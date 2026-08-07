@@ -99,6 +99,121 @@ Every proposed field satisfies all of these review conditions:
 A field that fails any condition belongs in analysis, plan, target facts, or
 pipeline-owned state outside IR.
 
+## Descriptor-Backed Attributes and Types
+
+`ParameterizedAttrDef` declares a closed, namespaced attribute family with an
+ordered parameter schema. Use it when the family name and parameter meanings
+are public IR semantics and generic dictionary keys would lose the family
+identity or permit unsupported fields.
+
+```python
+from loom.dsl import AttrDef, ParameterizedAttrDef
+
+tile_attr = ParameterizedAttrDef(
+    "example.tile",
+    group=example_ops,
+    parameters=[
+        AttrDef("width", "i64", doc="Tile width in elements."),
+        AttrDef("transpose", "bool", optional=True),
+    ],
+    doc="A statically selected tile layout.",
+)
+
+tile = tile_attr(width=16, transpose=True)
+```
+
+The canonical text names every present parameter:
+
+```loom
+#example.tile<width = 16, transpose = true>
+```
+
+Parameters are stored in declaration order and exposed through generated C
+accessors without runtime name lookup. Text and bytecode carry the stable
+family and parameter names rather than those dense positions. Renaming a
+parameter changes the source and serialization contract. Reordering parameters
+changes canonical text and generated builder argument order even though
+bytecode resolves each present value by name.
+
+Optional absence is distinct from a present false scalar, empty array, byte
+span, or dictionary. Python values expose that distinction with `has()` and
+`get()`; generated C builders use `HAS_*` build flags. This lets a dialect
+assign different semantics to omission and an explicit value without sentinel
+payloads:
+
+```python
+absent = tile_attr(width=16)
+present_false = tile_attr(width=16, transpose=False)
+
+assert not absent.has("transpose")
+assert present_false.has("transpose")
+```
+
+A parameter whose kind is `ATTR_TYPE_PARAMETERIZED` declares its exact nested
+family. The parser, builders, and bytecode reader reject values from another
+family instead of accepting any attribute with a similar physical shape:
+
+```python
+from loom.dsl import ATTR_TYPE_PARAMETERIZED
+
+AttrDef(
+    "tile",
+    ATTR_TYPE_PARAMETERIZED,
+    optional=True,
+    parameterized_attr=tile_attr,
+)
+```
+
+Symbol parameters retain the `SymbolReference` contract declared by their
+`AttrDef`. References nested in parameterized attributes and types participate
+in ordinary symbol verification, remapping, and compaction, and text and
+bytecode preserve their stable symbol names.
+
+A `TypeDef` whose parameters are all `AttrDef` values declares a
+descriptor-backed type family with the same immutable named-slot contract.
+Its assembly format controls only how each named parameter is spelled. `Param`
+may be positional or surrounded by keywords and punctuation, and every
+parameter appears exactly once:
+
+```python
+from loom.assembly import COMMA, EQUALS, OptionalGroup, Param, kw
+from loom.dsl import AttrDef, TypeDef
+
+array_type = TypeDef(
+    "example.array",
+    params=[
+        AttrDef("element_type", "type"),
+        AttrDef("alignment", "i64", optional=True),
+    ],
+    format=[
+        Param("element_type"),
+        OptionalGroup(
+            [COMMA, kw("alignment"), EQUALS, Param("alignment")],
+            anchor="alignment",
+        ),
+    ],
+    doc="An element type with optional storage alignment.",
+)
+```
+
+That declaration accepts both forms while preserving the same parameter
+identity in memory and bytecode:
+
+```loom
+example.array<bf16>
+example.array<bf16, alignment = 16>
+```
+
+Descriptor-backed and representation-specific type parameters are deliberately
+separate models. A descriptor-backed `TypeDef` cannot mix `AttrDef` parameters
+with `ShapeParam`, `TypeParam`, or other physical type representation fields.
+This keeps the generic family self-describing and lets every parser, printer,
+builder, remapper, and serializer consume the same schema.
+
+Both family forms currently allow at most 255 total parameters and 64 optional
+parameters. Generation rejects larger schemas instead of widening every IR
+value or generated builder for a pathological family.
+
 ## Assembly Formats
 
 Assembly format elements live in
@@ -113,6 +228,7 @@ Common elements:
   operands or use-side values.
 - `Attr("field")` prints one attribute value.
 - `AttrDict()` prints uncovered declared attributes in a dictionary.
+- `Param("field")` prints one typed parameter of a descriptor-backed type.
 - `TypeOf("field")`, `TypesOf("field")`, `ResultType("field")`, and
   `ResultTypeList("field")` print type information.
 - `TemplateParam("field")` prints an op template parameter such as

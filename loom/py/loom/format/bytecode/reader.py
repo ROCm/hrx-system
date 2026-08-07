@@ -24,6 +24,8 @@ from loom.format.bytecode.encoding import decode_signed_varint, decode_varint
 from loom.format.bytecode.op_decls import (
     attr_def_for_op,
     build_op_decl_map,
+    build_parameterized_attr_def_map,
+    build_parameterized_type_def_map,
     func_like_interface_for_op,
     symbol_def_for_op,
 )
@@ -44,6 +46,7 @@ from loom.format.bytecode.writer import (
     SECTION_TYPES,
 )
 from loom.ir import (
+    ATTR_AGGREGATE_MAX_NESTING_DEPTH,
     BUFFER_TYPE,
     ENCODING_TYPE,
     NONE_TYPE,
@@ -67,6 +70,8 @@ from loom.ir import (
     Module,
     OpaqueLocation,
     Operation,
+    ParameterizedAttr,
+    ParameterizedType,
     PoolType,
     Predicate,
     PredicateArg,
@@ -145,10 +150,21 @@ def _register_name_for_payload(
 class BytecodeReader:
     """Reads .loombc bytes and constructs an ir.py Module."""
 
-    def __init__(self, data: bytes, *, op_decls: Iterable[Any] | None = None) -> None:
+    def __init__(
+        self,
+        data: bytes,
+        *,
+        op_decls: Iterable[Any] | None = None,
+        parameterized_attrs: Iterable[Any] | None = None,
+        type_defs: Iterable[Any] | None = None,
+    ) -> None:
         self._data = data
         self._offset = 0
         self._op_decls_by_name = build_op_decl_map(op_decls)
+        self._parameterized_attrs_by_name = build_parameterized_attr_def_map(
+            self._op_decls_by_name, parameterized_attrs
+        )
+        self._parameterized_types_by_name = build_parameterized_type_def_map(type_defs)
         self._strings: list[str] = []
         self._sources: list[str] = []
         self._types: list[Type] = []
@@ -516,6 +532,66 @@ class BytecodeReader:
             raise BytecodeError(str(err)) from err
         return ir_type, offset
 
+    def _read_parameterized_type(
+        self, data: bytes, offset: int
+    ) -> tuple[ParameterizedType, int]:
+        family_id, offset = decode_varint(data, offset)
+        if family_id >= len(self._strings):
+            raise BytecodeError(
+                f"parameterized type family string_id {family_id} out of range "
+                f"(string table has {len(self._strings)} entries)"
+            )
+        family_name = self._strings[family_id]
+        definition = self._parameterized_types_by_name.get(family_name)
+        if definition is None:
+            raise BytecodeError(
+                f"parameterized type family {family_name!r} is not registered"
+            )
+
+        present_count, offset = decode_varint(data, offset)
+        if present_count > len(definition.params):
+            raise BytecodeError(
+                f"parameterized type {family_name!r} has {present_count} present "
+                f"parameters but declares only {len(definition.params)}"
+            )
+        parameter_by_name = {
+            parameter.name: (index, parameter)
+            for index, parameter in enumerate(definition.params)
+        }
+        parameters: dict[str, Any] = {}
+        previous_index = -1
+        for _ in range(present_count):
+            parameter_name_id, offset = decode_varint(data, offset)
+            if parameter_name_id >= len(self._strings):
+                raise BytecodeError(
+                    "parameterized type parameter string_id "
+                    f"{parameter_name_id} out of range (string table has "
+                    f"{len(self._strings)} entries)"
+                )
+            parameter_name = self._strings[parameter_name_id]
+            parameter_entry = parameter_by_name.get(parameter_name)
+            if parameter_entry is None:
+                raise BytecodeError(
+                    f"parameterized type {family_name!r} has unknown parameter "
+                    f"{parameter_name!r}"
+                )
+            parameter_index, parameter_def = parameter_entry
+            if parameter_index <= previous_index:
+                raise BytecodeError(
+                    f"parameterized type {family_name!r} parameters are not in "
+                    "declaration order"
+                )
+            parameter_value, offset = self._read_attr_value(
+                data, offset, attr_def=parameter_def
+            )
+            parameters[parameter_name] = parameter_value
+            previous_index = parameter_index
+
+        try:
+            return ParameterizedType(definition, parameters), offset
+        except (TypeError, ValueError) as err:
+            raise BytecodeError(str(err)) from err
+
     def _read_types_section(self, section: tuple[int, bytes]) -> None:
         _, data = section
         offset = 0
@@ -620,6 +696,8 @@ class BytecodeReader:
                     ir_type = DialectType(self._strings[name_id], tuple(params))
                 case TypeKind.REGISTER:
                     ir_type, offset = self._read_register_type(data, offset)
+                case TypeKind.PARAMETERIZED:
+                    ir_type, offset = self._read_parameterized_type(data, offset)
                 case TypeKind.STORAGE:
                     space_byte = data[offset]
                     offset += 1
@@ -1670,6 +1748,7 @@ class BytecodeReader:
         module: Module | None = None,
         value_map: list[int] | None = None,
         attr_def: Any | None = None,
+        aggregate_nesting_depth: int = 0,
     ) -> tuple[Any, int]:
         kind = data[offset]
         offset += 1
@@ -1699,16 +1778,26 @@ class BytecodeReader:
                 return SymbolName(self._strings[string_id]), offset
             case 7:  # TYPE
                 type_idx, offset = decode_varint(data, offset)
-                return self._types[type_idx], offset
+                return self._resolve_prior_type(type_idx, "attribute type"), offset
             case 8:  # PREDICATE_LIST
                 predicates, offset = self._read_predicate_list(
                     data, offset, module, value_map
                 )
                 return predicates, offset
             case 9:  # DICT
+                if aggregate_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
+                    raise BytecodeError(
+                        "aggregate attribute nesting exceeds maximum depth "
+                        f"{ATTR_AGGREGATE_MAX_NESTING_DEPTH}"
+                    )
                 count, offset = decode_varint(data, offset)
                 return self._read_attr_dict_entries(
-                    data, offset, count, module, value_map
+                    data,
+                    offset,
+                    count,
+                    module,
+                    value_map,
+                    aggregate_nesting_depth + 1,
                 )
             case 10:  # ENCODING
                 encoding_id, offset = decode_varint(data, offset)
@@ -1732,8 +1821,7 @@ class BytecodeReader:
             case 13:  # ENUM_ARRAY
                 if getattr(attr_def, "attr_type", None) != "enum_array":
                     raise BytecodeError(
-                        "enum-array attributes require a descriptor-backed "
-                        "operation field"
+                        "enum-array attributes require a descriptor-backed field"
                     )
                 count, offset = decode_varint(data, offset)
                 end_offset = offset + count
@@ -1744,6 +1832,86 @@ class BytecodeReader:
                         f"enum-array length {count} exceeds payload size"
                     )
                 return EnumArrayAttr(data[offset:end_offset]), end_offset
+            case 14:  # PARAMETERIZED
+                if aggregate_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
+                    raise BytecodeError(
+                        "aggregate attribute nesting exceeds maximum depth "
+                        f"{ATTR_AGGREGATE_MAX_NESTING_DEPTH}"
+                    )
+                family_id, offset = decode_varint(data, offset)
+                if family_id >= len(self._strings):
+                    raise BytecodeError(
+                        f"parameterized attr family string_id {family_id} out of "
+                        f"range (string table has {len(self._strings)} entries)"
+                    )
+                family_name = self._strings[family_id]
+                definition = self._parameterized_attrs_by_name.get(family_name)
+                if definition is None:
+                    raise BytecodeError(
+                        f"parameterized attr family {family_name!r} is not registered"
+                    )
+                if attr_def is not None and (
+                    getattr(attr_def, "attr_type", None) != "parameterized"
+                ):
+                    raise BytecodeError(
+                        "parameterized attr does not match the field contract"
+                    )
+                expected_definition = getattr(attr_def, "parameterized_attr", None)
+                if expected_definition is not None and (
+                    expected_definition.name != family_name
+                ):
+                    raise BytecodeError(
+                        f"parameterized attr family {family_name!r} does not match "
+                        f"field contract {expected_definition.name!r}"
+                    )
+                present_count, offset = decode_varint(data, offset)
+                if present_count > len(definition.parameters):
+                    raise BytecodeError(
+                        f"parameterized attr {family_name!r} has {present_count} "
+                        f"present parameters but declares only "
+                        f"{len(definition.parameters)}"
+                    )
+                parameter_by_name = {
+                    parameter.name: (index, parameter)
+                    for index, parameter in enumerate(definition.parameters)
+                }
+                parameters: dict[str, Any] = {}
+                previous_index = -1
+                for _ in range(present_count):
+                    parameter_name_id, offset = decode_varint(data, offset)
+                    if parameter_name_id >= len(self._strings):
+                        raise BytecodeError(
+                            "parameterized attr parameter string_id "
+                            f"{parameter_name_id} out of range (string table has "
+                            f"{len(self._strings)} entries)"
+                        )
+                    parameter_name = self._strings[parameter_name_id]
+                    parameter_entry = parameter_by_name.get(parameter_name)
+                    if parameter_entry is None:
+                        raise BytecodeError(
+                            f"parameterized attr {family_name!r} has unknown "
+                            f"parameter {parameter_name!r}"
+                        )
+                    parameter_index, parameter_def = parameter_entry
+                    if parameter_index <= previous_index:
+                        raise BytecodeError(
+                            f"parameterized attr {family_name!r} parameters are "
+                            "not in declaration order"
+                        )
+                    parameter_value, offset = self._read_attr_value(
+                        data,
+                        offset,
+                        module,
+                        value_map,
+                        parameter_def,
+                        aggregate_nesting_depth + 1,
+                    )
+                    parameters[parameter_name] = parameter_value
+                    previous_index = parameter_index
+                try:
+                    return ParameterizedAttr(definition, parameters), offset
+                except (TypeError, ValueError) as err:
+                    raise BytecodeError(str(err)) from err
             case _:
                 raise BytecodeError(f"unknown attr value kind: {kind}")
 
@@ -1754,6 +1922,7 @@ class BytecodeReader:
         count: int,
         module: Module | None = None,
         value_map: list[int] | None = None,
+        aggregate_nesting_depth: int = 0,
     ) -> tuple[CanonicalAttrDict, int]:
         """Read canonical dict attr entries and verify sorted/deduped order."""
         entries: list[tuple[str, Any]] = []
@@ -1773,7 +1942,13 @@ class BytecodeReader:
                     "dict attr keys are not in canonical order: "
                     f"{previous_key!r} appears before {key!r}"
                 )
-            value, offset = self._read_attr_value(data, offset, module, value_map)
+            value, offset = self._read_attr_value(
+                data,
+                offset,
+                module,
+                value_map,
+                aggregate_nesting_depth=aggregate_nesting_depth,
+            )
             entries.append((key, value))
             previous_key = key
         return CanonicalAttrDict.from_sorted_items(entries), offset
@@ -1915,12 +2090,19 @@ def read_module(
     data: bytes,
     *,
     op_decls: Iterable[Any] | None = None,
+    parameterized_attrs: Iterable[Any] | None = None,
+    type_defs: Iterable[Any] | None = None,
     verify: bool = False,
 ) -> Module:
     """Read a module from .loombc bytes."""
     op_decl_tuple = tuple(op_decls) if op_decls is not None else None
     try:
-        module = BytecodeReader(data, op_decls=op_decl_tuple).read()
+        module = BytecodeReader(
+            data,
+            op_decls=op_decl_tuple,
+            parameterized_attrs=parameterized_attrs,
+            type_defs=type_defs,
+        ).read()
     except ValueError as err:
         raise BytecodeError(str(err)) from err
     if verify:

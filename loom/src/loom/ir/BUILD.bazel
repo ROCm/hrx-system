@@ -58,6 +58,7 @@ loom_cc_library(
     ],
     hdrs = [
         "attribute.h",
+        "attribute_schema.h",
         "context.h",
         "encoding.h",
         "function_version.h",
@@ -65,6 +66,8 @@ loom_cc_library(
         "local_value_domain.h",
         "location.h",
         "module.h",
+        "parameterized_attr.h",
+        "parameterized_type.h",
         "scalar_type.h",
         "semantics.h",
         "types.h",
@@ -126,6 +129,7 @@ loom_cc_test(
     srcs = ["module_test.cc"],
     deps = [
         ":ir",
+        "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/ops/test",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",

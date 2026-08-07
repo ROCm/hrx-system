@@ -42,6 +42,7 @@ void loom_verify_block_arg_encoding_refs(loom_verify_state_t* state,
 iree_status_t loom_verify_symbol_definition(loom_verify_state_t* state,
                                             const loom_op_t* op,
                                             const loom_op_vtable_t* vtable);
+void loom_verify_module_type_symbol_references(loom_verify_state_t* state);
 void loom_verify_symbol_references(loom_verify_state_t* state,
                                    const loom_op_t* op,
                                    const loom_op_vtable_t* vtable);

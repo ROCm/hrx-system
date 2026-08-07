@@ -1415,11 +1415,12 @@ static void loom_verify_relation_yield_match(
   for (uint16_t i = 0; i < check_count; ++i) {
     loom_type_t yield_type = loom_verify_value_type(state, yield_operands[i]);
     loom_type_t result_type = loom_verify_value_type(state, result_values[i]);
-    bool matched = constraint->property == LOOM_PROPERTY_TYPE
-                       ? loom_type_equal_after_value_remap(
-                             result_type, yield_type, &yield_remap)
-                       : loom_constraint_property_equals(
-                             yield_type, result_type, constraint->property);
+    bool matched =
+        constraint->property == LOOM_PROPERTY_TYPE
+            ? loom_type_equal_after_value_remap(state->module, result_type,
+                                                yield_type, &yield_remap)
+            : loom_constraint_property_equals(yield_type, result_type,
+                                              constraint->property);
     if (matched) {
       continue;
     }
@@ -1492,11 +1493,11 @@ static void loom_verify_relation_variadic_match(
   for (uint16_t i = 0; i < count_a; ++i) {
     loom_type_t type_a = loom_verify_value_type(state, values_a[i]);
     loom_type_t type_b = loom_verify_value_type(state, values_b[i]);
-    bool matched =
-        constraint->property == LOOM_PROPERTY_TYPE
-            ? loom_type_equal_after_value_remap(type_b, type_a, &value_remap)
-            : loom_constraint_property_equals(type_a, type_b,
-                                              constraint->property);
+    bool matched = constraint->property == LOOM_PROPERTY_TYPE
+                       ? loom_type_equal_after_value_remap(
+                             state->module, type_b, type_a, &value_remap)
+                       : loom_constraint_property_equals(type_a, type_b,
+                                                         constraint->property);
     if (matched) {
       continue;
     }

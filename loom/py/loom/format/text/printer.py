@@ -49,6 +49,7 @@ from loom.assembly import (
     Keyword,
     OperandDict,
     OptionalGroup,
+    Param,
     PredicateList,
     Ref,
     Refs,
@@ -90,6 +91,8 @@ from loom.ir import (
     Module,
     NoneType,
     Operation,
+    ParameterizedAttr,
+    ParameterizedType,
     PoolType,
     Predicate,
     PredicateArg,
@@ -113,6 +116,7 @@ _IR_TYPE_CLASSES = (
     RegisterType,
     StorageType,
     DialectType,
+    ParameterizedType,
     EncodingType,
     PoolType,
     NoneType,
@@ -242,6 +246,8 @@ def print_type(
             return "none"
         case EncodingType():
             return repr(ir_type)
+        case ParameterizedType():
+            return _print_parameterized_type(ir_type, context, type_registry)
         case DialectType(name=_name, params=_params):
             return _print_dialect_type(ir_type, context, type_registry)
     raise ValueError(f"Unknown type: {ir_type}")
@@ -325,6 +331,50 @@ def _print_dialect_type(
     walk_type_format(type_def.format)
     interior = " ".join(parts)
     return f"{name}<{interior}>"
+
+
+def _print_parameterized_type(
+    parameterized_type: ParameterizedType,
+    context: TypePrintContext | None,
+    type_registry: dict[str, Any] | None,
+) -> str:
+    """Prints a descriptor-backed type through its declarative format."""
+    stream = TokenStream()
+
+    def walk(elements: tuple[FormatElement, ...]) -> None:
+        for element in elements:
+            match element:
+                case Param(field=field):
+                    parameter = parameterized_type.definition.param(field)
+                    assert isinstance(parameter, AttrDef)
+                    value = parameterized_type.get(field)
+                    stream.emit(
+                        _format_attr_value(
+                            value,
+                            parameter,
+                            type_context=context,
+                            type_registry=type_registry,
+                        )
+                    )
+                case Keyword(text=text):
+                    stream.emit(text)
+                case Clause(name=name, elements=inner):
+                    stream.emit(name)
+                    stream.emit("(")
+                    walk(inner)
+                    stream.emit(")")
+                case OptionalGroup(elements=inner, anchor=anchor):
+                    if parameterized_type.has(anchor):
+                        walk(inner)
+                case Glue():
+                    stream.set_glue()
+                case _:
+                    raise ValueError(
+                        f"unsupported parameterized type format element: {element!r}"
+                    )
+
+    walk(parameterized_type.definition.format)
+    return f"{parameterized_type.family_name}<{stream.join()}>"
 
 
 def _print_shaped_type(
@@ -506,7 +556,13 @@ def _format_string_literal(value: str) -> str:
     return "".join(escaped_chunks)
 
 
-def _format_attr_value(value: Any, attr_def: AttrDef | None = None) -> str:
+def _format_attr_value(
+    value: Any,
+    attr_def: AttrDef | None = None,
+    *,
+    type_context: TypePrintContext | None = None,
+    type_registry: dict[str, Any] | None = None,
+) -> str:
     """Format an attribute value for text output.
 
     Enum attributes print as bare keywords (lt, not "lt").
@@ -532,15 +588,16 @@ def _format_attr_value(value: Any, attr_def: AttrDef | None = None) -> str:
             + "]"
         )
     if attr_def is not None and attr_def.attr_type == "symbol":
-        if not isinstance(value, str):
-            raise TypeError(f"symbol attribute value must be a string: {value!r}")
-        if value.startswith("@"):
+        if not isinstance(value, str | SymbolName):
+            raise TypeError(f"symbol attribute value must be a symbol: {value!r}")
+        symbol_name = str(value)
+        if symbol_name.startswith("@"):
             raise ValueError(f"symbol attribute value must not include '@': {value!r}")
-        return "@" + value
+        return "@" + symbol_name
     if attr_def is not None and attr_def.attr_type == "type":
         if not isinstance(value, _IR_TYPE_CLASSES):
             raise TypeError(f"type attribute value must be a Type: {value!r}")
-        return print_type(cast(Type, value))
+        return print_type(cast(Type, value), type_context, type_registry)
     if attr_def is not None and attr_def.attr_type == "bytes":
         if not isinstance(value, bytes | bytearray):
             raise TypeError(f"bytes attribute value must be bytes: {value!r}")
@@ -556,14 +613,41 @@ def _format_attr_value(value: Any, attr_def: AttrDef | None = None) -> str:
     if isinstance(value, bytes | bytearray):
         return f'bytes("{bytes(value).hex()}")'
     if isinstance(value, EnumArrayAttr):
-        raise ValueError("enum arrays require a descriptor-backed operation field")
+        raise ValueError("enum arrays require a descriptor-backed field")
+    if isinstance(value, ParameterizedAttr):
+        parameters = []
+        for parameter, slot in zip(
+            value.definition.parameters, value.slots, strict=True
+        ):
+            if slot is None:
+                continue
+            formatted_slot = _format_attr_value(
+                slot,
+                parameter,
+                type_context=type_context,
+                type_registry=type_registry,
+            )
+            parameters.append(f"{parameter.name} = {formatted_slot}")
+        return f"#{value.family_name}<" + ", ".join(parameters) + ">"
     if isinstance(value, str):
         return _format_string_literal(value)
     if isinstance(value, list | tuple):
-        parts = [_format_attr_value(v) for v in value]
+        parts = [
+            _format_attr_value(
+                v, type_context=type_context, type_registry=type_registry
+            )
+            for v in value
+        ]
         return "[" + ", ".join(parts) + "]"
     if isinstance(value, Mapping):
-        parts = [f"{key} = {_format_attr_value(item)}" for key, item in value.items()]
+        parts = []
+        for key, item in value.items():
+            formatted_item = _format_attr_value(
+                item,
+                type_context=type_context,
+                type_registry=type_registry,
+            )
+            parts.append(f"{key} = {formatted_item}")
         return "{" + ", ".join(parts) + "}"
     if isinstance(value, EncodingInstance):
         return _format_encoding_instance(value, use_alias=True)
@@ -617,7 +701,20 @@ def _is_pipeline_printable_name(value: Any, *, allow_dot: bool) -> bool:
     return True
 
 
-def _is_pipeline_printable_attr_value(value: Any) -> bool:
+def _is_pipeline_printable_attr_value(
+    value: Any, attr_def: AttrDef | None = None
+) -> bool:
+    if attr_def is not None and attr_def.attr_type in ("enum", "enum_array"):
+        return True
+    if attr_def is not None and attr_def.attr_type == "symbol":
+        return _is_pipeline_printable_name(str(value), allow_dot=False)
+    if isinstance(value, ParameterizedAttr):
+        return all(
+            slot is None or _is_pipeline_printable_attr_value(slot, parameter)
+            for parameter, slot in zip(
+                value.definition.parameters, value.slots, strict=True
+            )
+        )
     if isinstance(value, bool | int | float | str | bytes | bytearray):
         return True
     if isinstance(value, list | tuple):

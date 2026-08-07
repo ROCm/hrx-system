@@ -372,6 +372,15 @@ TEST(Tokenizer, HashAttr) {
   EXPECT_TRUE(iree_string_view_equal(token.source_text, IREE_SV("#q8_0")));
 }
 
+TEST(Tokenizer, DottedHashAttr) {
+  ScopedTokenizer t("#test.options");
+  loom_token_t token = t.next();
+  EXPECT_EQ(token.kind, LOOM_TOKEN_HASH_ATTR);
+  EXPECT_TRUE(iree_string_view_equal(token.text, IREE_SV("test.options")));
+  EXPECT_TRUE(
+      iree_string_view_equal(token.source_text, IREE_SV("#test.options")));
+}
+
 TEST(Tokenizer, HashAttrRejectsNumericName) {
   ScopedTokenizer t("#0 #1");
   ExpectNextErrorToken(t.get(),

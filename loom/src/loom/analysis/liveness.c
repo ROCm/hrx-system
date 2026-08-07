@@ -633,12 +633,13 @@ static iree_status_t loom_liveness_type_ref_callback(loom_value_id_t value_id,
 }
 
 static iree_status_t loom_liveness_for_each_type_ref(
-    loom_type_t type, loom_liveness_value_callback_t visitor) {
+    const loom_module_t* module, loom_type_t type,
+    loom_liveness_value_callback_t visitor) {
   loom_liveness_type_ref_callback_state_t state = {
       .visitor = visitor,
   };
-  return loom_type_walk_value_refs(type, loom_liveness_type_ref_callback,
-                                   &state);
+  return loom_type_walk_value_refs(module, type,
+                                   loom_liveness_type_ref_callback, &state);
 }
 
 static bool loom_liveness_op_defines_value(const loom_op_t* op,
@@ -716,7 +717,7 @@ static iree_status_t loom_liveness_for_each_region_external_use(
   loom_region_for_each_block(region, block) {
     for (uint16_t i = 0; i < block->arg_count; ++i) {
       IREE_RETURN_IF_ERROR(loom_liveness_for_each_type_ref(
-          loom_block_arg_type(state->module, block, i),
+          state->module, loom_block_arg_type(state->module, block, i),
           loom_liveness_value_callback_make(
               loom_liveness_external_value_callback, state)));
     }
@@ -727,14 +728,14 @@ static iree_status_t loom_liveness_for_each_region_external_use(
         IREE_RETURN_IF_ERROR(
             loom_liveness_external_value_callback(state, operands[i]));
         IREE_RETURN_IF_ERROR(loom_liveness_for_each_type_ref(
-            loom_module_value_type(state->module, operands[i]),
+            state->module, loom_module_value_type(state->module, operands[i]),
             loom_liveness_value_callback_make(
                 loom_liveness_external_value_callback, state)));
       }
       const loom_value_id_t* results = loom_op_const_results(op);
       for (uint16_t i = 0; i < op->result_count; ++i) {
         IREE_RETURN_IF_ERROR(loom_liveness_for_each_type_ref(
-            loom_module_value_type(state->module, results[i]),
+            state->module, loom_module_value_type(state->module, results[i]),
             loom_liveness_value_callback_make(
                 loom_liveness_external_value_callback, state)));
       }
@@ -786,7 +787,7 @@ static iree_status_t loom_liveness_for_each_op_direct_use(
   for (uint16_t i = 0; i < op->operand_count; ++i) {
     IREE_RETURN_IF_ERROR(visitor.fn(visitor.user_data, operands[i]));
     IREE_RETURN_IF_ERROR(loom_liveness_for_each_type_ref(
-        loom_module_value_type(module, operands[i]), visitor));
+        module, loom_module_value_type(module, operands[i]), visitor));
   }
   const loom_value_id_t* results = loom_op_const_results(op);
   for (uint16_t i = 0; i < op->result_count; ++i) {
@@ -796,7 +797,7 @@ static iree_status_t loom_liveness_for_each_op_direct_use(
         .visitor = visitor,
     };
     IREE_RETURN_IF_ERROR(loom_type_walk_value_refs(
-        result_type, loom_liveness_result_type_ref_callback, &state));
+        module, result_type, loom_liveness_result_type_ref_callback, &state));
   }
   return iree_ok_status();
 }
@@ -844,7 +845,7 @@ static iree_status_t loom_liveness_collect_block_use_def(
   }
   for (uint16_t i = 0; i < block->arg_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_liveness_for_each_type_ref(
-        loom_block_arg_type(state->module, block, i),
+        state->module, loom_block_arg_type(state->module, block, i),
         loom_liveness_value_callback_make(loom_liveness_add_block_use,
                                           &use_def_state)));
   }
@@ -1047,7 +1048,7 @@ static iree_status_t loom_liveness_finalize_block_arguments(
         .point = start_point,
     };
     IREE_RETURN_IF_ERROR(loom_liveness_for_each_type_ref(
-        loom_block_arg_type(state->module, block, arg_index),
+        state->module, loom_block_arg_type(state->module, block, arg_index),
         loom_liveness_value_callback_make(loom_liveness_note_use_at_point,
                                           &type_use_state)));
   }

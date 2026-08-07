@@ -92,6 +92,7 @@ __all__ = [
     "ShapeOf",
     "ScalarOf",
     "EncodingOf",
+    "Param",
     # Union type.
     "FormatElement",
     # Convenience constructors.
@@ -816,6 +817,18 @@ class EncodingOf:
     field: str
 
 
+@dataclass(frozen=True, slots=True)
+class Param:
+    """A descriptor-backed value in a parameterized type interior.
+
+    The field names an AttrDef parameter on the TypeDef. Surrounding format
+    elements determine whether the value is positional or keyed; the stored
+    value always occupies the descriptor's stable slot.
+    """
+
+    field: str
+
+
 # Binding kind constants for BindingList.
 BINDING_CAPTURE = "capture"
 BINDING_ELEMENT = "element"
@@ -860,6 +873,7 @@ type FormatElement = (
     | ShapeOf
     | ScalarOf
     | EncodingOf
+    | Param
 )
 
 

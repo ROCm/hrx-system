@@ -365,6 +365,17 @@ iree_status_t loom_verify_module(const loom_module_t* module,
   IREE_RETURN_IF_ERROR(
       loom_verify_state_initialize(&state, module, options, out_result));
 
+  // Interned parameterized types are module-level values. Verify their symbol
+  // parameters once instead of rediscovering the same type graph from every
+  // SSA value that carries one of the types.
+  loom_verify_module_type_symbol_references(&state);
+  iree_status_t diagnostic_status =
+      loom_verify_pending_diagnostic_status(&state);
+  if (!iree_status_is_ok(diagnostic_status)) {
+    loom_verify_state_deinitialize(&state);
+    return diagnostic_status;
+  }
+
   // Walk the module body.
   if (module->body) {
     // Module-level invariant: only symbol-defining ops (func.def,
@@ -384,8 +395,7 @@ iree_status_t loom_verify_module(const loom_module_t* module,
           };
           loom_verify_emit_structured(&state, op, LOOM_ERR_STRUCTURE_011,
                                       params, IREE_ARRAYSIZE(params));
-          iree_status_t diagnostic_status =
-              loom_verify_pending_diagnostic_status(&state);
+          diagnostic_status = loom_verify_pending_diagnostic_status(&state);
           if (!iree_status_is_ok(diagnostic_status)) {
             loom_verify_state_deinitialize(&state);
             return diagnostic_status;

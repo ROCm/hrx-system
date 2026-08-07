@@ -1027,10 +1027,12 @@ static iree_status_t loom_parse_module_body(loom_parser_t* parser) {
         uint32_t errors_before = parser->error_count;
 
         if (loom_context_lookup_encoding_vtable(parser->context,
-                                                alias_token.text)) {
+                                                alias_token.text) ||
+            loom_context_lookup_parameterized_attr_by_name(parser->context,
+                                                           alias_token.text)) {
           loom_diagnostic_param_t params[] = {
               loom_param_string(
-                  IREE_SV("alias name shadows a registered encoding family")),
+                  IREE_SV("alias name shadows a registered attribute family")),
           };
           IREE_RETURN_IF_ERROR(loom_parser_emit(parser, LOOM_ERR_PARSE_014,
                                                 params, IREE_ARRAYSIZE(params),

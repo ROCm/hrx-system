@@ -9,9 +9,29 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Any
 
 _C_SYMBOL_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*$")
+
+_SYMBOL_INTERFACE_MAP: dict[str, str] = {
+    "func_like": "LOOM_SYMBOL_INTERFACE_FUNC_LIKE",
+    "callable": "LOOM_SYMBOL_INTERFACE_CALLABLE",
+    "global": "LOOM_SYMBOL_INTERFACE_GLOBAL",
+    "executable": "LOOM_SYMBOL_INTERFACE_EXECUTABLE",
+    "record": "LOOM_SYMBOL_INTERFACE_RECORD",
+    "rodata": "LOOM_SYMBOL_INTERFACE_RODATA",
+    "target": "LOOM_SYMBOL_INTERFACE_TARGET",
+    "config": "LOOM_SYMBOL_INTERFACE_CONFIG",
+    "kernel": "LOOM_SYMBOL_INTERFACE_KERNEL",
+}
+
+
+def symbol_interface_flags(interfaces: Sequence[str]) -> str:
+    """Returns the C flag expression for a symbol-reference contract."""
+
+    flags = [_SYMBOL_INTERFACE_MAP[interface] for interface in interfaces]
+    return " | ".join(flags) if flags else "0"
 
 
 def symbol_fact_domain_symbol(op: Any) -> str | None:

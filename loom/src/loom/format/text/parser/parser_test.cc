@@ -22,6 +22,8 @@
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/test/ops.h"
+#include "loom/ops/test/registry.h"
+#include "loom/ops/type_registry.h"
 #include "loom/testing/diagnostic_matchers.h"
 #include "loom/util/stream.h"
 
@@ -59,13 +61,7 @@ class ParserTest : public ::testing::Test {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(),
                                      &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
-    {
-      iree_host_size_t count = 0;
-      const loom_op_vtable_t* const* vtables =
-          loom_test_dialect_vtables(&count);
-      IREE_ASSERT_OK(loom_context_register_dialect(&context_, LOOM_DIALECT_TEST,
-                                                   vtables, (uint16_t)count));
-    }
+    IREE_ASSERT_OK(loom_test_dialect_register(&context_));
     IREE_ASSERT_OK(loom_context_register_encoding_vtable(
         &context_, &kDenseEncodingVtable));
     IREE_ASSERT_OK(
@@ -804,6 +800,127 @@ TEST_F(ParserTest, EnumArraysRoundTripStableValuesAndPresentEmpty) {
   loom_module_free(module);
 }
 
+TEST_F(ParserTest, ParameterizedAttrsRoundTripInDeclarationOrder) {
+  std::string text = RoundTrip(
+      "test.record @target\n"
+      "test.parameterized_attr "
+      "#test.options<tile = #test.tile<width = 16>, element_type = bf16, "
+      "scopes = [subgroup, <254>], target = @target, mode = fast>\n");
+  EXPECT_NE(text.find("test.parameterized_attr "
+                      "#test.options<mode = fast, scopes = [subgroup, <254>], "
+                      "element_type = bf16, tile = #test.tile<width = 16>, "
+                      "target = @target>"),
+            std::string::npos);
+
+  loom_module_t* module = ParseOk(
+      "test.record @target\n"
+      "test.parameterized_attr "
+      "#test.options<mode = fast, scopes = [subgroup, <254>], "
+      "element_type = bf16, tile = #test.tile<width = 16>, "
+      "target = @target>\n");
+  loom_block_t* body = loom_module_block(module);
+  ASSERT_EQ(body->op_count, 2u);
+  loom_op_t* op = loom_block_op(body, 1);
+  ASSERT_TRUE(loom_test_parameterized_attr_isa(op));
+  loom_attribute_t options = loom_test_parameterized_attr_options(op);
+  ASSERT_TRUE(loom_test_options_attr_isa(options));
+  EXPECT_EQ(loom_test_options_attr_mode(options), LOOM_TEST_OPTIONS_MODE_FAST);
+  ASSERT_TRUE(loom_test_options_attr_has_scopes(options));
+  loom_enum_array_t scopes = loom_test_options_attr_scopes(options);
+  ASSERT_EQ(scopes.count, 2u);
+  EXPECT_EQ(scopes.values[0], LOOM_TEST_OPTIONS_SCOPES_SUBGROUP);
+  EXPECT_EQ(scopes.values[1], 254u);
+  ASSERT_TRUE(loom_test_options_attr_has_element_type(options));
+  ASSERT_TRUE(loom_test_options_attr_has_tile(options));
+  loom_attribute_t tile = loom_test_options_attr_tile(options);
+  ASSERT_TRUE(loom_test_tile_attr_isa(tile));
+  EXPECT_EQ(loom_test_tile_attr_width(tile), 16);
+  ASSERT_TRUE(loom_test_options_attr_has_target(options));
+  loom_symbol_ref_t target = loom_test_options_attr_target(options);
+  ASSERT_LT(target.symbol_id, module->symbols.count);
+  EXPECT_TRUE(iree_string_view_equal(
+      module->strings
+          .entries[module->symbols.entries[target.symbol_id].name_id],
+      IREE_SV("target")));
+  loom_module_free(module);
+}
+
+TEST_F(ParserTest, ParameterizedAttrsPreservePresentEmptyAndGenericNesting) {
+  loom_module_t* module = ParseOk(
+      "test.parameterized_attr "
+      "#test.options<mode = fast, scopes = []>\n"
+      "test.parameterized_attr #test.options<mode = fast>\n"
+      "test.enum_array_attrs [] "
+      "{options = #test.options<mode = precise>}\n");
+  loom_block_t* body = loom_module_block(module);
+  ASSERT_EQ(body->op_count, 3u);
+
+  loom_attribute_t present =
+      loom_test_parameterized_attr_options(loom_block_op(body, 0));
+  ASSERT_TRUE(loom_test_options_attr_has_scopes(present));
+  EXPECT_EQ(loom_test_options_attr_scopes(present).count, 0u);
+  loom_attribute_t absent =
+      loom_test_parameterized_attr_options(loom_block_op(body, 1));
+  EXPECT_FALSE(loom_test_options_attr_has_scopes(absent));
+
+  std::string text = PrintModule(module);
+  EXPECT_NE(text.find("{options = #test.options<mode = precise>}"),
+            std::string::npos);
+  loom_module_free(module);
+}
+
+TEST_F(ParserTest, ParameterizedAttrsRejectMalformedInput) {
+  struct MalformedCase {
+    const char* source;
+    const char* actual_token;
+    const char* expected;
+  } cases[] = {
+      {
+          "test.parameterized_attr #test.unknown<mode = fast>\n",
+          "#test.unknown",
+          "a registered parameterized attribute family",
+      },
+      {
+          "test.parameterized_attr "
+          "#test.options<mode = fast, nope = 1>\n",
+          "nope",
+          "a parameter declared by '#test.options'",
+      },
+      {
+          "test.parameterized_attr "
+          "#test.options<mode = fast, mode = precise>\n",
+          "mode",
+          "each parameter at most once",
+      },
+      {
+          "test.parameterized_attr #test.options<scopes = []>\n",
+          ">",
+          "required parameter 'mode'",
+      },
+      {
+          "test.parameterized_attr #test.options<mode = <42>>\n",
+          "<",
+          "a declared enum keyword",
+      },
+      {
+          "test.parameterized_attr "
+          "#test.options<mode = fast, "
+          "tile = #test.options<mode = precise>>\n",
+          "#test.options",
+          "'#test.tile'",
+      },
+  };
+  for (const MalformedCase& test_case : cases) {
+    SCOPED_TRACE(test_case.source);
+    const auto& diagnostics = ParseExpectErrors(test_case.source);
+    ASSERT_FALSE(diagnostics.empty());
+    ExpectError(diagnostics.front(),
+                loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 3));
+    EXPECT_EQ(GetStringParam(diagnostics.front(), 0), test_case.actual_token);
+    EXPECT_EQ(GetStringParam(diagnostics.front(), 1), test_case.expected);
+  }
+}
+
 TEST_F(ParserTest, OptionalPredicateListPreservesPresentEmpty) {
   std::string text = RoundTrip(
       "test.func @empty_predicates() where [] {\n"
@@ -1255,6 +1372,88 @@ TEST_F(ParserTest, EncodingRoleTypeRoundTrip) {
                       "%transform: encoding<transform>)"),
             std::string::npos)
       << "encoding role types should round-trip: " << text;
+}
+
+TEST_F(ParserTest, DescriptorBackedTypesRoundTripAndPreserveParameters) {
+  const char* source =
+      "test.record @target\n"
+      "%scope = test.constant 0 : test.scope<subgroup>\n"
+      "%matrix = test.constant 0 : "
+      "test.matrix<bf16, scope = workgroup, rows = 16, target = @target>\n"
+      "%packed = test.constant 0 : test.array<bf16>\n"
+      "%aligned = test.constant 0 : "
+      "test.array<bf16, alignment = 32>\n"
+      "%metadata = test.constant 0 : "
+      "test.array<bf16, metadata = {tile = #test.tile<width = 8>}>\n";
+  std::string text = RoundTrip(source);
+  loom_module_t* module = ParseOk(text.c_str());
+  ASSERT_NE(module, nullptr);
+  loom_block_t* block = loom_module_block(module);
+  ASSERT_NE(block, nullptr);
+  ASSERT_EQ(block->op_count, 6u);
+
+  loom_type_t scope_type = loom_module_value_type(
+      module, loom_test_constant_result(loom_block_op(block, 1)));
+  ASSERT_TRUE(loom_test_scope_type_isa(scope_type));
+  EXPECT_EQ(loom_test_scope_type_scope(scope_type),
+            LOOM_TEST_SCOPE_TYPE_SCOPE_SUBGROUP);
+
+  loom_type_t matrix_type = loom_module_value_type(
+      module, loom_test_constant_result(loom_block_op(block, 2)));
+  ASSERT_TRUE(loom_test_matrix_type_isa(matrix_type));
+  EXPECT_EQ(loom_test_matrix_type_scope(matrix_type),
+            LOOM_TEST_MATRIX_TYPE_SCOPE_WORKGROUP);
+  EXPECT_EQ(loom_test_matrix_type_rows(matrix_type), 16);
+  ASSERT_TRUE(loom_test_matrix_type_has_target(matrix_type));
+  loom_symbol_ref_t target = loom_test_matrix_type_target(matrix_type);
+  ASSERT_LT(target.symbol_id, module->symbols.count);
+  EXPECT_TRUE(iree_string_view_equal(
+      module->strings
+          .entries[module->symbols.entries[target.symbol_id].name_id],
+      IREE_SV("target")));
+  loom_type_id_t element_type_id =
+      loom_test_matrix_type_element_type(matrix_type);
+  ASSERT_LT(element_type_id, module->types.count);
+  EXPECT_TRUE(loom_type_equal(module->types.entries[element_type_id],
+                              loom_type_scalar(LOOM_SCALAR_TYPE_BF16)));
+
+  loom_type_t packed_type = loom_module_value_type(
+      module, loom_test_constant_result(loom_block_op(block, 3)));
+  ASSERT_TRUE(loom_test_array_type_isa(packed_type));
+  EXPECT_FALSE(loom_test_array_type_has_alignment(packed_type));
+  loom_type_t aligned_type = loom_module_value_type(
+      module, loom_test_constant_result(loom_block_op(block, 4)));
+  ASSERT_TRUE(loom_test_array_type_isa(aligned_type));
+  EXPECT_TRUE(loom_test_array_type_has_alignment(aligned_type));
+  EXPECT_EQ(loom_test_array_type_alignment(aligned_type), 32);
+
+  loom_type_t metadata_type = loom_module_value_type(
+      module, loom_test_constant_result(loom_block_op(block, 5)));
+  ASSERT_TRUE(loom_test_array_type_isa(metadata_type));
+  ASSERT_TRUE(loom_test_array_type_has_metadata(metadata_type));
+  loom_named_attr_slice_t metadata =
+      loom_test_array_type_metadata(metadata_type);
+  ASSERT_EQ(metadata.count, 1u);
+  ASSERT_TRUE(loom_test_tile_attr_isa(metadata.entries[0].value));
+  EXPECT_EQ(loom_test_tile_attr_width(metadata.entries[0].value), 8);
+
+  loom_module_free(module);
+}
+
+TEST_F(ParserTest, DescriptorBackedTypeRejectsInvalidParameterValue) {
+  const auto& diagnostics =
+      ParseExpectErrors("%v = test.constant 0 : test.scope<cluster>\n");
+  ASSERT_GE(diagnostics.size(), 1u);
+  ExpectError(diagnostics[0],
+              loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 17));
+}
+
+TEST_F(ParserTest, DescriptorBackedTypeRejectsMissingRequiredParameter) {
+  const auto& diagnostics = ParseExpectErrors(
+      "%v = test.constant 0 : test.matrix<bf16, scope = subgroup>\n");
+  ASSERT_GE(diagnostics.size(), 1u);
+  ExpectError(diagnostics[0],
+              loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 3));
 }
 
 TEST_F(ParserTest, FuncDeclNamedResultCanReferenceSignatureArg) {
@@ -2102,11 +2301,13 @@ TEST_F(ParserTest, AttrDictTooDeep) {
   std::string source =
       "%c = test.constant 0 : f32\n"
       "%s = test.attrs %c ";
-  for (uint32_t depth = 0; depth <= LOOM_ATTR_DICT_MAX_NESTING_DEPTH; ++depth) {
+  for (uint32_t depth = 0; depth <= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH;
+       ++depth) {
     source += "{k" + std::to_string(depth) + " = ";
   }
   source += "0";
-  for (uint32_t depth = 0; depth <= LOOM_ATTR_DICT_MAX_NESTING_DEPTH; ++depth) {
+  for (uint32_t depth = 0; depth <= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH;
+       ++depth) {
     source += "}";
   }
   source += " : f32\n";
@@ -2115,7 +2316,7 @@ TEST_F(ParserTest, AttrDictTooDeep) {
   ASSERT_GE(diagnostics.size(), 1u);
   ExpectError(diagnostics[0],
               loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 21));
-  ExpectU32Param(diagnostics[0], 0, LOOM_ATTR_DICT_MAX_NESTING_DEPTH);
+  ExpectU32Param(diagnostics[0], 0, LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
 }
 
 TEST_F(ParserTest, UnexpectedTokenInFuncSignature) {
@@ -2241,13 +2442,20 @@ TEST_F(ParserTest, InlineEncoding) {
   }
 }
 
-TEST_F(ParserTest, EncodingAliasCannotShadowRegisteredFamily) {
-  const auto& diagnostics = ParseExpectErrors("#q8_0 = #dense\n");
-  ASSERT_GE(diagnostics.size(), 1u);
-  ExpectError(diagnostics[0],
-              loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 14));
-  EXPECT_EQ(GetStringParam(diagnostics[0], 0),
-            "alias name shadows a registered encoding family");
+TEST_F(ParserTest, EncodingAliasCannotShadowRegisteredAttributeFamily) {
+  const char* sources[] = {
+      "#q8_0 = #dense\n",
+      "#test.options = #dense\n",
+  };
+  for (const char* source : sources) {
+    SCOPED_TRACE(source);
+    const auto& diagnostics = ParseExpectErrors(source);
+    ASSERT_GE(diagnostics.size(), 1u);
+    ExpectError(diagnostics[0],
+                loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 14));
+    EXPECT_EQ(GetStringParam(diagnostics[0], 0),
+              "alias name shadows a registered attribute family");
+  }
 }
 
 TEST_F(ParserTest, DuplicateEncodingAliasDefinitionFails) {

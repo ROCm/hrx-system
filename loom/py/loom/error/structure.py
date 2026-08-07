@@ -668,6 +668,87 @@ ERR_STRUCTURE_040 = ErrorDef(
     ),
 )
 
+# ERR_STRUCTURE_041: Parameterized attribute family is not registered.
+ERR_STRUCTURE_041 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=41,
+    severity=Severity.ERROR,
+    summary="Parameterized attribute family is not registered.",
+    message=(
+        "attribute '{attr_name}' references unregistered parameterized family "
+        "kind {family_kind}"
+    ),
+    params=(
+        ErrorParam("attr_name", ParamKind.STRING),
+        ErrorParam("family_kind", ParamKind.U32),
+    ),
+    fix_hint="Construct '{attr_name}' from a family registered in the active context",
+)
+
+# ERR_STRUCTURE_042: Parameterized attribute family mismatch.
+ERR_STRUCTURE_042 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=42,
+    severity=Severity.ERROR,
+    summary="Parameterized attribute family mismatch.",
+    message=(
+        "attribute '{attr_name}' has family '{actual_family}', expected "
+        "'{expected_family}'"
+    ),
+    params=(
+        ErrorParam("attr_name", ParamKind.STRING),
+        ErrorParam("actual_family", ParamKind.STRING),
+        ErrorParam("expected_family", ParamKind.STRING),
+    ),
+    fix_hint="Construct '{attr_name}' with the declared parameterized family",
+)
+
+# ERR_STRUCTURE_043: Parameterized attribute slot count mismatch.
+ERR_STRUCTURE_043 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=43,
+    severity=Severity.ERROR,
+    summary="Parameterized attribute slot count mismatch.",
+    message=(
+        "attribute '{attr_name}' has {actual_count} parameter slots, expected "
+        "{expected_count}"
+    ),
+    params=(
+        ErrorParam("attr_name", ParamKind.STRING),
+        ErrorParam("actual_count", ParamKind.U32),
+        ErrorParam("expected_count", ParamKind.U32),
+    ),
+    fix_hint="Construct '{attr_name}' through its generated family builder",
+)
+
+# ERR_STRUCTURE_044: Required parameterized attribute parameter is absent.
+ERR_STRUCTURE_044 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=44,
+    severity=Severity.ERROR,
+    summary="Required parameterized attribute parameter is absent.",
+    message="required parameter '{attr_name}' is absent",
+    params=(ErrorParam("attr_name", ParamKind.STRING),),
+    fix_hint="Provide a value for required parameter '{attr_name}'",
+)
+
+# ERR_STRUCTURE_045: Aggregate attribute nesting is too deep.
+ERR_STRUCTURE_045 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=45,
+    severity=Severity.ERROR,
+    summary="Aggregate attribute nesting is too deep.",
+    message=(
+        "attribute '{attr_name}' exceeds the maximum aggregate nesting depth "
+        "of {max_depth}"
+    ),
+    params=(
+        ErrorParam("attr_name", ParamKind.STRING),
+        ErrorParam("max_depth", ParamKind.U32),
+    ),
+    fix_hint="Flatten nested dictionary and parameterized attribute values",
+)
+
 ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_001,
     ERR_STRUCTURE_002,
@@ -708,4 +789,9 @@ ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_038,
     ERR_STRUCTURE_039,
     ERR_STRUCTURE_040,
+    ERR_STRUCTURE_041,
+    ERR_STRUCTURE_042,
+    ERR_STRUCTURE_043,
+    ERR_STRUCTURE_044,
+    ERR_STRUCTURE_045,
 )

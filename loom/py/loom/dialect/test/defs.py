@@ -38,6 +38,7 @@ from loom.assembly import (
     IndexList,
     OperandDict,
     OptionalGroup,
+    Param,
     PredicateList,
     Ref,
     Refs,
@@ -58,9 +59,12 @@ from loom.dialect.target import target_record_attrs
 from loom.dsl import (
     ANY,
     ANY_ENCODING,
+    ATTR_TYPE_ENUM,
     ATTR_TYPE_ENUM_ARRAY,
     ATTR_TYPE_FLAGS,
     ATTR_TYPE_I64_ARRAY,
+    ATTR_TYPE_PARAMETERIZED,
+    ATTR_TYPE_SYMBOL,
     BY_REFERENCE,
     CONSTANT_LIKE,
     CONVERGENT,
@@ -105,6 +109,7 @@ from loom.dsl import (
     Op,
     Operand,
     OperandRole,
+    ParameterizedAttrDef,
     Reads,
     ReadWrites,
     RegionDef,
@@ -119,6 +124,7 @@ from loom.dsl import (
     SymbolReference,
     TargetLikeInterface,
     TiedResult,
+    TypeDef,
     Writes,
     YieldCountMatchesResults,
     YieldElementTypesMatchResults,
@@ -192,6 +198,141 @@ _ArrayElement = EnumDef(
         EnumCase("high", 255, doc="Maximum stable byte value."),
     ],
     doc="Synthetic sparse enum for enum-array lifecycle coverage.",
+)
+
+_ParameterizedMode = EnumDef(
+    "ParameterizedMode",
+    [
+        EnumCase("fast", 1, doc="Synthetic fast mode."),
+        EnumCase("precise", 2, doc="Synthetic precise mode."),
+    ],
+    doc="Synthetic mode for parameterized attribute coverage.",
+)
+
+_ParameterizedScope = EnumDef(
+    "ParameterizedScope",
+    [
+        EnumCase("workgroup", 1, doc="Synthetic workgroup scope."),
+        EnumCase("subgroup", 2, doc="Synthetic subgroup scope."),
+    ],
+    doc="Synthetic scope for parameterized value coverage.",
+)
+
+test_tile_attr = ParameterizedAttrDef(
+    "test.tile",
+    group=test_ops,
+    parameters=[
+        AttrDef("width", "i64", doc="Tile width in elements."),
+    ],
+    doc="Minimal parameterized attribute family.",
+)
+
+test_options_attr = ParameterizedAttrDef(
+    "test.options",
+    group=test_ops,
+    parameters=[
+        AttrDef(
+            "mode",
+            ATTR_TYPE_ENUM,
+            enum_def=_ParameterizedMode,
+            doc="Required execution mode.",
+        ),
+        AttrDef(
+            "scopes",
+            ATTR_TYPE_ENUM_ARRAY,
+            enum_def=_ParameterizedScope,
+            optional=True,
+            open_enum=True,
+            doc="Optional ordered scopes.",
+        ),
+        AttrDef("element_type", "type", optional=True),
+        AttrDef(
+            "tile",
+            ATTR_TYPE_PARAMETERIZED,
+            optional=True,
+            parameterized_attr=test_tile_attr,
+        ),
+        AttrDef(
+            "target",
+            ATTR_TYPE_SYMBOL,
+            optional=True,
+            symbol_ref=SymbolReference("record", ["record"]),
+            doc="Optional record symbol dependency.",
+        ),
+    ],
+    doc="Structured parameterized attribute lifecycle witness.",
+)
+
+ALL_TEST_PARAMETERIZED_ATTRS = (
+    test_tile_attr,
+    test_options_attr,
+)
+
+test_scope_type = TypeDef(
+    "test.scope",
+    params=[
+        AttrDef("scope", ATTR_TYPE_ENUM, enum_def=_ParameterizedScope),
+    ],
+    format=[Param("scope")],
+    doc="Positional descriptor-backed type parameter witness.",
+)
+
+test_matrix_type = TypeDef(
+    "test.matrix",
+    params=[
+        AttrDef("element_type", "type"),
+        AttrDef("scope", ATTR_TYPE_ENUM, enum_def=_ParameterizedScope),
+        AttrDef("rows", "i64"),
+        AttrDef(
+            "target",
+            ATTR_TYPE_SYMBOL,
+            optional=True,
+            symbol_ref=SymbolReference("record", ["record"]),
+        ),
+    ],
+    format=[
+        Param("element_type"),
+        COMMA,
+        kw("scope"),
+        EQUALS,
+        Param("scope"),
+        COMMA,
+        kw("rows"),
+        EQUALS,
+        Param("rows"),
+        OptionalGroup(
+            [COMMA, kw("target"), EQUALS, Param("target")],
+            anchor="target",
+        ),
+    ],
+    doc="Mixed positional and keyed descriptor-backed type witness.",
+)
+
+test_array_type = TypeDef(
+    "test.array",
+    params=[
+        AttrDef("element_type", "type"),
+        AttrDef("alignment", "i64", optional=True),
+        AttrDef("metadata", "dict", optional=True),
+    ],
+    format=[
+        Param("element_type"),
+        OptionalGroup(
+            [COMMA, kw("alignment"), EQUALS, Param("alignment")],
+            anchor="alignment",
+        ),
+        OptionalGroup(
+            [COMMA, kw("metadata"), EQUALS, Param("metadata")],
+            anchor="metadata",
+        ),
+    ],
+    doc="Optional and nested descriptor-backed type parameter witness.",
+)
+
+ALL_TEST_TYPES = (
+    test_scope_type,
+    test_matrix_type,
+    test_array_type,
 )
 
 cmp_predicates = EnumDef(
@@ -1791,6 +1932,27 @@ test_attrs = Op(
 )
 
 # ============================================================================
+# test.parameterized_attr — descriptor-backed parameterized attribute
+# ============================================================================
+
+test_parameterized_attr = Op(
+    "test.parameterized_attr",
+    group=test_ops,
+    doc="Test op carrying an exact descriptor-backed attribute family.",
+    attrs=[
+        AttrDef(
+            "options",
+            ATTR_TYPE_PARAMETERIZED,
+            parameterized_attr=test_options_attr,
+        ),
+    ],
+    format=[Attr("options")],
+    examples=[
+        "test.parameterized_attr #test.options<mode = fast>",
+    ],
+)
+
+# ============================================================================
 # test.enum_array_attrs — descriptor-backed enum-array attributes
 # ============================================================================
 
@@ -2541,4 +2703,5 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_fact_not_subnormal,
     test_fact_cluster_uniform,
     test_enum_array_attrs,
+    test_parameterized_attr,
 )

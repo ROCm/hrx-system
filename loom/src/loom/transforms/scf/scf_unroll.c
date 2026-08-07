@@ -1177,7 +1177,8 @@ static iree_status_t loom_scf_unroll_type_refs_are_ready(
     bool* out_ready) {
   query->ready = true;
   IREE_RETURN_IF_ERROR(loom_type_walk_value_refs(
-      type, loom_scf_unroll_check_type_ref_is_ready, query));
+      query->context->module, type, loom_scf_unroll_check_type_ref_is_ready,
+      query));
   *out_ready = query->ready;
   return iree_ok_status();
 }
@@ -1200,7 +1201,7 @@ static iree_status_t loom_scf_unroll_attr_refs_are_ready(
     loom_scf_unroll_payload_readiness_t* query, const loom_attribute_t* attr,
     uint8_t depth, bool* out_ready) {
   *out_ready = false;
-  if (!attr || depth > LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
+  if (!attr || depth > LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
     return iree_ok_status();
   }
   switch ((loom_attr_kind_t)attr->kind) {
@@ -1240,6 +1241,18 @@ static iree_status_t loom_scf_unroll_attr_refs_are_ready(
       for (uint16_t i = 0; i < attr->count; ++i) {
         IREE_RETURN_IF_ERROR(loom_scf_unroll_attr_refs_are_ready(
             query, &attr->dict_entries[i].value, (uint8_t)(depth + 1),
+            out_ready));
+        if (!*out_ready) return iree_ok_status();
+      }
+      *out_ready = true;
+      return iree_ok_status();
+    case LOOM_ATTR_PARAMETERIZED:
+      if (attr->count > 0 && !attr->parameterized_slots) {
+        return iree_ok_status();
+      }
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_scf_unroll_attr_refs_are_ready(
+            query, &attr->parameterized_slots[i], (uint8_t)(depth + 1),
             out_ready));
         if (!*out_ready) return iree_ok_status();
       }

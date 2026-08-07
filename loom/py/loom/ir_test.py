@@ -10,6 +10,13 @@ import math
 
 import pytest
 
+from loom.dialect.test import (
+    test_array_type,
+    test_matrix_type,
+    test_options_attr,
+    test_scope_type,
+    test_tile_attr,
+)
 from loom.ir import (
     BF16,
     BUFFER_TYPE,
@@ -51,6 +58,8 @@ from loom.ir import (
     Module,
     OpaqueLocation,
     Operation,
+    ParameterizedAttr,
+    ParameterizedType,
     PoolType,
     Predicate,
     PredicateArg,
@@ -64,6 +73,7 @@ from loom.ir import (
     StringTable,
     Symbol,
     SymbolKind,
+    SymbolName,
     SymbolRef,
     TaggedLocation,
     TiedResult,
@@ -642,6 +652,127 @@ class TestCanonicalAttrDict:
             ("target", "llvm-cpu"),
         ]
         assert isinstance(updated["config"], CanonicalAttrDict)
+
+
+class TestParameterizedAttr:
+    def test_constructs_declaration_order_slots_and_nested_values(self) -> None:
+        tile = test_tile_attr(width=16)
+        options = test_options_attr(
+            mode="fast",
+            scopes=["subgroup", 254],
+            element_type=BF16,
+            tile=tile,
+            target=SymbolName("target"),
+        )
+
+        assert isinstance(options, ParameterizedAttr)
+        assert options.family_name == "test.options"
+        assert options.slots == (
+            1,
+            EnumArrayAttr([2, 254]),
+            BF16,
+            tile,
+            SymbolName("target"),
+        )
+        assert options.present_items() == (
+            ("mode", 1),
+            ("scopes", EnumArrayAttr([2, 254])),
+            ("element_type", BF16),
+            ("tile", tile),
+            ("target", SymbolName("target")),
+        )
+
+    def test_preserves_absent_and_present_empty_optional_values(self) -> None:
+        absent = test_options_attr(mode="precise")
+        present_empty = test_options_attr(mode="precise", scopes=[])
+
+        assert not absent.has("scopes")
+        assert absent.get("scopes") is None
+        assert absent.slots == (2, None, None, None, None)
+        assert present_empty.has("scopes")
+        assert present_empty.get("scopes") == EnumArrayAttr()
+        assert absent != present_empty
+
+    def test_rejects_missing_unknown_and_wrong_family_parameters(self) -> None:
+        with pytest.raises(TypeError, match="missing required parameter 'mode'"):
+            test_options_attr()
+        with pytest.raises(TypeError, match=r"unknown parameter.*mood"):
+            test_options_attr(mode="fast", mood="precise")
+        with pytest.raises(ValueError, match=r"has family 'test\.options'"):
+            test_options_attr(mode="fast", tile=test_options_attr(mode="precise"))
+
+    def test_rejects_closed_enum_values_and_bad_scalar_types(self) -> None:
+        with pytest.raises(ValueError, match="undeclared enum value 255"):
+            test_options_attr(mode=255)
+        with pytest.raises(TypeError, match="must be an enum keyword or byte"):
+            test_options_attr(mode=True)
+        with pytest.raises(TypeError, match="signed 64-bit integer"):
+            test_tile_attr(width=True)
+
+    def test_equality_and_hash_use_stable_family_and_frozen_values(self) -> None:
+        lhs = test_options_attr(mode="fast", scopes=["subgroup"])
+        rhs = test_options_attr(mode=1, scopes=EnumArrayAttr([2]))
+
+        assert lhs == rhs
+        assert hash(lhs) == hash(rhs)
+        assert {lhs, rhs} == {lhs}
+
+
+class TestParameterizedType:
+    def test_constructs_positional_and_mixed_format_families(self) -> None:
+        scope = test_scope_type(scope="subgroup")
+        matrix = test_matrix_type(
+            element_type=BF16,
+            scope="workgroup",
+            rows=16,
+            target=SymbolName("target"),
+        )
+
+        assert isinstance(scope, ParameterizedType)
+        assert scope.type_kind == TypeKind.PARAMETERIZED
+        assert scope.slots == (2,)
+        assert matrix.family_name == "test.matrix"
+        assert matrix.present_items() == (
+            ("element_type", BF16),
+            ("scope", 1),
+            ("rows", 16),
+            ("target", SymbolName("target")),
+        )
+
+    def test_equality_hash_and_validation_use_named_schema(self) -> None:
+        lhs = test_matrix_type(element_type=BF16, scope="subgroup", rows=16)
+        rhs = test_matrix_type(element_type=BF16, scope=2, rows=16)
+
+        assert lhs == rhs
+        assert hash(lhs) == hash(rhs)
+        with pytest.raises(TypeError, match="missing required parameter 'rows'"):
+            test_matrix_type(element_type=BF16, scope="subgroup")
+        with pytest.raises(TypeError, match=r"unknown parameter.*columns"):
+            test_matrix_type(
+                element_type=BF16,
+                scope="subgroup",
+                rows=16,
+                columns=16,
+            )
+
+    def test_optional_parameter_has_explicit_presence(self) -> None:
+        packed = test_array_type(element_type=BF16)
+        aligned = test_array_type(element_type=BF16, alignment=16)
+
+        assert packed.slots == (BF16, None, None)
+        assert not packed.has("alignment")
+        assert packed.get("alignment") is None
+        assert aligned.has("alignment")
+        assert aligned.get("alignment") == 16
+
+    def test_dictionary_parameter_preserves_nested_family_values(self) -> None:
+        metadata = CanonicalAttrDict(
+            (("tile", test_tile_attr(width=8)), ("purpose", "scratch"))
+        )
+        array = test_array_type(element_type=BF16, metadata=metadata)
+
+        assert array.has("metadata")
+        assert array.get("metadata") == metadata
 
 
 class TestOperations:

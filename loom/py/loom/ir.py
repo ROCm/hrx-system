@@ -59,6 +59,7 @@ __all__ = [
     "NoneType",
     "RegisterType",
     "DialectType",
+    "ParameterizedType",
     "EncodingRole",
     "ENCODING_ROLE_BY_NAME",
     "EncodingType",
@@ -89,7 +90,9 @@ __all__ = [
     "EncodingInstance",
     # Predicates.
     "CanonicalAttrDict",
+    "ATTR_AGGREGATE_MAX_NESTING_DEPTH",
     "EnumArrayAttr",
+    "ParameterizedAttr",
     "canonicalize_attr_dict",
     "replace_canonical_attr_dict",
     "PredicateArg",
@@ -247,7 +250,8 @@ class TypeKind(IntEnum):
     BUFFER = 11
     REGISTER = 12
     STORAGE = 13
-    PLACEHOLDER = 14
+    PARAMETERIZED = 14
+    PLACEHOLDER = 15
 
 
 # ============================================================================
@@ -554,6 +558,93 @@ class DialectType:
         return self.name
 
 
+@dataclass(frozen=True, slots=True, init=False, eq=False)
+class ParameterizedType:
+    """Immutable descriptor-backed generic type value.
+
+    The declaration format controls whether each named slot is printed
+    positionally or with a key. Storage and identity always use declaration-
+    order slots so generated accessors require no lookup.
+    """
+
+    definition: Any
+    _slots: tuple[Any, ...]
+
+    def __init__(self, definition: Any, parameters: Mapping[str, Any]) -> None:
+        from loom.dsl import TypeDef
+
+        if (
+            not isinstance(definition, TypeDef)
+            or not definition.uses_attribute_parameters
+        ):
+            raise TypeError(
+                "ParameterizedType definition must be a descriptor-backed "
+                f"TypeDef, got {definition!r}"
+            )
+        object.__setattr__(self, "definition", definition)
+        object.__setattr__(
+            self,
+            "_slots",
+            _canonicalize_parameterized_slots(
+                definition.name, definition.params, parameters
+            ),
+        )
+
+    @property
+    def type_kind(self) -> TypeKind:
+        return TypeKind.PARAMETERIZED
+
+    @property
+    def family_name(self) -> str:
+        return self.definition.name
+
+    @property
+    def slots(self) -> tuple[Any, ...]:
+        return tuple(
+            None if value is _ABSENT_PARAMETERIZED_VALUE else value
+            for value in self._slots
+        )
+
+    def has(self, parameter_name: str) -> bool:
+        return (
+            self._slots[self._parameter_index(parameter_name)]
+            is not _ABSENT_PARAMETERIZED_VALUE
+        )
+
+    def get(self, parameter_name: str, default: Any = None) -> Any:
+        value = self._slots[self._parameter_index(parameter_name)]
+        return default if value is _ABSENT_PARAMETERIZED_VALUE else value
+
+    def present_items(self) -> tuple[tuple[str, Any], ...]:
+        return tuple(
+            (parameter.name, value)
+            for parameter, value in zip(
+                self.definition.params, self._slots, strict=True
+            )
+            if value is not _ABSENT_PARAMETERIZED_VALUE
+        )
+
+    def _parameter_index(self, parameter_name: str) -> int:
+        for index, parameter in enumerate(self.definition.params):
+            if parameter.name == parameter_name:
+                return index
+        raise KeyError(parameter_name)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ParameterizedType):
+            return NotImplemented
+        return self.family_name == other.family_name and self._slots == other._slots
+
+    def __hash__(self) -> int:
+        return hash((self.family_name, self._slots))
+
+    def __repr__(self) -> str:
+        parameters = ", ".join(
+            f"{name}={value!r}" for name, value in self.present_items()
+        )
+        return f"{self.family_name}<{parameters}>"
+
+
 @unique
 class EncodingRole(IntEnum):
     """Semantic role carried by an encoding SSA value type."""
@@ -676,6 +767,7 @@ type Type = (
     | FunctionType
     | RegisterType
     | DialectType
+    | ParameterizedType
     | EncodingType
     | PoolType
     | PlaceholderType
@@ -1013,6 +1105,300 @@ class TiedResult:
 # ============================================================================
 # Canonical attribute dictionaries
 # ============================================================================
+
+
+ATTR_AGGREGATE_MAX_NESTING_DEPTH = 8
+
+
+class _AbsentParameterizedValue:
+    """Private sentinel preserving optional absence in immutable slot tuples."""
+
+    __slots__ = ()
+
+
+_ABSENT_PARAMETERIZED_VALUE = _AbsentParameterizedValue()
+
+
+@dataclass(frozen=True, slots=True, init=False, eq=False)
+class ParameterizedAttr:
+    """Immutable descriptor-backed parameterized attribute value.
+
+    Values are stored in declaration order. Optional omission uses a private
+    sentinel so an absent parameter remains distinct from a present empty array,
+    byte span, or dictionary.
+    """
+
+    definition: Any
+    _slots: tuple[Any, ...]
+
+    def __init__(self, definition: Any, parameters: Mapping[str, Any]) -> None:
+        from loom.dsl import ParameterizedAttrDef
+
+        if not isinstance(definition, ParameterizedAttrDef):
+            raise TypeError(
+                "ParameterizedAttr definition must be a ParameterizedAttrDef, "
+                f"got {type(definition).__name__}"
+            )
+        object.__setattr__(self, "definition", definition)
+        object.__setattr__(
+            self,
+            "_slots",
+            _canonicalize_parameterized_slots(
+                definition.name, definition.parameters, parameters
+            ),
+        )
+
+    @property
+    def family_name(self) -> str:
+        """Returns the stable namespaced family identity."""
+
+        return self.definition.name
+
+    @property
+    def slots(self) -> tuple[Any, ...]:
+        """Returns declaration-order values with absent slots represented by None."""
+
+        return tuple(
+            None if value is _ABSENT_PARAMETERIZED_VALUE else value
+            for value in self._slots
+        )
+
+    def has(self, parameter_name: str) -> bool:
+        """Returns whether an optional parameter is present."""
+
+        index = self._parameter_index(parameter_name)
+        return self._slots[index] is not _ABSENT_PARAMETERIZED_VALUE
+
+    def get(self, parameter_name: str, default: Any = None) -> Any:
+        """Returns a present parameter value or |default| when absent."""
+
+        index = self._parameter_index(parameter_name)
+        value = self._slots[index]
+        return default if value is _ABSENT_PARAMETERIZED_VALUE else value
+
+    def present_items(self) -> tuple[tuple[str, Any], ...]:
+        """Returns present parameters in declaration order."""
+
+        return tuple(
+            (parameter.name, value)
+            for parameter, value in zip(
+                self.definition.parameters, self._slots, strict=True
+            )
+            if value is not _ABSENT_PARAMETERIZED_VALUE
+        )
+
+    def _parameter_index(self, parameter_name: str) -> int:
+        for index, parameter in enumerate(self.definition.parameters):
+            if parameter.name == parameter_name:
+                return index
+        raise KeyError(parameter_name)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ParameterizedAttr):
+            return NotImplemented
+        return self.family_name == other.family_name and self._slots == other._slots
+
+    def __hash__(self) -> int:
+        return hash((self.family_name, self._slots))
+
+    def __repr__(self) -> str:
+        parameters = ", ".join(
+            f"{name}={value!r}" for name, value in self.present_items()
+        )
+        return f"#{self.family_name}<{parameters}>"
+
+
+def _canonicalize_parameterized_enum_value(
+    family_name: str, parameter: Any, value: Any
+) -> int:
+    assert parameter.enum_def is not None
+    value_by_keyword = {
+        enum_case.keyword: enum_case.value for enum_case in parameter.enum_def.cases
+    }
+    declared_values = frozenset(value_by_keyword.values())
+    if isinstance(value, str):
+        normalized = value_by_keyword.get(value)
+        if normalized is None:
+            raise ValueError(
+                f"{family_name}: parameter '{parameter.name}' has unknown enum "
+                f"keyword {value!r}"
+            )
+        return normalized
+    if type(value) is not int or not 0 <= value <= 0xFF:
+        raise TypeError(
+            f"{family_name}: parameter '{parameter.name}' must be an enum "
+            f"keyword or byte value, got {value!r}"
+        )
+    if not parameter.open_enum and value not in declared_values:
+        raise ValueError(
+            f"{family_name}: parameter '{parameter.name}' has undeclared enum "
+            f"value {value}"
+        )
+    return value
+
+
+def _canonicalize_parameterized_slots(
+    family_name: str,
+    descriptors: Iterable[Any],
+    parameters: Mapping[str, Any],
+) -> tuple[Any, ...]:
+    """Canonicalizes a named parameter mapping into immutable ordered slots."""
+
+    if not isinstance(parameters, Mapping):
+        raise TypeError(
+            f"{family_name}: parameters must be a mapping, got "
+            f"{type(parameters).__name__}"
+        )
+    frozen_descriptors = tuple(descriptors)
+    parameter_names = {parameter.name for parameter in frozen_descriptors}
+    unknown_names = sorted(set(parameters) - parameter_names)
+    if unknown_names:
+        raise TypeError(
+            f"{family_name}: unknown parameter(s): {', '.join(unknown_names)}"
+        )
+
+    slots: list[Any] = []
+    for descriptor in frozen_descriptors:
+        if descriptor.name not in parameters:
+            if descriptor.optional:
+                slots.append(_ABSENT_PARAMETERIZED_VALUE)
+                continue
+            raise TypeError(
+                f"{family_name}: missing required parameter '{descriptor.name}'"
+            )
+        slots.append(
+            _canonicalize_parameterized_value(
+                family_name, descriptor, parameters[descriptor.name]
+            )
+        )
+    return tuple(slots)
+
+
+def _canonicalize_parameterized_value(
+    family_name: str, parameter: Any, value: Any
+) -> Any:
+    from loom.dsl import (
+        ATTR_TYPE_BOOL,
+        ATTR_TYPE_BYTES,
+        ATTR_TYPE_DICT,
+        ATTR_TYPE_ENCODING,
+        ATTR_TYPE_ENUM,
+        ATTR_TYPE_ENUM_ARRAY,
+        ATTR_TYPE_F64,
+        ATTR_TYPE_I64,
+        ATTR_TYPE_I64_ARRAY,
+        ATTR_TYPE_PARAMETERIZED,
+        ATTR_TYPE_STRING,
+        ATTR_TYPE_SYMBOL,
+        ATTR_TYPE_TYPE,
+    )
+
+    def type_error(expected: str) -> TypeError:
+        return TypeError(
+            f"{family_name}: parameter '{parameter.name}' must be {expected}, "
+            f"got {value!r}"
+        )
+
+    match parameter.attr_type:
+        case kind if kind == ATTR_TYPE_I64:
+            if type(value) is not int or not -(2**63) <= value < 2**63:
+                raise type_error("a signed 64-bit integer")
+            return value
+        case kind if kind == ATTR_TYPE_F64:
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                raise type_error("a floating-point number")
+            return float(value)
+        case kind if kind == ATTR_TYPE_STRING:
+            if type(value) is not str:
+                raise type_error("a string")
+            return value
+        case kind if kind == ATTR_TYPE_BOOL:
+            if type(value) is not bool:
+                raise type_error("a Boolean")
+            return value
+        case kind if kind == ATTR_TYPE_ENUM:
+            return _canonicalize_parameterized_enum_value(family_name, parameter, value)
+        case kind if kind == ATTR_TYPE_ENUM_ARRAY:
+            values = value.values if isinstance(value, EnumArrayAttr) else value
+            if isinstance(values, str) or not isinstance(values, Iterable):
+                raise type_error("an iterable of enum keywords or byte values")
+            return EnumArrayAttr(
+                _canonicalize_parameterized_enum_value(family_name, parameter, element)
+                for element in values
+            )
+        case kind if kind == ATTR_TYPE_TYPE:
+            if not isinstance(
+                value,
+                (
+                    ScalarType,
+                    ShapedType,
+                    BufferType,
+                    StorageType,
+                    FunctionType,
+                    RegisterType,
+                    DialectType,
+                    ParameterizedType,
+                    EncodingType,
+                    PoolType,
+                    PlaceholderType,
+                    NoneType,
+                ),
+            ):
+                raise type_error("a Loom type")
+            return value
+        case kind if kind == ATTR_TYPE_I64_ARRAY:
+            if isinstance(value, str | bytes | bytearray) or not isinstance(
+                value, Iterable
+            ):
+                raise type_error("an iterable of signed 64-bit integers")
+            values = tuple(value)
+            for index, element in enumerate(values):
+                if type(element) is not int or not -(2**63) <= element < 2**63:
+                    raise TypeError(
+                        f"{family_name}: parameter '{parameter.name}' element "
+                        f"{index} must be a signed 64-bit integer, got "
+                        f"{element!r}"
+                    )
+            if len(values) > 0xFFFF:
+                raise ValueError(
+                    f"{family_name}: parameter '{parameter.name}' has "
+                    f"{len(values)} elements, exceeding UINT16_MAX"
+                )
+            return values
+        case kind if kind == ATTR_TYPE_BYTES:
+            if not isinstance(value, bytes | bytearray | memoryview):
+                raise type_error("a byte payload")
+            return bytes(value)
+        case kind if kind == ATTR_TYPE_ENCODING:
+            if not isinstance(value, EncodingInstance):
+                raise type_error("a static encoding")
+            return value
+        case kind if kind == ATTR_TYPE_SYMBOL:
+            if not isinstance(value, SymbolName):
+                raise type_error("a symbol name")
+            return value
+        case kind if kind == ATTR_TYPE_DICT:
+            if not isinstance(value, Mapping):
+                raise type_error("an attribute dictionary")
+            return canonicalize_attr_dict(value)
+        case kind if kind == ATTR_TYPE_PARAMETERIZED:
+            if not isinstance(value, ParameterizedAttr):
+                raise type_error("a parameterized attribute")
+            expected_family = parameter.parameterized_attr
+            if (
+                expected_family is not None
+                and value.family_name != expected_family.name
+            ):
+                raise ValueError(
+                    f"{family_name}: parameter '{parameter.name}' has family "
+                    f"'{value.family_name}', expected '{expected_family.name}'"
+                )
+            return value
+        case _:
+            raise ValueError(
+                f"{family_name}: parameter '{parameter.name}' has unsupported "
+                f"kind '{parameter.attr_type}'"
+            )
 
 
 @dataclass(frozen=True, slots=True, init=False)

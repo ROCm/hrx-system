@@ -221,6 +221,17 @@ static iree_status_t loom_symbol_dependency_visit_type(
       return loom_symbol_dependency_visit_type_sequence(
           builder, source_symbol_id, loom_type_dialect_params(type),
           loom_type_dialect_param_count(type), kind, attr_index, user_op);
+    case LOOM_TYPE_PARAMETERIZED: {
+      const loom_attribute_t* parameters =
+          loom_type_parameterized_parameters(type);
+      uint8_t parameter_count = loom_type_parameterized_parameter_count(type);
+      for (uint8_t i = 0; i < parameter_count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_symbol_dependency_visit_attr(
+            builder, source_symbol_id, parameters[i], kind, attr_index, user_op,
+            /*dict_depth=*/1));
+      }
+      return iree_ok_status();
+    }
     case LOOM_TYPE_REGISTER: {
       const loom_type_t* value_type = loom_type_register_value_type(type);
       return value_type ? loom_symbol_dependency_visit_type(
@@ -261,10 +272,11 @@ static iree_status_t loom_symbol_dependency_visit_attr(
           builder, source_symbol_id, attr.encoding_id,
           LOOM_SYMBOL_DEPENDENCY_EDGE_ENCODING_ATTR, attr_index, user_op);
     case LOOM_ATTR_DICT:
-      if (dict_depth >= LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "dict attribute nesting exceeds max depth %u",
-                                (unsigned)LOOM_ATTR_DICT_MAX_NESTING_DEPTH);
+      if (dict_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "dict attribute nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
       }
       if (attr.count == 0) return iree_ok_status();
       if (!attr.dict_entries) {
@@ -284,6 +296,20 @@ static iree_status_t loom_symbol_dependency_visit_attr(
             attr_index, user_op, (uint8_t)(dict_depth + 1)));
       }
       return iree_ok_status();
+    case LOOM_ATTR_PARAMETERIZED:
+      if (dict_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "aggregate attribute nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
+      }
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_symbol_dependency_visit_attr(
+            builder, source_symbol_id, attr.parameterized_slots[i],
+            LOOM_SYMBOL_DEPENDENCY_EDGE_NESTED_ATTR, attr_index, user_op,
+            (uint8_t)(dict_depth + 1)));
+      }
+      return iree_ok_status();
     default:
       return iree_ok_status();
   }
@@ -301,8 +327,8 @@ loom_symbol_dependency_direct_attr_kind(const loom_op_vtable_t* vtable,
       attr_index == vtable->call_like->callee_attr_index) {
     return LOOM_SYMBOL_DEPENDENCY_EDGE_CALL;
   }
-  if (descriptor && descriptor->symbol_ref &&
-      iree_any_bit_set(descriptor->symbol_ref->interfaces,
+  if (descriptor && descriptor->reference.symbol_ref &&
+      iree_any_bit_set(descriptor->reference.symbol_ref->interfaces,
                        LOOM_SYMBOL_INTERFACE_GLOBAL)) {
     return LOOM_SYMBOL_DEPENDENCY_EDGE_GLOBAL_ACCESS;
   }

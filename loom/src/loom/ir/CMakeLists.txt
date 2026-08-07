@@ -43,6 +43,7 @@ loom_cc_library(
     ir
   HDRS
     "attribute.h"
+    "attribute_schema.h"
     "context.h"
     "encoding.h"
     "function_version.h"
@@ -50,6 +51,8 @@ loom_cc_library(
     "local_value_domain.h"
     "location.h"
     "module.h"
+    "parameterized_attr.h"
+    "parameterized_type.h"
     "scalar_type.h"
     "semantics.h"
     "types.h"
@@ -132,6 +135,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::ops::test
+    loom::ops::type_registry
 )
 
 loom_cc_test(

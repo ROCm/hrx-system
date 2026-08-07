@@ -632,7 +632,8 @@ static iree_status_t loom_template_selection_types_match(
     }
     loom_type_t operand_type =
         loom_module_value_type(state->module, operands.values[i]);
-    if (!loom_type_equal_after_value_remap(provider->argument_types[i],
+    if (!loom_type_equal_after_value_remap(state->module,
+                                           provider->argument_types[i],
                                            operand_type, &signature_remap)) {
       return iree_ok_status();
     }
@@ -647,7 +648,8 @@ static iree_status_t loom_template_selection_types_match(
     }
     loom_type_t result_type =
         loom_module_value_type(state->module, results.values[i]);
-    if (!loom_type_equal_after_value_remap(provider->result_types[i],
+    if (!loom_type_equal_after_value_remap(state->module,
+                                           provider->result_types[i],
                                            result_type, &signature_remap)) {
       return iree_ok_status();
     }

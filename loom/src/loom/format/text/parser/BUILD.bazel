@@ -73,6 +73,7 @@ loom_cc_test(
         "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/testing:diagnostic_matchers",
         "//loom/src/loom/util:stream",

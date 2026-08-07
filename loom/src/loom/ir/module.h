@@ -21,6 +21,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/ir/ir.h"
+#include "loom/ir/parameterized_attr.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -287,6 +288,20 @@ static inline loom_type_use_id_t loom_module_value_first_incoming_type_use(
       ->first_incoming_use_id;
 }
 
+// Walks SSA value references embedded in |attr|. Type-valued attributes are
+// resolved through |module| and aggregate attributes are visited in structural
+// order. References are not deduplicated.
+iree_status_t loom_module_walk_attribute_value_refs(
+    const loom_module_t* module, loom_attribute_t attr,
+    loom_type_value_ref_callback_t callback, void* user_data);
+
+// Replaces SSA references to |old_id| embedded in |attr| with |new_id|.
+// Aggregate payloads and type-valued attributes are rebuilt in |module| only
+// when a nested reference changes.
+iree_status_t loom_module_replace_attribute_value_references(
+    loom_module_t* module, loom_attribute_t attr, loom_value_id_t old_id,
+    loom_value_id_t new_id, loom_attribute_t* out_attr, bool* out_changed);
+
 // Replaces SSA references to |old_id| embedded in |type| with |new_id| and
 // interns the resulting type in |module|. The module value table and type-use
 // side table are not mutated; callers decide which carrier value, if any, owns
@@ -323,6 +338,28 @@ loom_string_id_t loom_module_lookup_string(const loom_module_t* module,
 iree_status_t loom_module_make_canonical_attr_dict(
     loom_module_t* module, loom_named_attr_slice_t entries,
     loom_attribute_t* out_attr);
+
+// Builds a descriptor-backed PARAMETERIZED attribute in |module|.
+//
+// |parameters| is indexed by the registered family descriptor and may point to
+// temporary storage. Required fields must be present and optional fields use
+// LOOM_ATTR_ABSENT. Aggregate payloads are recursively copied and canonicalized
+// into the module arena before the immutable value is returned in |out_attr|.
+iree_status_t loom_module_make_parameterized_attr(
+    loom_module_t* module, loom_parameterized_attr_kind_t family_kind,
+    const loom_attribute_t* parameters, iree_host_size_t parameter_count,
+    loom_attribute_t* out_attr);
+
+// Builds and interns a descriptor-backed generic type in |module|.
+//
+// |parameters| is indexed by |descriptor| and may point to temporary storage.
+// Required fields must be present and optional fields use LOOM_ATTR_ABSENT.
+// Aggregate payloads are recursively copied into the module arena.
+iree_status_t loom_module_make_parameterized_type(
+    loom_module_t* module,
+    const loom_parameterized_type_descriptor_t* descriptor,
+    const loom_attribute_t* parameters, iree_host_size_t parameter_count,
+    loom_type_t* out_type);
 
 // Builds a fresh canonical DICT attribute from |base_entries| plus |updates|.
 //

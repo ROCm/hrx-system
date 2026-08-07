@@ -11,6 +11,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/ir/context.h"
 #include "loom/ops/test/ops.h"
+#include "loom/ops/type_registry.h"
 
 namespace loom {
 namespace {
@@ -40,6 +41,12 @@ class ModuleTest : public ::testing::Test {
         loom_context_register_encoding_vtable(&context_, &kQ6KEncodingVtable));
     IREE_ASSERT_OK(loom_context_register_encoding_vtable(
         &context_, &kDenseEncodingVtable));
+    iree_host_size_t parameterized_attr_count = 0;
+    const loom_parameterized_attr_descriptor_t* parameterized_attrs =
+        loom_test_dialect_parameterized_attrs(&parameterized_attr_count);
+    IREE_ASSERT_OK(loom_context_register_parameterized_attrs(
+        &context_, LOOM_DIALECT_TEST, parameterized_attrs,
+        parameterized_attr_count));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
   }
 
@@ -370,6 +377,65 @@ TEST_F(ModuleTest, CompactSymbolsCanPreserveExternalRefOrdinal) {
   EXPECT_EQ(loom_test_record_symbol(external_op).symbol_id, 2u);
   EXPECT_EQ(loom_module_find_symbol(module, drop_after_name),
             LOOM_SYMBOL_ID_INVALID);
+
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, CompactSymbolsPreservesParameterizedTypeSymbolOrdinals) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_string_id_t drop_before_name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("drop_before"),
+                                           &drop_before_name));
+  uint16_t drop_before_symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_add_symbol(module, drop_before_name, &drop_before_symbol_id));
+
+  loom_string_id_t target_name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("target"), &target_name));
+  uint16_t target_symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_add_symbol(module, target_name, &target_symbol_id));
+
+  loom_string_id_t drop_after_name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("drop_after"),
+                                           &drop_after_name));
+  uint16_t drop_after_symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_add_symbol(module, drop_after_name, &drop_after_symbol_id));
+
+  ASSERT_EQ(drop_before_symbol_id, 0u);
+  ASSERT_EQ(target_symbol_id, 1u);
+  ASSERT_EQ(drop_after_symbol_id, 2u);
+
+  loom_type_id_t bf16_type_id = LOOM_TYPE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_type_id(
+      module, loom_type_scalar(LOOM_SCALAR_TYPE_BF16), &bf16_type_id));
+  loom_type_t matrix_type = {};
+  IREE_ASSERT_OK(loom_test_matrix_type_make(
+      module, LOOM_TEST_MATRIX_TYPE_BUILD_FLAG_HAS_TARGET, bf16_type_id,
+      LOOM_TEST_MATRIX_TYPE_SCOPE_SUBGROUP, 16,
+      (loom_symbol_ref_t){0, target_symbol_id}, &matrix_type));
+
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(&block_pool_, &scratch_arena);
+  iree_host_size_t removed_count = 0;
+  IREE_ASSERT_OK(
+      loom_module_compact_symbols(module, &scratch_arena, &removed_count));
+  iree_arena_deinitialize(&scratch_arena);
+
+  EXPECT_EQ(removed_count, 1u);
+  ASSERT_EQ(module->symbols.count, 2u);
+  EXPECT_EQ(module->symbols.entries[0].name_id, LOOM_STRING_ID_INVALID);
+  EXPECT_EQ(loom_module_find_symbol(module, target_name), target_symbol_id);
+  EXPECT_EQ(loom_module_find_symbol(module, drop_after_name),
+            LOOM_SYMBOL_ID_INVALID);
+  ASSERT_TRUE(loom_test_matrix_type_has_target(matrix_type));
+  EXPECT_EQ(loom_test_matrix_type_target(matrix_type).symbol_id,
+            target_symbol_id);
 
   loom_module_free(module);
 }
@@ -1012,6 +1078,49 @@ TEST_F(ModuleTest, ReplaceValueTypeUsesUpdatesRegisterValueType) {
   loom_module_free(module);
 }
 
+TEST_F(ModuleTest, ReplaceValueTypeUsesUpdatesParameterizedTypeSlots) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_value_id_t old_dim_id = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t new_dim_id = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_define_value(module, index_type, &old_dim_id));
+  IREE_ASSERT_OK(loom_module_define_value(module, index_type, &new_dim_id));
+
+  loom_type_t vector_type =
+      loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32,
+                          loom_dim_pack_dynamic(old_dim_id), 0);
+  loom_type_id_t vector_type_id = LOOM_TYPE_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_type_id(module, vector_type, &vector_type_id));
+  loom_type_t array_type = {};
+  IREE_ASSERT_OK(loom_test_array_type_make(
+      module, /*build_flags=*/0, vector_type_id, /*alignment=*/0,
+      loom_named_attr_slice_empty(), &array_type));
+  loom_value_id_t array_id = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_define_value(module, array_type, &array_id));
+
+  EXPECT_TRUE(loom_module_value_has_type_uses(module, old_dim_id));
+  IREE_ASSERT_OK(
+      loom_module_replace_value_type_uses(module, old_dim_id, new_dim_id));
+
+  loom_type_t replaced_array_type = loom_module_value_type(module, array_id);
+  ASSERT_TRUE(loom_test_array_type_isa(replaced_array_type));
+  loom_type_id_t replaced_vector_type_id =
+      loom_test_array_type_element_type(replaced_array_type);
+  ASSERT_LT(replaced_vector_type_id, module->types.count);
+  loom_type_t replaced_vector_type =
+      module->types.entries[replaced_vector_type_id];
+  ASSERT_TRUE(loom_type_dim_is_dynamic_at(replaced_vector_type, 0));
+  EXPECT_EQ(loom_type_dim_value_id_at(replaced_vector_type, 0), new_dim_id);
+  EXPECT_FALSE(loom_module_value_has_type_uses(module, old_dim_id));
+  EXPECT_TRUE(loom_module_value_has_type_uses(module, new_dim_id));
+
+  loom_module_free(module);
+}
+
 TEST_F(ModuleTest, ReplaceTypeValueReferencesDoesNotMutateCarriers) {
   loom_module_t* module = NULL;
   IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
@@ -1647,6 +1756,191 @@ TEST_F(ModuleTest, VerifyCanonicalAttrDictRejectsEmptyDictWithNonNullEntries) {
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_module_verify_canonical_attr_dict(module, attr));
+
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, ParameterizedAttrBuilderFreezesNestedPayloads) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_attribute_t tile = {0};
+  IREE_ASSERT_OK(loom_test_tile_attr_make(module, 16, &tile));
+  uint8_t scope_values[] = {
+      LOOM_TEST_OPTIONS_SCOPES_WORKGROUP,
+      254,
+  };
+  loom_attribute_t options = {0};
+  IREE_ASSERT_OK(loom_test_options_attr_make(
+      module,
+      LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_SCOPES |
+          LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_TILE,
+      LOOM_TEST_OPTIONS_MODE_FAST,
+      loom_make_enum_array(scope_values, IREE_ARRAYSIZE(scope_values)),
+      LOOM_TYPE_ID_INVALID, tile, loom_symbol_ref_null(), &options));
+
+  scope_values[0] = 99;
+  EXPECT_TRUE(loom_test_options_attr_isa(options));
+  EXPECT_EQ(loom_test_options_attr_mode(options), LOOM_TEST_OPTIONS_MODE_FAST);
+  ASSERT_TRUE(loom_test_options_attr_has_scopes(options));
+  loom_enum_array_t scopes = loom_test_options_attr_scopes(options);
+  ASSERT_EQ(scopes.count, 2u);
+  EXPECT_EQ(scopes.values[0], LOOM_TEST_OPTIONS_SCOPES_WORKGROUP);
+  EXPECT_EQ(scopes.values[1], 254u);
+  EXPECT_FALSE(loom_test_options_attr_has_element_type(options));
+  ASSERT_TRUE(loom_test_options_attr_has_tile(options));
+  loom_attribute_t nested_tile = loom_test_options_attr_tile(options);
+  EXPECT_TRUE(loom_test_tile_attr_isa(nested_tile));
+  EXPECT_EQ(loom_test_tile_attr_width(nested_tile), 16);
+  EXPECT_NE(loom_attr_as_parameterized_slots(nested_tile),
+            loom_attr_as_parameterized_slots(tile));
+
+  loom_string_id_t key_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("options"), &key_id));
+  loom_named_attr_t entries[] = {{
+      /*.name_id=*/key_id,
+      /*.reserved=*/0,
+      /*.value=*/options,
+  }};
+  loom_attribute_t dict = {0};
+  IREE_ASSERT_OK(loom_module_make_canonical_attr_dict(
+      module, loom_make_named_attr_slice(entries, IREE_ARRAYSIZE(entries)),
+      &dict));
+  IREE_ASSERT_OK(loom_module_verify_canonical_attr_dict(module, dict));
+
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, ParameterizedAttrPreservesOptionalPresence) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_attribute_t absent_scopes = {0};
+  IREE_ASSERT_OK(loom_test_options_attr_make(
+      module, /*build_flags=*/0, LOOM_TEST_OPTIONS_MODE_PRECISE,
+      loom_enum_array_empty(), LOOM_TYPE_ID_INVALID, loom_attr_absent(),
+      loom_symbol_ref_null(), &absent_scopes));
+  loom_attribute_t empty_scopes = {0};
+  IREE_ASSERT_OK(loom_test_options_attr_make(
+      module, LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_SCOPES,
+      LOOM_TEST_OPTIONS_MODE_PRECISE, loom_enum_array_empty(),
+      LOOM_TYPE_ID_INVALID, loom_attr_absent(), loom_symbol_ref_null(),
+      &empty_scopes));
+
+  EXPECT_FALSE(loom_test_options_attr_has_scopes(absent_scopes));
+  EXPECT_TRUE(loom_test_options_attr_has_scopes(empty_scopes));
+  EXPECT_EQ(loom_test_options_attr_scopes(empty_scopes).count, 0u);
+  EXPECT_FALSE(loom_attribute_equal(&absent_scopes, &empty_scopes));
+
+  loom_attribute_t second_empty_scopes = {0};
+  IREE_ASSERT_OK(loom_test_options_attr_make(
+      module, LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_SCOPES,
+      LOOM_TEST_OPTIONS_MODE_PRECISE, loom_enum_array_empty(),
+      LOOM_TYPE_ID_INVALID, loom_attr_absent(), loom_symbol_ref_null(),
+      &second_empty_scopes));
+  EXPECT_TRUE(loom_attribute_equal(&empty_scopes, &second_empty_scopes));
+  EXPECT_EQ(loom_attribute_hash(&empty_scopes),
+            loom_attribute_hash(&second_empty_scopes));
+
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, ParameterizedAttrRejectsMalformedSlots) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_attribute_t slots[5] = {
+      loom_attr_enum(LOOM_TEST_OPTIONS_MODE_FAST),
+      loom_attr_absent(),
+      loom_attr_absent(),
+      loom_attr_absent(),
+      loom_attr_absent(),
+  };
+  loom_attribute_t options = {0};
+  IREE_ASSERT_OK(loom_module_make_parameterized_attr(
+      module, LOOM_PARAMETERIZED_ATTR_TEST_OPTIONS, slots,
+      IREE_ARRAYSIZE(slots), &options));
+
+  slots[0] = loom_attr_absent();
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_module_make_parameterized_attr(
+                            module, LOOM_PARAMETERIZED_ATTR_TEST_OPTIONS, slots,
+                            IREE_ARRAYSIZE(slots), &options));
+  slots[0] = loom_attr_enum(99);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_module_make_parameterized_attr(
+                            module, LOOM_PARAMETERIZED_ATTR_TEST_OPTIONS, slots,
+                            IREE_ARRAYSIZE(slots), &options));
+  slots[0] = loom_attr_enum(LOOM_TEST_OPTIONS_MODE_FAST);
+  slots[3] = options;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_module_make_parameterized_attr(
+                            module, LOOM_PARAMETERIZED_ATTR_TEST_OPTIONS, slots,
+                            IREE_ARRAYSIZE(slots), &options));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_module_make_parameterized_attr(
+                            module, LOOM_PARAMETERIZED_ATTR_TEST_OPTIONS, slots,
+                            IREE_ARRAYSIZE(slots) - 1, &options));
+
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, ParameterizedTypeBuilderInternsDescriptorIndexedSlots) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_type_id_t bf16_type_id = LOOM_TYPE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_type_id(
+      module, loom_type_scalar(LOOM_SCALAR_TYPE_BF16), &bf16_type_id));
+  loom_type_t matrix_type = {0};
+  IREE_ASSERT_OK(
+      loom_test_matrix_type_make(module, /*build_flags=*/0, bf16_type_id,
+                                 LOOM_TEST_MATRIX_TYPE_SCOPE_SUBGROUP, 16,
+                                 loom_symbol_ref_null(), &matrix_type));
+  loom_type_t duplicate_type = {0};
+  IREE_ASSERT_OK(
+      loom_test_matrix_type_make(module, /*build_flags=*/0, bf16_type_id,
+                                 LOOM_TEST_MATRIX_TYPE_SCOPE_SUBGROUP, 16,
+                                 loom_symbol_ref_null(), &duplicate_type));
+
+  EXPECT_TRUE(loom_test_matrix_type_isa(matrix_type));
+  EXPECT_EQ(loom_test_matrix_type_element_type(matrix_type), bf16_type_id);
+  EXPECT_EQ(loom_test_matrix_type_scope(matrix_type),
+            LOOM_TEST_MATRIX_TYPE_SCOPE_SUBGROUP);
+  EXPECT_EQ(loom_test_matrix_type_rows(matrix_type), 16);
+  EXPECT_TRUE(loom_type_equal(matrix_type, duplicate_type));
+  EXPECT_EQ(loom_type_hash(matrix_type), loom_type_hash(duplicate_type));
+  EXPECT_EQ(loom_type_parameterized_parameters(matrix_type),
+            loom_type_parameterized_parameters(duplicate_type));
+
+  iree_host_size_t allocation_size = module->arena.used_allocation_size;
+  for (int i = 0; i < 32; ++i) {
+    loom_type_t repeated_type = {0};
+    IREE_ASSERT_OK(
+        loom_test_matrix_type_make(module, /*build_flags=*/0, bf16_type_id,
+                                   LOOM_TEST_MATRIX_TYPE_SCOPE_SUBGROUP, 16,
+                                   loom_symbol_ref_null(), &repeated_type));
+    EXPECT_EQ(loom_type_parameterized_parameters(repeated_type),
+              loom_type_parameterized_parameters(matrix_type));
+  }
+  EXPECT_EQ(module->arena.used_allocation_size, allocation_size);
+
+  loom_type_t packed_array = {0};
+  IREE_ASSERT_OK(loom_test_array_type_make(
+      module, /*build_flags=*/0, bf16_type_id, /*alignment=*/0,
+      loom_named_attr_slice_empty(), &packed_array));
+  EXPECT_FALSE(loom_test_array_type_has_alignment(packed_array));
+  loom_type_t aligned_array = {0};
+  IREE_ASSERT_OK(loom_test_array_type_make(
+      module, LOOM_TEST_ARRAY_TYPE_BUILD_FLAG_HAS_ALIGNMENT, bf16_type_id,
+      /*alignment=*/32, loom_named_attr_slice_empty(), &aligned_array));
+  EXPECT_TRUE(loom_test_array_type_has_alignment(aligned_array));
+  EXPECT_EQ(loom_test_array_type_alignment(aligned_array), 32);
 
   loom_module_free(module);
 }

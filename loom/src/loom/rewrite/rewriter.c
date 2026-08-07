@@ -483,7 +483,8 @@ static iree_status_t loom_rewriter_add_type_ref_provider_to_worklist(
 static iree_status_t loom_rewriter_add_type_ref_providers_to_worklist(
     loom_rewriter_t* rewriter, loom_type_t type) {
   return loom_type_walk_value_refs(
-      type, loom_rewriter_add_type_ref_provider_to_worklist, rewriter);
+      rewriter->module, type, loom_rewriter_add_type_ref_provider_to_worklist,
+      rewriter);
 }
 
 static iree_status_t loom_rewriter_add_subtree_operand_providers_to_worklist(

@@ -13,6 +13,7 @@ from contextlib import contextmanager
 import loom.ir as ir
 from loom.assembly import (
     COLON,
+    COMMA,
     EQUALS,
     Attr,
     BlockRef,
@@ -20,6 +21,7 @@ from loom.assembly import (
     FuncArgs,
     IndexList,
     Keyword,
+    Param,
     Ref,
     Region,
     ResultType,
@@ -33,6 +35,7 @@ from loom.dsl import (
     ADDRESS,
     ANY,
     ANY_ENCODING,
+    ATTR_TYPE_PARAMETERIZED,
     ATTR_TYPE_SYMBOL,
     BUFFER,
     BY_REFERENCE,
@@ -126,6 +129,7 @@ from loom.dsl import (
     OperandOwnershipEffect,
     OpPhase,
     PackedPayloadBitCountMatchesStorage,
+    ParameterizedAttrDef,
     PositiveBitWidthAttr,
     RanksMatch,
     Reads,
@@ -367,6 +371,64 @@ class TestAttrDef:
             AttrDef("descriptor", "scoped_enum", optional=True)
         with _raises(ValueError, match="scoped_enum attributes cannot have defaults"):
             AttrDef("descriptor", "scoped_enum", default=0)
+
+
+class TestParameterizedAttrDef:
+    def test_declares_namespaced_typed_parameters(self) -> None:
+        tile = ParameterizedAttrDef(
+            "test.tile",
+            group=Dialect("test"),
+            parameters=[AttrDef("width", "i64")],
+        )
+
+        assert tile.name == "test.tile"
+        assert tile.parameters == (AttrDef("width", "i64"),)
+
+    def test_rejects_wrong_namespace(self) -> None:
+        with _raises(ValueError, match="must begin with the owning dialect"):
+            ParameterizedAttrDef("other.tile", group=Dialect("test"))
+
+    def test_rejects_duplicate_parameters(self) -> None:
+        with _raises(ValueError, match="duplicate parameter 'width'"):
+            ParameterizedAttrDef(
+                "test.tile",
+                group=Dialect("test"),
+                parameters=[AttrDef("width", "i64"), AttrDef("width", "i64")],
+            )
+
+    def test_rejects_enclosing_operation_parameter_kinds(self) -> None:
+        with _raises(ValueError, match="unsupported kind 'scoped_enum'"):
+            ParameterizedAttrDef(
+                "test.tile",
+                group=Dialect("test"),
+                parameters=[AttrDef("scope", "scoped_enum")],
+            )
+
+    def test_nested_parameter_requires_exact_family(self) -> None:
+        with _raises(ValueError, match="requires an exact parameterized_attr"):
+            ParameterizedAttrDef(
+                "test.options",
+                group=Dialect("test"),
+                parameters=[AttrDef("tile", ATTR_TYPE_PARAMETERIZED)],
+            )
+
+    def test_nested_parameter_retains_exact_family(self) -> None:
+        dialect = Dialect("test")
+        tile = ParameterizedAttrDef("test.tile", group=dialect)
+        options = ParameterizedAttrDef(
+            "test.options",
+            group=dialect,
+            parameters=[
+                AttrDef(
+                    "tile",
+                    ATTR_TYPE_PARAMETERIZED,
+                    optional=True,
+                    parameterized_attr=tile,
+                )
+            ],
+        )
+
+        assert options.parameters[0].parameterized_attr is tile
 
 
 class TestEnumDef:
@@ -1445,6 +1507,87 @@ class TestTypeDef:
 
         assert type_def.semantic == TypeSemantic.CONTROL_TOKEN
         assert type_def.contracts == (ContractFamily.KERNEL_ASYNC,)
+
+    def test_descriptor_parameters_support_positional_and_keyed_formats(self) -> None:
+        type_def = TypeDef(
+            "test.matrix",
+            params=[AttrDef("element_type", "type"), AttrDef("rows", "i64")],
+            format=[
+                Param("element_type"),
+                COMMA,
+                kw("rows"),
+                EQUALS,
+                Param("rows"),
+            ],
+        )
+
+        assert type_def.param("rows") == AttrDef("rows", "i64")
+        assert type_def.uses_attribute_parameters
+
+    def test_descriptor_parameters_reject_mixed_storage_schemas(self) -> None:
+        from loom.dsl import TypeParam
+
+        with _raises(ValueError, match="cannot be mixed"):
+            TypeDef(
+                "test.wrapper",
+                params=[TypeParam("value"), AttrDef("mode", "i64")],
+                format=[TypeOf("value"), COMMA, Param("mode")],
+            )
+
+    def test_descriptor_parameters_share_family_schema_validation(self) -> None:
+        with _raises(ValueError, match="must be a bare ASCII identifier"):
+            TypeDef(
+                "test.wrapper",
+                params=[AttrDef("not-valid", "i64")],
+                format=[Param("not-valid")],
+            )
+
+        with _raises(ValueError, match="requires an exact parameterized_attr"):
+            TypeDef(
+                "test.wrapper",
+                params=[AttrDef("value", ATTR_TYPE_PARAMETERIZED)],
+                format=[Param("value")],
+            )
+
+        with _raises(ValueError, match="unsupported kind 'scoped_enum'"):
+            TypeDef(
+                "test.wrapper",
+                params=[AttrDef("scope", "scoped_enum")],
+                format=[Param("scope")],
+            )
+
+    def test_descriptor_parameters_require_exactly_one_format_reference(self) -> None:
+        with _raises(ValueError, match="must appear exactly once"):
+            TypeDef(
+                "test.wrapper",
+                params=[AttrDef("value", "type")],
+                format=[Param("value"), COMMA, Param("value")],
+            )
+
+        with _raises(ValueError, match="assembly format omits"):
+            TypeDef(
+                "test.wrapper",
+                params=[AttrDef("value", "type")],
+                format=[kw("empty")],
+            )
+
+    def test_param_format_requires_descriptor_parameter(self) -> None:
+        from loom.dsl import TypeParam
+
+        with _raises(ValueError, match="requires an AttrDef parameter"):
+            TypeDef(
+                "test.wrapper",
+                params=[TypeParam("value")],
+                format=[Param("value")],
+            )
+
+    def test_format_rejects_unknown_parameter(self) -> None:
+        with _raises(ValueError, match="format references unknown parameter"):
+            TypeDef(
+                "test.wrapper",
+                params=[AttrDef("value", "type")],
+                format=[Param("missing")],
+            )
 
 
 # ============================================================================

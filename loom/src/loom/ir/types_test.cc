@@ -8,6 +8,8 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/ir/context.h"
+#include "loom/ir/module.h"
 
 namespace loom {
 namespace {
@@ -126,7 +128,30 @@ static iree_status_t CaptureValueRef(loom_value_id_t value_id,
   return iree_ok_status();
 }
 
-TEST(TypesTest, RegisterValueTypeParticipatesInStructuralLifecycle) {
+class ModuleTypesTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    iree_arena_block_pool_initialize(32 * 1024, iree_allocator_system(),
+                                     &block_pool_);
+    loom_context_initialize(iree_allocator_system(), &context_);
+    IREE_ASSERT_OK(loom_context_finalize(&context_));
+    IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("types_test"),
+                                        &block_pool_, /*hints=*/NULL,
+                                        iree_allocator_system(), &module_));
+  }
+
+  void TearDown() override {
+    loom_module_free(module_);
+    loom_context_deinitialize(&context_);
+    iree_arena_block_pool_deinitialize(&block_pool_);
+  }
+
+  iree_arena_block_pool_t block_pool_;
+  loom_context_t context_;
+  loom_module_t* module_ = nullptr;
+};
+
+TEST_F(ModuleTypesTest, RegisterValueTypeParticipatesInStructuralLifecycle) {
   loom_type_t source_value_type = loom_type_shaped_1d(
       LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_dynamic(7), 0);
   loom_type_t duplicate_value_type = loom_type_shaped_1d(
@@ -159,10 +184,11 @@ TEST(TypesTest, RegisterValueTypeParticipatesInStructuralLifecycle) {
   EXPECT_FALSE(loom_type_equal(source, different));
   EXPECT_FALSE(loom_type_equal(source, loom_type_register_payload(42, 4)));
 
-  EXPECT_TRUE(loom_type_references_value(source, 7));
-  EXPECT_FALSE(loom_type_references_value(source, 9));
+  EXPECT_TRUE(loom_type_references_value(module_, source, 7));
+  EXPECT_FALSE(loom_type_references_value(module_, source, 9));
   ValueRefCapture capture = {};
-  IREE_ASSERT_OK(loom_type_walk_value_refs(source, CaptureValueRef, &capture));
+  IREE_ASSERT_OK(
+      loom_type_walk_value_refs(module_, source, CaptureValueRef, &capture));
   ASSERT_EQ(capture.count, 1u);
   EXPECT_EQ(capture.values[0], 7u);
 
@@ -173,7 +199,8 @@ TEST(TypesTest, RegisterValueTypeParticipatesInStructuralLifecycle) {
       target_values,
       IREE_ARRAYSIZE(source_values),
   };
-  EXPECT_TRUE(loom_type_equal_after_value_remap(source, target, &remap));
+  EXPECT_TRUE(
+      loom_type_equal_after_value_remap(module_, source, target, &remap));
   EXPECT_FALSE(loom_type_equal(source, target));
 }
 

@@ -521,8 +521,8 @@ bool loom_type_is_available_before_op(const loom_dominance_info_t* info,
       .before_op = before_op,
       .available = true,
   };
-  iree_status_t status =
-      loom_type_walk_value_refs(type, loom_type_availability_check_ref, &query);
+  iree_status_t status = loom_type_walk_value_refs(
+      info->module, type, loom_type_availability_check_ref, &query);
   if (!iree_status_is_ok(status)) {
     iree_status_free(status);
     return false;

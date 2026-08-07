@@ -34,8 +34,16 @@ static iree_status_t loom_op_registry_register_dialect(
   }
   IREE_RETURN_IF_ERROR(loom_context_register_dialect(
       context, registration->dialect_id, vtables, (uint16_t)count));
-  return loom_context_register_dialect_semantics(
-      context, registration->dialect_id, semantics, (uint16_t)count);
+  IREE_RETURN_IF_ERROR(loom_context_register_dialect_semantics(
+      context, registration->dialect_id, semantics, (uint16_t)count));
+
+  iree_host_size_t parameterized_attr_count = 0;
+  if (registration->parameterized_attrs_fn == NULL) return iree_ok_status();
+  const loom_parameterized_attr_descriptor_t* parameterized_attrs =
+      registration->parameterized_attrs_fn(&parameterized_attr_count);
+  return loom_context_register_parameterized_attrs(
+      context, registration->dialect_id, parameterized_attrs,
+      parameterized_attr_count);
 }
 
 iree_status_t loom_op_registry_register_all_dialects(loom_context_t* context) {

@@ -17,7 +17,12 @@ from typing import Any
 
 import pytest
 
-from loom.dialect.test.defs import test_enum_array_attrs
+from loom.dialect.test.defs import (
+    ALL_TEST_TYPES,
+    test_enum_array_attrs,
+    test_options_attr,
+    test_parameterized_attr,
+)
 from loom.format.bytecode.encoding import decode_varint, encode_varint
 from loom.format.bytecode.reader import BytecodeError, BytecodeReader, read_module
 from loom.format.bytecode.writer import (
@@ -54,6 +59,7 @@ from loom.ir import (
     FunctionType,
     Module,
     Operation,
+    ParameterizedAttr,
     Predicate,
     PredicateArg,
     Region,
@@ -518,9 +524,13 @@ class TestMalformedTypeSection:
         self,
         data: bytes,
         encodings: list[EncodingInstance] | None = None,
+        *,
+        strings: list[str] | None = None,
+        type_defs: tuple[object, ...] | None = None,
     ) -> list[Type]:
-        reader = BytecodeReader(b"")
+        reader = BytecodeReader(b"", type_defs=type_defs)
         reader._encodings = encodings or []
+        reader._strings = strings or []
         reader._read_types_section((0, data))
         return reader._types
 
@@ -673,6 +683,100 @@ class TestMalformedTypeSection:
         )
         with pytest.raises(BytecodeError, match="reserved bits"):
             self._read_types(data)
+
+    def test_unknown_parameterized_type_family_is_rejected(self) -> None:
+        data = bytes(
+            [
+                1,
+                BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.PARAMETERIZED],
+                0,  # family string id
+                0,  # present parameter count
+            ]
+        )
+        with pytest.raises(BytecodeError, match="is not registered"):
+            self._read_types(
+                data,
+                strings=["test.unknown"],
+                type_defs=ALL_TEST_TYPES,
+            )
+
+    def test_unknown_parameterized_type_parameter_is_rejected(self) -> None:
+        data = bytes(
+            [
+                1,
+                BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.PARAMETERIZED],
+                0,  # test.scope family string id
+                1,  # present parameter count
+                1,  # unknown parameter string id
+                4,  # enum attribute kind
+                2,  # subgroup
+            ]
+        )
+        with pytest.raises(BytecodeError, match="unknown parameter 'bogus'"):
+            self._read_types(
+                data,
+                strings=["test.scope", "bogus"],
+                type_defs=ALL_TEST_TYPES,
+            )
+
+    def test_parameterized_type_parameters_must_be_in_order(self) -> None:
+        data = bytes(
+            [
+                2,
+                BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.SCALAR],
+                BF16.kind.value,
+                BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.PARAMETERIZED],
+                0,  # test.matrix family string id
+                2,  # present parameter count
+                2,  # rows parameter string id
+                0,  # i64 attribute kind
+                32,  # zigzag-encoded 16
+                1,  # scope parameter string id, out of order
+                4,  # enum attribute kind
+                2,  # subgroup
+            ]
+        )
+        with pytest.raises(BytecodeError, match="not in declaration order"):
+            self._read_types(
+                data,
+                strings=["test.matrix", "scope", "rows"],
+                type_defs=ALL_TEST_TYPES,
+            )
+
+    def test_parameterized_type_requires_mandatory_parameters(self) -> None:
+        data = bytes(
+            [
+                1,
+                BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.PARAMETERIZED],
+                0,  # test.scope family string id
+                0,  # present parameter count
+            ]
+        )
+        with pytest.raises(BytecodeError, match="required parameter 'scope'"):
+            self._read_types(
+                data,
+                strings=["test.scope"],
+                type_defs=ALL_TEST_TYPES,
+            )
+
+    def test_parameterized_type_rejects_forward_type_parameter(self) -> None:
+        data = bytes(
+            [
+                1,
+                BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.PARAMETERIZED],
+                0,  # test.array family string id
+                1,  # present parameter count
+                1,  # element_type parameter string id
+                7,  # type attribute kind
+                0,  # self-reference instead of a prior type
+            ]
+        )
+        with pytest.raises(BytecodeError, match="must refer to a prior type"):
+            self._read_types(
+                data,
+                strings=["test.array", "element_type"],
+                type_defs=ALL_TEST_TYPES,
+            )
 
 
 # ============================================================================
@@ -1687,6 +1791,74 @@ class TestEnumArrayAttributeWireFormat:
 
         with pytest.raises(BytecodeError, match="descriptor-backed"):
             reader._read_attr_value(data, 0)
+
+
+class TestParameterizedAttributeWireFormat:
+    def _reader(self, strings: list[str]) -> tuple[BytecodeReader, Any]:
+        reader = BytecodeReader(
+            b"", op_decls=[test_parameterized_attr, test_enum_array_attrs]
+        )
+        reader._strings = strings
+        attr_def = reader._attr_def_for_op_attr("test.parameterized_attr", "options")
+        return reader, attr_def
+
+    def test_reads_named_slots_in_declaration_order(self) -> None:
+        reader, attr_def = self._reader(["", "test.options", "mode"])
+        data = bytes([14, 1, 1, 2, 4, 1])
+
+        value, offset = reader._read_attr_value(data, 0, attr_def=attr_def)
+
+        assert isinstance(value, ParameterizedAttr)
+        assert value.definition is test_options_attr
+        assert value.get("mode") == 1
+        assert offset == len(data)
+
+    def test_rejects_unknown_family(self) -> None:
+        reader, attr_def = self._reader(["", "test.unknown"])
+
+        with pytest.raises(BytecodeError, match="is not registered"):
+            reader._read_attr_value(bytes([14, 1, 0]), 0, attr_def=attr_def)
+
+    def test_rejects_wrong_family_for_field(self) -> None:
+        reader, attr_def = self._reader(["", "test.tile"])
+
+        with pytest.raises(BytecodeError, match="does not match field contract"):
+            reader._read_attr_value(bytes([14, 1, 0]), 0, attr_def=attr_def)
+
+    def test_rejects_parameterized_value_for_other_field_kind(self) -> None:
+        reader, _ = self._reader(["", "test.options"])
+        enum_array_def = reader._attr_def_for_op_attr(
+            "test.enum_array_attrs", "required_values"
+        )
+
+        with pytest.raises(BytecodeError, match="does not match the field contract"):
+            reader._read_attr_value(bytes([14, 1, 0]), 0, attr_def=enum_array_def)
+
+    def test_rejects_unknown_parameter(self) -> None:
+        reader, attr_def = self._reader(["", "test.options", "unknown"])
+
+        with pytest.raises(BytecodeError, match="unknown parameter"):
+            reader._read_attr_value(bytes([14, 1, 1, 2]), 0, attr_def=attr_def)
+
+    @pytest.mark.parametrize(
+        "data",
+        [
+            bytes([14, 1, 2, 2, 4, 1, 2, 4, 1]),
+            bytes([14, 1, 2, 3, 13, 0, 2, 4, 1]),
+        ],
+        ids=["duplicate", "out_of_order"],
+    )
+    def test_rejects_noncanonical_parameter_order(self, data: bytes) -> None:
+        reader, attr_def = self._reader(["", "test.options", "mode", "scopes"])
+
+        with pytest.raises(BytecodeError, match="not in declaration order"):
+            reader._read_attr_value(data, 0, attr_def=attr_def)
+
+    def test_rejects_missing_required_parameter(self) -> None:
+        reader, attr_def = self._reader(["", "test.options"])
+
+        with pytest.raises(BytecodeError, match="missing required parameter 'mode'"):
+            reader._read_attr_value(bytes([14, 1, 0]), 0, attr_def=attr_def)
 
 
 # ============================================================================

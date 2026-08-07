@@ -95,6 +95,10 @@ class TestHashAttr:
         assert _texts("#enc") == ["enc"]
         assert _texts("#q6_k") == ["q6_k"]
 
+    def test_dotted_family_name(self) -> None:
+        assert _texts("#test.options") == ["test.options"]
+        assert _kinds("#test.options") == [TokenKind.HASH_ATTR]
+
     def test_error_numeric_name(self) -> None:
         with pytest.raises(ParseError, match="expected identifier after '#'"):
             _tokens("#0")

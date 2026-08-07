@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from loom.dsl import ATTR_TYPE_FLAGS, Op
+from loom.dsl import ATTR_TYPE_FLAGS, Op, ParameterizedAttrDef
 from loom.fields import compute_layout
 from loom.gen.ops import c_builders
 from loom.gen.ops.c_enum_attrs import collect_shared_enums as _collect_shared_enums
@@ -19,12 +19,26 @@ from loom.gen.ops.c_enum_attrs import enum_case_c_ident as _enum_case_c_ident
 from loom.gen.ops.c_names import COPYRIGHT
 from loom.gen.ops.c_names import c_dialect_enum as _c_dialect_enum
 from loom.gen.ops.c_names import c_enum_name as _c_enum_name
+from loom.gen.ops.c_names import (
+    c_parameterized_attr_enum_name as _c_parameterized_attr_enum_name,
+)
+from loom.gen.ops.c_names import (
+    c_parameterized_attr_prefix as _c_parameterized_attr_prefix,
+)
 from loom.gen.ops.c_names import c_prefix as _c_prefix
 from loom.gen.ops.c_names import guard_name as _guard_name
+from loom.gen.ops.c_parameterized_attrs import (
+    generate_parameterized_attr_header_lines as _generate_parameterized_attr_header_lines,
+)
 from loom.gen.support.generated_file import line_comment_header
 
 
-def generate_ops_h(dialect_name: str, dialect_id: int, ops: Sequence[Op]) -> str:
+def generate_ops_h(
+    dialect_name: str,
+    dialect_id: int,
+    ops: Sequence[Op],
+    parameterized_attrs: Sequence[ParameterizedAttrDef] = (),
+) -> str:
     """Generates the ops.h header for a dialect."""
     lines: list[str] = []
     guard = _guard_name(dialect_name)
@@ -44,6 +58,8 @@ def generate_ops_h(dialect_name: str, dialect_id: int, ops: Sequence[Op]) -> str
     lines.append(f"#ifndef {guard}")
     lines.append(f"#define {guard}")
     lines.append("")
+    if parameterized_attrs:
+        lines.append('#include "loom/ir/parameterized_attr.h"')
     lines.append('#include "loom/ops/op_defs.h"')
     enum_includes = sorted(
         {
@@ -52,13 +68,59 @@ def generate_ops_h(dialect_name: str, dialect_id: int, ops: Sequence[Op]) -> str
             for attr_def in op.attrs
             if attr_def.attr_type in ("enum", "enum_array") and attr_def.enum_def is not None and attr_def.enum_def.c_include is not None
         }
+        | {
+            parameter.enum_def.c_include
+            for attr_def in parameterized_attrs
+            for parameter in attr_def.parameters
+            if parameter.attr_type in ("enum", "enum_array") and parameter.enum_def is not None and parameter.enum_def.c_include is not None
+        }
     )
     lines.extend(f'#include "{include}"' for include in enum_includes)
     lines.append("")
+
+    # Parameterized attribute family kind enum. Numeric local ordinals are
+    # context-local implementation details and never serialize.
+    if parameterized_attrs:
+        lines.append("enum {")
+        for index, attr_def in enumerate(parameterized_attrs):
+            lines.append(f"  {_c_parameterized_attr_enum_name(attr_def)} = LOOM_PARAMETERIZED_ATTR_KIND({dialect_enum}, {index}),")
+        lines.append(f"  LOOM_PARAMETERIZED_ATTR_{dialect_name.upper()}_COUNT_ = {len(parameterized_attrs)},")
+        lines.append("};")
+        lines.append("")
+
+    # Parameter enum C types. Attribute family parameters are not operation
+    # fields, so they deliberately use family-qualified names.
+    emitted_parameter_enums: set[int] = set()
+    for attr_def in parameterized_attrs:
+        for parameter in attr_def.parameters:
+            enum_def = parameter.enum_def
+            if parameter.attr_type not in ("enum", "enum_array") or enum_def is None or enum_def.c_type is not None or id(enum_def) in emitted_parameter_enums:
+                continue
+            emitted_parameter_enums.add(id(enum_def))
+            c_prefix = f"{_c_parameterized_attr_prefix(attr_def)}_{parameter.name}"
+            enum_tag = f"{c_prefix}_e"
+            const_prefix = c_prefix.upper()
+            max_value = max(case.value for case in enum_def.cases)
+            if enum_def.doc:
+                lines.append(f"// {enum_def.doc}")
+            if parameter.open_enum:
+                lines.append(f"typedef uint8_t {c_prefix}_t;")
+                lines.append(f"typedef enum {enum_tag} {{")
+                lines.extend(f"  {const_prefix}_{_enum_case_c_ident(case.keyword)} = {case.value}," for case in enum_def.cases)
+                lines.append(f"  {const_prefix}_COUNT_ = {max_value + 1},")
+                lines.append(f"}} {enum_tag};")
+            else:
+                lines.append(f"typedef enum {enum_tag} {{")
+                lines.extend(f"  {const_prefix}_{_enum_case_c_ident(case.keyword)} = {case.value}," for case in enum_def.cases)
+                lines.append(f"  {const_prefix}_COUNT_ = {max_value + 1},")
+                lines.append(f"}} {c_prefix}_t;")
+            lines.append("")
     lines.append("#ifdef __cplusplus")
     lines.append('extern "C" {')
     lines.append("#endif")
     lines.append("")
+
+    lines.extend(_generate_parameterized_attr_header_lines(parameterized_attrs))
 
     # Op kind enum.
     lines.append("enum {")
@@ -217,6 +279,7 @@ def generate_ops_h(dialect_name: str, dialect_id: int, ops: Sequence[Op]) -> str
                 "scoped_enum": "LOOM_DEFINE_ATTR_SCOPED_ENUM",
                 "symbol": "LOOM_DEFINE_ATTR_SYMBOL",
                 "type": "LOOM_DEFINE_ATTR_TYPE",
+                "parameterized": "LOOM_DEFINE_ATTR_PARAMETERIZED",
                 "any": "LOOM_DEFINE_ATTR_ANY",
             }
             macro = macro_map.get(attr_def.attr_type)
@@ -286,6 +349,12 @@ def generate_ops_h(dialect_name: str, dialect_id: int, ops: Sequence[Op]) -> str
     lines.append(f"loom_op_semantics_t loom_{dialect_name}_op_semantics(")
     lines.append("    loom_op_kind_t kind);")
     lines.append("")
+
+    if parameterized_attrs:
+        lines.append(f"// Returns parameterized attribute descriptors for the {dialect_name} dialect.")
+        lines.append(f"const loom_parameterized_attr_descriptor_t* loom_{dialect_name}_dialect_parameterized_attrs(")
+        lines.append("    iree_host_size_t* out_count);")
+        lines.append("")
 
     lines.append("#ifdef __cplusplus")
     lines.append("}")

@@ -12,7 +12,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from loom.dsl import Op
+from loom.dsl import Op, ParameterizedAttrDef
 
 
 @dataclass(frozen=True)
@@ -22,6 +22,7 @@ class DialectGeneration:
     dialect: Any
     ops: list[Op]
     table_shards: Sequence[tuple[Any, Sequence[Op]]] | None
+    parameterized_attrs: Sequence[ParameterizedAttrDef] = ()
 
 
 @dataclass(frozen=True)
@@ -36,9 +37,18 @@ DialectGenerationLoader = Callable[[], DialectGeneration]
 
 
 def _load_test_generation() -> DialectGeneration:
-    from loom.dialect.test import ALL_TEST_OPS, test_ops
+    from loom.dialect.test import (
+        ALL_TEST_OPS,
+        ALL_TEST_PARAMETERIZED_ATTRS,
+        test_ops,
+    )
 
-    return DialectGeneration(test_ops, list(ALL_TEST_OPS), None)
+    return DialectGeneration(
+        test_ops,
+        list(ALL_TEST_OPS),
+        None,
+        ALL_TEST_PARAMETERIZED_ATTRS,
+    )
 
 
 def _load_scalar_generation() -> DialectGeneration:
@@ -223,12 +233,14 @@ def _load_all_types() -> list[Any]:
     from loom.builtin_types import ALL_BUILTIN_TYPES
     from loom.dialect.hal import ALL_HAL_TYPES
     from loom.dialect.kernel import ALL_KERNEL_TYPES
+    from loom.dialect.test import ALL_TEST_TYPES
     from loom.target.arch.ireevm.dialect import ALL_IREEVM_TYPES
 
     return [
         *ALL_BUILTIN_TYPES,
         *ALL_HAL_TYPES,
         *ALL_KERNEL_TYPES,
+        *ALL_TEST_TYPES,
         *ALL_IREEVM_TYPES,
     ]
 

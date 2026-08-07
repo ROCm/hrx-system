@@ -1051,12 +1051,13 @@ static bool loom_canonicalize_can_rewrite_edge_type_refs_for_result(
 }
 
 static void loom_canonicalize_scan_type_for_edge_uses(
+    const loom_module_t* module,
     loom_canonicalize_edge_assume_set_t* assume_set, loom_type_t type) {
   for (uint16_t candidate_index = 0;
        candidate_index < assume_set->candidate_count; ++candidate_index) {
     loom_canonicalize_edge_assume_candidate_t* candidate =
         &assume_set->candidates[candidate_index];
-    if (loom_type_references_value(type, candidate->source)) {
+    if (loom_type_references_value(module, type, candidate->source)) {
       candidate->has_region_use = true;
     }
   }
@@ -1207,7 +1208,8 @@ static iree_status_t loom_canonicalize_scan_region_uses(
       continue;
     }
     loom_type_t result_type = loom_module_value_type(scan->module, result);
-    loom_canonicalize_scan_type_for_edge_uses(scan->assume_set, result_type);
+    loom_canonicalize_scan_type_for_edge_uses(scan->module, scan->assume_set,
+                                              result_type);
   }
   return iree_ok_status();
 }

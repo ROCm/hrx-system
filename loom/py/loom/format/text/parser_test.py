@@ -16,13 +16,23 @@ from loom.assembly import (
     LPAREN,
     RPAREN,
     OptionalGroup,
+    Param,
     Ref,
     ScopedEnumRef,
     TypeOf,
     kw,
 )
 from loom.builtin_types import ALL_BUILTIN_TYPES
-from loom.dialect.test import ALL_TEST_OPS, test_ops
+from loom.dialect.test import (
+    ALL_TEST_OPS,
+    ALL_TEST_PARAMETERIZED_ATTRS,
+    ALL_TEST_TYPES,
+    test_array_type,
+    test_matrix_type,
+    test_ops,
+    test_scope_type,
+    test_tile_attr,
+)
 from loom.dsl import ANY, AttrDef, Op, Operand, TypeDef, TypeParam
 from loom.format.bytecode.reader import read_module
 from loom.format.bytecode.writer import write_module
@@ -60,6 +70,8 @@ from loom.ir import (
     FunctionType,
     Module,
     Operation,
+    ParameterizedAttr,
+    ParameterizedType,
     RegisterType,
     ScalarType,
     ScalarTypeKind,
@@ -602,6 +614,89 @@ class TestParseDialectTypes:
             _parse_type("unknown", type_registry=self._registry())
 
 
+class TestParseDescriptorBackedTypes:
+    def _registry(self) -> dict[str, TypeDef]:
+        return {
+            type_def.name: type_def
+            for type_def in (*ALL_BUILTIN_TYPES, *ALL_TEST_TYPES)
+        }
+
+    def test_positional_parameter(self) -> None:
+        parsed = _parse_type("test.scope<subgroup>", type_registry=self._registry())
+        assert isinstance(parsed, ParameterizedType)
+        assert parsed == test_scope_type(scope="subgroup")
+        assert print_type(parsed) == "test.scope<subgroup>"
+
+    def test_mixed_positional_and_keyed_parameters(self) -> None:
+        parsed = _parse_type(
+            "test.matrix<bf16, scope = subgroup, rows = 16, target = @target>",
+            type_registry=self._registry(),
+        )
+        assert parsed == test_matrix_type(
+            element_type=BF16,
+            scope="subgroup",
+            rows=16,
+            target=SymbolName("target"),
+        )
+        assert print_type(parsed) == (
+            "test.matrix<bf16, scope = subgroup, rows = 16, target = @target>"
+        )
+
+    def test_optional_keyed_parameter(self) -> None:
+        packed = _parse_type("test.array<bf16>", type_registry=self._registry())
+        aligned = _parse_type(
+            "test.array<bf16, alignment = 16>",
+            type_registry=self._registry(),
+        )
+
+        assert packed == test_array_type(element_type=BF16)
+        assert aligned == test_array_type(element_type=BF16, alignment=16)
+
+    def test_dictionary_parameter_parses_nested_parameterized_attr(self) -> None:
+        module = Module()
+        op = _parse_op(
+            "%array = test.constant 0 : "
+            "test.array<bf16, metadata = {tile = #test.tile<width = 8>}>",
+            module=module,
+        )
+
+        parsed = module.values[op.results[0]].type
+        assert isinstance(parsed, ParameterizedType)
+        assert parsed == test_array_type(
+            element_type=BF16,
+            metadata=CanonicalAttrDict((("tile", test_tile_attr(width=8)),)),
+        )
+
+    def test_optional_float_parameter_accepts_special_value(self) -> None:
+        optional_float_type = TypeDef(
+            "test.optional_float",
+            params=[AttrDef("value", "f64", optional=True)],
+            format=[OptionalGroup([Param("value")], anchor="value")],
+        )
+        registry = self._registry()
+        registry[optional_float_type.name] = optional_float_type
+
+        parsed = _parse_type("test.optional_float<inf>", type_registry=registry)
+
+        assert isinstance(parsed, ParameterizedType)
+        assert math.isinf(parsed.get("value"))
+
+    def test_rejects_wrong_enum_domain(self) -> None:
+        with pytest.raises(ParseError, match="invalid enum value 'cluster'"):
+            _parse_type("test.scope<cluster>", type_registry=self._registry())
+
+    def test_rejects_missing_parameter(self) -> None:
+        with pytest.raises(ParseError, match="expected COMMA"):
+            _parse_type(
+                "test.matrix<bf16, scope = subgroup>",
+                type_registry=self._registry(),
+            )
+
+    def test_rejects_trailing_tokens(self) -> None:
+        with pytest.raises(ParseError, match="expected EOF"):
+            _parse_type("test.scope<subgroup extra>", type_registry=self._registry())
+
+
 # ============================================================================
 # Type round-trip: print(parse(text)) == text
 # ============================================================================
@@ -666,18 +761,19 @@ class TestTypeRoundTrip:
 
 
 def _op_parser() -> Parser:
-    """Create a parser with test ops and built-in types."""
+    """Create a parser with the complete test dialect vocabulary."""
     parser = Parser()
     parser.register_ops(ALL_TEST_OPS)
-    parser.register_types(ALL_BUILTIN_TYPES)
+    parser.register_types((*ALL_BUILTIN_TYPES, *ALL_TEST_TYPES))
+    parser.register_parameterized_attrs(ALL_TEST_PARAMETERIZED_ATTRS)
     return parser
 
 
 def _op_printer(**kwargs: Any) -> Printer:
-    """Create a printer with test ops and built-in types."""
+    """Create a printer with the complete test dialect vocabulary."""
     printer = Printer(**kwargs)
     printer.register_ops(ALL_TEST_OPS)
-    printer.register_types(ALL_BUILTIN_TYPES)
+    printer.register_types((*ALL_BUILTIN_TYPES, *ALL_TEST_TYPES))
     return printer
 
 
@@ -1276,6 +1372,8 @@ class TestParseEncodingAlias:
         parser.register_encodings(["q8_0", "dense"])
         with pytest.raises(ParseError, match="alias name shadows"):
             parser.parse("#q8_0 = #dense\n")
+        with pytest.raises(ParseError, match="alias name shadows"):
+            parser.parse("#test.options = #dense\n")
 
     def test_duplicate_alias_definition_fails(self) -> None:
         with pytest.raises(ParseError, match="duplicate encoding alias name"):
@@ -1336,6 +1434,82 @@ class TestRoundTrip:
         printed = _op_printer().print_operation(op, Module())
         assert printed == text
         assert _op_printer().print_operation(_parse_op(printed), Module()) == text
+
+    def test_parameterized_attr_prints_in_declaration_order(self) -> None:
+        op = _parse_op(
+            "test.parameterized_attr "
+            "#test.options<tile = #test.tile<width = 16>, "
+            "element_type = bf16, scopes = [subgroup, <254>], mode = fast, "
+            "target = @target>"
+        )
+        options = op.attributes["options"]
+        assert isinstance(options, ParameterizedAttr)
+        assert options.get("mode") == 1
+        assert options.get("scopes") == EnumArrayAttr([2, 254])
+        assert options.get("element_type") == BF16
+        assert isinstance(options.get("tile"), ParameterizedAttr)
+        assert options.get("target") == SymbolName("target")
+        assert _op_printer().print_operation(op, Module()) == (
+            "test.parameterized_attr "
+            "#test.options<mode = fast, scopes = [subgroup, <254>], "
+            "element_type = bf16, tile = #test.tile<width = 16>, "
+            "target = @target>"
+        )
+
+    def test_parameterized_attr_preserves_present_empty(self) -> None:
+        present = _parse_op(
+            "test.parameterized_attr #test.options<mode = fast, scopes = []>"
+        )
+        absent = _parse_op("test.parameterized_attr #test.options<mode = fast>")
+        present_options = present.attributes["options"]
+        absent_options = absent.attributes["options"]
+        assert isinstance(present_options, ParameterizedAttr)
+        assert isinstance(absent_options, ParameterizedAttr)
+        assert present_options.has("scopes")
+        assert present_options.get("scopes") == EnumArrayAttr()
+        assert not absent_options.has("scopes")
+
+    def test_parameterized_attr_nests_in_generic_dict(self) -> None:
+        text = "test.enum_array_attrs [] {options = #test.options<mode = precise>}"
+        op = _parse_op(text)
+        assert _op_printer().print_operation(op, Module()) == text
+
+    @pytest.mark.parametrize(
+        ("text", "message"),
+        [
+            (
+                "test.parameterized_attr #test.unknown<mode = fast>",
+                "unknown parameterized attribute family",
+            ),
+            (
+                "test.parameterized_attr #test.options<mode = fast, nope = 1>",
+                "unknown parameter 'nope'",
+            ),
+            (
+                "test.parameterized_attr #test.options<mode = fast, mode = precise>",
+                "duplicate parameter 'mode'",
+            ),
+            (
+                "test.parameterized_attr #test.options<scopes = []>",
+                "missing required parameter 'mode'",
+            ),
+            (
+                "test.parameterized_attr #test.options<mode = <42>>",
+                "closed and does not admit raw values",
+            ),
+            (
+                "test.parameterized_attr "
+                "#test.options<mode = fast, "
+                "tile = #test.options<mode = precise>>",
+                "expected parameterized attribute family 'test.tile'",
+            ),
+        ],
+    )
+    def test_parameterized_attr_rejects_malformed_input(
+        self, text: str, message: str
+    ) -> None:
+        with pytest.raises(ParseError, match=message):
+            _parse_op(text)
 
     def test_optional_enum_array_distinguishes_empty_from_absent(self) -> None:
         present = _parse_op("test.enum_array_attrs [] using []")
@@ -2687,26 +2861,25 @@ class TestNestedDictAttr:
         )
 
     def test_max_nested_dict_depth_is_accepted(self) -> None:
-        # The top-level AttrDict field itself is parser depth 0, so 15 nested
-        # dict values below it gives 16 total dict wrappers and is the deepest
-        # valid shape accepted by the C parser/verifier contract.
+        # The top-level AttrDict field consumes one aggregate level, so seven
+        # nested dict values below it gives the shared maximum of eight.
         module, scope = _setup_scope(("x", F32))
         op = _parse_op(
-            f"%r = test.attrs %x {{meta = {self._nested_dict_text(15)}}} : f32",
+            f"%r = test.attrs %x {{meta = {self._nested_dict_text(7)}}} : f32",
             module=module,
             scope=scope,
         )
         value = op.attributes["dict"]["meta"]
-        for index in range(14):
+        for index in range(6):
             assert isinstance(value, CanonicalAttrDict)
             value = value[f"k{index}"]
-        assert value == CanonicalAttrDict([("k14", 7)])
+        assert value == CanonicalAttrDict([("k6", 7)])
 
     def test_over_max_nested_dict_depth_is_rejected(self) -> None:
         module, scope = _setup_scope(("x", F32))
-        with pytest.raises(ParseError, match="maximum depth 16"):
+        with pytest.raises(ParseError, match="maximum depth 8"):
             _parse_op(
-                f"%r = test.attrs %x {{meta = {self._nested_dict_text(16)}}} : f32",
+                f"%r = test.attrs %x {{meta = {self._nested_dict_text(8)}}} : f32",
                 module=module,
                 scope=scope,
             )

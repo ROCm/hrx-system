@@ -323,7 +323,7 @@ static iree_status_t loom_scf_switch_verify_region_yield(
     loom_type_t yield_type =
         loom_module_value_type(module, yielded_values.values[i]);
     loom_type_t result_type = loom_module_value_type(module, results.values[i]);
-    if (loom_type_equal_after_value_remap(result_type, yield_type,
+    if (loom_type_equal_after_value_remap(module, result_type, yield_type,
                                           &yield_remap)) {
       continue;
     }

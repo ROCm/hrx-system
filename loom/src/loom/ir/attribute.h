@@ -143,6 +143,30 @@ uint8_t loom_predicate_kind_argument_count(uint8_t kind);
 
 typedef struct loom_named_attr_t loom_named_attr_t;
 
+// Context-local identity for a descriptor-backed parameterized attribute
+// family. The high byte identifies the dialect and the low byte indexes that
+// dialect's generated descriptor array. This value never serializes.
+typedef uint16_t loom_parameterized_attr_kind_t;
+
+// Sentinel used by descriptors that accept any registered parameterized
+// attribute family. Registered family kinds use dialect IDs below
+// LOOM_DIALECT_BUILTIN_COUNT_ and can never reach this value.
+#define LOOM_PARAMETERIZED_ATTR_KIND_ANY UINT16_MAX
+
+#define LOOM_PARAMETERIZED_ATTR_KIND(dialect_id, family_index)      \
+  ((loom_parameterized_attr_kind_t)(((uint16_t)(dialect_id) << 8) | \
+                                    (uint16_t)(family_index)))
+
+static inline uint8_t loom_parameterized_attr_dialect_id(
+    loom_parameterized_attr_kind_t kind) {
+  return (uint8_t)(kind >> 8);
+}
+
+static inline uint8_t loom_parameterized_attr_dialect_index(
+    loom_parameterized_attr_kind_t kind) {
+  return (uint8_t)kind;
+}
+
 // A borrowed ordered array of stable enum values.
 //
 // The descriptor of the operation field carrying the array owns the enum
@@ -161,6 +185,26 @@ static inline loom_enum_array_t loom_enum_array_empty(void) {
 static inline loom_enum_array_t loom_make_enum_array(const uint8_t* values,
                                                      iree_host_size_t count) {
   loom_enum_array_t array = {
+      /*.values=*/count > 0 ? values : NULL,
+      /*.count=*/count,
+  };
+  return array;
+}
+
+// A borrowed ordered array of signed 64-bit integers.
+typedef struct loom_i64_array_t {
+  const int64_t* values;
+  iree_host_size_t count;
+} loom_i64_array_t;
+
+static inline loom_i64_array_t loom_i64_array_empty(void) {
+  loom_i64_array_t array = {0};
+  return array;
+}
+
+static inline loom_i64_array_t loom_make_i64_array(const int64_t* values,
+                                                   iree_host_size_t count) {
+  loom_i64_array_t array = {
       /*.values=*/count > 0 ? values : NULL,
       /*.count=*/count,
   };
@@ -241,22 +285,25 @@ typedef enum loom_attr_kind_e {
   // Arena-allocated ordered stable enum values. The operation field descriptor
   // supplies the enum domain; generic dictionaries cannot carry this kind.
   LOOM_ATTR_ENUM_ARRAY = 15,
+  // Descriptor-backed parameterized value. The family kind and immutable
+  // descriptor-indexed slot payload define the concrete value.
+  LOOM_ATTR_PARAMETERIZED = 16,
   LOOM_ATTR_COUNT_,
 } loom_attr_kind_t;
 
-// Maximum supported nesting depth for DICT attribute values. This keeps
-// recursive verification, equality, and hashing bounded while still covering
-// practical metadata shapes.
-#define LOOM_ATTR_DICT_MAX_NESTING_DEPTH 16
+// Maximum supported nesting depth shared by DICT and PARAMETERIZED aggregate
+// values. This bounds recursive structural operations while covering practical
+// metadata shapes.
+#define LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH 8
 
 // A 16-byte tagged value. Used in operation trailing data, encoding
 // parameters, and anywhere a typed scalar/aggregate is needed.
 //
 // The kind tag (byte 0) determines which union member is active.
-// For I64_ARRAY, ENUM_ARRAY, and PREDICATE_LIST, the count field holds the
-// element count and the payload holds a pointer to arena-allocated storage. For
-// BYTES, reserved_1 holds the byte length and the payload holds a pointer to
-// arena-allocated immutable bytes.
+// For I64_ARRAY, ENUM_ARRAY, PREDICATE_LIST, and PARAMETERIZED, the count field
+// holds the element or parameter count and the payload holds a pointer to
+// arena-allocated storage. PARAMETERIZED uses reserved_1 for its family kind.
+// BYTES uses reserved_1 for its byte length and points to immutable bytes.
 typedef struct loom_attribute_t {
   uint8_t kind;
   uint8_t reserved_0;
@@ -274,6 +321,7 @@ typedef struct loom_attribute_t {
     uint32_t scoped_enum;
     loom_predicate_t* predicate_list;
     const loom_named_attr_t* dict_entries;
+    const struct loom_attribute_t* parameterized_slots;
     const uint8_t* bytes;
     uint64_t raw;
   };
@@ -413,6 +461,20 @@ static inline loom_attribute_t loom_make_canonical_attr_dict(
   loom_attribute_t attr = loom_attr_make_present(LOOM_ATTR_DICT);
   attr.count = (uint16_t)count;
   attr.dict_entries = count > 0 ? entries : NULL;
+  return attr;
+}
+
+// Constructs a parameterized attribute from already-canonical slot storage.
+// The slots must be in descriptor order and outlive the attribute. Use
+// loom_module_make_parameterized_attr for normal construction.
+static inline loom_attribute_t loom_make_parameterized_attr(
+    loom_parameterized_attr_kind_t family_kind, const loom_attribute_t* slots,
+    iree_host_size_t count) {
+  IREE_ASSERT(count <= UINT8_MAX);
+  loom_attribute_t attr = loom_attr_make_present(LOOM_ATTR_PARAMETERIZED);
+  attr.count = (uint16_t)count;
+  attr.reserved_1 = family_kind;
+  attr.parameterized_slots = count > 0 ? slots : NULL;
   return attr;
 }
 
@@ -570,6 +632,16 @@ static inline loom_enum_array_t loom_attr_as_enum_array(loom_attribute_t attr) {
   return loom_make_enum_array(attr.enum_array, attr.count);
 }
 
+// Returns the ordered integers of an I64_ARRAY attribute.
+//
+// An absent optional attribute reads as an empty array. Call
+// loom_attr_is_absent when presence matters.
+static inline loom_i64_array_t loom_attr_as_i64_array(loom_attribute_t attr) {
+  if (loom_attr_is_absent(attr)) return loom_i64_array_empty();
+  IREE_ASSERT(attr.kind == LOOM_ATTR_I64_ARRAY);
+  return loom_make_i64_array(attr.i64_array, attr.count);
+}
+
 // Returns the dictionary entries of a DICT attribute.
 //
 // A zero-initialized optional attribute slot is interpreted as an empty slice
@@ -580,6 +652,20 @@ static inline loom_named_attr_slice_t loom_attr_as_dict(loom_attribute_t attr) {
   }
   IREE_ASSERT(attr.kind == LOOM_ATTR_DICT);
   return loom_make_named_attr_slice(attr.dict_entries, attr.count);
+}
+
+// Returns the family kind of a PARAMETERIZED attribute.
+static inline loom_parameterized_attr_kind_t loom_attr_as_parameterized_kind(
+    loom_attribute_t attr) {
+  IREE_ASSERT(attr.kind == LOOM_ATTR_PARAMETERIZED);
+  return (loom_parameterized_attr_kind_t)attr.reserved_1;
+}
+
+// Returns the descriptor-indexed slots of a PARAMETERIZED attribute.
+static inline const loom_attribute_t* loom_attr_as_parameterized_slots(
+    loom_attribute_t attr) {
+  IREE_ASSERT(attr.kind == LOOM_ATTR_PARAMETERIZED);
+  return attr.parameterized_slots;
 }
 
 #ifdef __cplusplus

@@ -74,6 +74,7 @@ loom_cc_test(
     loom::ir
     loom::ops::op_defs
     loom::ops::test
+    loom::ops::type_registry
     loom::testing::diagnostic_matchers
     loom::util::stream
 )

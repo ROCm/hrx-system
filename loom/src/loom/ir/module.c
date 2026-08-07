@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/ir/context.h"
+#include "loom/ir/parameterized_type.h"
 
 //===----------------------------------------------------------------------===//
 // Hash function
@@ -808,10 +809,11 @@ static iree_status_t loom_module_mark_symbol_references_in_attr(
       return iree_ok_status();
     }
     case LOOM_ATTR_DICT:
-      if (dict_depth >= LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "dict attribute nesting exceeds max depth %u",
-                                (unsigned)LOOM_ATTR_DICT_MAX_NESTING_DEPTH);
+      if (dict_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "dict attribute nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
       }
       if (attr->count > 0 && !attr->dict_entries) {
         return iree_make_status(
@@ -821,6 +823,24 @@ static iree_status_t loom_module_mark_symbol_references_in_attr(
       for (uint16_t i = 0; i < attr->count; ++i) {
         IREE_RETURN_IF_ERROR(loom_module_mark_symbol_references_in_attr(
             module, &attr->dict_entries[i].value, referenced_symbols,
+            (uint8_t)(dict_depth + 1)));
+      }
+      return iree_ok_status();
+    case LOOM_ATTR_PARAMETERIZED:
+      if (dict_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameterized attribute nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
+      }
+      if (attr->count > 0 && !attr->parameterized_slots) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "non-empty parameterized attribute has a NULL slot pointer");
+      }
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_module_mark_symbol_references_in_attr(
+            module, &attr->parameterized_slots[i], referenced_symbols,
             (uint8_t)(dict_depth + 1)));
       }
       return iree_ok_status();
@@ -850,6 +870,21 @@ static iree_status_t loom_module_mark_symbol_references_in_named_attrs(
   for (iree_host_size_t i = 0; i < attr_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_module_mark_symbol_references_in_attr(
         module, &attrs[i].value, referenced_symbols, 0));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_module_mark_symbol_references_in_types(
+    const loom_module_t* module, uint8_t* referenced_symbols) {
+  for (iree_host_size_t i = 0; i < module->types.count; ++i) {
+    loom_type_t type = module->types.entries[i];
+    if (!loom_type_is_parameterized(type)) continue;
+    const loom_attribute_t* parameters =
+        loom_type_parameterized_parameters(type);
+    const uint8_t parameter_count =
+        loom_type_parameterized_parameter_count(type);
+    IREE_RETURN_IF_ERROR(loom_module_mark_symbol_references_in_attrs(
+        module, parameters, parameter_count, referenced_symbols));
   }
   return iree_ok_status();
 }
@@ -902,10 +937,11 @@ static iree_status_t loom_module_remap_symbol_attr(
       return iree_ok_status();
     }
     case LOOM_ATTR_DICT: {
-      if (dict_depth >= LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "dict attribute nesting exceeds max depth %u",
-                                (unsigned)LOOM_ATTR_DICT_MAX_NESTING_DEPTH);
+      if (dict_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "dict attribute nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
       }
       if (source_attr.count == 0) return iree_ok_status();
       if (!source_attr.dict_entries) {
@@ -934,6 +970,45 @@ static iree_status_t loom_module_remap_symbol_attr(
       if (target_entries) {
         *out_target_attr =
             loom_make_canonical_attr_dict(target_entries, source_attr.count);
+        *out_changed = true;
+      }
+      return iree_ok_status();
+    }
+    case LOOM_ATTR_PARAMETERIZED: {
+      if (dict_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameterized attribute nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
+      }
+      if (source_attr.count == 0) return iree_ok_status();
+      if (!source_attr.parameterized_slots) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "non-empty parameterized attribute has a NULL slot pointer");
+      }
+      loom_attribute_t* target_slots = NULL;
+      for (uint16_t i = 0; i < source_attr.count; ++i) {
+        loom_attribute_t target_value = {0};
+        bool value_changed = false;
+        IREE_RETURN_IF_ERROR(loom_module_remap_symbol_attr(
+            module, new_symbol_ids, old_symbol_count,
+            source_attr.parameterized_slots[i], (uint8_t)(dict_depth + 1),
+            &target_value, &value_changed));
+        if (!value_changed) continue;
+        if (!target_slots) {
+          IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+              &module->arena, source_attr.count, sizeof(*target_slots),
+              (void**)&target_slots));
+          memcpy(target_slots, source_attr.parameterized_slots,
+                 (iree_host_size_t)source_attr.count * sizeof(*target_slots));
+        }
+        target_slots[i] = target_value;
+      }
+      if (target_slots) {
+        *out_target_attr = loom_make_parameterized_attr(
+            (loom_parameterized_attr_kind_t)source_attr.reserved_1,
+            target_slots, source_attr.count);
         *out_changed = true;
       }
       return iree_ok_status();
@@ -1042,7 +1117,7 @@ iree_status_t loom_module_compact_symbols_preserving_symbol_refs(
   if (out_removed_count) *out_removed_count = 0;
   const iree_host_size_t old_symbol_count = module->symbols.count;
   if (old_symbol_count == 0) return iree_ok_status();
-  const iree_host_size_t max_preserved_symbol_id =
+  iree_host_size_t max_preserved_symbol_id =
       loom_module_max_preserved_symbol_id(
           preserved_symbol_refs, preserved_symbol_ref_count, old_symbol_count);
 
@@ -1051,6 +1126,19 @@ iree_status_t loom_module_compact_symbols_preserving_symbol_refs(
       scratch_arena, old_symbol_count, sizeof(*referenced_symbols),
       (void**)&referenced_symbols));
   memset(referenced_symbols, 0, old_symbol_count * sizeof(*referenced_symbols));
+
+  IREE_RETURN_IF_ERROR(
+      loom_module_mark_symbol_references_in_types(module, referenced_symbols));
+  // Parameterized types are immutable entries in the module type interner. A
+  // preserved ordinal prefix keeps their symbol slots valid without rebuilding
+  // that interner during symbol compaction.
+  for (iree_host_size_t i = 0; i < old_symbol_count; ++i) {
+    if (referenced_symbols[i] == 0) continue;
+    if (max_preserved_symbol_id == IREE_HOST_SIZE_MAX ||
+        i > max_preserved_symbol_id) {
+      max_preserved_symbol_id = i;
+    }
+  }
 
   IREE_RETURN_IF_ERROR(loom_module_mark_symbol_references_in_region(
       module, module->body, referenced_symbols));
@@ -1390,7 +1478,7 @@ static iree_status_t loom_type_use_prepare_for_type(
       .reference_count = 0,
   };
   IREE_RETURN_IF_ERROR(loom_type_walk_value_refs(
-      type, loom_type_use_prepare_callback, &prepare));
+      module, type, loom_type_use_prepare_callback, &prepare));
   IREE_RETURN_IF_ERROR(loom_type_use_table_ensure_record_capacity(
       &module->arena, &module->type_uses, prepare.reference_count));
   *out_reference_count = prepare.reference_count;
@@ -1527,7 +1615,8 @@ static iree_status_t loom_type_use_table_add_outgoing_for_value(
       .table = &module->type_uses,
       .user_value_id = user_value_id,
   };
-  return loom_type_walk_value_refs(type, loom_type_use_add_callback, &add);
+  return loom_type_walk_value_refs(module, type, loom_type_use_add_callback,
+                                   &add);
 }
 
 static iree_status_t loom_module_canonicalize_value_type(
@@ -1895,132 +1984,20 @@ static iree_status_t loom_module_resolve_attr_dict_key_name(
   return iree_ok_status();
 }
 
-static iree_status_t loom_module_canonicalize_attr_dict_i64_array_value(
-    loom_module_t* module, loom_attribute_t value,
-    loom_attribute_t* out_value) {
-  if (value.count == 0) {
-    value.i64_array = NULL;
-    *out_value = value;
-    return iree_ok_status();
-  }
-  if (!value.i64_array) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "non-empty dict attribute i64 array value has a NULL payload");
-  }
-
-  int64_t* values = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      &module->arena, value.count, sizeof(int64_t), (void**)&values));
-  memcpy(values, value.i64_array,
-         (iree_host_size_t)value.count * sizeof(int64_t));
-  value.i64_array = values;
-  *out_value = value;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_module_canonicalize_attr_dict_predicate_list_value(
-    loom_module_t* module, loom_attribute_t value,
-    loom_attribute_t* out_value) {
-  if (value.count == 0) {
-    value.predicate_list = NULL;
-    *out_value = value;
-    return iree_ok_status();
-  }
-  if (!value.predicate_list) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "non-empty dict attribute predicate list has a NULL payload");
-  }
-
-  loom_predicate_t* predicates = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(&module->arena, value.count,
-                                                 sizeof(loom_predicate_t),
-                                                 (void**)&predicates));
-  memcpy(predicates, value.predicate_list,
-         (iree_host_size_t)value.count * sizeof(loom_predicate_t));
-  value.predicate_list = predicates;
-  *out_value = value;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_module_canonicalize_non_dict_attr_value(
-    loom_module_t* module, loom_attribute_t value,
-    loom_attribute_t* out_value) {
-  value.reserved_0 = 0;
-  value.reserved_1 = 0;
-
-  switch ((loom_attr_kind_t)value.kind) {
-    case LOOM_ATTR_ABSENT:
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "dict attribute value is absent");
-    case LOOM_ATTR_I64:
-    case LOOM_ATTR_F64:
-    case LOOM_ATTR_BOOL:
-    case LOOM_ATTR_ENUM:
-    case LOOM_ATTR_SYMBOL:
-      *out_value = value;
-      return iree_ok_status();
-    case LOOM_ATTR_STRING:
-      if (value.string_id == LOOM_STRING_ID_INVALID ||
-          value.string_id >= module->strings.count) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "dict attribute string value id %u is out of "
-                                "range (module has %" PRIhsz " strings)",
-                                value.string_id, module->strings.count);
-      }
-      *out_value = value;
-      return iree_ok_status();
-    case LOOM_ATTR_TYPE:
-      if (value.type_id == LOOM_TYPE_ID_INVALID ||
-          value.type_id >= module->types.count) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "dict attribute type value id %u is out of "
-                                "range (module has %" PRIhsz " types)",
-                                value.type_id, module->types.count);
-      }
-      *out_value = value;
-      return iree_ok_status();
-    case LOOM_ATTR_ENCODING:
-      if (value.encoding_id == 0 ||
-          value.encoding_id > module->encodings.count) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "dict attribute encoding value id %u is out of range "
-            "(module has %" PRIhsz " encodings)",
-            (unsigned)value.encoding_id, module->encodings.count);
-      }
-      *out_value = value;
-      return iree_ok_status();
-    case LOOM_ATTR_I64_ARRAY:
-      return loom_module_canonicalize_attr_dict_i64_array_value(module, value,
-                                                                out_value);
-    case LOOM_ATTR_ENUM_ARRAY:
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "enum array attributes require a descriptor-backed operation field");
-    case LOOM_ATTR_PREDICATE_LIST:
-      return loom_module_canonicalize_attr_dict_predicate_list_value(
-          module, value, out_value);
-    case LOOM_ATTR_DICT:
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "nested dict attribute must be canonicalized by the entry walker");
-    default:
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "dict attribute value has unknown kind %u",
-                              (unsigned)value.kind);
-  }
-}
+// Aggregate values recurse through this helper with a shared hard depth bound.
+static iree_status_t loom_module_canonicalize_attr_value(
+    loom_module_t* module, const loom_attr_descriptor_t* descriptor,
+    loom_attribute_t value, iree_host_size_t depth,
+    loom_attribute_t* out_value);
 
 static iree_status_t loom_module_make_canonical_attr_dict_entries(
     loom_module_t* module, const loom_named_attr_t* entries,
     iree_host_size_t count, iree_host_size_t depth,
     loom_attribute_t* out_attr) {
-  if (depth >= LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
+  if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "dict attribute nesting exceeds max depth %u",
-                            (unsigned)LOOM_ATTR_DICT_MAX_NESTING_DEPTH);
+                            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
   }
   if (count > UINT16_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -2053,14 +2030,9 @@ static iree_status_t loom_module_make_canonical_attr_dict_entries(
         .name_id = entries[i].name_id,
         .value = {0},
     };
-    if (entries[i].value.kind == LOOM_ATTR_DICT) {
-      IREE_RETURN_IF_ERROR(loom_module_make_canonical_attr_dict_entries(
-          module, entries[i].value.dict_entries, entries[i].value.count,
-          depth + 1, &entry.value));
-    } else {
-      IREE_RETURN_IF_ERROR(loom_module_canonicalize_non_dict_attr_value(
-          module, entries[i].value, &entry.value));
-    }
+    IREE_RETURN_IF_ERROR(loom_module_canonicalize_attr_value(
+        module, /*descriptor=*/NULL, entries[i].value, depth + 1,
+        &entry.value));
 
     iree_host_size_t insert_index = canonical_count;
     while (insert_index > 0) {
@@ -2089,11 +2061,339 @@ static iree_status_t loom_module_make_canonical_attr_dict_entries(
   return iree_ok_status();
 }
 
+static iree_status_t loom_module_make_parameterized_attr_slots(
+    loom_module_t* module,
+    const loom_parameterized_attr_descriptor_t* family_descriptor,
+    const loom_attribute_t* parameters, iree_host_size_t parameter_count,
+    iree_host_size_t depth, loom_attribute_t* out_attr) {
+  if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameterized attribute nesting exceeds max depth %u",
+        (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
+  }
+  if (parameter_count != family_descriptor->parameter_count) {
+    iree_string_view_t family_name = loom_bstring_view(family_descriptor->name);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameterized attribute '%.*s' has %" PRIhsz
+                            " slots but its descriptor requires %u",
+                            (int)family_name.size, family_name.data,
+                            parameter_count,
+                            family_descriptor->parameter_count);
+  }
+  if (parameter_count > 0 && parameters == NULL) {
+    iree_string_view_t family_name = loom_bstring_view(family_descriptor->name);
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "non-empty parameterized attribute '%.*s' has a NULL slot pointer",
+        (int)family_name.size, family_name.data);
+  }
+  if (parameter_count == 0) {
+    *out_attr = loom_make_parameterized_attr(family_descriptor->kind, NULL, 0);
+    return iree_ok_status();
+  }
+
+  loom_attribute_t* canonical_slots = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      &module->arena, parameter_count, sizeof(*canonical_slots),
+      (void**)&canonical_slots));
+  for (iree_host_size_t i = 0; i < parameter_count; ++i) {
+    const loom_attr_descriptor_t* parameter_descriptor =
+        &family_descriptor->parameter_descriptors[i];
+    IREE_RETURN_IF_ERROR(loom_module_canonicalize_attr_value(
+        module, parameter_descriptor, parameters[i], depth + 1,
+        &canonical_slots[i]));
+  }
+
+  *out_attr = loom_make_parameterized_attr(family_descriptor->kind,
+                                           canonical_slots, parameter_count);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_module_validate_attr_descriptor_value(
+    const loom_attr_descriptor_t* descriptor, loom_attribute_t value) {
+  if (!descriptor) return iree_ok_status();
+  iree_string_view_t parameter_name = loom_attr_descriptor_name(descriptor);
+  if (loom_attr_is_absent(value)) {
+    if (iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPTIONAL)) {
+      return iree_ok_status();
+    }
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "required parameter '%.*s' is absent",
+                            (int)parameter_name.size, parameter_name.data);
+  }
+
+  bool kind_matches = value.kind == descriptor->attr_kind;
+  if (descriptor->attr_kind == LOOM_ATTR_ANY) {
+    kind_matches =
+        value.kind > LOOM_ATTR_ABSENT && value.kind < LOOM_ATTR_COUNT_ &&
+        value.kind != LOOM_ATTR_ANY && value.kind != LOOM_ATTR_SCOPED_ENUM &&
+        value.kind != LOOM_ATTR_ENUM_ARRAY;
+  }
+  if (!kind_matches) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter '%.*s' has attribute kind %u but requires kind %u",
+        (int)parameter_name.size, parameter_name.data, (unsigned)value.kind,
+        (unsigned)descriptor->attr_kind);
+  }
+
+  if (value.kind == LOOM_ATTR_ENUM &&
+      !iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM) &&
+      !loom_attr_descriptor_has_enum_case(descriptor,
+                                          loom_attr_as_enum(value))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter '%.*s' has undeclared enum value %u",
+                            (int)parameter_name.size, parameter_name.data,
+                            loom_attr_as_enum(value));
+  }
+  if (value.kind == LOOM_ATTR_ENUM_ARRAY &&
+      !iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM)) {
+    if (value.count > 0 && value.enum_array == NULL) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "non-empty enum array parameter '%.*s' has a NULL payload",
+          (int)parameter_name.size, parameter_name.data);
+    }
+    for (uint16_t i = 0; i < value.count; ++i) {
+      if (loom_attr_descriptor_has_enum_case(descriptor, value.enum_array[i])) {
+        continue;
+      }
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "parameter '%.*s' has undeclared enum array value %u",
+          (int)parameter_name.size, parameter_name.data, value.enum_array[i]);
+    }
+  }
+  if (value.kind == LOOM_ATTR_PARAMETERIZED &&
+      descriptor->reference.parameterized_attr_kind !=
+          LOOM_PARAMETERIZED_ATTR_KIND_ANY &&
+      value.reserved_1 != descriptor->reference.parameterized_attr_kind) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter '%.*s' has parameterized family kind %u but requires %u",
+        (int)parameter_name.size, parameter_name.data,
+        (unsigned)value.reserved_1,
+        (unsigned)descriptor->reference.parameterized_attr_kind);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_module_canonicalize_attr_value(
+    loom_module_t* module, const loom_attr_descriptor_t* descriptor,
+    loom_attribute_t value, iree_host_size_t depth,
+    loom_attribute_t* out_value) {
+  IREE_RETURN_IF_ERROR(
+      loom_module_validate_attr_descriptor_value(descriptor, value));
+  if (loom_attr_is_absent(value)) {
+    if (descriptor == NULL) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "generic attribute value is absent");
+    }
+    *out_value = loom_attr_absent();
+    return iree_ok_status();
+  }
+
+  switch ((loom_attr_kind_t)value.kind) {
+    case LOOM_ATTR_ABSENT:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "attribute value is absent");
+    case LOOM_ATTR_I64:
+      *out_value = loom_attr_i64(value.i64);
+      return iree_ok_status();
+    case LOOM_ATTR_F64:
+      *out_value = loom_attr_f64(value.f64);
+      return iree_ok_status();
+    case LOOM_ATTR_STRING:
+      if (value.string_id == LOOM_STRING_ID_INVALID ||
+          value.string_id >= module->strings.count) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "attribute string value id %u is out of range "
+                                "(module has %" PRIhsz " strings)",
+                                value.string_id, module->strings.count);
+      }
+      *out_value = loom_attr_string(value.string_id);
+      return iree_ok_status();
+    case LOOM_ATTR_BOOL: {
+      if (value.raw > 1) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "boolean attribute payload is %" PRIu64
+                                ", expected 0 or 1",
+                                value.raw);
+      }
+      *out_value = loom_attr_bool(value.raw != 0);
+      return iree_ok_status();
+    }
+    case LOOM_ATTR_ENUM:
+      if (value.raw > UINT8_MAX) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "enum attribute payload is %" PRIu64
+                                ", exceeding the uint8_t domain",
+                                value.raw);
+      }
+      *out_value = loom_attr_enum((uint8_t)value.raw);
+      return iree_ok_status();
+    case LOOM_ATTR_I64_ARRAY: {
+      if (value.count == 0) {
+        *out_value = loom_attr_i64_array(NULL, 0);
+        return iree_ok_status();
+      }
+      if (value.i64_array == NULL) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "non-empty i64 array attribute has a NULL payload");
+      }
+      int64_t* values = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          &module->arena, value.count, sizeof(*values), (void**)&values));
+      memcpy(values, value.i64_array,
+             (iree_host_size_t)value.count * sizeof(*values));
+      *out_value = loom_attr_i64_array(values, value.count);
+      return iree_ok_status();
+    }
+    case LOOM_ATTR_SYMBOL:
+      *out_value = loom_attr_symbol(value.symbol);
+      return iree_ok_status();
+    case LOOM_ATTR_TYPE:
+      if (value.type_id == LOOM_TYPE_ID_INVALID ||
+          value.type_id >= module->types.count) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "attribute type value id %u is out of range "
+                                "(module has %" PRIhsz " types)",
+                                value.type_id, module->types.count);
+      }
+      *out_value = loom_attr_type(value.type_id);
+      return iree_ok_status();
+    case LOOM_ATTR_PREDICATE_LIST: {
+      if (value.count == 0) {
+        *out_value = loom_attr_predicate_list(NULL, 0);
+        return iree_ok_status();
+      }
+      if (value.predicate_list == NULL) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "non-empty predicate list attribute has a NULL payload");
+      }
+      loom_predicate_t* predicates = NULL;
+      IREE_RETURN_IF_ERROR(
+          iree_arena_allocate_array(&module->arena, value.count,
+                                    sizeof(*predicates), (void**)&predicates));
+      memcpy(predicates, value.predicate_list,
+             (iree_host_size_t)value.count * sizeof(*predicates));
+      *out_value = loom_attr_predicate_list(predicates, value.count);
+      return iree_ok_status();
+    }
+    case LOOM_ATTR_DICT:
+      return loom_module_make_canonical_attr_dict_entries(
+          module, value.dict_entries, value.count, depth, out_value);
+    case LOOM_ATTR_ENCODING:
+      if (value.encoding_id == 0 ||
+          value.encoding_id > module->encodings.count) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "attribute encoding value id %u is out of range "
+            "(module has %" PRIhsz " encodings)",
+            (unsigned)value.encoding_id, module->encodings.count);
+      }
+      *out_value = loom_attr_encoding((uint16_t)value.encoding_id);
+      return iree_ok_status();
+    case LOOM_ATTR_BYTES: {
+      if (value.reserved_1 == 0) {
+        *out_value = loom_attr_bytes(NULL, 0);
+        return iree_ok_status();
+      }
+      if (value.bytes == NULL) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "non-empty bytes attribute has a NULL payload");
+      }
+      uint8_t* bytes = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(&module->arena, value.reserved_1,
+                                               (void**)&bytes));
+      memcpy(bytes, value.bytes, value.reserved_1);
+      *out_value = loom_attr_bytes(bytes, value.reserved_1);
+      return iree_ok_status();
+    }
+    case LOOM_ATTR_SCOPED_ENUM:
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "representation-scoped enum is not a generic attribute value");
+    case LOOM_ATTR_ANY:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "ANY is a descriptor kind, not an attribute");
+    case LOOM_ATTR_ENUM_ARRAY: {
+      if (descriptor == NULL) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "enum array attributes require a descriptor-backed field");
+      }
+      if (value.count == 0) {
+        *out_value = loom_attr_enum_array(NULL, 0);
+        return iree_ok_status();
+      }
+      if (value.enum_array == NULL) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "non-empty enum array attribute has a NULL payload");
+      }
+      uint8_t* values = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          &module->arena, value.count, sizeof(*values), (void**)&values));
+      memcpy(values, value.enum_array,
+             (iree_host_size_t)value.count * sizeof(*values));
+      *out_value = loom_attr_enum_array(values, value.count);
+      return iree_ok_status();
+    }
+    case LOOM_ATTR_PARAMETERIZED: {
+      if (value.reserved_1 > UINT16_MAX) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameterized attribute family kind %u exceeds uint16_t",
+            (unsigned)value.reserved_1);
+      }
+      const loom_parameterized_attr_descriptor_t* family_descriptor =
+          loom_context_resolve_parameterized_attr(
+              module->context,
+              (loom_parameterized_attr_kind_t)value.reserved_1);
+      if (family_descriptor == NULL) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameterized attribute family kind %u is not registered",
+            (unsigned)value.reserved_1);
+      }
+      return loom_module_make_parameterized_attr_slots(
+          module, family_descriptor, value.parameterized_slots, value.count,
+          depth, out_value);
+    }
+    case LOOM_ATTR_COUNT_:
+      break;
+  }
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "attribute value has unknown kind %u",
+                          (unsigned)value.kind);
+}
+
 iree_status_t loom_module_make_canonical_attr_dict(
     loom_module_t* module, loom_named_attr_slice_t entries,
     loom_attribute_t* out_attr) {
   return loom_module_make_canonical_attr_dict_entries(
       module, entries.entries, entries.count, 0, out_attr);
+}
+
+iree_status_t loom_module_make_parameterized_attr(
+    loom_module_t* module, loom_parameterized_attr_kind_t family_kind,
+    const loom_attribute_t* parameters, iree_host_size_t parameter_count,
+    loom_attribute_t* out_attr) {
+  const loom_parameterized_attr_descriptor_t* family_descriptor =
+      loom_context_resolve_parameterized_attr(module->context, family_kind);
+  if (family_descriptor == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameterized attribute family kind %u is not registered",
+        (unsigned)family_kind);
+  }
+  return loom_module_make_parameterized_attr_slots(module, family_descriptor,
+                                                   parameters, parameter_count,
+                                                   /*depth=*/0, out_attr);
 }
 
 iree_status_t loom_module_replace_canonical_attr_dict(
@@ -2187,14 +2487,9 @@ iree_status_t loom_module_replace_canonical_attr_dict(
     }
 
     loom_attribute_t canonical_value = {0};
-    if (update->value.kind == LOOM_ATTR_DICT) {
-      IREE_RETURN_IF_ERROR(loom_module_make_canonical_attr_dict_entries(
-          module, update->value.dict_entries, update->value.count,
-          /*depth=*/1, &canonical_value));
-    } else {
-      IREE_RETURN_IF_ERROR(loom_module_canonicalize_non_dict_attr_value(
-          module, update->value, &canonical_value));
-    }
+    IREE_RETURN_IF_ERROR(loom_module_canonicalize_attr_value(
+        module, /*descriptor=*/NULL, update->value, /*depth=*/1,
+        &canonical_value));
     if (found_existing) {
       merged_entries[entry_index].value = canonical_value;
       merged_entries[entry_index].reserved = 0;
@@ -2226,173 +2521,245 @@ static iree_status_t loom_module_verify_canonical_attr_header(
   return iree_ok_status();
 }
 
-static iree_status_t loom_module_verify_canonical_attr_dict_i64_array_value(
-    const loom_attribute_t* value) {
-  if (value->count > 0 && !value->i64_array) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "non-empty dict attribute i64 array value has a NULL payload");
+static iree_status_t loom_module_verify_canonical_attr_value(
+    const loom_module_t* module, const loom_attr_descriptor_t* descriptor,
+    const loom_attribute_t* value, iree_host_size_t depth) {
+  IREE_RETURN_IF_ERROR(
+      loom_module_validate_attr_descriptor_value(descriptor, *value));
+  if (loom_attr_is_absent(*value)) {
+    if (descriptor == NULL) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "generic attribute value is absent");
+    }
+    return iree_ok_status();
   }
-  if (value->count == 0 && value->i64_array != NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "empty dict attribute i64 array value must use a NULL payload");
-  }
-  return iree_ok_status();
-}
 
-static iree_status_t
-loom_module_verify_canonical_attr_dict_predicate_list_value(
-    const loom_attribute_t* value) {
-  if (value->count > 0 && !value->predicate_list) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "non-empty dict attribute predicate list has a NULL payload");
+  if (value->reserved_0 != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "attribute value has non-zero reserved bits");
   }
-  if (value->count == 0 && value->predicate_list != NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "empty dict attribute predicate list must use a NULL payload");
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_module_verify_non_dict_attr_value(
-    const loom_module_t* module, const loom_attribute_t* value) {
-  IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_header(
-      value, IREE_SV("dict attribute value")));
-
   switch ((loom_attr_kind_t)value->kind) {
     case LOOM_ATTR_ABSENT:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "dict attribute value is absent");
+                              "attribute value is absent");
     case LOOM_ATTR_I64:
     case LOOM_ATTR_F64:
-    case LOOM_ATTR_BOOL:
-    case LOOM_ATTR_ENUM:
     case LOOM_ATTR_SYMBOL:
+      return loom_module_verify_canonical_attr_header(
+          value, IREE_SV("attribute value"));
+    case LOOM_ATTR_BOOL: {
+      IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_header(
+          value, IREE_SV("boolean attribute")));
+      if (value->raw > 1) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "boolean attribute payload is %" PRIu64
+                                ", expected 0 or 1",
+                                value->raw);
+      }
       return iree_ok_status();
-    case LOOM_ATTR_STRING:
+    }
+    case LOOM_ATTR_ENUM: {
+      IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_header(
+          value, IREE_SV("enum attribute")));
+      if (value->raw > UINT8_MAX) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "enum attribute payload is %" PRIu64
+                                ", exceeding the uint8_t domain",
+                                value->raw);
+      }
+      return iree_ok_status();
+    }
+    case LOOM_ATTR_STRING: {
+      IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_header(
+          value, IREE_SV("string attribute")));
       if (value->string_id == LOOM_STRING_ID_INVALID ||
           value->string_id >= module->strings.count) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "dict attribute string value id %u is out of "
-                                "range (module has %" PRIhsz " strings)",
+                                "attribute string value id %u is out of range "
+                                "(module has %" PRIhsz " strings)",
                                 value->string_id, module->strings.count);
       }
       return iree_ok_status();
-    case LOOM_ATTR_TYPE:
+    }
+    case LOOM_ATTR_TYPE: {
+      IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_header(
+          value, IREE_SV("type attribute")));
       if (value->type_id == LOOM_TYPE_ID_INVALID ||
           value->type_id >= module->types.count) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "dict attribute type value id %u is out of "
-                                "range (module has %" PRIhsz " types)",
+                                "attribute type value id %u is out of range "
+                                "(module has %" PRIhsz " types)",
                                 value->type_id, module->types.count);
       }
       return iree_ok_status();
-    case LOOM_ATTR_ENCODING:
+    }
+    case LOOM_ATTR_ENCODING: {
+      IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_header(
+          value, IREE_SV("encoding attribute")));
       if (value->encoding_id == 0 ||
           value->encoding_id > module->encodings.count) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
-            "dict attribute encoding value id %u is out of range "
+            "attribute encoding value id %u is out of range "
             "(module has %" PRIhsz " encodings)",
             (unsigned)value->encoding_id, module->encodings.count);
       }
       return iree_ok_status();
-    case LOOM_ATTR_I64_ARRAY:
-      return loom_module_verify_canonical_attr_dict_i64_array_value(value);
-    case LOOM_ATTR_ENUM_ARRAY:
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "enum array attributes require a descriptor-backed operation field");
-    case LOOM_ATTR_PREDICATE_LIST:
-      return loom_module_verify_canonical_attr_dict_predicate_list_value(value);
-    case LOOM_ATTR_DICT:
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "nested dict attribute must be verified by the entry walker");
-    default:
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "dict attribute value has unknown kind %u",
-                              (unsigned)value->kind);
-  }
-}
-
-static iree_status_t loom_module_verify_canonical_attr_dict_entries(
-    const loom_module_t* module, const loom_attribute_t* attr,
-    iree_host_size_t depth) {
-  if (attr->kind != LOOM_ATTR_DICT) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "expected a DICT attribute, got kind %u",
-                            (unsigned)attr->kind);
-  }
-  IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_header(
-      attr, IREE_SV("dict attribute")));
-  if (depth >= LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "dict attribute nesting exceeds max depth %u",
-                            (unsigned)LOOM_ATTR_DICT_MAX_NESTING_DEPTH);
-  }
-  if (attr->count == 0) {
-    if (attr->dict_entries != NULL) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "empty dict attribute must use a NULL entry pointer");
     }
-    return iree_ok_status();
-  }
-  if (!attr->dict_entries) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "non-empty dict attribute has a NULL entry pointer");
-  }
-
-  iree_string_view_t previous_key_name = iree_string_view_empty();
-  for (uint16_t i = 0; i < attr->count; ++i) {
-    const loom_named_attr_t* entry = &attr->dict_entries[i];
-    if (entry->reserved != 0) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "dict attribute entry %u has non-zero reserved bits", i);
-    }
-
-    iree_string_view_t key_name = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_module_resolve_attr_dict_key_name(
-        module, entry->name_id, &key_name));
-    if (i > 0) {
-      int comparison = iree_string_view_compare(key_name, previous_key_name);
-      if (comparison == 0) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "duplicate dict attribute key '%.*s'",
-                                (int)key_name.size, key_name.data);
-      }
-      if (comparison < 0) {
+    case LOOM_ATTR_I64_ARRAY: {
+      IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_header(
+          value, IREE_SV("i64 array attribute")));
+      if ((value->count > 0) != (value->i64_array != NULL)) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
-            "dict attribute key '%.*s' appears after '%.*s' out of canonical "
-            "order",
-            (int)key_name.size, key_name.data, (int)previous_key_name.size,
-            previous_key_name.data);
+            "i64 array attribute pointer does not match its element count");
       }
+      return iree_ok_status();
     }
-
-    if (entry->value.kind == LOOM_ATTR_DICT) {
-      IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_dict_entries(
-          module, &entry->value, depth + 1));
-    } else {
-      IREE_RETURN_IF_ERROR(
-          loom_module_verify_non_dict_attr_value(module, &entry->value));
+    case LOOM_ATTR_PREDICATE_LIST: {
+      IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_header(
+          value, IREE_SV("predicate list attribute")));
+      if ((value->count > 0) != (value->predicate_list != NULL)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "predicate list attribute pointer does not match its count");
+      }
+      return iree_ok_status();
     }
-    previous_key_name = key_name;
+    case LOOM_ATTR_ENUM_ARRAY: {
+      IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_header(
+          value, IREE_SV("enum array attribute")));
+      if (descriptor == NULL) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "enum array attributes require a descriptor-backed field");
+      }
+      if ((value->count > 0) != (value->enum_array != NULL)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "enum array attribute pointer does not match its element count");
+      }
+      return iree_ok_status();
+    }
+    case LOOM_ATTR_BYTES:
+      if (value->count != 0) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "bytes attribute has a non-zero count field");
+      }
+      if ((value->reserved_1 > 0) != (value->bytes != NULL)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "bytes attribute pointer does not match its byte length");
+      }
+      return iree_ok_status();
+    case LOOM_ATTR_DICT: {
+      IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_header(
+          value, IREE_SV("dict attribute")));
+      if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "aggregate attribute nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
+      }
+      if ((value->count > 0) != (value->dict_entries != NULL)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "dict attribute pointer does not match its entry count");
+      }
+      iree_string_view_t previous_key_name = iree_string_view_empty();
+      for (uint16_t i = 0; i < value->count; ++i) {
+        const loom_named_attr_t* entry = &value->dict_entries[i];
+        if (entry->reserved != 0) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "dict attribute entry %u has non-zero reserved bits", i);
+        }
+        iree_string_view_t key_name = iree_string_view_empty();
+        IREE_RETURN_IF_ERROR(loom_module_resolve_attr_dict_key_name(
+            module, entry->name_id, &key_name));
+        if (i > 0) {
+          int comparison =
+              iree_string_view_compare(key_name, previous_key_name);
+          if (comparison == 0) {
+            return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                    "duplicate dict attribute key '%.*s'",
+                                    (int)key_name.size, key_name.data);
+          }
+          if (comparison < 0) {
+            return iree_make_status(
+                IREE_STATUS_INVALID_ARGUMENT,
+                "dict attribute key '%.*s' appears after '%.*s' out of "
+                "canonical order",
+                (int)key_name.size, key_name.data, (int)previous_key_name.size,
+                previous_key_name.data);
+          }
+        }
+        IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_value(
+            module, /*descriptor=*/NULL, &entry->value, depth + 1));
+        previous_key_name = key_name;
+      }
+      return iree_ok_status();
+    }
+    case LOOM_ATTR_PARAMETERIZED: {
+      if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "aggregate attribute nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
+      }
+      const loom_parameterized_attr_descriptor_t* family_descriptor =
+          loom_context_resolve_parameterized_attr(
+              module->context,
+              (loom_parameterized_attr_kind_t)value->reserved_1);
+      if (family_descriptor == NULL) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameterized attribute family kind %u is not registered",
+            (unsigned)value->reserved_1);
+      }
+      if (value->count != family_descriptor->parameter_count) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameterized attribute has %u slots but its descriptor "
+            "requires %u",
+            value->count, family_descriptor->parameter_count);
+      }
+      if ((value->count > 0) != (value->parameterized_slots != NULL)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameterized attribute pointer does not match its slot count");
+      }
+      for (uint16_t i = 0; i < value->count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_value(
+            module, &family_descriptor->parameter_descriptors[i],
+            &value->parameterized_slots[i], depth + 1));
+      }
+      return iree_ok_status();
+    }
+    case LOOM_ATTR_SCOPED_ENUM:
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "representation-scoped enum is not a generic attribute value");
+    case LOOM_ATTR_ANY:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "ANY is a descriptor kind, not an attribute");
+    case LOOM_ATTR_COUNT_:
+      break;
   }
-
-  return iree_ok_status();
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "attribute value has unknown kind %u",
+                          (unsigned)value->kind);
 }
 
 iree_status_t loom_module_verify_canonical_attr_dict(
     const loom_module_t* module, loom_attribute_t attr) {
-  return loom_module_verify_canonical_attr_dict_entries(module, &attr, 0);
+  if (attr.kind != LOOM_ATTR_DICT) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "expected a DICT attribute, got kind %u",
+                            (unsigned)attr.kind);
+  }
+  return loom_module_verify_canonical_attr_value(module, /*descriptor=*/NULL,
+                                                 &attr, /*depth=*/0);
 }
 
 //===----------------------------------------------------------------------===//
@@ -2575,6 +2942,44 @@ static iree_status_t loom_module_clone_type_payload(loom_module_t* module,
       return iree_ok_status();
     }
 
+    case LOOM_TYPE_PARAMETERIZED: {
+      const loom_parameterized_type_descriptor_t* descriptor =
+          loom_type_parameterized_descriptor(type);
+      if (!descriptor) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameterized type has a NULL family descriptor");
+      }
+      uint8_t parameter_count = loom_type_parameterized_parameter_count(type);
+      if (parameter_count != descriptor->parameter_count) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameterized type has %u slots but its descriptor requires %u",
+            parameter_count, descriptor->parameter_count);
+      }
+      const loom_attribute_t* parameters =
+          loom_type_parameterized_parameters(type);
+      if (parameter_count > 0 && !parameters) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "non-empty parameterized type has a NULL slot pointer");
+      }
+      loom_attribute_t* cloned_parameters = NULL;
+      if (parameter_count > 0) {
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            &module->arena, parameter_count, sizeof(*cloned_parameters),
+            (void**)&cloned_parameters));
+        for (uint8_t i = 0; i < parameter_count; ++i) {
+          IREE_RETURN_IF_ERROR(loom_module_canonicalize_attr_value(
+              module, &descriptor->parameter_descriptors[i], parameters[i],
+              /*depth=*/1, &cloned_parameters[i]));
+        }
+      }
+      *out_type = loom_type_parameterized(descriptor, parameter_count,
+                                          cloned_parameters);
+      return iree_ok_status();
+    }
+
     case LOOM_TYPE_REGISTER: {
       const loom_register_type_data_t* source_data =
           loom_type_register_data(type);
@@ -2635,7 +3040,8 @@ static iree_status_t loom_module_intern_type_impl(
     loom_module_t* module, uint32_t hash, loom_intern_equal_fn_t equal_fn,
     const void* equal_context, loom_module_type_clone_fn_t clone_fn,
     const void* clone_context, loom_type_t* out_interned_type,
-    loom_type_id_t* out_type_id) {
+    loom_type_id_t* out_type_id, bool* out_miss) {
+  if (out_miss) *out_miss = false;
   uint32_t existing_index = loom_intern_table_lookup(&module->type_intern, hash,
                                                      equal_fn, equal_context);
   if (existing_index != UINT32_MAX) {
@@ -2643,6 +3049,7 @@ static iree_status_t loom_module_intern_type_impl(
     if (out_type_id) *out_type_id = (loom_type_id_t)existing_index;
     return iree_ok_status();
   }
+  if (out_miss) *out_miss = true;
 
   // Type interner slots use 32-bit indices with UINT32_MAX as the empty
   // sentinel in loom_intern_table_t. Reject a new unique type before that
@@ -2677,6 +3084,14 @@ static iree_status_t loom_module_intern_type_impl(
   module->types.count++;
   *out_interned_type = type;
   if (out_type_id) *out_type_id = (loom_type_id_t)new_index;
+  return iree_ok_status();
+}
+
+// Retains a module-owned type candidate by value on an interner miss.
+static iree_status_t loom_module_retain_type_from_context(
+    loom_module_t* module, const void* clone_context, loom_type_t* out_type) {
+  (void)module;
+  *out_type = *(const loom_type_t*)clone_context;
   return iree_ok_status();
 }
 
@@ -2752,7 +3167,8 @@ static iree_status_t loom_module_intern_type_with_dependencies(
   return loom_module_intern_type_impl(module, hash, loom_type_equal_fn,
                                       &equal_context,
                                       loom_module_clone_type_from_context,
-                                      &type, out_interned_type, out_type_id);
+                                      &type, out_interned_type, out_type_id,
+                                      /*out_miss=*/NULL);
 }
 
 static iree_status_t loom_module_intern_function_type_dependencies(
@@ -2790,6 +3206,64 @@ iree_status_t loom_module_intern_type_id(loom_module_t* module,
                                                    out_type_id);
 }
 
+iree_status_t loom_module_make_parameterized_type(
+    loom_module_t* module,
+    const loom_parameterized_type_descriptor_t* descriptor,
+    const loom_attribute_t* parameters, iree_host_size_t parameter_count,
+    loom_type_t* out_type) {
+  if (!descriptor) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameterized type descriptor is NULL");
+  }
+  if (parameter_count != descriptor->parameter_count) {
+    iree_string_view_t type_name = loom_bstring_view(descriptor->name);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameterized type '%.*s' has %" PRIhsz
+                            " slots but its descriptor requires %u",
+                            (int)type_name.size, type_name.data,
+                            parameter_count, descriptor->parameter_count);
+  }
+  if (parameter_count > 0 && !parameters) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "non-empty parameterized type has a NULL slot pointer");
+  }
+
+  iree_arena_checkpoint_t checkpoint =
+      iree_arena_checkpoint_save(&module->arena);
+  loom_attribute_t* canonical_parameters = NULL;
+  iree_status_t status = iree_ok_status();
+  if (parameter_count > 0) {
+    status = iree_arena_allocate_array(&module->arena, parameter_count,
+                                       sizeof(*canonical_parameters),
+                                       (void**)&canonical_parameters);
+    for (iree_host_size_t i = 0;
+         i < parameter_count && iree_status_is_ok(status); ++i) {
+      status = loom_module_canonicalize_attr_value(
+          module, &descriptor->parameter_descriptors[i], parameters[i],
+          /*depth=*/1, &canonical_parameters[i]);
+    }
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_arena_checkpoint_restore(&checkpoint);
+    return status;
+  }
+
+  loom_type_t type = loom_type_parameterized(
+      descriptor, (uint8_t)parameter_count, canonical_parameters);
+  uint32_t hash = loom_type_hash(type);
+  loom_type_equal_context_t equal_context = {module, type};
+  bool interner_miss = false;
+  status = loom_module_intern_type_impl(
+      module, hash, loom_type_equal_fn, &equal_context,
+      loom_module_retain_type_from_context, &type, out_type,
+      /*out_type_id=*/NULL, &interner_miss);
+  if (!iree_status_is_ok(status) || !interner_miss) {
+    iree_arena_checkpoint_restore(&checkpoint);
+  }
+  return status;
+}
+
 iree_status_t loom_module_intern_function_type(loom_module_t* module,
                                                const loom_type_t* arg_types,
                                                uint16_t arg_count,
@@ -2820,7 +3294,7 @@ iree_status_t loom_module_intern_function_type(loom_module_t* module,
   return loom_module_intern_type_impl(
       module, hash, loom_function_type_equal_fn, &equal_context,
       loom_module_clone_function_type_from_context, &equal_context,
-      out_interned_type, /*out_type_id=*/NULL);
+      out_interned_type, /*out_type_id=*/NULL, /*out_miss=*/NULL);
 }
 
 iree_status_t loom_module_intern_register_type(loom_module_t* module,
@@ -2836,6 +3310,242 @@ iree_status_t loom_module_intern_register_type(loom_module_t* module,
   return loom_module_intern_type(
       module, loom_type_register_payload_with_value_type(&data),
       out_interned_type);
+}
+
+//===----------------------------------------------------------------------===//
+// Attribute SSA reference walking
+//===----------------------------------------------------------------------===//
+
+static iree_status_t loom_module_walk_attribute_value_refs_impl(
+    const loom_module_t* module, loom_attribute_t attr, uint8_t depth,
+    loom_type_value_ref_callback_t callback, void* user_data) {
+  switch ((loom_attr_kind_t)attr.kind) {
+    case LOOM_ATTR_TYPE:
+      if (attr.type_id == LOOM_TYPE_ID_INVALID ||
+          attr.type_id >= module->types.count) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "type attribute id %u is out of range (module has %" PRIhsz
+            " types)",
+            (unsigned)attr.type_id, module->types.count);
+      }
+      return loom_type_walk_value_refs(
+          module, module->types.entries[attr.type_id], callback, user_data);
+
+    case LOOM_ATTR_PREDICATE_LIST:
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        const loom_predicate_t* predicate = &attr.predicate_list[i];
+        for (uint8_t j = 0; j < predicate->arg_count; ++j) {
+          if (predicate->arg_tags[j] != LOOM_PRED_ARG_VALUE) continue;
+          IREE_RETURN_IF_ERROR(
+              callback((loom_value_id_t)predicate->args[j], user_data));
+        }
+      }
+      return iree_ok_status();
+
+    case LOOM_ATTR_DICT:
+      if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "aggregate attribute nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
+      }
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_module_walk_attribute_value_refs_impl(
+            module, attr.dict_entries[i].value, (uint8_t)(depth + 1), callback,
+            user_data));
+      }
+      return iree_ok_status();
+
+    case LOOM_ATTR_PARAMETERIZED:
+      if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "aggregate attribute nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
+      }
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_module_walk_attribute_value_refs_impl(
+            module, attr.parameterized_slots[i], (uint8_t)(depth + 1), callback,
+            user_data));
+      }
+      return iree_ok_status();
+
+    default:
+      return iree_ok_status();
+  }
+}
+
+iree_status_t loom_module_walk_attribute_value_refs(
+    const loom_module_t* module, loom_attribute_t attr,
+    loom_type_value_ref_callback_t callback, void* user_data) {
+  if (!module) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "module is NULL");
+  }
+  if (!callback) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "value reference callback is NULL");
+  }
+  return loom_module_walk_attribute_value_refs_impl(module, attr, /*depth=*/0,
+                                                    callback, user_data);
+}
+
+static iree_status_t loom_module_replace_attribute_value_refs_impl(
+    loom_module_t* module, loom_attribute_t attr, loom_value_id_t old_id,
+    loom_value_id_t new_id, uint8_t depth, loom_attribute_t* out_attr,
+    bool* out_changed) {
+  *out_attr = attr;
+  *out_changed = false;
+
+  switch ((loom_attr_kind_t)attr.kind) {
+    case LOOM_ATTR_ABSENT:
+    case LOOM_ATTR_I64:
+    case LOOM_ATTR_F64:
+    case LOOM_ATTR_STRING:
+    case LOOM_ATTR_BOOL:
+    case LOOM_ATTR_ENUM:
+    case LOOM_ATTR_SCOPED_ENUM:
+    case LOOM_ATTR_SYMBOL:
+    case LOOM_ATTR_I64_ARRAY:
+    case LOOM_ATTR_ENUM_ARRAY:
+    case LOOM_ATTR_ENCODING:
+    case LOOM_ATTR_BYTES:
+      return iree_ok_status();
+
+    case LOOM_ATTR_TYPE: {
+      if (attr.type_id == LOOM_TYPE_ID_INVALID ||
+          attr.type_id >= module->types.count) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "type attribute id %u is out of range (module has %" PRIhsz
+            " types)",
+            (unsigned)attr.type_id, module->types.count);
+      }
+      loom_type_t replaced_type = module->types.entries[attr.type_id];
+      IREE_RETURN_IF_ERROR(loom_module_replace_type_value_references(
+          module, replaced_type, old_id, new_id, &replaced_type, out_changed));
+      if (!*out_changed) return iree_ok_status();
+      return loom_module_intern_type_id(module, replaced_type,
+                                        &out_attr->type_id);
+    }
+
+    case LOOM_ATTR_PREDICATE_LIST: {
+      bool changed = false;
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        const loom_predicate_t* predicate = &attr.predicate_list[i];
+        for (uint8_t j = 0; j < predicate->arg_count; ++j) {
+          if (predicate->arg_tags[j] == LOOM_PRED_ARG_VALUE &&
+              (loom_value_id_t)predicate->args[j] == old_id) {
+            changed = true;
+          }
+        }
+      }
+      if (!changed) return iree_ok_status();
+
+      loom_predicate_t* predicates = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(&module->arena, attr.count,
+                                                     sizeof(*predicates),
+                                                     (void**)&predicates));
+      memcpy(predicates, attr.predicate_list,
+             (iree_host_size_t)attr.count * sizeof(*predicates));
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        for (uint8_t j = 0; j < predicates[i].arg_count; ++j) {
+          if (predicates[i].arg_tags[j] == LOOM_PRED_ARG_VALUE &&
+              (loom_value_id_t)predicates[i].args[j] == old_id) {
+            predicates[i].args[j] = (int64_t)new_id;
+          }
+        }
+      }
+      out_attr->predicate_list = predicates;
+      *out_changed = true;
+      return iree_ok_status();
+    }
+
+    case LOOM_ATTR_DICT: {
+      if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "aggregate attribute nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
+      }
+      loom_named_attr_t* replaced_entries = NULL;
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        loom_attribute_t replaced_value = attr.dict_entries[i].value;
+        bool value_changed = false;
+        IREE_RETURN_IF_ERROR(loom_module_replace_attribute_value_refs_impl(
+            module, attr.dict_entries[i].value, old_id, new_id,
+            (uint8_t)(depth + 1), &replaced_value, &value_changed));
+        if (!value_changed) continue;
+        if (!replaced_entries) {
+          IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+              &module->arena, attr.count, sizeof(*replaced_entries),
+              (void**)&replaced_entries));
+          memcpy(replaced_entries, attr.dict_entries,
+                 (iree_host_size_t)attr.count * sizeof(*replaced_entries));
+        }
+        replaced_entries[i].value = replaced_value;
+      }
+      if (!replaced_entries) return iree_ok_status();
+      *out_attr = loom_make_canonical_attr_dict(replaced_entries, attr.count);
+      *out_changed = true;
+      return iree_ok_status();
+    }
+
+    case LOOM_ATTR_PARAMETERIZED: {
+      if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "aggregate attribute nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
+      }
+      loom_attribute_t* replaced_slots = NULL;
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        loom_attribute_t replaced_value = attr.parameterized_slots[i];
+        bool value_changed = false;
+        IREE_RETURN_IF_ERROR(loom_module_replace_attribute_value_refs_impl(
+            module, attr.parameterized_slots[i], old_id, new_id,
+            (uint8_t)(depth + 1), &replaced_value, &value_changed));
+        if (!value_changed) continue;
+        if (!replaced_slots) {
+          IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+              &module->arena, attr.count, sizeof(*replaced_slots),
+              (void**)&replaced_slots));
+          memcpy(replaced_slots, attr.parameterized_slots,
+                 (iree_host_size_t)attr.count * sizeof(*replaced_slots));
+        }
+        replaced_slots[i] = replaced_value;
+      }
+      if (!replaced_slots) return iree_ok_status();
+      *out_attr = loom_make_parameterized_attr(
+          (loom_parameterized_attr_kind_t)attr.reserved_1, replaced_slots,
+          attr.count);
+      *out_changed = true;
+      return iree_ok_status();
+    }
+
+    case LOOM_ATTR_ANY:
+    case LOOM_ATTR_COUNT_:
+      break;
+  }
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "unknown attribute kind %u", (unsigned)attr.kind);
+}
+
+iree_status_t loom_module_replace_attribute_value_references(
+    loom_module_t* module, loom_attribute_t attr, loom_value_id_t old_id,
+    loom_value_id_t new_id, loom_attribute_t* out_attr, bool* out_changed) {
+  *out_attr = attr;
+  *out_changed = false;
+  if (old_id == new_id) return iree_ok_status();
+  if (old_id >= module->values.count || new_id >= module->values.count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "cannot replace attribute references from %%%u to %%%u in a module "
+        "with %" PRIhsz " values",
+        (unsigned)old_id, (unsigned)new_id, module->values.count);
+  }
+  return loom_module_replace_attribute_value_refs_impl(
+      module, attr, old_id, new_id, /*depth=*/0, out_attr, out_changed);
 }
 
 //===----------------------------------------------------------------------===//
@@ -2912,6 +3622,27 @@ static iree_status_t loom_module_replace_type_value_refs_impl(
       loom_type_t replaced_type = loom_type_dialect(
           loom_type_dialect_name_id(type), param_count, replaced_params);
       return loom_module_intern_type(module, replaced_type, out_type);
+    }
+
+    case LOOM_TYPE_PARAMETERIZED: {
+      const loom_parameterized_type_descriptor_t* descriptor =
+          loom_type_parameterized_descriptor(type);
+      uint8_t parameter_count = loom_type_parameterized_parameter_count(type);
+      const loom_attribute_t* parameters =
+          loom_type_parameterized_parameters(type);
+      loom_attribute_t replaced_parameters[UINT8_MAX];
+      bool changed = false;
+      for (uint8_t i = 0; i < parameter_count; ++i) {
+        bool parameter_changed = false;
+        IREE_RETURN_IF_ERROR(loom_module_replace_attribute_value_refs_impl(
+            module, parameters[i], old_id, new_id, /*depth=*/1,
+            &replaced_parameters[i], &parameter_changed));
+        changed = changed || parameter_changed;
+      }
+      if (!changed) return iree_ok_status();
+      *out_changed = true;
+      return loom_module_make_parameterized_type(
+          module, descriptor, replaced_parameters, parameter_count, out_type);
     }
 
     case LOOM_TYPE_REGISTER: {

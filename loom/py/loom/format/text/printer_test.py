@@ -13,7 +13,14 @@ import pytest
 from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.dialect.encoding import ALL_ENCODING_OPS
 from loom.dialect.func import ALL_FUNC_OPS
-from loom.dialect.test import ALL_TEST_OPS
+from loom.dialect.test import (
+    ALL_TEST_OPS,
+    ALL_TEST_PARAMETERIZED_ATTRS,
+    test_array_type,
+    test_matrix_type,
+    test_scope_type,
+    test_tile_attr,
+)
 from loom.format.text.parser import Parser
 from loom.format.text.printer import Printer, print_type
 from loom.ir import (
@@ -92,6 +99,7 @@ def _module_parser() -> Parser:
     parser.register_ops(ALL_TEST_OPS)
     parser.register_ops(ALL_FUNC_OPS)
     parser.register_types(ALL_BUILTIN_TYPES)
+    parser.register_parameterized_attrs(ALL_TEST_PARAMETERIZED_ATTRS)
     return parser
 
 
@@ -349,6 +357,32 @@ class TestPrintType:
         t = DialectType("test.pair", (F32, I32))
         result = print_type(t)
         assert result == "test.pair<f32, i32>"
+
+    def test_descriptor_backed_type_positional_parameter(self) -> None:
+        assert print_type(test_scope_type(scope="subgroup")) == "test.scope<subgroup>"
+
+    def test_descriptor_backed_type_mixed_parameters(self) -> None:
+        assert (
+            print_type(test_matrix_type(element_type=BF16, scope="subgroup", rows=16))
+            == "test.matrix<bf16, scope = subgroup, rows = 16>"
+        )
+
+    def test_descriptor_backed_type_optional_parameter(self) -> None:
+        assert print_type(test_array_type(element_type=BF16)) == "test.array<bf16>"
+        assert (
+            print_type(test_array_type(element_type=BF16, alignment=16))
+            == "test.array<bf16, alignment = 16>"
+        )
+
+    def test_descriptor_backed_type_nested_dictionary_parameter(self) -> None:
+        metadata = CanonicalAttrDict(
+            (("tile", test_tile_attr(width=8)), ("purpose", "scratch"))
+        )
+        assert (
+            print_type(test_array_type(element_type=BF16, metadata=metadata))
+            == 'test.array<bf16, metadata = {purpose = "scratch", '
+            "tile = #test.tile<width = 8>}>"
+        )
 
 
 # ============================================================================
@@ -775,7 +809,7 @@ class TestPrintAttrDict:
             attributes={"dict": {"modes": EnumArrayAttr([1, 7])}},
         )
 
-        with pytest.raises(ValueError, match="descriptor-backed operation field"):
+        with pytest.raises(ValueError, match="descriptor-backed field"):
             _printer().print_operation(op, module)
 
 

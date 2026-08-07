@@ -424,10 +424,10 @@ static iree_status_t loom_tooling_config_copy_named_attrs(
     *out_target_entries = NULL;
     return iree_ok_status();
   }
-  if (depth >= LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
+  if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "config value attribute nesting exceeds max %u",
-                            (unsigned)LOOM_ATTR_DICT_MAX_NESTING_DEPTH);
+                            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
   }
   loom_named_attr_t* target_entries = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(&target_module->arena, count,
@@ -450,10 +450,10 @@ static iree_status_t loom_tooling_config_copy_encoding(
     const loom_module_t* source_module, loom_module_t* target_module,
     uint16_t source_encoding_id, uint8_t depth,
     uint16_t* out_target_encoding_id) {
-  if (depth >= LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
+  if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "config encoding nesting exceeds max %u",
-                            (unsigned)LOOM_ATTR_DICT_MAX_NESTING_DEPTH);
+                            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
   }
   const loom_encoding_t* source_encoding =
       loom_module_encoding(source_module, source_encoding_id);
@@ -526,6 +526,17 @@ static iree_status_t loom_tooling_config_copy_attr(
           target_module,
           loom_make_named_attr_slice(target_entries, source_attr.count),
           out_attr);
+    }
+    case LOOM_ATTR_PARAMETERIZED: {
+      loom_attribute_t target_slots[UINT8_MAX];
+      for (uint16_t i = 0; i < source_attr.count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_tooling_config_copy_attr(
+            source_module, target_module, source_attr.parameterized_slots[i],
+            (uint8_t)(depth + 1), &target_slots[i]));
+      }
+      return loom_module_make_parameterized_attr(
+          target_module, (loom_parameterized_attr_kind_t)source_attr.reserved_1,
+          target_slots, source_attr.count, out_attr);
     }
     case LOOM_ATTR_ENCODING: {
       uint16_t target_encoding_id = 0;
