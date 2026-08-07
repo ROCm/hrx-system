@@ -1245,6 +1245,9 @@ HIPAPI hipError_t hipLaunchByPtr(const void* func) {
 
 HIPAPI hipError_t hipLaunchCooperativeKernelMultiDevice(
     hipLaunchParams* launchParamsList, int numDevices, unsigned int flags) {
+  int device_count = 0;
+  hipError_t init_result = hipGetDeviceCount(&device_count);
+  if (init_result != hipSuccess) return init_result;
   (void)launchParamsList;
   (void)numDevices;
   (void)flags;
