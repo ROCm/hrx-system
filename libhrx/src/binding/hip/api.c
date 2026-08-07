@@ -9356,7 +9356,7 @@ HIPAPI hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor,
   struct hipArray_st* array_info = NULL;
   hipError_t result =
       iree_hip_array_retain((hipArray_const_t)array, &array_info);
-  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  if (result != hipSuccess) HIP_RETURN_ERROR(hipErrorInvalidHandle);
   pArrayDescriptor->Width = array_info->public_extent.width;
   pArrayDescriptor->Height = array_info->public_extent.height;
   pArrayDescriptor->Format = array_info->format;
@@ -9372,7 +9372,7 @@ HIPAPI hipError_t hipArray3DGetDescriptor(
   struct hipArray_st* array_info = NULL;
   hipError_t result =
       iree_hip_array_retain((hipArray_const_t)array, &array_info);
-  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  if (result != hipSuccess) HIP_RETURN_ERROR(hipErrorInvalidHandle);
   pArrayDescriptor->Width = array_info->public_extent.width;
   pArrayDescriptor->Height = array_info->public_extent.height;
   pArrayDescriptor->Depth = array_info->public_extent.depth;
@@ -9390,7 +9390,7 @@ HIPAPI hipError_t hipArrayGetInfo(hipChannelFormatDesc* desc, hipExtent* extent,
   struct hipArray_st* array_info = NULL;
   hipError_t result =
       iree_hip_array_retain((hipArray_const_t)array, &array_info);
-  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  if (result != hipSuccess) HIP_RETURN_ERROR(hipErrorInvalidHandle);
   if (desc) *desc = array_info->desc;
   if (extent) *extent = array_info->public_extent;
   if (flags) *flags = array_info->flags;
