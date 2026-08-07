@@ -40,7 +40,118 @@ typedef struct hipArrayMemoryRequirements {
   size_t alignment;
   size_t size;
 } hipArrayMemoryRequirements;
-typedef struct hipDeviceProp_tR0000 hipDeviceProp_tR0000;
+typedef struct hipDeviceProp_tR0000 {
+  // Device name.
+  char name[256];
+  // Global memory size in bytes.
+  size_t totalGlobalMem;
+  // Workgroup-local memory size in bytes.
+  size_t sharedMemPerBlock;
+  // Registers available per workgroup.
+  int regsPerBlock;
+  // Hardware wavefront size.
+  int warpSize;
+  // Maximum invocations per workgroup.
+  int maxThreadsPerBlock;
+  // Maximum workgroup dimensions.
+  int maxThreadsDim[3];
+  // Maximum grid dimensions.
+  int maxGridSize[3];
+  // Maximum core clock rate in kHz.
+  int clockRate;
+  // Maximum memory clock rate in kHz.
+  int memoryClockRate;
+  // Global memory bus width in bits.
+  int memoryBusWidth;
+  // Constant memory size in bytes.
+  size_t totalConstMem;
+  // Major compute capability.
+  int major;
+  // Minor compute capability.
+  int minor;
+  // Number of execution units.
+  int multiProcessorCount;
+  // L2 cache size in bytes.
+  int l2CacheSize;
+  // Maximum resident invocations per execution unit.
+  int maxThreadsPerMultiProcessor;
+  // Device compute mode.
+  int computeMode;
+  // Device clock-instruction rate in kHz.
+  int clockInstructionRate;
+  // Architectural feature flags.
+  hipDeviceArch_t arch;
+  // Whether concurrent kernel execution is supported.
+  int concurrentKernels;
+  // PCI domain identifier.
+  int pciDomainID;
+  // PCI bus identifier.
+  int pciBusID;
+  // PCI device identifier.
+  int pciDeviceID;
+  // Maximum shared memory per execution unit in bytes.
+  size_t maxSharedMemoryPerMultiProcessor;
+  // Whether this device belongs to a multi-GPU board.
+  int isMultiGpuBoard;
+  // Whether host memory can be mapped.
+  int canMapHostMemory;
+  // Deprecated numeric architecture identifier.
+  int gcnArch;
+  // Architecture target identifier.
+  char gcnArchName[256];
+  // Whether the device shares memory with the host.
+  int integrated;
+  // Whether cooperative launch is supported.
+  int cooperativeLaunch;
+  // Whether multi-device cooperative launch is supported.
+  int cooperativeMultiDeviceLaunch;
+  // Maximum linear one-dimensional texture size.
+  int maxTexture1DLinear;
+  // Maximum one-dimensional texture size.
+  int maxTexture1D;
+  // Maximum two-dimensional texture dimensions.
+  int maxTexture2D[2];
+  // Maximum three-dimensional texture dimensions.
+  int maxTexture3D[3];
+  // HDP memory-flush register address, when available.
+  unsigned int* hdpMemFlushCntl;
+  // HDP register-flush address, when available.
+  unsigned int* hdpRegFlushCntl;
+  // Maximum memory-copy pitch in bytes.
+  size_t memPitch;
+  // Texture base-address alignment in bytes.
+  size_t textureAlignment;
+  // Texture pitch alignment in bytes.
+  size_t texturePitchAlignment;
+  // Whether kernels have an execution timeout.
+  int kernelExecTimeoutEnabled;
+  // Whether error-correcting memory is enabled.
+  int ECCEnabled;
+  // Whether the device uses a compute-only driver mode.
+  int tccDriver;
+  // Whether cooperative devices may use different functions.
+  int cooperativeMultiDeviceUnmatchedFunc;
+  // Whether cooperative devices may use different grid dimensions.
+  int cooperativeMultiDeviceUnmatchedGridDim;
+  // Whether cooperative devices may use different block dimensions.
+  int cooperativeMultiDeviceUnmatchedBlockDim;
+  // Whether cooperative devices may use different shared-memory sizes.
+  int cooperativeMultiDeviceUnmatchedSharedMem;
+  // Whether the entire device allocation is host-addressable.
+  int isLargeBar;
+  // Hardware revision identifier.
+  int asicRevision;
+  // Whether managed allocation is supported.
+  int managedMemory;
+  // Whether the host can directly access managed allocations.
+  int directManagedMemAccessFromHost;
+  // Whether managed memory supports concurrent host and device access.
+  int concurrentManagedAccess;
+  // Whether pageable host memory is directly accessible.
+  int pageableMemoryAccess;
+  // Whether pageable access uses host page tables.
+  int pageableMemoryAccessUsesHostPageTables;
+} hipDeviceProp_tR0000;
 typedef hipDeviceProp_t hipDeviceProp_tR0600;
 typedef struct ihipDevResourceDesc_t* hipDevResourceDesc_t;
 typedef struct ihipExecutionCtx_t* hipExecutionCtx_t;
@@ -525,15 +636,77 @@ HIPAPI hipError_t hipBindTextureToMipmappedArray(
   return hipErrorNotSupported;
 }
 
-HIPAPI hipError_t hipChooseDeviceR0000(int* device,
-                                       const hipDeviceProp_tR0000* properties) {
-  (void)device;
-  (void)properties;
-  return hipErrorNotSupported;
+static void iree_hip_convert_device_properties_r0600_to_r0000(
+    const hipDeviceProp_tR0600* source, hipDeviceProp_tR0000* target) {
+  memset(target, 0, sizeof(*target));
+  memcpy(target->name, source->name, sizeof(target->name));
+  target->totalGlobalMem = source->totalGlobalMem;
+  target->sharedMemPerBlock = source->sharedMemPerBlock;
+  target->regsPerBlock = source->regsPerBlock;
+  target->warpSize = source->warpSize;
+  target->maxThreadsPerBlock = source->maxThreadsPerBlock;
+  memcpy(target->maxThreadsDim, source->maxThreadsDim,
+         sizeof(target->maxThreadsDim));
+  memcpy(target->maxGridSize, source->maxGridSize, sizeof(target->maxGridSize));
+  target->clockRate = source->clockRate;
+  target->memoryClockRate = source->memoryClockRate;
+  target->memoryBusWidth = source->memoryBusWidth;
+  target->totalConstMem = source->totalConstMem;
+  target->major = source->major;
+  target->minor = source->minor;
+  target->multiProcessorCount = source->multiProcessorCount;
+  target->l2CacheSize = source->l2CacheSize;
+  target->maxThreadsPerMultiProcessor = source->maxThreadsPerMultiProcessor;
+  target->computeMode = source->computeMode;
+  target->clockInstructionRate = source->clockInstructionRate;
+  target->arch = source->arch;
+  target->concurrentKernels = source->concurrentKernels;
+  target->pciDomainID = source->pciDomainID;
+  target->pciBusID = source->pciBusID;
+  target->pciDeviceID = source->pciDeviceID;
+  target->maxSharedMemoryPerMultiProcessor =
+      source->maxSharedMemoryPerMultiProcessor;
+  target->isMultiGpuBoard = source->isMultiGpuBoard;
+  target->canMapHostMemory = source->canMapHostMemory;
+  memcpy(target->gcnArchName, source->gcnArchName, sizeof(target->gcnArchName));
+  target->integrated = source->integrated;
+  target->cooperativeLaunch = source->cooperativeLaunch;
+  target->cooperativeMultiDeviceLaunch = source->cooperativeMultiDeviceLaunch;
+  target->maxTexture1DLinear = source->maxTexture1DLinear;
+  target->maxTexture1D = source->maxTexture1D;
+  memcpy(target->maxTexture2D, source->maxTexture2D,
+         sizeof(target->maxTexture2D));
+  memcpy(target->maxTexture3D, source->maxTexture3D,
+         sizeof(target->maxTexture3D));
+  target->hdpMemFlushCntl = source->hdpMemFlushCntl;
+  target->hdpRegFlushCntl = source->hdpRegFlushCntl;
+  target->memPitch = source->memPitch;
+  target->textureAlignment = source->textureAlignment;
+  target->texturePitchAlignment = source->texturePitchAlignment;
+  target->kernelExecTimeoutEnabled = source->kernelExecTimeoutEnabled;
+  target->ECCEnabled = source->ECCEnabled;
+  target->tccDriver = source->tccDriver;
+  target->cooperativeMultiDeviceUnmatchedFunc =
+      source->cooperativeMultiDeviceUnmatchedFunc;
+  target->cooperativeMultiDeviceUnmatchedGridDim =
+      source->cooperativeMultiDeviceUnmatchedGridDim;
+  target->cooperativeMultiDeviceUnmatchedBlockDim =
+      source->cooperativeMultiDeviceUnmatchedBlockDim;
+  target->cooperativeMultiDeviceUnmatchedSharedMem =
+      source->cooperativeMultiDeviceUnmatchedSharedMem;
+  target->isLargeBar = source->isLargeBar;
+  target->asicRevision = source->asicRevision;
+  target->managedMemory = source->managedMemory;
+  target->directManagedMemAccessFromHost =
+      source->directManagedMemAccessFromHost;
+  target->concurrentManagedAccess = source->concurrentManagedAccess;
+  target->pageableMemoryAccess = source->pageableMemoryAccess;
+  target->pageableMemoryAccessUsesHostPageTables =
+      source->pageableMemoryAccessUsesHostPageTables;
 }
 
-HIPAPI hipError_t hipChooseDeviceR0600(int* device,
-                                       const hipDeviceProp_tR0600* properties) {
+static hipError_t iree_hip_choose_device_r0600(
+    int* device, const hipDeviceProp_tR0600* properties) {
   if (!device || !properties) return hipErrorInvalidValue;
 
   int device_count = 0;
@@ -578,6 +751,34 @@ HIPAPI hipError_t hipChooseDeviceR0600(int* device,
     }
   }
   return hipSuccess;
+}
+
+HIPAPI hipError_t hipChooseDeviceR0000(int* device,
+                                       const hipDeviceProp_tR0000* properties) {
+  if (!device || !properties) return hipErrorInvalidValue;
+  hipDeviceProp_tR0600 current_properties = {0};
+  current_properties.major = properties->major;
+  current_properties.minor = properties->minor;
+  current_properties.totalGlobalMem = properties->totalGlobalMem;
+  current_properties.sharedMemPerBlock = properties->sharedMemPerBlock;
+  current_properties.maxThreadsPerBlock = properties->maxThreadsPerBlock;
+  current_properties.totalConstMem = properties->totalConstMem;
+  current_properties.multiProcessorCount = properties->multiProcessorCount;
+  current_properties.maxThreadsPerMultiProcessor =
+      properties->maxThreadsPerMultiProcessor;
+  current_properties.memoryClockRate = properties->memoryClockRate;
+  current_properties.memoryBusWidth = properties->memoryBusWidth;
+  current_properties.l2CacheSize = properties->l2CacheSize;
+  current_properties.regsPerBlock = properties->regsPerBlock;
+  current_properties.maxSharedMemoryPerMultiProcessor =
+      properties->maxSharedMemoryPerMultiProcessor;
+  current_properties.warpSize = properties->warpSize;
+  return iree_hip_choose_device_r0600(device, &current_properties);
+}
+
+HIPAPI hipError_t hipChooseDeviceR0600(int* device,
+                                       const hipDeviceProp_tR0600* properties) {
+  return iree_hip_choose_device_r0600(device, properties);
 }
 
 HIPAPI hipError_t hipConfigureCall(dim3 gridDim, dim3 blockDim,
@@ -935,9 +1136,12 @@ HIPAPI hipError_t hipFreeMipmappedArray(hipMipmappedArray_t mipmappedArray) {
 
 HIPAPI hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop,
                                               int device) {
-  (void)prop;
-  (void)device;
-  return hipErrorNotSupported;
+  if (!prop) return hipErrorInvalidValue;
+  hipDeviceProp_tR0600 current_properties = {0};
+  hipError_t result = hipGetDeviceProperties(&current_properties, device);
+  if (result != hipSuccess) return result;
+  iree_hip_convert_device_properties_r0600_to_r0000(&current_properties, prop);
+  return hipSuccess;
 }
 
 HIPAPI hipError_t hipGetDriverEntryPoint(

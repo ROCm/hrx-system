@@ -23855,13 +23855,32 @@ void* iree_hip_self_dl_handle(void) {
   return iree_hip_self_dl_handle_cached;
 }
 
+enum {
+  IREE_HIP_PROC_ADDRESS_DEFAULT = 0,
+  IREE_HIP_PROC_ADDRESS_LEGACY_STREAM = 1,
+  IREE_HIP_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM = 2,
+  IREE_HIP_DEVICE_PROPERTIES_R0600_VERSION = 600,
+};
+
 HIPAPI hipError_t hipGetProcAddress(const char* symbol, void** pfn,
                                     int hipVersion, uint64_t flags,
                                     void* symbolStatus) {
-  (void)hipVersion;
-  (void)flags;
-  if (!symbol || !pfn) {
+  if (!symbol || symbol[0] == '\0' || !pfn ||
+      flags > IREE_HIP_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  const char* resolved_symbol = symbol;
+  if (strcmp(symbol, "hipGetDeviceProperties") == 0) {
+    resolved_symbol = hipVersion >= IREE_HIP_DEVICE_PROPERTIES_R0600_VERSION
+                          ? "hipGetDevicePropertiesR0600"
+                          : "hipGetDevicePropertiesR0000";
+    flags = IREE_HIP_PROC_ADDRESS_DEFAULT;
+  } else if (strcmp(symbol, "hipChooseDevice") == 0) {
+    resolved_symbol = hipVersion >= IREE_HIP_DEVICE_PROPERTIES_R0600_VERSION
+                          ? "hipChooseDeviceR0600"
+                          : "hipChooseDeviceR0000";
+    flags = IREE_HIP_PROC_ADDRESS_DEFAULT;
   }
 
   // Resolve symbols against this library, not the process-global scope. A
@@ -23881,7 +23900,18 @@ HIPAPI hipError_t hipGetProcAddress(const char* symbol, void** pfn,
     if (symbolStatus) *(int*)symbolStatus = 1;
     HIP_RETURN_ERROR(hipErrorSharedObjectInitFailed);
   }
-  *pfn = dlsym(handle, symbol);
+  char stream_per_thread_symbol[256];
+  *pfn = NULL;
+  size_t symbol_length = strlen(resolved_symbol);
+  if (flags == IREE_HIP_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM &&
+      symbol_length <= sizeof(stream_per_thread_symbol) - sizeof("_spt") &&
+      (symbol_length < 4 ||
+       strcmp(resolved_symbol + symbol_length - 4, "_spt") != 0)) {
+    snprintf(stream_per_thread_symbol, sizeof(stream_per_thread_symbol),
+             "%s_spt", resolved_symbol);
+    *pfn = dlsym(handle, stream_per_thread_symbol);
+  }
+  if (!*pfn) *pfn = dlsym(handle, resolved_symbol);
   if (close_handle) dlclose(handle);
   if (symbolStatus) *(int*)symbolStatus = *pfn ? 0 : 1;
   HIP_RETURN_ERROR(*pfn ? hipSuccess : hipErrorNotFound);
