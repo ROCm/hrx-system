@@ -30,7 +30,14 @@ from loom.dialect.low import ALL_LOW_OPS
 from loom.dialect.pass_ import ALL_PASS_OPS
 from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.target import ALL_TARGET_OPS
-from loom.dialect.test import ALL_TEST_OPS, ALL_TEST_PARAMETERIZED_ATTRS
+from loom.dialect.test import (
+    ALL_TEST_OPS,
+    ALL_TEST_PARAMETERIZED_ATTRS,
+    ALL_TEST_TYPES,
+    test_array_type,
+    test_matrix_type,
+    test_scope_type,
+)
 from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dsl import (
     ANY,
@@ -580,7 +587,12 @@ class TestStringsSection:
 
 
 class TestTypesSection:
-    def _roundtrip_type(self, ir_type: Type) -> None:
+    def _roundtrip_type(
+        self,
+        ir_type: Type,
+        *,
+        type_defs: tuple[object, ...] | None = None,
+    ) -> None:
         """Write a module with a value of this type, read back, verify.
 
         For types with dynamic dims, creates index-typed SSA values
@@ -606,7 +618,7 @@ class TestTypesSection:
         module.add_symbol(Symbol(name="f", kind=SymbolKind.FUNC_DEF, op=func_op))
 
         data = write_module(module)
-        loaded = read(data)
+        loaded = read(data, type_defs=type_defs)
         loaded_op = loaded.symbols[0].op
         assert loaded_op is not None
         # The value under test is the last block arg.
@@ -766,6 +778,16 @@ class TestTypesSection:
     def test_dialect_type_nested(self) -> None:
         inner = DialectType("vm.list", (I32,))
         self._roundtrip_type(DialectType("vm.ref", (inner,)))
+
+    def test_descriptor_backed_types(self) -> None:
+        types = (
+            test_scope_type(scope="subgroup"),
+            test_matrix_type(element_type=BF16, scope="workgroup", rows=16),
+            test_array_type(element_type=BF16),
+            test_array_type(element_type=BF16, alignment=32),
+        )
+        for ir_type in types:
+            self._roundtrip_type(ir_type, type_defs=ALL_TEST_TYPES)
 
     def test_register_type(self) -> None:
         self._roundtrip_type(_test_ptr_register_type(4))

@@ -24,6 +24,7 @@
 #include "loom/ops/global/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
+#include "loom/ops/type_registry.h"
 
 namespace loom {
 namespace {
@@ -436,6 +437,43 @@ class ReaderTest : public ::testing::Test {
         &builder, 0, /*visibility=*/0, /*cc=*/0, callee, &reg_type,
         /*arg_types_count=*/1, &reg_type, /*result_count=*/1, nullptr, 0,
         LOOM_LOCATION_UNKNOWN, &decl_op));
+    return module;
+  }
+
+  loom_module_t* CreateParameterizedTypeDeclModule() {
+    loom_module_t* module = CreateModule("reader_parameterized_type_decl");
+    loom_type_id_t bf16_type_id = LOOM_TYPE_ID_INVALID;
+    IREE_CHECK_OK(loom_module_intern_type_id(
+        module, loom_type_scalar(LOOM_SCALAR_TYPE_BF16), &bf16_type_id));
+
+    loom_type_t argument_types[4] = {};
+    IREE_CHECK_OK(loom_test_scope_type_make(
+        module, LOOM_TEST_SCOPE_TYPE_SCOPE_SUBGROUP, &argument_types[0]));
+    IREE_CHECK_OK(loom_test_matrix_type_make(
+        module, bf16_type_id, LOOM_TEST_MATRIX_TYPE_SCOPE_WORKGROUP, 16,
+        &argument_types[1]));
+    IREE_CHECK_OK(loom_test_array_type_make(module, /*build_flags=*/0,
+                                            bf16_type_id, /*alignment=*/0,
+                                            &argument_types[2]));
+    IREE_CHECK_OK(loom_test_array_type_make(
+        module, LOOM_TEST_ARRAY_TYPE_BUILD_FLAG_HAS_ALIGNMENT, bf16_type_id,
+        /*alignment=*/32, &argument_types[3]));
+
+    loom_builder_t builder;
+    loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                            &builder);
+    loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+    IREE_CHECK_OK(loom_builder_intern_string(
+        &builder, IREE_SV("parameterized_types"), &name_id));
+    uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
+    IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
+    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    loom_op_t* decl_op = nullptr;
+    IREE_CHECK_OK(loom_test_decl_build(
+        &builder, 0, /*visibility=*/0, /*cc=*/0, callee, argument_types,
+        IREE_ARRAYSIZE(argument_types), /*result_types=*/nullptr,
+        /*result_count=*/0, /*tied_results=*/nullptr,
+        /*tied_result_count=*/0, LOOM_LOCATION_UNKNOWN, &decl_op));
     return module;
   }
 
@@ -2629,6 +2667,11 @@ TEST_F(ReaderTest, CanonicalRoundTripPreservesTypesAttrsAndPredicates) {
   ExpectCanonicalBytecodeRoundTrip(register_decl_module);
   loom_module_free(register_decl_module);
 
+  loom_module_t* parameterized_type_module =
+      CreateParameterizedTypeDeclModule();
+  ExpectCanonicalBytecodeRoundTrip(parameterized_type_module);
+  loom_module_free(parameterized_type_module);
+
   loom_module_t* dynamic_module = CreateDynamicDimFunctionModule();
   ExpectCanonicalBytecodeRoundTrip(dynamic_module);
   loom_module_free(dynamic_module);
@@ -2688,6 +2731,55 @@ TEST_F(ReaderTest, ReadsStructuralRegisterValueType) {
   loom_module_free(source_module);
 }
 
+TEST_F(ReaderTest, ReadsDescriptorBackedParameterizedTypes) {
+  loom_module_t* source_module = CreateParameterizedTypeDeclModule();
+  auto bytes = WriteModule(source_module);
+
+  loom_module_t* read_module = nullptr;
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result =
+      ReadModule(bytes, &read_module, &error_ids);
+  EXPECT_EQ(result.error_count, 0u);
+  EXPECT_TRUE(error_ids.empty());
+  ASSERT_NE(read_module, nullptr);
+  ASSERT_EQ(read_module->symbols.count, 1u);
+  const loom_op_t* decl_op = read_module->symbols.entries[0].defining_op;
+  ASSERT_NE(decl_op, nullptr);
+  loom_value_slice_t arguments = loom_test_decl_args(decl_op);
+  ASSERT_EQ(arguments.count, 4u);
+
+  loom_type_t scope_type =
+      loom_module_value_type(read_module, arguments.values[0]);
+  ASSERT_TRUE(loom_test_scope_type_isa(scope_type));
+  EXPECT_EQ(loom_test_scope_type_scope(scope_type),
+            LOOM_TEST_SCOPE_TYPE_SCOPE_SUBGROUP);
+
+  loom_type_t matrix_type =
+      loom_module_value_type(read_module, arguments.values[1]);
+  ASSERT_TRUE(loom_test_matrix_type_isa(matrix_type));
+  EXPECT_EQ(loom_test_matrix_type_scope(matrix_type),
+            LOOM_TEST_MATRIX_TYPE_SCOPE_WORKGROUP);
+  EXPECT_EQ(loom_test_matrix_type_rows(matrix_type), 16);
+  loom_type_id_t element_type_id =
+      loom_test_matrix_type_element_type(matrix_type);
+  ASSERT_LT(element_type_id, read_module->types.count);
+  EXPECT_TRUE(loom_type_equal(read_module->types.entries[element_type_id],
+                              loom_type_scalar(LOOM_SCALAR_TYPE_BF16)));
+
+  loom_type_t packed_type =
+      loom_module_value_type(read_module, arguments.values[2]);
+  ASSERT_TRUE(loom_test_array_type_isa(packed_type));
+  EXPECT_FALSE(loom_test_array_type_has_alignment(packed_type));
+  loom_type_t aligned_type =
+      loom_module_value_type(read_module, arguments.values[3]);
+  ASSERT_TRUE(loom_test_array_type_isa(aligned_type));
+  EXPECT_TRUE(loom_test_array_type_has_alignment(aligned_type));
+  EXPECT_EQ(loom_test_array_type_alignment(aligned_type), 32);
+
+  loom_module_free(read_module);
+  loom_module_free(source_module);
+}
+
 TEST_F(ReaderTest, RejectsUnassignedTypeKind) {
   loom_module_t* module = CreateFunctionModule();
   auto bytes = WriteModule(module);
@@ -2696,6 +2788,16 @@ TEST_F(ReaderTest, RejectsUnassignedTypeKind) {
   bytes[offset] = 4;
 
   ExpectReadError(bytes, "ERR_BYTECODE_004");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsUnknownParameterizedTypeFamily) {
+  loom_module_t* module = CreateParameterizedTypeDeclModule();
+  auto bytes = WriteModule(module);
+  ReplaceBytes(&bytes, "test.scope", "test.bogus");
+
+  ExpectReadError(bytes, "ERR_BYTECODE_006");
 
   loom_module_free(module);
 }

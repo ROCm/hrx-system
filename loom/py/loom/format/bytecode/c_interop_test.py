@@ -15,11 +15,25 @@ from pathlib import Path
 
 from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.dialect.low import ALL_LOW_OPS
-from loom.dialect.test import ALL_TEST_OPS, ALL_TEST_PARAMETERIZED_ATTRS
+from loom.dialect.test import (
+    ALL_TEST_OPS,
+    ALL_TEST_PARAMETERIZED_ATTRS,
+    ALL_TEST_TYPES,
+    test_array_type,
+    test_matrix_type,
+    test_scope_type,
+)
 from loom.format.bytecode.reader import read_module
 from loom.format.bytecode.writer import write_module
 from loom.format.text.parser import Parser
-from loom.ir import BF16, EnumArrayAttr, Module, ParameterizedAttr, RegisterType
+from loom.ir import (
+    BF16,
+    EnumArrayAttr,
+    Module,
+    ParameterizedAttr,
+    ParameterizedType,
+    RegisterType,
+)
 
 
 def _run_loom_format(arguments: list[object]) -> subprocess.CompletedProcess[str]:
@@ -41,6 +55,7 @@ def _typed_register_module() -> tuple[Module, RegisterType]:
     parser.register_ops(ALL_LOW_OPS)
     parser.register_ops(ALL_TEST_OPS)
     parser.register_types(ALL_BUILTIN_TYPES)
+    parser.register_types(ALL_TEST_TYPES)
     parser.register_parameterized_attrs(ALL_TEST_PARAMETERIZED_ATTRS)
     module = parser.parse(
         "low.func.decl target<test.low.core> "
@@ -59,6 +74,11 @@ def _typed_register_module() -> tuple[Module, RegisterType]:
         "}\n"
         "test.record @parameterized_record "
         "{options = #test.options<mode = precise, scopes = []>}\n"
+        "test.decl @parameterized_types("
+        "%scope: test.scope<subgroup>, "
+        "%matrix: test.matrix<bf16, scope = workgroup, rows = 16>, "
+        "%packed: test.array<bf16>, "
+        "%aligned: test.array<bf16, alignment = 32>)\n"
     )
     register_types = [
         value.type for value in module.values if isinstance(value.type, RegisterType)
@@ -89,7 +109,7 @@ def main() -> None:
                 python_bytecode_path,
             ]
         )
-        loaded = read_module(c_bytecode_path.read_bytes())
+        loaded = read_module(c_bytecode_path.read_bytes(), type_defs=ALL_TEST_TYPES)
         if not any(value.type == register_type for value in loaded.values):
             raise AssertionError(
                 "Python reader did not recover the C-written structural register type"
@@ -144,6 +164,26 @@ def main() -> None:
             or record_options.get("scopes") != EnumArrayAttr()
         ):
             raise AssertionError("record dict lost present empty parameter")
+        parameterized_types = next(
+            symbol.op
+            for symbol in loaded.symbols
+            if symbol.name == "parameterized_types"
+        )
+        if parameterized_types is None:
+            raise AssertionError("Python reader did not recover parameterized_types")
+        argument_types = tuple(
+            loaded.values[value_id].type for value_id in parameterized_types.operands
+        )
+        expected_types = (
+            test_scope_type(scope="subgroup"),
+            test_matrix_type(element_type=BF16, scope="workgroup", rows=16),
+            test_array_type(element_type=BF16),
+            test_array_type(element_type=BF16, alignment=32),
+        )
+        if argument_types != expected_types or not all(
+            isinstance(value, ParameterizedType) for value in argument_types
+        ):
+            raise AssertionError("descriptor-backed types did not survive C bytecode")
 
 
 if __name__ == "__main__":

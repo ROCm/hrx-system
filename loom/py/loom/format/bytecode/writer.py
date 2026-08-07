@@ -48,6 +48,7 @@ from loom.ir import (
     OpaqueLocation,
     Operation,
     ParameterizedAttr,
+    ParameterizedType,
     PoolType,
     Predicate,
     PredicateArg,
@@ -73,6 +74,7 @@ _IR_TYPE_CLASSES = (
     RegisterType,
     StorageType,
     DialectType,
+    ParameterizedType,
     EncodingType,
     PoolType,
     NoneType,
@@ -151,6 +153,7 @@ BYTECODE_TYPE_KIND_BY_IR_KIND: dict[TypeKind, int] = {
     TypeKind.BUFFER: 11,
     TypeKind.REGISTER: 12,
     TypeKind.STORAGE: 13,
+    TypeKind.PARAMETERIZED: 14,
 }
 
 BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
@@ -159,7 +162,7 @@ BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
 
 # File magic and version.
 MAGIC = b"LOOM"
-FORMAT_VERSION = 22
+FORMAT_VERSION = 23
 PRODUCER = "loom-py"
 
 SYMBOL_FLAG_PUBLIC = 0x0001
@@ -641,6 +644,16 @@ class BytecodeWriter:
             case RegisterType(value_type=value_type):
                 if value_type is not None:
                     self._number_type(value_type)
+            case ParameterizedType(
+                definition=definition,
+                slots=slots,
+            ):
+                self._ctx.intern_string(definition.name)
+                for parameter, value in zip(definition.params, slots, strict=True):
+                    if value is None:
+                        continue
+                    self._ctx.intern_string(parameter.name)
+                    self._number_attr_value(value, parameter)
             case _:
                 pass
         # Intern the parent AFTER sub-types (ensures sub-types have lower IDs).
@@ -674,7 +687,7 @@ class BytecodeWriter:
         elif isinstance(value, bytes | bytearray):
             pass
         elif isinstance(value, _IR_TYPE_CLASSES):
-            self._ctx.intern_type(cast(Type, value))
+            self._number_type(cast(Type, value))
         elif isinstance(value, EncodingInstance):
             self._number_encoding_instance(value)
         elif isinstance(value, Mapping):
@@ -832,6 +845,21 @@ class BytecodeWriter:
                 buf.write_varint(len(params))
                 for param in params:
                     buf.write_varint(self._ctx.intern_type(param))
+            case ParameterizedType(
+                definition=definition,
+                slots=slots,
+            ):
+                buf.write_u8(BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.PARAMETERIZED])
+                buf.write_varint(self._ctx.strings[definition.name])
+                present_parameters = [
+                    (parameter, value)
+                    for parameter, value in zip(definition.params, slots, strict=True)
+                    if value is not None
+                ]
+                buf.write_varint(len(present_parameters))
+                for parameter, value in present_parameters:
+                    buf.write_varint(self._ctx.strings[parameter.name])
+                    self._write_attr_value(buf, value, attr_def=parameter)
             case RegisterType(
                 descriptor_set_stable_id=descriptor_set_stable_id,
                 register_class_id=register_class_id,

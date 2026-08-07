@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from loom.dialect.test.defs import (
+    ALL_TEST_TYPES,
     test_enum_array_attrs,
     test_options_attr,
     test_parameterized_attr,
@@ -523,9 +524,13 @@ class TestMalformedTypeSection:
         self,
         data: bytes,
         encodings: list[EncodingInstance] | None = None,
+        *,
+        strings: list[str] | None = None,
+        type_defs: tuple[object, ...] | None = None,
     ) -> list[Type]:
-        reader = BytecodeReader(b"")
+        reader = BytecodeReader(b"", type_defs=type_defs)
         reader._encodings = encodings or []
+        reader._strings = strings or []
         reader._read_types_section((0, data))
         return reader._types
 
@@ -678,6 +683,100 @@ class TestMalformedTypeSection:
         )
         with pytest.raises(BytecodeError, match="reserved bits"):
             self._read_types(data)
+
+    def test_unknown_parameterized_type_family_is_rejected(self) -> None:
+        data = bytes(
+            [
+                1,
+                BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.PARAMETERIZED],
+                0,  # family string id
+                0,  # present parameter count
+            ]
+        )
+        with pytest.raises(BytecodeError, match="is not registered"):
+            self._read_types(
+                data,
+                strings=["test.unknown"],
+                type_defs=ALL_TEST_TYPES,
+            )
+
+    def test_unknown_parameterized_type_parameter_is_rejected(self) -> None:
+        data = bytes(
+            [
+                1,
+                BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.PARAMETERIZED],
+                0,  # test.scope family string id
+                1,  # present parameter count
+                1,  # unknown parameter string id
+                4,  # enum attribute kind
+                2,  # subgroup
+            ]
+        )
+        with pytest.raises(BytecodeError, match="unknown parameter 'bogus'"):
+            self._read_types(
+                data,
+                strings=["test.scope", "bogus"],
+                type_defs=ALL_TEST_TYPES,
+            )
+
+    def test_parameterized_type_parameters_must_be_in_order(self) -> None:
+        data = bytes(
+            [
+                2,
+                BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.SCALAR],
+                BF16.kind.value,
+                BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.PARAMETERIZED],
+                0,  # test.matrix family string id
+                2,  # present parameter count
+                2,  # rows parameter string id
+                0,  # i64 attribute kind
+                32,  # zigzag-encoded 16
+                1,  # scope parameter string id, out of order
+                4,  # enum attribute kind
+                2,  # subgroup
+            ]
+        )
+        with pytest.raises(BytecodeError, match="not in declaration order"):
+            self._read_types(
+                data,
+                strings=["test.matrix", "scope", "rows"],
+                type_defs=ALL_TEST_TYPES,
+            )
+
+    def test_parameterized_type_requires_mandatory_parameters(self) -> None:
+        data = bytes(
+            [
+                1,
+                BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.PARAMETERIZED],
+                0,  # test.scope family string id
+                0,  # present parameter count
+            ]
+        )
+        with pytest.raises(BytecodeError, match="required parameter 'scope'"):
+            self._read_types(
+                data,
+                strings=["test.scope"],
+                type_defs=ALL_TEST_TYPES,
+            )
+
+    def test_parameterized_type_rejects_forward_type_parameter(self) -> None:
+        data = bytes(
+            [
+                1,
+                BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.PARAMETERIZED],
+                0,  # test.array family string id
+                1,  # present parameter count
+                1,  # element_type parameter string id
+                7,  # type attribute kind
+                0,  # self-reference instead of a prior type
+            ]
+        )
+        with pytest.raises(BytecodeError, match="must refer to a prior type"):
+            self._read_types(
+                data,
+                strings=["test.array", "element_type"],
+                type_defs=ALL_TEST_TYPES,
+            )
 
 
 # ============================================================================

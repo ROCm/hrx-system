@@ -85,7 +85,7 @@ extern "C" {
 
 #define LOOM_BYTECODE_MAGIC "LOOM"
 #define LOOM_BYTECODE_MAGIC_LENGTH 4
-#define LOOM_BYTECODE_FORMAT_VERSION 22
+#define LOOM_BYTECODE_FORMAT_VERSION 23
 
 // File-level source-location mode stored in the file header.
 enum loom_bytecode_location_mode_e {
@@ -320,7 +320,7 @@ typedef enum loom_bytecode_section_kind_e {
 //       0 = none, 1 = scalar, 2 = tile, 3 = tensor, 4 = unassigned,
 //       5 = function, 6 = dialect, 7 = encoding, 8 = pool,
 //       9 = vector, 10 = view, 11 = buffer, 12 = register,
-//       13 = storage
+//       13 = storage, 14 = parameterized
 //     (SCALAR: [element_type: byte])
 //     (TILE/TENSOR/VECTOR/VIEW:
 //       [element_type: byte]
@@ -355,6 +355,18 @@ typedef enum loom_bytecode_section_kind_e {
 //       (if present: [value_type_index: varint]))
 //     (STORAGE:
 //       [space: byte]               (loom_bytecode_storage_space_t))
+//     (PARAMETERIZED:
+//       [family_name_id: varint]
+//       [present_parameter_count: varint]
+//       For each present parameter in declaration order:
+//         [parameter_name_id: varint]
+//         [value_kind: byte]
+//         [value_data: ...])
+//
+// Parameterized type family and parameter names are stable public identities.
+// Dense descriptor pointers and declaration-order slot ordinals never
+// serialize. TYPE parameter payloads reference earlier TYPES entries so the
+// table remains topologically materializable.
 
 // ==========================================================================
 // ENCODINGS section
@@ -883,6 +895,8 @@ typedef enum loom_bytecode_type_kind_e {
   LOOM_BYTECODE_TYPE_BUFFER = 11,
   LOOM_BYTECODE_TYPE_REGISTER = 12,
   LOOM_BYTECODE_TYPE_STORAGE = 13,
+  // Descriptor-backed type with stable named attribute parameter slots.
+  LOOM_BYTECODE_TYPE_PARAMETERIZED = 14,
 } loom_bytecode_type_kind_t;
 
 // Encoding role byte in the TYPES section (ENCODING payload).

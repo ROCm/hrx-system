@@ -89,6 +89,7 @@ loom_cc_library(
     loom::format::low_repr
     loom::ir
     loom::ops::op_defs
+    loom::ops::type_registry
     loom::verify
   PUBLIC
 )
@@ -111,6 +112,7 @@ loom_cc_test(
     loom::ops::func
     loom::ops::global
     loom::ops::test
+    loom::ops::type_registry
 )
 
 loom_cc_test(

@@ -94,6 +94,28 @@ def build_parameterized_attr_def_map(
     return result
 
 
+def build_parameterized_type_def_map(
+    type_defs: Iterable[Any] | None = None,
+) -> dict[str, Any]:
+    """Return descriptor-backed type declarations by stable family name."""
+    if type_defs is None:
+        from loom.builders import default_types
+
+        type_defs = default_types()
+    result: dict[str, Any] = {}
+    for type_def in type_defs:
+        if not getattr(type_def, "uses_attribute_parameters", False):
+            continue
+        existing = result.get(type_def.name)
+        if existing is not None and existing != type_def:
+            raise ValueError(
+                f"parameterized type family {type_def.name!r} has "
+                "conflicting declarations"
+            )
+        result[type_def.name] = type_def
+    return result
+
+
 def symbol_def_for_op(op_decls_by_name: Mapping[str, Any], op_name: str) -> Any:
     """Return the generated symbol definition descriptor for ``op_name``."""
     op_decl = op_decls_by_name.get(op_name)

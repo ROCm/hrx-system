@@ -16,6 +16,7 @@
 #include "loom/ir/module.h"
 #include "loom/ir/types.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/type_registry.h"
 #include "loom/verify/verify.h"
 
 // Keep reader allocation guards aligned with the bytecode format comment.
@@ -52,6 +53,14 @@ typedef struct loom_bytecode_reader_section_t {
   uint64_t absolute_offset;      // Absolute file byte offset.
   iree_const_byte_span_t bytes;  // Section payload bytes.
 } loom_bytecode_reader_section_t;
+
+typedef enum loom_bytecode_type_read_mode_e {
+  // Validate the wire payload and retain transient type structure for metadata
+  // references without constructing module-owned parameter values.
+  LOOM_BYTECODE_TYPE_READ_VALIDATE = 0,
+  // Construct canonical module-owned types while rereading the TYPES section.
+  LOOM_BYTECODE_TYPE_READ_MATERIALIZE = 1,
+} loom_bytecode_type_read_mode_t;
 
 typedef struct loom_bytecode_reader_state_t {
   iree_const_byte_span_t bytecode;  // Full bytecode file bytes.
@@ -608,21 +617,6 @@ static iree_status_t loom_bytecode_reader_materialize_sources(
   return iree_ok_status();
 }
 
-static iree_status_t loom_bytecode_reader_materialize_types(
-    loom_bytecode_reader_state_t* reader) {
-  for (iree_host_size_t i = 0; i < reader->type_count; ++i) {
-    loom_type_id_t type_id = 0;
-    IREE_RETURN_IF_ERROR(loom_module_intern_type_id(
-        reader->output_module, reader->types[i], &type_id));
-    if (type_id != i) {
-      return loom_bytecode_reader_emit_invalid_field(
-          reader, IREE_SV("TYPES"), IREE_SV("type"), i, IREE_SV("type"), 0,
-          IREE_SV("type_table_must_be_deduplicated_and_topologically_ordered"));
-    }
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_bytecode_reader_skip_predicate_list(
     loom_bytecode_reader_state_t* reader, loom_bytecode_reader_cursor_t* cursor,
     bool value_args_are_strings) {
@@ -682,13 +676,13 @@ static iree_status_t loom_bytecode_reader_skip_predicate_list(
 }
 
 static uint8_t loom_bytecode_reader_find_parameter_index(
-    const loom_parameterized_attr_descriptor_t* family_descriptor,
-    iree_string_view_t parameter_name, uint8_t start_index) {
-  for (uint8_t i = start_index; i < family_descriptor->parameter_count; ++i) {
+    const loom_attr_descriptor_t* parameter_descriptors,
+    uint8_t parameter_count, iree_string_view_t parameter_name,
+    uint8_t start_index) {
+  for (uint8_t i = start_index; i < parameter_count; ++i) {
     if (iree_string_view_equal(
             parameter_name,
-            loom_attr_descriptor_name(
-                &family_descriptor->parameter_descriptors[i]))) {
+            loom_attr_descriptor_name(&parameter_descriptors[i]))) {
       return i;
     }
   }
@@ -698,7 +692,8 @@ static uint8_t loom_bytecode_reader_find_parameter_index(
 static iree_status_t loom_bytecode_reader_skip_attr_value_at_depth(
     loom_bytecode_reader_state_t* reader, loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, uint8_t kind,
-    bool predicate_value_args_are_strings, uint8_t aggregate_depth) {
+    bool predicate_value_args_are_strings,
+    iree_host_size_t available_type_count, uint8_t aggregate_depth) {
   switch (kind) {
     case LOOM_BYTECODE_ATTR_I64: {
       int64_t value = 0;
@@ -798,8 +793,9 @@ static iree_status_t loom_bytecode_reader_skip_attr_value_at_depth(
           loom_bytecode_reader_read_uvarint(reader, cursor, &type_id));
       if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
       loom_type_t unused = {0};
-      return loom_bytecode_reader_validate_type_ref(
-          reader, type_id, IREE_SV("attribute_type"), offset, &unused);
+      return loom_bytecode_reader_validate_type_ref_bounded(
+          reader, type_id, available_type_count, IREE_SV("attribute_type"),
+          offset, &unused);
     }
     case LOOM_BYTECODE_ATTR_PREDICATE_LIST:
       return loom_bytecode_reader_skip_predicate_list(
@@ -849,7 +845,7 @@ static iree_status_t loom_bytecode_reader_skip_attr_value_at_depth(
         }
         IREE_RETURN_IF_ERROR(loom_bytecode_reader_skip_attr_value_at_depth(
             reader, cursor, NULL, value_kind, predicate_value_args_are_strings,
-            aggregate_depth + 1));
+            available_type_count, aggregate_depth + 1));
         if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
       }
       return iree_ok_status();
@@ -917,12 +913,15 @@ static iree_status_t loom_bytecode_reader_skip_attr_value_at_depth(
         if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
         const uint8_t parameter_index =
             loom_bytecode_reader_find_parameter_index(
-                family_descriptor, parameter_name, next_parameter_index);
+                family_descriptor->parameter_descriptors,
+                family_descriptor->parameter_count, parameter_name,
+                next_parameter_index);
         if (parameter_index == LOOM_ATTR_INDEX_NONE) {
           const bool declared_before_cursor =
               loom_bytecode_reader_find_parameter_index(
-                  family_descriptor, parameter_name, /*start_index=*/0) !=
-              LOOM_ATTR_INDEX_NONE;
+                  family_descriptor->parameter_descriptors,
+                  family_descriptor->parameter_count, parameter_name,
+                  /*start_index=*/0) != LOOM_ATTR_INDEX_NONE;
           return loom_bytecode_reader_emit_invalid_field(
               reader, cursor->range_name, IREE_SV("attribute"), i,
               IREE_SV("parameter_name"), parameter_offset,
@@ -947,7 +946,8 @@ static iree_status_t loom_bytecode_reader_skip_attr_value_at_depth(
         IREE_RETURN_IF_ERROR(loom_bytecode_reader_skip_attr_value_at_depth(
             reader, cursor,
             &family_descriptor->parameter_descriptors[parameter_index],
-            value_kind, predicate_value_args_are_strings, aggregate_depth + 1));
+            value_kind, predicate_value_args_are_strings, available_type_count,
+            aggregate_depth + 1));
         if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
       }
       return iree_ok_status();
@@ -962,10 +962,11 @@ static iree_status_t loom_bytecode_reader_skip_attr_value_at_depth(
 static iree_status_t loom_bytecode_reader_skip_attr_value(
     loom_bytecode_reader_state_t* reader, loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, uint8_t kind,
-    bool predicate_value_args_are_strings) {
+    bool predicate_value_args_are_strings,
+    iree_host_size_t available_type_count) {
   return loom_bytecode_reader_skip_attr_value_at_depth(
       reader, cursor, descriptor, kind, predicate_value_args_are_strings,
-      /*aggregate_depth=*/0);
+      available_type_count, /*aggregate_depth=*/0);
 }
 
 static iree_status_t loom_bytecode_reader_read_predicate_list_attr(
@@ -1070,7 +1071,8 @@ static iree_status_t loom_bytecode_reader_read_attr_value_at_depth(
     loom_bytecode_reader_state_t* reader, loom_bytecode_reader_cursor_t* cursor,
     loom_bytecode_body_reader_t* body_reader,
     const loom_attr_descriptor_t* descriptor, uint8_t kind,
-    loom_attribute_t* out_attr, uint8_t aggregate_depth) {
+    loom_attribute_t* out_attr, iree_host_size_t available_type_count,
+    uint8_t aggregate_depth) {
   switch (kind) {
     case LOOM_BYTECODE_ATTR_I64: {
       int64_t value = 0;
@@ -1236,8 +1238,9 @@ static iree_status_t loom_bytecode_reader_read_attr_value_at_depth(
           loom_bytecode_reader_read_uvarint(reader, cursor, &type_id));
       if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
       loom_type_t unused = {0};
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_type_ref(
-          reader, type_id, IREE_SV("attribute_type"), type_offset, &unused));
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_type_ref_bounded(
+          reader, type_id, available_type_count, IREE_SV("attribute_type"),
+          type_offset, &unused));
       if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
       *out_attr = loom_attr_type((loom_type_id_t)type_id);
       return iree_ok_status();
@@ -1305,7 +1308,8 @@ static iree_status_t loom_bytecode_reader_read_attr_value_at_depth(
         entries[entry_index].reserved = 0;
         IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_attr_value_at_depth(
             reader, cursor, body_reader, NULL, value_kind,
-            &entries[entry_index].value, aggregate_depth + 1));
+            &entries[entry_index].value, available_type_count,
+            aggregate_depth + 1));
         if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
       }
       return loom_module_make_canonical_attr_dict(
@@ -1424,12 +1428,15 @@ static iree_status_t loom_bytecode_reader_read_attr_value_at_depth(
         }
         const uint8_t parameter_index =
             loom_bytecode_reader_find_parameter_index(
-                family_descriptor, parameter_name, next_parameter_index);
+                family_descriptor->parameter_descriptors,
+                family_descriptor->parameter_count, parameter_name,
+                next_parameter_index);
         if (parameter_index == LOOM_ATTR_INDEX_NONE) {
           const bool declared_before_cursor =
               loom_bytecode_reader_find_parameter_index(
-                  family_descriptor, parameter_name, /*start_index=*/0) !=
-              LOOM_ATTR_INDEX_NONE;
+                  family_descriptor->parameter_descriptors,
+                  family_descriptor->parameter_count, parameter_name,
+                  /*start_index=*/0) != LOOM_ATTR_INDEX_NONE;
           status = loom_bytecode_reader_emit_invalid_field(
               reader, cursor->range_name, IREE_SV("attribute"), i,
               IREE_SV("parameter_name"), parameter_offset,
@@ -1458,7 +1465,8 @@ static iree_status_t loom_bytecode_reader_read_attr_value_at_depth(
         status = loom_bytecode_reader_read_attr_value_at_depth(
             reader, cursor, body_reader,
             &family_descriptor->parameter_descriptors[parameter_index],
-            value_kind, &slots[parameter_index], aggregate_depth + 1);
+            value_kind, &slots[parameter_index], available_type_count,
+            aggregate_depth + 1);
       }
       if (iree_status_is_ok(status) &&
           !loom_bytecode_reader_has_errors(reader)) {
@@ -1480,10 +1488,156 @@ static iree_status_t loom_bytecode_reader_read_attr_value(
     loom_bytecode_reader_state_t* reader, loom_bytecode_reader_cursor_t* cursor,
     loom_bytecode_body_reader_t* body_reader,
     const loom_attr_descriptor_t* descriptor, uint8_t kind,
-    loom_attribute_t* out_attr) {
+    loom_attribute_t* out_attr, iree_host_size_t available_type_count) {
   return loom_bytecode_reader_read_attr_value_at_depth(
       reader, cursor, body_reader, descriptor, kind, out_attr,
-      /*aggregate_depth=*/0);
+      available_type_count, /*aggregate_depth=*/0);
+}
+
+static iree_status_t loom_bytecode_reader_read_parameterized_type(
+    loom_bytecode_reader_state_t* reader, loom_bytecode_reader_cursor_t* cursor,
+    uint64_t type_index, loom_bytecode_type_read_mode_t read_mode,
+    loom_type_t* out_type) {
+  const uint64_t family_offset =
+      loom_bytecode_reader_cursor_absolute_position(cursor);
+  uint64_t family_name_id = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_bytecode_reader_read_uvarint(reader, cursor, &family_name_id));
+  if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+  iree_string_view_t family_name = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_string_ref(
+      reader, family_name_id, IREE_SV("parameterized_type_family"),
+      family_offset, &family_name));
+  if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+  const loom_type_descriptor_t* type_descriptor =
+      loom_type_registry_lookup(family_name);
+  if (!type_descriptor || !type_descriptor->parameterized) {
+    return loom_bytecode_reader_emit_invalid_field(
+        reader, IREE_SV("TYPES"), IREE_SV("type"), type_index,
+        IREE_SV("family_name"), family_offset,
+        IREE_SV("parameterized_type_family_is_not_registered"));
+  }
+  const loom_parameterized_type_descriptor_t* descriptor =
+      type_descriptor->parameterized;
+
+  const uint64_t present_count_offset =
+      loom_bytecode_reader_cursor_absolute_position(cursor);
+  uint64_t present_count = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_bytecode_reader_read_uvarint(reader, cursor, &present_count));
+  if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+  if (present_count > descriptor->parameter_count) {
+    return loom_bytecode_reader_emit_count_exceeds(
+        reader, IREE_SV("parameterized_type_parameters"), present_count,
+        descriptor->parameter_count, present_count_offset);
+  }
+
+  const iree_arena_checkpoint_t checkpoint =
+      iree_arena_checkpoint_save(reader->arena);
+  loom_attribute_t* parameters = NULL;
+  bool present_parameters[UINT8_MAX] = {false};
+  iree_status_t status = iree_ok_status();
+  if (read_mode == LOOM_BYTECODE_TYPE_READ_MATERIALIZE &&
+      descriptor->parameter_count > 0) {
+    status =
+        iree_arena_allocate_array(reader->arena, descriptor->parameter_count,
+                                  sizeof(*parameters), (void**)&parameters);
+    if (iree_status_is_ok(status)) {
+      memset(parameters, 0, descriptor->parameter_count * sizeof(*parameters));
+    }
+  }
+
+  uint8_t next_parameter_index = 0;
+  for (uint64_t i = 0; i < present_count && iree_status_is_ok(status) &&
+                       !loom_bytecode_reader_has_errors(reader);
+       ++i) {
+    const uint64_t parameter_offset =
+        loom_bytecode_reader_cursor_absolute_position(cursor);
+    uint64_t parameter_name_id = 0;
+    status =
+        loom_bytecode_reader_read_uvarint(reader, cursor, &parameter_name_id);
+    if (!iree_status_is_ok(status) || loom_bytecode_reader_has_errors(reader)) {
+      break;
+    }
+    iree_string_view_t parameter_name = iree_string_view_empty();
+    status = loom_bytecode_reader_validate_string_ref(
+        reader, parameter_name_id, IREE_SV("parameterized_type_parameter"),
+        parameter_offset, &parameter_name);
+    if (!iree_status_is_ok(status) || loom_bytecode_reader_has_errors(reader)) {
+      break;
+    }
+    const uint8_t parameter_index = loom_bytecode_reader_find_parameter_index(
+        descriptor->parameter_descriptors, descriptor->parameter_count,
+        parameter_name, next_parameter_index);
+    if (parameter_index == LOOM_ATTR_INDEX_NONE) {
+      const bool declared_before_cursor =
+          loom_bytecode_reader_find_parameter_index(
+              descriptor->parameter_descriptors, descriptor->parameter_count,
+              parameter_name, /*start_index=*/0) != LOOM_ATTR_INDEX_NONE;
+      status = loom_bytecode_reader_emit_invalid_field(
+          reader, IREE_SV("TYPES"), IREE_SV("type"), type_index,
+          IREE_SV("parameter_name"), parameter_offset,
+          declared_before_cursor
+              ? IREE_SV("parameterized_type_parameters_are_not_in_declaration_"
+                        "order")
+              : IREE_SV("parameterized_type_parameter_is_not_declared"));
+      break;
+    }
+    present_parameters[parameter_index] = true;
+    next_parameter_index = parameter_index + 1;
+
+    const uint64_t value_kind_offset =
+        loom_bytecode_reader_cursor_absolute_position(cursor);
+    uint8_t value_kind = 0;
+    status = loom_bytecode_reader_read_u8(reader, cursor, &value_kind);
+    if (!iree_status_is_ok(status) || loom_bytecode_reader_has_errors(reader)) {
+      break;
+    }
+    if (value_kind >= LOOM_BYTECODE_ATTR_COUNT) {
+      status = loom_bytecode_reader_emit_enum_value(
+          reader, IREE_SV("attribute_kind"), value_kind,
+          LOOM_BYTECODE_ATTR_COUNT, value_kind_offset);
+      break;
+    }
+    const loom_attr_descriptor_t* parameter_descriptor =
+        &descriptor->parameter_descriptors[parameter_index];
+    if (read_mode == LOOM_BYTECODE_TYPE_READ_MATERIALIZE) {
+      status = loom_bytecode_reader_read_attr_value(
+          reader, cursor, /*body_reader=*/NULL, parameter_descriptor,
+          value_kind, &parameters[parameter_index], type_index);
+    } else {
+      status = loom_bytecode_reader_skip_attr_value(
+          reader, cursor, parameter_descriptor, value_kind,
+          /*predicate_value_args_are_strings=*/true, type_index);
+    }
+  }
+
+  for (uint8_t i = 0;
+       i < descriptor->parameter_count && iree_status_is_ok(status) &&
+       !loom_bytecode_reader_has_errors(reader);
+       ++i) {
+    if (!present_parameters[i] &&
+        !iree_any_bit_set(descriptor->parameter_descriptors[i].flags,
+                          LOOM_ATTR_OPTIONAL)) {
+      status = loom_bytecode_reader_emit_invalid_field(
+          reader, IREE_SV("TYPES"), IREE_SV("type"), type_index,
+          IREE_SV("parameter_name"), present_count_offset,
+          IREE_SV("parameterized_type_required_parameter_is_absent"));
+    }
+  }
+
+  if (iree_status_is_ok(status) && !loom_bytecode_reader_has_errors(reader)) {
+    if (read_mode == LOOM_BYTECODE_TYPE_READ_MATERIALIZE) {
+      status = loom_module_make_parameterized_type(
+          reader->output_module, descriptor, parameters,
+          descriptor->parameter_count, out_type);
+    } else {
+      *out_type = loom_type_parameterized(descriptor, /*parameter_count=*/0,
+                                          /*parameters=*/NULL);
+    }
+  }
+  iree_arena_checkpoint_restore(&checkpoint);
+  return status;
 }
 
 static iree_status_t loom_bytecode_reader_read_encodings(
@@ -1615,7 +1769,8 @@ static iree_status_t loom_bytecode_reader_read_encodings(
             LOOM_BYTECODE_ATTR_COUNT, kind_offset);
       }
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_skip_attr_value(
-          reader, &cursor, /*descriptor=*/NULL, value_kind, true));
+          reader, &cursor, /*descriptor=*/NULL, value_kind, true,
+          reader->type_count));
       if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
     }
   }
@@ -1716,7 +1871,8 @@ static iree_status_t loom_bytecode_reader_materialize_encodings(
       params[param_index].name_id = (loom_string_id_t)name_id;
       params[param_index].reserved = 0;
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_attr_value(
-          reader, &cursor, NULL, NULL, value_kind, &params[param_index].value));
+          reader, &cursor, NULL, NULL, value_kind, &params[param_index].value,
+          reader->type_count));
       if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
     }
 
@@ -1784,6 +1940,9 @@ static iree_status_t loom_bytecode_reader_decode_type_kind(
       return iree_ok_status();
     case LOOM_BYTECODE_TYPE_STORAGE:
       *out_kind = LOOM_TYPE_STORAGE;
+      return iree_ok_status();
+    case LOOM_BYTECODE_TYPE_PARAMETERIZED:
+      *out_kind = LOOM_TYPE_PARAMETERIZED;
       return iree_ok_status();
     default: {
       loom_diagnostic_param_t params[] = {
@@ -1892,7 +2051,8 @@ static iree_status_t loom_bytecode_reader_build_shaped_type(
 
 static iree_status_t loom_bytecode_reader_read_types(
     loom_bytecode_reader_state_t* reader,
-    const loom_bytecode_reader_section_t* section) {
+    const loom_bytecode_reader_section_t* section,
+    loom_bytecode_type_read_mode_t read_mode) {
   loom_bytecode_reader_cursor_t cursor;
   loom_bytecode_reader_cursor_initialize(
       section->bytes.data, section->bytes.data_length, section->absolute_offset,
@@ -1909,13 +2069,24 @@ static iree_status_t loom_bytecode_reader_read_types(
         reader, IREE_SV("TYPES"), count, LOOM_BYTECODE_MAX_TYPE_COUNT,
         count_offset);
   }
-  if (count > 0) {
+  if (read_mode == LOOM_BYTECODE_TYPE_READ_MATERIALIZE &&
+      count != reader->type_count) {
+    return loom_bytecode_reader_emit_invalid_field(
+        reader, IREE_SV("TYPES"), IREE_SV("header"), 0, IREE_SV("type_count"),
+        count_offset,
+        IREE_SV("type_count_changed_between_validation_and_materialization"));
+  }
+  if (count > 0 && read_mode == LOOM_BYTECODE_TYPE_READ_VALIDATE) {
     IREE_RETURN_IF_ERROR(
         iree_arena_allocate_array(reader->arena, (iree_host_size_t)count,
                                   sizeof(loom_type_t), (void**)&reader->types));
   }
   reader->type_count = (iree_host_size_t)count;
   for (uint64_t type_index = 0; type_index < count; ++type_index) {
+    iree_arena_checkpoint_t materialize_checkpoint = {0};
+    if (read_mode == LOOM_BYTECODE_TYPE_READ_MATERIALIZE) {
+      materialize_checkpoint = iree_arena_checkpoint_save(reader->arena);
+    }
     uint64_t type_offset =
         loom_bytecode_reader_cursor_absolute_position(&cursor);
     uint8_t kind_byte = 0;
@@ -2085,6 +2256,11 @@ static iree_status_t loom_bytecode_reader_read_types(
                                        (uint16_t)param_count, params);
         break;
       }
+      case LOOM_TYPE_PARAMETERIZED: {
+        IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_parameterized_type(
+            reader, &cursor, type_index, read_mode, &type));
+        break;
+      }
       case LOOM_TYPE_REGISTER: {
         uint64_t payload0_offset =
             loom_bytecode_reader_cursor_absolute_position(&cursor);
@@ -2208,7 +2384,23 @@ static iree_status_t loom_bytecode_reader_read_types(
       default:
         break;
     }
+    if (read_mode == LOOM_BYTECODE_TYPE_READ_MATERIALIZE) {
+      loom_type_id_t type_id = LOOM_TYPE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(
+          loom_module_intern_type_id(reader->output_module, type, &type_id));
+      if (type_id != type_index) {
+        return loom_bytecode_reader_emit_invalid_field(
+            reader, IREE_SV("TYPES"), IREE_SV("type"), type_index,
+            IREE_SV("type"), type_offset,
+            IREE_SV(
+                "type_table_must_be_deduplicated_and_topologically_ordered"));
+      }
+      type = reader->output_module->types.entries[type_id];
+    }
     reader->types[type_index] = type;
+    if (read_mode == LOOM_BYTECODE_TYPE_READ_MATERIALIZE) {
+      iree_arena_checkpoint_restore(&materialize_checkpoint);
+    }
   }
   return loom_bytecode_reader_expect_empty(reader, &cursor, IREE_SV("TYPES"));
 }
@@ -3198,7 +3390,7 @@ static iree_status_t loom_bytecode_body_reader_read_op(
     } else {
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_attr_value(
           body_reader->reader, cursor, body_reader, descriptor, value_kind,
-          &attrs[attr_index]));
+          &attrs[attr_index], body_reader->reader->type_count));
     }
     if (loom_bytecode_reader_has_errors(body_reader->reader))
       return iree_ok_status();
@@ -3734,7 +3926,7 @@ static iree_status_t loom_bytecode_reader_read_func_payload_attrs(
     }
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_attr_value(
         reader, cursor, signature_reader, descriptor, value_kind,
-        &attrs[attr_index]));
+        &attrs[attr_index], reader->type_count));
     if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
   }
   return iree_ok_status();
@@ -3837,7 +4029,7 @@ static iree_status_t loom_bytecode_reader_skip_func_payload_attrs(
     }
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_skip_attr_value(
         reader, cursor, &vtable->attr_descriptors[attr_index], value_kind,
-        false));
+        false, reader->type_count));
     if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
   }
   return iree_ok_status();
@@ -4114,7 +4306,7 @@ static iree_status_t loom_bytecode_reader_skip_global_payload(
     }
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_skip_attr_value(
         reader, cursor, &vtable->attr_descriptors[attr_index], value_kind,
-        false));
+        false, reader->type_count));
     if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
   }
   return iree_ok_status();
@@ -4204,7 +4396,7 @@ static iree_status_t loom_bytecode_reader_skip_record_payload(
     }
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_skip_attr_value(
         reader, cursor, &vtable->attr_descriptors[attr_index], value_kind,
-        false));
+        false, reader->type_count));
     if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
   }
 
@@ -4966,7 +5158,7 @@ static iree_status_t loom_bytecode_reader_materialize_global_symbol(
     }
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_attr_value(
         reader, cursor, &global_reader, descriptor, value_kind,
-        &attrs[attr_index]));
+        &attrs[attr_index], reader->type_count));
     if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
   }
 
@@ -5087,7 +5279,8 @@ static iree_status_t loom_bytecode_reader_materialize_record_symbol(
           LOOM_BYTECODE_ATTR_COUNT, value_kind_offset);
     }
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_attr_value(
-        reader, cursor, NULL, descriptor, value_kind, &attrs[attr_index]));
+        reader, cursor, NULL, descriptor, value_kind, &attrs[attr_index],
+        reader->type_count));
     if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
   }
 
@@ -5148,10 +5341,6 @@ static iree_status_t loom_bytecode_reader_materialize_symbols(
     loom_bytecode_reader_state_t* reader,
     const loom_bytecode_reader_section_t* symbols_section,
     const loom_bytecode_reader_section_t* ir_section) {
-  IREE_RETURN_IF_ERROR(
-      loom_bytecode_reader_predeclare_symbols(reader, symbols_section));
-  if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
-
   loom_bytecode_reader_cursor_t cursor;
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_symbol_cursor_to_entries(
       reader, symbols_section, &cursor));
@@ -6154,7 +6343,8 @@ static iree_status_t loom_bytecode_reader_read_module_metadata(
   IREE_RETURN_IF_ERROR(
       loom_bytecode_reader_read_encodings(reader, encodings_section));
   if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_types(reader, types_section));
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_types(
+      reader, types_section, LOOM_BYTECODE_TYPE_READ_VALIDATE));
   if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_ops(reader, ops_section));
   if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
@@ -6211,11 +6401,15 @@ static iree_status_t loom_bytecode_reader_materialize_module(
   if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
 
   const loom_bytecode_reader_section_t* encodings_section = NULL;
+  const loom_bytecode_reader_section_t* types_section = NULL;
   const loom_bytecode_reader_section_t* symbols_section = NULL;
   const loom_bytecode_reader_section_t* ir_section = NULL;
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_require_section(
       reader, sections, section_count, LOOM_BYTECODE_SECTION_ENCODINGS,
       &encodings_section));
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_require_section(
+      reader, sections, section_count, LOOM_BYTECODE_SECTION_TYPES,
+      &types_section));
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_require_section(
       reader, sections, section_count, LOOM_BYTECODE_SECTION_SYMBOLS,
       &symbols_section));
@@ -6237,7 +6431,11 @@ static iree_status_t loom_bytecode_reader_materialize_module(
   IREE_RETURN_IF_ERROR(
       loom_bytecode_reader_materialize_encodings(reader, encodings_section));
   if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_materialize_types(reader));
+  IREE_RETURN_IF_ERROR(
+      loom_bytecode_reader_predeclare_symbols(reader, symbols_section));
+  if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_types(
+      reader, types_section, LOOM_BYTECODE_TYPE_READ_MATERIALIZE));
   if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
   if (locations_section) {
     IREE_RETURN_IF_ERROR(

@@ -25,6 +25,7 @@ from loom.format.bytecode.op_decls import (
     attr_def_for_op,
     build_op_decl_map,
     build_parameterized_attr_def_map,
+    build_parameterized_type_def_map,
     func_like_interface_for_op,
     symbol_def_for_op,
 )
@@ -70,6 +71,7 @@ from loom.ir import (
     OpaqueLocation,
     Operation,
     ParameterizedAttr,
+    ParameterizedType,
     PoolType,
     Predicate,
     PredicateArg,
@@ -154,6 +156,7 @@ class BytecodeReader:
         *,
         op_decls: Iterable[Any] | None = None,
         parameterized_attrs: Iterable[Any] | None = None,
+        type_defs: Iterable[Any] | None = None,
     ) -> None:
         self._data = data
         self._offset = 0
@@ -161,6 +164,7 @@ class BytecodeReader:
         self._parameterized_attrs_by_name = build_parameterized_attr_def_map(
             self._op_decls_by_name, parameterized_attrs
         )
+        self._parameterized_types_by_name = build_parameterized_type_def_map(type_defs)
         self._strings: list[str] = []
         self._sources: list[str] = []
         self._types: list[Type] = []
@@ -528,6 +532,66 @@ class BytecodeReader:
             raise BytecodeError(str(err)) from err
         return ir_type, offset
 
+    def _read_parameterized_type(
+        self, data: bytes, offset: int
+    ) -> tuple[ParameterizedType, int]:
+        family_id, offset = decode_varint(data, offset)
+        if family_id >= len(self._strings):
+            raise BytecodeError(
+                f"parameterized type family string_id {family_id} out of range "
+                f"(string table has {len(self._strings)} entries)"
+            )
+        family_name = self._strings[family_id]
+        definition = self._parameterized_types_by_name.get(family_name)
+        if definition is None:
+            raise BytecodeError(
+                f"parameterized type family {family_name!r} is not registered"
+            )
+
+        present_count, offset = decode_varint(data, offset)
+        if present_count > len(definition.params):
+            raise BytecodeError(
+                f"parameterized type {family_name!r} has {present_count} present "
+                f"parameters but declares only {len(definition.params)}"
+            )
+        parameter_by_name = {
+            parameter.name: (index, parameter)
+            for index, parameter in enumerate(definition.params)
+        }
+        parameters: dict[str, Any] = {}
+        previous_index = -1
+        for _ in range(present_count):
+            parameter_name_id, offset = decode_varint(data, offset)
+            if parameter_name_id >= len(self._strings):
+                raise BytecodeError(
+                    "parameterized type parameter string_id "
+                    f"{parameter_name_id} out of range (string table has "
+                    f"{len(self._strings)} entries)"
+                )
+            parameter_name = self._strings[parameter_name_id]
+            parameter_entry = parameter_by_name.get(parameter_name)
+            if parameter_entry is None:
+                raise BytecodeError(
+                    f"parameterized type {family_name!r} has unknown parameter "
+                    f"{parameter_name!r}"
+                )
+            parameter_index, parameter_def = parameter_entry
+            if parameter_index <= previous_index:
+                raise BytecodeError(
+                    f"parameterized type {family_name!r} parameters are not in "
+                    "declaration order"
+                )
+            parameter_value, offset = self._read_attr_value(
+                data, offset, attr_def=parameter_def
+            )
+            parameters[parameter_name] = parameter_value
+            previous_index = parameter_index
+
+        try:
+            return ParameterizedType(definition, parameters), offset
+        except (TypeError, ValueError) as err:
+            raise BytecodeError(str(err)) from err
+
     def _read_types_section(self, section: tuple[int, bytes]) -> None:
         _, data = section
         offset = 0
@@ -632,6 +696,8 @@ class BytecodeReader:
                     ir_type = DialectType(self._strings[name_id], tuple(params))
                 case TypeKind.REGISTER:
                     ir_type, offset = self._read_register_type(data, offset)
+                case TypeKind.PARAMETERIZED:
+                    ir_type, offset = self._read_parameterized_type(data, offset)
                 case TypeKind.STORAGE:
                     space_byte = data[offset]
                     offset += 1
@@ -1712,7 +1778,7 @@ class BytecodeReader:
                 return SymbolName(self._strings[string_id]), offset
             case 7:  # TYPE
                 type_idx, offset = decode_varint(data, offset)
-                return self._types[type_idx], offset
+                return self._resolve_prior_type(type_idx, "attribute type"), offset
             case 8:  # PREDICATE_LIST
                 predicates, offset = self._read_predicate_list(
                     data, offset, module, value_map
@@ -2025,6 +2091,7 @@ def read_module(
     *,
     op_decls: Iterable[Any] | None = None,
     parameterized_attrs: Iterable[Any] | None = None,
+    type_defs: Iterable[Any] | None = None,
     verify: bool = False,
 ) -> Module:
     """Read a module from .loombc bytes."""
@@ -2034,6 +2101,7 @@ def read_module(
             data,
             op_decls=op_decl_tuple,
             parameterized_attrs=parameterized_attrs,
+            type_defs=type_defs,
         ).read()
     except ValueError as err:
         raise BytecodeError(str(err)) from err
