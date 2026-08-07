@@ -1559,6 +1559,33 @@ static hipError_t iree_hip_resolve_stream(
   return hipSuccess;
 }
 
+// Resolves a stream and the context that owns its queue. Explicit streams are
+// valid independently of the calling thread's current context; implicit stream
+// handles are resolved against the current context.
+static hipError_t iree_hip_resolve_stream_context(
+    hipStream_t stream, iree_hal_streaming_context_t** out_context,
+    iree_hal_streaming_stream_t** out_stream) {
+  IREE_ASSERT_ARGUMENT(out_context);
+  IREE_ASSERT_ARGUMENT(out_stream);
+  *out_context = NULL;
+  *out_stream = NULL;
+
+  if (stream && stream != hipStreamLegacy && stream != hipStreamPerThread) {
+    iree_hal_streaming_stream_t* stream_obj =
+        (iree_hal_streaming_stream_t*)stream;
+    if (!stream_obj->context) return hipErrorContextIsDestroyed;
+    *out_context = stream_obj->context;
+    *out_stream = stream_obj;
+    return hipSuccess;
+  }
+
+  hipError_t result = iree_hip_ensure_context(out_context);
+  if (result == hipSuccess) {
+    result = iree_hip_resolve_stream(stream, out_stream);
+  }
+  return result;
+}
+
 static hipError_t iree_hip_synchronize_legacy_stream_dependencies(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_stream_t* stream) {
@@ -6022,6 +6049,13 @@ static hipError_t iree_hip_memcpy_peer_staged(
     iree_hal_streaming_context_t* src_context, const void* src,
     size_t size_bytes, iree_hal_streaming_stream_t* stream);
 
+static hipError_t iree_hip_memcpy3d_staged_rows(
+    iree_hal_streaming_context_t* dst_context, void* dst,
+    iree_hal_streaming_context_t* src_context, const void* src, size_t width,
+    size_t height, size_t depth, size_t dst_pitch, size_t src_pitch,
+    size_t dst_slice_pitch, size_t src_slice_pitch,
+    iree_hal_streaming_stream_t* stream);
+
 static hipError_t iree_hip_try_cross_context_h2d(
     iree_hal_streaming_context_t* context, void* dst, const void* src,
     size_t size, bool* out_handled) {
@@ -6483,23 +6517,10 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  // Explicit streams carry their owning context and can be used from worker
-  // threads that have no current context set.
   iree_hal_streaming_context_t* context = NULL;
   iree_hal_streaming_stream_t* stream_obj = NULL;
-  hipError_t init_result = hipSuccess;
-  if (stream && stream != hipStreamLegacy && stream != hipStreamPerThread) {
-    stream_obj = (iree_hal_streaming_stream_t*)stream;
-    context = stream_obj->context;
-    if (!context) {
-      init_result = hipErrorContextIsDestroyed;
-    }
-  } else {
-    init_result = iree_hip_ensure_context(&context);
-    if (init_result == hipSuccess) {
-      init_result = iree_hip_resolve_stream(stream, &stream_obj);
-    }
-  }
+  hipError_t init_result =
+      iree_hip_resolve_stream_context(stream, &context, &stream_obj);
   if (init_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
@@ -6640,6 +6661,92 @@ static bool iree_hip_calculate_2d_copy_span(size_t pitch, size_t width,
          iree_host_size_checked_add(*out_span, width, out_span);
 }
 
+// Resolves the context that owns a device allocation. The stream context is
+// checked first to keep the common same-device path off the global context
+// list lock.
+static hipError_t iree_hip_lookup_device_allocation_owner(
+    iree_hal_streaming_context_t* stream_context, const void* pointer,
+    size_t span, iree_hal_streaming_context_t** out_context,
+    bool* out_is_device) {
+  *out_context = NULL;
+  *out_is_device = false;
+
+  iree_hal_streaming_buffer_ref_t buffer_ref = {0};
+  iree_status_t status = iree_hal_streaming_memory_lookup_range(
+      stream_context, (iree_hal_streaming_deviceptr_t)(uintptr_t)pointer, span,
+      &buffer_ref);
+  if (iree_status_is_ok(status)) {
+    iree_hal_streaming_context_retain(stream_context);
+    *out_context = stream_context;
+  } else if (iree_status_code(status) == IREE_STATUS_NOT_FOUND) {
+    iree_status_ignore(status);
+    status = iree_hal_streaming_memory_lookup_range_across_contexts(
+        (iree_hal_streaming_deviceptr_t)(uintptr_t)pointer, span, out_context,
+        &buffer_ref);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_is_device =
+        iree_hip_memory_type_for_buffer(buffer_ref.buffer) != hipMemoryTypeHost;
+    return hipSuccess;
+  }
+  if (iree_status_code(status) == IREE_STATUS_NOT_FOUND) {
+    iree_status_ignore(status);
+    return hipSuccess;
+  }
+  return iree_status_to_hip_result(status);
+}
+
+// Handles pitched copies whose device endpoint is not owned by the stream's
+// context. A HAL queue cannot directly reference buffers from another device,
+// so these copies preserve stream order and transfer through the owning
+// contexts instead of recording an invalid command buffer.
+static hipError_t iree_hip_try_foreign_context_memcpy2d(
+    iree_hal_streaming_context_t* stream_context, void* dst, size_t dst_pitch,
+    size_t dst_span, const void* src, size_t src_pitch, size_t src_span,
+    size_t width, size_t height, hipMemcpyKind kind,
+    iree_hal_streaming_stream_t* stream, bool* out_handled) {
+  *out_handled = false;
+
+  iree_hal_streaming_context_t* dst_context = NULL;
+  iree_hal_streaming_context_t* src_context = NULL;
+  bool dst_is_device = false;
+  bool src_is_device = false;
+  hipError_t result = hipSuccess;
+
+  if (kind == hipMemcpyHostToDevice || kind == hipMemcpyDeviceToDevice) {
+    result = iree_hip_lookup_device_allocation_owner(
+        stream_context, dst, dst_span, &dst_context, &dst_is_device);
+  }
+  if (result == hipSuccess &&
+      (kind == hipMemcpyDeviceToHost || kind == hipMemcpyDeviceToDevice)) {
+    result = iree_hip_lookup_device_allocation_owner(
+        stream_context, src, src_span, &src_context, &src_is_device);
+  }
+
+  if (result == hipSuccess) {
+    if ((kind == hipMemcpyHostToDevice && dst_is_device &&
+         dst_context != stream_context) ||
+        (kind == hipMemcpyDeviceToHost && src_is_device &&
+         src_context != stream_context) ||
+        (kind == hipMemcpyDeviceToDevice && dst_is_device && src_is_device &&
+         (dst_context != stream_context || src_context != stream_context))) {
+      *out_handled = true;
+    }
+  }
+
+  if (result == hipSuccess && *out_handled) {
+    result = iree_hip_memcpy3d_staged_rows(
+        kind == hipMemcpyDeviceToHost ? NULL : dst_context, dst,
+        kind == hipMemcpyHostToDevice ? NULL : src_context, src, width, height,
+        /*depth=*/1, dst_pitch, src_pitch, /*dst_slice_pitch=*/dst_span,
+        /*src_slice_pitch=*/src_span, stream);
+  }
+
+  iree_hal_streaming_context_release(src_context);
+  iree_hal_streaming_context_release(dst_context);
+  return result;
+}
+
 static hipError_t iree_hip_validate_2d_copy_shape(size_t dst_pitch,
                                                   size_t src_pitch,
                                                   size_t width, size_t height,
@@ -6652,13 +6759,6 @@ static hipError_t iree_hip_validate_2d_copy_shape(size_t dst_pitch,
   size_t src_span = 0;
   if (!iree_hip_calculate_2d_copy_span(dst_pitch, width, height, &dst_span) ||
       !iree_hip_calculate_2d_copy_span(src_pitch, width, height, &src_span)) {
-    return hipErrorInvalidValue;
-  }
-  int max_pitch = 0;
-  if (hipDeviceGetAttribute(&max_pitch, hipDeviceAttributeMaxPitch, 0) ==
-          hipSuccess &&
-      max_pitch > 0 &&
-      (dst_pitch > (size_t)max_pitch || src_pitch > (size_t)max_pitch)) {
     return hipErrorInvalidValue;
   }
   return hipSuccess;
@@ -6842,16 +6942,10 @@ HIPAPI hipError_t hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src,
     return hipSuccess;
   }
 
-  // Ensure initialization and get context.
   iree_hal_streaming_context_t* context = NULL;
-  hipError_t init_result = iree_hip_ensure_context(&context);
-  if (init_result != hipSuccess) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
-  }
-
   iree_hal_streaming_stream_t* stream_obj = NULL;
-  init_result = iree_hip_resolve_stream(stream, &stream_obj);
+  hipError_t init_result =
+      iree_hip_resolve_stream_context(stream, &context, &stream_obj);
   if (init_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
@@ -6862,6 +6956,14 @@ HIPAPI hipError_t hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src,
   if (shape_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(shape_result);
+  }
+  int max_pitch = 0;
+  if (hipDeviceGetAttribute(&max_pitch, hipDeviceAttributeMaxPitch,
+                            context->device_ordinal) == hipSuccess &&
+      max_pitch > 0 &&
+      (dpitch > (size_t)max_pitch || spitch > (size_t)max_pitch)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
   const hipMemcpyKind requested_kind = kind;
@@ -6897,9 +6999,23 @@ HIPAPI hipError_t hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src,
   }
 
   size_t dst_span = 0;
-  if (!iree_hip_calculate_2d_copy_span(dpitch, width, height, &dst_span)) {
+  size_t src_span = 0;
+  if (!iree_hip_calculate_2d_copy_span(dpitch, width, height, &dst_span) ||
+      !iree_hip_calculate_2d_copy_span(spitch, width, height, &src_span)) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  bool handled_foreign_context = false;
+  hipError_t foreign_context_result = iree_hip_try_foreign_context_memcpy2d(
+      context, dst, dpitch, dst_span, src, spitch, src_span, width, height,
+      kind, stream_obj, &handled_foreign_context);
+  if (handled_foreign_context || foreign_context_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    if (foreign_context_result != hipSuccess) {
+      HIP_RETURN_ERROR(foreign_context_result);
+    }
+    return hipSuccess;
   }
   const bool pageable_d2h =
       kind == hipMemcpyDeviceToHost &&
@@ -7071,8 +7187,14 @@ static hipError_t iree_hip_memcpy3d_staged_rows(
   uint8_t* dst_base = (uint8_t*)dst;
   const uint8_t* src_base = (const uint8_t*)src;
   if (dst_context && src_context) {
-    uint8_t* staging = (uint8_t*)malloc(width);
-    if (!staging) return hipErrorOutOfMemory;
+    if (stream) {
+      status = iree_hal_streaming_stream_synchronize(stream);
+    }
+    uint8_t* staging = NULL;
+    if (iree_status_is_ok(status)) {
+      staging = (uint8_t*)malloc(width);
+      if (!staging) return hipErrorOutOfMemory;
+    }
     for (size_t z = 0; z < depth && iree_status_is_ok(status); ++z) {
       uint8_t* dst_slice = dst_base + z * dst_slice_pitch;
       const uint8_t* src_slice = src_base + z * src_slice_pitch;
@@ -7227,6 +7349,15 @@ HIPAPI hipError_t hipMemcpy3DAsync(const hipMemcpy3DParms* p,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+
+  iree_hal_streaming_context_t* context = NULL;
+  iree_hal_streaming_stream_t* stream_obj = NULL;
+  hipError_t stream_result =
+      iree_hip_resolve_stream_context(stream, &context, &stream_obj);
+  if (stream_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(stream_result);
+  }
   if (p->extent.width > p->srcPtr.pitch || p->extent.width > p->dstPtr.pitch ||
       p->srcPos.x > p->srcPtr.pitch || p->dstPos.x > p->dstPtr.pitch ||
       p->extent.width > p->srcPtr.pitch - p->srcPos.x ||
@@ -7235,8 +7366,8 @@ HIPAPI hipError_t hipMemcpy3DAsync(const hipMemcpy3DParms* p,
     HIP_RETURN_ERROR(hipErrorInvalidPitchValue);
   }
   int max_pitch = 0;
-  if (hipDeviceGetAttribute(&max_pitch, hipDeviceAttributeMaxPitch, 0) ==
-          hipSuccess &&
+  if (hipDeviceGetAttribute(&max_pitch, hipDeviceAttributeMaxPitch,
+                            context->device_ordinal) == hipSuccess &&
       max_pitch > 0 &&
       (p->srcPtr.pitch >= (size_t)max_pitch ||
        p->dstPtr.pitch >= (size_t)max_pitch)) {
@@ -7297,12 +7428,6 @@ HIPAPI hipError_t hipMemcpy3DAsync(const hipMemcpy3DParms* p,
   const uint8_t* src_base = (const uint8_t*)p->srcPtr.ptr + src_base_offset;
   uint8_t* dst_base = (uint8_t*)p->dstPtr.ptr + dst_base_offset;
 
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  hipError_t stream_result = iree_hip_resolve_stream(stream, &stream_obj);
-  if (stream_result != hipSuccess) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(stream_result);
-  }
   if (stream_obj->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
     hipError_t result =
         iree_hip_capture_memcpy3d_node(stream_obj, original_params);
