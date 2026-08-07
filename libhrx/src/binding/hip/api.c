@@ -5793,6 +5793,15 @@ HIPAPI hipError_t hipMemPtrGetInfo(void* ptr, size_t* size) {
   return result;
 }
 
+static hipMemoryType iree_hip_memory_type_for_buffer(
+    const iree_hal_streaming_buffer_t* buffer) {
+  if (buffer->is_managed) return hipMemoryTypeManaged;
+  return iree_any_bit_set((iree_hal_memory_type_t)buffer->memory_type,
+                          IREE_HAL_MEMORY_TYPE_HOST_LOCAL)
+             ? hipMemoryTypeHost
+             : hipMemoryTypeDevice;
+}
+
 static hipError_t iree_hip_resolve_memcpy_kind(
     iree_hal_streaming_context_t* context, const void* dst, const void* src,
     hipMemcpyKind kind, hipMemcpyKind* out_kind) {
@@ -5815,14 +5824,17 @@ static hipError_t iree_hip_resolve_memcpy_kind(
   iree_hal_streaming_buffer_ref_t dst_ref;
   iree_status_t dst_status = iree_hal_streaming_memory_lookup(
       context, (iree_hal_streaming_deviceptr_t)dst, &dst_ref);
-  bool dst_is_device = iree_status_is_ok(dst_status);
+  bool dst_is_device =
+      iree_status_is_ok(dst_status) &&
+      iree_hip_memory_type_for_buffer(dst_ref.buffer) != hipMemoryTypeHost;
   if (!dst_is_device && iree_status_code(dst_status) == IREE_STATUS_NOT_FOUND) {
     iree_status_ignore(dst_status);
     iree_hal_streaming_context_t* owner_context = NULL;
     dst_status = iree_hal_streaming_memory_lookup_range_across_contexts(
         (iree_hal_streaming_deviceptr_t)dst, 1, &owner_context, &dst_ref);
     if (iree_status_is_ok(dst_status)) {
-      dst_is_device = dst_ref.buffer->is_managed;
+      dst_is_device =
+          iree_hip_memory_type_for_buffer(dst_ref.buffer) != hipMemoryTypeHost;
       iree_hal_streaming_context_release(owner_context);
     }
   }
@@ -5831,14 +5843,17 @@ static hipError_t iree_hip_resolve_memcpy_kind(
   iree_hal_streaming_buffer_ref_t src_ref;
   iree_status_t src_status = iree_hal_streaming_memory_lookup(
       context, (iree_hal_streaming_deviceptr_t)src, &src_ref);
-  bool src_is_device = iree_status_is_ok(src_status);
+  bool src_is_device =
+      iree_status_is_ok(src_status) &&
+      iree_hip_memory_type_for_buffer(src_ref.buffer) != hipMemoryTypeHost;
   if (!src_is_device && iree_status_code(src_status) == IREE_STATUS_NOT_FOUND) {
     iree_status_ignore(src_status);
     iree_hal_streaming_context_t* owner_context = NULL;
     src_status = iree_hal_streaming_memory_lookup_range_across_contexts(
         (iree_hal_streaming_deviceptr_t)src, 1, &owner_context, &src_ref);
     if (iree_status_is_ok(src_status)) {
-      src_is_device = src_ref.buffer->is_managed;
+      src_is_device =
+          iree_hip_memory_type_for_buffer(src_ref.buffer) != hipMemoryTypeHost;
       iree_hal_streaming_context_release(owner_context);
     }
   }
@@ -13745,12 +13760,6 @@ typedef struct iree_hip_pointer_metadata_t {
   // Registered symbol size when |kind| is STATIC_MANAGED.
   size_t symbol_size;
 } iree_hip_pointer_metadata_t;
-
-static hipMemoryType iree_hip_memory_type_for_buffer(
-    const iree_hal_streaming_buffer_t* buffer) {
-  if (buffer->is_managed) return hipMemoryTypeManaged;
-  return buffer->host_ptr ? hipMemoryTypeHost : hipMemoryTypeDevice;
-}
 
 static bool iree_hip_pointer_is_cpu_mapped(const void* ptr) {
 #ifdef __linux__
