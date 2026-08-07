@@ -748,11 +748,20 @@ class TestParameterizedType:
         packed = test_array_type(element_type=BF16)
         aligned = test_array_type(element_type=BF16, alignment=16)
 
-        assert packed.slots == (BF16, None)
+        assert packed.slots == (BF16, None, None)
         assert not packed.has("alignment")
         assert packed.get("alignment") is None
         assert aligned.has("alignment")
         assert aligned.get("alignment") == 16
+
+    def test_dictionary_parameter_preserves_nested_family_values(self) -> None:
+        metadata = CanonicalAttrDict(
+            (("tile", test_tile_attr(width=8)), ("purpose", "scratch"))
+        )
+        array = test_array_type(element_type=BF16, metadata=metadata)
+
+        assert array.has("metadata")
+        assert array.get("metadata") == metadata
 
 
 class TestOperations:

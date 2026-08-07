@@ -1038,7 +1038,8 @@ TEST_F(ModuleTest, ReplaceValueTypeUsesUpdatesParameterizedTypeSlots) {
       loom_module_intern_type_id(module, vector_type, &vector_type_id));
   loom_type_t array_type = {};
   IREE_ASSERT_OK(loom_test_array_type_make(
-      module, /*build_flags=*/0, vector_type_id, /*alignment=*/0, &array_type));
+      module, /*build_flags=*/0, vector_type_id, /*alignment=*/0,
+      loom_named_attr_slice_empty(), &array_type));
   loom_value_id_t array_id = LOOM_VALUE_ID_INVALID;
   IREE_ASSERT_OK(loom_module_define_value(module, array_type, &array_id));
 
@@ -1866,12 +1867,13 @@ TEST_F(ModuleTest, ParameterizedTypeBuilderInternsDescriptorIndexedSlots) {
 
   loom_type_t packed_array = {0};
   IREE_ASSERT_OK(loom_test_array_type_make(
-      module, /*build_flags=*/0, bf16_type_id, /*alignment=*/0, &packed_array));
+      module, /*build_flags=*/0, bf16_type_id, /*alignment=*/0,
+      loom_named_attr_slice_empty(), &packed_array));
   EXPECT_FALSE(loom_test_array_type_has_alignment(packed_array));
   loom_type_t aligned_array = {0};
   IREE_ASSERT_OK(loom_test_array_type_make(
       module, LOOM_TEST_ARRAY_TYPE_BUILD_FLAG_HAS_ALIGNMENT, bf16_type_id,
-      /*alignment=*/32, &aligned_array));
+      /*alignment=*/32, loom_named_attr_slice_empty(), &aligned_array));
   EXPECT_TRUE(loom_test_array_type_has_alignment(aligned_array));
   EXPECT_EQ(loom_test_array_type_alignment(aligned_array), 32);
 

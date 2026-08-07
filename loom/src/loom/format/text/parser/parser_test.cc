@@ -1370,13 +1370,15 @@ TEST_F(ParserTest, DescriptorBackedTypesRoundTripAndPreserveParameters) {
       "test.matrix<bf16, scope = workgroup, rows = 16>\n"
       "%packed = test.constant 0 : test.array<bf16>\n"
       "%aligned = test.constant 0 : "
-      "test.array<bf16, alignment = 32>\n";
+      "test.array<bf16, alignment = 32>\n"
+      "%metadata = test.constant 0 : "
+      "test.array<bf16, metadata = {tile = #test.tile<width = 8>}>\n";
   std::string text = RoundTrip(source);
   loom_module_t* module = ParseOk(text.c_str());
   ASSERT_NE(module, nullptr);
   loom_block_t* block = loom_module_block(module);
   ASSERT_NE(block, nullptr);
-  ASSERT_EQ(block->op_count, 4u);
+  ASSERT_EQ(block->op_count, 5u);
 
   loom_type_t scope_type = loom_module_value_type(
       module, loom_test_constant_result(loom_block_op(block, 0)));
@@ -1405,6 +1407,16 @@ TEST_F(ParserTest, DescriptorBackedTypesRoundTripAndPreserveParameters) {
   ASSERT_TRUE(loom_test_array_type_isa(aligned_type));
   EXPECT_TRUE(loom_test_array_type_has_alignment(aligned_type));
   EXPECT_EQ(loom_test_array_type_alignment(aligned_type), 32);
+
+  loom_type_t metadata_type = loom_module_value_type(
+      module, loom_test_constant_result(loom_block_op(block, 4)));
+  ASSERT_TRUE(loom_test_array_type_isa(metadata_type));
+  ASSERT_TRUE(loom_test_array_type_has_metadata(metadata_type));
+  loom_named_attr_slice_t metadata =
+      loom_test_array_type_metadata(metadata_type);
+  ASSERT_EQ(metadata.count, 1u);
+  ASSERT_TRUE(loom_test_tile_attr_isa(metadata.entries[0].value));
+  EXPECT_EQ(loom_test_tile_attr_width(metadata.entries[0].value), 8);
 
   loom_module_free(module);
 }

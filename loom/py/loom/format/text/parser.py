@@ -748,6 +748,7 @@ def _parse_descriptor_attr_value_from_tokens(
                 module,
                 type_registry,
                 mode or TypeParseMode.BODY,
+                parameterized_attr_registry=parameterized_attr_registry,
             )
             return parsed_type
         case "i64_array":
@@ -973,6 +974,8 @@ def parse_type_from_tokens(
     module: Module,
     type_registry: dict[str, TypeDef],
     mode: TypeParseMode = TypeParseMode.BODY,
+    *,
+    parameterized_attr_registry: Mapping[str, ParameterizedAttrDef] | None = None,
 ) -> tuple[Type, dict[int, int]]:
     """Parse a type from the token stream.
 
@@ -1005,7 +1008,14 @@ def parse_type_from_tokens(
 
     # Register type keyword?
     if token.kind == TokenKind.BARE_IDENT and token.text == "reg":
-        return _parse_register_type(tokenizer, scope, module, type_registry, mode)
+        return _parse_register_type(
+            tokenizer,
+            scope,
+            module,
+            type_registry,
+            mode,
+            parameterized_attr_registry,
+        )
 
     # Registered type (BARE_IDENT like "tile" or OP_NAME like "hal.buffer")?
     if token.kind in (TokenKind.BARE_IDENT, TokenKind.OP_NAME):
@@ -1041,6 +1051,7 @@ def parse_type_from_tokens(
                 mode,
                 token.location,
                 tokenizer._filename,
+                parameterized_attr_registry,
             )
         if token.kind == TokenKind.OP_NAME:
             tokenizer.next()
@@ -1048,7 +1059,14 @@ def parse_type_from_tokens(
 
     # Function type: (types) -> (types)
     if token.kind == TokenKind.LPAREN:
-        return _parse_function_type(tokenizer, scope, module, type_registry, mode)
+        return _parse_function_type(
+            tokenizer,
+            scope,
+            module,
+            type_registry,
+            mode,
+            parameterized_attr_registry,
+        )
 
     raise ParseError(
         f"expected type, got {token.kind.name} {token.text!r}",
@@ -1104,6 +1122,7 @@ def _parse_register_type(
     module: Module,
     type_registry: dict[str, TypeDef],
     mode: TypeParseMode,
+    parameterized_attr_registry: Mapping[str, ParameterizedAttrDef] | None,
 ) -> tuple[RegisterType, dict[int, int]]:
     """Parse reg<namespace.class [xN] [: value_type]>."""
     tokenizer.expect(TokenKind.BARE_IDENT, "reg")
@@ -1136,7 +1155,12 @@ def _parse_register_type(
     dim_bindings: dict[int, int] = {}
     if tokenizer.try_consume(TokenKind.COLON) is not None:
         value_type, dim_bindings = parse_type_from_tokens(
-            tokenizer, scope, module, type_registry, mode
+            tokenizer,
+            scope,
+            module,
+            type_registry,
+            mode,
+            parameterized_attr_registry=parameterized_attr_registry,
         )
     tokenizer.expect(TokenKind.RANGLE)
     try:
@@ -1160,6 +1184,7 @@ def parse_type_string(
     scope: NameScope | None = None,
     module: Module | None = None,
     mode: TypeParseMode | None = None,
+    parameterized_attr_registry: Mapping[str, ParameterizedAttrDef] | None = None,
 ) -> tuple[Type, dict[int, int]]:
     """Parse a type from a string. Convenience for testing."""
     tokenizer = Tokenizer(text)
@@ -1173,7 +1198,14 @@ def parse_type_string(
         type_registry = {td.name: td for td in ALL_BUILTIN_TYPES}
     if mode is None:
         mode = TypeParseMode.BODY
-    result = parse_type_from_tokens(tokenizer, scope, module, type_registry, mode)
+    result = parse_type_from_tokens(
+        tokenizer,
+        scope,
+        module,
+        type_registry,
+        mode,
+        parameterized_attr_registry=parameterized_attr_registry,
+    )
     tokenizer.expect(TokenKind.EOF)
     return result
 
@@ -1184,18 +1216,29 @@ def _parse_function_type(
     module: Module,
     type_registry: dict[str, TypeDef],
     mode: TypeParseMode,
+    parameterized_attr_registry: Mapping[str, ParameterizedAttrDef] | None,
 ) -> tuple[FunctionType, dict[int, int]]:
     """Parse (arg_types) -> (result_types)."""
     tokenizer.expect(TokenKind.LPAREN)
     arg_types: list[Type] = []
     if not tokenizer.at(TokenKind.RPAREN):
         arg_type, _ = parse_type_from_tokens(
-            tokenizer, scope, module, type_registry, mode
+            tokenizer,
+            scope,
+            module,
+            type_registry,
+            mode,
+            parameterized_attr_registry=parameterized_attr_registry,
         )
         arg_types.append(arg_type)
         while tokenizer.try_consume(TokenKind.COMMA):
             arg_type, _ = parse_type_from_tokens(
-                tokenizer, scope, module, type_registry, mode
+                tokenizer,
+                scope,
+                module,
+                type_registry,
+                mode,
+                parameterized_attr_registry=parameterized_attr_registry,
             )
             arg_types.append(arg_type)
     tokenizer.expect(TokenKind.RPAREN)
@@ -1204,12 +1247,22 @@ def _parse_function_type(
     result_types: list[Type] = []
     if not tokenizer.at(TokenKind.RPAREN):
         result_type, _ = parse_type_from_tokens(
-            tokenizer, scope, module, type_registry, mode
+            tokenizer,
+            scope,
+            module,
+            type_registry,
+            mode,
+            parameterized_attr_registry=parameterized_attr_registry,
         )
         result_types.append(result_type)
         while tokenizer.try_consume(TokenKind.COMMA):
             result_type, _ = parse_type_from_tokens(
-                tokenizer, scope, module, type_registry, mode
+                tokenizer,
+                scope,
+                module,
+                type_registry,
+                mode,
+                parameterized_attr_registry=parameterized_attr_registry,
             )
             result_types.append(result_type)
     tokenizer.expect(TokenKind.RPAREN)
@@ -1237,12 +1290,17 @@ _KEYWORD_TOKEN_KINDS = {
 }
 
 
-def _at_keyword(tokenizer: Tokenizer, text: str) -> bool:
-    """Returns whether the tokenizer is positioned at a keyword."""
+def _token_is_keyword(token: Token, text: str) -> bool:
+    """Returns whether a token matches a keyword spelling."""
     kind = _KEYWORD_TOKEN_KINDS.get(text)
     if kind is not None:
-        return tokenizer.at(kind)
-    return tokenizer.at(TokenKind.BARE_IDENT, text)
+        return token.kind == kind
+    return token.kind == TokenKind.BARE_IDENT and token.text == text
+
+
+def _at_keyword(tokenizer: Tokenizer, text: str) -> bool:
+    """Returns whether the tokenizer is positioned at a keyword."""
+    return _token_is_keyword(tokenizer.peek(), text)
 
 
 def _expect_keyword(tokenizer: Tokenizer, text: str) -> None:
@@ -1263,63 +1321,61 @@ def _type_optional_present(
     """Peek to decide if an OptionalGroup is present in a type interior."""
     if not inner_elements:
         return False
-    first = next(
-        (element for element in inner_elements if not isinstance(element, Glue)),
-        None,
-    )
-    match first:
-        case Keyword(text=","):
-            result: bool = tokenizer.at(TokenKind.COMMA)
-            return result
-        case Keyword(text="->"):
-            result = tokenizer.at(TokenKind.ARROW)
-            return result
-        case Keyword(text=text):
-            result = tokenizer.at(TokenKind.BARE_IDENT, text)
-            return result
-        case Clause(name=name):
-            return (
-                tokenizer.at(TokenKind.BARE_IDENT, name)
-                and tokenizer.peek_n(1).kind == TokenKind.LPAREN
-            )
-        case TypeOf() | TypesOf():
-            return _is_type_start(tokenizer.peek(), type_registry)
-        case Param(field=field):
-            descriptor = type_def.param(field)
-            assert isinstance(descriptor, AttrDef)
-            match descriptor.attr_type:
-                case "i64":
-                    return tokenizer.at(TokenKind.INTEGER)
-                case "f64":
-                    return (
-                        tokenizer.at(TokenKind.INTEGER)
-                        or tokenizer.at(TokenKind.FLOAT)
-                        or tokenizer.at(TokenKind.BARE_IDENT)
-                    )
-                case "string":
-                    return tokenizer.at(TokenKind.STRING)
-                case "enum":
-                    return tokenizer.at(TokenKind.BARE_IDENT) or tokenizer.at(
-                        TokenKind.LANGLE
-                    )
-                case "enum_array" | "i64_array":
-                    return tokenizer.at(TokenKind.LBRACKET)
-                case "bool":
-                    return tokenizer.at(TokenKind.BARE_IDENT)
-                case "symbol":
-                    return tokenizer.at(TokenKind.SYMBOL)
-                case "type":
-                    return _is_type_start(tokenizer.peek(), type_registry)
-                case "bytes":
-                    return tokenizer.at(TokenKind.BARE_IDENT, "bytes")
-                case "encoding" | "parameterized":
-                    return tokenizer.at(TokenKind.HASH_ATTR)
-                case "dict":
-                    return tokenizer.at(TokenKind.LBRACE)
-                case _:
-                    return not tokenizer.at(TokenKind.EOF)
-        case _:
-            return not tokenizer.at(TokenKind.EOF)
+    token_offset = 0
+    for element in inner_elements:
+        if isinstance(element, Glue):
+            continue
+        token = tokenizer.peek_n(token_offset)
+        match element:
+            case Keyword(text=text):
+                if not _token_is_keyword(token, text):
+                    return False
+                token_offset += 1
+            case Clause(name=name):
+                return (
+                    _token_is_keyword(token, name)
+                    and tokenizer.peek_n(token_offset + 1).kind == TokenKind.LPAREN
+                )
+            case TypeOf() | TypesOf():
+                return _is_type_start(token, type_registry)
+            case Param(field=field):
+                descriptor = type_def.param(field)
+                assert isinstance(descriptor, AttrDef)
+                match descriptor.attr_type:
+                    case "i64":
+                        return token.kind == TokenKind.INTEGER
+                    case "f64":
+                        return token.kind in (
+                            TokenKind.INTEGER,
+                            TokenKind.FLOAT,
+                            TokenKind.BARE_IDENT,
+                        )
+                    case "string":
+                        return token.kind == TokenKind.STRING
+                    case "enum":
+                        return token.kind in (
+                            TokenKind.BARE_IDENT,
+                            TokenKind.LANGLE,
+                        )
+                    case "enum_array" | "i64_array":
+                        return token.kind == TokenKind.LBRACKET
+                    case "bool":
+                        return token.kind == TokenKind.BARE_IDENT
+                    case "symbol":
+                        return token.kind == TokenKind.SYMBOL
+                    case "type":
+                        return _is_type_start(token, type_registry)
+                    case "bytes":
+                        return _token_is_keyword(token, "bytes")
+                    case "encoding" | "parameterized":
+                        return token.kind == TokenKind.HASH_ATTR
+                    case "dict":
+                        return token.kind == TokenKind.LBRACE
+                    case _:
+                        return token.kind != TokenKind.EOF
+            case _:
+                return token.kind != TokenKind.EOF
+    return True
 
 
 def _parse_type_interior(
@@ -1331,6 +1387,7 @@ def _parse_type_interior(
     mode: TypeParseMode,
     location: SourceLocation,
     filename: str,
+    parameterized_attr_registry: Mapping[str, ParameterizedAttrDef] | None,
 ) -> tuple[Type, dict[int, int]]:
     """Parse the interior of a parameterized type.
 
@@ -1348,19 +1405,36 @@ def _parse_type_interior(
             match element:
                 case TypeOf():
                     param_type, _ = parse_type_from_tokens(
-                        interior_tokenizer, scope, module, type_registry, mode
+                        interior_tokenizer,
+                        scope,
+                        module,
+                        type_registry,
+                        mode,
+                        parameterized_attr_registry=parameterized_attr_registry,
                     )
                     parsed_params.append(param_type)
                 case TypesOf():
                     # Comma-separated types.
                     if _is_type_start(interior_tokenizer.peek(), type_registry):
                         t, _ = parse_type_from_tokens(
-                            interior_tokenizer, scope, module, type_registry, mode
+                            interior_tokenizer,
+                            scope,
+                            module,
+                            type_registry,
+                            mode,
+                            parameterized_attr_registry=parameterized_attr_registry,
                         )
                         parsed_params.append(t)
                         while interior_tokenizer.try_consume(TokenKind.COMMA):
                             t, _ = parse_type_from_tokens(
-                                interior_tokenizer, scope, module, type_registry, mode
+                                interior_tokenizer,
+                                scope,
+                                module,
+                                type_registry,
+                                mode,
+                                parameterized_attr_registry=(
+                                    parameterized_attr_registry
+                                ),
                             )
                             parsed_params.append(t)
                 case Attr(field=name):
@@ -1377,7 +1451,7 @@ def _parse_type_interior(
                         scope=scope,
                         type_registry=type_registry,
                         mode=mode,
-                        parameterized_attr_registry=None,
+                        parameterized_attr_registry=parameterized_attr_registry,
                         aliases=_CURRENT_ALIASES,
                         known_encodings=_CURRENT_KNOWN_ENCODINGS,
                         attr_dict_nesting_depth=0,
@@ -1695,6 +1769,20 @@ class Parser:
         for definition in definitions:
             self._parameterized_attr_registry[definition.name] = definition
 
+    def _parse_type(
+        self, tokenizer: Tokenizer, scope: NameScope, mode: TypeParseMode
+    ) -> tuple[Type, dict[int, int]]:
+        """Parses a type with every registry owned by this parser."""
+
+        return parse_type_from_tokens(
+            tokenizer,
+            scope,
+            self._module,
+            self._type_registry,
+            mode,
+            parameterized_attr_registry=self._parameterized_attr_registry,
+        )
+
     def register_encodings(self, names: Sequence[str]) -> None:
         """Register known encoding names for validation."""
         self._known_encodings.update(names)
@@ -1826,8 +1914,8 @@ class Parser:
         tok = self._tokenizer
         name_tok = tok.expect(TokenKind.SSA_VALUE)
         tok.expect(TokenKind.COLON)
-        arg_type, all_bindings = parse_type_from_tokens(
-            tok, self._scope, self._module, self._type_registry, TypeParseMode.SIGNATURE
+        arg_type, all_bindings = self._parse_type(
+            tok, self._scope, TypeParseMode.SIGNATURE
         )
         # Extract bindings: dim_bindings are non-negative keys,
         # encoding_binding uses sentinel key -1.
@@ -2568,12 +2656,8 @@ class Parser:
                                 tok._filename,
                             ) from None
                         tok.expect(TokenKind.COLON)
-                        annotated_type, _bindings = parse_type_from_tokens(
-                            tok,
-                            self._scope,
-                            self._module,
-                            self._type_registry,
-                            TypeParseMode.BODY,
+                        annotated_type, _bindings = self._parse_type(
+                            tok, self._scope, TypeParseMode.BODY
                         )
                         actual_type = self._module.values[value_id].type
                         if actual_type != annotated_type:
@@ -2607,12 +2691,8 @@ class Parser:
                         else TypeParseMode.BODY
                     )
                     annotation_token = tok.peek()
-                    parsed_type, bindings = parse_type_from_tokens(
-                        tok,
-                        self._scope,
-                        self._module,
-                        self._type_registry,
-                        parse_mode,
+                    parsed_type, bindings = self._parse_type(
+                        tok, self._scope, parse_mode
                     )
                     # Check if this field is a result — store the type.
                     if is_result:
@@ -2632,12 +2712,8 @@ class Parser:
                     annotation_tokens: list[Token] = []
                     if _is_type_start(tok.peek(), self._type_registry):
                         annotation_tokens.append(tok.peek())
-                        t, bindings = parse_type_from_tokens(
-                            tok,
-                            self._scope,
-                            self._module,
-                            self._type_registry,
-                            TypeParseMode.BODY,
+                        t, bindings = self._parse_type(
+                            tok, self._scope, TypeParseMode.BODY
                         )
                         parsed_types.append(t)
                         parsed_bindings.append(bindings)
@@ -2645,12 +2721,8 @@ class Parser:
                             if not _is_type_start(tok.peek(), self._type_registry):
                                 break
                             annotation_tokens.append(tok.peek())
-                            t, bindings = parse_type_from_tokens(
-                                tok,
-                                self._scope,
-                                self._module,
-                                self._type_registry,
-                                TypeParseMode.BODY,
+                            t, bindings = self._parse_type(
+                                tok, self._scope, TypeParseMode.BODY
                             )
                             parsed_types.append(t)
                             parsed_bindings.append(bindings)
@@ -3060,11 +3132,9 @@ class Parser:
                 if value.type == NONE_TYPE:
                     value.type = PlaceholderType()
                 scope.define(name, value_id)
-        result_type, bindings = parse_type_from_tokens(
+        result_type, bindings = self._parse_type(
             self._tokenizer,
             scope,
-            self._module,
-            self._type_registry,
             TypeParseMode.SIGNATURE
             if self._definition_scope_active
             else TypeParseMode.BODY,
@@ -3120,12 +3190,8 @@ class Parser:
             name_tok = tok.next()
             if tok.try_consume(TokenKind.COLON):
                 # Named result: %name: type.
-                result_type, all_bindings = parse_type_from_tokens(
-                    tok,
-                    self._scope,
-                    self._module,
-                    self._type_registry,
-                    result_mode,
+                result_type, all_bindings = self._parse_type(
+                    tok, self._scope, result_mode
                 )
                 dim_bindings = {k: v for k, v in all_bindings.items() if k >= 0}
                 encoding_binding = all_bindings.get(-1, -1)
@@ -3159,12 +3225,8 @@ class Parser:
             elif tok.try_consume(TokenKind.BARE_IDENT, "as"):
                 # Tied result: %operand as type.
                 operand_name = name_tok.text
-                result_type, bindings = parse_type_from_tokens(
-                    tok,
-                    self._scope,
-                    self._module,
-                    self._type_registry,
-                    TypeParseMode.BODY,
+                result_type, bindings = self._parse_type(
+                    tok, self._scope, TypeParseMode.BODY
                 )
                 parsed.result_types.append(result_type)
                 parsed.result_bindings.append(bindings)
@@ -3201,13 +3263,7 @@ class Parser:
                 )
         else:
             # Fresh result: type.
-            result_type, bindings = parse_type_from_tokens(
-                tok,
-                self._scope,
-                self._module,
-                self._type_registry,
-                result_mode,
-            )
+            result_type, bindings = self._parse_type(tok, self._scope, result_mode)
             parsed.result_types.append(result_type)
             parsed.result_bindings.append(bindings)
             self._assign_reserved_binding_types(bindings)
@@ -3309,12 +3365,8 @@ class Parser:
             while True:
                 name_token = tok.expect(TokenKind.SSA_VALUE)
                 tok.expect(TokenKind.COLON)
-                arg_type, _bindings = parse_type_from_tokens(
-                    tok,
-                    self._scope,
-                    self._module,
-                    self._type_registry,
-                    TypeParseMode.BODY,
+                arg_type, _bindings = self._parse_type(
+                    tok, self._scope, TypeParseMode.BODY
                 )
                 block_arg_names.append(name_token.text)
                 block_arg_types.append(arg_type)
@@ -3342,9 +3394,7 @@ class Parser:
         tok.expect(TokenKind.EQUALS)
         operand_name = tok.expect(TokenKind.SSA_VALUE).text
         tok.expect(TokenKind.COLON)
-        operand_type, _ = parse_type_from_tokens(
-            tok, self._scope, self._module, self._type_registry, TypeParseMode.BODY
-        )
+        operand_type, _ = self._parse_type(tok, self._scope, TypeParseMode.BODY)
         operand_id = self._scope.lookup(operand_name)
         parsed.operand_ids.append(operand_id)
         self._record_operand_ids(parsed, op_decl, field_name, [operand_id])
@@ -3818,13 +3868,7 @@ class Parser:
                 while not tok.at(TokenKind.RPAREN):
                     arg_name = tok.expect(TokenKind.SSA_VALUE).text
                     tok.expect(TokenKind.COLON)
-                    arg_type, _ = parse_type_from_tokens(
-                        tok,
-                        self._scope,
-                        self._module,
-                        self._type_registry,
-                        TypeParseMode.BODY,
-                    )
+                    arg_type, _ = self._parse_type(tok, self._scope, TypeParseMode.BODY)
                     value_id = self._module.add_value(
                         Value(name=arg_name, type=arg_type)
                     )
@@ -3929,13 +3973,7 @@ class Parser:
                     tok._filename,
                 ) from None
             tok.expect(TokenKind.COLON)
-            annotated_type, _ = parse_type_from_tokens(
-                tok,
-                self._scope,
-                self._module,
-                self._type_registry,
-                TypeParseMode.BODY,
-            )
+            annotated_type, _ = self._parse_type(tok, self._scope, TypeParseMode.BODY)
             actual_type = self._module.values[value_id].type
             if actual_type != annotated_type:
                 raise ParseError(

@@ -2823,7 +2823,7 @@ class Dialect:
         object.__setattr__(self, "register_by_default", register_by_default)
 
 
-_PARAMETERIZED_ATTR_PARAMETER_TYPES = frozenset(
+_DESCRIPTOR_PARAMETER_TYPES = frozenset(
     {
         ATTR_TYPE_I64,
         ATTR_TYPE_F64,
@@ -2857,6 +2857,46 @@ def _is_ascii_identifier(value: str) -> bool:
         character.isascii() and (character.isalnum() or character == "_")
         for character in value[1:]
     )
+
+
+def _validate_descriptor_parameters(
+    owner: str, parameters: tuple[AttrDef, ...]
+) -> None:
+    """Validates one descriptor-backed parameter schema."""
+
+    if len(parameters) > 0xFF:
+        raise ValueError(
+            f"{owner}: {len(parameters)} parameters exceed the uint8_t slot limit"
+        )
+    optional_parameter_count = sum(parameter.optional for parameter in parameters)
+    if optional_parameter_count > 64:
+        raise ValueError(
+            f"{owner}: {optional_parameter_count} optional parameters exceed "
+            "the uint64_t C builder flag limit"
+        )
+
+    seen_names: set[str] = set()
+    for parameter in parameters:
+        if not _is_ascii_identifier(parameter.name):
+            raise ValueError(
+                f"{owner}: parameter '{parameter.name}' must be a bare ASCII identifier"
+            )
+        if parameter.name in seen_names:
+            raise ValueError(f"{owner}: duplicate parameter '{parameter.name}'")
+        seen_names.add(parameter.name)
+        if parameter.attr_type not in _DESCRIPTOR_PARAMETER_TYPES:
+            raise ValueError(
+                f"{owner}: parameter '{parameter.name}' has unsupported kind "
+                f"'{parameter.attr_type}'"
+            )
+        if (
+            parameter.attr_type == ATTR_TYPE_PARAMETERIZED
+            and parameter.parameterized_attr is None
+        ):
+            raise ValueError(
+                f"{owner}: nested parameter '{parameter.name}' requires an "
+                "exact parameterized_attr"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -2895,46 +2935,9 @@ class ParameterizedAttrDef:
             )
 
         frozen_parameters = tuple(parameters)
-        if len(frozen_parameters) > 0xFF:
-            raise ValueError(
-                f"ParameterizedAttrDef '{name}': {len(frozen_parameters)} "
-                "parameters exceed the uint8_t slot limit"
-            )
-        optional_parameter_count = sum(
-            parameter.optional for parameter in frozen_parameters
+        _validate_descriptor_parameters(
+            f"ParameterizedAttrDef '{name}'", frozen_parameters
         )
-        if optional_parameter_count > 64:
-            raise ValueError(
-                f"ParameterizedAttrDef '{name}': {optional_parameter_count} "
-                "optional parameters exceed the uint64_t C builder flag limit"
-            )
-        seen_names: set[str] = set()
-        for parameter in frozen_parameters:
-            if not _is_ascii_identifier(parameter.name):
-                raise ValueError(
-                    f"ParameterizedAttrDef '{name}': parameter "
-                    f"'{parameter.name}' must be a bare ASCII identifier"
-                )
-            if parameter.name in seen_names:
-                raise ValueError(
-                    f"ParameterizedAttrDef '{name}': duplicate parameter "
-                    f"'{parameter.name}'"
-                )
-            seen_names.add(parameter.name)
-            if parameter.attr_type not in _PARAMETERIZED_ATTR_PARAMETER_TYPES:
-                raise ValueError(
-                    f"ParameterizedAttrDef '{name}': parameter "
-                    f"'{parameter.name}' has unsupported kind "
-                    f"'{parameter.attr_type}'"
-                )
-            if (
-                parameter.attr_type == ATTR_TYPE_PARAMETERIZED
-                and parameter.parameterized_attr is None
-            ):
-                raise ValueError(
-                    f"ParameterizedAttrDef '{name}': nested parameter "
-                    f"'{parameter.name}' requires an exact parameterized_attr"
-                )
 
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "group", group)
@@ -3090,19 +3093,8 @@ class TypeDef:
                 f"TypeDef '{name}': descriptor-backed parameters require the "
                 "generic dialect representation"
             )
-        if len(attribute_parameters) > 0xFF:
-            raise ValueError(
-                f"TypeDef '{name}': {len(attribute_parameters)} parameters "
-                "exceed the uint8_t slot limit"
-            )
-        optional_parameter_count = sum(
-            parameter.optional for parameter in attribute_parameters
-        )
-        if optional_parameter_count > 64:
-            raise ValueError(
-                f"TypeDef '{name}': {optional_parameter_count} optional "
-                "parameters exceed the uint64_t C builder flag limit"
-            )
+        if attribute_parameters:
+            _validate_descriptor_parameters(f"TypeDef '{name}'", attribute_parameters)
         parameter_names = [parameter.name for parameter in frozen_params]
         if len(set(parameter_names)) != len(parameter_names):
             raise ValueError(f"TypeDef '{name}': duplicate parameter name")
@@ -3135,20 +3127,6 @@ class TypeDef:
                     f"TypeDef '{name}': assembly format omits descriptor-backed "
                     f"parameter(s): {', '.join(sorted(omitted_parameters))}"
                 )
-            for parameter in attribute_parameters:
-                if parameter.attr_type not in _PARAMETERIZED_ATTR_PARAMETER_TYPES:
-                    raise ValueError(
-                        f"TypeDef '{name}': parameter '{parameter.name}' has "
-                        f"unsupported kind '{parameter.attr_type}'"
-                    )
-                if (
-                    parameter.attr_type == ATTR_TYPE_PARAMETERIZED
-                    and parameter.parameterized_attr is None
-                ):
-                    raise ValueError(
-                        f"TypeDef '{name}': nested parameter "
-                        f"'{parameter.name}' requires an exact parameterized_attr"
-                    )
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "doc", doc)
         object.__setattr__(self, "params", frozen_params)

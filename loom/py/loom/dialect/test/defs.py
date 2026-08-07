@@ -295,6 +295,7 @@ test_array_type = TypeDef(
     params=[
         AttrDef("element_type", "type"),
         AttrDef("alignment", "i64", optional=True),
+        AttrDef("metadata", "dict", optional=True),
     ],
     format=[
         Param("element_type"),
@@ -302,8 +303,12 @@ test_array_type = TypeDef(
             [COMMA, kw("alignment"), EQUALS, Param("alignment")],
             anchor="alignment",
         ),
+        OptionalGroup(
+            [COMMA, kw("metadata"), EQUALS, Param("metadata")],
+            anchor="metadata",
+        ),
     ],
-    doc="Optional keyed descriptor-backed type parameter witness.",
+    doc="Optional and nested descriptor-backed type parameter witness.",
 )
 
 ALL_TEST_TYPES = (

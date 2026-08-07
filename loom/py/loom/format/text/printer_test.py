@@ -19,6 +19,7 @@ from loom.dialect.test import (
     test_array_type,
     test_matrix_type,
     test_scope_type,
+    test_tile_attr,
 )
 from loom.format.text.parser import Parser
 from loom.format.text.printer import Printer, print_type
@@ -371,6 +372,16 @@ class TestPrintType:
         assert (
             print_type(test_array_type(element_type=BF16, alignment=16))
             == "test.array<bf16, alignment = 16>"
+        )
+
+    def test_descriptor_backed_type_nested_dictionary_parameter(self) -> None:
+        metadata = CanonicalAttrDict(
+            (("tile", test_tile_attr(width=8)), ("purpose", "scratch"))
+        )
+        assert (
+            print_type(test_array_type(element_type=BF16, metadata=metadata))
+            == 'test.array<bf16, metadata = {purpose = "scratch", '
+            "tile = #test.tile<width = 8>}>"
         )
 
 

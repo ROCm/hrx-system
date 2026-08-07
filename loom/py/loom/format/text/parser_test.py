@@ -31,6 +31,7 @@ from loom.dialect.test import (
     test_matrix_type,
     test_ops,
     test_scope_type,
+    test_tile_attr,
 )
 from loom.dsl import ANY, AttrDef, Op, Operand, TypeDef, TypeParam
 from loom.format.bytecode.reader import read_module
@@ -644,6 +645,21 @@ class TestParseDescriptorBackedTypes:
         assert packed == test_array_type(element_type=BF16)
         assert aligned == test_array_type(element_type=BF16, alignment=16)
 
+    def test_dictionary_parameter_parses_nested_parameterized_attr(self) -> None:
+        module = Module()
+        op = _parse_op(
+            "%array = test.constant 0 : "
+            "test.array<bf16, metadata = {tile = #test.tile<width = 8>}>",
+            module=module,
+        )
+
+        parsed = module.values[op.results[0]].type
+        assert isinstance(parsed, ParameterizedType)
+        assert parsed == test_array_type(
+            element_type=BF16,
+            metadata=CanonicalAttrDict((("tile", test_tile_attr(width=8)),)),
+        )
+
     def test_optional_float_parameter_accepts_special_value(self) -> None:
         optional_float_type = TypeDef(
             "test.optional_float",
@@ -738,19 +754,19 @@ class TestTypeRoundTrip:
 
 
 def _op_parser() -> Parser:
-    """Create a parser with test ops and built-in types."""
+    """Create a parser with the complete test dialect vocabulary."""
     parser = Parser()
     parser.register_ops(ALL_TEST_OPS)
-    parser.register_types(ALL_BUILTIN_TYPES)
+    parser.register_types((*ALL_BUILTIN_TYPES, *ALL_TEST_TYPES))
     parser.register_parameterized_attrs(ALL_TEST_PARAMETERIZED_ATTRS)
     return parser
 
 
 def _op_printer(**kwargs: Any) -> Printer:
-    """Create a printer with test ops and built-in types."""
+    """Create a printer with the complete test dialect vocabulary."""
     printer = Printer(**kwargs)
     printer.register_ops(ALL_TEST_OPS)
-    printer.register_types(ALL_BUILTIN_TYPES)
+    printer.register_types((*ALL_BUILTIN_TYPES, *ALL_TEST_TYPES))
     return printer
 
 

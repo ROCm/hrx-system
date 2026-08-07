@@ -1010,57 +1010,66 @@ static bool loom_parse_type_parameter_token_is_present(
   }
 }
 
-static bool loom_parse_type_format_keyword_is_present(loom_parser_t* parser,
-                                                      uint16_t keyword_id) {
-  loom_token_t token = loom_tokenizer_peek(&parser->tokenizer);
+static bool loom_parse_type_format_keyword_try_consume(
+    loom_tokenizer_t* tokenizer, uint16_t keyword_id) {
   loom_token_kind_t expected_kind = loom_keyword_token_kind(keyword_id);
   if (expected_kind != LOOM_TOKEN_BARE_IDENT) {
-    return token.kind == expected_kind;
+    return loom_tokenizer_try_consume(tokenizer, expected_kind);
   }
   loom_bstring_t keyword = loom_keyword_bstring((loom_keyword_id_t)keyword_id);
-  return keyword && token.kind == LOOM_TOKEN_BARE_IDENT &&
-         loom_bstring_equal(keyword, token.text);
+  return keyword && loom_tokenizer_try_consume_keyword(
+                        tokenizer, loom_bstring_view(keyword));
 }
 
 static bool loom_parse_type_optional_group_is_present(
     loom_parser_t* parser, const loom_type_descriptor_t* descriptor,
     uint16_t optional_index) {
   const loom_type_format_element_t* elements = descriptor->format_elements;
+  loom_tokenizer_t lookahead = parser->tokenizer;
   uint16_t element_index = (uint16_t)(optional_index + 1);
-  while (elements[element_index].kind == LOOM_TYPE_FMT_GLUE) {
-    ++element_index;
-  }
-  const loom_type_format_element_t* first = &elements[element_index];
-  switch (first->kind) {
-    case LOOM_TYPE_FMT_PARAM:
-      return loom_parse_type_parameter_token_is_present(
-          &descriptor->parameterized->parameter_descriptors[first->field_index],
-          loom_tokenizer_peek(&parser->tokenizer));
-    case LOOM_TYPE_FMT_PARAM_KEY: {
-      loom_token_t token = loom_tokenizer_peek(&parser->tokenizer);
-      return token.kind == LOOM_TOKEN_BARE_IDENT &&
-             iree_string_view_equal(
-                 token.text,
-                 loom_attr_descriptor_name(
-                     &descriptor->parameterized
-                          ->parameter_descriptors[first->field_index]));
+  const uint16_t optional_end =
+      (uint16_t)(optional_index + 1 + (elements[optional_index].data >> 8));
+  for (; element_index < optional_end; ++element_index) {
+    const loom_type_format_element_t* element = &elements[element_index];
+    switch (element->kind) {
+      case LOOM_TYPE_FMT_GLUE:
+        break;
+      case LOOM_TYPE_FMT_KEYWORD:
+        if (!loom_parse_type_format_keyword_try_consume(&lookahead,
+                                                        element->data)) {
+          return false;
+        }
+        break;
+      case LOOM_TYPE_FMT_PARAM:
+        return loom_parse_type_parameter_token_is_present(
+            &descriptor->parameterized
+                 ->parameter_descriptors[element->field_index],
+            loom_tokenizer_peek(&lookahead));
+      case LOOM_TYPE_FMT_PARAM_KEY: {
+        loom_token_t token = loom_tokenizer_peek(&lookahead);
+        return token.kind == LOOM_TOKEN_BARE_IDENT &&
+               iree_string_view_equal(
+                   token.text,
+                   loom_attr_descriptor_name(
+                       &descriptor->parameterized
+                            ->parameter_descriptors[element->field_index]));
+      }
+      default:
+        return false;
     }
-    case LOOM_TYPE_FMT_KEYWORD:
-      return loom_parse_type_format_keyword_is_present(parser, first->data);
-    default:
-      return false;
   }
+  return true;
 }
 
-static iree_status_t loom_parse_parameterized_type(
+static iree_status_t loom_parse_parameterized_type_contents(
     loom_parser_t* parser, const loom_type_descriptor_t* descriptor,
-    loom_type_parse_mode_t mode, loom_type_t* out_type) {
+    loom_type_parse_mode_t mode, loom_attribute_t* parameter_slots,
+    loom_type_t* out_type) {
   (void)loom_tokenizer_next(&parser->tokenizer);  // consume type name
   LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_LANGLE, NULL);
 
   const loom_parameterized_type_descriptor_t* parameterized =
       descriptor->parameterized;
-  loom_attribute_t parameter_slots[UINT8_MAX] = {0};
   uint32_t errors_before = parser->error_count;
   for (uint16_t i = 0; i < descriptor->format_element_count; ++i) {
     const loom_type_format_element_t* element = &descriptor->format_elements[i];
@@ -1104,6 +1113,31 @@ static iree_status_t loom_parse_parameterized_type(
   return loom_module_make_parameterized_type(
       parser->module, parameterized, parameter_slots,
       parameterized->parameter_count, out_type);
+}
+
+static iree_status_t loom_parse_parameterized_type(
+    loom_parser_t* parser, const loom_type_descriptor_t* descriptor,
+    loom_type_parse_mode_t mode, loom_type_t* out_type) {
+  const uint8_t parameter_count = descriptor->parameterized->parameter_count;
+  const iree_arena_checkpoint_t checkpoint =
+      iree_arena_checkpoint_save(&parser->parser_arena);
+  loom_attribute_t* parameter_slots = NULL;
+  iree_status_t status = iree_ok_status();
+  if (parameter_count > 0) {
+    status = iree_arena_allocate_array(&parser->parser_arena, parameter_count,
+                                       sizeof(*parameter_slots),
+                                       (void**)&parameter_slots);
+    if (iree_status_is_ok(status)) {
+      memset(parameter_slots, 0,
+             (iree_host_size_t)parameter_count * sizeof(*parameter_slots));
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_parse_parameterized_type_contents(parser, descriptor, mode,
+                                                    parameter_slots, out_type);
+  }
+  iree_arena_checkpoint_restore(&checkpoint);
+  return status;
 }
 
 static iree_status_t loom_parse_registered_type(loom_parser_t* parser,

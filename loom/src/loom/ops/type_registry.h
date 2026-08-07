@@ -135,6 +135,7 @@ iree_status_t loom_test_matrix_type_make(
 
 enum loom_test_array_type_build_flag_bits_e {
   LOOM_TEST_ARRAY_TYPE_BUILD_FLAG_HAS_ALIGNMENT = 1u << 0,
+  LOOM_TEST_ARRAY_TYPE_BUILD_FLAG_HAS_METADATA = 1u << 1,
 };
 typedef uint32_t loom_test_array_type_build_flags_t;
 
@@ -153,11 +154,19 @@ static inline bool loom_test_array_type_has_alignment(loom_type_t type) {
 static inline int64_t loom_test_array_type_alignment(loom_type_t type) {
   return loom_attr_as_i64(loom_type_parameterized_parameters(type)[LOOM_TEST_ARRAY_TYPE_ALIGNMENT_PARAMETER_INDEX]);
 }
+enum { LOOM_TEST_ARRAY_TYPE_METADATA_PARAMETER_INDEX = 2 };
+static inline bool loom_test_array_type_has_metadata(loom_type_t type) {
+  return !loom_attr_is_absent(loom_type_parameterized_parameters(type)[LOOM_TEST_ARRAY_TYPE_METADATA_PARAMETER_INDEX]);
+}
+static inline loom_named_attr_slice_t loom_test_array_type_metadata(loom_type_t type) {
+  return loom_attr_as_dict(loom_type_parameterized_parameters(type)[LOOM_TEST_ARRAY_TYPE_METADATA_PARAMETER_INDEX]);
+}
 iree_status_t loom_test_array_type_make(
     loom_module_t* module,
     loom_test_array_type_build_flags_t build_flags,
     loom_type_id_t element_type,
     int64_t alignment,
+    loom_named_attr_slice_t metadata,
     loom_type_t* out_type);
 
 // Entry in the sorted type registry.

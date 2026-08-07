@@ -452,12 +452,12 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_test_matrix_type_make(
         module, bf16_type_id, LOOM_TEST_MATRIX_TYPE_SCOPE_WORKGROUP, 16,
         &argument_types[1]));
-    IREE_CHECK_OK(loom_test_array_type_make(module, /*build_flags=*/0,
-                                            bf16_type_id, /*alignment=*/0,
-                                            &argument_types[2]));
+    IREE_CHECK_OK(loom_test_array_type_make(
+        module, /*build_flags=*/0, bf16_type_id, /*alignment=*/0,
+        loom_named_attr_slice_empty(), &argument_types[2]));
     IREE_CHECK_OK(loom_test_array_type_make(
         module, LOOM_TEST_ARRAY_TYPE_BUILD_FLAG_HAS_ALIGNMENT, bf16_type_id,
-        /*alignment=*/32, &argument_types[3]));
+        /*alignment=*/32, loom_named_attr_slice_empty(), &argument_types[3]));
 
     loom_builder_t builder;
     loom_builder_initialize(module, &module->arena, loom_module_block(module),

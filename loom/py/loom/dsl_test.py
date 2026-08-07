@@ -1534,6 +1534,28 @@ class TestTypeDef:
                 format=[TypeOf("value"), COMMA, Param("mode")],
             )
 
+    def test_descriptor_parameters_share_family_schema_validation(self) -> None:
+        with _raises(ValueError, match="must be a bare ASCII identifier"):
+            TypeDef(
+                "test.wrapper",
+                params=[AttrDef("not-valid", "i64")],
+                format=[Param("not-valid")],
+            )
+
+        with _raises(ValueError, match="requires an exact parameterized_attr"):
+            TypeDef(
+                "test.wrapper",
+                params=[AttrDef("value", ATTR_TYPE_PARAMETERIZED)],
+                format=[Param("value")],
+            )
+
+        with _raises(ValueError, match="unsupported kind 'scoped_enum'"):
+            TypeDef(
+                "test.wrapper",
+                params=[AttrDef("scope", "scoped_enum")],
+                format=[Param("scope")],
+            )
+
     def test_descriptor_parameters_require_exactly_one_format_reference(self) -> None:
         with _raises(ValueError, match="must appear exactly once"):
             TypeDef(

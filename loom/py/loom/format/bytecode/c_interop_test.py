@@ -22,12 +22,14 @@ from loom.dialect.test import (
     test_array_type,
     test_matrix_type,
     test_scope_type,
+    test_tile_attr,
 )
 from loom.format.bytecode.reader import read_module
 from loom.format.bytecode.writer import write_module
 from loom.format.text.parser import Parser
 from loom.ir import (
     BF16,
+    CanonicalAttrDict,
     EnumArrayAttr,
     Module,
     ParameterizedAttr,
@@ -78,7 +80,9 @@ def _typed_register_module() -> tuple[Module, RegisterType]:
         "%scope: test.scope<subgroup>, "
         "%matrix: test.matrix<bf16, scope = workgroup, rows = 16>, "
         "%packed: test.array<bf16>, "
-        "%aligned: test.array<bf16, alignment = 32>)\n"
+        "%aligned: test.array<bf16, alignment = 32>, "
+        "%metadata: test.array<bf16, metadata = "
+        "{tile = #test.tile<width = 8>}>)\n"
     )
     register_types = [
         value.type for value in module.values if isinstance(value.type, RegisterType)
@@ -179,6 +183,10 @@ def main() -> None:
             test_matrix_type(element_type=BF16, scope="workgroup", rows=16),
             test_array_type(element_type=BF16),
             test_array_type(element_type=BF16, alignment=32),
+            test_array_type(
+                element_type=BF16,
+                metadata=CanonicalAttrDict((("tile", test_tile_attr(width=8)),)),
+            ),
         )
         if argument_types != expected_types or not all(
             isinstance(value, ParameterizedType) for value in argument_types

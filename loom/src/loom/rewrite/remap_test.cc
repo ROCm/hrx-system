@@ -134,7 +134,8 @@ TEST_F(RemapTest, RemapsTypesNestedInParameterizedTypeSlots) {
   loom_type_t source_array_type = {};
   IREE_ASSERT_OK(loom_test_array_type_make(
       source_, LOOM_TEST_ARRAY_TYPE_BUILD_FLAG_HAS_ALIGNMENT,
-      source_vector_type_id, /*alignment=*/32, &source_array_type));
+      source_vector_type_id, /*alignment=*/32, loom_named_attr_slice_empty(),
+      &source_array_type));
 
   loom_ir_remap_t remap = InitializeRemap();
   IREE_ASSERT_OK(loom_ir_remap_map_value(&remap, source_dim, target_dim));
