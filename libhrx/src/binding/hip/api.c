@@ -8760,9 +8760,7 @@ static hipError_t iree_hip_memset_3d(hipPitchedPtr pitchedDevPtr, int value,
         hipMemsetAsync(pitchedDevPtr.ptr, value, byte_count, stream);
     if (linear_result == hipSuccess && !is_async) {
       iree_status_t sync_status =
-          iree_hal_streaming_memory_complete_synchronous_memset(
-              context, (iree_hal_streaming_deviceptr_t)pitchedDevPtr.ptr,
-              byte_count, context->default_stream);
+          iree_hal_streaming_context_synchronize_legacy_default(context);
       linear_result = iree_memset_status_to_hip_result(sync_status);
     }
     IREE_TRACE_ZONE_END(z0);
@@ -8788,9 +8786,7 @@ static hipError_t iree_hip_memset_3d(hipPitchedPtr pitchedDevPtr, int value,
 
   if (!is_async) {
     iree_status_t sync_status =
-        iree_hal_streaming_memory_complete_synchronous_memset(
-            context, (iree_hal_streaming_deviceptr_t)pitchedDevPtr.ptr,
-            byte_span, context->default_stream);
+        iree_hal_streaming_context_synchronize_legacy_default(context);
     result = iree_memset_status_to_hip_result(sync_status);
   }
 
