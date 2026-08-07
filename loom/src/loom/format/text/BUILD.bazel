@@ -88,7 +88,7 @@ loom_cc_benchmark(
     name = "type_syntax_benchmark",
     srcs = ["type_syntax_benchmark.cc"],
     args = [
-        "--benchmark_filter=BM_(ScalarTypeClassify.*|(Parse|Print)(ScalarTypes|ShapedTypes|TaggedLocations)/16)",
+        "--benchmark_filter=BM_((ScalarType|LocationTag)Classify.*|(Parse|Print)(ScalarTypes|ShapedTypes|TaggedLocations)/16)",
     ],
     deps = [
         ":parser",

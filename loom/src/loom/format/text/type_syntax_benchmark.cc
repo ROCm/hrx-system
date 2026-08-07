@@ -5,9 +5,9 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 // Benchmarks built-in type and location syntax at scales that expose small
-// per-occurrence costs in generated modules. Focused scalar classification
-// rows isolate vocabulary lookup, while full-module rows include the actual
-// parser and canonical printer paths used by the JIT.
+// per-occurrence costs in generated modules. Focused vocabulary classification
+// rows isolate name lookup, while full-module rows include the actual parser
+// and canonical printer paths used by the JIT.
 
 #include <array>
 #include <cstdint>
@@ -18,6 +18,7 @@
 #include "loom/format/text/parser.h"
 #include "loom/format/text/printer.h"
 #include "loom/ir/context.h"
+#include "loom/ir/location.h"
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/ops/test/ops.h"
@@ -31,7 +32,7 @@ enum class SyntaxWorkload {
   kTaggedLocations,
 };
 
-static constexpr int64_t kScalarClassificationBatchCount = 4096;
+static constexpr int64_t kClassificationBatchCount = 4096;
 
 static std::array<iree_string_view_t, LOOM_SCALAR_TYPE_COUNT_>
 BuildScalarTypeNameViews() {
@@ -51,12 +52,21 @@ static constexpr std::array<const char*, 5> kShapedTypeNames = {
     "pool<4096>",
 };
 
-static constexpr std::array<const char*, 4> kLocationTagNames = {
-    "sanitizer_site",
-    "template_instantiation",
-    "tile_lowering",
-    "ukernel_selection",
+static constexpr std::array<loom_location_tag_t, 4> kBuiltinLocationTags = {
+    LOOM_LOCATION_TAG_SANITIZER_SITE,
+    LOOM_LOCATION_TAG_TEMPLATE_INSTANTIATION,
+    LOOM_LOCATION_TAG_TILE_LOWERING,
+    LOOM_LOCATION_TAG_UKERNEL_SELECTION,
 };
+
+static std::array<iree_string_view_t, kBuiltinLocationTags.size()>
+BuildLocationTagNameViews() {
+  std::array<iree_string_view_t, kBuiltinLocationTags.size()> names;
+  for (size_t i = 0; i < kBuiltinLocationTags.size(); ++i) {
+    names[i] = loom_location_tag_name(kBuiltinLocationTags[i]);
+  }
+  return names;
+}
 
 class TypeSyntaxBenchmark {
  public:
@@ -127,11 +137,14 @@ static std::string BuildSyntaxModule(SyntaxWorkload workload,
       case SyntaxWorkload::kShapedTypes:
         source.append(kShapedTypeNames[(size_t)i % kShapedTypeNames.size()]);
         break;
-      case SyntaxWorkload::kTaggedLocations:
+      case SyntaxWorkload::kTaggedLocations: {
         source.append("i32 loc(tagged<");
-        source.append(kLocationTagNames[(size_t)i % kLocationTagNames.size()]);
+        const iree_string_view_t tag_name = loom_location_tag_name(
+            kBuiltinLocationTags[(size_t)i % kBuiltinLocationTags.size()]);
+        source.append(tag_name.data, tag_name.size);
         source.append(", \"00\">)");
         break;
+      }
     }
     source.push_back((i + 1) % kOperationsPerSourceLine == 0 ? '\n' : ' ');
   }
@@ -195,7 +208,7 @@ static void BenchmarkPrintModule(benchmark::State& state,
 static void BM_ScalarTypeClassifyKnown(benchmark::State& state) {
   const auto type_names = BuildScalarTypeNameViews();
   for (auto _ : state) {
-    for (int64_t batch = 0; batch < kScalarClassificationBatchCount; ++batch) {
+    for (int64_t batch = 0; batch < kClassificationBatchCount; ++batch) {
       for (iree_string_view_t type_name : type_names) {
         benchmark::DoNotOptimize(type_name);
         loom_scalar_type_t type = 0;
@@ -206,13 +219,13 @@ static void BM_ScalarTypeClassifyKnown(benchmark::State& state) {
     }
   }
   state.SetItemsProcessed(state.iterations() * LOOM_SCALAR_TYPE_COUNT_ *
-                          kScalarClassificationBatchCount);
+                          kClassificationBatchCount);
 }
 BENCHMARK(BM_ScalarTypeClassifyKnown);
 
 static void BM_ScalarTypeClassifyMiss(benchmark::State& state) {
   for (auto _ : state) {
-    for (int64_t batch = 0; batch < kScalarClassificationBatchCount; ++batch) {
+    for (int64_t batch = 0; batch < kClassificationBatchCount; ++batch) {
       iree_string_view_t type_name = IREE_SV("not_a_scalar_type");
       benchmark::DoNotOptimize(type_name);
       loom_scalar_type_t type = 0;
@@ -221,9 +234,42 @@ static void BM_ScalarTypeClassifyMiss(benchmark::State& state) {
       benchmark::DoNotOptimize(type);
     }
   }
-  state.SetItemsProcessed(state.iterations() * kScalarClassificationBatchCount);
+  state.SetItemsProcessed(state.iterations() * kClassificationBatchCount);
 }
 BENCHMARK(BM_ScalarTypeClassifyMiss);
+
+static void BM_LocationTagClassifyKnown(benchmark::State& state) {
+  const auto tag_names = BuildLocationTagNameViews();
+  for (auto _ : state) {
+    for (int64_t batch = 0; batch < kClassificationBatchCount; ++batch) {
+      for (iree_string_view_t tag_name : tag_names) {
+        benchmark::DoNotOptimize(tag_name);
+        loom_location_tag_t tag = LOOM_LOCATION_TAG_INVALID;
+        bool matched = loom_location_tag_parse(tag_name, &tag);
+        benchmark::DoNotOptimize(matched);
+        benchmark::DoNotOptimize(tag);
+      }
+    }
+  }
+  state.SetItemsProcessed(state.iterations() * kBuiltinLocationTags.size() *
+                          kClassificationBatchCount);
+}
+BENCHMARK(BM_LocationTagClassifyKnown);
+
+static void BM_LocationTagClassifyMiss(benchmark::State& state) {
+  for (auto _ : state) {
+    for (int64_t batch = 0; batch < kClassificationBatchCount; ++batch) {
+      iree_string_view_t tag_name = IREE_SV("not_a_location_tag");
+      benchmark::DoNotOptimize(tag_name);
+      loom_location_tag_t tag = LOOM_LOCATION_TAG_INVALID;
+      bool matched = loom_location_tag_parse(tag_name, &tag);
+      benchmark::DoNotOptimize(matched);
+      benchmark::DoNotOptimize(tag);
+    }
+  }
+  state.SetItemsProcessed(state.iterations() * kClassificationBatchCount);
+}
+BENCHMARK(BM_LocationTagClassifyMiss);
 
 static void BM_ParseScalarTypes(benchmark::State& state) {
   BenchmarkParseModule(state, SyntaxWorkload::kScalarTypes);
