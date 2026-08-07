@@ -15,9 +15,13 @@ from loom.gen.ops import c_symbols
 from loom.gen.ops.c_enum_attrs import enum_case_c_ident
 from loom.gen.ops.c_enums import ATTR_KIND_MAP
 from loom.gen.ops.c_names import c_parameterized_attr_enum_name
-from loom.gen.ops.c_parameterized_attrs import (
-    _parameter_accessor_expr,
-    _parameter_attr_expr,
+from loom.gen.ops.c_parameter_values import (
+    append_parameter_build_flag_declarations,
+    append_parameter_slot_initializers,
+    optional_parameters,
+    parameter_constructor_declarations,
+    parameter_value_accessor_expr,
+    parameter_value_c_type,
 )
 
 
@@ -47,43 +51,16 @@ def _parameter_enum_type(type_def: TypeDef, parameter: AttrDef) -> str:
 
 
 def _parameter_c_type(type_def: TypeDef, parameter: AttrDef) -> str:
-    if parameter.attr_type == "enum":
-        return _parameter_enum_type(type_def, parameter)
-    return {
-        "i64": "int64_t",
-        "f64": "double",
-        "string": "loom_string_id_t",
-        "bool": "bool",
-        "enum_array": "loom_enum_array_t",
-        "type": "loom_type_id_t",
-        "i64_array": "loom_i64_array_t",
-        "bytes": "iree_const_byte_span_t",
-        "encoding": "uint16_t",
-        "symbol": "loom_symbol_ref_t",
-        "dict": "loom_named_attr_slice_t",
-        "parameterized": "loom_attribute_t",
-    }[parameter.attr_type]
-
-
-def _optional_parameters(type_def: TypeDef) -> tuple[AttrDef, ...]:
-    return tuple(parameter for parameter in type_def.params if parameter.optional)
-
-
-def _build_flags_type(type_def: TypeDef) -> str:
-    return f"{type_api_prefix(type_def)}_build_flags_t"
-
-
-def _build_flag_name(type_def: TypeDef, parameter: AttrDef) -> str:
-    return f"{type_api_prefix(type_def).upper()}_BUILD_FLAG_HAS_{parameter.name.upper()}"
+    return parameter_value_c_type(parameter, lambda value: _parameter_enum_type(type_def, value))
 
 
 def _function_parameters(type_def: TypeDef) -> list[str]:
-    parameters = ["    loom_module_t* module"]
-    if _optional_parameters(type_def):
-        parameters.append(f"    {_build_flags_type(type_def)} build_flags")
-    parameters.extend(f"    {_parameter_c_type(type_def, parameter)} {parameter.name}" for parameter in type_def.params)
-    parameters.append("    loom_type_t* out_type")
-    return parameters
+    return parameter_constructor_declarations(
+        type_def.params,
+        type_api_prefix(type_def),
+        lambda parameter: _parameter_c_type(type_def, parameter),
+        "loom_type_t* out_type",
+    )
 
 
 def generate_header_lines(types: Sequence[TypeDef]) -> list[str]:
@@ -114,18 +91,9 @@ def generate_header_lines(types: Sequence[TypeDef]) -> list[str]:
             lines.append(f"}} {suffix};")
             lines.append("")
 
-        optional_parameters = _optional_parameters(type_def)
-        if optional_parameters:
-            if len(optional_parameters) <= 31:
-                lines.append(f"enum {prefix}_build_flag_bits_e {{")
-                for index, parameter in enumerate(optional_parameters):
-                    lines.append(f"  {_build_flag_name(type_def, parameter)} = 1u << {index},")
-                lines.append("};")
-            else:
-                for index, parameter in enumerate(optional_parameters):
-                    lines.append(f"#define {_build_flag_name(type_def, parameter)} (UINT64_C(1) << {index})")
-            storage_type = "uint32_t" if len(optional_parameters) <= 32 else "uint64_t"
-            lines.append(f"typedef {storage_type} {_build_flags_type(type_def)};")
+        optional = optional_parameters(type_def.params)
+        if optional:
+            append_parameter_build_flag_declarations(lines, prefix, type_def.params)
             lines.append("")
 
         lines.append(f"extern const loom_parameterized_type_descriptor_t {descriptor_symbol};")
@@ -142,7 +110,7 @@ def generate_header_lines(types: Sequence[TypeDef]) -> list[str]:
                 lines.append(f"  return !loom_attr_is_absent({slot_expr});")
                 lines.append("}")
             c_type = _parameter_c_type(type_def, parameter)
-            accessor_expr = f"({c_type})loom_attr_as_enum({slot_expr})" if parameter.attr_type == "enum" else _parameter_accessor_expr(parameter, slot_expr)
+            accessor_expr = parameter_value_accessor_expr(parameter, slot_expr, c_type)
             lines.append(f"static inline {c_type} {parameter_prefix}(loom_type_t type) {{")
             lines.append(f"  return {accessor_expr};")
             lines.append("}")
@@ -155,67 +123,18 @@ def generate_header_lines(types: Sequence[TypeDef]) -> list[str]:
     return lines
 
 
-def _emit_range_check(
-    lines: list[str],
-    type_def: TypeDef,
-    parameter: AttrDef,
-    condition: str,
-    limit: str,
-    indent: str,
-) -> None:
-    lines.append(f"{indent}if ({condition}) {{")
-    lines.append(f"{indent}  return iree_make_status(")
-    lines.append(f"{indent}      IREE_STATUS_RESOURCE_EXHAUSTED,")
-    lines.append(f'{indent}      "{type_def.name} parameter {parameter.name} exceeds {limit}");')
-    lines.append(f"{indent}}}")
-
-
 def generate_source_lines(types: Sequence[TypeDef]) -> list[str]:
     """Generates typed constructor implementations."""
 
     lines: list[str] = []
     for type_def in parameterized_type_defs(types):
         prefix = type_api_prefix(type_def)
-        optional_parameters = _optional_parameters(type_def)
         lines.append(f"iree_status_t {prefix}_make(")
         function_parameters = _function_parameters(type_def)
         for index, declaration in enumerate(function_parameters):
             suffix = "," if index + 1 < len(function_parameters) else ") {"
             lines.append(f"{declaration}{suffix}")
-        if optional_parameters:
-            known_flags = " | ".join(_build_flag_name(type_def, parameter) for parameter in optional_parameters)
-            lines.append(f"  if (build_flags & ~({known_flags})) {{")
-            lines.append("    return iree_make_status(")
-            lines.append("        IREE_STATUS_INVALID_ARGUMENT,")
-            lines.append(f'        "{type_def.name} has unknown build flag bits");')
-            lines.append("  }")
-        lines.append(f"  loom_attribute_t slots[{len(type_def.params)}] = {{0}};")
-        for index, parameter in enumerate(type_def.params):
-            indent = "  "
-            if parameter.optional:
-                lines.append(f"  if (iree_any_bit_set(build_flags, {_build_flag_name(type_def, parameter)})) {{")
-                indent = "    "
-            if parameter.attr_type in ("enum_array", "i64_array", "dict"):
-                _emit_range_check(
-                    lines,
-                    type_def,
-                    parameter,
-                    f"{parameter.name}.count > UINT16_MAX",
-                    "UINT16_MAX elements",
-                    indent,
-                )
-            elif parameter.attr_type == "bytes":
-                _emit_range_check(
-                    lines,
-                    type_def,
-                    parameter,
-                    f"{parameter.name}.data_length > UINT32_MAX",
-                    "UINT32_MAX bytes",
-                    indent,
-                )
-            lines.append(f"{indent}slots[{index}] = {_parameter_attr_expr(parameter)};")
-            if parameter.optional:
-                lines.append("  }")
+        append_parameter_slot_initializers(lines, type_def.name, prefix, type_def.params)
         lines.append("  return loom_module_make_parameterized_type(")
         lines.append(f"      module, &{type_descriptor_symbol(type_def)}, slots, {len(type_def.params)}, out_type);")
         lines.append("}")
