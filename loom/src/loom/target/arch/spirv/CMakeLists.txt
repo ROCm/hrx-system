@@ -470,6 +470,7 @@ loom_check_test_suite(
     "test/source_low/low_verify_diagnostics.loom-test"
     "test/source_low/source_low.loom-test"
     "test/source_low/source_low_diagnostics.loom-test"
+    "test/source_low/structural_value_types_bytecode.loom-test"
     "test/source_low/structured_control.loom-test"
     "test/source_low/target_legalize.loom-test"
     "test/source_low/workgroup_storage.loom-test"
