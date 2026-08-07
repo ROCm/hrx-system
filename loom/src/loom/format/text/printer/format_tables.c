@@ -146,8 +146,8 @@ iree_status_t loom_print_inline_attr_dict(
     iree_string_view_t name = loom_attr_descriptor_name(descriptor);
     IREE_RETURN_IF_ERROR(loom_output_stream_write(ctx->stream, name));
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, " = "));
-    IREE_RETURN_IF_ERROR(loom_print_attr(
-        ctx->stream, &loom_op_attrs(op)[attr_index], ctx->module, descriptor));
+    IREE_RETURN_IF_ERROR(
+        loom_print_attr(ctx, &loom_op_attrs(op)[attr_index], descriptor));
     loom_print_report_field(
         ctx, loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, attr_index),
         attr_start, ctx->stream->offset);
@@ -278,8 +278,8 @@ iree_status_t loom_print_operand_dict(loom_print_context_t* ctx,
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, " = "));
     uint16_t operand_index = (uint16_t)(start + (uint16_t)ordinal);
     iree_host_size_t value_start = ctx->stream->offset;
-    IREE_RETURN_IF_ERROR(loom_print_value_ref(
-        ctx->stream, ctx->module, loom_op_const_operands(op)[operand_index]));
+    IREE_RETURN_IF_ERROR(
+        loom_print_value_ref(ctx, loom_op_const_operands(op)[operand_index]));
     loom_print_report_field(
         ctx, loom_print_field_ref(LOOM_PRINT_FIELD_OPERAND, operand_index),
         value_start, ctx->stream->offset);
@@ -310,8 +310,7 @@ static iree_status_t loom_print_attr_table_row_values(loom_print_context_t* ctx,
     const loom_value_id_t* operand = &values.values[operand_index];
     uint16_t flat_operand_index = (uint16_t)(operand - operand_base);
     iree_host_size_t value_start = ctx->stream->offset;
-    IREE_RETURN_IF_ERROR(
-        loom_print_value_ref(ctx->stream, ctx->module, *operand));
+    IREE_RETURN_IF_ERROR(loom_print_value_ref(ctx, *operand));
     loom_print_report_field(
         ctx, loom_print_field_ref(LOOM_PRINT_FIELD_OPERAND, flat_operand_index),
         value_start, ctx->stream->offset);

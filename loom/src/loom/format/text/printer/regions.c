@@ -274,8 +274,7 @@ iree_status_t loom_print_block_label_line_with_options(
             loom_output_stream_write_cstring(ctx->stream, ", "));
       }
       loom_value_id_t arg_id = loom_block_arg_id(block, arg_index);
-      IREE_RETURN_IF_ERROR(
-          loom_print_value_ref(ctx->stream, ctx->module, arg_id));
+      IREE_RETURN_IF_ERROR(loom_print_value_ref(ctx, arg_id));
       IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, ": "));
       IREE_RETURN_IF_ERROR(
           loom_print_type(ctx, loom_module_value_type(ctx->module, arg_id)));

@@ -8,6 +8,7 @@
 #define LOOM_FORMAT_TEXT_PRINTER_CONTEXT_H_
 
 #include "iree/base/api.h"
+#include "loom/format/text/printer/name_plan.h"
 #include "loom/format/text/printer/printer.h"
 #include "loom/ir/ir.h"
 #include "loom/util/stream.h"
@@ -21,6 +22,8 @@ typedef struct loom_print_context_t {
   loom_output_stream_t* stream;
   // Module whose string, type, value, and location tables are printed.
   const loom_module_t* module;
+  // Canonical module value-name resolutions.
+  const loom_print_name_plan_t* name_plan;
   // Flag bitset controlling layout and optional annotations.
   loom_text_print_flags_t flags;
   // Representation codec and assembly interface for Low functions.

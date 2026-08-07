@@ -41,7 +41,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, unique
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, cast
 
 from loom.assembly import FormatElement, OptionalGroup
 from loom.errors import ErrorDef
@@ -3011,6 +3011,91 @@ class EncodingParam:
 type TypeParamDef = TypeParam | ShapeParam | ScalarParam | EncodingParam | AttrDef
 
 
+_COMPACT_SHAPE_IR_KINDS = frozenset(("pool", "tile", "tensor", "vector", "view"))
+
+
+def _validate_compact_shape_format(
+    name: str,
+    ir_kind: str,
+    params: tuple[TypeParamDef, ...],
+    format_elements: tuple[FormatElement, ...],
+) -> None:
+    """Validates the direct compact shape grammars implemented by the IR."""
+    compact_params = (ShapeParam, ScalarParam, EncodingParam)
+    has_compact_params = any(isinstance(param, compact_params) for param in params)
+    if ir_kind not in _COMPACT_SHAPE_IR_KINDS and not has_compact_params:
+        return
+
+    from loom.assembly import COMMA, EncodingOf, ScalarOf, ShapeOf, kw
+
+    if ir_kind == "pool":
+        if len(params) != 1 or not isinstance(params[0], ShapeParam):
+            raise ValueError(
+                f"TypeDef '{name}': pool representation requires one shape parameter"
+            )
+        expected_format: tuple[FormatElement, ...] = (ShapeOf(params[0].name),)
+    elif ir_kind == "vector":
+        if (
+            len(params) == 3
+            and isinstance(params[0], ShapeParam)
+            and isinstance(params[1], ScalarParam)
+            and isinstance(params[2], EncodingParam)
+        ):
+            raise ValueError(
+                f"TypeDef '{name}': vector representation cannot carry an encoding"
+            )
+        if (
+            len(params) != 2
+            or not isinstance(params[0], ShapeParam)
+            or not isinstance(params[1], ScalarParam)
+        ):
+            raise ValueError(
+                f"TypeDef '{name}': vector representation requires shape and scalar "
+                "parameters"
+            )
+        expected_format = (
+            ShapeOf(params[0].name),
+            kw("x"),
+            ScalarOf(params[1].name),
+        )
+    elif ir_kind in ("tile", "tensor", "view"):
+        if (
+            len(params) != 3
+            or not isinstance(params[0], ShapeParam)
+            or not isinstance(params[1], ScalarParam)
+            or not isinstance(params[2], EncodingParam)
+        ):
+            raise ValueError(
+                f"TypeDef '{name}': shaped representation requires shape, scalar, "
+                "and encoding parameters"
+            )
+        encoding_param = cast(EncodingParam, params[2])
+        if not encoding_param.optional:
+            raise ValueError(
+                f"TypeDef '{name}': compact shape encodings must be optional"
+            )
+        expected_format = (
+            ShapeOf(params[0].name),
+            kw("x"),
+            ScalarOf(params[1].name),
+            OptionalGroup(
+                [COMMA, EncodingOf(encoding_param.name)],
+                anchor=encoding_param.name,
+            ),
+        )
+    else:
+        raise ValueError(
+            f"TypeDef '{name}': compact shape parameters are unsupported for "
+            f"IR kind '{ir_kind}'"
+        )
+
+    if format_elements != expected_format:
+        raise ValueError(
+            f"TypeDef '{name}': assembly format does not match its compact shape "
+            "representation"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class TypeDef:
     """Declarative type definition.
@@ -3091,6 +3176,7 @@ class TypeDef:
                 f"TypeDef '{name}': descriptor-backed AttrDef parameters cannot "
                 "be mixed with representation-specific type parameters"
             )
+        _validate_compact_shape_format(name, ir_kind, frozen_params, frozen_format)
         if attribute_parameters:
             _validate_descriptor_parameters(f"TypeDef '{name}'", attribute_parameters)
         uses_inline_enum_parameter = bool(attribute_parameters) and ir_kind != "dialect"
@@ -3204,6 +3290,12 @@ class TypeDef:
         """True when the sole enum parameter is stored in the type header."""
 
         return self.uses_attribute_parameters and self.ir_kind != "dialect"
+
+    @property
+    def uses_compact_shape_format(self) -> bool:
+        """True when the type uses the direct compact shape representation."""
+
+        return self.ir_kind in _COMPACT_SHAPE_IR_KINDS
 
     @property
     def omits_empty_parameter_list(self) -> bool:

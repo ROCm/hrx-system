@@ -6,6 +6,9 @@
 
 #include "loom/ir/scalar_type.h"
 
+#include <array>
+#include <string>
+
 #include "iree/testing/gtest.h"
 
 namespace loom {
@@ -34,6 +37,16 @@ TEST(ScalarTypeTest, InvalidValues) {
   loom_scalar_type_t parsed = LOOM_SCALAR_TYPE_I32;
   EXPECT_FALSE(loom_scalar_type_parse(IREE_SV("not_a_scalar"), &parsed));
   EXPECT_EQ(parsed, LOOM_SCALAR_TYPE_I32);
+
+  static const std::array<iree_string_view_t, 8> kNearMisses = {
+      IREE_SV(""),       IREE_SV("i"),      IREE_SV("i10"),  IREE_SV("index0"),
+      IREE_SV("f8e4m3"), IREE_SV("f8E4M2"), IREE_SV("bf32"), IREE_SV("offsets"),
+  };
+  for (iree_string_view_t near_miss : kNearMisses) {
+    EXPECT_FALSE(loom_scalar_type_parse(near_miss, &parsed))
+        << std::string(near_miss.data, near_miss.size);
+    EXPECT_EQ(parsed, LOOM_SCALAR_TYPE_I32);
+  }
 }
 
 TEST(ScalarTypeTest, AddressTypesAreTargetWidth) {

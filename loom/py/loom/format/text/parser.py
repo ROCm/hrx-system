@@ -64,7 +64,6 @@ from loom.dsl import (
     FuncLikeInterface,
     Op,
     ParameterizedAttrDef,
-    ShapeParam,
     TypeConstraint,
     TypeDef,
 )
@@ -86,10 +85,6 @@ from loom.ir import (
     ENCODING_TYPE,
     I1,
     INDEX,
-    LOCATION_TAG_SANITIZER_SITE,
-    LOCATION_TAG_TEMPLATE_INSTANTIATION,
-    LOCATION_TAG_TILE_LOWERING,
-    LOCATION_TAG_UKERNEL_SELECTION,
     NONE_TYPE,
     OFFSET,
     PREDICATE_KINDS,
@@ -125,6 +120,7 @@ from loom.ir import (
     TypeKind,
     Value,
     binding_element_type,
+    parse_scalar_type_kind,
     rebuild_value_metadata,
     record_operation_value_metadata,
     symbol_from_operation,
@@ -132,15 +128,9 @@ from loom.ir import (
 from loom.ir import (
     TiedResult as IRTiedResult,
 )
+from loom.location_tag import parse_builtin_location_tag
 from loom.stable_id import stable_id_from_string
 from loom.target.descriptor_sets import DESCRIPTOR_SET_REGISTRATIONS
-
-_LOCATION_TAG_NAMES = {
-    "sanitizer_site": LOCATION_TAG_SANITIZER_SITE,
-    "template_instantiation": LOCATION_TAG_TEMPLATE_INSTANTIATION,
-    "tile_lowering": LOCATION_TAG_TILE_LOWERING,
-    "ukernel_selection": LOCATION_TAG_UKERNEL_SELECTION,
-}
 
 __all__ = [
     "ParseError",
@@ -426,27 +416,6 @@ def _parse_static_encoding_from_tokens(
     instance = EncodingInstance(name=token.text, params=params)
     module.add_encoding(instance)
     return instance
-
-
-# ============================================================================
-# Scalar type name table (fixed, finite set — not pluggable)
-# ============================================================================
-
-_SCALAR_NAMES: dict[str, ScalarTypeKind] = {
-    "index": ScalarTypeKind.INDEX,
-    "offset": ScalarTypeKind.OFFSET,
-    "i1": ScalarTypeKind.I1,
-    "i8": ScalarTypeKind.I8,
-    "i16": ScalarTypeKind.I16,
-    "i32": ScalarTypeKind.I32,
-    "i64": ScalarTypeKind.I64,
-    "f8E4M3": ScalarTypeKind.F8E4M3,
-    "f8E5M2": ScalarTypeKind.F8E5M2,
-    "f16": ScalarTypeKind.F16,
-    "bf16": ScalarTypeKind.BF16,
-    "f32": ScalarTypeKind.F32,
-    "f64": ScalarTypeKind.F64,
-}
 
 
 def _implicit_terminator_name(op_decl: Op) -> str | None:
@@ -947,7 +916,7 @@ def _parse_type_encoding_from_tokens(
 def _is_type_start(token: Token, type_registry: dict[str, TypeDef]) -> bool:
     """Check if a token could start a type expression."""
     if token.kind == TokenKind.BARE_IDENT:
-        if token.text in _SCALAR_NAMES:
+        if parse_scalar_type_kind(token.text) is not None:
             return True
         if token.text == "encoding":
             return True
@@ -982,7 +951,7 @@ def parse_type_from_tokens(
 
     # Scalar type keyword?
     if token.kind == TokenKind.BARE_IDENT:
-        scalar_kind = _SCALAR_NAMES.get(token.text)
+        scalar_kind = parse_scalar_type_kind(token.text)
         if scalar_kind is not None:
             tokenizer.next()
             return ScalarType(scalar_kind), {}
@@ -1017,12 +986,10 @@ def parse_type_from_tokens(
                         str(error), token.location, tokenizer._filename
                     ) from error
             tokenizer.expect(TokenKind.LANGLE)
-            # Shape-grammar types parse from the token stream using in_dim_list
-            # for 'x' separators. Other types use the interior tokenizer
-            # approach.
-            has_shape = any(isinstance(p, ShapeParam) for p in type_def.params)
-            if has_shape:
-                result = _parse_shaped_type_from_tokens(
+            # Compact shape types parse from the token stream using in_dim_list
+            # for 'x' separators. Other types use the interior tokenizer.
+            if type_def.uses_compact_shape_format:
+                result = _parse_compact_shape_type_from_tokens(
                     type_def,
                     tokenizer,
                     scope,
@@ -1383,7 +1350,7 @@ def _parse_type_interior(
 
     The type_def's format spec drives the parse for dialect types
     such as vm.ref<T>. Built-in shaped types use
-    _parse_shaped_type_from_tokens directly.
+    _parse_compact_shape_type_from_tokens directly.
     """
     interior_tokenizer = Tokenizer(interior, filename)
     parsed_params: list[Type] = []
@@ -1490,7 +1457,7 @@ def _parse_type_interior(
     return DialectType(type_def.name, tuple(parsed_params)), {}
 
 
-def _parse_shaped_type_from_tokens(
+def _parse_compact_shape_type_from_tokens(
     type_def: TypeDef,
     tokenizer: Tokenizer,
     scope: NameScope,
@@ -1524,22 +1491,8 @@ def _parse_shaped_type_from_tokens(
             dim_bindings[0] = binding_id
         return PoolType(block_size=dim), dim_bindings
 
-    # Shaped type (tile, tensor, vector, view).
-    _IR_KIND_TO_TYPE_KIND = {
-        "tile": TypeKind.TILE,
-        "tensor": TypeKind.TENSOR,
-        "vector": TypeKind.VECTOR,
-        "view": TypeKind.VIEW,
-    }
-    type_kind = _IR_KIND_TO_TYPE_KIND.get(type_def.ir_kind)
-    if type_kind is None:
-        token = tokenizer.peek()
-        raise ParseError(
-            f"TypeDef '{type_def.name}' has ShapeParam but ir_kind "
-            f"'{type_def.ir_kind}' is not a recognized shaped type kind.",
-            token.location,
-            filename,
-        )
+    # TypeDef construction validates the compact representation kind.
+    type_kind = TypeKind[type_def.ir_kind.upper()]
 
     # Parse dimensions. in_dim_list must be true from the start so
     # that '0x' in '0xf32' is scanned as INTEGER(0) + DIM_X(x) +
@@ -1582,7 +1535,7 @@ def _parse_shaped_type_from_tokens(
 
     # Parse element type (in_dim_list is false here).
     element_token = tokenizer.expect(TokenKind.BARE_IDENT)
-    scalar_kind = _SCALAR_NAMES.get(element_token.text)
+    scalar_kind = parse_scalar_type_kind(element_token.text)
     if scalar_kind is None:
         raise ParseError(
             f"unknown element type '{element_token.text}' in shaped type",
@@ -1595,9 +1548,9 @@ def _parse_shaped_type_from_tokens(
     encoding: EncodingInstance | DynamicEncoding | None = None
     encoding_binding = -1
     if tokenizer.try_consume(TokenKind.COMMA):
-        if type_kind == TypeKind.VECTOR:
+        if len(type_def.params) < 3:
             raise ParseError(
-                "vector types must not carry encoding or layout attachments",
+                f"{type_def.name} types must not carry encoding or layout attachments",
                 tokenizer.peek().location,
                 filename,
             )
@@ -2515,13 +2468,13 @@ class Parser:
         tag_token = tok.peek()
         if tag_token.kind == TokenKind.BARE_IDENT:
             tag_name = tok.expect(TokenKind.BARE_IDENT).text
-            if tag_name not in _LOCATION_TAG_NAMES:
+            tag = parse_builtin_location_tag(tag_name)
+            if tag is None:
                 raise ParseError(
                     f"unknown tagged location tag {tag_name!r}",
                     tag_token.location,
                     tok._filename,
                 )
-            tag = _LOCATION_TAG_NAMES[tag_name]
         else:
             tag = int(tok.expect(TokenKind.INTEGER).text)
             if tag <= 0 or tag > 0xFFFF:

@@ -581,10 +581,10 @@ static iree_status_t loom_parse_shaped_dims(loom_parser_t* parser,
 // Called after LANGLE has been consumed. Consumes tokens through RANGLE.
 //
 // Grammar: dim (x dim)* x element_type [, encoding] >
-static iree_status_t loom_parse_shaped_type(loom_parser_t* parser,
-                                            loom_type_kind_t kind,
-                                            loom_type_parse_mode_t mode,
-                                            loom_type_t* out_type) {
+static iree_status_t loom_parse_shaped_type(
+    loom_parser_t* parser, const loom_type_descriptor_t* descriptor,
+    loom_type_parse_mode_t mode, loom_type_t* out_type) {
+  const loom_type_kind_t kind = descriptor->ir_kind;
   uint64_t dims[16];
   uint8_t rank = 0;
   const uint32_t errors_before = parser->error_count;
@@ -612,7 +612,7 @@ static iree_status_t loom_parse_shaped_type(loom_parser_t* parser,
   // Parse optional encoding.
   uint16_t encoding_id = 0;
   loom_encoding_flags_t encoding_flags = 0;
-  if (kind == LOOM_TYPE_VECTOR &&
+  if (descriptor->param_count == 2 &&
       loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_COMMA)) {
     loom_token_t comma_token = loom_tokenizer_peek(&parser->tokenizer);
     loom_diagnostic_param_t params[] = {
@@ -902,20 +902,20 @@ static iree_status_t loom_parse_register_type(loom_parser_t* parser,
   return loom_module_intern_type(parser->module, type, out_type);
 }
 
-// Consumes keyword, expects LANGLE, and dispatches to a shaped or pool parser.
-static iree_status_t loom_parse_angle_bracketed_type(
-    loom_parser_t* parser, loom_type_kind_t kind, loom_type_parse_mode_t mode,
-    loom_type_t* out_type) {
+// Consumes the type name and parses one validated compact shape grammar.
+static iree_status_t loom_parse_compact_shape_type(
+    loom_parser_t* parser, const loom_type_descriptor_t* descriptor,
+    loom_type_parse_mode_t mode, loom_type_t* out_type) {
   loom_tokenizer_next(&parser->tokenizer);  // consume type keyword
   if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LANGLE)) {
     loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
     return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'<'"));
   }
   iree_status_t status;
-  if (kind == LOOM_TYPE_POOL) {
+  if (descriptor->param_count == 1) {
     status = loom_parse_pool_type(parser, mode, out_type);
   } else {
-    status = loom_parse_shaped_type(parser, kind, mode, out_type);
+    status = loom_parse_shaped_type(parser, descriptor, mode, out_type);
   }
   parser->tokenizer.in_dim_list = false;  // cleanup on error paths
   return status;
@@ -1121,14 +1121,12 @@ static iree_status_t loom_parse_registered_type(loom_parser_t* parser,
     return loom_parse_parameterized_type(parser, descriptor, mode, out_type);
   }
 
+  if (descriptor->format_element_count > 0 &&
+      descriptor->format_elements[0].kind == LOOM_TYPE_FMT_SHAPE) {
+    return loom_parse_compact_shape_type(parser, descriptor, mode, out_type);
+  }
+
   switch (descriptor->ir_kind) {
-    case LOOM_TYPE_TILE:
-    case LOOM_TYPE_TENSOR:
-    case LOOM_TYPE_VECTOR:
-    case LOOM_TYPE_VIEW:
-    case LOOM_TYPE_POOL:
-      return loom_parse_angle_bracketed_type(parser, descriptor->ir_kind, mode,
-                                             out_type);
     case LOOM_TYPE_BUFFER:
       loom_tokenizer_next(&parser->tokenizer);
       *out_type = loom_type_buffer();

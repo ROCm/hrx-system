@@ -428,8 +428,7 @@ static iree_status_t loom_print_pipeline_attr_parens(
     IREE_RETURN_IF_ERROR(loom_output_stream_write(
         ctx->stream, ctx->module->strings.entries[entry->name_id]));
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, " = "));
-    IREE_RETURN_IF_ERROR(
-        loom_print_attr(ctx->stream, &entry->value, ctx->module, NULL));
+    IREE_RETURN_IF_ERROR(loom_print_attr(ctx, &entry->value, NULL));
   }
   return loom_output_stream_write_char(ctx->stream, ')');
 }
@@ -445,7 +444,7 @@ static iree_status_t loom_print_pipeline_string_attr_value(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "missing pass pipeline string attribute");
   }
-  return loom_print_attr(ctx->stream, attr, ctx->module, NULL);
+  return loom_print_attr(ctx, attr, NULL);
 }
 
 static iree_status_t loom_print_pipeline_symbol_attr_value(
@@ -459,7 +458,7 @@ static iree_status_t loom_print_pipeline_symbol_attr_value(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "missing pass pipeline symbol attribute");
   }
-  return loom_print_attr(ctx->stream, attr, ctx->module, NULL);
+  return loom_print_attr(ctx, attr, NULL);
 }
 
 static iree_status_t loom_print_pipeline_nested_region(
@@ -531,8 +530,7 @@ static iree_status_t loom_print_pipeline_statement(loom_print_context_t* ctx,
       if (count_attr) {
         IREE_RETURN_IF_ERROR(
             loom_output_stream_write_cstring(ctx->stream, "count = "));
-        IREE_RETURN_IF_ERROR(
-            loom_print_attr(ctx->stream, count_attr, ctx->module, NULL));
+        IREE_RETURN_IF_ERROR(loom_print_attr(ctx, count_attr, NULL));
         wrote_attr = true;
       }
       if (max_iterations_attr) {
@@ -542,8 +540,7 @@ static iree_status_t loom_print_pipeline_statement(loom_print_context_t* ctx,
         }
         IREE_RETURN_IF_ERROR(
             loom_output_stream_write_cstring(ctx->stream, "max_iterations = "));
-        IREE_RETURN_IF_ERROR(loom_print_attr(ctx->stream, max_iterations_attr,
-                                             ctx->module, NULL));
+        IREE_RETURN_IF_ERROR(loom_print_attr(ctx, max_iterations_attr, NULL));
       }
       IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, ')'));
     }

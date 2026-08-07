@@ -25,8 +25,7 @@ static iree_status_t loom_print_predicate_arg(loom_print_context_t* ctx,
                                               uint8_t tag, int64_t value) {
   switch (tag) {
     case LOOM_PRED_ARG_VALUE: {
-      return loom_print_value_ref(ctx->stream, ctx->module,
-                                  (loom_value_id_t)value);
+      return loom_print_value_ref(ctx, (loom_value_id_t)value);
     }
     case LOOM_PRED_ARG_CONST:
       return loom_output_stream_write_format(ctx->stream, "%" PRId64, value);
@@ -146,8 +145,7 @@ static iree_status_t loom_print_attr_with_field(
     loom_print_field_ref_t field_ref) {
   IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
   iree_host_size_t start = ctx->stream->offset;
-  IREE_RETURN_IF_ERROR(
-      loom_print_attr(ctx->stream, attr, ctx->module, descriptor));
+  IREE_RETURN_IF_ERROR(loom_print_attr(ctx, attr, descriptor));
   iree_host_size_t end = ctx->stream->offset;
   loom_print_did_write(ctx);
   loom_print_report_field(ctx, field_ref, start, end);
@@ -660,8 +658,7 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
         loom_attribute_t attr = loom_op_attrs(op)[element->field_index];
         iree_host_size_t param_start = ctx->stream->offset;
         IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "<", true));
-        IREE_RETURN_IF_ERROR(
-            loom_print_attr(ctx->stream, &attr, ctx->module, descriptor));
+        IREE_RETURN_IF_ERROR(loom_print_attr(ctx, &attr, descriptor));
         IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ">", true));
         loom_print_did_write(ctx);
         loom_print_report_field(
@@ -688,8 +685,7 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
         loom_attribute_t attr = loom_op_attrs(op)[element->field_index];
         iree_host_size_t param_start = ctx->stream->offset;
         IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "<", true));
-        IREE_RETURN_IF_ERROR(
-            loom_print_attr(ctx->stream, &attr, ctx->module, descriptor));
+        IREE_RETURN_IF_ERROR(loom_print_attr(ctx, &attr, descriptor));
         uint8_t flags = op->instance_flags;
         if (flags != 0 && vtable->instance_flags_case_names != NULL) {
           IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ", ", false));

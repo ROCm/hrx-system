@@ -15,6 +15,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/format/text/printer/name_plan.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
@@ -1015,6 +1016,33 @@ TEST_F(PrintOpTest, FuncWithBody) {
             "}\n");
 }
 
+TEST_F(PrintOpTest, UnnamedValuesRequireNoNamePlanAllocation) {
+  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  (void)def(i32);
+  (void)def(i32);
+
+  loom_print_name_plan_t name_plan;
+  IREE_ASSERT_OK(loom_print_name_plan_initialize(module_, &name_plan));
+  EXPECT_EQ(name_plan.arena.block_pool, module_->arena.block_pool);
+  EXPECT_EQ(name_plan.arena.total_allocation_size, 0u);
+  loom_print_name_plan_deinitialize(&name_plan);
+}
+
+TEST_F(PrintOpTest, NamedValuesUseModuleBlockPool) {
+  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_value_id_t value = def(i32);
+  set_value_name(value, "named");
+
+  loom_print_name_plan_t name_plan;
+  IREE_ASSERT_OK(loom_print_name_plan_initialize(module_, &name_plan));
+  EXPECT_EQ(name_plan.arena.block_pool, module_->arena.block_pool);
+  EXPECT_NE(name_plan.resolutions, nullptr);
+  EXPECT_GT(name_plan.arena.used_allocation_size, 0u);
+  EXPECT_EQ(name_plan.arena.total_allocation_size,
+            module_->arena.block_pool->total_block_size);
+  loom_print_name_plan_deinitialize(&name_plan);
+}
+
 TEST_F(PrintOpTest, DuplicateExplicitValueNamesPrintUniquely) {
   loom_symbol_ref_t callee = make_symbol("dupes");
   loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
@@ -1034,6 +1062,35 @@ TEST_F(PrintOpTest, DuplicateExplicitValueNamesPrintUniquely) {
   EXPECT_EQ(print_op(func_op, LOOM_TEXT_PRINT_DEFAULT),
             "test.func @dupes(%input$0: f32, %input$1: f32) {\n"
             "}\n");
+}
+
+TEST_F(PrintOpTest, DuplicateExplicitValueNamesAvoidExplicitSuffixes) {
+  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_op_t* first_op = NULL;
+  loom_op_t* second_op = NULL;
+  loom_op_t* suffix_op = NULL;
+  IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(1), i32,
+                                          LOOM_LOCATION_UNKNOWN, &first_op));
+  IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(2), i32,
+                                          LOOM_LOCATION_UNKNOWN, &second_op));
+  IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(3), i32,
+                                          LOOM_LOCATION_UNKNOWN, &suffix_op));
+  set_value_name(loom_test_constant_result(first_op), "input");
+  set_value_name(loom_test_constant_result(second_op), "input");
+  set_value_name(loom_test_constant_result(suffix_op), "input$0");
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  IREE_ASSERT_OK(loom_text_print_module_to_builder(module_, &builder,
+                                                   LOOM_TEXT_PRINT_DEFAULT));
+  std::string output(iree_string_builder_buffer(&builder),
+                     iree_string_builder_size(&builder));
+  iree_string_builder_deinitialize(&builder);
+
+  EXPECT_EQ(output,
+            "%input$0$1 = test.constant 1 : i32\n"
+            "%input$1 = test.constant 2 : i32\n"
+            "%input$0 = test.constant 3 : i32\n");
 }
 
 TEST_F(PrintOpTest, DuplicateExplicitValueNamesInSiblingRegionsArePreserved) {
@@ -1206,6 +1263,34 @@ TEST_F(PrintOpTest, AttrsOpWithDictEntries) {
   std::string output = print_op(op, LOOM_TEXT_PRINT_DEFAULT);
   EXPECT_NE(output.find("{axis = 0, label = \"foo\"}"), std::string::npos)
       << "Expected attr dict in output, got: " << output;
+}
+
+TEST_F(PrintOpTest, AttrsOpTypeAttrUsesNamedDynamicDimension) {
+  loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_value_id_t dimension = def(index_type);
+  set_value_name(dimension, "M");
+
+  loom_type_t dynamic_tensor =
+      loom_type_shaped_1d(LOOM_TYPE_TENSOR, LOOM_SCALAR_TYPE_F32,
+                          loom_dim_pack_dynamic(dimension), /*encoding_id=*/0);
+  loom_type_id_t dynamic_tensor_id = LOOM_TYPE_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_type_id(module_, dynamic_tensor, &dynamic_tensor_id));
+
+  loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
+  loom_value_id_t input = def(f32);
+  loom_named_attr_t entries[] = {
+      {/*.name_id=*/intern("shape"), /*.reserved=*/{},
+       /*.value=*/loom_attr_type(dynamic_tensor_id)},
+  };
+  loom_op_t* op = NULL;
+  IREE_ASSERT_OK(loom_test_attrs_build(
+      &builder_, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT, input,
+      loom_make_named_attr_slice(entries, IREE_ARRAYSIZE(entries)), f32,
+      LOOM_LOCATION_UNKNOWN, &op));
+
+  EXPECT_EQ(print_op(op, LOOM_TEXT_PRINT_DEFAULT),
+            "%2 = test.attrs %1 {shape = tensor<[%M]xf32>} : f32\n");
 }
 
 TEST_F(PrintOpTest, AttrsOpStringAttrsUseCanonicalEscapes) {

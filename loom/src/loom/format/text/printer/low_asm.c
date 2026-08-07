@@ -371,8 +371,7 @@ static iree_status_t loom_print_low_asm_named_immediates(
     IREE_RETURN_IF_ERROR(
         loom_output_stream_write(ctx->stream, immediate.spelling));
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, " = "));
-    IREE_RETURN_IF_ERROR(
-        loom_print_attr(ctx->stream, &attr->value, ctx->module, NULL));
+    IREE_RETURN_IF_ERROR(loom_print_attr(ctx, &attr->value, NULL));
     ++printed_count;
   }
   IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '}'));
@@ -407,8 +406,7 @@ static iree_status_t loom_print_low_asm_positional_immediates(
     }
     IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
     iree_host_size_t start = ctx->stream->offset;
-    IREE_RETURN_IF_ERROR(
-        loom_print_attr(ctx->stream, &attr->value, ctx->module, NULL));
+    IREE_RETURN_IF_ERROR(loom_print_attr(ctx, &attr->value, NULL));
     loom_print_did_write(ctx);
     if (statement->has_immediate_attribute_field) {
       loom_print_report_field(
@@ -507,8 +505,7 @@ static iree_status_t loom_print_low_asm_structural_attr_dict(
     }
     IREE_RETURN_IF_ERROR(loom_output_stream_write(ctx->stream, attr->name));
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, " = "));
-    IREE_RETURN_IF_ERROR(loom_print_attr(ctx->stream, attr->value, ctx->module,
-                                         attr->descriptor));
+    IREE_RETURN_IF_ERROR(loom_print_attr(ctx, attr->value, attr->descriptor));
   }
   if (wrote_dict) {
     IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '}'));
@@ -529,7 +526,7 @@ static iree_status_t loom_print_low_asm_named_attr_dict(
   loom_attribute_t attr =
       loom_make_canonical_attr_dict(attrs.entries, attrs.count);
   IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
-  IREE_RETURN_IF_ERROR(loom_print_attr(ctx->stream, &attr, ctx->module, NULL));
+  IREE_RETURN_IF_ERROR(loom_print_attr(ctx, &attr, NULL));
   loom_print_did_write(ctx);
   return iree_ok_status();
 }

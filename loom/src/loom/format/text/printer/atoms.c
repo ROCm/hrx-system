@@ -15,126 +15,10 @@
 #include "loom/ops/type_registry.h"
 #include "loom/target/registers.h"
 
-static const loom_op_vtable_t* loom_print_value_defining_op_vtable(
-    const loom_module_t* module, const loom_op_t* op) {
-  if (!module || !module->context || !op) {
-    return NULL;
-  }
-  return loom_context_resolve_op(module->context, op->kind);
-}
-
-static bool loom_print_value_has_name(const loom_module_t* module,
-                                      loom_value_id_t value_id,
-                                      loom_string_id_t* out_name_id) {
-  *out_name_id = LOOM_STRING_ID_INVALID;
-  if (!module || value_id >= module->values.count) {
-    return false;
-  }
-  loom_string_id_t name_id = loom_module_value(module, value_id)->name_id;
-  if (name_id == LOOM_STRING_ID_INVALID || name_id >= module->strings.count) {
-    return false;
-  }
-  *out_name_id = name_id;
-  return true;
-}
-
-// Returns the parser scope that will receive |value_id|'s printed definition.
-// Sibling regions and symbol signatures have independent SSA namespaces, while
-// values defined inside one region body share that region's namespace.
-static const void* loom_print_value_parse_scope(const loom_module_t* module,
-                                                loom_value_id_t value_id) {
-  if (!module || value_id >= module->values.count) {
-    return NULL;
-  }
-  const loom_value_t* value = loom_module_value(module, value_id);
-  if (loom_value_is_block_arg(value)) {
-    loom_block_t* block = loom_value_def_block(value);
-    return block ? (const void*)block->parent_region : NULL;
-  }
-
-  loom_op_t* def_op = loom_value_def_op(value);
-  if (def_op) {
-    const loom_op_vtable_t* vtable =
-        loom_print_value_defining_op_vtable(module, def_op);
-    if (vtable && iree_any_bit_set(vtable->traits, LOOM_TRAIT_SYMBOL_DEFINE)) {
-      return (const void*)def_op;
-    }
-    loom_block_t* block = def_op->parent_block;
-    return block ? (const void*)block->parent_region : NULL;
-  }
-
-  const loom_use_t* uses = loom_value_uses(value);
-  if (!uses || value->use_count == 0) {
-    return NULL;
-  }
-  loom_op_t* user_op = loom_use_user_op(uses[0]);
-  const loom_op_vtable_t* user_vtable =
-      loom_print_value_defining_op_vtable(module, user_op);
-  if (user_vtable &&
-      iree_any_bit_set(user_vtable->traits, LOOM_TRAIT_SYMBOL_DEFINE)) {
-    return (const void*)user_op;
-  }
-  loom_block_t* block = user_op ? user_op->parent_block : NULL;
-  return block ? (const void*)block->parent_region : NULL;
-}
-
-static bool loom_print_value_is_printable(const loom_module_t* module,
-                                          loom_value_id_t value_id) {
-  if (!module || value_id >= module->values.count) {
-    return false;
-  }
-  const loom_value_t* value = loom_module_value(module, value_id);
-  if (loom_value_is_block_arg(value)) {
-    return loom_value_def_block(value) != NULL;
-  }
-  loom_op_t* def_op = loom_value_def_op(value);
-  if (def_op) {
-    return !iree_any_bit_set(def_op->flags, LOOM_OP_FLAG_DEAD);
-  }
-  return value->use_count > 0;
-}
-
-static bool loom_print_value_name_is_duplicated(const loom_module_t* module,
-                                                loom_value_id_t value_id,
-                                                loom_string_id_t name_id) {
-  const void* scope = loom_print_value_parse_scope(module, value_id);
-  for (iree_host_size_t i = 0; i < module->values.count; ++i) {
-    if (i == value_id) {
-      continue;
-    }
-    if (!loom_print_value_is_printable(module, (loom_value_id_t)i)) {
-      continue;
-    }
-    if (loom_print_value_parse_scope(module, (loom_value_id_t)i) != scope) {
-      continue;
-    }
-    if (loom_module_value(module, (loom_value_id_t)i)->name_id == name_id) {
-      return true;
-    }
-  }
-  return false;
-}
-
-static bool loom_print_explicit_value_name_exists(const loom_module_t* module,
-                                                  const void* scope,
-                                                  iree_string_view_t name) {
-  for (iree_host_size_t i = 0; i < module->values.count; ++i) {
-    if (!loom_print_value_is_printable(module, (loom_value_id_t)i)) {
-      continue;
-    }
-    if (loom_print_value_parse_scope(module, (loom_value_id_t)i) != scope) {
-      continue;
-    }
-    loom_string_id_t name_id =
-        loom_module_value(module, (loom_value_id_t)i)->name_id;
-    if (name_id == LOOM_STRING_ID_INVALID || name_id >= module->strings.count) {
-      continue;
-    }
-    if (iree_string_view_equal(module->strings.entries[name_id], name)) {
-      return true;
-    }
-  }
-  return false;
+iree_status_t loom_print_value_ref(const loom_print_context_t* ctx,
+                                   loom_value_id_t value_id) {
+  return loom_print_name_plan_write_value_ref(ctx->name_plan, ctx->stream,
+                                              ctx->module, value_id);
 }
 
 // Emits a canonical JSON-compatible string literal. Stored strings are expected
@@ -196,127 +80,10 @@ static iree_status_t loom_print_string_literal(loom_output_stream_t* stream,
   return loom_output_stream_write_char(stream, '"');
 }
 
-static iree_string_view_t loom_print_resolve_generated_value_name(
-    const loom_module_t* module, loom_value_id_t value_id, char* buffer,
-    iree_host_size_t buffer_size) {
-  const void* scope = loom_print_value_parse_scope(module, value_id);
-  int length = iree_snprintf(buffer, buffer_size, "%%%" PRIhsz,
-                             (iree_host_size_t)value_id);
-  if (length > 1 && (iree_host_size_t)length < buffer_size) {
-    iree_string_view_t candidate =
-        iree_make_string_view(buffer + 1, (iree_host_size_t)length - 1);
-    if (!loom_print_explicit_value_name_exists(module, scope, candidate)) {
-      return iree_make_string_view(buffer, (iree_host_size_t)length);
-    }
-  }
-  for (iree_host_size_t attempt = 1; attempt < 8; ++attempt) {
-    length = iree_snprintf(buffer, buffer_size, "%%%" PRIhsz "$%" PRIhsz,
-                           (iree_host_size_t)value_id, attempt);
-    if (length <= 1 || (iree_host_size_t)length >= buffer_size) {
-      break;
-    }
-    iree_string_view_t candidate =
-        iree_make_string_view(buffer + 1, (iree_host_size_t)length - 1);
-    if (!loom_print_explicit_value_name_exists(module, scope, candidate)) {
-      return iree_make_string_view(buffer, (iree_host_size_t)length);
-    }
-  }
-  length = iree_snprintf(buffer, buffer_size, "%%%" PRIhsz,
-                         (iree_host_size_t)value_id);
-  IREE_ASSERT(length > 1 && (iree_host_size_t)length < buffer_size,
-              "generated value names must fit LOOM_VALUE_NAME_BUFFER_SIZE");
-  return iree_make_string_view(buffer, length);
-}
-
-static bool loom_print_explicit_value_name_with_suffix_exists(
-    const loom_module_t* module, const void* scope, iree_string_view_t base,
-    iree_string_view_t suffix) {
-  for (iree_host_size_t i = 0; i < module->values.count; ++i) {
-    if (!loom_print_value_is_printable(module, (loom_value_id_t)i)) {
-      continue;
-    }
-    if (loom_print_value_parse_scope(module, (loom_value_id_t)i) != scope) {
-      continue;
-    }
-    loom_string_id_t name_id =
-        loom_module_value(module, (loom_value_id_t)i)->name_id;
-    if (name_id == LOOM_STRING_ID_INVALID || name_id >= module->strings.count) {
-      continue;
-    }
-    iree_string_view_t name = module->strings.entries[name_id];
-    if (name.size != base.size + suffix.size) {
-      continue;
-    }
-    if (!iree_string_view_starts_with(name, base)) {
-      continue;
-    }
-    iree_string_view_t name_suffix =
-        iree_string_view_substr(name, base.size, suffix.size);
-    if (iree_string_view_equal(name_suffix, suffix)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-static iree_status_t loom_print_duplicate_value_ref(
-    loom_output_stream_t* stream, const loom_module_t* module,
-    loom_value_id_t value_id, iree_string_view_t bare_name) {
-  const void* scope = loom_print_value_parse_scope(module, value_id);
-  for (iree_host_size_t attempt = 0; attempt < 8; ++attempt) {
-    char suffix_buffer[LOOM_VALUE_NAME_BUFFER_SIZE];
-    int suffix_length =
-        attempt == 0 ? iree_snprintf(suffix_buffer, sizeof(suffix_buffer),
-                                     "$%" PRIhsz, (iree_host_size_t)value_id)
-                     : iree_snprintf(suffix_buffer, sizeof(suffix_buffer),
-                                     "$%" PRIhsz "$%" PRIhsz,
-                                     (iree_host_size_t)value_id, attempt);
-    if (suffix_length <= 0 ||
-        (iree_host_size_t)suffix_length >= sizeof(suffix_buffer)) {
-      break;
-    }
-    iree_string_view_t suffix =
-        iree_make_string_view(suffix_buffer, (iree_host_size_t)suffix_length);
-    if (loom_print_explicit_value_name_with_suffix_exists(module, scope,
-                                                          bare_name, suffix)) {
-      continue;
-    }
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '%'));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write(stream, bare_name));
-    return loom_output_stream_write(stream, suffix);
-  }
-  char buffer[LOOM_VALUE_NAME_BUFFER_SIZE];
-  return loom_output_stream_write(
-      stream, loom_print_resolve_generated_value_name(module, value_id, buffer,
-                                                      sizeof(buffer)));
-}
-
-iree_status_t loom_print_value_ref(loom_output_stream_t* stream,
-                                   const loom_module_t* module,
-                                   loom_value_id_t value_id) {
-  if (!module || value_id >= module->values.count) {
-    return loom_output_stream_write_cstring(stream, "%?");
-  }
-  loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
-  if (loom_print_value_has_name(module, value_id, &name_id)) {
-    iree_string_view_t bare_name = module->strings.entries[name_id];
-    if (!loom_print_value_name_is_duplicated(module, value_id, name_id)) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '%'));
-      return loom_output_stream_write(stream, bare_name);
-    }
-    return loom_print_duplicate_value_ref(stream, module, value_id, bare_name);
-  }
-  char buffer[LOOM_VALUE_NAME_BUFFER_SIZE];
-  return loom_output_stream_write(
-      stream, loom_print_resolve_generated_value_name(module, value_id, buffer,
-                                                      sizeof(buffer)));
-}
-
 iree_status_t loom_print_value_name(loom_print_context_t* ctx,
                                     loom_value_id_t value_id) {
   IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
-  IREE_RETURN_IF_ERROR(
-      loom_print_value_ref(ctx->stream, ctx->module, value_id));
+  IREE_RETURN_IF_ERROR(loom_print_value_ref(ctx, value_id));
   loom_print_did_write(ctx);
   return iree_ok_status();
 }
@@ -403,7 +170,7 @@ static bool loom_print_static_encoding_param_as_bare_symbol(
 
 static iree_status_t loom_print_canonical_encoding(
     loom_output_stream_t* stream, const loom_module_t* module,
-    const loom_encoding_t* encoding) {
+    const loom_encoding_t* encoding, const loom_print_context_t* ctx) {
   IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '#'));
   if (encoding->name_id < module->strings.count) {
     IREE_RETURN_IF_ERROR(loom_output_stream_write(
@@ -428,17 +195,19 @@ static iree_status_t loom_print_canonical_encoding(
     if (loom_print_static_encoding_param_as_bare_symbol(module, encoding, param,
                                                         &bare_symbol)) {
       IREE_RETURN_IF_ERROR(loom_output_stream_write(stream, bare_symbol));
+    } else if (ctx) {
+      IREE_RETURN_IF_ERROR(loom_print_attr(ctx, &param->value, NULL));
     } else {
       IREE_RETURN_IF_ERROR(
-          loom_print_attr(stream, &param->value, module, NULL));
+          loom_text_print_attribute(&param->value, module, stream));
     }
   }
   return loom_output_stream_write_char(stream, '>');
 }
 
-static iree_status_t loom_print_static_encoding(loom_output_stream_t* stream,
-                                                const loom_module_t* module,
-                                                uint16_t encoding_id) {
+static iree_status_t loom_print_static_encoding(
+    loom_output_stream_t* stream, const loom_module_t* module,
+    uint16_t encoding_id, const loom_print_context_t* ctx) {
   if (module && encoding_id > 0 && encoding_id <= module->encodings.count) {
     const loom_encoding_t* encoding =
         &module->encodings.entries[encoding_id - 1];
@@ -448,7 +217,7 @@ static iree_status_t loom_print_static_encoding(loom_output_stream_t* stream,
       return loom_output_stream_write(
           stream, module->strings.entries[encoding->alias_id]);
     }
-    return loom_print_canonical_encoding(stream, module, encoding);
+    return loom_print_canonical_encoding(stream, module, encoding, ctx);
   }
 
   return loom_output_stream_write_format(stream, "#encoding_%" PRIu16,
@@ -458,27 +227,32 @@ static iree_status_t loom_print_static_encoding(loom_output_stream_t* stream,
 static iree_status_t loom_print_dim(loom_output_stream_t* stream,
                                     loom_type_t type,
                                     iree_host_size_t dim_index,
-                                    const loom_module_t* module) {
+                                    const loom_module_t* module,
+                                    const loom_print_context_t* ctx) {
   uint64_t packed = loom_type_dim(type, dim_index);
   if (loom_dim_is_dynamic(packed)) {
     IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '['));
-    IREE_RETURN_IF_ERROR(
-        loom_print_value_ref(stream, module, loom_dim_value_id(packed)));
+    IREE_RETURN_IF_ERROR(loom_print_name_plan_write_value_ref(
+        ctx ? ctx->name_plan : NULL, stream, module,
+        loom_dim_value_id(packed)));
     return loom_output_stream_write_char(stream, ']');
   }
   return loom_output_stream_write_format(stream, "%" PRId64,
                                          loom_dim_static_size(packed));
 }
 
-static iree_status_t loom_print_shaped_interior(loom_output_stream_t* stream,
-                                                loom_type_t type,
-                                                const loom_module_t* module) {
+// Shared in source but kept inline in both complete-type and result-type hot
+// paths so declaration-driven spelling does not add a call per printed type.
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t
+loom_print_shaped_interior(loom_output_stream_t* stream, loom_type_t type,
+                           const loom_module_t* module,
+                           const loom_print_context_t* ctx) {
   uint8_t rank = loom_type_rank(type);
   for (uint8_t i = 0; i < rank; ++i) {
     if (i > 0) {
       IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "x"));
     }
-    IREE_RETURN_IF_ERROR(loom_print_dim(stream, type, i, module));
+    IREE_RETURN_IF_ERROR(loom_print_dim(stream, type, i, module, ctx));
   }
   if (rank > 0) {
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "x"));
@@ -488,31 +262,24 @@ static iree_status_t loom_print_shaped_interior(loom_output_stream_t* stream,
   if (loom_type_has_encoding(type)) {
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ", "));
     if (loom_type_has_ssa_encoding(type)) {
-      IREE_RETURN_IF_ERROR(loom_print_value_ref(
-          stream, module, loom_type_encoding_value_id(type)));
+      IREE_RETURN_IF_ERROR(loom_print_name_plan_write_value_ref(
+          ctx ? ctx->name_plan : NULL, stream, module,
+          loom_type_encoding_value_id(type)));
     } else {
       IREE_RETURN_IF_ERROR(
-          loom_print_static_encoding(stream, module, type.encoding_id));
+          loom_print_static_encoding(stream, module, type.encoding_id, ctx));
     }
   }
   return iree_ok_status();
 }
 
-static iree_status_t loom_print_shaped_type_prefix(loom_output_stream_t* stream,
-                                                   loom_type_kind_t kind) {
-  switch (kind) {
-    case LOOM_TYPE_TILE:
-      return loom_output_stream_write_cstring(stream, "tile<");
-    case LOOM_TYPE_TENSOR:
-      return loom_output_stream_write_cstring(stream, "tensor<");
-    case LOOM_TYPE_VECTOR:
-      return loom_output_stream_write_cstring(stream, "vector<");
-    case LOOM_TYPE_VIEW:
-      return loom_output_stream_write_cstring(stream, "view<");
-    default:
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "type kind %d is not shaped", (int)kind);
-  }
+static iree_status_t loom_print_compact_shape_prefix(
+    loom_output_stream_t* stream, loom_type_kind_t type_kind) {
+  const loom_type_descriptor_t* descriptor =
+      loom_type_registry_lookup_builtin(type_kind);
+  const iree_string_view_t name = loom_bstring_view(descriptor->name);
+  return loom_output_stream_write(
+      stream, iree_make_string_view(name.data, name.size + 1));
 }
 
 // Parameterized types and type-valued attributes are mutually recursive.
@@ -568,17 +335,17 @@ static iree_status_t loom_print_descriptor_backed_type(
                             "parameterized type has malformed slot storage");
   }
 
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write(stream, loom_bstring_view(parameterized->name)));
-
   bool omit_parameter_list = iree_any_bit_set(
       parameterized->flags, LOOM_PARAMETERIZED_TYPE_OMIT_EMPTY_PARAMETER_LIST);
   for (uint8_t i = 0; i < parameter_count && omit_parameter_list; ++i) {
     omit_parameter_list = loom_attr_is_absent(parameters[i]);
   }
-  if (omit_parameter_list) return iree_ok_status();
-
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '<'));
+  const iree_string_view_t name = loom_bstring_view(descriptor->name);
+  if (omit_parameter_list) {
+    return loom_output_stream_write(stream, name);
+  }
+  IREE_RETURN_IF_ERROR(loom_output_stream_write(
+      stream, iree_make_string_view(name.data, name.size + 1)));
 
   loom_print_context_t parameter_context = {0};
   if (type_context) parameter_context = *type_context;
@@ -644,9 +411,10 @@ static iree_status_t loom_text_print_type_impl(
     case LOOM_TYPE_VECTOR:
     case LOOM_TYPE_VIEW: {
       IREE_RETURN_IF_ERROR(
-          loom_print_shaped_type_prefix(stream, loom_type_kind(type)));
-      IREE_RETURN_IF_ERROR(loom_print_shaped_interior(stream, type, module));
-      return loom_output_stream_write_cstring(stream, ">");
+          loom_print_compact_shape_prefix(stream, loom_type_kind(type)));
+      IREE_RETURN_IF_ERROR(
+          loom_print_shaped_interior(stream, type, module, ctx));
+      return loom_output_stream_write_char(stream, '>');
     }
     case LOOM_TYPE_DIALECT: {
       loom_string_id_t name_id = loom_type_dialect_name_id(type);
@@ -739,9 +507,10 @@ static iree_status_t loom_text_print_type_impl(
     case LOOM_TYPE_BUFFER:
       return loom_output_stream_write_cstring(stream, "buffer");
     case LOOM_TYPE_POOL: {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "pool<"));
-      IREE_RETURN_IF_ERROR(loom_print_dim(stream, type, 0, module));
-      return loom_output_stream_write_cstring(stream, ">");
+      IREE_RETURN_IF_ERROR(
+          loom_print_compact_shape_prefix(stream, loom_type_kind(type)));
+      IREE_RETURN_IF_ERROR(loom_print_dim(stream, type, 0, module, ctx));
+      return loom_output_stream_write_char(stream, '>');
     }
     case LOOM_TYPE_FUNCTION: {
       const loom_func_type_data_t* func_data = loom_type_func_data(type);
@@ -791,13 +560,6 @@ iree_status_t loom_print_type(loom_print_context_t* ctx, loom_type_t type) {
   return loom_text_print_type_impl(type, ctx->module, ctx->stream, ctx);
 }
 
-static iree_status_t loom_print_result_type_dim(loom_output_stream_t* stream,
-                                                loom_type_t type,
-                                                iree_host_size_t dim_index,
-                                                const loom_module_t* module) {
-  return loom_print_dim(stream, type, dim_index, module);
-}
-
 static iree_status_t loom_text_print_result_type(loom_type_t type,
                                                  const loom_module_t* module,
                                                  loom_output_stream_t* stream,
@@ -808,31 +570,10 @@ static iree_status_t loom_text_print_result_type(loom_type_t type,
     case LOOM_TYPE_VECTOR:
     case LOOM_TYPE_VIEW: {
       IREE_RETURN_IF_ERROR(
-          loom_print_shaped_type_prefix(stream, loom_type_kind(type)));
-      uint8_t rank = loom_type_rank(type);
-      for (uint8_t i = 0; i < rank; ++i) {
-        if (i > 0) {
-          IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "x"));
-        }
-        IREE_RETURN_IF_ERROR(
-            loom_print_result_type_dim(stream, type, i, module));
-      }
-      if (rank > 0) {
-        IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "x"));
-      }
+          loom_print_compact_shape_prefix(stream, loom_type_kind(type)));
       IREE_RETURN_IF_ERROR(
-          loom_print_scalar_type(stream, loom_type_element_type(type)));
-      if (loom_type_has_encoding(type)) {
-        IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ", "));
-        if (loom_type_has_ssa_encoding(type)) {
-          IREE_RETURN_IF_ERROR(loom_print_value_ref(
-              stream, module, loom_type_encoding_value_id(type)));
-        } else {
-          IREE_RETURN_IF_ERROR(
-              loom_print_static_encoding(stream, module, type.encoding_id));
-        }
-      }
-      return loom_output_stream_write_cstring(stream, ">");
+          loom_print_shaped_interior(stream, type, module, ctx));
+      return loom_output_stream_write_char(stream, '>');
     }
     default:
       return loom_text_print_type_impl(type, module, stream, ctx);
@@ -1142,8 +883,8 @@ static iree_status_t loom_print_attr_impl(
       return loom_output_stream_write_format(stream, "type<%" PRIu32 ">",
                                              attr->type_id);
     case LOOM_ATTR_ENCODING:
-      return loom_print_static_encoding(stream, module,
-                                        loom_attr_as_encoding_id(*attr));
+      return loom_print_static_encoding(
+          stream, module, loom_attr_as_encoding_id(*attr), type_context);
     case LOOM_ATTR_PARAMETERIZED: {
       if (!module || !module->context) {
         return iree_make_status(
@@ -1221,18 +962,17 @@ static iree_status_t loom_print_attr_impl(
   }
 }
 
-iree_status_t loom_print_attr(loom_output_stream_t* stream,
+iree_status_t loom_print_attr(const loom_print_context_t* ctx,
                               const loom_attribute_t* attr,
-                              const loom_module_t* module,
                               const loom_attr_descriptor_t* descriptor) {
-  return loom_print_attr_impl(stream, attr, module, descriptor,
-                              /*type_context=*/NULL);
+  return loom_print_attr_impl(ctx->stream, attr, ctx->module, descriptor, ctx);
 }
 
 iree_status_t loom_text_print_attribute(const loom_attribute_t* attr,
                                         const loom_module_t* module,
                                         loom_output_stream_t* stream) {
-  return loom_print_attr(stream, attr, module, NULL);
+  return loom_print_attr_impl(stream, attr, module, /*descriptor=*/NULL,
+                              /*type_context=*/NULL);
 }
 
 iree_status_t loom_print_encoding_aliases(loom_print_context_t* ctx,
@@ -1248,7 +988,7 @@ iree_status_t loom_print_encoding_aliases(loom_print_context_t* ctx,
         ctx->stream, module->strings.entries[encoding->alias_id]));
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, " = "));
     IREE_RETURN_IF_ERROR(
-        loom_print_canonical_encoding(ctx->stream, module, encoding));
+        loom_print_canonical_encoding(ctx->stream, module, encoding, ctx));
     IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '\n'));
   }
   return iree_ok_status();
