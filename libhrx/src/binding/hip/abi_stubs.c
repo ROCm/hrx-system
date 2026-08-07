@@ -1395,6 +1395,9 @@ HIPAPI hipError_t hipLaunchCooperativeKernel(const void* f, dim3 gridDim,
                                              void** kernelParams,
                                              unsigned int sharedMemBytes,
                                              hipStream_t stream) {
+  int device_count = 0;
+  hipError_t init_result = hipGetDeviceCount(&device_count);
+  if (init_result != hipSuccess) return init_result;
   (void)f;
   (void)gridDim;
   (void)blockDimX;
@@ -1406,6 +1409,9 @@ HIPAPI hipError_t hipLaunchCooperativeKernel(const void* f, dim3 gridDim,
 
 HIPAPI hipError_t hipLaunchCooperativeKernelMultiDevice(
     hipLaunchParams* launchParamsList, int numDevices, unsigned int flags) {
+  int device_count = 0;
+  hipError_t init_result = hipGetDeviceCount(&device_count);
+  if (init_result != hipSuccess) return init_result;
   (void)launchParamsList;
   (void)numDevices;
   (void)flags;

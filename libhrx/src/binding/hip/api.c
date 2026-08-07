@@ -3145,6 +3145,10 @@ HIPAPI hipError_t hipDeviceGetByPCIBusId(int* device, const char* pciBusId) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
+  int device_count = 0;
+  hipError_t count_result = hipGetDeviceCount(&device_count);
+  if (count_result != hipSuccess) return count_result;
+
   unsigned int domain = 0;
   unsigned int bus = 0;
   unsigned int pci_device = 0;
@@ -3156,9 +3160,6 @@ HIPAPI hipError_t hipDeviceGetByPCIBusId(int* device, const char* pciBusId) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  int device_count = 0;
-  hipError_t count_result = hipGetDeviceCount(&device_count);
-  if (count_result != hipSuccess) return count_result;
   for (int i = 0; i < device_count; ++i) {
     const iree_hal_physical_device_identity_t* physical_identity =
         iree_hip_physical_device_identity(iree_hal_streaming_device_entry(i));
@@ -3180,6 +3181,11 @@ HIPAPI hipError_t hipDeviceGetByPCIBusId(int* device, const char* pciBusId) {
 // Lower values have higher priority (with 0 being the default).
 HIPAPI hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority,
                                                   int* greatestPriority) {
+  hipError_t init_result = iree_hip_ensure_context(NULL);
+  if (init_result != hipSuccess) {
+    HIP_RETURN_ERROR(init_result);
+  }
+
   // Return a simple priority range (0 = default, -1 = high priority).
   // On most AMD GPUs, stream priorities don't have significant effect.
   if (leastPriority) {
@@ -3493,12 +3499,25 @@ HIPAPI hipError_t hipGetDeviceFlags(unsigned int* flags) {
 // Sets the preferred cache configuration for the current device.
 // Note: These hints are ignored on AMD devices per the HIP documentation.
 HIPAPI hipError_t hipDeviceSetCacheConfig(hipFuncCache_t cacheConfig) {
-  (void)cacheConfig;
+  hipError_t init_result = iree_hip_ensure_context(NULL);
+  if (init_result != hipSuccess) {
+    HIP_RETURN_ERROR(init_result);
+  }
+  if (cacheConfig != hipFuncCachePreferNone &&
+      cacheConfig != hipFuncCachePreferShared &&
+      cacheConfig != hipFuncCachePreferL1 &&
+      cacheConfig != hipFuncCachePreferEqual) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
   return hipSuccess;  // No-op on AMD
 }
 
 // Gets the current cache configuration for the current device.
 HIPAPI hipError_t hipDeviceGetCacheConfig(hipFuncCache_t* cacheConfig) {
+  hipError_t init_result = iree_hip_ensure_context(NULL);
+  if (init_result != hipSuccess) {
+    HIP_RETURN_ERROR(init_result);
+  }
   if (!cacheConfig) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
@@ -3508,6 +3527,10 @@ HIPAPI hipError_t hipDeviceGetCacheConfig(hipFuncCache_t* cacheConfig) {
 
 // Sets the shared memory configuration for the current device.
 HIPAPI hipError_t hipDeviceSetSharedMemConfig(hipSharedMemConfig config) {
+  hipError_t init_result = iree_hip_ensure_context(NULL);
+  if (init_result != hipSuccess) {
+    HIP_RETURN_ERROR(init_result);
+  }
   if (config != hipSharedMemBankSizeDefault &&
       config != hipSharedMemBankSizeFourByte &&
       config != hipSharedMemBankSizeEightByte) {
@@ -3518,6 +3541,10 @@ HIPAPI hipError_t hipDeviceSetSharedMemConfig(hipSharedMemConfig config) {
 
 // Gets the shared memory configuration for the current device.
 HIPAPI hipError_t hipDeviceGetSharedMemConfig(hipSharedMemConfig* config) {
+  hipError_t init_result = iree_hip_ensure_context(NULL);
+  if (init_result != hipSuccess) {
+    HIP_RETURN_ERROR(init_result);
+  }
   if (!config) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
