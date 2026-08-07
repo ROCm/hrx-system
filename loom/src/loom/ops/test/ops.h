@@ -12,8 +12,30 @@
 #ifndef LOOM_OPS_TEST_OPS_H_
 #define LOOM_OPS_TEST_OPS_H_
 
+#include "loom/ir/parameterized_attr.h"
 #include "loom/ops/op_defs.h"
 #include "loom/target/types.h"
+
+enum {
+  LOOM_PARAMETERIZED_ATTR_TEST_TILE = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0),
+  LOOM_PARAMETERIZED_ATTR_TEST_OPTIONS = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 1),
+  LOOM_PARAMETERIZED_ATTR_TEST_COUNT_ = 2,
+};
+
+// Synthetic mode for parameterized attribute coverage.
+typedef enum loom_test_options_mode_e {
+  LOOM_TEST_OPTIONS_MODE_FAST = 1,
+  LOOM_TEST_OPTIONS_MODE_PRECISE = 2,
+  LOOM_TEST_OPTIONS_MODE_COUNT_ = 3,
+} loom_test_options_mode_t;
+
+// Synthetic scope for parameterized value coverage.
+typedef uint8_t loom_test_options_scopes_t;
+typedef enum loom_test_options_scopes_e {
+  LOOM_TEST_OPTIONS_SCOPES_WORKGROUP = 1,
+  LOOM_TEST_OPTIONS_SCOPES_SUBGROUP = 2,
+  LOOM_TEST_OPTIONS_SCOPES_COUNT_ = 3,
+} loom_test_options_scopes_e;
 
 #ifdef __cplusplus
 extern "C" {
@@ -2012,6 +2034,10 @@ const loom_op_semantics_t* loom_test_dialect_op_semantics(
 // Returns semantic metadata for a test op kind, or empty metadata.
 loom_op_semantics_t loom_test_op_semantics(
     loom_op_kind_t kind);
+
+// Returns parameterized attribute descriptors for the test dialect.
+const loom_parameterized_attr_descriptor_t* loom_test_dialect_parameterized_attrs(
+    iree_host_size_t* out_count);
 
 #ifdef __cplusplus
 }

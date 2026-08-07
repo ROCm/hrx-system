@@ -18,6 +18,7 @@ through printer and parser, real dialect ops will too.
 
 from loom.dialect.test.defs import (
     ALL_TEST_OPS,
+    ALL_TEST_PARAMETERIZED_ATTRS,
     cmp_predicates,
     test_addi,
     test_assume,
@@ -56,10 +57,12 @@ from loom.dialect.test.defs import (
     test_neg,
     test_operand_dict,
     test_ops,
+    test_options_attr,
     test_record,
     test_region_table,
     test_slice,
     test_split_func,
+    test_tile_attr,
     test_update,
     test_use,
     test_yield,
@@ -68,6 +71,9 @@ from loom.dialect.test.defs import (
 __all__ = [
     "test_ops",
     "ALL_TEST_OPS",
+    "ALL_TEST_PARAMETERIZED_ATTRS",
+    "test_tile_attr",
+    "test_options_attr",
     "test_addi",
     "test_neg",
     "test_cast",

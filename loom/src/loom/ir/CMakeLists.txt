@@ -50,6 +50,7 @@ loom_cc_library(
     "local_value_domain.h"
     "location.h"
     "module.h"
+    "parameterized_attr.h"
     "scalar_type.h"
     "semantics.h"
     "types.h"

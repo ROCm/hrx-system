@@ -183,6 +183,52 @@ TEST_F(ContextTest, RegisterDialectSemanticsRequiresMatchingVtables) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION, status);
 }
 
+TEST_F(ContextTest, ParameterizedAttributeFamiliesResolveByKindAndName) {
+  static const uint8_t kFamilyName[] =
+      "\x09"
+      "test.tile";
+  static const loom_parameterized_attr_descriptor_t kFamilies[] = {
+      {
+          /*.name=*/kFamilyName,
+          /*.kind=*/LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0),
+      },
+  };
+
+  IREE_ASSERT_OK(loom_context_register_parameterized_attrs(
+      &context_, LOOM_DIALECT_TEST, kFamilies, IREE_ARRAYSIZE(kFamilies)));
+  EXPECT_EQ(
+      loom_context_resolve_parameterized_attr(&context_, kFamilies[0].kind),
+      &kFamilies[0]);
+  EXPECT_EQ(loom_context_lookup_parameterized_attr_by_name(
+                &context_, IREE_SV("test.tile")),
+            nullptr);
+
+  IREE_ASSERT_OK(loom_context_finalize(&context_));
+  EXPECT_EQ(loom_context_lookup_parameterized_attr_by_name(
+                &context_, IREE_SV("test.tile")),
+            &kFamilies[0]);
+  EXPECT_EQ(loom_context_lookup_parameterized_attr_by_name(
+                &context_, IREE_SV("test.missing")),
+            nullptr);
+}
+
+TEST_F(ContextTest, ParameterizedAttributeRegistrationRejectsWrongKind) {
+  static const uint8_t kFamilyName[] =
+      "\x09"
+      "test.tile";
+  static const loom_parameterized_attr_descriptor_t kFamilies[] = {
+      {
+          /*.name=*/kFamilyName,
+          /*.kind=*/LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 1),
+      },
+  };
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_context_register_parameterized_attrs(
+          &context_, LOOM_DIALECT_TEST, kFamilies, IREE_ARRAYSIZE(kFamilies)));
+}
+
 TEST_F(ContextTest, RegisterEncodingVtableAndLookupByName) {
   IREE_ASSERT_OK(
       loom_context_register_encoding_vtable(&context_, &kQ8_0EncodingVtable));

@@ -23,6 +23,7 @@
 
 #include "iree/base/api.h"
 #include "loom/ir/ir.h"
+#include "loom/ir/parameterized_attr.h"
 #include "loom/ir/semantics.h"
 
 #ifdef __cplusplus
@@ -54,6 +55,20 @@ typedef struct loom_op_vtable_registry_t {
   loom_dialect_vtables_t dialects[LOOM_DIALECT_BUILTIN_COUNT_];
 } loom_op_vtable_registry_t;
 
+// One dialect's dense parameterized attribute family descriptors.
+typedef struct loom_dialect_parameterized_attrs_t {
+  // Number of family descriptors in |entries|.
+  uint8_t count;
+  // Generated descriptors indexed by the family kind's low byte.
+  const loom_parameterized_attr_descriptor_t* entries;
+} loom_dialect_parameterized_attrs_t;
+
+// Two-level parameterized attribute registry indexed by dialect and family.
+typedef struct loom_parameterized_attr_registry_t {
+  // Dialect family registrations indexed by dialect ID.
+  loom_dialect_parameterized_attrs_t dialects[LOOM_DIALECT_BUILTIN_COUNT_];
+} loom_parameterized_attr_registry_t;
+
 // Entry in the op name hash table. Maps a dotted op name string
 // (e.g., "test.addi") to the op kind and vtable pointer. The name
 // field is a view into the vtable's B-string — no allocation.
@@ -78,6 +93,24 @@ typedef struct loom_op_name_table_t {
   uint32_t count;
 } loom_op_name_table_t;
 
+// Entry in the stable family-name lookup table.
+typedef struct loom_parameterized_attr_name_entry_t {
+  // Borrowed dotted public name from the generated descriptor.
+  iree_string_view_t name;
+  // Borrowed generated family descriptor.
+  const loom_parameterized_attr_descriptor_t* descriptor;
+} loom_parameterized_attr_name_entry_t;
+
+// Finalized family-name hash table used by text and bytecode boundaries.
+typedef struct loom_parameterized_attr_name_table_t {
+  // Allocated open-addressed entries.
+  loom_parameterized_attr_name_entry_t* entries;
+  // Power-of-two entry capacity, or zero when no families are registered.
+  uint32_t capacity;
+  // Number of occupied entries.
+  uint32_t count;
+} loom_parameterized_attr_name_table_t;
+
 // The global context: vtables, allocator, and shared language registries.
 //
 // Created once at startup, shared across all modules and threads.
@@ -93,8 +126,14 @@ struct loom_context_t {
   // Op vtable registry: two-level lookup by dialect_id then op_index.
   loom_op_vtable_registry_t op_vtables;
 
+  // Parameterized attribute descriptors indexed by generated family kind.
+  loom_parameterized_attr_registry_t parameterized_attrs;
+
   // Op name hash table for string → vtable resolution.
   loom_op_name_table_t op_name_table;
+
+  // Stable family-name lookup used only at public format boundaries.
+  loom_parameterized_attr_name_table_t parameterized_attr_name_table;
 };
 
 // Initializes a context with the given host allocator. After initialization,
@@ -130,6 +169,16 @@ iree_status_t loom_context_register_dialect_semantics(
     loom_context_t* context, uint8_t dialect_id,
     const loom_op_semantics_t* semantics, uint16_t op_count);
 
+// Registers one dialect's dense parameterized attribute descriptors.
+//
+// Descriptor storage must remain valid for the context lifetime. Family kinds
+// must match their dialect and array index. Empty dialect arrays are omitted
+// instead of registered.
+iree_status_t loom_context_register_parameterized_attrs(
+    loom_context_t* context, uint8_t dialect_id,
+    const loom_parameterized_attr_descriptor_t* descriptors,
+    iree_host_size_t descriptor_count);
+
 // Registers one encoding family vtable with the context.
 //
 // `vtable->name` must be non-empty and stable for the context lifetime
@@ -161,6 +210,17 @@ loom_op_semantics_t loom_context_resolve_op_semantics(
 const loom_op_vtable_t* loom_context_lookup_op_by_name(
     const loom_context_t* context, iree_string_view_t name,
     loom_op_kind_t* out_kind);
+
+// Resolves a dense context-local parameterized attribute family kind.
+const loom_parameterized_attr_descriptor_t*
+loom_context_resolve_parameterized_attr(const loom_context_t* context,
+                                        loom_parameterized_attr_kind_t kind);
+
+// Looks up a parameterized attribute family by its stable dotted public name.
+// The context must be finalized.
+const loom_parameterized_attr_descriptor_t*
+loom_context_lookup_parameterized_attr_by_name(const loom_context_t* context,
+                                               iree_string_view_t name);
 
 // Looks up an encoding family by its bare name (`q8_0`, `dense`, ...).
 // Returns NULL when no matching family has been registered.

@@ -20,6 +20,7 @@ from loom.dsl import (
     EnumDef,
     Op,
     OperandOwnershipEffect,
+    ParameterizedAttrDef,
     ResultOwnershipEffect,
     TargetLikeInterface,
     TypeConstraint,
@@ -43,6 +44,12 @@ from loom.gen.ops.c_enums import (
 from loom.gen.ops.c_enums import error_ref_literal as _error_ref_literal
 from loom.gen.ops.c_names import COPYRIGHT
 from loom.gen.ops.c_names import c_dialect_enum as _c_dialect_enum
+from loom.gen.ops.c_names import (
+    c_parameterized_attr_enum_name as _c_parameterized_attr_enum_name,
+)
+from loom.gen.ops.c_names import (
+    c_parameterized_attr_prefix as _c_parameterized_attr_prefix,
+)
 from loom.gen.ops.c_names import c_prefix as _c_prefix
 from loom.gen.support import c_arrays
 from loom.gen.support.c import c_identifier as _c_identifier
@@ -81,7 +88,11 @@ def _op_semantics_row(op: Op) -> list[str]:
     return row
 
 
-def _emit_dialect_table_accessors(lines: list[str], dialect_name: str) -> None:
+def _emit_dialect_table_accessors(
+    lines: list[str],
+    dialect_name: str,
+    parameterized_attrs: Sequence[ParameterizedAttrDef] = (),
+) -> None:
     """Emits dialect-specific wrappers around shared table helper algorithms."""
 
     vtable_array_name = f"loom_{dialect_name}_vtable_array"
@@ -93,6 +104,13 @@ def _emit_dialect_table_accessors(lines: list[str], dialect_name: str) -> None:
     lines.append("      out_count);")
     lines.append("}")
     lines.append("")
+    if parameterized_attrs:
+        lines.append(f"const loom_parameterized_attr_descriptor_t* loom_{dialect_name}_dialect_parameterized_attrs(")
+        lines.append("    iree_host_size_t* out_count) {")
+        lines.append(f"  *out_count = IREE_ARRAYSIZE(loom_{dialect_name}_parameterized_attr_array);")
+        lines.append(f"  return loom_{dialect_name}_parameterized_attr_array;")
+        lines.append("}")
+        lines.append("")
     lines.append(f"const loom_op_semantics_t* loom_{dialect_name}_dialect_op_semantics(")
     lines.append("    iree_host_size_t* out_count) {")
     lines.append("  return loom_dialect_semantics_array(")
@@ -218,6 +236,80 @@ def _emit_table_string_macros(lines: list[str], _dialect_name: str) -> None:
     lines.append("")
 
 
+def _emit_enum_case_names(lines: list[str], array_name: str, enum_def: EnumDef) -> None:
+    cases_by_value = sorted(enum_def.cases, key=lambda case: case.value)
+    max_value = max(case.value for case in cases_by_value)
+    value_to_name = {case.value: case.keyword for case in cases_by_value}
+    c_arrays.append_value_array(
+        lines,
+        "loom_bstring_t",
+        array_name,
+        [_bstring_expr(name) if (name := value_to_name.get(value)) is not None else "NULL" for value in range(max_value + 1)],
+        trailing_blank=False,
+    )
+
+
+def _emit_parameterized_attr_tables(
+    lines: list[str],
+    dialect_name: str,
+    parameterized_attrs: Sequence[ParameterizedAttrDef],
+) -> None:
+    """Emits dialect-owned parameter schemas and family descriptors."""
+
+    for attr_def in parameterized_attrs:
+        prefix = _c_parameterized_attr_prefix(attr_def)
+        for parameter in attr_def.parameters:
+            if parameter.attr_type in ("enum", "enum_array"):
+                assert parameter.enum_def is not None
+                _emit_enum_case_names(
+                    lines,
+                    f"{prefix}_{parameter.name}_enum_names",
+                    parameter.enum_def,
+                )
+            if parameter.symbol_ref is not None:
+                flags = _symbol_interface_flags(parameter.symbol_ref.interfaces)
+                lines.append(f"static const loom_symbol_reference_descriptor_t {prefix}_{parameter.name}_symbol_ref = {{{_bstring_expr(parameter.symbol_ref.name)}, {flags}}};")
+
+        if attr_def.parameters:
+            lines.append(f"static const loom_attr_descriptor_t {prefix}_parameter_desc[] = {{")
+            for parameter in attr_def.parameters:
+                attr_kind = ATTR_KIND_MAP[parameter.attr_type]
+                flags_parts = []
+                if parameter.optional:
+                    flags_parts.append("LOOM_ATTR_OPTIONAL")
+                if parameter.elide_default:
+                    flags_parts.append("LOOM_ATTR_ELIDE_DEFAULT")
+                if parameter.open_enum:
+                    flags_parts.append("LOOM_ATTR_OPEN_ENUM")
+                lines.append("    {")
+                lines.append(f"        .name = {_bstring_expr(parameter.name)},")
+                lines.append(f"        .attr_kind = {attr_kind},")
+                if flags_parts:
+                    lines.append(f"        .flags = {' | '.join(flags_parts)},")
+                if parameter.attr_type in ("enum", "enum_array"):
+                    enum_names = f"{prefix}_{parameter.name}_enum_names"
+                    lines.append(f"        .enum_max_value = (uint8_t)(IREE_ARRAYSIZE({enum_names}) - 1),")
+                    lines.append(f"        .enum_case_names = {enum_names},")
+                if parameter.symbol_ref is not None:
+                    lines.append(f"        .symbol_ref = &{prefix}_{parameter.name}_symbol_ref,")
+                lines.append("    },")
+            lines.append("};")
+
+    if parameterized_attrs:
+        lines.append(f"static const loom_parameterized_attr_descriptor_t loom_{dialect_name}_parameterized_attr_array[] = {{")
+        for attr_def in parameterized_attrs:
+            prefix = _c_parameterized_attr_prefix(attr_def)
+            lines.append("    {")
+            lines.append(f"        .name = {_bstring_expr(attr_def.name)},")
+            lines.append(f"        .kind = {_c_parameterized_attr_enum_name(attr_def)},")
+            if attr_def.parameters:
+                lines.append(f"        .parameter_count = IREE_ARRAYSIZE({prefix}_parameter_desc),")
+                lines.append(f"        .parameter_descriptors = {prefix}_parameter_desc,")
+            lines.append("    },")
+        lines.append("};")
+        lines.append("")
+
+
 # ============================================================================
 # tables.c generation
 # ============================================================================
@@ -227,6 +319,7 @@ def generate_tables_c(
     dialect_name: str,
     dialect_id: int,
     ops: Sequence[Op],
+    parameterized_attrs: Sequence[ParameterizedAttrDef] = (),
     *,
     include_path: str | None = None,
     emit_registration: bool = True,
@@ -259,18 +352,6 @@ def generate_tables_c(
     # Canonicalize functions are declared in ops.h (not here) so there
     # are no extern declarations in .c files.
     shared_enums = _collect_shared_enums(dialect_name, ops)
-
-    def _emit_enum_case_names(lines: list[str], array_name: str, enum_def: EnumDef) -> None:
-        cases_by_value = sorted(enum_def.cases, key=lambda c: c.value)
-        max_value = max(c.value for c in cases_by_value)
-        value_to_name: dict[int, str] = {c.value: c.keyword for c in cases_by_value}
-        c_arrays.append_value_array(
-            lines,
-            "loom_bstring_t",
-            array_name,
-            [_bstring_expr(name) if (name := value_to_name.get(v)) is not None else "NULL" for v in range(max_value + 1)],
-            trailing_blank=False,
-        )
 
     # Symbol definition descriptors may refer to fact domains outside this
     # generated translation unit.
@@ -681,6 +762,10 @@ def generate_tables_c(
         lines.append("};")
         lines.append("")
 
+    # Parameterized attribute families share the ordinary attribute schema but
+    # retain a distinct dialect-owned outer identity.
+    _emit_parameterized_attr_tables(lines, dialect_name, parameterized_attrs)
+
     lines.append("#undef _OP_NAME")
     lines.append("#undef _BSTRING")
     lines.append("")
@@ -701,7 +786,7 @@ def generate_tables_c(
         f"loom_{dialect_name}_semantics_array",
         [_op_semantics_row(op) for op in ops],
     )
-    _emit_dialect_table_accessors(lines, dialect_name)
+    _emit_dialect_table_accessors(lines, dialect_name, parameterized_attrs)
 
     return "\n".join(lines)
 
@@ -740,6 +825,7 @@ def generate_tables_aggregator_c(
     dialect_name: str,
     dialect_id: int,
     ops: Sequence[Op],
+    parameterized_attrs: Sequence[ParameterizedAttrDef] = (),
     *,
     include_path: str | None = None,
 ) -> str:
@@ -754,6 +840,8 @@ def generate_tables_aggregator_c(
     lines.append(f'#include "{include_path}/tables.h"')
     lines.append("")
 
+    _emit_parameterized_attr_tables(lines, dialect_name, parameterized_attrs)
+
     c_arrays.append_value_array(
         lines,
         "loom_op_vtable_t* const",
@@ -766,7 +854,7 @@ def generate_tables_aggregator_c(
         f"loom_{dialect_name}_semantics_array",
         [_op_semantics_row(op) for op in ops],
     )
-    _emit_dialect_table_accessors(lines, dialect_name)
+    _emit_dialect_table_accessors(lines, dialect_name, parameterized_attrs)
 
     return "\n".join(lines)
 
@@ -775,6 +863,7 @@ def generate_sharded_tables_c(
     dialect_name: str,
     dialect_id: int,
     category_groups: Sequence[tuple[Any, Sequence[Op]]],
+    parameterized_attrs: Sequence[ParameterizedAttrDef] = (),
     *,
     include_path: str | None = None,
 ) -> dict[str, str]:
@@ -797,6 +886,12 @@ def generate_sharded_tables_c(
             export_vtables=True,
             private_header=True,
         )
-    table_files["tables.c"] = generate_tables_aggregator_c(dialect_name, dialect_id, all_ops, include_path=include_path)
+    table_files["tables.c"] = generate_tables_aggregator_c(
+        dialect_name,
+        dialect_id,
+        all_ops,
+        parameterized_attrs,
+        include_path=include_path,
+    )
     table_files["tables.h"] = generate_tables_h(dialect_name, all_ops, include_path=include_path)
     return table_files

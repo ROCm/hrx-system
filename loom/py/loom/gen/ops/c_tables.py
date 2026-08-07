@@ -83,8 +83,18 @@ def _parse_named_output(value: str) -> NamedOutput:
     return NamedOutput(name=name, path=Path(path))
 
 
-def _production_dialects(model: GenerationModel) -> list[tuple[Any, list[Op]]]:
-    return [(generation.dialect, generation.ops) for generation in model.dialects if generation.dialect.register_by_default]
+def _production_dialects(
+    model: GenerationModel,
+) -> list[tuple[Any, list[Op], Sequence[Any]]]:
+    return [
+        (
+            generation.dialect,
+            generation.ops,
+            generation.parameterized_attrs,
+        )
+        for generation in model.dialects
+        if generation.dialect.register_by_default
+    ]
 
 
 def _generate_registry_contents(model: GenerationModel) -> dict[str, str]:

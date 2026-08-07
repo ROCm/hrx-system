@@ -143,6 +143,25 @@ uint8_t loom_predicate_kind_argument_count(uint8_t kind);
 
 typedef struct loom_named_attr_t loom_named_attr_t;
 
+// Context-local identity for a descriptor-backed parameterized attribute
+// family. The high byte identifies the dialect and the low byte indexes that
+// dialect's generated descriptor array. This value never serializes.
+typedef uint16_t loom_parameterized_attr_kind_t;
+
+#define LOOM_PARAMETERIZED_ATTR_KIND(dialect_id, family_index)      \
+  ((loom_parameterized_attr_kind_t)(((uint16_t)(dialect_id) << 8) | \
+                                    (uint16_t)(family_index)))
+
+static inline uint8_t loom_parameterized_attr_dialect_id(
+    loom_parameterized_attr_kind_t kind) {
+  return (uint8_t)(kind >> 8);
+}
+
+static inline uint8_t loom_parameterized_attr_dialect_index(
+    loom_parameterized_attr_kind_t kind) {
+  return (uint8_t)kind;
+}
+
 // A borrowed ordered array of stable enum values.
 //
 // The descriptor of the operation field carrying the array owns the enum

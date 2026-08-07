@@ -30,6 +30,13 @@ iree_status_t loom_test_dialect_register(loom_context_t* context) {
   }
   IREE_RETURN_IF_ERROR(loom_context_register_dialect(context, LOOM_DIALECT_TEST,
                                                      vtables, (uint16_t)count));
-  return loom_context_register_dialect_semantics(context, LOOM_DIALECT_TEST,
-                                                 semantics, (uint16_t)count);
+  IREE_RETURN_IF_ERROR(loom_context_register_dialect_semantics(
+      context, LOOM_DIALECT_TEST, semantics, (uint16_t)count));
+  iree_host_size_t parameterized_attr_count = 0;
+  const loom_parameterized_attr_descriptor_t* parameterized_attrs =
+      loom_test_dialect_parameterized_attrs(&parameterized_attr_count);
+  if (parameterized_attr_count == 0) return iree_ok_status();
+  return loom_context_register_parameterized_attrs(context, LOOM_DIALECT_TEST,
+                                                   parameterized_attrs,
+                                                   parameterized_attr_count);
 }

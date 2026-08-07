@@ -74,6 +74,7 @@ from loom.dsl import (
     OperandRole,
     OpPhase,
     PackedPayloadBitCountMatchesStorage,
+    ParameterizedAttrDef,
     PositiveBitWidthAttr,
     Reads,
     ReadWrites,
@@ -232,13 +233,48 @@ def test_generate_op_registry_emits_registration_tables() -> None:
         default_phase=OpPhase.EXECUTABLE,
     )
 
-    op_registry_h, op_registry_tables_h, op_registry_tables_c = generate_op_registry([(dialect, [])])
+    op_registry_h, op_registry_tables_h, op_registry_tables_c = generate_op_registry([(dialect, [], ())])
 
     assert "loom_op_registry_register_all_dialects" in op_registry_h
     assert "loom_op_registry_dialects[]" in op_registry_tables_h
     assert "loom_test_dialect_vtables" in op_registry_tables_c
     assert "loom_op_registry_register_dialect" not in op_registry_tables_c
     assert "iree_make_status" not in op_registry_tables_c
+
+
+def test_generate_parameterized_attribute_family_metadata() -> None:
+    dialect = Dialect("test", dialect_id=0x01)
+    scope = EnumDef(
+        "Scope",
+        [EnumCase("workgroup", 1), EnumCase("subgroup", 2)],
+    )
+    tile = ParameterizedAttrDef(
+        "test.tile",
+        group=dialect,
+        parameters=[AttrDef("width", ATTR_TYPE_I64)],
+    )
+    options = ParameterizedAttrDef(
+        "test.options",
+        group=dialect,
+        parameters=[
+            AttrDef(
+                "scopes",
+                ATTR_TYPE_ENUM_ARRAY,
+                enum_def=scope,
+                optional=True,
+                open_enum=True,
+            ),
+        ],
+    )
+
+    ops_h = generate_ops_h("test", 0x01, [], [tile, options])
+    tables_c = generate_tables_c("test", 0x01, [], [tile, options])
+
+    assert "LOOM_PARAMETERIZED_ATTR_TEST_TILE" in ops_h
+    assert "loom_test_dialect_parameterized_attrs" in ops_h
+    assert '.name = _BSTRING(12, "test.options")' in tables_c
+    assert ".attr_kind = LOOM_ATTR_ENUM_ARRAY" in tables_c
+    assert ".flags = LOOM_ATTR_OPTIONAL | LOOM_ATTR_OPEN_ENUM" in tables_c
 
 
 def test_generate_dialect_tables_emit_dense_op_semantics() -> None:

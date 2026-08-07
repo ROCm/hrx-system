@@ -38,6 +38,7 @@ def generate_dialect_contents(generation: DialectGeneration) -> dict[str, str]:
             dialect.name,
             dialect.dialect_id,
             generation.table_shards,
+            generation.parameterized_attrs,
             include_path=include_path,
         )
         if generation.table_shards is not None
@@ -46,12 +47,18 @@ def generate_dialect_contents(generation: DialectGeneration) -> dict[str, str]:
                 dialect.name,
                 dialect.dialect_id,
                 generation.ops,
+                generation.parameterized_attrs,
                 include_path=include_path,
             )
         }
     )
     return {
-        "ops.h": generate_ops_h(dialect.name, dialect.dialect_id, generation.ops),
+        "ops.h": generate_ops_h(
+            dialect.name,
+            dialect.dialect_id,
+            generation.ops,
+            generation.parameterized_attrs,
+        ),
         "builders.c": c_builders.generate_builders_c(
             dialect.name,
             generation.ops,

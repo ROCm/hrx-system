@@ -58,6 +58,7 @@ from loom.dialect.target import target_record_attrs
 from loom.dsl import (
     ANY,
     ANY_ENCODING,
+    ATTR_TYPE_ENUM,
     ATTR_TYPE_ENUM_ARRAY,
     ATTR_TYPE_FLAGS,
     ATTR_TYPE_I64_ARRAY,
@@ -105,6 +106,7 @@ from loom.dsl import (
     Op,
     Operand,
     OperandRole,
+    ParameterizedAttrDef,
     Reads,
     ReadWrites,
     RegionDef,
@@ -192,6 +194,61 @@ _ArrayElement = EnumDef(
         EnumCase("high", 255, doc="Maximum stable byte value."),
     ],
     doc="Synthetic sparse enum for enum-array lifecycle coverage.",
+)
+
+_ParameterizedMode = EnumDef(
+    "ParameterizedMode",
+    [
+        EnumCase("fast", 1, doc="Synthetic fast mode."),
+        EnumCase("precise", 2, doc="Synthetic precise mode."),
+    ],
+    doc="Synthetic mode for parameterized attribute coverage.",
+)
+
+_ParameterizedScope = EnumDef(
+    "ParameterizedScope",
+    [
+        EnumCase("workgroup", 1, doc="Synthetic workgroup scope."),
+        EnumCase("subgroup", 2, doc="Synthetic subgroup scope."),
+    ],
+    doc="Synthetic scope for parameterized value coverage.",
+)
+
+test_tile_attr = ParameterizedAttrDef(
+    "test.tile",
+    group=test_ops,
+    parameters=[
+        AttrDef("width", "i64", doc="Tile width in elements."),
+    ],
+    doc="Minimal parameterized attribute family.",
+)
+
+test_options_attr = ParameterizedAttrDef(
+    "test.options",
+    group=test_ops,
+    parameters=[
+        AttrDef(
+            "mode",
+            ATTR_TYPE_ENUM,
+            enum_def=_ParameterizedMode,
+            doc="Required execution mode.",
+        ),
+        AttrDef(
+            "scopes",
+            ATTR_TYPE_ENUM_ARRAY,
+            enum_def=_ParameterizedScope,
+            optional=True,
+            open_enum=True,
+            doc="Optional ordered scopes.",
+        ),
+        AttrDef("element_type", "type", optional=True),
+    ],
+    doc="Structured parameterized attribute lifecycle witness.",
+)
+
+ALL_TEST_PARAMETERIZED_ATTRS = (
+    test_tile_attr,
+    test_options_attr,
 )
 
 cmp_predicates = EnumDef(

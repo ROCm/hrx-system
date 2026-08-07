@@ -40,6 +40,8 @@ void loom_context_initialize(iree_allocator_t allocator,
 void loom_context_deinitialize(loom_context_t* context) {
   iree_allocator_free(context->allocator, context->encoding_vtables.entries);
   iree_allocator_free(context->allocator, context->op_name_table.entries);
+  iree_allocator_free(context->allocator,
+                      context->parameterized_attr_name_table.entries);
   memset(context, 0, sizeof(*context));
 }
 
@@ -97,6 +99,78 @@ iree_status_t loom_context_register_dialect_semantics(
         "dialect ID %u semantic metadata is already registered", dialect_id);
   }
   dialect->semantics = semantics;
+  return iree_ok_status();
+}
+
+iree_status_t loom_context_register_parameterized_attrs(
+    loom_context_t* context, uint8_t dialect_id,
+    const loom_parameterized_attr_descriptor_t* descriptors,
+    iree_host_size_t descriptor_count) {
+  if (dialect_id >= LOOM_DIALECT_BUILTIN_COUNT_) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "dialect ID %u exceeds maximum %u", dialect_id,
+                            LOOM_DIALECT_BUILTIN_COUNT_ - 1);
+  }
+  if (descriptor_count == 0 || descriptors == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "dialect ID %u parameterized attribute registration requires at "
+        "least one descriptor",
+        dialect_id);
+  }
+  if (descriptor_count > UINT8_MAX) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "dialect ID %u has %" PRIhsz
+        " parameterized attribute families, exceeding the uint8_t limit",
+        dialect_id, descriptor_count);
+  }
+  loom_dialect_parameterized_attrs_t* dialect =
+      &context->parameterized_attrs.dialects[dialect_id];
+  if (dialect->entries != NULL) {
+    return iree_make_status(
+        IREE_STATUS_ALREADY_EXISTS,
+        "dialect ID %u parameterized attributes are already registered",
+        dialect_id);
+  }
+  for (iree_host_size_t i = 0; i < descriptor_count; ++i) {
+    const loom_parameterized_attr_descriptor_t* descriptor = &descriptors[i];
+    loom_parameterized_attr_kind_t expected_kind =
+        LOOM_PARAMETERIZED_ATTR_KIND(dialect_id, i);
+    if (descriptor->kind != expected_kind) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "dialect ID %u parameterized attribute descriptor %" PRIhsz
+          " has kind 0x%04X instead of 0x%04X",
+          dialect_id, i, descriptor->kind, expected_kind);
+    }
+    if (descriptor->name == NULL) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "dialect ID %u parameterized attribute descriptor %" PRIhsz
+          " has no name",
+          dialect_id, i);
+    }
+    if (iree_string_view_is_empty(loom_bstring_view(descriptor->name))) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "dialect ID %u parameterized attribute descriptor %" PRIhsz
+          " has an empty name",
+          dialect_id, i);
+    }
+    if (descriptor->parameter_count > 0 &&
+        descriptor->parameter_descriptors == NULL) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "parameterized attribute '%.*s' has %u parameters but no "
+          "descriptors",
+          (int)loom_bstring_view(descriptor->name).size,
+          loom_bstring_view(descriptor->name).data,
+          descriptor->parameter_count);
+    }
+  }
+  dialect->count = (uint8_t)descriptor_count;
+  dialect->entries = descriptors;
   return iree_ok_status();
 }
 
@@ -167,7 +241,68 @@ static iree_status_t loom_context_build_op_name_table(loom_context_t* context) {
   return iree_ok_status();
 }
 
+static iree_status_t loom_context_build_parameterized_attr_name_table(
+    loom_context_t* context) {
+  uint32_t total_families = 0;
+  for (uint8_t dialect_id = 0; dialect_id < LOOM_DIALECT_BUILTIN_COUNT_;
+       ++dialect_id) {
+    total_families += context->parameterized_attrs.dialects[dialect_id].count;
+  }
+  if (total_families == 0) return iree_ok_status();
+
+  uint32_t capacity =
+      iree_host_size_next_power_of_two((total_families * 4 + 2) / 3);
+  if (capacity < 16) capacity = 16;
+  loom_parameterized_attr_name_entry_t* entries = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      context->allocator, capacity, sizeof(*entries), (void**)&entries));
+  memset(entries, 0, (iree_host_size_t)capacity * sizeof(*entries));
+
+  uint32_t mask = capacity - 1;
+  uint32_t count = 0;
+  for (uint8_t dialect_id = 0; dialect_id < LOOM_DIALECT_BUILTIN_COUNT_;
+       ++dialect_id) {
+    const loom_dialect_parameterized_attrs_t* dialect =
+        &context->parameterized_attrs.dialects[dialect_id];
+    for (uint8_t family_index = 0; family_index < dialect->count;
+         ++family_index) {
+      const loom_parameterized_attr_descriptor_t* descriptor =
+          &dialect->entries[family_index];
+      iree_string_view_t name = loom_bstring_view(descriptor->name);
+      if (loom_context_lookup_encoding_vtable(context, name) != NULL) {
+        iree_allocator_free(context->allocator, entries);
+        return iree_make_status(
+            IREE_STATUS_ALREADY_EXISTS,
+            "parameterized attribute family '%.*s' conflicts with a "
+            "registered encoding family",
+            (int)name.size, name.data);
+      }
+      uint32_t slot = loom_hash_string(name) & mask;
+      while (entries[slot].descriptor != NULL) {
+        if (iree_string_view_equal(entries[slot].name, name)) {
+          iree_allocator_free(context->allocator, entries);
+          return iree_make_status(
+              IREE_STATUS_ALREADY_EXISTS,
+              "parameterized attribute family '%.*s' is registered twice",
+              (int)name.size, name.data);
+        }
+        slot = (slot + 1) & mask;
+      }
+      entries[slot].name = name;
+      entries[slot].descriptor = descriptor;
+      ++count;
+    }
+  }
+
+  context->parameterized_attr_name_table.entries = entries;
+  context->parameterized_attr_name_table.capacity = capacity;
+  context->parameterized_attr_name_table.count = count;
+  return iree_ok_status();
+}
+
 iree_status_t loom_context_finalize(loom_context_t* context) {
+  IREE_RETURN_IF_ERROR(
+      loom_context_build_parameterized_attr_name_table(context));
   return loom_context_build_op_name_table(context);
 }
 
@@ -213,6 +348,35 @@ const loom_op_vtable_t* loom_context_lookup_op_by_name(
     if (iree_string_view_equal(table->entries[slot].name, name)) {
       *out_kind = table->entries[slot].kind;
       return table->entries[slot].vtable;
+    }
+    slot = (slot + 1) & mask;
+  }
+  return NULL;
+}
+
+const loom_parameterized_attr_descriptor_t*
+loom_context_resolve_parameterized_attr(const loom_context_t* context,
+                                        loom_parameterized_attr_kind_t kind) {
+  uint8_t dialect_id = loom_parameterized_attr_dialect_id(kind);
+  if (dialect_id >= LOOM_DIALECT_BUILTIN_COUNT_) return NULL;
+  const loom_dialect_parameterized_attrs_t* dialect =
+      &context->parameterized_attrs.dialects[dialect_id];
+  uint8_t family_index = loom_parameterized_attr_dialect_index(kind);
+  if (family_index >= dialect->count) return NULL;
+  return &dialect->entries[family_index];
+}
+
+const loom_parameterized_attr_descriptor_t*
+loom_context_lookup_parameterized_attr_by_name(const loom_context_t* context,
+                                               iree_string_view_t name) {
+  const loom_parameterized_attr_name_table_t* table =
+      &context->parameterized_attr_name_table;
+  if (table->capacity == 0) return NULL;
+  uint32_t mask = table->capacity - 1;
+  uint32_t slot = loom_hash_string(name) & mask;
+  while (table->entries[slot].descriptor != NULL) {
+    if (iree_string_view_equal(table->entries[slot].name, name)) {
+      return table->entries[slot].descriptor;
     }
     slot = (slot + 1) & mask;
   }

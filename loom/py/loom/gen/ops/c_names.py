@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from loom.dsl import Op
+from loom.dsl import Op, ParameterizedAttrDef
 from loom.gen.support.generated_file import line_comment_header
 
 COPYRIGHT = """\
@@ -38,6 +38,18 @@ def c_enum_name(op: Op) -> str:
     test.addi -> LOOM_OP_TEST_ADDI
     """
     return "LOOM_OP_" + op.name.replace(".", "_").upper()
+
+
+def c_parameterized_attr_prefix(attr_def: ParameterizedAttrDef) -> str:
+    """Returns the C function/variable prefix for an attribute family."""
+
+    return "loom_" + attr_def.name.replace(".", "_")
+
+
+def c_parameterized_attr_enum_name(attr_def: ParameterizedAttrDef) -> str:
+    """Returns the C enum constant for a parameterized attribute family."""
+
+    return "LOOM_PARAMETERIZED_ATTR_" + attr_def.name.replace(".", "_").upper()
 
 
 def c_dialect_enum(dialect_name: str) -> str:

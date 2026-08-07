@@ -226,6 +226,7 @@ __all__ = [
     "RegisterUnitsSumTo",
     # Op group.
     "Dialect",
+    "ParameterizedAttrDef",
     # Legacy text-format migration declarations.
     "LegacyFieldDefault",
     "LegacyFieldMapping",
@@ -2810,6 +2811,108 @@ class Dialect:
         object.__setattr__(self, "register_by_default", register_by_default)
 
 
+_PARAMETERIZED_ATTR_PARAMETER_TYPES = frozenset(
+    {
+        ATTR_TYPE_I64,
+        ATTR_TYPE_F64,
+        ATTR_TYPE_STRING,
+        ATTR_TYPE_BOOL,
+        ATTR_TYPE_ENUM,
+        ATTR_TYPE_ENUM_ARRAY,
+        ATTR_TYPE_TYPE,
+        ATTR_TYPE_I64_ARRAY,
+        ATTR_TYPE_BYTES,
+        ATTR_TYPE_ENCODING,
+        ATTR_TYPE_SYMBOL,
+        ATTR_TYPE_DICT,
+    }
+)
+
+
+def _is_ascii_identifier(value: str) -> bool:
+    """Returns whether |value| is a bare Loom identifier."""
+
+    if not value:
+        return False
+    first_character = value[0]
+    if not (
+        first_character == "_"
+        or (first_character.isascii() and first_character.isalpha())
+    ):
+        return False
+    return all(
+        character.isascii() and (character.isalnum() or character == "_")
+        for character in value[1:]
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ParameterizedAttrDef:
+    """Declares one namespaced family of descriptor-backed attributes.
+
+    The family name is stable public IR. Dense family ordinals and parameter
+    slot positions are generated implementation details and never serialize.
+    Parameters use AttrDef so operation fields, parameterized attributes, and
+    generic parameterized types share one value schema.
+    """
+
+    name: str
+    group: Dialect
+    parameters: tuple[AttrDef, ...] = ()
+    doc: str = ""
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        group: Dialect,
+        parameters: list[AttrDef] | tuple[AttrDef, ...] = (),
+        doc: str = "",
+    ) -> None:
+        name_parts = name.split(".")
+        if len(name_parts) < 2 or name_parts[0] != group.name:
+            raise ValueError(
+                f"ParameterizedAttrDef '{name}': family name must begin with "
+                f"the owning dialect namespace '{group.name}.'"
+            )
+        if not all(_is_ascii_identifier(part) for part in name_parts):
+            raise ValueError(
+                f"ParameterizedAttrDef '{name}': family name must be a dotted "
+                "ASCII identifier"
+            )
+
+        frozen_parameters = tuple(parameters)
+        if len(frozen_parameters) > 0xFF:
+            raise ValueError(
+                f"ParameterizedAttrDef '{name}': {len(frozen_parameters)} "
+                "parameters exceed the uint8_t slot limit"
+            )
+        seen_names: set[str] = set()
+        for parameter in frozen_parameters:
+            if not _is_ascii_identifier(parameter.name):
+                raise ValueError(
+                    f"ParameterizedAttrDef '{name}': parameter "
+                    f"'{parameter.name}' must be a bare ASCII identifier"
+                )
+            if parameter.name in seen_names:
+                raise ValueError(
+                    f"ParameterizedAttrDef '{name}': duplicate parameter "
+                    f"'{parameter.name}'"
+                )
+            seen_names.add(parameter.name)
+            if parameter.attr_type not in _PARAMETERIZED_ATTR_PARAMETER_TYPES:
+                raise ValueError(
+                    f"ParameterizedAttrDef '{name}': parameter "
+                    f"'{parameter.name}' has unsupported kind "
+                    f"'{parameter.attr_type}'"
+                )
+
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "group", group)
+        object.__setattr__(self, "parameters", frozen_parameters)
+        object.__setattr__(self, "doc", doc)
+
+
 # ============================================================================
 # Type declarations
 # ============================================================================
@@ -2863,8 +2966,9 @@ class EncodingParam:
     doc: str = ""
 
 
-# Union of type parameter kinds.
-type TypeParamDef = TypeParam | ShapeParam | ScalarParam | EncodingParam
+# Union of type parameter kinds. AttrDef parameters use the shared tagged-value
+# schema and are consumed by Param format elements.
+type TypeParamDef = TypeParam | ShapeParam | ScalarParam | EncodingParam | AttrDef
 
 
 @dataclass(frozen=True, slots=True)
@@ -2895,6 +2999,14 @@ class TypeDef:
                 params=[TypeParam("object", ANY)],
                 format=[TypeOf("object")])
         # Prints: vm.ref<hal.buffer>
+
+        # Descriptor-backed parameters with positional and keyed text:
+        TypeDef(name="test.matrix",
+                params=[AttrDef("element_type", ATTR_TYPE_TYPE),
+                        AttrDef("rows", ATTR_TYPE_I64)],
+                format=[Param("element_type"), COMMA,
+                        kw("rows"), EQUALS, Param("rows")])
+        # Prints: test.matrix<bf16, rows = 16>
 
         # Shaped type with dims, element, encoding:
         TypeDef(name="tile",
@@ -2927,10 +3039,29 @@ class TypeDef:
         semantic: TypeSemantic = TypeSemantic.ORDINARY,
         contracts: list[ContractFamily] | tuple[ContractFamily, ...] = (),
     ) -> None:
+        frozen_params = tuple(params)
+        frozen_format = tuple(format)
+        parameter_names = [parameter.name for parameter in frozen_params]
+        if len(set(parameter_names)) != len(parameter_names):
+            raise ValueError(f"TypeDef '{name}': duplicate parameter name")
+        unknown_format_fields = _collect_format_fields(frozen_format) - set(
+            parameter_names
+        )
+        if unknown_format_fields:
+            raise ValueError(
+                f"TypeDef '{name}': format references unknown parameter(s): "
+                f"{', '.join(sorted(unknown_format_fields))}"
+            )
+        parameter_by_name = {parameter.name: parameter for parameter in frozen_params}
+        for field in _collect_parameter_format_fields(frozen_format):
+            if not isinstance(parameter_by_name[field], AttrDef):
+                raise ValueError(
+                    f"TypeDef '{name}': Param('{field}') requires an AttrDef parameter"
+                )
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "doc", doc)
-        object.__setattr__(self, "params", tuple(params))
-        object.__setattr__(self, "format", tuple(format))
+        object.__setattr__(self, "params", frozen_params)
+        object.__setattr__(self, "format", frozen_format)
         object.__setattr__(self, "ir_kind", ir_kind)
         object.__setattr__(self, "fact_domain", fact_domain)
         object.__setattr__(self, "semantic", semantic)
@@ -2987,6 +3118,7 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
         Keyword,
         OperandDict,
         OptionalGroup,
+        Param,
         PredicateList,
         Ref,
         Refs,
@@ -3051,9 +3183,37 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
                 fields |= _collect_format_fields(inner)
             case Scope(elements=inner):
                 fields |= _collect_format_fields(inner)
-            case ShapeOf(field=f) | ScalarOf(field=f) | EncodingOf(field=f):
+            case (
+                ShapeOf(field=f)
+                | ScalarOf(field=f)
+                | EncodingOf(field=f)
+                | Param(field=f)
+            ):
                 fields.add(f)
             case Keyword() | AttrDict() | Glue():
+                pass
+    return fields
+
+
+def _collect_parameter_format_fields(
+    elements: tuple[FormatElement, ...],
+) -> set[str]:
+    """Collects fields consumed through descriptor-backed Param elements."""
+
+    from loom.assembly import Clause, OptionalGroup, Param, Scope
+
+    fields: set[str] = set()
+    for element in elements:
+        match element:
+            case Param(field=field):
+                fields.add(field)
+            case (
+                Clause(elements=nested)
+                | OptionalGroup(elements=nested)
+                | Scope(elements=nested)
+            ):
+                fields |= _collect_parameter_format_fields(nested)
+            case _:
                 pass
     return fields
 
