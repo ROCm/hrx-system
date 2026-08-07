@@ -73,6 +73,7 @@ from loom.ir import (
     StringTable,
     Symbol,
     SymbolKind,
+    SymbolName,
     SymbolRef,
     TaggedLocation,
     TiedResult,
@@ -661,16 +662,24 @@ class TestParameterizedAttr:
             scopes=["subgroup", 254],
             element_type=BF16,
             tile=tile,
+            target=SymbolName("target"),
         )
 
         assert isinstance(options, ParameterizedAttr)
         assert options.family_name == "test.options"
-        assert options.slots == (1, EnumArrayAttr([2, 254]), BF16, tile)
+        assert options.slots == (
+            1,
+            EnumArrayAttr([2, 254]),
+            BF16,
+            tile,
+            SymbolName("target"),
+        )
         assert options.present_items() == (
             ("mode", 1),
             ("scopes", EnumArrayAttr([2, 254])),
             ("element_type", BF16),
             ("tile", tile),
+            ("target", SymbolName("target")),
         )
 
     def test_preserves_absent_and_present_empty_optional_values(self) -> None:
@@ -679,7 +688,7 @@ class TestParameterizedAttr:
 
         assert not absent.has("scopes")
         assert absent.get("scopes") is None
-        assert absent.slots == (2, None, None, None)
+        assert absent.slots == (2, None, None, None, None)
         assert present_empty.has("scopes")
         assert present_empty.get("scopes") == EnumArrayAttr()
         assert absent != present_empty
@@ -716,6 +725,7 @@ class TestParameterizedType:
             element_type=BF16,
             scope="workgroup",
             rows=16,
+            target=SymbolName("target"),
         )
 
         assert isinstance(scope, ParameterizedType)
@@ -726,6 +736,7 @@ class TestParameterizedType:
             ("element_type", BF16),
             ("scope", 1),
             ("rows", 16),
+            ("target", SymbolName("target")),
         )
 
     def test_equality_hash_and_validation_use_named_schema(self) -> None:

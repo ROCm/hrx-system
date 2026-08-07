@@ -874,6 +874,21 @@ static iree_status_t loom_module_mark_symbol_references_in_named_attrs(
   return iree_ok_status();
 }
 
+static iree_status_t loom_module_mark_symbol_references_in_types(
+    const loom_module_t* module, uint8_t* referenced_symbols) {
+  for (iree_host_size_t i = 0; i < module->types.count; ++i) {
+    loom_type_t type = module->types.entries[i];
+    if (!loom_type_is_parameterized(type)) continue;
+    const loom_attribute_t* parameters =
+        loom_type_parameterized_parameters(type);
+    const uint8_t parameter_count =
+        loom_type_parameterized_parameter_count(type);
+    IREE_RETURN_IF_ERROR(loom_module_mark_symbol_references_in_attrs(
+        module, parameters, parameter_count, referenced_symbols));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_module_mark_symbol_references_in_region(
     const loom_module_t* module, const loom_region_t* region,
     uint8_t* referenced_symbols) {
@@ -1102,7 +1117,7 @@ iree_status_t loom_module_compact_symbols_preserving_symbol_refs(
   if (out_removed_count) *out_removed_count = 0;
   const iree_host_size_t old_symbol_count = module->symbols.count;
   if (old_symbol_count == 0) return iree_ok_status();
-  const iree_host_size_t max_preserved_symbol_id =
+  iree_host_size_t max_preserved_symbol_id =
       loom_module_max_preserved_symbol_id(
           preserved_symbol_refs, preserved_symbol_ref_count, old_symbol_count);
 
@@ -1111,6 +1126,19 @@ iree_status_t loom_module_compact_symbols_preserving_symbol_refs(
       scratch_arena, old_symbol_count, sizeof(*referenced_symbols),
       (void**)&referenced_symbols));
   memset(referenced_symbols, 0, old_symbol_count * sizeof(*referenced_symbols));
+
+  IREE_RETURN_IF_ERROR(
+      loom_module_mark_symbol_references_in_types(module, referenced_symbols));
+  // Parameterized types are immutable entries in the module type interner. A
+  // preserved ordinal prefix keeps their symbol slots valid without rebuilding
+  // that interner during symbol compaction.
+  for (iree_host_size_t i = 0; i < old_symbol_count; ++i) {
+    if (referenced_symbols[i] == 0) continue;
+    if (max_preserved_symbol_id == IREE_HOST_SIZE_MAX ||
+        i > max_preserved_symbol_id) {
+      max_preserved_symbol_id = i;
+    }
+  }
 
   IREE_RETURN_IF_ERROR(loom_module_mark_symbol_references_in_region(
       module, module->body, referenced_symbols));
@@ -3230,7 +3258,7 @@ iree_status_t loom_module_make_parameterized_type(
       module, hash, loom_type_equal_fn, &equal_context,
       loom_module_retain_type_from_context, &type, out_type,
       /*out_type_id=*/NULL, &interner_miss);
-  if (iree_status_is_ok(status) && !interner_miss) {
+  if (!iree_status_is_ok(status) || !interner_miss) {
     iree_arena_checkpoint_restore(&checkpoint);
   }
   return status;

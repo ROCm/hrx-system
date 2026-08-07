@@ -23,6 +23,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/test/ops.h"
+#include "loom/ops/test/registry.h"
 #include "loom/target/low_descriptor_registry_core_test.h"
 #include "loom/testing/diagnostic_matchers.h"
 #include "loom/util/stream.h"
@@ -86,10 +87,7 @@ using ::loom::testing::GetStringParam;
 
 // Registers test dialect vtables on the context.
 static void RegisterTestDialect(loom_context_t* context) {
-  iree_host_size_t count = 0;
-  const loom_op_vtable_t* const* vtables = loom_test_dialect_vtables(&count);
-  IREE_ASSERT_OK(loom_context_register_dialect(context, LOOM_DIALECT_TEST,
-                                               vtables, (uint16_t)count));
+  IREE_ASSERT_OK(loom_test_dialect_register(context));
 }
 
 static void RegisterLowDialect(loom_context_t* context) {
@@ -2101,6 +2099,79 @@ TEST_F(VerifyTest, RejectsNonLocalSymbolRef) {
   ASSERT_NE(entry, nullptr) << "Expected SYMBOL/004 non-local symbol ref error";
   ExpectU32Param(*entry, 0, 1);
   ExpectFieldRefParam(*entry, 0, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, 0);
+}
+
+TEST_F(VerifyTest, AcceptsSymbolsNestedInParameterizedValues) {
+  const char* source =
+      "test.record @target\n"
+      "test.func @main("
+      "%arg: test.matrix<bf16, scope = subgroup, rows = 16, target = "
+      "@target>) {\n"
+      "  test.parameterized_attr "
+      "#test.options<mode = fast, target = @target>\n"
+      "  test.yield\n"
+      "}\n";
+  loom_module_t* parsed_module =
+      ParseSourceModule(source, "parameterized_symbols.loom");
+  ASSERT_NE(parsed_module, nullptr);
+
+  DiagnosticCapture capture;
+  auto result = VerifyParsedSourceModuleStructured(
+      parsed_module, source, "parameterized_symbols.loom", &capture);
+  EXPECT_EQ(result.error_count, 0u);
+  EXPECT_TRUE(capture.diagnostics.empty());
+
+  loom_module_free(parsed_module);
+}
+
+TEST_F(VerifyTest, RejectsWrongSymbolKindInParameterizedAttribute) {
+  const char* source =
+      "test.func @main() {\n"
+      "  test.parameterized_attr "
+      "#test.options<mode = fast, target = @main>\n"
+      "  test.yield\n"
+      "}\n";
+  loom_module_t* parsed_module =
+      ParseSourceModule(source, "parameterized_attr_symbol.loom");
+  ASSERT_NE(parsed_module, nullptr);
+
+  DiagnosticCapture capture;
+  auto result = VerifyParsedSourceModuleStructured(
+      parsed_module, source, "parameterized_attr_symbol.loom", &capture);
+  EXPECT_EQ(result.error_count, 1u);
+  const CapturedDiagnostic* entry = FindDiagnostic(
+      capture, loom_error_def_lookup(LOOM_ERROR_DOMAIN_SYMBOL, 3));
+  ASSERT_NE(entry, nullptr);
+  EXPECT_EQ(GetStringParam(*entry, 0), "main");
+  EXPECT_EQ(GetStringParam(*entry, 2), "record");
+  ExpectFieldRefParam(*entry, 0, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, 0);
+
+  loom_module_free(parsed_module);
+}
+
+TEST_F(VerifyTest, RejectsWrongSymbolKindInParameterizedType) {
+  const char* source =
+      "test.func @main("
+      "%arg: test.matrix<bf16, scope = subgroup, rows = 16, target = "
+      "@main>) {\n"
+      "  test.yield\n"
+      "}\n";
+  loom_module_t* parsed_module =
+      ParseSourceModule(source, "parameterized_type_symbol.loom");
+  ASSERT_NE(parsed_module, nullptr);
+
+  DiagnosticCapture capture;
+  auto result = VerifyParsedSourceModuleStructured(
+      parsed_module, source, "parameterized_type_symbol.loom", &capture);
+  EXPECT_EQ(result.error_count, 1u);
+  const CapturedDiagnostic* entry = FindDiagnostic(
+      capture, loom_error_def_lookup(LOOM_ERROR_DOMAIN_SYMBOL, 3));
+  ASSERT_NE(entry, nullptr);
+  EXPECT_EQ(GetStringParam(*entry, 0), "main");
+  EXPECT_EQ(GetStringParam(*entry, 2), "record");
+  ExpectNoFieldRefParam(*entry, 0);
+
+  loom_module_free(parsed_module);
 }
 
 TEST_F(VerifyTest, RejectsDuplicateSymbolDefinition) {

@@ -923,8 +923,8 @@ static uint32_t loom_bytecode_find_type_index(
   return LOOM_WRITER_ID_NONE;
 }
 
-// Attribute TYPE values and parameterized types form a bounded recursive
-// dependency graph. Both numbering functions preserve its topological order.
+// Attribute TYPE values and parameterized types share one dependency graph.
+// Both numbering functions preserve its module-established topological order.
 static iree_status_t loom_bytecode_number_attr_value(
     loom_bytecode_numbering_t* numbering, loom_attribute_t attr,
     const loom_attr_descriptor_t* descriptor);

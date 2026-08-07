@@ -629,11 +629,18 @@ class TestParseDescriptorBackedTypes:
 
     def test_mixed_positional_and_keyed_parameters(self) -> None:
         parsed = _parse_type(
-            "test.matrix<bf16, scope = subgroup, rows = 16>",
+            "test.matrix<bf16, scope = subgroup, rows = 16, target = @target>",
             type_registry=self._registry(),
         )
-        assert parsed == test_matrix_type(element_type=BF16, scope="subgroup", rows=16)
-        assert print_type(parsed) == ("test.matrix<bf16, scope = subgroup, rows = 16>")
+        assert parsed == test_matrix_type(
+            element_type=BF16,
+            scope="subgroup",
+            rows=16,
+            target=SymbolName("target"),
+        )
+        assert print_type(parsed) == (
+            "test.matrix<bf16, scope = subgroup, rows = 16, target = @target>"
+        )
 
     def test_optional_keyed_parameter(self) -> None:
         packed = _parse_type("test.array<bf16>", type_registry=self._registry())
@@ -1432,7 +1439,8 @@ class TestRoundTrip:
         op = _parse_op(
             "test.parameterized_attr "
             "#test.options<tile = #test.tile<width = 16>, "
-            "element_type = bf16, scopes = [subgroup, <254>], mode = fast>"
+            "element_type = bf16, scopes = [subgroup, <254>], mode = fast, "
+            "target = @target>"
         )
         options = op.attributes["options"]
         assert isinstance(options, ParameterizedAttr)
@@ -1440,10 +1448,12 @@ class TestRoundTrip:
         assert options.get("scopes") == EnumArrayAttr([2, 254])
         assert options.get("element_type") == BF16
         assert isinstance(options.get("tile"), ParameterizedAttr)
+        assert options.get("target") == SymbolName("target")
         assert _op_printer().print_operation(op, Module()) == (
             "test.parameterized_attr "
             "#test.options<mode = fast, scopes = [subgroup, <254>], "
-            "element_type = bf16, tile = #test.tile<width = 16>>"
+            "element_type = bf16, tile = #test.tile<width = 16>, "
+            "target = @target>"
         )
 
     def test_parameterized_attr_preserves_present_empty(self) -> None:

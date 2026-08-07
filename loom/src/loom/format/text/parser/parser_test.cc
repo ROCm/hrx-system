@@ -802,21 +802,25 @@ TEST_F(ParserTest, EnumArraysRoundTripStableValuesAndPresentEmpty) {
 
 TEST_F(ParserTest, ParameterizedAttrsRoundTripInDeclarationOrder) {
   std::string text = RoundTrip(
+      "test.record @target\n"
       "test.parameterized_attr "
       "#test.options<tile = #test.tile<width = 16>, element_type = bf16, "
-      "scopes = [subgroup, <254>], mode = fast>\n");
+      "scopes = [subgroup, <254>], target = @target, mode = fast>\n");
   EXPECT_NE(text.find("test.parameterized_attr "
                       "#test.options<mode = fast, scopes = [subgroup, <254>], "
-                      "element_type = bf16, tile = #test.tile<width = 16>>"),
+                      "element_type = bf16, tile = #test.tile<width = 16>, "
+                      "target = @target>"),
             std::string::npos);
 
   loom_module_t* module = ParseOk(
+      "test.record @target\n"
       "test.parameterized_attr "
       "#test.options<mode = fast, scopes = [subgroup, <254>], "
-      "element_type = bf16, tile = #test.tile<width = 16>>\n");
+      "element_type = bf16, tile = #test.tile<width = 16>, "
+      "target = @target>\n");
   loom_block_t* body = loom_module_block(module);
-  ASSERT_EQ(body->op_count, 1u);
-  loom_op_t* op = loom_block_op(body, 0);
+  ASSERT_EQ(body->op_count, 2u);
+  loom_op_t* op = loom_block_op(body, 1);
   ASSERT_TRUE(loom_test_parameterized_attr_isa(op));
   loom_attribute_t options = loom_test_parameterized_attr_options(op);
   ASSERT_TRUE(loom_test_options_attr_isa(options));
@@ -831,6 +835,13 @@ TEST_F(ParserTest, ParameterizedAttrsRoundTripInDeclarationOrder) {
   loom_attribute_t tile = loom_test_options_attr_tile(options);
   ASSERT_TRUE(loom_test_tile_attr_isa(tile));
   EXPECT_EQ(loom_test_tile_attr_width(tile), 16);
+  ASSERT_TRUE(loom_test_options_attr_has_target(options));
+  loom_symbol_ref_t target = loom_test_options_attr_target(options);
+  ASSERT_LT(target.symbol_id, module->symbols.count);
+  EXPECT_TRUE(iree_string_view_equal(
+      module->strings
+          .entries[module->symbols.entries[target.symbol_id].name_id],
+      IREE_SV("target")));
   loom_module_free(module);
 }
 
@@ -1365,9 +1376,10 @@ TEST_F(ParserTest, EncodingRoleTypeRoundTrip) {
 
 TEST_F(ParserTest, DescriptorBackedTypesRoundTripAndPreserveParameters) {
   const char* source =
+      "test.record @target\n"
       "%scope = test.constant 0 : test.scope<subgroup>\n"
       "%matrix = test.constant 0 : "
-      "test.matrix<bf16, scope = workgroup, rows = 16>\n"
+      "test.matrix<bf16, scope = workgroup, rows = 16, target = @target>\n"
       "%packed = test.constant 0 : test.array<bf16>\n"
       "%aligned = test.constant 0 : "
       "test.array<bf16, alignment = 32>\n"
@@ -1378,20 +1390,27 @@ TEST_F(ParserTest, DescriptorBackedTypesRoundTripAndPreserveParameters) {
   ASSERT_NE(module, nullptr);
   loom_block_t* block = loom_module_block(module);
   ASSERT_NE(block, nullptr);
-  ASSERT_EQ(block->op_count, 5u);
+  ASSERT_EQ(block->op_count, 6u);
 
   loom_type_t scope_type = loom_module_value_type(
-      module, loom_test_constant_result(loom_block_op(block, 0)));
+      module, loom_test_constant_result(loom_block_op(block, 1)));
   ASSERT_TRUE(loom_test_scope_type_isa(scope_type));
   EXPECT_EQ(loom_test_scope_type_scope(scope_type),
             LOOM_TEST_SCOPE_TYPE_SCOPE_SUBGROUP);
 
   loom_type_t matrix_type = loom_module_value_type(
-      module, loom_test_constant_result(loom_block_op(block, 1)));
+      module, loom_test_constant_result(loom_block_op(block, 2)));
   ASSERT_TRUE(loom_test_matrix_type_isa(matrix_type));
   EXPECT_EQ(loom_test_matrix_type_scope(matrix_type),
             LOOM_TEST_MATRIX_TYPE_SCOPE_WORKGROUP);
   EXPECT_EQ(loom_test_matrix_type_rows(matrix_type), 16);
+  ASSERT_TRUE(loom_test_matrix_type_has_target(matrix_type));
+  loom_symbol_ref_t target = loom_test_matrix_type_target(matrix_type);
+  ASSERT_LT(target.symbol_id, module->symbols.count);
+  EXPECT_TRUE(iree_string_view_equal(
+      module->strings
+          .entries[module->symbols.entries[target.symbol_id].name_id],
+      IREE_SV("target")));
   loom_type_id_t element_type_id =
       loom_test_matrix_type_element_type(matrix_type);
   ASSERT_LT(element_type_id, module->types.count);
@@ -1399,17 +1418,17 @@ TEST_F(ParserTest, DescriptorBackedTypesRoundTripAndPreserveParameters) {
                               loom_type_scalar(LOOM_SCALAR_TYPE_BF16)));
 
   loom_type_t packed_type = loom_module_value_type(
-      module, loom_test_constant_result(loom_block_op(block, 2)));
+      module, loom_test_constant_result(loom_block_op(block, 3)));
   ASSERT_TRUE(loom_test_array_type_isa(packed_type));
   EXPECT_FALSE(loom_test_array_type_has_alignment(packed_type));
   loom_type_t aligned_type = loom_module_value_type(
-      module, loom_test_constant_result(loom_block_op(block, 3)));
+      module, loom_test_constant_result(loom_block_op(block, 4)));
   ASSERT_TRUE(loom_test_array_type_isa(aligned_type));
   EXPECT_TRUE(loom_test_array_type_has_alignment(aligned_type));
   EXPECT_EQ(loom_test_array_type_alignment(aligned_type), 32);
 
   loom_type_t metadata_type = loom_module_value_type(
-      module, loom_test_constant_result(loom_block_op(block, 4)));
+      module, loom_test_constant_result(loom_block_op(block, 5)));
   ASSERT_TRUE(loom_test_array_type_isa(metadata_type));
   ASSERT_TRUE(loom_test_array_type_has_metadata(metadata_type));
   loom_named_attr_slice_t metadata =

@@ -59,6 +59,7 @@ enum loom_test_options_attr_build_flag_bits_e {
   LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_SCOPES = 1u << 0,
   LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_ELEMENT_TYPE = 1u << 1,
   LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_TILE = 1u << 2,
+  LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_TARGET = 1u << 3,
 };
 typedef uint32_t loom_test_options_attr_build_flags_t;
 static inline bool loom_test_options_attr_isa(loom_attribute_t attr) {
@@ -89,6 +90,13 @@ static inline bool loom_test_options_attr_has_tile(loom_attribute_t attr) {
 static inline loom_attribute_t loom_test_options_attr_tile(loom_attribute_t attr) {
   return loom_attr_as_parameterized_slots(attr)[LOOM_TEST_OPTIONS_ATTR_TILE_PARAMETER_INDEX];
 }
+enum { LOOM_TEST_OPTIONS_ATTR_TARGET_PARAMETER_INDEX = 4 };
+static inline bool loom_test_options_attr_has_target(loom_attribute_t attr) {
+  return !loom_attr_is_absent(loom_attr_as_parameterized_slots(attr)[LOOM_TEST_OPTIONS_ATTR_TARGET_PARAMETER_INDEX]);
+}
+static inline loom_symbol_ref_t loom_test_options_attr_target(loom_attribute_t attr) {
+  return loom_attr_as_symbol(loom_attr_as_parameterized_slots(attr)[LOOM_TEST_OPTIONS_ATTR_TARGET_PARAMETER_INDEX]);
+}
 iree_status_t loom_test_options_attr_make(
     loom_module_t* module,
     loom_test_options_attr_build_flags_t build_flags,
@@ -96,6 +104,7 @@ iree_status_t loom_test_options_attr_make(
     loom_enum_array_t scopes,
     loom_type_id_t element_type,
     loom_attribute_t tile,
+    loom_symbol_ref_t target,
     loom_attribute_t* out_attr);
 
 enum {

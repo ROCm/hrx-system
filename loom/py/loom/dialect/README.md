@@ -135,18 +135,18 @@ parameter changes the source and serialization contract. Reordering parameters
 changes canonical text and generated builder argument order even though
 bytecode resolves each present value by name.
 
-Optional absence is distinct from a present empty array, byte span, or
-dictionary. Python values expose that distinction with `has()` and `get()`;
-generated C builders use `HAS_*` build flags. This lets a dialect assign
-different semantics to omission and explicit emptiness without sentinel
+Optional absence is distinct from a present false scalar, empty array, byte
+span, or dictionary. Python values expose that distinction with `has()` and
+`get()`; generated C builders use `HAS_*` build flags. This lets a dialect
+assign different semantics to omission and an explicit value without sentinel
 payloads:
 
 ```python
-absent = test_options_attr(mode="precise")
-present_empty = test_options_attr(mode="precise", scopes=[])
+absent = tile_attr(width=16)
+present_false = tile_attr(width=16, transpose=False)
 
-assert not absent.has("scopes")
-assert present_empty.has("scopes")
+assert not absent.has("transpose")
+assert present_false.has("transpose")
 ```
 
 A parameter whose kind is `ATTR_TYPE_PARAMETERIZED` declares its exact nested
@@ -163,6 +163,11 @@ AttrDef(
     parameterized_attr=tile_attr,
 )
 ```
+
+Symbol parameters retain the `SymbolReference` contract declared by their
+`AttrDef`. References nested in parameterized attributes and types participate
+in ordinary symbol verification, remapping, and compaction, and text and
+bytecode preserve their stable symbol names.
 
 A `TypeDef` whose parameters are all `AttrDef` values declares a
 descriptor-backed type family with the same immutable named-slot contract.

@@ -665,6 +665,41 @@ TEST_F(RemapTest, CrossModuleSymbolRefsRequirePolicy) {
                                      IREE_SV("callee")));
 }
 
+TEST_F(RemapTest, RemapsSymbolsNestedInParameterizedTypes) {
+  loom_string_id_t source_name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(source_, IREE_SV("target"), &source_name_id));
+  uint16_t source_symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_add_symbol(source_, source_name_id, &source_symbol_id));
+
+  loom_type_id_t bf16_type_id = LOOM_TYPE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_type_id(
+      source_, loom_type_scalar(LOOM_SCALAR_TYPE_BF16), &bf16_type_id));
+  loom_type_t source_type = {};
+  IREE_ASSERT_OK(loom_test_matrix_type_make(
+      source_, LOOM_TEST_MATRIX_TYPE_BUILD_FLAG_HAS_TARGET, bf16_type_id,
+      LOOM_TEST_MATRIX_TYPE_SCOPE_SUBGROUP, 16,
+      (loom_symbol_ref_t){0, source_symbol_id}, &source_type));
+
+  loom_ir_remap_options_t options = {
+      /*.allow_unmapped_values=*/{}, /*.remap_symbol=*/
+      loom_ir_remap_symbol_callback_make(RemapSymbolByName, NULL),
+  };
+  loom_ir_remap_t remap = InitializeRemap(&options);
+  loom_type_t target_type = {};
+  IREE_ASSERT_OK(loom_ir_remap_type(&remap, source_type, &target_type));
+
+  ASSERT_TRUE(loom_test_matrix_type_isa(target_type));
+  ASSERT_TRUE(loom_test_matrix_type_has_target(target_type));
+  loom_symbol_ref_t target_ref = loom_test_matrix_type_target(target_type);
+  ASSERT_LT(target_ref.symbol_id, target_->symbols.count);
+  loom_string_id_t target_name_id =
+      target_->symbols.entries[target_ref.symbol_id].name_id;
+  EXPECT_TRUE(iree_string_view_equal(target_->strings.entries[target_name_id],
+                                     IREE_SV("target")));
+}
+
 TEST_F(RemapTest, CrossModuleSymbolPolicyMustReturnTargetSymbol) {
   loom_string_id_t source_name_id = LOOM_STRING_ID_INVALID;
   IREE_ASSERT_OK(

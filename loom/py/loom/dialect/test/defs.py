@@ -64,6 +64,7 @@ from loom.dsl import (
     ATTR_TYPE_FLAGS,
     ATTR_TYPE_I64_ARRAY,
     ATTR_TYPE_PARAMETERIZED,
+    ATTR_TYPE_SYMBOL,
     BY_REFERENCE,
     CONSTANT_LIKE,
     CONVERGENT,
@@ -251,6 +252,13 @@ test_options_attr = ParameterizedAttrDef(
             optional=True,
             parameterized_attr=test_tile_attr,
         ),
+        AttrDef(
+            "target",
+            ATTR_TYPE_SYMBOL,
+            optional=True,
+            symbol_ref=SymbolReference("record", ["record"]),
+            doc="Optional record symbol dependency.",
+        ),
     ],
     doc="Structured parameterized attribute lifecycle witness.",
 )
@@ -275,6 +283,12 @@ test_matrix_type = TypeDef(
         AttrDef("element_type", "type"),
         AttrDef("scope", ATTR_TYPE_ENUM, enum_def=_ParameterizedScope),
         AttrDef("rows", "i64"),
+        AttrDef(
+            "target",
+            ATTR_TYPE_SYMBOL,
+            optional=True,
+            symbol_ref=SymbolReference("record", ["record"]),
+        ),
     ],
     format=[
         Param("element_type"),
@@ -286,6 +300,10 @@ test_matrix_type = TypeDef(
         kw("rows"),
         EQUALS,
         Param("rows"),
+        OptionalGroup(
+            [COMMA, kw("target"), EQUALS, Param("target")],
+            anchor="target",
+        ),
     ],
     doc="Mixed positional and keyed descriptor-backed type witness.",
 )

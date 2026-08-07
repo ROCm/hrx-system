@@ -334,7 +334,7 @@ class ReaderTest : public ::testing::Test {
             LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_TILE,
         LOOM_TEST_OPTIONS_MODE_FAST,
         loom_make_enum_array(scopes, IREE_ARRAYSIZE(scopes)), bf16_type_id,
-        tile, &full_options));
+        tile, loom_symbol_ref_null(), &full_options));
     loom_op_t* full_op = nullptr;
     IREE_CHECK_OK(loom_test_parameterized_attr_build(
         &body_builder, full_options, LOOM_LOCATION_UNKNOWN, &full_op));
@@ -343,7 +343,8 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_test_options_attr_make(
         module, LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_SCOPES,
         LOOM_TEST_OPTIONS_MODE_PRECISE, loom_enum_array_empty(),
-        LOOM_TYPE_ID_INVALID, loom_attr_absent(), &empty_options));
+        LOOM_TYPE_ID_INVALID, loom_attr_absent(), loom_symbol_ref_null(),
+        &empty_options));
     loom_op_t* empty_op = nullptr;
     IREE_CHECK_OK(loom_test_parameterized_attr_build(
         &body_builder, empty_options, LOOM_LOCATION_UNKNOWN, &empty_op));
@@ -352,7 +353,7 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_test_options_attr_make(
         module, /*build_flags=*/0, LOOM_TEST_OPTIONS_MODE_FAST,
         loom_enum_array_empty(), LOOM_TYPE_ID_INVALID, loom_attr_absent(),
-        &absent_options));
+        loom_symbol_ref_null(), &absent_options));
     loom_op_t* absent_op = nullptr;
     IREE_CHECK_OK(loom_test_parameterized_attr_build(
         &body_builder, absent_options, LOOM_LOCATION_UNKNOWN, &absent_op));
@@ -449,9 +450,10 @@ class ReaderTest : public ::testing::Test {
     loom_type_t argument_types[4] = {};
     IREE_CHECK_OK(loom_test_scope_type_make(
         module, LOOM_TEST_SCOPE_TYPE_SCOPE_SUBGROUP, &argument_types[0]));
-    IREE_CHECK_OK(loom_test_matrix_type_make(
-        module, bf16_type_id, LOOM_TEST_MATRIX_TYPE_SCOPE_WORKGROUP, 16,
-        &argument_types[1]));
+    IREE_CHECK_OK(
+        loom_test_matrix_type_make(module, /*build_flags=*/0, bf16_type_id,
+                                   LOOM_TEST_MATRIX_TYPE_SCOPE_WORKGROUP, 16,
+                                   loom_symbol_ref_null(), &argument_types[1]));
     IREE_CHECK_OK(loom_test_array_type_make(
         module, /*build_flags=*/0, bf16_type_id, /*alignment=*/0,
         loom_named_attr_slice_empty(), &argument_types[2]));

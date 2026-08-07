@@ -35,6 +35,7 @@ from loom.ir import (
     ParameterizedAttr,
     ParameterizedType,
     RegisterType,
+    SymbolName,
 )
 
 
@@ -68,7 +69,8 @@ def _typed_register_module() -> tuple[Module, RegisterType]:
         "using [middle, <42>, middle]\n"
         "  test.parameterized_attr "
         "#test.options<mode = fast, scopes = [subgroup, <254>], "
-        "element_type = bf16, tile = #test.tile<width = 16>>\n"
+        "element_type = bf16, tile = #test.tile<width = 16>, "
+        "target = @parameterized_record>\n"
         "  test.parameterized_attr "
         "#test.options<mode = precise, scopes = []>\n"
         "  test.parameterized_attr #test.options<mode = fast>\n"
@@ -78,7 +80,8 @@ def _typed_register_module() -> tuple[Module, RegisterType]:
         "{options = #test.options<mode = precise, scopes = []>}\n"
         "test.decl @parameterized_types("
         "%scope: test.scope<subgroup>, "
-        "%matrix: test.matrix<bf16, scope = workgroup, rows = 16>, "
+        "%matrix: test.matrix<bf16, scope = workgroup, rows = 16, "
+        "target = @parameterized_record>, "
         "%packed: test.array<bf16>, "
         "%aligned: test.array<bf16, alignment = 32>, "
         "%metadata: test.array<bf16, metadata = "
@@ -146,6 +149,8 @@ def main() -> None:
         tile = first.get("tile")
         if not isinstance(tile, ParameterizedAttr) or tile.get("width") != 16:
             raise AssertionError("nested parameterized attr did not survive C bytecode")
+        if first.get("target") != SymbolName("parameterized_record"):
+            raise AssertionError("parameterized symbol did not survive C bytecode")
         if (
             not present_empty.has("scopes")
             or present_empty.get("scopes") != EnumArrayAttr()
@@ -180,7 +185,12 @@ def main() -> None:
         )
         expected_types = (
             test_scope_type(scope="subgroup"),
-            test_matrix_type(element_type=BF16, scope="workgroup", rows=16),
+            test_matrix_type(
+                element_type=BF16,
+                scope="workgroup",
+                rows=16,
+                target=SymbolName("parameterized_record"),
+            ),
             test_array_type(element_type=BF16),
             test_array_type(element_type=BF16, alignment=32),
             test_array_type(

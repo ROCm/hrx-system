@@ -110,6 +110,11 @@ typedef enum loom_test_matrix_type_scope_e {
   LOOM_TEST_MATRIX_TYPE_SCOPE_COUNT_ = 3,
 } loom_test_matrix_type_scope_t;
 
+enum loom_test_matrix_type_build_flag_bits_e {
+  LOOM_TEST_MATRIX_TYPE_BUILD_FLAG_HAS_TARGET = 1u << 0,
+};
+typedef uint32_t loom_test_matrix_type_build_flags_t;
+
 extern const loom_parameterized_type_descriptor_t loom_test_matrix_type_parameterized_descriptor;
 static inline bool loom_test_matrix_type_isa(loom_type_t type) {
   return loom_type_is_parameterized(type) && loom_type_parameterized_descriptor(type) == &loom_test_matrix_type_parameterized_descriptor;
@@ -126,11 +131,20 @@ enum { LOOM_TEST_MATRIX_TYPE_ROWS_PARAMETER_INDEX = 2 };
 static inline int64_t loom_test_matrix_type_rows(loom_type_t type) {
   return loom_attr_as_i64(loom_type_parameterized_parameters(type)[LOOM_TEST_MATRIX_TYPE_ROWS_PARAMETER_INDEX]);
 }
+enum { LOOM_TEST_MATRIX_TYPE_TARGET_PARAMETER_INDEX = 3 };
+static inline bool loom_test_matrix_type_has_target(loom_type_t type) {
+  return !loom_attr_is_absent(loom_type_parameterized_parameters(type)[LOOM_TEST_MATRIX_TYPE_TARGET_PARAMETER_INDEX]);
+}
+static inline loom_symbol_ref_t loom_test_matrix_type_target(loom_type_t type) {
+  return loom_attr_as_symbol(loom_type_parameterized_parameters(type)[LOOM_TEST_MATRIX_TYPE_TARGET_PARAMETER_INDEX]);
+}
 iree_status_t loom_test_matrix_type_make(
     loom_module_t* module,
+    loom_test_matrix_type_build_flags_t build_flags,
     loom_type_id_t element_type,
     loom_test_matrix_type_scope_t scope,
     int64_t rows,
+    loom_symbol_ref_t target,
     loom_type_t* out_type);
 
 enum loom_test_array_type_build_flag_bits_e {
