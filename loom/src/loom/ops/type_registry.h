@@ -79,7 +79,7 @@ typedef struct loom_type_descriptor_t {
   // Number of entries in |format_elements|.
   uint8_t format_element_count;
 
-  // Parameter schema for LOOM_TYPE_PARAMETERIZED, otherwise NULL.
+  // Descriptor-backed parameter schema, or NULL when not declared.
   const loom_parameterized_type_descriptor_t* parameterized;
 } loom_type_descriptor_t;
 
@@ -110,12 +110,12 @@ typedef enum loom_test_matrix_type_scope_e {
   LOOM_TEST_MATRIX_TYPE_SCOPE_COUNT_ = 3,
 } loom_test_matrix_type_scope_t;
 
+extern const loom_parameterized_type_descriptor_t loom_test_matrix_type_parameterized_descriptor;
 enum loom_test_matrix_type_build_flag_bits_e {
   LOOM_TEST_MATRIX_TYPE_BUILD_FLAG_HAS_TARGET = 1u << 0,
 };
 typedef uint32_t loom_test_matrix_type_build_flags_t;
 
-extern const loom_parameterized_type_descriptor_t loom_test_matrix_type_parameterized_descriptor;
 static inline bool loom_test_matrix_type_isa(loom_type_t type) {
   return loom_type_is_parameterized(type) && loom_type_parameterized_descriptor(type) == &loom_test_matrix_type_parameterized_descriptor;
 }
@@ -147,13 +147,13 @@ iree_status_t loom_test_matrix_type_make(
     loom_symbol_ref_t target,
     loom_type_t* out_type);
 
+extern const loom_parameterized_type_descriptor_t loom_test_array_type_parameterized_descriptor;
 enum loom_test_array_type_build_flag_bits_e {
   LOOM_TEST_ARRAY_TYPE_BUILD_FLAG_HAS_ALIGNMENT = 1u << 0,
   LOOM_TEST_ARRAY_TYPE_BUILD_FLAG_HAS_METADATA = 1u << 1,
 };
 typedef uint32_t loom_test_array_type_build_flags_t;
 
-extern const loom_parameterized_type_descriptor_t loom_test_array_type_parameterized_descriptor;
 static inline bool loom_test_array_type_isa(loom_type_t type) {
   return loom_type_is_parameterized(type) && loom_type_parameterized_descriptor(type) == &loom_test_array_type_parameterized_descriptor;
 }
@@ -199,6 +199,11 @@ const loom_type_registry_entry_t* loom_type_registry_entries(void);
 // Returns the descriptor on success, NULL if not found.
 const loom_type_descriptor_t* loom_type_registry_lookup(
     iree_string_view_t name);
+
+// Looks up a registered built-in descriptor by runtime type kind.
+// Returns NULL for dialect, generic parameterized, or invalid kinds.
+const loom_type_descriptor_t* loom_type_registry_lookup_builtin(
+    loom_type_kind_t kind);
 
 // Resolves the type-owned value fact domain for |type|, or NULL if the
 // registered type has no extension fact domain.

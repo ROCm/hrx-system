@@ -1066,10 +1066,20 @@ static iree_status_t loom_parse_parameterized_type_contents(
     loom_type_parse_mode_t mode, loom_attribute_t* parameter_slots,
     loom_type_t* out_type) {
   (void)loom_tokenizer_next(&parser->tokenizer);  // consume type name
-  LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_LANGLE, NULL);
 
   const loom_parameterized_type_descriptor_t* parameterized =
       descriptor->parameterized;
+  if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LANGLE)) {
+    if (!iree_any_bit_set(parameterized->flags,
+                          LOOM_PARAMETERIZED_TYPE_OMIT_EMPTY_PARAMETER_LIST)) {
+      loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
+      return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'<'"));
+    }
+    return loom_module_make_parameterized_type(
+        parser->module, parameterized, parameter_slots,
+        parameterized->parameter_count, out_type);
+  }
+
   uint32_t errors_before = parser->error_count;
   for (uint16_t i = 0; i < descriptor->format_element_count; ++i) {
     const loom_type_format_element_t* element = &descriptor->format_elements[i];
@@ -1151,6 +1161,10 @@ static iree_status_t loom_parse_registered_type(loom_parser_t* parser,
   if (!descriptor) return iree_ok_status();
   *out_matched = true;
 
+  if (descriptor->parameterized) {
+    return loom_parse_parameterized_type(parser, descriptor, mode, out_type);
+  }
+
   switch (descriptor->ir_kind) {
     case LOOM_TYPE_TILE:
     case LOOM_TYPE_TENSOR:
@@ -1167,8 +1181,6 @@ static iree_status_t loom_parse_registered_type(loom_parser_t* parser,
     case LOOM_TYPE_DIALECT:
       loom_tokenizer_next(&parser->tokenizer);
       return loom_parse_dialect_type(parser, token, mode, out_type);
-    case LOOM_TYPE_PARAMETERIZED:
-      return loom_parse_parameterized_type(parser, descriptor, mode, out_type);
     default:
       break;
   }

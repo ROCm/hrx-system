@@ -111,7 +111,6 @@ from loom.ir import (
     OpaqueLocation,
     Operation,
     ParameterizedAttr,
-    ParameterizedType,
     PlaceholderType,
     PoolType,
     Predicate,
@@ -1026,6 +1025,15 @@ def parse_type_from_tokens(
                 return BUFFER_TYPE, {}
             if type_def.is_opaque:
                 return DialectType(type_def.name), {}
+            if type_def.omits_empty_parameter_list and not tokenizer.at(
+                TokenKind.LANGLE
+            ):
+                try:
+                    return type_def(), {}
+                except (TypeError, ValueError) as error:
+                    raise ParseError(
+                        str(error), token.location, tokenizer._filename
+                    ) from error
             tokenizer.expect(TokenKind.LANGLE)
             # Shape-grammar types parse from the token stream using in_dim_list
             # for 'x' separators. Other types use the interior tokenizer
@@ -1493,7 +1501,7 @@ def _parse_type_interior(
 
     if type_def.uses_attribute_parameters:
         try:
-            return ParameterizedType(type_def, parsed_attrs), {}
+            return type_def(**parsed_attrs), {}
         except (TypeError, ValueError) as error:
             raise ParseError(str(error), location, filename) from error
 

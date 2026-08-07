@@ -43,7 +43,7 @@ from dataclasses import dataclass
 from enum import Enum, unique
 from typing import Any, NamedTuple
 
-from loom.assembly import FormatElement
+from loom.assembly import FormatElement, OptionalGroup
 from loom.errors import ErrorDef
 
 __all__ = [
@@ -3062,6 +3062,7 @@ class TypeDef:
     params: tuple[TypeParamDef, ...] = ()
     format: tuple[FormatElement, ...] = ()
     ir_kind: str = "dialect"  # "tile", "tensor", "vector", "view", etc.
+    python_type: type[Any] | None = None
     fact_domain: str | None = None
     semantic: TypeSemantic = TypeSemantic.ORDINARY
     contracts: tuple[ContractFamily, ...] = ()
@@ -3074,6 +3075,7 @@ class TypeDef:
         params: list[TypeParamDef] | tuple[TypeParamDef, ...] = (),
         format: list[FormatElement] | tuple[FormatElement, ...] = (),
         ir_kind: str = "dialect",
+        python_type: type[Any] | None = None,
         fact_domain: str | None = None,
         semantic: TypeSemantic = TypeSemantic.ORDINARY,
         contracts: list[ContractFamily] | tuple[ContractFamily, ...] = (),
@@ -3088,13 +3090,43 @@ class TypeDef:
                 f"TypeDef '{name}': descriptor-backed AttrDef parameters cannot "
                 "be mixed with representation-specific type parameters"
             )
-        if attribute_parameters and ir_kind != "dialect":
-            raise ValueError(
-                f"TypeDef '{name}': descriptor-backed parameters require the "
-                "generic dialect representation"
-            )
         if attribute_parameters:
             _validate_descriptor_parameters(f"TypeDef '{name}'", attribute_parameters)
+        uses_inline_enum_parameter = bool(attribute_parameters) and ir_kind != "dialect"
+        if uses_inline_enum_parameter:
+            if len(attribute_parameters) != 1:
+                raise ValueError(
+                    f"TypeDef '{name}': compact descriptor-backed types require "
+                    "exactly one parameter"
+                )
+            parameter = attribute_parameters[0]
+            if parameter.attr_type != ATTR_TYPE_ENUM:
+                raise ValueError(
+                    f"TypeDef '{name}': compact descriptor-backed parameter "
+                    "must be an enum"
+                )
+            if python_type is None:
+                raise ValueError(
+                    f"TypeDef '{name}': compact descriptor-backed types require "
+                    "a Python value type"
+                )
+            if parameter.optional:
+                assert parameter.enum_def is not None
+                if parameter.open_enum:
+                    raise ValueError(
+                        f"TypeDef '{name}': optional compact enum parameter "
+                        "cannot be open"
+                    )
+                if any(case.value == 0 for case in parameter.enum_def.cases):
+                    raise ValueError(
+                        f"TypeDef '{name}': optional compact enum parameter "
+                        "reserves value zero for absence"
+                    )
+        elif python_type is not None:
+            raise ValueError(
+                f"TypeDef '{name}': Python value types are only supported for "
+                "compact descriptor-backed types"
+            )
         parameter_names = [parameter.name for parameter in frozen_params]
         if len(set(parameter_names)) != len(parameter_names):
             raise ValueError(f"TypeDef '{name}': duplicate parameter name")
@@ -3127,11 +3159,22 @@ class TypeDef:
                     f"TypeDef '{name}': assembly format omits descriptor-backed "
                     f"parameter(s): {', '.join(sorted(omitted_parameters))}"
                 )
+            omits_empty_parameter_list = bool(frozen_format) and all(
+                isinstance(element, OptionalGroup) for element in frozen_format
+            )
+            if omits_empty_parameter_list and any(
+                not parameter.optional for parameter in attribute_parameters
+            ):
+                raise ValueError(
+                    f"TypeDef '{name}': an omitted empty parameter list requires "
+                    "every parameter to be optional"
+                )
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "doc", doc)
         object.__setattr__(self, "params", frozen_params)
         object.__setattr__(self, "format", frozen_format)
         object.__setattr__(self, "ir_kind", ir_kind)
+        object.__setattr__(self, "python_type", python_type)
         object.__setattr__(self, "fact_domain", fact_domain)
         object.__setattr__(self, "semantic", semantic)
         object.__setattr__(self, "contracts", tuple(contracts))
@@ -3151,9 +3194,25 @@ class TypeDef:
 
     @property
     def uses_attribute_parameters(self) -> bool:
-        """True when this type uses the generic descriptor-backed storage."""
+        """True when this type uses descriptor-backed parameter metadata."""
 
         return bool(self.params) and isinstance(self.params[0], AttrDef)
+
+    @property
+    def uses_inline_enum_parameter(self) -> bool:
+        """True when the sole enum parameter is stored in the type header."""
+
+        return self.uses_attribute_parameters and self.ir_kind != "dialect"
+
+    @property
+    def omits_empty_parameter_list(self) -> bool:
+        """True when absent optional parameters print without angle brackets."""
+
+        return (
+            self.uses_attribute_parameters
+            and bool(self.format)
+            and all(isinstance(element, OptionalGroup) for element in self.format)
+        )
 
     def __call__(self, **parameters: Any) -> Any:
         """Constructs one immutable descriptor-backed value of this type."""
@@ -3162,6 +3221,57 @@ class TypeDef:
             raise TypeError(
                 f"TypeDef '{self.name}' does not use descriptor-backed parameters"
             )
+        if self.uses_inline_enum_parameter:
+            assert self.python_type is not None
+            parameter = self.params[0]
+            assert isinstance(parameter, AttrDef)
+            unknown_names = sorted(set(parameters) - {parameter.name})
+            if unknown_names:
+                raise TypeError(
+                    f"{self.name}: unknown parameter(s): {', '.join(unknown_names)}"
+                )
+            if parameter.name not in parameters:
+                if not parameter.optional:
+                    raise TypeError(
+                        f"{self.name}: missing required parameter '{parameter.name}'"
+                    )
+                return self.python_type()
+
+            assert parameter.enum_def is not None
+            value = parameters[parameter.name]
+            value_by_keyword = {
+                case.keyword: case.value for case in parameter.enum_def.cases
+            }
+            if isinstance(value, str):
+                if value not in value_by_keyword:
+                    raise ValueError(
+                        f"{self.name}: parameter '{parameter.name}' has unknown "
+                        f"enum keyword {value!r}"
+                    )
+                value = value_by_keyword[value]
+            elif isinstance(value, int) and not isinstance(value, bool):
+                value = int(value)
+                if not 0 <= value <= 0xFF:
+                    raise ValueError(
+                        f"{self.name}: parameter '{parameter.name}' enum value "
+                        f"{value} is outside the byte domain"
+                    )
+                if (
+                    not parameter.open_enum
+                    and value not in value_by_keyword.values()
+                    and not (parameter.optional and value == 0)
+                ):
+                    raise ValueError(
+                        f"{self.name}: parameter '{parameter.name}' has "
+                        f"undeclared enum value {value}"
+                    )
+            else:
+                raise TypeError(
+                    f"{self.name}: parameter '{parameter.name}' must be an enum "
+                    f"keyword or byte value, got {value!r}"
+                )
+            return self.python_type(**{parameter.name: value})
+
         from loom.ir import ParameterizedType
 
         return ParameterizedType(self, parameters)

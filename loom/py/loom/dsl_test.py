@@ -21,6 +21,7 @@ from loom.assembly import (
     FuncArgs,
     IndexList,
     Keyword,
+    OptionalGroup,
     Param,
     Ref,
     Region,
@@ -1562,6 +1563,87 @@ class TestTypeDef:
                 "test.wrapper",
                 params=[AttrDef("value", "type")],
                 format=[Param("value"), COMMA, Param("value")],
+            )
+
+    def test_compact_enum_parameter_constructs_registered_python_type(self) -> None:
+        class CompactValue:
+            def __init__(self, mode: int = 0) -> None:
+                self.mode = mode
+
+        mode = EnumDef(
+            "Mode",
+            [EnumCase("fast", 1), EnumCase("precise", 2)],
+        )
+        type_def = TypeDef(
+            "test.compact",
+            ir_kind="encoding",
+            python_type=CompactValue,
+            params=[AttrDef("mode", "enum", enum_def=mode, optional=True)],
+            format=[OptionalGroup([Param("mode")], anchor="mode")],
+        )
+
+        assert type_def.uses_inline_enum_parameter
+        assert type_def.omits_empty_parameter_list
+        assert type_def().mode == 0
+        assert type_def(mode="precise").mode == 2
+        assert type_def(mode=1).mode == 1
+
+    def test_compact_enum_parameter_rejects_ambiguous_absence(self) -> None:
+        class CompactValue:
+            pass
+
+        mode = EnumDef(
+            "Mode",
+            [EnumCase("unknown", 0), EnumCase("fast", 1)],
+        )
+        with _raises(ValueError, match="reserves value zero for absence"):
+            TypeDef(
+                "test.compact",
+                ir_kind="encoding",
+                python_type=CompactValue,
+                params=[AttrDef("mode", "enum", enum_def=mode, optional=True)],
+                format=[OptionalGroup([Param("mode")], anchor="mode")],
+            )
+
+    def test_compact_enum_parameter_requires_closed_single_enum(self) -> None:
+        class CompactValue:
+            pass
+
+        mode = EnumDef("Mode", [EnumCase("fast", 1)])
+        with _raises(ValueError, match="exactly one parameter"):
+            TypeDef(
+                "test.compact",
+                ir_kind="encoding",
+                python_type=CompactValue,
+                params=[
+                    AttrDef("mode", "enum", enum_def=mode),
+                    AttrDef("other", "enum", enum_def=mode),
+                ],
+                format=[Param("mode"), COMMA, Param("other")],
+            )
+        with _raises(ValueError, match="must be an enum"):
+            TypeDef(
+                "test.compact",
+                ir_kind="encoding",
+                python_type=CompactValue,
+                params=[AttrDef("mode", "i64")],
+                format=[Param("mode")],
+            )
+        with _raises(ValueError, match="cannot be open"):
+            TypeDef(
+                "test.compact",
+                ir_kind="encoding",
+                python_type=CompactValue,
+                params=[
+                    AttrDef(
+                        "mode",
+                        "enum",
+                        enum_def=mode,
+                        optional=True,
+                        open_enum=True,
+                    )
+                ],
+                format=[OptionalGroup([Param("mode")], anchor="mode")],
             )
 
         with _raises(ValueError, match="assembly format omits"):

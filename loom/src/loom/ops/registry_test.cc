@@ -457,6 +457,7 @@ TEST(TypeRegistry, LookupBuiltinTypes) {
   desc = loom_type_registry_lookup(iree_make_cstring_view("tile"));
   ASSERT_NE(desc, nullptr);
   EXPECT_EQ(desc->ir_kind, LOOM_TYPE_TILE);
+  EXPECT_EQ(loom_type_registry_lookup_builtin(LOOM_TYPE_TILE), desc);
   EXPECT_EQ(desc->param_count, 3);
   EXPECT_NE(desc->format_elements, nullptr);
   EXPECT_GT(desc->format_element_count, 0);
@@ -491,6 +492,11 @@ TEST(TypeRegistry, LookupBuiltinTypes) {
   ASSERT_NE(desc, nullptr);
   EXPECT_EQ(desc->ir_kind, LOOM_TYPE_POOL);
   EXPECT_EQ(desc->param_count, 1);
+
+  EXPECT_EQ(loom_type_registry_lookup_builtin(LOOM_TYPE_DIALECT), nullptr);
+  EXPECT_EQ(loom_type_registry_lookup_builtin(LOOM_TYPE_PARAMETERIZED),
+            nullptr);
+  EXPECT_EQ(loom_type_registry_lookup_builtin(LOOM_TYPE_COUNT_), nullptr);
 }
 
 TEST(TypeRegistry, LookupDialectType) {

@@ -16,6 +16,11 @@ from loom.dsl import ContractFamily, TypeDef, TypeSemantic
 from loom.gen.assembly.tokens import KEYWORD_MAP
 from loom.gen.ops.c_names import c_dialect_path
 from loom.gen.ops.c_parameterized_types import (
+    TYPE_IR_KIND_MAP,
+    type_descriptor_symbol,
+    type_ir_kind_c_name,
+)
+from loom.gen.ops.c_parameterized_types import (
     generate_header_lines as _generate_parameterized_type_header_lines,
 )
 from loom.gen.ops.c_parameterized_types import (
@@ -24,7 +29,6 @@ from loom.gen.ops.c_parameterized_types import (
 from loom.gen.ops.c_parameterized_types import (
     generate_source_lines as _generate_parameterized_type_source_lines,
 )
-from loom.gen.ops.c_parameterized_types import type_descriptor_symbol
 from loom.gen.support.generated_file import line_comment_header
 
 COPYRIGHT = """\
@@ -36,17 +40,6 @@ COPYRIGHT = """\
 """
 
 GENERATED_HEADER = COPYRIGHT + "\n" + "\n".join(line_comment_header("//", generator="loom.gen.ops.c_tables")) + "\n// clang-format off"
-
-_IR_KIND_MAP: dict[str, str] = {
-    "tile": "LOOM_TYPE_TILE",
-    "tensor": "LOOM_TYPE_TENSOR",
-    "vector": "LOOM_TYPE_VECTOR",
-    "view": "LOOM_TYPE_VIEW",
-    "buffer": "LOOM_TYPE_BUFFER",
-    "storage": "LOOM_TYPE_STORAGE",
-    "pool": "LOOM_TYPE_POOL",
-    "dialect": "LOOM_TYPE_DIALECT",
-}
 
 _C_SYMBOL_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -177,18 +170,18 @@ def _translate_type_format_elements(
     return elements
 
 
-def _type_builtin_name_rows(all_types: Sequence[Any]) -> dict[str, str]:
-    """Returns sparse loom_type_kind_t name rows for built-in registry types."""
+def _type_builtin_descriptor_rows(all_types: Sequence[Any]) -> dict[str, TypeDef]:
+    """Returns sparse loom_type_kind_t descriptor rows for built-in types."""
 
-    rows: dict[str, str] = {}
+    rows: dict[str, TypeDef] = {}
     for type_def in all_types:
         if type_def.ir_kind == "dialect":
             continue
-        kind = _IR_KIND_MAP[type_def.ir_kind]
+        kind = TYPE_IR_KIND_MAP[type_def.ir_kind]
         previous = rows.get(kind)
         if previous is not None:
-            raise ValueError(f"Type kind {type_def.ir_kind!r} has duplicate registry names {previous!r} and {type_def.name!r}")
-        rows[kind] = type_def.name
+            raise ValueError(f"Type kind {type_def.ir_kind!r} has duplicate registry names {previous.name!r} and {type_def.name!r}")
+        rows[kind] = type_def
     return rows
 
 
@@ -201,8 +194,8 @@ def _emit_tables_header() -> str:
         "",
         '#include "loom/ops/type_registry.h"',
         "",
-        "extern const iree_string_view_t",
-        "    loom_type_registry_builtin_names[LOOM_TYPE_COUNT_];",
+        "extern const loom_type_descriptor_t* const",
+        "    loom_type_registry_builtin_descriptors[LOOM_TYPE_COUNT_];",
         "",
         "extern const loom_type_registry_entry_t",
         "    loom_type_registry_entries_storage[];",
@@ -301,7 +294,7 @@ def generate_type_registry(
     header.append("  // Number of entries in |format_elements|.")
     header.append("  uint8_t format_element_count;")
     header.append("")
-    header.append("  // Parameter schema for LOOM_TYPE_PARAMETERIZED, otherwise NULL.")
+    header.append("  // Descriptor-backed parameter schema, or NULL when not declared.")
     header.append("  const loom_parameterized_type_descriptor_t* parameterized;")
     header.append("} loom_type_descriptor_t;")
     header.append("")
@@ -322,6 +315,11 @@ def generate_type_registry(
     header.append("// Returns the descriptor on success, NULL if not found.")
     header.append("const loom_type_descriptor_t* loom_type_registry_lookup(")
     header.append("    iree_string_view_t name);")
+    header.append("")
+    header.append("// Looks up a registered built-in descriptor by runtime type kind.")
+    header.append("// Returns NULL for dialect, generic parameterized, or invalid kinds.")
+    header.append("const loom_type_descriptor_t* loom_type_registry_lookup_builtin(")
+    header.append("    loom_type_kind_t kind);")
     header.append("")
     header.append("// Resolves the type-owned value fact domain for |type|, or NULL if the")
     header.append("// registered type has no extension fact domain.")
@@ -384,7 +382,7 @@ def generate_type_registry(
 
     for type_def in all_types:
         ident = _type_c_ident(type_def.name)
-        ir_kind = "LOOM_TYPE_PARAMETERIZED" if type_def.uses_attribute_parameters else _IR_KIND_MAP[type_def.ir_kind]
+        ir_kind = type_ir_kind_c_name(type_def) if type_def.uses_attribute_parameters else TYPE_IR_KIND_MAP[type_def.ir_kind]
         param_count = len(type_def.params)
         fact_domain = _type_fact_domain_symbol(type_def)
         if type_def.format:
@@ -424,10 +422,11 @@ def generate_type_registry(
     source.append("const iree_host_size_t loom_type_registry_entry_count =")
     source.append(f"    {count};")
     source.append("")
-    source.append("const iree_string_view_t")
-    source.append("    loom_type_registry_builtin_names[LOOM_TYPE_COUNT_] = {")
-    for kind, name in sorted(_type_builtin_name_rows(all_types).items()):
-        source.append(f'    [{kind}] = IREE_SVL("{name}"),')
+    source.append("const loom_type_descriptor_t* const")
+    source.append("    loom_type_registry_builtin_descriptors[LOOM_TYPE_COUNT_] = {")
+    for kind, type_def in sorted(_type_builtin_descriptor_rows(all_types).items()):
+        ident = _type_c_ident(type_def.name)
+        source.append(f"    [{kind}] = &loom_type_{ident}_descriptor,")
     source.append("};")
     source.append("")
 

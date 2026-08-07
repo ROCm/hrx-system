@@ -69,7 +69,7 @@ from loom.assembly import (
 from loom.assembly import (
     Region as RegionFmt,
 )
-from loom.dsl import AttrDef, Op
+from loom.dsl import AttrDef, Op, TypeDef
 from loom.fields import (
     FieldLayout,
     FormatFields,
@@ -197,7 +197,7 @@ def _format_encoding_instance(
 def print_type(
     ir_type: Type,
     context: TypePrintContext | None = None,
-    type_registry: dict[str, Any] | None = None,
+    type_registry: dict[Any, Any] | None = None,
 ) -> str:
     """Print a loom type in canonical text form.
 
@@ -206,6 +206,12 @@ def print_type(
     With type_registry: DialectType printing walks the TypeDef format spec.
     Without type_registry: DialectType uses comma-separated params fallback.
     """
+    compact_type_def = _compact_type_definition(ir_type, type_registry)
+    if compact_type_def is not None:
+        return _print_descriptor_backed_type(
+            ir_type, compact_type_def, context, type_registry
+        )
+
     match ir_type:
         case ScalarType():
             return repr(ir_type)
@@ -247,16 +253,33 @@ def print_type(
         case EncodingType():
             return repr(ir_type)
         case ParameterizedType():
-            return _print_parameterized_type(ir_type, context, type_registry)
+            return _print_descriptor_backed_type(
+                ir_type, ir_type.definition, context, type_registry
+            )
         case DialectType(name=_name, params=_params):
             return _print_dialect_type(ir_type, context, type_registry)
     raise ValueError(f"Unknown type: {ir_type}")
 
 
+def _compact_type_definition(
+    ir_type: Type, type_registry: dict[Any, Any] | None
+) -> TypeDef | None:
+    """Resolves a compact Python value class to its registered declaration."""
+
+    if type_registry is not None:
+        type_def = type_registry.get(type(ir_type))
+        if isinstance(type_def, TypeDef) and type_def.uses_inline_enum_parameter:
+            return type_def
+
+    from loom.builtin_types import BUILTIN_TYPE_BY_PYTHON_TYPE
+
+    return BUILTIN_TYPE_BY_PYTHON_TYPE.get(type(ir_type))
+
+
 def _print_dialect_type(
     dialect_type: DialectType,
     context: TypePrintContext | None,
-    type_registry: dict[str, Any] | None,
+    type_registry: dict[Any, Any] | None,
 ) -> str:
     """Print a dialect type, walking TypeDef format if available."""
     from loom.assembly import (
@@ -333,24 +356,45 @@ def _print_dialect_type(
     return f"{name}<{interior}>"
 
 
-def _print_parameterized_type(
-    parameterized_type: ParameterizedType,
+def _print_descriptor_backed_type(
+    value: Type,
+    type_def: TypeDef,
     context: TypePrintContext | None,
-    type_registry: dict[str, Any] | None,
+    type_registry: dict[Any, Any] | None,
 ) -> str:
-    """Prints a descriptor-backed type through its declarative format."""
+    """Prints an indirect or compact type through its declarative format."""
     stream = TokenStream()
+
+    def has(parameter: AttrDef) -> bool:
+        if isinstance(value, ParameterizedType):
+            return value.has(parameter.name)
+        parameter_value = getattr(value, parameter.name)
+        return not (parameter.optional and int(parameter_value) == 0)
+
+    def get(parameter: AttrDef) -> Any:
+        if isinstance(value, ParameterizedType):
+            return value.get(parameter.name)
+        parameter_value = getattr(value, parameter.name)
+        return (
+            int(parameter_value) if parameter.attr_type == "enum" else parameter_value
+        )
+
+    if type_def.omits_empty_parameter_list and all(
+        isinstance(parameter, AttrDef) and not has(parameter)
+        for parameter in type_def.params
+    ):
+        return type_def.name
 
     def walk(elements: tuple[FormatElement, ...]) -> None:
         for element in elements:
             match element:
                 case Param(field=field):
-                    parameter = parameterized_type.definition.param(field)
+                    parameter = type_def.param(field)
                     assert isinstance(parameter, AttrDef)
-                    value = parameterized_type.get(field)
+                    parameter_value = get(parameter)
                     stream.emit(
                         _format_attr_value(
-                            value,
+                            parameter_value,
                             parameter,
                             type_context=context,
                             type_registry=type_registry,
@@ -364,7 +408,9 @@ def _print_parameterized_type(
                     walk(inner)
                     stream.emit(")")
                 case OptionalGroup(elements=inner, anchor=anchor):
-                    if parameterized_type.has(anchor):
+                    parameter = type_def.param(anchor)
+                    assert isinstance(parameter, AttrDef)
+                    if has(parameter):
                         walk(inner)
                 case Glue():
                     stream.set_glue()
@@ -373,8 +419,8 @@ def _print_parameterized_type(
                         f"unsupported parameterized type format element: {element!r}"
                     )
 
-    walk(parameterized_type.definition.format)
-    return f"{parameterized_type.family_name}<{stream.join()}>"
+    walk(type_def.format)
+    return f"{type_def.name}<{stream.join()}>"
 
 
 def _print_shaped_type(
@@ -561,7 +607,7 @@ def _format_attr_value(
     attr_def: AttrDef | None = None,
     *,
     type_context: TypePrintContext | None = None,
-    type_registry: dict[str, Any] | None = None,
+    type_registry: dict[Any, Any] | None = None,
 ) -> str:
     """Format an attribute value for text output.
 
@@ -816,7 +862,7 @@ class Printer:
         print_regions: bool = True,
     ) -> None:
         self._registry: dict[str, Op] = {}
-        self._type_registry: dict[str, Any] = {}  # TypeDef by name.
+        self._type_registry: dict[Any, Any] = {}  # TypeDef by name and value class.
         self._layouts: dict[str, FieldLayout] = {}
         self._module: Module | None = None
         self._indent: int = 0
@@ -835,6 +881,8 @@ class Printer:
         """Register type declarations for format-driven type printing."""
         for td in types:
             self._type_registry[td.name] = td
+            if td.python_type is not None:
+                self._type_registry[td.python_type] = td
 
     # --- Layout cache ---
 

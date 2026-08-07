@@ -29,6 +29,33 @@ static const loom_encoding_vtable_t kDenseEncodingVtable = {
     /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
 };
 
+static const loom_bstring_t kCompactRoleNames[] = {
+    NULL,
+    LOOM_BSTRING_REF(6, "layout"),
+    LOOM_BSTRING_REF(6, "schema"),
+};
+
+static const loom_attr_descriptor_t kCompactParameterDescriptors[] = {
+    {
+        /*.name=*/LOOM_BSTRING_REF(4, "role"),
+        /*.attr_kind=*/LOOM_ATTR_ENUM,
+        /*.flags=*/LOOM_ATTR_OPTIONAL,
+        /*.enum_max_value=*/
+        (uint8_t)(IREE_ARRAYSIZE(kCompactRoleNames) - 1),
+        /*.enum_case_names=*/kCompactRoleNames,
+        /*.reference=*/{},
+    },
+};
+
+static const loom_parameterized_type_descriptor_t kCompactTypeDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(12, "test.compact"),
+    /*.parameter_descriptors=*/kCompactParameterDescriptors,
+    /*.ir_kind=*/LOOM_TYPE_ENCODING,
+    /*.type_flags=*/LOOM_TYPE_FLAG_INLINE_DIMS,
+    /*.parameter_count=*/IREE_ARRAYSIZE(kCompactParameterDescriptors),
+    /*.flags=*/LOOM_PARAMETERIZED_TYPE_OMIT_EMPTY_PARAMETER_LIST,
+};
+
 class ModuleTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -1941,6 +1968,37 @@ TEST_F(ModuleTest, ParameterizedTypeBuilderInternsDescriptorIndexedSlots) {
       /*alignment=*/32, loom_named_attr_slice_empty(), &aligned_array));
   EXPECT_TRUE(loom_test_array_type_has_alignment(aligned_array));
   EXPECT_EQ(loom_test_array_type_alignment(aligned_array), 32);
+
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, CompactParameterizedTypeBuilderPacksWithoutAllocation) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  const iree_host_size_t allocation_size = module->arena.used_allocation_size;
+  loom_attribute_t role = loom_attr_enum(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT);
+  loom_type_t encoding_type = {0};
+  IREE_ASSERT_OK(loom_module_make_parameterized_type(
+      module, &kCompactTypeDescriptor, &role, 1, &encoding_type));
+  EXPECT_TRUE(loom_type_equal(
+      encoding_type,
+      loom_type_encoding_with_role(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT)));
+  EXPECT_EQ(module->arena.used_allocation_size, allocation_size);
+
+  role = loom_attr_absent();
+  IREE_ASSERT_OK(loom_module_make_parameterized_type(
+      module, &kCompactTypeDescriptor, &role, 1, &encoding_type));
+  EXPECT_TRUE(loom_type_equal(encoding_type, loom_type_encoding()));
+  EXPECT_EQ(module->arena.used_allocation_size, allocation_size);
+
+  role = loom_attr_enum(99);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_module_make_parameterized_type(module, &kCompactTypeDescriptor,
+                                          &role, 1, &encoding_type));
+  EXPECT_EQ(module->arena.used_allocation_size, allocation_size);
 
   loom_module_free(module);
 }

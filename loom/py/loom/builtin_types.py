@@ -190,3 +190,12 @@ ALL_BUILTIN_TYPES: tuple[TypeDef, ...] = (
     pool_type,
     storage_type,
 )
+
+# Direct Python representation class to declaration lookup for compact
+# descriptor-backed built-ins. Derived from the declarations so text formatting
+# never needs a parallel family switch or spelling table.
+BUILTIN_TYPE_BY_PYTHON_TYPE: dict[type[object], TypeDef] = {
+    type_def.python_type: type_def
+    for type_def in ALL_BUILTIN_TYPES
+    if type_def.python_type is not None
+}

@@ -537,23 +537,47 @@ static iree_status_t loom_print_attr_impl(
     const loom_module_t* module, const loom_attr_descriptor_t* descriptor,
     const loom_print_context_t* type_context);
 
-static iree_status_t loom_print_parameterized_type(
+static iree_status_t loom_print_descriptor_backed_type(
     loom_type_t type, const loom_module_t* module, loom_output_stream_t* stream,
     const loom_print_context_t* type_context) {
-  const loom_parameterized_type_descriptor_t* parameterized =
-      loom_type_parameterized_descriptor(type);
-  if (!parameterized) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "parameterized type has no family descriptor");
+  const loom_type_descriptor_t* descriptor = NULL;
+  const loom_parameterized_type_descriptor_t* parameterized = NULL;
+  uint8_t parameter_count = 0;
+  const loom_attribute_t* parameters = NULL;
+  loom_attribute_t inline_parameter = loom_attr_absent();
+  if (loom_type_is_parameterized(type)) {
+    parameterized = loom_type_parameterized_descriptor(type);
+    if (!parameterized) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "parameterized type has no family descriptor");
+    }
+    descriptor =
+        loom_type_registry_lookup(loom_bstring_view(parameterized->name));
+    parameter_count = loom_type_parameterized_parameter_count(type);
+    parameters = loom_type_parameterized_parameters(type);
+  } else {
+    descriptor = loom_type_registry_lookup_builtin(loom_type_kind(type));
+    if (descriptor) parameterized = descriptor->parameterized;
+    if (!parameterized || parameterized->parameter_count != 1 ||
+        parameterized->parameter_descriptors[0].attr_kind != LOOM_ATTR_ENUM) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "compact descriptor-backed type has no enum parameter descriptor");
+    }
+    const uint8_t payload = loom_type_payload(type);
+    inline_parameter =
+        payload == 0 &&
+                iree_any_bit_set(parameterized->parameter_descriptors[0].flags,
+                                 LOOM_ATTR_OPTIONAL)
+            ? loom_attr_absent()
+            : loom_attr_enum(payload);
+    parameter_count = 1;
+    parameters = &inline_parameter;
   }
-  const loom_type_descriptor_t* descriptor =
-      loom_type_registry_lookup(loom_bstring_view(parameterized->name));
   if (!descriptor || descriptor->parameterized != parameterized) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "parameterized type family is not registered");
   }
-  uint8_t parameter_count = loom_type_parameterized_parameter_count(type);
-  const loom_attribute_t* parameters = loom_type_parameterized_parameters(type);
   if (parameter_count != parameterized->parameter_count ||
       (parameter_count > 0 && !parameters)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -562,6 +586,14 @@ static iree_status_t loom_print_parameterized_type(
 
   IREE_RETURN_IF_ERROR(
       loom_output_stream_write(stream, loom_bstring_view(parameterized->name)));
+
+  bool omit_parameter_list = iree_any_bit_set(
+      parameterized->flags, LOOM_PARAMETERIZED_TYPE_OMIT_EMPTY_PARAMETER_LIST);
+  for (uint8_t i = 0; i < parameter_count && omit_parameter_list; ++i) {
+    omit_parameter_list = loom_attr_is_absent(parameters[i]);
+  }
+  if (omit_parameter_list) return iree_ok_status();
+
   IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '<'));
 
   loom_print_context_t parameter_context = {0};
@@ -658,7 +690,7 @@ static iree_status_t loom_text_print_type_impl(
       return iree_ok_status();
     }
     case LOOM_TYPE_PARAMETERIZED:
-      return loom_print_parameterized_type(type, module, stream, ctx);
+      return loom_print_descriptor_backed_type(type, module, stream, ctx);
     case LOOM_TYPE_REGISTER: {
       IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "reg<"));
       if (!ctx) {

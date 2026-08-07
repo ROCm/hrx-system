@@ -24,11 +24,58 @@ from loom.gen.ops.c_parameter_values import (
     parameter_value_c_type,
 )
 
+TYPE_IR_KIND_MAP: dict[str, str] = {
+    "tile": "LOOM_TYPE_TILE",
+    "tensor": "LOOM_TYPE_TENSOR",
+    "vector": "LOOM_TYPE_VECTOR",
+    "view": "LOOM_TYPE_VIEW",
+    "buffer": "LOOM_TYPE_BUFFER",
+    "encoding": "LOOM_TYPE_ENCODING",
+    "storage": "LOOM_TYPE_STORAGE",
+    "pool": "LOOM_TYPE_POOL",
+    "dialect": "LOOM_TYPE_DIALECT",
+}
+
+_INLINE_TYPE_FLAGS: dict[str, str] = {
+    "encoding": "LOOM_TYPE_FLAG_INLINE_DIMS",
+    "storage": "LOOM_TYPE_FLAG_INLINE_DIMS | LOOM_TYPE_FLAG_ALL_STATIC",
+}
+
 
 def parameterized_type_defs(types: Sequence[TypeDef]) -> tuple[TypeDef, ...]:
-    """Returns generic descriptor-backed type declarations in source order."""
+    """Returns descriptor-backed type declarations in source order."""
 
     return tuple(type_def for type_def in types if type_def.uses_attribute_parameters)
+
+
+def indirect_parameterized_type_defs(
+    types: Sequence[TypeDef],
+) -> tuple[TypeDef, ...]:
+    """Returns descriptor-backed types stored in immutable parameter slots."""
+
+    return tuple(type_def for type_def in parameterized_type_defs(types) if not type_def.uses_inline_enum_parameter)
+
+
+def type_ir_kind_c_name(type_def: TypeDef) -> str:
+    """Returns the runtime type-kind constant for a declaration."""
+
+    if type_def.uses_inline_enum_parameter:
+        try:
+            return TYPE_IR_KIND_MAP[type_def.ir_kind]
+        except KeyError as error:
+            raise ValueError(f"TypeDef {type_def.name!r}: compact enum representation does not support ir_kind {type_def.ir_kind!r}") from error
+    return "LOOM_TYPE_PARAMETERIZED"
+
+
+def inline_type_flags_c_expr(type_def: TypeDef) -> str | None:
+    """Returns the packed type flags for a compact enum declaration."""
+
+    if not type_def.uses_inline_enum_parameter:
+        return None
+    try:
+        return _INLINE_TYPE_FLAGS[type_def.ir_kind]
+    except KeyError as error:
+        raise ValueError(f"TypeDef {type_def.name!r}: compact enum representation does not define type flags for ir_kind {type_def.ir_kind!r}") from error
 
 
 def type_api_prefix(type_def: TypeDef) -> str:
@@ -92,11 +139,33 @@ def generate_header_lines(types: Sequence[TypeDef]) -> list[str]:
             lines.append("")
 
         optional = optional_parameters(type_def.params)
+        lines.append(f"extern const loom_parameterized_type_descriptor_t {descriptor_symbol};")
+        if type_def.uses_inline_enum_parameter:
+            parameter = type_def.params[0]
+            assert isinstance(parameter, AttrDef)
+            c_type = _parameter_c_type(type_def, parameter)
+            parameter_prefix = _parameter_prefix(type_def, parameter)
+            lines.append(f"static inline iree_string_view_t {parameter_prefix}_name({c_type} value) {{")
+            lines.append("  loom_bstring_t name = loom_attr_descriptor_enum_case_name(")
+            lines.append(f"      &{descriptor_symbol}.parameter_descriptors[0], (uint8_t)value);")
+            lines.append("  return name ? loom_bstring_view(name) : iree_string_view_empty();")
+            lines.append("}")
+            lines.append(f"static inline bool {parameter_prefix}_parse(iree_string_view_t name, {c_type}* out_value) {{")
+            lines.append("  uint8_t value = 0;")
+            lines.append("  if (!loom_attr_descriptor_find_enum_case(")
+            lines.append(f"          &{descriptor_symbol}.parameter_descriptors[0], name, &value)) {{")
+            lines.append("    return false;")
+            lines.append("  }")
+            lines.append(f"  *out_value = ({c_type})value;")
+            lines.append("  return true;")
+            lines.append("}")
+            lines.append("")
+            continue
+
         if optional:
             append_parameter_build_flag_declarations(lines, prefix, type_def.params)
             lines.append("")
 
-        lines.append(f"extern const loom_parameterized_type_descriptor_t {descriptor_symbol};")
         lines.append(f"static inline bool {prefix}_isa(loom_type_t type) {{")
         lines.append(f"  return loom_type_is_parameterized(type) && loom_type_parameterized_descriptor(type) == &{descriptor_symbol};")
         lines.append("}")
@@ -127,7 +196,7 @@ def generate_source_lines(types: Sequence[TypeDef]) -> list[str]:
     """Generates typed constructor implementations."""
 
     lines: list[str] = []
-    for type_def in parameterized_type_defs(types):
+    for type_def in indirect_parameterized_type_defs(types):
         prefix = type_api_prefix(type_def)
         lines.append(f"iree_status_t {prefix}_make(")
         function_parameters = _function_parameters(type_def)
@@ -194,7 +263,13 @@ def generate_metadata_lines(types: Sequence[TypeDef]) -> list[str]:
         lines.append("};")
         lines.append(f"const loom_parameterized_type_descriptor_t {type_descriptor_symbol(type_def)} = {{")
         lines.append(f"    .name = {_bstring(type_def.name)},")
+        lines.append(f"    .ir_kind = {type_ir_kind_c_name(type_def)},")
+        type_flags = inline_type_flags_c_expr(type_def)
+        if type_flags is not None:
+            lines.append(f"    .type_flags = {type_flags},")
         lines.append(f"    .parameter_count = IREE_ARRAYSIZE({prefix}_parameter_desc),")
+        if type_def.omits_empty_parameter_list:
+            lines.append("    .flags = LOOM_PARAMETERIZED_TYPE_OMIT_EMPTY_PARAMETER_LIST,")
         lines.append(f"    .parameter_descriptors = {prefix}_parameter_desc,")
         lines.append("};")
         lines.append("")

@@ -16,15 +16,37 @@
 extern "C" {
 #endif
 
-// Generated metadata for one descriptor-backed generic type family.
+enum loom_parameterized_type_flag_bits_e {
+  // A type whose optional parameters are all absent omits the entire <...>
+  // parameter list in canonical text.
+  LOOM_PARAMETERIZED_TYPE_OMIT_EMPTY_PARAMETER_LIST = 1u << 0,
+};
+typedef uint8_t loom_parameterized_type_flags_t;
+
+// Generated metadata for one descriptor-backed type family.
 typedef struct loom_parameterized_type_descriptor_t {
   // Stable dotted public family name.
   loom_bstring_t name;
-  // Number of descriptor-indexed parameter slots.
-  uint8_t parameter_count;
+
   // Parameter descriptors in stable declaration order.
   const loom_attr_descriptor_t* parameter_descriptors;
+
+  // Runtime type kind carrying the parameters. LOOM_TYPE_PARAMETERIZED uses
+  // indirect immutable slots; other kinds carry one enum in the header byte.
+  loom_type_kind_t ir_kind;
+
+  // loom_type_flags_t bits used by a compact inline-enum representation.
+  uint8_t type_flags;
+
+  // Number of descriptor-indexed parameter slots.
+  uint8_t parameter_count;
+
+  // Text and representation behavior bits.
+  loom_parameterized_type_flags_t flags;
 } loom_parameterized_type_descriptor_t;
+
+static_assert(sizeof(loom_parameterized_type_descriptor_t) == 24,
+              "parameterized type descriptor must remain 24 bytes");
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -350,11 +350,12 @@ iree_status_t loom_module_make_parameterized_attr(
     const loom_attribute_t* parameters, iree_host_size_t parameter_count,
     loom_attribute_t* out_attr);
 
-// Builds and interns a descriptor-backed generic type in |module|.
+// Builds a descriptor-backed type in |module|.
 //
 // |parameters| is indexed by |descriptor| and may point to temporary storage.
 // Required fields must be present and optional fields use LOOM_ATTR_ABSENT.
-// Aggregate payloads are recursively copied into the module arena.
+// Generic parameter arrays are recursively copied and interned. A compact
+// inline enum is packed directly into the returned type without allocating.
 iree_status_t loom_module_make_parameterized_type(
     loom_module_t* module,
     const loom_parameterized_type_descriptor_t* descriptor,
