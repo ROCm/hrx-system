@@ -10576,11 +10576,11 @@ HIPAPI hipError_t hipStreamDestroy(hipStream_t stream) {
   }
 
   // Removing the handle prevents new API calls from retaining the stream.
-  // Existing retained users keep the context association valid until the last
-  // reference performs object teardown.
+  // Keep the context association intact for operations that already retained
+  // the stream, including context-wide synchronization snapshots. Context
+  // teardown detaches any streams that outlive their owning context.
   iree_hal_streaming_context_t* context = streaming_stream->context;
   iree_hal_streaming_context_unregister_stream(context, streaming_stream);
-  streaming_stream->context = NULL;
   // Release the registry lookup reference and the public handle reference.
   iree_hal_streaming_stream_release(streaming_stream);
   iree_hal_streaming_stream_release(streaming_stream);
