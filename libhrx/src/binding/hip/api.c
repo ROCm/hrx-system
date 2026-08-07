@@ -8260,6 +8260,17 @@ static hipError_t iree_hip_array_create(hipArray_t* array,
   return hipSuccess;
 }
 
+static bool iree_hip_array_copy_region_in_bounds(
+    const struct hipArray_st* array, hipPos position, hipExtent extent) {
+  if (extent.width == 0 || extent.height == 0 || extent.depth == 0) return true;
+  return position.x <= array->extent.width &&
+         extent.width <= array->extent.width - position.x &&
+         position.y <= array->extent.height &&
+         extent.height <= array->extent.height - position.y &&
+         position.z <= array->extent.depth &&
+         extent.depth <= array->extent.depth - position.z;
+}
+
 static hipError_t iree_hip_resolve_memcpy3d_array_params(
     const hipMemcpy3DParms* params, hipMemcpy3DParms* out_params) {
   if (!params || !out_params) return hipErrorInvalidValue;
@@ -8287,6 +8298,16 @@ static hipError_t iree_hip_resolve_memcpy3d_array_params(
     if (src_array->element_size != dst_array->element_size) {
       result = hipErrorInvalidValue;
     }
+  }
+  if (result == hipSuccess && src_array &&
+      !iree_hip_array_copy_region_in_bounds(src_array, params->srcPos,
+                                            params->extent)) {
+    result = hipErrorInvalidValue;
+  }
+  if (result == hipSuccess && dst_array &&
+      !iree_hip_array_copy_region_in_bounds(dst_array, params->dstPos,
+                                            params->extent)) {
+    result = hipErrorInvalidValue;
   }
   if (result == hipSuccess && (src_array || dst_array)) {
     const size_t element_size =
@@ -9456,6 +9477,48 @@ HIPAPI hipError_t hipMemcpyPeer(void* dst, int dstDeviceId, const void* src,
                                        sizeBytes, NULL);
   IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(result);
+}
+
+static hipError_t iree_hip_convert_memcpy3d_peer_params(
+    const hipMemcpy3DPeerParms* peer_params,
+    hipMemcpy3DParms* out_copy_params) {
+  if (!peer_params || !out_copy_params) return hipErrorInvalidValue;
+
+  int device_count = 0;
+  hipError_t result = hipGetDeviceCount(&device_count);
+  if (result != hipSuccess) return result;
+  if (peer_params->srcDevice < 0 || peer_params->srcDevice >= device_count ||
+      peer_params->dstDevice < 0 || peer_params->dstDevice >= device_count) {
+    return hipErrorInvalidDevice;
+  }
+
+  // Device ordinals identify valid endpoints. Allocation handles and pointers
+  // retain their owning contexts, which the common 3D path resolves when it
+  // validates and executes the transfer.
+  out_copy_params->srcArray = peer_params->srcArray;
+  out_copy_params->srcPos = peer_params->srcPos;
+  out_copy_params->srcPtr = peer_params->srcPtr;
+  out_copy_params->dstArray = peer_params->dstArray;
+  out_copy_params->dstPos = peer_params->dstPos;
+  out_copy_params->dstPtr = peer_params->dstPtr;
+  out_copy_params->extent = peer_params->extent;
+  out_copy_params->kind = hipMemcpyDeviceToDevice;
+  return hipSuccess;
+}
+
+HIPAPI hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p) {
+  hipMemcpy3DParms copy_params;
+  hipError_t result = iree_hip_convert_memcpy3d_peer_params(p, &copy_params);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  return hipMemcpy3D(&copy_params);
+}
+
+HIPAPI hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p,
+                                       hipStream_t stream) {
+  hipMemcpy3DParms copy_params;
+  hipError_t result = iree_hip_convert_memcpy3d_peer_params(p, &copy_params);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  return hipMemcpy3DAsync(&copy_params, stream);
 }
 
 HIPAPI hipError_t hipArrayCreate(hipArray_t* pHandle,

@@ -94,6 +94,13 @@ typedef struct hipExtent {
   size_t depth;   // Depth in elements.
 } hipExtent;
 
+// 3D position type.
+typedef struct hipPos {
+  size_t x;  // X coordinate.
+  size_t y;  // Y coordinate.
+  size_t z;  // Z coordinate.
+} hipPos;
+
 #define hipArrayDefault 0x00
 #define hipArrayLayered 0x01
 #define hipArraySurfaceLoadStore 0x02
@@ -1106,23 +1113,30 @@ typedef struct hipChannelFormatDesc {
 
 // Memory copy node parameters.
 typedef struct hipMemcpy3DParms {
-  hipArray_t srcArray;  // Source array.
-  struct {
-    size_t x, y, z;
-  } srcPos;              // Source position.
+  hipArray_t srcArray;   // Source array.
+  hipPos srcPos;         // Source position.
   hipPitchedPtr srcPtr;  // Source pitched pointer.
 
-  hipArray_t dstArray;  // Destination array.
-  struct {
-    size_t x, y, z;
-  } dstPos;              // Destination position.
+  hipArray_t dstArray;   // Destination array.
+  hipPos dstPos;         // Destination position.
   hipPitchedPtr dstPtr;  // Destination pitched pointer.
 
-  struct {
-    size_t width, height, depth;
-  } extent;            // Copy extent.
+  hipExtent extent;    // Copy extent.
   hipMemcpyKind kind;  // Copy kind.
 } hipMemcpy3DParms;
+
+// Peer 3D memory copy parameters.
+typedef struct hipMemcpy3DPeerParms {
+  hipArray_t srcArray;   // Source array.
+  hipPos srcPos;         // Source position.
+  hipPitchedPtr srcPtr;  // Source pitched pointer.
+  int srcDevice;         // Source device ordinal.
+  hipArray_t dstArray;   // Destination array.
+  hipPos dstPos;         // Destination position.
+  hipPitchedPtr dstPtr;  // Destination pitched pointer.
+  int dstDevice;         // Destination device ordinal.
+  hipExtent extent;      // Copy extent.
+} hipMemcpy3DPeerParms;
 
 // Memory copy graph node parameters.
 typedef struct hipMemcpyNodeParams {
@@ -1346,6 +1360,9 @@ HIPAPI hipError_t hipMemcpyPeer(void* dst, int dstDeviceId, const void* src,
 HIPAPI hipError_t hipMemcpyPeerAsync(void* dst, int dstDeviceId,
                                      const void* src, int srcDeviceId,
                                      size_t sizeBytes, hipStream_t stream);
+HIPAPI hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p);
+HIPAPI hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p,
+                                       hipStream_t stream);
 HIPAPI hipError_t hipMemcpyHtoD(hipDeviceptr_t dst, void* src,
                                 size_t sizeBytes);
 HIPAPI hipError_t hipMemcpyDtoH(void* dst, hipDeviceptr_t src,
