@@ -8,11 +8,14 @@
 
 from loom.dialect.command.defs import (
     ALL_COMMAND_OPS,
+    command_concurrent,
     command_ops,
     command_program_decl,
     command_program_def,
     command_program_launch,
     command_return,
+    command_serial,
+    command_yield,
 )
 
 __all__ = [
@@ -21,5 +24,8 @@ __all__ = [
     "command_program_decl",
     "command_program_launch",
     "command_return",
+    "command_yield",
+    "command_serial",
+    "command_concurrent",
     "ALL_COMMAND_OPS",
 ]

@@ -23,7 +23,10 @@ enum {
   LOOM_OP_COMMAND_PROGRAM_DECL = LOOM_OP_KIND(LOOM_DIALECT_COMMAND, 1),
   LOOM_OP_COMMAND_PROGRAM_LAUNCH = LOOM_OP_KIND(LOOM_DIALECT_COMMAND, 2),
   LOOM_OP_COMMAND_RETURN = LOOM_OP_KIND(LOOM_DIALECT_COMMAND, 3),
-  LOOM_OP_COMMAND_COUNT_ = 4,
+  LOOM_OP_COMMAND_YIELD = LOOM_OP_KIND(LOOM_DIALECT_COMMAND, 4),
+  LOOM_OP_COMMAND_SERIAL = LOOM_OP_KIND(LOOM_DIALECT_COMMAND, 5),
+  LOOM_OP_COMMAND_CONCURRENT = LOOM_OP_KIND(LOOM_DIALECT_COMMAND, 6),
+  LOOM_OP_COMMAND_COUNT_ = 7,
 };
 
 // Function visibility. Absent (0) means private (module-internal).
@@ -135,6 +138,36 @@ iree_status_t loom_command_program_launch_verify(
 // command.return
 LOOM_DEFINE_ISA(loom_command_return_isa, LOOM_OP_COMMAND_RETURN)
 iree_status_t loom_command_return_build(
+    loom_builder_t* builder,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_COMMAND_YIELD: Terminate a structured command schedule region.
+// command.yield
+LOOM_DEFINE_ISA(loom_command_yield_isa, LOOM_OP_COMMAND_YIELD)
+iree_status_t loom_command_yield_build(
+    loom_builder_t* builder,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_COMMAND_SERIAL: Order each child command after the preceding child completes.
+// command.serial {
+//   command.yield
+// }
+LOOM_DEFINE_ISA(loom_command_serial_isa, LOOM_OP_COMMAND_SERIAL)
+LOOM_DEFINE_REGION(loom_command_serial_body, 0)
+iree_status_t loom_command_serial_build(
+    loom_builder_t* builder,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_COMMAND_CONCURRENT: Permit child commands to execute without dependency edges between siblings and join them on exit.
+// command.concurrent {
+//   command.yield
+// }
+LOOM_DEFINE_ISA(loom_command_concurrent_isa, LOOM_OP_COMMAND_CONCURRENT)
+LOOM_DEFINE_REGION(loom_command_concurrent_body, 0)
+iree_status_t loom_command_concurrent_build(
     loom_builder_t* builder,
     loom_location_id_t location,
     loom_op_t** out_op);

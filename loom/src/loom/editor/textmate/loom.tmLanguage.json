@@ -101,7 +101,7 @@
         },
         {
           "name": "meta.operation-name.loom",
-          "match": "\\b(command)\\.(program\\.launch|program\\.decl|program\\.def|return)\\b",
+          "match": "\\b(command)\\.(program\\.launch|program\\.decl|program\\.def|concurrent|return|serial|yield)\\b",
           "captures": {
             "1": {
               "name": "support.namespace.dialect.loom"

@@ -38,6 +38,7 @@ from loom.dsl import (
     CallLikeKind,
     Dialect,
     FuncLikeInterface,
+    ImplicitTerminator,
     Op,
     Operand,
     OpPhase,
@@ -241,9 +242,54 @@ command_return = Op(
 )
 
 
+command_yield = Op(
+    "command.yield",
+    group=command_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc="Terminate a structured command schedule region.",
+    traits=[TERMINATOR],
+    examples=["command.yield"],
+)
+
+
+def _schedule(name: str, doc: str) -> Op:
+    return Op(
+        name,
+        group=command_ops,
+        phase=OpPhase.EXECUTABLE,
+        doc=doc,
+        regions=[
+            RegionDef(
+                "body",
+                doc="Nested command operations and source-level control flow.",
+                single_block=True,
+                terminator="command.yield",
+            ),
+        ],
+        traits=[UNKNOWN_EFFECTS, ImplicitTerminator("command.yield")],
+        format=[Region("body")],
+        examples=[f"{name} {{\n  command.yield\n}}"],
+    )
+
+
+command_serial = _schedule(
+    "command.serial",
+    "Order each child command after the preceding child completes.",
+)
+
+
+command_concurrent = _schedule(
+    "command.concurrent",
+    "Permit child commands to execute without dependency edges between siblings and join them on exit.",
+)
+
+
 ALL_COMMAND_OPS: tuple[Op, ...] = (
     command_program_def,
     command_program_decl,
     command_program_launch,
     command_return,
+    command_yield,
+    command_serial,
+    command_concurrent,
 )

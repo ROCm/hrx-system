@@ -66,3 +66,21 @@ def test_program_declaration_roundtrip() -> None:
 
 def test_program_without_specializations_roundtrip() -> None:
     _roundtrip("command.program.def @static_program() launch(%parameters: buffer) {\n  command.return\n}\n")
+
+
+def test_structured_command_schedules_roundtrip() -> None:
+    _roundtrip(
+        """command.program.def @scheduled() launch(%parameters: buffer) {
+  command.serial {
+    command.concurrent {
+      command.program.launch @leaf[](%parameters) : [](buffer)
+    }
+  }
+  command.return
+}
+
+command.program.def @leaf() launch(%parameters: buffer) {
+  command.return
+}
+"""
+    )

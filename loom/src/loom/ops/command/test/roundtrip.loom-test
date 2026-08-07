@@ -26,3 +26,29 @@ command.program.decl retain @decode(%token_count: index) launch(%parameters: buf
 command.program.def @bounded(%token_count: index) launch(%parameters: buffer) where [range(%token_count, 1, 1024)] {
   command.return
 }
+
+// ====
+
+command.program.def @scheduled() launch(%parameters: buffer) {
+  command.serial {
+    command.concurrent {
+      command.program.launch @leaf[](%parameters) : [](buffer)
+    }
+  }
+  command.return
+}
+
+command.program.def @leaf() launch(%parameters: buffer) {
+  command.return
+}
+
+// ====
+
+kernel.decl @leaf_kernel(%element_count: index) launch(%parameters: buffer)
+
+command.program.def @kernel_schedule(%element_count: index) launch(%parameters: buffer) {
+  command.concurrent {
+    kernel.launch @leaf_kernel[%element_count](%parameters) : [index](buffer)
+  }
+  command.return
+}

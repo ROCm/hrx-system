@@ -47,3 +47,20 @@ class CommandBuilder(DialectBuilder):
         *,
         location_id: int | None = ...,
     ) -> None: ...
+    def yield_(
+        self,
+        *,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def serial(
+        self,
+        *,
+        body: Region | None = ...,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def concurrent(
+        self,
+        *,
+        body: Region | None = ...,
+        location_id: int | None = ...,
+    ) -> None: ...
