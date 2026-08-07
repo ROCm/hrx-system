@@ -75,8 +75,7 @@ static void iree_hip_sanitize_device_name(char* name) {
 }
 
 static const iree_hal_physical_device_identity_t*
-iree_hip_physical_device_identity(
-    const iree_hal_streaming_device_t* device) {
+iree_hip_physical_device_identity(const iree_hal_streaming_device_t* device) {
   const iree_hal_device_identity_spec_t* logical_identity =
       iree_hal_device_spec_identity(iree_hal_device_spec(device->hal_device));
   if (!logical_identity || logical_identity->physical_device_count == 0) {
@@ -2337,9 +2336,8 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->concurrentKernels = 1;
   prop->ECCEnabled = 0;
   if (physical_identity &&
-      iree_all_bits_set(
-          physical_identity->flags,
-          IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_PCI_ADDRESS)) {
+      iree_all_bits_set(physical_identity->flags,
+                        IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_PCI_ADDRESS)) {
     prop->pciBusID = physical_identity->pci.bus;
     prop->pciDeviceID = physical_identity->pci.device;
     prop->pciDomainID = physical_identity->pci.domain;
@@ -2758,8 +2756,7 @@ HIPAPI hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t dev) {
   if (!uuid) HIP_RETURN_ERROR(hipErrorInvalidValue);
   hipError_t init_result = iree_hip_ensure_initialized();
   if (init_result != hipSuccess) return init_result;
-  iree_hal_streaming_device_t* device =
-      iree_hal_streaming_device_entry(dev);
+  iree_hal_streaming_device_t* device = iree_hal_streaming_device_entry(dev);
   if (!device) HIP_RETURN_ERROR(hipErrorInvalidDevice);
   const iree_hal_physical_device_identity_t* physical_identity =
       iree_hip_physical_device_identity(device);
@@ -3128,16 +3125,14 @@ HIPAPI hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device) {
       iree_hip_physical_device_identity(
           iree_hal_streaming_device_entry(device));
   if (!physical_identity ||
-      !iree_all_bits_set(
-          physical_identity->flags,
-          IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_PCI_ADDRESS)) {
+      !iree_all_bits_set(physical_identity->flags,
+                         IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_PCI_ADDRESS)) {
     HIP_RETURN_ERROR(hipErrorNotSupported);
   }
-  int written = snprintf(pciBusId, len, "%04x:%02x:%02x.%01x",
-                         physical_identity->pci.domain,
-                         physical_identity->pci.bus,
-                         physical_identity->pci.device,
-                         physical_identity->pci.function);
+  int written =
+      snprintf(pciBusId, len, "%04x:%02x:%02x.%01x",
+               physical_identity->pci.domain, physical_identity->pci.bus,
+               physical_identity->pci.device, physical_identity->pci.function);
   if (written < 0 || written >= len) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
@@ -3168,9 +3163,8 @@ HIPAPI hipError_t hipDeviceGetByPCIBusId(int* device, const char* pciBusId) {
     const iree_hal_physical_device_identity_t* physical_identity =
         iree_hip_physical_device_identity(iree_hal_streaming_device_entry(i));
     if (physical_identity &&
-        iree_all_bits_set(
-            physical_identity->flags,
-            IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_PCI_ADDRESS) &&
+        iree_all_bits_set(physical_identity->flags,
+                          IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_PCI_ADDRESS) &&
         physical_identity->pci.domain == domain &&
         physical_identity->pci.bus == bus &&
         physical_identity->pci.device == pci_device &&
@@ -23672,166 +23666,152 @@ HIPAPI hipError_t hipMemRetainAllocationHandle(
 // Error handling
 //===----------------------------------------------------------------------===//
 
-// - String remains valid for program lifetime.
-// - Returns "unknown error" for unrecognized codes.
-// - String is in English.
-//
-// Usage pattern:
-// ```c
-// hipError_t err = hipMalloc(&ptr, size);
-// if (err != hipSuccess) {
-//   printf("HIP error: %s\n", hipGetErrorString(err));
-// }
-// ```
-//
-// See also: hipGetErrorName, hipGetLastError.
-HIPAPI const char* hipGetErrorString(hipError_t error) {
+// Error names and descriptions are process-lifetime constants. Keeping the
+// pairs in one list prevents the runtime and driver entry points from assigning
+// different meanings to the same numeric code.
+#define IREE_HIP_ERROR_LIST(X)                                                \
+  X(hipSuccess, "no error")                                                   \
+  X(hipErrorInvalidValue, "invalid argument")                                 \
+  X(hipErrorOutOfMemory, "out of memory")                                     \
+  X(hipErrorNotInitialized, "initialization error")                           \
+  X(hipErrorDeinitialized, "driver shutting down")                            \
+  X(hipErrorProfilerDisabled,                                                 \
+    "profiler disabled while using external profiling tool")                  \
+  X(hipErrorProfilerNotInitialized, "profiler is not initialized")            \
+  X(hipErrorProfilerAlreadyStarted, "profiler already started")               \
+  X(hipErrorProfilerAlreadyStopped, "profiler already stopped")               \
+  X(hipErrorInvalidConfiguration, "invalid configuration argument")           \
+  X(hipErrorInvalidPitchValue, "invalid pitch argument")                      \
+  X(hipErrorInvalidSymbol, "invalid device symbol")                           \
+  X(hipErrorInvalidDevicePointer, "invalid device pointer")                   \
+  X(hipErrorInvalidMemcpyDirection, "invalid copy direction for memcpy")      \
+  X(hipErrorInsufficientDriver,                                               \
+    "driver version is insufficient for runtime version")                     \
+  X(hipErrorMissingConfiguration,                                             \
+    "__global__ function call is not configured")                             \
+  X(hipErrorPriorLaunchFailure, "unspecified launch failure in prior launch") \
+  X(hipErrorInvalidDeviceFunction, "invalid device function")                 \
+  X(hipErrorNoDevice, "no ROCm-capable device is detected")                   \
+  X(hipErrorInvalidDevice, "invalid device ordinal")                          \
+  X(hipErrorInvalidImage, "device kernel image is invalid")                   \
+  X(hipErrorInvalidContext, "invalid device context")                         \
+  X(hipErrorContextAlreadyCurrent, "context is already current context")      \
+  X(hipErrorMapFailed, "mapping of buffer object failed")                     \
+  X(hipErrorUnmapFailed, "unmapping of buffer object failed")                 \
+  X(hipErrorArrayIsMapped, "array is mapped")                                 \
+  X(hipErrorAlreadyMapped, "resource already mapped")                         \
+  X(hipErrorNoBinaryForGpu,                                                   \
+    "no kernel image is available for execution on the device")               \
+  X(hipErrorAlreadyAcquired, "resource already acquired")                     \
+  X(hipErrorNotMapped, "resource not mapped")                                 \
+  X(hipErrorNotMappedAsArray, "resource not mapped as array")                 \
+  X(hipErrorNotMappedAsPointer, "resource not mapped as pointer")             \
+  X(hipErrorECCNotCorrectable, "uncorrectable ECC error encountered")         \
+  X(hipErrorUnsupportedLimit, "limit is not supported on this architecture")  \
+  X(hipErrorContextAlreadyInUse,                                              \
+    "exclusive-thread device already in use by a different thread")           \
+  X(hipErrorPeerAccessUnsupported,                                            \
+    "peer access is not supported between these two devices")                 \
+  X(hipErrorInvalidKernelFile, "invalid kernel file")                         \
+  X(hipErrorInvalidGraphicsContext, "invalid OpenGL or DirectX context")      \
+  X(hipErrorInvalidSource, "device kernel image is invalid")                  \
+  X(hipErrorFileNotFound, "file not found")                                   \
+  X(hipErrorSharedObjectSymbolNotFound, "shared object symbol not found")     \
+  X(hipErrorSharedObjectInitFailed, "shared object initialization failed")    \
+  X(hipErrorOperatingSystem,                                                  \
+    "OS call failed or operation not supported on this OS")                   \
+  X(hipErrorInvalidHandle, "invalid resource handle")                         \
+  X(hipErrorIllegalState,                                                     \
+    "the operation cannot be performed in the present state")                 \
+  X(hipErrorNotFound, "named symbol not found")                               \
+  X(hipErrorNotReady, "device not ready")                                     \
+  X(hipErrorIllegalAddress, "an illegal memory access was encountered")       \
+  X(hipErrorLaunchOutOfResources, "too many resources requested for launch")  \
+  X(hipErrorLaunchTimeOut, "the launch timed out and was terminated")         \
+  X(hipErrorPeerAccessAlreadyEnabled, "peer access is already enabled")       \
+  X(hipErrorPeerAccessNotEnabled, "peer access has not been enabled")         \
+  X(hipErrorSetOnActiveProcess,                                               \
+    "cannot set while device is active in this process")                      \
+  X(hipErrorContextIsDestroyed, "context is destroyed")                       \
+  X(hipErrorAssert, "device-side assert triggered")                           \
+  X(hipErrorHostMemoryAlreadyRegistered,                                      \
+    "part or all of the requested memory range is already mapped")            \
+  X(hipErrorHostMemoryNotRegistered,                                          \
+    "pointer does not correspond to a registered memory region")              \
+  X(hipErrorLaunchFailure, "unspecified launch failure")                      \
+  X(hipErrorCooperativeLaunchTooLarge,                                        \
+    "too many blocks in cooperative launch")                                  \
+  X(hipErrorNotSupported, "operation not supported")                          \
+  X(hipErrorStreamCaptureUnsupported,                                         \
+    "operation not permitted when stream is capturing")                       \
+  X(hipErrorStreamCaptureInvalidated,                                         \
+    "operation failed due to a previous error during capture")                \
+  X(hipErrorStreamCaptureMerge,                                               \
+    "operation would result in a merge of separate capture sequences")        \
+  X(hipErrorStreamCaptureUnmatched,                                           \
+    "capture was not ended in the same stream as it began")                   \
+  X(hipErrorStreamCaptureUnjoined, "capturing stream has unjoined work")      \
+  X(hipErrorStreamCaptureIsolation,                                           \
+    "dependency created on uncaptured work in another stream")                \
+  X(hipErrorStreamCaptureImplicit,                                            \
+    "operation would make the legacy stream depend on a capturing blocking "  \
+    "stream")                                                                 \
+  X(hipErrorCapturedEvent,                                                    \
+    "operation not permitted on an event last recorded in a capturing "       \
+    "stream")                                                                 \
+  X(hipErrorStreamCaptureWrongThread,                                         \
+    "attempt to terminate a thread-local capture sequence from another "      \
+    "thread")                                                                 \
+  X(hipErrorGraphExecUpdateFailure,                                           \
+    "the graph update was not performed because it included changes which "   \
+    "violated constraints specific to instantiated graph update")             \
+  X(hipErrorUnknown, "unknown error")                                         \
+  X(hipErrorRuntimeMemory, "runtime memory call returned error")              \
+  X(hipErrorRuntimeOther, "runtime call other than memory returned error")
+
+static const char* iree_hip_lookup_error_name(hipError_t error,
+                                              bool* out_is_known) {
   switch (error) {
-    case hipSuccess:
-      return "hipSuccess";
-    case hipErrorInvalidValue:
-      return "hipErrorInvalidValue";
-    case hipErrorOutOfMemory:
-      return "hipErrorOutOfMemory";
-    case hipErrorNotInitialized:
-      return "hipErrorNotInitialized";
-    case hipErrorDeinitialized:
-      return "hipErrorDeinitialized";
-    case hipErrorProfilerDisabled:
-      return "hipErrorProfilerDisabled";
-    case hipErrorProfilerNotInitialized:
-      return "hipErrorProfilerNotInitialized";
-    case hipErrorProfilerAlreadyStarted:
-      return "hipErrorProfilerAlreadyStarted";
-    case hipErrorProfilerAlreadyStopped:
-      return "hipErrorProfilerAlreadyStopped";
-    case hipErrorInvalidConfiguration:
-      return "hipErrorInvalidConfiguration";
-    case hipErrorInvalidSymbol:
-      return "hipErrorInvalidSymbol";
-    case hipErrorInvalidDevicePointer:
-      return "hipErrorInvalidDevicePointer";
-    case hipErrorInvalidMemcpyDirection:
-      return "hipErrorInvalidMemcpyDirection";
-    case hipErrorInsufficientDriver:
-      return "hipErrorInsufficientDriver";
-    case hipErrorMissingConfiguration:
-      return "hipErrorMissingConfiguration";
-    case hipErrorPriorLaunchFailure:
-      return "hipErrorPriorLaunchFailure";
-    case hipErrorInvalidDeviceFunction:
-      return "hipErrorInvalidDeviceFunction";
-    case hipErrorNoDevice:
-      return "hipErrorNoDevice";
-    case hipErrorInvalidDevice:
-      return "hipErrorInvalidDevice";
-    case hipErrorInvalidImage:
-      return "hipErrorInvalidImage";
-    case hipErrorInvalidContext:
-      return "hipErrorInvalidContext";
-    case hipErrorContextAlreadyCurrent:
-      return "hipErrorContextAlreadyCurrent";
-    case hipErrorMapFailed:
-      return "hipErrorMapFailed";
-    case hipErrorUnmapFailed:
-      return "hipErrorUnmapFailed";
-    case hipErrorArrayIsMapped:
-      return "hipErrorArrayIsMapped";
-    case hipErrorAlreadyMapped:
-      return "hipErrorAlreadyMapped";
-    case hipErrorNoBinaryForGpu:
-      return "hipErrorNoBinaryForGpu";
-    case hipErrorAlreadyAcquired:
-      return "hipErrorAlreadyAcquired";
-    case hipErrorNotMapped:
-      return "hipErrorNotMapped";
-    case hipErrorNotMappedAsArray:
-      return "hipErrorNotMappedAsArray";
-    case hipErrorNotMappedAsPointer:
-      return "hipErrorNotMappedAsPointer";
-    case hipErrorECCNotCorrectable:
-      return "hipErrorECCNotCorrectable";
-    case hipErrorUnsupportedLimit:
-      return "hipErrorUnsupportedLimit";
-    case hipErrorContextAlreadyInUse:
-      return "hipErrorContextAlreadyInUse";
-    case hipErrorPeerAccessUnsupported:
-      return "hipErrorPeerAccessUnsupported";
-    case hipErrorInvalidKernelFile:
-      return "hipErrorInvalidKernelFile";
-    case hipErrorInvalidGraphicsContext:
-      return "hipErrorInvalidGraphicsContext";
-    case hipErrorInvalidSource:
-      return "hipErrorInvalidSource";
-    case hipErrorFileNotFound:
-      return "hipErrorFileNotFound";
-    case hipErrorSharedObjectSymbolNotFound:
-      return "hipErrorSharedObjectSymbolNotFound";
-    case hipErrorSharedObjectInitFailed:
-      return "hipErrorSharedObjectInitFailed";
-    case hipErrorOperatingSystem:
-      return "hipErrorOperatingSystem";
-    case hipErrorInvalidHandle:
-      return "hipErrorInvalidHandle";
-    case hipErrorNotFound:
-      return "hipErrorNotFound";
-    case hipErrorNotReady:
-      return "hipErrorNotReady";
-    case hipErrorIllegalAddress:
-      return "hipErrorIllegalAddress";
-    case hipErrorLaunchOutOfResources:
-      return "hipErrorLaunchOutOfResources";
-    case hipErrorLaunchTimeOut:
-      return "hipErrorLaunchTimeOut";
-    case hipErrorPeerAccessAlreadyEnabled:
-      return "hipErrorPeerAccessAlreadyEnabled";
-    case hipErrorPeerAccessNotEnabled:
-      return "hipErrorPeerAccessNotEnabled";
-    case hipErrorSetOnActiveProcess:
-      return "hipErrorSetOnActiveProcess";
-    case hipErrorContextIsDestroyed:
-      return "hipErrorContextIsDestroyed";
-    case hipErrorAssert:
-      return "hipErrorAssert";
-    case hipErrorHostMemoryAlreadyRegistered:
-      return "hipErrorHostMemoryAlreadyRegistered";
-    case hipErrorHostMemoryNotRegistered:
-      return "hipErrorHostMemoryNotRegistered";
-    case hipErrorLaunchFailure:
-      return "hipErrorLaunchFailure";
-    case hipErrorCooperativeLaunchTooLarge:
-      return "hipErrorCooperativeLaunchTooLarge";
-    case hipErrorNotSupported:
-      return "hipErrorNotSupported";
-    case hipErrorStreamCaptureUnsupported:
-      return "hipErrorStreamCaptureUnsupported";
-    case hipErrorStreamCaptureInvalidated:
-      return "hipErrorStreamCaptureInvalidated";
-    case hipErrorStreamCaptureMerge:
-      return "hipErrorStreamCaptureMerge";
-    case hipErrorStreamCaptureUnmatched:
-      return "hipErrorStreamCaptureUnmatched";
-    case hipErrorStreamCaptureUnjoined:
-      return "hipErrorStreamCaptureUnjoined";
-    case hipErrorStreamCaptureIsolation:
-      return "hipErrorStreamCaptureIsolation";
-    case hipErrorStreamCaptureImplicit:
-      return "hipErrorStreamCaptureImplicit";
-    case hipErrorCapturedEvent:
-      return "hipErrorCapturedEvent";
-    case hipErrorStreamCaptureWrongThread:
-      return "hipErrorStreamCaptureWrongThread";
-    case hipErrorGraphExecUpdateFailure:
-      return "hipErrorGraphExecUpdateFailure";
-    case hipErrorUnknown:
+#define IREE_HIP_ERROR_NAME_CASE(error_code, description) \
+  case error_code:                                        \
+    *out_is_known = true;                                 \
+    return #error_code;
+    IREE_HIP_ERROR_LIST(IREE_HIP_ERROR_NAME_CASE)
+#undef IREE_HIP_ERROR_NAME_CASE
+    case hipErrorTbd:
+      *out_is_known = true;
+      return "hipErrorTbd";
     default:
+      *out_is_known = false;
       return "hipErrorUnknown";
   }
 }
 
+static const char* iree_hip_lookup_error_string(hipError_t error,
+                                                bool* out_is_known) {
+  switch (error) {
+#define IREE_HIP_ERROR_STRING_CASE(error_code, description) \
+  case error_code:                                          \
+    *out_is_known = true;                                   \
+    return description;
+    IREE_HIP_ERROR_LIST(IREE_HIP_ERROR_STRING_CASE)
+#undef IREE_HIP_ERROR_STRING_CASE
+    default:
+      *out_is_known = false;
+      return "unknown error";
+  }
+}
+
+#undef IREE_HIP_ERROR_LIST
+
+HIPAPI const char* hipGetErrorString(hipError_t error) {
+  bool is_known = false;
+  return iree_hip_lookup_error_string(error, &is_known);
+}
+
 HIPAPI const char* hipGetErrorName(hipError_t error) {
-  // Return the same as hipGetErrorString for simplicity.
-  return hipGetErrorString(error);
+  bool is_known = false;
+  return iree_hip_lookup_error_name(error, &is_known);
 }
 
 // Handle scoped to THIS shared object (the HIP shim), resolved once. See the
@@ -23929,16 +23909,14 @@ HIPAPI hipError_t hipGetProcAddress(const char* symbol, void** pfn,
 //
 // Synchronization: This operation is synchronous.
 //
-// Note: Unlike hipGetErrorString, this returns the string via output pointer.
-//       This is the driver API equivalent for compatibility with CUDA driver
-//       API.
 HIPAPI hipError_t hipDrvGetErrorString(hipError_t hipError,
                                        const char** errorString) {
   if (!errorString) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  *errorString = hipGetErrorString(hipError);
-  HIP_RETURN_ERROR(hipSuccess);
+  bool is_known = false;
+  *errorString = iree_hip_lookup_error_string(hipError, &is_known);
+  HIP_RETURN_ERROR(is_known ? hipSuccess : hipErrorInvalidValue);
 }
 
 // Driver API version of hipGetErrorName.
@@ -23953,16 +23931,14 @@ HIPAPI hipError_t hipDrvGetErrorString(hipError_t hipError,
 //
 // Synchronization: This operation is synchronous.
 //
-// Note: Unlike hipGetErrorName, this returns the name via output pointer.
-//       This is the driver API equivalent for compatibility with CUDA driver
-//       API.
 HIPAPI hipError_t hipDrvGetErrorName(hipError_t hipError,
                                      const char** errorName) {
   if (!errorName) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  *errorName = hipGetErrorName(hipError);
-  HIP_RETURN_ERROR(hipSuccess);
+  bool is_known = false;
+  *errorName = iree_hip_lookup_error_name(hipError, &is_known);
+  HIP_RETURN_ERROR(is_known ? hipSuccess : hipErrorInvalidValue);
 }
 
 // Gets and clears the last error from HIP runtime calls.
