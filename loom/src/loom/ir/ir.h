@@ -582,6 +582,7 @@ typedef enum loom_dialect_id_e {
   LOOM_DIALECT_SPIRV = 0x1B,
   LOOM_DIALECT_CONFIG = 0x1C,
   LOOM_DIALECT_SANITIZER = 0x1D,
+  LOOM_DIALECT_COMMAND = 0x1E,
   LOOM_DIALECT_RESERVED = 0xFF,
 } loom_dialect_id_t;
 #define LOOM_OP_KIND_UNKNOWN ((loom_op_kind_t)0)
@@ -593,7 +594,7 @@ typedef enum loom_dialect_id_e {
 
 // Maximum number of built-in dialects. Dialect IDs must be less than
 // this value. Matches the size of the dialect vtable registry array.
-#define LOOM_DIALECT_BUILTIN_COUNT_ 30
+#define LOOM_DIALECT_BUILTIN_COUNT_ 31
 
 // Extracts the dialect ID (high byte) from an op kind.
 static inline uint8_t loom_op_dialect_id(loom_op_kind_t kind) {
@@ -950,6 +951,8 @@ enum loom_call_like_kind_e {
   LOOM_CALL_LIKE_KIND_LOW_INTERNAL = 2,
   // Explicit semantic-to-target-low invocation of a selected low function.
   LOOM_CALL_LIKE_KIND_LOW_INVOKE = 3,
+  // Command-program materialization with specialization and binding operands.
+  LOOM_CALL_LIKE_KIND_COMMAND_PROGRAM = 4,
 };
 
 // Interface descriptor for direct symbol call-like ops. The operand field and
@@ -1069,6 +1072,10 @@ typedef struct loom_func_like_vtable_t {
   // Index of the provider proof-requirement array attr. LOOM_ATTR_INDEX_NONE
   // if absent.
   uint8_t requires_attr_index;
+
+  // Index of the optional i64 attr counting leading materialization-time
+  // arguments. LOOM_ATTR_INDEX_NONE means every argument is issue-time.
+  uint8_t specialization_count_attr_index;
 
   // Body region index. LOOM_REGION_INDEX_NONE for bodyless ops
   // (func.decl, func.ukernel) that only declare a signature.

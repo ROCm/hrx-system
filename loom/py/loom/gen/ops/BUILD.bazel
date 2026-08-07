@@ -136,6 +136,14 @@ iree_py_binary(
 )
 
 iree_py_binary(
+    name = "c_tables_command_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/command"],
+)
+
+iree_py_binary(
     name = "c_tables_config_generator",
     srcs = C_TABLES_SRCS,
     main = "c_tables.py",

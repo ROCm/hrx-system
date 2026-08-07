@@ -165,6 +165,7 @@ loom_generated_cc_library(
         "//loom/src/loom/ops/buffer",
         "//loom/src/loom/ops/cfg",
         "//loom/src/loom/ops/check",
+        "//loom/src/loom/ops/command",
         "//loom/src/loom/ops/config",
         "//loom/src/loom/ops/encoding",
         "//loom/src/loom/ops/func",
@@ -233,6 +234,7 @@ loom_cc_test(
     deps = [
         ":op_defs",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/command",
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/scf",

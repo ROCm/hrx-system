@@ -1326,6 +1326,11 @@ const loom_predicate_t* loom_func_like_predicates(loom_func_like_t func,
 // requirements.
 loom_parameterized_attr_array_t loom_func_like_requires(loom_func_like_t func);
 
+// Returns the number of leading function arguments consumed while
+// materializing the function-like artifact. Returns zero when the function
+// has no distinct specialization arguments or |func| is invalid.
+int64_t loom_func_like_specialization_count(loom_func_like_t func);
+
 // Returns the implements string ID for template/ukernel ops — the name of the
 // op kind this function provides an implementation for. Returns
 // LOOM_STRING_ID_INVALID for def/decl ops, ops with no implements attr, or

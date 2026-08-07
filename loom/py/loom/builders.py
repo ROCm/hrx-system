@@ -664,6 +664,7 @@ def default_ops() -> tuple[Op, ...]:
     from loom.dialect.buffer import ALL_BUFFER_OPS
     from loom.dialect.cfg import ALL_CFG_OPS
     from loom.dialect.check import ALL_CHECK_OPS
+    from loom.dialect.command import ALL_COMMAND_OPS
     from loom.dialect.encoding import ALL_ENCODING_OPS
     from loom.dialect.func import ALL_FUNC_OPS
     from loom.dialect.globals import ALL_GLOBAL_OPS
@@ -685,6 +686,7 @@ def default_ops() -> tuple[Op, ...]:
         *ALL_BUFFER_OPS,
         *ALL_CFG_OPS,
         *ALL_CHECK_OPS,
+        *ALL_COMMAND_OPS,
         *ALL_ENCODING_OPS,
         *ALL_FUNC_OPS,
         *ALL_GLOBAL_OPS,

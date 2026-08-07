@@ -764,6 +764,13 @@ static iree_status_t loom_link_merge_func_contract(
           .target_attr_index = target_func.vtable->predicates_attr_index,
           .field_name = IREE_SV("predicates"),
       },
+      {
+          .source_attr_index =
+              source_func.vtable->specialization_count_attr_index,
+          .target_attr_index =
+              target_func.vtable->specialization_count_attr_index,
+          .field_name = IREE_SV("specialization_count"),
+      },
   };
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(attrs); ++i) {
     IREE_RETURN_IF_ERROR(loom_link_merge_func_attr(

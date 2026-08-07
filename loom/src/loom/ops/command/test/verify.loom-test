@@ -1,0 +1,65 @@
+// RUN: verify
+
+command.program.def @decode(%token_count: index) launch(%parameters: buffer, %transient: buffer) {
+  command.return
+}
+
+command.program.def @valid_launch(%token_count: index) launch(%parameters: buffer, %transient: buffer) {
+  command.program.launch @decode[%token_count](%parameters, %transient) : [index](buffer, buffer)
+  command.return
+}
+
+// ====
+
+command.program.def @non_buffer_binding() launch(%binding: i32) {
+  // ERROR@-1: TYPE/003 "launch binding 0" "i32" "buffer"
+  command.return
+}
+
+// ====
+
+command.program.def @one_specialization(%token_count: index) launch(%parameters: buffer) {
+  command.return
+}
+
+command.program.def @missing_specialization() launch(%parameters: buffer) {
+  // ERROR@+1: STRUCTURE/013 "specialization" "0" "program specialization argument" "1"
+  command.program.launch @one_specialization[](%parameters) : [](buffer)
+  command.return
+}
+
+// ====
+
+command.program.def @index_specialization(%token_count: index) launch(%parameters: buffer) {
+  command.return
+}
+
+command.program.def @wrong_specialization_type(%token_count: i32) launch(%parameters: buffer) {
+  // ERROR@+1: TYPE/001 "specialization 0" "i32" "program specialization argument 0" "index"
+  command.program.launch @index_specialization[%token_count](%parameters) : [i32](buffer)
+  command.return
+}
+
+// ====
+
+command.program.def @two_bindings() launch(%parameters: buffer, %transient: buffer) {
+  command.return
+}
+
+command.program.def @missing_binding() launch(%parameters: buffer) {
+  // ERROR@+1: STRUCTURE/013 "binding" "1" "program launch binding" "2"
+  command.program.launch @two_bindings[](%parameters) : [](buffer)
+  command.return
+}
+
+// ====
+
+func.def @ordinary_function() {
+  func.return
+}
+
+command.program.def @wrong_symbol_kind() launch() {
+  // ERROR@+1: SYMBOL/003 {symbol_name="ordinary_function", actual_kind="function", expected_kind="command program"}
+  command.program.launch @ordinary_function[]() : []()
+  command.return
+}

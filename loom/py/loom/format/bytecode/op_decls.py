@@ -18,6 +18,7 @@ def default_op_decls() -> tuple[Any, ...]:
     """Return the built-in generated operation declarations."""
     from loom.dialect.buffer import ALL_BUFFER_OPS
     from loom.dialect.cfg import ALL_CFG_OPS
+    from loom.dialect.command import ALL_COMMAND_OPS
     from loom.dialect.encoding import ALL_ENCODING_OPS
     from loom.dialect.func import ALL_FUNC_OPS
     from loom.dialect.globals import ALL_GLOBAL_OPS
@@ -43,6 +44,7 @@ def default_op_decls() -> tuple[Any, ...]:
         *ALL_GLOBAL_OPS,
         *ALL_SCF_OPS,
         *ALL_CFG_OPS,
+        *ALL_COMMAND_OPS,
         *ALL_BUFFER_OPS,
         *ALL_VIEW_OPS,
         *ALL_VECTOR_OPS,

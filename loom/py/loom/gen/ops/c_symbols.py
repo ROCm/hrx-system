@@ -24,6 +24,7 @@ _SYMBOL_INTERFACE_MAP: dict[str, str] = {
     "target": "LOOM_SYMBOL_INTERFACE_TARGET",
     "config": "LOOM_SYMBOL_INTERFACE_CONFIG",
     "kernel": "LOOM_SYMBOL_INTERFACE_KERNEL",
+    "command_program": "LOOM_SYMBOL_INTERFACE_COMMAND_PROGRAM",
 }
 
 

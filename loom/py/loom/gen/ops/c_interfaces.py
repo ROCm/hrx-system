@@ -14,6 +14,7 @@ from typing import Any
 
 from loom.dsl import (
     ATTR_TYPE_FLAGS,
+    ATTR_TYPE_I64,
     ATTR_TYPE_PARAMETERIZED_ARRAY,
     ATTR_TYPE_STRING,
     CallLikeInterface,
@@ -159,6 +160,12 @@ INTERFACES: tuple[InterfaceSpec, ...] = (
                 "requires_attr_index",
                 "attr",
                 expected_attr_type=ATTR_TYPE_PARAMETERIZED_ARRAY,
+            ),
+            InterfaceFieldSpec(
+                "specialization_count",
+                "specialization_count_attr_index",
+                "attr",
+                expected_attr_type=ATTR_TYPE_I64,
             ),
             InterfaceFieldSpec("body", "body_region_index", "region"),
             InterfaceFieldSpec("implements", "implements_attr_index", "attr"),
