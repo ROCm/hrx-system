@@ -35,7 +35,7 @@ from loom.dsl import (
     ShapeParam,
     TypeDef,
 )
-from loom.ir import EncodingRole, EncodingType, StorageSpace, StorageType
+from loom.ir import EncodingRole, EncodingType, StorageSpace, StorageType, TypeKind
 
 __all__ = [
     "ALL_BUILTIN_TYPES",
@@ -253,4 +253,13 @@ BUILTIN_TYPE_BY_PYTHON_TYPE: dict[type[object], TypeDef] = {
     type_def.python_type: type_def
     for type_def in ALL_BUILTIN_TYPES
     if type_def.python_type is not None
+}
+
+# Direct compact shape representation kind to declaration lookup. Derived from
+# the declarations so parsers and printers do not maintain parallel family or
+# spelling tables.
+BUILTIN_COMPACT_SHAPE_TYPE_BY_KIND: dict[TypeKind, TypeDef] = {
+    TypeKind[type_def.ir_kind.upper()]: type_def
+    for type_def in ALL_BUILTIN_TYPES
+    if type_def.uses_compact_shape_format
 }

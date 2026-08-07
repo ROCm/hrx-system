@@ -10,11 +10,13 @@ from contextlib import contextmanager
 
 from loom.assembly import (
     COLON,
+    COMMA,
     Attr,
     AttrDict,
     AttrTable,
     BlockRef,
     Clause,
+    EncodingOf,
     Flags,
     FuncArgs,
     OperandDict,
@@ -25,11 +27,14 @@ from loom.assembly import (
     Region,
     ResultType,
     ResultTypeList,
+    ScalarOf,
     ScopedEnumRef,
+    ShapeOf,
     SymbolRef,
     TemplateParam,
     TemplateParamFlags,
     TypesOf,
+    kw,
 )
 from loom.dsl import (
     ANY,
@@ -62,6 +67,7 @@ from loom.dsl import (
     Dialect,
     ElementWidthAtLeastAttr,
     ElementWidthGreaterThan,
+    EncodingParam,
     EnumCase,
     EnumDef,
     FuncLikeInterface,
@@ -86,6 +92,8 @@ from loom.dsl import (
     Retain,
     RetainedResult,
     SameType,
+    ScalarParam,
+    ShapeParam,
     Successor,
     SymbolDefinition,
     SymbolDefinitionFlag,
@@ -128,6 +136,24 @@ def _raises_value_error(pattern: str) -> Iterator[None]:
             raise AssertionError(f"{exc!s} did not match {pattern!r}") from exc
     else:
         raise AssertionError(f"expected ValueError matching {pattern!r}")
+
+
+def _compact_tensor_type_def(name: str) -> TypeDef:
+    return TypeDef(
+        name=name,
+        ir_kind="tensor",
+        params=[
+            ShapeParam("dims"),
+            ScalarParam("element_type"),
+            EncodingParam("encoding"),
+        ],
+        format=[
+            ShapeOf("dims"),
+            kw("x"),
+            ScalarOf("element_type"),
+            OptionalGroup([COMMA, EncodingOf("encoding")], anchor="encoding"),
+        ],
+    )
 
 
 def test_load_dialect_generation_calls_only_requested_loader() -> None:
@@ -225,7 +251,7 @@ def test_generate_type_registry_emits_type_semantics() -> None:
 
 
 def test_generate_type_registry_emits_builtin_type_descriptor_table() -> None:
-    type_def = TypeDef(name="test.tensor", ir_kind="tensor")
+    type_def = _compact_tensor_type_def("test.tensor")
 
     _, _, type_registry_tables_c = generate_type_registry([type_def])
 
@@ -266,8 +292,8 @@ def test_generate_type_registry_emits_compact_enum_descriptor() -> None:
 
 def test_generate_type_registry_rejects_duplicate_builtin_type_names() -> None:
     type_defs = [
-        TypeDef(name="test.tensor", ir_kind="tensor"),
-        TypeDef(name="test.other_tensor", ir_kind="tensor"),
+        _compact_tensor_type_def("test.tensor"),
+        _compact_tensor_type_def("test.other_tensor"),
     ]
 
     with _raises_value_error(r"Type kind 'tensor' has duplicate registry names"):

@@ -18,6 +18,7 @@ from loom.assembly import (
     Attr,
     BlockRef,
     Clause,
+    EncodingOf,
     FuncArgs,
     IndexList,
     Keyword,
@@ -26,8 +27,10 @@ from loom.assembly import (
     Ref,
     Region,
     ResultType,
+    ScalarOf,
     Scope,
     ScopedEnumRef,
+    ShapeOf,
     SymbolRef,
     TypeOf,
     kw,
@@ -94,6 +97,7 @@ from loom.dsl import (
     ElementWidthAtLeastAttr,
     ElementWidthGreaterThan,
     ElementWidthLessThan,
+    EncodingParam,
     EnumCase,
     EnumDef,
     FreshResult,
@@ -143,6 +147,8 @@ from loom.dsl import (
     SameKind,
     SameShape,
     SameType,
+    ScalarParam,
+    ShapeParam,
     Successor,
     SymbolDefinition,
     SymbolKernelContract,
@@ -1542,6 +1548,44 @@ class TestTypeDef:
                 "test.wrapper",
                 params=[TypeParam("value"), AttrDef("mode", "i64")],
                 format=[TypeOf("value"), COMMA, Param("mode")],
+            )
+
+    def test_compact_shape_format_must_match_representation(self) -> None:
+        type_def = TypeDef(
+            "test.vector",
+            ir_kind="vector",
+            params=[ShapeParam("dims"), ScalarParam("element_type")],
+            format=[ShapeOf("dims"), kw("x"), ScalarOf("element_type")],
+        )
+        assert type_def.uses_compact_shape_format
+
+        with _raises(ValueError, match="does not match its compact shape"):
+            TypeDef(
+                "test.vector",
+                ir_kind="vector",
+                params=[ShapeParam("dims"), ScalarParam("element_type")],
+                format=[ScalarOf("element_type"), kw("x"), ShapeOf("dims")],
+            )
+
+        with _raises(ValueError, match="requires shape and scalar parameters"):
+            TypeDef("test.vector", ir_kind="vector")
+
+    def test_vector_compact_shape_format_rejects_encoding(self) -> None:
+        with _raises(ValueError, match="vector representation cannot carry"):
+            TypeDef(
+                "test.vector",
+                ir_kind="vector",
+                params=[
+                    ShapeParam("dims"),
+                    ScalarParam("element_type"),
+                    EncodingParam("encoding"),
+                ],
+                format=[
+                    ShapeOf("dims"),
+                    kw("x"),
+                    ScalarOf("element_type"),
+                    OptionalGroup([COMMA, EncodingOf("encoding")], anchor="encoding"),
+                ],
             )
 
     def test_descriptor_parameters_share_family_schema_validation(self) -> None:

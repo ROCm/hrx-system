@@ -241,9 +241,12 @@ static iree_status_t loom_print_dim(loom_output_stream_t* stream,
                                          loom_dim_static_size(packed));
 }
 
-static iree_status_t loom_print_shaped_interior(
-    loom_output_stream_t* stream, loom_type_t type, const loom_module_t* module,
-    const loom_print_context_t* ctx) {
+// Shared in source but kept inline in both complete-type and result-type hot
+// paths so declaration-driven spelling does not add a call per printed type.
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t
+loom_print_shaped_interior(loom_output_stream_t* stream, loom_type_t type,
+                           const loom_module_t* module,
+                           const loom_print_context_t* ctx) {
   uint8_t rank = loom_type_rank(type);
   for (uint8_t i = 0; i < rank; ++i) {
     if (i > 0) {
@@ -270,21 +273,13 @@ static iree_status_t loom_print_shaped_interior(
   return iree_ok_status();
 }
 
-static iree_status_t loom_print_shaped_type_prefix(loom_output_stream_t* stream,
-                                                   loom_type_kind_t kind) {
-  switch (kind) {
-    case LOOM_TYPE_TILE:
-      return loom_output_stream_write_cstring(stream, "tile<");
-    case LOOM_TYPE_TENSOR:
-      return loom_output_stream_write_cstring(stream, "tensor<");
-    case LOOM_TYPE_VECTOR:
-      return loom_output_stream_write_cstring(stream, "vector<");
-    case LOOM_TYPE_VIEW:
-      return loom_output_stream_write_cstring(stream, "view<");
-    default:
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "type kind %d is not shaped", (int)kind);
-  }
+static iree_status_t loom_print_compact_shape_prefix(
+    loom_output_stream_t* stream, loom_type_kind_t type_kind) {
+  const loom_type_descriptor_t* descriptor =
+      loom_type_registry_lookup_builtin(type_kind);
+  const iree_string_view_t name = loom_bstring_view(descriptor->name);
+  return loom_output_stream_write(
+      stream, iree_make_string_view(name.data, name.size + 1));
 }
 
 // Parameterized types and type-valued attributes are mutually recursive.
@@ -340,17 +335,17 @@ static iree_status_t loom_print_descriptor_backed_type(
                             "parameterized type has malformed slot storage");
   }
 
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write(stream, loom_bstring_view(parameterized->name)));
-
   bool omit_parameter_list = iree_any_bit_set(
       parameterized->flags, LOOM_PARAMETERIZED_TYPE_OMIT_EMPTY_PARAMETER_LIST);
   for (uint8_t i = 0; i < parameter_count && omit_parameter_list; ++i) {
     omit_parameter_list = loom_attr_is_absent(parameters[i]);
   }
-  if (omit_parameter_list) return iree_ok_status();
-
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '<'));
+  const iree_string_view_t name = loom_bstring_view(descriptor->name);
+  if (omit_parameter_list) {
+    return loom_output_stream_write(stream, name);
+  }
+  IREE_RETURN_IF_ERROR(loom_output_stream_write(
+      stream, iree_make_string_view(name.data, name.size + 1)));
 
   loom_print_context_t parameter_context = {0};
   if (type_context) parameter_context = *type_context;
@@ -416,10 +411,10 @@ static iree_status_t loom_text_print_type_impl(
     case LOOM_TYPE_VECTOR:
     case LOOM_TYPE_VIEW: {
       IREE_RETURN_IF_ERROR(
-          loom_print_shaped_type_prefix(stream, loom_type_kind(type)));
+          loom_print_compact_shape_prefix(stream, loom_type_kind(type)));
       IREE_RETURN_IF_ERROR(
           loom_print_shaped_interior(stream, type, module, ctx));
-      return loom_output_stream_write_cstring(stream, ">");
+      return loom_output_stream_write_char(stream, '>');
     }
     case LOOM_TYPE_DIALECT: {
       loom_string_id_t name_id = loom_type_dialect_name_id(type);
@@ -512,9 +507,10 @@ static iree_status_t loom_text_print_type_impl(
     case LOOM_TYPE_BUFFER:
       return loom_output_stream_write_cstring(stream, "buffer");
     case LOOM_TYPE_POOL: {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "pool<"));
+      IREE_RETURN_IF_ERROR(
+          loom_print_compact_shape_prefix(stream, loom_type_kind(type)));
       IREE_RETURN_IF_ERROR(loom_print_dim(stream, type, 0, module, ctx));
-      return loom_output_stream_write_cstring(stream, ">");
+      return loom_output_stream_write_char(stream, '>');
     }
     case LOOM_TYPE_FUNCTION: {
       const loom_func_type_data_t* func_data = loom_type_func_data(type);
@@ -564,14 +560,6 @@ iree_status_t loom_print_type(loom_print_context_t* ctx, loom_type_t type) {
   return loom_text_print_type_impl(type, ctx->module, ctx->stream, ctx);
 }
 
-static iree_status_t loom_print_result_type_dim(loom_output_stream_t* stream,
-                                                loom_type_t type,
-                                                iree_host_size_t dim_index,
-                                                const loom_module_t* module,
-                                                loom_print_context_t* ctx) {
-  return loom_print_dim(stream, type, dim_index, module, ctx);
-}
-
 static iree_status_t loom_text_print_result_type(loom_type_t type,
                                                  const loom_module_t* module,
                                                  loom_output_stream_t* stream,
@@ -582,32 +570,10 @@ static iree_status_t loom_text_print_result_type(loom_type_t type,
     case LOOM_TYPE_VECTOR:
     case LOOM_TYPE_VIEW: {
       IREE_RETURN_IF_ERROR(
-          loom_print_shaped_type_prefix(stream, loom_type_kind(type)));
-      uint8_t rank = loom_type_rank(type);
-      for (uint8_t i = 0; i < rank; ++i) {
-        if (i > 0) {
-          IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "x"));
-        }
-        IREE_RETURN_IF_ERROR(
-            loom_print_result_type_dim(stream, type, i, module, ctx));
-      }
-      if (rank > 0) {
-        IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "x"));
-      }
+          loom_print_compact_shape_prefix(stream, loom_type_kind(type)));
       IREE_RETURN_IF_ERROR(
-          loom_print_scalar_type(stream, loom_type_element_type(type)));
-      if (loom_type_has_encoding(type)) {
-        IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ", "));
-        if (loom_type_has_ssa_encoding(type)) {
-          IREE_RETURN_IF_ERROR(loom_print_name_plan_write_value_ref(
-              ctx ? ctx->name_plan : NULL, stream, module,
-              loom_type_encoding_value_id(type)));
-        } else {
-          IREE_RETURN_IF_ERROR(loom_print_static_encoding(
-              stream, module, type.encoding_id, ctx));
-        }
-      }
-      return loom_output_stream_write_cstring(stream, ">");
+          loom_print_shaped_interior(stream, type, module, ctx));
+      return loom_output_stream_write_char(stream, '>');
     }
     default:
       return loom_text_print_type_impl(type, module, stream, ctx);

@@ -104,7 +104,6 @@ from loom.ir import (
     StorageType,
     SymbolName,
     Type,
-    TypeKind,
     Value,
 )
 from loom.location_tag import builtin_location_tag_name
@@ -217,11 +216,15 @@ def print_type(
         case ScalarType():
             return repr(ir_type)
         case ShapedType():
-            return _print_shaped_type(ir_type, context)
+            return _print_shaped_type(
+                ir_type, _compact_shape_type_definition(ir_type), context
+            )
         case BufferType():
             return "buffer"
         case PoolType():
-            return _print_pool_type(ir_type, context)
+            return _print_pool_type(
+                ir_type, _compact_shape_type_definition(ir_type), context
+            )
         case FunctionType(arg_types=args, result_types=results):
             arg_strs = ", ".join(print_type(t, context, type_registry) for t in args)
             result_strs = ", ".join(
@@ -271,6 +274,14 @@ def _compact_type_definition(
     from loom.builtin_types import BUILTIN_TYPE_BY_PYTHON_TYPE
 
     return BUILTIN_TYPE_BY_PYTHON_TYPE.get(type(ir_type))
+
+
+def _compact_shape_type_definition(ir_type: ShapedType | PoolType) -> TypeDef:
+    """Resolves a compact shape representation to its declaration."""
+
+    from loom.builtin_types import BUILTIN_COMPACT_SHAPE_TYPE_BY_KIND
+
+    return BUILTIN_COMPACT_SHAPE_TYPE_BY_KIND[ir_type.type_kind]
 
 
 def _print_dialect_type(
@@ -421,16 +432,11 @@ def _print_descriptor_backed_type(
 
 
 def _print_shaped_type(
-    shaped: ShapedType, context: TypePrintContext | None = None
+    shaped: ShapedType,
+    type_def: TypeDef,
+    context: TypePrintContext | None = None,
 ) -> str:
     """Print shaped types with optional dim names and encodings/layouts."""
-    kind_names = {
-        TypeKind.TILE: "tile",
-        TypeKind.TENSOR: "tensor",
-        TypeKind.VECTOR: "vector",
-        TypeKind.VIEW: "view",
-    }
-    kind_name = kind_names[shaped.type_kind]
     if shaped.rank == 0:
         inner = repr(shaped.element_type)
     else:
@@ -461,19 +467,23 @@ def _print_shaped_type(
             use_aliases = context._use_aliases if context else True
             inner += ", " + _format_encoding_instance(enc, use_alias=use_aliases)
 
-    return f"{kind_name}<{inner}>"
+    return f"{type_def.name}<{inner}>"
 
 
-def _print_pool_type(pool: PoolType, context: TypePrintContext | None = None) -> str:
+def _print_pool_type(
+    pool: PoolType,
+    type_def: TypeDef,
+    context: TypePrintContext | None = None,
+) -> str:
     """Print pool<[%block_size]> or pool<N>."""
     match pool.block_size:
         case StaticDim(size=size):
-            return f"pool<{size}>"
+            return f"{type_def.name}<{size}>"
         case DynamicDim():
             dim_name = context.dim_name(0) if context else None
             if dim_name is not None:
-                return f"pool<[{dim_name}]>"
-            return "pool<?>"
+                return f"{type_def.name}<[{dim_name}]>"
+            return f"{type_def.name}<?>"
         case _:
             raise TypeError(f"unexpected dim type: {type(pool.block_size)}")
 

@@ -64,7 +64,6 @@ from loom.dsl import (
     FuncLikeInterface,
     Op,
     ParameterizedAttrDef,
-    ShapeParam,
     TypeConstraint,
     TypeDef,
 )
@@ -987,12 +986,10 @@ def parse_type_from_tokens(
                         str(error), token.location, tokenizer._filename
                     ) from error
             tokenizer.expect(TokenKind.LANGLE)
-            # Shape-grammar types parse from the token stream using in_dim_list
-            # for 'x' separators. Other types use the interior tokenizer
-            # approach.
-            has_shape = any(isinstance(p, ShapeParam) for p in type_def.params)
-            if has_shape:
-                result = _parse_shaped_type_from_tokens(
+            # Compact shape types parse from the token stream using in_dim_list
+            # for 'x' separators. Other types use the interior tokenizer.
+            if type_def.uses_compact_shape_format:
+                result = _parse_compact_shape_type_from_tokens(
                     type_def,
                     tokenizer,
                     scope,
@@ -1353,7 +1350,7 @@ def _parse_type_interior(
 
     The type_def's format spec drives the parse for dialect types
     such as vm.ref<T>. Built-in shaped types use
-    _parse_shaped_type_from_tokens directly.
+    _parse_compact_shape_type_from_tokens directly.
     """
     interior_tokenizer = Tokenizer(interior, filename)
     parsed_params: list[Type] = []
@@ -1460,7 +1457,7 @@ def _parse_type_interior(
     return DialectType(type_def.name, tuple(parsed_params)), {}
 
 
-def _parse_shaped_type_from_tokens(
+def _parse_compact_shape_type_from_tokens(
     type_def: TypeDef,
     tokenizer: Tokenizer,
     scope: NameScope,
@@ -1494,22 +1491,8 @@ def _parse_shaped_type_from_tokens(
             dim_bindings[0] = binding_id
         return PoolType(block_size=dim), dim_bindings
 
-    # Shaped type (tile, tensor, vector, view).
-    _IR_KIND_TO_TYPE_KIND = {
-        "tile": TypeKind.TILE,
-        "tensor": TypeKind.TENSOR,
-        "vector": TypeKind.VECTOR,
-        "view": TypeKind.VIEW,
-    }
-    type_kind = _IR_KIND_TO_TYPE_KIND.get(type_def.ir_kind)
-    if type_kind is None:
-        token = tokenizer.peek()
-        raise ParseError(
-            f"TypeDef '{type_def.name}' has ShapeParam but ir_kind "
-            f"'{type_def.ir_kind}' is not a recognized shaped type kind.",
-            token.location,
-            filename,
-        )
+    # TypeDef construction validates the compact representation kind.
+    type_kind = TypeKind[type_def.ir_kind.upper()]
 
     # Parse dimensions. in_dim_list must be true from the start so
     # that '0x' in '0xf32' is scanned as INTEGER(0) + DIM_X(x) +
@@ -1565,9 +1548,9 @@ def _parse_shaped_type_from_tokens(
     encoding: EncodingInstance | DynamicEncoding | None = None
     encoding_binding = -1
     if tokenizer.try_consume(TokenKind.COMMA):
-        if type_kind == TypeKind.VECTOR:
+        if len(type_def.params) < 3:
             raise ParseError(
-                "vector types must not carry encoding or layout attachments",
+                f"{type_def.name} types must not carry encoding or layout attachments",
                 tokenizer.peek().location,
                 filename,
             )
