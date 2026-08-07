@@ -832,6 +832,46 @@ TEST_F(ModuleTest, DefineValueSegmentGrowthKeepsPointersStable) {
   loom_module_free(module);
 }
 
+TEST_F(ModuleTest, DefineUntypedValuesPreservesRangeAndScratchState) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_value_id_t typed_id = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_define_value(
+      module, loom_type_scalar(LOOM_SCALAR_TYPE_F32), &typed_id));
+  loom_value_u32_scratch_acquire_zeroed(&module->scratch.values,
+                                        module->values.count);
+  loom_value_u32_scratch_store(&module->scratch.values, typed_id, 42);
+
+  const iree_host_size_t range_count = LOOM_VALUE_SEGMENT_CAPACITY + 7;
+  loom_value_id_t base_value_id = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_define_untyped_values(module, range_count, &base_value_id));
+  EXPECT_EQ(base_value_id, typed_id + 1);
+  EXPECT_EQ(module->values.count, range_count + 1);
+  EXPECT_EQ(loom_value_u32_scratch_load(&module->scratch.values, typed_id),
+            42u);
+  for (iree_host_size_t i = 0; i < range_count; ++i) {
+    const loom_value_id_t value_id = base_value_id + (loom_value_id_t)i;
+    const loom_value_t* value = loom_module_value(module, value_id);
+    EXPECT_EQ(loom_type_kind(value->type), LOOM_TYPE_NONE);
+    EXPECT_EQ(value->name_id, LOOM_STRING_ID_INVALID);
+    EXPECT_EQ(value->def, loom_value_def_make_none());
+    EXPECT_EQ(loom_value_u32_scratch_load(&module->scratch.values, value_id),
+              0u);
+  }
+  loom_value_u32_scratch_release_zeroed(&module->scratch.values);
+
+  loom_value_id_t empty_base_value_id = 0;
+  IREE_ASSERT_OK(
+      loom_module_define_untyped_values(module, 0, &empty_base_value_id));
+  EXPECT_EQ(empty_base_value_id, LOOM_VALUE_ID_INVALID);
+  EXPECT_EQ(module->values.count, range_count + 1);
+
+  loom_module_free(module);
+}
+
 TEST_F(ModuleTest, ValueOrdinalScratchTracksActiveFrameOnly) {
   loom_module_t* module = NULL;
   IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
@@ -937,7 +977,7 @@ TEST_F(ModuleTest, ValueU32ScratchAliasesOrdinalAndZeroedModes) {
   loom_module_free(module);
 }
 
-TEST_F(ModuleTest, DefineValueRejectsInvalidSentinelId) {
+TEST_F(ModuleTest, DefineValuesRejectInvalidSentinelId) {
   loom_module_t* module = NULL;
   IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
                                       NULL, iree_allocator_system(), &module));
@@ -949,6 +989,8 @@ TEST_F(ModuleTest, DefineValueRejectsInvalidSentinelId) {
       IREE_STATUS_RESOURCE_EXHAUSTED,
       loom_module_define_value(module, loom_type_scalar(LOOM_SCALAR_TYPE_F32),
                                &id));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_module_define_untyped_values(module, 1, &id));
 
   loom_module_free(module);
 }

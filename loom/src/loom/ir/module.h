@@ -149,6 +149,14 @@ static inline loom_type_t loom_block_arg_type(const loom_module_t* module,
 iree_status_t loom_module_define_value(loom_module_t* module, loom_type_t type,
                                        loom_value_id_t* out_value_id);
 
+// Defines a contiguous range of fresh SSA values with NONE types. Every value
+// is unnamed and has no defining operation. Decoders may use the returned base
+// ID to reserve forward references before assigning types and definitions.
+// Returns LOOM_VALUE_ID_INVALID when |count| is zero.
+iree_status_t loom_module_define_untyped_values(
+    loom_module_t* module, iree_host_size_t count,
+    loom_value_id_t* out_base_value_id);
+
 // Acquires the module value-ordinal scratch table for one compiler frame.
 //
 // Mutable modules are single-owner, so only one active local value mapping is

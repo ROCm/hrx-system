@@ -125,6 +125,10 @@ typedef struct loom_bytecode_body_reader_t {
   uint64_t value_capacity;               // Expected value count from summary.
   uint64_t next_value_number;            // Next value definition to decode.
   uint64_t available_value_count;        // Reserved prefix available to types.
+  // Next fresh module value ID reserved for this body.
+  loom_value_id_t next_fresh_value_id;
+  // Number of fresh module value IDs not yet assigned to body-local values.
+  uint64_t remaining_fresh_value_count;
   // Values already defined by the containing symbol signature.
   const loom_value_id_t* predefined_values;
   // Function-local value number of the first predefined region argument.
@@ -3048,6 +3052,16 @@ static iree_status_t loom_bytecode_body_reader_define_value(
   return iree_ok_status();
 }
 
+static iree_status_t loom_bytecode_body_reader_prepare_fresh_values(
+    loom_bytecode_body_reader_t* body_reader, iree_host_size_t count) {
+  loom_value_id_t base_value_id = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_module_define_untyped_values(
+      body_reader->reader->output_module, count, &base_value_id));
+  body_reader->next_fresh_value_id = base_value_id;
+  body_reader->remaining_fresh_value_count = count;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_bytecode_body_reader_reserve_value_defs(
     loom_bytecode_body_reader_t* body_reader, uint64_t count,
     loom_value_id_t* out_value_ids) {
@@ -3074,8 +3088,13 @@ static iree_status_t loom_bytecode_body_reader_reserve_value_defs(
             IREE_SV("predefined_value_is_not_present_in_the_module"));
       }
     } else {
-      IREE_RETURN_IF_ERROR(loom_module_define_value(
-          body_reader->reader->output_module, loom_type_none(), &value_id));
+      if (body_reader->remaining_fresh_value_count == 0) {
+        return loom_bytecode_reader_emit_invalid_ir_body(
+            body_reader, body_reader->body_offset,
+            IREE_SV("fresh_value_definition_exceeds_body_summary"));
+      }
+      value_id = body_reader->next_fresh_value_id++;
+      --body_reader->remaining_fresh_value_count;
     }
     body_reader->value_map[value_number] = value_id;
     if (out_value_ids) {
@@ -3670,6 +3689,16 @@ static iree_status_t loom_bytecode_reader_read_symbol_regions(
         &body_reader, body_reader.body_offset,
         IREE_SV("function_body_value_count_exceeds_host_size"));
   }
+  uint64_t predefined_value_count = 0;
+  for (uint8_t i = 0; i < predefined_region_count; ++i) {
+    predefined_value_count += predefined_regions[i].count;
+  }
+  if (iree_status_is_ok(status) && !loom_bytecode_reader_has_errors(reader) &&
+      predefined_value_count > value_count) {
+    status = loom_bytecode_reader_emit_invalid_ir_body(
+        &body_reader, body_reader.body_offset,
+        IREE_SV("predefined_value_count_exceeds_body_summary"));
+  }
   if (iree_status_is_ok(status) && !loom_bytecode_reader_has_errors(reader) &&
       predefined_region_count > parent_op->region_count) {
     status = loom_bytecode_reader_emit_invalid_ir_body(
@@ -3708,6 +3737,10 @@ static iree_status_t loom_bytecode_reader_read_symbol_regions(
     status = iree_arena_allocate_array(
         &body_arena, (iree_host_size_t)value_count, sizeof(loom_value_id_t),
         (void**)&body_reader.value_map);
+  }
+  if (iree_status_is_ok(status) && !loom_bytecode_reader_has_errors(reader)) {
+    status = loom_bytecode_body_reader_prepare_fresh_values(
+        &body_reader, (iree_host_size_t)(value_count - predefined_value_count));
   }
   if (iree_status_is_ok(status) && !loom_bytecode_reader_has_errors(reader)) {
     bool seen_regions[UINT8_MAX + 1] = {0};
@@ -4724,6 +4757,8 @@ static iree_status_t loom_bytecode_reader_materialize_function_symbol(
       .value_map = signature_values,
       .value_capacity = signature_value_count,
   };
+  IREE_RETURN_IF_ERROR(loom_bytecode_body_reader_prepare_fresh_values(
+      &signature_reader, signature_value_count));
   IREE_RETURN_IF_ERROR(loom_bytecode_body_reader_reserve_value_defs(
       &signature_reader, signature_value_count, signature_values));
   if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
@@ -5105,6 +5140,8 @@ static iree_status_t loom_bytecode_reader_materialize_global_symbol(
       .value_map = local_values,
       .value_capacity = local_value_count,
   };
+  IREE_RETURN_IF_ERROR(loom_bytecode_body_reader_prepare_fresh_values(
+      &global_reader, local_value_count));
   IREE_RETURN_IF_ERROR(loom_bytecode_body_reader_reserve_value_defs(
       &global_reader, local_value_count, local_values));
   if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
