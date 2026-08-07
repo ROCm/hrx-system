@@ -6405,9 +6405,15 @@ HIPAPI hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes,
   }
 
   if (kind == hipMemcpyDeviceToDevice) {
+    // Synchronous memory operations must complete both the copy and the
+    // blocking-stream work that implicitly precedes the legacy default stream.
+    // Ordinary D2D copies preserve that ordering with a queue barrier and
+    // remain host-asynchronous.
     iree_status_t status =
-        iree_hal_streaming_context_enqueue_legacy_default_dependency_barrier(
-            context);
+        requires_synchronous_memory_operations
+            ? iree_hal_streaming_context_synchronize_legacy_default(context)
+            : iree_hal_streaming_context_enqueue_legacy_default_dependency_barrier(
+                  context);
     if (iree_status_is_ok(status)) {
       status = iree_hal_streaming_memcpy_device_to_device(
           context, (iree_hal_streaming_deviceptr_t)dst,
@@ -14094,6 +14100,7 @@ HIPAPI hipError_t hipPointerGetAttribute(void* data,
     }
     case HIP_POINTER_ATTRIBUTE_HOST_POINTER: {
       if (!buffer_ref.buffer->host_ptr) {
+        *(void**)data = NULL;
         result = hipErrorInvalidValue;
         break;
       }
@@ -14143,8 +14150,12 @@ HIPAPI hipError_t hipPointerGetAttribute(void* data,
       *(unsigned long long*)data = (unsigned long long)buffer_ref.buffer;
       break;
     }
+    case HIP_POINTER_ATTRIBUTE_ACCESS_FLAGS: {
+      *(unsigned int*)data =
+          (unsigned int)buffer_ref.buffer->host_register_flags;
+      break;
+    }
     case HIP_POINTER_ATTRIBUTE_P2P_TOKENS:
-    case HIP_POINTER_ATTRIBUTE_ACCESS_FLAGS:
     case HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE:
     case HIP_POINTER_ATTRIBUTE_ALLOWED_HANDLE_TYPES:
     case HIP_POINTER_ATTRIBUTE_IS_GPU_DIRECT_RDMA_CAPABLE:
@@ -14306,22 +14317,19 @@ HIPAPI hipError_t hipDrvPointerGetAttributes(unsigned int numAttributes,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  // Query each attribute individually using hipPointerGetAttribute.
-  hipError_t result = hipSuccess;
+  // Each output is independent. Inapplicable attributes receive the default
+  // written by the single-attribute query, while valid inputs make the batch
+  // itself successful.
+  const hipError_t saved_last_error = iree_hip_thread_error.last_error;
+  const bool saved_sticky_error = iree_hip_thread_error.sticky;
   for (unsigned int i = 0; i < numAttributes; i++) {
-    hipError_t attr_result =
-        hipPointerGetAttribute(data[i], attributes[i], (hipDeviceptr_t)ptr);
-    if (attr_result != hipSuccess) {
-      // Return the first error encountered.
-      if (result == hipSuccess) {
-        result = attr_result;
-      }
-      // Continue to try other attributes even if one fails.
-    }
+    (void)hipPointerGetAttribute(data[i], attributes[i], (hipDeviceptr_t)ptr);
   }
+  iree_hip_thread_error.last_error = saved_last_error;
+  iree_hip_thread_error.sticky = saved_sticky_error;
 
   IREE_TRACE_ZONE_END(z0);
-  HIP_RETURN_ERROR(result);
+  HIP_RETURN_ERROR(hipSuccess);
 }
 
 // Queries pointer attributes (runtime API).
