@@ -781,15 +781,6 @@ HIPAPI hipError_t hipChooseDeviceR0600(int* device,
   return iree_hip_choose_device_r0600(device, properties);
 }
 
-HIPAPI hipError_t hipConfigureCall(dim3 gridDim, dim3 blockDim,
-                                   size_t sharedMem, hipStream_t stream) {
-  (void)gridDim;
-  (void)blockDim;
-  (void)sharedMem;
-  (void)stream;
-  return hipErrorNotSupported;
-}
-
 HIPAPI hipError_t hipCreateSurfaceObject(hipSurfaceObject_t* pSurfObject,
                                          const hipResourceDesc* pResDesc) {
   (void)pSurfObject;
@@ -1382,11 +1373,6 @@ HIPAPI hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value,
   (void)value;
   (void)kernel;
   (void)dev;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipLaunchByPtr(const void* func) {
-  (void)func;
   return hipErrorNotSupported;
 }
 
@@ -2011,14 +1997,6 @@ HIPAPI hipError_t hipOccupancyAvailableDynamicSMemPerBlock(
 HIPAPI hipError_t hipProfilerStart(void) { return hipErrorNotSupported; }
 
 HIPAPI hipError_t hipProfilerStop(void) { return hipErrorNotSupported; }
-
-HIPAPI hipError_t hipSetupArgument(const void* arg, size_t size,
-                                   size_t offset) {
-  (void)arg;
-  (void)size;
-  (void)offset;
-  return hipErrorNotSupported;
-}
 
 HIPAPI hipError_t hipSignalExternalSemaphoresAsync(
     const hipExternalSemaphore_t* extSemArray,

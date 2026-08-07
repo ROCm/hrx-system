@@ -29,6 +29,7 @@
 #include "binding/hip/binding_internal.h"
 #include "binding/hip/blocking_printf_provider.h"
 #include "binding/hip/launch_params.h"
+#include "binding/hip/legacy_launch_state.h"
 #include "common/graph.h"
 #include "common/internal.h"
 #include "common/tls.h"
@@ -12620,6 +12621,77 @@ HIPAPI const char* hipKernelNameRefByPtr(const void* hostFunction,
 // Execution control
 //===----------------------------------------------------------------------===//
 
+HIPAPI hipError_t hipConfigureCall(dim3 gridDim, dim3 blockDim,
+                                   size_t sharedMem, hipStream_t stream) {
+  HIP_RETURN_ERROR(
+      iree_hip_legacy_launch_state_push(gridDim, blockDim, sharedMem, stream));
+}
+
+HIPAPI hipError_t __hipPushCallConfiguration(dim3 gridDim, dim3 blockDim,
+                                             size_t sharedMem,
+                                             hipStream_t stream) {
+  HIP_RETURN_ERROR(
+      iree_hip_legacy_launch_state_push(gridDim, blockDim, sharedMem, stream));
+}
+
+HIPAPI hipError_t __hipPopCallConfiguration(dim3* gridDim, dim3* blockDim,
+                                            size_t* sharedMem,
+                                            hipStream_t* stream) {
+  iree_hip_legacy_launch_frame_t frame = {0};
+  hipError_t result = iree_hip_legacy_launch_state_pop(&frame);
+  if (result != hipSuccess) {
+    HIP_RETURN_ERROR(result == hipErrorMissingConfiguration
+                         ? hipErrorInvalidConfiguration
+                         : result);
+  }
+  if (gridDim) *gridDim = frame.grid_dimension;
+  if (blockDim) *blockDim = frame.block_dimension;
+  if (sharedMem) *sharedMem = frame.shared_memory_bytes;
+  if (stream) *stream = frame.stream;
+  iree_hip_legacy_launch_frame_deinitialize(&frame);
+  return hipSuccess;
+}
+
+HIPAPI hipError_t hipSetupArgument(const void* arg, size_t size,
+                                   size_t offset) {
+  HIP_RETURN_ERROR(
+      iree_hip_legacy_launch_state_setup_argument(arg, size, offset));
+}
+
+HIPAPI hipError_t hipLaunchByPtr(const void* func) {
+  iree_hip_legacy_launch_frame_t frame = {0};
+  hipError_t result = iree_hip_legacy_launch_state_pop(&frame);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+
+  if (!func) {
+    result = hipErrorInvalidDeviceFunction;
+  } else if (frame.shared_memory_bytes > UINT32_MAX) {
+    result = hipErrorInvalidValue;
+  } else {
+    hipFunction_t function = NULL;
+    result = hipGetFuncBySymbol(&function, func);
+    if (result == hipSuccess) {
+      size_t argument_length = frame.argument_length;
+      void* extra[] = {
+          HIP_LAUNCH_PARAM_BUFFER_POINTER,
+          frame.argument_data,
+          HIP_LAUNCH_PARAM_BUFFER_SIZE,
+          &argument_length,
+          HIP_LAUNCH_PARAM_END,
+      };
+      result = hipModuleLaunchKernel(
+          function, frame.grid_dimension.x, frame.grid_dimension.y,
+          frame.grid_dimension.z, frame.block_dimension.x,
+          frame.block_dimension.y, frame.block_dimension.z,
+          (unsigned int)frame.shared_memory_bytes, frame.stream, NULL,
+          argument_length == 0 ? NULL : extra);
+    }
+  }
+
+  iree_hip_legacy_launch_frame_deinitialize(&frame);
+  HIP_RETURN_ERROR(result);
+}
+
 // Launches a kernel with specified configuration.
 //
 // Parameters:
@@ -24315,92 +24387,4 @@ HIPAPI void __hipRegisterVar(void** modules, void* var, char* hostVar,
           registry, (iree_hal_streaming_module_registration_t*)modules, var,
           deviceVar, size, 8);
   iree_status_ignore(status);
-}
-
-// We make the assumption here that the stack depth is always 0 or 1.
-// Clang never emits more than one push per stub call and each stub call pops
-// exactly once. The whole push/pop design is terrible, anyway, and unless we
-// find something that actually uses the stack we keep things simple.
-typedef struct iree_hip_call_configuration_t {
-  dim3 grid_dim;
-  dim3 block_dim;
-  size_t shared_mem;
-  hipStream_t stream;
-  bool valid;  // true if configuration has been pushed
-} iree_hip_call_configuration_t;
-static IREE_THREAD_LOCAL iree_hip_call_configuration_t iree_hip_call_config = {
-    0};
-
-// Pushes kernel launch configuration onto the call stack.
-//
-// Parameters:
-//  - gridDim: [IN] Grid dimensions (number of blocks).
-//  - blockDim: [IN] Block dimensions (threads per block).
-//  - sharedMem: [IN] Dynamic shared memory size in bytes.
-//  - stream: [IN] Stream to launch on (NULL = default stream).
-//
-// Returns:
-//  - hipSuccess: Configuration pushed successfully.
-//  - hipErrorInvalidConfiguration: Invalid launch configuration.
-//
-// Calling context:
-// - Used by <<<>>> kernel launch syntax in HIP/CUDA.
-// - Must be immediately followed by the kernel call.
-// - Thread-local: Each thread has its own configuration stack.
-//
-// Usage:
-// - Compiler transforms kernel<<<grid,block,shared,stream>>>(...) into:
-//   __hipPushCallConfiguration(grid, block, shared, stream);
-//   kernel(...);
-//
-// NOTE: The pushed configuration is consumed by the next kernel launch
-// on the current thread.
-HIPAPI hipError_t __hipPushCallConfiguration(dim3 gridDim, dim3 blockDim,
-                                             size_t sharedMem,
-                                             hipStream_t stream) {
-  // Store the configuration in thread-local storage.
-  // This will be consumed by the next kernel launch on this thread.
-  iree_hip_call_config.grid_dim = gridDim;
-  iree_hip_call_config.block_dim = blockDim;
-  iree_hip_call_config.shared_mem = sharedMem;
-  iree_hip_call_config.stream = stream;
-  iree_hip_call_config.valid = true;
-  return hipSuccess;
-}
-
-// Pops kernel launch configuration from the call stack.
-//
-// Parameters:
-//  - gridDim: [OUT] Grid dimensions.
-//  - blockDim: [OUT] Block dimensions.
-//  - sharedMem: [OUT] Dynamic shared memory size.
-//  - stream: [OUT] Stream for launch.
-//
-// Returns:
-//  - hipSuccess: Configuration popped successfully.
-//  - hipErrorInvalidValue: No configuration on stack.
-//
-// Calling context:
-// - Used internally by kernel stub functions.
-// - Retrieves configuration pushed by __hipPushCallConfiguration.
-//
-// NOTE: This is typically called from compiler-generated kernel stubs
-// to retrieve launch parameters.
-HIPAPI hipError_t __hipPopCallConfiguration(dim3* gridDim, dim3* blockDim,
-                                            size_t* sharedMem,
-                                            hipStream_t* stream) {
-  // Check if configuration has been pushed.
-  if (IREE_UNLIKELY(!iree_hip_call_config.valid)) {
-    HIP_RETURN_ERROR(hipErrorInvalidConfiguration);
-  }
-
-  // Return the pushed configuration.
-  if (gridDim) *gridDim = iree_hip_call_config.grid_dim;
-  if (blockDim) *blockDim = iree_hip_call_config.block_dim;
-  if (sharedMem) *sharedMem = iree_hip_call_config.shared_mem;
-  if (stream) *stream = iree_hip_call_config.stream;
-
-  // Mark configuration as consumed.
-  iree_hip_call_config.valid = false;
-  return hipSuccess;
 }
