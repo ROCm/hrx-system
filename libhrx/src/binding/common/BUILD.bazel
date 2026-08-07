@@ -56,6 +56,7 @@ hrx_cc_library(
         "tls.c",
     ],
     hdrs = [
+        "context.h",
         "direct_transfer.h",
         "fat_binary.h",
         "graph.h",

@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "common/context.h"
+
 #include <string.h>
 
 #include "common/internal.h"
@@ -934,6 +936,146 @@ iree_status_t iree_hal_streaming_context_synchronize_legacy_default(
   return iree_hal_streaming_context_synchronize_streams(
       context, /*include_non_blocking_streams=*/false,
       /*flush_before_wait=*/true);
+}
+
+iree_status_t
+iree_hal_streaming_context_enqueue_legacy_default_dependency_barrier(
+    iree_hal_streaming_context_t* context) {
+  IREE_ASSERT_ARGUMENT(context);
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_hal_streaming_stream_t** streams = NULL;
+  iree_host_size_t stream_count = 0;
+  iree_status_t status = iree_hal_streaming_context_snapshot_streams(
+      context, &streams, &stream_count);
+
+  iree_hal_semaphore_t** wait_semaphores = NULL;
+  uint64_t* wait_values = NULL;
+  iree_host_size_t wait_capacity = 0;
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < stream_count; ++i) {
+      iree_hal_streaming_stream_t* stream = streams[i];
+      if (stream && stream != context->default_stream &&
+          !iree_any_bit_set(stream->flags,
+                            IREE_HAL_STREAMING_STREAM_FLAG_NON_BLOCKING)) {
+        if (IREE_UNLIKELY(!iree_host_size_checked_add(wait_capacity, 1,
+                                                      &wait_capacity))) {
+          status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                    "legacy stream dependency count overflow");
+          break;
+        }
+      }
+    }
+    if (wait_capacity > 0 && IREE_UNLIKELY(!iree_host_size_checked_add(
+                                 wait_capacity, 1, &wait_capacity))) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "legacy stream dependency count overflow");
+    }
+  }
+  if (iree_status_is_ok(status) && wait_capacity > 0) {
+    iree_host_size_t semaphore_storage_size = 0;
+    iree_host_size_t value_storage_size = 0;
+    if (IREE_UNLIKELY(
+            !iree_host_size_checked_mul(wait_capacity, sizeof(*wait_semaphores),
+                                        &semaphore_storage_size) ||
+            !iree_host_size_checked_mul(wait_capacity, sizeof(*wait_values),
+                                        &value_storage_size))) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "legacy stream wait-list size overflow");
+    } else {
+      status =
+          iree_allocator_malloc(context->host_allocator, semaphore_storage_size,
+                                (void**)&wait_semaphores);
+      if (iree_status_is_ok(status)) {
+        status = iree_allocator_malloc(
+            context->host_allocator, value_storage_size, (void**)&wait_values);
+      }
+    }
+  }
+
+  iree_host_size_t wait_count = 0;
+  for (iree_host_size_t i = 0; i < stream_count && iree_status_is_ok(status);
+       ++i) {
+    iree_hal_streaming_stream_t* stream = streams[i];
+    if (!stream || stream == context->default_stream ||
+        iree_any_bit_set(stream->flags,
+                         IREE_HAL_STREAMING_STREAM_FLAG_NON_BLOCKING)) {
+      continue;
+    }
+
+    iree_slim_mutex_lock(&stream->mutex);
+    const bool is_capturing =
+        stream->capture_status != IREE_HAL_STREAMING_CAPTURE_STATUS_NONE;
+    iree_slim_mutex_unlock(&stream->mutex);
+    if (is_capturing) continue;
+
+    status = iree_hal_streaming_stream_flush(stream);
+    if (iree_status_is_ok(status)) {
+      iree_slim_mutex_lock(&stream->mutex);
+      if (stream->submitted_value > 0) {
+        wait_semaphores[wait_count] = stream->timeline_semaphore;
+        wait_values[wait_count] = stream->submitted_value;
+        ++wait_count;
+      }
+      iree_slim_mutex_unlock(&stream->mutex);
+    }
+  }
+
+  iree_hal_streaming_stream_t* default_stream = context->default_stream;
+  bool default_stream_locked = false;
+  if (iree_status_is_ok(status) && wait_count > 0) {
+    status = iree_hal_streaming_stream_flush(default_stream);
+    if (iree_status_is_ok(status)) {
+      iree_slim_mutex_lock(&default_stream->mutex);
+      default_stream_locked = true;
+    }
+  }
+
+  if (iree_status_is_ok(status) && default_stream_locked) {
+    if (wait_count > 0 && default_stream->pending_value > 0) {
+      wait_semaphores[wait_count] = default_stream->timeline_semaphore;
+      wait_values[wait_count] = default_stream->pending_value;
+      ++wait_count;
+    }
+
+    if (wait_count > 0) {
+      if (IREE_UNLIKELY(default_stream->pending_value == UINT64_MAX)) {
+        status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                  "default stream timeline overflow");
+      } else {
+        uint64_t signal_value = default_stream->pending_value + 1;
+        const iree_hal_semaphore_list_t waits = {
+            .count = wait_count,
+            .semaphores = wait_semaphores,
+            .payload_values = wait_values,
+        };
+        const iree_hal_semaphore_list_t signals = {
+            .count = 1,
+            .semaphores = &default_stream->timeline_semaphore,
+            .payload_values = &signal_value,
+        };
+        status = iree_hal_device_queue_barrier(
+            context->device, default_stream->queue_affinity, waits, signals,
+            IREE_HAL_EXECUTE_FLAG_NONE);
+        if (iree_status_is_ok(status)) {
+          status = iree_hal_device_queue_flush(context->device,
+                                               default_stream->queue_affinity);
+        }
+        if (iree_status_is_ok(status)) {
+          default_stream->pending_value = signal_value;
+          default_stream->submitted_value = signal_value;
+        }
+      }
+    }
+    iree_slim_mutex_unlock(&default_stream->mutex);
+  }
+
+  iree_allocator_free(context->host_allocator, wait_values);
+  iree_allocator_free(context->host_allocator, wait_semaphores);
+  iree_hal_streaming_context_release_stream_snapshot(context, streams,
+                                                     stream_count);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
 }
 
 iree_status_t iree_hal_streaming_context_synchronize_all(void) {

@@ -857,6 +857,10 @@ typedef struct iree_hal_streaming_buffer_t {
   // True when the allocation was created by hipMallocManaged.
   bool is_managed;
 
+  // Whether copies explicitly naming this allocation must complete before
+  // returning to the caller.
+  iree_atomic_int32_t synchronous_memory_operations;
+
   // Number of managed-memory metadata pages tracked for this allocation.
   iree_host_size_t managed_page_count;
 

@@ -168,6 +168,7 @@ static iree_status_t iree_hal_streaming_buffer_wrap_hrx_buffer(
   wrapper->host_register_flags = IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT;
   wrapper->imported_host_allocation = imported_host_ptr != NULL;
   wrapper->is_managed = false;
+  wrapper->synchronous_memory_operations = IREE_ATOMIC_VAR_INIT(0);
   wrapper->owns_host_ptr = false;
   wrapper->has_host_mapping = false;
   memset(&wrapper->host_mapping, 0, sizeof(wrapper->host_mapping));

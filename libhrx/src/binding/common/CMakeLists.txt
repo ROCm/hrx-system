@@ -29,6 +29,7 @@ iree_cc_library(
   NAME
     common
   HDRS
+    "context.h"
     "direct_transfer.h"
     "fat_binary.h"
     "graph.h"
