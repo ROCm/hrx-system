@@ -20795,14 +20795,43 @@ typedef struct iree_hip_driver_memcpy3d_t {
   size_t Depth;
 } iree_hip_driver_memcpy3d_t;
 
-static hipError_t iree_hip_graph_convert_driver_memcpy3d_params(
+static hipError_t iree_hip_convert_driver_memcpy3d_array_range(
+    hipArray_t array, size_t x_in_bytes, size_t y, size_t z,
+    size_t width_in_bytes, size_t height, size_t depth,
+    bool* inout_width_is_elements, size_t* inout_width,
+    size_t* out_x_in_elements) {
+  struct hipArray_st* array_info = NULL;
+  hipError_t result = iree_hip_array_retain(array, &array_info);
+  if (result != hipSuccess) return result;
+
+  size_t x_in_elements = 0;
+  size_t width_in_elements = 0;
+  result = iree_hip_array_byte_range_to_elements_for_array(
+      array_info, x_in_bytes, width_in_bytes, &x_in_elements,
+      &width_in_elements);
+  if (result == hipSuccess &&
+      (y > array_info->extent.height ||
+       height > array_info->extent.height - y || z > array_info->extent.depth ||
+       depth > array_info->extent.depth - z)) {
+    result = hipErrorInvalidValue;
+  }
+  if (result == hipSuccess && *inout_width_is_elements &&
+      *inout_width != width_in_elements) {
+    result = hipErrorInvalidValue;
+  }
+  if (result == hipSuccess) {
+    *inout_width_is_elements = true;
+    *inout_width = width_in_elements;
+    *out_x_in_elements = x_in_elements;
+  }
+  iree_hip_array_release(array_info);
+  return result;
+}
+
+static hipError_t iree_hip_convert_driver_memcpy3d_params(
     const iree_hip_driver_memcpy3d_t* src, hipMemcpy3DParms* dst) {
   if (!src || !dst || src->WidthInBytes == 0 || src->Height == 0 ||
       src->Depth == 0) {
-    return hipErrorInvalidValue;
-  }
-  if (src->srcMemoryType == hipMemoryTypeArray ||
-      src->dstMemoryType == hipMemoryTypeArray) {
     return hipErrorInvalidValue;
   }
   if (src->srcLOD != 0 || src->dstLOD != 0) {
@@ -20812,27 +20841,50 @@ static hipError_t iree_hip_graph_convert_driver_memcpy3d_params(
       (src->dstMemoryType == hipMemoryTypeHost && src->dstZ != 0)) {
     return hipErrorInvalidValue;
   }
-  if (src->srcPitch == 0 || src->dstPitch == 0 ||
-      src->srcPitch < src->WidthInBytes || src->dstPitch < src->WidthInBytes) {
+  const bool src_is_array = src->srcMemoryType == hipMemoryTypeArray;
+  const bool dst_is_array = src->dstMemoryType == hipMemoryTypeArray;
+  if ((!src_is_array &&
+       (src->srcPitch == 0 || src->srcPitch < src->WidthInBytes)) ||
+      (!dst_is_array &&
+       (src->dstPitch == 0 || src->dstPitch < src->WidthInBytes))) {
     return hipErrorInvalidValue;
   }
   int max_pitch = 0;
   if (hipDeviceGetAttribute(&max_pitch, hipDeviceAttributeMaxPitch, 0) ==
           hipSuccess &&
       max_pitch > 0 &&
-      (src->srcPitch >= (size_t)max_pitch ||
-       src->dstPitch >= (size_t)max_pitch)) {
+      ((!src_is_array && src->srcPitch >= (size_t)max_pitch) ||
+       (!dst_is_array && src->dstPitch >= (size_t)max_pitch))) {
     return hipErrorInvalidValue;
   }
 
+  bool width_is_elements = false;
+  size_t converted_width = src->WidthInBytes;
+  size_t src_x = src->srcXInBytes;
+  size_t dst_x = src->dstXInBytes;
+  hipError_t result = hipSuccess;
+  if (src_is_array) {
+    result = iree_hip_convert_driver_memcpy3d_array_range(
+        src->srcArray, src->srcXInBytes, src->srcY, src->srcZ,
+        src->WidthInBytes, src->Height, src->Depth, &width_is_elements,
+        &converted_width, &src_x);
+  }
+  if (result == hipSuccess && dst_is_array) {
+    result = iree_hip_convert_driver_memcpy3d_array_range(
+        src->dstArray, src->dstXInBytes, src->dstY, src->dstZ,
+        src->WidthInBytes, src->Height, src->Depth, &width_is_elements,
+        &converted_width, &dst_x);
+  }
+  if (result != hipSuccess) return result;
+
   memset(dst, 0, sizeof(*dst));
-  dst->srcPos.x = src->srcXInBytes;
+  dst->srcPos.x = src_x;
   dst->srcPos.y = src->srcY;
   dst->srcPos.z = src->srcZ;
-  dst->dstPos.x = src->dstXInBytes;
+  dst->dstPos.x = dst_x;
   dst->dstPos.y = src->dstY;
   dst->dstPos.z = src->dstZ;
-  dst->extent.width = src->WidthInBytes;
+  dst->extent.width = converted_width;
   dst->extent.height = src->Height;
   dst->extent.depth = src->Depth;
 
@@ -20847,12 +20899,17 @@ static hipError_t iree_hip_graph_convert_driver_memcpy3d_params(
     dst->srcPtr.ptr = (void*)src->srcDevice;
     dst->kind = hipMemcpyDefault;
     use_default_kind = true;
+  } else if (src_is_array) {
+    dst->srcArray = src->srcArray;
+    dst->kind = hipMemcpyDeviceToDevice;
   } else {
     return hipErrorInvalidValue;
   }
-  dst->srcPtr.pitch = src->srcPitch;
-  dst->srcPtr.xsize = src->WidthInBytes;
-  dst->srcPtr.ysize = src->srcHeight ? src->srcHeight : src->Height;
+  if (!src_is_array) {
+    dst->srcPtr.pitch = src->srcPitch;
+    dst->srcPtr.xsize = src->srcPitch;
+    dst->srcPtr.ysize = src->srcHeight ? src->srcHeight : src->Height;
+  }
 
   if (src->dstMemoryType == hipMemoryTypeHost) {
     dst->dstPtr.ptr = src->dstHost;
@@ -20866,12 +20923,18 @@ static hipError_t iree_hip_graph_convert_driver_memcpy3d_params(
     dst->dstPtr.ptr = (void*)src->dstDevice;
     dst->kind = hipMemcpyDefault;
     use_default_kind = true;
+  } else if (dst_is_array) {
+    dst->dstArray = src->dstArray;
+    dst->kind = dst->kind == hipMemcpyHostToHost ? hipMemcpyHostToDevice
+                                                 : hipMemcpyDeviceToDevice;
   } else {
     return hipErrorInvalidValue;
   }
-  dst->dstPtr.pitch = src->dstPitch;
-  dst->dstPtr.xsize = src->WidthInBytes;
-  dst->dstPtr.ysize = src->dstHeight ? src->dstHeight : src->Height;
+  if (!dst_is_array) {
+    dst->dstPtr.pitch = src->dstPitch;
+    dst->dstPtr.xsize = src->dstPitch;
+    dst->dstPtr.ysize = src->dstHeight ? src->dstHeight : src->Height;
+  }
   if (use_default_kind) {
     dst->kind = hipMemcpyDefault;
   }
@@ -20889,8 +20952,7 @@ HIPAPI hipError_t hipDrvMemcpy3D(const iree_hip_driver_memcpy3d_t* pCopy) {
     return hipSuccess;
   }
   hipMemcpy3DParms params;
-  hipError_t result =
-      iree_hip_graph_convert_driver_memcpy3d_params(pCopy, &params);
+  hipError_t result = iree_hip_convert_driver_memcpy3d_params(pCopy, &params);
   if (result == hipSuccess) {
     result = hipMemcpy3D(&params);
   }
@@ -20913,8 +20975,7 @@ HIPAPI hipError_t hipDrvMemcpy3DAsync(const iree_hip_driver_memcpy3d_t* pCopy,
     return hipSuccess;
   }
   hipMemcpy3DParms params;
-  hipError_t result =
-      iree_hip_graph_convert_driver_memcpy3d_params(pCopy, &params);
+  hipError_t result = iree_hip_convert_driver_memcpy3d_params(pCopy, &params);
   if (result == hipSuccess) {
     result = hipMemcpy3DAsync(&params, stream);
   }
@@ -21209,7 +21270,7 @@ HIPAPI hipError_t hipDrvGraphAddMemcpyNode(hipGraphNode_t* pGraphNode,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   hipMemcpy3DParms params = {0};
-  hipError_t result = iree_hip_graph_convert_driver_memcpy3d_params(
+  hipError_t result = iree_hip_convert_driver_memcpy3d_params(
       (const iree_hip_driver_memcpy3d_t*)pCopyParams, &params);
   if (result != hipSuccess) {
     HIP_RETURN_ERROR(result);
@@ -21274,7 +21335,7 @@ HIPAPI hipError_t hipDrvGraphMemcpyNodeSetParams(
   }
   hipMemcpy3DParms params = {0};
   hipError_t result =
-      iree_hip_graph_convert_driver_memcpy3d_params(nodeParams, &params);
+      iree_hip_convert_driver_memcpy3d_params(nodeParams, &params);
   if (result != hipSuccess) {
     HIP_RETURN_ERROR(result);
   }
@@ -21345,7 +21406,7 @@ HIPAPI hipError_t hipDrvGraphExecMemcpyNodeSetParams(hipGraphExec_t graphExec,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   hipMemcpy3DParms params = {0};
-  hipError_t result = iree_hip_graph_convert_driver_memcpy3d_params(
+  hipError_t result = iree_hip_convert_driver_memcpy3d_params(
       (const iree_hip_driver_memcpy3d_t*)pNodeParams, &params);
   if (result != hipSuccess) {
     HIP_RETURN_ERROR(result);
