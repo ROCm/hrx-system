@@ -16,6 +16,7 @@ from loom.assembly import (
     LPAREN,
     RPAREN,
     OptionalGroup,
+    Param,
     Ref,
     ScopedEnumRef,
     TypeOf,
@@ -25,7 +26,11 @@ from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.dialect.test import (
     ALL_TEST_OPS,
     ALL_TEST_PARAMETERIZED_ATTRS,
+    ALL_TEST_TYPES,
+    test_array_type,
+    test_matrix_type,
     test_ops,
+    test_scope_type,
 )
 from loom.dsl import ANY, AttrDef, Op, Operand, TypeDef, TypeParam
 from loom.format.bytecode.reader import read_module
@@ -65,6 +70,7 @@ from loom.ir import (
     Module,
     Operation,
     ParameterizedAttr,
+    ParameterizedType,
     RegisterType,
     ScalarType,
     ScalarTypeKind,
@@ -605,6 +611,67 @@ class TestParseDialectTypes:
     def test_unknown_bare_type_fails(self) -> None:
         with pytest.raises(ParseError, match="expected type"):
             _parse_type("unknown", type_registry=self._registry())
+
+
+class TestParseDescriptorBackedTypes:
+    def _registry(self) -> dict[str, TypeDef]:
+        return {
+            type_def.name: type_def
+            for type_def in (*ALL_BUILTIN_TYPES, *ALL_TEST_TYPES)
+        }
+
+    def test_positional_parameter(self) -> None:
+        parsed = _parse_type("test.scope<subgroup>", type_registry=self._registry())
+        assert isinstance(parsed, ParameterizedType)
+        assert parsed == test_scope_type(scope="subgroup")
+        assert print_type(parsed) == "test.scope<subgroup>"
+
+    def test_mixed_positional_and_keyed_parameters(self) -> None:
+        parsed = _parse_type(
+            "test.matrix<bf16, scope = subgroup, rows = 16>",
+            type_registry=self._registry(),
+        )
+        assert parsed == test_matrix_type(element_type=BF16, scope="subgroup", rows=16)
+        assert print_type(parsed) == ("test.matrix<bf16, scope = subgroup, rows = 16>")
+
+    def test_optional_keyed_parameter(self) -> None:
+        packed = _parse_type("test.array<bf16>", type_registry=self._registry())
+        aligned = _parse_type(
+            "test.array<bf16, alignment = 16>",
+            type_registry=self._registry(),
+        )
+
+        assert packed == test_array_type(element_type=BF16)
+        assert aligned == test_array_type(element_type=BF16, alignment=16)
+
+    def test_optional_float_parameter_accepts_special_value(self) -> None:
+        optional_float_type = TypeDef(
+            "test.optional_float",
+            params=[AttrDef("value", "f64", optional=True)],
+            format=[OptionalGroup([Param("value")], anchor="value")],
+        )
+        registry = self._registry()
+        registry[optional_float_type.name] = optional_float_type
+
+        parsed = _parse_type("test.optional_float<inf>", type_registry=registry)
+
+        assert isinstance(parsed, ParameterizedType)
+        assert math.isinf(parsed.get("value"))
+
+    def test_rejects_wrong_enum_domain(self) -> None:
+        with pytest.raises(ParseError, match="invalid enum value 'cluster'"):
+            _parse_type("test.scope<cluster>", type_registry=self._registry())
+
+    def test_rejects_missing_parameter(self) -> None:
+        with pytest.raises(ParseError, match="expected COMMA"):
+            _parse_type(
+                "test.matrix<bf16, scope = subgroup>",
+                type_registry=self._registry(),
+            )
+
+    def test_rejects_trailing_tokens(self) -> None:
+        with pytest.raises(ParseError, match="expected EOF"):
+            _parse_type("test.scope<subgroup extra>", type_registry=self._registry())
 
 
 # ============================================================================

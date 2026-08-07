@@ -39,6 +39,7 @@ from loom.assembly import (
     Keyword,
     OperandDict,
     OptionalGroup,
+    Param,
     PredicateList,
     Ref,
     Refs,
@@ -110,6 +111,7 @@ from loom.ir import (
     OpaqueLocation,
     Operation,
     ParameterizedAttr,
+    ParameterizedType,
     PlaceholderType,
     PoolType,
     Predicate,
@@ -206,6 +208,12 @@ def _parse_generic_attr_value_from_tokens(
     filename: str,
     *,
     attr_dict_nesting_depth: int = 0,
+    scope: NameScope | None = None,
+    type_registry: dict[str, TypeDef] | None = None,
+    mode: TypeParseMode | None = None,
+    parameterized_attr_registry: Mapping[str, ParameterizedAttrDef] | None = None,
+    aliases: dict[str, EncodingInstance] | None = None,
+    known_encodings: set[str] | None = None,
 ) -> Any:
     """Parse an untyped attr value from the current token stream."""
     if tokenizer.at(TokenKind.INTEGER):
@@ -232,13 +240,36 @@ def _parse_generic_attr_value_from_tokens(
     if tokenizer.at(TokenKind.SYMBOL):
         return SymbolName(tokenizer.next().text)
     if tokenizer.at(TokenKind.HASH_ATTR):
+        family = (
+            parameterized_attr_registry.get(tokenizer.peek().text)
+            if parameterized_attr_registry is not None
+            else None
+        )
+        if family is not None:
+            return _parse_parameterized_attr_from_tokens(
+                tokenizer,
+                module,
+                filename,
+                family,
+                scope=scope,
+                type_registry=type_registry,
+                mode=mode,
+                parameterized_attr_registry=parameterized_attr_registry,
+                aliases=aliases,
+                known_encodings=known_encodings,
+                aggregate_nesting_depth=attr_dict_nesting_depth,
+            )
         return _parse_static_encoding_from_tokens(
             tokenizer,
             module,
             filename,
             attr_dict_nesting_depth=attr_dict_nesting_depth,
-            aliases=_CURRENT_ALIASES,
-            known_encodings=_CURRENT_KNOWN_ENCODINGS,
+            aliases=aliases if aliases is not None else _CURRENT_ALIASES,
+            known_encodings=(
+                known_encodings
+                if known_encodings is not None
+                else _CURRENT_KNOWN_ENCODINGS
+            ),
         )
     if tokenizer.at(TokenKind.LBRACKET):
         tokenizer.next()
@@ -275,6 +306,12 @@ def _parse_generic_attr_value_from_tokens(
                 module,
                 filename,
                 attr_dict_nesting_depth=attr_dict_nesting_depth + 1,
+                scope=scope,
+                type_registry=type_registry,
+                mode=mode,
+                parameterized_attr_registry=parameterized_attr_registry,
+                aliases=aliases,
+                known_encodings=known_encodings,
             )
             entries.append((key_token.text, value))
             tokenizer.try_consume(TokenKind.COMMA)
@@ -492,6 +529,306 @@ class TypeParseMode(Enum):
 
     BODY = "body"  # Op body: [%M] looks up existing values.
     SIGNATURE = "signature"  # Function signature: [%M] creates placeholders.
+
+
+def _parse_enum_attr_value_from_tokens(
+    tokenizer: Tokenizer,
+    descriptor: AttrDef,
+) -> str | int:
+    """Parses one descriptor-backed enum keyword or open byte value."""
+    assert descriptor.enum_def is not None
+    value_by_keyword = {
+        enum_case.keyword: enum_case.value for enum_case in descriptor.enum_def.cases
+    }
+    if tokenizer.at(TokenKind.LANGLE):
+        opening = tokenizer.next()
+        if not descriptor.open_enum:
+            raise ParseError(
+                f"enum attribute '{descriptor.name}' is closed and does not "
+                "admit raw values",
+                opening.location,
+                tokenizer._filename,
+            )
+        integer = tokenizer.expect(TokenKind.INTEGER)
+        value = int(integer.text)
+        if not 0 <= value <= 0xFF:
+            raise ParseError(
+                f"enum value {value} is outside the byte domain [0, 255]",
+                integer.location,
+                tokenizer._filename,
+            )
+        tokenizer.expect(TokenKind.RANGLE)
+        return value
+
+    if tokenizer.at(TokenKind.BARE_IDENT) or tokenizer.at(TokenKind.OP_NAME):
+        ident = tokenizer.next()
+    else:
+        ident = tokenizer.expect(TokenKind.BARE_IDENT)
+    if ident.text not in value_by_keyword:
+        raise ParseError(
+            f"invalid enum value '{ident.text}', expected one of "
+            f"{descriptor.enum_def.keywords}",
+            ident.location,
+            tokenizer._filename,
+        )
+    return ident.text
+
+
+def _parse_parameterized_attr_from_tokens(
+    tokenizer: Tokenizer,
+    module: Module,
+    filename: str,
+    expected_definition: ParameterizedAttrDef | None,
+    *,
+    scope: NameScope | None,
+    type_registry: dict[str, TypeDef] | None,
+    mode: TypeParseMode | None,
+    parameterized_attr_registry: Mapping[str, ParameterizedAttrDef] | None,
+    aliases: dict[str, EncodingInstance] | None,
+    known_encodings: set[str] | None,
+    aggregate_nesting_depth: int,
+) -> ParameterizedAttr:
+    """Parses one descriptor-backed parameterized attribute value."""
+    family_token = tokenizer.expect(TokenKind.HASH_ATTR)
+    definition = (
+        parameterized_attr_registry.get(family_token.text)
+        if parameterized_attr_registry is not None
+        else None
+    )
+    if (
+        definition is None
+        and expected_definition is not None
+        and expected_definition.name == family_token.text
+    ):
+        definition = expected_definition
+    if definition is None:
+        raise ParseError(
+            f"unknown parameterized attribute family '{family_token.text}'",
+            family_token.location,
+            filename,
+        )
+    if expected_definition is not None and definition.name != expected_definition.name:
+        raise ParseError(
+            f"expected parameterized attribute family "
+            f"'{expected_definition.name}', got '{definition.name}'",
+            family_token.location,
+            filename,
+        )
+
+    opening = tokenizer.expect(TokenKind.LANGLE)
+    if aggregate_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
+        raise ParseError(
+            "aggregate attribute nesting exceeds maximum depth "
+            f"{ATTR_AGGREGATE_MAX_NESTING_DEPTH}",
+            opening.location,
+            filename,
+        )
+
+    descriptors = {parameter.name: parameter for parameter in definition.parameters}
+    parameters: dict[str, Any] = {}
+    if not tokenizer.at(TokenKind.RANGLE):
+        while True:
+            name_token = tokenizer.expect(TokenKind.BARE_IDENT)
+            parameter = descriptors.get(name_token.text)
+            if parameter is None:
+                raise ParseError(
+                    f"unknown parameter '{name_token.text}' for '{definition.name}'",
+                    name_token.location,
+                    filename,
+                )
+            if name_token.text in parameters:
+                raise ParseError(
+                    f"duplicate parameter '{name_token.text}' for '{definition.name}'",
+                    name_token.location,
+                    filename,
+                )
+            tokenizer.expect(TokenKind.EQUALS)
+            value = _parse_descriptor_attr_value_from_tokens(
+                tokenizer,
+                module,
+                filename,
+                parameter,
+                scope=scope,
+                type_registry=type_registry,
+                mode=mode,
+                parameterized_attr_registry=parameterized_attr_registry,
+                aliases=aliases,
+                known_encodings=known_encodings,
+                attr_dict_nesting_depth=aggregate_nesting_depth + 1,
+            )
+            if parameter.attr_type == "symbol":
+                value = SymbolName(value)
+            parameters[name_token.text] = value
+            if not tokenizer.try_consume(TokenKind.COMMA):
+                break
+    closing = tokenizer.expect(TokenKind.RANGLE)
+    try:
+        return ParameterizedAttr(definition, parameters)
+    except (TypeError, ValueError) as error:
+        raise ParseError(str(error), closing.location, filename) from error
+
+
+def _parse_descriptor_attr_value_from_tokens(
+    tokenizer: Tokenizer,
+    module: Module,
+    filename: str,
+    descriptor: AttrDef,
+    *,
+    scope: NameScope | None,
+    type_registry: dict[str, TypeDef] | None,
+    mode: TypeParseMode | None,
+    parameterized_attr_registry: Mapping[str, ParameterizedAttrDef] | None,
+    aliases: dict[str, EncodingInstance] | None,
+    known_encodings: set[str] | None,
+    attr_dict_nesting_depth: int,
+) -> Any:
+    """Parses one value according to its descriptor schema."""
+    match descriptor.attr_type:
+        case "i64":
+            return int(tokenizer.expect(TokenKind.INTEGER).text)
+        case "f64":
+            if tokenizer.at(TokenKind.FLOAT):
+                return float(tokenizer.next().text)
+            if tokenizer.at(TokenKind.BARE_IDENT):
+                special_float = _parse_special_float(tokenizer.peek().text)
+                if special_float is not None:
+                    tokenizer.next()
+                    return special_float
+            return float(tokenizer.expect(TokenKind.INTEGER).text)
+        case "string":
+            return tokenizer.expect(TokenKind.STRING).text
+        case "bool":
+            ident = tokenizer.expect(TokenKind.BARE_IDENT)
+            if ident.text == "true":
+                return True
+            if ident.text == "false":
+                return False
+            raise ParseError(
+                f"expected 'true' or 'false', got '{ident.text}'",
+                ident.location,
+                filename,
+            )
+        case "enum":
+            return _parse_enum_attr_value_from_tokens(tokenizer, descriptor)
+        case "enum_array":
+            tokenizer.expect(TokenKind.LBRACKET)
+            assert descriptor.enum_def is not None
+            value_by_keyword = {
+                enum_case.keyword: enum_case.value
+                for enum_case in descriptor.enum_def.cases
+            }
+            values: list[int] = []
+
+            def append_value() -> None:
+                value = _parse_enum_attr_value_from_tokens(tokenizer, descriptor)
+                values.append(
+                    value if isinstance(value, int) else value_by_keyword[value]
+                )
+
+            if not tokenizer.at(TokenKind.RBRACKET):
+                append_value()
+                while tokenizer.try_consume(TokenKind.COMMA):
+                    if len(values) == 0xFFFF:
+                        raise ParseError(
+                            "enum-array length exceeds UINT16_MAX",
+                            tokenizer.peek().location,
+                            filename,
+                        )
+                    append_value()
+            tokenizer.expect(TokenKind.RBRACKET)
+            return EnumArrayAttr(values)
+        case "symbol":
+            return tokenizer.expect(TokenKind.SYMBOL).text
+        case "type":
+            if scope is None or type_registry is None:
+                raise ValueError("type attribute parsing requires a type context")
+            parsed_type, _ = parse_type_from_tokens(
+                tokenizer,
+                scope,
+                module,
+                type_registry,
+                mode or TypeParseMode.BODY,
+            )
+            return parsed_type
+        case "i64_array":
+            tokenizer.expect(TokenKind.LBRACKET)
+            values: list[int] = []
+            if not tokenizer.at(TokenKind.RBRACKET):
+                values.append(int(tokenizer.expect(TokenKind.INTEGER).text))
+                while tokenizer.try_consume(TokenKind.COMMA):
+                    values.append(int(tokenizer.expect(TokenKind.INTEGER).text))
+            tokenizer.expect(TokenKind.RBRACKET)
+            return values
+        case "bytes":
+            return _parse_bytes_attr_value_from_tokens(tokenizer, filename)
+        case "encoding":
+            return _parse_static_encoding_from_tokens(
+                tokenizer,
+                module,
+                filename,
+                aliases=aliases,
+                known_encodings=known_encodings,
+            )
+        case "dict":
+            if not tokenizer.at(TokenKind.LBRACE):
+                token = tokenizer.peek()
+                raise ParseError(
+                    f"expected attribute dictionary, got {token.kind.name}",
+                    token.location,
+                    filename,
+                )
+            return _parse_generic_attr_value_from_tokens(
+                tokenizer,
+                module,
+                filename,
+                attr_dict_nesting_depth=attr_dict_nesting_depth,
+                scope=scope,
+                type_registry=type_registry,
+                mode=mode,
+                parameterized_attr_registry=parameterized_attr_registry,
+                aliases=aliases,
+                known_encodings=known_encodings,
+            )
+        case "parameterized":
+            return _parse_parameterized_attr_from_tokens(
+                tokenizer,
+                module,
+                filename,
+                descriptor.parameterized_attr,
+                scope=scope,
+                type_registry=type_registry,
+                mode=mode,
+                parameterized_attr_registry=parameterized_attr_registry,
+                aliases=aliases,
+                known_encodings=known_encodings,
+                aggregate_nesting_depth=attr_dict_nesting_depth,
+            )
+        case "any":
+            return _parse_generic_attr_value_from_tokens(
+                tokenizer,
+                module,
+                filename,
+                attr_dict_nesting_depth=attr_dict_nesting_depth,
+                scope=scope,
+                type_registry=type_registry,
+                mode=mode,
+                parameterized_attr_registry=parameterized_attr_registry,
+                aliases=aliases,
+                known_encodings=known_encodings,
+            )
+        case _:
+            return _parse_generic_attr_value_from_tokens(
+                tokenizer,
+                module,
+                filename,
+                attr_dict_nesting_depth=attr_dict_nesting_depth,
+                scope=scope,
+                type_registry=type_registry,
+                mode=mode,
+                parameterized_attr_registry=parameterized_attr_registry,
+                aliases=aliases,
+                known_encodings=known_encodings,
+            )
 
 
 # ============================================================================
@@ -920,12 +1257,16 @@ def _expect_keyword(tokenizer: Tokenizer, text: str) -> None:
 def _type_optional_present(
     tokenizer: Tokenizer,
     inner_elements: tuple[FormatElement, ...],
+    type_def: TypeDef,
     type_registry: dict[str, TypeDef],
 ) -> bool:
     """Peek to decide if an OptionalGroup is present in a type interior."""
     if not inner_elements:
         return False
-    first = inner_elements[0]
+    first = next(
+        (element for element in inner_elements if not isinstance(element, Glue)),
+        None,
+    )
     match first:
         case Keyword(text=","):
             result: bool = tokenizer.at(TokenKind.COMMA)
@@ -943,6 +1284,40 @@ def _type_optional_present(
             )
         case TypeOf() | TypesOf():
             return _is_type_start(tokenizer.peek(), type_registry)
+        case Param(field=field):
+            descriptor = type_def.param(field)
+            assert isinstance(descriptor, AttrDef)
+            match descriptor.attr_type:
+                case "i64":
+                    return tokenizer.at(TokenKind.INTEGER)
+                case "f64":
+                    return (
+                        tokenizer.at(TokenKind.INTEGER)
+                        or tokenizer.at(TokenKind.FLOAT)
+                        or tokenizer.at(TokenKind.BARE_IDENT)
+                    )
+                case "string":
+                    return tokenizer.at(TokenKind.STRING)
+                case "enum":
+                    return tokenizer.at(TokenKind.BARE_IDENT) or tokenizer.at(
+                        TokenKind.LANGLE
+                    )
+                case "enum_array" | "i64_array":
+                    return tokenizer.at(TokenKind.LBRACKET)
+                case "bool":
+                    return tokenizer.at(TokenKind.BARE_IDENT)
+                case "symbol":
+                    return tokenizer.at(TokenKind.SYMBOL)
+                case "type":
+                    return _is_type_start(tokenizer.peek(), type_registry)
+                case "bytes":
+                    return tokenizer.at(TokenKind.BARE_IDENT, "bytes")
+                case "encoding" | "parameterized":
+                    return tokenizer.at(TokenKind.HASH_ATTR)
+                case "dict":
+                    return tokenizer.at(TokenKind.LBRACE)
+                case _:
+                    return not tokenizer.at(TokenKind.EOF)
         case _:
             return not tokenizer.at(TokenKind.EOF)
 
@@ -991,6 +1366,25 @@ def _parse_type_interior(
                 case Attr(field=name):
                     tok = interior_tokenizer.expect(TokenKind.BARE_IDENT)
                     parsed_attrs[name] = tok.text
+                case Param(field=name):
+                    descriptor = type_def.param(name)
+                    assert isinstance(descriptor, AttrDef)
+                    value = _parse_descriptor_attr_value_from_tokens(
+                        interior_tokenizer,
+                        module,
+                        filename,
+                        descriptor,
+                        scope=scope,
+                        type_registry=type_registry,
+                        mode=mode,
+                        parameterized_attr_registry=None,
+                        aliases=_CURRENT_ALIASES,
+                        known_encodings=_CURRENT_KNOWN_ENCODINGS,
+                        attr_dict_nesting_depth=0,
+                    )
+                    if descriptor.attr_type == "symbol":
+                        value = SymbolName(value)
+                    parsed_attrs[name] = value
                 case SymbolRef(field=name):
                     tok = interior_tokenizer.expect(TokenKind.SYMBOL)
                     parsed_attrs[name] = tok.text
@@ -1002,7 +1396,9 @@ def _parse_type_interior(
                     walk_type_format(inner)
                     interior_tokenizer.expect(TokenKind.RPAREN)
                 case OptionalGroup(elements=inner, anchor=_anchor):
-                    if _type_optional_present(interior_tokenizer, inner, type_registry):
+                    if _type_optional_present(
+                        interior_tokenizer, inner, type_def, type_registry
+                    ):
                         walk_type_format(inner)
                 case Glue():
                     pass
@@ -1019,6 +1415,13 @@ def _parse_type_interior(
                         parsed_attrs[name] = refs
 
     walk_type_format(type_def.format)
+    interior_tokenizer.expect(TokenKind.EOF)
+
+    if type_def.uses_attribute_parameters:
+        try:
+            return ParameterizedType(type_def, parsed_attrs), {}
+        except (TypeError, ValueError) as error:
+            raise ParseError(str(error), location, filename) from error
 
     # Dispatch based on ir_kind.
     if type_def.ir_kind == "storage" and "space" in parsed_attrs:
@@ -2584,162 +2987,37 @@ class Parser:
         self, attr_def: AttrDef | None, *, attr_dict_nesting_depth: int = 0
     ) -> Any:
         """Parse an attribute value based on its AttrDef type."""
-        tok = self._tokenizer
         if attr_def is None:
             return self._parse_any_attr_value(
                 attr_dict_nesting_depth=attr_dict_nesting_depth
             )
-
-        match attr_def.attr_type:
-            case "i64":
-                return int(tok.expect(TokenKind.INTEGER).text)
-            case "f64":
-                if tok.at(TokenKind.FLOAT):
-                    return float(tok.next().text)
-                if tok.at(TokenKind.BARE_IDENT):
-                    text = tok.peek().text
-                    special_float = _parse_special_float(text)
-                    if special_float is not None:
-                        tok.next()
-                        return special_float
-                return float(tok.expect(TokenKind.INTEGER).text)
-            case "string":
-                return tok.expect(TokenKind.STRING).text
-            case "bool":
-                ident = tok.expect(TokenKind.BARE_IDENT)
-                if ident.text == "true":
-                    return True
-                if ident.text == "false":
-                    return False
-                raise ParseError(
-                    f"expected 'true' or 'false', got '{ident.text}'",
-                    ident.location,
-                    tok._filename,
-                )
-            case "enum":
-                return self._parse_enum_attr_value(attr_def)
-            case "enum_array":
-                tok.expect(TokenKind.LBRACKET)
-                values: list[int] = []
-                assert attr_def.enum_def is not None
-                value_by_keyword = {
-                    case.keyword: case.value for case in attr_def.enum_def.cases
-                }
-                if not tok.at(TokenKind.RBRACKET):
-                    values.append(
-                        self._parse_enum_array_element(attr_def, value_by_keyword)
-                    )
-                    while tok.try_consume(TokenKind.COMMA):
-                        if len(values) == 0xFFFF:
-                            raise ParseError(
-                                "enum-array length exceeds UINT16_MAX",
-                                tok.peek().location,
-                                tok._filename,
-                            )
-                        values.append(
-                            self._parse_enum_array_element(attr_def, value_by_keyword)
-                        )
-                tok.expect(TokenKind.RBRACKET)
-                return EnumArrayAttr(values)
-            case "symbol":
-                sym = tok.expect(TokenKind.SYMBOL)
-                return sym.text
-            case "type":
-                parsed_type, _ = parse_type_from_tokens(
-                    tok,
-                    self._scope,
-                    self._module,
-                    self._type_registry,
-                    TypeParseMode.BODY,
-                )
-                return parsed_type
-            case "i64_array":
-                return self._parse_i64_array()
-            case "bytes":
-                return _parse_bytes_attr_value_from_tokens(tok, tok._filename)
-            case "encoding":
-                return _parse_static_encoding_from_tokens(
-                    tok,
-                    self._module,
-                    tok._filename,
-                    aliases=self._encoding_aliases,
-                    known_encodings=(
-                        self._known_encodings if self._known_encodings else None
-                    ),
-                )
-            case "dict":
-                if not tok.at(TokenKind.LBRACE):
-                    token = tok.peek()
-                    raise ParseError(
-                        f"expected attribute dictionary, got {token.kind.name}",
-                        token.location,
-                        tok._filename,
-                    )
-                return self._parse_any_attr_value(
-                    attr_dict_nesting_depth=attr_dict_nesting_depth
-                )
-            case "parameterized":
-                return self._parse_parameterized_attr(
-                    attr_def.parameterized_attr,
-                    aggregate_nesting_depth=attr_dict_nesting_depth,
-                )
-            case "any":
-                return self._parse_any_attr_value(
-                    attr_dict_nesting_depth=attr_dict_nesting_depth
-                )
-            case _:
-                return self._parse_any_attr_value(
-                    attr_dict_nesting_depth=attr_dict_nesting_depth
-                )
+        return _parse_descriptor_attr_value_from_tokens(
+            self._tokenizer,
+            self._module,
+            self._tokenizer._filename,
+            attr_def,
+            scope=self._scope,
+            type_registry=self._type_registry,
+            mode=TypeParseMode.BODY,
+            parameterized_attr_registry=self._parameterized_attr_registry,
+            aliases=self._encoding_aliases,
+            known_encodings=(self._known_encodings if self._known_encodings else None),
+            attr_dict_nesting_depth=attr_dict_nesting_depth,
+        )
 
     def _parse_any_attr_value(self, attr_dict_nesting_depth: int = 0) -> Any:
         """Parse any attribute value (type-agnostic)."""
-        tok = self._tokenizer
-        if tok.at(TokenKind.HASH_ATTR):
-            family = self._parameterized_attr_registry.get(tok.peek().text)
-            if family is not None:
-                return self._parse_parameterized_attr(
-                    family,
-                    aggregate_nesting_depth=attr_dict_nesting_depth,
-                )
-        if tok.at(TokenKind.LBRACE):
-            opening = tok.next()
-            if attr_dict_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
-                raise ParseError(
-                    "aggregate attribute nesting exceeds maximum depth "
-                    f"{ATTR_AGGREGATE_MAX_NESTING_DEPTH}",
-                    opening.location,
-                    tok._filename,
-                )
-            entries: list[tuple[str, Any]] = []
-            seen_keys: set[str] = set()
-            while not tok.at(TokenKind.RBRACE):
-                key_token = tok.expect(TokenKind.BARE_IDENT)
-                if key_token.text in seen_keys:
-                    raise ParseError(
-                        f"duplicate attribute dict key '{key_token.text}'",
-                        key_token.location,
-                        tok._filename,
-                    )
-                seen_keys.add(key_token.text)
-                tok.expect(TokenKind.EQUALS)
-                entries.append(
-                    (
-                        key_token.text,
-                        self._parse_any_attr_value(
-                            attr_dict_nesting_depth=attr_dict_nesting_depth + 1
-                        ),
-                    )
-                )
-                if not tok.try_consume(TokenKind.COMMA):
-                    break
-            tok.expect(TokenKind.RBRACE)
-            return CanonicalAttrDict(entries)
         return _parse_generic_attr_value_from_tokens(
-            tok,
+            self._tokenizer,
             self._module,
-            tok._filename,
+            self._tokenizer._filename,
             attr_dict_nesting_depth=attr_dict_nesting_depth,
+            scope=self._scope,
+            type_registry=self._type_registry,
+            mode=TypeParseMode.BODY,
+            parameterized_attr_registry=self._parameterized_attr_registry,
+            aliases=self._encoding_aliases,
+            known_encodings=(self._known_encodings if self._known_encodings else None),
         )
 
     def _parse_parameterized_attr(
@@ -2749,136 +3027,19 @@ class Parser:
         aggregate_nesting_depth: int,
     ) -> ParameterizedAttr:
         """Parse one registered descriptor-backed parameterized attribute."""
-        tok = self._tokenizer
-        family_token = tok.expect(TokenKind.HASH_ATTR)
-        definition = self._parameterized_attr_registry.get(family_token.text)
-        if definition is None:
-            raise ParseError(
-                f"unknown parameterized attribute family '{family_token.text}'",
-                family_token.location,
-                tok._filename,
-            )
-        if (
-            expected_definition is not None
-            and definition.name != expected_definition.name
-        ):
-            raise ParseError(
-                f"expected parameterized attribute family "
-                f"'{expected_definition.name}', got '{definition.name}'",
-                family_token.location,
-                tok._filename,
-            )
-
-        opening = tok.expect(TokenKind.LANGLE)
-        if aggregate_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
-            raise ParseError(
-                "aggregate attribute nesting exceeds maximum depth "
-                f"{ATTR_AGGREGATE_MAX_NESTING_DEPTH}",
-                opening.location,
-                tok._filename,
-            )
-
-        descriptors = {parameter.name: parameter for parameter in definition.parameters}
-        parameters: dict[str, Any] = {}
-        if not tok.at(TokenKind.RANGLE):
-            while True:
-                name_token = tok.expect(TokenKind.BARE_IDENT)
-                parameter = descriptors.get(name_token.text)
-                if parameter is None:
-                    raise ParseError(
-                        f"unknown parameter '{name_token.text}' for "
-                        f"'{definition.name}'",
-                        name_token.location,
-                        tok._filename,
-                    )
-                if name_token.text in parameters:
-                    raise ParseError(
-                        f"duplicate parameter '{name_token.text}' for "
-                        f"'{definition.name}'",
-                        name_token.location,
-                        tok._filename,
-                    )
-                tok.expect(TokenKind.EQUALS)
-                value = self._parse_attr_value(
-                    parameter,
-                    attr_dict_nesting_depth=aggregate_nesting_depth + 1,
-                )
-                if parameter.attr_type == "symbol":
-                    value = SymbolName(value)
-                parameters[name_token.text] = value
-                if not tok.try_consume(TokenKind.COMMA):
-                    break
-        closing = tok.expect(TokenKind.RANGLE)
-        try:
-            return ParameterizedAttr(definition, parameters)
-        except (TypeError, ValueError) as error:
-            raise ParseError(str(error), closing.location, tok._filename) from error
-
-    def _parse_i64_array(self) -> list[int]:
-        """Parse [int, int, ...] array."""
-        tok = self._tokenizer
-        tok.expect(TokenKind.LBRACKET)
-        values: list[int] = []
-        if not tok.at(TokenKind.RBRACKET):
-            values.append(int(tok.expect(TokenKind.INTEGER).text))
-            while tok.try_consume(TokenKind.COMMA):
-                values.append(int(tok.expect(TokenKind.INTEGER).text))
-        tok.expect(TokenKind.RBRACKET)
-        return values
-
-    def _parse_enum_attr_value(
-        self,
-        attr_def: AttrDef,
-        value_by_keyword: dict[str, int] | None = None,
-    ) -> str | int:
-        """Parse one descriptor-backed enum keyword or raw open value."""
-        tok = self._tokenizer
-        assert attr_def.enum_def is not None
-        if value_by_keyword is None:
-            value_by_keyword = {
-                case.keyword: case.value for case in attr_def.enum_def.cases
-            }
-        if tok.at(TokenKind.LANGLE):
-            opening = tok.next()
-            if not attr_def.open_enum:
-                raise ParseError(
-                    f"enum attribute '{attr_def.name}' is closed and does not "
-                    "admit raw values",
-                    opening.location,
-                    tok._filename,
-                )
-            integer = tok.expect(TokenKind.INTEGER)
-            value = int(integer.text)
-            if not 0 <= value <= 0xFF:
-                raise ParseError(
-                    f"enum value {value} is outside the byte domain [0, 255]",
-                    integer.location,
-                    tok._filename,
-                )
-            tok.expect(TokenKind.RANGLE)
-            return value
-
-        if tok.at(TokenKind.BARE_IDENT) or tok.at(TokenKind.OP_NAME):
-            ident = tok.next()
-        else:
-            ident = tok.expect(TokenKind.BARE_IDENT)
-        if ident.text not in value_by_keyword:
-            raise ParseError(
-                f"invalid enum value '{ident.text}', expected one of "
-                f"{attr_def.enum_def.keywords}",
-                ident.location,
-                tok._filename,
-            )
-        return ident.text
-
-    def _parse_enum_array_element(
-        self, attr_def: AttrDef, value_by_keyword: dict[str, int]
-    ) -> int:
-        """Parse one enum-array element to its stable byte value."""
-        value = self._parse_enum_attr_value(attr_def, value_by_keyword)
-        if isinstance(value, int):
-            return value
-        return value_by_keyword[value]
+        return _parse_parameterized_attr_from_tokens(
+            self._tokenizer,
+            self._module,
+            self._tokenizer._filename,
+            expected_definition,
+            scope=self._scope,
+            type_registry=self._type_registry,
+            mode=TypeParseMode.BODY,
+            parameterized_attr_registry=self._parameterized_attr_registry,
+            aliases=self._encoding_aliases,
+            known_encodings=(self._known_encodings if self._known_encodings else None),
+            aggregate_nesting_depth=aggregate_nesting_depth,
+        )
 
     # --- Result type list ---
 

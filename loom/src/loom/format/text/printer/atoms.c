@@ -12,6 +12,7 @@
 #include "iree/base/internal/unicode.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/type_registry.h"
 #include "loom/target/registers.h"
 
 static const loom_op_vtable_t* loom_print_value_defining_op_vtable(
@@ -530,6 +531,90 @@ static iree_status_t loom_print_shaped_type_prefix(loom_output_stream_t* stream,
   }
 }
 
+// Parameterized types and type-valued attributes are mutually recursive.
+static iree_status_t loom_print_attr_impl(
+    loom_output_stream_t* stream, const loom_attribute_t* attr,
+    const loom_module_t* module, const loom_attr_descriptor_t* descriptor,
+    const loom_print_context_t* type_context);
+
+static iree_status_t loom_print_parameterized_type(
+    loom_type_t type, const loom_module_t* module, loom_output_stream_t* stream,
+    const loom_print_context_t* type_context) {
+  const loom_parameterized_type_descriptor_t* parameterized =
+      loom_type_parameterized_descriptor(type);
+  if (!parameterized) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameterized type has no family descriptor");
+  }
+  const loom_type_descriptor_t* descriptor =
+      loom_type_registry_lookup(loom_bstring_view(parameterized->name));
+  if (!descriptor || descriptor->parameterized != parameterized) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameterized type family is not registered");
+  }
+  uint8_t parameter_count = loom_type_parameterized_parameter_count(type);
+  const loom_attribute_t* parameters = loom_type_parameterized_parameters(type);
+  if (parameter_count != parameterized->parameter_count ||
+      (parameter_count > 0 && !parameters)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameterized type has malformed slot storage");
+  }
+
+  IREE_RETURN_IF_ERROR(
+      loom_output_stream_write(stream, loom_bstring_view(parameterized->name)));
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '<'));
+
+  loom_print_context_t parameter_context = {0};
+  if (type_context) parameter_context = *type_context;
+  parameter_context.stream = stream;
+  parameter_context.module = module;
+  parameter_context.has_previous_token = false;
+  parameter_context.glue_next = false;
+  parameter_context.last_char = 0;
+  for (uint16_t i = 0; i < descriptor->format_element_count; ++i) {
+    const loom_type_format_element_t* element = &descriptor->format_elements[i];
+    switch (element->kind) {
+      case LOOM_TYPE_FMT_PARAM: {
+        IREE_RETURN_IF_ERROR(loom_print_space_if_needed(&parameter_context));
+        uint8_t parameter_index = element->field_index;
+        IREE_RETURN_IF_ERROR(loom_print_attr_impl(
+            stream, &parameters[parameter_index], module,
+            &parameterized->parameter_descriptors[parameter_index],
+            &parameter_context));
+        loom_print_did_write(&parameter_context);
+        break;
+      }
+      case LOOM_TYPE_FMT_PARAM_KEY: {
+        iree_string_view_t parameter_name = loom_attr_descriptor_name(
+            &parameterized->parameter_descriptors[element->field_index]);
+        IREE_RETURN_IF_ERROR(
+            loom_print_emit(&parameter_context, parameter_name, false));
+        break;
+      }
+      case LOOM_TYPE_FMT_KEYWORD: {
+        IREE_RETURN_IF_ERROR(loom_print_emit(
+            &parameter_context,
+            loom_bstring_view(
+                loom_keyword_bstring((loom_keyword_id_t)element->data)),
+            false));
+        break;
+      }
+      case LOOM_TYPE_FMT_OPTIONAL:
+        if (loom_attr_is_absent(parameters[element->field_index])) {
+          i = (uint16_t)(i + (element->data >> 8));
+        }
+        break;
+      case LOOM_TYPE_FMT_GLUE:
+        loom_print_set_glue(&parameter_context);
+        break;
+      default:
+        IREE_ASSERT_UNREACHABLE("unsupported parameterized type format kind");
+        IREE_BUILTIN_UNREACHABLE();
+    }
+  }
+  return loom_output_stream_write_char(stream, '>');
+}
+
 static iree_status_t loom_text_print_type_impl(
     loom_type_t type, const loom_module_t* module, loom_output_stream_t* stream,
     const loom_print_context_t* ctx) {
@@ -572,6 +657,8 @@ static iree_status_t loom_text_print_type_impl(
       }
       return iree_ok_status();
     }
+    case LOOM_TYPE_PARAMETERIZED:
+      return loom_print_parameterized_type(type, module, stream, ctx);
     case LOOM_TYPE_REGISTER: {
       IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "reg<"));
       if (!ctx) {
@@ -911,10 +998,10 @@ iree_status_t loom_print_location(loom_output_stream_t* stream,
 // Attribute printing.
 //===----------------------------------------------------------------------===//
 
-iree_status_t loom_print_attr(loom_output_stream_t* stream,
-                              const loom_attribute_t* attr,
-                              const loom_module_t* module,
-                              const loom_attr_descriptor_t* descriptor) {
+static iree_status_t loom_print_attr_impl(
+    loom_output_stream_t* stream, const loom_attribute_t* attr,
+    const loom_module_t* module, const loom_attr_descriptor_t* descriptor,
+    const loom_print_context_t* type_context) {
   switch (attr->kind) {
     case LOOM_ATTR_I64:
       return loom_output_stream_write_format(stream, "%" PRId64, attr->i64);
@@ -1046,8 +1133,8 @@ iree_status_t loom_print_attr(loom_output_stream_t* stream,
     }
     case LOOM_ATTR_TYPE:
       if (module && attr->type_id < module->types.count) {
-        return loom_text_print_type(module->types.entries[attr->type_id],
-                                    module, stream);
+        return loom_text_print_type_impl(module->types.entries[attr->type_id],
+                                         module, stream, type_context);
       }
       return loom_output_stream_write_format(stream, "type<%" PRIu32 ">",
                                              attr->type_id);
@@ -1094,8 +1181,8 @@ iree_status_t loom_print_attr(loom_output_stream_t* stream,
         IREE_RETURN_IF_ERROR(loom_output_stream_write(
             stream, loom_attr_descriptor_name(parameter_descriptor)));
         IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, " = "));
-        IREE_RETURN_IF_ERROR(
-            loom_print_attr(stream, parameter, module, parameter_descriptor));
+        IREE_RETURN_IF_ERROR(loom_print_attr_impl(
+            stream, parameter, module, parameter_descriptor, type_context));
         has_previous_parameter = true;
       }
       return loom_output_stream_write_char(stream, '>');
@@ -1120,8 +1207,8 @@ iree_status_t loom_print_attr(loom_output_stream_t* stream,
               stream, "<name:%" PRIu16 ">", entry->name_id));
         }
         IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, " = "));
-        IREE_RETURN_IF_ERROR(
-            loom_print_attr(stream, &entry->value, module, NULL));
+        IREE_RETURN_IF_ERROR(loom_print_attr_impl(stream, &entry->value, module,
+                                                  NULL, type_context));
       }
       return loom_output_stream_write_char(stream, '}');
     }
@@ -1129,6 +1216,14 @@ iree_status_t loom_print_attr(loom_output_stream_t* stream,
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "unknown attribute kind %d", (int)attr->kind);
   }
+}
+
+iree_status_t loom_print_attr(loom_output_stream_t* stream,
+                              const loom_attribute_t* attr,
+                              const loom_module_t* module,
+                              const loom_attr_descriptor_t* descriptor) {
+  return loom_print_attr_impl(stream, attr, module, descriptor,
+                              /*type_context=*/NULL);
 }
 
 iree_status_t loom_text_print_attribute(const loom_attribute_t* attr,

@@ -23,6 +23,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
+#include "loom/ops/type_registry.h"
 #include "loom/testing/diagnostic_matchers.h"
 #include "loom/util/stream.h"
 
@@ -1360,6 +1361,68 @@ TEST_F(ParserTest, EncodingRoleTypeRoundTrip) {
                       "%transform: encoding<transform>)"),
             std::string::npos)
       << "encoding role types should round-trip: " << text;
+}
+
+TEST_F(ParserTest, DescriptorBackedTypesRoundTripAndPreserveParameters) {
+  const char* source =
+      "%scope = test.constant 0 : test.scope<subgroup>\n"
+      "%matrix = test.constant 0 : "
+      "test.matrix<bf16, scope = workgroup, rows = 16>\n"
+      "%packed = test.constant 0 : test.array<bf16>\n"
+      "%aligned = test.constant 0 : "
+      "test.array<bf16, alignment = 32>\n";
+  std::string text = RoundTrip(source);
+  loom_module_t* module = ParseOk(text.c_str());
+  ASSERT_NE(module, nullptr);
+  loom_block_t* block = loom_module_block(module);
+  ASSERT_NE(block, nullptr);
+  ASSERT_EQ(block->op_count, 4u);
+
+  loom_type_t scope_type = loom_module_value_type(
+      module, loom_test_constant_result(loom_block_op(block, 0)));
+  ASSERT_TRUE(loom_test_scope_type_isa(scope_type));
+  EXPECT_EQ(loom_test_scope_type_scope(scope_type),
+            LOOM_TEST_SCOPE_TYPE_SCOPE_SUBGROUP);
+
+  loom_type_t matrix_type = loom_module_value_type(
+      module, loom_test_constant_result(loom_block_op(block, 1)));
+  ASSERT_TRUE(loom_test_matrix_type_isa(matrix_type));
+  EXPECT_EQ(loom_test_matrix_type_scope(matrix_type),
+            LOOM_TEST_MATRIX_TYPE_SCOPE_WORKGROUP);
+  EXPECT_EQ(loom_test_matrix_type_rows(matrix_type), 16);
+  loom_type_id_t element_type_id =
+      loom_test_matrix_type_element_type(matrix_type);
+  ASSERT_LT(element_type_id, module->types.count);
+  EXPECT_TRUE(loom_type_equal(module->types.entries[element_type_id],
+                              loom_type_scalar(LOOM_SCALAR_TYPE_BF16)));
+
+  loom_type_t packed_type = loom_module_value_type(
+      module, loom_test_constant_result(loom_block_op(block, 2)));
+  ASSERT_TRUE(loom_test_array_type_isa(packed_type));
+  EXPECT_FALSE(loom_test_array_type_has_alignment(packed_type));
+  loom_type_t aligned_type = loom_module_value_type(
+      module, loom_test_constant_result(loom_block_op(block, 3)));
+  ASSERT_TRUE(loom_test_array_type_isa(aligned_type));
+  EXPECT_TRUE(loom_test_array_type_has_alignment(aligned_type));
+  EXPECT_EQ(loom_test_array_type_alignment(aligned_type), 32);
+
+  loom_module_free(module);
+}
+
+TEST_F(ParserTest, DescriptorBackedTypeRejectsInvalidParameterValue) {
+  const auto& diagnostics =
+      ParseExpectErrors("%v = test.constant 0 : test.scope<cluster>\n");
+  ASSERT_GE(diagnostics.size(), 1u);
+  ExpectError(diagnostics[0],
+              loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 17));
+}
+
+TEST_F(ParserTest, DescriptorBackedTypeRejectsMissingRequiredParameter) {
+  const auto& diagnostics = ParseExpectErrors(
+      "%v = test.constant 0 : test.matrix<bf16, scope = subgroup>\n");
+  ASSERT_GE(diagnostics.size(), 1u);
+  ExpectError(diagnostics[0],
+              loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 3));
 }
 
 TEST_F(ParserTest, FuncDeclNamedResultCanReferenceSignatureArg) {

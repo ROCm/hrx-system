@@ -41,6 +41,7 @@ loom_cc_library(
     loom::format::text::low_asm
     loom::ir
     loom::ops::op_defs
+    loom::ops::type_registry
     loom::target::registers
     loom::util::stream
   PUBLIC
