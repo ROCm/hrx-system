@@ -2829,10 +2829,14 @@ static iree_status_t loom_bytecode_body_reader_read_region(
     loom_bytecode_reader_cursor_t* cursor, loom_builder_t* builder,
     loom_op_t* parent_op, uint32_t depth, loom_region_t** out_region);
 
+// Resolves body-local dimension and encoding bindings in |base_type|. Returns
+// its canonical type-table ID when no binding changes the type, or INVALID
+// alongside the rebound type otherwise.
 static iree_status_t loom_bytecode_body_reader_bind_type(
     loom_bytecode_body_reader_t* body_reader,
     loom_bytecode_reader_cursor_t* cursor, loom_type_t base_type,
-    uint64_t dim_binding_count, loom_type_t* out_type) {
+    loom_type_id_t base_type_id, uint64_t dim_binding_count,
+    loom_type_t* out_type, loom_type_id_t* out_canonical_type_id) {
   loom_type_t type = base_type;
   uint8_t rank = loom_type_rank(base_type);
   uint64_t dynamic_count = 0;
@@ -2905,8 +2909,15 @@ static iree_status_t loom_bytecode_body_reader_bind_type(
   }
   uint16_t rebound_encoding_id = type.encoding_id;
 
+  if (dynamic_count == 0 && !loom_type_has_ssa_encoding(base_type)) {
+    *out_type = base_type;
+    *out_canonical_type_id = base_type_id;
+    return iree_ok_status();
+  }
+
   if (rank == 0) {
     *out_type = type;
+    *out_canonical_type_id = LOOM_TYPE_ID_INVALID;
     return iree_ok_status();
   }
   if (rank == 1) {
@@ -2937,6 +2948,7 @@ static iree_status_t loom_bytecode_body_reader_bind_type(
   type.encoding_flags = base_type.encoding_flags;
   type.encoding_id = rebound_encoding_id;
   *out_type = type;
+  *out_canonical_type_id = LOOM_TYPE_ID_INVALID;
   return iree_ok_status();
 }
 
@@ -2978,8 +2990,10 @@ static iree_status_t loom_bytecode_body_reader_define_value(
     return iree_ok_status();
 
   loom_type_t type = {0};
+  loom_type_id_t canonical_type_id = LOOM_TYPE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_bytecode_body_reader_bind_type(
-      body_reader, cursor, base_type, dim_binding_count, &type));
+      body_reader, cursor, base_type, (loom_type_id_t)type_id,
+      dim_binding_count, &type, &canonical_type_id));
   if (loom_bytecode_reader_has_errors(body_reader->reader))
     return iree_ok_status();
 
@@ -3015,8 +3029,15 @@ static iree_status_t loom_bytecode_body_reader_define_value(
     return iree_ok_status();
   }
 
-  IREE_RETURN_IF_ERROR(loom_module_set_value_type(
-      body_reader->reader->output_module, value_id, type));
+  if (canonical_type_id != LOOM_TYPE_ID_INVALID) {
+    // This exact type-table entry has no body-local bindings and the reserved
+    // value is fresh, so installing it cannot invalidate type-use state.
+    loom_module_value(body_reader->reader->output_module, value_id)->type =
+        body_reader->reader->output_module->types.entries[canonical_type_id];
+  } else {
+    IREE_RETURN_IF_ERROR(loom_module_set_value_type(
+        body_reader->reader->output_module, value_id, type));
+  }
   if (value_name_id != LOOM_STRING_ID_INVALID) {
     IREE_RETURN_IF_ERROR(loom_module_set_value_name(
         body_reader->reader->output_module, value_id, value_name_id));
