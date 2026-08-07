@@ -396,6 +396,7 @@ typedef enum hipEventFlags {
   hipEventBlockingSync = 0x01,
   hipEventDisableTiming = 0x02,
   hipEventInterprocess = 0x04,
+  hipEventDisableSystemFence = 0x20000000,
   hipEventReleaseToDevice = 0x40000000,
   hipEventReleaseToSystem = 0x80000000
 } hipEventFlags_t;

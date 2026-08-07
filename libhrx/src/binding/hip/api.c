@@ -144,6 +144,155 @@ typedef struct hrx_hip_batch_mem_op_node_params_t {
 static bool iree_hip_graph_handle_is_live(hipGraph_t graph);
 static hipError_t iree_status_to_hip_result(iree_status_t status);
 
+typedef struct iree_hip_event_registry_entry_t {
+  // Event handle retained while it remains public.
+  iree_hal_streaming_event_t* event;
+  // Next live event in the process registry.
+  struct iree_hip_event_registry_entry_t* next;
+} iree_hip_event_registry_entry_t;
+
+static iree_once_flag iree_hip_event_registry_mutex_once = IREE_ONCE_FLAG_INIT;
+static iree_slim_mutex_t iree_hip_event_registry_mutex;
+static iree_hip_event_registry_entry_t** iree_hip_event_registry_buckets = NULL;
+static iree_host_size_t iree_hip_event_registry_bucket_count = 0;
+static iree_host_size_t iree_hip_event_registry_entry_count = 0;
+
+static void iree_hip_event_registry_mutex_initialize(void) {
+  iree_slim_mutex_initialize(&iree_hip_event_registry_mutex);
+}
+
+static void iree_hip_event_registry_lock(void) {
+  iree_call_once(&iree_hip_event_registry_mutex_once,
+                 iree_hip_event_registry_mutex_initialize);
+  iree_slim_mutex_lock(&iree_hip_event_registry_mutex);
+}
+
+static iree_host_size_t iree_hip_event_registry_bucket_index(
+    hipEvent_t event, iree_host_size_t bucket_count) {
+  uint64_t key = (uint64_t)(uintptr_t)event;
+  key ^= key >> 33;
+  key *= UINT64_C(0xff51afd7ed558ccd);
+  key ^= key >> 33;
+  return (iree_host_size_t)key & (bucket_count - 1);
+}
+
+static iree_status_t iree_hip_event_registry_grow_locked(void) {
+  iree_host_size_t new_bucket_count = 64;
+  if (iree_hip_event_registry_bucket_count != 0 &&
+      !iree_host_size_checked_mul(iree_hip_event_registry_bucket_count, 2,
+                                  &new_bucket_count)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "event registry capacity overflow");
+  }
+  iree_host_size_t allocation_size = 0;
+  if (!iree_host_size_checked_mul(new_bucket_count,
+                                  sizeof(*iree_hip_event_registry_buckets),
+                                  &allocation_size)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "event registry allocation size overflow");
+  }
+
+  iree_hip_event_registry_entry_t** new_buckets = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+      iree_allocator_system(), allocation_size, (void**)&new_buckets));
+  memset(new_buckets, 0, allocation_size);
+  for (iree_host_size_t i = 0; i < iree_hip_event_registry_bucket_count; ++i) {
+    iree_hip_event_registry_entry_t* entry = iree_hip_event_registry_buckets[i];
+    while (entry) {
+      iree_hip_event_registry_entry_t* next = entry->next;
+      iree_host_size_t new_index = iree_hip_event_registry_bucket_index(
+          (hipEvent_t)entry->event, new_bucket_count);
+      entry->next = new_buckets[new_index];
+      new_buckets[new_index] = entry;
+      entry = next;
+    }
+  }
+  iree_allocator_free(iree_allocator_system(), iree_hip_event_registry_buckets);
+  iree_hip_event_registry_buckets = new_buckets;
+  iree_hip_event_registry_bucket_count = new_bucket_count;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hip_event_registry_insert(
+    iree_hal_streaming_event_t* event) {
+  iree_hip_event_registry_entry_t* entry = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(iree_allocator_system(),
+                                             sizeof(*entry), (void**)&entry));
+  entry->event = event;
+  iree_hip_event_registry_lock();
+  iree_status_t status = iree_ok_status();
+  if (iree_hip_event_registry_bucket_count == 0 ||
+      iree_hip_event_registry_entry_count >=
+          iree_hip_event_registry_bucket_count) {
+    status = iree_hip_event_registry_grow_locked();
+  }
+  if (iree_status_is_ok(status)) {
+    iree_host_size_t bucket_index = iree_hip_event_registry_bucket_index(
+        (hipEvent_t)event, iree_hip_event_registry_bucket_count);
+    entry->next = iree_hip_event_registry_buckets[bucket_index];
+    iree_hip_event_registry_buckets[bucket_index] = entry;
+    ++iree_hip_event_registry_entry_count;
+  }
+  iree_slim_mutex_unlock(&iree_hip_event_registry_mutex);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(iree_allocator_system(), entry);
+  }
+  return status;
+}
+
+static hipError_t iree_hip_event_registry_lookup_retain(
+    hipEvent_t event, iree_hal_streaming_event_t** out_event) {
+  IREE_ASSERT_ARGUMENT(out_event);
+  *out_event = NULL;
+  if (!event) return hipErrorInvalidResourceHandle;
+
+  iree_hip_event_registry_lock();
+  if (iree_hip_event_registry_bucket_count != 0) {
+    iree_host_size_t bucket_index = iree_hip_event_registry_bucket_index(
+        event, iree_hip_event_registry_bucket_count);
+    for (iree_hip_event_registry_entry_t* entry =
+             iree_hip_event_registry_buckets[bucket_index];
+         entry; entry = entry->next) {
+      if ((hipEvent_t)entry->event == event) {
+        iree_hal_streaming_event_retain(entry->event);
+        *out_event = entry->event;
+        break;
+      }
+    }
+  }
+  iree_slim_mutex_unlock(&iree_hip_event_registry_mutex);
+  return *out_event ? hipSuccess : hipErrorInvalidResourceHandle;
+}
+
+static bool iree_hip_event_registry_remove(
+    hipEvent_t event, iree_hal_streaming_event_t** out_event) {
+  IREE_ASSERT_ARGUMENT(out_event);
+  *out_event = NULL;
+  if (!event) return false;
+
+  iree_hip_event_registry_entry_t* removed_entry = NULL;
+  iree_hip_event_registry_lock();
+  if (iree_hip_event_registry_bucket_count != 0) {
+    iree_host_size_t bucket_index = iree_hip_event_registry_bucket_index(
+        event, iree_hip_event_registry_bucket_count);
+    iree_hip_event_registry_entry_t** entry_ptr =
+        &iree_hip_event_registry_buckets[bucket_index];
+    while (*entry_ptr) {
+      if ((hipEvent_t)(*entry_ptr)->event == event) {
+        removed_entry = *entry_ptr;
+        *entry_ptr = removed_entry->next;
+        *out_event = removed_entry->event;
+        --iree_hip_event_registry_entry_count;
+        break;
+      }
+      entry_ptr = &(*entry_ptr)->next;
+    }
+  }
+  iree_slim_mutex_unlock(&iree_hip_event_registry_mutex);
+  iree_allocator_free(iree_allocator_system(), removed_entry);
+  return removed_entry != NULL;
+}
+
 #define IREE_HIP_ARRAY_MAGIC 0x6872786869706179ull
 // HRX HIP arrays are backed by normal device allocations. The practical limit
 // is checked allocation size and available device memory; HIP device attributes
@@ -595,6 +744,30 @@ static iree_hal_streaming_event_flags_t iree_hip_event_flags_to_internal(
     flags |= IREE_HAL_STREAMING_EVENT_FLAG_INTERPROCESS;
   }
   return flags;
+}
+
+static bool iree_hip_event_flags_are_valid(unsigned int flags) {
+  const unsigned int fence_flags = hipEventDisableSystemFence |
+                                   hipEventReleaseToDevice |
+                                   hipEventReleaseToSystem;
+  const unsigned int allowed_flags = hipEventBlockingSync |
+                                     hipEventDisableTiming |
+                                     hipEventInterprocess | fence_flags;
+  if ((flags & ~allowed_flags) != 0) return false;
+  if ((flags & hipEventInterprocess) != 0 &&
+      (flags & hipEventDisableTiming) == 0) {
+    return false;
+  }
+  const unsigned int selected_fence_flags = flags & fence_flags;
+  return selected_fence_flags == 0 ||
+         (selected_fence_flags & (selected_fence_flags - 1)) == 0;
+}
+
+static hipError_t iree_hip_event_record_on_stream(
+    iree_hal_streaming_event_t* event, iree_hal_streaming_stream_t* stream) {
+  if (event->context != stream->context) return hipErrorInvalidHandle;
+  return iree_status_to_hip_result(
+      iree_hal_streaming_event_record(event, stream));
 }
 
 static iree_hal_streaming_memory_flags_t iree_hip_memory_flags_to_internal(
@@ -10813,6 +10986,11 @@ HIPAPI hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event,
                                      unsigned int flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  if (flags != 0) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
   iree_hal_streaming_stream_t* stream_obj = NULL;
   hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
   if (init_result != hipSuccess) {
@@ -10820,8 +10998,16 @@ HIPAPI hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event,
     HIP_RETURN_ERROR(init_result);
   }
 
-  iree_status_t status = iree_hal_streaming_stream_wait_event(
-      stream_obj, (iree_hal_streaming_event_t*)event);
+  iree_hal_streaming_event_t* event_obj = NULL;
+  hipError_t event_result =
+      iree_hip_event_registry_lookup_retain(event, &event_obj);
+  if (event_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(event_result);
+  }
+  iree_status_t status =
+      iree_hal_streaming_stream_wait_event(stream_obj, event_obj);
+  iree_hal_streaming_event_release(event_obj);
   hipError_t result = iree_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
@@ -10950,12 +11136,13 @@ hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode) {
 //
 // Event behavior:
 // - Created with default flags (no special behavior).
-// - Can be recorded in any stream.
+// - Can be recorded in any stream on the device that created it.
 // - Can be used for timing measurements.
 // - Can be used for stream synchronization.
 // - Must be destroyed with hipEventDestroy().
 //
-// Multi-GPU: Event can be used across devices for synchronization.
+// Multi-GPU: Other devices can wait on the event after it is recorded on its
+// creation device.
 //
 // Usage pattern:
 // ```c
@@ -10979,6 +11166,7 @@ HIPAPI hipError_t hipEventCreate(hipEvent_t* event) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  *event = NULL;
 
   // Ensure initialization and get context.
   iree_hal_streaming_context_t* context = NULL;
@@ -10992,9 +11180,13 @@ HIPAPI hipError_t hipEventCreate(hipEvent_t* event) {
   iree_status_t status = iree_hal_streaming_event_create(
       context, IREE_HAL_STREAMING_EVENT_FLAG_NONE, context->host_allocator,
       &event_obj);
-
+  if (iree_status_is_ok(status)) {
+    status = iree_hip_event_registry_insert(event_obj);
+  }
   if (iree_status_is_ok(status)) {
     *event = (hipEvent_t)event_obj;
+  } else {
+    iree_hal_streaming_event_release(event_obj);
   }
 
   hipError_t result = iree_status_to_hip_result(status);
@@ -11006,8 +11198,7 @@ HIPAPI hipError_t hipEventCreate(hipEvent_t* event) {
 //
 // Parameters:
 //  - event: [OUT] Pointer to receive the created event handle.
-//  - flags: [IN] Event creation flags (hipEventDefault, hipEventBlockingSync,
-//                hipEventDisableTiming, hipEventInterprocess).
+//  - flags: [IN] A valid combination of event creation flags.
 //
 // Returns:
 //  - hipSuccess: Event created successfully.
@@ -11038,6 +11229,11 @@ HIPAPI hipError_t hipEventCreateWithFlags(hipEvent_t* event,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  *event = NULL;
+  if (!iree_hip_event_flags_are_valid(flags)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
 
   // Ensure initialization and get context.
   iree_hal_streaming_context_t* context = NULL;
@@ -11051,9 +11247,13 @@ HIPAPI hipError_t hipEventCreateWithFlags(hipEvent_t* event,
   iree_status_t status = iree_hal_streaming_event_create(
       context, iree_hip_event_flags_to_internal(flags), context->host_allocator,
       &event_obj);
-
+  if (iree_status_is_ok(status)) {
+    status = iree_hip_event_registry_insert(event_obj);
+  }
   if (iree_status_is_ok(status)) {
     *event = (hipEvent_t)event_obj;
+  } else {
+    iree_hal_streaming_event_release(event_obj);
   }
 
   hipError_t result = iree_status_to_hip_result(status);
@@ -11071,23 +11271,25 @@ HIPAPI hipError_t hipEventCreateWithFlags(hipEvent_t* event,
 //  - hipErrorInvalidResourceHandle: Invalid event handle.
 //  - hipErrorContextIsDestroyed: Associated context already destroyed.
 //
-// Synchronization: This operation is synchronous. Waits for the event to
-// complete if it has been recorded but not yet reached.
+// Synchronization: This operation invalidates the public handle immediately.
+// Resources retained by queued operations remain alive until those operations
+// complete.
 //
 // Event behavior:
-// - All uses of the event must complete before destruction.
 // - After destruction, the event handle becomes invalid.
-// - Using a destroyed event results in undefined behavior.
+// - Operations submitted before destruction retain the resources they need.
 //
 // Multi-GPU: Event must be destroyed from a context that can access it.
-//
-// Warning: Ensure the event has completed or been synchronized before
-// destroying.
 //
 // See also: hipEventCreate, hipEventCreateWithFlags, hipEventSynchronize.
 HIPAPI hipError_t hipEventDestroy(hipEvent_t event) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_hal_streaming_event_release((iree_hal_streaming_event_t*)event);
+  iree_hal_streaming_event_t* event_obj = NULL;
+  if (!iree_hip_event_registry_remove(event, &event_obj)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidResourceHandle);
+  }
+  iree_hal_streaming_event_release(event_obj);
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
 }
@@ -11119,7 +11321,8 @@ HIPAPI hipError_t hipEventDestroy(hipEvent_t event) {
 // - The event can be queried with hipEventQuery() or synchronized with
 //   hipEventSynchronize().
 //
-// Multi-GPU: Events can be used for synchronization across devices.
+// Multi-GPU: Recording requires a stream on the event's creation device. Other
+// devices can wait on the recorded event with hipStreamWaitEvent().
 //
 // Warning: Recording an event multiple times overwrites the previous
 // recording. Wait for the event to complete before re-recording.
@@ -11129,16 +11332,23 @@ HIPAPI hipError_t hipEventDestroy(hipEvent_t event) {
 HIPAPI hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  iree_hal_streaming_event_t* event_obj = NULL;
+  hipError_t event_result =
+      iree_hip_event_registry_lookup_retain(event, &event_obj);
+  if (event_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(event_result);
+  }
+
   iree_hal_streaming_stream_t* stream_obj = NULL;
   hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
   if (init_result != hipSuccess) {
+    iree_hal_streaming_event_release(event_obj);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
   }
-
-  iree_status_t status = iree_hal_streaming_event_record(
-      (iree_hal_streaming_event_t*)event, stream_obj);
-  hipError_t result = iree_status_to_hip_result(status);
+  hipError_t result = iree_hip_event_record_on_stream(event_obj, stream_obj);
+  iree_hal_streaming_event_release(event_obj);
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -11175,26 +11385,35 @@ HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
   HIP_DEBUG_LOG("[HIP_API] hipEventSynchronize(event=%p) called\n",
                 (void*)event);
 
+  iree_hal_streaming_event_t* streaming_event = NULL;
+  hipError_t event_result =
+      iree_hip_event_registry_lookup_retain(event, &streaming_event);
+  if (event_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(event_result);
+  }
+
   // Check if any stream is capturing - synchronous operations not allowed
   // during capture. Note: We need to check global capture status since events
   // can be shared across streams.
   iree_hal_streaming_context_t* context = NULL;
   hipError_t init_result = iree_hip_ensure_context(&context);
   if (init_result != hipSuccess) {
+    iree_hal_streaming_event_release(streaming_event);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
   }
 
-  iree_hal_streaming_event_t* streaming_event =
-      (iree_hal_streaming_event_t*)event;
   if (streaming_event->capture_graph) {
     iree_hip_context_invalidate_capture_graph(context,
                                               streaming_event->capture_graph);
+    iree_hal_streaming_event_release(streaming_event);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorCapturedEvent);
   }
 
   iree_status_t status = iree_hal_streaming_event_synchronize(streaming_event);
+  iree_hal_streaming_event_release(streaming_event);
   hipError_t result = iree_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
@@ -11233,26 +11452,34 @@ HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
 //
 // See also: hipEventSynchronize, hipEventRecord, hipStreamQuery.
 HIPAPI hipError_t hipEventQuery(hipEvent_t event) {
+  iree_hal_streaming_event_t* streaming_event = NULL;
+  hipError_t event_result =
+      iree_hip_event_registry_lookup_retain(event, &streaming_event);
+  if (event_result != hipSuccess) {
+    HIP_RETURN_ERROR(event_result);
+  }
+
   // Check if any stream is capturing - synchronous operations not allowed
   // during capture. Note: We need to check global capture status since events
   // can be shared across streams.
   iree_hal_streaming_context_t* context = NULL;
   hipError_t init_result = iree_hip_ensure_context(&context);
   if (init_result != hipSuccess) {
+    iree_hal_streaming_event_release(streaming_event);
     HIP_RETURN_ERROR(init_result);
   }
 
-  iree_hal_streaming_event_t* streaming_event =
-      (iree_hal_streaming_event_t*)event;
   if (streaming_event->capture_graph) {
     iree_hip_context_invalidate_capture_graph(context,
                                               streaming_event->capture_graph);
+    iree_hal_streaming_event_release(streaming_event);
     HIP_RETURN_ERROR(hipErrorCapturedEvent);
   }
 
   int is_complete = 0;
   iree_status_t status =
       iree_hal_streaming_event_query(streaming_event, &is_complete);
+  iree_hal_streaming_event_release(streaming_event);
   // is_complete == 0 means complete, is_complete == 1 means not complete.
   hipError_t result = iree_status_is_ok(status)
                           ? (is_complete == 0 ? hipSuccess : hipErrorNotReady)
@@ -11303,29 +11530,44 @@ HIPAPI hipError_t hipEventElapsedTime(float* ms, hipEvent_t start,
   if (!ms) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  if (!start || !stop) {
+  iree_hal_streaming_event_t* start_event = NULL;
+  hipError_t start_result =
+      iree_hip_event_registry_lookup_retain(start, &start_event);
+  if (start_result != hipSuccess) {
+    HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  }
+  iree_hal_streaming_event_t* stop_event = NULL;
+  hipError_t stop_result =
+      iree_hip_event_registry_lookup_retain(stop, &stop_event);
+  if (stop_result != hipSuccess) {
+    iree_hal_streaming_event_release(start_event);
     HIP_RETURN_ERROR(hipErrorInvalidHandle);
   }
 
-  iree_hal_streaming_event_t* start_event = (iree_hal_streaming_event_t*)start;
-  iree_hal_streaming_event_t* stop_event = (iree_hal_streaming_event_t*)stop;
-
   if (start_event->context != stop_event->context) {
+    iree_hal_streaming_event_release(stop_event);
+    iree_hal_streaming_event_release(start_event);
     HIP_RETURN_ERROR(hipErrorInvalidHandle);
   }
 
   // Check if either event has timing disabled.
   if ((start_event->flags & IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING) ||
       (stop_event->flags & IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING)) {
+    iree_hal_streaming_event_release(stop_event);
+    iree_hal_streaming_event_release(start_event);
     HIP_RETURN_ERROR(hipErrorInvalidHandle);
   }
 
   if (start_event->record_time_ns == 0 || stop_event->record_time_ns == 0) {
+    iree_hal_streaming_event_release(stop_event);
+    iree_hal_streaming_event_release(start_event);
     HIP_RETURN_ERROR(hipErrorInvalidHandle);
   }
 
   iree_status_t status =
       iree_hal_streaming_event_elapsed_time(ms, start_event, stop_event);
+  iree_hal_streaming_event_release(stop_event);
+  iree_hal_streaming_event_release(start_event);
   hipError_t result = iree_status_to_hip_result(status);
   return result;
 }
@@ -12411,9 +12653,38 @@ HIPAPI hipError_t hipExtLaunchKernel(const void* function_address,
                                      void** args, size_t sharedMemBytes,
                                      hipStream_t stream, hipEvent_t startEvent,
                                      hipEvent_t stopEvent, int flags) {
-  // TODO: handle start and end events.
-  return hipLaunchKernel(function_address, numBlocks, dimBlocks, args,
-                         sharedMemBytes, stream);
+  if ((flags & ~hipExtAnyOrderLaunch) != 0) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  iree_hal_streaming_event_t* start_event = NULL;
+  if (startEvent && iree_hip_event_registry_lookup_retain(
+                        startEvent, &start_event) != hipSuccess) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  iree_hal_streaming_event_t* stop_event = NULL;
+  if (stopEvent && iree_hip_event_registry_lookup_retain(
+                       stopEvent, &stop_event) != hipSuccess) {
+    iree_hal_streaming_event_release(start_event);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  iree_hal_streaming_stream_t* stream_obj = NULL;
+  hipError_t result = iree_hip_resolve_stream(stream, &stream_obj);
+  if (result == hipErrorInvalidResourceHandle) result = hipErrorInvalidValue;
+  if (result == hipSuccess && start_event) {
+    result = iree_hip_event_record_on_stream(start_event, stream_obj);
+  }
+  if (result == hipSuccess) {
+    result = hipLaunchKernel(function_address, numBlocks, dimBlocks, args,
+                             sharedMemBytes, stream);
+  }
+  if (result == hipSuccess && stop_event) {
+    result = iree_hip_event_record_on_stream(stop_event, stream_obj);
+  }
+  iree_hal_streaming_event_release(stop_event);
+  iree_hal_streaming_event_release(start_event);
+  HIP_RETURN_ERROR(result);
 }
 
 // Launches a kernel function with specified dimensions and parameters.
@@ -17417,15 +17688,23 @@ hipGraphAddEventRecordNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
+  iree_hal_streaming_event_t* event_obj = NULL;
+  if (iree_hip_event_registry_lookup_retain(event, &event_obj) != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
   iree_hal_streaming_graph_node_t* node = NULL;
-  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_hal_streaming_graph_add_event_node(
-          (iree_hal_streaming_graph_t*)graph,
-          (iree_hal_streaming_graph_node_t**)pDependencies, numDependencies,
-          IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD,
-          (iree_hal_streaming_event_t*)event, &node),
-      hipErrorInvalidValue);
+  iree_status_t status = iree_hal_streaming_graph_add_event_node(
+      (iree_hal_streaming_graph_t*)graph,
+      (iree_hal_streaming_graph_node_t**)pDependencies, numDependencies,
+      IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD, event_obj, &node);
+  iree_hal_streaming_event_release(event_obj);
+  if (!iree_status_is_ok(status)) {
+    hipError_t result =
+        iree_status_to_fixed_hip_result(status, hipErrorInvalidValue);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(result);
+  }
   *pGraphNode = (hipGraphNode_t)node;
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -17451,15 +17730,23 @@ HIPAPI hipError_t hipGraphAddEventWaitNode(hipGraphNode_t* pGraphNode,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
+  iree_hal_streaming_event_t* event_obj = NULL;
+  if (iree_hip_event_registry_lookup_retain(event, &event_obj) != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
   iree_hal_streaming_graph_node_t* node = NULL;
-  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_hal_streaming_graph_add_event_node(
-          (iree_hal_streaming_graph_t*)graph,
-          (iree_hal_streaming_graph_node_t**)pDependencies, numDependencies,
-          IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT,
-          (iree_hal_streaming_event_t*)event, &node),
-      hipErrorInvalidValue);
+  iree_status_t status = iree_hal_streaming_graph_add_event_node(
+      (iree_hal_streaming_graph_t*)graph,
+      (iree_hal_streaming_graph_node_t**)pDependencies, numDependencies,
+      IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT, event_obj, &node);
+  iree_hal_streaming_event_release(event_obj);
+  if (!iree_status_is_ok(status)) {
+    hipError_t result =
+        iree_status_to_fixed_hip_result(status, hipErrorInvalidValue);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(result);
+  }
   *pGraphNode = (hipGraphNode_t)node;
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -19511,16 +19798,21 @@ HIPAPI hipError_t hipGraphEventRecordNodeSetEvent(hipGraphNode_t node,
   }
   iree_hal_streaming_graph_node_t* stream_node =
       (iree_hal_streaming_graph_node_t*)node;
-  iree_hal_streaming_event_t* streaming_event =
-      (iree_hal_streaming_event_t*)event;
+  iree_hal_streaming_event_t* streaming_event = NULL;
+  if (iree_hip_event_registry_lookup_retain(event, &streaming_event) !=
+      hipSuccess) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
   if (!iree_hip_graph_node_is_active(stream_node) ||
       stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD ||
       streaming_event->context != stream_node->graph->context) {
+    iree_hal_streaming_event_release(streaming_event);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   iree_hal_streaming_event_retain(streaming_event);
   iree_hal_streaming_event_release(stream_node->attrs.event.event);
   stream_node->attrs.event.event = streaming_event;
+  iree_hal_streaming_event_release(streaming_event);
   return hipSuccess;
 }
 
@@ -19547,16 +19839,21 @@ HIPAPI hipError_t hipGraphEventWaitNodeSetEvent(hipGraphNode_t node,
   }
   iree_hal_streaming_graph_node_t* stream_node =
       (iree_hal_streaming_graph_node_t*)node;
-  iree_hal_streaming_event_t* streaming_event =
-      (iree_hal_streaming_event_t*)event;
+  iree_hal_streaming_event_t* streaming_event = NULL;
+  if (iree_hip_event_registry_lookup_retain(event, &streaming_event) !=
+      hipSuccess) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
   if (!iree_hip_graph_node_is_active(stream_node) ||
       stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT ||
       streaming_event->context != stream_node->graph->context) {
+    iree_hal_streaming_event_release(streaming_event);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   iree_hal_streaming_event_retain(streaming_event);
   iree_hal_streaming_event_release(stream_node->attrs.event.event);
   stream_node->attrs.event.event = streaming_event;
+  iree_hal_streaming_event_release(streaming_event);
   return hipSuccess;
 }
 
@@ -19618,9 +19915,15 @@ HIPAPI hipError_t hipGraphExecEventRecordNodeSetEvent(hipGraphExec_t graphExec,
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  iree_hal_streaming_event_t* event_obj = NULL;
+  if (iree_hip_event_registry_lookup_retain(event, &event_obj) != hipSuccess) {
+    iree_hal_streaming_graph_exec_release(exec);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
   iree_status_t status = iree_hal_streaming_graph_exec_set_event_node_event(
       exec, stream_node, IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD,
-      (iree_hal_streaming_event_t*)event);
+      event_obj);
+  iree_hal_streaming_event_release(event_obj);
   iree_hal_streaming_graph_exec_release(exec);
   HIP_RETURN_STATUS(status, hipErrorInvalidValue);
   return hipSuccess;
@@ -19644,9 +19947,15 @@ HIPAPI hipError_t hipGraphExecEventWaitNodeSetEvent(hipGraphExec_t graphExec,
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  iree_hal_streaming_event_t* event_obj = NULL;
+  if (iree_hip_event_registry_lookup_retain(event, &event_obj) != hipSuccess) {
+    iree_hal_streaming_graph_exec_release(exec);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
   iree_status_t status = iree_hal_streaming_graph_exec_set_event_node_event(
       exec, stream_node, IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT,
-      (iree_hal_streaming_event_t*)event);
+      event_obj);
+  iree_hal_streaming_event_release(event_obj);
   iree_hal_streaming_graph_exec_release(exec);
   HIP_RETURN_STATUS(status, hipErrorInvalidValue);
   return hipSuccess;
