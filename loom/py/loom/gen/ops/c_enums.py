@@ -332,4 +332,5 @@ ATTR_KIND_MAP: dict[str, str] = {
     "predicate_list": "LOOM_ATTR_PREDICATE_LIST",
     "dict": "LOOM_ATTR_DICT",
     "any": "LOOM_ATTR_ANY",
+    "parameterized": "LOOM_ATTR_PARAMETERIZED",
 }

@@ -1200,7 +1200,7 @@ static iree_status_t loom_scf_unroll_attr_refs_are_ready(
     loom_scf_unroll_payload_readiness_t* query, const loom_attribute_t* attr,
     uint8_t depth, bool* out_ready) {
   *out_ready = false;
-  if (!attr || depth > LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
+  if (!attr || depth > LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
     return iree_ok_status();
   }
   switch ((loom_attr_kind_t)attr->kind) {

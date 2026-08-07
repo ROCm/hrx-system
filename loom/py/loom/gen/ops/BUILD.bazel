@@ -54,6 +54,7 @@ C_TABLES_SRCS = [
     "c_metadata_tables.py",
     "c_names.py",
     "c_ops_header.py",
+    "c_parameterized_attrs.py",
     "c_queries.py",
     "c_registry.py",
     "c_symbols.py",

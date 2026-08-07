@@ -9,14 +9,12 @@
 #ifndef LOOM_IR_PARAMETERIZED_ATTR_H_
 #define LOOM_IR_PARAMETERIZED_ATTR_H_
 
-#include "loom/ir/attribute.h"
+#include "loom/ir/attribute_schema.h"
 #include "loom/util/bstring.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-typedef struct loom_attr_descriptor_t loom_attr_descriptor_t;
 
 // Generated metadata for one descriptor-backed parameterized attribute family.
 typedef struct loom_parameterized_attr_descriptor_t {

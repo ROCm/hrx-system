@@ -724,9 +724,9 @@ static iree_status_t loom_parse_present_attr_dict(loom_parser_t* parser,
                                                   loom_attribute_t* out_attr) {
   loom_token_t open_brace_token = loom_token_none();
   LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_LBRACE, &open_brace_token);
-  if (nesting_depth >= LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
+  if (nesting_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
     loom_diagnostic_param_t params[] = {
-        loom_param_u32(LOOM_ATTR_DICT_MAX_NESTING_DEPTH),
+        loom_param_u32(LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH),
     };
     return loom_parser_emit(parser, LOOM_ERR_PARSE_021, params,
                             IREE_ARRAYSIZE(params), open_brace_token);

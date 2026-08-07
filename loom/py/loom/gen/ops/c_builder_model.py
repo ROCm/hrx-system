@@ -128,6 +128,7 @@ _C_ATTR_TYPE_MAP: dict[str, str] = {
     "type": "uint32_t",
     "encoding": "uint16_t",
     "dict": "loom_named_attr_slice_t",
+    "parameterized": "loom_attribute_t",
     "any": "loom_attribute_t",
 }
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from loom.assembly import StableKeyRef
-from loom.dsl import Op, TypeConstraint
+from loom.dsl import Op, ParameterizedAttrDef, TypeConstraint
 from loom.fields import FieldKind, compute_layout
 from loom.gen.ops import c_builder_model, c_queries
 from loom.gen.ops.c_enum_attrs import SharedEnumMap
@@ -19,6 +19,9 @@ from loom.gen.ops.c_enum_attrs import collect_shared_enums as _collect_shared_en
 from loom.gen.ops.c_names import COPYRIGHT
 from loom.gen.ops.c_names import c_enum_name as _c_enum_name
 from loom.gen.ops.c_names import c_prefix as _c_prefix
+from loom.gen.ops.c_parameterized_attrs import (
+    generate_parameterized_attr_source_lines as _generate_parameterized_attr_source_lines,
+)
 from loom.gen.support.generated_file import line_comment_header
 
 
@@ -663,6 +666,7 @@ def _generate_builder_implementation(
                 "type": f"loom_attr_type({name})",
                 "encoding": f"loom_attr_encoding({name})",
                 "bytes": f"loom_attr_bytes(_{name}_storage, (uint32_t){name}.data_length)",
+                "parameterized": name,
                 "any": name,
             }
             constructor = constructor_map.get(attr_type, name)
@@ -818,7 +822,13 @@ def _generate_builder_implementation(
 # ============================================================================
 
 
-def generate_builders_c(dialect_name: str, ops: Sequence[Op], *, include_path: str | None = None) -> str:
+def generate_builders_c(
+    dialect_name: str,
+    ops: Sequence[Op],
+    parameterized_attrs: Sequence[ParameterizedAttrDef] = (),
+    *,
+    include_path: str | None = None,
+) -> str:
     """Generates the builders.c file for a dialect."""
     lines: list[str] = []
     shared_enums = _collect_shared_enums(dialect_name, ops)
@@ -837,6 +847,8 @@ def generate_builders_c(dialect_name: str, ops: Sequence[Op], *, include_path: s
     if any(isinstance(element, StableKeyRef) for op in ops for element in c_builder_model.flatten_format(op.format)):
         lines.append('#include "loom/util/stable_id.h"')
     lines.append("")
+
+    lines.extend(_generate_parameterized_attr_source_lines(parameterized_attrs))
 
     for op in ops:
         if not op.generate_c_builder:

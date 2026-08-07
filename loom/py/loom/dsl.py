@@ -108,6 +108,7 @@ __all__ = [
     "ATTR_TYPE_FLAGS",
     "ATTR_TYPE_PREDICATE_LIST",
     "ATTR_TYPE_DICT",
+    "ATTR_TYPE_PARAMETERIZED",
     "RegionDef",
     # Symbol support.
     "SymbolDefinition",
@@ -513,6 +514,7 @@ ATTR_TYPE_SYMBOL = "symbol"
 ATTR_TYPE_FLAGS = "flags"
 ATTR_TYPE_PREDICATE_LIST = "predicate_list"
 ATTR_TYPE_DICT = "dict"  # Named attribute dictionary.
+ATTR_TYPE_PARAMETERIZED = "parameterized"
 
 _VALID_ATTR_TYPES = frozenset(
     {
@@ -532,6 +534,7 @@ _VALID_ATTR_TYPES = frozenset(
         ATTR_TYPE_FLAGS,
         ATTR_TYPE_PREDICATE_LIST,
         ATTR_TYPE_DICT,
+        ATTR_TYPE_PARAMETERIZED,
     }
 )
 
@@ -785,6 +788,7 @@ class AttrDef:
     elide_default: bool = False
     symbol_ref: SymbolReference | None = None
     open_enum: bool = False
+    parameterized_attr: ParameterizedAttrDef | None = None
 
     def __post_init__(self) -> None:
         if self.attr_type not in _VALID_ATTR_TYPES:
@@ -823,6 +827,14 @@ class AttrDef:
         if self.symbol_ref is not None and self.attr_type != ATTR_TYPE_SYMBOL:
             raise ValueError(
                 f"AttrDef '{self.name}': symbol_ref requires attr_type='symbol'"
+            )
+        if (
+            self.parameterized_attr is not None
+            and self.attr_type != ATTR_TYPE_PARAMETERIZED
+        ):
+            raise ValueError(
+                f"AttrDef '{self.name}': parameterized_attr requires "
+                "attr_type='parameterized'"
             )
         if self.elide_default:
             if self.default is None:
@@ -2825,6 +2837,7 @@ _PARAMETERIZED_ATTR_PARAMETER_TYPES = frozenset(
         ATTR_TYPE_ENCODING,
         ATTR_TYPE_SYMBOL,
         ATTR_TYPE_DICT,
+        ATTR_TYPE_PARAMETERIZED,
     }
 )
 
@@ -2887,6 +2900,14 @@ class ParameterizedAttrDef:
                 f"ParameterizedAttrDef '{name}': {len(frozen_parameters)} "
                 "parameters exceed the uint8_t slot limit"
             )
+        optional_parameter_count = sum(
+            parameter.optional for parameter in frozen_parameters
+        )
+        if optional_parameter_count > 64:
+            raise ValueError(
+                f"ParameterizedAttrDef '{name}': {optional_parameter_count} "
+                "optional parameters exceed the uint64_t C builder flag limit"
+            )
         seen_names: set[str] = set()
         for parameter in frozen_parameters:
             if not _is_ascii_identifier(parameter.name):
@@ -2906,11 +2927,26 @@ class ParameterizedAttrDef:
                     f"'{parameter.name}' has unsupported kind "
                     f"'{parameter.attr_type}'"
                 )
+            if (
+                parameter.attr_type == ATTR_TYPE_PARAMETERIZED
+                and parameter.parameterized_attr is None
+            ):
+                raise ValueError(
+                    f"ParameterizedAttrDef '{name}': nested parameter "
+                    f"'{parameter.name}' requires an exact parameterized_attr"
+                )
 
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "group", group)
         object.__setattr__(self, "parameters", frozen_parameters)
         object.__setattr__(self, "doc", doc)
+
+    def __call__(self, **parameters: Any) -> Any:
+        """Constructs one immutable value of this family."""
+
+        from loom.ir import ParameterizedAttr
+
+        return ParameterizedAttr(self, parameters)
 
 
 # ============================================================================

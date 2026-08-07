@@ -250,7 +250,7 @@ static iree_status_t loom_symbol_equivalence_compare_attributes(
           state, lhs_attr, rhs_attr, out_equivalent);
     case LOOM_ATTR_DICT:
       if (lhs_attr->count != rhs_attr->count ||
-          depth >= LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
+          depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
         return iree_ok_status();
       }
       for (uint16_t i = 0; i < lhs_attr->count; ++i) {

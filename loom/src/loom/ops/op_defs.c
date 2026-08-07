@@ -620,8 +620,8 @@ static bool loom_attribute_refs_predicate_value(loom_attribute_t attr,
     case LOOM_ATTR_PREDICATE_LIST:
       return loom_predicate_list_attribute_refs_value(attr, value_id);
     case LOOM_ATTR_DICT:
-      if (dict_depth >= LOOM_ATTR_DICT_MAX_NESTING_DEPTH || attr.count == 0 ||
-          !attr.dict_entries) {
+      if (dict_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          attr.count == 0 || !attr.dict_entries) {
         return false;
       }
       for (uint16_t i = 0; i < attr.count; ++i) {
@@ -2860,7 +2860,7 @@ static iree_status_t loom_module_note_predicate_attribute_value_refs(
 
 static iree_status_t loom_module_note_dict_attribute_value_refs(
     loom_module_t* module, loom_attribute_t attr, uint8_t dict_depth) {
-  if (dict_depth >= LOOM_ATTR_DICT_MAX_NESTING_DEPTH || attr.count == 0 ||
+  if (dict_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH || attr.count == 0 ||
       !attr.dict_entries) {
     return iree_ok_status();
   }
@@ -3253,10 +3253,10 @@ static iree_status_t loom_dict_attr_replace_value_refs(
     bool* out_changed) {
   *out_attr = attr;
   *out_changed = false;
-  if (dict_depth >= LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
+  if (dict_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "dict attribute nesting exceeds max depth %u",
-                            (unsigned)LOOM_ATTR_DICT_MAX_NESTING_DEPTH);
+                            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
   }
   if (attr.count == 0) {
     *out_attr = loom_make_canonical_attr_dict(NULL, 0);

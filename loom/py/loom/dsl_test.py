@@ -35,6 +35,7 @@ from loom.dsl import (
     ADDRESS,
     ANY,
     ANY_ENCODING,
+    ATTR_TYPE_PARAMETERIZED,
     ATTR_TYPE_SYMBOL,
     BUFFER,
     BY_REFERENCE,
@@ -402,6 +403,32 @@ class TestParameterizedAttrDef:
                 group=Dialect("test"),
                 parameters=[AttrDef("scope", "scoped_enum")],
             )
+
+    def test_nested_parameter_requires_exact_family(self) -> None:
+        with _raises(ValueError, match="requires an exact parameterized_attr"):
+            ParameterizedAttrDef(
+                "test.options",
+                group=Dialect("test"),
+                parameters=[AttrDef("tile", ATTR_TYPE_PARAMETERIZED)],
+            )
+
+    def test_nested_parameter_retains_exact_family(self) -> None:
+        dialect = Dialect("test")
+        tile = ParameterizedAttrDef("test.tile", group=dialect)
+        options = ParameterizedAttrDef(
+            "test.options",
+            group=dialect,
+            parameters=[
+                AttrDef(
+                    "tile",
+                    ATTR_TYPE_PARAMETERIZED,
+                    optional=True,
+                    parameterized_attr=tile,
+                )
+            ],
+        )
+
+        assert options.parameters[0].parameterized_attr is tile
 
 
 class TestEnumDef:

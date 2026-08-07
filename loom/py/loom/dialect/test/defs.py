@@ -62,6 +62,7 @@ from loom.dsl import (
     ATTR_TYPE_ENUM_ARRAY,
     ATTR_TYPE_FLAGS,
     ATTR_TYPE_I64_ARRAY,
+    ATTR_TYPE_PARAMETERIZED,
     BY_REFERENCE,
     CONSTANT_LIKE,
     CONVERGENT,
@@ -242,6 +243,12 @@ test_options_attr = ParameterizedAttrDef(
             doc="Optional ordered scopes.",
         ),
         AttrDef("element_type", "type", optional=True),
+        AttrDef(
+            "tile",
+            ATTR_TYPE_PARAMETERIZED,
+            optional=True,
+            parameterized_attr=test_tile_attr,
+        ),
     ],
     doc="Structured parameterized attribute lifecycle witness.",
 )
@@ -1848,6 +1855,27 @@ test_attrs = Op(
 )
 
 # ============================================================================
+# test.parameterized_attr — descriptor-backed parameterized attribute
+# ============================================================================
+
+test_parameterized_attr = Op(
+    "test.parameterized_attr",
+    group=test_ops,
+    doc="Test op carrying an exact descriptor-backed attribute family.",
+    attrs=[
+        AttrDef(
+            "options",
+            ATTR_TYPE_PARAMETERIZED,
+            parameterized_attr=test_options_attr,
+        ),
+    ],
+    format=[Attr("options")],
+    examples=[
+        "test.parameterized_attr #test.options<mode = fast>",
+    ],
+)
+
+# ============================================================================
 # test.enum_array_attrs — descriptor-backed enum-array attributes
 # ============================================================================
 
@@ -2598,4 +2626,5 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_fact_not_subnormal,
     test_fact_cluster_uniform,
     test_enum_array_attrs,
+    test_parameterized_attr,
 )

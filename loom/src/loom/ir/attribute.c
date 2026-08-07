@@ -136,13 +136,27 @@ static bool loom_attribute_equal_impl(const loom_attribute_t* a,
     case LOOM_ATTR_DICT:
       if (a->count != b->count) return false;
       if (a->dict_entries == b->dict_entries) return true;
-      if (depth >= LOOM_ATTR_DICT_MAX_NESTING_DEPTH) return false;
+      if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) return false;
       for (uint16_t i = 0; i < a->count; ++i) {
         if (a->dict_entries[i].name_id != b->dict_entries[i].name_id) {
           return false;
         }
         if (!loom_attribute_equal_impl(&a->dict_entries[i].value,
                                        &b->dict_entries[i].value, depth + 1)) {
+          return false;
+        }
+      }
+      return true;
+    case LOOM_ATTR_PARAMETERIZED:
+      if (a->reserved_1 != b->reserved_1 || a->count != b->count) return false;
+      if (a->parameterized_slots == b->parameterized_slots) return true;
+      if (a->parameterized_slots == NULL || b->parameterized_slots == NULL ||
+          depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return false;
+      }
+      for (uint16_t i = 0; i < a->count; ++i) {
+        if (!loom_attribute_equal_impl(&a->parameterized_slots[i],
+                                       &b->parameterized_slots[i], depth + 1)) {
           return false;
         }
       }
@@ -187,7 +201,7 @@ static uint32_t loom_attribute_hash_impl(const loom_attribute_t* attr,
       }
       break;
     case LOOM_ATTR_DICT:
-      if (depth >= LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
+      if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
         hash = loom_hash_bytes(attr, sizeof(loom_attribute_t), hash);
         break;
       }
@@ -198,6 +212,21 @@ static uint32_t loom_attribute_hash_impl(const loom_attribute_t* attr,
         uint32_t value_hash =
             loom_attribute_hash_impl(&attr->dict_entries[i].value, depth + 1);
         hash = loom_hash_bytes(&value_hash, sizeof(value_hash), hash);
+      }
+      break;
+    case LOOM_ATTR_PARAMETERIZED:
+      hash = loom_hash_bytes(&attr->reserved_1, sizeof(attr->reserved_1), hash);
+      hash = loom_hash_bytes(&attr->count, sizeof(attr->count), hash);
+      if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          (attr->count > 0 && attr->parameterized_slots == NULL)) {
+        hash = loom_hash_bytes(&attr->parameterized_slots,
+                               sizeof(attr->parameterized_slots), hash);
+        break;
+      }
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        uint32_t slot_hash =
+            loom_attribute_hash_impl(&attr->parameterized_slots[i], depth + 1);
+        hash = loom_hash_bytes(&slot_hash, sizeof(slot_hash), hash);
       }
       break;
     default:

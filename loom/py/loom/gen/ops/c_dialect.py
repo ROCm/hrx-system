@@ -62,6 +62,7 @@ def generate_dialect_contents(generation: DialectGeneration) -> dict[str, str]:
         "builders.c": c_builders.generate_builders_c(
             dialect.name,
             generation.ops,
+            generation.parameterized_attrs,
             include_path=include_path,
         ),
         **table_files,

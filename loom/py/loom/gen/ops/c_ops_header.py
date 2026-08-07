@@ -27,6 +27,9 @@ from loom.gen.ops.c_names import (
 )
 from loom.gen.ops.c_names import c_prefix as _c_prefix
 from loom.gen.ops.c_names import guard_name as _guard_name
+from loom.gen.ops.c_parameterized_attrs import (
+    generate_parameterized_attr_header_lines as _generate_parameterized_attr_header_lines,
+)
 from loom.gen.support.generated_file import line_comment_header
 
 
@@ -116,6 +119,8 @@ def generate_ops_h(
     lines.append('extern "C" {')
     lines.append("#endif")
     lines.append("")
+
+    lines.extend(_generate_parameterized_attr_header_lines(parameterized_attrs))
 
     # Op kind enum.
     lines.append("enum {")
@@ -274,6 +279,7 @@ def generate_ops_h(
                 "scoped_enum": "LOOM_DEFINE_ATTR_SCOPED_ENUM",
                 "symbol": "LOOM_DEFINE_ATTR_SYMBOL",
                 "type": "LOOM_DEFINE_ATTR_TYPE",
+                "parameterized": "LOOM_DEFINE_ATTR_PARAMETERIZED",
                 "any": "LOOM_DEFINE_ATTR_ANY",
             }
             macro = macro_map.get(attr_def.attr_type)

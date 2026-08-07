@@ -46,6 +46,12 @@ def c_parameterized_attr_prefix(attr_def: ParameterizedAttrDef) -> str:
     return "loom_" + attr_def.name.replace(".", "_")
 
 
+def c_parameterized_attr_api_prefix(attr_def: ParameterizedAttrDef) -> str:
+    """Returns the C API prefix for a parameterized attribute family."""
+
+    return c_parameterized_attr_prefix(attr_def) + "_attr"
+
+
 def c_parameterized_attr_enum_name(attr_def: ParameterizedAttrDef) -> str:
     """Returns the C enum constant for a parameterized attribute family."""
 

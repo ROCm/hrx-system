@@ -41,6 +41,63 @@ typedef enum loom_test_options_scopes_e {
 extern "C" {
 #endif
 
+// Minimal parameterized attribute family.
+static inline bool loom_test_tile_attr_isa(loom_attribute_t attr) {
+  return attr.kind == LOOM_ATTR_PARAMETERIZED && loom_attr_as_parameterized_kind(attr) == LOOM_PARAMETERIZED_ATTR_TEST_TILE;
+}
+enum { LOOM_TEST_TILE_ATTR_WIDTH_PARAMETER_INDEX = 0 };
+static inline int64_t loom_test_tile_attr_width(loom_attribute_t attr) {
+  return loom_attr_as_i64(loom_attr_as_parameterized_slots(attr)[LOOM_TEST_TILE_ATTR_WIDTH_PARAMETER_INDEX]);
+}
+iree_status_t loom_test_tile_attr_make(
+    loom_module_t* module,
+    int64_t width,
+    loom_attribute_t* out_attr);
+
+// Structured parameterized attribute lifecycle witness.
+enum loom_test_options_attr_build_flag_bits_e {
+  LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_SCOPES = 1u << 0,
+  LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_ELEMENT_TYPE = 1u << 1,
+  LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_TILE = 1u << 2,
+};
+typedef uint32_t loom_test_options_attr_build_flags_t;
+static inline bool loom_test_options_attr_isa(loom_attribute_t attr) {
+  return attr.kind == LOOM_ATTR_PARAMETERIZED && loom_attr_as_parameterized_kind(attr) == LOOM_PARAMETERIZED_ATTR_TEST_OPTIONS;
+}
+enum { LOOM_TEST_OPTIONS_ATTR_MODE_PARAMETER_INDEX = 0 };
+static inline loom_test_options_mode_t loom_test_options_attr_mode(loom_attribute_t attr) {
+  return (loom_test_options_mode_t)loom_attr_as_enum(loom_attr_as_parameterized_slots(attr)[LOOM_TEST_OPTIONS_ATTR_MODE_PARAMETER_INDEX]);
+}
+enum { LOOM_TEST_OPTIONS_ATTR_SCOPES_PARAMETER_INDEX = 1 };
+static inline bool loom_test_options_attr_has_scopes(loom_attribute_t attr) {
+  return !loom_attr_is_absent(loom_attr_as_parameterized_slots(attr)[LOOM_TEST_OPTIONS_ATTR_SCOPES_PARAMETER_INDEX]);
+}
+static inline loom_enum_array_t loom_test_options_attr_scopes(loom_attribute_t attr) {
+  return loom_attr_as_enum_array(loom_attr_as_parameterized_slots(attr)[LOOM_TEST_OPTIONS_ATTR_SCOPES_PARAMETER_INDEX]);
+}
+enum { LOOM_TEST_OPTIONS_ATTR_ELEMENT_TYPE_PARAMETER_INDEX = 2 };
+static inline bool loom_test_options_attr_has_element_type(loom_attribute_t attr) {
+  return !loom_attr_is_absent(loom_attr_as_parameterized_slots(attr)[LOOM_TEST_OPTIONS_ATTR_ELEMENT_TYPE_PARAMETER_INDEX]);
+}
+static inline loom_type_id_t loom_test_options_attr_element_type(loom_attribute_t attr) {
+  return loom_attr_as_type_id(loom_attr_as_parameterized_slots(attr)[LOOM_TEST_OPTIONS_ATTR_ELEMENT_TYPE_PARAMETER_INDEX]);
+}
+enum { LOOM_TEST_OPTIONS_ATTR_TILE_PARAMETER_INDEX = 3 };
+static inline bool loom_test_options_attr_has_tile(loom_attribute_t attr) {
+  return !loom_attr_is_absent(loom_attr_as_parameterized_slots(attr)[LOOM_TEST_OPTIONS_ATTR_TILE_PARAMETER_INDEX]);
+}
+static inline loom_attribute_t loom_test_options_attr_tile(loom_attribute_t attr) {
+  return loom_attr_as_parameterized_slots(attr)[LOOM_TEST_OPTIONS_ATTR_TILE_PARAMETER_INDEX];
+}
+iree_status_t loom_test_options_attr_make(
+    loom_module_t* module,
+    loom_test_options_attr_build_flags_t build_flags,
+    loom_test_options_mode_t mode,
+    loom_enum_array_t scopes,
+    loom_type_id_t element_type,
+    loom_attribute_t tile,
+    loom_attribute_t* out_attr);
+
 enum {
   LOOM_OP_TEST_ADDI = LOOM_OP_KIND(LOOM_DIALECT_TEST, 0),
   LOOM_OP_TEST_NEG = LOOM_OP_KIND(LOOM_DIALECT_TEST, 1),
@@ -148,7 +205,8 @@ enum {
   LOOM_OP_TEST_FACT_NOT_SUBNORMAL = LOOM_OP_KIND(LOOM_DIALECT_TEST, 103),
   LOOM_OP_TEST_FACT_CLUSTER_UNIFORM = LOOM_OP_KIND(LOOM_DIALECT_TEST, 104),
   LOOM_OP_TEST_ENUM_ARRAY_ATTRS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 105),
-  LOOM_OP_TEST_COUNT_ = 106,
+  LOOM_OP_TEST_PARAMETERIZED_ATTR = LOOM_OP_KIND(LOOM_DIALECT_TEST, 106),
+  LOOM_OP_TEST_COUNT_ = 107,
 };
 
 // Synthetic flags for TemplateParamFlags parser/printer coverage.
@@ -2020,6 +2078,16 @@ iree_status_t loom_test_enum_array_attrs_build(
     loom_enum_array_t required_values,
     loom_optional loom_enum_array_t optional_values,
     loom_optional loom_named_attr_slice_t dict,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_TEST_PARAMETERIZED_ATTR: Test op carrying an exact descriptor-backed attribute family.
+// test.parameterized_attr #test.options<mode = fast>
+LOOM_DEFINE_ISA(loom_test_parameterized_attr_isa, LOOM_OP_TEST_PARAMETERIZED_ATTR)
+LOOM_DEFINE_ATTR_PARAMETERIZED(loom_test_parameterized_attr_options, 0)
+iree_status_t loom_test_parameterized_attr_build(
+    loom_builder_t* builder,
+    loom_attribute_t options,
     loom_location_id_t location,
     loom_op_t** out_op);
 

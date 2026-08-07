@@ -40,6 +40,12 @@ class ModuleTest : public ::testing::Test {
         loom_context_register_encoding_vtable(&context_, &kQ6KEncodingVtable));
     IREE_ASSERT_OK(loom_context_register_encoding_vtable(
         &context_, &kDenseEncodingVtable));
+    iree_host_size_t parameterized_attr_count = 0;
+    const loom_parameterized_attr_descriptor_t* parameterized_attrs =
+        loom_test_dialect_parameterized_attrs(&parameterized_attr_count);
+    IREE_ASSERT_OK(loom_context_register_parameterized_attrs(
+        &context_, LOOM_DIALECT_TEST, parameterized_attrs,
+        parameterized_attr_count));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
   }
 
@@ -1647,6 +1653,132 @@ TEST_F(ModuleTest, VerifyCanonicalAttrDictRejectsEmptyDictWithNonNullEntries) {
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_module_verify_canonical_attr_dict(module, attr));
+
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, ParameterizedAttrBuilderFreezesNestedPayloads) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_attribute_t tile = {0};
+  IREE_ASSERT_OK(loom_test_tile_attr_make(module, 16, &tile));
+  uint8_t scope_values[] = {
+      LOOM_TEST_OPTIONS_SCOPES_WORKGROUP,
+      254,
+  };
+  loom_attribute_t options = {0};
+  IREE_ASSERT_OK(loom_test_options_attr_make(
+      module,
+      LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_SCOPES |
+          LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_TILE,
+      LOOM_TEST_OPTIONS_MODE_FAST,
+      loom_make_enum_array(scope_values, IREE_ARRAYSIZE(scope_values)),
+      LOOM_TYPE_ID_INVALID, tile, &options));
+
+  scope_values[0] = 99;
+  EXPECT_TRUE(loom_test_options_attr_isa(options));
+  EXPECT_EQ(loom_test_options_attr_mode(options), LOOM_TEST_OPTIONS_MODE_FAST);
+  ASSERT_TRUE(loom_test_options_attr_has_scopes(options));
+  loom_enum_array_t scopes = loom_test_options_attr_scopes(options);
+  ASSERT_EQ(scopes.count, 2u);
+  EXPECT_EQ(scopes.values[0], LOOM_TEST_OPTIONS_SCOPES_WORKGROUP);
+  EXPECT_EQ(scopes.values[1], 254u);
+  EXPECT_FALSE(loom_test_options_attr_has_element_type(options));
+  ASSERT_TRUE(loom_test_options_attr_has_tile(options));
+  loom_attribute_t nested_tile = loom_test_options_attr_tile(options);
+  EXPECT_TRUE(loom_test_tile_attr_isa(nested_tile));
+  EXPECT_EQ(loom_test_tile_attr_width(nested_tile), 16);
+  EXPECT_NE(loom_attr_as_parameterized_slots(nested_tile),
+            loom_attr_as_parameterized_slots(tile));
+
+  loom_string_id_t key_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("options"), &key_id));
+  loom_named_attr_t entries[] = {{
+      /*.name_id=*/key_id,
+      /*.reserved=*/0,
+      /*.value=*/options,
+  }};
+  loom_attribute_t dict = {0};
+  IREE_ASSERT_OK(loom_module_make_canonical_attr_dict(
+      module, loom_make_named_attr_slice(entries, IREE_ARRAYSIZE(entries)),
+      &dict));
+  IREE_ASSERT_OK(loom_module_verify_canonical_attr_dict(module, dict));
+
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, ParameterizedAttrPreservesOptionalPresence) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_attribute_t absent_scopes = {0};
+  IREE_ASSERT_OK(loom_test_options_attr_make(
+      module, /*build_flags=*/0, LOOM_TEST_OPTIONS_MODE_PRECISE,
+      loom_enum_array_empty(), LOOM_TYPE_ID_INVALID, loom_attr_absent(),
+      &absent_scopes));
+  loom_attribute_t empty_scopes = {0};
+  IREE_ASSERT_OK(loom_test_options_attr_make(
+      module, LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_SCOPES,
+      LOOM_TEST_OPTIONS_MODE_PRECISE, loom_enum_array_empty(),
+      LOOM_TYPE_ID_INVALID, loom_attr_absent(), &empty_scopes));
+
+  EXPECT_FALSE(loom_test_options_attr_has_scopes(absent_scopes));
+  EXPECT_TRUE(loom_test_options_attr_has_scopes(empty_scopes));
+  EXPECT_EQ(loom_test_options_attr_scopes(empty_scopes).count, 0u);
+  EXPECT_FALSE(loom_attribute_equal(&absent_scopes, &empty_scopes));
+
+  loom_attribute_t second_empty_scopes = {0};
+  IREE_ASSERT_OK(loom_test_options_attr_make(
+      module, LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_SCOPES,
+      LOOM_TEST_OPTIONS_MODE_PRECISE, loom_enum_array_empty(),
+      LOOM_TYPE_ID_INVALID, loom_attr_absent(), &second_empty_scopes));
+  EXPECT_TRUE(loom_attribute_equal(&empty_scopes, &second_empty_scopes));
+  EXPECT_EQ(loom_attribute_hash(&empty_scopes),
+            loom_attribute_hash(&second_empty_scopes));
+
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, ParameterizedAttrRejectsMalformedSlots) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_attribute_t slots[4] = {
+      loom_attr_enum(LOOM_TEST_OPTIONS_MODE_FAST),
+      loom_attr_absent(),
+      loom_attr_absent(),
+      loom_attr_absent(),
+  };
+  loom_attribute_t options = {0};
+  IREE_ASSERT_OK(loom_module_make_parameterized_attr(
+      module, LOOM_PARAMETERIZED_ATTR_TEST_OPTIONS, slots,
+      IREE_ARRAYSIZE(slots), &options));
+
+  slots[0] = loom_attr_absent();
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_module_make_parameterized_attr(
+                            module, LOOM_PARAMETERIZED_ATTR_TEST_OPTIONS, slots,
+                            IREE_ARRAYSIZE(slots), &options));
+  slots[0] = loom_attr_enum(99);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_module_make_parameterized_attr(
+                            module, LOOM_PARAMETERIZED_ATTR_TEST_OPTIONS, slots,
+                            IREE_ARRAYSIZE(slots), &options));
+  slots[0] = loom_attr_enum(LOOM_TEST_OPTIONS_MODE_FAST);
+  slots[3] = options;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_module_make_parameterized_attr(
+                            module, LOOM_PARAMETERIZED_ATTR_TEST_OPTIONS, slots,
+                            IREE_ARRAYSIZE(slots), &options));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_module_make_parameterized_attr(
+                            module, LOOM_PARAMETERIZED_ATTR_TEST_OPTIONS, slots,
+                            IREE_ARRAYSIZE(slots) - 1, &options));
 
   loom_module_free(module);
 }

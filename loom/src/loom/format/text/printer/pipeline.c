@@ -173,7 +173,7 @@ static bool loom_print_pipeline_attr_value_is_printable(
       return attr->encoding_id > 0 &&
              attr->encoding_id <= ctx->module->encodings.count;
     case LOOM_ATTR_DICT: {
-      if (nesting_depth >= LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
+      if (nesting_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
         return false;
       }
       if (attr->count > 0 && !attr->dict_entries) {
@@ -195,6 +195,7 @@ static bool loom_print_pipeline_attr_value_is_printable(
     case LOOM_ATTR_ABSENT:
     case LOOM_ATTR_ENUM:
     case LOOM_ATTR_PREDICATE_LIST:
+    case LOOM_ATTR_PARAMETERIZED:
     case LOOM_ATTR_ANY:
     case LOOM_ATTR_COUNT_:
       return false;

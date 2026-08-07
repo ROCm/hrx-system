@@ -38,6 +38,7 @@ from loom.dsl import (
     ATTR_TYPE_FLAGS,
     ATTR_TYPE_I64,
     ATTR_TYPE_I64_ARRAY,
+    ATTR_TYPE_PARAMETERIZED,
     ATTR_TYPE_PREDICATE_LIST,
     ATTR_TYPE_STRING,
     ATTR_TYPE_SYMBOL,
@@ -264,17 +265,41 @@ def test_generate_parameterized_attribute_family_metadata() -> None:
                 optional=True,
                 open_enum=True,
             ),
+            AttrDef(
+                "tile",
+                ATTR_TYPE_PARAMETERIZED,
+                optional=True,
+                parameterized_attr=tile,
+            ),
         ],
     )
+    holder = Op(
+        "test.holder",
+        group=dialect,
+        attrs=[AttrDef("payload", ATTR_TYPE_PARAMETERIZED)],
+        format=[Attr("payload")],
+    )
 
-    ops_h = generate_ops_h("test", 0x01, [], [tile, options])
-    tables_c = generate_tables_c("test", 0x01, [], [tile, options])
+    ops_h = generate_ops_h("test", 0x01, [holder], [tile, options])
+    builders_c = generate_builders_c("test", [holder], [tile, options])
+    tables_c = generate_tables_c("test", 0x01, [holder], [tile, options])
 
     assert "LOOM_PARAMETERIZED_ATTR_TEST_TILE" in ops_h
+    assert "loom_test_tile_attr_make(" in ops_h
+    assert "loom_test_options_attr_make(" in ops_h
+    assert "LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_SCOPES" in ops_h
+    assert "loom_test_options_attr_has_scopes(" in ops_h
+    assert "loom_test_options_attr_scopes(" in ops_h
     assert "loom_test_dialect_parameterized_attrs" in ops_h
+    assert "loom_module_make_parameterized_attr(" in builders_c
+    assert "slots[0] = loom_attr_i64(width);" in builders_c
+    assert "slots[1] = tile;" in builders_c
     assert '.name = _BSTRING(12, "test.options")' in tables_c
     assert ".attr_kind = LOOM_ATTR_ENUM_ARRAY" in tables_c
     assert ".flags = LOOM_ATTR_OPTIONAL | LOOM_ATTR_OPEN_ENUM" in tables_c
+    assert ".attr_kind = LOOM_ATTR_PARAMETERIZED" in tables_c
+    assert ".reference.parameterized_attr_kind = LOOM_PARAMETERIZED_ATTR_TEST_TILE" in tables_c
+    assert ".reference.parameterized_attr_kind = LOOM_PARAMETERIZED_ATTR_KIND_ANY" in tables_c
 
 
 def test_generate_dialect_tables_emit_dense_op_semantics() -> None:
@@ -1896,7 +1921,8 @@ def test_scoped_enum_generates_domain_aware_format_metadata() -> None:
     assert "LOOM_DEFINE_ATTR_SCOPED_ENUM(loom_test_packet_descriptor, 0)" in ops_h
     assert "loom_test_packet_build(" not in ops_h
     assert "loom_test_packet_build(" not in builders_c
-    assert '_BSTRING(10, "descriptor"), LOOM_ATTR_SCOPED_ENUM' in tables_c
+    assert '.name = _BSTRING(10, "descriptor")' in tables_c
+    assert ".attr_kind = LOOM_ATTR_SCOPED_ENUM" in tables_c
     assert "{LOOM_FORMAT_KIND_SCOPED_ENUM_REF, 0, 0}," in tables_c
 
 

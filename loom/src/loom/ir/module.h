@@ -21,6 +21,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/ir/ir.h"
+#include "loom/ir/parameterized_attr.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -322,6 +323,17 @@ loom_string_id_t loom_module_lookup_string(const loom_module_t* module,
 // and stores the canonical wrapper in |out_attr|.
 iree_status_t loom_module_make_canonical_attr_dict(
     loom_module_t* module, loom_named_attr_slice_t entries,
+    loom_attribute_t* out_attr);
+
+// Builds a descriptor-backed PARAMETERIZED attribute in |module|.
+//
+// |parameters| is indexed by the registered family descriptor and may point to
+// temporary storage. Required fields must be present and optional fields use
+// LOOM_ATTR_ABSENT. Aggregate payloads are recursively copied and canonicalized
+// into the module arena before the immutable value is returned in |out_attr|.
+iree_status_t loom_module_make_parameterized_attr(
+    loom_module_t* module, loom_parameterized_attr_kind_t family_kind,
+    const loom_attribute_t* parameters, iree_host_size_t parameter_count,
     loom_attribute_t* out_attr);
 
 // Builds a fresh canonical DICT attribute from |base_entries| plus |updates|.

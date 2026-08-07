@@ -58,6 +58,7 @@ loom_cc_library(
     ],
     hdrs = [
         "attribute.h",
+        "attribute_schema.h",
         "context.h",
         "encoding.h",
         "function_version.h",

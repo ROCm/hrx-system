@@ -258,7 +258,7 @@ static bool loom_callable_attr_may_reference_symbol_in_mode(
     loom_symbol_ref_t target_ref, loom_callable_symbol_scan_mode_t mode,
     uint8_t depth) {
   if (!attr) return false;
-  if (depth > LOOM_ATTR_DICT_MAX_NESTING_DEPTH) return true;
+  if (depth > LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) return true;
   switch ((loom_attr_kind_t)attr->kind) {
     case LOOM_ATTR_SYMBOL:
       return loom_callable_symbol_scan_matches(loom_attr_as_symbol(*attr),

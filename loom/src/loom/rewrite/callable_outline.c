@@ -260,7 +260,7 @@ static iree_status_t loom_callable_outline_collect_attr_captures(
     loom_callable_outline_value_list_t* captures, const loom_attribute_t* attr,
     uint8_t depth) {
   if (!attr) return iree_ok_status();
-  if (depth > LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
+  if (depth > LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "attribute nesting exceeds maximum depth");
   }

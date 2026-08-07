@@ -225,7 +225,7 @@ static iree_status_t loom_availability_attr_is_available_before_op_impl(
   if (!loom_availability_query_is_valid(analysis, before_op) || !attr) {
     return iree_ok_status();
   }
-  if (depth > LOOM_ATTR_DICT_MAX_NESTING_DEPTH) return iree_ok_status();
+  if (depth > LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) return iree_ok_status();
   switch (attr->kind) {
     case LOOM_ATTR_ABSENT:
     case LOOM_ATTR_I64:

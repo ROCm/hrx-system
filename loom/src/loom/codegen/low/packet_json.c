@@ -340,10 +340,10 @@ static iree_status_t loom_low_packet_json_write_attr(
     const loom_module_t* module,
     const loom_text_print_options_t* type_print_options,
     const loom_attribute_t* attr, loom_output_stream_t* stream, uint8_t depth) {
-  if (depth >= LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
+  if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "attribute nesting exceeds %u",
-                            (unsigned)LOOM_ATTR_DICT_MAX_NESTING_DEPTH);
+                            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
   }
   switch (attr->kind) {
     case LOOM_ATTR_ABSENT:

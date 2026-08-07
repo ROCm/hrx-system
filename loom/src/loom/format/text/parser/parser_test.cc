@@ -2102,11 +2102,13 @@ TEST_F(ParserTest, AttrDictTooDeep) {
   std::string source =
       "%c = test.constant 0 : f32\n"
       "%s = test.attrs %c ";
-  for (uint32_t depth = 0; depth <= LOOM_ATTR_DICT_MAX_NESTING_DEPTH; ++depth) {
+  for (uint32_t depth = 0; depth <= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH;
+       ++depth) {
     source += "{k" + std::to_string(depth) + " = ";
   }
   source += "0";
-  for (uint32_t depth = 0; depth <= LOOM_ATTR_DICT_MAX_NESTING_DEPTH; ++depth) {
+  for (uint32_t depth = 0; depth <= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH;
+       ++depth) {
     source += "}";
   }
   source += " : f32\n";
@@ -2115,7 +2117,7 @@ TEST_F(ParserTest, AttrDictTooDeep) {
   ASSERT_GE(diagnostics.size(), 1u);
   ExpectError(diagnostics[0],
               loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 21));
-  ExpectU32Param(diagnostics[0], 0, LOOM_ATTR_DICT_MAX_NESTING_DEPTH);
+  ExpectU32Param(diagnostics[0], 0, LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
 }
 
 TEST_F(ParserTest, UnexpectedTokenInFuncSignature) {

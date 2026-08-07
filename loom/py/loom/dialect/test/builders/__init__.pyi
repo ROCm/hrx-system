@@ -1064,3 +1064,9 @@ class TestBuilder(DialectBuilder):
         dict: Mapping[str, Any] | None = ...,
         location_id: int | None = ...,
     ) -> None: ...
+    def parameterized_attr(
+        self,
+        *,
+        options: Any,
+        location_id: int | None = ...,
+    ) -> None: ...

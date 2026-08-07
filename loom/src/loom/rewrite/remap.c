@@ -956,10 +956,11 @@ static iree_status_t loom_ir_remap_attribute_impl(
     }
 
     case LOOM_ATTR_DICT: {
-      if (dict_depth >= LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "dict attribute nesting exceeds max depth %u",
-                                (unsigned)LOOM_ATTR_DICT_MAX_NESTING_DEPTH);
+      if (dict_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "dict attribute nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
       }
       if (source_attr.count == 0) {
         *out_target_attr = loom_make_canonical_attr_dict(NULL, 0);

@@ -424,10 +424,10 @@ static iree_status_t loom_tooling_config_copy_named_attrs(
     *out_target_entries = NULL;
     return iree_ok_status();
   }
-  if (depth >= LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
+  if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "config value attribute nesting exceeds max %u",
-                            (unsigned)LOOM_ATTR_DICT_MAX_NESTING_DEPTH);
+                            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
   }
   loom_named_attr_t* target_entries = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(&target_module->arena, count,
@@ -450,10 +450,10 @@ static iree_status_t loom_tooling_config_copy_encoding(
     const loom_module_t* source_module, loom_module_t* target_module,
     uint16_t source_encoding_id, uint8_t depth,
     uint16_t* out_target_encoding_id) {
-  if (depth >= LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
+  if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "config encoding nesting exceeds max %u",
-                            (unsigned)LOOM_ATTR_DICT_MAX_NESTING_DEPTH);
+                            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
   }
   const loom_encoding_t* source_encoding =
       loom_module_encoding(source_module, source_encoding_id);

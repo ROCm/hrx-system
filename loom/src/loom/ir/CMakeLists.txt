@@ -43,6 +43,7 @@ loom_cc_library(
     ir
   HDRS
     "attribute.h"
+    "attribute_schema.h"
     "context.h"
     "encoding.h"
     "function_version.h"

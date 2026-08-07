@@ -828,7 +828,7 @@ static iree_status_t loom_ir_move_attr_is_available(
     const loom_ir_move_availability_t* query, const loom_attribute_t* attr,
     uint8_t depth, bool* out_available) {
   *out_available = false;
-  if (depth > LOOM_ATTR_DICT_MAX_NESTING_DEPTH || !attr) {
+  if (depth > LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH || !attr) {
     return iree_ok_status();
   }
   switch ((loom_attr_kind_t)attr->kind) {
