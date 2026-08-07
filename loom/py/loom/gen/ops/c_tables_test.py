@@ -290,6 +290,25 @@ def test_generate_type_registry_emits_compact_enum_descriptor() -> None:
     assert "[LOOM_TYPE_ENCODING] = &loom_type_test_compact_descriptor," in type_registry_tables_c
 
 
+def test_generate_type_registry_deduplicates_external_enum_include() -> None:
+    mode = EnumDef(
+        "Mode",
+        [EnumCase("fast", 1)],
+        c_type="loom_mode_t",
+        c_const_prefix="LOOM_MODE",
+        c_include="loom/ir/types.h",
+    )
+    type_def = TypeDef(
+        name="test.mode",
+        params=[AttrDef("mode", ATTR_TYPE_ENUM, enum_def=mode)],
+        format=[Param("mode")],
+    )
+
+    type_registry_h, _, _ = generate_type_registry([type_def])
+
+    assert type_registry_h.count('#include "loom/ir/types.h"') == 1
+
+
 def test_generate_type_registry_rejects_duplicate_builtin_type_names() -> None:
     type_defs = [
         _compact_tensor_type_def("test.tensor"),

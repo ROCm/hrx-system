@@ -27,8 +27,14 @@ package(
 )
 
 exports_files(
-    ["isa.h"],
-    visibility = ["//loom/py/loom/gen/target/arch/spirv:__pkg__"],
+    [
+        "isa.h",
+        "scalar_types.h",
+    ],
+    visibility = [
+        "//loom/py/loom/gen/target/arch/spirv:__pkg__",
+        "//loom/py/loom/target/arch/spirv:__pkg__",
+    ],
 )
 
 _SPIRV_CHECK_PACKAGE_VISIBILITY = ["//loom/src/loom/target/arch/spirv/check:__pkg__"]
@@ -57,6 +63,8 @@ _SPIRV_TOOLING_VISIBILITY = [
     "//loom/src/loom/tooling/target/spirv/execution:__pkg__",
 ]
 
+_TYPE_REGISTRY_VISIBILITY = ["//loom/src/loom/ops:__pkg__"]
+
 #===------------------------------------------------------------------------===#
 # SPIR-V low descriptors
 #===------------------------------------------------------------------------===#
@@ -83,7 +91,7 @@ loom_generated_cc_library(
 loom_cc_library(
     name = "isa",
     hdrs = ["isa.h"],
-    visibility = _SPIRV_EMIT_VISIBILITY,
+    visibility = _SPIRV_EMIT_VISIBILITY + _TYPE_REGISTRY_VISIBILITY,
 )
 
 loom_generated_textual_header(
@@ -119,7 +127,7 @@ loom_cc_library(
     name = "scalar_types",
     srcs = ["scalar_types.c"],
     hdrs = ["scalar_types.h"],
-    visibility = _SPIRV_EMIT_VISIBILITY + _SPIRV_LOWER_VISIBILITY,
+    visibility = _SPIRV_EMIT_VISIBILITY + _SPIRV_LOWER_VISIBILITY + _TYPE_REGISTRY_VISIBILITY,
     deps = [
         ":features",
         "//loom/src/loom/util:numeric_format",

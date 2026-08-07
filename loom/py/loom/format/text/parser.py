@@ -1244,6 +1244,7 @@ _KEYWORD_TOKEN_KINDS = {
     "}": TokenKind.RBRACE,
     "<": TokenKind.LANGLE,
     ">": TokenKind.RANGLE,
+    "x": TokenKind.DIM_X,
 }
 
 
@@ -1263,10 +1264,17 @@ def _at_keyword(tokenizer: Tokenizer, text: str) -> bool:
 def _expect_keyword(tokenizer: Tokenizer, text: str) -> None:
     """Consume a keyword token, handling both punctuation and words."""
     kind = _KEYWORD_TOKEN_KINDS.get(text)
-    if kind is not None:
-        tokenizer.expect(kind)
-    else:
+    if kind is None:
         tokenizer.expect(TokenKind.BARE_IDENT, text)
+        return
+    if kind == TokenKind.DIM_X:
+        tokenizer.in_dim_list = True
+        try:
+            tokenizer.expect(kind)
+        finally:
+            tokenizer.in_dim_list = False
+        return
+    tokenizer.expect(kind)
 
 
 def _type_optional_present(

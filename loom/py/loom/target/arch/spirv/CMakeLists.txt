@@ -6,6 +6,14 @@
 #                                                                              #
 # To disable autogeneration for this file entirely, delete this header.        #
 ################################################################################
+if(LOOM_TARGET_ARCH_SPIRV)
+
+iree_get_spirv_registry_sources(
+  _LOOM_SPIRV_CORE_GRAMMAR
+  _LOOM_VULKAN_XML_REGISTRY
+)
+
+endif()
 
 iree_add_all_subdirs()
 
@@ -19,6 +27,31 @@ iree_py_library(
     loom::py::loom::core
     loom::py::loom::dialect::target::target
 )
+
+if(LOOM_TARGET_ARCH_SPIRV)
+iree_py_test(
+  NAME
+    dialect_test
+  MAIN
+    "dialect_test.py"
+  SRCS
+    "dialect_test.py"
+  ARGS
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/spirv/scalar_types.h"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/spirv/isa.h"
+    "${_LOOM_SPIRV_CORE_GRAMMAR}"
+  DEPS
+    loom::py::loom::target::arch::spirv::dialect
+    iree::build_tools::spirv::registry::spirv_core_grammar
+    loom::py::loom::format::text::text
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
+)
+endif()
 
 iree_py_library(
   NAME

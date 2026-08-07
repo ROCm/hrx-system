@@ -422,6 +422,7 @@ def main() -> None:
     from loom.dialect.vector import ALL_VECTOR_OPS
     from loom.dialect.view import ALL_VIEW_OPS
     from loom.target.arch.ireevm.dialect import ALL_IREEVM_TYPES
+    from loom.target.arch.spirv.dialect import ALL_SPIRV_TYPES
 
     ops = [
         *ALL_TEST_OPS,
@@ -445,6 +446,7 @@ def main() -> None:
         *ALL_BUILTIN_TYPES,
         *ALL_HAL_TYPES,
         *ALL_KERNEL_TYPES,
+        *ALL_SPIRV_TYPES,
         *ALL_IREEVM_TYPES,
     ]
 

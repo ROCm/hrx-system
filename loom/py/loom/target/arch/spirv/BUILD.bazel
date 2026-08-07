@@ -5,10 +5,27 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+load(
+    "//build_tools/spirv:registry_sources.bzl",
+    "loom_spirv_registry_sources",
+)
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_config_compatible_with",
+)
 
 package(
     default_visibility = ["//visibility:public"],
     licenses = ["notice"],  # Apache 2.0
+)
+
+_SPIRV_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target/arch:spirv",
+])
+
+loom_spirv_registry_sources(
+    name = "registry_sources",
+    target_compatible_with = _SPIRV_COMPATIBLE_WITH,
 )
 
 iree_py_library(
@@ -20,6 +37,28 @@ iree_py_library(
     deps = [
         "//loom/py/loom:core",
         "//loom/py/loom/dialect/target",
+    ],
+)
+
+iree_py_test(
+    name = "dialect_test",
+    size = "small",
+    srcs = ["dialect_test.py"],
+    args = [
+        "$(location //loom/src/loom/target/arch/spirv:scalar_types.h)",
+        "$(location //loom/src/loom/target/arch/spirv:isa.h)",
+        "$(location @spirv_headers//:spirv_core_grammar_unified1)",
+    ],
+    data = [
+        "//loom/src/loom/target/arch/spirv:isa.h",
+        "//loom/src/loom/target/arch/spirv:scalar_types.h",
+        "@spirv_headers//:spirv_core_grammar_unified1",
+    ],
+    target_compatible_with = _SPIRV_COMPATIBLE_WITH,
+    deps = [
+        ":dialect",
+        "//build_tools/spirv/registry:spirv_core_grammar",
+        "//loom/py/loom/format/text",
     ],
 )
 

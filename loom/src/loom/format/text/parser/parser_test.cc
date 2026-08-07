@@ -1440,6 +1440,36 @@ TEST_F(ParserTest, DescriptorBackedTypesRoundTripAndPreserveParameters) {
   loom_module_free(module);
 }
 
+TEST_F(ParserTest, SpirvCooperativeMatrixTypeRoundTripsCompactShape) {
+  const char* source =
+      "%matrix = test.constant 0 : "
+      "spirv.cooperative_matrix<16x32xu8, subgroup, matrix_a>\n";
+  std::string text = RoundTrip(source);
+  EXPECT_NE(text.find("spirv.cooperative_matrix<16x32xu8, subgroup, "
+                      "matrix_a>"),
+            std::string::npos)
+      << "cooperative matrix payload should round-trip without shape spacing: "
+      << text;
+
+  loom_module_t* module = ParseOk(text.c_str());
+  ASSERT_NE(module, nullptr);
+  loom_block_t* block = loom_module_block(module);
+  ASSERT_NE(block, nullptr);
+  ASSERT_EQ(block->op_count, 1u);
+  loom_type_t matrix_type = loom_module_value_type(
+      module, loom_test_constant_result(loom_block_op(block, 0)));
+  ASSERT_TRUE(loom_spirv_cooperative_matrix_type_isa(matrix_type));
+  EXPECT_EQ(loom_spirv_cooperative_matrix_type_rows(matrix_type), 16);
+  EXPECT_EQ(loom_spirv_cooperative_matrix_type_columns(matrix_type), 32);
+  EXPECT_EQ(loom_spirv_cooperative_matrix_type_component_type(matrix_type),
+            LOOM_SPIRV_SCALAR_TYPE_U8);
+  EXPECT_EQ(loom_spirv_cooperative_matrix_type_scope(matrix_type),
+            LOOM_SPIRV_SCOPE_SUBGROUP);
+  EXPECT_EQ(loom_spirv_cooperative_matrix_type_use(matrix_type),
+            LOOM_SPIRV_COOPERATIVE_MATRIX_USE_MATRIX_AKHR);
+  loom_module_free(module);
+}
+
 TEST_F(ParserTest, DescriptorBackedTypeRejectsInvalidParameterValue) {
   const auto& diagnostics =
       ParseExpectErrors("%v = test.constant 0 : test.scope<cluster>\n");

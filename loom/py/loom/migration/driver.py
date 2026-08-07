@@ -474,11 +474,13 @@ def default_migration_types() -> tuple[Any, ...]:
     from loom.dialect.hal import ALL_HAL_TYPES
     from loom.dialect.kernel import ALL_KERNEL_TYPES
     from loom.target.arch.ireevm.dialect import ALL_IREEVM_TYPES
+    from loom.target.arch.spirv.dialect import ALL_SPIRV_TYPES
 
     return (
         *ALL_BUILTIN_TYPES,
         *ALL_HAL_TYPES,
         *ALL_KERNEL_TYPES,
+        *ALL_SPIRV_TYPES,
         *ALL_IREEVM_TYPES,
     )
 

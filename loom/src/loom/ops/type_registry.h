@@ -14,7 +14,8 @@
 #include "loom/ir/parameterized_type.h"
 #include "loom/ir/types.h"
 #include "loom/ops/op_defs.h"
-#include "loom/ir/types.h"
+#include "loom/target/arch/spirv/isa.h"
+#include "loom/target/arch/spirv/scalar_types.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -214,6 +215,39 @@ iree_status_t loom_test_array_type_make(
     loom_type_id_t element_type,
     int64_t alignment,
     loom_named_attr_slice_t metadata,
+    loom_type_t* out_type);
+
+extern const loom_parameterized_type_descriptor_t loom_spirv_cooperative_matrix_type_parameterized_descriptor;
+static inline bool loom_spirv_cooperative_matrix_type_isa(loom_type_t type) {
+  return loom_type_is_parameterized(type) && loom_type_parameterized_descriptor(type) == &loom_spirv_cooperative_matrix_type_parameterized_descriptor;
+}
+enum { LOOM_SPIRV_COOPERATIVE_MATRIX_TYPE_ROWS_PARAMETER_INDEX = 0 };
+static inline int64_t loom_spirv_cooperative_matrix_type_rows(loom_type_t type) {
+  return loom_attr_as_i64(loom_type_parameterized_parameters(type)[LOOM_SPIRV_COOPERATIVE_MATRIX_TYPE_ROWS_PARAMETER_INDEX]);
+}
+enum { LOOM_SPIRV_COOPERATIVE_MATRIX_TYPE_COLUMNS_PARAMETER_INDEX = 1 };
+static inline int64_t loom_spirv_cooperative_matrix_type_columns(loom_type_t type) {
+  return loom_attr_as_i64(loom_type_parameterized_parameters(type)[LOOM_SPIRV_COOPERATIVE_MATRIX_TYPE_COLUMNS_PARAMETER_INDEX]);
+}
+enum { LOOM_SPIRV_COOPERATIVE_MATRIX_TYPE_COMPONENT_TYPE_PARAMETER_INDEX = 2 };
+static inline loom_spirv_scalar_type_t loom_spirv_cooperative_matrix_type_component_type(loom_type_t type) {
+  return (loom_spirv_scalar_type_t)loom_attr_as_enum(loom_type_parameterized_parameters(type)[LOOM_SPIRV_COOPERATIVE_MATRIX_TYPE_COMPONENT_TYPE_PARAMETER_INDEX]);
+}
+enum { LOOM_SPIRV_COOPERATIVE_MATRIX_TYPE_SCOPE_PARAMETER_INDEX = 3 };
+static inline loom_spirv_scope_t loom_spirv_cooperative_matrix_type_scope(loom_type_t type) {
+  return (loom_spirv_scope_t)loom_attr_as_enum(loom_type_parameterized_parameters(type)[LOOM_SPIRV_COOPERATIVE_MATRIX_TYPE_SCOPE_PARAMETER_INDEX]);
+}
+enum { LOOM_SPIRV_COOPERATIVE_MATRIX_TYPE_USE_PARAMETER_INDEX = 4 };
+static inline loom_spirv_cooperative_matrix_use_t loom_spirv_cooperative_matrix_type_use(loom_type_t type) {
+  return (loom_spirv_cooperative_matrix_use_t)loom_attr_as_enum(loom_type_parameterized_parameters(type)[LOOM_SPIRV_COOPERATIVE_MATRIX_TYPE_USE_PARAMETER_INDEX]);
+}
+iree_status_t loom_spirv_cooperative_matrix_type_make(
+    loom_module_t* module,
+    int64_t rows,
+    int64_t columns,
+    loom_spirv_scalar_type_t component_type,
+    loom_spirv_scope_t scope,
+    loom_spirv_cooperative_matrix_use_t use,
     loom_type_t* out_type);
 
 // Entry in the sorted type registry.
