@@ -1,0 +1,75 @@
+// RUN: verify
+
+target.generic<reference> @command_target {contract_set_key = "cmd.core"}
+
+// A Q/K/V preparation wave follows one scratch initialization wave. The
+// executable and entry values are symbol-free ABI inputs, and the argument
+// lists preserve variable kernel arity without making low packets variadic.
+low.func.def target<cmd.core>(@command_target) @qkv_two_wave(
+    %parameters: reg<cmd.buffer>,
+    %input: reg<cmd.binding>,
+    %scratch: reg<cmd.binding>,
+    %query_output: reg<cmd.binding>,
+    %key_output: reg<cmd.binding>,
+    %value_output: reg<cmd.binding>,
+    %query_executable: reg<cmd.executable>,
+    %query_entry: reg<cmd.entry>,
+    %key_executable: reg<cmd.executable>,
+    %key_entry: reg<cmd.entry>,
+    %value_executable: reg<cmd.executable>,
+    %value_entry: reg<cmd.entry>) {
+  %zero_u32 = low.const<cmd.constant.u32> {value = 0} : reg<cmd.u32>
+  %one_u32 = low.const<cmd.constant.u32> {value = 1} : reg<cmd.u32>
+  %workgroup_count_x = low.const<cmd.constant.u32> {value = 32} : reg<cmd.u32>
+  %zero_u64 = low.const<cmd.constant.u64> {value = 0} : reg<cmd.u64>
+  %buffer_length = low.const<cmd.constant.u64> {value = 4096} : reg<cmd.u64>
+
+  %parameters_ref = low.op<cmd.buffer.ref.direct>(%parameters, %zero_u64, %buffer_length) : (reg<cmd.buffer>, reg<cmd.u64>, reg<cmd.u64>) -> reg<cmd.buffer_ref>
+  %input_ref = low.op<cmd.buffer.ref.binding>(%input, %zero_u64, %buffer_length) : (reg<cmd.binding>, reg<cmd.u64>, reg<cmd.u64>) -> reg<cmd.buffer_ref>
+  %scratch_ref = low.op<cmd.buffer.ref.binding>(%scratch, %zero_u64, %buffer_length) : (reg<cmd.binding>, reg<cmd.u64>, reg<cmd.u64>) -> reg<cmd.buffer_ref>
+  %query_output_ref = low.op<cmd.buffer.ref.binding>(%query_output, %zero_u64, %buffer_length) : (reg<cmd.binding>, reg<cmd.u64>, reg<cmd.u64>) -> reg<cmd.buffer_ref>
+  %key_output_ref = low.op<cmd.buffer.ref.binding>(%key_output, %zero_u64, %buffer_length) : (reg<cmd.binding>, reg<cmd.u64>, reg<cmd.u64>) -> reg<cmd.buffer_ref>
+  %value_output_ref = low.op<cmd.buffer.ref.binding>(%value_output, %zero_u64, %buffer_length) : (reg<cmd.binding>, reg<cmd.u64>, reg<cmd.u64>) -> reg<cmd.buffer_ref>
+
+  low.op<cmd.fill>(%scratch_ref, %zero_u32, %one_u32) : (reg<cmd.buffer_ref>, reg<cmd.u32>, reg<cmd.u32>)
+  low.op<cmd.execution.barrier>() : ()
+
+  %query_args0 = low.op<cmd.arguments.empty>() : () -> reg<cmd.arguments>
+  %query_args1 = low.op<cmd.arguments.append.buffer_ref>(%query_args0, %parameters_ref) : (reg<cmd.arguments>, reg<cmd.buffer_ref>) -> reg<cmd.arguments>
+  %query_args2 = low.op<cmd.arguments.append.buffer_ref>(%query_args1, %input_ref) : (reg<cmd.arguments>, reg<cmd.buffer_ref>) -> reg<cmd.arguments>
+  %query_args3 = low.op<cmd.arguments.append.buffer_ref>(%query_args2, %query_output_ref) : (reg<cmd.arguments>, reg<cmd.buffer_ref>) -> reg<cmd.arguments>
+  low.op<cmd.dispatch.direct>(%query_executable, %query_entry, %workgroup_count_x, %one_u32, %one_u32, %query_args3) : (reg<cmd.executable>, reg<cmd.entry>, reg<cmd.u32>, reg<cmd.u32>, reg<cmd.u32>, reg<cmd.arguments>)
+
+  %key_args0 = low.op<cmd.arguments.empty>() : () -> reg<cmd.arguments>
+  %key_args1 = low.op<cmd.arguments.append.buffer_ref>(%key_args0, %parameters_ref) : (reg<cmd.arguments>, reg<cmd.buffer_ref>) -> reg<cmd.arguments>
+  %key_args2 = low.op<cmd.arguments.append.buffer_ref>(%key_args1, %input_ref) : (reg<cmd.arguments>, reg<cmd.buffer_ref>) -> reg<cmd.arguments>
+  %key_args3 = low.op<cmd.arguments.append.buffer_ref>(%key_args2, %key_output_ref) : (reg<cmd.arguments>, reg<cmd.buffer_ref>) -> reg<cmd.arguments>
+  low.op<cmd.dispatch.direct>(%key_executable, %key_entry, %workgroup_count_x, %one_u32, %one_u32, %key_args3) : (reg<cmd.executable>, reg<cmd.entry>, reg<cmd.u32>, reg<cmd.u32>, reg<cmd.u32>, reg<cmd.arguments>)
+
+  %value_args0 = low.op<cmd.arguments.empty>() : () -> reg<cmd.arguments>
+  %value_args1 = low.op<cmd.arguments.append.buffer_ref>(%value_args0, %parameters_ref) : (reg<cmd.arguments>, reg<cmd.buffer_ref>) -> reg<cmd.arguments>
+  %value_args2 = low.op<cmd.arguments.append.buffer_ref>(%value_args1, %input_ref) : (reg<cmd.arguments>, reg<cmd.buffer_ref>) -> reg<cmd.arguments>
+  %value_args3 = low.op<cmd.arguments.append.buffer_ref>(%value_args2, %value_output_ref) : (reg<cmd.arguments>, reg<cmd.buffer_ref>) -> reg<cmd.arguments>
+  low.op<cmd.dispatch.direct>(%value_executable, %value_entry, %workgroup_count_x, %one_u32, %one_u32, %value_args3) : (reg<cmd.executable>, reg<cmd.entry>, reg<cmd.u32>, reg<cmd.u32>, reg<cmd.u32>, reg<cmd.arguments>)
+
+  low.op<cmd.execution.barrier>() : ()
+  low.return
+}
+
+// ====
+
+target.generic<reference> @command_target {contract_set_key = "cmd.core"}
+
+low.func.def target<cmd.core>(@command_target) @indirect_modes(
+    %launch_counts: reg<cmd.binding>,
+    %executable: reg<cmd.executable>,
+    %entry: reg<cmd.entry>) {
+  %zero = low.const<cmd.constant.u64> {value = 0} : reg<cmd.u64>
+  %count_length = low.const<cmd.constant.u64> {value = 12} : reg<cmd.u64>
+  %count_ref = low.op<cmd.buffer.ref.binding>(%launch_counts, %zero, %count_length) : (reg<cmd.binding>, reg<cmd.u64>, reg<cmd.u64>) -> reg<cmd.buffer_ref>
+  %arguments = low.op<cmd.arguments.empty>() : () -> reg<cmd.arguments>
+  low.op<cmd.dispatch.indirect.static>(%executable, %entry, %count_ref, %arguments) : (reg<cmd.executable>, reg<cmd.entry>, reg<cmd.buffer_ref>, reg<cmd.arguments>)
+  low.op<cmd.execution.barrier>() : ()
+  low.op<cmd.dispatch.indirect.dynamic>(%executable, %entry, %count_ref, %arguments) : (reg<cmd.executable>, reg<cmd.entry>, reg<cmd.buffer_ref>, reg<cmd.arguments>)
+  low.return
+}

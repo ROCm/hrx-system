@@ -36,6 +36,7 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/arch/amdgpu:provider",
+        "//loom/src/loom/target/arch/cmd:provider",
         "//loom/src/loom/target/arch/ireevm:provider",
         "//loom/src/loom/target/arch/spirv:provider",
         "//loom/src/loom/target/arch/wasm:provider",

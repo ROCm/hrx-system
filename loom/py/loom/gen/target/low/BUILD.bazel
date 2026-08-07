@@ -13,6 +13,7 @@ package(
 
 GENERATOR_VISIBILITY = [
     "//loom/py/loom/gen:__subpackages__",
+    "//loom/src/loom/target/arch/cmd/descriptors:__pkg__",
     "//loom/src/loom/target/arch/ireevm/descriptors:__pkg__",
     "//loom/src/loom/target/arch/llvmir/descriptors:__pkg__",
     "//loom/src/loom/target/arch/spirv/descriptors:__pkg__",
@@ -54,6 +55,20 @@ iree_py_library(
         "low_descriptor_shard.py",
     ],
     deps = LOW_DESCRIPTOR_SHARD_DEPS,
+)
+
+iree_py_binary(
+    name = "cmd_low_descriptor_shard",
+    srcs = [
+        "__init__.py",
+        "low_descriptor_shard.py",
+    ],
+    main = "low_descriptor_shard.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        ":low_descriptor_shard",
+        "//loom/py/loom/target/arch/cmd:descriptors",
+    ],
 )
 
 iree_py_binary(

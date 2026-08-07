@@ -21,6 +21,7 @@ loom_cc_library(
     iree::base
     iree::base::threading
     loom::target::arch::amdgpu::provider
+    loom::target::arch::cmd::provider
     loom::target::arch::ireevm::provider
     loom::target::arch::spirv::provider
     loom::target::arch::wasm::provider

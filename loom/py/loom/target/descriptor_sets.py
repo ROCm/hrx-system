@@ -37,6 +37,13 @@ class DescriptorSetRegistration:
 
 DESCRIPTOR_SET_REGISTRATIONS = (
     DescriptorSetRegistration(
+        key="cmd.core",
+        module_name="loom.target.arch.cmd.descriptors",
+        symbol_name="CMD_CORE_DESCRIPTOR_SET",
+        aliases=("cmd_core",),
+        generates_checked_in_c=False,
+    ),
+    DescriptorSetRegistration(
         key="ireevm.core",
         module_name="loom.target.arch.ireevm.descriptors",
         symbol_name="IREEVM_CORE_DESCRIPTOR_SET",

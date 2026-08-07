@@ -508,6 +508,7 @@ loom_cc_binary(
     ::provider
     ::test_provider
     iree::base
+    loom::target::arch::cmd::check::check_provider
     ${_loom_check_platform_deps}
   TESTONLY
 )
