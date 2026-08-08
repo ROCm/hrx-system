@@ -2322,11 +2322,59 @@ static iree_status_t iree_hal_streaming_queue_read_host_span(
   return status;
 }
 
+static iree_status_t iree_hal_streaming_enqueue_buffer_copy_rows(
+    iree_hal_streaming_stream_t* stream, iree_hal_buffer_t* src_buffer,
+    iree_device_size_t src_pitch, iree_hal_buffer_t* dst_buffer,
+    iree_device_size_t dst_offset, iree_device_size_t dst_pitch,
+    iree_device_size_t width, iree_device_size_t row_count) {
+  IREE_ASSERT_ARGUMENT(stream);
+  IREE_ASSERT_ARGUMENT(src_buffer);
+  IREE_ASSERT_ARGUMENT(dst_buffer);
+
+  iree_slim_mutex_lock(&stream->mutex);
+  iree_status_t status = iree_hal_streaming_stream_begin_locked(stream);
+  for (iree_device_size_t row = 0; row < row_count && iree_status_is_ok(status);
+       ++row) {
+    const iree_hal_buffer_ref_t source_ref =
+        iree_hal_make_buffer_ref(src_buffer, row * src_pitch, width);
+    const iree_hal_buffer_ref_t target_ref = iree_hal_make_buffer_ref(
+        dst_buffer, dst_offset + row * dst_pitch, width);
+    status = iree_hal_command_buffer_copy_buffer(stream->command_buffer,
+                                                 source_ref, target_ref,
+                                                 IREE_HAL_COPY_FLAG_NONE);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_command_buffer_barrier(stream->command_buffer);
+  }
+  iree_slim_mutex_unlock(&stream->mutex);
+  return status;
+}
+
+static iree_status_t iree_hal_streaming_retained_resource_call(
+    void* user_data, const uint64_t args[4],
+    iree_hal_host_call_context_t* call_context) {
+  (void)user_data;
+  (void)args;
+  (void)call_context;
+  return iree_ok_status();
+}
+
+// Keeps |resource| live until all previously queued stream work completes.
+// Streaming command buffers borrow their buffer references, so temporary
+// buffers recorded into them require an explicit stream-ordered lifetime.
+static iree_status_t iree_hal_streaming_retain_resource_until_stream_point(
+    iree_hal_streaming_stream_t* stream, iree_hal_resource_t* resource) {
+  const uint64_t args[4] = {0, 0, 0, 0};
+  const iree_hal_host_call_t call = iree_hal_make_host_call_with_resource(
+      iree_hal_streaming_retained_resource_call, /*user_data=*/NULL, resource);
+  return iree_hal_streaming_queue_host_call(stream, call, args,
+                                            IREE_HAL_HOST_CALL_FLAG_RELAXED);
+}
+
 static iree_status_t iree_hal_streaming_queue_read_host_rows(
     iree_hal_streaming_stream_t* stream, const void* src,
     iree_device_size_t src_pitch, iree_device_size_t source_span,
     iree_device_size_t width, iree_device_size_t row_count,
-    iree_io_file_handle_release_callback_t release_callback,
     iree_hal_buffer_t* dst_buffer, iree_device_size_t dst_offset,
     iree_device_size_t dst_pitch) {
   if (IREE_UNLIKELY(source_span > IREE_HOST_SIZE_MAX)) {
@@ -2334,25 +2382,46 @@ static iree_status_t iree_hal_streaming_queue_read_host_rows(
                             "pitched H2D source exceeds host address range");
   }
 
-  iree_hal_file_t* file = NULL;
-  iree_status_t status = iree_hal_streaming_import_host_file(
-      stream, IREE_IO_FILE_ACCESS_READ, IREE_HAL_MEMORY_ACCESS_READ, (void*)src,
-      (iree_host_size_t)source_span, release_callback, &file);
-  if (iree_status_is_ok(status) && width == src_pitch && width == dst_pitch) {
-    status = iree_hal_streaming_queue_read_file(
-        stream, file, /*source_offset=*/0, source_span, dst_buffer, dst_offset);
-  } else if (iree_status_is_ok(status)) {
-    status = iree_hal_streaming_stream_flush(stream);
-    iree_slim_mutex_lock(&stream->mutex);
-    for (iree_device_size_t row = 0;
-         row < row_count && iree_status_is_ok(status); ++row) {
-      status = iree_hal_streaming_queue_read_file_locked(
-          stream, file, row * src_pitch, width, dst_buffer,
-          dst_offset + row * dst_pitch);
-    }
-    iree_slim_mutex_unlock(&stream->mutex);
+  if (width == src_pitch && width == dst_pitch) {
+    return iree_hal_streaming_queue_read_host_span(
+        stream, src, source_span, iree_io_file_handle_release_callback_null(),
+        dst_buffer, dst_offset);
   }
-  iree_hal_file_release(file);
+
+  // Preserve source and destination padding without issuing one native queue
+  // operation per row. The native read observes pinned host memory after prior
+  // stream work, and the following command buffer performs the strided copy.
+  const iree_hal_buffer_params_t staging_params = {
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+      .queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
+      .min_alignment = 64,
+  };
+  iree_hal_buffer_t* staging_buffer = NULL;
+  iree_status_t status = iree_hal_allocator_allocate_buffer(
+      stream->context->device_allocator, staging_params, source_span,
+      &staging_buffer);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_queue_read_host_span(
+        stream, src, source_span, iree_io_file_handle_release_callback_null(),
+        staging_buffer,
+        /*dst_offset=*/0);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_enqueue_buffer_copy_rows(
+        stream, staging_buffer, src_pitch, dst_buffer, dst_offset, dst_pitch,
+        width, row_count);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_retain_resource_until_stream_point(
+        stream, &staging_buffer->resource);
+  }
+  if (!iree_status_is_ok(status) && staging_buffer) {
+    iree_status_t sync_status = iree_hal_streaming_stream_synchronize(stream);
+    status = iree_status_join(status, sync_status);
+  }
+  iree_hal_buffer_release(staging_buffer);
   return status;
 }
 
@@ -2423,46 +2492,83 @@ iree_status_t iree_hal_streaming_memcpy_buffer_to_host(
                                                   src_offset);
 }
 
-static iree_status_t iree_hal_streaming_enqueue_host_update(
+static iree_status_t iree_hal_streaming_enqueue_host_updates(
     iree_hal_streaming_stream_t* stream, const void* src,
-    iree_hal_streaming_buffer_ref_t dst_ref, iree_device_size_t size) {
+    iree_device_size_t src_pitch, iree_hal_streaming_buffer_ref_t dst_ref,
+    iree_device_size_t dst_pitch, iree_device_size_t width,
+    iree_device_size_t row_count) {
   IREE_ASSERT_ARGUMENT(stream);
   IREE_ASSERT_ARGUMENT(src);
+  if (width == 0 || row_count == 0) return iree_ok_status();
+  if (IREE_UNLIKELY(width > src_pitch || width > dst_pitch)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "host update width exceeds a row pitch");
+  }
   if (!dst_ref.buffer || !dst_ref.buffer->buffer) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "host update destination is not a device buffer");
   }
-  iree_device_size_t range_end = 0;
-  if (IREE_UNLIKELY(
-          !iree_device_size_checked_add(dst_ref.offset, size, &range_end) ||
-          range_end > dst_ref.buffer->size)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "host update exceeds destination buffer range");
-  }
 
-  const uint8_t* src_ptr = (const uint8_t*)src;
-  iree_device_size_t remaining = size;
-  iree_device_size_t chunk_offset = 0;
+  iree_device_size_t source_span = 0;
+  iree_device_size_t destination_span = 0;
+  if (IREE_UNLIKELY(
+          !iree_device_size_checked_mul(row_count - 1, src_pitch,
+                                        &source_span) ||
+          !iree_device_size_checked_add(source_span, width, &source_span) ||
+          !iree_device_size_checked_mul(row_count - 1, dst_pitch,
+                                        &destination_span) ||
+          !iree_device_size_checked_add(destination_span, width,
+                                        &destination_span) ||
+          source_span > IREE_HOST_SIZE_MAX)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "host update row span overflows");
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_hal_streaming_buffer_ref_validate_range(&dst_ref, destination_span));
+
+  // Pageable host memory has no stream-ordered lifetime contract. Snapshot
+  // each row into the command buffer before returning, then publish all row
+  // updates with one barrier.
+  const uint8_t* source_bytes = (const uint8_t*)src;
+  const bool is_contiguous = src_pitch == width && dst_pitch == width;
+  const iree_device_size_t update_width = is_contiguous ? source_span : width;
+  const iree_device_size_t update_row_count = is_contiguous ? 1 : row_count;
   iree_slim_mutex_lock(&stream->mutex);
   iree_status_t status = iree_hal_streaming_stream_begin_locked(stream);
-  while (remaining > 0 && iree_status_is_ok(status)) {
-    const iree_device_size_t this_chunk =
-        remaining < IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE
-            ? remaining
-            : IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE;
-    const iree_hal_buffer_ref_t target_ref = iree_hal_make_buffer_ref(
-        dst_ref.buffer->buffer, dst_ref.offset + chunk_offset, this_chunk);
-    status = iree_hal_command_buffer_update_buffer(
-        stream->command_buffer, src_ptr + chunk_offset, 0, target_ref,
-        IREE_HAL_UPDATE_FLAG_NONE);
-    chunk_offset += this_chunk;
-    remaining -= this_chunk;
+  for (iree_device_size_t row = 0;
+       row < update_row_count && iree_status_is_ok(status); ++row) {
+    const iree_device_size_t source_row_offset = row * src_pitch;
+    const iree_device_size_t destination_row_offset = row * dst_pitch;
+    iree_device_size_t remaining = update_width;
+    iree_device_size_t chunk_offset = 0;
+    while (remaining > 0 && iree_status_is_ok(status)) {
+      const iree_device_size_t chunk_length =
+          remaining < IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE
+              ? remaining
+              : IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE;
+      const iree_hal_buffer_ref_t target_ref = iree_hal_make_buffer_ref(
+          dst_ref.buffer->buffer,
+          dst_ref.offset + destination_row_offset + chunk_offset, chunk_length);
+      status = iree_hal_command_buffer_update_buffer(
+          stream->command_buffer,
+          source_bytes + (iree_host_size_t)source_row_offset + chunk_offset, 0,
+          target_ref, IREE_HAL_UPDATE_FLAG_NONE);
+      chunk_offset += chunk_length;
+      remaining -= chunk_length;
+    }
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_command_buffer_barrier(stream->command_buffer);
   }
   iree_slim_mutex_unlock(&stream->mutex);
   return status;
+}
+
+static iree_status_t iree_hal_streaming_enqueue_host_update(
+    iree_hal_streaming_stream_t* stream, const void* src,
+    iree_hal_streaming_buffer_ref_t dst_ref, iree_device_size_t size) {
+  return iree_hal_streaming_enqueue_host_updates(stream, src, size, dst_ref,
+                                                 size, size, /*row_count=*/1);
 }
 
 //===----------------------------------------------------------------------===//
@@ -2767,12 +2873,6 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device_2d(
                              "pitched H2D copy exceeds host address range"));
   }
 
-  const void* transfer_source = src;
-  iree_device_size_t transfer_pitch = src_pitch;
-  iree_device_size_t transfer_span = source_span;
-  iree_io_file_handle_release_callback_t release_callback =
-      iree_io_file_handle_release_callback_null();
-
   iree_hal_streaming_buffer_ref_t src_ref;
   iree_status_t src_status = iree_hal_streaming_memory_lookup(
       context, (iree_hal_streaming_deviceptr_t)src, &src_ref);
@@ -2785,38 +2885,16 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device_2d(
                                     "pitched H2D source is not host memory");
     }
     IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, src_status);
-  } else {
-    iree_status_ignore(src_status);
-    iree_device_size_t packed_size = 0;
-    if (IREE_UNLIKELY(
-            !iree_device_size_checked_mul(width, row_count, &packed_size) ||
-            packed_size > IREE_HOST_SIZE_MAX)) {
-      IREE_RETURN_AND_END_ZONE_IF_ERROR(
-          z0, iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                               "packed H2D staging size overflows"));
-    }
-    void* staging = NULL;
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_allocator_malloc(iree_allocator_system(),
-                                  (iree_host_size_t)packed_size, &staging));
-    const uint8_t* source_bytes = (const uint8_t*)src;
-    uint8_t* staging_bytes = (uint8_t*)staging;
-    for (iree_device_size_t row = 0; row < row_count; ++row) {
-      memcpy(staging_bytes + row * width, source_bytes + row * src_pitch,
-             width);
-    }
-    transfer_source = staging;
-    transfer_pitch = width;
-    transfer_span = packed_size;
-    release_callback = (iree_io_file_handle_release_callback_t){
-        .fn = iree_hal_streaming_release_owned_host_allocation,
-        .user_data = NULL,
-    };
+    iree_status_t status = iree_hal_streaming_queue_read_host_rows(
+        stream, src, src_pitch, source_span, width, row_count,
+        dst_ref.buffer->buffer, dst_ref.offset, dst_pitch);
+    IREE_TRACE_ZONE_END(z0);
+    return status;
   }
+  iree_status_ignore(src_status);
 
-  iree_status_t status = iree_hal_streaming_queue_read_host_rows(
-      stream, transfer_source, transfer_pitch, transfer_span, width, row_count,
-      release_callback, dst_ref.buffer->buffer, dst_ref.offset, dst_pitch);
+  iree_status_t status = iree_hal_streaming_enqueue_host_updates(
+      stream, src, src_pitch, dst_ref, dst_pitch, width, row_count);
 
   IREE_TRACE_ZONE_END(z0);
   return status;
