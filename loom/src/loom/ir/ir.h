@@ -820,6 +820,9 @@ enum loom_op_vtable_flag_bits_e {
   // The op kind has generated constraints or type-transfer hooks that can
   // narrow dynamic type properties during table-driven type propagation.
   LOOM_OP_VTABLE_TYPE_PROPAGATION_CANDIDATE = 1u << 5,
+  // The op kind's assembly format contains an operand dictionary requiring
+  // structural verification against its keyed operand segment.
+  LOOM_OP_VTABLE_HAS_OPERAND_DICT = 1u << 6,
 };
 typedef uint8_t loom_op_vtable_flags_t;
 

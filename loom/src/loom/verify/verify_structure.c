@@ -1005,7 +1005,10 @@ static void loom_verify_emit_operand_dict_attr_violation(
 
 void loom_verify_operand_dicts(loom_verify_state_t* state, const loom_op_t* op,
                                const loom_op_vtable_t* vtable) {
-  if (!vtable->format_elements) return;
+  if (!iree_any_bit_set(vtable->vtable_flags,
+                        LOOM_OP_VTABLE_HAS_OPERAND_DICT)) {
+    return;
+  }
   for (uint16_t element_index = 0; element_index < vtable->format_element_count;
        ++element_index) {
     const loom_format_element_t* element =

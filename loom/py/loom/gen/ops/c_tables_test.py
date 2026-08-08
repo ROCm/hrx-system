@@ -2308,6 +2308,7 @@ def test_operand_dict_generates_format_and_builder_support() -> None:
     tables_c = generate_tables_c("test", 0, [op])
 
     assert "LOOM_FORMAT_KIND_OPERAND_DICT" in tables_c
+    assert "LOOM_OP_VTABLE_HAS_OPERAND_DICT" in tables_c
     assert "const loom_named_value_t* params" in ops_h
     assert "iree_host_size_t params_count" in ops_h
     assert "loom_make_named_value_slice(params, params_count)" in builders_c
@@ -2337,6 +2338,7 @@ def test_attr_table_generates_format_and_builder_support() -> None:
     tables_c = generate_tables_c("test", 0, [op])
 
     assert "LOOM_FORMAT_KIND_ATTR_TABLE" in tables_c
+    assert "LOOM_OP_VTABLE_HAS_OPERAND_DICT" not in tables_c
     assert "const int64_t* case_keys" in ops_h
     assert "iree_host_size_t case_keys_count" in ops_h
     assert "const loom_value_id_t* values" in ops_h
