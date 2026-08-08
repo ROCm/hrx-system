@@ -239,11 +239,6 @@ struct iree_hal_streaming_context_t {
   // Serializes access to |pending_free_head| and terminal free callbacks.
   iree_slim_mutex_t pending_free_mutex;
 
-  // Cached host-visible staging buffer for blocking pageable H2D transfers.
-  // Guarded by |mutex| and released during context destruction.
-  iree_hal_streaming_buffer_t* pageable_h2d_staging_buffer;
-  iree_device_size_t pageable_h2d_staging_size;
-
   // Number of streams in this context with capture state other than NONE.
   iree_atomic_int32_t capture_stream_count;
 
@@ -1864,10 +1859,6 @@ iree_status_t iree_hal_streaming_memory_allocate_managed(
 // Synchronization: all active contexts.
 iree_status_t iree_hal_streaming_memory_free_host(
     iree_hal_streaming_context_t* context, void* ptr);
-
-// Synchronization: none; called during context destruction after streams idle.
-void iree_hal_streaming_memory_release_pageable_staging(
-    iree_hal_streaming_context_t* context);
 
 // Wraps an existing HAL buffer and registers it in the context pointer map.
 // The wrapper retains |buffer| for HRX interop, but callers must still ensure

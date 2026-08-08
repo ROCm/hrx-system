@@ -81,8 +81,6 @@ iree_status_t iree_hal_streaming_context_create(
   memset(&context->symbol_map, 0, sizeof(context->symbol_map));
   memset(&context->buffer_table, 0, sizeof(context->buffer_table));
   context->pending_free_head = NULL;
-  context->pageable_h2d_staging_buffer = NULL;
-  context->pageable_h2d_staging_size = 0;
   iree_atomic_store(&context->capture_stream_count, 0,
                     iree_memory_order_relaxed);
   context->host_allocator = host_allocator;
@@ -182,8 +180,6 @@ static void iree_hal_streaming_context_destroy(
     iree_status_fprint(stderr, status);
     iree_status_free(status);
   }
-
-  iree_hal_streaming_memory_release_pageable_staging(context);
 
   // Deinitialize symbol map and unload any statically-registered modules that
   // were on-demand loaded for this context.
