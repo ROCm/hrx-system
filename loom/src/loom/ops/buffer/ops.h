@@ -26,7 +26,8 @@ enum {
   LOOM_OP_BUFFER_ASSUME_NOALIAS = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 3),
   LOOM_OP_BUFFER_ASSUME_SAME_ROOT = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 4),
   LOOM_OP_BUFFER_VIEW = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 5),
-  LOOM_OP_BUFFER_COUNT_ = 6,
+  LOOM_OP_BUFFER_PACK = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 6),
+  LOOM_OP_BUFFER_COUNT_ = 7,
 };
 
 // LOOM_OP_BUFFER_ALLOCA: Create a fixed-frame scratch buffer root in workgroup or private memory. Each execution produces a distinct storage identity; identical allocas must not be commoned. The byte length is the requested physical byte count for the execution. Targets requiring a static frame reserve its proven finite non-negative maximum. base_alignment is the minimum byte alignment of the root storage base.
@@ -156,6 +157,34 @@ iree_status_t loom_buffer_view_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 iree_status_t loom_buffer_view_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_BUFFER_PACK: Lay out simultaneously live physical byte ranges in one dense slab. Ranges retain operand order, begin at offsets satisfying their minimum alignments, and never alias. The total byte length is rounded up to the greatest range alignment so the result can be used as a repeatable record stride. Byte lengths may remain dynamic through specialization. Allocation lifetime packing is a separate compiler responsibility and must not be encoded with this operation.
+// %total, %header_offset, %payload_offset = buffer.pack [align(16) %header_bytes, align(256) %payload_bytes] : offset
+LOOM_DEFINE_ISA(loom_buffer_pack_isa, LOOM_OP_BUFFER_PACK)
+LOOM_DEFINE_VARIADIC_OPERANDS(loom_buffer_pack_byte_lengths, 0)
+LOOM_DEFINE_RESULT(loom_buffer_pack_total_byte_length, 0)
+LOOM_DEFINE_VARIADIC_RESULTS(loom_buffer_pack_byte_offsets, 1)
+LOOM_DEFINE_ATTR_I64_ARRAY(loom_buffer_pack_minimum_alignments, 0)
+iree_status_t loom_buffer_pack_build(
+    loom_builder_t* builder,
+    loom_may_consume const loom_value_id_t* byte_lengths,
+    iree_host_size_t byte_lengths_count,
+    const int64_t* minimum_alignments,
+    iree_host_size_t minimum_alignments_count,
+    const loom_type_t* result_types,
+    iree_host_size_t result_count,
+    const loom_tied_result_t* tied_results,
+    iree_host_size_t tied_result_count,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_buffer_pack_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+iree_status_t loom_buffer_pack_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 

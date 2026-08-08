@@ -144,6 +144,35 @@ iree_status_t loom_buffer_alloca_verify(const loom_module_t* module,
       emitter, op, loom_buffer_alloca_memory_space(op));
 }
 
+iree_status_t loom_buffer_pack_verify(const loom_module_t* module,
+                                      const loom_op_t* op,
+                                      iree_diagnostic_emitter_t emitter) {
+  loom_value_slice_t byte_lengths = loom_buffer_pack_byte_lengths(op);
+  if (byte_lengths.count == 0) {
+    return loom_buffer_emit_attribute_value_constraint(
+        emitter, op, IREE_SV("byte_lengths"), 0,
+        IREE_SV("at least one physical byte range"));
+  }
+
+  loom_attribute_t minimum_alignments = loom_buffer_pack_minimum_alignments(op);
+  if (minimum_alignments.count != byte_lengths.count) {
+    return loom_buffer_emit_attribute_value_constraint(
+        emitter, op, IREE_SV("minimum_alignments"), minimum_alignments.count,
+        IREE_SV("one entry per byte length"));
+  }
+  for (uint16_t i = 0; i < minimum_alignments.count; ++i) {
+    const int64_t minimum_alignment = minimum_alignments.i64_array[i];
+    if (iree_math_is_power_of_two_i64(minimum_alignment)) continue;
+    char attribute_name[64] = {0};
+    iree_snprintf(attribute_name, sizeof(attribute_name),
+                  "minimum_alignments[%u]", (unsigned)i);
+    return loom_buffer_emit_attribute_value_constraint(
+        emitter, op, iree_make_cstring_view(attribute_name), minimum_alignment,
+        IREE_SV("positive power-of-two byte alignment"));
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_buffer_assume_memory_space_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter) {

@@ -16,11 +16,13 @@ from loom.assembly import (
     LBRACKET,
     RBRACE,
     RBRACKET,
+    AlignedRefs,
     Attr,
     AttrDict,
     Ref,
     Refs,
     ResultType,
+    ResultTypeList,
     TemplateParam,
     TypeOf,
     TypesOf,
@@ -30,6 +32,7 @@ from loom.dialect.memory import MemorySpace
 from loom.dsl import (
     ATTR_TYPE_ENUM,
     ATTR_TYPE_I64,
+    ATTR_TYPE_I64_ARRAY,
     BUFFER,
     FACT_IDENTITY,
     OFFSET,
@@ -43,6 +46,7 @@ from loom.dsl import (
     Operand,
     OpPhase,
     Result,
+    SameType,
     VariadicValuesMatch,
 )
 
@@ -110,6 +114,67 @@ buffer_alloca = Op(
     ],
     examples=[
         "%scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer",
+    ],
+)
+
+# ============================================================================
+# buffer.pack — lay out simultaneously live byte ranges in one slab
+# ============================================================================
+
+buffer_pack = Op(
+    name="buffer.pack",
+    group=buffer_ops,
+    doc=(
+        "Lay out simultaneously live physical byte ranges in one dense slab. "
+        "Ranges retain operand order, begin at offsets satisfying their "
+        "minimum alignments, and never alias. The total byte length is rounded "
+        "up to the greatest range alignment so the result can be used as a "
+        "repeatable record stride. Byte lengths may remain dynamic through "
+        "specialization. Allocation lifetime packing is a separate compiler "
+        "responsibility and must not be encoded with this operation."
+    ),
+    operands=[
+        Operand(
+            "byte_lengths",
+            OFFSET,
+            doc="Physical byte length of each range in slab order.",
+            variadic=True,
+        ),
+    ],
+    results=[
+        Result(
+            "total_byte_length",
+            OFFSET,
+            doc="Aligned physical byte length of the complete slab.",
+        ),
+        Result(
+            "byte_offsets",
+            OFFSET,
+            doc="Slab-relative byte offset of each range.",
+            variadic=True,
+        ),
+    ],
+    attrs=[
+        AttrDef(
+            "minimum_alignments",
+            ATTR_TYPE_I64_ARRAY,
+            doc="Positive power-of-two minimum byte alignment for each range.",
+        ),
+    ],
+    constraints=[
+        VariadicValuesMatch("byte_lengths", "byte_offsets"),
+        SameType("total_byte_length", "byte_offsets"),
+    ],
+    traits=[PURE],
+    verify="loom_buffer_pack_verify",
+    facts="loom_buffer_pack_facts",
+    format=[
+        AlignedRefs("byte_lengths", "minimum_alignments"),
+        COLON,
+        ResultTypeList("total_byte_length", parens=False, uniform=True),
+    ],
+    examples=[
+        ("%total, %header_offset, %payload_offset = buffer.pack [align(16) %header_bytes, align(256) %payload_bytes] : offset"),
     ],
 )
 
@@ -307,4 +372,5 @@ ALL_BUFFER_OPS: tuple[Op, ...] = (
     buffer_assume_noalias,
     buffer_assume_same_root,
     buffer_view,
+    buffer_pack,
 )
