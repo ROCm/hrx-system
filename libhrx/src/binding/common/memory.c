@@ -2655,7 +2655,7 @@ static iree_status_t iree_hal_streaming_strided_3d_span(
   if (IREE_UNLIKELY(
           !iree_device_size_checked_mul(row_pitch, height,
                                         &minimum_slice_pitch) ||
-          slice_pitch < minimum_slice_pitch ||
+          (depth > 1 && slice_pitch < minimum_slice_pitch) ||
           !iree_device_size_checked_mul(depth - 1, slice_pitch,
                                         &last_slice_offset) ||
           !iree_device_size_checked_mul(height - 1, row_pitch,
