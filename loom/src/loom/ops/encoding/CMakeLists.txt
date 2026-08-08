@@ -49,6 +49,26 @@ loom_generated_cc_library(
     loom::util::stable_id
 )
 
+loom_cc_benchmark(
+  NAME
+    static_encoding_benchmark
+  SRCS
+    "static_encoding_benchmark.cc"
+  DEPS
+    ::encoding
+    iree::base
+    iree::base::internal::arena
+    iree::testing::benchmark_main
+    loom::format::text::parser
+    loom::format::text::printer
+    loom::ir
+    loom::util::fact_table
+    loom::util::stream
+  ARGS
+    "--benchmark_filter=BM_.*DistinctStatic.*/32"
+  TESTONLY
+)
+
 loom_cc_test(
   NAME
     format_test
