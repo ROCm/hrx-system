@@ -263,12 +263,6 @@ static void loom_verify_op_trait_flags_consistency(
                               IREE_ARRAYSIZE(params));
 }
 
-void loom_verify_op_declared_trait_consistency(loom_verify_state_t* state,
-                                               const loom_op_t* op,
-                                               const loom_op_vtable_t* vtable) {
-  loom_verify_op_trait_flags_consistency(state, op, vtable, vtable->traits);
-}
-
 void loom_verify_op_effective_trait_consistency(
     loom_verify_state_t* state, const loom_op_t* op,
     const loom_op_vtable_t* vtable) {
@@ -1005,7 +999,10 @@ static void loom_verify_emit_operand_dict_attr_violation(
 
 void loom_verify_operand_dicts(loom_verify_state_t* state, const loom_op_t* op,
                                const loom_op_vtable_t* vtable) {
-  if (!vtable->format_elements) return;
+  if (!iree_any_bit_set(vtable->vtable_flags,
+                        LOOM_OP_VTABLE_HAS_OPERAND_DICT)) {
+    return;
+  }
   for (uint16_t element_index = 0; element_index < vtable->format_element_count;
        ++element_index) {
     const loom_format_element_t* element =
@@ -1470,8 +1467,18 @@ static void loom_verify_attr_symbol_references(
 }
 
 void loom_verify_module_type_symbol_references(loom_verify_state_t* state) {
+  state->type_summary = (loom_verify_type_summary_t){
+      .all_well_formed = true,
+      .may_reference_values = false,
+  };
   for (iree_host_size_t i = 0; i < state->module->types.count; ++i) {
     loom_type_t type = state->module->types.entries[i];
+    if (loom_verify_type_well_formed_malformation(type) !=
+        LOOM_VERIFY_TYPE_MALFORMATION_NONE) {
+      state->type_summary.all_well_formed = false;
+    }
+    state->type_summary.may_reference_values |=
+        loom_type_may_reference_values(type);
     if (!loom_type_is_parameterized(type)) continue;
     const loom_parameterized_type_descriptor_t* descriptor =
         loom_type_parameterized_descriptor(type);
@@ -1529,21 +1536,6 @@ static bool loom_verify_region_terminator_matches(
   return terminator->kind == region_descriptor->terminator;
 }
 
-static bool loom_verify_region_has_cfg_successors(const loom_region_t* region) {
-  if (!region) return false;
-  if (iree_any_bit_set(region->flags, LOOM_REGION_INSTANCE_FLAG_CFG)) {
-    return true;
-  }
-  for (uint16_t b = 0; b < region->block_count; ++b) {
-    const loom_block_t* block = loom_region_const_block(region, b);
-    const loom_op_t* op = NULL;
-    loom_block_for_each_op(block, op) {
-      if (op->successor_count > 0) return true;
-    }
-  }
-  return false;
-}
-
 bool loom_verify_region_entry_yield(
     loom_verify_state_t* state, const loom_op_t* op,
     const loom_op_vtable_t* vtable, uint8_t region_index,
@@ -1572,116 +1564,4 @@ bool loom_verify_region_entry_yield(
     return true;
   }
   return false;
-}
-
-static iree_string_view_t loom_verify_op_kind_name(loom_verify_state_t* state,
-                                                   loom_op_kind_t kind) {
-  const loom_op_vtable_t* vtable = loom_verify_lookup_vtable(state, kind);
-  if (!vtable) return IREE_SV("<unknown op>");
-  return loom_op_vtable_name(vtable);
-}
-
-static void loom_verify_region_terminator_kind(
-    loom_verify_state_t* state, const loom_op_t* op,
-    const loom_op_vtable_t* vtable, uint8_t region_index,
-    bool region_uses_cfg_successors,
-    const loom_region_descriptor_t* region_descriptor,
-    const loom_op_t* terminator_op) {
-  if (!terminator_op || region_uses_cfg_successors ||
-      loom_verify_region_terminator_matches(region_descriptor, terminator_op)) {
-    return;
-  }
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(loom_op_vtable_name(vtable)),
-      loom_param_u32(region_index),
-      loom_param_string(
-          loom_verify_op_kind_name(state, region_descriptor->terminator)),
-      loom_param_string(loom_verify_op_kind_name(state, terminator_op->kind)),
-  };
-  loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_018, params,
-                              IREE_ARRAYSIZE(params));
-}
-
-void loom_verify_region_structure(loom_verify_state_t* state,
-                                  const loom_op_t* op,
-                                  const loom_op_vtable_t* vtable) {
-  if (!vtable->region_descriptors) return;
-  iree_string_view_t op_name = loom_op_vtable_name(vtable);
-  loom_region_t** regions = loom_op_regions(op);
-  for (uint8_t i = 0; i < op->region_count; ++i) {
-    const loom_region_descriptor_t* region_descriptor =
-        loom_op_vtable_region_descriptor(vtable, i);
-    if (!region_descriptor) return;
-    loom_region_t* region = regions[i];
-    if (!region) {
-      if (iree_any_bit_set(region_descriptor->flags, LOOM_REGION_OPTIONAL)) {
-        continue;
-      }
-      loom_diagnostic_param_t params[] = {
-          loom_param_string(op_name),
-          loom_param_u32(op->region_count),
-          loom_param_u32(vtable->region_count),
-      };
-      loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_004, params,
-                                  IREE_ARRAYSIZE(params));
-      continue;
-    }
-    if ((region_descriptor->flags & LOOM_REGION_SINGLE_BLOCK) &&
-        region->block_count != 1) {
-      loom_diagnostic_param_t params[] = {
-          loom_param_string(op_name),
-          loom_param_u32(i),
-          loom_param_u32(region->block_count),
-      };
-      loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_006, params,
-                                  IREE_ARRAYSIZE(params));
-    }
-    bool region_uses_cfg_successors =
-        loom_verify_region_has_cfg_successors(region);
-    for (uint16_t b = 0; b < region->block_count; ++b) {
-      const loom_block_t* block = loom_region_const_block(region, b);
-      const loom_op_t* terminator_op = NULL;
-      const loom_op_t* current_op = NULL;
-      loom_block_for_each_op(block, current_op) {
-        if (terminator_op) {
-          const loom_op_vtable_t* current_vtable =
-              loom_verify_lookup_vtable(state, current_op->kind);
-          iree_string_view_t current_name =
-              current_vtable ? loom_op_vtable_name(current_vtable)
-                             : IREE_SV("<unknown op>");
-          loom_diagnostic_param_t params[] = {
-              loom_param_string(current_name),
-          };
-          loom_diagnostic_related_op_t related_ops[] = {{
-              .label = IREE_SV("terminator here"),
-              .op = terminator_op,
-          }};
-          loom_diagnostic_emission_t emission = {
-              .op = current_op,
-              .error = LOOM_ERR_STRUCTURE_012,
-              .params = params,
-              .param_count = IREE_ARRAYSIZE(params),
-              .related_ops = related_ops,
-              .related_op_count = IREE_ARRAYSIZE(related_ops),
-          };
-          loom_verify_emit_diagnostic(state, &emission);
-          continue;
-        }
-        if (loom_verify_op_is_terminator(state, current_op)) {
-          terminator_op = current_op;
-        }
-      }
-      if (!terminator_op && !region_uses_cfg_successors) {
-        loom_diagnostic_param_t params[] = {
-            loom_param_string(op_name),
-            loom_param_u32(i),
-        };
-        loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_005, params,
-                                    IREE_ARRAYSIZE(params));
-      }
-      loom_verify_region_terminator_kind(state, op, vtable, i,
-                                         region_uses_cfg_successors,
-                                         region_descriptor, terminator_op);
-    }
-  }
 }

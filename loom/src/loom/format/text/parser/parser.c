@@ -454,9 +454,6 @@ static iree_status_t loom_finalize_op(
            parsed->successor_count * sizeof(loom_block_t*));
     loom_region_t* successor_region =
         op->parent_block ? op->parent_block->parent_region : NULL;
-    if (successor_region) {
-      successor_region->flags |= LOOM_REGION_INSTANCE_FLAG_CFG;
-    }
     for (uint8_t i = 0; i < parsed->successor_count; ++i) {
       if (parsed->successor_label_tokens[i].kind == LOOM_TOKEN_BLOCK_LABEL) {
         IREE_RETURN_IF_ERROR(loom_parser_add_pending_successor_ref(

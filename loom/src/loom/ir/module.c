@@ -4268,6 +4268,9 @@ static iree_status_t loom_block_link_op_between(loom_module_t* module,
   op->block_ordinal = ordinal;
   op->prev_op = prev_op;
   op->next_op = next_op;
+  if (op->successor_count > 0 && block->parent_region) {
+    block->parent_region->flags |= LOOM_REGION_INSTANCE_FLAG_CFG;
+  }
 
   if (prev_op) {
     prev_op->next_op = op;

@@ -9,9 +9,6 @@
 
 #include "loom/verify/verify_state.h"
 
-void loom_verify_op_declared_trait_consistency(loom_verify_state_t* state,
-                                               const loom_op_t* op,
-                                               const loom_op_vtable_t* vtable);
 void loom_verify_op_effective_trait_consistency(loom_verify_state_t* state,
                                                 const loom_op_t* op,
                                                 const loom_op_vtable_t* vtable);
@@ -52,8 +49,5 @@ bool loom_verify_region_entry_yield(loom_verify_state_t* state,
                                     uint8_t region_index,
                                     uint16_t* out_yield_count,
                                     const loom_value_id_t** out_yield_operands);
-void loom_verify_region_structure(loom_verify_state_t* state,
-                                  const loom_op_t* op,
-                                  const loom_op_vtable_t* vtable);
 
 #endif  // LOOM_VERIFY_VERIFY_STRUCTURE_H_

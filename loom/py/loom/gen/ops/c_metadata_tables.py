@@ -672,6 +672,8 @@ def generate_tables_c(
             vtable_flag_bits.append("LOOM_OP_VTABLE_HAS_INSTANCE_FLAGS")
         if c_queries.op_has_type_propagation_candidate(op, layout):
             vtable_flag_bits.append("LOOM_OP_VTABLE_TYPE_PROPAGATION_CANDIDATE")
+        if any(kind == "LOOM_FORMAT_KIND_OPERAND_DICT" for kind, _, _ in elements):
+            vtable_flag_bits.append("LOOM_OP_VTABLE_HAS_OPERAND_DICT")
         vtable_flags_str = " | ".join(vtable_flag_bits) if vtable_flag_bits else "0"
 
         sym_kind = _symbol_kind(op)
