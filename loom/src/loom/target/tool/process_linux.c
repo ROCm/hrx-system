@@ -4,6 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+// _GNU_SOURCE must be defined before any system header so that <spawn.h>
+// declares posix_spawn_file_actions_addclosefrom_np on glibc.
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif  // _GNU_SOURCE
+
 #include "loom/target/tool/process_platform.h"
 
 #if defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_ANDROID)
