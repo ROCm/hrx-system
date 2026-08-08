@@ -613,6 +613,9 @@ kernel.def target(@gfx11_generic) @configured_store() {
   EXPECT_NE(module_text.find("@configured_store("), std::string::npos)
       << module_text;
 
+  // Compiled function-version facts are module-owned and must not borrow the
+  // invocation profile used to produce them.
+  profile.reset();
   ResultPtr emit_result =
       EmitModule(target_environment.get(), workspace.get(), module.get(),
                  /*runtime_globals=*/0, LOOMC_ARTIFACT_MANIFEST_MODE_SUMMARY);
