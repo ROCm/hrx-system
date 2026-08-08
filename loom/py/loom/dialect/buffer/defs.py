@@ -69,12 +69,13 @@ buffer_alloca = Op(
     name="buffer.alloca",
     group=buffer_ops,
     doc=(
-        "Create a fixed-frame scratch buffer root in workgroup or private memory. "
+        "Create a fixed-frame scratch buffer root in an allocatable memory space. "
         "Each execution produces a distinct storage identity; identical allocas "
         "must not be commoned. The byte length is the requested physical byte "
         "count for the execution. Targets requiring a static frame reserve its "
         "proven finite non-negative maximum. base_alignment is the minimum byte "
-        "alignment of the root storage base."
+        "alignment of the root storage base. Target lowering determines which "
+        "allocatable spaces are legal for the containing program kind."
     ),
     operands=[
         Operand(
@@ -101,7 +102,7 @@ buffer_alloca = Op(
             "memory_space",
             ATTR_TYPE_ENUM,
             enum_def=MemorySpace,
-            doc="Scratch memory space for the root; must be workgroup or private.",
+            doc="Allocatable scratch memory space for the root.",
         ),
     ],
     verify="loom_buffer_alloca_verify",

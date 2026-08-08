@@ -25,16 +25,23 @@ func.def @buffer_alloca_rejects_non_power_of_two_alignment(%size: offset) {
 // ====
 
 func.def @buffer_alloca_rejects_unknown_memory_space(%size: offset) {
-  // ERROR@+1: STRUCTURE/014 "memory_space" "0" "workgroup or private memory space"
+  // ERROR@+1: STRUCTURE/014 "memory_space" "0" "global, workgroup, private, host, or generic memory space"
   %scratch = buffer.alloca %size {base_alignment = 64, memory_space = unknown} : buffer
   func.return
 }
 
 // ====
 
-func.def @buffer_alloca_rejects_global_memory_space(%size: offset) {
-  // ERROR@+1: STRUCTURE/014 "memory_space" "1" "workgroup or private memory space"
+func.def @buffer_alloca_accepts_global_memory_space(%size: offset) {
   %scratch = buffer.alloca %size {base_alignment = 64, memory_space = global} : buffer
+  func.return
+}
+
+// ====
+
+func.def @buffer_alloca_rejects_constant_memory_space(%size: offset) {
+  // ERROR@+1: STRUCTURE/014 "memory_space" "4" "global, workgroup, private, host, or generic memory space"
+  %scratch = buffer.alloca %size {base_alignment = 64, memory_space = constant} : buffer
   func.return
 }
 

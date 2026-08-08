@@ -75,16 +75,21 @@ static iree_status_t loom_buffer_verify_concrete_memory_space(
       emitter, op, attr_name, value, IREE_SV("concrete memory space"));
 }
 
-static iree_status_t loom_buffer_verify_scratch_memory_space(
+static iree_status_t loom_buffer_verify_allocatable_memory_space(
     iree_diagnostic_emitter_t emitter, const loom_op_t* op,
     loom_value_fact_memory_space_t value) {
-  if (value == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP ||
-      value == LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE) {
-    return iree_ok_status();
+  switch (value) {
+    case LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL:
+    case LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP:
+    case LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE:
+    case LOOM_VALUE_FACT_MEMORY_SPACE_HOST:
+    case LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC:
+      return iree_ok_status();
+    default:
+      return loom_buffer_emit_attribute_value_constraint(
+          emitter, op, IREE_SV("memory_space"), value,
+          IREE_SV("global, workgroup, private, host, or generic memory space"));
   }
-  return loom_buffer_emit_attribute_value_constraint(
-      emitter, op, IREE_SV("memory_space"), value,
-      IREE_SV("workgroup or private memory space"));
 }
 
 static bool loom_buffer_try_get_local_memory_space_fact(
@@ -140,7 +145,7 @@ iree_status_t loom_buffer_alloca_verify(const loom_module_t* module,
         emitter, op, IREE_SV("base_alignment"), base_alignment,
         IREE_SV("positive power-of-two byte alignment"));
   }
-  return loom_buffer_verify_scratch_memory_space(
+  return loom_buffer_verify_allocatable_memory_space(
       emitter, op, loom_buffer_alloca_memory_space(op));
 }
 
