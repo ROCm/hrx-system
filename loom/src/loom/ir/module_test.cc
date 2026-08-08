@@ -2393,6 +2393,25 @@ TEST_F(ModuleTest, BlockAppendOp) {
   loom_module_free(module);
 }
 
+TEST_F(ModuleTest, BlockAppendSuccessorOpMarksRegionCfg) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+  loom_block_t* block = loom_module_block(module);
+
+  loom_op_t* op = NULL;
+  IREE_ASSERT_OK(iree_arena_allocate(
+      &module->arena, sizeof(loom_op_t) + sizeof(loom_block_t*), (void**)&op));
+  memset(op, 0, sizeof(loom_op_t) + sizeof(loom_block_t*));
+  op->kind = 0x0100;
+  op->successor_count = 1;
+
+  IREE_ASSERT_OK(loom_block_append_op(module, block, op));
+  EXPECT_TRUE(
+      iree_any_bit_set(module->body->flags, LOOM_REGION_INSTANCE_FLAG_CFG));
+  loom_module_free(module);
+}
+
 TEST_F(ModuleTest, BlockAppendOrdering) {
   loom_module_t* module = NULL;
   IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,

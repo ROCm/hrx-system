@@ -1536,21 +1536,6 @@ static bool loom_verify_region_terminator_matches(
   return terminator->kind == region_descriptor->terminator;
 }
 
-static bool loom_verify_region_has_cfg_successors(const loom_region_t* region) {
-  if (!region) return false;
-  if (iree_any_bit_set(region->flags, LOOM_REGION_INSTANCE_FLAG_CFG)) {
-    return true;
-  }
-  for (uint16_t b = 0; b < region->block_count; ++b) {
-    const loom_block_t* block = loom_region_const_block(region, b);
-    const loom_op_t* op = NULL;
-    loom_block_for_each_op(block, op) {
-      if (op->successor_count > 0) return true;
-    }
-  }
-  return false;
-}
-
 bool loom_verify_region_entry_yield(
     loom_verify_state_t* state, const loom_op_t* op,
     const loom_op_vtable_t* vtable, uint8_t region_index,
@@ -1644,7 +1629,7 @@ void loom_verify_region_structure(loom_verify_state_t* state,
                                   IREE_ARRAYSIZE(params));
     }
     bool region_uses_cfg_successors =
-        loom_verify_region_has_cfg_successors(region);
+        iree_any_bit_set(region->flags, LOOM_REGION_INSTANCE_FLAG_CFG);
     for (uint16_t b = 0; b < region->block_count; ++b) {
       const loom_block_t* block = loom_region_const_block(region, b);
       const loom_op_t* terminator_op = NULL;
