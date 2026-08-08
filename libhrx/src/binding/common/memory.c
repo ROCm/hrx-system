@@ -2250,10 +2250,26 @@ static iree_status_t iree_hal_streaming_memory_lookup_memset_range(
     lookup_status = iree_hal_streaming_memory_lookup_range_across_contexts(
         dst, length, out_owner_context, out_dst_ref);
     if (iree_status_is_ok(lookup_status)) {
-      if (!out_dst_ref->buffer->is_managed) {
+      if (out_dst_ref->buffer->allocation_pool) {
+        lookup_status = iree_hal_streaming_memory_validate_pool_access(
+            out_dst_ref->buffer, context->device_ordinal,
+            HRX_MEMORY_ACCESS_WRITE);
+      } else if (!out_dst_ref->buffer->is_managed &&
+                 !out_dst_ref->buffer->is_virtual_reservation) {
+        iree_slim_mutex_lock(&(*out_owner_context)->peer_access_mutex);
+        const bool peer_access_enabled =
+            (*out_owner_context)
+                ->peer_accessor_counts[context->device_ordinal] != 0;
+        iree_slim_mutex_unlock(&(*out_owner_context)->peer_access_mutex);
+        if (!peer_access_enabled) {
+          lookup_status = iree_make_status(
+              IREE_STATUS_PERMISSION_DENIED,
+              "destination device has not enabled peer access");
+        }
+      }
+      if (!iree_status_is_ok(lookup_status)) {
         iree_hal_streaming_context_release(*out_owner_context);
         *out_owner_context = NULL;
-        lookup_status = iree_status_from_code(IREE_STATUS_NOT_FOUND);
       }
     }
   }
@@ -2264,6 +2280,7 @@ iree_status_t iree_hal_streaming_memory_memset(
     iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
     iree_device_size_t length, const void* pattern,
     iree_host_size_t pattern_length, iree_hal_streaming_stream_t* stream) {
+  IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(dst);
   IREE_ASSERT_ARGUMENT(pattern);
   IREE_ASSERT_ARGUMENT(stream);
@@ -2294,8 +2311,9 @@ iree_status_t iree_hal_streaming_memory_memset(
     return iree_ok_status();
   }
 
-  // Look up the entire destination range. Managed allocations are process-wide
-  // HIP pointers, so a device switch after allocation must still resolve them.
+  // Look up the entire destination range. Managed and virtual allocations are
+  // process-wide pointers, while ordinary peer allocations require explicit
+  // access from the current device.
   iree_hal_streaming_buffer_ref_t dst_ref;
   iree_hal_streaming_context_t* owner_context = NULL;
   iree_status_t lookup_status = iree_hal_streaming_memory_lookup_memset_range(
@@ -2315,15 +2333,126 @@ iree_status_t iree_hal_streaming_memory_memset(
                 "memset destination is not represented by a HAL buffer"));
   }
 
+  iree_hal_buffer_t* target_buffer = dst_ref.buffer->buffer;
+  iree_status_t status = iree_ok_status();
+  if (owner_context) {
+    status = iree_hal_streaming_memory_import_buffer_for_context(
+        context, dst_ref.buffer, &target_buffer, NULL);
+  }
+
   iree_slim_mutex_lock(&stream->mutex);
-  iree_status_t status = iree_hal_streaming_stream_begin_locked(stream);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_stream_begin_locked(stream);
+  }
 
   iree_hal_buffer_ref_t target_ref =
-      iree_hal_streaming_convert_range_buffer_ref(dst_ref, length);
+      iree_hal_make_buffer_ref(target_buffer, dst_ref.offset, length);
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_fill_buffer(
         stream->command_buffer, target_ref, pattern, pattern_length,
         IREE_HAL_FILL_FLAG_NONE);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_command_buffer_barrier(stream->command_buffer);
+  }
+  iree_slim_mutex_unlock(&stream->mutex);
+  iree_hal_streaming_context_release(owner_context);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
+
+  IREE_TRACE_ZONE_END(z0);
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_streaming_memory_memset_3d(
+    iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
+    iree_device_size_t row_pitch, iree_device_size_t slice_pitch,
+    iree_device_size_t width, iree_host_size_t height, iree_host_size_t depth,
+    const void* pattern, iree_host_size_t pattern_length,
+    iree_hal_streaming_stream_t* stream) {
+  IREE_ASSERT_ARGUMENT(context);
+  IREE_ASSERT_ARGUMENT(dst);
+  IREE_ASSERT_ARGUMENT(pattern);
+  IREE_ASSERT_ARGUMENT(stream);
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_device_size_t minimum_slice_pitch = 0;
+  if (IREE_UNLIKELY(width == 0 || height == 0 || depth == 0 ||
+                    width > row_pitch ||
+                    !iree_device_size_checked_mul(row_pitch, height,
+                                                  &minimum_slice_pitch) ||
+                    slice_pitch < minimum_slice_pitch)) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "invalid strided memset dimensions"));
+  }
+  iree_device_size_t last_slice_offset = 0;
+  iree_device_size_t last_row_offset = 0;
+  iree_device_size_t byte_span = 0;
+  if (IREE_UNLIKELY(
+          !iree_device_size_checked_mul(depth - 1, slice_pitch,
+                                        &last_slice_offset) ||
+          !iree_device_size_checked_mul(height - 1, row_pitch,
+                                        &last_row_offset) ||
+          !iree_device_size_checked_add(last_slice_offset, last_row_offset,
+                                        &byte_span) ||
+          !iree_device_size_checked_add(byte_span, width, &byte_span))) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                             "strided memset range overflows"));
+  }
+
+  // Captured fills are represented as one graph node per row because graph
+  // fill nodes describe contiguous ranges. This is a cold construction path;
+  // normal execution batches all rows under one command-buffer lock below.
+  if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
+    iree_status_t status = iree_ok_status();
+    for (iree_host_size_t z = 0; z < depth && iree_status_is_ok(status); ++z) {
+      const iree_device_size_t slice_offset = z * slice_pitch;
+      for (iree_host_size_t y = 0; y < height && iree_status_is_ok(status);
+           ++y) {
+        status = iree_hal_streaming_memory_memset(
+            context, dst + slice_offset + y * row_pitch, width, pattern,
+            pattern_length, stream);
+      }
+    }
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
+    IREE_TRACE_ZONE_END(z0);
+    return iree_ok_status();
+  }
+
+  iree_hal_streaming_buffer_ref_t dst_ref;
+  iree_hal_streaming_context_t* owner_context = NULL;
+  iree_status_t status = iree_hal_streaming_memory_lookup_memset_range(
+      context, dst, byte_span, &owner_context, &dst_ref);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_streaming_context_release(owner_context);
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, status, "resolving `dst` buffer ref %p", (void*)dst);
+  }
+
+  iree_hal_buffer_t* target_buffer = dst_ref.buffer->buffer;
+  if (!target_buffer) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "memset destination is not represented by a HAL buffer");
+  } else if (owner_context) {
+    status = iree_hal_streaming_memory_import_buffer_for_context(
+        context, dst_ref.buffer, &target_buffer, NULL);
+  }
+
+  iree_slim_mutex_lock(&stream->mutex);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_stream_begin_locked(stream);
+  }
+  for (iree_host_size_t z = 0; z < depth && iree_status_is_ok(status); ++z) {
+    const iree_device_size_t slice_offset = z * slice_pitch;
+    for (iree_host_size_t y = 0; y < height && iree_status_is_ok(status); ++y) {
+      const iree_hal_buffer_ref_t target_ref = iree_hal_make_buffer_ref(
+          target_buffer, dst_ref.offset + slice_offset + y * row_pitch, width);
+      status = iree_hal_command_buffer_fill_buffer(
+          stream->command_buffer, target_ref, pattern, pattern_length,
+          IREE_HAL_FILL_FLAG_NONE);
+    }
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_command_buffer_barrier(stream->command_buffer);
