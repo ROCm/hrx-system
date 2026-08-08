@@ -605,6 +605,60 @@ TEST_F(VerifyTest, LoopBodyMissingMaterializedTerminatorFails) {
   ExpectU32Param(*entry, 1, 0);
 }
 
+TEST_F(VerifyTest, WrongRegionTerminatorKindFails) {
+  EnterTestFunc(nullptr, 0, nullptr);
+  loom_op_t* terminator_op = nullptr;
+  IREE_ASSERT_OK(loom_test_implicit_yield_build(
+      &builder_, LOOM_LOCATION_UNKNOWN, &terminator_op));
+
+  DiagnosticCapture structured;
+  auto result = VerifyStructured(&structured);
+  EXPECT_GT(result.error_count, 0u);
+  const CapturedDiagnostic* entry = FindDiagnostic(
+      structured, loom_error_def_lookup(LOOM_ERROR_DOMAIN_STRUCTURE, 18));
+  ASSERT_NE(entry, nullptr)
+      << "Expected STRUCTURE/018 wrong-terminator diagnostic";
+  EXPECT_EQ(GetStringParam(*entry, 0), "test.func");
+  ExpectU32Param(*entry, 1, 0);
+  EXPECT_EQ(GetStringParam(*entry, 2), "test.yield");
+  EXPECT_EQ(GetStringParam(*entry, 3), "test.implicit_yield");
+}
+
+TEST_F(VerifyTest, SingleBlockRegionRejectsAdditionalBlock) {
+  loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_type_t arg_types[] = {index_type, index_type, index_type};
+  loom_value_id_t args[3];
+  EnterTestFunc(arg_types, IREE_ARRAYSIZE(arg_types), args);
+
+  loom_op_t* loop_op = nullptr;
+  IREE_ASSERT_OK(loom_test_loop_build(&builder_, args[0], args[1], args[2],
+                                      nullptr, 0, nullptr, 0, nullptr, 0,
+                                      LOOM_LOCATION_UNKNOWN, &loop_op));
+  loom_region_t* body = loom_test_loop_body(loop_op);
+  loom_builder_ip_t saved = loom_builder_enter_region(&builder_, loop_op, body);
+  loom_op_t* yield_op = nullptr;
+  IREE_ASSERT_OK(loom_test_yield_build(&builder_, nullptr, 0,
+                                       LOOM_LOCATION_UNKNOWN, &yield_op));
+  loom_block_t* additional_block = nullptr;
+  IREE_ASSERT_OK(loom_region_append_block(module_, body, &additional_block));
+  loom_builder_set_block(&builder_, additional_block);
+  IREE_ASSERT_OK(loom_test_yield_build(&builder_, nullptr, 0,
+                                       LOOM_LOCATION_UNKNOWN, &yield_op));
+  loom_builder_restore(&builder_, saved);
+  TerminateFunc();
+
+  DiagnosticCapture structured;
+  auto result = VerifyStructured(&structured);
+  EXPECT_GT(result.error_count, 0u);
+  const CapturedDiagnostic* entry = FindDiagnostic(
+      structured, loom_error_def_lookup(LOOM_ERROR_DOMAIN_STRUCTURE, 6));
+  ASSERT_NE(entry, nullptr)
+      << "Expected STRUCTURE/006 single-block-region diagnostic";
+  EXPECT_EQ(GetStringParam(*entry, 0), "test.loop");
+  ExpectU32Param(*entry, 1, 0);
+  ExpectU32Param(*entry, 2, 2);
+}
+
 TEST_F(VerifyTest, WrongOperandCountDetected) {
   // Manually create an op with wrong operand count.
   loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
