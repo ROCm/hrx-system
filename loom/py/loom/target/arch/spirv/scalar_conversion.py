@@ -250,16 +250,20 @@ def _bitcast_conversions() -> tuple[ScalarConversion, ...]:
     return tuple(rows)
 
 
+SIGNED_INTEGER_WIDTH_CONVERSIONS = _integer_width_conversions()
+UNSIGNED_INTEGER_WIDTH_CONVERSIONS = _unsigned_integer_width_conversions()
+SCALAR_BITCAST_CONVERSIONS = _bitcast_conversions()
+
 DIRECT_SCALAR_CONVERSIONS = (
-    *_integer_width_conversions(),
+    *SIGNED_INTEGER_WIDTH_CONVERSIONS,
     *_float_width_conversions(),
     *_signed_integer_to_float_conversions(),
     *_float_to_signed_integer_conversions(),
-    *_bitcast_conversions(),
+    *SCALAR_BITCAST_CONVERSIONS,
 )
 
 UNSIGNED_SCALAR_CONVERSIONS = (
-    *_unsigned_integer_width_conversions(),
+    *UNSIGNED_INTEGER_WIDTH_CONVERSIONS,
     *_unsigned_integer_to_float_conversions(),
     *_float_to_unsigned_integer_conversions(),
 )

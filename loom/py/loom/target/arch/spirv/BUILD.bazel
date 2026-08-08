@@ -81,7 +81,9 @@ iree_py_library(
         ":cooperative_matrix",
         ":features",
         ":ordinary_vector",
+        ":ordinary_vector_bit_layout",
         ":ordinary_vector_integer",
+        ":ordinary_vector_integer_conversion",
         ":scalar_alu",
         ":scalar_constant",
         ":scalar_conversion",
@@ -106,7 +108,9 @@ iree_py_test(
         ":cooperative_matrix",
         ":descriptors",
         ":ordinary_vector",
+        ":ordinary_vector_bit_layout",
         ":ordinary_vector_integer",
+        ":ordinary_vector_integer_conversion",
         ":scalar_alu",
         ":scalar_constant",
         ":scalar_conversion",
@@ -178,6 +182,36 @@ iree_py_test(
 )
 
 iree_py_library(
+    name = "ordinary_vector_bit_layout",
+    srcs = [
+        "__init__.py",
+        "ordinary_vector_bit_layout.py",
+    ],
+    deps = [
+        ":ordinary_vector",
+        ":scalar_conversion",
+    ],
+)
+
+iree_py_test(
+    name = "ordinary_vector_bit_layout_test",
+    size = "small",
+    srcs = [
+        "ordinary_vector_bit_layout_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.spirv.ordinary_vector_bit_layout_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":ordinary_vector",
+        ":ordinary_vector_bit_layout",
+        ":ordinary_vector_integer",
+        ":ordinary_vector_integer_conversion",
+        ":scalar_conversion",
+    ],
+)
+
+iree_py_library(
     name = "ordinary_vector_integer",
     srcs = [
         "__init__.py",
@@ -202,6 +236,37 @@ iree_py_test(
         ":features",
         ":ordinary_vector",
         ":ordinary_vector_integer",
+    ],
+)
+
+iree_py_library(
+    name = "ordinary_vector_integer_conversion",
+    srcs = [
+        "__init__.py",
+        "ordinary_vector_integer_conversion.py",
+    ],
+    deps = [
+        ":ordinary_vector",
+        ":ordinary_vector_integer",
+        ":scalar_alu",
+        ":scalar_conversion",
+    ],
+)
+
+iree_py_test(
+    name = "ordinary_vector_integer_conversion_test",
+    size = "small",
+    srcs = [
+        "ordinary_vector_integer_conversion_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.spirv.ordinary_vector_integer_conversion_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":ordinary_vector",
+        ":ordinary_vector_integer",
+        ":ordinary_vector_integer_conversion",
+        ":scalar_conversion",
     ],
 )
 
