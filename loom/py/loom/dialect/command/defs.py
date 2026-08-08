@@ -8,6 +8,7 @@
 
 from loom.assembly import (
     COLON,
+    COMMA,
     GLUE,
     LBRACKET,
     LPAREN,
@@ -17,8 +18,10 @@ from loom.assembly import (
     FuncArgs,
     OptionalGroup,
     PredicateList,
+    Ref,
     Refs,
     Region,
+    ResultType,
     Scope,
     SymbolRef,
     TypesOf,
@@ -28,11 +31,16 @@ from loom.dialect.func.defs import Retain, Visibility
 from loom.dsl import (
     ANY,
     ATTR_TYPE_I64,
+    ATTR_TYPE_STRING,
     BUFFER,
+    INDEX,
     ISOLATED_FROM_ABOVE,
+    PURE,
+    REFINABLE_RESULT_TYPE_REFS,
     SYMBOL_DEFINE,
     TERMINATOR,
     UNKNOWN_EFFECTS,
+    VIEW,
     AttrDef,
     CallLikeInterface,
     CallLikeKind,
@@ -43,6 +51,7 @@ from loom.dsl import (
     Operand,
     OpPhase,
     RegionDef,
+    Result,
     SymbolDefinition,
     SymbolDefinitionFlag,
     SymbolReference,
@@ -232,6 +241,54 @@ command_program_launch = Op(
 )
 
 
+command_parameter = Op(
+    "command.parameter",
+    group=command_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Associate immutable named parameter content with an explicit command-program "
+        "buffer root. The pattern contains one canonical decimal placeholder for each "
+        "index substitution. The result is a logical typed view; this operation performs "
+        "no allocation, lookup, transfer, or synchronization."
+    ),
+    operands=[
+        Operand("source", BUFFER, doc="Command-program buffer containing the parameter."),
+        Operand(
+            "substitutions",
+            INDEX,
+            variadic=True,
+            doc="Canonical decimal values substituted into the parameter pattern.",
+        ),
+    ],
+    results=[Result("result", VIEW, doc="Typed logical view of the named parameter.")],
+    attrs=[
+        AttrDef(
+            "pattern",
+            ATTR_TYPE_STRING,
+            doc="Parameter key with one '{}' placeholder per substitution operand.",
+        ),
+    ],
+    traits=[PURE, REFINABLE_RESULT_TYPE_REFS],
+    verify="loom_command_parameter_verify",
+    facts="loom_command_parameter_facts",
+    format=[
+        Ref("source"),
+        COMMA,
+        Attr("pattern"),
+        GLUE,
+        LBRACKET,
+        Refs("substitutions"),
+        RBRACKET,
+        COLON,
+        ResultType("result"),
+    ],
+    examples=[
+        '%embedding = command.parameter %parameters, "token_embd.weight"[] : view<175030272xi8, #dense>',
+        '%query = command.parameter %parameters, "blk.{}.attn_q.weight"[%layer] : view<4718592xi8, #dense>',
+    ],
+)
+
+
 command_return = Op(
     "command.return",
     group=command_ops,
@@ -292,4 +349,5 @@ ALL_COMMAND_OPS: tuple[Op, ...] = (
     command_yield,
     command_serial,
     command_concurrent,
+    command_parameter,
 )

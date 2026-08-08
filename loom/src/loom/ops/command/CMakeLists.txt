@@ -15,6 +15,7 @@ loom_generated_cc_library(
   GENERATOR
     loom::py::loom::gen::ops::c_tables_command_generator
   SRCS
+    "facts.c"
     "verify.c"
   GENERATED_SRC_FLAGS
     "--builders"
@@ -34,6 +35,8 @@ loom_generated_cc_library(
     loom::ops::func_symbol_facts
     loom::ops::function_contract_verify
     loom::ops::op_defs
+    loom::ops::view
+    loom::util::fact_table
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

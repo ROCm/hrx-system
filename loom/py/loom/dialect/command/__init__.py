@@ -10,6 +10,7 @@ from loom.dialect.command.defs import (
     ALL_COMMAND_OPS,
     command_concurrent,
     command_ops,
+    command_parameter,
     command_program_decl,
     command_program_def,
     command_program_launch,
@@ -20,6 +21,7 @@ from loom.dialect.command.defs import (
 
 __all__ = [
     "command_ops",
+    "command_parameter",
     "command_program_def",
     "command_program_decl",
     "command_program_launch",

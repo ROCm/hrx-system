@@ -14,7 +14,10 @@ package(
 
 loom_generated_cc_library(
     name = "command",
-    srcs = ["verify.c"],
+    srcs = [
+        "facts.c",
+        "verify.c",
+    ],
     hdrs = ["ops.h"],
     args = ["--dialect=command"],
     generated_src_flags = [
@@ -33,6 +36,8 @@ loom_generated_cc_library(
         "//loom/src/loom/ops:func_symbol_facts",
         "//loom/src/loom/ops:function_contract_verify",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/view",
+        "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
     ],
 )

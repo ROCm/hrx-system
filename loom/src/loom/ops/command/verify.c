@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <inttypes.h>
+
 #include "loom/error/emitter.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/module.h"
@@ -58,6 +60,57 @@ static iree_status_t loom_command_emit_count_mismatch(
   return loom_command_emit_launch_related(emitter, launch_op, definition_op,
                                           LOOM_ERR_STRUCTURE_013, params,
                                           IREE_ARRAYSIZE(params));
+}
+
+static iree_status_t loom_command_emit_pattern_constraint(
+    iree_diagnostic_emitter_t emitter, const loom_op_t* op,
+    iree_string_view_t pattern, iree_string_view_t expected_constraint) {
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(IREE_SV("pattern")),
+      loom_param_string(pattern),
+      loom_param_string(expected_constraint),
+  };
+  return loom_command_emit(emitter, op, LOOM_ERR_STRUCTURE_027, params,
+                           IREE_ARRAYSIZE(params));
+}
+
+iree_status_t loom_command_parameter_verify(const loom_module_t* module,
+                                            const loom_op_t* op,
+                                            iree_diagnostic_emitter_t emitter) {
+  const iree_string_view_t pattern =
+      module->strings.entries[loom_command_parameter_pattern(op)];
+  if (pattern.size == 0) {
+    return loom_command_emit_pattern_constraint(
+        emitter, op, pattern, IREE_SV("a non-empty parameter key pattern"));
+  }
+
+  iree_host_size_t placeholder_count = 0;
+  for (iree_host_size_t i = 0; i < pattern.size; ++i) {
+    if (pattern.data[i] == '{') {
+      if (i + 1 >= pattern.size || pattern.data[i + 1] != '}') {
+        return loom_command_emit_pattern_constraint(
+            emitter, op, pattern,
+            IREE_SV("only complete '{}' index placeholders"));
+      }
+      ++placeholder_count;
+      ++i;
+    } else if (pattern.data[i] == '}') {
+      return loom_command_emit_pattern_constraint(
+          emitter, op, pattern,
+          IREE_SV("only complete '{}' index placeholders"));
+    }
+  }
+
+  const uint16_t substitution_count =
+      loom_command_parameter_substitutions(op).count;
+  if (placeholder_count != substitution_count) {
+    char expected_constraint[96];
+    iree_snprintf(expected_constraint, sizeof(expected_constraint),
+                  "exactly %" PRIu16 " '{}' placeholders", substitution_count);
+    return loom_command_emit_pattern_constraint(
+        emitter, op, pattern, iree_make_cstring_view(expected_constraint));
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_command_verify_program_contract(

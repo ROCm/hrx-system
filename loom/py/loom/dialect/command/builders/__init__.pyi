@@ -4,9 +4,11 @@
 
 from __future__ import annotations
 
-from loom.builder import ValueRef
+from collections.abc import Sequence
+
+from loom.builder import TiedResultSpec, ValueRef
 from loom.builders import DialectBuilder
-from loom.ir import Predicate, Region
+from loom.ir import Predicate, Region, Type
 
 class CommandBuilder(DialectBuilder):
     def def_(
@@ -64,3 +66,15 @@ class CommandBuilder(DialectBuilder):
         body: Region | None = ...,
         location_id: int | None = ...,
     ) -> None: ...
+    def parameter(
+        self,
+        *,
+        source: ValueRef,
+        pattern: str,
+        substitutions: list[ValueRef] = ...,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...

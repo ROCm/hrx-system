@@ -26,7 +26,8 @@ enum {
   LOOM_OP_COMMAND_YIELD = LOOM_OP_KIND(LOOM_DIALECT_COMMAND, 4),
   LOOM_OP_COMMAND_SERIAL = LOOM_OP_KIND(LOOM_DIALECT_COMMAND, 5),
   LOOM_OP_COMMAND_CONCURRENT = LOOM_OP_KIND(LOOM_DIALECT_COMMAND, 6),
-  LOOM_OP_COMMAND_COUNT_ = 7,
+  LOOM_OP_COMMAND_PARAMETER = LOOM_OP_KIND(LOOM_DIALECT_COMMAND, 7),
+  LOOM_OP_COMMAND_COUNT_ = 8,
 };
 
 // Function visibility. Absent (0) means private (module-internal).
@@ -171,6 +172,31 @@ iree_status_t loom_command_concurrent_build(
     loom_builder_t* builder,
     loom_location_id_t location,
     loom_op_t** out_op);
+
+// LOOM_OP_COMMAND_PARAMETER: Associate immutable named parameter content with an explicit command-program buffer root. The pattern contains one canonical decimal placeholder for each index substitution. The result is a logical typed view; this operation performs no allocation, lookup, transfer, or synchronization.
+// %embedding = command.parameter %parameters, "token_embd.weight"[] : view<175030272xi8, #dense>
+LOOM_DEFINE_ISA(loom_command_parameter_isa, LOOM_OP_COMMAND_PARAMETER)
+LOOM_DEFINE_OPERAND(loom_command_parameter_source, 0)
+LOOM_DEFINE_VARIADIC_OPERANDS(loom_command_parameter_substitutions, 1)
+LOOM_DEFINE_RESULT(loom_command_parameter_result, 0)
+LOOM_DEFINE_ATTR_STRING(loom_command_parameter_pattern, 0)
+iree_status_t loom_command_parameter_build(
+    loom_builder_t* builder,
+    loom_may_consume loom_value_id_t source,
+    loom_string_id_t pattern,
+    loom_may_consume const loom_value_id_t* substitutions,
+    iree_host_size_t substitutions_count,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_command_parameter_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+iree_status_t loom_command_parameter_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
 
 // Returns the vtable array for the command dialect.
 const loom_op_vtable_t* const* loom_command_dialect_vtables(
