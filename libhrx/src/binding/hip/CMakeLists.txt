@@ -186,6 +186,7 @@ iree_cc_test(
     ::amdhip64
   DEPS
     ${CMAKE_DL_LIBS}
+    ::launch_params
     iree::testing::gtest
     iree::testing::gtest_main
     libhrx_defs
@@ -258,6 +259,25 @@ iree_cc_test(
   SANITIZER_SUPPRESSIONS
     lsan
     hsa
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    hip_pointer_api_test
+  SRCS
+    "hip_pointer_api_test.cc"
+  DATA
+    ::amdhip64
+  DEPS
+    ${CMAKE_DL_LIBS}
+    ::launch_params
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
 )
 endif()
 
@@ -337,7 +357,8 @@ endif()
 # The build-tree path is only valid for the in-tree CTest run.
 foreach(_hrx_hip_dso_test
     libhrx_src_binding_hip_hip_get_proc_address_test
-    libhrx_src_binding_hip_hip_launch_validation_api_test)
+    libhrx_src_binding_hip_hip_launch_validation_api_test
+    libhrx_src_binding_hip_hip_pointer_api_test)
   if(TARGET ${_hrx_hip_dso_test})
     target_compile_definitions(${_hrx_hip_dso_test}
       PRIVATE

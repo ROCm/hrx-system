@@ -240,6 +240,24 @@ hrx_cc_test(
 )
 
 hrx_cc_test(
+    name = "hip_pointer_api_test",
+    srcs = ["hip_pointer_api_test.cc"],
+    # The test loads the built runtime through its public ABI and exercises
+    # pointer-query validation before device initialization.
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        ":launch_params",
+        "//build_tools:dl",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
     name = "hostcall_message_test",
     srcs = ["hostcall_message_test.cc"],
     target_compatible_with = _LINUX_COMPATIBILITY,

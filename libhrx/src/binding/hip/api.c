@@ -14353,9 +14353,15 @@ HIPAPI hipError_t hipDrvPointerGetAttributes(unsigned int numAttributes,
                                              hipPointer_attribute_t* attributes,
                                              void** data, const void* ptr) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  if (!attributes || !data || numAttributes == 0) {
+  if (!attributes || !data || !ptr || numAttributes == 0) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  for (unsigned int i = 0; i < numAttributes; ++i) {
+    if (!data[i]) {
+      IREE_TRACE_ZONE_END(z0);
+      HIP_RETURN_ERROR(hipErrorInvalidValue);
+    }
   }
   // Each output is independent. Inapplicable attributes receive the default
   // written by the single-attribute query, while valid inputs make the batch
