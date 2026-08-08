@@ -329,9 +329,35 @@ static loom_trait_flags_t BadHintPureEffectiveTraits(const loom_op_t* op) {
   return LOOM_TRAIT_HINT | LOOM_TRAIT_PURE;
 }
 
-static void ExpectBadTraitDiagnostic(const loom_op_vtable_t* bad_vtable,
-                                     const char* op_name, const char* trait_a,
-                                     const char* trait_b) {
+TEST(VerifyTraitConsistencyTest, RejectsEffectiveIncompatibleHintTraits) {
+  static const uint8_t kBadHintName[] = {
+      8, 3, 'b', 'a', 'd', '.', 'h', 'i', 'n', 't', '\0',
+  };
+  static const loom_op_vtable_t kBadHintVtable = {
+      /*.traits=*/LOOM_TRAIT_HINT,
+      /*.fixed_operand_count=*/{},
+      /*.fixed_result_count=*/{},
+      /*.attribute_count=*/{},
+      /*.region_count=*/{},
+      /*.vtable_flags=*/{},
+      /*.symbol_kind=*/{},
+      /*.constraint_count=*/{},
+      /*.operand_descriptor_count=*/{},
+      /*.control_flow_flags=*/{},
+      /*.control_flow_reserved=*/{},
+      /*.successor_selector_operand_index=*/{},
+      /*.canonicalize=*/{},
+      /*.infer_facts=*/{},
+      /*.effective_traits=*/BadHintPureEffectiveTraits,
+      /*.attr_descriptors=*/{},
+      /*.operand_descriptors=*/{},
+      /*.type_transfer=*/{},
+      /*.result_descriptors=*/{},
+      /*.region_descriptors=*/{},
+      /*.constraints=*/{},
+      /*.verify=*/{},
+      /*.name=*/kBadHintName,
+  };
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
 
@@ -340,7 +366,7 @@ static void ExpectBadTraitDiagnostic(const loom_op_vtable_t* bad_vtable,
   RegisterTestDialect(&context);
 
   const loom_op_vtable_t* const kBadDialectVtables[] = {
-      bad_vtable,
+      &kBadHintVtable,
   };
   constexpr uint8_t kBadDialectId = LOOM_DIALECT_BUILTIN_COUNT_ - 1;
   IREE_ASSERT_OK(
@@ -390,176 +416,13 @@ static void ExpectBadTraitDiagnostic(const loom_op_vtable_t* bad_vtable,
       capture, loom_error_def_lookup(LOOM_ERROR_DOMAIN_STRUCTURE, 16));
   ASSERT_NE(entry, nullptr)
       << "Expected STRUCTURE/016 incompatible-traits error";
-  EXPECT_EQ(GetStringParam(*entry, 0), op_name);
-  EXPECT_EQ(GetStringParam(*entry, 1), trait_a);
-  EXPECT_EQ(GetStringParam(*entry, 2), trait_b);
+  EXPECT_EQ(GetStringParam(*entry, 0), "bad.hint");
+  EXPECT_EQ(GetStringParam(*entry, 1), "HINT");
+  EXPECT_EQ(GetStringParam(*entry, 2), "PURE");
 
   loom_module_free(module);
   loom_context_deinitialize(&context);
   iree_arena_block_pool_deinitialize(&block_pool);
-}
-
-TEST(VerifyTraitConsistencyTest, RejectsDeclaredIncompatibleHintTraits) {
-  static const uint8_t kBadHintName[] = {
-      8, 3, 'b', 'a', 'd', '.', 'h', 'i', 'n', 't', '\0',
-  };
-  static const loom_op_vtable_t kBadHintVtable = {
-      /*.traits=*/LOOM_TRAIT_HINT | LOOM_TRAIT_PURE,
-      /*.fixed_operand_count=*/{},
-      /*.fixed_result_count=*/{},
-      /*.attribute_count=*/{},
-      /*.region_count=*/{},
-      /*.vtable_flags=*/{},
-      /*.symbol_kind=*/{},
-      /*.constraint_count=*/{},
-      /*.operand_descriptor_count=*/{},
-      /*.control_flow_flags=*/{},
-      /*.control_flow_reserved=*/{},
-      /*.successor_selector_operand_index=*/{},
-      /*.canonicalize=*/{},
-      /*.infer_facts=*/{},
-      /*.effective_traits=*/{},
-      /*.attr_descriptors=*/{},
-      /*.operand_descriptors=*/{},
-      /*.type_transfer=*/{},
-      /*.result_descriptors=*/{},
-      /*.region_descriptors=*/{},
-      /*.constraints=*/{},
-      /*.verify=*/{},
-      /*.name=*/kBadHintName,
-  };
-  ExpectBadTraitDiagnostic(&kBadHintVtable, "bad.hint", "HINT", "PURE");
-}
-
-TEST(VerifyTraitConsistencyTest, RejectsEffectiveIncompatibleHintTraits) {
-  static const uint8_t kBadHintName[] = {
-      8, 3, 'b', 'a', 'd', '.', 'h', 'i', 'n', 't', '\0',
-  };
-  static const loom_op_vtable_t kBadHintVtable = {
-      /*.traits=*/LOOM_TRAIT_HINT,
-      /*.fixed_operand_count=*/{},
-      /*.fixed_result_count=*/{},
-      /*.attribute_count=*/{},
-      /*.region_count=*/{},
-      /*.vtable_flags=*/{},
-      /*.symbol_kind=*/{},
-      /*.constraint_count=*/{},
-      /*.operand_descriptor_count=*/{},
-      /*.control_flow_flags=*/{},
-      /*.control_flow_reserved=*/{},
-      /*.successor_selector_operand_index=*/{},
-      /*.canonicalize=*/{},
-      /*.infer_facts=*/{},
-      /*.effective_traits=*/BadHintPureEffectiveTraits,
-      /*.attr_descriptors=*/{},
-      /*.operand_descriptors=*/{},
-      /*.type_transfer=*/{},
-      /*.result_descriptors=*/{},
-      /*.region_descriptors=*/{},
-      /*.constraints=*/{},
-      /*.verify=*/{},
-      /*.name=*/kBadHintName,
-  };
-  ExpectBadTraitDiagnostic(&kBadHintVtable, "bad.hint", "HINT", "PURE");
-}
-
-TEST(VerifyTraitConsistencyTest, RejectsDeclaredIncompatibleSpeculationTraits) {
-  static const uint8_t kBadSpecName[] = {
-      8, 3, 'b', 'a', 'd', '.', 's', 'p', 'e', 'c', '\0',
-  };
-  static const loom_op_vtable_t kBadSpecVtable = {
-      /*.traits=*/LOOM_TRAIT_SAFE_TO_SPECULATE | LOOM_TRAIT_UNKNOWN_EFFECTS,
-      /*.fixed_operand_count=*/{},
-      /*.fixed_result_count=*/{},
-      /*.attribute_count=*/{},
-      /*.region_count=*/{},
-      /*.vtable_flags=*/{},
-      /*.symbol_kind=*/{},
-      /*.constraint_count=*/{},
-      /*.operand_descriptor_count=*/{},
-      /*.control_flow_flags=*/{},
-      /*.control_flow_reserved=*/{},
-      /*.successor_selector_operand_index=*/{},
-      /*.canonicalize=*/{},
-      /*.infer_facts=*/{},
-      /*.effective_traits=*/{},
-      /*.attr_descriptors=*/{},
-      /*.operand_descriptors=*/{},
-      /*.type_transfer=*/{},
-      /*.result_descriptors=*/{},
-      /*.region_descriptors=*/{},
-      /*.constraints=*/{},
-      /*.verify=*/{},
-      /*.name=*/kBadSpecName,
-  };
-  ExpectBadTraitDiagnostic(&kBadSpecVtable, "bad.spec", "SAFE_TO_SPECULATE",
-                           "UNKNOWN_EFFECTS");
-}
-
-TEST(VerifyTraitConsistencyTest, RejectsDeclaredSpeculatableConvergentTraits) {
-  static const uint8_t kBadConvergentName[] = {
-      8, 3, 'b', 'a', 'd', '.', 'c', 'o', 'n', 'v', '\0',
-  };
-  static const loom_op_vtable_t kBadConvergentVtable = {
-      /*.traits=*/LOOM_TRAIT_SAFE_TO_SPECULATE | LOOM_TRAIT_CONVERGENT,
-      /*.fixed_operand_count=*/{},
-      /*.fixed_result_count=*/{},
-      /*.attribute_count=*/{},
-      /*.region_count=*/{},
-      /*.vtable_flags=*/{},
-      /*.symbol_kind=*/{},
-      /*.constraint_count=*/{},
-      /*.operand_descriptor_count=*/{},
-      /*.control_flow_flags=*/{},
-      /*.control_flow_reserved=*/{},
-      /*.successor_selector_operand_index=*/{},
-      /*.canonicalize=*/{},
-      /*.infer_facts=*/{},
-      /*.effective_traits=*/{},
-      /*.attr_descriptors=*/{},
-      /*.operand_descriptors=*/{},
-      /*.type_transfer=*/{},
-      /*.result_descriptors=*/{},
-      /*.region_descriptors=*/{},
-      /*.constraints=*/{},
-      /*.verify=*/{},
-      /*.name=*/kBadConvergentName,
-  };
-  ExpectBadTraitDiagnostic(&kBadConvergentVtable, "bad.conv",
-                           "SAFE_TO_SPECULATE", "CONVERGENT");
-}
-
-TEST(VerifyTraitConsistencyTest, RejectsDeclaredPureMemoryFenceTraits) {
-  static const uint8_t kBadFenceName[] = {
-      9, 3, 'b', 'a', 'd', '.', 'f', 'e', 'n', 'c', 'e', '\0',
-  };
-  static const loom_op_vtable_t kBadFenceVtable = {
-      /*.traits=*/LOOM_TRAIT_PURE | LOOM_TRAIT_MEMORY_FENCE,
-      /*.fixed_operand_count=*/{},
-      /*.fixed_result_count=*/{},
-      /*.attribute_count=*/{},
-      /*.region_count=*/{},
-      /*.vtable_flags=*/{},
-      /*.symbol_kind=*/{},
-      /*.constraint_count=*/{},
-      /*.operand_descriptor_count=*/{},
-      /*.control_flow_flags=*/{},
-      /*.control_flow_reserved=*/{},
-      /*.successor_selector_operand_index=*/{},
-      /*.canonicalize=*/{},
-      /*.infer_facts=*/{},
-      /*.effective_traits=*/{},
-      /*.attr_descriptors=*/{},
-      /*.operand_descriptors=*/{},
-      /*.type_transfer=*/{},
-      /*.result_descriptors=*/{},
-      /*.region_descriptors=*/{},
-      /*.constraints=*/{},
-      /*.verify=*/{},
-      /*.name=*/kBadFenceName,
-  };
-  ExpectBadTraitDiagnostic(&kBadFenceVtable, "bad.fence", "PURE",
-                           "MEMORY_FENCE");
 }
 
 //===----------------------------------------------------------------------===//

@@ -92,8 +92,6 @@ static iree_status_t loom_verify_op(loom_verify_state_t* state,
     return iree_ok_status();
   }
 
-  loom_verify_op_declared_trait_consistency(state, op, vtable);
-  IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
   loom_verify_op_placement(state, op, vtable);
   IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
 

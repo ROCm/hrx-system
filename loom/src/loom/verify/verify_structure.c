@@ -263,12 +263,6 @@ static void loom_verify_op_trait_flags_consistency(
                               IREE_ARRAYSIZE(params));
 }
 
-void loom_verify_op_declared_trait_consistency(loom_verify_state_t* state,
-                                               const loom_op_t* op,
-                                               const loom_op_vtable_t* vtable) {
-  loom_verify_op_trait_flags_consistency(state, op, vtable, vtable->traits);
-}
-
 void loom_verify_op_effective_trait_consistency(
     loom_verify_state_t* state, const loom_op_t* op,
     const loom_op_vtable_t* vtable) {
