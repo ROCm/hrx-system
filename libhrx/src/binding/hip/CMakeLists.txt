@@ -186,7 +186,6 @@ iree_cc_test(
     ::amdhip64
   DEPS
     ${CMAKE_DL_LIBS}
-    ::launch_params
     iree::testing::gtest
     iree::testing::gtest_main
     libhrx_defs
