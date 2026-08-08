@@ -26,6 +26,8 @@ enum loom_attr_flag_bits_e {
   // Text formats may omit this required scalar attribute when the present
   // value equals the zero/false default. Parsers restore the explicit value.
   LOOM_ATTR_ELIDE_DEFAULT = 1u << 2,
+  // Descriptor-aware text formats spell string values as bare identifiers.
+  LOOM_ATTR_BARE_IDENTIFIER = 1u << 3,
 };
 typedef uint8_t loom_attr_flags_t;
 

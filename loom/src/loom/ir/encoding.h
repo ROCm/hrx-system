@@ -25,7 +25,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/error/emitter.h"
-#include "loom/ir/attribute.h"
+#include "loom/ir/attribute_schema.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -52,6 +52,18 @@ struct loom_encoding_t {
 };
 
 typedef struct loom_encoding_t loom_encoding_t;
+
+// Generated structural metadata for one registered encoding family.
+typedef struct loom_encoding_family_descriptor_t {
+  // Stable public family name without a leading '#'.
+  loom_bstring_t name;
+  // Semantic role carried by instances of the family.
+  loom_encoding_role_t role;
+  // Number of lexically ordered descriptors in |parameter_descriptors|.
+  uint8_t parameter_count;
+  // Lexically ordered static parameter descriptors, or NULL when empty.
+  const loom_attr_descriptor_t* parameter_descriptors;
+} loom_encoding_family_descriptor_t;
 
 // A module-owned table of unique static encoding instances.
 typedef struct loom_encoding_table_t {

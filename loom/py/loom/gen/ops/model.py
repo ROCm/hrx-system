@@ -12,7 +12,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from loom.dsl import Op, ParameterizedAttrDef
+from loom.dsl import EncodingFamilyDef, Op, ParameterizedAttrDef
 
 
 @dataclass(frozen=True)
@@ -23,6 +23,7 @@ class DialectGeneration:
     ops: list[Op]
     table_shards: Sequence[tuple[Any, Sequence[Op]]] | None
     parameterized_attrs: Sequence[ParameterizedAttrDef] = ()
+    encoding_families: Sequence[EncodingFamilyDef] = ()
 
 
 @dataclass(frozen=True)
@@ -64,9 +65,18 @@ def _load_func_generation() -> DialectGeneration:
 
 
 def _load_encoding_generation() -> DialectGeneration:
-    from loom.dialect.encoding import ALL_ENCODING_OPS, encoding_ops
+    from loom.dialect.encoding import (
+        ALL_ENCODING_FAMILIES,
+        ALL_ENCODING_OPS,
+        encoding_ops,
+    )
 
-    return DialectGeneration(encoding_ops, list(ALL_ENCODING_OPS), None)
+    return DialectGeneration(
+        encoding_ops,
+        list(ALL_ENCODING_OPS),
+        None,
+        encoding_families=ALL_ENCODING_FAMILIES,
+    )
 
 
 def _load_pool_generation() -> DialectGeneration:

@@ -67,6 +67,8 @@ from loom.dsl import (
     Dialect,
     ElementWidthAtLeastAttr,
     ElementWidthGreaterThan,
+    EncodingFamilyDef,
+    EncodingFamilyRole,
     EncodingParam,
     EnumCase,
     EnumDef,
@@ -402,6 +404,35 @@ def test_generate_parameterized_attribute_family_metadata() -> None:
     assert ".attr_kind = LOOM_ATTR_PARAMETERIZED" in tables_c
     assert ".reference.parameterized_attr_kind = LOOM_PARAMETERIZED_ATTR_TEST_TILE" in tables_c
     assert ".reference.parameterized_attr_kind = LOOM_PARAMETERIZED_ATTR_KIND_ANY" in tables_c
+
+
+def test_generate_encoding_family_metadata() -> None:
+    dialect = Dialect("encoding", dialect_id=0x09)
+    family = EncodingFamilyDef(
+        "matrix_operand",
+        group=dialect,
+        role=EncodingFamilyRole.STORAGE_SCHEMA,
+        parameters=[
+            AttrDef("rounding", ATTR_TYPE_STRING, optional=True, bare_identifier=True),
+            AttrDef("payload_elements", ATTR_TYPE_I64),
+        ],
+    )
+
+    ops_h = generate_ops_h("encoding", 0x09, [], (), [family])
+    tables_c = generate_tables_c("encoding", 0x09, [], (), [family])
+
+    assert '#include "loom/ir/encoding.h"' in ops_h
+    assert "LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_PAYLOAD_ELEMENTS = 0" in ops_h
+    assert "LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_ROUNDING = 1" in ops_h
+    assert "LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_COUNT_ = 2" in ops_h
+    assert "extern const loom_encoding_family_descriptor_t loom_encoding_matrix_operand_family_descriptor;" in ops_h
+    assert '.name = _BSTRING(14, "matrix_operand")' in tables_c
+    assert ".role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA" in tables_c
+    assert '.name = _BSTRING(16, "payload_elements")' in tables_c
+    assert ".attr_kind = LOOM_ATTR_I64" in tables_c
+    assert '.name = _BSTRING(8, "rounding")' in tables_c
+    assert ".flags = LOOM_ATTR_OPTIONAL | LOOM_ATTR_BARE_IDENTIFIER" in tables_c
+    assert ".parameter_count = IREE_ARRAYSIZE(loom_encoding_matrix_operand_parameter_desc)" in tables_c
 
 
 def test_generate_dialect_tables_emit_dense_op_semantics() -> None:
