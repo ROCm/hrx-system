@@ -1470,8 +1470,18 @@ static void loom_verify_attr_symbol_references(
 }
 
 void loom_verify_module_type_symbol_references(loom_verify_state_t* state) {
+  state->type_summary = (loom_verify_type_summary_t){
+      .all_well_formed = true,
+      .may_reference_values = false,
+  };
   for (iree_host_size_t i = 0; i < state->module->types.count; ++i) {
     loom_type_t type = state->module->types.entries[i];
+    if (loom_verify_type_well_formed_malformation(type) !=
+        LOOM_VERIFY_TYPE_MALFORMATION_NONE) {
+      state->type_summary.all_well_formed = false;
+    }
+    state->type_summary.may_reference_values |=
+        loom_type_may_reference_values(type);
     if (!loom_type_is_parameterized(type)) continue;
     const loom_parameterized_type_descriptor_t* descriptor =
         loom_type_parameterized_descriptor(type);

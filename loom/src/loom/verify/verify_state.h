@@ -59,6 +59,15 @@ typedef struct loom_verify_tied_table_t {
   iree_host_size_t operand_value_capacity;
 } loom_verify_tied_table_t;
 
+// Module-wide canonical type facts gathered before the op walk.
+typedef struct loom_verify_type_summary_t {
+  // True when every canonical type satisfies representation invariants.
+  bool all_well_formed;
+
+  // True when any canonical type may carry an SSA value reference.
+  bool may_reference_values;
+} loom_verify_type_summary_t;
+
 typedef struct loom_verify_state_t {
   // Module being verified.
   const loom_module_t* module;
@@ -77,6 +86,9 @@ typedef struct loom_verify_state_t {
 
   // First non-OK status returned by the diagnostic sink.
   iree_status_t diagnostic_status;
+
+  // Facts derived from the module's canonical type table.
+  loom_verify_type_summary_t type_summary;
 
   // Scratch arena for all verification-time allocations.
   iree_arena_allocator_t arena;

@@ -44,11 +44,11 @@ static iree_status_t loom_verify_region(loom_verify_state_t* state,
          ++a) {
       status = loom_verify_define_value(state, loom_block_arg_id(block, a));
     }
-    if (iree_status_is_ok(status)) {
+    if (iree_status_is_ok(status) && !state->type_summary.all_well_formed) {
       loom_verify_block_arg_type_well_formedness(state, block);
       status = loom_verify_pending_diagnostic_status(state);
     }
-    if (iree_status_is_ok(status)) {
+    if (iree_status_is_ok(status) && state->type_summary.may_reference_values) {
       loom_verify_block_arg_encoding_refs(state, block);
       status = loom_verify_pending_diagnostic_status(state);
     }
@@ -143,8 +143,10 @@ static iree_status_t loom_verify_op(loom_verify_state_t* state,
 
   // Operand and result type payloads must satisfy core representation
   // invariants before table-driven constraints interpret them.
-  loom_verify_op_type_well_formedness(state, op, vtable);
-  IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
+  if (!state->type_summary.all_well_formed) {
+    loom_verify_op_type_well_formedness(state, op, vtable);
+    IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
+  }
 
   // Per-field type constraint checks (operand/result types satisfy
   // the type category declared in the vtable descriptors).
@@ -162,8 +164,10 @@ static iree_status_t loom_verify_op(loom_verify_state_t* state,
   // valid LOOM_TYPE_ENCODING values. Ordinary references must be in scope;
   // result co-references and global declaration placeholders have explicit
   // rules in loom_verify_encoding_ref.
-  loom_verify_encoding_refs(state, op, vtable);
-  IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
+  if (state->type_summary.may_reference_values) {
+    loom_verify_encoding_refs(state, op, vtable);
+    IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
+  }
 
   // Poison may flow through pure SSA computation, but it must not be consumed
   // by an operation that observes values outside ordinary use-def propagation.
@@ -283,6 +287,7 @@ static iree_status_t loom_verify_state_initialize(
   memset(state, 0, sizeof(*state));
   state->module = module;
   state->result = out_result;
+  state->type_summary.may_reference_values = true;
   out_result->error_count = 0;
   out_result->warning_count = 0;
 
