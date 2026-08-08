@@ -199,6 +199,21 @@ static iree_status_t loom_value_table_ensure_capacity(loom_module_t* module) {
   return iree_ok_status();
 }
 
+static iree_status_t loom_value_table_reserve(loom_module_t* module,
+                                              iree_host_size_t count) {
+  loom_value_table_t* table = &module->values;
+  iree_host_size_t available_capacity =
+      loom_value_table_capacity(table) - table->count;
+  while (available_capacity < count) {
+    loom_value_segment_t* segment = NULL;
+    IREE_RETURN_IF_ERROR(loom_segmented_storage_append(
+        &table->segments, &module->arena, (void**)&segment));
+    loom_value_segment_initialize(segment);
+    available_capacity += LOOM_VALUE_SEGMENT_CAPACITY;
+  }
+  return iree_ok_status();
+}
+
 static void loom_value_u32_scratch_fill(loom_value_u32_scratch_t* scratch,
                                         iree_host_size_t value_count,
                                         int byte_value) {
@@ -1666,6 +1681,48 @@ iree_status_t loom_module_define_value(loom_module_t* module, loom_type_t type,
   }
 
   *out_value_id = id;
+  return iree_ok_status();
+}
+
+iree_status_t loom_module_define_untyped_values(
+    loom_module_t* module, iree_host_size_t count,
+    loom_value_id_t* out_base_value_id) {
+  *out_base_value_id = LOOM_VALUE_ID_INVALID;
+  if (count == 0) return iree_ok_status();
+  if (count > LOOM_VALUE_ID_INVALID - module->values.count) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "value table full (%" PRIhsz
+                            " entries, cannot append %" PRIhsz ")",
+                            module->values.count, count);
+  }
+
+  IREE_RETURN_IF_ERROR(loom_value_table_reserve(module, count));
+  const loom_value_id_t base_value_id = (loom_value_id_t)module->values.count;
+  const bool zero_scratch = module->scratch.values.state ==
+                                LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ZEROED ||
+                            module->scratch.values.state ==
+                                LOOM_VALUE_U32_SCRATCH_STATE_UNACQUIRED_ZEROED;
+  iree_host_size_t remaining_count = count;
+  iree_host_size_t value_ordinal = module->values.count;
+  module->values.count += count;
+  while (remaining_count > 0) {
+    loom_value_segment_t* segment = loom_value_table_segment_for_id(
+        &module->values, (loom_value_id_t)value_ordinal);
+    const iree_host_size_t segment_offset =
+        value_ordinal & LOOM_VALUE_SEGMENT_MASK;
+    const iree_host_size_t segment_count =
+        iree_min(remaining_count, LOOM_VALUE_SEGMENT_CAPACITY - segment_offset);
+    for (iree_host_size_t i = 0; i < segment_count; ++i) {
+      segment->values[segment_offset + i].name_id = LOOM_STRING_ID_INVALID;
+    }
+    if (zero_scratch) {
+      memset(&segment->u32_scratch[segment_offset], 0,
+             segment_count * sizeof(segment->u32_scratch[0]));
+    }
+    value_ordinal += segment_count;
+    remaining_count -= segment_count;
+  }
+  *out_base_value_id = base_value_id;
   return iree_ok_status();
 }
 
