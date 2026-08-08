@@ -82,7 +82,8 @@ You can also run the benchmark planner directly:
 ```bash
 python dev.py bazel run //loom/src/loom/tools/iree-benchmark-loom:iree-benchmark-loom -- \
   loom/src/loom/test/corpus/authoring/mlp_down_projection_residual_bf16.loom \
-  --dry-run
+  --dry-run \
+  --config=mlp_down_projection_residual_bf16.row_capacity=3584
 ```
 
 The Bazel HAL driver registry defaults to host-only drivers. On an
@@ -95,6 +96,7 @@ python dev.py bazel run \
   --//runtime/config/hal:drivers=amdgpu,local-sync,local-task,null \
   //loom/src/loom/tools/iree-benchmark-loom:iree-benchmark-loom -- \
   loom/src/loom/test/corpus/authoring/mlp_down_projection_residual_bf16.loom \
+  --config=mlp_down_projection_residual_bf16.row_capacity=3584 \
   --device=amdgpu \
   --measure=dispatch_complete \
   --iterations=1 \
