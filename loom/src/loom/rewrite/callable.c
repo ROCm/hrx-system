@@ -6,6 +6,7 @@
 
 #include "loom/rewrite/callable.h"
 
+#include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
 #include "loom/rewrite/materialize.h"
@@ -123,8 +124,9 @@ static bool loom_callable_op_is_inside_region(const loom_op_t* op,
 }
 
 static iree_status_t loom_callable_validate_inline_body(
-    const loom_op_t* call_op, loom_func_like_t callee,
-    loom_block_t** out_entry_block, loom_op_t** out_return_op) {
+    const loom_module_t* module, const loom_op_t* call_op,
+    loom_func_like_t callee, loom_block_t** out_entry_block,
+    loom_op_t** out_terminator_op) {
   loom_region_t* body = loom_func_like_body(callee);
   if (!body) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -144,13 +146,22 @@ static iree_status_t loom_callable_validate_inline_body(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "callee body has no terminator");
   }
-  loom_op_t* return_op = loom_block_op(entry_block, entry_block->op_count - 1);
-  if (!loom_func_return_isa(return_op)) {
+  loom_op_t* terminator_op =
+      loom_block_op(entry_block, entry_block->op_count - 1);
+  const uint8_t body_region_index = loom_func_like_body_region_index(callee);
+  const loom_op_vtable_t* callee_vtable = loom_op_vtable(module, callee.op);
+  const loom_region_descriptor_t* body_descriptor =
+      loom_op_vtable_region_descriptor(callee_vtable, body_region_index);
+  if (!body_descriptor ||
+      !loom_op_has_trait(module, terminator_op, LOOM_TRAIT_TERMINATOR) ||
+      (body_descriptor->terminator != LOOM_OP_KIND_UNKNOWN &&
+       terminator_op->kind != body_descriptor->terminator)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "callee body must end with func.return to inline");
+                            "callee body must end with its declared "
+                            "terminator to inline");
   }
   *out_entry_block = entry_block;
-  *out_return_op = return_op;
+  *out_terminator_op = terminator_op;
   return iree_ok_status();
 }
 
@@ -174,14 +185,18 @@ static iree_status_t loom_callable_bind_entry_args(loom_ir_remap_t* remap,
 }
 
 static iree_status_t loom_callable_resolve_return_replacements(
-    loom_rewriter_t* rewriter, loom_call_like_t call, loom_op_t* return_op,
+    loom_rewriter_t* rewriter, loom_call_like_t call, loom_op_t* terminator_op,
     loom_ir_remap_t* remap, loom_value_id_t* replacements) {
-  loom_value_slice_t return_operands = loom_func_return_operands(return_op);
+  loom_value_slice_t return_operands = {
+      .values = loom_op_operands(terminator_op),
+      .count = terminator_op->operand_count,
+  };
   loom_value_slice_t call_results_slice = loom_call_like_results(call);
   if (return_operands.count != call_results_slice.count) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        "func.return operand count %u does not match call result count %u",
+        "callee terminator operand count %u does not match call result count "
+        "%u",
         (unsigned)return_operands.count, (unsigned)call_results_slice.count);
   }
   for (uint16_t i = 0; i < call_results_slice.count; ++i) {
@@ -472,9 +487,9 @@ iree_status_t loom_callable_inline_call(loom_rewriter_t* rewriter,
       loom_callable_get_whole_call(rewriter->module, call_op, &call));
 
   loom_block_t* entry_block = NULL;
-  loom_op_t* return_op = NULL;
+  loom_op_t* terminator_op = NULL;
   IREE_RETURN_IF_ERROR(loom_callable_validate_inline_body(
-      call_op, callee, &entry_block, &return_op));
+      rewriter->module, call_op, callee, &entry_block, &terminator_op));
 
   loom_ir_remap_t remap = {0};
   IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
@@ -499,7 +514,7 @@ iree_status_t loom_callable_inline_call(loom_rewriter_t* rewriter,
       &rewriter->builder, entry_block, &remap, &clone_options);
   if (iree_status_is_ok(status)) {
     status = loom_callable_resolve_return_replacements(
-        rewriter, call, return_op, &remap, replacements);
+        rewriter, call, terminator_op, &remap, replacements);
   }
   loom_builder_restore(&rewriter->builder, saved_ip);
   IREE_RETURN_IF_ERROR(status);
@@ -529,9 +544,9 @@ iree_status_t loom_callable_inline_consuming_call(loom_rewriter_t* rewriter,
       rewriter->module, call_op, callee));
 
   loom_block_t* entry_block = NULL;
-  loom_op_t* return_op = NULL;
+  loom_op_t* terminator_op = NULL;
   IREE_RETURN_IF_ERROR(loom_callable_validate_inline_body(
-      call_op, callee, &entry_block, &return_op));
+      rewriter->module, call_op, callee, &entry_block, &terminator_op));
 
   loom_ir_remap_options_t remap_options = {
       .allow_unmapped_values = true,
@@ -550,7 +565,7 @@ iree_status_t loom_callable_inline_consuming_call(loom_rewriter_t* rewriter,
         (void**)&replacements));
   }
   IREE_RETURN_IF_ERROR(loom_callable_resolve_return_replacements(
-      rewriter, call, return_op, &remap, replacements));
+      rewriter, call, terminator_op, &remap, replacements));
 
   loom_ir_move_block_options_t move_options = {
       .omit_terminators = true,

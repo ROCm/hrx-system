@@ -30,10 +30,10 @@ iree_status_t loom_callable_resolve_direct_callee(const loom_module_t* module,
 // Inlines |callee| at |call_op| using clone materialization.
 //
 // The callee must be a same-module function-like op with a single-block body
-// ending in func.return. Function entry block arguments are bound to call
-// operands, body ops are cloned before the call, func.return operands become
-// the call result replacements, and the original call-like op is erased through
-// the rewriter.
+// ending in the terminator declared by its body region. Function entry block
+// arguments are bound to call operands, body ops are cloned before the call,
+// terminator operands become the call result replacements, and the original
+// call-like op is erased through the rewriter.
 iree_status_t loom_callable_inline_call(loom_rewriter_t* rewriter,
                                         loom_op_t* call_op,
                                         loom_func_like_t callee);
@@ -47,8 +47,8 @@ iree_status_t loom_callable_inline_direct_call(loom_rewriter_t* rewriter,
 // This consumes the callee definition. The callee must be private, the selected
 // call must be the only live symbol reference to the callee outside of the
 // callee's own defining attribute, and the callee body must satisfy the same
-// single-block func.return shape as clone inlining. On success body ops are
-// moved before the call, call results are replaced by remapped func.return
+// single-block terminator shape as clone inlining. On success body ops are
+// moved before the call, call results are replaced by remapped terminator
 // operands, the call is erased, and the consumed callee op is erased.
 iree_status_t loom_callable_inline_consuming_call(loom_rewriter_t* rewriter,
                                                   loom_op_t* call_op,
