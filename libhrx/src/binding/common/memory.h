@@ -92,6 +92,29 @@ iree_status_t iree_hal_streaming_memory_set_pool_access(
     hrx_mem_pool_t pool, iree_host_size_t owner_device_ordinal,
     iree_host_size_t accessor_device_ordinal, hrx_memory_access_t access);
 
+// Records a stream-ordered contiguous fill.
+iree_status_t iree_hal_streaming_memory_memset(
+    iree_hal_streaming_context_t* context, uint64_t dst,
+    iree_device_size_t length, const void* pattern,
+    iree_host_size_t pattern_length, iree_hal_streaming_stream_t* stream);
+
+// Records a stream-ordered strided three-dimensional fill. |row_pitch| and
+// |slice_pitch| are byte strides and |width| is the number of bytes filled in
+// each row.
+iree_status_t iree_hal_streaming_memory_memset_3d(
+    iree_hal_streaming_context_t* context, uint64_t dst,
+    iree_device_size_t row_pitch, iree_device_size_t slice_pitch,
+    iree_device_size_t width, iree_host_size_t height, iree_host_size_t depth,
+    const void* pattern, iree_host_size_t pattern_length,
+    iree_hal_streaming_stream_t* stream);
+
+// Applies synchronous memset completion semantics to an already-recorded
+// destination range. Host-backed, managed, and offset destinations wait;
+// base device allocations remain asynchronous with respect to the host.
+iree_status_t iree_hal_streaming_memory_complete_synchronous_memset(
+    iree_hal_streaming_context_t* context, uint64_t dst,
+    iree_device_size_t length, iree_hal_streaming_stream_t* stream);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
