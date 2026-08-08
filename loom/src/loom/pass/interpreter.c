@@ -495,6 +495,12 @@ static iree_status_t loom_pass_interpreter_build_function_snapshot(
     if (!loom_func_like_body(function)) {
       continue;
     }
+    const loom_pass_function_selector_t selector =
+        state->options->function_selector;
+    if (selector.select &&
+        !selector.select(selector.user_data, state->module, symbol, function)) {
+      continue;
+    }
     entries[i] = (loom_pass_interpreter_symbol_snapshot_entry_t){
         .symbol = symbol,
         .function = function,

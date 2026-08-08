@@ -273,6 +273,7 @@ loom_pass_interpreter_options_t PassTestHarness::InterpreterOptions(
     loom_pass_predicate_provider_t predicate_provider) {
   return (loom_pass_interpreter_options_t){
       /*.block_pool=*/&block_pool_,
+      /*.function_selector=*/{},
       /*.predicate_provider=*/predicate_provider,
       /*.diagnostic_emitter=*/diagnostic_emitter,
       /*.environment=*/EnvironmentWithTrace(trace),
