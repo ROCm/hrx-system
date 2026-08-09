@@ -324,6 +324,68 @@ TEST_F(ModuleTest, CompactSymbolsDropsUnreferencedTombstonesAndRenumbersRefs) {
   loom_module_free(module);
 }
 
+TEST_F(ModuleTest, CompactSymbolsRebuildsEncodingInternTable) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_string_id_t drop_name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("drop"), &drop_name));
+  uint16_t drop_symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_add_symbol(module, drop_name, &drop_symbol_id));
+  loom_string_id_t target_name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("target"), &target_name));
+  uint16_t target_symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_add_symbol(module, target_name, &target_symbol_id));
+  ASSERT_EQ(drop_symbol_id, 0u);
+  ASSERT_EQ(target_symbol_id, 1u);
+
+  loom_string_id_t encoding_name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("q8_0"), &encoding_name));
+  loom_string_id_t parameter_name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("block"), &parameter_name));
+  loom_named_attr_t parameter = {
+      /*.name_id=*/parameter_name,
+      /*.reserved=*/{},
+      /*.value=*/loom_attr_symbol((loom_symbol_ref_t){0, target_symbol_id}),
+  };
+  loom_encoding_t encoding = {
+      /*.name_id=*/encoding_name,
+      /*.alias_id=*/LOOM_STRING_ID_INVALID,
+      /*.attribute_count=*/1,
+      /*.family=*/{},
+      /*.attributes=*/&parameter,
+  };
+  uint16_t encoding_id = 0;
+  IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &encoding_id));
+
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(&block_pool_, &scratch_arena);
+  iree_host_size_t removed_count = 0;
+  IREE_ASSERT_OK(
+      loom_module_compact_symbols(module, &scratch_arena, &removed_count));
+  iree_arena_deinitialize(&scratch_arena);
+
+  EXPECT_EQ(removed_count, 1u);
+  const loom_encoding_t* compacted = loom_module_encoding(module, encoding_id);
+  ASSERT_NE(compacted, nullptr);
+  ASSERT_EQ(compacted->attribute_count, 1u);
+  EXPECT_EQ(loom_attr_as_symbol(compacted->attributes[0].value).symbol_id, 0u);
+
+  parameter.value = loom_attr_symbol((loom_symbol_ref_t){0, 0});
+  uint16_t duplicate_id = 0;
+  IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &duplicate_id));
+  EXPECT_EQ(duplicate_id, encoding_id);
+  EXPECT_EQ(module->encodings.count, 1u);
+
+  loom_module_free(module);
+}
+
 TEST_F(ModuleTest, CompactSymbolsCanPreserveExternalRefOrdinal) {
   loom_module_t* module = NULL;
   IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
@@ -2555,6 +2617,7 @@ TEST_F(ModuleTest, SizeHints) {
       /*.value_count=*/100,
       /*.string_count=*/50,
       /*.type_count=*/20,
+      /*.encoding_count=*/12,
       /*.symbol_count=*/10,
   };
   loom_module_t* module = NULL;
@@ -2566,6 +2629,8 @@ TEST_F(ModuleTest, SizeHints) {
   EXPECT_EQ(loom_value_table_capacity(&module->values), 0u);
   EXPECT_GE(module->strings.capacity, 50u);
   EXPECT_GE(module->types.capacity, 20u);
+  EXPECT_GE(module->encodings.capacity, 12u);
+  EXPECT_GE(module->encoding_intern.capacity, 12u);
   EXPECT_GE(module->symbols.capacity, 10u);
   loom_module_free(module);
 }
@@ -2696,6 +2761,59 @@ TEST_F(ModuleTest, AddEncodingDedup) {
   IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &id2));
   EXPECT_EQ(id1, id2);
   EXPECT_EQ(module->encodings.count, 1u);
+
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, AddEncodingDedupAfterInternTableGrowth) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("q8_0"), &name_id));
+  loom_string_id_t block_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("block"), &block_id));
+
+  constexpr uint16_t kEncodingCount = 128;
+  for (uint16_t i = 0; i < kEncodingCount; ++i) {
+    loom_named_attr_t parameter = {
+        /*.name_id=*/block_id,
+        /*.reserved=*/{},
+        /*.value=*/loom_attr_i64(i),
+    };
+    loom_encoding_t encoding = {
+        /*.name_id=*/name_id,
+        /*.alias_id=*/LOOM_STRING_ID_INVALID,
+        /*.attribute_count=*/1,
+        /*.family=*/{},
+        /*.attributes=*/&parameter,
+    };
+    uint16_t encoding_id = 0;
+    IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &encoding_id));
+    EXPECT_EQ(encoding_id, i + 1);
+  }
+
+  const uint16_t duplicate_ordinals[] = {0, 63, 127};
+  for (uint16_t ordinal : duplicate_ordinals) {
+    loom_named_attr_t parameter = {
+        /*.name_id=*/block_id,
+        /*.reserved=*/{},
+        /*.value=*/loom_attr_i64(ordinal),
+    };
+    loom_encoding_t encoding = {
+        /*.name_id=*/name_id,
+        /*.alias_id=*/LOOM_STRING_ID_INVALID,
+        /*.attribute_count=*/1,
+        /*.family=*/{},
+        /*.attributes=*/&parameter,
+    };
+    uint16_t encoding_id = 0;
+    IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &encoding_id));
+    EXPECT_EQ(encoding_id, ordinal + 1);
+  }
+  EXPECT_EQ(module->encodings.count, kEncodingCount);
 
   loom_module_free(module);
 }

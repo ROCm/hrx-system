@@ -6431,6 +6431,7 @@ static iree_status_t loom_bytecode_reader_allocate_output_module(
           (iree_host_size_t)reader->current_module_summary.value_count,
       .string_count = reader->string_count,
       .type_count = reader->type_count,
+      .encoding_count = reader->encoding_count,
       .symbol_count = reader->symbol_count,
   };
   // Bytecode string IDs must materialize 1:1 into module string IDs. Allocate

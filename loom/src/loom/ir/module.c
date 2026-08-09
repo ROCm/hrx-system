@@ -102,6 +102,39 @@ static iree_status_t loom_intern_table_grow(iree_arena_allocator_t* arena,
   return iree_ok_status();
 }
 
+// Clears all entries while retaining the arena-owned table allocation.
+static void loom_intern_table_clear(loom_intern_table_t* table) {
+  if (table->capacity == 0) return;
+  memset(table->indices, 0xFF, table->capacity * sizeof(uint32_t));
+  table->count = 0;
+}
+
+// Inserts a value known to be unique into a table with available capacity.
+static void loom_intern_table_insert_unique(loom_intern_table_t* table,
+                                            uint32_t hash, uint32_t index) {
+  IREE_ASSERT(table->count < table->capacity);
+  const iree_host_size_t mask = table->capacity - 1;
+  iree_host_size_t slot = hash & mask;
+  while (table->indices[slot] != UINT32_MAX) {
+    slot = (slot + 1) & mask;
+  }
+  table->hashes[slot] = hash;
+  table->indices[slot] = index;
+  ++table->count;
+}
+
+// Ensures one entry can be inserted while preserving the maximum load factor.
+static iree_status_t loom_intern_table_reserve_insert(
+    iree_arena_allocator_t* arena, loom_intern_table_t* table) {
+  if (table->capacity == 0) {
+    return loom_intern_table_allocate(arena, /*capacity=*/32, table);
+  }
+  if (table->count * 4 >= table->capacity * 3) {
+    return loom_intern_table_grow(arena, table);
+  }
+  return iree_ok_status();
+}
+
 typedef bool (*loom_intern_equal_fn_t)(const void* context, uint32_t index);
 
 static uint32_t loom_intern_table_lookup(const loom_intern_table_t* table,
@@ -125,26 +158,13 @@ static uint32_t loom_intern_table_lookup(const loom_intern_table_t* table,
 // Looks up or inserts an entry in the intern table.
 // |hash|: pre-computed hash of the entry.
 // |index|: the entry table index to insert if not found.
-// |out_existing_index|: set to the existing index if found, or |index|
-//   if newly inserted.
-// Returns true if an existing entry was found, false if newly inserted.
-// The caller must check for equality using the entry table — the intern
-// table only stores hashes and indices.
+// |out_index|: set to the existing index if found, or |new_index| if newly
+//   inserted.
 static iree_status_t loom_intern_table_find_or_insert(
     iree_arena_allocator_t* arena, loom_intern_table_t* table, uint32_t hash,
     uint32_t new_index, loom_intern_equal_fn_t equal_fn,
     const void* equal_context, uint32_t* out_index) {
-  // Lazy initialization.
-  if (table->capacity == 0) {
-    iree_host_size_t initial_capacity = 32;
-    IREE_RETURN_IF_ERROR(
-        loom_intern_table_allocate(arena, initial_capacity, table));
-  }
-
-  // Check load factor and grow if needed.
-  if (table->count * 4 >= table->capacity * 3) {
-    IREE_RETURN_IF_ERROR(loom_intern_table_grow(arena, table));
-  }
+  IREE_RETURN_IF_ERROR(loom_intern_table_reserve_insert(arena, table));
 
   iree_host_size_t mask = table->capacity - 1;
   iree_host_size_t slot = hash & mask;
@@ -506,6 +526,7 @@ static iree_status_t loom_module_initialize_tables(
 
   iree_host_size_t string_capacity = 512;
   iree_host_size_t type_capacity = 64;
+  iree_host_size_t encoding_capacity = 0;
   iree_host_size_t symbol_capacity = 32;
 
   if (hints) {
@@ -513,10 +534,15 @@ static iree_status_t loom_module_initialize_tables(
         (iree_host_size_t)(hints->string_count * LOOM_MODULE_GROWTH_FACTOR);
     type_capacity =
         (iree_host_size_t)(hints->type_count * LOOM_MODULE_GROWTH_FACTOR);
+    encoding_capacity =
+        (iree_host_size_t)(hints->encoding_count * LOOM_MODULE_GROWTH_FACTOR);
     symbol_capacity =
         (iree_host_size_t)(hints->symbol_count * LOOM_MODULE_GROWTH_FACTOR);
     if (string_capacity < 8) string_capacity = 8;
     if (type_capacity < 8) type_capacity = 8;
+    if (hints->encoding_count > 0 && encoding_capacity < 8) {
+      encoding_capacity = 8;
+    }
     if (symbol_capacity < 4) symbol_capacity = 4;
   }
 
@@ -546,6 +572,14 @@ static iree_status_t loom_module_initialize_tables(
   module->types.capacity = type_capacity;
   memset(module->types.entries, 0, type_capacity * sizeof(loom_type_t));
 
+  // Encodings. Modules without an encoding count hint retain lazy allocation.
+  if (encoding_capacity > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, encoding_capacity, sizeof(loom_encoding_t),
+        (void**)&module->encodings.entries));
+    module->encodings.capacity = encoding_capacity;
+  }
+
   // Symbols.
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(arena, symbol_capacity, sizeof(loom_symbol_t),
@@ -562,6 +596,12 @@ static iree_status_t loom_module_initialize_tables(
       loom_intern_capacity_for_entries(type_capacity);
   IREE_RETURN_IF_ERROR(loom_intern_table_allocate(arena, type_intern_capacity,
                                                   &module->type_intern));
+  if (encoding_capacity > 0) {
+    iree_host_size_t encoding_intern_capacity =
+        loom_intern_capacity_for_entries(encoding_capacity);
+    IREE_RETURN_IF_ERROR(loom_intern_table_allocate(
+        arena, encoding_intern_capacity, &module->encoding_intern));
+  }
 
   return iree_ok_status();
 }
@@ -646,6 +686,18 @@ void loom_value_u32_scratch_release_zeroed(loom_value_u32_scratch_t* scratch) {
 //===----------------------------------------------------------------------===//
 // Encoding table
 //===----------------------------------------------------------------------===//
+
+typedef struct loom_encoding_equal_context_t {
+  const loom_module_t* module;
+  const loom_encoding_t* encoding;
+} loom_encoding_equal_context_t;
+
+static bool loom_encoding_equal_fn(const void* context, uint32_t index) {
+  const loom_encoding_equal_context_t* equal_context =
+      (const loom_encoding_equal_context_t*)context;
+  return loom_encoding_equal(&equal_context->module->encodings.entries[index],
+                             equal_context->encoding);
+}
 
 // Binds freshly canonicalized sparse parameters to their generated descriptor
 // ordinals. Both arrays are lexically ordered, so one linear merge establishes
@@ -762,18 +814,23 @@ iree_status_t loom_module_add_encoding(loom_module_t* module,
         LOOM_ENCODING_FAMILY_STATIC_SEMANTICS_VALID;
   }
 
-  // Check for an existing duplicate and reject alias collisions against
-  // structurally different encodings. Alias names are file-local shorthand and
-  // must resolve unambiguously when the module is printed back to text.
-  iree_host_size_t existing_index = IREE_HOST_SIZE_MAX;
-  for (iree_host_size_t i = 0; i < module->encodings.count; ++i) {
-    if (loom_encoding_equal(&module->encodings.entries[i],
-                            &canonical_encoding)) {
-      existing_index = i;
-      continue;
-    }
-    if (canonical_encoding.alias_id != LOOM_STRING_ID_INVALID &&
-        module->encodings.entries[i].alias_id == canonical_encoding.alias_id) {
+  const uint32_t hash = loom_encoding_hash(&canonical_encoding);
+  const loom_encoding_equal_context_t equal_context = {
+      .module = module,
+      .encoding = &canonical_encoding,
+  };
+  const uint32_t existing_index = loom_intern_table_lookup(
+      &module->encoding_intern, hash, loom_encoding_equal_fn, &equal_context);
+
+  // Alias names are rare file-local shorthand. Scan only when one is authored
+  // and reject collisions against any structurally different encoding.
+  if (canonical_encoding.alias_id != LOOM_STRING_ID_INVALID) {
+    for (iree_host_size_t i = 0; i < module->encodings.count; ++i) {
+      if (i == existing_index) continue;
+      if (module->encodings.entries[i].alias_id !=
+          canonical_encoding.alias_id) {
+        continue;
+      }
       iree_string_view_t alias_name =
           module->strings.entries[canonical_encoding.alias_id];
       return iree_make_status(
@@ -783,7 +840,7 @@ iree_status_t loom_module_add_encoding(loom_module_t* module,
     }
   }
 
-  if (existing_index != IREE_HOST_SIZE_MAX) {
+  if (existing_index != UINT32_MAX) {
     if (module->encodings.entries[existing_index].alias_id ==
             LOOM_STRING_ID_INVALID &&
         canonical_encoding.alias_id != LOOM_STRING_ID_INVALID) {
@@ -805,11 +862,15 @@ iree_status_t loom_module_add_encoding(loom_module_t* module,
 
   IREE_RETURN_IF_ERROR(
       loom_encoding_table_ensure_capacity(&module->arena, &module->encodings));
+  IREE_RETURN_IF_ERROR(loom_intern_table_reserve_insert(
+      &module->arena, &module->encoding_intern));
 
-  loom_encoding_t* entry = &module->encodings.entries[module->encodings.count];
+  const uint32_t new_index = (uint32_t)module->encodings.count;
+  loom_encoding_t* entry = &module->encodings.entries[new_index];
   *entry = canonical_encoding;
+  loom_intern_table_insert_unique(&module->encoding_intern, hash, new_index);
 
-  *out_encoding_id = (uint16_t)(module->encodings.count + 1);
+  *out_encoding_id = (uint16_t)(new_index + 1);
   ++module->encodings.count;
   return iree_ok_status();
 }
@@ -1242,6 +1303,7 @@ iree_status_t loom_module_compact_symbols_preserving_symbol_refs(
 
   IREE_RETURN_IF_ERROR(loom_module_remap_symbol_region_attrs(
       module, new_symbol_ids, old_symbol_count, module->body));
+  loom_intern_table_clear(&module->encoding_intern);
   for (iree_host_size_t i = 0; i < module->encodings.count; ++i) {
     loom_encoding_t* encoding = &module->encodings.entries[i];
     const loom_named_attr_t* attributes = encoding->attributes;
@@ -1249,6 +1311,8 @@ iree_status_t loom_module_compact_symbols_preserving_symbol_refs(
         module, new_symbol_ids, old_symbol_count, &attributes,
         encoding->attribute_count));
     encoding->attributes = attributes;
+    loom_intern_table_insert_unique(&module->encoding_intern,
+                                    loom_encoding_hash(encoding), (uint32_t)i);
   }
 
   for (iree_host_size_t old_index = 0; old_index < old_symbol_count;

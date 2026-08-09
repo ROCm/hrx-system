@@ -37,6 +37,8 @@ typedef struct loom_module_size_hints_t {
   iree_host_size_t string_count;
   // Expected interned type count.
   iree_host_size_t type_count;
+  // Expected interned encoding count.
+  iree_host_size_t encoding_count;
   // Expected module symbol count.
   iree_host_size_t symbol_count;
 } loom_module_size_hints_t;
