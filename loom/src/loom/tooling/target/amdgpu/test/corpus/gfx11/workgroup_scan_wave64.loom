@@ -5,9 +5,9 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 // Exercises workgroup scan stitching across every native 32-lane partition in
 // a wave64 gfx11 workgroup.
-amdgpu.target<gfx11-generic> @gfx11_wave64 {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @workgroup_scan_gfx11_wave64 {subgroup_size = 64}
 
-kernel.def target(@gfx11_wave64) @workgroup_scan_wave64() {
+kernel.def target(@workgroup_scan_gfx11_wave64) @workgroup_scan_wave64() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 1024 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index

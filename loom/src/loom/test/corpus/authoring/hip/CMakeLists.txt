@@ -9,6 +9,76 @@
 
 iree_add_all_subdirs()
 
+file(GLOB _GLOB_X_LOOM_52CB0DDF LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
+file(GLOB _GLOB_TARGET_PROVIDER_SELECTION_LOOM_52CB0DDF LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS target_provider_selection.loom)
+list(REMOVE_ITEM _GLOB_X_LOOM_52CB0DDF ${_GLOB_TARGET_PROVIDER_SELECTION_LOOM_52CB0DDF})
+file(GLOB _GLOB_TEMPLATE_MATH_LEGALIZATION_LOOM_52CB0DDF LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS template_math_legalization.loom)
+list(REMOVE_ITEM _GLOB_X_LOOM_52CB0DDF ${_GLOB_TEMPLATE_MATH_LEGALIZATION_LOOM_52CB0DDF})
+file(GLOB _GLOB_WAVE64_REDUCTIONS_LOOM_52CB0DDF LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS wave64_reductions.loom)
+list(REMOVE_ITEM _GLOB_X_LOOM_52CB0DDF ${_GLOB_WAVE64_REDUCTIONS_LOOM_52CB0DDF})
+file(GLOB _GLOB_CLUSTER_B128_MULTICAST_LOOM_52CB0DDF LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS cluster_b128_multicast.loom)
+list(REMOVE_ITEM _GLOB_X_LOOM_52CB0DDF ${_GLOB_CLUSTER_B128_MULTICAST_LOOM_52CB0DDF})
+file(GLOB _GLOB_LANE_DISTRIBUTION_LOOM_52CB0DDF LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS lane_distribution.loom)
+list(REMOVE_ITEM _GLOB_X_LOOM_52CB0DDF ${_GLOB_LANE_DISTRIBUTION_LOOM_52CB0DDF})
+file(GLOB _GLOB_PACKED_FIELD_CONTRACTS_LOOM_52CB0DDF LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS packed_field_contracts.loom)
+list(REMOVE_ITEM _GLOB_X_LOOM_52CB0DDF ${_GLOB_PACKED_FIELD_CONTRACTS_LOOM_52CB0DDF})
+file(GLOB _GLOB_Q8_HIP_SHAPED_UNROLL_UNRESOLVED_LOOM_52CB0DDF LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS q8_hip_shaped_unroll_unresolved.loom)
+list(REMOVE_ITEM _GLOB_X_LOOM_52CB0DDF ${_GLOB_Q8_HIP_SHAPED_UNROLL_UNRESOLVED_LOOM_52CB0DDF})
+file(GLOB _GLOB_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
+loom_link_module(
+  NAME
+    portable_cases
+  SRCS
+    "${_GLOB_X_LOOM_52CB0DDF}"
+  MODE
+    "archive"
+  OUTPUT
+    "portable_cases.loombc"
+  OUTPUT_FORMAT
+    "bc"
+)
+
+loom_link_module(
+  NAME
+    amdgpu_selection_cases
+  SRCS
+    "target_provider_selection.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "amdgpu_selection_cases.loombc"
+  OUTPUT_FORMAT
+    "bc"
+)
+
+loom_link_module(
+  NAME
+    gfx11_cases
+  SRCS
+    "template_math_legalization.loom"
+    "wave64_reductions.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "gfx11_cases.loombc"
+  OUTPUT_FORMAT
+    "bc"
+)
+
+loom_link_module(
+  NAME
+    gfx1250_cases
+  SRCS
+    "cluster_b128_multicast.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "gfx1250_cases.loombc"
+  OUTPUT_FORMAT
+    "bc"
+)
+
+file(GLOB _GLOB_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 iree_execution_test_suite(
   NAME
@@ -16,156 +86,12 @@ iree_execution_test_suite(
   MANIFESTS
     "hip_authoring.test.json"
   TOOLS
-    "iree-benchmark-loom=loom::tools::iree-benchmark-loom"
     "loom-compile=loom::tools::loom-compile"
     "loom-opt=loom::tools::loom-opt"
   DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/cluster_b128_multicast.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/lane_distribution.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/packed_field_contracts.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/q8_block_unroll.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/q8_hip_shaped_unroll_unresolved.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/q8_load_width.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/q8_q4_signedness.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/shared_memory_tile.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/shared_memory_transpose.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/shared_memory_vector_tile.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/shared_memory_wave_tile.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/target_provider_selection.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/template_math_legalization.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/wave64_reductions.loom"
+    "${_GLOB_X_LOOM}"
   LABELS
     "hostonly"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
-  NAME
-    "wave64_reductions_amdgpu_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/wave64_reductions.loom}}"
-    "--device=amdgpu"
-    "--measure=dispatch_complete"
-    "--iterations=1"
-    "--warmup-iterations=0"
-    "--batch-size=1"
-    "--min-time-ms=0"
-    "--max-batches=1"
-    "--input-ring-count=1"
-  SRC
-    loom::tools::iree-benchmark-loom
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/wave64_reductions.loom"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
-  NAME
-    "shared_memory_tile_amdgpu_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/shared_memory_tile.loom}}"
-    "--device=amdgpu"
-    "--measure=dispatch_complete"
-    "--iterations=1"
-    "--warmup-iterations=0"
-    "--batch-size=1"
-    "--min-time-ms=0"
-    "--max-batches=1"
-    "--input-ring-count=1"
-  SRC
-    loom::tools::iree-benchmark-loom
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/shared_memory_tile.loom"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
-  NAME
-    "shared_memory_wave_tile_amdgpu_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/shared_memory_wave_tile.loom}}"
-    "--device=amdgpu"
-    "--measure=dispatch_complete"
-    "--iterations=1"
-    "--warmup-iterations=0"
-    "--batch-size=1"
-    "--min-time-ms=0"
-    "--max-batches=1"
-    "--input-ring-count=1"
-  SRC
-    loom::tools::iree-benchmark-loom
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/shared_memory_wave_tile.loom"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
-  NAME
-    "shared_memory_transpose_amdgpu_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/shared_memory_transpose.loom}}"
-    "--device=amdgpu"
-    "--measure=dispatch_complete"
-    "--iterations=1"
-    "--warmup-iterations=0"
-    "--batch-size=1"
-    "--min-time-ms=0"
-    "--max-batches=1"
-    "--input-ring-count=1"
-  SRC
-    loom::tools::iree-benchmark-loom
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/shared_memory_transpose.loom"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
-  NAME
-    "shared_memory_vector_tile_amdgpu_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/shared_memory_vector_tile.loom}}"
-    "--device=amdgpu"
-    "--measure=dispatch_complete"
-    "--iterations=1"
-    "--warmup-iterations=0"
-    "--batch-size=1"
-    "--min-time-ms=0"
-    "--max-batches=1"
-    "--input-ring-count=1"
-  SRC
-    loom::tools::iree-benchmark-loom
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/shared_memory_vector_tile.loom"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
 )
 endif()
 

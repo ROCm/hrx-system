@@ -98,6 +98,16 @@ TARGET_EXECUTION_INCLUDE_PATTERN = re.compile(
 TARGET_EXECUTION_DEP_LABEL_PATTERN = re.compile(
     r"//loom/src/loom/tooling/execution/(?:hal|ireevm)(?::|/)"
 )
+TARGET_PHYSICAL_TEST_SRC_PATTERN = re.compile(
+    r'\bsrc\s*=\s*"(?P<label>//loom/src/loom/tools/'
+    r'(?:iree-test-loom|iree-benchmark-loom)(?::[^"]*)?)"'
+)
+TARGET_EXECUTION_BAZEL_TOOLS_PATTERN = re.compile(
+    r"\btools\s*=\s*\{(?P<body>.*?)\}", re.DOTALL
+)
+TARGET_PHYSICAL_TEST_TOOL_LABEL_PATTERN = re.compile(
+    r"//loom/src/loom/tools/(?:iree-test-loom|iree-benchmark-loom)(?::|\")"
+)
 TARGET_EXECUTION_BAZEL_DEPS_PATTERN = re.compile(
     r"\b(?:deps|implementation_deps)\s*=\s*\[(?P<body>.*?)\]", re.DOTALL
 )
@@ -717,8 +727,29 @@ def _scan_target_execution_text(
 
     if path.name != "BUILD.bazel":
         return findings
-    bazel_text = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
     lines = text.splitlines()
+    bazel_text = "\n".join(line.split("#", 1)[0] for line in lines)
+    for src_match in TARGET_PHYSICAL_TEST_SRC_PATTERN.finditer(bazel_text):
+        line_number = bazel_text.count("\n", 0, src_match.start("label")) + 1
+        findings.append(
+            (
+                line_number,
+                "target packages must not own physical execution tests",
+                lines[line_number - 1].strip(),
+            )
+        )
+    for tools_match in TARGET_EXECUTION_BAZEL_TOOLS_PATTERN.finditer(bazel_text):
+        body = tools_match.group("body")
+        for label_match in TARGET_PHYSICAL_TEST_TOOL_LABEL_PATTERN.finditer(body):
+            offset = tools_match.start("body") + label_match.start()
+            line_number = bazel_text.count("\n", 0, offset) + 1
+            findings.append(
+                (
+                    line_number,
+                    "target packages must not own physical execution tests",
+                    lines[line_number - 1].strip(),
+                )
+            )
     for deps_match in TARGET_EXECUTION_BAZEL_DEPS_PATTERN.finditer(bazel_text):
         body = deps_match.group("body")
         for label_match in TARGET_EXECUTION_DEP_LABEL_PATTERN.finditer(body):
@@ -926,9 +957,30 @@ def _run_self_tests() -> int:
         (),
     )
     ok &= _expect_target_execution_self_test(
-        "target-owned qualification package passes",
-        "loom/src/loom/target/arch/amdgpu/test/execution/BUILD.bazel",
-        'tools = {"iree-test-loom": "//loom/src/loom/tools/iree-test-loom"}\n',
+        "provider-owned qualification package passes",
+        "loom/src/loom/tooling/target/amdgpu/test/corpus/BUILD.bazel",
+        'src = "//loom/src/loom/tools/iree-test-loom"\n',
+        (),
+    )
+    ok &= _expect_target_execution_self_test(
+        "target-owned qualification package fails",
+        "loom/src/loom/target/arch/amdgpu/test/BUILD.bazel",
+        'src = "//loom/src/loom/tools/iree-test-loom"\n',
+        ("target packages must not own physical execution tests",),
+    )
+    ok &= _expect_target_execution_self_test(
+        "target-owned qualification tool fails",
+        "loom/src/loom/target/arch/amdgpu/test/BUILD.bazel",
+        ('tools = {"iree-test-loom": "//loom/src/loom/tools/iree-test-loom"}\n'),
+        ("target packages must not own physical execution tests",),
+    )
+    ok &= _expect_target_execution_self_test(
+        "physical tool visibility grant passes",
+        "loom/src/loom/target/arch/amdgpu/BUILD.bazel",
+        (
+            "_PROVIDER_VISIBILITY = [\n    "
+            '"//loom/src/loom/tools/iree-test-loom:__pkg__",\n]\n'
+        ),
         (),
     )
     ok &= _expect_target_execution_self_test(

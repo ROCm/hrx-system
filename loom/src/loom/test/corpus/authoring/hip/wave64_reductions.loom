@@ -7,9 +7,9 @@
 // rejected by AMDGPU source-to-low diagnostics because native subgroup
 // communication is only proven for the GFX11 family's narrower execution
 // partition.
-amdgpu.target<gfx11-generic> @gfx11_wave64 {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @authoring_wave64 {subgroup_size = 64}
 
-kernel.def target(@gfx11_wave64) @wave64_workgroup_reduce_sub_wave() {
+kernel.def target(@authoring_wave64) @wave64_workgroup_reduce_sub_wave() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -29,7 +29,7 @@ kernel.def target(@gfx11_wave64) @wave64_workgroup_reduce_sub_wave() {
   kernel.return
 }
 
-kernel.def target(@gfx11_wave64) @wave64_workgroup_reduce_full_wave() {
+kernel.def target(@authoring_wave64) @wave64_workgroup_reduce_full_wave() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -49,7 +49,7 @@ kernel.def target(@gfx11_wave64) @wave64_workgroup_reduce_full_wave() {
   kernel.return
 }
 
-kernel.def target(@gfx11_wave64) @wave64_workgroup_reduce_cross_wave() {
+kernel.def target(@authoring_wave64) @wave64_workgroup_reduce_cross_wave() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 128 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -69,7 +69,7 @@ kernel.def target(@gfx11_wave64) @wave64_workgroup_reduce_cross_wave() {
   kernel.return
 }
 
-kernel.def target(@gfx11_wave64) @wave64_workgroup_reduce_loop_accumulation() {
+kernel.def target(@authoring_wave64) @wave64_workgroup_reduce_loop_accumulation() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 512 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -97,7 +97,7 @@ kernel.def target(@gfx11_wave64) @wave64_workgroup_reduce_loop_accumulation() {
   kernel.return
 }
 
-kernel.def target(@gfx11_wave64) @wave64_workgroup_reduce_sparse_loop_accumulation() {
+kernel.def target(@authoring_wave64) @wave64_workgroup_reduce_sparse_loop_accumulation() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 256 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -128,7 +128,7 @@ kernel.def target(@gfx11_wave64) @wave64_workgroup_reduce_sparse_loop_accumulati
   kernel.return
 }
 
-kernel.def target(@gfx11_wave64) @wave64_workgroup_reduce_loop_all_workitems() {
+kernel.def target(@authoring_wave64) @wave64_workgroup_reduce_loop_all_workitems() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 512 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -159,7 +159,7 @@ kernel.def target(@gfx11_wave64) @wave64_workgroup_reduce_loop_all_workitems() {
   kernel.return
 }
 
-kernel.def target(@gfx11_wave64) @wave64_workgroup_reduce_two_rows() {
+kernel.def target(@authoring_wave64) @wave64_workgroup_reduce_two_rows() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index

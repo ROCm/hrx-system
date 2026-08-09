@@ -3,9 +3,9 @@
 //
 // The fragment carries lane-dependent values so a row-block permutation cannot
 // hide behind uniform data.
-amdgpu.target<gfx1100> @gfx1100_wave64 {subgroup_size = 64}
+amdgpu.target<gfx1100> @fragment_result_lds_gfx1100_wave64 {subgroup_size = 64}
 
-kernel.def target(@gfx1100_wave64) @fragment_result_f16_lds_roundtrip() {
+kernel.def target(@fragment_result_lds_gfx1100_wave64) @fragment_result_f16_lds_roundtrip() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index

@@ -1,10 +1,12 @@
-# Checked Benchmark Integration Suite
+# Checked Benchmark Corpus
 
-This suite is for full Loom programs that must compile, execute, validate, and
-benchmark through production-facing infrastructure. A case belongs here when the
-important risk is the interaction between multiple compiler and runtime
-contracts, and that interaction cannot be represented faithfully by a smaller
-source-low, op, pass, tool, or authoring test.
+This corpus contains complete Loom programs with correctness cases and
+benchmark rows. Target providers compose these data-only sources into
+capability-coherent modules and execute them through production-facing
+infrastructure. A case belongs here when the important risk is the interaction
+between multiple compiler and runtime contracts, and that interaction cannot
+be represented faithfully by a smaller source-low, op, pass, tool, or authoring
+test.
 
 Each checked benchmark source is expected to contain:
 
@@ -24,8 +26,8 @@ FMA-style instructions are not misclassified as backend losses.
 
 The source stays more test-focused than the authoring corpus. Authoring
 examples are comment-rich recipes for people and agents learning how to write
-Loom. Checked benchmark integration cases are regression and benchmark assets:
-they can have comments, but their main job is to preserve end-to-end signal.
+Loom. Checked benchmark cases are regression and benchmark assets: they can
+have comments, but their main job is to preserve end-to-end signal.
 
 ## Case Template
 

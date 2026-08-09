@@ -9,24 +9,23 @@
 
 iree_add_all_subdirs()
 
+file(GLOB _GLOB_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
 loom_link_module(
   NAME
     numeric_conversion_cases
   SRCS
-    "fp8_bidirectional_decode_e4m3.loom"
-    "fp8_bidirectional_decode_e5m2.loom"
-    "fp8_bidirectional_encode_e4m3.loom"
-    "fp8_bidirectional_encode_e5m2.loom"
-    "fp8_encode.loom"
-    "mxfp4_decode_bf16.loom"
+    "${_GLOB_X_LOOM}"
   CONFIGS
+    "finite_storage_decode.input_capacity=4608"
+    "finite_storage_decode.output_capacity=16"
+    "finite_storage_decode.row_capacity=65"
     "fp8_bidirectional_decode.row_capacity=65536"
     "fp8_bidirectional_encode.row_capacity=65536"
     "fp8_encode.row_capacity=65536"
   MODE
     "archive"
   OUTPUT
-    "numeric_conversion_test.loombc"
+    "numeric_conversion_cases.loombc"
   OUTPUT_FORMAT
     "bc"
   REQUIRE_RESOLVED_CONFIG

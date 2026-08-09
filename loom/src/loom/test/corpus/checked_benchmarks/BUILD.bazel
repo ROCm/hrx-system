@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
+load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -12,11 +12,12 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-_CASES = glob(["*.loom-test"])
+_CASES = glob(["*.loom"])
 
 exports_files(_CASES)
 
-loom_check_test_suite(
-    name = "test",
+loom_link_module(
+    name = "checked_benchmark_cases",
     srcs = _CASES,
+    output_format = "bc",
 )

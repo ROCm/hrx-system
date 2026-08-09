@@ -121,37 +121,4 @@ iree_execution_test_suite(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_link_module(
-  NAME
-    numeric_conversion_test_module
-  SRCS
-    "loom::test::corpus::encoding::numeric_conversion_cases"
-  MODE
-    "archive"
-  OUTPUT
-    "numeric_conversion_test_module.loombc"
-  OUTPUT_FORMAT
-    "bc"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
-  NAME
-    "numeric_conversion_test"
-  ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/numeric_conversion_test_module.loombc}}"
-    "--device=amdgpu"
-  SRC
-    loom::tools::iree-test-loom
-  DATA
-    "${CMAKE_CURRENT_BINARY_DIR}/numeric_conversion_test_module.loombc"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

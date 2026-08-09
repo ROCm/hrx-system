@@ -4,10 +4,8 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:executable.bzl", "iree_executable_test")
 load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
-load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -118,24 +116,4 @@ iree_execution_test_suite(
     tools = {
         "iree-benchmark-loom": "//loom/src/loom/tools/iree-benchmark-loom",
     },
-)
-
-loom_link_module(
-    name = "numeric_conversion_test_module",
-    srcs = [
-        "//loom/src/loom/test/corpus/encoding:numeric_conversion_cases",
-    ],
-    output_format = "bc",
-)
-
-iree_executable_test(
-    name = "numeric_conversion_test",
-    src = "//loom/src/loom/tools/iree-test-loom",
-    args = [
-        "$(rootpath :numeric_conversion_test_module)",
-        "--device=amdgpu",
-    ],
-    data = [":numeric_conversion_test_module"],
-    tags = _AMDGPU_EXECUTION_TEST_TAGS,
-    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
 )
