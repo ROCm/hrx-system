@@ -135,6 +135,19 @@ static inline iree_string_view_t loom_attr_descriptor_name(
   return loom_bstring_view(descriptor->name);
 }
 
+// Returns true when |kind| satisfies the payload-kind contract of
+// |descriptor|. Open ANY fields still exclude descriptor-dependent payloads
+// that cannot be interpreted without their owning field schema.
+static inline bool loom_attr_descriptor_accepts_kind(
+    const loom_attr_descriptor_t* descriptor, loom_attr_kind_t kind) {
+  if (descriptor->attr_kind != LOOM_ATTR_ANY) {
+    return kind == descriptor->attr_kind;
+  }
+  return kind > LOOM_ATTR_ABSENT && kind < LOOM_ATTR_COUNT_ &&
+         kind != LOOM_ATTR_ANY && kind != LOOM_ATTR_SCOPED_ENUM &&
+         kind != LOOM_ATTR_ENUM_ARRAY;
+}
+
 // Returns the explicit zero/false scalar value implied by ELIDE_DEFAULT.
 static inline loom_attribute_t loom_attr_descriptor_default_value(
     const loom_attr_descriptor_t* descriptor) {

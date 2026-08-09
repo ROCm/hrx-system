@@ -164,6 +164,10 @@ static iree_status_t loom_verify_region(
       loom_verify_block_arg_type_well_formedness(state, block);
       status = loom_verify_pending_diagnostic_status(state);
     }
+    if (iree_status_is_ok(status) && state->static_encodings.diagnosed_bits) {
+      loom_verify_block_arg_static_encoding_refs(state, block);
+      status = loom_verify_pending_diagnostic_status(state);
+    }
     if (iree_status_is_ok(status) && state->type_summary.may_reference_values) {
       loom_verify_block_arg_encoding_refs(state, block);
       status = loom_verify_pending_diagnostic_status(state);
@@ -292,6 +296,14 @@ IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t loom_verify_op(
   // the type category declared in the vtable descriptors).
   loom_verify_type_constraints(state, op, vtable);
   IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
+
+  // Static encoding records are classified when constructed. Only malformed
+  // modules pay for use-site diagnostics, preserving exact source locations
+  // without rescanning valid records on every use.
+  if (state->static_encodings.diagnosed_bits) {
+    loom_verify_static_encoding_refs(state, op);
+    IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
+  }
 
   // OperandDict format elements are stored as ordinary variadic operands plus
   // a key -> operand-ordinal DICT attribute. Verify that field metadata is
@@ -515,12 +527,18 @@ iree_status_t loom_verify_module(const loom_module_t* module,
   IREE_RETURN_IF_ERROR(
       loom_verify_state_initialize(&state, module, options, out_result));
 
+  iree_status_t diagnostic_status =
+      loom_verify_prepare_static_encodings(&state);
+  if (!iree_status_is_ok(diagnostic_status)) {
+    loom_verify_state_deinitialize(&state);
+    return diagnostic_status;
+  }
+
   // Interned parameterized types are module-level values. Verify their symbol
   // parameters once instead of rediscovering the same type graph from every
   // SSA value that carries one of the types.
   loom_verify_module_type_symbol_references(&state);
-  iree_status_t diagnostic_status =
-      loom_verify_pending_diagnostic_status(&state);
+  diagnostic_status = loom_verify_pending_diagnostic_status(&state);
   if (!iree_status_is_ok(diagnostic_status)) {
     loom_verify_state_deinitialize(&state);
     return diagnostic_status;
@@ -562,6 +580,16 @@ iree_status_t loom_verify_module(const loom_module_t* module,
     }
   }
 
+  // Static encoding aliases may be authored without an operation or type use.
+  // Diagnose only those malformed records not already attributed during the
+  // operation walk.
+  loom_verify_remaining_static_encodings(&state);
+  diagnostic_status = loom_verify_pending_diagnostic_status(&state);
+  if (!iree_status_is_ok(diagnostic_status)) {
+    loom_verify_state_deinitialize(&state);
+    return diagnostic_status;
+  }
+
   loom_verify_state_deinitialize(&state);
   return iree_ok_status();
 }
@@ -584,9 +612,15 @@ iree_status_t loom_verify_function(const loom_module_t* module,
   IREE_RETURN_IF_ERROR(
       loom_verify_state_initialize(&state, module, options, out_result));
 
+  iree_status_t verify_status = loom_verify_prepare_static_encodings(&state);
+  if (!iree_status_is_ok(verify_status)) {
+    loom_verify_state_deinitialize(&state);
+    return verify_status;
+  }
+
   const loom_op_vtable_t* vtable =
       loom_verify_lookup_vtable(&state, function.op->kind);
-  iree_status_t verify_status = loom_verify_op(&state, function.op, vtable);
+  verify_status = loom_verify_op(&state, function.op, vtable);
   if (!iree_status_is_ok(verify_status)) {
     loom_verify_state_deinitialize(&state);
     return verify_status;

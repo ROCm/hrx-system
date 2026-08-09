@@ -838,20 +838,6 @@ static iree_status_t loom_encoding_emit_param_error(
   return loom_encoding_emit(emitter, op, error, params, IREE_ARRAYSIZE(params));
 }
 
-static iree_status_t loom_encoding_emit_static_kind_error(
-    iree_diagnostic_emitter_t emitter, const loom_op_t* op,
-    iree_string_view_t param_name, loom_attr_kind_t actual_kind,
-    iree_string_view_t expected_kind) {
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(loom_encoding_physical_storage_name()),
-      loom_param_string(param_name),
-      loom_param_u32(actual_kind),
-      loom_param_string(expected_kind),
-  };
-  return loom_encoding_emit(emitter, op, LOOM_ERR_ENCODING_010, params,
-                            IREE_ARRAYSIZE(params));
-}
-
 static iree_status_t loom_encoding_emit_dynamic_type_error(
     const loom_module_t* module, iree_diagnostic_emitter_t emitter,
     const loom_op_t* op, iree_string_view_t param_name,
@@ -879,23 +865,86 @@ static iree_status_t loom_encoding_emit_role_error(
                             IREE_ARRAYSIZE(params));
 }
 
-static iree_status_t loom_encoding_physical_storage_verify_static_param(
-    const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter, const loom_named_attr_t* entry,
-    iree_string_view_t param_name, loom_encoding_role_t expected_role,
-    iree_string_view_t expected_role_name) {
-  if (entry->value.kind != LOOM_ATTR_ENCODING) {
-    return loom_encoding_emit_static_kind_error(
-        emitter, op, param_name, (loom_attr_kind_t)entry->value.kind,
-        IREE_SV("encoding"));
-  }
+typedef struct loom_encoding_physical_storage_static_params_t {
+  // Optional statically bound address layout parameter.
+  const loom_named_attr_t* layout;
+  // Optional statically bound storage schema parameter.
+  const loom_named_attr_t* schema;
+} loom_encoding_physical_storage_static_params_t;
 
-  const loom_encoding_t* nested =
-      loom_module_encoding(module, loom_attr_as_encoding_id(entry->value));
-  loom_encoding_role_t actual_role = loom_encoding_static_role(module, nested);
-  if (actual_role != expected_role) {
-    return loom_encoding_emit_role_error(emitter, op, param_name,
-                                         expected_role_name);
+static loom_encoding_physical_storage_static_params_t
+loom_encoding_physical_storage_static_params(const loom_encoding_t* encoding) {
+  loom_encoding_physical_storage_static_params_t params = {0};
+  for (uint8_t i = 0; i < encoding->attribute_count; ++i) {
+    const loom_named_attr_t* parameter = &encoding->attributes[i];
+    switch (loom_encoding_parameter_descriptor_index(parameter)) {
+      case LOOM_ENCODING_PHYSICAL_STORAGE_PARAMETER_LAYOUT:
+        params.layout = parameter;
+        break;
+      case LOOM_ENCODING_PHYSICAL_STORAGE_PARAMETER_SCHEMA:
+        params.schema = parameter;
+        break;
+      default:
+        IREE_ASSERT_UNREACHABLE("invalid physical storage parameter binding");
+        IREE_BUILTIN_UNREACHABLE();
+    }
+  }
+  return params;
+}
+
+enum loom_encoding_physical_storage_violation_bits_e {
+  LOOM_ENCODING_PHYSICAL_STORAGE_LAYOUT_ROLE_VIOLATION = 1u << 0,
+  LOOM_ENCODING_PHYSICAL_STORAGE_SCHEMA_ROLE_VIOLATION = 1u << 1,
+};
+typedef uint8_t loom_encoding_physical_storage_violations_t;
+
+static loom_encoding_physical_storage_violations_t
+loom_encoding_physical_storage_static_violations(
+    const loom_module_t* module, const loom_encoding_t* encoding) {
+  const loom_encoding_physical_storage_static_params_t params =
+      loom_encoding_physical_storage_static_params(encoding);
+  loom_encoding_physical_storage_violations_t violations = 0;
+  if (params.layout) {
+    const loom_encoding_t* nested = loom_module_encoding(
+        module, loom_attr_as_encoding_id(params.layout->value));
+    if (loom_encoding_static_role(module, nested) !=
+        LOOM_ENCODING_ROLE_ADDRESS_LAYOUT) {
+      violations |= LOOM_ENCODING_PHYSICAL_STORAGE_LAYOUT_ROLE_VIOLATION;
+    }
+  }
+  if (params.schema) {
+    const loom_encoding_t* nested = loom_module_encoding(
+        module, loom_attr_as_encoding_id(params.schema->value));
+    if (loom_encoding_static_role(module, nested) !=
+        LOOM_ENCODING_ROLE_STORAGE_SCHEMA) {
+      violations |= LOOM_ENCODING_PHYSICAL_STORAGE_SCHEMA_ROLE_VIOLATION;
+    }
+  }
+  return violations;
+}
+
+static bool loom_encoding_physical_storage_is_static_valid(
+    const loom_module_t* module, const loom_encoding_t* encoding) {
+  return loom_encoding_physical_storage_static_violations(module, encoding) ==
+         0;
+}
+
+static iree_status_t loom_encoding_physical_storage_diagnose_static(
+    const loom_module_t* module, const loom_encoding_t* encoding,
+    const loom_op_t* op, iree_diagnostic_emitter_t emitter) {
+  const loom_encoding_physical_storage_violations_t violations =
+      loom_encoding_physical_storage_static_violations(module, encoding);
+  if (iree_any_bit_set(violations,
+                       LOOM_ENCODING_PHYSICAL_STORAGE_LAYOUT_ROLE_VIOLATION)) {
+    IREE_RETURN_IF_ERROR(loom_encoding_emit_role_error(
+        emitter, op, loom_encoding_layout_param_name(),
+        loom_encoding_role_description(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT)));
+  }
+  if (iree_any_bit_set(violations,
+                       LOOM_ENCODING_PHYSICAL_STORAGE_SCHEMA_ROLE_VIOLATION)) {
+    IREE_RETURN_IF_ERROR(loom_encoding_emit_role_error(
+        emitter, op, loom_encoding_schema_param_name(),
+        loom_encoding_role_description(LOOM_ENCODING_ROLE_STORAGE_SCHEMA)));
   }
   return iree_ok_status();
 }
@@ -928,17 +977,6 @@ static iree_status_t loom_encoding_physical_storage_verify_define(
     const loom_module_t* module, const loom_op_t* op,
     const loom_encoding_define_param_view_t* params,
     iree_diagnostic_emitter_t emitter) {
-  for (iree_host_size_t i = 0; i < params->static_attrs.count; ++i) {
-    const loom_named_attr_t* entry = &params->static_attrs.entries[i];
-    if (!loom_encoding_string_id_equal(module, entry->name_id,
-                                       loom_encoding_layout_param_name()) &&
-        !loom_encoding_string_id_equal(module, entry->name_id,
-                                       loom_encoding_schema_param_name())) {
-      iree_string_view_t param_name = module->strings.entries[entry->name_id];
-      return loom_encoding_emit_param_error(emitter, op, LOOM_ERR_ENCODING_008,
-                                            param_name);
-    }
-  }
   for (iree_host_size_t i = 0; i < params->dynamic_names.count; ++i) {
     const loom_named_attr_t* entry = &params->dynamic_names.entries[i];
     if (!loom_encoding_string_id_equal(module, entry->name_id,
@@ -951,30 +989,22 @@ static iree_status_t loom_encoding_physical_storage_verify_define(
     }
   }
 
-  const loom_named_attr_t* static_layout = loom_encoding_find_param(
-      module, params->static_attrs, loom_encoding_layout_param_name());
+  const loom_encoding_physical_storage_static_params_t static_params =
+      loom_encoding_physical_storage_static_params(params->spec);
   const loom_named_attr_t* dynamic_layout = loom_encoding_find_param(
       module, params->dynamic_names, loom_encoding_layout_param_name());
-  if (!static_layout && !dynamic_layout) {
+  if (!static_params.layout && !dynamic_layout) {
     return loom_encoding_emit_param_error(emitter, op, LOOM_ERR_ENCODING_007,
                                           loom_encoding_layout_param_name());
   }
 
-  const loom_named_attr_t* static_schema = loom_encoding_find_param(
-      module, params->static_attrs, loom_encoding_schema_param_name());
   const loom_named_attr_t* dynamic_schema = loom_encoding_find_param(
       module, params->dynamic_names, loom_encoding_schema_param_name());
-  if (!static_schema && !dynamic_schema) {
+  if (!static_params.schema && !dynamic_schema) {
     return loom_encoding_emit_param_error(emitter, op, LOOM_ERR_ENCODING_007,
                                           loom_encoding_schema_param_name());
   }
 
-  if (static_layout) {
-    IREE_RETURN_IF_ERROR(loom_encoding_physical_storage_verify_static_param(
-        module, op, emitter, static_layout, loom_encoding_layout_param_name(),
-        LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
-        loom_encoding_role_description(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT)));
-  }
   if (dynamic_layout) {
     IREE_RETURN_IF_ERROR(loom_encoding_physical_storage_verify_dynamic_param(
         module, op, emitter, params, dynamic_layout,
@@ -982,12 +1012,6 @@ static iree_status_t loom_encoding_physical_storage_verify_define(
         loom_encoding_role_description(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT)));
   }
 
-  if (static_schema) {
-    IREE_RETURN_IF_ERROR(loom_encoding_physical_storage_verify_static_param(
-        module, op, emitter, static_schema, loom_encoding_schema_param_name(),
-        LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
-        loom_encoding_role_description(LOOM_ENCODING_ROLE_STORAGE_SCHEMA)));
-  }
   if (dynamic_schema) {
     IREE_RETURN_IF_ERROR(loom_encoding_physical_storage_verify_dynamic_param(
         module, op, emitter, params, dynamic_schema,
@@ -998,68 +1022,10 @@ static iree_status_t loom_encoding_physical_storage_verify_define(
   return iree_ok_status();
 }
 
-static iree_status_t loom_encoding_physical_storage_verify_static(
-    const loom_module_t* module, const loom_encoding_t* encoding) {
-  const loom_named_attr_t* layout = loom_encoding_find_param(
-      module, loom_encoding_attrs(encoding), loom_encoding_layout_param_name());
-  const loom_named_attr_t* schema = loom_encoding_find_param(
-      module, loom_encoding_attrs(encoding), loom_encoding_schema_param_name());
-
-  for (iree_host_size_t i = 0; i < encoding->attribute_count; ++i) {
-    const loom_named_attr_t* entry = &encoding->attributes[i];
-    if (!loom_encoding_string_id_equal(module, entry->name_id,
-                                       loom_encoding_layout_param_name()) &&
-        !loom_encoding_string_id_equal(module, entry->name_id,
-                                       loom_encoding_schema_param_name())) {
-      iree_string_view_t param_name = module->strings.entries[entry->name_id];
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "encoding 'physical_storage' does not support parameter '%.*s'",
-          (int)param_name.size, param_name.data);
-    }
-  }
-
-  if (layout && layout->value.kind != LOOM_ATTR_ENCODING) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "encoding 'physical_storage' parameter 'layout' must be an encoding");
-  }
-  if (schema && schema->value.kind != LOOM_ATTR_ENCODING) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "encoding 'physical_storage' parameter 'schema' must be an encoding");
-  }
-
-  if (layout) {
-    const loom_encoding_t* layout_encoding =
-        loom_module_encoding(module, loom_attr_as_encoding_id(layout->value));
-    if (loom_encoding_static_role(module, layout_encoding) !=
-        LOOM_ENCODING_ROLE_ADDRESS_LAYOUT) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "encoding 'physical_storage' parameter 'layout' must be an address "
-          "layout encoding");
-    }
-  }
-
-  if (schema) {
-    const loom_encoding_t* schema_encoding =
-        loom_module_encoding(module, loom_attr_as_encoding_id(schema->value));
-    if (loom_encoding_static_role(module, schema_encoding) !=
-        LOOM_ENCODING_ROLE_STORAGE_SCHEMA) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "encoding 'physical_storage' parameter 'schema' must be a storage "
-          "schema encoding");
-    }
-  }
-
-  return iree_ok_status();
-}
-
 static const loom_encoding_vtable_t loom_encoding_physical_storage_vtable = {
     .descriptor = &loom_encoding_physical_storage_family_descriptor,
-    .verify = loom_encoding_physical_storage_verify_static,
+    .is_static_valid = loom_encoding_physical_storage_is_static_valid,
+    .diagnose_static = loom_encoding_physical_storage_diagnose_static,
     .verify_define = loom_encoding_physical_storage_verify_define,
 };
 

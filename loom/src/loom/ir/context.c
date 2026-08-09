@@ -192,6 +192,14 @@ iree_status_t loom_context_register_encoding_vtable(
         "encoding family '%.*s' has %u parameters but no descriptors",
         (int)name.size, name.data, vtable->descriptor->parameter_count);
   }
+  if ((vtable->is_static_valid == NULL) != (vtable->diagnose_static == NULL)) {
+    iree_string_view_t name = loom_bstring_view(vtable->descriptor->name);
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "encoding family '%.*s' must provide both static validity and "
+        "diagnostic callbacks",
+        (int)name.size, name.data);
+  }
 
   iree_string_view_t name = loom_bstring_view(vtable->descriptor->name);
   for (iree_host_size_t i = 0; i < context->encodings.vtables.count; ++i) {

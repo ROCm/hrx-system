@@ -32,6 +32,7 @@ extern "C" {
 #endif
 
 typedef struct loom_module_t loom_module_t;
+typedef struct loom_op_t loom_op_t;
 typedef struct loom_encoding_define_param_view_t
     loom_encoding_define_param_view_t;
 
@@ -41,6 +42,15 @@ typedef struct loom_encoding_define_param_view_t
 typedef uint16_t loom_encoding_family_id_t;
 
 #define LOOM_ENCODING_FAMILY_ID_INVALID ((loom_encoding_family_id_t)0)
+
+enum loom_encoding_family_flag_bits_e {
+  // Every present static parameter is bound to a family descriptor and has
+  // the descriptor's declared payload kind.
+  LOOM_ENCODING_FAMILY_STATIC_PARAMETERS_VALID = 1u << 0,
+  // Family-specific semantics of the structurally valid parameters hold.
+  LOOM_ENCODING_FAMILY_STATIC_SEMANTICS_VALID = 1u << 1,
+};
+typedef uint8_t loom_encoding_family_flags_t;
 
 // A single static encoding instance, such as `#q8_0<block=32>`.
 //
@@ -60,8 +70,8 @@ struct loom_encoding_t {
     // Dense one-based identity in the owning context's encoding registry.
     // This never participates in structural identity or serialization.
     loom_encoding_family_id_t id;
-    // Reserved for compact family metadata.
-    uint8_t reserved;
+    // Construction facts derived from the registered family descriptor.
+    loom_encoding_family_flags_t flags;
   } family;
   // Arena-owned canonical parameter array. NULL when attribute_count is 0.
   const loom_named_attr_t* attributes;
@@ -93,6 +103,23 @@ static inline void loom_encoding_parameter_bind_descriptor(
     loom_named_attr_t* parameter, uint8_t descriptor_index) {
   IREE_ASSERT(descriptor_index < UINT8_MAX);
   parameter->reserved = (uint32_t)descriptor_index + 1;
+}
+
+// Returns true when every present static parameter satisfies its registered
+// family schema. Unregistered permissive encodings never carry this fact.
+static inline bool loom_encoding_static_parameters_are_valid(
+    const loom_encoding_t* encoding) {
+  return iree_all_bits_set(encoding->family.flags,
+                           LOOM_ENCODING_FAMILY_STATIC_PARAMETERS_VALID);
+}
+
+// Returns true when the registered family has accepted both the generated
+// parameter schema and its family-specific static semantics.
+static inline bool loom_encoding_static_is_valid(
+    const loom_encoding_t* encoding) {
+  return iree_all_bits_set(encoding->family.flags,
+                           LOOM_ENCODING_FAMILY_STATIC_PARAMETERS_VALID |
+                               LOOM_ENCODING_FAMILY_STATIC_SEMANTICS_VALID);
 }
 
 // Generated structural metadata for one registered encoding family.
@@ -129,10 +156,20 @@ typedef struct loom_encoding_vtable_t {
   // Generated family schema. Required and process-lifetime stable.
   const loom_encoding_family_descriptor_t* descriptor;
 
-  // Verifies that `encoding` carries a valid parameter set for this family.
-  // May be NULL when the family accepts any canonical named attrs.
-  iree_status_t (*verify)(const loom_module_t* module,
+  // Classifies family-specific semantics during module construction. Called
+  // only after the generated parameter schema has matched. May be NULL when
+  // every structurally valid instance is semantically valid.
+  bool (*is_static_valid)(const loom_module_t* module,
                           const loom_encoding_t* encoding);
+
+  // Diagnoses a static encoding rejected by is_static_valid. Called only on
+  // malformed IR after the generated parameter schema has matched. A non-OK
+  // status is reserved for diagnostic sink failure. Must be present whenever
+  // is_static_valid is present.
+  iree_status_t (*diagnose_static)(const loom_module_t* module,
+                                   const loom_encoding_t* encoding,
+                                   const loom_op_t* op,
+                                   iree_diagnostic_emitter_t emitter);
 
   // Verifies one encoding.define op after generic OperandDict validation.
   // Receives the merged static/dynamic parameter view so families can enforce

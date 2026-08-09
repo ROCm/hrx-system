@@ -131,7 +131,8 @@ static const loom_encoding_family_descriptor_t kRequiresLayoutDescriptor = {
 };
 static const loom_encoding_vtable_t kRequiresLayoutEncodingVtable = {
     /*.descriptor=*/&kRequiresLayoutDescriptor,
-    /*.verify=*/{},
+    /*.is_static_valid=*/{},
+    /*.diagnose_static=*/{},
     /*.verify_define=*/VerifyRequiresLayoutDefine,
 };
 
@@ -250,6 +251,23 @@ TEST_F(EncodingVerifyTest, CustomVerifierRejectsUnknownParam) {
               LOOM_EMITTER_VERIFIER);
   EXPECT_EQ(GetStringParam(*diagnostic, 0), "requires_layout");
   EXPECT_EQ(GetStringParam(*diagnostic, 1), "bogus");
+}
+
+TEST_F(EncodingVerifyTest, UnusedMalformedStaticEncodingIsDiagnosed) {
+  DiagnosticCapture capture;
+  loom_verify_result_t result;
+  VerifySource("#bad = #q8_0<block=\"thirty_two\">\n", &capture, &result);
+
+  ASSERT_EQ(result.error_count, 1u);
+  const auto* diagnostic = FindDiagnostic(
+      capture, loom_error_def_lookup(LOOM_ERROR_DOMAIN_ENCODING, 10));
+  ASSERT_NE(diagnostic, nullptr);
+  ExpectError(*diagnostic,
+              loom_error_def_lookup(LOOM_ERROR_DOMAIN_ENCODING, 10),
+              LOOM_EMITTER_VERIFIER);
+  EXPECT_EQ(GetStringParam(*diagnostic, 0), "q8_0");
+  EXPECT_EQ(GetStringParam(*diagnostic, 1), "block");
+  EXPECT_EQ(GetStringParam(*diagnostic, 3), "integer");
 }
 
 }  // namespace

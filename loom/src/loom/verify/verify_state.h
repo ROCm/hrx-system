@@ -90,6 +90,15 @@ typedef struct loom_verify_state_t {
   // Facts derived from the module's canonical type table.
   loom_verify_type_summary_t type_summary;
 
+  // Malformed static encoding diagnostics needed by this verification run.
+  struct {
+    // Bitset recording encoding records diagnosed at an authored use site.
+    uint64_t* diagnosed_bits;
+
+    // Number of allocated words in diagnosed_bits.
+    iree_host_size_t word_count;
+  } static_encodings;
+
   // Scratch arena for all verification-time allocations.
   iree_arena_allocator_t arena;
 

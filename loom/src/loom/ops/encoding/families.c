@@ -64,40 +64,6 @@ static bool loom_encoding_string_attr_value(const loom_module_t* module,
   return true;
 }
 
-static bool loom_encoding_matrix_static_param_name_is_supported(
-    const loom_module_t* module, loom_string_id_t name_id) {
-  return loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("element_format")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("payload_packing")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("payload_elements")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("payload_registers")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("scale_topology")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("scale_format")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("secondary_scale_format")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("scale_group_elements")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("scale_group_shape")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("scale_operands")) ||
-         loom_encoding_string_id_equal(module, name_id, IREE_SV("affine")) ||
-         loom_encoding_string_id_equal(module, name_id, IREE_SV("rounding")) ||
-         loom_encoding_string_id_equal(module, name_id, IREE_SV("codebook")) ||
-         loom_encoding_string_id_equal(module, name_id, IREE_SV("sparsity")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("sparsity_group_elements")) ||
-         loom_encoding_string_id_equal(
-             module, name_id, IREE_SV("sparsity_group_nonzero_elements")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("zero_scale_fallback"));
-}
-
 static iree_status_t loom_encoding_emit(iree_diagnostic_emitter_t emitter,
                                         const loom_op_t* op,
                                         const loom_error_def_t* error,
@@ -121,20 +87,6 @@ static iree_status_t loom_encoding_emit_param_error(
       loom_param_string(param_name),
   };
   return loom_encoding_emit(emitter, op, error, params, IREE_ARRAYSIZE(params));
-}
-
-static iree_status_t loom_encoding_emit_static_kind_error(
-    iree_diagnostic_emitter_t emitter, const loom_op_t* op,
-    iree_string_view_t encoding_name, iree_string_view_t param_name,
-    loom_attr_kind_t actual_kind, iree_string_view_t expected_kind) {
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(encoding_name),
-      loom_param_string(param_name),
-      loom_param_u32(actual_kind),
-      loom_param_string(expected_kind),
-  };
-  return loom_encoding_emit(emitter, op, LOOM_ERR_ENCODING_010, params,
-                            IREE_ARRAYSIZE(params));
 }
 
 static iree_status_t loom_encoding_emit_static_value_error(
@@ -230,11 +182,6 @@ static iree_status_t loom_encoding_static_i64(
     return loom_encoding_emit_param_error(emitter, op, encoding_name,
                                           LOOM_ERR_ENCODING_007, param_name);
   }
-  if (entry->value.kind != LOOM_ATTR_I64) {
-    return loom_encoding_emit_static_kind_error(
-        emitter, op, encoding_name, param_name,
-        (loom_attr_kind_t)entry->value.kind, IREE_SV("i64"));
-  }
   *out_value = loom_attr_as_i64(entry->value);
   *out_ok = true;
   return iree_ok_status();
@@ -252,11 +199,6 @@ static iree_status_t loom_encoding_matrix_static_bool(
   if (!entry) {
     *out_ok = true;
     return iree_ok_status();
-  }
-  if (entry->value.kind != LOOM_ATTR_BOOL) {
-    return loom_encoding_emit_static_kind_error(
-        emitter, op, loom_encoding_matrix_operand_name(), param_name,
-        (loom_attr_kind_t)entry->value.kind, IREE_SV("bool"));
   }
   *out_value = loom_attr_as_bool(entry->value);
   *out_ok = true;
@@ -283,17 +225,8 @@ static iree_status_t loom_encoding_static_symbol(
     return loom_encoding_emit_param_error(emitter, op, encoding_name,
                                           LOOM_ERR_ENCODING_007, param_name);
   }
-  if (entry->value.kind != LOOM_ATTR_STRING) {
-    return loom_encoding_emit_static_kind_error(
-        emitter, op, encoding_name, param_name,
-        (loom_attr_kind_t)entry->value.kind, IREE_SV("symbol"));
-  }
-  iree_string_view_t symbol = iree_string_view_empty();
-  if (!loom_encoding_string_attr_value(module, entry->value, &symbol)) {
-    return loom_encoding_emit_static_kind_error(
-        emitter, op, encoding_name, param_name,
-        (loom_attr_kind_t)entry->value.kind, IREE_SV("symbol"));
-  }
+  const iree_string_view_t symbol =
+      module->strings.entries[loom_attr_as_string_id(entry->value)];
   if (!loom_encoding_matrix_operand_lookup_symbol(symbol_set, symbol,
                                                   out_value)) {
     return loom_encoding_emit_static_value_error(
@@ -304,21 +237,11 @@ static iree_status_t loom_encoding_static_symbol(
   return iree_ok_status();
 }
 
-static iree_status_t loom_encoding_matrix_verify_param_names(
+static iree_status_t loom_encoding_matrix_reject_dynamic_params(
     const loom_module_t* module, const loom_op_t* op,
     const loom_encoding_define_param_view_t* params,
     iree_diagnostic_emitter_t emitter, bool* out_ok) {
   *out_ok = false;
-  for (iree_host_size_t i = 0; i < params->static_attrs.count; ++i) {
-    const loom_named_attr_t* entry = &params->static_attrs.entries[i];
-    if (!loom_encoding_matrix_static_param_name_is_supported(module,
-                                                             entry->name_id)) {
-      iree_string_view_t param_name = module->strings.entries[entry->name_id];
-      return loom_encoding_emit_param_error(emitter, op,
-                                            loom_encoding_matrix_operand_name(),
-                                            LOOM_ERR_ENCODING_008, param_name);
-    }
-  }
   for (iree_host_size_t i = 0; i < params->dynamic_names.count; ++i) {
     const loom_named_attr_t* entry = &params->dynamic_names.entries[i];
     iree_string_view_t param_name = module->strings.entries[entry->name_id];
@@ -386,13 +309,6 @@ static iree_status_t loom_encoding_matrix_verify_scale_group_shape(
     *out_ok = true;
     return iree_ok_status();
   }
-  if (entry->value.kind != LOOM_ATTR_I64_ARRAY) {
-    return loom_encoding_emit_static_kind_error(
-        emitter, op, loom_encoding_matrix_operand_name(),
-        IREE_SV("scale_group_shape"), (loom_attr_kind_t)entry->value.kind,
-        IREE_SV("i64 array"));
-  }
-
   const uint16_t rank = entry->value.count;
   if (rank == 0 || rank > LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK) {
     return loom_encoding_matrix_verify_i64_range(
@@ -437,7 +353,7 @@ static iree_status_t loom_encoding_matrix_verify_define(
     const loom_encoding_define_param_view_t* params,
     iree_diagnostic_emitter_t emitter) {
   bool param_ok = false;
-  IREE_RETURN_IF_ERROR(loom_encoding_matrix_verify_param_names(
+  IREE_RETURN_IF_ERROR(loom_encoding_matrix_reject_dynamic_params(
       module, op, params, emitter, &param_ok));
   if (!param_ok) return iree_ok_status();
 
@@ -665,28 +581,12 @@ static iree_status_t loom_encoding_matrix_verify_define(
   return iree_ok_status();
 }
 
-static bool loom_encoding_named_fp8_static_param_name_is_supported(
-    const loom_module_t* module, loom_string_id_t name_id) {
-  return loom_encoding_string_id_equal(module, name_id, IREE_SV("rounding")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("storage_bits"));
-}
-
-static iree_status_t loom_encoding_named_fp8_verify_param_names(
+static iree_status_t loom_encoding_named_fp8_reject_dynamic_params(
     const loom_module_t* module, const loom_op_t* op,
     const loom_encoding_define_param_view_t* params,
     iree_diagnostic_emitter_t emitter, iree_string_view_t encoding_name,
     bool* out_ok) {
   *out_ok = false;
-  for (iree_host_size_t i = 0; i < params->static_attrs.count; ++i) {
-    const loom_named_attr_t* entry = &params->static_attrs.entries[i];
-    if (!loom_encoding_named_fp8_static_param_name_is_supported(
-            module, entry->name_id)) {
-      iree_string_view_t param_name = module->strings.entries[entry->name_id];
-      return loom_encoding_emit_param_error(emitter, op, encoding_name,
-                                            LOOM_ERR_ENCODING_008, param_name);
-    }
-  }
   for (iree_host_size_t i = 0; i < params->dynamic_names.count; ++i) {
     const loom_named_attr_t* entry = &params->dynamic_names.entries[i];
     iree_string_view_t param_name = module->strings.entries[entry->name_id];
@@ -704,7 +604,7 @@ static iree_status_t loom_encoding_named_fp8_verify_define(
   iree_string_view_t encoding_name =
       module->strings.entries[params->spec->name_id];
   bool param_ok = false;
-  IREE_RETURN_IF_ERROR(loom_encoding_named_fp8_verify_param_names(
+  IREE_RETURN_IF_ERROR(loom_encoding_named_fp8_reject_dynamic_params(
       module, op, params, emitter, encoding_name, &param_ok));
   if (!param_ok) return iree_ok_status();
 
@@ -727,27 +627,6 @@ static iree_status_t loom_encoding_named_fp8_verify_define(
         emitter, op, IREE_SV("storage_bits"), storage_bits, IREE_SV("8"));
   }
   return iree_ok_status();
-}
-
-static bool loom_encoding_turboquant_static_param_name_is_supported(
-    const loom_module_t* module, loom_string_id_t name_id) {
-  return loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("first_stage_bits")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("logical_element")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("logical_elems")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("pack_order")) ||
-         loom_encoding_string_id_equal(module, name_id, IREE_SV("qjl_rows")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("record_bytes")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("residual_bits")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("scalar_quantizer")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("transform_family"));
 }
 
 static bool loom_encoding_turboquant_dynamic_param_name_is_supported(
@@ -805,11 +684,6 @@ static iree_status_t loom_encoding_turboquant_require_static_i64(
   IREE_RETURN_IF_ERROR(loom_encoding_turboquant_require_static_param(
       module, op, params, emitter, param_name, &entry));
   if (!entry) return iree_ok_status();
-  if (entry->value.kind != LOOM_ATTR_I64) {
-    return loom_encoding_emit_static_kind_error(
-        emitter, op, loom_encoding_turboquant_kv_name(), param_name,
-        (loom_attr_kind_t)entry->value.kind, IREE_SV("i64"));
-  }
   *out_value = loom_attr_as_i64(entry->value);
   *out_ok = true;
   return iree_ok_status();
@@ -826,11 +700,7 @@ static iree_status_t loom_encoding_turboquant_require_static_string(
   IREE_RETURN_IF_ERROR(loom_encoding_turboquant_require_static_param(
       module, op, params, emitter, param_name, &entry));
   if (!entry) return iree_ok_status();
-  if (!loom_encoding_string_attr_value(module, entry->value, out_value)) {
-    return loom_encoding_emit_static_kind_error(
-        emitter, op, loom_encoding_turboquant_kv_name(), param_name,
-        (loom_attr_kind_t)entry->value.kind, IREE_SV("string"));
-  }
+  *out_value = module->strings.entries[loom_attr_as_string_id(entry->value)];
   *out_ok = true;
   return iree_ok_status();
 }
@@ -840,17 +710,6 @@ static bool loom_encoding_turboquant_transform_family_supported(
   return iree_string_view_equal(value, IREE_SV("hadamard")) ||
          iree_string_view_equal(value, IREE_SV("hadamard_sign")) ||
          iree_string_view_equal(value, IREE_SV("sign_permute_hadamard"));
-}
-
-static bool loom_encoding_numeric_transform_static_param_name_is_supported(
-    const loom_module_t* module, loom_string_id_t name_id) {
-  return loom_encoding_string_id_equal(module, name_id, IREE_SV("family")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("input_elems")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("normalization")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("output_elems"));
 }
 
 static bool loom_encoding_numeric_transform_dynamic_param_name_is_supported(
@@ -913,20 +772,12 @@ static iree_status_t loom_encoding_numeric_transform_verify_static_params(
   for (iree_host_size_t i = 0; i < params->static_attrs.count; ++i) {
     const loom_named_attr_t* entry = &params->static_attrs.entries[i];
     iree_string_view_t param_name = module->strings.entries[entry->name_id];
-    if (!loom_encoding_numeric_transform_static_param_name_is_supported(
-            module, entry->name_id)) {
-      return loom_encoding_emit_param_error(
-          emitter, op, loom_encoding_numeric_transform_name(),
-          LOOM_ERR_ENCODING_008, param_name);
-    }
-
-    if (loom_encoding_numeric_transform_param_is_extent(module,
-                                                        entry->name_id)) {
-      if (entry->value.kind != LOOM_ATTR_I64) {
-        return loom_encoding_emit_static_kind_error(
-            emitter, op, loom_encoding_numeric_transform_name(), param_name,
-            (loom_attr_kind_t)entry->value.kind, IREE_SV("i64"));
-      }
+    const uint8_t parameter_index =
+        loom_encoding_parameter_descriptor_index(entry);
+    if (parameter_index ==
+            LOOM_ENCODING_NUMERIC_TRANSFORM_PARAMETER_INPUT_ELEMS ||
+        parameter_index ==
+            LOOM_ENCODING_NUMERIC_TRANSFORM_PARAMETER_OUTPUT_ELEMS) {
       int64_t extent = loom_attr_as_i64(entry->value);
       if (extent <= 0) {
         return loom_encoding_emit_attribute_constraint_error(
@@ -935,15 +786,9 @@ static iree_status_t loom_encoding_numeric_transform_verify_static_params(
       continue;
     }
 
-    iree_string_view_t string_value = iree_string_view_empty();
-    if (!loom_encoding_string_attr_value(module, entry->value, &string_value)) {
-      return loom_encoding_emit_static_kind_error(
-          emitter, op, loom_encoding_numeric_transform_name(), param_name,
-          (loom_attr_kind_t)entry->value.kind, IREE_SV("string"));
-    }
-
-    if (loom_encoding_string_id_equal(module, entry->name_id,
-                                      IREE_SV("family"))) {
+    const iree_string_view_t string_value =
+        module->strings.entries[loom_attr_as_string_id(entry->value)];
+    if (parameter_index == LOOM_ENCODING_NUMERIC_TRANSFORM_PARAMETER_FAMILY) {
       if (loom_encoding_numeric_transform_family_supported(string_value)) {
         continue;
       }
@@ -954,6 +799,8 @@ static iree_status_t loom_encoding_numeric_transform_verify_static_params(
                   "'sign_permute_hadamard'"));
     }
 
+    IREE_ASSERT(parameter_index ==
+                LOOM_ENCODING_NUMERIC_TRANSFORM_PARAMETER_NORMALIZATION);
     if (loom_encoding_numeric_transform_normalization_supported(string_value)) {
       continue;
     }
@@ -1157,10 +1004,8 @@ static iree_status_t loom_encoding_numeric_transform_verify_jl_normalization(
     return iree_ok_status();
   }
 
-  iree_string_view_t value = iree_string_view_empty();
-  if (!loom_encoding_string_attr_value(module, entry->value, &value)) {
-    return iree_ok_status();
-  }
+  const iree_string_view_t value =
+      module->strings.entries[loom_attr_as_string_id(entry->value)];
   if (iree_string_view_equal(value, IREE_SV("none"))) {
     *out_ok = true;
     return iree_ok_status();
@@ -1179,11 +1024,8 @@ static iree_status_t loom_encoding_numeric_transform_verify_family_params(
       loom_encoding_find_param(module, params->static_attrs, IREE_SV("family"));
   if (!family_entry) return iree_ok_status();
 
-  iree_string_view_t family_name = iree_string_view_empty();
-  if (!loom_encoding_string_attr_value(module, family_entry->value,
-                                       &family_name)) {
-    return iree_ok_status();
-  }
+  const iree_string_view_t family_name =
+      module->strings.entries[loom_attr_as_string_id(family_entry->value)];
 
   switch (loom_encoding_numeric_transform_family_from_name(family_name)) {
     case LOOM_ENCODING_NUMERIC_TRANSFORM_FAMILY_HADAMARD:
@@ -1268,25 +1110,6 @@ static iree_status_t loom_encoding_numeric_transform_verify_define(
   return iree_ok_status();
 }
 
-static iree_status_t loom_encoding_turboquant_verify_static_param_kinds(
-    const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_param_view_t* params,
-    iree_diagnostic_emitter_t emitter, bool* out_ok) {
-  *out_ok = false;
-  for (iree_host_size_t i = 0; i < params->static_attrs.count; ++i) {
-    const loom_named_attr_t* entry = &params->static_attrs.entries[i];
-    iree_string_view_t param_name = module->strings.entries[entry->name_id];
-    if (!loom_encoding_turboquant_static_param_name_is_supported(
-            module, entry->name_id)) {
-      return loom_encoding_emit_param_error(emitter, op,
-                                            loom_encoding_turboquant_kv_name(),
-                                            LOOM_ERR_ENCODING_008, param_name);
-    }
-  }
-  *out_ok = true;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_encoding_turboquant_verify_dynamic_param_names(
     const loom_module_t* module, const loom_op_t* op,
     const loom_encoding_define_param_view_t* params,
@@ -1306,19 +1129,16 @@ static iree_status_t loom_encoding_turboquant_verify_dynamic_param_names(
   return iree_ok_status();
 }
 
-static iree_status_t loom_encoding_turboquant_ceil_bits_to_bytes(
+static bool loom_encoding_turboquant_ceil_bits_to_bytes(
     int64_t bit_count, int64_t* out_byte_count) {
   *out_byte_count = 0;
   int64_t padded_bits = 0;
-  if (!iree_checked_add_i64(bit_count, 7, &padded_bits)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "bit count overflows int64");
-  }
+  if (!iree_checked_add_i64(bit_count, 7, &padded_bits)) return false;
   *out_byte_count = padded_bits / 8;
-  return iree_ok_status();
+  return true;
 }
 
-static iree_status_t loom_encoding_turboquant_min_record_bytes(
+static bool loom_encoding_turboquant_min_record_bytes(
     int64_t logical_elems, int64_t first_stage_bits, int64_t qjl_rows,
     int64_t residual_bits, int64_t* out_record_bytes) {
   *out_record_bytes = 0;
@@ -1328,18 +1148,17 @@ static iree_status_t loom_encoding_turboquant_min_record_bytes(
   int64_t residual_bytes = 0;
   if (!iree_checked_mul_i64(logical_elems, first_stage_bits, &code_bits) ||
       !iree_checked_mul_i64(qjl_rows, residual_bits, &residual_total_bits)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "turboquant record bit count overflows int64");
+    return false;
   }
-  IREE_RETURN_IF_ERROR(
-      loom_encoding_turboquant_ceil_bits_to_bytes(code_bits, &code_bytes));
-  IREE_RETURN_IF_ERROR(loom_encoding_turboquant_ceil_bits_to_bytes(
-      residual_total_bits, &residual_bytes));
+  if (!loom_encoding_turboquant_ceil_bits_to_bytes(code_bits, &code_bytes) ||
+      !loom_encoding_turboquant_ceil_bits_to_bytes(residual_total_bits,
+                                                   &residual_bytes)) {
+    return false;
+  }
   if (!iree_checked_add_i64(code_bytes, residual_bytes, out_record_bytes)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "turboquant record byte count overflows int64");
+    return false;
   }
-  return iree_ok_status();
+  return true;
 }
 
 static iree_status_t loom_encoding_turboquant_verify_dynamic_view(
@@ -1477,9 +1296,6 @@ static iree_status_t loom_encoding_turboquant_verify_define(
     const loom_encoding_define_param_view_t* params,
     iree_diagnostic_emitter_t emitter) {
   bool param_ok = false;
-  IREE_RETURN_IF_ERROR(loom_encoding_turboquant_verify_static_param_kinds(
-      module, op, params, emitter, &param_ok));
-  if (!param_ok) return iree_ok_status();
   IREE_RETURN_IF_ERROR(loom_encoding_turboquant_verify_dynamic_param_names(
       module, op, params, emitter, &param_ok));
   if (!param_ok) return iree_ok_status();
@@ -1583,9 +1399,14 @@ static iree_status_t loom_encoding_turboquant_verify_define(
   }
 
   int64_t minimum_record_bytes = 0;
-  IREE_RETURN_IF_ERROR(loom_encoding_turboquant_min_record_bytes(
-      logical_elems, first_stage_bits, qjl_rows, residual_bits,
-      &minimum_record_bytes));
+  if (!loom_encoding_turboquant_min_record_bytes(
+          logical_elems, first_stage_bits, qjl_rows, residual_bits,
+          &minimum_record_bytes)) {
+    return loom_encoding_emit_attribute_constraint_error(
+        emitter, op, IREE_SV("record_bytes"), record_bytes,
+        IREE_SV("representable size for first-stage codes and QJL residual "
+                "bits"));
+  }
   if (record_bytes < minimum_record_bytes) {
     return loom_encoding_emit_attribute_constraint_error(
         emitter, op, IREE_SV("record_bytes"), record_bytes,

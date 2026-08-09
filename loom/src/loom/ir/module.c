@@ -647,6 +647,47 @@ void loom_value_u32_scratch_release_zeroed(loom_value_u32_scratch_t* scratch) {
 // Encoding table
 //===----------------------------------------------------------------------===//
 
+// Binds freshly canonicalized sparse parameters to their generated descriptor
+// ordinals. Both arrays are lexically ordered, so one linear merge establishes
+// all metadata and records whether authored names and kinds satisfy the schema.
+// Malformed semantic IR is retained for the verifier to diagnose.
+static loom_encoding_family_flags_t loom_module_bind_encoding_parameters(
+    const loom_module_t* module,
+    const loom_encoding_family_descriptor_t* family_descriptor,
+    loom_named_attr_t* parameters, uint8_t parameter_count) {
+  bool all_parameters_valid = true;
+  uint8_t descriptor_index = 0;
+  for (uint8_t parameter_index = 0; parameter_index < parameter_count;
+       ++parameter_index) {
+    loom_named_attr_t* parameter = &parameters[parameter_index];
+    const iree_string_view_t parameter_name =
+        module->strings.entries[parameter->name_id];
+    while (descriptor_index < family_descriptor->parameter_count) {
+      const iree_string_view_t descriptor_name = loom_attr_descriptor_name(
+          &family_descriptor->parameter_descriptors[descriptor_index]);
+      const int comparison =
+          iree_string_view_compare(parameter_name, descriptor_name);
+      if (comparison <= 0) {
+        if (comparison == 0) {
+          loom_encoding_parameter_bind_descriptor(parameter, descriptor_index);
+          all_parameters_valid &= loom_attr_descriptor_accepts_kind(
+              &family_descriptor->parameter_descriptors[descriptor_index],
+              (loom_attr_kind_t)parameter->value.kind);
+        } else {
+          all_parameters_valid = false;
+        }
+        break;
+      }
+      ++descriptor_index;
+    }
+    if (descriptor_index == family_descriptor->parameter_count) {
+      all_parameters_valid = false;
+    }
+  }
+  return all_parameters_valid ? LOOM_ENCODING_FAMILY_STATIC_PARAMETERS_VALID
+                              : 0;
+}
+
 iree_status_t loom_module_add_encoding(loom_module_t* module,
                                        const loom_encoding_t* encoding,
                                        uint16_t* out_encoding_id) {
@@ -702,8 +743,23 @@ iree_status_t loom_module_add_encoding(loom_module_t* module,
                             "unknown encoding family '%.*s'",
                             (int)encoding_name.size, encoding_name.data);
   }
-  if (vtable && vtable->verify) {
-    IREE_RETURN_IF_ERROR(vtable->verify(module, &canonical_encoding));
+  if (vtable && canonical_encoding.attribute_count > 0) {
+    // Canonical dictionary entries are freshly allocated by this function and
+    // have not yet been published through their const module-owned view.
+    canonical_encoding.family.flags = loom_module_bind_encoding_parameters(
+        module, vtable->descriptor,
+        (loom_named_attr_t*)canonical_encoding.attributes,
+        canonical_encoding.attribute_count);
+  } else if (vtable) {
+    canonical_encoding.family.flags =
+        LOOM_ENCODING_FAMILY_STATIC_PARAMETERS_VALID;
+  }
+  if (vtable &&
+      loom_encoding_static_parameters_are_valid(&canonical_encoding) &&
+      (!vtable->is_static_valid ||
+       vtable->is_static_valid(module, &canonical_encoding))) {
+    canonical_encoding.family.flags |=
+        LOOM_ENCODING_FAMILY_STATIC_SEMANTICS_VALID;
   }
 
   // Check for an existing duplicate and reject alias collisions against
@@ -2175,14 +2231,8 @@ static iree_status_t loom_module_validate_attr_descriptor_value(
                             (int)parameter_name.size, parameter_name.data);
   }
 
-  bool kind_matches = value.kind == descriptor->attr_kind;
-  if (descriptor->attr_kind == LOOM_ATTR_ANY) {
-    kind_matches =
-        value.kind > LOOM_ATTR_ABSENT && value.kind < LOOM_ATTR_COUNT_ &&
-        value.kind != LOOM_ATTR_ANY && value.kind != LOOM_ATTR_SCOPED_ENUM &&
-        value.kind != LOOM_ATTR_ENUM_ARRAY;
-  }
-  if (!kind_matches) {
+  if (!loom_attr_descriptor_accepts_kind(descriptor,
+                                         (loom_attr_kind_t)value.kind)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "parameter '%.*s' has attribute kind %u but requires kind %u",

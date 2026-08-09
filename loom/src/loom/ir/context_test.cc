@@ -32,6 +32,23 @@ static const loom_encoding_vtable_t kQ8_0EncodingVtable = {
     /*.descriptor=*/&kQ8_0EncodingDescriptor,
 };
 
+static bool TestEncodingIsStaticValid(const loom_module_t* module,
+                                      const loom_encoding_t* encoding) {
+  (void)module;
+  (void)encoding;
+  return true;
+}
+
+static iree_status_t TestEncodingDiagnoseStatic(
+    const loom_module_t* module, const loom_encoding_t* encoding,
+    const loom_op_t* op, iree_diagnostic_emitter_t emitter) {
+  (void)module;
+  (void)encoding;
+  (void)op;
+  (void)emitter;
+  return iree_ok_status();
+}
+
 TEST_F(ContextTest, FinalizeBuildsOpNameLookupTable) {
   static const uint8_t kTestOpName[] = {
       8, 4, 't', 'e', 's', 't', '.', 'n', 'o', 'p', '\0',
@@ -294,6 +311,25 @@ TEST_F(ContextTest, RegisterEncodingVtableRejectsMissingParameterDescriptors) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       loom_context_register_encoding_vtable(&context_, &kMalformedVtable));
+}
+
+TEST_F(ContextTest, RegisterEncodingVtableRequiresPairedStaticCallbacks) {
+  static const loom_encoding_vtable_t kPredicateOnlyVtable = {
+      /*.descriptor=*/&kQ8_0EncodingDescriptor,
+      /*.is_static_valid=*/TestEncodingIsStaticValid,
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_context_register_encoding_vtable(&context_, &kPredicateOnlyVtable));
+
+  static const loom_encoding_vtable_t kDiagnosticOnlyVtable = {
+      /*.descriptor=*/&kQ8_0EncodingDescriptor,
+      /*.is_static_valid=*/{},
+      /*.diagnose_static=*/TestEncodingDiagnoseStatic,
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_context_register_encoding_vtable(&context_, &kDiagnosticOnlyVtable));
 }
 
 }  // namespace
