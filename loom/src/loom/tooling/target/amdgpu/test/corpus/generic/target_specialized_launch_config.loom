@@ -1,8 +1,9 @@
 // Target provider selection must expand the launch region and device body
 // against the same exact device profile. Gfx1151 wave32 uses two items per
-// workgroup; the target-independent fallback uses four. Both paths must cover
-// the same 128-item workload. The kernel remains targetless so the fixture
-// executes on every Loom-supported AMDGPU device.
+// workgroup, a target-independent wave64 implementation uses four, and the
+// fallback uses eight. Every path must cover the same 128-item workload. The
+// kernel remains targetless so the same source executes on every
+// Loom-supported AMDGPU device.
 amdgpu.target<gfx1151> @gfx1151
 
 func.template<test.items_per_workgroup> target(@gfx1151) requires [#target.subgroup.size<32>] priority(20) @gfx1151_wave32_items_per_workgroup() -> (index) {
@@ -10,9 +11,14 @@ func.template<test.items_per_workgroup> target(@gfx1151) requires [#target.subgr
   func.return %c2 : index
 }
 
-func.template<test.items_per_workgroup> priority(1) @default_items_per_workgroup() -> (index) {
+func.template<test.items_per_workgroup> requires [#target.subgroup.size<64>] priority(10) @wave64_items_per_workgroup() -> (index) {
   %c4 = index.constant 4 : index
   func.return %c4 : index
+}
+
+func.template<test.items_per_workgroup> priority(1) @default_items_per_workgroup() -> (index) {
+  %c8 = index.constant 8 : index
+  func.return %c8 : index
 }
 
 kernel.def @target_specialized_launch_config(%item_count: index) {
