@@ -109,8 +109,8 @@ class CallableInlineTest : public ::testing::Test {
     loom_op_t* func_op = nullptr;
     IREE_CHECK_OK(loom_func_template_build(
         &module_builder_, 0, implements, 0, 0, 0, 0, 0, 0,
-        loom_symbol_ref_null(), 0, callee, &value_type, 1, &value_type, 1,
-        nullptr, 0, loom_parameterized_attr_array_empty(), nullptr, 0,
+        loom_symbol_ref_null(), loom_parameterized_attr_array_empty(), 0,
+        callee, &value_type, 1, &value_type, 1, nullptr, 0, nullptr, 0,
         LOOM_LOCATION_UNKNOWN, &func_op));
     loom_func_like_t func = loom_func_like_cast(module_, func_op);
     uint16_t arg_count = 0;

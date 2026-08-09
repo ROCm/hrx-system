@@ -53,12 +53,12 @@ static iree_status_t loom_func_provider_emit_non_identity_target_field(
 static iree_status_t loom_function_provider_verify_target_conditions(
     const loom_module_t* module, const loom_op_t* provider_op,
     loom_func_like_t provider, iree_diagnostic_emitter_t emitter) {
-  const loom_parameterized_attr_array_t conditions =
-      loom_func_like_conditions(provider);
-  for (iree_host_size_t i = 0; i < conditions.count; ++i) {
+  const loom_parameterized_attr_array_t requirements =
+      loom_func_like_requires(provider);
+  for (iree_host_size_t i = 0; i < requirements.count; ++i) {
     const loom_target_condition_descriptor_t* descriptor = NULL;
     iree_status_t status = loom_target_condition_resolve(
-        module->context, conditions.values[i], &descriptor);
+        module->context, requirements.values[i], &descriptor);
     if (!iree_status_is_ok(status)) {
       const loom_symbol_ref_t provider_ref = loom_func_like_callee(provider);
       const loom_symbol_t* provider_symbol =
@@ -68,9 +68,8 @@ static iree_status_t loom_function_provider_verify_target_conditions(
               loom_function_contract_symbol_name(module, provider_symbol)),
           loom_param_with_field_ref(
               loom_param_u32((uint32_t)i),
-              loom_diagnostic_field_ref(
-                  LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
-                  provider.vtable->conditions_attr_index)),
+              loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
+                                        provider.vtable->requires_attr_index)),
           loom_param_string(iree_status_message(status)),
       };
       loom_diagnostic_emission_t emission = {

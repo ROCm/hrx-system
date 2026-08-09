@@ -724,13 +724,13 @@ func.def public @entry(%arg: i32) -> (i32) {
 
 // ====
 
-// A normalized condition reads the containing function's effective target
+// A normalized requirement reads the containing function's effective target
 // facts and selects the matching higher-priority provider.
 // RUN: pass select-templates,inline-callables
 
 test.target<quirky> @wave7
 
-func.template<demo.condition_match> priority(10) @wave7_impl(%value: i32) -> (i32) where [#target.subgroup.size<7>] {
+func.template<demo.condition_match> requires [#target.subgroup.size<7>] priority(10) @wave7_impl(%value: i32) -> (i32) {
   %doubled = test.addi %value, %value : i32
   func.return %doubled : i32
 }
@@ -754,12 +754,12 @@ func.def public target(@wave7) @entry(%arg: i32) -> (i32) {
 
 // ====
 
-// The same normalized condition can be proven locally in targetless IR. The
-// dynamic query and static clause share one fact family: the true edge selects
-// the specialized provider and the false edge disproves it.
+// The same normalized requirement can be proven locally in targetless IR. The
+// dynamic query and static requirement share one fact family: the true edge
+// selects the specialized provider and the false edge disproves it.
 // RUN: pass select-templates,inline-callables
 
-func.template<demo.condition_path> priority(10) @wave32(%value: i32) -> (i32) where [#target.subgroup.size<32>] {
+func.template<demo.condition_path> requires [#target.subgroup.size<32>] priority(10) @wave32(%value: i32) -> (i32) {
   %doubled = test.addi %value, %value : i32
   func.return %doubled : i32
 }
@@ -798,12 +798,12 @@ func.def public @entry(%arg: i32) -> (i32) {
 
 // ====
 
-// Contextual clauses and argument predicates consume the same composed path
-// facts. Neither the query value nor either boolean guard is threaded through
-// func.apply solely to make provider selection work.
+// Target-fact requirements and argument predicates consume the same composed
+// path facts. Neither the query value nor either boolean guard is threaded
+// through func.apply solely to make provider selection work.
 // RUN: pass select-templates,inline-callables
 
-func.template<demo.condition_and_value> priority(10) @wave32_tile64(%tile_size: index, %value: i32) -> (i32) where [#target.subgroup.size<32>, eq(%tile_size, 64)] {
+func.template<demo.condition_and_value> requires [#target.subgroup.size<32>] priority(10) @wave32_tile64(%tile_size: index, %value: i32) -> (i32) where [eq(%tile_size, 64)] {
   %doubled = test.addi %value, %value : i32
   func.return %doubled : i32
 }
@@ -855,13 +855,13 @@ func.def public @entry(%tile_size: index, %arg: i32) -> (i32) {
 
 // ====
 
-// A disproven condition excludes the specialized provider and admits the
+// A disproven requirement excludes the specialized provider and admits the
 // proven fallback without changing the caller's target facts.
 // RUN: pass select-templates,inline-callables
 
 test.target<low_core> @wave32 {subgroup_size = 32}
 
-func.template<demo.condition_reject> priority(10) @wave64(%value: i32) -> (i32) where [#target.subgroup.size<64>] {
+func.template<demo.condition_reject> requires [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {
   %doubled = test.addi %value, %value : i32
   func.return %doubled : i32
 }
@@ -884,11 +884,11 @@ func.def public target(@wave32) @entry(%arg: i32) -> (i32) {
 
 // ====
 
-// An unbound condition remains unresolved during early selection, preserving
+// An unbound requirement remains unresolved during early selection, preserving
 // both the conditional choice and the proven lower-priority fallback.
 // RUN: pass select-templates
 
-func.template<demo.condition_unbound> priority(10) @wave64(%value: i32) -> (i32) where [#target.subgroup.size<64>] {
+func.template<demo.condition_unbound> requires [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {
   func.return %value : i32
 }
 
@@ -902,7 +902,7 @@ func.def public @entry(%arg: i32) -> (i32) {
 }
 
 // ----
-func.template<demo.condition_unbound> priority(10) @wave64(%value: i32) -> (i32) where [#target.subgroup.size<64>] {
+func.template<demo.condition_unbound> requires [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {
   func.return %value : i32
 }
 
@@ -917,13 +917,13 @@ func.def public @entry(%arg: i32) -> (i32) {
 
 // ====
 
-// Final selection excludes a higher-priority condition that concrete target
+// Final selection excludes a higher-priority requirement that concrete target
 // facts cannot yet prove and selects the proven fallback.
 // RUN: pass select-templates{mode=final},inline-callables
 
 test.target<low_core> @unknown_wave
 
-func.template<demo.condition_unknown_fallback> priority(10) @wave64(%value: i32) -> (i32) where [#target.subgroup.size<64>] {
+func.template<demo.condition_unknown_fallback> requires [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {
   %doubled = test.addi %value, %value : i32
   func.return %doubled : i32
 }
@@ -946,13 +946,13 @@ func.def public target(@unknown_wave) @entry(%arg: i32) -> (i32) {
 
 // ====
 
-// Without a proven fallback, final selection reports the authored condition
+// Without a proven fallback, final selection reports the authored requirement
 // whose target fact remains unknown.
 // RUN: pass select-templates{mode=final}
 
 test.target<low_core> @unknown_wave
 
-func.template<demo.condition_unknown_only> priority(10) @wave64(%value: i32) -> (i32) where [#target.subgroup.size<64>] {
+func.template<demo.condition_unknown_only> requires [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {
   func.return %value : i32
 }
 
@@ -964,7 +964,7 @@ func.def public target(@unknown_wave) @entry(%arg: i32) -> (i32) {
 
 // ====
 
-// An unresolved lower-priority condition cannot delay a higher-priority
+// An unresolved lower-priority requirement cannot delay a higher-priority
 // provider whose applicability is already proven.
 // RUN: pass select-templates,inline-callables
 
@@ -975,7 +975,7 @@ func.template<demo.condition_lower_unknown> priority(10) @proven(%value: i32) ->
   func.return %doubled : i32
 }
 
-func.template<demo.condition_lower_unknown> priority(1) @wave64(%value: i32) -> (i32) where [#target.subgroup.size<64>] {
+func.template<demo.condition_lower_unknown> requires [#target.subgroup.size<64>] priority(1) @wave64(%value: i32) -> (i32) {
   func.return %value : i32
 }
 
@@ -994,13 +994,13 @@ func.def public target(@unknown_wave) @entry(%arg: i32) -> (i32) {
 
 // ====
 
-// Conditions gate opaque providers before materialization. A rejected ukernel
+// Requirements gate opaque providers before materialization. A rejected ukernel
 // cannot block a proven template fallback.
 // RUN: pass select-templates,inline-callables
 
 test.target<quirky> @wave7
 
-func.ukernel<demo.condition_ukernel> priority(10) @wave64_opaque(%value: i32) -> (i32) where [#target.subgroup.size<64>]
+func.ukernel<demo.condition_ukernel> requires [#target.subgroup.size<64>] priority(10) @wave64_opaque(%value: i32) -> (i32)
 
 func.template<demo.condition_ukernel> priority(1) @fallback(%value: i32) -> (i32) {
   func.return %value : i32
@@ -1020,13 +1020,13 @@ func.def public target(@wave7) @entry(%arg: i32) -> (i32) {
 
 // ====
 
-// An opaque provider cannot block materialization until its target condition
+// An opaque provider cannot block materialization until its target requirement
 // is proven. Final selection therefore admits the concrete template fallback.
 // RUN: pass select-templates{mode=final},inline-callables
 
 test.target<low_core> @unknown_wave
 
-func.ukernel<demo.condition_unknown_ukernel> priority(10) @wave64_opaque(%value: i32) -> (i32) where [#target.subgroup.size<64>]
+func.ukernel<demo.condition_unknown_ukernel> requires [#target.subgroup.size<64>] priority(10) @wave64_opaque(%value: i32) -> (i32)
 
 func.template<demo.condition_unknown_ukernel> priority(1) @fallback(%value: i32) -> (i32) {
   func.return %value : i32

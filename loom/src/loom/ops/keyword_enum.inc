@@ -83,4 +83,4 @@
   LOOM_KW_CLUSTER_SIZE = 74,  // "cluster_size"
   LOOM_KW_MEMORY_ACCESS = 75,  // "memory_access"
   LOOM_KW_PERIOD = 76,  // "period"
-  LOOM_KW_WHEN = 77,  // "when"
+  LOOM_KW_REQUIRES = 77,  // "requires"

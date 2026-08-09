@@ -1927,7 +1927,7 @@ static iree_status_t loom_template_selection_emit_blockers(
           .op = provider->function.op,
           .field_ref = loom_diagnostic_field_ref(
               LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
-              provider->function.vtable->conditions_attr_index),
+              provider->function.vtable->requires_attr_index),
       };
       loom_diagnostic_emission_t emission = {
           .op = entry->apply_op,

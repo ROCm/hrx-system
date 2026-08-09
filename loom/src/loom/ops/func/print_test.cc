@@ -161,9 +161,8 @@ TEST_F(FuncPrinterTest, TemplateKeyRef) {
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(loom_func_template_build(
       &builder_, 0, implements_id, 0, 0, 0, 0, 0, 0, loom_symbol_ref_null(),
-      /*priority=*/0, callee, arg_types, 1, result_types, 1, NULL, 0,
-      loom_parameterized_attr_array_empty(), NULL, 0, LOOM_LOCATION_UNKNOWN,
-      &op));
+      loom_parameterized_attr_array_empty(), /*priority=*/0, callee, arg_types,
+      1, result_types, 1, NULL, 0, NULL, 0, LOOM_LOCATION_UNKNOWN, &op));
 
   EXPECT_NE(PrintOp(op).find("func.template<tile.contract>"),
             std::string::npos);
@@ -179,9 +178,9 @@ TEST_F(FuncPrinterTest, TemplateWithPriority) {
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(loom_func_template_build(
       &builder_, LOOM_FUNC_TEMPLATE_BUILD_FLAG_HAS_PRIORITY, implements_id, 0,
-      0, 0, 0, 0, 0, loom_symbol_ref_null(), /*priority=*/10, callee, arg_types,
-      1, result_types, 1, NULL, 0, loom_parameterized_attr_array_empty(), NULL,
-      0, LOOM_LOCATION_UNKNOWN, &op));
+      0, 0, 0, 0, 0, loom_symbol_ref_null(),
+      loom_parameterized_attr_array_empty(), /*priority=*/10, callee, arg_types,
+      1, result_types, 1, NULL, 0, NULL, 0, LOOM_LOCATION_UNKNOWN, &op));
 
   EXPECT_NE(PrintOp(op).find("priority(10)"), std::string::npos);
 }
@@ -197,8 +196,8 @@ TEST_F(FuncPrinterTest, TemplateWithTarget) {
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(loom_func_template_build(
       &builder_, LOOM_FUNC_TEMPLATE_BUILD_FLAG_HAS_TARGET, implements_id, 0, 0,
-      0, 0, 0, 0, target, /*priority=*/0, callee, arg_types, 1, result_types, 1,
-      NULL, 0, loom_parameterized_attr_array_empty(), NULL, 0,
+      0, 0, 0, 0, target, loom_parameterized_attr_array_empty(),
+      /*priority=*/0, callee, arg_types, 1, result_types, 1, NULL, 0, NULL, 0,
       LOOM_LOCATION_UNKNOWN, &op));
 
   EXPECT_NE(PrintOp(op).find("target(@gfx1100)"), std::string::npos);

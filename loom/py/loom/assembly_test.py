@@ -39,7 +39,6 @@ from loom.assembly import (
     SymbolRef,
     TypeOf,
     TypesOf,
-    WhereClause,
     kw,
 )
 
@@ -216,18 +215,6 @@ class TestPredicateList:
     def test_construct(self) -> None:
         pl = PredicateList("predicates")
         assert pl.field == "predicates"
-
-
-class TestWhereClause:
-    def test_construct_predicate_only(self) -> None:
-        clause = WhereClause("predicates")
-        assert clause.predicates == "predicates"
-        assert clause.clauses is None
-
-    def test_construct_heterogeneous(self) -> None:
-        clause = WhereClause("predicates", "conditions")
-        assert clause.predicates == "predicates"
-        assert clause.clauses == "conditions"
 
 
 class TestOptionalGroup:

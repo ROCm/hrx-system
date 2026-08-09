@@ -3568,7 +3568,6 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
         TypedRefs,
         TypeOf,
         TypesOf,
-        WhereClause,
     )
 
     fields: set[str] = set()
@@ -3601,10 +3600,6 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
                 fields.add(f)
             case PredicateList(field=f):
                 fields.add(f)
-            case WhereClause(predicates=predicates, clauses=clauses):
-                fields.add(predicates)
-                if clauses is not None:
-                    fields.add(clauses)
             case IndexList(dynamic=d, static=s):
                 fields.add(d)
                 fields.add(s)
@@ -3723,8 +3718,6 @@ def _validate_format_fields(
     regions: tuple[RegionDef, ...],
 ) -> None:
     """Validate that all fields in format elements are declared on the op."""
-    from loom.assembly import Clause, Scope, WhereClause
-
     _validate_no_nested_scope(op_name, format_elements)
     declared = _declared_format_fields(operands, results, attrs, successors, regions)
     referenced = _collect_format_fields(format_elements)
@@ -3734,54 +3727,6 @@ def _validate_format_fields(
             f"Op '{op_name}': format references undeclared fields: "
             f"{sorted(unknown)}. Declared: {sorted(declared)}"
         )
-
-    attrs_by_name = {attr.name: attr for attr in attrs}
-
-    def validate_where_clauses(elements: tuple[FormatElement, ...]) -> None:
-        for element in elements:
-            match element:
-                case WhereClause(predicates=predicates, clauses=clauses):
-                    predicate_attr = attrs_by_name.get(predicates)
-                    if predicate_attr is None:
-                        raise ValueError(
-                            f"Op '{op_name}': WhereClause predicate field "
-                            f"'{predicates}' must name an attr"
-                        )
-                    if predicate_attr.attr_type != ATTR_TYPE_PREDICATE_LIST:
-                        raise ValueError(
-                            f"Op '{op_name}': WhereClause predicate field "
-                            f"'{predicates}' must be a predicate_list attr"
-                        )
-                    if not predicate_attr.optional:
-                        raise ValueError(
-                            f"Op '{op_name}': WhereClause predicate field "
-                            f"'{predicates}' must be optional"
-                        )
-                    if clauses is not None:
-                        clause_attr = attrs_by_name.get(clauses)
-                        if clause_attr is None:
-                            raise ValueError(
-                                f"Op '{op_name}': WhereClause typed-clause field "
-                                f"'{clauses}' must name an attr"
-                            )
-                        if clause_attr.attr_type != ATTR_TYPE_PARAMETERIZED_ARRAY:
-                            raise ValueError(
-                                f"Op '{op_name}': WhereClause typed-clause field "
-                                f"'{clauses}' must be a parameterized_array attr"
-                            )
-                        if not clause_attr.optional:
-                            raise ValueError(
-                                f"Op '{op_name}': WhereClause typed-clause field "
-                                f"'{clauses}' must be optional"
-                            )
-                case (
-                    Clause(elements=inner)
-                    | OptionalGroup(elements=inner)
-                    | Scope(elements=inner)
-                ):
-                    validate_where_clauses(inner)
-
-    validate_where_clauses(format_elements)
 
 
 def _validate_scoped_enum_fields(
@@ -4295,9 +4240,9 @@ class FuncLikeInterface(NamedTuple):
     inline_policy: str | None = None
     # Predicate list attr for where-clause constraints. None if absent.
     predicates: str | None = None
-    # Parameterized attribute array naming ambient target-fact conditions.
+    # Parameterized attribute array naming provider proof requirements.
     # None for function kinds that are not implementation providers.
-    conditions: str | None = None
+    requires: str | None = None
     # Region name for the function body. None for bodyless ops that
     # only declare a signature without providing an implementation.
     body: str | None = None

@@ -229,7 +229,7 @@ func.def @entry() -> (index) {
 
 TEST_F(SymbolDependenciesTest, OpenParameterizedArraysAreNotSymbolReferences) {
   ModulePtr module = ParseModule(R"(
-func.template<demo.contract> @conditional(%arg: i32) -> (i32) where [#target.subgroup.size<64>] {
+func.template<demo.contract> requires [#target.subgroup.size<64>] @conditional(%arg: i32) -> (i32) {
   func.return %arg : i32
 }
 )");

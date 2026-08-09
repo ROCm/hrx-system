@@ -300,18 +300,18 @@ class TestFuncTemplateUkernelRoundTrip:
             )
         )
 
-    def test_template_with_target_conditions(self) -> None:
+    def test_template_with_requirements(self) -> None:
         text = _module_text(
-            "func.template<tile.contract> priority(10) @wave64(%a: f32) -> (f32) where [#target.subgroup.size<64>] {",
+            "func.template<tile.contract> requires [#target.subgroup.size<64>] priority(10) @wave64(%a: f32) -> (f32) {",
             "  func.return %a : f32",
             "}",
         )
         _roundtrip(text)
         assert _print_module(read_module(write_module(_parse_module(text)))) == text
 
-    def test_template_with_mixed_where_clause(self) -> None:
+    def test_template_with_requirements_and_where_predicates(self) -> None:
         text = _module_text(
-            "func.template<tile.contract> @wave64_tile(%tile: index, %a: f32) -> (f32) where [#target.subgroup.size<64>, eq(%tile, 32)] {",
+            "func.template<tile.contract> requires [#target.subgroup.size<64>] @wave64_tile(%tile: index, %a: f32) -> (f32) where [eq(%tile, 32)] {",
             "  func.return %a : f32",
             "}",
         )
@@ -319,28 +319,45 @@ class TestFuncTemplateUkernelRoundTrip:
         assert _print_module(module) == text
         op = module.symbols[0].op
         assert op is not None
-        conditions = op.attributes.get("conditions")
+        requirements = op.attributes.get("requires")
         predicates = op.attributes.get("predicates")
-        assert isinstance(conditions, ParameterizedAttrArray)
-        assert len(conditions) == 1
-        assert conditions.values[0].family_name == "target.subgroup.size"
+        assert isinstance(requirements, ParameterizedAttrArray)
+        assert len(requirements) == 1
+        assert requirements.values[0].family_name == "target.subgroup.size"
         assert isinstance(predicates, list)
         assert len(predicates) == 1
 
-    def test_template_where_clause_has_canonical_order(self) -> None:
-        source = _module_text(
-            "func.template<tile.contract> @wave64_tile(%tile: index, %a: f32) -> (f32) where [eq(%tile, 32), #target.subgroup.size<64>] {",
-            "  func.return %a : f32",
-            "}",
+    def test_template_provider_contract_has_canonical_order(self) -> None:
+        _roundtrip(
+            _module_text(
+                "func.template<tile.contract> target(@gfx11_generic) requires [#target.subgroup.size<64>] priority(10) @wave64_tile(%tile: index, %a: f32) -> (f32) where [eq(%tile, 32)] {",
+                "  func.return %a : f32",
+                "}",
+            )
         )
-        expected = source.replace(
-            "eq(%tile, 32), #target.subgroup.size<64>",
-            "#target.subgroup.size<64>, eq(%tile, 32)",
-        )
-        assert _print_module(_parse_module(source)) == expected
 
-    def test_definition_rejects_typed_applicability_clause(self) -> None:
-        with pytest.raises(ParseError, match="typed clauses are not supported"):
+    def test_template_rejects_requirements_after_priority(self) -> None:
+        with pytest.raises(ParseError):
+            _parse_module(
+                _module_text(
+                    "func.template<tile.contract> priority(10) requires [#target.subgroup.size<64>] @wave64(%a: f32) -> (f32) {",
+                    "  func.return %a : f32",
+                    "}",
+                )
+            )
+
+    def test_template_rejects_predicate_as_requirement(self) -> None:
+        with pytest.raises(ParseError):
+            _parse_module(
+                _module_text(
+                    "func.template<tile.contract> requires [eq(%tile, 32)] @impl(%tile: index) {",
+                    "  func.return",
+                    "}",
+                )
+            )
+
+    def test_definition_rejects_typed_requirement_in_where(self) -> None:
+        with pytest.raises(ParseError):
             _parse_module(
                 _module_text(
                     "func.def @not_a_provider() where [#target.subgroup.size<64>] {",
@@ -348,6 +365,22 @@ class TestFuncTemplateUkernelRoundTrip:
                     "}",
                 )
             )
+
+    def test_definition_rejects_requires(self) -> None:
+        with pytest.raises(ParseError):
+            _parse_module(
+                _module_text(
+                    "func.def requires [#target.subgroup.size<64>] @not_a_provider() {",
+                    "  func.return",
+                    "}",
+                )
+            )
+
+    def test_ukernel_with_explicit_empty_requirements(self) -> None:
+        _roundtrip(_module_text("func.ukernel<tile.contract> requires [] @unconditional(%a: f32) -> (f32)"))
+
+    def test_ukernel_with_explicit_empty_where_clause(self) -> None:
+        _roundtrip(_module_text("func.ukernel<tile.contract> @unconditional(%a: f32) -> (f32) where []"))
 
     def test_template_device_cc(self) -> None:
         _roundtrip(
@@ -366,9 +399,6 @@ class TestFuncTemplateUkernelRoundTrip:
 
     def test_ukernel_with_priority(self) -> None:
         _roundtrip(_module_text("func.ukernel<tile.contract> priority(5) @prioritized(%a: f32) -> (f32)"))
-
-    def test_ukernel_with_explicit_empty_where_clause(self) -> None:
-        _roundtrip(_module_text("func.ukernel<tile.contract> @unconditional(%a: f32) -> (f32) where []"))
 
     def test_template_implements_stored(self) -> None:
         module = _parse_module(

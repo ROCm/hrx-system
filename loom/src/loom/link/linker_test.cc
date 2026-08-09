@@ -282,7 +282,7 @@ func.def @unused(%x: i32) -> (i32) {
 
 TEST_F(LinkerTest, SelectiveRootMaterializesApplyContractProviders) {
   loom_module_t* module = Parse(IREE_SV(R"(
-func.template<demo.apply> @provider(%x: i32) -> (i32) where [#target.subgroup.size<64>] {
+func.template<demo.apply> requires [#target.subgroup.size<64>] @provider(%x: i32) -> (i32) {
   func.return %x : i32
 }
 
@@ -302,9 +302,9 @@ func.def @caller(%x: i32) -> (i32) {
   std::string text = Print(linked);
   EXPECT_NE(text.find("func.def retain @caller"), std::string::npos);
   EXPECT_NE(text.find("func.apply<demo.apply>"), std::string::npos);
-  EXPECT_NE(text.find("func.template<demo.apply> @provider"),
+  EXPECT_NE(text.find("func.template<demo.apply> requires "
+                      "[#target.subgroup.size<64>] @provider"),
             std::string::npos);
-  EXPECT_NE(text.find("where [#target.subgroup.size<64>]"), std::string::npos);
   EXPECT_EQ(text.find("func.template<demo.unused>"), std::string::npos);
 }
 

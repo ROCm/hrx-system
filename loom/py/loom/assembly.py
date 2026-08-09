@@ -77,7 +77,6 @@ __all__ = [
     "BlockArgs",
     "FuncArgs",
     "PredicateList",
-    "WhereClause",
     "OptionalGroup",
     "Scope",
     "Glue",
@@ -545,25 +544,6 @@ class PredicateList:
     field: str
 
 
-@dataclass(frozen=True, slots=True)
-class WhereClause:
-    """Optional heterogeneous applicability clause.
-
-    Prints/parses: where [#target.subgroup.size<32>, eq(%M, 64)]
-
-    The predicate field stores ordinary SSA predicates. The optional clause
-    field stores typed parameterized attributes. Both are conjunctive facts at
-    an application site; their distinct storage preserves their structured
-    representations without exposing separate surface-language concepts.
-
-    The entire clause is absent when both fields are absent. A present empty
-    predicate list preserves the explicit ``where []`` spelling.
-    """
-
-    predicates: str
-    clauses: str | None = None
-
-
 # ============================================================================
 # Modifiers
 # ============================================================================
@@ -652,7 +632,6 @@ class Glue:
     Elements that never glue (space before them is always present):
       - ResultTypeList: always follows -> with space
       - PredicateList: always follows 'where' with space
-      - WhereClause: owns its leading 'where' keyword and spacing
 
     For builders: Glue is invisible (not a parameter).
     """
@@ -882,7 +861,6 @@ type FormatElement = (
     | BlockArgs
     | FuncArgs
     | PredicateList
-    | WhereClause
     | OptionalGroup
     | Scope
     | Glue

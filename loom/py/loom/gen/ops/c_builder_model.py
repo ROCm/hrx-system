@@ -42,7 +42,6 @@ from loom.assembly import (
     TypedRefs,
     TypeOf,
     TypesOf,
-    WhereClause,
 )
 from loom.assembly import Region as RegionFmt
 from loom.dsl import ATTR_TYPE_FLAGS, AttrDef, FuncLikeInterface, Op, RegionDef, TiedResult, TypeConstraint
@@ -606,21 +605,6 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                             }
                         )
                         covered_attrs.add(name)
-
-                case WhereClause(predicates=predicates, clauses=clauses):
-                    if clauses is not None:
-                        append_attr_param(clauses)
-                    attr_def = op.attr(predicates)
-                    if attr_def is not None:
-                        params.append(
-                            {
-                                "name": predicates,
-                                "kind": "predicate_list",
-                                "optional": attr_def.optional,
-                                "attr_index": c_queries.resolve_attr_index(op, predicates, "builder"),
-                            }
-                        )
-                        covered_attrs.add(predicates)
 
                 case AttrDict(field=name):
                     if name:

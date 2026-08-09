@@ -1761,8 +1761,8 @@ class TestCrossFormatRoundTrip:
     def test_func_template_metadata_survives_bytecode(self) -> None:
         text = (
             "func.template<tile.contract> device "
-            "priority(7) @kernel(%input: f32) -> (f32) "
-            "where [#target.subgroup.size<64>] {\n"
+            "requires [#target.subgroup.size<64>] "
+            "priority(7) @kernel(%input: f32) -> (f32) {\n"
             "  func.return %input : f32\n"
             "}\n"
         )
@@ -1775,9 +1775,9 @@ class TestCrossFormatRoundTrip:
         assert symbol.op.attributes["implements"] == "tile.contract"
         assert symbol.op.attributes["priority"] == 7
         assert symbol.op.attributes["cc"] == "device"
-        conditions = symbol.op.attributes["conditions"]
-        assert isinstance(conditions, ParameterizedAttrArray)
-        assert conditions.values[0].family_name == "target.subgroup.size"
+        requirements = symbol.op.attributes["requires"]
+        assert isinstance(requirements, ParameterizedAttrArray)
+        assert requirements.values[0].family_name == "target.subgroup.size"
         assert _roundtrip_text_through_bytecode(text) == text
 
     def test_low_func_target_and_register_body_survive_bytecode(self) -> None:

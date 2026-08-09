@@ -155,8 +155,8 @@ INTERFACES: tuple[InterfaceSpec, ...] = (
             InterfaceFieldSpec("inline_policy", "inline_policy_attr_index", "attr"),
             InterfaceFieldSpec("predicates", "predicates_attr_index", "attr"),
             InterfaceFieldSpec(
-                "conditions",
-                "conditions_attr_index",
+                "requires",
+                "requires_attr_index",
                 "attr",
                 expected_attr_type=ATTR_TYPE_PARAMETERIZED_ARRAY,
             ),

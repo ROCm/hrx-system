@@ -35,13 +35,13 @@ from loom.assembly import (
     FuncArgs,
     KeyRef,
     OptionalGroup,
+    PredicateList,
     Refs,
     Region,
     ResultTypeList,
     Scope,
     SymbolRef,
     TypesOf,
-    WhereClause,
     kw,
 )
 from loom.dialect.target.defs import ExportAbiKind
@@ -232,22 +232,18 @@ _SIGNATURE_FORMAT: list[FormatElement] = [
                 [ARROW, ResultTypeList("results")],
                 anchor="results",
             ),
-            WhereClause("predicates"),
+            OptionalGroup(
+                [kw("where"), PredicateList("predicates")],
+                anchor="predicates",
+            ),
         ]
     ),
 ]
 
-_PROVIDER_SIGNATURE_FORMAT: list[FormatElement] = [
-    SymbolRef("callee"),
-    Scope(
-        [
-            FuncArgs("args"),
-            OptionalGroup(
-                [ARROW, ResultTypeList("results")],
-                anchor="results",
-            ),
-            WhereClause("predicates", "conditions"),
-        ]
+_REQUIRES_FORMAT: list[FormatElement] = [
+    OptionalGroup(
+        [kw("requires"), Attr("requires")],
+        anchor="requires",
     ),
 ]
 
@@ -288,10 +284,10 @@ _PROVIDER_ATTRS = [
         symbol_ref=SymbolReference("target", ["target"]),
     ),
     AttrDef(
-        "conditions",
+        "requires",
         ATTR_TYPE_PARAMETERIZED_ARRAY,
         optional=True,
-        doc="Typed applicability clauses conjoined with ordinary predicates.",
+        doc=("Typed proof requirements over the application-site target facts. Requirements filter provider eligibility and never add facts."),
     ),
 ]
 
@@ -462,7 +458,7 @@ func_template = Op(
             body="body",
             implements="implements",
             priority="priority",
-            conditions="conditions",
+            requires="requires",
         )
     ],
     verify="loom_func_template_verify",
@@ -470,16 +466,17 @@ func_template = Op(
         KeyRef("implements"),
         *_MODIFIER_FORMAT,
         *_TARGET_FORMAT,
+        *_REQUIRES_FORMAT,
         OptionalGroup(
             [kw("priority"), GLUE, LPAREN, GLUE, Attr("priority"), GLUE, RPAREN],
             anchor="priority",
         ),
-        *_PROVIDER_SIGNATURE_FORMAT,
+        *_SIGNATURE_FORMAT,
         Region("body"),
     ],
     examples=[
         "func.template<tile.contract> device @vnni_q8(%w: tensor<[%M]xi8>, %x: tensor<[%K]xf32>) -> (tensor<[%M]xf32>) where [mul(%M, 16)] {\n  func.return %x : tensor<[%K]xf32>\n}",
-        "func.template<tile.contract> priority(20) @subgroup64_q8(%a: tile<4xf32>) -> (tile<4xf32>) where [#target.subgroup.size<64>] {\n  func.return %a : tile<4xf32>\n}",
+        "func.template<tile.contract> requires [#target.subgroup.size<64>] priority(20) @subgroup64_q8(%a: tile<4xf32>) -> (tile<4xf32>) {\n  func.return %a : tile<4xf32>\n}",
         "func.template<tile.contract> target(@gfx11_generic) @gfx11_q8(%a: tile<4xf32>) -> (tile<4xf32>) {\n  func.return %a : tile<4xf32>\n}",
         "func.template<tile.contract> priority(10) @high_priority(%a: tile<4xf32>) -> (tile<4xf32>) {\n  func.return %a : tile<4xf32>\n}",
     ],
@@ -516,7 +513,7 @@ func_ukernel = Op(
             **_FUNC_LIKE_PROVIDER,
             implements="implements",
             priority="priority",
-            conditions="conditions",
+            requires="requires",
             args="args",
         )
     ],
@@ -525,15 +522,16 @@ func_ukernel = Op(
         KeyRef("implements"),
         *_MODIFIER_FORMAT,
         *_TARGET_FORMAT,
+        *_REQUIRES_FORMAT,
         OptionalGroup(
             [kw("priority"), GLUE, LPAREN, GLUE, Attr("priority"), GLUE, RPAREN],
             anchor="priority",
         ),
-        *_PROVIDER_SIGNATURE_FORMAT,
+        *_SIGNATURE_FORMAT,
     ],
     examples=[
         "func.ukernel<tile.contract> device @vnni_q8_asm(%w: tensor<[%M]xi8>, %x: tensor<[%K]xf32>) -> (tensor<[%M]xf32>) where [mul(%M, 16)]",
-        "func.ukernel<tile.contract> priority(20) @subgroup64_q8_asm(%a: tile<4xf32>) -> (tile<4xf32>) where [#target.subgroup.size<64>]",
+        "func.ukernel<tile.contract> requires [#target.subgroup.size<64>] priority(20) @subgroup64_q8_asm(%a: tile<4xf32>) -> (tile<4xf32>)",
         "func.ukernel<tile.contract> target(@gfx11_generic) @gfx11_q8_asm(%a: tile<4xf32>) -> (tile<4xf32>)",
     ],
 )

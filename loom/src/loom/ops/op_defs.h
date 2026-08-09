@@ -250,18 +250,8 @@ enum loom_format_kind_e {
   // Variadic operand references with adjacent type annotations:
   // %a: type, %b: type.
   LOOM_FORMAT_KIND_OPERAND_TYPED_REFS = 30,
-
-  // Optional heterogeneous applicability conjunction:
-  // where [#typed.clause<...>, predicate(...)]. field_index references the
-  // predicate-list attr and data references an optional parameterized-array
-  // attr containing typed clauses.
-  LOOM_FORMAT_KIND_WHERE_CLAUSE = 31,
-
 };
 typedef uint8_t loom_format_kind_t;
-
-// Sentinel in WHERE_CLAUSE data when the operation admits only predicates.
-#define LOOM_FORMAT_WHERE_CLAUSE_NO_CLAUSES UINT16_MAX
 
 // Individual flag bits packed into INDEX_LIST format element data.
 enum loom_format_index_list_data_bits_e {
@@ -316,7 +306,6 @@ typedef enum loom_region_syntax_e {
 //   REGION:         loom_region_syntax_t parser/printer selector.
 //   BINDING_LIST:   binding kind (CAPTURE=0, ELEMENT=1).
 //   OPTIONAL_GROUP: (skip_count << 2) | anchor_category.
-//   WHERE_CLAUSE:   typed-clause attr index, or NO_CLAUSES.
 typedef struct loom_format_element_t {
   loom_format_kind_t kind;
   uint8_t field_index;
@@ -1300,10 +1289,10 @@ loom_value_slice_t loom_kernel_workload_arg_ids(const loom_module_t* module,
 const loom_predicate_t* loom_func_like_predicates(loom_func_like_t func,
                                                   uint16_t* out_count);
 
-// Returns the static target conditions for a provider function. Returns an
-// empty slice for non-provider function kinds and providers without conditions.
-loom_parameterized_attr_array_t loom_func_like_conditions(
-    loom_func_like_t func);
+// Returns the authored proof requirements for a provider function. Returns an
+// empty slice for non-provider function kinds and providers without
+// requirements.
+loom_parameterized_attr_array_t loom_func_like_requires(loom_func_like_t func);
 
 // Returns the implements string ID for template/ukernel ops — the name of the
 // op kind this function provides an implementation for. Returns

@@ -29,10 +29,6 @@ iree_status_t loom_parse_generic_attr_value(loom_parser_t* parser,
                                             loom_attribute_t* out_attr);
 iree_status_t loom_parse_predicate_list(loom_parser_t* parser,
                                         loom_attribute_t* out_attr);
-iree_status_t loom_parse_where_clause(
-    loom_parser_t* parser,
-    const loom_attr_descriptor_t* typed_clause_descriptor,
-    loom_attribute_t* out_predicates, loom_attribute_t* out_typed_clauses);
 iree_status_t loom_parse_attr_dict(loom_parser_t* parser,
                                    loom_attribute_t* out_attr);
 

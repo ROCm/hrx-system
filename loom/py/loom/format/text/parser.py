@@ -55,7 +55,6 @@ from loom.assembly import (
     TypedRefs,
     TypeOf,
     TypesOf,
-    WhereClause,
 )
 from loom.assembly import (
     Region as RegionFmt,
@@ -1966,8 +1965,6 @@ class Parser:
                 return name == attr_name
             case TemplateParam(field=name) | PredicateList(field=name):
                 return name == attr_name
-            case WhereClause(predicates=predicates, clauses=clauses):
-                return attr_name in (predicates, clauses)
             case TemplateParamFlags(param=param_name, flags=flags_name):
                 return param_name == attr_name or flags_name == attr_name
             case ScopedEnumRef(field=name):
@@ -2886,17 +2883,6 @@ class Parser:
                     predicates = self._parse_predicate_list()
                     parsed.attributes[name] = predicates
 
-                case WhereClause(predicates=predicates, clauses=clauses):
-                    if tok.at(TokenKind.BARE_IDENT) and tok.peek().text == "where":
-                        tok.next()
-                        predicate_values, clause_values = self._parse_where_clause(
-                            op_decl.attr(clauses) if clauses is not None else None
-                        )
-                        if predicate_values is not None:
-                            parsed.attributes[predicates] = predicate_values
-                        if clauses is not None and clause_values is not None:
-                            parsed.attributes[clauses] = clause_values
-
                 case OptionalGroup(elements=inner, anchor=_anchor):
                     if self._optional_group_present(inner, op_decl):
                         self._walk_format(inner, op_decl, parsed)
@@ -3435,46 +3421,6 @@ class Parser:
                 predicates.append(self._parse_one_predicate())
         tok.expect(TokenKind.RBRACKET)
         return predicates
-
-    def _parse_where_clause(
-        self, clause_def: AttrDef | None
-    ) -> tuple[list[Predicate] | None, ParameterizedAttrArray | None]:
-        """Parse one heterogeneous ``where [...]`` conjunction."""
-        tok = self._tokenizer
-        tok.expect(TokenKind.LBRACKET)
-        predicates: list[Predicate] = []
-        clauses: list[ParameterizedAttr] = []
-        item_count = 0
-        while not tok.at(TokenKind.RBRACKET):
-            if item_count > 0:
-                tok.expect(TokenKind.COMMA)
-            if tok.at(TokenKind.HASH_ATTR):
-                if clause_def is None:
-                    raise ParseError(
-                        "typed clauses are not supported by this operation",
-                        tok.peek().location,
-                        tok._filename,
-                    )
-                clauses.append(
-                    self._parse_parameterized_attr(
-                        clause_def.parameterized_attr,
-                        aggregate_nesting_depth=1,
-                    )
-                )
-            elif tok.at(TokenKind.BARE_IDENT):
-                predicates.append(self._parse_one_predicate())
-            else:
-                raise ParseError(
-                    "expected a typed clause or predicate in where clause",
-                    tok.peek().location,
-                    tok._filename,
-                )
-            item_count += 1
-        tok.expect(TokenKind.RBRACKET)
-        return (
-            predicates if predicates or item_count == 0 else None,
-            ParameterizedAttrArray(clauses) if clauses else None,
-        )
 
     def _parse_one_predicate(self) -> Predicate:
         """Parse one predicate: kind(arg, arg, ...).

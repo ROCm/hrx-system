@@ -88,114 +88,6 @@ static iree_status_t loom_print_predicate_list(
   return iree_ok_status();
 }
 
-static iree_status_t loom_print_where_clause(
-    loom_print_context_t* ctx, const loom_op_t* op,
-    const loom_op_vtable_t* vtable, const loom_format_element_t* element) {
-  if (element->field_index >= op->attribute_count ||
-      element->field_index >= vtable->attribute_count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "format WHERE_CLAUSE predicate attr index %u out of range "
-        "(op has %u attributes)",
-        element->field_index, op->attribute_count);
-  }
-  const loom_attribute_t* predicates = &loom_op_attrs(op)[element->field_index];
-  const loom_attribute_t* typed_clauses = NULL;
-  const loom_attr_descriptor_t* typed_clause_descriptor = NULL;
-  if (element->data != LOOM_FORMAT_WHERE_CLAUSE_NO_CLAUSES) {
-    if (element->data >= op->attribute_count ||
-        element->data >= vtable->attribute_count) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "format WHERE_CLAUSE typed-clause attr index %u out of range "
-          "(op has %u attributes)",
-          element->data, op->attribute_count);
-    }
-    typed_clauses = &loom_op_attrs(op)[element->data];
-    typed_clause_descriptor = &vtable->attr_descriptors[element->data];
-  }
-  const bool has_predicates = !loom_attr_is_absent(*predicates);
-  const bool has_typed_clauses =
-      typed_clauses && !loom_attr_is_absent(*typed_clauses);
-  if (!has_predicates && !has_typed_clauses) return iree_ok_status();
-  if (has_predicates && predicates->kind != LOOM_ATTR_PREDICATE_LIST) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "WHERE_CLAUSE predicate field expected PREDICATE_LIST but found %d",
-        (int)predicates->kind);
-  }
-  if (has_predicates && predicates->count > 0 && !predicates->predicate_list) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "WHERE_CLAUSE predicate field has count %u but NULL predicates",
-        predicates->count);
-  }
-  if (has_typed_clauses &&
-      typed_clauses->kind != LOOM_ATTR_PARAMETERIZED_ARRAY) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "WHERE_CLAUSE typed-clause field expected PARAMETERIZED_ARRAY but "
-        "found %d",
-        (int)typed_clauses->kind);
-  }
-  if (has_typed_clauses &&
-      typed_clause_descriptor->attr_kind != LOOM_ATTR_PARAMETERIZED_ARRAY) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "WHERE_CLAUSE typed-clause descriptor is not a "
-                            "PARAMETERIZED_ARRAY");
-  }
-  if (has_typed_clauses && typed_clauses->count > 0 &&
-      !typed_clauses->parameterized_array) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "WHERE_CLAUSE typed-clause field has count %u but NULL values",
-        typed_clauses->count);
-  }
-
-  const iree_host_size_t clause_start =
-      loom_print_next_token_start_offset(ctx, false, 'w');
-  IREE_RETURN_IF_ERROR(loom_print_emit(
-      ctx, loom_bstring_view(loom_keyword_bstring(LOOM_KW_WHERE)), false));
-  IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "[", false));
-  iree_host_size_t item_count = 0;
-  if (has_typed_clauses) {
-    loom_attr_descriptor_t element_descriptor = *typed_clause_descriptor;
-    element_descriptor.attr_kind = LOOM_ATTR_PARAMETERIZED;
-    for (uint16_t i = 0; i < typed_clauses->count; ++i) {
-      if (item_count > 0) {
-        IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ",", false));
-      }
-      IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
-      IREE_RETURN_IF_ERROR(loom_print_attr(
-          ctx, &typed_clauses->parameterized_array[i], &element_descriptor));
-      loom_print_did_write(ctx);
-      ++item_count;
-    }
-  }
-  if (has_predicates) {
-    for (uint16_t i = 0; i < predicates->count; ++i) {
-      if (item_count > 0) {
-        IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ",", false));
-      }
-      IREE_RETURN_IF_ERROR(
-          loom_print_predicate(ctx, &predicates->predicate_list[i]));
-      ++item_count;
-    }
-  }
-  IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "]", false));
-  if (has_predicates) {
-    loom_print_report_field(
-        ctx, loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->field_index),
-        clause_start, ctx->stream->offset);
-  }
-  if (has_typed_clauses) {
-    loom_print_report_field(
-        ctx, loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->data),
-        clause_start, ctx->stream->offset);
-  }
-  return iree_ok_status();
-}
-
 static bool loom_print_optional_attr_present(const loom_op_t* op,
                                              uint16_t attr_index) {
   if (attr_index >= op->attribute_count) {
@@ -618,10 +510,6 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
               loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->field_index),
               predicate_start, ctx->stream->offset);
         }
-        break;
-      }
-      case LOOM_FORMAT_KIND_WHERE_CLAUSE: {
-        IREE_RETURN_IF_ERROR(loom_print_where_clause(ctx, op, vtable, element));
         break;
       }
       case LOOM_FORMAT_KIND_FLAGS: {
