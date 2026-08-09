@@ -184,40 +184,42 @@ low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @gfx950_vector_d
   %174 = v_lshl_add_u32_shift_imm %172, %173, 4
   %175 = s_mov_b32 1073774592
   %176 = s_mov_b32 3770720384
-  %177 = v_perm_b32 %176, %175, %172
-  %178 = s_mov_b32 993737216
-  %179 = s_mov_b32 993737531
-  %180 = v_perm_b32 %179, %178, %172
-  %181 = v_lshl_add_u32_shift_imm %180, %177, 8
-  %182 = v_cmp_lt_u32_src1_inline %172 {rhs = 8}
-  %183 = v_cndmask_b32 %174, %181, %182
-  %184 = v_or_b32 %171, %183
-  %185 = v_mov_b32 32704
-  %186 = v_and_b32_lit %payload, 255
-  %187 = v_mov_b32 128
-  %188 = v_cmp_eq_i32 %186, %187
-  %189 = v_cndmask_b32 %184, %185, %188
-  %190 = v_lshlrev_b32_src0_inline %189, 16
-  %191 = v_lshrrev_b32_src0_inline %payload, 8
-  %192 = v_and_b32_lit %191, 128
-  %193 = v_lshlrev_b32_src0_inline %192, 8
-  %194 = v_and_b32_lit %191, 127
-  %196 = v_lshl_add_u32_shift_imm %194, %173, 4
-  %199 = v_perm_b32 %176, %175, %194
-  %202 = v_perm_b32 %179, %178, %194
-  %203 = v_lshl_add_u32_shift_imm %202, %199, 8
-  %204 = v_cmp_lt_u32_src1_inline %194 {rhs = 8}
-  %205 = v_cndmask_b32 %196, %203, %204
-  %206 = v_or_b32 %193, %205
-  %208 = v_and_b32_lit %191, 255
-  %210 = v_cmp_eq_i32 %208, %187
-  %211 = v_cndmask_b32 %206, %185, %210
-  %212 = v_lshlrev_b32_src0_inline %211, 16
-  %wide = concat(%190, %212) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %177 = v_mov_b32_copy %175
+  %178 = v_perm_b32 %176, %177, %172
+  %179 = s_mov_b32 993737216
+  %180 = s_mov_b32 993737531
+  %181 = v_mov_b32_copy %179
+  %182 = v_perm_b32 %180, %181, %172
+  %183 = v_lshl_add_u32_shift_imm %182, %178, 8
+  %184 = v_cmp_lt_u32_src1_inline %172 {rhs = 8}
+  %185 = v_cndmask_b32 %174, %183, %184
+  %186 = v_or_b32 %171, %185
+  %187 = v_mov_b32 32704
+  %188 = v_and_b32_lit %payload, 255
+  %189 = v_mov_b32 128
+  %190 = v_cmp_eq_i32 %188, %189
+  %191 = v_cndmask_b32 %186, %187, %190
+  %192 = v_lshlrev_b32_src0_inline %191, 16
+  %193 = v_lshrrev_b32_src0_inline %payload, 8
+  %194 = v_and_b32_lit %193, 128
+  %195 = v_lshlrev_b32_src0_inline %194, 8
+  %196 = v_and_b32_lit %193, 127
+  %198 = v_lshl_add_u32_shift_imm %196, %173, 4
+  %202 = v_perm_b32 %176, %177, %196
+  %206 = v_perm_b32 %180, %181, %196
+  %207 = v_lshl_add_u32_shift_imm %206, %202, 8
+  %208 = v_cmp_lt_u32_src1_inline %196 {rhs = 8}
+  %209 = v_cndmask_b32 %198, %207, %208
+  %210 = v_or_b32 %195, %209
+  %212 = v_and_b32_lit %193, 255
+  %214 = v_cmp_eq_i32 %212, %189
+  %215 = v_cndmask_b32 %210, %187, %214
+  %216 = v_lshlrev_b32_src0_inline %215, 16
+  %wide = concat(%192, %216) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   %scale_vector = concat(%scale, %scale) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   %scaled = v_pk_mul_f32 %wide, %scale_vector
-  %216 = slice %scaled[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %217 = slice %scaled[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %rounded = v_cvt_pk_bf16_f32 %216, %217
+  %220 = slice %scaled[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %221 = slice %scaled[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %rounded = v_cvt_pk_bf16_f32 %220, %221
   return %rounded
 }

@@ -439,6 +439,13 @@ iree_status_t loom_amdgpu_lower_vector_dotf(
   IREE_RETURN_IF_ERROR(loom_amdgpu_dotf_materialize_init(
       context, source_op, plan, lane_type, &low_init));
 
+  loom_value_id_t sources[] = {low_lhs, low_rhs, low_init};
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_legalize_vop3_scalar_sources(context, source_op, sources));
+  low_lhs = sources[0];
+  low_rhs = sources[1];
+  low_init = sources[2];
+
   loom_value_id_t result = LOOM_VALUE_ID_INVALID;
   switch (plan->accumulation_kind) {
     case LOOM_AMDGPU_DOTF_ACCUMULATION_STRICT_CHAIN: {

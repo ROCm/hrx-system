@@ -1271,13 +1271,14 @@ iree_status_t loom_amdgpu_lower_scalar_fmaf_mix(
 static iree_status_t loom_amdgpu_packed_ternary_packet_source(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t low_source, uint32_t register_offset,
-    loom_type_t packet_type, loom_value_id_t* out_source) {
+    loom_type_t result_packet_type, loom_value_id_t* out_source) {
   *out_source = low_source;
+  const loom_type_t low_source_type = loom_module_value_type(
+      loom_low_lower_context_module(context), low_source);
   const uint32_t unit_count =
-      loom_low_register_type_unit_count(loom_module_value_type(
-          loom_low_lower_context_module(context), low_source));
+      loom_low_register_type_unit_count(low_source_type);
   const uint32_t packet_unit_count =
-      loom_low_register_type_unit_count(packet_type);
+      loom_low_register_type_unit_count(result_packet_type);
   if (unit_count == 0 || packet_unit_count == 0 ||
       register_offset > unit_count ||
       packet_unit_count > unit_count - register_offset) {
@@ -1287,8 +1288,12 @@ static iree_status_t loom_amdgpu_packed_ternary_packet_source(
   if (unit_count == packet_unit_count && register_offset == 0) {
     return iree_ok_status();
   }
+  const loom_type_t source_packet_type =
+      loom_low_register_carrier_type_with_unit_count(low_source_type,
+                                                     packet_unit_count);
   return loom_amdgpu_emit_low_slice(context, source_op, low_source,
-                                    register_offset, packet_type, out_source);
+                                    register_offset, source_packet_type,
+                                    out_source);
 }
 
 static iree_status_t loom_amdgpu_emit_packed_ternary_packet(
@@ -1345,6 +1350,8 @@ iree_status_t loom_amdgpu_lower_vector_packed_ternary(
     IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(context, plan->sources[i],
                                                      &low_sources[i]));
   }
+  IREE_RETURN_IF_ERROR(loom_amdgpu_legalize_vop3_scalar_sources(
+      context, source_op, low_sources));
 
   loom_type_t result_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_amdgpu_low_result_type(context, source_op,
