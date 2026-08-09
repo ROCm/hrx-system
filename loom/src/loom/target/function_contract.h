@@ -93,6 +93,21 @@ iree_status_t loom_target_function_contract_refine_facts(
     iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
     bool* out_valid, const loom_target_facts_t** out_facts);
 
+// Applies a module-internal callable's function-local contract to |base_facts|
+// and returns one immutable effective target-facts object allocated from
+// |arena|.
+//
+// Module-internal callables inherit the target snapshot and configuration but
+// have no artifact ABI or export contract by default. An explicitly authored
+// function ABI remains authoritative. |target_name| is used only for
+// diagnostics. Returns status only for infrastructure failures; invalid user
+// IR emits diagnostics and sets |out_valid| false.
+iree_status_t loom_target_function_contract_refine_internal_facts(
+    const loom_module_t* module, const loom_func_symbol_facts_t* func_facts,
+    iree_string_view_t target_name, const loom_target_facts_t* base_facts,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    bool* out_valid, const loom_target_facts_t** out_facts);
+
 // Applies a fixed workgroup size to an already resolved HAL-kernel export plan.
 //
 // Kernel dialect code calls this after it has derived launch metadata from

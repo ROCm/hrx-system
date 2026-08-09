@@ -687,6 +687,7 @@ loom_cc_test(
     loom::error::error_defs
     loom::format::text::parser
     loom::ir
+    loom::ops::func
     loom::ops::func_symbol_facts
     loom::ops::low
     loom::ops::target
