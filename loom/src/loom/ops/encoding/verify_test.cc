@@ -125,9 +125,12 @@ static iree_status_t VerifyRequiresLayoutDefine(
   return iree_ok_status();
 }
 
+static const loom_encoding_family_descriptor_t kRequiresLayoutDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(15, "requires_layout"),
+    /*.role=*/LOOM_ENCODING_ROLE_UNKNOWN,
+};
 static const loom_encoding_vtable_t kRequiresLayoutEncodingVtable = {
-    /*.name=*/IREE_SV("requires_layout"),
-    /*.role=*/{},
+    /*.descriptor=*/&kRequiresLayoutDescriptor,
     /*.verify=*/{},
     /*.verify_define=*/VerifyRequiresLayoutDefine,
 };

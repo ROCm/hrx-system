@@ -13,6 +13,7 @@
 #include "loom/ir/scalar_type.h"
 #include "loom/ops/encoding/matrix_operand.h"
 #include "loom/ops/encoding/numeric_transform.h"
+#include "loom/ops/encoding/ops.h"
 #include "loom/ops/encoding/params.h"
 #include "loom/ops/encoding/roles.h"
 #include "loom/ops/op_defs.h"
@@ -1620,101 +1621,83 @@ static iree_status_t loom_encoding_turboquant_verify_define(
 }
 
 static const loom_encoding_vtable_t loom_encoding_dense_vtable = {
-    .name = IREE_SVL("dense"),
-    .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+    .descriptor = &loom_encoding_dense_family_descriptor,
 };
 
 static const loom_encoding_vtable_t loom_encoding_strided_vtable = {
-    .name = IREE_SVL("strided"),
-    .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+    .descriptor = &loom_encoding_strided_family_descriptor,
 };
 
 static const loom_encoding_vtable_t loom_encoding_q8_0_vtable = {
-    .name = IREE_SVL("q8_0"),
-    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .descriptor = &loom_encoding_q8_0_family_descriptor,
 };
 
 static const loom_encoding_vtable_t loom_encoding_ggml_q4_0_vtable = {
-    .name = IREE_SVL("ggml_q4_0"),
-    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .descriptor = &loom_encoding_ggml_q4_0_family_descriptor,
 };
 
 static const loom_encoding_vtable_t loom_encoding_ggml_q8_0_vtable = {
-    .name = IREE_SVL("ggml_q8_0"),
-    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .descriptor = &loom_encoding_ggml_q8_0_family_descriptor,
 };
 
 static const loom_encoding_vtable_t loom_encoding_q6_k_vtable = {
-    .name = IREE_SVL("q6_k"),
-    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .descriptor = &loom_encoding_q6_k_family_descriptor,
 };
 
 static const loom_encoding_vtable_t loom_encoding_ggml_q6_k_vtable = {
-    .name = IREE_SVL("ggml_q6_k"),
-    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .descriptor = &loom_encoding_ggml_q6_k_family_descriptor,
 };
 
 static const loom_encoding_vtable_t loom_encoding_ggml_iq_grid_vtable = {
-    .name = IREE_SVL("ggml_iq_grid"),
-    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .descriptor = &loom_encoding_ggml_iq_grid_family_descriptor,
 };
 
 static const loom_encoding_vtable_t loom_encoding_loom_fp4_table_vtable = {
-    .name = IREE_SVL("loom_fp4_table"),
-    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .descriptor = &loom_encoding_loom_fp4_table_family_descriptor,
 };
 
 static const loom_encoding_vtable_t loom_encoding_ieee_fp8_e4m3_vtable = {
-    .name = IREE_SVL("ieee_fp8_e4m3"),
-    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .descriptor = &loom_encoding_ieee_fp8_e4m3_family_descriptor,
     .verify_define = loom_encoding_named_fp8_verify_define,
 };
 
 static const loom_encoding_vtable_t loom_encoding_ieee_fp8_e5m2_vtable = {
-    .name = IREE_SVL("ieee_fp8_e5m2"),
-    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .descriptor = &loom_encoding_ieee_fp8_e5m2_family_descriptor,
     .verify_define = loom_encoding_named_fp8_verify_define,
 };
 
 static const loom_encoding_vtable_t loom_encoding_fp8_e4m3fn_vtable = {
-    .name = IREE_SVL("fp8_e4m3fn"),
-    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .descriptor = &loom_encoding_fp8_e4m3fn_family_descriptor,
     .verify_define = loom_encoding_named_fp8_verify_define,
 };
 
 static const loom_encoding_vtable_t loom_encoding_fp8_e4m3fnuz_vtable = {
-    .name = IREE_SVL("fp8_e4m3fnuz"),
-    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .descriptor = &loom_encoding_fp8_e4m3fnuz_family_descriptor,
     .verify_define = loom_encoding_named_fp8_verify_define,
 };
 
 static const loom_encoding_vtable_t loom_encoding_fp8_e5m2fnuz_vtable = {
-    .name = IREE_SVL("fp8_e5m2fnuz"),
-    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .descriptor = &loom_encoding_fp8_e5m2fnuz_family_descriptor,
     .verify_define = loom_encoding_named_fp8_verify_define,
 };
 
 static const loom_encoding_vtable_t loom_encoding_matrix_operand_vtable = {
-    .name = IREE_SVL("matrix_operand"),
-    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .descriptor = &loom_encoding_matrix_operand_family_descriptor,
     .verify_define = loom_encoding_matrix_verify_define,
 };
 
 static const loom_encoding_vtable_t loom_encoding_numeric_transform_vtable = {
-    .name = IREE_SVL("numeric_transform"),
-    .role = LOOM_ENCODING_ROLE_NUMERIC_TRANSFORM,
+    .descriptor = &loom_encoding_numeric_transform_family_descriptor,
     .verify_define = loom_encoding_numeric_transform_verify_define,
 };
 
 static const loom_encoding_vtable_t loom_encoding_orthogonal_transform_vtable =
     {
-        .name = IREE_SVL("orthogonal_transform"),
-        .role = LOOM_ENCODING_ROLE_NUMERIC_TRANSFORM,
+        .descriptor = &loom_encoding_orthogonal_transform_family_descriptor,
 };
 
 static const loom_encoding_vtable_t loom_encoding_turboquant_kv_vtable = {
-    .name = IREE_SVL("turboquant_kv"),
-    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .descriptor = &loom_encoding_turboquant_kv_family_descriptor,
     .verify_define = loom_encoding_turboquant_verify_define,
 };
 

@@ -1058,8 +1058,7 @@ static iree_status_t loom_encoding_physical_storage_verify_static(
 }
 
 static const loom_encoding_vtable_t loom_encoding_physical_storage_vtable = {
-    .name = IREE_SVL("physical_storage"),
-    .role = LOOM_ENCODING_ROLE_PHYSICAL_STORAGE,
+    .descriptor = &loom_encoding_physical_storage_family_descriptor,
     .verify = loom_encoding_physical_storage_verify_static,
     .verify_define = loom_encoding_physical_storage_verify_define,
 };

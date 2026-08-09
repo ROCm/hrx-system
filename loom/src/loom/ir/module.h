@@ -407,11 +407,10 @@ static inline const loom_encoding_t* loom_module_encoding(
   return &module->encodings.entries[encoding_id - 1];
 }
 
-// Returns the registered family vtable for |encoding_id|, or NULL if
-// |encoding_id| is out of range, the module has no context, or the encoding
-// family is not registered in that context.
+// Returns the registered family vtable for |encoding|, or NULL when the
+// encoding belongs to a permissive context with no registered families.
 const loom_encoding_vtable_t* loom_module_encoding_vtable(
-    const loom_module_t* module, uint16_t encoding_id);
+    const loom_module_t* module, const loom_encoding_t* encoding);
 
 // Interns a type in the module's type table. If a structurally identical type
 // already exists, returns the existing entry by value. Otherwise appends a new

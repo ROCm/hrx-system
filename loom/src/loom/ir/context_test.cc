@@ -23,8 +23,13 @@ class ContextTest : public ::testing::Test {
   loom_context_t context_;
 };
 
+static const loom_encoding_family_descriptor_t kQ8_0EncodingDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(4, "q8_0"),
+    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+};
+
 static const loom_encoding_vtable_t kQ8_0EncodingVtable = {
-    /*.name=*/IREE_SV("q8_0"),
+    /*.descriptor=*/&kQ8_0EncodingDescriptor,
 };
 
 TEST_F(ContextTest, FinalizeBuildsOpNameLookupTable) {
@@ -232,10 +237,18 @@ TEST_F(ContextTest, ParameterizedAttributeRegistrationRejectsWrongKind) {
 TEST_F(ContextTest, RegisterEncodingVtableAndLookupByName) {
   IREE_ASSERT_OK(
       loom_context_register_encoding_vtable(&context_, &kQ8_0EncodingVtable));
+  IREE_ASSERT_OK(loom_context_finalize(&context_));
 
-  EXPECT_EQ(loom_context_lookup_encoding_vtable(&context_, IREE_SV("q8_0")),
+  loom_encoding_family_id_t family_id =
+      loom_context_lookup_encoding_family_by_name(&context_, IREE_SV("q8_0"));
+  EXPECT_NE(family_id, LOOM_ENCODING_FAMILY_ID_INVALID);
+  EXPECT_EQ(loom_context_resolve_encoding_vtable(&context_, family_id),
             &kQ8_0EncodingVtable);
-  EXPECT_EQ(loom_context_lookup_encoding_vtable(&context_, IREE_SV("q6_k")),
+  EXPECT_EQ(
+      loom_context_lookup_encoding_family_by_name(&context_, IREE_SV("q6_k")),
+      LOOM_ENCODING_FAMILY_ID_INVALID);
+  EXPECT_EQ(loom_context_resolve_encoding_vtable(
+                &context_, LOOM_ENCODING_FAMILY_ID_INVALID),
             nullptr);
 }
 
@@ -243,8 +256,12 @@ TEST_F(ContextTest, RegisterEncodingVtableRejectsDuplicateName) {
   IREE_ASSERT_OK(
       loom_context_register_encoding_vtable(&context_, &kQ8_0EncodingVtable));
 
+  static const loom_encoding_family_descriptor_t kDuplicateDescriptor = {
+      /*.name=*/LOOM_BSTRING_REF(4, "q8_0"),
+      /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+  };
   static const loom_encoding_vtable_t kDuplicate = {
-      /*.name=*/IREE_SV("q8_0"),
+      /*.descriptor=*/&kDuplicateDescriptor,
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_ALREADY_EXISTS,
@@ -252,12 +269,31 @@ TEST_F(ContextTest, RegisterEncodingVtableRejectsDuplicateName) {
 }
 
 TEST_F(ContextTest, RegisterEncodingVtableRejectsMissingName) {
-  static const loom_encoding_vtable_t kMissingName = {};
+  static const loom_encoding_family_descriptor_t kMissingNameDescriptor = {};
+  static const loom_encoding_vtable_t kMissingName = {
+      /*.descriptor=*/&kMissingNameDescriptor,
+  };
   iree_status_t status =
       loom_context_register_encoding_vtable(&context_, &kMissingName);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, status);
   status = loom_context_register_encoding_vtable(&context_, NULL);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, status);
+}
+
+TEST_F(ContextTest, RegisterEncodingVtableRejectsMissingParameterDescriptors) {
+  static const loom_encoding_family_descriptor_t kMalformedDescriptor = {
+      /*.name=*/LOOM_BSTRING_REF(9, "malformed"),
+      /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+      /*.parameter_count=*/1,
+      /*.parameter_descriptors=*/nullptr,
+  };
+  static const loom_encoding_vtable_t kMalformedVtable = {
+      /*.descriptor=*/&kMalformedDescriptor,
+  };
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_context_register_encoding_vtable(&context_, &kMalformedVtable));
 }
 
 }  // namespace

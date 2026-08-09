@@ -178,8 +178,9 @@ iree_status_t loom_parse_static_encoding(loom_parser_t* parser,
     encoding.attributes = params_scratch->attrs;
   }
 
-  if (parser->context->encoding_vtables.count > 0 &&
-      !loom_context_lookup_encoding_vtable(parser->context, token.text)) {
+  if (parser->context->encodings.vtables.count > 0 &&
+      loom_context_lookup_encoding_family_by_name(
+          parser->context, token.text) == LOOM_ENCODING_FAMILY_ID_INVALID) {
     loom_diagnostic_param_t params[] = {
         loom_param_string(token.text),
     };

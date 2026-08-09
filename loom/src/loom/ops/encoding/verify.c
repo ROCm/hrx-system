@@ -157,7 +157,7 @@ iree_status_t loom_encoding_define_verify(const loom_module_t* module,
   }
 
   const loom_encoding_vtable_t* vtable =
-      loom_context_lookup_encoding_vtable(module->context, encoding_name);
+      loom_module_encoding_vtable(module, params.spec);
   if (vtable && vtable->verify_define) {
     IREE_RETURN_IF_ERROR(vtable->verify_define(module, op, &params, emitter));
   }

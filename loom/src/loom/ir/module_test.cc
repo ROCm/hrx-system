@@ -16,17 +16,28 @@
 namespace loom {
 namespace {
 
+static const loom_encoding_family_descriptor_t kQ8_0EncodingDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(4, "q8_0"),
+    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+};
 static const loom_encoding_vtable_t kQ8_0EncodingVtable = {
-    /*.name=*/IREE_SV("q8_0"),
+    /*.descriptor=*/&kQ8_0EncodingDescriptor,
 };
 
+static const loom_encoding_family_descriptor_t kQ6KEncodingDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(4, "q6_k"),
+    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+};
 static const loom_encoding_vtable_t kQ6KEncodingVtable = {
-    /*.name=*/IREE_SV("q6_k"),
+    /*.descriptor=*/&kQ6KEncodingDescriptor,
 };
 
-static const loom_encoding_vtable_t kDenseEncodingVtable = {
-    /*.name=*/IREE_SV("dense"),
+static const loom_encoding_family_descriptor_t kDenseEncodingDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(5, "dense"),
     /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+};
+static const loom_encoding_vtable_t kDenseEncodingVtable = {
+    /*.descriptor=*/&kDenseEncodingDescriptor,
 };
 
 class ModuleTest : public ::testing::Test {
@@ -2599,7 +2610,7 @@ TEST_F(ModuleTest, AddEncodingBasic) {
       /*.name_id=*/name_id,
       /*.alias_id=*/LOOM_STRING_ID_INVALID,
       /*.attribute_count=*/1,
-      /*.reserved=*/{},
+      /*.family=*/{},
       /*.attributes=*/&param,
   };
 
@@ -2613,6 +2624,8 @@ TEST_F(ModuleTest, AddEncodingBasic) {
   ASSERT_NE(found, nullptr);
   EXPECT_EQ(found->name_id, name_id);
   EXPECT_EQ(found->attribute_count, 1);
+  EXPECT_NE(found->family.id, LOOM_ENCODING_FAMILY_ID_INVALID);
+  EXPECT_EQ(loom_module_encoding_vtable(module, found), &kQ8_0EncodingVtable);
   EXPECT_EQ(found->attributes[0].name_id, block_id);
   EXPECT_EQ(found->attributes[0].value.i64, 32);
 
@@ -2672,14 +2685,14 @@ TEST_F(ModuleTest, AddEncodingDedupStructuralParamsAndBackfillsAlias) {
       /*.name_id=*/name_id,
       /*.alias_id=*/LOOM_STRING_ID_INVALID,
       /*.attribute_count=*/1,
-      /*.reserved=*/{},
+      /*.family=*/{},
       /*.attributes=*/attrs_a,
   };
   loom_encoding_t aliased = {
       /*.name_id=*/name_id,
       /*.alias_id=*/alias_id,
       /*.attribute_count=*/1,
-      /*.reserved=*/{},       /*.attributes=*/attrs_b,
+      /*.family=*/{},         /*.attributes=*/attrs_b,
   };
 
   uint16_t plain_id = 0;
@@ -2757,14 +2770,14 @@ TEST_F(ModuleTest, AddEncodingDifferentParams) {
       /*.name_id=*/name_id,
       /*.alias_id=*/LOOM_STRING_ID_INVALID,
       /*.attribute_count=*/1,
-      /*.reserved=*/{},
+      /*.family=*/{},
       /*.attributes=*/&param32,
   };
   loom_encoding_t enc64 = {
       /*.name_id=*/name_id,
       /*.alias_id=*/LOOM_STRING_ID_INVALID,
       /*.attribute_count=*/1,
-      /*.reserved=*/{},
+      /*.family=*/{},
       /*.attributes=*/&param64,
   };
 
@@ -2812,7 +2825,8 @@ TEST_F(ModuleTest, EncodingVtableLookupReturnsRegisteredFamily) {
   uint16_t encoding_id = 0;
   IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &encoding_id));
 
-  EXPECT_EQ(loom_module_encoding_vtable(module, encoding_id),
+  EXPECT_EQ(loom_module_encoding_vtable(
+                module, loom_module_encoding(module, encoding_id)),
             &kQ8_0EncodingVtable);
 
   loom_module_free(module);
@@ -2825,9 +2839,6 @@ TEST_F(ModuleTest, EncodingLookupOutOfRange) {
   EXPECT_EQ(loom_module_encoding(module, 0), nullptr);
   EXPECT_EQ(loom_module_encoding(module, 1), nullptr);
   EXPECT_EQ(loom_module_encoding(module, UINT16_MAX), nullptr);
-  EXPECT_EQ(loom_module_encoding_vtable(module, 0), nullptr);
-  EXPECT_EQ(loom_module_encoding_vtable(module, 1), nullptr);
-  EXPECT_EQ(loom_module_encoding_vtable(module, UINT16_MAX), nullptr);
   loom_module_free(module);
 }
 

@@ -111,17 +111,44 @@ typedef struct loom_parameterized_attr_name_table_t {
   uint32_t count;
 } loom_parameterized_attr_name_table_t;
 
+// Entry in the finalized encoding family-name lookup table.
+typedef struct loom_encoding_family_name_entry_t {
+  // Borrowed public family name from the generated descriptor.
+  iree_string_view_t name;
+  // Dense one-based identity in the context encoding registry.
+  loom_encoding_family_id_t family_id;
+} loom_encoding_family_name_entry_t;
+
+// Finalized encoding family-name hash table used at format and module
+// construction boundaries.
+typedef struct loom_encoding_family_name_table_t {
+  // Allocated open-addressed entries.
+  loom_encoding_family_name_entry_t* entries;
+  // Power-of-two entry capacity, or zero when no families are registered.
+  uint32_t capacity;
+  // Number of occupied entries.
+  uint32_t count;
+} loom_encoding_family_name_table_t;
+
+// Immutable encoding family registry after context finalization.
+typedef struct loom_encoding_registry_t {
+  // Dense vtable list indexed by one-based family identity.
+  loom_encoding_vtable_list_t vtables;
+  // Public family spelling to dense identity lookup table.
+  loom_encoding_family_name_table_t names;
+} loom_encoding_registry_t;
+
 // The global context: vtables, allocator, and shared language registries.
 //
 // Created once at startup, shared across all modules and threads.
-// Dialect/op lookup state is immutable after finalization.
+// Registry and lookup state is immutable after finalization.
 //
 // Lifetime: the context must outlive all modules created from it.
 struct loom_context_t {
   iree_allocator_t allocator;
 
-  // Context-owned encoding vtables.
-  loom_encoding_vtable_list_t encoding_vtables;
+  // Context-owned encoding family registry.
+  loom_encoding_registry_t encodings;
 
   // Op vtable registry: two-level lookup by dialect_id then op_index.
   loom_op_vtable_registry_t op_vtables;
@@ -181,16 +208,16 @@ iree_status_t loom_context_register_parameterized_attrs(
 
 // Registers one encoding family vtable with the context.
 //
-// `vtable->name` must be non-empty and stable for the context lifetime
-// (usually static storage). Family names are unique; duplicate registration
-// returns ALREADY_EXISTS. Runtime callbacks may be NULL if the family only
-// needs parser/verifier visibility for now.
+// `vtable->descriptor` and its family name must be non-empty and stable for the
+// context lifetime (usually static storage). Family names are unique; duplicate
+// registration returns ALREADY_EXISTS. Runtime callbacks may be NULL if the
+// family only needs parser/verifier visibility for now.
 iree_status_t loom_context_register_encoding_vtable(
     loom_context_t* context, const loom_encoding_vtable_t* vtable);
 
-// Finalizes the context after dialect registration and encoding-table setup.
-// Builds acceleration structures for fast op name lookup. Must be called
-// before creating modules or parsing.
+// Finalizes the context after dialect and encoding registration. Builds the
+// immutable name indexes used by parsing and module construction. Must be
+// called before creating modules or parsing.
 iree_status_t loom_context_finalize(loom_context_t* context);
 
 // Resolves an op kind to its vtable. Returns NULL if the dialect is
@@ -223,9 +250,16 @@ loom_context_lookup_parameterized_attr_by_name(const loom_context_t* context,
                                                iree_string_view_t name);
 
 // Looks up an encoding family by its bare name (`q8_0`, `dense`, ...).
-// Returns NULL when no matching family has been registered.
-const loom_encoding_vtable_t* loom_context_lookup_encoding_vtable(
+// Returns LOOM_ENCODING_FAMILY_ID_INVALID when no matching family is
+// registered. The context must be finalized.
+loom_encoding_family_id_t loom_context_lookup_encoding_family_by_name(
     const loom_context_t* context, iree_string_view_t name);
+
+// Resolves a dense context-local encoding family identity to its vtable.
+// |family_id| must be the invalid sentinel or an identity returned by this
+// context. Returns NULL for the invalid sentinel.
+const loom_encoding_vtable_t* loom_context_resolve_encoding_vtable(
+    const loom_context_t* context, loom_encoding_family_id_t family_id);
 
 //===----------------------------------------------------------------------===//
 // Op convenience accessors

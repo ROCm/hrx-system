@@ -327,7 +327,7 @@ TEST_F(RemapTest, RemapsStaticEncodingDependenciesAcrossModules) {
       /*.name_id=*/source_family_id,
       /*.alias_id=*/LOOM_STRING_ID_INVALID,
       /*.attribute_count=*/IREE_ARRAYSIZE(source_attrs),
-      /*.reserved=*/{},
+      /*.family=*/{},
       /*.attributes=*/source_attrs,
   };
   uint16_t source_encoding_id = 0;
@@ -363,7 +363,7 @@ TEST_F(RemapTest, RemapsOverflowDimsAndEncodingBeforeInterning) {
       /*.name_id=*/source_family_id,
       /*.alias_id=*/LOOM_STRING_ID_INVALID,
       /*.attribute_count=*/0,
-      /*.reserved=*/{},
+      /*.family=*/{},
       /*.attributes=*/NULL,
   };
   uint16_t source_encoding_id = 0;
@@ -377,7 +377,7 @@ TEST_F(RemapTest, RemapsOverflowDimsAndEncodingBeforeInterning) {
       /*.name_id=*/target_dummy_family_id,
       /*.alias_id=*/LOOM_STRING_ID_INVALID,
       /*.attribute_count=*/0,
-      /*.reserved=*/{},
+      /*.family=*/{},
       /*.attributes=*/NULL,
   };
   uint16_t target_dummy_encoding_id = 0;
@@ -441,7 +441,7 @@ TEST_F(RemapTest, RejectsDeepStaticEncodingNesting) {
         /*.name_id=*/family_id,
         /*.alias_id=*/LOOM_STRING_ID_INVALID,
         /*.attribute_count=*/attribute_count,
-        /*.reserved=*/{},
+        /*.family=*/{},
         /*.attributes=*/attribute_count == 0 ? nullptr : attrs,
     };
     IREE_ASSERT_OK(

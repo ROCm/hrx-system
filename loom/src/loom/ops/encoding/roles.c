@@ -32,11 +32,10 @@ loom_encoding_role_t loom_encoding_static_role(
     return LOOM_ENCODING_ROLE_UNKNOWN;
   }
 
-  iree_string_view_t name = module->strings.entries[encoding->name_id];
   const loom_encoding_vtable_t* vtable =
-      loom_context_lookup_encoding_vtable(module->context, name);
-  if (vtable && vtable->role != LOOM_ENCODING_ROLE_UNKNOWN) {
-    return vtable->role;
+      loom_module_encoding_vtable(module, encoding);
+  if (vtable && vtable->descriptor->role != LOOM_ENCODING_ROLE_UNKNOWN) {
+    return vtable->descriptor->role;
   }
 
   return LOOM_ENCODING_ROLE_STORAGE_SCHEMA;

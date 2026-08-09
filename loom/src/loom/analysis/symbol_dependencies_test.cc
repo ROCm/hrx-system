@@ -401,7 +401,7 @@ TEST_F(SymbolDependenciesTest, TypeAndEncodingRefsUseOneTable) {
       /*.name_id=*/encoding_name_id,
       /*.alias_id=*/{},
       /*.attribute_count=*/IREE_ARRAYSIZE(encoding_attrs),
-      /*.reserved=*/{},
+      /*.family=*/{},
       /*.attributes=*/encoding_attrs,
   };
   uint16_t encoding_id = 0;

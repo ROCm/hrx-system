@@ -80,7 +80,7 @@ class VectorMemoryTest : public ::testing::Test {
         /*.name_id=*/name_id,
         /*.alias_id=*/LOOM_STRING_ID_INVALID,
         /*.attribute_count=*/attribute_count,
-        /*.reserved=*/{},
+        /*.family=*/{},
         /*.attributes=*/attributes,
     };
     uint16_t encoding_id = 0;

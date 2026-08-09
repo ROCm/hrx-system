@@ -35,23 +35,42 @@ typedef struct loom_module_t loom_module_t;
 typedef struct loom_encoding_define_param_view_t
     loom_encoding_define_param_view_t;
 
+// Context-local identity for a registered encoding family. IDs are dense and
+// one-based so zero can represent an unregistered family in permissive
+// contexts. This value never serializes.
+typedef uint16_t loom_encoding_family_id_t;
+
+#define LOOM_ENCODING_FAMILY_ID_INVALID ((loom_encoding_family_id_t)0)
+
 // A single static encoding instance, such as `#q8_0<block=32>`.
 //
 // The encoding family name and optional file-local alias are interned string
 // IDs in the owning module. Parameters are named attributes so families can
 // carry structured values such as integers, strings, arrays, and dicts.
 struct loom_encoding_t {
+  // Interned public family name in the owning module.
   loom_string_id_t name_id;
   // File-local alias spelling without '#', or LOOM_STRING_ID_INVALID when no
   // alias should be preferred for printing.
   loom_string_id_t alias_id;
+  // Number of canonical sparse entries in |attributes|.
   uint8_t attribute_count;
-  uint8_t reserved[3];
+  // Context-local family binding derived during module construction.
+  struct {
+    // Dense one-based identity in the owning context's encoding registry.
+    // This never participates in structural identity or serialization.
+    loom_encoding_family_id_t id;
+    // Reserved for compact family metadata.
+    uint8_t reserved;
+  } family;
   // Arena-owned canonical parameter array. NULL when attribute_count is 0.
   const loom_named_attr_t* attributes;
 };
 
 typedef struct loom_encoding_t loom_encoding_t;
+
+static_assert(sizeof(loom_encoding_t) == 24,
+              "loom_encoding_t must remain 24 bytes");
 
 // Generated structural metadata for one registered encoding family.
 typedef struct loom_encoding_family_descriptor_t {
@@ -84,11 +103,8 @@ typedef struct loom_encoding_table_t {
 // encode/decode. Text and bytecode syntax are generic named attrs, so
 // parsing/printing do not go through the family vtable.
 typedef struct loom_encoding_vtable_t {
-  // Encoding family name for lookup and printing, without a leading '#'.
-  iree_string_view_t name;
-
-  // Semantic role for this family. Leave UNKNOWN for unconstrained families.
-  loom_encoding_role_t role;
+  // Generated family schema. Required and process-lifetime stable.
+  const loom_encoding_family_descriptor_t* descriptor;
 
   // Verifies that `encoding` carries a valid parameter set for this family.
   // May be NULL when the family accepts any canonical named attrs.

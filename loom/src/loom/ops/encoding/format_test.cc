@@ -27,12 +27,20 @@ using ::loom::testing::DiagnosticCapture;
 using ::loom::testing::ExpectError;
 using ::loom::testing::GetStringParam;
 
+static const loom_encoding_family_descriptor_t kQ8_0EncodingDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(4, "q8_0"),
+    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+};
 static const loom_encoding_vtable_t kQ8_0EncodingVtable = {
-    /*.name=*/IREE_SV("q8_0"),
+    /*.descriptor=*/&kQ8_0EncodingDescriptor,
 };
 
+static const loom_encoding_family_descriptor_t kQuantizationDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(12, "quantization"),
+    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+};
 static const loom_encoding_vtable_t kQuantizationEncodingVtable = {
-    /*.name=*/IREE_SV("quantization"),
+    /*.descriptor=*/&kQuantizationDescriptor,
 };
 
 class EncodingFormatTest : public ::testing::Test {

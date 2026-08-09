@@ -1031,8 +1031,9 @@ static iree_status_t loom_parse_module_body(loom_parser_t* parser) {
       if (loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_EQUALS)) {
         uint32_t errors_before = parser->error_count;
 
-        if (loom_context_lookup_encoding_vtable(parser->context,
-                                                alias_token.text) ||
+        if (loom_context_lookup_encoding_family_by_name(parser->context,
+                                                        alias_token.text) !=
+                LOOM_ENCODING_FAMILY_ID_INVALID ||
             loom_context_lookup_parameterized_attr_by_name(parser->context,
                                                            alias_token.text)) {
           loom_diagnostic_param_t params[] = {

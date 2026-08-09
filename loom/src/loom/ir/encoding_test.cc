@@ -29,14 +29,16 @@ TEST(EncodingTest, EqualIgnoresAliasAndComparesArrayContents) {
       /*.name_id=*/42,
       /*.alias_id=*/100,
       /*.attribute_count=*/1,
-      /*.reserved=*/{},       /*.attributes=*/attrs_a,
+      /*.family=*/{},         /*.attributes=*/attrs_a,
   };
   loom_encoding_t q8_b = {
       /*.name_id=*/42,
       /*.alias_id=*/200,
       /*.attribute_count=*/1,
-      /*.reserved=*/{},       /*.attributes=*/attrs_b,
+      /*.family=*/{},         /*.attributes=*/attrs_b,
   };
+  q8_a.family.id = 1;
+  q8_b.family.id = 2;
 
   EXPECT_TRUE(loom_encoding_equal(&q8_a, &q8_b));
   EXPECT_EQ(loom_encoding_hash(&q8_a), loom_encoding_hash(&q8_b));
@@ -58,14 +60,14 @@ TEST(EncodingTest, NotEqualForDifferentParams) {
       /*.name_id=*/42,
       /*.alias_id=*/LOOM_STRING_ID_INVALID,
       /*.attribute_count=*/1,
-      /*.reserved=*/{},
+      /*.family=*/{},
       /*.attributes=*/attrs_a,
   };
   loom_encoding_t q8_b = {
       /*.name_id=*/42,
       /*.alias_id=*/LOOM_STRING_ID_INVALID,
       /*.attribute_count=*/1,
-      /*.reserved=*/{},
+      /*.family=*/{},
       /*.attributes=*/attrs_b,
   };
 
@@ -77,7 +79,7 @@ TEST(EncodingTest, AttrsEmptySliceForNoParams) {
       /*.name_id=*/42,
       /*.alias_id=*/LOOM_STRING_ID_INVALID,
       /*.attribute_count=*/0,
-      /*.reserved=*/{},
+      /*.family=*/{},
       /*.attributes=*/NULL,
   };
 

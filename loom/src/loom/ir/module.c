@@ -690,12 +690,14 @@ iree_status_t loom_module_add_encoding(loom_module_t* module,
       .name_id = encoding->name_id,
       .alias_id = encoding->alias_id,
       .attribute_count = canonical_attr_dict.count,
+      .family.id = loom_context_lookup_encoding_family_by_name(module->context,
+                                                               encoding_name),
       .attributes = canonical_attr_dict.dict_entries,
   };
 
-  const loom_encoding_vtable_t* vtable =
-      loom_context_lookup_encoding_vtable(module->context, encoding_name);
-  if (!vtable && module->context->encoding_vtables.count > 0) {
+  const loom_encoding_vtable_t* vtable = loom_context_resolve_encoding_vtable(
+      module->context, canonical_encoding.family.id);
+  if (!vtable && module->context->encodings.vtables.count > 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unknown encoding family '%.*s'",
                             (int)encoding_name.size, encoding_name.data);
@@ -749,11 +751,7 @@ iree_status_t loom_module_add_encoding(loom_module_t* module,
       loom_encoding_table_ensure_capacity(&module->arena, &module->encodings));
 
   loom_encoding_t* entry = &module->encodings.entries[module->encodings.count];
-  memset(entry, 0, sizeof(*entry));
-  entry->name_id = canonical_encoding.name_id;
-  entry->alias_id = canonical_encoding.alias_id;
-  entry->attribute_count = canonical_encoding.attribute_count;
-  entry->attributes = canonical_encoding.attributes;
+  *entry = canonical_encoding;
 
   *out_encoding_id = (uint16_t)(module->encodings.count + 1);
   ++module->encodings.count;
@@ -761,12 +759,9 @@ iree_status_t loom_module_add_encoding(loom_module_t* module,
 }
 
 const loom_encoding_vtable_t* loom_module_encoding_vtable(
-    const loom_module_t* module, uint16_t encoding_id) {
-  if (!module || !module->context) return NULL;
-  const loom_encoding_t* encoding = loom_module_encoding(module, encoding_id);
-  if (!encoding || encoding->name_id >= module->strings.count) return NULL;
-  return loom_context_lookup_encoding_vtable(
-      module->context, module->strings.entries[encoding->name_id]);
+    const loom_module_t* module, const loom_encoding_t* encoding) {
+  return loom_context_resolve_encoding_vtable(module->context,
+                                              encoding->family.id);
 }
 
 //===----------------------------------------------------------------------===//
