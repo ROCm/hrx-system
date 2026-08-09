@@ -12,6 +12,7 @@
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/vector/ops.h"
+#include "loom/util/numeric_format.h"
 
 //===----------------------------------------------------------------------===//
 // Schema support
@@ -30,68 +31,6 @@ static bool loom_vector_to_scalar_one_of_flags_are_supported(
 static bool loom_vector_to_scalar_bitset_flags_are_supported(
     uint64_t flags, uint64_t supported) {
   return (flags & ~supported) == 0;
-}
-
-static bool loom_vector_to_scalar_numeric_format_to_scalar_type(
-    loom_value_fact_numeric_format_flags_t format,
-    loom_scalar_type_t* out_scalar_type) {
-  switch (format) {
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F64:
-      *out_scalar_type = LOOM_SCALAR_TYPE_F64;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F32:
-      *out_scalar_type = LOOM_SCALAR_TYPE_F32;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F16:
-      *out_scalar_type = LOOM_SCALAR_TYPE_F16;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_BF16:
-      *out_scalar_type = LOOM_SCALAR_TYPE_BF16;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ:
-      *out_scalar_type = LOOM_SCALAR_TYPE_F8E4M3;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ:
-      *out_scalar_type = LOOM_SCALAR_TYPE_F8E5M2;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_I32:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_U32:
-      *out_scalar_type = LOOM_SCALAR_TYPE_I32;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_I16:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_U16:
-      *out_scalar_type = LOOM_SCALAR_TYPE_I16;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_I8:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_U8:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I8:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_CODEBOOK_INDEX:
-      *out_scalar_type = LOOM_SCALAR_TYPE_I8;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_I1:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_U1:
-      *out_scalar_type = LOOM_SCALAR_TYPE_I1;
-      return true;
-    default:
-      return false;
-  }
-}
-
-static bool loom_vector_to_scalar_numeric_format_is_unsigned(
-    loom_value_fact_numeric_format_flags_t format) {
-  switch (format) {
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_U32:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_U16:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_U8:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_U1:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_CODEBOOK_INDEX:
-      return true;
-    default:
-      return false;
-  }
 }
 
 static bool loom_vector_to_scalar_encoded_schema_uses_codebook(
@@ -288,8 +227,7 @@ static bool loom_vector_to_scalar_encoded_auxiliary_matches_format(
     loom_vector_encoding_auxiliary_key_t key,
     loom_value_fact_numeric_format_flags_t format, loom_type_t result_type) {
   loom_scalar_type_t expected_scalar_type = 0;
-  if (!loom_vector_to_scalar_numeric_format_to_scalar_type(
-          format, &expected_scalar_type)) {
+  if (!loom_numeric_format_direct_scalar_type(format, &expected_scalar_type)) {
     return false;
   }
   loom_type_t lane_type = {0};
@@ -329,8 +267,8 @@ static bool loom_vector_to_scalar_encoded_raw_lane_type_matches(
     loom_value_fact_encoded_operand_schema_t schema,
     loom_type_t raw_lane_type) {
   loom_scalar_type_t expected_scalar_type = 0;
-  if (!loom_vector_to_scalar_numeric_format_to_scalar_type(
-          schema.element_format, &expected_scalar_type)) {
+  if (!loom_numeric_format_direct_scalar_type(schema.element_format,
+                                              &expected_scalar_type)) {
     return false;
   }
   return loom_type_element_type(raw_lane_type) == expected_scalar_type;
@@ -600,7 +538,7 @@ static iree_status_t loom_vector_to_scalar_encoded_raw_value_lane(
   }
   return loom_vector_to_scalar_cast_numeric_lane(
       state, raw_lane, raw_lane_type, result_type,
-      loom_vector_to_scalar_numeric_format_is_unsigned(
+      loom_numeric_format_uses_unsigned_integer_semantics(
           operand->schema.element_format),
       out_lane);
 }
@@ -651,7 +589,7 @@ static iree_status_t loom_vector_to_scalar_encoded_apply_affine(
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_encoded_affine_operand_lane(
         state, operand, LOOM_VECTOR_ENCODING_AUXILIARY_KEY_ZERO_POINT,
         scale_index, result_type,
-        loom_vector_to_scalar_numeric_format_is_unsigned(
+        loom_numeric_format_uses_unsigned_integer_semantics(
             operand->schema.element_format),
         &zero_point));
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_scalar_binary(
