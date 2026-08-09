@@ -2,6 +2,98 @@
   "version": 1,
   "cases": [
     {
+      "name": "executes exact E4M3 FP8 encode matrix",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/fp8_bidirectional_encode_e4m3.loom",
+          "--device=amdgpu",
+          "--config=fp8_bidirectional_encode.row_capacity=65536"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            "\"case_count\":18",
+            "\"sample_count\":27",
+            "\"failed_sample_count\":0",
+            "\"skipped_case_count\":0",
+            "\"planning_issue_count\":0"
+          ]
+        }
+      }
+    },
+    {
+      "name": "executes exact E5M2 FP8 encode matrix",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/fp8_bidirectional_encode_e5m2.loom",
+          "--device=amdgpu",
+          "--config=fp8_bidirectional_encode.row_capacity=65536"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            "\"case_count\":12",
+            "\"sample_count\":18",
+            "\"failed_sample_count\":0",
+            "\"skipped_case_count\":0",
+            "\"planning_issue_count\":0"
+          ]
+        }
+      }
+    },
+    {
+      "name": "executes exact E4M3 FP8 decode matrix",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/fp8_bidirectional_decode_e4m3.loom",
+          "--device=amdgpu",
+          "--config=fp8_bidirectional_decode.row_capacity=65536"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            "\"case_count\":18",
+            "\"sample_count\":27",
+            "\"failed_sample_count\":0",
+            "\"skipped_case_count\":0",
+            "\"planning_issue_count\":0"
+          ]
+        }
+      }
+    },
+    {
+      "name": "executes exact E5M2 FP8 decode matrix",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/fp8_bidirectional_decode_e5m2.loom",
+          "--device=amdgpu",
+          "--config=fp8_bidirectional_decode.row_capacity=65536"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            "\"case_count\":12",
+            "\"sample_count\":18",
+            "\"failed_sample_count\":0",
+            "\"skipped_case_count\":0",
+            "\"planning_issue_count\":0"
+          ]
+        }
+      }
+    },
+    {
       "name": "executes exact FP8 encoding cases",
       "run": {
         "tool": "iree-test-loom",

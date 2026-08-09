@@ -136,6 +136,10 @@ iree_execution_test_suite(
 iree_execution_test_suite(
     name = "numeric_conversion_execution_test",
     data = [
+        "fp8_bidirectional_decode_e4m3.loom",
+        "fp8_bidirectional_decode_e5m2.loom",
+        "fp8_bidirectional_encode_e4m3.loom",
+        "fp8_bidirectional_encode_e5m2.loom",
         "fp8_encode.loom",
         "mxfp4_decode_bf16.loom",
     ],

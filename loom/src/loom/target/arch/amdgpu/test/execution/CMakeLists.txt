@@ -252,6 +252,10 @@ iree_execution_test_suite(
   TOOLS
     "iree-test-loom=loom::tools::iree-test-loom"
   DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amdgpu/test/execution/fp8_bidirectional_decode_e4m3.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amdgpu/test/execution/fp8_bidirectional_decode_e5m2.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amdgpu/test/execution/fp8_bidirectional_encode_e4m3.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amdgpu/test/execution/fp8_bidirectional_encode_e5m2.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amdgpu/test/execution/fp8_encode.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amdgpu/test/execution/mxfp4_decode_bf16.loom"
   LABELS
