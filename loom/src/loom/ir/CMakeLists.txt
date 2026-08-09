@@ -96,6 +96,18 @@ loom_cc_library(
 
 loom_cc_test(
   NAME
+    function_version_test
+  SRCS
+    "function_version_test.cc"
+  DEPS
+    ::ir
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
     type_refinement_test
   SRCS
     "type_refinement_test.cc"

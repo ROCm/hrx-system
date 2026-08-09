@@ -99,6 +99,17 @@ loom_cc_library(
 )
 
 loom_cc_test(
+    name = "function_version_test",
+    srcs = ["function_version_test.cc"],
+    deps = [
+        ":ir",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "type_refinement_test",
     srcs = ["type_refinement_test.cc"],
     deps = [
