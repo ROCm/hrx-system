@@ -203,10 +203,8 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             f"${{CMAKE_CURRENT_BINARY_DIR}}/{output}"
         )
         name_block = self._convert_string_arg_block("NAME", name, quote=False)
-        srcs_block = self._convert_string_list_block("SRCS", srcs, sort=False)
-        libraries_block = self._convert_string_list_block(
-            "LIBRARIES", libraries, sort=False
-        )
+        srcs_block = self._convert_loom_module_inputs("SRCS", srcs)
+        libraries_block = self._convert_loom_module_inputs("LIBRARIES", libraries)
         roots_block = self._convert_string_list_block("ROOTS", roots, sort=False)
         configs_block = self._convert_string_list_block("CONFIGS", configs, sort=False)
         mode_block = self._convert_string_arg_block("MODE", mode)
@@ -238,6 +236,22 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             f")\n\n"
         )
         self._emit_platform_guard_end(target_compatible_with)
+
+    def _convert_loom_module_inputs(self, block_name, inputs):
+        if inputs is None:
+            return ""
+        converted_inputs = []
+        for input_value in inputs:
+            if input_value.startswith(":") or input_value.startswith("//"):
+                if self._is_source_data_label(input_value):
+                    converted_inputs.append(
+                        self._cmake_source_location_path(input_value)
+                    )
+                else:
+                    converted_inputs.append(self._convert_single_target(input_value))
+            else:
+                converted_inputs.append(input_value)
+        return self._convert_string_list_block(block_name, converted_inputs, sort=False)
 
     def loom_amdgpu_target_selectors_flag(self, **kwargs):
         return None

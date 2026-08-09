@@ -28,6 +28,7 @@ def loom_link_module(
         strip_check = False,
         require_resolved_config = False,
         tags = [],
+        target_compatible_with = [],
         visibility = None):
     """Links Loom modules into one text or bytecode module.
 
@@ -44,6 +45,8 @@ def loom_link_module(
       strip_check: Whether check.case and check.benchmark symbols are removed.
       require_resolved_config: Whether unresolved config.decl symbols fail.
       tags: Additional tags for the generator action.
+      target_compatible_with: Optional compatibility constraints for the
+        generated module.
       visibility: Visibility of the generated module target.
     """
     if not srcs:
@@ -72,6 +75,7 @@ def loom_link_module(
 
     rule_kwargs = {
         "tags": tags + ["skip-bazel_to_cmake"],
+        "target_compatible_with": target_compatible_with,
     }
     if visibility != None:
         rule_kwargs["visibility"] = visibility

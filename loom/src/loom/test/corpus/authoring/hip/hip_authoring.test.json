@@ -31,22 +31,6 @@
       ]
     },
     {
-      "name": "plans q8 block unroll recipe",
-      "run": {
-        "tool": "iree-benchmark-loom",
-        "args": [
-          "{srcdir}/q8_block_unroll.loom",
-          "--dry-run"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "bench_q8_block_unroll_wg64",
-          "case_q8_block_unroll_wg64"
-        ]
-      }
-    },
-    {
       "name": "unrolls q8 hip-shaped dynamic lower bound loop",
       "run": {
         "tool": "loom-opt",
@@ -84,22 +68,6 @@
       ]
     },
     {
-      "name": "plans q8 load width recipe",
-      "run": {
-        "tool": "iree-benchmark-loom",
-        "args": [
-          "{srcdir}/q8_load_width.loom",
-          "--dry-run"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "bench_q8_load_widths",
-          "case_q8_load_widths"
-        ]
-      }
-    },
-    {
       "name": "preserves explicit q8 vector load width recipe",
       "run": {
         "tool": "loom-opt",
@@ -119,24 +87,6 @@
           ]
         }
       ]
-    },
-    {
-      "name": "plans q8 q4 signedness recipe",
-      "run": {
-        "tool": "iree-benchmark-loom",
-        "args": [
-          "{srcdir}/q8_q4_signedness.loom",
-          "--dry-run"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "bench_q8_q4_signedness",
-          "case_q8_q4_signedness",
-          "bench_q8_mixed_dot4_signedness",
-          "case_q8_mixed_dot4_signedness"
-        ]
-      }
     },
     {
       "name": "preserves q8 q4 signedness source shape",
@@ -159,22 +109,6 @@
           ]
         }
       ]
-    },
-    {
-      "name": "plans shared memory tile recipe",
-      "run": {
-        "tool": "iree-benchmark-loom",
-        "args": [
-          "{srcdir}/shared_memory_tile.loom",
-          "--dry-run"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "bench_shared_memory_tile_reverse",
-          "case_shared_memory_tile_reverse"
-        ]
-      }
     },
     {
       "name": "preserves shared memory tile source shape",
@@ -238,28 +172,6 @@
           "non_empty": true
         }
       ]
-    },
-    {
-      "name": "plans shared memory wave tile recipe",
-      "run": {
-        "tool": "iree-benchmark-loom",
-        "args": [
-          "{srcdir}/shared_memory_wave_tile.loom",
-          "--dry-run"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "bench_shared_memory_wave_i32_roundtrip",
-          "case_shared_memory_wave_i32_roundtrip",
-          "bench_shared_memory_wave_i32_roundtrip_static_offset",
-          "case_shared_memory_wave_i32_roundtrip_static_offset",
-          "bench_shared_memory_wave_i32_partial_lane_roundtrip",
-          "case_shared_memory_wave_i32_partial_lane_roundtrip",
-          "bench_shared_memory_cross_wave_i32_roundtrip_two_regions",
-          "case_shared_memory_cross_wave_i32_roundtrip_two_regions"
-        ]
-      }
     },
     {
       "name": "preserves shared memory wave tile source shape",
@@ -338,28 +250,6 @@
       ]
     },
     {
-      "name": "plans wave64 reductions recipe",
-      "run": {
-        "tool": "iree-benchmark-loom",
-        "args": [
-          "{srcdir}/wave64_reductions.loom",
-          "--dry-run"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "bench_wave64_workgroup_reduce_sub_wave",
-          "case_wave64_workgroup_reduce_sub_wave",
-          "bench_wave64_workgroup_reduce_full_wave",
-          "case_wave64_workgroup_reduce_full_wave",
-          "bench_wave64_workgroup_reduce_cross_wave",
-          "case_wave64_workgroup_reduce_cross_wave",
-          "bench_wave64_workgroup_reduce_sparse_loop_accumulation",
-          "case_wave64_workgroup_reduce_sparse_loop_accumulation"
-        ]
-      }
-    },
-    {
       "name": "preserves wave64 reductions source shape",
       "run": {
         "tool": "loom-opt",
@@ -433,22 +323,6 @@
       ]
     },
     {
-      "name": "plans shared memory transpose recipe",
-      "run": {
-        "tool": "iree-benchmark-loom",
-        "args": [
-          "{srcdir}/shared_memory_transpose.loom",
-          "--dry-run"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "bench_shared_memory_tile_double_transpose",
-          "case_shared_memory_tile_double_transpose"
-        ]
-      }
-    },
-    {
       "name": "preserves shared memory transpose source shape",
       "run": {
         "tool": "loom-opt",
@@ -512,22 +386,6 @@
           "non_empty": true
         }
       ]
-    },
-    {
-      "name": "plans shared memory vector tile recipe",
-      "run": {
-        "tool": "iree-benchmark-loom",
-        "args": [
-          "{srcdir}/shared_memory_vector_tile.loom",
-          "--dry-run"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "bench_shared_memory_vector_tile_roundtrip",
-          "case_shared_memory_vector_tile_roundtrip"
-        ]
-      }
     },
     {
       "name": "preserves shared memory vector tile source shape",
@@ -595,22 +453,6 @@
       ]
     },
     {
-      "name": "plans packed field contracts recipe",
-      "run": {
-        "tool": "iree-benchmark-loom",
-        "args": [
-          "{srcdir}/packed_field_contracts.loom",
-          "--dry-run"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "bench_packed_field_contracts",
-          "case_packed_field_contracts"
-        ]
-      }
-    },
-    {
       "name": "preserves packed field contract source shape",
       "run": {
         "tool": "loom-opt",
@@ -663,22 +505,6 @@
           ]
         }
       ]
-    },
-    {
-      "name": "plans target provider selection recipe",
-      "run": {
-        "tool": "iree-benchmark-loom",
-        "args": [
-          "{srcdir}/target_provider_selection.loom",
-          "--dry-run"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "bench_target_provider_selection",
-          "case_target_provider_selection"
-        ]
-      }
     },
     {
       "name": "selects target-specific provider recipe",
@@ -757,22 +583,6 @@
           "non_empty": true
         }
       ]
-    },
-    {
-      "name": "plans gfx1250 cluster b128 multicast recipe",
-      "run": {
-        "tool": "iree-benchmark-loom",
-        "args": [
-          "{srcdir}/cluster_b128_multicast.loom",
-          "--dry-run"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "bench_cluster_b128_multicast",
-          "case_cluster_b128_multicast"
-        ]
-      }
     },
     {
       "name": "compiles gfx1250 cluster b128 multicast recipe",

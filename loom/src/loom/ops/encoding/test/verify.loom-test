@@ -88,7 +88,7 @@ func.def @assume_spec_rejects_mismatched_ggml_q8_storage(%schema: encoding<schem
 // ====
 
 func.def @assume_spec_rejects_bad_named_fp8_rounding(%schema: encoding<schema>) {
-  // ERROR@+1: ENCODING/013 "fp8_e4m3fn" "rounding" "wat"
+  // ERROR@+1: PARSE/017 "rounding" "wat"
   %bad = encoding.assume.spec %schema, #fp8_e4m3fn<rounding=wat> : encoding<schema>
   func.return
 }
@@ -96,7 +96,7 @@ func.def @assume_spec_rejects_bad_named_fp8_rounding(%schema: encoding<schema>) 
 // ====
 
 func.def @assume_spec_rejects_bad_matrix_operand_format(%schema: encoding<schema>) {
-  // ERROR@+1: ENCODING/013 "matrix_operand" "element_format" "wat"
+  // ERROR@+1: PARSE/017 "element_format" "wat"
   %bad = encoding.assume.spec %schema, #matrix_operand<element_format=wat, payload_elements=32, payload_registers=6> : encoding<schema>
   func.return
 }
@@ -157,7 +157,7 @@ func.def @named_fp8_schema_unsupported_param() {
 // ====
 
 func.def @named_fp8_schema_bad_rounding() {
-  // ERROR@+1: ENCODING/013 "fp8_e4m3fn" "rounding" "wat"
+  // ERROR@+1: PARSE/017 "rounding" "wat"
   %schema = encoding.define #fp8_e4m3fn<rounding=wat> : encoding<schema>
   func.return
 }
@@ -270,7 +270,7 @@ func.def @numeric_transform_jl_dense_rejects_orthonormal() {
 // ====
 
 func.def @matrix_operand_rejects_bad_element_format() {
-  // ERROR@+1: ENCODING/013 "matrix_operand" "element_format" "wat"
+  // ERROR@+1: PARSE/017 "element_format" "wat"
   %schema = encoding.define #matrix_operand<element_format=wat, payload_elements=32, payload_registers=6> : encoding<schema>
   func.return
 }
@@ -278,7 +278,7 @@ func.def @matrix_operand_rejects_bad_element_format() {
 // ====
 
 func.def @matrix_operand_rejects_numeric_element_format() {
-  // ERROR@+1: ENCODING/010 "matrix_operand" "element_format"
+  // ERROR@+1: PARSE/003
   %schema = encoding.define #matrix_operand<element_format=268435456, payload_elements=32, payload_registers=6> : encoding<schema>
   func.return
 }
@@ -318,7 +318,7 @@ func.def @matrix_operand_rejects_missing_2d_scale_group_shape() {
 // ====
 
 func.def @matrix_operand_rejects_non_array_scale_group_shape() {
-  // ERROR@+1: ENCODING/010 "matrix_operand" "scale_group_shape"
+  // ERROR@+1: PARSE/003
   %schema = encoding.define #matrix_operand<element_format=f4e2m1, payload_elements=256, payload_registers=32, scale_format=f8e4m3fn, scale_group_elements=256, scale_group_shape=256, scale_operands=1, scale_topology=block_2d> : encoding<schema>
   func.return
 }
@@ -428,18 +428,8 @@ func.def @turboquant_missing_static_param(%params: buffer, %thresholds_offset: o
 
 // ====
 
-func.def @turboquant_wrong_static_kind(%params: buffer, %thresholds_offset: offset, %centroids_offset: offset) {
-  %dense = encoding.layout.dense : encoding<layout>
-  %thresholds = buffer.view %params[%thresholds_offset] : buffer -> view<3xf32, %dense>
-  %centroids = buffer.view %params[%centroids_offset] : buffer -> view<4xf16, %dense>
-  %signs = vector.constant false : vector<128xi1>
-  %qjl_matrix = vector.constant 0.0 : vector<64x128xf32>
-  %transform = encoding.define #numeric_transform<family="hadamard_sign", input_elems=128, output_elems=128> {signs = %signs : vector<128xi1>} : encoding<transform>
-  %qjl_transform = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %qjl_matrix : vector<64x128xf32>} : encoding<transform>
-  // ERROR@+1: ENCODING/010 "turboquant_kv" "first_stage_bits"
-  %schema = encoding.define #turboquant_kv<first_stage_bits="2", logical_element="f16", logical_elems=128, pack_order="lsb0", qjl_rows=64, record_bytes=40, residual_bits=1, scalar_quantizer="lloyd_max", transform_family="hadamard_sign"> {centroids = %centroids : view<4xf16, %dense>, qjl_transform = %qjl_transform : encoding<transform>, thresholds = %thresholds : view<3xf32, %dense>, transform = %transform : encoding<transform>} : encoding<schema>
-  func.return
-}
+// ERROR@+1: PARSE/003
+#bad_turboquant = #turboquant_kv<first_stage_bits="2">
 
 // ====
 

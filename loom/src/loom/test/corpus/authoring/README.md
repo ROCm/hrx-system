@@ -12,16 +12,15 @@ integration contract they test even when the fixture itself is written in Loom.
 
 The examples are tested through production-facing tools:
 
-- `iree-benchmark-loom --dry-run` proves `check.case` and `check.benchmark`
-  planning without requiring a local GPU during host-only CI.
-- `iree-benchmark-loom --device=amdgpu --measure=dispatch_complete --profile-final-batch=true`
-  compiles, executes correctness samples, measures warmed queue completion, and
-  replays the same workload with precise device timestamps on AMDGPU test hosts.
+- `iree-test-loom --device=<device>` compiles and executes `check.case`
+  correctness samples through the selected target provider.
+- `iree-benchmark-loom --device=<device>` reuses the same checked cases for
+  deliberate performance experiments with queue and device timing.
 
-The timing flags used by automated AMDGPU smoke coverage are harness policy.
-The source files name workloads and correctness expectations; iteration
-counts, warmups, profiling, compile-time measurement, soak runs, and quick
-proof runs belong to `iree-benchmark-loom` flags or embedding APIs.
+Target providers compose these source modules into physical execution suites;
+the corpus itself does not choose a device. Iteration counts, warmups,
+profiling, compile-time measurement, and soak runs belong to explicit
+`iree-benchmark-loom` invocations or embedding APIs.
 
 ## Source Map
 

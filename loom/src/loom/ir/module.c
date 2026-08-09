@@ -722,9 +722,16 @@ static loom_encoding_family_flags_t loom_module_bind_encoding_parameters(
       if (comparison <= 0) {
         if (comparison == 0) {
           loom_encoding_parameter_bind_descriptor(parameter, descriptor_index);
-          all_parameters_valid &= loom_attr_descriptor_accepts_kind(
-              &family_descriptor->parameter_descriptors[descriptor_index],
-              (loom_attr_kind_t)parameter->value.kind);
+          const loom_attr_descriptor_t* descriptor =
+              &family_descriptor->parameter_descriptors[descriptor_index];
+          bool parameter_valid = loom_attr_descriptor_accepts_kind(
+              descriptor, (loom_attr_kind_t)parameter->value.kind);
+          if (parameter_valid && parameter->value.kind == LOOM_ATTR_ENUM &&
+              !iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM)) {
+            parameter_valid = loom_attr_descriptor_has_enum_case(
+                descriptor, loom_attr_as_enum(parameter->value));
+          }
+          all_parameters_valid &= parameter_valid;
         } else {
           all_parameters_valid = false;
         }

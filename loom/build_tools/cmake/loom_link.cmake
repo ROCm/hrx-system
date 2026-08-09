@@ -6,16 +6,22 @@
 
 # Loom module linking helpers.
 
-function(_loom_link_source_paths OUTPUT_PATHS)
+function(_loom_link_input_paths OUTPUT_PATHS OUTPUT_TARGETS)
   set(_PATHS)
-  foreach(_PATH IN LISTS ARGN)
-    if(IS_ABSOLUTE "${_PATH}")
-      list(APPEND _PATHS "${_PATH}")
+  set(_TARGETS)
+  foreach(_INPUT IN LISTS ARGN)
+    if("${_INPUT}" MATCHES "::")
+      iree_package_target_name(_TARGET "${_INPUT}")
+      list(APPEND _PATHS "$<TARGET_PROPERTY:${_TARGET},LOOM_MODULE_FILE>")
+      list(APPEND _TARGETS "${_TARGET}")
+    elseif(IS_ABSOLUTE "${_INPUT}" OR "${_INPUT}" MATCHES "^\\$<")
+      list(APPEND _PATHS "${_INPUT}")
     else()
-      list(APPEND _PATHS "${CMAKE_CURRENT_SOURCE_DIR}/${_PATH}")
+      list(APPEND _PATHS "${CMAKE_CURRENT_SOURCE_DIR}/${_INPUT}")
     endif()
   endforeach()
   set(${OUTPUT_PATHS} ${_PATHS} PARENT_SCOPE)
+  set(${OUTPUT_TARGETS} ${_TARGETS} PARENT_SCOPE)
 endfunction()
 
 function(loom_link_module)
@@ -47,8 +53,8 @@ function(loom_link_module)
     endif()
   endif()
 
-  _loom_link_source_paths(_SOURCES ${_RULE_SRCS})
-  _loom_link_source_paths(_LIBRARIES ${_RULE_LIBRARIES})
+  _loom_link_input_paths(_SOURCES _SOURCE_TARGETS ${_RULE_SRCS})
+  _loom_link_input_paths(_LIBRARIES _LIBRARY_TARGETS ${_RULE_LIBRARIES})
   set(_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_OUTPUT}")
   set(_ARGS
     "--mode=${_RULE_MODE}"
@@ -97,6 +103,13 @@ function(loom_link_module)
   iree_package_name(_PACKAGE_NAME)
   set(_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}")
   add_custom_target("${_TARGET}" DEPENDS "${_OUTPUT}")
+  set_property(TARGET "${_TARGET}" PROPERTY LOOM_MODULE_FILE "${_OUTPUT}")
+  foreach(_INPUT_TARGET IN LISTS _SOURCE_TARGETS _LIBRARY_TARGETS)
+    iree_register_target_dependency(
+      TARGET "${_TARGET}"
+      DEPENDENCY "${_INPUT_TARGET}"
+    )
+  endforeach()
   iree_register_generated_output_producer("${_TARGET}"
     OUTPUTS "${_OUTPUT}"
   )

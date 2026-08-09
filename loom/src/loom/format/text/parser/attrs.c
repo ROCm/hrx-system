@@ -287,21 +287,6 @@ static iree_status_t loom_parse_generic_attr_value_with_type_mode(
     loom_parser_t* parser, uint16_t nesting_depth,
     loom_type_parse_mode_t type_mode, loom_attribute_t* out_attr);
 
-static const loom_attr_descriptor_t* loom_parse_find_parameter_descriptor(
-    const loom_parameterized_attr_descriptor_t* family_descriptor,
-    iree_string_view_t parameter_name, uint8_t* out_parameter_index) {
-  for (uint8_t i = 0; i < family_descriptor->parameter_count; ++i) {
-    const loom_attr_descriptor_t* parameter_descriptor =
-        &family_descriptor->parameter_descriptors[i];
-    if (iree_string_view_equal(loom_attr_descriptor_name(parameter_descriptor),
-                               parameter_name)) {
-      *out_parameter_index = i;
-      return parameter_descriptor;
-    }
-  }
-  return NULL;
-}
-
 static iree_status_t loom_parse_parameterized_attr(
     loom_parser_t* parser, loom_parameterized_attr_kind_t expected_family_kind,
     uint16_t nesting_depth, loom_type_parse_mode_t type_mode,
@@ -360,8 +345,10 @@ static iree_status_t loom_parse_parameterized_attr(
     LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_BARE_IDENT, &name_token);
     uint8_t parameter_index = 0;
     const loom_attr_descriptor_t* parameter_descriptor =
-        loom_parse_find_parameter_descriptor(family_descriptor, name_token.text,
-                                             &parameter_index);
+        loom_attr_descriptor_find_by_name(
+            family_descriptor->parameter_descriptors,
+            family_descriptor->parameter_count, name_token.text,
+            &parameter_index);
     if (!parameter_descriptor) {
       char expected[320];
       iree_string_view_t family_name =

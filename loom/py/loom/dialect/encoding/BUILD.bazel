@@ -16,8 +16,12 @@ iree_py_library(
     srcs = [
         "__init__.py",
         "defs.py",
+        "numeric_formats.py",
     ],
-    deps = ["//loom/py/loom:core"],
+    deps = [
+        "//loom/py/loom:core",
+        "//loom/py/loom/error",
+    ],
 )
 
 iree_py_test(

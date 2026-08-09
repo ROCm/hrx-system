@@ -135,6 +135,22 @@ static inline iree_string_view_t loom_attr_descriptor_name(
   return loom_bstring_view(descriptor->name);
 }
 
+// Finds a descriptor by its stable field name. Descriptor arrays are small
+// schema metadata tables; callers retain the ordinal when they need repeated
+// access to the selected field.
+static inline const loom_attr_descriptor_t* loom_attr_descriptor_find_by_name(
+    const loom_attr_descriptor_t* descriptors, uint8_t descriptor_count,
+    iree_string_view_t name, uint8_t* out_descriptor_index) {
+  for (uint8_t i = 0; i < descriptor_count; ++i) {
+    if (iree_string_view_equal(loom_attr_descriptor_name(&descriptors[i]),
+                               name)) {
+      *out_descriptor_index = i;
+      return &descriptors[i];
+    }
+  }
+  return NULL;
+}
+
 // Returns true when |kind| satisfies the payload-kind contract of
 // |descriptor|. Open ANY fields still exclude descriptor-dependent payloads
 // that cannot be interpreted without their owning field schema.

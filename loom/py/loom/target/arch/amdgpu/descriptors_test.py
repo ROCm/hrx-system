@@ -41,6 +41,7 @@ from loom.target.arch.amdgpu.descriptors import (
     _COUNTER_VMEM_LOAD,
     _COUNTER_VMEM_STORE,
     _D16_PARTIAL_REGISTER_ADDRESSABLE_UNIT_COUNT,
+    _EARLY_CLOBBER_RESULT_CONSTRAINTS,
     _GFX12_TH_ATOMIC_RETURN_VALUE,
     _MUBUF_SOFFSET_INLINE_ZERO,
     _REG_EXEC,
@@ -65,6 +66,7 @@ from loom.target.arch.amdgpu.descriptors import (
     _SCHEDULE_PACKED_DOT,
     _SCHEDULE_SALU,
     _SCHEDULE_SALU_COMPARE,
+    _SCHEDULE_SMEM_LOAD,
     _SCHEDULE_SMEM_STORE,
     _SCHEDULE_SWMMAC,
     _SCHEDULE_VALU,
@@ -5397,6 +5399,29 @@ def test_smem_dword_width_descriptors_cover_active_xml_families() -> None:
                 payload_field_name="dst",
                 effect_kind=EffectKind.READ,
                 memory_space=MemorySpace.GLOBAL,
+            )
+
+
+def test_smem_load_results_are_early_clobber() -> None:
+    for overlays in (
+        _gfx940_core_overlays(),
+        _gfx950_core_overlays(),
+        _gfx11_core_overlays(),
+        _gfx12_core_overlays(),
+        _gfx125x_core_overlays(),
+    ):
+        load_descriptors = (
+            descriptor
+            for descriptor in overlays
+            if descriptor.schedule_class == _SCHEDULE_SMEM_LOAD
+            and any(
+                operand.descriptor_operand.role is OperandRole.RESULT
+                for operand in descriptor.operands
+            )
+        )
+        for descriptor in load_descriptors:
+            assert descriptor.constraints == _EARLY_CLOBBER_RESULT_CONSTRAINTS, (
+                descriptor.descriptor_key
             )
 
 

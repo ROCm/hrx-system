@@ -8,9 +8,10 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from loom.dsl import EncodingFamilyDef, Op, ParameterizedAttrDef
+from loom.dsl import EncodingFamilyDef, EnumDef, Op, ParameterizedAttrDef
 from loom.gen.support.generated_file import line_comment_header
 
 COPYRIGHT = """\
@@ -68,6 +69,14 @@ def c_encoding_family_descriptor_name(family: EncodingFamilyDef) -> str:
     """Returns the exported C descriptor symbol for an encoding family."""
 
     return c_encoding_family_prefix(family) + "_family_descriptor"
+
+
+def c_encoding_enum_prefix(dialect_name: str, enum_def: EnumDef) -> str:
+    """Returns the shared C prefix for an encoding-family parameter enum."""
+
+    snake_name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", enum_def.name)
+    snake_name = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", snake_name).lower()
+    return f"loom_{dialect_name}_{snake_name}"
 
 
 def c_dialect_enum(dialect_name: str) -> str:

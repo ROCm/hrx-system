@@ -5,9 +5,9 @@
 // second stride even though the value is constant, matching kernels that keep
 // layout metadata parameterized while lowering f16 accumulator fragments into
 // f32 global memory.
-amdgpu.target<gfx1100> @gfx1100_wave64 {subgroup_size = 64}
+amdgpu.target<gfx1100> @fragment_result_dynamic_gfx1100_wave64 {subgroup_size = 64}
 
-kernel.def target(@gfx1100_wave64) @fragment_result_dynamic_strided_f16acc_f32_store() {
+kernel.def target(@fragment_result_dynamic_gfx1100_wave64) @fragment_result_dynamic_strided_f16acc_f32_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index

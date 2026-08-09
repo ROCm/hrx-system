@@ -30,6 +30,7 @@ iree_py_binary(
     ],
     deps = [
         "//loom/py/loom:core",
+        "//loom/py/loom/dialect/encoding",
         "//loom/py/loom/gen/support",
         "//loom/py/loom/gen/target/arch/amdgpu/lower/candidates:validation",
         "//loom/py/loom/target/arch/amdgpu:descriptors",

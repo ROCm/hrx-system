@@ -118,6 +118,70 @@ low.func.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_target) abi(hal_kernel) 
 
 // ====
 
+amdgpu.target<gfx9-4-generic> @gfx9_4_target
+kernel.def target(@gfx9_4_target) @packed_f32_uniform_vector4_fma() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%a_buffer: buffer, %b_buffer: buffer, %c_buffer: buffer, %result_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %a_noalias, %b_noalias, %c_noalias, %result_noalias = buffer.assume.noalias %a_buffer, %b_buffer, %c_buffer, %result_buffer : buffer, buffer, buffer, buffer
+  %a_view = buffer.view %a_noalias[%base] : buffer -> view<4xf32, #dense>
+  %b_view = buffer.view %b_noalias[%base] : buffer -> view<4xf32, #dense>
+  %c_view = buffer.view %c_noalias[%base] : buffer -> view<4xf32, #dense>
+  %result_view = buffer.view %result_noalias[%base] : buffer -> view<4xf32, #dense>
+  %a = vector.load %a_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %b = vector.load %b_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %c = vector.load %c_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %result = vector.fmaf %a, %b, %c : vector<4xf32>
+  vector.store %result, %result_view[0] : vector<4xf32>, view<4xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @packed_f32_uniform_vector4_fma() asm {
+  %a_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
+  %b_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
+  %c_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
+  %result_view = resource<hal_binding> {index = 3, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
+  %22 = s_mov_b32 0
+  %a = s_load_dwordx4 %a_view, %22
+  %b = s_load_dwordx4 %b_view, %22
+  %c = s_load_dwordx4 %c_view, %22
+  %28 = slice %b[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %29 = v_mov_b32_copy %28
+  %30 = slice %b[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %31 = v_mov_b32_copy %30
+  %32 = slice %b[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %33 = v_mov_b32_copy %32
+  %34 = slice %b[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %35 = v_mov_b32_copy %34
+  %36 = concat(%29, %31, %33, %35) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %37 = slice %c[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %38 = v_mov_b32_copy %37
+  %39 = slice %c[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %40 = v_mov_b32_copy %39
+  %41 = slice %c[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %42 = v_mov_b32_copy %41
+  %43 = slice %c[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %44 = v_mov_b32_copy %43
+  %45 = concat(%38, %40, %42, %44) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %46 = slice %a[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr x2>
+  %47 = slice %36[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %48 = slice %45[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %49 = v_pk_fma_f32 %46, %47, %48
+  %50 = slice %a[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr x2>
+  %51 = slice %36[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %52 = slice %45[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %53 = v_pk_fma_f32 %50, %51, %52
+  %result = concat(%49, %53) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %55 = v_mov_b32 0
+  %56 = s_mov_b32_m0_imm 0
+  global_store_dwordx4_saddr %55, %result, %result_view, %56
+  return
+}
+
+// ====
+
 amdgpu.target<gfx11-generic> @gfx11_target
 func.def target(@gfx11_target) @packed_i16_vector_fmai(%a: vector<2xi16>, %b: vector<2xi16>, %c: vector<2xi16>) -> (vector<2xi16>) {
   %result = vector.fmai %a, %b, %c : vector<2xi16>

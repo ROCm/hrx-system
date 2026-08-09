@@ -1099,7 +1099,9 @@ iree_status_t loom_amdgpu_emit_resolved_vgpr_ternary(
     loom_value_id_t* out_value) {
   IREE_ASSERT(descriptor->descriptor != NULL);
   *out_value = LOOM_VALUE_ID_INVALID;
-  const loom_value_id_t operands[] = {lhs, rhs, third};
+  loom_value_id_t operands[] = {lhs, rhs, third};
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_legalize_vop3_scalar_sources(context, source_op, operands));
   loom_op_t* low_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
       context, descriptor, operands, IREE_ARRAYSIZE(operands),
@@ -1107,6 +1109,67 @@ iree_status_t loom_amdgpu_emit_resolved_vgpr_ternary(
       /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
       &low_op));
   *out_value = loom_value_slice_get(loom_low_op_results(low_op), 0);
+  return iree_ok_status();
+}
+
+iree_status_t loom_amdgpu_legalize_vop3_scalar_sources(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t sources[3]) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_low_lower_context_descriptor_set(context);
+  const loom_amdgpu_descriptor_set_info_t* descriptor_set_info =
+      loom_amdgpu_target_info_descriptor_set_at(
+          descriptor_set->descriptor_set_ordinal);
+  const uint32_t scalar_source_limit =
+      loom_amdgpu_descriptor_set_info_has_flags(
+          descriptor_set_info,
+          LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOP3_TWO_SCALAR_SOURCES)
+          ? 2u
+          : 1u;
+
+  loom_value_id_t original_scalar_sources[3] = {
+      LOOM_VALUE_ID_INVALID,
+      LOOM_VALUE_ID_INVALID,
+      LOOM_VALUE_ID_INVALID,
+  };
+  loom_value_id_t legal_scalar_sources[3] = {
+      LOOM_VALUE_ID_INVALID,
+      LOOM_VALUE_ID_INVALID,
+      LOOM_VALUE_ID_INVALID,
+  };
+  uint32_t unique_scalar_source_count = 0;
+  uint32_t retained_scalar_source_count = 0;
+  const loom_module_t* module = loom_low_lower_context_module(context);
+  for (uint32_t i = 0; i < 3; ++i) {
+    const loom_type_t source_type = loom_module_value_type(module, sources[i]);
+    if (!loom_amdgpu_low_type_is_register_class(
+            context, source_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR)) {
+      continue;
+    }
+
+    uint32_t prior_index = 0;
+    for (; prior_index < unique_scalar_source_count; ++prior_index) {
+      if (original_scalar_sources[prior_index] == sources[i]) {
+        sources[i] = legal_scalar_sources[prior_index];
+        break;
+      }
+    }
+    if (prior_index < unique_scalar_source_count) {
+      continue;
+    }
+
+    original_scalar_sources[unique_scalar_source_count] = sources[i];
+    if (retained_scalar_source_count < scalar_source_limit) {
+      legal_scalar_sources[unique_scalar_source_count] = sources[i];
+      ++retained_scalar_source_count;
+    } else {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_vgpr_b32_registers(
+          context, source_op, sources[i],
+          &legal_scalar_sources[unique_scalar_source_count]));
+      sources[i] = legal_scalar_sources[unique_scalar_source_count];
+    }
+    ++unique_scalar_source_count;
+  }
   return iree_ok_status();
 }
 

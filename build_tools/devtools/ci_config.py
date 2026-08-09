@@ -199,7 +199,7 @@ AMDGPU_BAZEL_XFAILS_BY_TARGET_SELECTOR = {
     # Keep every other Loom AMDGPU execution test active on the runner.
     "gfx120X-all": (
         bazel_xfail(
-            "//loom/src/loom/tooling/target/amdgpu:iree_test_loom_tsan_execution_test"
+            "//loom/src/loom/tooling/target/amdgpu/test:iree_test_loom_tsan_execution_test"
         ),
     ),
 }

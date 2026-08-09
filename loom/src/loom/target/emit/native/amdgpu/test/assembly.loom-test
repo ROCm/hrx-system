@@ -1763,15 +1763,13 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_scheduled_liveness_
 }
 
 // ----
-  s_load_dwordx2 s[0:1], s[0:1], s2 offset:0
+  s_load_dwordx2 s[4:5], s[0:1], s2 offset:0
   s_mov_b32 s6, 256
   s_mov_b32 s7, 822173696
-  s_mov_b32 s3, 65535
+  s_mov_b32 s0, 65535
   v_mov_b32 v1, 1
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  s_and_b32 s1, s1, s3
-  s_mov_b32 s4, s0
-  s_mov_b32 s5, s1
+  s_and_b32 s5, s5, s0
   buffer_store_dword v1, v0, s[4:7], s2 offen offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
@@ -1828,7 +1826,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_s_load_offset_only(
 }
 
 // ----
-  s_load_dwordx2 s[0:1], s[0:1] offset:32
+  s_load_dwordx2 s[2:3], s[0:1] offset:32
   s_endpgm
 
 // ====
@@ -1841,7 +1839,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_s_load_offset_only_
 }
 
 // ----
-  s_load_dwordx8 s[0:7], s[0:1] offset:32
+  s_load_dwordx8 s[8:15], s[0:1] offset:32
   s_endpgm
 
 // ====
@@ -2974,7 +2972,7 @@ low.func.def target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_smem_wide_loads(%ba
   s_buffer_load_b96 s[8:10], s[4:7], s2 offset:8
   s_buffer_load_b512 s[16:31], s[4:7], s2 offset:16
   s_load_i8 s3, s[0:1], s2 offset:20
-  s_load_u16 s0, s[0:1], s2 offset:24
+  s_load_u16 s3, s[0:1], s2 offset:24
   s_buffer_load_u8 s0, s[4:7], s2 offset:28
   s_buffer_load_i16 s0, s[4:7], s2 offset:32
   s_endpgm
@@ -3064,14 +3062,14 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_stress_fragment(%s0
   v_wmma_f32_16x16x16_f16 v[0:7], v[16:23], v[24:31], v[0:7]
   buffer_load_dword v11, v10, s[4:7], s8 offen offset:4
   buffer_load_b128 v[12:15], v10, s[4:7], s8 offen offset:16
-  s_load_dwordx2 s[0:1], s[0:1], s8 offset:16
-  s_buffer_load_dword s1, s[4:7], s8 offset:0
-  s_add_u32 s2, s2, s3
+  s_load_dwordx2 s[10:11], s[0:1], s8 offset:16
+  s_buffer_load_dword s0, s[4:7], s8 offset:0
+  s_add_u32 s1, s2, s3
   v_add_u32 v8, v8, v9
-  s_add_u32 s1, s2, s1
+  s_add_u32 s0, s1, s0
   v_add_u32 v8, v8, v11
-  buffer_store_dword v8, v10, s[4:7], s1 offen offset:8
-  buffer_store_b128 v[12:15], v10, s[4:7], s0 offen offset:32
+  buffer_store_dword v8, v10, s[4:7], s0 offen offset:8
+  buffer_store_b128 v[12:15], v10, s[4:7], s10 offen offset:32
   v_wmma_f32_16x16x16_f16 v[0:7], v[16:23], v[24:31], v[0:7]
   buffer_store_b128 v[0:3], v10, s[4:7], s8 offen offset:48
   s_waitcnt vmcnt(0) lgkmcnt(0)
@@ -3099,9 +3097,9 @@ low.func.def target<amdgpu.rdna3.core>(@gfx_target) @gfx11_smem_wait_drains_cros
 
 // ----
   s_load_dword s5, s[0:1], s2 offset:4
-  s_load_dword s0, s[0:1], s2 offset:0
+  s_load_dword s6, s[0:1], s2 offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  s_add_u32 s0, s0, s3
+  s_add_u32 s0, s6, s3
   s_cmp_lt_i32 s3, s4
   s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb2
@@ -3610,14 +3608,14 @@ low.func.def target<amdgpu.rdna3.core>(@gfx_target) @wait_cross_block_descriptor
 }
 
 // ----
-  s_load_dwordx2 s[0:1], s[0:1], s2 offset:0
+  s_load_dwordx2 s[6:7], s[0:1], s2 offset:0
   s_cmp_lt_i32 s3, s4
   s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb2
 .Lbb1:
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  global_store_b32 v1, v0, s[0:1] offset:0
-  global_store_b32 v1, v2, s[0:1] offset:4
+  global_store_b32 v1, v0, s[6:7] offset:0
+  global_store_b32 v1, v2, s[6:7] offset:4
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 .Lbb2:
@@ -3966,6 +3964,6 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_wait_before_storage
 // The storage reservation emits no instruction, but wait planning may use it
 // as an ordering anchor. Assembly must visit the anchor just like encoding.
 // ----
-  s_load_dwordx8 s[0:7], s[0:1] offset:0
+  s_load_dwordx8 s[8:15], s[0:1] offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
   s_endpgm

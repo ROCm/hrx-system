@@ -13,6 +13,7 @@ See bazel_to_cmake.py for usage.
 # pylint: disable=unused-argument
 # pylint: disable=exec-used
 
+import hashlib
 import itertools
 import os
 import re
@@ -690,6 +691,8 @@ class BuildFileFunctions(object):
         return labels
 
     def _cmake_location_paths(self, label):
+        if label.startswith("${"):
+            return [label]
         if label.startswith("@"):
             try:
                 cmake_targets = self._targets.convert_target(label)
@@ -1576,6 +1579,14 @@ class BuildFileFunctions(object):
         if exclude is None:
             exclude = []
 
+        # Exclusions mutate the generated CMake list. Give filtered globs a
+        # stable identity derived from the complete expression so a later glob
+        # over the same include pattern cannot overwrite the filtered result.
+        suffix = ""
+        if exclude:
+            signature = repr((tuple(include), tuple(exclude))).encode("utf-8")
+            suffix = "_" + hashlib.sha256(signature).hexdigest()[:8].upper()
+
         glob_vars = []
         for pattern in include:
             if "**" in pattern:
@@ -1587,7 +1598,7 @@ class BuildFileFunctions(object):
             # Bazel `*.mlir` glob -> CMake variable `_GLOB_X_MLIR`.
             var = (
                 "_GLOB_" + self._cmake_variable_name(pattern.replace("*", "X")).upper()
-            )
+            ) + suffix
             glob_vars.append(var)
             self._converter.body += (
                 f"file(GLOB {var} LIST_DIRECTORIES false"
@@ -1597,7 +1608,9 @@ class BuildFileFunctions(object):
         for pattern in exclude:
             if "**" in pattern:
                 raise NotImplementedError("Recursive globs not supported")
-            exclude_var = "_GLOB_" + pattern.replace("*", "X").replace(".", "_").upper()
+            exclude_var = (
+                "_GLOB_" + pattern.replace("*", "X").replace(".", "_").upper() + suffix
+            )
             self._converter.body += (
                 f"file(GLOB {exclude_var} LIST_DIRECTORIES false"
                 f" RELATIVE {self._expand_cmake_var('CMAKE_CURRENT_SOURCE_DIR')}"

@@ -15,8 +15,10 @@ iree_py_library(
   SRCS
     "__init__.py"
     "defs.py"
+    "numeric_formats.py"
   DEPS
     loom::py::loom::core
+    loom::py::loom::error::error
 )
 
 iree_py_test(

@@ -104,7 +104,9 @@ kernel.def @ffn_gate_up_swiglu_q6q8() {
   %rows = index.constant 31 : index
   %channel_groups = index.constant 1184 : index
   %unit = index.constant 1 : index
-  %workgroup_size = index.constant 512 : index
+  %subgroup_size = kernel.subgroup.size : index
+  %channels_per_group = index.constant 16 : index
+  %workgroup_size = index.mul %subgroup_size, %channels_per_group : index
   kernel.launch.config workgroups(%rows, %channel_groups, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%q8_input: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
   %base = index.constant 0 : offset
@@ -119,6 +121,7 @@ kernel.def @ffn_gate_up_swiglu_q6q8() {
   %high_bit_shift_stride = index.constant 2 : index
   %lane_quad_width = index.constant 4 : index
   %lane_octet_width = index.constant 8 : index
+  %active_lane_count = index.constant 32 : index
   %q6_block_count = index.constant 14 : index
   %channels_per_group = index.constant 16 : index
   %lane_partition_width = index.constant 16 : index
@@ -128,14 +131,16 @@ kernel.def @ffn_gate_up_swiglu_q6q8() {
   %weight_i16_row_stride = index.constant 1470 : index
   %dot_initial = scalar.constant 0.0 : f32
   %leader_lane_i32 = scalar.constant 0 : i32
+  %active_lane = index.rem %lane, %active_lane_count : index
+  %is_active_lane = index.cmp ult, %lane, %active_lane_count : index
   %channel_base0 = index.mul %channel_group, %channels_per_group : index
   %channel0 = index.add %channel_base0, %subgroup_id : index
   %channel = index.assume %channel0 [range(%channel0, 0, 18943)] : index
   %q8_i32_row_base = index.mul %row, %q8_i32_row_stride : index
   %q8_f16_row_base = index.mul %row, %q8_f16_row_stride : index
-  %lane_mod8 = index.rem %lane, %lane_octet_width : index
-  %lane_mod16 = index.rem %lane, %lane_partition_width : index
-  %lane_div16 = index.div %lane, %lane_partition_width : index
+  %lane_mod8 = index.rem %active_lane, %lane_octet_width : index
+  %lane_mod16 = index.rem %active_lane, %lane_partition_width : index
+  %lane_div16 = index.div %active_lane, %lane_partition_width : index
   %lane_div8_in_16 = index.div %lane_mod16, %lane_octet_width : index
   %lane_div4_in_16 = index.div %lane_mod16, %lane_quad_width : index
   %vh_hi_group = index.mul %lane_div16, %lane_octet_width : index
@@ -170,13 +175,18 @@ kernel.def @ffn_gate_up_swiglu_q6q8() {
   // These loops are local transform intent, not source expansion. Full unroll is
   // requested where the q6_K block/part trip counts are tiny and compile-time
   // known, and the source still exposes the logical reduction structure.
-  %gate_acc, %up_acc = scf.for %block = [%loop_begin to %q6_block_count step %loop_step](%gate_block_acc = %dot_initial : f32, %up_block_acc = %dot_initial : f32) -> (f32, f32) unroll {
-    %gate_next, %up_next = scf.for %part = [%loop_begin to %part_count step %loop_step](%gate_part_acc = %gate_block_acc : f32, %up_part_acc = %up_block_acc : f32) -> (f32, f32) unroll {
-      %gate_step = func.apply<model.q6q8.accumulate_part>(%gate_part_acc, %gate_i8_view, %gate_i16_view, %gate_f16_view, %q8_i32_view, %q8_f16_view, %gate_row_i8_base, %gate_row_i16_base, %q8_i32_row_base, %q8_f16_row_base, %block, %part, %lane, %vh_index, %vh_shift_i32, %bq8_offset, %q8_qword, %scale_lane_base) : (f32, view<55695360xi8, #dense>, view<27847680xi16, #dense>, view<27847680xf16, #dense>, view<31248xi32, #dense>, view<62496xf16, #dense>, index, index, index, index, index, index, index, index, i32, index, index, index) -> (f32)
-      %up_step = func.apply<model.q6q8.accumulate_part>(%up_part_acc, %up_i8_view, %up_i16_view, %up_f16_view, %q8_i32_view, %q8_f16_view, %up_row_i8_base, %up_row_i16_base, %q8_i32_row_base, %q8_f16_row_base, %block, %part, %lane, %vh_index, %vh_shift_i32, %bq8_offset, %q8_qword, %scale_lane_base) : (f32, view<55695360xi8, #dense>, view<27847680xi16, #dense>, view<27847680xf16, #dense>, view<31248xi32, #dense>, view<62496xf16, #dense>, index, index, index, index, index, index, index, index, i32, index, index, index) -> (f32)
-      scf.yield %gate_step, %up_step : f32, f32
+  %gate_acc, %up_acc = scf.if %is_active_lane -> (f32, f32) {
+    %gate_result, %up_result = scf.for %block = [%loop_begin to %q6_block_count step %loop_step](%gate_block_acc = %dot_initial : f32, %up_block_acc = %dot_initial : f32) -> (f32, f32) unroll {
+      %gate_next, %up_next = scf.for %part = [%loop_begin to %part_count step %loop_step](%gate_part_acc = %gate_block_acc : f32, %up_part_acc = %up_block_acc : f32) -> (f32, f32) unroll {
+        %gate_step = func.apply<model.q6q8.accumulate_part>(%gate_part_acc, %gate_i8_view, %gate_i16_view, %gate_f16_view, %q8_i32_view, %q8_f16_view, %gate_row_i8_base, %gate_row_i16_base, %q8_i32_row_base, %q8_f16_row_base, %block, %part, %active_lane, %vh_index, %vh_shift_i32, %bq8_offset, %q8_qword, %scale_lane_base) : (f32, view<55695360xi8, #dense>, view<27847680xi16, #dense>, view<27847680xf16, #dense>, view<31248xi32, #dense>, view<62496xf16, #dense>, index, index, index, index, index, index, index, index, i32, index, index, index) -> (f32)
+        %up_step = func.apply<model.q6q8.accumulate_part>(%up_part_acc, %up_i8_view, %up_i16_view, %up_f16_view, %q8_i32_view, %q8_f16_view, %up_row_i8_base, %up_row_i16_base, %q8_i32_row_base, %q8_f16_row_base, %block, %part, %active_lane, %vh_index, %vh_shift_i32, %bq8_offset, %q8_qword, %scale_lane_base) : (f32, view<55695360xi8, #dense>, view<27847680xi16, #dense>, view<27847680xf16, #dense>, view<31248xi32, #dense>, view<62496xf16, #dense>, index, index, index, index, index, index, index, index, i32, index, index, index) -> (f32)
+        scf.yield %gate_step, %up_step : f32, f32
+      }
+      scf.yield %gate_next, %up_next : f32, f32
     }
-    scf.yield %gate_next, %up_next : f32, f32
+    scf.yield %gate_result, %up_result : f32, f32
+  } else {
+    scf.yield %dot_initial, %dot_initial : f32, f32
   }
 
   %gate_dot = kernel.subgroup.reduce<addf> %gate_acc : f32

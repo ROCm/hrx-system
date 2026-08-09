@@ -183,3 +183,48 @@ func.def target(@target) @dot8i4_u4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, 
   %dot = vector.dot8i4<u4s4> %lhs, %rhs, %acc : vector<1xi32>
   func.return %dot : vector<1xi32>
 }
+
+// ====
+
+amdgpu.target<gfx942> @target
+func.def target(@target) @f32_uniform_smem_vector_operands(%lhs: vector<4xf32>, %weights: buffer) -> (f32) {
+  %base = index.constant 0 : offset
+  %weights_global = buffer.assume.memory_space<global> %weights : buffer
+  %weights_noalias = buffer.assume.noalias %weights_global : buffer
+  %weights_view = buffer.view %weights_noalias[%base] : buffer -> view<2x4xf32, #dense>
+  %rhs = vector.load %weights_view[0, 0] : view<2x4xf32, #dense> -> vector<4xf32>
+  %bias_vector = vector.load %weights_view[1, 0] : view<2x4xf32, #dense> -> vector<4xf32>
+  %bias = vector.extract %bias_vector[0] : vector<4xf32> -> f32
+  %scaled = vector.mulf %lhs, %rhs : vector<4xf32>
+  %dot = vector.dotf %scaled, %rhs, %bias : vector<4xf32>, vector<4xf32>, f32
+  func.return %dot : f32
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @f32_uniform_smem_vector_operands(%lhs: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm {
+  %weights_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 32} : reg<amdgpu.sgpr x2>
+  %19 = s_mov_b32 0
+  %rhs = s_load_dwordx4 %weights_view, %19
+  %bias = s_load_dword %weights_view, %19 {offset = 16}
+  %23 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %24 = slice %rhs[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr x2>
+  %25 = v_pk_mul_f32 %23, %24
+  %26 = slice %lhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %27 = slice %rhs[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr x2>
+  %28 = v_pk_mul_f32 %26, %27
+  %scaled = concat(%25, %28) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %30 = v_mov_b32_copy %bias
+  %31 = slice %scaled[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %32 = slice %rhs[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %33 = v_fma_f32 %31, %32, %30
+  %34 = slice %scaled[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %35 = slice %rhs[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %36 = v_fma_f32 %34, %35, %33
+  %37 = slice %scaled[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %38 = slice %rhs[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %39 = v_fma_f32 %37, %38, %36
+  %40 = slice %scaled[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %41 = slice %rhs[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %dot = v_fma_f32 %40, %41, %39
+  return %dot
+}

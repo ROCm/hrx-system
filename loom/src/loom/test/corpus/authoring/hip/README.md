@@ -295,7 +295,7 @@ on cross-lane LDS traffic, not private register roundtripping.
 Proof command:
 
 ```bash
-iree-benchmark-loom shared_memory_tile.loom --dry-run
+iree-test-loom shared_memory_tile.loom --device=amdgpu
 ```
 
 Target compile evidence:
@@ -320,11 +320,11 @@ jq '{status, target_key, local:.entries.rows[0].local_memory_bytes, lds_ops:.sta
 llvm-objdump -d --mcpu=gfx11-generic /tmp/shared-memory-tile.hsaco | rg 'ds_(read|write)|s_barrier'
 ```
 
-Expected signal: the dry run lists `case_shared_memory_tile_reverse` and
-`bench_shared_memory_tile_reverse`; the compile report records
-`local_memory_bytes` as `256` for the 64-element i32 tile, two local memory
-instructions, and one barrier. On AMDGPU targets, object disassembly should
-show LDS read/write instructions and a workgroup barrier.
+Expected signal: `case_shared_memory_tile_reverse` passes.
+
+For the 64-element i32 tile, the compile report records `local_memory_bytes` as
+`256`, two local memory instructions, and one barrier. On AMDGPU targets, object
+disassembly should show LDS read/write instructions and a workgroup barrier.
 
 ## Shared Memory Transpose
 
@@ -370,7 +370,7 @@ transposing through LDS twice must reproduce the original row-major iota.
 Proof command:
 
 ```bash
-iree-benchmark-loom shared_memory_transpose.loom --dry-run
+iree-test-loom shared_memory_transpose.loom --device=amdgpu
 ```
 
 Target compile evidence:
@@ -395,12 +395,12 @@ jq '{status, target_key, local:.entries.rows[0].local_memory_bytes, lds_ops:.sta
 llvm-objdump -d --mcpu=gfx11-generic /tmp/shared-memory-transpose.hsaco | rg 'ds_(read|store)|s_barrier'
 ```
 
-Expected signal: the dry run lists
-`case_shared_memory_tile_double_transpose` and
-`bench_shared_memory_tile_double_transpose`; the compile report records
-`local_memory_bytes` as `512` for the two 8x8 i32 tiles, four local memory
-instructions, and two barriers. AMDGPU object disassembly should show two LDS
-stores, two LDS reads, and two workgroup barriers.
+Expected signal: `case_shared_memory_tile_double_transpose` passes.
+
+For the two 8x8 i32 tiles, the compile report records `local_memory_bytes` as
+`512`, four local memory instructions, and two barriers. AMDGPU object
+disassembly should show two LDS stores, two LDS reads, and two workgroup
+barriers.
 
 ## Shared Memory Vector Tile
 
@@ -440,7 +440,7 @@ target supports it.
 Proof command:
 
 ```bash
-iree-benchmark-loom shared_memory_vector_tile.loom --dry-run
+iree-test-loom shared_memory_vector_tile.loom --device=amdgpu
 ```
 
 Target compile evidence:
@@ -465,12 +465,12 @@ jq '{status, target_key, local:.entries.rows[0].local_memory_bytes, lds_ops:.sta
 llvm-objdump -d --mcpu=gfx11-generic /tmp/shared-memory-vector-tile.hsaco | rg 'global_(load|store)_b128|ds_(store|load)_b128|s_barrier'
 ```
 
-Expected signal: the dry run lists `case_shared_memory_vector_tile_roundtrip`
-and `bench_shared_memory_vector_tile_roundtrip`; the compile report records
-`local_memory_bytes` as `1024` for the 64 row by 4 i32 tile, two local memory
-instructions, and one barrier. AMDGPU object disassembly should show a
-`global_load_b128`, `ds_store_b128`, `s_barrier`, `ds_load_b128`, and
-`global_store_b128`.
+Expected signal: `case_shared_memory_vector_tile_roundtrip` passes.
+
+For the 64 row by 4 i32 tile, the compile report records `local_memory_bytes` as
+`1024`, two local memory instructions, and one barrier. AMDGPU object
+disassembly should show `global_load_b128`, `ds_store_b128`, `s_barrier`,
+`ds_load_b128`, and `global_store_b128`.
 
 ## Shared Memory Bank Feedback
 
@@ -629,7 +629,6 @@ native instruction.
 Proof command:
 
 ```bash
-iree-benchmark-loom packed_field_contracts.loom --dry-run
 loom-opt packed_field_contracts.loom --output=/tmp/packed-field-contracts.loom
 ```
 

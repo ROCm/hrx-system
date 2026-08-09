@@ -24,6 +24,10 @@ def _ensure_runtime_py_on_path() -> None:
 
 _ensure_runtime_py_on_path()
 
+from loom.dialect.encoding.numeric_formats import (  # noqa: E402
+    FP8_FORMATS,
+    Fp8SpecialPolicy,
+)
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
 from loom.gen.target.arch.amdgpu.lower.candidates.validation import (  # noqa: E402
     required_descriptor_ref_constant_name,
@@ -61,6 +65,7 @@ class _Fp8ScaledDescriptorRefRow:
 @dataclass(frozen=True)
 class _Fp8FormatRow:
     source_format: str
+    keyword: str
     source_type: ScalarTypeKind
     exponent_bits: int
     mantissa_bits: int
@@ -109,47 +114,31 @@ _FP8_PACKED_REPAIR_BITS = (
 )
 
 
-_FP8_FORMAT_ROWS = (
+_FP8_SOURCE_FORMAT_CONSTANTS = {
+    "f8e4m3": "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3",
+    "f8e5m2": "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2",
+    "f8e4m3fn": "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN",
+    "f8e4m3fnuz": "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ",
+    "f8e5m2fnuz": "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ",
+}
+
+_FP8_SPECIAL_POLICY_CONSTANTS = {
+    Fp8SpecialPolicy.IEEE: "LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_IEEE",
+    Fp8SpecialPolicy.FINITE_NAN: "LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN",
+    Fp8SpecialPolicy.FINITE_NAN_UNSIGNED_ZERO: ("LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN_UNSIGNED_ZERO"),
+}
+
+_FP8_FORMAT_ROWS = tuple(
     _Fp8FormatRow(
-        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3",
-        ScalarTypeKind.F8E4M3,
-        exponent_bits=4,
-        mantissa_bits=3,
-        exponent_bias=7,
-        special_policy="LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_IEEE",
-    ),
-    _Fp8FormatRow(
-        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2",
-        ScalarTypeKind.F8E5M2,
-        exponent_bits=5,
-        mantissa_bits=2,
-        exponent_bias=15,
-        special_policy="LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_IEEE",
-    ),
-    _Fp8FormatRow(
-        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN",
-        ScalarTypeKind.F8E4M3,
-        exponent_bits=4,
-        mantissa_bits=3,
-        exponent_bias=7,
-        special_policy="LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN",
-    ),
-    _Fp8FormatRow(
-        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ",
-        ScalarTypeKind.F8E4M3,
-        exponent_bits=4,
-        mantissa_bits=3,
-        exponent_bias=8,
-        special_policy=("LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN_UNSIGNED_ZERO"),
-    ),
-    _Fp8FormatRow(
-        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ",
-        ScalarTypeKind.F8E5M2,
-        exponent_bits=5,
-        mantissa_bits=2,
-        exponent_bias=16,
-        special_policy=("LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN_UNSIGNED_ZERO"),
-    ),
+        source_format=_FP8_SOURCE_FORMAT_CONSTANTS[numeric_format.keyword],
+        keyword=numeric_format.keyword,
+        source_type=numeric_format.carrier_type,
+        exponent_bits=numeric_format.exponent_bits,
+        mantissa_bits=numeric_format.mantissa_bits,
+        exponent_bias=numeric_format.exponent_bias,
+        special_policy=_FP8_SPECIAL_POLICY_CONSTANTS[numeric_format.special_policy],
+    )
+    for numeric_format in FP8_FORMATS
 )
 
 _FP8_FORMAT_INDEX_BY_NAME = {row.source_format: index for index, row in enumerate(_FP8_FORMAT_ROWS)}

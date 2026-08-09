@@ -13,14 +13,32 @@
 #include "loom/target/arch/amdgpu/lower/encoding/fp8.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
-static const loom_value_fact_numeric_format_flags_t
-    kLoomAmdgpuFp8SourceFormats[] = {
+typedef struct loom_amdgpu_fp8_format_row_t {
+  // Exact FP8 numeric format represented by this row.
+  loom_value_fact_numeric_format_flags_t numeric_format;
+  // Physical scalar carrier for encoded values of this format.
+  loom_scalar_type_t element_type;
+  // Exact exponent, mantissa, bias, and special-value semantics.
+  loom_scalar_type_fp8_format_t format;
+} loom_amdgpu_fp8_format_row_t;
+
+static const loom_amdgpu_fp8_format_row_t kLoomAmdgpuFp8FormatRows[] = {
 #define LOOM_AMDGPU_FP8_SUBNORMAL_TABLE_ROW(                                   \
     row_source_format, row_element_type, row_exponent_bits, row_mantissa_bits, \
     row_exponent_bias, row_special_policy, bf16_table_0, bf16_table_1,         \
     bf16_byte_0_0, bf16_byte_0_1, bf16_byte_1_0, bf16_byte_1_1, f16_byte_0_0,  \
     f16_byte_0_1, f16_byte_1_0, f16_byte_1_1)                                  \
-  row_source_format
+  {                                                                            \
+      .numeric_format = row_source_format,                                     \
+      .element_type = row_element_type,                                        \
+      .format =                                                                \
+          {                                                                    \
+              .exponent_bits = row_exponent_bits,                              \
+              .mantissa_bits = row_mantissa_bits,                              \
+              .exponent_bias = row_exponent_bias,                              \
+              .special_policy = row_special_policy,                            \
+          },                                                                   \
+  }
 #include "loom/target/arch/amdgpu/lower/encoding/fp8_subnormal_table_rows.inl"
 #undef LOOM_AMDGPU_FP8_SUBNORMAL_TABLE_ROW
 };
@@ -38,23 +56,40 @@ static_assert(LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ ==
                   (LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3 << 4),
               "FP8 numeric-format bits must be contiguous");
 
-bool loom_amdgpu_fp8_source_format_index(
-    loom_value_fact_numeric_format_flags_t source_format,
+bool loom_amdgpu_fp8_format_index(
+    loom_value_fact_numeric_format_flags_t numeric_format,
     uint32_t* out_format_index) {
   *out_format_index = 0;
-  if (source_format == LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE ||
-      (source_format & (source_format - 1)) != 0) {
+  if (numeric_format == LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE ||
+      (numeric_format & (numeric_format - 1)) != 0) {
     return false;
   }
   const uint64_t normalized_format =
-      source_format / LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3;
+      numeric_format / LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3;
   const uint32_t format_index =
       (uint32_t)iree_math_count_trailing_zeros_u64_width(normalized_format, 64);
-  if (format_index >= IREE_ARRAYSIZE(kLoomAmdgpuFp8SourceFormats) ||
-      kLoomAmdgpuFp8SourceFormats[format_index] != source_format) {
+  if (format_index >= IREE_ARRAYSIZE(kLoomAmdgpuFp8FormatRows) ||
+      kLoomAmdgpuFp8FormatRows[format_index].numeric_format != numeric_format) {
     return false;
   }
   *out_format_index = format_index;
+  return true;
+}
+
+bool loom_amdgpu_fp8_format(
+    loom_value_fact_numeric_format_flags_t numeric_format,
+    loom_scalar_type_t* out_element_type,
+    loom_scalar_type_fp8_format_t* out_format) {
+  *out_element_type = LOOM_SCALAR_TYPE_COUNT_;
+  *out_format = (loom_scalar_type_fp8_format_t){0};
+  uint32_t format_index = 0;
+  if (!loom_amdgpu_fp8_format_index(numeric_format, &format_index)) {
+    return false;
+  }
+  const loom_amdgpu_fp8_format_row_t* row =
+      &kLoomAmdgpuFp8FormatRows[format_index];
+  *out_element_type = row->element_type;
+  *out_format = row->format;
   return true;
 }
 
@@ -64,8 +99,7 @@ static bool loom_amdgpu_fp8_descriptor_row_index(
     loom_scalar_type_t result_element_type, size_t* out_row_index) {
   *out_row_index = 0;
   uint32_t source_format_index = 0;
-  if (!loom_amdgpu_fp8_source_format_index(source_format,
-                                           &source_format_index) ||
+  if (!loom_amdgpu_fp8_format_index(source_format, &source_format_index) ||
       result_element_type >= LOOM_SCALAR_TYPE_COUNT_) {
     return false;
   }
@@ -103,7 +137,7 @@ static_assert(IREE_ARRAYSIZE(kLoomAmdgpuFp8NativeDescriptorRefRows) <= 64,
               "native descriptor cache stores row state in one u64 bitset");
 
 static const uint8_t kLoomAmdgpuFp8NativeDescriptorRefRowIndex[IREE_ARRAYSIZE(
-    kLoomAmdgpuFp8SourceFormats)][LOOM_SCALAR_TYPE_COUNT_] = {
+    kLoomAmdgpuFp8FormatRows)][LOOM_SCALAR_TYPE_COUNT_] = {
 #define LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW(                        \
     row_index, source_format_index, source_format, result_type, lane_ref, \
     pair_ref, byte0_ref, byte1_ref, byte2_ref, byte3_ref)                 \
@@ -231,7 +265,7 @@ static_assert(IREE_ARRAYSIZE(kLoomAmdgpuFp8ScaledDescriptorRefRows) <= 64,
               "scaled descriptor cache stores row state in one u64 bitset");
 
 static const uint8_t kLoomAmdgpuFp8ScaledDescriptorRefRowIndex[IREE_ARRAYSIZE(
-    kLoomAmdgpuFp8SourceFormats)][LOOM_SCALAR_TYPE_COUNT_] = {
+    kLoomAmdgpuFp8FormatRows)][LOOM_SCALAR_TYPE_COUNT_] = {
 #define LOOM_AMDGPU_FP8_SCALED_DESCRIPTOR_REF_ROW(              \
     row_index, source_format_index, source_format, result_type, \
     scalef32_pair_ref, e8m0_pk8_ref)                            \

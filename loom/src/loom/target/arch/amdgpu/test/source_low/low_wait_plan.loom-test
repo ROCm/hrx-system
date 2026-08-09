@@ -914,13 +914,13 @@ low.func.def target<amdgpu.rdna3.core>(@target) @smem_load_address_dependency_as
   s_load_dwordx2 s[6:7], s[0:1], s4 offset:16
   s_load_dword s5, s[0:1], s4 offset:0
   s_load_dword s8, s[0:1], s4 offset:8
-  s_load_dword s0, s[0:1], s4 offset:12
+  s_load_dword s9, s[0:1], s4 offset:12
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  s_load_dword s1, s[6:7], s4 offset:0
+  s_load_dword s0, s[6:7], s4 offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  s_add_u32 s1, s1, s5
-  s_add_u32 s1, s1, s8
-  s_add_u32 s0, s1, s0
+  s_add_u32 s0, s0, s5
+  s_add_u32 s0, s0, s8
+  s_add_u32 s0, s0, s9
   v_mov_b32_copy v1, s0
   global_store_b32 v0, v1, s[2:3] offset:0
   s_waitcnt_vscnt vscnt(0)
