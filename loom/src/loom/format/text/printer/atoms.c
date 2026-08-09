@@ -871,13 +871,14 @@ static iree_status_t loom_print_attr_impl(
             "parameterized attribute has unknown family kind %u",
             (unsigned)loom_attr_as_parameterized_kind(*attr));
       }
+      iree_string_view_t family_name =
+          loom_bstring_view(family_descriptor->name);
       if (attr->count != family_descriptor->parameter_count ||
           (attr->count > 0 && !attr->parameterized_slots)) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "parameterized attribute '%.*s' has malformed slot storage",
-            (int)loom_bstring_view(family_descriptor->name).size,
-            loom_bstring_view(family_descriptor->name).data);
+            (int)family_name.size, family_name.data);
       }
 
       IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '#'));
@@ -885,14 +886,51 @@ static iree_status_t loom_print_attr_impl(
           stream, loom_bstring_view(family_descriptor->name)));
       IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '<'));
       bool has_previous_parameter = false;
+      const uint8_t primary_parameter_index =
+          family_descriptor->primary_parameter_index;
+      if (primary_parameter_index !=
+          LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER) {
+        const loom_attribute_t* primary_parameter =
+            &attr->parameterized_slots[primary_parameter_index];
+        const loom_attr_descriptor_t* primary_parameter_descriptor =
+            &family_descriptor->parameter_descriptors[primary_parameter_index];
+        if (loom_attr_is_absent(*primary_parameter)) {
+          iree_string_view_t parameter_name =
+              loom_attr_descriptor_name(primary_parameter_descriptor);
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "required parameter '%.*s' of parameterized attribute '%.*s' "
+              "is absent",
+              (int)parameter_name.size, parameter_name.data,
+              (int)family_name.size, family_name.data);
+        }
+        IREE_RETURN_IF_ERROR(
+            loom_print_attr_impl(stream, primary_parameter, module,
+                                 primary_parameter_descriptor, type_context));
+        has_previous_parameter = true;
+      }
       for (uint8_t i = 0; i < family_descriptor->parameter_count; ++i) {
+        if (i == primary_parameter_index) continue;
+        const loom_attr_descriptor_t* parameter_descriptor =
+            &family_descriptor->parameter_descriptors[i];
         const loom_attribute_t* parameter = &attr->parameterized_slots[i];
-        if (loom_attr_is_absent(*parameter)) continue;
+        if (loom_attr_is_absent(*parameter)) {
+          if (iree_any_bit_set(parameter_descriptor->flags,
+                               LOOM_ATTR_OPTIONAL)) {
+            continue;
+          }
+          iree_string_view_t parameter_name =
+              loom_attr_descriptor_name(parameter_descriptor);
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "required parameter '%.*s' of parameterized attribute '%.*s' "
+              "is absent",
+              (int)parameter_name.size, parameter_name.data,
+              (int)family_name.size, family_name.data);
+        }
         if (has_previous_parameter) {
           IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ", "));
         }
-        const loom_attr_descriptor_t* parameter_descriptor =
-            &family_descriptor->parameter_descriptors[i];
         IREE_RETURN_IF_ERROR(loom_output_stream_write(
             stream, loom_attr_descriptor_name(parameter_descriptor)));
         IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, " = "));

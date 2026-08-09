@@ -16,6 +16,11 @@
 extern "C" {
 #endif
 
+enum {
+  // Sentinel indicating that a family has no compact positional parameter.
+  LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER = UINT8_MAX,
+};
+
 // Generated metadata for one descriptor-backed parameterized attribute family.
 typedef struct loom_parameterized_attr_descriptor_t {
   // Stable dotted public family name.
@@ -24,9 +29,15 @@ typedef struct loom_parameterized_attr_descriptor_t {
   loom_parameterized_attr_kind_t kind;
   // Number of descriptor-indexed parameter slots.
   uint8_t parameter_count;
+  // Required parameter printed first without its name in text assembly, or
+  // LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER when all parameters are named.
+  uint8_t primary_parameter_index;
   // Parameter descriptors in stable declaration order.
   const loom_attr_descriptor_t* parameter_descriptors;
 } loom_parameterized_attr_descriptor_t;
+
+static_assert(sizeof(loom_parameterized_attr_descriptor_t) == 24,
+              "parameterized attribute descriptor must remain 24 bytes");
 
 #ifdef __cplusplus
 }  // extern "C"

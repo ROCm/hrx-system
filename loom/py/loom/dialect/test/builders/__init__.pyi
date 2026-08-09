@@ -1070,3 +1070,9 @@ class TestBuilder(DialectBuilder):
         options: Any,
         location_id: int | None = ...,
     ) -> None: ...
+    def compact_parameterized_attr(
+        self,
+        *,
+        value: Any,
+        location_id: int | None = ...,
+    ) -> None: ...

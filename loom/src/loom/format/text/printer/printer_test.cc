@@ -20,6 +20,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/test/ops.h"
+#include "loom/ops/test/registry.h"
 #include "loom/target/registers.h"
 #include "loom/util/stream.h"
 
@@ -341,11 +342,7 @@ class PrintOpTest : public ::testing::Test {
                                      &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
 
-    iree_host_size_t test_count = 0;
-    const loom_op_vtable_t* const* test_vtables =
-        loom_test_dialect_vtables(&test_count);
-    IREE_ASSERT_OK(loom_context_register_dialect(
-        &context_, LOOM_DIALECT_TEST, test_vtables, (uint16_t)test_count));
+    IREE_ASSERT_OK(loom_test_dialect_register(&context_));
 
     IREE_ASSERT_OK(
         loom_context_register_encoding_vtable(&context_, &kQ8_0EncodingVtable));
@@ -407,6 +404,16 @@ class PrintOpTest : public ::testing::Test {
     iree_string_builder_initialize(iree_allocator_system(), &builder);
     iree_status_t status =
         loom_text_print_operation_to_builder(module_, op, &builder, flags);
+    iree_string_builder_deinitialize(&builder);
+    return status;
+  }
+
+  iree_status_t print_attr_status(const loom_attribute_t* attr) {
+    iree_string_builder_t builder;
+    iree_string_builder_initialize(iree_allocator_system(), &builder);
+    loom_output_stream_t stream;
+    loom_output_stream_for_builder(&builder, &stream);
+    iree_status_t status = loom_text_print_attribute(attr, module_, &stream);
     iree_string_builder_deinitialize(&builder);
     return status;
   }
@@ -1429,6 +1436,30 @@ TEST_F(PrintOpTest, AttrsOpWithWrongDictAttrKindReturnsInvalidArgument) {
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         print_op_status(op, LOOM_TEXT_PRINT_DEFAULT));
+}
+
+TEST_F(PrintOpTest,
+       ParameterizedAttrWithAbsentRequiredPrimaryReturnsInvalidArgument) {
+  loom_attribute_t slots[] = {
+      loom_attr_absent(),
+      loom_attr_absent(),
+  };
+  loom_attribute_t attr = loom_make_parameterized_attr(
+      LOOM_PARAMETERIZED_ATTR_TEST_COMPACT, slots, IREE_ARRAYSIZE(slots));
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, print_attr_status(&attr));
+}
+
+TEST_F(PrintOpTest,
+       ParameterizedAttrWithAbsentRequiredNamedFieldReturnsInvalidArgument) {
+  loom_attribute_t slots[] = {
+      loom_attr_absent(), loom_attr_absent(), loom_attr_absent(),
+      loom_attr_absent(), loom_attr_absent(),
+  };
+  loom_attribute_t attr = loom_make_parameterized_attr(
+      LOOM_PARAMETERIZED_ATTR_TEST_OPTIONS, slots, IREE_ARRAYSIZE(slots));
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, print_attr_status(&attr));
 }
 
 //===----------------------------------------------------------------------===//

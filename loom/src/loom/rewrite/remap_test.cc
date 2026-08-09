@@ -13,6 +13,8 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/test/ops.h"
+#include "loom/ops/test/registry.h"
 #include "loom/ops/type_registry.h"
 
 namespace loom {
@@ -24,6 +26,7 @@ class RemapTest : public ::testing::Test {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(),
                                      &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
+    IREE_ASSERT_OK(loom_test_dialect_register(&context_));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("source"),
                                         &block_pool_, nullptr,
@@ -291,6 +294,30 @@ TEST_F(RemapTest, CopiesByteAttributePayloadAcrossModules) {
   ASSERT_NE(target_attr.bytes, nullptr);
   EXPECT_NE(target_attr.bytes, source_bytes);
   EXPECT_EQ(memcmp(target_attr.bytes, source_bytes, sizeof(source_bytes)), 0);
+}
+
+TEST_F(RemapTest, RemapsCompactParameterizedAttributeSlotsByDescriptor) {
+  loom_string_id_t source_label_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(source_, IREE_SV("wave"), &source_label_id));
+  loom_attribute_t source_attr = {};
+  IREE_ASSERT_OK(loom_test_compact_attr_make(
+      source_, LOOM_TEST_COMPACT_ATTR_BUILD_FLAG_HAS_LABEL, source_label_id, 64,
+      &source_attr));
+
+  loom_ir_remap_t remap = InitializeRemap();
+  loom_attribute_t target_attr = {};
+  IREE_ASSERT_OK(loom_ir_remap_attribute(&remap, source_attr, &target_attr));
+
+  ASSERT_TRUE(loom_test_compact_attr_isa(target_attr));
+  EXPECT_EQ(loom_test_compact_attr_value(target_attr), 64);
+  ASSERT_TRUE(loom_test_compact_attr_has_label(target_attr));
+  loom_string_id_t target_label_id = loom_test_compact_attr_label(target_attr);
+  ASSERT_LT(target_label_id, target_->strings.count);
+  EXPECT_TRUE(iree_string_view_equal(target_->strings.entries[target_label_id],
+                                     IREE_SV("wave")));
+  EXPECT_NE(loom_attr_as_parameterized_slots(source_attr),
+            loom_attr_as_parameterized_slots(target_attr));
 }
 
 TEST_F(RemapTest, RejectsMalformedPredicateListsWithoutReadingPastPayload) {

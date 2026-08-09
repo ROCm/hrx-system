@@ -398,6 +398,37 @@ class TestParameterizedAttrDef:
 
         assert tile.name == "test.tile"
         assert tile.parameters == (AttrDef("width", "i64"),)
+        assert tile.primary_parameter is None
+
+    def test_declares_required_primary_parameter_by_stable_name(self) -> None:
+        compact = ParameterizedAttrDef(
+            "test.compact",
+            group=Dialect("test"),
+            parameters=[
+                AttrDef("label", "string", optional=True),
+                AttrDef("value", "i64"),
+            ],
+            primary_parameter="value",
+        )
+
+        assert compact.primary_parameter_index == 1
+        assert compact.primary_parameter == AttrDef("value", "i64")
+
+    def test_rejects_missing_or_optional_primary_parameter(self) -> None:
+        with _raises(ValueError, match="primary parameter 'missing' is not declared"):
+            ParameterizedAttrDef(
+                "test.compact",
+                group=Dialect("test"),
+                parameters=[AttrDef("value", "i64")],
+                primary_parameter="missing",
+            )
+        with _raises(ValueError, match="primary parameter 'value' must be required"):
+            ParameterizedAttrDef(
+                "test.compact",
+                group=Dialect("test"),
+                parameters=[AttrDef("value", "i64", optional=True)],
+                primary_parameter="value",
+            )
 
     def test_rejects_wrong_namespace(self) -> None:
         with _raises(ValueError, match="must begin with the owning dialect"):

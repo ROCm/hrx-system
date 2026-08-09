@@ -287,6 +287,17 @@ static iree_status_t loom_parse_generic_attr_value_with_type_mode(
     loom_parser_t* parser, uint16_t nesting_depth,
     loom_type_parse_mode_t type_mode, loom_attribute_t* out_attr);
 
+static iree_status_t loom_parse_next_parameter_is_named(loom_parser_t* parser,
+                                                        bool* out_is_named) {
+  *out_is_named = false;
+  loom_tokenizer_t lookahead = parser->tokenizer;
+  if (loom_tokenizer_at(&lookahead, LOOM_TOKEN_BARE_IDENT)) {
+    (void)loom_tokenizer_next(&lookahead);
+    *out_is_named = loom_tokenizer_at(&lookahead, LOOM_TOKEN_EQUALS);
+  }
+  return loom_tokenizer_consume_status(&lookahead);
+}
+
 static iree_status_t loom_parse_parameterized_attr(
     loom_parser_t* parser, loom_parameterized_attr_kind_t expected_family_kind,
     uint16_t nesting_depth, loom_type_parse_mode_t type_mode,
@@ -341,35 +352,51 @@ static iree_status_t loom_parse_parameterized_attr(
       break;
     }
 
-    loom_token_t name_token = loom_token_none();
-    LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_BARE_IDENT, &name_token);
+    loom_token_t parameter_token = loom_tokenizer_peek(&parser->tokenizer);
     uint8_t parameter_index = 0;
-    const loom_attr_descriptor_t* parameter_descriptor =
-        loom_attr_descriptor_find_by_name(
-            family_descriptor->parameter_descriptors,
-            family_descriptor->parameter_count, name_token.text,
-            &parameter_index);
-    if (!parameter_descriptor) {
-      char expected[320];
-      iree_string_view_t family_name =
-          loom_bstring_view(family_descriptor->name);
-      int expected_length = iree_snprintf(
-          expected, sizeof(expected), "a parameter declared by '#%.*s'",
-          (int)family_name.size, family_name.data);
-      return loom_parser_emit_unexpected_token(
-          parser, name_token,
-          iree_make_string_view(expected, (iree_host_size_t)expected_length));
+    const loom_attr_descriptor_t* parameter_descriptor = NULL;
+    bool is_named = true;
+    if (parsed_parameter_count == 0 &&
+        family_descriptor->primary_parameter_index !=
+            LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER) {
+      IREE_RETURN_IF_ERROR(
+          loom_parse_next_parameter_is_named(parser, &is_named));
+      if (!is_named) {
+        parameter_index = family_descriptor->primary_parameter_index;
+        parameter_descriptor =
+            &family_descriptor->parameter_descriptors[parameter_index];
+      }
+    }
+    if (is_named) {
+      LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_BARE_IDENT, &parameter_token);
+      parameter_descriptor = loom_attr_descriptor_find_by_name(
+          family_descriptor->parameter_descriptors,
+          family_descriptor->parameter_count, parameter_token.text,
+          &parameter_index);
+      if (!parameter_descriptor) {
+        char expected[320];
+        iree_string_view_t family_name =
+            loom_bstring_view(family_descriptor->name);
+        int expected_length = iree_snprintf(
+            expected, sizeof(expected), "a parameter declared by '#%.*s'",
+            (int)family_name.size, family_name.data);
+        return loom_parser_emit_unexpected_token(
+            parser, parameter_token,
+            iree_make_string_view(expected, (iree_host_size_t)expected_length));
+      }
     }
 
     uint64_t parameter_bit = UINT64_C(1) << (parameter_index & 63u);
     uint64_t* present_word = &present_bits[parameter_index >> 6];
     if ((*present_word & parameter_bit) != 0) {
       return loom_parser_emit_unexpected_token(
-          parser, name_token, IREE_SV("each parameter at most once"));
+          parser, parameter_token, IREE_SV("each parameter at most once"));
     }
     *present_word |= parameter_bit;
 
-    LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_EQUALS, NULL);
+    if (is_named) {
+      LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_EQUALS, NULL);
+    }
     IREE_RETURN_IF_ERROR(loom_parse_attr_value_at_depth(
         parser, parameter_descriptor, (uint16_t)(nesting_depth + 1), type_mode,
         &parameter_slots[parameter_index]));

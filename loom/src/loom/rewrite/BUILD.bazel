@@ -74,6 +74,7 @@ loom_cc_test(
         ":remap",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/test",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

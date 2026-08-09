@@ -23,6 +23,7 @@ from loom.assembly import (
     kw,
 )
 from loom.builtin_types import ALL_BUILTIN_TYPES
+from loom.dialect.pass_ import ALL_PASS_OPS
 from loom.dialect.test import (
     ALL_TEST_OPS,
     ALL_TEST_PARAMETERIZED_ATTRS,
@@ -1457,6 +1458,57 @@ class TestRoundTrip:
             "#test.options<mode = fast, scopes = [subgroup, <254>], "
             "element_type = bf16, tile = #test.tile<width = 16>, "
             "target = @target>"
+        )
+
+    def test_compact_parameterized_attr_canonicalizes_primary_first(self) -> None:
+        op = _parse_op(
+            'test.compact_parameterized_attr #test.compact<label = "wave", value = 64>'
+        )
+        value = op.attributes["value"]
+        assert isinstance(value, ParameterizedAttr)
+        assert value.slots == ("wave", 64)
+        assert _op_printer().print_operation(op, Module()) == (
+            'test.compact_parameterized_attr #test.compact<64, label = "wave">'
+        )
+
+        canonical = _parse_op(
+            'test.compact_parameterized_attr #test.compact<64, label = "wave">'
+        )
+        assert canonical.attributes["value"] == value
+
+        primary_only = _parse_op("test.compact_parameterized_attr #test.compact<64>")
+        assert _op_printer().print_operation(primary_only, Module()) == (
+            "test.compact_parameterized_attr #test.compact<64>"
+        )
+
+    def test_compact_parameterized_attr_rejects_missing_or_duplicate_primary(
+        self,
+    ) -> None:
+        with pytest.raises(ParseError, match="missing required parameter 'value'"):
+            _parse_op('test.compact_parameterized_attr #test.compact<label = "wave">')
+        with pytest.raises(ParseError, match="duplicate parameter 'value'"):
+            _parse_op("test.compact_parameterized_attr #test.compact<64, value = 32>")
+
+    def test_compact_parameterized_attr_roundtrips_in_pipeline_syntax(self) -> None:
+        source = """pass.pipeline<module> @compact pipeline {
+  choose(condition = #test.compact<label = "wave", value = 64>)
+}
+"""
+        parser = Parser()
+        parser.register_ops(ALL_PASS_OPS)
+        parser.register_types(ALL_BUILTIN_TYPES)
+        parser.register_parameterized_attrs(ALL_TEST_PARAMETERIZED_ATTRS)
+        module = parser.parse(source)
+
+        printer = Printer()
+        printer.register_ops(ALL_PASS_OPS)
+        printer.register_types(ALL_BUILTIN_TYPES)
+        assert (
+            printer.print_module(module)
+            == """pass.pipeline<module> @compact pipeline {
+  choose(condition = #test.compact<64, label = "wave">)
+}
+"""
         )
 
     def test_parameterized_attr_preserves_present_empty(self) -> None:

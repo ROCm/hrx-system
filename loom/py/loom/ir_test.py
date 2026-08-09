@@ -12,6 +12,7 @@ import pytest
 
 from loom.dialect.test import (
     test_array_type,
+    test_compact_attr,
     test_matrix_type,
     test_options_attr,
     test_scope_type,
@@ -655,6 +656,13 @@ class TestCanonicalAttrDict:
 
 
 class TestParameterizedAttr:
+    def test_compact_primary_preserves_named_declaration_order_storage(self) -> None:
+        compact = test_compact_attr(label="wave", value=64)
+
+        assert compact.slots == ("wave", 64)
+        assert compact.present_items() == (("label", "wave"), ("value", 64))
+        assert compact.definition.primary_parameter_index == 1
+
     def test_constructs_declaration_order_slots_and_nested_values(self) -> None:
         tile = test_tile_attr(width=16)
         options = test_options_attr(

@@ -873,6 +873,44 @@ TEST_F(ParserTest, ParameterizedAttrsRoundTripInDeclarationOrder) {
   loom_module_free(module);
 }
 
+TEST_F(ParserTest, CompactParameterizedAttrsCanonicalizePrimaryFirst) {
+  std::string text = RoundTrip(
+      "test.compact_parameterized_attr "
+      "#test.compact<label = \"wave\", value = 64>\n");
+  EXPECT_NE(text.find("test.compact_parameterized_attr "
+                      "#test.compact<64, label = \"wave\">"),
+            std::string::npos);
+
+  loom_module_t* module = ParseOk(
+      "test.compact_parameterized_attr "
+      "#test.compact<64, label = \"wave\">\n");
+  loom_op_t* op = loom_block_op(loom_module_block(module), 0);
+  ASSERT_TRUE(loom_test_compact_parameterized_attr_isa(op));
+  loom_attribute_t compact = loom_test_compact_parameterized_attr_value(op);
+  ASSERT_TRUE(loom_test_compact_attr_isa(compact));
+  EXPECT_EQ(loom_test_compact_attr_value(compact), 64);
+  ASSERT_TRUE(loom_test_compact_attr_has_label(compact));
+  loom_string_id_t label_id = loom_test_compact_attr_label(compact);
+  ASSERT_LT(label_id, module->strings.count);
+  EXPECT_TRUE(iree_string_view_equal(module->strings.entries[label_id],
+                                     IREE_SV("wave")));
+  loom_module_free(module);
+
+  text = RoundTrip("test.compact_parameterized_attr #test.compact<64>\n");
+  EXPECT_NE(text.find("test.compact_parameterized_attr #test.compact<64>"),
+            std::string::npos);
+  module = ParseOk(
+      "test.compact_parameterized_attr "
+      "#test.compact<64>\n");
+  op = loom_block_op(loom_module_block(module), 0);
+  ASSERT_TRUE(loom_test_compact_parameterized_attr_isa(op));
+  compact = loom_test_compact_parameterized_attr_value(op);
+  ASSERT_TRUE(loom_test_compact_attr_isa(compact));
+  EXPECT_EQ(loom_test_compact_attr_value(compact), 64);
+  EXPECT_FALSE(loom_test_compact_attr_has_label(compact));
+  loom_module_free(module);
+}
+
 TEST_F(ParserTest, ParameterizedAttrsPreservePresentEmptyAndGenericNesting) {
   loom_module_t* module = ParseOk(
       "test.parameterized_attr "
@@ -936,6 +974,18 @@ TEST_F(ParserTest, ParameterizedAttrsRejectMalformedInput) {
           "tile = #test.options<mode = precise>>\n",
           "#test.options",
           "'#test.tile'",
+      },
+      {
+          "test.compact_parameterized_attr "
+          "#test.compact<label = \"wave\">\n",
+          ">",
+          "required parameter 'value'",
+      },
+      {
+          "test.compact_parameterized_attr "
+          "#test.compact<64, value = 32>\n",
+          "value",
+          "each parameter at most once",
       },
   };
   for (const MalformedCase& test_case : cases) {

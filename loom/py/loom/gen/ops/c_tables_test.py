@@ -357,6 +357,7 @@ def test_generate_parameterized_attribute_family_metadata() -> None:
         "test.tile",
         group=dialect,
         parameters=[AttrDef("width", ATTR_TYPE_I64)],
+        primary_parameter="width",
     )
     options = ParameterizedAttrDef(
         "test.options",
@@ -399,6 +400,8 @@ def test_generate_parameterized_attribute_family_metadata() -> None:
     assert "slots[0] = loom_attr_i64(width);" in builders_c
     assert "slots[1] = tile;" in builders_c
     assert '.name = _BSTRING(12, "test.options")' in tables_c
+    assert ".primary_parameter_index = 0" in tables_c
+    assert tables_c.count(".primary_parameter_index = LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER") == 1
     assert ".attr_kind = LOOM_ATTR_ENUM_ARRAY" in tables_c
     assert ".flags = LOOM_ATTR_OPTIONAL | LOOM_ATTR_OPEN_ENUM" in tables_c
     assert ".attr_kind = LOOM_ATTR_PARAMETERIZED" in tables_c

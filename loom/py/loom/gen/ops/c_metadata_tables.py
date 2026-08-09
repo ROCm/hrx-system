@@ -259,6 +259,12 @@ def _emit_parameterized_attr_tables(
             lines.append(f"        .kind = {_c_parameterized_attr_enum_name(attr_def)},")
             if attr_def.parameters:
                 lines.append(f"        .parameter_count = IREE_ARRAYSIZE({prefix}_parameter_desc),")
+            primary_parameter_index = attr_def.primary_parameter_index
+            if primary_parameter_index is None:
+                lines.append("        .primary_parameter_index = LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER,")
+            else:
+                lines.append(f"        .primary_parameter_index = {primary_parameter_index},")
+            if attr_def.parameters:
                 lines.append(f"        .parameter_descriptors = {prefix}_parameter_desc,")
             lines.append("    },")
         lines.append("};")

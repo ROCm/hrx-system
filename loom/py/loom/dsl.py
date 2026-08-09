@@ -2916,12 +2916,16 @@ class ParameterizedAttrDef:
     The family name is stable public IR. Dense family ordinals and parameter
     slot positions are generated implementation details and never serialize.
     Parameters use AttrDef so operation fields, parameterized attributes, and
-    generic parameterized types share one value schema.
+    generic parameterized types share one value schema. A family may designate
+    one required parameter as its compact primary value; the parameter remains
+    named everywhere except canonical text assembly, where it prints
+    positionally.
     """
 
     name: str
     group: Dialect
     parameters: tuple[AttrDef, ...] = ()
+    primary_parameter_index: int | None = None
     doc: str = ""
 
     def __init__(
@@ -2930,6 +2934,7 @@ class ParameterizedAttrDef:
         *,
         group: Dialect,
         parameters: list[AttrDef] | tuple[AttrDef, ...] = (),
+        primary_parameter: str | None = None,
         doc: str = "",
     ) -> None:
         name_parts = name.split(".")
@@ -2948,11 +2953,40 @@ class ParameterizedAttrDef:
         _validate_descriptor_parameters(
             f"ParameterizedAttrDef '{name}'", frozen_parameters
         )
+        primary_parameter_index = None
+        if primary_parameter is not None:
+            primary_parameter_index = next(
+                (
+                    index
+                    for index, parameter in enumerate(frozen_parameters)
+                    if parameter.name == primary_parameter
+                ),
+                None,
+            )
+            if primary_parameter_index is None:
+                raise ValueError(
+                    f"ParameterizedAttrDef '{name}': primary parameter "
+                    f"'{primary_parameter}' is not declared"
+                )
+            if frozen_parameters[primary_parameter_index].optional:
+                raise ValueError(
+                    f"ParameterizedAttrDef '{name}': primary parameter "
+                    f"'{primary_parameter}' must be required"
+                )
 
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "group", group)
         object.__setattr__(self, "parameters", frozen_parameters)
+        object.__setattr__(self, "primary_parameter_index", primary_parameter_index)
         object.__setattr__(self, "doc", doc)
+
+    @property
+    def primary_parameter(self) -> AttrDef | None:
+        """Returns the descriptor-declared compact positional parameter."""
+
+        if self.primary_parameter_index is None:
+            return None
+        return self.parameters[self.primary_parameter_index]
 
     def __call__(self, **parameters: Any) -> Any:
         """Constructs one immutable value of this family."""

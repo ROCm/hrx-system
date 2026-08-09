@@ -358,6 +358,17 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_test_parameterized_attr_build(
         &body_builder, absent_options, LOOM_LOCATION_UNKNOWN, &absent_op));
 
+    loom_string_id_t label_id = LOOM_STRING_ID_INVALID;
+    IREE_CHECK_OK(
+        loom_module_intern_string(module, IREE_SV("wave"), &label_id));
+    loom_attribute_t compact = loom_attr_absent();
+    IREE_CHECK_OK(loom_test_compact_attr_make(
+        module, LOOM_TEST_COMPACT_ATTR_BUILD_FLAG_HAS_LABEL, label_id, 64,
+        &compact));
+    loom_op_t* compact_op = nullptr;
+    IREE_CHECK_OK(loom_test_compact_parameterized_attr_build(
+        &body_builder, compact, LOOM_LOCATION_UNKNOWN, &compact_op));
+
     loom_op_t* yield_op = nullptr;
     IREE_CHECK_OK(loom_test_yield_build(&body_builder, /*values=*/nullptr,
                                         /*value_count=*/0,
@@ -2280,7 +2291,7 @@ TEST_F(ReaderTest, ParameterizedAttrsPreserveNamedSlotsAndPresence) {
   ASSERT_NE(func_op, nullptr);
   loom_block_t* entry = loom_region_entry_block(loom_test_func_body(func_op));
   ASSERT_NE(entry, nullptr);
-  ASSERT_EQ(entry->op_count, 4u);
+  ASSERT_EQ(entry->op_count, 5u);
 
   loom_attribute_t full =
       loom_test_parameterized_attr_options(loom_block_op(entry, 0));
@@ -2310,6 +2321,16 @@ TEST_F(ReaderTest, ParameterizedAttrsPreserveNamedSlotsAndPresence) {
   loom_attribute_t absent =
       loom_test_parameterized_attr_options(loom_block_op(entry, 2));
   EXPECT_FALSE(loom_test_options_attr_has_scopes(absent));
+
+  loom_attribute_t compact =
+      loom_test_compact_parameterized_attr_value(loom_block_op(entry, 3));
+  ASSERT_TRUE(loom_test_compact_attr_isa(compact));
+  EXPECT_EQ(loom_test_compact_attr_value(compact), 64);
+  ASSERT_TRUE(loom_test_compact_attr_has_label(compact));
+  loom_string_id_t label_id = loom_test_compact_attr_label(compact);
+  ASSERT_LT(label_id, read_module->strings.count);
+  EXPECT_TRUE(iree_string_view_equal(read_module->strings.entries[label_id],
+                                     IREE_SV("wave")));
 
   loom_module_free(read_module);
   loom_module_free(module);

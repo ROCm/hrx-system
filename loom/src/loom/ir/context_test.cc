@@ -213,6 +213,9 @@ TEST_F(ContextTest, ParameterizedAttributeFamiliesResolveByKindAndName) {
       {
           /*.name=*/kFamilyName,
           /*.kind=*/LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0),
+          /*.parameter_count=*/0,
+          /*.primary_parameter_index=*/
+          LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER,
       },
   };
 
@@ -242,6 +245,58 @@ TEST_F(ContextTest, ParameterizedAttributeRegistrationRejectsWrongKind) {
       {
           /*.name=*/kFamilyName,
           /*.kind=*/LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 1),
+          /*.parameter_count=*/0,
+          /*.primary_parameter_index=*/
+          LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER,
+      },
+  };
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_context_register_parameterized_attrs(
+          &context_, LOOM_DIALECT_TEST, kFamilies, IREE_ARRAYSIZE(kFamilies)));
+}
+
+TEST_F(ContextTest, ParameterizedAttributeRegistrationRejectsInvalidPrimary) {
+  static const uint8_t kFamilyName[] =
+      "\x0C"
+      "test.compact";
+  static const loom_parameterized_attr_descriptor_t kFamilies[] = {
+      {
+          /*.name=*/kFamilyName,
+          /*.kind=*/LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0),
+          /*.parameter_count=*/0,
+          /*.primary_parameter_index=*/0,
+      },
+  };
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_context_register_parameterized_attrs(
+          &context_, LOOM_DIALECT_TEST, kFamilies, IREE_ARRAYSIZE(kFamilies)));
+}
+
+TEST_F(ContextTest, ParameterizedAttributeRegistrationRejectsOptionalPrimary) {
+  static const uint8_t kFamilyName[] =
+      "\x0C"
+      "test.compact";
+  static const uint8_t kParameterName[] =
+      "\x05"
+      "value";
+  static const loom_attr_descriptor_t kParameters[] = {
+      {
+          /*.name=*/kParameterName,
+          /*.attr_kind=*/LOOM_ATTR_I64,
+          /*.flags=*/LOOM_ATTR_OPTIONAL,
+      },
+  };
+  static const loom_parameterized_attr_descriptor_t kFamilies[] = {
+      {
+          /*.name=*/kFamilyName,
+          /*.kind=*/LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0),
+          /*.parameter_count=*/IREE_ARRAYSIZE(kParameters),
+          /*.primary_parameter_index=*/0,
+          /*.parameter_descriptors=*/kParameters,
       },
   };
 

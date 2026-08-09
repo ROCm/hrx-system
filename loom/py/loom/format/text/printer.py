@@ -669,10 +669,23 @@ def _format_attr_value(
         raise ValueError("enum arrays require a descriptor-backed field")
     if isinstance(value, ParameterizedAttr):
         parameters = []
-        for parameter, slot in zip(
-            value.definition.parameters, value.slots, strict=True
+        primary_parameter_index = value.definition.primary_parameter_index
+        if primary_parameter_index is not None:
+            primary_parameter = value.definition.parameters[primary_parameter_index]
+            primary_slot = value.slots[primary_parameter_index]
+            if primary_slot is not None:
+                parameters.append(
+                    _format_attr_value(
+                        primary_slot,
+                        primary_parameter,
+                        type_context=type_context,
+                        type_registry=type_registry,
+                    )
+                )
+        for parameter_index, (parameter, slot) in enumerate(
+            zip(value.definition.parameters, value.slots, strict=True)
         ):
-            if slot is None:
+            if slot is None or parameter_index == primary_parameter_index:
                 continue
             formatted_slot = _format_attr_value(
                 slot,

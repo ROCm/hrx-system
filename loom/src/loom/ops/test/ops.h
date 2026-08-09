@@ -19,7 +19,8 @@
 enum {
   LOOM_PARAMETERIZED_ATTR_TEST_TILE = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0),
   LOOM_PARAMETERIZED_ATTR_TEST_OPTIONS = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 1),
-  LOOM_PARAMETERIZED_ATTR_TEST_COUNT_ = 2,
+  LOOM_PARAMETERIZED_ATTR_TEST_COMPACT = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 2),
+  LOOM_PARAMETERIZED_ATTR_TEST_COUNT_ = 3,
 };
 
 // Synthetic mode for parameterized attribute coverage.
@@ -105,6 +106,32 @@ iree_status_t loom_test_options_attr_make(
     loom_type_id_t element_type,
     loom_attribute_t tile,
     loom_symbol_ref_t target,
+    loom_attribute_t* out_attr);
+
+// Compact primary parameter lifecycle witness.
+enum loom_test_compact_attr_build_flag_bits_e {
+  LOOM_TEST_COMPACT_ATTR_BUILD_FLAG_HAS_LABEL = 1u << 0,
+};
+typedef uint32_t loom_test_compact_attr_build_flags_t;
+static inline bool loom_test_compact_attr_isa(loom_attribute_t attr) {
+  return attr.kind == LOOM_ATTR_PARAMETERIZED && loom_attr_as_parameterized_kind(attr) == LOOM_PARAMETERIZED_ATTR_TEST_COMPACT;
+}
+enum { LOOM_TEST_COMPACT_ATTR_LABEL_PARAMETER_INDEX = 0 };
+static inline bool loom_test_compact_attr_has_label(loom_attribute_t attr) {
+  return !loom_attr_is_absent(loom_attr_as_parameterized_slots(attr)[LOOM_TEST_COMPACT_ATTR_LABEL_PARAMETER_INDEX]);
+}
+static inline loom_string_id_t loom_test_compact_attr_label(loom_attribute_t attr) {
+  return loom_attr_as_string_id(loom_attr_as_parameterized_slots(attr)[LOOM_TEST_COMPACT_ATTR_LABEL_PARAMETER_INDEX]);
+}
+enum { LOOM_TEST_COMPACT_ATTR_VALUE_PARAMETER_INDEX = 1 };
+static inline int64_t loom_test_compact_attr_value(loom_attribute_t attr) {
+  return loom_attr_as_i64(loom_attr_as_parameterized_slots(attr)[LOOM_TEST_COMPACT_ATTR_VALUE_PARAMETER_INDEX]);
+}
+iree_status_t loom_test_compact_attr_make(
+    loom_module_t* module,
+    loom_test_compact_attr_build_flags_t build_flags,
+    loom_string_id_t label,
+    int64_t value,
     loom_attribute_t* out_attr);
 
 enum {
@@ -215,7 +242,8 @@ enum {
   LOOM_OP_TEST_FACT_CLUSTER_UNIFORM = LOOM_OP_KIND(LOOM_DIALECT_TEST, 104),
   LOOM_OP_TEST_ENUM_ARRAY_ATTRS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 105),
   LOOM_OP_TEST_PARAMETERIZED_ATTR = LOOM_OP_KIND(LOOM_DIALECT_TEST, 106),
-  LOOM_OP_TEST_COUNT_ = 107,
+  LOOM_OP_TEST_COMPACT_PARAMETERIZED_ATTR = LOOM_OP_KIND(LOOM_DIALECT_TEST, 107),
+  LOOM_OP_TEST_COUNT_ = 108,
 };
 
 // Synthetic flags for TemplateParamFlags parser/printer coverage.
@@ -2097,6 +2125,16 @@ LOOM_DEFINE_ATTR_PARAMETERIZED(loom_test_parameterized_attr_options, 0)
 iree_status_t loom_test_parameterized_attr_build(
     loom_builder_t* builder,
     loom_attribute_t options,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_TEST_COMPACT_PARAMETERIZED_ATTR: Test op carrying a compact descriptor-backed attribute family.
+// test.compact_parameterized_attr #test.compact<64, label = "wave">
+LOOM_DEFINE_ISA(loom_test_compact_parameterized_attr_isa, LOOM_OP_TEST_COMPACT_PARAMETERIZED_ATTR)
+LOOM_DEFINE_ATTR_PARAMETERIZED(loom_test_compact_parameterized_attr_value, 0)
+iree_status_t loom_test_compact_parameterized_attr_build(
+    loom_builder_t* builder,
+    loom_attribute_t value,
     loom_location_id_t location,
     loom_op_t** out_op);
 

@@ -593,21 +593,41 @@ def _parse_parameterized_attr_from_tokens(
     parameters: dict[str, Any] = {}
     if not tokenizer.at(TokenKind.RANGLE):
         while True:
-            name_token = tokenizer.expect(TokenKind.BARE_IDENT)
-            parameter = descriptors.get(name_token.text)
-            if parameter is None:
+            parameter_name: str
+            parameter: AttrDef
+            is_named = True
+            if (
+                not parameters
+                and definition.primary_parameter is not None
+                and not (
+                    tokenizer.at(TokenKind.BARE_IDENT)
+                    and tokenizer.peek_n(1).kind == TokenKind.EQUALS
+                )
+            ):
+                parameter = definition.primary_parameter
+                parameter_name = parameter.name
+                is_named = False
+                parameter_location = tokenizer.peek().location
+            else:
+                name_token = tokenizer.expect(TokenKind.BARE_IDENT)
+                parameter_name = name_token.text
+                parameter_location = name_token.location
+                declared_parameter = descriptors.get(parameter_name)
+                if declared_parameter is None:
+                    raise ParseError(
+                        f"unknown parameter '{parameter_name}' for '{definition.name}'",
+                        name_token.location,
+                        filename,
+                    )
+                parameter = declared_parameter
+            if parameter_name in parameters:
                 raise ParseError(
-                    f"unknown parameter '{name_token.text}' for '{definition.name}'",
-                    name_token.location,
+                    f"duplicate parameter '{parameter_name}' for '{definition.name}'",
+                    parameter_location,
                     filename,
                 )
-            if name_token.text in parameters:
-                raise ParseError(
-                    f"duplicate parameter '{name_token.text}' for '{definition.name}'",
-                    name_token.location,
-                    filename,
-                )
-            tokenizer.expect(TokenKind.EQUALS)
+            if is_named:
+                tokenizer.expect(TokenKind.EQUALS)
             value = _parse_descriptor_attr_value_from_tokens(
                 tokenizer,
                 module,
@@ -623,7 +643,7 @@ def _parse_parameterized_attr_from_tokens(
             )
             if parameter.attr_type == "symbol":
                 value = SymbolName(value)
-            parameters[name_token.text] = value
+            parameters[parameter_name] = value
             if not tokenizer.try_consume(TokenKind.COMMA):
                 break
     closing = tokenizer.expect(TokenKind.RANGLE)

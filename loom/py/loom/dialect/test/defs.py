@@ -263,9 +263,21 @@ test_options_attr = ParameterizedAttrDef(
     doc="Structured parameterized attribute lifecycle witness.",
 )
 
+test_compact_attr = ParameterizedAttrDef(
+    "test.compact",
+    group=test_ops,
+    parameters=[
+        AttrDef("label", "string", optional=True, doc="Optional display label."),
+        AttrDef("value", "i64", doc="Primary compact value."),
+    ],
+    primary_parameter="value",
+    doc="Compact primary parameter lifecycle witness.",
+)
+
 ALL_TEST_PARAMETERIZED_ATTRS = (
     test_tile_attr,
     test_options_attr,
+    test_compact_attr,
 )
 
 test_scope_type = TypeDef(
@@ -1953,6 +1965,27 @@ test_parameterized_attr = Op(
 )
 
 # ============================================================================
+# test.compact_parameterized_attr — compact parameterized attribute
+# ============================================================================
+
+test_compact_parameterized_attr = Op(
+    "test.compact_parameterized_attr",
+    group=test_ops,
+    doc="Test op carrying a compact descriptor-backed attribute family.",
+    attrs=[
+        AttrDef(
+            "value",
+            ATTR_TYPE_PARAMETERIZED,
+            parameterized_attr=test_compact_attr,
+        ),
+    ],
+    format=[Attr("value")],
+    examples=[
+        'test.compact_parameterized_attr #test.compact<64, label = "wave">',
+    ],
+)
+
+# ============================================================================
 # test.enum_array_attrs — descriptor-backed enum-array attributes
 # ============================================================================
 
@@ -2704,4 +2737,5 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_fact_cluster_uniform,
     test_enum_array_attrs,
     test_parameterized_attr,
+    test_compact_parameterized_attr,
 )

@@ -1486,6 +1486,24 @@ class TestCrossFormatRoundTrip:
         assert not absent.has("scopes")
         assert _roundtrip_text_through_bytecode(text) == text
 
+    def test_compact_parameterized_attr_survives_named_slot_bytecode(self) -> None:
+        text = (
+            "test.func @compact() {\n"
+            "  test.compact_parameterized_attr "
+            '#test.compact<64, label = "wave">\n'
+            "  test.yield\n"
+            "}\n"
+        )
+        loaded = _parse_write_read(text)
+        function = next(
+            symbol.op for symbol in loaded.symbols if symbol.name == "compact"
+        )
+        assert function is not None
+        compact = function.regions[0].blocks[0].ops[0].attributes["value"]
+        assert isinstance(compact, ParameterizedAttr)
+        assert compact.slots == ("wave", 64)
+        assert _roundtrip_text_through_bytecode(text) == text
+
     def test_empty_optional_aggregates_survive_bytecode(self) -> None:
         text = (
             "test.func @empty_predicates() where [] {\n"
