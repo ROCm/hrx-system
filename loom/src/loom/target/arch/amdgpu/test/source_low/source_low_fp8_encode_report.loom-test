@@ -114,3 +114,47 @@ func.def target(@target) @report_f32_to_fp8_fnuz_bridge(%input: vector<4xf32>) -
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=1 emitted_ops=37 rows=1
 COMPILE-REPORT: source_low[0] function=report_f32_to_fp8_fnuz_bridge source_op=vector.fptrunc selection=plan plan_key=amdgpu.fp8_encode.strategy.f32_fnuz_bridge emitted_ops=37
+
+// ====
+
+// Schema-driven encoding reuses the exact plan selected for the equivalent
+// scalar-format conversion instead of scalarizing the logical lanes.
+amdgpu.target<gfx1100> @target
+func.def target(@target) @report_schema_f32_to_fp8_software(%input: vector<4xf32>) -> (vector<4xf8E4M3>) {
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3fn, payload_elements=4, payload_packing=dense_lanes, payload_registers=0, rounding=finite_only> : encoding<schema>
+  %encoded = vector.encode %input using %schema : vector<4xf32>, encoding<schema> -> vector<4xf8E4M3>
+  func.return %encoded : vector<4xf8E4M3>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=1 emitted_ops=63 rows=1
+COMPILE-REPORT: source_low[0] function=report_schema_f32_to_fp8_software source_op=vector.encode selection=plan plan_key=amdgpu.fp8_encode.strategy.f32_software emitted_ops=63
+
+// ====
+
+amdgpu.target<gfx950> @target
+func.def target(@target) @report_schema_f32_to_fp8_native(%input: vector<4xf32>) -> (vector<4xf8E4M3>) {
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3fn, payload_elements=4, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %encoded = vector.encode %input using %schema : vector<4xf32>, encoding<schema> -> vector<4xf8E4M3>
+  func.return %encoded : vector<4xf8E4M3>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=1 emitted_ops=20 rows=1
+COMPILE-REPORT: source_low[0] function=report_schema_f32_to_fp8_native source_op=vector.encode selection=plan plan_key=amdgpu.fp8_encode.strategy.f32_pair_saturating_native emitted_ops=20
+
+// ====
+
+amdgpu.target<gfx1151> @target
+func.def target(@target) @report_schema_f16_to_bf8_software(%input: vector<4xf16>) -> (vector<4xf8E5M2>) {
+  %schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=4, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %encoded = vector.encode %input using %schema : vector<4xf16>, encoding<schema> -> vector<4xf8E5M2>
+  func.return %encoded : vector<4xf8E5M2>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=1 emitted_ops=27 rows=1
+COMPILE-REPORT: source_low[0] function=report_schema_f16_to_bf8_software source_op=vector.encode selection=plan plan_key=amdgpu.fp8_encode.strategy.f16_e5m2_software emitted_ops=27

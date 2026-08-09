@@ -47,6 +47,7 @@ void loom_amdgpu_mark_value_plan_storage_demands(
     }
     case LOOM_OP_VECTOR_EXTF:
     case LOOM_OP_VECTOR_DECODE:
+    case LOOM_OP_VECTOR_ENCODE:
     case LOOM_OP_VECTOR_FPTRUNC: {
       const loom_amdgpu_vector_16bit_float_conversion_plan_t* conversion_plan =
           (const loom_amdgpu_vector_16bit_float_conversion_plan_t*)

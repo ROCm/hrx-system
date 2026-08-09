@@ -6,8 +6,8 @@
 
 // AMDGPU vector conversion lowering for F16, BF16, FP8, and BF8 formats.
 
-#ifndef LOOM_TARGET_ARCH_AMDGPU_LOWER_NARROW_FLOAT_VECTOR_CONVERSION_H_
-#define LOOM_TARGET_ARCH_AMDGPU_LOWER_NARROW_FLOAT_VECTOR_CONVERSION_H_
+#ifndef LOOM_TARGET_ARCH_AMDGPU_LOWER_ENCODING_VECTOR_CONVERSION_H_
+#define LOOM_TARGET_ARCH_AMDGPU_LOWER_ENCODING_VECTOR_CONVERSION_H_
 
 #include "loom/codegen/low/lower/lower.h"
 #include "loom/target/arch/amdgpu/lower/plan.h"
@@ -60,8 +60,14 @@ iree_status_t loom_amdgpu_low_legality_verify_vector_decode(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     bool* out_handled);
 
+// Verifies AMDGPU low legality for direct FP8 vector.encode operations.
+iree_status_t loom_amdgpu_low_legality_verify_vector_encode(
+    const loom_target_low_legality_provider_t* provider,
+    loom_target_low_legality_context_t* context, const loom_op_t* op,
+    bool* out_handled);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
 
-#endif  // LOOM_TARGET_ARCH_AMDGPU_LOWER_NARROW_FLOAT_VECTOR_CONVERSION_H_
+#endif  // LOOM_TARGET_ARCH_AMDGPU_LOWER_ENCODING_VECTOR_CONVERSION_H_

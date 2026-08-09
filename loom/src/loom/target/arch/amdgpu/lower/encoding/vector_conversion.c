@@ -323,6 +323,78 @@ bool loom_amdgpu_vector_decode_can_lower_as_fp8_conversion(
   }
 }
 
+static bool loom_amdgpu_select_vector_encode_fp8_plan(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_low_descriptor_set_t* descriptor_set, const loom_op_t* source_op,
+    loom_amdgpu_fp8_encode_plan_t* out_plan) {
+  *out_plan = (loom_amdgpu_fp8_encode_plan_t){0};
+  if (!loom_vector_encode_isa(source_op) || fact_table == NULL ||
+      loom_vector_encode_auxiliary(source_op).count != 0 ||
+      loom_vector_encode_auxiliary_names(source_op).count != 0) {
+    return false;
+  }
+
+  const loom_value_id_t source = loom_vector_encode_source(source_op);
+  const loom_value_id_t result = loom_vector_encode_result(source_op);
+  const loom_type_t source_type = loom_module_value_type(module, source);
+  const loom_type_t result_type = loom_module_value_type(module, result);
+  if (!loom_type_is_vector(source_type) || !loom_type_is_vector(result_type) ||
+      !loom_type_shape_equals(source_type, result_type)) {
+    return false;
+  }
+
+  const loom_scalar_type_t source_element_type =
+      loom_type_element_type(source_type);
+  uint32_t source_lane_count = 0;
+  uint32_t source_register_count = 0;
+  if (source_element_type == LOOM_SCALAR_TYPE_F32) {
+    source_lane_count = loom_amdgpu_vector_f32_register_count(source_type);
+    source_register_count = source_lane_count;
+  } else if (!loom_amdgpu_type_is_16bit_float_packed_vector(
+                 source_type, source_element_type, &source_lane_count,
+                 &source_register_count)) {
+    return false;
+  }
+  if (source_lane_count == 0 || source_register_count == 0) {
+    return false;
+  }
+
+  const loom_scalar_type_t result_element_type =
+      loom_type_element_type(result_type);
+  uint32_t result_lane_count = 0;
+  uint32_t result_register_count = 0;
+  if (!loom_amdgpu_type_is_extf_packed_float_vector(
+          result_type, result_element_type, &result_lane_count,
+          &result_register_count) ||
+      result_lane_count != source_lane_count || result_register_count == 0) {
+    return false;
+  }
+
+  loom_value_fact_encoding_summary_t summary = {0};
+  if (!loom_value_facts_query_encoding_summary(
+          &fact_table->context,
+          loom_value_fact_table_lookup(fact_table,
+                                       loom_vector_encode_schema(source_op)),
+          &summary)) {
+    return false;
+  }
+  const loom_value_fact_encoded_operand_schema_t schema =
+      summary.storage_schema.encoded_operand;
+  const loom_value_fact_rounding_policy_flags_t unsupported_policies =
+      schema.rounding_policy & ~LOOM_VALUE_FACT_ROUNDING_POLICY_FINITE_ONLY;
+  if (schema.element_format !=
+          loom_numeric_format_from_scalar_type(result_element_type) ||
+      unsupported_policies != LOOM_VALUE_FACT_ROUNDING_POLICY_NONE ||
+      !loom_amdgpu_fp8_encoded_operand_schema_matches(
+          schema, result_element_type, result_lane_count,
+          LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_UNSCALED)) {
+    return false;
+  }
+
+  return loom_amdgpu_select_fp8_encode_plan(descriptor_set, source_element_type,
+                                            result_element_type, out_plan);
+}
+
 iree_status_t loom_amdgpu_low_legality_verify_vector_decode(
     const loom_target_low_legality_provider_t* provider,
     loom_target_low_legality_context_t* context, const loom_op_t* op,
@@ -346,6 +418,24 @@ iree_status_t loom_amdgpu_low_legality_verify_vector_decode(
   return iree_ok_status();
 }
 
+iree_status_t loom_amdgpu_low_legality_verify_vector_encode(
+    const loom_target_low_legality_provider_t* provider,
+    loom_target_low_legality_context_t* context, const loom_op_t* op,
+    bool* out_handled) {
+  (void)provider;
+  *out_handled = false;
+  const loom_target_bundle_t* bundle = loom_target_low_legality_bundle(context);
+  if (!loom_amdgpu_low_legality_bundle_is_amdgpu(bundle)) {
+    return iree_ok_status();
+  }
+  loom_amdgpu_fp8_encode_plan_t plan = {0};
+  *out_handled = loom_amdgpu_select_vector_encode_fp8_plan(
+      loom_target_low_legality_module(context),
+      loom_target_low_legality_fact_table(context),
+      loom_target_low_legality_descriptor_set(context), op, &plan);
+  return iree_ok_status();
+}
+
 #define LOOM_AMDGPU_VECTOR_OP_INDEX(op_kind) ((uint8_t)((op_kind) & 0xFFu))
 #define LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_ROW(op, kind_) \
   [LOOM_AMDGPU_VECTOR_OP_INDEX(LOOM_OP_VECTOR_##op)] =                \
@@ -356,6 +446,7 @@ static const loom_amdgpu_vector_16bit_float_conversion_kind_t
         LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_ROW(EXTF, EXTF),
         LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_ROW(FPTRUNC, FPTRUNC),
         LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_ROW(DECODE, DECODE),
+        LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_ROW(ENCODE, ENCODE),
 };
 
 #undef LOOM_AMDGPU_VECTOR_OP_INDEX
@@ -652,6 +743,11 @@ iree_status_t loom_amdgpu_select_vector_16bit_float_conversion_plan(
           loom_low_lower_context_fact_table(context),
           loom_low_lower_context_descriptor_set(context), source_op);
     }
+  } else if (kind == LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_ENCODE) {
+    *out_selected = loom_amdgpu_select_vector_encode_fp8_plan(
+        loom_low_lower_context_module(context),
+        loom_low_lower_context_fact_table(context),
+        loom_low_lower_context_descriptor_set(context), source_op, &fp8_encode);
   } else if (kind == LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_FPTRUNC) {
     const loom_module_t* module = loom_low_lower_context_module(context);
     const loom_value_id_t source = loom_op_const_operands(source_op)[0];
@@ -1282,6 +1378,7 @@ iree_status_t loom_amdgpu_lower_vector_16bit_float_conversion(
       return loom_amdgpu_lower_vector_16bit_float_extf(context, source_op,
                                                        plan);
     case LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_FPTRUNC:
+    case LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_ENCODE:
       return loom_amdgpu_lower_vector_16bit_float_fptrunc(context, source_op,
                                                           plan);
     default:
