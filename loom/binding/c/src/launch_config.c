@@ -428,7 +428,8 @@ static loomc_status_t loomc_launch_config_prepare_target(
     if (loom_func_like_isa(function)) {
       const loom_target_function_version_t* function_version =
           loom_target_function_version_list_find(
-              &out_preparation->pipeline_result.function_versions, function);
+              &out_preparation->pipeline_result.function_versions.list,
+              function);
       if (function_version != NULL) {
         out_preparation->effective_target_facts =
             function_version->effective_target_facts;

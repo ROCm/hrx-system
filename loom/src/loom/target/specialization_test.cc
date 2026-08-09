@@ -237,7 +237,7 @@ func.def public target(@unrequested_family) @unrequested() {
   const loom_target_specialization_result_t result =
       Specialize(module.get(), requests, IREE_ARRAYSIZE(requests));
   ASSERT_EQ(result.error_count, 0u);
-  ASSERT_EQ(result.function_versions.count, 2u);
+  ASSERT_EQ(result.function_versions.list.count, 2u);
   EXPECT_EQ(module->symbols.count, symbol_count);
   EXPECT_EQ(TargetKind(module.get(), generic), LOOM_TEST_TARGET_KIND_LOW_CORE);
   EXPECT_EQ(loom_func_like_target(generic).module_id, generic_target.module_id);
@@ -251,7 +251,7 @@ func.def public target(@unrequested_family) @unrequested() {
             unrequested_target.symbol_id);
 
   const loom_target_function_version_t* generic_version =
-      loom_target_function_version_list_find(&result.function_versions,
+      loom_target_function_version_list_find(&result.function_versions.list,
                                              generic);
   ASSERT_NE(generic_version, nullptr);
   ASSERT_NE(generic_version->authored_target_facts, nullptr);
@@ -262,15 +262,15 @@ func.def public target(@unrequested_family) @unrequested() {
             LOOM_TEST_TARGET_KIND_LOW_CORE);
 
   const loom_target_function_version_t* targetless_version =
-      loom_target_function_version_list_find(&result.function_versions,
+      loom_target_function_version_list_find(&result.function_versions.list,
                                              targetless);
   ASSERT_NE(targetless_version, nullptr);
   EXPECT_EQ(targetless_version->authored_target_facts, nullptr);
   ASSERT_NE(targetless_version->effective_target_facts, nullptr);
   EXPECT_EQ(targetless_version->effective_target_facts->selector,
             LOOM_TEST_TARGET_KIND_LOW_CORE);
-  EXPECT_EQ(loom_target_function_version_list_find(&result.function_versions,
-                                                   unrequested),
+  EXPECT_EQ(loom_target_function_version_list_find(
+                &result.function_versions.list, unrequested),
             nullptr);
 }
 
@@ -295,14 +295,14 @@ func.def public target(@exact) @entry() {
   const loom_target_specialization_result_t result =
       Specialize(module.get(), &request, 1);
   ASSERT_EQ(result.error_count, 0u);
-  ASSERT_EQ(result.function_versions.count, 1u);
+  ASSERT_EQ(result.function_versions.list.count, 1u);
   const loom_symbol_ref_t effective_ref =
       loom_func_like_target(Function(module.get(), IREE_SV("entry")));
   EXPECT_EQ(effective_ref.module_id, authored_ref.module_id);
   EXPECT_EQ(effective_ref.symbol_id, authored_ref.symbol_id);
   const loom_target_function_version_t* version =
       loom_target_function_version_const_cast(
-          result.function_versions.values[0]);
+          result.function_versions.list.values[0]);
   ASSERT_NE(version, nullptr);
   EXPECT_EQ(version->effective_target_facts->selector,
             LOOM_TEST_TARGET_KIND_LOW_CORE);
@@ -349,16 +349,18 @@ func.def public target(@right_requirement) export("right_function") @right() {
   const loom_target_specialization_result_t result =
       Specialize(module.get(), requests, IREE_ARRAYSIZE(requests));
   ASSERT_EQ(result.error_count, 0u);
-  ASSERT_EQ(result.function_versions.count, 2u);
+  ASSERT_EQ(result.function_versions.list.count, 2u);
   EXPECT_EQ(module->symbols.count, symbol_count);
   EXPECT_EQ(loom_func_like_target(left).module_id, left_target.module_id);
   EXPECT_EQ(loom_func_like_target(left).symbol_id, left_target.symbol_id);
   EXPECT_EQ(loom_func_like_target(right).module_id, right_target.module_id);
   EXPECT_EQ(loom_func_like_target(right).symbol_id, right_target.symbol_id);
   const loom_target_function_version_t* left_version =
-      loom_target_function_version_list_find(&result.function_versions, left);
+      loom_target_function_version_list_find(&result.function_versions.list,
+                                             left);
   const loom_target_function_version_t* right_version =
-      loom_target_function_version_list_find(&result.function_versions, right);
+      loom_target_function_version_list_find(&result.function_versions.list,
+                                             right);
   ASSERT_NE(left_version, nullptr);
   ASSERT_NE(right_version, nullptr);
   const loom_target_facts_t* left_version_facts =
@@ -417,7 +419,7 @@ func.def public @otherwise_compatible() {
   const loom_target_specialization_result_t result = Specialize(
       module.get(), requests, IREE_ARRAYSIZE(requests), &diagnostic_collector);
   ASSERT_EQ(result.error_count, 1u);
-  EXPECT_EQ(result.function_versions.count, 0u);
+  EXPECT_EQ(result.function_versions.list.count, 0u);
   EXPECT_EQ(diagnostic_collector.error, LOOM_ERR_TARGET_052);
   ASSERT_EQ(diagnostic_collector.strings.size(), 3u);
   EXPECT_EQ(diagnostic_collector.strings[0], "conflict");
@@ -458,7 +460,7 @@ func.def public @entry() {
                                 /*.count=*/1,
                             },
                             /*diagnostic_emitter=*/{}, &arena_, &result));
-  EXPECT_EQ(result.function_versions.count, 0u);
+  EXPECT_EQ(result.function_versions.list.count, 0u);
 }
 
 TEST_F(TargetSpecializationTest,
@@ -483,14 +485,15 @@ func.def public target(@external) @entry() {
   const loom_target_specialization_result_t result =
       Specialize(module.get(), &request, 1);
   ASSERT_EQ(result.error_count, 0u);
-  ASSERT_EQ(result.function_versions.count, 1u);
+  ASSERT_EQ(result.function_versions.list.count, 1u);
   EXPECT_EQ(module->symbols.count, symbol_count);
   EXPECT_EQ(loom_func_like_target(entry).module_id,
             authored_target_ref.module_id);
   EXPECT_EQ(loom_func_like_target(entry).symbol_id,
             authored_target_ref.symbol_id);
   const loom_target_function_version_t* version =
-      loom_target_function_version_list_find(&result.function_versions, entry);
+      loom_target_function_version_list_find(&result.function_versions.list,
+                                             entry);
   ASSERT_NE(version, nullptr);
   EXPECT_TRUE(iree_string_view_equal(version->authored_target_name,
                                      IREE_SV("external")));

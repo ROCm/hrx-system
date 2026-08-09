@@ -54,7 +54,7 @@ struct loomc_module_t {
   iree_arena_allocator_t function_version_arena;
 
   // Concrete function versions published by the last successful compilation.
-  loom_function_version_list_t function_versions;
+  loom_function_version_owner_t function_versions;
 };
 
 typedef struct loomc_module_resolved_serialize_options_t {
@@ -816,6 +816,8 @@ loomc_status_t loomc_module_create_empty(loomc_context_t* context,
   loomc_workspace_retain(workspace);
   iree_arena_initialize(loomc_workspace_block_pool(workspace),
                         &module->function_version_arena);
+  loom_function_version_owner_initialize(&module->function_version_arena,
+                                         &module->function_versions);
 
   *out_module = module;
   return loomc_ok_status();
@@ -861,20 +863,21 @@ iree_arena_allocator_t* loomc_module_prepare_function_versions(
     loomc_module_t* module) {
   IREE_ASSERT_ARGUMENT(module);
   iree_arena_reset(&module->function_version_arena);
-  module->function_versions = (loom_function_version_list_t){0};
+  loom_function_version_owner_initialize(&module->function_version_arena,
+                                         &module->function_versions);
   return &module->function_version_arena;
 }
 
 void loomc_module_publish_function_versions(
-    loomc_module_t* module, loom_function_version_list_t function_versions) {
+    loomc_module_t* module, loom_function_version_owner_t function_versions) {
   IREE_ASSERT_ARGUMENT(module);
   module->function_versions = function_versions;
 }
 
 const loom_function_version_list_t* loomc_module_function_versions(
     const loomc_module_t* module) {
-  return module && module->function_versions.count != 0
-             ? &module->function_versions
+  return module && module->function_versions.list.count != 0
+             ? &module->function_versions.list
              : NULL;
 }
 

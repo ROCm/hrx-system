@@ -232,6 +232,7 @@ iree_status_t loom_target_specialize_functions(
   IREE_ASSERT_ARGUMENT(arena);
   IREE_ASSERT_ARGUMENT(out_result);
   *out_result = (loom_target_specialization_result_t){0};
+  loom_function_version_owner_initialize(arena, &out_result->function_versions);
   if (requests.count == 0) {
     return iree_ok_status();
   }
@@ -285,12 +286,10 @@ iree_status_t loom_target_specialize_functions(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, requests.count,
                                                  sizeof(*target_versions),
                                                  (void**)&target_versions));
-  loom_function_version_t** version_values = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, requests.count, sizeof(*version_values), (void**)&version_values));
+  IREE_RETURN_IF_ERROR(loom_function_version_owner_reserve(
+      &out_result->function_versions, requests.count));
   for (iree_host_size_t i = 0; i < requests.count; ++i) {
     specializations[i].version = &target_versions[i];
-    version_values[i] = &target_versions[i].base;
   }
 
   IREE_RETURN_IF_ERROR(loom_target_specialization_prepare_versions(
@@ -300,9 +299,9 @@ iree_status_t loom_target_specialize_functions(
     return iree_ok_status();
   }
 
-  out_result->function_versions = (loom_function_version_list_t){
-      .values = version_values,
-      .count = requests.count,
-  };
+  for (iree_host_size_t i = 0; i < requests.count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_function_version_owner_append(
+        &out_result->function_versions, &target_versions[i].base));
+  }
   return iree_ok_status();
 }
