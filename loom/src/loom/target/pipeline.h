@@ -82,6 +82,7 @@ iree_status_t loom_target_pipeline_build_to_source_low_diagnostic_artifacts(
 //
 // The produced pipeline is target-neutral at the driver level:
 // - source/kernel normalization and cleanup run on functions;
+// - retained call graphs are specialized for each concrete function target;
 // - source-to-low runs as the shared module pass;
 // - target providers contribute materialization/preparation pass IR;
 // - common low packetization preparation runs on functions.
