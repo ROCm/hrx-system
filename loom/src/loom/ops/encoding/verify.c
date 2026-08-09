@@ -183,13 +183,13 @@ iree_status_t loom_encoding_define_verify(const loom_module_t* module,
 
   const loom_encoding_vtable_t* vtable =
       loom_module_encoding_vtable(module, params.spec);
-  loom_value_id_t
-      dynamic_value_slots[LOOM_ENCODING_DYNAMIC_PARAMETER_COUNT_MAX];
+  loom_encoding_define_dynamic_binding_t
+      dynamic_binding_slots[LOOM_ENCODING_DYNAMIC_PARAMETER_COUNT_MAX];
   loom_encoding_define_resolved_params_t resolved_params;
   if (vtable) {
     const loom_encoding_define_param_resolution_t resolution =
         loom_encoding_define_resolve_params(module, vtable->descriptor, &params,
-                                            dynamic_value_slots,
+                                            dynamic_binding_slots,
                                             &resolved_params);
     switch (resolution.issue) {
       case LOOM_ENCODING_DEFINE_PARAM_ISSUE_NONE:

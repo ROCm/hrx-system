@@ -15,36 +15,6 @@
 #include "loom/ops/encoding/storage.h"
 #include "loom/util/fact_table.h"
 
-static iree_string_view_t loom_encoding_facts_layout_param_name(void) {
-  return IREE_SV("layout");
-}
-
-static iree_string_view_t loom_encoding_facts_schema_param_name(void) {
-  return IREE_SV("schema");
-}
-
-static bool loom_encoding_facts_string_id_equal(const loom_module_t* module,
-                                                loom_string_id_t string_id,
-                                                iree_string_view_t expected) {
-  if (string_id == LOOM_STRING_ID_INVALID ||
-      string_id >= module->strings.count) {
-    return false;
-  }
-  return iree_string_view_equal(module->strings.entries[string_id], expected);
-}
-
-static const loom_named_attr_t* loom_encoding_facts_find_param(
-    const loom_module_t* module, loom_named_attr_slice_t attrs,
-    iree_string_view_t name) {
-  for (iree_host_size_t i = 0; i < attrs.count; ++i) {
-    const loom_named_attr_t* entry = &attrs.entries[i];
-    if (loom_encoding_facts_string_id_equal(module, entry->name_id, name)) {
-      return entry;
-    }
-  }
-  return NULL;
-}
-
 static loom_value_fact_address_layout_t loom_encoding_facts_dense_layout(void) {
   return (loom_value_fact_address_layout_t){
       .kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE,
@@ -212,14 +182,22 @@ iree_status_t loom_encoding_define_facts(
       storage_schema.static_spec_encoding_id = 0;
     }
   } else if (role == LOOM_ENCODING_ROLE_PHYSICAL_STORAGE) {
-    const loom_named_attr_t* dynamic_layout = loom_encoding_facts_find_param(
-        module, params.dynamic_names, loom_encoding_facts_layout_param_name());
-    uint16_t dynamic_ordinal = 0;
-    if (loom_encoding_define_dynamic_param_ordinal(&params, dynamic_layout,
-                                                   &dynamic_ordinal)) {
+    loom_encoding_define_dynamic_binding_t dynamic_bindings
+        [LOOM_ENCODING_PHYSICAL_STORAGE_DYNAMIC_PARAMETER_COUNT_];
+    loom_encoding_define_resolved_params_t resolved_params;
+    loom_encoding_define_resolve_verified_params(
+        module, &loom_encoding_physical_storage_family_descriptor, &params,
+        dynamic_bindings, &resolved_params);
+
+    const uint16_t layout_operand_ordinal =
+        loom_encoding_define_dynamic_parameter_operand_ordinal(
+            &resolved_params,
+            LOOM_ENCODING_PHYSICAL_STORAGE_DYNAMIC_PARAMETER_LAYOUT);
+    if (layout_operand_ordinal != UINT16_MAX) {
       loom_value_fact_encoding_summary_t layout_summary = {0};
       if (loom_value_facts_query_encoding_summary(
-              context, operand_facts[dynamic_ordinal], &layout_summary)) {
+              context, operand_facts[layout_operand_ordinal],
+              &layout_summary)) {
         address_layout = layout_summary.address_layout;
       }
     } else {
@@ -228,13 +206,15 @@ iree_status_t loom_encoding_define_facts(
           IREE_ARRAYSIZE(static_strides), &address_layout);
     }
 
-    const loom_named_attr_t* dynamic_schema = loom_encoding_facts_find_param(
-        module, params.dynamic_names, loom_encoding_facts_schema_param_name());
-    if (loom_encoding_define_dynamic_param_ordinal(&params, dynamic_schema,
-                                                   &dynamic_ordinal)) {
+    const uint16_t schema_operand_ordinal =
+        loom_encoding_define_dynamic_parameter_operand_ordinal(
+            &resolved_params,
+            LOOM_ENCODING_PHYSICAL_STORAGE_DYNAMIC_PARAMETER_SCHEMA);
+    if (schema_operand_ordinal != UINT16_MAX) {
       loom_value_fact_encoding_summary_t schema_summary = {0};
       if (loom_value_facts_query_encoding_summary(
-              context, operand_facts[dynamic_ordinal], &schema_summary)) {
+              context, operand_facts[schema_operand_ordinal],
+              &schema_summary)) {
         storage_schema = schema_summary.storage_schema;
       }
     } else {

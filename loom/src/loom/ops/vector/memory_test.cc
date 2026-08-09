@@ -54,7 +54,9 @@ class VectorMemoryTest : public ::testing::Test {
   void BuildDenseLayout(loom_value_id_t* out_layout) {
     loom_op_t* layout = nullptr;
     IREE_ASSERT_OK(loom_encoding_layout_dense_build(
-        &builder_, loom_type_encoding(), LOOM_LOCATION_UNKNOWN, &layout));
+        &builder_,
+        loom_type_encoding_with_role(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT),
+        LOOM_LOCATION_UNKNOWN, &layout));
     *out_layout = loom_encoding_layout_dense_result(layout);
   }
 
@@ -66,8 +68,9 @@ class VectorMemoryTest : public ::testing::Test {
     loom_op_t* layout = nullptr;
     IREE_ASSERT_OK(loom_encoding_layout_strided_build(
         &builder_, dynamic_strides, dynamic_stride_count, static_strides,
-        static_stride_count, loom_type_encoding(), LOOM_LOCATION_UNKNOWN,
-        &layout));
+        static_stride_count,
+        loom_type_encoding_with_role(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT),
+        LOOM_LOCATION_UNKNOWN, &layout));
     *out_layout = loom_encoding_layout_strided_result(layout);
   }
 
@@ -154,7 +157,8 @@ class VectorMemoryTest : public ::testing::Test {
     loom_op_t* schema = nullptr;
     IREE_ASSERT_OK(loom_encoding_define_build(
         &builder_, spec, /*params=*/nullptr, /*params_count=*/0,
-        loom_type_encoding(), LOOM_LOCATION_UNKNOWN, &schema));
+        loom_type_encoding_with_role(LOOM_ENCODING_ROLE_STORAGE_SCHEMA),
+        LOOM_LOCATION_UNKNOWN, &schema));
     *out_schema = loom_encoding_define_result(schema);
   }
 
@@ -183,7 +187,8 @@ class VectorMemoryTest : public ::testing::Test {
     };
     loom_op_t* storage = nullptr;
     IREE_ASSERT_OK(loom_encoding_define_build(
-        &builder_, spec, params, IREE_ARRAYSIZE(params), loom_type_encoding(),
+        &builder_, spec, params, IREE_ARRAYSIZE(params),
+        loom_type_encoding_with_role(LOOM_ENCODING_ROLE_PHYSICAL_STORAGE),
         LOOM_LOCATION_UNKNOWN, &storage));
     *out_storage = loom_encoding_define_result(storage);
   }

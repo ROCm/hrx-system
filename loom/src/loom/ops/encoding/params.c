@@ -32,21 +32,21 @@ loom_encoding_define_param_resolution_t loom_encoding_define_resolve_params(
     const loom_module_t* module,
     const loom_encoding_family_descriptor_t* descriptor,
     const loom_encoding_define_param_view_t* params,
-    loom_value_id_t* dynamic_value_slots,
+    loom_encoding_define_dynamic_binding_t* dynamic_binding_slots,
     loom_encoding_define_resolved_params_t* out_params) {
   const uint8_t descriptor_count = descriptor->dynamic_parameter_count;
   for (uint8_t i = 0; i < descriptor_count; ++i) {
-    dynamic_value_slots[i] = LOOM_VALUE_ID_INVALID;
+    dynamic_binding_slots[i] = (loom_encoding_define_dynamic_binding_t){
+        .value_id = LOOM_VALUE_ID_INVALID,
+        .operand_ordinal = UINT16_MAX,
+    };
   }
   *out_params = (loom_encoding_define_resolved_params_t){
       .spec = params->spec,
       .descriptor = descriptor,
       .static_attrs = params->static_attrs,
-      .dynamic_values =
-          {
-              .values = dynamic_value_slots,
-              .count = descriptor_count,
-          },
+      .dynamic_bindings = dynamic_binding_slots,
+      .dynamic_binding_count = descriptor_count,
   };
 
   iree_host_size_t static_index = 0;
@@ -98,8 +98,9 @@ loom_encoding_define_param_resolution_t loom_encoding_define_resolve_params(
     IREE_ASSERT(dynamic_entry->value.kind == LOOM_ATTR_I64);
     IREE_ASSERT(dynamic_entry->value.i64 >= 0);
     IREE_ASSERT(dynamic_entry->value.i64 < params->dynamic_values.count);
+    const uint16_t operand_ordinal = (uint16_t)dynamic_entry->value.i64;
     const loom_value_id_t value_id =
-        params->dynamic_values.values[dynamic_entry->value.i64];
+        params->dynamic_values.values[operand_ordinal];
     const loom_type_constraint_t expected_type =
         descriptor->dynamic_parameter_descriptors[descriptor_index]
             .type_constraint;
@@ -109,9 +110,25 @@ loom_encoding_define_param_resolution_t loom_encoding_define_resolve_params(
           LOOM_ENCODING_DEFINE_PARAM_ISSUE_DYNAMIC_TYPE_MISMATCH,
           dynamic_entry->name_id, value_id, expected_type);
     }
-    dynamic_value_slots[descriptor_index] = value_id;
+    dynamic_binding_slots[descriptor_index] =
+        (loom_encoding_define_dynamic_binding_t){
+            .value_id = value_id,
+            .operand_ordinal = operand_ordinal,
+        };
     ++descriptor_index;
   }
 
   return loom_encoding_define_param_resolution_ok();
+}
+
+void loom_encoding_define_resolve_verified_params(
+    const loom_module_t* module,
+    const loom_encoding_family_descriptor_t* descriptor,
+    const loom_encoding_define_param_view_t* params,
+    loom_encoding_define_dynamic_binding_t* dynamic_binding_slots,
+    loom_encoding_define_resolved_params_t* out_params) {
+  const loom_encoding_define_param_resolution_t resolution =
+      loom_encoding_define_resolve_params(module, descriptor, params,
+                                          dynamic_binding_slots, out_params);
+  IREE_ASSERT(resolution.issue == LOOM_ENCODING_DEFINE_PARAM_ISSUE_NONE);
 }

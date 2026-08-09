@@ -95,12 +95,13 @@ func.def @assume_spec_static_strided_layout_summary(%layout: encoding<layout>) -
 // ====
 
 // Physical-storage encodings carry the nested address-layout summary through
-// the storage value.
+// the storage value even when authored operand order differs from descriptor
+// order.
 func.def @physical_storage_layout_summary(%stride: index) -> (i64, i64) {
   %stride2 = index.assume %stride [range(%stride, 8, 16), mul(%stride, 8)] : index
   %layout = encoding.layout.strided [%stride2, 1] : encoding<layout>
   %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
-  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %storage = encoding.define #physical_storage {schema = %schema : encoding<schema>, layout = %layout : encoding<layout>} : encoding<storage>
   %kind = test.fact_encoding_layout_kind %storage : encoding<storage> -> i64
   %stride_hi = test.fact_encoding_layout_stride_hi %storage[0] : encoding<storage> -> i64
   func.return %kind, %stride_hi : i64, i64
