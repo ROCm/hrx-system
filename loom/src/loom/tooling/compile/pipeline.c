@@ -251,11 +251,11 @@ iree_status_t loom_compile_run_pipeline(
   }
   loom_pass_tool_run_options_t run_options = {
       .registry = pass_registry,
-      .environment = loom_low_pass_environment_storage_initialize(
+      .environment = loom_low_pass_environment_storage_initialize_mutable(
           &options->low_descriptor_registry->registry,
           &low_lower_policy_registry, &low_legality_provider_list,
           &legalizer_provider_list, &math_policy_registry, options->report,
-          options->target_environment, &out_result->function_versions.list,
+          options->target_environment, &out_result->function_versions,
           &low_pass_environment_storage),
       .function_versions = &out_result->function_versions.list,
       .predicate_provider =

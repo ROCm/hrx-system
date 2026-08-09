@@ -115,7 +115,8 @@ static iree_status_t loomc_compile_capture_diagnostic_emission(
 static loomc_status_t loomc_compile_run_pass_program(
     loomc_compiler_t* compiler, loomc_workspace_t* workspace,
     const loomc_pass_program_t* pass_program, loom_module_t* internal_module,
-    loom_function_version_owner_t* function_versions, loomc_result_t* result) {
+    loom_function_version_owner_t* function_version_owner,
+    loomc_result_t* result) {
   loomc_compile_diagnostic_capture_t capture = {
       .result = result,
   };
@@ -127,7 +128,7 @@ static loomc_status_t loomc_compile_run_pass_program(
       loomc_context_target_pass_environment(compiler->context);
   if (target_environment != NULL) {
     pass_environment = loomc_target_pass_environment_make_loom_pass_environment(
-        target_environment, &function_versions->list, &low_environment_storage);
+        target_environment, function_version_owner, &low_environment_storage);
     loom_target_pass_predicate_provider_storage_initialize(
         loomc_workspace_block_pool(workspace), &predicate_storage);
     predicate_provider =
@@ -142,7 +143,7 @@ static loomc_status_t loomc_compile_run_pass_program(
               .user_data = &capture,
           },
       .environment = pass_environment,
-      .function_versions = &function_versions->list,
+      .function_versions = &function_version_owner->list,
   };
   loom_pass_run_result_t run_result = {0};
   LOOMC_RETURN_IF_ERROR(loomc_status_from_iree(loom_pass_interpreter_run_module(

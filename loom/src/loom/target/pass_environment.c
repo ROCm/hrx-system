@@ -36,6 +36,22 @@ loom_target_pass_capability_t loom_target_pass_capability_make(
           },
       .target_environment = target_environment,
       .function_versions = function_versions,
+      .function_version_owner = NULL,
+  };
+}
+
+loom_target_pass_capability_t loom_target_pass_capability_make_mutable(
+    const loom_target_environment_t* target_environment,
+    loom_function_version_owner_t* function_version_owner) {
+  return (loom_target_pass_capability_t){
+      .base =
+          {
+              .type = &loom_target_pass_capability_type,
+          },
+      .target_environment = target_environment,
+      .function_versions =
+          loom_function_version_owner_list(function_version_owner),
+      .function_version_owner = function_version_owner,
   };
 }
 
@@ -65,6 +81,12 @@ const loom_function_version_list_t*
 loom_target_pass_capability_function_versions(
     const loom_target_pass_capability_t* capability) {
   return capability ? capability->function_versions : NULL;
+}
+
+loom_function_version_owner_t*
+loom_target_pass_capability_function_version_owner(
+    const loom_target_pass_capability_t* capability) {
+  return capability ? capability->function_version_owner : NULL;
 }
 
 static bool loom_target_function_symbol_id(const loom_module_t* module,
