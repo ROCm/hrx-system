@@ -194,7 +194,7 @@ static bool loom_vector_to_scalar_numeric_lane_cast_is_supported(
 
 static bool loom_vector_to_scalar_encoded_auxiliary_lane_type(
     const loom_vector_to_scalar_state_t* state,
-    const loom_vector_to_scalar_encoded_matrix_operand_t* operand,
+    const loom_vector_to_scalar_encoded_operand_t* operand,
     loom_vector_encoding_auxiliary_key_t key, loom_type_t* out_lane_type) {
   loom_value_id_t value = operand->auxiliary.values[key];
   if (value == LOOM_VALUE_ID_INVALID ||
@@ -212,7 +212,7 @@ static bool loom_vector_to_scalar_encoded_auxiliary_lane_type(
 
 static bool loom_vector_to_scalar_encoded_auxiliary_lane_cast_is_supported(
     const loom_vector_to_scalar_state_t* state,
-    const loom_vector_to_scalar_encoded_matrix_operand_t* operand,
+    const loom_vector_to_scalar_encoded_operand_t* operand,
     loom_vector_encoding_auxiliary_key_t key, loom_type_t result_type) {
   loom_type_t lane_type = {0};
   return loom_vector_to_scalar_encoded_auxiliary_lane_type(state, operand, key,
@@ -223,7 +223,7 @@ static bool loom_vector_to_scalar_encoded_auxiliary_lane_cast_is_supported(
 
 static bool loom_vector_to_scalar_encoded_auxiliary_matches_format(
     const loom_vector_to_scalar_state_t* state,
-    const loom_vector_to_scalar_encoded_matrix_operand_t* operand,
+    const loom_vector_to_scalar_encoded_operand_t* operand,
     loom_vector_encoding_auxiliary_key_t key,
     loom_value_fact_numeric_format_flags_t format, loom_type_t result_type) {
   loom_scalar_type_t expected_scalar_type = 0;
@@ -239,7 +239,7 @@ static bool loom_vector_to_scalar_encoded_auxiliary_matches_format(
 }
 
 static bool loom_vector_to_scalar_encoded_logical_element_count_matches(
-    const loom_vector_to_scalar_encoded_matrix_operand_t* operand) {
+    const loom_vector_to_scalar_encoded_operand_t* operand) {
   if (operand->blocks.is_dynamic || operand->rows.is_dynamic ||
       operand->columns.is_dynamic) {
     return true;
@@ -263,7 +263,7 @@ static bool loom_vector_to_scalar_encoded_logical_element_count_matches(
          operand->schema.payload_element_count == (uint16_t)element_count;
 }
 
-static bool loom_vector_to_scalar_encoded_raw_lane_type_matches(
+static bool loom_vector_to_scalar_encoded_physical_lane_type_matches(
     loom_value_fact_encoded_operand_schema_t schema,
     loom_type_t raw_lane_type) {
   loom_scalar_type_t expected_scalar_type = 0;
@@ -276,7 +276,7 @@ static bool loom_vector_to_scalar_encoded_raw_lane_type_matches(
 
 static bool loom_vector_to_scalar_encoded_affine_is_supported(
     const loom_vector_to_scalar_state_t* state,
-    const loom_vector_to_scalar_encoded_matrix_operand_t* operand,
+    const loom_vector_to_scalar_encoded_operand_t* operand,
     loom_type_t result_type) {
   if (!loom_vector_to_scalar_encoded_schema_has_scale_affine(operand->schema)) {
     return true;
@@ -313,7 +313,7 @@ static bool loom_vector_to_scalar_encoded_affine_is_supported(
 
 static bool loom_vector_to_scalar_encoded_codebook_is_supported(
     const loom_vector_to_scalar_state_t* state,
-    const loom_vector_to_scalar_encoded_matrix_operand_t* operand,
+    const loom_vector_to_scalar_encoded_operand_t* operand,
     loom_type_t result_type) {
   if (!loom_vector_to_scalar_encoded_schema_uses_codebook(operand->schema)) {
     return true;
@@ -330,23 +330,23 @@ static bool loom_vector_to_scalar_encoded_codebook_is_supported(
                                                               result_type);
 }
 
-bool loom_vector_to_scalar_encoded_matrix_operand_is_supported(
+bool loom_vector_to_scalar_encoded_operand_is_supported(
     const loom_vector_to_scalar_state_t* state,
-    const loom_vector_to_scalar_encoded_matrix_operand_t* operand,
-    loom_type_t raw_lane_type, loom_type_t result_type) {
+    const loom_vector_to_scalar_encoded_operand_t* operand) {
   IREE_ASSERT_ARGUMENT(state);
   IREE_ASSERT_ARGUMENT(operand);
-  return loom_vector_to_scalar_encoded_matrix_operand_rejection_bits(
-             state, operand, raw_lane_type, result_type) ==
+  return loom_vector_to_scalar_encoded_operand_rejection_bits(state, operand) ==
          LOOM_CONTRACT_REJECTION_NONE;
 }
 
-uint32_t loom_vector_to_scalar_encoded_matrix_operand_rejection_bits(
+uint32_t loom_vector_to_scalar_encoded_operand_rejection_bits(
     const loom_vector_to_scalar_state_t* state,
-    const loom_vector_to_scalar_encoded_matrix_operand_t* operand,
-    loom_type_t raw_lane_type, loom_type_t result_type) {
+    const loom_vector_to_scalar_encoded_operand_t* operand) {
   IREE_ASSERT_ARGUMENT(state);
   IREE_ASSERT_ARGUMENT(operand);
+  if (operand->direction != LOOM_VECTOR_TO_SCALAR_ENCODING_DIRECTION_DECODE) {
+    return LOOM_CONTRACT_REJECTION_INVALID_REQUEST;
+  }
   loom_contract_rejection_bits_t rejection_bits = LOOM_CONTRACT_REJECTION_NONE;
   if (!loom_vector_to_scalar_encoded_schema_is_supported(operand->schema)) {
     return LOOM_CONTRACT_REJECTION_SCHEMA;
@@ -358,19 +358,19 @@ uint32_t loom_vector_to_scalar_encoded_matrix_operand_rejection_bits(
   if (!loom_vector_to_scalar_encoded_logical_element_count_matches(operand)) {
     rejection_bits |= LOOM_CONTRACT_REJECTION_SHAPE;
   }
-  if (!loom_vector_to_scalar_encoded_raw_lane_type_matches(operand->schema,
-                                                           raw_lane_type) ||
-      !loom_vector_to_scalar_numeric_lane_cast_is_supported(raw_lane_type,
-                                                            result_type)) {
+  if (!loom_vector_to_scalar_encoded_physical_lane_type_matches(
+          operand->schema, operand->physical_lane_type) ||
+      !loom_vector_to_scalar_numeric_lane_cast_is_supported(
+          operand->physical_lane_type, operand->logical_lane_type)) {
     rejection_bits |= LOOM_CONTRACT_REJECTION_NUMERIC;
   }
-  if (!loom_vector_to_scalar_encoded_affine_is_supported(state, operand,
-                                                         result_type)) {
+  if (!loom_vector_to_scalar_encoded_affine_is_supported(
+          state, operand, operand->logical_lane_type)) {
     rejection_bits |= LOOM_CONTRACT_REJECTION_NUMERIC |
                       LOOM_CONTRACT_REJECTION_AUXILIARY_OPERAND;
   }
-  if (!loom_vector_to_scalar_encoded_codebook_is_supported(state, operand,
-                                                           result_type)) {
+  if (!loom_vector_to_scalar_encoded_codebook_is_supported(
+          state, operand, operand->logical_lane_type)) {
     rejection_bits |= LOOM_CONTRACT_REJECTION_NUMERIC |
                       LOOM_CONTRACT_REJECTION_AUXILIARY_OPERAND;
   }
@@ -399,7 +399,7 @@ static iree_status_t loom_vector_to_scalar_cast_lane_to_index(
 
 static iree_status_t loom_vector_to_scalar_encoded_auxiliary_lane(
     loom_vector_to_scalar_state_t* state,
-    const loom_vector_to_scalar_encoded_matrix_operand_t* operand,
+    const loom_vector_to_scalar_encoded_operand_t* operand,
     loom_vector_encoding_auxiliary_key_t key,
     loom_vector_to_scalar_index_term_t index, loom_value_id_t* out_lane) {
   loom_value_id_t vector_value = operand->auxiliary.values[key];
@@ -425,7 +425,7 @@ static iree_status_t loom_vector_to_scalar_encoded_ceil_div(
 
 static iree_status_t loom_vector_to_scalar_encoded_scale_index(
     loom_vector_to_scalar_state_t* state,
-    const loom_vector_to_scalar_encoded_matrix_operand_t* operand,
+    const loom_vector_to_scalar_encoded_operand_t* operand,
     loom_vector_to_scalar_index_term_t block,
     loom_vector_to_scalar_index_term_t row,
     loom_vector_to_scalar_index_term_t column,
@@ -502,7 +502,7 @@ static iree_status_t loom_vector_to_scalar_encoded_scale_index(
 
 static iree_status_t loom_vector_to_scalar_encoded_codebook_lane(
     loom_vector_to_scalar_state_t* state,
-    const loom_vector_to_scalar_encoded_matrix_operand_t* operand,
+    const loom_vector_to_scalar_encoded_operand_t* operand,
     loom_value_id_t raw_lane, loom_type_t raw_lane_type,
     loom_type_t result_type, loom_value_id_t* out_lane) {
   loom_value_id_t table_index = LOOM_VALUE_ID_INVALID;
@@ -529,7 +529,7 @@ static iree_status_t loom_vector_to_scalar_encoded_codebook_lane(
 
 static iree_status_t loom_vector_to_scalar_encoded_raw_value_lane(
     loom_vector_to_scalar_state_t* state,
-    const loom_vector_to_scalar_encoded_matrix_operand_t* operand,
+    const loom_vector_to_scalar_encoded_operand_t* operand,
     loom_value_id_t raw_lane, loom_type_t raw_lane_type,
     loom_type_t result_type, loom_value_id_t* out_lane) {
   if (loom_vector_to_scalar_encoded_schema_uses_codebook(operand->schema)) {
@@ -545,7 +545,7 @@ static iree_status_t loom_vector_to_scalar_encoded_raw_value_lane(
 
 static iree_status_t loom_vector_to_scalar_encoded_affine_operand_lane(
     loom_vector_to_scalar_state_t* state,
-    const loom_vector_to_scalar_encoded_matrix_operand_t* operand,
+    const loom_vector_to_scalar_encoded_operand_t* operand,
     loom_vector_encoding_auxiliary_key_t key,
     loom_vector_to_scalar_index_term_t index, loom_type_t result_type,
     bool unsigned_input, loom_value_id_t* out_lane) {
@@ -562,7 +562,7 @@ static iree_status_t loom_vector_to_scalar_encoded_affine_operand_lane(
 
 static iree_status_t loom_vector_to_scalar_encoded_apply_scale(
     loom_vector_to_scalar_state_t* state,
-    const loom_vector_to_scalar_encoded_matrix_operand_t* operand,
+    const loom_vector_to_scalar_encoded_operand_t* operand,
     loom_vector_to_scalar_index_term_t scale_index, loom_type_t result_type,
     loom_value_id_t input, loom_value_id_t* out_lane) {
   if (!loom_vector_to_scalar_encoded_schema_has_scale(operand->schema)) {
@@ -579,7 +579,7 @@ static iree_status_t loom_vector_to_scalar_encoded_apply_scale(
 
 static iree_status_t loom_vector_to_scalar_encoded_apply_affine(
     loom_vector_to_scalar_state_t* state,
-    const loom_vector_to_scalar_encoded_matrix_operand_t* operand,
+    const loom_vector_to_scalar_encoded_operand_t* operand,
     loom_vector_to_scalar_index_term_t scale_index, loom_type_t result_type,
     loom_value_id_t input, loom_value_id_t* out_lane) {
   loom_value_id_t value = input;
@@ -627,31 +627,33 @@ static iree_status_t loom_vector_to_scalar_encoded_apply_affine(
       state, LOOM_OP_SCALAR_ADDF, value, offset, result_type, out_lane);
 }
 
-iree_status_t loom_vector_to_scalar_build_encoded_matrix_lane(
+iree_status_t loom_vector_to_scalar_build_decoded_lane(
     loom_vector_to_scalar_state_t* state,
-    const loom_vector_to_scalar_encoded_matrix_operand_t* operand,
-    loom_value_id_t raw_lane, loom_type_t raw_lane_type,
-    loom_type_t result_type, loom_vector_to_scalar_index_term_t block,
+    const loom_vector_to_scalar_encoded_operand_t* operand,
+    loom_value_id_t physical_lane, loom_vector_to_scalar_index_term_t block,
     loom_vector_to_scalar_index_term_t row,
     loom_vector_to_scalar_index_term_t column,
     loom_vector_to_scalar_index_term_t ordinal, loom_value_id_t* out_lane) {
   IREE_ASSERT_ARGUMENT(state);
   IREE_ASSERT_ARGUMENT(operand);
   IREE_ASSERT_ARGUMENT(out_lane);
-  IREE_ASSERT(loom_vector_to_scalar_encoded_matrix_operand_is_supported(
-                  state, operand, raw_lane_type, result_type),
-              "unsupported encoded matrix operand reached scalar reference "
-              "builder");
+  IREE_ASSERT(
+      loom_vector_to_scalar_encoded_operand_is_supported(state, operand),
+      "unsupported encoded operand reached scalar reference builder");
+  IREE_ASSERT_EQ(operand->direction,
+                 LOOM_VECTOR_TO_SCALAR_ENCODING_DIRECTION_DECODE);
 
   loom_value_id_t decoded = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_encoded_raw_value_lane(
-      state, operand, raw_lane, raw_lane_type, result_type, &decoded));
+      state, operand, physical_lane, operand->physical_lane_type,
+      operand->logical_lane_type, &decoded));
 
   loom_vector_to_scalar_index_term_t scale_index = {0};
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_encoded_scale_index(
       state, operand, block, row, column, ordinal, &scale_index));
-  return loom_vector_to_scalar_encoded_apply_affine(
-      state, operand, scale_index, result_type, decoded, out_lane);
+  return loom_vector_to_scalar_encoded_apply_affine(state, operand, scale_index,
+                                                    operand->logical_lane_type,
+                                                    decoded, out_lane);
 }
 
 //===----------------------------------------------------------------------===//
@@ -660,8 +662,7 @@ iree_status_t loom_vector_to_scalar_build_encoded_matrix_lane(
 
 static uint32_t loom_vector_to_scalar_decode_operand(
     loom_vector_to_scalar_state_t* state,
-    loom_vector_to_scalar_encoded_matrix_operand_t* out_operand,
-    loom_type_t* out_raw_lane_type) {
+    loom_vector_to_scalar_encoded_operand_t* out_operand) {
   if (!loom_vector_decode_isa(state->op)) {
     return LOOM_CONTRACT_REJECTION_INVALID_REQUEST;
   }
@@ -699,7 +700,7 @@ static uint32_t loom_vector_to_scalar_decode_operand(
     return LOOM_CONTRACT_REJECTION_AUXILIARY_OPERAND;
   }
 
-  *out_operand = (loom_vector_to_scalar_encoded_matrix_operand_t){
+  *out_operand = (loom_vector_to_scalar_encoded_operand_t){
       .schema = summary.storage_schema.encoded_operand,
       .auxiliary = auxiliary,
       .blocks = loom_vector_to_scalar_static_term(1),
@@ -708,17 +709,18 @@ static uint32_t loom_vector_to_scalar_decode_operand(
                   : loom_vector_to_scalar_dim_bound_term(state, result_type, 0),
       .columns = loom_vector_to_scalar_dim_bound_term(state, result_type,
                                                       (uint8_t)(rank - 1)),
+      .logical_lane_type = state->result_scalar_type,
+      .physical_lane_type = loom_vector_to_scalar_lane_type(payload_type),
+      .direction = LOOM_VECTOR_TO_SCALAR_ENCODING_DIRECTION_DECODE,
   };
-  *out_raw_lane_type = loom_vector_to_scalar_lane_type(payload_type);
-  return loom_vector_to_scalar_encoded_matrix_operand_rejection_bits(
-      state, out_operand, *out_raw_lane_type, state->result_scalar_type);
+  return loom_vector_to_scalar_encoded_operand_rejection_bits(state,
+                                                              out_operand);
 }
 
 uint32_t loom_vector_to_scalar_decode_rejection_bits(
     loom_vector_to_scalar_state_t* state) {
-  loom_vector_to_scalar_encoded_matrix_operand_t operand = {0};
-  loom_type_t raw_lane_type = {0};
-  return loom_vector_to_scalar_decode_operand(state, &operand, &raw_lane_type);
+  loom_vector_to_scalar_encoded_operand_t operand = {0};
+  return loom_vector_to_scalar_decode_operand(state, &operand);
 }
 
 static iree_status_t loom_vector_to_scalar_decode_coordinates(
@@ -746,9 +748,8 @@ static iree_status_t loom_vector_to_scalar_decode_coordinates(
 iree_status_t loom_vector_to_scalar_build_decode_lane(
     loom_vector_to_scalar_state_t* state,
     loom_vector_to_scalar_index_list_t indices, loom_value_id_t* out_lane) {
-  loom_vector_to_scalar_encoded_matrix_operand_t operand = {0};
-  loom_type_t raw_lane_type = {0};
-  if (loom_vector_to_scalar_decode_operand(state, &operand, &raw_lane_type) !=
+  loom_vector_to_scalar_encoded_operand_t operand = {0};
+  if (loom_vector_to_scalar_decode_operand(state, &operand) !=
       LOOM_CONTRACT_REJECTION_NONE) {
     IREE_ASSERT_UNREACHABLE(
         "unsupported vector.decode reached scalar reference builder");
@@ -767,7 +768,7 @@ iree_status_t loom_vector_to_scalar_build_decode_lane(
   loom_vector_to_scalar_index_term_t column = {0};
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_decode_coordinates(
       state, indices, ordinal, &row, &column));
-  return loom_vector_to_scalar_build_encoded_matrix_lane(
-      state, &operand, raw_lane, raw_lane_type, state->result_scalar_type,
-      loom_vector_to_scalar_static_term(0), row, column, ordinal, out_lane);
+  return loom_vector_to_scalar_build_decoded_lane(
+      state, &operand, raw_lane, loom_vector_to_scalar_static_term(0), row,
+      column, ordinal, out_lane);
 }
