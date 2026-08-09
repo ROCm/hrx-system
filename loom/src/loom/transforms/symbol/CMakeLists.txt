@@ -56,6 +56,7 @@ loom_cc_library(
     loom::rewrite::rewriter
     loom::target::condition
     loom::target::pass_environment
+    loom::util::bstring
   PUBLIC
 )
 

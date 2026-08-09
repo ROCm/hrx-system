@@ -526,8 +526,9 @@
           "\"target\":\"gfx1100\"",
           "\"selected_provider\":\"scale_i32_gfx1100\"",
           "\"provider_count\":3",
-          "\"target_applicable_count\":2",
-          "\"best_exact_count\":1"
+          "\"target_identity_match_count\":2",
+          "\"target_identity_unresolved_count\":0",
+          "\"best_match_count\":1"
         ]
       },
       "files": [

@@ -356,7 +356,9 @@ func.def public @entry(%n: index) -> (index) {
 
 // ====
 
-// RUN: pass select-templates{mode=final}
+// Final selection excludes an unproven higher-priority provider and selects a
+// lower-priority provider whose applicability is proven.
+// RUN: pass select-templates{mode=final},inline-callables
 
 func.template<demo.final_maybe> priority(10) @large(%m: index) -> (index) where [ge(%m, 1024)] {
   func.return %m : index
@@ -367,9 +369,13 @@ func.template<demo.final_maybe> priority(1) @fallback(%m: index) -> (index) {
 }
 
 func.def public @entry(%n: index) -> (index) {
-  // ERROR@+1: LOWERING/045 {op_name="func.apply", phase_name="select-templates", contract_key="demo.final_maybe", failure_code="missing_facts"}
   %result = func.apply<demo.final_maybe>(%n) : (index) -> (index)
   func.return %result : index
+}
+
+// ----
+func.def public @entry(%n: index) -> (index) {
+  func.return %n : index
 }
 
 // ====
@@ -491,7 +497,7 @@ func.template<demo.targetless_only> target(@low_core) @low_core_provider(%value:
 }
 
 func.def public @entry(%arg: i32) -> (i32) {
-  // ERROR@+1: LOWERING/045 {op_name="func.apply", phase_name="select-templates", contract_key="demo.targetless_only", failure_code="target_mismatch"}
+  // ERROR@+1: LOWERING/045 {op_name="func.apply", phase_name="select-templates", contract_key="demo.targetless_only", failure_code="missing_facts"}
   %result = func.apply<demo.targetless_only>(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
@@ -606,6 +612,74 @@ func.def public target(@external) @entry(%arg: i32) -> (i32) {
 
 // ====
 
+// A targetless caller does not disprove a targeted provider. Early selection
+// preserves that unresolved choice when it can outrank the proven fallback.
+// RUN: pass select-templates
+
+test.target<low_core> @low_core
+
+func.template<demo.identity_unbound_early> target(@low_core) priority(10) @targeted(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.template<demo.identity_unbound_early> priority(1) @fallback(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = func.apply<demo.identity_unbound_early>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<low_core> @low_core
+
+func.template<demo.identity_unbound_early> target(@low_core) priority(10) @targeted(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.template<demo.identity_unbound_early> priority(1) @fallback(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = func.apply<demo.identity_unbound_early>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// At the final boundary, the same unproven target identity is excluded and a
+// target-independent provider remains a valid concrete fallback.
+// RUN: pass select-templates{mode=final},inline-callables
+
+test.target<low_core> @low_core
+
+func.template<demo.identity_unbound_final> target(@low_core) priority(10) @targeted(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.template<demo.identity_unbound_final> priority(1) @fallback(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = func.apply<demo.identity_unbound_final>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<low_core> @low_core
+
+func.def public @entry(%arg: i32) -> (i32) {
+  func.return %arg : i32
+}
+
+// ====
+
 // A normalized condition reads the containing function's effective target
 // facts and selects the matching higher-priority provider.
 // RUN: pass select-templates,inline-callables
@@ -698,6 +772,83 @@ func.def public @entry(%arg: i32) -> (i32) {
 
 // ====
 
+// Final selection excludes a higher-priority condition that concrete target
+// facts cannot yet prove and selects the proven fallback.
+// RUN: pass select-templates{mode=final},inline-callables
+
+test.target<low_core> @unknown_wave
+
+func.template<demo.condition_unknown_fallback> when [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.template<demo.condition_unknown_fallback> priority(1) @fallback(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public target(@unknown_wave) @entry(%arg: i32) -> (i32) {
+  %result = func.apply<demo.condition_unknown_fallback>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<low_core> @unknown_wave
+
+func.def public target(@unknown_wave) @entry(%arg: i32) -> (i32) {
+  func.return %arg : i32
+}
+
+// ====
+
+// Without a proven fallback, final selection reports the authored condition
+// whose target fact remains unknown.
+// RUN: pass select-templates{mode=final}
+
+test.target<low_core> @unknown_wave
+
+func.template<demo.condition_unknown_only> when [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public target(@unknown_wave) @entry(%arg: i32) -> (i32) {
+  // ERROR@+1: LOWERING/048 {op_name="func.apply", phase_name="select-templates", contract_key="demo.condition_unknown_only", provider_name="wave64", condition_name="target.subgroup.size"}
+  %result = func.apply<demo.condition_unknown_only>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// An unresolved lower-priority condition cannot delay a higher-priority
+// provider whose applicability is already proven.
+// RUN: pass select-templates,inline-callables
+
+test.target<low_core> @unknown_wave
+
+func.template<demo.condition_lower_unknown> priority(10) @proven(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.template<demo.condition_lower_unknown> when [#target.subgroup.size<64>] priority(1) @wave64(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public target(@unknown_wave) @entry(%arg: i32) -> (i32) {
+  %result = func.apply<demo.condition_lower_unknown>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<low_core> @unknown_wave
+
+func.def public target(@unknown_wave) @entry(%arg: i32) -> (i32) {
+  %doubled = test.addi %arg, %arg : i32
+  func.return %doubled : i32
+}
+
+// ====
+
 // Conditions gate opaque providers before materialization. A rejected ukernel
 // cannot block a proven template fallback.
 // RUN: pass select-templates,inline-callables
@@ -719,6 +870,32 @@ func.def public target(@wave7) @entry(%arg: i32) -> (i32) {
 test.target<quirky> @wave7
 
 func.def public target(@wave7) @entry(%arg: i32) -> (i32) {
+  func.return %arg : i32
+}
+
+// ====
+
+// An opaque provider cannot block materialization until its target condition
+// is proven. Final selection therefore admits the concrete template fallback.
+// RUN: pass select-templates{mode=final},inline-callables
+
+test.target<low_core> @unknown_wave
+
+func.ukernel<demo.condition_unknown_ukernel> when [#target.subgroup.size<64>] priority(10) @wave64_opaque(%value: i32) -> (i32)
+
+func.template<demo.condition_unknown_ukernel> priority(1) @fallback(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public target(@unknown_wave) @entry(%arg: i32) -> (i32) {
+  %result = func.apply<demo.condition_unknown_ukernel>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<low_core> @unknown_wave
+
+func.def public target(@unknown_wave) @entry(%arg: i32) -> (i32) {
   func.return %arg : i32
 }
 

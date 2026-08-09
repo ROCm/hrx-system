@@ -705,13 +705,13 @@ jq '.invocations[]
   | select(.pass == "select-templates")
   | .details[]
   | select(.category == "template-selection")
-  | {outcome, contract, target, selected_provider, provider_count, target_applicable_count, best_exact_count}' /tmp/template-selection-report.json
+  | {outcome, contract, target, selected_provider, provider_count, target_identity_match_count, target_identity_unresolved_count, best_match_count}' /tmp/template-selection-report.json
 ```
 
 Expected signal:
 
 ```json
-{"outcome":"selected","contract":"hip.recipe.scale_i32","target":"gfx1100","selected_provider":"scale_i32_gfx1100","provider_count":3,"target_applicable_count":2,"best_exact_count":1}
+{"outcome":"selected","contract":"hip.recipe.scale_i32","target":"gfx1100","selected_provider":"scale_i32_gfx1100","provider_count":3,"target_identity_match_count":2,"target_identity_unresolved_count":0,"best_match_count":1}
 ```
 
 The transformed file should contain the selected gfx1100 implementation body,

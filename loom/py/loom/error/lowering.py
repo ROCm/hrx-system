@@ -453,9 +453,9 @@ ERR_LOWERING_045 = ErrorDef(
         ErrorParam("failure_code", ParamKind.STRING),
     ),
     fix_hint=(
-        "Add a matching func.template provider, make provider predicates "
-        "resolvable before final selection, or call a specific implementation "
-        "with func.call inline"
+        "Add a matching func.template provider, make target, caller context, "
+        "and value predicates resolvable before final selection, or call a "
+        "specific implementation with func.call inline"
     ),
 )
 
@@ -499,6 +499,31 @@ ERR_LOWERING_047 = ErrorDef(
     ),
 )
 
+# ERR_LOWERING_048: Func apply target condition is unresolved.
+ERR_LOWERING_048 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=48,
+    severity=Severity.ERROR,
+    summary="Func apply target condition is unresolved.",
+    message=(
+        "{phase_name} cannot select an implementation for {op_name}"
+        "<{contract_key}> because @{provider_name} has unresolved condition "
+        "#{condition_name}"
+    ),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("phase_name", ParamKind.STRING),
+        ErrorParam("contract_key", ParamKind.STRING),
+        ErrorParam("provider_name", ParamKind.STRING),
+        ErrorParam("condition_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Supply target facts that decide the condition, add a provider whose "
+        "applicability is proven, or call a specific implementation with "
+        "func.call inline"
+    ),
+)
+
 ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_022,
     ERR_LOWERING_023,
@@ -524,4 +549,5 @@ ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_045,
     ERR_LOWERING_046,
     ERR_LOWERING_047,
+    ERR_LOWERING_048,
 )

@@ -200,15 +200,96 @@
           "\"selected_priority\":1",
           "\"highest_provider_priority\":10",
           "\"provider_count\":2",
-          "\"target_applicable_count\":2",
+          "\"target_identity_match_count\":2",
+          "\"target_identity_unresolved_count\":0",
           "\"possible_count\":1",
-          "\"best_exact_count\":1"
+          "\"best_match_count\":1"
         ]
       },
       "files": [
         {
           "path": "{tmp}/selected.loom",
           "contains": ["func.call inline @fallback"]
+        }
+      ]
+    },
+    {
+      "name": "reports unresolved target condition behind final fallback",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=select-templates{mode=final}",
+          "--pass-report=json",
+          "--output={tmp}/target-condition-fallback.loom"
+        ],
+        "stdin": {
+          "text": "test.target<low_core> @unknown_wave\n\nfunc.template<demo.target_condition_report> when [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {\n  func.return %value : i32\n}\n\nfunc.template<demo.target_condition_report> priority(1) @fallback(%value: i32) -> (i32) {\n  func.return %value : i32\n}\n\nfunc.def public target(@unknown_wave) @entry(%arg: i32) -> (i32) {\n  %result = func.apply<demo.target_condition_report>(%arg) : (i32) -> (i32)\n  func.return %result : i32\n}\n"
+        }
+      },
+      "stderr": {
+        "contains": [
+          "\"pass\":\"select-templates\"",
+          "\"status\":{\"code\":0,\"name\":\"OK\"}",
+          "\"selected-sites\":1",
+          "\"fallback-selected-sites\":1",
+          "\"category\":\"template-selection\"",
+          "\"outcome\":\"fallback_selected\"",
+          "\"selected_provider\":\"fallback\"",
+          "\"selected_priority\":1",
+          "\"unresolved_provider\":\"wave64\"",
+          "\"unresolved_priority\":10",
+          "\"unresolved_reason\":\"target_condition\"",
+          "\"unresolved_condition\":\"target.subgroup.size\"",
+          "\"highest_provider_priority\":10",
+          "\"provider_count\":2",
+          "\"target_identity_match_count\":2",
+          "\"target_identity_unresolved_count\":0",
+          "\"possible_count\":2",
+          "\"best_match_count\":1"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/target-condition-fallback.loom",
+          "contains": ["func.call inline @fallback"],
+          "not_contains": ["@wave64"]
+        }
+      ]
+    },
+    {
+      "name": "reports unresolved target identity behind final fallback",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=select-templates{mode=final}",
+          "--pass-report=json",
+          "--output={tmp}/target-identity-fallback.loom"
+        ],
+        "stdin": {
+          "text": "test.target<low_core> @low_core\n\nfunc.template<demo.target_identity_report> target(@low_core) priority(10) @targeted(%value: i32) -> (i32) {\n  func.return %value : i32\n}\n\nfunc.template<demo.target_identity_report> priority(1) @fallback(%value: i32) -> (i32) {\n  func.return %value : i32\n}\n\nfunc.def public @entry(%arg: i32) -> (i32) {\n  %result = func.apply<demo.target_identity_report>(%arg) : (i32) -> (i32)\n  func.return %result : i32\n}\n"
+        }
+      },
+      "stderr": {
+        "contains": [
+          "\"pass\":\"select-templates\"",
+          "\"status\":{\"code\":0,\"name\":\"OK\"}",
+          "\"category\":\"template-selection\"",
+          "\"outcome\":\"fallback_selected\"",
+          "\"selected_provider\":\"fallback\"",
+          "\"unresolved_provider\":\"targeted\"",
+          "\"unresolved_reason\":\"target_identity\"",
+          "\"provider_count\":2",
+          "\"target_identity_match_count\":1",
+          "\"target_identity_unresolved_count\":1",
+          "\"possible_count\":2",
+          "\"best_match_count\":1"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/target-identity-fallback.loom",
+          "contains": ["func.call inline @fallback"],
+          "not_contains": ["@targeted"]
         }
       ]
     },
