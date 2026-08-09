@@ -687,8 +687,9 @@ static iree_status_t loom_vector_to_scalar_lower_descriptor_op(
   loom_vector_to_scalar_state_t state = {0};
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_prepare_state(
       pass, rewriter, op, &descriptor, 0, &state));
-  if (descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_DECODE &&
-      loom_vector_to_scalar_decode_rejection_bits(&state) !=
+  if ((descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_DECODE ||
+       descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_ENCODE) &&
+      loom_vector_to_scalar_encoding_rejection_bits(&state) !=
           LOOM_CONTRACT_REJECTION_NONE) {
     return iree_ok_status();
   }
@@ -877,7 +878,7 @@ uint32_t loom_vector_decode_to_scalar_reference_rejection_bits(
       .location = op->location,
   };
   loom_vector_to_scalar_state_initialize(&state, pass);
-  return loom_vector_to_scalar_decode_rejection_bits(&state);
+  return loom_vector_to_scalar_encoding_rejection_bits(&state);
 }
 
 iree_status_t loom_vector_mma_to_scalar_rewrite_op(

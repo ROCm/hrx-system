@@ -330,6 +330,33 @@ static bool loom_vector_to_scalar_encoded_codebook_is_supported(
                                                               result_type);
 }
 
+static bool loom_vector_to_scalar_encode_rounding_is_supported(
+    loom_value_fact_encoded_operand_schema_t schema) {
+  const loom_value_fact_rounding_policy_flags_t supported =
+      LOOM_VALUE_FACT_ROUNDING_POLICY_NEAREST_EVEN |
+      LOOM_VALUE_FACT_ROUNDING_POLICY_FINITE_ONLY;
+  if ((schema.rounding_policy & ~supported) != 0) {
+    return false;
+  }
+  return !iree_any_bit_set(schema.rounding_policy,
+                           LOOM_VALUE_FACT_ROUNDING_POLICY_FINITE_ONLY) ||
+         loom_numeric_format_is_finite_only(schema.element_format);
+}
+
+static bool loom_vector_to_scalar_encode_float_format_is_exact(
+    loom_value_fact_encoded_operand_schema_t schema,
+    loom_type_t physical_lane_type) {
+  const loom_numeric_format_info_t* info = NULL;
+  if (!loom_numeric_format_info(schema.element_format, &info)) {
+    return false;
+  }
+  if (info->kind != LOOM_NUMERIC_FORMAT_KIND_FLOAT) {
+    return true;
+  }
+  return loom_numeric_format_from_scalar_type(loom_type_element_type(
+             physical_lane_type)) == schema.element_format;
+}
+
 bool loom_vector_to_scalar_encoded_operand_is_supported(
     const loom_vector_to_scalar_state_t* state,
     const loom_vector_to_scalar_encoded_operand_t* operand) {
@@ -344,9 +371,6 @@ uint32_t loom_vector_to_scalar_encoded_operand_rejection_bits(
     const loom_vector_to_scalar_encoded_operand_t* operand) {
   IREE_ASSERT_ARGUMENT(state);
   IREE_ASSERT_ARGUMENT(operand);
-  if (operand->direction != LOOM_VECTOR_TO_SCALAR_ENCODING_DIRECTION_DECODE) {
-    return LOOM_CONTRACT_REJECTION_INVALID_REQUEST;
-  }
   loom_contract_rejection_bits_t rejection_bits = LOOM_CONTRACT_REJECTION_NONE;
   if (!loom_vector_to_scalar_encoded_schema_is_supported(operand->schema)) {
     return LOOM_CONTRACT_REJECTION_SCHEMA;
@@ -359,9 +383,7 @@ uint32_t loom_vector_to_scalar_encoded_operand_rejection_bits(
     rejection_bits |= LOOM_CONTRACT_REJECTION_SHAPE;
   }
   if (!loom_vector_to_scalar_encoded_physical_lane_type_matches(
-          operand->schema, operand->physical_lane_type) ||
-      !loom_vector_to_scalar_numeric_lane_cast_is_supported(
-          operand->physical_lane_type, operand->logical_lane_type)) {
+          operand->schema, operand->physical_lane_type)) {
     rejection_bits |= LOOM_CONTRACT_REJECTION_NUMERIC;
   }
   if (!loom_vector_to_scalar_encoded_affine_is_supported(
@@ -369,10 +391,31 @@ uint32_t loom_vector_to_scalar_encoded_operand_rejection_bits(
     rejection_bits |= LOOM_CONTRACT_REJECTION_NUMERIC |
                       LOOM_CONTRACT_REJECTION_AUXILIARY_OPERAND;
   }
-  if (!loom_vector_to_scalar_encoded_codebook_is_supported(
-          state, operand, operand->logical_lane_type)) {
-    rejection_bits |= LOOM_CONTRACT_REJECTION_NUMERIC |
-                      LOOM_CONTRACT_REJECTION_AUXILIARY_OPERAND;
+  switch (operand->direction) {
+    case LOOM_VECTOR_TO_SCALAR_ENCODING_DIRECTION_DECODE:
+      if (!loom_vector_to_scalar_numeric_lane_cast_is_supported(
+              operand->physical_lane_type, operand->logical_lane_type)) {
+        rejection_bits |= LOOM_CONTRACT_REJECTION_NUMERIC;
+      }
+      if (!loom_vector_to_scalar_encoded_codebook_is_supported(
+              state, operand, operand->logical_lane_type)) {
+        rejection_bits |= LOOM_CONTRACT_REJECTION_NUMERIC |
+                          LOOM_CONTRACT_REJECTION_AUXILIARY_OPERAND;
+      }
+      break;
+    case LOOM_VECTOR_TO_SCALAR_ENCODING_DIRECTION_ENCODE:
+      if (!loom_vector_to_scalar_numeric_lane_cast_is_supported(
+              operand->logical_lane_type, operand->physical_lane_type) ||
+          !loom_vector_to_scalar_encode_rounding_is_supported(
+              operand->schema) ||
+          !loom_vector_to_scalar_encode_float_format_is_exact(
+              operand->schema, operand->physical_lane_type) ||
+          loom_vector_to_scalar_encoded_schema_uses_codebook(operand->schema)) {
+        rejection_bits |= LOOM_CONTRACT_REJECTION_NUMERIC;
+      }
+      break;
+    default:
+      return LOOM_CONTRACT_REJECTION_INVALID_REQUEST;
   }
   return rejection_bits;
 }
@@ -560,7 +603,23 @@ static iree_status_t loom_vector_to_scalar_encoded_affine_operand_lane(
       state, lane, lane_type, result_type, unsigned_input, out_lane);
 }
 
-static iree_status_t loom_vector_to_scalar_encoded_apply_scale(
+static loom_vector_encoding_auxiliary_key_t
+loom_vector_to_scalar_encoded_offset_key(
+    loom_value_fact_affine_policy_flags_t affine_policy) {
+  switch (affine_policy) {
+    case LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_PLUS_MIN:
+      return LOOM_VECTOR_ENCODING_AUXILIARY_KEY_MINIMUM;
+    case LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_PLUS_BIAS:
+      return LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIAS;
+    case LOOM_VALUE_FACT_AFFINE_POLICY_NONE:
+    case LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_ONLY:
+    case LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_PLUS_ZERO_POINT:
+    default:
+      return LOOM_VECTOR_ENCODING_AUXILIARY_KEY_COUNT_;
+  }
+}
+
+static iree_status_t loom_vector_to_scalar_encoded_apply_decode_scale(
     loom_vector_to_scalar_state_t* state,
     const loom_vector_to_scalar_encoded_operand_t* operand,
     loom_vector_to_scalar_index_term_t scale_index, loom_type_t result_type,
@@ -577,7 +636,7 @@ static iree_status_t loom_vector_to_scalar_encoded_apply_scale(
       state, LOOM_OP_SCALAR_MULF, input, scale, result_type, out_lane);
 }
 
-static iree_status_t loom_vector_to_scalar_encoded_apply_affine(
+static iree_status_t loom_vector_to_scalar_encoded_apply_decode_affine(
     loom_vector_to_scalar_state_t* state,
     const loom_vector_to_scalar_encoded_operand_t* operand,
     loom_vector_to_scalar_index_term_t scale_index, loom_type_t result_type,
@@ -596,24 +655,11 @@ static iree_status_t loom_vector_to_scalar_encoded_apply_affine(
         state, LOOM_OP_SCALAR_SUBF, value, zero_point, result_type, &value));
   }
 
-  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_encoded_apply_scale(
+  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_encoded_apply_decode_scale(
       state, operand, scale_index, result_type, value, &value));
 
-  loom_vector_encoding_auxiliary_key_t offset_key =
-      LOOM_VECTOR_ENCODING_AUXILIARY_KEY_COUNT_;
-  switch (operand->schema.affine_policy) {
-    case LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_PLUS_MIN:
-      offset_key = LOOM_VECTOR_ENCODING_AUXILIARY_KEY_MINIMUM;
-      break;
-    case LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_PLUS_BIAS:
-      offset_key = LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIAS;
-      break;
-    case LOOM_VALUE_FACT_AFFINE_POLICY_NONE:
-    case LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_ONLY:
-    case LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_PLUS_ZERO_POINT:
-    default:
-      break;
-  }
+  const loom_vector_encoding_auxiliary_key_t offset_key =
+      loom_vector_to_scalar_encoded_offset_key(operand->schema.affine_policy);
   if (offset_key == LOOM_VECTOR_ENCODING_AUXILIARY_KEY_COUNT_) {
     *out_lane = value;
     return iree_ok_status();
@@ -625,6 +671,53 @@ static iree_status_t loom_vector_to_scalar_encoded_apply_affine(
       /*unsigned_input=*/false, &offset));
   return loom_vector_to_scalar_build_scalar_binary(
       state, LOOM_OP_SCALAR_ADDF, value, offset, result_type, out_lane);
+}
+
+static iree_status_t loom_vector_to_scalar_encoded_apply_encode_affine(
+    loom_vector_to_scalar_state_t* state,
+    const loom_vector_to_scalar_encoded_operand_t* operand,
+    loom_vector_to_scalar_index_term_t scale_index, loom_value_id_t input,
+    loom_value_id_t* out_lane) {
+  const loom_type_t logical_lane_type = operand->logical_lane_type;
+  loom_value_id_t value = input;
+
+  const loom_vector_encoding_auxiliary_key_t offset_key =
+      loom_vector_to_scalar_encoded_offset_key(operand->schema.affine_policy);
+  if (offset_key != LOOM_VECTOR_ENCODING_AUXILIARY_KEY_COUNT_) {
+    loom_value_id_t offset = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_encoded_affine_operand_lane(
+        state, operand, offset_key, scale_index, logical_lane_type,
+        /*unsigned_input=*/false, &offset));
+    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_scalar_binary(
+        state, LOOM_OP_SCALAR_SUBF, value, offset, logical_lane_type, &value));
+  }
+
+  if (loom_vector_to_scalar_encoded_schema_has_scale(operand->schema)) {
+    loom_value_id_t scale = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_encoded_affine_operand_lane(
+        state, operand, LOOM_VECTOR_ENCODING_AUXILIARY_KEY_SCALE, scale_index,
+        logical_lane_type, /*unsigned_input=*/false, &scale));
+    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_scalar_binary(
+        state, LOOM_OP_SCALAR_DIVF, value, scale, logical_lane_type, &value));
+  }
+
+  if (operand->schema.affine_policy ==
+      LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_PLUS_ZERO_POINT) {
+    loom_value_id_t zero_point = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_encoded_affine_operand_lane(
+        state, operand, LOOM_VECTOR_ENCODING_AUXILIARY_KEY_ZERO_POINT,
+        scale_index, logical_lane_type,
+        loom_numeric_format_uses_unsigned_integer_semantics(
+            operand->schema.element_format),
+        &zero_point));
+    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_scalar_binary(
+        state, LOOM_OP_SCALAR_ADDF, value, zero_point, logical_lane_type,
+        &value));
+  }
+
+  return loom_vector_to_scalar_cast_numeric_lane(
+      state, value, logical_lane_type, operand->physical_lane_type,
+      /*unsigned_input=*/false, out_lane);
 }
 
 iree_status_t loom_vector_to_scalar_build_decoded_lane(
@@ -651,52 +744,102 @@ iree_status_t loom_vector_to_scalar_build_decoded_lane(
   loom_vector_to_scalar_index_term_t scale_index = {0};
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_encoded_scale_index(
       state, operand, block, row, column, ordinal, &scale_index));
-  return loom_vector_to_scalar_encoded_apply_affine(state, operand, scale_index,
-                                                    operand->logical_lane_type,
-                                                    decoded, out_lane);
+  return loom_vector_to_scalar_encoded_apply_decode_affine(
+      state, operand, scale_index, operand->logical_lane_type, decoded,
+      out_lane);
+}
+
+static iree_status_t loom_vector_to_scalar_build_encoded_lane(
+    loom_vector_to_scalar_state_t* state,
+    const loom_vector_to_scalar_encoded_operand_t* operand,
+    loom_value_id_t logical_lane, loom_vector_to_scalar_index_term_t block,
+    loom_vector_to_scalar_index_term_t row,
+    loom_vector_to_scalar_index_term_t column,
+    loom_vector_to_scalar_index_term_t ordinal, loom_value_id_t* out_lane) {
+  IREE_ASSERT(
+      loom_vector_to_scalar_encoded_operand_is_supported(state, operand),
+      "unsupported encoded operand reached scalar reference builder");
+  IREE_ASSERT_EQ(operand->direction,
+                 LOOM_VECTOR_TO_SCALAR_ENCODING_DIRECTION_ENCODE);
+
+  loom_vector_to_scalar_index_term_t scale_index = {0};
+  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_encoded_scale_index(
+      state, operand, block, row, column, ordinal, &scale_index));
+  return loom_vector_to_scalar_encoded_apply_encode_affine(
+      state, operand, scale_index, logical_lane, out_lane);
 }
 
 //===----------------------------------------------------------------------===//
-// Standalone vector.decode
+// Standalone vector.encode/vector.decode
 //===----------------------------------------------------------------------===//
 
-static uint32_t loom_vector_to_scalar_decode_operand(
+static uint32_t loom_vector_to_scalar_standalone_encoded_operand(
     loom_vector_to_scalar_state_t* state,
+    loom_vector_to_scalar_encoding_direction_t direction,
     loom_vector_to_scalar_encoded_operand_t* out_operand) {
-  if (!loom_vector_decode_isa(state->op)) {
-    return LOOM_CONTRACT_REJECTION_INVALID_REQUEST;
-  }
   if (!state->rewriter->fact_table) {
     return LOOM_CONTRACT_REJECTION_SCHEMA;
   }
 
-  const loom_value_id_t payload = loom_vector_decode_payload(state->op);
-  loom_type_t payload_type =
-      loom_module_value_type(state->rewriter->module, payload);
-  loom_type_t result_type = state->vector_type;
-  if (!loom_type_is_vector(payload_type) || !loom_type_is_vector(result_type)) {
+  loom_value_id_t schema_value = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t logical_value = LOOM_VALUE_ID_INVALID;
+  loom_type_t logical_type = {0};
+  loom_type_t physical_type = {0};
+  loom_value_slice_t auxiliary_values = {0};
+  loom_named_attr_slice_t auxiliary_names = {0};
+  switch (direction) {
+    case LOOM_VECTOR_TO_SCALAR_ENCODING_DIRECTION_DECODE: {
+      if (!loom_vector_decode_isa(state->op)) {
+        return LOOM_CONTRACT_REJECTION_INVALID_REQUEST;
+      }
+      const loom_value_id_t physical_value =
+          loom_vector_decode_payload(state->op);
+      schema_value = loom_vector_decode_schema(state->op);
+      logical_type = state->vector_type;
+      physical_type =
+          loom_module_value_type(state->rewriter->module, physical_value);
+      auxiliary_values = loom_vector_decode_auxiliary(state->op);
+      auxiliary_names = loom_vector_decode_auxiliary_names(state->op);
+      break;
+    }
+    case LOOM_VECTOR_TO_SCALAR_ENCODING_DIRECTION_ENCODE:
+      if (!loom_vector_encode_isa(state->op)) {
+        return LOOM_CONTRACT_REJECTION_INVALID_REQUEST;
+      }
+      logical_value = loom_vector_encode_source(state->op);
+      schema_value = loom_vector_encode_schema(state->op);
+      logical_type =
+          loom_module_value_type(state->rewriter->module, logical_value);
+      physical_type = state->vector_type;
+      auxiliary_values = loom_vector_encode_auxiliary(state->op);
+      auxiliary_names = loom_vector_encode_auxiliary_names(state->op);
+      break;
+    default:
+      return LOOM_CONTRACT_REJECTION_INVALID_REQUEST;
+  }
+
+  if (!loom_type_is_vector(logical_type) ||
+      !loom_type_is_vector(physical_type)) {
     return LOOM_CONTRACT_REJECTION_SHAPE;
   }
 
-  const uint8_t rank = loom_type_rank(result_type);
+  const uint8_t rank = loom_type_rank(logical_type);
   if ((rank != 1 && rank != 2) ||
-      !loom_type_shape_equals(payload_type, result_type)) {
+      !loom_type_shape_equals(physical_type, logical_type)) {
     return LOOM_CONTRACT_REJECTION_SHAPE;
   }
 
   loom_value_fact_encoding_summary_t summary = {0};
   if (!loom_value_facts_query_encoding_summary(
           &state->rewriter->fact_table->context,
-          loom_rewriter_value_facts(state->rewriter,
-                                    loom_vector_decode_schema(state->op)),
-          &summary)) {
+          loom_rewriter_value_facts(state->rewriter, schema_value), &summary)) {
     return LOOM_CONTRACT_REJECTION_SCHEMA;
   }
 
   loom_vector_encoding_auxiliary_view_t auxiliary = {0};
   if (!loom_vector_encoding_auxiliary_view_resolve(
-          state->rewriter->module, loom_vector_decode_auxiliary(state->op),
-          loom_vector_decode_auxiliary_names(state->op), &auxiliary, NULL)) {
+          state->rewriter->module, auxiliary_values, auxiliary_names,
+          &auxiliary, NULL)) {
     return LOOM_CONTRACT_REJECTION_AUXILIARY_OPERAND;
   }
 
@@ -704,26 +847,34 @@ static uint32_t loom_vector_to_scalar_decode_operand(
       .schema = summary.storage_schema.encoded_operand,
       .auxiliary = auxiliary,
       .blocks = loom_vector_to_scalar_static_term(1),
-      .rows = rank == 1
-                  ? loom_vector_to_scalar_static_term(1)
-                  : loom_vector_to_scalar_dim_bound_term(state, result_type, 0),
-      .columns = loom_vector_to_scalar_dim_bound_term(state, result_type,
+      .rows = rank == 1 ? loom_vector_to_scalar_static_term(1)
+                        : loom_vector_to_scalar_dim_bound_term(state,
+                                                               logical_type, 0),
+      .columns = loom_vector_to_scalar_dim_bound_term(state, logical_type,
                                                       (uint8_t)(rank - 1)),
-      .logical_lane_type = state->result_scalar_type,
-      .physical_lane_type = loom_vector_to_scalar_lane_type(payload_type),
-      .direction = LOOM_VECTOR_TO_SCALAR_ENCODING_DIRECTION_DECODE,
+      .logical_lane_type = loom_vector_to_scalar_lane_type(logical_type),
+      .physical_lane_type = loom_vector_to_scalar_lane_type(physical_type),
+      .direction = direction,
   };
   return loom_vector_to_scalar_encoded_operand_rejection_bits(state,
                                                               out_operand);
 }
 
-uint32_t loom_vector_to_scalar_decode_rejection_bits(
+uint32_t loom_vector_to_scalar_encoding_rejection_bits(
     loom_vector_to_scalar_state_t* state) {
   loom_vector_to_scalar_encoded_operand_t operand = {0};
-  return loom_vector_to_scalar_decode_operand(state, &operand);
+  if (loom_vector_decode_isa(state->op)) {
+    return loom_vector_to_scalar_standalone_encoded_operand(
+        state, LOOM_VECTOR_TO_SCALAR_ENCODING_DIRECTION_DECODE, &operand);
+  }
+  if (loom_vector_encode_isa(state->op)) {
+    return loom_vector_to_scalar_standalone_encoded_operand(
+        state, LOOM_VECTOR_TO_SCALAR_ENCODING_DIRECTION_ENCODE, &operand);
+  }
+  return LOOM_CONTRACT_REJECTION_INVALID_REQUEST;
 }
 
-static iree_status_t loom_vector_to_scalar_decode_coordinates(
+static iree_status_t loom_vector_to_scalar_encoded_coordinates(
     loom_vector_to_scalar_state_t* state,
     loom_vector_to_scalar_index_list_t indices,
     loom_vector_to_scalar_index_term_t ordinal,
@@ -740,7 +891,7 @@ static iree_status_t loom_vector_to_scalar_decode_coordinates(
       return iree_ok_status();
     default:
       IREE_ASSERT_UNREACHABLE(
-          "unsupported vector.decode rank reached scalar reference builder");
+          "unsupported encoded vector rank reached scalar reference builder");
       IREE_BUILTIN_UNREACHABLE();
   }
 }
@@ -749,7 +900,8 @@ iree_status_t loom_vector_to_scalar_build_decode_lane(
     loom_vector_to_scalar_state_t* state,
     loom_vector_to_scalar_index_list_t indices, loom_value_id_t* out_lane) {
   loom_vector_to_scalar_encoded_operand_t operand = {0};
-  if (loom_vector_to_scalar_decode_operand(state, &operand) !=
+  if (loom_vector_to_scalar_standalone_encoded_operand(
+          state, LOOM_VECTOR_TO_SCALAR_ENCODING_DIRECTION_DECODE, &operand) !=
       LOOM_CONTRACT_REJECTION_NONE) {
     IREE_ASSERT_UNREACHABLE(
         "unsupported vector.decode reached scalar reference builder");
@@ -766,9 +918,37 @@ iree_status_t loom_vector_to_scalar_build_decode_lane(
       state, state->vector_type, indices, &ordinal));
   loom_vector_to_scalar_index_term_t row = {0};
   loom_vector_to_scalar_index_term_t column = {0};
-  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_decode_coordinates(
+  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_encoded_coordinates(
       state, indices, ordinal, &row, &column));
   return loom_vector_to_scalar_build_decoded_lane(
       state, &operand, raw_lane, loom_vector_to_scalar_static_term(0), row,
+      column, ordinal, out_lane);
+}
+
+iree_status_t loom_vector_to_scalar_build_encode_lane(
+    loom_vector_to_scalar_state_t* state,
+    loom_vector_to_scalar_index_list_t indices, loom_value_id_t* out_lane) {
+  loom_vector_to_scalar_encoded_operand_t operand = {0};
+  if (loom_vector_to_scalar_standalone_encoded_operand(
+          state, LOOM_VECTOR_TO_SCALAR_ENCODING_DIRECTION_ENCODE, &operand) !=
+      LOOM_CONTRACT_REJECTION_NONE) {
+    IREE_ASSERT_UNREACHABLE(
+        "unsupported vector.encode reached scalar reference builder");
+    IREE_BUILTIN_UNREACHABLE();
+  }
+
+  loom_value_id_t logical_lane = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_materialize_lane(
+      state, loom_vector_encode_source(state->op), indices, &logical_lane));
+
+  loom_vector_to_scalar_index_term_t ordinal = {0};
+  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_linear_ordinal_term(
+      state, state->vector_type, indices, &ordinal));
+  loom_vector_to_scalar_index_term_t row = {0};
+  loom_vector_to_scalar_index_term_t column = {0};
+  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_encoded_coordinates(
+      state, indices, ordinal, &row, &column));
+  return loom_vector_to_scalar_build_encoded_lane(
+      state, &operand, logical_lane, loom_vector_to_scalar_static_term(0), row,
       column, ordinal, out_lane);
 }

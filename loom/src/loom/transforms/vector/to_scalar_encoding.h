@@ -64,8 +64,9 @@ bool loom_vector_to_scalar_encoded_operand_is_supported(
     const loom_vector_to_scalar_state_t* state,
     const loom_vector_to_scalar_encoded_operand_t* operand);
 
-// Returns contract rejection bits for standalone vector.decode scalarization.
-uint32_t loom_vector_to_scalar_decode_rejection_bits(
+// Returns contract rejection bits for standalone vector.encode/decode
+// scalarization.
+uint32_t loom_vector_to_scalar_encoding_rejection_bits(
     loom_vector_to_scalar_state_t* state);
 
 // Returns contract rejection bits for forms the generic scalar lane builder
@@ -88,6 +89,11 @@ iree_status_t loom_vector_to_scalar_build_decoded_lane(
 
 // Builds one lane of a supported standalone vector.decode op.
 iree_status_t loom_vector_to_scalar_build_decode_lane(
+    loom_vector_to_scalar_state_t* state,
+    loom_vector_to_scalar_index_list_t indices, loom_value_id_t* out_lane);
+
+// Builds one lane of a supported standalone vector.encode op.
+iree_status_t loom_vector_to_scalar_build_encode_lane(
     loom_vector_to_scalar_state_t* state,
     loom_vector_to_scalar_index_list_t indices, loom_value_id_t* out_lane);
 

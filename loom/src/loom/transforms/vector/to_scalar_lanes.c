@@ -720,6 +720,7 @@ static const loom_vector_to_scalar_lane_lowerer_t
         loom_vector_to_scalar_build_table_lookup_lane,
         loom_vector_to_scalar_build_table_quantize_lane,
         loom_vector_to_scalar_build_decode_lane,
+        loom_vector_to_scalar_build_encode_lane,
         loom_vector_to_scalar_build_transform_lane,
         loom_vector_to_scalar_build_load_lane,
         loom_vector_to_scalar_build_masked_load_lane,
@@ -1082,8 +1083,9 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
       .rematerialization = state->rematerialization,
       .location = def_op->location,
   };
-  if (descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_DECODE &&
-      loom_vector_to_scalar_decode_rejection_bits(&def_state) !=
+  if ((descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_DECODE ||
+       descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_ENCODE) &&
+      loom_vector_to_scalar_encoding_rejection_bits(&def_state) !=
           LOOM_CONTRACT_REJECTION_NONE) {
     return iree_ok_status();
   }
