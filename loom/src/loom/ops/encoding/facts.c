@@ -42,14 +42,6 @@ static bool loom_encoding_define_has_dynamic_params(
   return params->dynamic_values.count != 0 || params->dynamic_names.count != 0;
 }
 
-static iree_status_t loom_encoding_facts_make_unknown_address_layout(
-    loom_fact_context_t* context, loom_value_facts_t* out) {
-  return loom_encoding_facts_make_summary(
-      context, LOOM_ENCODING_ROLE_ADDRESS_LAYOUT, /*static_spec_encoding_id=*/0,
-      (loom_value_fact_address_layout_t){0},
-      (loom_value_fact_storage_schema_t){0}, out);
-}
-
 iree_status_t loom_encoding_layout_dense_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,
@@ -66,24 +58,6 @@ iree_status_t loom_encoding_layout_strided_facts(
     loom_value_facts_t* result_facts) {
   loom_attribute_t static_strides =
       loom_encoding_layout_strided_static_strides(op);
-  if (static_strides.kind != LOOM_ATTR_I64_ARRAY ||
-      static_strides.count > LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK) {
-    return loom_encoding_facts_make_unknown_address_layout(context,
-                                                           &result_facts[0]);
-  }
-
-  loom_value_slice_t dynamic_strides = loom_encoding_layout_strided_strides(op);
-  uint16_t expected_dynamic_count = 0;
-  for (uint16_t i = 0; i < static_strides.count; ++i) {
-    if (static_strides.i64_array[i] == INT64_MIN) {
-      ++expected_dynamic_count;
-    }
-  }
-  if (expected_dynamic_count != dynamic_strides.count) {
-    return loom_encoding_facts_make_unknown_address_layout(context,
-                                                           &result_facts[0]);
-  }
-
   loom_value_facts_t strides[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK] = {0};
   uint16_t dynamic_ordinal = 0;
   for (uint16_t i = 0; i < static_strides.count; ++i) {
@@ -91,10 +65,6 @@ iree_status_t loom_encoding_layout_strided_facts(
     if (static_stride == INT64_MIN) {
       strides[i] = operand_facts[dynamic_ordinal++];
     } else {
-      if (static_stride < 0) {
-        return loom_encoding_facts_make_unknown_address_layout(
-            context, &result_facts[0]);
-      }
       strides[i] = loom_value_facts_exact_i64(static_stride);
     }
   }

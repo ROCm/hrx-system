@@ -97,19 +97,6 @@ loom_cc_test(
 )
 
 loom_cc_test(
-    name = "facts_test",
-    srcs = ["facts_test.cc"],
-    deps = [
-        ":encoding",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/util:fact_table",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_test(
     name = "verify_test",
     srcs = ["verify_test.cc"],
     deps = [

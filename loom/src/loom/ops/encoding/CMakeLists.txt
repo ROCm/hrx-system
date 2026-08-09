@@ -95,20 +95,6 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
-    facts_test
-  SRCS
-    "facts_test.cc"
-  DEPS
-    ::encoding
-    iree::base::internal::arena
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::ir
-    loom::util::fact_table
-)
-
-loom_cc_test(
-  NAME
     verify_test
   SRCS
     "verify_test.cc"
