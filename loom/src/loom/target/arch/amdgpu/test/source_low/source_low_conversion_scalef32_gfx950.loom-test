@@ -193,29 +193,31 @@ low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @gfx950_vector_d
   %183 = v_cndmask_b32 %174, %181, %182
   %184 = v_or_b32 %171, %183
   %185 = v_mov_b32 32704
-  %186 = v_mov_b32 128
-  %187 = v_cmp_eq_i32 %payload, %186
-  %188 = v_cndmask_b32 %184, %185, %187
-  %189 = v_lshlrev_b32_src0_inline %188, 16
-  %190 = v_lshrrev_b32_src0_inline %payload, 8
-  %191 = v_and_b32_lit %190, 128
-  %192 = v_lshlrev_b32_src0_inline %191, 8
-  %193 = v_and_b32_lit %190, 127
-  %195 = v_lshl_add_u32_shift_imm %193, %173, 4
-  %198 = v_perm_b32 %176, %175, %193
-  %201 = v_perm_b32 %179, %178, %193
-  %202 = v_lshl_add_u32_shift_imm %201, %198, 8
-  %203 = v_cmp_lt_u32_src1_inline %193 {rhs = 8}
-  %204 = v_cndmask_b32 %195, %202, %203
-  %205 = v_or_b32 %192, %204
-  %208 = v_cmp_eq_i32 %190, %186
-  %209 = v_cndmask_b32 %205, %185, %208
-  %210 = v_lshlrev_b32_src0_inline %209, 16
-  %wide = concat(%189, %210) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %186 = v_and_b32_lit %payload, 255
+  %187 = v_mov_b32 128
+  %188 = v_cmp_eq_i32 %186, %187
+  %189 = v_cndmask_b32 %184, %185, %188
+  %190 = v_lshlrev_b32_src0_inline %189, 16
+  %191 = v_lshrrev_b32_src0_inline %payload, 8
+  %192 = v_and_b32_lit %191, 128
+  %193 = v_lshlrev_b32_src0_inline %192, 8
+  %194 = v_and_b32_lit %191, 127
+  %196 = v_lshl_add_u32_shift_imm %194, %173, 4
+  %199 = v_perm_b32 %176, %175, %194
+  %202 = v_perm_b32 %179, %178, %194
+  %203 = v_lshl_add_u32_shift_imm %202, %199, 8
+  %204 = v_cmp_lt_u32_src1_inline %194 {rhs = 8}
+  %205 = v_cndmask_b32 %196, %203, %204
+  %206 = v_or_b32 %193, %205
+  %208 = v_and_b32_lit %191, 255
+  %210 = v_cmp_eq_i32 %208, %187
+  %211 = v_cndmask_b32 %206, %185, %210
+  %212 = v_lshlrev_b32_src0_inline %211, 16
+  %wide = concat(%190, %212) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   %scale_vector = concat(%scale, %scale) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   %scaled = v_pk_mul_f32 %wide, %scale_vector
-  %214 = slice %scaled[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %215 = slice %scaled[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %rounded = v_cvt_pk_bf16_f32 %214, %215
+  %216 = slice %scaled[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %217 = slice %scaled[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %rounded = v_cvt_pk_bf16_f32 %216, %217
   return %rounded
 }

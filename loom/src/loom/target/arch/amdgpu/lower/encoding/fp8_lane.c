@@ -41,7 +41,7 @@ static iree_status_t loom_amdgpu_emit_fp8_apply_special_values(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fp8_decode_plan_t* plan, loom_value_id_t low_finite_bits,
     loom_value_id_t low_sign_bits, loom_value_id_t low_source_no_sign,
-    loom_value_id_t low_source_byte,
+    loom_value_id_t low_source_shifted,
     loom_amdgpu_fp8_decode_value_flags_t value_flags, uint32_t quiet_nan_bits,
     uint32_t infinity_magnitude_bits, loom_type_t vgpr_type,
     loom_type_t mask_type, loom_value_id_t* out_lane) {
@@ -67,6 +67,10 @@ static iree_status_t loom_amdgpu_emit_fp8_apply_special_values(
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
         context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
         quiet_nan_bits, vgpr_type, &low_quiet_nan));
+    loom_value_id_t low_source_byte = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT,
+        low_source_shifted, UINT32_C(0xFF), vgpr_type, &low_source_byte));
     loom_value_id_t low_is_nan = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_vgpr_compare_immediate(
         context, source_op, &plan->compare_eq_i32_src1_inline_descriptor,
