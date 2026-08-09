@@ -72,6 +72,29 @@ typedef struct loom_encoding_t loom_encoding_t;
 static_assert(sizeof(loom_encoding_t) == 24,
               "loom_encoding_t must remain 24 bytes");
 
+// Sentinel returned for an encoding parameter that is not bound to a family
+// descriptor. Unbound parameters are retained until an input boundary emits
+// the corresponding unknown-parameter diagnostic.
+#define LOOM_ENCODING_PARAMETER_INDEX_INVALID UINT8_MAX
+
+// Returns the zero-based family descriptor index bound to |parameter|, or
+// LOOM_ENCODING_PARAMETER_INDEX_INVALID when the parameter is unbound.
+static inline uint8_t loom_encoding_parameter_descriptor_index(
+    const loom_named_attr_t* parameter) {
+  const uint8_t ordinal = (uint8_t)parameter->reserved;
+  return ordinal == 0 ? LOOM_ENCODING_PARAMETER_INDEX_INVALID
+                      : (uint8_t)(ordinal - 1);
+}
+
+// Binds |parameter| to a zero-based family descriptor index. Descriptor
+// metadata is non-semantic and never participates in text, bytecode, hashing,
+// or equality.
+static inline void loom_encoding_parameter_bind_descriptor(
+    loom_named_attr_t* parameter, uint8_t descriptor_index) {
+  IREE_ASSERT(descriptor_index < UINT8_MAX);
+  parameter->reserved = (uint32_t)descriptor_index + 1;
+}
+
 // Generated structural metadata for one registered encoding family.
 typedef struct loom_encoding_family_descriptor_t {
   // Stable public family name without a leading '#'.
