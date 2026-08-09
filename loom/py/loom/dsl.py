@@ -2918,13 +2918,15 @@ class ParameterizedAttrDef:
     generic parameterized types share one value schema. A family may designate
     one required parameter as its compact primary value; the parameter remains
     named everywhere except canonical text assembly, where it prints
-    positionally.
+    positionally. A family used as a static target-applicability clause may
+    name its typed C condition descriptor.
     """
 
     name: str
     group: Dialect
     parameters: tuple[AttrDef, ...] = ()
     primary_parameter_index: int | None = None
+    target_condition: str | None = None
     doc: str = ""
 
     def __init__(
@@ -2934,6 +2936,7 @@ class ParameterizedAttrDef:
         group: Dialect,
         parameters: list[AttrDef] | tuple[AttrDef, ...] = (),
         primary_parameter: str | None = None,
+        target_condition: str | None = None,
         doc: str = "",
     ) -> None:
         name_parts = name.split(".")
@@ -2972,11 +2975,17 @@ class ParameterizedAttrDef:
                     f"ParameterizedAttrDef '{name}': primary parameter "
                     f"'{primary_parameter}' must be required"
                 )
+        if target_condition is not None and not _is_ascii_identifier(target_condition):
+            raise ValueError(
+                f"ParameterizedAttrDef '{name}': target condition "
+                f"'{target_condition}' must be a C symbol name"
+            )
 
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "group", group)
         object.__setattr__(self, "parameters", frozen_parameters)
         object.__setattr__(self, "primary_parameter_index", primary_parameter_index)
+        object.__setattr__(self, "target_condition", target_condition)
         object.__setattr__(self, "doc", doc)
 
     @property

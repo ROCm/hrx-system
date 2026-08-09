@@ -22,6 +22,7 @@ from loom.dsl import (
     EnumDef,
     Op,
     OpPhase,
+    ParameterizedAttrDef,
     SymbolDefinition,
     SymbolDefinitionFlag,
     TargetFactSpecialization,
@@ -37,6 +38,21 @@ target_ops = Dialect(
     dialect_id=0x13,
     doc="Target planning records.",
     default_phase=OpPhase.MODULE_METADATA,
+)
+
+# ============================================================================
+# Static target fact clauses
+# ============================================================================
+
+target_subgroup_size_attr = ParameterizedAttrDef(
+    "target.subgroup.size",
+    group=target_ops,
+    parameters=[
+        AttrDef("size", ATTR_TYPE_I64, doc="Required fixed subgroup size."),
+    ],
+    primary_parameter="size",
+    target_condition="loom_target_subgroup_size_condition",
+    doc="Requires the selected target to have one exact fixed subgroup size.",
 )
 
 # ============================================================================
@@ -252,3 +268,5 @@ target_decl = Op(
 # ============================================================================
 
 ALL_TARGET_OPS: tuple[Op, ...] = (target_generic, target_decl)
+
+ALL_TARGET_PARAMETERIZED_ATTRS = (target_subgroup_size_attr,)

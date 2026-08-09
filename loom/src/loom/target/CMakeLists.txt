@@ -34,6 +34,39 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    condition
+  HDRS
+    "condition.h"
+  SRCS
+    "condition.c"
+  DEPS
+    ::facts
+    iree::base
+    loom::ir
+    loom::util::bstring
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    condition_test
+  SRCS
+    "condition_test.cc"
+  DEPS
+    ::condition
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::format::text::printer
+    loom::ir
+    loom::ops::op_registry
+    loom::ops::target
+    loom::ops::test
+)
+
+loom_cc_library(
+  NAME
     facts_builder
   HDRS
     "facts_builder.h"

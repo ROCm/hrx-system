@@ -37,6 +37,35 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "condition",
+    srcs = ["condition.c"],
+    hdrs = ["condition.h"],
+    deps = [
+        ":facts",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:bstring",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "condition_test",
+    srcs = ["condition_test.cc"],
+    deps = [
+        ":condition",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/format/text:printer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/test",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "facts_builder",
     srcs = ["facts_builder.c"],
     hdrs = ["facts_builder.h"],

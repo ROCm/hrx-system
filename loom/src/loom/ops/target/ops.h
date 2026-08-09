@@ -12,12 +12,33 @@
 #ifndef LOOM_OPS_TARGET_OPS_H_
 #define LOOM_OPS_TARGET_OPS_H_
 
+#include "loom/ir/parameterized_attr.h"
 #include "loom/ops/op_defs.h"
 #include "loom/target/types.h"
+
+enum {
+  LOOM_PARAMETERIZED_ATTR_TARGET_SUBGROUP_SIZE = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TARGET, 0),
+  LOOM_PARAMETERIZED_ATTR_TARGET_COUNT_ = 1,
+};
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+extern const loom_target_condition_descriptor_t loom_target_subgroup_size_condition;
+
+// Requires the selected target to have one exact fixed subgroup size.
+static inline bool loom_target_subgroup_size_attr_isa(loom_attribute_t attr) {
+  return attr.kind == LOOM_ATTR_PARAMETERIZED && loom_attr_as_parameterized_kind(attr) == LOOM_PARAMETERIZED_ATTR_TARGET_SUBGROUP_SIZE;
+}
+enum { LOOM_TARGET_SUBGROUP_SIZE_ATTR_SIZE_PARAMETER_INDEX = 0 };
+static inline int64_t loom_target_subgroup_size_attr_size(loom_attribute_t attr) {
+  return loom_attr_as_i64(loom_attr_as_parameterized_slots(attr)[LOOM_TARGET_SUBGROUP_SIZE_ATTR_SIZE_PARAMETER_INDEX]);
+}
+iree_status_t loom_target_subgroup_size_attr_make(
+    loom_module_t* module,
+    int64_t size,
+    loom_attribute_t* out_attr);
 
 enum {
   LOOM_OP_TARGET_GENERIC = LOOM_OP_KIND(LOOM_DIALECT_TARGET, 0),
@@ -161,6 +182,10 @@ const loom_op_semantics_t* loom_target_dialect_op_semantics(
 // Returns semantic metadata for a target op kind, or empty metadata.
 loom_op_semantics_t loom_target_op_semantics(
     loom_op_kind_t kind);
+
+// Returns parameterized attribute descriptors for the target dialect.
+const loom_parameterized_attr_descriptor_t* loom_target_dialect_parameterized_attrs(
+    iree_host_size_t* out_count);
 
 #ifdef __cplusplus
 }

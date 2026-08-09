@@ -24,6 +24,10 @@ from loom.assembly import (
 )
 from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.dialect.pass_ import ALL_PASS_OPS
+from loom.dialect.target import (
+    ALL_TARGET_PARAMETERIZED_ATTRS,
+    target_subgroup_size_attr,
+)
 from loom.dialect.test import (
     ALL_TEST_OPS,
     ALL_TEST_PARAMETERIZED_ATTRS,
@@ -1512,6 +1516,25 @@ class TestRoundTrip:
         assert _op_printer().print_operation(primary_only, Module()) == (
             "test.compact_parameterized_attr #test.compact<64>"
         )
+
+    def test_target_subgroup_size_uses_paired_compact_name(self) -> None:
+        parser = _op_parser()
+        parser.register_parameterized_attrs(ALL_TARGET_PARAMETERIZED_ATTRS)
+        source = """test.func @conditions() {
+  test.parameterized_attr_array [#target.subgroup.size<64>]
+  test.yield
+}
+"""
+        module = parser.parse(source)
+        function = module.symbols[0].op
+        assert function is not None
+        op = function.regions[0].blocks[0].ops[0]
+
+        values = op.attributes["values"]
+        assert isinstance(values, ParameterizedAttrArray)
+        assert values.values == (target_subgroup_size_attr(size=64),)
+        loaded = read_module(write_module(module))
+        assert _op_printer().print_module(loaded) == source
 
     def test_compact_parameterized_attr_rejects_missing_or_duplicate_primary(
         self,

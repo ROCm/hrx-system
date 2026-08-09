@@ -414,6 +414,25 @@ class TestParameterizedAttrDef:
         assert compact.primary_parameter_index == 1
         assert compact.primary_parameter == AttrDef("value", "i64")
 
+    def test_declares_typed_target_condition_descriptor(self) -> None:
+        condition = ParameterizedAttrDef(
+            "target.subgroup.size",
+            group=Dialect("target"),
+            parameters=[AttrDef("size", "i64")],
+            primary_parameter="size",
+            target_condition="loom_target_subgroup_size_condition",
+        )
+
+        assert condition.target_condition == "loom_target_subgroup_size_condition"
+
+    def test_rejects_invalid_target_condition_symbol(self) -> None:
+        with _raises(ValueError, match="must be a C symbol name"):
+            ParameterizedAttrDef(
+                "target.subgroup.size",
+                group=Dialect("target"),
+                target_condition="target.subgroup.size",
+            )
+
     def test_rejects_missing_or_optional_primary_parameter(self) -> None:
         with _raises(ValueError, match="primary parameter 'missing' is not declared"):
             ParameterizedAttrDef(

@@ -200,6 +200,11 @@ def generate_ops_h(
     lines.append("#endif")
     lines.append("")
 
+    target_condition_symbols = sorted({attr_def.target_condition for attr_def in parameterized_attrs if attr_def.target_condition is not None})
+    lines.extend(f"extern const loom_target_condition_descriptor_t {symbol};" for symbol in target_condition_symbols)
+    if target_condition_symbols:
+        lines.append("")
+
     lines.extend(_generate_parameterized_attr_header_lines(parameterized_attrs))
 
     lines.extend((f"extern const loom_encoding_family_descriptor_t {_c_encoding_family_descriptor_name(family)};") for family in encoding_families)

@@ -359,6 +359,7 @@ def test_generate_parameterized_attribute_family_metadata() -> None:
         group=dialect,
         parameters=[AttrDef("width", ATTR_TYPE_I64)],
         primary_parameter="width",
+        target_condition="loom_test_tile_condition",
     )
     options = ParameterizedAttrDef(
         "test.options",
@@ -391,6 +392,7 @@ def test_generate_parameterized_attribute_family_metadata() -> None:
     tables_c = generate_tables_c("test", 0x01, [holder], [tile, options])
 
     assert "LOOM_PARAMETERIZED_ATTR_TEST_TILE" in ops_h
+    assert "extern const loom_target_condition_descriptor_t loom_test_tile_condition;" in ops_h
     assert "loom_test_tile_attr_make(" in ops_h
     assert "loom_test_options_attr_make(" in ops_h
     assert "LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_SCOPES" in ops_h
@@ -401,6 +403,7 @@ def test_generate_parameterized_attribute_family_metadata() -> None:
     assert "slots[0] = loom_attr_i64(width);" in builders_c
     assert "slots[1] = tile;" in builders_c
     assert '.name = _BSTRING(12, "test.options")' in tables_c
+    assert ".target_condition = &loom_test_tile_condition" in tables_c
     assert ".primary_parameter_index = 0" in tables_c
     assert tables_c.count(".primary_parameter_index = LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER") == 1
     assert ".attr_kind = LOOM_ATTR_ENUM_ARRAY" in tables_c

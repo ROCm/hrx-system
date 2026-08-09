@@ -55,6 +55,13 @@ def default_op_decls() -> tuple[Any, ...]:
     )
 
 
+def default_parameterized_attr_defs() -> tuple[Any, ...]:
+    """Return built-in families not reachable from one exact op field."""
+    from loom.dialect.target import ALL_TARGET_PARAMETERIZED_ATTRS
+
+    return (*ALL_TARGET_PARAMETERIZED_ATTRS,)
+
+
 def build_op_decl_map(op_decls: Iterable[Any] | None = None) -> dict[str, Any]:
     """Return op declarations keyed by dotted operation name."""
     result: dict[str, Any] = {}
@@ -68,7 +75,11 @@ def build_parameterized_attr_def_map(
     parameterized_attrs: Iterable[Any] | None = None,
 ) -> dict[str, Any]:
     """Return reachable parameterized attribute declarations by stable name."""
-    pending = list(parameterized_attrs or ())
+    pending = list(
+        default_parameterized_attr_defs()
+        if parameterized_attrs is None
+        else parameterized_attrs
+    )
     for op_decl in op_decls_by_name.values():
         for attr_def in getattr(op_decl, "attrs", ()):
             definition = getattr(attr_def, "parameterized_attr", None)

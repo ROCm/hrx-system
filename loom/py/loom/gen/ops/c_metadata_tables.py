@@ -266,6 +266,9 @@ def _emit_parameterized_attr_tables(
                 lines.append(f"        .primary_parameter_index = {primary_parameter_index},")
             if attr_def.parameters:
                 lines.append(f"        .parameter_descriptors = {prefix}_parameter_desc,")
+            if attr_def.target_condition is not None:
+                condition = c_symbols.normalize_c_symbol_reference(attr_def.target_condition)
+                lines.append(f"        .target_condition = &{condition},")
             lines.append("    },")
         lines.append("};")
         lines.append("")
