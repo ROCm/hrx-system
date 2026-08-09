@@ -12,7 +12,8 @@
 # Parameters:
 # NAME: name of the test.
 # MANIFESTS: JSON manifest files, relative to the current source directory.
-# TOOLS: list of tool_name=cmake_target entries.
+# TOOLS: list of tool_name=cmake_target entries. Targets may be native
+#     executables or iree_py_library targets that declare MAIN.
 # DATA: additional data files required by the manifests.
 # ARGS: additional arguments passed to the runner.
 # LABELS: additional labels to apply to the test.
@@ -70,6 +71,7 @@ function(iree_execution_test_suite)
   endforeach()
 
   set(_TOOL_TARGETS)
+  set(_TOOL_PYTHON_PACKAGE_DIRS)
   foreach(_TOOL IN LISTS _RULE_TOOLS)
     if(NOT _TOOL MATCHES "^([^=]+)=(.+)$")
       message(FATAL_ERROR
@@ -79,7 +81,33 @@ function(iree_execution_test_suite)
     set(_TOOL_TARGET "${CMAKE_MATCH_2}")
     string(REGEX REPLACE "^::" "${_PACKAGE_NS}::" _TOOL_TARGET "${_TOOL_TARGET}")
     list(APPEND _TOOL_TARGETS "${_TOOL_TARGET}")
-    list(APPEND _TEST_ARGS "--tool=${_TOOL_NAME}=$<TARGET_FILE:${_TOOL_TARGET}>")
+    iree_package_target_name(_TOOL_CMAKE_TARGET "${_TOOL_TARGET}")
+    set(_TOOL_IS_PYTHON FALSE)
+    if(TARGET "${_TOOL_CMAKE_TARGET}")
+      get_property(
+        _TOOL_IS_PYTHON
+        TARGET "${_TOOL_CMAKE_TARGET}"
+        PROPERTY IREE_PY_MAIN
+        SET
+      )
+    endif()
+    if(_TOOL_IS_PYTHON)
+      iree_py_library_main(_TOOL_MAIN "${_TOOL_TARGET}")
+      iree_py_library_collect_sources(_TOOL_SOURCE_FILES "${_TOOL_TARGET}")
+      iree_py_library_collect_package_dirs(
+        _TOOL_PACKAGE_DIRS "${_TOOL_TARGET}"
+      )
+      list(APPEND _TEST_ARGS
+        "--tool=${_TOOL_NAME}=${Python3_EXECUTABLE}"
+        "--tool-arg=${_TOOL_NAME}=${_TOOL_MAIN}"
+      )
+      list(APPEND _REQUIRED_FILES ${_TOOL_SOURCE_FILES})
+      list(APPEND _TOOL_PYTHON_PACKAGE_DIRS ${_TOOL_PACKAGE_DIRS})
+    else()
+      list(APPEND _TEST_ARGS
+        "--tool=${_TOOL_NAME}=$<TARGET_FILE:${_TOOL_TARGET}>"
+      )
+    endif()
   endforeach()
 
   iree_package_name(_PACKAGE_NAME)
@@ -158,6 +186,19 @@ function(iree_execution_test_suite)
       ${_RULE_LABELS}
   )
   set(_ENVIRONMENT_VARS "PYTHONDONTWRITEBYTECODE=1")
+  if(_TOOL_PYTHON_PACKAGE_DIRS)
+    list(REMOVE_DUPLICATES _TOOL_PYTHON_PACKAGE_DIRS)
+    if(NOT "$ENV{PYTHONPATH}" STREQUAL "")
+      list(APPEND _TOOL_PYTHON_PACKAGE_DIRS "$ENV{PYTHONPATH}")
+    endif()
+    if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+      # Windows uses semi-colon delimiters, but so does CMake, so escape them.
+      list(JOIN _TOOL_PYTHON_PACKAGE_DIRS "\\;" _TOOL_PYTHONPATH)
+    else()
+      list(JOIN _TOOL_PYTHON_PACKAGE_DIRS ":" _TOOL_PYTHONPATH)
+    endif()
+    list(APPEND _ENVIRONMENT_VARS "PYTHONPATH=${_TOOL_PYTHONPATH}")
+  endif()
   if(_RULE_SANITIZER_SUPPRESSIONS)
     iree_append_sanitizer_suppression_environment(
       _ENVIRONMENT_VARS
