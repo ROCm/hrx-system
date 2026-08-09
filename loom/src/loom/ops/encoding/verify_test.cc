@@ -120,12 +120,17 @@ class EncodingVerifyTest : public ::testing::Test {
                                    &module));
     ASSERT_TRUE(parse_capture.diagnostics.empty());
 
+    VerifyModule(module, capture, result);
+    loom_module_free(module);
+  }
+
+  void VerifyModule(loom_module_t* module, DiagnosticCapture* capture,
+                    loom_verify_result_t* result) {
     capture->Reset();
     loom_verify_options_t verify_options = {};
     verify_options.sink = capture->sink();
     verify_options.max_errors = 100;
     IREE_ASSERT_OK(loom_verify_module(module, &verify_options, result));
-    loom_module_free(module);
   }
 
   iree_arena_block_pool_t block_pool_;
@@ -198,9 +203,37 @@ TEST_F(EncodingVerifyTest, CustomVerifierRejectsUnknownParam) {
 }
 
 TEST_F(EncodingVerifyTest, UnusedMalformedStaticEncodingIsDiagnosed) {
+  loom_module_t* module = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      nullptr, iree_allocator_system(),
+                                      &module));
+  loom_string_id_t encoding_name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("q8_0"), &encoding_name_id));
+  loom_string_id_t parameter_name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("block"), &parameter_name_id));
+  loom_string_id_t value_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("thirty_two"), &value_id));
+  loom_named_attr_t parameter = {
+      /*.name_id=*/parameter_name_id,
+      /*.reserved=*/{},
+      /*.value=*/loom_attr_string(value_id),
+  };
+  loom_encoding_t encoding = {
+      /*.name_id=*/encoding_name_id,
+      /*.alias_id=*/LOOM_STRING_ID_INVALID,
+      /*.attribute_count=*/1,
+      /*.family=*/{},
+      /*.attributes=*/&parameter,
+  };
+  uint16_t encoding_id = 0;
+  IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &encoding_id));
+
   DiagnosticCapture capture;
   loom_verify_result_t result;
-  VerifySource("#bad = #q8_0<block=\"thirty_two\">\n", &capture, &result);
+  VerifyModule(module, &capture, &result);
 
   ASSERT_EQ(result.error_count, 1u);
   const auto* diagnostic = FindDiagnostic(
@@ -212,6 +245,7 @@ TEST_F(EncodingVerifyTest, UnusedMalformedStaticEncodingIsDiagnosed) {
   EXPECT_EQ(GetStringParam(*diagnostic, 0), "q8_0");
   EXPECT_EQ(GetStringParam(*diagnostic, 1), "block");
   EXPECT_EQ(GetStringParam(*diagnostic, 3), "integer");
+  loom_module_free(module);
 }
 
 }  // namespace

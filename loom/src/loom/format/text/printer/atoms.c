@@ -80,6 +80,23 @@ static iree_status_t loom_print_string_literal(loom_output_stream_t* stream,
   return loom_output_stream_write_char(stream, '"');
 }
 
+static bool loom_print_is_bare_identifier(iree_string_view_t value) {
+  if (value.size == 0) return false;
+  const char first = value.data[0];
+  if (!((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') ||
+        first == '_' || first == '$')) {
+    return false;
+  }
+  for (iree_host_size_t i = 1; i < value.size; ++i) {
+    const char c = value.data[i];
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+          (c >= '0' && c <= '9') || c == '_' || c == '$' || c == '-')) {
+      return false;
+    }
+  }
+  return true;
+}
+
 iree_status_t loom_print_value_name(loom_print_context_t* ctx,
                                     loom_value_id_t value_id) {
   IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
@@ -112,61 +129,12 @@ static iree_status_t loom_print_scalar_type(loom_output_stream_t* stream,
   return loom_output_stream_write_cstring(stream, name);
 }
 
-static bool loom_print_is_bare_identifier_start(char c) {
-  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' ||
-         c == '$';
-}
-
-static bool loom_print_is_bare_identifier_continue(char c) {
-  return loom_print_is_bare_identifier_start(c) || (c >= '0' && c <= '9') ||
-         c == '-';
-}
-
-static bool loom_print_is_bare_string_attr(iree_string_view_t text) {
-  if (text.size == 0 || !loom_print_is_bare_identifier_start(text.data[0])) {
-    return false;
-  }
-  for (iree_host_size_t i = 1; i < text.size; ++i) {
-    if (!loom_print_is_bare_identifier_continue(text.data[i])) return false;
-  }
-  return true;
-}
-
-static bool loom_print_matrix_operand_symbol_param_name(
-    iree_string_view_t name) {
-  return iree_string_view_equal(name, IREE_SV("element_format")) ||
-         iree_string_view_equal(name, IREE_SV("payload_packing")) ||
-         iree_string_view_equal(name, IREE_SV("scale_topology")) ||
-         iree_string_view_equal(name, IREE_SV("scale_format")) ||
-         iree_string_view_equal(name, IREE_SV("secondary_scale_format")) ||
-         iree_string_view_equal(name, IREE_SV("affine")) ||
-         iree_string_view_equal(name, IREE_SV("rounding")) ||
-         iree_string_view_equal(name, IREE_SV("codebook")) ||
-         iree_string_view_equal(name, IREE_SV("sparsity"));
-}
-
-static bool loom_print_static_encoding_param_as_bare_symbol(
-    const loom_module_t* module, const loom_encoding_t* encoding,
-    const loom_named_attr_t* param, iree_string_view_t* out_symbol) {
-  *out_symbol = iree_string_view_empty();
-  if (param->value.kind != LOOM_ATTR_STRING ||
-      param->value.string_id == LOOM_STRING_ID_INVALID ||
-      param->value.string_id >= module->strings.count ||
-      encoding->name_id >= module->strings.count ||
-      param->name_id >= module->strings.count) {
-    return false;
-  }
-  if (!iree_string_view_equal(module->strings.entries[encoding->name_id],
-                              IREE_SV("matrix_operand")) ||
-      !loom_print_matrix_operand_symbol_param_name(
-          module->strings.entries[param->name_id])) {
-    return false;
-  }
-  iree_string_view_t symbol = module->strings.entries[param->value.string_id];
-  if (!loom_print_is_bare_string_attr(symbol)) return false;
-  *out_symbol = symbol;
-  return true;
-}
+// Parameterized types, static encodings, and type-valued attributes are
+// mutually recursive.
+static iree_status_t loom_print_attr_impl(
+    loom_output_stream_t* stream, const loom_attribute_t* attr,
+    const loom_module_t* module, const loom_attr_descriptor_t* descriptor,
+    const loom_print_context_t* type_context);
 
 static iree_status_t loom_print_canonical_encoding(
     loom_output_stream_t* stream, const loom_module_t* module,
@@ -180,6 +148,9 @@ static iree_status_t loom_print_canonical_encoding(
     return iree_ok_status();
   }
 
+  const loom_encoding_vtable_t* vtable =
+      loom_module_encoding_vtable(module, encoding);
+
   IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '<'));
   for (uint8_t i = 0; i < encoding->attribute_count; ++i) {
     if (i > 0) {
@@ -191,16 +162,17 @@ static iree_status_t loom_print_canonical_encoding(
           stream, module->strings.entries[param->name_id]));
     }
     IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '='));
-    iree_string_view_t bare_symbol = iree_string_view_empty();
-    if (loom_print_static_encoding_param_as_bare_symbol(module, encoding, param,
-                                                        &bare_symbol)) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write(stream, bare_symbol));
-    } else if (ctx) {
-      IREE_RETURN_IF_ERROR(loom_print_attr(ctx, &param->value, NULL));
-    } else {
-      IREE_RETURN_IF_ERROR(
-          loom_text_print_attribute(&param->value, module, stream));
+    const loom_attr_descriptor_t* descriptor = NULL;
+    if (vtable) {
+      const uint8_t descriptor_index =
+          loom_encoding_parameter_descriptor_index(param);
+      if (descriptor_index != LOOM_ENCODING_PARAMETER_INDEX_INVALID) {
+        descriptor =
+            &vtable->descriptor->parameter_descriptors[descriptor_index];
+      }
     }
+    IREE_RETURN_IF_ERROR(
+        loom_print_attr_impl(stream, &param->value, module, descriptor, ctx));
   }
   return loom_output_stream_write_char(stream, '>');
 }
@@ -281,12 +253,6 @@ static iree_status_t loom_print_compact_shape_prefix(
   return loom_output_stream_write(
       stream, iree_make_string_view(name.data, name.size + 1));
 }
-
-// Parameterized types and type-valued attributes are mutually recursive.
-static iree_status_t loom_print_attr_impl(
-    loom_output_stream_t* stream, const loom_attribute_t* attr,
-    const loom_module_t* module, const loom_attr_descriptor_t* descriptor,
-    const loom_print_context_t* type_context);
 
 static iree_status_t loom_print_descriptor_backed_type(
     loom_type_t type, const loom_module_t* module, loom_output_stream_t* stream,
@@ -781,6 +747,11 @@ static iree_status_t loom_print_attr_impl(
       iree_string_view_t attr_string = iree_string_view_empty();
       if (module && id < module->strings.count) {
         attr_string = module->strings.entries[id];
+      }
+      if (descriptor &&
+          iree_any_bit_set(descriptor->flags, LOOM_ATTR_BARE_IDENTIFIER) &&
+          loom_print_is_bare_identifier(attr_string)) {
+        return loom_output_stream_write(stream, attr_string);
       }
       return loom_print_string_literal(stream, attr_string);
     }

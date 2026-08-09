@@ -1215,7 +1215,7 @@ func.def @transform_unknown_param(%v: vector<128xf32>) {
 
 // Transform extent parameters must be positive integer attributes when static.
 func.def @transform_static_extent_kind_mismatch(%v: vector<128xf32>) {
-  // ERROR@+1: ENCODING/010 "numeric_transform" "input_elems"
+  // ERROR@+1: PARSE/003
   %xf = encoding.define #numeric_transform<family="hadamard", input_elems="128", output_elems=128> : encoding<transform>
   %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
   func.return

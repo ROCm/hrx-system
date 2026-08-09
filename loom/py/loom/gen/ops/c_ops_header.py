@@ -23,6 +23,7 @@ from loom.gen.ops.c_enum_attrs import enum_c_type as _enum_c_type
 from loom.gen.ops.c_enum_attrs import enum_case_c_ident as _enum_case_c_ident
 from loom.gen.ops.c_names import COPYRIGHT
 from loom.gen.ops.c_names import c_dialect_enum as _c_dialect_enum
+from loom.gen.ops.c_names import c_encoding_enum_prefix as _c_encoding_enum_prefix
 from loom.gen.ops.c_names import (
     c_encoding_family_descriptor_name as _c_encoding_family_descriptor_name,
 )
@@ -118,6 +119,35 @@ def generate_ops_h(
                 continue
             emitted_parameter_enums.add(id(enum_def))
             c_prefix = f"{_c_parameterized_attr_prefix(attr_def)}_{parameter.name}"
+            enum_tag = f"{c_prefix}_e"
+            const_prefix = c_prefix.upper()
+            max_value = max(case.value for case in enum_def.cases)
+            if enum_def.doc:
+                lines.append(f"// {enum_def.doc}")
+            if parameter.open_enum:
+                lines.append(f"typedef uint8_t {c_prefix}_t;")
+                lines.append(f"typedef enum {enum_tag} {{")
+                lines.extend(f"  {const_prefix}_{_enum_case_c_ident(case.keyword)} = {case.value}," for case in enum_def.cases)
+                lines.append(f"  {const_prefix}_COUNT_ = {max_value + 1},")
+                lines.append(f"}} {enum_tag};")
+            else:
+                lines.append(f"typedef enum {enum_tag} {{")
+                lines.extend(f"  {const_prefix}_{_enum_case_c_ident(case.keyword)} = {case.value}," for case in enum_def.cases)
+                lines.append(f"  {const_prefix}_COUNT_ = {max_value + 1},")
+                lines.append(f"}} {c_prefix}_t;")
+            lines.append("")
+
+    # Encoding-family enums are shared by EnumDef identity across families and
+    # parameters. This keeps one typed C vocabulary for policies such as
+    # numeric format and rounding instead of stamping out family-local aliases.
+    emitted_encoding_enums: set[int] = set()
+    for family in encoding_families:
+        for parameter in family.parameters:
+            enum_def = parameter.enum_def
+            if parameter.attr_type not in ("enum", "enum_array") or enum_def is None or enum_def.c_type is not None or id(enum_def) in emitted_encoding_enums:
+                continue
+            emitted_encoding_enums.add(id(enum_def))
+            c_prefix = _c_encoding_enum_prefix(dialect_name, enum_def)
             enum_tag = f"{c_prefix}_e"
             const_prefix = c_prefix.upper()
             max_value = max(case.value for case in enum_def.cases)

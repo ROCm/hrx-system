@@ -46,6 +46,7 @@ from loom.gen.ops.c_enums import (
 from loom.gen.ops.c_enums import error_ref_literal as _error_ref_literal
 from loom.gen.ops.c_names import COPYRIGHT
 from loom.gen.ops.c_names import c_dialect_enum as _c_dialect_enum
+from loom.gen.ops.c_names import c_encoding_enum_prefix as _c_encoding_enum_prefix
 from loom.gen.ops.c_names import (
     c_encoding_family_descriptor_name as _c_encoding_family_descriptor_name,
 )
@@ -268,6 +269,7 @@ def _emit_attr_descriptor_table(
     lines: list[str],
     prefix: str,
     parameters: Sequence[AttrDef],
+    shared_enum_names: dict[int, str] | None = None,
 ) -> str | None:
     """Emits one shared named-attribute descriptor table."""
 
@@ -276,11 +278,12 @@ def _emit_attr_descriptor_table(
     for parameter in parameters:
         if parameter.attr_type in ("enum", "enum_array"):
             assert parameter.enum_def is not None
-            _emit_enum_case_names(
-                lines,
-                f"{prefix}_{parameter.name}_enum_names",
-                parameter.enum_def,
-            )
+            if shared_enum_names is None or id(parameter.enum_def) not in shared_enum_names:
+                _emit_enum_case_names(
+                    lines,
+                    f"{prefix}_{parameter.name}_enum_names",
+                    parameter.enum_def,
+                )
         if parameter.symbol_ref is not None:
             flags = c_symbols.symbol_interface_flags(parameter.symbol_ref.interfaces)
             lines.append(f"static const loom_symbol_reference_descriptor_t {prefix}_{parameter.name}_symbol_ref = {{{_bstring_expr(parameter.symbol_ref.name)}, {flags}}};")
@@ -304,7 +307,7 @@ def _emit_attr_descriptor_table(
         if flags_parts:
             lines.append(f"        .flags = {' | '.join(flags_parts)},")
         if parameter.attr_type in ("enum", "enum_array"):
-            enum_names = f"{prefix}_{parameter.name}_enum_names"
+            enum_names = shared_enum_names[id(parameter.enum_def)] if shared_enum_names is not None and id(parameter.enum_def) in shared_enum_names else f"{prefix}_{parameter.name}_enum_names"
             lines.append(f"        .enum_max_value = (uint8_t)(IREE_ARRAYSIZE({enum_names}) - 1),")
             lines.append(f"        .enum_case_names = {enum_names},")
         if parameter.symbol_ref is not None:
@@ -320,9 +323,22 @@ def _emit_attr_descriptor_table(
 def _emit_encoding_family_tables(lines: list[str], encoding_families: Sequence[EncodingFamilyDef]) -> None:
     """Emits generated encoding-family descriptors."""
 
+    shared_enum_names: dict[int, str] = {}
+    for family in encoding_families:
+        for parameter in family.parameters:
+            enum_def = parameter.enum_def
+            if parameter.attr_type not in ("enum", "enum_array") or enum_def is None:
+                continue
+            enum_id = id(enum_def)
+            if enum_id in shared_enum_names:
+                continue
+            array_name = f"{_c_encoding_enum_prefix(family.group.name, enum_def)}_names"
+            _emit_enum_case_names(lines, array_name, enum_def)
+            shared_enum_names[enum_id] = array_name
+
     for family in encoding_families:
         prefix = _c_encoding_family_prefix(family)
-        parameter_table = _emit_attr_descriptor_table(lines, prefix, family.parameters)
+        parameter_table = _emit_attr_descriptor_table(lines, prefix, family.parameters, shared_enum_names)
         dynamic_parameter_table = None
         if family.dynamic_parameters:
             dynamic_parameter_table = f"{prefix}_dynamic_parameter_desc"

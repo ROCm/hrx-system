@@ -23,6 +23,7 @@ from loom.dsl import (
     ATTR_TYPE_BOOL,
     ATTR_TYPE_DICT,
     ATTR_TYPE_ENCODING,
+    ATTR_TYPE_ENUM,
     ATTR_TYPE_I64,
     ATTR_TYPE_I64_ARRAY,
     ATTR_TYPE_STRING,
@@ -38,6 +39,8 @@ from loom.dsl import (
     Dialect,
     EncodingFamilyDef,
     EncodingFamilyRole,
+    EnumCase,
+    EnumDef,
     Op,
     Operand,
     OpPhase,
@@ -55,6 +58,190 @@ encoding_ops = Dialect("encoding", dialect_id=0x09, doc="Encoding definition and
 # Static encoding families
 # ============================================================================
 
+NumericFormat = EnumDef(
+    "NumericFormat",
+    [
+        EnumCase(keyword, ordinal)
+        for ordinal, keyword in enumerate(
+            (
+                "none",
+                "f64",
+                "f32",
+                "tf32",
+                "f16",
+                "bf16",
+                "i32",
+                "u32",
+                "i16",
+                "u16",
+                "i8",
+                "u8",
+                "i6",
+                "u6",
+                "i5",
+                "u5",
+                "i4",
+                "u4",
+                "i3",
+                "u3",
+                "i2",
+                "u2",
+                "i1",
+                "u1",
+                "f8e4m3",
+                "f8e5m2",
+                "f8e4m3fn",
+                "f8e4m3fnuz",
+                "f8e5m2fnuz",
+                "e8m0",
+                "bf8",
+                "f6e3m2",
+                "f6e2m3",
+                "bf6",
+                "f4e2m1",
+                "ternary",
+                "sign_bit",
+                "codebook_index",
+                "quant_i8",
+                "quant_i6",
+                "quant_i4",
+            )
+        )
+    ],
+    doc="Target-independent encoded numeric format.",
+)
+
+PayloadPacking = EnumDef(
+    "PayloadPacking",
+    [
+        EnumCase(keyword, ordinal)
+        for ordinal, keyword in enumerate(
+            (
+                "dense_lanes",
+                "little_endian_nibbles",
+                "big_endian_nibbles",
+                "bitfield_stream",
+                "bitplane_stream",
+                "multi_stream",
+                "base_n_packed",
+                "codebook_indices",
+                "target_fragment",
+                "interleaved_scale_payload",
+                "separate_scale_payload",
+            ),
+            start=1,
+        )
+    ],
+    doc="Physical payload bit and field layout.",
+)
+
+ScaleTopology = EnumDef(
+    "ScaleTopology",
+    [
+        EnumCase(keyword, ordinal)
+        for ordinal, keyword in enumerate(
+            (
+                "none",
+                "tensor_global",
+                "row",
+                "column",
+                "channel",
+                "group_1d",
+                "block_1d",
+                "block_2d",
+                "subblock_in_superblock",
+                "hierarchical",
+                "per_token",
+                "per_head",
+                "per_page",
+                "runtime_amax_derived",
+            )
+        )
+    ],
+    doc="Scale sharing topology for encoded values.",
+)
+
+AffinePolicy = EnumDef(
+    "AffinePolicy",
+    [
+        EnumCase(keyword, ordinal)
+        for ordinal, keyword in enumerate(
+            (
+                "none",
+                "scale_only",
+                "scale_plus_min",
+                "scale_plus_zero_point",
+                "scale_plus_bias",
+                "super_scale_times_subscale",
+                "sum_correction",
+            )
+        )
+    ],
+    doc="Affine transform applied to encoded values.",
+)
+
+RoundingPolicy = EnumDef(
+    "RoundingPolicy",
+    [
+        EnumCase("none", 0),
+        EnumCase("nearest_even", 1),
+        EnumCase("nearest_away", 2),
+        EnumCase("toward_zero", 3),
+        EnumCase("down", 4),
+        EnumCase("up", 5),
+        EnumCase("stochastic", 6),
+        EnumCase("satfinite", 7),
+        EnumCase("overflow_to_inf", 8),
+        EnumCase("overflow_to_nan", 9),
+        EnumCase("flush_subnormal", 10),
+        EnumCase("preserve_subnormal", 11),
+        EnumCase("relu_clamp", 12),
+        EnumCase("finite_only", 13),
+        EnumCase("finite_flush_subnormal", 14),
+    ],
+    doc="Rounding and exceptional-value policy for encoded values.",
+)
+
+CodebookPolicy = EnumDef(
+    "CodebookPolicy",
+    [
+        EnumCase(keyword, ordinal)
+        for ordinal, keyword in enumerate(
+            (
+                "none",
+                "static_builtin_table",
+                "static_symbol_table",
+                "global_data_table",
+                "dynamic_table_operand",
+                "per_superblock_table",
+            )
+        )
+    ],
+    doc="Codebook source for indexed encoded values.",
+)
+
+SparsityPolicy = EnumDef(
+    "SparsityPolicy",
+    [
+        EnumCase(keyword, ordinal)
+        for ordinal, keyword in enumerate(
+            (
+                "none",
+                "mask",
+                "n_m_structured",
+                "block_sparse",
+                "bsr",
+                "csr",
+                "coo",
+                "page_table",
+                "moe_routing",
+                "outlier_side_stream",
+            )
+        )
+    ],
+    doc="Sparse payload organization for encoded values.",
+)
+
 _BLOCK_STORAGE_PARAMETERS = (
     AttrDef("block_elems", ATTR_TYPE_I64, optional=True),
     AttrDef("storage_bytes", ATTR_TYPE_I64, optional=True),
@@ -63,43 +250,43 @@ _BLOCK_STORAGE_PARAMETERS = (
 _NAMED_FP8_PARAMETERS = (
     AttrDef(
         "rounding",
-        ATTR_TYPE_STRING,
+        ATTR_TYPE_ENUM,
+        enum_def=RoundingPolicy,
         optional=True,
-        bare_identifier=True,
     ),
     AttrDef("storage_bits", ATTR_TYPE_I64, optional=True),
 )
 
 _MATRIX_OPERAND_PARAMETERS = (
-    AttrDef("affine", ATTR_TYPE_STRING, optional=True, bare_identifier=True),
-    AttrDef("codebook", ATTR_TYPE_STRING, optional=True, bare_identifier=True),
-    AttrDef("element_format", ATTR_TYPE_STRING, bare_identifier=True),
+    AttrDef("affine", ATTR_TYPE_ENUM, enum_def=AffinePolicy, optional=True),
+    AttrDef("codebook", ATTR_TYPE_ENUM, enum_def=CodebookPolicy, optional=True),
+    AttrDef("element_format", ATTR_TYPE_ENUM, enum_def=NumericFormat),
     AttrDef("payload_elements", ATTR_TYPE_I64),
     AttrDef(
         "payload_packing",
-        ATTR_TYPE_STRING,
+        ATTR_TYPE_ENUM,
+        enum_def=PayloadPacking,
         optional=True,
-        bare_identifier=True,
     ),
     AttrDef("payload_registers", ATTR_TYPE_I64),
-    AttrDef("rounding", ATTR_TYPE_STRING, optional=True, bare_identifier=True),
-    AttrDef("scale_format", ATTR_TYPE_STRING, optional=True, bare_identifier=True),
+    AttrDef("rounding", ATTR_TYPE_ENUM, enum_def=RoundingPolicy, optional=True),
+    AttrDef("scale_format", ATTR_TYPE_ENUM, enum_def=NumericFormat, optional=True),
     AttrDef("scale_group_elements", ATTR_TYPE_I64, optional=True),
     AttrDef("scale_group_shape", ATTR_TYPE_I64_ARRAY, optional=True),
     AttrDef("scale_operands", ATTR_TYPE_I64, optional=True),
     AttrDef(
         "scale_topology",
-        ATTR_TYPE_STRING,
+        ATTR_TYPE_ENUM,
+        enum_def=ScaleTopology,
         optional=True,
-        bare_identifier=True,
     ),
     AttrDef(
         "secondary_scale_format",
-        ATTR_TYPE_STRING,
+        ATTR_TYPE_ENUM,
+        enum_def=NumericFormat,
         optional=True,
-        bare_identifier=True,
     ),
-    AttrDef("sparsity", ATTR_TYPE_STRING, optional=True, bare_identifier=True),
+    AttrDef("sparsity", ATTR_TYPE_ENUM, enum_def=SparsityPolicy, optional=True),
     AttrDef("sparsity_group_elements", ATTR_TYPE_I64, optional=True),
     AttrDef("sparsity_group_nonzero_elements", ATTR_TYPE_I64, optional=True),
     AttrDef("zero_scale_fallback", ATTR_TYPE_BOOL, optional=True),

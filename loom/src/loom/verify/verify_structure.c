@@ -1300,6 +1300,17 @@ static void loom_verify_static_encoding_ref(loom_verify_state_t* state,
           &vtable->descriptor->parameter_descriptors[descriptor_index];
       if (loom_attr_descriptor_accepts_kind(
               descriptor, (loom_attr_kind_t)parameter->value.kind)) {
+        if (parameter->value.kind == LOOM_ATTR_ENUM &&
+            !iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM) &&
+            !loom_attr_descriptor_has_enum_case(
+                descriptor, loom_attr_as_enum(parameter->value))) {
+          const loom_diagnostic_param_t params[] = {
+              loom_param_string(parameter_name),
+              loom_param_u32(loom_attr_as_enum(parameter->value)),
+          };
+          loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_010, params,
+                                      IREE_ARRAYSIZE(params));
+        }
         continue;
       }
       const loom_diagnostic_param_t params[] = {

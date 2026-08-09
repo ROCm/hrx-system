@@ -380,17 +380,13 @@ static uint32_t loom_amdgpu_memory_report_dynamic_stride_bytes(
              : 0;
 }
 
-static iree_string_view_t loom_amdgpu_memory_report_storage_symbol(
-    loom_encoding_matrix_operand_symbol_set_t symbol_set, uint64_t value,
+static iree_string_view_t loom_amdgpu_memory_report_storage_name(
+    loom_encoding_matrix_operand_parameter_t parameter, uint64_t value,
     uint64_t omitted_value) {
   if (value == omitted_value) {
     return iree_string_view_empty();
   }
-  iree_string_view_t symbol = iree_string_view_empty();
-  if (!loom_encoding_matrix_operand_lookup_value(symbol_set, value, &symbol)) {
-    return iree_string_view_empty();
-  }
-  return symbol;
+  return loom_encoding_matrix_operand_fact_name(parameter, value);
 }
 
 static void loom_amdgpu_memory_report_row_set_storage_schema(
@@ -402,34 +398,33 @@ static void loom_amdgpu_memory_report_row_set_storage_schema(
   }
   const loom_value_fact_encoded_operand_schema_t encoded =
       schema->encoded_operand;
-  row->storage_element_format = loom_amdgpu_memory_report_storage_symbol(
-      LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_NUMERIC_FORMAT,
+  row->storage_element_format = loom_amdgpu_memory_report_storage_name(
+      LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_ELEMENT_FORMAT,
       encoded.element_format, LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
-  row->storage_scale_format = loom_amdgpu_memory_report_storage_symbol(
-      LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_NUMERIC_FORMAT,
-      encoded.scale_format, LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
-  row->storage_secondary_scale_format =
-      loom_amdgpu_memory_report_storage_symbol(
-          LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_NUMERIC_FORMAT,
-          encoded.secondary_scale_format, LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
-  row->storage_payload_packing = loom_amdgpu_memory_report_storage_symbol(
-      LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_PAYLOAD_PACKING,
+  row->storage_scale_format = loom_amdgpu_memory_report_storage_name(
+      LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SCALE_FORMAT, encoded.scale_format,
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
+  row->storage_secondary_scale_format = loom_amdgpu_memory_report_storage_name(
+      LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SECONDARY_SCALE_FORMAT,
+      encoded.secondary_scale_format, LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
+  row->storage_payload_packing = loom_amdgpu_memory_report_storage_name(
+      LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_PAYLOAD_PACKING,
       encoded.payload_packing, LOOM_VALUE_FACT_PAYLOAD_PACKING_UNKNOWN);
-  row->storage_scale_topology = loom_amdgpu_memory_report_storage_symbol(
-      LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_SCALE_TOPOLOGY,
+  row->storage_scale_topology = loom_amdgpu_memory_report_storage_name(
+      LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SCALE_TOPOLOGY,
       encoded.scale_topology, LOOM_VALUE_FACT_SCALE_TOPOLOGY_NONE);
-  row->storage_affine_policy = loom_amdgpu_memory_report_storage_symbol(
-      LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_AFFINE_POLICY,
-      encoded.affine_policy, LOOM_VALUE_FACT_AFFINE_POLICY_NONE);
-  row->storage_rounding_policy = loom_amdgpu_memory_report_storage_symbol(
-      LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_ROUNDING_POLICY,
-      encoded.rounding_policy, LOOM_VALUE_FACT_ROUNDING_POLICY_NONE);
-  row->storage_codebook_policy = loom_amdgpu_memory_report_storage_symbol(
-      LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_CODEBOOK_POLICY,
-      encoded.codebook_policy, LOOM_VALUE_FACT_CODEBOOK_POLICY_NONE);
-  row->storage_sparsity_policy = loom_amdgpu_memory_report_storage_symbol(
-      LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_SPARSITY_POLICY,
-      encoded.sparsity_policy, LOOM_VALUE_FACT_SPARSITY_POLICY_NONE);
+  row->storage_affine_policy = loom_amdgpu_memory_report_storage_name(
+      LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_AFFINE, encoded.affine_policy,
+      LOOM_VALUE_FACT_AFFINE_POLICY_NONE);
+  row->storage_rounding_policy = loom_amdgpu_memory_report_storage_name(
+      LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_ROUNDING, encoded.rounding_policy,
+      LOOM_VALUE_FACT_ROUNDING_POLICY_NONE);
+  row->storage_codebook_policy = loom_amdgpu_memory_report_storage_name(
+      LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_CODEBOOK, encoded.codebook_policy,
+      LOOM_VALUE_FACT_CODEBOOK_POLICY_NONE);
+  row->storage_sparsity_policy = loom_amdgpu_memory_report_storage_name(
+      LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SPARSITY, encoded.sparsity_policy,
+      LOOM_VALUE_FACT_SPARSITY_POLICY_NONE);
 }
 
 void loom_amdgpu_memory_report_row_populate_storage_schema(
@@ -455,8 +450,8 @@ void loom_amdgpu_memory_report_row_populate_storage_schema(
   if (iree_string_view_is_empty(row->storage_element_format)) {
     const loom_value_fact_numeric_format_flags_t element_format =
         loom_numeric_format_from_scalar_type(loom_type_element_type(view_type));
-    row->storage_element_format = loom_amdgpu_memory_report_storage_symbol(
-        LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_NUMERIC_FORMAT, element_format,
+    row->storage_element_format = loom_amdgpu_memory_report_storage_name(
+        LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_ELEMENT_FORMAT, element_format,
         LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
   }
 }

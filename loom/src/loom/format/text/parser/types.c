@@ -81,7 +81,9 @@ static iree_status_t loom_parse_encoding_params_emit_duplicate_name(
 // has been consumed. Consumes tokens through the closing RANGLE
 // (inclusive). Grammar: key=value [, key=value]* >.
 static iree_status_t loom_parse_encoding_params(
-    loom_parser_t* parser, loom_parser_encoding_params_t* params) {
+    loom_parser_t* parser,
+    const loom_encoding_family_descriptor_t* family_descriptor,
+    loom_parser_encoding_params_t* params) {
   while (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_RANGLE) &&
          !loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_EOF)) {
     if (params->count > 0) {
@@ -126,8 +128,21 @@ static iree_status_t loom_parse_encoding_params(
       IREE_RETURN_IF_ERROR(loom_parse_encoding_params_emit_static_ssa_value(
           parser, name_token, value_token));
     } else {
-      IREE_RETURN_IF_ERROR(loom_parse_generic_attr_value(
-          parser, /*nesting_depth=*/0, &params->attrs[params->count].value));
+      const loom_attr_descriptor_t* parameter_descriptor = NULL;
+      if (family_descriptor) {
+        uint8_t parameter_index = 0;
+        parameter_descriptor = loom_attr_descriptor_find_by_name(
+            family_descriptor->parameter_descriptors,
+            family_descriptor->parameter_count, name_token.text,
+            &parameter_index);
+      }
+      if (parameter_descriptor) {
+        IREE_RETURN_IF_ERROR(loom_parse_attr_value(
+            parser, parameter_descriptor, &params->attrs[params->count].value));
+      } else {
+        IREE_RETURN_IF_ERROR(loom_parse_generic_attr_value(
+            parser, /*nesting_depth=*/0, &params->attrs[params->count].value));
+      }
     }
     if (parser->error_count > errors_before) {
       return iree_ok_status();
@@ -152,6 +167,21 @@ iree_status_t loom_parse_static_encoding(loom_parser_t* parser,
     return iree_ok_status();
   }
 
+  const loom_encoding_family_id_t family_id =
+      loom_context_lookup_encoding_family_by_name(parser->context, token.text);
+  if (parser->context->encodings.vtables.count > 0 &&
+      family_id == LOOM_ENCODING_FAMILY_ID_INVALID) {
+    loom_diagnostic_param_t params[] = {
+        loom_param_string(token.text),
+    };
+    return loom_parser_emit(parser, LOOM_ERR_PARSE_008, params,
+                            IREE_ARRAYSIZE(params), token);
+  }
+  const loom_encoding_vtable_t* family_vtable =
+      loom_context_resolve_encoding_vtable(parser->context, family_id);
+  const loom_encoding_family_descriptor_t* family_descriptor =
+      family_vtable ? family_vtable->descriptor : NULL;
+
   loom_encoding_t encoding = {
       .name_id = LOOM_STRING_ID_INVALID,
       .alias_id = alias_id,
@@ -165,7 +195,8 @@ iree_status_t loom_parse_static_encoding(loom_parser_t* parser,
         loom_parser_acquire_encoding_params(parser, &params_scratch));
 
     uint32_t errors_before = parser->error_count;
-    iree_status_t status = loom_parse_encoding_params(parser, params_scratch);
+    iree_status_t status =
+        loom_parse_encoding_params(parser, family_descriptor, params_scratch);
     if (iree_status_is_ok(status) && parser->error_count > errors_before) {
       loom_parser_release_encoding_params(parser, params_scratch);
       return iree_ok_status();
@@ -176,17 +207,6 @@ iree_status_t loom_parse_static_encoding(loom_parser_t* parser,
     }
     encoding.attribute_count = params_scratch->count;
     encoding.attributes = params_scratch->attrs;
-  }
-
-  if (parser->context->encodings.vtables.count > 0 &&
-      loom_context_lookup_encoding_family_by_name(
-          parser->context, token.text) == LOOM_ENCODING_FAMILY_ID_INVALID) {
-    loom_diagnostic_param_t params[] = {
-        loom_param_string(token.text),
-    };
-    loom_parser_release_encoding_params(parser, params_scratch);
-    return loom_parser_emit(parser, LOOM_ERR_PARSE_008, params,
-                            IREE_ARRAYSIZE(params), token);
   }
 
   iree_status_t status =

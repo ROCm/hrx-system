@@ -408,12 +408,17 @@ def test_generate_parameterized_attribute_family_metadata() -> None:
 
 def test_generate_encoding_family_metadata() -> None:
     dialect = Dialect("encoding", dialect_id=0x09)
+    rounding = EnumDef(
+        "RoundingPolicy",
+        [EnumCase("none", 0), EnumCase("nearest_even", 1)],
+        doc="Encoded value rounding policy.",
+    )
     family = EncodingFamilyDef(
         "matrix_operand",
         group=dialect,
         role=EncodingFamilyRole.STORAGE_SCHEMA,
         parameters=[
-            AttrDef("rounding", ATTR_TYPE_STRING, optional=True, bare_identifier=True),
+            AttrDef("rounding", ATTR_TYPE_ENUM, enum_def=rounding, optional=True),
             AttrDef("payload_elements", ATTR_TYPE_I64),
         ],
         dynamic_parameters=[
@@ -426,6 +431,8 @@ def test_generate_encoding_family_metadata() -> None:
     tables_c = generate_tables_c("encoding", 0x09, [], (), [family])
 
     assert '#include "loom/ir/encoding.h"' in ops_h
+    assert "typedef enum loom_encoding_rounding_policy_e" in ops_h
+    assert "LOOM_ENCODING_ROUNDING_POLICY_NEAREST_EVEN = 1" in ops_h
     assert "LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_PAYLOAD_ELEMENTS = 0" in ops_h
     assert "LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_ROUNDING = 1" in ops_h
     assert "LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_COUNT_ = 2" in ops_h
@@ -439,12 +446,37 @@ def test_generate_encoding_family_metadata() -> None:
     assert '.name = _BSTRING(16, "payload_elements")' in tables_c
     assert ".attr_kind = LOOM_ATTR_I64" in tables_c
     assert '.name = _BSTRING(8, "rounding")' in tables_c
-    assert ".flags = LOOM_ATTR_OPTIONAL | LOOM_ATTR_BARE_IDENTIFIER" in tables_c
+    assert ".attr_kind = LOOM_ATTR_ENUM" in tables_c
+    assert ".flags = LOOM_ATTR_OPTIONAL" in tables_c
     assert ".parameter_count = IREE_ARRAYSIZE(loom_encoding_matrix_operand_parameter_desc)" in tables_c
     assert "static const loom_encoding_dynamic_parameter_descriptor_t loom_encoding_matrix_operand_dynamic_parameter_desc[]" in tables_c
     assert ".type_constraint = LOOM_TYPE_CONSTRAINT_VECTOR" in tables_c
     assert ".type_constraint = LOOM_TYPE_CONSTRAINT_INDEX" in tables_c
     assert ".dynamic_parameter_count = IREE_ARRAYSIZE(loom_encoding_matrix_operand_dynamic_parameter_desc)" in tables_c
+
+
+def test_generate_encoding_families_share_enum_vocabulary() -> None:
+    dialect = Dialect("encoding", dialect_id=0x09)
+    rounding = EnumDef(
+        "RoundingPolicy",
+        [EnumCase("none", 0), EnumCase("nearest_even", 1)],
+    )
+    families = [
+        EncodingFamilyDef(
+            name,
+            group=dialect,
+            role=EncodingFamilyRole.STORAGE_SCHEMA,
+            parameters=[AttrDef("rounding", ATTR_TYPE_ENUM, enum_def=rounding)],
+        )
+        for name in ("first", "second")
+    ]
+
+    ops_h = generate_ops_h("encoding", 0x09, [], (), families)
+    tables_c = generate_tables_c("encoding", 0x09, [], (), families)
+
+    assert ops_h.count("typedef enum loom_encoding_rounding_policy_e") == 1
+    assert tables_c.count("loom_encoding_rounding_policy_names[]") == 1
+    assert tables_c.count(".enum_case_names = loom_encoding_rounding_policy_names") == 2
 
 
 def test_generate_dialect_tables_emit_dense_op_semantics() -> None:
