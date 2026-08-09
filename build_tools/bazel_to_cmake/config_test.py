@@ -280,6 +280,42 @@ iree_executable_test(
             cmake,
         )
 
+    def test_loom_link_module_preserves_cross_package_module_targets(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        loom = bazel_to_cmake_config.include_project(
+            str(repo_root / ".bazel_to_cmake.cfg.py"),
+            "loom/.bazel_to_cmake.cfg.py",
+        )
+        repo_cfg = SimpleNamespace(PROJECTS=[loom], REPO_MAP={"@iree": ""})
+
+        cmake = bazel_to_cmake_converter.convert_build_file(
+            """
+load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
+
+loom_link_module(
+    name = "provider_suite",
+    srcs = ["provider_checks.loom"],
+    libraries = [
+        "//loom/src/loom/test/corpus/encoding:numeric_conversion_cases",
+        "//loom/src/loom/test/corpus/encoding:mxfp4_decode_bf16.loom",
+    ],
+)
+""",
+            repo_cfg,
+            str(repo_root / "loom/src/loom/tooling/target/amdgpu/test"),
+            repo_root=str(repo_root),
+        )
+
+        self.assertIn(
+            '    "loom::test::corpus::encoding::numeric_conversion_cases"',
+            cmake,
+        )
+        self.assertIn(
+            '    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/encoding/'
+            'mxfp4_decode_bf16.loom"',
+            cmake,
+        )
+
     def test_rejects_compiler_monorepo_external_targets(self):
         converter = bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""})
 

@@ -4,8 +4,6 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:executable.bzl", "iree_executable_test")
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
 
 package(
@@ -24,7 +22,7 @@ exports_files([
 ])
 
 loom_link_module(
-    name = "numeric_conversion_test_module",
+    name = "numeric_conversion_cases",
     srcs = [
         "fp8_bidirectional_decode_e4m3.loom",
         "fp8_bidirectional_decode_e5m2.loom",
@@ -41,22 +39,4 @@ loom_link_module(
     output = "numeric_conversion_test.loombc",
     output_format = "bc",
     require_resolved_config = True,
-)
-
-iree_executable_test(
-    name = "numeric_conversion_amdgpu_test",
-    src = "//loom/src/loom/tools/iree-test-loom",
-    args = [
-        "$(rootpath :numeric_conversion_test_module)",
-        "--device=amdgpu",
-    ],
-    data = [":numeric_conversion_test_module"],
-    tags = [
-        "iree-run-requirement=runtime.resource.amd_gpu",
-        "requires-gpu-amd",
-        "runtime-resource=amd-gpu",
-    ],
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/execute:amdgpu_hal",
-    ]),
 )
