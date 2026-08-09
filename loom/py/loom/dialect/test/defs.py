@@ -64,6 +64,7 @@ from loom.dsl import (
     ATTR_TYPE_FLAGS,
     ATTR_TYPE_I64_ARRAY,
     ATTR_TYPE_PARAMETERIZED,
+    ATTR_TYPE_PARAMETERIZED_ARRAY,
     ATTR_TYPE_SYMBOL,
     BY_REFERENCE,
     CONSTANT_LIKE,
@@ -259,6 +260,13 @@ test_options_attr = ParameterizedAttrDef(
             symbol_ref=SymbolReference("record", ["record"]),
             doc="Optional record symbol dependency.",
         ),
+        AttrDef(
+            "tiles",
+            ATTR_TYPE_PARAMETERIZED_ARRAY,
+            optional=True,
+            parameterized_attr=test_tile_attr,
+            doc="Optional ordered tile alternatives.",
+        ),
     ],
     doc="Structured parameterized attribute lifecycle witness.",
 )
@@ -274,10 +282,27 @@ test_compact_attr = ParameterizedAttrDef(
     doc="Compact primary parameter lifecycle witness.",
 )
 
+test_node_attr = ParameterizedAttrDef(
+    "test.node",
+    group=test_ops,
+    parameters=[
+        AttrDef("value", "i64", doc="Synthetic node value."),
+        AttrDef(
+            "children",
+            ATTR_TYPE_PARAMETERIZED_ARRAY,
+            optional=True,
+            doc="Ordered child nodes or other registered attributes.",
+        ),
+    ],
+    primary_parameter="value",
+    doc="Recursive open-family parameterized-array witness.",
+)
+
 ALL_TEST_PARAMETERIZED_ATTRS = (
     test_tile_attr,
     test_options_attr,
     test_compact_attr,
+    test_node_attr,
 )
 
 test_scope_type = TypeDef(
@@ -341,10 +366,36 @@ test_array_type = TypeDef(
     doc="Optional and nested descriptor-backed type parameter witness.",
 )
 
+test_variant_set_type = TypeDef(
+    "test.variant_set",
+    params=[
+        AttrDef(
+            "values",
+            ATTR_TYPE_PARAMETERIZED_ARRAY,
+            doc="Ordered parameterized values from any registered family.",
+        ),
+        AttrDef(
+            "alternatives",
+            ATTR_TYPE_PARAMETERIZED_ARRAY,
+            optional=True,
+            doc="Optional ordered values from any registered family.",
+        ),
+    ],
+    format=[
+        Param("values"),
+        OptionalGroup(
+            [COMMA, kw("alternatives"), EQUALS, Param("alternatives")],
+            anchor="alternatives",
+        ),
+    ],
+    doc="Parameterized-array type-parameter lifecycle witness.",
+)
+
 ALL_TEST_TYPES = (
     test_scope_type,
     test_matrix_type,
     test_array_type,
+    test_variant_set_type,
 )
 
 cmp_predicates = EnumDef(
@@ -1965,6 +2016,37 @@ test_parameterized_attr = Op(
 )
 
 # ============================================================================
+# test.parameterized_attr_array — ordered parameterized attributes
+# ============================================================================
+
+test_parameterized_attr_array = Op(
+    "test.parameterized_attr_array",
+    group=test_ops,
+    doc="Test op carrying open- and exact-family parameterized arrays.",
+    attrs=[
+        AttrDef(
+            "values",
+            ATTR_TYPE_PARAMETERIZED_ARRAY,
+            doc="Ordered parameterized attributes from any registered family.",
+        ),
+        AttrDef(
+            "tiles",
+            ATTR_TYPE_PARAMETERIZED_ARRAY,
+            optional=True,
+            parameterized_attr=test_tile_attr,
+            doc="Optional ordered attributes from the tile family.",
+        ),
+    ],
+    format=[
+        Attr("values"),
+        OptionalGroup([kw("using"), Attr("tiles")], anchor="tiles"),
+    ],
+    examples=[
+        "test.parameterized_attr_array [#test.tile<width = 8>, #test.options<mode = fast>, #test.tile<width = 16>] using [#test.tile<width = 4>]",
+    ],
+)
+
+# ============================================================================
 # test.compact_parameterized_attr — compact parameterized attribute
 # ============================================================================
 
@@ -2738,4 +2820,5 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_enum_array_attrs,
     test_parameterized_attr,
     test_compact_parameterized_attr,
+    test_parameterized_attr_array,
 )

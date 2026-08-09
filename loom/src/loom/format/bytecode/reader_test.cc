@@ -334,7 +334,8 @@ class ReaderTest : public ::testing::Test {
             LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_TILE,
         LOOM_TEST_OPTIONS_MODE_FAST,
         loom_make_enum_array(scopes, IREE_ARRAYSIZE(scopes)), bf16_type_id,
-        tile, loom_symbol_ref_null(), &full_options));
+        tile, loom_symbol_ref_null(), loom_parameterized_attr_array_empty(),
+        &full_options));
     loom_op_t* full_op = nullptr;
     IREE_CHECK_OK(loom_test_parameterized_attr_build(
         &body_builder, full_options, LOOM_LOCATION_UNKNOWN, &full_op));
@@ -344,7 +345,7 @@ class ReaderTest : public ::testing::Test {
         module, LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_SCOPES,
         LOOM_TEST_OPTIONS_MODE_PRECISE, loom_enum_array_empty(),
         LOOM_TYPE_ID_INVALID, loom_attr_absent(), loom_symbol_ref_null(),
-        &empty_options));
+        loom_parameterized_attr_array_empty(), &empty_options));
     loom_op_t* empty_op = nullptr;
     IREE_CHECK_OK(loom_test_parameterized_attr_build(
         &body_builder, empty_options, LOOM_LOCATION_UNKNOWN, &empty_op));
@@ -353,7 +354,8 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_test_options_attr_make(
         module, /*build_flags=*/0, LOOM_TEST_OPTIONS_MODE_FAST,
         loom_enum_array_empty(), LOOM_TYPE_ID_INVALID, loom_attr_absent(),
-        loom_symbol_ref_null(), &absent_options));
+        loom_symbol_ref_null(), loom_parameterized_attr_array_empty(),
+        &absent_options));
     loom_op_t* absent_op = nullptr;
     IREE_CHECK_OK(loom_test_parameterized_attr_build(
         &body_builder, absent_options, LOOM_LOCATION_UNKNOWN, &absent_op));
@@ -368,6 +370,28 @@ class ReaderTest : public ::testing::Test {
     loom_op_t* compact_op = nullptr;
     IREE_CHECK_OK(loom_test_compact_parameterized_attr_build(
         &body_builder, compact, LOOM_LOCATION_UNKNOWN, &compact_op));
+
+    loom_attribute_t array_values[] = {tile, full_options, tile};
+    loom_attribute_t exact_tiles[] = {tile};
+    loom_op_t* array_op = nullptr;
+    IREE_CHECK_OK(loom_test_parameterized_attr_array_build(
+        &body_builder, LOOM_TEST_PARAMETERIZED_ATTR_ARRAY_BUILD_FLAG_HAS_TILES,
+        loom_make_parameterized_attr_array(array_values,
+                                           IREE_ARRAYSIZE(array_values)),
+        loom_make_parameterized_attr_array(exact_tiles,
+                                           IREE_ARRAYSIZE(exact_tiles)),
+        LOOM_LOCATION_UNKNOWN, &array_op));
+    loom_op_t* present_empty_array_op = nullptr;
+    IREE_CHECK_OK(loom_test_parameterized_attr_array_build(
+        &body_builder, LOOM_TEST_PARAMETERIZED_ATTR_ARRAY_BUILD_FLAG_HAS_TILES,
+        loom_parameterized_attr_array_empty(),
+        loom_parameterized_attr_array_empty(), LOOM_LOCATION_UNKNOWN,
+        &present_empty_array_op));
+    loom_op_t* absent_array_op = nullptr;
+    IREE_CHECK_OK(loom_test_parameterized_attr_array_build(
+        &body_builder, /*build_flags=*/0, loom_parameterized_attr_array_empty(),
+        loom_parameterized_attr_array_empty(), LOOM_LOCATION_UNKNOWN,
+        &absent_array_op));
 
     loom_op_t* yield_op = nullptr;
     IREE_CHECK_OK(loom_test_yield_build(&body_builder, /*values=*/nullptr,
@@ -458,7 +482,7 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_module_intern_type_id(
         module, loom_type_scalar(LOOM_SCALAR_TYPE_BF16), &bf16_type_id));
 
-    loom_type_t argument_types[4] = {};
+    loom_type_t argument_types[6] = {};
     IREE_CHECK_OK(loom_test_scope_type_make(
         module, LOOM_TEST_SCOPE_TYPE_SCOPE_SUBGROUP, &argument_types[0]));
     IREE_CHECK_OK(
@@ -471,6 +495,22 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_test_array_type_make(
         module, LOOM_TEST_ARRAY_TYPE_BUILD_FLAG_HAS_ALIGNMENT, bf16_type_id,
         /*alignment=*/32, loom_named_attr_slice_empty(), &argument_types[3]));
+    loom_attribute_t tile = loom_attr_absent();
+    IREE_CHECK_OK(loom_test_tile_attr_make(module, 8, &tile));
+    loom_attribute_t options = loom_attr_absent();
+    IREE_CHECK_OK(loom_test_options_attr_make(
+        module, /*build_flags=*/0, LOOM_TEST_OPTIONS_MODE_FAST,
+        loom_enum_array_empty(), LOOM_TYPE_ID_INVALID, loom_attr_absent(),
+        loom_symbol_ref_null(), loom_parameterized_attr_array_empty(),
+        &options));
+    loom_attribute_t variants[] = {tile, options, tile};
+    IREE_CHECK_OK(loom_test_variant_set_type_make(
+        module, LOOM_TEST_VARIANT_SET_TYPE_BUILD_FLAG_HAS_ALTERNATIVES,
+        loom_make_parameterized_attr_array(variants, IREE_ARRAYSIZE(variants)),
+        loom_parameterized_attr_array_empty(), &argument_types[4]));
+    IREE_CHECK_OK(loom_test_variant_set_type_make(
+        module, /*build_flags=*/0, loom_parameterized_attr_array_empty(),
+        loom_parameterized_attr_array_empty(), &argument_types[5]));
 
     loom_builder_t builder;
     loom_builder_initialize(module, &module->arena, loom_module_block(module),
@@ -1830,8 +1870,8 @@ class ReaderTest : public ::testing::Test {
     std::vector<std::string> error_ids;
     loom_bytecode_read_result_t result =
         ReadModule(first, &read_module, &error_ids);
-    EXPECT_EQ(result.error_count, 0u);
-    EXPECT_TRUE(error_ids.empty());
+    EXPECT_EQ(result.error_count, 0u) << ::testing::PrintToString(error_ids);
+    EXPECT_TRUE(error_ids.empty()) << ::testing::PrintToString(error_ids);
     ASSERT_NE(read_module, nullptr);
 
     auto second = WriteModule(read_module);
@@ -2291,7 +2331,7 @@ TEST_F(ReaderTest, ParameterizedAttrsPreserveNamedSlotsAndPresence) {
   ASSERT_NE(func_op, nullptr);
   loom_block_t* entry = loom_region_entry_block(loom_test_func_body(func_op));
   ASSERT_NE(entry, nullptr);
-  ASSERT_EQ(entry->op_count, 5u);
+  ASSERT_EQ(entry->op_count, 8u);
 
   loom_attribute_t full =
       loom_test_parameterized_attr_options(loom_block_op(entry, 0));
@@ -2331,6 +2371,28 @@ TEST_F(ReaderTest, ParameterizedAttrsPreserveNamedSlotsAndPresence) {
   ASSERT_LT(label_id, read_module->strings.count);
   EXPECT_TRUE(iree_string_view_equal(read_module->strings.entries[label_id],
                                      IREE_SV("wave")));
+
+  loom_op_t* array_op = loom_block_op(entry, 4);
+  ASSERT_TRUE(loom_test_parameterized_attr_array_isa(array_op));
+  loom_parameterized_attr_array_t values =
+      loom_test_parameterized_attr_array_values(array_op);
+  ASSERT_EQ(values.count, 3u);
+  EXPECT_TRUE(loom_test_tile_attr_isa(values.values[0]));
+  EXPECT_TRUE(loom_test_options_attr_isa(values.values[1]));
+  EXPECT_TRUE(loom_test_tile_attr_isa(values.values[2]));
+  EXPECT_TRUE(loom_attribute_equal(&values.values[0], &values.values[2]));
+  loom_parameterized_attr_array_t exact_tiles =
+      loom_test_parameterized_attr_array_tiles(array_op);
+  ASSERT_EQ(exact_tiles.count, 1u);
+  EXPECT_TRUE(loom_test_tile_attr_isa(exact_tiles.values[0]));
+
+  loom_op_t* present_empty_array_op = loom_block_op(entry, 5);
+  EXPECT_FALSE(loom_attr_is_absent(loom_op_attrs(present_empty_array_op)[1]));
+  EXPECT_EQ(
+      loom_test_parameterized_attr_array_tiles(present_empty_array_op).count,
+      0u);
+  loom_op_t* absent_array_op = loom_block_op(entry, 6);
+  EXPECT_TRUE(loom_attr_is_absent(loom_op_attrs(absent_array_op)[1]));
 
   loom_module_free(read_module);
   loom_module_free(module);
@@ -2733,8 +2795,8 @@ TEST_F(ReaderTest, ReadsStructuralRegisterValueType) {
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
       ReadModule(bytes, &read_module, &error_ids);
-  EXPECT_EQ(result.error_count, 0u);
-  EXPECT_TRUE(error_ids.empty());
+  EXPECT_EQ(result.error_count, 0u) << ::testing::PrintToString(error_ids);
+  EXPECT_TRUE(error_ids.empty()) << ::testing::PrintToString(error_ids);
   ASSERT_NE(read_module, nullptr);
 
   const loom_type_t* register_type = nullptr;
@@ -2778,7 +2840,7 @@ TEST_F(ReaderTest, ReadsDescriptorBackedParameterizedTypes) {
   const loom_op_t* decl_op = read_module->symbols.entries[0].defining_op;
   ASSERT_NE(decl_op, nullptr);
   loom_value_slice_t arguments = loom_test_decl_args(decl_op);
-  ASSERT_EQ(arguments.count, 4u);
+  ASSERT_EQ(arguments.count, 6u);
 
   loom_type_t scope_type =
       loom_module_value_type(read_module, arguments.values[0]);
@@ -2807,6 +2869,25 @@ TEST_F(ReaderTest, ReadsDescriptorBackedParameterizedTypes) {
   ASSERT_TRUE(loom_test_array_type_isa(aligned_type));
   EXPECT_TRUE(loom_test_array_type_has_alignment(aligned_type));
   EXPECT_EQ(loom_test_array_type_alignment(aligned_type), 32);
+
+  loom_type_t variants_type =
+      loom_module_value_type(read_module, arguments.values[4]);
+  ASSERT_TRUE(loom_test_variant_set_type_isa(variants_type));
+  loom_parameterized_attr_array_t variants =
+      loom_test_variant_set_type_values(variants_type);
+  ASSERT_EQ(variants.count, 3u);
+  EXPECT_TRUE(loom_test_tile_attr_isa(variants.values[0]));
+  EXPECT_TRUE(loom_test_options_attr_isa(variants.values[1]));
+  EXPECT_TRUE(loom_test_tile_attr_isa(variants.values[2]));
+  EXPECT_TRUE(loom_attribute_equal(&variants.values[0], &variants.values[2]));
+  EXPECT_TRUE(loom_test_variant_set_type_has_alternatives(variants_type));
+  EXPECT_EQ(loom_test_variant_set_type_alternatives(variants_type).count, 0u);
+
+  loom_type_t variants_absent_type =
+      loom_module_value_type(read_module, arguments.values[5]);
+  ASSERT_TRUE(loom_test_variant_set_type_isa(variants_absent_type));
+  EXPECT_FALSE(
+      loom_test_variant_set_type_has_alternatives(variants_absent_type));
 
   loom_module_free(read_module);
   loom_module_free(source_module);

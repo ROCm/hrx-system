@@ -31,8 +31,10 @@ from loom.dialect.test import (
     test_array_type,
     test_matrix_type,
     test_ops,
+    test_options_attr,
     test_scope_type,
     test_tile_attr,
+    test_variant_set_type,
 )
 from loom.dsl import ANY, AttrDef, Op, Operand, TypeDef, TypeParam
 from loom.format.bytecode.reader import read_module
@@ -72,6 +74,7 @@ from loom.ir import (
     Module,
     Operation,
     ParameterizedAttr,
+    ParameterizedAttrArray,
     ParameterizedType,
     RegisterType,
     ScalarType,
@@ -670,6 +673,35 @@ class TestParseDescriptorBackedTypes:
             element_type=BF16,
             metadata=CanonicalAttrDict((("tile", test_tile_attr(width=8)),)),
         )
+
+    def test_parameterized_array_parameters_preserve_order_and_presence(
+        self,
+    ) -> None:
+        text = (
+            "test.variant_set<"
+            "[#test.tile<width = 8>, #test.options<mode = fast>, "
+            "#test.tile<width = 8>], alternatives = []>"
+        )
+        parameterized_attr_registry = {
+            definition.name: definition for definition in ALL_TEST_PARAMETERIZED_ATTRS
+        }
+
+        parsed = _parse_type(
+            text,
+            type_registry=self._registry(),
+            parameterized_attr_registry=parameterized_attr_registry,
+        )
+
+        assert parsed == test_variant_set_type(
+            values=[
+                test_tile_attr(width=8),
+                test_options_attr(mode="fast"),
+                test_tile_attr(width=8),
+            ],
+            alternatives=[],
+        )
+        assert parsed.has("alternatives")
+        assert print_type(parsed) == text
 
     def test_optional_float_parameter_accepts_special_value(self) -> None:
         optional_float_type = TypeDef(
@@ -1511,6 +1543,22 @@ class TestRoundTrip:
 """
         )
 
+    def test_parameterized_attr_array_roundtrips_in_pipeline_syntax(self) -> None:
+        source = """pass.pipeline<module> @arrays pipeline {
+  choose(condition = #test.options<mode = fast, tiles = [#test.tile<width = 4>, #test.tile<width = 8>]>)
+}
+"""
+        parser = Parser()
+        parser.register_ops(ALL_PASS_OPS)
+        parser.register_types(ALL_BUILTIN_TYPES)
+        parser.register_parameterized_attrs(ALL_TEST_PARAMETERIZED_ATTRS)
+        module = parser.parse(source)
+
+        printer = Printer()
+        printer.register_ops(ALL_PASS_OPS)
+        printer.register_types(ALL_BUILTIN_TYPES)
+        assert printer.print_module(module) == source
+
     def test_parameterized_attr_preserves_present_empty(self) -> None:
         present = _parse_op(
             "test.parameterized_attr #test.options<mode = fast, scopes = []>"
@@ -1523,6 +1571,91 @@ class TestRoundTrip:
         assert present_options.has("scopes")
         assert present_options.get("scopes") == EnumArrayAttr()
         assert not absent_options.has("scopes")
+
+    def test_parameterized_attr_array_preserves_order_and_exact_family(self) -> None:
+        text = (
+            "test.parameterized_attr_array "
+            "[#test.tile<width = 8>, #test.options<mode = fast>, "
+            "#test.tile<width = 8>] using [#test.tile<width = 4>]"
+        )
+        op = _parse_op(text)
+
+        values = op.attributes["values"]
+        tiles = op.attributes["tiles"]
+        assert isinstance(values, ParameterizedAttrArray)
+        assert isinstance(tiles, ParameterizedAttrArray)
+        assert tuple(value.family_name for value in values) == (
+            "test.tile",
+            "test.options",
+            "test.tile",
+        )
+        assert values.values[0] == values.values[2]
+        assert tuple(value.family_name for value in tiles) == ("test.tile",)
+        assert _op_printer().print_operation(op, Module()) == text
+
+    def test_parameterized_attr_array_distinguishes_empty_from_absent(self) -> None:
+        absent = _parse_op("test.parameterized_attr_array []")
+        present_empty = _parse_op("test.parameterized_attr_array [] using []")
+
+        assert absent.attributes["values"] == ParameterizedAttrArray()
+        assert "tiles" not in absent.attributes
+        assert present_empty.attributes["tiles"] == ParameterizedAttrArray()
+        assert _op_printer().print_operation(absent, Module()) == (
+            "test.parameterized_attr_array []"
+        )
+        assert _op_printer().print_operation(present_empty, Module()) == (
+            "test.parameterized_attr_array [] using []"
+        )
+
+    def test_parameterized_attr_array_nests_in_parameterized_attr(self) -> None:
+        text = (
+            "test.parameterized_attr "
+            "#test.options<mode = fast, "
+            "tiles = [#test.tile<width = 4>, #test.tile<width = 8>]>"
+        )
+        op = _parse_op(text)
+        options = op.attributes["options"]
+
+        assert isinstance(options, ParameterizedAttr)
+        assert options.get("tiles") == ParameterizedAttrArray(
+            [test_tile_attr(width=4), test_tile_attr(width=8)]
+        )
+        assert _op_printer().print_operation(op, Module()) == text
+
+    def test_parameterized_attr_array_rejects_excessive_nesting(self) -> None:
+        node = "#test.node<0>"
+        for value in range(1, 10):
+            node = f"#test.node<{value}, children = [{node}]>"
+
+        with pytest.raises(ParseError, match="maximum depth"):
+            _parse_op(f"test.parameterized_attr_array [{node}]")
+
+    @pytest.mark.parametrize(
+        ("text", "message"),
+        [
+            (
+                "test.parameterized_attr_array [42]",
+                "expected HASH_ATTR",
+            ),
+            (
+                "test.parameterized_attr_array [#test.unknown<value = 1>]",
+                "unknown parameterized attribute family",
+            ),
+            (
+                "test.parameterized_attr_array [] using [#test.options<mode = fast>]",
+                "expected parameterized attribute family 'test.tile'",
+            ),
+            (
+                "test.parameterized_attr_array [#test.tile<width = 8>,]",
+                "expected HASH_ATTR",
+            ),
+        ],
+    )
+    def test_parameterized_attr_array_rejects_malformed_input(
+        self, text: str, message: str
+    ) -> None:
+        with pytest.raises(ParseError, match=message):
+            _parse_op(text)
 
     def test_parameterized_attr_nests_in_generic_dict(self) -> None:
         text = "test.enum_array_attrs [] {options = #test.options<mode = precise>}"

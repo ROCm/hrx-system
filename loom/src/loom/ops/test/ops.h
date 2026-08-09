@@ -20,7 +20,8 @@ enum {
   LOOM_PARAMETERIZED_ATTR_TEST_TILE = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0),
   LOOM_PARAMETERIZED_ATTR_TEST_OPTIONS = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 1),
   LOOM_PARAMETERIZED_ATTR_TEST_COMPACT = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 2),
-  LOOM_PARAMETERIZED_ATTR_TEST_COUNT_ = 3,
+  LOOM_PARAMETERIZED_ATTR_TEST_NODE = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 3),
+  LOOM_PARAMETERIZED_ATTR_TEST_COUNT_ = 4,
 };
 
 // Synthetic mode for parameterized attribute coverage.
@@ -61,6 +62,7 @@ enum loom_test_options_attr_build_flag_bits_e {
   LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_ELEMENT_TYPE = 1u << 1,
   LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_TILE = 1u << 2,
   LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_TARGET = 1u << 3,
+  LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_TILES = 1u << 4,
 };
 typedef uint32_t loom_test_options_attr_build_flags_t;
 static inline bool loom_test_options_attr_isa(loom_attribute_t attr) {
@@ -98,6 +100,13 @@ static inline bool loom_test_options_attr_has_target(loom_attribute_t attr) {
 static inline loom_symbol_ref_t loom_test_options_attr_target(loom_attribute_t attr) {
   return loom_attr_as_symbol(loom_attr_as_parameterized_slots(attr)[LOOM_TEST_OPTIONS_ATTR_TARGET_PARAMETER_INDEX]);
 }
+enum { LOOM_TEST_OPTIONS_ATTR_TILES_PARAMETER_INDEX = 5 };
+static inline bool loom_test_options_attr_has_tiles(loom_attribute_t attr) {
+  return !loom_attr_is_absent(loom_attr_as_parameterized_slots(attr)[LOOM_TEST_OPTIONS_ATTR_TILES_PARAMETER_INDEX]);
+}
+static inline loom_parameterized_attr_array_t loom_test_options_attr_tiles(loom_attribute_t attr) {
+  return loom_attr_as_parameterized_array(loom_attr_as_parameterized_slots(attr)[LOOM_TEST_OPTIONS_ATTR_TILES_PARAMETER_INDEX]);
+}
 iree_status_t loom_test_options_attr_make(
     loom_module_t* module,
     loom_test_options_attr_build_flags_t build_flags,
@@ -106,6 +115,7 @@ iree_status_t loom_test_options_attr_make(
     loom_type_id_t element_type,
     loom_attribute_t tile,
     loom_symbol_ref_t target,
+    loom_parameterized_attr_array_t tiles,
     loom_attribute_t* out_attr);
 
 // Compact primary parameter lifecycle witness.
@@ -132,6 +142,32 @@ iree_status_t loom_test_compact_attr_make(
     loom_test_compact_attr_build_flags_t build_flags,
     loom_string_id_t label,
     int64_t value,
+    loom_attribute_t* out_attr);
+
+// Recursive open-family parameterized-array witness.
+enum loom_test_node_attr_build_flag_bits_e {
+  LOOM_TEST_NODE_ATTR_BUILD_FLAG_HAS_CHILDREN = 1u << 0,
+};
+typedef uint32_t loom_test_node_attr_build_flags_t;
+static inline bool loom_test_node_attr_isa(loom_attribute_t attr) {
+  return attr.kind == LOOM_ATTR_PARAMETERIZED && loom_attr_as_parameterized_kind(attr) == LOOM_PARAMETERIZED_ATTR_TEST_NODE;
+}
+enum { LOOM_TEST_NODE_ATTR_VALUE_PARAMETER_INDEX = 0 };
+static inline int64_t loom_test_node_attr_value(loom_attribute_t attr) {
+  return loom_attr_as_i64(loom_attr_as_parameterized_slots(attr)[LOOM_TEST_NODE_ATTR_VALUE_PARAMETER_INDEX]);
+}
+enum { LOOM_TEST_NODE_ATTR_CHILDREN_PARAMETER_INDEX = 1 };
+static inline bool loom_test_node_attr_has_children(loom_attribute_t attr) {
+  return !loom_attr_is_absent(loom_attr_as_parameterized_slots(attr)[LOOM_TEST_NODE_ATTR_CHILDREN_PARAMETER_INDEX]);
+}
+static inline loom_parameterized_attr_array_t loom_test_node_attr_children(loom_attribute_t attr) {
+  return loom_attr_as_parameterized_array(loom_attr_as_parameterized_slots(attr)[LOOM_TEST_NODE_ATTR_CHILDREN_PARAMETER_INDEX]);
+}
+iree_status_t loom_test_node_attr_make(
+    loom_module_t* module,
+    loom_test_node_attr_build_flags_t build_flags,
+    int64_t value,
+    loom_parameterized_attr_array_t children,
     loom_attribute_t* out_attr);
 
 enum {
@@ -243,7 +279,8 @@ enum {
   LOOM_OP_TEST_ENUM_ARRAY_ATTRS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 105),
   LOOM_OP_TEST_PARAMETERIZED_ATTR = LOOM_OP_KIND(LOOM_DIALECT_TEST, 106),
   LOOM_OP_TEST_COMPACT_PARAMETERIZED_ATTR = LOOM_OP_KIND(LOOM_DIALECT_TEST, 107),
-  LOOM_OP_TEST_COUNT_ = 108,
+  LOOM_OP_TEST_PARAMETERIZED_ATTR_ARRAY = LOOM_OP_KIND(LOOM_DIALECT_TEST, 108),
+  LOOM_OP_TEST_COUNT_ = 109,
 };
 
 // Synthetic flags for TemplateParamFlags parser/printer coverage.
@@ -2135,6 +2172,23 @@ LOOM_DEFINE_ATTR_PARAMETERIZED(loom_test_compact_parameterized_attr_value, 0)
 iree_status_t loom_test_compact_parameterized_attr_build(
     loom_builder_t* builder,
     loom_attribute_t value,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_TEST_PARAMETERIZED_ATTR_ARRAY: Test op carrying open- and exact-family parameterized arrays.
+// test.parameterized_attr_array [#test.tile<width = 8>, #test.options<mode = fast>, #test.tile<width = 16>] using [#test.tile<width = 4>]
+LOOM_DEFINE_ISA(loom_test_parameterized_attr_array_isa, LOOM_OP_TEST_PARAMETERIZED_ATTR_ARRAY)
+LOOM_DEFINE_ATTR_PARAMETERIZED_ARRAY(loom_test_parameterized_attr_array_values, 0)
+LOOM_DEFINE_ATTR_PARAMETERIZED_ARRAY(loom_test_parameterized_attr_array_tiles, 1)
+enum loom_test_parameterized_attr_array_build_flag_bits_e {
+  LOOM_TEST_PARAMETERIZED_ATTR_ARRAY_BUILD_FLAG_HAS_TILES = 1u << 0,
+};
+typedef uint32_t loom_test_parameterized_attr_array_build_flags_t;
+iree_status_t loom_test_parameterized_attr_array_build(
+    loom_builder_t* builder,
+    loom_test_parameterized_attr_array_build_flags_t build_flags,
+    loom_parameterized_attr_array_t values,
+    loom_optional loom_parameterized_attr_array_t tiles,
     loom_location_id_t location,
     loom_op_t** out_op);
 

@@ -1682,6 +1682,17 @@ static void loom_verify_attr_symbol_references(
       }
       return;
     }
+    case LOOM_ATTR_PARAMETERIZED_ARRAY:
+      if (aggregate_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          (attr.count > 0 && !attr.parameterized_array)) {
+        return;
+      }
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        loom_verify_attr_symbol_references(
+            state, op, /*descriptor=*/NULL, attr.parameterized_array[i],
+            field_ref, (uint8_t)(aggregate_depth + 1));
+      }
+      return;
     default:
       return;
   }

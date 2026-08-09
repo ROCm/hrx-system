@@ -45,6 +45,7 @@ from loom.dsl import (
     ATTR_TYPE_I64,
     ATTR_TYPE_I64_ARRAY,
     ATTR_TYPE_PARAMETERIZED,
+    ATTR_TYPE_PARAMETERIZED_ARRAY,
     ATTR_TYPE_PREDICATE_LIST,
     ATTR_TYPE_STRING,
     ATTR_TYPE_SYMBOL,
@@ -480,6 +481,80 @@ def test_generate_encoding_families_share_enum_vocabulary() -> None:
     assert ops_h.count("typedef enum loom_encoding_rounding_policy_e") == 1
     assert tables_c.count("loom_encoding_rounding_policy_names[]") == 1
     assert tables_c.count(".enum_case_names = loom_encoding_rounding_policy_names") == 2
+
+
+def test_generate_parameterized_attribute_array_surface() -> None:
+    dialect = Dialect("test", dialect_id=0x01)
+    tile = ParameterizedAttrDef(
+        "test.tile",
+        group=dialect,
+        parameters=[AttrDef("width", ATTR_TYPE_I64)],
+        primary_parameter="width",
+    )
+    node = ParameterizedAttrDef(
+        "test.node",
+        group=dialect,
+        parameters=[
+            AttrDef("value", ATTR_TYPE_I64),
+            AttrDef(
+                "children",
+                ATTR_TYPE_PARAMETERIZED_ARRAY,
+                optional=True,
+            ),
+            AttrDef(
+                "tiles",
+                ATTR_TYPE_PARAMETERIZED_ARRAY,
+                optional=True,
+                parameterized_attr=tile,
+            ),
+        ],
+        primary_parameter="value",
+    )
+    holder = Op(
+        "test.holder",
+        group=dialect,
+        attrs=[
+            AttrDef("values", ATTR_TYPE_PARAMETERIZED_ARRAY),
+            AttrDef(
+                "tiles",
+                ATTR_TYPE_PARAMETERIZED_ARRAY,
+                optional=True,
+                parameterized_attr=tile,
+            ),
+        ],
+        format=[
+            Attr("values"),
+            OptionalGroup([Attr("tiles")], anchor="tiles"),
+        ],
+    )
+    wrapper = TypeDef(
+        "test.wrapper",
+        params=[
+            AttrDef(
+                "children",
+                ATTR_TYPE_PARAMETERIZED_ARRAY,
+            )
+        ],
+        format=[Param("children")],
+    )
+
+    ops_h = generate_ops_h("test", 0x01, [holder], [tile, node])
+    builders_c = generate_builders_c("test", [holder], [tile, node])
+    tables_c = generate_tables_c("test", 0x01, [holder], [tile, node])
+    type_registry_h, _, type_registry_tables_c = generate_type_registry([wrapper])
+
+    assert "LOOM_DEFINE_ATTR_PARAMETERIZED_ARRAY(loom_test_holder_values, 0)" in ops_h
+    assert "loom_parameterized_attr_array_t values" in ops_h
+    assert "loom_optional loom_parameterized_attr_array_t tiles" in ops_h
+    assert "loom_module_make_parameterized_attr_array(" in builders_c
+    assert "loom_attr_parameterized_array(children.values, children.count)" in builders_c
+    assert "loom_attr_parameterized_array(tiles.values, tiles.count)" in builders_c
+    assert ".attr_kind = LOOM_ATTR_PARAMETERIZED_ARRAY" in tables_c
+    assert ".reference.parameterized_attr_kind = LOOM_PARAMETERIZED_ATTR_KIND_ANY" in tables_c
+    assert ".reference.parameterized_attr_kind = LOOM_PARAMETERIZED_ATTR_TEST_TILE" in tables_c
+    assert "loom_parameterized_attr_array_t children" in type_registry_h
+    assert "loom_attr_as_parameterized_array(" in type_registry_h
+    assert ".reference.parameterized_attr_kind = LOOM_PARAMETERIZED_ATTR_KIND_ANY" in type_registry_tables_c
 
 
 def test_generate_dialect_tables_emit_dense_op_semantics() -> None:

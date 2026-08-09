@@ -281,6 +281,18 @@ static iree_status_t loom_availability_attr_is_available_before_op_impl(
       }
       *out_available = true;
       return iree_ok_status();
+    case LOOM_ATTR_PARAMETERIZED_ARRAY:
+      if (attr->count > 0 && !attr->parameterized_array) {
+        return iree_ok_status();
+      }
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_availability_attr_is_available_before_op_impl(
+            analysis, moving_root_op, before_op, &attr->parameterized_array[i],
+            (uint8_t)(depth + 1), out_available));
+        if (!*out_available) return iree_ok_status();
+      }
+      *out_available = true;
+      return iree_ok_status();
     case LOOM_ATTR_ENCODING: {
       const loom_encoding_t* encoding =
           loom_module_encoding(analysis->module, attr->encoding_id);

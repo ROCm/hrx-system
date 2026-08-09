@@ -161,6 +161,20 @@ static bool loom_attribute_equal_impl(const loom_attribute_t* a,
         }
       }
       return true;
+    case LOOM_ATTR_PARAMETERIZED_ARRAY:
+      if (a->count != b->count) return false;
+      if (a->parameterized_array == b->parameterized_array) return true;
+      if (a->parameterized_array == NULL || b->parameterized_array == NULL ||
+          depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return false;
+      }
+      for (uint16_t i = 0; i < a->count; ++i) {
+        if (!loom_attribute_equal_impl(&a->parameterized_array[i],
+                                       &b->parameterized_array[i], depth + 1)) {
+          return false;
+        }
+      }
+      return true;
     default:
       return memcmp(a, b, sizeof(loom_attribute_t)) == 0;
   }
@@ -227,6 +241,20 @@ static uint32_t loom_attribute_hash_impl(const loom_attribute_t* attr,
         uint32_t slot_hash =
             loom_attribute_hash_impl(&attr->parameterized_slots[i], depth + 1);
         hash = loom_hash_bytes(&slot_hash, sizeof(slot_hash), hash);
+      }
+      break;
+    case LOOM_ATTR_PARAMETERIZED_ARRAY:
+      hash = loom_hash_bytes(&attr->count, sizeof(attr->count), hash);
+      if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          (attr->count > 0 && attr->parameterized_array == NULL)) {
+        hash = loom_hash_bytes(&attr->parameterized_array,
+                               sizeof(attr->parameterized_array), hash);
+        break;
+      }
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        uint32_t element_hash =
+            loom_attribute_hash_impl(&attr->parameterized_array[i], depth + 1);
+        hash = loom_hash_bytes(&element_hash, sizeof(element_hash), hash);
       }
       break;
     default:

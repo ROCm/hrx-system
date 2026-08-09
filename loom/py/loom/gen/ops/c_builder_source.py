@@ -667,6 +667,7 @@ def _generate_builder_implementation(
                 "encoding": f"loom_attr_encoding({name})",
                 "bytes": f"loom_attr_bytes(_{name}_storage, (uint32_t){name}.data_length)",
                 "parameterized": name,
+                "parameterized_array": name,
                 "any": name,
             }
             constructor = constructor_map.get(attr_type, name)
@@ -730,6 +731,19 @@ def _generate_builder_implementation(
                 else:
                     lines.append("  IREE_RETURN_IF_ERROR(")
                     lines.append("      loom_module_make_canonical_attr_dict(")
+                    lines.append(f"          builder->module, {name},")
+                    lines.append(f"          &loom_op_attrs(*out_op)[{idx}]));")
+            elif attr_type == "parameterized_array":
+                if optional_flag:
+                    lines.append(f"  if (iree_any_bit_set(build_flags, {optional_flag})) {{")
+                    lines.append("    IREE_RETURN_IF_ERROR(")
+                    lines.append("        loom_module_make_parameterized_attr_array(")
+                    lines.append(f"            builder->module, {name},")
+                    lines.append(f"            &loom_op_attrs(*out_op)[{idx}]));")
+                    lines.append("  }")
+                else:
+                    lines.append("  IREE_RETURN_IF_ERROR(")
+                    lines.append("      loom_module_make_parameterized_attr_array(")
                     lines.append(f"          builder->module, {name},")
                     lines.append(f"          &loom_op_attrs(*out_op)[{idx}]));")
             elif attr_type == "bytes":

@@ -466,6 +466,19 @@ static bool loom_attribute_refs_predicate_value(loom_attribute_t attr,
         }
       }
       return false;
+    case LOOM_ATTR_PARAMETERIZED_ARRAY:
+      if (dict_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          attr.count == 0 || !attr.parameterized_array) {
+        return false;
+      }
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        if (loom_attribute_refs_predicate_value(attr.parameterized_array[i],
+                                                value_id,
+                                                (uint8_t)(dict_depth + 1))) {
+          return true;
+        }
+      }
+      return false;
     default:
       return false;
   }

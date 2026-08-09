@@ -92,6 +92,7 @@ from loom.ir import (
     NoneType,
     Operation,
     ParameterizedAttr,
+    ParameterizedAttrArray,
     ParameterizedType,
     PoolType,
     Predicate,
@@ -668,6 +669,21 @@ def _format_attr_value(
     if isinstance(value, EnumArrayAttr):
         raise ValueError("enum arrays require a descriptor-backed field")
     if isinstance(value, ParameterizedAttr):
+        if attr_def is not None:
+            if attr_def.attr_type != "parameterized":
+                raise TypeError(
+                    "parameterized attribute value does not match field "
+                    f"kind {attr_def.attr_type!r}"
+                )
+            expected_family = attr_def.parameterized_attr
+            if (
+                expected_family is not None
+                and value.family_name != expected_family.name
+            ):
+                raise ValueError(
+                    f"parameterized attribute family '{value.family_name}' "
+                    f"does not match field contract '{expected_family.name}'"
+                )
         parameters = []
         primary_parameter_index = value.definition.primary_parameter_index
         if primary_parameter_index is not None:
@@ -695,6 +711,29 @@ def _format_attr_value(
             )
             parameters.append(f"{parameter.name} = {formatted_slot}")
         return f"#{value.family_name}<" + ", ".join(parameters) + ">"
+    if isinstance(value, ParameterizedAttrArray):
+        if attr_def is None or attr_def.attr_type != "parameterized_array":
+            raise ValueError(
+                "parameterized attribute arrays require a descriptor-backed field"
+            )
+        element_descriptor = AttrDef(
+            attr_def.name,
+            "parameterized",
+            parameterized_attr=attr_def.parameterized_attr,
+        )
+        return (
+            "["
+            + ", ".join(
+                _format_attr_value(
+                    element,
+                    element_descriptor,
+                    type_context=type_context,
+                    type_registry=type_registry,
+                )
+                for element in value
+            )
+            + "]"
+        )
     if isinstance(value, str):
         return _format_string_literal(value)
     if isinstance(value, list | tuple):
@@ -780,6 +819,18 @@ def _is_pipeline_printable_attr_value(
             for parameter, slot in zip(
                 value.definition.parameters, value.slots, strict=True
             )
+        )
+    if isinstance(value, ParameterizedAttrArray):
+        if attr_def is None or attr_def.attr_type != "parameterized_array":
+            return False
+        element_descriptor = AttrDef(
+            attr_def.name,
+            "parameterized",
+            parameterized_attr=attr_def.parameterized_attr,
+        )
+        return all(
+            _is_pipeline_printable_attr_value(element, element_descriptor)
+            for element in value
         )
     if isinstance(value, bool | int | float | str | bytes | bytearray):
         return True

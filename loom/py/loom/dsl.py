@@ -109,6 +109,7 @@ __all__ = [
     "ATTR_TYPE_PREDICATE_LIST",
     "ATTR_TYPE_DICT",
     "ATTR_TYPE_PARAMETERIZED",
+    "ATTR_TYPE_PARAMETERIZED_ARRAY",
     "RegionDef",
     # Symbol support.
     "SymbolDefinition",
@@ -518,6 +519,7 @@ ATTR_TYPE_FLAGS = "flags"
 ATTR_TYPE_PREDICATE_LIST = "predicate_list"
 ATTR_TYPE_DICT = "dict"  # Named attribute dictionary.
 ATTR_TYPE_PARAMETERIZED = "parameterized"
+ATTR_TYPE_PARAMETERIZED_ARRAY = "parameterized_array"
 
 _VALID_ATTR_TYPES = frozenset(
     {
@@ -538,6 +540,7 @@ _VALID_ATTR_TYPES = frozenset(
         ATTR_TYPE_PREDICATE_LIST,
         ATTR_TYPE_DICT,
         ATTR_TYPE_PARAMETERIZED,
+        ATTR_TYPE_PARAMETERIZED_ARRAY,
     }
 )
 
@@ -764,11 +767,11 @@ class AttrDef:
 
     name: Attribute name (key in the attribute dictionary or
           positional in the format spec).
-    attr_type: The kind of attribute value. Must be one of the
-        ATTR_TYPE_* constants: "i64", "f64", "string", "bool",
-        "enum", "enum_array", "scoped_enum", "type", "i64_array", "bytes", "encoding",
-        "any". Scoped enums use a stable key at format boundaries and a dense
-        ordinal interpreted by the enclosing representation contract in C IR.
+    attr_type: The kind of attribute value. Must be one of the ATTR_TYPE_*
+        constants. Scoped enums use a stable key at format boundaries and a
+        dense ordinal interpreted by the enclosing representation contract in
+        C IR. Parameterized attribute arrays preserve order and repeated
+        families and are valid only in descriptor-backed fields.
     doc: Human-readable description.
     default: Default value (None = required, not optional).
     enum_def: For enum and enum-array attrs, the EnumDef describing valid
@@ -782,6 +785,9 @@ class AttrDef:
         ordinals and leaves selected/supported-case policy to the op verifier.
     bare_identifier: If True, string values use bare identifier spelling in
         descriptor-aware text formats instead of quoted string spelling.
+    parameterized_attr: Optional exact family constraint for parameterized
+        attributes or every element of a parameterized attribute array. None
+        leaves the family open.
     """
 
     name: str
@@ -834,13 +840,13 @@ class AttrDef:
             raise ValueError(
                 f"AttrDef '{self.name}': symbol_ref requires attr_type='symbol'"
             )
-        if (
-            self.parameterized_attr is not None
-            and self.attr_type != ATTR_TYPE_PARAMETERIZED
+        if self.parameterized_attr is not None and self.attr_type not in (
+            ATTR_TYPE_PARAMETERIZED,
+            ATTR_TYPE_PARAMETERIZED_ARRAY,
         ):
             raise ValueError(
                 f"AttrDef '{self.name}': parameterized_attr requires "
-                "attr_type='parameterized'"
+                "attr_type='parameterized' or 'parameterized_array'"
             )
         if self.elide_default:
             if self.default is None:
@@ -2848,6 +2854,7 @@ _DESCRIPTOR_PARAMETER_TYPES = frozenset(
         ATTR_TYPE_SYMBOL,
         ATTR_TYPE_DICT,
         ATTR_TYPE_PARAMETERIZED,
+        ATTR_TYPE_PARAMETERIZED_ARRAY,
     }
 )
 
@@ -2898,14 +2905,6 @@ def _validate_descriptor_parameters(
             raise ValueError(
                 f"{owner}: parameter '{parameter.name}' has unsupported kind "
                 f"'{parameter.attr_type}'"
-            )
-        if (
-            parameter.attr_type == ATTR_TYPE_PARAMETERIZED
-            and parameter.parameterized_attr is None
-        ):
-            raise ValueError(
-                f"{owner}: nested parameter '{parameter.name}' requires an "
-                "exact parameterized_attr"
             )
 
 

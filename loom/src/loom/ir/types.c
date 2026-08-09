@@ -278,6 +278,23 @@ static bool loom_attribute_equal_after_value_remap(
       }
       return true;
 
+    case LOOM_ATTR_PARAMETERIZED_ARRAY:
+      if (source_attr.count != target_attr.count ||
+          depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          (source_attr.count > 0 && (!source_attr.parameterized_array ||
+                                     !target_attr.parameterized_array))) {
+        return false;
+      }
+      for (uint16_t i = 0; i < source_attr.count; ++i) {
+        if (!loom_attribute_equal_after_value_remap(
+                module, source_attr.parameterized_array[i],
+                target_attr.parameterized_array[i], (uint8_t)(depth + 1),
+                remap)) {
+          return false;
+        }
+      }
+      return true;
+
     default:
       return loom_attribute_equal(&source_attr, &target_attr);
   }
@@ -579,6 +596,15 @@ static bool loom_attribute_references_value(const loom_module_t* module,
       if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) return false;
       for (uint16_t i = 0; i < attr.count; ++i) {
         if (loom_attribute_references_value(module, attr.parameterized_slots[i],
+                                            (uint8_t)(depth + 1), value_id)) {
+          return true;
+        }
+      }
+      return false;
+    case LOOM_ATTR_PARAMETERIZED_ARRAY:
+      if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) return false;
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        if (loom_attribute_references_value(module, attr.parameterized_array[i],
                                             (uint8_t)(depth + 1), value_id)) {
           return true;
         }

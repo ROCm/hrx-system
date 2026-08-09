@@ -435,6 +435,17 @@ static iree_status_t loom_low_packet_json_write_attr(
       IREE_RETURN_IF_ERROR(loom_json_object_end(&parameters));
       return loom_json_object_end(&object);
     }
+    case LOOM_ATTR_PARAMETERIZED_ARRAY: {
+      loom_json_array_writer_t array;
+      IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &array));
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&array));
+        IREE_RETURN_IF_ERROR(loom_low_packet_json_write_attr(
+            module, type_print_options, &attr->parameterized_array[i], stream,
+            (uint8_t)(depth + 1)));
+      }
+      return loom_json_array_end(&array);
+    }
     case LOOM_ATTR_ENCODING: {
       const loom_encoding_t* encoding =
           loom_module_encoding(module, (uint16_t)attr->encoding_id);

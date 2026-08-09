@@ -364,6 +364,7 @@ def generate_ops_h(
                 "symbol": "LOOM_DEFINE_ATTR_SYMBOL",
                 "type": "LOOM_DEFINE_ATTR_TYPE",
                 "parameterized": "LOOM_DEFINE_ATTR_PARAMETERIZED",
+                "parameterized_array": "LOOM_DEFINE_ATTR_PARAMETERIZED_ARRAY",
                 "any": "LOOM_DEFINE_ATTR_ANY",
             }
             macro = macro_map.get(attr_def.attr_type)

@@ -1076,3 +1076,10 @@ class TestBuilder(DialectBuilder):
         value: Any,
         location_id: int | None = ...,
     ) -> None: ...
+    def parameterized_attr_array(
+        self,
+        *,
+        values: Any,
+        tiles: Any | None = ...,
+        location_id: int | None = ...,
+    ) -> None: ...

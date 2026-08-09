@@ -1775,6 +1775,14 @@ loom_attribute_t loom_memory_access_atomic_scope(loom_memory_access_t access);
     return loom_op_attrs(op)[(index)];                            \
   }
 
+// Defines a function that reads a parameterized attribute array by index.
+#define LOOM_DEFINE_ATTR_PARAMETERIZED_ARRAY(func_name, index)           \
+  enum { func_name##_ATTR_INDEX = (index) };                             \
+  static inline loom_parameterized_attr_array_t func_name(               \
+      const loom_op_t* op) {                                             \
+    return loom_attr_as_parameterized_array(loom_op_attrs(op)[(index)]); \
+  }
+
 // Defines a function that reads a generic attribute payload by index.
 #define LOOM_DEFINE_ATTR_ANY(func_name, index)                    \
   enum { func_name##_ATTR_INDEX = (index) };                      \

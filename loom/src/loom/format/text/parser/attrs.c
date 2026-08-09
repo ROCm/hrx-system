@@ -429,6 +429,53 @@ static iree_status_t loom_parse_parameterized_attr(
       family_descriptor->parameter_count, out_attr);
 }
 
+static iree_status_t loom_parse_parameterized_attr_array(
+    loom_parser_t* parser, loom_parameterized_attr_kind_t expected_family_kind,
+    uint16_t nesting_depth, loom_type_parse_mode_t type_mode,
+    loom_attribute_t* out_attr) {
+  loom_token_t opening_token = loom_token_none();
+  LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_LBRACKET, &opening_token);
+  if (nesting_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+    loom_diagnostic_param_t params[] = {
+        loom_param_u32(LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH),
+    };
+    return loom_parser_emit(parser, LOOM_ERR_PARSE_021, params,
+                            IREE_ARRAYSIZE(params), opening_token);
+  }
+
+  loom_attribute_t inline_attributes[16];
+  loom_attribute_t* attributes = inline_attributes;
+  iree_host_size_t capacity = IREE_ARRAYSIZE(inline_attributes);
+  iree_host_size_t count = 0;
+  while (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_RBRACKET) &&
+         !loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_EOF)) {
+    if (count > 0 &&
+        !loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_COMMA)) {
+      break;
+    }
+    if (count == UINT16_MAX) {
+      loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
+      return loom_parser_emit_unexpected_token(
+          parser, peek, IREE_SV("at most 65535 parameterized attributes"));
+    }
+    if (count >= capacity) {
+      IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+          &parser->parser_arena, count, count + 1, sizeof(*attributes),
+          &capacity, (void**)&attributes));
+    }
+    const uint32_t element_errors_before = parser->error_count;
+    IREE_RETURN_IF_ERROR(loom_parse_parameterized_attr(
+        parser, expected_family_kind, (uint16_t)(nesting_depth + 1), type_mode,
+        &attributes[count]));
+    if (parser->error_count > element_errors_before) return iree_ok_status();
+    ++count;
+  }
+  LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_RBRACKET, NULL);
+  return loom_module_make_parameterized_attr_array(
+      parser->module, loom_make_parameterized_attr_array(attributes, count),
+      out_attr);
+}
+
 static iree_status_t loom_parse_attr_value_at_depth(
     loom_parser_t* parser, const loom_attr_descriptor_t* descriptor,
     uint16_t nesting_depth, loom_type_parse_mode_t type_mode,
@@ -535,6 +582,10 @@ static iree_status_t loom_parse_attr_value_at_depth(
                                           out_attr);
     case LOOM_ATTR_PARAMETERIZED:
       return loom_parse_parameterized_attr(
+          parser, descriptor->reference.parameterized_attr_kind, nesting_depth,
+          type_mode, out_attr);
+    case LOOM_ATTR_PARAMETERIZED_ARRAY:
+      return loom_parse_parameterized_attr_array(
           parser, descriptor->reference.parameterized_attr_kind, nesting_depth,
           type_mode, out_attr);
     case LOOM_ATTR_ANY:

@@ -71,6 +71,7 @@ from loom.ir import (
     OpaqueLocation,
     Operation,
     ParameterizedAttr,
+    ParameterizedAttrArray,
     ParameterizedType,
     PoolType,
     Predicate,
@@ -1741,6 +1742,87 @@ class BytecodeReader:
         )
         return op, offset
 
+    def _read_parameterized_attr_payload(
+        self,
+        data: bytes,
+        offset: int,
+        module: Module | None,
+        value_map: list[int] | None,
+        expected_definition: Any | None,
+        aggregate_nesting_depth: int,
+    ) -> tuple[ParameterizedAttr, int]:
+        """Read a parameterized attribute payload without a kind byte."""
+        if aggregate_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
+            raise BytecodeError(
+                "aggregate attribute nesting exceeds maximum depth "
+                f"{ATTR_AGGREGATE_MAX_NESTING_DEPTH}"
+            )
+        family_id, offset = decode_varint(data, offset)
+        if family_id >= len(self._strings):
+            raise BytecodeError(
+                f"parameterized attr family string_id {family_id} out of "
+                f"range (string table has {len(self._strings)} entries)"
+            )
+        family_name = self._strings[family_id]
+        definition = self._parameterized_attrs_by_name.get(family_name)
+        if definition is None:
+            raise BytecodeError(
+                f"parameterized attr family {family_name!r} is not registered"
+            )
+        if expected_definition is not None and expected_definition.name != family_name:
+            raise BytecodeError(
+                f"parameterized attr family {family_name!r} does not match "
+                f"field contract {expected_definition.name!r}"
+            )
+        present_count, offset = decode_varint(data, offset)
+        if present_count > len(definition.parameters):
+            raise BytecodeError(
+                f"parameterized attr {family_name!r} has {present_count} "
+                f"present parameters but declares only "
+                f"{len(definition.parameters)}"
+            )
+        parameter_by_name = {
+            parameter.name: (index, parameter)
+            for index, parameter in enumerate(definition.parameters)
+        }
+        parameters: dict[str, Any] = {}
+        previous_index = -1
+        for _ in range(present_count):
+            parameter_name_id, offset = decode_varint(data, offset)
+            if parameter_name_id >= len(self._strings):
+                raise BytecodeError(
+                    "parameterized attr parameter string_id "
+                    f"{parameter_name_id} out of range (string table has "
+                    f"{len(self._strings)} entries)"
+                )
+            parameter_name = self._strings[parameter_name_id]
+            parameter_entry = parameter_by_name.get(parameter_name)
+            if parameter_entry is None:
+                raise BytecodeError(
+                    f"parameterized attr {family_name!r} has unknown "
+                    f"parameter {parameter_name!r}"
+                )
+            parameter_index, parameter_def = parameter_entry
+            if parameter_index <= previous_index:
+                raise BytecodeError(
+                    f"parameterized attr {family_name!r} parameters are "
+                    "not in declaration order"
+                )
+            parameter_value, offset = self._read_attr_value(
+                data,
+                offset,
+                module,
+                value_map,
+                parameter_def,
+                aggregate_nesting_depth + 1,
+            )
+            parameters[parameter_name] = parameter_value
+            previous_index = parameter_index
+        try:
+            return ParameterizedAttr(definition, parameters), offset
+        except (TypeError, ValueError) as err:
+            raise BytecodeError(str(err)) from err
+
     def _read_attr_value(
         self,
         data: bytes,
@@ -1833,85 +1915,50 @@ class BytecodeReader:
                     )
                 return EnumArrayAttr(data[offset:end_offset]), end_offset
             case 14:  # PARAMETERIZED
-                if aggregate_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
-                    raise BytecodeError(
-                        "aggregate attribute nesting exceeds maximum depth "
-                        f"{ATTR_AGGREGATE_MAX_NESTING_DEPTH}"
-                    )
-                family_id, offset = decode_varint(data, offset)
-                if family_id >= len(self._strings):
-                    raise BytecodeError(
-                        f"parameterized attr family string_id {family_id} out of "
-                        f"range (string table has {len(self._strings)} entries)"
-                    )
-                family_name = self._strings[family_id]
-                definition = self._parameterized_attrs_by_name.get(family_name)
-                if definition is None:
-                    raise BytecodeError(
-                        f"parameterized attr family {family_name!r} is not registered"
-                    )
                 if attr_def is not None and (
                     getattr(attr_def, "attr_type", None) != "parameterized"
                 ):
                     raise BytecodeError(
                         "parameterized attr does not match the field contract"
                     )
+                return self._read_parameterized_attr_payload(
+                    data,
+                    offset,
+                    module,
+                    value_map,
+                    getattr(attr_def, "parameterized_attr", None),
+                    aggregate_nesting_depth,
+                )
+            case 15:  # PARAMETERIZED_ARRAY
+                if getattr(attr_def, "attr_type", None) != "parameterized_array":
+                    raise BytecodeError(
+                        "parameterized attribute arrays require a "
+                        "descriptor-backed field"
+                    )
+                if aggregate_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
+                    raise BytecodeError(
+                        "aggregate attribute nesting exceeds maximum depth "
+                        f"{ATTR_AGGREGATE_MAX_NESTING_DEPTH}"
+                    )
+                count, offset = decode_varint(data, offset)
+                if count > 0xFFFF:
+                    raise BytecodeError(
+                        "parameterized attribute array length "
+                        f"{count} exceeds UINT16_MAX"
+                    )
+                values: list[ParameterizedAttr] = []
                 expected_definition = getattr(attr_def, "parameterized_attr", None)
-                if expected_definition is not None and (
-                    expected_definition.name != family_name
-                ):
-                    raise BytecodeError(
-                        f"parameterized attr family {family_name!r} does not match "
-                        f"field contract {expected_definition.name!r}"
-                    )
-                present_count, offset = decode_varint(data, offset)
-                if present_count > len(definition.parameters):
-                    raise BytecodeError(
-                        f"parameterized attr {family_name!r} has {present_count} "
-                        f"present parameters but declares only "
-                        f"{len(definition.parameters)}"
-                    )
-                parameter_by_name = {
-                    parameter.name: (index, parameter)
-                    for index, parameter in enumerate(definition.parameters)
-                }
-                parameters: dict[str, Any] = {}
-                previous_index = -1
-                for _ in range(present_count):
-                    parameter_name_id, offset = decode_varint(data, offset)
-                    if parameter_name_id >= len(self._strings):
-                        raise BytecodeError(
-                            "parameterized attr parameter string_id "
-                            f"{parameter_name_id} out of range (string table has "
-                            f"{len(self._strings)} entries)"
-                        )
-                    parameter_name = self._strings[parameter_name_id]
-                    parameter_entry = parameter_by_name.get(parameter_name)
-                    if parameter_entry is None:
-                        raise BytecodeError(
-                            f"parameterized attr {family_name!r} has unknown "
-                            f"parameter {parameter_name!r}"
-                        )
-                    parameter_index, parameter_def = parameter_entry
-                    if parameter_index <= previous_index:
-                        raise BytecodeError(
-                            f"parameterized attr {family_name!r} parameters are "
-                            "not in declaration order"
-                        )
-                    parameter_value, offset = self._read_attr_value(
+                for _ in range(count):
+                    value, offset = self._read_parameterized_attr_payload(
                         data,
                         offset,
                         module,
                         value_map,
-                        parameter_def,
+                        expected_definition,
                         aggregate_nesting_depth + 1,
                     )
-                    parameters[parameter_name] = parameter_value
-                    previous_index = parameter_index
-                try:
-                    return ParameterizedAttr(definition, parameters), offset
-                except (TypeError, ValueError) as err:
-                    raise BytecodeError(str(err)) from err
+                    values.append(value)
+                return ParameterizedAttrArray(values), offset
             case _:
                 raise BytecodeError(f"unknown attr value kind: {kind}")
 

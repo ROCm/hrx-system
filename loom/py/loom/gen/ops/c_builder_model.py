@@ -129,6 +129,7 @@ _C_ATTR_TYPE_MAP: dict[str, str] = {
     "encoding": "uint16_t",
     "dict": "loom_named_attr_slice_t",
     "parameterized": "loom_attribute_t",
+    "parameterized_array": "loom_parameterized_attr_array_t",
     "any": "loom_attribute_t",
 }
 
@@ -163,6 +164,7 @@ _BUILD_FLAG_OPTIONAL_ATTR_TYPES = frozenset(
         "type",
         "encoding",
         "dict",
+        "parameterized_array",
     }
 )
 
@@ -171,6 +173,7 @@ _TRAILING_BUILD_FLAG_OPTIONAL_ATTR_TYPES = frozenset(
         "i64_array",
         "bytes",
         "dict",
+        "parameterized_array",
     }
 )
 

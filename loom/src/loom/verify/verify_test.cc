@@ -494,6 +494,34 @@ TEST_F(VerifyTest, EnumArraysRequireExplicitAttributeDescriptors) {
   ExpectU32Param(*entry, 2, LOOM_ATTR_ANY);
 }
 
+TEST_F(VerifyTest, ParameterizedAttrArraysRequireExplicitAttributeDescriptors) {
+  EnterTestFunc(nullptr, 0, nullptr);
+
+  loom_attribute_t tile = loom_attr_absent();
+  IREE_ASSERT_OK(loom_test_tile_attr_make(module_, 8, &tile));
+  loom_attribute_t values[] = {tile};
+  loom_attribute_t array = loom_attr_absent();
+  IREE_ASSERT_OK(loom_module_make_parameterized_attr_array(
+      module_,
+      loom_make_parameterized_attr_array(values, IREE_ARRAYSIZE(values)),
+      &array));
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(
+      &builder_, array, loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+      LOOM_LOCATION_UNKNOWN, &op));
+
+  TerminateFunc();
+  DiagnosticCapture capture;
+  auto result = VerifyStructured(&capture);
+  EXPECT_GT(result.error_count, 0u);
+  const CapturedDiagnostic* entry =
+      FindDiagnostic(capture, loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 5));
+  ASSERT_NE(entry, nullptr) << "Expected TYPE/005 attribute-kind diagnostic";
+  EXPECT_EQ(GetStringParam(*entry, 0), "value");
+  ExpectU32Param(*entry, 1, LOOM_ATTR_PARAMETERIZED_ARRAY);
+  ExpectU32Param(*entry, 2, LOOM_ATTR_ANY);
+}
+
 TEST_F(VerifyTest, EnumArraysPreserveValuesAndPresentEmpty) {
   EnterTestFunc(nullptr, 0, nullptr);
   uint8_t required_values[] = {

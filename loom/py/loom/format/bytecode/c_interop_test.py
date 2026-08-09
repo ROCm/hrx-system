@@ -33,6 +33,7 @@ from loom.ir import (
     EnumArrayAttr,
     Module,
     ParameterizedAttr,
+    ParameterizedAttrArray,
     ParameterizedType,
     RegisterType,
     SymbolName,
@@ -70,10 +71,14 @@ def _typed_register_module() -> tuple[Module, RegisterType]:
         "  test.parameterized_attr "
         "#test.options<mode = fast, scopes = [subgroup, <254>], "
         "element_type = bf16, tile = #test.tile<width = 16>, "
-        "target = @parameterized_record>\n"
+        "target = @parameterized_record, "
+        "tiles = [#test.tile<width = 4>, #test.tile<width = 8>]>\n"
         "  test.parameterized_attr "
         "#test.options<mode = precise, scopes = []>\n"
         "  test.parameterized_attr #test.options<mode = fast>\n"
+        "  test.parameterized_attr_array "
+        "[#test.tile<width = 8>, #test.options<mode = precise>, "
+        "#test.tile<width = 8>] using [#test.tile<width = 4>]\n"
         "  test.yield\n"
         "}\n"
         "test.record @parameterized_record "
@@ -151,6 +156,12 @@ def main() -> None:
             raise AssertionError("nested parameterized attr did not survive C bytecode")
         if first.get("target") != SymbolName("parameterized_record"):
             raise AssertionError("parameterized symbol did not survive C bytecode")
+        if first.get("tiles") != ParameterizedAttrArray(
+            [test_tile_attr(width=4), test_tile_attr(width=8)]
+        ):
+            raise AssertionError(
+                "nested parameterized array did not survive C bytecode"
+            )
         if (
             not present_empty.has("scopes")
             or present_empty.get("scopes") != EnumArrayAttr()
@@ -158,6 +169,22 @@ def main() -> None:
             raise AssertionError("present empty parameter did not survive C bytecode")
         if absent.has("scopes"):
             raise AssertionError("absent parameter became present in C bytecode")
+        array_op = enum_function.regions[0].blocks[0].ops[4]
+        array_values = array_op.attributes["values"]
+        if not isinstance(array_values, ParameterizedAttrArray):
+            raise AssertionError("Python reader did not recover parameterized array")
+        if tuple(value.family_name for value in array_values) != (
+            "test.tile",
+            "test.options",
+            "test.tile",
+        ):
+            raise AssertionError("mixed parameterized array lost element order")
+        if array_values.values[0] != array_values.values[2]:
+            raise AssertionError("repeated parameterized array value changed")
+        if array_op.attributes["tiles"] != ParameterizedAttrArray(
+            [test_tile_attr(width=4)]
+        ):
+            raise AssertionError("exact-family parameterized array changed")
         record = next(
             symbol.op
             for symbol in loaded.symbols

@@ -646,6 +646,79 @@ static iree_status_t RemapSymbolByName(void* user_data,
   return iree_ok_status();
 }
 
+TEST_F(RemapTest, RemapsParameterizedAttributeArraysAcrossModules) {
+  loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_value_id_t source_dim = DefineValue(source_, index_type);
+  loom_value_id_t target_dim = DefineValue(target_, index_type);
+  loom_type_t source_vector_type =
+      loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32,
+                          loom_dim_pack_dynamic(source_dim), 0);
+  loom_type_id_t source_vector_type_id = LOOM_TYPE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_type_id(source_, source_vector_type,
+                                            &source_vector_type_id));
+
+  loom_string_id_t source_name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(source_, IREE_SV("target"), &source_name_id));
+  uint16_t source_symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_add_symbol(source_, source_name_id, &source_symbol_id));
+
+  loom_attribute_t tile = loom_attr_absent();
+  IREE_ASSERT_OK(loom_test_tile_attr_make(source_, 8, &tile));
+  loom_attribute_t options = loom_attr_absent();
+  IREE_ASSERT_OK(loom_test_options_attr_make(
+      source_,
+      LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_ELEMENT_TYPE |
+          LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_TILE |
+          LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_TARGET,
+      LOOM_TEST_OPTIONS_MODE_FAST, loom_enum_array_empty(),
+      source_vector_type_id, tile, (loom_symbol_ref_t){0, source_symbol_id},
+      loom_parameterized_attr_array_empty(), &options));
+  loom_attribute_t source_values[] = {tile, options, tile};
+  loom_attribute_t source_array = loom_attr_absent();
+  IREE_ASSERT_OK(loom_module_make_parameterized_attr_array(
+      source_,
+      loom_make_parameterized_attr_array(source_values,
+                                         IREE_ARRAYSIZE(source_values)),
+      &source_array));
+
+  loom_ir_remap_options_t remap_options = {
+      /*.allow_unmapped_values=*/{}, /*.remap_symbol=*/
+      loom_ir_remap_symbol_callback_make(RemapSymbolByName, NULL),
+  };
+  loom_ir_remap_t remap = InitializeRemap(&remap_options);
+  IREE_ASSERT_OK(loom_ir_remap_map_value(&remap, source_dim, target_dim));
+  loom_attribute_t target_array = loom_attr_absent();
+  IREE_ASSERT_OK(loom_ir_remap_attribute(&remap, source_array, &target_array));
+
+  loom_parameterized_attr_array_t target_values =
+      loom_attr_as_parameterized_array(target_array);
+  ASSERT_EQ(target_values.count, 3u);
+  EXPECT_TRUE(loom_test_tile_attr_isa(target_values.values[0]));
+  EXPECT_TRUE(loom_test_options_attr_isa(target_values.values[1]));
+  EXPECT_TRUE(loom_test_tile_attr_isa(target_values.values[2]));
+  EXPECT_TRUE(
+      loom_attribute_equal(&target_values.values[0], &target_values.values[2]));
+  EXPECT_NE(target_values.values,
+            loom_attr_as_parameterized_array(source_array).values);
+
+  loom_attribute_t target_options = target_values.values[1];
+  loom_type_id_t target_vector_type_id =
+      loom_test_options_attr_element_type(target_options);
+  ASSERT_LT(target_vector_type_id, target_->types.count);
+  loom_type_t target_vector_type =
+      target_->types.entries[target_vector_type_id];
+  ASSERT_TRUE(loom_type_dim_is_dynamic_at(target_vector_type, 0));
+  EXPECT_EQ(loom_type_dim_value_id_at(target_vector_type, 0), target_dim);
+  loom_symbol_ref_t target_ref = loom_test_options_attr_target(target_options);
+  ASSERT_LT(target_ref.symbol_id, target_->symbols.count);
+  loom_string_id_t target_name_id =
+      target_->symbols.entries[target_ref.symbol_id].name_id;
+  EXPECT_TRUE(iree_string_view_equal(target_->strings.entries[target_name_id],
+                                     IREE_SV("target")));
+}
+
 static iree_status_t RemapSymbolToMissingTarget(
     void* user_data, const loom_module_t* source_module,
     loom_module_t* target_module, loom_symbol_ref_t source_ref,

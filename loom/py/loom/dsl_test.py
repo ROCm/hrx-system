@@ -450,13 +450,14 @@ class TestParameterizedAttrDef:
                 parameters=[AttrDef("scope", "scoped_enum")],
             )
 
-    def test_nested_parameter_requires_exact_family(self) -> None:
-        with _raises(ValueError, match="requires an exact parameterized_attr"):
-            ParameterizedAttrDef(
-                "test.options",
-                group=Dialect("test"),
-                parameters=[AttrDef("tile", ATTR_TYPE_PARAMETERIZED)],
-            )
+    def test_nested_parameter_allows_open_family(self) -> None:
+        options = ParameterizedAttrDef(
+            "test.options",
+            group=Dialect("test"),
+            parameters=[AttrDef("value", ATTR_TYPE_PARAMETERIZED)],
+        )
+
+        assert options.parameters[0].parameterized_attr is None
 
     def test_nested_parameter_retains_exact_family(self) -> None:
         dialect = Dialect("test")
@@ -1702,12 +1703,12 @@ class TestTypeDef:
                 format=[Param("not-valid")],
             )
 
-        with _raises(ValueError, match="requires an exact parameterized_attr"):
-            TypeDef(
-                "test.wrapper",
-                params=[AttrDef("value", ATTR_TYPE_PARAMETERIZED)],
-                format=[Param("value")],
-            )
+        open_wrapper = TypeDef(
+            "test.wrapper",
+            params=[AttrDef("value", ATTR_TYPE_PARAMETERIZED)],
+            format=[Param("value")],
+        )
+        assert open_wrapper.params[0].parameterized_attr is None
 
         with _raises(ValueError, match="unsupported kind 'scoped_enum'"):
             TypeDef(

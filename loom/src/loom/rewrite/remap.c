@@ -1047,6 +1047,35 @@ static iree_status_t loom_ir_remap_attribute_impl(
       return iree_ok_status();
     }
 
+    case LOOM_ATTR_PARAMETERIZED_ARRAY: {
+      if (aggregate_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "aggregate attribute nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
+      }
+      loom_attribute_t* target_attributes = NULL;
+      if (source_attr.count > 0) {
+        if (!source_attr.parameterized_array) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "non-empty parameterized attribute array has a NULL element "
+              "pointer");
+        }
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            payload_arena, source_attr.count, sizeof(*target_attributes),
+            (void**)&target_attributes));
+        for (uint16_t i = 0; i < source_attr.count; ++i) {
+          IREE_RETURN_IF_ERROR(loom_ir_remap_attribute_impl(
+              remap, source_attr.parameterized_array[i], aggregate_depth + 1,
+              payload_arena, &target_attributes[i]));
+        }
+      }
+      *out_target_attr =
+          loom_attr_parameterized_array(target_attributes, source_attr.count);
+      return iree_ok_status();
+    }
+
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "unknown attribute kind %u",

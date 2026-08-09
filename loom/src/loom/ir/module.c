@@ -981,6 +981,25 @@ static iree_status_t loom_module_mark_symbol_references_in_attr(
             (uint8_t)(dict_depth + 1)));
       }
       return iree_ok_status();
+    case LOOM_ATTR_PARAMETERIZED_ARRAY:
+      if (dict_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameterized attribute array nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
+      }
+      if (attr->count > 0 && !attr->parameterized_array) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "non-empty parameterized attribute array has a NULL value "
+            "pointer");
+      }
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_module_mark_symbol_references_in_attr(
+            module, &attr->parameterized_array[i], referenced_symbols,
+            (uint8_t)(dict_depth + 1)));
+      }
+      return iree_ok_status();
     default:
       return iree_ok_status();
   }
@@ -1146,6 +1165,46 @@ static iree_status_t loom_module_remap_symbol_attr(
         *out_target_attr = loom_make_parameterized_attr(
             (loom_parameterized_attr_kind_t)source_attr.reserved_1,
             target_slots, source_attr.count);
+        *out_changed = true;
+      }
+      return iree_ok_status();
+    }
+    case LOOM_ATTR_PARAMETERIZED_ARRAY: {
+      if (dict_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameterized attribute array nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
+      }
+      if (source_attr.count == 0) return iree_ok_status();
+      if (!source_attr.parameterized_array) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "non-empty parameterized attribute array has a NULL value "
+            "pointer");
+      }
+      loom_attribute_t* target_attributes = NULL;
+      for (uint16_t i = 0; i < source_attr.count; ++i) {
+        loom_attribute_t target_value = {0};
+        bool value_changed = false;
+        IREE_RETURN_IF_ERROR(loom_module_remap_symbol_attr(
+            module, new_symbol_ids, old_symbol_count,
+            source_attr.parameterized_array[i], (uint8_t)(dict_depth + 1),
+            &target_value, &value_changed));
+        if (!value_changed) continue;
+        if (!target_attributes) {
+          IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+              &module->arena, source_attr.count, sizeof(*target_attributes),
+              (void**)&target_attributes));
+          memcpy(
+              target_attributes, source_attr.parameterized_array,
+              (iree_host_size_t)source_attr.count * sizeof(*target_attributes));
+        }
+        target_attributes[i] = target_value;
+      }
+      if (target_attributes) {
+        *out_target_attr =
+            loom_attr_parameterized_array(target_attributes, source_attr.count);
         *out_changed = true;
       }
       return iree_ok_status();
@@ -2292,6 +2351,53 @@ static iree_status_t loom_module_make_parameterized_attr_slots(
   return iree_ok_status();
 }
 
+static iree_status_t loom_module_make_parameterized_attr_array_values(
+    loom_module_t* module, const loom_attribute_t* attributes,
+    iree_host_size_t attribute_count, iree_host_size_t depth,
+    loom_attribute_t* out_attr) {
+  if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameterized attribute array nesting exceeds max depth %u",
+        (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
+  }
+  if (attribute_count > UINT16_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "parameterized attribute array has %" PRIhsz
+                            " elements, max %u",
+                            attribute_count, (unsigned)UINT16_MAX);
+  }
+  if (attribute_count > 0 && attributes == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "non-empty parameterized attribute array has a NULL value pointer");
+  }
+  if (attribute_count == 0) {
+    *out_attr = loom_attr_parameterized_array(NULL, 0);
+    return iree_ok_status();
+  }
+
+  loom_attribute_t* canonical_attributes = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      &module->arena, attribute_count, sizeof(*canonical_attributes),
+      (void**)&canonical_attributes));
+  for (iree_host_size_t i = 0; i < attribute_count; ++i) {
+    if (attributes[i].kind != LOOM_ATTR_PARAMETERIZED) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "parameterized attribute array element %" PRIhsz
+                              " has kind %u, expected PARAMETERIZED",
+                              i, (unsigned)attributes[i].kind);
+    }
+    IREE_RETURN_IF_ERROR(loom_module_canonicalize_attr_value(
+        module, /*descriptor=*/NULL, attributes[i], depth + 1,
+        &canonical_attributes[i]));
+  }
+
+  *out_attr =
+      loom_attr_parameterized_array(canonical_attributes, attribute_count);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_module_validate_attr_descriptor_value(
     const loom_attr_descriptor_t* descriptor, loom_attribute_t value) {
   if (!descriptor) return iree_ok_status();
@@ -2351,6 +2457,38 @@ static iree_status_t loom_module_validate_attr_descriptor_value(
         (int)parameter_name.size, parameter_name.data,
         (unsigned)value.reserved_1,
         (unsigned)descriptor->reference.parameterized_attr_kind);
+  }
+  if (value.kind == LOOM_ATTR_PARAMETERIZED_ARRAY) {
+    if (value.count > 0 && value.parameterized_array == NULL) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "non-empty parameterized attribute array parameter '%.*s' has a "
+          "NULL payload",
+          (int)parameter_name.size, parameter_name.data);
+    }
+    for (uint16_t i = 0; i < value.count; ++i) {
+      const loom_attribute_t* element = &value.parameterized_array[i];
+      if (element->kind != LOOM_ATTR_PARAMETERIZED) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameterized attribute array parameter '%.*s' element %u has "
+            "kind %u, expected PARAMETERIZED",
+            (int)parameter_name.size, parameter_name.data, (unsigned)i,
+            (unsigned)element->kind);
+      }
+      if (descriptor->reference.parameterized_attr_kind !=
+              LOOM_PARAMETERIZED_ATTR_KIND_ANY &&
+          element->reserved_1 !=
+              descriptor->reference.parameterized_attr_kind) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameterized attribute array parameter '%.*s' element %u has "
+            "family kind %u but requires %u",
+            (int)parameter_name.size, parameter_name.data, (unsigned)i,
+            (unsigned)element->reserved_1,
+            (unsigned)descriptor->reference.parameterized_attr_kind);
+      }
+    }
   }
   return iree_ok_status();
 }
@@ -2540,6 +2678,15 @@ static iree_status_t loom_module_canonicalize_attr_value(
           module, family_descriptor, value.parameterized_slots, value.count,
           depth, out_value);
     }
+    case LOOM_ATTR_PARAMETERIZED_ARRAY:
+      if (descriptor == NULL) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameterized attribute arrays require a descriptor-backed "
+            "field");
+      }
+      return loom_module_make_parameterized_attr_array_values(
+          module, value.parameterized_array, value.count, depth, out_value);
     case LOOM_ATTR_COUNT_:
       break;
   }
@@ -2570,6 +2717,13 @@ iree_status_t loom_module_make_parameterized_attr(
   return loom_module_make_parameterized_attr_slots(module, family_descriptor,
                                                    parameters, parameter_count,
                                                    /*depth=*/0, out_attr);
+}
+
+iree_status_t loom_module_make_parameterized_attr_array(
+    loom_module_t* module, loom_parameterized_attr_array_t attributes,
+    loom_attribute_t* out_attr) {
+  return loom_module_make_parameterized_attr_array_values(
+      module, attributes.values, attributes.count, /*depth=*/0, out_attr);
 }
 
 iree_status_t loom_module_replace_canonical_attr_dict(
@@ -2909,6 +3063,36 @@ static iree_status_t loom_module_verify_canonical_attr_value(
         IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_value(
             module, &family_descriptor->parameter_descriptors[i],
             &value->parameterized_slots[i], depth + 1));
+      }
+      return iree_ok_status();
+    }
+    case LOOM_ATTR_PARAMETERIZED_ARRAY: {
+      IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_header(
+          value, IREE_SV("parameterized attribute array")));
+      if (descriptor == NULL) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameterized attribute arrays require a descriptor-backed "
+            "field");
+      }
+      if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "aggregate attribute nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
+      }
+      if ((value->count > 0) != (value->parameterized_array != NULL)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameterized attribute array pointer does not match its "
+            "element count");
+      }
+      loom_attr_descriptor_t element_descriptor = *descriptor;
+      element_descriptor.attr_kind = LOOM_ATTR_PARAMETERIZED;
+      for (uint16_t i = 0; i < value->count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_value(
+            module, &element_descriptor, &value->parameterized_array[i],
+            depth + 1));
       }
       return iree_ok_status();
     }
@@ -3631,6 +3815,20 @@ static iree_status_t loom_module_walk_attribute_value_refs_impl(
       }
       return iree_ok_status();
 
+    case LOOM_ATTR_PARAMETERIZED_ARRAY:
+      if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "aggregate attribute nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
+      }
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_module_walk_attribute_value_refs_impl(
+            module, attr.parameterized_array[i], (uint8_t)(depth + 1), callback,
+            user_data));
+      }
+      return iree_ok_status();
+
     default:
       return iree_ok_status();
   }
@@ -3779,6 +3977,37 @@ static iree_status_t loom_module_replace_attribute_value_refs_impl(
       *out_attr = loom_make_parameterized_attr(
           (loom_parameterized_attr_kind_t)attr.reserved_1, replaced_slots,
           attr.count);
+      *out_changed = true;
+      return iree_ok_status();
+    }
+
+    case LOOM_ATTR_PARAMETERIZED_ARRAY: {
+      if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "aggregate attribute nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
+      }
+      loom_attribute_t* replaced_attributes = NULL;
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        loom_attribute_t replaced_value = attr.parameterized_array[i];
+        bool value_changed = false;
+        IREE_RETURN_IF_ERROR(loom_module_replace_attribute_value_refs_impl(
+            module, attr.parameterized_array[i], old_id, new_id,
+            (uint8_t)(depth + 1), &replaced_value, &value_changed));
+        if (!value_changed) continue;
+        if (!replaced_attributes) {
+          IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+              &module->arena, attr.count, sizeof(*replaced_attributes),
+              (void**)&replaced_attributes));
+          memcpy(replaced_attributes, attr.parameterized_array,
+                 (iree_host_size_t)attr.count * sizeof(*replaced_attributes));
+        }
+        replaced_attributes[i] = replaced_value;
+      }
+      if (!replaced_attributes) return iree_ok_status();
+      *out_attr =
+          loom_attr_parameterized_array(replaced_attributes, attr.count);
       *out_changed = true;
       return iree_ok_status();
     }

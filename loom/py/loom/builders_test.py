@@ -22,7 +22,11 @@ from loom.dialect import vector
 from loom.dialect.globals import ALL_GLOBAL_OPS
 from loom.dialect.pass_ import ALL_PASS_OPS
 from loom.dialect.scf import ALL_SCF_OPS
-from loom.dialect.test import ALL_TEST_OPS
+from loom.dialect.test import (
+    ALL_TEST_OPS,
+    test_options_attr,
+    test_tile_attr,
+)
 from loom.format.text.printer import Printer
 from loom.ir import (
     F32,
@@ -31,6 +35,7 @@ from loom.ir import (
     Block,
     EnumArrayAttr,
     OpaqueLocation,
+    ParameterizedAttrArray,
     ShapedType,
     StaticDim,
     TypeKind,
@@ -111,6 +116,31 @@ def test_dynamic_builder_rejects_undeclared_closed_enum_array_value() -> None:
 
     with pytest.raises(ValueError, match="undeclared value 42"):
         builder.test.enum_array_attrs(required_values=[42])
+
+
+def test_dynamic_builder_normalizes_parameterized_attribute_arrays() -> None:
+    block, builder = _builder()
+    tile = test_tile_attr(width=8)
+    options = test_options_attr(mode="fast")
+
+    builder.test.parameterized_attr_array(
+        values=[tile, options, tile],
+        tiles=[tile],
+    )
+
+    op = block.ops[0]
+    assert op.attributes["values"] == ParameterizedAttrArray([tile, options, tile])
+    assert op.attributes["tiles"] == ParameterizedAttrArray([tile])
+
+
+def test_dynamic_builder_rejects_wrong_exact_array_family() -> None:
+    _block, builder = _builder()
+
+    with pytest.raises(ValueError, match=r"element 0 has family 'test\.options'"):
+        builder.test.parameterized_attr_array(
+            values=[],
+            tiles=[test_options_attr(mode="fast")],
+        )
 
 
 def test_dynamic_builder_records_segmented_operand_counts() -> None:
