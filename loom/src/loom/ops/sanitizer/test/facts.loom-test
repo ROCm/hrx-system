@@ -142,6 +142,25 @@ func.def @assert_uses_exact_relational_rhs(%n: index) -> (i64) {
 
 // ====
 
+// Relational assertions consume interval facts from a checked dynamic bound.
+// This is the executable-assertion equivalent of chained index.assume aliases.
+func.def @assert_uses_bounded_relational_rhs(%n: index, %limit: index) -> (i64) {
+  %bounded_limit = sanitizer.assert.value %limit [range(%limit, 0, 256)] : index
+  %checked, %limit_checked = sanitizer.assert.value %n, %bounded_limit [lt(%n, %bounded_limit)] : index, index
+  %upper = test.fact_range_hi %checked : index -> i64
+  func.return %upper : i64
+}
+
+// ----
+func.def @assert_uses_bounded_relational_rhs(%n: index, %limit: index) -> (i64) {
+  %bounded_limit = sanitizer.assert.value %limit [range(%limit, 0, 256)] : index
+  %checked, %limit_checked = sanitizer.assert.value %n, %bounded_limit [lt(%n, %bounded_limit)] : index, index
+  %upper = scalar.constant 255 : i64
+  func.return %upper : i64
+}
+
+// ====
+
 // Layout assertions refine view-reference facts on the continuing path. The
 // assertion remains because the dynamic source shape has not been proven to
 // satisfy the refined static result shape.
