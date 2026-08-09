@@ -148,6 +148,26 @@ TEST(TargetPassEnvironmentTest, MutableEnvironmentCarriesVersionOwner) {
   iree_arena_block_pool_deinitialize(&block_pool);
 }
 
+TEST(TargetPassEnvironmentTest,
+     MutableEnvironmentDeclaresRuntimeOwnerBeforeInvocation) {
+  const loom_target_environment_t* target_environment =
+      reinterpret_cast<const loom_target_environment_t*>(uintptr_t{1});
+  const loom_target_pass_capability_t target_capability =
+      loom_target_pass_capability_make_mutable(
+          target_environment, /*function_version_owner=*/nullptr);
+
+  EXPECT_EQ(loom_target_pass_capability_target_environment(&target_capability),
+            target_environment);
+  EXPECT_EQ(loom_target_pass_capability_function_versions(&target_capability),
+            nullptr);
+  EXPECT_EQ(
+      loom_target_pass_capability_function_version_owner(&target_capability),
+      nullptr);
+  EXPECT_TRUE(loom_pass_environment_capability_satisfies_requirement(
+      &target_capability.base,
+      IREE_SV(LOOM_TARGET_PASS_REQUIREMENT_MUTABLE_FUNCTION_VERSIONS)));
+}
+
 TEST(TargetPassEnvironmentTest, MissingCapabilityHasEmptyAccessors) {
   EXPECT_EQ(loom_target_pass_capability_from_environment(nullptr), nullptr);
   EXPECT_EQ(loom_target_pass_capability_target_environment(nullptr), nullptr);

@@ -20,7 +20,7 @@ static bool loom_target_pass_capability_satisfies_requirement(
   if (iree_string_view_equal(
           requirement,
           IREE_SV(LOOM_TARGET_PASS_REQUIREMENT_MUTABLE_FUNCTION_VERSIONS))) {
-    return target_capability->function_version_owner != NULL;
+    return target_capability->supports_mutable_function_versions;
   }
   return false;
 }
@@ -43,6 +43,7 @@ loom_target_pass_capability_t loom_target_pass_capability_make(
       .target_environment = target_environment,
       .function_versions = function_versions,
       .function_version_owner = NULL,
+      .supports_mutable_function_versions = false,
   };
 }
 
@@ -58,6 +59,7 @@ loom_target_pass_capability_t loom_target_pass_capability_make_mutable(
       .function_versions =
           loom_function_version_owner_list(function_version_owner),
       .function_version_owner = function_version_owner,
+      .supports_mutable_function_versions = true,
   };
 }
 

@@ -42,6 +42,11 @@ typedef struct loom_target_pass_capability_t {
 
   // Mutable owner of |function_versions|, or NULL for read-only capabilities.
   loom_function_version_owner_t* function_version_owner;
+
+  // True when pass-program executions supply a mutable function-version
+  // owner. The owner may be NULL while compiling a pass program before an
+  // invocation exists.
+  bool supports_mutable_function_versions;
 } loom_target_pass_capability_t;
 
 // Creates a borrowed target pass capability.
