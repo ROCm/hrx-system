@@ -1188,6 +1188,23 @@ def test_generate_builders_use_explicit_flags_for_optional_scalar_attrs() -> Non
     assert "priority != 0" not in builders_c
 
 
+def test_generate_builders_escape_c_and_cpp_keyword_parameters() -> None:
+    op = Op(
+        "test.keyword",
+        group=Dialect("test"),
+        attrs=[AttrDef("requires", "i64")],
+        format=[Attr("requires")],
+    )
+
+    ops_h = generate_ops_h("test", 0, [op])
+    builders_c = generate_builders_c("test", [op])
+
+    assert "int64_t requires_" in ops_h
+    assert "int64_t requires_" in builders_c
+    assert "loom_attr_i64(requires_)" in builders_c
+    assert "LOOM_DEFINE_ATTR_I64(loom_test_keyword_requires," in ops_h
+
+
 def test_generate_builders_use_explicit_flags_for_optional_symbol_refs() -> None:
     op = Op(
         "test.targeted",
