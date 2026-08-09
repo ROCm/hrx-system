@@ -4,17 +4,17 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 // GENERATED FILE: DO NOT EDIT.
-// Generator: loom.gen.target.arch.amdgpu.lower.amdgpu_narrow_float_matrix.
+// Generator: loom.gen.test.numeric_conversion_matrix.
 //
-// Exact schema-driven FP8 encode witnesses generated from the same
-// numeric-format rows that drive AMDGPU recipe selection. Heterogeneous
+// Exact schema-driven FP8 encode witnesses generated from the
+// target-independent numeric-format definitions. Heterogeneous
 // expected payloads are reduced to zero difference tensors on the device
 // so the complete goldens remain readable here without binary fixtures.
 config.decl @fp8_bidirectional_encode.row_capacity : %value: index where [range(%value, 1, 4294967295)]
 
 // f32 to f8e5m2: exact special values, RNE boundaries,
 // and two packed eight-lane conversions. The final zero lane pads the
-// fifteen semantic witnesses to a complete AMDGPU memory register.
+// fifteen semantic witnesses to two complete eight-lane conversions.
 kernel.def @fp8_encode_f8e5m2_f32_exact() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -125,7 +125,7 @@ check.benchmark<@fp8_encode_f8e5m2_f32_rows_case> @fp8_encode_f8e5m2_f32_rows_be
 
 // f16 to f8e5m2: exact special values, RNE boundaries,
 // and two packed eight-lane conversions. The final zero lane pads the
-// fifteen semantic witnesses to a complete AMDGPU memory register.
+// fifteen semantic witnesses to two complete eight-lane conversions.
 kernel.def @fp8_encode_f8e5m2_f16_exact() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -236,7 +236,7 @@ check.benchmark<@fp8_encode_f8e5m2_f16_rows_case> @fp8_encode_f8e5m2_f16_rows_be
 
 // bf16 to f8e5m2: exact special values, RNE boundaries,
 // and two packed eight-lane conversions. The final zero lane pads the
-// fifteen semantic witnesses to a complete AMDGPU memory register.
+// fifteen semantic witnesses to two complete eight-lane conversions.
 kernel.def @fp8_encode_f8e5m2_bf16_exact() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -347,7 +347,7 @@ check.benchmark<@fp8_encode_f8e5m2_bf16_rows_case> @fp8_encode_f8e5m2_bf16_rows_
 
 // f32 to f8e5m2fnuz: exact special values, RNE boundaries,
 // and two packed eight-lane conversions. The final zero lane pads the
-// fifteen semantic witnesses to a complete AMDGPU memory register.
+// fifteen semantic witnesses to two complete eight-lane conversions.
 kernel.def @fp8_encode_f8e5m2fnuz_f32_exact() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -458,7 +458,7 @@ check.benchmark<@fp8_encode_f8e5m2fnuz_f32_rows_case> @fp8_encode_f8e5m2fnuz_f32
 
 // f16 to f8e5m2fnuz: exact special values, RNE boundaries,
 // and two packed eight-lane conversions. The final zero lane pads the
-// fifteen semantic witnesses to a complete AMDGPU memory register.
+// fifteen semantic witnesses to two complete eight-lane conversions.
 kernel.def @fp8_encode_f8e5m2fnuz_f16_exact() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -569,7 +569,7 @@ check.benchmark<@fp8_encode_f8e5m2fnuz_f16_rows_case> @fp8_encode_f8e5m2fnuz_f16
 
 // bf16 to f8e5m2fnuz: exact special values, RNE boundaries,
 // and two packed eight-lane conversions. The final zero lane pads the
-// fifteen semantic witnesses to a complete AMDGPU memory register.
+// fifteen semantic witnesses to two complete eight-lane conversions.
 kernel.def @fp8_encode_f8e5m2fnuz_bf16_exact() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index

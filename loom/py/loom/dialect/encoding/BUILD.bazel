@@ -18,7 +18,10 @@ iree_py_library(
         "defs.py",
         "numeric_formats.py",
     ],
-    deps = ["//loom/py/loom:core"],
+    deps = [
+        "//loom/py/loom:core",
+        "//loom/py/loom/error",
+    ],
 )
 
 iree_py_test(

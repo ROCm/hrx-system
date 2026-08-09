@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Generates exact AMDGPU FP8 encode/decode execution witnesses."""
+"""Generates exact target-independent FP8 conversion witnesses."""
 
 from __future__ import annotations
 
@@ -15,14 +15,15 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Literal
 
-from loom.gen.support.generated_file import line_comment_header
-from loom.gen.target.arch.amdgpu.lower.amdgpu_narrow_float_tables import (
-    _FP8_FORMAT_ROWS,
-    _Fp8FormatRow,
+from loom.dialect.encoding.numeric_formats import (
+    FP8_FORMATS,
+    Fp8Format,
+    Fp8SpecialPolicy,
 )
+from loom.gen.support.generated_file import line_comment_header
 from loom.ir import ScalarTypeKind
 
-_GENERATOR = "loom.gen.target.arch.amdgpu.lower.amdgpu_narrow_float_matrix"
+_GENERATOR = "loom.gen.test.numeric_conversion_matrix"
 
 
 @dataclass(frozen=True)
@@ -156,17 +157,7 @@ def _binary_encode_bits(value: _BinaryValue, binary_format: _BinaryFormat) -> in
     return sign_bits | (encoded_exponent << binary_format.mantissa_bits) | mantissa
 
 
-def _fp8_special_policy(row: _Fp8FormatRow) -> Literal["ieee", "finite_nan", "fnuz"]:
-    if row.special_policy.endswith("FINITE_NAN_UNSIGNED_ZERO"):
-        return "fnuz"
-    if row.special_policy.endswith("FINITE_NAN"):
-        return "finite_nan"
-    if row.special_policy.endswith("IEEE"):
-        return "ieee"
-    raise ValueError(f"unsupported FP8 special policy: {row.special_policy}")
-
-
-def _fp8_decode_bits(row: _Fp8FormatRow, raw_bits: int) -> _BinaryValue:
+def _fp8_decode_bits(row: Fp8Format, raw_bits: int) -> _BinaryValue:
     raw_bits &= 0xFF
     sign = raw_bits >> 7
     magnitude_bits = raw_bits & 0x7F
@@ -174,12 +165,12 @@ def _fp8_decode_bits(row: _Fp8FormatRow, raw_bits: int) -> _BinaryValue:
     mantissa_mask = (1 << row.mantissa_bits) - 1
     exponent = magnitude_bits >> row.mantissa_bits
     mantissa = magnitude_bits & mantissa_mask
-    special_policy = _fp8_special_policy(row)
-    if special_policy == "fnuz" and raw_bits == 0x80:
+    special_policy = row.special_policy
+    if special_policy == Fp8SpecialPolicy.FINITE_NAN_UNSIGNED_ZERO and raw_bits == 0x80:
         return _BinaryValue("nan")
-    if special_policy == "finite_nan" and magnitude_bits == 0x7F:
+    if special_policy == Fp8SpecialPolicy.FINITE_NAN and magnitude_bits == 0x7F:
         return _BinaryValue("nan")
-    if special_policy == "ieee" and exponent == exponent_mask:
+    if special_policy == Fp8SpecialPolicy.IEEE and exponent == exponent_mask:
         if mantissa == 0:
             return _BinaryValue("infinity", sign)
         return _BinaryValue("nan")
@@ -190,38 +181,38 @@ def _fp8_decode_bits(row: _Fp8FormatRow, raw_bits: int) -> _BinaryValue:
     return _BinaryValue("finite", sign, magnitude)
 
 
-def _fp8_positive_finite_payloads(row: _Fp8FormatRow) -> tuple[int, ...]:
+def _fp8_positive_finite_payloads(row: Fp8Format) -> tuple[int, ...]:
     return tuple(payload for payload in range(0x80) if _fp8_decode_bits(row, payload).kind == "finite")
 
 
-def _fp8_maximum_finite_payload(row: _Fp8FormatRow) -> int:
+def _fp8_maximum_finite_payload(row: Fp8Format) -> int:
     return _fp8_positive_finite_payloads(row)[-1]
 
 
-def _fp8_nan_payload(row: _Fp8FormatRow, sign: int) -> int:
-    if _fp8_special_policy(row) == "fnuz":
+def _fp8_nan_payload(row: Fp8Format, sign: int) -> int:
+    if row.special_policy == Fp8SpecialPolicy.FINITE_NAN_UNSIGNED_ZERO:
         return 0x80
     return (sign << 7) | 0x7F
 
 
-def _fp8_encode_bits(row: _Fp8FormatRow, value: _BinaryValue) -> int:
-    special_policy = _fp8_special_policy(row)
+def _fp8_encode_bits(row: Fp8Format, value: _BinaryValue) -> int:
+    special_policy = row.special_policy
     if value.kind == "nan":
         return _fp8_nan_payload(row, value.sign)
 
     maximum_payload = _fp8_maximum_finite_payload(row)
     sign_bits = value.sign << 7
     if value.kind == "infinity":
-        if special_policy == "ieee":
+        if special_policy == Fp8SpecialPolicy.IEEE:
             exponent_mask = (1 << row.exponent_bits) - 1
             return sign_bits | (exponent_mask << row.mantissa_bits)
         return sign_bits | maximum_payload
     if value.magnitude == 0:
-        return 0 if special_policy == "fnuz" else sign_bits
+        return 0 if special_policy == Fp8SpecialPolicy.FINITE_NAN_UNSIGNED_ZERO else sign_bits
 
     finite_payloads = _fp8_positive_finite_payloads(row)
     maximum_value = _fp8_decode_bits(row, maximum_payload).magnitude
-    if special_policy == "ieee":
+    if special_policy == Fp8SpecialPolicy.IEEE:
         previous_value = _fp8_decode_bits(row, finite_payloads[-2]).magnitude
         overflow_threshold = maximum_value + (maximum_value - previous_value) / 2
         if value.magnitude >= overflow_threshold:
@@ -241,7 +232,7 @@ def _fp8_encode_bits(row: _Fp8FormatRow, value: _BinaryValue) -> int:
     return sign_bits | best_payload
 
 
-def _fp8_boundary_values(row: _Fp8FormatRow) -> tuple[tuple[str, _BinaryValue], ...]:
+def _fp8_boundary_values(row: Fp8Format) -> tuple[tuple[str, _BinaryValue], ...]:
     mantissa_mask = (1 << row.mantissa_bits) - 1
     minimum_subnormal = _fp8_decode_bits(row, 1).magnitude
     maximum_subnormal = _fp8_decode_bits(row, mantissa_mask).magnitude
@@ -268,7 +259,7 @@ def _fp8_boundary_values(row: _Fp8FormatRow) -> tuple[tuple[str, _BinaryValue], 
     )
 
 
-def _fp8_decode_payloads(row: _Fp8FormatRow) -> tuple[tuple[str, int], ...]:
+def _fp8_decode_payloads(row: Fp8Format) -> tuple[tuple[str, int], ...]:
     mantissa_mask = (1 << row.mantissa_bits) - 1
     one_payload = _fp8_encode_bits(row, _BinaryValue("finite", magnitude=Fraction(1)))
     maximum_finite = _fp8_maximum_finite_payload(row)
@@ -286,8 +277,8 @@ def _fp8_decode_payloads(row: _Fp8FormatRow) -> tuple[tuple[str, int], ...]:
         ("maximum_finite", maximum_finite),
         ("negative_maximum_finite", 0x80 | maximum_finite),
     ]
-    special_policy = _fp8_special_policy(row)
-    if special_policy == "ieee":
+    special_policy = row.special_policy
+    if special_policy == Fp8SpecialPolicy.IEEE:
         infinity = ((1 << row.exponent_bits) - 1) << row.mantissa_bits
         candidates.extend(
             (
@@ -296,7 +287,7 @@ def _fp8_decode_payloads(row: _Fp8FormatRow) -> tuple[tuple[str, int], ...]:
                 ("negative_nan", 0xFF),
             )
         )
-    elif special_policy == "finite_nan":
+    elif special_policy == Fp8SpecialPolicy.FINITE_NAN:
         candidates.extend((("positive_nan", 0x7F), ("negative_nan", 0xFF)))
 
     seen = {payload for _, payload in candidates}
@@ -309,7 +300,7 @@ def _fp8_decode_payloads(row: _Fp8FormatRow) -> tuple[tuple[str, int], ...]:
     return tuple(candidates[:15])
 
 
-def _encode_exact_values(row: _Fp8FormatRow, source_format: _BinaryFormat) -> tuple[_ExactValue, ...]:
+def _encode_exact_values(row: Fp8Format, source_format: _BinaryFormat) -> tuple[_ExactValue, ...]:
     values = []
     for name, intended_value in _fp8_boundary_values(row):
         source_bits = _binary_encode_bits(intended_value, source_format)
@@ -318,7 +309,7 @@ def _encode_exact_values(row: _Fp8FormatRow, source_format: _BinaryFormat) -> tu
     return tuple(values)
 
 
-def _decode_exact_values(row: _Fp8FormatRow, result_format: _BinaryFormat) -> tuple[_ExactValue, ...]:
+def _decode_exact_values(row: Fp8Format, result_format: _BinaryFormat) -> tuple[_ExactValue, ...]:
     return tuple(
         _ExactValue(
             name,
@@ -351,8 +342,8 @@ def _generated_header(direction: str) -> list[str]:
         "// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception",
         *line_comment_header("//", generator=_GENERATOR),
         "//",
-        f"// Exact schema-driven FP8 {direction} witnesses generated from the same",
-        "// numeric-format rows that drive AMDGPU recipe selection. Heterogeneous",
+        f"// Exact schema-driven FP8 {direction} witnesses generated from the",
+        "// target-independent numeric-format definitions. Heterogeneous",
         "// expected payloads are reduced to zero difference tensors on the device",
         "// so the complete goldens remain readable here without binary fixtures.",
         f"config.decl @fp8_bidirectional_{direction}.row_capacity : %value: index where [range(%value, 1, 4294967295)]",
@@ -393,10 +384,10 @@ def _emit_exact_vector(
     ]
 
 
-def _emit_encode_pair(row: _Fp8FormatRow, source_format: _BinaryFormat) -> str:
+def _emit_encode_pair(row: Fp8Format, source_format: _BinaryFormat) -> str:
     format_name = row.keyword
     source_name = source_format.type_spelling
-    carrier_type = _scalar_type_spelling(row.source_type)
+    carrier_type = _scalar_type_spelling(row.carrier_type)
     kernel_name = f"fp8_encode_{format_name}_{source_name}_exact"
     row_kernel_name = f"fp8_encode_{format_name}_{source_name}_rows"
     benchmark_name = f"{row_kernel_name}_benchmark"
@@ -410,7 +401,7 @@ def _emit_encode_pair(row: _Fp8FormatRow, source_format: _BinaryFormat) -> str:
     lines = [
         f"// {source_name} to {format_name}: exact special values, RNE boundaries,",
         "// and two packed eight-lane conversions. The final zero lane pads the",
-        "// fifteen semantic witnesses to a complete AMDGPU memory register.",
+        "// fifteen semantic witnesses to two complete eight-lane conversions.",
         f"kernel.def @{kernel_name}() {{",
         "  %unit = index.constant 1 : index",
         "  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index",
@@ -515,10 +506,10 @@ def _emit_encode_pair(row: _Fp8FormatRow, source_format: _BinaryFormat) -> str:
     return "\n".join(lines)
 
 
-def _emit_decode_pair(row: _Fp8FormatRow, result_format: _BinaryFormat) -> str:
+def _emit_decode_pair(row: Fp8Format, result_format: _BinaryFormat) -> str:
     format_name = row.keyword
     result_name = result_format.type_spelling
-    carrier_type = _scalar_type_spelling(row.source_type)
+    carrier_type = _scalar_type_spelling(row.carrier_type)
     kernel_name = f"fp8_decode_{format_name}_{result_name}_exact"
     row_kernel_name = f"fp8_decode_{format_name}_{result_name}_rows"
     benchmark_name = f"{row_kernel_name}_benchmark"
@@ -638,19 +629,19 @@ def _emit_decode_pair(row: _Fp8FormatRow, result_format: _BinaryFormat) -> str:
     return "\n".join(lines)
 
 
-def _fp8_format_family(row: _Fp8FormatRow) -> Literal["e4m3", "e5m2"]:
-    if row.source_type == ScalarTypeKind.F8E4M3:
+def _fp8_format_family(row: Fp8Format) -> Literal["e4m3", "e5m2"]:
+    if row.carrier_type == ScalarTypeKind.F8E4M3:
         return "e4m3"
-    if row.source_type == ScalarTypeKind.F8E5M2:
+    if row.carrier_type == ScalarTypeKind.F8E5M2:
         return "e5m2"
-    raise ValueError(f"unsupported FP8 carrier type: {row.source_type.name}")
+    raise ValueError(f"unsupported FP8 carrier type: {row.carrier_type.name}")
 
 
 def emit_fp8_encode_matrix(family: Literal["e4m3", "e5m2"]) -> str:
     return "\n".join(
         [
             *_generated_header("encode"),
-            *(_emit_encode_pair(row, source_format) for row in _FP8_FORMAT_ROWS if _fp8_format_family(row) == family for source_format in _BINARY_FORMATS),
+            *(_emit_encode_pair(row, source_format) for row in FP8_FORMATS if _fp8_format_family(row) == family for source_format in _BINARY_FORMATS),
         ]
     )
 
@@ -659,7 +650,7 @@ def emit_fp8_decode_matrix(family: Literal["e4m3", "e5m2"]) -> str:
     return "\n".join(
         [
             *_generated_header("decode"),
-            *(_emit_decode_pair(row, result_format) for row in _FP8_FORMAT_ROWS if _fp8_format_family(row) == family for result_format in _BINARY_FORMATS),
+            *(_emit_decode_pair(row, result_format) for row in FP8_FORMATS if _fp8_format_family(row) == family for result_format in _BINARY_FORMATS),
         ]
     )
 

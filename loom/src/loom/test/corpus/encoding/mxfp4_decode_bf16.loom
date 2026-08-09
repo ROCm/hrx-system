@@ -1,4 +1,4 @@
-// Exact group-scaled E2M1-to-BF16 decoding through the AMDGPU HAL.
+// Exact group-scaled E2M1-to-BF16 decoding through generic vector operations.
 //
 // One E8M0 byte scales 32 consecutive packed E2M1 values. Integer outputs
 // preserve the BF16 payloads so minimum scales, signed zero, overflow, and the

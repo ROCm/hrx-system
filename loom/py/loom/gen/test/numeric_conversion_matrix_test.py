@@ -11,24 +11,24 @@ from pathlib import Path
 
 import pytest
 
-from loom.gen.target.arch.amdgpu.lower import amdgpu_narrow_float_matrix
-from loom.gen.target.arch.amdgpu.lower.amdgpu_narrow_float_tables import _FP8_FORMAT_ROWS
+from loom.dialect.encoding.numeric_formats import FP8_FORMATS
+from loom.gen.test import numeric_conversion_matrix
 
-_REPOSITORY_ROOT = Path(__file__).resolve().parents[8]
-_EXECUTION_TEST_ROOT = _REPOSITORY_ROOT / "loom/src/loom/target/arch/amdgpu/test/execution"
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[5]
+_CORPUS_ROOT = _REPOSITORY_ROOT / "loom/src/loom/test/corpus/encoding"
 
 
 def _format_row(keyword: str):
-    return next(row for row in _FP8_FORMAT_ROWS if row.keyword == keyword)
+    return next(row for row in FP8_FORMATS if row.keyword == keyword)
 
 
-@pytest.mark.parametrize("row", _FP8_FORMAT_ROWS, ids=lambda row: row.keyword)
+@pytest.mark.parametrize("row", FP8_FORMATS, ids=lambda row: row.keyword)
 def test_fp8_reference_round_trips_every_finite_payload(row) -> None:
     for payload in range(256):
-        value = amdgpu_narrow_float_matrix._fp8_decode_bits(row, payload)
+        value = numeric_conversion_matrix._fp8_decode_bits(row, payload)
         if value.kind != "finite":
             continue
-        assert amdgpu_narrow_float_matrix._fp8_encode_bits(row, value) == payload
+        assert numeric_conversion_matrix._fp8_encode_bits(row, value) == payload
 
 
 @pytest.mark.parametrize(
@@ -50,10 +50,10 @@ def test_fp8_reference_special_policy_boundaries(
     negative_zero: int,
 ) -> None:
     row = _format_row(keyword)
-    encode = amdgpu_narrow_float_matrix._fp8_encode_bits
-    value = amdgpu_narrow_float_matrix._BinaryValue
+    encode = numeric_conversion_matrix._fp8_encode_bits
+    value = numeric_conversion_matrix._BinaryValue
     assert encode(row, value("finite", magnitude=Fraction(1))) == one
-    assert amdgpu_narrow_float_matrix._fp8_maximum_finite_payload(row) == maximum
+    assert numeric_conversion_matrix._fp8_maximum_finite_payload(row) == maximum
     assert encode(row, value("infinity")) == infinity
     assert encode(row, value("nan")) == nan
     assert encode(row, value("finite", sign=1)) == negative_zero
@@ -64,21 +64,21 @@ def test_fp8_reference_special_policy_boundaries(
     [
         (
             "fp8_bidirectional_encode_e4m3.loom",
-            lambda: amdgpu_narrow_float_matrix.emit_fp8_encode_matrix("e4m3"),
+            lambda: numeric_conversion_matrix.emit_fp8_encode_matrix("e4m3"),
         ),
         (
             "fp8_bidirectional_encode_e5m2.loom",
-            lambda: amdgpu_narrow_float_matrix.emit_fp8_encode_matrix("e5m2"),
+            lambda: numeric_conversion_matrix.emit_fp8_encode_matrix("e5m2"),
         ),
         (
             "fp8_bidirectional_decode_e4m3.loom",
-            lambda: amdgpu_narrow_float_matrix.emit_fp8_decode_matrix("e4m3"),
+            lambda: numeric_conversion_matrix.emit_fp8_decode_matrix("e4m3"),
         ),
         (
             "fp8_bidirectional_decode_e5m2.loom",
-            lambda: amdgpu_narrow_float_matrix.emit_fp8_decode_matrix("e5m2"),
+            lambda: numeric_conversion_matrix.emit_fp8_decode_matrix("e5m2"),
         ),
     ],
 )
 def test_fp8_matrix_checked_in_sources_are_current(path_name: str, generated) -> None:
-    assert (_EXECUTION_TEST_ROOT / path_name).read_text(encoding="utf-8") == generated()
+    assert (_CORPUS_ROOT / path_name).read_text(encoding="utf-8") == generated()

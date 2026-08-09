@@ -4,10 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 // GENERATED FILE: DO NOT EDIT.
-// Generator: loom.gen.target.arch.amdgpu.lower.amdgpu_narrow_float_matrix.
+// Generator: loom.gen.test.numeric_conversion_matrix.
 //
-// Exact schema-driven FP8 decode witnesses generated from the same
-// numeric-format rows that drive AMDGPU recipe selection. Heterogeneous
+// Exact schema-driven FP8 decode witnesses generated from the
+// target-independent numeric-format definitions. Heterogeneous
 // expected payloads are reduced to zero difference tensors on the device
 // so the complete goldens remain readable here without binary fixtures.
 config.decl @fp8_bidirectional_decode.row_capacity : %value: index where [range(%value, 1, 4294967295)]

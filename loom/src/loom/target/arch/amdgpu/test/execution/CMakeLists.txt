@@ -246,28 +246,6 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_execution_test_suite(
   NAME
-    numeric_conversion_execution_test
-  MANIFESTS
-    "numeric_conversion.test.json"
-  TOOLS
-    "iree-test-loom=loom::tools::iree-test-loom"
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amdgpu/test/execution/fp8_bidirectional_decode_e4m3.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amdgpu/test/execution/fp8_bidirectional_decode_e5m2.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amdgpu/test/execution/fp8_bidirectional_encode_e4m3.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amdgpu/test/execution/fp8_bidirectional_encode_e5m2.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amdgpu/test/execution/fp8_encode.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amdgpu/test/execution/mxfp4_decode_bf16.loom"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_execution_test_suite(
-  NAME
     global_atomic_add_f32_execution_test
   MANIFESTS
     "global_atomic_add_f32.test.json"
@@ -343,7 +321,7 @@ iree_execution_test_suite(
   TOOLS
     "loom-compile=loom::tools::loom-compile"
   DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amdgpu/test/execution/mxfp4_decode_bf16.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/encoding/mxfp4_decode_bf16.loom"
   LABELS
     "hostonly"
 )

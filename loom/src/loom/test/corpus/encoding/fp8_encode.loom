@@ -1,4 +1,4 @@
-// Exact OCP FP8 narrowing on every AMDGPU target.
+// Exact OCP FP8 narrowing through generic vector operations.
 //
 // The expected random and iota tensors are materialized independently by the
 // host testbench converter. Reusing a seed gives the input and expected
@@ -39,8 +39,8 @@ kernel.def @f32_to_fp8(%row_count: index) {
 }
 
 // Encodes the same finite F32 payloads as @f32_to_fp8 through the semantic
-// storage schema boundary. The schema remains target-independent while AMDGPU
-// selects the same native or software conversion plan as vector.fptrunc.
+// storage schema boundary. Each target selects the same native or software
+// conversion semantics as vector.fptrunc.
 kernel.def @f32_to_fp8_schema(%row_count: index) {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
