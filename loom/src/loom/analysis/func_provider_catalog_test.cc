@@ -242,10 +242,12 @@ func.template<demo.contract> priority(2) @base(%arg0: i32) -> (i32) {
       iree_string_view_equal(rebuilt.providers[1].name, IREE_SV("base")));
 }
 
-TEST_F(FuncProviderCatalogTest, CapturesProviderTargetApplicability) {
+TEST_F(FuncProviderCatalogTest, CapturesProviderIdentityAndConditions) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @gfx11
 
+// Both constraints are deliberate here: the catalog must preserve target
+// identity and normalized facts independently when a provider requires both.
 func.template<demo.contract> target(@gfx11) when [#target.subgroup.size<64>] priority(3) @gfx11_provider(%arg0: i32) -> (i32) {
   func.return %arg0 : i32
 }
