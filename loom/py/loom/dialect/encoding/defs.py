@@ -17,6 +17,7 @@ from loom.assembly import (
     ResultType,
     TypeOf,
 )
+from loom.dialect.encoding.numeric_formats import NUMERIC_FORMAT_KEYWORDS
 from loom.dsl import (
     ANY,
     ANY_ENCODING,
@@ -60,54 +61,7 @@ encoding_ops = Dialect("encoding", dialect_id=0x09, doc="Encoding definition and
 
 NumericFormat = EnumDef(
     "NumericFormat",
-    [
-        EnumCase(keyword, ordinal)
-        for ordinal, keyword in enumerate(
-            (
-                "none",
-                "f64",
-                "f32",
-                "tf32",
-                "f16",
-                "bf16",
-                "i32",
-                "u32",
-                "i16",
-                "u16",
-                "i8",
-                "u8",
-                "i6",
-                "u6",
-                "i5",
-                "u5",
-                "i4",
-                "u4",
-                "i3",
-                "u3",
-                "i2",
-                "u2",
-                "i1",
-                "u1",
-                "f8e4m3",
-                "f8e5m2",
-                "f8e4m3fn",
-                "f8e4m3fnuz",
-                "f8e5m2fnuz",
-                "e8m0",
-                "bf8",
-                "f6e3m2",
-                "f6e2m3",
-                "bf6",
-                "f4e2m1",
-                "ternary",
-                "sign_bit",
-                "codebook_index",
-                "quant_i8",
-                "quant_i6",
-                "quant_i4",
-            )
-        )
-    ],
+    [EnumCase(keyword, ordinal) for ordinal, keyword in enumerate(NUMERIC_FORMAT_KEYWORDS)],
     doc="Target-independent encoded numeric format.",
 )
 

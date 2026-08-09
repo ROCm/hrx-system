@@ -26,6 +26,7 @@ iree_py_library(
     "amdgpu_narrow_float_tables.py"
   DEPS
     loom::py::loom::core
+    loom::py::loom::dialect::encoding::encoding
     loom::py::loom::gen::support::support
     loom::py::loom::gen::target::arch::amdgpu::lower::candidates::validation
     loom::py::loom::target::arch::amdgpu::descriptors
@@ -42,6 +43,7 @@ iree_py_library(
     "amdgpu_narrow_float_tables.py"
   DEPS
     loom::py::loom::core
+    loom::py::loom::dialect::encoding::encoding
     loom::py::loom::gen::support::support
     loom::py::loom::gen::target::arch::amdgpu::lower::candidates::validation
     loom::py::loom::target::arch::amdgpu::descriptors
