@@ -147,31 +147,6 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "capability_facts",
-    srcs = ["capability_facts.c"],
-    hdrs = ["capability_facts.h"],
-    deps = [
-        ":facts",
-        ":types",
-        "//loom/src/loom/util:fact_table",
-        "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_test(
-    name = "capability_facts_test",
-    srcs = ["capability_facts_test.cc"],
-    deps = [
-        ":capability_facts",
-        ":facts",
-        ":types",
-        "//loom/src/loom/util:fact_table",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_library(
     name = "pass_environment",
     srcs = ["pass_environment.c"],
     hdrs = ["pass_environment.h"],

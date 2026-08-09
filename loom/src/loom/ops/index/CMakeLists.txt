@@ -41,7 +41,21 @@ loom_generated_cc_library(
     loom::ops::op_defs
     loom::ops::scalar
     loom::rewrite::rewriter
-    loom::target::capability_facts
+    loom::target::facts
+    loom::util::fact_table
+)
+
+loom_cc_test(
+  NAME
+    carrier_test
+  SRCS
+    "carrier_test.cc"
+  DEPS
+    ::index
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::target::facts
+    loom::util::fact_table
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
