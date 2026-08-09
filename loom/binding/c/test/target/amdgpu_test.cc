@@ -665,6 +665,144 @@ kernel.def target(@gfx11_generic) @configured_store() {
       << manifest;
 }
 
+TEST(AmdgpuTargetTest, CompileSpecializesRetainedHelpersForEachTargetContext) {
+  TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
+  ContextPtr context = CreateAmdgpuContext(target_environment.get());
+  WorkspacePtr workspace = CreateWorkspace();
+  CompilerPtr compiler = CreateCompiler(context.get());
+  PassProgramPtr pass_program = CreatePreparedLowPassProgram(context.get());
+  TargetProfilePtr wave32_profile =
+      CreateTargetProfile(target_environment.get(), "gfx1151");
+  TargetProfilePtr wave64_profile =
+      CreateTargetProfile(target_environment.get(), "gfx942");
+  SourcePtr source = CreateTextSource("retained_helpers.loom", R"(
+func.def @read_subgroup_size() -> (index) {
+  %size = target.subgroup.size : index
+  func.return %size : index
+}
+
+func.def @forward_subgroup_size() -> (index) {
+  %size = func.call @read_subgroup_size() : () -> (index)
+  func.return %size : index
+}
+
+kernel.def @wave32_root() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%output: buffer) {
+  %size = func.call @forward_subgroup_size() : () -> (index)
+  %size_i32 = index.cast %size : index to i32
+  %zero_offset = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %global = buffer.assume.memory_space<global> %output : buffer
+  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, #dense>
+  view.store %size_i32, %view[%zero_index] : i32, view<1xi32, #dense>
+  kernel.return
+}
+
+kernel.def @wave64_root() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%output: buffer) {
+  %size = func.call @forward_subgroup_size() : () -> (index)
+  %size_i32 = index.cast %size : index to i32
+  %zero_offset = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %global = buffer.assume.memory_space<global> %output : buffer
+  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, #dense>
+  view.store %size_i32, %view[%zero_index] : i32, view<1xi32, #dense>
+  kernel.return
+}
+)");
+  ModulePtr module =
+      DeserializeModule(context.get(), workspace.get(), source.get());
+  const loomc_target_specialization_t specializations[] = {
+      {
+          /*.function_symbol=*/loomc_make_cstring_view("wave32_root"),
+          /*.target_profile=*/wave32_profile.get(),
+      },
+      {
+          /*.function_symbol=*/loomc_make_cstring_view("wave64_root"),
+          /*.target_profile=*/wave64_profile.get(),
+      },
+  };
+  const loomc_target_specialization_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      /*.structure_size=*/sizeof(target_options),
+      /*.next=*/nullptr,
+      /*.specializations=*/specializations,
+      /*.specialization_count=*/IREE_ARRAYSIZE(specializations),
+  };
+  const loomc_compile_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/&target_options,
+      /*.module_name=*/loomc_make_cstring_view("retained_helpers"),
+      /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
+  };
+
+  loomc_result_t* result = nullptr;
+  LOOMC_EXPECT_OK(loomc_compile_module(
+      compiler.get(), workspace.get(), pass_program.get(), module.get(),
+      &options, loomc_allocator_system(), &result));
+  ResultPtr result_ptr(result);
+  ExpectSucceededResult(result_ptr.get());
+
+  const loomc_artifact_t* text_artifact =
+      FindArtifact(result_ptr.get(), LOOMC_ARTIFACT_KIND_MODULE,
+                   LOOMC_ARTIFACT_FORMAT_LOOM_TEXT);
+  ASSERT_NE(text_artifact, nullptr);
+  const std::string module_text = ToString(text_artifact->contents);
+
+  const size_t wave32_leaf = module_text.find(
+      "low.func.def target<amdgpu.rdna3_5.core> @read_subgroup_size()");
+  const size_t wave64_leaf = module_text.find(
+      "low.func.def target<amdgpu.cdna3.core> "
+      "@read_subgroup_size_spec0()");
+  const size_t wave32_forward = module_text.find(
+      "low.func.def target<amdgpu.rdna3_5.core> @forward_subgroup_size()");
+  const size_t wave64_forward = module_text.find(
+      "low.func.def target<amdgpu.cdna3.core> "
+      "@forward_subgroup_size_spec0()");
+  const size_t wave32_root = module_text.find(
+      "low.kernel.def target<amdgpu.rdna3_5.core>", wave64_forward);
+  const size_t wave64_root =
+      module_text.find("low.kernel.def target<amdgpu.cdna3.core>", wave32_root);
+  ASSERT_NE(wave32_leaf, std::string::npos) << module_text;
+  ASSERT_NE(wave64_leaf, std::string::npos) << module_text;
+  ASSERT_NE(wave32_forward, std::string::npos) << module_text;
+  ASSERT_NE(wave64_forward, std::string::npos) << module_text;
+  ASSERT_NE(wave32_root, std::string::npos) << module_text;
+  ASSERT_NE(wave64_root, std::string::npos) << module_text;
+  EXPECT_LT(module_text.find("@wave32_root()", wave32_root), wave64_root)
+      << module_text;
+  EXPECT_NE(module_text.find("@wave64_root()", wave64_root), std::string::npos)
+      << module_text;
+
+  const size_t wave32_constant = module_text.find("s_mov_b32 32", wave32_leaf);
+  const size_t wave64_constant = module_text.find("s_mov_b32 64", wave64_leaf);
+  EXPECT_LT(wave32_constant, wave64_leaf) << module_text;
+  EXPECT_LT(wave64_constant, wave32_forward) << module_text;
+
+  const size_t wave32_leaf_call = module_text.find(
+      "low.func.call pure @read_subgroup_size()", wave32_forward);
+  const size_t wave64_leaf_call = module_text.find(
+      "low.func.call pure @read_subgroup_size_spec0()", wave64_forward);
+  EXPECT_LT(wave32_leaf_call, wave64_forward) << module_text;
+  EXPECT_LT(wave64_leaf_call, wave32_root) << module_text;
+
+  const size_t wave32_forward_call = module_text.find(
+      "low.func.call pure @forward_subgroup_size()", wave32_root);
+  const size_t wave64_forward_call = module_text.find(
+      "low.func.call pure @forward_subgroup_size_spec0()", wave64_root);
+  EXPECT_LT(wave32_forward_call, wave64_root) << module_text;
+  EXPECT_NE(wave64_forward_call, std::string::npos) << module_text;
+  EXPECT_EQ(module_text.find("target.subgroup.size"), std::string::npos)
+      << module_text;
+  EXPECT_EQ(module_text.find("amdgpu.target"), std::string::npos)
+      << module_text;
+}
+
 TEST(AmdgpuTargetTest,
      CompileRejectsIncompatibleExactTargetWithoutBindingAnyFunction) {
   TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
