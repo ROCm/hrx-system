@@ -123,6 +123,19 @@ iree_status_t loom_index_cast_facts(loom_fact_context_t* context,
   return iree_ok_status();
 }
 
+static bool loom_index_assume_find_value_ordinal(loom_value_slice_t values,
+                                                 uint16_t fact_count,
+                                                 loom_value_id_t value_id,
+                                                 uint16_t* out_ordinal) {
+  for (uint16_t i = 0; i < fact_count; ++i) {
+    if (values.values[i] == value_id) {
+      *out_ordinal = i;
+      return true;
+    }
+  }
+  return false;
+}
+
 iree_status_t loom_index_assume_facts(loom_fact_context_t* context,
                                       const loom_module_t* module,
                                       const loom_op_t* op,
@@ -139,24 +152,98 @@ iree_status_t loom_index_assume_facts(loom_fact_context_t* context,
   loom_attribute_t pred_attr = loom_op_attrs(op)[0];
   const loom_predicate_t* predicates = pred_attr.predicate_list;
   uint16_t predicate_count = pred_attr.count;
+  loom_value_slice_t values = loom_index_assume_values(op);
   for (uint16_t predicate_ordinal = 0; predicate_ordinal < predicate_count;
        ++predicate_ordinal) {
     const loom_predicate_t* predicate = &predicates[predicate_ordinal];
     if (predicate->arg_tags[0] != LOOM_PRED_ARG_VALUE) continue;
-    loom_value_slice_t values = loom_index_assume_values(op);
     loom_value_id_t target_id = (loom_value_id_t)predicate->args[0];
     uint16_t target = 0;
-    bool found = false;
-    for (uint16_t i = 0; i < values.count; ++i) {
-      if (values.values[i] == target_id) {
-        target = i;
-        found = true;
+    if (!loom_index_assume_find_value_ordinal(values, fact_count, target_id,
+                                              &target)) {
+      continue;
+    }
+    loom_value_facts_apply_predicate(&result_facts[target], predicate);
+  }
+
+  // Value-valued relational predicates constrain both aliases from the known
+  // interval of their counterpart. The predicate itself remains available to
+  // symbolic relation analysis; these interval refinements let ordinary
+  // arithmetic and target legality consume the same authored contract.
+  for (uint16_t predicate_ordinal = 0; predicate_ordinal < predicate_count;
+       ++predicate_ordinal) {
+    const loom_predicate_t* predicate = &predicates[predicate_ordinal];
+    if (predicate->arg_count != 2 ||
+        predicate->arg_tags[0] != LOOM_PRED_ARG_VALUE ||
+        predicate->arg_tags[1] != LOOM_PRED_ARG_VALUE) {
+      continue;
+    }
+
+    uint16_t lhs_ordinal = 0;
+    uint16_t rhs_ordinal = 0;
+    if (!loom_index_assume_find_value_ordinal(
+            values, fact_count, (loom_value_id_t)predicate->args[0],
+            &lhs_ordinal) ||
+        !loom_index_assume_find_value_ordinal(
+            values, fact_count, (loom_value_id_t)predicate->args[1],
+            &rhs_ordinal)) {
+      continue;
+    }
+
+    const loom_value_facts_t lhs_facts = result_facts[lhs_ordinal];
+    const loom_value_facts_t rhs_facts = result_facts[rhs_ordinal];
+    loom_value_facts_t* lhs_result = &result_facts[lhs_ordinal];
+    loom_value_facts_t* rhs_result = &result_facts[rhs_ordinal];
+    switch ((loom_predicate_kind_t)predicate->kind) {
+      case LOOM_PREDICATE_EQ: {
+        const int64_t range_lo =
+            iree_max(lhs_facts.range_lo, rhs_facts.range_lo);
+        const int64_t range_hi =
+            iree_min(lhs_facts.range_hi, rhs_facts.range_hi);
+        lhs_result->range_lo = range_lo;
+        lhs_result->range_hi = range_hi;
+        rhs_result->range_lo = range_lo;
+        rhs_result->range_hi = range_hi;
         break;
       }
+      case LOOM_PREDICATE_LT:
+        if (rhs_facts.range_hi > INT64_MIN) {
+          lhs_result->range_hi =
+              iree_min(lhs_result->range_hi, rhs_facts.range_hi - 1);
+        }
+        if (lhs_facts.range_lo < INT64_MAX) {
+          rhs_result->range_lo =
+              iree_max(rhs_result->range_lo, lhs_facts.range_lo + 1);
+        }
+        break;
+      case LOOM_PREDICATE_LE:
+        lhs_result->range_hi =
+            iree_min(lhs_result->range_hi, rhs_facts.range_hi);
+        rhs_result->range_lo =
+            iree_max(rhs_result->range_lo, lhs_facts.range_lo);
+        break;
+      case LOOM_PREDICATE_GT:
+        if (rhs_facts.range_lo < INT64_MAX) {
+          lhs_result->range_lo =
+              iree_max(lhs_result->range_lo, rhs_facts.range_lo + 1);
+        }
+        if (lhs_facts.range_hi > INT64_MIN) {
+          rhs_result->range_hi =
+              iree_min(rhs_result->range_hi, lhs_facts.range_hi - 1);
+        }
+        break;
+      case LOOM_PREDICATE_GE:
+        lhs_result->range_lo =
+            iree_max(lhs_result->range_lo, rhs_facts.range_lo);
+        rhs_result->range_hi =
+            iree_min(rhs_result->range_hi, lhs_facts.range_hi);
+        break;
+      default:
+        continue;
     }
-    if (!found) continue;
-    if (target < fact_count) {
-      loom_value_facts_apply_predicate(&result_facts[target], predicate);
+    loom_value_facts_recompute_flags(lhs_result);
+    if (rhs_ordinal != lhs_ordinal) {
+      loom_value_facts_recompute_flags(rhs_result);
     }
   }
   return iree_ok_status();
