@@ -36,6 +36,8 @@ typedef struct loom_module_t loom_module_t;
 typedef struct loom_op_t loom_op_t;
 typedef struct loom_encoding_define_param_view_t
     loom_encoding_define_param_view_t;
+typedef struct loom_encoding_define_resolved_params_t
+    loom_encoding_define_resolved_params_t;
 
 // Context-local identity for a registered encoding family. IDs are dense and
 // one-based so zero can represent an unregistered family in permissive
@@ -203,18 +205,19 @@ typedef struct loom_encoding_vtable_t {
                                    const loom_op_t* op,
                                    iree_diagnostic_emitter_t emitter);
 
-  // Verifies one encoding.define op after generic OperandDict validation.
-  // Receives the merged static/dynamic parameter view so families can enforce
-  // required dynamic operands, reject unknown parameters, and diagnose type
-  // mismatches at the op that introduced the dynamic encoding value.
-  // Authored contract violations are emitted as structured diagnostics; a
-  // non-OK status is reserved for diagnostic sink failure.
+  // Verifies one encoding.define op after generic OperandDict and generated
+  // family-schema validation. Receives descriptor-indexed static and dynamic
+  // parameters so families can enforce cross-parameter semantics without
+  // searching authored names. Authored contract violations are emitted as
+  // structured diagnostics; a non-OK status is reserved for diagnostic sink
+  // failure.
   //
-  // May be NULL when the family has no dynamic-parameter contract. Static
-  // parsing/printing stays generic; family-specific logic belongs here.
+  // May be NULL when the family has no definition-site semantics beyond its
+  // generated schema. Static parsing/printing stays generic; family-specific
+  // cross-parameter logic belongs here.
   iree_status_t (*verify_define)(
       const loom_module_t* module, const loom_op_t* op,
-      const loom_encoding_define_param_view_t* params,
+      const loom_encoding_define_resolved_params_t* params,
       iree_diagnostic_emitter_t emitter);
 
   // Computes storage size in bytes for `element_count` logical elements.

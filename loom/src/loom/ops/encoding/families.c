@@ -28,28 +28,6 @@ static iree_string_view_t loom_encoding_matrix_operand_name(void) {
   return IREE_SV("matrix_operand");
 }
 
-static bool loom_encoding_string_id_equal(const loom_module_t* module,
-                                          loom_string_id_t string_id,
-                                          iree_string_view_t expected) {
-  if (string_id == LOOM_STRING_ID_INVALID ||
-      string_id >= module->strings.count) {
-    return false;
-  }
-  return iree_string_view_equal(module->strings.entries[string_id], expected);
-}
-
-static const loom_named_attr_t* loom_encoding_find_param(
-    const loom_module_t* module, loom_named_attr_slice_t attrs,
-    iree_string_view_t name) {
-  for (iree_host_size_t i = 0; i < attrs.count; ++i) {
-    const loom_named_attr_t* entry = &attrs.entries[i];
-    if (loom_encoding_string_id_equal(module, entry->name_id, name)) {
-      return entry;
-    }
-  }
-  return NULL;
-}
-
 static iree_status_t loom_encoding_emit(iree_diagnostic_emitter_t emitter,
                                         const loom_op_t* op,
                                         const loom_error_def_t* error,
@@ -204,22 +182,6 @@ static iree_status_t loom_encoding_static_symbol(
   return iree_ok_status();
 }
 
-static iree_status_t loom_encoding_matrix_reject_dynamic_params(
-    const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_param_view_t* params,
-    iree_diagnostic_emitter_t emitter, bool* out_ok) {
-  *out_ok = false;
-  for (iree_host_size_t i = 0; i < params->dynamic_names.count; ++i) {
-    const loom_named_attr_t* entry = &params->dynamic_names.entries[i];
-    iree_string_view_t param_name = module->strings.entries[entry->name_id];
-    return loom_encoding_emit_param_error(emitter, op,
-                                          loom_encoding_matrix_operand_name(),
-                                          LOOM_ERR_ENCODING_008, param_name);
-  }
-  *out_ok = true;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_encoding_matrix_verify_i64_range(
     iree_diagnostic_emitter_t emitter, const loom_op_t* op,
     iree_string_view_t param_name, int64_t value,
@@ -312,12 +274,9 @@ static iree_status_t loom_encoding_matrix_verify_scale_group_shape(
 
 static iree_status_t loom_encoding_matrix_verify_define(
     const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_param_view_t* params,
+    const loom_encoding_define_resolved_params_t* params,
     iree_diagnostic_emitter_t emitter) {
   bool param_ok = false;
-  IREE_RETURN_IF_ERROR(loom_encoding_matrix_reject_dynamic_params(
-      module, op, params, emitter, &param_ok));
-  if (!param_ok) return iree_ok_status();
   const loom_named_attr_t*
       static_params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_COUNT_];
   loom_encoding_collect_parameter_slots(
@@ -564,22 +523,6 @@ static iree_status_t loom_encoding_matrix_verify_define(
   return iree_ok_status();
 }
 
-static iree_status_t loom_encoding_named_fp8_reject_dynamic_params(
-    const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_param_view_t* params,
-    iree_diagnostic_emitter_t emitter, iree_string_view_t encoding_name,
-    bool* out_ok) {
-  *out_ok = false;
-  for (iree_host_size_t i = 0; i < params->dynamic_names.count; ++i) {
-    const loom_named_attr_t* entry = &params->dynamic_names.entries[i];
-    iree_string_view_t param_name = module->strings.entries[entry->name_id];
-    return loom_encoding_emit_param_error(emitter, op, encoding_name,
-                                          LOOM_ERR_ENCODING_008, param_name);
-  }
-  *out_ok = true;
-  return iree_ok_status();
-}
-
 static_assert(LOOM_ENCODING_IEEE_FP8_E4M3_PARAMETER_ROUNDING == 0 &&
                   LOOM_ENCODING_IEEE_FP8_E5M2_PARAMETER_ROUNDING == 0 &&
                   LOOM_ENCODING_FP8_E4M3FN_PARAMETER_ROUNDING == 0 &&
@@ -601,14 +544,11 @@ static_assert(LOOM_ENCODING_IEEE_FP8_E4M3_PARAMETER_COUNT_ == 2 &&
 
 static iree_status_t loom_encoding_named_fp8_verify_define(
     const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_param_view_t* params,
+    const loom_encoding_define_resolved_params_t* params,
     iree_diagnostic_emitter_t emitter) {
   iree_string_view_t encoding_name =
       module->strings.entries[params->spec->name_id];
   bool param_ok = false;
-  IREE_RETURN_IF_ERROR(loom_encoding_named_fp8_reject_dynamic_params(
-      module, op, params, emitter, encoding_name, &param_ok));
-  if (!param_ok) return iree_ok_status();
   const loom_named_attr_t*
       static_params[LOOM_ENCODING_IEEE_FP8_E4M3_PARAMETER_COUNT_];
   loom_encoding_collect_parameter_slots(
@@ -635,33 +575,6 @@ static iree_status_t loom_encoding_named_fp8_verify_define(
     return loom_encoding_matrix_verify_i64_range(
         emitter, op, IREE_SV("storage_bits"), storage_bits, IREE_SV("8"));
   }
-  return iree_ok_status();
-}
-
-static bool loom_encoding_turboquant_dynamic_param_name_is_supported(
-    const loom_module_t* module, loom_string_id_t name_id) {
-  return loom_encoding_string_id_equal(module, name_id, IREE_SV("centroids")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("qjl_transform")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("thresholds")) ||
-         loom_encoding_string_id_equal(module, name_id, IREE_SV("transform"));
-}
-
-static iree_status_t loom_encoding_turboquant_require_dynamic_param(
-    const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_param_view_t* params,
-    iree_diagnostic_emitter_t emitter, iree_string_view_t param_name,
-    const loom_named_attr_t** out_param) {
-  *out_param = NULL;
-  const loom_named_attr_t* entry =
-      loom_encoding_find_param(module, params->dynamic_names, param_name);
-  if (!entry) {
-    return loom_encoding_emit_param_error(emitter, op,
-                                          loom_encoding_turboquant_kv_name(),
-                                          LOOM_ERR_ENCODING_007, param_name);
-  }
-  *out_param = entry;
   return iree_ok_status();
 }
 
@@ -706,19 +619,6 @@ static bool loom_encoding_turboquant_transform_family_supported(
          iree_string_view_equal(value, IREE_SV("sign_permute_hadamard"));
 }
 
-static bool loom_encoding_numeric_transform_dynamic_param_name_is_supported(
-    const loom_module_t* module, loom_string_id_t name_id) {
-  return loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("input_elems")) ||
-         loom_encoding_string_id_equal(module, name_id, IREE_SV("matrix")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("output_elems")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("permutation")) ||
-         loom_encoding_string_id_equal(module, name_id, IREE_SV("seed")) ||
-         loom_encoding_string_id_equal(module, name_id, IREE_SV("signs"));
-}
-
 static bool loom_encoding_numeric_transform_family_supported(
     iree_string_view_t value) {
   return loom_encoding_numeric_transform_family_from_name(value) !=
@@ -748,14 +648,6 @@ static bool loom_encoding_numeric_transform_normalization_supported(
       LOOM_ENCODING_NUMERIC_TRANSFORM_NORMALIZATION_NONE;
   return loom_encoding_numeric_transform_normalization_from_name(
       value, &normalization);
-}
-
-static bool loom_encoding_numeric_transform_param_is_extent(
-    const loom_module_t* module, loom_string_id_t name_id) {
-  return loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("input_elems")) ||
-         loom_encoding_string_id_equal(module, name_id,
-                                       IREE_SV("output_elems"));
 }
 
 static iree_status_t loom_encoding_numeric_transform_verify_static_params(
@@ -812,70 +704,49 @@ static iree_status_t loom_encoding_numeric_transform_verify_static_params(
 
 static iree_status_t loom_encoding_numeric_transform_verify_dynamic_params(
     const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_param_view_t* params,
+    const loom_encoding_define_resolved_params_t* params,
     iree_diagnostic_emitter_t emitter, bool* out_ok) {
   *out_ok = false;
-  for (iree_host_size_t i = 0; i < params->dynamic_names.count; ++i) {
-    const loom_named_attr_t* entry = &params->dynamic_names.entries[i];
-    iree_string_view_t param_name = module->strings.entries[entry->name_id];
-    if (!loom_encoding_numeric_transform_dynamic_param_name_is_supported(
-            module, entry->name_id)) {
-      return loom_encoding_emit_param_error(
-          emitter, op, loom_encoding_numeric_transform_name(),
-          LOOM_ERR_ENCODING_008, param_name);
-    }
-
-    loom_value_id_t value_id = LOOM_VALUE_ID_INVALID;
-    if (!loom_encoding_define_dynamic_param_value(params, entry, &value_id)) {
-      return iree_ok_status();
-    }
-
-    loom_type_t actual_type = loom_module_value_type(module, value_id);
-    if (loom_encoding_numeric_transform_param_is_extent(module,
-                                                        entry->name_id) ||
-        loom_encoding_string_id_equal(module, entry->name_id,
-                                      IREE_SV("seed"))) {
-      if (loom_type_equal(actual_type,
-                          loom_type_scalar(LOOM_SCALAR_TYPE_INDEX))) {
-        continue;
-      }
+  const loom_value_id_t signs = loom_encoding_define_dynamic_parameter(
+      params, LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_SIGNS);
+  if (signs != LOOM_VALUE_ID_INVALID) {
+    const loom_type_t actual_type = loom_module_value_type(module, signs);
+    if (loom_type_element_type(actual_type) != LOOM_SCALAR_TYPE_I1) {
       return loom_encoding_emit_dynamic_type_error(
           module, emitter, op, loom_encoding_numeric_transform_name(),
-          param_name, value_id, IREE_SV("index"));
+          loom_encoding_define_dynamic_parameter_name(
+              params, LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_SIGNS),
+          signs, IREE_SV("i1 vector"));
     }
+  }
 
-    if (loom_encoding_string_id_equal(module, entry->name_id,
-                                      IREE_SV("signs"))) {
-      if (loom_type_is_vector(actual_type) &&
-          loom_type_element_type(actual_type) == LOOM_SCALAR_TYPE_I1) {
-        continue;
-      }
+  const loom_value_id_t permutation = loom_encoding_define_dynamic_parameter(
+      params, LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_PERMUTATION);
+  if (permutation != LOOM_VALUE_ID_INVALID) {
+    const loom_type_t actual_type = loom_module_value_type(module, permutation);
+    if (!loom_type_satisfies_constraint(
+            actual_type,
+            LOOM_TYPE_CONSTRAINT_INDEX_OR_NON_I1_INTEGER_ELEMENT)) {
       return loom_encoding_emit_dynamic_type_error(
           module, emitter, op, loom_encoding_numeric_transform_name(),
-          param_name, value_id, IREE_SV("i1 vector"));
+          loom_encoding_define_dynamic_parameter_name(
+              params,
+              LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_PERMUTATION),
+          permutation, IREE_SV("vector with index or non-i1 integer elements"));
     }
+  }
 
-    if (loom_encoding_string_id_equal(module, entry->name_id,
-                                      IREE_SV("permutation"))) {
-      if (loom_type_is_vector(actual_type) &&
-          loom_type_satisfies_constraint(
-              actual_type,
-              LOOM_TYPE_CONSTRAINT_INDEX_OR_NON_I1_INTEGER_ELEMENT)) {
-        continue;
-      }
+  const loom_value_id_t matrix = loom_encoding_define_dynamic_parameter(
+      params, LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_MATRIX);
+  if (matrix != LOOM_VALUE_ID_INVALID) {
+    const loom_type_t actual_type = loom_module_value_type(module, matrix);
+    if (!loom_scalar_type_is_float(loom_type_element_type(actual_type))) {
       return loom_encoding_emit_dynamic_type_error(
           module, emitter, op, loom_encoding_numeric_transform_name(),
-          param_name, value_id,
-          IREE_SV("vector with index or non-i1 integer elements"));
+          loom_encoding_define_dynamic_parameter_name(
+              params, LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_MATRIX),
+          matrix, IREE_SV("floating-point vector"));
     }
-
-    if (loom_type_is_vector(actual_type) &&
-        loom_scalar_type_is_float(loom_type_element_type(actual_type))) {
-      continue;
-    }
-    return loom_encoding_emit_dynamic_type_error(
-        module, emitter, op, loom_encoding_numeric_transform_name(), param_name,
-        value_id, IREE_SV("floating-point vector"));
   }
   *out_ok = true;
   return iree_ok_status();
@@ -897,94 +768,93 @@ static iree_status_t loom_encoding_numeric_transform_require_static_param(
 
 static iree_status_t
 loom_encoding_numeric_transform_require_static_or_dynamic_param(
-    const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_param_view_t* params,
+    const loom_op_t* op, const loom_encoding_define_resolved_params_t* params,
     const loom_named_attr_t* static_param, iree_diagnostic_emitter_t emitter,
-    iree_string_view_t param_name, bool* out_ok) {
+    uint8_t dynamic_parameter_index, bool* out_ok) {
   *out_ok = false;
-  if (static_param ||
-      loom_encoding_find_param(module, params->dynamic_names, param_name)) {
+  if (static_param || loom_encoding_define_has_dynamic_parameter(
+                          params, dynamic_parameter_index)) {
     *out_ok = true;
     return iree_ok_status();
   }
-  return loom_encoding_emit_param_error(emitter, op,
-                                        loom_encoding_numeric_transform_name(),
-                                        LOOM_ERR_ENCODING_007, param_name);
+  return loom_encoding_emit_param_error(
+      emitter, op, loom_encoding_numeric_transform_name(),
+      LOOM_ERR_ENCODING_007,
+      loom_encoding_define_dynamic_parameter_name(params,
+                                                  dynamic_parameter_index));
 }
 
 static iree_status_t loom_encoding_numeric_transform_require_dynamic_param(
-    const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_param_view_t* params,
-    iree_diagnostic_emitter_t emitter, iree_string_view_t param_name,
+    const loom_op_t* op, const loom_encoding_define_resolved_params_t* params,
+    iree_diagnostic_emitter_t emitter, uint8_t dynamic_parameter_index,
     bool* out_ok) {
   *out_ok = false;
-  if (loom_encoding_find_param(module, params->dynamic_names, param_name)) {
+  if (loom_encoding_define_has_dynamic_parameter(params,
+                                                 dynamic_parameter_index)) {
     *out_ok = true;
     return iree_ok_status();
   }
-  return loom_encoding_emit_param_error(emitter, op,
-                                        loom_encoding_numeric_transform_name(),
-                                        LOOM_ERR_ENCODING_007, param_name);
-}
-
-static bool loom_encoding_numeric_transform_has_dynamic_param(
-    const loom_module_t* module,
-    const loom_encoding_define_param_view_t* params,
-    iree_string_view_t param_name) {
-  return loom_encoding_find_param(module, params->dynamic_names, param_name) !=
-         NULL;
+  return loom_encoding_emit_param_error(
+      emitter, op, loom_encoding_numeric_transform_name(),
+      LOOM_ERR_ENCODING_007,
+      loom_encoding_define_dynamic_parameter_name(params,
+                                                  dynamic_parameter_index));
 }
 
 static iree_status_t loom_encoding_numeric_transform_reject_dynamic_param(
-    const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_param_view_t* params,
-    iree_diagnostic_emitter_t emitter, iree_string_view_t param_name,
+    const loom_op_t* op, const loom_encoding_define_resolved_params_t* params,
+    iree_diagnostic_emitter_t emitter, uint8_t dynamic_parameter_index,
     bool* out_ok) {
   *out_ok = false;
-  if (!loom_encoding_find_param(module, params->dynamic_names, param_name)) {
+  if (!loom_encoding_define_has_dynamic_parameter(params,
+                                                  dynamic_parameter_index)) {
     *out_ok = true;
     return iree_ok_status();
   }
-  return loom_encoding_emit_param_error(emitter, op,
-                                        loom_encoding_numeric_transform_name(),
-                                        LOOM_ERR_ENCODING_008, param_name);
+  return loom_encoding_emit_param_error(
+      emitter, op, loom_encoding_numeric_transform_name(),
+      LOOM_ERR_ENCODING_008,
+      loom_encoding_define_dynamic_parameter_name(params,
+                                                  dynamic_parameter_index));
 }
 
 static iree_status_t loom_encoding_numeric_transform_verify_no_dynamic_payload(
-    const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_param_view_t* params,
+    const loom_op_t* op, const loom_encoding_define_resolved_params_t* params,
     iree_diagnostic_emitter_t emitter, bool* out_ok) {
   IREE_RETURN_IF_ERROR(loom_encoding_numeric_transform_reject_dynamic_param(
-      module, op, params, emitter, IREE_SV("signs"), out_ok));
+      op, params, emitter,
+      LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_SIGNS, out_ok));
   if (!*out_ok) return iree_ok_status();
   IREE_RETURN_IF_ERROR(loom_encoding_numeric_transform_reject_dynamic_param(
-      module, op, params, emitter, IREE_SV("permutation"), out_ok));
+      op, params, emitter,
+      LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_PERMUTATION, out_ok));
   if (!*out_ok) return iree_ok_status();
   IREE_RETURN_IF_ERROR(loom_encoding_numeric_transform_reject_dynamic_param(
-      module, op, params, emitter, IREE_SV("matrix"), out_ok));
+      op, params, emitter,
+      LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_MATRIX, out_ok));
   if (!*out_ok) return iree_ok_status();
   return loom_encoding_numeric_transform_reject_dynamic_param(
-      module, op, params, emitter, IREE_SV("seed"), out_ok);
+      op, params, emitter,
+      LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_SEED, out_ok);
 }
 
 static iree_status_t loom_encoding_numeric_transform_verify_no_matrix(
-    const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_param_view_t* params,
+    const loom_op_t* op, const loom_encoding_define_resolved_params_t* params,
     iree_diagnostic_emitter_t emitter, bool* out_ok) {
   return loom_encoding_numeric_transform_reject_dynamic_param(
-      module, op, params, emitter, IREE_SV("matrix"), out_ok);
+      op, params, emitter,
+      LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_MATRIX, out_ok);
 }
 
 static iree_status_t
 loom_encoding_numeric_transform_verify_hadamard_sign_payload(
-    const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_param_view_t* params,
+    const loom_op_t* op, const loom_encoding_define_resolved_params_t* params,
     iree_diagnostic_emitter_t emitter, bool* out_ok) {
   *out_ok = false;
-  bool has_signs = loom_encoding_numeric_transform_has_dynamic_param(
-      module, params, IREE_SV("signs"));
-  bool has_seed = loom_encoding_numeric_transform_has_dynamic_param(
-      module, params, IREE_SV("seed"));
+  const bool has_signs = loom_encoding_define_has_dynamic_parameter(
+      params, LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_SIGNS);
+  const bool has_seed = loom_encoding_define_has_dynamic_parameter(
+      params, LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_SEED);
   if (!has_signs && !has_seed) {
     return loom_encoding_emit_param_error(
         emitter, op, loom_encoding_numeric_transform_name(),
@@ -1022,7 +892,7 @@ static iree_status_t loom_encoding_numeric_transform_verify_jl_normalization(
 
 static iree_status_t loom_encoding_numeric_transform_verify_family_params(
     const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_param_view_t* params,
+    const loom_encoding_define_resolved_params_t* params,
     const loom_named_attr_t* family, const loom_named_attr_t* normalization,
     iree_diagnostic_emitter_t emitter, bool* out_ok) {
   *out_ok = false;
@@ -1034,46 +904,58 @@ static iree_status_t loom_encoding_numeric_transform_verify_family_params(
   switch (loom_encoding_numeric_transform_family_from_name(family_name)) {
     case LOOM_ENCODING_NUMERIC_TRANSFORM_FAMILY_HADAMARD:
       return loom_encoding_numeric_transform_verify_no_dynamic_payload(
-          module, op, params, emitter, out_ok);
+          op, params, emitter, out_ok);
     case LOOM_ENCODING_NUMERIC_TRANSFORM_FAMILY_HADAMARD_SIGN: {
       IREE_RETURN_IF_ERROR(
           loom_encoding_numeric_transform_verify_hadamard_sign_payload(
-              module, op, params, emitter, out_ok));
+              op, params, emitter, out_ok));
       if (!*out_ok) return iree_ok_status();
       IREE_RETURN_IF_ERROR(loom_encoding_numeric_transform_reject_dynamic_param(
-          module, op, params, emitter, IREE_SV("permutation"), out_ok));
+          op, params, emitter,
+          LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_PERMUTATION,
+          out_ok));
       if (!*out_ok) return iree_ok_status();
-      return loom_encoding_numeric_transform_verify_no_matrix(
-          module, op, params, emitter, out_ok);
+      return loom_encoding_numeric_transform_verify_no_matrix(op, params,
+                                                              emitter, out_ok);
     }
     case LOOM_ENCODING_NUMERIC_TRANSFORM_FAMILY_SIGN_PERMUTE_HADAMARD: {
       IREE_RETURN_IF_ERROR(
           loom_encoding_numeric_transform_require_dynamic_param(
-              module, op, params, emitter, IREE_SV("signs"), out_ok));
+              op, params, emitter,
+              LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_SIGNS, out_ok));
       if (!*out_ok) return iree_ok_status();
       IREE_RETURN_IF_ERROR(
           loom_encoding_numeric_transform_require_dynamic_param(
-              module, op, params, emitter, IREE_SV("permutation"), out_ok));
+              op, params, emitter,
+              LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_PERMUTATION,
+              out_ok));
       if (!*out_ok) return iree_ok_status();
       IREE_RETURN_IF_ERROR(loom_encoding_numeric_transform_reject_dynamic_param(
-          module, op, params, emitter, IREE_SV("seed"), out_ok));
+          op, params, emitter,
+          LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_SEED, out_ok));
       if (!*out_ok) return iree_ok_status();
-      return loom_encoding_numeric_transform_verify_no_matrix(
-          module, op, params, emitter, out_ok);
+      return loom_encoding_numeric_transform_verify_no_matrix(op, params,
+                                                              emitter, out_ok);
     }
     case LOOM_ENCODING_NUMERIC_TRANSFORM_FAMILY_JL_DENSE: {
       IREE_RETURN_IF_ERROR(
           loom_encoding_numeric_transform_require_dynamic_param(
-              module, op, params, emitter, IREE_SV("matrix"), out_ok));
+              op, params, emitter,
+              LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_MATRIX,
+              out_ok));
       if (!*out_ok) return iree_ok_status();
       IREE_RETURN_IF_ERROR(loom_encoding_numeric_transform_reject_dynamic_param(
-          module, op, params, emitter, IREE_SV("signs"), out_ok));
+          op, params, emitter,
+          LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_SIGNS, out_ok));
       if (!*out_ok) return iree_ok_status();
       IREE_RETURN_IF_ERROR(loom_encoding_numeric_transform_reject_dynamic_param(
-          module, op, params, emitter, IREE_SV("permutation"), out_ok));
+          op, params, emitter,
+          LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_PERMUTATION,
+          out_ok));
       if (!*out_ok) return iree_ok_status();
       IREE_RETURN_IF_ERROR(loom_encoding_numeric_transform_reject_dynamic_param(
-          module, op, params, emitter, IREE_SV("seed"), out_ok));
+          op, params, emitter,
+          LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_SEED, out_ok));
       if (!*out_ok) return iree_ok_status();
       return loom_encoding_numeric_transform_verify_jl_normalization(
           module, op, normalization, emitter, out_ok);
@@ -1085,7 +967,7 @@ static iree_status_t loom_encoding_numeric_transform_verify_family_params(
 
 static iree_status_t loom_encoding_numeric_transform_verify_define(
     const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_param_view_t* params,
+    const loom_encoding_define_resolved_params_t* params,
     iree_diagnostic_emitter_t emitter) {
   const loom_named_attr_t*
       static_params[LOOM_ENCODING_NUMERIC_TRANSFORM_PARAMETER_COUNT_];
@@ -1107,15 +989,19 @@ static iree_status_t loom_encoding_numeric_transform_verify_define(
   if (!param_ok) return iree_ok_status();
   IREE_RETURN_IF_ERROR(
       loom_encoding_numeric_transform_require_static_or_dynamic_param(
-          module, op, params,
+          op, params,
           static_params[LOOM_ENCODING_NUMERIC_TRANSFORM_PARAMETER_INPUT_ELEMS],
-          emitter, IREE_SV("input_elems"), &param_ok));
+          emitter,
+          LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_INPUT_ELEMS,
+          &param_ok));
   if (!param_ok) return iree_ok_status();
   IREE_RETURN_IF_ERROR(
       loom_encoding_numeric_transform_require_static_or_dynamic_param(
-          module, op, params,
+          op, params,
           static_params[LOOM_ENCODING_NUMERIC_TRANSFORM_PARAMETER_OUTPUT_ELEMS],
-          emitter, IREE_SV("output_elems"), &param_ok));
+          emitter,
+          LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_OUTPUT_ELEMS,
+          &param_ok));
   if (!param_ok) return iree_ok_status();
   IREE_RETURN_IF_ERROR(loom_encoding_numeric_transform_verify_family_params(
       module, op, params,
@@ -1124,25 +1010,6 @@ static iree_status_t loom_encoding_numeric_transform_verify_define(
       emitter, &param_ok));
   if (!param_ok) return iree_ok_status();
 
-  return iree_ok_status();
-}
-
-static iree_status_t loom_encoding_turboquant_verify_dynamic_param_names(
-    const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_param_view_t* params,
-    iree_diagnostic_emitter_t emitter, bool* out_ok) {
-  *out_ok = false;
-  for (iree_host_size_t i = 0; i < params->dynamic_names.count; ++i) {
-    const loom_named_attr_t* entry = &params->dynamic_names.entries[i];
-    iree_string_view_t param_name = module->strings.entries[entry->name_id];
-    if (!loom_encoding_turboquant_dynamic_param_name_is_supported(
-            module, entry->name_id)) {
-      return loom_encoding_emit_param_error(emitter, op,
-                                            loom_encoding_turboquant_kv_name(),
-                                            LOOM_ERR_ENCODING_008, param_name);
-    }
-  }
-  *out_ok = true;
   return iree_ok_status();
 }
 
@@ -1180,22 +1047,23 @@ static bool loom_encoding_turboquant_min_record_bytes(
 
 static iree_status_t loom_encoding_turboquant_verify_dynamic_view(
     const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_param_view_t* params,
-    iree_diagnostic_emitter_t emitter, iree_string_view_t param_name,
+    const loom_encoding_define_resolved_params_t* params,
+    iree_diagnostic_emitter_t emitter, uint8_t dynamic_parameter_index,
     int64_t expected_static_length, bool* out_ok) {
   *out_ok = false;
-  const loom_named_attr_t* entry = NULL;
-  IREE_RETURN_IF_ERROR(loom_encoding_turboquant_require_dynamic_param(
-      module, op, params, emitter, param_name, &entry));
-  if (!entry) return iree_ok_status();
-
-  loom_value_id_t value_id = LOOM_VALUE_ID_INVALID;
-  if (!loom_encoding_define_dynamic_param_value(params, entry, &value_id)) {
-    return iree_ok_status();
+  const iree_string_view_t param_name =
+      loom_encoding_define_dynamic_parameter_name(params,
+                                                  dynamic_parameter_index);
+  const loom_value_id_t value_id =
+      loom_encoding_define_dynamic_parameter(params, dynamic_parameter_index);
+  if (value_id == LOOM_VALUE_ID_INVALID) {
+    return loom_encoding_emit_param_error(emitter, op,
+                                          loom_encoding_turboquant_kv_name(),
+                                          LOOM_ERR_ENCODING_007, param_name);
   }
 
-  loom_type_t actual_type = loom_module_value_type(module, value_id);
-  if (!loom_type_is_view(actual_type) || loom_type_rank(actual_type) != 1 ||
+  const loom_type_t actual_type = loom_module_value_type(module, value_id);
+  if (loom_type_rank(actual_type) != 1 ||
       !loom_scalar_type_is_float(loom_type_element_type(actual_type))) {
     return loom_encoding_emit_dynamic_type_error(
         module, emitter, op, loom_encoding_turboquant_kv_name(), param_name,
@@ -1214,33 +1082,17 @@ static iree_status_t loom_encoding_turboquant_verify_dynamic_view(
   return iree_ok_status();
 }
 
-static iree_status_t loom_encoding_turboquant_verify_dynamic_transform(
-    const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_param_view_t* params,
-    iree_diagnostic_emitter_t emitter, iree_string_view_t param_name,
+static iree_status_t loom_encoding_turboquant_require_dynamic_param(
+    const loom_op_t* op, const loom_encoding_define_resolved_params_t* params,
+    iree_diagnostic_emitter_t emitter, uint8_t dynamic_parameter_index,
     bool* out_ok) {
   *out_ok = false;
-  const loom_named_attr_t* entry = NULL;
-  IREE_RETURN_IF_ERROR(loom_encoding_turboquant_require_dynamic_param(
-      module, op, params, emitter, param_name, &entry));
-  if (!entry) return iree_ok_status();
-
-  loom_value_id_t value_id = LOOM_VALUE_ID_INVALID;
-  if (!loom_encoding_define_dynamic_param_value(params, entry, &value_id)) {
-    return iree_ok_status();
-  }
-
-  loom_type_t actual_type = loom_module_value_type(module, value_id);
-  if (!loom_type_is_encoding(actual_type)) {
-    return loom_encoding_emit_dynamic_type_error(
-        module, emitter, op, loom_encoding_turboquant_kv_name(), param_name,
-        value_id, IREE_SV("encoding<transform>"));
-  }
-  if (loom_type_encoding_role(actual_type) !=
-      LOOM_ENCODING_ROLE_NUMERIC_TRANSFORM) {
-    return loom_encoding_emit_role_error(
-        emitter, op, loom_encoding_turboquant_kv_name(), param_name,
-        loom_encoding_role_description(LOOM_ENCODING_ROLE_NUMERIC_TRANSFORM));
+  if (!loom_encoding_define_has_dynamic_parameter(params,
+                                                  dynamic_parameter_index)) {
+    return loom_encoding_emit_param_error(
+        emitter, op, loom_encoding_turboquant_kv_name(), LOOM_ERR_ENCODING_007,
+        loom_encoding_define_dynamic_parameter_name(params,
+                                                    dynamic_parameter_index));
   }
   *out_ok = true;
   return iree_ok_status();
@@ -1280,19 +1132,14 @@ static bool loom_encoding_try_get_numeric_transform_family(
 
 static iree_status_t loom_encoding_turboquant_verify_transform_family(
     const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_param_view_t* params,
-    iree_diagnostic_emitter_t emitter, iree_string_view_t param_name,
+    const loom_encoding_define_resolved_params_t* params,
+    iree_diagnostic_emitter_t emitter, uint8_t dynamic_parameter_index,
     iree_string_view_t expected_family, bool* out_ok) {
   *out_ok = false;
-  const loom_named_attr_t* entry =
-      loom_encoding_find_param(module, params->dynamic_names, param_name);
-  if (!entry) {
+  const loom_value_id_t value_id =
+      loom_encoding_define_dynamic_parameter(params, dynamic_parameter_index);
+  if (value_id == LOOM_VALUE_ID_INVALID) {
     *out_ok = true;
-    return iree_ok_status();
-  }
-
-  loom_value_id_t value_id = LOOM_VALUE_ID_INVALID;
-  if (!loom_encoding_define_dynamic_param_value(params, entry, &value_id)) {
     return iree_ok_status();
   }
 
@@ -1310,13 +1157,15 @@ static iree_status_t loom_encoding_turboquant_verify_transform_family(
   iree_string_view_t expected =
       loom_encoding_numeric_transform_family_quoted(expected_family);
   return loom_encoding_emit_static_value_error(
-      emitter, op, loom_encoding_turboquant_kv_name(), param_name,
+      emitter, op, loom_encoding_turboquant_kv_name(),
+      loom_encoding_define_dynamic_parameter_name(params,
+                                                  dynamic_parameter_index),
       actual_family, expected);
 }
 
 static iree_status_t loom_encoding_turboquant_verify_define(
     const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_param_view_t* params,
+    const loom_encoding_define_resolved_params_t* params,
     iree_diagnostic_emitter_t emitter) {
   const loom_named_attr_t*
       static_params[LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_COUNT_];
@@ -1325,9 +1174,6 @@ static iree_status_t loom_encoding_turboquant_verify_define(
       static_params);
 
   bool param_ok = false;
-  IREE_RETURN_IF_ERROR(loom_encoding_turboquant_verify_dynamic_param_names(
-      module, op, params, emitter, &param_ok));
-  if (!param_ok) return iree_ok_status();
 
   int64_t first_stage_bits = 0;
   int64_t logical_elems = 0;
@@ -1449,25 +1295,31 @@ static iree_status_t loom_encoding_turboquant_verify_define(
   int64_t centroid_count = 1LL << first_stage_bits;
   int64_t threshold_count = centroid_count - 1;
   IREE_RETURN_IF_ERROR(loom_encoding_turboquant_verify_dynamic_view(
-      module, op, params, emitter, IREE_SV("centroids"), centroid_count,
+      module, op, params, emitter,
+      LOOM_ENCODING_TURBOQUANT_KV_DYNAMIC_PARAMETER_CENTROIDS, centroid_count,
       &param_ok));
   if (!param_ok) return iree_ok_status();
   IREE_RETURN_IF_ERROR(loom_encoding_turboquant_verify_dynamic_view(
-      module, op, params, emitter, IREE_SV("thresholds"), threshold_count,
+      module, op, params, emitter,
+      LOOM_ENCODING_TURBOQUANT_KV_DYNAMIC_PARAMETER_THRESHOLDS, threshold_count,
       &param_ok));
   if (!param_ok) return iree_ok_status();
-  IREE_RETURN_IF_ERROR(loom_encoding_turboquant_verify_dynamic_transform(
-      module, op, params, emitter, IREE_SV("qjl_transform"), &param_ok));
+  IREE_RETURN_IF_ERROR(loom_encoding_turboquant_require_dynamic_param(
+      op, params, emitter,
+      LOOM_ENCODING_TURBOQUANT_KV_DYNAMIC_PARAMETER_QJL_TRANSFORM, &param_ok));
   if (!param_ok) return iree_ok_status();
   IREE_RETURN_IF_ERROR(loom_encoding_turboquant_verify_transform_family(
-      module, op, params, emitter, IREE_SV("qjl_transform"),
+      module, op, params, emitter,
+      LOOM_ENCODING_TURBOQUANT_KV_DYNAMIC_PARAMETER_QJL_TRANSFORM,
       IREE_SV("jl_dense"), &param_ok));
   if (!param_ok) return iree_ok_status();
-  IREE_RETURN_IF_ERROR(loom_encoding_turboquant_verify_dynamic_transform(
-      module, op, params, emitter, IREE_SV("transform"), &param_ok));
+  IREE_RETURN_IF_ERROR(loom_encoding_turboquant_require_dynamic_param(
+      op, params, emitter,
+      LOOM_ENCODING_TURBOQUANT_KV_DYNAMIC_PARAMETER_TRANSFORM, &param_ok));
   if (!param_ok) return iree_ok_status();
   IREE_RETURN_IF_ERROR(loom_encoding_turboquant_verify_transform_family(
-      module, op, params, emitter, IREE_SV("transform"), transform_family,
+      module, op, params, emitter,
+      LOOM_ENCODING_TURBOQUANT_KV_DYNAMIC_PARAMETER_TRANSFORM, transform_family,
       &param_ok));
   if (!param_ok) return iree_ok_status();
 

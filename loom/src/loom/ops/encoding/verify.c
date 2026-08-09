@@ -227,7 +227,8 @@ iree_status_t loom_encoding_define_verify(const loom_module_t* module,
   }
 
   if (vtable && vtable->verify_define) {
-    IREE_RETURN_IF_ERROR(vtable->verify_define(module, op, &params, emitter));
+    IREE_RETURN_IF_ERROR(
+        vtable->verify_define(module, op, &resolved_params, emitter));
   }
 
   return iree_ok_status();
