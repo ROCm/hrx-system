@@ -2672,10 +2672,9 @@ iree_status_t loom_vector_transform_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts) {
-  loom_encoding_numeric_transform_read_t read =
-      loom_encoding_numeric_transform_read_descriptor(
-          module, loom_vector_transform_transform(op));
-  if (read.code != LOOM_ENCODING_NUMERIC_TRANSFORM_READ_OK) {
+  loom_encoding_numeric_transform_descriptor_t descriptor;
+  if (!loom_encoding_numeric_transform_try_read_verified_descriptor(
+          module, loom_vector_transform_transform(op), &descriptor)) {
     return loom_vector_make_unknown_facts(result_facts);
   }
 
@@ -2683,16 +2682,16 @@ iree_status_t loom_vector_transform_facts(
       loom_module_value_type(module, loom_vector_transform_source(op));
   loom_type_t result_type =
       loom_module_value_type(module, loom_vector_transform_result(op));
-  switch (read.descriptor.family) {
+  switch (descriptor.family) {
     case LOOM_ENCODING_NUMERIC_TRANSFORM_FAMILY_HADAMARD:
     case LOOM_ENCODING_NUMERIC_TRANSFORM_FAMILY_HADAMARD_SIGN:
     case LOOM_ENCODING_NUMERIC_TRANSFORM_FAMILY_SIGN_PERMUTE_HADAMARD:
       return loom_vector_transform_hadamard_facts(
-          context, &read.descriptor, source_type, result_type, operand_facts[0],
+          context, &descriptor, source_type, result_type, operand_facts[0],
           &result_facts[0]);
     case LOOM_ENCODING_NUMERIC_TRANSFORM_FAMILY_JL_DENSE:
       return loom_vector_transform_jl_dense_facts(
-          context, &read.descriptor, module, source_type, result_type,
+          context, &descriptor, module, source_type, result_type,
           operand_facts[0], &result_facts[0]);
     case LOOM_ENCODING_NUMERIC_TRANSFORM_FAMILY_UNKNOWN:
       return loom_vector_make_unknown_facts(result_facts);

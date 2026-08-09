@@ -24,6 +24,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/encoding/families.h"
+#include "loom/ops/encoding/numeric_transform.h"
 #include "loom/ops/encoding/ops.h"
 #include "loom/ops/encoding/roles.h"
 #include "loom/ops/encoding/storage.h"
@@ -216,6 +217,27 @@ static std::string BuildDynamicEncodingModule(int64_t definition_count) {
         " = encoding.define #physical_storage {layout = %layout : "
         "encoding<layout>, schema = %schema : encoding<schema>} : "
         "encoding<storage>\n");
+  }
+  source.append("  func.return\n}\n");
+  return source;
+}
+
+static std::string BuildDynamicNumericTransformModule(
+    int64_t definition_count) {
+  std::string source;
+  source.reserve((size_t)definition_count * 240);
+  source.append(
+      "func.def @transforms(%input_elems: index, %output_elems: index, "
+      "%permutation: vector<32xindex>, %signs: vector<32xi1>) {\n");
+  for (int64_t i = 0; i < definition_count; ++i) {
+    source.append("  %transform");
+    source.append(std::to_string(i));
+    source.append(
+        " = encoding.define "
+        "#numeric_transform<family=\"sign_permute_hadamard\"> "
+        "{input_elems = %input_elems : index, output_elems = %output_elems : "
+        "index, permutation = %permutation : vector<32xindex>, signs = %signs "
+        ": vector<32xi1>} : encoding<transform>\n");
   }
   source.append("  func.return\n}\n");
   return source;
@@ -666,5 +688,64 @@ static void BM_ComputeDynamicEncodingFacts(benchmark::State& state) {
   loom_module_free(module);
 }
 BENCHMARK(BM_ComputeDynamicEncodingFacts)->Apply(DistinctSchemaCounts);
+
+static bool QueryVerifiedDynamicNumericTransforms(loom_module_t* module,
+                                                  int64_t definition_count) {
+  loom_func_like_t function = GetOnlyFunction(module);
+  if (!function.op) return false;
+  loom_block_t* body = loom_region_entry_block(loom_func_like_body(function));
+  if (!body || body->op_count != (iree_host_size_t)definition_count + 1) {
+    return false;
+  }
+  int64_t query_count = 0;
+  loom_op_t* op = nullptr;
+  loom_block_for_each_op(body, op) {
+    if (loom_func_return_isa(op)) break;
+    if (!loom_encoding_define_isa(op)) return false;
+    loom_encoding_numeric_transform_descriptor_t descriptor;
+    if (!loom_encoding_numeric_transform_try_read_verified_descriptor(
+            module, loom_encoding_define_result(op), &descriptor) ||
+        descriptor.family !=
+            LOOM_ENCODING_NUMERIC_TRANSFORM_FAMILY_SIGN_PERMUTE_HADAMARD ||
+        descriptor.input_extent.dynamic_value == LOOM_VALUE_ID_INVALID ||
+        descriptor.output_extent.dynamic_value == LOOM_VALUE_ID_INVALID ||
+        !loom_encoding_numeric_transform_has_permutation(&descriptor) ||
+        !loom_encoding_numeric_transform_has_signs(&descriptor)) {
+      return false;
+    }
+    benchmark::DoNotOptimize(descriptor);
+    ++query_count;
+  }
+  return query_count == definition_count;
+}
+
+static void BM_QueryVerifiedDynamicEncodingTransforms(benchmark::State& state) {
+  const int64_t definition_count = state.range(0);
+  const std::string source =
+      BuildDynamicNumericTransformModule(definition_count);
+  EncodingBenchmarkFixture fixture;
+  loom_module_t* module = ParseModule(fixture, source);
+  VerifyDynamicEncodingModule(module);
+  OperationMemoryTracker memory_tracker(fixture.block_pool());
+
+  if (!QueryVerifiedDynamicNumericTransforms(module, definition_count)) {
+    state.SkipWithError("dynamic numeric transform query produced wrong data");
+    loom_module_free(module);
+    return;
+  }
+  memory_tracker.MarkWarmupComplete(module);
+  for (auto _ : state) {
+    if (!QueryVerifiedDynamicNumericTransforms(module, definition_count)) {
+      state.SkipWithError(
+          "dynamic numeric transform query produced wrong data");
+      break;
+    }
+  }
+  memory_tracker.SetCounters(state);
+  state.SetItemsProcessed(state.iterations() * definition_count);
+  loom_module_free(module);
+}
+BENCHMARK(BM_QueryVerifiedDynamicEncodingTransforms)
+    ->Apply(DistinctSchemaCounts);
 
 }  // namespace

@@ -16,7 +16,7 @@
 #include "loom/ops/cache.h"
 #include "loom/ops/combining.h"
 #include "loom/ops/encoding/numeric_transform.h"
-#include "loom/ops/encoding/params.h"
+#include "loom/ops/encoding/ops.h"
 #include "loom/ops/encoding/roles.h"
 #include "loom/ops/encoding/storage.h"
 #include "loom/ops/scalar/ops.h"
@@ -1605,46 +1605,11 @@ iree_status_t loom_vector_table_quantize_verify(
                                                    thresholds_value);
 }
 
-static iree_string_view_t loom_vector_transform_input_elems_param_name(void) {
-  return IREE_SV("input_elems");
-}
-
-static iree_string_view_t loom_vector_transform_output_elems_param_name(void) {
-  return IREE_SV("output_elems");
-}
-
-static iree_string_view_t loom_vector_transform_signs_param_name(void) {
-  return IREE_SV("signs");
-}
-
-static iree_string_view_t loom_vector_transform_permutation_param_name(void) {
-  return IREE_SV("permutation");
-}
-
-static iree_string_view_t loom_vector_transform_matrix_param_name(void) {
-  return IREE_SV("matrix");
-}
-
-static bool loom_vector_string_id_equal(const loom_module_t* module,
-                                        loom_string_id_t string_id,
-                                        iree_string_view_t expected) {
-  if (string_id == LOOM_STRING_ID_INVALID ||
-      string_id >= module->strings.count) {
-    return false;
-  }
-  return iree_string_view_equal(module->strings.entries[string_id], expected);
-}
-
-static const loom_named_attr_t* loom_vector_find_named_attr(
-    const loom_module_t* module, loom_named_attr_slice_t attrs,
-    iree_string_view_t name) {
-  for (iree_host_size_t i = 0; i < attrs.count; ++i) {
-    const loom_named_attr_t* entry = &attrs.entries[i];
-    if (loom_vector_string_id_equal(module, entry->name_id, name)) {
-      return entry;
-    }
-  }
-  return NULL;
+static iree_string_view_t loom_vector_transform_dynamic_parameter_name(
+    loom_encoding_numeric_transform_dynamic_parameter_t parameter) {
+  return loom_bstring_view(loom_encoding_numeric_transform_family_descriptor
+                               .dynamic_parameter_descriptors[parameter]
+                               .name);
 }
 
 static iree_status_t loom_vector_emit_auxiliary_key_error(
@@ -1940,38 +1905,27 @@ static bool loom_vector_i64_is_power_of_two(int64_t value) {
 
 static iree_status_t loom_vector_transform_verify_extent_param(
     const loom_module_t* module, iree_diagnostic_emitter_t emitter,
-    const loom_op_t* op, const loom_encoding_define_param_view_t* params,
-    iree_string_view_t param_name, iree_string_view_t field_name,
-    loom_type_t field_type, uint8_t axis, bool field_is_result) {
-  const loom_named_attr_t* static_param =
-      loom_vector_find_named_attr(module, params->static_attrs, param_name);
-  const loom_named_attr_t* dynamic_param =
-      loom_vector_find_named_attr(module, params->dynamic_names, param_name);
-  if (!static_param && !dynamic_param) return iree_ok_status();
-
-  if (static_param) {
-    if (static_param->value.kind != LOOM_ATTR_I64) {
-      return iree_ok_status();
-    }
-    int64_t expected_extent = loom_attr_as_i64(static_param->value);
-    if (expected_extent <= 0) {
-      return iree_ok_status();
-    }
+    const loom_op_t* op,
+    const loom_encoding_numeric_transform_extent_t* transform_extent,
+    iree_string_view_t field_name, loom_type_t field_type, uint8_t axis,
+    bool field_is_result) {
+  if (transform_extent->static_value > 0) {
     if (loom_type_dim_is_dynamic_at(field_type, axis)) {
       return loom_vector_emit_field_constraint(
           emitter, op, field_is_result, field_name, field_type,
           IREE_SV("last axis matching static transform extent"));
     }
     int64_t actual_extent = loom_type_dim_static_size_at(field_type, axis);
-    if (actual_extent == expected_extent) return iree_ok_status();
+    if (actual_extent == transform_extent->static_value) {
+      return iree_ok_status();
+    }
     return loom_vector_emit_field_constraint(
         emitter, op, field_is_result, field_name, field_type,
         IREE_SV("last axis matching static transform extent"));
   }
 
-  loom_value_id_t value_id = LOOM_VALUE_ID_INVALID;
-  if (!loom_encoding_define_dynamic_param_value(params, dynamic_param,
-                                                &value_id)) {
+  const loom_value_id_t value_id = transform_extent->dynamic_value;
+  if (value_id == LOOM_VALUE_ID_INVALID) {
     return iree_ok_status();
   }
   if (!loom_type_equal(loom_module_value_type(module, value_id),
@@ -2052,37 +2006,26 @@ static iree_status_t loom_vector_transform_verify_static_permutation_values(
 static iree_status_t loom_vector_transform_verify_dynamic_param_shapes(
     const loom_module_t* module, iree_diagnostic_emitter_t emitter,
     const loom_op_t* op, const loom_op_t* define_op,
-    const loom_encoding_define_param_view_t* params,
-    iree_string_view_t encoding_name, loom_type_t source_type,
-    loom_type_t result_type) {
-  const loom_named_attr_t* signs_param = loom_vector_find_named_attr(
-      module, params->dynamic_names, loom_vector_transform_signs_param_name());
-  if (signs_param) {
-    loom_value_id_t signs_value = LOOM_VALUE_ID_INVALID;
-    if (!loom_encoding_define_dynamic_param_value(params, signs_param,
-                                                  &signs_value)) {
-      return iree_ok_status();
-    }
+    const loom_encoding_numeric_transform_descriptor_t* descriptor,
+    loom_type_t source_type, loom_type_t result_type) {
+  const iree_string_view_t encoding_name =
+      loom_encoding_numeric_transform_name();
+  if (loom_encoding_numeric_transform_has_signs(descriptor)) {
+    const loom_value_id_t signs_value = descriptor->signs;
     loom_type_t signs_type = loom_module_value_type(module, signs_value);
     if (loom_type_is_vector(signs_type) &&
         loom_type_element_type(signs_type) == LOOM_SCALAR_TYPE_I1 &&
         !loom_vector_shapes_match(signs_type, source_type)) {
       return loom_vector_emit_encoding_dynamic_type_error(
           module, emitter, define_op, encoding_name,
-          loom_vector_transform_signs_param_name(), signs_value,
-          IREE_SV("i1 vector with source shape"));
+          loom_vector_transform_dynamic_parameter_name(
+              LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_SIGNS),
+          signs_value, IREE_SV("i1 vector with source shape"));
     }
   }
 
-  const loom_named_attr_t* permutation_param = loom_vector_find_named_attr(
-      module, params->dynamic_names,
-      loom_vector_transform_permutation_param_name());
-  if (permutation_param) {
-    loom_value_id_t permutation_value = LOOM_VALUE_ID_INVALID;
-    if (!loom_encoding_define_dynamic_param_value(params, permutation_param,
-                                                  &permutation_value)) {
-      return iree_ok_status();
-    }
+  if (loom_encoding_numeric_transform_has_permutation(descriptor)) {
+    const loom_value_id_t permutation_value = descriptor->permutation;
     loom_type_t permutation_type =
         loom_module_value_type(module, permutation_value);
     if (loom_type_is_vector(permutation_type) &&
@@ -2092,36 +2035,26 @@ static iree_status_t loom_vector_transform_verify_dynamic_param_shapes(
         !loom_vector_shapes_match(permutation_type, source_type)) {
       return loom_vector_emit_encoding_dynamic_type_error(
           module, emitter, define_op, encoding_name,
-          loom_vector_transform_permutation_param_name(), permutation_value,
+          loom_vector_transform_dynamic_parameter_name(
+              LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_PERMUTATION),
+          permutation_value,
           IREE_SV("index or non-i1 integer vector with source shape"));
     }
     IREE_RETURN_IF_ERROR(loom_vector_transform_verify_static_permutation_values(
         module, emitter, op, source_type, permutation_value));
   }
 
-  const loom_named_attr_t* matrix_param = loom_vector_find_named_attr(
-      module, params->dynamic_names, loom_vector_transform_matrix_param_name());
-  if (!matrix_param) return iree_ok_status();
-
-  loom_value_id_t matrix_value = LOOM_VALUE_ID_INVALID;
-  if (!loom_encoding_define_dynamic_param_value(params, matrix_param,
-                                                &matrix_value)) {
+  if (!loom_encoding_numeric_transform_has_matrix(descriptor)) {
     return iree_ok_status();
   }
+  const loom_value_id_t matrix_value = descriptor->matrix;
   loom_type_t matrix_type = loom_module_value_type(module, matrix_value);
   if (!loom_type_is_vector(matrix_type) ||
       !loom_scalar_type_is_float(loom_type_element_type(matrix_type))) {
     return iree_ok_status();
   }
 
-  loom_encoding_numeric_transform_read_t read =
-      loom_encoding_numeric_transform_read_descriptor(
-          module, loom_encoding_define_result(define_op));
-  if (read.code != LOOM_ENCODING_NUMERIC_TRANSFORM_READ_OK) {
-    return iree_ok_status();
-  }
-  if (read.descriptor.family !=
-      LOOM_ENCODING_NUMERIC_TRANSFORM_FAMILY_JL_DENSE) {
+  if (descriptor->family != LOOM_ENCODING_NUMERIC_TRANSFORM_FAMILY_JL_DENSE) {
     return iree_ok_status();
   }
 
@@ -2137,24 +2070,19 @@ static iree_status_t loom_vector_transform_verify_dynamic_param_shapes(
   }
   return loom_vector_emit_encoding_dynamic_type_error(
       module, emitter, define_op, encoding_name,
-      loom_vector_transform_matrix_param_name(), matrix_value,
+      loom_vector_transform_dynamic_parameter_name(
+          LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_MATRIX),
+      matrix_value,
       IREE_SV("rank-2 source-element-type matrix matching output x input "
               "extents"));
 }
 
 static iree_status_t loom_vector_transform_verify_family(
-    const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter, loom_type_t source_type,
-    loom_type_t result_type) {
-  loom_encoding_numeric_transform_read_t read =
-      loom_encoding_numeric_transform_read_descriptor(
-          module, loom_vector_transform_transform(op));
-  if (read.code != LOOM_ENCODING_NUMERIC_TRANSFORM_READ_OK) {
-    return iree_ok_status();
-  }
-
+    const loom_op_t* op, iree_diagnostic_emitter_t emitter,
+    const loom_encoding_numeric_transform_descriptor_t* descriptor,
+    loom_type_t source_type, loom_type_t result_type) {
   if (!loom_encoding_numeric_transform_family_is_hadamard_like(
-          read.descriptor.family)) {
+          descriptor->family)) {
     return iree_ok_status();
   }
   if (!loom_vector_shapes_match(source_type, result_type)) {
@@ -2215,29 +2143,23 @@ iree_status_t loom_vector_transform_verify(const loom_module_t* module,
     return iree_ok_status();
   }
 
-  loom_encoding_define_param_view_t params =
-      loom_encoding_define_param_view(module, define_op);
-  if (!params.spec || params.spec->name_id == LOOM_STRING_ID_INVALID ||
-      params.spec->name_id >= module->strings.count) {
+  loom_encoding_numeric_transform_descriptor_t descriptor;
+  if (!loom_encoding_numeric_transform_try_read_unverified_descriptor(
+          module, transform_value, &descriptor)) {
     return iree_ok_status();
   }
-  iree_string_view_t encoding_name =
-      module->strings.entries[params.spec->name_id];
 
   IREE_RETURN_IF_ERROR(loom_vector_transform_verify_extent_param(
-      module, emitter, op, &params,
-      loom_vector_transform_input_elems_param_name(), IREE_SV("source"),
+      module, emitter, op, &descriptor.input_extent, IREE_SV("source"),
       source_type, last_axis, /*field_is_result=*/false));
   IREE_RETURN_IF_ERROR(loom_vector_transform_verify_extent_param(
-      module, emitter, op, &params,
-      loom_vector_transform_output_elems_param_name(), IREE_SV("result"),
+      module, emitter, op, &descriptor.output_extent, IREE_SV("result"),
       result_type, last_axis, /*field_is_result=*/true));
   IREE_RETURN_IF_ERROR(loom_vector_transform_verify_dynamic_param_shapes(
-      module, emitter, op, define_op, &params, encoding_name, source_type,
-      result_type));
+      module, emitter, op, define_op, &descriptor, source_type, result_type));
 
-  return loom_vector_transform_verify_family(module, op, emitter, source_type,
-                                             result_type);
+  return loom_vector_transform_verify_family(op, emitter, &descriptor,
+                                             source_type, result_type);
 }
 
 iree_status_t loom_vector_geluf_verify(const loom_module_t* module,

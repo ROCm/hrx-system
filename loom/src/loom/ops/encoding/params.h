@@ -31,33 +31,6 @@ struct loom_encoding_define_param_view_t {
   loom_named_attr_slice_t dynamic_names;
 };
 
-// Resolves a structurally verified operand dictionary entry to its ordinal.
-static inline bool loom_encoding_define_dynamic_param_ordinal(
-    const loom_encoding_define_param_view_t* params,
-    const loom_named_attr_t* name_entry, uint16_t* out_ordinal) {
-  *out_ordinal = 0;
-  if (!name_entry) return false;
-  IREE_ASSERT(name_entry->value.kind == LOOM_ATTR_I64);
-  IREE_ASSERT(name_entry->value.i64 >= 0);
-  IREE_ASSERT(name_entry->value.i64 < params->dynamic_values.count);
-  *out_ordinal = (uint16_t)name_entry->value.i64;
-  return true;
-}
-
-// Resolves a structurally verified operand dictionary entry to its value.
-static inline bool loom_encoding_define_dynamic_param_value(
-    const loom_encoding_define_param_view_t* params,
-    const loom_named_attr_t* name_entry, loom_value_id_t* out_value) {
-  uint16_t ordinal = 0;
-  *out_value = LOOM_VALUE_ID_INVALID;
-  if (!loom_encoding_define_dynamic_param_ordinal(params, name_entry,
-                                                  &ordinal)) {
-    return false;
-  }
-  *out_value = params->dynamic_values.values[ordinal];
-  return true;
-}
-
 // One descriptor-indexed dynamic parameter binding.
 typedef struct loom_encoding_define_dynamic_binding_t {
   // SSA value bound to the parameter, or invalid when absent.
@@ -80,6 +53,18 @@ typedef struct loom_encoding_define_resolved_params_t {
   // Number of entries in |dynamic_bindings|.
   uint8_t dynamic_binding_count;
 } loom_encoding_define_resolved_params_t;
+
+// Attempts to resolve parameters from an encoding.define that may already have
+// failed its own verifier. Returns false without emitting another diagnostic
+// when the producer's family or parameter contract is malformed. This is for
+// conservative cross-op verifier queries; verified compiler paths should use
+// loom_encoding_define_resolve_verified_params instead.
+bool loom_encoding_define_try_resolve_unverified_params(
+    const loom_module_t* module,
+    const loom_encoding_family_descriptor_t* descriptor,
+    const loom_encoding_define_param_view_t* params,
+    loom_encoding_define_dynamic_binding_t* dynamic_binding_slots,
+    loom_encoding_define_resolved_params_t* out_params);
 
 // Resolves parameters from a verified encoding.define. This is the infallible
 // internal query for passes that run after module verification.
