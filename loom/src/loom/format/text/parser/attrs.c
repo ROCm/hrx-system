@@ -287,6 +287,17 @@ static iree_status_t loom_parse_generic_attr_value_with_type_mode(
     loom_parser_t* parser, uint16_t nesting_depth,
     loom_type_parse_mode_t type_mode, loom_attribute_t* out_attr);
 
+static iree_status_t loom_parse_next_parameter_is_named(loom_parser_t* parser,
+                                                        bool* out_is_named) {
+  *out_is_named = false;
+  loom_tokenizer_t lookahead = parser->tokenizer;
+  if (loom_tokenizer_at(&lookahead, LOOM_TOKEN_BARE_IDENT)) {
+    (void)loom_tokenizer_next(&lookahead);
+    *out_is_named = loom_tokenizer_at(&lookahead, LOOM_TOKEN_EQUALS);
+  }
+  return loom_tokenizer_consume_status(&lookahead);
+}
+
 static iree_status_t loom_parse_parameterized_attr(
     loom_parser_t* parser, loom_parameterized_attr_kind_t expected_family_kind,
     uint16_t nesting_depth, loom_type_parse_mode_t type_mode,
@@ -341,35 +352,51 @@ static iree_status_t loom_parse_parameterized_attr(
       break;
     }
 
-    loom_token_t name_token = loom_token_none();
-    LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_BARE_IDENT, &name_token);
+    loom_token_t parameter_token = loom_tokenizer_peek(&parser->tokenizer);
     uint8_t parameter_index = 0;
-    const loom_attr_descriptor_t* parameter_descriptor =
-        loom_attr_descriptor_find_by_name(
-            family_descriptor->parameter_descriptors,
-            family_descriptor->parameter_count, name_token.text,
-            &parameter_index);
-    if (!parameter_descriptor) {
-      char expected[320];
-      iree_string_view_t family_name =
-          loom_bstring_view(family_descriptor->name);
-      int expected_length = iree_snprintf(
-          expected, sizeof(expected), "a parameter declared by '#%.*s'",
-          (int)family_name.size, family_name.data);
-      return loom_parser_emit_unexpected_token(
-          parser, name_token,
-          iree_make_string_view(expected, (iree_host_size_t)expected_length));
+    const loom_attr_descriptor_t* parameter_descriptor = NULL;
+    bool is_named = true;
+    if (parsed_parameter_count == 0 &&
+        family_descriptor->primary_parameter_index !=
+            LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER) {
+      IREE_RETURN_IF_ERROR(
+          loom_parse_next_parameter_is_named(parser, &is_named));
+      if (!is_named) {
+        parameter_index = family_descriptor->primary_parameter_index;
+        parameter_descriptor =
+            &family_descriptor->parameter_descriptors[parameter_index];
+      }
+    }
+    if (is_named) {
+      LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_BARE_IDENT, &parameter_token);
+      parameter_descriptor = loom_attr_descriptor_find_by_name(
+          family_descriptor->parameter_descriptors,
+          family_descriptor->parameter_count, parameter_token.text,
+          &parameter_index);
+      if (!parameter_descriptor) {
+        char expected[320];
+        iree_string_view_t family_name =
+            loom_bstring_view(family_descriptor->name);
+        int expected_length = iree_snprintf(
+            expected, sizeof(expected), "a parameter declared by '#%.*s'",
+            (int)family_name.size, family_name.data);
+        return loom_parser_emit_unexpected_token(
+            parser, parameter_token,
+            iree_make_string_view(expected, (iree_host_size_t)expected_length));
+      }
     }
 
     uint64_t parameter_bit = UINT64_C(1) << (parameter_index & 63u);
     uint64_t* present_word = &present_bits[parameter_index >> 6];
     if ((*present_word & parameter_bit) != 0) {
       return loom_parser_emit_unexpected_token(
-          parser, name_token, IREE_SV("each parameter at most once"));
+          parser, parameter_token, IREE_SV("each parameter at most once"));
     }
     *present_word |= parameter_bit;
 
-    LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_EQUALS, NULL);
+    if (is_named) {
+      LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_EQUALS, NULL);
+    }
     IREE_RETURN_IF_ERROR(loom_parse_attr_value_at_depth(
         parser, parameter_descriptor, (uint16_t)(nesting_depth + 1), type_mode,
         &parameter_slots[parameter_index]));
@@ -400,6 +427,53 @@ static iree_status_t loom_parse_parameterized_attr(
   return loom_module_make_parameterized_attr(
       parser->module, family_descriptor->kind, parameter_slots,
       family_descriptor->parameter_count, out_attr);
+}
+
+static iree_status_t loom_parse_parameterized_attr_array(
+    loom_parser_t* parser, loom_parameterized_attr_kind_t expected_family_kind,
+    uint16_t nesting_depth, loom_type_parse_mode_t type_mode,
+    loom_attribute_t* out_attr) {
+  loom_token_t opening_token = loom_token_none();
+  LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_LBRACKET, &opening_token);
+  if (nesting_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+    loom_diagnostic_param_t params[] = {
+        loom_param_u32(LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH),
+    };
+    return loom_parser_emit(parser, LOOM_ERR_PARSE_021, params,
+                            IREE_ARRAYSIZE(params), opening_token);
+  }
+
+  loom_attribute_t inline_attributes[16];
+  loom_attribute_t* attributes = inline_attributes;
+  iree_host_size_t capacity = IREE_ARRAYSIZE(inline_attributes);
+  iree_host_size_t count = 0;
+  while (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_RBRACKET) &&
+         !loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_EOF)) {
+    if (count > 0 &&
+        !loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_COMMA)) {
+      break;
+    }
+    if (count == UINT16_MAX) {
+      loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
+      return loom_parser_emit_unexpected_token(
+          parser, peek, IREE_SV("at most 65535 parameterized attributes"));
+    }
+    if (count >= capacity) {
+      IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+          &parser->parser_arena, count, count + 1, sizeof(*attributes),
+          &capacity, (void**)&attributes));
+    }
+    const uint32_t element_errors_before = parser->error_count;
+    IREE_RETURN_IF_ERROR(loom_parse_parameterized_attr(
+        parser, expected_family_kind, (uint16_t)(nesting_depth + 1), type_mode,
+        &attributes[count]));
+    if (parser->error_count > element_errors_before) return iree_ok_status();
+    ++count;
+  }
+  LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_RBRACKET, NULL);
+  return loom_module_make_parameterized_attr_array(
+      parser->module, loom_make_parameterized_attr_array(attributes, count),
+      out_attr);
 }
 
 static iree_status_t loom_parse_attr_value_at_depth(
@@ -508,6 +582,10 @@ static iree_status_t loom_parse_attr_value_at_depth(
                                           out_attr);
     case LOOM_ATTR_PARAMETERIZED:
       return loom_parse_parameterized_attr(
+          parser, descriptor->reference.parameterized_attr_kind, nesting_depth,
+          type_mode, out_attr);
+    case LOOM_ATTR_PARAMETERIZED_ARRAY:
+      return loom_parse_parameterized_attr_array(
           parser, descriptor->reference.parameterized_attr_kind, nesting_depth,
           type_mode, out_attr);
     case LOOM_ATTR_ANY:
@@ -619,6 +697,112 @@ static const struct {
      LOOM_PREDICATE_FINITE},
 };
 
+static iree_status_t loom_parse_predicate(loom_parser_t* parser,
+                                          loom_predicate_t* out_predicate) {
+  // Parse predicate kind name.
+  loom_token_t name_token = loom_token_none();
+  LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_BARE_IDENT, &name_token);
+
+  uint8_t pred_kind = UINT8_MAX;
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(loom_predicate_names); ++i) {
+    if (loom_bstring_equal(loom_predicate_names[i].name, name_token.text)) {
+      pred_kind = loom_predicate_names[i].kind;
+      break;
+    }
+  }
+  if (pred_kind == UINT8_MAX) {
+    loom_diagnostic_param_t params[] = {
+        loom_param_string(name_token.text),
+    };
+    return loom_parser_emit(parser, LOOM_ERR_PARSE_013, params,
+                            IREE_ARRAYSIZE(params), name_token);
+  }
+
+  // Expect '('.
+  if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LPAREN)) {
+    loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
+    return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'('"));
+  }
+
+  loom_predicate_t predicate = {
+      .kind = pred_kind,
+  };
+
+  // Parse arguments.
+  while (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_RPAREN) &&
+         !loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_EOF)) {
+    if (predicate.arg_count > 0) {
+      if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_COMMA)) {
+        break;
+      }
+    }
+    if (predicate.arg_count >= 3) {
+      loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
+      return loom_parser_emit_token_text_error(parser, LOOM_ERR_PARSE_004,
+                                               peek);
+    }
+
+    loom_token_t arg_token = loom_tokenizer_peek(&parser->tokenizer);
+    if (arg_token.kind == LOOM_TOKEN_SSA_VALUE) {
+      // SSA value reference.
+      loom_tokenizer_next(&parser->tokenizer);
+      loom_value_id_t value_id = LOOM_VALUE_ID_INVALID;
+      LOOM_PARSE_RESOLVE_VALUE(parser, arg_token, &value_id);
+      predicate.arg_tags[predicate.arg_count] = LOOM_PRED_ARG_VALUE;
+      predicate.args[predicate.arg_count] = (int64_t)value_id;
+    } else if (arg_token.kind == LOOM_TOKEN_INTEGER) {
+      // Constant.
+      loom_tokenizer_next(&parser->tokenizer);
+      int64_t value = 0;
+      if (!iree_string_view_atoi_int64(arg_token.text, &value)) {
+        loom_diagnostic_param_t params[] = {
+            loom_param_string(arg_token.text),
+        };
+        return loom_parser_emit(parser, LOOM_ERR_PARSE_015, params,
+                                IREE_ARRAYSIZE(params), arg_token);
+      }
+      predicate.arg_tags[predicate.arg_count] = LOOM_PRED_ARG_CONST;
+      predicate.args[predicate.arg_count] = value;
+    } else {
+      return loom_parser_emit_unexpected_token(parser, arg_token,
+                                               IREE_SV("a predicate argument"));
+    }
+    ++predicate.arg_count;
+  }
+
+  if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_RPAREN)) {
+    loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
+    return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("')'"));
+  }
+  uint8_t expected_argument_count =
+      loom_predicate_kind_argument_count(pred_kind);
+  if (predicate.arg_count != expected_argument_count) {
+    loom_diagnostic_param_t params[] = {
+        loom_param_string(name_token.text),
+        loom_param_u32(expected_argument_count),
+        loom_param_u32(predicate.arg_count),
+    };
+    return loom_parser_emit(parser, LOOM_ERR_PARSE_031, params,
+                            IREE_ARRAYSIZE(params), name_token);
+  }
+  *out_predicate = predicate;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_parse_predicate_array_attr(
+    loom_parser_t* parser, const loom_predicate_t* predicates,
+    iree_host_size_t count, loom_attribute_t* out_attr) {
+  loom_predicate_t* arena_predicates = NULL;
+  if (count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        &parser->module->arena, count, sizeof(*arena_predicates),
+        (void**)&arena_predicates));
+    memcpy(arena_predicates, predicates, count * sizeof(*arena_predicates));
+  }
+  *out_attr = loom_attr_predicate_list(arena_predicates, count);
+  return iree_ok_status();
+}
+
 iree_status_t loom_parse_predicate_list(loom_parser_t* parser,
                                         loom_attribute_t* out_attr) {
   // [pred(args), ...]
@@ -627,111 +811,27 @@ iree_status_t loom_parse_predicate_list(loom_parser_t* parser,
     return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'['"));
   }
 
-  loom_predicate_t stack_predicates[16];
-  uint16_t count = 0;
-
+  loom_predicate_t inline_predicates[16];
+  loom_predicate_t* predicates = inline_predicates;
+  iree_host_size_t capacity = IREE_ARRAYSIZE(inline_predicates);
+  iree_host_size_t count = 0;
   while (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_RBRACKET) &&
          !loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_EOF)) {
-    if (count > 0) {
-      if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_COMMA)) {
-        break;
-      }
+    if (count > 0 &&
+        !loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_COMMA)) {
+      break;
     }
-    if (count >= 16) {
+    if (count == UINT16_MAX) {
       loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
-      return loom_parser_emit_token_text_error(parser, LOOM_ERR_PARSE_004,
-                                               peek);
+      return loom_parser_emit_unexpected_token(
+          parser, peek, IREE_SV("at most 65535 predicates"));
     }
-
-    // Parse predicate kind name.
-    loom_token_t name_token = loom_token_none();
-    LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_BARE_IDENT, &name_token);
-
-    uint8_t pred_kind = UINT8_MAX;
-    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(loom_predicate_names);
-         ++i) {
-      if (loom_bstring_equal(loom_predicate_names[i].name, name_token.text)) {
-        pred_kind = loom_predicate_names[i].kind;
-        break;
-      }
+    if (count >= capacity) {
+      IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+          &parser->parser_arena, count, count + 1, sizeof(*predicates),
+          &capacity, (void**)&predicates));
     }
-    if (pred_kind == UINT8_MAX) {
-      loom_diagnostic_param_t params[] = {
-          loom_param_string(name_token.text),
-      };
-      return loom_parser_emit(parser, LOOM_ERR_PARSE_013, params,
-                              IREE_ARRAYSIZE(params), name_token);
-    }
-
-    // Expect '('.
-    if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LPAREN)) {
-      loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
-      return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'('"));
-    }
-
-    loom_predicate_t predicate = {
-        .kind = pred_kind,
-    };
-
-    // Parse arguments.
-    while (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_RPAREN) &&
-           !loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_EOF)) {
-      if (predicate.arg_count > 0) {
-        if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_COMMA)) {
-          break;
-        }
-      }
-      if (predicate.arg_count >= 3) {
-        loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
-        return loom_parser_emit_token_text_error(parser, LOOM_ERR_PARSE_004,
-                                                 peek);
-      }
-
-      loom_token_t arg_token = loom_tokenizer_peek(&parser->tokenizer);
-      if (arg_token.kind == LOOM_TOKEN_SSA_VALUE) {
-        // SSA value reference.
-        loom_tokenizer_next(&parser->tokenizer);
-        loom_value_id_t value_id = LOOM_VALUE_ID_INVALID;
-        LOOM_PARSE_RESOLVE_VALUE(parser, arg_token, &value_id);
-        predicate.arg_tags[predicate.arg_count] = LOOM_PRED_ARG_VALUE;
-        predicate.args[predicate.arg_count] = (int64_t)value_id;
-      } else if (arg_token.kind == LOOM_TOKEN_INTEGER) {
-        // Constant.
-        loom_tokenizer_next(&parser->tokenizer);
-        int64_t value = 0;
-        if (!iree_string_view_atoi_int64(arg_token.text, &value)) {
-          loom_diagnostic_param_t params[] = {
-              loom_param_string(arg_token.text),
-          };
-          return loom_parser_emit(parser, LOOM_ERR_PARSE_015, params,
-                                  IREE_ARRAYSIZE(params), arg_token);
-        }
-        predicate.arg_tags[predicate.arg_count] = LOOM_PRED_ARG_CONST;
-        predicate.args[predicate.arg_count] = value;
-      } else {
-        return loom_parser_emit_unexpected_token(
-            parser, arg_token, IREE_SV("a predicate argument"));
-      }
-      ++predicate.arg_count;
-    }
-
-    if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_RPAREN)) {
-      loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
-      return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("')'"));
-    }
-    uint8_t expected_argument_count =
-        loom_predicate_kind_argument_count(pred_kind);
-    if (predicate.arg_count != expected_argument_count) {
-      loom_diagnostic_param_t params[] = {
-          loom_param_string(name_token.text),
-          loom_param_u32(expected_argument_count),
-          loom_param_u32(predicate.arg_count),
-      };
-      return loom_parser_emit(parser, LOOM_ERR_PARSE_031, params,
-                              IREE_ARRAYSIZE(params), name_token);
-    }
-
-    stack_predicates[count++] = predicate;
+    IREE_RETURN_IF_ERROR(loom_parse_predicate(parser, &predicates[count++]));
   }
 
   if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_RBRACKET)) {
@@ -739,16 +839,7 @@ iree_status_t loom_parse_predicate_list(loom_parser_t* parser,
     return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("']'"));
   }
 
-  loom_predicate_t* arena_predicates = NULL;
-  if (count > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        &parser->module->arena, count, sizeof(loom_predicate_t),
-        (void**)&arena_predicates));
-    memcpy(arena_predicates, stack_predicates,
-           count * sizeof(loom_predicate_t));
-  }
-  *out_attr = loom_attr_predicate_list(arena_predicates, count);
-  return iree_ok_status();
+  return loom_parse_predicate_array_attr(parser, predicates, count, out_attr);
 }
 
 //===----------------------------------------------------------------------===//

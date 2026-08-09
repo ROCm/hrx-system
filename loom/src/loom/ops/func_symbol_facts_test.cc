@@ -18,6 +18,7 @@
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/target/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/target/low_descriptor_registry_core_test.h"
 #include "loom/target/types.h"
@@ -38,7 +39,14 @@ class FuncSymbolFactsTest : public ::testing::Test {
     RegisterDialect(LOOM_DIALECT_INDEX, loom_index_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_KERNEL, loom_kernel_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_LOW, loom_low_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
+    iree_host_size_t parameterized_attr_count = 0;
+    const loom_parameterized_attr_descriptor_t* parameterized_attrs =
+        loom_target_dialect_parameterized_attrs(&parameterized_attr_count);
+    IREE_ASSERT_OK(loom_context_register_parameterized_attrs(
+        &context_, LOOM_DIALECT_TARGET, parameterized_attrs,
+        parameterized_attr_count));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     loom_target_core_test_low_descriptor_registry_initialize(&low_registry_);
     iree_arena_initialize(&block_pool_, &analysis_arena_);
@@ -138,7 +146,7 @@ func.def public device @semantic() {
 
 TEST_F(FuncSymbolFactsTest, TemplateFactsCarryProviderContract) {
   ModulePtr module = ParseModule(R"(
-func.template<qwen.q4.matmul> public device pure hot inline priority(7) @impl(%m: index) -> (index) where [mul(%m, 16)] {
+func.template<qwen.q4.matmul> public device pure hot inline requires [#target.subgroup.size<64>] priority(7) @impl(%m: index) -> (index) where [mul(%m, 16)] {
   func.return %m : index
 }
 )");
@@ -158,6 +166,13 @@ func.template<qwen.q4.matmul> public device pure hot inline priority(7) @impl(%m
   EXPECT_EQ(facts->argument_count, 1);
   EXPECT_EQ(facts->result_count, 1);
   EXPECT_EQ(facts->predicate_count, 1);
+  ASSERT_EQ(facts->target_condition_count, 1);
+  ASSERT_NE(facts->target_conditions, nullptr);
+  EXPECT_EQ(facts->target_conditions[0].descriptor,
+            &loom_target_subgroup_size_condition);
+  EXPECT_EQ(
+      loom_target_subgroup_size_attr_size(facts->target_conditions[0].value),
+      64);
 }
 
 TEST_F(FuncSymbolFactsTest, DeclarationFactsCarryImportContract) {

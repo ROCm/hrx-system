@@ -1070,3 +1070,16 @@ class TestBuilder(DialectBuilder):
         options: Any,
         location_id: int | None = ...,
     ) -> None: ...
+    def compact_parameterized_attr(
+        self,
+        *,
+        value: Any,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def parameterized_attr_array(
+        self,
+        *,
+        values: Any,
+        tiles: Any | None = ...,
+        location_id: int | None = ...,
+    ) -> None: ...

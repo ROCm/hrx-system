@@ -360,6 +360,17 @@ iree_status_t loom_module_make_parameterized_attr(
     const loom_attribute_t* parameters, iree_host_size_t parameter_count,
     loom_attribute_t* out_attr);
 
+// Builds a descriptor-backed PARAMETERIZED_ARRAY attribute in |module|.
+//
+// |attributes| may point to temporary storage. Every element must be a
+// registered PARAMETERIZED attribute. Element slots and nested aggregate
+// payloads are recursively copied and canonicalized into the module arena.
+// Exact-family constraints belong to the field descriptor and are checked by
+// construction/parsing paths that own that descriptor.
+iree_status_t loom_module_make_parameterized_attr_array(
+    loom_module_t* module, loom_parameterized_attr_array_t attributes,
+    loom_attribute_t* out_attr);
+
 // Builds a descriptor-backed type in |module|.
 //
 // |parameters| is indexed by |descriptor| and may point to temporary storage.

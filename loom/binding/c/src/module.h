@@ -58,7 +58,7 @@ loomc_module_prepare_function_versions(loomc_module_t* module);
 
 // Publishes function versions produced by a successful compilation.
 LOOMC_API_PRIVATE void loomc_module_publish_function_versions(
-    loomc_module_t* module, loom_function_version_list_t function_versions);
+    loomc_module_t* module, loom_function_version_owner_t function_versions);
 
 // Returns function versions from the last successful compilation, or NULL.
 LOOMC_API_PRIVATE const loom_function_version_list_t*

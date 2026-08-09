@@ -34,6 +34,39 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    condition
+  HDRS
+    "condition.h"
+  SRCS
+    "condition.c"
+  DEPS
+    ::facts
+    iree::base
+    loom::ir
+    loom::util::bstring
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    condition_test
+  SRCS
+    "condition_test.cc"
+  DEPS
+    ::condition
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::format::text::printer
+    loom::ir
+    loom::ops::op_registry
+    loom::ops::target
+    loom::ops::test
+)
+
+loom_cc_library(
+  NAME
     facts_builder
   HDRS
     "facts_builder.h"
@@ -44,6 +77,56 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
   PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    callgraph_specialization
+  HDRS
+    "callgraph_specialization.h"
+  SRCS
+    "callgraph_specialization.c"
+  DEPS
+    ::facts_builder
+    ::function_contract
+    ::function_version
+    ::pass_environment
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::symbol_dependencies
+    loom::analysis::symbol_facts
+    loom::error::error_defs
+    loom::ir
+    loom::ops::func_symbol_facts
+    loom::ops::op_defs
+    loom::ops::target
+    loom::pass::types
+    loom::rewrite::callable
+    loom::util::walk
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    callgraph_specialization_test
+  SRCS
+    "callgraph_specialization_test.cc"
+  DEPS
+    ::callgraph_specialization
+    ::pass_environment
+    ::provider
+    ::specialization
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::error::error_defs
+    loom::format::text::parser
+    loom::ir
+    loom::ops::func
+    loom::ops::target
+    loom::ops::test
+    loom::target::test::target_record_table
+    loom::testing::module_ptr
 )
 
 loom_cc_library(
@@ -168,35 +251,6 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
-    capability_facts
-  HDRS
-    "capability_facts.h"
-  SRCS
-    "capability_facts.c"
-  DEPS
-    ::facts
-    ::types
-    iree::base
-    loom::util::fact_table
-  PUBLIC
-)
-
-loom_cc_test(
-  NAME
-    capability_facts_test
-  SRCS
-    "capability_facts_test.cc"
-  DEPS
-    ::capability_facts
-    ::facts
-    ::types
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::util::fact_table
-)
-
-loom_cc_library(
-  NAME
     pass_environment
   HDRS
     "pass_environment.h"
@@ -205,6 +259,7 @@ loom_cc_library(
   DEPS
     ::function_contract
     ::function_version
+    ::pass_requirements
     iree::base
     loom::analysis::symbol_facts
     loom::ir
@@ -212,6 +267,16 @@ loom_cc_library(
     loom::ops::op_defs
     loom::pass::environment
     loom::pass::types
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    pass_requirements
+  HDRS
+    "pass_requirements.h"
+  DEPS
+
   PUBLIC
 )
 
@@ -282,6 +347,7 @@ loom_cc_test(
     ::facts_builder
     ::function_version
     ::pass_environment
+    ::pass_requirements
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
@@ -683,6 +749,7 @@ loom_cc_test(
     loom::error::error_defs
     loom::format::text::parser
     loom::ir
+    loom::ops::func
     loom::ops::func_symbol_facts
     loom::ops::low
     loom::ops::target

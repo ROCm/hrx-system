@@ -22,8 +22,13 @@ from loom.dialect.test.defs import (
     test_enum_array_attrs,
     test_options_attr,
     test_parameterized_attr,
+    test_parameterized_attr_array,
 )
-from loom.format.bytecode.encoding import decode_varint, encode_varint
+from loom.format.bytecode.encoding import (
+    decode_varint,
+    encode_signed_varint,
+    encode_varint,
+)
 from loom.format.bytecode.reader import BytecodeError, BytecodeReader, read_module
 from loom.format.bytecode.writer import (
     BYTECODE_TYPE_KIND_BY_IR_KIND,
@@ -36,6 +41,7 @@ from loom.format.bytecode.writer import (
     write_module,
 )
 from loom.ir import (
+    ATTR_AGGREGATE_MAX_NESTING_DEPTH,
     BF16,
     BUFFER_TYPE,
     F32,
@@ -60,6 +66,7 @@ from loom.ir import (
     Module,
     Operation,
     ParameterizedAttr,
+    ParameterizedAttrArray,
     Predicate,
     PredicateArg,
     Region,
@@ -1859,6 +1866,74 @@ class TestParameterizedAttributeWireFormat:
 
         with pytest.raises(BytecodeError, match="missing required parameter 'mode'"):
             reader._read_attr_value(bytes([14, 1, 0]), 0, attr_def=attr_def)
+
+
+class TestParameterizedAttributeArrayWireFormat:
+    def _reader(
+        self, strings: list[str], field_name: str = "values"
+    ) -> tuple[BytecodeReader, Any]:
+        reader = BytecodeReader(
+            b"",
+            op_decls=[test_parameterized_attr_array],
+            parameterized_attrs=[test_options_attr],
+        )
+        reader._strings = strings
+        attr_def = reader._attr_def_for_op_attr(
+            "test.parameterized_attr_array", field_name
+        )
+        return reader, attr_def
+
+    def test_reads_ordered_repeated_mixed_families(self) -> None:
+        reader, attr_def = self._reader(
+            ["", "test.tile", "width", "test.options", "mode"]
+        )
+        tile_payload = bytes([1, 1, 2, 0]) + encode_signed_varint(8)
+        options_payload = bytes([3, 1, 4, 4, 1])
+        data = bytes([15, 3]) + tile_payload + options_payload + tile_payload
+
+        value, offset = reader._read_attr_value(data, 0, attr_def=attr_def)
+
+        assert isinstance(value, ParameterizedAttrArray)
+        assert tuple(element.family_name for element in value) == (
+            "test.tile",
+            "test.options",
+            "test.tile",
+        )
+        assert value.values[0] == value.values[2]
+        assert offset == len(data)
+
+    def test_rejects_array_without_field_descriptor(self) -> None:
+        reader = BytecodeReader(b"")
+
+        with pytest.raises(BytecodeError, match="descriptor-backed"):
+            reader._read_attr_value(bytes([15, 0]), 0)
+
+    def test_rejects_oversized_array(self) -> None:
+        reader, attr_def = self._reader([""])
+        data = bytes([15]) + encode_varint(0x10000)
+
+        with pytest.raises(BytecodeError, match="exceeds UINT16_MAX"):
+            reader._read_attr_value(data, 0, attr_def=attr_def)
+
+    def test_rejects_array_beyond_aggregate_nesting_limit(self) -> None:
+        reader, attr_def = self._reader([""])
+
+        with pytest.raises(BytecodeError, match="maximum depth"):
+            reader._read_attr_value(
+                bytes([15, 0]),
+                0,
+                attr_def=attr_def,
+                aggregate_nesting_depth=ATTR_AGGREGATE_MAX_NESTING_DEPTH,
+            )
+
+    def test_rejects_wrong_family_for_exact_array(self) -> None:
+        reader, attr_def = self._reader(
+            ["", "test.options", "mode"], field_name="tiles"
+        )
+        data = bytes([15, 1, 1, 1, 2, 4, 1])
+
+        with pytest.raises(BytecodeError, match="does not match field contract"):
+            reader._read_attr_value(data, 0, attr_def=attr_def)
 
 
 # ============================================================================

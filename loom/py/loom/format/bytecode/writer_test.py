@@ -29,14 +29,17 @@ from loom.dialect.kernel import ALL_KERNEL_OPS, ALL_KERNEL_TYPES
 from loom.dialect.low import ALL_LOW_OPS
 from loom.dialect.pass_ import ALL_PASS_OPS
 from loom.dialect.scalar import ALL_SCALAR_OPS
-from loom.dialect.target import ALL_TARGET_OPS
+from loom.dialect.target import ALL_TARGET_OPS, ALL_TARGET_PARAMETERIZED_ATTRS
 from loom.dialect.test import (
     ALL_TEST_OPS,
     ALL_TEST_PARAMETERIZED_ATTRS,
     ALL_TEST_TYPES,
     test_array_type,
     test_matrix_type,
+    test_options_attr,
     test_scope_type,
+    test_tile_attr,
+    test_variant_set_type,
 )
 from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dsl import (
@@ -93,6 +96,7 @@ from loom.ir import (
     Module,
     Operation,
     ParameterizedAttr,
+    ParameterizedAttrArray,
     PlaceholderType,
     PoolType,
     Region,
@@ -202,7 +206,9 @@ def _text_parser(
     if include_pass:
         _append_unique(ops, ALL_PASS_OPS)
     parser.register_ops(ops)
-    parser.register_parameterized_attrs(ALL_TEST_PARAMETERIZED_ATTRS)
+    parser.register_parameterized_attrs(
+        (*ALL_TEST_PARAMETERIZED_ATTRS, *ALL_TARGET_PARAMETERIZED_ATTRS)
+    )
     types = list(ALL_BUILTIN_TYPES)
     if include_kernel:
         _append_unique(types, ALL_KERNEL_TYPES)
@@ -592,6 +598,7 @@ class TestTypesSection:
         ir_type: Type,
         *,
         type_defs: tuple[object, ...] | None = None,
+        parameterized_attrs: tuple[object, ...] | None = None,
     ) -> None:
         """Write a module with a value of this type, read back, verify.
 
@@ -618,7 +625,11 @@ class TestTypesSection:
         module.add_symbol(Symbol(name="f", kind=SymbolKind.FUNC_DEF, op=func_op))
 
         data = write_module(module)
-        loaded = read(data, type_defs=type_defs)
+        loaded = read(
+            data,
+            type_defs=type_defs,
+            parameterized_attrs=parameterized_attrs,
+        )
         loaded_op = loaded.symbols[0].op
         assert loaded_op is not None
         # The value under test is the last block arg.
@@ -788,6 +799,16 @@ class TestTypesSection:
         )
         for ir_type in types:
             self._roundtrip_type(ir_type, type_defs=ALL_TEST_TYPES)
+
+        tile = test_tile_attr(width=8)
+        self._roundtrip_type(
+            test_variant_set_type(
+                values=[tile, test_options_attr(mode="fast"), tile],
+                alternatives=[],
+            ),
+            type_defs=ALL_TEST_TYPES,
+            parameterized_attrs=ALL_TEST_PARAMETERIZED_ATTRS,
+        )
 
     def test_register_type(self) -> None:
         self._roundtrip_type(_test_ptr_register_type(4))
@@ -1486,6 +1507,64 @@ class TestCrossFormatRoundTrip:
         assert not absent.has("scopes")
         assert _roundtrip_text_through_bytecode(text) == text
 
+    def test_parameterized_attr_arrays_survive_bytecode(self) -> None:
+        text = (
+            "test.func @parameterized_arrays() {\n"
+            "  test.parameterized_attr_array "
+            "[#test.tile<width = 8>, #test.options<mode = fast>, "
+            "#test.tile<width = 8>] using [#test.tile<width = 4>]\n"
+            "  test.parameterized_attr_array [] using []\n"
+            "  test.parameterized_attr_array []\n"
+            "  test.parameterized_attr "
+            "#test.options<mode = precise, "
+            "tiles = [#test.tile<width = 16>]>\n"
+            "  test.yield\n"
+            "}\n"
+        )
+
+        loaded = _parse_write_read(text)
+        function = next(
+            symbol.op
+            for symbol in loaded.symbols
+            if symbol.name == "parameterized_arrays"
+        )
+        assert function is not None
+        body_ops = function.regions[0].blocks[0].ops
+        values = body_ops[0].attributes["values"]
+        assert isinstance(values, ParameterizedAttrArray)
+        assert tuple(value.family_name for value in values) == (
+            "test.tile",
+            "test.options",
+            "test.tile",
+        )
+        assert values.values[0] == values.values[2]
+        assert body_ops[0].attributes["tiles"] == ParameterizedAttrArray(
+            [test_tile_attr(width=4)]
+        )
+        assert body_ops[1].attributes["tiles"] == ParameterizedAttrArray()
+        assert "tiles" not in body_ops[2].attributes
+        nested = body_ops[3].attributes["options"]
+        assert nested.get("tiles") == ParameterizedAttrArray([test_tile_attr(width=16)])
+        assert _roundtrip_text_through_bytecode(text) == text
+
+    def test_compact_parameterized_attr_survives_named_slot_bytecode(self) -> None:
+        text = (
+            "test.func @compact() {\n"
+            "  test.compact_parameterized_attr "
+            '#test.compact<64, label = "wave">\n'
+            "  test.yield\n"
+            "}\n"
+        )
+        loaded = _parse_write_read(text)
+        function = next(
+            symbol.op for symbol in loaded.symbols if symbol.name == "compact"
+        )
+        assert function is not None
+        compact = function.regions[0].blocks[0].ops[0].attributes["value"]
+        assert isinstance(compact, ParameterizedAttr)
+        assert compact.slots == ("wave", 64)
+        assert _roundtrip_text_through_bytecode(text) == text
+
     def test_empty_optional_aggregates_survive_bytecode(self) -> None:
         text = (
             "test.func @empty_predicates() where [] {\n"
@@ -1508,6 +1587,25 @@ class TestCrossFormatRoundTrip:
         operation = Operation(
             name="test.attrs",
             attributes={"dict": {"modes": EnumArrayAttr([1, 7])}},
+        )
+        body = Region(blocks=[Block(ops=[operation, Operation(name="test.yield")])])
+        function = Operation(
+            name="test.func",
+            attributes={"callee": "f"},
+            regions=[body],
+        )
+        module.add_symbol(Symbol(name="f", kind=SymbolKind.FUNC_DEF, op=function))
+
+        with pytest.raises(ValueError, match="descriptor-backed field"):
+            write_module(module)
+
+    def test_parameterized_attr_array_in_generic_dict_is_rejected(self) -> None:
+        module = Module(name="test")
+        operation = Operation(
+            name="test.attrs",
+            attributes={
+                "dict": {"values": ParameterizedAttrArray([test_tile_attr(width=8)])}
+            },
         )
         body = Region(blocks=[Block(ops=[operation, Operation(name="test.yield")])])
         function = Operation(
@@ -1662,8 +1760,9 @@ class TestCrossFormatRoundTrip:
 
     def test_func_template_metadata_survives_bytecode(self) -> None:
         text = (
-            "func.template<tile.contract> device priority(7) "
-            "@kernel(%input: f32) -> (f32) {\n"
+            "func.template<tile.contract> device "
+            "requires [#target.subgroup.size<64>] "
+            "priority(7) @kernel(%input: f32) -> (f32) {\n"
             "  func.return %input : f32\n"
             "}\n"
         )
@@ -1676,6 +1775,9 @@ class TestCrossFormatRoundTrip:
         assert symbol.op.attributes["implements"] == "tile.contract"
         assert symbol.op.attributes["priority"] == 7
         assert symbol.op.attributes["cc"] == "device"
+        requirements = symbol.op.attributes["requires"]
+        assert isinstance(requirements, ParameterizedAttrArray)
+        assert requirements.values[0].family_name == "target.subgroup.size"
         assert _roundtrip_text_through_bytecode(text) == text
 
     def test_low_func_target_and_register_body_survive_bytecode(self) -> None:

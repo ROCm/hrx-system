@@ -42,6 +42,7 @@ iree_execution_test_suite(
     target_compatible_with = _AMDGPU_ARTIFACTS_COMPATIBLE_WITH,
     tools = {
         "loom-compile": "//loom/src/loom/tools/loom-compile",
+        "loom-compile-report": "//loom/py/loom/tools:loom-compile-report",
     },
 )
 

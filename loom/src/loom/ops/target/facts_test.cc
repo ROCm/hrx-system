@@ -92,6 +92,24 @@ class TargetFactsTest : public ::testing::Test {
   loom_symbol_fact_table_t fact_table_;
 };
 
+TEST(TargetFactRelationTest, DistinctFactsRequireFamilyIdentityRelation) {
+  static const loom_target_fact_type_t kFactType = {
+      /*.name=*/IREE_SVL("no-identity"),
+      /*.storage_size=*/sizeof(loom_target_facts_t),
+  };
+  const loom_target_facts_t lhs = {
+      /*.fact_type=*/&kFactType,
+      /*.selector=*/7,
+  };
+  const loom_target_facts_t rhs = {
+      /*.fact_type=*/&kFactType,
+      /*.selector=*/7,
+  };
+
+  EXPECT_TRUE(loom_target_facts_satisfy_identity_requirement(&lhs, &lhs));
+  EXPECT_FALSE(loom_target_facts_satisfy_identity_requirement(&lhs, &rhs));
+}
+
 TEST_F(TargetFactsTest, ProjectsLaunchBoundsFromGenericTargetRecord) {
   ModulePtr module = ParseModule(R"(
 target.generic<reference> @gpu {
@@ -130,7 +148,8 @@ target.generic<reference> @gpu {
   EXPECT_EQ(storage.snapshot.max_flat_grid_size, 8589934592ull);
 }
 
-TEST_F(TargetFactsTest, StructuralSatisfactionUsesFactsNotSymbolIdentity) {
+TEST_F(TargetFactsTest,
+       GeneratedTargetSeparatesSelectorIdentityFromStructuralSpecialization) {
   ModulePtr module = ParseModule(R"(
 target.generic<reference> @effective {
   max_workgroup_size_x = 256
@@ -151,11 +170,19 @@ target.generic<reference> @smaller_requirement {
       LookupTarget(module.get(), IREE_SV("smaller_requirement"))->projection;
 
   EXPECT_NE(effective, equivalent);
-  EXPECT_TRUE(loom_target_facts_satisfy_requirement(effective, equivalent));
+  EXPECT_TRUE(loom_target_facts_satisfy_specialization_requirement(effective,
+                                                                   equivalent));
+  EXPECT_TRUE(loom_target_facts_satisfy_specialization_requirement(
+      effective, smaller_requirement));
+  EXPECT_FALSE(loom_target_facts_satisfy_specialization_requirement(
+      smaller_requirement, effective));
+
   EXPECT_TRUE(
-      loom_target_facts_satisfy_requirement(effective, smaller_requirement));
-  EXPECT_FALSE(
-      loom_target_facts_satisfy_requirement(smaller_requirement, effective));
+      loom_target_facts_satisfy_identity_requirement(effective, effective));
+  EXPECT_TRUE(
+      loom_target_facts_satisfy_identity_requirement(effective, equivalent));
+  EXPECT_TRUE(loom_target_facts_satisfy_identity_requirement(
+      smaller_requirement, effective));
 }
 
 TEST_F(TargetFactsTest, InvalidSelectorProducesNoFacts) {

@@ -661,7 +661,7 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
       provider->launch_config_module, entry_symbol, &launch_config_func));
   const loom_target_function_version_t* launch_config_function_version =
       loom_target_function_version_list_find(
-          &provider->launch_config_pipeline_result.function_versions,
+          &provider->launch_config_pipeline_result.function_versions.list,
           launch_config_func);
   IREE_ASSERT(launch_config_function_version != NULL);
   IREE_ASSERT(launch_config_function_version->effective_target_facts != NULL);
@@ -679,7 +679,7 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
   loom_run_candidate_compile_options_initialize(&compile_options);
   compile_options.module_name = IREE_SV("loom");
   compile_options.function_versions =
-      &provider->pipeline_result.function_versions;
+      &provider->pipeline_result.function_versions.list;
   compile_options.target_pipeline_options =
       pipeline_options.target_pipeline_options;
   compile_options.diagnostic_sink = diagnostic_sink;

@@ -1764,7 +1764,7 @@ int main(int argc, char** argv) {
       }
       exit_code = 1;
     }
-    compile_options.function_versions = &pipeline_result.function_versions;
+    compile_options.function_versions = &pipeline_result.function_versions.list;
   }
   if (iree_status_is_ok(status) && exit_code == 0) {
     status =

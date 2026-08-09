@@ -46,6 +46,43 @@ kernel.def @inlines_into_required_ancestor() {
 
 // ====
 
+// RUN: pass inline-callables,canonicalize
+
+target.generic<reference> @wave32 {subgroup_size = 32}
+target.generic<reference> @wave64 {subgroup_size = 64}
+
+func.def inline @current_subgroup_size() -> (index) {
+  %size = target.subgroup.size : index
+  func.return %size : index
+}
+
+func.def target(@wave32) @caller_wave32() -> (index) {
+  %size = func.call @current_subgroup_size() : () -> (index)
+  func.return %size : index
+}
+
+func.def target(@wave64) @caller_wave64() -> (index) {
+  %size = func.call @current_subgroup_size() : () -> (index)
+  func.return %size : index
+}
+
+// ----
+target.generic<reference> @wave32 {subgroup_size = 32}
+
+target.generic<reference> @wave64 {subgroup_size = 64}
+
+func.def target(@wave32) @caller_wave32() -> (index) {
+  %size = index.constant 32 : index
+  func.return %size : index
+}
+
+func.def target(@wave64) @caller_wave64() -> (index) {
+  %size = index.constant 64 : index
+  func.return %size : index
+}
+
+// ====
+
 // RUN: pass inline-callables
 
 func.def inline @misplaced_lane_id() -> (index) {

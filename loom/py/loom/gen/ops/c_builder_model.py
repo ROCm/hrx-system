@@ -49,6 +49,7 @@ from loom.fields import FieldKind, FieldLayout, compute_layout
 from loom.gen.ops import c_queries
 from loom.gen.ops.c_enum_attrs import SharedEnumMap
 from loom.gen.ops.c_enum_attrs import enum_c_type as _enum_c_type
+from loom.gen.support.c import c_identifier as _c_identifier
 
 
 def detect_builder_pattern(op: Op) -> str | None:
@@ -129,6 +130,7 @@ _C_ATTR_TYPE_MAP: dict[str, str] = {
     "encoding": "uint16_t",
     "dict": "loom_named_attr_slice_t",
     "parameterized": "loom_attribute_t",
+    "parameterized_array": "loom_parameterized_attr_array_t",
     "any": "loom_attribute_t",
 }
 
@@ -163,6 +165,7 @@ _BUILD_FLAG_OPTIONAL_ATTR_TYPES = frozenset(
         "type",
         "encoding",
         "dict",
+        "parameterized_array",
     }
 )
 
@@ -171,8 +174,14 @@ _TRAILING_BUILD_FLAG_OPTIONAL_ATTR_TYPES = frozenset(
         "i64_array",
         "bytes",
         "dict",
+        "parameterized_array",
     }
 )
+
+
+def c_parameter_name(name: object) -> str:
+    """Projects a semantic op field name to a C/C++ parameter identifier."""
+    return _c_identifier(str(name))
 
 
 def flatten_format(
@@ -731,33 +740,36 @@ def build_c_param_list(op: Op, params: list[dict[str, object]], layout: FieldLay
     for param in params:
         opt = "loom_optional " if param.get("optional") else ""
         consume = "loom_may_consume " if param.get("may_consume") else ""
+        name = c_parameter_name(param["name"])
         match param["kind"]:
             case "operand":
-                c_params.append(f"{opt}{consume}loom_value_id_t {param['name']}")
+                c_params.append(f"{opt}{consume}loom_value_id_t {name}")
             case "successor":
-                c_params.append(f"loom_block_t* {param['name']}")
+                c_params.append(f"loom_block_t* {name}")
             case "operand_variadic":
-                c_params.append(f"{consume}const loom_value_id_t* {param['name']}")
-                c_params.append(f"iree_host_size_t {param['name']}_count")
+                c_params.append(f"{consume}const loom_value_id_t* {name}")
+                c_params.append(f"iree_host_size_t {name}_count")
             case "operand_dict":
-                c_params.append(f"{consume}const loom_named_value_t* {param['name']}")
-                c_params.append(f"iree_host_size_t {param['name']}_count")
+                c_params.append(f"{consume}const loom_named_value_t* {name}")
+                c_params.append(f"iree_host_size_t {name}_count")
             case "attr":
-                c_params.append(f"{opt}{param['c_type']} {param['name']}")
+                c_params.append(f"{opt}{param['c_type']} {name}")
                 if param["attr_type"] == "i64_array":
-                    c_params.append(f"iree_host_size_t {param['name']}_count")
+                    c_params.append(f"iree_host_size_t {name}_count")
             case "stable_key_ref":
-                c_params.append(f"{param['c_type']} {param['name']}")
+                c_params.append(f"{param['c_type']} {name}")
             case "symbol":
-                c_params.append(f"{opt}loom_symbol_ref_t {param['name']}")
+                c_params.append(f"{opt}loom_symbol_ref_t {name}")
             case "index_list":
-                c_params.append(f"const loom_value_id_t* {param['dynamic_field']}")
-                c_params.append(f"iree_host_size_t {param['dynamic_field']}_count")
-                c_params.append(f"const int64_t* {param['static_field']}")
-                c_params.append(f"iree_host_size_t {param['static_field']}_count")
+                dynamic_name = c_parameter_name(param["dynamic_field"])
+                static_name = c_parameter_name(param["static_field"])
+                c_params.append(f"const loom_value_id_t* {dynamic_name}")
+                c_params.append(f"iree_host_size_t {dynamic_name}_count")
+                c_params.append(f"const int64_t* {static_name}")
+                c_params.append(f"iree_host_size_t {static_name}_count")
             case "binding_list":
-                c_params.append(f"{consume}const loom_value_id_t* {param['name']}")
-                c_params.append(f"iree_host_size_t {param['name']}_count")
+                c_params.append(f"{consume}const loom_value_id_t* {name}")
+                c_params.append(f"iree_host_size_t {name}_count")
             case "result_type":
                 c_params.append("loom_type_t result_type")
             case "result_types":
@@ -772,16 +784,16 @@ def build_c_param_list(op: Op, params: list[dict[str, object]], layout: FieldLay
                 c_params.append("const loom_tied_result_t* tied_results")
                 c_params.append("iree_host_size_t tied_result_count")
             case "predicate_list":
-                c_params.append(f"{opt}const loom_predicate_t* {param['name']}")
-                c_params.append(f"iree_host_size_t {param['name']}_count")
+                c_params.append(f"{opt}const loom_predicate_t* {name}")
+                c_params.append(f"iree_host_size_t {name}_count")
             case "instance_flags":
-                c_params.append(f"uint8_t {param['name']}")
+                c_params.append(f"uint8_t {name}")
             case "func_args":
-                c_params.append(f"const loom_type_t* {param['name']}")
-                c_params.append(f"iree_host_size_t {param['name']}_count")
+                c_params.append(f"const loom_type_t* {name}")
+                c_params.append(f"iree_host_size_t {name}_count")
             case "block_args":
-                c_params.append(f"const loom_type_t* {param['name']}")
-                c_params.append(f"iree_host_size_t {param['name']}_count")
+                c_params.append(f"const loom_type_t* {name}")
+                c_params.append(f"iree_host_size_t {name}_count")
             case "auto_region":
                 pass  # Auto-created by builder, no parameter.
     c_params.append("loom_location_id_t location")

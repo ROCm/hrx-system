@@ -169,6 +169,31 @@ iree_status_t loom_context_register_parameterized_attrs(
           loom_bstring_view(descriptor->name).data,
           descriptor->parameter_count);
     }
+    if (descriptor->primary_parameter_index !=
+        LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER) {
+      if (descriptor->primary_parameter_index >= descriptor->parameter_count) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameterized attribute '%.*s' has primary parameter index %u "
+            "outside its %u parameter slots",
+            (int)loom_bstring_view(descriptor->name).size,
+            loom_bstring_view(descriptor->name).data,
+            descriptor->primary_parameter_index, descriptor->parameter_count);
+      }
+      const loom_attr_descriptor_t* primary_parameter =
+          &descriptor
+               ->parameter_descriptors[descriptor->primary_parameter_index];
+      if (iree_any_bit_set(primary_parameter->flags, LOOM_ATTR_OPTIONAL)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameterized attribute '%.*s' has optional primary parameter "
+            "'%.*s'",
+            (int)loom_bstring_view(descriptor->name).size,
+            loom_bstring_view(descriptor->name).data,
+            (int)loom_attr_descriptor_name(primary_parameter).size,
+            loom_attr_descriptor_name(primary_parameter).data);
+      }
+    }
   }
   dialect->count = (uint8_t)descriptor_count;
   dialect->entries = descriptors;

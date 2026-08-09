@@ -31,6 +31,7 @@ def parameter_value_c_type(parameter: AttrDef, enum_type: Callable[[AttrDef], st
         "symbol": "loom_symbol_ref_t",
         "dict": "loom_named_attr_slice_t",
         "parameterized": "loom_attribute_t",
+        "parameterized_array": "loom_parameterized_attr_array_t",
     }[parameter.attr_type]
 
 
@@ -52,6 +53,7 @@ def parameter_value_constructor_expr(parameter: AttrDef) -> str:
         "symbol": f"loom_attr_symbol({name})",
         "dict": f"loom_make_canonical_attr_dict({name}.entries, {name}.count)",
         "parameterized": name,
+        "parameterized_array": f"loom_attr_parameterized_array({name}.values, {name}.count)",
     }[parameter.attr_type]
 
 
@@ -72,6 +74,7 @@ def parameter_value_accessor_expr(parameter: AttrDef, slot_expr: str, c_type: st
         "symbol": f"loom_attr_as_symbol({slot_expr})",
         "dict": f"loom_attr_as_dict({slot_expr})",
         "parameterized": slot_expr,
+        "parameterized_array": f"loom_attr_as_parameterized_array({slot_expr})",
     }[parameter.attr_type]
 
 
@@ -148,7 +151,12 @@ def append_parameter_slot_initializers(
         if parameter.optional:
             lines.append(f"  if (iree_any_bit_set(build_flags, {parameter_build_flag_name(api_prefix, parameter)})) {{")
             indent = "    "
-        if parameter.attr_type in ("enum_array", "i64_array", "dict"):
+        if parameter.attr_type in (
+            "enum_array",
+            "i64_array",
+            "dict",
+            "parameterized_array",
+        ):
             _append_parameter_range_check(
                 lines,
                 family_name,

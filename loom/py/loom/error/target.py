@@ -1216,6 +1216,59 @@ ERR_TARGET_066 = ErrorDef(
     ),
 )
 
+# ERR_TARGET_067: Provider target condition contains a non-identity field.
+ERR_TARGET_067 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=67,
+    severity=Severity.ERROR,
+    summary="Provider target condition contains a non-identity field.",
+    message=(
+        "function provider '@{provider_name}' uses target '@{target_name}' as "
+        "an identity condition, but that target authors non-identity field "
+        "'{field_name}'"
+    ),
+    params=(
+        ErrorParam("provider_name", ParamKind.STRING),
+        ErrorParam("target_name", ParamKind.STRING),
+        ErrorParam("field_name", ParamKind.STRING),
+    ),
+)
+
+# ERR_TARGET_068: Function provider has an invalid target condition.
+ERR_TARGET_068 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=68,
+    severity=Severity.ERROR,
+    summary="Function provider has an invalid target condition.",
+    message=(
+        "function provider '@{provider_name}' has invalid target condition "
+        "{condition_index}: {reason}"
+    ),
+    params=(
+        ErrorParam("provider_name", ParamKind.STRING),
+        ErrorParam("condition_index", ParamKind.U32),
+        ErrorParam("reason", ParamKind.STRING),
+    ),
+)
+
+# ERR_TARGET_069: Externally reachable function needs multiple target versions.
+ERR_TARGET_069 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=69,
+    severity=Severity.ERROR,
+    summary="Externally reachable function needs multiple target versions.",
+    message=(
+        "function '@{function_name}' is reachable under more than one "
+        "invocation target context and cannot be implicitly cloned because "
+        "it is externally reachable"
+    ),
+    params=(ErrorParam("function_name", ParamKind.STRING),),
+    fix_hint=(
+        "Request an explicit exported version for each target context or make "
+        "the callable module-internal."
+    ),
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1275,4 +1328,7 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_064,
     ERR_TARGET_065,
     ERR_TARGET_066,
+    ERR_TARGET_067,
+    ERR_TARGET_068,
+    ERR_TARGET_069,
 )

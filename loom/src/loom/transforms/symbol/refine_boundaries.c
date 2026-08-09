@@ -2137,10 +2137,8 @@ static iree_status_t loom_refine_boundaries_create_specialization_group(
 static void loom_refine_boundaries_retarget_call(loom_module_t* module,
                                                  loom_op_t* call_op,
                                                  loom_symbol_ref_t callee) {
-  loom_trait_flags_t old_traits = call_op->traits;
-  loom_op_attrs(call_op)[0] = loom_attr_symbol(callee);
-  loom_op_refresh_effective_traits(module, call_op);
-  loom_module_update_op_direct_effects(call_op, old_traits, call_op->traits);
+  loom_call_like_set_callee(module, loom_call_like_cast(module, call_op),
+                            callee);
 }
 
 static iree_status_t loom_refine_boundaries_create_specializations(

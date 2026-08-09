@@ -23,6 +23,13 @@ iree_status_t loom_function_contract_verify(const loom_module_t* module,
                                             const loom_op_t* op,
                                             iree_diagnostic_emitter_t emitter);
 
+// Verifies a function implementation provider and its target applicability
+// contract. Provider target witnesses describe identity only; target-neutral
+// execution choices and limits belong to typed provider requirements.
+iree_status_t loom_function_provider_contract_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

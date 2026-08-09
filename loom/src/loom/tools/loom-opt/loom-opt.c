@@ -894,13 +894,19 @@ static iree_status_t loom_opt_run_passes(
     loom_pass_trace_initialize(&run_trace_options, &trace);
     trace_ptr = &trace;
   }
+  iree_arena_allocator_t function_version_arena;
+  iree_arena_initialize(block_pool, &function_version_arena);
+  loom_function_version_owner_t function_versions;
+  loom_function_version_owner_initialize(&function_version_arena,
+                                         &function_versions);
   loom_pass_tool_run_options_t run_options = {
       .registry = pass_registry,
-      .environment = loom_low_pass_environment_storage_initialize(
+      .environment = loom_low_pass_environment_storage_initialize_mutable(
           &low_registry->registry, &low_lower_policy_registry,
           &low_legality_provider_list, &legalizer_provider_list,
           &math_policy_registry, /*compile_report=*/NULL, target_environment,
-          /*function_versions=*/NULL, &low_pass_environment_storage),
+          &function_versions, &low_pass_environment_storage),
+      .function_versions = &function_versions.list,
       .predicate_provider =
           loom_target_pass_predicate_provider(&predicate_storage),
       .block_pool = block_pool,
@@ -910,28 +916,29 @@ static iree_status_t loom_opt_run_passes(
       .trace = trace_ptr,
   };
 
+  iree_status_t status = iree_ok_status();
   if (pipeline_kind == LOOM_OPT_PIPELINE_MODULE_SYMBOL) {
     *out_execution_started = true;
-    return loom_pass_tool_run_pipeline_symbol(module, pipeline_symbol,
-                                              &run_options, out_result);
-  }
-  if (pipeline_kind == LOOM_OPT_PIPELINE_SOURCE_LOW ||
-      pipeline_kind == LOOM_OPT_PIPELINE_PREPARED_LOW) {
+    status = loom_pass_tool_run_pipeline_symbol(module, pipeline_symbol,
+                                                &run_options, out_result);
+  } else if (pipeline_kind == LOOM_OPT_PIPELINE_SOURCE_LOW ||
+             pipeline_kind == LOOM_OPT_PIPELINE_PREPARED_LOW) {
     *out_execution_started = true;
-    return loom_opt_run_shared_compile_pipeline(
+    status = loom_opt_run_shared_compile_pipeline(
         module, pipeline_kind, target_environment, &run_options, out_result);
+  } else {
+    iree_string_builder_t pipeline_builder;
+    iree_string_builder_initialize(allocator, &pipeline_builder);
+    status = loom_opt_join_pass_list(passes, &pipeline_builder);
+    if (iree_status_is_ok(status)) {
+      *out_execution_started = true;
+      status = loom_pass_tool_run_flat_pipeline(
+          module, iree_string_builder_view(&pipeline_builder), &run_options,
+          out_result);
+    }
+    iree_string_builder_deinitialize(&pipeline_builder);
   }
-
-  iree_string_builder_t pipeline_builder;
-  iree_string_builder_initialize(allocator, &pipeline_builder);
-  iree_status_t status = loom_opt_join_pass_list(passes, &pipeline_builder);
-  if (iree_status_is_ok(status)) {
-    *out_execution_started = true;
-    status = loom_pass_tool_run_flat_pipeline(
-        module, iree_string_builder_view(&pipeline_builder), &run_options,
-        out_result);
-  }
-  iree_string_builder_deinitialize(&pipeline_builder);
+  iree_arena_deinitialize(&function_version_arena);
   return status;
 }
 

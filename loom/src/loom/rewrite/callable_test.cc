@@ -109,8 +109,9 @@ class CallableInlineTest : public ::testing::Test {
     loom_op_t* func_op = nullptr;
     IREE_CHECK_OK(loom_func_template_build(
         &module_builder_, 0, implements, 0, 0, 0, 0, 0, 0,
-        loom_symbol_ref_null(), 0, callee, &value_type, 1, &value_type, 1,
-        nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &func_op));
+        loom_symbol_ref_null(), loom_parameterized_attr_array_empty(), 0,
+        callee, &value_type, 1, &value_type, 1, nullptr, 0, nullptr, 0,
+        LOOM_LOCATION_UNKNOWN, &func_op));
     loom_func_like_t func = loom_func_like_cast(module_, func_op);
     uint16_t arg_count = 0;
     const loom_value_id_t* args = loom_func_like_arg_ids(func, &arg_count);
@@ -440,6 +441,58 @@ TEST_F(CallableInlineTest, RejectsRecursiveSelfInline) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         loom_callable_inline_direct_call(&rewriter, call_op));
   loom_rewriter_deinitialize(&rewriter);
+}
+
+TEST_F(CallableInlineTest, CloneDefinitionRemapsOnlySelfReferences) {
+  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_symbol_ref_t helper_ref = MakeSymbol(IREE_SV("helper"));
+  BuildNegateFunction(helper_ref, i32);
+  loom_symbol_ref_t source_ref = MakeSymbol(IREE_SV("source"));
+  loom_op_t* source_self_call = nullptr;
+  loom_op_t* source_op =
+      BuildCaller(source_ref, source_ref, i32, &source_self_call);
+
+  loom_func_like_t source = loom_func_like_cast(module_, source_op);
+  uint16_t arg_count = 0;
+  const loom_value_id_t* args = loom_func_like_arg_ids(source, &arg_count);
+  ASSERT_EQ(arg_count, 1u);
+  loom_block_t* source_block =
+      loom_region_entry_block(loom_func_like_body(source));
+  loom_op_t* source_return = loom_block_op(source_block, 1);
+  loom_builder_t body_builder = BodyBuilder(source_op);
+  loom_builder_set_before(&body_builder, source_return);
+  loom_op_t* source_helper_call = nullptr;
+  IREE_ASSERT_OK(loom_func_call_build(
+      &body_builder, 0, 0, 0, 0, helper_ref, args, 1, &i32, 1, nullptr, 0,
+      LOOM_LOCATION_UNKNOWN, &source_helper_call));
+
+  loom_symbol_ref_t target_ref = MakeSymbol(IREE_SV("target"));
+  loom_func_like_t cloned = {};
+  IREE_ASSERT_OK(loom_callable_clone_definition(
+      &module_builder_, source, target_ref, &cloned, &rewriter_arena_));
+
+  ASSERT_EQ(source_block->op_count, 3u);
+  EXPECT_EQ(loom_func_call_callee(source_self_call).symbol_id,
+            source_ref.symbol_id);
+  EXPECT_EQ(loom_func_call_callee(source_helper_call).symbol_id,
+            helper_ref.symbol_id);
+
+  ASSERT_TRUE(loom_func_like_isa(cloned));
+  EXPECT_NE(cloned.op, source.op);
+  EXPECT_EQ(loom_func_like_callee(cloned).symbol_id, target_ref.symbol_id);
+  EXPECT_EQ(module_->symbols.entries[target_ref.symbol_id].defining_op,
+            cloned.op);
+  loom_block_t* cloned_block =
+      loom_region_entry_block(loom_func_like_body(cloned));
+  ASSERT_EQ(cloned_block->op_count, 3u);
+  loom_op_t* cloned_self_call = loom_block_op(cloned_block, 0);
+  loom_op_t* cloned_helper_call = loom_block_op(cloned_block, 1);
+  ASSERT_TRUE(loom_func_call_isa(cloned_self_call));
+  ASSERT_TRUE(loom_func_call_isa(cloned_helper_call));
+  EXPECT_EQ(loom_func_call_callee(cloned_self_call).symbol_id,
+            target_ref.symbol_id);
+  EXPECT_EQ(loom_func_call_callee(cloned_helper_call).symbol_id,
+            helper_ref.symbol_id);
 }
 
 TEST_F(CallableInlineTest, OutlinesRangeIntoFunctionAndCall) {

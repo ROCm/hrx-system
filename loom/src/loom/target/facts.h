@@ -75,8 +75,15 @@ static inline bool loom_target_fact_field_set_contains(
   return iree_any_bit_set(set, UINT64_C(1) << field);
 }
 
-// Returns whether one effective fact value satisfies a same-type requirement.
-typedef bool (*loom_target_fact_satisfies_requirement_fn_t)(
+// Returns whether one effective fact identity satisfies a same-type identity
+// requirement.
+typedef bool (*loom_target_fact_satisfies_identity_requirement_fn_t)(
+    const loom_target_facts_t* effective,
+    const loom_target_facts_t* requirement);
+
+// Returns whether one effective fact value satisfies a same-type
+// specialization requirement.
+typedef bool (*loom_target_fact_satisfies_specialization_requirement_fn_t)(
     const loom_target_facts_t* effective,
     const loom_target_facts_t* requirement);
 
@@ -98,8 +105,13 @@ struct loom_target_fact_type_t {
   // Size of the family-owned facts object beginning with loom_target_facts_t.
   iree_host_size_t storage_size;
 
-  // Optional satisfaction relation for distinct same-type fact values.
-  loom_target_fact_satisfies_requirement_fn_t satisfies_requirement;
+  // Optional identity-domain relation for distinct same-type fact values.
+  loom_target_fact_satisfies_identity_requirement_fn_t
+      satisfies_identity_requirement;
+
+  // Optional full specialization relation for distinct same-type fact values.
+  loom_target_fact_satisfies_specialization_requirement_fn_t
+      satisfies_specialization_requirement;
 
   // Optional family-owned rebind callback used only while constructing facts.
   loom_target_fact_rebind_fn_t rebind;
@@ -154,19 +166,35 @@ static inline bool loom_target_facts_field_is_authored(
   return loom_target_fact_field_set_contains(facts->authored_fields, field);
 }
 
-// Returns whether |effective| satisfies every requirement in |requirement|.
+// Returns whether the identity of |effective| satisfies |requirement|.
+//
+// The same fact object satisfies itself. Distinct values require the same
+// static fact type and a family-defined identity relation. Common target
+// projections are deliberately not treated as an identity fallback.
+bool loom_target_facts_satisfy_identity_requirement(
+    const loom_target_facts_t* effective,
+    const loom_target_facts_t* requirement);
+
+// Identity relation for simple target families completely identified by their
+// typed selector.
+bool loom_target_facts_selector_satisfies_identity_requirement(
+    const loom_target_facts_t* effective,
+    const loom_target_facts_t* requirement);
+
+// Returns whether |effective| satisfies every specialization requirement in
+// |requirement|.
 //
 // Distinct values must have the same static fact type. Family relations
 // dispatch directly through that type and never inspect target IR or scan a
 // provider registry.
-bool loom_target_facts_satisfy_requirement(
+bool loom_target_facts_satisfy_specialization_requirement(
     const loom_target_facts_t* effective,
     const loom_target_facts_t* requirement);
 
 // Common structural relation for target families whose selector, snapshot,
 // and configuration fully define compatibility. Function ABI and export facts
 // do not participate.
-bool loom_target_facts_structural_satisfy_requirement(
+bool loom_target_facts_structural_satisfy_specialization_requirement(
     const loom_target_facts_t* effective,
     const loom_target_facts_t* requirement);
 
@@ -174,7 +202,7 @@ bool loom_target_facts_structural_satisfy_requirement(
 // in |target_requirement|. Representation widths and address spaces must
 // match, fixed subgroup sizes must agree, and effective capacity limits must
 // meet or exceed nonzero required limits.
-bool loom_target_snapshot_satisfies_requirement(
+bool loom_target_snapshot_satisfies_specialization_requirement(
     const loom_target_snapshot_t* effective_snapshot,
     const loom_target_snapshot_t* target_requirement);
 

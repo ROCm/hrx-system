@@ -48,7 +48,7 @@ typedef struct loom_target_specialization_request_list_t {
 // Result of resolving a specialization request list.
 typedef struct loom_target_specialization_result_t {
   // Concrete target-refined function versions participating in compilation.
-  loom_function_version_list_t function_versions;
+  loom_function_version_owner_t function_versions;
 
   // Number of source compatibility diagnostics emitted while validating the
   // complete request list.

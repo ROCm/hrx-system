@@ -56,7 +56,7 @@ from loom.dsl import (
     SymbolDefinition,
     SymbolDefinitionFlag,
     SymbolReference,
-    TargetFactSatisfaction,
+    TargetFactSpecialization,
     TargetLikeInterface,
     TypeDef,
     TypeParam,
@@ -171,7 +171,7 @@ ireevm_target = Op(
             symbol="symbol",
             selector="kind",
             bundle_table="loom_ireevm_target_bundles",
-            fact_satisfaction=TargetFactSatisfaction.STRUCTURAL,
+            fact_specialization=TargetFactSpecialization.STRUCTURAL,
         )
     ],
     symbol_def=SymbolDefinition(

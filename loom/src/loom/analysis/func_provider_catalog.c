@@ -316,6 +316,8 @@ static iree_status_t loom_func_provider_catalog_populate_local(
         .priority = facts->priority,
         .predicates = facts->predicates,
         .predicate_count = facts->predicate_count,
+        .target_conditions = facts->target_conditions,
+        .target_condition_count = facts->target_condition_count,
     };
     IREE_RETURN_IF_ERROR(loom_func_provider_catalog_populate_signature(
         catalog, module, facts, provider));

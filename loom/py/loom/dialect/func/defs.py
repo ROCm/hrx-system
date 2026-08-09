@@ -47,6 +47,7 @@ from loom.assembly import (
 from loom.dialect.target.defs import ExportAbiKind
 from loom.dsl import (
     ANY,
+    ATTR_TYPE_PARAMETERIZED_ARRAY,
     ISOLATED_FROM_ABOVE,
     POISON_BOUNDARY,
     SYMBOL_DEFINE,
@@ -239,6 +240,13 @@ _SIGNATURE_FORMAT: list[FormatElement] = [
     ),
 ]
 
+_REQUIRES_FORMAT: list[FormatElement] = [
+    OptionalGroup(
+        [kw("requires"), Attr("requires")],
+        anchor="requires",
+    ),
+]
+
 _MODIFIER_ATTRS = [
     AttrDef("callee", "symbol"),
     AttrDef("visibility", "enum", enum_def=Visibility, optional=True),
@@ -274,6 +282,12 @@ _PROVIDER_ATTRS = [
         "symbol",
         optional=True,
         symbol_ref=SymbolReference("target", ["target"]),
+    ),
+    AttrDef(
+        "requires",
+        ATTR_TYPE_PARAMETERIZED_ARRAY,
+        optional=True,
+        doc=("Typed proof requirements over the application-site target facts. Requirements filter provider eligibility and never add facts."),
     ),
 ]
 
@@ -444,12 +458,15 @@ func_template = Op(
             body="body",
             implements="implements",
             priority="priority",
+            requires="requires",
         )
     ],
+    verify="loom_func_template_verify",
     format=[
         KeyRef("implements"),
         *_MODIFIER_FORMAT,
         *_TARGET_FORMAT,
+        *_REQUIRES_FORMAT,
         OptionalGroup(
             [kw("priority"), GLUE, LPAREN, GLUE, Attr("priority"), GLUE, RPAREN],
             anchor="priority",
@@ -459,7 +476,8 @@ func_template = Op(
     ],
     examples=[
         "func.template<tile.contract> device @vnni_q8(%w: tensor<[%M]xi8>, %x: tensor<[%K]xf32>) -> (tensor<[%M]xf32>) where [mul(%M, 16)] {\n  func.return %x : tensor<[%K]xf32>\n}",
-        "func.template<tile.contract> target(@gfx11_generic) priority(20) @gfx11_q8(%a: tile<4xf32>) -> (tile<4xf32>) {\n  func.return %a : tile<4xf32>\n}",
+        "func.template<tile.contract> requires [#target.subgroup.size<64>] priority(20) @subgroup64_q8(%a: tile<4xf32>) -> (tile<4xf32>) {\n  func.return %a : tile<4xf32>\n}",
+        "func.template<tile.contract> target(@gfx11_generic) @gfx11_q8(%a: tile<4xf32>) -> (tile<4xf32>) {\n  func.return %a : tile<4xf32>\n}",
         "func.template<tile.contract> priority(10) @high_priority(%a: tile<4xf32>) -> (tile<4xf32>) {\n  func.return %a : tile<4xf32>\n}",
     ],
 )
@@ -495,13 +513,16 @@ func_ukernel = Op(
             **_FUNC_LIKE_PROVIDER,
             implements="implements",
             priority="priority",
+            requires="requires",
             args="args",
         )
     ],
+    verify="loom_func_ukernel_verify",
     format=[
         KeyRef("implements"),
         *_MODIFIER_FORMAT,
         *_TARGET_FORMAT,
+        *_REQUIRES_FORMAT,
         OptionalGroup(
             [kw("priority"), GLUE, LPAREN, GLUE, Attr("priority"), GLUE, RPAREN],
             anchor="priority",
@@ -510,7 +531,8 @@ func_ukernel = Op(
     ],
     examples=[
         "func.ukernel<tile.contract> device @vnni_q8_asm(%w: tensor<[%M]xi8>, %x: tensor<[%K]xf32>) -> (tensor<[%M]xf32>) where [mul(%M, 16)]",
-        "func.ukernel<tile.contract> target(@gfx11_generic) priority(20) @gfx11_q8_asm(%a: tile<4xf32>) -> (tile<4xf32>)",
+        "func.ukernel<tile.contract> requires [#target.subgroup.size<64>] priority(20) @subgroup64_q8_asm(%a: tile<4xf32>) -> (tile<4xf32>)",
+        "func.ukernel<tile.contract> target(@gfx11_generic) @gfx11_q8_asm(%a: tile<4xf32>) -> (tile<4xf32>)",
     ],
 )
 

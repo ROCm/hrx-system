@@ -76,10 +76,12 @@ void loom_condition_fact_set_initialize(
 void loom_condition_fact_set_reset(loom_condition_fact_set_t* facts);
 
 // Derives facts implied by assuming |condition_value| evaluates to
-// |assumed_truth|. Unknown condition producers are valid and simply produce an
-// empty fact set. |fact_table| may be NULL to query without ambient value
-// facts. Returns false if the caller-owned storage was too small or recursion
-// was capped; returned relations remain a conservative subset in that case.
+// |assumed_truth|. An otherwise opaque i1 producer contributes the fundamental
+// relation that its result equals one or zero on the selected edge; recognized
+// producers additionally expose relations over their operands. |fact_table|
+// may be NULL to query without ambient value facts. Returns false if the
+// caller-owned storage was too small or recursion was capped; returned
+// relations remain a conservative subset in that case.
 bool loom_condition_facts_query(const loom_module_t* module,
                                 const loom_value_fact_table_t* fact_table,
                                 loom_value_id_t condition_value,
@@ -134,10 +136,13 @@ bool loom_condition_integer_relation_implies(
     const loom_condition_integer_relation_t* queried, bool* out_result);
 
 // Attempts to evaluate |queried| from one of the edge-local relations in
-// |facts|. Returns true when the relation is proven either true or false and
-// writes that result to |out_result|.
+// |facts|. Exact scalar values in |fact_table| participate in operand
+// identity, so a relation against an SSA constant can prove the equivalent
+// relation against a literal. Returns true when the relation is proven either
+// true or false and writes that result to |out_result|.
 bool loom_condition_fact_set_proves_integer_relation(
     const loom_condition_fact_set_t* facts,
+    const loom_value_fact_table_t* fact_table,
     const loom_condition_integer_relation_t* queried, bool* out_result);
 
 // Returns true when each relation implies the other.

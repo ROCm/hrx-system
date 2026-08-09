@@ -250,7 +250,6 @@ enum loom_format_kind_e {
   // Variadic operand references with adjacent type annotations:
   // %a: type, %b: type.
   LOOM_FORMAT_KIND_OPERAND_TYPED_REFS = 30,
-
 };
 typedef uint8_t loom_format_kind_t;
 
@@ -1141,6 +1140,14 @@ loom_call_like_t loom_call_like_cast(const loom_module_t* module,
 // Returns the direct callee symbol ref, or {0, 0} if |call| is not valid.
 loom_symbol_ref_t loom_call_like_callee(loom_call_like_t call);
 
+// Retargets a verified direct call to |callee|.
+//
+// The call and symbol reference must belong to |module|. This refreshes
+// callback-backed effective traits and transitive effect summaries;
+// callers remain responsible for invalidating any higher-level analyses.
+void loom_call_like_set_callee(loom_module_t* module, loom_call_like_t call,
+                               loom_symbol_ref_t callee);
+
 // Returns the trailing call argument slice, or an empty slice if |call| is not
 // valid or the recorded offset is malformed for the op instance.
 loom_value_slice_t loom_call_like_operands(loom_call_like_t call);
@@ -1289,6 +1296,11 @@ loom_value_slice_t loom_kernel_workload_arg_ids(const loom_module_t* module,
 // not valid.
 const loom_predicate_t* loom_func_like_predicates(loom_func_like_t func,
                                                   uint16_t* out_count);
+
+// Returns the authored proof requirements for a provider function. Returns an
+// empty slice for non-provider function kinds and providers without
+// requirements.
+loom_parameterized_attr_array_t loom_func_like_requires(loom_func_like_t func);
 
 // Returns the implements string ID for template/ukernel ops — the name of the
 // op kind this function provides an implementation for. Returns
@@ -1773,6 +1785,14 @@ loom_attribute_t loom_memory_access_atomic_scope(loom_memory_access_t access);
   enum { func_name##_ATTR_INDEX = (index) };                      \
   static inline loom_attribute_t func_name(const loom_op_t* op) { \
     return loom_op_attrs(op)[(index)];                            \
+  }
+
+// Defines a function that reads a parameterized attribute array by index.
+#define LOOM_DEFINE_ATTR_PARAMETERIZED_ARRAY(func_name, index)           \
+  enum { func_name##_ATTR_INDEX = (index) };                             \
+  static inline loom_parameterized_attr_array_t func_name(               \
+      const loom_op_t* op) {                                             \
+    return loom_attr_as_parameterized_array(loom_op_attrs(op)[(index)]); \
   }
 
 // Defines a function that reads a generic attribute payload by index.

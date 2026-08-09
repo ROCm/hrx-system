@@ -23,12 +23,19 @@ from loom.builder_model import (
     signatures_for_ops,
 )
 from loom.builtin_types import ALL_BUILTIN_TYPES
-from loom.dsl import ATTR_TYPE_ENUM_ARRAY, AttrDef, Op, TypeDef
+from loom.dsl import (
+    ATTR_TYPE_ENUM_ARRAY,
+    ATTR_TYPE_PARAMETERIZED_ARRAY,
+    AttrDef,
+    Op,
+    TypeDef,
+)
 from loom.fields import compute_layout
 from loom.ir import (
     Block,
     EnumArrayAttr,
     Module,
+    ParameterizedAttrArray,
     Region,
     Type,
 )
@@ -203,6 +210,14 @@ class OpCallable:
                             and param.attr_def.attr_type == ATTR_TYPE_ENUM_ARRAY
                         ):
                             value = _normalize_enum_array_attr(
+                                op.name, param.attr_def, value
+                            )
+                        elif (
+                            param.attr_def is not None
+                            and param.attr_def.attr_type
+                            == ATTR_TYPE_PARAMETERIZED_ARRAY
+                        ):
+                            value = _normalize_parameterized_attr_array(
                                 op.name, param.attr_def, value
                             )
                         attributes[param.name] = value
@@ -470,6 +485,35 @@ def _normalize_enum_array_attr(
             )
         normalized_values.append(stable_value)
     return EnumArrayAttr(normalized_values)
+
+
+def _normalize_parameterized_attr_array(
+    op_name: str, attr_def: AttrDef, value: Any
+) -> ParameterizedAttrArray:
+    """Canonicalizes and validates a parameterized-attribute array field."""
+    if isinstance(value, ParameterizedAttrArray):
+        array = value
+    else:
+        if isinstance(value, str | bytes | bytearray) or not isinstance(
+            value, Iterable
+        ):
+            raise TypeError(
+                f"{op_name}: parameterized attribute array '{attr_def.name}' "
+                "must be an iterable of ParameterizedAttr values"
+            )
+        array = ParameterizedAttrArray(value)
+
+    expected_family = attr_def.parameterized_attr
+    if expected_family is not None:
+        for index, element in enumerate(array):
+            if element.family_name != expected_family.name:
+                raise ValueError(
+                    f"{op_name}: parameterized attribute array "
+                    f"'{attr_def.name}' element {index} has family "
+                    f"'{element.family_name}', expected "
+                    f"'{expected_family.name}'"
+                )
+    return array
 
 
 def _normalize_result_names(

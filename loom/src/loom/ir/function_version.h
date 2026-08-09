@@ -14,6 +14,7 @@
 #define LOOM_IR_FUNCTION_VERSION_H_
 
 #include "iree/base/api.h"
+#include "iree/base/internal/arena.h"
 #include "loom/ir/ir.h"
 
 #ifdef __cplusplus
@@ -45,6 +46,48 @@ typedef struct loom_function_version_list_t {
   // Number of version objects in |values|.
   iree_host_size_t count;
 } loom_function_version_list_t;
+
+// Arena-backed owner for the concrete function versions in one compilation.
+//
+// Appending may replace the pointer vector exposed by |list|, but the list
+// object and every version object retain stable addresses. Consumers borrow
+// the list object and observe its current values at explicit pass/emission
+// boundaries. The owner does not own the version objects themselves; callers
+// normally allocate them from the same arena.
+typedef struct loom_function_version_owner_t {
+  // Current borrowed view over |storage|.
+  loom_function_version_list_t list;
+
+  // Arena used to grow |storage|.
+  iree_arena_allocator_t* arena;
+
+  // Writable pointer vector also exposed through |list.values|.
+  loom_function_version_t** storage;
+
+  // Number of pointer slots allocated in |storage|.
+  iree_host_size_t capacity;
+} loom_function_version_owner_t;
+
+// Initializes an empty function-version owner allocating from |arena|.
+void loom_function_version_owner_initialize(
+    iree_arena_allocator_t* arena, loom_function_version_owner_t* out_owner);
+
+// Ensures that |owner| can hold at least |minimum_capacity| versions.
+//
+// Existing version order is preserved. Superseded pointer vectors remain
+// arena-owned and are reclaimed with the arena.
+iree_status_t loom_function_version_owner_reserve(
+    loom_function_version_owner_t* owner, iree_host_size_t minimum_capacity);
+
+// Appends one stable concrete version handle to |owner|.
+iree_status_t loom_function_version_owner_append(
+    loom_function_version_owner_t* owner, loom_function_version_t* version);
+
+// Returns the stable borrowed list view owned by |owner|.
+static inline const loom_function_version_list_t*
+loom_function_version_owner_list(const loom_function_version_owner_t* owner) {
+  return owner != NULL ? &owner->list : NULL;
+}
 
 // Finds the version currently implemented by |function|, or returns NULL.
 //

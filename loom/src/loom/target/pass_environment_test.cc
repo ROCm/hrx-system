@@ -17,6 +17,7 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/target/facts_builder.h"
+#include "loom/target/pass_requirements.h"
 #include "loom/target/test/target_records.h"
 #include "loom/testing/module_ptr.h"
 
@@ -102,12 +103,77 @@ TEST(TargetPassEnvironmentTest, EnvironmentCarriesProvidersAndVersions) {
             target_environment);
   EXPECT_EQ(loom_target_pass_capability_function_versions(found_capability),
             &function_versions);
+  EXPECT_EQ(
+      loom_target_pass_capability_function_version_owner(found_capability),
+      nullptr);
+  EXPECT_FALSE(loom_pass_environment_capability_satisfies_requirement(
+      &target_capability.base,
+      IREE_SV(LOOM_TARGET_PASS_REQUIREMENT_MUTABLE_FUNCTION_VERSIONS)));
+}
+
+TEST(TargetPassEnvironmentTest, MutableEnvironmentCarriesVersionOwner) {
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool, &arena);
+  loom_function_version_owner_t function_version_owner = {};
+  loom_function_version_owner_initialize(&arena, &function_version_owner);
+
+  const loom_target_environment_t* target_environment =
+      reinterpret_cast<const loom_target_environment_t*>(uintptr_t{1});
+  const loom_target_pass_capability_t target_capability =
+      loom_target_pass_capability_make_mutable(target_environment,
+                                               &function_version_owner);
+
+  EXPECT_EQ(loom_target_pass_capability_target_environment(&target_capability),
+            target_environment);
+  EXPECT_EQ(loom_target_pass_capability_function_versions(&target_capability),
+            &function_version_owner.list);
+  EXPECT_EQ(
+      loom_target_pass_capability_function_version_owner(&target_capability),
+      &function_version_owner);
+  EXPECT_TRUE(loom_pass_environment_capability_satisfies_requirement(
+      &target_capability.base,
+      IREE_SV(LOOM_TARGET_PASS_REQUIREMENT_MUTABLE_FUNCTION_VERSIONS)));
+
+  loom_function_version_t appended_version = {};
+  IREE_ASSERT_OK(loom_function_version_owner_append(&function_version_owner,
+                                                    &appended_version));
+  const loom_function_version_list_t* visible_versions =
+      loom_target_pass_capability_function_versions(&target_capability);
+  ASSERT_EQ(visible_versions->count, 1u);
+  EXPECT_EQ(visible_versions->values[0], &appended_version);
+
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&block_pool);
+}
+
+TEST(TargetPassEnvironmentTest,
+     MutableEnvironmentDeclaresRuntimeOwnerBeforeInvocation) {
+  const loom_target_environment_t* target_environment =
+      reinterpret_cast<const loom_target_environment_t*>(uintptr_t{1});
+  const loom_target_pass_capability_t target_capability =
+      loom_target_pass_capability_make_mutable(
+          target_environment, /*function_version_owner=*/nullptr);
+
+  EXPECT_EQ(loom_target_pass_capability_target_environment(&target_capability),
+            target_environment);
+  EXPECT_EQ(loom_target_pass_capability_function_versions(&target_capability),
+            nullptr);
+  EXPECT_EQ(
+      loom_target_pass_capability_function_version_owner(&target_capability),
+      nullptr);
+  EXPECT_TRUE(loom_pass_environment_capability_satisfies_requirement(
+      &target_capability.base,
+      IREE_SV(LOOM_TARGET_PASS_REQUIREMENT_MUTABLE_FUNCTION_VERSIONS)));
 }
 
 TEST(TargetPassEnvironmentTest, MissingCapabilityHasEmptyAccessors) {
   EXPECT_EQ(loom_target_pass_capability_from_environment(nullptr), nullptr);
   EXPECT_EQ(loom_target_pass_capability_target_environment(nullptr), nullptr);
   EXPECT_EQ(loom_target_pass_capability_function_versions(nullptr), nullptr);
+  EXPECT_EQ(loom_target_pass_capability_function_version_owner(nullptr),
+            nullptr);
 }
 
 TEST_F(TargetPassFactsTest, RefinedVersionSuppliesEffectiveFactsDirectly) {

@@ -7,15 +7,19 @@
 """Tests for loom.ir — in-memory IR representation."""
 
 import math
+from itertools import repeat
 
 import pytest
 
 from loom.dialect.test import (
     test_array_type,
+    test_compact_attr,
     test_matrix_type,
+    test_node_attr,
     test_options_attr,
     test_scope_type,
     test_tile_attr,
+    test_variant_set_type,
 )
 from loom.ir import (
     BF16,
@@ -59,6 +63,7 @@ from loom.ir import (
     OpaqueLocation,
     Operation,
     ParameterizedAttr,
+    ParameterizedAttrArray,
     ParameterizedType,
     PoolType,
     Predicate,
@@ -655,6 +660,13 @@ class TestCanonicalAttrDict:
 
 
 class TestParameterizedAttr:
+    def test_compact_primary_preserves_named_declaration_order_storage(self) -> None:
+        compact = test_compact_attr(label="wave", value=64)
+
+        assert compact.slots == ("wave", 64)
+        assert compact.present_items() == (("label", "wave"), ("value", 64))
+        assert compact.definition.primary_parameter_index == 1
+
     def test_constructs_declaration_order_slots_and_nested_values(self) -> None:
         tile = test_tile_attr(width=16)
         options = test_options_attr(
@@ -662,6 +674,7 @@ class TestParameterizedAttr:
             scopes=["subgroup", 254],
             element_type=BF16,
             tile=tile,
+            tiles=[tile, test_tile_attr(width=8)],
             target=SymbolName("target"),
         )
 
@@ -673,6 +686,7 @@ class TestParameterizedAttr:
             BF16,
             tile,
             SymbolName("target"),
+            ParameterizedAttrArray([tile, test_tile_attr(width=8)]),
         )
         assert options.present_items() == (
             ("mode", 1),
@@ -680,6 +694,7 @@ class TestParameterizedAttr:
             ("element_type", BF16),
             ("tile", tile),
             ("target", SymbolName("target")),
+            ("tiles", ParameterizedAttrArray([tile, test_tile_attr(width=8)])),
         )
 
     def test_preserves_absent_and_present_empty_optional_values(self) -> None:
@@ -688,7 +703,7 @@ class TestParameterizedAttr:
 
         assert not absent.has("scopes")
         assert absent.get("scopes") is None
-        assert absent.slots == (2, None, None, None, None)
+        assert absent.slots == (2, None, None, None, None, None)
         assert present_empty.has("scopes")
         assert present_empty.get("scopes") == EnumArrayAttr()
         assert absent != present_empty
@@ -700,6 +715,11 @@ class TestParameterizedAttr:
             test_options_attr(mode="fast", mood="precise")
         with pytest.raises(ValueError, match=r"has family 'test\.options'"):
             test_options_attr(mode="fast", tile=test_options_attr(mode="precise"))
+        with pytest.raises(ValueError, match=r"element 0 has family 'test\.options'"):
+            test_options_attr(
+                mode="fast",
+                tiles=[test_options_attr(mode="precise")],
+            )
 
     def test_rejects_closed_enum_values_and_bad_scalar_types(self) -> None:
         with pytest.raises(ValueError, match="undeclared enum value 255"):
@@ -716,6 +736,42 @@ class TestParameterizedAttr:
         assert lhs == rhs
         assert hash(lhs) == hash(rhs)
         assert {lhs, rhs} == {lhs}
+
+
+class TestParameterizedAttrArray:
+    def test_preserves_order_repetition_and_mixed_families(self) -> None:
+        tile = test_tile_attr(width=8)
+        options = test_options_attr(mode="fast")
+
+        values = ParameterizedAttrArray([tile, options, tile])
+
+        assert values.values == (tile, options, tile)
+        assert tuple(values) == (tile, options, tile)
+        assert len(values) == 3
+
+    def test_empty_array_is_immutable_and_hashable(self) -> None:
+        assert ParameterizedAttrArray() == ParameterizedAttrArray([])
+        assert hash(ParameterizedAttrArray()) == hash(ParameterizedAttrArray([]))
+
+    def test_rejects_non_parameterized_elements_and_excessive_length(self) -> None:
+        with pytest.raises(TypeError, match="element 0 must be a ParameterizedAttr"):
+            ParameterizedAttrArray([42])  # type: ignore[list-item]
+
+        tile = test_tile_attr(width=8)
+        with pytest.raises(ValueError, match="exceeds UINT16_MAX"):
+            ParameterizedAttrArray(repeat(tile, 0x10000))
+
+    def test_recursively_nests_open_family_arrays(self) -> None:
+        leaf = test_node_attr(value=0)
+        child = test_node_attr(value=1, children=[leaf])
+        root = test_node_attr(
+            value=2,
+            children=[child, test_tile_attr(width=8), child],
+        )
+
+        children = root.get("children")
+        assert isinstance(children, ParameterizedAttrArray)
+        assert children.values == (child, test_tile_attr(width=8), child)
 
 
 class TestParameterizedType:
@@ -773,6 +829,18 @@ class TestParameterizedType:
 
         assert array.has("metadata")
         assert array.get("metadata") == metadata
+
+    def test_parameterized_array_parameters_preserve_family_contracts(self) -> None:
+        tile = test_tile_attr(width=8)
+        options = test_options_attr(mode="fast")
+        variants = test_variant_set_type(
+            values=[tile, options, tile],
+            alternatives=[],
+        )
+
+        assert variants.get("values") == ParameterizedAttrArray([tile, options, tile])
+        assert variants.has("alternatives")
+        assert variants.get("alternatives") == ParameterizedAttrArray()
 
 
 class TestOperations:

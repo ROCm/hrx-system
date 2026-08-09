@@ -96,6 +96,7 @@ loom_cc_test(
         "//loom/src/loom/pass:tooling",
         "//loom/src/loom/pass:value_facts",
         "//loom/src/loom/target:facts_builder",
+        "//loom/src/loom/target:function_contract",
         "//loom/src/loom/target:function_version",
         "//loom/src/loom/target/test:low_registry",
         "//loom/src/loom/target/test:lower",

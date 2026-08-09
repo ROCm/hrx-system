@@ -22,6 +22,26 @@ class CIdentifierCase(Enum):
     UPPER = "upper"
 
 
+# C23 and C++20 keywords that can survive identifier normalization unchanged.
+# Loom's generated public headers are C APIs that must also remain valid when
+# included from C++, so identifiers avoid the union of both language sets.
+_C_AND_CPP_KEYWORDS = frozenset(
+    """
+    alignas alignof and and_eq asm auto bitand bitor bool break case catch char
+    char16_t char32_t char8_t class
+    co_await co_return co_yield compl concept const const_cast consteval
+    constexpr constinit continue decltype default delete do double
+    dynamic_cast else enum explicit export extern false float for friend goto
+    if inline int long mutable namespace new noexcept not not_eq nullptr
+    operator or or_eq private protected public register reinterpret_cast
+    requires restrict return short signed sizeof static static_assert
+    static_cast struct switch template this thread_local throw true try typedef
+    typeid typename typeof typeof_unqual union unsigned using virtual void
+    volatile wchar_t while xor xor_eq
+    """.split()  # noqa: SIM905 - compact language-spec word list
+)
+
+
 def c_identifier_parts(value: str) -> tuple[str, ...]:
     """Returns non-empty ASCII identifier parts split on non-identifier chars."""
     return tuple(part for part in re.split(r"[^0-9A-Za-z]+", value) if part)
@@ -33,7 +53,7 @@ def c_identifier(
     case: CIdentifierCase = CIdentifierCase.PRESERVE,
     empty: str = "_",
 ) -> str:
-    """Returns a valid C identifier from an arbitrary stable spelling."""
+    """Returns a valid C/C++ identifier from an arbitrary stable spelling."""
     parts = c_identifier_parts(value)
     identifier = "_".join(parts) if parts else empty
     if not identifier:
@@ -41,9 +61,11 @@ def c_identifier(
     if identifier[0].isdigit():
         identifier = "_" + identifier
     if case is CIdentifierCase.LOWER:
-        return identifier.lower()
-    if case is CIdentifierCase.UPPER:
-        return identifier.upper()
+        identifier = identifier.lower()
+    elif case is CIdentifierCase.UPPER:
+        identifier = identifier.upper()
+    if identifier in _C_AND_CPP_KEYWORDS:
+        identifier += "_"
     return identifier
 
 

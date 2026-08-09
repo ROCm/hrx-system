@@ -48,6 +48,7 @@ from loom.ir import (
     OpaqueLocation,
     Operation,
     ParameterizedAttr,
+    ParameterizedAttrArray,
     ParameterizedType,
     PoolType,
     Predicate,
@@ -136,6 +137,7 @@ ATTR_KIND_BYTES = 11
 ATTR_KIND_SCOPED_ENUM = 12
 ATTR_KIND_ENUM_ARRAY = 13
 ATTR_KIND_PARAMETERIZED = 14
+ATTR_KIND_PARAMETERIZED_ARRAY = 15
 
 # Type kind bytes. These must match loom_bytecode_type_kind_e, not just the
 # current Python enum spelling.
@@ -682,6 +684,18 @@ class BytecodeWriter:
                     continue
                 self._ctx.intern_string(parameter.name)
                 self._number_attr_value(slot, parameter, aggregate_nesting_depth + 1)
+        elif isinstance(value, ParameterizedAttrArray):
+            if aggregate_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
+                raise ValueError(
+                    "aggregate attribute nesting exceeds maximum depth "
+                    f"{ATTR_AGGREGATE_MAX_NESTING_DEPTH}"
+                )
+            if getattr(attr_def, "attr_type", None) != "parameterized_array":
+                raise ValueError(
+                    "parameterized attribute arrays require a descriptor-backed field"
+                )
+            for element in value:
+                self._number_attr_value(element, attr_def, aggregate_nesting_depth + 1)
         elif isinstance(value, str):
             self._ctx.intern_string(value)
         elif isinstance(value, bytes | bytearray):
@@ -1236,7 +1250,7 @@ class BytecodeWriter:
         for region in op.regions:
             self._write_region(buf, region, value_numbers)
 
-    def _write_parameterized_attr_value(
+    def _write_parameterized_attr_payload(
         self,
         buf: ByteBuffer,
         value: ParameterizedAttr,
@@ -1244,26 +1258,21 @@ class BytecodeWriter:
         attr_def: Any | None,
         aggregate_nesting_depth: int,
     ) -> None:
-        """Write a descriptor-backed parameterized attribute value."""
+        """Write a parameterized attribute payload without its kind byte."""
         if aggregate_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
             raise ValueError(
                 "aggregate attribute nesting exceeds maximum depth "
                 f"{ATTR_AGGREGATE_MAX_NESTING_DEPTH}"
             )
-        attr_type = getattr(attr_def, "attr_type", None)
-        if attr_def is not None and attr_type != "parameterized":
-            raise TypeError(
-                "parameterized attribute value does not match the field contract"
-            )
         expected_definition = getattr(attr_def, "parameterized_attr", None)
-        if attr_def is not None and (
-            expected_definition is None or expected_definition.name != value.family_name
+        if (
+            expected_definition is not None
+            and expected_definition.name != value.family_name
         ):
             raise TypeError(
                 "parameterized attribute family "
                 f"{value.family_name!r} does not match the field contract"
             )
-        buf.write_u8(ATTR_KIND_PARAMETERIZED)
         buf.write_varint(self._ctx.strings[value.family_name])
         present_items = value.present_items()
         buf.write_varint(len(present_items))
@@ -1277,6 +1286,59 @@ class BytecodeWriter:
                 parameter_value,
                 value_numbers_by_name,
                 parameter_by_name[parameter_name],
+                aggregate_nesting_depth + 1,
+            )
+
+    def _write_parameterized_attr_value(
+        self,
+        buf: ByteBuffer,
+        value: ParameterizedAttr,
+        value_numbers_by_name: dict[str, int] | None,
+        attr_def: Any | None,
+        aggregate_nesting_depth: int,
+    ) -> None:
+        """Write a complete descriptor-backed parameterized attribute."""
+        if attr_def is not None and getattr(attr_def, "attr_type", None) != (
+            "parameterized"
+        ):
+            raise TypeError(
+                "parameterized attribute value does not match the field contract"
+            )
+        buf.write_u8(ATTR_KIND_PARAMETERIZED)
+        self._write_parameterized_attr_payload(
+            buf,
+            value,
+            value_numbers_by_name,
+            attr_def,
+            aggregate_nesting_depth,
+        )
+
+    def _write_parameterized_attr_array_value(
+        self,
+        buf: ByteBuffer,
+        value: ParameterizedAttrArray,
+        value_numbers_by_name: dict[str, int] | None,
+        attr_def: Any | None,
+        aggregate_nesting_depth: int,
+    ) -> None:
+        """Write a descriptor-backed ordered parameterized attribute array."""
+        if aggregate_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
+            raise ValueError(
+                "aggregate attribute nesting exceeds maximum depth "
+                f"{ATTR_AGGREGATE_MAX_NESTING_DEPTH}"
+            )
+        if getattr(attr_def, "attr_type", None) != "parameterized_array":
+            raise TypeError(
+                "parameterized attribute arrays require a descriptor-backed field"
+            )
+        buf.write_u8(ATTR_KIND_PARAMETERIZED_ARRAY)
+        buf.write_varint(len(value))
+        for element in value:
+            self._write_parameterized_attr_payload(
+                buf,
+                element,
+                value_numbers_by_name,
+                attr_def,
                 aggregate_nesting_depth + 1,
             )
 
@@ -1304,6 +1366,46 @@ class BytecodeWriter:
                 aggregate_nesting_depth=aggregate_nesting_depth + 1,
             )
 
+    def _dispatch_parameterized_attr_value(
+        self,
+        buf: ByteBuffer,
+        value: Any,
+        value_numbers_by_name: dict[str, int] | None,
+        attr_def: Any | None,
+        aggregate_nesting_depth: int,
+    ) -> bool:
+        """Writes or rejects a parameterized field, returning whether handled."""
+        attr_type = getattr(attr_def, "attr_type", None)
+        if isinstance(value, ParameterizedAttr):
+            self._write_parameterized_attr_value(
+                buf,
+                value,
+                value_numbers_by_name,
+                attr_def,
+                aggregate_nesting_depth,
+            )
+            return True
+        if isinstance(value, ParameterizedAttrArray):
+            self._write_parameterized_attr_array_value(
+                buf,
+                value,
+                value_numbers_by_name,
+                attr_def,
+                aggregate_nesting_depth,
+            )
+            return True
+        if attr_type == "parameterized":
+            raise TypeError(
+                "parameterized attribute field requires ParameterizedAttr, "
+                f"got {value!r}"
+            )
+        if attr_type == "parameterized_array":
+            raise TypeError(
+                "parameterized attribute array field requires "
+                f"ParameterizedAttrArray, got {value!r}"
+            )
+        return False
+
     def _write_attr_value(
         self,
         buf: ByteBuffer,
@@ -1314,20 +1416,14 @@ class BytecodeWriter:
     ) -> None:
         """Write an attribute value with its kind byte."""
         attr_type = getattr(attr_def, "attr_type", None)
-        if isinstance(value, ParameterizedAttr):
-            self._write_parameterized_attr_value(
-                buf,
-                value,
-                value_numbers_by_name,
-                attr_def,
-                aggregate_nesting_depth,
-            )
+        if self._dispatch_parameterized_attr_value(
+            buf,
+            value,
+            value_numbers_by_name,
+            attr_def,
+            aggregate_nesting_depth,
+        ):
             return
-        if attr_type == "parameterized":
-            raise TypeError(
-                "parameterized attribute field requires ParameterizedAttr, "
-                f"got {value!r}"
-            )
         if attr_type == "predicate_list":
             if not isinstance(value, list) or not all(
                 isinstance(predicate, Predicate) for predicate in value

@@ -288,22 +288,27 @@ typedef enum loom_attr_kind_e {
   // Descriptor-backed parameterized value. The family kind and immutable
   // descriptor-indexed slot payload define the concrete value.
   LOOM_ATTR_PARAMETERIZED = 16,
+  // Arena-allocated ordered parameterized values. The enclosing field
+  // descriptor supplies an optional exact family constraint; generic
+  // dictionaries cannot carry this kind.
+  LOOM_ATTR_PARAMETERIZED_ARRAY = 17,
   LOOM_ATTR_COUNT_,
 } loom_attr_kind_t;
 
-// Maximum supported nesting depth shared by DICT and PARAMETERIZED aggregate
-// values. This bounds recursive structural operations while covering practical
-// metadata shapes.
+// Maximum supported nesting depth shared by DICT, PARAMETERIZED, and
+// PARAMETERIZED_ARRAY aggregate values. This bounds recursive structural
+// operations while covering practical metadata shapes.
 #define LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH 8
 
 // A 16-byte tagged value. Used in operation trailing data, encoding
 // parameters, and anywhere a typed scalar/aggregate is needed.
 //
 // The kind tag (byte 0) determines which union member is active.
-// For I64_ARRAY, ENUM_ARRAY, PREDICATE_LIST, and PARAMETERIZED, the count field
-// holds the element or parameter count and the payload holds a pointer to
-// arena-allocated storage. PARAMETERIZED uses reserved_1 for its family kind.
-// BYTES uses reserved_1 for its byte length and points to immutable bytes.
+// For I64_ARRAY, ENUM_ARRAY, PREDICATE_LIST, PARAMETERIZED, and
+// PARAMETERIZED_ARRAY, the count field holds the element or parameter count and
+// the payload holds a pointer to arena-allocated storage. PARAMETERIZED uses
+// reserved_1 for its family kind. BYTES uses reserved_1 for its byte length and
+// points to immutable bytes.
 typedef struct loom_attribute_t {
   uint8_t kind;
   uint8_t reserved_0;
@@ -322,6 +327,8 @@ typedef struct loom_attribute_t {
     loom_predicate_t* predicate_list;
     const loom_named_attr_t* dict_entries;
     const struct loom_attribute_t* parameterized_slots;
+    // Ordered complete PARAMETERIZED attribute values.
+    const struct loom_attribute_t* parameterized_array;
     const uint8_t* bytes;
     uint64_t raw;
   };
@@ -329,6 +336,34 @@ typedef struct loom_attribute_t {
 
 static_assert(sizeof(loom_attribute_t) == 16,
               "loom_attribute_t must be exactly 16 bytes");
+
+// A borrowed ordered array of parameterized attribute values.
+//
+// Every element must have kind LOOM_ATTR_PARAMETERIZED. The descriptor of the
+// field carrying the array may additionally constrain all elements to one
+// registered family. Ordering and repeated families are preserved.
+typedef struct loom_parameterized_attr_array_t {
+  // Borrowed complete parameterized attribute values.
+  const loom_attribute_t* values;
+  // Number of values in the borrowed range.
+  iree_host_size_t count;
+} loom_parameterized_attr_array_t;
+
+static inline loom_parameterized_attr_array_t
+loom_parameterized_attr_array_empty(void) {
+  loom_parameterized_attr_array_t array = {0};
+  return array;
+}
+
+static inline loom_parameterized_attr_array_t
+loom_make_parameterized_attr_array(const loom_attribute_t* values,
+                                   iree_host_size_t count) {
+  loom_parameterized_attr_array_t array = {
+      /*.values=*/count > 0 ? values : NULL,
+      /*.count=*/count,
+  };
+  return array;
+}
 
 // Constructs the all-zero optional-absent sentinel.
 static inline loom_attribute_t loom_attr_absent(void) {
@@ -475,6 +510,19 @@ static inline loom_attribute_t loom_make_parameterized_attr(
   attr.count = (uint16_t)count;
   attr.reserved_1 = family_kind;
   attr.parameterized_slots = count > 0 ? slots : NULL;
+  return attr;
+}
+
+// Constructs a parameterized attribute array from already-canonical storage.
+// The values must all be registered PARAMETERIZED attributes and outlive the
+// returned value. Use loom_module_make_parameterized_attr_array for normal
+// construction from temporary storage.
+static inline loom_attribute_t loom_attr_parameterized_array(
+    const loom_attribute_t* values, iree_host_size_t count) {
+  IREE_ASSERT(count <= UINT16_MAX);
+  loom_attribute_t attr = loom_attr_make_present(LOOM_ATTR_PARAMETERIZED_ARRAY);
+  attr.count = (uint16_t)count;
+  attr.parameterized_array = count > 0 ? values : NULL;
   return attr;
 }
 
@@ -672,6 +720,20 @@ static inline const loom_attribute_t* loom_attr_as_parameterized_slots(
     loom_attribute_t attr) {
   IREE_ASSERT(attr.kind == LOOM_ATTR_PARAMETERIZED);
   return attr.parameterized_slots;
+}
+
+// Returns the ordered values of a PARAMETERIZED_ARRAY attribute.
+//
+// An absent optional attribute reads as an empty array. Call
+// loom_attr_is_absent when presence matters.
+static inline loom_parameterized_attr_array_t loom_attr_as_parameterized_array(
+    loom_attribute_t attr) {
+  if (loom_attr_is_absent(attr)) {
+    return loom_parameterized_attr_array_empty();
+  }
+  IREE_ASSERT(attr.kind == LOOM_ATTR_PARAMETERIZED_ARRAY);
+  return loom_make_parameterized_attr_array(attr.parameterized_array,
+                                            attr.count);
 }
 
 #ifdef __cplusplus

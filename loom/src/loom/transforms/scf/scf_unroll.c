@@ -1258,6 +1258,18 @@ static iree_status_t loom_scf_unroll_attr_refs_are_ready(
       }
       *out_ready = true;
       return iree_ok_status();
+    case LOOM_ATTR_PARAMETERIZED_ARRAY:
+      if (attr->count > 0 && !attr->parameterized_array) {
+        return iree_ok_status();
+      }
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_scf_unroll_attr_refs_are_ready(
+            query, &attr->parameterized_array[i], (uint8_t)(depth + 1),
+            out_ready));
+        if (!*out_ready) return iree_ok_status();
+      }
+      *out_ready = true;
+      return iree_ok_status();
     case LOOM_ATTR_ENCODING: {
       if (attr->encoding_id > UINT16_MAX) return iree_ok_status();
       const loom_encoding_t* encoding = loom_module_encoding(

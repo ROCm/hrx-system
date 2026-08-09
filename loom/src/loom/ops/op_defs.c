@@ -466,6 +466,19 @@ static bool loom_attribute_refs_predicate_value(loom_attribute_t attr,
         }
       }
       return false;
+    case LOOM_ATTR_PARAMETERIZED_ARRAY:
+      if (dict_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          attr.count == 0 || !attr.parameterized_array) {
+        return false;
+      }
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        if (loom_attribute_refs_predicate_value(attr.parameterized_array[i],
+                                                value_id,
+                                                (uint8_t)(dict_depth + 1))) {
+          return true;
+        }
+      }
+      return false;
     default:
       return false;
   }
@@ -605,6 +618,22 @@ loom_symbol_ref_t loom_call_like_callee(loom_call_like_t call) {
   }
   return loom_attr_as_symbol(
       loom_op_attrs(call.op)[call.vtable->callee_attr_index]);
+}
+
+void loom_call_like_set_callee(loom_module_t* module, loom_call_like_t call,
+                               loom_symbol_ref_t callee) {
+  IREE_ASSERT_ARGUMENT(module);
+  IREE_ASSERT_ARGUMENT(call.op);
+  IREE_ASSERT_ARGUMENT(call.vtable);
+  IREE_ASSERT_LT(call.vtable->callee_attr_index, call.op->attribute_count);
+  IREE_ASSERT(loom_symbol_ref_is_valid(callee));
+  IREE_ASSERT_EQ(callee.module_id, 0);
+  IREE_ASSERT_LT(callee.symbol_id, module->symbols.count);
+  const loom_trait_flags_t old_traits = call.op->traits;
+  loom_op_attrs(call.op)[call.vtable->callee_attr_index] =
+      loom_attr_symbol(callee);
+  loom_op_refresh_effective_traits(module, call.op);
+  loom_module_update_op_direct_effects(call.op, old_traits, call.op->traits);
 }
 
 loom_value_slice_t loom_call_like_operands(loom_call_like_t call) {
@@ -974,6 +1003,15 @@ const loom_predicate_t* loom_func_like_predicates(loom_func_like_t func,
       loom_op_attrs(func.op)[func.vtable->predicates_attr_index];
   *out_count = attr.count;
   return attr.predicate_list;
+}
+
+loom_parameterized_attr_array_t loom_func_like_requires(loom_func_like_t func) {
+  if (!func.vtable ||
+      func.vtable->requires_attr_index == LOOM_ATTR_INDEX_NONE) {
+    return loom_parameterized_attr_array_empty();
+  }
+  return loom_attr_as_parameterized_array(
+      loom_op_attrs(func.op)[func.vtable->requires_attr_index]);
 }
 
 loom_string_id_t loom_func_like_implements(loom_func_like_t func) {

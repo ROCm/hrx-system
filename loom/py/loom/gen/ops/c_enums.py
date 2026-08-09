@@ -333,4 +333,5 @@ ATTR_KIND_MAP: dict[str, str] = {
     "dict": "LOOM_ATTR_DICT",
     "any": "LOOM_ATTR_ANY",
     "parameterized": "LOOM_ATTR_PARAMETERIZED",
+    "parameterized_array": "LOOM_ATTR_PARAMETERIZED_ARRAY",
 }

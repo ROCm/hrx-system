@@ -92,10 +92,16 @@ class SpirvProviderTest : public ::testing::Test {
                   FindSymbolRef(module, name));
   }
 
-  bool Satisfies(const loom_target_facts_t* effective,
-                 const loom_target_symbol_facts_t* requirement) {
-    return loom_target_facts_satisfy_requirement(effective,
-                                                 requirement->projection);
+  bool SatisfiesSpecialization(const loom_target_facts_t* effective,
+                               const loom_target_symbol_facts_t* requirement) {
+    return loom_target_facts_satisfy_specialization_requirement(
+        effective, requirement->projection);
+  }
+
+  bool SatisfiesIdentity(const loom_target_facts_t* effective,
+                         const loom_target_symbol_facts_t* requirement) {
+    return loom_target_facts_satisfy_identity_requirement(
+        effective, requirement->projection);
   }
 
   // Block pool shared by parsed modules and analysis storage.
@@ -165,20 +171,22 @@ TEST_F(SpirvProviderTest, ProjectedProfileSatisfiesStructuredRequirements) {
       Requirement(requirements.get(), IREE_SV("baseline_a"));
   const loom_target_symbol_facts_t* baseline_b =
       Requirement(requirements.get(), IREE_SV("baseline_b"));
-  EXPECT_TRUE(Satisfies(effective, baseline_a));
-  EXPECT_TRUE(Satisfies(effective, baseline_b));
-  EXPECT_TRUE(Satisfies(effective,
-                        Requirement(requirements.get(), IREE_SV("fitting"))));
-  EXPECT_FALSE(Satisfies(
+  EXPECT_TRUE(SatisfiesIdentity(effective, baseline_a));
+  EXPECT_TRUE(SatisfiesIdentity(effective, baseline_b));
+  EXPECT_TRUE(SatisfiesSpecialization(effective, baseline_a));
+  EXPECT_TRUE(SatisfiesSpecialization(effective, baseline_b));
+  EXPECT_TRUE(SatisfiesSpecialization(
+      effective, Requirement(requirements.get(), IREE_SV("fitting"))));
+  EXPECT_FALSE(SatisfiesSpecialization(
       effective, Requirement(requirements.get(), IREE_SV("too_large"))));
-  EXPECT_FALSE(Satisfies(
+  EXPECT_FALSE(SatisfiesSpecialization(
       effective, Requirement(requirements.get(), IREE_SV("subgroup64"))));
-  EXPECT_FALSE(Satisfies(effective,
-                         Requirement(requirements.get(), IREE_SV("index64"))));
-  EXPECT_TRUE(Satisfies(effective,
-                        Requirement(requirements.get(), IREE_SV("float16"))));
-  EXPECT_FALSE(Satisfies(effective,
-                         Requirement(requirements.get(), IREE_SV("float64"))));
+  EXPECT_FALSE(SatisfiesSpecialization(
+      effective, Requirement(requirements.get(), IREE_SV("index64"))));
+  EXPECT_TRUE(SatisfiesSpecialization(
+      effective, Requirement(requirements.get(), IREE_SV("float16"))));
+  EXPECT_FALSE(SatisfiesSpecialization(
+      effective, Requirement(requirements.get(), IREE_SV("float64"))));
 
   EXPECT_EQ(baseline_a->projection->storage.export_plan.abi_kind,
             LOOM_TARGET_ABI_SHADER_ENTRY_POINT);

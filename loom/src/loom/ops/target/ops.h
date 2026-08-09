@@ -12,17 +12,39 @@
 #ifndef LOOM_OPS_TARGET_OPS_H_
 #define LOOM_OPS_TARGET_OPS_H_
 
+#include "loom/ir/parameterized_attr.h"
 #include "loom/ops/op_defs.h"
 #include "loom/target/types.h"
+
+enum {
+  LOOM_PARAMETERIZED_ATTR_TARGET_SUBGROUP_SIZE = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TARGET, 0),
+  LOOM_PARAMETERIZED_ATTR_TARGET_COUNT_ = 1,
+};
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+extern const loom_target_condition_descriptor_t loom_target_subgroup_size_condition;
+
+// Requires the active function-version facts to establish this subgroup size.
+static inline bool loom_target_subgroup_size_attr_isa(loom_attribute_t attr) {
+  return attr.kind == LOOM_ATTR_PARAMETERIZED && loom_attr_as_parameterized_kind(attr) == LOOM_PARAMETERIZED_ATTR_TARGET_SUBGROUP_SIZE;
+}
+enum { LOOM_TARGET_SUBGROUP_SIZE_ATTR_SIZE_PARAMETER_INDEX = 0 };
+static inline int64_t loom_target_subgroup_size_attr_size(loom_attribute_t attr) {
+  return loom_attr_as_i64(loom_attr_as_parameterized_slots(attr)[LOOM_TARGET_SUBGROUP_SIZE_ATTR_SIZE_PARAMETER_INDEX]);
+}
+iree_status_t loom_target_subgroup_size_attr_make(
+    loom_module_t* module,
+    int64_t size,
+    loom_attribute_t* out_attr);
+
 enum {
   LOOM_OP_TARGET_GENERIC = LOOM_OP_KIND(LOOM_DIALECT_TARGET, 0),
   LOOM_OP_TARGET_DECL = LOOM_OP_KIND(LOOM_DIALECT_TARGET, 1),
-  LOOM_OP_TARGET_COUNT_ = 2,
+  LOOM_OP_TARGET_SUBGROUP_SIZE = LOOM_OP_KIND(LOOM_DIALECT_TARGET, 2),
+  LOOM_OP_TARGET_COUNT_ = 3,
 };
 
 // Generic target-family row selected by target.generic.
@@ -150,6 +172,21 @@ iree_status_t loom_target_decl_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 
+// LOOM_OP_TARGET_SUBGROUP_SIZE: Read the selected subgroup size of the current function version.
+// %size = target.subgroup.size : index
+LOOM_DEFINE_ISA(loom_target_subgroup_size_isa, LOOM_OP_TARGET_SUBGROUP_SIZE)
+LOOM_DEFINE_RESULT(loom_target_subgroup_size_result, 0)
+iree_status_t loom_target_subgroup_size_build(
+    loom_builder_t* builder,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_target_subgroup_size_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+
 // Returns the vtable array for the target dialect.
 const loom_op_vtable_t* const* loom_target_dialect_vtables(
     iree_host_size_t* out_count);
@@ -161,6 +198,10 @@ const loom_op_semantics_t* loom_target_dialect_op_semantics(
 // Returns semantic metadata for a target op kind, or empty metadata.
 loom_op_semantics_t loom_target_op_semantics(
     loom_op_kind_t kind);
+
+// Returns parameterized attribute descriptors for the target dialect.
+const loom_parameterized_attr_descriptor_t* loom_target_dialect_parameterized_attrs(
+    iree_host_size_t* out_count);
 
 #ifdef __cplusplus
 }

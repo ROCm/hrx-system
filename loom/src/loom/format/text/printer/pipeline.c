@@ -219,6 +219,12 @@ static bool loom_print_pipeline_attr_value_is_printable(
           loom_context_resolve_parameterized_attr(
               ctx->module->context, loom_attr_as_parameterized_kind(*attr));
       if (!family_descriptor ||
+          (descriptor && descriptor->attr_kind != LOOM_ATTR_PARAMETERIZED) ||
+          (descriptor &&
+           descriptor->reference.parameterized_attr_kind !=
+               LOOM_PARAMETERIZED_ATTR_KIND_ANY &&
+           descriptor->reference.parameterized_attr_kind !=
+               family_descriptor->kind) ||
           attr->count != family_descriptor->parameter_count ||
           (attr->count > 0 && !attr->parameterized_slots)) {
         return false;
@@ -236,6 +242,24 @@ static bool loom_print_pipeline_attr_value_is_printable(
         }
         if (!loom_print_pipeline_attr_value_is_printable(
                 ctx, parameter, parameter_descriptor,
+                (uint8_t)(nesting_depth + 1))) {
+          return false;
+        }
+      }
+      return true;
+    }
+    case LOOM_ATTR_PARAMETERIZED_ARRAY: {
+      if (!descriptor ||
+          descriptor->attr_kind != LOOM_ATTR_PARAMETERIZED_ARRAY ||
+          nesting_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          (attr->count > 0 && !attr->parameterized_array)) {
+        return false;
+      }
+      loom_attr_descriptor_t element_descriptor = *descriptor;
+      element_descriptor.attr_kind = LOOM_ATTR_PARAMETERIZED;
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        if (!loom_print_pipeline_attr_value_is_printable(
+                ctx, &attr->parameterized_array[i], &element_descriptor,
                 (uint8_t)(nesting_depth + 1))) {
           return false;
         }

@@ -538,6 +538,22 @@ static iree_status_t loom_tooling_config_copy_attr(
           target_module, (loom_parameterized_attr_kind_t)source_attr.reserved_1,
           target_slots, source_attr.count, out_attr);
     }
+    case LOOM_ATTR_PARAMETERIZED_ARRAY: {
+      loom_attribute_t* target_attributes = NULL;
+      if (source_attr.count > 0) {
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            &target_module->arena, source_attr.count,
+            sizeof(*target_attributes), (void**)&target_attributes));
+        for (uint16_t i = 0; i < source_attr.count; ++i) {
+          IREE_RETURN_IF_ERROR(loom_tooling_config_copy_attr(
+              source_module, target_module, source_attr.parameterized_array[i],
+              (uint8_t)(depth + 1), &target_attributes[i]));
+        }
+      }
+      *out_attr =
+          loom_attr_parameterized_array(target_attributes, source_attr.count);
+      return iree_ok_status();
+    }
     case LOOM_ATTR_ENCODING: {
       uint16_t target_encoding_id = 0;
       IREE_RETURN_IF_ERROR(loom_tooling_config_copy_encoding(

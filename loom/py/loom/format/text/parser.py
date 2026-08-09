@@ -104,6 +104,7 @@ from loom.ir import (
     OpaqueLocation,
     Operation,
     ParameterizedAttr,
+    ParameterizedAttrArray,
     PlaceholderType,
     PoolType,
     Predicate,
@@ -593,21 +594,41 @@ def _parse_parameterized_attr_from_tokens(
     parameters: dict[str, Any] = {}
     if not tokenizer.at(TokenKind.RANGLE):
         while True:
-            name_token = tokenizer.expect(TokenKind.BARE_IDENT)
-            parameter = descriptors.get(name_token.text)
-            if parameter is None:
+            parameter_name: str
+            parameter: AttrDef
+            is_named = True
+            if (
+                not parameters
+                and definition.primary_parameter is not None
+                and not (
+                    tokenizer.at(TokenKind.BARE_IDENT)
+                    and tokenizer.peek_n(1).kind == TokenKind.EQUALS
+                )
+            ):
+                parameter = definition.primary_parameter
+                parameter_name = parameter.name
+                is_named = False
+                parameter_location = tokenizer.peek().location
+            else:
+                name_token = tokenizer.expect(TokenKind.BARE_IDENT)
+                parameter_name = name_token.text
+                parameter_location = name_token.location
+                declared_parameter = descriptors.get(parameter_name)
+                if declared_parameter is None:
+                    raise ParseError(
+                        f"unknown parameter '{parameter_name}' for '{definition.name}'",
+                        name_token.location,
+                        filename,
+                    )
+                parameter = declared_parameter
+            if parameter_name in parameters:
                 raise ParseError(
-                    f"unknown parameter '{name_token.text}' for '{definition.name}'",
-                    name_token.location,
+                    f"duplicate parameter '{parameter_name}' for '{definition.name}'",
+                    parameter_location,
                     filename,
                 )
-            if name_token.text in parameters:
-                raise ParseError(
-                    f"duplicate parameter '{name_token.text}' for '{definition.name}'",
-                    name_token.location,
-                    filename,
-                )
-            tokenizer.expect(TokenKind.EQUALS)
+            if is_named:
+                tokenizer.expect(TokenKind.EQUALS)
             value = _parse_descriptor_attr_value_from_tokens(
                 tokenizer,
                 module,
@@ -623,7 +644,7 @@ def _parse_parameterized_attr_from_tokens(
             )
             if parameter.attr_type == "symbol":
                 value = SymbolName(value)
-            parameters[name_token.text] = value
+            parameters[parameter_name] = value
             if not tokenizer.try_consume(TokenKind.COMMA):
                 break
     closing = tokenizer.expect(TokenKind.RANGLE)
@@ -769,6 +790,43 @@ def _parse_descriptor_attr_value_from_tokens(
                 known_encodings=known_encodings,
                 aggregate_nesting_depth=attr_dict_nesting_depth,
             )
+        case "parameterized_array":
+            opening = tokenizer.expect(TokenKind.LBRACKET)
+            if attr_dict_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
+                raise ParseError(
+                    "aggregate attribute nesting exceeds maximum depth "
+                    f"{ATTR_AGGREGATE_MAX_NESTING_DEPTH}",
+                    opening.location,
+                    filename,
+                )
+            values: list[ParameterizedAttr] = []
+            if not tokenizer.at(TokenKind.RBRACKET):
+                while True:
+                    if len(values) == 0xFFFF:
+                        raise ParseError(
+                            "parameterized attribute array length exceeds UINT16_MAX",
+                            tokenizer.peek().location,
+                            filename,
+                        )
+                    values.append(
+                        _parse_parameterized_attr_from_tokens(
+                            tokenizer,
+                            module,
+                            filename,
+                            descriptor.parameterized_attr,
+                            scope=scope,
+                            type_registry=type_registry,
+                            mode=mode,
+                            parameterized_attr_registry=parameterized_attr_registry,
+                            aliases=aliases,
+                            known_encodings=known_encodings,
+                            aggregate_nesting_depth=attr_dict_nesting_depth + 1,
+                        )
+                    )
+                    if not tokenizer.try_consume(TokenKind.COMMA):
+                        break
+            tokenizer.expect(TokenKind.RBRACKET)
+            return ParameterizedAttrArray(values)
         case "any":
             return _parse_generic_attr_value_from_tokens(
                 tokenizer,
@@ -1322,7 +1380,7 @@ def _type_optional_present(
                             TokenKind.BARE_IDENT,
                             TokenKind.LANGLE,
                         )
-                    case "enum_array" | "i64_array":
+                    case "enum_array" | "i64_array" | "parameterized_array":
                         return token.kind == TokenKind.LBRACKET
                     case "bool":
                         return token.kind == TokenKind.BARE_IDENT

@@ -32,6 +32,7 @@
 #include "loom/pass/tooling.h"
 #include "loom/pass/value_facts.h"
 #include "loom/target/facts_builder.h"
+#include "loom/target/function_contract.h"
 #include "loom/target/function_version.h"
 #include "loom/target/test/contracts/core_lower_rules.h"
 #include "loom/target/test/low_registry.h"
@@ -364,6 +365,71 @@ TEST_F(LowLowerPassTest, SourceSelectionUsesPerFunctionEffectiveTargetFacts) {
                                      IREE_SV("test.low.core")));
   EXPECT_EQ(selections.values[0].target_source,
             LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION);
+  iree_arena_deinitialize(&arena);
+}
+
+TEST_F(LowLowerPassTest, ModuleInternalVersionLowersWithoutArtifactAbi) {
+  ModulePtr module =
+      Parse(IREE_SV("test.target<low_core> @test_target\n"
+                    "func.def @helper() {\n"
+                    "  func.return\n"
+                    "}\n"));
+
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool_, &arena);
+  loom_symbol_fact_table_t symbol_facts = {};
+  loom_symbol_fact_table_initialize(&symbol_facts, &arena);
+  const loom_symbol_ref_t target_ref =
+      FindSymbolRef(module.get(), IREE_SV("test_target"));
+  const loom_symbol_facts_base_t* base_target_facts = nullptr;
+  IREE_ASSERT_OK(loom_symbol_fact_table_lookup_ref(
+      &symbol_facts, module.get(), target_ref, &base_target_facts));
+  const loom_target_symbol_facts_t* target_facts =
+      loom_target_symbol_facts_cast(base_target_facts);
+  ASSERT_NE(target_facts, nullptr);
+
+  const loom_symbol_ref_t function_ref =
+      FindSymbolRef(module.get(), IREE_SV("helper"));
+  const loom_symbol_facts_base_t* base_function_facts = nullptr;
+  IREE_ASSERT_OK(loom_symbol_fact_table_lookup_ref(
+      &symbol_facts, module.get(), function_ref, &base_function_facts));
+  const loom_func_symbol_facts_t* function_facts =
+      loom_func_symbol_facts_cast(base_function_facts);
+  ASSERT_NE(function_facts, nullptr);
+
+  bool contract_valid = false;
+  const loom_target_facts_t* effective_facts = nullptr;
+  IREE_ASSERT_OK(loom_target_function_contract_refine_internal_facts(
+      module.get(), function_facts, target_facts->name,
+      target_facts->projection, iree_diagnostic_emitter_t{}, &arena,
+      &contract_valid, &effective_facts));
+  ASSERT_TRUE(contract_valid);
+  ASSERT_NE(effective_facts, nullptr);
+  ASSERT_EQ(effective_facts->storage.export_plan.abi_kind,
+            LOOM_TARGET_ABI_UNKNOWN);
+
+  loom_target_function_version_t function_version = {};
+  function_version.base.type = &loom_target_function_version_type;
+  function_version.base.function = loom_func_like_cast(
+      module.get(),
+      module->symbols.entries[function_ref.symbol_id].defining_op);
+  function_version.target_context_facts = target_facts->projection;
+  function_version.effective_target_facts = effective_facts;
+  loom_function_version_t* function_version_values[] = {
+      &function_version.base,
+  };
+  const loom_function_version_list_t function_versions = {
+      /*.values=*/function_version_values,
+      /*.count=*/IREE_ARRAYSIZE(function_version_values),
+  };
+
+  IREE_ASSERT_OK(RunSourceToLow(&policy_registry_, module.get(), nullptr,
+                                &function_versions));
+  ASSERT_TRUE(loom_low_func_def_isa(function_version.base.function.op));
+  EXPECT_EQ(loom_func_like_abi(function_version.base.function),
+            LOOM_TARGET_ABI_UNKNOWN);
+  EXPECT_FALSE(loom_symbol_ref_is_valid(
+      loom_low_func_def_target(function_version.base.function.op)));
   iree_arena_deinitialize(&arena);
 }
 

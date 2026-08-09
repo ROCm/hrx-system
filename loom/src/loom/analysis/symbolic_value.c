@@ -1668,7 +1668,8 @@ iree_status_t loom_symbolic_value_prove_relation(
   };
   bool condition_result = false;
   if (loom_condition_fact_set_proves_integer_relation(
-          context->condition_facts, &queried_relation, &condition_result)) {
+          context->condition_facts, context->fact_table, &queried_relation,
+          &condition_result)) {
     *out_result =
         condition_result ? LOOM_SYMBOLIC_PROOF_TRUE : LOOM_SYMBOLIC_PROOF_FALSE;
     return iree_ok_status();

@@ -35,6 +35,39 @@ static iree_status_t loom_print_predicate_arg(loom_print_context_t* ctx,
   }
 }
 
+static iree_status_t loom_print_predicate(loom_print_context_t* ctx,
+                                          const loom_predicate_t* predicate) {
+  const char* predicate_name = loom_predicate_kind_name(predicate->kind);
+  if (!predicate_name) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unknown predicate kind %d", (int)predicate->kind);
+  }
+  uint8_t expected_argument_count =
+      loom_predicate_kind_argument_count(predicate->kind);
+  if (predicate->arg_count != expected_argument_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "predicate kind %s expects %u arguments, got %u",
+                            predicate_name, expected_argument_count,
+                            predicate->arg_count);
+  }
+  // Emit kind name and opening paren: "mul("
+  IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
+  IREE_RETURN_IF_ERROR(
+      loom_output_stream_write_cstring(ctx->stream, predicate_name));
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '('));
+  // Emit arguments separated by ", ".
+  for (uint8_t j = 0; j < predicate->arg_count; ++j) {
+    if (j > 0) {
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, ", "));
+    }
+    IREE_RETURN_IF_ERROR(loom_print_predicate_arg(ctx, predicate->arg_tags[j],
+                                                  predicate->args[j]));
+  }
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, ')'));
+  loom_print_did_write(ctx);
+  return iree_ok_status();
+}
+
 // Prints a predicate list in the format: [pred(%name, 16), lt(%K, 1024)]
 static iree_status_t loom_print_predicate_list(
     loom_print_context_t* ctx, const loom_predicate_t* predicates,
@@ -49,37 +82,7 @@ static iree_status_t loom_print_predicate_list(
     if (i > 0) {
       IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ",", false));
     }
-    const loom_predicate_t* predicate = &predicates[i];
-    const char* predicate_name = loom_predicate_kind_name(predicate->kind);
-    if (!predicate_name) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "unknown predicate kind %d",
-                              (int)predicate->kind);
-    }
-    uint8_t expected_argument_count =
-        loom_predicate_kind_argument_count(predicate->kind);
-    if (predicate->arg_count != expected_argument_count) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "predicate kind %s expects %u arguments, got %u",
-                              predicate_name, expected_argument_count,
-                              predicate->arg_count);
-    }
-    // Emit kind name and opening paren: "mul("
-    IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(ctx->stream, predicate_name));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '('));
-    // Emit arguments separated by ", ".
-    for (uint8_t j = 0; j < predicate->arg_count; ++j) {
-      if (j > 0) {
-        IREE_RETURN_IF_ERROR(
-            loom_output_stream_write_cstring(ctx->stream, ", "));
-      }
-      IREE_RETURN_IF_ERROR(loom_print_predicate_arg(ctx, predicate->arg_tags[j],
-                                                    predicate->args[j]));
-    }
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, ')'));
-    loom_print_did_write(ctx);
+    IREE_RETURN_IF_ERROR(loom_print_predicate(ctx, &predicates[i]));
   }
   IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "]", false));
   return iree_ok_status();

@@ -154,7 +154,7 @@ from loom.dsl import (
     Successor,
     SymbolDefinition,
     SymbolKernelContract,
-    TargetFactSatisfaction,
+    TargetFactSpecialization,
     TargetLikeInterface,
     TotalBitCountEqual,
     TypeConstraint,
@@ -398,6 +398,56 @@ class TestParameterizedAttrDef:
 
         assert tile.name == "test.tile"
         assert tile.parameters == (AttrDef("width", "i64"),)
+        assert tile.primary_parameter is None
+
+    def test_declares_required_primary_parameter_by_stable_name(self) -> None:
+        compact = ParameterizedAttrDef(
+            "test.compact",
+            group=Dialect("test"),
+            parameters=[
+                AttrDef("label", "string", optional=True),
+                AttrDef("value", "i64"),
+            ],
+            primary_parameter="value",
+        )
+
+        assert compact.primary_parameter_index == 1
+        assert compact.primary_parameter == AttrDef("value", "i64")
+
+    def test_declares_typed_target_condition_descriptor(self) -> None:
+        condition = ParameterizedAttrDef(
+            "target.subgroup.size",
+            group=Dialect("target"),
+            parameters=[AttrDef("size", "i64")],
+            primary_parameter="size",
+            target_condition="loom_target_subgroup_size_condition",
+        )
+
+        assert condition.target_condition == "loom_target_subgroup_size_condition"
+
+    def test_rejects_invalid_target_condition_symbol(self) -> None:
+        with _raises(ValueError, match="must be a C symbol name"):
+            ParameterizedAttrDef(
+                "target.subgroup.size",
+                group=Dialect("target"),
+                target_condition="target.subgroup.size",
+            )
+
+    def test_rejects_missing_or_optional_primary_parameter(self) -> None:
+        with _raises(ValueError, match="primary parameter 'missing' is not declared"):
+            ParameterizedAttrDef(
+                "test.compact",
+                group=Dialect("test"),
+                parameters=[AttrDef("value", "i64")],
+                primary_parameter="missing",
+            )
+        with _raises(ValueError, match="primary parameter 'value' must be required"):
+            ParameterizedAttrDef(
+                "test.compact",
+                group=Dialect("test"),
+                parameters=[AttrDef("value", "i64", optional=True)],
+                primary_parameter="value",
+            )
 
     def test_rejects_wrong_namespace(self) -> None:
         with _raises(ValueError, match="must begin with the owning dialect"):
@@ -419,13 +469,14 @@ class TestParameterizedAttrDef:
                 parameters=[AttrDef("scope", "scoped_enum")],
             )
 
-    def test_nested_parameter_requires_exact_family(self) -> None:
-        with _raises(ValueError, match="requires an exact parameterized_attr"):
-            ParameterizedAttrDef(
-                "test.options",
-                group=Dialect("test"),
-                parameters=[AttrDef("tile", ATTR_TYPE_PARAMETERIZED)],
-            )
+    def test_nested_parameter_allows_open_family(self) -> None:
+        options = ParameterizedAttrDef(
+            "test.options",
+            group=Dialect("test"),
+            parameters=[AttrDef("value", ATTR_TYPE_PARAMETERIZED)],
+        )
+
+        assert options.parameters[0].parameterized_attr is None
 
     def test_nested_parameter_retains_exact_family(self) -> None:
         dialect = Dialect("test")
@@ -714,7 +765,7 @@ class TestInterfaces:
         assert interface.descriptor is None
         assert interface.fact_type is None
         assert interface.fact_projector is None
-        assert interface.fact_satisfaction == TargetFactSatisfaction.IDENTITY
+        assert interface.fact_specialization == TargetFactSpecialization.EXACT
 
     def test_memory_access_interface_uses_soft_field_defaults(self) -> None:
         interface = MemoryAccessInterface()
@@ -1671,12 +1722,12 @@ class TestTypeDef:
                 format=[Param("not-valid")],
             )
 
-        with _raises(ValueError, match="requires an exact parameterized_attr"):
-            TypeDef(
-                "test.wrapper",
-                params=[AttrDef("value", ATTR_TYPE_PARAMETERIZED)],
-                format=[Param("value")],
-            )
+        open_wrapper = TypeDef(
+            "test.wrapper",
+            params=[AttrDef("value", ATTR_TYPE_PARAMETERIZED)],
+            format=[Param("value")],
+        )
+        assert open_wrapper.params[0].parameterized_attr is None
 
         with _raises(ValueError, match="unsupported kind 'scoped_enum'"):
             TypeDef(

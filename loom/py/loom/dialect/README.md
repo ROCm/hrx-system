@@ -116,24 +116,34 @@ tile_attr = ParameterizedAttrDef(
         AttrDef("width", "i64", doc="Tile width in elements."),
         AttrDef("transpose", "bool", optional=True),
     ],
+    primary_parameter="width",
     doc="A statically selected tile layout.",
 )
 
 tile = tile_attr(width=16, transpose=True)
 ```
 
-The canonical text names every present parameter:
+The descriptor-declared primary parameter prints positionally while additional
+parameters remain named:
 
 ```loom
-#example.tile<width = 16, transpose = true>
+#example.tile<16, transpose = true>
 ```
 
+Families without `primary_parameter` name every present parameter, even when
+the schema currently has only one field. Compact syntax is therefore a stable
+family contract rather than an arity heuristic; adding an optional named field
+does not change the primary spelling.
+
 Parameters are stored in declaration order and exposed through generated C
-accessors without runtime name lookup. Text and bytecode carry the stable
-family and parameter names rather than those dense positions. Renaming a
-parameter changes the source and serialization contract. Reordering parameters
-changes canonical text and generated builder argument order even though
-bytecode resolves each present value by name.
+accessors without runtime name lookup. Bytecode carries the stable family and
+parameter names rather than dense positions. Text carries the family name and
+every non-primary parameter name; the descriptor makes the primary position a
+family-level syntax contract. Renaming any parameter changes the bytecode and
+generated API contract, while the canonical positional spelling survives a
+primary-parameter rename. Reordering parameters changes generated storage and
+builder order, but the primary still prints first and bytecode still resolves
+each present value by name.
 
 Optional absence is distinct from a present false scalar, empty array, byte
 span, or dictionary. Python values expose that distinction with `has()` and

@@ -873,6 +873,44 @@ TEST_F(ParserTest, ParameterizedAttrsRoundTripInDeclarationOrder) {
   loom_module_free(module);
 }
 
+TEST_F(ParserTest, CompactParameterizedAttrsCanonicalizePrimaryFirst) {
+  std::string text = RoundTrip(
+      "test.compact_parameterized_attr "
+      "#test.compact<label = \"wave\", value = 64>\n");
+  EXPECT_NE(text.find("test.compact_parameterized_attr "
+                      "#test.compact<64, label = \"wave\">"),
+            std::string::npos);
+
+  loom_module_t* module = ParseOk(
+      "test.compact_parameterized_attr "
+      "#test.compact<64, label = \"wave\">\n");
+  loom_op_t* op = loom_block_op(loom_module_block(module), 0);
+  ASSERT_TRUE(loom_test_compact_parameterized_attr_isa(op));
+  loom_attribute_t compact = loom_test_compact_parameterized_attr_value(op);
+  ASSERT_TRUE(loom_test_compact_attr_isa(compact));
+  EXPECT_EQ(loom_test_compact_attr_value(compact), 64);
+  ASSERT_TRUE(loom_test_compact_attr_has_label(compact));
+  loom_string_id_t label_id = loom_test_compact_attr_label(compact);
+  ASSERT_LT(label_id, module->strings.count);
+  EXPECT_TRUE(iree_string_view_equal(module->strings.entries[label_id],
+                                     IREE_SV("wave")));
+  loom_module_free(module);
+
+  text = RoundTrip("test.compact_parameterized_attr #test.compact<64>\n");
+  EXPECT_NE(text.find("test.compact_parameterized_attr #test.compact<64>"),
+            std::string::npos);
+  module = ParseOk(
+      "test.compact_parameterized_attr "
+      "#test.compact<64>\n");
+  op = loom_block_op(loom_module_block(module), 0);
+  ASSERT_TRUE(loom_test_compact_parameterized_attr_isa(op));
+  compact = loom_test_compact_parameterized_attr_value(op);
+  ASSERT_TRUE(loom_test_compact_attr_isa(compact));
+  EXPECT_EQ(loom_test_compact_attr_value(compact), 64);
+  EXPECT_FALSE(loom_test_compact_attr_has_label(compact));
+  loom_module_free(module);
+}
+
 TEST_F(ParserTest, ParameterizedAttrsPreservePresentEmptyAndGenericNesting) {
   loom_module_t* module = ParseOk(
       "test.parameterized_attr "
@@ -895,6 +933,79 @@ TEST_F(ParserTest, ParameterizedAttrsPreservePresentEmptyAndGenericNesting) {
   EXPECT_NE(text.find("{options = #test.options<mode = precise>}"),
             std::string::npos);
   loom_module_free(module);
+}
+
+TEST_F(ParserTest, ParameterizedAttrArraysPreserveOrderFamiliesAndPresence) {
+  std::string text = RoundTrip(
+      "test.parameterized_attr_array "
+      "[#test.tile<width = 8>, #test.options<mode = fast>, "
+      "#test.tile<width = 8>] using [#test.tile<width = 4>]\n"
+      "test.parameterized_attr_array [] using []\n"
+      "test.parameterized_attr_array []\n"
+      "test.parameterized_attr "
+      "#test.options<mode = precise, "
+      "tiles = [#test.tile<width = 4>, #test.tile<width = 8>]>\n"
+      "test.parameterized_attr_array "
+      "[#test.node<0, children = [#test.node<1>]>]\n");
+  EXPECT_NE(text.find("test.parameterized_attr_array "
+                      "[#test.tile<width = 8>, "
+                      "#test.options<mode = fast>, "
+                      "#test.tile<width = 8>] using "
+                      "[#test.tile<width = 4>]"),
+            std::string::npos);
+  EXPECT_NE(text.find("test.parameterized_attr_array [] using []"),
+            std::string::npos);
+  EXPECT_NE(text.find("tiles = [#test.tile<width = 4>, "
+                      "#test.tile<width = 8>]"),
+            std::string::npos);
+
+  loom_module_t* module = ParseOk(
+      "test.parameterized_attr_array "
+      "[#test.tile<width = 8>, #test.options<mode = fast>, "
+      "#test.tile<width = 8>] using [#test.tile<width = 4>]\n"
+      "test.parameterized_attr_array [] using []\n"
+      "test.parameterized_attr_array []\n");
+  ASSERT_NE(module, nullptr);
+  loom_block_t* body = loom_module_block(module);
+  ASSERT_EQ(body->op_count, 3u);
+
+  loom_op_t* mixed_op = loom_block_op(body, 0);
+  ASSERT_TRUE(loom_test_parameterized_attr_array_isa(mixed_op));
+  loom_parameterized_attr_array_t values =
+      loom_test_parameterized_attr_array_values(mixed_op);
+  ASSERT_EQ(values.count, 3u);
+  EXPECT_TRUE(loom_test_tile_attr_isa(values.values[0]));
+  EXPECT_TRUE(loom_test_options_attr_isa(values.values[1]));
+  EXPECT_TRUE(loom_test_tile_attr_isa(values.values[2]));
+  EXPECT_TRUE(loom_attribute_equal(&values.values[0], &values.values[2]));
+  loom_parameterized_attr_array_t tiles =
+      loom_test_parameterized_attr_array_tiles(mixed_op);
+  ASSERT_EQ(tiles.count, 1u);
+  EXPECT_TRUE(loom_test_tile_attr_isa(tiles.values[0]));
+
+  loom_op_t* present_empty_op = loom_block_op(body, 1);
+  EXPECT_FALSE(loom_attr_is_absent(loom_op_attrs(present_empty_op)[1]));
+  EXPECT_EQ(loom_test_parameterized_attr_array_tiles(present_empty_op).count,
+            0u);
+  loom_op_t* absent_op = loom_block_op(body, 2);
+  EXPECT_TRUE(loom_attr_is_absent(loom_op_attrs(absent_op)[1]));
+
+  loom_module_free(module);
+}
+
+TEST_F(ParserTest, ParameterizedAttrArraysRejectMalformedInput) {
+  const char* cases[] = {
+      "test.parameterized_attr_array [42]\n",
+      "test.parameterized_attr_array "
+      "[#test.tile<width = 8>,]\n",
+      "test.parameterized_attr_array [] using "
+      "[#test.options<mode = fast>]\n",
+      "test.parameterized_attr_array [#test.unknown<value = 1>]\n",
+  };
+  for (const char* source : cases) {
+    SCOPED_TRACE(source);
+    EXPECT_FALSE(ParseExpectErrors(source).empty());
+  }
 }
 
 TEST_F(ParserTest, ParameterizedAttrsRejectMalformedInput) {
@@ -936,6 +1047,18 @@ TEST_F(ParserTest, ParameterizedAttrsRejectMalformedInput) {
           "tile = #test.options<mode = precise>>\n",
           "#test.options",
           "'#test.tile'",
+      },
+      {
+          "test.compact_parameterized_attr "
+          "#test.compact<label = \"wave\">\n",
+          ">",
+          "required parameter 'value'",
+      },
+      {
+          "test.compact_parameterized_attr "
+          "#test.compact<64, value = 32>\n",
+          "value",
+          "each parameter at most once",
       },
   };
   for (const MalformedCase& test_case : cases) {
@@ -1175,6 +1298,18 @@ TEST_F(ParserTest, EmptyPredicateListPayloadRoundTripsExplicitly) {
   loom_module_free(module);
 }
 
+TEST_F(ParserTest, PredicateListBeyondInlineCapacityRoundTrips) {
+  std::string text = RoundTrip(
+      "%x = test.constant 0 : index\n"
+      "%y = test.assume %x ["
+      "eq(%x, 0), eq(%x, 0), eq(%x, 0), eq(%x, 0), eq(%x, 0), "
+      "eq(%x, 0), eq(%x, 0), eq(%x, 0), eq(%x, 0), eq(%x, 0), "
+      "eq(%x, 0), eq(%x, 0), eq(%x, 0), eq(%x, 0), eq(%x, 0), "
+      "eq(%x, 0), eq(%x, 0)] : index\n");
+  EXPECT_NE(text.find("eq(%x, 0), eq(%x, 0)]"), std::string::npos)
+      << "predicate lists should grow beyond inline storage: " << text;
+}
+
 TEST_F(ParserTest, PredicateArityMismatchEmitsStructuredDiagnostic) {
   const auto& diagnostics = ParseExpectErrors(
       "%x = test.constant 0 : index\n"
@@ -1412,13 +1547,18 @@ TEST_F(ParserTest, DescriptorBackedTypesRoundTripAndPreserveParameters) {
       "%aligned = test.constant 0 : "
       "test.array<bf16, alignment = 32>\n"
       "%metadata = test.constant 0 : "
-      "test.array<bf16, metadata = {tile = #test.tile<width = 8>}>\n";
+      "test.array<bf16, metadata = {tile = #test.tile<width = 8>}>\n"
+      "%variants = test.constant 0 : "
+      "test.variant_set<"
+      "[#test.tile<width = 8>, #test.options<mode = fast>, "
+      "#test.tile<width = 8>], alternatives = []>\n"
+      "%variants_absent = test.constant 0 : test.variant_set<[]>\n";
   std::string text = RoundTrip(source);
   loom_module_t* module = ParseOk(text.c_str());
   ASSERT_NE(module, nullptr);
   loom_block_t* block = loom_module_block(module);
   ASSERT_NE(block, nullptr);
-  ASSERT_EQ(block->op_count, 6u);
+  ASSERT_EQ(block->op_count, 8u);
 
   loom_type_t scope_type = loom_module_value_type(
       module, loom_test_constant_result(loom_block_op(block, 1)));
@@ -1464,6 +1604,25 @@ TEST_F(ParserTest, DescriptorBackedTypesRoundTripAndPreserveParameters) {
   ASSERT_EQ(metadata.count, 1u);
   ASSERT_TRUE(loom_test_tile_attr_isa(metadata.entries[0].value));
   EXPECT_EQ(loom_test_tile_attr_width(metadata.entries[0].value), 8);
+
+  loom_type_t variants_type = loom_module_value_type(
+      module, loom_test_constant_result(loom_block_op(block, 6)));
+  ASSERT_TRUE(loom_test_variant_set_type_isa(variants_type));
+  loom_parameterized_attr_array_t variants =
+      loom_test_variant_set_type_values(variants_type);
+  ASSERT_EQ(variants.count, 3u);
+  EXPECT_TRUE(loom_test_tile_attr_isa(variants.values[0]));
+  EXPECT_TRUE(loom_test_options_attr_isa(variants.values[1]));
+  EXPECT_TRUE(loom_test_tile_attr_isa(variants.values[2]));
+  EXPECT_TRUE(loom_attribute_equal(&variants.values[0], &variants.values[2]));
+  ASSERT_TRUE(loom_test_variant_set_type_has_alternatives(variants_type));
+  EXPECT_EQ(loom_test_variant_set_type_alternatives(variants_type).count, 0u);
+
+  loom_type_t variants_absent_type = loom_module_value_type(
+      module, loom_test_constant_result(loom_block_op(block, 7)));
+  ASSERT_TRUE(loom_test_variant_set_type_isa(variants_absent_type));
+  EXPECT_FALSE(
+      loom_test_variant_set_type_has_alternatives(variants_absent_type));
 
   loom_module_free(module);
 }

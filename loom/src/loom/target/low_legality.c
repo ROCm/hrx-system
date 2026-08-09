@@ -456,6 +456,8 @@ static bool loom_target_low_legality_codegen_format_is_low(
 static bool loom_target_low_legality_abi_is_low(
     loom_target_abi_kind_t abi_kind) {
   switch (abi_kind) {
+    // Module-internal functions intentionally have no artifact ABI.
+    case LOOM_TARGET_ABI_UNKNOWN:
     case LOOM_TARGET_ABI_OBJECT_FUNCTION:
     case LOOM_TARGET_ABI_HAL_KERNEL:
     case LOOM_TARGET_ABI_SHADER_ENTRY_POINT:

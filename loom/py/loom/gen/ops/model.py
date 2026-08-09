@@ -146,9 +146,18 @@ def _load_llvmir_generation() -> DialectGeneration:
 
 
 def _load_target_generation() -> DialectGeneration:
-    from loom.dialect.target import ALL_TARGET_OPS, target_ops
+    from loom.dialect.target import (
+        ALL_TARGET_OPS,
+        ALL_TARGET_PARAMETERIZED_ATTRS,
+        target_ops,
+    )
 
-    return DialectGeneration(target_ops, list(ALL_TARGET_OPS), None)
+    return DialectGeneration(
+        target_ops,
+        list(ALL_TARGET_OPS),
+        None,
+        ALL_TARGET_PARAMETERIZED_ATTRS,
+    )
 
 
 def _load_low_generation() -> DialectGeneration:

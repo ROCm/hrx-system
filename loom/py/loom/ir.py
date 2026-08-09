@@ -104,6 +104,7 @@ __all__ = [
     "ATTR_AGGREGATE_MAX_NESTING_DEPTH",
     "EnumArrayAttr",
     "ParameterizedAttr",
+    "ParameterizedAttrArray",
     "canonicalize_attr_dict",
     "replace_canonical_attr_dict",
     "PredicateArg",
@@ -1187,6 +1188,30 @@ def _canonicalize_parameterized_slots(
     return tuple(slots)
 
 
+def _canonicalize_parameterized_attr_array(
+    family_name: str, parameter: Any, value: Any
+) -> ParameterizedAttrArray:
+    """Canonicalizes an ordered parameterized attribute array."""
+    values = value.values if isinstance(value, ParameterizedAttrArray) else value
+    if isinstance(values, str | bytes | bytearray) or not isinstance(values, Iterable):
+        raise TypeError(
+            f"{family_name}: parameter '{parameter.name}' must be an iterable "
+            f"of parameterized attributes, got {value!r}"
+        )
+
+    array = ParameterizedAttrArray(values)
+    expected_family = parameter.parameterized_attr
+    if expected_family is not None:
+        for index, element in enumerate(array):
+            if element.family_name != expected_family.name:
+                raise ValueError(
+                    f"{family_name}: parameter '{parameter.name}' element "
+                    f"{index} has family '{element.family_name}', expected "
+                    f"'{expected_family.name}'"
+                )
+    return array
+
+
 def _canonicalize_parameterized_value(
     family_name: str, parameter: Any, value: Any
 ) -> Any:
@@ -1201,6 +1226,7 @@ def _canonicalize_parameterized_value(
         ATTR_TYPE_I64,
         ATTR_TYPE_I64_ARRAY,
         ATTR_TYPE_PARAMETERIZED,
+        ATTR_TYPE_PARAMETERIZED_ARRAY,
         ATTR_TYPE_STRING,
         ATTR_TYPE_SYMBOL,
         ATTR_TYPE_TYPE,
@@ -1307,6 +1333,8 @@ def _canonicalize_parameterized_value(
                     f"'{value.family_name}', expected '{expected_family.name}'"
                 )
             return value
+        case kind if kind == ATTR_TYPE_PARAMETERIZED_ARRAY:
+            return _canonicalize_parameterized_attr_array(family_name, parameter, value)
         case _:
             raise ValueError(
                 f"{family_name}: parameter '{parameter.name}' has unsupported "
@@ -1335,6 +1363,38 @@ class EnumArrayAttr:
         object.__setattr__(self, "values", frozen_values)
 
     def __iter__(self) -> Iterator[int]:
+        return iter(self.values)
+
+    def __len__(self) -> int:
+        return len(self.values)
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class ParameterizedAttrArray:
+    """Ordered registered parameterized attribute values.
+
+    The enclosing field descriptor may constrain every element to one exact
+    family. This value preserves ordering and repeated families.
+    """
+
+    values: tuple[ParameterizedAttr, ...]
+
+    def __init__(self, values: Iterable[ParameterizedAttr] = ()) -> None:
+        frozen_values = tuple(values)
+        if len(frozen_values) > 0xFFFF:
+            raise ValueError(
+                "parameterized attribute array length "
+                f"{len(frozen_values)} exceeds UINT16_MAX"
+            )
+        for index, value in enumerate(frozen_values):
+            if not isinstance(value, ParameterizedAttr):
+                raise TypeError(
+                    "parameterized attribute array element "
+                    f"{index} must be a ParameterizedAttr, got {value!r}"
+                )
+        object.__setattr__(self, "values", frozen_values)
+
+    def __iter__(self) -> Iterator[ParameterizedAttr]:
         return iter(self.values)
 
     def __len__(self) -> int:

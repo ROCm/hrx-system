@@ -26,6 +26,9 @@ typedef struct loom_target_resolved_specialization_t {
   // Structured profile borrowed from the request.
   const loom_target_profile_t* target_profile;
 
+  // Profile facts projected once for all requests sharing |target_profile|.
+  const loom_target_facts_t* projected_profile_facts;
+
   // Function facts projected at specialization construction.
   const loom_func_symbol_facts_t* function_facts;
 
@@ -34,6 +37,10 @@ typedef struct loom_target_resolved_specialization_t {
 
   // Authored target facts when projected by the target witness, or NULL.
   const loom_target_symbol_facts_t* authored_target_facts;
+
+  // Profile facts refined by the authored target requirement but not by the
+  // function-local ABI/export contract.
+  const loom_target_facts_t* target_context_facts;
 
   // Compiler-owned target-refined function version.
   loom_target_function_version_t* version;
@@ -168,36 +175,74 @@ static iree_status_t loom_target_specialization_prepare_versions(
 
   for (iree_host_size_t i = 0; i < specialization_count; ++i) {
     loom_target_resolved_specialization_t* specialization = &specializations[i];
-    loom_target_facts_t* effective_facts = NULL;
-    IREE_RETURN_IF_ERROR(loom_target_profile_project_facts(
-        specialization->target_profile, arena, &effective_facts));
+    for (iree_host_size_t j = 0; j < i; ++j) {
+      const loom_target_resolved_specialization_t* prior = &specializations[j];
+      if (prior->target_profile == specialization->target_profile) {
+        specialization->projected_profile_facts =
+            prior->projected_profile_facts;
+        break;
+      }
+    }
+    if (specialization->projected_profile_facts == NULL) {
+      loom_target_facts_t* projected_profile_facts = NULL;
+      IREE_RETURN_IF_ERROR(loom_target_profile_project_facts(
+          specialization->target_profile, arena, &projected_profile_facts));
+      specialization->projected_profile_facts = projected_profile_facts;
+    }
+  }
+
+  for (iree_host_size_t i = 0; i < specialization_count; ++i) {
+    loom_target_resolved_specialization_t* specialization = &specializations[i];
+    const loom_target_facts_t* projected_profile_facts =
+        specialization->projected_profile_facts;
     if (specialization->authored_target_facts != NULL &&
-        !loom_target_facts_satisfy_requirement(
-            effective_facts,
+        !loom_target_facts_satisfy_specialization_requirement(
+            projected_profile_facts,
             specialization->authored_target_facts->projection)) {
       IREE_RETURN_IF_ERROR(loom_target_specialization_emit_conflict(
           diagnostic_emitter, module, specialization,
-          loom_target_facts_identity_name(effective_facts)));
+          loom_target_facts_identity_name(projected_profile_facts)));
       if (*out_error_count != UINT32_MAX) {
         ++*out_error_count;
       }
       continue;
     }
 
+    const loom_target_facts_t* target_context_facts = projected_profile_facts;
     if (specialization->authored_target_facts != NULL) {
-      loom_target_facts_builder_apply_requirement(
-          specialization->authored_target_facts->projection, effective_facts);
+      for (iree_host_size_t j = 0; j < i; ++j) {
+        const loom_target_resolved_specialization_t* prior =
+            &specializations[j];
+        if (prior->projected_profile_facts == projected_profile_facts &&
+            prior->authored_target_facts ==
+                specialization->authored_target_facts &&
+            prior->target_context_facts != NULL) {
+          target_context_facts = prior->target_context_facts;
+          break;
+        }
+      }
+      if (target_context_facts == projected_profile_facts) {
+        loom_target_facts_t* refined_context_facts = NULL;
+        IREE_RETURN_IF_ERROR(loom_target_facts_builder_clone(
+            projected_profile_facts, arena, &refined_context_facts));
+        loom_target_facts_builder_apply_requirement(
+            specialization->authored_target_facts->projection,
+            refined_context_facts);
+        target_context_facts = refined_context_facts;
+      }
     }
+    specialization->target_context_facts = target_context_facts;
 
     const iree_string_view_t target_name =
         !iree_string_view_is_empty(specialization->authored_target_name)
             ? specialization->authored_target_name
-            : loom_target_facts_identity_name(effective_facts);
+            : loom_target_facts_identity_name(target_context_facts);
     bool contract_valid = false;
     const loom_target_facts_t* function_facts = NULL;
     IREE_RETURN_IF_ERROR(loom_target_function_contract_refine_facts(
-        module, specialization->function_facts, target_name, effective_facts,
-        diagnostic_emitter, arena, &contract_valid, &function_facts));
+        module, specialization->function_facts, target_name,
+        target_context_facts, diagnostic_emitter, arena, &contract_valid,
+        &function_facts));
     if (!contract_valid) {
       if (*out_error_count != UINT32_MAX) {
         ++*out_error_count;
@@ -216,6 +261,7 @@ static iree_status_t loom_target_specialization_prepare_versions(
             specialization->authored_target_facts != NULL
                 ? specialization->authored_target_facts->projection
                 : NULL,
+        .target_context_facts = target_context_facts,
         .effective_target_facts = function_facts,
     };
   }
@@ -232,6 +278,7 @@ iree_status_t loom_target_specialize_functions(
   IREE_ASSERT_ARGUMENT(arena);
   IREE_ASSERT_ARGUMENT(out_result);
   *out_result = (loom_target_specialization_result_t){0};
+  loom_function_version_owner_initialize(arena, &out_result->function_versions);
   if (requests.count == 0) {
     return iree_ok_status();
   }
@@ -285,12 +332,10 @@ iree_status_t loom_target_specialize_functions(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, requests.count,
                                                  sizeof(*target_versions),
                                                  (void**)&target_versions));
-  loom_function_version_t** version_values = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, requests.count, sizeof(*version_values), (void**)&version_values));
+  IREE_RETURN_IF_ERROR(loom_function_version_owner_reserve(
+      &out_result->function_versions, requests.count));
   for (iree_host_size_t i = 0; i < requests.count; ++i) {
     specializations[i].version = &target_versions[i];
-    version_values[i] = &target_versions[i].base;
   }
 
   IREE_RETURN_IF_ERROR(loom_target_specialization_prepare_versions(
@@ -300,9 +345,9 @@ iree_status_t loom_target_specialize_functions(
     return iree_ok_status();
   }
 
-  out_result->function_versions = (loom_function_version_list_t){
-      .values = version_values,
-      .count = requests.count,
-  };
+  for (iree_host_size_t i = 0; i < requests.count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_function_version_owner_append(
+        &out_result->function_versions, &target_versions[i].base));
+  }
   return iree_ok_status();
 }

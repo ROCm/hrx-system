@@ -256,8 +256,8 @@ def generate_metadata_lines(types: Sequence[TypeDef]) -> list[str]:
                 lines.append(f"        .enum_case_names = {enum_names},")
             if parameter.symbol_ref is not None:
                 lines.append(f"        .reference.symbol_ref = &{prefix}_{parameter.name}_symbol_ref,")
-            if parameter.attr_type == "parameterized":
-                expected_family = c_parameterized_attr_enum_name(parameter.parameterized_attr)
+            if parameter.attr_type in ("parameterized", "parameterized_array"):
+                expected_family = c_parameterized_attr_enum_name(parameter.parameterized_attr) if parameter.parameterized_attr is not None else "LOOM_PARAMETERIZED_ATTR_KIND_ANY"
                 lines.append(f"        .reference.parameterized_attr_kind = {expected_family},")
             lines.append("    },")
         lines.append("};")

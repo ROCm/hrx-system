@@ -89,6 +89,20 @@ loom_pass_environment_t loom_low_pass_environment_storage_initialize(
     const loom_function_version_list_t* function_versions,
     loom_low_pass_environment_storage_t* out_storage);
 
+// Initializes stack storage for a composed target/low/math pass environment
+// whose function-version owner may be extended by module passes. The returned
+// environment must not outlive |out_storage| or |function_version_owner|.
+loom_pass_environment_t loom_low_pass_environment_storage_initialize_mutable(
+    const loom_low_descriptor_registry_t* descriptor_registry,
+    const loom_low_lower_policy_registry_t* lower_policy_registry,
+    const loom_target_low_legality_provider_list_t* legality_provider_list,
+    const loom_target_legalizer_provider_list_t* legalizer_provider_list,
+    const loom_target_math_policy_registry_t* math_policy_registry,
+    loom_target_compile_report_t* compile_report,
+    const loom_target_environment_t* target_environment,
+    loom_function_version_owner_t* function_version_owner,
+    loom_low_pass_environment_storage_t* out_storage);
+
 // Looks up the low capability from |environment|. Returns NULL when absent.
 const loom_low_pass_capability_t* loom_low_pass_capability_from_environment(
     const loom_pass_environment_t* environment);

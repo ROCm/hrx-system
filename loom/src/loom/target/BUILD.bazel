@@ -37,6 +37,35 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "condition",
+    srcs = ["condition.c"],
+    hdrs = ["condition.h"],
+    deps = [
+        ":facts",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:bstring",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "condition_test",
+    srcs = ["condition_test.cc"],
+    deps = [
+        ":condition",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/format/text:printer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/test",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "facts_builder",
     srcs = ["facts_builder.c"],
     hdrs = ["facts_builder.h"],
@@ -44,6 +73,52 @@ loom_cc_library(
         ":facts",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "callgraph_specialization",
+    srcs = ["callgraph_specialization.c"],
+    hdrs = ["callgraph_specialization.h"],
+    deps = [
+        ":facts_builder",
+        ":function_contract",
+        ":function_version",
+        ":pass_environment",
+        "//loom/src/loom/analysis:symbol_dependencies",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/rewrite:callable",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "callgraph_specialization_test",
+    srcs = ["callgraph_specialization_test.cc"],
+    deps = [
+        ":callgraph_specialization",
+        ":pass_environment",
+        ":provider",
+        ":specialization",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target/test:target_record_table",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -147,37 +222,13 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "capability_facts",
-    srcs = ["capability_facts.c"],
-    hdrs = ["capability_facts.h"],
-    deps = [
-        ":facts",
-        ":types",
-        "//loom/src/loom/util:fact_table",
-        "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_test(
-    name = "capability_facts_test",
-    srcs = ["capability_facts_test.cc"],
-    deps = [
-        ":capability_facts",
-        ":facts",
-        ":types",
-        "//loom/src/loom/util:fact_table",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_library(
     name = "pass_environment",
     srcs = ["pass_environment.c"],
     hdrs = ["pass_environment.h"],
     deps = [
         ":function_contract",
         ":function_version",
+        ":pass_requirements",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:func_symbol_facts",
@@ -186,6 +237,11 @@ loom_cc_library(
         "//loom/src/loom/pass:types",
         "//runtime/src/iree/base",
     ],
+)
+
+loom_cc_library(
+    name = "pass_requirements",
+    hdrs = ["pass_requirements.h"],
 )
 
 loom_cc_library(
@@ -248,6 +304,7 @@ loom_cc_test(
         ":facts_builder",
         ":function_version",
         ":pass_environment",
+        ":pass_requirements",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/func",
@@ -616,6 +673,7 @@ loom_cc_test(
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/ops/test",

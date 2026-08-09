@@ -10,12 +10,18 @@
 #include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/op_defs.h"
 #include "loom/target/function_contract.h"
+#include "loom/target/pass_requirements.h"
 
 static bool loom_target_pass_capability_satisfies_requirement(
     const loom_pass_environment_capability_t* capability,
     iree_string_view_t requirement) {
-  (void)capability;
-  (void)requirement;
+  const loom_target_pass_capability_t* target_capability =
+      (const loom_target_pass_capability_t*)capability;
+  if (iree_string_view_equal(
+          requirement,
+          IREE_SV(LOOM_TARGET_PASS_REQUIREMENT_MUTABLE_FUNCTION_VERSIONS))) {
+    return target_capability->supports_mutable_function_versions;
+  }
   return false;
 }
 
@@ -36,6 +42,24 @@ loom_target_pass_capability_t loom_target_pass_capability_make(
           },
       .target_environment = target_environment,
       .function_versions = function_versions,
+      .function_version_owner = NULL,
+      .supports_mutable_function_versions = false,
+  };
+}
+
+loom_target_pass_capability_t loom_target_pass_capability_make_mutable(
+    const loom_target_environment_t* target_environment,
+    loom_function_version_owner_t* function_version_owner) {
+  return (loom_target_pass_capability_t){
+      .base =
+          {
+              .type = &loom_target_pass_capability_type,
+          },
+      .target_environment = target_environment,
+      .function_versions =
+          loom_function_version_owner_list(function_version_owner),
+      .function_version_owner = function_version_owner,
+      .supports_mutable_function_versions = true,
   };
 }
 
@@ -65,6 +89,12 @@ const loom_function_version_list_t*
 loom_target_pass_capability_function_versions(
     const loom_target_pass_capability_t* capability) {
   return capability ? capability->function_versions : NULL;
+}
+
+loom_function_version_owner_t*
+loom_target_pass_capability_function_version_owner(
+    const loom_target_pass_capability_t* capability) {
+  return capability ? capability->function_version_owner : NULL;
 }
 
 static bool loom_target_function_symbol_id(const loom_module_t* module,

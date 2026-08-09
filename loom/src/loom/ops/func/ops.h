@@ -212,8 +212,9 @@ LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_template_temperature, 5, loom_func_tempera
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_template_inline_policy, 6, loom_inline_policy_t)
 LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_func_template_predicates, 7)
 LOOM_DEFINE_ATTR_SYMBOL(loom_func_template_target, 8)
-LOOM_DEFINE_ATTR_I64(loom_func_template_priority, 9)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_template_retain, 10, loom_func_retain_t)
+LOOM_DEFINE_ATTR_PARAMETERIZED_ARRAY(loom_func_template_requires, 9)
+LOOM_DEFINE_ATTR_I64(loom_func_template_priority, 10)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_template_retain, 11, loom_func_retain_t)
 LOOM_DEFINE_REGION(loom_func_template_body, 0)
 enum loom_func_template_build_flag_bits_e {
   LOOM_FUNC_TEMPLATE_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
@@ -224,7 +225,8 @@ enum loom_func_template_build_flag_bits_e {
   LOOM_FUNC_TEMPLATE_BUILD_FLAG_HAS_INLINE_POLICY = 1u << 5,
   LOOM_FUNC_TEMPLATE_BUILD_FLAG_HAS_TARGET = 1u << 6,
   LOOM_FUNC_TEMPLATE_BUILD_FLAG_HAS_PRIORITY = 1u << 7,
-  LOOM_FUNC_TEMPLATE_BUILD_FLAG_HAS_PREDICATES = 1u << 8,
+  LOOM_FUNC_TEMPLATE_BUILD_FLAG_HAS_REQUIRES = 1u << 8,
+  LOOM_FUNC_TEMPLATE_BUILD_FLAG_HAS_PREDICATES = 1u << 9,
 };
 typedef uint32_t loom_func_template_build_flags_t;
 iree_status_t loom_func_template_build(
@@ -238,6 +240,7 @@ iree_status_t loom_func_template_build(
     loom_optional uint8_t temperature,
     loom_optional uint8_t inline_policy,
     loom_optional loom_symbol_ref_t target,
+    loom_optional loom_parameterized_attr_array_t requires_,
     loom_optional int64_t priority,
     loom_symbol_ref_t callee,
     const loom_type_t* arg_types,
@@ -250,6 +253,9 @@ iree_status_t loom_func_template_build(
     iree_host_size_t predicates_count,
     loom_location_id_t location,
     loom_op_t** out_op);
+iree_status_t loom_func_template_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_FUNC_UKERNEL: Constraint-matched opaque implementation of an abstract op.
 // func.ukernel<tile.contract> device @vnni_q8_asm(%w: tensor<[%M]xi8>, %x: tensor<[%K]xf32>) -> (tensor<[%M]xf32>) where [mul(%M, 16)]
@@ -265,8 +271,9 @@ LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_ukernel_temperature, 5, loom_func_temperat
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_ukernel_inline_policy, 6, loom_inline_policy_t)
 LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_func_ukernel_predicates, 7)
 LOOM_DEFINE_ATTR_SYMBOL(loom_func_ukernel_target, 8)
-LOOM_DEFINE_ATTR_I64(loom_func_ukernel_priority, 9)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_ukernel_retain, 10, loom_func_retain_t)
+LOOM_DEFINE_ATTR_PARAMETERIZED_ARRAY(loom_func_ukernel_requires, 9)
+LOOM_DEFINE_ATTR_I64(loom_func_ukernel_priority, 10)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_ukernel_retain, 11, loom_func_retain_t)
 enum loom_func_ukernel_build_flag_bits_e {
   LOOM_FUNC_UKERNEL_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
   LOOM_FUNC_UKERNEL_BUILD_FLAG_HAS_RETAIN = 1u << 1,
@@ -276,7 +283,8 @@ enum loom_func_ukernel_build_flag_bits_e {
   LOOM_FUNC_UKERNEL_BUILD_FLAG_HAS_INLINE_POLICY = 1u << 5,
   LOOM_FUNC_UKERNEL_BUILD_FLAG_HAS_TARGET = 1u << 6,
   LOOM_FUNC_UKERNEL_BUILD_FLAG_HAS_PRIORITY = 1u << 7,
-  LOOM_FUNC_UKERNEL_BUILD_FLAG_HAS_PREDICATES = 1u << 8,
+  LOOM_FUNC_UKERNEL_BUILD_FLAG_HAS_REQUIRES = 1u << 8,
+  LOOM_FUNC_UKERNEL_BUILD_FLAG_HAS_PREDICATES = 1u << 9,
 };
 typedef uint32_t loom_func_ukernel_build_flags_t;
 iree_status_t loom_func_ukernel_build(
@@ -290,6 +298,7 @@ iree_status_t loom_func_ukernel_build(
     loom_optional uint8_t temperature,
     loom_optional uint8_t inline_policy,
     loom_optional loom_symbol_ref_t target,
+    loom_optional loom_parameterized_attr_array_t requires_,
     loom_optional int64_t priority,
     loom_symbol_ref_t callee,
     const loom_type_t* arg_types,
@@ -302,6 +311,9 @@ iree_status_t loom_func_ukernel_build(
     iree_host_size_t predicates_count,
     loom_location_id_t location,
     loom_op_t** out_op);
+iree_status_t loom_func_ukernel_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_FUNC_CALL: Function-like symbol call. Runtime calls target func.def/func.decl; required-inline exact template calls are consumed before executable lowering.
 // %r = func.call @add(%a, %b) : (f32, f32) -> (f32)

@@ -6,7 +6,7 @@
 
 #include "loom/target/facts.h"
 
-bool loom_target_facts_satisfy_requirement(
+bool loom_target_facts_satisfy_identity_requirement(
     const loom_target_facts_t* effective,
     const loom_target_facts_t* requirement) {
   IREE_ASSERT_ARGUMENT(effective);
@@ -15,13 +15,39 @@ bool loom_target_facts_satisfy_requirement(
     return true;
   }
   if (effective->fact_type != requirement->fact_type ||
-      effective->fact_type->satisfies_requirement == NULL) {
+      effective->fact_type->satisfies_identity_requirement == NULL) {
     return false;
   }
-  return effective->fact_type->satisfies_requirement(effective, requirement);
+  return effective->fact_type->satisfies_identity_requirement(effective,
+                                                              requirement);
 }
 
-bool loom_target_facts_structural_satisfy_requirement(
+bool loom_target_facts_selector_satisfies_identity_requirement(
+    const loom_target_facts_t* effective,
+    const loom_target_facts_t* requirement) {
+  IREE_ASSERT_ARGUMENT(effective);
+  IREE_ASSERT_ARGUMENT(requirement);
+  return effective->fact_type == requirement->fact_type &&
+         effective->selector == requirement->selector;
+}
+
+bool loom_target_facts_satisfy_specialization_requirement(
+    const loom_target_facts_t* effective,
+    const loom_target_facts_t* requirement) {
+  IREE_ASSERT_ARGUMENT(effective);
+  IREE_ASSERT_ARGUMENT(requirement);
+  if (effective == requirement) {
+    return true;
+  }
+  if (effective->fact_type != requirement->fact_type ||
+      effective->fact_type->satisfies_specialization_requirement == NULL) {
+    return false;
+  }
+  return effective->fact_type->satisfies_specialization_requirement(
+      effective, requirement);
+}
+
+bool loom_target_facts_structural_satisfy_specialization_requirement(
     const loom_target_facts_t* effective,
     const loom_target_facts_t* requirement) {
   IREE_ASSERT_ARGUMENT(effective);
@@ -30,7 +56,7 @@ bool loom_target_facts_structural_satisfy_requirement(
       effective->selector != requirement->selector) {
     return false;
   }
-  return loom_target_snapshot_satisfies_requirement(
+  return loom_target_snapshot_satisfies_specialization_requirement(
              &effective->storage.snapshot, &requirement->storage.snapshot) &&
          iree_string_view_equal(effective->storage.config.contract_set_key,
                                 requirement->storage.config.contract_set_key) &&
@@ -43,7 +69,7 @@ static bool loom_target_limit_satisfies(uint64_t effective_limit,
   return required_limit == 0 || effective_limit >= required_limit;
 }
 
-bool loom_target_snapshot_satisfies_requirement(
+bool loom_target_snapshot_satisfies_specialization_requirement(
     const loom_target_snapshot_t* effective_snapshot,
     const loom_target_snapshot_t* target_requirement) {
   IREE_ASSERT_ARGUMENT(effective_snapshot);

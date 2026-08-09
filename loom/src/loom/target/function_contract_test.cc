@@ -14,6 +14,7 @@
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/func/ops.h"
 #include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/target/facts.h"
@@ -36,6 +37,7 @@ class TargetFunctionContractTest : public ::testing::Test {
     loom_context_initialize(iree_allocator_system(), &context_);
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_LOW, loom_low_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     loom_target_core_test_low_descriptor_registry_initialize(&low_registry_);
@@ -272,6 +274,72 @@ low.kernel.def target<test.low.core>(@test_target) export("dispatch") linkage(de
   EXPECT_EQ(
       launch_facts->storage.export_plan.hal_kernel.required_workgroup_size.z,
       1u);
+}
+
+TEST_F(TargetFunctionContractTest,
+       InternalFactRefinementDoesNotInheritArtifactContract) {
+  ModulePtr module = ParseModule(R"(
+test.target<low_core> @test_target
+
+func.def @helper() {
+  func.return
+}
+)");
+
+  const loom_func_symbol_facts_t* func_facts =
+      LookupFunc(module.get(), IREE_SV("helper"));
+  const loom_target_facts_t* base_facts =
+      LookupTarget(module.get(), IREE_SV("test_target"))->projection;
+  ASSERT_EQ(base_facts->storage.export_plan.abi_kind,
+            LOOM_TARGET_ABI_OBJECT_FUNCTION);
+  ASSERT_EQ(base_facts->storage.export_plan.linkage,
+            LOOM_TARGET_LINKAGE_DSO_LOCAL);
+
+  bool valid = false;
+  const loom_target_facts_t* effective_facts = nullptr;
+  IREE_ASSERT_OK(loom_target_function_contract_refine_internal_facts(
+      module.get(), func_facts, IREE_SV("test_target"), base_facts,
+      iree_diagnostic_emitter_t{}, &analysis_arena_, &valid, &effective_facts));
+  ASSERT_TRUE(valid);
+  ASSERT_NE(effective_facts, nullptr);
+  EXPECT_EQ(effective_facts->storage.export_plan.abi_kind,
+            LOOM_TARGET_ABI_UNKNOWN);
+  EXPECT_EQ(effective_facts->storage.export_plan.linkage,
+            LOOM_TARGET_LINKAGE_DEFAULT);
+  EXPECT_TRUE(iree_string_view_equal(effective_facts->storage.export_plan.name,
+                                     IREE_SV("helper")));
+  EXPECT_TRUE(iree_string_view_is_empty(
+      effective_facts->storage.export_plan.export_symbol));
+  EXPECT_EQ(base_facts->storage.export_plan.abi_kind,
+            LOOM_TARGET_ABI_OBJECT_FUNCTION);
+  EXPECT_EQ(base_facts->storage.export_plan.linkage,
+            LOOM_TARGET_LINKAGE_DSO_LOCAL);
+}
+
+TEST_F(TargetFunctionContractTest, InternalFactRefinementPreservesAuthoredAbi) {
+  ModulePtr module = ParseModule(R"(
+test.target<low_core> @test_target
+
+func.def abi(object_function) @helper() {
+  func.return
+}
+)");
+
+  const loom_func_symbol_facts_t* func_facts =
+      LookupFunc(module.get(), IREE_SV("helper"));
+  const loom_target_facts_t* base_facts =
+      LookupTarget(module.get(), IREE_SV("test_target"))->projection;
+  bool valid = false;
+  const loom_target_facts_t* effective_facts = nullptr;
+  IREE_ASSERT_OK(loom_target_function_contract_refine_internal_facts(
+      module.get(), func_facts, IREE_SV("test_target"), base_facts,
+      iree_diagnostic_emitter_t{}, &analysis_arena_, &valid, &effective_facts));
+  ASSERT_TRUE(valid);
+  ASSERT_NE(effective_facts, nullptr);
+  EXPECT_EQ(effective_facts->storage.export_plan.abi_kind,
+            LOOM_TARGET_ABI_OBJECT_FUNCTION);
+  EXPECT_TRUE(loom_target_facts_field_is_authored(effective_facts,
+                                                  LOOM_TARGET_FACT_FIELD_ABI));
 }
 
 TEST_F(TargetFunctionContractTest,

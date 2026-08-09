@@ -194,6 +194,35 @@ TEST_F(ConditionFactsTest, ExactOperandFactsPreserveStructuralRelation) {
   EXPECT_EQ(relation.right.value_id, upper_bound);
 }
 
+TEST_F(ConditionFactsTest, ExactOperandFactsProveEquivalentLiteralRelation) {
+  loom_value_id_t value = DefineIndexValue();
+  loom_value_id_t expected = DefineIndexValue();
+  DefineFacts(expected, loom_value_facts_exact_i64(32));
+  loom_op_t* compare =
+      BuildIndexCompare(LOOM_INDEX_CMP_PREDICATE_EQ, value, expected);
+  Query(loom_index_cmp_result(compare), /*assumed_truth=*/false);
+
+  const loom_condition_integer_relation_t queried = {
+      /*.relation=*/LOOM_SYMBOLIC_INTEGER_RELATION_EQ,
+      /*.left=*/
+      {
+          /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+          /*.value_id=*/value,
+          /*.constant=*/0,
+      },
+      /*.right=*/
+      {
+          /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
+          /*.value_id=*/LOOM_VALUE_ID_INVALID,
+          /*.constant=*/32,
+      },
+  };
+  bool result = true;
+  EXPECT_TRUE(loom_condition_fact_set_proves_integer_relation(
+      &condition_facts_, &fact_table_, &queried, &result));
+  EXPECT_FALSE(result);
+}
+
 TEST_F(ConditionFactsTest, AppliesConstantRelationToValueFacts) {
   loom_value_id_t induction = DefineIndexValue();
   loom_value_id_t upper_bound = DefineIndexValue();
@@ -367,13 +396,25 @@ TEST_F(ConditionFactsTest, BooleanAndFalseEdgeIsDisjunctiveWithoutKnownSide) {
   EXPECT_EQ(condition_facts_.integer_relation_count, 0u);
 }
 
-TEST_F(ConditionFactsTest, UnknownConditionProducesNoFacts) {
+TEST_F(ConditionFactsTest, OpaqueBooleanConditionProducesEdgeFact) {
   loom_value_id_t condition =
       DefineValue(loom_type_scalar(LOOM_SCALAR_TYPE_I1));
 
-  Query(condition);
+  ASSERT_TRUE(Query(condition));
 
-  EXPECT_EQ(condition_facts_.integer_relation_count, 0u);
+  ASSERT_EQ(condition_facts_.integer_relation_count, 1u);
+  const loom_condition_integer_relation_t& true_relation =
+      condition_facts_.integer_relations[0];
+  EXPECT_EQ(true_relation.relation, LOOM_SYMBOLIC_INTEGER_RELATION_EQ);
+  EXPECT_EQ(true_relation.left.kind, LOOM_CONDITION_INTEGER_OPERAND_VALUE);
+  EXPECT_EQ(true_relation.left.value_id, condition);
+  EXPECT_EQ(true_relation.right.kind, LOOM_CONDITION_INTEGER_OPERAND_CONSTANT);
+  EXPECT_EQ(true_relation.right.constant, 1);
+
+  ASSERT_TRUE(Query(condition, /*assumed_truth=*/false));
+
+  ASSERT_EQ(condition_facts_.integer_relation_count, 1u);
+  EXPECT_EQ(condition_facts_.integer_relations[0].right.constant, 0);
 }
 
 TEST_F(ConditionFactsTest, RelationCapacityOverflowIsIncomplete) {

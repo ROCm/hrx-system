@@ -739,7 +739,7 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   loom_target_facts_t* exact_facts = nullptr;
   IREE_ASSERT_OK(loom_target_profile_project_facts(
       &target_profile.base, &version_arena, &exact_facts));
-  ASSERT_TRUE(loom_target_facts_satisfy_requirement(
+  ASSERT_TRUE(loom_target_facts_satisfy_specialization_requirement(
       exact_facts, authored_target->projection));
   loom_target_facts_builder_apply_requirement(authored_target->projection,
                                               exact_facts);

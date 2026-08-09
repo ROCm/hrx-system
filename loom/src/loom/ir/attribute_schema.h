@@ -83,8 +83,9 @@ typedef struct loom_attr_descriptor_t {
   union {
     // Expected symbol target contract for SYMBOL attributes.
     const loom_symbol_reference_descriptor_t* symbol_ref;
-    // Expected family kind for PARAMETERIZED attributes, or
-    // LOOM_PARAMETERIZED_ATTR_KIND_ANY when open.
+    // Expected family kind for PARAMETERIZED attributes and every element of
+    // PARAMETERIZED_ARRAY attributes, or LOOM_PARAMETERIZED_ATTR_KIND_ANY when
+    // open.
     loom_parameterized_attr_kind_t parameterized_attr_kind;
   } reference;
 } loom_attr_descriptor_t;
@@ -161,7 +162,7 @@ static inline bool loom_attr_descriptor_accepts_kind(
   }
   return kind > LOOM_ATTR_ABSENT && kind < LOOM_ATTR_COUNT_ &&
          kind != LOOM_ATTR_ANY && kind != LOOM_ATTR_SCOPED_ENUM &&
-         kind != LOOM_ATTR_ENUM_ARRAY;
+         kind != LOOM_ATTR_ENUM_ARRAY && kind != LOOM_ATTR_PARAMETERIZED_ARRAY;
 }
 
 // Returns the explicit zero/false scalar value implied by ELIDE_DEFAULT.

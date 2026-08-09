@@ -39,12 +39,26 @@ typedef struct loom_target_pass_capability_t {
 
   // Invocation-local concrete function versions, or NULL.
   const loom_function_version_list_t* function_versions;
+
+  // Mutable owner of |function_versions|, or NULL for read-only capabilities.
+  loom_function_version_owner_t* function_version_owner;
+
+  // True when pass-program executions supply a mutable function-version
+  // owner. The owner may be NULL while compiling a pass program before an
+  // invocation exists.
+  bool supports_mutable_function_versions;
 } loom_target_pass_capability_t;
 
 // Creates a borrowed target pass capability.
 loom_target_pass_capability_t loom_target_pass_capability_make(
     const loom_target_environment_t* target_environment,
     const loom_function_version_list_t* function_versions);
+
+// Creates a borrowed target pass capability whose function versions may be
+// extended by module passes. |function_version_owner| may be NULL.
+loom_target_pass_capability_t loom_target_pass_capability_make_mutable(
+    const loom_target_environment_t* target_environment,
+    loom_function_version_owner_t* function_version_owner);
 
 // Looks up the target capability from |environment|. Returns NULL when absent.
 const loom_target_pass_capability_t*
@@ -63,6 +77,12 @@ const loom_target_environment_t* loom_target_pass_capability_target_environment(
 // Returns the invocation-local concrete function versions, or NULL.
 const loom_function_version_list_t*
 loom_target_pass_capability_function_versions(
+    const loom_target_pass_capability_t* capability);
+
+// Returns the mutable invocation-local function-version owner, or NULL when
+// the capability exposes only a read-only list.
+loom_function_version_owner_t*
+loom_target_pass_capability_function_version_owner(
     const loom_target_pass_capability_t* capability);
 
 // Resolves the immutable effective target facts for the active function pass.

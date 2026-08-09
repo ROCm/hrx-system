@@ -45,6 +45,7 @@ from loom.dsl import (
     ATTR_TYPE_I64,
     ATTR_TYPE_I64_ARRAY,
     ATTR_TYPE_PARAMETERIZED,
+    ATTR_TYPE_PARAMETERIZED_ARRAY,
     ATTR_TYPE_PREDICATE_LIST,
     ATTR_TYPE_STRING,
     ATTR_TYPE_SYMBOL,
@@ -101,7 +102,7 @@ from loom.dsl import (
     SymbolDefinitionFlag,
     SymbolKernelContract,
     SymbolValueContract,
-    TargetFactSatisfaction,
+    TargetFactSpecialization,
     TargetLikeInterface,
     TotalBitCountEqual,
     TypeConstraint,
@@ -357,6 +358,8 @@ def test_generate_parameterized_attribute_family_metadata() -> None:
         "test.tile",
         group=dialect,
         parameters=[AttrDef("width", ATTR_TYPE_I64)],
+        primary_parameter="width",
+        target_condition="loom_test_tile_condition",
     )
     options = ParameterizedAttrDef(
         "test.options",
@@ -389,6 +392,7 @@ def test_generate_parameterized_attribute_family_metadata() -> None:
     tables_c = generate_tables_c("test", 0x01, [holder], [tile, options])
 
     assert "LOOM_PARAMETERIZED_ATTR_TEST_TILE" in ops_h
+    assert "extern const loom_target_condition_descriptor_t loom_test_tile_condition;" in ops_h
     assert "loom_test_tile_attr_make(" in ops_h
     assert "loom_test_options_attr_make(" in ops_h
     assert "LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_SCOPES" in ops_h
@@ -399,6 +403,9 @@ def test_generate_parameterized_attribute_family_metadata() -> None:
     assert "slots[0] = loom_attr_i64(width);" in builders_c
     assert "slots[1] = tile;" in builders_c
     assert '.name = _BSTRING(12, "test.options")' in tables_c
+    assert ".target_condition = &loom_test_tile_condition" in tables_c
+    assert ".primary_parameter_index = 0" in tables_c
+    assert tables_c.count(".primary_parameter_index = LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER") == 1
     assert ".attr_kind = LOOM_ATTR_ENUM_ARRAY" in tables_c
     assert ".flags = LOOM_ATTR_OPTIONAL | LOOM_ATTR_OPEN_ENUM" in tables_c
     assert ".attr_kind = LOOM_ATTR_PARAMETERIZED" in tables_c
@@ -479,6 +486,80 @@ def test_generate_encoding_families_share_enum_vocabulary() -> None:
     assert tables_c.count(".enum_case_names = loom_encoding_rounding_policy_names") == 2
 
 
+def test_generate_parameterized_attribute_array_surface() -> None:
+    dialect = Dialect("test", dialect_id=0x01)
+    tile = ParameterizedAttrDef(
+        "test.tile",
+        group=dialect,
+        parameters=[AttrDef("width", ATTR_TYPE_I64)],
+        primary_parameter="width",
+    )
+    node = ParameterizedAttrDef(
+        "test.node",
+        group=dialect,
+        parameters=[
+            AttrDef("value", ATTR_TYPE_I64),
+            AttrDef(
+                "children",
+                ATTR_TYPE_PARAMETERIZED_ARRAY,
+                optional=True,
+            ),
+            AttrDef(
+                "tiles",
+                ATTR_TYPE_PARAMETERIZED_ARRAY,
+                optional=True,
+                parameterized_attr=tile,
+            ),
+        ],
+        primary_parameter="value",
+    )
+    holder = Op(
+        "test.holder",
+        group=dialect,
+        attrs=[
+            AttrDef("values", ATTR_TYPE_PARAMETERIZED_ARRAY),
+            AttrDef(
+                "tiles",
+                ATTR_TYPE_PARAMETERIZED_ARRAY,
+                optional=True,
+                parameterized_attr=tile,
+            ),
+        ],
+        format=[
+            Attr("values"),
+            OptionalGroup([Attr("tiles")], anchor="tiles"),
+        ],
+    )
+    wrapper = TypeDef(
+        "test.wrapper",
+        params=[
+            AttrDef(
+                "children",
+                ATTR_TYPE_PARAMETERIZED_ARRAY,
+            )
+        ],
+        format=[Param("children")],
+    )
+
+    ops_h = generate_ops_h("test", 0x01, [holder], [tile, node])
+    builders_c = generate_builders_c("test", [holder], [tile, node])
+    tables_c = generate_tables_c("test", 0x01, [holder], [tile, node])
+    type_registry_h, _, type_registry_tables_c = generate_type_registry([wrapper])
+
+    assert "LOOM_DEFINE_ATTR_PARAMETERIZED_ARRAY(loom_test_holder_values, 0)" in ops_h
+    assert "loom_parameterized_attr_array_t values" in ops_h
+    assert "loom_optional loom_parameterized_attr_array_t tiles" in ops_h
+    assert "loom_module_make_parameterized_attr_array(" in builders_c
+    assert "loom_attr_parameterized_array(children.values, children.count)" in builders_c
+    assert "loom_attr_parameterized_array(tiles.values, tiles.count)" in builders_c
+    assert ".attr_kind = LOOM_ATTR_PARAMETERIZED_ARRAY" in tables_c
+    assert ".reference.parameterized_attr_kind = LOOM_PARAMETERIZED_ATTR_KIND_ANY" in tables_c
+    assert ".reference.parameterized_attr_kind = LOOM_PARAMETERIZED_ATTR_TEST_TILE" in tables_c
+    assert "loom_parameterized_attr_array_t children" in type_registry_h
+    assert "loom_attr_as_parameterized_array(" in type_registry_h
+    assert ".reference.parameterized_attr_kind = LOOM_PARAMETERIZED_ATTR_KIND_ANY" in type_registry_tables_c
+
+
 def test_generate_dialect_tables_emit_dense_op_semantics() -> None:
     dialect = Dialect(
         "test",
@@ -524,7 +605,7 @@ def _target_projection_test_op(
     *,
     fact_type: str | None = None,
     fact_projector: str | None = None,
-    fact_satisfaction: TargetFactSatisfaction = TargetFactSatisfaction.IDENTITY,
+    fact_specialization: TargetFactSpecialization = TargetFactSpecialization.EXACT,
 ) -> Op:
     kind = EnumDef("TargetKind", [EnumCase("generic", 0)])
     abi = EnumDef("TargetAbi", [EnumCase("unknown", 0)])
@@ -548,7 +629,7 @@ def _target_projection_test_op(
                 bundle_table="loom_test_target_bundles",
                 fact_type=fact_type,
                 fact_projector=fact_projector,
-                fact_satisfaction=fact_satisfaction,
+                fact_specialization=fact_specialization,
             )
         ],
     )
@@ -572,14 +653,15 @@ def test_generate_target_projection_emits_typed_fact_contract() -> None:
     tables_c = generate_tables_c(
         "test",
         0,
-        [_target_projection_test_op(fact_satisfaction=TargetFactSatisfaction.STRUCTURAL)],
+        [_target_projection_test_op(fact_specialization=TargetFactSpecialization.STRUCTURAL)],
     )
 
     assert '#include "loom/ops/target/facts.h"' in tables_c
     assert "static const loom_target_fact_type_t loom_test_target_fact_type = {" in tables_c
     assert '.name = IREE_SVL("test"),' in tables_c
     assert ".storage_size = sizeof(loom_target_facts_t)," in tables_c
-    assert ".satisfies_requirement = loom_target_facts_structural_satisfy_requirement," in tables_c
+    assert ".satisfies_identity_requirement = loom_target_facts_selector_satisfies_identity_requirement," in tables_c
+    assert (".satisfies_specialization_requirement = loom_target_facts_structural_satisfy_specialization_requirement,") in tables_c
     assert ".fact_type = &loom_test_target_fact_type," in tables_c
 
 
@@ -612,14 +694,14 @@ def test_generate_target_projection_rejects_projector_without_family_facts() -> 
 
 
 def test_generate_target_projection_rejects_split_fact_ownership() -> None:
-    with _raises_value_error(r"external fact type owns its satisfaction"):
+    with _raises_value_error(r"external fact type owns its specialization"):
         generate_tables_c(
             "test",
             0,
             [
                 _target_projection_test_op(
                     fact_type="loom_test_custom_fact_type",
-                    fact_satisfaction=TargetFactSatisfaction.STRUCTURAL,
+                    fact_specialization=TargetFactSpecialization.STRUCTURAL,
                 )
             ],
         )
@@ -1104,6 +1186,23 @@ def test_generate_builders_use_explicit_flags_for_optional_scalar_attrs() -> Non
     assert "loom_test_optional_build_flags_t build_flags" in builders_c
     assert ("iree_any_bit_set(build_flags, LOOM_TEST_OPTIONAL_BUILD_FLAG_HAS_PRIORITY)") in builders_c
     assert "priority != 0" not in builders_c
+
+
+def test_generate_builders_escape_c_and_cpp_keyword_parameters() -> None:
+    op = Op(
+        "test.keyword",
+        group=Dialect("test"),
+        attrs=[AttrDef("requires", "i64")],
+        format=[Attr("requires")],
+    )
+
+    ops_h = generate_ops_h("test", 0, [op])
+    builders_c = generate_builders_c("test", [op])
+
+    assert "int64_t requires_" in ops_h
+    assert "int64_t requires_" in builders_c
+    assert "loom_attr_i64(requires_)" in builders_c
+    assert "LOOM_DEFINE_ATTR_I64(loom_test_keyword_requires," in ops_h
 
 
 def test_generate_builders_use_explicit_flags_for_optional_symbol_refs() -> None:

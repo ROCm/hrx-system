@@ -88,7 +88,7 @@ typedef struct loom_compile_pipeline_result_t {
   iree_arena_allocator_t version_arena;
 
   // Concrete function versions produced for this invocation.
-  loom_function_version_list_t function_versions;
+  loom_function_version_owner_t function_versions;
 
   // Pass diagnostics observed while executing the selected pipeline.
   loom_pass_run_result_t pass;

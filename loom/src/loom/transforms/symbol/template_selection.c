@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "loom/analysis/condition_facts.h"
 #include "loom/analysis/func_provider_catalog.h"
 #include "loom/analysis/symbol_dependencies.h"
 #include "loom/analysis/symbol_facts.h"
@@ -19,15 +20,18 @@
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/scf/ops.h"
 #include "loom/ops/target/facts.h"
 #include "loom/pass/pipeline.h"
 #include "loom/pass/registry.h"
 #include "loom/pass/report.h"
 #include "loom/pass/value_facts.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/target/condition.h"
 #include "loom/target/pass_environment.h"
 #include "loom/transforms/symbol/symbol_equivalence.h"
 #include "loom/transforms/symbol/symbol_pruning.h"
+#include "loom/util/bstring.h"
 
 //===----------------------------------------------------------------------===//
 // Options and statistics
@@ -52,37 +56,37 @@ static const loom_pass_option_def_t kTemplateSelectionOptions[] = {
               "emits diagnostics for every unresolved live apply.")},
 };
 
-#define LOOM_TEMPLATE_SELECTION_STATISTICS(V, statistics_type)           \
-  V(statistics_type, apply_sites, "apply-sites",                         \
-    "Number of live func.apply sites analyzed.")                         \
-  V(statistics_type, selected_sites, "selected-sites",                   \
-    "Number of func.apply sites resolved to inline calls.")              \
-  V(statistics_type, fallback_selected_sites, "fallback-selected-sites", \
-    "Number of selected sites that used a lower-priority "               \
-    "provider while a higher-priority candidate existed.")               \
-  V(statistics_type, unresolved_sites, "unresolved-sites",               \
-    "Number of live func.apply sites left unresolved.")                  \
-  V(statistics_type, no_provider_sites, "no-provider-sites",             \
-    "Number of unresolved sites with no provider for the "               \
-    "requested contract.")                                               \
-  V(statistics_type, target_mismatch_sites, "target-mismatch-sites",     \
-    "Number of unresolved sites with no target-applicable "              \
-    "provider.")                                                         \
-  V(statistics_type, rejected_sites, "rejected-sites",                   \
-    "Number of unresolved sites whose providers were rejected "          \
-    "by signature or predicates.")                                       \
-  V(statistics_type, missing_fact_sites, "missing-fact-sites",           \
-    "Number of unresolved sites blocked by unknown predicate "           \
-    "facts.")                                                            \
-  V(statistics_type, ambiguous_sites, "ambiguous-sites",                 \
-    "Number of unresolved sites with multiple best providers.")          \
-  V(statistics_type, materialization_blocked_sites,                      \
-    "materialization-blocked-sites",                                     \
-    "Number of unresolved sites with a selected provider that "          \
-    "could not be materialized.")                                        \
-  V(statistics_type, provider_edges, "provider-edges",                   \
-    "Number of apply-generated provider liveness edges.")                \
-  V(statistics_type, symbols_pruned, "symbols-pruned",                   \
+#define LOOM_TEMPLATE_SELECTION_STATISTICS(V, statistics_type)            \
+  V(statistics_type, apply_sites, "apply-sites",                          \
+    "Number of live func.apply sites analyzed.")                          \
+  V(statistics_type, selected_sites, "selected-sites",                    \
+    "Number of func.apply sites resolved to inline calls.")               \
+  V(statistics_type, fallback_selected_sites, "fallback-selected-sites",  \
+    "Number of selected sites that used a lower-priority "                \
+    "provider while a higher-priority candidate existed.")                \
+  V(statistics_type, unresolved_sites, "unresolved-sites",                \
+    "Number of live func.apply sites left unresolved.")                   \
+  V(statistics_type, no_provider_sites, "no-provider-sites",              \
+    "Number of unresolved sites with no provider for the "                \
+    "requested contract.")                                                \
+  V(statistics_type, target_mismatch_sites, "target-mismatch-sites",      \
+    "Number of unresolved sites whose provider target identities "        \
+    "are all disproven.")                                                 \
+  V(statistics_type, rejected_sites, "rejected-sites",                    \
+    "Number of unresolved sites whose providers were rejected by "        \
+    "signature, caller context, target conditions, or value predicates.") \
+  V(statistics_type, missing_fact_sites, "missing-fact-sites",            \
+    "Number of unresolved sites with no proven provider because target, " \
+    "context, or value facts remain unknown.")                            \
+  V(statistics_type, ambiguous_sites, "ambiguous-sites",                  \
+    "Number of unresolved sites with multiple best providers.")           \
+  V(statistics_type, materialization_blocked_sites,                       \
+    "materialization-blocked-sites",                                      \
+    "Number of unresolved sites with a selected provider that "           \
+    "could not be materialized.")                                         \
+  V(statistics_type, provider_edges, "provider-edges",                    \
+    "Number of apply-generated provider liveness edges.")                 \
+  V(statistics_type, symbols_pruned, "symbols-pruned",                    \
     "Number of unreachable private symbols pruned after selection.")
 
 LOOM_PASS_STATISTICS_DEFINE(loom_template_selection_statistics,
@@ -204,6 +208,28 @@ typedef enum loom_template_provider_feasibility_e {
   LOOM_TEMPLATE_PROVIDER_MATCH = 2,
 } loom_template_provider_feasibility_t;
 
+typedef enum loom_template_provider_unresolved_reason_e {
+  LOOM_TEMPLATE_PROVIDER_UNRESOLVED_NONE = 0,
+  LOOM_TEMPLATE_PROVIDER_UNRESOLVED_TARGET_IDENTITY = 1,
+  LOOM_TEMPLATE_PROVIDER_UNRESOLVED_CALLER_CONTEXT = 2,
+  LOOM_TEMPLATE_PROVIDER_UNRESOLVED_TARGET_CONDITION = 3,
+  LOOM_TEMPLATE_PROVIDER_UNRESOLVED_VALUE_PREDICATE = 4,
+} loom_template_provider_unresolved_reason_t;
+
+typedef struct loom_template_provider_classification_t {
+  // Combined signature, target, context, condition, and predicate outcome.
+  loom_template_provider_feasibility_t feasibility;
+
+  // Target-identity outcome before other provider requirements are applied.
+  loom_template_provider_feasibility_t target_feasibility;
+
+  // First unresolved requirement category in deterministic evaluation order.
+  loom_template_provider_unresolved_reason_t unresolved_reason;
+
+  // First unresolved typed target condition, or NULL for other categories.
+  const loom_target_condition_t* unresolved_target_condition;
+} loom_template_provider_classification_t;
+
 typedef enum loom_template_predicate_arg_kind_e {
   LOOM_TEMPLATE_PREDICATE_ARG_INVALID = 0,
   LOOM_TEMPLATE_PREDICATE_ARG_CONST = 1,
@@ -252,11 +278,20 @@ typedef struct loom_template_selection_entry_t {
   // Selected provider when action is SELECT or materialization is blocked.
   const loom_func_provider_summary_t* selected_provider;
 
+  // Highest-priority provider whose applicability remains unproven.
+  const loom_func_provider_summary_t* unresolved_provider;
+
+  // First unresolved target condition on unresolved_provider, or NULL.
+  const loom_target_condition_t* unresolved_target_condition;
+
   // Selection action for this apply.
   loom_template_selection_action_t action;
 
   // Reason an unresolved apply could not be selected.
   loom_template_selection_blocker_t blocker;
+
+  // First unresolved requirement category on unresolved_provider.
+  loom_template_provider_unresolved_reason_t unresolved_reason;
 } loom_template_selection_entry_t;
 
 typedef struct loom_template_provider_equivalence_t {
@@ -324,6 +359,15 @@ typedef struct loom_template_selection_state_t {
     // Allocated entries.
     iree_host_size_t capacity;
   } equivalence_cache;
+
+  // Reusable branch-relation storage for the apply site being classified.
+  struct {
+    // Relations implied by structured control-flow ancestors.
+    loom_condition_integer_relation_t* relations;
+
+    // Allocated relation count.
+    iree_host_size_t capacity;
+  } application_path_scratch;
 } loom_template_selection_state_t;
 
 static iree_string_view_t loom_template_selection_contract_name(
@@ -358,6 +402,39 @@ static iree_string_view_t loom_template_selection_context_symbol_name(
     return IREE_SV("<none>");
   }
   return state->module->strings.entries[context->source_symbol->name_id];
+}
+
+static iree_string_view_t loom_template_selection_unresolved_reason_code(
+    loom_template_provider_unresolved_reason_t reason) {
+  switch (reason) {
+    case LOOM_TEMPLATE_PROVIDER_UNRESOLVED_TARGET_IDENTITY:
+      return IREE_SV("target_identity");
+    case LOOM_TEMPLATE_PROVIDER_UNRESOLVED_CALLER_CONTEXT:
+      return IREE_SV("caller_context");
+    case LOOM_TEMPLATE_PROVIDER_UNRESOLVED_TARGET_CONDITION:
+      return IREE_SV("target_condition");
+    case LOOM_TEMPLATE_PROVIDER_UNRESOLVED_VALUE_PREDICATE:
+      return IREE_SV("value_predicate");
+    case LOOM_TEMPLATE_PROVIDER_UNRESOLVED_NONE:
+    default:
+      return IREE_SV("none");
+  }
+}
+
+static iree_string_view_t loom_template_selection_target_condition_name(
+    const loom_template_selection_state_t* state,
+    const loom_target_condition_t* condition) {
+  const loom_parameterized_attr_kind_t family_kind =
+      loom_attr_as_parameterized_kind(condition->value);
+  const loom_parameterized_attr_descriptor_t* family =
+      loom_context_resolve_parameterized_attr(state->module->context,
+                                              family_kind);
+  if (family == NULL) {
+    IREE_ASSERT_UNREACHABLE(
+        "resolved target condition family disappeared from its context");
+    IREE_BUILTIN_UNREACHABLE();
+  }
+  return loom_bstring_view(family->name);
 }
 
 static iree_string_view_t loom_template_selection_blocker_code(
@@ -466,6 +543,14 @@ typedef struct loom_template_selection_apply_target_t {
   const loom_target_facts_t* facts;
 } loom_template_selection_apply_target_t;
 
+typedef struct loom_template_selection_application_facts_t {
+  // Function-scoped SSA facts projected with the effective target facts.
+  const loom_value_fact_table_t* values;
+
+  // Facts established only along the lexical path to this func.apply.
+  loom_condition_fact_set_t path;
+} loom_template_selection_application_facts_t;
+
 static iree_status_t loom_template_selection_lookup_target_facts(
     loom_template_selection_state_t* state, loom_symbol_ref_t target_ref,
     const loom_target_facts_t** out_target) {
@@ -517,32 +602,37 @@ static iree_status_t loom_template_selection_resolve_apply_target(
                                                      &out_target->facts);
 }
 
-static iree_status_t loom_template_selection_provider_applies_to_target(
+static iree_status_t loom_template_selection_provider_target_feasibility(
     loom_template_selection_state_t* state,
     const loom_template_selection_apply_target_t* apply_target,
-    const loom_func_provider_summary_t* provider, bool* out_applies) {
-  *out_applies = false;
+    const loom_func_provider_summary_t* provider,
+    loom_template_provider_feasibility_t* out_feasibility) {
+  *out_feasibility = LOOM_TEMPLATE_PROVIDER_REJECT;
   if (!loom_symbol_ref_is_valid(provider->target_symbol)) {
-    *out_applies = true;
+    *out_feasibility = LOOM_TEMPLATE_PROVIDER_MATCH;
     return iree_ok_status();
   }
   if (loom_symbol_ref_is_valid(apply_target->witness) &&
       provider->target_symbol.module_id == apply_target->witness.module_id &&
       provider->target_symbol.symbol_id == apply_target->witness.symbol_id) {
-    *out_applies = true;
+    *out_feasibility = LOOM_TEMPLATE_PROVIDER_MATCH;
     return iree_ok_status();
   }
   if (apply_target->facts == NULL) {
+    *out_feasibility = LOOM_TEMPLATE_PROVIDER_MAYBE;
     return iree_ok_status();
   }
   const loom_target_facts_t* target_requirement = NULL;
   IREE_RETURN_IF_ERROR(loom_template_selection_lookup_target_facts(
       state, provider->target_symbol, &target_requirement));
   if (target_requirement == NULL) {
+    *out_feasibility = LOOM_TEMPLATE_PROVIDER_MAYBE;
     return iree_ok_status();
   }
-  *out_applies = loom_target_facts_satisfy_requirement(apply_target->facts,
-                                                       target_requirement);
+  *out_feasibility = loom_target_facts_satisfy_identity_requirement(
+                         apply_target->facts, target_requirement)
+                         ? LOOM_TEMPLATE_PROVIDER_MATCH
+                         : LOOM_TEMPLATE_PROVIDER_REJECT;
   return iree_ok_status();
 }
 
@@ -551,14 +641,14 @@ static iree_status_t loom_template_selection_append_report_detail(
     const loom_symbol_liveness_contributor_context_t* context,
     const loom_template_selection_entry_t* entry,
     const loom_template_selection_apply_target_t* apply_target,
-    iree_host_size_t provider_count, uint32_t target_applicable_count,
-    uint32_t possible_count, uint32_t best_exact_count,
-    int64_t highest_provider_priority) {
+    iree_host_size_t provider_count, uint32_t target_identity_match_count,
+    uint32_t target_identity_unresolved_count, uint32_t possible_count,
+    uint32_t best_match_count, int64_t highest_provider_priority) {
   if (!state->reports_enabled) {
     return iree_ok_status();
   }
 
-  loom_pass_report_detail_field_t fields[12];
+  loom_pass_report_detail_field_t fields[17];
   uint16_t field_count = 0;
   fields[field_count++] = loom_pass_report_detail_string_field(
       IREE_SV("outcome"),
@@ -586,6 +676,22 @@ static iree_status_t loom_template_selection_append_report_detail(
     fields[field_count++] = loom_pass_report_detail_int64_field(
         IREE_SV("selected_priority"), entry->selected_provider->priority);
   }
+  if (entry->unresolved_provider) {
+    fields[field_count++] = loom_pass_report_detail_string_field(
+        IREE_SV("unresolved_provider"), entry->unresolved_provider->name);
+    fields[field_count++] = loom_pass_report_detail_int64_field(
+        IREE_SV("unresolved_priority"), entry->unresolved_provider->priority);
+    fields[field_count++] = loom_pass_report_detail_string_field(
+        IREE_SV("unresolved_reason"),
+        loom_template_selection_unresolved_reason_code(
+            entry->unresolved_reason));
+  }
+  if (entry->unresolved_target_condition) {
+    fields[field_count++] = loom_pass_report_detail_string_field(
+        IREE_SV("unresolved_condition"),
+        loom_template_selection_target_condition_name(
+            state, entry->unresolved_target_condition));
+  }
   if (provider_count > 0) {
     fields[field_count++] = loom_pass_report_detail_int64_field(
         IREE_SV("highest_provider_priority"), highest_provider_priority);
@@ -593,11 +699,14 @@ static iree_status_t loom_template_selection_append_report_detail(
   fields[field_count++] = loom_pass_report_detail_uint64_field(
       IREE_SV("provider_count"), (uint64_t)provider_count);
   fields[field_count++] = loom_pass_report_detail_uint64_field(
-      IREE_SV("target_applicable_count"), target_applicable_count);
+      IREE_SV("target_identity_match_count"), target_identity_match_count);
+  fields[field_count++] = loom_pass_report_detail_uint64_field(
+      IREE_SV("target_identity_unresolved_count"),
+      target_identity_unresolved_count);
   fields[field_count++] = loom_pass_report_detail_uint64_field(
       IREE_SV("possible_count"), possible_count);
   fields[field_count++] = loom_pass_report_detail_uint64_field(
-      IREE_SV("best_exact_count"), best_exact_count);
+      IREE_SV("best_match_count"), best_match_count);
   return loom_pass_report_append_detail(
       state->pass, IREE_SV("template-selection"), fields, field_count);
 }
@@ -659,11 +768,80 @@ static iree_status_t loom_template_selection_types_match(
   return iree_ok_status();
 }
 
-static iree_status_t loom_template_selection_apply_fact_table(
+static bool loom_template_selection_collect_application_path_facts(
+    const loom_module_t* module, const loom_value_fact_table_t* value_facts,
+    const loom_op_t* apply_op, loom_condition_fact_set_t* out_path) {
+  bool complete = true;
+  const loom_op_t* child = apply_op;
+  for (const loom_op_t* ancestor = apply_op->parent_op; ancestor;
+       child = ancestor, ancestor = ancestor->parent_op) {
+    if (!loom_scf_if_isa(ancestor) || child->parent_block == NULL) continue;
+    const loom_region_t* child_region = child->parent_block->parent_region;
+    bool assumed_truth = false;
+    if (child_region == loom_scf_if_then_region(ancestor)) {
+      assumed_truth = true;
+    } else if (child_region != loom_scf_if_else_region(ancestor)) {
+      continue;
+    }
+    const bool edge_complete = loom_condition_facts_query_into(
+        module, value_facts, loom_scf_if_condition(ancestor), assumed_truth,
+        out_path);
+    complete = edge_complete && complete;
+  }
+  return complete;
+}
+
+static iree_status_t loom_template_selection_grow_application_path_scratch(
+    loom_template_selection_state_t* state, iree_host_size_t new_capacity) {
+  IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+      state->pass->arena, state->application_path_scratch.capacity,
+      new_capacity, sizeof(*state->application_path_scratch.relations),
+      &state->application_path_scratch.capacity,
+      (void**)&state->application_path_scratch.relations));
+  return iree_ok_status();
+}
+
+static iree_status_t loom_template_selection_prepare_application_path_facts(
+    loom_template_selection_state_t* state,
+    const loom_value_fact_table_t* value_facts, const loom_op_t* apply_op,
+    loom_template_selection_application_facts_t* out_facts) {
+  if (state->application_path_scratch.capacity == 0) {
+    IREE_RETURN_IF_ERROR(
+        loom_template_selection_grow_application_path_scratch(state, 16));
+  }
+
+  for (;;) {
+    loom_condition_fact_set_initialize(
+        state->application_path_scratch.relations,
+        state->application_path_scratch.capacity, &out_facts->path);
+    const bool path_complete =
+        loom_template_selection_collect_application_path_facts(
+            state->module, value_facts, apply_op, &out_facts->path);
+    if (path_complete || out_facts->path.integer_relation_count <
+                             out_facts->path.integer_relation_capacity) {
+      return iree_ok_status();
+    }
+    const iree_host_size_t old_capacity =
+        state->application_path_scratch.capacity;
+    const iree_host_size_t new_capacity = old_capacity * 2;
+    if (new_capacity <= old_capacity) {
+      return iree_make_status(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          "template selection application path fact capacity overflow");
+    }
+    IREE_RETURN_IF_ERROR(loom_template_selection_grow_application_path_scratch(
+        state, new_capacity));
+  }
+}
+
+static iree_status_t loom_template_selection_prepare_application_facts(
     loom_template_selection_state_t* state,
     const loom_symbol_liveness_contributor_context_t* context,
-    const loom_value_fact_table_t** out_table) {
-  *out_table = NULL;
+    const loom_op_t* apply_op,
+    const loom_template_selection_apply_target_t* apply_target,
+    loom_template_selection_application_facts_t* out_facts) {
+  *out_facts = (loom_template_selection_application_facts_t){0};
+  loom_condition_fact_set_initialize(NULL, 0, &out_facts->path);
   if (!context || !context->source_symbol ||
       !context->source_symbol->defining_op) {
     return iree_ok_status();
@@ -677,9 +855,12 @@ static iree_status_t loom_template_selection_apply_fact_table(
   loom_value_fact_table_t* table = NULL;
   IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
       state->pass, state->module,
-      loom_pass_value_fact_scope_function(source_function), &table));
-  *out_table = table;
-  return iree_ok_status();
+      loom_pass_value_fact_scope_function_for_target(source_function,
+                                                     apply_target->facts),
+      &table));
+  out_facts->values = table;
+  return loom_template_selection_prepare_application_path_facts(
+      state, table, apply_op, out_facts);
 }
 
 static bool loom_template_selection_remap_provider_value(
@@ -708,17 +889,39 @@ static bool loom_template_selection_remap_provider_value(
   return false;
 }
 
-static bool loom_template_selection_resolve_predicate_arg(
-    const loom_template_selection_state_t* state, const loom_op_t* apply_op,
-    const loom_func_provider_summary_t* provider,
-    const loom_value_fact_table_t* fact_table,
-    const loom_predicate_t* predicate, uint8_t argument_index,
+static void loom_template_predicate_arg_initialize(
     loom_template_predicate_arg_t* out_arg) {
   *out_arg = (loom_template_predicate_arg_t){
       .kind = LOOM_TEMPLATE_PREDICATE_ARG_INVALID,
       .value_id = LOOM_VALUE_ID_INVALID,
       .facts = loom_value_facts_unknown(),
   };
+}
+
+static bool loom_template_selection_resolve_application_value_arg(
+    const loom_template_selection_state_t* state,
+    const loom_template_selection_application_facts_t* application_facts,
+    loom_value_id_t value_id, loom_template_predicate_arg_t* out_arg) {
+  if (value_id >= state->module->values.count) return false;
+  out_arg->kind = LOOM_TEMPLATE_PREDICATE_ARG_VALUE;
+  out_arg->value_id = value_id;
+  if (application_facts->values) {
+    out_arg->facts =
+        loom_value_fact_table_lookup(application_facts->values, value_id);
+    (void)loom_condition_fact_set_apply_to_value_facts(
+        &application_facts->path, application_facts->values, value_id,
+        &out_arg->facts);
+  }
+  return true;
+}
+
+static bool loom_template_selection_resolve_provider_predicate_arg(
+    const loom_template_selection_state_t* state, const loom_op_t* apply_op,
+    const loom_func_provider_summary_t* provider,
+    const loom_template_selection_application_facts_t* application_facts,
+    const loom_predicate_t* predicate, uint8_t argument_index,
+    loom_template_predicate_arg_t* out_arg) {
+  loom_template_predicate_arg_initialize(out_arg);
   if (argument_index >= predicate->arg_count) return false;
 
   switch ((loom_predicate_arg_tag_t)predicate->arg_tags[argument_index]) {
@@ -736,14 +939,34 @@ static bool loom_template_selection_resolve_predicate_arg(
               apply_op, provider, provider_value_id, &apply_value_id)) {
         return false;
       }
-      if (apply_value_id >= state->module->values.count) return false;
-      out_arg->kind = LOOM_TEMPLATE_PREDICATE_ARG_VALUE;
-      out_arg->value_id = apply_value_id;
-      if (fact_table) {
-        out_arg->facts =
-            loom_value_fact_table_lookup(fact_table, apply_value_id);
-      }
+      return loom_template_selection_resolve_application_value_arg(
+          state, application_facts, apply_value_id, out_arg);
+    }
+    case LOOM_PRED_ARG_NONE:
+    default:
+      return false;
+  }
+}
+
+static bool loom_template_selection_resolve_application_predicate_arg(
+    const loom_template_selection_state_t* state,
+    const loom_template_selection_application_facts_t* application_facts,
+    const loom_predicate_t* predicate, uint8_t argument_index,
+    loom_template_predicate_arg_t* out_arg) {
+  loom_template_predicate_arg_initialize(out_arg);
+  if (argument_index >= predicate->arg_count) return false;
+
+  switch ((loom_predicate_arg_tag_t)predicate->arg_tags[argument_index]) {
+    case LOOM_PRED_ARG_CONST:
+      out_arg->kind = LOOM_TEMPLATE_PREDICATE_ARG_CONST;
+      out_arg->constant = predicate->args[argument_index];
+      out_arg->facts = loom_value_facts_exact_i64(out_arg->constant);
       return true;
+    case LOOM_PRED_ARG_VALUE: {
+      const int64_t raw_value_id = predicate->args[argument_index];
+      if (raw_value_id < 0 || raw_value_id > UINT32_MAX) return false;
+      return loom_template_selection_resolve_application_value_arg(
+          state, application_facts, (loom_value_id_t)raw_value_id, out_arg);
     }
     case LOOM_PRED_ARG_NONE:
     default:
@@ -765,10 +988,70 @@ static bool loom_template_predicate_arg_exact_i64(
   return loom_value_facts_as_exact_i64(arg->facts, out_value);
 }
 
+static bool loom_template_predicate_relation_kind(
+    uint8_t predicate_kind, loom_symbolic_integer_relation_t* out_relation) {
+  switch ((loom_predicate_kind_t)predicate_kind) {
+    case LOOM_PREDICATE_EQ:
+      *out_relation = LOOM_SYMBOLIC_INTEGER_RELATION_EQ;
+      return true;
+    case LOOM_PREDICATE_NE:
+      *out_relation = LOOM_SYMBOLIC_INTEGER_RELATION_NE;
+      return true;
+    case LOOM_PREDICATE_LT:
+      *out_relation = LOOM_SYMBOLIC_INTEGER_RELATION_LT;
+      return true;
+    case LOOM_PREDICATE_LE:
+      *out_relation = LOOM_SYMBOLIC_INTEGER_RELATION_LE;
+      return true;
+    case LOOM_PREDICATE_GT:
+      *out_relation = LOOM_SYMBOLIC_INTEGER_RELATION_GT;
+      return true;
+    case LOOM_PREDICATE_GE:
+      *out_relation = LOOM_SYMBOLIC_INTEGER_RELATION_GE;
+      return true;
+    default:
+      return false;
+  }
+}
+
+static bool loom_template_predicate_arg_as_condition_operand(
+    const loom_template_predicate_arg_t* arg,
+    loom_condition_integer_operand_t* out_operand) {
+  *out_operand = (loom_condition_integer_operand_t){0};
+  switch (arg->kind) {
+    case LOOM_TEMPLATE_PREDICATE_ARG_CONST:
+      out_operand->kind = LOOM_CONDITION_INTEGER_OPERAND_CONSTANT;
+      out_operand->constant = arg->constant;
+      return true;
+    case LOOM_TEMPLATE_PREDICATE_ARG_VALUE:
+      out_operand->kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE;
+      out_operand->value_id = arg->value_id;
+      return true;
+    default:
+      return false;
+  }
+}
+
 static loom_template_provider_feasibility_t
 loom_template_selection_evaluate_relation(
     const loom_template_predicate_arg_t* lhs,
-    const loom_template_predicate_arg_t* rhs, uint8_t predicate_kind) {
+    const loom_template_predicate_arg_t* rhs, uint8_t predicate_kind,
+    const loom_template_selection_application_facts_t* application_facts) {
+  loom_condition_integer_relation_t queried_relation = {0};
+  if (loom_template_predicate_relation_kind(predicate_kind,
+                                            &queried_relation.relation) &&
+      loom_template_predicate_arg_as_condition_operand(
+          lhs, &queried_relation.left) &&
+      loom_template_predicate_arg_as_condition_operand(
+          rhs, &queried_relation.right)) {
+    bool relation_result = false;
+    if (loom_condition_fact_set_proves_integer_relation(
+            &application_facts->path, application_facts->values,
+            &queried_relation, &relation_result)) {
+      return loom_template_selection_feasibility_from_bool(relation_result);
+    }
+  }
+
   if (lhs->kind == LOOM_TEMPLATE_PREDICATE_ARG_VALUE &&
       rhs->kind == LOOM_TEMPLATE_PREDICATE_ARG_VALUE &&
       lhs->value_id == rhs->value_id) {
@@ -932,30 +1215,10 @@ loom_template_selection_evaluate_range(
   return LOOM_TEMPLATE_PROVIDER_MAYBE;
 }
 
-static iree_status_t loom_template_selection_evaluate_predicate(
-    const loom_template_selection_state_t* state, const loom_op_t* apply_op,
-    const loom_func_provider_summary_t* provider,
-    const loom_value_fact_table_t* fact_table,
-    const loom_predicate_t* predicate,
-    loom_template_provider_feasibility_t* out_feasibility) {
-  *out_feasibility = LOOM_TEMPLATE_PROVIDER_MAYBE;
-  loom_template_predicate_arg_t args[3];
-  uint8_t expected_argument_count =
-      loom_predicate_kind_argument_count(predicate->kind);
-  if (expected_argument_count == UINT8_MAX ||
-      predicate->arg_count != expected_argument_count ||
-      predicate->arg_count > IREE_ARRAYSIZE(args)) {
-    return iree_ok_status();
-  }
-
-  for (uint8_t i = 0; i < predicate->arg_count && i < IREE_ARRAYSIZE(args);
-       ++i) {
-    if (!loom_template_selection_resolve_predicate_arg(
-            state, apply_op, provider, fact_table, predicate, i, &args[i])) {
-      return iree_ok_status();
-    }
-  }
-
+static loom_template_provider_feasibility_t
+loom_template_selection_evaluate_resolved_predicate(
+    const loom_template_selection_application_facts_t* application_facts,
+    const loom_predicate_t* predicate, loom_template_predicate_arg_t* args) {
   switch ((loom_predicate_kind_t)predicate->kind) {
     case LOOM_PREDICATE_EQ:
     case LOOM_PREDICATE_NE:
@@ -963,70 +1226,109 @@ static iree_status_t loom_template_selection_evaluate_predicate(
     case LOOM_PREDICATE_LE:
     case LOOM_PREDICATE_GT:
     case LOOM_PREDICATE_GE:
-      *out_feasibility = loom_template_selection_evaluate_relation(
-          &args[0], &args[1], predicate->kind);
-      return iree_ok_status();
+      return loom_template_selection_evaluate_relation(
+          &args[0], &args[1], predicate->kind, application_facts);
     case LOOM_PREDICATE_MUL: {
       int64_t divisor = 0;
       if (!loom_template_predicate_arg_exact_i64(&args[1], &divisor)) {
-        return iree_ok_status();
+        return LOOM_TEMPLATE_PROVIDER_MAYBE;
       }
-      *out_feasibility =
-          loom_template_selection_evaluate_multiple(&args[0], divisor);
-      return iree_ok_status();
+      return loom_template_selection_evaluate_multiple(&args[0], divisor);
     }
     case LOOM_PREDICATE_MIN:
-      *out_feasibility = loom_template_selection_evaluate_relation(
-          &args[0], &args[1], LOOM_PREDICATE_GE);
-      return iree_ok_status();
+      return loom_template_selection_evaluate_relation(
+          &args[0], &args[1], LOOM_PREDICATE_GE, application_facts);
     case LOOM_PREDICATE_MAX:
-      *out_feasibility = loom_template_selection_evaluate_relation(
-          &args[0], &args[1], LOOM_PREDICATE_LE);
-      return iree_ok_status();
+      return loom_template_selection_evaluate_relation(
+          &args[0], &args[1], LOOM_PREDICATE_LE, application_facts);
     case LOOM_PREDICATE_POW2:
-      *out_feasibility = loom_template_selection_evaluate_pow2(&args[0]);
-      return iree_ok_status();
+      return loom_template_selection_evaluate_pow2(&args[0]);
     case LOOM_PREDICATE_RANGE: {
       int64_t lower_bound = 0;
       int64_t upper_bound = 0;
       if (!loom_template_predicate_arg_exact_i64(&args[1], &lower_bound) ||
           !loom_template_predicate_arg_exact_i64(&args[2], &upper_bound)) {
-        return iree_ok_status();
+        return LOOM_TEMPLATE_PROVIDER_MAYBE;
       }
-      *out_feasibility = loom_template_selection_evaluate_range(
-          &args[0], lower_bound, upper_bound);
-      return iree_ok_status();
+      return loom_template_selection_evaluate_range(&args[0], lower_bound,
+                                                    upper_bound);
     }
     default:
-      return iree_ok_status();
+      return LOOM_TEMPLATE_PROVIDER_MAYBE;
   }
 }
 
-static iree_status_t loom_template_selection_evaluate_predicates(
-    loom_template_selection_state_t* state,
-    const loom_symbol_liveness_contributor_context_t* context,
-    const loom_op_t* apply_op, const loom_func_provider_summary_t* provider,
-    loom_template_provider_feasibility_t* out_feasibility) {
-  const loom_value_fact_table_t* fact_table = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_template_selection_apply_fact_table(state, context, &fact_table));
+static bool loom_template_selection_predicate_arity_is_valid(
+    const loom_predicate_t* predicate) {
+  const uint8_t expected_argument_count =
+      loom_predicate_kind_argument_count(predicate->kind);
+  return expected_argument_count != UINT8_MAX &&
+         predicate->arg_count == expected_argument_count &&
+         predicate->arg_count <= IREE_ARRAYSIZE(predicate->args);
+}
 
-  *out_feasibility = LOOM_TEMPLATE_PROVIDER_MATCH;
-  for (uint16_t i = 0; i < provider->predicate_count; ++i) {
-    loom_template_provider_feasibility_t predicate_feasibility =
-        LOOM_TEMPLATE_PROVIDER_MAYBE;
-    IREE_RETURN_IF_ERROR(loom_template_selection_evaluate_predicate(
-        state, apply_op, provider, fact_table, &provider->predicates[i],
-        &predicate_feasibility));
-    if (predicate_feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) {
-      *out_feasibility = LOOM_TEMPLATE_PROVIDER_REJECT;
-      return iree_ok_status();
-    }
-    if (predicate_feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE) {
-      *out_feasibility = LOOM_TEMPLATE_PROVIDER_MAYBE;
+static loom_template_provider_feasibility_t
+loom_template_selection_evaluate_provider_predicate(
+    const loom_template_selection_state_t* state, const loom_op_t* apply_op,
+    const loom_func_provider_summary_t* provider,
+    const loom_template_selection_application_facts_t* application_facts,
+    const loom_predicate_t* predicate) {
+  if (!loom_template_selection_predicate_arity_is_valid(predicate)) {
+    return LOOM_TEMPLATE_PROVIDER_MAYBE;
+  }
+
+  loom_template_predicate_arg_t args[3];
+  for (uint8_t i = 0; i < predicate->arg_count; ++i) {
+    if (!loom_template_selection_resolve_provider_predicate_arg(
+            state, apply_op, provider, application_facts, predicate, i,
+            &args[i])) {
+      return LOOM_TEMPLATE_PROVIDER_MAYBE;
     }
   }
-  return iree_ok_status();
+  return loom_template_selection_evaluate_resolved_predicate(application_facts,
+                                                             predicate, args);
+}
+
+static loom_template_provider_feasibility_t
+loom_template_selection_evaluate_application_predicate(
+    const loom_template_selection_state_t* state,
+    const loom_template_selection_application_facts_t* application_facts,
+    const loom_predicate_t* predicate) {
+  if (!loom_template_selection_predicate_arity_is_valid(predicate)) {
+    return LOOM_TEMPLATE_PROVIDER_MAYBE;
+  }
+
+  loom_template_predicate_arg_t args[3];
+  for (uint8_t i = 0; i < predicate->arg_count; ++i) {
+    if (!loom_template_selection_resolve_application_predicate_arg(
+            state, application_facts, predicate, i, &args[i])) {
+      return LOOM_TEMPLATE_PROVIDER_MAYBE;
+    }
+  }
+  return loom_template_selection_evaluate_resolved_predicate(application_facts,
+                                                             predicate, args);
+}
+
+static loom_template_provider_feasibility_t
+loom_template_selection_evaluate_predicates(
+    const loom_template_selection_state_t* state, const loom_op_t* apply_op,
+    const loom_func_provider_summary_t* provider,
+    const loom_template_selection_application_facts_t* application_facts) {
+  loom_template_provider_feasibility_t feasibility =
+      LOOM_TEMPLATE_PROVIDER_MATCH;
+  for (uint16_t i = 0; i < provider->predicate_count; ++i) {
+    const loom_template_provider_feasibility_t predicate_feasibility =
+        loom_template_selection_evaluate_provider_predicate(
+            state, apply_op, provider, application_facts,
+            &provider->predicates[i]);
+    if (predicate_feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) {
+      return LOOM_TEMPLATE_PROVIDER_REJECT;
+    }
+    if (predicate_feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE) {
+      feasibility = LOOM_TEMPLATE_PROVIDER_MAYBE;
+    }
+  }
+  return feasibility;
 }
 
 static bool loom_template_selection_apply_has_ancestor(
@@ -1074,12 +1376,121 @@ loom_template_selection_provider_context_feasibility(
   return feasibility;
 }
 
+static loom_template_provider_feasibility_t
+loom_template_selection_evaluate_target_condition_query_value(
+    const loom_template_selection_state_t* state,
+    const loom_target_condition_t* condition,
+    const loom_template_selection_application_facts_t* application_facts,
+    loom_value_id_t value_id) {
+  if (application_facts->values == NULL ||
+      condition->descriptor->project_query_predicate == NULL) {
+    return LOOM_TEMPLATE_PROVIDER_MAYBE;
+  }
+  loom_value_fact_contextual_query_origin_t origin = {0};
+  if (!loom_value_fact_table_query_contextual_query_origin(
+          application_facts->values, state->module, value_id, &origin) ||
+      origin.family_kind != loom_attr_as_parameterized_kind(condition->value)) {
+    return LOOM_TEMPLATE_PROVIDER_MAYBE;
+  }
+
+  loom_predicate_t predicate = {0};
+  if (!condition->descriptor->project_query_predicate(
+          condition->value, origin.key, value_id, &predicate)) {
+    return LOOM_TEMPLATE_PROVIDER_MAYBE;
+  }
+  return loom_template_selection_evaluate_application_predicate(
+      state, application_facts, &predicate);
+}
+
+static loom_template_provider_feasibility_t
+loom_template_selection_evaluate_target_condition_queries(
+    const loom_template_selection_state_t* state,
+    const loom_target_condition_t* condition,
+    const loom_template_selection_application_facts_t* application_facts) {
+  bool has_match = false;
+  bool has_reject = false;
+  for (iree_host_size_t i = 0;
+       i < application_facts->path.integer_relation_count; ++i) {
+    const loom_condition_integer_relation_t* relation =
+        &application_facts->path.integer_relations[i];
+    for (uint8_t operand_index = 0; operand_index < 2; ++operand_index) {
+      const loom_condition_integer_operand_t operand =
+          operand_index == 0 ? relation->left : relation->right;
+      if (operand.kind != LOOM_CONDITION_INTEGER_OPERAND_VALUE) continue;
+      const loom_template_provider_feasibility_t feasibility =
+          loom_template_selection_evaluate_target_condition_query_value(
+              state, condition, application_facts, operand.value_id);
+      has_match |= feasibility == LOOM_TEMPLATE_PROVIDER_MATCH;
+      has_reject |= feasibility == LOOM_TEMPLATE_PROVIDER_REJECT;
+    }
+  }
+  if (has_match && has_reject) return LOOM_TEMPLATE_PROVIDER_MAYBE;
+  if (has_match) return LOOM_TEMPLATE_PROVIDER_MATCH;
+  if (has_reject) return LOOM_TEMPLATE_PROVIDER_REJECT;
+  return LOOM_TEMPLATE_PROVIDER_MAYBE;
+}
+
+static loom_template_provider_feasibility_t
+loom_template_selection_evaluate_target_conditions(
+    const loom_template_selection_state_t* state,
+    const loom_func_provider_summary_t* provider,
+    const loom_target_facts_t* target_facts,
+    const loom_template_selection_application_facts_t* application_facts,
+    const loom_target_condition_t** out_unresolved_condition) {
+  *out_unresolved_condition = NULL;
+  loom_template_provider_feasibility_t feasibility =
+      LOOM_TEMPLATE_PROVIDER_MATCH;
+  for (uint16_t i = 0; i < provider->target_condition_count; ++i) {
+    const loom_target_condition_t* condition = &provider->target_conditions[i];
+    const loom_target_condition_outcome_t outcome =
+        loom_target_condition_evaluate(condition->descriptor, condition->value,
+                                       target_facts);
+    switch (outcome) {
+      case LOOM_TARGET_CONDITION_MATCH:
+        break;
+      case LOOM_TARGET_CONDITION_UNKNOWN:
+      case LOOM_TARGET_CONDITION_UNBOUND: {
+        const loom_template_provider_feasibility_t query_feasibility =
+            loom_template_selection_evaluate_target_condition_queries(
+                state, condition, application_facts);
+        if (query_feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) {
+          return LOOM_TEMPLATE_PROVIDER_REJECT;
+        }
+        if (query_feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE) {
+          feasibility = LOOM_TEMPLATE_PROVIDER_MAYBE;
+          if (*out_unresolved_condition == NULL) {
+            *out_unresolved_condition = condition;
+          }
+        }
+        break;
+      }
+      case LOOM_TARGET_CONDITION_REJECT:
+        return LOOM_TEMPLATE_PROVIDER_REJECT;
+      default:
+        IREE_ASSERT_UNREACHABLE("target condition returned an invalid outcome");
+        IREE_BUILTIN_UNREACHABLE();
+    }
+  }
+  return feasibility;
+}
+
 static iree_status_t loom_template_selection_classify_provider(
     loom_template_selection_state_t* state,
     const loom_symbol_liveness_contributor_context_t* context,
     const loom_op_t* apply_op, const loom_func_provider_summary_t* provider,
-    loom_template_provider_feasibility_t* out_feasibility) {
-  *out_feasibility = LOOM_TEMPLATE_PROVIDER_REJECT;
+    const loom_template_selection_apply_target_t* apply_target,
+    const loom_template_selection_application_facts_t* application_facts,
+    loom_template_provider_classification_t* out_classification) {
+  *out_classification = (loom_template_provider_classification_t){
+      .feasibility = LOOM_TEMPLATE_PROVIDER_REJECT,
+      .target_feasibility = LOOM_TEMPLATE_PROVIDER_REJECT,
+  };
+  IREE_RETURN_IF_ERROR(loom_template_selection_provider_target_feasibility(
+      state, apply_target, provider, &out_classification->target_feasibility));
+  if (out_classification->target_feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) {
+    return iree_ok_status();
+  }
+
   bool types_match = false;
   IREE_RETURN_IF_ERROR(loom_template_selection_types_match(
       state, apply_op, provider, &types_match));
@@ -1091,21 +1502,47 @@ static iree_status_t loom_template_selection_classify_provider(
     return iree_ok_status();
   }
 
+  const loom_target_condition_t* unresolved_target_condition = NULL;
+  const loom_template_provider_feasibility_t target_condition_feasibility =
+      loom_template_selection_evaluate_target_conditions(
+          state, provider, apply_target->facts, application_facts,
+          &unresolved_target_condition);
+  if (target_condition_feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) {
+    return iree_ok_status();
+  }
+
   loom_template_provider_feasibility_t predicate_feasibility =
       LOOM_TEMPLATE_PROVIDER_MATCH;
   if (provider->predicate_count > 0) {
-    IREE_RETURN_IF_ERROR(loom_template_selection_evaluate_predicates(
-        state, context, apply_op, provider, &predicate_feasibility));
+    predicate_feasibility = loom_template_selection_evaluate_predicates(
+        state, apply_op, provider, application_facts);
     if (predicate_feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) {
       return iree_ok_status();
     }
   }
 
-  *out_feasibility =
-      context_feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE ||
+  out_classification->feasibility =
+      out_classification->target_feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE ||
+              context_feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE ||
+              target_condition_feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE ||
               predicate_feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE
           ? LOOM_TEMPLATE_PROVIDER_MAYBE
           : LOOM_TEMPLATE_PROVIDER_MATCH;
+  if (out_classification->target_feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE) {
+    out_classification->unresolved_reason =
+        LOOM_TEMPLATE_PROVIDER_UNRESOLVED_TARGET_IDENTITY;
+  } else if (context_feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE) {
+    out_classification->unresolved_reason =
+        LOOM_TEMPLATE_PROVIDER_UNRESOLVED_CALLER_CONTEXT;
+  } else if (target_condition_feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE) {
+    out_classification->unresolved_reason =
+        LOOM_TEMPLATE_PROVIDER_UNRESOLVED_TARGET_CONDITION;
+    out_classification->unresolved_target_condition =
+        unresolved_target_condition;
+  } else if (predicate_feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE) {
+    out_classification->unresolved_reason =
+        LOOM_TEMPLATE_PROVIDER_UNRESOLVED_VALUE_PREDICATE;
+  }
   return iree_ok_status();
 }
 
@@ -1185,25 +1622,20 @@ static void loom_template_selection_record_blocker(
   }
 }
 
-static iree_status_t loom_template_selection_mark_exact_priority(
+static iree_status_t loom_template_selection_mark_match_priority(
     loom_template_selection_state_t* state,
     loom_symbol_liveness_contributor_context_t* context,
     const loom_op_t* apply_op, loom_func_provider_slice_t providers,
     const loom_template_selection_apply_target_t* apply_target,
+    const loom_template_selection_application_facts_t* application_facts,
     int64_t priority) {
   for (iree_host_size_t i = 0; i < providers.count; ++i) {
     const loom_func_provider_summary_t* provider = &providers.providers[i];
-    bool applies_to_target = false;
-    IREE_RETURN_IF_ERROR(loom_template_selection_provider_applies_to_target(
-        state, apply_target, provider, &applies_to_target));
-    if (!applies_to_target) {
-      continue;
-    }
-    loom_template_provider_feasibility_t feasibility =
-        LOOM_TEMPLATE_PROVIDER_REJECT;
+    loom_template_provider_classification_t classification = {0};
     IREE_RETURN_IF_ERROR(loom_template_selection_classify_provider(
-        state, context, apply_op, provider, &feasibility));
-    if (feasibility != LOOM_TEMPLATE_PROVIDER_MATCH ||
+        state, context, apply_op, provider, apply_target, application_facts,
+        &classification));
+    if (classification.feasibility != LOOM_TEMPLATE_PROVIDER_MATCH ||
         provider->priority != priority) {
       continue;
     }
@@ -1213,32 +1645,30 @@ static iree_status_t loom_template_selection_mark_exact_priority(
   return iree_ok_status();
 }
 
-static iree_status_t loom_template_selection_mark_missing_fact_candidates(
+static iree_status_t loom_template_selection_mark_unresolved_candidates(
     loom_template_selection_state_t* state,
     loom_symbol_liveness_contributor_context_t* context,
     const loom_op_t* apply_op, loom_func_provider_slice_t providers,
-    const loom_template_selection_apply_target_t* apply_target, bool has_exact,
-    int64_t exact_priority) {
+    const loom_template_selection_apply_target_t* apply_target,
+    const loom_template_selection_application_facts_t* application_facts,
+    bool has_match, int64_t match_priority) {
+  if (state->mode != LOOM_TEMPLATE_SELECTION_MODE_EARLY) {
+    return iree_ok_status();
+  }
   for (iree_host_size_t i = 0; i < providers.count; ++i) {
     const loom_func_provider_summary_t* provider = &providers.providers[i];
-    bool applies_to_target = false;
-    IREE_RETURN_IF_ERROR(loom_template_selection_provider_applies_to_target(
-        state, apply_target, provider, &applies_to_target));
-    if (!applies_to_target) {
-      continue;
-    }
-    loom_template_provider_feasibility_t feasibility =
-        LOOM_TEMPLATE_PROVIDER_REJECT;
+    loom_template_provider_classification_t classification = {0};
     IREE_RETURN_IF_ERROR(loom_template_selection_classify_provider(
-        state, context, apply_op, provider, &feasibility));
-    if (feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) continue;
-    if (has_exact) {
-      if (feasibility == LOOM_TEMPLATE_PROVIDER_MATCH &&
-          provider->priority != exact_priority) {
+        state, context, apply_op, provider, apply_target, application_facts,
+        &classification));
+    if (classification.feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) continue;
+    if (has_match) {
+      if (classification.feasibility == LOOM_TEMPLATE_PROVIDER_MATCH &&
+          provider->priority != match_priority) {
         continue;
       }
-      if (feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE &&
-          provider->priority < exact_priority) {
+      if (classification.feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE &&
+          provider->priority < match_priority) {
         continue;
       }
     }
@@ -1246,6 +1676,33 @@ static iree_status_t loom_template_selection_mark_missing_fact_candidates(
         loom_template_selection_mark_provider_live(state, context, provider));
   }
   return iree_ok_status();
+}
+
+static bool loom_template_selection_requires_application_facts(
+    const loom_op_t* apply_op, loom_func_provider_slice_t providers,
+    const loom_target_facts_t* target_facts) {
+  for (iree_host_size_t i = 0; i < providers.count; ++i) {
+    if (providers.providers[i].predicate_count > 0) return true;
+  }
+  if (!loom_template_selection_apply_has_ancestor(apply_op, LOOM_OP_SCF_IF)) {
+    return false;
+  }
+  for (iree_host_size_t i = 0; i < providers.count; ++i) {
+    const loom_func_provider_summary_t* provider = &providers.providers[i];
+    for (uint16_t j = 0; j < provider->target_condition_count; ++j) {
+      const loom_target_condition_t* condition =
+          &provider->target_conditions[j];
+      if (condition->descriptor->project_query_predicate == NULL) continue;
+      const loom_target_condition_outcome_t outcome =
+          loom_target_condition_evaluate(condition->descriptor,
+                                         condition->value, target_facts);
+      if (outcome == LOOM_TARGET_CONDITION_UNKNOWN ||
+          outcome == LOOM_TARGET_CONDITION_UNBOUND) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 static iree_status_t loom_template_selection_analyze_apply(
@@ -1279,75 +1736,98 @@ static iree_status_t loom_template_selection_analyze_apply(
         state, entry, LOOM_TEMPLATE_SELECTION_BLOCKER_NO_PROVIDER);
     return loom_template_selection_append_report_detail(
         state, context, entry, &apply_target, providers.count,
-        /*target_applicable_count=*/0, /*possible_count=*/0,
-        /*best_exact_count=*/0, /*highest_provider_priority=*/INT64_MIN);
+        /*target_identity_match_count=*/0,
+        /*target_identity_unresolved_count=*/0,
+        /*possible_count=*/0, /*best_match_count=*/0,
+        /*highest_provider_priority=*/INT64_MIN);
   }
 
-  bool has_exact = false;
+  loom_template_selection_application_facts_t application_facts = {0};
+  loom_condition_fact_set_initialize(NULL, 0, &application_facts.path);
+  if (loom_template_selection_requires_application_facts(apply_op, providers,
+                                                         apply_target.facts)) {
+    IREE_RETURN_IF_ERROR(loom_template_selection_prepare_application_facts(
+        state, context, apply_op, &apply_target, &application_facts));
+  }
+
+  bool has_match = false;
   bool has_maybe = false;
-  bool has_distinct_best_exact = false;
-  int64_t best_exact_priority = INT64_MIN;
+  bool has_distinct_best_match = false;
+  int64_t best_match_priority = INT64_MIN;
   int64_t highest_provider_priority = INT64_MIN;
   int64_t highest_maybe_priority = INT64_MIN;
-  uint32_t best_exact_count = 0;
-  uint32_t target_applicable_count = 0;
+  uint32_t best_match_count = 0;
+  uint32_t target_identity_match_count = 0;
+  uint32_t target_identity_unresolved_count = 0;
   uint32_t possible_count = 0;
-  const loom_func_provider_summary_t* best_exact_provider = NULL;
+  const loom_func_provider_summary_t* best_match_provider = NULL;
+  const loom_func_provider_summary_t* highest_maybe_provider = NULL;
+  loom_template_provider_classification_t highest_maybe_classification = {0};
 
   for (iree_host_size_t i = 0; i < providers.count; ++i) {
     const loom_func_provider_summary_t* provider = &providers.providers[i];
     if (provider->priority > highest_provider_priority) {
       highest_provider_priority = provider->priority;
     }
-    bool applies_to_target = false;
-    IREE_RETURN_IF_ERROR(loom_template_selection_provider_applies_to_target(
-        state, &apply_target, provider, &applies_to_target));
-    if (!applies_to_target) {
-      continue;
-    }
-    ++target_applicable_count;
-    loom_template_provider_feasibility_t feasibility =
-        LOOM_TEMPLATE_PROVIDER_REJECT;
+    loom_template_provider_classification_t classification = {0};
     IREE_RETURN_IF_ERROR(loom_template_selection_classify_provider(
-        state, context, apply_op, provider, &feasibility));
-    if (feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) {
+        state, context, apply_op, provider, &apply_target, &application_facts,
+        &classification));
+    if (classification.target_feasibility == LOOM_TEMPLATE_PROVIDER_MATCH) {
+      ++target_identity_match_count;
+    } else if (classification.target_feasibility ==
+               LOOM_TEMPLATE_PROVIDER_MAYBE) {
+      ++target_identity_unresolved_count;
+    }
+    if (classification.feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) {
       continue;
     }
     ++possible_count;
-    if (feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE) {
+    if (classification.feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE) {
       has_maybe = true;
-      if (provider->priority > highest_maybe_priority) {
+      if (highest_maybe_provider == NULL ||
+          provider->priority > highest_maybe_priority) {
         highest_maybe_priority = provider->priority;
+        highest_maybe_provider = provider;
+        highest_maybe_classification = classification;
       }
       continue;
     }
 
-    if (!has_exact || provider->priority > best_exact_priority) {
-      has_exact = true;
-      best_exact_priority = provider->priority;
-      best_exact_count = 1;
-      has_distinct_best_exact = false;
-      best_exact_provider = provider;
-    } else if (provider->priority == best_exact_priority) {
-      ++best_exact_count;
-      if (!has_distinct_best_exact) {
+    if (!has_match || provider->priority > best_match_priority) {
+      has_match = true;
+      best_match_priority = provider->priority;
+      best_match_count = 1;
+      has_distinct_best_match = false;
+      best_match_provider = provider;
+    } else if (provider->priority == best_match_priority) {
+      ++best_match_count;
+      if (!has_distinct_best_match) {
         bool equivalent = false;
         IREE_RETURN_IF_ERROR(loom_template_providers_are_equivalent(
-            state, best_exact_provider, provider, &equivalent));
-        has_distinct_best_exact = !equivalent;
+            state, best_match_provider, provider, &equivalent));
+        has_distinct_best_match = !equivalent;
       }
     }
   }
 
-  if (target_applicable_count == 0) {
+  if (has_maybe) {
+    entry->unresolved_provider = highest_maybe_provider;
+    entry->unresolved_reason = highest_maybe_classification.unresolved_reason;
+    entry->unresolved_target_condition =
+        highest_maybe_classification.unresolved_target_condition;
+  }
+
+  if (target_identity_match_count == 0 &&
+      target_identity_unresolved_count == 0) {
     loom_template_selection_record_blocker(
         state, entry, LOOM_TEMPLATE_SELECTION_BLOCKER_TARGET_MISMATCH);
     IREE_RETURN_IF_ERROR(loom_template_selection_preserve_rejected_providers(
         state, context, providers));
     return loom_template_selection_append_report_detail(
         state, context, entry, &apply_target, providers.count,
-        target_applicable_count, possible_count, best_exact_count,
-        highest_provider_priority);
+        target_identity_match_count, target_identity_unresolved_count,
+        possible_count, best_match_count, highest_provider_priority);
   }
 
   if (possible_count == 0) {
@@ -1357,57 +1837,59 @@ static iree_status_t loom_template_selection_analyze_apply(
         state, context, providers));
     return loom_template_selection_append_report_detail(
         state, context, entry, &apply_target, providers.count,
-        target_applicable_count, possible_count, best_exact_count,
-        highest_provider_priority);
+        target_identity_match_count, target_identity_unresolved_count,
+        possible_count, best_match_count, highest_provider_priority);
   }
 
-  if (!has_exact ||
-      (has_maybe && highest_maybe_priority >= best_exact_priority)) {
+  const bool unresolved_blocks_match =
+      state->mode == LOOM_TEMPLATE_SELECTION_MODE_EARLY && has_maybe &&
+      (!has_match || highest_maybe_priority >= best_match_priority);
+  if (!has_match || unresolved_blocks_match) {
     loom_template_selection_record_blocker(
         state, entry, LOOM_TEMPLATE_SELECTION_BLOCKER_MISSING_FACTS);
-    IREE_RETURN_IF_ERROR(loom_template_selection_mark_missing_fact_candidates(
-        state, context, apply_op, providers, &apply_target, has_exact,
-        best_exact_priority));
+    IREE_RETURN_IF_ERROR(loom_template_selection_mark_unresolved_candidates(
+        state, context, apply_op, providers, &apply_target, &application_facts,
+        has_match, best_match_priority));
     return loom_template_selection_append_report_detail(
         state, context, entry, &apply_target, providers.count,
-        target_applicable_count, possible_count, best_exact_count,
-        highest_provider_priority);
+        target_identity_match_count, target_identity_unresolved_count,
+        possible_count, best_match_count, highest_provider_priority);
   }
 
-  if (has_distinct_best_exact) {
+  if (has_distinct_best_match) {
     loom_template_selection_record_blocker(
         state, entry, LOOM_TEMPLATE_SELECTION_BLOCKER_AMBIGUOUS);
-    IREE_RETURN_IF_ERROR(loom_template_selection_mark_exact_priority(
-        state, context, apply_op, providers, &apply_target,
-        best_exact_priority));
+    IREE_RETURN_IF_ERROR(loom_template_selection_mark_match_priority(
+        state, context, apply_op, providers, &apply_target, &application_facts,
+        best_match_priority));
     return loom_template_selection_append_report_detail(
         state, context, entry, &apply_target, providers.count,
-        target_applicable_count, possible_count, best_exact_count,
-        highest_provider_priority);
+        target_identity_match_count, target_identity_unresolved_count,
+        possible_count, best_match_count, highest_provider_priority);
   }
 
-  entry->selected_provider = best_exact_provider;
+  entry->selected_provider = best_match_provider;
   IREE_RETURN_IF_ERROR(loom_template_selection_mark_provider_live(
-      state, context, best_exact_provider));
-  if (!loom_template_provider_is_materializable(best_exact_provider)) {
+      state, context, best_match_provider));
+  if (!loom_template_provider_is_materializable(best_match_provider)) {
     loom_template_selection_record_blocker(
         state, entry, LOOM_TEMPLATE_SELECTION_BLOCKER_MATERIALIZATION);
     return loom_template_selection_append_report_detail(
         state, context, entry, &apply_target, providers.count,
-        target_applicable_count, possible_count, best_exact_count,
-        highest_provider_priority);
+        target_identity_match_count, target_identity_unresolved_count,
+        possible_count, best_match_count, highest_provider_priority);
   }
 
   entry->action = LOOM_TEMPLATE_SELECTION_ACTION_SELECT;
   entry->blocker = LOOM_TEMPLATE_SELECTION_BLOCKER_NONE;
-  if (best_exact_provider->priority < highest_provider_priority) {
+  if (best_match_provider->priority < highest_provider_priority) {
     ++state->statistics->fallback_selected_sites;
   }
   ++state->statistics->selected_sites;
   return loom_template_selection_append_report_detail(
       state, context, entry, &apply_target, providers.count,
-      target_applicable_count, possible_count, best_exact_count,
-      highest_provider_priority);
+      target_identity_match_count, target_identity_unresolved_count,
+      possible_count, best_match_count, highest_provider_priority);
 }
 
 static iree_status_t loom_template_selection_visit_reachable_op(
@@ -1429,17 +1911,52 @@ static iree_status_t loom_template_selection_emit_blockers(
     if (entry->action == LOOM_TEMPLATE_SELECTION_ACTION_SELECT) {
       continue;
     }
+    if (entry->blocker == LOOM_TEMPLATE_SELECTION_BLOCKER_MISSING_FACTS &&
+        entry->unresolved_target_condition != NULL) {
+      const loom_func_provider_summary_t* provider = entry->unresolved_provider;
+      loom_diagnostic_param_t params[] = {
+          loom_param_string(loom_op_name(state->module, entry->apply_op)),
+          loom_param_string(state->pass->info->name),
+          loom_param_string(entry->contract),
+          loom_param_string(provider->name),
+          loom_param_string(loom_template_selection_target_condition_name(
+              state, entry->unresolved_target_condition)),
+      };
+      loom_diagnostic_related_op_t related_op = {
+          .label = IREE_SV("unresolved provider condition"),
+          .op = provider->function.op,
+          .field_ref = loom_diagnostic_field_ref(
+              LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
+              provider->function.vtable->requires_attr_index),
+      };
+      loom_diagnostic_emission_t emission = {
+          .op = entry->apply_op,
+          .error = LOOM_ERR_LOWERING_048,
+          .params = params,
+          .param_count = IREE_ARRAYSIZE(params),
+          .related_ops = &related_op,
+          .related_op_count = 1,
+      };
+      IREE_RETURN_IF_ERROR(
+          iree_diagnostic_emit(state->pass->diagnostic_emitter, &emission));
+      continue;
+    }
     loom_diagnostic_param_t params[] = {
         loom_param_string(loom_op_name(state->module, entry->apply_op)),
         loom_param_string(state->pass->info->name),
         loom_param_string(entry->contract),
         loom_param_string(loom_template_selection_blocker_code(entry->blocker)),
     };
-    loom_op_t* related_provider_op =
-        entry->selected_provider ? entry->selected_provider->function.op : NULL;
+    const loom_func_provider_summary_t* related_provider =
+        entry->selected_provider;
+    if (related_provider == NULL &&
+        entry->blocker == LOOM_TEMPLATE_SELECTION_BLOCKER_MISSING_FACTS) {
+      related_provider = entry->unresolved_provider;
+    }
     loom_diagnostic_related_op_t related_op = {
-        .label = IREE_SV("selected provider"),
-        .op = related_provider_op,
+        .label = entry->selected_provider ? IREE_SV("selected provider")
+                                          : IREE_SV("unresolved provider"),
+        .op = related_provider ? related_provider->function.op : NULL,
         .field_ref = loom_diagnostic_field_ref_none(),
     };
     loom_diagnostic_emission_t emission = {
@@ -1447,8 +1964,8 @@ static iree_status_t loom_template_selection_emit_blockers(
         .error = LOOM_ERR_LOWERING_045,
         .params = params,
         .param_count = IREE_ARRAYSIZE(params),
-        .related_ops = related_provider_op ? &related_op : NULL,
-        .related_op_count = related_provider_op ? 1 : 0,
+        .related_ops = related_op.op ? &related_op : NULL,
+        .related_op_count = related_op.op ? 1 : 0,
     };
     IREE_RETURN_IF_ERROR(
         iree_diagnostic_emit(state->pass->diagnostic_emitter, &emission));

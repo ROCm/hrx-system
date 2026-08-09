@@ -271,6 +271,54 @@
           }
         }
       ]
+    },
+    {
+      "name": "reports invocation-specialized targets to suggestion providers",
+      "steps": [
+        {
+          "name": "compile-generic-root-for-gfx1151",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/selected_root_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--root=@selected_store_i32",
+              "--target=gfx1151",
+              "--output={tmp}/specialized_report.hal",
+              "--emit-target-artifact={tmp}/specialized_report.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output={tmp}/specialized_report.json"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/specialized_report.json",
+              "contains": [
+                "\"target_family\":\"AMDGPU\"",
+                "\"target_key\":\"gfx1151\""
+              ]
+            }
+          ]
+        },
+        {
+          "name": "suggest-for-effective-gfx1151-target",
+          "run": {
+            "tool": "loom-compile-report",
+            "args": [
+              "suggest",
+              "{tmp}/specialized_report.json",
+              "--format=json"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "\"provider\":\"amdgpu\"",
+              "\"status\":\"available\"",
+              "\"target\":{\"family\":\"AMDGPU\",\"key\":\"gfx1151\"}"
+            ]
+          }
+        }
+      ]
     }
   ]
 }

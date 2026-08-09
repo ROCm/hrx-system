@@ -53,7 +53,10 @@ an explicit `steps` list:
 ```
 
 Manifest strings support `{srcdir}`, `{tmp}`, `{case}`, `{manifest}`, and
-`{tool:name}` substitutions.
+`{tool:name}` substitutions. Tool substitution is available when the build
+adapter binds the tool to a single executable path. Tools launched through an
+interpreter or another multi-argument command prefix can be selected by
+`run.tool`, but cannot be flattened into a string substitution.
 
 Run steps default to `exit: 0`. Stdout and stderr are ignored unless checks are
 declared:

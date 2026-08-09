@@ -137,6 +137,8 @@ iree_status_t loom_ir_remap_initialize(const loom_module_t* source_module,
       .allow_unmapped_values = options ? options->allow_unmapped_values : false,
       .remap_symbol = options ? options->remap_symbol
                               : loom_ir_remap_symbol_callback_empty(),
+      .remap_same_module_symbols =
+          options ? options->remap_same_module_symbols : false,
   };
 
   *out_remap = remap;
@@ -557,14 +559,15 @@ static iree_status_t loom_ir_remap_symbol_ref(
         "source symbol ref {module=%u, symbol=%u} is out of range",
         (unsigned)source_ref.module_id, (unsigned)source_ref.symbol_id);
   }
-  if (remap->source_module == remap->target_module) {
+  if (remap->source_module == remap->target_module &&
+      !remap->remap_same_module_symbols) {
     *out_target_ref = source_ref;
     return iree_ok_status();
   }
   if (!remap->remap_symbol.fn) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        "cross-module symbol reference remapping requires a symbol policy");
+        "symbol reference remapping requires a symbol policy");
   }
   loom_symbol_ref_t target_ref = loom_symbol_ref_null();
   IREE_RETURN_IF_ERROR(remap->remap_symbol.fn(
@@ -1044,6 +1047,35 @@ static iree_status_t loom_ir_remap_attribute_impl(
       *out_target_attr = loom_make_parameterized_attr(
           (loom_parameterized_attr_kind_t)source_attr.reserved_1, target_slots,
           source_attr.count);
+      return iree_ok_status();
+    }
+
+    case LOOM_ATTR_PARAMETERIZED_ARRAY: {
+      if (aggregate_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "aggregate attribute nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
+      }
+      loom_attribute_t* target_attributes = NULL;
+      if (source_attr.count > 0) {
+        if (!source_attr.parameterized_array) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "non-empty parameterized attribute array has a NULL element "
+              "pointer");
+        }
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            payload_arena, source_attr.count, sizeof(*target_attributes),
+            (void**)&target_attributes));
+        for (uint16_t i = 0; i < source_attr.count; ++i) {
+          IREE_RETURN_IF_ERROR(loom_ir_remap_attribute_impl(
+              remap, source_attr.parameterized_array[i], aggregate_depth + 1,
+              payload_arena, &target_attributes[i]));
+        }
+      }
+      *out_target_attr =
+          loom_attr_parameterized_array(target_attributes, source_attr.count);
       return iree_ok_status();
     }
 

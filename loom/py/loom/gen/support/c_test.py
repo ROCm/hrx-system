@@ -41,6 +41,16 @@ def test_c_identifier_preserves_requested_case() -> None:
     assert c_identifier("Mixed.Case", case=CIdentifierCase.UPPER) == "MIXED_CASE"
 
 
+@pytest.mark.parametrize("keyword", ["requires", "class", "switch"])
+def test_c_identifier_escapes_c_and_cpp_keywords(keyword: str) -> None:
+    assert c_identifier(keyword) == f"{keyword}_"
+
+
+def test_c_identifier_escapes_after_case_conversion() -> None:
+    assert c_identifier("CLASS", case=CIdentifierCase.LOWER) == "class_"
+    assert c_identifier("class", case=CIdentifierCase.UPPER) == "CLASS"
+
+
 def test_c_identifier_rejects_empty_replacement() -> None:
     with pytest.raises(ValueError, match="empty replacement"):
         c_identifier("...", empty="")

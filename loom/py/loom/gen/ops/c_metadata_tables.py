@@ -259,7 +259,16 @@ def _emit_parameterized_attr_tables(
             lines.append(f"        .kind = {_c_parameterized_attr_enum_name(attr_def)},")
             if attr_def.parameters:
                 lines.append(f"        .parameter_count = IREE_ARRAYSIZE({prefix}_parameter_desc),")
+            primary_parameter_index = attr_def.primary_parameter_index
+            if primary_parameter_index is None:
+                lines.append("        .primary_parameter_index = LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER,")
+            else:
+                lines.append(f"        .primary_parameter_index = {primary_parameter_index},")
+            if attr_def.parameters:
                 lines.append(f"        .parameter_descriptors = {prefix}_parameter_desc,")
+            if attr_def.target_condition is not None:
+                condition = c_symbols.normalize_c_symbol_reference(attr_def.target_condition)
+                lines.append(f"        .target_condition = &{condition},")
             lines.append("    },")
         lines.append("};")
         lines.append("")
@@ -312,7 +321,7 @@ def _emit_attr_descriptor_table(
             lines.append(f"        .enum_case_names = {enum_names},")
         if parameter.symbol_ref is not None:
             lines.append(f"        .reference.symbol_ref = &{prefix}_{parameter.name}_symbol_ref,")
-        if parameter.attr_type == "parameterized":
+        if parameter.attr_type in ("parameterized", "parameterized_array"):
             expected_family = _c_parameterized_attr_enum_name(parameter.parameterized_attr) if parameter.parameterized_attr is not None else "LOOM_PARAMETERIZED_ATTR_KIND_ANY"
             lines.append(f"        .reference.parameterized_attr_kind = {expected_family},")
         lines.append("    },")
@@ -570,7 +579,7 @@ def generate_tables_c(
                     lines.append(f"        .enum_case_names = {enum_names},")
                 if attr_def.symbol_ref is not None:
                     lines.append(f"        .reference.symbol_ref = &{prefix}_{attr_def.name}_symbol_ref,")
-                if attr_def.attr_type == "parameterized":
+                if attr_def.attr_type in ("parameterized", "parameterized_array"):
                     expected_family = _c_parameterized_attr_enum_name(attr_def.parameterized_attr) if attr_def.parameterized_attr is not None else "LOOM_PARAMETERIZED_ATTR_KIND_ANY"
                     lines.append(f"        .reference.parameterized_attr_kind = {expected_family},")
                 lines.append("    },")

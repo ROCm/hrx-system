@@ -310,6 +310,20 @@ static iree_status_t loom_symbol_dependency_visit_attr(
             (uint8_t)(dict_depth + 1)));
       }
       return iree_ok_status();
+    case LOOM_ATTR_PARAMETERIZED_ARRAY:
+      if (dict_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "aggregate attribute nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
+      }
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_symbol_dependency_visit_attr(
+            builder, source_symbol_id, attr.parameterized_array[i],
+            LOOM_SYMBOL_DEPENDENCY_EDGE_NESTED_ATTR, attr_index, user_op,
+            (uint8_t)(dict_depth + 1)));
+      }
+      return iree_ok_status();
     default:
       return iree_ok_status();
   }
@@ -327,7 +341,8 @@ loom_symbol_dependency_direct_attr_kind(const loom_op_vtable_t* vtable,
       attr_index == vtable->call_like->callee_attr_index) {
     return LOOM_SYMBOL_DEPENDENCY_EDGE_CALL;
   }
-  if (descriptor && descriptor->reference.symbol_ref &&
+  if (descriptor && descriptor->attr_kind == LOOM_ATTR_SYMBOL &&
+      descriptor->reference.symbol_ref &&
       iree_any_bit_set(descriptor->reference.symbol_ref->interfaces,
                        LOOM_SYMBOL_INTERFACE_GLOBAL)) {
     return LOOM_SYMBOL_DEPENDENCY_EDGE_GLOBAL_ACCESS;

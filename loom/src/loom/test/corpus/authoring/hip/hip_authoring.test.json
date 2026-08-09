@@ -507,46 +507,105 @@
       ]
     },
     {
-      "name": "selects target-specific provider recipe",
+      "name": "specializes targetless recipe for generic subgroup 32",
       "run": {
-        "tool": "loom-opt",
+        "tool": "loom-compile",
         "args": [
           "{srcdir}/target_provider_selection.loom",
-          "--pass=select-templates,inline-callables",
-          "--pass-report=json",
-          "--output={tmp}/target_provider_selected.loom"
+          "--backend=amdgpu-hal",
+          "--target=gfx11-generic",
+          "--output={tmp}/target_provider_gfx11_generic.vmfb",
+          "--emit-target-artifact={tmp}/target_provider_gfx11_generic.hsaco",
+          "--compile-report=summary",
+          "--dump-ir-after=select-templates",
+          "--dump-ir-format=jsonl",
+          "--dump-ir-output={tmp}/target_provider_gfx11_generic_trace.jsonl"
         ]
       },
       "stderr": {
         "contains": [
-          "\"pass\":\"select-templates\"",
-          "\"category\":\"template-selection\"",
-          "\"outcome\":\"selected\"",
-          "\"contract\":\"hip.recipe.scale_i32\"",
-          "\"target\":\"gfx1100\"",
-          "\"selected_provider\":\"scale_i32_gfx1100\"",
-          "\"provider_count\":3",
-          "\"target_applicable_count\":2",
-          "\"best_exact_count\":1"
+          "\"status\":{\"code\":0,\"name\":\"OK\"}",
+          "\"target_key\":\"gfx11-generic\"",
+          "\"subgroup_size\":32"
         ]
       },
       "files": [
         {
-          "path": "{tmp}/target_provider_selected.loom",
+          "path": "{tmp}/target_provider_gfx11_generic.vmfb",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/target_provider_gfx11_generic.hsaco",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/target_provider_gfx11_generic_trace.jsonl",
           "contains": [
-            "func.def public target(@gfx1100) @selects_gfx1100_provider",
-            "scalar.muli"
+            "\"pass\":\"select-templates\"",
+            "%subgroup_size = index.constant 32 : index",
+            "func.call inline @scale_i32_subgroup_32",
+            "scalar.addi %value, %value : i32"
           ],
           "not_contains": [
             "func.apply",
-            "scale_i32_gfx1200",
+            "%subgroup_size = target.subgroup.size",
+            "scale_i32_subgroup_64",
             "scale_i32_fallback"
           ]
         }
       ]
     },
     {
-      "name": "compiles math materialized from a target template",
+      "name": "specializes same targetless recipe for generic subgroup 64",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/target_provider_selection.loom",
+          "--backend=amdgpu-hal",
+          "--target=gfx9-4-generic",
+          "--output={tmp}/target_provider_gfx9_4_generic.vmfb",
+          "--emit-target-artifact={tmp}/target_provider_gfx9_4_generic.hsaco",
+          "--compile-report=summary",
+          "--dump-ir-after=select-templates",
+          "--dump-ir-format=jsonl",
+          "--dump-ir-output={tmp}/target_provider_gfx9_4_generic_trace.jsonl"
+        ]
+      },
+      "stderr": {
+        "contains": [
+          "\"status\":{\"code\":0,\"name\":\"OK\"}",
+          "\"target_key\":\"gfx9-4-generic\"",
+          "\"subgroup_size\":64"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/target_provider_gfx9_4_generic.vmfb",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/target_provider_gfx9_4_generic.hsaco",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/target_provider_gfx9_4_generic_trace.jsonl",
+          "contains": [
+            "\"pass\":\"select-templates\"",
+            "%subgroup_size = index.constant 64 : index",
+            "func.call inline @scale_i32_subgroup_64",
+            "scalar.muli %value, %scale_factor : i32"
+          ],
+          "not_contains": [
+            "func.apply",
+            "%subgroup_size = target.subgroup.size",
+            "scale_i32_subgroup_32",
+            "scale_i32_fallback"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "compiles targetless math template after specialization",
       "run": {
         "tool": "loom-compile",
         "args": [

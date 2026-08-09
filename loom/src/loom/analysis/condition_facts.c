@@ -117,6 +117,23 @@ static bool loom_condition_value_is_i1(const loom_module_t* module,
          loom_type_element_type(type) == LOOM_SCALAR_TYPE_I1;
 }
 
+static bool loom_condition_facts_query_opaque_boolean(
+    const loom_module_t* module, loom_value_id_t condition_value,
+    bool assumed_truth, loom_condition_fact_set_t* out_facts) {
+  if (!loom_condition_value_is_i1(module, condition_value)) return true;
+  const loom_condition_integer_relation_t assertion = {
+      .relation = LOOM_SYMBOLIC_INTEGER_RELATION_EQ,
+      .left = loom_condition_value_operand(condition_value),
+      .right =
+          {
+              .kind = LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
+              .value_id = LOOM_VALUE_ID_INVALID,
+              .constant = assumed_truth ? 1 : 0,
+          },
+  };
+  return loom_condition_fact_set_append_integer_relation(out_facts, assertion);
+}
+
 static bool loom_condition_value_exact_bool(
     const loom_value_fact_table_t* fact_table, loom_value_id_t value_id,
     bool* out_value) {
@@ -376,9 +393,15 @@ static bool loom_condition_facts_query_impl(
     return true;
   }
   const loom_value_t* value = loom_module_value(module, condition_value);
-  if (loom_value_is_block_arg(value)) return true;
+  if (loom_value_is_block_arg(value)) {
+    return loom_condition_facts_query_opaque_boolean(module, condition_value,
+                                                     assumed_truth, out_facts);
+  }
   const loom_op_t* defining_op = loom_value_def_op(value);
-  if (!defining_op) return true;
+  if (!defining_op) {
+    return loom_condition_facts_query_opaque_boolean(module, condition_value,
+                                                     assumed_truth, out_facts);
+  }
 
   switch (defining_op->kind) {
     case LOOM_OP_INDEX_CMP:
@@ -433,7 +456,8 @@ static bool loom_condition_facts_query_impl(
           loom_scalar_xori_rhs(defining_op), assumed_truth, out_facts,
           recursion_depth);
     default:
-      return true;
+      return loom_condition_facts_query_opaque_boolean(
+          module, condition_value, assumed_truth, out_facts);
   }
 }
 
@@ -785,6 +809,36 @@ bool loom_condition_fact_set_apply_to_value_facts(
   return applied;
 }
 
+static bool loom_condition_integer_operand_exact_i64(
+    const loom_value_fact_table_t* fact_table,
+    loom_condition_integer_operand_t operand, int64_t* out_value) {
+  switch (operand.kind) {
+    case LOOM_CONDITION_INTEGER_OPERAND_VALUE:
+      return loom_condition_value_exact_integer(fact_table, operand.value_id,
+                                                out_value);
+    case LOOM_CONDITION_INTEGER_OPERAND_CONSTANT:
+      *out_value = operand.constant;
+      return true;
+    default:
+      return false;
+  }
+}
+
+static bool loom_condition_integer_operands_equivalent_with_facts(
+    loom_condition_integer_operand_t left,
+    loom_condition_integer_operand_t right,
+    const loom_value_fact_table_t* fact_table) {
+  if (loom_condition_integer_operands_equal(left, right)) return true;
+  int64_t left_value = 0;
+  int64_t right_value = 0;
+  return fact_table != NULL &&
+         loom_condition_integer_operand_exact_i64(fact_table, left,
+                                                  &left_value) &&
+         loom_condition_integer_operand_exact_i64(fact_table, right,
+                                                  &right_value) &&
+         left_value == right_value;
+}
+
 bool loom_condition_integer_relation_implies(
     const loom_condition_integer_relation_t* known,
     const loom_condition_integer_relation_t* queried, bool* out_result) {
@@ -806,12 +860,37 @@ bool loom_condition_integer_relation_implies(
 
 bool loom_condition_fact_set_proves_integer_relation(
     const loom_condition_fact_set_t* facts,
+    const loom_value_fact_table_t* fact_table,
     const loom_condition_integer_relation_t* queried, bool* out_result) {
   if (!facts) return false;
   for (iree_host_size_t i = 0; i < facts->integer_relation_count; ++i) {
     if (loom_condition_integer_relation_implies(&facts->integer_relations[i],
                                                 queried, out_result)) {
       return true;
+    }
+    const loom_condition_integer_relation_t* known =
+        &facts->integer_relations[i];
+    const bool left_operands_equal =
+        loom_condition_integer_operands_equivalent_with_facts(
+            known->left, queried->left, fact_table);
+    const bool right_operands_equal =
+        loom_condition_integer_operands_equivalent_with_facts(
+            known->right, queried->right, fact_table);
+    if (left_operands_equal && right_operands_equal) {
+      return loom_symbolic_integer_relation_implies(
+          known->relation, queried->relation, out_result);
+    }
+
+    const bool swapped_left_operands_equal =
+        loom_condition_integer_operands_equivalent_with_facts(
+            known->left, queried->right, fact_table);
+    const bool swapped_right_operands_equal =
+        loom_condition_integer_operands_equivalent_with_facts(
+            known->right, queried->left, fact_table);
+    if (swapped_left_operands_equal && swapped_right_operands_equal) {
+      return loom_symbolic_integer_relation_implies(
+          loom_symbolic_integer_relation_swap(known->relation),
+          queried->relation, out_result);
     }
   }
   return false;

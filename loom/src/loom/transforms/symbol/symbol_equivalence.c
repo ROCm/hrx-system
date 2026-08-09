@@ -281,6 +281,20 @@ static iree_status_t loom_symbol_equivalence_compare_attributes(
       }
       *out_equivalent = true;
       return iree_ok_status();
+    case LOOM_ATTR_PARAMETERIZED_ARRAY:
+      if (lhs_attr->count != rhs_attr->count ||
+          depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_ok_status();
+      }
+      for (uint16_t i = 0; i < lhs_attr->count; ++i) {
+        bool element_equivalent = false;
+        IREE_RETURN_IF_ERROR(loom_symbol_equivalence_compare_attributes(
+            state, &lhs_attr->parameterized_array[i],
+            &rhs_attr->parameterized_array[i], depth + 1, &element_equivalent));
+        if (!element_equivalent) return iree_ok_status();
+      }
+      *out_equivalent = true;
+      return iree_ok_status();
     default:
       *out_equivalent = loom_attribute_equal(lhs_attr, rhs_attr);
       return iree_ok_status();

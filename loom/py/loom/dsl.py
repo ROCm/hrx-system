@@ -109,6 +109,7 @@ __all__ = [
     "ATTR_TYPE_PREDICATE_LIST",
     "ATTR_TYPE_DICT",
     "ATTR_TYPE_PARAMETERIZED",
+    "ATTR_TYPE_PARAMETERIZED_ARRAY",
     "RegionDef",
     # Symbol support.
     "SymbolDefinition",
@@ -244,7 +245,7 @@ __all__ = [
     "MemoryAccessInterface",
     "MemoryAccessOperationKind",
     "RegionBranchInterface",
-    "TargetFactSatisfaction",
+    "TargetFactSpecialization",
     "TargetLikeInterface",
     # Op declaration.
     "Op",
@@ -518,6 +519,7 @@ ATTR_TYPE_FLAGS = "flags"
 ATTR_TYPE_PREDICATE_LIST = "predicate_list"
 ATTR_TYPE_DICT = "dict"  # Named attribute dictionary.
 ATTR_TYPE_PARAMETERIZED = "parameterized"
+ATTR_TYPE_PARAMETERIZED_ARRAY = "parameterized_array"
 
 _VALID_ATTR_TYPES = frozenset(
     {
@@ -538,6 +540,7 @@ _VALID_ATTR_TYPES = frozenset(
         ATTR_TYPE_PREDICATE_LIST,
         ATTR_TYPE_DICT,
         ATTR_TYPE_PARAMETERIZED,
+        ATTR_TYPE_PARAMETERIZED_ARRAY,
     }
 )
 
@@ -764,11 +767,11 @@ class AttrDef:
 
     name: Attribute name (key in the attribute dictionary or
           positional in the format spec).
-    attr_type: The kind of attribute value. Must be one of the
-        ATTR_TYPE_* constants: "i64", "f64", "string", "bool",
-        "enum", "enum_array", "scoped_enum", "type", "i64_array", "bytes", "encoding",
-        "any". Scoped enums use a stable key at format boundaries and a dense
-        ordinal interpreted by the enclosing representation contract in C IR.
+    attr_type: The kind of attribute value. Must be one of the ATTR_TYPE_*
+        constants. Scoped enums use a stable key at format boundaries and a
+        dense ordinal interpreted by the enclosing representation contract in
+        C IR. Parameterized attribute arrays preserve order and repeated
+        families and are valid only in descriptor-backed fields.
     doc: Human-readable description.
     default: Default value (None = required, not optional).
     enum_def: For enum and enum-array attrs, the EnumDef describing valid
@@ -782,6 +785,9 @@ class AttrDef:
         ordinals and leaves selected/supported-case policy to the op verifier.
     bare_identifier: If True, string values use bare identifier spelling in
         descriptor-aware text formats instead of quoted string spelling.
+    parameterized_attr: Optional exact family constraint for parameterized
+        attributes or every element of a parameterized attribute array. None
+        leaves the family open.
     """
 
     name: str
@@ -834,13 +840,13 @@ class AttrDef:
             raise ValueError(
                 f"AttrDef '{self.name}': symbol_ref requires attr_type='symbol'"
             )
-        if (
-            self.parameterized_attr is not None
-            and self.attr_type != ATTR_TYPE_PARAMETERIZED
+        if self.parameterized_attr is not None and self.attr_type not in (
+            ATTR_TYPE_PARAMETERIZED,
+            ATTR_TYPE_PARAMETERIZED_ARRAY,
         ):
             raise ValueError(
                 f"AttrDef '{self.name}': parameterized_attr requires "
-                "attr_type='parameterized'"
+                "attr_type='parameterized' or 'parameterized_array'"
             )
         if self.elide_default:
             if self.default is None:
@@ -2848,6 +2854,7 @@ _DESCRIPTOR_PARAMETER_TYPES = frozenset(
         ATTR_TYPE_SYMBOL,
         ATTR_TYPE_DICT,
         ATTR_TYPE_PARAMETERIZED,
+        ATTR_TYPE_PARAMETERIZED_ARRAY,
     }
 )
 
@@ -2899,14 +2906,6 @@ def _validate_descriptor_parameters(
                 f"{owner}: parameter '{parameter.name}' has unsupported kind "
                 f"'{parameter.attr_type}'"
             )
-        if (
-            parameter.attr_type == ATTR_TYPE_PARAMETERIZED
-            and parameter.parameterized_attr is None
-        ):
-            raise ValueError(
-                f"{owner}: nested parameter '{parameter.name}' requires an "
-                "exact parameterized_attr"
-            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -2916,12 +2915,18 @@ class ParameterizedAttrDef:
     The family name is stable public IR. Dense family ordinals and parameter
     slot positions are generated implementation details and never serialize.
     Parameters use AttrDef so operation fields, parameterized attributes, and
-    generic parameterized types share one value schema.
+    generic parameterized types share one value schema. A family may designate
+    one required parameter as its compact primary value; the parameter remains
+    named everywhere except canonical text assembly, where it prints
+    positionally. A family used as a static target-applicability clause may
+    name its typed C condition descriptor.
     """
 
     name: str
     group: Dialect
     parameters: tuple[AttrDef, ...] = ()
+    primary_parameter_index: int | None = None
+    target_condition: str | None = None
     doc: str = ""
 
     def __init__(
@@ -2930,6 +2935,8 @@ class ParameterizedAttrDef:
         *,
         group: Dialect,
         parameters: list[AttrDef] | tuple[AttrDef, ...] = (),
+        primary_parameter: str | None = None,
+        target_condition: str | None = None,
         doc: str = "",
     ) -> None:
         name_parts = name.split(".")
@@ -2948,11 +2955,46 @@ class ParameterizedAttrDef:
         _validate_descriptor_parameters(
             f"ParameterizedAttrDef '{name}'", frozen_parameters
         )
+        primary_parameter_index = None
+        if primary_parameter is not None:
+            primary_parameter_index = next(
+                (
+                    index
+                    for index, parameter in enumerate(frozen_parameters)
+                    if parameter.name == primary_parameter
+                ),
+                None,
+            )
+            if primary_parameter_index is None:
+                raise ValueError(
+                    f"ParameterizedAttrDef '{name}': primary parameter "
+                    f"'{primary_parameter}' is not declared"
+                )
+            if frozen_parameters[primary_parameter_index].optional:
+                raise ValueError(
+                    f"ParameterizedAttrDef '{name}': primary parameter "
+                    f"'{primary_parameter}' must be required"
+                )
+        if target_condition is not None and not _is_ascii_identifier(target_condition):
+            raise ValueError(
+                f"ParameterizedAttrDef '{name}': target condition "
+                f"'{target_condition}' must be a C symbol name"
+            )
 
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "group", group)
         object.__setattr__(self, "parameters", frozen_parameters)
+        object.__setattr__(self, "primary_parameter_index", primary_parameter_index)
+        object.__setattr__(self, "target_condition", target_condition)
         object.__setattr__(self, "doc", doc)
+
+    @property
+    def primary_parameter(self) -> AttrDef | None:
+        """Returns the descriptor-declared compact positional parameter."""
+
+        if self.primary_parameter_index is None:
+            return None
+        return self.parameters[self.primary_parameter_index]
 
     def __call__(self, **parameters: Any) -> Any:
         """Constructs one immutable value of this family."""
@@ -4198,6 +4240,9 @@ class FuncLikeInterface(NamedTuple):
     inline_policy: str | None = None
     # Predicate list attr for where-clause constraints. None if absent.
     predicates: str | None = None
+    # Parameterized attribute array naming provider proof requirements.
+    # None for function kinds that are not implementation providers.
+    requires: str | None = None
     # Region name for the function body. None for bodyless ops that
     # only declare a signature without providing an implementation.
     body: str | None = None
@@ -4217,10 +4262,12 @@ class FuncLikeInterface(NamedTuple):
 
 
 @unique
-class TargetFactSatisfaction(Enum):
-    """Satisfaction relation for generated common target facts."""
+class TargetFactSpecialization(Enum):
+    """Specialization relation for generated common target facts."""
 
-    IDENTITY = "identity"
+    # Only the same projected fact object satisfies specialization.
+    EXACT = "exact"
+    # Distinct facts satisfy compatible common snapshots and configuration.
     STRUCTURAL = "structural"
 
 
@@ -4247,14 +4294,15 @@ class TargetLikeInterface(NamedTuple):
     # table instead of requiring hand-authored descriptor metadata.
     bundle_table: str | None = None
     # Optional C symbol for a family-owned target fact type. When absent, the C
-    # generator emits a common fact type private to this op.
+    # generator emits a common fact type private to this op whose identity is
+    # defined by selector equality.
     fact_type: str | None = None
     # Optional C symbol for the target-op adapter that projects family-owned
     # attributes into the typed fact extension.
     fact_projector: str | None = None
-    # Satisfaction relation used by a generated common fact type. Family-owned
-    # fact types carry their relation in the named descriptor instead.
-    fact_satisfaction: TargetFactSatisfaction = TargetFactSatisfaction.IDENTITY
+    # Specialization relation used by a generated common fact type.
+    # Family-owned fact types carry their relation in the named descriptor.
+    fact_specialization: TargetFactSpecialization = TargetFactSpecialization.EXACT
 
 
 class LoopLikeInterface(NamedTuple):
