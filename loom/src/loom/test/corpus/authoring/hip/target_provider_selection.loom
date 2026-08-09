@@ -25,10 +25,12 @@ func.template<hip.recipe.scale_i32> priority(1) @scale_i32_fallback(%value: i32)
 }
 
 // The source does not select a backend or processor. A live JIT projects facts
-// from its device; offline compilation supplies a profile with --target.
+// from its device; offline compilation supplies a profile with --target. The
+// launch geometry and provider selection consume the same effective fact.
 kernel.def @selects_subgroup_provider() {
   %c1 = index.constant 1 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+  %subgroup_size = target.subgroup.size : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%subgroup_size, %c1, %c1) : index
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %element_index = index.constant 0 : index

@@ -542,11 +542,13 @@
           "path": "{tmp}/target_provider_gfx11_generic_trace.jsonl",
           "contains": [
             "\"pass\":\"select-templates\"",
+            "%subgroup_size = index.constant 32 : index",
             "func.call inline @scale_i32_subgroup_32",
             "scalar.addi %value, %value : i32"
           ],
           "not_contains": [
             "func.apply",
+            "%subgroup_size = target.subgroup.size",
             "scale_i32_subgroup_64",
             "scale_i32_fallback"
           ]
@@ -589,11 +591,13 @@
           "path": "{tmp}/target_provider_gfx9_4_generic_trace.jsonl",
           "contains": [
             "\"pass\":\"select-templates\"",
+            "%subgroup_size = index.constant 64 : index",
             "func.call inline @scale_i32_subgroup_64",
             "scalar.muli %value, %scale_factor : i32"
           ],
           "not_contains": [
             "func.apply",
+            "%subgroup_size = target.subgroup.size",
             "scale_i32_subgroup_32",
             "scale_i32_fallback"
           ]

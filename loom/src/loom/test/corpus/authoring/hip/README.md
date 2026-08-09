@@ -673,7 +673,11 @@ func.template<hip.recipe.scale_i32> requires [#target.subgroup.size<64>] priorit
 func.template<hip.recipe.scale_i32> requires [#target.subgroup.size<32>] priority(20) @scale_i32_subgroup_32(%value: i32) -> (i32) { ... }
 func.template<hip.recipe.scale_i32> priority(1) @scale_i32_fallback(%value: i32) -> (i32) { ... }
 
-kernel.def @selects_subgroup_provider() { ... } launch(%input: buffer, %output: buffer) {
+kernel.def @selects_subgroup_provider() {
+  %c1 = index.constant 1 : index
+  %subgroup_size = target.subgroup.size : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%subgroup_size, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer) {
   ...
   %scaled = func.apply<hip.recipe.scale_i32>(%value) : (i32) -> (i32)
   ...
@@ -689,6 +693,9 @@ is proven. Nothing in this source names AMDGPU or SPIR-V: subgroup size is the
 complete applicability requirement, so the kernel and all three providers
 remain targetless. A live JIT supplies facts from its device; offline
 compilation supplies the same structured profile with `--target`.
+`target.subgroup.size` reads the selected fact as SSA for launch arithmetic;
+the paired `#target.subgroup.size<...>` spelling constrains static provider
+applicability. Both consume the same function-version context.
 `target(@...)` belongs only on a provider whose implementation actually
 requires that target identity.
 
@@ -725,13 +732,16 @@ jq -r 'select(.pass == "select-templates" and .changed) | .ir' \
 Expected signal:
 
 ```loom
+%subgroup_size = index.constant 32 : index
 func.call inline @scale_i32_subgroup_32
+%subgroup_size = index.constant 64 : index
 func.call inline @scale_i32_subgroup_64
 ```
 
-Each trace retains exactly one applicable provider before inlining. The emitted
-artifacts prove that normalized fact selection composes with the full target
-pipeline, rather than only a synthetic selection pass.
+Each trace folds the same query and retains exactly one applicable provider
+before inlining. The emitted artifacts prove that normalized fact selection
+and launch arithmetic compose with the full target pipeline, rather than only
+a synthetic selection pass.
 
 ## Workgroup-Cluster B128 Multicast
 
