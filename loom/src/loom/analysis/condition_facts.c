@@ -117,6 +117,23 @@ static bool loom_condition_value_is_i1(const loom_module_t* module,
          loom_type_element_type(type) == LOOM_SCALAR_TYPE_I1;
 }
 
+static bool loom_condition_facts_query_opaque_boolean(
+    const loom_module_t* module, loom_value_id_t condition_value,
+    bool assumed_truth, loom_condition_fact_set_t* out_facts) {
+  if (!loom_condition_value_is_i1(module, condition_value)) return true;
+  const loom_condition_integer_relation_t assertion = {
+      .relation = LOOM_SYMBOLIC_INTEGER_RELATION_EQ,
+      .left = loom_condition_value_operand(condition_value),
+      .right =
+          {
+              .kind = LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
+              .value_id = LOOM_VALUE_ID_INVALID,
+              .constant = assumed_truth ? 1 : 0,
+          },
+  };
+  return loom_condition_fact_set_append_integer_relation(out_facts, assertion);
+}
+
 static bool loom_condition_value_exact_bool(
     const loom_value_fact_table_t* fact_table, loom_value_id_t value_id,
     bool* out_value) {
@@ -376,9 +393,15 @@ static bool loom_condition_facts_query_impl(
     return true;
   }
   const loom_value_t* value = loom_module_value(module, condition_value);
-  if (loom_value_is_block_arg(value)) return true;
+  if (loom_value_is_block_arg(value)) {
+    return loom_condition_facts_query_opaque_boolean(module, condition_value,
+                                                     assumed_truth, out_facts);
+  }
   const loom_op_t* defining_op = loom_value_def_op(value);
-  if (!defining_op) return true;
+  if (!defining_op) {
+    return loom_condition_facts_query_opaque_boolean(module, condition_value,
+                                                     assumed_truth, out_facts);
+  }
 
   switch (defining_op->kind) {
     case LOOM_OP_INDEX_CMP:
@@ -433,7 +456,8 @@ static bool loom_condition_facts_query_impl(
           loom_scalar_xori_rhs(defining_op), assumed_truth, out_facts,
           recursion_depth);
     default:
-      return true;
+      return loom_condition_facts_query_opaque_boolean(
+          module, condition_value, assumed_truth, out_facts);
   }
 }
 
