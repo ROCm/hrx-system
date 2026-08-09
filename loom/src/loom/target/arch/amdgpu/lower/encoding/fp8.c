@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/target/arch/amdgpu/lower/narrow_float/fp8.h"
+#include "loom/target/arch/amdgpu/lower/encoding/fp8.h"
 
 #include "loom/ir/attribute.h"
 #include "loom/ir/module.h"
@@ -26,7 +26,7 @@ enum {
 
 static const iree_string_view_t kLoomAmdgpuFp8PackedBf16RepairReasons
     [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_REASON_COUNT] = {
-#include "loom/target/arch/amdgpu/lower/narrow_float/fp8_packed_repair_reason_rows.inl"
+#include "loom/target/arch/amdgpu/lower/encoding/fp8_packed_repair_reason_rows.inl"
 };
 
 #undef LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_REASON_ROW
@@ -38,7 +38,7 @@ static const iree_string_view_t kLoomAmdgpuFp8PackedBf16RepairReasons
 
 static const iree_string_view_t kLoomAmdgpuFp8PackedF16RepairReasons
     [LOOM_AMDGPU_FP8_PACKED_F16_REPAIR_REASON_COUNT] = {
-#include "loom/target/arch/amdgpu/lower/narrow_float/fp8_packed_repair_reason_rows.inl"
+#include "loom/target/arch/amdgpu/lower/encoding/fp8_packed_repair_reason_rows.inl"
 };
 
 #undef LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_REASON_ROW
@@ -140,7 +140,7 @@ static const loom_amdgpu_fp8_encoded_operand_schema_requirement_t
       .scale_operand_count = row_scale_operand_count,              \
       .scale_group_mode = row_scale_group_mode,                    \
   }
-#include "loom/target/arch/amdgpu/lower/narrow_float/fp8_encoded_operand_schema_requirement_rows.inl"
+#include "loom/target/arch/amdgpu/lower/encoding/fp8_encoded_operand_schema_requirement_rows.inl"
 #undef LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_REQUIREMENT_ROW
 };
 
@@ -163,7 +163,7 @@ static const loom_amdgpu_fp8_encoded_operand_format_row_t
       .element_type = row_element_type,                       \
       .encoded_operand_formats = row_encoded_operand_formats, \
   }
-#include "loom/target/arch/amdgpu/lower/narrow_float/fp8_encoded_operand_format_rows.inl"
+#include "loom/target/arch/amdgpu/lower/encoding/fp8_encoded_operand_format_rows.inl"
 #undef LOOM_AMDGPU_FP8_ENCODED_OPERAND_FORMAT_ROW
 };
 

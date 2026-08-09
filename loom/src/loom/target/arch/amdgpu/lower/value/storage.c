@@ -8,7 +8,7 @@
 
 #include "loom/ops/index/ops.h"
 #include "loom/ops/vector/ops.h"
-#include "loom/target/arch/amdgpu/lower/narrow_float/vector_conversion.h"
+#include "loom/target/arch/amdgpu/lower/encoding/vector_conversion.h"
 #include "loom/target/arch/amdgpu/lower/value/integer64.h"
 #include "loom/target/arch/amdgpu/lower/value/vector_conversion.h"
 

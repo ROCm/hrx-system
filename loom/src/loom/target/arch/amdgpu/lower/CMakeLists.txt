@@ -93,7 +93,7 @@ loom_generated_textual_header(
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
   OUTPUT
-    "narrow_float/fp8_decode_plan_descriptor_rows.inl"
+    "encoding/fp8_decode_plan_descriptor_rows.inl"
   OUTPUT_FLAG
     "--fp8-decode-plan-descriptor-rows"
 )
@@ -106,7 +106,7 @@ loom_generated_textual_header(
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
   OUTPUT
-    "narrow_float/fp8_encoded_operand_format_rows.inl"
+    "encoding/fp8_encoded_operand_format_rows.inl"
   OUTPUT_FLAG
     "--fp8-encoded-operand-format-rows"
 )
@@ -119,7 +119,7 @@ loom_generated_textual_header(
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
   OUTPUT
-    "narrow_float/fp8_encoded_operand_schema_requirement_rows.inl"
+    "encoding/fp8_encoded_operand_schema_requirement_rows.inl"
   OUTPUT_FLAG
     "--fp8-encoded-operand-schema-requirement-rows"
 )
@@ -132,7 +132,7 @@ loom_generated_textual_header(
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
   OUTPUT
-    "narrow_float/fp8_native_descriptor_ref_rows.inl"
+    "encoding/fp8_native_descriptor_ref_rows.inl"
   OUTPUT_FLAG
     "--fp8-native-descriptor-ref-rows"
 )
@@ -145,7 +145,7 @@ loom_generated_textual_header(
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
   OUTPUT
-    "narrow_float/fp8_scaled_descriptor_ref_rows.inl"
+    "encoding/fp8_scaled_descriptor_ref_rows.inl"
   OUTPUT_FLAG
     "--fp8-scaled-descriptor-ref-rows"
 )
@@ -158,7 +158,7 @@ loom_generated_textual_header(
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
   OUTPUT
-    "narrow_float/fp8_subnormal_table_rows.inl"
+    "encoding/fp8_subnormal_table_rows.inl"
   OUTPUT_FLAG
     "--fp8-subnormal-table-rows"
 )
@@ -171,7 +171,7 @@ loom_generated_textual_header(
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
   OUTPUT
-    "narrow_float/fp8_packed_repair_reason_rows.inl"
+    "encoding/fp8_packed_repair_reason_rows.inl"
   OUTPUT_FLAG
     "--fp8-packed-repair-reason-rows"
 )
@@ -197,6 +197,12 @@ loom_cc_library(
     "descriptor_ref.h"
     "dot.h"
     "emit.h"
+    "encoding/float16.h"
+    "encoding/fp4.h"
+    "encoding/fp8.h"
+    "encoding/fp8_encode.h"
+    "encoding/fp8_vector_conversion.h"
+    "encoding/vector_conversion.h"
     "feedback.h"
     "legality.h"
     "lower.h"
@@ -213,12 +219,6 @@ loom_cc_library(
     "matrix_fragment_state.h"
     "memory.h"
     "memory_bank_service.h"
-    "narrow_float/float16.h"
-    "narrow_float/fp4.h"
-    "narrow_float/fp8.h"
-    "narrow_float/fp8_encode.h"
-    "narrow_float/fp8_vector_conversion.h"
-    "narrow_float/vector_conversion.h"
     "plan.h"
     "preamble.h"
     "sanitizer.h"
@@ -243,17 +243,17 @@ loom_cc_library(
     "workgroup.h"
   TEXTUAL_HDRS
     "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/records/target_records_tables.inl"
+    "encoding/fp8_decode_plan_descriptor_rows.inl"
+    "encoding/fp8_encoded_operand_format_rows.inl"
+    "encoding/fp8_encoded_operand_schema_requirement_rows.inl"
+    "encoding/fp8_native_descriptor_ref_rows.inl"
+    "encoding/fp8_packed_repair_reason_rows.inl"
+    "encoding/fp8_scaled_descriptor_ref_rows.inl"
+    "encoding/fp8_subnormal_table_rows.inl"
     "memory_cache_policy_encoding_rows.inl"
     "memory_cache_policy_temporal_th.inl"
     "memory_descriptor_candidate_ranges.inl"
     "memory_descriptor_candidates.inl"
-    "narrow_float/fp8_decode_plan_descriptor_rows.inl"
-    "narrow_float/fp8_encoded_operand_format_rows.inl"
-    "narrow_float/fp8_encoded_operand_schema_requirement_rows.inl"
-    "narrow_float/fp8_native_descriptor_ref_rows.inl"
-    "narrow_float/fp8_packed_repair_reason_rows.inl"
-    "narrow_float/fp8_scaled_descriptor_ref_rows.inl"
-    "narrow_float/fp8_subnormal_table_rows.inl"
     "registry_tables.inl"
   SRCS
     "abi.c"
@@ -274,6 +274,16 @@ loom_cc_library(
     "descriptor_ref.c"
     "dot.c"
     "emit_support.c"
+    "encoding/float16.c"
+    "encoding/fp4.c"
+    "encoding/fp8.c"
+    "encoding/fp8_descriptors.c"
+    "encoding/fp8_encode.c"
+    "encoding/fp8_lane.c"
+    "encoding/fp8_packed.c"
+    "encoding/fp8_plan.c"
+    "encoding/fp8_vector_conversion.c"
+    "encoding/vector_conversion.c"
     "feedback.c"
     "legality.c"
     "mask.c"
@@ -294,16 +304,6 @@ loom_cc_library(
     "memory_diagnostics.c"
     "memory_emit.c"
     "memory_legality.c"
-    "narrow_float/float16.c"
-    "narrow_float/fp4.c"
-    "narrow_float/fp8.c"
-    "narrow_float/fp8_descriptors.c"
-    "narrow_float/fp8_encode.c"
-    "narrow_float/fp8_lane.c"
-    "narrow_float/fp8_packed.c"
-    "narrow_float/fp8_plan.c"
-    "narrow_float/fp8_vector_conversion.c"
-    "narrow_float/vector_conversion.c"
     "preamble.c"
     "prefetch.c"
     "registry.c"

@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/target/arch/amdgpu/lower/narrow_float/fp4.h"
+#include "loom/target/arch/amdgpu/lower/encoding/fp4.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -14,9 +14,9 @@
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/vector/storage.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
-#include "loom/target/arch/amdgpu/lower/narrow_float/float16.h"
-#include "loom/target/arch/amdgpu/lower/narrow_float/fp8.h"
-#include "loom/target/arch/amdgpu/lower/narrow_float/vector_conversion.h"
+#include "loom/target/arch/amdgpu/lower/encoding/float16.h"
+#include "loom/target/arch/amdgpu/lower/encoding/fp8.h"
+#include "loom/target/arch/amdgpu/lower/encoding/vector_conversion.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_info.h"

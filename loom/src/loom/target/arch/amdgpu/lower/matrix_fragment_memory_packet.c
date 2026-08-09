@@ -11,9 +11,9 @@
 #include "loom/ops/vector/fragment.h"
 #include "loom/target/arch/amdgpu/lower/candidates/compare_candidates.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
+#include "loom/target/arch/amdgpu/lower/encoding/fp8.h"
 #include "loom/target/arch/amdgpu/lower/matrix_fragment_memory_address.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
-#include "loom/target/arch/amdgpu/lower/narrow_float/fp8.h"
 #include "loom/target/arch/amdgpu/lower/subgroup.h"
 #include "loom/util/fact_table.h"
 

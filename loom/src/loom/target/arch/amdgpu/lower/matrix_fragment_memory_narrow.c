@@ -11,7 +11,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/ops/vector/fragment.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
-#include "loom/target/arch/amdgpu/lower/narrow_float/fp8.h"
+#include "loom/target/arch/amdgpu/lower/encoding/fp8.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/util/fact_table.h"
 

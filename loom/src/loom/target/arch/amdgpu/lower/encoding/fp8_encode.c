@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/target/arch/amdgpu/lower/narrow_float/fp8_encode.h"
+#include "loom/target/arch/amdgpu/lower/encoding/fp8_encode.h"
 
 #include "loom/ir/attribute.h"
 #include "loom/ops/low/ops.h"
