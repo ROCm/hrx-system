@@ -32,6 +32,25 @@ typedef struct loom_text_low_asm_form_t loom_text_low_asm_form_t;
 typedef struct loom_text_low_asm_descriptor_handle_t
     loom_text_low_asm_descriptor_handle_t;
 
+typedef enum loom_text_low_asm_operand_segment_delimiter_e {
+  // Angle brackets: `<...>`.
+  LOOM_TEXT_LOW_ASM_OPERAND_SEGMENT_DELIMITER_ANGLE = 1,
+  // Square brackets: `[...]`.
+  LOOM_TEXT_LOW_ASM_OPERAND_SEGMENT_DELIMITER_SQUARE = 2,
+  // Parentheses: `(...)`.
+  LOOM_TEXT_LOW_ASM_OPERAND_SEGMENT_DELIMITER_PAREN = 3,
+} loom_text_low_asm_operand_segment_delimiter_t;
+
+typedef struct loom_text_low_asm_operand_segment_descriptor_t {
+  // Delimiter pair enclosing this operand segment.
+  loom_text_low_asm_operand_segment_delimiter_t delimiter;
+  // Number of fixed operands in this segment.
+  uint16_t fixed_operand_count;
+  // True when the segment consumes all remaining operands after its fixed
+  // prefix. Only the final segment may be variadic.
+  bool is_variadic;
+} loom_text_low_asm_operand_segment_descriptor_t;
+
 // Active target-low representation contract for contextual types and regions.
 typedef struct loom_text_low_repr_context_t {
   // Canonical representation-contract key selected by the enclosing wrapper.
@@ -53,8 +72,12 @@ typedef struct loom_text_low_asm_packet_descriptor_t {
   iree_string_view_t mnemonic;
   // Number of SSA results produced by this asm packet.
   uint16_t result_count;
-  // Number of SSA operands consumed by this asm packet.
-  uint16_t operand_count;
+  // Minimum number of SSA operands consumed by this asm packet.
+  uint16_t minimum_operand_count;
+  // Number of delimited operand segments, or zero for the flat legacy form.
+  uint16_t operand_segment_count;
+  // True when the final operand segment accepts a variadic suffix.
+  bool has_variadic_operands;
   // Number of immediate attributes addressed by the compact asm form.
   uint16_t asm_immediate_count;
   // Number of descriptor immediate attributes addressable by this asm packet.
@@ -244,6 +267,11 @@ typedef iree_status_t (*loom_text_low_asm_immediate_descriptor_fn_t)(
     uint16_t immediate_index,
     loom_text_low_asm_immediate_descriptor_t* out_immediate);
 
+typedef iree_status_t (*loom_text_low_asm_operand_segment_descriptor_fn_t)(
+    const loom_text_low_asm_environment_state_t* state,
+    const loom_text_low_asm_packet_descriptor_t* packet, uint16_t segment_index,
+    loom_text_low_asm_operand_segment_descriptor_t* out_segment);
+
 typedef iree_status_t (*loom_text_low_asm_build_packet_fn_t)(
     const loom_text_low_asm_environment_state_t* state, loom_builder_t* builder,
     const loom_text_low_asm_packet_descriptor_t* packet,
@@ -318,6 +346,8 @@ typedef struct loom_text_low_asm_vtable_t {
       result_type_annotation_required;
   // Returns canonical field and surface spelling metadata for one immediate.
   loom_text_low_asm_immediate_descriptor_fn_t immediate_descriptor;
+  // Returns delimiter and cardinality metadata for one operand segment.
+  loom_text_low_asm_operand_segment_descriptor_fn_t operand_segment_descriptor;
   // Builds the canonical low operation for a parsed non-return asm packet.
   loom_text_low_asm_build_packet_fn_t build_packet;
   // Builds the canonical low return operation for an asm `return` packet.
@@ -358,6 +388,7 @@ static inline bool loom_text_low_asm_environment_is_configured(
          environment->vtable->infer_result_type &&
          environment->vtable->validate_result_type &&
          environment->vtable->immediate_descriptor &&
+         environment->vtable->operand_segment_descriptor &&
          environment->vtable->build_packet &&
          environment->vtable->build_return &&
          environment->vtable->structural_attr_descriptor &&
@@ -370,6 +401,7 @@ static inline bool loom_text_low_asm_environment_supports_printing(
          environment->low_repr.vtable && environment->low_repr.state &&
          environment->vtable->result_type_annotation_required &&
          environment->vtable->immediate_descriptor &&
+         environment->vtable->operand_segment_descriptor &&
          environment->vtable->describe_operation &&
          environment->vtable->lookup_register_descriptor_set &&
          environment->vtable->describe_register_type;

@@ -26,7 +26,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 33u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 34u
 
 // Sentinel for absent string-table offsets.
 #define LOOM_LOW_STRING_OFFSET_NONE LOOM_BSTRING_TABLE_OFFSET_NONE
@@ -119,6 +119,9 @@ typedef uint16_t loom_low_operand_flags_t;
 // execution, and writes only the result's declared register part. The source
 // establishes issue order and storage identity but not completion dependence.
 #define LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION ((uint16_t)1u << 8)
+// Operand row describes zero or more trailing packet operands. Variadic rows
+// are explicit packet operands and must terminate the descriptor operand list.
+#define LOOM_LOW_OPERAND_FLAG_VARIADIC ((uint16_t)1u << 9)
 
 // Bitset of register-class alternative flags.
 typedef uint16_t loom_low_reg_class_alt_flags_t;
@@ -970,6 +973,38 @@ typedef struct loom_low_asm_result_value_type_t {
 static_assert(sizeof(loom_low_asm_result_value_type_t) == 4,
               "loom_low_asm_result_value_type_t must be 4 bytes");
 
+enum loom_low_asm_operand_segment_delimiter_e {
+  // Unknown or uninitialized operand segment delimiter.
+  LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_UNKNOWN = 0,
+  // Angle brackets: `<...>`.
+  LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_ANGLE = 1,
+  // Square brackets: `[...]`.
+  LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_SQUARE = 2,
+  // Parentheses: `(...)`.
+  LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_PAREN = 3,
+};
+typedef uint8_t loom_low_asm_operand_segment_delimiter_t;
+
+// Bitset of compact Low asm operand segment flags.
+typedef uint8_t loom_low_asm_operand_segment_flags_t;
+
+// The final operand row in the segment repeats over the remaining packet
+// operand suffix and may have zero instances.
+#define LOOM_LOW_ASM_OPERAND_SEGMENT_FLAG_VARIADIC ((uint8_t)1u << 0)
+
+typedef struct loom_low_asm_operand_segment_t {
+  // Number of descriptor operand rows in the segment. A variadic final row is
+  // included once in this count as its schema template.
+  uint16_t operand_count;
+  // Delimiter pair enclosing the segment.
+  loom_low_asm_operand_segment_delimiter_t delimiter;
+  // Segment flags controlling packet operand cardinality.
+  loom_low_asm_operand_segment_flags_t flags;
+} loom_low_asm_operand_segment_t;
+
+static_assert(sizeof(loom_low_asm_operand_segment_t) == 4,
+              "loom_low_asm_operand_segment_t must be 4 bytes");
+
 typedef struct loom_low_asm_form_t {
   // String-table offset for the unqualified asm mnemonic.
   loom_bstring_table_offset_t mnemonic_string_offset;
@@ -983,6 +1018,8 @@ typedef struct loom_low_asm_form_t {
   uint32_t result_value_type_start;
   // First descriptor-local input operand index in asm_operand_indices.
   uint32_t operand_index_start;
+  // First delimited input operand segment row.
+  uint32_t operand_segment_start;
   // First immediate spelling row for this asm form.
   uint32_t immediate_start;
   // First native assembly value row for this asm form.
@@ -991,14 +1028,16 @@ typedef struct loom_low_asm_form_t {
   uint16_t result_operand_index_count;
   // Number of input operand indices for this asm form.
   uint16_t operand_index_count;
+  // Number of delimited input operand segments for this asm form.
+  uint16_t operand_segment_count;
   // Number of immediate spelling rows for this asm form.
   uint16_t immediate_count;
   // Number of native assembly value rows for this asm form.
   uint16_t native_assembly_value_count;
 } loom_low_asm_form_t;
 
-static_assert(sizeof(loom_low_asm_form_t) == 40,
-              "loom_low_asm_form_t must be 40 bytes");
+static_assert(sizeof(loom_low_asm_form_t) == 48,
+              "loom_low_asm_form_t must be 48 bytes");
 
 typedef struct loom_low_descriptor_set_t {
   // Descriptor table ABI version.
@@ -1041,6 +1080,10 @@ typedef struct loom_low_descriptor_set_t {
   const uint16_t* asm_operand_indices;
   // Number of descriptor-local operand index rows owned by this set.
   uint32_t asm_operand_index_count;
+  // Packed delimited operand segments referenced by asm forms.
+  const loom_low_asm_operand_segment_t* asm_operand_segments;
+  // Number of operand segment rows owned by this set.
+  uint32_t asm_operand_segment_count;
   // Packed exact semantic result rows referenced by asm forms.
   const loom_low_asm_result_value_type_t* asm_result_value_types;
   // Number of exact semantic result rows owned by this set.
@@ -1280,14 +1323,40 @@ bool loom_low_descriptor_operand_maps_to_packet_operand(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint16_t descriptor_operand_index);
 
+typedef struct loom_low_packet_operand_span_t {
+  // First packet operand represented by the descriptor operand row.
+  uint16_t start;
+  // Number of packet operands represented by the row.
+  uint16_t count;
+} loom_low_packet_operand_span_t;
+
+// Returns true when |descriptor| ends in a variadic packet operand row.
+bool loom_low_descriptor_has_variadic_operands(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor);
+
+// Returns the minimum number of packet operands accepted by |descriptor|.
+// Descriptors without a variadic suffix accept exactly this count.
+uint16_t loom_low_descriptor_minimum_packet_operand_count(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor);
+
+// Returns the packet operand span represented by |descriptor_operand_index|.
+// The descriptor operand must map to a packet operand and
+// |packet_operand_count| must satisfy the descriptor cardinality contract.
+loom_low_packet_operand_span_t loom_low_descriptor_operand_packet_span(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor, uint16_t descriptor_operand_index,
+    uint16_t packet_operand_count);
+
 // Returns the first low packet resource operand omitted from target assembly,
 // or NULL when |descriptor| has no implicit resource operand.
 const loom_low_operand_t* loom_low_descriptor_implicit_resource_operand(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor);
 
-// Returns the low packet operand index for |descriptor_operand_index|. The
-// descriptor operand must map to a low packet operand.
+// Returns the first low packet operand index for |descriptor_operand_index|.
+// The descriptor operand must map to a low packet operand.
 uint16_t loom_low_descriptor_operand_packet_index(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint16_t descriptor_operand_index);

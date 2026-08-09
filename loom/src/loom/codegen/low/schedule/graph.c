@@ -271,10 +271,15 @@ static const uint16_t* loom_low_schedule_index_descriptor_operands(
         &state->target.descriptor_set
              ->operands[descriptor->operand_start + descriptor_operand_index];
     if (!loom_low_operand_role_is_packet_operand(operand->role)) continue;
-    IREE_ASSERT_LT(operand->source_value_index, operand_count);
-    state->descriptor_operands.indices[operand->source_value_index] =
-        descriptor_operand_index;
-    ++indexed_operand_count;
+    const loom_low_packet_operand_span_t packet_span =
+        loom_low_descriptor_operand_packet_span(
+            state->target.descriptor_set, descriptor, descriptor_operand_index,
+            operand_count);
+    for (uint16_t i = 0; i < packet_span.count; ++i) {
+      state->descriptor_operands.indices[packet_span.start + i] =
+          descriptor_operand_index;
+    }
+    indexed_operand_count += packet_span.count;
   }
   IREE_ASSERT_EQ(indexed_operand_count, operand_count);
   return state->descriptor_operands.indices;

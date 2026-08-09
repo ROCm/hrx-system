@@ -95,6 +95,55 @@ bool loom_low_descriptor_operand_maps_to_packet_operand(
   return loom_low_operand_role_is_packet_operand(operand->role);
 }
 
+bool loom_low_descriptor_has_variadic_operands(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor) {
+  if (descriptor->operand_count == 0) return false;
+  const loom_low_operand_t* operand =
+      &descriptor_set->operands[descriptor->operand_start +
+                                descriptor->operand_count - 1];
+  return iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_VARIADIC);
+}
+
+uint16_t loom_low_descriptor_minimum_packet_operand_count(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor) {
+  uint16_t count = 0;
+  for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
+       ++i) {
+    const loom_low_operand_t* operand =
+        &descriptor_set->operands[descriptor->operand_start + i];
+    if (!loom_low_operand_role_is_packet_operand(operand->role) ||
+        iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_VARIADIC)) {
+      continue;
+    }
+    ++count;
+  }
+  return count;
+}
+
+loom_low_packet_operand_span_t loom_low_descriptor_operand_packet_span(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor, uint16_t descriptor_operand_index,
+    uint16_t packet_operand_count) {
+  IREE_ASSERT_TRUE(loom_low_descriptor_operand_maps_to_packet_operand(
+      descriptor_set, descriptor, descriptor_operand_index));
+  const loom_low_operand_t* operand =
+      &descriptor_set
+           ->operands[descriptor->operand_start + descriptor_operand_index];
+  IREE_ASSERT_NE(operand->source_value_index, LOOM_LOW_ID_NONE);
+  const uint16_t start = operand->source_value_index;
+  if (!iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_VARIADIC)) {
+    IREE_ASSERT_LT(start, packet_operand_count);
+    return (loom_low_packet_operand_span_t){.start = start, .count = 1};
+  }
+  IREE_ASSERT_LE(start, packet_operand_count);
+  return (loom_low_packet_operand_span_t){
+      .start = start,
+      .count = packet_operand_count - start,
+  };
+}
+
 const loom_low_operand_t* loom_low_descriptor_implicit_resource_operand(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor) {

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from loom.gen.support.string_pool import CStringPool
 from loom.target.low_descriptors import (
+    AsmOperandSegmentDelimiter,
     AsmResultValueType,
     Constraint,
     Descriptor,
@@ -98,6 +99,7 @@ class CompiledDescriptorSet:
     canonical_asm_form_ordinals: list[int | None]
     asm_forms: list[CompiledAsmForm]
     asm_operand_indices: list[int]
+    asm_operand_segments: list[CompiledAsmOperandSegment]
     asm_result_value_types: list[AsmResultValueType | None]
     asm_immediates: list[CompiledAsmImmediate]
     native_asm_values: list[CompiledNativeAsmValue]
@@ -142,6 +144,13 @@ class CompiledNativeAsmValue:
     literal: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class CompiledAsmOperandSegment:
+    delimiter: AsmOperandSegmentDelimiter
+    operand_count: int
+    has_variadic_operand: bool
+
+
 @dataclass(slots=True)
 class CompiledAsmForm:
     descriptor_ordinal: int
@@ -151,12 +160,14 @@ class CompiledAsmForm:
     native_assembly_mnemonic: str | None
     result_indices: tuple[int, ...]
     operand_indices: tuple[int, ...]
+    operand_segments: tuple[CompiledAsmOperandSegment, ...]
     result_value_types: tuple[AsmResultValueType | None, ...]
     immediates: tuple[CompiledAsmImmediate, ...]
     native_assembly_values: tuple[CompiledNativeAsmValue, ...]
     result_index_start: int = 0
     result_value_type_start: int | None = None
     operand_index_start: int = 0
+    operand_segment_start: int = 0
     immediate_start: int = 0
     native_assembly_value_start: int = 0
 

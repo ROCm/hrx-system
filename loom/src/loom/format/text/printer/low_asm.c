@@ -335,6 +335,76 @@ static iree_status_t loom_print_low_asm_value_list(
   return iree_ok_status();
 }
 
+static iree_status_t loom_print_low_asm_value_span(
+    loom_print_context_t* ctx, const loom_value_id_t* values,
+    uint16_t value_start, uint16_t value_count,
+    loom_print_field_kind_t field_kind) {
+  for (uint16_t i = 0; i < value_count; ++i) {
+    if (i > 0) {
+      IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ",", false));
+    }
+    const uint16_t value_index = value_start + i;
+    IREE_RETURN_IF_ERROR(loom_print_value_name_with_field(
+        ctx, values[value_index],
+        loom_print_field_ref(field_kind, value_index)));
+  }
+  return iree_ok_status();
+}
+
+static void loom_print_low_asm_operand_segment_delimiters(
+    loom_text_low_asm_operand_segment_delimiter_t delimiter,
+    const char** out_open, const char** out_close) {
+  switch (delimiter) {
+    case LOOM_TEXT_LOW_ASM_OPERAND_SEGMENT_DELIMITER_ANGLE:
+      *out_open = "<";
+      *out_close = ">";
+      return;
+    case LOOM_TEXT_LOW_ASM_OPERAND_SEGMENT_DELIMITER_SQUARE:
+      *out_open = "[";
+      *out_close = "]";
+      return;
+    case LOOM_TEXT_LOW_ASM_OPERAND_SEGMENT_DELIMITER_PAREN:
+      *out_open = "(";
+      *out_close = ")";
+      return;
+    default:
+      IREE_ASSERT_UNREACHABLE("validated low asm operand segment delimiter");
+      *out_open = "";
+      *out_close = "";
+      return;
+  }
+}
+
+static iree_status_t loom_print_low_asm_operand_segments(
+    loom_print_context_t* ctx, const loom_text_low_asm_statement_t* statement) {
+  uint16_t operand_offset = 0;
+  for (uint16_t segment_index = 0;
+       segment_index < statement->packet.operand_segment_count;
+       ++segment_index) {
+    loom_text_low_asm_operand_segment_descriptor_t segment = {0};
+    IREE_RETURN_IF_ERROR(
+        ctx->low_asm_environment.vtable->operand_segment_descriptor(
+            ctx->low_asm_environment.state, &statement->packet, segment_index,
+            &segment));
+    const uint16_t segment_operand_count =
+        segment.is_variadic ? statement->operand_count - operand_offset
+                            : segment.fixed_operand_count;
+    const char* open = NULL;
+    const char* close = NULL;
+    loom_print_low_asm_operand_segment_delimiters(segment.delimiter, &open,
+                                                  &close);
+    IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, open, true));
+    loom_print_set_glue(ctx);
+    IREE_RETURN_IF_ERROR(loom_print_low_asm_value_span(
+        ctx, statement->operands, operand_offset, segment_operand_count,
+        LOOM_PRINT_FIELD_OPERAND));
+    IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, close, true));
+    operand_offset += segment_operand_count;
+  }
+  IREE_ASSERT_EQ(operand_offset, statement->operand_count);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_print_low_asm_named_immediates(
     loom_print_context_t* ctx, const loom_text_low_asm_statement_t* statement,
     uint16_t immediate_start, uint16_t immediate_end) {
@@ -466,9 +536,13 @@ static iree_status_t loom_print_low_asm_packet(
     loom_print_context_t* ctx, const loom_text_low_asm_statement_t* statement) {
   IREE_RETURN_IF_ERROR(loom_print_low_asm_result_list(ctx, statement));
   IREE_RETURN_IF_ERROR(loom_print_emit(ctx, statement->packet.mnemonic, false));
-  IREE_RETURN_IF_ERROR(loom_print_low_asm_value_list(ctx, statement->operands,
-                                                     statement->operand_count,
-                                                     LOOM_PRINT_FIELD_OPERAND));
+  if (statement->packet.operand_segment_count != 0) {
+    IREE_RETURN_IF_ERROR(loom_print_low_asm_operand_segments(ctx, statement));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_print_low_asm_value_list(
+        ctx, statement->operands, statement->operand_count,
+        LOOM_PRINT_FIELD_OPERAND));
+  }
   IREE_RETURN_IF_ERROR(loom_print_low_asm_immediates(ctx, statement));
   IREE_RETURN_IF_ERROR(
       loom_print_low_asm_result_type_annotation(ctx, statement));

@@ -204,27 +204,39 @@ static iree_status_t loom_parse_low_asm_result_types(
   return iree_ok_status();
 }
 
-static iree_status_t loom_parse_low_asm_operands(
+static iree_status_t loom_parse_low_asm_operand(
+    loom_parser_t* parser, loom_token_t mnemonic_token,
+    uint32_t expected_operand_count, loom_low_asm_value_list_t* operands) {
+  if (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_SSA_VALUE)) {
+    return loom_parser_emit_low_asm_operand_count_mismatch(
+        parser, mnemonic_token, expected_operand_count,
+        (uint32_t)operands->count);
+  }
+  loom_token_t operand_token = loom_tokenizer_next(&parser->tokenizer);
+  loom_value_id_t operand = LOOM_VALUE_ID_INVALID;
+  uint32_t errors_before = parser->error_count;
+  IREE_RETURN_IF_ERROR(
+      loom_parser_resolve_value(parser, operand_token, &operand));
+  if (parser->error_count > errors_before) {
+    return iree_ok_status();
+  }
+  return loom_low_asm_value_list_append(parser, operands, operand);
+}
+
+static iree_status_t loom_parse_low_asm_flat_operands(
     loom_parser_t* parser, const loom_text_low_asm_packet_descriptor_t* packet,
-    loom_token_t mnemonic_token, loom_value_id_t* operands) {
-  const uint16_t operand_count = packet->operand_count;
+    loom_token_t mnemonic_token, loom_low_asm_value_list_t* operands) {
+  const uint16_t operand_count = packet->minimum_operand_count;
+  const uint32_t errors_before = parser->error_count;
   for (uint16_t i = 0; i < operand_count; ++i) {
     if (i > 0 &&
         !loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_COMMA)) {
       return loom_parser_emit_low_asm_operand_count_mismatch(
           parser, mnemonic_token, operand_count, i);
     }
-    if (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_SSA_VALUE)) {
-      return loom_parser_emit_low_asm_operand_count_mismatch(
-          parser, mnemonic_token, operand_count, i);
-    }
-    loom_token_t operand_token = loom_tokenizer_next(&parser->tokenizer);
-    uint32_t errors_before = parser->error_count;
-    IREE_RETURN_IF_ERROR(
-        loom_parser_resolve_value(parser, operand_token, &operands[i]));
-    if (parser->error_count > errors_before) {
-      return iree_ok_status();
-    }
+    IREE_RETURN_IF_ERROR(loom_parse_low_asm_operand(parser, mnemonic_token,
+                                                    operand_count, operands));
+    if (parser->error_count > errors_before) return iree_ok_status();
   }
 
   loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
@@ -235,6 +247,92 @@ static iree_status_t loom_parse_low_asm_operands(
         parser, mnemonic_token, /*expected_count=*/0, /*actual_count=*/1);
   }
   return iree_ok_status();
+}
+
+static iree_status_t loom_low_asm_operand_segment_tokens(
+    loom_text_low_asm_operand_segment_delimiter_t delimiter,
+    loom_token_kind_t* out_open_token, loom_token_kind_t* out_close_token) {
+  switch (delimiter) {
+    case LOOM_TEXT_LOW_ASM_OPERAND_SEGMENT_DELIMITER_ANGLE:
+      *out_open_token = LOOM_TOKEN_LANGLE;
+      *out_close_token = LOOM_TOKEN_RANGLE;
+      return iree_ok_status();
+    case LOOM_TEXT_LOW_ASM_OPERAND_SEGMENT_DELIMITER_SQUARE:
+      *out_open_token = LOOM_TOKEN_LBRACKET;
+      *out_close_token = LOOM_TOKEN_RBRACKET;
+      return iree_ok_status();
+    case LOOM_TEXT_LOW_ASM_OPERAND_SEGMENT_DELIMITER_PAREN:
+      *out_open_token = LOOM_TOKEN_LPAREN;
+      *out_close_token = LOOM_TOKEN_RPAREN;
+      return iree_ok_status();
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "low asm operand segment has an invalid "
+                              "delimiter");
+  }
+}
+
+static iree_status_t loom_parse_low_asm_segmented_operands(
+    loom_parser_t* parser, const loom_text_low_asm_packet_descriptor_t* packet,
+    loom_token_t mnemonic_token, loom_low_asm_value_list_t* operands) {
+  const uint32_t errors_before = parser->error_count;
+  for (uint16_t segment_index = 0;
+       segment_index < packet->operand_segment_count; ++segment_index) {
+    loom_text_low_asm_operand_segment_descriptor_t segment = {0};
+    IREE_RETURN_IF_ERROR(
+        parser->low_asm_environment.vtable->operand_segment_descriptor(
+            parser->low_asm_environment.state, packet, segment_index,
+            &segment));
+    loom_token_kind_t open_token = LOOM_TOKEN_NONE;
+    loom_token_kind_t close_token = LOOM_TOKEN_NONE;
+    IREE_RETURN_IF_ERROR(loom_low_asm_operand_segment_tokens(
+        segment.delimiter, &open_token, &close_token));
+    LOOM_PARSE_EXPECT(parser, open_token, NULL);
+    if (parser->error_count > errors_before) return iree_ok_status();
+
+    uint32_t segment_operand_count = 0;
+    for (uint16_t i = 0; i < segment.fixed_operand_count; ++i) {
+      if (i > 0 &&
+          !loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_COMMA)) {
+        return loom_parser_emit_low_asm_operand_count_mismatch(
+            parser, mnemonic_token, packet->minimum_operand_count,
+            (uint32_t)operands->count);
+      }
+      IREE_RETURN_IF_ERROR(loom_parse_low_asm_operand(
+          parser, mnemonic_token, packet->minimum_operand_count, operands));
+      if (parser->error_count > errors_before) return iree_ok_status();
+      ++segment_operand_count;
+    }
+
+    if (segment.is_variadic) {
+      while (!loom_tokenizer_at(&parser->tokenizer, close_token)) {
+        if (segment_operand_count > 0 &&
+            !loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_COMMA)) {
+          return loom_parser_emit_low_asm_error(
+              parser, loom_tokenizer_peek(&parser->tokenizer),
+              IREE_SV("expected ',' or operand segment terminator"));
+        }
+        IREE_RETURN_IF_ERROR(loom_parse_low_asm_operand(
+            parser, mnemonic_token, packet->minimum_operand_count, operands));
+        if (parser->error_count > errors_before) return iree_ok_status();
+        ++segment_operand_count;
+      }
+    }
+    LOOM_PARSE_EXPECT(parser, close_token, NULL);
+    if (parser->error_count > errors_before) return iree_ok_status();
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_parse_low_asm_operands(
+    loom_parser_t* parser, const loom_text_low_asm_packet_descriptor_t* packet,
+    loom_token_t mnemonic_token, loom_low_asm_value_list_t* operands) {
+  if (packet->operand_segment_count == 0) {
+    return loom_parse_low_asm_flat_operands(parser, packet, mnemonic_token,
+                                            operands);
+  }
+  return loom_parse_low_asm_segmented_operands(parser, packet, mnemonic_token,
+                                               operands);
 }
 
 static iree_status_t loom_low_asm_immediate_descriptor(
@@ -335,7 +433,8 @@ static iree_status_t loom_parse_low_asm_positional_immediates(
     loom_token_t mnemonic_token, loom_named_attr_t* attrs,
     uint16_t* out_attr_count, loom_parsed_op_t* parsed_spans) {
   for (uint16_t i = 0; i < packet->asm_immediate_count; ++i) {
-    if ((i > 0 || packet->operand_count > 0) &&
+    if ((i > 0 || packet->minimum_operand_count > 0 ||
+         packet->operand_segment_count > 0) &&
         !loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_COMMA)) {
       return loom_parser_emit_low_asm_error(parser, mnemonic_token,
                                             IREE_SV("missing immediate"));
@@ -634,14 +733,10 @@ static iree_status_t loom_parse_low_asm_instruction(
         (uint32_t)result_names->count);
   }
 
-  loom_value_id_t* operands = NULL;
-  if (packet.operand_count > 0) {
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(&parser->parser_arena, packet.operand_count,
-                                  sizeof(*operands), (void**)&operands));
-  }
+  loom_low_asm_value_list_t operands;
+  loom_low_asm_value_list_initialize(&operands);
   IREE_RETURN_IF_ERROR(
-      loom_parse_low_asm_operands(parser, &packet, mnemonic_token, operands));
+      loom_parse_low_asm_operands(parser, &packet, mnemonic_token, &operands));
   if (parser->error_count > errors_before) {
     return iree_ok_status();
   }
@@ -665,9 +760,9 @@ static iree_status_t loom_parse_low_asm_instruction(
         &parser->parser_arena, packet.result_count, sizeof(*result_types),
         (void**)&result_types));
   }
-  IREE_RETURN_IF_ERROR(
-      loom_parse_low_asm_result_types(parser, &packet, mnemonic_token, operands,
-                                      packet.operand_count, result_types));
+  IREE_RETURN_IF_ERROR(loom_parse_low_asm_result_types(
+      parser, &packet, mnemonic_token, operands.values, operands.count,
+      result_types));
   if (parser->error_count > errors_before) {
     return iree_ok_status();
   }
@@ -683,9 +778,9 @@ static iree_status_t loom_parse_low_asm_instruction(
   const loom_named_attr_slice_t attr_slice =
       loom_make_named_attr_slice(attrs, attr_count);
   IREE_RETURN_IF_ERROR(parser->low_asm_environment.vtable->build_packet(
-      parser->low_asm_environment.state, &parser->builder, &packet, operands,
-      packet.operand_count, attr_slice, result_types, packet.result_count,
-      location, &op));
+      parser->low_asm_environment.state, &parser->builder, &packet,
+      operands.values, operands.count, attr_slice, result_types,
+      packet.result_count, location, &op));
   if (op == NULL) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low asm packet builder returned no operation");
