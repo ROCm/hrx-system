@@ -58,6 +58,7 @@ loom_cc_library(
     loom::ops::op_defs
     loom::ops::scf
     loom::ops::vector
+    loom::rewrite::remap
     loom::sanitizer::options
     loom::target::contract
     loom::target::facts
