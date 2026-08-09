@@ -1,6 +1,10 @@
+// GFX11 wave32 target providing the physical WMMA fragment payloads compared
+// below.
+amdgpu.target<gfx11-generic> @fragment_repack_gfx11_wave32 {subgroup_size = 32}
+
 // Compare the explicit BF16 workgroup round trip used by online attention with
 // the direct in-register result-to-LHS fragment repack.
-kernel.def @fragment_repack_roundtrip_bf16() {
+kernel.def target(@fragment_repack_gfx11_wave32) @fragment_repack_roundtrip_bf16() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -9,14 +13,12 @@ kernel.def @fragment_repack_roundtrip_bf16() {
   %fragment_origin = index.constant 0 : index
   %tile_extent = index.constant 16 : index
   %scratch_bytes = index.constant 512 : offset
-
   %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
   %input_view = buffer.view %input[%base] : buffer -> view<16x16xf32, #dense>
   %rhs_view = buffer.view %rhs[%base] : buffer -> view<16x16xbf16, %rhs_layout>
   %output_view = buffer.view %output[%base] : buffer -> view<16x16xf32, #dense>
   %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %scratch_view = buffer.view %scratch[%base] : buffer -> view<16x16xbf16, #dense>
-
   %zero_accumulator = vector.constant 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero_accumulator shape [%tile_extent, %tile_extent] : vector<8xf32>
   %result = vector.fragment.load<result> %input_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xf32, #dense> -> vector<8xf32>
@@ -29,7 +31,7 @@ kernel.def @fragment_repack_roundtrip_bf16() {
   kernel.return
 }
 
-kernel.def @fragment_repack_direct_bf16() {
+kernel.def target(@fragment_repack_gfx11_wave32) @fragment_repack_direct_bf16() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -37,12 +39,10 @@ kernel.def @fragment_repack_direct_bf16() {
   %base = index.constant 0 : offset
   %fragment_origin = index.constant 0 : index
   %tile_extent = index.constant 16 : index
-
   %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
   %input_view = buffer.view %input[%base] : buffer -> view<16x16xf32, #dense>
   %rhs_view = buffer.view %rhs[%base] : buffer -> view<16x16xbf16, %rhs_layout>
   %output_view = buffer.view %output[%base] : buffer -> view<16x16xf32, #dense>
-
   %zero_accumulator = vector.constant 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero_accumulator shape [%tile_extent, %tile_extent] : vector<8xf32>
   %result = vector.fragment.load<result> %input_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xf32, #dense> -> vector<8xf32>
