@@ -54,6 +54,14 @@ typedef struct loom_encoding_define_resolved_params_t {
   uint8_t dynamic_binding_count;
 } loom_encoding_define_resolved_params_t;
 
+// Resolves a static family instance with every dynamic parameter absent.
+// |dynamic_binding_slots| must have one entry per dynamic family descriptor.
+void loom_encoding_resolve_static_params(
+    const loom_encoding_family_descriptor_t* descriptor,
+    const loom_encoding_t* spec,
+    loom_encoding_define_dynamic_binding_t* dynamic_binding_slots,
+    loom_encoding_define_resolved_params_t* out_params);
+
 // Attempts to resolve parameters from an encoding.define that may already have
 // failed its own verifier. Returns false without emitting another diagnostic
 // when the producer's family or parameter contract is malformed. This is for

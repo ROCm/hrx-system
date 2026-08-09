@@ -138,6 +138,13 @@ def generate_ops_h(
 
     # Encoding family parameter ordinals are compiler-local implementation
     # details. Family parameters remain sparse named attributes in public IR.
+    if encoding_families:
+        max_dynamic_parameter_count = max(len(family.dynamic_parameters) for family in encoding_families)
+        lines.append("enum {")
+        lines.append(f"  LOOM_{dialect_name.upper()}_FAMILY_DYNAMIC_PARAMETER_COUNT_MAX_ = {max_dynamic_parameter_count},")
+        lines.append("};")
+        lines.append("")
+
     for family in encoding_families:
         c_prefix = _c_encoding_family_prefix(family)
         const_prefix = c_prefix.upper()

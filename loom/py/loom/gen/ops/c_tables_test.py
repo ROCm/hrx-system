@@ -432,6 +432,7 @@ def test_generate_encoding_family_metadata() -> None:
     assert "LOOM_ENCODING_MATRIX_OPERAND_DYNAMIC_PARAMETER_MATRIX = 0" in ops_h
     assert "LOOM_ENCODING_MATRIX_OPERAND_DYNAMIC_PARAMETER_SEED = 1" in ops_h
     assert "LOOM_ENCODING_MATRIX_OPERAND_DYNAMIC_PARAMETER_COUNT_ = 2" in ops_h
+    assert "LOOM_ENCODING_FAMILY_DYNAMIC_PARAMETER_COUNT_MAX_ = 2" in ops_h
     assert "extern const loom_encoding_family_descriptor_t loom_encoding_matrix_operand_family_descriptor;" in ops_h
     assert '.name = _BSTRING(14, "matrix_operand")' in tables_c
     assert ".role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA" in tables_c

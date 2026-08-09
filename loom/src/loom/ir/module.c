@@ -806,14 +806,6 @@ iree_status_t loom_module_add_encoding(loom_module_t* module,
     canonical_encoding.family.flags =
         LOOM_ENCODING_FAMILY_STATIC_PARAMETERS_VALID;
   }
-  if (vtable &&
-      loom_encoding_static_parameters_are_valid(&canonical_encoding) &&
-      (!vtable->is_static_valid ||
-       vtable->is_static_valid(module, &canonical_encoding))) {
-    canonical_encoding.family.flags |=
-        LOOM_ENCODING_FAMILY_STATIC_SEMANTICS_VALID;
-  }
-
   const uint32_t hash = loom_encoding_hash(&canonical_encoding);
   const loom_encoding_equal_context_t equal_context = {
       .module = module,
@@ -849,6 +841,17 @@ iree_status_t loom_module_add_encoding(loom_module_t* module,
     }
     *out_encoding_id = (uint16_t)(existing_index + 1);
     return iree_ok_status();
+  }
+
+  // Family semantics are an invariant of structural encoding identity. Only
+  // classify a new canonical entry; repeated references reuse the interned
+  // entry's established family facts.
+  if (vtable &&
+      loom_encoding_static_parameters_are_valid(&canonical_encoding) &&
+      (!vtable->is_static_valid ||
+       vtable->is_static_valid(module, &canonical_encoding))) {
+    canonical_encoding.family.flags |=
+        LOOM_ENCODING_FAMILY_STATIC_SEMANTICS_VALID;
   }
 
   // Encoding IDs are 1-based uint16_t. ID 0 means "no encoding" and

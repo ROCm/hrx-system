@@ -22,6 +22,7 @@ loom_generated_cc_library(
         "params.c",
         "roles.c",
         "storage.c",
+        "summary.c",
         "verify.c",
     ],
     hdrs = [
@@ -32,6 +33,7 @@ loom_generated_cc_library(
         "params.h",
         "roles.h",
         "storage.h",
+        "summary.h",
     ],
     args = ["--dialect=encoding"],
     generated_src_flags = [

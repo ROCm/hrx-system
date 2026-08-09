@@ -27,6 +27,19 @@ static void loom_encoding_define_initialize_resolved_params(
   };
 }
 
+void loom_encoding_resolve_static_params(
+    const loom_encoding_family_descriptor_t* descriptor,
+    const loom_encoding_t* spec,
+    loom_encoding_define_dynamic_binding_t* dynamic_binding_slots,
+    loom_encoding_define_resolved_params_t* out_params) {
+  const loom_encoding_define_param_view_t params = {
+      .spec = spec,
+      .static_attrs = loom_encoding_attrs(spec),
+  };
+  loom_encoding_define_initialize_resolved_params(
+      descriptor, &params, dynamic_binding_slots, out_params);
+}
+
 bool loom_encoding_define_try_resolve_unverified_params(
     const loom_module_t* module,
     const loom_encoding_family_descriptor_t* descriptor,
@@ -127,6 +140,27 @@ void loom_encoding_define_resolve_verified_params(
     const loom_encoding_define_param_view_t* params,
     loom_encoding_define_dynamic_binding_t* dynamic_binding_slots,
     loom_encoding_define_resolved_params_t* out_params) {
+  const uint8_t descriptor_count = descriptor->dynamic_parameter_count;
+  if (params->dynamic_names.count == descriptor_count) {
+    *out_params = (loom_encoding_define_resolved_params_t){
+        .spec = params->spec,
+        .descriptor = descriptor,
+        .static_attrs = params->static_attrs,
+        .dynamic_bindings = dynamic_binding_slots,
+        .dynamic_binding_count = descriptor_count,
+    };
+    for (uint8_t i = 0; i < descriptor_count; ++i) {
+      const loom_named_attr_t* dynamic_entry =
+          &params->dynamic_names.entries[i];
+      const uint16_t operand_ordinal = (uint16_t)dynamic_entry->value.i64;
+      dynamic_binding_slots[i] = (loom_encoding_define_dynamic_binding_t){
+          .value_id = params->dynamic_values.values[operand_ordinal],
+          .operand_ordinal = operand_ordinal,
+      };
+    }
+    return;
+  }
+
   loom_encoding_define_initialize_resolved_params(
       descriptor, params, dynamic_binding_slots, out_params);
 

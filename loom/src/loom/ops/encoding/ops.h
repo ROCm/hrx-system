@@ -15,6 +15,10 @@
 #include "loom/ir/encoding.h"
 #include "loom/ops/op_defs.h"
 
+enum {
+  LOOM_ENCODING_FAMILY_DYNAMIC_PARAMETER_COUNT_MAX_ = 6,
+};
+
 // Composes an address layout and storage schema.
 typedef enum loom_encoding_physical_storage_parameter_e {
   LOOM_ENCODING_PHYSICAL_STORAGE_PARAMETER_LAYOUT = 0,

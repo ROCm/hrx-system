@@ -38,6 +38,9 @@ typedef struct loom_encoding_define_param_view_t
     loom_encoding_define_param_view_t;
 typedef struct loom_encoding_define_resolved_params_t
     loom_encoding_define_resolved_params_t;
+typedef struct loom_encoding_family_summary_request_t
+    loom_encoding_family_summary_request_t;
+typedef struct loom_encoding_family_summary_t loom_encoding_family_summary_t;
 
 // Context-local identity for a registered encoding family. IDs are dense and
 // one-based so zero can represent an unregistered family in permissive
@@ -219,6 +222,13 @@ typedef struct loom_encoding_vtable_t {
       const loom_module_t* module, const loom_op_t* op,
       const loom_encoding_define_resolved_params_t* params,
       iree_diagnostic_emitter_t emitter);
+
+  // Summarizes one verified family instance into target-independent facts.
+  // The request contains descriptor-indexed static and dynamic parameters and
+  // caller-owned transient storage. Implementations are allocation-free and
+  // infallible; unsupported facts remain zero in |out_summary|.
+  void (*summarize)(const loom_encoding_family_summary_request_t* request,
+                    loom_encoding_family_summary_t* out_summary);
 
   // Computes storage size in bytes for `element_count` logical elements.
   // May be NULL for families that are compile-time-only metadata.

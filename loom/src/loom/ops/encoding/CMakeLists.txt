@@ -22,6 +22,7 @@ loom_generated_cc_library(
     "params.c"
     "roles.c"
     "storage.c"
+    "summary.c"
     "verify.c"
   GENERATED_SRC_FLAGS
     "--builders"
@@ -37,6 +38,7 @@ loom_generated_cc_library(
     "params.h"
     "roles.h"
     "storage.h"
+    "summary.h"
   ARGS
     "--dialect=encoding"
   DEPS

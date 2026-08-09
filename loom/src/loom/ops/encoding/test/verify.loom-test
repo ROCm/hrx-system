@@ -70,6 +70,39 @@ func.def @assume_spec_rejects_role_mismatch(%schema: encoding<schema>) {
 
 // ====
 
+// Static family semantics are verified independently of encoding.define.
+func.def @assume_spec_rejects_negative_static_stride(%layout: encoding<layout>) {
+  // ERROR@+1: STRUCTURE/014 "stride" "-1" "non-negative stride"
+  %bad = encoding.assume.spec %layout, #strided<stride=-1> : encoding<layout>
+  func.return
+}
+
+// ====
+
+func.def @assume_spec_rejects_mismatched_ggml_q8_storage(%schema: encoding<schema>) {
+  // ERROR@+1: STRUCTURE/014 "storage_bytes" "33" "block_elems + 2"
+  %bad = encoding.assume.spec %schema, #ggml_q8_0<block_elems=32, storage_bytes=33> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @assume_spec_rejects_bad_named_fp8_rounding(%schema: encoding<schema>) {
+  // ERROR@+1: ENCODING/013 "fp8_e4m3fn" "rounding" "wat"
+  %bad = encoding.assume.spec %schema, #fp8_e4m3fn<rounding=wat> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @assume_spec_rejects_bad_matrix_operand_format(%schema: encoding<schema>) {
+  // ERROR@+1: ENCODING/013 "matrix_operand" "element_format" "wat"
+  %bad = encoding.assume.spec %schema, #matrix_operand<element_format=wat, payload_elements=32, payload_registers=6> : encoding<schema>
+  func.return
+}
+
+// ====
+
 // Numeric transform descriptors are verified when declared, even before a
 // vector.transform use site sees them.
 func.def @numeric_transform_unknown_family_define_only() {
@@ -253,7 +286,7 @@ func.def @matrix_operand_rejects_numeric_element_format() {
 // ====
 
 func.def @matrix_operand_rejects_dynamic_params(%format: index) {
-  // ERROR@+1: ENCODING/008 "matrix_operand" "element_format"
+  // ERROR@+1: ENCODING/007 "matrix_operand" "element_format"
   %schema = encoding.define #matrix_operand<payload_elements=32, payload_registers=6> {element_format = %format : index} : encoding<schema>
   func.return
 }

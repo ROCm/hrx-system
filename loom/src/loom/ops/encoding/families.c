@@ -17,6 +17,7 @@
 #include "loom/ops/encoding/params.h"
 #include "loom/ops/encoding/roles.h"
 #include "loom/ops/encoding/storage.h"
+#include "loom/ops/encoding/summary.h"
 #include "loom/ops/op_defs.h"
 #include "loom/util/fact_table.h"
 
@@ -26,6 +27,14 @@ static iree_string_view_t loom_encoding_turboquant_kv_name(void) {
 
 static iree_string_view_t loom_encoding_matrix_operand_name(void) {
   return IREE_SV("matrix_operand");
+}
+
+static iree_string_view_t loom_encoding_strided_name(void) {
+  return IREE_SV("strided");
+}
+
+static iree_string_view_t loom_encoding_ggml_q8_0_name(void) {
+  return IREE_SV("ggml_q8_0");
 }
 
 static iree_status_t loom_encoding_emit(iree_diagnostic_emitter_t emitter,
@@ -153,6 +162,18 @@ static bool loom_encoding_static_bool(const loom_named_attr_t* parameter,
   return parameter ? loom_attr_as_bool(parameter->value) : default_value;
 }
 
+static bool loom_encoding_static_symbol_value(
+    const loom_module_t* module, const loom_named_attr_t* parameter,
+    loom_encoding_matrix_operand_symbol_set_t symbol_set,
+    uint64_t default_value, uint64_t* out_value) {
+  *out_value = default_value;
+  if (!parameter) return true;
+  const iree_string_view_t symbol =
+      module->strings.entries[loom_attr_as_string_id(parameter->value)];
+  return loom_encoding_matrix_operand_lookup_symbol(symbol_set, symbol,
+                                                    out_value);
+}
+
 static iree_status_t loom_encoding_static_symbol(
     const loom_module_t* module, const loom_named_attr_t* parameter,
     const loom_op_t* op, iree_diagnostic_emitter_t emitter,
@@ -172,8 +193,8 @@ static iree_status_t loom_encoding_static_symbol(
   }
   const iree_string_view_t symbol =
       module->strings.entries[loom_attr_as_string_id(parameter->value)];
-  if (!loom_encoding_matrix_operand_lookup_symbol(symbol_set, symbol,
-                                                  out_value)) {
+  if (!loom_encoding_static_symbol_value(module, parameter, symbol_set,
+                                         default_value, out_value)) {
     return loom_encoding_emit_static_value_error(
         emitter, op, encoding_name, param_name, symbol,
         loom_encoding_matrix_operand_expected_symbols(symbol_set));
@@ -272,16 +293,390 @@ static iree_status_t loom_encoding_matrix_verify_scale_group_shape(
   return iree_ok_status();
 }
 
-static iree_status_t loom_encoding_matrix_verify_define(
-    const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_resolved_params_t* params,
-    iree_diagnostic_emitter_t emitter) {
+typedef enum loom_encoding_strided_static_violation_e {
+  LOOM_ENCODING_STRIDED_STATIC_VALID = 0,
+  LOOM_ENCODING_STRIDED_STATIC_MISSING_STRIDES,
+  LOOM_ENCODING_STRIDED_STATIC_MUTUALLY_EXCLUSIVE_STRIDES,
+  LOOM_ENCODING_STRIDED_STATIC_OVERSIZED_RANK,
+  LOOM_ENCODING_STRIDED_STATIC_NEGATIVE_SCALAR_STRIDE,
+  LOOM_ENCODING_STRIDED_STATIC_NEGATIVE_STRIDE_ARRAY_ELEMENT,
+} loom_encoding_strided_static_violation_t;
+
+typedef struct loom_encoding_strided_static_validation_t {
+  loom_encoding_strided_static_violation_t violation;
+  int64_t actual_value;
+} loom_encoding_strided_static_validation_t;
+
+static loom_encoding_strided_static_validation_t
+loom_encoding_strided_validate_static(const loom_encoding_t* encoding) {
+  const loom_named_attr_t* params[LOOM_ENCODING_STRIDED_PARAMETER_COUNT_];
+  loom_encoding_collect_parameter_slots(
+      encoding, LOOM_ENCODING_STRIDED_PARAMETER_COUNT_, params);
+  const loom_named_attr_t* stride =
+      params[LOOM_ENCODING_STRIDED_PARAMETER_STRIDE];
+  const loom_named_attr_t* strides =
+      params[LOOM_ENCODING_STRIDED_PARAMETER_STRIDES];
+  if (!stride && !strides) {
+    return (loom_encoding_strided_static_validation_t){
+        .violation = LOOM_ENCODING_STRIDED_STATIC_MISSING_STRIDES,
+    };
+  }
+  if (stride && strides) {
+    return (loom_encoding_strided_static_validation_t){
+        .violation = LOOM_ENCODING_STRIDED_STATIC_MUTUALLY_EXCLUSIVE_STRIDES,
+    };
+  }
+  if (stride) {
+    const int64_t value = loom_attr_as_i64(stride->value);
+    return (loom_encoding_strided_static_validation_t){
+        .violation = value < 0
+                         ? LOOM_ENCODING_STRIDED_STATIC_NEGATIVE_SCALAR_STRIDE
+                         : LOOM_ENCODING_STRIDED_STATIC_VALID,
+        .actual_value = value,
+    };
+  }
+  if (strides->value.count > LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK) {
+    return (loom_encoding_strided_static_validation_t){
+        .violation = LOOM_ENCODING_STRIDED_STATIC_OVERSIZED_RANK,
+        .actual_value = strides->value.count,
+    };
+  }
+  for (uint16_t i = 0; i < strides->value.count; ++i) {
+    if (strides->value.i64_array[i] < 0) {
+      return (loom_encoding_strided_static_validation_t){
+          .violation =
+              LOOM_ENCODING_STRIDED_STATIC_NEGATIVE_STRIDE_ARRAY_ELEMENT,
+          .actual_value = strides->value.i64_array[i],
+      };
+    }
+  }
+  return (loom_encoding_strided_static_validation_t){0};
+}
+
+static bool loom_encoding_strided_is_static_valid(
+    const loom_module_t* module, const loom_encoding_t* encoding) {
+  (void)module;
+  return loom_encoding_strided_validate_static(encoding).violation ==
+         LOOM_ENCODING_STRIDED_STATIC_VALID;
+}
+
+static iree_status_t loom_encoding_strided_diagnose_static(
+    const loom_module_t* module, const loom_encoding_t* encoding,
+    const loom_op_t* op, iree_diagnostic_emitter_t emitter) {
+  (void)module;
+  const loom_encoding_strided_static_validation_t validation =
+      loom_encoding_strided_validate_static(encoding);
+  switch (validation.violation) {
+    case LOOM_ENCODING_STRIDED_STATIC_VALID:
+      return iree_ok_status();
+    case LOOM_ENCODING_STRIDED_STATIC_MISSING_STRIDES:
+      return loom_encoding_emit_param_error(
+          emitter, op, loom_encoding_strided_name(), LOOM_ERR_ENCODING_007,
+          IREE_SV("stride or strides"));
+    case LOOM_ENCODING_STRIDED_STATIC_MUTUALLY_EXCLUSIVE_STRIDES:
+      return loom_encoding_emit_mutually_exclusive_param_error(
+          emitter, op, loom_encoding_strided_name(), IREE_SV("stride"),
+          IREE_SV("strides"));
+    case LOOM_ENCODING_STRIDED_STATIC_OVERSIZED_RANK:
+      return loom_encoding_emit_attribute_constraint_error(
+          emitter, op, IREE_SV("strides"), validation.actual_value,
+          IREE_SV("rank <= 8"));
+    case LOOM_ENCODING_STRIDED_STATIC_NEGATIVE_SCALAR_STRIDE:
+      return loom_encoding_emit_attribute_constraint_error(
+          emitter, op, IREE_SV("stride"), validation.actual_value,
+          IREE_SV("non-negative stride"));
+    case LOOM_ENCODING_STRIDED_STATIC_NEGATIVE_STRIDE_ARRAY_ELEMENT:
+      return loom_encoding_emit_attribute_constraint_error(
+          emitter, op, IREE_SV("strides"), validation.actual_value,
+          IREE_SV("non-negative stride"));
+  }
+  IREE_ASSERT_UNREACHABLE("unknown strided static validation result");
+  IREE_BUILTIN_UNREACHABLE();
+}
+
+typedef enum loom_encoding_ggml_q8_0_static_violation_e {
+  LOOM_ENCODING_GGML_Q8_0_STATIC_VALID = 0,
+  LOOM_ENCODING_GGML_Q8_0_STATIC_BLOCK_RANGE,
+  LOOM_ENCODING_GGML_Q8_0_STATIC_STORAGE_RANGE,
+  LOOM_ENCODING_GGML_Q8_0_STATIC_STORAGE_MISMATCH,
+} loom_encoding_ggml_q8_0_static_violation_t;
+
+typedef struct loom_encoding_ggml_q8_0_static_validation_t {
+  loom_encoding_ggml_q8_0_static_violation_t violation;
+  int64_t actual_value;
+} loom_encoding_ggml_q8_0_static_validation_t;
+
+static loom_encoding_ggml_q8_0_static_validation_t
+loom_encoding_ggml_q8_0_validate_static(const loom_encoding_t* encoding) {
+  const loom_named_attr_t* params[LOOM_ENCODING_GGML_Q8_0_PARAMETER_COUNT_];
+  loom_encoding_collect_parameter_slots(
+      encoding, LOOM_ENCODING_GGML_Q8_0_PARAMETER_COUNT_, params);
+  const int64_t block_elements =
+      params[LOOM_ENCODING_GGML_Q8_0_PARAMETER_BLOCK_ELEMS]
+          ? loom_attr_as_i64(
+                params[LOOM_ENCODING_GGML_Q8_0_PARAMETER_BLOCK_ELEMS]->value)
+          : 32;
+  if (block_elements <= 0 || block_elements > UINT16_MAX - 2) {
+    return (loom_encoding_ggml_q8_0_static_validation_t){
+        .violation = LOOM_ENCODING_GGML_Q8_0_STATIC_BLOCK_RANGE,
+        .actual_value = block_elements,
+    };
+  }
+  const int64_t storage_bytes =
+      params[LOOM_ENCODING_GGML_Q8_0_PARAMETER_STORAGE_BYTES]
+          ? loom_attr_as_i64(
+                params[LOOM_ENCODING_GGML_Q8_0_PARAMETER_STORAGE_BYTES]->value)
+          : 34;
+  if (storage_bytes <= 0 || storage_bytes > UINT16_MAX) {
+    return (loom_encoding_ggml_q8_0_static_validation_t){
+        .violation = LOOM_ENCODING_GGML_Q8_0_STATIC_STORAGE_RANGE,
+        .actual_value = storage_bytes,
+    };
+  }
+  if (storage_bytes != block_elements + 2) {
+    return (loom_encoding_ggml_q8_0_static_validation_t){
+        .violation = LOOM_ENCODING_GGML_Q8_0_STATIC_STORAGE_MISMATCH,
+        .actual_value = storage_bytes,
+    };
+  }
+  return (loom_encoding_ggml_q8_0_static_validation_t){0};
+}
+
+static bool loom_encoding_ggml_q8_0_is_static_valid(
+    const loom_module_t* module, const loom_encoding_t* encoding) {
+  (void)module;
+  return loom_encoding_ggml_q8_0_validate_static(encoding).violation ==
+         LOOM_ENCODING_GGML_Q8_0_STATIC_VALID;
+}
+
+static iree_status_t loom_encoding_ggml_q8_0_diagnose_static(
+    const loom_module_t* module, const loom_encoding_t* encoding,
+    const loom_op_t* op, iree_diagnostic_emitter_t emitter) {
+  (void)module;
+  const loom_encoding_ggml_q8_0_static_validation_t validation =
+      loom_encoding_ggml_q8_0_validate_static(encoding);
+  switch (validation.violation) {
+    case LOOM_ENCODING_GGML_Q8_0_STATIC_VALID:
+      return iree_ok_status();
+    case LOOM_ENCODING_GGML_Q8_0_STATIC_BLOCK_RANGE:
+      return loom_encoding_emit_attribute_constraint_error(
+          emitter, op, IREE_SV("block_elems"), validation.actual_value,
+          IREE_SV("positive and <= 65533"));
+    case LOOM_ENCODING_GGML_Q8_0_STATIC_STORAGE_RANGE:
+      return loom_encoding_emit_attribute_constraint_error(
+          emitter, op, IREE_SV("storage_bytes"), validation.actual_value,
+          IREE_SV("positive and <= 65535"));
+    case LOOM_ENCODING_GGML_Q8_0_STATIC_STORAGE_MISMATCH:
+      return loom_encoding_emit_attribute_constraint_error(
+          emitter, op, IREE_SV("storage_bytes"), validation.actual_value,
+          IREE_SV("block_elems + 2"));
+  }
+  IREE_ASSERT_UNREACHABLE("unknown ggml_q8_0 static validation result");
+  IREE_BUILTIN_UNREACHABLE();
+}
+
+static bool loom_encoding_matrix_static_i64_value(
+    const loom_named_attr_t* parameter,
+    loom_encoding_matrix_param_requirement_t requirement, int64_t minimum,
+    int64_t maximum, int64_t default_value, int64_t* out_value) {
+  *out_value = default_value;
+  if (!parameter) {
+    return requirement == LOOM_ENCODING_MATRIX_PARAM_OPTIONAL;
+  }
+  *out_value = loom_attr_as_i64(parameter->value);
+  return *out_value >= minimum && *out_value <= maximum;
+}
+
+static bool loom_encoding_matrix_static_scale_group_shape_valid(
+    const loom_named_attr_t* parameter, uint64_t scale_topology,
+    int64_t scale_group_elements,
+    uint16_t out_shape[LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK]) {
+  memset(out_shape, 0,
+         LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK * sizeof(out_shape[0]));
+  const uint32_t topology = (uint32_t)scale_topology;
+  const bool is_1d =
+      iree_any_bit_set(topology, LOOM_VALUE_FACT_SCALE_TOPOLOGY_GROUP_1D |
+                                     LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D);
+  const bool is_2d =
+      iree_any_bit_set(topology, LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_2D);
+  if (!parameter) {
+    if (is_2d) return false;
+    if (is_1d && scale_group_elements > 0) {
+      out_shape[0] = (uint16_t)scale_group_elements;
+    }
+    return true;
+  }
+  const uint16_t rank = parameter->value.count;
+  if (rank == 0 || rank > LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK ||
+      (is_1d && rank != 1) || (is_2d && rank != 2)) {
+    return false;
+  }
+  uint32_t shape_element_count = 1;
+  for (uint16_t i = 0; i < rank; ++i) {
+    const int64_t dimension = parameter->value.i64_array[i];
+    if (dimension <= 0 || dimension > UINT16_MAX ||
+        shape_element_count > UINT16_MAX / (uint32_t)dimension) {
+      return false;
+    }
+    shape_element_count *= (uint32_t)dimension;
+    out_shape[i] = (uint16_t)dimension;
+  }
+  return shape_element_count == (uint32_t)scale_group_elements;
+}
+
+static bool loom_encoding_matrix_is_static_valid(
+    const loom_module_t* module, const loom_encoding_t* encoding) {
+  const loom_named_attr_t*
+      params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_COUNT_];
+  loom_encoding_collect_parameter_slots(
+      encoding, LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_COUNT_, params);
+
+  uint64_t element_format = 0;
+  if (!params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_ELEMENT_FORMAT] ||
+      !loom_encoding_static_symbol_value(
+          module, params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_ELEMENT_FORMAT],
+          LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_NUMERIC_FORMAT,
+          LOOM_VALUE_FACT_NUMERIC_FORMAT_UNKNOWN, &element_format) ||
+      element_format == LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE) {
+    return false;
+  }
+  uint64_t payload_packing = 0;
+  if (!loom_encoding_static_symbol_value(
+          module,
+          params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_PAYLOAD_PACKING],
+          LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_PAYLOAD_PACKING,
+          LOOM_VALUE_FACT_PAYLOAD_PACKING_TARGET_FRAGMENT, &payload_packing)) {
+    return false;
+  }
+  uint64_t scale_format = 0;
+  if (!loom_encoding_static_symbol_value(
+          module, params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SCALE_FORMAT],
+          LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_NUMERIC_FORMAT,
+          LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE, &scale_format)) {
+    return false;
+  }
+  uint64_t secondary_scale_format = 0;
+  if (!loom_encoding_static_symbol_value(
+          module,
+          params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SECONDARY_SCALE_FORMAT],
+          LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_NUMERIC_FORMAT,
+          LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE, &secondary_scale_format)) {
+    return false;
+  }
+  uint64_t scale_topology = 0;
+  if (!loom_encoding_static_symbol_value(
+          module, params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SCALE_TOPOLOGY],
+          LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_SCALE_TOPOLOGY,
+          LOOM_VALUE_FACT_SCALE_TOPOLOGY_NONE, &scale_topology)) {
+    return false;
+  }
+
+  int64_t payload_elements = 0;
+  if (!loom_encoding_matrix_static_i64_value(
+          params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_PAYLOAD_ELEMENTS],
+          LOOM_ENCODING_MATRIX_PARAM_REQUIRED, 1, UINT16_MAX,
+          /*default_value=*/0, &payload_elements)) {
+    return false;
+  }
+  int64_t payload_registers = 0;
+  if (!loom_encoding_matrix_static_i64_value(
+          params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_PAYLOAD_REGISTERS],
+          LOOM_ENCODING_MATRIX_PARAM_REQUIRED, 0, UINT16_MAX,
+          /*default_value=*/0, &payload_registers) ||
+      (iree_any_bit_set((uint32_t)payload_packing,
+                        LOOM_VALUE_FACT_PAYLOAD_PACKING_TARGET_FRAGMENT) &&
+       payload_registers == 0)) {
+    return false;
+  }
+  int64_t scale_group_elements = 0;
+  if (!loom_encoding_matrix_static_i64_value(
+          params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SCALE_GROUP_ELEMENTS],
+          LOOM_ENCODING_MATRIX_PARAM_OPTIONAL, 0, UINT16_MAX,
+          /*default_value=*/0, &scale_group_elements)) {
+    return false;
+  }
+  uint16_t scale_group_shape[LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK];
+  if (!loom_encoding_matrix_static_scale_group_shape_valid(
+          params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SCALE_GROUP_SHAPE],
+          scale_topology, scale_group_elements, scale_group_shape)) {
+    return false;
+  }
+  int64_t scale_operands = 0;
+  if (!loom_encoding_matrix_static_i64_value(
+          params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SCALE_OPERANDS],
+          LOOM_ENCODING_MATRIX_PARAM_OPTIONAL, 0, UINT16_MAX,
+          /*default_value=*/0, &scale_operands)) {
+    return false;
+  }
+
+  uint64_t affine = 0;
+  uint64_t rounding = 0;
+  uint64_t codebook = 0;
+  uint64_t sparsity = 0;
+  if (!loom_encoding_static_symbol_value(
+          module, params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_AFFINE],
+          LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_AFFINE_POLICY,
+          LOOM_VALUE_FACT_AFFINE_POLICY_NONE, &affine) ||
+      !loom_encoding_static_symbol_value(
+          module, params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_ROUNDING],
+          LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_ROUNDING_POLICY,
+          LOOM_VALUE_FACT_ROUNDING_POLICY_NONE, &rounding) ||
+      !loom_encoding_static_symbol_value(
+          module, params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_CODEBOOK],
+          LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_CODEBOOK_POLICY,
+          LOOM_VALUE_FACT_CODEBOOK_POLICY_NONE, &codebook) ||
+      !loom_encoding_static_symbol_value(
+          module, params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SPARSITY],
+          LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_SPARSITY_POLICY,
+          LOOM_VALUE_FACT_SPARSITY_POLICY_NONE, &sparsity)) {
+    return false;
+  }
+  int64_t sparsity_group_elements = 0;
+  int64_t sparsity_group_nonzero_elements = 0;
+  if (!loom_encoding_matrix_static_i64_value(
+          params
+              [LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SPARSITY_GROUP_ELEMENTS],
+          LOOM_ENCODING_MATRIX_PARAM_OPTIONAL, 0, UINT16_MAX,
+          /*default_value=*/0, &sparsity_group_elements) ||
+      !loom_encoding_matrix_static_i64_value(
+          params
+              [LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SPARSITY_GROUP_NONZERO_ELEMENTS],
+          LOOM_ENCODING_MATRIX_PARAM_OPTIONAL, 0, UINT16_MAX,
+          /*default_value=*/0, &sparsity_group_nonzero_elements)) {
+    return false;
+  }
+
+  loom_value_fact_encoded_operand_schema_t encoded_operand = {
+      .scale_format = scale_format,
+      .secondary_scale_format = secondary_scale_format,
+      .scale_topology = (uint32_t)scale_topology,
+      .scale_group = {.element_count = (uint16_t)scale_group_elements},
+      .scale_operand_count = (uint16_t)scale_operands,
+      .sparsity_policy = (uint32_t)sparsity,
+      .sparsity_group =
+          {
+              .nonzero_element_count =
+                  (uint16_t)sparsity_group_nonzero_elements,
+              .element_count = (uint16_t)sparsity_group_elements,
+          },
+  };
+  for (uint8_t i = 0; i < LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK; ++i) {
+    encoded_operand.scale_group.shape[i] = scale_group_shape[i];
+  }
+  return loom_value_fact_encoded_operand_schema_scale_is_complete(
+             encoded_operand) &&
+         loom_value_fact_encoded_operand_schema_sparsity_is_complete(
+             encoded_operand);
+}
+
+static iree_status_t loom_encoding_matrix_diagnose_static(
+    const loom_module_t* module, const loom_encoding_t* encoding,
+    const loom_op_t* op, iree_diagnostic_emitter_t emitter) {
   bool param_ok = false;
   const loom_named_attr_t*
       static_params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_COUNT_];
   loom_encoding_collect_parameter_slots(
-      params->spec, LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_COUNT_,
-      static_params);
+      encoding, LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_COUNT_, static_params);
 
   uint64_t element_format = 0;
   IREE_RETURN_IF_ERROR(loom_encoding_static_symbol(
@@ -542,18 +937,33 @@ static_assert(LOOM_ENCODING_IEEE_FP8_E4M3_PARAMETER_COUNT_ == 2 &&
                   LOOM_ENCODING_FP8_E5M2FNUZ_PARAMETER_COUNT_ == 2,
               "named FP8 parameter counts must match");
 
-static iree_status_t loom_encoding_named_fp8_verify_define(
-    const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_resolved_params_t* params,
-    iree_diagnostic_emitter_t emitter) {
-  iree_string_view_t encoding_name =
-      module->strings.entries[params->spec->name_id];
+static bool loom_encoding_named_fp8_is_static_valid(
+    const loom_module_t* module, const loom_encoding_t* encoding) {
+  const loom_named_attr_t*
+      static_params[LOOM_ENCODING_IEEE_FP8_E4M3_PARAMETER_COUNT_];
+  loom_encoding_collect_parameter_slots(
+      encoding, LOOM_ENCODING_IEEE_FP8_E4M3_PARAMETER_COUNT_, static_params);
+  uint64_t rounding = 0;
+  if (!loom_encoding_static_symbol_value(
+          module, static_params[LOOM_ENCODING_IEEE_FP8_E4M3_PARAMETER_ROUNDING],
+          LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_ROUNDING_POLICY,
+          LOOM_VALUE_FACT_ROUNDING_POLICY_NONE, &rounding)) {
+    return false;
+  }
+  const loom_named_attr_t* storage_bits =
+      static_params[LOOM_ENCODING_IEEE_FP8_E4M3_PARAMETER_STORAGE_BITS];
+  return !storage_bits || loom_attr_as_i64(storage_bits->value) == 8;
+}
+
+static iree_status_t loom_encoding_named_fp8_diagnose_static(
+    const loom_module_t* module, const loom_encoding_t* encoding,
+    const loom_op_t* op, iree_diagnostic_emitter_t emitter) {
+  iree_string_view_t encoding_name = module->strings.entries[encoding->name_id];
   bool param_ok = false;
   const loom_named_attr_t*
       static_params[LOOM_ENCODING_IEEE_FP8_E4M3_PARAMETER_COUNT_];
   loom_encoding_collect_parameter_slots(
-      params->spec, LOOM_ENCODING_IEEE_FP8_E4M3_PARAMETER_COUNT_,
-      static_params);
+      encoding, LOOM_ENCODING_IEEE_FP8_E4M3_PARAMETER_COUNT_, static_params);
 
   uint64_t rounding = 0;
   IREE_RETURN_IF_ERROR(loom_encoding_static_symbol(
@@ -1328,10 +1738,14 @@ static iree_status_t loom_encoding_turboquant_verify_define(
 
 static const loom_encoding_vtable_t loom_encoding_dense_vtable = {
     .descriptor = &loom_encoding_dense_family_descriptor,
+    .summarize = loom_encoding_dense_summarize,
 };
 
 static const loom_encoding_vtable_t loom_encoding_strided_vtable = {
     .descriptor = &loom_encoding_strided_family_descriptor,
+    .is_static_valid = loom_encoding_strided_is_static_valid,
+    .diagnose_static = loom_encoding_strided_diagnose_static,
+    .summarize = loom_encoding_strided_summarize,
 };
 
 static const loom_encoding_vtable_t loom_encoding_q8_0_vtable = {
@@ -1344,6 +1758,9 @@ static const loom_encoding_vtable_t loom_encoding_ggml_q4_0_vtable = {
 
 static const loom_encoding_vtable_t loom_encoding_ggml_q8_0_vtable = {
     .descriptor = &loom_encoding_ggml_q8_0_family_descriptor,
+    .is_static_valid = loom_encoding_ggml_q8_0_is_static_valid,
+    .diagnose_static = loom_encoding_ggml_q8_0_diagnose_static,
+    .summarize = loom_encoding_ggml_q8_0_summarize,
 };
 
 static const loom_encoding_vtable_t loom_encoding_q6_k_vtable = {
@@ -1364,32 +1781,44 @@ static const loom_encoding_vtable_t loom_encoding_loom_fp4_table_vtable = {
 
 static const loom_encoding_vtable_t loom_encoding_ieee_fp8_e4m3_vtable = {
     .descriptor = &loom_encoding_ieee_fp8_e4m3_family_descriptor,
-    .verify_define = loom_encoding_named_fp8_verify_define,
+    .is_static_valid = loom_encoding_named_fp8_is_static_valid,
+    .diagnose_static = loom_encoding_named_fp8_diagnose_static,
+    .summarize = loom_encoding_ieee_fp8_e4m3_summarize,
 };
 
 static const loom_encoding_vtable_t loom_encoding_ieee_fp8_e5m2_vtable = {
     .descriptor = &loom_encoding_ieee_fp8_e5m2_family_descriptor,
-    .verify_define = loom_encoding_named_fp8_verify_define,
+    .is_static_valid = loom_encoding_named_fp8_is_static_valid,
+    .diagnose_static = loom_encoding_named_fp8_diagnose_static,
+    .summarize = loom_encoding_ieee_fp8_e5m2_summarize,
 };
 
 static const loom_encoding_vtable_t loom_encoding_fp8_e4m3fn_vtable = {
     .descriptor = &loom_encoding_fp8_e4m3fn_family_descriptor,
-    .verify_define = loom_encoding_named_fp8_verify_define,
+    .is_static_valid = loom_encoding_named_fp8_is_static_valid,
+    .diagnose_static = loom_encoding_named_fp8_diagnose_static,
+    .summarize = loom_encoding_fp8_e4m3fn_summarize,
 };
 
 static const loom_encoding_vtable_t loom_encoding_fp8_e4m3fnuz_vtable = {
     .descriptor = &loom_encoding_fp8_e4m3fnuz_family_descriptor,
-    .verify_define = loom_encoding_named_fp8_verify_define,
+    .is_static_valid = loom_encoding_named_fp8_is_static_valid,
+    .diagnose_static = loom_encoding_named_fp8_diagnose_static,
+    .summarize = loom_encoding_fp8_e4m3fnuz_summarize,
 };
 
 static const loom_encoding_vtable_t loom_encoding_fp8_e5m2fnuz_vtable = {
     .descriptor = &loom_encoding_fp8_e5m2fnuz_family_descriptor,
-    .verify_define = loom_encoding_named_fp8_verify_define,
+    .is_static_valid = loom_encoding_named_fp8_is_static_valid,
+    .diagnose_static = loom_encoding_named_fp8_diagnose_static,
+    .summarize = loom_encoding_fp8_e5m2fnuz_summarize,
 };
 
 static const loom_encoding_vtable_t loom_encoding_matrix_operand_vtable = {
     .descriptor = &loom_encoding_matrix_operand_family_descriptor,
-    .verify_define = loom_encoding_matrix_verify_define,
+    .is_static_valid = loom_encoding_matrix_is_static_valid,
+    .diagnose_static = loom_encoding_matrix_diagnose_static,
+    .summarize = loom_encoding_matrix_operand_summarize,
 };
 
 static const loom_encoding_vtable_t loom_encoding_numeric_transform_vtable = {
