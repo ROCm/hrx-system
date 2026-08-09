@@ -59,6 +59,26 @@ def test_fp8_reference_special_policy_boundaries(
     assert encode(row, value("finite", sign=1)) == negative_zero
 
 
+@pytest.mark.parametrize("row", FP8_FORMATS, ids=lambda row: row.keyword)
+@pytest.mark.parametrize("bit_count", [16, 32])
+def test_fp8_decode_comparison_ignores_only_nan_sign(row, bit_count: int) -> None:
+    all_bits = (1 << bit_count) - 1
+    nan_payload = numeric_conversion_matrix._fp8_nan_payload(row, sign=0)
+    assert numeric_conversion_matrix._decode_comparison_mask(row, nan_payload, bit_count) == all_bits >> 1
+    assert numeric_conversion_matrix._decode_comparison_mask(row, 0x00, bit_count) == all_bits
+    assert (
+        numeric_conversion_matrix._decode_comparison_mask(
+            row,
+            numeric_conversion_matrix._fp8_encode_bits(
+                row,
+                numeric_conversion_matrix._BinaryValue("finite", sign=1, magnitude=Fraction(1)),
+            ),
+            bit_count,
+        )
+        == all_bits
+    )
+
+
 @pytest.mark.parametrize(
     ("path_name", "generated"),
     [

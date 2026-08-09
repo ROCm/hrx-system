@@ -320,6 +320,13 @@ def _decode_exact_values(row: Fp8Format, result_format: _BinaryFormat) -> tuple[
     )
 
 
+def _decode_comparison_mask(row: Fp8Format, raw_bits: int, bit_count: int) -> int:
+    all_bits = (1 << bit_count) - 1
+    if _fp8_decode_bits(row, raw_bits).kind == "nan":
+        return all_bits >> 1
+    return all_bits
+
+
 def _scalar_type_spelling(scalar_type: ScalarTypeKind) -> str:
     spellings = {
         ScalarTypeKind.F8E4M3: "f8E4M3",
@@ -382,6 +389,18 @@ def _emit_exact_vector(
         f"  %source_bits_{vector_name} = vector.from_elements {names} : vector<{width}x{source_integer_type}>",
         f"  %expected_bits_{vector_name} = vector.from_elements {expected_names} : vector<{width}x{expected_integer_type}>",
     ]
+
+
+def _emit_decode_comparison_vector(
+    row: Fp8Format,
+    values: tuple[_ExactValue, ...],
+    integer_type: str,
+    bit_count: int,
+    vector_name: str,
+) -> str:
+    all_bits = (1 << bit_count) - 1
+    masks = ", ".join("%comparison_mask_all_bits" if _decode_comparison_mask(row, value.raw_bits, bit_count) == all_bits else "%comparison_mask_without_sign" for value in values)
+    return f"  %comparison_mask_{vector_name} = vector.from_elements {masks} : vector<{len(values)}x{integer_type}>"
 
 
 def _emit_encode_pair(row: Fp8Format, source_format: _BinaryFormat) -> str:
@@ -525,6 +544,8 @@ def _emit_decode_pair(row: Fp8Format, result_format: _BinaryFormat) -> str:
         f"// {format_name} to {result_name}: exact special values and finite",
         "// boundaries through two packed eight-lane conversions. The final zero",
         "// lane pads the fifteen semantic witnesses to a complete register.",
+        "// NaN sign is outside the numeric contract and is the only result bit",
+        "// excluded from the exact comparison.",
         f"kernel.def @{kernel_name}() {{",
         "  %unit = index.constant 1 : index",
         "  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index",
@@ -535,6 +556,8 @@ def _emit_decode_pair(row: Fp8Format, result_format: _BinaryFormat) -> str:
         f"  %output_view = buffer.view %output[%base] : buffer -> view<{exact_width}x{output_integer_type}, #dense>",
         f"  %head_schema = encoding.define #matrix_operand<element_format={format_name}, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>",
         f"  %tail_schema = encoding.define #matrix_operand<element_format={format_name}, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>",
+        f"  %comparison_mask_all_bits = scalar.constant -1 : {output_integer_type}",
+        f"  %comparison_mask_without_sign = scalar.constant {(1 << (result_format.bit_count - 1)) - 1} : {output_integer_type}",
         *_emit_exact_constants(
             values,
             "i8",
@@ -552,10 +575,18 @@ def _emit_decode_pair(row: Fp8Format, result_format: _BinaryFormat) -> str:
             "head",
             "decode",
         ),
+        _emit_decode_comparison_vector(
+            row,
+            head,
+            output_integer_type,
+            result_format.bit_count,
+            "head",
+        ),
         f"  %source_head = vector.bitcast %source_bits_head : vector<8xi8> to vector<8x{carrier_type}>",
         f"  %decoded_head = vector.decode %source_head using %head_schema : vector<8x{carrier_type}>, encoding<schema> -> vector<8x{result_name}>",
         f"  %decoded_bits_head = vector.bitcast %decoded_head : vector<8x{result_name}> to vector<8x{output_integer_type}>",
-        f"  %difference_head = vector.xori %decoded_bits_head, %expected_bits_head : vector<8x{output_integer_type}>",
+        f"  %raw_difference_head = vector.xori %decoded_bits_head, %expected_bits_head : vector<8x{output_integer_type}>",
+        f"  %difference_head = vector.andi %raw_difference_head, %comparison_mask_head : vector<8x{output_integer_type}>",
         f"  vector.store %difference_head, %output_view[%head_offset] : vector<8x{output_integer_type}>, view<{exact_width}x{output_integer_type}, #dense>",
         *_emit_exact_vector(
             tail,
@@ -566,10 +597,18 @@ def _emit_decode_pair(row: Fp8Format, result_format: _BinaryFormat) -> str:
             "tail",
             "decode",
         ),
+        _emit_decode_comparison_vector(
+            row,
+            tail,
+            output_integer_type,
+            result_format.bit_count,
+            "tail",
+        ),
         f"  %source_tail = vector.bitcast %source_bits_tail : vector<{len(tail)}xi8> to vector<{len(tail)}x{carrier_type}>",
         f"  %decoded_tail = vector.decode %source_tail using %tail_schema : vector<{len(tail)}x{carrier_type}>, encoding<schema> -> vector<{len(tail)}x{result_name}>",
         f"  %decoded_bits_tail = vector.bitcast %decoded_tail : vector<{len(tail)}x{result_name}> to vector<{len(tail)}x{output_integer_type}>",
-        f"  %difference_tail = vector.xori %decoded_bits_tail, %expected_bits_tail : vector<{len(tail)}x{output_integer_type}>",
+        f"  %raw_difference_tail = vector.xori %decoded_bits_tail, %expected_bits_tail : vector<{len(tail)}x{output_integer_type}>",
+        f"  %difference_tail = vector.andi %raw_difference_tail, %comparison_mask_tail : vector<{len(tail)}x{output_integer_type}>",
         f"  vector.store %difference_tail, %output_view[%tail_offset] : vector<{len(tail)}x{output_integer_type}>, view<{exact_width}x{output_integer_type}, #dense>",
         "  kernel.return",
         "}",
