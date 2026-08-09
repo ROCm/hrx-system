@@ -58,7 +58,10 @@ loom_cc_benchmark(
     ::encoding
     iree::base
     iree::base::internal::arena
+    iree::io::stream
     iree::testing::benchmark_main
+    loom::format::bytecode::reader
+    loom::format::bytecode::writer
     loom::format::text::parser
     loom::format::text::printer
     loom::ir

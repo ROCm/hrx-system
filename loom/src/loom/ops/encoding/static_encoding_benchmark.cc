@@ -6,14 +6,20 @@
 
 // Benchmarks static encoding construction and queries at scales representative
 // of modules carrying reusable schemas and many specialized schemas. The rows
-// use production text parsing, canonical module storage, and family queries so
-// representation changes remain accountable for both time and retained memory.
+// use production text and bytecode paths, canonical module storage, and family
+// queries so representation changes remain accountable for time and memory.
+// Bytecode rows use fresh operation-local block pools, warm them once, and
+// report both the live module arena and reusable pool high-water allocation.
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "benchmark/benchmark.h"
 #include "iree/base/internal/arena.h"
+#include "iree/io/vec_stream.h"
+#include "loom/format/bytecode/reader.h"
+#include "loom/format/bytecode/writer.h"
 #include "loom/format/text/parser.h"
 #include "loom/format/text/printer.h"
 #include "loom/ir/context.h"
@@ -32,11 +38,30 @@ enum class SchemaPopulation {
   kDistinct,
 };
 
+static void DistinctSchemaCounts(::benchmark::Benchmark* benchmark) {
+  benchmark->Arg(1)->Arg(32)->Arg(256)->Arg(4096);
+}
+
+class ScopedBlockPool {
+ public:
+  ScopedBlockPool() {
+    iree_arena_block_pool_initialize(65536, iree_allocator_system(), &pool_);
+  }
+
+  ScopedBlockPool(const ScopedBlockPool&) = delete;
+  ScopedBlockPool& operator=(const ScopedBlockPool&) = delete;
+
+  ~ScopedBlockPool() { iree_arena_block_pool_deinitialize(&pool_); }
+
+  iree_arena_block_pool_t* get() { return &pool_; }
+
+ private:
+  iree_arena_block_pool_t pool_;
+};
+
 class StaticEncodingBenchmark {
  public:
   StaticEncodingBenchmark() {
-    iree_arena_block_pool_initialize(65536, iree_allocator_system(),
-                                     &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
     iree_host_size_t vtable_count = 0;
     const loom_op_vtable_t* const* vtables =
@@ -50,34 +75,39 @@ class StaticEncodingBenchmark {
   StaticEncodingBenchmark(const StaticEncodingBenchmark&) = delete;
   StaticEncodingBenchmark& operator=(const StaticEncodingBenchmark&) = delete;
 
-  ~StaticEncodingBenchmark() {
-    loom_context_deinitialize(&context_);
-    iree_arena_block_pool_deinitialize(&block_pool_);
-  }
+  ~StaticEncodingBenchmark() { loom_context_deinitialize(&context_); }
 
   iree_status_t Parse(iree_string_view_t source, loom_module_t** out_module) {
     loom_text_parse_options_t options = {};
     options.max_errors = 1;
     return loom_text_parse(source, IREE_SV("static_encoding_benchmark.loom"),
-                           &context_, &block_pool_, &options, out_module);
+                           &context_, block_pool_.get(), &options, out_module);
   }
 
-  void SetMemoryCounters(benchmark::State& state,
-                         const loom_module_t* module) const {
+  loom_context_t* context() { return &context_; }
+
+  iree_arena_block_pool_t* block_pool() { return block_pool_.get(); }
+
+  void SetMemoryCounters(benchmark::State& state, const loom_module_t* module,
+                         const iree_arena_block_pool_t* block_pool) const {
     iree_arena_block_pool_statistics_t statistics;
-    iree_arena_block_pool_query_statistics(&block_pool_, &statistics);
+    iree_arena_block_pool_query_statistics(block_pool, &statistics);
     state.counters["module_arena_used_bytes"] =
         (double)module->arena.used_allocation_size;
     state.counters["module_arena_owned_bytes"] =
         (double)module->arena.total_allocation_size;
-    state.counters["block_pool_system_bytes"] =
+    state.counters["pool_block_system_bytes"] =
         (double)statistics.block_system_allocation_bytes;
-    state.counters["oversized_allocation_count"] =
+    state.counters["pool_block_system_count"] =
+        (double)statistics.block_system_allocation_count;
+    state.counters["pool_oversized_system_bytes"] =
+        (double)statistics.oversized_allocation_bytes;
+    state.counters["pool_oversized_system_count"] =
         (double)statistics.oversized_allocation_count;
   }
 
  private:
-  iree_arena_block_pool_t block_pool_;
+  ScopedBlockPool block_pool_;
   loom_context_t context_;
 };
 
@@ -110,6 +140,56 @@ static loom_module_t* ParseModule(StaticEncodingBenchmark& fixture,
   return module;
 }
 
+static iree_io_stream_t* CreateBytecodeStream() {
+  iree_io_stream_t* stream = nullptr;
+  IREE_CHECK_OK(iree_io_vec_stream_create(
+      IREE_IO_STREAM_MODE_WRITABLE | IREE_IO_STREAM_MODE_SEEKABLE |
+          IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_RESIZABLE,
+      4096, iree_allocator_system(), &stream));
+  return stream;
+}
+
+static std::vector<uint8_t> SerializeModule(
+    const loom_module_t* module, iree_arena_block_pool_t* block_pool) {
+  iree_io_stream_t* stream = CreateBytecodeStream();
+  IREE_CHECK_OK(
+      loom_bytecode_write_module(module, stream, nullptr, block_pool));
+  const iree_io_stream_pos_t stream_length = iree_io_stream_length(stream);
+  IREE_ASSERT(stream_length >= 0);
+  std::vector<uint8_t> bytes((size_t)stream_length);
+  IREE_CHECK_OK(iree_io_stream_seek(stream, IREE_IO_STREAM_SEEK_SET, 0));
+  IREE_CHECK_OK(
+      iree_io_stream_read(stream, bytes.size(), bytes.data(), nullptr));
+  iree_io_stream_release(stream);
+  return bytes;
+}
+
+static loom_module_t* ReadModule(StaticEncodingBenchmark& fixture,
+                                 const std::vector<uint8_t>& bytes,
+                                 iree_arena_block_pool_t* block_pool) {
+  loom_bytecode_read_options_t options = {};
+  loom_bytecode_read_result_t result = {};
+  loom_module_t* module = nullptr;
+  IREE_CHECK_OK(loom_bytecode_read_module(
+      iree_make_const_byte_span(bytes.data(), bytes.size()),
+      IREE_SV("static_encoding_benchmark.loombc"), fixture.context(),
+      block_pool, &options, &result, &module, iree_allocator_system()));
+  IREE_ASSERT(module != nullptr);
+  return module;
+}
+
+static bool IsExpectedDistinctModule(const loom_module_t* module,
+                                     int64_t definition_count) {
+  if (module->encodings.count != (iree_host_size_t)definition_count) {
+    return false;
+  }
+  loom_value_fact_storage_schema_t schema = {};
+  return loom_encoding_query_static_storage_schema(
+             module, (uint16_t)definition_count, &schema) &&
+         schema.encoded_operand.payload_element_count ==
+             (uint32_t)definition_count;
+}
+
 static void BenchmarkParseStaticEncodings(benchmark::State& state,
                                           SchemaPopulation population) {
   const int64_t definition_count = state.range(0);
@@ -117,7 +197,7 @@ static void BenchmarkParseStaticEncodings(benchmark::State& state,
   StaticEncodingBenchmark fixture;
 
   loom_module_t* warm_module = ParseModule(fixture, source);
-  fixture.SetMemoryCounters(state, warm_module);
+  fixture.SetMemoryCounters(state, warm_module, fixture.block_pool());
   loom_module_free(warm_module);
 
   for (auto _ : state) {
@@ -132,12 +212,12 @@ static void BenchmarkParseStaticEncodings(benchmark::State& state,
 static void BM_ParseRepeatedStaticEncoding(benchmark::State& state) {
   BenchmarkParseStaticEncodings(state, SchemaPopulation::kRepeated);
 }
-BENCHMARK(BM_ParseRepeatedStaticEncoding)->Arg(256);
+BENCHMARK(BM_ParseRepeatedStaticEncoding)->Arg(256)->Arg(4096);
 
 static void BM_ParseDistinctStaticEncodings(benchmark::State& state) {
   BenchmarkParseStaticEncodings(state, SchemaPopulation::kDistinct);
 }
-BENCHMARK(BM_ParseDistinctStaticEncodings)->Arg(1)->Arg(32)->Arg(256);
+BENCHMARK(BM_ParseDistinctStaticEncodings)->Apply(DistinctSchemaCounts);
 
 static void BM_PrintDistinctStaticEncodings(benchmark::State& state) {
   const int64_t definition_count = state.range(0);
@@ -145,7 +225,7 @@ static void BM_PrintDistinctStaticEncodings(benchmark::State& state) {
       BuildEncodingModule(SchemaPopulation::kDistinct, definition_count);
   StaticEncodingBenchmark fixture;
   loom_module_t* module = ParseModule(fixture, source);
-  fixture.SetMemoryCounters(state, module);
+  fixture.SetMemoryCounters(state, module, fixture.block_pool());
 
   loom_output_stream_t preflight_stream;
   loom_output_stream_null(&preflight_stream);
@@ -163,7 +243,71 @@ static void BM_PrintDistinctStaticEncodings(benchmark::State& state) {
   state.SetBytesProcessed(state.iterations() * printed_byte_count);
   loom_module_free(module);
 }
-BENCHMARK(BM_PrintDistinctStaticEncodings)->Arg(1)->Arg(32)->Arg(256);
+BENCHMARK(BM_PrintDistinctStaticEncodings)->Apply(DistinctSchemaCounts);
+
+static void BM_WriteDistinctStaticEncodings(benchmark::State& state) {
+  const int64_t definition_count = state.range(0);
+  const std::string source =
+      BuildEncodingModule(SchemaPopulation::kDistinct, definition_count);
+  StaticEncodingBenchmark fixture;
+  loom_module_t* module = ParseModule(fixture, source);
+  if (!IsExpectedDistinctModule(module, definition_count)) {
+    state.SkipWithError("distinct static encoding module was malformed");
+    loom_module_free(module);
+    return;
+  }
+
+  ScopedBlockPool write_pool;
+  iree_io_stream_t* stream = CreateBytecodeStream();
+  IREE_CHECK_OK(
+      loom_bytecode_write_module(module, stream, nullptr, write_pool.get()));
+  const int64_t serialized_byte_count = (int64_t)iree_io_stream_length(stream);
+  fixture.SetMemoryCounters(state, module, write_pool.get());
+  state.counters["serialized_bytes"] = (double)serialized_byte_count;
+
+  for (auto _ : state) {
+    IREE_CHECK_OK(iree_io_stream_seek(stream, IREE_IO_STREAM_SEEK_SET, 0));
+    IREE_CHECK_OK(
+        loom_bytecode_write_module(module, stream, nullptr, write_pool.get()));
+    benchmark::DoNotOptimize(stream);
+  }
+  state.SetItemsProcessed(state.iterations() * definition_count);
+  state.SetBytesProcessed(state.iterations() * serialized_byte_count);
+  iree_io_stream_release(stream);
+  loom_module_free(module);
+}
+BENCHMARK(BM_WriteDistinctStaticEncodings)->Apply(DistinctSchemaCounts);
+
+static void BM_ReadDistinctStaticEncodings(benchmark::State& state) {
+  const int64_t definition_count = state.range(0);
+  const std::string source =
+      BuildEncodingModule(SchemaPopulation::kDistinct, definition_count);
+  StaticEncodingBenchmark fixture;
+  loom_module_t* source_module = ParseModule(fixture, source);
+  const std::vector<uint8_t> bytes =
+      SerializeModule(source_module, fixture.block_pool());
+  loom_module_free(source_module);
+
+  ScopedBlockPool read_pool;
+  loom_module_t* warm_module = ReadModule(fixture, bytes, read_pool.get());
+  if (!IsExpectedDistinctModule(warm_module, definition_count)) {
+    state.SkipWithError("bytecode reader changed static encoding schemas");
+    loom_module_free(warm_module);
+    return;
+  }
+  fixture.SetMemoryCounters(state, warm_module, read_pool.get());
+  state.counters["serialized_bytes"] = (double)bytes.size();
+  loom_module_free(warm_module);
+
+  for (auto _ : state) {
+    loom_module_t* module = ReadModule(fixture, bytes, read_pool.get());
+    benchmark::DoNotOptimize(module);
+    loom_module_free(module);
+  }
+  state.SetItemsProcessed(state.iterations() * definition_count);
+  state.SetBytesProcessed(state.iterations() * (int64_t)bytes.size());
+}
+BENCHMARK(BM_ReadDistinctStaticEncodings)->Apply(DistinctSchemaCounts);
 
 static void BM_QueryDistinctStaticEncodingRoles(benchmark::State& state) {
   const int64_t definition_count = state.range(0);
@@ -171,7 +315,7 @@ static void BM_QueryDistinctStaticEncodingRoles(benchmark::State& state) {
       BuildEncodingModule(SchemaPopulation::kDistinct, definition_count);
   StaticEncodingBenchmark fixture;
   loom_module_t* module = ParseModule(fixture, source);
-  fixture.SetMemoryCounters(state, module);
+  fixture.SetMemoryCounters(state, module, fixture.block_pool());
   if (module->encodings.count != (iree_host_size_t)definition_count) {
     state.SkipWithError("distinct schemas were unexpectedly deduplicated");
     loom_module_free(module);
@@ -188,7 +332,7 @@ static void BM_QueryDistinctStaticEncodingRoles(benchmark::State& state) {
   state.SetItemsProcessed(state.iterations() * definition_count);
   loom_module_free(module);
 }
-BENCHMARK(BM_QueryDistinctStaticEncodingRoles)->Arg(1)->Arg(32)->Arg(256);
+BENCHMARK(BM_QueryDistinctStaticEncodingRoles)->Apply(DistinctSchemaCounts);
 
 static void BM_QueryDistinctStaticStorageSchemas(benchmark::State& state) {
   const int64_t definition_count = state.range(0);
@@ -196,7 +340,7 @@ static void BM_QueryDistinctStaticStorageSchemas(benchmark::State& state) {
       BuildEncodingModule(SchemaPopulation::kDistinct, definition_count);
   StaticEncodingBenchmark fixture;
   loom_module_t* module = ParseModule(fixture, source);
-  fixture.SetMemoryCounters(state, module);
+  fixture.SetMemoryCounters(state, module, fixture.block_pool());
   if (module->encodings.count != (iree_host_size_t)definition_count) {
     state.SkipWithError("distinct schemas were unexpectedly deduplicated");
     loom_module_free(module);
@@ -228,6 +372,6 @@ static void BM_QueryDistinctStaticStorageSchemas(benchmark::State& state) {
   state.SetItemsProcessed(state.iterations() * definition_count);
   loom_module_free(module);
 }
-BENCHMARK(BM_QueryDistinctStaticStorageSchemas)->Arg(1)->Arg(32)->Arg(256);
+BENCHMARK(BM_QueryDistinctStaticStorageSchemas)->Apply(DistinctSchemaCounts);
 
 }  // namespace

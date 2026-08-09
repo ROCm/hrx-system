@@ -122,6 +122,24 @@ static inline bool loom_encoding_static_is_valid(
                                LOOM_ENCODING_FAMILY_STATIC_SEMANTICS_VALID);
 }
 
+// Materializes the sparse parameter array into caller-owned descriptor-indexed
+// slots. The encoding must have passed its registered static parameter schema,
+// and |slot_count| must match that family's descriptor count. This is transient
+// query state and never becomes part of encoding identity or module storage.
+static inline void loom_encoding_collect_parameter_slots(
+    const loom_encoding_t* encoding, uint8_t slot_count,
+    const loom_named_attr_t** out_slots) {
+  IREE_ASSERT(loom_encoding_static_parameters_are_valid(encoding));
+  for (uint8_t i = 0; i < slot_count; ++i) out_slots[i] = NULL;
+  for (uint8_t i = 0; i < encoding->attribute_count; ++i) {
+    const loom_named_attr_t* parameter = &encoding->attributes[i];
+    const uint8_t descriptor_index =
+        loom_encoding_parameter_descriptor_index(parameter);
+    IREE_ASSERT(descriptor_index < slot_count);
+    out_slots[descriptor_index] = parameter;
+  }
+}
+
 // Generated structural metadata for one registered encoding family.
 typedef struct loom_encoding_family_descriptor_t {
   // Stable public family name without a leading '#'.
@@ -175,6 +193,8 @@ typedef struct loom_encoding_vtable_t {
   // Receives the merged static/dynamic parameter view so families can enforce
   // required dynamic operands, reject unknown parameters, and diagnose type
   // mismatches at the op that introduced the dynamic encoding value.
+  // Authored contract violations are emitted as structured diagnostics; a
+  // non-OK status is reserved for diagnostic sink failure.
   //
   // May be NULL when the family has no dynamic-parameter contract. Static
   // parsing/printing stays generic; family-specific logic belongs here.
