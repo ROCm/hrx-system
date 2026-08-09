@@ -416,6 +416,10 @@ def test_generate_encoding_family_metadata() -> None:
             AttrDef("rounding", ATTR_TYPE_STRING, optional=True, bare_identifier=True),
             AttrDef("payload_elements", ATTR_TYPE_I64),
         ],
+        dynamic_parameters=[
+            Operand("matrix", TypeConstraint.VECTOR),
+            Operand("seed", TypeConstraint.INDEX),
+        ],
     )
 
     ops_h = generate_ops_h("encoding", 0x09, [], (), [family])
@@ -425,6 +429,9 @@ def test_generate_encoding_family_metadata() -> None:
     assert "LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_PAYLOAD_ELEMENTS = 0" in ops_h
     assert "LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_ROUNDING = 1" in ops_h
     assert "LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_COUNT_ = 2" in ops_h
+    assert "LOOM_ENCODING_MATRIX_OPERAND_DYNAMIC_PARAMETER_MATRIX = 0" in ops_h
+    assert "LOOM_ENCODING_MATRIX_OPERAND_DYNAMIC_PARAMETER_SEED = 1" in ops_h
+    assert "LOOM_ENCODING_MATRIX_OPERAND_DYNAMIC_PARAMETER_COUNT_ = 2" in ops_h
     assert "extern const loom_encoding_family_descriptor_t loom_encoding_matrix_operand_family_descriptor;" in ops_h
     assert '.name = _BSTRING(14, "matrix_operand")' in tables_c
     assert ".role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA" in tables_c
@@ -433,6 +440,10 @@ def test_generate_encoding_family_metadata() -> None:
     assert '.name = _BSTRING(8, "rounding")' in tables_c
     assert ".flags = LOOM_ATTR_OPTIONAL | LOOM_ATTR_BARE_IDENTIFIER" in tables_c
     assert ".parameter_count = IREE_ARRAYSIZE(loom_encoding_matrix_operand_parameter_desc)" in tables_c
+    assert "static const loom_encoding_dynamic_parameter_descriptor_t loom_encoding_matrix_operand_dynamic_parameter_desc[]" in tables_c
+    assert ".type_constraint = LOOM_TYPE_CONSTRAINT_VECTOR" in tables_c
+    assert ".type_constraint = LOOM_TYPE_CONSTRAINT_INDEX" in tables_c
+    assert ".dynamic_parameter_count = IREE_ARRAYSIZE(loom_encoding_matrix_operand_dynamic_parameter_desc)" in tables_c
 
 
 def test_generate_dialect_tables_emit_dense_op_semantics() -> None:

@@ -139,18 +139,24 @@ def generate_ops_h(
     # Encoding family parameter ordinals are compiler-local implementation
     # details. Family parameters remain sparse named attributes in public IR.
     for family in encoding_families:
-        if not family.parameters:
-            continue
         c_prefix = _c_encoding_family_prefix(family)
         const_prefix = c_prefix.upper()
-        if family.doc:
+        if family.doc and (family.parameters or family.dynamic_parameters):
             lines.append(f"// {family.doc}")
-        lines.append(f"typedef enum {c_prefix}_parameter_e {{")
-        for index, parameter in enumerate(family.parameters):
-            lines.append(f"  {const_prefix}_PARAMETER_{parameter.name.upper()} = {index},")
-        lines.append(f"  {const_prefix}_PARAMETER_COUNT_ = {len(family.parameters)},")
-        lines.append(f"}} {c_prefix}_parameter_t;")
-        lines.append("")
+        if family.parameters:
+            lines.append(f"typedef enum {c_prefix}_parameter_e {{")
+            for index, parameter in enumerate(family.parameters):
+                lines.append(f"  {const_prefix}_PARAMETER_{parameter.name.upper()} = {index},")
+            lines.append(f"  {const_prefix}_PARAMETER_COUNT_ = {len(family.parameters)},")
+            lines.append(f"}} {c_prefix}_parameter_t;")
+            lines.append("")
+        if family.dynamic_parameters:
+            lines.append(f"typedef enum {c_prefix}_dynamic_parameter_e {{")
+            for index, parameter in enumerate(family.dynamic_parameters):
+                lines.append(f"  {const_prefix}_DYNAMIC_PARAMETER_{parameter.name.upper()} = {index},")
+            lines.append(f"  {const_prefix}_DYNAMIC_PARAMETER_COUNT_ = {len(family.dynamic_parameters)},")
+            lines.append(f"}} {c_prefix}_dynamic_parameter_t;")
+            lines.append("")
 
     lines.append("#ifdef __cplusplus")
     lines.append('extern "C" {')

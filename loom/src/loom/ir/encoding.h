@@ -26,6 +26,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/attribute_schema.h"
+#include "loom/ir/type_constraint.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -140,6 +141,14 @@ static inline void loom_encoding_collect_parameter_slots(
   }
 }
 
+// Describes one accepted dynamic parameter on encoding.define.
+typedef struct loom_encoding_dynamic_parameter_descriptor_t {
+  // Stable public parameter name.
+  loom_bstring_t name;
+  // Broad SSA type constraint checked before family semantics.
+  loom_type_constraint_t type_constraint;
+} loom_encoding_dynamic_parameter_descriptor_t;
+
 // Generated structural metadata for one registered encoding family.
 typedef struct loom_encoding_family_descriptor_t {
   // Stable public family name without a leading '#'.
@@ -150,6 +159,11 @@ typedef struct loom_encoding_family_descriptor_t {
   uint8_t parameter_count;
   // Lexically ordered static parameter descriptors, or NULL when empty.
   const loom_attr_descriptor_t* parameter_descriptors;
+  // Number of lexically ordered descriptors in |dynamic_parameter_descriptors|.
+  uint8_t dynamic_parameter_count;
+  // Lexically ordered dynamic parameter descriptors, or NULL when empty.
+  const loom_encoding_dynamic_parameter_descriptor_t*
+      dynamic_parameter_descriptors;
 } loom_encoding_family_descriptor_t;
 
 // A module-owned table of unique static encoding instances.

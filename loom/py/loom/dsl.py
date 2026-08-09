@@ -2979,10 +2979,11 @@ class EncodingFamilyRole(Enum):
 
 @dataclass(frozen=True, slots=True)
 class EncodingFamilyDef:
-    """Declares one registered static encoding family.
+    """Declares one registered encoding family.
 
-    Family names are stable public IR. Parameters remain sparse named
-    attributes in the IR and wire format; lexical descriptor ordinals are
+    Family names are stable public IR. Static parameters remain sparse named
+    attributes in the IR and wire format. Dynamic parameters name ordinary SSA
+    operands accepted by encoding.define. Lexical descriptor ordinals are
     generated implementation metadata used after parsing.
     """
 
@@ -2990,6 +2991,7 @@ class EncodingFamilyDef:
     group: Dialect
     role: EncodingFamilyRole
     parameters: tuple[AttrDef, ...] = ()
+    dynamic_parameters: tuple[Operand, ...] = ()
     doc: str = ""
 
     def __init__(
@@ -2999,6 +3001,7 @@ class EncodingFamilyDef:
         group: Dialect,
         role: EncodingFamilyRole,
         parameters: list[AttrDef] | tuple[AttrDef, ...] = (),
+        dynamic_parameters: list[Operand] | tuple[Operand, ...] = (),
         doc: str = "",
     ) -> None:
         if not _is_ascii_identifier(name):
@@ -3015,11 +3018,39 @@ class EncodingFamilyDef:
         _validate_descriptor_parameters(
             f"EncodingFamilyDef '{name}'", lexical_parameters
         )
+        lexical_dynamic_parameters = tuple(
+            sorted(dynamic_parameters, key=lambda value: value.name)
+        )
+        if len(lexical_dynamic_parameters) > 0xFF:
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': {len(lexical_dynamic_parameters)} "
+                "dynamic parameters exceed the uint8_t slot limit"
+            )
+        seen_dynamic_names: set[str] = set()
+        for parameter in lexical_dynamic_parameters:
+            if not _is_ascii_identifier(parameter.name):
+                raise ValueError(
+                    f"EncodingFamilyDef '{name}': dynamic parameter "
+                    f"'{parameter.name}' must be a bare ASCII identifier"
+                )
+            if parameter.name in seen_dynamic_names:
+                raise ValueError(
+                    f"EncodingFamilyDef '{name}': duplicate dynamic parameter "
+                    f"'{parameter.name}'"
+                )
+            seen_dynamic_names.add(parameter.name)
+            if parameter.variadic or parameter.optional:
+                raise ValueError(
+                    f"EncodingFamilyDef '{name}': dynamic parameter "
+                    f"'{parameter.name}' cannot be variadic or optional; "
+                    "family semantics determine presence"
+                )
 
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "group", group)
         object.__setattr__(self, "role", role)
         object.__setattr__(self, "parameters", lexical_parameters)
+        object.__setattr__(self, "dynamic_parameters", lexical_dynamic_parameters)
         object.__setattr__(self, "doc", doc)
 
 

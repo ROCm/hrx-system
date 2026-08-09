@@ -318,17 +318,31 @@ def _emit_attr_descriptor_table(
 
 
 def _emit_encoding_family_tables(lines: list[str], encoding_families: Sequence[EncodingFamilyDef]) -> None:
-    """Emits generated static encoding-family descriptors."""
+    """Emits generated encoding-family descriptors."""
 
     for family in encoding_families:
         prefix = _c_encoding_family_prefix(family)
         parameter_table = _emit_attr_descriptor_table(lines, prefix, family.parameters)
+        dynamic_parameter_table = None
+        if family.dynamic_parameters:
+            dynamic_parameter_table = f"{prefix}_dynamic_parameter_desc"
+            lines.append(f"static const loom_encoding_dynamic_parameter_descriptor_t {dynamic_parameter_table}[] = {{")
+            for parameter in family.dynamic_parameters:
+                lines.append("    {")
+                lines.append(f"        .name = {_bstring_expr(parameter.name)},")
+                lines.append(f"        .type_constraint = {TYPE_CONSTRAINT_MAP[parameter.type_constraint]},")
+                lines.append("    },")
+            lines.append("};")
+            lines.append("")
         lines.append(f"const loom_encoding_family_descriptor_t {_c_encoding_family_descriptor_name(family)} = {{")
         lines.append(f"    .name = {_bstring_expr(family.name)},")
         lines.append(f"    .role = {family.role.c_name},")
         if parameter_table is not None:
             lines.append(f"    .parameter_count = IREE_ARRAYSIZE({parameter_table}),")
             lines.append(f"    .parameter_descriptors = {parameter_table},")
+        if dynamic_parameter_table is not None:
+            lines.append(f"    .dynamic_parameter_count = IREE_ARRAYSIZE({dynamic_parameter_table}),")
+            lines.append(f"    .dynamic_parameter_descriptors = {dynamic_parameter_table},")
         lines.append("};")
         lines.append("")
 

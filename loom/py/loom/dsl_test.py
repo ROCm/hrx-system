@@ -465,6 +465,34 @@ class TestEncodingFamilyDef:
             "rounding",
         )
 
+    def test_declares_lexically_indexed_dynamic_parameters(self) -> None:
+        family = EncodingFamilyDef(
+            "physical_storage",
+            group=Dialect("encoding"),
+            role=EncodingFamilyRole.PHYSICAL_STORAGE,
+            dynamic_parameters=[
+                Operand("schema", TypeConstraint.ENCODING_SCHEMA),
+                Operand("layout", TypeConstraint.ENCODING_LAYOUT),
+            ],
+        )
+
+        assert tuple(parameter.name for parameter in family.dynamic_parameters) == (
+            "layout",
+            "schema",
+        )
+
+    def test_rejects_duplicate_dynamic_parameters_after_sorting(self) -> None:
+        with _raises(ValueError, match="duplicate dynamic parameter 'value'"):
+            EncodingFamilyDef(
+                "schema",
+                group=Dialect("encoding"),
+                role=EncodingFamilyRole.STORAGE_SCHEMA,
+                dynamic_parameters=[
+                    Operand("value", TypeConstraint.INDEX),
+                    Operand("value", TypeConstraint.INDEX),
+                ],
+            )
+
     def test_rejects_namespaced_family_name(self) -> None:
         with _raises(ValueError, match="bare ASCII identifier"):
             EncodingFamilyDef(

@@ -27,9 +27,13 @@ from loom.dsl import (
     ATTR_TYPE_I64_ARRAY,
     ATTR_TYPE_STRING,
     ENCODING_LAYOUT,
+    ENCODING_SCHEMA,
+    ENCODING_TRANSFORM,
     I1,
     INDEX,
     PURE,
+    VECTOR,
+    VIEW,
     AttrDef,
     Dialect,
     EncodingFamilyDef,
@@ -129,6 +133,10 @@ ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
             AttrDef("layout", ATTR_TYPE_ENCODING, optional=True),
             AttrDef("schema", ATTR_TYPE_ENCODING, optional=True),
         ),
+        dynamic_parameters=(
+            Operand("layout", ENCODING_LAYOUT),
+            Operand("schema", ENCODING_SCHEMA),
+        ),
         doc="Composes an address layout and storage schema.",
     ),
     EncodingFamilyDef(
@@ -225,6 +233,14 @@ ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
         group=encoding_ops,
         role=EncodingFamilyRole.NUMERIC_TRANSFORM,
         parameters=_NUMERIC_TRANSFORM_PARAMETERS,
+        dynamic_parameters=(
+            Operand("input_elems", INDEX),
+            Operand("matrix", VECTOR),
+            Operand("output_elems", INDEX),
+            Operand("permutation", VECTOR),
+            Operand("seed", INDEX),
+            Operand("signs", VECTOR),
+        ),
         doc="Numerical transform with static shape and policy parameters.",
     ),
     EncodingFamilyDef(
@@ -238,6 +254,12 @@ ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
         group=encoding_ops,
         role=EncodingFamilyRole.STORAGE_SCHEMA,
         parameters=_TURBOQUANT_KV_PARAMETERS,
+        dynamic_parameters=(
+            Operand("centroids", VIEW),
+            Operand("qjl_transform", ENCODING_TRANSFORM),
+            Operand("thresholds", VIEW),
+            Operand("transform", ENCODING_TRANSFORM),
+        ),
         doc="TurboQuant key/value storage schema.",
     ),
 )

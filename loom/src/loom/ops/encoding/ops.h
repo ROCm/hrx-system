@@ -22,6 +22,12 @@ typedef enum loom_encoding_physical_storage_parameter_e {
   LOOM_ENCODING_PHYSICAL_STORAGE_PARAMETER_COUNT_ = 2,
 } loom_encoding_physical_storage_parameter_t;
 
+typedef enum loom_encoding_physical_storage_dynamic_parameter_e {
+  LOOM_ENCODING_PHYSICAL_STORAGE_DYNAMIC_PARAMETER_LAYOUT = 0,
+  LOOM_ENCODING_PHYSICAL_STORAGE_DYNAMIC_PARAMETER_SCHEMA = 1,
+  LOOM_ENCODING_PHYSICAL_STORAGE_DYNAMIC_PARAMETER_COUNT_ = 2,
+} loom_encoding_physical_storage_dynamic_parameter_t;
+
 // Explicit element-stride address layout.
 typedef enum loom_encoding_strided_parameter_e {
   LOOM_ENCODING_STRIDED_PARAMETER_STRIDE = 0,
@@ -136,6 +142,16 @@ typedef enum loom_encoding_numeric_transform_parameter_e {
   LOOM_ENCODING_NUMERIC_TRANSFORM_PARAMETER_COUNT_ = 4,
 } loom_encoding_numeric_transform_parameter_t;
 
+typedef enum loom_encoding_numeric_transform_dynamic_parameter_e {
+  LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_INPUT_ELEMS = 0,
+  LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_MATRIX = 1,
+  LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_OUTPUT_ELEMS = 2,
+  LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_PERMUTATION = 3,
+  LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_SEED = 4,
+  LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_SIGNS = 5,
+  LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_COUNT_ = 6,
+} loom_encoding_numeric_transform_dynamic_parameter_t;
+
 // TurboQuant key/value storage schema.
 typedef enum loom_encoding_turboquant_kv_parameter_e {
   LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_FIRST_STAGE_BITS = 0,
@@ -149,6 +165,14 @@ typedef enum loom_encoding_turboquant_kv_parameter_e {
   LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_TRANSFORM_FAMILY = 8,
   LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_COUNT_ = 9,
 } loom_encoding_turboquant_kv_parameter_t;
+
+typedef enum loom_encoding_turboquant_kv_dynamic_parameter_e {
+  LOOM_ENCODING_TURBOQUANT_KV_DYNAMIC_PARAMETER_CENTROIDS = 0,
+  LOOM_ENCODING_TURBOQUANT_KV_DYNAMIC_PARAMETER_QJL_TRANSFORM = 1,
+  LOOM_ENCODING_TURBOQUANT_KV_DYNAMIC_PARAMETER_THRESHOLDS = 2,
+  LOOM_ENCODING_TURBOQUANT_KV_DYNAMIC_PARAMETER_TRANSFORM = 3,
+  LOOM_ENCODING_TURBOQUANT_KV_DYNAMIC_PARAMETER_COUNT_ = 4,
+} loom_encoding_turboquant_kv_dynamic_parameter_t;
 
 #ifdef __cplusplus
 extern "C" {
