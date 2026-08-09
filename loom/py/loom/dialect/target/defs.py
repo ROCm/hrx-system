@@ -4,17 +4,21 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Target planning dialect op definitions.
+"""Authored target witnesses and contextual target-query definitions.
 
-The target dialect owns durable module records that select and freeze code
-generation facts before backend-specific lowering.
+Target records preserve only the constraints written in the program.
+Compilation projects immutable facts for each function version without
+expanding or rewriting those records; contextual query ops read that active
+fact scope and remain dynamic when no value is established.
 """
 
-from loom.assembly import AttrDict, SymbolRef, TemplateParam
+from loom.assembly import COLON, AttrDict, ResultType, SymbolRef, TemplateParam
 from loom.dsl import (
     ATTR_TYPE_ENUM,
     ATTR_TYPE_I64,
     ATTR_TYPE_STRING,
+    INDEX,
+    PURE,
     SYMBOL_DEFINE,
     AttrDef,
     Dialect,
@@ -23,6 +27,7 @@ from loom.dsl import (
     Op,
     OpPhase,
     ParameterizedAttrDef,
+    Result,
     SymbolDefinition,
     SymbolDefinitionFlag,
     TargetFactSpecialization,
@@ -36,7 +41,7 @@ from loom.dsl import (
 target_ops = Dialect(
     "target",
     dialect_id=0x13,
-    doc="Target planning records.",
+    doc="Authored target witnesses and contextual target queries.",
     default_phase=OpPhase.MODULE_METADATA,
 )
 
@@ -52,7 +57,7 @@ target_subgroup_size_attr = ParameterizedAttrDef(
     ],
     primary_parameter="size",
     target_condition="loom_target_subgroup_size_condition",
-    doc="Requires the selected target to have one exact fixed subgroup size.",
+    doc="Requires the active function-version facts to establish this subgroup size.",
 )
 
 # ============================================================================
@@ -207,6 +212,24 @@ def target_record_attrs(kind_enum: EnumDef) -> list[AttrDef]:
 
 
 # ============================================================================
+# Contextual target queries
+# ============================================================================
+
+target_subgroup_size = Op(
+    "target.subgroup.size",
+    group=target_ops,
+    builder_name="subgroup_size",
+    phase=OpPhase.EXECUTABLE,
+    doc="Read the selected subgroup size of the current function version.",
+    results=[Result("result", INDEX, doc="Selected subgroup size.")],
+    traits=[PURE],
+    facts="loom_target_subgroup_size_facts",
+    format=[COLON, ResultType("result")],
+    examples=["%size = target.subgroup.size : index"],
+)
+
+
+# ============================================================================
 # target.generic
 # ============================================================================
 
@@ -267,6 +290,10 @@ target_decl = Op(
 # All ops
 # ============================================================================
 
-ALL_TARGET_OPS: tuple[Op, ...] = (target_generic, target_decl)
+ALL_TARGET_OPS: tuple[Op, ...] = (
+    target_generic,
+    target_decl,
+    target_subgroup_size,
+)
 
 ALL_TARGET_PARAMETERIZED_ATTRS = (target_subgroup_size_attr,)

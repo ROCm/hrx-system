@@ -43,6 +43,7 @@ loom_generated_cc_library(
         "//loom/src/loom/target:facts",
         "//loom/src/loom/target:projection",
         "//loom/src/loom/target:types",
+        "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
     ],
 )

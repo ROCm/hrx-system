@@ -27,7 +27,7 @@ extern "C" {
 
 extern const loom_target_condition_descriptor_t loom_target_subgroup_size_condition;
 
-// Requires the selected target to have one exact fixed subgroup size.
+// Requires the active function-version facts to establish this subgroup size.
 static inline bool loom_target_subgroup_size_attr_isa(loom_attribute_t attr) {
   return attr.kind == LOOM_ATTR_PARAMETERIZED && loom_attr_as_parameterized_kind(attr) == LOOM_PARAMETERIZED_ATTR_TARGET_SUBGROUP_SIZE;
 }
@@ -43,7 +43,8 @@ iree_status_t loom_target_subgroup_size_attr_make(
 enum {
   LOOM_OP_TARGET_GENERIC = LOOM_OP_KIND(LOOM_DIALECT_TARGET, 0),
   LOOM_OP_TARGET_DECL = LOOM_OP_KIND(LOOM_DIALECT_TARGET, 1),
-  LOOM_OP_TARGET_COUNT_ = 2,
+  LOOM_OP_TARGET_SUBGROUP_SIZE = LOOM_OP_KIND(LOOM_DIALECT_TARGET, 2),
+  LOOM_OP_TARGET_COUNT_ = 3,
 };
 
 // Generic target-family row selected by target.generic.
@@ -170,6 +171,21 @@ iree_status_t loom_target_decl_build(
     loom_symbol_ref_t symbol,
     loom_location_id_t location,
     loom_op_t** out_op);
+
+// LOOM_OP_TARGET_SUBGROUP_SIZE: Read the selected subgroup size of the current function version.
+// %size = target.subgroup.size : index
+LOOM_DEFINE_ISA(loom_target_subgroup_size_isa, LOOM_OP_TARGET_SUBGROUP_SIZE)
+LOOM_DEFINE_RESULT(loom_target_subgroup_size_result, 0)
+iree_status_t loom_target_subgroup_size_build(
+    loom_builder_t* builder,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_target_subgroup_size_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 
 // Returns the vtable array for the target dialect.
 const loom_op_vtable_t* const* loom_target_dialect_vtables(

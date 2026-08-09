@@ -141,6 +141,24 @@ typedef struct loom_value_fact_uniform_scale_origin_t {
   loom_value_id_t scale_value_id;
 } loom_value_fact_uniform_scale_origin_t;
 
+// Structured contextual query materialized by an SSA value. The family is
+// shared with the paired static applicability attribute. The optional key
+// distinguishes projections within a family, such as one SPIR-V extension;
+// queries with no additional identity use an absent key.
+typedef struct loom_value_fact_contextual_query_origin_t {
+  // Context-local parameterized attribute family identifying query semantics.
+  loom_parameterized_attr_kind_t family_kind;
+
+  // Reserved for alignment and future query-origin flags. Always zero.
+  uint16_t reserved;
+
+  // Borrowed structured projection key owned by the current module.
+  loom_attribute_t key;
+} loom_value_fact_contextual_query_origin_t;
+
+static_assert(sizeof(loom_value_fact_contextual_query_origin_t) == 24,
+              "contextual query origin must remain 24 bytes");
+
 // Vector value is a prefix mask produced by vector.mask.range.
 typedef struct loom_value_fact_vector_prefix_mask_t {
   // Facts for the first tested coordinate.
@@ -749,6 +767,28 @@ struct loom_value_fact_table_t {
     iree_host_size_t touched_capacity;
   } uniform_scale_origins;
 
+  // Contextual query origins keyed by SSA value ID. Dense entries contain
+  // one-based indexes into the sparse origin array and are allocated only when
+  // a function materializes at least one contextual query.
+  struct {
+    // One-based sparse origin indexes keyed by SSA value ID; zero is absent.
+    uint32_t* entries;
+    // Allocated dense entry count.
+    iree_host_size_t capacity;
+    // SSA value IDs with origins defined in the current populated scope.
+    loom_value_id_t* touched_values;
+    // Number of populated entries in touched_values.
+    iree_host_size_t touched_count;
+    // Allocated touched_values entry count.
+    iree_host_size_t touched_capacity;
+    // Sparse structured origins referenced by entries.
+    loom_value_fact_contextual_query_origin_t* origins;
+    // Number of populated sparse origins in the current scope.
+    iree_host_size_t origin_count;
+    // Allocated sparse origin entry count.
+    iree_host_size_t origin_capacity;
+  } contextual_query_origins;
+
   // Reusable scratch buffers for fact inference calls. Allocated on first use,
   // grown only when an op needs more slots. Never shrinks. Old buffers are
   // abandoned in the arena and freed in bulk with the arena.
@@ -864,6 +904,22 @@ bool loom_value_fact_table_query_uniform_scale_origin(
     const loom_value_fact_table_t* table, const loom_module_t* module,
     loom_value_id_t value_id,
     loom_value_fact_uniform_scale_origin_t* out_origin);
+
+// Defines |value_id| as the SSA materialization of one contextual query. The
+// family is the descriptor-backed static applicability family with the same
+// public dotted name. The optional structured key distinguishes projections
+// within that family without flattening them into strings or feature bits.
+iree_status_t loom_value_fact_table_define_contextual_query_origin(
+    loom_value_fact_table_t* table, loom_value_id_t value_id,
+    loom_value_fact_contextual_query_origin_t origin);
+
+// Returns true when scalar |value_id| materializes a contextual query. The
+// returned origin borrows its structured key from the current module and is
+// valid until the fact-table scope is cleared.
+bool loom_value_fact_table_query_contextual_query_origin(
+    const loom_value_fact_table_t* table, const loom_module_t* module,
+    loom_value_id_t value_id,
+    loom_value_fact_contextual_query_origin_t* out_origin);
 
 // Clones |facts| from |source| into |target|, re-interning any context-local
 // extension payloads in the target table. The returned facts are valid for
