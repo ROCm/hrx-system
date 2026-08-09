@@ -55,10 +55,10 @@ loom_generated_cc_library(
 )
 
 loom_cc_benchmark(
-    name = "static_encoding_benchmark",
-    srcs = ["static_encoding_benchmark.cc"],
+    name = "encoding_benchmark",
+    srcs = ["encoding_benchmark.cc"],
     args = [
-        "--benchmark_filter=BM_.*DistinctStatic.*/32",
+        "--benchmark_filter=BM_.*Encoding.*/32",
     ],
     deps = [
         ":encoding",
@@ -67,8 +67,10 @@ loom_cc_benchmark(
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
         "//loom/src/loom/util:fact_table",
         "//loom/src/loom/util:stream",
+        "//loom/src/loom/verify",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:stream",
