@@ -8,7 +8,7 @@
 
 #include "loom/ops/index/ops.h"
 #include "loom/ops/vector/ops.h"
-#include "loom/target/arch/amdgpu/lower/narrow_float/vector_conversion.h"
+#include "loom/target/arch/amdgpu/lower/encoding/vector_conversion.h"
 #include "loom/target/arch/amdgpu/lower/value/integer64.h"
 #include "loom/target/arch/amdgpu/lower/value/vector_conversion.h"
 
@@ -47,6 +47,7 @@ void loom_amdgpu_mark_value_plan_storage_demands(
     }
     case LOOM_OP_VECTOR_EXTF:
     case LOOM_OP_VECTOR_DECODE:
+    case LOOM_OP_VECTOR_ENCODE:
     case LOOM_OP_VECTOR_FPTRUNC: {
       const loom_amdgpu_vector_16bit_float_conversion_plan_t* conversion_plan =
           (const loom_amdgpu_vector_16bit_float_conversion_plan_t*)

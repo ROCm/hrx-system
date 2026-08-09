@@ -2147,7 +2147,7 @@ typedef struct loom_comment_table_t {
   loom_comment_attachment_t* entries;
 } loom_comment_table_t;
 
-// Open-addressing hash table for deduplicating strings and types during
+// Open-addressing hash table for deduplicating module-owned values during
 // construction. Arena-allocated, freed when the module is destroyed.
 // Lazy-initialized: capacity 0 means uninitialized, first use allocates.
 typedef struct loom_intern_table_t {
@@ -2246,10 +2246,11 @@ typedef struct loom_module_t {
   // loom_module_allocate().
   loom_region_t* body;
 
-  // Intern hash tables for deduplicating strings and types during
+  // Intern hash tables for deduplicating strings, types, and encodings during
   // construction. Arena-allocated, lazy-initialized on first use.
   loom_intern_table_t string_intern;
   loom_intern_table_t type_intern;
+  loom_intern_table_t encoding_intern;
 
   // One-based IDs of the two most-recent typed-register types, newest first.
   // Zero denotes an empty slot and keeps zero-initialized modules inert.

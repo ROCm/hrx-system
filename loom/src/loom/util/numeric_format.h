@@ -178,6 +178,9 @@ typedef struct loom_numeric_format_info_t {
   // Encoded mantissa bit count for floating-point formats.
   uint8_t mantissa_bit_count;
 
+  // Direct Loom scalar carrier, or LOOM_SCALAR_TYPE_COUNT_ when none exists.
+  loom_scalar_type_t direct_scalar_type;
+
   // Special-value and contract behavior flags.
   loom_numeric_format_flags_t flags;
 } loom_numeric_format_info_t;
@@ -193,6 +196,16 @@ bool loom_numeric_format_is_finite_only(
 // Returns true when encoded matrix/dot payloads need selector facts for this
 // format.
 bool loom_numeric_format_needs_encoded_payload_selector(
+    loom_value_fact_numeric_format_flags_t format);
+
+// Returns the directly represented Loom scalar type for |format|. Returns
+// false for packed or otherwise schema-only formats without a scalar carrier.
+bool loom_numeric_format_direct_scalar_type(
+    loom_value_fact_numeric_format_flags_t format,
+    loom_scalar_type_t* out_type);
+
+// Returns true when integer arithmetic interprets |format| as unsigned.
+bool loom_numeric_format_uses_unsigned_integer_semantics(
     loom_value_fact_numeric_format_flags_t format);
 
 // Returns the numeric-format fact corresponding to a directly represented Loom

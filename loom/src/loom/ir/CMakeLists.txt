@@ -55,6 +55,7 @@ loom_cc_library(
     "parameterized_type.h"
     "scalar_type.h"
     "semantics.h"
+    "type_constraint.h"
     "types.h"
   TEXTUAL_HDRS
     "location_tag_table.inc"
@@ -68,6 +69,7 @@ loom_cc_library(
     "location.c"
     "module.c"
     "scalar_type.c"
+    "type_constraint.c"
     "types.c"
   DEPS
     iree::base

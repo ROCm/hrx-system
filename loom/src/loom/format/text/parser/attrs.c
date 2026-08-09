@@ -454,9 +454,13 @@ static iree_status_t loom_parse_attr_value_at_depth(
     }
     case LOOM_ATTR_STRING: {
       loom_token_t token = loom_token_none();
-      LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_STRING, &token);
-      // Token text is the decoded content without surrounding quotes, so
-      // intern it directly.
+      if (iree_any_bit_set(descriptor->flags, LOOM_ATTR_BARE_IDENTIFIER)) {
+        LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_BARE_IDENT, &token);
+      } else {
+        LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_STRING, &token);
+      }
+      // String token text is decoded and bare identifiers are already sliced
+      // to their payload, so both forms can be interned directly.
       loom_string_id_t string_id = 0;
       IREE_RETURN_IF_ERROR(
           loom_module_intern_string(parser->module, token.text, &string_id));

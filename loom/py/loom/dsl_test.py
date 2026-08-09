@@ -97,6 +97,8 @@ from loom.dsl import (
     ElementWidthAtLeastAttr,
     ElementWidthGreaterThan,
     ElementWidthLessThan,
+    EncodingFamilyDef,
+    EncodingFamilyRole,
     EncodingParam,
     EnumCase,
     EnumDef,
@@ -380,6 +382,11 @@ class TestAttrDef:
         with _raises(ValueError, match="scoped_enum attributes cannot have defaults"):
             AttrDef("descriptor", "scoped_enum", default=0)
 
+    def test_bare_identifier_requires_string(self) -> None:
+        assert AttrDef("mode", "string", bare_identifier=True).bare_identifier
+        with _raises(ValueError, match="bare_identifier requires"):
+            AttrDef("mode", "i64", bare_identifier=True)
+
 
 class TestParameterizedAttrDef:
     def test_declares_namespaced_typed_parameters(self) -> None:
@@ -437,6 +444,74 @@ class TestParameterizedAttrDef:
         )
 
         assert options.parameters[0].parameterized_attr is tile
+
+
+class TestEncodingFamilyDef:
+    def test_declares_lexically_indexed_sparse_parameters(self) -> None:
+        family = EncodingFamilyDef(
+            "matrix_operand",
+            group=Dialect("encoding"),
+            role=EncodingFamilyRole.STORAGE_SCHEMA,
+            parameters=[
+                AttrDef("rounding", "string", optional=True),
+                AttrDef("payload_elements", "i64"),
+            ],
+        )
+
+        assert family.name == "matrix_operand"
+        assert family.role is EncodingFamilyRole.STORAGE_SCHEMA
+        assert tuple(parameter.name for parameter in family.parameters) == (
+            "payload_elements",
+            "rounding",
+        )
+
+    def test_declares_lexically_indexed_dynamic_parameters(self) -> None:
+        family = EncodingFamilyDef(
+            "physical_storage",
+            group=Dialect("encoding"),
+            role=EncodingFamilyRole.PHYSICAL_STORAGE,
+            dynamic_parameters=[
+                Operand("schema", TypeConstraint.ENCODING_SCHEMA),
+                Operand("layout", TypeConstraint.ENCODING_LAYOUT),
+            ],
+        )
+
+        assert tuple(parameter.name for parameter in family.dynamic_parameters) == (
+            "layout",
+            "schema",
+        )
+
+    def test_rejects_duplicate_dynamic_parameters_after_sorting(self) -> None:
+        with _raises(ValueError, match="duplicate dynamic parameter 'value'"):
+            EncodingFamilyDef(
+                "schema",
+                group=Dialect("encoding"),
+                role=EncodingFamilyRole.STORAGE_SCHEMA,
+                dynamic_parameters=[
+                    Operand("value", TypeConstraint.INDEX),
+                    Operand("value", TypeConstraint.INDEX),
+                ],
+            )
+
+    def test_rejects_namespaced_family_name(self) -> None:
+        with _raises(ValueError, match="bare ASCII identifier"):
+            EncodingFamilyDef(
+                "encoding.matrix_operand",
+                group=Dialect("encoding"),
+                role=EncodingFamilyRole.STORAGE_SCHEMA,
+            )
+
+    def test_rejects_duplicate_parameters_after_sorting(self) -> None:
+        with _raises(ValueError, match="duplicate parameter 'mode'"):
+            EncodingFamilyDef(
+                "schema",
+                group=Dialect("encoding"),
+                role=EncodingFamilyRole.STORAGE_SCHEMA,
+                parameters=[
+                    AttrDef("mode", "string"),
+                    AttrDef("mode", "string"),
+                ],
+            )
 
 
 class TestEnumDef:

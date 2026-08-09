@@ -1962,7 +1962,7 @@ func.def @finite_only_storage_fragment_load_content(%buffer: buffer) -> (i1, i1)
 // Explicit decodes carry the same finite-only content facts as encoded storage
 // while preserving subnormal uncertainty.
 func.def @finite_only_vector_decode_content(%payload: vector<2xf8E4M3>) -> (i1, i1) {
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=2, payload_registers=0, rounding=finite_only> : encoding<schema>
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=2, payload_packing=dense_lanes, payload_registers=0, rounding=finite_only> : encoding<schema>
   %decoded = vector.decode %payload using %schema : vector<2xf8E4M3>, encoding<schema> -> vector<2xbf16>
   %lane = vector.extract %decoded[0] : vector<2xbf16> -> bf16
   %finite = test.fact_finite %lane : bf16 -> i1
@@ -1982,7 +1982,7 @@ func.def @finite_only_vector_decode_content(%payload: vector<2xf8E4M3>) -> (i1, 
 // Explicit finite-flush decodes carry both finite and not-subnormal content
 // facts to consumers when the payload source has the same storage contract.
 func.def @finite_flush_vector_decode_content(%payload: vector<2xf8E4M3>) -> (i1, i1) {
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=2, payload_registers=0, rounding=finite_flush_subnormal> : encoding<schema>
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=2, payload_packing=dense_lanes, payload_registers=0, rounding=finite_flush_subnormal> : encoding<schema>
   %decoded = vector.decode %payload using %schema : vector<2xf8E4M3>, encoding<schema> -> vector<2xbf16>
   %lane = vector.extract %decoded[0] : vector<2xbf16> -> bf16
   %finite = test.fact_finite %lane : bf16 -> i1

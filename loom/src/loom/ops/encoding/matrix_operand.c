@@ -9,7 +9,6 @@
 #include <stdint.h>
 
 #include "loom/util/fact_table.h"
-#include "loom/util/stable_id.h"
 
 typedef struct loom_encoding_matrix_operand_symbol_t {
   // Authored symbolic spelling accepted by #matrix_operand.
@@ -191,9 +190,8 @@ static bool loom_encoding_matrix_operand_lookup_in_table(
     iree_host_size_t symbol_count, iree_string_view_t symbol,
     uint64_t* out_value) {
   *out_value = 0;
-  uint64_t symbol_id = loom_stable_id_from_string(symbol);
   for (iree_host_size_t i = 0; i < symbol_count; ++i) {
-    if (loom_stable_id_from_string(symbols[i].spelling) == symbol_id) {
+    if (iree_string_view_equal(symbols[i].spelling, symbol)) {
       *out_value = symbols[i].value;
       return true;
     }

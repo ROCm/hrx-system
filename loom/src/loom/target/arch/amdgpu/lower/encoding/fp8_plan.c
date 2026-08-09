@@ -8,7 +8,7 @@
 #include <string.h>
 
 #include "loom/target/arch/amdgpu/lower/emit.h"
-#include "loom/target/arch/amdgpu/lower/narrow_float/fp8.h"
+#include "loom/target/arch/amdgpu/lower/encoding/fp8.h"
 
 typedef struct loom_amdgpu_fp8_subnormal_table_row_t {
   // Exact FP8 numeric format owning this decode table row.
@@ -58,7 +58,7 @@ static const loom_amdgpu_fp8_subnormal_table_row_t
               {f16_byte_1_0, f16_byte_1_1},                                    \
           },                                                                   \
   }
-#include "loom/target/arch/amdgpu/lower/narrow_float/fp8_subnormal_table_rows.inl"
+#include "loom/target/arch/amdgpu/lower/encoding/fp8_subnormal_table_rows.inl"
 #undef LOOM_AMDGPU_FP8_SUBNORMAL_TABLE_ROW
 };
 
@@ -125,7 +125,7 @@ typedef struct loom_amdgpu_fp8_decode_plan_descriptor_row_t {
 
 static const loom_amdgpu_fp8_decode_plan_descriptor_row_t
     kLoomAmdgpuFp8DecodePlanDescriptorRows[] = {
-#include "loom/target/arch/amdgpu/lower/narrow_float/fp8_decode_plan_descriptor_rows.inl"
+#include "loom/target/arch/amdgpu/lower/encoding/fp8_decode_plan_descriptor_rows.inl"
 };
 
 #undef LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW

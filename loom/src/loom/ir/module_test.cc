@@ -16,17 +16,35 @@
 namespace loom {
 namespace {
 
+static const loom_attr_descriptor_t kQ8_0EncodingParameters[] = {{
+    /*.name=*/LOOM_BSTRING_REF(5, "block"),
+    /*.attr_kind=*/LOOM_ATTR_I64,
+    /*.flags=*/LOOM_ATTR_OPTIONAL,
+}};
+static const loom_encoding_family_descriptor_t kQ8_0EncodingDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(4, "q8_0"),
+    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    /*.parameter_count=*/IREE_ARRAYSIZE(kQ8_0EncodingParameters),
+    /*.parameter_descriptors=*/kQ8_0EncodingParameters,
+};
 static const loom_encoding_vtable_t kQ8_0EncodingVtable = {
-    /*.name=*/IREE_SV("q8_0"),
+    /*.descriptor=*/&kQ8_0EncodingDescriptor,
 };
 
+static const loom_encoding_family_descriptor_t kQ6KEncodingDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(4, "q6_k"),
+    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+};
 static const loom_encoding_vtable_t kQ6KEncodingVtable = {
-    /*.name=*/IREE_SV("q6_k"),
+    /*.descriptor=*/&kQ6KEncodingDescriptor,
 };
 
-static const loom_encoding_vtable_t kDenseEncodingVtable = {
-    /*.name=*/IREE_SV("dense"),
+static const loom_encoding_family_descriptor_t kDenseEncodingDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(5, "dense"),
     /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+};
+static const loom_encoding_vtable_t kDenseEncodingVtable = {
+    /*.descriptor=*/&kDenseEncodingDescriptor,
 };
 
 class ModuleTest : public ::testing::Test {
@@ -302,6 +320,68 @@ TEST_F(ModuleTest, CompactSymbolsDropsUnreferencedTombstonesAndRenumbersRefs) {
   loom_named_attr_slice_t dict = loom_test_record_dict(keep_a_op);
   ASSERT_EQ(dict.count, 1u);
   EXPECT_EQ(loom_attr_as_symbol(dict.entries[0].value).symbol_id, 1u);
+
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, CompactSymbolsRebuildsEncodingInternTable) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_string_id_t drop_name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("drop"), &drop_name));
+  uint16_t drop_symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_add_symbol(module, drop_name, &drop_symbol_id));
+  loom_string_id_t target_name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("target"), &target_name));
+  uint16_t target_symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_add_symbol(module, target_name, &target_symbol_id));
+  ASSERT_EQ(drop_symbol_id, 0u);
+  ASSERT_EQ(target_symbol_id, 1u);
+
+  loom_string_id_t encoding_name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("q8_0"), &encoding_name));
+  loom_string_id_t parameter_name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("block"), &parameter_name));
+  loom_named_attr_t parameter = {
+      /*.name_id=*/parameter_name,
+      /*.reserved=*/{},
+      /*.value=*/loom_attr_symbol((loom_symbol_ref_t){0, target_symbol_id}),
+  };
+  loom_encoding_t encoding = {
+      /*.name_id=*/encoding_name,
+      /*.alias_id=*/LOOM_STRING_ID_INVALID,
+      /*.attribute_count=*/1,
+      /*.family=*/{},
+      /*.attributes=*/&parameter,
+  };
+  uint16_t encoding_id = 0;
+  IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &encoding_id));
+
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(&block_pool_, &scratch_arena);
+  iree_host_size_t removed_count = 0;
+  IREE_ASSERT_OK(
+      loom_module_compact_symbols(module, &scratch_arena, &removed_count));
+  iree_arena_deinitialize(&scratch_arena);
+
+  EXPECT_EQ(removed_count, 1u);
+  const loom_encoding_t* compacted = loom_module_encoding(module, encoding_id);
+  ASSERT_NE(compacted, nullptr);
+  ASSERT_EQ(compacted->attribute_count, 1u);
+  EXPECT_EQ(loom_attr_as_symbol(compacted->attributes[0].value).symbol_id, 0u);
+
+  parameter.value = loom_attr_symbol((loom_symbol_ref_t){0, 0});
+  uint16_t duplicate_id = 0;
+  IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &duplicate_id));
+  EXPECT_EQ(duplicate_id, encoding_id);
+  EXPECT_EQ(module->encodings.count, 1u);
 
   loom_module_free(module);
 }
@@ -2537,6 +2617,7 @@ TEST_F(ModuleTest, SizeHints) {
       /*.value_count=*/100,
       /*.string_count=*/50,
       /*.type_count=*/20,
+      /*.encoding_count=*/12,
       /*.symbol_count=*/10,
   };
   loom_module_t* module = NULL;
@@ -2548,6 +2629,8 @@ TEST_F(ModuleTest, SizeHints) {
   EXPECT_EQ(loom_value_table_capacity(&module->values), 0u);
   EXPECT_GE(module->strings.capacity, 50u);
   EXPECT_GE(module->types.capacity, 20u);
+  EXPECT_GE(module->encodings.capacity, 12u);
+  EXPECT_GE(module->encoding_intern.capacity, 12u);
   EXPECT_GE(module->symbols.capacity, 10u);
   loom_module_free(module);
 }
@@ -2599,7 +2682,7 @@ TEST_F(ModuleTest, AddEncodingBasic) {
       /*.name_id=*/name_id,
       /*.alias_id=*/LOOM_STRING_ID_INVALID,
       /*.attribute_count=*/1,
-      /*.reserved=*/{},
+      /*.family=*/{},
       /*.attributes=*/&param,
   };
 
@@ -2613,8 +2696,48 @@ TEST_F(ModuleTest, AddEncodingBasic) {
   ASSERT_NE(found, nullptr);
   EXPECT_EQ(found->name_id, name_id);
   EXPECT_EQ(found->attribute_count, 1);
+  EXPECT_NE(found->family.id, LOOM_ENCODING_FAMILY_ID_INVALID);
+  EXPECT_EQ(loom_module_encoding_vtable(module, found), &kQ8_0EncodingVtable);
   EXPECT_EQ(found->attributes[0].name_id, block_id);
   EXPECT_EQ(found->attributes[0].value.i64, 32);
+
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, AddEncodingRetainsMalformedParametersForVerification) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("q8_0"), &name_id));
+  loom_string_id_t block_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("block"), &block_id));
+  loom_string_id_t value_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("thirty_two"), &value_id));
+  loom_named_attr_t parameter = {
+      /*.name_id=*/block_id,
+      /*.reserved=*/{},
+      /*.value=*/loom_attr_string(value_id),
+  };
+  loom_encoding_t encoding = {
+      /*.name_id=*/name_id,
+      /*.alias_id=*/LOOM_STRING_ID_INVALID,
+      /*.attribute_count=*/1,
+      /*.family=*/{},
+      /*.attributes=*/&parameter,
+  };
+
+  uint16_t encoding_id = 0;
+  IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &encoding_id));
+  const loom_encoding_t* stored = loom_module_encoding(module, encoding_id);
+  ASSERT_NE(stored, nullptr);
+  EXPECT_FALSE(loom_encoding_static_parameters_are_valid(stored));
+  EXPECT_FALSE(loom_encoding_static_is_valid(stored));
+  EXPECT_EQ(loom_encoding_parameter_descriptor_index(&stored->attributes[0]),
+            0u);
 
   loom_module_free(module);
 }
@@ -2638,6 +2761,59 @@ TEST_F(ModuleTest, AddEncodingDedup) {
   IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &id2));
   EXPECT_EQ(id1, id2);
   EXPECT_EQ(module->encodings.count, 1u);
+
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, AddEncodingDedupAfterInternTableGrowth) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("q8_0"), &name_id));
+  loom_string_id_t block_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("block"), &block_id));
+
+  constexpr uint16_t kEncodingCount = 128;
+  for (uint16_t i = 0; i < kEncodingCount; ++i) {
+    loom_named_attr_t parameter = {
+        /*.name_id=*/block_id,
+        /*.reserved=*/{},
+        /*.value=*/loom_attr_i64(i),
+    };
+    loom_encoding_t encoding = {
+        /*.name_id=*/name_id,
+        /*.alias_id=*/LOOM_STRING_ID_INVALID,
+        /*.attribute_count=*/1,
+        /*.family=*/{},
+        /*.attributes=*/&parameter,
+    };
+    uint16_t encoding_id = 0;
+    IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &encoding_id));
+    EXPECT_EQ(encoding_id, i + 1);
+  }
+
+  const uint16_t duplicate_ordinals[] = {0, 63, 127};
+  for (uint16_t ordinal : duplicate_ordinals) {
+    loom_named_attr_t parameter = {
+        /*.name_id=*/block_id,
+        /*.reserved=*/{},
+        /*.value=*/loom_attr_i64(ordinal),
+    };
+    loom_encoding_t encoding = {
+        /*.name_id=*/name_id,
+        /*.alias_id=*/LOOM_STRING_ID_INVALID,
+        /*.attribute_count=*/1,
+        /*.family=*/{},
+        /*.attributes=*/&parameter,
+    };
+    uint16_t encoding_id = 0;
+    IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &encoding_id));
+    EXPECT_EQ(encoding_id, ordinal + 1);
+  }
+  EXPECT_EQ(module->encodings.count, kEncodingCount);
 
   loom_module_free(module);
 }
@@ -2672,14 +2848,14 @@ TEST_F(ModuleTest, AddEncodingDedupStructuralParamsAndBackfillsAlias) {
       /*.name_id=*/name_id,
       /*.alias_id=*/LOOM_STRING_ID_INVALID,
       /*.attribute_count=*/1,
-      /*.reserved=*/{},
+      /*.family=*/{},
       /*.attributes=*/attrs_a,
   };
   loom_encoding_t aliased = {
       /*.name_id=*/name_id,
       /*.alias_id=*/alias_id,
       /*.attribute_count=*/1,
-      /*.reserved=*/{},       /*.attributes=*/attrs_b,
+      /*.family=*/{},         /*.attributes=*/attrs_b,
   };
 
   uint16_t plain_id = 0;
@@ -2757,14 +2933,14 @@ TEST_F(ModuleTest, AddEncodingDifferentParams) {
       /*.name_id=*/name_id,
       /*.alias_id=*/LOOM_STRING_ID_INVALID,
       /*.attribute_count=*/1,
-      /*.reserved=*/{},
+      /*.family=*/{},
       /*.attributes=*/&param32,
   };
   loom_encoding_t enc64 = {
       /*.name_id=*/name_id,
       /*.alias_id=*/LOOM_STRING_ID_INVALID,
       /*.attribute_count=*/1,
-      /*.reserved=*/{},
+      /*.family=*/{},
       /*.attributes=*/&param64,
   };
 
@@ -2773,6 +2949,12 @@ TEST_F(ModuleTest, AddEncodingDifferentParams) {
   IREE_ASSERT_OK(loom_module_add_encoding(module, &enc64, &id64));
   EXPECT_NE(id32, id64);
   EXPECT_EQ(module->encodings.count, 2u);
+  EXPECT_EQ(loom_encoding_parameter_descriptor_index(
+                &loom_module_encoding(module, id32)->attributes[0]),
+            0u);
+  EXPECT_EQ(loom_encoding_parameter_descriptor_index(
+                &loom_module_encoding(module, id64)->attributes[0]),
+            0u);
 
   loom_module_free(module);
 }
@@ -2812,7 +2994,8 @@ TEST_F(ModuleTest, EncodingVtableLookupReturnsRegisteredFamily) {
   uint16_t encoding_id = 0;
   IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &encoding_id));
 
-  EXPECT_EQ(loom_module_encoding_vtable(module, encoding_id),
+  EXPECT_EQ(loom_module_encoding_vtable(
+                module, loom_module_encoding(module, encoding_id)),
             &kQ8_0EncodingVtable);
 
   loom_module_free(module);
@@ -2825,9 +3008,6 @@ TEST_F(ModuleTest, EncodingLookupOutOfRange) {
   EXPECT_EQ(loom_module_encoding(module, 0), nullptr);
   EXPECT_EQ(loom_module_encoding(module, 1), nullptr);
   EXPECT_EQ(loom_module_encoding(module, UINT16_MAX), nullptr);
-  EXPECT_EQ(loom_module_encoding_vtable(module, 0), nullptr);
-  EXPECT_EQ(loom_module_encoding_vtable(module, 1), nullptr);
-  EXPECT_EQ(loom_module_encoding_vtable(module, UINT16_MAX), nullptr);
   loom_module_free(module);
 }
 

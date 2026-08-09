@@ -25,6 +25,12 @@ void loom_verify_successor_targets(loom_verify_state_t* state,
 void loom_verify_type_constraints(loom_verify_state_t* state,
                                   const loom_op_t* op,
                                   const loom_op_vtable_t* vtable);
+iree_status_t loom_verify_prepare_static_encodings(loom_verify_state_t* state);
+void loom_verify_static_encoding_refs(loom_verify_state_t* state,
+                                      const loom_op_t* op);
+void loom_verify_block_arg_static_encoding_refs(loom_verify_state_t* state,
+                                                const loom_block_t* block);
+void loom_verify_remaining_static_encodings(loom_verify_state_t* state);
 void loom_verify_operand_dicts(loom_verify_state_t* state, const loom_op_t* op,
                                const loom_op_vtable_t* vtable);
 void loom_verify_op_type_well_formedness(loom_verify_state_t* state,

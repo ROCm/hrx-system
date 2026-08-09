@@ -27,12 +27,40 @@ using ::loom::testing::DiagnosticCapture;
 using ::loom::testing::ExpectError;
 using ::loom::testing::GetStringParam;
 
+static const loom_attr_descriptor_t kQ8_0EncodingParameters[] = {
+    {
+        /*.name=*/LOOM_BSTRING_REF(5, "block"),
+        /*.attr_kind=*/LOOM_ATTR_I64,
+        /*.flags=*/LOOM_ATTR_OPTIONAL,
+    },
+    {
+        /*.name=*/LOOM_BSTRING_REF(10, "group_size"),
+        /*.attr_kind=*/LOOM_ATTR_I64,
+        /*.flags=*/LOOM_ATTR_OPTIONAL,
+    },
+};
+static const loom_encoding_family_descriptor_t kQ8_0EncodingDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(4, "q8_0"),
+    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    /*.parameter_count=*/IREE_ARRAYSIZE(kQ8_0EncodingParameters),
+    /*.parameter_descriptors=*/kQ8_0EncodingParameters,
+};
 static const loom_encoding_vtable_t kQ8_0EncodingVtable = {
-    /*.name=*/IREE_SV("q8_0"),
+    /*.descriptor=*/&kQ8_0EncodingDescriptor,
 };
 
+static const loom_attr_descriptor_t kQuantizationParameters[] = {{
+    /*.name=*/LOOM_BSTRING_REF(4, "spec"),
+    /*.attr_kind=*/LOOM_ATTR_ENCODING,
+}};
+static const loom_encoding_family_descriptor_t kQuantizationDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(12, "quantization"),
+    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    /*.parameter_count=*/IREE_ARRAYSIZE(kQuantizationParameters),
+    /*.parameter_descriptors=*/kQuantizationParameters,
+};
 static const loom_encoding_vtable_t kQuantizationEncodingVtable = {
-    /*.name=*/IREE_SV("quantization"),
+    /*.descriptor=*/&kQuantizationDescriptor,
 };
 
 class EncodingFormatTest : public ::testing::Test {

@@ -10,73 +10,8 @@
 #include "loom/ops/encoding/params.h"
 
 iree_string_view_t loom_encoding_numeric_transform_name(void) {
-  return IREE_SV("numeric_transform");
-}
-
-static iree_string_view_t loom_encoding_numeric_transform_family_param_name(
-    void) {
-  return IREE_SV("family");
-}
-
-static iree_string_view_t
-loom_encoding_numeric_transform_normalization_param_name(void) {
-  return IREE_SV("normalization");
-}
-
-static iree_string_view_t loom_encoding_numeric_transform_signs_param_name(
-    void) {
-  return IREE_SV("signs");
-}
-
-static iree_string_view_t
-loom_encoding_numeric_transform_permutation_param_name(void) {
-  return IREE_SV("permutation");
-}
-
-static iree_string_view_t loom_encoding_numeric_transform_matrix_param_name(
-    void) {
-  return IREE_SV("matrix");
-}
-
-static iree_string_view_t loom_encoding_numeric_transform_seed_param_name(
-    void) {
-  return IREE_SV("seed");
-}
-
-static bool loom_encoding_numeric_transform_string_id_equal(
-    const loom_module_t* module, loom_string_id_t string_id,
-    iree_string_view_t expected) {
-  if (string_id == LOOM_STRING_ID_INVALID ||
-      string_id >= module->strings.count) {
-    return false;
-  }
-  return iree_string_view_equal(module->strings.entries[string_id], expected);
-}
-
-static const loom_named_attr_t* loom_encoding_numeric_transform_find_named_attr(
-    const loom_module_t* module, loom_named_attr_slice_t attrs,
-    iree_string_view_t name) {
-  for (iree_host_size_t i = 0; i < attrs.count; ++i) {
-    const loom_named_attr_t* entry = &attrs.entries[i];
-    if (loom_encoding_numeric_transform_string_id_equal(module, entry->name_id,
-                                                        name)) {
-      return entry;
-    }
-  }
-  return NULL;
-}
-
-static bool loom_encoding_numeric_transform_string_attr_value(
-    const loom_module_t* module, loom_attribute_t attr,
-    iree_string_view_t* out_value) {
-  *out_value = iree_string_view_empty();
-  if (attr.kind != LOOM_ATTR_STRING ||
-      attr.string_id == LOOM_STRING_ID_INVALID ||
-      attr.string_id >= module->strings.count) {
-    return false;
-  }
-  *out_value = module->strings.entries[attr.string_id];
-  return true;
+  return loom_bstring_view(
+      loom_encoding_numeric_transform_family_descriptor.name);
 }
 
 loom_encoding_numeric_transform_family_t
@@ -154,168 +89,174 @@ bool loom_encoding_numeric_transform_seed_sign_bit(int64_t seed,
   return true;
 }
 
-static loom_encoding_numeric_transform_read_t
-loom_encoding_numeric_transform_make_read(
-    loom_encoding_numeric_transform_read_code_t code,
-    iree_string_view_t parameter_name,
-    loom_encoding_numeric_transform_descriptor_t descriptor) {
-  return (loom_encoding_numeric_transform_read_t){
-      .descriptor = descriptor,
-      .code = code,
-      .parameter_name = parameter_name,
-  };
+static bool loom_encoding_numeric_transform_try_find_definition(
+    const loom_module_t* module, loom_value_id_t value_id,
+    loom_encoding_define_param_view_t* out_params) {
+  if (!module || value_id == LOOM_VALUE_ID_INVALID ||
+      value_id >= module->values.count) {
+    return false;
+  }
+
+  const loom_value_t* value = loom_module_value(module, value_id);
+  if (loom_value_is_block_arg(value)) return false;
+
+  const loom_op_t* define_op = loom_value_def_op(value);
+  if (!define_op || !loom_encoding_define_isa(define_op)) return false;
+
+  const loom_encoding_define_param_view_t params =
+      loom_encoding_define_param_view(module, define_op);
+  if (!params.spec ||
+      loom_module_encoding_family_descriptor(module, params.spec) !=
+          &loom_encoding_numeric_transform_family_descriptor) {
+    return false;
+  }
+
+  *out_params = params;
+  return true;
 }
 
-static loom_encoding_numeric_transform_read_t
-loom_encoding_numeric_transform_read_dynamic_param(
-    const loom_encoding_define_param_view_t* params,
-    const loom_named_attr_t* param, iree_string_view_t param_name,
-    loom_value_id_t* out_value,
-    loom_encoding_numeric_transform_descriptor_t descriptor) {
-  if (!param) {
-    *out_value = LOOM_VALUE_ID_INVALID;
-    return loom_encoding_numeric_transform_make_read(
-        LOOM_ENCODING_NUMERIC_TRANSFORM_READ_OK, iree_string_view_empty(),
-        descriptor);
-  }
-  if (!loom_encoding_define_dynamic_param_value(params, param, out_value)) {
-    return loom_encoding_numeric_transform_make_read(
-        LOOM_ENCODING_NUMERIC_TRANSFORM_READ_MALFORMED_DYNAMIC_PARAM,
-        param_name, descriptor);
-  }
-  return loom_encoding_numeric_transform_make_read(
-      LOOM_ENCODING_NUMERIC_TRANSFORM_READ_OK, iree_string_view_empty(),
-      descriptor);
-}
-
-loom_encoding_numeric_transform_read_t
-loom_encoding_numeric_transform_read_descriptor(const loom_module_t* module,
-                                                loom_value_id_t value_id) {
+static void loom_encoding_numeric_transform_read_static_descriptor(
+    const loom_module_t* module,
+    const loom_named_attr_t* const
+        static_params[LOOM_ENCODING_NUMERIC_TRANSFORM_PARAMETER_COUNT_],
+    loom_encoding_numeric_transform_descriptor_t* out_descriptor) {
   loom_encoding_numeric_transform_descriptor_t descriptor = {
       .family = LOOM_ENCODING_NUMERIC_TRANSFORM_FAMILY_UNKNOWN,
       .normalization = LOOM_ENCODING_NUMERIC_TRANSFORM_NORMALIZATION_NONE,
+      .input_extent =
+          {
+              .static_value = 0,
+              .dynamic_value = LOOM_VALUE_ID_INVALID,
+          },
+      .output_extent =
+          {
+              .static_value = 0,
+              .dynamic_value = LOOM_VALUE_ID_INVALID,
+          },
       .signs = LOOM_VALUE_ID_INVALID,
       .permutation = LOOM_VALUE_ID_INVALID,
       .matrix = LOOM_VALUE_ID_INVALID,
       .seed = LOOM_VALUE_ID_INVALID,
   };
 
-  if (!module || value_id == LOOM_VALUE_ID_INVALID ||
-      value_id >= module->values.count) {
-    return loom_encoding_numeric_transform_make_read(
-        LOOM_ENCODING_NUMERIC_TRANSFORM_READ_VALUE_OUT_OF_RANGE,
-        iree_string_view_empty(), descriptor);
-  }
-
-  const loom_value_t* value = loom_module_value(module, value_id);
-  if (loom_value_is_block_arg(value)) {
-    return loom_encoding_numeric_transform_make_read(
-        LOOM_ENCODING_NUMERIC_TRANSFORM_READ_NOT_LOCALLY_DEFINED,
-        iree_string_view_empty(), descriptor);
-  }
-
-  const loom_op_t* define_op = loom_value_def_op(value);
-  if (!define_op || !loom_encoding_define_isa(define_op)) {
-    return loom_encoding_numeric_transform_make_read(
-        LOOM_ENCODING_NUMERIC_TRANSFORM_READ_NOT_ENCODING_DEFINE,
-        iree_string_view_empty(), descriptor);
-  }
-
-  loom_encoding_define_param_view_t params =
-      loom_encoding_define_param_view(module, define_op);
-  if (!params.spec || !loom_encoding_numeric_transform_string_id_equal(
-                          module, params.spec->name_id,
-                          loom_encoding_numeric_transform_name())) {
-    return loom_encoding_numeric_transform_make_read(
-        LOOM_ENCODING_NUMERIC_TRANSFORM_READ_NOT_NUMERIC_TRANSFORM,
-        iree_string_view_empty(), descriptor);
-  }
-
-  iree_string_view_t family_param_name =
-      loom_encoding_numeric_transform_family_param_name();
   const loom_named_attr_t* family_param =
-      loom_encoding_numeric_transform_find_named_attr(
-          module, params.static_attrs, family_param_name);
-  if (!family_param) {
-    return loom_encoding_numeric_transform_make_read(
-        LOOM_ENCODING_NUMERIC_TRANSFORM_READ_MISSING_FAMILY, family_param_name,
-        descriptor);
-  }
-
-  iree_string_view_t family_name = iree_string_view_empty();
-  if (!loom_encoding_numeric_transform_string_attr_value(
-          module, family_param->value, &family_name)) {
-    return loom_encoding_numeric_transform_make_read(
-        LOOM_ENCODING_NUMERIC_TRANSFORM_READ_NON_STRING_FAMILY,
-        family_param_name, descriptor);
-  }
+      static_params[LOOM_ENCODING_NUMERIC_TRANSFORM_PARAMETER_FAMILY];
+  const iree_string_view_t family_name =
+      module->strings.entries[loom_attr_as_string_id(family_param->value)];
   descriptor.family =
       loom_encoding_numeric_transform_family_from_name(family_name);
-  if (descriptor.family == LOOM_ENCODING_NUMERIC_TRANSFORM_FAMILY_UNKNOWN) {
-    return loom_encoding_numeric_transform_make_read(
-        LOOM_ENCODING_NUMERIC_TRANSFORM_READ_UNKNOWN_FAMILY, family_name,
-        descriptor);
-  }
 
-  iree_string_view_t normalization_param_name =
-      loom_encoding_numeric_transform_normalization_param_name();
   const loom_named_attr_t* normalization_param =
-      loom_encoding_numeric_transform_find_named_attr(
-          module, params.static_attrs, normalization_param_name);
+      static_params[LOOM_ENCODING_NUMERIC_TRANSFORM_PARAMETER_NORMALIZATION];
   if (normalization_param) {
-    iree_string_view_t normalization_name = iree_string_view_empty();
-    if (!loom_encoding_numeric_transform_string_attr_value(
-            module, normalization_param->value, &normalization_name)) {
-      return loom_encoding_numeric_transform_make_read(
-          LOOM_ENCODING_NUMERIC_TRANSFORM_READ_NON_STRING_NORMALIZATION,
-          normalization_param_name, descriptor);
-    }
-    if (!loom_encoding_numeric_transform_normalization_from_name(
-            normalization_name, &descriptor.normalization)) {
-      return loom_encoding_numeric_transform_make_read(
-          LOOM_ENCODING_NUMERIC_TRANSFORM_READ_UNKNOWN_NORMALIZATION,
-          normalization_name, descriptor);
-    }
+    const iree_string_view_t normalization_name =
+        module->strings
+            .entries[loom_attr_as_string_id(normalization_param->value)];
+    loom_encoding_numeric_transform_normalization_from_name(
+        normalization_name, &descriptor.normalization);
   }
 
-  iree_string_view_t signs_param_name =
-      loom_encoding_numeric_transform_signs_param_name();
-  loom_encoding_numeric_transform_read_t read =
-      loom_encoding_numeric_transform_read_dynamic_param(
-          &params,
-          loom_encoding_numeric_transform_find_named_attr(
-              module, params.dynamic_names, signs_param_name),
-          signs_param_name, &descriptor.signs, descriptor);
-  if (read.code != LOOM_ENCODING_NUMERIC_TRANSFORM_READ_OK) return read;
+  const loom_named_attr_t* input_extent_param =
+      static_params[LOOM_ENCODING_NUMERIC_TRANSFORM_PARAMETER_INPUT_ELEMS];
+  if (input_extent_param) {
+    descriptor.input_extent.static_value =
+        loom_attr_as_i64(input_extent_param->value);
+  }
+  const loom_named_attr_t* output_extent_param =
+      static_params[LOOM_ENCODING_NUMERIC_TRANSFORM_PARAMETER_OUTPUT_ELEMS];
+  if (output_extent_param) {
+    descriptor.output_extent.static_value =
+        loom_attr_as_i64(output_extent_param->value);
+  }
 
-  iree_string_view_t permutation_param_name =
-      loom_encoding_numeric_transform_permutation_param_name();
-  read = loom_encoding_numeric_transform_read_dynamic_param(
-      &params,
-      loom_encoding_numeric_transform_find_named_attr(
-          module, params.dynamic_names, permutation_param_name),
-      permutation_param_name, &descriptor.permutation, descriptor);
-  if (read.code != LOOM_ENCODING_NUMERIC_TRANSFORM_READ_OK) return read;
+  *out_descriptor = descriptor;
+}
 
-  iree_string_view_t matrix_param_name =
-      loom_encoding_numeric_transform_matrix_param_name();
-  read = loom_encoding_numeric_transform_read_dynamic_param(
-      &params,
-      loom_encoding_numeric_transform_find_named_attr(
-          module, params.dynamic_names, matrix_param_name),
-      matrix_param_name, &descriptor.matrix, descriptor);
-  if (read.code != LOOM_ENCODING_NUMERIC_TRANSFORM_READ_OK) return read;
+static void loom_encoding_numeric_transform_read_dynamic_descriptor(
+    const loom_encoding_define_resolved_params_t* resolved_params,
+    loom_encoding_numeric_transform_descriptor_t* out_descriptor) {
+  out_descriptor->input_extent.dynamic_value =
+      loom_encoding_define_dynamic_parameter(
+          resolved_params,
+          LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_INPUT_ELEMS);
+  out_descriptor->output_extent.dynamic_value =
+      loom_encoding_define_dynamic_parameter(
+          resolved_params,
+          LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_OUTPUT_ELEMS);
+  out_descriptor->signs = loom_encoding_define_dynamic_parameter(
+      resolved_params, LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_SIGNS);
+  out_descriptor->permutation = loom_encoding_define_dynamic_parameter(
+      resolved_params,
+      LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_PERMUTATION);
+  out_descriptor->matrix = loom_encoding_define_dynamic_parameter(
+      resolved_params,
+      LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_MATRIX);
+  out_descriptor->seed = loom_encoding_define_dynamic_parameter(
+      resolved_params, LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_SEED);
+}
 
-  iree_string_view_t seed_param_name =
-      loom_encoding_numeric_transform_seed_param_name();
-  read = loom_encoding_numeric_transform_read_dynamic_param(
-      &params,
-      loom_encoding_numeric_transform_find_named_attr(
-          module, params.dynamic_names, seed_param_name),
-      seed_param_name, &descriptor.seed, descriptor);
-  if (read.code != LOOM_ENCODING_NUMERIC_TRANSFORM_READ_OK) return read;
+bool loom_encoding_numeric_transform_try_read_unverified_descriptor(
+    const loom_module_t* module, loom_value_id_t value_id,
+    loom_encoding_numeric_transform_descriptor_t* out_descriptor) {
+  loom_encoding_define_param_view_t params;
+  if (!loom_encoding_numeric_transform_try_find_definition(module, value_id,
+                                                           &params) ||
+      !loom_encoding_static_is_valid(params.spec)) {
+    return false;
+  }
+  const loom_named_attr_t*
+      static_params[LOOM_ENCODING_NUMERIC_TRANSFORM_PARAMETER_COUNT_];
+  loom_encoding_collect_parameter_slots(
+      params.spec, LOOM_ENCODING_NUMERIC_TRANSFORM_PARAMETER_COUNT_,
+      static_params);
+  if (!static_params[LOOM_ENCODING_NUMERIC_TRANSFORM_PARAMETER_FAMILY]) {
+    return false;
+  }
+  loom_encoding_numeric_transform_descriptor_t descriptor;
+  loom_encoding_numeric_transform_read_static_descriptor(module, static_params,
+                                                         &descriptor);
 
-  return loom_encoding_numeric_transform_make_read(
-      LOOM_ENCODING_NUMERIC_TRANSFORM_READ_OK, iree_string_view_empty(),
-      descriptor);
+  loom_encoding_define_dynamic_binding_t dynamic_bindings
+      [LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_COUNT_];
+  loom_encoding_define_resolved_params_t resolved_params;
+  if (!loom_encoding_define_try_resolve_unverified_params(
+          module, &loom_encoding_numeric_transform_family_descriptor, &params,
+          dynamic_bindings, &resolved_params)) {
+    return false;
+  }
+  loom_encoding_numeric_transform_read_dynamic_descriptor(&resolved_params,
+                                                          &descriptor);
+
+  *out_descriptor = descriptor;
+  return true;
+}
+
+bool loom_encoding_numeric_transform_try_read_verified_descriptor(
+    const loom_module_t* module, loom_value_id_t value_id,
+    loom_encoding_numeric_transform_descriptor_t* out_descriptor) {
+  loom_encoding_define_param_view_t params;
+  if (!loom_encoding_numeric_transform_try_find_definition(module, value_id,
+                                                           &params)) {
+    return false;
+  }
+  const loom_named_attr_t*
+      static_params[LOOM_ENCODING_NUMERIC_TRANSFORM_PARAMETER_COUNT_];
+  loom_encoding_collect_parameter_slots(
+      params.spec, LOOM_ENCODING_NUMERIC_TRANSFORM_PARAMETER_COUNT_,
+      static_params);
+  loom_encoding_numeric_transform_descriptor_t descriptor;
+  loom_encoding_numeric_transform_read_static_descriptor(module, static_params,
+                                                         &descriptor);
+
+  loom_encoding_define_dynamic_binding_t dynamic_bindings
+      [LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_COUNT_];
+  loom_encoding_define_resolved_params_t resolved_params;
+  loom_encoding_define_resolve_verified_params(
+      module, &loom_encoding_numeric_transform_family_descriptor, &params,
+      dynamic_bindings, &resolved_params);
+  loom_encoding_numeric_transform_read_dynamic_descriptor(&resolved_params,
+                                                          &descriptor);
+
+  *out_descriptor = descriptor;
+  return true;
 }

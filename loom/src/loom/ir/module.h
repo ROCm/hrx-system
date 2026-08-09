@@ -37,6 +37,8 @@ typedef struct loom_module_size_hints_t {
   iree_host_size_t string_count;
   // Expected interned type count.
   iree_host_size_t type_count;
+  // Expected interned encoding count.
+  iree_host_size_t encoding_count;
   // Expected module symbol count.
   iree_host_size_t symbol_count;
 } loom_module_size_hints_t;
@@ -407,11 +409,20 @@ static inline const loom_encoding_t* loom_module_encoding(
   return &module->encodings.entries[encoding_id - 1];
 }
 
-// Returns the registered family vtable for |encoding_id|, or NULL if
-// |encoding_id| is out of range, the module has no context, or the encoding
-// family is not registered in that context.
+// Returns the registered family vtable for |encoding|, or NULL when the
+// encoding belongs to a permissive context with no registered families.
 const loom_encoding_vtable_t* loom_module_encoding_vtable(
-    const loom_module_t* module, uint16_t encoding_id);
+    const loom_module_t* module, const loom_encoding_t* encoding);
+
+// Returns the registered descriptor for |encoding|, or NULL when a permissive
+// context has no registered family. |encoding| must be a valid module entry.
+static inline const loom_encoding_family_descriptor_t*
+loom_module_encoding_family_descriptor(const loom_module_t* module,
+                                       const loom_encoding_t* encoding) {
+  const loom_encoding_vtable_t* vtable =
+      loom_module_encoding_vtable(module, encoding);
+  return vtable ? vtable->descriptor : NULL;
+}
 
 // Interns a type in the module's type table. If a structurally identical type
 // already exists, returns the existing entry by value. Otherwise appends a new

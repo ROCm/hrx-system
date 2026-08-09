@@ -55,8 +55,11 @@ TEST(OpRegistry, RegistersProductionContextSurface) {
   EXPECT_TRUE(loom_contract_family_set_has_any(
       iota_semantics.contract_families, LOOM_CONTRACT_VECTOR_COORDINATE));
 
-  EXPECT_NE(loom_context_lookup_encoding_vtable(
-                &context, iree_make_cstring_view("dense")),
+  loom_encoding_family_id_t dense_family_id =
+      loom_context_lookup_encoding_family_by_name(
+          &context, iree_make_cstring_view("dense"));
+  EXPECT_NE(dense_family_id, LOOM_ENCODING_FAMILY_ID_INVALID);
+  EXPECT_NE(loom_context_resolve_encoding_vtable(&context, dense_family_id),
             nullptr);
   EXPECT_EQ(loom_context_lookup_op_by_name(
                 &context, iree_make_cstring_view("test.addi"), &kind),

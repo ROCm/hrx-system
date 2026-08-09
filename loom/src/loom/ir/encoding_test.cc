@@ -11,6 +11,33 @@
 namespace loom {
 namespace {
 
+TEST(EncodingTest, ParameterDescriptorBindingIsNonSemantic) {
+  loom_named_attr_t bound_attr = {
+      /*.name_id=*/7,
+      /*.reserved=*/{},
+      /*.value=*/loom_attr_i64(32),
+  };
+  loom_named_attr_t unbound_attr = bound_attr;
+
+  EXPECT_EQ(loom_encoding_parameter_descriptor_index(&bound_attr),
+            LOOM_ENCODING_PARAMETER_INDEX_INVALID);
+  loom_encoding_parameter_bind_descriptor(&bound_attr, 5);
+  EXPECT_EQ(loom_encoding_parameter_descriptor_index(&bound_attr), 5);
+
+  loom_encoding_t bound_encoding = {
+      /*.name_id=*/42,
+      /*.alias_id=*/LOOM_STRING_ID_INVALID,
+      /*.attribute_count=*/1,
+      /*.family=*/{},
+      /*.attributes=*/&bound_attr,
+  };
+  loom_encoding_t unbound_encoding = bound_encoding;
+  unbound_encoding.attributes = &unbound_attr;
+  EXPECT_TRUE(loom_encoding_equal(&bound_encoding, &unbound_encoding));
+  EXPECT_EQ(loom_encoding_hash(&bound_encoding),
+            loom_encoding_hash(&unbound_encoding));
+}
+
 TEST(EncodingTest, EqualIgnoresAliasAndComparesArrayContents) {
   int64_t block_a[] = {16, 32, 64};
   int64_t block_b[] = {16, 32, 64};
@@ -29,14 +56,16 @@ TEST(EncodingTest, EqualIgnoresAliasAndComparesArrayContents) {
       /*.name_id=*/42,
       /*.alias_id=*/100,
       /*.attribute_count=*/1,
-      /*.reserved=*/{},       /*.attributes=*/attrs_a,
+      /*.family=*/{},         /*.attributes=*/attrs_a,
   };
   loom_encoding_t q8_b = {
       /*.name_id=*/42,
       /*.alias_id=*/200,
       /*.attribute_count=*/1,
-      /*.reserved=*/{},       /*.attributes=*/attrs_b,
+      /*.family=*/{},         /*.attributes=*/attrs_b,
   };
+  q8_a.family.id = 1;
+  q8_b.family.id = 2;
 
   EXPECT_TRUE(loom_encoding_equal(&q8_a, &q8_b));
   EXPECT_EQ(loom_encoding_hash(&q8_a), loom_encoding_hash(&q8_b));
@@ -58,14 +87,14 @@ TEST(EncodingTest, NotEqualForDifferentParams) {
       /*.name_id=*/42,
       /*.alias_id=*/LOOM_STRING_ID_INVALID,
       /*.attribute_count=*/1,
-      /*.reserved=*/{},
+      /*.family=*/{},
       /*.attributes=*/attrs_a,
   };
   loom_encoding_t q8_b = {
       /*.name_id=*/42,
       /*.alias_id=*/LOOM_STRING_ID_INVALID,
       /*.attribute_count=*/1,
-      /*.reserved=*/{},
+      /*.family=*/{},
       /*.attributes=*/attrs_b,
   };
 
@@ -77,7 +106,7 @@ TEST(EncodingTest, AttrsEmptySliceForNoParams) {
       /*.name_id=*/42,
       /*.alias_id=*/LOOM_STRING_ID_INVALID,
       /*.attribute_count=*/0,
-      /*.reserved=*/{},
+      /*.family=*/{},
       /*.attributes=*/NULL,
   };
 

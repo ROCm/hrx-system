@@ -3177,6 +3177,8 @@ TEST_F(ReaderTest, RejectsUnknownEncodingFamily) {
   };
   uint16_t encoding_id = 0;
   IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &encoding_id));
+  EXPECT_EQ(loom_module_encoding(module, encoding_id)->family.id,
+            LOOM_ENCODING_FAMILY_ID_INVALID);
   auto bytes = WriteModule(module);
 
   ExpectReadError(bytes, "ERR_BYTECODE_006");

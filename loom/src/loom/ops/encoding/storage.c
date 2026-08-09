@@ -14,6 +14,7 @@
 #include "loom/ops/encoding/ops.h"
 #include "loom/ops/encoding/params.h"
 #include "loom/ops/encoding/roles.h"
+#include "loom/ops/encoding/summary.h"
 #include "loom/util/fact_table.h"
 #include "loom/util/numeric_format.h"
 
@@ -37,226 +38,43 @@ static iree_string_view_t loom_encoding_schema_param_name(void) {
   return IREE_SV("schema");
 }
 
-static iree_string_view_t loom_encoding_block_elems_param_name(void) {
-  return IREE_SV("block_elems");
+static uint16_t loom_encoding_u16_param(const loom_named_attr_t* parameter) {
+  return (uint16_t)loom_attr_as_i64(parameter->value);
 }
 
-static iree_string_view_t loom_encoding_storage_bytes_param_name(void) {
-  return IREE_SV("storage_bytes");
+static uint16_t loom_encoding_u16_param_or_default(
+    const loom_named_attr_t* parameter, uint16_t default_value) {
+  return parameter ? loom_encoding_u16_param(parameter) : default_value;
 }
 
-static iree_string_view_t loom_encoding_stride_param_name(void) {
-  return IREE_SV("stride");
+static uint64_t loom_encoding_symbol_param(
+    const loom_module_t* module, const loom_named_attr_t* parameter,
+    loom_encoding_matrix_operand_symbol_set_t symbol_set) {
+  iree_string_view_t symbol =
+      module->strings.entries[parameter->value.string_id];
+  uint64_t value = 0;
+  const bool found =
+      loom_encoding_matrix_operand_lookup_symbol(symbol_set, symbol, &value);
+  IREE_ASSERT(found);
+  return value;
 }
 
-static iree_string_view_t loom_encoding_strides_param_name(void) {
-  return IREE_SV("strides");
-}
-
-static iree_string_view_t loom_encoding_element_format_param_name(void) {
-  return IREE_SV("element_format");
-}
-
-static iree_string_view_t loom_encoding_payload_packing_param_name(void) {
-  return IREE_SV("payload_packing");
-}
-
-static iree_string_view_t loom_encoding_payload_elements_param_name(void) {
-  return IREE_SV("payload_elements");
-}
-
-static iree_string_view_t loom_encoding_payload_registers_param_name(void) {
-  return IREE_SV("payload_registers");
-}
-
-static iree_string_view_t loom_encoding_scale_topology_param_name(void) {
-  return IREE_SV("scale_topology");
-}
-
-static iree_string_view_t loom_encoding_scale_format_param_name(void) {
-  return IREE_SV("scale_format");
-}
-
-static iree_string_view_t loom_encoding_secondary_scale_format_param_name(
-    void) {
-  return IREE_SV("secondary_scale_format");
-}
-
-static iree_string_view_t loom_encoding_scale_group_elements_param_name(void) {
-  return IREE_SV("scale_group_elements");
-}
-
-static iree_string_view_t loom_encoding_scale_group_shape_param_name(void) {
-  return IREE_SV("scale_group_shape");
-}
-
-static iree_string_view_t loom_encoding_scale_operands_param_name(void) {
-  return IREE_SV("scale_operands");
-}
-
-static iree_string_view_t loom_encoding_affine_param_name(void) {
-  return IREE_SV("affine");
-}
-
-static iree_string_view_t loom_encoding_rounding_param_name(void) {
-  return IREE_SV("rounding");
-}
-
-static iree_string_view_t loom_encoding_codebook_param_name(void) {
-  return IREE_SV("codebook");
-}
-
-static iree_string_view_t loom_encoding_sparsity_param_name(void) {
-  return IREE_SV("sparsity");
-}
-
-static iree_string_view_t loom_encoding_sparsity_group_elements_param_name(
-    void) {
-  return IREE_SV("sparsity_group_elements");
-}
-
-static iree_string_view_t
-loom_encoding_sparsity_group_nonzero_elements_param_name(void) {
-  return IREE_SV("sparsity_group_nonzero_elements");
-}
-
-static iree_string_view_t loom_encoding_zero_scale_fallback_param_name(void) {
-  return IREE_SV("zero_scale_fallback");
-}
-
-static bool loom_encoding_string_id_equal(const loom_module_t* module,
-                                          loom_string_id_t string_id,
-                                          iree_string_view_t expected) {
-  if (string_id == LOOM_STRING_ID_INVALID ||
-      string_id >= module->strings.count) {
-    return false;
-  }
-  return iree_string_view_equal(module->strings.entries[string_id], expected);
-}
-
-static bool loom_encoding_name_equal(const loom_module_t* module,
-                                     const loom_encoding_t* encoding,
-                                     iree_string_view_t expected) {
-  if (!encoding) return false;
-  return loom_encoding_string_id_equal(module, encoding->name_id, expected);
-}
-
-static const loom_named_attr_t* loom_encoding_find_param(
-    const loom_module_t* module, loom_named_attr_slice_t attrs,
-    iree_string_view_t name) {
-  for (iree_host_size_t i = 0; i < attrs.count; ++i) {
-    const loom_named_attr_t* entry = &attrs.entries[i];
-    if (loom_encoding_string_id_equal(module, entry->name_id, name)) {
-      return entry;
-    }
-  }
-  return NULL;
-}
-
-static bool loom_encoding_static_u16_param(const loom_module_t* module,
-                                           const loom_encoding_t* encoding,
-                                           iree_string_view_t param_name,
-                                           uint16_t* out_value) {
-  *out_value = 0;
-  const loom_named_attr_t* entry = loom_encoding_find_param(
-      module, loom_encoding_attrs(encoding), param_name);
-  if (!entry || entry->value.kind != LOOM_ATTR_I64) return false;
-  int64_t value = loom_attr_as_i64(entry->value);
-  if (value <= 0 || value > UINT16_MAX) return false;
-  *out_value = (uint16_t)value;
-  return true;
-}
-
-static bool loom_encoding_static_nonnegative_u16_param(
-    const loom_module_t* module, const loom_encoding_t* encoding,
-    iree_string_view_t param_name, uint16_t* out_value) {
-  *out_value = 0;
-  const loom_named_attr_t* entry = loom_encoding_find_param(
-      module, loom_encoding_attrs(encoding), param_name);
-  if (!entry || entry->value.kind != LOOM_ATTR_I64) return false;
-  int64_t value = loom_attr_as_i64(entry->value);
-  if (value < 0 || value > UINT16_MAX) return false;
-  *out_value = (uint16_t)value;
-  return true;
-}
-
-static bool loom_encoding_static_nonnegative_u16_param_or_default(
-    const loom_module_t* module, const loom_encoding_t* encoding,
-    iree_string_view_t param_name, uint16_t default_value,
-    uint16_t* out_value) {
-  *out_value = default_value;
-  const loom_named_attr_t* entry = loom_encoding_find_param(
-      module, loom_encoding_attrs(encoding), param_name);
-  if (!entry) return true;
-  if (entry->value.kind != LOOM_ATTR_I64) return false;
-  int64_t value = loom_attr_as_i64(entry->value);
-  if (value < 0 || value > UINT16_MAX) return false;
-  *out_value = (uint16_t)value;
-  return true;
-}
-
-static bool loom_encoding_static_positive_u16_param_or_default(
-    const loom_module_t* module, const loom_encoding_t* encoding,
-    iree_string_view_t param_name, uint16_t default_value,
-    uint16_t* out_value) {
-  *out_value = default_value;
-  const loom_named_attr_t* entry = loom_encoding_find_param(
-      module, loom_encoding_attrs(encoding), param_name);
-  if (!entry) return true;
-  if (entry->value.kind != LOOM_ATTR_I64) return false;
-  int64_t value = loom_attr_as_i64(entry->value);
-  if (value <= 0 || value > UINT16_MAX) return false;
-  *out_value = (uint16_t)value;
-  return true;
-}
-
-static bool loom_encoding_static_symbol_param(
-    const loom_module_t* module, const loom_encoding_t* encoding,
-    iree_string_view_t param_name,
-    loom_encoding_matrix_operand_symbol_set_t symbol_set, uint64_t* out_value) {
-  *out_value = 0;
-  const loom_named_attr_t* entry = loom_encoding_find_param(
-      module, loom_encoding_attrs(encoding), param_name);
-  if (!entry || entry->value.kind != LOOM_ATTR_STRING ||
-      entry->value.string_id == LOOM_STRING_ID_INVALID ||
-      entry->value.string_id >= module->strings.count) {
-    return false;
-  }
-  iree_string_view_t symbol = module->strings.entries[entry->value.string_id];
-  return loom_encoding_matrix_operand_lookup_symbol(symbol_set, symbol,
-                                                    out_value);
-}
-
-static bool loom_encoding_static_symbol_param_or_default(
-    const loom_module_t* module, const loom_encoding_t* encoding,
-    iree_string_view_t param_name,
+static uint64_t loom_encoding_symbol_param_or_default(
+    const loom_module_t* module, const loom_named_attr_t* parameter,
     loom_encoding_matrix_operand_symbol_set_t symbol_set,
-    uint64_t default_value, uint64_t* out_value) {
-  const loom_named_attr_t* entry = loom_encoding_find_param(
-      module, loom_encoding_attrs(encoding), param_name);
-  if (!entry) {
-    *out_value = default_value;
-    return true;
-  }
-  return loom_encoding_static_symbol_param(module, encoding, param_name,
-                                           symbol_set, out_value);
+    uint64_t default_value) {
+  return parameter ? loom_encoding_symbol_param(module, parameter, symbol_set)
+                   : default_value;
 }
 
-static bool loom_encoding_static_bool_param_or_default(
-    const loom_module_t* module, const loom_encoding_t* encoding,
-    iree_string_view_t param_name, bool default_value, bool* out_value) {
-  *out_value = default_value;
-  const loom_named_attr_t* entry = loom_encoding_find_param(
-      module, loom_encoding_attrs(encoding), param_name);
-  if (!entry) return true;
-  if (entry->value.kind != LOOM_ATTR_BOOL) return false;
-  *out_value = loom_attr_as_bool(entry->value);
-  return true;
+static bool loom_encoding_bool_param_or_default(
+    const loom_named_attr_t* parameter, bool default_value) {
+  return parameter ? loom_attr_as_bool(parameter->value) : default_value;
 }
 
-static bool loom_encoding_static_scale_group_shape(
-    const loom_module_t* module, const loom_encoding_t* encoding,
-    uint32_t scale_topology, uint16_t scale_group_element_count,
+static void loom_encoding_scale_group_shape(
+    const loom_named_attr_t* parameter, uint32_t scale_topology,
+    uint16_t scale_group_element_count,
     uint16_t out_shape[LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK]) {
   for (uint8_t i = 0; i < LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK; ++i) {
     out_shape[i] = 0;
@@ -265,27 +83,16 @@ static bool loom_encoding_static_scale_group_shape(
   const bool is_1d = iree_any_bit_set(
       scale_topology, LOOM_VALUE_FACT_SCALE_TOPOLOGY_GROUP_1D |
                           LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D);
-  const bool is_2d =
-      iree_any_bit_set(scale_topology, LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_2D);
-  const loom_named_attr_t* entry =
-      loom_encoding_find_param(module, loom_encoding_attrs(encoding),
-                               loom_encoding_scale_group_shape_param_name());
-  if (!entry) {
-    if (is_2d) return false;
+  if (!parameter) {
     if (is_1d && scale_group_element_count != 0) {
       out_shape[0] = scale_group_element_count;
     }
-    return true;
-  }
-  if (entry->value.kind != LOOM_ATTR_I64_ARRAY || entry->value.count == 0 ||
-      entry->value.count > LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK) {
-    return false;
+    return;
   }
 
-  for (uint16_t i = 0; i < entry->value.count; ++i) {
-    out_shape[i] = (uint16_t)entry->value.i64_array[i];
+  for (uint16_t i = 0; i < parameter->value.count; ++i) {
+    out_shape[i] = (uint16_t)parameter->value.i64_array[i];
   }
-  return true;
 }
 
 static loom_value_fact_address_layout_t loom_encoding_dense_address_layout(
@@ -297,34 +104,32 @@ static loom_value_fact_address_layout_t loom_encoding_dense_address_layout(
   };
 }
 
-static bool loom_encoding_static_dense_layout_isa(
-    const loom_module_t* module, const loom_encoding_t* encoding) {
-  return loom_encoding_name_equal(module, encoding, IREE_SV("dense"));
-}
-
-static bool loom_encoding_static_strided_layout_isa(
-    const loom_module_t* module, const loom_encoding_t* encoding) {
-  return loom_encoding_name_equal(module, encoding, IREE_SV("strided"));
+void loom_encoding_dense_summarize(
+    const loom_encoding_family_summary_request_t* request,
+    loom_encoding_family_summary_t* out_summary) {
+  (void)request;
+  *out_summary = (loom_encoding_family_summary_t){
+      .encoding.address_layout = loom_encoding_dense_address_layout(),
+  };
 }
 
 static bool loom_encoding_static_strided_layout(
-    const loom_module_t* module, const loom_encoding_t* encoding,
-    loom_value_facts_t* stride_storage, iree_host_size_t stride_capacity,
+    const loom_encoding_t* encoding, loom_value_facts_t* stride_storage,
+    iree_host_size_t stride_capacity,
     loom_value_fact_address_layout_t* out_layout) {
+  const loom_named_attr_t* params[LOOM_ENCODING_STRIDED_PARAMETER_COUNT_];
+  loom_encoding_collect_parameter_slots(
+      encoding, LOOM_ENCODING_STRIDED_PARAMETER_COUNT_, params);
   const loom_named_attr_t* strides =
-      loom_encoding_find_param(module, loom_encoding_attrs(encoding),
-                               loom_encoding_strides_param_name());
+      params[LOOM_ENCODING_STRIDED_PARAMETER_STRIDES];
   if (strides) {
-    if (strides->value.kind != LOOM_ATTR_I64_ARRAY ||
-        strides->value.count > LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK ||
-        strides->value.count > stride_capacity ||
+    if (strides->value.count > stride_capacity ||
         (strides->value.count > 0 && !stride_storage)) {
       return false;
     }
     for (uint16_t i = 0; i < strides->value.count; ++i) {
-      int64_t stride = strides->value.i64_array[i];
-      if (stride < 0) return false;
-      stride_storage[i] = loom_value_facts_exact_i64(stride);
+      stride_storage[i] =
+          loom_value_facts_exact_i64(strides->value.i64_array[i]);
     }
     *out_layout = (loom_value_fact_address_layout_t){
         .kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
@@ -334,10 +139,9 @@ static bool loom_encoding_static_strided_layout(
     return true;
   }
 
-  const loom_named_attr_t* stride = loom_encoding_find_param(
-      module, loom_encoding_attrs(encoding), loom_encoding_stride_param_name());
-  if (!stride || stride->value.kind != LOOM_ATTR_I64 || stride_capacity < 1 ||
-      !stride_storage || stride->value.i64 < 0) {
+  const loom_named_attr_t* stride =
+      params[LOOM_ENCODING_STRIDED_PARAMETER_STRIDE];
+  if (stride_capacity < 1 || !stride_storage) {
     return false;
   }
   stride_storage[0] = loom_value_facts_exact_i64(stride->value.i64);
@@ -349,108 +153,90 @@ static bool loom_encoding_static_strided_layout(
   return true;
 }
 
-static bool loom_encoding_static_matrix_operand_schema(
-    const loom_module_t* module, uint16_t encoding_id,
-    const loom_encoding_t* encoding,
-    loom_value_fact_storage_schema_t* out_schema) {
-  out_schema->static_spec_encoding_id = encoding_id;
+void loom_encoding_strided_summarize(
+    const loom_encoding_family_summary_request_t* request,
+    loom_encoding_family_summary_t* out_summary) {
+  *out_summary = (loom_encoding_family_summary_t){0};
+  (void)loom_encoding_static_strided_layout(
+      request->params->spec, request->stride_storage, request->stride_capacity,
+      &out_summary->encoding.address_layout);
+}
 
-  uint64_t element_format = 0;
-  uint32_t payload_packing = 0;
-  uint64_t scale_format = 0;
-  uint64_t secondary_scale_format = 0;
-  uint32_t scale_topology = 0;
-  uint32_t affine_policy = 0;
-  uint32_t rounding_policy = 0;
-  uint32_t codebook_policy = 0;
-  uint32_t sparsity_policy = 0;
-  uint16_t payload_elements = 0;
-  uint16_t payload_registers = 0;
-  uint16_t scale_group_elements = 0;
-  uint16_t scale_group_shape[LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK] = {0};
-  uint16_t scale_operands = 0;
-  uint16_t sparsity_group_elements = 0;
-  uint16_t sparsity_group_nonzero_elements = 0;
-  bool zero_scale_fallback = false;
-  uint64_t payload_packing_value = 0;
-  uint64_t scale_topology_value = 0;
-  uint64_t affine_policy_value = 0;
-  uint64_t rounding_policy_value = 0;
-  uint64_t codebook_policy_value = 0;
-  uint64_t sparsity_policy_value = 0;
-  if (!loom_encoding_static_symbol_param(
-          module, encoding, loom_encoding_element_format_param_name(),
-          LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_NUMERIC_FORMAT,
-          &element_format) ||
-      element_format == LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE ||
-      !loom_encoding_static_symbol_param_or_default(
-          module, encoding, loom_encoding_payload_packing_param_name(),
+static void loom_encoding_static_matrix_operand_schema(
+    const loom_module_t* module, const loom_encoding_t* encoding,
+    loom_value_fact_storage_schema_t* out_schema) {
+  const loom_named_attr_t*
+      params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_COUNT_];
+  loom_encoding_collect_parameter_slots(
+      encoding, LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_COUNT_, params);
+
+  const uint64_t element_format = loom_encoding_symbol_param(
+      module, params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_ELEMENT_FORMAT],
+      LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_NUMERIC_FORMAT);
+  const uint32_t payload_packing =
+      (uint32_t)loom_encoding_symbol_param_or_default(
+          module,
+          params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_PAYLOAD_PACKING],
           LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_PAYLOAD_PACKING,
-          LOOM_VALUE_FACT_PAYLOAD_PACKING_TARGET_FRAGMENT,
-          &payload_packing_value) ||
-      !loom_encoding_static_symbol_param_or_default(
-          module, encoding, loom_encoding_scale_format_param_name(),
-          LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_NUMERIC_FORMAT,
-          LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE, &scale_format) ||
-      !loom_encoding_static_symbol_param_or_default(
-          module, encoding, loom_encoding_secondary_scale_format_param_name(),
-          LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_NUMERIC_FORMAT,
-          LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE, &secondary_scale_format) ||
-      !loom_encoding_static_symbol_param_or_default(
-          module, encoding, loom_encoding_scale_topology_param_name(),
+          LOOM_VALUE_FACT_PAYLOAD_PACKING_TARGET_FRAGMENT);
+  const uint64_t scale_format = loom_encoding_symbol_param_or_default(
+      module, params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SCALE_FORMAT],
+      LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_NUMERIC_FORMAT,
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
+  const uint64_t secondary_scale_format = loom_encoding_symbol_param_or_default(
+      module,
+      params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SECONDARY_SCALE_FORMAT],
+      LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_NUMERIC_FORMAT,
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
+  const uint32_t scale_topology =
+      (uint32_t)loom_encoding_symbol_param_or_default(
+          module, params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SCALE_TOPOLOGY],
           LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_SCALE_TOPOLOGY,
-          LOOM_VALUE_FACT_SCALE_TOPOLOGY_NONE, &scale_topology_value) ||
-      !loom_encoding_static_u16_param(
-          module, encoding, loom_encoding_payload_elements_param_name(),
-          &payload_elements) ||
-      !loom_encoding_static_nonnegative_u16_param(
-          module, encoding, loom_encoding_payload_registers_param_name(),
-          &payload_registers) ||
-      !loom_encoding_static_nonnegative_u16_param_or_default(
-          module, encoding, loom_encoding_scale_group_elements_param_name(),
-          /*default_value=*/0, &scale_group_elements) ||
-      !loom_encoding_static_nonnegative_u16_param_or_default(
-          module, encoding, loom_encoding_scale_operands_param_name(),
-          /*default_value=*/0, &scale_operands) ||
-      !loom_encoding_static_symbol_param_or_default(
-          module, encoding, loom_encoding_affine_param_name(),
+          LOOM_VALUE_FACT_SCALE_TOPOLOGY_NONE);
+  const uint32_t affine_policy =
+      (uint32_t)loom_encoding_symbol_param_or_default(
+          module, params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_AFFINE],
           LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_AFFINE_POLICY,
-          LOOM_VALUE_FACT_AFFINE_POLICY_NONE, &affine_policy_value) ||
-      !loom_encoding_static_symbol_param_or_default(
-          module, encoding, loom_encoding_rounding_param_name(),
+          LOOM_VALUE_FACT_AFFINE_POLICY_NONE);
+  const uint32_t rounding_policy =
+      (uint32_t)loom_encoding_symbol_param_or_default(
+          module, params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_ROUNDING],
           LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_ROUNDING_POLICY,
-          LOOM_VALUE_FACT_ROUNDING_POLICY_NONE, &rounding_policy_value) ||
-      !loom_encoding_static_symbol_param_or_default(
-          module, encoding, loom_encoding_codebook_param_name(),
+          LOOM_VALUE_FACT_ROUNDING_POLICY_NONE);
+  const uint32_t codebook_policy =
+      (uint32_t)loom_encoding_symbol_param_or_default(
+          module, params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_CODEBOOK],
           LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_CODEBOOK_POLICY,
-          LOOM_VALUE_FACT_CODEBOOK_POLICY_NONE, &codebook_policy_value) ||
-      !loom_encoding_static_symbol_param_or_default(
-          module, encoding, loom_encoding_sparsity_param_name(),
+          LOOM_VALUE_FACT_CODEBOOK_POLICY_NONE);
+  const uint32_t sparsity_policy =
+      (uint32_t)loom_encoding_symbol_param_or_default(
+          module, params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SPARSITY],
           LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_SPARSITY_POLICY,
-          LOOM_VALUE_FACT_SPARSITY_POLICY_NONE, &sparsity_policy_value) ||
-      !loom_encoding_static_nonnegative_u16_param_or_default(
-          module, encoding, loom_encoding_sparsity_group_elements_param_name(),
-          /*default_value=*/0, &sparsity_group_elements) ||
-      !loom_encoding_static_nonnegative_u16_param_or_default(
-          module, encoding,
-          loom_encoding_sparsity_group_nonzero_elements_param_name(),
-          /*default_value=*/0, &sparsity_group_nonzero_elements) ||
-      !loom_encoding_static_bool_param_or_default(
-          module, encoding, loom_encoding_zero_scale_fallback_param_name(),
-          /*default_value=*/false, &zero_scale_fallback)) {
-    return true;
-  }
-  payload_packing = (uint32_t)payload_packing_value;
-  scale_topology = (uint32_t)scale_topology_value;
-  affine_policy = (uint32_t)affine_policy_value;
-  rounding_policy = (uint32_t)rounding_policy_value;
-  codebook_policy = (uint32_t)codebook_policy_value;
-  sparsity_policy = (uint32_t)sparsity_policy_value;
-  if (!loom_encoding_static_scale_group_shape(module, encoding, scale_topology,
-                                              scale_group_elements,
-                                              scale_group_shape)) {
-    return true;
-  }
+          LOOM_VALUE_FACT_SPARSITY_POLICY_NONE);
+  const uint16_t payload_elements = loom_encoding_u16_param(
+      params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_PAYLOAD_ELEMENTS]);
+  const uint16_t payload_registers = loom_encoding_u16_param(
+      params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_PAYLOAD_REGISTERS]);
+  const uint16_t scale_group_elements = loom_encoding_u16_param_or_default(
+      params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SCALE_GROUP_ELEMENTS],
+      /*default_value=*/0);
+  uint16_t scale_group_shape[LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK] = {0};
+  loom_encoding_scale_group_shape(
+      params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SCALE_GROUP_SHAPE],
+      scale_topology, scale_group_elements, scale_group_shape);
+  const uint16_t scale_operands = loom_encoding_u16_param_or_default(
+      params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SCALE_OPERANDS],
+      /*default_value=*/0);
+  const uint16_t sparsity_group_elements = loom_encoding_u16_param_or_default(
+      params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SPARSITY_GROUP_ELEMENTS],
+      /*default_value=*/0);
+  const uint16_t sparsity_group_nonzero_elements = loom_encoding_u16_param_or_default(
+      params
+          [LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SPARSITY_GROUP_NONZERO_ELEMENTS],
+      /*default_value=*/0);
+  const bool zero_scale_fallback = loom_encoding_bool_param_or_default(
+      params[LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_ZERO_SCALE_FALLBACK],
+      /*default_value=*/false);
 
   loom_value_fact_encoded_operand_schema_t encoded_operand = {
       .element_format = element_format,
@@ -482,42 +268,28 @@ static bool loom_encoding_static_matrix_operand_schema(
     encoded_operand.flags |=
         LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_ZERO_SCALE_FALLBACK;
   }
-  if (encoded_operand.payload_packing == 0) {
-    return true;
-  }
-
-  if (!loom_value_fact_encoded_operand_schema_scale_is_complete(
-          encoded_operand)) {
-    return true;
-  }
-  if (!loom_value_fact_encoded_operand_schema_sparsity_is_complete(
-          encoded_operand)) {
-    return true;
-  }
-
   out_schema->encoded_operand = encoded_operand;
-  return true;
 }
 
-static bool loom_encoding_static_ggml_q8_0_schema(
-    const loom_module_t* module, uint16_t encoding_id,
+void loom_encoding_matrix_operand_summarize(
+    const loom_encoding_family_summary_request_t* request,
+    loom_encoding_family_summary_t* out_summary) {
+  *out_summary = (loom_encoding_family_summary_t){0};
+  loom_encoding_static_matrix_operand_schema(
+      request->module, request->params->spec,
+      &out_summary->encoding.storage_schema);
+}
+
+static void loom_encoding_static_ggml_q8_0_schema(
     const loom_encoding_t* encoding,
     loom_value_fact_storage_schema_t* out_schema) {
-  uint16_t block_elements = 0;
-  uint16_t storage_bytes = 0;
-  if (!loom_encoding_static_positive_u16_param_or_default(
-          module, encoding, loom_encoding_block_elems_param_name(),
-          /*default_value=*/32, &block_elements) ||
-      !loom_encoding_static_positive_u16_param_or_default(
-          module, encoding, loom_encoding_storage_bytes_param_name(),
-          /*default_value=*/34, &storage_bytes)) {
-    return true;
-  }
-  if (storage_bytes != (uint16_t)(block_elements + 2)) {
-    return true;
-  }
+  const loom_named_attr_t* params[LOOM_ENCODING_GGML_Q8_0_PARAMETER_COUNT_];
+  loom_encoding_collect_parameter_slots(
+      encoding, LOOM_ENCODING_GGML_Q8_0_PARAMETER_COUNT_, params);
+  const uint16_t block_elements = loom_encoding_u16_param_or_default(
+      params[LOOM_ENCODING_GGML_Q8_0_PARAMETER_BLOCK_ELEMS],
+      /*default_value=*/32);
 
-  out_schema->static_spec_encoding_id = encoding_id;
   out_schema->encoded_operand = (loom_value_fact_encoded_operand_schema_t){
       .element_format = LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I8,
       .scale_format = LOOM_VALUE_FACT_NUMERIC_FORMAT_F16,
@@ -532,150 +304,115 @@ static bool loom_encoding_static_ggml_q8_0_schema(
           },
       .scale_operand_count = 1,
   };
-  return true;
 }
 
-typedef struct loom_encoding_named_fp8_schema_t {
-  iree_string_view_t name;
-  loom_value_fact_numeric_format_flags_t element_format;
-} loom_encoding_named_fp8_schema_t;
-
-static const loom_encoding_named_fp8_schema_t kLoomEncodingNamedFp8Schemas[] = {
-    {IREE_SVL("ieee_fp8_e4m3"), LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3},
-    {IREE_SVL("ieee_fp8_e5m2"), LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2},
-    {IREE_SVL("fp8_e4m3fn"), LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN},
-    {IREE_SVL("fp8_e4m3fnuz"), LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ},
-    {IREE_SVL("fp8_e5m2fnuz"), LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ},
-};
-
-static const loom_encoding_named_fp8_schema_t*
-loom_encoding_find_named_fp8_schema(const loom_module_t* module,
-                                    const loom_encoding_t* encoding) {
-  if (!encoding) return NULL;
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kLoomEncodingNamedFp8Schemas);
-       ++i) {
-    const loom_encoding_named_fp8_schema_t* entry =
-        &kLoomEncodingNamedFp8Schemas[i];
-    if (loom_encoding_string_id_equal(module, encoding->name_id, entry->name)) {
-      return entry;
-    }
-  }
-  return NULL;
+void loom_encoding_ggml_q8_0_summarize(
+    const loom_encoding_family_summary_request_t* request,
+    loom_encoding_family_summary_t* out_summary) {
+  *out_summary = (loom_encoding_family_summary_t){0};
+  loom_encoding_static_ggml_q8_0_schema(request->params->spec,
+                                        &out_summary->encoding.storage_schema);
 }
 
-static bool loom_encoding_static_named_fp8_schema(
-    const loom_module_t* module, uint16_t encoding_id,
-    const loom_encoding_t* encoding,
+static void loom_encoding_static_named_fp8_schema(
+    const loom_module_t* module, const loom_encoding_t* encoding,
+    loom_value_fact_numeric_format_flags_t element_format,
     loom_value_fact_storage_schema_t* out_schema) {
-  const loom_encoding_named_fp8_schema_t* schema =
-      loom_encoding_find_named_fp8_schema(module, encoding);
-  if (!schema) return false;
+  const loom_named_attr_t* params[LOOM_ENCODING_IEEE_FP8_E4M3_PARAMETER_COUNT_];
+  loom_encoding_collect_parameter_slots(
+      encoding, LOOM_ENCODING_IEEE_FP8_E4M3_PARAMETER_COUNT_, params);
+  const uint64_t rounding_policy_value = loom_encoding_symbol_param_or_default(
+      module, params[LOOM_ENCODING_IEEE_FP8_E4M3_PARAMETER_ROUNDING],
+      LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_ROUNDING_POLICY,
+      LOOM_VALUE_FACT_ROUNDING_POLICY_NONE);
 
-  uint64_t rounding_policy_value = 0;
-  if (!loom_encoding_static_symbol_param_or_default(
-          module, encoding, loom_encoding_rounding_param_name(),
-          LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_ROUNDING_POLICY,
-          LOOM_VALUE_FACT_ROUNDING_POLICY_NONE, &rounding_policy_value)) {
-    return true;
-  }
-
-  out_schema->static_spec_encoding_id = encoding_id;
   out_schema->encoded_operand = (loom_value_fact_encoded_operand_schema_t){
-      .element_format = schema->element_format,
+      .element_format = element_format,
       .payload_packing = LOOM_VALUE_FACT_PAYLOAD_PACKING_DENSE_LANES,
       .rounding_policy = (uint32_t)rounding_policy_value,
       .payload_element_count = 1,
   };
-  return true;
 }
 
-static bool loom_encoding_query_static_address_layout_rec(
-    const loom_module_t* module, uint16_t encoding_id, uint8_t depth,
-    loom_value_facts_t* stride_storage, iree_host_size_t stride_capacity,
-    loom_value_fact_address_layout_t* out_layout) {
-  if (!module || depth > 4) return false;
-  const loom_encoding_t* encoding = loom_module_encoding(module, encoding_id);
-  if (loom_encoding_static_dense_layout_isa(module, encoding)) {
-    *out_layout = loom_encoding_dense_address_layout();
-    return true;
-  }
-  if (loom_encoding_static_strided_layout_isa(module, encoding)) {
-    return loom_encoding_static_strided_layout(module, encoding, stride_storage,
-                                               stride_capacity, out_layout);
-  }
-  if (!loom_encoding_name_equal(module, encoding,
-                                loom_encoding_physical_storage_name())) {
-    return false;
-  }
+static void loom_encoding_named_fp8_summarize(
+    const loom_encoding_family_summary_request_t* request,
+    loom_value_fact_numeric_format_flags_t element_format,
+    loom_encoding_family_summary_t* out_summary) {
+  *out_summary = (loom_encoding_family_summary_t){0};
+  loom_encoding_static_named_fp8_schema(request->module, request->params->spec,
+                                        element_format,
+                                        &out_summary->encoding.storage_schema);
+}
 
-  const loom_named_attr_t* layout = loom_encoding_find_param(
-      module, loom_encoding_attrs(encoding), loom_encoding_layout_param_name());
-  if (!layout || layout->value.kind != LOOM_ATTR_ENCODING) return false;
-  return loom_encoding_query_static_address_layout_rec(
-      module, loom_attr_as_encoding_id(layout->value), (uint8_t)(depth + 1),
-      stride_storage, stride_capacity, out_layout);
+void loom_encoding_ieee_fp8_e4m3_summarize(
+    const loom_encoding_family_summary_request_t* request,
+    loom_encoding_family_summary_t* out_summary) {
+  loom_encoding_named_fp8_summarize(
+      request, LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3, out_summary);
+}
+
+void loom_encoding_ieee_fp8_e5m2_summarize(
+    const loom_encoding_family_summary_request_t* request,
+    loom_encoding_family_summary_t* out_summary) {
+  loom_encoding_named_fp8_summarize(
+      request, LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2, out_summary);
+}
+
+void loom_encoding_fp8_e4m3fn_summarize(
+    const loom_encoding_family_summary_request_t* request,
+    loom_encoding_family_summary_t* out_summary) {
+  loom_encoding_named_fp8_summarize(
+      request, LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN, out_summary);
+}
+
+void loom_encoding_fp8_e4m3fnuz_summarize(
+    const loom_encoding_family_summary_request_t* request,
+    loom_encoding_family_summary_t* out_summary) {
+  loom_encoding_named_fp8_summarize(
+      request, LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ, out_summary);
+}
+
+void loom_encoding_fp8_e5m2fnuz_summarize(
+    const loom_encoding_family_summary_request_t* request,
+    loom_encoding_family_summary_t* out_summary) {
+  loom_encoding_named_fp8_summarize(
+      request, LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ, out_summary);
 }
 
 bool loom_encoding_query_static_address_layout(
     const loom_module_t* module, uint16_t encoding_id,
     loom_value_facts_t* stride_storage, iree_host_size_t stride_capacity,
     loom_value_fact_address_layout_t* out_layout) {
-  if (!out_layout) return false;
+  if (!module || !out_layout) return false;
   *out_layout = (loom_value_fact_address_layout_t){0};
-  return loom_encoding_query_static_address_layout_rec(
-      module, encoding_id, /*depth=*/0, stride_storage, stride_capacity,
-      out_layout);
-}
-
-static bool loom_encoding_query_static_storage_schema_rec(
-    const loom_module_t* module, uint16_t encoding_id, uint8_t depth,
-    loom_value_fact_storage_schema_t* out_schema) {
-  if (!module || depth > 4) return false;
   const loom_encoding_t* encoding = loom_module_encoding(module, encoding_id);
-  if (!encoding) return false;
-  if (loom_encoding_name_equal(module, encoding,
-                               loom_encoding_physical_storage_name())) {
-    const loom_named_attr_t* schema =
-        loom_encoding_find_param(module, loom_encoding_attrs(encoding),
-                                 loom_encoding_schema_param_name());
-    if (!schema || schema->value.kind != LOOM_ATTR_ENCODING) return false;
-    return loom_encoding_query_static_storage_schema_rec(
-        module, loom_attr_as_encoding_id(schema->value), (uint8_t)(depth + 1),
-        out_schema);
-  }
-
-  if (loom_encoding_static_role(module, encoding) !=
-      LOOM_ENCODING_ROLE_STORAGE_SCHEMA) {
+  if (!encoding || !loom_encoding_static_is_valid(encoding)) {
     return false;
   }
-
-  *out_schema = (loom_value_fact_storage_schema_t){
-      .static_spec_encoding_id = encoding_id,
-  };
-  if (loom_encoding_name_equal(module, encoding,
-                               loom_encoding_matrix_operand_name())) {
-    return loom_encoding_static_matrix_operand_schema(module, encoding_id,
-                                                      encoding, out_schema);
-  }
-  if (loom_encoding_name_equal(module, encoding,
-                               loom_encoding_ggml_q8_0_name())) {
-    return loom_encoding_static_ggml_q8_0_schema(module, encoding_id, encoding,
-                                                 out_schema);
-  }
-  if (loom_encoding_static_named_fp8_schema(module, encoding_id, encoding,
-                                            out_schema)) {
-    return true;
-  }
-  return true;
+  loom_encoding_family_summary_t summary;
+  loom_encoding_summarize_verified_static(module, encoding_id, stride_storage,
+                                          stride_capacity, &summary);
+  *out_layout = summary.encoding.address_layout;
+  return out_layout->kind != LOOM_VALUE_FACT_ADDRESS_LAYOUT_UNKNOWN;
 }
 
 bool loom_encoding_query_static_storage_schema(
     const loom_module_t* module, uint16_t encoding_id,
     loom_value_fact_storage_schema_t* out_schema) {
-  if (!out_schema) return false;
+  if (!module || !out_schema) return false;
   *out_schema = (loom_value_fact_storage_schema_t){0};
-  return loom_encoding_query_static_storage_schema_rec(module, encoding_id,
-                                                       /*depth=*/0, out_schema);
+  const loom_encoding_t* encoding = loom_module_encoding(module, encoding_id);
+  if (!encoding || !loom_encoding_static_is_valid(encoding)) {
+    return false;
+  }
+  loom_encoding_family_summary_t summary;
+  loom_encoding_summarize_verified_static(module, encoding_id,
+                                          /*stride_storage=*/NULL,
+                                          /*stride_capacity=*/0, &summary);
+  *out_schema = summary.encoding.storage_schema;
+  return out_schema->static_spec_encoding_id != 0 ||
+         !loom_value_fact_encoded_operand_schema_is_unknown(
+             out_schema->encoded_operand);
 }
 
 static bool loom_encoding_facts_address_layout(
@@ -838,35 +575,6 @@ static iree_status_t loom_encoding_emit_param_error(
   return loom_encoding_emit(emitter, op, error, params, IREE_ARRAYSIZE(params));
 }
 
-static iree_status_t loom_encoding_emit_static_kind_error(
-    iree_diagnostic_emitter_t emitter, const loom_op_t* op,
-    iree_string_view_t param_name, loom_attr_kind_t actual_kind,
-    iree_string_view_t expected_kind) {
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(loom_encoding_physical_storage_name()),
-      loom_param_string(param_name),
-      loom_param_u32(actual_kind),
-      loom_param_string(expected_kind),
-  };
-  return loom_encoding_emit(emitter, op, LOOM_ERR_ENCODING_010, params,
-                            IREE_ARRAYSIZE(params));
-}
-
-static iree_status_t loom_encoding_emit_dynamic_type_error(
-    const loom_module_t* module, iree_diagnostic_emitter_t emitter,
-    const loom_op_t* op, iree_string_view_t param_name,
-    loom_value_id_t value_id) {
-  loom_type_t actual_type = loom_module_value_type(module, value_id);
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(loom_encoding_physical_storage_name()),
-      loom_param_string(param_name),
-      loom_param_type(actual_type),
-      loom_param_string(IREE_SV("encoding")),
-  };
-  return loom_encoding_emit(emitter, op, LOOM_ERR_ENCODING_009, params,
-                            IREE_ARRAYSIZE(params));
-}
-
 static iree_status_t loom_encoding_emit_role_error(
     iree_diagnostic_emitter_t emitter, const loom_op_t* op,
     iree_string_view_t param_name, iree_string_view_t expected_role) {
@@ -879,189 +587,145 @@ static iree_status_t loom_encoding_emit_role_error(
                             IREE_ARRAYSIZE(params));
 }
 
-static iree_status_t loom_encoding_physical_storage_verify_static_param(
-    const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter, const loom_named_attr_t* entry,
-    iree_string_view_t param_name, loom_encoding_role_t expected_role,
-    iree_string_view_t expected_role_name) {
-  if (entry->value.kind != LOOM_ATTR_ENCODING) {
-    return loom_encoding_emit_static_kind_error(
-        emitter, op, param_name, (loom_attr_kind_t)entry->value.kind,
-        IREE_SV("encoding"));
-  }
+typedef struct loom_encoding_physical_storage_static_params_t {
+  // Optional statically bound address layout parameter.
+  const loom_named_attr_t* layout;
+  // Optional statically bound storage schema parameter.
+  const loom_named_attr_t* schema;
+} loom_encoding_physical_storage_static_params_t;
 
-  const loom_encoding_t* nested =
-      loom_module_encoding(module, loom_attr_as_encoding_id(entry->value));
-  loom_encoding_role_t actual_role = loom_encoding_static_role(module, nested);
-  if (actual_role != expected_role) {
-    return loom_encoding_emit_role_error(emitter, op, param_name,
-                                         expected_role_name);
-  }
-  return iree_ok_status();
+static loom_encoding_physical_storage_static_params_t
+loom_encoding_physical_storage_static_params(const loom_encoding_t* encoding) {
+  const loom_named_attr_t*
+      slots[LOOM_ENCODING_PHYSICAL_STORAGE_PARAMETER_COUNT_];
+  loom_encoding_collect_parameter_slots(
+      encoding, LOOM_ENCODING_PHYSICAL_STORAGE_PARAMETER_COUNT_, slots);
+  return (loom_encoding_physical_storage_static_params_t){
+      .layout = slots[LOOM_ENCODING_PHYSICAL_STORAGE_PARAMETER_LAYOUT],
+      .schema = slots[LOOM_ENCODING_PHYSICAL_STORAGE_PARAMETER_SCHEMA],
+  };
 }
 
-static iree_status_t loom_encoding_physical_storage_verify_dynamic_param(
-    const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter,
-    const loom_encoding_define_param_view_t* params,
-    const loom_named_attr_t* entry, iree_string_view_t param_name,
-    loom_encoding_role_t expected_role, iree_string_view_t expected_role_name) {
-  loom_value_id_t value_id = LOOM_VALUE_ID_INVALID;
-  if (!loom_encoding_define_dynamic_param_value(params, entry, &value_id)) {
-    return iree_ok_status();
-  }
+enum loom_encoding_physical_storage_violation_bits_e {
+  LOOM_ENCODING_PHYSICAL_STORAGE_LAYOUT_ROLE_VIOLATION = 1u << 0,
+  LOOM_ENCODING_PHYSICAL_STORAGE_SCHEMA_ROLE_VIOLATION = 1u << 1,
+};
+typedef uint8_t loom_encoding_physical_storage_violations_t;
 
-  if (!loom_type_is_encoding(loom_module_value_type(module, value_id))) {
-    return loom_encoding_emit_dynamic_type_error(module, emitter, op,
-                                                 param_name, value_id);
+static loom_encoding_physical_storage_violations_t
+loom_encoding_physical_storage_static_violations(
+    const loom_module_t* module, const loom_encoding_t* encoding) {
+  const loom_encoding_physical_storage_static_params_t params =
+      loom_encoding_physical_storage_static_params(encoding);
+  loom_encoding_physical_storage_violations_t violations = 0;
+  if (params.layout) {
+    const loom_encoding_t* nested = loom_module_encoding(
+        module, loom_attr_as_encoding_id(params.layout->value));
+    if (loom_encoding_static_role(module, nested) !=
+        LOOM_ENCODING_ROLE_ADDRESS_LAYOUT) {
+      violations |= LOOM_ENCODING_PHYSICAL_STORAGE_LAYOUT_ROLE_VIOLATION;
+    }
   }
+  if (params.schema) {
+    const loom_encoding_t* nested = loom_module_encoding(
+        module, loom_attr_as_encoding_id(params.schema->value));
+    if (loom_encoding_static_role(module, nested) !=
+        LOOM_ENCODING_ROLE_STORAGE_SCHEMA) {
+      violations |= LOOM_ENCODING_PHYSICAL_STORAGE_SCHEMA_ROLE_VIOLATION;
+    }
+  }
+  return violations;
+}
 
-  loom_encoding_role_t actual_role = loom_encoding_value_role(module, value_id);
-  if (actual_role != expected_role) {
-    return loom_encoding_emit_role_error(emitter, op, param_name,
-                                         expected_role_name);
+static bool loom_encoding_physical_storage_is_static_valid(
+    const loom_module_t* module, const loom_encoding_t* encoding) {
+  return loom_encoding_physical_storage_static_violations(module, encoding) ==
+         0;
+}
+
+static iree_status_t loom_encoding_physical_storage_diagnose_static(
+    const loom_module_t* module, const loom_encoding_t* encoding,
+    const loom_op_t* op, iree_diagnostic_emitter_t emitter) {
+  const loom_encoding_physical_storage_violations_t violations =
+      loom_encoding_physical_storage_static_violations(module, encoding);
+  if (iree_any_bit_set(violations,
+                       LOOM_ENCODING_PHYSICAL_STORAGE_LAYOUT_ROLE_VIOLATION)) {
+    IREE_RETURN_IF_ERROR(loom_encoding_emit_role_error(
+        emitter, op, loom_encoding_layout_param_name(),
+        loom_encoding_role_description(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT)));
+  }
+  if (iree_any_bit_set(violations,
+                       LOOM_ENCODING_PHYSICAL_STORAGE_SCHEMA_ROLE_VIOLATION)) {
+    IREE_RETURN_IF_ERROR(loom_encoding_emit_role_error(
+        emitter, op, loom_encoding_schema_param_name(),
+        loom_encoding_role_description(LOOM_ENCODING_ROLE_STORAGE_SCHEMA)));
   }
   return iree_ok_status();
 }
 
 static iree_status_t loom_encoding_physical_storage_verify_define(
     const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_param_view_t* params,
+    const loom_encoding_define_resolved_params_t* params,
     iree_diagnostic_emitter_t emitter) {
-  for (iree_host_size_t i = 0; i < params->static_attrs.count; ++i) {
-    const loom_named_attr_t* entry = &params->static_attrs.entries[i];
-    if (!loom_encoding_string_id_equal(module, entry->name_id,
-                                       loom_encoding_layout_param_name()) &&
-        !loom_encoding_string_id_equal(module, entry->name_id,
-                                       loom_encoding_schema_param_name())) {
-      iree_string_view_t param_name = module->strings.entries[entry->name_id];
-      return loom_encoding_emit_param_error(emitter, op, LOOM_ERR_ENCODING_008,
-                                            param_name);
-    }
-  }
-  for (iree_host_size_t i = 0; i < params->dynamic_names.count; ++i) {
-    const loom_named_attr_t* entry = &params->dynamic_names.entries[i];
-    if (!loom_encoding_string_id_equal(module, entry->name_id,
-                                       loom_encoding_layout_param_name()) &&
-        !loom_encoding_string_id_equal(module, entry->name_id,
-                                       loom_encoding_schema_param_name())) {
-      iree_string_view_t param_name = module->strings.entries[entry->name_id];
-      return loom_encoding_emit_param_error(emitter, op, LOOM_ERR_ENCODING_008,
-                                            param_name);
-    }
-  }
-
-  const loom_named_attr_t* static_layout = loom_encoding_find_param(
-      module, params->static_attrs, loom_encoding_layout_param_name());
-  const loom_named_attr_t* dynamic_layout = loom_encoding_find_param(
-      module, params->dynamic_names, loom_encoding_layout_param_name());
-  if (!static_layout && !dynamic_layout) {
+  const loom_encoding_physical_storage_static_params_t static_params =
+      loom_encoding_physical_storage_static_params(params->spec);
+  if (!static_params.layout &&
+      !loom_encoding_define_has_dynamic_parameter(
+          params, LOOM_ENCODING_PHYSICAL_STORAGE_DYNAMIC_PARAMETER_LAYOUT)) {
     return loom_encoding_emit_param_error(emitter, op, LOOM_ERR_ENCODING_007,
                                           loom_encoding_layout_param_name());
   }
-
-  const loom_named_attr_t* static_schema = loom_encoding_find_param(
-      module, params->static_attrs, loom_encoding_schema_param_name());
-  const loom_named_attr_t* dynamic_schema = loom_encoding_find_param(
-      module, params->dynamic_names, loom_encoding_schema_param_name());
-  if (!static_schema && !dynamic_schema) {
+  if (!static_params.schema &&
+      !loom_encoding_define_has_dynamic_parameter(
+          params, LOOM_ENCODING_PHYSICAL_STORAGE_DYNAMIC_PARAMETER_SCHEMA)) {
     return loom_encoding_emit_param_error(emitter, op, LOOM_ERR_ENCODING_007,
                                           loom_encoding_schema_param_name());
   }
-
-  if (static_layout) {
-    IREE_RETURN_IF_ERROR(loom_encoding_physical_storage_verify_static_param(
-        module, op, emitter, static_layout, loom_encoding_layout_param_name(),
-        LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
-        loom_encoding_role_description(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT)));
-  }
-  if (dynamic_layout) {
-    IREE_RETURN_IF_ERROR(loom_encoding_physical_storage_verify_dynamic_param(
-        module, op, emitter, params, dynamic_layout,
-        loom_encoding_layout_param_name(), LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
-        loom_encoding_role_description(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT)));
-  }
-
-  if (static_schema) {
-    IREE_RETURN_IF_ERROR(loom_encoding_physical_storage_verify_static_param(
-        module, op, emitter, static_schema, loom_encoding_schema_param_name(),
-        LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
-        loom_encoding_role_description(LOOM_ENCODING_ROLE_STORAGE_SCHEMA)));
-  }
-  if (dynamic_schema) {
-    IREE_RETURN_IF_ERROR(loom_encoding_physical_storage_verify_dynamic_param(
-        module, op, emitter, params, dynamic_schema,
-        loom_encoding_schema_param_name(), LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
-        loom_encoding_role_description(LOOM_ENCODING_ROLE_STORAGE_SCHEMA)));
-  }
-
   return iree_ok_status();
 }
 
-static iree_status_t loom_encoding_physical_storage_verify_static(
-    const loom_module_t* module, const loom_encoding_t* encoding) {
-  const loom_named_attr_t* layout = loom_encoding_find_param(
-      module, loom_encoding_attrs(encoding), loom_encoding_layout_param_name());
-  const loom_named_attr_t* schema = loom_encoding_find_param(
-      module, loom_encoding_attrs(encoding), loom_encoding_schema_param_name());
+void loom_encoding_physical_storage_summarize(
+    const loom_encoding_family_summary_request_t* request,
+    loom_encoding_family_summary_t* out_summary) {
+  *out_summary = (loom_encoding_family_summary_t){0};
+  const loom_encoding_physical_storage_static_params_t static_params =
+      loom_encoding_physical_storage_static_params(request->params->spec);
 
-  for (iree_host_size_t i = 0; i < encoding->attribute_count; ++i) {
-    const loom_named_attr_t* entry = &encoding->attributes[i];
-    if (!loom_encoding_string_id_equal(module, entry->name_id,
-                                       loom_encoding_layout_param_name()) &&
-        !loom_encoding_string_id_equal(module, entry->name_id,
-                                       loom_encoding_schema_param_name())) {
-      iree_string_view_t param_name = module->strings.entries[entry->name_id];
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "encoding 'physical_storage' does not support parameter '%.*s'",
-          (int)param_name.size, param_name.data);
+  if (loom_encoding_define_has_dynamic_parameter(
+          request->params,
+          LOOM_ENCODING_PHYSICAL_STORAGE_DYNAMIC_PARAMETER_LAYOUT)) {
+    loom_value_fact_encoding_summary_t dynamic_summary;
+    if (loom_encoding_summary_query_dynamic_encoding(
+            request, LOOM_ENCODING_PHYSICAL_STORAGE_DYNAMIC_PARAMETER_LAYOUT,
+            &dynamic_summary)) {
+      out_summary->encoding.address_layout = dynamic_summary.address_layout;
     }
+  } else if (static_params.layout) {
+    out_summary->nested_static.address_layout_encoding_id =
+        loom_attr_as_encoding_id(static_params.layout->value);
   }
 
-  if (layout && layout->value.kind != LOOM_ATTR_ENCODING) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "encoding 'physical_storage' parameter 'layout' must be an encoding");
-  }
-  if (schema && schema->value.kind != LOOM_ATTR_ENCODING) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "encoding 'physical_storage' parameter 'schema' must be an encoding");
-  }
-
-  if (layout) {
-    const loom_encoding_t* layout_encoding =
-        loom_module_encoding(module, loom_attr_as_encoding_id(layout->value));
-    if (loom_encoding_static_role(module, layout_encoding) !=
-        LOOM_ENCODING_ROLE_ADDRESS_LAYOUT) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "encoding 'physical_storage' parameter 'layout' must be an address "
-          "layout encoding");
+  if (loom_encoding_define_has_dynamic_parameter(
+          request->params,
+          LOOM_ENCODING_PHYSICAL_STORAGE_DYNAMIC_PARAMETER_SCHEMA)) {
+    loom_value_fact_encoding_summary_t dynamic_summary;
+    if (loom_encoding_summary_query_dynamic_encoding(
+            request, LOOM_ENCODING_PHYSICAL_STORAGE_DYNAMIC_PARAMETER_SCHEMA,
+            &dynamic_summary)) {
+      out_summary->encoding.storage_schema = dynamic_summary.storage_schema;
     }
+  } else if (static_params.schema) {
+    out_summary->nested_static.storage_schema_encoding_id =
+        loom_attr_as_encoding_id(static_params.schema->value);
   }
-
-  if (schema) {
-    const loom_encoding_t* schema_encoding =
-        loom_module_encoding(module, loom_attr_as_encoding_id(schema->value));
-    if (loom_encoding_static_role(module, schema_encoding) !=
-        LOOM_ENCODING_ROLE_STORAGE_SCHEMA) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "encoding 'physical_storage' parameter 'schema' must be a storage "
-          "schema encoding");
-    }
-  }
-
-  return iree_ok_status();
 }
 
 static const loom_encoding_vtable_t loom_encoding_physical_storage_vtable = {
-    .name = IREE_SVL("physical_storage"),
-    .role = LOOM_ENCODING_ROLE_PHYSICAL_STORAGE,
-    .verify = loom_encoding_physical_storage_verify_static,
+    .descriptor = &loom_encoding_physical_storage_family_descriptor,
+    .is_static_valid = loom_encoding_physical_storage_is_static_valid,
+    .diagnose_static = loom_encoding_physical_storage_diagnose_static,
     .verify_define = loom_encoding_physical_storage_verify_define,
+    .summarize = loom_encoding_physical_storage_summarize,
 };
 
 iree_status_t loom_encoding_register_physical_storage_family(

@@ -556,20 +556,6 @@ void loom_verify_successor_targets(loom_verify_state_t* state,
   }
 }
 
-// Resolves a field reference to its author-facing DSL field name when available
-static bool loom_verify_attr_kind_matches_descriptor(
-    loom_attribute_t attr, const loom_attr_descriptor_t* descriptor) {
-  if (descriptor->attr_kind == LOOM_ATTR_ANY) {
-    // Descriptor-backed enums require an explicit field descriptor so text and
-    // bytecode can resolve stable values through the enclosing contract. A
-    // context-free ANY field cannot carry that contract.
-    return attr.kind > LOOM_ATTR_ABSENT && attr.kind < LOOM_ATTR_COUNT_ &&
-           attr.kind != LOOM_ATTR_ANY && attr.kind != LOOM_ATTR_SCOPED_ENUM &&
-           attr.kind != LOOM_ATTR_ENUM_ARRAY;
-  }
-  return attr.kind == descriptor->attr_kind;
-}
-
 static void loom_verify_predicate_list_attr(loom_verify_state_t* state,
                                             const loom_op_t* op,
                                             iree_string_view_t name,
@@ -762,8 +748,8 @@ static void loom_verify_parameterized_attr(
                                   IREE_ARRAYSIZE(params));
       continue;
     }
-    if (!loom_verify_attr_kind_matches_descriptor(parameter,
-                                                  parameter_descriptor)) {
+    if (!loom_attr_descriptor_accepts_kind(parameter_descriptor,
+                                           (loom_attr_kind_t)parameter.kind)) {
       loom_diagnostic_param_t params[] = {
           loom_verify_param_string_for_diagnostic_field(
               parameter_name, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, attr_index),
@@ -922,7 +908,8 @@ void loom_verify_type_constraints(loom_verify_state_t* state,
       bool optional = (descriptor->flags & LOOM_ATTR_OPTIONAL) != 0;
       if (optional && loom_attr_is_absent(attrs[i])) continue;
       iree_string_view_t attr_name = loom_bstring_view(descriptor->name);
-      if (!loom_verify_attr_kind_matches_descriptor(attrs[i], descriptor)) {
+      if (!loom_attr_descriptor_accepts_kind(descriptor,
+                                             (loom_attr_kind_t)attrs[i].kind)) {
         loom_diagnostic_param_t params[] = {
             loom_verify_param_string_for_diagnostic_field(
                 attr_name, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, i),
@@ -1210,6 +1197,229 @@ void loom_verify_block_arg_type_well_formedness(loom_verify_state_t* state,
     loom_verify_emit_type_well_formed_diagnostic(
         state, NULL, type, iree_make_cstring_view(name_buffer),
         loom_diagnostic_field_ref_none(), malformation);
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// Static encoding validation
+//===----------------------------------------------------------------------===//
+
+static iree_string_view_t loom_verify_encoding_attr_kind_name(
+    loom_attr_kind_t kind) {
+  static const iree_string_view_t kNames[LOOM_ATTR_COUNT_] = {
+      [LOOM_ATTR_ABSENT] = IREE_SVL("absent"),
+      [LOOM_ATTR_I64] = IREE_SVL("integer"),
+      [LOOM_ATTR_F64] = IREE_SVL("float"),
+      [LOOM_ATTR_STRING] = IREE_SVL("string"),
+      [LOOM_ATTR_BOOL] = IREE_SVL("boolean"),
+      [LOOM_ATTR_ENUM] = IREE_SVL("enum"),
+      [LOOM_ATTR_I64_ARRAY] = IREE_SVL("integer array"),
+      [LOOM_ATTR_SYMBOL] = IREE_SVL("symbol"),
+      [LOOM_ATTR_TYPE] = IREE_SVL("type"),
+      [LOOM_ATTR_PREDICATE_LIST] = IREE_SVL("predicate list"),
+      [LOOM_ATTR_DICT] = IREE_SVL("dictionary"),
+      [LOOM_ATTR_ENCODING] = IREE_SVL("encoding"),
+      [LOOM_ATTR_BYTES] = IREE_SVL("bytes"),
+      [LOOM_ATTR_SCOPED_ENUM] = IREE_SVL("scoped enum"),
+      [LOOM_ATTR_ANY] = IREE_SVL("attribute"),
+      [LOOM_ATTR_ENUM_ARRAY] = IREE_SVL("enum array"),
+      [LOOM_ATTR_PARAMETERIZED] = IREE_SVL("parameterized attribute"),
+  };
+  return kind < IREE_ARRAYSIZE(kNames) ? kNames[kind] : IREE_SV("attribute");
+}
+
+static bool loom_verify_static_encoding_is_malformed(
+    const loom_module_t* module, const loom_encoding_t* encoding) {
+  return loom_module_encoding_vtable(module, encoding) &&
+         !loom_encoding_static_is_valid(encoding);
+}
+
+iree_status_t loom_verify_prepare_static_encodings(loom_verify_state_t* state) {
+  const loom_module_t* module = state->module;
+  bool has_malformed_encoding = false;
+  for (iree_host_size_t i = 0; i < module->encodings.count; ++i) {
+    if (loom_verify_static_encoding_is_malformed(
+            module, &module->encodings.entries[i])) {
+      has_malformed_encoding = true;
+      break;
+    }
+  }
+  if (!has_malformed_encoding) return iree_ok_status();
+
+  state->static_encodings.word_count =
+      loom_bitset_word_count(module->encodings.count);
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      &state->arena, state->static_encodings.word_count, sizeof(uint64_t),
+      (void**)&state->static_encodings.diagnosed_bits));
+  memset(state->static_encodings.diagnosed_bits, 0,
+         state->static_encodings.word_count * sizeof(uint64_t));
+  return iree_ok_status();
+}
+
+static void loom_verify_static_encoding_ref(loom_verify_state_t* state,
+                                            const loom_op_t* op,
+                                            uint16_t encoding_id) {
+  if (!state->static_encodings.diagnosed_bits || encoding_id == 0 ||
+      encoding_id > state->module->encodings.count) {
+    return;
+  }
+
+  const uint16_t encoding_index = (uint16_t)(encoding_id - 1);
+  const loom_encoding_t* encoding =
+      &state->module->encodings.entries[encoding_index];
+  if (!loom_verify_static_encoding_is_malformed(state->module, encoding)) {
+    return;
+  }
+  loom_bitset_set(state->static_encodings.diagnosed_bits,
+                  state->static_encodings.word_count, encoding_index);
+
+  const loom_encoding_vtable_t* vtable =
+      loom_module_encoding_vtable(state->module, encoding);
+  if (!loom_encoding_static_parameters_are_valid(encoding)) {
+    const iree_string_view_t encoding_name =
+        state->module->strings.entries[encoding->name_id];
+    for (uint8_t i = 0;
+         i < encoding->attribute_count && !loom_verify_at_error_limit(state);
+         ++i) {
+      const loom_named_attr_t* parameter = &encoding->attributes[i];
+      const iree_string_view_t parameter_name =
+          state->module->strings.entries[parameter->name_id];
+      const uint8_t descriptor_index =
+          loom_encoding_parameter_descriptor_index(parameter);
+      if (descriptor_index == LOOM_ENCODING_PARAMETER_INDEX_INVALID) {
+        const loom_diagnostic_param_t params[] = {
+            loom_param_string(encoding_name),
+            loom_param_string(parameter_name),
+        };
+        loom_verify_emit_structured(state, op, LOOM_ERR_ENCODING_008, params,
+                                    IREE_ARRAYSIZE(params));
+        continue;
+      }
+
+      const loom_attr_descriptor_t* descriptor =
+          &vtable->descriptor->parameter_descriptors[descriptor_index];
+      if (loom_attr_descriptor_accepts_kind(
+              descriptor, (loom_attr_kind_t)parameter->value.kind)) {
+        continue;
+      }
+      const loom_diagnostic_param_t params[] = {
+          loom_param_string(encoding_name),
+          loom_param_string(parameter_name),
+          loom_param_u32(parameter->value.kind),
+          loom_param_string(loom_verify_encoding_attr_kind_name(
+              (loom_attr_kind_t)descriptor->attr_kind)),
+      };
+      loom_verify_emit_structured(state, op, LOOM_ERR_ENCODING_010, params,
+                                  IREE_ARRAYSIZE(params));
+    }
+
+    return;
+  }
+
+  IREE_ASSERT(vtable->is_static_valid && vtable->diagnose_static);
+  iree_diagnostic_emitter_t emitter = {
+      .fn = loom_verify_diagnostic_emitter_fn,
+      .user_data = state,
+  };
+  loom_verify_record_diagnostic_status(
+      state, vtable->diagnose_static(state->module, encoding, op, emitter));
+}
+
+static void loom_verify_static_encoding_type_ref(loom_verify_state_t* state,
+                                                 const loom_op_t* op,
+                                                 loom_type_t type) {
+  if (loom_type_has_static_encoding(type)) {
+    loom_verify_static_encoding_ref(state, op, type.encoding_id);
+  }
+}
+
+static void loom_verify_static_encoding_attr_refs(loom_verify_state_t* state,
+                                                  const loom_op_t* op,
+                                                  loom_attribute_t attr,
+                                                  uint8_t depth) {
+  switch ((loom_attr_kind_t)attr.kind) {
+    case LOOM_ATTR_ENCODING:
+      loom_verify_static_encoding_ref(state, op,
+                                      loom_attr_as_encoding_id(attr));
+      return;
+    case LOOM_ATTR_TYPE:
+      if (attr.type_id < state->module->types.count) {
+        loom_verify_static_encoding_type_ref(
+            state, op, state->module->types.entries[attr.type_id]);
+      }
+      return;
+    case LOOM_ATTR_DICT:
+      if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          (attr.count > 0 && !attr.dict_entries)) {
+        return;
+      }
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        loom_verify_static_encoding_attr_refs(
+            state, op, attr.dict_entries[i].value, (uint8_t)(depth + 1));
+      }
+      return;
+    case LOOM_ATTR_PARAMETERIZED:
+      if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          (attr.count > 0 && !attr.parameterized_slots)) {
+        return;
+      }
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        loom_verify_static_encoding_attr_refs(
+            state, op, attr.parameterized_slots[i], (uint8_t)(depth + 1));
+      }
+      return;
+    default:
+      return;
+  }
+}
+
+void loom_verify_static_encoding_refs(loom_verify_state_t* state,
+                                      const loom_op_t* op) {
+  if (!state->static_encodings.diagnosed_bits) return;
+  const loom_value_id_t* operands = loom_op_const_operands(op);
+  for (uint16_t i = 0; i < op->operand_count; ++i) {
+    if (operands[i] < state->module->values.count) {
+      loom_verify_static_encoding_type_ref(
+          state, op, loom_module_value_type(state->module, operands[i]));
+    }
+  }
+  const loom_value_id_t* results = loom_op_const_results(op);
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    if (results[i] < state->module->values.count) {
+      loom_verify_static_encoding_type_ref(
+          state, op, loom_module_value_type(state->module, results[i]));
+    }
+  }
+  const loom_attribute_t* attrs = loom_op_attrs(op);
+  for (uint8_t i = 0; i < op->attribute_count; ++i) {
+    loom_verify_static_encoding_attr_refs(state, op, attrs[i], /*depth=*/0);
+  }
+}
+
+void loom_verify_block_arg_static_encoding_refs(loom_verify_state_t* state,
+                                                const loom_block_t* block) {
+  if (!state->static_encodings.diagnosed_bits) return;
+  for (uint16_t i = 0; i < block->arg_count; ++i) {
+    const loom_value_id_t value_id = loom_block_arg_id(block, i);
+    if (value_id < state->module->values.count) {
+      loom_verify_static_encoding_type_ref(
+          state, /*op=*/NULL, loom_module_value_type(state->module, value_id));
+    }
+  }
+}
+
+void loom_verify_remaining_static_encodings(loom_verify_state_t* state) {
+  if (!state->static_encodings.diagnosed_bits) return;
+  for (iree_host_size_t i = 0;
+       i < state->module->encodings.count && !loom_verify_at_error_limit(state);
+       ++i) {
+    const loom_encoding_t* encoding = &state->module->encodings.entries[i];
+    if (!loom_verify_static_encoding_is_malformed(state->module, encoding) ||
+        loom_bitset_test(state->static_encodings.diagnosed_bits,
+                         state->static_encodings.word_count, i)) {
+      continue;
+    }
+    loom_verify_static_encoding_ref(state, /*op=*/NULL, (uint16_t)(i + 1));
   }
 }
 

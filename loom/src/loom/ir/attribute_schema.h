@@ -26,6 +26,8 @@ enum loom_attr_flag_bits_e {
   // Text formats may omit this required scalar attribute when the present
   // value equals the zero/false default. Parsers restore the explicit value.
   LOOM_ATTR_ELIDE_DEFAULT = 1u << 2,
+  // Descriptor-aware text formats spell string values as bare identifiers.
+  LOOM_ATTR_BARE_IDENTIFIER = 1u << 3,
 };
 typedef uint8_t loom_attr_flags_t;
 
@@ -131,6 +133,19 @@ static inline bool loom_attr_descriptor_find_enum_case(
 static inline iree_string_view_t loom_attr_descriptor_name(
     const loom_attr_descriptor_t* descriptor) {
   return loom_bstring_view(descriptor->name);
+}
+
+// Returns true when |kind| satisfies the payload-kind contract of
+// |descriptor|. Open ANY fields still exclude descriptor-dependent payloads
+// that cannot be interpreted without their owning field schema.
+static inline bool loom_attr_descriptor_accepts_kind(
+    const loom_attr_descriptor_t* descriptor, loom_attr_kind_t kind) {
+  if (descriptor->attr_kind != LOOM_ATTR_ANY) {
+    return kind == descriptor->attr_kind;
+  }
+  return kind > LOOM_ATTR_ABSENT && kind < LOOM_ATTR_COUNT_ &&
+         kind != LOOM_ATTR_ANY && kind != LOOM_ATTR_SCOPED_ENUM &&
+         kind != LOOM_ATTR_ENUM_ARRAY;
 }
 
 // Returns the explicit zero/false scalar value implied by ELIDE_DEFAULT.

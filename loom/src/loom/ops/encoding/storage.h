@@ -35,6 +35,11 @@ typedef struct loom_value_fact_address_layout_t
 typedef struct loom_value_fact_storage_schema_t
     loom_value_fact_storage_schema_t;
 
+// Registers the physical-storage composition family with |context|. Built-in
+// context setup calls this through the encoding family registry.
+iree_status_t loom_encoding_register_physical_storage_family(
+    loom_context_t* context);
+
 // Maximum static layout rank decoded into caller-provided stride storage.
 // Shaped type ranks are packed in four header bits, so no well-formed consumer
 // can use more than 15 layout strides.

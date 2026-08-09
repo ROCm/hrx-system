@@ -10,7 +10,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from loom.dsl import ATTR_TYPE_FLAGS, Op, ParameterizedAttrDef
+from loom.dsl import (
+    ATTR_TYPE_FLAGS,
+    EncodingFamilyDef,
+    Op,
+    ParameterizedAttrDef,
+)
 from loom.fields import compute_layout
 from loom.gen.ops import c_builders
 from loom.gen.ops.c_enum_attrs import collect_shared_enums as _collect_shared_enums
@@ -18,6 +23,12 @@ from loom.gen.ops.c_enum_attrs import enum_c_type as _enum_c_type
 from loom.gen.ops.c_enum_attrs import enum_case_c_ident as _enum_case_c_ident
 from loom.gen.ops.c_names import COPYRIGHT
 from loom.gen.ops.c_names import c_dialect_enum as _c_dialect_enum
+from loom.gen.ops.c_names import (
+    c_encoding_family_descriptor_name as _c_encoding_family_descriptor_name,
+)
+from loom.gen.ops.c_names import (
+    c_encoding_family_prefix as _c_encoding_family_prefix,
+)
 from loom.gen.ops.c_names import c_enum_name as _c_enum_name
 from loom.gen.ops.c_names import (
     c_parameterized_attr_enum_name as _c_parameterized_attr_enum_name,
@@ -38,6 +49,7 @@ def generate_ops_h(
     dialect_id: int,
     ops: Sequence[Op],
     parameterized_attrs: Sequence[ParameterizedAttrDef] = (),
+    encoding_families: Sequence[EncodingFamilyDef] = (),
 ) -> str:
     """Generates the ops.h header for a dialect."""
     lines: list[str] = []
@@ -58,6 +70,8 @@ def generate_ops_h(
     lines.append(f"#ifndef {guard}")
     lines.append(f"#define {guard}")
     lines.append("")
+    if encoding_families:
+        lines.append('#include "loom/ir/encoding.h"')
     if parameterized_attrs:
         lines.append('#include "loom/ir/parameterized_attr.h"')
     lines.append('#include "loom/ops/op_defs.h"')
@@ -72,6 +86,12 @@ def generate_ops_h(
             parameter.enum_def.c_include
             for attr_def in parameterized_attrs
             for parameter in attr_def.parameters
+            if parameter.attr_type in ("enum", "enum_array") and parameter.enum_def is not None and parameter.enum_def.c_include is not None
+        }
+        | {
+            parameter.enum_def.c_include
+            for family in encoding_families
+            for parameter in family.parameters
             if parameter.attr_type in ("enum", "enum_array") and parameter.enum_def is not None and parameter.enum_def.c_include is not None
         }
     )
@@ -115,12 +135,46 @@ def generate_ops_h(
                 lines.append(f"  {const_prefix}_COUNT_ = {max_value + 1},")
                 lines.append(f"}} {c_prefix}_t;")
             lines.append("")
+
+    # Encoding family parameter ordinals are compiler-local implementation
+    # details. Family parameters remain sparse named attributes in public IR.
+    if encoding_families:
+        max_dynamic_parameter_count = max(len(family.dynamic_parameters) for family in encoding_families)
+        lines.append("enum {")
+        lines.append(f"  LOOM_{dialect_name.upper()}_FAMILY_DYNAMIC_PARAMETER_COUNT_MAX_ = {max_dynamic_parameter_count},")
+        lines.append("};")
+        lines.append("")
+
+    for family in encoding_families:
+        c_prefix = _c_encoding_family_prefix(family)
+        const_prefix = c_prefix.upper()
+        if family.doc and (family.parameters or family.dynamic_parameters):
+            lines.append(f"// {family.doc}")
+        if family.parameters:
+            lines.append(f"typedef enum {c_prefix}_parameter_e {{")
+            for index, parameter in enumerate(family.parameters):
+                lines.append(f"  {const_prefix}_PARAMETER_{parameter.name.upper()} = {index},")
+            lines.append(f"  {const_prefix}_PARAMETER_COUNT_ = {len(family.parameters)},")
+            lines.append(f"}} {c_prefix}_parameter_t;")
+            lines.append("")
+        if family.dynamic_parameters:
+            lines.append(f"typedef enum {c_prefix}_dynamic_parameter_e {{")
+            for index, parameter in enumerate(family.dynamic_parameters):
+                lines.append(f"  {const_prefix}_DYNAMIC_PARAMETER_{parameter.name.upper()} = {index},")
+            lines.append(f"  {const_prefix}_DYNAMIC_PARAMETER_COUNT_ = {len(family.dynamic_parameters)},")
+            lines.append(f"}} {c_prefix}_dynamic_parameter_t;")
+            lines.append("")
+
     lines.append("#ifdef __cplusplus")
     lines.append('extern "C" {')
     lines.append("#endif")
     lines.append("")
 
     lines.extend(_generate_parameterized_attr_header_lines(parameterized_attrs))
+
+    lines.extend((f"extern const loom_encoding_family_descriptor_t {_c_encoding_family_descriptor_name(family)};") for family in encoding_families)
+    if encoding_families:
+        lines.append("")
 
     # Op kind enum.
     lines.append("enum {")

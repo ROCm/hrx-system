@@ -31,32 +31,91 @@ struct loom_encoding_define_param_view_t {
   loom_named_attr_slice_t dynamic_names;
 };
 
-// Resolves a dynamic parameter name entry to the operand it names. False means
-// the entry is absent or the operand dictionary is structurally invalid.
-// Semantic verifiers still own missing-entry diagnostics; the structural
-// verifier owns malformed dictionary diagnostics.
-static inline bool loom_encoding_define_dynamic_param_ordinal(
+// One descriptor-indexed dynamic parameter binding.
+typedef struct loom_encoding_define_dynamic_binding_t {
+  // SSA value bound to the parameter, or invalid when absent.
+  loom_value_id_t value_id;
+  // Ordinal in encoding.define's authored operand list, or UINT16_MAX when
+  // absent.
+  uint16_t operand_ordinal;
+} loom_encoding_define_dynamic_binding_t;
+
+// A descriptor-indexed view over one structurally valid encoding.define.
+typedef struct loom_encoding_define_resolved_params_t {
+  // Static encoding table entry referenced by the `spec` attribute.
+  const loom_encoding_t* spec;
+  // Registered family descriptor governing both parameter classes.
+  const loom_encoding_family_descriptor_t* descriptor;
+  // Static family parameters from `spec`, sorted by parameter name.
+  loom_named_attr_slice_t static_attrs;
+  // Descriptor-indexed dynamic parameter bindings.
+  const loom_encoding_define_dynamic_binding_t* dynamic_bindings;
+  // Number of entries in |dynamic_bindings|.
+  uint8_t dynamic_binding_count;
+} loom_encoding_define_resolved_params_t;
+
+// Resolves a static family instance with every dynamic parameter absent.
+// |dynamic_binding_slots| must have one entry per dynamic family descriptor.
+void loom_encoding_resolve_static_params(
+    const loom_encoding_family_descriptor_t* descriptor,
+    const loom_encoding_t* spec,
+    loom_encoding_define_dynamic_binding_t* dynamic_binding_slots,
+    loom_encoding_define_resolved_params_t* out_params);
+
+// Attempts to resolve parameters from an encoding.define that may already have
+// failed its own verifier. Returns false without emitting another diagnostic
+// when the producer's family or parameter contract is malformed. This is for
+// conservative cross-op verifier queries; verified compiler paths should use
+// loom_encoding_define_resolve_verified_params instead.
+bool loom_encoding_define_try_resolve_unverified_params(
+    const loom_module_t* module,
+    const loom_encoding_family_descriptor_t* descriptor,
     const loom_encoding_define_param_view_t* params,
-    const loom_named_attr_t* name_entry, uint16_t* out_ordinal) {
-  *out_ordinal = 0;
-  if (!name_entry || name_entry->value.kind != LOOM_ATTR_I64) return false;
-  int64_t ordinal = name_entry->value.i64;
-  if (ordinal < 0 || ordinal >= params->dynamic_values.count) return false;
-  *out_ordinal = (uint16_t)ordinal;
-  return true;
+    loom_encoding_define_dynamic_binding_t* dynamic_binding_slots,
+    loom_encoding_define_resolved_params_t* out_params);
+
+// Resolves parameters from a verified encoding.define. This is the infallible
+// internal query for passes that run after module verification.
+void loom_encoding_define_resolve_verified_params(
+    const loom_module_t* module,
+    const loom_encoding_family_descriptor_t* descriptor,
+    const loom_encoding_define_param_view_t* params,
+    loom_encoding_define_dynamic_binding_t* dynamic_binding_slots,
+    loom_encoding_define_resolved_params_t* out_params);
+
+// Returns the descriptor-indexed dynamic parameter value, or an invalid value
+// ID when that parameter is absent.
+static inline loom_value_id_t loom_encoding_define_dynamic_parameter(
+    const loom_encoding_define_resolved_params_t* params,
+    uint8_t descriptor_index) {
+  IREE_ASSERT(descriptor_index < params->dynamic_binding_count);
+  return params->dynamic_bindings[descriptor_index].value_id;
 }
 
-static inline bool loom_encoding_define_dynamic_param_value(
-    const loom_encoding_define_param_view_t* params,
-    const loom_named_attr_t* name_entry, loom_value_id_t* out_value) {
-  uint16_t ordinal = 0;
-  *out_value = LOOM_VALUE_ID_INVALID;
-  if (!loom_encoding_define_dynamic_param_ordinal(params, name_entry,
-                                                  &ordinal)) {
-    return false;
-  }
-  *out_value = params->dynamic_values.values[ordinal];
-  return true;
+// Returns the authored operand ordinal of a descriptor-indexed dynamic
+// parameter, or UINT16_MAX when that parameter is absent.
+static inline uint16_t loom_encoding_define_dynamic_parameter_operand_ordinal(
+    const loom_encoding_define_resolved_params_t* params,
+    uint8_t descriptor_index) {
+  IREE_ASSERT(descriptor_index < params->dynamic_binding_count);
+  return params->dynamic_bindings[descriptor_index].operand_ordinal;
+}
+
+// Returns whether the descriptor-indexed dynamic parameter is present.
+static inline bool loom_encoding_define_has_dynamic_parameter(
+    const loom_encoding_define_resolved_params_t* params,
+    uint8_t descriptor_index) {
+  return loom_encoding_define_dynamic_parameter(params, descriptor_index) !=
+         LOOM_VALUE_ID_INVALID;
+}
+
+// Returns the stable name of a descriptor-indexed dynamic parameter.
+static inline iree_string_view_t loom_encoding_define_dynamic_parameter_name(
+    const loom_encoding_define_resolved_params_t* params,
+    uint8_t descriptor_index) {
+  IREE_ASSERT(descriptor_index < params->dynamic_binding_count);
+  return loom_bstring_view(
+      params->descriptor->dynamic_parameter_descriptors[descriptor_index].name);
 }
 
 static inline loom_encoding_define_param_view_t loom_encoding_define_param_view(

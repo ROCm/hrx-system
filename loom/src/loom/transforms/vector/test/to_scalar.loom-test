@@ -370,6 +370,95 @@ func.def @scalarizes_row_scaled_f8_decode(%payload: vector<2x2xf8E4M3>, %scale: 
 
 // ====
 
+func.def @scalarizes_dense_f8_encode(%source: vector<2xf32>) -> (vector<2xf8E4M3>) {
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3fn, payload_packing=dense_lanes, payload_elements=2, payload_registers=0> : encoding<schema>
+  %encoded = vector.encode %source using %schema : vector<2xf32>, encoding<schema> -> vector<2xf8E4M3>
+  func.return %encoded : vector<2xf8E4M3>
+}
+
+// ----
+func.def @scalarizes_dense_f8_encode(%source: vector<2xf32>) -> (vector<2xf8E4M3>) {
+  %4 = vector.extract %source[0] : vector<2xf32> -> f32
+  %5 = scalar.fptrunc %4 : f32 to f8E4M3
+  %6 = vector.extract %source[1] : vector<2xf32> -> f32
+  %7 = scalar.fptrunc %6 : f32 to f8E4M3
+  %encoded = vector.from_elements %5, %7 : vector<2xf8E4M3>
+  func.return %encoded : vector<2xf8E4M3>
+}
+
+// ====
+
+func.def @leaves_nonmatching_f8_encode_for_exact_lowering(%source: vector<2xf32>) -> (vector<2xf8E4M3>) {
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_packing=dense_lanes, payload_elements=2, payload_registers=0> : encoding<schema>
+  %encoded = vector.encode %source using %schema : vector<2xf32>, encoding<schema> -> vector<2xf8E4M3>
+  func.return %encoded : vector<2xf8E4M3>
+}
+
+// ----
+func.def @leaves_nonmatching_f8_encode_for_exact_lowering(%source: vector<2xf32>) -> (vector<2xf8E4M3>) {
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=2, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %encoded = vector.encode %source using %schema : vector<2xf32>, encoding<schema> -> vector<2xf8E4M3>
+  func.return %encoded : vector<2xf8E4M3>
+}
+
+// ====
+
+func.def @scalarizes_block_scaled_bias_f8_encode(%source: vector<2xf32>, %scale: vector<1xf32>, %bias: vector<1xf32>) -> (vector<2xf8E4M3>) {
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3fn, payload_packing=dense_lanes, payload_elements=2, payload_registers=0, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d, affine=scale_plus_bias> : encoding<schema>
+  %encoded = vector.encode %source using %schema {bias = %bias : vector<1xf32>, scale = %scale : vector<1xf32>} : vector<2xf32>, encoding<schema> -> vector<2xf8E4M3>
+  func.return %encoded : vector<2xf8E4M3>
+}
+
+// ----
+func.def @scalarizes_block_scaled_bias_f8_encode(%source: vector<2xf32>, %scale: vector<1xf32>, %bias: vector<1xf32>) -> (vector<2xf8E4M3>) {
+  %6 = vector.extract %source[0] : vector<2xf32> -> f32
+  %7 = vector.extract %bias[0] : vector<1xf32> -> f32
+  %8 = scalar.subf %6, %7 : f32
+  %9 = vector.extract %scale[0] : vector<1xf32> -> f32
+  %10 = scalar.divf %8, %9 : f32
+  %11 = scalar.fptrunc %10 : f32 to f8E4M3
+  %12 = vector.extract %source[1] : vector<2xf32> -> f32
+  %13 = vector.extract %bias[0] : vector<1xf32> -> f32
+  %14 = scalar.subf %12, %13 : f32
+  %15 = vector.extract %scale[0] : vector<1xf32> -> f32
+  %16 = scalar.divf %14, %15 : f32
+  %17 = scalar.fptrunc %16 : f32 to f8E4M3
+  %encoded = vector.from_elements %11, %17 : vector<2xf8E4M3>
+  func.return %encoded : vector<2xf8E4M3>
+}
+
+// ====
+
+func.def @scalarizes_row_scaled_f8_encode(%source: vector<2x2xf32>, %scale: vector<2xf32>) -> (vector<2x2xf8E4M3>) {
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3fn, payload_packing=dense_lanes, payload_elements=4, payload_registers=0, scale_format=f32, scale_group_elements=1, scale_operands=1, scale_topology=row, affine=scale_only> : encoding<schema>
+  %encoded = vector.encode %source using %schema {scale = %scale : vector<2xf32>} : vector<2x2xf32>, encoding<schema> -> vector<2x2xf8E4M3>
+  func.return %encoded : vector<2x2xf8E4M3>
+}
+
+// ----
+func.def @scalarizes_row_scaled_f8_encode(%source: vector<2x2xf32>, %scale: vector<2xf32>) -> (vector<2x2xf8E4M3>) {
+  %5 = vector.extract %source[0, 0] : vector<2x2xf32> -> f32
+  %6 = vector.extract %scale[0] : vector<2xf32> -> f32
+  %7 = scalar.divf %5, %6 : f32
+  %8 = scalar.fptrunc %7 : f32 to f8E4M3
+  %9 = vector.extract %source[0, 1] : vector<2x2xf32> -> f32
+  %10 = vector.extract %scale[0] : vector<2xf32> -> f32
+  %11 = scalar.divf %9, %10 : f32
+  %12 = scalar.fptrunc %11 : f32 to f8E4M3
+  %13 = vector.extract %source[1, 0] : vector<2x2xf32> -> f32
+  %14 = vector.extract %scale[1] : vector<2xf32> -> f32
+  %15 = scalar.divf %13, %14 : f32
+  %16 = scalar.fptrunc %15 : f32 to f8E4M3
+  %17 = vector.extract %source[1, 1] : vector<2x2xf32> -> f32
+  %18 = vector.extract %scale[1] : vector<2xf32> -> f32
+  %19 = scalar.divf %17, %18 : f32
+  %20 = scalar.fptrunc %19 : f32 to f8E4M3
+  %encoded = vector.from_elements %8, %12, %16, %20 : vector<2x2xf8E4M3>
+  func.return %encoded : vector<2x2xf8E4M3>
+}
+
+// ====
+
 func.def @leaves_packed_q8_decode_for_later_lowering(%payload: vector<4xi32>, %scale: vector<1xf16>) -> (vector<32xf32>) {
   %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf16>} : vector<4xi32>, encoding<schema> -> vector<32xf32>

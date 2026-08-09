@@ -10,7 +10,7 @@
 #include "iree/base/internal/math.h"
 #include "loom/target/arch/amdgpu/lower/descriptor_ref.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
-#include "loom/target/arch/amdgpu/lower/narrow_float/fp8.h"
+#include "loom/target/arch/amdgpu/lower/encoding/fp8.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
 static const loom_value_fact_numeric_format_flags_t
@@ -21,7 +21,7 @@ static const loom_value_fact_numeric_format_flags_t
     bf16_byte_0_0, bf16_byte_0_1, bf16_byte_1_0, bf16_byte_1_1, f16_byte_0_0,  \
     f16_byte_0_1, f16_byte_1_0, f16_byte_1_1)                                  \
   row_source_format
-#include "loom/target/arch/amdgpu/lower/narrow_float/fp8_subnormal_table_rows.inl"
+#include "loom/target/arch/amdgpu/lower/encoding/fp8_subnormal_table_rows.inl"
 #undef LOOM_AMDGPU_FP8_SUBNORMAL_TABLE_ROW
 };
 
@@ -96,7 +96,7 @@ static const loom_amdgpu_fp8_native_descriptor_ref_row_t
       source_format,                                                      \
       result_type,                                                        \
       {lane_ref, pair_ref, {byte0_ref, byte1_ref, byte2_ref, byte3_ref}}}
-#include "loom/target/arch/amdgpu/lower/narrow_float/fp8_native_descriptor_ref_rows.inl"
+#include "loom/target/arch/amdgpu/lower/encoding/fp8_native_descriptor_ref_rows.inl"
 #undef LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW
 };
 static_assert(IREE_ARRAYSIZE(kLoomAmdgpuFp8NativeDescriptorRefRows) <= 64,
@@ -108,7 +108,7 @@ static const uint8_t kLoomAmdgpuFp8NativeDescriptorRefRowIndex[IREE_ARRAYSIZE(
     row_index, source_format_index, source_format, result_type, lane_ref, \
     pair_ref, byte0_ref, byte1_ref, byte2_ref, byte3_ref)                 \
   [source_format_index][result_type] = (row_index) + 1
-#include "loom/target/arch/amdgpu/lower/narrow_float/fp8_native_descriptor_ref_rows.inl"
+#include "loom/target/arch/amdgpu/lower/encoding/fp8_native_descriptor_ref_rows.inl"
 #undef LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW
 };
 
@@ -224,7 +224,7 @@ static const loom_amdgpu_fp8_scaled_descriptor_ref_row_t
     row_index, source_format_index, source_format, result_type, \
     scalef32_pair_ref, e8m0_pk8_ref)                            \
   [row_index] = {source_format, result_type, scalef32_pair_ref, e8m0_pk8_ref}
-#include "loom/target/arch/amdgpu/lower/narrow_float/fp8_scaled_descriptor_ref_rows.inl"
+#include "loom/target/arch/amdgpu/lower/encoding/fp8_scaled_descriptor_ref_rows.inl"
 #undef LOOM_AMDGPU_FP8_SCALED_DESCRIPTOR_REF_ROW
 };
 static_assert(IREE_ARRAYSIZE(kLoomAmdgpuFp8ScaledDescriptorRefRows) <= 64,
@@ -236,7 +236,7 @@ static const uint8_t kLoomAmdgpuFp8ScaledDescriptorRefRowIndex[IREE_ARRAYSIZE(
     row_index, source_format_index, source_format, result_type, \
     scalef32_pair_ref, e8m0_pk8_ref)                            \
   [source_format_index][result_type] = (row_index) + 1
-#include "loom/target/arch/amdgpu/lower/narrow_float/fp8_scaled_descriptor_ref_rows.inl"
+#include "loom/target/arch/amdgpu/lower/encoding/fp8_scaled_descriptor_ref_rows.inl"
 #undef LOOM_AMDGPU_FP8_SCALED_DESCRIPTOR_REF_ROW
 };
 

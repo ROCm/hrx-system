@@ -8,15 +8,15 @@
         "args": [
           "{srcdir}/fp8_encode.loom",
           "--device=amdgpu",
-          "--config=fp8_encode.row_capacity=257"
+          "--config=fp8_encode.row_capacity=65536"
         ]
       },
       "stdout": {
         "contains": {
           "unordered": [
             "\"format\":\"loom.test.v0\"",
-            "\"case_count\":8",
-            "\"sample_count\":8",
+            "\"case_count\":10",
+            "\"sample_count\":12",
             "\"failed_sample_count\":0",
             "\"skipped_case_count\":0",
             "\"planning_issue_count\":0"

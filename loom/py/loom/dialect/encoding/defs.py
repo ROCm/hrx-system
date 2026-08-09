@@ -20,17 +20,24 @@ from loom.assembly import (
 from loom.dsl import (
     ANY,
     ANY_ENCODING,
+    ATTR_TYPE_BOOL,
     ATTR_TYPE_DICT,
     ATTR_TYPE_ENCODING,
     ATTR_TYPE_I64,
     ATTR_TYPE_I64_ARRAY,
     ATTR_TYPE_STRING,
     ENCODING_LAYOUT,
+    ENCODING_SCHEMA,
+    ENCODING_TRANSFORM,
     I1,
     INDEX,
     PURE,
+    VECTOR,
+    VIEW,
     AttrDef,
     Dialect,
+    EncodingFamilyDef,
+    EncodingFamilyRole,
     Op,
     Operand,
     OpPhase,
@@ -43,6 +50,219 @@ from loom.dsl import (
 # ============================================================================
 
 encoding_ops = Dialect("encoding", dialect_id=0x09, doc="Encoding definition and query ops.")
+
+# ============================================================================
+# Static encoding families
+# ============================================================================
+
+_BLOCK_STORAGE_PARAMETERS = (
+    AttrDef("block_elems", ATTR_TYPE_I64, optional=True),
+    AttrDef("storage_bytes", ATTR_TYPE_I64, optional=True),
+)
+
+_NAMED_FP8_PARAMETERS = (
+    AttrDef(
+        "rounding",
+        ATTR_TYPE_STRING,
+        optional=True,
+        bare_identifier=True,
+    ),
+    AttrDef("storage_bits", ATTR_TYPE_I64, optional=True),
+)
+
+_MATRIX_OPERAND_PARAMETERS = (
+    AttrDef("affine", ATTR_TYPE_STRING, optional=True, bare_identifier=True),
+    AttrDef("codebook", ATTR_TYPE_STRING, optional=True, bare_identifier=True),
+    AttrDef("element_format", ATTR_TYPE_STRING, bare_identifier=True),
+    AttrDef("payload_elements", ATTR_TYPE_I64),
+    AttrDef(
+        "payload_packing",
+        ATTR_TYPE_STRING,
+        optional=True,
+        bare_identifier=True,
+    ),
+    AttrDef("payload_registers", ATTR_TYPE_I64),
+    AttrDef("rounding", ATTR_TYPE_STRING, optional=True, bare_identifier=True),
+    AttrDef("scale_format", ATTR_TYPE_STRING, optional=True, bare_identifier=True),
+    AttrDef("scale_group_elements", ATTR_TYPE_I64, optional=True),
+    AttrDef("scale_group_shape", ATTR_TYPE_I64_ARRAY, optional=True),
+    AttrDef("scale_operands", ATTR_TYPE_I64, optional=True),
+    AttrDef(
+        "scale_topology",
+        ATTR_TYPE_STRING,
+        optional=True,
+        bare_identifier=True,
+    ),
+    AttrDef(
+        "secondary_scale_format",
+        ATTR_TYPE_STRING,
+        optional=True,
+        bare_identifier=True,
+    ),
+    AttrDef("sparsity", ATTR_TYPE_STRING, optional=True, bare_identifier=True),
+    AttrDef("sparsity_group_elements", ATTR_TYPE_I64, optional=True),
+    AttrDef("sparsity_group_nonzero_elements", ATTR_TYPE_I64, optional=True),
+    AttrDef("zero_scale_fallback", ATTR_TYPE_BOOL, optional=True),
+)
+
+_NUMERIC_TRANSFORM_PARAMETERS = (
+    AttrDef("family", ATTR_TYPE_STRING),
+    AttrDef("input_elems", ATTR_TYPE_I64, optional=True),
+    AttrDef("normalization", ATTR_TYPE_STRING, optional=True),
+    AttrDef("output_elems", ATTR_TYPE_I64, optional=True),
+)
+
+_TURBOQUANT_KV_PARAMETERS = (
+    AttrDef("first_stage_bits", ATTR_TYPE_I64),
+    AttrDef("logical_element", ATTR_TYPE_STRING),
+    AttrDef("logical_elems", ATTR_TYPE_I64),
+    AttrDef("pack_order", ATTR_TYPE_STRING),
+    AttrDef("qjl_rows", ATTR_TYPE_I64),
+    AttrDef("record_bytes", ATTR_TYPE_I64),
+    AttrDef("residual_bits", ATTR_TYPE_I64),
+    AttrDef("scalar_quantizer", ATTR_TYPE_STRING),
+    AttrDef("transform_family", ATTR_TYPE_STRING),
+)
+
+ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
+    EncodingFamilyDef(
+        "physical_storage",
+        group=encoding_ops,
+        role=EncodingFamilyRole.PHYSICAL_STORAGE,
+        parameters=(
+            AttrDef("layout", ATTR_TYPE_ENCODING, optional=True),
+            AttrDef("schema", ATTR_TYPE_ENCODING, optional=True),
+        ),
+        dynamic_parameters=(
+            Operand("layout", ENCODING_LAYOUT),
+            Operand("schema", ENCODING_SCHEMA),
+        ),
+        doc="Composes an address layout and storage schema.",
+    ),
+    EncodingFamilyDef(
+        "dense",
+        group=encoding_ops,
+        role=EncodingFamilyRole.ADDRESS_LAYOUT,
+        doc="Dense row-major address layout.",
+    ),
+    EncodingFamilyDef(
+        "strided",
+        group=encoding_ops,
+        role=EncodingFamilyRole.ADDRESS_LAYOUT,
+        parameters=(
+            AttrDef("stride", ATTR_TYPE_I64, optional=True),
+            AttrDef("strides", ATTR_TYPE_I64_ARRAY, optional=True),
+        ),
+        doc="Explicit element-stride address layout.",
+    ),
+    EncodingFamilyDef(
+        "q8_0",
+        group=encoding_ops,
+        role=EncodingFamilyRole.STORAGE_SCHEMA,
+        parameters=(AttrDef("block", ATTR_TYPE_I64, optional=True),),
+        doc="Blockwise eight-bit quantized storage schema.",
+    ),
+    *(
+        EncodingFamilyDef(
+            name,
+            group=encoding_ops,
+            role=EncodingFamilyRole.STORAGE_SCHEMA,
+            parameters=_BLOCK_STORAGE_PARAMETERS,
+            doc="GGML-compatible block storage schema.",
+        )
+        for name in ("ggml_q4_0", "ggml_q8_0")
+    ),
+    EncodingFamilyDef(
+        "q6_k",
+        group=encoding_ops,
+        role=EncodingFamilyRole.STORAGE_SCHEMA,
+        doc="Six-bit K-quant storage schema.",
+    ),
+    EncodingFamilyDef(
+        "ggml_q6_k",
+        group=encoding_ops,
+        role=EncodingFamilyRole.STORAGE_SCHEMA,
+        parameters=_BLOCK_STORAGE_PARAMETERS,
+        doc="GGML-compatible block storage schema.",
+    ),
+    EncodingFamilyDef(
+        "ggml_iq_grid",
+        group=encoding_ops,
+        role=EncodingFamilyRole.STORAGE_SCHEMA,
+        parameters=(
+            AttrDef("code_bits", ATTR_TYPE_I64),
+            AttrDef("grid_elems", ATTR_TYPE_I64),
+        ),
+        doc="GGML indexed-grid storage schema.",
+    ),
+    EncodingFamilyDef(
+        "loom_fp4_table",
+        group=encoding_ops,
+        role=EncodingFamilyRole.STORAGE_SCHEMA,
+        parameters=(
+            AttrDef("code_bits", ATTR_TYPE_I64),
+            AttrDef("table_elems", ATTR_TYPE_I64),
+        ),
+        doc="Table-decoded four-bit storage schema.",
+    ),
+    *(
+        EncodingFamilyDef(
+            name,
+            group=encoding_ops,
+            role=EncodingFamilyRole.STORAGE_SCHEMA,
+            parameters=_NAMED_FP8_PARAMETERS,
+            doc="Named eight-bit floating-point storage schema.",
+        )
+        for name in (
+            "ieee_fp8_e4m3",
+            "ieee_fp8_e5m2",
+            "fp8_e4m3fn",
+            "fp8_e4m3fnuz",
+            "fp8_e5m2fnuz",
+        )
+    ),
+    EncodingFamilyDef(
+        "matrix_operand",
+        group=encoding_ops,
+        role=EncodingFamilyRole.STORAGE_SCHEMA,
+        parameters=_MATRIX_OPERAND_PARAMETERS,
+        doc="Target-independent encoded matrix operand schema.",
+    ),
+    EncodingFamilyDef(
+        "numeric_transform",
+        group=encoding_ops,
+        role=EncodingFamilyRole.NUMERIC_TRANSFORM,
+        parameters=_NUMERIC_TRANSFORM_PARAMETERS,
+        dynamic_parameters=(
+            Operand("input_elems", INDEX),
+            Operand("matrix", VECTOR),
+            Operand("output_elems", INDEX),
+            Operand("permutation", VECTOR),
+            Operand("seed", INDEX),
+            Operand("signs", VECTOR),
+        ),
+        doc="Numerical transform with static shape and policy parameters.",
+    ),
+    EncodingFamilyDef(
+        "orthogonal_transform",
+        group=encoding_ops,
+        role=EncodingFamilyRole.NUMERIC_TRANSFORM,
+        doc="Orthogonal numerical transform.",
+    ),
+    EncodingFamilyDef(
+        "turboquant_kv",
+        group=encoding_ops,
+        role=EncodingFamilyRole.STORAGE_SCHEMA,
+        parameters=_TURBOQUANT_KV_PARAMETERS,
+        dynamic_parameters=(
+            Operand("centroids", VIEW),
+            Operand("qjl_transform", ENCODING_TRANSFORM),
+            Operand("thresholds", VIEW),
+            Operand("transform", ENCODING_TRANSFORM),
+        ),
+        doc="TurboQuant key/value storage schema.",
+    ),
+)
 
 # ============================================================================
 # encoding.layout.dense — dense logical-to-physical address layout

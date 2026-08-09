@@ -114,6 +114,7 @@ typedef enum loom_amdgpu_vector_16bit_float_conversion_kind_e {
   LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_EXTF = 1,
   LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_FPTRUNC = 2,
   LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_DECODE = 3,
+  LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_ENCODE = 4,
 } loom_amdgpu_vector_16bit_float_conversion_kind_t;
 
 typedef struct loom_amdgpu_fp4_decode_recipe_t loom_amdgpu_fp4_decode_recipe_t;

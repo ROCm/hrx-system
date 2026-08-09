@@ -301,15 +301,19 @@ static bool loom_vector_to_scalar_mma_value_is_fragment_load(
   return def_op != NULL && loom_vector_fragment_load_isa(def_op);
 }
 
-static loom_vector_to_scalar_encoded_matrix_operand_t
+static loom_vector_to_scalar_encoded_operand_t
 loom_vector_to_scalar_mma_encoded_operand(
-    const loom_vector_to_scalar_mma_fragment_t* fragment) {
-  return (loom_vector_to_scalar_encoded_matrix_operand_t){
+    const loom_vector_to_scalar_mma_fragment_t* fragment,
+    loom_type_t logical_lane_type) {
+  return (loom_vector_to_scalar_encoded_operand_t){
       .schema = fragment->fact.encoded_operand,
       .auxiliary = fragment->fact.auxiliary,
       .blocks = fragment->blocks,
       .rows = fragment->rows,
       .columns = fragment->columns,
+      .logical_lane_type = logical_lane_type,
+      .physical_lane_type = loom_vector_to_scalar_lane_type(fragment->type),
+      .direction = LOOM_VECTOR_TO_SCALAR_ENCODING_DIRECTION_DECODE,
   };
 }
 
@@ -458,20 +462,18 @@ static bool loom_vector_to_scalar_mma_semantics_match(
       return false;
     }
     if (lhs_encoded) {
-      const loom_vector_to_scalar_encoded_matrix_operand_t operand =
-          loom_vector_to_scalar_mma_encoded_operand(lhs);
-      if (!loom_vector_to_scalar_encoded_matrix_operand_is_supported(
-              state, &operand, loom_vector_to_scalar_lane_type(lhs->type),
-              accumulator_type)) {
+      const loom_vector_to_scalar_encoded_operand_t operand =
+          loom_vector_to_scalar_mma_encoded_operand(lhs, accumulator_type);
+      if (!loom_vector_to_scalar_encoded_operand_is_supported(state,
+                                                              &operand)) {
         return false;
       }
     }
     if (rhs_encoded) {
-      const loom_vector_to_scalar_encoded_matrix_operand_t operand =
-          loom_vector_to_scalar_mma_encoded_operand(rhs);
-      if (!loom_vector_to_scalar_encoded_matrix_operand_is_supported(
-              state, &operand, loom_vector_to_scalar_lane_type(rhs->type),
-              accumulator_type)) {
+      const loom_vector_to_scalar_encoded_operand_t operand =
+          loom_vector_to_scalar_mma_encoded_operand(rhs, accumulator_type);
+      if (!loom_vector_to_scalar_encoded_operand_is_supported(state,
+                                                              &operand)) {
         return false;
       }
     }
@@ -568,20 +570,16 @@ static uint32_t loom_vector_to_scalar_mma_semantic_rejection_bits(
     rejection_bits |= LOOM_CONTRACT_REJECTION_NUMERIC;
   }
   if (lhs_encoded) {
-    const loom_vector_to_scalar_encoded_matrix_operand_t operand =
-        loom_vector_to_scalar_mma_encoded_operand(lhs);
+    const loom_vector_to_scalar_encoded_operand_t operand =
+        loom_vector_to_scalar_mma_encoded_operand(lhs, accumulator_type);
     rejection_bits |=
-        loom_vector_to_scalar_encoded_matrix_operand_rejection_bits(
-            state, &operand, loom_vector_to_scalar_lane_type(lhs->type),
-            accumulator_type);
+        loom_vector_to_scalar_encoded_operand_rejection_bits(state, &operand);
   }
   if (rhs_encoded) {
-    const loom_vector_to_scalar_encoded_matrix_operand_t operand =
-        loom_vector_to_scalar_mma_encoded_operand(rhs);
+    const loom_vector_to_scalar_encoded_operand_t operand =
+        loom_vector_to_scalar_mma_encoded_operand(rhs, accumulator_type);
     rejection_bits |=
-        loom_vector_to_scalar_encoded_matrix_operand_rejection_bits(
-            state, &operand, loom_vector_to_scalar_lane_type(rhs->type),
-            accumulator_type);
+        loom_vector_to_scalar_encoded_operand_rejection_bits(state, &operand);
   }
 
   const loom_scalar_type_t lhs_element_type =
@@ -760,12 +758,10 @@ static iree_status_t loom_vector_to_scalar_mma_materialize_matrix_lane(
   loom_vector_to_scalar_index_term_t ordinal = {0};
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_matrix_ordinal(
       state, fragment, block, row, column, &ordinal));
-  const loom_vector_to_scalar_encoded_matrix_operand_t operand =
-      loom_vector_to_scalar_mma_encoded_operand(fragment);
-  return loom_vector_to_scalar_build_encoded_matrix_lane(
-      state, &operand, raw_lane,
-      loom_vector_to_scalar_lane_type(fragment->type), result_type, block, row,
-      column, ordinal, out_lane);
+  const loom_vector_to_scalar_encoded_operand_t operand =
+      loom_vector_to_scalar_mma_encoded_operand(fragment, result_type);
+  return loom_vector_to_scalar_build_decoded_lane(
+      state, &operand, raw_lane, block, row, column, ordinal, out_lane);
 }
 
 static iree_status_t loom_vector_to_scalar_mma_insert_matrix_lane(

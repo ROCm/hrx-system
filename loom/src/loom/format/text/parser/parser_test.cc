@@ -38,21 +38,49 @@ using ::loom::testing::ExpectU32Param;
 using ::loom::testing::FindDiagnostic;
 using ::loom::testing::GetStringParam;
 
-static const loom_encoding_vtable_t kDenseEncodingVtable = {
-    /*.name=*/IREE_SV("dense"),
+static const loom_encoding_family_descriptor_t kDenseEncodingDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(5, "dense"),
     /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
 };
+static const loom_encoding_vtable_t kDenseEncodingVtable = {
+    /*.descriptor=*/&kDenseEncodingDescriptor,
+};
 
+static const loom_attr_descriptor_t kQ8_0EncodingParameters[] = {{
+    /*.name=*/LOOM_BSTRING_REF(5, "block"),
+    /*.attr_kind=*/LOOM_ATTR_I64,
+    /*.flags=*/LOOM_ATTR_OPTIONAL,
+}};
+static const loom_encoding_family_descriptor_t kQ8_0EncodingDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(4, "q8_0"),
+    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    /*.parameter_count=*/IREE_ARRAYSIZE(kQ8_0EncodingParameters),
+    /*.parameter_descriptors=*/kQ8_0EncodingParameters,
+};
 static const loom_encoding_vtable_t kQ8_0EncodingVtable = {
-    /*.name=*/IREE_SV("q8_0"),
+    /*.descriptor=*/&kQ8_0EncodingDescriptor,
 };
 
+static const loom_encoding_family_descriptor_t kQ6KEncodingDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(4, "q6_k"),
+    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+};
 static const loom_encoding_vtable_t kQ6KEncodingVtable = {
-    /*.name=*/IREE_SV("q6_k"),
+    /*.descriptor=*/&kQ6KEncodingDescriptor,
 };
 
+static const loom_attr_descriptor_t kQuantizationEncodingParameters[] = {{
+    /*.name=*/LOOM_BSTRING_REF(4, "bits"),
+    /*.attr_kind=*/LOOM_ATTR_I64,
+}};
+static const loom_encoding_family_descriptor_t kQuantizationDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(12, "quantization"),
+    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    /*.parameter_count=*/IREE_ARRAYSIZE(kQuantizationEncodingParameters),
+    /*.parameter_descriptors=*/kQuantizationEncodingParameters,
+};
 static const loom_encoding_vtable_t kQuantizationEncodingVtable = {
-    /*.name=*/IREE_SV("quantization"),
+    /*.descriptor=*/&kQuantizationDescriptor,
 };
 
 class ParserTest : public ::testing::Test {
@@ -2461,13 +2489,13 @@ TEST_F(ParserTest, InvalidEncodingAliasReportsAliasToken) {
 TEST_F(ParserTest, InlineEncoding) {
   // Inline encoding definition directly in a tile type.
   loom_module_t* module = ParseOk(
-      "test.func @test_enc(%x: tile<4xf32, #dense<block=32>>) -> "
-      "(tile<4xf32, #dense<block=32>>) {\n"
-      "  test.yield %x : tile<4xf32, #dense<block=32>>\n"
+      "test.func @test_enc(%x: tile<4xf32, #q8_0<block=32>>) -> "
+      "(tile<4xf32, #q8_0<block=32>>) {\n"
+      "  test.yield %x : tile<4xf32, #q8_0<block=32>>\n"
       "}\n");
   if (module) {
     std::string text = PrintModule(module);
-    EXPECT_NE(text.find("#dense<block=32>"), std::string::npos);
+    EXPECT_NE(text.find("#q8_0<block=32>"), std::string::npos);
     loom_module_free(module);
   }
 }

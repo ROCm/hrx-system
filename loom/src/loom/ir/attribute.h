@@ -491,14 +491,20 @@ bool loom_attr_matches_scalar_type(loom_attribute_t attr,
                                    loom_attr_kind_t* out_expected_kind);
 
 // A named attribute: interned name paired with a typed value.
-// Used for encoding parameters (block=32, layout="nchw"),
-// dictionary attributes on ops, and anywhere else a key-value
-// attribute pair is needed.
+// Used for encoding parameters (block=32, layout="nchw"), dictionary
+// attributes on ops, and anywhere else a key-value attribute pair is needed.
 struct loom_named_attr_t {
+  // Interned attribute name in the owning module.
   loom_string_id_t name_id;
+  // Non-semantic metadata selected by the owning representation. Generic
+  // dictionary entries require this to remain zero.
   uint32_t reserved;
+  // Typed attribute value.
   loom_attribute_t value;
 };
+
+static_assert(sizeof(loom_named_attr_t) == 24,
+              "loom_named_attr_t must remain 24 bytes");
 
 // A named attribute update applied to an existing DICT attribute.
 //

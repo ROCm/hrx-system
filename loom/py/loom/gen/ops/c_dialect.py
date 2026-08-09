@@ -39,6 +39,7 @@ def generate_dialect_contents(generation: DialectGeneration) -> dict[str, str]:
             dialect.dialect_id,
             generation.table_shards,
             generation.parameterized_attrs,
+            generation.encoding_families,
             include_path=include_path,
         )
         if generation.table_shards is not None
@@ -48,6 +49,7 @@ def generate_dialect_contents(generation: DialectGeneration) -> dict[str, str]:
                 dialect.dialect_id,
                 generation.ops,
                 generation.parameterized_attrs,
+                generation.encoding_families,
                 include_path=include_path,
             )
         }
@@ -58,6 +60,7 @@ def generate_dialect_contents(generation: DialectGeneration) -> dict[str, str]:
             dialect.dialect_id,
             generation.ops,
             generation.parameterized_attrs,
+            generation.encoding_families,
         ),
         "builders.c": c_builders.generate_builders_c(
             dialect.name,

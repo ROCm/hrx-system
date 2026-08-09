@@ -57,26 +57,11 @@ static iree_status_t loom_vector_to_scalar_read_transform_descriptor(
     loom_vector_to_scalar_state_t* state,
     loom_encoding_numeric_transform_descriptor_t* out_descriptor) {
   loom_value_id_t transform_value = loom_vector_transform_transform(state->op);
-  loom_encoding_numeric_transform_read_t read =
-      loom_encoding_numeric_transform_read_descriptor(state->rewriter->module,
-                                                      transform_value);
-  switch (read.code) {
-    case LOOM_ENCODING_NUMERIC_TRANSFORM_READ_OK:
-      *out_descriptor = read.descriptor;
-      return iree_ok_status();
-    case LOOM_ENCODING_NUMERIC_TRANSFORM_READ_VALUE_OUT_OF_RANGE:
-    case LOOM_ENCODING_NUMERIC_TRANSFORM_READ_NOT_LOCALLY_DEFINED:
-    case LOOM_ENCODING_NUMERIC_TRANSFORM_READ_NOT_ENCODING_DEFINE:
-    case LOOM_ENCODING_NUMERIC_TRANSFORM_READ_NOT_NUMERIC_TRANSFORM:
-    case LOOM_ENCODING_NUMERIC_TRANSFORM_READ_MISSING_FAMILY:
-    case LOOM_ENCODING_NUMERIC_TRANSFORM_READ_NON_STRING_FAMILY:
-    case LOOM_ENCODING_NUMERIC_TRANSFORM_READ_UNKNOWN_FAMILY:
-    case LOOM_ENCODING_NUMERIC_TRANSFORM_READ_NON_STRING_NORMALIZATION:
-    case LOOM_ENCODING_NUMERIC_TRANSFORM_READ_UNKNOWN_NORMALIZATION:
-    case LOOM_ENCODING_NUMERIC_TRANSFORM_READ_MALFORMED_DYNAMIC_PARAM:
-      return loom_vector_to_scalar_emit_undecodable_transform_descriptor(state);
+  if (!loom_encoding_numeric_transform_try_read_verified_descriptor(
+          state->rewriter->module, transform_value, out_descriptor)) {
+    return loom_vector_to_scalar_emit_undecodable_transform_descriptor(state);
   }
-  return loom_vector_to_scalar_emit_undecodable_transform_descriptor(state);
+  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//

@@ -19,8 +19,10 @@ loom_generated_cc_library(
     "families.c"
     "matrix_operand.c"
     "numeric_transform.c"
+    "params.c"
     "roles.c"
     "storage.c"
+    "summary.c"
     "verify.c"
   GENERATED_SRC_FLAGS
     "--builders"
@@ -36,6 +38,7 @@ loom_generated_cc_library(
     "params.h"
     "roles.h"
     "storage.h"
+    "summary.h"
   ARGS
     "--dialect=encoding"
   DEPS
@@ -47,6 +50,32 @@ loom_generated_cc_library(
     loom::util::fact_table
     loom::util::numeric_format
     loom::util::stable_id
+)
+
+loom_cc_benchmark(
+  NAME
+    encoding_benchmark
+  SRCS
+    "encoding_benchmark.cc"
+  DEPS
+    ::encoding
+    iree::base
+    iree::base::internal::arena
+    iree::io::stream
+    iree::testing::benchmark_main
+    loom::format::bytecode::reader
+    loom::format::bytecode::writer
+    loom::format::text::parser
+    loom::format::text::printer
+    loom::ir
+    loom::ops::func
+    loom::ops::vector
+    loom::util::fact_table
+    loom::util::stream
+    loom::verify
+  ARGS
+    "--benchmark_filter=BM_.*Encoding.*/32"
+  TESTONLY
 )
 
 loom_cc_test(
@@ -65,20 +94,6 @@ loom_cc_test(
     loom::ir
     loom::ops::test
     loom::testing::diagnostic_matchers
-)
-
-loom_cc_test(
-  NAME
-    facts_test
-  SRCS
-    "facts_test.cc"
-  DEPS
-    ::encoding
-    iree::base::internal::arena
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::ir
-    loom::util::fact_table
 )
 
 loom_cc_test(

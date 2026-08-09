@@ -95,8 +95,6 @@ typedef struct loom_bytecode_reader_state_t {
   const loom_op_vtable_t** ops;   // Current module OPS resolved vtables.
   loom_op_kind_t* op_kinds;       // Current module OPS resolved op kinds.
   iree_host_size_t op_count;      // Number of current module OPS entries.
-  // Current module ENCODINGS family vtables.
-  const loom_encoding_vtable_t** encoding_families;
   loom_string_id_t* encoding_family_name_ids;  // Family name string IDs.
   iree_host_size_t encoding_family_count;      // Number of encoding families.
   iree_host_size_t encoding_count;             // Number of encoding instances.
@@ -1665,10 +1663,6 @@ static iree_status_t loom_bytecode_reader_read_encodings(
         LOOM_BYTECODE_MAX_ENCODING_COUNT, family_count_offset);
   }
   if (family_count > 0) {
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(reader->arena, (iree_host_size_t)family_count,
-                                  sizeof(const loom_encoding_vtable_t*),
-                                  (void**)&reader->encoding_families));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         reader->arena, (iree_host_size_t)family_count, sizeof(loom_string_id_t),
         (void**)&reader->encoding_family_name_ids));
@@ -1685,15 +1679,13 @@ static iree_status_t loom_bytecode_reader_read_encodings(
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_string_ref(
         reader, name_id, IREE_SV("encoding_family_name"), name_offset, &name));
     if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
-    const loom_encoding_vtable_t* vtable =
-        loom_context_lookup_encoding_vtable(reader->context, name);
-    if (!vtable) {
+    if (loom_context_lookup_encoding_family_by_name(reader->context, name) ==
+        LOOM_ENCODING_FAMILY_ID_INVALID) {
       return loom_bytecode_reader_emit_invalid_field(
           reader, IREE_SV("ENCODINGS"), IREE_SV("family"), i,
           IREE_SV("name_id"), name_offset,
           IREE_SV("encoding_family_is_not_registered_in_the_context"));
     }
-    reader->encoding_families[i] = vtable;
     reader->encoding_family_name_ids[i] = (loom_string_id_t)name_id;
   }
 
@@ -6330,7 +6322,6 @@ static iree_status_t loom_bytecode_reader_read_module_metadata(
   reader->ops = NULL;
   reader->op_kinds = NULL;
   reader->op_count = 0;
-  reader->encoding_families = NULL;
   reader->encoding_family_name_ids = NULL;
   reader->encoding_family_count = 0;
   reader->encoding_count = 0;
@@ -6440,6 +6431,7 @@ static iree_status_t loom_bytecode_reader_allocate_output_module(
           (iree_host_size_t)reader->current_module_summary.value_count,
       .string_count = reader->string_count,
       .type_count = reader->type_count,
+      .encoding_count = reader->encoding_count,
       .symbol_count = reader->symbol_count,
   };
   // Bytecode string IDs must materialize 1:1 into module string IDs. Allocate

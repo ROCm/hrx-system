@@ -15,8 +15,10 @@ from loom.dsl import (
     ATTR_TYPE_ENUM,
     ATTR_TYPE_FLAGS,
     ATTR_TYPE_PREDICATE_LIST,
+    AttrDef,
     ContractFamily,
     EffectKind,
+    EncodingFamilyDef,
     EnumDef,
     Op,
     OperandOwnershipEffect,
@@ -44,6 +46,12 @@ from loom.gen.ops.c_enums import (
 from loom.gen.ops.c_enums import error_ref_literal as _error_ref_literal
 from loom.gen.ops.c_names import COPYRIGHT
 from loom.gen.ops.c_names import c_dialect_enum as _c_dialect_enum
+from loom.gen.ops.c_names import (
+    c_encoding_family_descriptor_name as _c_encoding_family_descriptor_name,
+)
+from loom.gen.ops.c_names import (
+    c_encoding_family_prefix as _c_encoding_family_prefix,
+)
 from loom.gen.ops.c_names import (
     c_parameterized_attr_enum_name as _c_parameterized_attr_enum_name,
 )
@@ -239,45 +247,7 @@ def _emit_parameterized_attr_tables(
 
     for attr_def in parameterized_attrs:
         prefix = _c_parameterized_attr_prefix(attr_def)
-        for parameter in attr_def.parameters:
-            if parameter.attr_type in ("enum", "enum_array"):
-                assert parameter.enum_def is not None
-                _emit_enum_case_names(
-                    lines,
-                    f"{prefix}_{parameter.name}_enum_names",
-                    parameter.enum_def,
-                )
-            if parameter.symbol_ref is not None:
-                flags = c_symbols.symbol_interface_flags(parameter.symbol_ref.interfaces)
-                lines.append(f"static const loom_symbol_reference_descriptor_t {prefix}_{parameter.name}_symbol_ref = {{{_bstring_expr(parameter.symbol_ref.name)}, {flags}}};")
-
-        if attr_def.parameters:
-            lines.append(f"static const loom_attr_descriptor_t {prefix}_parameter_desc[] = {{")
-            for parameter in attr_def.parameters:
-                attr_kind = ATTR_KIND_MAP[parameter.attr_type]
-                flags_parts = []
-                if parameter.optional:
-                    flags_parts.append("LOOM_ATTR_OPTIONAL")
-                if parameter.elide_default:
-                    flags_parts.append("LOOM_ATTR_ELIDE_DEFAULT")
-                if parameter.open_enum:
-                    flags_parts.append("LOOM_ATTR_OPEN_ENUM")
-                lines.append("    {")
-                lines.append(f"        .name = {_bstring_expr(parameter.name)},")
-                lines.append(f"        .attr_kind = {attr_kind},")
-                if flags_parts:
-                    lines.append(f"        .flags = {' | '.join(flags_parts)},")
-                if parameter.attr_type in ("enum", "enum_array"):
-                    enum_names = f"{prefix}_{parameter.name}_enum_names"
-                    lines.append(f"        .enum_max_value = (uint8_t)(IREE_ARRAYSIZE({enum_names}) - 1),")
-                    lines.append(f"        .enum_case_names = {enum_names},")
-                if parameter.symbol_ref is not None:
-                    lines.append(f"        .reference.symbol_ref = &{prefix}_{parameter.name}_symbol_ref,")
-                if parameter.attr_type == "parameterized":
-                    expected_family = _c_parameterized_attr_enum_name(parameter.parameterized_attr) if parameter.parameterized_attr is not None else "LOOM_PARAMETERIZED_ATTR_KIND_ANY"
-                    lines.append(f"        .reference.parameterized_attr_kind = {expected_family},")
-                lines.append("    },")
-            lines.append("};")
+        _emit_attr_descriptor_table(lines, prefix, attr_def.parameters)
 
     if parameterized_attrs:
         lines.append(f"static const loom_parameterized_attr_descriptor_t loom_{dialect_name}_parameterized_attr_array[] = {{")
@@ -294,6 +264,89 @@ def _emit_parameterized_attr_tables(
         lines.append("")
 
 
+def _emit_attr_descriptor_table(
+    lines: list[str],
+    prefix: str,
+    parameters: Sequence[AttrDef],
+) -> str | None:
+    """Emits one shared named-attribute descriptor table."""
+
+    if not parameters:
+        return None
+    for parameter in parameters:
+        if parameter.attr_type in ("enum", "enum_array"):
+            assert parameter.enum_def is not None
+            _emit_enum_case_names(
+                lines,
+                f"{prefix}_{parameter.name}_enum_names",
+                parameter.enum_def,
+            )
+        if parameter.symbol_ref is not None:
+            flags = c_symbols.symbol_interface_flags(parameter.symbol_ref.interfaces)
+            lines.append(f"static const loom_symbol_reference_descriptor_t {prefix}_{parameter.name}_symbol_ref = {{{_bstring_expr(parameter.symbol_ref.name)}, {flags}}};")
+
+    table_name = f"{prefix}_parameter_desc"
+    lines.append(f"static const loom_attr_descriptor_t {table_name}[] = {{")
+    for parameter in parameters:
+        attr_kind = ATTR_KIND_MAP[parameter.attr_type]
+        flags_parts = []
+        if parameter.optional:
+            flags_parts.append("LOOM_ATTR_OPTIONAL")
+        if parameter.elide_default:
+            flags_parts.append("LOOM_ATTR_ELIDE_DEFAULT")
+        if parameter.open_enum:
+            flags_parts.append("LOOM_ATTR_OPEN_ENUM")
+        if parameter.bare_identifier:
+            flags_parts.append("LOOM_ATTR_BARE_IDENTIFIER")
+        lines.append("    {")
+        lines.append(f"        .name = {_bstring_expr(parameter.name)},")
+        lines.append(f"        .attr_kind = {attr_kind},")
+        if flags_parts:
+            lines.append(f"        .flags = {' | '.join(flags_parts)},")
+        if parameter.attr_type in ("enum", "enum_array"):
+            enum_names = f"{prefix}_{parameter.name}_enum_names"
+            lines.append(f"        .enum_max_value = (uint8_t)(IREE_ARRAYSIZE({enum_names}) - 1),")
+            lines.append(f"        .enum_case_names = {enum_names},")
+        if parameter.symbol_ref is not None:
+            lines.append(f"        .reference.symbol_ref = &{prefix}_{parameter.name}_symbol_ref,")
+        if parameter.attr_type == "parameterized":
+            expected_family = _c_parameterized_attr_enum_name(parameter.parameterized_attr) if parameter.parameterized_attr is not None else "LOOM_PARAMETERIZED_ATTR_KIND_ANY"
+            lines.append(f"        .reference.parameterized_attr_kind = {expected_family},")
+        lines.append("    },")
+    lines.append("};")
+    return table_name
+
+
+def _emit_encoding_family_tables(lines: list[str], encoding_families: Sequence[EncodingFamilyDef]) -> None:
+    """Emits generated encoding-family descriptors."""
+
+    for family in encoding_families:
+        prefix = _c_encoding_family_prefix(family)
+        parameter_table = _emit_attr_descriptor_table(lines, prefix, family.parameters)
+        dynamic_parameter_table = None
+        if family.dynamic_parameters:
+            dynamic_parameter_table = f"{prefix}_dynamic_parameter_desc"
+            lines.append(f"static const loom_encoding_dynamic_parameter_descriptor_t {dynamic_parameter_table}[] = {{")
+            for parameter in family.dynamic_parameters:
+                lines.append("    {")
+                lines.append(f"        .name = {_bstring_expr(parameter.name)},")
+                lines.append(f"        .type_constraint = {TYPE_CONSTRAINT_MAP[parameter.type_constraint]},")
+                lines.append("    },")
+            lines.append("};")
+            lines.append("")
+        lines.append(f"const loom_encoding_family_descriptor_t {_c_encoding_family_descriptor_name(family)} = {{")
+        lines.append(f"    .name = {_bstring_expr(family.name)},")
+        lines.append(f"    .role = {family.role.c_name},")
+        if parameter_table is not None:
+            lines.append(f"    .parameter_count = IREE_ARRAYSIZE({parameter_table}),")
+            lines.append(f"    .parameter_descriptors = {parameter_table},")
+        if dynamic_parameter_table is not None:
+            lines.append(f"    .dynamic_parameter_count = IREE_ARRAYSIZE({dynamic_parameter_table}),")
+            lines.append(f"    .dynamic_parameter_descriptors = {dynamic_parameter_table},")
+        lines.append("};")
+        lines.append("")
+
+
 # ============================================================================
 # tables.c generation
 # ============================================================================
@@ -304,6 +357,7 @@ def generate_tables_c(
     dialect_id: int,
     ops: Sequence[Op],
     parameterized_attrs: Sequence[ParameterizedAttrDef] = (),
+    encoding_families: Sequence[EncodingFamilyDef] = (),
     *,
     include_path: str | None = None,
     emit_registration: bool = True,
@@ -763,6 +817,7 @@ def generate_tables_c(
     # Parameterized attribute families share the ordinary attribute schema but
     # retain a distinct dialect-owned outer identity.
     _emit_parameterized_attr_tables(lines, dialect_name, parameterized_attrs)
+    _emit_encoding_family_tables(lines, encoding_families)
 
     lines.append("#undef _OP_NAME")
     lines.append("#undef _BSTRING")
@@ -824,6 +879,7 @@ def generate_tables_aggregator_c(
     dialect_id: int,
     ops: Sequence[Op],
     parameterized_attrs: Sequence[ParameterizedAttrDef] = (),
+    encoding_families: Sequence[EncodingFamilyDef] = (),
     *,
     include_path: str | None = None,
 ) -> str:
@@ -839,6 +895,7 @@ def generate_tables_aggregator_c(
     lines.append("")
 
     _emit_parameterized_attr_tables(lines, dialect_name, parameterized_attrs)
+    _emit_encoding_family_tables(lines, encoding_families)
 
     c_arrays.append_value_array(
         lines,
@@ -862,6 +919,7 @@ def generate_sharded_tables_c(
     dialect_id: int,
     category_groups: Sequence[tuple[Any, Sequence[Op]]],
     parameterized_attrs: Sequence[ParameterizedAttrDef] = (),
+    encoding_families: Sequence[EncodingFamilyDef] = (),
     *,
     include_path: str | None = None,
 ) -> dict[str, str]:
@@ -889,6 +947,7 @@ def generate_sharded_tables_c(
         dialect_id,
         all_ops,
         parameterized_attrs,
+        encoding_families,
         include_path=include_path,
     )
     table_files["tables.h"] = generate_tables_h(dialect_name, all_ops, include_path=include_path)

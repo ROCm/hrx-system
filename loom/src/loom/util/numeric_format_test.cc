@@ -142,4 +142,36 @@ TEST(NumericFormatTest, MapsDirectScalarTypesToNumericFormats) {
             LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
 }
 
+TEST(NumericFormatTest, MapsNumericFormatsToDirectScalarTypes) {
+  loom_scalar_type_t type = LOOM_SCALAR_TYPE_COUNT_;
+  EXPECT_TRUE(loom_numeric_format_direct_scalar_type(
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN, &type));
+  EXPECT_EQ(type, LOOM_SCALAR_TYPE_F8E4M3);
+  EXPECT_TRUE(loom_numeric_format_direct_scalar_type(
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ, &type));
+  EXPECT_EQ(type, LOOM_SCALAR_TYPE_F8E5M2);
+  EXPECT_TRUE(loom_numeric_format_direct_scalar_type(
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_U32, &type));
+  EXPECT_EQ(type, LOOM_SCALAR_TYPE_I32);
+  EXPECT_TRUE(loom_numeric_format_direct_scalar_type(
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I8, &type));
+  EXPECT_EQ(type, LOOM_SCALAR_TYPE_I8);
+
+  EXPECT_FALSE(loom_numeric_format_direct_scalar_type(
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_F4_E2M1, &type));
+  EXPECT_FALSE(loom_numeric_format_direct_scalar_type(
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_UNKNOWN, &type));
+}
+
+TEST(NumericFormatTest, DescribesUnsignedIntegerSemantics) {
+  EXPECT_TRUE(loom_numeric_format_uses_unsigned_integer_semantics(
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_U8));
+  EXPECT_TRUE(loom_numeric_format_uses_unsigned_integer_semantics(
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_CODEBOOK_INDEX));
+  EXPECT_FALSE(loom_numeric_format_uses_unsigned_integer_semantics(
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_I8));
+  EXPECT_FALSE(loom_numeric_format_uses_unsigned_integer_semantics(
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN));
+}
+
 }  // namespace

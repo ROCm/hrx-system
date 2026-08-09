@@ -37,32 +37,14 @@ typedef enum loom_encoding_numeric_transform_normalization_e {
   LOOM_ENCODING_NUMERIC_TRANSFORM_NORMALIZATION_ORTHONORMAL = 1,
 } loom_encoding_numeric_transform_normalization_t;
 
-// Conservative decode result. Non-OK results let each consumer choose the
-// right behavior: verifier silence, unknown facts, or lowering failure.
-typedef enum loom_encoding_numeric_transform_read_code_e {
-  // Descriptor was decoded successfully.
-  LOOM_ENCODING_NUMERIC_TRANSFORM_READ_OK = 0,
-  // The transform SSA value is not in the module value table.
-  LOOM_ENCODING_NUMERIC_TRANSFORM_READ_VALUE_OUT_OF_RANGE = 1,
-  // The transform SSA value is a block argument or otherwise non-local.
-  LOOM_ENCODING_NUMERIC_TRANSFORM_READ_NOT_LOCALLY_DEFINED = 2,
-  // The transform SSA value is not produced by encoding.define.
-  LOOM_ENCODING_NUMERIC_TRANSFORM_READ_NOT_ENCODING_DEFINE = 3,
-  // The encoding.define spec is not #numeric_transform.
-  LOOM_ENCODING_NUMERIC_TRANSFORM_READ_NOT_NUMERIC_TRANSFORM = 4,
-  // The required static family parameter is absent.
-  LOOM_ENCODING_NUMERIC_TRANSFORM_READ_MISSING_FAMILY = 5,
-  // The family parameter exists but is not a static string.
-  LOOM_ENCODING_NUMERIC_TRANSFORM_READ_NON_STRING_FAMILY = 6,
-  // The family string is not part of the supported family vocabulary.
-  LOOM_ENCODING_NUMERIC_TRANSFORM_READ_UNKNOWN_FAMILY = 7,
-  // The normalization parameter exists but is not a static string.
-  LOOM_ENCODING_NUMERIC_TRANSFORM_READ_NON_STRING_NORMALIZATION = 8,
-  // The normalization string is not part of the supported vocabulary.
-  LOOM_ENCODING_NUMERIC_TRANSFORM_READ_UNKNOWN_NORMALIZATION = 9,
-  // A dynamic parameter name does not map to a valid operand ordinal.
-  LOOM_ENCODING_NUMERIC_TRANSFORM_READ_MALFORMED_DYNAMIC_PARAM = 10,
-} loom_encoding_numeric_transform_read_code_t;
+// Static-or-dynamic element extent selected by a numeric transform.
+typedef struct loom_encoding_numeric_transform_extent_t {
+  // Positive static extent, or zero when not statically specified.
+  int64_t static_value;
+
+  // Dynamic index value carrying the extent, or invalid when absent.
+  loom_value_id_t dynamic_value;
+} loom_encoding_numeric_transform_extent_t;
 
 // Decoded #numeric_transform descriptor.
 typedef struct loom_encoding_numeric_transform_descriptor_t {
@@ -71,6 +53,12 @@ typedef struct loom_encoding_numeric_transform_descriptor_t {
 
   // Static normalization convention. Defaults to none when omitted.
   loom_encoding_numeric_transform_normalization_t normalization;
+
+  // Number of input elements transformed along the last vector axis.
+  loom_encoding_numeric_transform_extent_t input_extent;
+
+  // Number of output elements produced along the last vector axis.
+  loom_encoding_numeric_transform_extent_t output_extent;
 
   // Optional dynamic i1 vector carrying per-lane negative-sign bits.
   loom_value_id_t signs;
@@ -84,19 +72,6 @@ typedef struct loom_encoding_numeric_transform_descriptor_t {
   // Optional dynamic seed for deterministic sign/permutation generation.
   loom_value_id_t seed;
 } loom_encoding_numeric_transform_descriptor_t;
-
-// Descriptor read result including the offending parameter when applicable.
-typedef struct loom_encoding_numeric_transform_read_t {
-  // Decoded descriptor. Only complete when code is READ_OK.
-  loom_encoding_numeric_transform_descriptor_t descriptor;
-
-  // Decode result category.
-  loom_encoding_numeric_transform_read_code_t code;
-
-  // Parameter name associated with code, or empty when no single parameter
-  // caused the result.
-  iree_string_view_t parameter_name;
-} loom_encoding_numeric_transform_read_t;
 
 // Returns the canonical encoding family spelling.
 iree_string_view_t loom_encoding_numeric_transform_name(void);
@@ -132,13 +107,20 @@ bool loom_encoding_numeric_transform_seed_sign_bit(int64_t seed,
                                                    int64_t input_index,
                                                    bool* out_negate);
 
-// Decodes the numeric transform descriptor produced by |value_id|. This never
-// emits diagnostics or returns iree_status_t: unsupported/non-local/malformed
-// cases are ordinary query results that consumers interpret at their own
-// invariant boundary.
-loom_encoding_numeric_transform_read_t
-loom_encoding_numeric_transform_read_descriptor(const loom_module_t* module,
-                                                loom_value_id_t value_id);
+// Attempts to decode the numeric transform descriptor produced by |value_id|
+// into |out_descriptor|. Returns false without modifying the output or
+// emitting diagnostics for unsupported, non-local, or malformed producers.
+// Callers use that conservative result at their own invariant boundary.
+bool loom_encoding_numeric_transform_try_read_unverified_descriptor(
+    const loom_module_t* module, loom_value_id_t value_id,
+    loom_encoding_numeric_transform_descriptor_t* out_descriptor);
+
+// Attempts to decode a descriptor from verified IR. Valid non-local values
+// still return false, while locally defined numeric transforms consume their
+// established family and operand invariants without revalidation.
+bool loom_encoding_numeric_transform_try_read_verified_descriptor(
+    const loom_module_t* module, loom_value_id_t value_id,
+    loom_encoding_numeric_transform_descriptor_t* out_descriptor);
 
 #ifdef __cplusplus
 }
