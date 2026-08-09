@@ -71,6 +71,7 @@ loom_cc_benchmark(
         "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/vector",
         "//loom/src/loom/util:fact_table",
         "//loom/src/loom/util:stream",
         "//loom/src/loom/verify",

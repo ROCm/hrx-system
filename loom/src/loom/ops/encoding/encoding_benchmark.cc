@@ -4,11 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Benchmarks static encoding construction and dynamic encoding definitions at
-// scales representative of large JIT modules. The rows use production text,
-// bytecode, verifier, and fact paths so descriptor changes remain accountable
-// for time and memory. Operation-local rows use fresh reusable block pools and
-// report both live arena storage and pool high-water allocation.
+// Benchmarks static encoding construction, dynamic encoding definitions, and
+// repeated vector encoding use at scales representative of large JIT modules.
+// The rows use production text, bytecode, verifier, and fact paths so
+// descriptor changes remain accountable for time and memory. Operation-local
+// rows use fresh reusable block pools and report both live arena storage and
+// pool high-water allocation.
 
 #include <cstdint>
 #include <string>
@@ -29,6 +30,7 @@
 #include "loom/ops/encoding/roles.h"
 #include "loom/ops/encoding/storage.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/vector/ops.h"
 #include "loom/util/fact_table.h"
 #include "loom/util/stream.h"
 #include "loom/verify/verify.h"
@@ -40,7 +42,7 @@ enum class SchemaPopulation {
   kDistinct,
 };
 
-static void DistinctSchemaCounts(::benchmark::Benchmark* benchmark) {
+static void ScaledEncodingCounts(::benchmark::Benchmark* benchmark) {
   benchmark->Arg(1)->Arg(32)->Arg(256)->Arg(4096);
 }
 
@@ -148,6 +150,7 @@ class EncodingBenchmarkFixture {
     loom_context_initialize(iree_allocator_system(), &context_);
     RegisterDialect(LOOM_DIALECT_ENCODING, loom_encoding_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_VECTOR, loom_vector_dialect_vtables);
     IREE_CHECK_OK(loom_context_register_builtin_encoding_vtables(&context_));
     IREE_CHECK_OK(loom_context_finalize(&context_));
   }
@@ -243,6 +246,38 @@ static std::string BuildDynamicNumericTransformModule(
   return source;
 }
 
+static std::string BuildVectorEncodingUseModule(int64_t pair_count) {
+  std::string source;
+  source.reserve((size_t)pair_count * 420);
+  source.append(
+      "func.def @encoding_uses(%source: vector<32xf32>, %scale: "
+      "vector<1xf32>) {\n"
+      "  %schema = encoding.define "
+      "#matrix_operand<element_format=f8e4m3fn, "
+      "payload_elements=32, payload_packing=dense_lanes, "
+      "payload_registers=0, scale_format=f32, "
+      "scale_group_elements=32, scale_operands=1, "
+      "scale_topology=block_1d, affine=scale_only> : "
+      "encoding<schema>\n");
+  for (int64_t i = 0; i < pair_count; ++i) {
+    source.append("  %encoded");
+    source.append(std::to_string(i));
+    source.append(
+        " = vector.encode %source using %schema {scale = %scale : "
+        "vector<1xf32>} : vector<32xf32>, encoding<schema> -> "
+        "vector<32xf8E4M3>\n");
+    source.append("  %decoded");
+    source.append(std::to_string(i));
+    source.append(" = vector.decode %encoded");
+    source.append(std::to_string(i));
+    source.append(
+        " using %schema {scale = %scale : vector<1xf32>} : "
+        "vector<32xf8E4M3>, encoding<schema> -> vector<32xf32>\n");
+  }
+  source.append("  func.return\n}\n");
+  return source;
+}
+
 static loom_module_t* ParseModule(EncodingBenchmarkFixture& fixture,
                                   const std::string& source) {
   loom_module_t* module = nullptr;
@@ -258,6 +293,25 @@ static loom_func_like_t GetOnlyFunction(loom_module_t* module) {
   loom_op_t* op = loom_block_op(module_block, 0);
   if (!loom_func_def_isa(op)) return (loom_func_like_t){0};
   return loom_func_like_cast(module, op);
+}
+
+static bool IsExpectedVectorEncodingUseModule(loom_module_t* module,
+                                              int64_t pair_count) {
+  loom_func_like_t function = GetOnlyFunction(module);
+  if (!function.op) return false;
+  loom_block_t* body = loom_region_entry_block(loom_func_like_body(function));
+  if (!body || body->op_count != (iree_host_size_t)(pair_count * 2 + 2)) {
+    return false;
+  }
+
+  int64_t encode_count = 0;
+  int64_t decode_count = 0;
+  loom_op_t* op = nullptr;
+  loom_block_for_each_op(body, op) {
+    encode_count += loom_vector_encode_isa(op) ? 1 : 0;
+    decode_count += loom_vector_decode_isa(op) ? 1 : 0;
+  }
+  return encode_count == pair_count && decode_count == pair_count;
 }
 
 static iree_io_stream_t* CreateBytecodeStream() {
@@ -339,7 +393,7 @@ BENCHMARK(BM_ParseRepeatedStaticEncoding)->Arg(256)->Arg(4096);
 static void BM_ParseDistinctStaticEncodings(benchmark::State& state) {
   BenchmarkParseStaticEncodings(state, SchemaPopulation::kDistinct);
 }
-BENCHMARK(BM_ParseDistinctStaticEncodings)->Apply(DistinctSchemaCounts);
+BENCHMARK(BM_ParseDistinctStaticEncodings)->Apply(ScaledEncodingCounts);
 
 static void BM_PrintDistinctStaticEncodings(benchmark::State& state) {
   const int64_t definition_count = state.range(0);
@@ -367,7 +421,7 @@ static void BM_PrintDistinctStaticEncodings(benchmark::State& state) {
   state.SetBytesProcessed(state.iterations() * printed_byte_count);
   loom_module_free(module);
 }
-BENCHMARK(BM_PrintDistinctStaticEncodings)->Apply(DistinctSchemaCounts);
+BENCHMARK(BM_PrintDistinctStaticEncodings)->Apply(ScaledEncodingCounts);
 
 static void BM_WriteDistinctStaticEncodings(benchmark::State& state) {
   const int64_t definition_count = state.range(0);
@@ -402,7 +456,7 @@ static void BM_WriteDistinctStaticEncodings(benchmark::State& state) {
   iree_io_stream_release(stream);
   loom_module_free(module);
 }
-BENCHMARK(BM_WriteDistinctStaticEncodings)->Apply(DistinctSchemaCounts);
+BENCHMARK(BM_WriteDistinctStaticEncodings)->Apply(ScaledEncodingCounts);
 
 static void BM_ReadDistinctStaticEncodings(benchmark::State& state) {
   const int64_t definition_count = state.range(0);
@@ -435,7 +489,7 @@ static void BM_ReadDistinctStaticEncodings(benchmark::State& state) {
   state.SetItemsProcessed(state.iterations() * definition_count);
   state.SetBytesProcessed(state.iterations() * (int64_t)bytes.size());
 }
-BENCHMARK(BM_ReadDistinctStaticEncodings)->Apply(DistinctSchemaCounts);
+BENCHMARK(BM_ReadDistinctStaticEncodings)->Apply(ScaledEncodingCounts);
 
 static void BM_QueryDistinctStaticEncodingRoles(benchmark::State& state) {
   const int64_t definition_count = state.range(0);
@@ -467,7 +521,7 @@ static void BM_QueryDistinctStaticEncodingRoles(benchmark::State& state) {
   state.SetItemsProcessed(state.iterations() * definition_count);
   loom_module_free(module);
 }
-BENCHMARK(BM_QueryDistinctStaticEncodingRoles)->Apply(DistinctSchemaCounts);
+BENCHMARK(BM_QueryDistinctStaticEncodingRoles)->Apply(ScaledEncodingCounts);
 
 static void BM_QueryDistinctStaticStorageSchemas(benchmark::State& state) {
   const int64_t definition_count = state.range(0);
@@ -509,7 +563,7 @@ static void BM_QueryDistinctStaticStorageSchemas(benchmark::State& state) {
   state.SetItemsProcessed(state.iterations() * definition_count);
   loom_module_free(module);
 }
-BENCHMARK(BM_QueryDistinctStaticStorageSchemas)->Apply(DistinctSchemaCounts);
+BENCHMARK(BM_QueryDistinctStaticStorageSchemas)->Apply(ScaledEncodingCounts);
 
 static void BM_ParseDynamicEncodingDefinitions(benchmark::State& state) {
   const int64_t definition_count = state.range(0);
@@ -530,7 +584,7 @@ static void BM_ParseDynamicEncodingDefinitions(benchmark::State& state) {
   state.SetItemsProcessed(state.iterations() * definition_count);
   state.SetBytesProcessed(state.iterations() * (int64_t)source.size());
 }
-BENCHMARK(BM_ParseDynamicEncodingDefinitions)->Apply(DistinctSchemaCounts);
+BENCHMARK(BM_ParseDynamicEncodingDefinitions)->Apply(ScaledEncodingCounts);
 
 static void BM_PrintDynamicEncodingDefinitions(benchmark::State& state) {
   const int64_t definition_count = state.range(0);
@@ -557,7 +611,7 @@ static void BM_PrintDynamicEncodingDefinitions(benchmark::State& state) {
   state.SetBytesProcessed(state.iterations() * printed_byte_count);
   loom_module_free(module);
 }
-BENCHMARK(BM_PrintDynamicEncodingDefinitions)->Apply(DistinctSchemaCounts);
+BENCHMARK(BM_PrintDynamicEncodingDefinitions)->Apply(ScaledEncodingCounts);
 
 static void BM_WriteDynamicEncodingDefinitions(benchmark::State& state) {
   const int64_t definition_count = state.range(0);
@@ -586,7 +640,7 @@ static void BM_WriteDynamicEncodingDefinitions(benchmark::State& state) {
   iree_io_stream_release(stream);
   loom_module_free(module);
 }
-BENCHMARK(BM_WriteDynamicEncodingDefinitions)->Apply(DistinctSchemaCounts);
+BENCHMARK(BM_WriteDynamicEncodingDefinitions)->Apply(ScaledEncodingCounts);
 
 static void BM_ReadDynamicEncodingDefinitions(benchmark::State& state) {
   const int64_t definition_count = state.range(0);
@@ -618,14 +672,200 @@ static void BM_ReadDynamicEncodingDefinitions(benchmark::State& state) {
   state.SetItemsProcessed(state.iterations() * definition_count);
   state.SetBytesProcessed(state.iterations() * (int64_t)bytes.size());
 }
-BENCHMARK(BM_ReadDynamicEncodingDefinitions)->Apply(DistinctSchemaCounts);
+BENCHMARK(BM_ReadDynamicEncodingDefinitions)->Apply(ScaledEncodingCounts);
 
-static void VerifyDynamicEncodingModule(loom_module_t* module) {
+static void VerifyEncodingModule(loom_module_t* module) {
   loom_verify_options_t options = {};
   loom_verify_result_t result = {};
   IREE_CHECK_OK(loom_verify_module(module, &options, &result));
   IREE_ASSERT(result.error_count == 0);
 }
+
+static void BM_ParseVectorEncodingUses(benchmark::State& state) {
+  const int64_t pair_count = state.range(0);
+  const std::string source = BuildVectorEncodingUseModule(pair_count);
+  EncodingBenchmarkFixture fixture;
+  OperationMemoryTracker memory_tracker(fixture.block_pool());
+
+  loom_module_t* warm_module = ParseModule(fixture, source);
+  if (!IsExpectedVectorEncodingUseModule(warm_module, pair_count)) {
+    state.SkipWithError("vector encoding use module was malformed");
+    loom_module_free(warm_module);
+    return;
+  }
+  memory_tracker.MarkWarmupComplete(warm_module);
+  loom_module_free(warm_module);
+
+  for (auto _ : state) {
+    loom_module_t* module = ParseModule(fixture, source);
+    benchmark::DoNotOptimize(module);
+    loom_module_free(module);
+  }
+  memory_tracker.SetCounters(state);
+  state.SetItemsProcessed(state.iterations() * pair_count * 2);
+  state.SetBytesProcessed(state.iterations() * (int64_t)source.size());
+}
+BENCHMARK(BM_ParseVectorEncodingUses)->Apply(ScaledEncodingCounts);
+
+static void BM_PrintVectorEncodingUses(benchmark::State& state) {
+  const int64_t pair_count = state.range(0);
+  const std::string source = BuildVectorEncodingUseModule(pair_count);
+  EncodingBenchmarkFixture fixture;
+  loom_module_t* module = ParseModule(fixture, source);
+  OperationMemoryTracker memory_tracker(fixture.block_pool());
+  if (!IsExpectedVectorEncodingUseModule(module, pair_count)) {
+    state.SkipWithError("vector encoding use module was malformed");
+    loom_module_free(module);
+    return;
+  }
+
+  loom_output_stream_t preflight_stream;
+  loom_output_stream_null(&preflight_stream);
+  IREE_CHECK_OK(loom_text_print_module(module, &preflight_stream,
+                                       LOOM_TEXT_PRINT_DEFAULT));
+  const int64_t printed_byte_count = (int64_t)preflight_stream.offset;
+  memory_tracker.MarkWarmupComplete(module);
+  for (auto _ : state) {
+    loom_output_stream_t stream;
+    loom_output_stream_null(&stream);
+    IREE_CHECK_OK(
+        loom_text_print_module(module, &stream, LOOM_TEXT_PRINT_DEFAULT));
+    benchmark::DoNotOptimize(stream.offset);
+  }
+  memory_tracker.SetCounters(state);
+  state.SetItemsProcessed(state.iterations() * pair_count * 2);
+  state.SetBytesProcessed(state.iterations() * printed_byte_count);
+  loom_module_free(module);
+}
+BENCHMARK(BM_PrintVectorEncodingUses)->Apply(ScaledEncodingCounts);
+
+static void BM_WriteVectorEncodingUses(benchmark::State& state) {
+  const int64_t pair_count = state.range(0);
+  const std::string source = BuildVectorEncodingUseModule(pair_count);
+  EncodingBenchmarkFixture fixture;
+  loom_module_t* module = ParseModule(fixture, source);
+  if (!IsExpectedVectorEncodingUseModule(module, pair_count)) {
+    state.SkipWithError("vector encoding use module was malformed");
+    loom_module_free(module);
+    return;
+  }
+
+  ScopedBlockPool write_pool;
+  OperationMemoryTracker memory_tracker(write_pool.get());
+  iree_io_stream_t* stream = CreateBytecodeStream();
+  IREE_CHECK_OK(
+      loom_bytecode_write_module(module, stream, nullptr, write_pool.get()));
+  const int64_t serialized_byte_count = (int64_t)iree_io_stream_length(stream);
+  memory_tracker.MarkWarmupComplete(module);
+  state.counters["serialized_bytes"] = (double)serialized_byte_count;
+
+  for (auto _ : state) {
+    IREE_CHECK_OK(iree_io_stream_seek(stream, IREE_IO_STREAM_SEEK_SET, 0));
+    IREE_CHECK_OK(
+        loom_bytecode_write_module(module, stream, nullptr, write_pool.get()));
+    benchmark::DoNotOptimize(stream);
+  }
+  memory_tracker.SetCounters(state);
+  state.SetItemsProcessed(state.iterations() * pair_count * 2);
+  state.SetBytesProcessed(state.iterations() * serialized_byte_count);
+  iree_io_stream_release(stream);
+  loom_module_free(module);
+}
+BENCHMARK(BM_WriteVectorEncodingUses)->Apply(ScaledEncodingCounts);
+
+static void BM_ReadVectorEncodingUses(benchmark::State& state) {
+  const int64_t pair_count = state.range(0);
+  const std::string source = BuildVectorEncodingUseModule(pair_count);
+  EncodingBenchmarkFixture fixture;
+  loom_module_t* source_module = ParseModule(fixture, source);
+  const std::vector<uint8_t> bytes =
+      SerializeModule(source_module, fixture.block_pool());
+  loom_module_free(source_module);
+
+  ScopedBlockPool read_pool;
+  OperationMemoryTracker memory_tracker(read_pool.get());
+  loom_module_t* warm_module = ReadModule(fixture, bytes, read_pool.get());
+  if (!IsExpectedVectorEncodingUseModule(warm_module, pair_count)) {
+    state.SkipWithError("bytecode reader changed vector encoding uses");
+    loom_module_free(warm_module);
+    return;
+  }
+  memory_tracker.MarkWarmupComplete(warm_module);
+  state.counters["serialized_bytes"] = (double)bytes.size();
+  loom_module_free(warm_module);
+
+  for (auto _ : state) {
+    loom_module_t* module = ReadModule(fixture, bytes, read_pool.get());
+    benchmark::DoNotOptimize(module);
+    loom_module_free(module);
+  }
+  memory_tracker.SetCounters(state);
+  state.SetItemsProcessed(state.iterations() * pair_count * 2);
+  state.SetBytesProcessed(state.iterations() * (int64_t)bytes.size());
+}
+BENCHMARK(BM_ReadVectorEncodingUses)->Apply(ScaledEncodingCounts);
+
+static void BM_VerifyVectorEncodingUses(benchmark::State& state) {
+  const int64_t pair_count = state.range(0);
+  const std::string source = BuildVectorEncodingUseModule(pair_count);
+  EncodingBenchmarkFixture fixture;
+  loom_module_t* module = ParseModule(fixture, source);
+  OperationMemoryTracker memory_tracker(fixture.block_pool());
+
+  VerifyEncodingModule(module);
+  memory_tracker.MarkWarmupComplete(module);
+  for (auto _ : state) {
+    VerifyEncodingModule(module);
+    benchmark::DoNotOptimize(module);
+  }
+  memory_tracker.SetCounters(state);
+  state.SetItemsProcessed(state.iterations() * pair_count * 2);
+  loom_module_free(module);
+}
+BENCHMARK(BM_VerifyVectorEncodingUses)->Apply(ScaledEncodingCounts);
+
+static void BM_ComputeVectorEncodingFacts(benchmark::State& state) {
+  const int64_t pair_count = state.range(0);
+  const std::string source = BuildVectorEncodingUseModule(pair_count);
+  EncodingBenchmarkFixture fixture;
+  loom_module_t* module = ParseModule(fixture, source);
+  VerifyEncodingModule(module);
+  loom_func_like_t function = GetOnlyFunction(module);
+  if (!function.op) {
+    state.SkipWithError("vector encoding use function was malformed");
+    loom_module_free(module);
+    return;
+  }
+
+  ScopedBlockPool analysis_pool;
+  OperationMemoryTracker memory_tracker(analysis_pool.get());
+  iree_arena_allocator_t analysis_arena;
+  iree_arena_initialize(analysis_pool.get(), &analysis_arena);
+  loom_value_fact_table_t warm_table = {};
+  IREE_CHECK_OK(loom_value_fact_table_initialize(&warm_table, &analysis_arena,
+                                                 module->values.count));
+  IREE_CHECK_OK(loom_value_fact_table_compute(&warm_table, module, function));
+  state.counters["analysis_arena_used_bytes"] =
+      (double)analysis_arena.used_allocation_size;
+  state.counters["analysis_arena_owned_bytes"] =
+      (double)analysis_arena.total_allocation_size;
+  memory_tracker.MarkWarmupComplete(module);
+  iree_arena_deinitialize(&analysis_arena);
+
+  for (auto _ : state) {
+    iree_arena_initialize(analysis_pool.get(), &analysis_arena);
+    loom_value_fact_table_t table = {};
+    IREE_CHECK_OK(loom_value_fact_table_initialize(&table, &analysis_arena,
+                                                   module->values.count));
+    IREE_CHECK_OK(loom_value_fact_table_compute(&table, module, function));
+    benchmark::DoNotOptimize(table);
+    iree_arena_deinitialize(&analysis_arena);
+  }
+  memory_tracker.SetCounters(state);
+  state.SetItemsProcessed(state.iterations() * pair_count * 2);
+  loom_module_free(module);
+}
+BENCHMARK(BM_ComputeVectorEncodingFacts)->Apply(ScaledEncodingCounts);
 
 static void BM_VerifyDynamicEncodingDefinitions(benchmark::State& state) {
   const int64_t definition_count = state.range(0);
@@ -634,24 +874,24 @@ static void BM_VerifyDynamicEncodingDefinitions(benchmark::State& state) {
   loom_module_t* module = ParseModule(fixture, source);
   OperationMemoryTracker memory_tracker(fixture.block_pool());
 
-  VerifyDynamicEncodingModule(module);
+  VerifyEncodingModule(module);
   memory_tracker.MarkWarmupComplete(module);
   for (auto _ : state) {
-    VerifyDynamicEncodingModule(module);
+    VerifyEncodingModule(module);
     benchmark::DoNotOptimize(module);
   }
   memory_tracker.SetCounters(state);
   state.SetItemsProcessed(state.iterations() * definition_count);
   loom_module_free(module);
 }
-BENCHMARK(BM_VerifyDynamicEncodingDefinitions)->Apply(DistinctSchemaCounts);
+BENCHMARK(BM_VerifyDynamicEncodingDefinitions)->Apply(ScaledEncodingCounts);
 
 static void BM_ComputeDynamicEncodingFacts(benchmark::State& state) {
   const int64_t definition_count = state.range(0);
   const std::string source = BuildDynamicEncodingModule(definition_count);
   EncodingBenchmarkFixture fixture;
   loom_module_t* module = ParseModule(fixture, source);
-  VerifyDynamicEncodingModule(module);
+  VerifyEncodingModule(module);
   loom_func_like_t function = GetOnlyFunction(module);
   if (!function.op) {
     state.SkipWithError("dynamic encoding function was malformed");
@@ -687,7 +927,7 @@ static void BM_ComputeDynamicEncodingFacts(benchmark::State& state) {
   state.SetItemsProcessed(state.iterations() * definition_count);
   loom_module_free(module);
 }
-BENCHMARK(BM_ComputeDynamicEncodingFacts)->Apply(DistinctSchemaCounts);
+BENCHMARK(BM_ComputeDynamicEncodingFacts)->Apply(ScaledEncodingCounts);
 
 static bool QueryVerifiedDynamicNumericTransforms(loom_module_t* module,
                                                   int64_t definition_count) {
@@ -725,7 +965,7 @@ static void BM_QueryVerifiedDynamicEncodingTransforms(benchmark::State& state) {
       BuildDynamicNumericTransformModule(definition_count);
   EncodingBenchmarkFixture fixture;
   loom_module_t* module = ParseModule(fixture, source);
-  VerifyDynamicEncodingModule(module);
+  VerifyEncodingModule(module);
   OperationMemoryTracker memory_tracker(fixture.block_pool());
 
   if (!QueryVerifiedDynamicNumericTransforms(module, definition_count)) {
@@ -746,6 +986,6 @@ static void BM_QueryVerifiedDynamicEncodingTransforms(benchmark::State& state) {
   loom_module_free(module);
 }
 BENCHMARK(BM_QueryVerifiedDynamicEncodingTransforms)
-    ->Apply(DistinctSchemaCounts);
+    ->Apply(ScaledEncodingCounts);
 
 }  // namespace
