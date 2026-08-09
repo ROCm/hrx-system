@@ -428,15 +428,16 @@ ResultPtr EmitModule(loomc_target_environment_t* target_environment,
   return ResultPtr(result);
 }
 
-TEST(AmdgpuTargetTest, EvaluateLaunchConfigSelectsExactTargetProviders) {
+TEST(AmdgpuTargetTest,
+     EvaluateLaunchConfigCombinesIdentityAndSubgroupRequirements) {
   TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
   ContextPtr context = CreateAmdgpuContext(target_environment.get());
   WorkspacePtr workspace = CreateWorkspace();
   SourcePtr source = CreateTextSource("target_specialized_launch.loom", R"(
 amdgpu.target<gfx11-generic> @gfx11_wave64 {subgroup_size = 64}
-amdgpu.target<gfx1151> @gfx1151_wave64 {subgroup_size = 64}
+amdgpu.target<gfx1151> @gfx1151
 
-func.template<test.experts_per_wave> target(@gfx1151_wave64) priority(20) @two_experts_per_wave(%expert_count: index) -> (index) {
+func.template<test.experts_per_wave> target(@gfx1151) requires [#target.subgroup.size<64>] priority(20) @two_experts_per_wave(%expert_count: index) -> (index) {
   %c2 = index.constant 2 : index
   func.return %c2 : index
 }
@@ -448,7 +449,7 @@ func.template<test.experts_per_wave> priority(1) @four_experts_per_wave(%expert_
 
 kernel.def target(@gfx11_wave64) @target_specialized_launch(%expert_count: index) {
   %c1 = index.constant 1 : index
-  %wave_size = index.constant 64 : index
+  %wave_size = target.subgroup.size : index
   %experts_per_wave = func.apply<test.experts_per_wave>(%expert_count) : (index) -> (index)
   %workgroup_count = index.div %expert_count, %experts_per_wave : index
   kernel.launch.config workgroups(%workgroup_count, %c1, %c1) workgroup_size(%wave_size, %c1, %c1) : index
@@ -513,6 +514,25 @@ kernel.def target(@gfx11_wave64) @target_specialized_launch(%expert_count: index
     EXPECT_EQ(launch_config.workgroup_count.z, 1u) << target_case.target;
     EXPECT_EQ(launch_config.workgroup_size.x, 64u) << target_case.target;
   }
+
+  const std::string module_text = SerializeModuleToText(module.get());
+  EXPECT_NE(module_text.find(
+                "amdgpu.target<gfx11-generic> @gfx11_wave64 {subgroup_size = "
+                "64}"),
+            std::string::npos)
+      << module_text;
+  EXPECT_NE(module_text.find("amdgpu.target<gfx1151> @gfx1151"),
+            std::string::npos)
+      << module_text;
+  EXPECT_EQ(module_text.find("@gfx1151 {subgroup_size"), std::string::npos)
+      << module_text;
+  EXPECT_NE(
+      module_text.find("target(@gfx1151) requires [#target.subgroup.size<64>]"),
+      std::string::npos)
+      << module_text;
+  EXPECT_NE(module_text.find("%wave_size = target.subgroup.size : index"),
+            std::string::npos)
+      << module_text;
 }
 
 TEST(AmdgpuTargetTest,
