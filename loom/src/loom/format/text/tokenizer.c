@@ -1163,13 +1163,14 @@ static iree_status_t loom_tokenizer_scan(loom_tokenizer_t* t,
 // Public API
 //===----------------------------------------------------------------------===//
 
-loom_token_t loom_tokenizer_peek(loom_tokenizer_t* tokenizer) {
+// Scans and caches the lookahead token when one is not already available.
+static void loom_tokenizer_ensure_peeked(loom_tokenizer_t* tokenizer) {
   if (tokenizer->peeked.kind == LOOM_TOKEN_NONE) {
     loom_tokenizer_clear_error(tokenizer);
     // If a previous scan already failed, keep returning EOF.
     if (!iree_status_is_ok(tokenizer->status)) {
       tokenizer->peeked = loom_tokenizer_make_eof_token(tokenizer);
-      return tokenizer->peeked;
+      return;
     }
     iree_status_t status = loom_tokenizer_scan(tokenizer, &tokenizer->peeked);
     if (!iree_status_is_ok(status)) {
@@ -1178,11 +1179,16 @@ loom_token_t loom_tokenizer_peek(loom_tokenizer_t* tokenizer) {
       tokenizer->peeked = loom_tokenizer_make_eof_token(tokenizer);
     }
   }
+}
+
+loom_token_t loom_tokenizer_peek(loom_tokenizer_t* tokenizer) {
+  loom_tokenizer_ensure_peeked(tokenizer);
   return tokenizer->peeked;
 }
 
 loom_token_t loom_tokenizer_next(loom_tokenizer_t* tokenizer) {
-  loom_token_t token = loom_tokenizer_peek(tokenizer);
+  loom_tokenizer_ensure_peeked(tokenizer);
+  loom_token_t token = tokenizer->peeked;
   tokenizer->peeked.kind = LOOM_TOKEN_NONE;
   tokenizer->consumed_end_line = token.line;
   tokenizer->consumed_end_column = token.end_column;
@@ -1190,23 +1196,24 @@ loom_token_t loom_tokenizer_next(loom_tokenizer_t* tokenizer) {
 }
 
 bool loom_tokenizer_at(loom_tokenizer_t* tokenizer, loom_token_kind_t kind) {
-  return loom_tokenizer_peek(tokenizer).kind == kind;
+  loom_tokenizer_ensure_peeked(tokenizer);
+  return tokenizer->peeked.kind == kind;
 }
 
 bool loom_tokenizer_at_keyword(loom_tokenizer_t* tokenizer,
                                iree_string_view_t text) {
-  loom_token_t token = loom_tokenizer_peek(tokenizer);
-  return token.kind == LOOM_TOKEN_BARE_IDENT &&
-         iree_string_view_equal(token.text, text);
+  loom_tokenizer_ensure_peeked(tokenizer);
+  return tokenizer->peeked.kind == LOOM_TOKEN_BARE_IDENT &&
+         iree_string_view_equal(tokenizer->peeked.text, text);
 }
 
 bool loom_tokenizer_try_consume(loom_tokenizer_t* tokenizer,
                                 loom_token_kind_t kind) {
-  loom_token_t token = loom_tokenizer_peek(tokenizer);
-  if (token.kind == kind) {
+  loom_tokenizer_ensure_peeked(tokenizer);
+  if (tokenizer->peeked.kind == kind) {
+    tokenizer->consumed_end_line = tokenizer->peeked.line;
+    tokenizer->consumed_end_column = tokenizer->peeked.end_column;
     tokenizer->peeked.kind = LOOM_TOKEN_NONE;
-    tokenizer->consumed_end_line = token.line;
-    tokenizer->consumed_end_column = token.end_column;
     return true;
   }
   return false;
@@ -1214,12 +1221,12 @@ bool loom_tokenizer_try_consume(loom_tokenizer_t* tokenizer,
 
 bool loom_tokenizer_try_consume_keyword(loom_tokenizer_t* tokenizer,
                                         iree_string_view_t text) {
-  loom_token_t token = loom_tokenizer_peek(tokenizer);
-  if (token.kind == LOOM_TOKEN_BARE_IDENT &&
-      iree_string_view_equal(token.text, text)) {
+  loom_tokenizer_ensure_peeked(tokenizer);
+  if (tokenizer->peeked.kind == LOOM_TOKEN_BARE_IDENT &&
+      iree_string_view_equal(tokenizer->peeked.text, text)) {
+    tokenizer->consumed_end_line = tokenizer->peeked.line;
+    tokenizer->consumed_end_column = tokenizer->peeked.end_column;
     tokenizer->peeked.kind = LOOM_TOKEN_NONE;
-    tokenizer->consumed_end_line = token.line;
-    tokenizer->consumed_end_column = token.end_column;
     return true;
   }
   return false;
