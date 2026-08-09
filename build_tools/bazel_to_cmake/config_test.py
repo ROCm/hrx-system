@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 """Tests for bazel_to_cmake project config routing."""
 
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -223,6 +224,42 @@ loom_check_test_suite(
         self.assertIn('    "${_GLOB_TEST_SOURCE_LOW_X_LOOM_TEST}"', cmake)
         self.assertNotIn('"test/source_low/a.loom-test"', cmake)
         self.assertNotIn("iree_native_test(", cmake)
+
+    def test_glob_exclusions_have_distinct_cmake_storage(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        loom = bazel_to_cmake_config.include_project(
+            str(repo_root / ".bazel_to_cmake.cfg.py"),
+            "loom/.bazel_to_cmake.cfg.py",
+        )
+        repo_cfg = SimpleNamespace(PROJECTS=[loom], REPO_MAP={"@iree": ""})
+
+        cmake = bazel_to_cmake_converter.convert_build_file(
+            """
+load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
+
+loom_link_module(
+    name = "filtered",
+    srcs = glob(["*.loom"], exclude = ["negative.loom"]),
+)
+
+loom_link_module(
+    name = "complete",
+    srcs = glob(["*.loom"]),
+)
+""",
+            repo_cfg,
+            str(repo_root / "loom/src/loom/test/corpus/authoring"),
+            repo_root=str(repo_root),
+        )
+
+        glob_vars = set(
+            re.findall(r"file\(GLOB (_GLOB_X_LOOM(?:_[A-F0-9]{8})?)", cmake)
+        )
+        self.assertEqual(len(glob_vars), 2)
+        self.assertIn("_GLOB_X_LOOM", glob_vars)
+        filtered_var = next(var for var in glob_vars if var != "_GLOB_X_LOOM")
+        self.assertIn(f'    "${{{filtered_var}}}"', cmake)
+        self.assertIn('    "${_GLOB_X_LOOM}"', cmake)
 
     def test_loom_link_module_registers_generated_location(self):
         repo_root = Path(__file__).resolve().parents[2]
@@ -940,6 +977,30 @@ loom_link_module(
             converter.body,
         )
         self.assertIn('"iree::third_party::spirv_dis"', converter.body)
+
+    def test_execution_test_suite_preserves_glob_data(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        repo_cfg = SimpleNamespace(PROJECTS=[], REPO_MAP={"@iree": ""})
+
+        cmake = bazel_to_cmake_converter.convert_build_file(
+            """
+load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+
+iree_execution_test_suite(
+    name = "execution_test",
+    manifests = ["smoke.test.json"],
+    tools = {"runner": "//tools:runner"},
+    data = glob(["*.loom"]),
+)
+""",
+            repo_cfg,
+            str(repo_root / "build_tools/testing/test"),
+            repo_root=str(repo_root),
+        )
+
+        self.assertIn("file(GLOB _GLOB_X_LOOM LIST_DIRECTORIES false", cmake)
+        self.assertIn('    "${_GLOB_X_LOOM}"', cmake)
+        self.assertNotIn("::${_GLOB_X_LOOM}", cmake)
 
     def test_native_test_converts_location_env(self):
         converter = SimpleNamespace(body="")
