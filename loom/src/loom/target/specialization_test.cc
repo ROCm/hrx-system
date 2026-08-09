@@ -28,8 +28,14 @@ namespace {
 using ModulePtr = ::loom::testing::ModulePtr;
 
 typedef struct TestTargetProfile {
+  // Generic target profile base.
   loom_target_profile_t base;
+
+  // Test target selector projected into facts.
   loom_test_target_kind_t kind;
+
+  // Optional counter incremented by each fact projection.
+  uint32_t* projection_count;
 } TestTargetProfile;
 
 static iree_status_t ProjectTestProfileFacts(
@@ -38,6 +44,9 @@ static iree_status_t ProjectTestProfileFacts(
   (void)arena;
   const auto* profile =
       reinterpret_cast<const TestTargetProfile*>(base_profile);
+  if (profile->projection_count != nullptr) {
+    ++*profile->projection_count;
+  }
   out_facts->selector = profile->kind;
   return iree_ok_status();
 }
@@ -57,6 +66,7 @@ static TestTargetProfile MakeTestProfile(loom_test_target_kind_t kind) {
           loom_target_bundle_table_lookup(&loom_test_target_bundles, kind),
       },
       /*.kind=*/kind,
+      /*.projection_count=*/nullptr,
   };
 }
 
@@ -272,6 +282,56 @@ func.def public target(@unrequested_family) @unrequested() {
   EXPECT_EQ(loom_target_function_version_list_find(
                 &result.function_versions.list, unrequested),
             nullptr);
+}
+
+TEST_F(TargetSpecializationTest, SharesProfileProjectionAndTargetlessContext) {
+  ModulePtr module = Parse(R"(
+func.def public @left() {
+  func.return
+}
+
+func.def public @right() {
+  func.return
+}
+)");
+  uint32_t projection_count = 0;
+  TestTargetProfile exact_profile =
+      MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
+  exact_profile.projection_count = &projection_count;
+  const loom_target_specialization_request_t requests[] = {
+      {
+          /*.function_name=*/IREE_SV("left"),
+          /*.target_profile=*/&exact_profile.base,
+      },
+      {
+          /*.function_name=*/IREE_SV("right"),
+          /*.target_profile=*/&exact_profile.base,
+      },
+  };
+  const loom_func_like_t left = Function(module.get(), IREE_SV("left"));
+  const loom_func_like_t right = Function(module.get(), IREE_SV("right"));
+
+  const loom_target_specialization_result_t result =
+      Specialize(module.get(), requests, IREE_ARRAYSIZE(requests));
+  ASSERT_EQ(result.error_count, 0u);
+  ASSERT_EQ(result.function_versions.list.count, 2u);
+  EXPECT_EQ(projection_count, 1u);
+  const loom_target_function_version_t* left_version =
+      loom_target_function_version_list_find(&result.function_versions.list,
+                                             left);
+  const loom_target_function_version_t* right_version =
+      loom_target_function_version_list_find(&result.function_versions.list,
+                                             right);
+  ASSERT_NE(left_version, nullptr);
+  ASSERT_NE(right_version, nullptr);
+  EXPECT_EQ(left_version->target_context_facts,
+            right_version->target_context_facts);
+  EXPECT_NE(left_version->target_context_facts,
+            left_version->effective_target_facts);
+  EXPECT_NE(right_version->target_context_facts,
+            right_version->effective_target_facts);
+  EXPECT_NE(left_version->effective_target_facts,
+            right_version->effective_target_facts);
 }
 
 TEST_F(TargetSpecializationTest, PreservesMatchingAuthoredExactTarget) {

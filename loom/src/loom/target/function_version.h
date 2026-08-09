@@ -29,7 +29,14 @@ typedef struct loom_target_function_version_t {
   // Facts projected from the authored target witness, or NULL when absent.
   const loom_target_facts_t* authored_target_facts;
 
-  // Exact invocation-refined facts used to compile this function version.
+  // Exact invocation context inherited by retained semantic callees.
+  //
+  // These facts contain the profile projection and authored target requirement
+  // without function-local ABI or export overlays.
+  const loom_target_facts_t* target_context_facts;
+
+  // Exact invocation-refined facts used to compile this function version,
+  // including its function-local ABI and export contract.
   const loom_target_facts_t* effective_target_facts;
 } loom_target_function_version_t;
 
