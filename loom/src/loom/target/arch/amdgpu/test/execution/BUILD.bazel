@@ -17,6 +17,10 @@ package(
 exports_files([
     "divergent_loop_carry.loom",
     "fragment_repack_bf16.loom",
+    "fp8_bidirectional_decode_e4m3.loom",
+    "fp8_bidirectional_decode_e5m2.loom",
+    "fp8_bidirectional_encode_e4m3.loom",
+    "fp8_bidirectional_encode_e5m2.loom",
     "fp8_encode.loom",
     "fp8_finite_storage_decode.loom",
     "global_atomic_add_f32.loom",

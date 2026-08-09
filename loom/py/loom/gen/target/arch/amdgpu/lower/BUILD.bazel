@@ -36,6 +36,27 @@ iree_py_binary(
     ],
 )
 
+iree_py_binary(
+    name = "narrow_float_matrix",
+    srcs = [
+        "__init__.py",
+        "amdgpu_narrow_float_matrix.py",
+        "amdgpu_narrow_float_tables.py",
+    ],
+    main = "amdgpu_narrow_float_matrix.py",
+    visibility = [
+        "//loom/py/loom/gen:__subpackages__",
+        "//loom/src/loom/target/arch/amdgpu:__pkg__",
+        "//loom/src/loom/target/arch/amdgpu:__subpackages__",
+    ],
+    deps = [
+        "//loom/py/loom:core",
+        "//loom/py/loom/gen/support",
+        "//loom/py/loom/gen/target/arch/amdgpu/lower/candidates:validation",
+        "//loom/py/loom/target/arch/amdgpu:descriptors",
+    ],
+)
+
 iree_py_test(
     name = "narrow_float_tables_test",
     srcs = [
@@ -45,4 +66,21 @@ iree_py_test(
     args = ["loom.gen.target.arch.amdgpu.lower.amdgpu_narrow_float_tables_test"],
     main = "pytest_style_runner.py",
     deps = [":narrow_float_tables"],
+)
+
+iree_py_test(
+    name = "narrow_float_matrix_test",
+    srcs = [
+        "amdgpu_narrow_float_matrix_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.gen.target.arch.amdgpu.lower.amdgpu_narrow_float_matrix_test"],
+    data = [
+        "//loom/src/loom/target/arch/amdgpu/test/execution:fp8_bidirectional_decode_e4m3.loom",
+        "//loom/src/loom/target/arch/amdgpu/test/execution:fp8_bidirectional_decode_e5m2.loom",
+        "//loom/src/loom/target/arch/amdgpu/test/execution:fp8_bidirectional_encode_e4m3.loom",
+        "//loom/src/loom/target/arch/amdgpu/test/execution:fp8_bidirectional_encode_e5m2.loom",
+    ],
+    main = "pytest_style_runner.py",
+    deps = [":narrow_float_matrix"],
 )

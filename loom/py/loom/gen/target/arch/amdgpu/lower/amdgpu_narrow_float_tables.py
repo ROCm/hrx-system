@@ -61,6 +61,7 @@ class _Fp8ScaledDescriptorRefRow:
 @dataclass(frozen=True)
 class _Fp8FormatRow:
     source_format: str
+    keyword: str
     source_type: ScalarTypeKind
     exponent_bits: int
     mantissa_bits: int
@@ -112,6 +113,7 @@ _FP8_PACKED_REPAIR_BITS = (
 _FP8_FORMAT_ROWS = (
     _Fp8FormatRow(
         "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3",
+        "f8e4m3",
         ScalarTypeKind.F8E4M3,
         exponent_bits=4,
         mantissa_bits=3,
@@ -120,6 +122,7 @@ _FP8_FORMAT_ROWS = (
     ),
     _Fp8FormatRow(
         "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2",
+        "f8e5m2",
         ScalarTypeKind.F8E5M2,
         exponent_bits=5,
         mantissa_bits=2,
@@ -128,6 +131,7 @@ _FP8_FORMAT_ROWS = (
     ),
     _Fp8FormatRow(
         "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN",
+        "f8e4m3fn",
         ScalarTypeKind.F8E4M3,
         exponent_bits=4,
         mantissa_bits=3,
@@ -136,6 +140,7 @@ _FP8_FORMAT_ROWS = (
     ),
     _Fp8FormatRow(
         "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ",
+        "f8e4m3fnuz",
         ScalarTypeKind.F8E4M3,
         exponent_bits=4,
         mantissa_bits=3,
@@ -144,6 +149,7 @@ _FP8_FORMAT_ROWS = (
     ),
     _Fp8FormatRow(
         "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ",
+        "f8e5m2fnuz",
         ScalarTypeKind.F8E5M2,
         exponent_bits=5,
         mantissa_bits=2,

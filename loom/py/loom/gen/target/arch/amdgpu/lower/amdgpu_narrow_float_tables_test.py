@@ -263,6 +263,7 @@ def test_fp8_subnormal_table_rows_reject_missing_dense_format_row() -> None:
             rows=(
                 _Fp8FormatRow(
                     "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3",
+                    "f8e4m3",
                     ScalarTypeKind.F8E4M3,
                     exponent_bits=4,
                     mantissa_bits=3,
