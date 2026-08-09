@@ -17,6 +17,7 @@ iree_execution_test_suite(
     "loom-compile-amdgpu.test.json"
   TOOLS
     "loom-compile=loom::tools::loom-compile"
+    "loom-compile-report=loom::py::loom::tools::loom-compile-report"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/amdgpu_bad_return.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/amdgpu_unused_kernargs.loom"
