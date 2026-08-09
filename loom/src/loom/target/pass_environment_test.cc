@@ -17,6 +17,7 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/target/facts_builder.h"
+#include "loom/target/pass_requirements.h"
 #include "loom/target/test/target_records.h"
 #include "loom/testing/module_ptr.h"
 
@@ -105,6 +106,9 @@ TEST(TargetPassEnvironmentTest, EnvironmentCarriesProvidersAndVersions) {
   EXPECT_EQ(
       loom_target_pass_capability_function_version_owner(found_capability),
       nullptr);
+  EXPECT_FALSE(loom_pass_environment_capability_satisfies_requirement(
+      &target_capability.base,
+      IREE_SV(LOOM_TARGET_PASS_REQUIREMENT_MUTABLE_FUNCTION_VERSIONS)));
 }
 
 TEST(TargetPassEnvironmentTest, MutableEnvironmentCarriesVersionOwner) {
@@ -128,6 +132,9 @@ TEST(TargetPassEnvironmentTest, MutableEnvironmentCarriesVersionOwner) {
   EXPECT_EQ(
       loom_target_pass_capability_function_version_owner(&target_capability),
       &function_version_owner);
+  EXPECT_TRUE(loom_pass_environment_capability_satisfies_requirement(
+      &target_capability.base,
+      IREE_SV(LOOM_TARGET_PASS_REQUIREMENT_MUTABLE_FUNCTION_VERSIONS)));
 
   loom_function_version_t appended_version = {};
   IREE_ASSERT_OK(loom_function_version_owner_append(&function_version_owner,

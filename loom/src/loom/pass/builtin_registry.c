@@ -18,6 +18,9 @@
 #include "loom/codegen/low/transforms/pipeline/target_legalize.h"
 #include "loom/sanitizer/pipeline_passes.h"
 #include "loom/sanitizer/race_insertion.h"
+#include "loom/target/callgraph_specialization.h"
+#include "loom/target/pass_environment.h"
+#include "loom/target/pass_requirements.h"
 #include "loom/transforms/cfg/branch_fusion.h"
 #include "loom/transforms/cfg/branch_sink.h"
 #include "loom/transforms/cfg/cfg_simplify.h"
@@ -294,6 +297,18 @@ static const loom_pass_option_schema_t kTemplateSelectionOptionSchema[] = {
     },
 };
 
+static const loom_pass_requirement_def_t
+    kTargetCallgraphSpecializationRequirements[] = {
+        {
+            .capability_type = &loom_target_pass_capability_type,
+            .key = IREE_SVL(
+                LOOM_TARGET_PASS_REQUIREMENT_MUTABLE_FUNCTION_VERSIONS),
+            .description =
+                IREE_SVL("Requires mutable invocation-local concrete "
+                         "function versions."),
+        },
+};
+
 static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
     {
         .key = IREE_SVL("branch-fusion"),
@@ -469,6 +484,14 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
         .option_schema_count = IREE_ARRAYSIZE(kLowSourceToLowOptionSchema),
         .requirement_defs = kLowSourceToLowRequirements,
         .requirement_count = IREE_ARRAYSIZE(kLowSourceToLowRequirements),
+    },
+    {
+        .key = IREE_SVL("specialize-target-callgraph"),
+        .info = loom_target_callgraph_specialization_pass_info,
+        .module_run = loom_target_callgraph_specialization_run,
+        .requirement_defs = kTargetCallgraphSpecializationRequirements,
+        .requirement_count =
+            IREE_ARRAYSIZE(kTargetCallgraphSpecializationRequirements),
     },
     {
         .key = IREE_SVL("sroa-vector-banks"),

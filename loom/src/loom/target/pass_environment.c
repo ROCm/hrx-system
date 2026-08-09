@@ -10,12 +10,18 @@
 #include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/op_defs.h"
 #include "loom/target/function_contract.h"
+#include "loom/target/pass_requirements.h"
 
 static bool loom_target_pass_capability_satisfies_requirement(
     const loom_pass_environment_capability_t* capability,
     iree_string_view_t requirement) {
-  (void)capability;
-  (void)requirement;
+  const loom_target_pass_capability_t* target_capability =
+      (const loom_target_pass_capability_t*)capability;
+  if (iree_string_view_equal(
+          requirement,
+          IREE_SV(LOOM_TARGET_PASS_REQUIREMENT_MUTABLE_FUNCTION_VERSIONS))) {
+    return target_capability->function_version_owner != NULL;
+  }
   return false;
 }
 

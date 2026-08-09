@@ -288,6 +288,9 @@ loom_cc_library(
     loom::codegen::low::transforms::pipeline::target_legalize
     loom::sanitizer::pipeline_passes
     loom::sanitizer::race_insertion
+    loom::target::callgraph_specialization
+    loom::target::pass_environment
+    loom::target::pass_requirements
     loom::transforms::cfg::branch_fusion
     loom::transforms::cfg::branch_sink
     loom::transforms::cfg::cfg_simplify
@@ -412,6 +415,8 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::codegen::low::pipeline::pass_environment
     loom::pass::testing::registry_verify
+    loom::target::pass_environment
+    loom::target::pass_requirements
 )
 
 loom_cc_test(

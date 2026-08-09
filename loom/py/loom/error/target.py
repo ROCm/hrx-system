@@ -1251,6 +1251,24 @@ ERR_TARGET_068 = ErrorDef(
     ),
 )
 
+# ERR_TARGET_069: Externally reachable function needs multiple target versions.
+ERR_TARGET_069 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=69,
+    severity=Severity.ERROR,
+    summary="Externally reachable function needs multiple target versions.",
+    message=(
+        "function '@{function_name}' is reachable under more than one "
+        "invocation target context and cannot be implicitly cloned because "
+        "it is externally reachable"
+    ),
+    params=(ErrorParam("function_name", ParamKind.STRING),),
+    fix_hint=(
+        "Request an explicit exported version for each target context or make "
+        "the callable module-internal."
+    ),
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1312,4 +1330,5 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_066,
     ERR_TARGET_067,
     ERR_TARGET_068,
+    ERR_TARGET_069,
 )

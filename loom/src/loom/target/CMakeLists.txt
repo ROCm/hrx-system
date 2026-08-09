@@ -81,6 +81,56 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    callgraph_specialization
+  HDRS
+    "callgraph_specialization.h"
+  SRCS
+    "callgraph_specialization.c"
+  DEPS
+    ::facts_builder
+    ::function_contract
+    ::function_version
+    ::pass_environment
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::symbol_dependencies
+    loom::analysis::symbol_facts
+    loom::error::error_defs
+    loom::ir
+    loom::ops::func_symbol_facts
+    loom::ops::op_defs
+    loom::ops::target
+    loom::pass::types
+    loom::rewrite::callable
+    loom::util::walk
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    callgraph_specialization_test
+  SRCS
+    "callgraph_specialization_test.cc"
+  DEPS
+    ::callgraph_specialization
+    ::pass_environment
+    ::provider
+    ::specialization
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::error::error_defs
+    loom::format::text::parser
+    loom::ir
+    loom::ops::func
+    loom::ops::target
+    loom::ops::test
+    loom::target::test::target_record_table
+    loom::testing::module_ptr
+)
+
+loom_cc_library(
+  NAME
     function_version
   HDRS
     "function_version.h"
@@ -209,6 +259,7 @@ loom_cc_library(
   DEPS
     ::function_contract
     ::function_version
+    ::pass_requirements
     iree::base
     loom::analysis::symbol_facts
     loom::ir
@@ -216,6 +267,16 @@ loom_cc_library(
     loom::ops::op_defs
     loom::pass::environment
     loom::pass::types
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    pass_requirements
+  HDRS
+    "pass_requirements.h"
+  DEPS
+
   PUBLIC
 )
 
@@ -286,6 +347,7 @@ loom_cc_test(
     ::facts_builder
     ::function_version
     ::pass_environment
+    ::pass_requirements
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
