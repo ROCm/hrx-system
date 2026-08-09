@@ -194,6 +194,35 @@ TEST_F(ConditionFactsTest, ExactOperandFactsPreserveStructuralRelation) {
   EXPECT_EQ(relation.right.value_id, upper_bound);
 }
 
+TEST_F(ConditionFactsTest, ExactOperandFactsProveEquivalentLiteralRelation) {
+  loom_value_id_t value = DefineIndexValue();
+  loom_value_id_t expected = DefineIndexValue();
+  DefineFacts(expected, loom_value_facts_exact_i64(32));
+  loom_op_t* compare =
+      BuildIndexCompare(LOOM_INDEX_CMP_PREDICATE_EQ, value, expected);
+  Query(loom_index_cmp_result(compare), /*assumed_truth=*/false);
+
+  const loom_condition_integer_relation_t queried = {
+      /*.relation=*/LOOM_SYMBOLIC_INTEGER_RELATION_EQ,
+      /*.left=*/
+      {
+          /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+          /*.value_id=*/value,
+          /*.constant=*/0,
+      },
+      /*.right=*/
+      {
+          /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
+          /*.value_id=*/LOOM_VALUE_ID_INVALID,
+          /*.constant=*/32,
+      },
+  };
+  bool result = true;
+  EXPECT_TRUE(loom_condition_fact_set_proves_integer_relation(
+      &condition_facts_, &fact_table_, &queried, &result));
+  EXPECT_FALSE(result);
+}
+
 TEST_F(ConditionFactsTest, AppliesConstantRelationToValueFacts) {
   loom_value_id_t induction = DefineIndexValue();
   loom_value_id_t upper_bound = DefineIndexValue();

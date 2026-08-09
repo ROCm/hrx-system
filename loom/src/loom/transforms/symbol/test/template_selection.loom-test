@@ -356,6 +356,50 @@ func.def public @entry(%n: index) -> (index) {
 
 // ====
 
+// Provider predicates consume facts at each application point. The true edge
+// proves the higher-priority equality while the false edge disproves it and
+// selects the fallback.
+// RUN: pass select-templates,inline-callables
+
+func.template<demo.application_path> priority(10) @exact(%m: index) -> (index) where [eq(%m, 32)] {
+  %c1 = index.constant 1 : index
+  %adjusted = index.add %m, %c1 : index
+  func.return %adjusted : index
+}
+
+func.template<demo.application_path> priority(1) @fallback(%m: index) -> (index) {
+  func.return %m : index
+}
+
+func.def public @entry(%n: index) -> (index) {
+  %c32 = index.constant 32 : index
+  %is32 = index.cmp eq, %n, %c32 : index
+  %result = scf.if %is32 -> (index) {
+    %matched = func.apply<demo.application_path>(%n) : (index) -> (index)
+    scf.yield %matched : index
+  } else {
+    %fallback = func.apply<demo.application_path>(%n) : (index) -> (index)
+    scf.yield %fallback : index
+  }
+  func.return %result : index
+}
+
+// ----
+func.def public @entry(%n: index) -> (index) {
+  %c32 = index.constant 32 : index
+  %is32 = index.cmp eq, %n, %c32 : index
+  %result = scf.if %is32 -> (index) {
+    %c1 = index.constant 1 : index
+    %adjusted = index.add %n, %c1 : index
+    scf.yield %adjusted : index
+  } else {
+    scf.yield %n : index
+  }
+  func.return %result : index
+}
+
+// ====
+
 // Final selection excludes an unproven higher-priority provider and selects a
 // lower-priority provider whose applicability is proven.
 // RUN: pass select-templates{mode=final},inline-callables

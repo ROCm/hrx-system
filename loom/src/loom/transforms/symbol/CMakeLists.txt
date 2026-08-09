@@ -38,6 +38,7 @@ loom_cc_library(
     ::symbol_pruning
     iree::base
     iree::base::internal::arena
+    loom::analysis::condition_facts
     loom::analysis::func_provider_catalog
     loom::analysis::symbol_dependencies
     loom::analysis::symbol_facts
@@ -47,6 +48,7 @@ loom_cc_library(
     loom::ir::facts
     loom::ops::func
     loom::ops::op_defs
+    loom::ops::scf
     loom::ops::target
     loom::pass::pipeline
     loom::pass::registry

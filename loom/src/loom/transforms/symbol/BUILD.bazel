@@ -34,6 +34,7 @@ loom_cc_library(
     deps = [
         ":symbol_equivalence",
         ":symbol_pruning",
+        "//loom/src/loom/analysis:condition_facts",
         "//loom/src/loom/analysis:func_provider_catalog",
         "//loom/src/loom/analysis:symbol_dependencies",
         "//loom/src/loom/analysis:symbol_facts",
@@ -43,6 +44,7 @@ loom_cc_library(
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/pass:pipeline",
         "//loom/src/loom/pass:registry",
