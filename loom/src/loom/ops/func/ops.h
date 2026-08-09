@@ -250,6 +250,9 @@ iree_status_t loom_func_template_build(
     iree_host_size_t predicates_count,
     loom_location_id_t location,
     loom_op_t** out_op);
+iree_status_t loom_func_template_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_FUNC_UKERNEL: Constraint-matched opaque implementation of an abstract op.
 // func.ukernel<tile.contract> device @vnni_q8_asm(%w: tensor<[%M]xi8>, %x: tensor<[%K]xf32>) -> (tensor<[%M]xf32>) where [mul(%M, 16)]
@@ -302,6 +305,9 @@ iree_status_t loom_func_ukernel_build(
     iree_host_size_t predicates_count,
     loom_location_id_t location,
     loom_op_t** out_op);
+iree_status_t loom_func_ukernel_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_FUNC_CALL: Function-like symbol call. Runtime calls target func.def/func.decl; required-inline exact template calls are consumed before executable lowering.
 // %r = func.call @add(%a, %b) : (f32, f32) -> (f32)

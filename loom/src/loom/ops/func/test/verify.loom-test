@@ -30,3 +30,28 @@ test.target<low_core> @test_target
 func.def target(@test_target) abi(object_function) export("semantic") @targeted_semantic() {
   func.return
 }
+
+// ====
+
+// Ordinary functions may author target-local execution choices.
+target.generic<reference> @wave64_target {subgroup_size = 64}
+
+func.def target(@wave64_target) @wave64_function() {
+  func.return
+}
+
+// ====
+
+target.generic<reference> @wave64_target {subgroup_size = 64}
+
+// ERROR@+1: TARGET/067 {provider_name="wave64_template", target_name="wave64_target", field_name="subgroup_size"}
+func.template<test.wave64> target(@wave64_target) @wave64_template() {
+  func.return
+}
+
+// ====
+
+target.generic<reference> @large_target {max_workgroup_size_x = 1024}
+
+// ERROR@+1: TARGET/067 {provider_name="large_ukernel", target_name="large_target", field_name="max_workgroup_size_x"}
+func.ukernel<test.large> target(@large_target) @large_ukernel()

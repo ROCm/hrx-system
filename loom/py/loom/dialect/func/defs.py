@@ -446,6 +446,7 @@ func_template = Op(
             priority="priority",
         )
     ],
+    verify="loom_func_template_verify",
     format=[
         KeyRef("implements"),
         *_MODIFIER_FORMAT,
@@ -498,6 +499,7 @@ func_ukernel = Op(
             args="args",
         )
     ],
+    verify="loom_func_ukernel_verify",
     format=[
         KeyRef("implements"),
         *_MODIFIER_FORMAT,

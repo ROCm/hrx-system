@@ -68,6 +68,7 @@ loom_cc_library(
     loom::error::emitter
     loom::error::error_defs
     loom::ir
+    loom::target::projection
   PUBLIC
 )
 
