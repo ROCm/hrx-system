@@ -49,6 +49,7 @@ from loom.assembly import (
     TypedRefs,
     TypeOf,
     TypesOf,
+    WhereClause,
 )
 from loom.assembly import (
     Region as RegionFmt,
@@ -581,6 +582,22 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
                         )
                     )
                     covered_attrs.add(name)
+
+                case WhereClause(predicates=predicates, clauses=clauses):
+                    if clauses is not None:
+                        append_attr_param(clauses)
+                    attr_def = op.attr(predicates)
+                    params.append(
+                        BuilderParam(
+                            name=predicates,
+                            kind=BuilderParamKind.PREDICATE_LIST,
+                            type_hint="list[Predicate]",
+                            required=not (attr_def.optional if attr_def else False),
+                            attr_def=attr_def,
+                            doc=f"Predicate list: {predicates}",
+                        )
+                    )
+                    covered_attrs.add(predicates)
 
                 case AttrDict(field=name):
                     if name:

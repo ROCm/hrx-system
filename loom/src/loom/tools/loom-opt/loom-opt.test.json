@@ -223,7 +223,7 @@
           "--output={tmp}/target-condition-fallback.loom"
         ],
         "stdin": {
-          "text": "func.template<demo.target_condition_report> when [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {\n  func.return %value : i32\n}\n\nfunc.template<demo.target_condition_report> priority(1) @fallback(%value: i32) -> (i32) {\n  func.return %value : i32\n}\n\nfunc.def public @entry(%arg: i32) -> (i32) {\n  %result = func.apply<demo.target_condition_report>(%arg) : (i32) -> (i32)\n  func.return %result : i32\n}\n"
+          "text": "func.template<demo.target_condition_report> priority(10) @wave64(%value: i32) -> (i32) where [#target.subgroup.size<64>] {\n  func.return %value : i32\n}\n\nfunc.template<demo.target_condition_report> priority(1) @fallback(%value: i32) -> (i32) {\n  func.return %value : i32\n}\n\nfunc.def public @entry(%arg: i32) -> (i32) {\n  %result = func.apply<demo.target_condition_report>(%arg) : (i32) -> (i32)\n  func.return %result : i32\n}\n"
         }
       },
       "stderr": {

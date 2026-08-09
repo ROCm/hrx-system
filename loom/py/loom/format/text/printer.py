@@ -65,6 +65,7 @@ from loom.assembly import (
     TypedRefs,
     TypeOf,
     TypesOf,
+    WhereClause,
 )
 from loom.assembly import (
     Region as RegionFmt,
@@ -886,6 +887,27 @@ def _format_predicate_list(predicates: list[Predicate]) -> str:
     """Format a predicate list: [pred(...), pred(...)]."""
     parts = [_format_predicate(p) for p in predicates]
     return "[" + ", ".join(parts) + "]"
+
+
+def _format_where_clause(
+    predicates: list[Predicate] | None,
+    clauses: ParameterizedAttrArray | None,
+    clause_def: AttrDef | None,
+) -> str:
+    """Format one canonical heterogeneous ``where [...]`` conjunction."""
+    parts: list[str] = []
+    if clauses is not None:
+        if clause_def is None or clause_def.attr_type != "parameterized_array":
+            raise ValueError("typed where clauses require a parameterized-array field")
+        element_def = AttrDef(
+            clause_def.name,
+            "parameterized",
+            parameterized_attr=clause_def.parameterized_attr,
+        )
+        parts.extend(_format_attr_value(clause, element_def) for clause in clauses)
+    if predicates is not None:
+        parts.extend(_format_predicate(predicate) for predicate in predicates)
+    return "where [" + ", ".join(parts) + "]"
 
 
 def _is_symbol_define(op_decl: Op) -> bool:
@@ -1781,6 +1803,27 @@ class Printer:
                         predicates = fields._op.attributes.get(name)
                     if predicates is not None:
                         stream.emit(_format_predicate_list(predicates))
+
+                case WhereClause(predicates=predicate_field, clauses=clause_field):
+                    predicates = fields.attr(predicate_field)
+                    clauses = (
+                        fields.attr(clause_field) if clause_field is not None else None
+                    )
+                    covered_attrs.add(predicate_field)
+                    if clause_field is not None:
+                        covered_attrs.add(clause_field)
+                    if predicates is not None or clauses is not None:
+                        stream.emit(
+                            _format_where_clause(
+                                predicates,
+                                clauses,
+                                (
+                                    op_decl.attr(clause_field)
+                                    if clause_field is not None
+                                    else None
+                                ),
+                            )
+                        )
 
                 case OptionalGroup(elements=inner, anchor=anchor):
                     if fields.is_present(anchor):

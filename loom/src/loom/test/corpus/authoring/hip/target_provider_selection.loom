@@ -5,13 +5,13 @@
 
 // Both specialized providers and the fallback implement the same contract:
 // double one i32 value. Selection changes the implementation, not semantics.
-func.template<hip.recipe.scale_i32> when [#target.subgroup.size<64>] priority(20) @scale_i32_subgroup_64(%value: i32) -> (i32) {
+func.template<hip.recipe.scale_i32> priority(20) @scale_i32_subgroup_64(%value: i32) -> (i32) where [#target.subgroup.size<64>] {
   %scale_factor = scalar.constant 2 : i32
   %scaled = scalar.muli %value, %scale_factor : i32
   func.return %scaled : i32
 }
 
-func.template<hip.recipe.scale_i32> when [#target.subgroup.size<32>] priority(20) @scale_i32_subgroup_32(%value: i32) -> (i32) {
+func.template<hip.recipe.scale_i32> priority(20) @scale_i32_subgroup_32(%value: i32) -> (i32) where [#target.subgroup.size<32>] {
   %scaled = scalar.addi %value, %value : i32
   func.return %scaled : i32
 }

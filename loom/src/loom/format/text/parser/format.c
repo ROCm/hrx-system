@@ -1074,6 +1074,56 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
         break;
       }
 
+      case LOOM_FORMAT_KIND_WHERE_CLAUSE: {
+        const loom_format_element_t where_keyword = {
+            .kind = LOOM_FORMAT_KIND_KEYWORD,
+            .data = LOOM_KW_WHERE,
+        };
+        bool present = false;
+        IREE_RETURN_IF_ERROR(loom_parse_format_keyword_is_present(
+            parser, &where_keyword, &present));
+        if (!present) break;
+        loom_token_t start_token = loom_tokenizer_peek(&parser->tokenizer);
+        IREE_RETURN_IF_ERROR(loom_parse_keyword(parser, LOOM_KW_WHERE));
+        if (element->field_index >= vtable->attribute_count) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "format WHERE_CLAUSE predicate attr index %u out of range "
+              "(op has %u attributes)",
+              element->field_index, vtable->attribute_count);
+        }
+        const loom_attr_descriptor_t* typed_clause_descriptor = NULL;
+        if (element->data != LOOM_FORMAT_WHERE_CLAUSE_NO_CLAUSES) {
+          if (element->data >= vtable->attribute_count) {
+            return iree_make_status(
+                IREE_STATUS_INVALID_ARGUMENT,
+                "format WHERE_CLAUSE typed-clause attr index %u out of range "
+                "(op has %u attributes)",
+                element->data, vtable->attribute_count);
+          }
+          typed_clause_descriptor = &vtable->attr_descriptors[element->data];
+        }
+        loom_attribute_t predicates = loom_attr_absent();
+        loom_attribute_t typed_clauses = loom_attr_absent();
+        IREE_RETURN_IF_ERROR(loom_parse_where_clause(
+            parser, typed_clause_descriptor, &predicates, &typed_clauses));
+        if (!loom_attr_is_absent(predicates)) {
+          IREE_RETURN_IF_ERROR(loom_parsed_op_set_attribute(
+              parsed, &parser->parser_arena, element->field_index, predicates));
+          IREE_RETURN_IF_ERROR(loom_parse_format_add_field_span(
+              parser, parsed, LOOM_LOCATION_FIELD_ATTRIBUTE,
+              element->field_index, start_token));
+        }
+        if (!loom_attr_is_absent(typed_clauses)) {
+          IREE_RETURN_IF_ERROR(loom_parsed_op_set_attribute(
+              parsed, &parser->parser_arena, element->data, typed_clauses));
+          IREE_RETURN_IF_ERROR(loom_parse_format_add_field_span(
+              parser, parsed, LOOM_LOCATION_FIELD_ATTRIBUTE, element->data,
+              start_token));
+        }
+        break;
+      }
+
       case LOOM_FORMAT_KIND_OPTIONAL_GROUP: {
         uint16_t skip_count = 0;
         IREE_RETURN_IF_ERROR(loom_parse_format_optional_group(

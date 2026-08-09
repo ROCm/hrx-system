@@ -1298,6 +1298,18 @@ TEST_F(ParserTest, EmptyPredicateListPayloadRoundTripsExplicitly) {
   loom_module_free(module);
 }
 
+TEST_F(ParserTest, PredicateListBeyondInlineCapacityRoundTrips) {
+  std::string text = RoundTrip(
+      "%x = test.constant 0 : index\n"
+      "%y = test.assume %x ["
+      "eq(%x, 0), eq(%x, 0), eq(%x, 0), eq(%x, 0), eq(%x, 0), "
+      "eq(%x, 0), eq(%x, 0), eq(%x, 0), eq(%x, 0), eq(%x, 0), "
+      "eq(%x, 0), eq(%x, 0), eq(%x, 0), eq(%x, 0), eq(%x, 0), "
+      "eq(%x, 0), eq(%x, 0)] : index\n");
+  EXPECT_NE(text.find("eq(%x, 0), eq(%x, 0)]"), std::string::npos)
+      << "predicate lists should grow beyond inline storage: " << text;
+}
+
 TEST_F(ParserTest, PredicateArityMismatchEmitsStructuredDiagnostic) {
   const auto& diagnostics = ParseExpectErrors(
       "%x = test.constant 0 : index\n"

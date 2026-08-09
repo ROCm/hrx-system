@@ -118,8 +118,8 @@ func.template<test.effect> target(@gfx1100) priority(10) @gfx11_template(%value:
   func.return %value : i32
 }
 
-func.template<test.effect> when [#target.subgroup.size<64>] priority(7) @subgroup_64_template(%value: i32) -> (i32) {
+func.template<test.effect> priority(7) @subgroup_64_template(%value: i32) -> (i32) where [#target.subgroup.size<64>, eq(%value, 7)] {
   func.return %value : i32
 }
 
-func.ukernel<test.effect> when [#target.subgroup.size<32>] priority(5) @subgroup_32_opaque(%value: i32) -> (i32)
+func.ukernel<test.effect> priority(5) @subgroup_32_opaque(%value: i32) -> (i32) where [#target.subgroup.size<32>]

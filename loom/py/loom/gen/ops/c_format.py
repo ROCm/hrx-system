@@ -40,6 +40,7 @@ from loom.assembly import (
     TypedRefs,
     TypeOf,
     TypesOf,
+    WhereClause,
 )
 from loom.assembly import (
     Region as RegionFmt,
@@ -265,6 +266,26 @@ def translate_format_elements(op: Op) -> list[tuple[str, int, str]]:
                 case PredicateList(field=name):
                     _field_kind, index = resolve_field(name)
                     elements.append(("LOOM_FORMAT_KIND_PREDICATE_LIST", index, "0"))
+
+                case WhereClause(predicates=predicates, clauses=clauses):
+                    predicate_kind, predicate_index = resolve_field(predicates)
+                    predicate_attr = op.attr(predicates)
+                    if predicate_kind != FieldKind.ATTR or predicate_attr is None or predicate_attr.attr_type != "predicate_list":
+                        raise ValueError(f"Op '{op.name}': WhereClause predicate field '{predicates}' must be a predicate_list attr")
+                    clause_index = "LOOM_FORMAT_WHERE_CLAUSE_NO_CLAUSES"
+                    if clauses is not None:
+                        clause_kind, resolved_clause_index = resolve_field(clauses)
+                        clause_attr = op.attr(clauses)
+                        if clause_kind != FieldKind.ATTR or clause_attr is None or clause_attr.attr_type != "parameterized_array":
+                            raise ValueError(f"Op '{op.name}': WhereClause typed-clause field '{clauses}' must be a parameterized_array attr")
+                        clause_index = str(resolved_clause_index)
+                    elements.append(
+                        (
+                            "LOOM_FORMAT_KIND_WHERE_CLAUSE",
+                            predicate_index,
+                            clause_index,
+                        )
+                    )
 
                 case OptionalGroup(elements=inner, anchor=anchor):
                     # Resolve anchor to determine category.

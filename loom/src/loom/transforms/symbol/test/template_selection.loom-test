@@ -730,7 +730,7 @@ func.def public @entry(%arg: i32) -> (i32) {
 
 test.target<quirky> @wave7
 
-func.template<demo.condition_match> when [#target.subgroup.size<7>] priority(10) @wave7_impl(%value: i32) -> (i32) {
+func.template<demo.condition_match> priority(10) @wave7_impl(%value: i32) -> (i32) where [#target.subgroup.size<7>] {
   %doubled = test.addi %value, %value : i32
   func.return %doubled : i32
 }
@@ -759,7 +759,7 @@ func.def public target(@wave7) @entry(%arg: i32) -> (i32) {
 // the specialized provider and the false edge disproves it.
 // RUN: pass select-templates,inline-callables
 
-func.template<demo.condition_path> when [#target.subgroup.size<32>] priority(10) @wave32(%value: i32) -> (i32) {
+func.template<demo.condition_path> priority(10) @wave32(%value: i32) -> (i32) where [#target.subgroup.size<32>] {
   %doubled = test.addi %value, %value : i32
   func.return %doubled : i32
 }
@@ -803,7 +803,7 @@ func.def public @entry(%arg: i32) -> (i32) {
 // func.apply solely to make provider selection work.
 // RUN: pass select-templates,inline-callables
 
-func.template<demo.condition_and_value> when [#target.subgroup.size<32>] priority(10) @wave32_tile64(%tile_size: index, %value: i32) -> (i32) where [eq(%tile_size, 64)] {
+func.template<demo.condition_and_value> priority(10) @wave32_tile64(%tile_size: index, %value: i32) -> (i32) where [#target.subgroup.size<32>, eq(%tile_size, 64)] {
   %doubled = test.addi %value, %value : i32
   func.return %doubled : i32
 }
@@ -861,7 +861,7 @@ func.def public @entry(%tile_size: index, %arg: i32) -> (i32) {
 
 test.target<low_core> @wave32 {subgroup_size = 32}
 
-func.template<demo.condition_reject> when [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {
+func.template<demo.condition_reject> priority(10) @wave64(%value: i32) -> (i32) where [#target.subgroup.size<64>] {
   %doubled = test.addi %value, %value : i32
   func.return %doubled : i32
 }
@@ -888,7 +888,7 @@ func.def public target(@wave32) @entry(%arg: i32) -> (i32) {
 // both the conditional choice and the proven lower-priority fallback.
 // RUN: pass select-templates
 
-func.template<demo.condition_unbound> when [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {
+func.template<demo.condition_unbound> priority(10) @wave64(%value: i32) -> (i32) where [#target.subgroup.size<64>] {
   func.return %value : i32
 }
 
@@ -902,7 +902,7 @@ func.def public @entry(%arg: i32) -> (i32) {
 }
 
 // ----
-func.template<demo.condition_unbound> when [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {
+func.template<demo.condition_unbound> priority(10) @wave64(%value: i32) -> (i32) where [#target.subgroup.size<64>] {
   func.return %value : i32
 }
 
@@ -923,7 +923,7 @@ func.def public @entry(%arg: i32) -> (i32) {
 
 test.target<low_core> @unknown_wave
 
-func.template<demo.condition_unknown_fallback> when [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {
+func.template<demo.condition_unknown_fallback> priority(10) @wave64(%value: i32) -> (i32) where [#target.subgroup.size<64>] {
   %doubled = test.addi %value, %value : i32
   func.return %doubled : i32
 }
@@ -952,7 +952,7 @@ func.def public target(@unknown_wave) @entry(%arg: i32) -> (i32) {
 
 test.target<low_core> @unknown_wave
 
-func.template<demo.condition_unknown_only> when [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {
+func.template<demo.condition_unknown_only> priority(10) @wave64(%value: i32) -> (i32) where [#target.subgroup.size<64>] {
   func.return %value : i32
 }
 
@@ -975,7 +975,7 @@ func.template<demo.condition_lower_unknown> priority(10) @proven(%value: i32) ->
   func.return %doubled : i32
 }
 
-func.template<demo.condition_lower_unknown> when [#target.subgroup.size<64>] priority(1) @wave64(%value: i32) -> (i32) {
+func.template<demo.condition_lower_unknown> priority(1) @wave64(%value: i32) -> (i32) where [#target.subgroup.size<64>] {
   func.return %value : i32
 }
 
@@ -1000,7 +1000,7 @@ func.def public target(@unknown_wave) @entry(%arg: i32) -> (i32) {
 
 test.target<quirky> @wave7
 
-func.ukernel<demo.condition_ukernel> when [#target.subgroup.size<64>] priority(10) @wave64_opaque(%value: i32) -> (i32)
+func.ukernel<demo.condition_ukernel> priority(10) @wave64_opaque(%value: i32) -> (i32) where [#target.subgroup.size<64>]
 
 func.template<demo.condition_ukernel> priority(1) @fallback(%value: i32) -> (i32) {
   func.return %value : i32
@@ -1026,7 +1026,7 @@ func.def public target(@wave7) @entry(%arg: i32) -> (i32) {
 
 test.target<low_core> @unknown_wave
 
-func.ukernel<demo.condition_unknown_ukernel> when [#target.subgroup.size<64>] priority(10) @wave64_opaque(%value: i32) -> (i32)
+func.ukernel<demo.condition_unknown_ukernel> priority(10) @wave64_opaque(%value: i32) -> (i32) where [#target.subgroup.size<64>]
 
 func.template<demo.condition_unknown_ukernel> priority(1) @fallback(%value: i32) -> (i32) {
   func.return %value : i32

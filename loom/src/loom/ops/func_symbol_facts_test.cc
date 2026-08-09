@@ -146,7 +146,7 @@ func.def public device @semantic() {
 
 TEST_F(FuncSymbolFactsTest, TemplateFactsCarryProviderContract) {
   ModulePtr module = ParseModule(R"(
-func.template<qwen.q4.matmul> public device pure hot inline when [#target.subgroup.size<64>] priority(7) @impl(%m: index) -> (index) where [mul(%m, 16)] {
+func.template<qwen.q4.matmul> public device pure hot inline priority(7) @impl(%m: index) -> (index) where [#target.subgroup.size<64>, mul(%m, 16)] {
   func.return %m : index
 }
 )");

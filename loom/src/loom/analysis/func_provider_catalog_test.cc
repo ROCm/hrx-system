@@ -104,10 +104,10 @@ class FuncProviderCatalogTest : public ::testing::Test {
     loom_op_t* op = nullptr;
     IREE_ASSERT_OK(loom_func_ukernel_build(
         &builder, LOOM_FUNC_UKERNEL_BUILD_FLAG_HAS_PRIORITY, contract_id, 0, 0,
-        0, 0, 0, 0, loom_symbol_ref_null(),
-        loom_parameterized_attr_array_empty(), priority,
+        0, 0, 0, 0, loom_symbol_ref_null(), priority,
         (loom_symbol_ref_t){/*.module_id=*/0, /*.symbol_id=*/symbol_id}, &i32,
-        1, &i32, 1, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &op));
+        1, &i32, 1, nullptr, 0, loom_parameterized_attr_array_empty(), nullptr,
+        0, LOOM_LOCATION_UNKNOWN, &op));
     ASSERT_NE(op, nullptr);
   }
 
@@ -248,7 +248,7 @@ test.target<low_core> @gfx11
 
 // Both constraints are deliberate here: the catalog must preserve target
 // identity and normalized facts independently when a provider requires both.
-func.template<demo.contract> target(@gfx11) when [#target.subgroup.size<64>] priority(3) @gfx11_provider(%arg0: i32) -> (i32) {
+func.template<demo.contract> target(@gfx11) priority(3) @gfx11_provider(%arg0: i32) -> (i32) where [#target.subgroup.size<64>] {
   func.return %arg0 : i32
 }
 

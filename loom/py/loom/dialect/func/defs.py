@@ -35,13 +35,13 @@ from loom.assembly import (
     FuncArgs,
     KeyRef,
     OptionalGroup,
-    PredicateList,
     Refs,
     Region,
     ResultTypeList,
     Scope,
     SymbolRef,
     TypesOf,
+    WhereClause,
     kw,
 )
 from loom.dialect.target.defs import ExportAbiKind
@@ -232,10 +232,21 @@ _SIGNATURE_FORMAT: list[FormatElement] = [
                 [ARROW, ResultTypeList("results")],
                 anchor="results",
             ),
+            WhereClause("predicates"),
+        ]
+    ),
+]
+
+_PROVIDER_SIGNATURE_FORMAT: list[FormatElement] = [
+    SymbolRef("callee"),
+    Scope(
+        [
+            FuncArgs("args"),
             OptionalGroup(
-                [kw("where"), PredicateList("predicates")],
-                anchor="predicates",
+                [ARROW, ResultTypeList("results")],
+                anchor="results",
             ),
+            WhereClause("predicates", "conditions"),
         ]
     ),
 ]
@@ -280,14 +291,7 @@ _PROVIDER_ATTRS = [
         "conditions",
         ATTR_TYPE_PARAMETERIZED_ARRAY,
         optional=True,
-        doc="Static target-fact conditions required by this provider.",
-    ),
-]
-
-_PROVIDER_CONDITION_FORMAT: list[FormatElement] = [
-    OptionalGroup(
-        [kw("when"), Attr("conditions")],
-        anchor="conditions",
+        doc="Typed applicability clauses conjoined with ordinary predicates.",
     ),
 ]
 
@@ -466,17 +470,16 @@ func_template = Op(
         KeyRef("implements"),
         *_MODIFIER_FORMAT,
         *_TARGET_FORMAT,
-        *_PROVIDER_CONDITION_FORMAT,
         OptionalGroup(
             [kw("priority"), GLUE, LPAREN, GLUE, Attr("priority"), GLUE, RPAREN],
             anchor="priority",
         ),
-        *_SIGNATURE_FORMAT,
+        *_PROVIDER_SIGNATURE_FORMAT,
         Region("body"),
     ],
     examples=[
         "func.template<tile.contract> device @vnni_q8(%w: tensor<[%M]xi8>, %x: tensor<[%K]xf32>) -> (tensor<[%M]xf32>) where [mul(%M, 16)] {\n  func.return %x : tensor<[%K]xf32>\n}",
-        "func.template<tile.contract> when [#target.subgroup.size<64>] priority(20) @subgroup64_q8(%a: tile<4xf32>) -> (tile<4xf32>) {\n  func.return %a : tile<4xf32>\n}",
+        "func.template<tile.contract> priority(20) @subgroup64_q8(%a: tile<4xf32>) -> (tile<4xf32>) where [#target.subgroup.size<64>] {\n  func.return %a : tile<4xf32>\n}",
         "func.template<tile.contract> target(@gfx11_generic) @gfx11_q8(%a: tile<4xf32>) -> (tile<4xf32>) {\n  func.return %a : tile<4xf32>\n}",
         "func.template<tile.contract> priority(10) @high_priority(%a: tile<4xf32>) -> (tile<4xf32>) {\n  func.return %a : tile<4xf32>\n}",
     ],
@@ -522,16 +525,15 @@ func_ukernel = Op(
         KeyRef("implements"),
         *_MODIFIER_FORMAT,
         *_TARGET_FORMAT,
-        *_PROVIDER_CONDITION_FORMAT,
         OptionalGroup(
             [kw("priority"), GLUE, LPAREN, GLUE, Attr("priority"), GLUE, RPAREN],
             anchor="priority",
         ),
-        *_SIGNATURE_FORMAT,
+        *_PROVIDER_SIGNATURE_FORMAT,
     ],
     examples=[
         "func.ukernel<tile.contract> device @vnni_q8_asm(%w: tensor<[%M]xi8>, %x: tensor<[%K]xf32>) -> (tensor<[%M]xf32>) where [mul(%M, 16)]",
-        "func.ukernel<tile.contract> when [#target.subgroup.size<64>] priority(20) @subgroup64_q8_asm(%a: tile<4xf32>) -> (tile<4xf32>)",
+        "func.ukernel<tile.contract> priority(20) @subgroup64_q8_asm(%a: tile<4xf32>) -> (tile<4xf32>) where [#target.subgroup.size<64>]",
         "func.ukernel<tile.contract> target(@gfx11_generic) @gfx11_q8_asm(%a: tile<4xf32>) -> (tile<4xf32>)",
     ],
 )

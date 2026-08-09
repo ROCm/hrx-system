@@ -59,9 +59,9 @@ func.ukernel<test.large> target(@large_target) @large_ukernel()
 // ====
 
 // Only parameterized attribute families with target-condition semantics are
-// valid in provider when clauses.
+// valid as typed provider applicability clauses.
 // ERROR@+1: TARGET/068 {provider_name="not_a_condition", condition_index="0", reason="parameterized attribute family 'test.tile' is not a target condition"}
-func.template<test.invalid_condition> when [#test.tile<width = 8>] @not_a_condition() {
+func.template<test.invalid_condition> @not_a_condition() where [#test.tile<width = 8>] {
   func.return
 }
 
@@ -69,4 +69,4 @@ func.template<test.invalid_condition> when [#test.tile<width = 8>] @not_a_condit
 
 // Target condition values are validated at the authored provider boundary.
 // ERROR@+1: TARGET/068 {provider_name="invalid_size", condition_index="0", reason="target.subgroup.size requires a nonzero unsigned 32-bit size; got 0"}
-func.ukernel<test.invalid_condition> when [#target.subgroup.size<0>] @invalid_size()
+func.ukernel<test.invalid_condition> @invalid_size() where [#target.subgroup.size<0>]

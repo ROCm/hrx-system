@@ -34,6 +34,7 @@ from loom.assembly import (
     TemplateParam,
     TemplateParamFlags,
     TypesOf,
+    WhereClause,
     kw,
 )
 from loom.dsl import (
@@ -1083,6 +1084,31 @@ def test_generate_tables_expands_clause_format() -> None:
     assert "LOOM_KW_TARGET" in tables_c
     assert "LOOM_FORMAT_KIND_GLUE" in tables_c
     assert "LOOM_FORMAT_KIND_OPERAND_REF" in tables_c
+
+
+def test_generate_tables_emits_heterogeneous_where_clause() -> None:
+    mixed_op = Op(
+        "test.mixed_where",
+        group=Dialect("test"),
+        attrs=[
+            AttrDef("predicates", ATTR_TYPE_PREDICATE_LIST, optional=True),
+            AttrDef("conditions", ATTR_TYPE_PARAMETERIZED_ARRAY, optional=True),
+        ],
+        format=[WhereClause("predicates", "conditions")],
+    )
+    predicate_op = Op(
+        "test.predicate_where",
+        group=Dialect("test"),
+        attrs=[
+            AttrDef("predicates", ATTR_TYPE_PREDICATE_LIST, optional=True),
+        ],
+        format=[WhereClause("predicates")],
+    )
+
+    tables_c = generate_tables_c("test", 0, [mixed_op, predicate_op])
+
+    assert "{LOOM_FORMAT_KIND_WHERE_CLAUSE, 0, 1}," in tables_c
+    assert ("{LOOM_FORMAT_KIND_WHERE_CLAUSE, 0, LOOM_FORMAT_WHERE_CLAUSE_NO_CLAUSES},") in tables_c
 
 
 def test_generate_tables_emits_literal_matches_element_type_constraint() -> None:

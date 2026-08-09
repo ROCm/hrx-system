@@ -1761,8 +1761,8 @@ class TestCrossFormatRoundTrip:
     def test_func_template_metadata_survives_bytecode(self) -> None:
         text = (
             "func.template<tile.contract> device "
-            "when [#target.subgroup.size<64>] priority(7) "
-            "@kernel(%input: f32) -> (f32) {\n"
+            "priority(7) @kernel(%input: f32) -> (f32) "
+            "where [#target.subgroup.size<64>] {\n"
             "  func.return %input : f32\n"
             "}\n"
         )

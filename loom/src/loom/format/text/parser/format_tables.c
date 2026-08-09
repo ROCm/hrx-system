@@ -93,6 +93,8 @@ static bool loom_parse_format_element_covers_attr(
     case LOOM_FORMAT_KIND_TEMPLATE_PARAM:
     case LOOM_FORMAT_KIND_PREDICATE_LIST:
       return element->field_index == attr_index;
+    case LOOM_FORMAT_KIND_WHERE_CLAUSE:
+      return element->field_index == attr_index || element->data == attr_index;
     case LOOM_FORMAT_KIND_TEMPLATE_PARAM_FLAGS:
       return element->field_index == attr_index;
     case LOOM_FORMAT_KIND_STABLE_KEY_REF:
