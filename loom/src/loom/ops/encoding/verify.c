@@ -37,6 +37,58 @@ static iree_status_t loom_encoding_define_emit_duplicate_static_dynamic_param(
                             IREE_ARRAYSIZE(params));
 }
 
+static iree_status_t loom_encoding_define_emit_unknown_dynamic_param(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter, iree_string_view_t encoding_name,
+    loom_string_id_t name_id) {
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(encoding_name),
+      loom_param_string(module->strings.entries[name_id]),
+  };
+  return loom_encoding_emit(emitter, op, LOOM_ERR_ENCODING_008, params,
+                            IREE_ARRAYSIZE(params));
+}
+
+static iree_status_t loom_encoding_define_emit_dynamic_type_mismatch(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter, iree_string_view_t encoding_name,
+    const loom_encoding_define_param_resolution_t* resolution) {
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(encoding_name),
+      loom_param_string(module->strings.entries[resolution->name_id]),
+      loom_param_type(loom_module_value_type(module, resolution->value_id)),
+      loom_param_string(iree_make_cstring_view(
+          loom_type_constraint_name(resolution->expected_type))),
+  };
+  return loom_encoding_emit(emitter, op, LOOM_ERR_ENCODING_009, params,
+                            IREE_ARRAYSIZE(params));
+}
+
+// Returns a name present in both lexically ordered parameter namespaces.
+static loom_string_id_t loom_encoding_define_find_duplicate_param(
+    const loom_module_t* module,
+    const loom_encoding_define_param_view_t* params) {
+  iree_host_size_t static_index = 0;
+  iree_host_size_t dynamic_index = 0;
+  while (static_index < params->static_attrs.count &&
+         dynamic_index < params->dynamic_names.count) {
+    const loom_string_id_t static_name_id =
+        params->static_attrs.entries[static_index].name_id;
+    const loom_string_id_t dynamic_name_id =
+        params->dynamic_names.entries[dynamic_index].name_id;
+    const int comparison =
+        iree_string_view_compare(module->strings.entries[static_name_id],
+                                 module->strings.entries[dynamic_name_id]);
+    if (comparison == 0) return dynamic_name_id;
+    if (comparison < 0) {
+      ++static_index;
+    } else {
+      ++dynamic_index;
+    }
+  }
+  return LOOM_STRING_ID_INVALID;
+}
+
 static iree_status_t loom_encoding_define_emit_result_role_error(
     iree_diagnostic_emitter_t emitter, const loom_op_t* op,
     iree_string_view_t encoding_name, loom_type_t actual_type,
@@ -126,22 +178,40 @@ iree_status_t loom_encoding_define_verify(const loom_module_t* module,
       loom_encoding_define_param_view(module, op);
   if (!params.spec) return iree_ok_status();
 
-  for (iree_host_size_t static_index = 0;
-       static_index < params.static_attrs.count; ++static_index) {
-    loom_string_id_t static_name_id =
-        params.static_attrs.entries[static_index].name_id;
-    for (iree_host_size_t dynamic_index = 0;
-         dynamic_index < params.dynamic_names.count; ++dynamic_index) {
-      if (params.dynamic_names.entries[dynamic_index].name_id ==
-          static_name_id) {
-        return loom_encoding_define_emit_duplicate_static_dynamic_param(
-            module, op, emitter, static_name_id);
-      }
-    }
-  }
-
   iree_string_view_t encoding_name =
       module->strings.entries[params.spec->name_id];
+
+  const loom_encoding_vtable_t* vtable =
+      loom_module_encoding_vtable(module, params.spec);
+  loom_value_id_t
+      dynamic_value_slots[LOOM_ENCODING_DYNAMIC_PARAMETER_COUNT_MAX];
+  loom_encoding_define_resolved_params_t resolved_params;
+  if (vtable) {
+    const loom_encoding_define_param_resolution_t resolution =
+        loom_encoding_define_resolve_params(module, vtable->descriptor, &params,
+                                            dynamic_value_slots,
+                                            &resolved_params);
+    switch (resolution.issue) {
+      case LOOM_ENCODING_DEFINE_PARAM_ISSUE_NONE:
+        break;
+      case LOOM_ENCODING_DEFINE_PARAM_ISSUE_DUPLICATE_STATIC_DYNAMIC:
+        return loom_encoding_define_emit_duplicate_static_dynamic_param(
+            module, op, emitter, resolution.name_id);
+      case LOOM_ENCODING_DEFINE_PARAM_ISSUE_UNKNOWN_DYNAMIC:
+        return loom_encoding_define_emit_unknown_dynamic_param(
+            module, op, emitter, encoding_name, resolution.name_id);
+      case LOOM_ENCODING_DEFINE_PARAM_ISSUE_DYNAMIC_TYPE_MISMATCH:
+        return loom_encoding_define_emit_dynamic_type_mismatch(
+            module, op, emitter, encoding_name, &resolution);
+    }
+  } else {
+    const loom_string_id_t duplicate_name_id =
+        loom_encoding_define_find_duplicate_param(module, &params);
+    if (duplicate_name_id != LOOM_STRING_ID_INVALID) {
+      return loom_encoding_define_emit_duplicate_static_dynamic_param(
+          module, op, emitter, duplicate_name_id);
+    }
+  }
 
   loom_type_t result_type =
       loom_module_value_type(module, loom_encoding_define_result(op));
@@ -156,8 +226,6 @@ iree_status_t loom_encoding_define_verify(const loom_module_t* module,
     }
   }
 
-  const loom_encoding_vtable_t* vtable =
-      loom_module_encoding_vtable(module, params.spec);
   if (vtable && vtable->verify_define) {
     IREE_RETURN_IF_ERROR(vtable->verify_define(module, op, &params, emitter));
   }

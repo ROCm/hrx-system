@@ -125,9 +125,19 @@ static iree_status_t VerifyRequiresLayoutDefine(
   return iree_ok_status();
 }
 
+static const loom_encoding_dynamic_parameter_descriptor_t
+    kRequiresLayoutDynamicParameters[] = {{
+        /*.name=*/LOOM_BSTRING_REF(6, "layout"),
+        /*.type_constraint=*/LOOM_TYPE_CONSTRAINT_ANY_ENCODING,
+    }};
 static const loom_encoding_family_descriptor_t kRequiresLayoutDescriptor = {
     /*.name=*/LOOM_BSTRING_REF(15, "requires_layout"),
     /*.role=*/LOOM_ENCODING_ROLE_UNKNOWN,
+    /*.parameter_count=*/{},
+    /*.parameter_descriptors=*/{},
+    /*.dynamic_parameter_count=*/
+    IREE_ARRAYSIZE(kRequiresLayoutDynamicParameters),
+    /*.dynamic_parameter_descriptors=*/kRequiresLayoutDynamicParameters,
 };
 static const loom_encoding_vtable_t kRequiresLayoutEncodingVtable = {
     /*.descriptor=*/&kRequiresLayoutDescriptor,

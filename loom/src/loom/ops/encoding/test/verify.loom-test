@@ -158,7 +158,7 @@ func.def @physical_storage_missing_schema() {
 
 func.def @physical_storage_wrong_layout_type(%x: index) {
   %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
-  // ERROR@+1: ENCODING/009 {encoding_name="physical_storage", param_name="layout", actual_type="index", expected_type="encoding"}
+  // ERROR@+1: ENCODING/009 {encoding_name="physical_storage", param_name="layout", actual_type="index", expected_type="encoding<layout>"}
   %storage = encoding.define #physical_storage {layout = %x : index, schema = %schema : encoding<schema>} : encoding<storage>
   func.return
 }
@@ -168,8 +168,7 @@ func.def @physical_storage_wrong_layout_type(%x: index) {
 func.def @physical_storage_role_mismatch() {
   %layout = encoding.layout.dense : encoding<layout>
   %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
-  // ERROR@+2: ENCODING/011 {encoding_name="physical_storage", param_name="layout", expected_role="an address layout encoding"}
-  // ERROR@+1: ENCODING/011 {encoding_name="physical_storage", param_name="schema", expected_role="a storage schema encoding"}
+  // ERROR@+1: ENCODING/009 {encoding_name="physical_storage", param_name="layout", actual_type="encoding<schema>", expected_type="encoding<layout>"}
   %storage = encoding.define #physical_storage {layout = %schema : encoding<schema>, schema = %layout : encoding<layout>} : encoding<storage>
   func.return
 }
@@ -493,7 +492,7 @@ func.def @turboquant_transform_role_mismatch(%params: buffer, %thresholds_offset
   %schema_param = encoding.define #q8_0<block=32> : encoding<schema>
   %qjl_matrix = vector.constant 0.0 : vector<64x128xf32>
   %qjl_transform = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %qjl_matrix : vector<64x128xf32>} : encoding<transform>
-  // ERROR@+1: ENCODING/011 "turboquant_kv" "transform" "a numeric transform encoding"
+  // ERROR@+1: ENCODING/009 "turboquant_kv" "transform" "encoding<schema>" "encoding<transform>"
   %schema = encoding.define #turboquant_kv<first_stage_bits=2, logical_element="f16", logical_elems=128, pack_order="lsb0", qjl_rows=64, record_bytes=40, residual_bits=1, scalar_quantizer="lloyd_max", transform_family="hadamard_sign"> {centroids = %centroids : view<4xf16, %dense>, qjl_transform = %qjl_transform : encoding<transform>, thresholds = %thresholds : view<3xf32, %dense>, transform = %schema_param : encoding<schema>} : encoding<schema>
   func.return
 }

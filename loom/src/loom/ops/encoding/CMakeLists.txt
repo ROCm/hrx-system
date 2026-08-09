@@ -19,6 +19,7 @@ loom_generated_cc_library(
     "families.c"
     "matrix_operand.c"
     "numeric_transform.c"
+    "params.c"
     "roles.c"
     "storage.c"
     "verify.c"
