@@ -44,6 +44,14 @@ typedef iree_status_t (*loom_target_condition_validate_fn_t)(
 typedef loom_target_condition_outcome_t (*loom_target_condition_evaluate_fn_t)(
     const loom_target_facts_t* facts, loom_attribute_t condition);
 
+// Projects one typed static condition into the ordinary predicate it places
+// on a matching contextual query result. Returns false when |query_key|
+// identifies a different projection within the same family. The authored
+// condition and compiler-produced query origin are already verified.
+typedef bool (*loom_target_condition_project_query_predicate_fn_t)(
+    loom_attribute_t condition, loom_attribute_t query_key,
+    loom_value_id_t query_value_id, loom_predicate_t* out_predicate);
+
 // Static semantics attached to one parameterized attribute family.
 struct loom_target_condition_descriptor_t {
   // Required static target fact-family type, or NULL for normalized common
@@ -55,10 +63,13 @@ struct loom_target_condition_descriptor_t {
 
   // Infallible hot evaluator over immutable facts.
   loom_target_condition_evaluate_fn_t evaluate;
+
+  // Optional projection into the shared SSA fact-predicate domain.
+  loom_target_condition_project_query_predicate_fn_t project_query_predicate;
 };
 
-static_assert(sizeof(loom_target_condition_descriptor_t) == 24,
-              "target condition descriptor must remain 24 bytes");
+static_assert(sizeof(loom_target_condition_descriptor_t) == 32,
+              "target condition descriptor must remain 32 bytes");
 
 // One semantically resolved authored target condition.
 typedef struct loom_target_condition_t {

@@ -56,7 +56,24 @@ loom_target_subgroup_size_condition_evaluate(const loom_target_facts_t* facts,
                                       : LOOM_TARGET_CONDITION_REJECT;
 }
 
+static bool loom_target_subgroup_size_condition_project_query_predicate(
+    loom_attribute_t condition, loom_attribute_t query_key,
+    loom_value_id_t query_value_id, loom_predicate_t* out_predicate) {
+  if (!loom_attr_is_absent(query_key)) return false;
+  *out_predicate = (loom_predicate_t){
+      .kind = LOOM_PREDICATE_EQ,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,
+                   LOOM_PRED_ARG_NONE},
+      .args = {query_value_id, loom_target_subgroup_size_attr_size(condition),
+               0},
+  };
+  return true;
+}
+
 const loom_target_condition_descriptor_t loom_target_subgroup_size_condition = {
     .validate = loom_target_subgroup_size_condition_validate,
     .evaluate = loom_target_subgroup_size_condition_evaluate,
+    .project_query_predicate =
+        loom_target_subgroup_size_condition_project_query_predicate,
 };

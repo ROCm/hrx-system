@@ -754,6 +754,107 @@ func.def public target(@wave7) @entry(%arg: i32) -> (i32) {
 
 // ====
 
+// The same normalized condition can be proven locally in targetless IR. The
+// dynamic query and static clause share one fact family: the true edge selects
+// the specialized provider and the false edge disproves it.
+// RUN: pass select-templates,inline-callables
+
+func.template<demo.condition_path> when [#target.subgroup.size<32>] priority(10) @wave32(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.template<demo.condition_path> priority(1) @fallback(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %subgroup_size = target.subgroup.size : index
+  %c32 = index.constant 32 : index
+  %is_wave32 = index.cmp eq, %subgroup_size, %c32 : index
+  %result = scf.if %is_wave32 -> (i32) {
+    %matched = func.apply<demo.condition_path>(%arg) : (i32) -> (i32)
+    scf.yield %matched : i32
+  } else {
+    %fallback = func.apply<demo.condition_path>(%arg) : (i32) -> (i32)
+    scf.yield %fallback : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def public @entry(%arg: i32) -> (i32) {
+  %subgroup_size = target.subgroup.size : index
+  %c32 = index.constant 32 : index
+  %is_wave32 = index.cmp eq, %subgroup_size, %c32 : index
+  %result = scf.if %is_wave32 -> (i32) {
+    %doubled = test.addi %arg, %arg : i32
+    scf.yield %doubled : i32
+  } else {
+    scf.yield %arg : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+// Contextual clauses and argument predicates consume the same composed path
+// facts. Neither the query value nor either boolean guard is threaded through
+// func.apply solely to make provider selection work.
+// RUN: pass select-templates,inline-callables
+
+func.template<demo.condition_and_value> when [#target.subgroup.size<32>] priority(10) @wave32_tile64(%tile_size: index, %value: i32) -> (i32) where [eq(%tile_size, 64)] {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.template<demo.condition_and_value> priority(1) @fallback(%tile_size: index, %value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public @entry(%tile_size: index, %arg: i32) -> (i32) {
+  %subgroup_size = target.subgroup.size : index
+  %c32 = index.constant 32 : index
+  %is_wave32 = index.cmp eq, %subgroup_size, %c32 : index
+  %c64 = index.constant 64 : index
+  %is_tile64 = index.cmp eq, %tile_size, %c64 : index
+  %wave_result = scf.if %is_wave32 -> (i32) {
+    %tile_result = scf.if %is_tile64 -> (i32) {
+      %matched = func.apply<demo.condition_and_value>(%tile_size, %arg) : (index, i32) -> (i32)
+      scf.yield %matched : i32
+    } else {
+      scf.yield %arg : i32
+    }
+    scf.yield %tile_result : i32
+  } else {
+    scf.yield %arg : i32
+  }
+  func.return %wave_result : i32
+}
+
+// ----
+func.def public @entry(%tile_size: index, %arg: i32) -> (i32) {
+  %subgroup_size = target.subgroup.size : index
+  %c32 = index.constant 32 : index
+  %is_wave32 = index.cmp eq, %subgroup_size, %c32 : index
+  %c64 = index.constant 64 : index
+  %is_tile64 = index.cmp eq, %tile_size, %c64 : index
+  %wave_result = scf.if %is_wave32 -> (i32) {
+    %tile_result = scf.if %is_tile64 -> (i32) {
+      %doubled = test.addi %arg, %arg : i32
+      scf.yield %doubled : i32
+    } else {
+      scf.yield %arg : i32
+    }
+    scf.yield %tile_result : i32
+  } else {
+    scf.yield %arg : i32
+  }
+  func.return %wave_result : i32
+}
+
+// ====
+
 // A disproven condition excludes the specialized provider and admits the
 // proven fallback without changing the caller's target facts.
 // RUN: pass select-templates,inline-callables
