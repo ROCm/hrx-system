@@ -1140,6 +1140,14 @@ loom_call_like_t loom_call_like_cast(const loom_module_t* module,
 // Returns the direct callee symbol ref, or {0, 0} if |call| is not valid.
 loom_symbol_ref_t loom_call_like_callee(loom_call_like_t call);
 
+// Retargets a verified direct call to |callee|.
+//
+// The call and symbol reference must belong to |module|. This refreshes
+// callback-backed effective traits and transitive effect summaries;
+// callers remain responsible for invalidating any higher-level analyses.
+void loom_call_like_set_callee(loom_module_t* module, loom_call_like_t call,
+                               loom_symbol_ref_t callee);
+
 // Returns the trailing call argument slice, or an empty slice if |call| is not
 // valid or the recorded offset is malformed for the op instance.
 loom_value_slice_t loom_call_like_operands(loom_call_like_t call);

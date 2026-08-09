@@ -620,6 +620,22 @@ loom_symbol_ref_t loom_call_like_callee(loom_call_like_t call) {
       loom_op_attrs(call.op)[call.vtable->callee_attr_index]);
 }
 
+void loom_call_like_set_callee(loom_module_t* module, loom_call_like_t call,
+                               loom_symbol_ref_t callee) {
+  IREE_ASSERT_ARGUMENT(module);
+  IREE_ASSERT_ARGUMENT(call.op);
+  IREE_ASSERT_ARGUMENT(call.vtable);
+  IREE_ASSERT_LT(call.vtable->callee_attr_index, call.op->attribute_count);
+  IREE_ASSERT(loom_symbol_ref_is_valid(callee));
+  IREE_ASSERT_EQ(callee.module_id, 0);
+  IREE_ASSERT_LT(callee.symbol_id, module->symbols.count);
+  const loom_trait_flags_t old_traits = call.op->traits;
+  loom_op_attrs(call.op)[call.vtable->callee_attr_index] =
+      loom_attr_symbol(callee);
+  loom_op_refresh_effective_traits(module, call.op);
+  loom_module_update_op_direct_effects(call.op, old_traits, call.op->traits);
+}
+
 loom_value_slice_t loom_call_like_operands(loom_call_like_t call) {
   if (!call.vtable || call.vtable->operand_offset > call.op->operand_count) {
     return (loom_value_slice_t){0};

@@ -162,6 +162,19 @@ TEST_F(InterfaceTest, CallLikeCastReturnsValidForInvoke) {
   EXPECT_EQ(loom_call_like_result_offset(call), 0);
   EXPECT_EQ(loom_call_like_callee(call).symbol_id, func_ref_.symbol_id);
 
+  loom_string_id_t replacement_name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_string(module_, IREE_SV("replacement"),
+                                           &replacement_name_id));
+  uint16_t replacement_symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_add_symbol(module_, replacement_name_id,
+                                        &replacement_symbol_id));
+  const loom_symbol_ref_t replacement_ref = {
+      /*.module_id=*/0,
+      /*.symbol_id=*/replacement_symbol_id,
+  };
+  loom_call_like_set_callee(module_, call, replacement_ref);
+  EXPECT_EQ(loom_call_like_callee(call).symbol_id, replacement_symbol_id);
+
   loom_value_slice_t operands = loom_call_like_operands(call);
   ASSERT_EQ(operands.count, 1);
   EXPECT_EQ(operands.values[0], input_id);

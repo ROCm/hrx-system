@@ -580,6 +580,76 @@ iree_status_t loom_callable_inline_consuming_direct_call(
   return loom_callable_inline_consuming_call(rewriter, call_op, callee);
 }
 
+typedef struct loom_callable_clone_symbol_state_t {
+  // Source function symbol replaced during cloning.
+  loom_symbol_ref_t source_ref;
+
+  // Target function symbol replacing |source_ref|.
+  loom_symbol_ref_t target_ref;
+} loom_callable_clone_symbol_state_t;
+
+static iree_status_t loom_callable_clone_remap_symbol(
+    void* user_data, const loom_module_t* source_module,
+    loom_module_t* target_module, loom_symbol_ref_t source_ref,
+    loom_symbol_ref_t* out_target_ref) {
+  (void)source_module;
+  (void)target_module;
+  const loom_callable_clone_symbol_state_t* state =
+      (const loom_callable_clone_symbol_state_t*)user_data;
+  *out_target_ref =
+      loom_callable_symbol_ref_equal(source_ref, state->source_ref)
+          ? state->target_ref
+          : source_ref;
+  return iree_ok_status();
+}
+
+iree_status_t loom_callable_clone_definition(
+    loom_builder_t* builder, loom_func_like_t source,
+    loom_symbol_ref_t target_ref, loom_func_like_t* out_cloned,
+    iree_arena_allocator_t* scratch_arena) {
+  *out_cloned = (loom_func_like_t){0};
+  IREE_RETURN_IF_ERROR(
+      loom_callable_validate_same_module_callee(builder->module, source));
+  if (!loom_symbol_ref_is_valid(target_ref) || target_ref.module_id != 0 ||
+      target_ref.symbol_id >= builder->module->symbols.count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "target symbol ref {module=%u, symbol=%u} is invalid",
+        (unsigned)target_ref.module_id, (unsigned)target_ref.symbol_id);
+  }
+  loom_symbol_t* target_symbol =
+      &builder->module->symbols.entries[target_ref.symbol_id];
+  if (target_symbol->defining_op != NULL) {
+    return iree_make_status(IREE_STATUS_ALREADY_EXISTS,
+                            "target symbol already has a defining op");
+  }
+
+  loom_callable_clone_symbol_state_t symbol_state = {
+      .source_ref = loom_func_like_callee(source),
+      .target_ref = target_ref,
+  };
+  const loom_ir_remap_options_t remap_options = {
+      .remap_symbol = loom_ir_remap_symbol_callback_make(
+          loom_callable_clone_remap_symbol, &symbol_state),
+      .remap_same_module_symbols = true,
+  };
+  loom_ir_remap_t remap = {0};
+  IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
+      builder->module, builder->module, scratch_arena, &remap_options, &remap));
+
+  loom_op_t* cloned_op = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_ir_clone_op(builder, source.op, &remap, &cloned_op));
+  loom_func_like_t cloned = loom_func_like_cast(builder->module, cloned_op);
+  if (!loom_func_like_isa(cloned) || target_symbol->defining_op != cloned_op) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "cloned function did not bind the requested target symbol");
+  }
+  *out_cloned = cloned;
+  return iree_ok_status();
+}
+
 typedef struct loom_callable_import_symbol_state_t {
   // Source-module symbol ref of the callable being imported.
   loom_symbol_ref_t source_callee_ref;

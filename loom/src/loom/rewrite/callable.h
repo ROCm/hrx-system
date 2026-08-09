@@ -58,6 +58,17 @@ iree_status_t loom_callable_inline_consuming_call(loom_rewriter_t* rewriter,
 iree_status_t loom_callable_inline_consuming_direct_call(
     loom_rewriter_t* rewriter, loom_op_t* call_op);
 
+// Clones one same-module function-like definition as |target_ref|.
+//
+// |target_ref| must name an existing symbol without a defining op. The cloned
+// function's defining symbol and recursive self-references are rewritten to
+// |target_ref| while references to every other same-module symbol are
+// preserved.
+iree_status_t loom_callable_clone_definition(
+    loom_builder_t* builder, loom_func_like_t source,
+    loom_symbol_ref_t target_ref, loom_func_like_t* out_cloned,
+    iree_arena_allocator_t* scratch_arena);
+
 // Options for importing one function-like definition across modules.
 typedef struct loom_callable_import_options_t {
   // Optional policy for non-callee symbol references in the imported body.

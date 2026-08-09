@@ -137,6 +137,8 @@ iree_status_t loom_ir_remap_initialize(const loom_module_t* source_module,
       .allow_unmapped_values = options ? options->allow_unmapped_values : false,
       .remap_symbol = options ? options->remap_symbol
                               : loom_ir_remap_symbol_callback_empty(),
+      .remap_same_module_symbols =
+          options ? options->remap_same_module_symbols : false,
   };
 
   *out_remap = remap;
@@ -557,14 +559,15 @@ static iree_status_t loom_ir_remap_symbol_ref(
         "source symbol ref {module=%u, symbol=%u} is out of range",
         (unsigned)source_ref.module_id, (unsigned)source_ref.symbol_id);
   }
-  if (remap->source_module == remap->target_module) {
+  if (remap->source_module == remap->target_module &&
+      !remap->remap_same_module_symbols) {
     *out_target_ref = source_ref;
     return iree_ok_status();
   }
   if (!remap->remap_symbol.fn) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        "cross-module symbol reference remapping requires a symbol policy");
+        "symbol reference remapping requires a symbol policy");
   }
   loom_symbol_ref_t target_ref = loom_symbol_ref_null();
   IREE_RETURN_IF_ERROR(remap->remap_symbol.fn(

@@ -29,7 +29,7 @@ extern "C" {
 // Cross-module materialization cannot infer symbol ownership safely. Callers
 // that clone IR across modules must provide this callback when cloned
 // attributes may reference symbols. Same-module remapping keeps symbol refs
-// unchanged and does not call the callback.
+// unchanged unless |remap_same_module_symbols| explicitly enables the callback.
 typedef iree_status_t (*loom_ir_remap_symbol_fn_t)(
     void* user_data, const loom_module_t* source_module,
     loom_module_t* target_module, loom_symbol_ref_t source_ref,
@@ -64,8 +64,11 @@ typedef struct loom_ir_remap_options_t {
   // target are the same module. Cross-module remaps still require an explicit
   // mapping for every SSA value reference.
   bool allow_unmapped_values;
-  // Optional callback for cross-module symbol reference remapping.
+  // Optional callback for symbol reference remapping.
   loom_ir_remap_symbol_callback_t remap_symbol;
+  // Invokes |remap_symbol| for same-module symbol refs instead of preserving
+  // them by identity.
+  bool remap_same_module_symbols;
 } loom_ir_remap_options_t;
 
 // Sparse SSA value mapping entry.
@@ -102,8 +105,10 @@ typedef struct loom_ir_remap_t {
   iree_host_size_t block_map_capacity;
   // Allows same-module unmapped SSA refs to keep their original ID.
   bool allow_unmapped_values;
-  // Optional callback for cross-module symbol reference remapping.
+  // Optional callback for symbol reference remapping.
   loom_ir_remap_symbol_callback_t remap_symbol;
+  // Invokes |remap_symbol| for same-module symbol refs.
+  bool remap_same_module_symbols;
   // Current recursive static-encoding remap depth. Internal recursion guard;
   // callers should treat this as owned by the remap helpers.
   uint16_t encoding_depth;
