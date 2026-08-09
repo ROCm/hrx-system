@@ -58,10 +58,6 @@ static inline bool loom_encoding_define_dynamic_param_value(
   return true;
 }
 
-// Maximum number of dynamic parameters in one family descriptor. Descriptor
-// ordinals reserve UINT8_MAX as an invalid sentinel.
-#define LOOM_ENCODING_DYNAMIC_PARAMETER_COUNT_MAX UINT8_MAX
-
 // One descriptor-indexed dynamic parameter binding.
 typedef struct loom_encoding_define_dynamic_binding_t {
   // SSA value bound to the parameter, or invalid when absent.
@@ -84,38 +80,6 @@ typedef struct loom_encoding_define_resolved_params_t {
   // Number of entries in |dynamic_bindings|.
   uint8_t dynamic_binding_count;
 } loom_encoding_define_resolved_params_t;
-
-typedef enum loom_encoding_define_param_issue_e {
-  LOOM_ENCODING_DEFINE_PARAM_ISSUE_NONE = 0,
-  LOOM_ENCODING_DEFINE_PARAM_ISSUE_DUPLICATE_STATIC_DYNAMIC,
-  LOOM_ENCODING_DEFINE_PARAM_ISSUE_UNKNOWN_DYNAMIC,
-  LOOM_ENCODING_DEFINE_PARAM_ISSUE_DYNAMIC_TYPE_MISMATCH,
-} loom_encoding_define_param_issue_t;
-
-// Describes the first authored parameter contract violation found while
-// resolving a structurally valid encoding.define.
-typedef struct loom_encoding_define_param_resolution_t {
-  // Issue classification, or NONE when resolution succeeded.
-  loom_encoding_define_param_issue_t issue;
-  // Authored dynamic parameter name associated with the issue.
-  loom_string_id_t name_id;
-  // Dynamic operand associated with a type mismatch, or invalid otherwise.
-  loom_value_id_t value_id;
-  // Expected type associated with a type mismatch, or ANY otherwise.
-  loom_type_constraint_t expected_type;
-} loom_encoding_define_param_resolution_t;
-
-// Resolves sorted authored parameters against |descriptor| in linear time.
-// |dynamic_binding_slots| must provide descriptor->dynamic_parameter_count
-// entries. The input must have passed generic OperandDict verification;
-// authored family-contract violations are returned as ordinary classifications
-// for the public verifier to diagnose.
-loom_encoding_define_param_resolution_t loom_encoding_define_resolve_params(
-    const loom_module_t* module,
-    const loom_encoding_family_descriptor_t* descriptor,
-    const loom_encoding_define_param_view_t* params,
-    loom_encoding_define_dynamic_binding_t* dynamic_binding_slots,
-    loom_encoding_define_resolved_params_t* out_params);
 
 // Resolves parameters from a verified encoding.define. This is the infallible
 // internal query for passes that run after module verification.
