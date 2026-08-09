@@ -139,6 +139,7 @@ typedef struct loom_amdgpu_fp8_encode_emission_state_t {
 bool loom_amdgpu_select_fp8_encode_plan(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_scalar_type_t source_type, loom_scalar_type_t result_type,
+    loom_value_fact_numeric_format_flags_t result_format,
     loom_amdgpu_fp8_encode_plan_t* out_plan);
 
 // Returns true when |plan| encodes independent lanes in software.
@@ -173,7 +174,7 @@ iree_status_t loom_amdgpu_emit_fp8_encode_duplicate_f16_lane(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t source, loom_type_t lane_type, loom_value_id_t* out_packed);
 
-// Encodes one F32 bit payload to an exact OCP FP8 byte in a full VGPR.
+// Encodes one F32 bit payload to the plan's exact FP8 byte in a full VGPR.
 iree_status_t loom_amdgpu_emit_fp8_encode_software_f32_lane(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fp8_encode_plan_t* plan,

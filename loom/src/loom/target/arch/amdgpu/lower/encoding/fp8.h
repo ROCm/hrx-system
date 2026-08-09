@@ -257,9 +257,16 @@ typedef struct loom_amdgpu_fp8_packed_u16_pair_source_t {
 } loom_amdgpu_fp8_packed_u16_pair_source_t;
 
 // Maps one supported FP8 numeric-format bit to its compact table index.
-bool loom_amdgpu_fp8_source_format_index(
-    loom_value_fact_numeric_format_flags_t source_format,
+bool loom_amdgpu_fp8_format_index(
+    loom_value_fact_numeric_format_flags_t numeric_format,
     uint32_t* out_format_index);
+
+// Returns the exact binary format and physical scalar carrier for one
+// supported FP8 numeric-format bit.
+bool loom_amdgpu_fp8_format(
+    loom_value_fact_numeric_format_flags_t numeric_format,
+    loom_scalar_type_t* out_element_type,
+    loom_scalar_type_fp8_format_t* out_format);
 
 // Returns the native unscaled FP8/BF8 conversion descriptor refs for the
 // descriptor-compatible source format and result element type pair.

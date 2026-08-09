@@ -382,9 +382,7 @@ static bool loom_amdgpu_select_vector_encode_fp8_plan(
       summary.storage_schema.encoded_operand;
   const loom_value_fact_rounding_policy_flags_t unsupported_policies =
       schema.rounding_policy & ~LOOM_VALUE_FACT_ROUNDING_POLICY_FINITE_ONLY;
-  if (schema.element_format !=
-          loom_numeric_format_from_scalar_type(result_element_type) ||
-      unsupported_policies != LOOM_VALUE_FACT_ROUNDING_POLICY_NONE ||
+  if (unsupported_policies != LOOM_VALUE_FACT_ROUNDING_POLICY_NONE ||
       !loom_amdgpu_fp8_encoded_operand_schema_matches(
           schema, result_element_type, result_lane_count,
           LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_UNSCALED)) {
@@ -392,7 +390,8 @@ static bool loom_amdgpu_select_vector_encode_fp8_plan(
   }
 
   return loom_amdgpu_select_fp8_encode_plan(descriptor_set, source_element_type,
-                                            result_element_type, out_plan);
+                                            result_element_type,
+                                            schema.element_format, out_plan);
 }
 
 iree_status_t loom_amdgpu_low_legality_verify_vector_decode(
@@ -761,7 +760,9 @@ iree_status_t loom_amdgpu_select_vector_16bit_float_conversion_plan(
     if (result_is_fp8) {
       *out_selected = loom_amdgpu_select_fp8_encode_plan(
           loom_low_lower_context_descriptor_set(context), source_element_type,
-          result_element_type, &fp8_encode);
+          result_element_type,
+          loom_numeric_format_from_scalar_type(result_element_type),
+          &fp8_encode);
     } else {
       IREE_RETURN_IF_ERROR(loom_amdgpu_select_arithmetic_contract(
           context, source_op, out_selected));

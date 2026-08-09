@@ -435,8 +435,9 @@ static bool loom_amdgpu_select_scalar_conversion_plan_impl(
 
   loom_amdgpu_fp8_encode_plan_t fp8_encode = {0};
   if (source_op->kind == LOOM_OP_SCALAR_FPTRUNC &&
-      loom_amdgpu_select_fp8_encode_plan(descriptor_set, source_type,
-                                         result_type, &fp8_encode)) {
+      loom_amdgpu_select_fp8_encode_plan(
+          descriptor_set, source_type, result_type,
+          loom_numeric_format_from_scalar_type(result_type), &fp8_encode)) {
     *out_plan = (loom_amdgpu_scalar_conversion_plan_t){
         .kind = LOOM_AMDGPU_SCALAR_CONVERSION_KIND_FP8_ENCODE,
         .source = source,

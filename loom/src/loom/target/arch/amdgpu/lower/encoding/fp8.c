@@ -103,8 +103,7 @@ loom_value_fact_numeric_format_flags_t loom_amdgpu_fp8_descriptor_source_format(
                : LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE;
   }
   uint32_t unused_format_index = 0;
-  return loom_amdgpu_fp8_source_format_index(exact_source_format,
-                                             &unused_format_index)
+  return loom_amdgpu_fp8_format_index(exact_source_format, &unused_format_index)
              ? exact_source_format
              : LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE;
 }

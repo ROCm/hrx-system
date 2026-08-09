@@ -69,7 +69,7 @@ static_assert(IREE_ARRAYSIZE(kLoomAmdgpuFp8SubnormalTableRows) + 1u <= 32,
 static bool loom_amdgpu_fp8_subnormal_table_row_index(
     loom_value_fact_numeric_format_flags_t source_format,
     uint32_t* out_row_index) {
-  return loom_amdgpu_fp8_source_format_index(source_format, out_row_index);
+  return loom_amdgpu_fp8_format_index(source_format, out_row_index);
 }
 
 static const loom_amdgpu_fp8_subnormal_table_row_t*

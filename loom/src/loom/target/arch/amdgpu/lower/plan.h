@@ -97,6 +97,8 @@ typedef struct loom_amdgpu_fp8_encode_plan_t {
   loom_amdgpu_fp8_encode_kind_t kind;
   // Optional packet-sequence capabilities refining the selected strategy.
   loom_amdgpu_fp8_encode_plan_flags_t flags;
+  // Exact exponent, mantissa, bias, and special-value semantics.
+  loom_scalar_type_fp8_format_t format;
   // Descriptor writing the low encoded byte pair of a result register.
   loom_amdgpu_descriptor_ref_t low_descriptor_ref;
   // Descriptor continuing a result register with its high encoded byte pair.
