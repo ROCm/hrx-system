@@ -3,13 +3,13 @@
 // HIP concept tags: template, specialization, expf, vector math, target
 // legalization, device function, inline.
 //
-// Position: provider selection and inlining establish the concrete body of a
-// target function. Math authored inside the selected provider then follows the
-// same target policy and lowering path as math written directly in the caller.
-amdgpu.target<gfx11-generic> @gfx11
+// Position: provider selection and inlining establish the concrete body after
+// the compile or JIT invocation specializes this targetless kernel. Math
+// authored inside the selected provider then follows the same target policy
+// and lowering path as math written directly in the caller.
 
 // HIP concept:
-//   template <typename Arch>
+//   template <typename MathPolicy>
 //   __device__ float4 evaluate_exp(float scalar, float4 values);
 //
 // Loom spelling: keep the semantic operation in the provider. The target
@@ -21,7 +21,7 @@ func.template<hip.recipe.exp_f32> device @exp_f32_provider(%scalar: f32, %values
   func.return %scalar_result, %vector_result : f32, vector<4xf32>
 }
 
-kernel.def target(@gfx11) @template_math_legalization() {
+kernel.def @template_math_legalization() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%scalar_input: buffer, %vector_input: buffer, %scalar_output: buffer, %vector_output: buffer) {

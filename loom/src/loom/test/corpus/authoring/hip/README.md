@@ -44,8 +44,8 @@ python dev.py bazel run //loom/src/loom/tools/loom-opt:loom-opt -- \
 | `q8`, `q4`, `u8`, `s8`, `u4`, `s4`, `v_dot4_i32_iu8`, `dp4a` | `vector.bitunpacku`, `vector.bitunpacks`, `vector.dot4i<u8s8>` | `q8_q4_signedness.loom` |
 | `q2`, `q3`, `q4`, `q5`, `q6`, split high bits, lookup tables, offset-binary, packed-dot repack | `vector.bitunpacku`, `vector.bitfield.extractu`, `vector.bitfield.insert`, `vector.table.lookup`, `vector.dot8i4` | `packed_field_contracts.loom` |
 | dynamic lower-bound unroll, missing facts | structured diagnostic, exact/range facts | `q8_hip_shaped_unroll_unresolved.loom` |
-| `#if __gfx*__`, template, macro, arch-specialization, fallback | `func.apply`, `func.template`, `target(@...)`, `priority(...)` | `target_provider_selection.loom` |
-| template device function, `expf`, target math policy, inline | authoring expansion before target math legalization | `template_math_legalization.loom` |
+| wave size, template, specialization, fallback | targetless `func.apply`, `func.template ... when`, `#target.subgroup.size` | `target_provider_selection.loom` |
+| targetless template device function, `expf`, target math policy, inline | invocation specialization, then authoring expansion and math legalization | `template_math_legalization.loom` |
 | `__cluster_dims__`, cluster multicast, async-to-LDS, `s_wait_asynccnt`, b128 | static `cluster_size`, `kernel.async.cluster.gather`, async groups and waits | `cluster_b128_multicast.loom` |
 
 ## Lane Distribution
@@ -649,73 +649,87 @@ vector.table.lookup %grid[%codes]
 vector.dot8i4<s4u4>
 ```
 
-## Target Provider Selection
+## Target-Fact Provider Selection
 
-Tags: `HIP template`, `CUDA template`, `macro`, `#if __gfx1100__`,
-`arch-specialization`, `gfx1100`, `gfx1200`, `fallback`, `func.apply`,
-`func.template`, `target(@...)`, `priority`.
+Tags: `HIP template`, `CUDA template`, wave size, subgroup size,
+specialization, fallback, targetless, `func.apply`, `func.template`, `when`,
+`#target.subgroup.size`, `priority`.
 
 HIP habit:
 
 ```c++
-#if __gfx1100__
-  return scale_i32_gfx1100(value);
-#elif __gfx1200__
-  return scale_i32_gfx1200(value);
-#else
+template <int WarpSize>
+int scale_i32(int value) {
+  if constexpr (WarpSize == 64) return scale_i32_wave64(value);
+  if constexpr (WarpSize == 32) return scale_i32_wave32(value);
   return scale_i32_fallback(value);
-#endif
+}
 ```
 
 Loom spelling:
 
 ```loom
-amdgpu.target<gfx1100> @gfx1100
-amdgpu.target<gfx1200> @gfx1200
-
-func.template<hip.recipe.scale_i32> target(@gfx1100) priority(20) @scale_i32_gfx1100(%value: i32) -> (i32) { ... }
-func.template<hip.recipe.scale_i32> target(@gfx1200) priority(20) @scale_i32_gfx1200(%value: i32) -> (i32) { ... }
+func.template<hip.recipe.scale_i32> when [#target.subgroup.size<64>] priority(20) @scale_i32_subgroup_64(%value: i32) -> (i32) { ... }
+func.template<hip.recipe.scale_i32> when [#target.subgroup.size<32>] priority(20) @scale_i32_subgroup_32(%value: i32) -> (i32) { ... }
 func.template<hip.recipe.scale_i32> priority(1) @scale_i32_fallback(%value: i32) -> (i32) { ... }
 
-func.def public target(@gfx1100) @selects_gfx1100_provider(%value: i32) -> (i32) {
+kernel.def @selects_subgroup_provider() { ... } launch(%input: buffer, %output: buffer) {
+  ...
   %scaled = func.apply<hip.recipe.scale_i32>(%value) : (i32) -> (i32)
-  func.return %scaled : i32
+  ...
+  kernel.return
 }
 ```
 
 `func.apply<contract>` is the call-site demand. `func.template<contract>` rows
-are providers. `target(@...)` filters applicability, and `priority(...)` orders
-providers after signature, target, and predicate filtering. A targetless
-provider is the generic fallback.
+are providers. `when [...]` evaluates typed target facts, and `priority(...)`
+orders providers whose applicability is proven. Nothing in this source names
+AMDGPU or SPIR-V: subgroup size is the complete applicability requirement, so
+the kernel and all three providers remain targetless. A live JIT supplies facts
+from its device; offline compilation supplies the same structured profile with
+`--target`. `target(@...)` belongs only on a provider whose implementation
+actually requires that target identity.
 
-Proof command:
+Compile the same source for generic wave32 and wave64 target profiles:
 
 ```bash
-loom-opt target_provider_selection.loom \
-  --pass=select-templates,inline-callables \
-  --pass-report=json \
-  --output=/tmp/target-provider-selected.loom \
-  2>/tmp/template-selection-report.json
+loom-compile target_provider_selection.loom \
+  --backend=amdgpu-hal \
+  --target=gfx11-generic \
+  --output=/tmp/target-provider-gfx11-generic.vmfb \
+  --emit-target-artifact=/tmp/target-provider-gfx11-generic.hsaco \
+  --dump-ir-after=select-templates \
+  --dump-ir-format=jsonl \
+  --dump-ir-output=/tmp/target-provider-gfx11-generic-trace.jsonl
+
+loom-compile target_provider_selection.loom \
+  --backend=amdgpu-hal \
+  --target=gfx9-4-generic \
+  --output=/tmp/target-provider-gfx9-4-generic.vmfb \
+  --emit-target-artifact=/tmp/target-provider-gfx9-4-generic.hsaco \
+  --dump-ir-after=select-templates \
+  --dump-ir-format=jsonl \
+  --dump-ir-output=/tmp/target-provider-gfx9-4-generic-trace.jsonl
 ```
 
 Useful query:
 
 ```bash
-jq '.invocations[]
-  | select(.pass == "select-templates")
-  | .details[]
-  | select(.category == "template-selection")
-  | {outcome, contract, target, selected_provider, provider_count, target_identity_match_count, target_identity_unresolved_count, best_match_count}' /tmp/template-selection-report.json
+jq -r 'select(.pass == "select-templates" and .changed) | .ir' \
+  /tmp/target-provider-gfx11-generic-trace.jsonl \
+  /tmp/target-provider-gfx9-4-generic-trace.jsonl
 ```
 
 Expected signal:
 
-```json
-{"outcome":"selected","contract":"hip.recipe.scale_i32","target":"gfx1100","selected_provider":"scale_i32_gfx1100","provider_count":3,"target_identity_match_count":2,"target_identity_unresolved_count":0,"best_match_count":1}
+```loom
+func.call inline @scale_i32_subgroup_32
+func.call inline @scale_i32_subgroup_64
 ```
 
-The transformed file should contain the selected gfx1100 implementation body,
-not `func.apply`, `@scale_i32_gfx1200`, or `@scale_i32_fallback`.
+Each trace retains exactly one applicable provider before inlining. The emitted
+artifacts prove that normalized fact selection composes with the full target
+pipeline, rather than only a synthetic selection pass.
 
 ## Workgroup-Cluster B128 Multicast
 
@@ -848,10 +862,13 @@ Use Loom fast-math flags on arithmetic when contraction/reassociation is part
 of the intended target shape. Then inspect compile reports and target listings
 instead of assuming an operation selected the same instruction as HIP C++.
 
-Tags: `template`, `macro`, `gfx1100`, `gfx1200`, `arch-specialization`.
+Tags: `template`, wave size, subgroup size, targetless specialization.
 
 Use `func.apply<contract>` at call sites and `func.template<contract>`
-providers for implementations. Target-specific providers use `target(@...)`
-and priority; generic fallbacks stay correct for targets without a specialized
-provider. `target_provider_selection.loom` shows the source-level selection
-proof. The authoring/linking corpus shows the full library and bytecode flow.
+providers for implementations. Normalized requirements such as subgroup size
+use typed `when` conditions without naming a backend or target. Keep a correct
+lower-priority fallback for profiles that cannot prove a specialization, and
+reserve `target(@...)` for implementations that truly require one target
+identity. `target_provider_selection.loom` compiles the same targetless kernel
+for wave32 and wave64 profiles. The authoring/linking corpus shows the full
+library and bytecode flow.
