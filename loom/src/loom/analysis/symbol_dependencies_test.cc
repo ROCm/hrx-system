@@ -19,6 +19,7 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/global/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/target/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/testing/module_ptr.h"
 
@@ -36,7 +37,14 @@ class SymbolDependenciesTest : public ::testing::Test {
     RegisterDialect(LOOM_DIALECT_CONFIG, loom_config_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_GLOBAL, loom_global_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
+    iree_host_size_t parameterized_attr_count = 0;
+    const loom_parameterized_attr_descriptor_t* parameterized_attrs =
+        loom_target_dialect_parameterized_attrs(&parameterized_attr_count);
+    IREE_ASSERT_OK(loom_context_register_parameterized_attrs(
+        &context_, LOOM_DIALECT_TARGET, parameterized_attrs,
+        parameterized_attr_count));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     iree_arena_initialize(&block_pool_, &analysis_arena_);
   }
@@ -217,6 +225,22 @@ func.def @entry() -> (index) {
 
   EXPECT_EQ(table.symbols[state].incoming_count, 2u);
   EXPECT_EQ(table.symbols[reader].incoming_count, 1u);
+}
+
+TEST_F(SymbolDependenciesTest, OpenParameterizedArraysAreNotSymbolReferences) {
+  ModulePtr module = ParseModule(R"(
+func.template<demo.contract> when [#target.subgroup.size<64>] @conditional(%arg: i32) -> (i32) {
+  func.return %arg : i32
+}
+)");
+
+  loom_symbol_id_t conditional =
+      FindSymbol(module.get(), IREE_SV("conditional"));
+  loom_symbol_dependency_table_t table = BuildTable(module.get());
+
+  ASSERT_EQ(table.symbol_count, 1u);
+  EXPECT_EQ(table.symbols[conditional].outgoing_count, 0u);
+  EXPECT_EQ(table.edge_count, 0u);
 }
 
 TEST_F(SymbolDependenciesTest, ConfigReadsUseNormalSymbolAttrEdges) {

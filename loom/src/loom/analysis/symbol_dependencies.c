@@ -341,7 +341,8 @@ loom_symbol_dependency_direct_attr_kind(const loom_op_vtable_t* vtable,
       attr_index == vtable->call_like->callee_attr_index) {
     return LOOM_SYMBOL_DEPENDENCY_EDGE_CALL;
   }
-  if (descriptor && descriptor->reference.symbol_ref &&
+  if (descriptor && descriptor->attr_kind == LOOM_ATTR_SYMBOL &&
+      descriptor->reference.symbol_ref &&
       iree_any_bit_set(descriptor->reference.symbol_ref->interfaces,
                        LOOM_SYMBOL_INTERFACE_GLOBAL)) {
     return LOOM_SYMBOL_DEPENDENCY_EDGE_GLOBAL_ACCESS;

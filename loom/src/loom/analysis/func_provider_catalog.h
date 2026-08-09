@@ -101,6 +101,9 @@ typedef struct loom_func_provider_summary_t {
   // Number of predicate entries.
   uint16_t predicate_count;
 
+  // Number of resolved target-condition entries.
+  uint16_t target_condition_count;
+
   // Borrowed implementation contract key text.
   iree_string_view_t contract;
 
@@ -118,6 +121,9 @@ typedef struct loom_func_provider_summary_t {
 
   // Borrowed predicate list for feasibility checks.
   const loom_predicate_t* predicates;
+
+  // Borrowed resolved target-condition conjunction.
+  const loom_target_condition_t* target_conditions;
 
   // Ancestor kinds that must be supplied by each provider application site.
   const loom_op_kind_t* required_caller_ancestors;

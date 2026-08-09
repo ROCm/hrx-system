@@ -15,6 +15,7 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/target/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/testing/module_ptr.h"
 
@@ -40,6 +41,15 @@ class FuncProviderCatalogTest : public ::testing::Test {
     vtables = loom_test_dialect_vtables(&vtable_count);
     IREE_ASSERT_OK(loom_context_register_dialect(
         &context_, LOOM_DIALECT_TEST, vtables, (uint16_t)vtable_count));
+    vtables = loom_target_dialect_vtables(&vtable_count);
+    IREE_ASSERT_OK(loom_context_register_dialect(
+        &context_, LOOM_DIALECT_TARGET, vtables, (uint16_t)vtable_count));
+    iree_host_size_t parameterized_attr_count = 0;
+    const loom_parameterized_attr_descriptor_t* parameterized_attrs =
+        loom_target_dialect_parameterized_attrs(&parameterized_attr_count);
+    IREE_ASSERT_OK(loom_context_register_parameterized_attrs(
+        &context_, LOOM_DIALECT_TARGET, parameterized_attrs,
+        parameterized_attr_count));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     iree_arena_initialize(&block_pool_, &analysis_arena_);
     loom_symbol_fact_table_initialize(&fact_table_, &analysis_arena_);
@@ -94,7 +104,8 @@ class FuncProviderCatalogTest : public ::testing::Test {
     loom_op_t* op = nullptr;
     IREE_ASSERT_OK(loom_func_ukernel_build(
         &builder, LOOM_FUNC_UKERNEL_BUILD_FLAG_HAS_PRIORITY, contract_id, 0, 0,
-        0, 0, 0, 0, loom_symbol_ref_null(), priority,
+        0, 0, 0, 0, loom_symbol_ref_null(),
+        loom_parameterized_attr_array_empty(), priority,
         (loom_symbol_ref_t){/*.module_id=*/0, /*.symbol_id=*/symbol_id}, &i32,
         1, &i32, 1, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &op));
     ASSERT_NE(op, nullptr);
@@ -235,7 +246,7 @@ TEST_F(FuncProviderCatalogTest, CapturesProviderTargetApplicability) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @gfx11
 
-func.template<demo.contract> target(@gfx11) priority(3) @gfx11_provider(%arg0: i32) -> (i32) {
+func.template<demo.contract> target(@gfx11) when [#target.subgroup.size<64>] priority(3) @gfx11_provider(%arg0: i32) -> (i32) {
   func.return %arg0 : i32
 }
 
@@ -254,7 +265,15 @@ func.template<demo.contract> priority(1) @fallback(%arg0: i32) -> (i32) {
   EXPECT_TRUE(loom_symbol_ref_is_valid(providers.providers[0].target_symbol));
   EXPECT_EQ(providers.providers[0].target_symbol.module_id, 0);
   EXPECT_EQ(providers.providers[0].target_symbol.symbol_id, target_id);
+  ASSERT_EQ(providers.providers[0].target_condition_count, 1);
+  ASSERT_NE(providers.providers[0].target_conditions, nullptr);
+  EXPECT_EQ(providers.providers[0].target_conditions[0].descriptor,
+            &loom_target_subgroup_size_condition);
+  EXPECT_EQ(loom_target_subgroup_size_attr_size(
+                providers.providers[0].target_conditions[0].value),
+            64);
   EXPECT_FALSE(loom_symbol_ref_is_valid(providers.providers[1].target_symbol));
+  EXPECT_EQ(providers.providers[1].target_condition_count, 0);
 }
 
 }  // namespace

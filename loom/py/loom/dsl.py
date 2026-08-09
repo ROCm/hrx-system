@@ -4240,6 +4240,9 @@ class FuncLikeInterface(NamedTuple):
     inline_policy: str | None = None
     # Predicate list attr for where-clause constraints. None if absent.
     predicates: str | None = None
+    # Parameterized attribute array naming ambient target-fact conditions.
+    # None for function kinds that are not implementation providers.
+    conditions: str | None = None
     # Region name for the function body. None for bodyless ops that
     # only declare a signature without providing an implementation.
     body: str | None = None

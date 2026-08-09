@@ -10,6 +10,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
+#include "loom/target/condition.h"
 #include "loom/target/projection.h"
 
 static iree_string_view_t loom_function_contract_symbol_name(
@@ -49,6 +50,43 @@ static iree_status_t loom_func_provider_emit_non_identity_target_field(
   return iree_diagnostic_emit(emitter, &emission);
 }
 
+static iree_status_t loom_function_provider_verify_target_conditions(
+    const loom_module_t* module, const loom_op_t* provider_op,
+    loom_func_like_t provider, iree_diagnostic_emitter_t emitter) {
+  const loom_parameterized_attr_array_t conditions =
+      loom_func_like_conditions(provider);
+  for (iree_host_size_t i = 0; i < conditions.count; ++i) {
+    const loom_target_condition_descriptor_t* descriptor = NULL;
+    iree_status_t status = loom_target_condition_resolve(
+        module->context, conditions.values[i], &descriptor);
+    if (!iree_status_is_ok(status)) {
+      const loom_symbol_ref_t provider_ref = loom_func_like_callee(provider);
+      const loom_symbol_t* provider_symbol =
+          &module->symbols.entries[provider_ref.symbol_id];
+      loom_diagnostic_param_t params[] = {
+          loom_param_string(
+              loom_function_contract_symbol_name(module, provider_symbol)),
+          loom_param_with_field_ref(
+              loom_param_u32((uint32_t)i),
+              loom_diagnostic_field_ref(
+                  LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
+                  provider.vtable->conditions_attr_index)),
+          loom_param_string(iree_status_message(status)),
+      };
+      loom_diagnostic_emission_t emission = {
+          .op = provider_op,
+          .error = LOOM_ERR_TARGET_068,
+          .params = params,
+          .param_count = IREE_ARRAYSIZE(params),
+      };
+      iree_status_t emission_status = iree_diagnostic_emit(emitter, &emission);
+      iree_status_ignore(status);
+      return emission_status;
+    }
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_function_contract_verify(const loom_module_t* module,
                                             const loom_op_t* op,
                                             iree_diagnostic_emitter_t emitter) {
@@ -67,6 +105,8 @@ iree_status_t loom_function_provider_contract_verify(
   IREE_RETURN_IF_ERROR(loom_function_contract_verify(module, op, emitter));
 
   loom_func_like_t provider = loom_func_like_cast(module, (loom_op_t*)op);
+  IREE_RETURN_IF_ERROR(loom_function_provider_verify_target_conditions(
+      module, op, provider, emitter));
   const loom_symbol_ref_t target_ref = loom_func_like_target(provider);
   if (!loom_symbol_ref_is_valid(target_ref)) return iree_ok_status();
 

@@ -989,6 +989,16 @@ const loom_predicate_t* loom_func_like_predicates(loom_func_like_t func,
   return attr.predicate_list;
 }
 
+loom_parameterized_attr_array_t loom_func_like_conditions(
+    loom_func_like_t func) {
+  if (!func.vtable ||
+      func.vtable->conditions_attr_index == LOOM_ATTR_INDEX_NONE) {
+    return loom_parameterized_attr_array_empty();
+  }
+  return loom_attr_as_parameterized_array(
+      loom_op_attrs(func.op)[func.vtable->conditions_attr_index]);
+}
+
 loom_string_id_t loom_func_like_implements(loom_func_like_t func) {
   if (!func.vtable) return LOOM_STRING_ID_INVALID;
   if (func.vtable->implements_attr_index == LOOM_ATTR_INDEX_NONE) {

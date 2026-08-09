@@ -27,10 +27,12 @@ def _all_roundtrip_ops() -> Sequence[Op]:
 def _parse_module(text: str) -> Module:
     """Parses a module with func and test dialect fixtures registered."""
     from loom.builtin_types import ALL_BUILTIN_TYPES
+    from loom.dialect.target import ALL_TARGET_PARAMETERIZED_ATTRS
     from loom.format.text.parser import Parser
 
     parser = Parser()
     parser.register_ops(_all_roundtrip_ops())
+    parser.register_parameterized_attrs(ALL_TARGET_PARAMETERIZED_ATTRS)
     parser.register_types(ALL_BUILTIN_TYPES)
     return parser.parse(text)
 
@@ -297,6 +299,15 @@ class TestFuncTemplateUkernelRoundTrip:
             )
         )
 
+    def test_template_with_target_conditions(self) -> None:
+        text = _module_text(
+            "func.template<tile.contract> when [#target.subgroup.size<64>] priority(10) @wave64(%a: f32) -> (f32) {",
+            "  func.return %a : f32",
+            "}",
+        )
+        _roundtrip(text)
+        assert _print_module(read_module(write_module(_parse_module(text)))) == text
+
     def test_template_device_cc(self) -> None:
         _roundtrip(
             _module_text(
@@ -314,6 +325,9 @@ class TestFuncTemplateUkernelRoundTrip:
 
     def test_ukernel_with_priority(self) -> None:
         _roundtrip(_module_text("func.ukernel<tile.contract> priority(5) @prioritized(%a: f32) -> (f32)"))
+
+    def test_ukernel_with_explicit_empty_conditions(self) -> None:
+        _roundtrip(_module_text("func.ukernel<tile.contract> when [] @unconditional(%a: f32) -> (f32)"))
 
     def test_template_implements_stored(self) -> None:
         module = _parse_module(

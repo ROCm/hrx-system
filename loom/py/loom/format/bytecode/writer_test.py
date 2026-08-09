@@ -29,7 +29,7 @@ from loom.dialect.kernel import ALL_KERNEL_OPS, ALL_KERNEL_TYPES
 from loom.dialect.low import ALL_LOW_OPS
 from loom.dialect.pass_ import ALL_PASS_OPS
 from loom.dialect.scalar import ALL_SCALAR_OPS
-from loom.dialect.target import ALL_TARGET_OPS
+from loom.dialect.target import ALL_TARGET_OPS, ALL_TARGET_PARAMETERIZED_ATTRS
 from loom.dialect.test import (
     ALL_TEST_OPS,
     ALL_TEST_PARAMETERIZED_ATTRS,
@@ -206,7 +206,9 @@ def _text_parser(
     if include_pass:
         _append_unique(ops, ALL_PASS_OPS)
     parser.register_ops(ops)
-    parser.register_parameterized_attrs(ALL_TEST_PARAMETERIZED_ATTRS)
+    parser.register_parameterized_attrs(
+        (*ALL_TEST_PARAMETERIZED_ATTRS, *ALL_TARGET_PARAMETERIZED_ATTRS)
+    )
     types = list(ALL_BUILTIN_TYPES)
     if include_kernel:
         _append_unique(types, ALL_KERNEL_TYPES)
@@ -1758,7 +1760,8 @@ class TestCrossFormatRoundTrip:
 
     def test_func_template_metadata_survives_bytecode(self) -> None:
         text = (
-            "func.template<tile.contract> device priority(7) "
+            "func.template<tile.contract> device "
+            "when [#target.subgroup.size<64>] priority(7) "
             "@kernel(%input: f32) -> (f32) {\n"
             "  func.return %input : f32\n"
             "}\n"
@@ -1772,6 +1775,9 @@ class TestCrossFormatRoundTrip:
         assert symbol.op.attributes["implements"] == "tile.contract"
         assert symbol.op.attributes["priority"] == 7
         assert symbol.op.attributes["cc"] == "device"
+        conditions = symbol.op.attributes["conditions"]
+        assert isinstance(conditions, ParameterizedAttrArray)
+        assert conditions.values[0].family_name == "target.subgroup.size"
         assert _roundtrip_text_through_bytecode(text) == text
 
     def test_low_func_target_and_register_body_survive_bytecode(self) -> None:

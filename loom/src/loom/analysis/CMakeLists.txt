@@ -209,6 +209,7 @@ loom_cc_test(
     loom::ops::func
     loom::ops::kernel
     loom::ops::op_defs
+    loom::ops::target
     loom::ops::test
     loom::testing::module_ptr
 )
@@ -777,6 +778,7 @@ loom_cc_test(
     loom::ops::func
     loom::ops::global
     loom::ops::op_defs
+    loom::ops::target
     loom::ops::test
     loom::testing::module_ptr
 )

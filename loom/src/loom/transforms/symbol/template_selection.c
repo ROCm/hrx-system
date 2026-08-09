@@ -25,6 +25,7 @@
 #include "loom/pass/report.h"
 #include "loom/pass/value_facts.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/target/condition.h"
 #include "loom/target/pass_environment.h"
 #include "loom/transforms/symbol/symbol_equivalence.h"
 #include "loom/transforms/symbol/symbol_pruning.h"
@@ -1074,10 +1075,39 @@ loom_template_selection_provider_context_feasibility(
   return feasibility;
 }
 
+static loom_template_provider_feasibility_t
+loom_template_selection_evaluate_target_conditions(
+    const loom_func_provider_summary_t* provider,
+    const loom_target_facts_t* target_facts) {
+  loom_template_provider_feasibility_t feasibility =
+      LOOM_TEMPLATE_PROVIDER_MATCH;
+  for (uint16_t i = 0; i < provider->target_condition_count; ++i) {
+    const loom_target_condition_t* condition = &provider->target_conditions[i];
+    const loom_target_condition_outcome_t outcome =
+        loom_target_condition_evaluate(condition->descriptor, condition->value,
+                                       target_facts);
+    switch (outcome) {
+      case LOOM_TARGET_CONDITION_MATCH:
+        break;
+      case LOOM_TARGET_CONDITION_UNKNOWN:
+      case LOOM_TARGET_CONDITION_UNBOUND:
+        feasibility = LOOM_TEMPLATE_PROVIDER_MAYBE;
+        break;
+      case LOOM_TARGET_CONDITION_REJECT:
+        return LOOM_TEMPLATE_PROVIDER_REJECT;
+      default:
+        IREE_ASSERT_UNREACHABLE("target condition returned an invalid outcome");
+        IREE_BUILTIN_UNREACHABLE();
+    }
+  }
+  return feasibility;
+}
+
 static iree_status_t loom_template_selection_classify_provider(
     loom_template_selection_state_t* state,
     const loom_symbol_liveness_contributor_context_t* context,
     const loom_op_t* apply_op, const loom_func_provider_summary_t* provider,
+    const loom_target_facts_t* target_facts,
     loom_template_provider_feasibility_t* out_feasibility) {
   *out_feasibility = LOOM_TEMPLATE_PROVIDER_REJECT;
   bool types_match = false;
@@ -1088,6 +1118,13 @@ static iree_status_t loom_template_selection_classify_provider(
       loom_template_selection_provider_context_feasibility(context, apply_op,
                                                            provider);
   if (context_feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) {
+    return iree_ok_status();
+  }
+
+  const loom_template_provider_feasibility_t target_condition_feasibility =
+      loom_template_selection_evaluate_target_conditions(provider,
+                                                         target_facts);
+  if (target_condition_feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) {
     return iree_ok_status();
   }
 
@@ -1103,6 +1140,7 @@ static iree_status_t loom_template_selection_classify_provider(
 
   *out_feasibility =
       context_feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE ||
+              target_condition_feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE ||
               predicate_feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE
           ? LOOM_TEMPLATE_PROVIDER_MAYBE
           : LOOM_TEMPLATE_PROVIDER_MATCH;
@@ -1202,7 +1240,7 @@ static iree_status_t loom_template_selection_mark_exact_priority(
     loom_template_provider_feasibility_t feasibility =
         LOOM_TEMPLATE_PROVIDER_REJECT;
     IREE_RETURN_IF_ERROR(loom_template_selection_classify_provider(
-        state, context, apply_op, provider, &feasibility));
+        state, context, apply_op, provider, apply_target->facts, &feasibility));
     if (feasibility != LOOM_TEMPLATE_PROVIDER_MATCH ||
         provider->priority != priority) {
       continue;
@@ -1230,7 +1268,7 @@ static iree_status_t loom_template_selection_mark_missing_fact_candidates(
     loom_template_provider_feasibility_t feasibility =
         LOOM_TEMPLATE_PROVIDER_REJECT;
     IREE_RETURN_IF_ERROR(loom_template_selection_classify_provider(
-        state, context, apply_op, provider, &feasibility));
+        state, context, apply_op, provider, apply_target->facts, &feasibility));
     if (feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) continue;
     if (has_exact) {
       if (feasibility == LOOM_TEMPLATE_PROVIDER_MATCH &&
@@ -1309,7 +1347,7 @@ static iree_status_t loom_template_selection_analyze_apply(
     loom_template_provider_feasibility_t feasibility =
         LOOM_TEMPLATE_PROVIDER_REJECT;
     IREE_RETURN_IF_ERROR(loom_template_selection_classify_provider(
-        state, context, apply_op, provider, &feasibility));
+        state, context, apply_op, provider, apply_target.facts, &feasibility));
     if (feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) {
       continue;
     }

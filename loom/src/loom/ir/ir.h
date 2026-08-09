@@ -1030,6 +1030,10 @@ typedef struct loom_func_like_vtable_t {
   // Index of the predicate list attr. LOOM_ATTR_INDEX_NONE if absent.
   uint8_t predicates_attr_index;
 
+  // Index of the static target-condition array attr. LOOM_ATTR_INDEX_NONE if
+  // absent.
+  uint8_t conditions_attr_index;
+
   // Body region index. LOOM_REGION_INDEX_NONE for bodyless ops
   // (func.decl, func.ukernel) that only declare a signature.
   uint8_t body_region_index;

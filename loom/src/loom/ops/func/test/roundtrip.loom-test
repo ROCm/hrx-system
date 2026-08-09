@@ -110,12 +110,11 @@ func.def @apply_with_edge_policy(%value: i32) -> (i32) {
 
 // ====
 
-// Provider target applicability is expressed with the same target(@...) spelling
-// as executable roots.
+// Provider identity and static fact applicability remain separate modifiers.
 test.target<low_core> @gfx1100
 
-func.template<test.effect> target(@gfx1100) priority(10) @gfx11_template(%value: i32) -> (i32) {
+func.template<test.effect> target(@gfx1100) when [#target.subgroup.size<64>] priority(10) @gfx11_template(%value: i32) -> (i32) {
   func.return %value : i32
 }
 
-func.ukernel<test.effect> target(@gfx1100) priority(5) @gfx11_opaque(%value: i32) -> (i32)
+func.ukernel<test.effect> target(@gfx1100) when [] priority(5) @gfx11_opaque(%value: i32) -> (i32)

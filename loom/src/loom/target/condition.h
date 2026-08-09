@@ -60,6 +60,18 @@ struct loom_target_condition_descriptor_t {
 static_assert(sizeof(loom_target_condition_descriptor_t) == 24,
               "target condition descriptor must remain 24 bytes");
 
+// One semantically resolved authored target condition.
+typedef struct loom_target_condition_t {
+  // Static family-owned semantics.
+  const loom_target_condition_descriptor_t* descriptor;
+
+  // Borrowed parameterized value owned by the source module.
+  loom_attribute_t value;
+} loom_target_condition_t;
+
+static_assert(sizeof(loom_target_condition_t) == 24,
+              "resolved target condition must remain 24 bytes");
+
 // Resolves and validates one structurally verified parameterized attribute as
 // a target condition. This is a cold authored-input boundary. On success,
 // |out_descriptor| borrows static process-lifetime storage.

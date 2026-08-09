@@ -17,6 +17,7 @@
 #include "iree/base/api.h"
 #include "loom/analysis/symbol_facts.h"
 #include "loom/ir/ir.h"
+#include "loom/target/condition.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus
@@ -69,20 +70,26 @@ typedef struct loom_func_symbol_facts_t {
   // Borrowed argument value IDs in signature order.
   const loom_value_id_t* argument_ids;
 
-  // Number of argument value IDs.
-  uint16_t argument_count;
-
   // Borrowed result value IDs in signature order.
   const loom_value_id_t* result_ids;
-
-  // Number of result value IDs.
-  uint16_t result_count;
 
   // Borrowed predicate list for provider or callable selection.
   const loom_predicate_t* predicates;
 
+  // Borrowed resolved target conditions for implementation providers.
+  const loom_target_condition_t* target_conditions;
+
+  // Number of argument value IDs.
+  uint16_t argument_count;
+
+  // Number of result value IDs.
+  uint16_t result_count;
+
   // Number of predicate entries.
   uint16_t predicate_count;
+
+  // Number of resolved target conditions.
+  uint16_t target_condition_count;
 
   // True when the func is an external import declaration.
   bool imports;

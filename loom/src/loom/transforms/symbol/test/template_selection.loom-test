@@ -606,6 +606,124 @@ func.def public target(@external) @entry(%arg: i32) -> (i32) {
 
 // ====
 
+// A normalized condition reads the containing function's effective target
+// facts and selects the matching higher-priority provider.
+// RUN: pass select-templates,inline-callables
+
+test.target<quirky> @wave7
+
+func.template<demo.condition_match> when [#target.subgroup.size<7>] priority(10) @wave7_impl(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.template<demo.condition_match> priority(1) @fallback(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public target(@wave7) @entry(%arg: i32) -> (i32) {
+  %result = func.apply<demo.condition_match>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<quirky> @wave7
+
+func.def public target(@wave7) @entry(%arg: i32) -> (i32) {
+  %doubled = test.addi %arg, %arg : i32
+  func.return %doubled : i32
+}
+
+// ====
+
+// A disproven condition excludes the specialized provider and admits the
+// proven fallback without changing the caller's target facts.
+// RUN: pass select-templates,inline-callables
+
+test.target<low_core> @wave32 {subgroup_size = 32}
+
+func.template<demo.condition_reject> when [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.template<demo.condition_reject> priority(1) @fallback(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public target(@wave32) @entry(%arg: i32) -> (i32) {
+  %result = func.apply<demo.condition_reject>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<low_core> @wave32 {subgroup_size = 32}
+
+func.def public target(@wave32) @entry(%arg: i32) -> (i32) {
+  func.return %arg : i32
+}
+
+// ====
+
+// An unbound condition remains unresolved during early selection, preserving
+// both the conditional choice and the proven lower-priority fallback.
+// RUN: pass select-templates
+
+func.template<demo.condition_unbound> when [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.template<demo.condition_unbound> priority(1) @fallback(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = func.apply<demo.condition_unbound>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+func.template<demo.condition_unbound> when [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.template<demo.condition_unbound> priority(1) @fallback(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = func.apply<demo.condition_unbound>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// Conditions gate opaque providers before materialization. A rejected ukernel
+// cannot block a proven template fallback.
+// RUN: pass select-templates,inline-callables
+
+test.target<quirky> @wave7
+
+func.ukernel<demo.condition_ukernel> when [#target.subgroup.size<64>] priority(10) @wave64_opaque(%value: i32) -> (i32)
+
+func.template<demo.condition_ukernel> priority(1) @fallback(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public target(@wave7) @entry(%arg: i32) -> (i32) {
+  %result = func.apply<demo.condition_ukernel>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<quirky> @wave7
+
+func.def public target(@wave7) @entry(%arg: i32) -> (i32) {
+  func.return %arg : i32
+}
+
+// ====
+
 // The shared declaration identity is sufficient to specialize a provider that
 // names the same still-partial target contract.
 // RUN: pass select-templates,inline-callables

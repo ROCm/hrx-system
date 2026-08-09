@@ -51,6 +51,7 @@ loom_cc_library(
     iree::base
     loom::analysis::symbol_facts
     loom::ir
+    loom::target::condition
     loom::target::types
   PUBLIC
 )
@@ -68,6 +69,7 @@ loom_cc_library(
     loom::error::emitter
     loom::error::error_defs
     loom::ir
+    loom::target::condition
     loom::target::projection
   PUBLIC
 )
@@ -106,6 +108,7 @@ loom_cc_test(
     loom::ops::index
     loom::ops::kernel
     loom::ops::low
+    loom::ops::target
     loom::ops::test
     loom::target::low_descriptor_registry_core_test
     loom::target::types

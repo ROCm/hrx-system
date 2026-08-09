@@ -130,6 +130,32 @@ static iree_status_t loom_func_symbol_apply_imports(
   return iree_ok_status();
 }
 
+static iree_status_t loom_func_symbol_resolve_target_conditions(
+    loom_symbol_fact_context_t* context, const loom_module_t* module,
+    loom_func_like_t func, loom_func_symbol_facts_t* facts) {
+  const loom_parameterized_attr_array_t authored_conditions =
+      loom_func_like_conditions(func);
+  facts->target_condition_count = (uint16_t)authored_conditions.count;
+  if (authored_conditions.count == 0) return iree_ok_status();
+
+  loom_target_condition_t* target_conditions = NULL;
+  IREE_RETURN_IF_ERROR(loom_symbol_fact_context_allocate(
+      context, authored_conditions.count * sizeof(*target_conditions),
+      (void**)&target_conditions));
+  for (iree_host_size_t i = 0; i < authored_conditions.count; ++i) {
+    const loom_attribute_t value = authored_conditions.values[i];
+    const loom_target_condition_descriptor_t* descriptor = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_target_condition_resolve(module->context, value, &descriptor));
+    target_conditions[i] = (loom_target_condition_t){
+        .descriptor = descriptor,
+        .value = value,
+    };
+  }
+  facts->target_conditions = target_conditions;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_func_symbol_fact_compute(
     const loom_symbol_fact_domain_t* domain,
     loom_symbol_fact_context_t* context, const loom_module_t* module,
@@ -175,6 +201,8 @@ static iree_status_t loom_func_symbol_fact_compute(
   facts->result_ids = loom_op_const_results(func.op);
   facts->result_count = func.op->result_count;
   facts->predicates = loom_func_like_predicates(func, &facts->predicate_count);
+  IREE_RETURN_IF_ERROR(
+      loom_func_symbol_resolve_target_conditions(context, module, func, facts));
   IREE_RETURN_IF_ERROR(loom_func_symbol_apply_imports(module, func, facts));
   facts->target_symbol = loom_func_like_target(func);
 

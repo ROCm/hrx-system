@@ -1290,6 +1290,11 @@ loom_value_slice_t loom_kernel_workload_arg_ids(const loom_module_t* module,
 const loom_predicate_t* loom_func_like_predicates(loom_func_like_t func,
                                                   uint16_t* out_count);
 
+// Returns the static target conditions for a provider function. Returns an
+// empty slice for non-provider function kinds and providers without conditions.
+loom_parameterized_attr_array_t loom_func_like_conditions(
+    loom_func_like_t func);
+
 // Returns the implements string ID for template/ukernel ops — the name of the
 // op kind this function provides an implementation for. Returns
 // LOOM_STRING_ID_INVALID for def/decl ops, ops with no implements attr, or
