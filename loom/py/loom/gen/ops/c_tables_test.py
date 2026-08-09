@@ -101,7 +101,7 @@ from loom.dsl import (
     SymbolDefinitionFlag,
     SymbolKernelContract,
     SymbolValueContract,
-    TargetFactSatisfaction,
+    TargetFactSpecialization,
     TargetLikeInterface,
     TotalBitCountEqual,
     TypeConstraint,
@@ -524,7 +524,7 @@ def _target_projection_test_op(
     *,
     fact_type: str | None = None,
     fact_projector: str | None = None,
-    fact_satisfaction: TargetFactSatisfaction = TargetFactSatisfaction.IDENTITY,
+    fact_specialization: TargetFactSpecialization = TargetFactSpecialization.EXACT,
 ) -> Op:
     kind = EnumDef("TargetKind", [EnumCase("generic", 0)])
     abi = EnumDef("TargetAbi", [EnumCase("unknown", 0)])
@@ -548,7 +548,7 @@ def _target_projection_test_op(
                 bundle_table="loom_test_target_bundles",
                 fact_type=fact_type,
                 fact_projector=fact_projector,
-                fact_satisfaction=fact_satisfaction,
+                fact_specialization=fact_specialization,
             )
         ],
     )
@@ -572,14 +572,15 @@ def test_generate_target_projection_emits_typed_fact_contract() -> None:
     tables_c = generate_tables_c(
         "test",
         0,
-        [_target_projection_test_op(fact_satisfaction=TargetFactSatisfaction.STRUCTURAL)],
+        [_target_projection_test_op(fact_specialization=TargetFactSpecialization.STRUCTURAL)],
     )
 
     assert '#include "loom/ops/target/facts.h"' in tables_c
     assert "static const loom_target_fact_type_t loom_test_target_fact_type = {" in tables_c
     assert '.name = IREE_SVL("test"),' in tables_c
     assert ".storage_size = sizeof(loom_target_facts_t)," in tables_c
-    assert ".satisfies_requirement = loom_target_facts_structural_satisfy_requirement," in tables_c
+    assert ".satisfies_identity_requirement = loom_target_facts_selector_satisfies_identity_requirement," in tables_c
+    assert (".satisfies_specialization_requirement = loom_target_facts_structural_satisfy_specialization_requirement,") in tables_c
     assert ".fact_type = &loom_test_target_fact_type," in tables_c
 
 
@@ -612,14 +613,14 @@ def test_generate_target_projection_rejects_projector_without_family_facts() -> 
 
 
 def test_generate_target_projection_rejects_split_fact_ownership() -> None:
-    with _raises_value_error(r"external fact type owns its satisfaction"):
+    with _raises_value_error(r"external fact type owns its specialization"):
         generate_tables_c(
             "test",
             0,
             [
                 _target_projection_test_op(
                     fact_type="loom_test_custom_fact_type",
-                    fact_satisfaction=TargetFactSatisfaction.STRUCTURAL,
+                    fact_specialization=TargetFactSpecialization.STRUCTURAL,
                 )
             ],
         )

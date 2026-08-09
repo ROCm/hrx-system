@@ -244,7 +244,7 @@ __all__ = [
     "MemoryAccessInterface",
     "MemoryAccessOperationKind",
     "RegionBranchInterface",
-    "TargetFactSatisfaction",
+    "TargetFactSpecialization",
     "TargetLikeInterface",
     # Op declaration.
     "Op",
@@ -4217,10 +4217,12 @@ class FuncLikeInterface(NamedTuple):
 
 
 @unique
-class TargetFactSatisfaction(Enum):
-    """Satisfaction relation for generated common target facts."""
+class TargetFactSpecialization(Enum):
+    """Specialization relation for generated common target facts."""
 
-    IDENTITY = "identity"
+    # Only the same projected fact object satisfies specialization.
+    EXACT = "exact"
+    # Distinct facts satisfy compatible common snapshots and configuration.
     STRUCTURAL = "structural"
 
 
@@ -4247,14 +4249,15 @@ class TargetLikeInterface(NamedTuple):
     # table instead of requiring hand-authored descriptor metadata.
     bundle_table: str | None = None
     # Optional C symbol for a family-owned target fact type. When absent, the C
-    # generator emits a common fact type private to this op.
+    # generator emits a common fact type private to this op whose identity is
+    # defined by selector equality.
     fact_type: str | None = None
     # Optional C symbol for the target-op adapter that projects family-owned
     # attributes into the typed fact extension.
     fact_projector: str | None = None
-    # Satisfaction relation used by a generated common fact type. Family-owned
-    # fact types carry their relation in the named descriptor instead.
-    fact_satisfaction: TargetFactSatisfaction = TargetFactSatisfaction.IDENTITY
+    # Specialization relation used by a generated common fact type.
+    # Family-owned fact types carry their relation in the named descriptor.
+    fact_specialization: TargetFactSpecialization = TargetFactSpecialization.EXACT
 
 
 class LoopLikeInterface(NamedTuple):

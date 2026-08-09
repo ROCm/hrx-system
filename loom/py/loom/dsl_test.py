@@ -154,7 +154,7 @@ from loom.dsl import (
     Successor,
     SymbolDefinition,
     SymbolKernelContract,
-    TargetFactSatisfaction,
+    TargetFactSpecialization,
     TargetLikeInterface,
     TotalBitCountEqual,
     TypeConstraint,
@@ -714,7 +714,7 @@ class TestInterfaces:
         assert interface.descriptor is None
         assert interface.fact_type is None
         assert interface.fact_projector is None
-        assert interface.fact_satisfaction == TargetFactSatisfaction.IDENTITY
+        assert interface.fact_specialization == TargetFactSpecialization.EXACT
 
     def test_memory_access_interface_uses_soft_field_defaults(self) -> None:
         interface = MemoryAccessInterface()

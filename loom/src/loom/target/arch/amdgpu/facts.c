@@ -109,7 +109,18 @@ void loom_amdgpu_target_properties_resolve(
   };
 }
 
-static bool loom_amdgpu_target_facts_satisfy_requirement(
+static bool loom_amdgpu_target_facts_satisfy_identity_requirement(
+    const loom_target_facts_t* effective_base,
+    const loom_target_facts_t* requirement_base) {
+  const loom_amdgpu_target_facts_t* effective =
+      (const loom_amdgpu_target_facts_t*)effective_base;
+  const loom_amdgpu_target_facts_t* requirement =
+      (const loom_amdgpu_target_facts_t*)requirement_base;
+  return loom_amdgpu_target_identity_satisfies_requirement(
+      &effective->identity, &requirement->identity);
+}
+
+static bool loom_amdgpu_target_facts_satisfy_specialization_requirement(
     const loom_target_facts_t* effective_base,
     const loom_target_facts_t* requirement_base) {
   const loom_amdgpu_target_facts_t* effective =
@@ -156,10 +167,10 @@ static bool loom_amdgpu_target_facts_satisfy_requirement(
   }
 
   // ABI and export facts belong to the function contract. Target
-  // applicability compares representation, limits, memory spaces, and
+  // specialization compares representation, limits, memory spaces, and
   // required target feature bits.
-  return loom_target_snapshot_satisfies_requirement(&effective_snapshot,
-                                                    &requirement_snapshot) &&
+  return loom_target_snapshot_satisfies_specialization_requirement(
+             &effective_snapshot, &requirement_snapshot) &&
          iree_all_bits_set(
              effective->base.storage.config.contract_feature_bits,
              requirement->base.storage.config.contract_feature_bits);
@@ -186,7 +197,10 @@ static iree_string_view_t loom_amdgpu_target_facts_identity_name(
 const loom_target_fact_type_t loom_amdgpu_target_fact_type = {
     .name = IREE_SVL("amdgpu"),
     .storage_size = sizeof(loom_amdgpu_target_facts_t),
-    .satisfies_requirement = loom_amdgpu_target_facts_satisfy_requirement,
+    .satisfies_identity_requirement =
+        loom_amdgpu_target_facts_satisfy_identity_requirement,
+    .satisfies_specialization_requirement =
+        loom_amdgpu_target_facts_satisfy_specialization_requirement,
     .rebind = loom_amdgpu_target_facts_rebind,
     .identity_name = loom_amdgpu_target_facts_identity_name,
 };

@@ -541,8 +541,8 @@ static iree_status_t loom_template_selection_provider_applies_to_target(
   if (target_requirement == NULL) {
     return iree_ok_status();
   }
-  *out_applies = loom_target_facts_satisfy_requirement(apply_target->facts,
-                                                       target_requirement);
+  *out_applies = loom_target_facts_satisfy_identity_requirement(
+      apply_target->facts, target_requirement);
   return iree_ok_status();
 }
 

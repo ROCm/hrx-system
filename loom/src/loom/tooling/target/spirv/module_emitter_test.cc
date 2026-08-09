@@ -165,8 +165,8 @@ low.func.def target<spirv.logical.core>(@generic) abi(shader_entry_point) @kerne
   loom_target_facts_t* profile_facts = nullptr;
   IREE_ASSERT_OK(loom_target_profile_project_facts(&exact_profile.base, &arena_,
                                                    &profile_facts));
-  ASSERT_TRUE(loom_target_facts_satisfy_requirement(profile_facts,
-                                                    target_facts->projection));
+  ASSERT_TRUE(loom_target_facts_satisfy_specialization_requirement(
+      profile_facts, target_facts->projection));
   loom_target_facts_builder_apply_requirement(target_facts->projection,
                                               profile_facts);
 

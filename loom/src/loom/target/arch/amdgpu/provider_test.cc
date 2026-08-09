@@ -147,14 +147,27 @@ class AmdgpuProviderTest : public ::testing::Test {
     return target_facts;
   }
 
-  bool Satisfies(const loom_target_facts_t* effective,
-                 const loom_target_facts_t* requirement) {
-    return loom_target_facts_satisfy_requirement(effective, requirement);
+  bool SatisfiesSpecialization(const loom_target_facts_t* effective,
+                               const loom_target_facts_t* requirement) {
+    return loom_target_facts_satisfy_specialization_requirement(effective,
+                                                                requirement);
   }
 
-  bool Satisfies(const loom_target_symbol_facts_t* effective,
-                 const loom_target_symbol_facts_t* requirement) {
-    return Satisfies(effective->projection, requirement->projection);
+  bool SatisfiesIdentity(const loom_target_facts_t* effective,
+                         const loom_target_facts_t* requirement) {
+    return loom_target_facts_satisfy_identity_requirement(effective,
+                                                          requirement);
+  }
+
+  bool SatisfiesSpecialization(const loom_target_symbol_facts_t* effective,
+                               const loom_target_symbol_facts_t* requirement) {
+    return SatisfiesSpecialization(effective->projection,
+                                   requirement->projection);
+  }
+
+  bool SatisfiesIdentity(const loom_target_symbol_facts_t* effective,
+                         const loom_target_symbol_facts_t* requirement) {
+    return SatisfiesIdentity(effective->projection, requirement->projection);
   }
 
   const loom_op_t* TargetOpFromRef(const loom_module_t* module,
@@ -327,7 +340,7 @@ TEST_F(AmdgpuProviderTest, ProvidesLoweringPolicyForEveryDescriptorSet) {
   }
 }
 
-TEST_F(AmdgpuProviderTest, SatisfiesCanonicalProcessorRequirements) {
+TEST_F(AmdgpuProviderTest, SeparatesIdentityAndSpecializationRequirements) {
   ModulePtr module =
       Parse(IREE_SV("amdgpu.target<gfx1151> @gfx1151_a\n"
                     "amdgpu.target<gfx1151> @gfx1151_b\n"
@@ -392,18 +405,35 @@ TEST_F(AmdgpuProviderTest, SatisfiesCanonicalProcessorRequirements) {
   EXPECT_FALSE(gfx11_generic_facts->contract_set_key_authored);
   EXPECT_TRUE(gfx11_explicit_contract_facts->contract_set_key_authored);
 
-  EXPECT_TRUE(Satisfies(gfx1151_a, gfx1151_a));
-  EXPECT_TRUE(Satisfies(gfx1151_a, gfx1151_b));
-  EXPECT_TRUE(Satisfies(gfx1151_a, gfx11_generic));
-  EXPECT_TRUE(Satisfies(gfx1151_a, gfx11_wave32));
-  EXPECT_TRUE(Satisfies(gfx1151_a, gfx11_small_workgroup));
-  EXPECT_FALSE(Satisfies(gfx11_generic, gfx1151_a));
-  EXPECT_FALSE(Satisfies(gfx1151_a, gfx1150));
-  EXPECT_FALSE(Satisfies(gfx1170, gfx11_generic));
-  EXPECT_TRUE(Satisfies(gfx1151_a, gfx11_wave64));
-  EXPECT_FALSE(Satisfies(gfx1151_explicit_wave32, gfx11_wave64));
-  EXPECT_FALSE(Satisfies(gfx1151_a, gfx11_feature));
-  EXPECT_FALSE(Satisfies(gfx1151_a, gfx11_explicit_contract));
+  // Identity is only the generated code-object domain and target-ID
+  // coordinates. Common projection authorship cannot narrow it.
+  EXPECT_TRUE(SatisfiesIdentity(gfx1151_a, gfx1151_a));
+  EXPECT_TRUE(SatisfiesIdentity(gfx1151_a, gfx1151_b));
+  EXPECT_TRUE(SatisfiesIdentity(gfx1151_a, gfx11_generic));
+  EXPECT_TRUE(SatisfiesIdentity(gfx1151_a, gfx11_wave32));
+  EXPECT_TRUE(SatisfiesIdentity(gfx1151_a, gfx11_wave64));
+  EXPECT_TRUE(SatisfiesIdentity(gfx1151_explicit_wave32, gfx11_wave64));
+  EXPECT_TRUE(SatisfiesIdentity(gfx1151_a, gfx11_small_workgroup));
+  EXPECT_TRUE(SatisfiesIdentity(gfx1151_a, gfx11_feature));
+  EXPECT_TRUE(SatisfiesIdentity(gfx1151_a, gfx11_explicit_contract));
+  EXPECT_FALSE(SatisfiesIdentity(gfx11_generic, gfx1151_a));
+  EXPECT_FALSE(SatisfiesIdentity(gfx1151_a, gfx1150));
+  EXPECT_FALSE(SatisfiesIdentity(gfx1170, gfx11_generic));
+
+  // Full specialization retains authored execution choices, limits, and
+  // artifact contract requirements.
+  EXPECT_TRUE(SatisfiesSpecialization(gfx1151_a, gfx1151_a));
+  EXPECT_TRUE(SatisfiesSpecialization(gfx1151_a, gfx1151_b));
+  EXPECT_TRUE(SatisfiesSpecialization(gfx1151_a, gfx11_generic));
+  EXPECT_TRUE(SatisfiesSpecialization(gfx1151_a, gfx11_wave32));
+  EXPECT_TRUE(SatisfiesSpecialization(gfx1151_a, gfx11_small_workgroup));
+  EXPECT_FALSE(SatisfiesSpecialization(gfx11_generic, gfx1151_a));
+  EXPECT_FALSE(SatisfiesSpecialization(gfx1151_a, gfx1150));
+  EXPECT_FALSE(SatisfiesSpecialization(gfx1170, gfx11_generic));
+  EXPECT_TRUE(SatisfiesSpecialization(gfx1151_a, gfx11_wave64));
+  EXPECT_FALSE(SatisfiesSpecialization(gfx1151_explicit_wave32, gfx11_wave64));
+  EXPECT_FALSE(SatisfiesSpecialization(gfx1151_a, gfx11_feature));
+  EXPECT_FALSE(SatisfiesSpecialization(gfx1151_a, gfx11_explicit_contract));
 }
 
 TEST_F(AmdgpuProviderTest, PreservesTargetIdFeatureRequirements) {
@@ -419,11 +449,17 @@ TEST_F(AmdgpuProviderTest, PreservesTargetIdFeatureRequirements) {
   const loom_target_symbol_facts_t* xnack_off =
       Target(module.get(), FindSymbolRef(module.get(), IREE_SV("xnack_off")));
 
-  EXPECT_TRUE(Satisfies(xnack_on, any));
-  EXPECT_TRUE(Satisfies(xnack_on, xnack_on));
-  EXPECT_FALSE(Satisfies(xnack_on, xnack_off));
-  EXPECT_FALSE(Satisfies(any, xnack_on));
-  EXPECT_FALSE(Satisfies(xnack_off, xnack_on));
+  EXPECT_TRUE(SatisfiesSpecialization(xnack_on, any));
+  EXPECT_TRUE(SatisfiesSpecialization(xnack_on, xnack_on));
+  EXPECT_FALSE(SatisfiesSpecialization(xnack_on, xnack_off));
+  EXPECT_FALSE(SatisfiesSpecialization(any, xnack_on));
+  EXPECT_FALSE(SatisfiesSpecialization(xnack_off, xnack_on));
+
+  EXPECT_TRUE(SatisfiesIdentity(xnack_on, any));
+  EXPECT_TRUE(SatisfiesIdentity(xnack_on, xnack_on));
+  EXPECT_FALSE(SatisfiesIdentity(xnack_on, xnack_off));
+  EXPECT_FALSE(SatisfiesIdentity(any, xnack_on));
+  EXPECT_FALSE(SatisfiesIdentity(xnack_off, xnack_on));
 }
 
 TEST_F(AmdgpuProviderTest, PreservesTargetOverlayRequirements) {
@@ -439,16 +475,16 @@ TEST_F(AmdgpuProviderTest, PreservesTargetOverlayRequirements) {
   const loom_target_symbol_facts_t* gfx12_5_generic = Target(
       module.get(), FindSymbolRef(module.get(), IREE_SV("gfx12_5_generic")));
 
-  EXPECT_TRUE(Satisfies(gfx1250_a0, gfx1250_a0));
-  EXPECT_TRUE(Satisfies(gfx1250_b0, gfx1250_b0));
-  EXPECT_FALSE(Satisfies(gfx1250_a0, gfx1250_b0));
-  EXPECT_FALSE(Satisfies(gfx1250_b0, gfx1250_a0));
-  EXPECT_TRUE(Satisfies(gfx1250_a0, gfx12_5_generic));
-  EXPECT_TRUE(Satisfies(gfx1250_b0, gfx12_5_generic));
-  EXPECT_FALSE(Satisfies(gfx12_5_generic, gfx1250_a0));
+  EXPECT_TRUE(SatisfiesSpecialization(gfx1250_a0, gfx1250_a0));
+  EXPECT_TRUE(SatisfiesSpecialization(gfx1250_b0, gfx1250_b0));
+  EXPECT_FALSE(SatisfiesSpecialization(gfx1250_a0, gfx1250_b0));
+  EXPECT_FALSE(SatisfiesSpecialization(gfx1250_b0, gfx1250_a0));
+  EXPECT_TRUE(SatisfiesSpecialization(gfx1250_a0, gfx12_5_generic));
+  EXPECT_TRUE(SatisfiesSpecialization(gfx1250_b0, gfx12_5_generic));
+  EXPECT_FALSE(SatisfiesSpecialization(gfx12_5_generic, gfx1250_a0));
 }
 
-TEST_F(AmdgpuProviderTest, ExhaustsSupportedProfileSatisfactionRelation) {
+TEST_F(AmdgpuProviderTest, ExhaustsSupportedProfileRelations) {
   struct ProjectedProfile {
     // Generated canonical target represented by the profile.
     const loom_amdgpu_target_info_t* target_info;
@@ -483,7 +519,15 @@ TEST_F(AmdgpuProviderTest, ExhaustsSupportedProfileSatisfactionRelation) {
       const bool expected =
           loom_amdgpu_target_satisfies_code_object_requirement(
               effective.target_info, requirement.target_info);
-      EXPECT_EQ(Satisfies(effective.facts, requirement.facts), expected)
+      EXPECT_EQ(SatisfiesSpecialization(effective.facts, requirement.facts),
+                expected)
+          << "effective "
+          << std::string(effective.target_info->name.data,
+                         effective.target_info->name.size)
+          << ", requirement "
+          << std::string(requirement.target_info->name.data,
+                         requirement.target_info->name.size);
+      EXPECT_EQ(SatisfiesIdentity(effective.facts, requirement.facts), expected)
           << "effective "
           << std::string(effective.target_info->name.data,
                          effective.target_info->name.size)

@@ -172,7 +172,7 @@ static iree_status_t loom_target_specialization_prepare_versions(
     IREE_RETURN_IF_ERROR(loom_target_profile_project_facts(
         specialization->target_profile, arena, &effective_facts));
     if (specialization->authored_target_facts != NULL &&
-        !loom_target_facts_satisfy_requirement(
+        !loom_target_facts_satisfy_specialization_requirement(
             effective_facts,
             specialization->authored_target_facts->projection)) {
       IREE_RETURN_IF_ERROR(loom_target_specialization_emit_conflict(

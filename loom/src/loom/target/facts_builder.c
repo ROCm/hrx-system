@@ -181,7 +181,8 @@ void loom_target_facts_builder_apply_requirement(
   IREE_ASSERT_ARGUMENT(requirement);
   IREE_ASSERT_ARGUMENT(effective);
   IREE_ASSERT(effective->fact_type == requirement->fact_type);
-  IREE_ASSERT(loom_target_facts_satisfy_requirement(effective, requirement));
+  IREE_ASSERT(loom_target_facts_satisfy_specialization_requirement(
+      effective, requirement));
   for (loom_target_fact_field_t field = 0;
        field < LOOM_TARGET_FACT_FIELD_COUNT_; ++field) {
     if (!loom_target_facts_field_is_authored(requirement, field)) {

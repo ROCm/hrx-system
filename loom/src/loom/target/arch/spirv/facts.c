@@ -9,5 +9,8 @@
 const loom_target_fact_type_t loom_spirv_target_fact_type = {
     .name = IREE_SVL("spirv"),
     .storage_size = sizeof(loom_spirv_target_facts_t),
-    .satisfies_requirement = loom_target_facts_structural_satisfy_requirement,
+    .satisfies_identity_requirement =
+        loom_target_facts_selector_satisfies_identity_requirement,
+    .satisfies_specialization_requirement =
+        loom_target_facts_structural_satisfy_specialization_requirement,
 };

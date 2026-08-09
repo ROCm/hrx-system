@@ -25,7 +25,7 @@ from loom.dsl import (
     MemoryAccessOperationKind,
     Op,
     RegionBranchInterface,
-    TargetFactSatisfaction,
+    TargetFactSpecialization,
     TargetLikeInterface,
 )
 from loom.fields import compute_layout
@@ -553,8 +553,8 @@ def _target_like_projection_entries(op: Op) -> list[tuple[int, str, str, str]]:
 def emit_target_like_descriptor(op: Op, iface: TargetLikeInterface, lines: list[str]) -> None:
     if iface.bundle_table is None:
         return
-    if iface.fact_type is not None and iface.fact_satisfaction != TargetFactSatisfaction.IDENTITY:
-        raise ValueError(f"TargetLikeInterface on {op.name!r}: an external fact type owns its satisfaction relation")
+    if iface.fact_type is not None and iface.fact_specialization != TargetFactSpecialization.EXACT:
+        raise ValueError(f"TargetLikeInterface on {op.name!r}: an external fact type owns its specialization relation")
     if iface.fact_projector is not None and iface.fact_type is None:
         raise ValueError(f"TargetLikeInterface on {op.name!r}: a family fact projector requires an external fact type")
     descriptor = c_symbols.normalize_c_symbol_reference(iface.descriptor or f"{c_prefix(op)}_target_like_descriptor")
@@ -565,8 +565,9 @@ def emit_target_like_descriptor(op: Op, iface: TargetLikeInterface, lines: list[
         lines.append(f"static const loom_target_fact_type_t {fact_type} = {{")
         lines.append(f'    .name = IREE_SVL("{op.group.name}"),')
         lines.append("    .storage_size = sizeof(loom_target_facts_t),")
-        if iface.fact_satisfaction == TargetFactSatisfaction.STRUCTURAL:
-            lines.append("    .satisfies_requirement = loom_target_facts_structural_satisfy_requirement,")
+        lines.append("    .satisfies_identity_requirement = loom_target_facts_selector_satisfies_identity_requirement,")
+        if iface.fact_specialization == TargetFactSpecialization.STRUCTURAL:
+            lines.append("    .satisfies_specialization_requirement = loom_target_facts_structural_satisfy_specialization_requirement,")
         lines.append("};")
     else:
         fact_type = c_symbols.normalize_c_symbol_reference(iface.fact_type)

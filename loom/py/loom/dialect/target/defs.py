@@ -24,7 +24,7 @@ from loom.dsl import (
     OpPhase,
     SymbolDefinition,
     SymbolDefinitionFlag,
-    TargetFactSatisfaction,
+    TargetFactSpecialization,
     TargetLikeInterface,
 )
 
@@ -204,7 +204,7 @@ target_generic = Op(
             symbol="symbol",
             selector="kind",
             bundle_table="loom_target_generic_target_bundles",
-            fact_satisfaction=TargetFactSatisfaction.STRUCTURAL,
+            fact_specialization=TargetFactSpecialization.STRUCTURAL,
         )
     ],
     symbol_def=SymbolDefinition(
