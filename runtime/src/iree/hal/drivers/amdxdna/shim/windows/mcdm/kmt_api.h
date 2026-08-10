@@ -81,6 +81,23 @@ enum class McdmAbi {
   compact,
 };
 
+enum class McdmAbiSource {
+  unknown,
+  identity_query,
+};
+
+struct McdmAbiDiagnostics {
+  McdmAbi selected_abi = McdmAbi::legacy;
+  McdmAbi probed_abi = McdmAbi::legacy;
+  McdmAbiSource source = McdmAbiSource::unknown;
+  uint32_t identity_words[3] = {};
+  uint32_t identity_word_count = 0;
+  uint32_t accepted_identity_count = 0;
+  bool identities_match = false;
+  NTSTATUS compact_query_status = 0;
+  NTSTATUS legacy_query_status = 0;
+};
+
 enum class CommandApertureWritePublishMode {
   cpu_cache_flush,
   kmt_invalidate,
@@ -152,6 +169,9 @@ struct KmtApi {
 
 bool QueryMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter, McdmAbi* out_abi,
                   Error* out_error);
+bool QueryMcdmAbiDiagnostics(const KmtApi& api, D3DKMT_HANDLE adapter,
+                             McdmAbiDiagnostics* out_diagnostics,
+                             Error* out_error);
 
 struct Adapter {
   D3DKMT_HANDLE handle = 0;
@@ -172,6 +192,7 @@ struct Device {
   // device-wide watermark before every HW-queue submit.
   mutable volatile LONG64 pending_paging_fence_value = 0;
   McdmAbi mcdm_abi = McdmAbi::legacy;
+  McdmAbiDiagnostics mcdm_abi_diagnostics = {};
 };
 
 struct Buffer {

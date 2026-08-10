@@ -13,10 +13,13 @@
 #include <atomic>
 #include <cstdarg>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <cwchar>
 #include <limits>
+
+#ifndef IREE_HAL_AMDXDNA_MCDM_ENABLE_KMT_TRACE
+#define IREE_HAL_AMDXDNA_MCDM_ENABLE_KMT_TRACE 0
+#endif
 
 namespace iree::hal::amdxdna::mcdm {
 namespace {
@@ -74,29 +77,8 @@ const char* NtStatusSuffix(NTSTATUS status) {
   return status == kStatusPending ? " (STATUS_PENDING)" : "";
 }
 
-bool EnvFlagEnabled(const char* name) {
-  const char* value = std::getenv(name);
-  return value && value[0] && std::strcmp(value, "0") != 0 &&
-         std::strcmp(value, "false") != 0 &&
-         std::strcmp(value, "FALSE") != 0;
-}
-
-bool TraceEnabled() {
-  static const bool enabled = [] {
-    return EnvFlagEnabled("HRX_KMT_TRACE");
-  }();
-  return enabled;
-}
-
-bool StatsEnabled() {
-  static const bool enabled = [] {
-    return EnvFlagEnabled("HRX_KMT_STATS");
-  }();
-  return enabled;
-}
-
-void Trace(const char* fmt, ...) {
-  if (!TraceEnabled()) return;
+#if IREE_HAL_AMDXDNA_MCDM_ENABLE_KMT_TRACE
+void TraceImpl(const char* fmt, ...) {
   std::fprintf(stderr, "[hrx][kmt] ");
   va_list args;
   va_start(args, fmt);
@@ -124,12 +106,12 @@ uint32_t ReadTraceU32(const void* data, size_t size, size_t offset) {
   return value;
 }
 
-void TraceBlob(const char* label, const void* data, size_t size) {
-  if (!TraceEnabled() || !data || size == 0) return;
-  Trace("%s size=%zu hash=0x%016llx u32[0..3]=%08x,%08x,%08x,%08x",
-        label, size, static_cast<unsigned long long>(HashBytes(data, size)),
-        ReadTraceU32(data, size, 0), ReadTraceU32(data, size, 4),
-        ReadTraceU32(data, size, 8), ReadTraceU32(data, size, 12));
+void TraceBlobImpl(const char* label, const void* data, size_t size) {
+  if (!data || size == 0) return;
+  TraceImpl("%s size=%zu hash=0x%016llx u32[0..3]=%08x,%08x,%08x,%08x",
+            label, size, static_cast<unsigned long long>(HashBytes(data, size)),
+            ReadTraceU32(data, size, 0), ReadTraceU32(data, size, 4),
+            ReadTraceU32(data, size, 8), ReadTraceU32(data, size, 12));
 }
 
 std::atomic<uint64_t> g_live_kmt_bytes{0};
@@ -144,8 +126,8 @@ void UpdatePeakKmtBytes(uint64_t live_bytes) {
   }
 }
 
-void StatsAlloc(const char* label, uint64_t bytes, D3DKMT_HANDLE allocation) {
-  if (!StatsEnabled()) return;
+void StatsAllocImpl(const char* label, uint64_t bytes,
+                    D3DKMT_HANDLE allocation) {
   const uint64_t live =
       g_live_kmt_bytes.fetch_add(bytes, std::memory_order_relaxed) + bytes;
   const uint64_t count =
@@ -164,8 +146,8 @@ void StatsAlloc(const char* label, uint64_t bytes, D3DKMT_HANDLE allocation) {
   std::fflush(stderr);
 }
 
-void StatsFree(const char* label, uint64_t bytes, D3DKMT_HANDLE allocation) {
-  if (!StatsEnabled()) return;
+void StatsFreeImpl(const char* label, uint64_t bytes,
+                   D3DKMT_HANDLE allocation) {
   uint64_t before = g_live_kmt_bytes.load(std::memory_order_relaxed);
   uint64_t live = 0;
   while (true) {
@@ -193,6 +175,16 @@ void StatsFree(const char* label, uint64_t bytes, D3DKMT_HANDLE allocation) {
                static_cast<unsigned>(allocation));
   std::fflush(stderr);
 }
+#define Trace(...) TraceImpl(__VA_ARGS__)
+#define TraceBlob(...) TraceBlobImpl(__VA_ARGS__)
+#define StatsAlloc(...) StatsAllocImpl(__VA_ARGS__)
+#define StatsFree(...) StatsFreeImpl(__VA_ARGS__)
+#else
+#define Trace(...) ((void)0)
+#define TraceBlob(...) ((void)0)
+#define StatsAlloc(...) ((void)0)
+#define StatsFree(...) ((void)0)
+#endif
 
 void ConfigureMakeResidentFlags(D3DDDI_MAKERESIDENT* resident) {
   if (!resident) return;
@@ -537,8 +529,14 @@ void QueryDriverStorePathForWarmup(const KmtApi& api, D3DKMT_HANDLE adapter) {
 
 }  // namespace
 
-bool QueryMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter, McdmAbi* out_abi,
-                  Error* out_error) {
+bool QueryMcdmAbiDiagnostics(const KmtApi& api, D3DKMT_HANDLE adapter,
+                             McdmAbiDiagnostics* out_diagnostics,
+                             Error* out_error) {
+  if (!out_diagnostics) {
+    SetError(out_error, "missing MCDM ABI diagnostics output");
+    return false;
+  }
+  McdmAbiDiagnostics diagnostics = {};
   // Negotiate on both the accepted query shape and its returned protocol
   // identity. Some legacy drivers accept an oversized three-DWORD query and
   // zero-fill the extra DWORD, making {0, 2, 0} and {0, 3, 0} ambiguous by
@@ -558,6 +556,7 @@ bool QueryMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter, McdmAbi* out_abi,
   query.pPrivateDriverData = compact_data;
   query.PrivateDriverDataSize = sizeof(compact_data);
   NTSTATUS compact_status = api.query_adapter_info(&query);
+  diagnostics.compact_query_status = compact_status;
   if (compact_status != 0 && compact_status != kStatusBufferTooSmall) {
     return CheckStatus("D3DKMTQueryAdapterInfo(UMDRIVERPRIVATE compact)",
                        compact_status, out_error);
@@ -567,6 +566,7 @@ bool QueryMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter, McdmAbi* out_abi,
   query.pPrivateDriverData = legacy_data;
   query.PrivateDriverDataSize = sizeof(legacy_data);
   NTSTATUS legacy_status = api.query_adapter_info(&query);
+  diagnostics.legacy_query_status = legacy_status;
   if (legacy_status != 0 && legacy_status != kStatusBufferTooSmall) {
     return CheckStatus("D3DKMTQueryAdapterInfo(UMDRIVERPRIVATE legacy)",
                        legacy_status, out_error);
@@ -609,7 +609,15 @@ bool QueryMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter, McdmAbi* out_abi,
     }
     // v4 drivers on some platforms (e.g. Krackan + 32.0.203.329) report only
     // the legacy two-dword identity; they still use the legacy packet layout.
-    *out_abi = McdmAbi::legacy;
+    diagnostics.selected_abi = McdmAbi::legacy;
+    diagnostics.probed_abi = McdmAbi::legacy;
+    diagnostics.source = McdmAbiSource::identity_query;
+    diagnostics.identity_words[0] = legacy_data[0];
+    diagnostics.identity_words[1] = legacy_data[1];
+    diagnostics.identity_word_count = 2;
+    diagnostics.accepted_identity_count = compact_status == 0 ? 2 : 1;
+    diagnostics.identities_match = true;
+    *out_diagnostics = diagnostics;
     return true;
   }
 
@@ -625,7 +633,26 @@ bool QueryMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter, McdmAbi* out_abi,
                    compact_data[0], compact_data[1], compact_data[2]);
     return false;
   }
-  *out_abi = McdmAbi::compact;
+  diagnostics.selected_abi = McdmAbi::compact;
+  diagnostics.probed_abi = McdmAbi::compact;
+  diagnostics.source = McdmAbiSource::identity_query;
+  diagnostics.identity_words[0] = compact_data[0];
+  diagnostics.identity_words[1] = compact_data[1];
+  diagnostics.identity_words[2] = compact_data[2];
+  diagnostics.identity_word_count = 3;
+  diagnostics.accepted_identity_count = 1;
+  diagnostics.identities_match = true;
+  *out_diagnostics = diagnostics;
+  return true;
+}
+
+bool QueryMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter, McdmAbi* out_abi,
+                  Error* out_error) {
+  McdmAbiDiagnostics diagnostics = {};
+  if (!QueryMcdmAbiDiagnostics(api, adapter, &diagnostics, out_error)) {
+    return false;
+  }
+  *out_abi = diagnostics.selected_abi;
   return true;
 }
 
@@ -968,10 +995,12 @@ bool CreateDevice(const KmtApi& api, const Adapter& adapter, Device* out_device,
   device.paging_queue = paging.hPagingQueue;
   device.paging_sync_object = paging.hSyncObject;
   device.paging_fence_cpu = paging.FenceValueCPUVirtualAddress;
-  if (!QueryMcdmAbi(api, device.adapter, &device.mcdm_abi, out_error)) {
+  if (!QueryMcdmAbiDiagnostics(api, device.adapter,
+                               &device.mcdm_abi_diagnostics, out_error)) {
     DestroyDevice(api, &device);
     return false;
   }
+  device.mcdm_abi = device.mcdm_abi_diagnostics.selected_abi;
   *out_device = device;
   return true;
 }

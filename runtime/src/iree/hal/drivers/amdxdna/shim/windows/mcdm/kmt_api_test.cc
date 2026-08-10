@@ -737,6 +737,102 @@ TEST(KmtApiTest, NegotiatesCompactV4AbiWhenLegacyShapeIsRejected) {
   ASSERT_EQ(g_query_count, 2u);
 }
 
+TEST(KmtApiTest, RecordsDiagnosticsFor314StyleLegacyIdentity) {
+  ResetFakes();
+  g_query_outputs[0][1] = 3;
+  g_query_outputs[1][1] = 3;
+  KmtApi api = {};
+  api.query_adapter_info = FakeQueryAdapterInfo;
+  McdmAbiDiagnostics diagnostics = {};
+  Error error = {};
+
+  ASSERT_TRUE(QueryMcdmAbiDiagnostics(api, 0x5678, &diagnostics, &error))
+      << ErrorMessage(&error);
+  EXPECT_EQ(diagnostics.selected_abi, McdmAbi::legacy);
+  EXPECT_EQ(diagnostics.probed_abi, McdmAbi::legacy);
+  EXPECT_EQ(diagnostics.source, McdmAbiSource::identity_query);
+  EXPECT_EQ(diagnostics.identity_word_count, 2u);
+  EXPECT_EQ(diagnostics.identity_words[0], 0u);
+  EXPECT_EQ(diagnostics.identity_words[1], 3u);
+  EXPECT_EQ(diagnostics.accepted_identity_count, 2u);
+  EXPECT_TRUE(diagnostics.identities_match);
+  EXPECT_EQ(diagnostics.compact_query_status, 0);
+  EXPECT_EQ(diagnostics.legacy_query_status, 0);
+}
+
+TEST(KmtApiTest, RecordsDiagnosticsFor329StyleLegacyIdentity) {
+  ResetFakes();
+  g_query_outputs[0][1] = 4;
+  g_query_outputs[1][1] = 4;
+  KmtApi api = {};
+  api.query_adapter_info = FakeQueryAdapterInfo;
+  McdmAbiDiagnostics diagnostics = {};
+  Error error = {};
+
+  ASSERT_TRUE(QueryMcdmAbiDiagnostics(api, 0x5678, &diagnostics, &error))
+      << ErrorMessage(&error);
+  EXPECT_EQ(diagnostics.selected_abi, McdmAbi::legacy);
+  EXPECT_EQ(diagnostics.probed_abi, McdmAbi::legacy);
+  EXPECT_EQ(diagnostics.source, McdmAbiSource::identity_query);
+  EXPECT_EQ(diagnostics.identity_word_count, 2u);
+  EXPECT_EQ(diagnostics.identity_words[0], 0u);
+  EXPECT_EQ(diagnostics.identity_words[1], 4u);
+  EXPECT_EQ(diagnostics.accepted_identity_count, 2u);
+  EXPECT_TRUE(diagnostics.identities_match);
+  EXPECT_EQ(diagnostics.compact_query_status, 0);
+  EXPECT_EQ(diagnostics.legacy_query_status, 0);
+}
+
+TEST(KmtApiTest, RecordsDiagnosticsFor3760StyleCompactIdentity) {
+  ResetFakes();
+  g_query_outputs[0][1] = 3;
+  g_query_statuses[1] = static_cast<NTSTATUS>(0xC0000023u);
+  KmtApi api = {};
+  api.query_adapter_info = FakeQueryAdapterInfo;
+  McdmAbiDiagnostics diagnostics = {};
+  Error error = {};
+
+  ASSERT_TRUE(QueryMcdmAbiDiagnostics(api, 0x5678, &diagnostics, &error))
+      << ErrorMessage(&error);
+  EXPECT_EQ(diagnostics.selected_abi, McdmAbi::compact);
+  EXPECT_EQ(diagnostics.probed_abi, McdmAbi::compact);
+  EXPECT_EQ(diagnostics.source, McdmAbiSource::identity_query);
+  EXPECT_EQ(diagnostics.identity_word_count, 3u);
+  EXPECT_EQ(diagnostics.identity_words[0], 0u);
+  EXPECT_EQ(diagnostics.identity_words[1], 3u);
+  EXPECT_EQ(diagnostics.identity_words[2], 0u);
+  EXPECT_EQ(diagnostics.accepted_identity_count, 1u);
+  EXPECT_TRUE(diagnostics.identities_match);
+  EXPECT_EQ(diagnostics.compact_query_status, 0);
+  EXPECT_EQ(diagnostics.legacy_query_status,
+            static_cast<NTSTATUS>(0xC0000023u));
+}
+
+TEST(KmtApiTest, RecordsDiagnosticsFor3930StyleCompactIdentity) {
+  ResetFakes();
+  g_query_outputs[0][1] = 4;
+  g_query_statuses[1] = static_cast<NTSTATUS>(0xC0000023u);
+  KmtApi api = {};
+  api.query_adapter_info = FakeQueryAdapterInfo;
+  McdmAbiDiagnostics diagnostics = {};
+  Error error = {};
+
+  ASSERT_TRUE(QueryMcdmAbiDiagnostics(api, 0x5678, &diagnostics, &error))
+      << ErrorMessage(&error);
+  EXPECT_EQ(diagnostics.selected_abi, McdmAbi::compact);
+  EXPECT_EQ(diagnostics.probed_abi, McdmAbi::compact);
+  EXPECT_EQ(diagnostics.source, McdmAbiSource::identity_query);
+  EXPECT_EQ(diagnostics.identity_word_count, 3u);
+  EXPECT_EQ(diagnostics.identity_words[0], 0u);
+  EXPECT_EQ(diagnostics.identity_words[1], 4u);
+  EXPECT_EQ(diagnostics.identity_words[2], 0u);
+  EXPECT_EQ(diagnostics.accepted_identity_count, 1u);
+  EXPECT_TRUE(diagnostics.identities_match);
+  EXPECT_EQ(diagnostics.compact_query_status, 0);
+  EXPECT_EQ(diagnostics.legacy_query_status,
+            static_cast<NTSTATUS>(0xC0000023u));
+}
+
 TEST(KmtApiTest, NegotiatesLegacyV4AbiWhenCompactShapeIsRejected) {
   ResetFakes();
   g_query_statuses[0] = static_cast<NTSTATUS>(0xC0000023u);
