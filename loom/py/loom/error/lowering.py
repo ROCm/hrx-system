@@ -524,6 +524,23 @@ ERR_LOWERING_048 = ErrorDef(
     ),
 )
 
+# ERR_LOWERING_049: Command-program composition is recursive.
+ERR_LOWERING_049 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=49,
+    severity=Severity.ERROR,
+    summary="Command-program composition is recursive.",
+    message=(
+        "command-program preparation cannot flatten recursive composition "
+        "through @{program_name}"
+    ),
+    params=(ErrorParam("program_name", ParamKind.STRING),),
+    fix_hint=(
+        "Make command.program.launch dependencies acyclic before materializing "
+        "the command program"
+    ),
+)
+
 ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_022,
     ERR_LOWERING_023,
@@ -550,4 +567,5 @@ ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_046,
     ERR_LOWERING_047,
     ERR_LOWERING_048,
+    ERR_LOWERING_049,
 )
