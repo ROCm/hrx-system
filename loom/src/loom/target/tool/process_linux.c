@@ -4,6 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE 1
+#endif  // _DEFAULT_SOURCE
+
 #include "loom/target/tool/process_platform.h"
 
 #if defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_ANDROID)
