@@ -207,3 +207,14 @@ class CheckBuilder(DialectBuilder):
         attrs: Mapping[str, Any] | None = ...,
         location_id: int | None = ...,
     ) -> None: ...
+    def view(
+        self,
+        *,
+        source: ValueRef,
+        byte_offset: int,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...

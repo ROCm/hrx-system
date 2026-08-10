@@ -328,6 +328,13 @@ static bool loom_testbench_plan_parameter(
   return false;
 }
 
+static bool loom_testbench_is_value_source_op(const loom_op_t* op) {
+  return loom_check_literal_isa(op) || loom_check_generate_iota_isa(op) ||
+         loom_check_generate_fill_isa(op) ||
+         loom_check_generate_random_uniform_isa(op) ||
+         loom_check_file_read_npy_isa(op) || loom_check_tensor_view_isa(op);
+}
+
 static bool loom_testbench_plan_value_source(
     const loom_module_t* module, const loom_op_t* op,
     loom_testbench_value_source_plan_t* out_source) {
@@ -386,6 +393,26 @@ static bool loom_testbench_plan_value_source(
         loom_testbench_string_from_id(module, out_source->file.path_id);
     return out_source->value_id < module->values.count &&
            out_source->file.path_id < module->strings.count;
+  }
+  if (loom_check_tensor_view_isa(op)) {
+    out_source->kind = LOOM_TESTBENCH_VALUE_SOURCE_TENSOR_VIEW;
+    out_source->value_id = loom_check_tensor_view_result(op);
+    out_source->type = loom_testbench_value_type(module, out_source->value_id);
+    out_source->tensor_view.source_value_id = loom_check_tensor_view_source(op);
+    int64_t byte_offset = loom_check_tensor_view_byte_offset(op);
+    if (out_source->value_id >= module->values.count || byte_offset < 0 ||
+        out_source->tensor_view.source_value_id >= module->values.count) {
+      return false;
+    }
+    const loom_value_t* source_value =
+        loom_module_value(module, out_source->tensor_view.source_value_id);
+    if (loom_value_is_block_arg(source_value)) return false;
+    const loom_op_t* source_op = loom_value_def_op(source_value);
+    if (!source_op || !loom_testbench_is_value_source_op(source_op)) {
+      return false;
+    }
+    out_source->tensor_view.byte_offset = (iree_device_size_t)byte_offset;
+    return true;
   }
   return false;
 }
@@ -672,13 +699,6 @@ static bool loom_testbench_is_parameter_op(const loom_op_t* op) {
          loom_check_param_seed_isa(op);
 }
 
-static bool loom_testbench_is_value_source_op(const loom_op_t* op) {
-  return loom_check_literal_isa(op) || loom_check_generate_iota_isa(op) ||
-         loom_check_generate_fill_isa(op) ||
-         loom_check_generate_random_uniform_isa(op) ||
-         loom_check_file_read_npy_isa(op);
-}
-
 static bool loom_testbench_is_launch_schedule_op(const loom_op_t* op) {
   return loom_kernel_launch_serial_isa(op) ||
          loom_kernel_launch_concurrent_isa(op);
@@ -761,6 +781,7 @@ static bool loom_testbench_is_supported_check_body_op(
     case LOOM_OP_CHECK_GENERATE_RANDOM_UNIFORM:
     case LOOM_OP_CHECK_FILE_READ_NPY:
     case LOOM_OP_CHECK_FILE_WRITE_NPY:
+    case LOOM_OP_CHECK_TENSOR_VIEW:
     case LOOM_OP_CHECK_ORACLE_CALL:
     case LOOM_OP_KERNEL_LAUNCH_SERIAL:
     case LOOM_OP_KERNEL_LAUNCH_CONCURRENT:

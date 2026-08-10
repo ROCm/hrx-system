@@ -40,7 +40,8 @@ enum {
   LOOM_OP_CHECK_EXPECT = LOOM_OP_KIND(LOOM_DIALECT_CHECK, 18),
   LOOM_OP_CHECK_EXPECT_EVENT = LOOM_OP_KIND(LOOM_DIALECT_CHECK, 19),
   LOOM_OP_CHECK_BENCHMARK = LOOM_OP_KIND(LOOM_DIALECT_CHECK, 20),
-  LOOM_OP_CHECK_COUNT_ = 21,
+  LOOM_OP_CHECK_TENSOR_VIEW = LOOM_OP_KIND(LOOM_DIALECT_CHECK, 21),
+  LOOM_OP_CHECK_COUNT_ = 22,
 };
 
 // Check symbol visibility. Absent (0) means private.
@@ -427,6 +428,20 @@ iree_status_t loom_check_benchmark_build(
     loom_symbol_ref_t case_ref,
     loom_optional loom_symbol_ref_t benchmark,
     loom_optional loom_named_attr_slice_t attrs,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_CHECK_TENSOR_VIEW: Forms a dense typed alias over a byte subspan of a tensor materialized by another check value source. The view shares storage with its source.
+// %payload = check.tensor.view %packed offset(16) : tensor<144xi8> -> tensor<32xi32>
+LOOM_DEFINE_ISA(loom_check_tensor_view_isa, LOOM_OP_CHECK_TENSOR_VIEW)
+LOOM_DEFINE_OPERAND(loom_check_tensor_view_source, 0)
+LOOM_DEFINE_RESULT(loom_check_tensor_view_result, 0)
+LOOM_DEFINE_ATTR_I64(loom_check_tensor_view_byte_offset, 0)
+iree_status_t loom_check_tensor_view_build(
+    loom_builder_t* builder,
+    loom_value_id_t source,
+    int64_t byte_offset,
+    loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
 

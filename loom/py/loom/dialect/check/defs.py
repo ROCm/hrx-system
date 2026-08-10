@@ -43,6 +43,7 @@ from loom.dsl import (
     PURE,
     SCALAR,
     SYMBOL_DEFINE,
+    TENSOR,
     TERMINATOR,
     UNKNOWN_EFFECTS,
     AttrDef,
@@ -405,6 +406,38 @@ check_file_write_npy = Op(
 
 
 # ============================================================================
+# Value projections
+# ============================================================================
+
+check_tensor_view = Op(
+    "check.tensor.view",
+    group=check_ops,
+    doc=("Forms a dense typed alias over a byte subspan of a tensor materialized by another check value source. The view shares storage with its source."),
+    operands=[Operand("source", TENSOR)],
+    results=[Result("result", TENSOR)],
+    attrs=[
+        AttrDef(
+            "byte_offset",
+            "i64",
+            doc=("Non-negative static byte offset from the beginning of the source tensor."),
+        ),
+    ],
+    traits=[PURE, HasAncestor("check.case")],
+    format=[
+        Ref("source"),
+        Clause("offset", Attr("byte_offset")),
+        COLON,
+        TypeOf("source"),
+        ARROW,
+        TypeOf("result"),
+    ],
+    examples=[
+        "%payload = check.tensor.view %packed offset(16) : tensor<144xi8> -> tensor<32xi32>",
+    ],
+)
+
+
+# ============================================================================
 # Oracles
 # ============================================================================
 
@@ -636,4 +669,6 @@ ALL_CHECK_OPS = (
     check_expect,
     check_expect_event,
     check_benchmark,
+    # Append new operations to preserve existing bytecode op ordinals.
+    check_tensor_view,
 )

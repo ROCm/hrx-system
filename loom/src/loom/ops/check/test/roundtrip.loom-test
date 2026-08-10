@@ -29,9 +29,11 @@ check.case @fixture_case {
   %fill = check.generate.fill value(17) : tensor<[%m]x4xi32>
   %uniform = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<[%n]xf32>
   %expected = check.file.read.npy path("fixtures/vector.npy") : tensor<[%n]xf32>
+  %uniform_tail = check.tensor.view %uniform offset(16) : tensor<[%n]xf32> -> tensor<4xf32>
   check.expect.equal actual(%scalar) expected(%scalar) : i32
   check.expect.bitwise actual(%uniform) expected(%expected) : tensor<[%n]xf32>
   check.expect.shape value(%iota) shape([%m, 4]) : tensor<[%m]x4xi32>
+  check.expect.shape value(%uniform_tail) shape([4]) : tensor<4xf32>
   check.file.write.npy value(%uniform) path("outputs/vector.actual.npy") mode(on_failure) : tensor<[%n]xf32>
   test.use %fill : tensor<[%m]x4xi32>
   check.return

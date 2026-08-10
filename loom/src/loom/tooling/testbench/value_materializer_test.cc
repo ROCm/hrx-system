@@ -295,6 +295,76 @@ check.case @generated {
   loom_module_free(module);
 }
 
+TEST_F(ValueMaterializerTest, MaterializesTypedTensorSubspanViews) {
+  loom_module_t* module = ParseModule(R"(
+check.case @tensor_view {
+  %length = check.param.choice values([2, 3]) : index
+  %source = check.generate.iota offset(1) step(1) : tensor<4xi32>
+  %tail = check.tensor.view %source offset(4) : tensor<4xi32> -> tensor<[%length]xi32>
+  check.return
+}
+)");
+  ASSERT_NE(module, nullptr);
+  loom_testbench_module_plan_t plan = PlanModule(module);
+  ASSERT_EQ(plan.case_count, 1u);
+  ASSERT_EQ(plan.issue_count, 0u);
+  const loom_testbench_case_plan_t& case_plan = plan.cases[0];
+
+  loom_testbench_value_table_t table = {};
+  IREE_ASSERT_OK(loom_testbench_value_table_initialize(
+      module, &case_plan, host_allocator_, &table));
+  loom_testbench_value_materializer_options_t options = MaterializerOptions();
+  IREE_ASSERT_OK(loom_testbench_materialize_case_sample(
+      &options, &case_plan, /*sample_ordinal=*/1, &table));
+
+  ASSERT_EQ(case_plan.value_source_count, 2u);
+  loom_testbench_value_t source = {};
+  iree_hal_buffer_view_t* source_view =
+      LookupBufferView(&table, case_plan.value_sources[0].value_id, &source);
+  loom_testbench_value_t tail = {};
+  iree_hal_buffer_view_t* tail_view =
+      LookupBufferView(&table, case_plan.value_sources[1].value_id, &tail);
+  ExpectBufferViewContents<int32_t>(tail_view, {3},
+                                    IREE_HAL_ELEMENT_TYPE_SINT_32, {2, 3, 4});
+  EXPECT_EQ(iree_hal_buffer_test_overlap(
+                iree_hal_buffer_view_buffer(source_view), /*lhs_offset=*/0,
+                IREE_HAL_WHOLE_BUFFER, iree_hal_buffer_view_buffer(tail_view),
+                /*rhs_offset=*/0, IREE_HAL_WHOLE_BUFFER),
+            IREE_HAL_BUFFER_OVERLAP_PARTIAL);
+
+  loom_testbench_value_deinitialize(&tail);
+  loom_testbench_value_deinitialize(&source);
+  loom_testbench_value_table_deinitialize(&table);
+  loom_module_free(module);
+}
+
+TEST_F(ValueMaterializerTest, RejectsTensorViewOutsideSourceRange) {
+  loom_module_t* module = ParseModule(R"(
+check.case @tensor_view_out_of_range {
+  %source = check.generate.fill value(0) : tensor<4xi32>
+  %outside = check.tensor.view %source offset(8) : tensor<4xi32> -> tensor<3xi32>
+  check.return
+}
+)");
+  ASSERT_NE(module, nullptr);
+  loom_testbench_module_plan_t plan = PlanModule(module);
+  ASSERT_EQ(plan.case_count, 1u);
+  ASSERT_EQ(plan.issue_count, 0u);
+  const loom_testbench_case_plan_t& case_plan = plan.cases[0];
+
+  loom_testbench_value_table_t table = {};
+  IREE_ASSERT_OK(loom_testbench_value_table_initialize(
+      module, &case_plan, host_allocator_, &table));
+  loom_testbench_value_materializer_options_t options = MaterializerOptions();
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      loom_testbench_materialize_case_sample(&options, &case_plan,
+                                             /*sample_ordinal=*/0, &table));
+
+  loom_testbench_value_table_deinitialize(&table);
+  loom_module_free(module);
+}
+
 TEST_F(ValueMaterializerTest,
        MaterializesExplicitCartesianSamplePastRetainedPrefix) {
   loom_module_t* module = ParseModule(R"(
