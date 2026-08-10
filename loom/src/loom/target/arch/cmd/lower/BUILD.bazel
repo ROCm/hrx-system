@@ -96,6 +96,25 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "lower",
+    srcs = ["lower.c"],
+    hdrs = ["lower.h"],
+    deps = [
+        ":launch_graph",
+        "//loom/src/loom/codegen/low:builder",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/command",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/cmd:abi_layout",
+        "//loom/src/loom/target/arch/cmd/descriptors",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "parameters",
     srcs = ["parameters.c"],
     hdrs = ["parameters.h"],

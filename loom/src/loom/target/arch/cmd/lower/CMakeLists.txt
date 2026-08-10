@@ -106,6 +106,28 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    lower
+  HDRS
+    "lower.h"
+  SRCS
+    "lower.c"
+  DEPS
+    ::launch_graph
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::builder
+    loom::ir
+    loom::ops::command
+    loom::ops::kernel
+    loom::ops::low
+    loom::target::arch::cmd::abi_layout
+    loom::target::arch::cmd::descriptors
+    loom::target::types
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     parameters
   HDRS
     "parameters.h"
