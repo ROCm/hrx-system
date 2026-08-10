@@ -18,6 +18,9 @@ from loom.dsl import (
 )
 from loom.fields import compute_layout
 from loom.gen.ops import c_builders
+from loom.gen.ops.c_enum_attrs import (
+    collect_encoding_enum_types as _collect_encoding_enum_types,
+)
 from loom.gen.ops.c_enum_attrs import collect_shared_enums as _collect_shared_enums
 from loom.gen.ops.c_enum_attrs import enum_c_type as _enum_c_type
 from loom.gen.ops.c_enum_attrs import enum_case_c_ident as _enum_case_c_ident
@@ -62,6 +65,7 @@ def generate_ops_h(
     guard = _guard_name(dialect_name)
     dialect_enum = _c_dialect_enum(dialect_name)
     shared_enums = _collect_shared_enums(dialect_name, ops)
+    encoding_enum_types = _collect_encoding_enum_types(dialect_name, encoding_families)
 
     lines.append(COPYRIGHT)
     lines.extend(
@@ -120,7 +124,7 @@ def generate_ops_h(
     for attr_def in parameterized_attrs:
         for parameter in attr_def.parameters:
             enum_def = parameter.enum_def
-            if parameter.attr_type not in ("enum", "enum_array") or enum_def is None or enum_def.c_type is not None or id(enum_def) in emitted_parameter_enums:
+            if parameter.attr_type not in ("enum", "enum_array") or enum_def is None or enum_def.c_type is not None or id(enum_def) in encoding_enum_types or id(enum_def) in emitted_parameter_enums:
                 continue
             emitted_parameter_enums.add(id(enum_def))
             c_prefix = f"{_c_parameterized_attr_prefix(attr_def)}_{parameter.name}"
@@ -210,7 +214,7 @@ def generate_ops_h(
     if target_condition_symbols:
         lines.append("")
 
-    lines.extend(_generate_parameterized_attr_header_lines(parameterized_attrs))
+    lines.extend(_generate_parameterized_attr_header_lines(parameterized_attrs, encoding_enum_types))
 
     lines.extend((f"extern const loom_encoding_family_descriptor_t {_c_encoding_family_descriptor_name(family)};") for family in encoding_families)
     if encoding_families:

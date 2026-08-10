@@ -246,12 +246,13 @@ def _emit_parameterized_attr_tables(
     lines: list[str],
     dialect_name: str,
     parameterized_attrs: Sequence[ParameterizedAttrDef],
+    shared_enum_names: dict[int, str] | None = None,
 ) -> None:
     """Emits dialect-owned parameter schemas and family descriptors."""
 
     for attr_def in parameterized_attrs:
         prefix = _c_parameterized_attr_prefix(attr_def)
-        _emit_attr_descriptor_table(lines, prefix, attr_def.parameters)
+        _emit_attr_descriptor_table(lines, prefix, attr_def.parameters, shared_enum_names)
 
     if parameterized_attrs:
         lines.append(f"static const loom_parameterized_attr_descriptor_t loom_{dialect_name}_parameterized_attr_array[] = {{")
@@ -332,11 +333,11 @@ def _emit_attr_descriptor_table(
     return table_name
 
 
-def _emit_encoding_family_tables(lines: list[str], encoding_families: Sequence[EncodingFamilyDef]) -> None:
-    """Emits generated encoding-family descriptors."""
-
-    _validate_encoding_family_c_names(encoding_families)
-
+def _emit_encoding_enum_case_names(
+    lines: list[str],
+    encoding_families: Sequence[EncodingFamilyDef],
+) -> dict[int, str]:
+    """Emits and returns enum name tables shared by encoding schemas."""
     shared_enum_names: dict[int, str] = {}
     for family in encoding_families:
         for parameter in family.parameters:
@@ -349,6 +350,17 @@ def _emit_encoding_family_tables(lines: list[str], encoding_families: Sequence[E
             array_name = f"{_c_encoding_enum_prefix(family.group.name, enum_def)}_names"
             _emit_enum_case_names(lines, array_name, enum_def)
             shared_enum_names[enum_id] = array_name
+    return shared_enum_names
+
+
+def _emit_encoding_family_tables(
+    lines: list[str],
+    encoding_families: Sequence[EncodingFamilyDef],
+    shared_enum_names: dict[int, str],
+) -> None:
+    """Emits generated encoding-family descriptors."""
+
+    _validate_encoding_family_c_names(encoding_families)
 
     for family in encoding_families:
         prefix = _c_encoding_family_prefix(family)
@@ -846,8 +858,9 @@ def generate_tables_c(
 
     # Parameterized attribute families share the ordinary attribute schema but
     # retain a distinct dialect-owned outer identity.
-    _emit_parameterized_attr_tables(lines, dialect_name, parameterized_attrs)
-    _emit_encoding_family_tables(lines, encoding_families)
+    encoding_enum_names = _emit_encoding_enum_case_names(lines, encoding_families)
+    _emit_parameterized_attr_tables(lines, dialect_name, parameterized_attrs, encoding_enum_names)
+    _emit_encoding_family_tables(lines, encoding_families, encoding_enum_names)
 
     lines.append("#undef _OP_NAME")
     lines.append("#undef _BSTRING")
@@ -924,8 +937,9 @@ def generate_tables_aggregator_c(
     lines.append(f'#include "{include_path}/tables.h"')
     lines.append("")
 
-    _emit_parameterized_attr_tables(lines, dialect_name, parameterized_attrs)
-    _emit_encoding_family_tables(lines, encoding_families)
+    encoding_enum_names = _emit_encoding_enum_case_names(lines, encoding_families)
+    _emit_parameterized_attr_tables(lines, dialect_name, parameterized_attrs, encoding_enum_names)
+    _emit_encoding_family_tables(lines, encoding_families, encoding_enum_names)
 
     c_arrays.append_value_array(
         lines,

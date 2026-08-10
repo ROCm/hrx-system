@@ -11,11 +11,30 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Sequence
 
-from loom.dsl import AttrDef, EnumDef, Op
-from loom.gen.ops.c_names import c_prefix
+from loom.dsl import AttrDef, EncodingFamilyDef, EnumDef, Op
+from loom.gen.ops.c_names import c_encoding_enum_prefix, c_prefix
 from loom.gen.support.c import CIdentifierCase, c_identifier
 
 SharedEnumMap = dict[int, tuple[str, str, EnumDef]]
+EncodingEnumTypeMap = dict[int, str]
+
+
+def collect_encoding_enum_types(
+    dialect_name: str,
+    encoding_families: Sequence[EncodingFamilyDef],
+) -> EncodingEnumTypeMap:
+    """Returns the canonical C type for encoding-family parameter enums."""
+    enum_types: EncodingEnumTypeMap = {}
+    for family in encoding_families:
+        for parameter in family.parameters:
+            enum_def = parameter.enum_def
+            if parameter.attr_type not in ("enum", "enum_array") or enum_def is None:
+                continue
+            enum_types.setdefault(
+                id(enum_def),
+                enum_def.c_type or f"{c_encoding_enum_prefix(dialect_name, enum_def)}_t",
+            )
+    return enum_types
 
 
 def collect_shared_enums(

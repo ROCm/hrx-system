@@ -529,6 +529,51 @@ def test_generate_encoding_families_share_enum_vocabulary() -> None:
     assert tables_c.count(".enum_case_names = loom_encoding_rounding_policy_names") == 2
 
 
+def test_generate_parameterized_attrs_share_encoding_enum_vocabulary() -> None:
+    dialect = Dialect("encoding", dialect_id=0x09)
+    numeric_format = EnumDef(
+        "NumericFormat",
+        [EnumCase("f16", 1), EnumCase("bf16", 2)],
+    )
+    requirements = ParameterizedAttrDef(
+        "encoding.requirements",
+        group=dialect,
+        parameters=[
+            AttrDef(
+                "element_format",
+                ATTR_TYPE_ENUM,
+                enum_def=numeric_format,
+                optional=True,
+            ),
+        ],
+    )
+    family = EncodingFamilyDef(
+        "matrix_operand",
+        group=dialect,
+        role=EncodingFamilyRole.STORAGE_SCHEMA,
+        parameters=[
+            AttrDef("element_format", ATTR_TYPE_ENUM, enum_def=numeric_format),
+        ],
+    )
+
+    ops_h = generate_ops_h("encoding", 0x09, [], [requirements], [family])
+    builders_c = generate_builders_c(
+        "encoding",
+        [],
+        [requirements],
+        encoding_families=[family],
+    )
+    tables_c = generate_tables_c("encoding", 0x09, [], [requirements], [family])
+
+    assert ops_h.count("typedef enum loom_encoding_numeric_format_e") == 1
+    assert "loom_encoding_requirements_element_format_t" not in ops_h
+    assert "static inline loom_encoding_numeric_format_t loom_encoding_requirements_attr_element_format" in ops_h
+    assert "loom_encoding_numeric_format_t element_format" in ops_h
+    assert "loom_encoding_numeric_format_t element_format" in builders_c
+    assert tables_c.count("loom_encoding_numeric_format_names[]") == 1
+    assert tables_c.count(".enum_case_names = loom_encoding_numeric_format_names") == 2
+
+
 def test_generate_parameterized_attribute_array_surface() -> None:
     dialect = Dialect("test", dialect_id=0x01)
     tile = ParameterizedAttrDef(

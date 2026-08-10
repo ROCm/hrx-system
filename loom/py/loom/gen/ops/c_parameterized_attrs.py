@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from loom.dsl import AttrDef, ParameterizedAttrDef
 from loom.gen.ops.c_names import (
@@ -29,6 +29,7 @@ from loom.gen.ops.c_parameter_values import (
 
 def _parameter_enum_type(
     families: Sequence[ParameterizedAttrDef],
+    shared_enum_types: Mapping[int, str],
     family: ParameterizedAttrDef,
     parameter: AttrDef,
 ) -> str:
@@ -36,6 +37,9 @@ def _parameter_enum_type(
     assert enum_def is not None
     if enum_def.c_type is not None:
         return enum_def.c_type
+    shared_enum_type = shared_enum_types.get(id(enum_def))
+    if shared_enum_type is not None:
+        return shared_enum_type
     for candidate_family in families:
         for candidate in candidate_family.parameters:
             if candidate.enum_def is enum_def:
@@ -45,28 +49,35 @@ def _parameter_enum_type(
 
 def _parameter_c_type(
     families: Sequence[ParameterizedAttrDef],
+    shared_enum_types: Mapping[int, str],
     family: ParameterizedAttrDef,
     parameter: AttrDef,
 ) -> str:
     return parameter_value_c_type(
         parameter,
-        lambda value: _parameter_enum_type(families, family, value),
+        lambda value: _parameter_enum_type(families, shared_enum_types, family, value),
     )
 
 
-def _function_parameters(families: Sequence[ParameterizedAttrDef], family: ParameterizedAttrDef) -> list[str]:
+def _function_parameters(
+    families: Sequence[ParameterizedAttrDef],
+    shared_enum_types: Mapping[int, str],
+    family: ParameterizedAttrDef,
+) -> list[str]:
     return parameter_constructor_declarations(
         family.parameters,
         _c_family_api_prefix(family),
-        lambda parameter: _parameter_c_type(families, family, parameter),
+        lambda parameter: _parameter_c_type(families, shared_enum_types, family, parameter),
         "loom_attribute_t* out_attr",
     )
 
 
 def generate_parameterized_attr_header_lines(
     families: Sequence[ParameterizedAttrDef],
+    shared_enum_types: Mapping[int, str] | None = None,
 ) -> list[str]:
     """Generates family constructors and fixed-slot accessors."""
+    shared_enum_types = shared_enum_types or {}
     lines: list[str] = []
     for family in families:
         prefix = _c_family_api_prefix(family)
@@ -87,14 +98,14 @@ def generate_parameterized_attr_header_lines(
                 lines.append(f"static inline bool {prefix}_has_{parameter.name}(loom_attribute_t attr) {{")
                 lines.append(f"  return !loom_attr_is_absent({slot_expr});")
                 lines.append("}")
-            c_type = _parameter_c_type(families, family, parameter)
+            c_type = _parameter_c_type(families, shared_enum_types, family, parameter)
             accessor_expr = parameter_value_accessor_expr(parameter, slot_expr, c_type)
             lines.append(f"static inline {c_type} {parameter_prefix}(loom_attribute_t attr) {{")
             lines.append(f"  return {accessor_expr};")
             lines.append("}")
 
         lines.append(f"iree_status_t {prefix}_make(")
-        function_parameters = _function_parameters(families, family)
+        function_parameters = _function_parameters(families, shared_enum_types, family)
         for index, declaration in enumerate(function_parameters):
             suffix = "," if index + 1 < len(function_parameters) else ");"
             lines.append(f"{declaration}{suffix}")
@@ -104,14 +115,16 @@ def generate_parameterized_attr_header_lines(
 
 def generate_parameterized_attr_source_lines(
     families: Sequence[ParameterizedAttrDef],
+    shared_enum_types: Mapping[int, str] | None = None,
 ) -> list[str]:
     """Generates family constructor implementations."""
+    shared_enum_types = shared_enum_types or {}
     lines: list[str] = []
     for family in families:
         prefix = _c_family_api_prefix(family)
         family_enum = _c_family_enum_name(family)
         lines.append(f"iree_status_t {prefix}_make(")
-        function_parameters = _function_parameters(families, family)
+        function_parameters = _function_parameters(families, shared_enum_types, family)
         for index, declaration in enumerate(function_parameters):
             suffix = "," if index + 1 < len(function_parameters) else ") {"
             lines.append(f"{declaration}{suffix}")
