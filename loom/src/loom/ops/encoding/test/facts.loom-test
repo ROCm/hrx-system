@@ -31,6 +31,53 @@ func.def @dynamic_static_spec_query(%schema: encoding<schema>) -> (i1) {
 
 // ====
 
+// Typed semantic predicates fold independently for each authored property.
+func.def @static_semantic_queries() -> (i1, i1, i1, i1) {
+  %schema = encoding.define #matrix_operand<affine=scale_plus_min, element_format=u4, payload_elements=256, payload_packing=multi_stream, payload_registers=8> : encoding<schema>
+  %all = encoding.matches<element_format = u4, payload_packing = multi_stream, affine = scale_plus_min> %schema : encoding<schema>
+  %partial = encoding.matches<element_format = u4> %schema : encoding<schema>
+  %wrong_format = encoding.matches<element_format = u6> %schema : encoding<schema>
+  %wrong_affine = encoding.matches<affine = scale_only> %schema : encoding<schema>
+  func.return %all, %partial, %wrong_format, %wrong_affine : i1, i1, i1, i1
+}
+// ----
+func.def @static_semantic_queries() -> (i1, i1, i1, i1) {
+  %all = scalar.constant true : i1
+  %partial = scalar.constant true : i1
+  %wrong_format = scalar.constant false : i1
+  %wrong_affine = scalar.constant false : i1
+  func.return %all, %partial, %wrong_format, %wrong_affine : i1, i1, i1, i1
+}
+
+// ====
+
+// A complete static schema proves that omitted affine behavior is `none`.
+func.def @static_semantic_absence() -> (i1) {
+  %schema = encoding.define #matrix_operand<element_format=f16, payload_elements=16, payload_packing=dense_lanes, payload_registers=8> : encoding<schema>
+  %unscaled = encoding.matches<affine = none> %schema : encoding<schema>
+  func.return %unscaled : i1
+}
+// ----
+func.def @static_semantic_absence() -> (i1) {
+  %unscaled = scalar.constant true : i1
+  func.return %unscaled : i1
+}
+
+// ====
+
+// Unknown schema facts keep semantic predicates executable.
+func.def @dynamic_semantic_query(%schema: encoding<schema>) -> (i1) {
+  %is_u4 = encoding.matches<element_format = u4> %schema : encoding<schema>
+  func.return %is_u4 : i1
+}
+// ----
+func.def @dynamic_semantic_query(%schema: encoding<schema>) -> (i1) {
+  %is_u4 = encoding.matches<element_format = u4> %schema : encoding<schema>
+  func.return %is_u4 : i1
+}
+
+// ====
+
 // Dense layout ops seed address-layout summary facts.
 func.def @dense_layout_summary() -> (i64) {
   %layout = encoding.layout.dense : encoding<layout>

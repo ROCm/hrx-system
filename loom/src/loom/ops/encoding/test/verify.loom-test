@@ -46,6 +46,22 @@ func.def @encoding_isa_rejects_role_mismatch(%schema: encoding<schema>) {
 
 // ====
 
+func.def @encoding_matches_rejects_empty_requirements(%schema: encoding<schema>) {
+  // ERROR@+1: ENCODING/022
+  %is = encoding.matches<> %schema : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @encoding_matches_requires_schema_role(%layout: encoding<layout>) {
+  // ERROR@+1: TYPE/003 "encoding<schema>"
+  %is = encoding.matches<element_format = u4> %layout : encoding<layout>
+  func.return
+}
+
+// ====
+
 func.def @layout_assume_strided_rejects_negative_rank(%layout: encoding<layout>) {
   // ERROR@+1: STRUCTURE/014 "rank" "-1" "rank in [0, 255]"
   %strided = encoding.layout.assume.strided %layout {rank = -1} : encoding<layout>

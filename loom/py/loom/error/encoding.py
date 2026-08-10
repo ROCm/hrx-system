@@ -361,6 +361,19 @@ ERR_ENCODING_021 = ErrorDef(
     ),
 )
 
+# ERR_ENCODING_022: Semantic encoding query has no requirements.
+ERR_ENCODING_022 = ErrorDef(
+    domain=ErrorDomain.ENCODING,
+    code=22,
+    severity=Severity.ERROR,
+    summary="Semantic encoding query has no requirements.",
+    message="encoding.matches requires at least one semantic property",
+    params=(),
+    fix_hint=(
+        "Add a typed property such as element_format, payload_packing, or affine"
+    ),
+)
+
 ALL_ENCODING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_ENCODING_001,
     ERR_ENCODING_002,
@@ -383,4 +396,5 @@ ALL_ENCODING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_ENCODING_019,
     ERR_ENCODING_020,
     ERR_ENCODING_021,
+    ERR_ENCODING_022,
 )

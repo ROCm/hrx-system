@@ -9,6 +9,15 @@ func.def @exact_static_spec_query(%schema: encoding<schema>) -> (i1) {
 
 // ====
 
+// Semantic predicates carry typed partial requirements. Omitted fields are
+// wildcards, and the result type remains implicit.
+func.def @semantic_schema_query(%schema: encoding<schema>) -> (i1) {
+  %supports = encoding.matches<element_format = u4, payload_packing = multi_stream, affine = scale_plus_min> %schema : encoding<schema>
+  func.return %supports : i1
+}
+
+// ====
+
 // Dynamic encoding parameters are named SSA operands on encoding.define.
 func.def @dynamic_encoding_params(%group_size: index, %scale: f32) {
   %enc = encoding.define #q8_0<block=32> {group_size = %group_size : index, scale = %scale : f32} : encoding<schema>

@@ -367,3 +367,16 @@ iree_status_t loom_encoding_isa_verify(const loom_module_t* module,
   return loom_encoding_emit(emitter, op, LOOM_ERR_ENCODING_021, params,
                             IREE_ARRAYSIZE(params));
 }
+
+iree_status_t loom_encoding_matches_verify(const loom_module_t* module,
+                                           const loom_op_t* op,
+                                           iree_diagnostic_emitter_t emitter) {
+  const loom_attribute_t requirements = loom_encoding_matches_requirements(op);
+  if (loom_encoding_match_attr_has_element_format(requirements) ||
+      loom_encoding_match_attr_has_payload_packing(requirements) ||
+      loom_encoding_match_attr_has_affine(requirements)) {
+    return iree_ok_status();
+  }
+  return loom_encoding_emit(emitter, op, LOOM_ERR_ENCODING_022,
+                            /*params=*/NULL, /*param_count=*/0);
+}

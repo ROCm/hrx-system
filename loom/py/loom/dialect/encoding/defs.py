@@ -11,6 +11,7 @@ from loom.assembly import (
     COMMA,
     Attr,
     AttrDict,
+    AttrParams,
     IndexList,
     OperandDict,
     Ref,
@@ -28,6 +29,7 @@ from loom.dsl import (
     ATTR_TYPE_ENUM,
     ATTR_TYPE_I64,
     ATTR_TYPE_I64_ARRAY,
+    ATTR_TYPE_PARAMETERIZED,
     ATTR_TYPE_STRING,
     ENCODING_LAYOUT,
     ENCODING_SCHEMA,
@@ -46,6 +48,7 @@ from loom.dsl import (
     Op,
     Operand,
     OpPhase,
+    ParameterizedAttrDef,
     Result,
     SameType,
 )
@@ -407,6 +410,38 @@ ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
 )
 
 # ============================================================================
+# Semantic encoding query attributes
+# ============================================================================
+
+encoding_match_requirements = ParameterizedAttrDef(
+    "encoding.match",
+    group=encoding_ops,
+    parameters=(
+        AttrDef(
+            "element_format",
+            ATTR_TYPE_ENUM,
+            enum_def=NumericFormat,
+            optional=True,
+        ),
+        AttrDef(
+            "payload_packing",
+            ATTR_TYPE_ENUM,
+            enum_def=PayloadPacking,
+            optional=True,
+        ),
+        AttrDef(
+            "affine",
+            ATTR_TYPE_ENUM,
+            enum_def=AffinePolicy,
+            optional=True,
+        ),
+    ),
+    doc="Typed semantic requirements for an encoded storage schema.",
+)
+
+ALL_ENCODING_PARAMETERIZED_ATTRS: tuple[ParameterizedAttrDef, ...] = (encoding_match_requirements,)
+
+# ============================================================================
 # encoding.layout.dense — dense logical-to-physical address layout
 # ============================================================================
 
@@ -597,6 +632,33 @@ encoding_isa = Op(
 )
 
 # ============================================================================
+# encoding.matches — test typed semantic encoding facts
+# ============================================================================
+
+encoding_matches = Op(
+    name="encoding.matches",
+    group=encoding_ops,
+    doc="Test whether a storage schema satisfies typed semantic requirements.",
+    operands=[Operand("enc", ENCODING_SCHEMA, doc="Storage schema to query.")],
+    results=[Result("result", I1)],
+    attrs=[
+        AttrDef(
+            "requirements",
+            ATTR_TYPE_PARAMETERIZED,
+            parameterized_attr=encoding_match_requirements,
+            doc="Authored semantic requirements; omitted fields are wildcards.",
+        ),
+    ],
+    traits=[PURE],
+    verify="loom_encoding_matches_verify",
+    facts="loom_encoding_matches_facts",
+    format=[AttrParams("requirements"), Ref("enc"), COLON, TypeOf("enc")],
+    examples=[
+        "%supports = encoding.matches<element_format = u4, payload_packing = multi_stream, affine = scale_plus_min> %schema : encoding<schema>",
+    ],
+)
+
+# ============================================================================
 # Registry: all encoding ops in declaration order
 # ============================================================================
 
@@ -608,4 +670,5 @@ ALL_ENCODING_OPS: tuple[Op, ...] = (
     encoding_layout_assume_dense,
     encoding_layout_assume_strided,
     encoding_assume_spec,
+    encoding_matches,
 )
