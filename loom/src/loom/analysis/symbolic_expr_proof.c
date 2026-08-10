@@ -719,7 +719,10 @@ static iree_status_t loom_symbolic_expr_try_common_product_factor(
     loom_value_id_t negative_relation_value, int64_t coefficient,
     const loom_symbolic_expr_t* residual,
     loom_symbolic_proof_result_t* out_result) {
-  if (!loom_symbolic_value_is_non_negative(context, common_factor)) {
+  bool common_factor_non_negative = false;
+  IREE_RETURN_IF_ERROR(loom_symbolic_value_is_non_negative(
+      context, common_factor, &common_factor_non_negative));
+  if (!common_factor_non_negative) {
     return iree_ok_status();
   }
 
@@ -1220,9 +1223,11 @@ static iree_status_t loom_symbolic_expr_prove_le_with_condition_facts(
   }
   const iree_host_size_t previous_integer_relation_count =
       condition_facts.integer_relation_count;
-  (void)loom_condition_facts_query_into(context->module, context->fact_table,
-                                        condition, assumed_truth,
-                                        &condition_facts);
+  bool edge_complete = false;
+  IREE_RETURN_IF_ERROR(loom_condition_facts_query_into(
+      &context->condition_query, context->fact_table, condition, assumed_truth,
+      &condition_facts, &edge_complete));
+  if (!edge_complete) return iree_ok_status();
   if (condition_facts.integer_relation_count ==
       previous_integer_relation_count) {
     return iree_ok_status();
@@ -1260,10 +1265,14 @@ static iree_status_t loom_symbolic_expr_prove_le_by_select_cases(
       IREE_ARRAYSIZE(conditions), &condition_count));
   for (iree_host_size_t i = 0; i < condition_count; ++i) {
     bool proven_condition = false;
-    if (context->condition_facts &&
-        loom_condition_fact_set_proves_condition(
-            context->module, context->fact_table, context->condition_facts,
-            conditions[i], &proven_condition)) {
+    bool condition_is_proven = false;
+    if (context->condition_facts) {
+      IREE_RETURN_IF_ERROR(loom_condition_fact_set_proves_condition(
+          &context->condition_query, context->fact_table,
+          context->condition_facts, conditions[i], &proven_condition,
+          &condition_is_proven));
+    }
+    if (condition_is_proven) {
       IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_le_with_condition_facts(
           context, left_expression, right_expression, conditions[i],
           proven_condition, out_result));

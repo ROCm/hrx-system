@@ -1750,25 +1750,6 @@ iree_status_t loom_low_lower_rule_match_descriptor_ref_from_lowering(
   return iree_ok_status();
 }
 
-static loom_symbolic_expr_context_t*
-loom_low_lower_rule_symbolic_expr_context_from_lowering(
-    loom_low_lower_context_t* context) {
-  const loom_value_fact_table_t* fact_table =
-      loom_low_lower_context_fact_table(context);
-  if (fact_table == NULL) return NULL;
-
-  loom_low_lowering_frame_t* lowering = &context->lowering;
-  if (!lowering->expression_context_initialized ||
-      lowering->expression_context_fact_table != fact_table) {
-    loom_symbolic_expr_context_initialize(
-        loom_low_lower_context_module(context), fact_table,
-        &context->function_arena, &lowering->expression_context);
-    lowering->expression_context_fact_table = fact_table;
-    lowering->expression_context_initialized = true;
-  }
-  return &lowering->expression_context;
-}
-
 void loom_low_lower_rule_match_context_initialize_from_lowering(
     loom_low_lower_context_t* context,
     const loom_view_region_table_t* view_regions,
@@ -1800,7 +1781,9 @@ void loom_low_lower_rule_match_context_initialize_from_lowering(
       .view_regions = view_regions,
       .source_memory_state = source_memory_state,
       .symbolic_expr_context =
-          loom_low_lower_rule_symbolic_expr_context_from_lowering(context),
+          loom_low_lower_context_fact_table(context) != NULL
+              ? loom_low_lower_context_symbolic_expr_context(context)
+              : NULL,
   };
 }
 

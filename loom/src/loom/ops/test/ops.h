@@ -280,7 +280,9 @@ enum {
   LOOM_OP_TEST_PARAMETERIZED_ATTR = LOOM_OP_KIND(LOOM_DIALECT_TEST, 106),
   LOOM_OP_TEST_COMPACT_PARAMETERIZED_ATTR = LOOM_OP_KIND(LOOM_DIALECT_TEST, 107),
   LOOM_OP_TEST_PARAMETERIZED_ATTR_ARRAY = LOOM_OP_KIND(LOOM_DIALECT_TEST, 108),
-  LOOM_OP_TEST_COUNT_ = 109,
+  LOOM_OP_TEST_ATTR_PARAMS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 109),
+  LOOM_OP_TEST_CONDITION_REFINES_POSITIVE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 110),
+  LOOM_OP_TEST_COUNT_ = 111,
 };
 
 // Synthetic flags for TemplateParamFlags parser/printer coverage.
@@ -2192,6 +2194,32 @@ iree_status_t loom_test_parameterized_attr_array_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 
+// LOOM_OP_TEST_ATTR_PARAMS: Test op carrying a known-family parameter payload in angle brackets.
+// test.attr_params<mode = fast, scopes = [workgroup]>
+LOOM_DEFINE_ISA(loom_test_attr_params_isa, LOOM_OP_TEST_ATTR_PARAMS)
+LOOM_DEFINE_ATTR_PARAMETERIZED(loom_test_attr_params_options, 0)
+iree_status_t loom_test_attr_params_build(
+    loom_builder_t* builder,
+    loom_attribute_t options,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_TEST_CONDITION_REFINES_POSITIVE: Test a boolean query that refines its source on the true edge.
+// %positive = test.condition_refines_positive %value : index
+LOOM_DEFINE_ISA(loom_test_condition_refines_positive_isa, LOOM_OP_TEST_CONDITION_REFINES_POSITIVE)
+LOOM_DEFINE_OPERAND(loom_test_condition_refines_positive_value, 0)
+LOOM_DEFINE_RESULT(loom_test_condition_refines_positive_result, 0)
+iree_status_t loom_test_condition_refines_positive_build(
+    loom_builder_t* builder,
+    loom_value_id_t value,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_test_condition_refines_positive_materialize(
+    loom_rewriter_t* rewriter, const loom_op_t* condition_op,
+    loom_value_id_t source, bool assumed_truth,
+    loom_value_id_t* out_refined_value);
+
 // Returns the vtable array for the test dialect.
 const loom_op_vtable_t* const* loom_test_dialect_vtables(
     iree_host_size_t* out_count);
@@ -2203,6 +2231,10 @@ const loom_op_semantics_t* loom_test_dialect_op_semantics(
 // Returns semantic metadata for a test op kind, or empty metadata.
 loom_op_semantics_t loom_test_op_semantics(
     loom_op_kind_t kind);
+
+// Returns sparse condition-refinement descriptors for the test dialect.
+const loom_condition_refinement_descriptor_t* loom_test_dialect_condition_refinements(
+    iree_host_size_t* out_count);
 
 // Returns parameterized attribute descriptors for the test dialect.
 const loom_parameterized_attr_descriptor_t* loom_test_dialect_parameterized_attrs(

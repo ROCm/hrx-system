@@ -1391,6 +1391,22 @@ class TestEncodingRoundTrips:
         assert "q8_0" in names
         assert "q6_k" in names
 
+    def test_qualified_encoding_name(self) -> None:
+        encoding = EncodingInstance(name="ggml.q4_k")
+        module = Module(name="test")
+        module.add_encoding(encoding)
+        shaped_type = ShapedType(
+            TypeKind.TILE,
+            I8,
+            (StaticDim(256),),
+            encoding=encoding,
+        )
+        _make_func(module, "f", [shaped_type])
+
+        loaded = _roundtrip(module)
+
+        assert loaded.encodings[0].name == "ggml.q4_k"
+
 
 # ============================================================================
 # Cross-format round-trip

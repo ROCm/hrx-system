@@ -66,6 +66,7 @@ def generate_dialect_contents(generation: DialectGeneration) -> dict[str, str]:
             dialect.name,
             generation.ops,
             generation.parameterized_attrs,
+            encoding_families=generation.encoding_families,
             include_path=include_path,
         ),
         **table_files,

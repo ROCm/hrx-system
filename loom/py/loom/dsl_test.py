@@ -99,7 +99,9 @@ from loom.dsl import (
     ElementWidthLessThan,
     EncodingFamilyDef,
     EncodingFamilyRole,
+    EncodingOperandSummaryDef,
     EncodingParam,
+    EncodingRecordDef,
     EnumCase,
     EnumDef,
     FreshResult,
@@ -544,10 +546,19 @@ class TestEncodingFamilyDef:
                 ],
             )
 
-    def test_rejects_namespaced_family_name(self) -> None:
-        with _raises(ValueError, match="bare ASCII identifier"):
+    def test_accepts_qualified_family_name(self) -> None:
+        family = EncodingFamilyDef(
+            "ggml.q4_k",
+            group=Dialect("encoding"),
+            role=EncodingFamilyRole.STORAGE_SCHEMA,
+        )
+
+        assert family.name == "ggml.q4_k"
+
+    def test_rejects_invalid_qualified_family_name(self) -> None:
+        with _raises(ValueError, match="dotted ASCII identifier"):
             EncodingFamilyDef(
-                "encoding.matrix_operand",
+                "ggml..q4_k",
                 group=Dialect("encoding"),
                 role=EncodingFamilyRole.STORAGE_SCHEMA,
             )
@@ -563,6 +574,80 @@ class TestEncodingFamilyDef:
                     AttrDef("mode", "string"),
                 ],
             )
+
+    def test_declares_fixed_storage_metadata(self) -> None:
+        auxiliary_keys = EnumDef(
+            "AuxiliaryKey",
+            [EnumCase("scale", 0), EnumCase("minimum", 1)],
+        )
+        family = EncodingFamilyDef(
+            "ggml.q4_k",
+            group=Dialect("encoding"),
+            role=EncodingFamilyRole.STORAGE_SCHEMA,
+            fixed_record=EncodingRecordDef(
+                logical_element_count=256,
+                storage_byte_count=144,
+                required_alignment=16,
+            ),
+            fixed_operand_summary=EncodingOperandSummaryDef(
+                payload_packing=4,
+                payload_element_count=256,
+                scale_group_shape=(16, 16),
+            ),
+            auxiliary_key_enum=auxiliary_keys,
+            required_auxiliary_keys=[auxiliary_keys.case("scale")],
+        )
+
+        assert family.fixed_record is not None
+        assert family.fixed_record.storage_byte_count == 144
+        assert family.fixed_operand_summary is not None
+        assert family.fixed_operand_summary.scale_group_element_count == 256
+        assert family.required_auxiliary_keys == (auxiliary_keys.case("scale"),)
+
+    def test_rejects_fixed_metadata_on_non_storage_family(self) -> None:
+        with _raises(ValueError, match="requires the STORAGE_SCHEMA role"):
+            EncodingFamilyDef(
+                "dense",
+                group=Dialect("encoding"),
+                role=EncodingFamilyRole.ADDRESS_LAYOUT,
+                fixed_record=EncodingRecordDef(1, 1),
+            )
+
+    def test_rejects_auxiliary_key_from_another_enum(self) -> None:
+        expected_keys = EnumDef("ExpectedKey", [EnumCase("scale", 0)])
+        other_keys = EnumDef("OtherKey", [EnumCase("scale", 0)])
+        with _raises(ValueError, match="is not in ExpectedKey"):
+            EncodingFamilyDef(
+                "schema",
+                group=Dialect("encoding"),
+                role=EncodingFamilyRole.STORAGE_SCHEMA,
+                auxiliary_key_enum=expected_keys,
+                required_auxiliary_keys=[other_keys.case("scale")],
+            )
+
+
+class TestEncodingRecordDef:
+    def test_rejects_non_power_of_two_alignment(self) -> None:
+        with _raises(ValueError, match="must be a power of two"):
+            EncodingRecordDef(16, 8, required_alignment=3)
+
+
+class TestEncodingOperandSummaryDef:
+    def test_canonicalizes_scale_group_element_count(self) -> None:
+        summary = EncodingOperandSummaryDef(scale_group_shape=(4, 8))
+
+        assert summary.scale_group_element_count == 32
+
+    def test_rejects_inconsistent_scale_group_element_count(self) -> None:
+        with _raises(ValueError, match="must equal the scale_group_shape product"):
+            EncodingOperandSummaryDef(
+                scale_group_element_count=16,
+                scale_group_shape=(4, 8),
+            )
+
+    def test_rejects_out_of_range_fact_bits(self) -> None:
+        with _raises(ValueError, match="unsigned 32-bit integer"):
+            EncodingOperandSummaryDef(payload_packing=1 << 32)
 
 
 class TestEnumDef:

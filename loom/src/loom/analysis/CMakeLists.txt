@@ -112,6 +112,7 @@ loom_cc_library(
   DEPS
     ::integer_relation
     iree::base
+    iree::base::internal::arena
     loom::ir
     loom::ir::facts
     loom::ops::index
@@ -134,6 +135,21 @@ loom_cc_test(
     loom::ops::index
     loom::ops::scalar
     loom::util::fact_table
+)
+
+loom_cc_benchmark(
+  NAME
+    condition_facts_benchmark
+  SRCS
+    "condition_facts_benchmark.cc"
+  DEPS
+    ::condition_facts
+    iree::base::internal::arena
+    iree::testing::benchmark_main
+    loom::ir
+    loom::ops::scalar
+    loom::util::fact_table
+  TESTONLY
 )
 
 loom_cc_library(

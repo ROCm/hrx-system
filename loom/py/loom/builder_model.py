@@ -20,6 +20,7 @@ from enum import Enum, auto
 from loom.assembly import (
     Attr,
     AttrDict,
+    AttrParams,
     AttrTable,
     BindingList,
     BlockArgs,
@@ -394,6 +395,7 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
                     | SymbolRef(field=name)
                     | KeyRef(field=name)
                     | TemplateParam(field=name)
+                    | AttrParams(field=name)
                 ):
                     append_attr_param(name)
 

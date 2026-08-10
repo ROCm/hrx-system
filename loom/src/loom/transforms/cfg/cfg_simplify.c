@@ -90,6 +90,8 @@ typedef struct loom_cfg_simplify_state_t {
   const loom_value_fact_table_t* fact_table;
   // Dominance computed for the current fixed-point iteration.
   const loom_dominance_info_t* dominance;
+  // Reusable condition traversal state for the current fixed-point iteration.
+  loom_condition_query_t condition_query;
   // DFS stack for nested regions.
   loom_cfg_simplify_region_stack_t region_stack;
 } loom_cfg_simplify_state_t;
@@ -596,7 +598,7 @@ static void loom_cfg_simplify_entry_facts_prove_condition_fact_set(
   }
 }
 
-static void loom_cfg_simplify_dominating_relations_prove_bool(
+static iree_status_t loom_cfg_simplify_dominating_relations_prove_bool(
     loom_cfg_simplify_state_t* state, const loom_cfg_graph_t* graph,
     const loom_cfg_block_entry_condition_facts_t* facts, loom_op_t* op,
     loom_value_id_t condition, bool* out_value, bool* out_proven) {
@@ -609,8 +611,10 @@ static void loom_cfg_simplify_dominating_relations_prove_bool(
   loom_condition_fact_set_initialize(true_relation_storage,
                                      IREE_ARRAYSIZE(true_relation_storage),
                                      &true_facts);
-  bool true_facts_complete = loom_condition_facts_query(
-      state->module, state->fact_table, condition, true, &true_facts);
+  bool true_facts_complete = false;
+  IREE_RETURN_IF_ERROR(loom_condition_facts_query(
+      &state->condition_query, state->fact_table, condition, true, &true_facts,
+      &true_facts_complete));
 
   loom_condition_integer_relation_t
       false_relation_storage[LOOM_CFG_CONDITION_FACT_RELATION_CAPACITY];
@@ -618,8 +622,10 @@ static void loom_cfg_simplify_dominating_relations_prove_bool(
   loom_condition_fact_set_initialize(false_relation_storage,
                                      IREE_ARRAYSIZE(false_relation_storage),
                                      &false_facts);
-  bool false_facts_complete = loom_condition_facts_query(
-      state->module, state->fact_table, condition, false, &false_facts);
+  bool false_facts_complete = false;
+  IREE_RETURN_IF_ERROR(loom_condition_facts_query(
+      &state->condition_query, state->fact_table, condition, false,
+      &false_facts, &false_facts_complete));
 
   bool true_proven = false;
   bool true_contradicted = false;
@@ -638,12 +644,13 @@ static void loom_cfg_simplify_dominating_relations_prove_bool(
 
   bool proves_true = true_proven || false_contradicted;
   bool proves_false = false_proven || true_contradicted;
-  if (proves_true == proves_false) return;
+  if (proves_true == proves_false) return iree_ok_status();
   *out_value = proves_true;
   *out_proven = true;
+  return iree_ok_status();
 }
 
-static void loom_cfg_simplify_entry_facts_prove_bool(
+static iree_status_t loom_cfg_simplify_entry_facts_prove_bool(
     loom_cfg_simplify_state_t* state,
     const loom_cfg_block_entry_condition_facts_t* facts,
     loom_value_id_t condition, bool* out_value, bool* out_proven) {
@@ -652,7 +659,7 @@ static void loom_cfg_simplify_entry_facts_prove_bool(
   if (facts->condition_known && facts->condition == condition) {
     *out_value = facts->condition_value;
     *out_proven = true;
-    return;
+    return iree_ok_status();
   }
 
   loom_condition_integer_relation_t
@@ -661,8 +668,10 @@ static void loom_cfg_simplify_entry_facts_prove_bool(
   loom_condition_fact_set_initialize(true_relation_storage,
                                      IREE_ARRAYSIZE(true_relation_storage),
                                      &true_facts);
-  bool true_facts_complete = loom_condition_facts_query(
-      state->module, state->fact_table, condition, true, &true_facts);
+  bool true_facts_complete = false;
+  IREE_RETURN_IF_ERROR(loom_condition_facts_query(
+      &state->condition_query, state->fact_table, condition, true, &true_facts,
+      &true_facts_complete));
 
   loom_condition_integer_relation_t
       false_relation_storage[LOOM_CFG_CONDITION_FACT_RELATION_CAPACITY];
@@ -670,8 +679,10 @@ static void loom_cfg_simplify_entry_facts_prove_bool(
   loom_condition_fact_set_initialize(false_relation_storage,
                                      IREE_ARRAYSIZE(false_relation_storage),
                                      &false_facts);
-  bool false_facts_complete = loom_condition_facts_query(
-      state->module, state->fact_table, condition, false, &false_facts);
+  bool false_facts_complete = false;
+  IREE_RETURN_IF_ERROR(loom_condition_facts_query(
+      &state->condition_query, state->fact_table, condition, false,
+      &false_facts, &false_facts_complete));
 
   bool true_proven = false;
   bool true_contradicted = false;
@@ -689,12 +700,13 @@ static void loom_cfg_simplify_entry_facts_prove_bool(
 
   bool proves_true = true_proven || false_contradicted;
   bool proves_false = false_proven || true_contradicted;
-  if (proves_true == proves_false) return;
+  if (proves_true == proves_false) return iree_ok_status();
   *out_value = proves_true;
   *out_proven = true;
+  return iree_ok_status();
 }
 
-static void loom_cfg_simplify_path_facts_prove_bool(
+static iree_status_t loom_cfg_simplify_path_facts_prove_bool(
     loom_cfg_simplify_state_t* state, const loom_cfg_graph_t* graph,
     const loom_cfg_block_entry_condition_facts_t* facts, loom_op_t* op,
     loom_value_id_t condition_value, bool* out_value, bool* out_proven) {
@@ -703,9 +715,9 @@ static void loom_cfg_simplify_path_facts_prove_bool(
   if (loom_cfg_simplify_dominating_exact_bool(state, graph, facts, op,
                                               condition_value, out_value)) {
     *out_proven = true;
-    return;
+    return iree_ok_status();
   }
-  loom_cfg_simplify_dominating_relations_prove_bool(
+  return loom_cfg_simplify_dominating_relations_prove_bool(
       state, graph, facts, op, condition_value, out_value, out_proven);
 }
 
@@ -718,8 +730,8 @@ static iree_status_t loom_cfg_simplify_fold_path_sensitive_cond_br(
   loom_value_id_t condition_value = loom_cfg_cond_br_condition(op);
   bool condition = false;
   bool condition_proven = false;
-  loom_cfg_simplify_path_facts_prove_bool(
-      state, graph, facts, op, condition_value, &condition, &condition_proven);
+  IREE_RETURN_IF_ERROR(loom_cfg_simplify_path_facts_prove_bool(
+      state, graph, facts, op, condition_value, &condition, &condition_proven));
   if (!condition_proven) return iree_ok_status();
 
   loom_block_t* true_dest = loom_cfg_cond_br_true_dest(op);
@@ -853,16 +865,16 @@ static iree_status_t loom_cfg_simplify_thread_fact_known_branches(
       loom_condition_integer_relation_t
           edge_relation_storage[LOOM_CFG_CONDITION_FACT_RELATION_CAPACITY];
       loom_cfg_block_entry_condition_facts_t edge_facts = {0};
-      loom_cfg_condition_facts_compute_predecessor_edge(
-          state->module, state->fact_table, state->dominance, block,
+      IREE_RETURN_IF_ERROR(loom_cfg_condition_facts_compute_predecessor_edge(
+          &state->condition_query, state->fact_table, state->dominance, block,
           predecessor->last_op, predecessor_index, facts, edge_relation_storage,
-          IREE_ARRAYSIZE(edge_relation_storage), &edge_facts);
+          IREE_ARRAYSIZE(edge_relation_storage), &edge_facts));
 
       bool condition = false;
       bool condition_proven = false;
-      loom_cfg_simplify_entry_facts_prove_bool(
+      IREE_RETURN_IF_ERROR(loom_cfg_simplify_entry_facts_prove_bool(
           state, &edge_facts, loom_cfg_cond_br_condition(terminator),
-          &condition, &condition_proven);
+          &condition, &condition_proven));
       if (!condition_proven) continue;
 
       loom_block_t* new_dest = condition
@@ -965,8 +977,8 @@ static iree_status_t loom_cfg_simplify_fold_path_sensitive_i1_ops(
         if (loom_cfg_simplify_can_replace_with_constant(state, op, result)) {
           bool value = false;
           bool proven = false;
-          loom_cfg_simplify_path_facts_prove_bool(state, graph, facts, op,
-                                                  result, &value, &proven);
+          IREE_RETURN_IF_ERROR(loom_cfg_simplify_path_facts_prove_bool(
+              state, graph, facts, op, result, &value, &proven));
           if (proven) {
             IREE_RETURN_IF_ERROR(
                 loom_cfg_simplify_replace_with_bool_constant(state, op, value));
@@ -2194,6 +2206,8 @@ iree_status_t loom_cfg_simplify_run(loom_pass_t* pass, loom_module_t* module,
   while (iree_status_is_ok(status) && changed) {
     changed = false;
     iree_arena_reset(&analysis_arena);
+    loom_condition_query_initialize(module, &analysis_arena,
+                                    &state.condition_query);
 
     loom_value_fact_table_t* fact_table = NULL;
     status = loom_pass_value_facts_acquire(

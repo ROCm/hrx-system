@@ -21,11 +21,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from enum import Enum, unique
-from typing import Any
+from typing import Any, cast
 
 from loom.assembly import (
     Attr,
     AttrDict,
+    AttrParams,
     AttrTable,
     BindingList,
     BlockArgs,
@@ -580,6 +581,37 @@ def _parse_parameterized_attr_from_tokens(
             family_token.location,
             filename,
         )
+
+    return _parse_parameterized_attr_parameters_from_tokens(
+        tokenizer,
+        module,
+        filename,
+        definition,
+        scope=scope,
+        type_registry=type_registry,
+        mode=mode,
+        parameterized_attr_registry=parameterized_attr_registry,
+        aliases=aliases,
+        known_encodings=known_encodings,
+        aggregate_nesting_depth=aggregate_nesting_depth,
+    )
+
+
+def _parse_parameterized_attr_parameters_from_tokens(
+    tokenizer: Tokenizer,
+    module: Module,
+    filename: str,
+    definition: ParameterizedAttrDef,
+    *,
+    scope: NameScope | None,
+    type_registry: dict[str, TypeDef] | None,
+    mode: TypeParseMode | None,
+    parameterized_attr_registry: Mapping[str, ParameterizedAttrDef] | None,
+    aliases: dict[str, EncodingInstance] | None,
+    known_encodings: set[str] | None,
+    aggregate_nesting_depth: int,
+) -> ParameterizedAttr:
+    """Parses a known parameterized attribute family's angle payload."""
 
     opening = tokenizer.expect(TokenKind.LANGLE)
     if aggregate_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
@@ -1963,7 +1995,11 @@ class Parser:
         match element:
             case Attr(field=name) | SymbolRef(field=name) | KeyRef(field=name):
                 return name == attr_name
-            case TemplateParam(field=name) | PredicateList(field=name):
+            case (
+                AttrParams(field=name)
+                | TemplateParam(field=name)
+                | PredicateList(field=name)
+            ):
                 return name == attr_name
             case TemplateParamFlags(param=param_name, flags=flags_name):
                 return param_name == attr_name or flags_name == attr_name
@@ -2971,6 +3007,14 @@ class Parser:
                     parsed.attributes[name] = self._parse_attr_value(attr_def)
                     tok.expect(TokenKind.RANGLE)
 
+                case AttrParams(field=name):
+                    attr_def = cast(AttrDef, op_decl.attr(name))
+                    definition = cast(ParameterizedAttrDef, attr_def.parameterized_attr)
+                    parsed.attributes[name] = self._parse_parameterized_attr_parameters(
+                        definition,
+                        aggregate_nesting_depth=0,
+                    )
+
                 case TemplateParamFlags(param=param_name, flags=flags_name):
                     tok.expect(TokenKind.LANGLE)
                     attr_def = op_decl.attr(param_name)
@@ -3037,6 +3081,7 @@ class Parser:
                 KeyRef()
                 | ScopedEnumRef()
                 | StableKeyRef()
+                | AttrParams()
                 | TemplateParam()
                 | TemplateParamFlags()
             ):
@@ -3101,6 +3146,27 @@ class Parser:
             self._module,
             self._tokenizer._filename,
             expected_definition,
+            scope=self._scope,
+            type_registry=self._type_registry,
+            mode=TypeParseMode.BODY,
+            parameterized_attr_registry=self._parameterized_attr_registry,
+            aliases=self._encoding_aliases,
+            known_encodings=(self._known_encodings if self._known_encodings else None),
+            aggregate_nesting_depth=aggregate_nesting_depth,
+        )
+
+    def _parse_parameterized_attr_parameters(
+        self,
+        definition: ParameterizedAttrDef,
+        *,
+        aggregate_nesting_depth: int,
+    ) -> ParameterizedAttr:
+        """Parse one known-family parameter payload without a family prefix."""
+        return _parse_parameterized_attr_parameters_from_tokens(
+            self._tokenizer,
+            self._module,
+            self._tokenizer._filename,
+            definition,
             scope=self._scope,
             type_registry=self._type_registry,
             mode=TypeParseMode.BODY,

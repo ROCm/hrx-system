@@ -13,6 +13,7 @@ from typing import Any
 from loom.assembly import (
     Attr,
     AttrDict,
+    AttrParams,
     AttrTable,
     BindingList,
     BlockArgs,
@@ -60,7 +61,7 @@ def detect_builder_pattern(op: Op) -> str | None:
     layout = compute_layout(op)
     non_flags = c_queries.non_flags_attrs(op)
     has_flags = c_queries.has_flags_attr(op)
-    has_template_param = any(isinstance(e, TemplateParam | TemplateParamFlags) for e in flatten_format(op.format))
+    has_template_param = any(isinstance(e, AttrParams | TemplateParam | TemplateParamFlags) for e in flatten_format(op.format))
     operand_names = tuple(operand.name for operand in op.operands)
 
     # Binary: 2 fixed operands, 1 fixed result, no real attrs/regions.
@@ -562,6 +563,9 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                     covered_attrs.add(name)
 
                 case TemplateParam(field=name):
+                    append_attr_param(name)
+
+                case AttrParams(field=name):
                     append_attr_param(name)
 
                 case TemplateParamFlags(param=param_name, flags=flags_name):

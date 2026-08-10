@@ -23,6 +23,7 @@ static bool loom_print_format_element_covers_attr(
     case LOOM_FORMAT_KIND_SYMBOL_REF:
     case LOOM_FORMAT_KIND_KEY_REF:
     case LOOM_FORMAT_KIND_SCOPED_ENUM_REF:
+    case LOOM_FORMAT_KIND_ATTR_PARAMS:
     case LOOM_FORMAT_KIND_TEMPLATE_PARAM:
     case LOOM_FORMAT_KIND_PREDICATE_LIST:
       return element->field_index == attr_index;

@@ -243,6 +243,8 @@ Common elements:
   `ResultTypeList("field")` print type information.
 - `TemplateParam("field")` prints an op template parameter such as
   `buffer.assume.memory_space<global>`.
+- `AttrParams("field")` prints only the parameter payload of an exact-family
+  parameterized attribute, such as `encoding.matches<element_format = u4>`.
 - `Region("field")`, `BlockRef("field")`, and related CFG/region elements
   describe structured control flow.
 

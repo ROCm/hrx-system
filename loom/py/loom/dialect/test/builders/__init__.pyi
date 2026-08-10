@@ -1083,3 +1083,19 @@ class TestBuilder(DialectBuilder):
         tiles: Any | None = ...,
         location_id: int | None = ...,
     ) -> None: ...
+    def attr_params(
+        self,
+        *,
+        options: Any,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def condition_refines_positive(
+        self,
+        *,
+        value: ValueRef,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...

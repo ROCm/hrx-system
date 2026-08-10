@@ -26,6 +26,35 @@ func.def target(@test_target) @rejects_mma_without_target_legalization(%lhs_data
 }
 
 // ====
+// RUN: pass source-to-low
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @rejects_unresolved_compile_time_query(%schema: encoding<schema>) -> (i1) {
+  // ERROR@+1: TARGET/070 {op_name="encoding.matches"}
+  %matches = encoding.matches<element_format = u4> %schema : encoding<schema>
+  func.return %matches : i1
+}
+
+// ====
+// RUN: pass dce,canonicalize,source-to-low
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @removes_dead_compile_time_query() {
+  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+  %unused = encoding.matches<element_format = u4> %schema : encoding<schema>
+  func.return
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) abi(object_function) @removes_dead_compile_time_query() {
+  low.return
+}
+
+// ====
 // RUN: pass target-legalize{mode=final}
 
 test.target<low_core> @test_target

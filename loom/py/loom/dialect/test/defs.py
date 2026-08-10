@@ -29,6 +29,7 @@ from loom.assembly import (
     RPAREN,
     Attr,
     AttrDict,
+    AttrParams,
     AttrTable,
     BindingList,
     BlockArgs,
@@ -95,6 +96,8 @@ from loom.dsl import (
     BorrowedResult,
     CallLikeInterface,
     CallLikeKind,
+    ConditionRefinement,
+    ConditionRefinementTruth,
     Consume,
     Dialect,
     DimIndexInBounds,
@@ -2016,6 +2019,27 @@ test_parameterized_attr = Op(
 )
 
 # ============================================================================
+# test.attr_params — exact-family parameter payload syntax
+# ============================================================================
+
+test_attr_params = Op(
+    "test.attr_params",
+    group=test_ops,
+    doc="Test op carrying a known-family parameter payload in angle brackets.",
+    attrs=[
+        AttrDef(
+            "options",
+            ATTR_TYPE_PARAMETERIZED,
+            parameterized_attr=test_options_attr,
+        ),
+    ],
+    format=[AttrParams("options")],
+    examples=[
+        "test.attr_params<mode = fast, scopes = [workgroup]>",
+    ],
+)
+
+# ============================================================================
 # test.parameterized_attr_array — ordered parameterized attributes
 # ============================================================================
 
@@ -2257,6 +2281,28 @@ test_assume = Op(
     examples=[
         "%M2 = test.assume %M [mul(%M, 16)] : index",
         "%M2, %K2 = test.assume %M, %K [mul(%M, 16), lt(%K, 1024)] : index, index",
+    ],
+)
+
+# ============================================================================
+# test.condition_refines_positive — generic condition-refinement metadata
+# ============================================================================
+
+test_condition_refines_positive = Op(
+    "test.condition_refines_positive",
+    group=test_ops,
+    doc="Test a boolean query that refines its source on the true edge.",
+    operands=[Operand("value", INDEX)],
+    results=[Result("result", I1)],
+    traits=[PURE],
+    condition_refinement=ConditionRefinement(
+        source="value",
+        truth=ConditionRefinementTruth.TRUE,
+        materialize="loom_test_condition_refines_positive_materialize",
+    ),
+    format=[Ref("value"), COLON, TypeOf("value")],
+    examples=[
+        "%positive = test.condition_refines_positive %value : index",
     ],
 )
 
@@ -2821,4 +2867,6 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_parameterized_attr,
     test_compact_parameterized_attr,
     test_parameterized_attr_array,
+    test_attr_params,
+    test_condition_refines_positive,
 )

@@ -17,6 +17,7 @@ loom_cc_library(
     srcs = ["canonicalize.c"],
     hdrs = ["canonicalize.h"],
     visibility = [
+        "//loom/src/loom/ops/encoding:__pkg__",
         "//loom/src/loom/pass:__pkg__",
         "//loom/src/loom/transforms/symbol:__pkg__",
     ],

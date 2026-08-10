@@ -33,6 +33,7 @@ enum loom_target_low_legality_e {
   LOOM_TARGET_LOW_LEGALITY_PROVIDER = 2,
   LOOM_TARGET_LOW_LEGALITY_SOURCE_ONLY = 3,
   LOOM_TARGET_LOW_LEGALITY_MODULE_METADATA = 4,
+  LOOM_TARGET_LOW_LEGALITY_COMPILE_TIME_QUERY = 5,
 };
 
 typedef struct loom_target_low_legality_target_state_record_t {
@@ -196,6 +197,13 @@ static iree_status_t loom_target_low_legality_emit_no_target_contract(
     loom_target_low_legality_context_t* context, const loom_op_t* op) {
   return loom_target_low_legality_emit_target_context_error(
       context, op, LOOM_ERR_TARGET_001, /*extra_params=*/NULL,
+      /*extra_param_count=*/0);
+}
+
+static iree_status_t loom_target_low_legality_emit_unresolved_query(
+    loom_target_low_legality_context_t* context, const loom_op_t* op) {
+  return loom_target_low_legality_emit_target_context_error(
+      context, op, LOOM_ERR_TARGET_070, /*extra_params=*/NULL,
       /*extra_param_count=*/0);
 }
 
@@ -864,6 +872,9 @@ static iree_status_t loom_target_low_legality_verify_op_class(
       case LOOM_OP_PHASE_MODULE_METADATA:
         legality = LOOM_TARGET_LOW_LEGALITY_MODULE_METADATA;
         break;
+      case LOOM_OP_PHASE_COMPILE_TIME_QUERY:
+        legality = LOOM_TARGET_LOW_LEGALITY_COMPILE_TIME_QUERY;
+        break;
       case LOOM_OP_PHASE_UNSPECIFIED:
       default:
         legality = LOOM_TARGET_LOW_LEGALITY_UNSUPPORTED;
@@ -883,6 +894,8 @@ static iree_status_t loom_target_low_legality_verify_op_class(
     case LOOM_TARGET_LOW_LEGALITY_MODULE_METADATA:
       return loom_target_low_legality_emit_op_constraint(
           context, op, IREE_SV("module_metadata.outside_executable_region"));
+    case LOOM_TARGET_LOW_LEGALITY_COMPILE_TIME_QUERY:
+      return loom_target_low_legality_emit_unresolved_query(context, op);
     case LOOM_TARGET_LOW_LEGALITY_UNSUPPORTED:
       return loom_target_low_legality_emit_no_target_contract(context, op);
     default: {

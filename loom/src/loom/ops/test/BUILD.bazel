@@ -24,6 +24,7 @@ loom_generated_cc_library(
     name = "test",
     srcs = [
         "canonicalize.c",
+        "condition_refinement.c",
         "facts.c",
         "registry.c",
         "symbol_facts.c",
@@ -52,6 +53,7 @@ loom_generated_cc_library(
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:storage_facts",
+        "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:types",

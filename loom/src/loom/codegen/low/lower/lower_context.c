@@ -291,6 +291,27 @@ const loom_value_fact_table_t* loom_low_lower_context_fact_table(
   return context->lowering.fact_table;
 }
 
+loom_condition_query_t* loom_low_lower_context_condition_query(
+    loom_low_lower_context_t* context) {
+  return &context->lowering.condition_query;
+}
+
+loom_symbolic_expr_context_t* loom_low_lower_context_symbolic_expr_context(
+    loom_low_lower_context_t* context) {
+  const loom_value_fact_table_t* fact_table =
+      loom_low_lower_context_fact_table(context);
+  loom_low_lowering_frame_t* lowering = &context->lowering;
+  if (!lowering->expression_context_initialized ||
+      lowering->expression_context_fact_table != fact_table) {
+    loom_symbolic_expr_context_initialize(
+        loom_low_lower_context_module(context), fact_table,
+        &context->function_arena, &lowering->expression_context);
+    lowering->expression_context_fact_table = fact_table;
+    lowering->expression_context_initialized = true;
+  }
+  return &lowering->expression_context;
+}
+
 loom_sanitizer_reporting_mode_t loom_low_lower_context_sanitizer_reporting_mode(
     const loom_low_lower_context_t* context) {
   return context->options->sanitizer_reporting_mode;

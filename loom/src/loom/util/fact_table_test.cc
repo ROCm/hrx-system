@@ -642,6 +642,16 @@ TEST_F(FactTableTest, EncodingSummaryDenseLayoutRoundTrips) {
   EXPECT_EQ(result.address_layout.kind, LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE);
 }
 
+TEST(EncodedOperandSchemaTest, SemanticAbsenceDoesNotImplyScale) {
+  loom_value_fact_encoded_operand_schema_t schema = {};
+  schema.flags = LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_ELEMENT_FORMAT_NONE |
+                 LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_AFFINE_NONE;
+  EXPECT_FALSE(loom_value_fact_encoded_operand_schema_has_scale(schema));
+
+  schema.flags |= LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_ZERO_SCALE_FALLBACK;
+  EXPECT_TRUE(loom_value_fact_encoded_operand_schema_has_scale(schema));
+}
+
 TEST_F(FactTableTest, EncodingSummaryStridedLayoutInternsStrideFacts) {
   loom_value_fact_table_t table = {0};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));

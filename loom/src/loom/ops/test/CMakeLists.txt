@@ -16,6 +16,7 @@ loom_generated_cc_library(
     loom::py::loom::gen::ops::c_tables_test_generator
   SRCS
     "canonicalize.c"
+    "condition_refinement.c"
     "facts.c"
     "registry.c"
     "symbol_facts.c"
@@ -39,6 +40,7 @@ loom_generated_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ir::facts
+    loom::ops::index
     loom::ops::op_defs
     loom::ops::storage_facts
     loom::ops::target

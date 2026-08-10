@@ -13,6 +13,7 @@ def test_derives_target_low_legality_from_phase_and_contracts() -> None:
     unsupported_dialect = Dialect("misc")
     source_dialect = Dialect("scf", default_phase=OpPhase.SOURCE_STRUCTURE)
     metadata_dialect = Dialect("target", default_phase=OpPhase.MODULE_METADATA)
+    query_dialect = Dialect("query", default_phase=OpPhase.COMPILE_TIME_QUERY)
 
     legality_by_name = target_low_legality_by_name(
         [
@@ -30,6 +31,7 @@ def test_derives_target_low_legality_from_phase_and_contracts() -> None:
             (unsupported_dialect, [Op("misc.unsupported", group=unsupported_dialect)]),
             (source_dialect, [Op("scf.for", group=source_dialect)]),
             (metadata_dialect, [Op("target.generic", group=metadata_dialect)]),
+            (query_dialect, [Op("query.is_supported", group=query_dialect)]),
         ]
     )
 
@@ -37,4 +39,7 @@ def test_derives_target_low_legality_from_phase_and_contracts() -> None:
     assert legality_by_name["test.contract"] == TargetLowLegality.PROVIDER
     assert legality_by_name["scf.for"] == TargetLowLegality.SOURCE_ONLY
     assert legality_by_name["target.generic"] == TargetLowLegality.MODULE_METADATA
+    assert (
+        legality_by_name["query.is_supported"] == TargetLowLegality.COMPILE_TIME_QUERY
+    )
     assert "misc.unsupported" not in legality_by_name

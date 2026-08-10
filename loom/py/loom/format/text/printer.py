@@ -36,6 +36,7 @@ from typing import Any, cast
 from loom.assembly import (
     Attr,
     AttrDict,
+    AttrParams,
     AttrTable,
     BindingList,
     BlockArgs,
@@ -69,7 +70,7 @@ from loom.assembly import (
 from loom.assembly import (
     Region as RegionFmt,
 )
-from loom.dsl import AttrDef, Op, TypeDef
+from loom.dsl import AttrDef, Op, ParameterizedAttrDef, TypeDef
 from loom.fields import (
     FieldLayout,
     FormatFields,
@@ -684,33 +685,13 @@ def _format_attr_value(
                     f"parameterized attribute family '{value.family_name}' "
                     f"does not match field contract '{expected_family.name}'"
                 )
-        parameters = []
-        primary_parameter_index = value.definition.primary_parameter_index
-        if primary_parameter_index is not None:
-            primary_parameter = value.definition.parameters[primary_parameter_index]
-            primary_slot = value.slots[primary_parameter_index]
-            if primary_slot is not None:
-                parameters.append(
-                    _format_attr_value(
-                        primary_slot,
-                        primary_parameter,
-                        type_context=type_context,
-                        type_registry=type_registry,
-                    )
-                )
-        for parameter_index, (parameter, slot) in enumerate(
-            zip(value.definition.parameters, value.slots, strict=True)
-        ):
-            if slot is None or parameter_index == primary_parameter_index:
-                continue
-            formatted_slot = _format_attr_value(
-                slot,
-                parameter,
-                type_context=type_context,
-                type_registry=type_registry,
-            )
-            parameters.append(f"{parameter.name} = {formatted_slot}")
-        return f"#{value.family_name}<" + ", ".join(parameters) + ">"
+        parameters = _format_parameterized_attr_parameters(
+            value,
+            value.definition,
+            type_context=type_context,
+            type_registry=type_registry,
+        )
+        return f"#{value.family_name}<{parameters}>"
     if isinstance(value, ParameterizedAttrArray):
         if attr_def is None or attr_def.attr_type != "parameterized_array":
             raise ValueError(
@@ -757,6 +738,54 @@ def _format_attr_value(
     if isinstance(value, EncodingInstance):
         return _format_encoding_instance(value, use_alias=True)
     return str(value)
+
+
+def _format_parameterized_attr_parameters(
+    value: Any,
+    definition: ParameterizedAttrDef,
+    *,
+    type_context: TypePrintContext | None = None,
+    type_registry: dict[Any, Any] | None = None,
+) -> str:
+    """Formats one known-family parameterized attribute payload."""
+    if not isinstance(value, ParameterizedAttr):
+        raise TypeError(
+            f"expected parameterized attribute '{definition.name}', got {value!r}"
+        )
+    if value.family_name != definition.name:
+        raise ValueError(
+            f"parameterized attribute family '{value.family_name}' does not "
+            f"match field contract '{definition.name}'"
+        )
+
+    parameters = []
+    slots = value.slots
+    primary_parameter_index = definition.primary_parameter_index
+    if primary_parameter_index is not None:
+        primary_parameter = definition.parameters[primary_parameter_index]
+        primary_slot = slots[primary_parameter_index]
+        if primary_slot is not None:
+            parameters.append(
+                _format_attr_value(
+                    primary_slot,
+                    primary_parameter,
+                    type_context=type_context,
+                    type_registry=type_registry,
+                )
+            )
+    for parameter_index, (parameter, slot) in enumerate(
+        zip(definition.parameters, slots, strict=True)
+    ):
+        if slot is None or parameter_index == primary_parameter_index:
+            continue
+        formatted_slot = _format_attr_value(
+            slot,
+            parameter,
+            type_context=type_context,
+            type_registry=type_registry,
+        )
+        parameters.append(f"{parameter.name} = {formatted_slot}")
+    return ", ".join(parameters)
 
 
 def _format_enum_attr_value(
@@ -1835,6 +1864,16 @@ class Printer:
                     attr_def = op_decl.attr(name)
                     value = fields.attr(name)
                     stream.emit(f"<{_format_attr_value(value, attr_def)}>", glue=True)
+
+                case AttrParams(field=name):
+                    covered_attrs.add(name)
+                    attr_def = cast(AttrDef, op_decl.attr(name))
+                    value = fields.attr(name)
+                    definition = cast(ParameterizedAttrDef, attr_def.parameterized_attr)
+                    stream.emit(
+                        f"<{_format_parameterized_attr_parameters(value, definition)}>",
+                        glue=True,
+                    )
 
                 case TemplateParamFlags(param=param_name, flags=flags_name):
                     covered_attrs.add(param_name)

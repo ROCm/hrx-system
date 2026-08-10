@@ -60,6 +60,10 @@ def generate_op_registry(
     tables_header.append("    loom_op_registry_dialect_semantics_fn_t)(")
     tables_header.append("    iree_host_size_t* out_count);")
     tables_header.append("")
+    tables_header.append("typedef const loom_condition_refinement_descriptor_t* (*")
+    tables_header.append("    loom_op_registry_condition_refinements_fn_t)(")
+    tables_header.append("    iree_host_size_t* out_count);")
+    tables_header.append("")
     tables_header.append("typedef const loom_parameterized_attr_descriptor_t* (*")
     tables_header.append("    loom_op_registry_parameterized_attrs_fn_t)(")
     tables_header.append("    iree_host_size_t* out_count);")
@@ -68,6 +72,7 @@ def generate_op_registry(
     tables_header.append("  loom_dialect_id_t dialect_id;")
     tables_header.append("  loom_op_registry_dialect_vtables_fn_t vtables_fn;")
     tables_header.append("  loom_op_registry_dialect_semantics_fn_t semantics_fn;")
+    tables_header.append("  loom_op_registry_condition_refinements_fn_t condition_refinements_fn;")
     tables_header.append("  loom_op_registry_parameterized_attrs_fn_t parameterized_attrs_fn;")
     tables_header.append("} loom_op_registry_dialect_registration_t;")
     tables_header.append("")
@@ -86,8 +91,9 @@ def generate_op_registry(
     source.append("const loom_op_registry_dialect_registration_t")
     source.append("    loom_op_registry_dialects[] = {")
     for dialect, _ops, _parameterized_attrs in sorted(dialects, key=lambda item: item[0].dialect_id):
+        condition_refinements_fn = f"loom_{dialect.name}_dialect_condition_refinements" if any(op.condition_refinement is not None for op in _ops) else "NULL"
         parameterized_attrs_fn = f"loom_{dialect.name}_dialect_parameterized_attrs" if _parameterized_attrs else "NULL"
-        source.append(f"    {{{c_dialect_enum(dialect.name)}, loom_{dialect.name}_dialect_vtables, loom_{dialect.name}_dialect_op_semantics, {parameterized_attrs_fn}}},")
+        source.append(f"    {{{c_dialect_enum(dialect.name)}, loom_{dialect.name}_dialect_vtables, loom_{dialect.name}_dialect_op_semantics, {condition_refinements_fn}, {parameterized_attrs_fn}}},")
     source.append("};")
     source.append("")
     source.append("const iree_host_size_t loom_op_registry_dialect_count =")

@@ -15,6 +15,7 @@ loom_generated_cc_library(
   GENERATOR
     loom::py::loom::gen::ops::c_tables_encoding_generator
   SRCS
+    "condition_refinement.c"
     "facts.c"
     "families.c"
     "matrix_operand.c"
@@ -47,6 +48,7 @@ loom_generated_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ops::op_defs
+    loom::rewrite::rewriter
     loom::util::fact_table
     loom::util::numeric_format
     loom::util::stable_id
@@ -69,7 +71,12 @@ loom_cc_benchmark(
     loom::format::text::printer
     loom::ir
     loom::ops::func
+    loom::ops::scalar
+    loom::ops::scf
+    loom::ops::test
     loom::ops::vector
+    loom::pass::value_facts
+    loom::transforms::cleanup::canonicalize
     loom::util::fact_table
     loom::util::stream
     loom::verify
@@ -94,6 +101,20 @@ loom_cc_test(
     loom::ir
     loom::ops::test
     loom::testing::diagnostic_matchers
+)
+
+loom_cc_test(
+  NAME
+    storage_test
+  SRCS
+    "storage_test.cc"
+  DEPS
+    ::encoding
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ir
 )
 
 loom_cc_test(

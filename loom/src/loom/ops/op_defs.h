@@ -250,6 +250,12 @@ enum loom_format_kind_e {
   // Variadic operand references with adjacent type annotations:
   // %a: type, %b: type.
   LOOM_FORMAT_KIND_OPERAND_TYPED_REFS = 30,
+
+  // Known-family parameterized attribute payload in angle brackets:
+  // <mode = fast, scopes = [workgroup]>. The field_index references a
+  // PARAMETERIZED attribute constrained to one exact family. The family name
+  // is carried by the descriptor and omitted from text.
+  LOOM_FORMAT_KIND_ATTR_PARAMS = 31,
 };
 typedef uint8_t loom_format_kind_t;
 

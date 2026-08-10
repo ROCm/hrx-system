@@ -341,6 +341,39 @@ ERR_ENCODING_020 = ErrorDef(
     fix_hint="Clamp or specialize permutation lanes to the source last-axis extent",
 )
 
+# ERR_ENCODING_021: Encoding query specification has the wrong semantic role.
+ERR_ENCODING_021 = ErrorDef(
+    domain=ErrorDomain.ENCODING,
+    code=21,
+    severity=Severity.ERROR,
+    summary="Encoding query specification has wrong role.",
+    message=(
+        "encoding query specification '{encoding_name}' has type {spec_type}, "
+        "incompatible with operand type {operand_type}"
+    ),
+    params=(
+        ErrorParam("encoding_name", ParamKind.STRING),
+        ErrorParam("spec_type", ParamKind.TYPE),
+        ErrorParam("operand_type", ParamKind.TYPE),
+    ),
+    fix_hint=(
+        "Query an encoding specification with the same semantic role as the operand"
+    ),
+)
+
+# ERR_ENCODING_022: Semantic encoding query has no requirements.
+ERR_ENCODING_022 = ErrorDef(
+    domain=ErrorDomain.ENCODING,
+    code=22,
+    severity=Severity.ERROR,
+    summary="Semantic encoding query has no requirements.",
+    message="encoding.matches requires at least one semantic property",
+    params=(),
+    fix_hint=(
+        "Add a typed property such as element_format, payload_packing, or affine"
+    ),
+)
+
 ALL_ENCODING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_ENCODING_001,
     ERR_ENCODING_002,
@@ -362,4 +395,6 @@ ALL_ENCODING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_ENCODING_018,
     ERR_ENCODING_019,
     ERR_ENCODING_020,
+    ERR_ENCODING_021,
+    ERR_ENCODING_022,
 )

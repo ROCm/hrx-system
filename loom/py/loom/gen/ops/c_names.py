@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Any
 
 from loom.dsl import EncodingFamilyDef, EnumDef, Op, ParameterizedAttrDef
@@ -62,7 +63,23 @@ def c_parameterized_attr_enum_name(attr_def: ParameterizedAttrDef) -> str:
 def c_encoding_family_prefix(family: EncodingFamilyDef) -> str:
     """Returns the C function/variable prefix for an encoding family."""
 
-    return "loom_encoding_" + family.name
+    return "loom_encoding_" + family.name.replace(".", "_")
+
+
+def validate_encoding_family_c_names(
+    families: Sequence[EncodingFamilyDef],
+) -> None:
+    """Rejects duplicate or colliding generated encoding-family names."""
+
+    families_by_prefix: dict[str, EncodingFamilyDef] = {}
+    for family in families:
+        prefix = c_encoding_family_prefix(family)
+        previous_family = families_by_prefix.get(prefix)
+        if previous_family is not None:
+            if previous_family.name == family.name:
+                raise ValueError(f"duplicate encoding family '{family.name}'")
+            raise ValueError(f"encoding families '{previous_family.name}' and '{family.name}' both generate C prefix '{prefix}'")
+        families_by_prefix[prefix] = family
 
 
 def c_encoding_family_descriptor_name(family: EncodingFamilyDef) -> str:

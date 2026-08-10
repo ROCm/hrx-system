@@ -670,6 +670,32 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
             param_start, ctx->stream->offset);
         break;
       }
+      case LOOM_FORMAT_KIND_ATTR_PARAMS: {
+        // Known-family parameter payload glued to the op name:
+        // encoding.matches<element_format = u4>.
+        if (element->field_index >= op->attribute_count) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "format ATTR_PARAMS field_index %u out of range (op has %u "
+              "attributes)",
+              element->field_index, op->attribute_count);
+        }
+        const loom_attr_descriptor_t* descriptor =
+            (vtable->attr_descriptors &&
+             element->field_index < vtable->attribute_count)
+                ? &vtable->attr_descriptors[element->field_index]
+                : NULL;
+        loom_attribute_t attr = loom_op_attrs(op)[element->field_index];
+        iree_host_size_t param_start = ctx->stream->offset;
+        IREE_RETURN_IF_ERROR(
+            loom_print_parameterized_attr_parameters(ctx, &attr, descriptor));
+        loom_print_did_write(ctx);
+        loom_print_report_field(
+            ctx,
+            loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->field_index),
+            param_start, ctx->stream->offset);
+        break;
+      }
       case LOOM_FORMAT_KIND_TEMPLATE_PARAM_FLAGS: {
         // Required compile-time op parameter plus optional instance flags:
         // vector.reduce<addf, reassoc|nnan|nsz>.

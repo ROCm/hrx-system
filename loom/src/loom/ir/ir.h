@@ -881,6 +881,37 @@ typedef iree_status_t (*loom_type_transfer_fn_t)(
     loom_type_transfer_context_t* context, const loom_module_t* module,
     loom_op_t* op);
 
+// Branch-edge truth values accepted by a condition-refinement descriptor.
+typedef uint8_t loom_condition_refinement_truth_flags_t;
+
+enum loom_condition_refinement_truth_flag_bits_e {
+  LOOM_CONDITION_REFINEMENT_TRUTH_TRUE = 1u << 0,
+  LOOM_CONDITION_REFINEMENT_TRUTH_FALSE = 1u << 1,
+};
+
+// Materializes a dialect-owned edge-local fact identity for |source|. The
+// rewriter insertion point is already positioned at the beginning of the
+// selected control-flow region. The callback returns the refined SSA value;
+// generic canonicalization rewrites only region-local uses to that value.
+typedef iree_status_t (*loom_condition_refinement_materialize_fn_t)(
+    loom_rewriter_t* rewriter, const loom_op_t* condition_op,
+    loom_value_id_t source, bool assumed_truth,
+    loom_value_id_t* out_refined_value);
+
+// Sparse dialect-owned description of an operand refinement implied by one
+// boolean query operation.
+typedef struct loom_condition_refinement_descriptor_t {
+  // Callback that materializes the fact identity.
+  loom_condition_refinement_materialize_fn_t materialize;
+  // Required non-variadic source operand ordinal on the condition op.
+  uint8_t source_operand_index;
+  // Truth edges on which materialization is valid.
+  loom_condition_refinement_truth_flags_t truth_flags;
+} loom_condition_refinement_descriptor_t;
+
+static_assert(sizeof(loom_condition_refinement_descriptor_t) == 16,
+              "condition refinement descriptors must remain compact");
+
 //===----------------------------------------------------------------------===//
 // FuncLike interface vtable
 //===----------------------------------------------------------------------===//

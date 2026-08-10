@@ -1143,6 +1143,16 @@ class TestParseAttrDictOp:
         assert op.attributes["flags"] == "debug|trace"
         assert _op_printer().print_operation(op, module) == source
 
+    def test_parameterized_attr_params_roundtrip(self) -> None:
+        source = "test.attr_params<mode = fast, scopes = [workgroup]>"
+        module = Module()
+        op = _parse_op(source, module=module, scope=NameScope())
+        options = op.attributes["options"]
+        assert isinstance(options, ParameterizedAttr)
+        assert options.family_name == "test.options"
+        assert options.get("mode") == 1
+        assert _op_printer().print_operation(op, module) == source
+
     def test_string_that_looks_like_symbol_stays_string(self) -> None:
         source = '%r = test.attrs %x {target = "@target"} : f32'
         module, scope = _setup_scope(("x", F32))
@@ -1440,6 +1450,20 @@ class TestEncodingValidation:
                 "  test.yield %a : tile<256xi8, #q999>\n"
                 "}\n"
             )
+
+    def test_qualified_encoding_name_round_trips(self) -> None:
+        parser = _op_parser()
+        parser.register_encodings(["ggml.q4_k"])
+        text = (
+            "test.func @f(%a: tile<256xi8, #ggml.q4_k>) -> "
+            "(tile<256xi8, #ggml.q4_k>) {\n"
+            "  test.yield %a : tile<256xi8, #ggml.q4_k>\n"
+            "}\n"
+        )
+
+        module = parser.parse(text)
+
+        assert _op_printer().print_module(module) == text
 
 
 # ============================================================================

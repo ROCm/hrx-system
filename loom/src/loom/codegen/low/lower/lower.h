@@ -17,7 +17,9 @@
 #define LOOM_CODEGEN_LOW_LOWER_LOWER_H_
 
 #include "iree/base/api.h"
+#include "loom/analysis/condition_facts.h"
 #include "loom/analysis/contract_vector.h"
+#include "loom/analysis/symbolic_expr.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/memory_access.h"
 #include "loom/error/emitter.h"
@@ -1010,6 +1012,14 @@ const loom_low_descriptor_set_t* loom_low_lower_context_descriptor_set(
 // the source function being lowered and remains valid only during callbacks.
 const loom_value_fact_table_t* loom_low_lower_context_fact_table(
     const loom_low_lower_context_t* context);
+
+// Returns reusable traversal state for condition-fact queries.
+loom_condition_query_t* loom_low_lower_context_condition_query(
+    loom_low_lower_context_t* context);
+
+// Returns the function-local symbolic expression context.
+loom_symbolic_expr_context_t* loom_low_lower_context_symbolic_expr_context(
+    loom_low_lower_context_t* context);
 
 // Returns target failure reporting behavior for lowered sanitizer assertions.
 loom_sanitizer_reporting_mode_t loom_low_lower_context_sanitizer_reporting_mode(

@@ -154,6 +154,107 @@ typedef struct loom_encoding_dynamic_parameter_descriptor_t {
   loom_type_constraint_t type_constraint;
 } loom_encoding_dynamic_parameter_descriptor_t;
 
+// Maximum number of logical axes in an exact encoded scale-group shape.
+#define LOOM_ENCODING_SCALE_GROUP_MAX_RANK 4
+
+// Target-independent interpretation of one encoded operand. Bulk payload,
+// scale, table, and sparse metadata remain SSA values; this compact summary
+// only carries facts shared by storage schemas and prepared fragments.
+typedef struct loom_encoding_operand_summary_t {
+  // Logical element-format fact bitset after payload interpretation.
+  uint64_t element_format;
+
+  // Primary or local scale-format fact bitset.
+  uint64_t scale_format;
+
+  // Secondary, global, or super-scale format fact bitset.
+  uint64_t secondary_scale_format;
+
+  // Physical payload-packing fact bitset.
+  uint32_t payload_packing;
+
+  // Scale-topology fact bitset.
+  uint32_t scale_topology;
+
+  // Affine, offset, or correction-policy fact bitset.
+  uint32_t affine_policy;
+
+  // Rounding or finite-policy fact bitset.
+  uint32_t rounding_policy;
+
+  // Codebook or table-ownership fact bitset.
+  uint32_t codebook_policy;
+
+  // Sparse-metadata policy fact bitset.
+  uint32_t sparsity_policy;
+
+  // Encoded-operand flags interpreted by the fact domain.
+  uint32_t flags;
+
+  // Structured sparsity density within one logical reduction group.
+  struct {
+    // Number of physically stored nonzero elements in each group.
+    uint16_t nonzero_element_count;
+
+    // Number of logical elements represented by each group.
+    uint16_t element_count;
+  } sparsity_group;
+
+  // Number of 32-bit payload registers in a prepared fragment, or zero when
+  // the operand is not target-fragment-shaped.
+  uint16_t payload_register_count;
+
+  // Number of logical elements represented by the payload.
+  uint16_t payload_element_count;
+
+  // Logical element block covered by one primary or local scale value.
+  struct {
+    // Cached product of the exact shape, or the known coarse group size when
+    // no exact multidimensional shape is available.
+    uint16_t element_count;
+
+    // Exact extents in logical operand-axis order. Positive dimensions are
+    // contiguous from axis zero and trailing zeroes terminate the rank.
+    uint16_t shape[LOOM_ENCODING_SCALE_GROUP_MAX_RANK];
+  } scale_group;
+
+  // Number of explicit scale-like SSA operands required by this schema.
+  uint16_t scale_operand_count;
+} loom_encoding_operand_summary_t;
+
+static_assert(sizeof(loom_encoding_operand_summary_t) == 72,
+              "encoding operand summary must remain padding-free");
+
+// Exact physical geometry for one fixed encoding record. An all-zero record
+// means the family has no family-wide fixed geometry.
+typedef struct loom_encoding_record_geometry_t {
+  // Number of logical elements represented by one physical record.
+  uint16_t logical_element_count;
+
+  // Number of physical storage bytes in one record.
+  uint16_t storage_byte_count;
+
+  // Required byte alignment for the start of one record.
+  uint16_t required_alignment;
+} loom_encoding_record_geometry_t;
+
+// Dense bitset of family-declared auxiliary operand keys.
+typedef uint64_t loom_encoding_auxiliary_key_flags_t;
+
+// Generated constants shared by every instance of a fixed encoding family.
+// This data is process-lifetime read-only storage referenced by the family
+// descriptor and never copied into a module.
+typedef struct loom_encoding_family_fixed_metadata_t {
+  // Target-independent operand facts common to every family instance.
+  loom_encoding_operand_summary_t operand_summary;
+
+  // Auxiliary operand keys required to interpret the encoded payload.
+  loom_encoding_auxiliary_key_flags_t required_auxiliary_keys;
+
+  // Exact family-wide record geometry, or all zeroes when parameterized.
+  loom_encoding_record_geometry_t record;
+} loom_encoding_family_fixed_metadata_t;
+
 // Generated structural metadata for one registered encoding family.
 typedef struct loom_encoding_family_descriptor_t {
   // Stable public family name without a leading '#'.
@@ -169,6 +270,8 @@ typedef struct loom_encoding_family_descriptor_t {
   // Lexically ordered dynamic parameter descriptors, or NULL when empty.
   const loom_encoding_dynamic_parameter_descriptor_t*
       dynamic_parameter_descriptors;
+  // Generated family-wide constants, or NULL when every fact is parameterized.
+  const loom_encoding_family_fixed_metadata_t* fixed_metadata;
 } loom_encoding_family_descriptor_t;
 
 // A module-owned table of unique static encoding instances.
@@ -223,10 +326,11 @@ typedef struct loom_encoding_vtable_t {
       const loom_encoding_define_resolved_params_t* params,
       iree_diagnostic_emitter_t emitter);
 
-  // Summarizes one verified family instance into target-independent facts.
+  // Augments one verified family instance's target-independent facts.
   // The request contains descriptor-indexed static and dynamic parameters and
-  // caller-owned transient storage. Implementations are allocation-free and
-  // infallible; unsupported facts remain zero in |out_summary|.
+  // caller-owned transient storage. |out_summary| has already been initialized
+  // from generated fixed metadata. Implementations are allocation-free and
+  // infallible and only write parameterized or composed facts.
   void (*summarize)(const loom_encoding_family_summary_request_t* request,
                     loom_encoding_family_summary_t* out_summary);
 

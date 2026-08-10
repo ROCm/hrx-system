@@ -38,6 +38,7 @@ Quick reference — declaring an op:
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, unique
@@ -145,6 +146,8 @@ __all__ = [
     # Semantic phase/contract metadata.
     "OpPhase",
     "ContractFamily",
+    "ConditionRefinement",
+    "ConditionRefinementTruth",
     "TypeSemantic",
     "OpCategory",
     # Trait constructors.
@@ -228,8 +231,10 @@ __all__ = [
     "RegisterUnitsSumTo",
     # Op group.
     "Dialect",
+    "EncodingOperandSummaryDef",
     "EncodingFamilyDef",
     "EncodingFamilyRole",
+    "EncodingRecordDef",
     "ParameterizedAttrDef",
     # Legacy text-format migration declarations.
     "LegacyFieldDefault",
@@ -1022,6 +1027,13 @@ class EnumDef:
         """All valid keyword strings."""
         return tuple(c.keyword for c in self.cases)
 
+    def case(self, keyword: str) -> EnumCase:
+        """Returns the case with the given textual keyword."""
+        for case in self.cases:
+            if case.keyword == keyword:
+                return case
+        raise ValueError(f"EnumDef '{self.name}': unknown keyword '{keyword}'")
+
 
 # ============================================================================
 # Traits
@@ -1142,6 +1154,7 @@ class OpPhase(Enum):
     EXECUTABLE = "LOOM_OP_PHASE_EXECUTABLE"
     SOURCE_STRUCTURE = "LOOM_OP_PHASE_SOURCE_STRUCTURE"
     MODULE_METADATA = "LOOM_OP_PHASE_MODULE_METADATA"
+    COMPILE_TIME_QUERY = "LOOM_OP_PHASE_COMPILE_TIME_QUERY"
 
     @property
     def c_name(self) -> str:
@@ -1202,6 +1215,30 @@ class ContractFamily(Enum):
         self.key = key
         self.c_name = c_name
         self.diagnostic_name = diagnostic_name
+
+
+@unique
+class ConditionRefinementTruth(Enum):
+    """Control-flow edges on which an op can refine one of its operands."""
+
+    TRUE = "true"
+    FALSE = "false"
+    BOTH = "both"
+
+
+@dataclass(frozen=True, slots=True)
+class ConditionRefinement:
+    """Dialect-owned operand refinement implied by a boolean result.
+
+    Generated metadata names the source operand by ordinal and points at a
+    dialect callback that materializes its edge-local fact identity. Generic
+    control-flow transforms invoke the callback only when the source is used on
+    an edge whose truth value is listed here.
+    """
+
+    source: str
+    truth: ConditionRefinementTruth
+    materialize: str
 
 
 def _validate_metadata_key(kind: str, key: str) -> None:
@@ -2876,6 +2913,12 @@ def _is_ascii_identifier(value: str) -> bool:
     )
 
 
+def _is_ascii_qualified_identifier(value: str) -> bool:
+    """Returns whether |value| is a dot-qualified Loom identifier."""
+
+    return all(_is_ascii_identifier(part) for part in value.split("."))
+
+
 def _validate_descriptor_parameters(
     owner: str, parameters: tuple[AttrDef, ...]
 ) -> None:
@@ -2945,7 +2988,7 @@ class ParameterizedAttrDef:
                 f"ParameterizedAttrDef '{name}': family name must begin with "
                 f"the owning dialect namespace '{group.name}.'"
             )
-        if not all(_is_ascii_identifier(part) for part in name_parts):
+        if not _is_ascii_qualified_identifier(name):
             raise ValueError(
                 f"ParameterizedAttrDef '{name}': family name must be a dotted "
                 "ASCII identifier"
@@ -3020,6 +3063,123 @@ class EncodingFamilyRole(Enum):
 
 
 @dataclass(frozen=True, slots=True)
+class EncodingRecordDef:
+    """Exact physical geometry for one fixed encoding record."""
+
+    logical_element_count: int
+    storage_byte_count: int
+    required_alignment: int = 1
+
+    def __post_init__(self) -> None:
+        for field_name, value in (
+            ("logical_element_count", self.logical_element_count),
+            ("storage_byte_count", self.storage_byte_count),
+            ("required_alignment", self.required_alignment),
+        ):
+            if type(value) is not int or not 1 <= value <= 0xFFFF:
+                raise ValueError(
+                    f"EncodingRecordDef: {field_name} must be an integer in "
+                    f"[1, 65535], got {value!r}"
+                )
+        if self.required_alignment & (self.required_alignment - 1):
+            raise ValueError(
+                "EncodingRecordDef: required_alignment must be a power of two"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class EncodingOperandSummaryDef:
+    """Constant target-independent facts for one encoded operand schema."""
+
+    element_format: int = 0
+    scale_format: int = 0
+    secondary_scale_format: int = 0
+    payload_packing: int = 0
+    scale_topology: int = 0
+    affine_policy: int = 0
+    rounding_policy: int = 0
+    codebook_policy: int = 0
+    sparsity_policy: int = 0
+    zero_scale_fallback: bool = False
+    sparsity_group_nonzero_element_count: int = 0
+    sparsity_group_element_count: int = 0
+    payload_register_count: int = 0
+    payload_element_count: int = 0
+    scale_group_element_count: int = 0
+    scale_group_shape: tuple[int, ...] = ()
+    scale_operand_count: int = 0
+
+    def __post_init__(self) -> None:
+        scale_group_shape = tuple(self.scale_group_shape)
+        object.__setattr__(self, "scale_group_shape", scale_group_shape)
+        for field_name in (
+            "element_format",
+            "scale_format",
+            "secondary_scale_format",
+        ):
+            value = getattr(self, field_name)
+            if type(value) is not int or not 0 <= value <= 0xFFFFFFFFFFFFFFFF:
+                raise ValueError(
+                    f"EncodingOperandSummaryDef: {field_name} must be an "
+                    f"unsigned 64-bit integer, got {value!r}"
+                )
+        for field_name in (
+            "payload_packing",
+            "scale_topology",
+            "affine_policy",
+            "rounding_policy",
+            "codebook_policy",
+            "sparsity_policy",
+        ):
+            value = getattr(self, field_name)
+            if type(value) is not int or not 0 <= value <= 0xFFFFFFFF:
+                raise ValueError(
+                    f"EncodingOperandSummaryDef: {field_name} must be an "
+                    f"unsigned 32-bit integer, got {value!r}"
+                )
+        if type(self.zero_scale_fallback) is not bool:
+            raise ValueError(
+                "EncodingOperandSummaryDef: zero_scale_fallback must be a bool"
+            )
+        for field_name in (
+            "sparsity_group_nonzero_element_count",
+            "sparsity_group_element_count",
+            "payload_register_count",
+            "payload_element_count",
+            "scale_group_element_count",
+            "scale_operand_count",
+        ):
+            value = getattr(self, field_name)
+            if type(value) is not int or not 0 <= value <= 0xFFFF:
+                raise ValueError(
+                    f"EncodingOperandSummaryDef: {field_name} must be an "
+                    f"integer in [0, 65535], got {value!r}"
+                )
+        if len(scale_group_shape) > 4:
+            raise ValueError(
+                "EncodingOperandSummaryDef: scale_group_shape rank exceeds 4"
+            )
+        for extent in scale_group_shape:
+            if type(extent) is not int or not 1 <= extent <= 0xFFFF:
+                raise ValueError(
+                    "EncodingOperandSummaryDef: scale_group_shape extents "
+                    f"must be integers in [1, 65535], got {extent!r}"
+                )
+        if scale_group_shape:
+            shape_element_count = math.prod(scale_group_shape)
+            if shape_element_count > 0xFFFF:
+                raise ValueError(
+                    "EncodingOperandSummaryDef: scale_group_shape product exceeds 65535"
+                )
+            if self.scale_group_element_count not in (0, shape_element_count):
+                raise ValueError(
+                    "EncodingOperandSummaryDef: scale_group_element_count "
+                    "must equal the scale_group_shape product"
+                )
+            object.__setattr__(self, "scale_group_element_count", shape_element_count)
+
+
+@dataclass(frozen=True, slots=True)
 class EncodingFamilyDef:
     """Declares one registered encoding family.
 
@@ -3034,6 +3194,10 @@ class EncodingFamilyDef:
     role: EncodingFamilyRole
     parameters: tuple[AttrDef, ...] = ()
     dynamic_parameters: tuple[Operand, ...] = ()
+    fixed_record: EncodingRecordDef | None = None
+    fixed_operand_summary: EncodingOperandSummaryDef | None = None
+    auxiliary_key_enum: EnumDef | None = None
+    required_auxiliary_keys: tuple[EnumCase, ...] = ()
     doc: str = ""
 
     def __init__(
@@ -3044,16 +3208,72 @@ class EncodingFamilyDef:
         role: EncodingFamilyRole,
         parameters: list[AttrDef] | tuple[AttrDef, ...] = (),
         dynamic_parameters: list[Operand] | tuple[Operand, ...] = (),
+        fixed_record: EncodingRecordDef | None = None,
+        fixed_operand_summary: EncodingOperandSummaryDef | None = None,
+        auxiliary_key_enum: EnumDef | None = None,
+        required_auxiliary_keys: list[EnumCase] | tuple[EnumCase, ...] = (),
         doc: str = "",
     ) -> None:
-        if not _is_ascii_identifier(name):
+        if not _is_ascii_qualified_identifier(name):
             raise ValueError(
-                f"EncodingFamilyDef '{name}': family name must be a bare "
+                f"EncodingFamilyDef '{name}': family name must be a dotted "
                 "ASCII identifier"
             )
         if not isinstance(role, EncodingFamilyRole):
             raise ValueError(
                 f"EncodingFamilyDef '{name}': role must be an EncodingFamilyRole"
+            )
+        if fixed_record is not None and not isinstance(fixed_record, EncodingRecordDef):
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': fixed_record must be an EncodingRecordDef"
+            )
+        if fixed_operand_summary is not None and not isinstance(
+            fixed_operand_summary, EncodingOperandSummaryDef
+        ):
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': fixed_operand_summary must be an "
+                "EncodingOperandSummaryDef"
+            )
+        frozen_required_auxiliary_keys = tuple(required_auxiliary_keys)
+        if (
+            fixed_record is not None
+            or fixed_operand_summary is not None
+            or auxiliary_key_enum is not None
+            or frozen_required_auxiliary_keys
+        ) and role is not EncodingFamilyRole.STORAGE_SCHEMA:
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': fixed storage metadata requires "
+                "the STORAGE_SCHEMA role"
+            )
+
+        if auxiliary_key_enum is not None and not isinstance(
+            auxiliary_key_enum, EnumDef
+        ):
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': auxiliary_key_enum must be an EnumDef"
+            )
+        if frozen_required_auxiliary_keys and auxiliary_key_enum is None:
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': required auxiliary keys need an "
+                "auxiliary key enum"
+            )
+        if auxiliary_key_enum is not None:
+            if max(case.value for case in auxiliary_key_enum.cases) >= 64:
+                raise ValueError(
+                    f"EncodingFamilyDef '{name}': auxiliary key ordinals must "
+                    "fit in one uint64_t bitset"
+                )
+            for key in frozen_required_auxiliary_keys:
+                if not any(key is case for case in auxiliary_key_enum.cases):
+                    raise ValueError(
+                        f"EncodingFamilyDef '{name}': required auxiliary key "
+                        f"'{key.keyword}' is not in {auxiliary_key_enum.name}"
+                    )
+        if len(set(frozen_required_auxiliary_keys)) != len(
+            frozen_required_auxiliary_keys
+        ):
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': duplicate required auxiliary key"
             )
 
         lexical_parameters = tuple(sorted(parameters, key=lambda value: value.name))
@@ -3093,6 +3313,12 @@ class EncodingFamilyDef:
         object.__setattr__(self, "role", role)
         object.__setattr__(self, "parameters", lexical_parameters)
         object.__setattr__(self, "dynamic_parameters", lexical_dynamic_parameters)
+        object.__setattr__(self, "fixed_record", fixed_record)
+        object.__setattr__(self, "fixed_operand_summary", fixed_operand_summary)
+        object.__setattr__(self, "auxiliary_key_enum", auxiliary_key_enum)
+        object.__setattr__(
+            self, "required_auxiliary_keys", frozen_required_auxiliary_keys
+        )
         object.__setattr__(self, "doc", doc)
 
 
@@ -3536,6 +3762,7 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
     from loom.assembly import (
         Attr,
         AttrDict,
+        AttrParams,
         AttrTable,
         BindingList,
         BlockArgs,
@@ -3582,6 +3809,7 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
                 | KeyRef(field=f)
                 | ScopedEnumRef(field=f)
                 | TemplateParam(field=f)
+                | AttrParams(field=f)
             ):
                 fields.add(f)
             case TemplateParamFlags(param=param, flags=flags):
@@ -3763,6 +3991,31 @@ def _validate_scoped_enum_fields(
                 f"Op '{op_name}': scoped_enum attr '{attr.name}' requires "
                 "exactly one top-level ScopedEnumRef"
             )
+
+
+def _validate_attr_params_fields(
+    op_name: str,
+    format_elements: tuple[FormatElement, ...],
+    attrs: tuple[AttrDef, ...],
+) -> None:
+    """Validates known-family parameterized attribute payload syntax."""
+    from loom.assembly import AttrParams, Clause, OptionalGroup, Scope
+
+    attrs_by_name = {attr.name: attr for attr in attrs}
+    for element in format_elements:
+        if isinstance(element, AttrParams):
+            attr = attrs_by_name.get(element.field)
+            if (
+                attr is None
+                or attr.attr_type != ATTR_TYPE_PARAMETERIZED
+                or attr.parameterized_attr is None
+            ):
+                raise ValueError(
+                    f"Op '{op_name}': AttrParams field '{element.field}' must "
+                    "name a parameterized attr constrained to one exact family"
+                )
+        elif isinstance(element, Clause | OptionalGroup | Scope):
+            _validate_attr_params_fields(op_name, element.elements, attrs)
 
 
 def _validate_legacy_formats(
@@ -4610,6 +4863,44 @@ class LegacyFormat:
         object.__setattr__(self, "rewrite_hook", rewrite_hook)
 
 
+def _validate_condition_refinement(
+    op_name: str,
+    refinement: ConditionRefinement | None,
+    operands: tuple[Operand, ...],
+    results: tuple[Result | TiedResult, ...],
+) -> None:
+    if refinement is None:
+        return
+    source_operand = next(
+        (operand for operand in operands if operand.name == refinement.source),
+        None,
+    )
+    if source_operand is None:
+        raise ValueError(
+            f"Op '{op_name}': condition refinement source "
+            f"'{refinement.source}' does not name an operand"
+        )
+    if source_operand.variadic or source_operand.optional:
+        raise ValueError(
+            f"Op '{op_name}': condition refinement source "
+            f"'{refinement.source}' must be a required non-variadic operand"
+        )
+    if (
+        len(results) != 1
+        or not isinstance(results[0], Result)
+        or results[0].type_constraint is not I1
+        or results[0].variadic
+    ):
+        raise ValueError(
+            f"Op '{op_name}': condition refinement requires exactly one "
+            "non-variadic i1 result"
+        )
+    if not refinement.materialize:
+        raise ValueError(
+            f"Op '{op_name}': condition refinement materializer must be non-empty"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class Op:
     """A complete operation declaration.
@@ -4664,6 +4955,7 @@ class Op:
     )
     facts: str = ""  # C function name for fact inference, or "".
     type_transfer: str = ""  # C function name for semantic type transfer, or "".
+    condition_refinement: ConditionRefinement | None = None
     verify: str = ""  # C function name for op-specific verification, or "".
     builder_name: str | None = None  # Python builder method override, or None.
     generate_c_builder: bool = True  # False when construction requires domain context.
@@ -4699,6 +4991,7 @@ class Op:
         effective_traits: str = "",
         facts: str = "",
         type_transfer: str = "",
+        condition_refinement: ConditionRefinement | None = None,
         verify: str = "",
         builder_name: str | None = None,
         generate_c_builder: bool = True,
@@ -4738,11 +5031,15 @@ class Op:
         object.__setattr__(self, "effective_traits", effective_traits)
         object.__setattr__(self, "facts", facts)
         object.__setattr__(self, "type_transfer", type_transfer)
+        object.__setattr__(self, "condition_refinement", condition_refinement)
         object.__setattr__(self, "verify", verify)
         object.__setattr__(self, "builder_name", builder_name)
         object.__setattr__(self, "generate_c_builder", generate_c_builder)
         object.__setattr__(self, "phase", phase)
         object.__setattr__(self, "contracts", tuple(contracts))
+        _validate_condition_refinement(
+            name, condition_refinement, frozen_operands, frozen_results
+        )
         if (
             category is not None
             and group is not None
@@ -4911,6 +5208,7 @@ class Op:
             name, frozen_operands, frozen_results, tuple(traits)
         )
         _validate_scoped_enum_fields(name, frozen_format, frozen_attrs)
+        _validate_attr_params_fields(name, frozen_format, frozen_attrs)
         # Validate that format elements reference declared fields.
         if frozen_format:
             _validate_format_fields(

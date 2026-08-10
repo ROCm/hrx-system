@@ -1269,6 +1269,24 @@ ERR_TARGET_069 = ErrorDef(
     ),
 )
 
+# ERR_TARGET_070: Compile-time query remains unresolved.
+ERR_TARGET_070 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=70,
+    severity=Severity.ERROR,
+    summary="Compile-time query remains unresolved.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "cannot lower unresolved compile-time query '{op_name}' in "
+        "'@{function_name}'"
+    ),
+    params=_TARGET_CONTEXT_PARAMS,
+    fix_hint=(
+        "Provide static, configuration, or target facts that resolve "
+        "'{op_name}' and canonicalize the result before target-low lowering"
+    ),
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1331,4 +1349,5 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_067,
     ERR_TARGET_068,
     ERR_TARGET_069,
+    ERR_TARGET_070,
 )

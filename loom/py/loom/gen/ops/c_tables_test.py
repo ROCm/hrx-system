@@ -13,6 +13,7 @@ from loom.assembly import (
     COMMA,
     Attr,
     AttrDict,
+    AttrParams,
     AttrTable,
     BlockRef,
     Clause,
@@ -63,6 +64,8 @@ from loom.dsl import (
     BitRangeWithinElementWidth,
     Borrow,
     CallLikeInterface,
+    ConditionRefinement,
+    ConditionRefinementTruth,
     Constraint,
     ContractFamily,
     Dialect,
@@ -70,7 +73,9 @@ from loom.dsl import (
     ElementWidthGreaterThan,
     EncodingFamilyDef,
     EncodingFamilyRole,
+    EncodingOperandSummaryDef,
     EncodingParam,
+    EncodingRecordDef,
     EnumCase,
     EnumDef,
     FuncLikeInterface,
@@ -348,6 +353,27 @@ def test_generate_op_registry_emits_registration_tables() -> None:
     assert "iree_make_status" not in op_registry_tables_c
 
 
+def test_generate_op_registry_wires_condition_refinement_tables() -> None:
+    dialect = Dialect("test", dialect_id=0x01)
+    op = Op(
+        "test.is_positive",
+        group=dialect,
+        operands=[Operand("value", INTEGER)],
+        results=[Result("matches", TypeConstraint.I1)],
+        condition_refinement=ConditionRefinement(
+            source="value",
+            truth=ConditionRefinementTruth.TRUE,
+            materialize="loom_test_is_positive_materialize",
+        ),
+    )
+
+    _, tables_h, tables_c = generate_op_registry([(dialect, [op], ())])
+
+    assert "loom_op_registry_condition_refinements_fn_t" in tables_h
+    assert "condition_refinements_fn" in tables_h
+    assert "loom_test_dialect_condition_refinements" in tables_c
+
+
 def test_generate_parameterized_attribute_family_metadata() -> None:
     dialect = Dialect("test", dialect_id=0x01)
     scope = EnumDef(
@@ -420,6 +446,10 @@ def test_generate_encoding_family_metadata() -> None:
         [EnumCase("none", 0), EnumCase("nearest_even", 1)],
         doc="Encoded value rounding policy.",
     )
+    auxiliary_keys = EnumDef(
+        "AuxiliaryKey",
+        [EnumCase("scale", 0), EnumCase("minimum", 3)],
+    )
     family = EncodingFamilyDef(
         "matrix_operand",
         group=dialect,
@@ -431,6 +461,27 @@ def test_generate_encoding_family_metadata() -> None:
         dynamic_parameters=[
             Operand("matrix", TypeConstraint.VECTOR),
             Operand("seed", TypeConstraint.INDEX),
+        ],
+        fixed_record=EncodingRecordDef(
+            logical_element_count=256,
+            storage_byte_count=144,
+            required_alignment=16,
+        ),
+        fixed_operand_summary=EncodingOperandSummaryDef(
+            element_format=0x10000,
+            payload_packing=0x2,
+            zero_scale_fallback=True,
+            sparsity_group_nonzero_element_count=2,
+            sparsity_group_element_count=4,
+            payload_register_count=8,
+            payload_element_count=256,
+            scale_group_shape=(16, 16),
+            scale_operand_count=2,
+        ),
+        auxiliary_key_enum=auxiliary_keys,
+        required_auxiliary_keys=[
+            auxiliary_keys.case("scale"),
+            auxiliary_keys.case("minimum"),
         ],
     )
 
@@ -460,6 +511,63 @@ def test_generate_encoding_family_metadata() -> None:
     assert ".type_constraint = LOOM_TYPE_CONSTRAINT_VECTOR" in tables_c
     assert ".type_constraint = LOOM_TYPE_CONSTRAINT_INDEX" in tables_c
     assert ".dynamic_parameter_count = IREE_ARRAYSIZE(loom_encoding_matrix_operand_dynamic_parameter_desc)" in tables_c
+    assert "static const loom_encoding_family_fixed_metadata_t loom_encoding_matrix_operand_fixed_metadata" in tables_c
+    assert ".element_format = UINT64_C(0x10000)" in tables_c
+    assert ".payload_packing = UINT32_C(0x2)" in tables_c
+    assert ".flags = UINT32_C(0x1)" in tables_c
+    assert ".nonzero_element_count = 2" in tables_c
+    assert ".payload_register_count = 8" in tables_c
+    assert ".payload_element_count = 256" in tables_c
+    assert ".element_count = 256" in tables_c
+    assert ".shape = {16, 16}" in tables_c
+    assert ".scale_operand_count = 2" in tables_c
+    assert ".required_auxiliary_keys = UINT64_C(0x9)" in tables_c
+    assert ".logical_element_count = 256" in tables_c
+    assert ".storage_byte_count = 144" in tables_c
+    assert ".required_alignment = 16" in tables_c
+    assert ".fixed_metadata = &loom_encoding_matrix_operand_fixed_metadata" in tables_c
+
+
+def test_generate_qualified_encoding_family_metadata() -> None:
+    family = EncodingFamilyDef(
+        "ggml.q4_k",
+        group=Dialect("encoding", dialect_id=0x09),
+        role=EncodingFamilyRole.STORAGE_SCHEMA,
+    )
+
+    ops_h = generate_ops_h("encoding", 0x09, [], (), [family])
+    tables_c = generate_tables_c("encoding", 0x09, [], (), [family])
+
+    assert "loom_encoding_ggml_q4_k_family_descriptor" in ops_h
+    assert '.name = _BSTRING(9, "ggml.q4_k")' in tables_c
+
+
+def test_rejects_colliding_encoding_family_c_names() -> None:
+    dialect = Dialect("encoding", dialect_id=0x09)
+    families = [
+        EncodingFamilyDef(
+            name,
+            group=dialect,
+            role=EncodingFamilyRole.STORAGE_SCHEMA,
+        )
+        for name in ("ggml.q4_k", "ggml_q4_k")
+    ]
+
+    with _raises_value_error("encoding families 'ggml.q4_k' and 'ggml_q4_k' both generate C prefix"):
+        generate_ops_h("encoding", 0x09, [], (), families)
+    with _raises_value_error("encoding families 'ggml.q4_k' and 'ggml_q4_k' both generate C prefix"):
+        generate_tables_c("encoding", 0x09, [], (), families)
+
+
+def test_rejects_duplicate_encoding_family_names() -> None:
+    family = EncodingFamilyDef(
+        "ggml.q4_k",
+        group=Dialect("encoding", dialect_id=0x09),
+        role=EncodingFamilyRole.STORAGE_SCHEMA,
+    )
+
+    with _raises_value_error("duplicate encoding family 'ggml.q4_k'"):
+        generate_ops_h("encoding", 0x09, [], (), [family, family])
 
 
 def test_generate_encoding_families_share_enum_vocabulary() -> None:
@@ -484,6 +592,51 @@ def test_generate_encoding_families_share_enum_vocabulary() -> None:
     assert ops_h.count("typedef enum loom_encoding_rounding_policy_e") == 1
     assert tables_c.count("loom_encoding_rounding_policy_names[]") == 1
     assert tables_c.count(".enum_case_names = loom_encoding_rounding_policy_names") == 2
+
+
+def test_generate_parameterized_attrs_share_encoding_enum_vocabulary() -> None:
+    dialect = Dialect("encoding", dialect_id=0x09)
+    numeric_format = EnumDef(
+        "NumericFormat",
+        [EnumCase("f16", 1), EnumCase("bf16", 2)],
+    )
+    requirements = ParameterizedAttrDef(
+        "encoding.requirements",
+        group=dialect,
+        parameters=[
+            AttrDef(
+                "element_format",
+                ATTR_TYPE_ENUM,
+                enum_def=numeric_format,
+                optional=True,
+            ),
+        ],
+    )
+    family = EncodingFamilyDef(
+        "matrix_operand",
+        group=dialect,
+        role=EncodingFamilyRole.STORAGE_SCHEMA,
+        parameters=[
+            AttrDef("element_format", ATTR_TYPE_ENUM, enum_def=numeric_format),
+        ],
+    )
+
+    ops_h = generate_ops_h("encoding", 0x09, [], [requirements], [family])
+    builders_c = generate_builders_c(
+        "encoding",
+        [],
+        [requirements],
+        encoding_families=[family],
+    )
+    tables_c = generate_tables_c("encoding", 0x09, [], [requirements], [family])
+
+    assert ops_h.count("typedef enum loom_encoding_numeric_format_e") == 1
+    assert "loom_encoding_requirements_element_format_t" not in ops_h
+    assert "static inline loom_encoding_numeric_format_t loom_encoding_requirements_attr_element_format" in ops_h
+    assert "loom_encoding_numeric_format_t element_format" in ops_h
+    assert "loom_encoding_numeric_format_t element_format" in builders_c
+    assert tables_c.count("loom_encoding_numeric_format_names[]") == 1
+    assert tables_c.count(".enum_case_names = loom_encoding_numeric_format_names") == 2
 
 
 def test_generate_parameterized_attribute_array_surface() -> None:
@@ -583,6 +736,65 @@ def test_generate_dialect_tables_emit_dense_op_semantics() -> None:
     assert "loom_dialect_semantics_lookup(" in tables_c
     assert "kind, LOOM_DIALECT_TEST, loom_test_semantics_array," in tables_c
     assert "loom_op_dialect_id(kind)" not in tables_c
+
+
+def test_generate_dialect_tables_emit_sparse_condition_refinements() -> None:
+    dialect = Dialect("test", dialect_id=0x01)
+    op = Op(
+        "test.is_positive",
+        group=dialect,
+        operands=[Operand("value", INTEGER)],
+        results=[Result("matches", TypeConstraint.I1)],
+        condition_refinement=ConditionRefinement(
+            source="value",
+            truth=ConditionRefinementTruth.TRUE,
+            materialize="loom_test_is_positive_materialize",
+        ),
+    )
+
+    ops_h = generate_ops_h("test", 0x01, [op])
+    tables_c = generate_tables_c("test", 0x01, [op])
+
+    assert "iree_status_t loom_test_is_positive_materialize(" in ops_h
+    assert "loom_test_dialect_condition_refinements(" in ops_h
+    assert "loom_test_condition_refinement_array[]" in tables_c
+    assert ".materialize = loom_test_is_positive_materialize," in tables_c
+    assert ".source_operand_index = 0," in tables_c
+    assert ".truth_flags = LOOM_CONDITION_REFINEMENT_TRUTH_TRUE," in tables_c
+    assert ".condition_refinement_index = 1," in tables_c
+
+
+def test_condition_refinement_requires_a_required_operand_and_i1_result() -> None:
+    dialect = Dialect("test")
+    refinement = ConditionRefinement(
+        source="value",
+        truth=ConditionRefinementTruth.TRUE,
+        materialize="loom_test_is_positive_materialize",
+    )
+
+    with _raises_value_error("does not name an operand"):
+        Op(
+            "test.missing_source",
+            group=dialect,
+            results=[Result("matches", TypeConstraint.I1)],
+            condition_refinement=refinement,
+        )
+    with _raises_value_error("must be a required non-variadic operand"):
+        Op(
+            "test.optional_source",
+            group=dialect,
+            operands=[Operand("value", INTEGER, optional=True)],
+            results=[Result("matches", TypeConstraint.I1)],
+            condition_refinement=refinement,
+        )
+    with _raises_value_error("requires exactly one non-variadic i1 result"):
+        Op(
+            "test.non_boolean",
+            group=dialect,
+            operands=[Operand("value", INTEGER)],
+            results=[Result("result", INTEGER)],
+            condition_refinement=refinement,
+        )
 
 
 def test_generate_tables_omits_zero_default_vtable_fields() -> None:
@@ -2457,6 +2669,30 @@ def test_template_param_flags_uses_template_attr_and_instance_flags() -> None:
     assert "uint8_t instance_flags" in ops_h
     assert "loom_op_attrs(*out_op)[0] = loom_attr_enum(kind);" in builders_c
     assert "(*out_op)->instance_flags = instance_flags;" in builders_c
+
+
+def test_attr_params_uses_exact_parameterized_family() -> None:
+    dialect = Dialect("test")
+    options = ParameterizedAttrDef(
+        "test.options",
+        group=dialect,
+        parameters=[AttrDef("width", ATTR_TYPE_I64, optional=True)],
+    )
+    op = Op(
+        "test.query",
+        group=dialect,
+        attrs=[
+            AttrDef(
+                "requirements",
+                ATTR_TYPE_PARAMETERIZED,
+                parameterized_attr=options,
+            )
+        ],
+        format=[AttrParams("requirements")],
+    )
+
+    tables_c = generate_tables_c("test", 0, [op], parameterized_attrs=[options])
+    assert "{LOOM_FORMAT_KIND_ATTR_PARAMS, 0, 0}" in tables_c
 
 
 def test_operand_dict_generates_format_and_builder_support() -> None:

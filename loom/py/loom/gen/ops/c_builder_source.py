@@ -11,10 +11,13 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from loom.assembly import StableKeyRef
-from loom.dsl import Op, ParameterizedAttrDef, TypeConstraint
+from loom.dsl import EncodingFamilyDef, Op, ParameterizedAttrDef, TypeConstraint
 from loom.fields import FieldKind, compute_layout
 from loom.gen.ops import c_builder_model, c_queries
 from loom.gen.ops.c_enum_attrs import SharedEnumMap
+from loom.gen.ops.c_enum_attrs import (
+    collect_encoding_enum_types as _collect_encoding_enum_types,
+)
 from loom.gen.ops.c_enum_attrs import collect_shared_enums as _collect_shared_enums
 from loom.gen.ops.c_names import COPYRIGHT
 from loom.gen.ops.c_names import c_enum_name as _c_enum_name
@@ -855,6 +858,7 @@ def generate_builders_c(
     ops: Sequence[Op],
     parameterized_attrs: Sequence[ParameterizedAttrDef] = (),
     *,
+    encoding_families: Sequence[EncodingFamilyDef] = (),
     include_path: str | None = None,
 ) -> str:
     """Generates the builders.c file for a dialect."""
@@ -876,7 +880,12 @@ def generate_builders_c(
         lines.append('#include "loom/util/stable_id.h"')
     lines.append("")
 
-    lines.extend(_generate_parameterized_attr_source_lines(parameterized_attrs))
+    lines.extend(
+        _generate_parameterized_attr_source_lines(
+            parameterized_attrs,
+            _collect_encoding_enum_types(dialect_name, encoding_families),
+        )
+    )
 
     for op in ops:
         if not op.generate_c_builder:

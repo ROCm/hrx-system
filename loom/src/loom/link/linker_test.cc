@@ -20,6 +20,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/op_registry.h"
 #include "loom/ops/test/ops.h"
+#include "loom/ops/test/registry.h"
 #include "loom/target/test/alt_descriptors.h"
 #include "loom/target/test/descriptors.h"
 #include "loom/verify/verify.h"
@@ -39,8 +40,7 @@ class LinkerTest : public ::testing::Test {
                                      &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
     IREE_ASSERT_OK(loom_op_registry_register_all_dialects(&context_));
-    RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables,
-                    loom_test_dialect_op_semantics);
+    IREE_ASSERT_OK(loom_test_dialect_register(&context_));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     low_registry_.descriptor_set_providers = low_descriptor_set_providers_;
     low_registry_.descriptor_set_provider_count =

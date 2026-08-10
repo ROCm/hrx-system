@@ -13,7 +13,13 @@
 #define LOOM_OPS_ENCODING_OPS_H_
 
 #include "loom/ir/encoding.h"
+#include "loom/ir/parameterized_attr.h"
 #include "loom/ops/op_defs.h"
+
+enum {
+  LOOM_PARAMETERIZED_ATTR_ENCODING_MATCH = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_ENCODING, 0),
+  LOOM_PARAMETERIZED_ATTR_ENCODING_COUNT_ = 1,
+};
 
 // Rounding and exceptional-value policy for encoded values.
 typedef enum loom_encoding_rounding_policy_e {
@@ -321,6 +327,45 @@ typedef enum loom_encoding_turboquant_kv_dynamic_parameter_e {
 extern "C" {
 #endif
 
+// Typed semantic requirements for an encoded storage schema.
+enum loom_encoding_match_attr_build_flag_bits_e {
+  LOOM_ENCODING_MATCH_ATTR_BUILD_FLAG_HAS_ELEMENT_FORMAT = 1u << 0,
+  LOOM_ENCODING_MATCH_ATTR_BUILD_FLAG_HAS_PAYLOAD_PACKING = 1u << 1,
+  LOOM_ENCODING_MATCH_ATTR_BUILD_FLAG_HAS_AFFINE = 1u << 2,
+};
+typedef uint32_t loom_encoding_match_attr_build_flags_t;
+static inline bool loom_encoding_match_attr_isa(loom_attribute_t attr) {
+  return attr.kind == LOOM_ATTR_PARAMETERIZED && loom_attr_as_parameterized_kind(attr) == LOOM_PARAMETERIZED_ATTR_ENCODING_MATCH;
+}
+enum { LOOM_ENCODING_MATCH_ATTR_ELEMENT_FORMAT_PARAMETER_INDEX = 0 };
+static inline bool loom_encoding_match_attr_has_element_format(loom_attribute_t attr) {
+  return !loom_attr_is_absent(loom_attr_as_parameterized_slots(attr)[LOOM_ENCODING_MATCH_ATTR_ELEMENT_FORMAT_PARAMETER_INDEX]);
+}
+static inline loom_encoding_numeric_format_t loom_encoding_match_attr_element_format(loom_attribute_t attr) {
+  return (loom_encoding_numeric_format_t)loom_attr_as_enum(loom_attr_as_parameterized_slots(attr)[LOOM_ENCODING_MATCH_ATTR_ELEMENT_FORMAT_PARAMETER_INDEX]);
+}
+enum { LOOM_ENCODING_MATCH_ATTR_PAYLOAD_PACKING_PARAMETER_INDEX = 1 };
+static inline bool loom_encoding_match_attr_has_payload_packing(loom_attribute_t attr) {
+  return !loom_attr_is_absent(loom_attr_as_parameterized_slots(attr)[LOOM_ENCODING_MATCH_ATTR_PAYLOAD_PACKING_PARAMETER_INDEX]);
+}
+static inline loom_encoding_payload_packing_t loom_encoding_match_attr_payload_packing(loom_attribute_t attr) {
+  return (loom_encoding_payload_packing_t)loom_attr_as_enum(loom_attr_as_parameterized_slots(attr)[LOOM_ENCODING_MATCH_ATTR_PAYLOAD_PACKING_PARAMETER_INDEX]);
+}
+enum { LOOM_ENCODING_MATCH_ATTR_AFFINE_PARAMETER_INDEX = 2 };
+static inline bool loom_encoding_match_attr_has_affine(loom_attribute_t attr) {
+  return !loom_attr_is_absent(loom_attr_as_parameterized_slots(attr)[LOOM_ENCODING_MATCH_ATTR_AFFINE_PARAMETER_INDEX]);
+}
+static inline loom_encoding_affine_policy_t loom_encoding_match_attr_affine(loom_attribute_t attr) {
+  return (loom_encoding_affine_policy_t)loom_attr_as_enum(loom_attr_as_parameterized_slots(attr)[LOOM_ENCODING_MATCH_ATTR_AFFINE_PARAMETER_INDEX]);
+}
+iree_status_t loom_encoding_match_attr_make(
+    loom_module_t* module,
+    loom_encoding_match_attr_build_flags_t build_flags,
+    loom_encoding_numeric_format_t element_format,
+    loom_encoding_payload_packing_t payload_packing,
+    loom_encoding_affine_policy_t affine,
+    loom_attribute_t* out_attr);
+
 extern const loom_encoding_family_descriptor_t loom_encoding_physical_storage_family_descriptor;
 extern const loom_encoding_family_descriptor_t loom_encoding_dense_family_descriptor;
 extern const loom_encoding_family_descriptor_t loom_encoding_strided_family_descriptor;
@@ -349,7 +394,9 @@ enum {
   LOOM_OP_ENCODING_LAYOUT_ASSUME_DENSE = LOOM_OP_KIND(LOOM_DIALECT_ENCODING, 4),
   LOOM_OP_ENCODING_LAYOUT_ASSUME_STRIDED = LOOM_OP_KIND(LOOM_DIALECT_ENCODING, 5),
   LOOM_OP_ENCODING_ASSUME_SPEC = LOOM_OP_KIND(LOOM_DIALECT_ENCODING, 6),
-  LOOM_OP_ENCODING_COUNT_ = 7,
+  LOOM_OP_ENCODING_MATCHES = LOOM_OP_KIND(LOOM_DIALECT_ENCODING, 7),
+  LOOM_OP_ENCODING_ASSUME_MATCH = LOOM_OP_KIND(LOOM_DIALECT_ENCODING, 8),
+  LOOM_OP_ENCODING_COUNT_ = 9,
 };
 
 // LOOM_OP_ENCODING_LAYOUT_DENSE: Construct a dense row-major address layout. The consuming view type provides the rank and logical extents.
@@ -415,19 +462,31 @@ iree_status_t loom_encoding_define_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_ENCODING_ISA: Test if an encoding belongs to a category.
-// %is_quantized = encoding.isa %enc, "quantized" : i1
+// LOOM_OP_ENCODING_ISA: Test if an encoding exactly matches a static encoding specification.
+// %is_q4 = encoding.isa<#ggml.q4_k> %schema : encoding<schema>
 LOOM_DEFINE_ISA(loom_encoding_isa_isa, LOOM_OP_ENCODING_ISA)
 LOOM_DEFINE_OPERAND(loom_encoding_isa_enc, 0)
 LOOM_DEFINE_RESULT(loom_encoding_isa_result, 0)
-LOOM_DEFINE_ATTR_STRING(loom_encoding_isa_category, 0)
+LOOM_DEFINE_ATTR_ENCODING(loom_encoding_isa_spec, 0)
 iree_status_t loom_encoding_isa_build(
     loom_builder_t* builder,
+    uint16_t spec,
     loom_value_id_t enc,
-    loom_string_id_t category,
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
+iree_status_t loom_encoding_isa_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+iree_status_t loom_encoding_isa_materialize_refinement(
+    loom_rewriter_t* rewriter, const loom_op_t* condition_op,
+    loom_value_id_t source, bool assumed_truth,
+    loom_value_id_t* out_refined_value);
+iree_status_t loom_encoding_isa_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_ENCODING_LAYOUT_ASSUME_DENSE: Refine an existing address-layout encoding value with the fact that it is dense row-major. The result is the same encoding value in SSA form with stronger local facts.
 // %dense = encoding.layout.assume.dense %layout : encoding<layout>
@@ -490,6 +549,54 @@ iree_status_t loom_encoding_assume_spec_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
+// LOOM_OP_ENCODING_MATCHES: Test whether a storage schema satisfies typed semantic requirements.
+// %supports = encoding.matches<element_format = u4, payload_packing = multi_stream, affine = scale_plus_min> %schema : encoding<schema>
+LOOM_DEFINE_ISA(loom_encoding_matches_isa, LOOM_OP_ENCODING_MATCHES)
+LOOM_DEFINE_OPERAND(loom_encoding_matches_enc, 0)
+LOOM_DEFINE_RESULT(loom_encoding_matches_result, 0)
+LOOM_DEFINE_ATTR_PARAMETERIZED(loom_encoding_matches_requirements, 0)
+iree_status_t loom_encoding_matches_build(
+    loom_builder_t* builder,
+    loom_attribute_t requirements,
+    loom_value_id_t enc,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_encoding_matches_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+iree_status_t loom_encoding_matches_materialize_refinement(
+    loom_rewriter_t* rewriter, const loom_op_t* condition_op,
+    loom_value_id_t source, bool assumed_truth,
+    loom_value_id_t* out_refined_value);
+iree_status_t loom_encoding_matches_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_ENCODING_ASSUME_MATCH: Refine a storage schema with typed semantic requirements. Omitted fields retain their existing facts.
+// %schema2 = encoding.assume.match<element_format = u4, affine = scale_plus_min> %schema : encoding<schema>
+LOOM_DEFINE_ISA(loom_encoding_assume_match_isa, LOOM_OP_ENCODING_ASSUME_MATCH)
+LOOM_DEFINE_OPERAND(loom_encoding_assume_match_enc, 0)
+LOOM_DEFINE_RESULT(loom_encoding_assume_match_result, 0)
+LOOM_DEFINE_ATTR_PARAMETERIZED(loom_encoding_assume_match_requirements, 0)
+iree_status_t loom_encoding_assume_match_build(
+    loom_builder_t* builder,
+    loom_attribute_t requirements,
+    loom_value_id_t enc,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_encoding_assume_match_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+iree_status_t loom_encoding_assume_match_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
 // Returns the vtable array for the encoding dialect.
 const loom_op_vtable_t* const* loom_encoding_dialect_vtables(
     iree_host_size_t* out_count);
@@ -501,6 +608,14 @@ const loom_op_semantics_t* loom_encoding_dialect_op_semantics(
 // Returns semantic metadata for a encoding op kind, or empty metadata.
 loom_op_semantics_t loom_encoding_op_semantics(
     loom_op_kind_t kind);
+
+// Returns sparse condition-refinement descriptors for the encoding dialect.
+const loom_condition_refinement_descriptor_t* loom_encoding_dialect_condition_refinements(
+    iree_host_size_t* out_count);
+
+// Returns parameterized attribute descriptors for the encoding dialect.
+const loom_parameterized_attr_descriptor_t* loom_encoding_dialect_parameterized_attrs(
+    iree_host_size_t* out_count);
 
 #ifdef __cplusplus
 }

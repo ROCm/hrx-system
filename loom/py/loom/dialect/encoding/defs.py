@@ -11,10 +11,12 @@ from loom.assembly import (
     COMMA,
     Attr,
     AttrDict,
+    AttrParams,
     IndexList,
     OperandDict,
     Ref,
     ResultType,
+    TemplateParam,
     TypeOf,
 )
 from loom.dialect.encoding.numeric_formats import NUMERIC_FORMAT_KEYWORDS
@@ -27,24 +29,31 @@ from loom.dsl import (
     ATTR_TYPE_ENUM,
     ATTR_TYPE_I64,
     ATTR_TYPE_I64_ARRAY,
+    ATTR_TYPE_PARAMETERIZED,
     ATTR_TYPE_STRING,
     ENCODING_LAYOUT,
     ENCODING_SCHEMA,
     ENCODING_TRANSFORM,
+    FACT_IDENTITY,
     I1,
     INDEX,
     PURE,
     VECTOR,
     VIEW,
     AttrDef,
+    ConditionRefinement,
+    ConditionRefinementTruth,
     Dialect,
     EncodingFamilyDef,
     EncodingFamilyRole,
+    EncodingOperandSummaryDef,
+    EncodingRecordDef,
     EnumCase,
     EnumDef,
     Op,
     Operand,
     OpPhase,
+    ParameterizedAttrDef,
     Result,
     SameType,
 )
@@ -58,6 +67,12 @@ encoding_ops = Dialect("encoding", dialect_id=0x09, doc="Encoding definition and
 # ============================================================================
 # Static encoding families
 # ============================================================================
+
+
+def _one_hot_enum_fact(enum_def: EnumDef, keyword: str) -> int:
+    value = enum_def.case(keyword).value
+    return 0 if value == 0 else 1 << (value - 1)
+
 
 NumericFormat = EnumDef(
     "NumericFormat",
@@ -352,14 +367,20 @@ ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
             group=encoding_ops,
             role=EncodingFamilyRole.STORAGE_SCHEMA,
             parameters=_NAMED_FP8_PARAMETERS,
+            fixed_record=EncodingRecordDef(1, 1),
+            fixed_operand_summary=EncodingOperandSummaryDef(
+                element_format=_one_hot_enum_fact(NumericFormat, numeric_format),
+                payload_packing=_one_hot_enum_fact(PayloadPacking, "dense_lanes"),
+                payload_element_count=1,
+            ),
             doc="Named eight-bit floating-point storage schema.",
         )
-        for name in (
-            "ieee_fp8_e4m3",
-            "ieee_fp8_e5m2",
-            "fp8_e4m3fn",
-            "fp8_e4m3fnuz",
-            "fp8_e5m2fnuz",
+        for name, numeric_format in (
+            ("ieee_fp8_e4m3", "f8e4m3"),
+            ("ieee_fp8_e5m2", "f8e5m2"),
+            ("fp8_e4m3fn", "f8e4m3fn"),
+            ("fp8_e4m3fnuz", "f8e4m3fnuz"),
+            ("fp8_e5m2fnuz", "f8e5m2fnuz"),
         )
     ),
     EncodingFamilyDef(
@@ -404,6 +425,38 @@ ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
         doc="TurboQuant key/value storage schema.",
     ),
 )
+
+# ============================================================================
+# Semantic encoding query attributes
+# ============================================================================
+
+encoding_match_requirements = ParameterizedAttrDef(
+    "encoding.match",
+    group=encoding_ops,
+    parameters=(
+        AttrDef(
+            "element_format",
+            ATTR_TYPE_ENUM,
+            enum_def=NumericFormat,
+            optional=True,
+        ),
+        AttrDef(
+            "payload_packing",
+            ATTR_TYPE_ENUM,
+            enum_def=PayloadPacking,
+            optional=True,
+        ),
+        AttrDef(
+            "affine",
+            ATTR_TYPE_ENUM,
+            enum_def=AffinePolicy,
+            optional=True,
+        ),
+    ),
+    doc="Typed semantic requirements for an encoded storage schema.",
+)
+
+ALL_ENCODING_PARAMETERIZED_ATTRS: tuple[ParameterizedAttrDef, ...] = (encoding_match_requirements,)
 
 # ============================================================================
 # encoding.layout.dense — dense logical-to-physical address layout
@@ -560,7 +613,7 @@ encoding_assume_spec = Op(
     results=[Result("result", ANY_ENCODING, doc="Encoding value with exact static-spec facts.")],
     attrs=[AttrDef("spec", ATTR_TYPE_ENCODING, doc="Exact static encoding specification.")],
     constraints=[SameType("enc", "result")],
-    traits=[PURE],
+    traits=[PURE, FACT_IDENTITY],
     verify="loom_encoding_assume_spec_verify",
     facts="loom_encoding_assume_spec_facts",
     format=[
@@ -576,20 +629,90 @@ encoding_assume_spec = Op(
 )
 
 # ============================================================================
-# encoding.isa — test if an encoding belongs to a category
+# encoding.isa — test an exact static encoding specification
 # ============================================================================
 
 encoding_isa = Op(
     name="encoding.isa",
     group=encoding_ops,
-    doc="Test if an encoding belongs to a category.",
-    operands=[Operand("enc", ANY_ENCODING)],
+    phase=OpPhase.COMPILE_TIME_QUERY,
+    doc="Test if an encoding exactly matches a static encoding specification.",
+    operands=[Operand("enc", ANY_ENCODING, doc="Encoding value to query.")],
     results=[Result("result", I1)],
-    attrs=[AttrDef("category", ATTR_TYPE_STRING)],
+    attrs=[AttrDef("spec", ATTR_TYPE_ENCODING, doc="Exact static encoding specification.")],
     traits=[PURE],
-    format=[Ref("enc"), COMMA, Attr("category"), COLON, TypeOf("result")],
+    condition_refinement=ConditionRefinement(
+        source="enc",
+        truth=ConditionRefinementTruth.TRUE,
+        materialize="loom_encoding_isa_materialize_refinement",
+    ),
+    verify="loom_encoding_isa_verify",
+    facts="loom_encoding_isa_facts",
+    format=[TemplateParam("spec"), Ref("enc"), COLON, TypeOf("enc")],
     examples=[
-        '%is_quantized = encoding.isa %enc, "quantized" : i1',
+        "%is_q4 = encoding.isa<#ggml.q4_k> %schema : encoding<schema>",
+    ],
+)
+
+# ============================================================================
+# encoding.matches — test typed semantic encoding facts
+# ============================================================================
+
+encoding_matches = Op(
+    name="encoding.matches",
+    group=encoding_ops,
+    phase=OpPhase.COMPILE_TIME_QUERY,
+    doc="Test whether a storage schema satisfies typed semantic requirements.",
+    operands=[Operand("enc", ENCODING_SCHEMA, doc="Storage schema to query.")],
+    results=[Result("result", I1)],
+    attrs=[
+        AttrDef(
+            "requirements",
+            ATTR_TYPE_PARAMETERIZED,
+            parameterized_attr=encoding_match_requirements,
+            doc="Authored semantic requirements; omitted fields are wildcards.",
+        ),
+    ],
+    traits=[PURE],
+    condition_refinement=ConditionRefinement(
+        source="enc",
+        truth=ConditionRefinementTruth.TRUE,
+        materialize="loom_encoding_matches_materialize_refinement",
+    ),
+    verify="loom_encoding_matches_verify",
+    facts="loom_encoding_matches_facts",
+    format=[AttrParams("requirements"), Ref("enc"), COLON, TypeOf("enc")],
+    examples=[
+        "%supports = encoding.matches<element_format = u4, payload_packing = multi_stream, affine = scale_plus_min> %schema : encoding<schema>",
+    ],
+)
+
+# ============================================================================
+# encoding.assume.match — local semantic encoding refinement
+# ============================================================================
+
+encoding_assume_match = Op(
+    name="encoding.assume.match",
+    group=encoding_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Refine a storage schema with typed semantic requirements. Omitted fields retain their existing facts."),
+    operands=[Operand("enc", ENCODING_SCHEMA, doc="Storage schema to refine.")],
+    results=[Result("result", ENCODING_SCHEMA, doc="Schema with stronger semantic facts.")],
+    attrs=[
+        AttrDef(
+            "requirements",
+            ATTR_TYPE_PARAMETERIZED,
+            parameterized_attr=encoding_match_requirements,
+            doc="Authored semantic requirements; omitted fields are unchanged.",
+        ),
+    ],
+    constraints=[SameType("enc", "result")],
+    traits=[PURE, FACT_IDENTITY],
+    verify="loom_encoding_assume_match_verify",
+    facts="loom_encoding_assume_match_facts",
+    format=[AttrParams("requirements"), Ref("enc"), COLON, TypeOf("enc")],
+    examples=[
+        "%schema2 = encoding.assume.match<element_format = u4, affine = scale_plus_min> %schema : encoding<schema>",
     ],
 )
 
@@ -605,4 +728,6 @@ ALL_ENCODING_OPS: tuple[Op, ...] = (
     encoding_layout_assume_dense,
     encoding_layout_assume_strided,
     encoding_assume_spec,
+    encoding_matches,
+    encoding_assume_match,
 )

@@ -127,6 +127,55 @@ func.def @if_preserves_inconclusive_unsigned_cmp(%x: index, %y: index) -> (index
 
 // ====
 
+// Dialect-owned condition refinements use generic branch analysis and only
+// materialize when the selected source is consumed inside the region.
+func.def @if_materializes_dialect_condition_refinement(%value: index) {
+  %condition = test.condition_refines_positive %value : index
+  scf.if %condition {
+    test.use %value : index
+  }
+  func.return
+}
+
+// ----
+func.def @if_materializes_dialect_condition_refinement(%value: index) {
+  %condition = test.condition_refines_positive %value : index
+  scf.if %condition {
+    %2 = index.assume %value [gt(%value, 0)] : index
+    test.use %2 : index
+  }
+  func.return
+}
+
+// ====
+
+// Multiple semantic conditions on one source form one edge-local refinement
+// chain. The final replacement dominates ordinary region uses.
+func.def @if_chains_dialect_condition_refinements(%value: index) {
+  %first = test.condition_refines_positive %value : index
+  %second = test.condition_refines_positive %value : index
+  %condition = scalar.andi %first, %second : i1
+  scf.if %condition {
+    test.use %value : index
+  }
+  func.return
+}
+
+// ----
+func.def @if_chains_dialect_condition_refinements(%value: index) {
+  %first = test.condition_refines_positive %value : index
+  %second = test.condition_refines_positive %value : index
+  %condition = scalar.andi %first, %second : i1
+  scf.if %condition {
+    %4 = index.assume %value [gt(%value, 0)] : index
+    %5 = index.assume %4 [gt(%4, 0)] : index
+    test.use %5 : index
+  }
+  func.return
+}
+
+// ====
+
 // Branch-edge facts materialize as region-local assumes, allowing both sides of
 // a dynamic condition to fold predicates that are only known on that edge.
 func.def @if_condition_relation_folds_inside_regions(%i: index, %n: index) -> (i1) {

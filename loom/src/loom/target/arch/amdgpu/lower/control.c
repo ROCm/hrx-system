@@ -186,42 +186,47 @@ static bool loom_amdgpu_single_predecessor_cfg_condition(
   return *out_condition != LOOM_VALUE_ID_INVALID;
 }
 
-static bool loom_amdgpu_cfg_cond_br_edge_implied_bool(
+static iree_status_t loom_amdgpu_cfg_cond_br_edge_implied_bool(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    bool* out_condition) {
+    bool* out_condition, bool* out_proven) {
   *out_condition = false;
+  *out_proven = false;
   if (!loom_cfg_cond_br_isa(source_op)) {
-    return false;
+    return iree_ok_status();
   }
 
   loom_value_id_t edge_condition = LOOM_VALUE_ID_INVALID;
   bool edge_assumed_truth = false;
   if (!loom_amdgpu_single_predecessor_cfg_condition(source_op, &edge_condition,
                                                     &edge_assumed_truth)) {
-    return false;
+    return iree_ok_status();
   }
 
   const loom_value_id_t condition = loom_cfg_cond_br_condition(source_op);
   if (condition == edge_condition) {
     *out_condition = edge_assumed_truth;
-    return true;
+    *out_proven = true;
+    return iree_ok_status();
   }
 
-  const loom_module_t* module = loom_low_lower_context_module(context);
   const loom_value_fact_table_t* fact_table =
       loom_low_lower_context_fact_table(context);
   loom_condition_integer_relation_t relation_storage[16];
   loom_condition_fact_set_t edge_facts = {0};
   loom_condition_fact_set_initialize(
       relation_storage, IREE_ARRAYSIZE(relation_storage), &edge_facts);
-  (void)loom_condition_facts_query(module, fact_table, edge_condition,
-                                   edge_assumed_truth, &edge_facts);
+  bool complete = false;
+  IREE_RETURN_IF_ERROR(loom_condition_facts_query(
+      loom_low_lower_context_condition_query(context), fact_table,
+      edge_condition, edge_assumed_truth, &edge_facts, &complete));
+  if (!complete) return iree_ok_status();
   if (edge_facts.integer_relation_count == 0) {
-    return false;
+    return iree_ok_status();
   }
 
   return loom_condition_fact_set_proves_condition(
-      module, fact_table, &edge_facts, condition, out_condition);
+      loom_low_lower_context_condition_query(context), fact_table, &edge_facts,
+      condition, out_condition, out_proven);
 }
 
 // Materializes a subgroup-uniform 32- or 64-bit address stored in VGPRs as an
@@ -1408,8 +1413,11 @@ iree_status_t loom_amdgpu_prepare_branch(
     return iree_ok_status();
   }
   bool edge_implied_condition = false;
-  if (loom_amdgpu_cfg_cond_br_edge_implied_bool(context, source_terminator,
-                                                &edge_implied_condition)) {
+  bool edge_condition_proven = false;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_cfg_cond_br_edge_implied_bool(
+      context, source_terminator, &edge_implied_condition,
+      &edge_condition_proven));
+  if (edge_condition_proven) {
     return iree_ok_status();
   }
 
@@ -2123,8 +2131,10 @@ iree_status_t loom_amdgpu_emit_cond_branch(void* user_data,
   if (loom_amdgpu_condition_is_reg_class(context, condition_type,
                                          LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2)) {
     bool edge_implied_condition = false;
-    if (loom_amdgpu_cfg_cond_br_edge_implied_bool(context, source_op,
-                                                  &edge_implied_condition)) {
+    bool edge_condition_proven = false;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_cfg_cond_br_edge_implied_bool(
+        context, source_op, &edge_implied_condition, &edge_condition_proven));
+    if (edge_condition_proven) {
       loom_block_t* low_dest =
           edge_implied_condition ? low_true_dest : low_false_dest;
       loom_op_t* low_br_op = NULL;

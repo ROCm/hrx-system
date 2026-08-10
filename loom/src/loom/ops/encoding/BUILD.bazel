@@ -15,6 +15,7 @@ package(
 loom_generated_cc_library(
     name = "encoding",
     srcs = [
+        "condition_refinement.c",
         "facts.c",
         "families.c",
         "matrix_operand.c",
@@ -50,6 +51,7 @@ loom_generated_cc_library(
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/util:fact_table",
         "//loom/src/loom/util:numeric_format",
         "//loom/src/loom/util:stable_id",
@@ -71,7 +73,12 @@ loom_cc_benchmark(
         "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/test",
         "//loom/src/loom/ops/vector",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/transforms/cleanup:canonicalize",
         "//loom/src/loom/util:fact_table",
         "//loom/src/loom/util:stream",
         "//loom/src/loom/verify",
@@ -93,6 +100,19 @@ loom_cc_test(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/testing:diagnostic_matchers",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "storage_test",
+    srcs = ["storage_test.cc"],
+    deps = [
+        ":encoding",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

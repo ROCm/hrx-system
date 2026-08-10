@@ -68,6 +68,7 @@ def _load_encoding_generation() -> DialectGeneration:
     from loom.dialect.encoding import (
         ALL_ENCODING_FAMILIES,
         ALL_ENCODING_OPS,
+        ALL_ENCODING_PARAMETERIZED_ATTRS,
         encoding_ops,
     )
 
@@ -75,6 +76,7 @@ def _load_encoding_generation() -> DialectGeneration:
         encoding_ops,
         list(ALL_ENCODING_OPS),
         None,
+        parameterized_attrs=ALL_ENCODING_PARAMETERIZED_ATTRS,
         encoding_families=ALL_ENCODING_FAMILIES,
     )
 

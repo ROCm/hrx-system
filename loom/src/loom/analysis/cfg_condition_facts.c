@@ -220,14 +220,16 @@ static bool loom_cfg_condition_set_edge_bool_fact(
   return *inout_condition == condition && *inout_value == value;
 }
 
-void loom_cfg_condition_facts_compute_predecessor_edge(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+iree_status_t loom_cfg_condition_facts_compute_predecessor_edge(
+    loom_condition_query_t* condition_query,
+    const loom_value_fact_table_t* fact_table,
     const loom_dominance_info_t* dominance, const loom_block_t* block,
     const loom_op_t* predecessor_terminator, uint16_t predecessor_index,
     const loom_cfg_block_entry_condition_facts_t* current_facts,
     loom_condition_integer_relation_t* relation_storage,
     iree_host_size_t relation_capacity,
     loom_cfg_block_entry_condition_facts_t* out_fact) {
+  const loom_module_t* module = condition_query->module;
   *out_fact = (loom_cfg_block_entry_condition_facts_t){
       .condition = LOOM_VALUE_ID_INVALID,
       .integer_relations = relation_storage,
@@ -258,8 +260,12 @@ void loom_cfg_condition_facts_compute_predecessor_edge(
   loom_condition_fact_set_initialize(relation_storage, relation_capacity,
                                      &edge_facts);
   if (edge_has_condition) {
-    loom_condition_facts_query(module, fact_table, edge_condition, edge_value,
-                               &edge_facts);
+    // A bounded subset remains sound input to the fixed-point meet.
+    bool complete = false;
+    IREE_RETURN_IF_ERROR(loom_condition_facts_query(condition_query, fact_table,
+                                                    edge_condition, edge_value,
+                                                    &edge_facts, &complete));
+    (void)complete;
   }
   if (current_facts) {
     const loom_cfg_block_entry_condition_facts_t* predecessor_facts =
@@ -272,6 +278,7 @@ void loom_cfg_condition_facts_compute_predecessor_edge(
   }
 
   out_fact->integer_relation_count = edge_facts.integer_relation_count;
+  return iree_ok_status();
 }
 
 static bool loom_cfg_condition_block_entry_facts_equal(
@@ -292,8 +299,8 @@ static bool loom_cfg_condition_block_entry_facts_equal(
   return true;
 }
 
-static void loom_cfg_condition_compute_block_entry_facts(
-    const loom_module_t* module, const loom_cfg_graph_t* graph,
+static iree_status_t loom_cfg_condition_compute_block_entry_facts(
+    loom_condition_query_t* condition_query, const loom_cfg_graph_t* graph,
     const loom_value_fact_table_t* fact_table,
     const loom_dominance_info_t* dominance,
     const loom_cfg_block_entry_condition_facts_t* current_facts,
@@ -304,11 +311,11 @@ static void loom_cfg_condition_compute_block_entry_facts(
   };
   if (block_index == 0 ||
       !loom_cfg_graph_block_is_reachable(graph, block_index)) {
-    return;
+    return iree_ok_status();
   }
 
   const loom_block_t* block = graph->blocks[block_index].block;
-  if (!block) return;
+  if (!block) return iree_ok_status();
 
   bool saw_reachable_predecessor = false;
   bool condition_candidate_initialized = false;
@@ -321,16 +328,16 @@ static void loom_cfg_condition_compute_block_entry_facts(
     uint16_t predecessor_index = predecessors.values[i];
     if (!loom_cfg_graph_block_is_reachable(graph, predecessor_index)) continue;
     const loom_block_t* predecessor = graph->blocks[predecessor_index].block;
-    if (!predecessor) return;
+    if (!predecessor) return iree_ok_status();
     saw_reachable_predecessor = true;
 
     loom_condition_integer_relation_t
         edge_relation_storage[LOOM_CFG_CONDITION_FACT_RELATION_CAPACITY];
     loom_cfg_block_entry_condition_facts_t edge_fact = {0};
-    loom_cfg_condition_facts_compute_predecessor_edge(
-        module, fact_table, dominance, block, predecessor->last_op,
+    IREE_RETURN_IF_ERROR(loom_cfg_condition_facts_compute_predecessor_edge(
+        condition_query, fact_table, dominance, block, predecessor->last_op,
         predecessor_index, current_facts, edge_relation_storage,
-        IREE_ARRAYSIZE(edge_relation_storage), &edge_fact);
+        IREE_ARRAYSIZE(edge_relation_storage), &edge_fact));
     if (!edge_fact.condition_known ||
         !loom_cfg_condition_set_edge_bool_fact(
             edge_fact.condition, edge_fact.condition_value,
@@ -352,7 +359,7 @@ static void loom_cfg_condition_compute_block_entry_facts(
         edge_fact.integer_relation_count);
   }
 
-  if (!saw_reachable_predecessor) return;
+  if (!saw_reachable_predecessor) return iree_ok_status();
   out_fact->condition_known =
       condition_candidate_valid && condition_candidate_initialized;
   if (!out_fact->condition_known) {
@@ -360,6 +367,7 @@ static void loom_cfg_condition_compute_block_entry_facts(
   }
   out_fact->integer_relations = relation_storage;
   out_fact->integer_relation_count = relation_count;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_cfg_condition_copy_relations(
@@ -393,6 +401,8 @@ iree_status_t loom_cfg_condition_fact_table_compute(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, graph->block_count, sizeof(*facts), (void**)&facts));
   memset(facts, 0, graph->block_count * sizeof(*facts));
+  loom_condition_query_t condition_query;
+  loom_condition_query_initialize(module, arena, &condition_query);
 
   iree_host_size_t max_iterations = (iree_host_size_t)graph->block_count + 1;
   for (iree_host_size_t iteration = 0; iteration < max_iterations;
@@ -403,9 +413,9 @@ iree_status_t loom_cfg_condition_fact_table_compute(
       loom_condition_integer_relation_t
           relation_storage[LOOM_CFG_CONDITION_FACT_RELATION_CAPACITY];
       loom_cfg_block_entry_condition_facts_t computed_facts = {0};
-      loom_cfg_condition_compute_block_entry_facts(
-          module, graph, fact_table, dominance, facts, block_index,
-          relation_storage, &computed_facts);
+      IREE_RETURN_IF_ERROR(loom_cfg_condition_compute_block_entry_facts(
+          &condition_query, graph, fact_table, dominance, facts, block_index,
+          relation_storage, &computed_facts));
       if (loom_cfg_condition_block_entry_facts_equal(&facts[block_index],
                                                      &computed_facts)) {
         continue;

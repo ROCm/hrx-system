@@ -26,6 +26,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/analysis/condition_facts.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/ir.h"
 #include "loom/ir/module.h"
@@ -39,8 +40,6 @@ extern "C" {
 #define LOOM_SYMBOLIC_EXPR_DEFAULT_TERM_LIMIT 64
 
 typedef struct loom_symbolic_expr_memo_entry_t loom_symbolic_expr_memo_entry_t;
-typedef struct loom_condition_fact_set_t loom_condition_fact_set_t;
-
 // A single coefficient times an SSA value.
 typedef struct loom_symbolic_term_t {
   // Signed coefficient multiplying value_id.
@@ -102,6 +101,9 @@ typedef struct loom_symbolic_expr_context_t {
   // Optional edge-local facts applied during branch-sensitive proofs. Reset
   // the context after changing this pointer or the facts it references.
   const loom_condition_fact_set_t* condition_facts;
+
+  // Reusable traversal state for branch-sensitive fact queries.
+  loom_condition_query_t condition_query;
 
   // Arena used for memo entries, retained term arrays, and scratch growth.
   iree_arena_allocator_t* arena;

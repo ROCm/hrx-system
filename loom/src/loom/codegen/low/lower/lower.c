@@ -1488,6 +1488,8 @@ iree_status_t loom_low_lower_source_query_scope_create(
   scope->context.lowering.fact_table = options->fact_table;
   iree_arena_initialize(module->arena.block_pool,
                         &scope->context.function_arena);
+  loom_condition_query_initialize(module, &scope->context.function_arena,
+                                  &scope->context.lowering.condition_query);
 
   iree_status_t status =
       loom_target_low_descriptor_set_select_for_source_lowering(
@@ -2216,6 +2218,8 @@ iree_status_t loom_low_lower_import_declaration(
   };
   out_result->descriptor_set = descriptor_set;
   iree_arena_initialize(module->arena.block_pool, &context.function_arena);
+  loom_condition_query_initialize(module, &context.function_arena,
+                                  &context.lowering.condition_query);
   iree_arena_initialize(module->arena.block_pool, &context.emission_arena);
 
   loom_type_t* arg_types = NULL;
@@ -3495,6 +3499,8 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
   };
   context.lowering.fact_table = options->fact_table;
   iree_arena_initialize(module->arena.block_pool, &context.function_arena);
+  loom_condition_query_initialize(module, &context.function_arena,
+                                  &context.lowering.condition_query);
 
   iree_status_t status =
       loom_low_lowering_frame_initialize_value_ordinals(&context, source_body);

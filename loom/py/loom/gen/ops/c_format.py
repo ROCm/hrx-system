@@ -11,6 +11,7 @@ from __future__ import annotations
 from loom.assembly import (
     Attr,
     AttrDict,
+    AttrParams,
     AttrTable,
     BindingList,
     BlockArgs,
@@ -357,6 +358,15 @@ def translate_format_elements(op: Op) -> list[tuple[str, int, str]]:
                 case TemplateParam(field=name):
                     kind, index = resolve_field(name)
                     elements.append(("LOOM_FORMAT_KIND_TEMPLATE_PARAM", index, "0"))
+
+                case AttrParams(field=name):
+                    kind, index = resolve_field(name)
+                    attr = op.attr(name)
+                    if kind != FieldKind.ATTR:
+                        raise ValueError(f"Op '{op.name}': AttrParams field '{name}' is not an attr field")
+                    if attr is None or attr.attr_type != "parameterized" or attr.parameterized_attr is None:
+                        raise ValueError(f"Op '{op.name}': AttrParams field '{name}' must be a parameterized attr constrained to one exact family")
+                    elements.append(("LOOM_FORMAT_KIND_ATTR_PARAMS", index, "0"))
 
                 case TemplateParamFlags(param=param_name, flags=flags_name):
                     kind, index = resolve_field(param_name)
