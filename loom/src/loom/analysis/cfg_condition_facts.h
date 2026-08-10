@@ -55,8 +55,9 @@ typedef struct loom_cfg_condition_fact_table_t {
 // from a previous fixed-point iteration. |relation_storage| is caller-owned
 // scratch storage that remains owned by the caller; out_fact references it
 // until the caller copies the relations elsewhere.
-void loom_cfg_condition_facts_compute_predecessor_edge(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+iree_status_t loom_cfg_condition_facts_compute_predecessor_edge(
+    loom_condition_query_t* condition_query,
+    const loom_value_fact_table_t* fact_table,
     const loom_dominance_info_t* dominance, const loom_block_t* block,
     const loom_op_t* predecessor_terminator, uint16_t predecessor_index,
     const loom_cfg_block_entry_condition_facts_t* current_facts,

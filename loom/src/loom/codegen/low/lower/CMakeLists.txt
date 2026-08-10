@@ -33,6 +33,7 @@ loom_cc_library(
     iree::base
     iree::base::internal
     iree::base::internal::arena
+    loom::analysis::condition_facts
     loom::analysis::contract_vector
     loom::analysis::kernel_async_legality
     loom::analysis::symbolic_expr

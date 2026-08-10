@@ -21,6 +21,7 @@
 #define LOOM_ANALYSIS_CONDITION_FACTS_H_
 
 #include "iree/base/api.h"
+#include "iree/base/internal/arena.h"
 #include "loom/analysis/integer_relation.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/ir.h"
@@ -90,6 +91,43 @@ typedef struct loom_condition_edge_refinement_set_t {
   iree_host_size_t refinement_capacity;
 } loom_condition_edge_refinement_set_t;
 
+typedef struct loom_condition_query_frame_t loom_condition_query_frame_t;
+
+// Reusable state for condition-fact derivation and proof.
+//
+// The query is tied to one module and is not reentrant. All dynamic storage is
+// retained in |arena| so repeated queries reuse their high-water capacity.
+// Module mutation may append values between queries; indexed state grows on
+// demand to cover the current value table.
+typedef struct loom_condition_query_t {
+  // Module containing every queried condition value.
+  const loom_module_t* module;
+  // Arena retaining indexed state and worklist capacity.
+  iree_arena_allocator_t* arena;
+  // Per-value visitation or memo state for the active query.
+  uint8_t* value_states;
+  // Allocated entry count in value_states.
+  iree_host_size_t value_state_capacity;
+  // Value IDs whose state must be cleared when the active query completes.
+  loom_value_id_t* touched_values;
+  // Number of populated entries in touched_values.
+  iree_host_size_t touched_value_count;
+  // Allocated entry count in touched_values.
+  iree_host_size_t touched_value_capacity;
+  // Explicit traversal frames for the active query.
+  loom_condition_query_frame_t* frames;
+  // Number of active entries in frames.
+  iree_host_size_t frame_count;
+  // Allocated entry count in frames.
+  iree_host_size_t frame_capacity;
+} loom_condition_query_t;
+
+// Initializes reusable query state without allocating. |module| and |arena|
+// must remain valid for the complete query lifetime.
+void loom_condition_query_initialize(const loom_module_t* module,
+                                     iree_arena_allocator_t* arena,
+                                     loom_condition_query_t* out_query);
+
 // Initializes a caller-owned fact set over fixed storage.
 void loom_condition_fact_set_initialize(
     loom_condition_integer_relation_t* integer_relation_storage,
@@ -113,33 +151,31 @@ void loom_condition_edge_refinement_set_reset(
 // |assumed_truth|. An otherwise opaque i1 producer contributes the fundamental
 // relation that its result equals one or zero on the selected edge; recognized
 // producers additionally expose relations over their operands. |fact_table|
-// may be NULL to query without ambient value facts. Returns false if the
-// caller-owned storage was too small or recursion was capped; returned
-// relations remain a conservative subset in that case.
-bool loom_condition_facts_query(const loom_module_t* module,
-                                const loom_value_fact_table_t* fact_table,
-                                loom_value_id_t condition_value,
-                                bool assumed_truth,
-                                loom_condition_fact_set_t* out_facts);
+// may be NULL to query without ambient value facts. |out_complete| is false
+// when caller-owned output storage was too small; returned relations remain a
+// conservative subset in that case.
+iree_status_t loom_condition_facts_query(
+    loom_condition_query_t* query, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t condition_value, bool assumed_truth,
+    loom_condition_fact_set_t* out_facts, bool* out_complete);
 
 // Derives integer relations and dialect-owned semantic refinements in one
 // traversal of a boolean condition expression. Either output may use empty
 // caller-owned storage when that fact class is not needed.
-bool loom_condition_facts_query_edge(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+iree_status_t loom_condition_facts_query_edge(
+    loom_condition_query_t* query, const loom_value_fact_table_t* fact_table,
     loom_value_id_t condition_value, bool assumed_truth,
     loom_condition_fact_set_t* out_facts,
-    loom_condition_edge_refinement_set_t* out_refinements);
+    loom_condition_edge_refinement_set_t* out_refinements, bool* out_complete);
 
 // Appends facts implied by assuming |condition_value| evaluates to
 // |assumed_truth| into |inout_facts|. This has the same derivation semantics as
 // loom_condition_facts_query but preserves existing relations so callers can
 // compose multiple edge conditions.
-bool loom_condition_facts_query_into(const loom_module_t* module,
-                                     const loom_value_fact_table_t* fact_table,
-                                     loom_value_id_t condition_value,
-                                     bool assumed_truth,
-                                     loom_condition_fact_set_t* inout_facts);
+iree_status_t loom_condition_facts_query_into(
+    loom_condition_query_t* query, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t condition_value, bool assumed_truth,
+    loom_condition_fact_set_t* inout_facts, bool* out_complete);
 
 // Applies a single integer relation to scalar range facts for |value_id| when
 // the relation can be reduced to value-vs-constant form. Value-to-value
@@ -201,11 +237,12 @@ bool loom_condition_integer_relation_meet(
 
 // Attempts to prove that |condition_value| is exact after applying edge-local
 // |facts| to the values it depends on. Unsupported condition forms are valid
-// and return false. |fact_table| may be NULL to prove only from edge relations.
-bool loom_condition_fact_set_proves_condition(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+// and set |out_proven| to false. |fact_table| may be NULL to prove only from
+// edge relations.
+iree_status_t loom_condition_fact_set_proves_condition(
+    loom_condition_query_t* query, const loom_value_fact_table_t* fact_table,
     const loom_condition_fact_set_t* facts, loom_value_id_t condition_value,
-    bool* out_condition);
+    bool* out_condition, bool* out_proven);
 
 #ifdef __cplusplus
 }  // extern "C"

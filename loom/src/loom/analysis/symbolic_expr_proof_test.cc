@@ -25,6 +25,28 @@
 namespace loom {
 namespace {
 
+static bool QueryConditionFacts(
+    loom_symbolic_expr_context_t* expression_context,
+    const loom_value_fact_table_t* fact_table, loom_value_id_t condition,
+    bool assumed_truth, loom_condition_fact_set_t* out_facts) {
+  bool complete = false;
+  IREE_CHECK_OK(loom_condition_facts_query(&expression_context->condition_query,
+                                           fact_table, condition, assumed_truth,
+                                           out_facts, &complete));
+  return complete;
+}
+
+static bool AppendConditionFacts(
+    loom_symbolic_expr_context_t* expression_context,
+    const loom_value_fact_table_t* fact_table, loom_value_id_t condition,
+    bool assumed_truth, loom_condition_fact_set_t* inout_facts) {
+  bool complete = false;
+  IREE_CHECK_OK(loom_condition_facts_query_into(
+      &expression_context->condition_query, fact_table, condition,
+      assumed_truth, inout_facts, &complete));
+  return complete;
+}
+
 static iree_status_t ProveSemanticallyEquivalentUpperBound(
     loom_symbolic_expr_context_t* context, loom_value_id_t relation_value,
     loom_value_id_t query_value, loom_symbolic_proof_result_t* out_result) {
@@ -433,9 +455,9 @@ TEST_F(SymbolicExprTest, ProvesFlattenedAddressFromDynamicAxisBounds) {
   loom_condition_fact_set_t condition_facts;
   loom_condition_fact_set_initialize(
       relation_storage, IREE_ARRAYSIZE(relation_storage), &condition_facts);
-  ASSERT_TRUE(loom_condition_facts_query(
-      module_, &fact_table_, loom_index_cmp_result(column_compare_op), true,
-      &condition_facts));
+  ASSERT_TRUE(QueryConditionFacts(&expression_context_, &fact_table_,
+                                  loom_index_cmp_result(column_compare_op),
+                                  true, &condition_facts));
   expression_context_.condition_facts = &condition_facts;
   loom_symbolic_expr_context_reset(&expression_context_);
 
@@ -474,12 +496,12 @@ TEST_F(SymbolicExprTest, ProvesFlattenedAddressFromDynamicAxisBounds) {
       &builder_, LOOM_INDEX_CMP_PREDICATE_ULE, row_source, row_count_source,
       index_type, loom_type_scalar(LOOM_SCALAR_TYPE_I1), LOOM_LOCATION_UNKNOWN,
       &row_nonstrict_compare_op));
-  ASSERT_TRUE(loom_condition_facts_query(
-      module_, &fact_table_, loom_index_cmp_result(row_nonstrict_compare_op),
-      true, &condition_facts));
-  ASSERT_TRUE(loom_condition_facts_query_into(
-      module_, &fact_table_, loom_index_cmp_result(column_compare_op), true,
-      &condition_facts));
+  ASSERT_TRUE(QueryConditionFacts(
+      &expression_context_, &fact_table_,
+      loom_index_cmp_result(row_nonstrict_compare_op), true, &condition_facts));
+  ASSERT_TRUE(AppendConditionFacts(&expression_context_, &fact_table_,
+                                   loom_index_cmp_result(column_compare_op),
+                                   true, &condition_facts));
   loom_symbolic_expr_context_reset(&expression_context_);
 
   loom_op_t* nonstrict_row_base_op = nullptr;
@@ -691,9 +713,8 @@ TEST_F(SymbolicExprTest, ConditionRefinementMemoReusesPersistentStorage) {
   loom_condition_fact_set_t condition_facts;
   loom_condition_fact_set_initialize(
       relation_storage, IREE_ARRAYSIZE(relation_storage), &condition_facts);
-  ASSERT_TRUE(loom_condition_facts_query(module_, &fact_table_, condition,
-                                         /*assumed_truth=*/true,
-                                         &condition_facts));
+  ASSERT_TRUE(QueryConditionFacts(&expression_context_, &fact_table_, condition,
+                                  /*assumed_truth=*/true, &condition_facts));
   expression_context_.condition_facts = &condition_facts;
 
   loom_symbolic_expr_t zero = {0};
@@ -878,9 +899,9 @@ TEST_F(SymbolicExprTest, SelectConditionProvesDynamicLoopDivBounds) {
   loom_condition_fact_set_initialize(left_false_storage,
                                      IREE_ARRAYSIZE(left_false_storage),
                                      &left_false_facts);
-  ASSERT_TRUE(loom_condition_facts_query(
-      module_, &fact_table_, loom_index_cmp_result(left_edge_cmp_op),
-      /*assumed_truth=*/false, &left_false_facts));
+  ASSERT_TRUE(QueryConditionFacts(&expression_context_, &fact_table_,
+                                  loom_index_cmp_result(left_edge_cmp_op),
+                                  /*assumed_truth=*/false, &left_false_facts));
   expression_context_.condition_facts = &left_false_facts;
   expression_context_.condition_proof_depth = 1;
   loom_symbolic_expr_context_reset(&expression_context_);
@@ -914,12 +935,12 @@ TEST_F(SymbolicExprTest, SelectConditionProvesDynamicLoopDivBounds) {
   loom_condition_fact_set_t false_edge_facts;
   loom_condition_fact_set_initialize(
       relation_storage, IREE_ARRAYSIZE(relation_storage), &false_edge_facts);
-  ASSERT_TRUE(loom_condition_facts_query(
-      module_, &fact_table_, loom_index_cmp_result(left_edge_cmp_op),
-      /*assumed_truth=*/false, &false_edge_facts));
-  ASSERT_TRUE(loom_condition_facts_query_into(
-      module_, &fact_table_, loom_index_cmp_result(right_edge_cmp_op),
-      /*assumed_truth=*/false, &false_edge_facts));
+  ASSERT_TRUE(QueryConditionFacts(&expression_context_, &fact_table_,
+                                  loom_index_cmp_result(left_edge_cmp_op),
+                                  /*assumed_truth=*/false, &false_edge_facts));
+  ASSERT_TRUE(AppendConditionFacts(&expression_context_, &fact_table_,
+                                   loom_index_cmp_result(right_edge_cmp_op),
+                                   /*assumed_truth=*/false, &false_edge_facts));
   loom_value_facts_t lane_false_edge_facts =
       loom_value_fact_table_lookup(&fact_table_, lane);
   EXPECT_TRUE(loom_condition_fact_set_apply_to_value_facts(

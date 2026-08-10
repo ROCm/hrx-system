@@ -120,8 +120,8 @@ static iree_status_t loom_symbolic_expr_condition_fact_frame_begin(
   *out_pending = false;
   if (!context->condition_facts || !context->module || !context->fact_table ||
       remaining_depth == 0 || value_id >= context->module->values.count) {
-    *out_facts = loom_symbolic_expr_context_lookup_facts(context, value_id);
-    return iree_ok_status();
+    return loom_symbolic_expr_context_lookup_facts(context, value_id,
+                                                   out_facts);
   }
 
   IREE_RETURN_IF_ERROR(loom_symbolic_value_ensure_condition_fact_memo_capacity(
@@ -134,8 +134,9 @@ static iree_status_t loom_symbolic_expr_condition_fact_frame_begin(
     return iree_ok_status();
   }
 
-  loom_value_facts_t facts =
-      loom_symbolic_expr_context_lookup_facts(context, value_id);
+  loom_value_facts_t facts = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_symbolic_expr_context_lookup_facts(context, value_id, &facts));
   IREE_RETURN_IF_ERROR(
       loom_symbolic_value_apply_identity_chain_predicates_to_facts(
           context, value_id, &facts));
@@ -598,12 +599,14 @@ iree_status_t loom_symbolic_values_match(loom_symbolic_expr_context_t* context,
 
   int64_t left_exact = 0;
   int64_t right_exact = 0;
-  if (loom_symbolic_value_exact_integer_facts(
-          loom_symbolic_expr_context_lookup_facts(context, left_value),
-          &left_exact) &&
-      loom_symbolic_value_exact_integer_facts(
-          loom_symbolic_expr_context_lookup_facts(context, right_value),
-          &right_exact)) {
+  loom_value_facts_t left_facts = {0};
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_context_lookup_facts(
+      context, left_value, &left_facts));
+  loom_value_facts_t right_facts = {0};
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_context_lookup_facts(
+      context, right_value, &right_facts));
+  if (loom_symbolic_value_exact_integer_facts(left_facts, &left_exact) &&
+      loom_symbolic_value_exact_integer_facts(right_facts, &right_exact)) {
     *out_match = left_exact == right_exact;
     return iree_ok_status();
   }
@@ -963,16 +966,24 @@ static bool loom_symbolic_expr_unsigned_quotient_def(
   return false;
 }
 
-bool loom_symbolic_value_is_non_negative(
-    const loom_symbolic_expr_context_t* context, loom_value_id_t value_id) {
-  return loom_value_facts_is_non_negative(
-      loom_symbolic_expr_context_lookup_facts(context, value_id));
+iree_status_t loom_symbolic_value_is_non_negative(
+    loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
+    bool* out_is_non_negative) {
+  loom_value_facts_t facts = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_symbolic_expr_context_lookup_facts(context, value_id, &facts));
+  *out_is_non_negative = loom_value_facts_is_non_negative(facts);
+  return iree_ok_status();
 }
 
-static bool loom_symbolic_expr_value_facts_are_positive(
-    const loom_symbolic_expr_context_t* context, loom_value_id_t value_id) {
-  return loom_value_facts_is_positive(
-      loom_symbolic_expr_context_lookup_facts(context, value_id));
+static iree_status_t loom_symbolic_expr_value_facts_are_positive(
+    loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
+    bool* out_is_positive) {
+  loom_value_facts_t facts = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_symbolic_expr_context_lookup_facts(context, value_id, &facts));
+  *out_is_positive = loom_value_facts_is_positive(facts);
+  return iree_ok_status();
 }
 
 static bool loom_symbolic_expr_multiply_def(const loom_op_t* op,
@@ -1084,9 +1095,16 @@ static iree_status_t loom_symbolic_expr_quotient_launch_bound_proves_relation(
     loom_value_id_t divisor, loom_value_id_t bound_value, bool* out_matched,
     loom_symbolic_proof_result_t* out_result) {
   *out_matched = false;
-  if (!loom_symbolic_value_is_non_negative(context, dividend) ||
-      !loom_symbolic_expr_value_facts_are_positive(context, divisor) ||
-      !loom_symbolic_value_is_non_negative(context, bound_value)) {
+  bool dividend_non_negative = false;
+  IREE_RETURN_IF_ERROR(loom_symbolic_value_is_non_negative(
+      context, dividend, &dividend_non_negative));
+  bool divisor_positive = false;
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_value_facts_are_positive(
+      context, divisor, &divisor_positive));
+  bool bound_non_negative = false;
+  IREE_RETURN_IF_ERROR(loom_symbolic_value_is_non_negative(
+      context, bound_value, &bound_non_negative));
+  if (!dividend_non_negative || !divisor_positive || !bound_non_negative) {
     return iree_ok_status();
   }
 
@@ -1184,9 +1202,13 @@ static iree_status_t loom_symbolic_expr_remainder_bound_proves_relation(
     bool right_matches_divisor = false;
     IREE_RETURN_IF_ERROR(loom_symbolic_values_match(
         context, right_value, divisor, &right_matches_divisor));
-    if (right_matches_divisor &&
-        loom_symbolic_value_is_non_negative(context, dividend) &&
-        loom_symbolic_expr_value_facts_are_positive(context, divisor)) {
+    bool dividend_non_negative = false;
+    IREE_RETURN_IF_ERROR(loom_symbolic_value_is_non_negative(
+        context, dividend, &dividend_non_negative));
+    bool divisor_positive = false;
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_value_facts_are_positive(
+        context, divisor, &divisor_positive));
+    if (right_matches_divisor && dividend_non_negative && divisor_positive) {
       *out_matched = loom_symbolic_expr_remainder_bound_relation(
           relation, /*swapped=*/false, out_result);
       return iree_ok_status();
@@ -1202,9 +1224,13 @@ static iree_status_t loom_symbolic_expr_remainder_bound_proves_relation(
     bool left_matches_divisor = false;
     IREE_RETURN_IF_ERROR(loom_symbolic_values_match(
         context, left_value, divisor, &left_matches_divisor));
-    if (left_matches_divisor &&
-        loom_symbolic_value_is_non_negative(context, dividend) &&
-        loom_symbolic_expr_value_facts_are_positive(context, divisor)) {
+    bool dividend_non_negative = false;
+    IREE_RETURN_IF_ERROR(loom_symbolic_value_is_non_negative(
+        context, dividend, &dividend_non_negative));
+    bool divisor_positive = false;
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_value_facts_are_positive(
+        context, divisor, &divisor_positive));
+    if (left_matches_divisor && dividend_non_negative && divisor_positive) {
       *out_matched = loom_symbolic_expr_remainder_bound_relation(
           relation, /*swapped=*/true, out_result);
     }

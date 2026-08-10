@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_benchmark", "loom_cc_library", "loom_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -105,6 +105,7 @@ loom_cc_library(
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 
@@ -120,6 +121,19 @@ loom_cc_test(
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "condition_facts_benchmark",
+    srcs = ["condition_facts_benchmark.cc"],
+    deps = [
+        ":condition_facts",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:benchmark_main",
     ],
 )
 

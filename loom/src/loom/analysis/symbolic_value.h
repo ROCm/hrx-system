@@ -17,8 +17,9 @@ extern "C" {
 
 // Returns the facts for |value_id| after applying edge-local facts active on
 // |context|. The query does not infer facts through arbitrary producers.
-loom_value_facts_t loom_symbolic_expr_context_lookup_facts(
-    const loom_symbolic_expr_context_t* context, loom_value_id_t value_id);
+iree_status_t loom_symbolic_expr_context_lookup_facts(
+    loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
+    loom_value_facts_t* out_facts);
 
 // Returns value facts after applying the active condition facts, producer fact
 // inference, and predicates carried by identity operations.
@@ -44,8 +45,9 @@ iree_status_t loom_symbolic_values_semantically_match(
     loom_value_id_t right_value, bool* out_match);
 
 // Returns true when the current facts prove |value_id| is non-negative.
-bool loom_symbolic_value_is_non_negative(
-    const loom_symbolic_expr_context_t* context, loom_value_id_t value_id);
+iree_status_t loom_symbolic_value_is_non_negative(
+    loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
+    bool* out_is_non_negative);
 
 // Returns the two factors when |value_id| is defined by integer multiplication.
 bool loom_symbolic_value_product_factors(

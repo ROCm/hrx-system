@@ -45,6 +45,8 @@ class ConditionFactsTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"),
                                         &block_pool_, NULL,
                                         iree_allocator_system(), &module_));
+    loom_condition_query_initialize(module_, &analysis_arena_,
+                                    &condition_query_);
     loom_builder_initialize(module_, &module_->arena,
                             loom_module_block(module_), &builder_);
     IREE_ASSERT_OK(
@@ -116,14 +118,18 @@ class ConditionFactsTest : public ::testing::Test {
   }
 
   bool Query(loom_value_id_t condition_value, bool assumed_truth = true) {
-    return loom_condition_facts_query(module_, &fact_table_, condition_value,
-                                      assumed_truth, &condition_facts_);
+    bool complete = false;
+    IREE_CHECK_OK(loom_condition_facts_query(&condition_query_, &fact_table_,
+                                             condition_value, assumed_truth,
+                                             &condition_facts_, &complete));
+    return complete;
   }
 
   iree_arena_block_pool_t block_pool_;
   iree_arena_allocator_t analysis_arena_;
   loom_context_t context_;
   loom_module_t* module_ = nullptr;
+  loom_condition_query_t condition_query_;
   loom_builder_t builder_;
   loom_value_fact_table_t fact_table_;
   loom_condition_integer_relation_t relation_storage_[4];
@@ -148,6 +154,19 @@ TEST_F(ConditionFactsTest, IndexCompareTrueEdgeProducesRelation) {
   EXPECT_EQ(relation.right.value_id, upper_bound);
 }
 
+TEST_F(ConditionFactsTest, DirectConditionQueryDoesNotAllocateScratch) {
+  loom_value_id_t induction = DefineIndexValue();
+  loom_value_id_t upper_bound = DefineIndexValue();
+  loom_op_t* compare =
+      BuildIndexCompare(LOOM_INDEX_CMP_PREDICATE_SLT, induction, upper_bound);
+  const iree_host_size_t used_allocation_size =
+      analysis_arena_.used_allocation_size;
+
+  ASSERT_TRUE(Query(loom_index_cmp_result(compare)));
+
+  EXPECT_EQ(analysis_arena_.used_allocation_size, used_allocation_size);
+}
+
 TEST_F(ConditionFactsTest, RepeatedConditionDoesNotDuplicateRelation) {
   loom_value_id_t induction = DefineIndexValue();
   loom_value_id_t upper_bound = DefineIndexValue();
@@ -156,9 +175,11 @@ TEST_F(ConditionFactsTest, RepeatedConditionDoesNotDuplicateRelation) {
   const loom_value_id_t condition = loom_index_cmp_result(compare);
 
   ASSERT_TRUE(Query(condition));
-  ASSERT_TRUE(loom_condition_facts_query_into(module_, &fact_table_, condition,
-                                              /*assumed_truth=*/true,
-                                              &condition_facts_));
+  bool complete = false;
+  IREE_ASSERT_OK(loom_condition_facts_query_into(
+      &condition_query_, &fact_table_, condition,
+      /*assumed_truth=*/true, &condition_facts_, &complete));
+  ASSERT_TRUE(complete);
 
   EXPECT_EQ(condition_facts_.integer_relation_count, 1u);
 }
@@ -266,9 +287,11 @@ TEST_F(ConditionFactsTest, EdgeFactsProveWiderScalarCompareTrue) {
   loom_op_t* inner =
       BuildScalarI32Compare(LOOM_SCALAR_CMPI_PREDICATE_SLT, lane, inner_bound);
   bool condition = false;
-  EXPECT_TRUE(loom_condition_fact_set_proves_condition(
-      module_, &fact_table_, &condition_facts_, loom_scalar_cmpi_result(inner),
-      &condition));
+  bool proven = false;
+  IREE_ASSERT_OK(loom_condition_fact_set_proves_condition(
+      &condition_query_, &fact_table_, &condition_facts_,
+      loom_scalar_cmpi_result(inner), &condition, &proven));
+  EXPECT_TRUE(proven);
   EXPECT_TRUE(condition);
 }
 
@@ -285,10 +308,38 @@ TEST_F(ConditionFactsTest, EdgeFactsProveDisjointIndexCompareFalse) {
   loom_op_t* inner =
       BuildIndexCompare(LOOM_INDEX_CMP_PREDICATE_SGE, lane, inner_bound);
   bool condition = true;
-  EXPECT_TRUE(loom_condition_fact_set_proves_condition(
-      module_, &fact_table_, &condition_facts_, loom_index_cmp_result(inner),
-      &condition));
+  bool proven = false;
+  IREE_ASSERT_OK(loom_condition_fact_set_proves_condition(
+      &condition_query_, &fact_table_, &condition_facts_,
+      loom_index_cmp_result(inner), &condition, &proven));
+  EXPECT_TRUE(proven);
   EXPECT_FALSE(condition);
+}
+
+TEST_F(ConditionFactsTest, SharedBooleanDagProofIsMemoized) {
+  loom_value_id_t lane = DefineI32Value();
+  loom_value_id_t outer_bound = DefineI32Value();
+  loom_value_id_t inner_bound = DefineI32Value();
+  DefineFacts(outer_bound, loom_value_facts_exact_i64(8));
+  DefineFacts(inner_bound, loom_value_facts_exact_i64(16));
+  loom_op_t* outer =
+      BuildScalarI32Compare(LOOM_SCALAR_CMPI_PREDICATE_SLT, lane, outer_bound);
+  ASSERT_TRUE(Query(loom_scalar_cmpi_result(outer)));
+
+  loom_op_t* inner =
+      BuildScalarI32Compare(LOOM_SCALAR_CMPI_PREDICATE_SLT, lane, inner_bound);
+  loom_value_id_t condition = loom_scalar_cmpi_result(inner);
+  for (int i = 0; i < 64; ++i) {
+    condition = loom_scalar_andi_result(BuildBoolAnd(condition, condition));
+  }
+
+  bool condition_value = false;
+  bool proven = false;
+  IREE_ASSERT_OK(loom_condition_fact_set_proves_condition(
+      &condition_query_, &fact_table_, &condition_facts_, condition,
+      &condition_value, &proven));
+  EXPECT_TRUE(proven);
+  EXPECT_TRUE(condition_value);
 }
 
 TEST_F(ConditionFactsTest, UnsignedCompareRequiresNonNegativeOperandFacts) {
@@ -396,6 +447,23 @@ TEST_F(ConditionFactsTest, BooleanAndFalseEdgeIsDisjunctiveWithoutKnownSide) {
   EXPECT_EQ(condition_facts_.integer_relation_count, 0u);
 }
 
+TEST_F(ConditionFactsTest, DeepBooleanConditionDerivesFacts) {
+  loom_value_id_t induction = DefineIndexValue();
+  loom_value_id_t upper_bound = DefineIndexValue();
+  loom_op_t* compare =
+      BuildIndexCompare(LOOM_INDEX_CMP_PREDICATE_SLT, induction, upper_bound);
+  loom_value_id_t condition = loom_index_cmp_result(compare);
+  for (int i = 0; i < 64; ++i) {
+    condition = loom_scalar_andi_result(
+        BuildBoolAnd(condition, loom_index_cmp_result(compare)));
+  }
+
+  ASSERT_TRUE(Query(condition));
+  ASSERT_EQ(condition_facts_.integer_relation_count, 1u);
+  EXPECT_EQ(condition_facts_.integer_relations[0].relation,
+            LOOM_SYMBOLIC_INTEGER_RELATION_LT);
+}
+
 TEST_F(ConditionFactsTest, OpaqueBooleanConditionProducesEdgeFact) {
   loom_value_id_t condition =
       DefineValue(loom_type_scalar(LOOM_SCALAR_TYPE_I1));
@@ -425,9 +493,11 @@ TEST_F(ConditionFactsTest, RelationCapacityOverflowIsIncomplete) {
   loom_condition_fact_set_t empty_facts;
   loom_condition_fact_set_initialize(NULL, 0, &empty_facts);
 
-  EXPECT_FALSE(loom_condition_facts_query(module_, &fact_table_,
-                                          loom_index_cmp_result(compare), true,
-                                          &empty_facts));
+  bool complete = true;
+  IREE_ASSERT_OK(loom_condition_facts_query(&condition_query_, &fact_table_,
+                                            loom_index_cmp_result(compare),
+                                            true, &empty_facts, &complete));
+  EXPECT_FALSE(complete);
   EXPECT_EQ(empty_facts.integer_relation_count, 0u);
 }
 

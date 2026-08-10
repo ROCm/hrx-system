@@ -67,6 +67,7 @@ void loom_symbolic_expr_context_initialize(
   out_context->fact_table = fact_table;
   out_context->arena = arena;
   out_context->maximum_term_count = LOOM_SYMBOLIC_EXPR_DEFAULT_TERM_LIMIT;
+  loom_condition_query_initialize(module, arena, &out_context->condition_query);
 }
 
 void loom_symbolic_expr_context_reset(loom_symbolic_expr_context_t* context) {
@@ -122,8 +123,9 @@ static bool loom_symbolic_term_less(const loom_symbolic_term_t* lhs,
 LOOM_DEFINE_ADAPTIVE_SORT(loom_symbolic_expr_sort_terms, loom_symbolic_term_t,
                           loom_symbolic_term_less)
 
-loom_value_facts_t loom_symbolic_expr_context_lookup_facts(
-    const loom_symbolic_expr_context_t* context, loom_value_id_t value_id) {
+iree_status_t loom_symbolic_expr_context_lookup_facts(
+    loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
+    loom_value_facts_t* out_facts) {
   loom_value_facts_t facts =
       context->fact_table
           ? loom_value_fact_table_lookup(context->fact_table, value_id)
@@ -135,12 +137,15 @@ loom_value_facts_t loom_symbolic_expr_context_lookup_facts(
       const loom_op_t* defining_op =
           loom_symbolic_expr_value_defining_op(context, value_id);
       bool condition = false;
-      if (!defining_op || !loom_scf_select_isa(defining_op) ||
-          !loom_condition_fact_set_proves_condition(
-              context->module, context->fact_table, context->condition_facts,
-              loom_scf_select_condition(defining_op), &condition)) {
+      bool proven = false;
+      if (!defining_op || !loom_scf_select_isa(defining_op)) {
         break;
       }
+      IREE_RETURN_IF_ERROR(loom_condition_fact_set_proves_condition(
+          &context->condition_query, context->fact_table,
+          context->condition_facts, loom_scf_select_condition(defining_op),
+          &condition, &proven));
+      if (!proven) break;
       value_id = condition ? loom_scf_select_true_value(defining_op)
                            : loom_scf_select_false_value(defining_op);
       loom_value_facts_t selected_facts =
@@ -151,7 +156,8 @@ loom_value_facts_t loom_symbolic_expr_context_lookup_facts(
       facts = loom_symbolic_expr_intersect_integer_facts(facts, selected_facts);
     }
   }
-  return facts;
+  *out_facts = facts;
+  return iree_ok_status();
 }
 
 static bool loom_symbolic_expr_exact_integer_facts(loom_value_facts_t facts,
@@ -312,8 +318,9 @@ static iree_status_t loom_symbolic_expr_make_linear(
 iree_status_t loom_symbolic_expr_value(loom_symbolic_expr_context_t* context,
                                        loom_value_id_t value_id,
                                        loom_symbolic_expr_t* out_expression) {
-  loom_value_facts_t facts =
-      loom_symbolic_expr_context_lookup_facts(context, value_id);
+  loom_value_facts_t facts = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_symbolic_expr_context_lookup_facts(context, value_id, &facts));
   if (!context->module || value_id >= context->module->values.count) {
     loom_symbolic_expr_unknown(facts, out_expression);
     return iree_ok_status();
@@ -331,12 +338,14 @@ iree_status_t loom_symbolic_expr_value(loom_symbolic_expr_context_t* context,
                                         facts, out_expression);
 }
 
-static void loom_symbolic_expr_override_facts(
-    const loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
+static iree_status_t loom_symbolic_expr_override_facts(
+    loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
     loom_symbolic_expr_t* expression) {
-  loom_value_facts_t facts =
-      loom_symbolic_expr_context_lookup_facts(context, value_id);
+  loom_value_facts_t facts = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_symbolic_expr_context_lookup_facts(context, value_id, &facts));
   if (!loom_value_facts_is_unknown(facts)) expression->facts = facts;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_symbolic_expr_add_or_sub(
@@ -603,8 +612,9 @@ static iree_status_t loom_symbolic_expr_expansion_prepare_frame(
     loom_symbolic_expr_expansion_frame_t* frame,
     loom_symbolic_expr_t* out_expression, bool* out_complete) {
   *out_complete = false;
-  loom_value_facts_t facts =
-      loom_symbolic_expr_context_lookup_facts(context, frame->value_id);
+  loom_value_facts_t facts = {0};
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_context_lookup_facts(
+      context, frame->value_id, &facts));
   int64_t exact_value = 0;
   if (loom_symbolic_expr_exact_integer_facts(facts, &exact_value)) {
     loom_symbolic_expr_constant(exact_value, out_expression);
@@ -949,7 +959,10 @@ iree_status_t loom_symbolic_expr_from_value(
       status = loom_symbolic_expr_value(context, completed_value, &expression);
     }
     if (iree_status_is_ok(status)) {
-      loom_symbolic_expr_override_facts(context, completed_value, &expression);
+      status = loom_symbolic_expr_override_facts(context, completed_value,
+                                                 &expression);
+    }
+    if (iree_status_is_ok(status)) {
       loom_symbolic_expr_memo_entry_t* completed_entry =
           &context->memo_entries[completed_value];
       completed_entry->expression = expression;

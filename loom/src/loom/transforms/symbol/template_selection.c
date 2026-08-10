@@ -315,6 +315,9 @@ typedef struct loom_template_selection_state_t {
   // Module being transformed.
   loom_module_t* module;
 
+  // Reusable condition traversal state for application path facts.
+  loom_condition_query_t condition_query;
+
   // Early or final selection behavior.
   loom_template_selection_mode_t mode;
 
@@ -768,10 +771,11 @@ static iree_status_t loom_template_selection_types_match(
   return iree_ok_status();
 }
 
-static bool loom_template_selection_collect_application_path_facts(
-    const loom_module_t* module, const loom_value_fact_table_t* value_facts,
-    const loom_op_t* apply_op, loom_condition_fact_set_t* out_path) {
-  bool complete = true;
+static iree_status_t loom_template_selection_collect_application_path_facts(
+    loom_condition_query_t* condition_query,
+    const loom_value_fact_table_t* value_facts, const loom_op_t* apply_op,
+    loom_condition_fact_set_t* out_path, bool* out_complete) {
+  *out_complete = true;
   const loom_op_t* child = apply_op;
   for (const loom_op_t* ancestor = apply_op->parent_op; ancestor;
        child = ancestor, ancestor = ancestor->parent_op) {
@@ -783,12 +787,13 @@ static bool loom_template_selection_collect_application_path_facts(
     } else if (child_region != loom_scf_if_else_region(ancestor)) {
       continue;
     }
-    const bool edge_complete = loom_condition_facts_query_into(
-        module, value_facts, loom_scf_if_condition(ancestor), assumed_truth,
-        out_path);
-    complete = edge_complete && complete;
+    bool edge_complete = false;
+    IREE_RETURN_IF_ERROR(loom_condition_facts_query_into(
+        condition_query, value_facts, loom_scf_if_condition(ancestor),
+        assumed_truth, out_path, &edge_complete));
+    *out_complete &= edge_complete;
   }
-  return complete;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_template_selection_grow_application_path_scratch(
@@ -814,11 +819,11 @@ static iree_status_t loom_template_selection_prepare_application_path_facts(
     loom_condition_fact_set_initialize(
         state->application_path_scratch.relations,
         state->application_path_scratch.capacity, &out_facts->path);
-    const bool path_complete =
-        loom_template_selection_collect_application_path_facts(
-            state->module, value_facts, apply_op, &out_facts->path);
-    if (path_complete || out_facts->path.integer_relation_count <
-                             out_facts->path.integer_relation_capacity) {
+    bool path_complete = false;
+    IREE_RETURN_IF_ERROR(loom_template_selection_collect_application_path_facts(
+        &state->condition_query, value_facts, apply_op, &out_facts->path,
+        &path_complete));
+    if (path_complete) {
       return iree_ok_status();
     }
     const iree_host_size_t old_capacity =
@@ -2104,6 +2109,7 @@ iree_status_t loom_template_selection_run(loom_pass_t* pass,
               .flags = LOOM_SYMBOL_PRUNING_RETAIN_TARGET_SOURCE_ENTRIES,
           },
   };
+  loom_condition_query_initialize(module, pass->arena, &state.condition_query);
   loom_symbol_fact_table_initialize(&state.fact_table, pass->arena);
   loom_func_provider_catalog_initialize(&state.catalog, pass->arena);
 

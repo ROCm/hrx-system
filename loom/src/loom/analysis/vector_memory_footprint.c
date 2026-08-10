@@ -1619,8 +1619,11 @@ loom_vector_memory_footprint_condition_facts_for_assumption(
   loom_condition_fact_set_initialize(
       relation_storage, IREE_ARRAYSIZE(relation_storage), &additional);
   if (state->fact_table) {
-    (void)loom_condition_facts_query(state->module, state->fact_table,
-                                     condition, assumed_truth, &additional);
+    bool complete = false;
+    IREE_RETURN_IF_ERROR(loom_condition_facts_query(
+        &state->expression_context.condition_query, state->fact_table,
+        condition, assumed_truth, &additional, &complete));
+    if (!complete) loom_condition_fact_set_reset(&additional);
   }
   return loom_vector_memory_footprint_condition_facts_copy(
       state, base, &additional, out_facts);

@@ -485,9 +485,12 @@ static iree_status_t loom_canonicalize_try_symbolic_integer_cmp(
   loom_condition_fact_set_t condition_facts;
   loom_condition_fact_set_initialize(
       relation_storage, IREE_ARRAYSIZE(relation_storage), &condition_facts);
-  if (!loom_condition_facts_query(rewriter->module, rewriter->fact_table,
-                                  loom_op_const_results(op)[0],
-                                  /*assumed_truth=*/true, &condition_facts)) {
+  bool complete = false;
+  IREE_RETURN_IF_ERROR(loom_condition_facts_query(
+      &expression_context->condition_query, rewriter->fact_table,
+      loom_op_const_results(op)[0], /*assumed_truth=*/true, &condition_facts,
+      &complete));
+  if (!complete) {
     return iree_ok_status();
   }
   if (condition_facts.integer_relation_count != 1) {
@@ -1542,8 +1545,9 @@ static iree_status_t loom_canonicalize_materialize_edge_assumes(
 }
 
 static iree_status_t loom_canonicalize_materialize_condition_facts_in_region(
-    loom_rewriter_t* rewriter, loom_op_t* parent_op, loom_region_t* region,
-    loom_value_id_t condition, bool assumed_truth, bool* out_changed) {
+    loom_rewriter_t* rewriter, loom_condition_query_t* condition_query,
+    loom_op_t* parent_op, loom_region_t* region, loom_value_id_t condition,
+    bool assumed_truth, bool* out_changed) {
   *out_changed = false;
   loom_condition_integer_relation_t
       relation_storage[LOOM_CANONICALIZE_EDGE_RELATION_CAPACITY];
@@ -1556,9 +1560,11 @@ static iree_status_t loom_canonicalize_materialize_condition_facts_in_region(
   loom_condition_edge_refinement_set_initialize(
       refinement_storage, IREE_ARRAYSIZE(refinement_storage),
       &condition_refinements);
-  loom_condition_facts_query_edge(rewriter->module, rewriter->fact_table,
-                                  condition, assumed_truth, &condition_facts,
-                                  &condition_refinements);
+  bool complete = false;
+  IREE_RETURN_IF_ERROR(loom_condition_facts_query_edge(
+      condition_query, rewriter->fact_table, condition, assumed_truth,
+      &condition_facts, &condition_refinements, &complete));
+  if (!complete) return iree_ok_status();
   if (condition_facts.integer_relation_count == 0 &&
       condition_refinements.refinement_count == 0) {
     return iree_ok_status();
@@ -1624,21 +1630,22 @@ loom_canonicalize_materialize_selector_default_facts_in_region(
 }
 
 static iree_status_t loom_canonicalize_try_materialize_branch_edge_facts(
-    loom_rewriter_t* rewriter, loom_op_t* op, bool* out_changed) {
+    loom_rewriter_t* rewriter, loom_condition_query_t* condition_query,
+    loom_op_t* op, bool* out_changed) {
   *out_changed = false;
   if (loom_scf_if_isa(op)) {
     bool then_changed = false;
     IREE_RETURN_IF_ERROR(
         loom_canonicalize_materialize_condition_facts_in_region(
-            rewriter, op, loom_scf_if_then_region(op),
+            rewriter, condition_query, op, loom_scf_if_then_region(op),
             loom_scf_if_condition(op), true, &then_changed));
     bool else_changed = false;
     loom_region_t* else_region = loom_scf_if_else_region(op);
     if (else_region) {
       IREE_RETURN_IF_ERROR(
           loom_canonicalize_materialize_condition_facts_in_region(
-              rewriter, op, else_region, loom_scf_if_condition(op), false,
-              &else_changed));
+              rewriter, condition_query, op, else_region,
+              loom_scf_if_condition(op), false, &else_changed));
     }
     *out_changed = then_changed || else_changed;
     return iree_ok_status();
@@ -1674,6 +1681,8 @@ static iree_status_t loom_canonicalize_try_materialize_branch_edge_facts(
 typedef struct loom_canonicalize_edge_fact_materialization_t {
   // Rewriter used for inserted assumes and region-local operand replacement.
   loom_rewriter_t* rewriter;
+  // Reusable traversal state for condition fact derivation.
+  loom_condition_query_t* condition_query;
   // Result updated when materialization rewrites an edge.
   loom_greedy_rewrite_result_t* result;
   // True when at least one branch edge gained materialized facts.
@@ -1691,7 +1700,8 @@ static iree_status_t loom_canonicalize_materialize_branch_edge_facts_preorder(
   bool op_changed = false;
   materialization->rewriter->flags = 0;
   IREE_RETURN_IF_ERROR(loom_canonicalize_try_materialize_branch_edge_facts(
-      materialization->rewriter, op, &op_changed));
+      materialization->rewriter, materialization->condition_query, op,
+      &op_changed));
   if (!op_changed) return iree_ok_status();
 
   materialization->changed = true;
@@ -1702,10 +1712,12 @@ static iree_status_t loom_canonicalize_materialize_branch_edge_facts_preorder(
 }
 
 static iree_status_t loom_canonicalize_materialize_branch_edge_facts_in_region(
-    loom_rewriter_t* rewriter, loom_region_t* region,
-    loom_greedy_rewrite_result_t* result, bool* out_changed) {
+    loom_rewriter_t* rewriter, loom_condition_query_t* condition_query,
+    loom_region_t* region, loom_greedy_rewrite_result_t* result,
+    bool* out_changed) {
   loom_canonicalize_edge_fact_materialization_t materialization = {
       .rewriter = rewriter,
+      .condition_query = condition_query,
       .result = result,
       .changed = false,
   };
@@ -1833,9 +1845,12 @@ static iree_status_t loom_canonicalize_before_worklist(
     void* user_data, loom_greedy_rewrite_driver_t* driver,
     loom_region_t* region, loom_greedy_rewrite_result_t* result,
     bool* out_changed) {
+  loom_canonicalize_rewrite_state_t* state =
+      (loom_canonicalize_rewrite_state_t*)user_data;
   driver->rewriter.flags = 0;
   return loom_canonicalize_materialize_branch_edge_facts_in_region(
-      &driver->rewriter, region, result, out_changed);
+      &driver->rewriter, &state->expression_context.condition_query, region,
+      result, out_changed);
 }
 
 static iree_status_t loom_canonicalize_rewrite_op(

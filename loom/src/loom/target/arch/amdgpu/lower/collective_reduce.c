@@ -337,26 +337,27 @@ static bool loom_amdgpu_symbolic_expr_is_zero(
 }
 
 static iree_status_t loom_amdgpu_condition_implies_participant_zero(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    loom_value_id_t condition, bool assumed_truth,
-    loom_amdgpu_participant_id_kind_t participant_id_kind,
+    loom_low_lower_context_t* context, loom_value_id_t condition,
+    bool assumed_truth, loom_amdgpu_participant_id_kind_t participant_id_kind,
     bool* out_implies_participant_zero) {
   *out_implies_participant_zero = false;
+  const loom_value_fact_table_t* fact_table =
+      loom_low_lower_context_fact_table(context);
 
   loom_condition_integer_relation_t relation_storage[16];
   loom_condition_fact_set_t condition_facts = {0};
   loom_condition_fact_set_initialize(
       relation_storage, IREE_ARRAYSIZE(relation_storage), &condition_facts);
-  if (!loom_condition_facts_query(module, fact_table, condition, assumed_truth,
-                                  &condition_facts)) {
+  bool complete = false;
+  IREE_RETURN_IF_ERROR(loom_condition_facts_query(
+      loom_low_lower_context_condition_query(context), fact_table, condition,
+      assumed_truth, &condition_facts, &complete));
+  if (!complete) {
     return iree_ok_status();
   }
 
-  iree_arena_allocator_t arena;
-  iree_arena_initialize(module->arena.block_pool, &arena);
-  loom_symbolic_expr_context_t symbolic_context = {0};
-  loom_symbolic_expr_context_initialize(module, fact_table, &arena,
-                                        &symbolic_context);
+  loom_symbolic_expr_context_t* symbolic_context =
+      loom_low_lower_context_symbolic_expr_context(context);
 
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
@@ -372,13 +373,13 @@ static iree_status_t loom_amdgpu_condition_implies_participant_zero(
 
     loom_symbolic_expr_t left_expression = {0};
     status = loom_symbolic_expr_from_value(
-        &symbolic_context, relation->left.value_id, &left_expression);
+        symbolic_context, relation->left.value_id, &left_expression);
     if (!iree_status_is_ok(status)) {
       break;
     }
     loom_symbolic_expr_t right_expression = {0};
     status = loom_symbolic_expr_from_value(
-        &symbolic_context, relation->right.value_id, &right_expression);
+        symbolic_context, relation->right.value_id, &right_expression);
     if (!iree_status_is_ok(status)) {
       break;
     }
@@ -393,13 +394,12 @@ static iree_status_t loom_amdgpu_condition_implies_participant_zero(
     }
   }
 
-  iree_arena_deinitialize(&arena);
   return status;
 }
 
 static iree_status_t loom_amdgpu_cfg_block_implies_participant_zero(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    const loom_region_t* region, const loom_block_t* block,
+    loom_low_lower_context_t* context, const loom_region_t* region,
+    const loom_block_t* block,
     loom_amdgpu_participant_id_kind_t participant_id_kind,
     uint16_t remaining_depth, bool* out_implies_participant_zero) {
   *out_implies_participant_zero = false;
@@ -442,8 +442,8 @@ static iree_status_t loom_amdgpu_cfg_block_implies_participant_zero(
     bool edge_implies_participant_zero = false;
     if (edge_condition != LOOM_VALUE_ID_INVALID) {
       IREE_RETURN_IF_ERROR(loom_amdgpu_condition_implies_participant_zero(
-          module, fact_table, edge_condition, edge_assumed_truth,
-          participant_id_kind, &edge_implies_participant_zero));
+          context, edge_condition, edge_assumed_truth, participant_id_kind,
+          &edge_implies_participant_zero));
     }
     if (edge_implies_participant_zero) {
       continue;
@@ -451,7 +451,7 @@ static iree_status_t loom_amdgpu_cfg_block_implies_participant_zero(
 
     bool predecessor_implies_participant_zero = false;
     IREE_RETURN_IF_ERROR(loom_amdgpu_cfg_block_implies_participant_zero(
-        module, fact_table, region, predecessor, participant_id_kind,
+        context, region, predecessor, participant_id_kind,
         (uint16_t)(remaining_depth - 1),
         &predecessor_implies_participant_zero));
     if (!predecessor_implies_participant_zero) {
@@ -482,8 +482,7 @@ static const loom_op_t* loom_amdgpu_use_enclosing_resultless_then_if(
 }
 
 static iree_status_t loom_amdgpu_use_implies_participant_zero(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    const loom_op_t* use_op,
+    loom_low_lower_context_t* context, const loom_op_t* use_op,
     loom_amdgpu_participant_id_kind_t participant_id_kind,
     bool* out_implies_participant_zero) {
   *out_implies_participant_zero = false;
@@ -491,9 +490,8 @@ static iree_status_t loom_amdgpu_use_implies_participant_zero(
       loom_amdgpu_use_enclosing_resultless_then_if(use_op);
   if (guard_op != NULL) {
     return loom_amdgpu_condition_implies_participant_zero(
-        module, fact_table, loom_scf_if_condition(guard_op),
-        /*assumed_truth=*/true, participant_id_kind,
-        out_implies_participant_zero);
+        context, loom_scf_if_condition(guard_op), /*assumed_truth=*/true,
+        participant_id_kind, out_implies_participant_zero);
   }
 
   const loom_block_t* block = use_op != NULL ? use_op->parent_block : NULL;
@@ -502,8 +500,8 @@ static iree_status_t loom_amdgpu_use_implies_participant_zero(
     return iree_ok_status();
   }
   return loom_amdgpu_cfg_block_implies_participant_zero(
-      module, fact_table, region, block, participant_id_kind,
-      region->block_count, out_implies_participant_zero);
+      context, region, block, participant_id_kind, region->block_count,
+      out_implies_participant_zero);
 }
 
 typedef enum loom_amdgpu_collective_result_demand_e {
@@ -588,19 +586,16 @@ static const loom_amdgpu_workgroup_reduce_publication_rule_t
 };
 
 static iree_status_t loom_amdgpu_collective_result_demand(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    loom_func_like_t source_function, const loom_target_bundle_t* bundle,
-    loom_value_id_t result,
+    loom_low_lower_context_t* context, loom_value_id_t result,
     loom_amdgpu_collective_result_demand_t* out_result_demand) {
   *out_result_demand = LOOM_AMDGPU_COLLECTIVE_RESULT_DEMAND_ALL_WORKITEMS;
-  if (module == NULL) {
-    return iree_ok_status();
-  }
+  const loom_module_t* module = loom_low_lower_context_module(context);
 
   loom_target_workgroup_size_t workgroup_size = {0};
   const bool has_one_dimensional_workgroup =
-      loom_amdgpu_required_workgroup_size(module, source_function, bundle,
-                                          &workgroup_size) &&
+      loom_amdgpu_required_workgroup_size(
+          module, loom_low_lower_context_source_function(context),
+          loom_low_lower_context_bundle(context), &workgroup_size) &&
       workgroup_size.x != 0 && workgroup_size.y == 1 && workgroup_size.z == 1;
 
   if (result >= module->values.count) {
@@ -618,7 +613,7 @@ static iree_status_t loom_amdgpu_collective_result_demand(
     const loom_op_t* user_op = loom_use_user_op(uses[i]);
     bool guard_is_leader_workitem = false;
     IREE_RETURN_IF_ERROR(loom_amdgpu_use_implies_participant_zero(
-        module, fact_table, user_op, LOOM_AMDGPU_PARTICIPANT_ID_WORKITEM_X,
+        context, user_op, LOOM_AMDGPU_PARTICIPANT_ID_WORKITEM_X,
         &guard_is_leader_workitem));
     if (guard_is_leader_workitem && has_one_dimensional_workgroup) {
       continue;
@@ -626,7 +621,7 @@ static iree_status_t loom_amdgpu_collective_result_demand(
 
     bool guard_is_subgroup_leader_lane = false;
     IREE_RETURN_IF_ERROR(loom_amdgpu_use_implies_participant_zero(
-        module, fact_table, user_op, LOOM_AMDGPU_PARTICIPANT_ID_SUBGROUP_LANE,
+        context, user_op, LOOM_AMDGPU_PARTICIPANT_ID_SUBGROUP_LANE,
         &guard_is_subgroup_leader_lane));
     if (!guard_is_subgroup_leader_lane) {
       return iree_ok_status();
@@ -651,11 +646,7 @@ static iree_status_t loom_amdgpu_select_workgroup_reduce_publication_kind(
   loom_amdgpu_collective_result_demand_t result_demand =
       LOOM_AMDGPU_COLLECTIVE_RESULT_DEMAND_ALL_WORKITEMS;
   IREE_RETURN_IF_ERROR(loom_amdgpu_collective_result_demand(
-      loom_low_lower_context_module(context),
-      loom_low_lower_context_fact_table(context),
-      loom_low_lower_context_source_function(context),
-      loom_low_lower_context_bundle(context),
-      loom_kernel_workgroup_reduce_result(source_op), &result_demand));
+      context, loom_kernel_workgroup_reduce_result(source_op), &result_demand));
 
   loom_amdgpu_workgroup_reduce_publication_rule_flags_t available_flags =
       LOOM_AMDGPU_WORKGROUP_REDUCE_PUBLICATION_RULE_MULTI_WAVE;

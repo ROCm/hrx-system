@@ -152,6 +152,8 @@ typedef struct loom_low_lowering_frame_t {
   loom_local_value_domain_t value_domain;
   // Borrowed source value facts computed before planning.
   loom_value_fact_table_t* fact_table;
+  // Reusable traversal state for condition-fact queries.
+  loom_condition_query_t condition_query;
   // Function-local symbolic proof context initialized on first rule query.
   loom_symbolic_expr_context_t expression_context;
   // Fact table used to initialize expression_context.
