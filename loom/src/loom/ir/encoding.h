@@ -297,10 +297,9 @@ typedef struct loom_encoding_table_t {
 // by OperandDict metadata so the merged parameter view is explicit in the IR
 // instead of hidden inside attribute payloads.
 //
-// The context-owned family vtable supplies runtime hooks for interpreting
-// static instances: parameter verification, storage sizing, and byte
-// encode/decode. Text and bytecode syntax are generic named attrs, so
-// parsing/printing do not go through the family vtable.
+// The context-owned family vtable supplies compiler hooks for validating and
+// summarizing family instances. Text and bytecode syntax are generic named
+// attrs, so parsing/printing do not go through the family vtable.
 typedef struct loom_encoding_vtable_t {
   // Generated family schema. Required and process-lifetime stable.
   const loom_encoding_family_descriptor_t* descriptor;
@@ -342,29 +341,6 @@ typedef struct loom_encoding_vtable_t {
   // infallible and only write parameterized or composed facts.
   void (*summarize)(const loom_encoding_family_summary_request_t* request,
                     loom_encoding_family_summary_t* out_summary);
-
-  // Computes storage size in bytes for `element_count` logical elements.
-  // May be NULL for families that are compile-time-only metadata.
-  iree_status_t (*storage_size)(const loom_module_t* module,
-                                const loom_encoding_t* encoding,
-                                iree_host_size_t element_count,
-                                iree_host_size_t* out_storage_size);
-
-  // Decodes encoded bytes into dense elements.
-  // May be NULL if the family has no host-side codec yet.
-  iree_status_t (*decode)(const loom_module_t* module,
-                          const loom_encoding_t* encoding,
-                          iree_const_byte_span_t encoded_data,
-                          iree_byte_span_t decoded_data,
-                          iree_host_size_t element_count);
-
-  // Encodes dense elements into the family-specific byte layout.
-  // May be NULL if the family has no host-side codec yet.
-  iree_status_t (*encode)(const loom_module_t* module,
-                          const loom_encoding_t* encoding,
-                          iree_const_byte_span_t decoded_data,
-                          iree_byte_span_t encoded_data,
-                          iree_host_size_t element_count);
 } loom_encoding_vtable_t;
 
 // Context-owned dense list of registered encoding family vtables.
