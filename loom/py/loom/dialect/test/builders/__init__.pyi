@@ -1099,3 +1099,12 @@ class TestBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> ValueRef: ...
+    def partitioned_call(
+        self,
+        *,
+        callee: str,
+        prefix: list[ValueRef] = ...,
+        specializations: list[ValueRef] = ...,
+        bindings: list[ValueRef] = ...,
+        location_id: int | None = ...,
+    ) -> None: ...

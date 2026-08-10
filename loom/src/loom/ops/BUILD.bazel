@@ -234,10 +234,6 @@ loom_cc_test(
     deps = [
         ":op_defs",
         "//loom/src/loom/ir",
-        "//loom/src/loom/ops/command",
-        "//loom/src/loom/ops/kernel",
-        "//loom/src/loom/ops/scalar",
-        "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/test",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
