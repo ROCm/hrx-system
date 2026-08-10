@@ -15,6 +15,12 @@ namespace {
 
 constexpr size_t kAxlfBaseOffset = 0xE8;
 constexpr size_t kContextTailSize = 0x3C8;
+constexpr size_t kLegacyV0AxlfBaseOffset = 0xC0;
+constexpr size_t kLegacyV0ContextTailSize = 0x530;
+constexpr size_t kLegacyV0MlirAieContextTailSize = 0x370;
+constexpr size_t kLegacyV2AxlfBaseOffset = 0xE0;
+constexpr size_t kLegacyV2ContextTailSize = 0x3C8;
+constexpr size_t kLegacyV2MlirAieContextTailSize = 0x370;
 constexpr uint64_t kCommandApertureBase = 0x04000000;
 constexpr uint64_t kContextCommandBoSize = 0x1000;
 constexpr size_t kCompactContextPrivateDataSize = 0xA0;
@@ -625,6 +631,185 @@ bool BuildCompactContextPrivateDataFromXclbin(
   return true;
 }
 
+bool BuildLegacyV0ContextPrivateDataFromXclbin(
+    const uint8_t* xclbin, size_t xclbin_size, uint32_t process_id,
+    iree_allocator_t allocator, iree_byte_span_t* out_blob,
+    ContextBlobInfo* out_info, Error* out_error) {
+  if (!xclbin || !out_blob || iree_allocator_is_null(allocator)) {
+    return Fail("invalid v0 context arguments", out_error);
+  }
+  *out_blob = iree_byte_span_empty();
+  if (out_info) *out_info = ContextBlobInfo();
+  if (xclbin_size < 0x1B0) return Fail("xclbin is too small", out_error);
+
+  ContextBlobInfo info;
+  if (!ParseContextBlobInfo(xclbin, xclbin_size, allocator, &info,
+                            out_error)) {
+    return false;
+  }
+  const bool is_mlir_aie =
+      std::strcmp(info.kernel_name, "MLIR_AIE") == 0 ||
+      std::strcmp(info.pdi_name, "MLIR_AIE") == 0;
+  const size_t tail_size =
+      is_mlir_aie ? kLegacyV0MlirAieContextTailSize : kLegacyV0ContextTailSize;
+  if (xclbin_size > std::numeric_limits<size_t>::max() -
+                        kLegacyV0AxlfBaseOffset - tail_size) {
+    ContextBlobInfoDeinitialize(&info);
+    return Fail("v0 context blob size overflows size_t", out_error);
+  }
+  size_t total_size =
+      kLegacyV0AxlfBaseOffset + xclbin_size + tail_size;
+  if (total_size > kMaxContextBlobSize || total_size > IREE_HOST_SIZE_MAX) {
+    ContextBlobInfoDeinitialize(&info);
+    return Fail("v0 context blob size exceeds supported limit", out_error);
+  }
+
+  uint8_t* blob = nullptr;
+  iree_status_t status =
+      iree_allocator_malloc(allocator, static_cast<iree_host_size_t>(total_size),
+                            reinterpret_cast<void**>(&blob));
+  if (!FailStatus(status, "v0 context blob allocation failed", out_error)) {
+    ContextBlobInfoDeinitialize(&info);
+    return false;
+  }
+  std::memset(blob, 0, total_size);
+  std::memcpy(blob, xclbin + 0x1A0, 16);
+  WriteU64(blob, 0x38, kCommandApertureBase);
+  WriteU64(blob, 0x40, 0x48);
+  WriteU64(blob, 0x48, total_size - 0x58);
+  WriteU64(blob, 0x50, process_id);
+  WriteU64(blob, 0x58, 1);
+  WriteU64(blob, 0xA0, kContextCommandBoSize);
+  WriteU64(blob, 0xA8, xclbin_size);
+  WriteU64(blob, 0xB0, total_size - 0x110);
+  WriteU64(blob, 0xB8, total_size - 0xC0);
+  std::memcpy(blob + kLegacyV0AxlfBaseOffset, xclbin, xclbin_size);
+
+  size_t tail = kLegacyV0AxlfBaseOffset + xclbin_size;
+  if (!WriteCString(blob, tail + 0x00, 64, info.kernel_name, out_error)) {
+    iree_allocator_free(allocator, blob);
+    ContextBlobInfoDeinitialize(&info);
+    return false;
+  }
+  blob[tail + 0x3F] = '0';
+  if (is_mlir_aie) {
+    WriteU64(blob, tail + 0x40, 0x10000);
+    WriteU64(blob, tail + 0x48, 8);
+    WriteU32(blob, tail + 0x58, 0x901);
+    WriteU32(blob, tail + 0x360, 0x800);
+    WriteU32(blob, tail + 0x364, 1);
+    WriteU32(blob, tail + 0x368, info.column_width);
+  } else {
+    WriteU64(blob, tail + 0x40, kContextCommandBoSize);
+    WriteU64(blob, tail + 0x48, info.column_width);
+    if (!WriteCString(blob, tail + 0x1C0, 64, info.pdi_name, out_error)) {
+      iree_allocator_free(allocator, blob);
+      ContextBlobInfoDeinitialize(&info);
+      return false;
+    }
+    blob[tail + 0x1FF] = '0';
+    WriteU64(blob, tail + 0x200, 0x10000);
+    WriteU64(blob, tail + 0x208, 8);
+    WriteU32(blob, tail + 0x218, 0x100);
+  }
+
+  *out_blob = iree_make_byte_span(blob, total_size);
+  if (out_info) {
+    *out_info = info;
+    info = ContextBlobInfo();
+  }
+  ContextBlobInfoDeinitialize(&info);
+  return true;
+}
+
+bool BuildLegacyV2ContextPrivateDataFromXclbin(
+    const uint8_t* xclbin, size_t xclbin_size, uint32_t process_id,
+    iree_allocator_t allocator, iree_byte_span_t* out_blob,
+    ContextBlobInfo* out_info, Error* out_error) {
+  if (!xclbin || !out_blob || iree_allocator_is_null(allocator)) {
+    return Fail("invalid legacy_v2 context arguments", out_error);
+  }
+  *out_blob = iree_byte_span_empty();
+  if (out_info) *out_info = ContextBlobInfo();
+  if (xclbin_size < 0x1B0) return Fail("xclbin is too small", out_error);
+
+  ContextBlobInfo info;
+  if (!ParseContextBlobInfo(xclbin, xclbin_size, allocator, &info,
+                            out_error)) {
+    return false;
+  }
+  const bool is_mlir_aie =
+      std::strcmp(info.kernel_name, "MLIR_AIE") == 0 ||
+      std::strcmp(info.pdi_name, "MLIR_AIE") == 0;
+  const size_t tail_size = is_mlir_aie
+                               ? kLegacyV2MlirAieContextTailSize
+                               : kLegacyV2ContextTailSize;
+  if (xclbin_size > std::numeric_limits<size_t>::max() -
+                        kLegacyV2AxlfBaseOffset - tail_size) {
+    ContextBlobInfoDeinitialize(&info);
+    return Fail("legacy_v2 context blob size overflows size_t", out_error);
+  }
+  size_t total_size = kLegacyV2AxlfBaseOffset + xclbin_size + tail_size;
+  if (total_size > kMaxContextBlobSize || total_size > IREE_HOST_SIZE_MAX) {
+    ContextBlobInfoDeinitialize(&info);
+    return Fail("legacy_v2 context blob size exceeds supported limit",
+                out_error);
+  }
+
+  uint8_t* blob = nullptr;
+  iree_status_t status =
+      iree_allocator_malloc(allocator, static_cast<iree_host_size_t>(total_size),
+                            reinterpret_cast<void**>(&blob));
+  if (!FailStatus(status, "legacy_v2 context blob allocation failed",
+                  out_error)) {
+    ContextBlobInfoDeinitialize(&info);
+    return false;
+  }
+  std::memset(blob, 0, total_size);
+  std::memcpy(blob, xclbin + 0x1A0, 16);
+  WriteU64(blob, 0x40, kCommandApertureBase);
+  WriteU64(blob, 0x48, 0x48);
+  WriteU64(blob, 0x50, total_size - 0x78);
+  WriteU64(blob, 0x58, process_id);
+  WriteU64(blob, 0x78, 1);
+  WriteU64(blob, 0xC0, kContextCommandBoSize);
+  WriteU64(blob, 0xC8, xclbin_size);
+  WriteU64(blob, 0xD0, total_size - 0x130);
+  WriteU64(blob, 0xD8, total_size - 0xE0);
+  std::memcpy(blob + kLegacyV2AxlfBaseOffset, xclbin, xclbin_size);
+
+  size_t tail = kLegacyV2AxlfBaseOffset + xclbin_size;
+  if (!WriteCString(blob, tail + 0x00, 64, info.kernel_name, out_error)) {
+    iree_allocator_free(allocator, blob);
+    ContextBlobInfoDeinitialize(&info);
+    return false;
+  }
+  blob[tail + 0x3F] = '0';
+  if (is_mlir_aie) {
+    WriteU64(blob, tail + 0x40, 0x10000);
+    WriteU64(blob, tail + 0x48, 8);
+    WriteU32(blob, tail + 0x58, 0x901);
+    WriteU32(blob, tail + 0x360, 0x800);
+    WriteU32(blob, tail + 0x364, 1);
+    WriteU32(blob, tail + 0x368, info.column_width);
+  } else {
+    WriteU64(blob, tail + 0x40, 0x10000);
+    WriteU64(blob, tail + 0x48, 9);
+    WriteU32(blob, tail + 0x3B8, 0x800);
+    WriteU32(blob, tail + 0x3BC, 1);
+    WriteU32(blob, tail + 0x3C0, info.column_width);
+    WriteU32(blob, tail + 0x3C4, info.start_column);
+  }
+
+  *out_blob = iree_make_byte_span(blob, total_size);
+  if (out_info) {
+    *out_info = info;
+    info = ContextBlobInfo();
+  }
+  ContextBlobInfoDeinitialize(&info);
+  return true;
+}
+
 bool BuildContextPrivateDataForDevice(
     const KmtApi& api, const Device& device, const uint8_t* xclbin,
     size_t xclbin_size, uint32_t process_id, iree_allocator_t allocator,
@@ -634,6 +819,16 @@ bool BuildContextPrivateDataForDevice(
     return Fail("invalid context-private buffer output", out_error);
   }
   *out_context_private_buffer = {};
+  if (device.mcdm_abi == McdmAbi::legacy_v0) {
+    return BuildLegacyV0ContextPrivateDataFromXclbin(
+        xclbin, xclbin_size, process_id, allocator, out_blob, out_info,
+        out_error);
+  }
+  if (device.mcdm_abi == McdmAbi::legacy_v2) {
+    return BuildLegacyV2ContextPrivateDataFromXclbin(
+        xclbin, xclbin_size, process_id, allocator, out_blob, out_info,
+        out_error);
+  }
   if (device.mcdm_abi == McdmAbi::legacy) {
     return BuildContextPrivateDataFromXclbin(
         xclbin, xclbin_size, process_id, allocator, out_blob, out_info,

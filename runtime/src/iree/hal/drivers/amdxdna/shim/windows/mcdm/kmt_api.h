@@ -77,6 +77,8 @@ enum class BufferKind {
 };
 
 enum class McdmAbi {
+  legacy_v0,
+  legacy_v2,
   legacy,
   compact,
 };
@@ -93,9 +95,20 @@ struct McdmAbiDiagnostics {
   uint32_t identity_words[3] = {};
   uint32_t identity_word_count = 0;
   uint32_t accepted_identity_count = 0;
-  bool identities_match = false;
+  bool identity_accepted = false;
+  bool driver_version_disambiguation_required = false;
+  bool driver_version_disambiguation_available = false;
+  bool compact_query_attempted = false;
+  bool legacy_query_attempted = false;
   NTSTATUS compact_query_status = 0;
   NTSTATUS legacy_query_status = 0;
+};
+
+struct DriverVersion {
+  uint32_t major = 0;
+  uint32_t minor = 0;
+  uint32_t build = 0;
+  uint32_t revision = 0;
 };
 
 enum class CommandApertureWritePublishMode {
@@ -129,6 +142,10 @@ struct McdmAbiInfo {
 };
 
 McdmAbiInfo GetMcdmAbiInfo(McdmAbi abi);
+
+McdmAbi SelectMcdmAbiForDriverVersion(McdmAbi probed_abi,
+                                       bool has_driver_version,
+                                       const DriverVersion& driver_version);
 
 struct BufferKindInfo {
   const char* name;
@@ -167,8 +184,8 @@ struct KmtApi {
   bool Load(Error* out_error);
 };
 
-bool QueryMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter, McdmAbi* out_abi,
-                  Error* out_error);
+bool QueryProbedMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter,
+                        McdmAbi* out_abi, Error* out_error);
 bool QueryMcdmAbiDiagnostics(const KmtApi& api, D3DKMT_HANDLE adapter,
                              McdmAbiDiagnostics* out_diagnostics,
                              Error* out_error);
@@ -193,6 +210,8 @@ struct Device {
   mutable volatile LONG64 pending_paging_fence_value = 0;
   McdmAbi mcdm_abi = McdmAbi::legacy;
   McdmAbiDiagnostics mcdm_abi_diagnostics = {};
+  DriverVersion driver_version = {};
+  bool has_driver_version = false;
 };
 
 struct Buffer {

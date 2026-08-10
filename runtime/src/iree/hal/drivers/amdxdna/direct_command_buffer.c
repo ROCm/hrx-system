@@ -677,10 +677,20 @@ iree_status_t iree_hal_amdxdna_make_npu_cmd(
     }
   } else if (native_uses_dpu_regmap_args) {
     // Some native drivers expose DPU kernels through an xclbin XML register
-    // map. In that path the runtime data VAs are regular ERT args.
+    // map. In that path the runtime data VAs are regular ERT args, but native
+    // completion still needs the backing BO ranges to refresh host-visible
+    // outputs.
+    if (IREE_UNLIKELY(arg_count &&
+                      (!arg_buffers || !arg_offsets || !arg_lengths))) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "amdxdna START_NPU DPU regmap command is missing BO bindings for "
+          "its runtime args");
+    }
     for (size_t i = 0; i < arg_count; ++i) {
-      IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_command_c_add_arg_64(
-          out_cmd->command, args[i]));
+      IREE_RETURN_IF_ERROR(
+          iree_hal_amdxdna_native_command_c_add_buffer_arg_at_offset(
+              out_cmd->command, arg_buffers[i], arg_offsets[i]));
     }
   }
   out_cmd->built = true;
@@ -785,8 +795,13 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_start_npu_cmd(
       command_buffer->device->native_caps.default_dispatch_opcode ==
       IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_NPU;
   if (native_uses_dpu_regmap_args) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdxdna_native_command_c_reset_bound_buffers(cached->command));
     iree_status_t update_status = iree_ok_status();
     for (iree_host_size_t i = 0; i < fresh->binding_count; ++i) {
+      IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_command_c_bind_buffer(
+          cached->command, /*position=*/i + 1, fresh->binding_buffers[i],
+          fresh->binding_offsets[i], fresh->binding_lengths[i]));
       update_status = iree_hal_amdxdna_native_command_c_update_arg_64(
           cached->command, i + 1, fresh->binding_device_addrs[i]);
       if (!iree_status_is_ok(update_status)) break;
@@ -809,8 +824,10 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_start_npu_cmd(
       IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_command_c_add_arg_64(
           cached->command, kAie2ExecBufferKernelOpTxn));
       for (iree_host_size_t i = 0; i < fresh->binding_count; ++i) {
-        IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_command_c_add_arg_64(
-            cached->command, fresh->binding_device_addrs[i]));
+        IREE_RETURN_IF_ERROR(
+            iree_hal_amdxdna_native_command_c_add_buffer_arg_at_offset(
+                cached->command, fresh->binding_buffers[i],
+                fresh->binding_offsets[i]));
       }
     }
   }
@@ -894,7 +911,12 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_single_start_npu_cmd(
       IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_NPU;
   bool rebuild_command = !native_uses_dpu_regmap_args;
   if (native_uses_dpu_regmap_args) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdxdna_native_command_c_reset_bound_buffers(cached->command));
     for (iree_host_size_t i = 0; i < fresh->binding_count; ++i) {
+      IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_command_c_bind_buffer(
+          cached->command, /*position=*/i + 1, fresh->binding_buffers[i],
+          fresh->binding_offsets[i], fresh->binding_lengths[i]));
       iree_status_t update_status =
           iree_hal_amdxdna_native_command_c_update_arg_64(
               cached->command, i + 1, fresh->binding_device_addrs[i]);
@@ -923,8 +945,10 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_single_start_npu_cmd(
         cached->command, kAie2ExecBufferKernelOpTxn));
     if (native_uses_dpu_regmap_args) {
       for (iree_host_size_t i = 0; i < fresh->binding_count; ++i) {
-        IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_command_c_add_arg_64(
-            cached->command, fresh->binding_device_addrs[i]));
+        IREE_RETURN_IF_ERROR(
+            iree_hal_amdxdna_native_command_c_add_buffer_arg_at_offset(
+                cached->command, fresh->binding_buffers[i],
+                fresh->binding_offsets[i]));
       }
     }
   }

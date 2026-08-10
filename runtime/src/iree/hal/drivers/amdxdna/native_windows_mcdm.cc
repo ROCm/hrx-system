@@ -127,6 +127,44 @@ uint32_t chain_slot_capacity(size_t exec_bo_size) {
              : 1;
 }
 
+bool disables_command_chaining(mcdm::McdmAbi abi) {
+  return abi == mcdm::McdmAbi::legacy_v0 ||
+         abi == mcdm::McdmAbi::legacy_v2;
+}
+
+void apply_command_chain_override(
+    iree_hal_amdxdna_native_c_device_caps_t* caps) {
+  switch (IREE_HAL_AMDXDNA_COMMAND_CHAIN_OVERRIDE) {
+    case IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_OVERRIDE_FORCE_ENABLED: {
+      const size_t chain_exec_bo_size =
+          static_cast<size_t>(windows_dpu_pathb_chain_exec_bo_size());
+      caps->max_command_chain_slots = chain_slot_capacity(chain_exec_bo_size);
+      // The override is intentionally scoped to the OS-neutral command-chain
+      // capability. It does not re-advertise Windows-specific dispatch models
+      // that were disabled for a known-bad driver stack.
+      caps->dispatch_models |=
+          IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_COMMAND_CHAIN;
+      caps->supports_command_chain = true;
+      caps->supports_submit_many = true;
+      caps->command_chain_status =
+          IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_FOR_TESTING;
+      break;
+    }
+    case IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_OVERRIDE_FORCE_DISABLED:
+      caps->max_command_chain_slots = 0;
+      caps->dispatch_models &=
+          ~IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_COMMAND_CHAIN;
+      caps->supports_command_chain = false;
+      caps->supports_submit_many = false;
+      caps->command_chain_status =
+          IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_FOR_TESTING;
+      break;
+    case IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_OVERRIDE_AUTO:
+    default:
+      break;
+  }
+}
+
 iree_status_t status_from_mcdm_error(const char* label,
                                      const mcdm::Error& error) {
   return iree_make_status(IREE_STATUS_INTERNAL, "%s: %s", label,
@@ -1252,6 +1290,9 @@ iree_status_t refresh_command_output_ranges(
     }
     return iree_ok_status();
   }
+  if (uses_windows_dpu_regmap(command)) {
+    return refresh_all_runtime_bindings(command);
+  }
   return refresh_partial_elf_output_ranges(command);
 }
 
@@ -1370,17 +1411,14 @@ iree_status_t validate_windows_dpu_regmap_inputs(
         IREE_STATUS_RESOURCE_EXHAUSTED,
         "amdxdna Windows MCDM DPU control code exceeds aperture code BO");
   }
-  // The Windows wrapper DPU ABI carries the TXN selector plus a staged
-  // instruction pointer. Execute TXNs add three data buffer VAs (arg_count=4,
-  // reg_idx=8 before rewrite). Control-packet reconfiguration TXNs add only the
-  // control-packet sequence/MC buffer VA (arg_count=2, reg_idx=4); the common
-  // rewrite below maps that single VA into the first data slot and leaves the
-  // others zero.
-  const bool has_execute_args =
-      command->arg_count >= 4 && command->reg_idx >= 8;
-  const bool has_reconfigure_args =
-      command->arg_count == 2 && command->reg_idx == 4;
-  if (IREE_UNLIKELY(!has_execute_args && !has_reconfigure_args)) {
+  // The Windows wrapper DPU ABI carries a TXN selector plus a staged
+  // instruction pointer. Data BO VAs after the selector are optional: some
+  // START_NPU dispatches have no runtime buffer bindings, while reconfigure
+  // and execute packets may have one or more. The rewrite below preserves the
+  // first three data VAs if present and leaves absent slots zero-filled.
+  const bool has_selector_args =
+      command->arg_count >= 1 && command->reg_idx >= 2;
+  if (IREE_UNLIKELY(!has_selector_args)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "amdxdna Windows MCDM DPU packet is missing selector/data args");
@@ -1406,6 +1444,12 @@ iree_status_t rewrite_windows_dpu_regmap_to_instruction(
                             (static_cast<uint64_t>(regmap[5]) << 32);
   const uint64_t ofm_va = static_cast<uint64_t>(regmap[6]) |
                           (static_cast<uint64_t>(regmap[7]) << 32);
+  const uint64_t dummy0_va = static_cast<uint64_t>(regmap[8]) |
+                             (static_cast<uint64_t>(regmap[9]) << 32);
+  const uint64_t dummy1_va = static_cast<uint64_t>(regmap[10]) |
+                             (static_cast<uint64_t>(regmap[11]) << 32);
+  const uint64_t dummy2_va = static_cast<uint64_t>(regmap[12]) |
+                             (static_cast<uint64_t>(regmap[13]) << 32);
   std::memset(regmap, 0, kWindowsDpuRegmapWords * sizeof(uint32_t));
   regmap[0] = static_cast<uint32_t>(selector);
   regmap[1] = static_cast<uint32_t>(selector >> 32);
@@ -1418,6 +1462,12 @@ iree_status_t rewrite_windows_dpu_regmap_to_instruction(
   regmap[8] = static_cast<uint32_t>(param_va >> 32);
   regmap[9] = static_cast<uint32_t>(ofm_va);
   regmap[10] = static_cast<uint32_t>(ofm_va >> 32);
+  regmap[11] = static_cast<uint32_t>(dummy0_va);
+  regmap[12] = static_cast<uint32_t>(dummy0_va >> 32);
+  regmap[13] = static_cast<uint32_t>(dummy1_va);
+  regmap[14] = static_cast<uint32_t>(dummy1_va >> 32);
+  regmap[15] = static_cast<uint32_t>(dummy2_va);
+  regmap[16] = static_cast<uint32_t>(dummy2_va >> 32);
   command->reg_idx = kWindowsDpuRegmapWords;
   command->windows_dpu_regmap_finalized = true;
   return iree_ok_status();
@@ -1430,16 +1480,8 @@ iree_status_t finalize_windows_dpu_regmap(
   if (command->windows_dpu_regmap_finalized) return iree_ok_status();
   IREE_RETURN_IF_ERROR(validate_windows_dpu_regmap_inputs(queue, command));
   mcdm::CommandAperture& aperture = queue->context->command_aperture;
+  IREE_RETURN_IF_ERROR(stage_windows_dpu_code_buffer(queue, command));
   uint64_t instruction_va = aperture.code_gpu_va;
-
-  if (command->control_buffer &&
-      command->control_buffer->type ==
-          IREE_HAL_AMDXDNA_NATIVE_BUFFER_TYPE_INSTRUCTION) {
-    IREE_RETURN_IF_ERROR(materialize_deferred_instruction_buffer(
-        queue->context, command->control_buffer));
-    instruction_va =
-        iree_hal_amdxdna_native_buffer_device_address(command->control_buffer);
-  }
 
   IREE_RETURN_IF_ERROR(
       rewrite_windows_dpu_regmap_to_instruction(command, instruction_va));
@@ -2188,6 +2230,18 @@ iree_status_t iree_hal_amdxdna_native_device_query_caps(
   caps.command_chain_status =
       IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_BY_DEFAULT;
   *out_caps = caps;
+  if (disables_command_chaining(device->device.mcdm_abi)) {
+    out_caps->max_command_chain_slots = 0;
+    out_caps->dispatch_models &=
+        ~IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_COMMAND_CHAIN;
+    out_caps->dispatch_models &=
+        ~IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_PARTIAL_ELF;
+    out_caps->supports_command_chain = false;
+    out_caps->supports_submit_many = false;
+    out_caps->command_chain_status =
+        IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_KNOWN_BAD_STACK;
+  }
+  apply_command_chain_override(out_caps);
   return iree_ok_status();
 }
 
@@ -2249,6 +2303,13 @@ iree_status_t iree_hal_amdxdna_native_device_create_context(
   iree_byte_span_t private_data = iree_byte_span_empty();
   mcdm::ContextBlobInfo info;
   mcdm::Buffer context_private_buffer;
+  auto release_context_private_data = [&]() {
+    iree_allocator_free(device->host_allocator, private_data.data);
+    private_data = iree_byte_span_empty();
+    mcdm::DestroyBuffer(device->api, device->device, &context_private_buffer);
+    context_private_buffer = mcdm::Buffer();
+    mcdm::ContextBlobInfoDeinitialize(&info);
+  };
   if (!mcdm::BuildContextPrivateDataForDevice(
           device->api, device->device, xclbin.data, xclbin.data_length,
           GetCurrentProcessId(), device->host_allocator, &private_data, &info,
@@ -2259,10 +2320,7 @@ iree_status_t iree_hal_amdxdna_native_device_create_context(
   mcdm::Context context = {};
   if (!mcdm::CreateContext(device->api, device->device, private_data.data,
                            private_data.data_length, &context, &error)) {
-    iree_allocator_free(device->host_allocator, private_data.data);
-    mcdm::DestroyBuffer(device->api, device->device,
-                        &context_private_buffer);
-    mcdm::ContextBlobInfoDeinitialize(&info);
+    release_context_private_data();
     return status_from_mcdm_error(
         "amdxdna Windows MCDM context creation failed", error);
   }

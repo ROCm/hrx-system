@@ -7,8 +7,6 @@
 #include <errno.h>
 #include <unistd.h>
 
-#include <algorithm>
-#include <cctype>
 #include <cinttypes>
 #include <cstdlib>
 #include <cstring>
@@ -111,9 +109,9 @@ constexpr size_t kMaxExecBoSize = 4096;
 // implementation chunks native command chains at 24 children. Match that
 // firmware-facing scheduling unit instead of advertising the larger packet
 // capacity: longer KMQ chains are functionally valid in small tests, but full
-// FastFlowLM decode profiling shows worse device/completion latency for the
-// same work when a 28-child decode section is submitted as one chain instead of
-// XRT's 24+4 split.
+// decode-style profiling shows worse device/completion latency for the same
+// work when a 28-child section is submitted as one chain instead of XRT's 24+4
+// split.
 constexpr uint32_t kKmqDefaultChainSlots = 24;
 
 constexpr const char* kKnownBadUbuntu617Srcversion =
@@ -151,16 +149,6 @@ struct driver_stack_info_t {
   bool has_device = false;
   bool has_revision = false;
 };
-
-bool env_flag_enabled(const char* name) {
-  const char* raw_value = std::getenv(name);
-  if (!raw_value || raw_value[0] == '\0') return false;
-  std::string value(raw_value);
-  std::transform(value.begin(), value.end(), value.begin(),
-                 [](unsigned char c) { return (char)std::tolower(c); });
-  return value != "0" && value != "false" && value != "off" &&
-         value != "no";
-}
 
 std::string read_first_line(const std::filesystem::path& path) {
   std::ifstream file(path);
@@ -264,34 +252,39 @@ bool has_known_bad_amdxdna_srcversion(const driver_stack_info_t& info) {
 
 iree_hal_amdxdna_native_c_command_chain_status_t select_command_chain_status(
     const driver_stack_info_t& info) {
-  if (env_flag_enabled("IREE_HAL_AMDXDNA_DISABLE_COMMAND_CHAIN")) {
-    return IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_BY_USER;
-  }
-  if (env_flag_enabled("IREE_HAL_AMDXDNA_ENABLE_COMMAND_CHAIN")) {
-    return IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_BY_USER;
-  }
-
+  iree_hal_amdxdna_native_c_command_chain_status_t status =
+      IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_BY_DEFAULT;
   if (has_known_bad_amdxdna_srcversion(info)) {
-    return IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_KNOWN_BAD_STACK;
-  }
-
-  // There is no ordered kernel-module srcversion. Firmware is the ordered local
-  // signal; only enable native parent chains by default once firmware reaches
-  // the command-chain-capable floor. Older 1.0.x stock firmware has now failed
-  // on multiple Ubuntu amdxdna stacks.
-  if (is_xdna2_pci_revision(info)) {
+    status =
+        IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_KNOWN_BAD_STACK;
+  } else if (is_xdna2_pci_revision(info)) {
+    // There is no ordered kernel-module srcversion. Firmware is the ordered
+    // local signal; only enable native parent chains by default once firmware
+    // reaches the command-chain-capable floor. Older 1.0.x stock firmware has
+    // now failed on multiple Ubuntu amdxdna stacks.
     if (info.firmware.valid) {
       if (firmware_compare(info.firmware, kCommandChainFirmwareMinMajor,
                            kCommandChainFirmwareMinMinor,
                            kCommandChainFirmwareMinPatch,
                            kCommandChainFirmwareMinBuild) < 0) {
-        return IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_OLD_FIRMWARE;
+        status =
+            IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_OLD_FIRMWARE;
       }
     } else if (info.module_version.empty()) {
-      return IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_UNIDENTIFIED_STACK;
+      status =
+          IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_UNIDENTIFIED_STACK;
     }
   }
-  return IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_BY_DEFAULT;
+
+  switch (IREE_HAL_AMDXDNA_COMMAND_CHAIN_OVERRIDE) {
+    case IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_OVERRIDE_FORCE_ENABLED:
+      return IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_FOR_TESTING;
+    case IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_OVERRIDE_FORCE_DISABLED:
+      return IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_FOR_TESTING;
+    case IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_OVERRIDE_AUTO:
+    default:
+      return status;
+  }
 }
 
 bool command_chain_enabled(
@@ -299,7 +292,7 @@ bool command_chain_enabled(
   return status ==
              IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_BY_DEFAULT ||
          status ==
-             IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_BY_USER;
+             IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_FOR_TESTING;
 }
 
 void record_driver_stack_info(iree_hal_amdxdna_native_device_t* device,
@@ -639,10 +632,9 @@ iree_status_t iree_hal_amdxdna_native_device_query_caps(
   caps.context_image_models = IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_MODEL_PDI;
   // START_NPU is used for command-chain children and is correct on Linux KMQ.
   // Do not advertise PARTIAL_ELF here: its resident-instruction path currently
-  // produces wrong results for kernels with per-dispatch moving I/O (for
-  // example FastFlowLM decode). The command dirty hooks below only sync exec
-  // BO mutations; they do not make the PARTIAL_ELF resident-instruction model
-  // correct on Linux.
+  // produces wrong results for kernels with per-dispatch moving I/O. The
+  // command dirty hooks below only sync exec BO mutations; they do not make the
+  // PARTIAL_ELF resident-instruction model correct on Linux.
   caps.dispatch_models = IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_START_CU |
                          IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_START_NPU;
   if (device->supports_command_chain) {

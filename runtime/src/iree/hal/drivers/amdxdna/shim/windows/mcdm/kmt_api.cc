@@ -16,6 +16,8 @@
 #include <cstring>
 #include <cwchar>
 #include <limits>
+#include <string>
+#include <vector>
 
 #ifndef IREE_HAL_AMDXDNA_MCDM_ENABLE_KMT_TRACE
 #define IREE_HAL_AMDXDNA_MCDM_ENABLE_KMT_TRACE 0
@@ -39,10 +41,10 @@ constexpr uint64_t kCommandApertureGpuVaSize = 0x04000000;
 constexpr uint32_t kQhdlCompletionSlotSize = 8;
 constexpr uint32_t kMaxSubmitPrivatePrefixSize = 0x78;
 constexpr size_t kLegacyContextCommandApertureCookieOffset = 0x40;
+constexpr size_t kLegacyV2ContextCommandApertureCookieOffset = 0x3c;
 constexpr size_t kCompactContextCommandApertureCookieOffset = 0x44;
 constexpr UINT kMaxComputeAdapters = 256;
 constexpr UINT kMaxDriverStorePathWarmupBytes = 4096;
-
 template <typename Fn>
 Fn ResolveKmtProc(const char* name) {
   HMODULE modules[] = {
@@ -75,6 +77,36 @@ void SetErrorFormat(Error* out_error, const char* fmt, ...) {
 
 const char* NtStatusSuffix(NTSTATUS status) {
   return status == kStatusPending ? " (STATUS_PENDING)" : "";
+}
+
+bool UsesLegacyCpuBufferHandles(McdmAbi abi) {
+  return abi == McdmAbi::legacy || abi == McdmAbi::legacy_v0 ||
+         abi == McdmAbi::legacy_v2;
+}
+
+const char* McdmAbiName(McdmAbi abi) {
+  switch (abi) {
+    case McdmAbi::legacy_v0:
+      return "legacy_v0";
+    case McdmAbi::legacy_v2:
+      return "legacy_v2";
+    case McdmAbi::legacy:
+      return "legacy";
+    case McdmAbi::compact:
+      return "compact";
+  }
+  return "unknown";
+}
+
+size_t ContextCommandApertureCookieOffset(McdmAbi abi) {
+  if (abi == McdmAbi::legacy_v0) return size_t{0x30};
+  if (abi == McdmAbi::legacy_v2) {
+    return kLegacyV2ContextCommandApertureCookieOffset;
+  }
+  if (abi == McdmAbi::compact) {
+    return kCompactContextCommandApertureCookieOffset;
+  }
+  return kLegacyContextCommandApertureCookieOffset;
 }
 
 #if IREE_HAL_AMDXDNA_MCDM_ENABLE_KMT_TRACE
@@ -497,7 +529,8 @@ bool EnumerateComputeAdapters(const KmtApi& api,
   return true;
 }
 
-void QueryDriverStorePathForWarmup(const KmtApi& api, D3DKMT_HANDLE adapter) {
+bool QueryDriverStorePath(const KmtApi& api, D3DKMT_HANDLE adapter,
+                          std::wstring* out_path) {
   D3DDDI_QUERYREGISTRY_INFO query_info = {};
   query_info.QueryType = D3DDDI_QUERYREGISTRY_DRIVERSTOREPATH;
 
@@ -510,11 +543,11 @@ void QueryDriverStorePathForWarmup(const KmtApi& api, D3DKMT_HANDLE adapter) {
   if (status != 0 ||
       query_info.Status != D3DDDI_QUERYREGISTRY_STATUS_BUFFER_OVERFLOW ||
       query_info.OutputValueSize == 0) {
-    return;
+    return false;
   }
 
   if (query_info.OutputValueSize > kMaxDriverStorePathWarmupBytes) {
-    return;
+    return false;
   }
   alignas(D3DDDI_QUERYREGISTRY_INFO)
       uint8_t buffer[sizeof(D3DDDI_QUERYREGISTRY_INFO) +
@@ -524,10 +557,196 @@ void QueryDriverStorePathForWarmup(const KmtApi& api, D3DKMT_HANDLE adapter) {
   query.pPrivateDriverData = expanded;
   query.PrivateDriverDataSize = static_cast<UINT>(
       sizeof(D3DDDI_QUERYREGISTRY_INFO) + query_info.OutputValueSize);
-  api.query_adapter_info(&query);
+  status = api.query_adapter_info(&query);
+  if (status != 0 ||
+      expanded->Status != D3DDDI_QUERYREGISTRY_STATUS_SUCCESS ||
+      expanded->OutputValueSize == 0) {
+    return false;
+  }
+  if (out_path) {
+    size_t wchar_count = expanded->OutputValueSize / sizeof(WCHAR);
+    while (wchar_count > 0 && expanded->OutputString[wchar_count - 1] == 0) {
+      --wchar_count;
+    }
+    out_path->assign(expanded->OutputString,
+                     expanded->OutputString + wchar_count);
+  }
+  return true;
+}
+
+void QueryDriverStorePathForWarmup(const KmtApi& api, D3DKMT_HANDLE adapter) {
+  QueryDriverStorePath(api, adapter, nullptr);
+}
+
+bool ReadFileToBytes(const wchar_t* path, std::vector<uint8_t>* out_bytes) {
+  if (!path || !out_bytes) return false;
+  HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, nullptr,
+                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) return false;
+  LARGE_INTEGER size = {};
+  if (!GetFileSizeEx(file, &size) || size.QuadPart <= 0 ||
+      size.QuadPart > 1024 * 1024) {
+    CloseHandle(file);
+    return false;
+  }
+  out_bytes->resize(static_cast<size_t>(size.QuadPart));
+  DWORD read = 0;
+  BOOL ok =
+      ReadFile(file, out_bytes->data(), static_cast<DWORD>(out_bytes->size()),
+               &read, nullptr);
+  CloseHandle(file);
+  if (!ok || read != out_bytes->size()) {
+    out_bytes->clear();
+    return false;
+  }
+  return true;
+}
+
+std::wstring DecodeInfText(const std::vector<uint8_t>& bytes) {
+  if (bytes.size() >= 2 &&
+      ((bytes[0] == 0xFF && bytes[1] == 0xFE) ||
+       (bytes[0] != 0 && bytes[1] == 0))) {
+    size_t offset = bytes[0] == 0xFF && bytes[1] == 0xFE ? 2 : 0;
+    size_t wchar_count = (bytes.size() - offset) / sizeof(wchar_t);
+    return std::wstring(
+        reinterpret_cast<const wchar_t*>(bytes.data() + offset),
+        reinterpret_cast<const wchar_t*>(bytes.data() + offset) + wchar_count);
+  }
+  int wchar_count = MultiByteToWideChar(
+      CP_UTF8, 0, reinterpret_cast<const char*>(bytes.data()),
+      static_cast<int>(bytes.size()), nullptr, 0);
+  UINT code_page = CP_UTF8;
+  if (wchar_count == 0) {
+    code_page = CP_ACP;
+    wchar_count = MultiByteToWideChar(
+        code_page, 0, reinterpret_cast<const char*>(bytes.data()),
+        static_cast<int>(bytes.size()), nullptr, 0);
+  }
+  std::wstring text(static_cast<size_t>(wchar_count), L'\0');
+  if (wchar_count > 0) {
+    MultiByteToWideChar(code_page, 0,
+                        reinterpret_cast<const char*>(bytes.data()),
+                        static_cast<int>(bytes.size()), text.data(),
+                        wchar_count);
+  }
+  return text;
+}
+
+std::string NarrowForTrace(const std::wstring& text) {
+  if (text.empty()) return std::string();
+  int size = WideCharToMultiByte(CP_UTF8, 0, text.data(),
+                                 static_cast<int>(text.size()), nullptr, 0,
+                                 nullptr, nullptr);
+  if (size <= 0) return std::string("<unprintable>");
+  std::string result(static_cast<size_t>(size), '\0');
+  WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()),
+                      result.data(), size, nullptr, nullptr);
+  return result;
+}
+
+void NormalizeSystemRootPath(std::wstring* path) {
+  if (!path) return;
+  constexpr wchar_t kSystemRootPrefix[] = L"\\SystemRoot";
+  constexpr size_t kSystemRootPrefixLength =
+      sizeof(kSystemRootPrefix) / sizeof(kSystemRootPrefix[0]) - 1;
+  if (path->size() < kSystemRootPrefixLength ||
+      _wcsnicmp(path->c_str(), kSystemRootPrefix, kSystemRootPrefixLength) !=
+          0) {
+    return;
+  }
+  wchar_t windows_directory[MAX_PATH] = {};
+  UINT length = GetWindowsDirectoryW(windows_directory, MAX_PATH);
+  if (length == 0 || length >= MAX_PATH) return;
+  path->replace(0, kSystemRootPrefixLength, windows_directory);
+}
+
+bool ParseDriverVersionText(const std::wstring& text, DriverVersion* out) {
+  if (!out) return false;
+  const std::wstring key = L"DriverVer";
+  size_t pos = text.find(key);
+  if (pos == std::wstring::npos) return false;
+  pos = text.find(L',', pos + key.size());
+  if (pos == std::wstring::npos) return false;
+  ++pos;
+  while (pos < text.size() && (text[pos] == L' ' || text[pos] == L'\t')) {
+    ++pos;
+  }
+
+  uint32_t values[4] = {};
+  for (size_t i = 0; i < 4; ++i) {
+    if (pos >= text.size() || text[pos] < L'0' || text[pos] > L'9') {
+      return false;
+    }
+    uint32_t value = 0;
+    while (pos < text.size() && text[pos] >= L'0' && text[pos] <= L'9') {
+      value = value * 10 + static_cast<uint32_t>(text[pos] - L'0');
+      ++pos;
+    }
+    values[i] = value;
+    if (i != 3) {
+      if (pos >= text.size() || text[pos] != L'.') return false;
+      ++pos;
+    }
+  }
+  out->major = values[0];
+  out->minor = values[1];
+  out->build = values[2];
+  out->revision = values[3];
+  return true;
+}
+
+bool QueryDriverVersion(const KmtApi& api, D3DKMT_HANDLE adapter,
+                        DriverVersion* out_version) {
+  if (!out_version) return false;
+  std::wstring driver_store_path;
+  if (!QueryDriverStorePath(api, adapter, &driver_store_path) ||
+      driver_store_path.empty()) {
+    Trace("driver-version query failed: no DriverStore path");
+    return false;
+  }
+  NormalizeSystemRootPath(&driver_store_path);
+  const std::string original_driver_store_path =
+      NarrowForTrace(driver_store_path);
+  if (driver_store_path.back() != L'\\' && driver_store_path.back() != L'/') {
+    driver_store_path.push_back(L'\\');
+  }
+  driver_store_path.append(L"kipudrv.inf");
+  const std::string inf_path = NarrowForTrace(driver_store_path);
+
+  std::vector<uint8_t> bytes;
+  if (!ReadFileToBytes(driver_store_path.c_str(), &bytes)) {
+    Trace("driver-version query failed: cannot read INF store_path='%s' "
+          "inf_path='%s'",
+          original_driver_store_path.c_str(), inf_path.c_str());
+    return false;
+  }
+  if (!ParseDriverVersionText(DecodeInfText(bytes), out_version)) {
+    Trace("driver-version query failed: cannot parse INF path='%s'",
+          inf_path.c_str());
+    return false;
+  }
+  Trace("driver-version query path='%s' version=%u.%u.%u.%u",
+        inf_path.c_str(), out_version->major, out_version->minor,
+        out_version->build, out_version->revision);
+  return true;
+}
+
+bool UsesLegacyV2ContextLayout(const DriverVersion& version) {
+  return version.major == 32 && version.minor == 0 && version.build == 203 &&
+         version.revision < 314;
 }
 
 }  // namespace
+
+McdmAbi SelectMcdmAbiForDriverVersion(McdmAbi probed_abi,
+                                       bool has_driver_version,
+                                       const DriverVersion& driver_version) {
+  if (probed_abi == McdmAbi::legacy_v2 &&
+      (!has_driver_version || !UsesLegacyV2ContextLayout(driver_version))) {
+    return McdmAbi::legacy;
+  }
+  return probed_abi;
+}
 
 bool QueryMcdmAbiDiagnostics(const KmtApi& api, D3DKMT_HANDLE adapter,
                              McdmAbiDiagnostics* out_diagnostics,
@@ -537,34 +756,24 @@ bool QueryMcdmAbiDiagnostics(const KmtApi& api, D3DKMT_HANDLE adapter,
     return false;
   }
   McdmAbiDiagnostics diagnostics = {};
-  // Negotiate on both the accepted query shape and its returned protocol
-  // identity. Some legacy drivers accept an oversized three-DWORD query and
-  // zero-fill the extra DWORD, making {0, 2, 0} and {0, 3, 0} ambiguous by
-  // themselves. Compact drivers reject the two-DWORD shape with
-  // STATUS_BUFFER_TOO_SMALL, while legacy drivers accept it. Unknown or
-  // inconsistent combinations fail closed.
+  // Match XRT's legacy-driver negotiation: query the two-DWORD identity first.
+  // Compact drivers reject that shape with STATUS_BUFFER_TOO_SMALL, in which
+  // case we retry with the three-DWORD compact identity. Unknown identities fail
+  // closed.
+  constexpr uint32_t kLegacyV0Identity[2] = {0, 0};
   constexpr uint32_t kLegacyV2Identity[2] = {0, 2};
   constexpr uint32_t kLegacyV3Identity[2] = {0, 3};
   constexpr uint32_t kLegacyV4Identity[2] = {0, 4};
   constexpr uint32_t kCompactIdentity[3] = {0, 2, 0};
   constexpr uint32_t kCompactV3Identity[3] = {0, 3, 0};
   constexpr uint32_t kCompactV4Identity[3] = {0, 4, 0};
-  uint32_t compact_data[3] = {};
+  uint32_t legacy_data[2] = {};
   D3DKMT_QUERYADAPTERINFO query = {};
   query.hAdapter = adapter;
   query.Type = KMTQAITYPE_UMDRIVERPRIVATE;
-  query.pPrivateDriverData = compact_data;
-  query.PrivateDriverDataSize = sizeof(compact_data);
-  NTSTATUS compact_status = api.query_adapter_info(&query);
-  diagnostics.compact_query_status = compact_status;
-  if (compact_status != 0 && compact_status != kStatusBufferTooSmall) {
-    return CheckStatus("D3DKMTQueryAdapterInfo(UMDRIVERPRIVATE compact)",
-                       compact_status, out_error);
-  }
-
-  uint32_t legacy_data[2] = {};
   query.pPrivateDriverData = legacy_data;
   query.PrivateDriverDataSize = sizeof(legacy_data);
+  diagnostics.legacy_query_attempted = true;
   NTSTATUS legacy_status = api.query_adapter_info(&query);
   diagnostics.legacy_query_status = legacy_status;
   if (legacy_status != 0 && legacy_status != kStatusBufferTooSmall) {
@@ -572,6 +781,56 @@ bool QueryMcdmAbiDiagnostics(const KmtApi& api, D3DKMT_HANDLE adapter,
                        legacy_status, out_error);
   }
 
+  if (legacy_status == 0) {
+    const bool is_legacy_v0 =
+        std::memcmp(legacy_data, kLegacyV0Identity,
+                    sizeof(kLegacyV0Identity)) == 0;
+    const bool is_legacy_v2 =
+        std::memcmp(legacy_data, kLegacyV2Identity,
+                    sizeof(kLegacyV2Identity)) == 0;
+    const bool is_legacy_v3 =
+        std::memcmp(legacy_data, kLegacyV3Identity,
+                    sizeof(kLegacyV3Identity)) == 0;
+    const bool is_legacy_v4 =
+        std::memcmp(legacy_data, kLegacyV4Identity,
+                    sizeof(kLegacyV4Identity)) == 0;
+    if (!is_legacy_v0 && !is_legacy_v2 && !is_legacy_v3 && !is_legacy_v4) {
+      SetErrorFormat(out_error,
+                     "unsupported two-dword MCDM identity {%u, %u}",
+                     legacy_data[0], legacy_data[1]);
+      return false;
+    }
+    diagnostics.probed_abi = is_legacy_v0   ? McdmAbi::legacy_v0
+                             : is_legacy_v2 ? McdmAbi::legacy_v2
+                                            : McdmAbi::legacy;
+    diagnostics.selected_abi = diagnostics.probed_abi;
+    diagnostics.source = McdmAbiSource::identity_query;
+    diagnostics.identity_words[0] = legacy_data[0];
+    diagnostics.identity_words[1] = legacy_data[1];
+    diagnostics.identity_word_count = 2;
+    diagnostics.accepted_identity_count = 1;
+    diagnostics.identity_accepted = true;
+    diagnostics.driver_version_disambiguation_required = is_legacy_v2;
+    *out_diagnostics = diagnostics;
+    return true;
+  }
+
+  uint32_t compact_data[3] = {};
+  query.pPrivateDriverData = compact_data;
+  query.PrivateDriverDataSize = sizeof(compact_data);
+  diagnostics.compact_query_attempted = true;
+  NTSTATUS compact_status = api.query_adapter_info(&query);
+  diagnostics.compact_query_status = compact_status;
+  if (compact_status == kStatusBufferTooSmall) {
+    SetError(out_error,
+             "MCDM driver rejected both three-dword and two-dword identity "
+             "queries");
+    return false;
+  }
+  if (compact_status != 0) {
+    return CheckStatus("D3DKMTQueryAdapterInfo(UMDRIVERPRIVATE compact)",
+                       compact_status, out_error);
+  }
   const bool is_compact_v2 =
       std::memcmp(compact_data, kCompactIdentity,
                   sizeof(kCompactIdentity)) == 0;
@@ -581,52 +840,6 @@ bool QueryMcdmAbiDiagnostics(const KmtApi& api, D3DKMT_HANDLE adapter,
   const bool is_compact_v4 =
       std::memcmp(compact_data, kCompactV4Identity,
                   sizeof(kCompactV4Identity)) == 0;
-  const bool is_legacy_v2 =
-      std::memcmp(legacy_data, kLegacyV2Identity,
-                  sizeof(kLegacyV2Identity)) == 0;
-  const bool is_legacy_v3 =
-      std::memcmp(legacy_data, kLegacyV3Identity,
-                  sizeof(kLegacyV3Identity)) == 0;
-  const bool is_legacy_v4 =
-      std::memcmp(legacy_data, kLegacyV4Identity,
-                  sizeof(kLegacyV4Identity)) == 0;
-
-  if (legacy_status == 0) {
-    if (!is_legacy_v2 && !is_legacy_v3 && !is_legacy_v4) {
-      SetErrorFormat(out_error,
-                     "unsupported two-dword MCDM identity {%u, %u}",
-                     legacy_data[0], legacy_data[1]);
-      return false;
-    }
-    if (compact_status == 0 &&
-        ((!is_compact_v2 && !is_compact_v3 && !is_compact_v4) ||
-         std::memcmp(compact_data, legacy_data, sizeof(legacy_data)) != 0)) {
-      SetErrorFormat(out_error,
-                     "inconsistent MCDM identities {%u, %u, %u} and {%u, %u}",
-                     compact_data[0], compact_data[1], compact_data[2],
-                     legacy_data[0], legacy_data[1]);
-      return false;
-    }
-    // v4 drivers on some platforms (e.g. Krackan + 32.0.203.329) report only
-    // the legacy two-dword identity; they still use the legacy packet layout.
-    diagnostics.selected_abi = McdmAbi::legacy;
-    diagnostics.probed_abi = McdmAbi::legacy;
-    diagnostics.source = McdmAbiSource::identity_query;
-    diagnostics.identity_words[0] = legacy_data[0];
-    diagnostics.identity_words[1] = legacy_data[1];
-    diagnostics.identity_word_count = 2;
-    diagnostics.accepted_identity_count = compact_status == 0 ? 2 : 1;
-    diagnostics.identities_match = true;
-    *out_diagnostics = diagnostics;
-    return true;
-  }
-
-  if (compact_status == kStatusBufferTooSmall) {
-    SetError(out_error,
-             "MCDM driver rejected both three-dword and two-dword identity "
-             "queries");
-    return false;
-  }
   if (!is_compact_v2 && !is_compact_v3 && !is_compact_v4) {
     SetErrorFormat(out_error,
                    "unsupported three-dword MCDM identity {%u, %u, %u}",
@@ -641,13 +854,13 @@ bool QueryMcdmAbiDiagnostics(const KmtApi& api, D3DKMT_HANDLE adapter,
   diagnostics.identity_words[2] = compact_data[2];
   diagnostics.identity_word_count = 3;
   diagnostics.accepted_identity_count = 1;
-  diagnostics.identities_match = true;
+  diagnostics.identity_accepted = true;
   *out_diagnostics = diagnostics;
   return true;
 }
 
-bool QueryMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter, McdmAbi* out_abi,
-                  Error* out_error) {
+bool QueryProbedMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter,
+                        McdmAbi* out_abi, Error* out_error) {
   McdmAbiDiagnostics diagnostics = {};
   if (!QueryMcdmAbiDiagnostics(api, adapter, &diagnostics, out_error)) {
     return false;
@@ -680,6 +893,48 @@ McdmAbiInfo GetMcdmAbiInfo(McdmAbi abi) {
             /*shared_resource_destroy_flags=*/0x3,
             // Compact XRT leaves mapped VA ownership with the allocation.
             /*explicit_gpu_va_free_on_destroy=*/false};
+  }
+  if (abi == McdmAbi::legacy_v0) {
+    return {/*status_private_type=*/0x332b,
+            /*status_policy=*/0,
+            /*status_xcl_flags=*/0,
+            /*submit_private_prefix_size=*/0x58,
+            /*setup_private_size=*/0x260,
+            /*pathb_private_size=*/0x258,
+            /*pathb_packet_offset=*/0x58,
+            /*chain_metadata_offset=*/0x40,
+            /*pathb_bo_table_entry_count=*/5,
+            /*status_has_gpu_va=*/false,
+            /*sync_has_allocation_handle=*/true,
+            /*command_aperture_code_slot_size=*/0x8000,
+            /*command_aperture_write_publish_mode=*/
+            CommandApertureWritePublishMode::kmt_invalidate,
+            /*command_aperture_code_publish_granularity=*/0,
+            /*command_aperture_residency_after_bootstrap=*/false,
+            /*command_aperture_remap_after_write=*/true,
+            /*shared_resource_destroy_flags=*/0,
+            /*explicit_gpu_va_free_on_destroy=*/true};
+  }
+  if (abi == McdmAbi::legacy_v2) {
+    return {/*status_private_type=*/0x332b,
+            /*status_policy=*/0,
+            /*status_xcl_flags=*/0,
+            /*submit_private_prefix_size=*/0x60,
+            /*setup_private_size=*/0x268,
+            /*pathb_private_size=*/0x260,
+            /*pathb_packet_offset=*/0x60,
+            /*chain_metadata_offset=*/0x48,
+            /*pathb_bo_table_entry_count=*/5,
+            /*status_has_gpu_va=*/false,
+            /*sync_has_allocation_handle=*/true,
+            /*command_aperture_code_slot_size=*/0x8000,
+            /*command_aperture_write_publish_mode=*/
+            CommandApertureWritePublishMode::kmt_invalidate,
+            /*command_aperture_code_publish_granularity=*/0,
+            /*command_aperture_residency_after_bootstrap=*/false,
+            /*command_aperture_remap_after_write=*/true,
+            /*shared_resource_destroy_flags=*/0,
+            /*explicit_gpu_va_free_on_destroy=*/true};
   }
   return {/*status_private_type=*/0x332b,
           /*status_policy=*/0,
@@ -781,7 +1036,9 @@ McdmPrivateData BuildPathBSubmitPrivateData(
     WriteU32(private_data.data, abi.chain_metadata_offset + 12,
              chain_info->command_count);
     WriteU32(private_data.data, abi.chain_metadata_offset + 16,
-             chain_info->first_child_opcode);
+             mcdm_abi == McdmAbi::legacy_v0
+                 ? 0
+                 : chain_info->first_child_opcode);
   }
   std::memcpy(private_data.data + abi.pathb_packet_offset, ert_packet,
               ert_bytes);
@@ -804,7 +1061,7 @@ BufferKindInfo GetBufferKindInfo(BufferKind kind) {
 
 uint64_t GetPathBChainChildHandle(const Device& device, Buffer* buffer) {
   if (!buffer) return 0;
-  if (device.mcdm_abi == McdmAbi::legacy) {
+  if (UsesLegacyCpuBufferHandles(device.mcdm_abi)) {
     return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(buffer->cpu_ptr));
   }
 
@@ -1000,7 +1257,22 @@ bool CreateDevice(const KmtApi& api, const Adapter& adapter, Device* out_device,
     DestroyDevice(api, &device);
     return false;
   }
-  device.mcdm_abi = device.mcdm_abi_diagnostics.selected_abi;
+  device.has_driver_version =
+      QueryDriverVersion(api, device.adapter, &device.driver_version);
+  const McdmAbi probed_mcdm_abi = device.mcdm_abi_diagnostics.probed_abi;
+  device.mcdm_abi = SelectMcdmAbiForDriverVersion(
+      probed_mcdm_abi, device.has_driver_version,
+      device.driver_version);
+  device.mcdm_abi_diagnostics.selected_abi = device.mcdm_abi;
+  device.mcdm_abi_diagnostics.driver_version_disambiguation_available =
+      device.mcdm_abi_diagnostics.driver_version_disambiguation_required &&
+      device.has_driver_version;
+  Trace("selected MCDM ABI probed=%s selected=%s driver_version=%u.%u.%u.%u "
+        "has_driver_version=%u",
+        McdmAbiName(probed_mcdm_abi), McdmAbiName(device.mcdm_abi),
+        device.driver_version.major, device.driver_version.minor,
+        device.driver_version.build, device.driver_version.revision,
+        device.has_driver_version ? 1u : 0u);
   *out_device = device;
   return true;
 }
@@ -1515,9 +1787,7 @@ bool CreateContext(const KmtApi& api, const Device& device,
   }
   context.context = create_context.hContext;
   const size_t cookie_offset =
-      device.mcdm_abi == McdmAbi::compact
-          ? kCompactContextCommandApertureCookieOffset
-          : kLegacyContextCommandApertureCookieOffset;
+      ContextCommandApertureCookieOffset(device.mcdm_abi);
   if (private_data_size >=
       cookie_offset + sizeof(context.command_aperture_cookie)) {
     std::memcpy(&context.command_aperture_cookie,
@@ -2349,7 +2619,7 @@ bool ReleasePathBCodeRange(const KmtApi& api, const Device& device,
   if (!ValidatePathBCodeRange(abi, aperture, offset, length, out_error)) {
     return false;
   }
-  if (device.mcdm_abi == McdmAbi::legacy) {
+  if (UsesLegacyCpuBufferHandles(device.mcdm_abi)) {
     return SubmitPathBApertureSync(api, device, context, aperture, offset,
                                    /*wait_for_cpu=*/true, out_error);
   }

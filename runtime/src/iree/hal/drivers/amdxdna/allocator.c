@@ -29,6 +29,7 @@ typedef struct iree_hal_amdxdna_allocator_t {
   iree_hal_amdxdna_native_buffer_t*
       cached_buffers[kAmdxdnaAllocatorCacheCapacity];
   iree_host_size_t cached_buffer_count;
+  iree_host_size_t cached_buffer_capacity;
   IREE_STATISTICS(iree_hal_allocator_statistics_t statistics;)
 } iree_hal_amdxdna_allocator_t;
 
@@ -63,7 +64,7 @@ static void iree_hal_amdxdna_allocator_release_cached_buffer(
       iree_hal_amdxdna_buffer_steal_native_buffer(base_buffer);
   if (native_buffer) {
     iree_slim_mutex_lock(&allocator->cache_mutex);
-    if (allocator->cached_buffer_count < kAmdxdnaAllocatorCacheCapacity) {
+    if (allocator->cached_buffer_count < allocator->cached_buffer_capacity) {
       allocator->cached_buffers[allocator->cached_buffer_count++] =
           native_buffer;
       native_buffer = NULL;
@@ -230,7 +231,8 @@ static iree_status_t iree_hal_amdxdna_allocator_allocate_buffer(
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_hal_amdxdna_native_device_c_alloc_buffer(
                 allocator->native_device, allocation_size,
-                IREE_HAL_AMDXDNA_NATIVE_BUFFER_TYPE_HOST_ONLY, &native_buffer));
+                IREE_HAL_AMDXDNA_NATIVE_BUFFER_TYPE_HOST_ONLY,
+                &native_buffer));
   }
 
   iree_hal_buffer_t* buffer = NULL;
@@ -303,6 +305,17 @@ iree_status_t iree_hal_amdxdna_allocator_create(
   allocator->host_allocator = host_allocator;
   allocator->native_device = native_device;
   iree_slim_mutex_initialize(&allocator->cache_mutex);
+  allocator->cached_buffer_capacity = kAmdxdnaAllocatorCacheCapacity;
+  iree_hal_amdxdna_native_c_device_caps_t native_caps;
+  if (native_device &&
+      iree_status_is_ok(iree_hal_amdxdna_native_device_c_query_caps(
+          native_device, &native_caps))) {
+    if (!native_caps.supports_command_chain &&
+        native_caps.default_dispatch_opcode ==
+            IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_NPU) {
+      allocator->cached_buffer_capacity = 0;
+    }
+  }
 
   *out_allocator = (iree_hal_allocator_t*)allocator;
   IREE_TRACE_ZONE_END(z0);
