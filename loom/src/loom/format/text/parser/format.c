@@ -1185,6 +1185,12 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
         break;
       }
 
+      case LOOM_FORMAT_KIND_ALIGNED_REFS: {
+        IREE_RETURN_IF_ERROR(
+            loom_parse_format_aligned_refs(parser, vtable, element, parsed));
+        break;
+      }
+
       case LOOM_FORMAT_KIND_REGION_TABLE: {
         IREE_RETURN_IF_ERROR(
             loom_parse_format_region_table(parser, vtable, element, parsed));

@@ -3772,6 +3772,7 @@ _IMPLICIT_FORMAT_FIELDS = frozenset({"iv", "args", "predicates"})
 def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
     """Recursively collect all field names referenced by format elements."""
     from loom.assembly import (
+        AlignedRefs,
         Attr,
         AttrDict,
         AttrParams,
@@ -3814,6 +3815,9 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
         match elem:
             case Ref(field=f) | Refs(field=f) | TypedRefs(field=f) | BlockRef(field=f):
                 fields.add(f)
+            case AlignedRefs(refs=refs, alignments=alignments):
+                fields.add(refs)
+                fields.add(alignments)
             case (
                 Attr(field=f)
                 | SymbolRef(field=f)

@@ -73,6 +73,7 @@ iree_status_t loom_print_result_type_list(
     loom_print_context_t* ctx, const loom_op_t* op,
     const loom_op_vtable_t* vtable, const loom_format_element_t* element) {
   bool use_parens = (element->data & LOOM_RESULT_TYPE_LIST_PARENS) != 0;
+  bool uniform = (element->data & LOOM_RESULT_TYPE_LIST_UNIFORM) != 0;
   if (use_parens) {
     IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "(", false));
   }
@@ -81,7 +82,9 @@ iree_status_t loom_print_result_type_list(
   uint16_t tied_operand_count = 0;
   const loom_value_id_t* tied_operand_ids =
       loom_print_tied_operand_ids(op, vtable, &tied_operand_count);
-  for (uint16_t j = 0; j < op->result_count; ++j) {
+  uint16_t printed_result_count =
+      uniform && op->result_count > 0 ? 1 : op->result_count;
+  for (uint16_t j = 0; j < printed_result_count; ++j) {
     if (j > 0) {
       IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ",", false));
     }

@@ -34,6 +34,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
 from loom.assembly import (
+    AlignedRefs,
     Attr,
     AttrDict,
     AttrParams,
@@ -1633,10 +1634,16 @@ class Printer:
                     result_id = fields.value_id(name)
                     stream.emit(self._print_value_type(result_id, module))
 
-                case ResultTypeList(field=name, parens=parens):
+                case ResultTypeList(field=name, parens=parens, uniform=uniform):
                     assert isinstance(fields, ResolvedFields)
                     stream.emit(
-                        self._format_result_types(fields, name, op_decl, parens=parens)
+                        self._format_result_types(
+                            fields,
+                            name,
+                            op_decl,
+                            parens=parens,
+                            uniform=uniform,
+                        )
                     )
 
                 case Keyword(text=text):
@@ -1678,6 +1685,13 @@ class Printer:
                     covered_attrs.add(keys_field)
                     stream = self._emit_attr_table(
                         stream, fields, keys_field, values_field
+                    )
+
+                case AlignedRefs(refs=refs_field, alignments=alignments_field):
+                    assert isinstance(fields, ResolvedFields)
+                    covered_attrs.add(alignments_field)
+                    stream.emit(
+                        self._format_aligned_refs(fields, refs_field, alignments_field)
                     )
 
                 case RegionTable(
@@ -1923,14 +1937,22 @@ class Printer:
     # --- Formatting helpers ---
 
     def _format_result_types(
-        self, fields: ResolvedFields, name: str, op_decl: Op, *, parens: bool = True
+        self,
+        fields: ResolvedFields,
+        name: str,
+        op_decl: Op,
+        *,
+        parens: bool = True,
+        uniform: bool = False,
     ) -> str:
         """Format result types with optional parentheses."""
         desc = fields._layout.fields.get(name)
         if desc is None:
             return "()" if parens else ""
 
-        if desc.variadic:
+        if uniform:
+            result_ids = list(fields._op.results)
+        elif desc.variadic:
             result_ids = fields.value_ids(name)
         else:
             result_ids = [fields.value_id(name)]
@@ -1941,7 +1963,7 @@ class Printer:
         tied_map = fields.tied_result_map()
         parts: list[str] = []
 
-        for result_id in result_ids:
+        for result_id in result_ids[:1] if uniform else result_ids:
             type_str = self._print_value_type(result_id, fields._module)
             value = fields._module.values[result_id]
 
@@ -1973,6 +1995,26 @@ class Printer:
         if parens:
             return "(" + text + ")"
         return text
+
+    def _format_aligned_refs(
+        self,
+        fields: ResolvedFields,
+        refs_field: str,
+        alignments_field: str,
+    ) -> str:
+        """Format [align(N) %value, ...] from paired attrs and operands."""
+        alignments = fields.attr(alignments_field) or []
+        value_ids = fields.value_ids(refs_field)
+        if len(alignments) != len(value_ids):
+            raise ValueError(
+                f"AlignedRefs field '{refs_field}' has {len(value_ids)} values "
+                f"but '{alignments_field}' has {len(alignments)} alignments."
+            )
+        parts = [
+            f"align({alignment}) {self._value_name(value_id)}"
+            for alignment, value_id in zip(alignments, value_ids, strict=True)
+        ]
+        return "[" + ", ".join(parts) + "]"
 
     def _format_index_list(
         self, fields: ResolvedFields, dynamic_field: str, static_field: str

@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 from loom.assembly import (
+    AlignedRefs,
     Attr,
     AttrDict,
     AttrParams,
@@ -402,6 +403,18 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
                             doc=f"Variadic operands: {name}",
                         )
                     )
+
+                case AlignedRefs(refs=refs_field, alignments=alignments_field):
+                    params.append(
+                        BuilderParam(
+                            name=refs_field,
+                            kind=BuilderParamKind.OPERAND_VARIADIC,
+                            type_hint="list[ValueRef]",
+                            required=False,
+                            doc=f"Variadic operands: {refs_field}",
+                        )
+                    )
+                    append_attr_param(alignments_field)
 
                 case BlockRef(field=name):
                     params.append(

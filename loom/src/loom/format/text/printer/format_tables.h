@@ -34,6 +34,12 @@ iree_status_t loom_print_attr_table(loom_print_context_t* ctx,
                                     const loom_op_vtable_t* vtable,
                                     const loom_format_element_t* element);
 
+// Prints byte-length operands paired with static alignment clauses.
+iree_status_t loom_print_aligned_refs(loom_print_context_t* ctx,
+                                      const loom_op_t* op,
+                                      const loom_op_vtable_t* vtable,
+                                      const loom_format_element_t* element);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

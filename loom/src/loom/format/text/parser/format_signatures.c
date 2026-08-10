@@ -147,6 +147,7 @@ static iree_status_t loom_parse_format_lhs_result_type_list(
     loom_parsed_op_t* parsed) {
   uint32_t errors_before = parser->error_count;
   bool use_parens = (element->data & LOOM_RESULT_TYPE_LIST_PARENS) != 0;
+  bool uniform = (element->data & LOOM_RESULT_TYPE_LIST_UNIFORM) != 0;
   if (use_parens) {
     if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LPAREN)) {
       loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
@@ -155,6 +156,23 @@ static iree_status_t loom_parse_format_lhs_result_type_list(
   }
 
   loom_type_parse_mode_t type_mode = LOOM_TYPE_PARSE_BODY;
+  if (uniform) {
+    loom_type_t type = {0};
+    IREE_RETURN_IF_ERROR(loom_parse_type(parser, type_mode, &type));
+    for (uint16_t result_index = 0; result_index < parsed->result_count;
+         ++result_index) {
+      IREE_RETURN_IF_ERROR(loom_parse_format_assign_lhs_result_type(
+          parser, vtable, op_name_token, parsed, result_index, type));
+    }
+    if (use_parens) {
+      if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_RPAREN)) {
+        loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
+        return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("')'"));
+      }
+    }
+    return iree_ok_status();
+  }
+
   uint16_t result_index = 0;
   while ((!use_parens ||
           !loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_RPAREN)) &&

@@ -259,6 +259,11 @@ enum loom_format_kind_e {
   // PARAMETERIZED attribute constrained to one exact family. The family name
   // is carried by the descriptor and omitted from text.
   LOOM_FORMAT_KIND_ATTR_PARAMS = 31,
+
+  // Variadic byte-length operands paired with static alignments:
+  // [align(16) %a, align(256) %b]. field_index references the variadic
+  // operand field and data references its i64 array alignment attribute.
+  LOOM_FORMAT_KIND_ALIGNED_REFS = 32,
 };
 typedef uint8_t loom_format_kind_t;
 
@@ -345,6 +350,8 @@ enum loom_result_type_list_flag_bits_e {
   // Wrap result types in parentheses: (type, type).
   // When clear, result types are bare: type, type.
   LOOM_RESULT_TYPE_LIST_PARENS = 1u << 0,
+  // Print and parse one type shared by every result.
+  LOOM_RESULT_TYPE_LIST_UNIFORM = 1u << 1,
 };
 
 // Data field flags for ATTR_DICT elements. Stored in the element's data field.

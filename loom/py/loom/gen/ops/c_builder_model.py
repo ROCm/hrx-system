@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from loom.assembly import (
+    AlignedRefs,
     Attr,
     AttrDict,
     AttrParams,
@@ -368,6 +369,22 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                             "may_consume": has_result_type_list,
                         }
                     )
+
+                case AlignedRefs(refs=refs_field, alignments=alignments_field):
+                    refs_desc = layout.fields.get(refs_field)
+                    if refs_desc is None or refs_desc.kind != FieldKind.OPERAND:
+                        raise ValueError(f"Op '{op.name}': AlignedRefs refs field '{refs_field}' is not an operand field")
+                    if not refs_desc.variadic:
+                        raise ValueError(f"Op '{op.name}': AlignedRefs refs field '{refs_field}' must be variadic")
+                    params.append(
+                        {
+                            "name": refs_field,
+                            "kind": "operand_variadic",
+                            "c_type": "const loom_value_id_t*",
+                            "may_consume": has_result_type_list,
+                        }
+                    )
+                    append_attr_param(alignments_field)
 
                 case BlockRef(field=name):
                     desc = layout.fields.get(name)

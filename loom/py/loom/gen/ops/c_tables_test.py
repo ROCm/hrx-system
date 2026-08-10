@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from loom.assembly import (
     COLON,
     COMMA,
+    AlignedRefs,
     Attr,
     AttrDict,
     AttrParams,
@@ -2947,3 +2948,31 @@ def test_attr_table_generates_format_and_builder_support() -> None:
     assert "const loom_value_id_t* values" in ops_h
     assert "iree_host_size_t values_count" in ops_h
     assert "loom_attr_i64_array(" in builders_c
+
+
+def test_aligned_refs_generate_paired_format_and_uniform_results() -> None:
+    op = Op(
+        "test.aligned_refs",
+        group=Dialect("test"),
+        operands=[Operand("byte_lengths", INTEGER, variadic=True)],
+        results=[
+            Result("total_byte_length", INTEGER),
+            Result("byte_offsets", INTEGER, variadic=True),
+        ],
+        attrs=[AttrDef("minimum_alignments", ATTR_TYPE_I64_ARRAY)],
+        format=[
+            AlignedRefs("byte_lengths", "minimum_alignments"),
+            COLON,
+            ResultTypeList("total_byte_length", parens=False, uniform=True),
+        ],
+    )
+
+    ops_h = generate_ops_h("test", 0, [op])
+    builders_c = generate_builders_c("test", [op])
+    tables_c = generate_tables_c("test", 0, [op])
+
+    assert "const loom_value_id_t* byte_lengths" in ops_h
+    assert "const int64_t* minimum_alignments" in ops_h
+    assert "loom_attr_i64_array(" in builders_c
+    assert "LOOM_FORMAT_KIND_ALIGNED_REFS" in tables_c
+    assert "LOOM_RESULT_TYPE_LIST_UNIFORM" in tables_c

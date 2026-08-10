@@ -57,6 +57,7 @@ __all__ = [
     # Element types.
     "Ref",
     "Refs",
+    "AlignedRefs",
     "TypedRefs",
     "BlockRef",
     "Attr",
@@ -153,6 +154,25 @@ class Refs:
     """
 
     field: str
+
+
+@dataclass(frozen=True, slots=True)
+class AlignedRefs:
+    """Variadic SSA references paired with static byte alignments.
+
+    Prints/parses: [align(16) %a, align(256) %b]
+
+    ``refs`` names a variadic operand field and ``alignments`` names an i64
+    array attribute with one positive power-of-two entry per operand. Each
+    adjacent record describes placement of one byte range: align the current
+    cursor, then advance it by the referenced byte length.
+
+    For builders: maps to the ordinary variadic operand and i64 array
+    parameters; the pairing exists only in textual assembly.
+    """
+
+    refs: str
+    alignments: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -281,10 +301,15 @@ class ResultTypeList:
 
     For builders: maps to a result_types parameter and an optional
     tied parameter for specifying ties.
+
+    ``uniform`` prints and parses one type shared by every result. The op
+    declaration must separately constrain all result fields to that type; the
+    format flag only removes redundant textual repetition.
     """
 
     field: str
     parens: bool = True
+    uniform: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -869,6 +894,7 @@ BINDING_ELEMENT = "element"
 type FormatElement = (
     Ref
     | Refs
+    | AlignedRefs
     | TypedRefs
     | BlockRef
     | Attr

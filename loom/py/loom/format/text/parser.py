@@ -24,6 +24,7 @@ from enum import Enum, unique
 from typing import Any, cast
 
 from loom.assembly import (
+    AlignedRefs,
     Attr,
     AttrDict,
     AttrParams,
@@ -2009,6 +2010,8 @@ class Parser:
                 return key == attr_name or stable_id == attr_name
             case IndexList(static=name):
                 return name == attr_name
+            case AlignedRefs(alignments=name):
+                return name == attr_name
             case FuncArgs(start_attr=start_attr, end_attr=end_attr):
                 return start_attr == attr_name or end_attr == attr_name
             case (
@@ -2792,8 +2795,14 @@ class Parser:
                 case ResultType(field=name):
                     self._parse_result_type(parsed)
 
-                case ResultTypeList(field=name, parens=parens):
-                    self._parse_result_type_list(parsed, op_decl, name, parens=parens)
+                case ResultTypeList(field=name, parens=parens, uniform=uniform):
+                    self._parse_result_type_list(
+                        parsed,
+                        op_decl,
+                        name,
+                        parens=parens,
+                        uniform=uniform,
+                    )
 
                 case Keyword(text=text):
                     _expect_keyword(tok, text)
@@ -2812,6 +2821,11 @@ class Parser:
 
                 case AttrTable(keys=keys_field, values=values_field):
                     self._parse_attr_table(parsed, op_decl, keys_field, values_field)
+
+                case AlignedRefs(refs=refs_field, alignments=alignments_field):
+                    self._parse_aligned_refs(
+                        parsed, op_decl, refs_field, alignments_field
+                    )
 
                 case RegionTable(
                     keys=keys_field,
@@ -3215,7 +3229,13 @@ class Parser:
         self._assign_reserved_binding_types(bindings)
 
     def _parse_result_type_list(
-        self, parsed: ParsedFields, op_decl: Op, field_name: str, *, parens: bool = True
+        self,
+        parsed: ParsedFields,
+        op_decl: Op,
+        field_name: str,
+        *,
+        parens: bool = True,
+        uniform: bool = False,
     ) -> None:
         """Parse a parenthesized or bare result type list."""
         saved_scope = self._scope
@@ -3237,10 +3257,20 @@ class Parser:
             has_entry = _is_type_start(tok.peek(), self._type_registry) or tok.at(
                 TokenKind.SSA_VALUE
             )
+        result_type_start = len(parsed.result_types)
         if has_entry:
             self._parse_one_result_type(parsed)
-            while tok.try_consume(TokenKind.COMMA):
-                self._parse_one_result_type(parsed)
+            if uniform:
+                result_count = len(self._reserved_result_ids)
+                if result_count > 1:
+                    result_type = parsed.result_types[result_type_start]
+                    result_bindings = parsed.result_bindings[result_type_start]
+                    for _ in range(1, result_count):
+                        parsed.result_types.append(result_type)
+                        parsed.result_bindings.append(dict(result_bindings))
+            else:
+                while tok.try_consume(TokenKind.COMMA):
+                    self._parse_one_result_type(parsed)
         if parens:
             tok.expect(TokenKind.RPAREN)
         self._scope = saved_scope
@@ -4065,6 +4095,39 @@ class Parser:
             self._record_operand_ids(parsed, op_decl, operand_field, [value_id])
         if name_entries:
             parsed.attributes[names_field] = CanonicalAttrDict(name_entries)
+
+    def _parse_aligned_refs(
+        self,
+        parsed: ParsedFields,
+        op_decl: Op,
+        refs_field: str,
+        alignments_field: str,
+    ) -> None:
+        """Parse [align(N) %value, ...] into paired attrs and operands."""
+        tok = self._tokenizer
+        tok.expect(TokenKind.LBRACKET)
+        alignments: list[int] = []
+        value_ids: list[int] = []
+        while not tok.at(TokenKind.RBRACKET):
+            _expect_keyword(tok, "align")
+            tok.expect(TokenKind.LPAREN)
+            alignments.append(int(tok.expect(TokenKind.INTEGER).text))
+            tok.expect(TokenKind.RPAREN)
+            value_tok = tok.expect(TokenKind.SSA_VALUE)
+            try:
+                value_ids.append(self._scope.lookup(value_tok.text))
+            except KeyError:
+                raise ParseError(
+                    f"undefined SSA value '%{value_tok.text}'",
+                    value_tok.location,
+                    tok._filename,
+                ) from None
+            if not tok.try_consume(TokenKind.COMMA):
+                break
+        tok.expect(TokenKind.RBRACKET)
+        parsed.attributes[alignments_field] = alignments
+        parsed.operand_ids.extend(value_ids)
+        self._record_operand_ids(parsed, op_decl, refs_field, value_ids)
 
     def _parse_attr_table_row(self) -> list[int]:
         tok = self._tokenizer
