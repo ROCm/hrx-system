@@ -156,10 +156,7 @@ loom_cc_library(
     name = "program_plan",
     srcs = ["program_plan.c"],
     hdrs = ["program_plan.h"],
-    visibility = [
-        "//loom/binding/c/target/cmd:__pkg__",
-        "//loom/src/loom/target/arch/cmd:__subpackages__",
-    ],
+    visibility = ["//loom/src/loom/target/arch/cmd/check:__pkg__"],
     deps = [
         ":kernel_unit",
         ":launch_graph",
@@ -189,10 +186,7 @@ loom_cc_library(
     name = "serialize",
     srcs = ["serialize.c"],
     hdrs = ["serialize.h"],
-    visibility = [
-        "//loom/binding/c/target/cmd:__pkg__",
-        "//loom/src/loom/target/arch/cmd/check:__pkg__",
-    ],
+    visibility = ["//loom/src/loom/target/arch/cmd/check:__pkg__"],
     deps = [
         ":program_plan",
         "//loom/src/loom/codegen/low:function",
