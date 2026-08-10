@@ -851,6 +851,25 @@ static bool loom_low_verify_constraint_requires_matching_types(
          kind == LOOM_LOW_CONSTRAINT_KIND_DESTRUCTIVE;
 }
 
+static iree_status_t loom_low_verify_descriptor_packet_operand_field(
+    loom_low_function_verify_state_t* function_state, const loom_op_t* op,
+    uint16_t packet_operand_index, loom_low_packet_field_t* out_field) {
+  const loom_module_t* module = function_state->state->module;
+  if (packet_operand_index >= op->operand_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "low packet operand index %" PRIu16
+                            " exceeds op operand count %" PRIu16,
+                            packet_operand_index, op->operand_count);
+  }
+  const loom_value_id_t value_id =
+      loom_op_const_operands(op)[packet_operand_index];
+  out_field->field_ref = loom_diagnostic_field_ref(
+      LOOM_DIAGNOSTIC_FIELD_OPERAND, packet_operand_index);
+  out_field->value_id = value_id;
+  out_field->type = loom_module_value_type(module, value_id);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_verify_descriptor_packet_field(
     loom_low_function_verify_state_t* function_state, const loom_op_t* op,
     const loom_low_descriptor_t* descriptor, uint16_t descriptor_operand_index,
@@ -902,20 +921,8 @@ static iree_status_t loom_low_verify_descriptor_packet_field(
                             descriptor_operand_index);
   }
 
-  const uint16_t packet_operand_index = descriptor_operand->source_value_index;
-  if (packet_operand_index >= op->operand_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "low packet operand index %" PRIu16
-                            " exceeds op operand count %" PRIu16,
-                            packet_operand_index, op->operand_count);
-  }
-  const loom_value_id_t value_id =
-      loom_op_const_operands(op)[packet_operand_index];
-  out_field->field_ref = loom_diagnostic_field_ref(
-      LOOM_DIAGNOSTIC_FIELD_OPERAND, packet_operand_index);
-  out_field->value_id = value_id;
-  out_field->type = loom_module_value_type(module, value_id);
-  return iree_ok_status();
+  return loom_low_verify_descriptor_packet_operand_field(
+      function_state, op, descriptor_operand->source_value_index, out_field);
 }
 
 static iree_status_t loom_low_verify_format_expected_register_classes(
@@ -1281,6 +1288,7 @@ static iree_status_t loom_low_verify_workgroup_storage_limit(
     loom_low_function_verify_state_t* function_state) {
   const loom_target_bundle_t* bundle =
       loom_low_resolved_target_bundle(function_state->target);
+  if (bundle == NULL) return iree_ok_status();
   const uint64_t limit = bundle->snapshot->max_workgroup_storage_bytes;
   if (limit == 0 || function_state->body == NULL ||
       loom_low_verify_should_stop(function_state->state)) {
@@ -1494,25 +1502,33 @@ static iree_status_t loom_low_verify_descriptor_register_parts(
       continue;
     }
 
-    loom_low_packet_field_t field;
-    IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_packet_field(
-        function_state, op, descriptor, i, &field));
-    const loom_low_register_part_mask_t required_mask =
-        loom_low_verify_descriptor_operand_part_mask(
-            function_state, descriptor_operand, field.type);
-    if (required_mask == 0) {
-      continue;
-    }
-    const loom_low_register_part_mask_t defined_mask =
-        loom_low_verify_value_defined_mask(function_state, field.value_id);
-    if ((defined_mask & required_mask) == required_mask) {
-      continue;
-    }
-    IREE_RETURN_IF_ERROR(loom_low_verify_emit_undefined_register_part(
-        function_state, op, descriptor_key, field.field_ref, field.field_name,
-        required_mask, defined_mask));
-    if (loom_low_verify_should_stop(function_state->state)) {
-      return iree_ok_status();
+    const loom_low_packet_operand_span_t packet_span =
+        loom_low_descriptor_operand_packet_span(descriptor_set, descriptor, i,
+                                                op->operand_count);
+    for (uint16_t j = 0; j < packet_span.count; ++j) {
+      loom_low_packet_field_t field = {
+          .field_name = loom_low_descriptor_set_string(
+              descriptor_set, descriptor_operand->field_name_string_offset),
+      };
+      IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_packet_operand_field(
+          function_state, op, packet_span.start + j, &field));
+      const loom_low_register_part_mask_t required_mask =
+          loom_low_verify_descriptor_operand_part_mask(
+              function_state, descriptor_operand, field.type);
+      if (required_mask == 0) {
+        continue;
+      }
+      const loom_low_register_part_mask_t defined_mask =
+          loom_low_verify_value_defined_mask(function_state, field.value_id);
+      if ((defined_mask & required_mask) == required_mask) {
+        continue;
+      }
+      IREE_RETURN_IF_ERROR(loom_low_verify_emit_undefined_register_part(
+          function_state, op, descriptor_key, field.field_ref, field.field_name,
+          required_mask, defined_mask));
+      if (loom_low_verify_should_stop(function_state->state)) {
+        return iree_ok_status();
+      }
     }
   }
 

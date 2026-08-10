@@ -13,6 +13,8 @@ from pathlib import Path
 from loom.target.low_descriptors import (
     AsmForm,
     AsmImmediate,
+    AsmOperandSegment,
+    AsmOperandSegmentDelimiter,
     Descriptor,
     DescriptorFlag,
     DescriptorOpKind,
@@ -28,6 +30,7 @@ from loom.target.low_descriptors import (
     MemorySpace,
     ModelQuality,
     Operand,
+    OperandFlag,
     OperandRole,
     RegClass,
     RegClassAlt,
@@ -41,10 +44,13 @@ from loom.target.low_descriptors import (
 
 _REG_U32 = "cmd.u32"
 _REG_U64 = "cmd.u64"
+_REG_B8 = "cmd.b8"
+_REG_B16 = "cmd.b16"
+_REG_B32 = "cmd.b32"
+_REG_B64 = "cmd.b64"
 _REG_BUFFER = "cmd.buffer"
 _REG_BINDING = "cmd.binding"
 _REG_BUFFER_REF = "cmd.buffer_ref"
-_REG_ARGUMENTS = "cmd.arguments"
 _REG_EXECUTABLE = "cmd.executable"
 _REG_ENTRY = "cmd.entry"
 
@@ -80,10 +86,13 @@ _ALT_BY_CLASS = {
     for reg_class in (
         _REG_U32,
         _REG_U64,
+        _REG_B8,
+        _REG_B16,
+        _REG_B32,
+        _REG_B64,
         _REG_BUFFER,
         _REG_BINDING,
         _REG_BUFFER_REF,
-        _REG_ARGUMENTS,
         _REG_EXECUTABLE,
         _REG_ENTRY,
     )
@@ -102,19 +111,14 @@ def _operand(reg_class: str, field_name: str) -> Operand:
     return _value(reg_class, OperandRole.OPERAND, field_name)
 
 
-_U32_VALUE_IMMEDIATE = Immediate(
-    "value",
-    ImmediateKind.UNSIGNED,
-    bit_width=32,
-    unsigned_max=(2**32) - 1,
-)
+def _variadic_operand(reg_classes: tuple[str, ...], field_name: str) -> Operand:
+    return Operand(
+        field_name,
+        OperandRole.OPERAND,
+        tuple(RegClassAlt(reg_class) for reg_class in reg_classes),
+        flags=(OperandFlag.VARIADIC,),
+    )
 
-_U64_VALUE_IMMEDIATE = Immediate(
-    "value",
-    ImmediateKind.UNSIGNED,
-    bit_width=64,
-    unsigned_max=(2**64) - 1,
-)
 
 _RECORD_EFFECT = Effect(
     EffectKind.CALL,
@@ -128,12 +132,17 @@ _BARRIER_EFFECT = Effect(
 )
 
 
-def _constant_descriptor(reg_class: str, bit_width: int) -> Descriptor:
-    immediate = _U32_VALUE_IMMEDIATE if bit_width == 32 else _U64_VALUE_IMMEDIATE
+def _constant_descriptor(reg_class: str, spelling: str, bit_width: int) -> Descriptor:
+    immediate = Immediate(
+        "value",
+        ImmediateKind.UNSIGNED,
+        bit_width=bit_width,
+        unsigned_max=(2**bit_width) - 1,
+    )
     return Descriptor(
-        key=f"cmd.constant.u{bit_width}",
-        mnemonic=f"cmd.constant.u{bit_width}",
-        semantic_tag=f"constant.u{bit_width}",
+        key=f"cmd.constant.{spelling}",
+        mnemonic=f"cmd.constant.{spelling}",
+        semantic_tag=f"constant.{spelling}",
         operands=(_result(reg_class),),
         immediates=(immediate,),
         op_kind=DescriptorOpKind.CONST,
@@ -144,8 +153,12 @@ def _constant_descriptor(reg_class: str, bit_width: int) -> Descriptor:
 
 
 _CONSTANT_DESCRIPTORS = (
-    _constant_descriptor(_REG_U32, 32),
-    _constant_descriptor(_REG_U64, 64),
+    _constant_descriptor(_REG_U32, "u32", 32),
+    _constant_descriptor(_REG_U64, "u64", 64),
+    _constant_descriptor(_REG_B8, "b8", 8),
+    _constant_descriptor(_REG_B16, "b16", 16),
+    _constant_descriptor(_REG_B32, "b32", 32),
+    _constant_descriptor(_REG_B64, "b64", 64),
 )
 
 _VALUE_DESCRIPTORS = (
@@ -177,58 +190,10 @@ _VALUE_DESCRIPTORS = (
         schedule_class=_SCHEDULE_PURE,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     ),
-    Descriptor(
-        key="cmd.arguments.empty",
-        mnemonic="cmd.arguments.empty",
-        semantic_tag="command.arguments.empty",
-        operands=(_result(_REG_ARGUMENTS),),
-        asm_forms=_asm(results=("result",)),
-        schedule_class=_SCHEDULE_PURE,
-        flags=(DescriptorFlag.DEAD_REMOVABLE,),
-    ),
-    Descriptor(
-        key="cmd.arguments.append.u32",
-        mnemonic="cmd.arguments.append.u32",
-        semantic_tag="command.arguments.append.u32",
-        operands=(
-            _result(_REG_ARGUMENTS),
-            _operand(_REG_ARGUMENTS, "arguments"),
-            _operand(_REG_U32, "value"),
-        ),
-        asm_forms=_asm(results=("result",), operands=("arguments", "value")),
-        schedule_class=_SCHEDULE_PURE,
-        flags=(DescriptorFlag.DEAD_REMOVABLE,),
-    ),
-    Descriptor(
-        key="cmd.arguments.append.u64",
-        mnemonic="cmd.arguments.append.u64",
-        semantic_tag="command.arguments.append.u64",
-        operands=(
-            _result(_REG_ARGUMENTS),
-            _operand(_REG_ARGUMENTS, "arguments"),
-            _operand(_REG_U64, "value"),
-        ),
-        asm_forms=_asm(results=("result",), operands=("arguments", "value")),
-        schedule_class=_SCHEDULE_PURE,
-        flags=(DescriptorFlag.DEAD_REMOVABLE,),
-    ),
-    Descriptor(
-        key="cmd.arguments.append.buffer_ref",
-        mnemonic="cmd.arguments.append.buffer_ref",
-        semantic_tag="command.arguments.append.buffer_ref",
-        operands=(
-            _result(_REG_ARGUMENTS),
-            _operand(_REG_ARGUMENTS, "arguments"),
-            _operand(_REG_BUFFER_REF, "value"),
-        ),
-        asm_forms=_asm(results=("result",), operands=("arguments", "value")),
-        schedule_class=_SCHEDULE_PURE,
-        flags=(DescriptorFlag.DEAD_REMOVABLE,),
-    ),
 )
 
 
-def _dispatch_descriptor(*, indirect_mode: str | None) -> Descriptor:
+def _dispatch_descriptor(*, indirect_mode: str | None, barrier: bool) -> Descriptor:
     if indirect_mode is None:
         key = "cmd.dispatch.direct"
         workgroup_operands = (
@@ -245,6 +210,8 @@ def _dispatch_descriptor(*, indirect_mode: str | None) -> Descriptor:
         key = f"cmd.dispatch.indirect.{indirect_mode}"
         workgroup_operands = (_operand(_REG_BUFFER_REF, "workgroup_count"),)
         workgroup_names = ("workgroup_count",)
+    if barrier:
+        key = f"{key}.barrier"
     return Descriptor(
         key=key,
         mnemonic=key,
@@ -253,53 +220,110 @@ def _dispatch_descriptor(*, indirect_mode: str | None) -> Descriptor:
             _operand(_REG_EXECUTABLE, "executable"),
             _operand(_REG_ENTRY, "entry"),
             *workgroup_operands,
-            _operand(_REG_ARGUMENTS, "arguments"),
+            _variadic_operand(
+                (
+                    _REG_B8,
+                    _REG_B16,
+                    _REG_B32,
+                    _REG_B64,
+                    _REG_BUFFER,
+                    _REG_BINDING,
+                    _REG_U64,
+                ),
+                "arguments",
+            ),
         ),
-        asm_forms=_asm(operands=("executable", "entry", *workgroup_names, "arguments")),
-        effects=(_RECORD_EFFECT,),
-        schedule_class=_SCHEDULE_RECORD,
-        flags=(DescriptorFlag.SIDE_EFFECTING,),
-        instruction_classes=(InstructionClass.CONTROL,),
+        asm_forms=(
+            AsmForm(
+                operand_segments=(
+                    AsmOperandSegment(
+                        AsmOperandSegmentDelimiter.ANGLE,
+                        ("executable", "entry"),
+                    ),
+                    AsmOperandSegment(
+                        AsmOperandSegmentDelimiter.SQUARE, workgroup_names
+                    ),
+                    AsmOperandSegment(AsmOperandSegmentDelimiter.PAREN, ("arguments",)),
+                ),
+            ),
+        ),
+        effects=(_RECORD_EFFECT, _BARRIER_EFFECT) if barrier else (_RECORD_EFFECT,),
+        schedule_class=_SCHEDULE_BARRIER if barrier else _SCHEDULE_RECORD,
+        flags=(DescriptorFlag.SIDE_EFFECTING, DescriptorFlag.BARRIER)
+        if barrier
+        else (DescriptorFlag.SIDE_EFFECTING,),
+        instruction_classes=(InstructionClass.CONTROL, InstructionClass.BARRIER)
+        if barrier
+        else (InstructionClass.CONTROL,),
     )
 
 
-_COMMAND_DESCRIPTORS = (
-    Descriptor(
-        key="cmd.fill",
-        mnemonic="cmd.fill",
-        semantic_tag="command.fill",
+def _fill_descriptor(*, barrier: bool) -> Descriptor:
+    key = "cmd.fill.barrier" if barrier else "cmd.fill"
+    return Descriptor(
+        key=key,
+        mnemonic=key,
+        semantic_tag=key.replace("cmd.", "command."),
         operands=(
             _operand(_REG_BUFFER_REF, "target"),
             _operand(_REG_U32, "pattern"),
             _operand(_REG_U32, "pattern_length"),
         ),
         asm_forms=_asm(operands=("target", "pattern", "pattern_length")),
-        effects=(_RECORD_EFFECT,),
-        schedule_class=_SCHEDULE_RECORD,
-        flags=(DescriptorFlag.SIDE_EFFECTING,),
-        instruction_classes=(InstructionClass.GENERIC_MEMORY,),
-    ),
-    Descriptor(
-        key="cmd.copy",
-        mnemonic="cmd.copy",
-        semantic_tag="command.copy",
+        effects=(_RECORD_EFFECT, _BARRIER_EFFECT) if barrier else (_RECORD_EFFECT,),
+        schedule_class=_SCHEDULE_BARRIER if barrier else _SCHEDULE_RECORD,
+        flags=(DescriptorFlag.SIDE_EFFECTING, DescriptorFlag.BARRIER)
+        if barrier
+        else (DescriptorFlag.SIDE_EFFECTING,),
+        instruction_classes=(
+            InstructionClass.GENERIC_MEMORY,
+            InstructionClass.BARRIER,
+        )
+        if barrier
+        else (InstructionClass.GENERIC_MEMORY,),
+    )
+
+
+def _copy_descriptor(*, barrier: bool) -> Descriptor:
+    key = "cmd.copy.barrier" if barrier else "cmd.copy"
+    return Descriptor(
+        key=key,
+        mnemonic=key,
+        semantic_tag=key.replace("cmd.", "command."),
         operands=(
             _operand(_REG_BUFFER_REF, "source"),
             _operand(_REG_BUFFER_REF, "target"),
         ),
         asm_forms=_asm(operands=("source", "target")),
-        effects=(_RECORD_EFFECT,),
-        schedule_class=_SCHEDULE_RECORD,
-        flags=(DescriptorFlag.SIDE_EFFECTING,),
-        instruction_classes=(InstructionClass.GENERIC_MEMORY,),
-    ),
-    _dispatch_descriptor(indirect_mode=None),
-    _dispatch_descriptor(indirect_mode="static"),
-    _dispatch_descriptor(indirect_mode="dynamic"),
+        effects=(_RECORD_EFFECT, _BARRIER_EFFECT) if barrier else (_RECORD_EFFECT,),
+        schedule_class=_SCHEDULE_BARRIER if barrier else _SCHEDULE_RECORD,
+        flags=(DescriptorFlag.SIDE_EFFECTING, DescriptorFlag.BARRIER)
+        if barrier
+        else (DescriptorFlag.SIDE_EFFECTING,),
+        instruction_classes=(
+            InstructionClass.GENERIC_MEMORY,
+            InstructionClass.BARRIER,
+        )
+        if barrier
+        else (InstructionClass.GENERIC_MEMORY,),
+    )
+
+
+_COMMAND_DESCRIPTORS = (
+    _fill_descriptor(barrier=False),
+    _fill_descriptor(barrier=True),
+    _copy_descriptor(barrier=False),
+    _copy_descriptor(barrier=True),
+    _dispatch_descriptor(indirect_mode=None, barrier=False),
+    _dispatch_descriptor(indirect_mode=None, barrier=True),
+    _dispatch_descriptor(indirect_mode="static", barrier=False),
+    _dispatch_descriptor(indirect_mode="static", barrier=True),
+    _dispatch_descriptor(indirect_mode="dynamic", barrier=False),
+    _dispatch_descriptor(indirect_mode="dynamic", barrier=True),
     Descriptor(
-        key="cmd.execution.barrier",
-        mnemonic="cmd.execution.barrier",
-        semantic_tag="command.execution_barrier",
+        key="cmd.barrier.execution",
+        mnemonic="cmd.barrier.execution",
+        semantic_tag="command.barrier.execution",
         operands=(),
         asm_forms=_asm(),
         effects=(_BARRIER_EFFECT,),
@@ -351,10 +375,13 @@ CMD_CORE_DESCRIPTOR_SET = DescriptorSet(
     reg_classes=(
         _scalar_reg_class(_REG_U32, 32),
         _scalar_reg_class(_REG_U64, 64),
+        _scalar_reg_class(_REG_B8, 8),
+        _scalar_reg_class(_REG_B16, 16),
+        _scalar_reg_class(_REG_B32, 32),
+        _scalar_reg_class(_REG_B64, 64),
         _reference_reg_class(_REG_BUFFER),
         _scalar_reg_class(_REG_BINDING, 32),
         _reference_reg_class(_REG_BUFFER_REF),
-        _reference_reg_class(_REG_ARGUMENTS),
         _reference_reg_class(_REG_EXECUTABLE),
         _scalar_reg_class(_REG_ENTRY, 64),
     ),

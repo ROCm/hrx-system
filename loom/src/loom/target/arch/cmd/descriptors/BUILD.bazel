@@ -20,7 +20,7 @@ loom_low_descriptor_cc_library(
     name = "descriptors",
     args = ["--descriptor-set=cmd_core"],
     generator = "//loom/py/loom/gen/target/low:cmd_low_descriptor_shard",
-    visibility = ["//loom/src/loom/target/arch/cmd:__pkg__"],
+    visibility = ["//loom/src/loom/target/arch/cmd:__subpackages__"],
     deps = ["//loom/src/loom/codegen/low:descriptors"],
 )
 

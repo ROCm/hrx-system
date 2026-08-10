@@ -1,8 +1,6 @@
 // RUN: format bytecode
 
-target.generic<reference> @command_target {abi = command_program, contract_set_key = "cmd.core"}
-
-low.func.def target<cmd.core>(@command_target) abi(command_program) @one_dispatch() {
+low.func.def target<cmd.core> abi(command_program) @one_dispatch() {
   %parameters = low.resource<command_input> {index = 0, source_type = buffer} : reg<cmd.buffer>
   %output = low.resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
   %executable = low.resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
@@ -10,11 +8,6 @@ low.func.def target<cmd.core>(@command_target) abi(command_program) @one_dispatc
   %one_u32 = low.const<cmd.constant.u32> {value = 1} : reg<cmd.u32>
   %zero_u64 = low.const<cmd.constant.u64> {value = 0} : reg<cmd.u64>
   %length = low.const<cmd.constant.u64> {value = 4096} : reg<cmd.u64>
-  %parameters_ref = low.op<cmd.buffer.ref.direct>(%parameters, %zero_u64, %length) : (reg<cmd.buffer>, reg<cmd.u64>, reg<cmd.u64>) -> reg<cmd.buffer_ref>
-  %output_ref = low.op<cmd.buffer.ref.binding>(%output, %zero_u64, %length) : (reg<cmd.binding>, reg<cmd.u64>, reg<cmd.u64>) -> reg<cmd.buffer_ref>
-  %arguments0 = low.op<cmd.arguments.empty>() : () -> reg<cmd.arguments>
-  %arguments1 = low.op<cmd.arguments.append.buffer_ref>(%arguments0, %parameters_ref) : (reg<cmd.arguments>, reg<cmd.buffer_ref>) -> reg<cmd.arguments>
-  %arguments2 = low.op<cmd.arguments.append.buffer_ref>(%arguments1, %output_ref) : (reg<cmd.arguments>, reg<cmd.buffer_ref>) -> reg<cmd.arguments>
-  low.op<cmd.dispatch.direct>(%executable, %entry, %one_u32, %one_u32, %one_u32, %arguments2) : (reg<cmd.executable>, reg<cmd.entry>, reg<cmd.u32>, reg<cmd.u32>, reg<cmd.u32>, reg<cmd.arguments>)
+  low.op<cmd.dispatch.direct>(%executable, %entry, %one_u32, %one_u32, %one_u32, %parameters, %zero_u64, %length, %output, %zero_u64, %length) : (reg<cmd.executable>, reg<cmd.entry>, reg<cmd.u32>, reg<cmd.u32>, reg<cmd.u32>, reg<cmd.buffer>, reg<cmd.u64>, reg<cmd.u64>, reg<cmd.binding>, reg<cmd.u64>, reg<cmd.u64>)
   low.return
 }
