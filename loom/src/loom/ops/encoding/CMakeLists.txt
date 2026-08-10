@@ -105,6 +105,20 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
+    storage_test
+  SRCS
+    "storage_test.cc"
+  DEPS
+    ::encoding
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ir
+)
+
+loom_cc_test(
+  NAME
     verify_test
   SRCS
     "verify_test.cc"

@@ -76,17 +76,23 @@ void loom_encoding_resolve_nested_static_summaries(
     const loom_encoding_family_summary_request_t* parent_request,
     loom_encoding_family_summary_t* summary);
 
-// Invokes one resolved family summary callback. This stays inline because it
-// is on every encoding fact/query path and only performs one vtable dispatch.
+// Initializes one resolved family summary from generated constants and lets
+// the family callback augment parameterized or composed facts. This stays
+// inline because it is on every encoding fact/query path.
 IREE_ATTRIBUTE_ALWAYS_INLINE static inline void
 loom_encoding_summarize_resolved(
     const loom_encoding_vtable_t* vtable,
     const loom_encoding_family_summary_request_t* request,
     loom_encoding_family_summary_t* out_summary) {
+  *out_summary = (loom_encoding_family_summary_t){0};
+  const loom_encoding_family_fixed_metadata_t* fixed_metadata =
+      vtable->descriptor->fixed_metadata;
+  if (fixed_metadata) {
+    out_summary->encoding.storage_schema.encoded_operand =
+        fixed_metadata->operand_summary;
+  }
   if (vtable->summarize) {
     vtable->summarize(request, out_summary);
-  } else {
-    *out_summary = (loom_encoding_family_summary_t){0};
   }
   if (vtable->descriptor->role == LOOM_ENCODING_ROLE_STORAGE_SCHEMA) {
     out_summary->encoding.storage_schema.static_spec_encoding_id =
@@ -160,19 +166,7 @@ void loom_encoding_physical_storage_summarize(
 void loom_encoding_ggml_q8_0_summarize(
     const loom_encoding_family_summary_request_t* request,
     loom_encoding_family_summary_t* out_summary);
-void loom_encoding_ieee_fp8_e4m3_summarize(
-    const loom_encoding_family_summary_request_t* request,
-    loom_encoding_family_summary_t* out_summary);
-void loom_encoding_ieee_fp8_e5m2_summarize(
-    const loom_encoding_family_summary_request_t* request,
-    loom_encoding_family_summary_t* out_summary);
-void loom_encoding_fp8_e4m3fn_summarize(
-    const loom_encoding_family_summary_request_t* request,
-    loom_encoding_family_summary_t* out_summary);
-void loom_encoding_fp8_e4m3fnuz_summarize(
-    const loom_encoding_family_summary_request_t* request,
-    loom_encoding_family_summary_t* out_summary);
-void loom_encoding_fp8_e5m2fnuz_summarize(
+void loom_encoding_named_fp8_summarize(
     const loom_encoding_family_summary_request_t* request,
     loom_encoding_family_summary_t* out_summary);
 void loom_encoding_matrix_operand_summarize(

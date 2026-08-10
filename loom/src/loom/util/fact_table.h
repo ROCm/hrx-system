@@ -378,74 +378,12 @@ typedef enum loom_value_fact_encoded_operand_flag_bits_e {
 
 typedef uint32_t loom_value_fact_encoded_operand_flags_t;
 
-// Maximum number of logical axes in an exact encoded scale-group shape.
-#define LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK 4
-
-// Target-independent encoded operand facts for storage schemas or prepared
-// matrix/vector fragments. Bulk payload, scale, table, and sparse metadata data
-// remain SSA values; this summary only records compact interpretation facts.
-typedef struct loom_value_fact_encoded_operand_schema_t {
-  // Logical element format after payload interpretation.
-  loom_value_fact_numeric_format_flags_t element_format;
-
-  // Primary/local scale format.
-  loom_value_fact_numeric_format_flags_t scale_format;
-
-  // Secondary/global/super scale format for hierarchical schemes.
-  loom_value_fact_numeric_format_flags_t secondary_scale_format;
-
-  // Physical payload packing or target-fragment arrangement.
-  loom_value_fact_payload_packing_flags_t payload_packing;
-
-  // How scale values are broadcast over logical elements.
-  loom_value_fact_scale_topology_flags_t scale_topology;
-
-  // Affine, offset, or correction contract.
-  loom_value_fact_affine_policy_flags_t affine_policy;
-
-  // Rounding or finite-policy contract.
-  loom_value_fact_rounding_policy_flags_t rounding_policy;
-
-  // Codebook/table ownership contract.
-  loom_value_fact_codebook_policy_flags_t codebook_policy;
-
-  // Sparse metadata contract.
-  loom_value_fact_sparsity_policy_flags_t sparsity_policy;
-
-  // Bitset of loom_value_fact_encoded_operand_flag_bits_t values.
-  loom_value_fact_encoded_operand_flags_t flags;
-
-  // Structured sparsity density within one logical reduction group.
-  struct {
-    // Number of physically stored nonzero elements in each group.
-    uint16_t nonzero_element_count;
-
-    // Number of logical elements represented by each group.
-    uint16_t element_count;
-  } sparsity_group;
-
-  // Number of 32-bit payload registers in a prepared fragment, or zero when
-  // not target-fragment-shaped.
-  uint16_t payload_register_count;
-
-  // Number of logical elements represented by the payload.
-  uint16_t payload_element_count;
-
-  // Logical element block covered by one primary/local scale value.
-  struct {
-    // Cached product of the exact shape, or the known coarse group size when
-    // no exact multidimensional shape is available.
-    uint16_t element_count;
-
-    // Exact extents in logical operand-axis order. Positive dimensions are
-    // contiguous from axis zero and trailing zeroes terminate the rank. An
-    // all-zero shape means only element_count is known.
-    uint16_t shape[LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK];
-  } scale_group;
-
-  // Number of explicit scale-like SSA operands required by this schema.
-  uint16_t scale_operand_count;
-} loom_value_fact_encoded_operand_schema_t;
+// Encoding facts use the generic encoding-owned summary representation. This
+// alias keeps fact-domain terminology at analysis callsites without defining a
+// second storage contract.
+#define LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK LOOM_ENCODING_SCALE_GROUP_MAX_RANK
+typedef loom_encoding_operand_summary_t
+    loom_value_fact_encoded_operand_schema_t;
 static_assert(sizeof(loom_value_fact_encoded_operand_schema_t) == 72,
               "encoded operand schema must be padding-free for raw equality");
 

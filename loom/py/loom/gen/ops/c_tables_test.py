@@ -73,7 +73,9 @@ from loom.dsl import (
     ElementWidthGreaterThan,
     EncodingFamilyDef,
     EncodingFamilyRole,
+    EncodingOperandSummaryDef,
     EncodingParam,
+    EncodingRecordDef,
     EnumCase,
     EnumDef,
     FuncLikeInterface,
@@ -444,6 +446,10 @@ def test_generate_encoding_family_metadata() -> None:
         [EnumCase("none", 0), EnumCase("nearest_even", 1)],
         doc="Encoded value rounding policy.",
     )
+    auxiliary_keys = EnumDef(
+        "AuxiliaryKey",
+        [EnumCase("scale", 0), EnumCase("minimum", 3)],
+    )
     family = EncodingFamilyDef(
         "matrix_operand",
         group=dialect,
@@ -455,6 +461,27 @@ def test_generate_encoding_family_metadata() -> None:
         dynamic_parameters=[
             Operand("matrix", TypeConstraint.VECTOR),
             Operand("seed", TypeConstraint.INDEX),
+        ],
+        fixed_record=EncodingRecordDef(
+            logical_element_count=256,
+            storage_byte_count=144,
+            required_alignment=16,
+        ),
+        fixed_operand_summary=EncodingOperandSummaryDef(
+            element_format=0x10000,
+            payload_packing=0x2,
+            zero_scale_fallback=True,
+            sparsity_group_nonzero_element_count=2,
+            sparsity_group_element_count=4,
+            payload_register_count=8,
+            payload_element_count=256,
+            scale_group_shape=(16, 16),
+            scale_operand_count=2,
+        ),
+        auxiliary_key_enum=auxiliary_keys,
+        required_auxiliary_keys=[
+            auxiliary_keys.case("scale"),
+            auxiliary_keys.case("minimum"),
         ],
     )
 
@@ -484,6 +511,21 @@ def test_generate_encoding_family_metadata() -> None:
     assert ".type_constraint = LOOM_TYPE_CONSTRAINT_VECTOR" in tables_c
     assert ".type_constraint = LOOM_TYPE_CONSTRAINT_INDEX" in tables_c
     assert ".dynamic_parameter_count = IREE_ARRAYSIZE(loom_encoding_matrix_operand_dynamic_parameter_desc)" in tables_c
+    assert "static const loom_encoding_family_fixed_metadata_t loom_encoding_matrix_operand_fixed_metadata" in tables_c
+    assert ".element_format = UINT64_C(0x10000)" in tables_c
+    assert ".payload_packing = UINT32_C(0x2)" in tables_c
+    assert ".flags = UINT32_C(0x1)" in tables_c
+    assert ".nonzero_element_count = 2" in tables_c
+    assert ".payload_register_count = 8" in tables_c
+    assert ".payload_element_count = 256" in tables_c
+    assert ".element_count = 256" in tables_c
+    assert ".shape = {16, 16}" in tables_c
+    assert ".scale_operand_count = 2" in tables_c
+    assert ".required_auxiliary_keys = UINT64_C(0x9)" in tables_c
+    assert ".logical_element_count = 256" in tables_c
+    assert ".storage_byte_count = 144" in tables_c
+    assert ".required_alignment = 16" in tables_c
+    assert ".fixed_metadata = &loom_encoding_matrix_operand_fixed_metadata" in tables_c
 
 
 def test_generate_qualified_encoding_family_metadata() -> None:

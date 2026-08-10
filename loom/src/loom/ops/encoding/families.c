@@ -1647,35 +1647,35 @@ static const loom_encoding_vtable_t loom_encoding_ieee_fp8_e4m3_vtable = {
     .descriptor = &loom_encoding_ieee_fp8_e4m3_family_descriptor,
     .is_static_valid = loom_encoding_named_fp8_is_static_valid,
     .diagnose_static = loom_encoding_named_fp8_diagnose_static,
-    .summarize = loom_encoding_ieee_fp8_e4m3_summarize,
+    .summarize = loom_encoding_named_fp8_summarize,
 };
 
 static const loom_encoding_vtable_t loom_encoding_ieee_fp8_e5m2_vtable = {
     .descriptor = &loom_encoding_ieee_fp8_e5m2_family_descriptor,
     .is_static_valid = loom_encoding_named_fp8_is_static_valid,
     .diagnose_static = loom_encoding_named_fp8_diagnose_static,
-    .summarize = loom_encoding_ieee_fp8_e5m2_summarize,
+    .summarize = loom_encoding_named_fp8_summarize,
 };
 
 static const loom_encoding_vtable_t loom_encoding_fp8_e4m3fn_vtable = {
     .descriptor = &loom_encoding_fp8_e4m3fn_family_descriptor,
     .is_static_valid = loom_encoding_named_fp8_is_static_valid,
     .diagnose_static = loom_encoding_named_fp8_diagnose_static,
-    .summarize = loom_encoding_fp8_e4m3fn_summarize,
+    .summarize = loom_encoding_named_fp8_summarize,
 };
 
 static const loom_encoding_vtable_t loom_encoding_fp8_e4m3fnuz_vtable = {
     .descriptor = &loom_encoding_fp8_e4m3fnuz_family_descriptor,
     .is_static_valid = loom_encoding_named_fp8_is_static_valid,
     .diagnose_static = loom_encoding_named_fp8_diagnose_static,
-    .summarize = loom_encoding_fp8_e4m3fnuz_summarize,
+    .summarize = loom_encoding_named_fp8_summarize,
 };
 
 static const loom_encoding_vtable_t loom_encoding_fp8_e5m2fnuz_vtable = {
     .descriptor = &loom_encoding_fp8_e5m2fnuz_family_descriptor,
     .is_static_valid = loom_encoding_named_fp8_is_static_valid,
     .diagnose_static = loom_encoding_named_fp8_diagnose_static,
-    .summarize = loom_encoding_fp8_e5m2fnuz_summarize,
+    .summarize = loom_encoding_named_fp8_summarize,
 };
 
 static const loom_encoding_vtable_t loom_encoding_matrix_operand_vtable = {

@@ -626,6 +626,45 @@ static void BM_QueryDistinctStaticStorageSchemas(benchmark::State& state) {
 }
 BENCHMARK(BM_QueryDistinctStaticStorageSchemas)->Apply(ScaledEncodingCounts);
 
+static void BM_QueryFixedNamedFp8StorageSchema(benchmark::State& state) {
+  const int64_t query_count = state.range(0);
+  EncodingBenchmarkFixture fixture;
+  loom_module_t* module =
+      ParseModule(fixture,
+                  "%schema = encoding.define #fp8_e4m3fn<rounding=finite_only> "
+                  ": encoding<schema>\n");
+  OperationMemoryTracker memory_tracker(fixture.block_pool());
+  const loom_op_t* define_op =
+      loom_block_const_op(loom_module_block(module), 0);
+  const uint16_t encoding_id = loom_encoding_define_spec(define_op);
+
+  loom_value_fact_storage_schema_t schema = {};
+  if (!loom_encoding_query_static_storage_schema(module, encoding_id,
+                                                 &schema) ||
+      schema.encoded_operand.element_format !=
+          LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN ||
+      schema.encoded_operand.rounding_policy !=
+          LOOM_VALUE_FACT_ROUNDING_POLICY_FINITE_ONLY) {
+    state.SkipWithError("fixed named FP8 schema query produced wrong facts");
+    loom_module_free(module);
+    return;
+  }
+  memory_tracker.MarkWarmupComplete(module);
+
+  for (auto _ : state) {
+    for (int64_t i = 0; i < query_count; ++i) {
+      bool resolved = loom_encoding_query_static_storage_schema(
+          module, encoding_id, &schema);
+      benchmark::DoNotOptimize(resolved);
+      benchmark::DoNotOptimize(schema);
+    }
+  }
+  memory_tracker.SetCounters(state);
+  state.SetItemsProcessed(state.iterations() * query_count);
+  loom_module_free(module);
+}
+BENCHMARK(BM_QueryFixedNamedFp8StorageSchema)->Apply(ScaledEncodingCounts);
+
 static void BM_ParseDynamicEncodingDefinitions(benchmark::State& state) {
   const int64_t definition_count = state.range(0);
   const std::string source = BuildDynamicEncodingModule(definition_count);

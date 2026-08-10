@@ -64,6 +64,12 @@ bool loom_encoding_query_static_storage_schema(
     const loom_module_t* module, uint16_t encoding_id,
     loom_value_fact_storage_schema_t* out_schema);
 
+// Queries exact family-wide physical record geometry. Returns false when the
+// encoding is invalid, unregistered, or parameterized per instance.
+bool loom_encoding_query_static_record_geometry(
+    const loom_module_t* module, uint16_t encoding_id,
+    loom_encoding_record_geometry_t* out_geometry);
+
 // Queries a shaped type's address-layout summary from static encodings or
 // context-owned SSA encoding facts. This does not walk call graphs or inspect
 // callers; block-argument encodings only resolve when a previous analysis has

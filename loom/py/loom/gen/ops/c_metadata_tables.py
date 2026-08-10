@@ -401,6 +401,74 @@ def _emit_encoding_enum_case_names(
     return shared_enum_names
 
 
+def _emit_encoding_family_fixed_metadata(lines: list[str], family: EncodingFamilyDef, prefix: str) -> str | None:
+    """Emits family-wide constant encoding metadata when present."""
+    summary = family.fixed_operand_summary
+    record = family.fixed_record
+    if summary is None and record is None and not family.required_auxiliary_keys:
+        return None
+
+    table_name = f"{prefix}_fixed_metadata"
+    lines.append(f"static const loom_encoding_family_fixed_metadata_t {table_name} = {{")
+    if summary is not None:
+        lines.append("    .operand_summary = {")
+        for field_name in (
+            "element_format",
+            "scale_format",
+            "secondary_scale_format",
+        ):
+            value = getattr(summary, field_name)
+            if value:
+                lines.append(f"        .{field_name} = UINT64_C(0x{value:x}),")
+        for field_name in (
+            "payload_packing",
+            "scale_topology",
+            "affine_policy",
+            "rounding_policy",
+            "codebook_policy",
+            "sparsity_policy",
+        ):
+            value = getattr(summary, field_name)
+            if value:
+                lines.append(f"        .{field_name} = UINT32_C(0x{value:x}),")
+        if summary.zero_scale_fallback:
+            lines.append("        .flags = UINT32_C(0x1),")
+        if summary.sparsity_group_nonzero_element_count or summary.sparsity_group_element_count:
+            lines.append("        .sparsity_group = {")
+            if summary.sparsity_group_nonzero_element_count:
+                lines.append(f"            .nonzero_element_count = {summary.sparsity_group_nonzero_element_count},")
+            if summary.sparsity_group_element_count:
+                lines.append(f"            .element_count = {summary.sparsity_group_element_count},")
+            lines.append("        },")
+        if summary.payload_register_count:
+            lines.append(f"        .payload_register_count = {summary.payload_register_count},")
+        if summary.payload_element_count:
+            lines.append(f"        .payload_element_count = {summary.payload_element_count},")
+        if summary.scale_group_element_count or summary.scale_group_shape:
+            lines.append("        .scale_group = {")
+            if summary.scale_group_element_count:
+                lines.append(f"            .element_count = {summary.scale_group_element_count},")
+            if summary.scale_group_shape:
+                shape = ", ".join(str(value) for value in summary.scale_group_shape)
+                lines.append(f"            .shape = {{{shape}}},")
+            lines.append("        },")
+        if summary.scale_operand_count:
+            lines.append(f"        .scale_operand_count = {summary.scale_operand_count},")
+        lines.append("    },")
+    if family.required_auxiliary_keys:
+        required_key_bits = sum(1 << key.value for key in family.required_auxiliary_keys)
+        lines.append(f"    .required_auxiliary_keys = UINT64_C(0x{required_key_bits:x}),")
+    if record is not None:
+        lines.append("    .record = {")
+        lines.append(f"        .logical_element_count = {record.logical_element_count},")
+        lines.append(f"        .storage_byte_count = {record.storage_byte_count},")
+        lines.append(f"        .required_alignment = {record.required_alignment},")
+        lines.append("    },")
+    lines.append("};")
+    lines.append("")
+    return table_name
+
+
 def _emit_encoding_family_tables(
     lines: list[str],
     encoding_families: Sequence[EncodingFamilyDef],
@@ -413,6 +481,7 @@ def _emit_encoding_family_tables(
     for family in encoding_families:
         prefix = _c_encoding_family_prefix(family)
         parameter_table = _emit_attr_descriptor_table(lines, prefix, family.parameters, shared_enum_names)
+        fixed_metadata = _emit_encoding_family_fixed_metadata(lines, family, prefix)
         dynamic_parameter_table = None
         if family.dynamic_parameters:
             dynamic_parameter_table = f"{prefix}_dynamic_parameter_desc"
@@ -433,6 +502,8 @@ def _emit_encoding_family_tables(
         if dynamic_parameter_table is not None:
             lines.append(f"    .dynamic_parameter_count = IREE_ARRAYSIZE({dynamic_parameter_table}),")
             lines.append(f"    .dynamic_parameter_descriptors = {dynamic_parameter_table},")
+        if fixed_metadata is not None:
+            lines.append(f"    .fixed_metadata = &{fixed_metadata},")
         lines.append("};")
         lines.append("")
 

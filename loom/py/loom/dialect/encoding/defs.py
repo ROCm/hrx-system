@@ -46,6 +46,8 @@ from loom.dsl import (
     Dialect,
     EncodingFamilyDef,
     EncodingFamilyRole,
+    EncodingOperandSummaryDef,
+    EncodingRecordDef,
     EnumCase,
     EnumDef,
     Op,
@@ -65,6 +67,12 @@ encoding_ops = Dialect("encoding", dialect_id=0x09, doc="Encoding definition and
 # ============================================================================
 # Static encoding families
 # ============================================================================
+
+
+def _one_hot_enum_fact(enum_def: EnumDef, keyword: str) -> int:
+    value = enum_def.case(keyword).value
+    return 0 if value == 0 else 1 << (value - 1)
+
 
 NumericFormat = EnumDef(
     "NumericFormat",
@@ -359,14 +367,20 @@ ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
             group=encoding_ops,
             role=EncodingFamilyRole.STORAGE_SCHEMA,
             parameters=_NAMED_FP8_PARAMETERS,
+            fixed_record=EncodingRecordDef(1, 1),
+            fixed_operand_summary=EncodingOperandSummaryDef(
+                element_format=_one_hot_enum_fact(NumericFormat, numeric_format),
+                payload_packing=_one_hot_enum_fact(PayloadPacking, "dense_lanes"),
+                payload_element_count=1,
+            ),
             doc="Named eight-bit floating-point storage schema.",
         )
-        for name in (
-            "ieee_fp8_e4m3",
-            "ieee_fp8_e5m2",
-            "fp8_e4m3fn",
-            "fp8_e4m3fnuz",
-            "fp8_e5m2fnuz",
+        for name, numeric_format in (
+            ("ieee_fp8_e4m3", "f8e4m3"),
+            ("ieee_fp8_e5m2", "f8e5m2"),
+            ("fp8_e4m3fn", "f8e4m3fn"),
+            ("fp8_e4m3fnuz", "f8e4m3fnuz"),
+            ("fp8_e5m2fnuz", "f8e5m2fnuz"),
         )
     ),
     EncodingFamilyDef(

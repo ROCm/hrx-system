@@ -38,6 +38,7 @@ Quick reference — declaring an op:
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, unique
@@ -230,8 +231,10 @@ __all__ = [
     "RegisterUnitsSumTo",
     # Op group.
     "Dialect",
+    "EncodingOperandSummaryDef",
     "EncodingFamilyDef",
     "EncodingFamilyRole",
+    "EncodingRecordDef",
     "ParameterizedAttrDef",
     # Legacy text-format migration declarations.
     "LegacyFieldDefault",
@@ -1023,6 +1026,13 @@ class EnumDef:
     def keywords(self) -> tuple[str, ...]:
         """All valid keyword strings."""
         return tuple(c.keyword for c in self.cases)
+
+    def case(self, keyword: str) -> EnumCase:
+        """Returns the case with the given textual keyword."""
+        for case in self.cases:
+            if case.keyword == keyword:
+                return case
+        raise ValueError(f"EnumDef '{self.name}': unknown keyword '{keyword}'")
 
 
 # ============================================================================
@@ -3053,6 +3063,123 @@ class EncodingFamilyRole(Enum):
 
 
 @dataclass(frozen=True, slots=True)
+class EncodingRecordDef:
+    """Exact physical geometry for one fixed encoding record."""
+
+    logical_element_count: int
+    storage_byte_count: int
+    required_alignment: int = 1
+
+    def __post_init__(self) -> None:
+        for field_name, value in (
+            ("logical_element_count", self.logical_element_count),
+            ("storage_byte_count", self.storage_byte_count),
+            ("required_alignment", self.required_alignment),
+        ):
+            if type(value) is not int or not 1 <= value <= 0xFFFF:
+                raise ValueError(
+                    f"EncodingRecordDef: {field_name} must be an integer in "
+                    f"[1, 65535], got {value!r}"
+                )
+        if self.required_alignment & (self.required_alignment - 1):
+            raise ValueError(
+                "EncodingRecordDef: required_alignment must be a power of two"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class EncodingOperandSummaryDef:
+    """Constant target-independent facts for one encoded operand schema."""
+
+    element_format: int = 0
+    scale_format: int = 0
+    secondary_scale_format: int = 0
+    payload_packing: int = 0
+    scale_topology: int = 0
+    affine_policy: int = 0
+    rounding_policy: int = 0
+    codebook_policy: int = 0
+    sparsity_policy: int = 0
+    zero_scale_fallback: bool = False
+    sparsity_group_nonzero_element_count: int = 0
+    sparsity_group_element_count: int = 0
+    payload_register_count: int = 0
+    payload_element_count: int = 0
+    scale_group_element_count: int = 0
+    scale_group_shape: tuple[int, ...] = ()
+    scale_operand_count: int = 0
+
+    def __post_init__(self) -> None:
+        scale_group_shape = tuple(self.scale_group_shape)
+        object.__setattr__(self, "scale_group_shape", scale_group_shape)
+        for field_name in (
+            "element_format",
+            "scale_format",
+            "secondary_scale_format",
+        ):
+            value = getattr(self, field_name)
+            if type(value) is not int or not 0 <= value <= 0xFFFFFFFFFFFFFFFF:
+                raise ValueError(
+                    f"EncodingOperandSummaryDef: {field_name} must be an "
+                    f"unsigned 64-bit integer, got {value!r}"
+                )
+        for field_name in (
+            "payload_packing",
+            "scale_topology",
+            "affine_policy",
+            "rounding_policy",
+            "codebook_policy",
+            "sparsity_policy",
+        ):
+            value = getattr(self, field_name)
+            if type(value) is not int or not 0 <= value <= 0xFFFFFFFF:
+                raise ValueError(
+                    f"EncodingOperandSummaryDef: {field_name} must be an "
+                    f"unsigned 32-bit integer, got {value!r}"
+                )
+        if type(self.zero_scale_fallback) is not bool:
+            raise ValueError(
+                "EncodingOperandSummaryDef: zero_scale_fallback must be a bool"
+            )
+        for field_name in (
+            "sparsity_group_nonzero_element_count",
+            "sparsity_group_element_count",
+            "payload_register_count",
+            "payload_element_count",
+            "scale_group_element_count",
+            "scale_operand_count",
+        ):
+            value = getattr(self, field_name)
+            if type(value) is not int or not 0 <= value <= 0xFFFF:
+                raise ValueError(
+                    f"EncodingOperandSummaryDef: {field_name} must be an "
+                    f"integer in [0, 65535], got {value!r}"
+                )
+        if len(scale_group_shape) > 4:
+            raise ValueError(
+                "EncodingOperandSummaryDef: scale_group_shape rank exceeds 4"
+            )
+        for extent in scale_group_shape:
+            if type(extent) is not int or not 1 <= extent <= 0xFFFF:
+                raise ValueError(
+                    "EncodingOperandSummaryDef: scale_group_shape extents "
+                    f"must be integers in [1, 65535], got {extent!r}"
+                )
+        if scale_group_shape:
+            shape_element_count = math.prod(scale_group_shape)
+            if shape_element_count > 0xFFFF:
+                raise ValueError(
+                    "EncodingOperandSummaryDef: scale_group_shape product exceeds 65535"
+                )
+            if self.scale_group_element_count not in (0, shape_element_count):
+                raise ValueError(
+                    "EncodingOperandSummaryDef: scale_group_element_count "
+                    "must equal the scale_group_shape product"
+                )
+            object.__setattr__(self, "scale_group_element_count", shape_element_count)
+
+
+@dataclass(frozen=True, slots=True)
 class EncodingFamilyDef:
     """Declares one registered encoding family.
 
@@ -3067,6 +3194,10 @@ class EncodingFamilyDef:
     role: EncodingFamilyRole
     parameters: tuple[AttrDef, ...] = ()
     dynamic_parameters: tuple[Operand, ...] = ()
+    fixed_record: EncodingRecordDef | None = None
+    fixed_operand_summary: EncodingOperandSummaryDef | None = None
+    auxiliary_key_enum: EnumDef | None = None
+    required_auxiliary_keys: tuple[EnumCase, ...] = ()
     doc: str = ""
 
     def __init__(
@@ -3077,6 +3208,10 @@ class EncodingFamilyDef:
         role: EncodingFamilyRole,
         parameters: list[AttrDef] | tuple[AttrDef, ...] = (),
         dynamic_parameters: list[Operand] | tuple[Operand, ...] = (),
+        fixed_record: EncodingRecordDef | None = None,
+        fixed_operand_summary: EncodingOperandSummaryDef | None = None,
+        auxiliary_key_enum: EnumDef | None = None,
+        required_auxiliary_keys: list[EnumCase] | tuple[EnumCase, ...] = (),
         doc: str = "",
     ) -> None:
         if not _is_ascii_qualified_identifier(name):
@@ -3087,6 +3222,58 @@ class EncodingFamilyDef:
         if not isinstance(role, EncodingFamilyRole):
             raise ValueError(
                 f"EncodingFamilyDef '{name}': role must be an EncodingFamilyRole"
+            )
+        if fixed_record is not None and not isinstance(fixed_record, EncodingRecordDef):
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': fixed_record must be an EncodingRecordDef"
+            )
+        if fixed_operand_summary is not None and not isinstance(
+            fixed_operand_summary, EncodingOperandSummaryDef
+        ):
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': fixed_operand_summary must be an "
+                "EncodingOperandSummaryDef"
+            )
+        frozen_required_auxiliary_keys = tuple(required_auxiliary_keys)
+        if (
+            fixed_record is not None
+            or fixed_operand_summary is not None
+            or auxiliary_key_enum is not None
+            or frozen_required_auxiliary_keys
+        ) and role is not EncodingFamilyRole.STORAGE_SCHEMA:
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': fixed storage metadata requires "
+                "the STORAGE_SCHEMA role"
+            )
+
+        if auxiliary_key_enum is not None and not isinstance(
+            auxiliary_key_enum, EnumDef
+        ):
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': auxiliary_key_enum must be an EnumDef"
+            )
+        if frozen_required_auxiliary_keys and auxiliary_key_enum is None:
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': required auxiliary keys need an "
+                "auxiliary key enum"
+            )
+        if auxiliary_key_enum is not None:
+            if max(case.value for case in auxiliary_key_enum.cases) >= 64:
+                raise ValueError(
+                    f"EncodingFamilyDef '{name}': auxiliary key ordinals must "
+                    "fit in one uint64_t bitset"
+                )
+            for key in frozen_required_auxiliary_keys:
+                if not any(key is case for case in auxiliary_key_enum.cases):
+                    raise ValueError(
+                        f"EncodingFamilyDef '{name}': required auxiliary key "
+                        f"'{key.keyword}' is not in {auxiliary_key_enum.name}"
+                    )
+        if len(set(frozen_required_auxiliary_keys)) != len(
+            frozen_required_auxiliary_keys
+        ):
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': duplicate required auxiliary key"
             )
 
         lexical_parameters = tuple(sorted(parameters, key=lambda value: value.name))
@@ -3126,6 +3313,12 @@ class EncodingFamilyDef:
         object.__setattr__(self, "role", role)
         object.__setattr__(self, "parameters", lexical_parameters)
         object.__setattr__(self, "dynamic_parameters", lexical_dynamic_parameters)
+        object.__setattr__(self, "fixed_record", fixed_record)
+        object.__setattr__(self, "fixed_operand_summary", fixed_operand_summary)
+        object.__setattr__(self, "auxiliary_key_enum", auxiliary_key_enum)
+        object.__setattr__(
+            self, "required_auxiliary_keys", frozen_required_auxiliary_keys
+        )
         object.__setattr__(self, "doc", doc)
 
 

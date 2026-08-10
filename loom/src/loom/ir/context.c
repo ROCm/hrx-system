@@ -272,6 +272,31 @@ iree_status_t loom_context_register_encoding_vtable(
         "encoding family '%.*s' has %u parameters but no descriptors",
         (int)name.size, name.data, vtable->descriptor->parameter_count);
   }
+  const loom_encoding_family_fixed_metadata_t* fixed_metadata =
+      vtable->descriptor->fixed_metadata;
+  if (fixed_metadata) {
+    iree_string_view_t name = loom_bstring_view(vtable->descriptor->name);
+    if (vtable->descriptor->role != LOOM_ENCODING_ROLE_STORAGE_SCHEMA) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "encoding family '%.*s' has fixed storage metadata but is not a "
+          "storage schema",
+          (int)name.size, name.data);
+    }
+    const loom_encoding_record_geometry_t record = fixed_metadata->record;
+    const bool has_record = record.logical_element_count != 0 ||
+                            record.storage_byte_count != 0 ||
+                            record.required_alignment != 0;
+    if (has_record &&
+        (record.logical_element_count == 0 || record.storage_byte_count == 0 ||
+         record.required_alignment == 0 ||
+         !iree_host_size_is_power_of_two(record.required_alignment))) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "encoding family '%.*s' has malformed fixed record geometry",
+          (int)name.size, name.data);
+    }
+  }
   if ((vtable->is_static_valid == NULL) != (vtable->diagnose_static == NULL)) {
     iree_string_view_t name = loom_bstring_view(vtable->descriptor->name);
     return iree_make_status(

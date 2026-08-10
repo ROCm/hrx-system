@@ -495,6 +495,55 @@ TEST_F(ContextTest, RegisterEncodingVtableRejectsMissingParameterDescriptors) {
       loom_context_register_encoding_vtable(&context_, &kMalformedVtable));
 }
 
+TEST_F(ContextTest, RegisterEncodingVtableRejectsMalformedFixedMetadata) {
+  static const loom_encoding_family_fixed_metadata_t kFixedMetadata = {
+      /*.operand_summary=*/{},
+      /*.required_auxiliary_keys=*/{},
+      /*.record=*/
+      {
+          /*.logical_element_count=*/32,
+          /*.storage_byte_count=*/18,
+          /*.required_alignment=*/3,
+      },
+  };
+  static const loom_encoding_family_descriptor_t kMalformedDescriptor = {
+      /*.name=*/LOOM_BSTRING_REF(9, "malformed"),
+      /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+      /*.parameter_count=*/{},
+      /*.parameter_descriptors=*/{},
+      /*.dynamic_parameter_count=*/{},
+      /*.dynamic_parameter_descriptors=*/{},
+      /*.fixed_metadata=*/&kFixedMetadata,
+  };
+  static const loom_encoding_vtable_t kMalformedVtable = {
+      /*.descriptor=*/&kMalformedDescriptor,
+  };
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_context_register_encoding_vtable(&context_, &kMalformedVtable));
+}
+
+TEST_F(ContextTest, RegisterEncodingVtableRestrictsFixedMetadataToSchemas) {
+  static const loom_encoding_family_fixed_metadata_t kFixedMetadata = {};
+  static const loom_encoding_family_descriptor_t kMalformedDescriptor = {
+      /*.name=*/LOOM_BSTRING_REF(9, "malformed"),
+      /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+      /*.parameter_count=*/{},
+      /*.parameter_descriptors=*/{},
+      /*.dynamic_parameter_count=*/{},
+      /*.dynamic_parameter_descriptors=*/{},
+      /*.fixed_metadata=*/&kFixedMetadata,
+  };
+  static const loom_encoding_vtable_t kMalformedVtable = {
+      /*.descriptor=*/&kMalformedDescriptor,
+  };
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_context_register_encoding_vtable(&context_, &kMalformedVtable));
+}
+
 TEST_F(ContextTest, RegisterEncodingVtableRequiresPairedStaticCallbacks) {
   static const loom_encoding_vtable_t kPredicateOnlyVtable = {
       /*.descriptor=*/&kQ8_0EncodingDescriptor,
