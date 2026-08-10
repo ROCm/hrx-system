@@ -31,6 +31,8 @@ typedef enum loom_op_phase_e {
   LOOM_OP_PHASE_SOURCE_STRUCTURE = 2,
   // Module metadata consumed by compilation/configuration rather than emitted.
   LOOM_OP_PHASE_MODULE_METADATA = 3,
+  // Compile-time query that must resolve or become dead before target-low IR.
+  LOOM_OP_PHASE_COMPILE_TIME_QUERY = 4,
 } loom_op_phase_e;
 
 // Bitset of target-contract families represented by an op or type.

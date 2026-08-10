@@ -621,6 +621,7 @@ encoding_assume_spec = Op(
 encoding_isa = Op(
     name="encoding.isa",
     group=encoding_ops,
+    phase=OpPhase.COMPILE_TIME_QUERY,
     doc="Test if an encoding exactly matches a static encoding specification.",
     operands=[Operand("enc", ANY_ENCODING, doc="Encoding value to query.")],
     results=[Result("result", I1)],
@@ -646,6 +647,7 @@ encoding_isa = Op(
 encoding_matches = Op(
     name="encoding.matches",
     group=encoding_ops,
+    phase=OpPhase.COMPILE_TIME_QUERY,
     doc="Test whether a storage schema satisfies typed semantic requirements.",
     operands=[Operand("enc", ENCODING_SCHEMA, doc="Storage schema to query.")],
     results=[Result("result", I1)],
