@@ -30,7 +30,13 @@
 #include "loom/ops/encoding/roles.h"
 #include "loom/ops/encoding/storage.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/scalar/ops.h"
+#include "loom/ops/scf/ops.h"
+#include "loom/ops/test/ops.h"
+#include "loom/ops/test/registry.h"
 #include "loom/ops/vector/ops.h"
+#include "loom/pass/value_facts.h"
+#include "loom/transforms/cleanup/canonicalize.h"
 #include "loom/util/fact_table.h"
 #include "loom/util/stream.h"
 #include "loom/verify/verify.h"
@@ -148,9 +154,27 @@ class EncodingBenchmarkFixture {
  public:
   EncodingBenchmarkFixture() {
     loom_context_initialize(iree_allocator_system(), &context_);
-    RegisterDialect(LOOM_DIALECT_ENCODING, loom_encoding_dialect_vtables);
-    RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
-    RegisterDialect(LOOM_DIALECT_VECTOR, loom_vector_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_ENCODING, loom_encoding_dialect_vtables,
+                    loom_encoding_dialect_op_semantics);
+    RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables,
+                    loom_func_dialect_op_semantics);
+    RegisterDialect(LOOM_DIALECT_SCALAR, loom_scalar_dialect_vtables,
+                    loom_scalar_dialect_op_semantics);
+    RegisterDialect(LOOM_DIALECT_SCF, loom_scf_dialect_vtables,
+                    loom_scf_dialect_op_semantics);
+    RegisterDialect(LOOM_DIALECT_VECTOR, loom_vector_dialect_vtables,
+                    loom_vector_dialect_op_semantics);
+
+    iree_host_size_t count = 0;
+    const loom_condition_refinement_descriptor_t* condition_refinements =
+        loom_encoding_dialect_condition_refinements(&count);
+    IREE_CHECK_OK(loom_context_register_condition_refinements(
+        &context_, LOOM_DIALECT_ENCODING, condition_refinements, count));
+    const loom_parameterized_attr_descriptor_t* parameterized_attrs =
+        loom_encoding_dialect_parameterized_attrs(&count);
+    IREE_CHECK_OK(loom_context_register_parameterized_attrs(
+        &context_, LOOM_DIALECT_ENCODING, parameterized_attrs, count));
+    IREE_CHECK_OK(loom_test_dialect_register(&context_));
     IREE_CHECK_OK(loom_context_register_builtin_encoding_vtables(&context_));
     IREE_CHECK_OK(loom_context_finalize(&context_));
   }
@@ -174,13 +198,20 @@ class EncodingBenchmarkFixture {
  private:
   using DialectVtablesFn =
       const loom_op_vtable_t* const* (*)(iree_host_size_t*);
+  using DialectSemanticsFn = const loom_op_semantics_t* (*)(iree_host_size_t*);
 
-  void RegisterDialect(uint8_t dialect_id,
-                       DialectVtablesFn dialect_vtables_fn) {
+  void RegisterDialect(uint8_t dialect_id, DialectVtablesFn dialect_vtables_fn,
+                       DialectSemanticsFn dialect_semantics_fn) {
     iree_host_size_t vtable_count = 0;
     const loom_op_vtable_t* const* vtables = dialect_vtables_fn(&vtable_count);
+    iree_host_size_t semantics_count = 0;
+    const loom_op_semantics_t* semantics =
+        dialect_semantics_fn(&semantics_count);
+    IREE_ASSERT(vtable_count == semantics_count);
     IREE_CHECK_OK(loom_context_register_dialect(&context_, dialect_id, vtables,
                                                 (uint16_t)vtable_count));
+    IREE_CHECK_OK(loom_context_register_dialect_semantics(
+        &context_, dialect_id, semantics, (uint16_t)semantics_count));
   }
 
   ScopedBlockPool block_pool_;
@@ -273,6 +304,36 @@ static std::string BuildVectorEncodingUseModule(int64_t pair_count) {
     source.append(
         " using %schema {scale = %scale : vector<1xf32>} : "
         "vector<32xf8E4M3>, encoding<schema> -> vector<32xf32>\n");
+  }
+  source.append("  func.return\n}\n");
+  return source;
+}
+
+static std::string BuildDynamicEncodingQueryBranchModule(int64_t branch_count) {
+  std::string source;
+  source.reserve((size_t)branch_count * 480);
+  source.append("func.def @query_branches(%schema: encoding<schema>) {\n");
+  for (int64_t i = 0; i < branch_count; ++i) {
+    const bool use_exact_query = (i & 1) == 0;
+    const char* query =
+        use_exact_query
+            ? " = encoding.isa<#matrix_operand<affine=scale_plus_min, "
+              "element_format=u4, payload_elements=256, "
+              "payload_packing=multi_stream, payload_registers=8>> %schema "
+              ": encoding<schema>\n"
+            : " = encoding.matches<element_format = u4, affine = "
+              "scale_plus_min> %schema : encoding<schema>\n";
+    source.append("  %condition");
+    source.append(std::to_string(i));
+    source.append(query);
+    source.append("  scf.if %condition");
+    source.append(std::to_string(i));
+    source.append(" {\n    %known");
+    source.append(std::to_string(i));
+    source.append(query);
+    source.append("    test.use %known");
+    source.append(std::to_string(i));
+    source.append(" : i1\n  }\n");
   }
   source.append("  func.return\n}\n");
   return source;
@@ -986,6 +1047,114 @@ static void BM_QueryVerifiedDynamicEncodingTransforms(benchmark::State& state) {
   loom_module_free(module);
 }
 BENCHMARK(BM_QueryVerifiedDynamicEncodingTransforms)
+    ->Apply(ScaledEncodingCounts);
+
+static bool IsCanonicalDynamicEncodingQueryBranchModule(loom_module_t* module,
+                                                        int64_t branch_count) {
+  loom_func_like_t function = GetOnlyFunction(module);
+  if (!function.op) return false;
+  loom_block_t* body = loom_region_entry_block(loom_func_like_body(function));
+  if (!body) return false;
+
+  int64_t outer_query_count = 0;
+  int64_t branch_count_seen = 0;
+  loom_op_t* op = nullptr;
+  loom_block_for_each_op(body, op) {
+    if (loom_encoding_isa_isa(op) || loom_encoding_matches_isa(op)) {
+      ++outer_query_count;
+      continue;
+    }
+    if (!loom_scf_if_isa(op)) continue;
+    ++branch_count_seen;
+    loom_block_t* branch = loom_region_entry_block(loom_scf_if_then_region(op));
+    if (!branch) return false;
+    loom_op_t* branch_op = nullptr;
+    loom_block_for_each_op(branch, branch_op) {
+      if (loom_encoding_isa_isa(branch_op) ||
+          loom_encoding_matches_isa(branch_op)) {
+        return false;
+      }
+    }
+  }
+  return outer_query_count == branch_count && branch_count_seen == branch_count;
+}
+
+static iree_status_t CanonicalizeDynamicEncodingQueryBranches(
+    loom_module_t* module, iree_arena_block_pool_t* block_pool,
+    loom_canonicalizer_result_t* out_result) {
+  loom_func_like_t function = GetOnlyFunction(module);
+  if (!function.op) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "query branch module has no function");
+  }
+
+  iree_arena_allocator_t pass_arena;
+  iree_arena_initialize(block_pool, &pass_arena);
+  loom_pass_value_fact_owner_t value_facts = {};
+  loom_pass_value_fact_owner_initialize(block_pool, &value_facts);
+  loom_canonicalizer_t canonicalizer;
+  iree_status_t status = loom_canonicalizer_initialize(
+      module, &pass_arena, &value_facts, &canonicalizer);
+  if (iree_status_is_ok(status)) {
+    status = loom_canonicalizer_run_function(&canonicalizer, function,
+                                             /*options=*/nullptr, out_result);
+    loom_canonicalizer_deinitialize(&canonicalizer);
+  }
+  loom_pass_value_fact_owner_deinitialize(&value_facts);
+  iree_arena_deinitialize(&pass_arena);
+  return status;
+}
+
+static void BM_CanonicalizeDynamicEncodingQueryBranches(
+    benchmark::State& state) {
+  const int64_t branch_count = state.range(0);
+  const std::string source =
+      BuildDynamicEncodingQueryBranchModule(branch_count);
+  EncodingBenchmarkFixture fixture;
+  loom_module_t* source_module = ParseModule(fixture, source);
+  VerifyEncodingModule(source_module);
+  const std::vector<uint8_t> bytes =
+      SerializeModule(source_module, fixture.block_pool());
+  loom_module_free(source_module);
+
+  ScopedBlockPool module_pool;
+  ScopedBlockPool pass_pool;
+  OperationMemoryTracker memory_tracker(pass_pool.get());
+  loom_module_t* warm_module = ReadModule(fixture, bytes, module_pool.get());
+  loom_canonicalizer_result_t warm_result = {};
+  IREE_CHECK_OK(CanonicalizeDynamicEncodingQueryBranches(
+      warm_module, pass_pool.get(), &warm_result));
+  if (!warm_result.changed ||
+      !IsCanonicalDynamicEncodingQueryBranchModule(warm_module, branch_count)) {
+    state.SkipWithError("dynamic encoding queries did not canonicalize");
+    loom_module_free(warm_module);
+    return;
+  }
+  memory_tracker.MarkWarmupComplete(warm_module);
+  loom_module_free(warm_module);
+
+  for (auto _ : state) {
+    state.PauseTiming();
+    loom_module_t* module = ReadModule(fixture, bytes, module_pool.get());
+    loom_canonicalizer_result_t result = {};
+    state.ResumeTiming();
+
+    iree_status_t status = CanonicalizeDynamicEncodingQueryBranches(
+        module, pass_pool.get(), &result);
+
+    state.PauseTiming();
+    IREE_CHECK_OK(status);
+    if (!result.changed ||
+        !IsCanonicalDynamicEncodingQueryBranchModule(module, branch_count)) {
+      state.SkipWithError("dynamic encoding queries did not canonicalize");
+    }
+    loom_module_free(module);
+    state.ResumeTiming();
+  }
+  memory_tracker.SetCounters(state);
+  state.SetItemsProcessed(state.iterations() * branch_count * 2);
+}
+BENCHMARK(BM_CanonicalizeDynamicEncodingQueryBranches)
     ->Apply(ScaledEncodingCounts);
 
 }  // namespace

@@ -71,7 +71,12 @@ loom_cc_benchmark(
     loom::format::text::printer
     loom::ir
     loom::ops::func
+    loom::ops::scalar
+    loom::ops::scf
+    loom::ops::test
     loom::ops::vector
+    loom::pass::value_facts
+    loom::transforms::cleanup::canonicalize
     loom::util::fact_table
     loom::util::stream
     loom::verify
