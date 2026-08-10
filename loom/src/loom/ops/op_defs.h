@@ -1129,6 +1129,14 @@ bool loom_op_regions_have_hints(const loom_module_t* module,
 bool loom_module_value_has_predicate_attribute_uses(const loom_module_t* module,
                                                     loom_value_id_t value_id);
 
+// Replaces SSA references to |old_id| in attributes on live operations nested
+// under |region| with |new_id|. Operand and type references are unchanged.
+// Rewritten operations have their effective traits and direct effects
+// refreshed.
+iree_status_t loom_region_replace_attribute_value_references(
+    loom_module_t* module, loom_region_t* region, loom_value_id_t old_id,
+    loom_value_id_t new_id);
+
 // Returns true if every result of |op| has zero operand uses, no live
 // predicate-list attribute uses, and no external value type references. Type
 // references carried by another result of |op| do not keep the whole op alive.

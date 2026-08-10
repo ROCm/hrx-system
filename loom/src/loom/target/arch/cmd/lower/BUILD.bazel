@@ -45,3 +45,52 @@ loom_cc_library(
         "//runtime/src/iree/base/internal:arena",
     ],
 )
+
+loom_cc_library(
+    name = "kernel_unit",
+    srcs = ["kernel_unit.c"],
+    hdrs = ["kernel_unit.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/link:linker",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:special_values",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/transforms/cleanup:canonicalize",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "launch_graph",
+    srcs = ["launch_graph.c"],
+    hdrs = ["launch_graph.h"],
+    deps = [
+        ":schedule",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:special_values",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/command",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/rewrite:materialize",
+        "//loom/src/loom/rewrite:remap",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/cmd:program",
+        "//loom/src/loom/transforms/cleanup:canonicalize",
+        "//loom/src/loom/transforms/cleanup:cse",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)

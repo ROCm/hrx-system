@@ -3016,7 +3016,7 @@ static iree_status_t loom_op_replace_attr_value_refs(loom_module_t* module,
   return iree_ok_status();
 }
 
-static iree_status_t loom_region_replace_attr_value_refs(
+iree_status_t loom_region_replace_attribute_value_references(
     loom_module_t* module, loom_region_t* region, loom_value_id_t old_id,
     loom_value_id_t new_id) {
   if (!region) {
@@ -3033,7 +3033,7 @@ static iree_status_t loom_region_replace_attr_value_refs(
           loom_op_replace_attr_value_refs(module, op, old_id, new_id));
       loom_region_t** regions = loom_op_regions(op);
       for (uint8_t i = 0; i < op->region_count; ++i) {
-        IREE_RETURN_IF_ERROR(loom_region_replace_attr_value_refs(
+        IREE_RETURN_IF_ERROR(loom_region_replace_attribute_value_references(
             module, regions[i], old_id, new_id));
       }
     }
@@ -3056,7 +3056,7 @@ iree_status_t loom_value_replace_all_uses_with(loom_module_t* module,
   IREE_RETURN_IF_ERROR(
       loom_module_replace_value_type_uses(module, old_id, new_id));
   if (old_has_attribute_uses) {
-    IREE_RETURN_IF_ERROR(loom_region_replace_attr_value_refs(
+    IREE_RETURN_IF_ERROR(loom_region_replace_attribute_value_references(
         module, module->body, old_id, new_id));
     new_value->flags |= LOOM_VALUE_FLAG_ATTRIBUTE_USES;
     old_value->flags &= ~LOOM_VALUE_FLAG_ATTRIBUTE_USES;

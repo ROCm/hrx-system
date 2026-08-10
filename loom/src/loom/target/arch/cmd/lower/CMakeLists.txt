@@ -49,4 +49,59 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    kernel_unit
+  HDRS
+    "kernel_unit.h"
+  SRCS
+    "kernel_unit.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::link::linker
+    loom::ops::buffer
+    loom::ops::index
+    loom::ops::kernel
+    loom::ops::op_defs
+    loom::ops::special_values
+    loom::ops::type_registry
+    loom::pass::value_facts
+    loom::transforms::cleanup::canonicalize
+    loom::util::fact_table
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    launch_graph
+  HDRS
+    "launch_graph.h"
+  SRCS
+    "launch_graph.c"
+  DEPS
+    ::schedule
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::ir::facts
+    loom::ops::command
+    loom::ops::func
+    loom::ops::kernel
+    loom::ops::op_defs
+    loom::ops::special_values
+    loom::ops::type_registry
+    loom::pass::value_facts
+    loom::rewrite::materialize
+    loom::rewrite::remap
+    loom::rewrite::rewriter
+    loom::target::arch::cmd::program
+    loom::target::types
+    loom::transforms::cleanup::canonicalize
+    loom::transforms::cleanup::cse
+    loom::util::fact_table
+  PUBLIC
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
