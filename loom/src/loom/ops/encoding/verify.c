@@ -339,3 +339,31 @@ iree_status_t loom_encoding_assume_spec_verify(
       emitter, op, encoding_name, result_type,
       loom_type_encoding_with_role(expected_role));
 }
+
+iree_status_t loom_encoding_isa_verify(const loom_module_t* module,
+                                       const loom_op_t* op,
+                                       iree_diagnostic_emitter_t emitter) {
+  const loom_encoding_t* spec =
+      loom_module_encoding(module, loom_encoding_isa_spec(op));
+  if (!spec) return iree_ok_status();
+
+  const loom_type_t operand_type =
+      loom_module_value_type(module, loom_encoding_isa_enc(op));
+  if (!loom_type_is_encoding(operand_type)) return iree_ok_status();
+
+  const loom_encoding_role_t operand_role =
+      loom_type_encoding_role(operand_type);
+  const loom_encoding_role_t spec_role =
+      loom_encoding_static_role(module, spec);
+  if (operand_role == LOOM_ENCODING_ROLE_UNKNOWN || operand_role == spec_role) {
+    return iree_ok_status();
+  }
+
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(module->strings.entries[spec->name_id]),
+      loom_param_type(loom_type_encoding_with_role(spec_role)),
+      loom_param_type(operand_type),
+  };
+  return loom_encoding_emit(emitter, op, LOOM_ERR_ENCODING_021, params,
+                            IREE_ARRAYSIZE(params));
+}

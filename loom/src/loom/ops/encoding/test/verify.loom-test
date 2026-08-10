@@ -38,9 +38,9 @@ func.def @encoding_define_wrong_result_role() {
 
 // ====
 
-func.def @encoding_isa_result_must_be_i1(%enc: encoding<schema>) {
-  // ERROR@+1: TYPE/004 "i1"
-  %is = encoding.isa %enc, "quantized" : i32
+func.def @encoding_isa_rejects_role_mismatch(%schema: encoding<schema>) {
+  // ERROR@+1: ENCODING/021 "dense" "encoding<layout>" "encoding<schema>"
+  %is = encoding.isa<#dense> %schema : encoding<schema>
   func.return
 }
 

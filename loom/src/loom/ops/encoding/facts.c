@@ -190,3 +190,21 @@ iree_status_t loom_encoding_assume_spec_facts(
   return loom_value_facts_make_encoding_summary(
       context, family_summary.encoding, &result_facts[0]);
 }
+
+iree_status_t loom_encoding_isa_facts(loom_fact_context_t* context,
+                                      const loom_module_t* module,
+                                      const loom_op_t* op,
+                                      const loom_value_facts_t* operand_facts,
+                                      loom_value_facts_t* result_facts) {
+  loom_value_fact_encoding_summary_t summary;
+  if (!loom_value_facts_query_encoding_summary(context, operand_facts[0],
+                                               &summary) ||
+      summary.static_spec_encoding_id == 0) {
+    result_facts[0] = loom_value_facts_make(0, 1, 1);
+    return iree_ok_status();
+  }
+
+  result_facts[0] = loom_value_facts_exact_i64(
+      summary.static_spec_encoding_id == loom_encoding_isa_spec(op));
+  return iree_ok_status();
+}

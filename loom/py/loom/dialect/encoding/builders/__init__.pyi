@@ -45,8 +45,8 @@ class EncodingBuilder(DialectBuilder):
     def isa(
         self,
         *,
+        spec: Any,
         enc: ValueRef,
-        category: str,
         results: list[Type | TiedResultSpec],
         name: str | None = ...,
         names: Sequence[str] | None = ...,

@@ -1,5 +1,14 @@
 // RUN: roundtrip
 
+// Exact encoding predicates carry the complete queried specification as a
+// typed template parameter and infer the i1 result.
+func.def @exact_static_spec_query(%schema: encoding<schema>) -> (i1) {
+  %is_q4 = encoding.isa<#ggml_q4_0<block_elems=32, storage_bytes=18>> %schema : encoding<schema>
+  func.return %is_q4 : i1
+}
+
+// ====
+
 // Dynamic encoding parameters are named SSA operands on encoding.define.
 func.def @dynamic_encoding_params(%group_size: index, %scale: f32) {
   %enc = encoding.define #q8_0<block=32> {group_size = %group_size : index, scale = %scale : f32} : encoding<schema>

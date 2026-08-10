@@ -1,5 +1,36 @@
 // RUN: pass canonicalize
 
+// Exact encoding queries fold when the producer carries a complete static
+// specification.
+func.def @exact_static_spec_query() -> (i1, i1) {
+  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+  %same = encoding.isa<#ggml_q4_0<block_elems=32, storage_bytes=18>> %schema : encoding<schema>
+  %different = encoding.isa<#ggml_q8_0<block_elems=32, storage_bytes=34>> %schema : encoding<schema>
+  func.return %same, %different : i1, i1
+}
+// ----
+func.def @exact_static_spec_query() -> (i1, i1) {
+  %same = scalar.constant true : i1
+  %different = scalar.constant false : i1
+  func.return %same, %different : i1, i1
+}
+
+// ====
+
+// A dynamic encoding argument has no exact static specification to compare;
+// the query remains executable instead of becoming an assumed result.
+func.def @dynamic_static_spec_query(%schema: encoding<schema>) -> (i1) {
+  %is_q4 = encoding.isa<#ggml_q4_0<block_elems=32, storage_bytes=18>> %schema : encoding<schema>
+  func.return %is_q4 : i1
+}
+// ----
+func.def @dynamic_static_spec_query(%schema: encoding<schema>) -> (i1) {
+  %is_q4 = encoding.isa<#ggml_q4_0<block_elems=32, storage_bytes=18>> %schema : encoding<schema>
+  func.return %is_q4 : i1
+}
+
+// ====
+
 // Dense layout ops seed address-layout summary facts.
 func.def @dense_layout_summary() -> (i64) {
   %layout = encoding.layout.dense : encoding<layout>

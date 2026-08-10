@@ -15,6 +15,7 @@ from loom.assembly import (
     OperandDict,
     Ref,
     ResultType,
+    TemplateParam,
     TypeOf,
 )
 from loom.dialect.encoding.numeric_formats import NUMERIC_FORMAT_KEYWORDS
@@ -576,20 +577,22 @@ encoding_assume_spec = Op(
 )
 
 # ============================================================================
-# encoding.isa — test if an encoding belongs to a category
+# encoding.isa — test an exact static encoding specification
 # ============================================================================
 
 encoding_isa = Op(
     name="encoding.isa",
     group=encoding_ops,
-    doc="Test if an encoding belongs to a category.",
-    operands=[Operand("enc", ANY_ENCODING)],
+    doc="Test if an encoding exactly matches a static encoding specification.",
+    operands=[Operand("enc", ANY_ENCODING, doc="Encoding value to query.")],
     results=[Result("result", I1)],
-    attrs=[AttrDef("category", ATTR_TYPE_STRING)],
+    attrs=[AttrDef("spec", ATTR_TYPE_ENCODING, doc="Exact static encoding specification.")],
     traits=[PURE],
-    format=[Ref("enc"), COMMA, Attr("category"), COLON, TypeOf("result")],
+    verify="loom_encoding_isa_verify",
+    facts="loom_encoding_isa_facts",
+    format=[TemplateParam("spec"), Ref("enc"), COLON, TypeOf("enc")],
     examples=[
-        '%is_quantized = encoding.isa %enc, "quantized" : i1',
+        "%is_q4 = encoding.isa<#ggml.q4_k> %schema : encoding<schema>",
     ],
 )
 

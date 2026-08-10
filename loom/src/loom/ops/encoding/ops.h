@@ -415,19 +415,27 @@ iree_status_t loom_encoding_define_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_ENCODING_ISA: Test if an encoding belongs to a category.
-// %is_quantized = encoding.isa %enc, "quantized" : i1
+// LOOM_OP_ENCODING_ISA: Test if an encoding exactly matches a static encoding specification.
+// %is_q4 = encoding.isa<#ggml.q4_k> %schema : encoding<schema>
 LOOM_DEFINE_ISA(loom_encoding_isa_isa, LOOM_OP_ENCODING_ISA)
 LOOM_DEFINE_OPERAND(loom_encoding_isa_enc, 0)
 LOOM_DEFINE_RESULT(loom_encoding_isa_result, 0)
-LOOM_DEFINE_ATTR_STRING(loom_encoding_isa_category, 0)
+LOOM_DEFINE_ATTR_ENCODING(loom_encoding_isa_spec, 0)
 iree_status_t loom_encoding_isa_build(
     loom_builder_t* builder,
+    uint16_t spec,
     loom_value_id_t enc,
-    loom_string_id_t category,
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
+iree_status_t loom_encoding_isa_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+iree_status_t loom_encoding_isa_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_ENCODING_LAYOUT_ASSUME_DENSE: Refine an existing address-layout encoding value with the fact that it is dense row-major. The result is the same encoding value in SSA form with stronger local facts.
 // %dense = encoding.layout.assume.dense %layout : encoding<layout>
