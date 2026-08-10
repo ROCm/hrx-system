@@ -104,4 +104,46 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    parameters
+  HDRS
+    "parameters.h"
+  SRCS
+    "parameters.c"
+  DEPS
+    iree::base
+    iree::base::internal
+    iree::base::internal::arena
+    loom::ir
+    loom::ir::facts
+    loom::ops::command
+    loom::target::arch::cmd::abi_layout
+    loom::util::fact_table
+    loom::util::walk
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    transients
+  HDRS
+    "transients.h"
+  SRCS
+    "transients.c"
+  DEPS
+    ::schedule
+    iree::base
+    iree::base::internal
+    iree::base::internal::arena
+    loom::ir
+    loom::ir::facts
+    loom::ops::buffer
+    loom::ops::kernel
+    loom::target::arch::cmd::abi_layout
+    loom::util::fact_table
+    loom::util::walk
+  PUBLIC
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

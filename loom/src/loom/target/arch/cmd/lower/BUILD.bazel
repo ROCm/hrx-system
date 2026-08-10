@@ -94,3 +94,39 @@ loom_cc_library(
         "//runtime/src/iree/base/internal:arena",
     ],
 )
+
+loom_cc_library(
+    name = "parameters",
+    srcs = ["parameters.c"],
+    hdrs = ["parameters.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops/command",
+        "//loom/src/loom/target/arch/cmd:abi_layout",
+        "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "transients",
+    srcs = ["transients.c"],
+    hdrs = ["transients.h"],
+    deps = [
+        ":schedule",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/target/arch/cmd:abi_layout",
+        "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
