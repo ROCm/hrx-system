@@ -109,7 +109,7 @@ _PROGRAM_ATTRS = [
     AttrDef(
         "specialization_count",
         ATTR_TYPE_I64,
-        doc="Number of leading materialization-time arguments.",
+        doc="Number of leading staged program arguments.",
     ),
     AttrDef("retain", "enum", enum_def=Retain, optional=True),
 ]
@@ -135,7 +135,11 @@ command_program_def = Op(
     "command.program.def",
     group=command_ops,
     phase=OpPhase.EXECUTABLE,
-    doc=("Reusable command-program definition. Leading specialization values are consumed while materializing the program; launch bindings are provided each time the materialized program is issued."),
+    doc=(
+        "Reusable command-program definition. Leading specialization arguments "
+        "participate in staged specialization and launch-count evaluation; buffer "
+        "bindings are provided when the materialized program is issued."
+    ),
     traits=[SYMBOL_DEFINE, ISOLATED_FROM_ABOVE],
     attrs=list(_PROGRAM_ATTRS),
     symbol_def=SymbolDefinition(
@@ -193,7 +197,7 @@ command_program_launch = Op(
     "command.program.launch",
     group=command_ops,
     phase=OpPhase.EXECUTABLE,
-    doc=("Materialize and launch a command program with explicit specialization values and issue-time buffer bindings."),
+    doc=("Invoke a command program with explicit specialization values and issue-time buffer bindings."),
     operands=[
         Operand("specializations", ANY, variadic=True),
         Operand("bindings", BUFFER, variadic=True),

@@ -4518,8 +4518,8 @@ class CallLikeKind(Enum):
     LOW_INTERNAL = "low_internal"
     # Explicit semantic-to-target-low invocation of an already selected low function.
     LOW_INVOKE = "low_invoke"
-    # Command-program materialization edge. Its operands are compile-time
-    # specialization values followed by issue-time buffer bindings.
+    # Command-program invocation edge. Its operands are staged specialization
+    # values followed by issue-time buffer bindings.
     COMMAND_PROGRAM = "command_program"
 
 
@@ -4610,9 +4610,9 @@ class FuncLikeInterface(NamedTuple):
     # Parameterized attribute array naming provider proof requirements.
     # None for function kinds that are not implementation providers.
     requires: str | None = None
-    # Optional i64 attr containing the number of leading arguments consumed
-    # while materializing the function-like artifact. Remaining arguments are
-    # part of its issue-time ABI. None means every argument is issue-time.
+    # Optional i64 attr containing the number of leading arguments that
+    # participate in staged specialization. Remaining arguments form the
+    # issue-time binding ABI. None means there is no leading staged group.
     specialization_count: str | None = None
     # Region name for the function body. None for bodyless ops that
     # only declare a signature without providing an implementation.

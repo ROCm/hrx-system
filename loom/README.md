@@ -28,7 +28,8 @@ facts are still visible enough to compile, inspect, specialize, and tune.
 | AMDGPU HSACO | Most established native target path |
 | SPIR-V/Vulkan | Working examples and tests; still hardening as a product target |
 | x86, Wasm, IREEVM | Real early target paths with providers, lowering/check coverage, and initial emission infrastructure; not mature product targets |
-| Whole model programs | Direction of travel; current checked examples are kernel-focused |
+| Portable command programs | Source dialect, multi-root preparation, target-neutral Low ISA, and immutable artifact core; public embedding and materialization are staged separately |
+| Whole host programs | Direction of travel beyond reusable command-buffer-shaped subgraphs |
 
 ## Build The First Slice
 
@@ -284,6 +285,7 @@ useful when evaluating Loom as a compiler for target-explicit IREE HAL loading.
 | [src/loom/target/arch/amdgpu](src/loom/target/arch/amdgpu) | AMDGPU source-to-low policy and target contracts |
 | [src/loom/target/emit/native/amdgpu](src/loom/target/emit/native/amdgpu) | Native AMDGPU/HSACO emission path |
 | [src/loom/target/arch/spirv](src/loom/target/arch/spirv) | SPIR-V target facts, profiles, and cooperative-matrix capability handling |
+| [src/loom/target/arch/cmd](src/loom/target/arch/cmd/README.md) | Reusable command-program source, preparation, portable Low ISA, and artifact contracts |
 
 ## Mental Model
 

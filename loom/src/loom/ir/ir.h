@@ -1073,8 +1073,9 @@ typedef struct loom_func_like_vtable_t {
   // if absent.
   uint8_t requires_attr_index;
 
-  // Index of the optional i64 attr counting leading materialization-time
-  // arguments. LOOM_ATTR_INDEX_NONE means every argument is issue-time.
+  // Index of the optional i64 attr counting leading arguments that participate
+  // in staged specialization. LOOM_ATTR_INDEX_NONE means there is no leading
+  // staged group.
   uint8_t specialization_count_attr_index;
 
   // Body region index. LOOM_REGION_INDEX_NONE for bodyless ops

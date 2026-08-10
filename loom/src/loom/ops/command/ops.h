@@ -42,7 +42,7 @@ typedef enum loom_command_retain_e {
   LOOM_COMMAND_RETAIN_COUNT_ = 2,
 } loom_command_retain_t;
 
-// LOOM_OP_COMMAND_PROGRAM_DEF: Reusable command-program definition. Leading specialization values are consumed while materializing the program; launch bindings are provided each time the materialized program is issued.
+// LOOM_OP_COMMAND_PROGRAM_DEF: Reusable command-program definition. Leading specialization arguments participate in staged specialization and launch-count evaluation; buffer bindings are provided when the materialized program is issued.
 // command.program.def @decode(%token_count: index) launch(%parameters: buffer, %transient: buffer) {
 //   command.return
 // }
@@ -116,7 +116,7 @@ iree_status_t loom_command_program_decl_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_COMMAND_PROGRAM_LAUNCH: Materialize and launch a command program with explicit specialization values and issue-time buffer bindings.
+// LOOM_OP_COMMAND_PROGRAM_LAUNCH: Invoke a command program with explicit specialization values and issue-time buffer bindings.
 // command.program.launch @decode[%token_count](%parameters, %transient) : [index](buffer, buffer)
 LOOM_DEFINE_ISA(loom_command_program_launch_isa, LOOM_OP_COMMAND_PROGRAM_LAUNCH)
 LOOM_DEFINE_SEGMENTED_OPERANDS(loom_command_program_launch_specializations, 0)
