@@ -59,7 +59,7 @@ typedef enum loom_cmd_program_argument_kind_e {
   LOOM_CMD_PROGRAM_ARGUMENT_KIND_B64 = 5,
 } loom_cmd_program_argument_kind_t;
 
-// Logical parameter schema for one executable-entry requirement.
+// Logical argument schema for one executable-entry requirement.
 //
 // The schema identifies a program-local entry and describes every tagless
 // dispatch payload targeting it. It does not encode native offsets, alignment,
@@ -273,9 +273,9 @@ typedef struct loom_cmd_program_t {
   loom_cmd_program_requirements_t requirements;
   // Buffer ranges used by fills, copies, and indirect launch counts.
   loom_cmd_program_table_t buffer_refs;
-  // Executable-entry logical parameter schemas.
+  // Executable-entry logical argument schemas.
   loom_cmd_program_table_t entry_schemas;
-  // Flattened one-byte logical parameter kinds referenced by entry schemas.
+  // Flattened one-byte logical argument kinds referenced by entry schemas.
   loom_cmd_program_table_t entry_schema_kinds;
   // Tagless dispatch argument payloads in command traversal order.
   iree_const_byte_span_t argument_data;
@@ -315,22 +315,6 @@ typedef struct loom_cmd_program_barrier_wave_iterator_t {
   uint32_t barrier_wave_ordinal;
 } loom_cmd_program_barrier_wave_iterator_t;
 
-// Dependency relocation applied while assembling command program roots.
-//
-// Each map has one entry for every corresponding requirement in the source
-// program. Map values are dense indices in the assembled requirement table
-// whose total size is given by the matching count field.
-typedef struct loom_cmd_program_dependency_relocation_t {
-  // Source executable index to assembled executable index map.
-  const uint32_t* executable_indices;
-  // Total number of executables in the assembled requirement table.
-  uint32_t executable_count;
-  // Source entry index to assembled entry index map.
-  const uint32_t* entry_indices;
-  // Total number of entries in the assembled requirement table.
-  uint32_t entry_count;
-} loom_cmd_program_dependency_relocation_t;
-
 // Parses and validates one complete command-program artifact.
 //
 // This is the untrusted byte boundary. Successful parsing guarantees that all
@@ -343,7 +327,7 @@ iree_status_t loom_cmd_program_parse(iree_const_byte_span_t data,
 loom_cmd_program_buffer_ref_t loom_cmd_program_buffer_ref_at(
     const loom_cmd_program_t* program, uint32_t index);
 
-// Returns one validated executable-entry logical parameter schema.
+// Returns one validated executable-entry logical argument schema.
 loom_cmd_program_entry_schema_t loom_cmd_program_entry_schema_at(
     const loom_cmd_program_t* program, uint32_t index);
 
@@ -386,17 +370,6 @@ loom_cmd_program_parameter_root_t loom_cmd_program_parameter_root_at(
 // Returns one validated concrete parameter requirement.
 loom_cmd_program_parameter_t loom_cmd_program_parameter_at(
     const loom_cmd_program_t* program, uint32_t index);
-
-// Clones |program| and relocates dependency indices into assembled tables.
-//
-// |program| must have passed loom_cmd_program_parse. The relocation maps are
-// compiler-owned assembly state and must cover every source requirement with
-// an index inside the corresponding assembled table. The caller owns the
-// returned storage and must release it with |host_allocator|.
-iree_status_t loom_cmd_program_relocate_dependencies(
-    const loom_cmd_program_t* program,
-    const loom_cmd_program_dependency_relocation_t* relocation,
-    iree_byte_span_t* out_data, iree_allocator_t host_allocator);
 
 #ifdef __cplusplus
 }  // extern "C"

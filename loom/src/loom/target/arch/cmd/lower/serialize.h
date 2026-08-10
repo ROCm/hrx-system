@@ -22,14 +22,15 @@ extern "C" {
 // function, parameter placement, transient requirements, and ABI layout are
 // consumed together so independently prepared state cannot be mixed.
 //
-// The selected function must be a closed zero-signature, single-block
-// low.func.def using the cmd.core descriptor set and command_program ABI.
-// Serialization is the closed portable-format boundary: a descriptor or Low
-// operation without a portable command encoding is rejected. Pure scalar and
-// buffer-reference SSA is evaluated once while serializing. The resulting
-// artifact contains canonical flat buffer-reference, logical-argument,
-// command, and parameter-requirement tables and retains no module, operation,
-// value, symbol, or string storage.
+// Preparation guarantees that the selected root is a closed zero-signature,
+// single-block low.func.def using the cmd.core descriptor set and
+// command_program ABI. Serialization trusts those plan-owned invariants. It is
+// the closed portable-format boundary: a descriptor or Low operation without a
+// portable command encoding is rejected. Pure scalar and buffer-reference SSA
+// is evaluated once while serializing. The resulting artifact contains
+// canonical flat buffer-reference, logical-argument, command, and
+// parameter-requirement tables and retains no module, operation, value,
+// symbol, or string storage.
 //
 // |out_data| is empty on failure. The caller owns returned bytes and must free
 // them with |host_allocator|.

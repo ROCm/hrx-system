@@ -45,7 +45,7 @@ typedef struct loom_cmd_schedule_command_t {
 } loom_cmd_schedule_command_t;
 
 typedef struct loom_cmd_schedule_build_t {
-  // Source module used to diagnose unsupported operations.
+  // Source module used to inspect operation traits and names.
   const loom_module_t* module;
   // Arena owning traversal and command tables.
   iree_arena_allocator_t* arena;

@@ -53,14 +53,8 @@ typedef struct loom_cmd_lower_plan_t {
   const loom_cmd_buffer_range_t* buffer_ranges;
   // Number of entries in |buffer_ranges|.
   iree_host_size_t buffer_range_count;
-  // Number of dense fixed-buffer ABI resources.
-  uint32_t fixed_buffer_count;
-  // Number of dense issue-time binding ABI resources.
-  uint32_t rebindable_binding_count;
-  // Number of dense executable ABI resources.
-  uint32_t executable_count;
-  // Number of dense executable-local entry ABI resources.
-  uint32_t entry_count;
+  // External resource-table shape emitted on the lowered function.
+  loom_cmd_abi_layout_t abi_layout;
   // Aggregate launch graph defining direct and host-static count placement.
   const loom_cmd_launch_graph_t* launch_graph;
   // Host launch-count table placement, ignored when the graph has no tuples.

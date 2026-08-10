@@ -117,9 +117,9 @@ typedef struct loom_cmd_serialize_build_t {
   loom_cmd_program_requirements_t requirements;
   // Buffer ranges used by fills, copies, and indirect launch counts.
   loom_cmd_serialize_buffer_ref_table_t buffer_refs;
-  // Executable-entry logical parameter schemas.
+  // Executable-entry logical argument schemas.
   loom_cmd_serialize_entry_schema_table_t entry_schemas;
-  // Flattened logical parameter kinds referenced by entry schemas.
+  // Flattened logical argument kinds referenced by entry schemas.
   loom_cmd_serialize_byte_table_t entry_schema_kinds;
   // Tagless dispatch argument payloads.
   loom_cmd_serialize_byte_table_t argument_data;
@@ -140,15 +140,6 @@ static bool loom_cmd_serialize_packet_is(
     const loom_low_descriptor_packet_t* packet, uint32_t descriptor_ordinal) {
   IREE_ASSERT_LT(descriptor_ordinal, build->descriptor_set->descriptor_count);
   return packet->descriptor_ordinal == descriptor_ordinal;
-}
-
-static iree_string_view_t loom_cmd_serialize_module_string(
-    const loom_module_t* module, loom_string_id_t string_id) {
-  if (string_id == LOOM_STRING_ID_INVALID ||
-      string_id >= module->strings.count) {
-    return iree_string_view_empty();
-  }
-  return module->strings.entries[string_id];
 }
 
 static uint64_t loom_cmd_serialize_constant_value(const loom_op_t* op) {
@@ -254,20 +245,6 @@ static iree_status_t loom_cmd_serialize_append_command(
   return iree_ok_status();
 }
 
-static iree_status_t loom_cmd_serialize_validate_resource_index(
-    uint64_t resource_index, uint32_t resource_count,
-    iree_string_view_t resource_kind) {
-  if (resource_index >= resource_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "command %.*s resource index %" PRIu64
-                            " is outside the declared ABI table of %" PRIu32
-                            " entries",
-                            (int)resource_kind.size, resource_kind.data,
-                            resource_index, resource_count);
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_cmd_serialize_import_resource(
     loom_cmd_serialize_build_t* build, const loom_op_t* op) {
   const loom_value_id_t result_id = loom_low_resource_result(op);
@@ -282,29 +259,23 @@ static iree_status_t loom_cmd_serialize_import_resource(
       loom_cmd_serialize_result(build, result_id);
   switch (register_class_id) {
     case CMD_CORE_REG_CLASS_ID_BUFFER: {
-      IREE_RETURN_IF_ERROR(loom_cmd_serialize_validate_resource_index(
-          resource_index, build->requirements.fixed_buffer_count,
-          IREE_SV("fixed-buffer")));
+      IREE_ASSERT_LT(resource_index, build->requirements.fixed_buffer_count);
       result->kind = LOOM_CMD_SERIALIZE_VALUE_KIND_FIXED_BUFFER;
       break;
     }
     case CMD_CORE_REG_CLASS_ID_BINDING: {
-      IREE_RETURN_IF_ERROR(loom_cmd_serialize_validate_resource_index(
-          resource_index, build->requirements.rebindable_binding_count,
-          IREE_SV("binding")));
+      IREE_ASSERT_LT(resource_index,
+                     build->requirements.rebindable_binding_count);
       result->kind = LOOM_CMD_SERIALIZE_VALUE_KIND_BINDING;
       break;
     }
     case CMD_CORE_REG_CLASS_ID_EXECUTABLE: {
-      IREE_RETURN_IF_ERROR(loom_cmd_serialize_validate_resource_index(
-          resource_index, build->requirements.executable_count,
-          IREE_SV("executable")));
+      IREE_ASSERT_LT(resource_index, build->requirements.executable_count);
       result->kind = LOOM_CMD_SERIALIZE_VALUE_KIND_EXECUTABLE;
       break;
     }
     case CMD_CORE_REG_CLASS_ID_ENTRY: {
-      IREE_RETURN_IF_ERROR(loom_cmd_serialize_validate_resource_index(
-          resource_index, build->requirements.entry_count, IREE_SV("entry")));
+      IREE_ASSERT_LT(resource_index, build->requirements.entry_count);
       result->kind = LOOM_CMD_SERIALIZE_VALUE_KIND_ENTRY;
       break;
     }
@@ -1135,38 +1106,16 @@ iree_status_t loom_cmd_program_plan_serialize_root(
       &root->parameters;
   const loom_cmd_transient_requirement_t* transient_requirement =
       &root->transient;
-  if (!loom_low_func_def_isa(function_op) ||
-      loom_low_func_def_abi(function_op) != LOOM_TARGET_ABI_COMMAND_PROGRAM) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "expected a command_program low.func.def");
-  }
-
-  loom_cmd_abi_layout_t abi_layout = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_cmd_abi_layout_from_low(module, function_op, &abi_layout));
-
   const loom_low_descriptor_set_t* descriptor_set =
       loom_cmd_core_descriptor_set();
-  const iree_string_view_t descriptor_set_key =
-      loom_cmd_serialize_module_string(
-          module, loom_low_func_def_descriptor_set(function_op));
-  if (!iree_string_view_equal(
-          descriptor_set_key,
-          loom_low_descriptor_set_string(descriptor_set,
-                                         descriptor_set->key_string_offset))) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "command program must use the cmd.core contract");
-  }
-
+  IREE_ASSERT(loom_low_func_def_isa(function_op));
+  IREE_ASSERT_EQ(loom_low_func_def_abi(function_op),
+                 LOOM_TARGET_ABI_COMMAND_PROGRAM);
   const loom_region_t* body = loom_low_function_const_body(function_op);
-  if (body == NULL || body->block_count != 1 ||
-      loom_region_const_entry_block(body)->arg_count != 0 ||
-      function_op->result_count != 0) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "portable command serialization requires a zero-signature, "
-        "single-block cmd low function");
-  }
+  IREE_ASSERT(body != NULL);
+  IREE_ASSERT_EQ(body->block_count, 1u);
+  IREE_ASSERT_EQ(loom_region_const_entry_block(body)->arg_count, 0u);
+  IREE_ASSERT_EQ(function_op->result_count, 0u);
 
   iree_arena_allocator_t arena;
   iree_arena_initialize(module->arena.block_pool, &arena);
@@ -1181,10 +1130,11 @@ iree_status_t loom_cmd_program_plan_serialize_root(
       .value_count = value_domain.value_count,
       .requirements =
           {
-              .fixed_buffer_count = abi_layout.fixed_buffer_count,
-              .rebindable_binding_count = abi_layout.rebindable_binding_count,
-              .executable_count = abi_layout.executable_count,
-              .entry_count = abi_layout.entry_count,
+              .fixed_buffer_count = root->abi_layout.fixed_buffer_count,
+              .rebindable_binding_count =
+                  root->abi_layout.rebindable_binding_count,
+              .executable_count = root->abi_layout.executable_count,
+              .entry_count = root->abi_layout.entry_count,
           },
       .parameter_requirements = parameter_requirements,
       .transient_requirement = transient_requirement,

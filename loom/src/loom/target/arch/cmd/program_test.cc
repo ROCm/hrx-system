@@ -442,53 +442,6 @@ TEST(CmdProgramTest, RejectsMalformedLaunchCountTuple) {
                         loom_cmd_program_parse(AsByteSpan(data), &program));
 }
 
-TEST(CmdProgramTest, RelocatesDependencyIndices) {
-  const std::vector<uint8_t> data = BuildValidProgram();
-  loom_cmd_program_t program = {};
-  IREE_ASSERT_OK(loom_cmd_program_parse(AsByteSpan(data), &program));
-
-  const uint32_t executable_indices[] = {3};
-  const uint32_t entry_indices[] = {4};
-  const loom_cmd_program_dependency_relocation_t relocation = {
-      /*.executable_indices=*/executable_indices,
-      /*.executable_count=*/5,
-      /*.entry_indices=*/entry_indices,
-      /*.entry_count=*/6,
-  };
-  iree_byte_span_t relocated_data = iree_byte_span_empty();
-  IREE_ASSERT_OK(loom_cmd_program_relocate_dependencies(
-      &program, &relocation, &relocated_data, iree_allocator_system()));
-
-  loom_cmd_program_t relocated_program = {};
-  IREE_ASSERT_OK(loom_cmd_program_parse(
-      iree_make_const_byte_span(relocated_data.data,
-                                relocated_data.data_length),
-      &relocated_program));
-  EXPECT_EQ(relocated_program.requirements.executable_count, 5u);
-  EXPECT_EQ(relocated_program.requirements.entry_count, 6u);
-  for (uint32_t command_index = 2; command_index <= 4; ++command_index) {
-    const loom_cmd_program_command_t command =
-        loom_cmd_program_command_at(&relocated_program, command_index);
-    const bool is_direct =
-        command.kind == LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_DIRECT;
-    EXPECT_EQ(is_direct ? command.payload.dispatch_direct.executable_index
-                        : command.payload.dispatch_indirect.executable_index,
-              3u);
-    EXPECT_EQ(is_direct ? command.payload.dispatch_direct.entry_index
-                        : command.payload.dispatch_indirect.entry_index,
-              4u);
-  }
-  EXPECT_EQ(loom_cmd_program_command_at(&relocated_program, 0).kind,
-            LOOM_CMD_PROGRAM_COMMAND_KIND_FILL);
-  EXPECT_EQ(loom_cmd_program_command_at(&relocated_program, 5).kind,
-            LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER_EXECUTION);
-  EXPECT_TRUE(iree_string_view_equal(
-      loom_cmd_program_parameter_at(&relocated_program, 1).key,
-      IREE_SV("blk.3.weight")));
-
-  iree_allocator_free(iree_allocator_system(), relocated_data.data);
-}
-
 TEST(CmdProgramTest, RejectsMalformedHeader) {
   std::vector<uint8_t> data = BuildValidProgram();
   data[LOOM_CMD_PROGRAM_HEADER_MAGIC_OFFSET] ^= 0xFF;

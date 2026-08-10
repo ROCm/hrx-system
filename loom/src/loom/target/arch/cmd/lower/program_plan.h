@@ -14,6 +14,7 @@
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
 #include "loom/pass/registry.h"
+#include "loom/target/arch/cmd/abi_layout.h"
 #include "loom/target/arch/cmd/lower/kernel_unit.h"
 #include "loom/target/arch/cmd/lower/launch_graph.h"
 #include "loom/target/arch/cmd/lower/parameters.h"
@@ -31,6 +32,9 @@ extern "C" {
 typedef struct loom_cmd_program_root_t {
   // Lowered command root in the plan's shared root module.
   loom_op_t* function_op;
+
+  // External resource-table shape carried through command lowering.
+  loom_cmd_abi_layout_t abi_layout;
 
   // Host launch-count function in the plan's shared launch module.
   loom_op_t* launch_function_op;
@@ -97,10 +101,11 @@ typedef struct loom_cmd_program_plan_t {
 // function passes used to resolve root-local source structure. It is a
 // compiler-owned resource rather than part of the authored program contract.
 //
-// Infrastructure failures return a non-OK status. Invalid source programs emit
-// diagnostics, set |out_valid| to false, leave |out_plan| empty, and return OK.
-// A valid plan sets |out_valid| to true and transfers all referenced modules to
-// |out_plan|, which must be deinitialized by the caller.
+// Unsupported portable mappings and infrastructure failures return a non-OK
+// status. Source contract violations emit diagnostics, set |out_valid| to
+// false, leave |out_plan| empty, and return OK. A valid plan sets |out_valid|
+// to true and transfers all referenced modules to |out_plan|, which must be
+// deinitialized by the caller.
 iree_status_t loom_cmd_program_plan_prepare(
     const loom_module_t* source_module,
     const loom_op_t* const* source_program_ops,

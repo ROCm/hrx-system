@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/error/error_catalog.h"
 #include "loom/ir/module.h"
 #include "loom/link/linker.h"
 #include "loom/ops/kernel/ops.h"
@@ -164,6 +165,52 @@ static iree_status_t loom_cmd_program_plan_compute_kernel_config_facts(
           kernel_op));
     }
   }
+  return iree_ok_status();
+}
+
+// Establishes the dependency-unit contract before consumers assume every
+// scheduled launch has a materializable Loom kernel body.
+static iree_status_t loom_cmd_program_plan_validate_kernel_definitions(
+    const loom_module_t* module, const loom_cmd_program_root_build_t* roots,
+    iree_host_size_t root_count, iree_diagnostic_emitter_t emitter,
+    bool* out_valid) {
+  *out_valid = false;
+  for (iree_host_size_t root_index = 0; root_index < root_count; ++root_index) {
+    const loom_cmd_schedule_plan_t* schedule = &roots[root_index].schedule;
+    for (iree_host_size_t launch_index = 0;
+         launch_index < schedule->command_count; ++launch_index) {
+      const loom_op_t* launch_op = schedule->commands[launch_index];
+      IREE_ASSERT(loom_kernel_launch_isa(launch_op));
+      const loom_symbol_ref_t callee = loom_kernel_launch_callee(launch_op);
+      IREE_ASSERT(loom_symbol_ref_is_valid(callee));
+      IREE_ASSERT_EQ(callee.module_id, 0u);
+      IREE_ASSERT_LT(callee.symbol_id, module->symbols.count);
+      const loom_symbol_t* symbol = &module->symbols.entries[callee.symbol_id];
+      const loom_op_t* kernel_op = symbol->defining_op;
+      IREE_ASSERT(kernel_op != NULL);
+      if (loom_kernel_def_isa(kernel_op)) continue;
+
+      IREE_ASSERT(loom_kernel_decl_isa(kernel_op));
+      IREE_ASSERT_LT(symbol->name_id, module->strings.count);
+      const loom_diagnostic_param_t params[] = {
+          loom_param_string(module->strings.entries[symbol->name_id]),
+      };
+      const loom_diagnostic_related_op_t related_op = {
+          .label = IREE_SV("launched here"),
+          .op = launch_op,
+      };
+      const loom_diagnostic_emission_t emission = {
+          .op = kernel_op,
+          .error = LOOM_ERR_LOWERING_050,
+          .params = params,
+          .param_count = IREE_ARRAYSIZE(params),
+          .related_ops = &related_op,
+          .related_op_count = 1,
+      };
+      return iree_diagnostic_emit(emitter, &emission);
+    }
+  }
+  *out_valid = true;
   return iree_ok_status();
 }
 
@@ -331,12 +378,16 @@ static iree_status_t loom_cmd_program_plan_build_lower_plan(
       .binding_count = binding_count,
       .buffer_ranges = buffer_ranges,
       .buffer_range_count = buffer_range_count,
-      .fixed_buffer_count = parameter_layout.fixed_buffer_count,
-      .rebindable_binding_count = parameter_layout.rebindable_binding_count +
-                                  (has_transient ? 1u : 0u) +
-                                  (has_host_launch_counts ? 1u : 0u),
-      .executable_count = dependency_count,
-      .entry_count = dependency_count,
+      .abi_layout =
+          {
+              .fixed_buffer_count = parameter_layout.fixed_buffer_count,
+              .rebindable_binding_count =
+                  parameter_layout.rebindable_binding_count +
+                  (has_transient ? 1u : 0u) +
+                  (has_host_launch_counts ? 1u : 0u),
+              .executable_count = dependency_count,
+              .entry_count = dependency_count,
+          },
       .launch_graph = launch_graph,
       .launch_count_binding =
           {
@@ -462,6 +513,12 @@ iree_status_t loom_cmd_program_plan_prepare(
     }
   }
 
+  if (valid && iree_status_is_ok(status)) {
+    status = loom_cmd_program_plan_validate_kernel_definitions(
+        preparation_module, root_builds, source_program_count,
+        diagnostic_emitter, &valid);
+  }
+
   loom_value_fact_table_t source_facts = {0};
   if (valid && iree_status_is_ok(status)) {
     status = loom_value_fact_table_initialize(&source_facts, &scratch_arena,
@@ -556,6 +613,7 @@ iree_status_t loom_cmd_program_plan_prepare(
       loom_cmd_program_root_build_t* build = &root_builds[i];
       root->function_op =
           loom_cmd_program_plan_find_symbol(plan.root_module, build->name);
+      root->abi_layout = build->lower_plan.abi_layout;
       root->launch_function_op =
           loom_cmd_program_plan_find_symbol(plan.launch_module, build->name);
       root->launch_tuple_count = build->launch_graph.host_tuple_count;

@@ -27,15 +27,16 @@ loom_cc_library(
     visibility = ["//loom/src/loom/target/arch/cmd:__subpackages__"],
     deps = [
         "//loom/src/loom/ir",
-        "//loom/src/loom/ops/low",
-        "//loom/src/loom/target:types",
         "//runtime/src/iree/base",
     ],
 )
 
 loom_cc_library(
     name = "program",
-    srcs = ["program.c"],
+    srcs = [
+        "format.c",
+        "program.c",
+    ],
     hdrs = [
         "format.h",
         "program.h",

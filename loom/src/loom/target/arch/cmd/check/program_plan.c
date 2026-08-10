@@ -185,7 +185,7 @@ static iree_status_t loom_cmd_program_plan_check_print_module(
 // Exercises the complete portable artifact boundary for every prepared root.
 // Textual expectations continue to describe the source and Low semantics while
 // this closure proves that the same production plan serializes into an artifact
-// accepted by the public untrusted-byte parser.
+// accepted by the artifact's untrusted-byte parser.
 static iree_status_t loom_cmd_program_plan_check_roundtrip_artifacts(
     const loom_cmd_program_plan_t* plan, iree_allocator_t host_allocator) {
   iree_status_t status = iree_ok_status();

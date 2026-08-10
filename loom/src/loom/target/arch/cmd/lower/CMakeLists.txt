@@ -184,6 +184,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::error::emitter
+    loom::error::error_defs
     loom::ir
     loom::link::linker
     loom::ops::command
@@ -194,6 +195,7 @@ loom_cc_library(
     loom::pass::interpreter
     loom::pass::program
     loom::pass::registry
+    loom::target::arch::cmd::abi_layout
     loom::util::fact_table
   PUBLIC
 )

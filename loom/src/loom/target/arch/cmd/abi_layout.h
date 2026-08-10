@@ -76,14 +76,6 @@ iree_status_t loom_cmd_abi_layout_make_attr(loom_module_t* module,
                                             const loom_cmd_abi_layout_t* layout,
                                             loom_attribute_t* out_attr);
 
-// Loads the command ABI layout declared by |function_op|.
-//
-// The function must be a command_program low.func.def with a complete command
-// ABI layout. User-authored missing, malformed, or out-of-range fields fail.
-iree_status_t loom_cmd_abi_layout_from_low(const loom_module_t* module,
-                                           const loom_op_t* function_op,
-                                           loom_cmd_abi_layout_t* out_layout);
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif

@@ -19,8 +19,6 @@ loom_cc_library(
   DEPS
     iree::base
     loom::ir
-    loom::ops::low
-    loom::target::types
   PUBLIC
 )
 
@@ -31,6 +29,7 @@ loom_cc_library(
     "format.h"
     "program.h"
   SRCS
+    "format.c"
     "program.c"
   DEPS
     iree::base

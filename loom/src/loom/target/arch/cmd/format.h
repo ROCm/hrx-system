@@ -5,6 +5,12 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 // Canonical little-endian encoding of one portable command program.
+//
+// The fixed header is followed by the tables in
+// loom_cmd_program_format_layout_t order with no inter-table padding.
+// Multi-byte fields may therefore be unaligned and must be accessed with the
+// IREE unaligned little-endian helpers. All offsets and the total artifact
+// length are 32-bit byte counts.
 
 #ifndef LOOM_TARGET_ARCH_CMD_FORMAT_H_
 #define LOOM_TARGET_ARCH_CMD_FORMAT_H_
@@ -15,6 +21,7 @@
 extern "C" {
 #endif
 
+// Eight-byte artifact identity including the trailing NUL byte.
 #define LOOM_CMD_PROGRAM_FORMAT_MAGIC "LOOMCMD"
 
 enum {

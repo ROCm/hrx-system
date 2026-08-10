@@ -263,16 +263,19 @@ static iree_status_t loom_cmd_lower_build_dense_resources(
 static iree_status_t loom_cmd_lower_build_abi_resources(
     loom_cmd_lower_state_t* state) {
   IREE_RETURN_IF_ERROR(loom_cmd_lower_build_dense_resources(
-      state, state->plan->fixed_buffer_count, state->types.buffer_source,
-      state->types.fixed_buffer, &state->resources.fixed_buffers));
+      state, state->plan->abi_layout.fixed_buffer_count,
+      state->types.buffer_source, state->types.fixed_buffer,
+      &state->resources.fixed_buffers));
   IREE_RETURN_IF_ERROR(loom_cmd_lower_build_dense_resources(
-      state, state->plan->rebindable_binding_count, state->types.buffer_source,
-      state->types.binding, &state->resources.bindings));
+      state, state->plan->abi_layout.rebindable_binding_count,
+      state->types.buffer_source, state->types.binding,
+      &state->resources.bindings));
   IREE_RETURN_IF_ERROR(loom_cmd_lower_build_dense_resources(
-      state, state->plan->executable_count, state->types.index_source,
-      state->types.executable, &state->resources.executables));
+      state, state->plan->abi_layout.executable_count,
+      state->types.index_source, state->types.executable,
+      &state->resources.executables));
   return loom_cmd_lower_build_dense_resources(
-      state, state->plan->entry_count, state->types.index_source,
+      state, state->plan->abi_layout.entry_count, state->types.index_source,
       state->types.entry, &state->resources.entries);
 }
 
@@ -286,12 +289,13 @@ static iree_status_t loom_cmd_lower_build_buffer_tuple(
       .byte_length = LOOM_VALUE_ID_INVALID,
   };
   if (binding->role == LOOM_CMD_BUFFER_ROLE_FIXED) {
-    IREE_ASSERT_LT(binding->resource_index, state->plan->fixed_buffer_count);
+    IREE_ASSERT_LT(binding->resource_index,
+                   state->plan->abi_layout.fixed_buffer_count);
     out_tuple->root = state->resources.fixed_buffers[binding->resource_index];
   } else {
     IREE_ASSERT_EQ(binding->role, LOOM_CMD_BUFFER_ROLE_REBINDABLE);
     IREE_ASSERT_LT(binding->resource_index,
-                   state->plan->rebindable_binding_count);
+                   state->plan->abi_layout.rebindable_binding_count);
     out_tuple->root = state->resources.bindings[binding->resource_index];
   }
   IREE_RETURN_IF_ERROR(loom_cmd_lower_build_u64_constant(
@@ -385,7 +389,8 @@ static iree_status_t loom_cmd_lower_build_launch_count_refs(
 
   const loom_cmd_lower_launch_count_binding_t binding =
       state->plan->launch_count_binding;
-  IREE_ASSERT_LT(binding.resource_index, state->plan->rebindable_binding_count);
+  IREE_ASSERT_LT(binding.resource_index,
+                 state->plan->abi_layout.rebindable_binding_count);
   IREE_ASSERT_EQ(binding.byte_offset % sizeof(uint32_t), 0u);
   IREE_RETURN_IF_ERROR(loom_cmd_lower_allocate_value_array(
       state, graph->host_tuple_count, &state->resources.launch_counts));
@@ -453,8 +458,9 @@ static iree_status_t loom_cmd_lower_build_direct_launch(
     const loom_cmd_lower_launch_t* launch,
     loom_target_dispatch_workgroup_count_t workgroup_count, bool has_barrier) {
   IREE_ASSERT(loom_kernel_launch_isa(source_op));
-  IREE_ASSERT_LT(launch->executable_index, state->plan->executable_count);
-  IREE_ASSERT_LT(launch->entry_index, state->plan->entry_count);
+  IREE_ASSERT_LT(launch->executable_index,
+                 state->plan->abi_layout.executable_count);
+  IREE_ASSERT_LT(launch->entry_index, state->plan->abi_layout.entry_count);
 
   loom_value_id_t workgroup_count_x = LOOM_VALUE_ID_INVALID;
   loom_value_id_t workgroup_count_y = LOOM_VALUE_ID_INVALID;
@@ -492,8 +498,9 @@ static iree_status_t loom_cmd_lower_build_host_launch(
     const loom_cmd_lower_launch_t* launch, uint32_t host_tuple_ordinal,
     bool has_barrier) {
   IREE_ASSERT(loom_kernel_launch_isa(source_op));
-  IREE_ASSERT_LT(launch->executable_index, state->plan->executable_count);
-  IREE_ASSERT_LT(launch->entry_index, state->plan->entry_count);
+  IREE_ASSERT_LT(launch->executable_index,
+                 state->plan->abi_layout.executable_count);
+  IREE_ASSERT_LT(launch->entry_index, state->plan->abi_layout.entry_count);
   IREE_ASSERT_LT(host_tuple_ordinal,
                  state->plan->launch_graph->host_tuple_count);
 
@@ -593,15 +600,9 @@ static iree_status_t loom_cmd_lower_create_function(
   loom_builder_initialize(state->module, &state->module->arena,
                           loom_module_block(state->module), &state->builder);
   loom_builder_set_before(&state->builder, state->source_program.op);
-  const loom_cmd_abi_layout_t abi_layout = {
-      .fixed_buffer_count = state->plan->fixed_buffer_count,
-      .rebindable_binding_count = state->plan->rebindable_binding_count,
-      .executable_count = state->plan->executable_count,
-      .entry_count = state->plan->entry_count,
-  };
   loom_attribute_t abi_layout_attr = loom_attr_absent();
-  IREE_RETURN_IF_ERROR(loom_cmd_abi_layout_make_attr(state->module, &abi_layout,
-                                                     &abi_layout_attr));
+  IREE_RETURN_IF_ERROR(loom_cmd_abi_layout_make_attr(
+      state->module, &state->plan->abi_layout, &abi_layout_attr));
   IREE_RETURN_IF_ERROR(loom_low_func_def_build(
       &state->builder, build_flags, visibility, retain,
       /*cc=*/0, /*purity=*/0, /*allocation=*/0, /*schedule=*/0,
