@@ -27,6 +27,7 @@ loom_generated_cc_library(
         "verify.c",
     ],
     hdrs = [
+        "facts.h",
         "families.h",
         "matrix_operand.h",
         "numeric_transform.h",

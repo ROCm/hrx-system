@@ -125,8 +125,8 @@ config_def = Op(
     group=config_ops,
     doc=(
         "Define a compile/link-time configuration value. The initializer is "
-        "required and must match the declared result type. Scalar values seed "
-        "ordinary value facts so config.get can fold through canonicalization."
+        "required and must match the declared result type. Scalar and encoding "
+        "values seed typed facts so config.get can fold through canonicalization."
     ),
     traits=[SYMBOL_DEFINE, PURE],
     symbol_def=_CONFIG_DEF_SYMBOL_DEF,

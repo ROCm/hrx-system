@@ -33,6 +33,7 @@ loom_generated_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ir::facts
+    loom::ops::encoding
     loom::ops::op_defs
 )
 

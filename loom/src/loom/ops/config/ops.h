@@ -50,7 +50,7 @@ iree_status_t loom_config_decl_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_CONFIG_DEF: Define a compile/link-time configuration value. The initializer is required and must match the declared result type. Scalar values seed ordinary value facts so config.get can fold through canonicalization.
+// LOOM_OP_CONFIG_DEF: Define a compile/link-time configuration value. The initializer is required and must match the declared result type. Scalar and encoding values seed typed facts so config.get can fold through canonicalization.
 // config.def @model36.model.hidden_size = 2048 : index
 LOOM_DEFINE_ISA(loom_config_def_isa, LOOM_OP_CONFIG_DEF)
 LOOM_DEFINE_RESULT(loom_config_def_type, 0)
