@@ -4,7 +4,11 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library")
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+)
 
 package(
     default_visibility = ["//visibility:private"],
@@ -147,5 +151,55 @@ loom_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "program_plan",
+    srcs = ["program_plan.c"],
+    hdrs = ["program_plan.h"],
+    visibility = [
+        "//loom/binding/c/target/cmd:__pkg__",
+        "//loom/src/loom/target/arch/cmd:__subpackages__",
+    ],
+    deps = [
+        ":kernel_unit",
+        ":launch_graph",
+        ":lower",
+        ":parameters",
+        ":program_composition",
+        ":schedule",
+        ":transients",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/link:linker",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/command",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+# The program-plan C++ test covers ownership after the source module is
+# released. Compiler transformations are covered textually through loom-check.
+loom_cc_test(
+    name = "program_plan_test",
+    srcs = ["program_plan_test.cc"],
+    deps = [
+        ":program_plan",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/testing:diagnostic_matchers",
+        "//loom/src/loom/testing:module_ptr",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )

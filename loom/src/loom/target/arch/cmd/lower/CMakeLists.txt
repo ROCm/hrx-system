@@ -168,4 +168,52 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    program_plan
+  HDRS
+    "program_plan.h"
+  SRCS
+    "program_plan.c"
+  DEPS
+    ::kernel_unit
+    ::launch_graph
+    ::lower
+    ::parameters
+    ::program_composition
+    ::schedule
+    ::transients
+    iree::base
+    iree::base::internal::arena
+    loom::error::emitter
+    loom::ir
+    loom::link::linker
+    loom::ops::command
+    loom::ops::kernel
+    loom::ops::op_defs
+    loom::ops::type_registry
+    loom::util::fact_table
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    program_plan_test
+  SRCS
+    "program_plan_test.cc"
+  DEPS
+    ::program_plan
+    iree::base
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ir
+    loom::ops::low
+    loom::ops::op_registry
+    loom::testing::diagnostic_matchers
+    loom::testing::module_ptr
+    loom::verify
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
