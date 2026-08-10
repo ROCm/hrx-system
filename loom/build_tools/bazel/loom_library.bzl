@@ -342,6 +342,14 @@ def loom_compile(
         visibility = visibility,
     )
 
+def _compile_target_suffix(target):
+    target_text = str(target)
+    if ":" in target_text:
+        target_text = target_text.split(":")[-1]
+    elif "/" in target_text:
+        target_text = target_text.split("/")[-1]
+    return target_text.replace("-", "_").replace(".", "_").replace("+", "_")
+
 def _declare_library(
         name,
         srcs,
@@ -379,8 +387,18 @@ def _declare_library(
         )
         tests.append(plan_test_name)
 
-    for index, target in enumerate(compile_targets):
-        compile_name = "%s_compile_%d" % (name, index)
+    compile_names = {}
+    for target in compile_targets:
+        compile_name = "%s_compile_%s" % (name, _compile_target_suffix(target))
+        if compile_name in compile_names:
+            fail(
+                "%s compile target %s has the same generated name as %s" % (
+                    name,
+                    target,
+                    compile_names[compile_name],
+                ),
+            )
+        compile_names[compile_name] = target
         _loom_compile(
             name = compile_name,
             library = ":" + name,
