@@ -493,6 +493,10 @@ def test_generate_encoding_family_metadata() -> None:
     assert '#include "loom/ir/encoding.h"' in ops_h
     assert "typedef enum loom_encoding_rounding_policy_e" in ops_h
     assert "LOOM_ENCODING_ROUNDING_POLICY_NEAREST_EVEN = 1" in ops_h
+    assert "typedef enum loom_encoding_auxiliary_key_e" in ops_h
+    assert "LOOM_ENCODING_AUXILIARY_KEY_SCALE = 0" in ops_h
+    assert "LOOM_ENCODING_AUXILIARY_KEY_MINIMUM = 3" in ops_h
+    assert "loom_encoding_auxiliary_key_descriptors[LOOM_ENCODING_AUXILIARY_KEY_COUNT_]" in ops_h
     assert "LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_PAYLOAD_ELEMENTS = 0" in ops_h
     assert "LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_ROUNDING = 1" in ops_h
     assert "LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_COUNT_ = 2" in ops_h
@@ -524,10 +528,37 @@ def test_generate_encoding_family_metadata() -> None:
     assert ".shape = {16, 16}" in tables_c
     assert ".scale_operand_count = 2" in tables_c
     assert ".required_auxiliary_keys = UINT64_C(0x9)" in tables_c
+    assert "loom_encoding_auxiliary_key_descriptors[LOOM_ENCODING_AUXILIARY_KEY_COUNT_]" in tables_c
+    assert '.name = _BSTRING(5, "scale")' in tables_c
+    assert ".stable_id = UINT64_C(0x6aacb9fbb71a1d91)" in tables_c
+    assert '.name = _BSTRING(7, "minimum")' in tables_c
     assert ".logical_element_count = 256" in tables_c
     assert ".storage_byte_count = 144" in tables_c
     assert ".required_alignment = 16" in tables_c
     assert ".fixed_metadata = &loom_encoding_matrix_operand_fixed_metadata" in tables_c
+
+
+def test_encoding_families_require_one_auxiliary_key_vocabulary() -> None:
+    dialect = Dialect("encoding", dialect_id=0x09)
+    first_keys = EnumDef("FirstKeys", [EnumCase("scale", 0)])
+    second_keys = EnumDef("SecondKeys", [EnumCase("minimum", 0)])
+    families = [
+        EncodingFamilyDef(
+            "first",
+            group=dialect,
+            role=EncodingFamilyRole.STORAGE_SCHEMA,
+            auxiliary_key_enum=first_keys,
+        ),
+        EncodingFamilyDef(
+            "second",
+            group=dialect,
+            role=EncodingFamilyRole.STORAGE_SCHEMA,
+            auxiliary_key_enum=second_keys,
+        ),
+    ]
+
+    with _raises_value_error("encoding families in one dialect must share one auxiliary key enum"):
+        generate_ops_h("encoding", 0x09, [], (), families)
 
 
 def test_generate_qualified_encoding_family_metadata() -> None:

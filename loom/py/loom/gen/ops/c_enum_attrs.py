@@ -16,25 +16,56 @@ from loom.gen.ops.c_names import c_encoding_enum_prefix, c_prefix
 from loom.gen.support.c import CIdentifierCase, c_identifier
 
 SharedEnumMap = dict[int, tuple[str, str, EnumDef]]
+EncodingEnumMap = dict[int, tuple[EnumDef, bool]]
 EncodingEnumTypeMap = dict[int, str]
+
+
+def collect_encoding_enums(
+    encoding_families: Sequence[EncodingFamilyDef],
+) -> EncodingEnumMap:
+    """Returns encoding-owned enums and whether each is open."""
+    enums: EncodingEnumMap = {}
+    auxiliary_key_enum: EnumDef | None = None
+    for family in encoding_families:
+        for parameter in family.parameters:
+            enum_def = parameter.enum_def
+            if parameter.attr_type not in ("enum", "enum_array") or enum_def is None:
+                continue
+            previous = enums.get(id(enum_def))
+            if previous is not None and previous[1] != parameter.open_enum:
+                raise ValueError(f"encoding enum '{enum_def.name}' cannot be both open and closed")
+            enums.setdefault(id(enum_def), (enum_def, parameter.open_enum))
+
+        enum_def = family.auxiliary_key_enum
+        if enum_def is None:
+            continue
+        if auxiliary_key_enum is not None and enum_def is not auxiliary_key_enum:
+            raise ValueError("encoding families in one dialect must share one auxiliary key enum")
+        auxiliary_key_enum = enum_def
+        previous = enums.get(id(enum_def))
+        if previous is not None and previous[1]:
+            raise ValueError(f"auxiliary key enum '{enum_def.name}' must be closed")
+        enums.setdefault(id(enum_def), (enum_def, False))
+    return enums
+
+
+def collect_encoding_auxiliary_key_enum(
+    encoding_families: Sequence[EncodingFamilyDef],
+) -> EnumDef | None:
+    """Returns the one shared auxiliary-key enum, if present."""
+    collect_encoding_enums(encoding_families)
+    for family in encoding_families:
+        if family.auxiliary_key_enum is not None:
+            return family.auxiliary_key_enum
+    return None
 
 
 def collect_encoding_enum_types(
     dialect_name: str,
     encoding_families: Sequence[EncodingFamilyDef],
 ) -> EncodingEnumTypeMap:
-    """Returns the canonical C type for encoding-family parameter enums."""
-    enum_types: EncodingEnumTypeMap = {}
-    for family in encoding_families:
-        for parameter in family.parameters:
-            enum_def = parameter.enum_def
-            if parameter.attr_type not in ("enum", "enum_array") or enum_def is None:
-                continue
-            enum_types.setdefault(
-                id(enum_def),
-                enum_def.c_type or f"{c_encoding_enum_prefix(dialect_name, enum_def)}_t",
-            )
-    return enum_types
+    """Returns the canonical C type for encoding-owned enums."""
+    return {enum_id: enum_def.c_type or f"{c_encoding_enum_prefix(dialect_name, enum_def)}_t" for enum_id, (enum_def, _) in collect_encoding_enums(encoding_families).items()}
 
 
 def collect_shared_enums(

@@ -241,6 +241,15 @@ typedef struct loom_encoding_record_geometry_t {
 // Dense bitset of family-declared auxiliary operand keys.
 typedef uint64_t loom_encoding_auxiliary_key_flags_t;
 
+// Generated read-only metadata for one auxiliary operand key.
+typedef struct loom_encoding_auxiliary_key_descriptor_t {
+  // Stable textual key used in authored IR and diagnostics.
+  loom_bstring_t name;
+
+  // Stable hash of |name| used after parsing to avoid string comparisons.
+  uint64_t stable_id;
+} loom_encoding_auxiliary_key_descriptor_t;
+
 // Generated constants shared by every instance of a fixed encoding family.
 // This data is process-lifetime read-only storage referenced by the family
 // descriptor and never copied into a module.

@@ -80,6 +80,37 @@ NumericFormat = EnumDef(
     doc="Target-independent encoded numeric format.",
 )
 
+AuxiliaryKey = EnumDef(
+    "AuxiliaryKey",
+    [
+        EnumCase("scale", 0),
+        EnumCase("secondary_scale", 1),
+        EnumCase("scale2", 2),
+        EnumCase("scale3", 3),
+        EnumCase("scale4", 4),
+        EnumCase("scale5", 5),
+        EnumCase("scale6", 6),
+        EnumCase("scale7", 7),
+        EnumCase("zero_point", 8),
+        EnumCase("minimum", 9),
+        EnumCase("bias", 10),
+        EnumCase("sum_correction", 11),
+        EnumCase("codebook", 12),
+        EnumCase("sparsity", 13),
+        EnumCase("metadata", 14),
+        EnumCase("indices", 15),
+        EnumCase("offsets", 16),
+        EnumCase("mask", 17),
+        EnumCase("signs", 18),
+        EnumCase("residual", 19),
+        EnumCase("amax", 20),
+        EnumCase("thresholds", 21),
+        EnumCase("centroids", 22),
+        EnumCase("outliers", 23),
+    ],
+    doc="Auxiliary SSA operand key shared by encoded storage schemas.",
+)
+
 PayloadPacking = EnumDef(
     "PayloadPacking",
     [
@@ -388,6 +419,7 @@ ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
         group=encoding_ops,
         role=EncodingFamilyRole.STORAGE_SCHEMA,
         parameters=_MATRIX_OPERAND_PARAMETERS,
+        auxiliary_key_enum=AuxiliaryKey,
         doc="Target-independent encoded matrix operand schema.",
     ),
     EncodingFamilyDef(

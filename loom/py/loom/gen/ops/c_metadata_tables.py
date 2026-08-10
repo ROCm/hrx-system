@@ -30,6 +30,9 @@ from loom.dsl import (
 )
 from loom.fields import FieldKind, compute_layout
 from loom.gen.ops import c_format, c_interfaces, c_queries, c_symbols, c_traits
+from loom.gen.ops.c_enum_attrs import (
+    collect_encoding_auxiliary_key_enum as _collect_encoding_auxiliary_key_enum,
+)
 from loom.gen.ops.c_enum_attrs import collect_shared_enums as _collect_shared_enums
 from loom.gen.ops.c_enum_attrs import enum_names_array_name as _enum_names_array_name
 from loom.gen.ops.c_enums import (
@@ -68,6 +71,7 @@ from loom.gen.support import c_arrays
 from loom.gen.support.c import c_identifier as _c_identifier
 from loom.gen.support.c import c_string_literal as _c_string_literal
 from loom.gen.support.generated_file import line_comment_header
+from loom.stable_id import stable_id_from_string as _stable_id_from_string
 
 
 def _contract_family_mask(contracts: Sequence[ContractFamily]) -> str:
@@ -399,6 +403,35 @@ def _emit_encoding_enum_case_names(
             _emit_enum_case_names(lines, array_name, enum_def)
             shared_enum_names[enum_id] = array_name
     return shared_enum_names
+
+
+def _emit_encoding_auxiliary_key_descriptors(
+    lines: list[str],
+    dialect_name: str,
+    encoding_families: Sequence[EncodingFamilyDef],
+) -> None:
+    """Emits the shared auxiliary-key vocabulary for encoding families."""
+    enum_def = _collect_encoding_auxiliary_key_enum(encoding_families)
+    if enum_def is None:
+        return
+
+    c_prefix = _c_encoding_enum_prefix(dialect_name, enum_def)
+    cases_by_value = {case.value: case for case in enum_def.cases}
+    descriptor_count = max(cases_by_value) + 1
+    descriptor_count_expression = f"{c_prefix.upper()}_COUNT_" if enum_def.c_type is None else str(descriptor_count)
+    lines.append(f"const loom_encoding_auxiliary_key_descriptor_t {c_prefix}_descriptors[{descriptor_count_expression}] = {{")
+    for value in range(descriptor_count):
+        case = cases_by_value.get(value)
+        if case is None:
+            lines.append("    {0},")
+            continue
+        stable_id = _stable_id_from_string(case.keyword)
+        lines.append("    {")
+        lines.append(f"        .name = {_bstring_expr(case.keyword)},")
+        lines.append(f"        .stable_id = UINT64_C(0x{stable_id:016x}),")
+        lines.append("    },")
+    lines.append("};")
+    lines.append("")
 
 
 def _emit_encoding_family_fixed_metadata(lines: list[str], family: EncodingFamilyDef, prefix: str) -> str | None:
@@ -978,6 +1011,7 @@ def generate_tables_c(
     # Parameterized attribute families share the ordinary attribute schema but
     # retain a distinct dialect-owned outer identity.
     encoding_enum_names = _emit_encoding_enum_case_names(lines, encoding_families)
+    _emit_encoding_auxiliary_key_descriptors(lines, dialect_name, encoding_families)
     _emit_parameterized_attr_tables(lines, dialect_name, parameterized_attrs, encoding_enum_names)
     _emit_encoding_family_tables(lines, encoding_families, encoding_enum_names)
 
@@ -1063,6 +1097,7 @@ def generate_tables_aggregator_c(
     lines.append("")
 
     encoding_enum_names = _emit_encoding_enum_case_names(lines, encoding_families)
+    _emit_encoding_auxiliary_key_descriptors(lines, dialect_name, encoding_families)
     _emit_parameterized_attr_tables(lines, dialect_name, parameterized_attrs, encoding_enum_names)
     _emit_encoding_family_tables(lines, encoding_families, encoding_enum_names)
 

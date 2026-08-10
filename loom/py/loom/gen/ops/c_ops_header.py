@@ -19,8 +19,12 @@ from loom.dsl import (
 from loom.fields import compute_layout
 from loom.gen.ops import c_builders
 from loom.gen.ops.c_enum_attrs import (
+    collect_encoding_auxiliary_key_enum as _collect_encoding_auxiliary_key_enum,
+)
+from loom.gen.ops.c_enum_attrs import (
     collect_encoding_enum_types as _collect_encoding_enum_types,
 )
+from loom.gen.ops.c_enum_attrs import collect_encoding_enums as _collect_encoding_enums
 from loom.gen.ops.c_enum_attrs import collect_shared_enums as _collect_shared_enums
 from loom.gen.ops.c_enum_attrs import enum_c_type as _enum_c_type
 from loom.gen.ops.c_enum_attrs import enum_case_c_ident as _enum_case_c_ident
@@ -65,7 +69,9 @@ def generate_ops_h(
     guard = _guard_name(dialect_name)
     dialect_enum = _c_dialect_enum(dialect_name)
     shared_enums = _collect_shared_enums(dialect_name, ops)
+    encoding_enums = _collect_encoding_enums(encoding_families)
     encoding_enum_types = _collect_encoding_enum_types(dialect_name, encoding_families)
+    auxiliary_key_enum = _collect_encoding_auxiliary_key_enum(encoding_families)
 
     lines.append(COPYRIGHT)
     lines.extend(
@@ -104,6 +110,7 @@ def generate_ops_h(
             for parameter in family.parameters
             if parameter.attr_type in ("enum", "enum_array") and parameter.enum_def is not None and parameter.enum_def.c_include is not None
         }
+        | {family.auxiliary_key_enum.c_include for family in encoding_families if family.auxiliary_key_enum is not None and family.auxiliary_key_enum.c_include is not None}
     )
     lines.extend(f'#include "{include}"' for include in enum_includes)
     lines.append("")
@@ -149,31 +156,27 @@ def generate_ops_h(
     # Encoding-family enums are shared by EnumDef identity across families and
     # parameters. This keeps one typed C vocabulary for policies such as
     # numeric format and rounding instead of stamping out family-local aliases.
-    emitted_encoding_enums: set[int] = set()
-    for family in encoding_families:
-        for parameter in family.parameters:
-            enum_def = parameter.enum_def
-            if parameter.attr_type not in ("enum", "enum_array") or enum_def is None or enum_def.c_type is not None or id(enum_def) in emitted_encoding_enums:
-                continue
-            emitted_encoding_enums.add(id(enum_def))
-            c_prefix = _c_encoding_enum_prefix(dialect_name, enum_def)
-            enum_tag = f"{c_prefix}_e"
-            const_prefix = c_prefix.upper()
-            max_value = max(case.value for case in enum_def.cases)
-            if enum_def.doc:
-                lines.append(f"// {enum_def.doc}")
-            if parameter.open_enum:
-                lines.append(f"typedef uint8_t {c_prefix}_t;")
-                lines.append(f"typedef enum {enum_tag} {{")
-                lines.extend(f"  {const_prefix}_{_enum_case_c_ident(case.keyword)} = {case.value}," for case in enum_def.cases)
-                lines.append(f"  {const_prefix}_COUNT_ = {max_value + 1},")
-                lines.append(f"}} {enum_tag};")
-            else:
-                lines.append(f"typedef enum {enum_tag} {{")
-                lines.extend(f"  {const_prefix}_{_enum_case_c_ident(case.keyword)} = {case.value}," for case in enum_def.cases)
-                lines.append(f"  {const_prefix}_COUNT_ = {max_value + 1},")
-                lines.append(f"}} {c_prefix}_t;")
-            lines.append("")
+    for enum_def, open_enum in encoding_enums.values():
+        if enum_def.c_type is not None:
+            continue
+        c_prefix = _c_encoding_enum_prefix(dialect_name, enum_def)
+        enum_tag = f"{c_prefix}_e"
+        const_prefix = c_prefix.upper()
+        max_value = max(case.value for case in enum_def.cases)
+        if enum_def.doc:
+            lines.append(f"// {enum_def.doc}")
+        if open_enum:
+            lines.append(f"typedef uint8_t {c_prefix}_t;")
+            lines.append(f"typedef enum {enum_tag} {{")
+            lines.extend(f"  {const_prefix}_{_enum_case_c_ident(case.keyword)} = {case.value}," for case in enum_def.cases)
+            lines.append(f"  {const_prefix}_COUNT_ = {max_value + 1},")
+            lines.append(f"}} {enum_tag};")
+        else:
+            lines.append(f"typedef enum {enum_tag} {{")
+            lines.extend(f"  {const_prefix}_{_enum_case_c_ident(case.keyword)} = {case.value}," for case in enum_def.cases)
+            lines.append(f"  {const_prefix}_COUNT_ = {max_value + 1},")
+            lines.append(f"}} {c_prefix}_t;")
+        lines.append("")
 
     # Encoding family parameter ordinals are compiler-local implementation
     # details. Family parameters remain sparse named attributes in public IR.
@@ -208,6 +211,12 @@ def generate_ops_h(
     lines.append('extern "C" {')
     lines.append("#endif")
     lines.append("")
+
+    if auxiliary_key_enum is not None:
+        c_prefix = _c_encoding_enum_prefix(dialect_name, auxiliary_key_enum)
+        descriptor_count = f"{c_prefix.upper()}_COUNT_" if auxiliary_key_enum.c_type is None else str(max(case.value for case in auxiliary_key_enum.cases) + 1)
+        lines.append(f"extern const loom_encoding_auxiliary_key_descriptor_t {c_prefix}_descriptors[{descriptor_count}];")
+        lines.append("")
 
     target_condition_symbols = sorted({attr_def.target_condition for attr_def in parameterized_attrs if attr_def.target_condition is not None})
     lines.extend(f"extern const loom_target_condition_descriptor_t {symbol};" for symbol in target_condition_symbols)
