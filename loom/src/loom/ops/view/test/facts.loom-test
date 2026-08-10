@@ -344,7 +344,7 @@ func.def @strided_static_footprint(%buffer: buffer) -> (i64) {
 func.def @storage_resolves_layout(%buffer: buffer) -> (i64) {
   %offset = index.constant 0 : offset
   %layout = encoding.layout.strided [8, 1] : encoding<layout>
-  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
   %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, %storage>
   %length_hi = test.fact_view_byte_length_hi %view : view<4x4xf32, %storage> -> i64
@@ -420,7 +420,7 @@ func.def @static_strided_type_layout_facts(%buffer: buffer) -> (i64) {
 // to chase.
 func.def @static_storage_resolves_layout(%buffer: buffer) -> (i64) {
   %offset = index.constant 0 : offset
-  %storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#ggml_q4_0<block_elems=32, storage_bytes=18>> : encoding<storage>
+  %storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0> : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %storage>
   %length_hi = test.fact_view_byte_length_hi %view : view<4xf32, %storage> -> i64
   func.return %length_hi : i64

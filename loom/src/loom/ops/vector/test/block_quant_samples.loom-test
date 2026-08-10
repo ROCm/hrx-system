@@ -9,7 +9,7 @@
 // Q4_0 logical order is all lows followed by all highs, with a -8 bias.
 // Expected signed codes: -8, -6, -4, -2, -7, -5, -3, -1
 func.def @q4_0_reference_chunk() -> (i1) {
-  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
   test.use %schema : encoding<schema>
 
   %b0 = scalar.constant 0x10 : i8
@@ -48,7 +48,7 @@ func.def @q4_0_reference_chunk() -> (i1) {
 // Scale: 0.5
 // Expected f16 lanes: -1.5, -0.5, 1.0, 3.5
 func.def @q8_0_reference_chunk() -> (i1) {
-  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  %schema = encoding.define #ggml.q8_0 : encoding<schema>
   test.use %schema : encoding<schema>
 
   %q0 = scalar.constant -3 : i8
@@ -83,7 +83,7 @@ func.def @q8_0_reference_chunk() -> (i1) {
 // Acc lane: 10
 // Expected mathematical lane: 10 + (-12) + (-5) + (-4) + 7 = -4
 func.def @q8_0_dot4_reference_chunk() -> (vector<1xi32>) {
-  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  %schema = encoding.define #ggml.q8_0 : encoding<schema>
   test.use %schema : encoding<schema>
 
   %a0 = scalar.constant -3 : i8
@@ -118,7 +118,7 @@ func.def @q8_0_dot4_reference_chunk() -> (vector<1xi32>) {
 // Expected signed lanes after -32 bias:
 //   -32, 17, -14, 3, 4, -11, -26, -25
 func.def @q6_k_reference_chunk() -> (i1) {
-  %schema = encoding.define #ggml_q6_k<block_elems=256, storage_bytes=210> : encoding<schema>
+  %schema = encoding.define #ggml.q6_k : encoding<schema>
   test.use %schema : encoding<schema>
 
   %l0 = scalar.constant 0x10 : i8

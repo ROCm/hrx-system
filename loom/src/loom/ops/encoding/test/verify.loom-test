@@ -103,14 +103,6 @@ func.def @assume_spec_rejects_negative_static_stride(%layout: encoding<layout>) 
 
 // ====
 
-func.def @assume_spec_rejects_mismatched_ggml_q8_storage(%schema: encoding<schema>) {
-  // ERROR@+1: STRUCTURE/014 "storage_bytes" "33" "block_elems + 2"
-  %bad = encoding.assume.spec %schema, #ggml_q8_0<block_elems=32, storage_bytes=33> : encoding<schema>
-  func.return
-}
-
-// ====
-
 func.def @assume_spec_rejects_bad_named_fp8_rounding(%schema: encoding<schema>) {
   // ERROR@+1: PARSE/017 "rounding" "wat"
   %bad = encoding.assume.spec %schema, #encoding.operand<element_format=f8e4m3fn, payload_elements=1, payload_packing=dense_lanes, rounding=wat> : encoding<schema>
@@ -139,7 +131,7 @@ func.def @numeric_transform_unknown_family_define_only() {
 
 func.def @storage_dynamic_params() {
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
   %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   func.return
 }
@@ -147,7 +139,7 @@ func.def @storage_dynamic_params() {
 // ====
 
 func.def @storage_static_params() {
-  %storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#ggml_q4_0<block_elems=32, storage_bytes=18>> : encoding<storage>
+  %storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0> : encoding<storage>
   func.return
 }
 
@@ -214,7 +206,7 @@ func.def @storage_missing_schema() {
 // ====
 
 func.def @storage_wrong_layout_type(%x: index) {
-  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
   // ERROR@+1: ENCODING/009 {encoding_name="encoding.storage", param_name="layout", actual_type="index", expected_type="encoding<layout>"}
   %storage = encoding.define #encoding.storage {layout = %x : index, schema = %schema : encoding<schema>} : encoding<storage>
   func.return
@@ -224,7 +216,7 @@ func.def @storage_wrong_layout_type(%x: index) {
 
 func.def @storage_role_mismatch() {
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
   // ERROR@+1: ENCODING/009 {encoding_name="encoding.storage", param_name="layout", actual_type="encoding<schema>", expected_type="encoding<layout>"}
   %storage = encoding.define #encoding.storage {layout = %schema : encoding<schema>, schema = %layout : encoding<layout>} : encoding<storage>
   func.return
@@ -235,7 +227,7 @@ func.def @storage_role_mismatch() {
 func.def @storage_static_role_mismatch() {
   // ERROR@+2: ENCODING/011 {encoding_name="encoding.storage", param_name="layout", expected_role="an address layout encoding"}
   // ERROR@+1: ENCODING/011 {encoding_name="encoding.storage", param_name="schema", expected_role="a storage schema encoding"}
-  %storage = encoding.define #encoding.storage<layout=#ggml_q4_0<block_elems=32, storage_bytes=18>, schema=#encoding.layout.dense> : encoding<storage>
+  %storage = encoding.define #encoding.storage<layout=#ggml.q4_0, schema=#encoding.layout.dense> : encoding<storage>
   func.return
 }
 

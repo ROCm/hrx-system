@@ -46,6 +46,8 @@ from loom.dsl import (
     Dialect,
     EncodingFamilyDef,
     EncodingFamilyRole,
+    EncodingOperandSummaryDef,
+    EncodingRecordDef,
     EnumCase,
     EnumDef,
     Op,
@@ -65,6 +67,12 @@ encoding_ops = Dialect("encoding", dialect_id=0x09, doc="Encoding definition and
 # ============================================================================
 # Static encoding families
 # ============================================================================
+
+
+def _enum_fact(enum_def: EnumDef, keyword: str) -> int:
+    """Returns the one-hot fact bit for one nonzero enum case."""
+    value = enum_def.case(keyword).value
+    return 0 if value == 0 else 1 << (value - 1)
 
 
 NumericFormat = EnumDef(
@@ -235,11 +243,6 @@ SparsityPolicy = EnumDef(
     doc="Sparse payload organization for encoded values.",
 )
 
-_BLOCK_STORAGE_PARAMETERS = (
-    AttrDef("block_elems", ATTR_TYPE_I64, optional=True),
-    AttrDef("storage_bytes", ATTR_TYPE_I64, optional=True),
-)
-
 _OPERAND_PARAMETERS = (
     AttrDef("affine", ATTR_TYPE_ENUM, enum_def=AffinePolicy, optional=True),
     AttrDef("codebook", ATTR_TYPE_ENUM, enum_def=CodebookPolicy, optional=True),
@@ -322,22 +325,112 @@ ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
         parameters=(AttrDef("strides", ATTR_TYPE_I64_ARRAY),),
         doc="Explicit element-stride address layout.",
     ),
-    *(
-        EncodingFamilyDef(
-            name,
-            group=encoding_ops,
-            role=EncodingFamilyRole.STORAGE_SCHEMA,
-            parameters=_BLOCK_STORAGE_PARAMETERS,
-            doc="GGML-compatible block storage schema.",
-        )
-        for name in ("ggml_q4_0", "ggml_q8_0")
-    ),
     EncodingFamilyDef(
-        "ggml_q6_k",
+        "ggml.q4_0",
         group=encoding_ops,
         role=EncodingFamilyRole.STORAGE_SCHEMA,
-        parameters=_BLOCK_STORAGE_PARAMETERS,
-        doc="GGML-compatible block storage schema.",
+        fixed_record=EncodingRecordDef(32, 18, required_alignment=2),
+        fixed_operand_summary=EncodingOperandSummaryDef(
+            element_format=_enum_fact(NumericFormat, "quant_i4"),
+            scale_format=_enum_fact(NumericFormat, "f16"),
+            payload_packing=_enum_fact(PayloadPacking, "little_endian_nibbles"),
+            scale_topology=_enum_fact(ScaleTopology, "block_1d"),
+            affine_policy=_enum_fact(AffinePolicy, "scale_only"),
+            payload_element_count=32,
+            scale_group_shape=(32,),
+            scale_operand_count=1,
+        ),
+        auxiliary_key_enum=AuxiliaryKey,
+        required_auxiliary_keys=(AuxiliaryKey.case("scale"),),
+        doc="GGML Q4_0 block storage schema.",
+    ),
+    EncodingFamilyDef(
+        "ggml.q8_0",
+        group=encoding_ops,
+        role=EncodingFamilyRole.STORAGE_SCHEMA,
+        fixed_record=EncodingRecordDef(32, 34, required_alignment=2),
+        fixed_operand_summary=EncodingOperandSummaryDef(
+            element_format=_enum_fact(NumericFormat, "quant_i8"),
+            scale_format=_enum_fact(NumericFormat, "f16"),
+            payload_packing=_enum_fact(PayloadPacking, "dense_lanes"),
+            scale_topology=_enum_fact(ScaleTopology, "block_1d"),
+            affine_policy=_enum_fact(AffinePolicy, "scale_only"),
+            payload_element_count=32,
+            scale_group_shape=(32,),
+            scale_operand_count=1,
+        ),
+        auxiliary_key_enum=AuxiliaryKey,
+        required_auxiliary_keys=(AuxiliaryKey.case("scale"),),
+        doc="GGML Q8_0 block storage schema.",
+    ),
+    EncodingFamilyDef(
+        "ggml.q4_k",
+        group=encoding_ops,
+        role=EncodingFamilyRole.STORAGE_SCHEMA,
+        fixed_record=EncodingRecordDef(256, 144, required_alignment=2),
+        fixed_operand_summary=EncodingOperandSummaryDef(
+            element_format=_enum_fact(NumericFormat, "u4"),
+            scale_format=_enum_fact(NumericFormat, "f16"),
+            secondary_scale_format=_enum_fact(NumericFormat, "u6"),
+            payload_packing=_enum_fact(PayloadPacking, "multi_stream"),
+            scale_topology=_enum_fact(ScaleTopology, "hierarchical"),
+            affine_policy=_enum_fact(AffinePolicy, "scale_plus_min"),
+            payload_element_count=256,
+            scale_group_shape=(32,),
+            scale_operand_count=2,
+        ),
+        auxiliary_key_enum=AuxiliaryKey,
+        required_auxiliary_keys=(
+            AuxiliaryKey.case("scale"),
+            AuxiliaryKey.case("secondary_scale"),
+            AuxiliaryKey.case("minimum"),
+        ),
+        doc="GGML Q4_K super-block storage schema.",
+    ),
+    EncodingFamilyDef(
+        "ggml.q6_k",
+        group=encoding_ops,
+        role=EncodingFamilyRole.STORAGE_SCHEMA,
+        fixed_record=EncodingRecordDef(256, 210, required_alignment=2),
+        fixed_operand_summary=EncodingOperandSummaryDef(
+            element_format=_enum_fact(NumericFormat, "quant_i6"),
+            scale_format=_enum_fact(NumericFormat, "f16"),
+            secondary_scale_format=_enum_fact(NumericFormat, "i8"),
+            payload_packing=_enum_fact(PayloadPacking, "multi_stream"),
+            scale_topology=_enum_fact(ScaleTopology, "hierarchical"),
+            affine_policy=_enum_fact(AffinePolicy, "super_scale_times_subscale"),
+            payload_element_count=256,
+            scale_group_shape=(16,),
+            scale_operand_count=2,
+        ),
+        auxiliary_key_enum=AuxiliaryKey,
+        required_auxiliary_keys=(
+            AuxiliaryKey.case("scale"),
+            AuxiliaryKey.case("secondary_scale"),
+        ),
+        doc="GGML Q6_K super-block storage schema.",
+    ),
+    EncodingFamilyDef(
+        "ggml.q8_1_x4",
+        group=encoding_ops,
+        role=EncodingFamilyRole.STORAGE_SCHEMA,
+        fixed_record=EncodingRecordDef(128, 144, required_alignment=16),
+        fixed_operand_summary=EncodingOperandSummaryDef(
+            element_format=_enum_fact(NumericFormat, "quant_i8"),
+            scale_format=_enum_fact(NumericFormat, "f16"),
+            payload_packing=_enum_fact(PayloadPacking, "separate_scale_payload"),
+            scale_topology=_enum_fact(ScaleTopology, "block_1d"),
+            affine_policy=_enum_fact(AffinePolicy, "sum_correction"),
+            payload_element_count=128,
+            scale_group_shape=(32,),
+            scale_operand_count=1,
+        ),
+        auxiliary_key_enum=AuxiliaryKey,
+        required_auxiliary_keys=(
+            AuxiliaryKey.case("scale"),
+            AuxiliaryKey.case("sum_correction"),
+        ),
+        doc="GGML Vulkan Q8_1 x4 block storage schema.",
     ),
     EncodingFamilyDef(
         "encoding.operand",
@@ -575,7 +668,7 @@ encoding_assume_spec = Op(
         TypeOf("result"),
     ],
     examples=[
-        "%schema2 = encoding.assume.spec %schema, #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>",
+        "%schema2 = encoding.assume.spec %schema, #ggml.q4_0 : encoding<schema>",
     ],
 )
 

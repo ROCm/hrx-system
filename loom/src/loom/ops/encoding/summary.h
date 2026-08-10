@@ -163,9 +163,6 @@ void loom_encoding_layout_strided_summarize(
 void loom_encoding_storage_summarize(
     const loom_encoding_family_summary_request_t* request,
     loom_encoding_family_summary_t* out_summary);
-void loom_encoding_ggml_q8_0_summarize(
-    const loom_encoding_family_summary_request_t* request,
-    loom_encoding_family_summary_t* out_summary);
 void loom_encoding_operand_summarize(
     const loom_encoding_family_summary_request_t* request,
     loom_encoding_family_summary_t* out_summary);

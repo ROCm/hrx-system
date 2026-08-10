@@ -26,10 +26,6 @@ static iree_string_view_t loom_encoding_operand_name(void) {
   return IREE_SV("encoding.operand");
 }
 
-static iree_string_view_t loom_encoding_ggml_q8_0_name(void) {
-  return IREE_SV("ggml_q8_0");
-}
-
 static iree_string_view_t loom_encoding_layout_param_name(void) {
   return IREE_SV("layout");
 }
@@ -40,11 +36,6 @@ static iree_string_view_t loom_encoding_schema_param_name(void) {
 
 static uint16_t loom_encoding_u16_param(const loom_named_attr_t* parameter) {
   return (uint16_t)loom_attr_as_i64(parameter->value);
-}
-
-static uint16_t loom_encoding_u16_param_or_default(
-    const loom_named_attr_t* parameter, uint16_t default_value) {
-  return parameter ? loom_encoding_u16_param(parameter) : default_value;
 }
 
 static loom_value_fact_address_layout_t
@@ -252,39 +243,6 @@ void loom_encoding_operand_summarize(
     loom_encoding_family_summary_t* out_summary) {
   loom_encoding_static_operand_schema(request->params->spec,
                                       &out_summary->encoding.storage_schema);
-}
-
-static void loom_encoding_static_ggml_q8_0_schema(
-    const loom_encoding_t* encoding,
-    loom_value_fact_storage_schema_t* out_schema) {
-  const loom_named_attr_t* params[LOOM_ENCODING_GGML_Q8_0_PARAMETER_COUNT_];
-  loom_encoding_collect_parameter_slots(
-      encoding, LOOM_ENCODING_GGML_Q8_0_PARAMETER_COUNT_, params);
-  const uint16_t block_elements = loom_encoding_u16_param_or_default(
-      params[LOOM_ENCODING_GGML_Q8_0_PARAMETER_BLOCK_ELEMS],
-      /*default_value=*/32);
-
-  out_schema->encoded_operand = (loom_value_fact_encoded_operand_schema_t){
-      .element_format = LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I8,
-      .scale_format = LOOM_VALUE_FACT_NUMERIC_FORMAT_F16,
-      .payload_packing = LOOM_VALUE_FACT_PAYLOAD_PACKING_DENSE_LANES,
-      .scale_topology = LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D,
-      .affine_policy = LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_ONLY,
-      .payload_element_count = block_elements,
-      .scale_group =
-          {
-              .element_count = block_elements,
-              .shape = {block_elements},
-          },
-      .scale_operand_count = 1,
-  };
-}
-
-void loom_encoding_ggml_q8_0_summarize(
-    const loom_encoding_family_summary_request_t* request,
-    loom_encoding_family_summary_t* out_summary) {
-  loom_encoding_static_ggml_q8_0_schema(request->params->spec,
-                                        &out_summary->encoding.storage_schema);
 }
 
 bool loom_encoding_query_static_address_layout(

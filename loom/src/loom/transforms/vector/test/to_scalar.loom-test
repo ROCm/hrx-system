@@ -460,14 +460,14 @@ func.def @scalarizes_row_scaled_f8_encode(%source: vector<2x2xf32>, %scale: vect
 // ====
 
 func.def @leaves_packed_q8_decode_for_later_lowering(%payload: vector<4xi32>, %scale: vector<1xf16>) -> (vector<32xf32>) {
-  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  %schema = encoding.define #ggml.q8_0 : encoding<schema>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf16>} : vector<4xi32>, encoding<schema> -> vector<32xf32>
   func.return %decoded : vector<32xf32>
 }
 
 // ----
 func.def @leaves_packed_q8_decode_for_later_lowering(%payload: vector<4xi32>, %scale: vector<1xf16>) -> (vector<32xf32>) {
-  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  %schema = encoding.define #ggml.q8_0 : encoding<schema>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf16>} : vector<4xi32>, encoding<schema> -> vector<32xf32>
   func.return %decoded : vector<32xf32>
 }

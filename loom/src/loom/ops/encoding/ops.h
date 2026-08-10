@@ -21,6 +21,35 @@ enum {
   LOOM_PARAMETERIZED_ATTR_ENCODING_COUNT_ = 1,
 };
 
+// Auxiliary SSA operand key shared by encoded storage schemas.
+typedef enum loom_encoding_auxiliary_key_e {
+  LOOM_ENCODING_AUXILIARY_KEY_SCALE = 0,
+  LOOM_ENCODING_AUXILIARY_KEY_SECONDARY_SCALE = 1,
+  LOOM_ENCODING_AUXILIARY_KEY_SCALE2 = 2,
+  LOOM_ENCODING_AUXILIARY_KEY_SCALE3 = 3,
+  LOOM_ENCODING_AUXILIARY_KEY_SCALE4 = 4,
+  LOOM_ENCODING_AUXILIARY_KEY_SCALE5 = 5,
+  LOOM_ENCODING_AUXILIARY_KEY_SCALE6 = 6,
+  LOOM_ENCODING_AUXILIARY_KEY_SCALE7 = 7,
+  LOOM_ENCODING_AUXILIARY_KEY_ZERO_POINT = 8,
+  LOOM_ENCODING_AUXILIARY_KEY_MINIMUM = 9,
+  LOOM_ENCODING_AUXILIARY_KEY_BIAS = 10,
+  LOOM_ENCODING_AUXILIARY_KEY_SUM_CORRECTION = 11,
+  LOOM_ENCODING_AUXILIARY_KEY_CODEBOOK = 12,
+  LOOM_ENCODING_AUXILIARY_KEY_SPARSITY = 13,
+  LOOM_ENCODING_AUXILIARY_KEY_METADATA = 14,
+  LOOM_ENCODING_AUXILIARY_KEY_INDICES = 15,
+  LOOM_ENCODING_AUXILIARY_KEY_OFFSETS = 16,
+  LOOM_ENCODING_AUXILIARY_KEY_MASK = 17,
+  LOOM_ENCODING_AUXILIARY_KEY_SIGNS = 18,
+  LOOM_ENCODING_AUXILIARY_KEY_RESIDUAL = 19,
+  LOOM_ENCODING_AUXILIARY_KEY_AMAX = 20,
+  LOOM_ENCODING_AUXILIARY_KEY_THRESHOLDS = 21,
+  LOOM_ENCODING_AUXILIARY_KEY_CENTROIDS = 22,
+  LOOM_ENCODING_AUXILIARY_KEY_OUTLIERS = 23,
+  LOOM_ENCODING_AUXILIARY_KEY_COUNT_ = 24,
+} loom_encoding_auxiliary_key_t;
+
 // Affine transform applied to encoded values.
 typedef enum loom_encoding_affine_policy_e {
   LOOM_ENCODING_AFFINE_POLICY_NONE = 0,
@@ -160,35 +189,6 @@ typedef enum loom_encoding_sparsity_policy_e {
   LOOM_ENCODING_SPARSITY_POLICY_COUNT_ = 10,
 } loom_encoding_sparsity_policy_t;
 
-// Auxiliary SSA operand key shared by encoded storage schemas.
-typedef enum loom_encoding_auxiliary_key_e {
-  LOOM_ENCODING_AUXILIARY_KEY_SCALE = 0,
-  LOOM_ENCODING_AUXILIARY_KEY_SECONDARY_SCALE = 1,
-  LOOM_ENCODING_AUXILIARY_KEY_SCALE2 = 2,
-  LOOM_ENCODING_AUXILIARY_KEY_SCALE3 = 3,
-  LOOM_ENCODING_AUXILIARY_KEY_SCALE4 = 4,
-  LOOM_ENCODING_AUXILIARY_KEY_SCALE5 = 5,
-  LOOM_ENCODING_AUXILIARY_KEY_SCALE6 = 6,
-  LOOM_ENCODING_AUXILIARY_KEY_SCALE7 = 7,
-  LOOM_ENCODING_AUXILIARY_KEY_ZERO_POINT = 8,
-  LOOM_ENCODING_AUXILIARY_KEY_MINIMUM = 9,
-  LOOM_ENCODING_AUXILIARY_KEY_BIAS = 10,
-  LOOM_ENCODING_AUXILIARY_KEY_SUM_CORRECTION = 11,
-  LOOM_ENCODING_AUXILIARY_KEY_CODEBOOK = 12,
-  LOOM_ENCODING_AUXILIARY_KEY_SPARSITY = 13,
-  LOOM_ENCODING_AUXILIARY_KEY_METADATA = 14,
-  LOOM_ENCODING_AUXILIARY_KEY_INDICES = 15,
-  LOOM_ENCODING_AUXILIARY_KEY_OFFSETS = 16,
-  LOOM_ENCODING_AUXILIARY_KEY_MASK = 17,
-  LOOM_ENCODING_AUXILIARY_KEY_SIGNS = 18,
-  LOOM_ENCODING_AUXILIARY_KEY_RESIDUAL = 19,
-  LOOM_ENCODING_AUXILIARY_KEY_AMAX = 20,
-  LOOM_ENCODING_AUXILIARY_KEY_THRESHOLDS = 21,
-  LOOM_ENCODING_AUXILIARY_KEY_CENTROIDS = 22,
-  LOOM_ENCODING_AUXILIARY_KEY_OUTLIERS = 23,
-  LOOM_ENCODING_AUXILIARY_KEY_COUNT_ = 24,
-} loom_encoding_auxiliary_key_t;
-
 enum {
   LOOM_ENCODING_FAMILY_DYNAMIC_PARAMETER_COUNT_MAX_ = 6,
 };
@@ -211,27 +211,6 @@ typedef enum loom_encoding_layout_strided_parameter_e {
   LOOM_ENCODING_LAYOUT_STRIDED_PARAMETER_STRIDES = 0,
   LOOM_ENCODING_LAYOUT_STRIDED_PARAMETER_COUNT_ = 1,
 } loom_encoding_layout_strided_parameter_t;
-
-// GGML-compatible block storage schema.
-typedef enum loom_encoding_ggml_q4_0_parameter_e {
-  LOOM_ENCODING_GGML_Q4_0_PARAMETER_BLOCK_ELEMS = 0,
-  LOOM_ENCODING_GGML_Q4_0_PARAMETER_STORAGE_BYTES = 1,
-  LOOM_ENCODING_GGML_Q4_0_PARAMETER_COUNT_ = 2,
-} loom_encoding_ggml_q4_0_parameter_t;
-
-// GGML-compatible block storage schema.
-typedef enum loom_encoding_ggml_q8_0_parameter_e {
-  LOOM_ENCODING_GGML_Q8_0_PARAMETER_BLOCK_ELEMS = 0,
-  LOOM_ENCODING_GGML_Q8_0_PARAMETER_STORAGE_BYTES = 1,
-  LOOM_ENCODING_GGML_Q8_0_PARAMETER_COUNT_ = 2,
-} loom_encoding_ggml_q8_0_parameter_t;
-
-// GGML-compatible block storage schema.
-typedef enum loom_encoding_ggml_q6_k_parameter_e {
-  LOOM_ENCODING_GGML_Q6_K_PARAMETER_BLOCK_ELEMS = 0,
-  LOOM_ENCODING_GGML_Q6_K_PARAMETER_STORAGE_BYTES = 1,
-  LOOM_ENCODING_GGML_Q6_K_PARAMETER_COUNT_ = 2,
-} loom_encoding_ggml_q6_k_parameter_t;
 
 // Target-independent encoded operand schema.
 typedef enum loom_encoding_operand_parameter_e {
@@ -346,7 +325,9 @@ extern const loom_encoding_family_descriptor_t loom_encoding_layout_dense_family
 extern const loom_encoding_family_descriptor_t loom_encoding_layout_strided_family_descriptor;
 extern const loom_encoding_family_descriptor_t loom_encoding_ggml_q4_0_family_descriptor;
 extern const loom_encoding_family_descriptor_t loom_encoding_ggml_q8_0_family_descriptor;
+extern const loom_encoding_family_descriptor_t loom_encoding_ggml_q4_k_family_descriptor;
 extern const loom_encoding_family_descriptor_t loom_encoding_ggml_q6_k_family_descriptor;
+extern const loom_encoding_family_descriptor_t loom_encoding_ggml_q8_1_x4_family_descriptor;
 extern const loom_encoding_family_descriptor_t loom_encoding_operand_family_descriptor;
 extern const loom_encoding_family_descriptor_t loom_encoding_numeric_transform_family_descriptor;
 extern const loom_encoding_family_descriptor_t loom_encoding_turboquant_kv_family_descriptor;
@@ -493,7 +474,7 @@ iree_status_t loom_encoding_layout_assume_strided_verify(
     iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_ENCODING_ASSUME_SPEC: Refine an existing encoding value with an exact static encoding specification. Dynamic values remain ordinary SSA operands elsewhere; this op only states the selected static family and static parameters.
-// %schema2 = encoding.assume.spec %schema, #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+// %schema2 = encoding.assume.spec %schema, #ggml.q4_0 : encoding<schema>
 LOOM_DEFINE_ISA(loom_encoding_assume_spec_isa, LOOM_OP_ENCODING_ASSUME_SPEC)
 LOOM_DEFINE_OPERAND(loom_encoding_assume_spec_enc, 0)
 LOOM_DEFINE_RESULT(loom_encoding_assume_spec_result, 0)

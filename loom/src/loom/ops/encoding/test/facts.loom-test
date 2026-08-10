@@ -3,9 +3,9 @@
 // Exact encoding queries fold when the producer carries a complete static
 // specification.
 func.def @exact_static_spec_query() -> (i1, i1) {
-  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
-  %same = encoding.isa<#ggml_q4_0<block_elems=32, storage_bytes=18>> %schema : encoding<schema>
-  %different = encoding.isa<#ggml_q8_0<block_elems=32, storage_bytes=34>> %schema : encoding<schema>
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
+  %same = encoding.isa<#ggml.q4_0> %schema : encoding<schema>
+  %different = encoding.isa<#ggml.q8_0> %schema : encoding<schema>
   func.return %same, %different : i1, i1
 }
 // ----
@@ -20,12 +20,12 @@ func.def @exact_static_spec_query() -> (i1, i1) {
 // A dynamic encoding argument has no exact static specification to compare;
 // the query remains executable instead of becoming an assumed result.
 func.def @dynamic_static_spec_query(%schema: encoding<schema>) -> (i1) {
-  %is_q4 = encoding.isa<#ggml_q4_0<block_elems=32, storage_bytes=18>> %schema : encoding<schema>
+  %is_q4 = encoding.isa<#ggml.q4_0> %schema : encoding<schema>
   func.return %is_q4 : i1
 }
 // ----
 func.def @dynamic_static_spec_query(%schema: encoding<schema>) -> (i1) {
-  %is_q4 = encoding.isa<#ggml_q4_0<block_elems=32, storage_bytes=18>> %schema : encoding<schema>
+  %is_q4 = encoding.isa<#ggml.q4_0> %schema : encoding<schema>
   func.return %is_q4 : i1
 }
 
@@ -121,16 +121,16 @@ func.def @assume_semantic_absence(%schema: encoding<schema>) -> (i1, i1, i1, i1)
 // Exact predicates refine their source on the true branch, allowing a repeated
 // query to fold without specializing the function argument.
 func.def @exact_query_refines_true_branch(%schema: encoding<schema>) {
-  %is_q4 = encoding.isa<#ggml_q4_0<block_elems=32, storage_bytes=18>> %schema : encoding<schema>
+  %is_q4 = encoding.isa<#ggml.q4_0> %schema : encoding<schema>
   scf.if %is_q4 {
-    %known = encoding.isa<#ggml_q4_0<block_elems=32, storage_bytes=18>> %schema : encoding<schema>
+    %known = encoding.isa<#ggml.q4_0> %schema : encoding<schema>
     test.use %known : i1
   }
   func.return
 }
 // ----
 func.def @exact_query_refines_true_branch(%schema: encoding<schema>) {
-  %is_q4 = encoding.isa<#ggml_q4_0<block_elems=32, storage_bytes=18>> %schema : encoding<schema>
+  %is_q4 = encoding.isa<#ggml.q4_0> %schema : encoding<schema>
   scf.if %is_q4 {
     %known = scalar.constant true : i1
     test.use %known : i1
@@ -231,7 +231,7 @@ func.def @assume_strided_layout_summary(%layout: encoding<layout>) -> (i64, i64)
 // Exact static-spec assumptions expose static physical-storage layout facts
 // for schema/storage arguments selected by a specialization thunk.
 func.def @assume_spec_storage_layout_summary(%storage: encoding<storage>) -> (i64) {
-  %storage2 = encoding.assume.spec %storage, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml_q4_0<block_elems=32, storage_bytes=18>> : encoding<storage>
+  %storage2 = encoding.assume.spec %storage, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0> : encoding<storage>
   %kind = test.fact_encoding_layout_kind %storage2 : encoding<storage> -> i64
   func.return %kind : i64
 }
@@ -266,7 +266,7 @@ func.def @assume_spec_static_strided_layout_summary(%layout: encoding<layout>) -
 func.def @storage_layout_summary(%stride: index) -> (i64, i64) {
   %stride2 = index.assume %stride [range(%stride, 8, 16), mul(%stride, 8)] : index
   %layout = encoding.layout.strided [%stride2, 1] : encoding<layout>
-  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
   %storage = encoding.define #encoding.storage {schema = %schema : encoding<schema>, layout = %layout : encoding<layout>} : encoding<storage>
   %kind = test.fact_encoding_layout_kind %storage : encoding<storage> -> i64
   %stride_hi = test.fact_encoding_layout_stride_hi %storage[0] : encoding<storage> -> i64
@@ -284,7 +284,7 @@ func.def @storage_layout_summary(%stride: index) -> (i64, i64) {
 // Static physical-storage parameters can seed the same summary when their
 // nested layout is static.
 func.def @static_storage_layout_summary() -> (i64) {
-  %storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#ggml_q4_0<block_elems=32, storage_bytes=18>> : encoding<storage>
+  %storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0> : encoding<storage>
   %kind = test.fact_encoding_layout_kind %storage : encoding<storage> -> i64
   func.return %kind : i64
 }
@@ -298,7 +298,7 @@ func.def @static_storage_layout_summary() -> (i64) {
 
 // Static physical-storage summaries recurse through static strided layouts too.
 func.def @static_strided_storage_layout_summary() -> (i64, i64) {
-  %storage = encoding.define #encoding.storage<layout=#encoding.layout.strided<strides=[64]>, schema=#ggml_q4_0<block_elems=32, storage_bytes=18>> : encoding<storage>
+  %storage = encoding.define #encoding.storage<layout=#encoding.layout.strided<strides=[64]>, schema=#ggml.q4_0> : encoding<storage>
   %kind = test.fact_encoding_layout_kind %storage : encoding<storage> -> i64
   %stride_hi = test.fact_encoding_layout_stride_hi %storage[0] : encoding<storage> -> i64
   func.return %kind, %stride_hi : i64, i64
@@ -392,7 +392,7 @@ func.def @operand_structured_sparsity_summary() -> (i64, i64, i64) {
 // GGML Q8_0 is a concrete block-quant schema: dense signed i8 payload lanes
 // with one f16 block scale covering 32 logical elements.
 func.def @ggml_q8_0_schema_summary() -> (i64, i64, i64, i64, i64, i64, i64) {
-  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  %schema = encoding.define #ggml.q8_0 : encoding<schema>
   %format = test.fact_encoding_operand_field %schema["element_format"] : encoding<schema> -> i64
   %scale_format = test.fact_encoding_operand_field %schema["scale_format"] : encoding<schema> -> i64
   %packing = test.fact_encoding_operand_field %schema["payload_packing"] : encoding<schema> -> i64

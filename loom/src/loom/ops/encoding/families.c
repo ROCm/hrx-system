@@ -33,10 +33,6 @@ static iree_string_view_t loom_encoding_layout_strided_name(void) {
   return IREE_SV("encoding.layout.strided");
 }
 
-static iree_string_view_t loom_encoding_ggml_q8_0_name(void) {
-  return IREE_SV("ggml_q8_0");
-}
-
 static iree_status_t loom_encoding_emit(iree_diagnostic_emitter_t emitter,
                                         const loom_op_t* op,
                                         const loom_error_def_t* error,
@@ -346,87 +342,6 @@ static iree_status_t loom_encoding_layout_strided_diagnose_static(
           IREE_SV("non-negative stride"));
   }
   IREE_ASSERT_UNREACHABLE("unknown strided static validation result");
-  IREE_BUILTIN_UNREACHABLE();
-}
-
-typedef enum loom_encoding_ggml_q8_0_static_violation_e {
-  LOOM_ENCODING_GGML_Q8_0_STATIC_VALID = 0,
-  LOOM_ENCODING_GGML_Q8_0_STATIC_BLOCK_RANGE,
-  LOOM_ENCODING_GGML_Q8_0_STATIC_STORAGE_RANGE,
-  LOOM_ENCODING_GGML_Q8_0_STATIC_STORAGE_MISMATCH,
-} loom_encoding_ggml_q8_0_static_violation_t;
-
-typedef struct loom_encoding_ggml_q8_0_static_validation_t {
-  loom_encoding_ggml_q8_0_static_violation_t violation;
-  int64_t actual_value;
-} loom_encoding_ggml_q8_0_static_validation_t;
-
-static loom_encoding_ggml_q8_0_static_validation_t
-loom_encoding_ggml_q8_0_validate_static(const loom_encoding_t* encoding) {
-  const loom_named_attr_t* params[LOOM_ENCODING_GGML_Q8_0_PARAMETER_COUNT_];
-  loom_encoding_collect_parameter_slots(
-      encoding, LOOM_ENCODING_GGML_Q8_0_PARAMETER_COUNT_, params);
-  const int64_t block_elements =
-      params[LOOM_ENCODING_GGML_Q8_0_PARAMETER_BLOCK_ELEMS]
-          ? loom_attr_as_i64(
-                params[LOOM_ENCODING_GGML_Q8_0_PARAMETER_BLOCK_ELEMS]->value)
-          : 32;
-  if (block_elements <= 0 || block_elements > UINT16_MAX - 2) {
-    return (loom_encoding_ggml_q8_0_static_validation_t){
-        .violation = LOOM_ENCODING_GGML_Q8_0_STATIC_BLOCK_RANGE,
-        .actual_value = block_elements,
-    };
-  }
-  const int64_t storage_bytes =
-      params[LOOM_ENCODING_GGML_Q8_0_PARAMETER_STORAGE_BYTES]
-          ? loom_attr_as_i64(
-                params[LOOM_ENCODING_GGML_Q8_0_PARAMETER_STORAGE_BYTES]->value)
-          : 34;
-  if (storage_bytes <= 0 || storage_bytes > UINT16_MAX) {
-    return (loom_encoding_ggml_q8_0_static_validation_t){
-        .violation = LOOM_ENCODING_GGML_Q8_0_STATIC_STORAGE_RANGE,
-        .actual_value = storage_bytes,
-    };
-  }
-  if (storage_bytes != block_elements + 2) {
-    return (loom_encoding_ggml_q8_0_static_validation_t){
-        .violation = LOOM_ENCODING_GGML_Q8_0_STATIC_STORAGE_MISMATCH,
-        .actual_value = storage_bytes,
-    };
-  }
-  return (loom_encoding_ggml_q8_0_static_validation_t){0};
-}
-
-static bool loom_encoding_ggml_q8_0_is_static_valid(
-    const loom_module_t* module, const loom_encoding_t* encoding) {
-  (void)module;
-  return loom_encoding_ggml_q8_0_validate_static(encoding).violation ==
-         LOOM_ENCODING_GGML_Q8_0_STATIC_VALID;
-}
-
-static iree_status_t loom_encoding_ggml_q8_0_diagnose_static(
-    const loom_module_t* module, const loom_encoding_t* encoding,
-    const loom_op_t* op, iree_diagnostic_emitter_t emitter) {
-  (void)module;
-  const loom_encoding_ggml_q8_0_static_validation_t validation =
-      loom_encoding_ggml_q8_0_validate_static(encoding);
-  switch (validation.violation) {
-    case LOOM_ENCODING_GGML_Q8_0_STATIC_VALID:
-      return iree_ok_status();
-    case LOOM_ENCODING_GGML_Q8_0_STATIC_BLOCK_RANGE:
-      return loom_encoding_emit_attribute_constraint_error(
-          emitter, op, IREE_SV("block_elems"), validation.actual_value,
-          IREE_SV("positive and <= 65533"));
-    case LOOM_ENCODING_GGML_Q8_0_STATIC_STORAGE_RANGE:
-      return loom_encoding_emit_attribute_constraint_error(
-          emitter, op, IREE_SV("storage_bytes"), validation.actual_value,
-          IREE_SV("positive and <= 65535"));
-    case LOOM_ENCODING_GGML_Q8_0_STATIC_STORAGE_MISMATCH:
-      return loom_encoding_emit_attribute_constraint_error(
-          emitter, op, IREE_SV("storage_bytes"), validation.actual_value,
-          IREE_SV("block_elems + 2"));
-  }
-  IREE_ASSERT_UNREACHABLE("unknown ggml_q8_0 static validation result");
   IREE_BUILTIN_UNREACHABLE();
 }
 
@@ -1546,13 +1461,18 @@ static const loom_encoding_vtable_t loom_encoding_ggml_q4_0_vtable = {
 
 static const loom_encoding_vtable_t loom_encoding_ggml_q8_0_vtable = {
     .descriptor = &loom_encoding_ggml_q8_0_family_descriptor,
-    .is_static_valid = loom_encoding_ggml_q8_0_is_static_valid,
-    .diagnose_static = loom_encoding_ggml_q8_0_diagnose_static,
-    .summarize = loom_encoding_ggml_q8_0_summarize,
+};
+
+static const loom_encoding_vtable_t loom_encoding_ggml_q4_k_vtable = {
+    .descriptor = &loom_encoding_ggml_q4_k_family_descriptor,
 };
 
 static const loom_encoding_vtable_t loom_encoding_ggml_q6_k_vtable = {
     .descriptor = &loom_encoding_ggml_q6_k_family_descriptor,
+};
+
+static const loom_encoding_vtable_t loom_encoding_ggml_q8_1_x4_vtable = {
+    .descriptor = &loom_encoding_ggml_q8_1_x4_family_descriptor,
 };
 
 static const loom_encoding_vtable_t loom_encoding_operand_vtable = {
@@ -1577,7 +1497,9 @@ static const loom_encoding_vtable_t* const loom_encoding_builtin_vtables[] = {
     &loom_encoding_layout_strided_vtable,
     &loom_encoding_ggml_q4_0_vtable,
     &loom_encoding_ggml_q8_0_vtable,
+    &loom_encoding_ggml_q4_k_vtable,
     &loom_encoding_ggml_q6_k_vtable,
+    &loom_encoding_ggml_q8_1_x4_vtable,
     &loom_encoding_operand_vtable,
     &loom_encoding_numeric_transform_vtable,
     &loom_encoding_turboquant_kv_vtable,

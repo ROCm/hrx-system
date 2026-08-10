@@ -282,7 +282,7 @@ config.decl @model36.layout : encoding<layout>
 
   loom_tooling_config_binding_t binding = {
       /*.key=*/IREE_SV("model36.layout"),
-      /*.value=*/IREE_SV("#ggml_q4_0<block_elems=32, storage_bytes=18>"),
+      /*.value=*/IREE_SV("#ggml.q4_0"),
   };
   iree_status_t status = Materialize(module.get(), &binding, 1, nullptr);
   EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);

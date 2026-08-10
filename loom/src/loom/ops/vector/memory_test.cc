@@ -92,26 +92,8 @@ class VectorMemoryTest : public ::testing::Test {
   }
 
   uint16_t AddGgmlQ4_0Schema() {
-    loom_string_id_t block_elems_name = LOOM_STRING_ID_INVALID;
-    loom_string_id_t storage_bytes_name = LOOM_STRING_ID_INVALID;
-    IREE_CHECK_OK(loom_module_intern_string(module_, IREE_SV("block_elems"),
-                                            &block_elems_name));
-    IREE_CHECK_OK(loom_module_intern_string(module_, IREE_SV("storage_bytes"),
-                                            &storage_bytes_name));
-    loom_named_attr_t attributes[] = {
-        {
-            /*.name_id=*/block_elems_name,
-            /*.reserved=*/{},
-            /*.value=*/loom_attr_i64(32),
-        },
-        {
-            /*.name_id=*/storage_bytes_name,
-            /*.reserved=*/{},
-            /*.value=*/loom_attr_i64(18),
-        },
-    };
-    return AddEncoding(IREE_SV("ggml_q4_0"), attributes,
-                       (uint8_t)IREE_ARRAYSIZE(attributes));
+    return AddEncoding(IREE_SV("ggml.q4_0"), /*attributes=*/nullptr,
+                       /*attribute_count=*/0);
   }
 
   uint16_t AddStaticStridedLayout(int64_t stride) {

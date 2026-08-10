@@ -3,7 +3,7 @@
 // Exact encoding predicates carry the complete queried specification as a
 // typed template parameter and infer the i1 result.
 func.def @exact_static_spec_query(%schema: encoding<schema>) -> (i1) {
-  %is_q4 = encoding.isa<#ggml_q4_0<block_elems=32, storage_bytes=18>> %schema : encoding<schema>
+  %is_q4 = encoding.isa<#ggml.q4_0> %schema : encoding<schema>
   func.return %is_q4 : i1
 }
 
@@ -23,7 +23,7 @@ config.decl @model.weight_encoding : encoding<schema>
 
 func.def @config_driven_spec_query() -> (i1) {
   %schema = config.get @model.weight_encoding : encoding<schema>
-  %is_q4 = encoding.isa<#ggml_q4_0<block_elems=32, storage_bytes=18>> %schema : encoding<schema>
+  %is_q4 = encoding.isa<#ggml.q4_0> %schema : encoding<schema>
   func.return %is_q4 : i1
 }
 
@@ -82,7 +82,7 @@ func.def @layout_assumptions(%layout: encoding<layout>) {
 // Exact static-spec assumptions let dispatch thunks specialize schema/storage
 // arguments without changing the original ABI value.
 func.def @static_spec_assumption(%schema: encoding<schema>) {
-  %schema2 = encoding.assume.spec %schema, #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+  %schema2 = encoding.assume.spec %schema, #ggml.q4_0 : encoding<schema>
   test.use %schema2 : encoding<schema>
   func.return
 }

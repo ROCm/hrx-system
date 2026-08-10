@@ -1174,7 +1174,7 @@ func.def @table_quantize_unsorted_thresholds(%values: vector<4xf32>) {
 // Numeric transforms require an encoding with the numeric-transform role, not
 // an arbitrary storage schema.
 func.def @transform_role_mismatch(%v: vector<128xf32>) {
-  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
   // ERROR@+1: TYPE/003 "encoding<transform>"
   %r = vector.transform %v, %schema : vector<128xf32>, encoding<schema> -> vector<128xf32>
   func.return

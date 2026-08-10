@@ -421,7 +421,7 @@ func.def @table_quantize(%values: vector<32xf32>, %thresholds: vector<15xf32>) -
 // Encoded numeric boundaries keep compact schema facts separate from the
 // per-record data used to interpret a particular payload.
 func.def @schema_decode_storage_payload(%payload: vector<4xi32>, %scale: vector<1xf16>) -> (vector<32xf32>) {
-  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
   %values = vector.decode %payload using %schema {scale = %scale : vector<1xf16>} : vector<4xi32>, encoding<schema> -> vector<32xf32>
   func.return %values : vector<32xf32>
 }
