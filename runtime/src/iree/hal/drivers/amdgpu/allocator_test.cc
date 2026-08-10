@@ -356,6 +356,53 @@ TEST_F(AllocatorTest, AsanHostLocalShadowBackingMapsPinnedHostSlabs) {
   EXPECT_EQ(shadow_byte, kHeapRedzoneShadowValue);
 }
 
+TEST_F(AllocatorTest, AsanShadowWritesSplitPhysicalSlabs) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.asan.enabled = 1;
+  options.asan.shadow_slab_size = 2 * 1024 * 1024;
+  options.asan.quarantine_size = 0;
+  if (const char* reason = QueryHostIncompatibilityReason(&options)) {
+    GTEST_SKIP() << reason;
+  }
+
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(test_device.InitializeWithOptions(
+      &options, &libhsa_, &topology_, host_allocator_));
+
+  iree_hal_amdgpu_asan_state_t* asan_state =
+      &test_device.logical_device()->asan;
+  iree_hal_amdgpu_shadow_map_t* shadow_map =
+      iree_hal_amdgpu_asan_state_shadow_map(asan_state);
+  ASSERT_NE(shadow_map, nullptr);
+
+  // Publish a small application range whose shadow bytes straddle two
+  // independently backed physical slabs. Both publication and release must
+  // split their HSA memory operations at the slab boundary.
+  const iree_device_size_t shadow_granule = (iree_device_size_t)1ull
+                                            << shadow_map->shadow_scale_shift;
+  const uint64_t owned_application_base =
+      reinterpret_cast<uintptr_t>(asan_state->owned_application_base_ptr);
+  const uint64_t owned_shadow_offset =
+      owned_application_base >> shadow_map->shadow_scale_shift;
+  const uint64_t slab_boundary_shadow_offset =
+      iree_device_align(owned_shadow_offset + 4, shadow_map->slab_size);
+  const uint64_t application_address = (slab_boundary_shadow_offset - 4)
+                                       << shadow_map->shadow_scale_shift;
+  const iree_device_size_t application_length = 8 * shadow_granule;
+  ASSERT_LE(application_address,
+            owned_application_base + asan_state->owned_application_size);
+  ASSERT_LE(application_length, owned_application_base +
+                                    asan_state->owned_application_size -
+                                    application_address);
+
+  IREE_ASSERT_OK(iree_hal_amdgpu_asan_state_publish_allocated_range(
+      asan_state, application_address, application_length, application_address,
+      application_length));
+  iree_hal_amdgpu_asan_state_publish_released_range(
+      asan_state, application_address, application_length);
+}
+
 TEST_F(AllocatorTest,
        AsanDeviceLocalAllocationQuarantinesReleasedApplicationRange) {
   iree_hal_amdgpu_logical_device_options_t options;
