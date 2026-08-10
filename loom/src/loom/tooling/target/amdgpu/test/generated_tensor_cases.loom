@@ -37,10 +37,10 @@ kernel.def @decode_f8e5m2_one() {
 check.case @fp8_generated_fill {
   %input_e4m3 = check.generate.fill value(1.0) : tensor<1xf8E4M3>
   %output_e4m3 = check.generate.fill value(0.0) : tensor<1xf32>
-  kernel.launch @decode_f8e4m3_one[](%input_e4m3, %output_e4m3) : [](tensor<1xf8E4M3>, tensor<1xf32>)
+  kernel.launch @decode_f8e4m3_one(%input_e4m3, %output_e4m3) : (tensor<1xf8E4M3>, tensor<1xf32>)
   %input_e5m2 = check.generate.fill value(1.0) : tensor<1xf8E5M2>
   %output_e5m2 = check.generate.fill value(0.0) : tensor<1xf32>
-  kernel.launch @decode_f8e5m2_one[](%input_e5m2, %output_e5m2) : [](tensor<1xf8E5M2>, tensor<1xf32>)
+  kernel.launch @decode_f8e5m2_one(%input_e5m2, %output_e5m2) : (tensor<1xf8E5M2>, tensor<1xf32>)
   %expected = check.generate.fill value(1.0) : tensor<1xf32>
   check.expect.close actual(%output_e4m3) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
   check.expect.close actual(%output_e5m2) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>

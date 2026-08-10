@@ -24,7 +24,7 @@ command.program.def @one_specialization(%token_count: index) launch(%parameters:
 
 command.program.def @missing_specialization() launch(%parameters: buffer) {
   // ERROR@+1: STRUCTURE/013 "specialization" "0" "program specialization argument" "1"
-  command.program.launch @one_specialization[](%parameters) : [](buffer)
+  command.program.launch @one_specialization(%parameters) : (buffer)
   command.return
 }
 
@@ -48,7 +48,7 @@ command.program.def @two_bindings() launch(%parameters: buffer, %transient: buff
 
 command.program.def @missing_binding() launch(%parameters: buffer) {
   // ERROR@+1: STRUCTURE/013 "binding" "1" "program launch binding" "2"
-  command.program.launch @two_bindings[](%parameters) : [](buffer)
+  command.program.launch @two_bindings(%parameters) : (buffer)
   command.return
 }
 
@@ -60,7 +60,7 @@ func.def @ordinary_function() {
 
 command.program.def @wrong_symbol_kind() launch() {
   // ERROR@+1: SYMBOL/003 {symbol_name="ordinary_function", actual_kind="function", expected_kind="command program"}
-  command.program.launch @ordinary_function[]() : []()
+  command.program.launch @ordinary_function() : ()
   command.return
 }
 
@@ -68,7 +68,7 @@ command.program.def @wrong_symbol_kind() launch() {
 
 command.program.def @invalid_parameter_patterns(%layer: index) launch(%parameters: buffer) {
   // ERROR@+1: STRUCTURE/027 {attr_name="pattern", actual_value="", expected_constraint="a non-empty parameter key pattern"}
-  %empty = command.parameter %parameters, ""[] : view<16xi8, #dense>
+  %empty = command.parameter %parameters, "" : view<16xi8, #dense>
   // ERROR@+1: STRUCTURE/027 {attr_name="pattern", actual_value="blk.{.weight", expected_constraint="only complete '{}' index placeholders"}
   %malformed = command.parameter %parameters, "blk.{.weight"[%layer] : view<16xi8, #dense>
   // ERROR@+1: STRUCTURE/027 {attr_name="pattern", actual_value="blk.{}.{}.weight", expected_constraint="exactly 1 '{}' placeholders"}

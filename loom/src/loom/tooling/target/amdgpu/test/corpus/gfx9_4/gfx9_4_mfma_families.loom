@@ -113,7 +113,7 @@ check.case public @gfx9_4_mfma_families_case {
   %sparse_f16_expected = check.generate.fill value(16.0) : tensor<16x16xf32>
   %sparse_bf16_expected = check.generate.fill value(16.0) : tensor<16x16xf32>
   %sparse_i8_expected = check.generate.fill value(32) : tensor<16x16xi32>
-  kernel.launch @gfx9_4_mfma_families[](%f16_output, %bf16_output, %f32_output, %f64_output, %i8_output, %sparse_f16_output, %sparse_bf16_output, %sparse_i8_output) : [](tensor<16x16xf32>, tensor<16x16xf32>, tensor<16x16xf32>, tensor<16x16xf64>, tensor<16x16xi32>, tensor<16x16xf32>, tensor<16x16xf32>, tensor<16x16xi32>)
+  kernel.launch @gfx9_4_mfma_families(%f16_output, %bf16_output, %f32_output, %f64_output, %i8_output, %sparse_f16_output, %sparse_bf16_output, %sparse_i8_output) : (tensor<16x16xf32>, tensor<16x16xf32>, tensor<16x16xf32>, tensor<16x16xf64>, tensor<16x16xi32>, tensor<16x16xf32>, tensor<16x16xf32>, tensor<16x16xi32>)
   check.expect.equal actual(%f16_output) expected(%f16_expected) : tensor<16x16xf32>
   check.expect.equal actual(%bf16_output) expected(%bf16_expected) : tensor<16x16xf32>
   check.expect.equal actual(%f32_output) expected(%f32_expected) : tensor<16x16xf32>

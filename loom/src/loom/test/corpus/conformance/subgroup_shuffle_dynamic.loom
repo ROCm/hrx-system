@@ -116,7 +116,7 @@ check.case public @subgroup_shuffle_dynamic_index_case {
   %input = check.generate.iota offset(0) step(1) period(16) : tensor<64xi32>
   %output = check.generate.fill value(-1) : tensor<64xi32>
   %expected = check.generate.iota offset(0) step(1) period(16) : tensor<64xi32>
-  kernel.launch @subgroup_shuffle_dynamic_index[](%input, %output) : [](tensor<64xi32>, tensor<64xi32>)
+  kernel.launch @subgroup_shuffle_dynamic_index(%input, %output) : (tensor<64xi32>, tensor<64xi32>)
   check.expect.equal actual(%output) expected(%expected) : tensor<64xi32>
   check.return
 }
@@ -125,7 +125,7 @@ check.case public @subgroup_shuffle_dynamic_xor_case {
   %input = check.generate.iota offset(0) step(1) period(16) : tensor<64xi32>
   %output = check.generate.fill value(-1) : tensor<64xi32>
   %expected = check.generate.fill value(0) : tensor<64xi32>
-  kernel.launch @subgroup_shuffle_dynamic_xor[](%input, %output) : [](tensor<64xi32>, tensor<64xi32>)
+  kernel.launch @subgroup_shuffle_dynamic_xor(%input, %output) : (tensor<64xi32>, tensor<64xi32>)
   check.expect.equal actual(%output) expected(%expected) : tensor<64xi32>
   check.return
 }
@@ -134,7 +134,7 @@ check.case public @subgroup_shuffle_dynamic_up_case {
   %input = check.generate.fill value(1) : tensor<64xi32>
   %output = check.generate.fill value(0) : tensor<64xi32>
   %expected = check.generate.iota offset(0) step(1) period(2) : tensor<64xi32>
-  kernel.launch @subgroup_shuffle_dynamic_up[](%input, %output) : [](tensor<64xi32>, tensor<64xi32>)
+  kernel.launch @subgroup_shuffle_dynamic_up(%input, %output) : (tensor<64xi32>, tensor<64xi32>)
   check.expect.equal actual(%output) expected(%expected) : tensor<64xi32>
   check.return
 }
@@ -143,7 +143,7 @@ check.case public @subgroup_shuffle_dynamic_down_case {
   %input = check.generate.fill value(1) : tensor<64xi32>
   %output = check.generate.fill value(0) : tensor<64xi32>
   %expected = check.generate.iota offset(1) step(-1) period(2) : tensor<64xi32>
-  kernel.launch @subgroup_shuffle_dynamic_down[](%input, %output) : [](tensor<64xi32>, tensor<64xi32>)
+  kernel.launch @subgroup_shuffle_dynamic_down(%input, %output) : (tensor<64xi32>, tensor<64xi32>)
   check.expect.equal actual(%output) expected(%expected) : tensor<64xi32>
   check.return
 }

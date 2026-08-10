@@ -40,7 +40,7 @@ check.case public @loop_carried_lane_liveness_case {
   %input = check.generate.fill value(1.0) : tensor<32x16xbf16>
   %output = check.generate.fill value(0.0) : tensor<32xbf16>
   %expected = check.generate.fill value(1.0) : tensor<32xbf16>
-  kernel.launch @loop_carried_lane_liveness[](%input, %output) : [](tensor<32x16xbf16>, tensor<32xbf16>)
+  kernel.launch @loop_carried_lane_liveness(%input, %output) : (tensor<32x16xbf16>, tensor<32xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32xbf16>
   check.return
 }
@@ -90,8 +90,8 @@ kernel.def @loop_carried_lane_store_reference() {
 check.case public @loop_carried_lane_store_after_loop_case {
   %actual = check.generate.fill value(1) : tensor<96xi32>
   %expected = check.generate.fill value(1) : tensor<96xi32>
-  kernel.launch @loop_carried_lane_store_after_loop[](%actual) : [](tensor<96xi32>)
-  kernel.launch @loop_carried_lane_store_reference[](%expected) : [](tensor<96xi32>)
+  kernel.launch @loop_carried_lane_store_after_loop(%actual) : (tensor<96xi32>)
+  kernel.launch @loop_carried_lane_store_reference(%expected) : (tensor<96xi32>)
   check.expect.equal actual(%actual) expected(%expected) : tensor<96xi32>
   check.return
 }
@@ -132,7 +132,7 @@ check.case public @loop_edge_exact_extent_case {
   %input2 = check.generate.fill value(3.0) : tensor<128xf32>
   %output = check.generate.fill value(0.0) : tensor<32xf32>
   %expected = check.generate.fill value(24.0) : tensor<32xf32>
-  kernel.launch @loop_edge_exact_extent[](%input0, %input1, %input2, %output) : [](tensor<128xf32>, tensor<128xf32>, tensor<128xf32>, tensor<32xf32>)
+  kernel.launch @loop_edge_exact_extent(%input0, %input1, %input2, %output) : (tensor<128xf32>, tensor<128xf32>, tensor<128xf32>, tensor<32xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32xf32>
   check.return
 }

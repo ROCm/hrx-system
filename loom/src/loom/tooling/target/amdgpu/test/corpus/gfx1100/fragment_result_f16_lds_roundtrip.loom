@@ -84,7 +84,7 @@ kernel.def target(@fragment_result_lds_gfx1100_wave64) @fragment_result_f16_lds_
 check.case public @fragment_result_f16_lds_roundtrip_case {
   %direct = check.generate.fill value(0.0) : tensor<256xf32>
   %roundtrip = check.generate.fill value(0.0) : tensor<256xf32>
-  kernel.launch @fragment_result_f16_lds_roundtrip[](%direct, %roundtrip) : [](tensor<256xf32>, tensor<256xf32>)
+  kernel.launch @fragment_result_f16_lds_roundtrip(%direct, %roundtrip) : (tensor<256xf32>, tensor<256xf32>)
   check.expect.close actual(%roundtrip) expected(%direct) atol(0.0) rtol(0.0) nan(same) : tensor<256xf32>
   check.return
 }

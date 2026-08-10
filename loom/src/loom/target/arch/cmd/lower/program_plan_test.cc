@@ -203,8 +203,8 @@ kernel.def @combine() {
 command.program.def public @parameterized() launch(%parameters: buffer, %target: buffer) {
   %layer = index.constant 3 : index
   %lhs = command.parameter %parameters, "blk.{}.lhs"[%layer] : view<3xi32, #dense>
-  %rhs = command.parameter %parameters, "shared.rhs"[] : view<4xi32, #dense>
-  kernel.launch @combine[](%lhs, %rhs, %target) : [](view<3xi32, #dense>, view<4xi32, #dense>, buffer)
+  %rhs = command.parameter %parameters, "shared.rhs" : view<4xi32, #dense>
+  kernel.launch @combine(%lhs, %rhs, %target) : (view<3xi32, #dense>, view<4xi32, #dense>, buffer)
   command.return
 }
 )");

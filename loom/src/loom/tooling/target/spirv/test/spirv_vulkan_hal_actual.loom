@@ -19,7 +19,7 @@ check.case @double_i32_at_byte_offset_case {
   %input = check.generate.iota offset(7) step(3) : tensor<2xi32>
   %output = check.generate.fill value(0) : tensor<2xi32>
   %byte_offset = check.literal value(4) : offset
-  kernel.launch @double_i32_at_byte_offset[](%input, %output, %byte_offset) : [](tensor<2xi32>, tensor<2xi32>, offset)
+  kernel.launch @double_i32_at_byte_offset(%input, %output, %byte_offset) : (tensor<2xi32>, tensor<2xi32>, offset)
   %expected = check.generate.iota offset(0) step(20) : tensor<2xi32>
   check.expect.equal actual(%output) expected(%expected) : tensor<2xi32>
   check.return
@@ -64,9 +64,9 @@ check.case @ordered_dispatch_aba_case {
   // If the B-to-A visibility edge is missing, A observes -19 and emits -18.
   %output = check.generate.fill value(-19) : tensor<1xi32>
   %terminal = check.generate.fill value(-99) : tensor<1xi32>
-  kernel.launch @increment_i32[](%input, %intermediate) : [](tensor<1xi32>, tensor<1xi32>)
-  kernel.launch @double_i32[](%intermediate, %output) : [](tensor<1xi32>, tensor<1xi32>)
-  kernel.launch @increment_i32[](%output, %terminal) : [](tensor<1xi32>, tensor<1xi32>)
+  kernel.launch @increment_i32(%input, %intermediate) : (tensor<1xi32>, tensor<1xi32>)
+  kernel.launch @double_i32(%intermediate, %output) : (tensor<1xi32>, tensor<1xi32>)
+  kernel.launch @increment_i32(%output, %terminal) : (tensor<1xi32>, tensor<1xi32>)
   %expected = check.generate.fill value(17) : tensor<1xi32>
   check.expect.equal actual(%terminal) expected(%expected) : tensor<1xi32>
   check.return
@@ -129,7 +129,7 @@ check.case @scalar_addressing_i32_case {
   %stride_row = check.literal value(1) : index
   %columns = check.literal value(8) : index
   %subview_element = check.literal value(2) : index
-  kernel.launch @scalar_addressing_i32[](%input, %output, %base, %element, %mixed_row, %column, %stride_row, %columns, %subview_element) : [](tensor<32xi32>, tensor<7xi32>, offset, index, index, index, index, index, index)
+  kernel.launch @scalar_addressing_i32(%input, %output, %base, %element, %mixed_row, %column, %stride_row, %columns, %subview_element) : (tensor<32xi32>, tensor<7xi32>, offset, index, index, index, index, index, index)
   %expected = check.generate.iota offset(108) step(1) : tensor<7xi32>
   check.expect.equal actual(%output) expected(%expected) : tensor<7xi32>
   check.return
@@ -162,7 +162,7 @@ kernel.def target(@target) @workgroup_addressing_i32() {
 check.case @workgroup_addressing_i32_case {
   %input = check.generate.iota offset(10) step(3) : tensor<4xi32>
   %output = check.generate.fill value(-1) : tensor<4xi32>
-  kernel.launch @workgroup_addressing_i32[](%input, %output) : [](tensor<4xi32>, tensor<4xi32>)
+  kernel.launch @workgroup_addressing_i32(%input, %output) : (tensor<4xi32>, tensor<4xi32>)
   %expected = check.generate.iota offset(10) step(3) : tensor<4xi32>
   check.expect.equal actual(%output) expected(%expected) : tensor<4xi32>
   check.return
@@ -216,7 +216,7 @@ kernel.def target(@target) @ordinary_vector_structure_i32() {
 check.case @ordinary_vector_structure_i32_case {
   %input = check.generate.iota offset(10) step(3) : tensor<4xi32>
   %output = check.generate.fill value(-1) : tensor<4xi32>
-  kernel.launch @ordinary_vector_structure_i32[](%input, %output) : [](tensor<4xi32>, tensor<4xi32>)
+  kernel.launch @ordinary_vector_structure_i32(%input, %output) : (tensor<4xi32>, tensor<4xi32>)
   %expected = check.generate.fill value(10) : tensor<4xi32>
   check.expect.equal actual(%output) expected(%expected) : tensor<4xi32>
   check.return

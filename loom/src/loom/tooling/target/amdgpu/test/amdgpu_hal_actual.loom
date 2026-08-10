@@ -27,7 +27,7 @@ kernel.def @double_i32() {
 
 check.case @store_i32_case {
   %output = check.generate.fill value(0) : tensor<1xi32>
-  kernel.launch @store_i32[](%output) : [](tensor<1xi32>)
+  kernel.launch @store_i32(%output) : (tensor<1xi32>)
   %expected = check.generate.fill value(42) : tensor<1xi32>
   check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
   check.return
@@ -35,8 +35,8 @@ check.case @store_i32_case {
 
 check.case @store_then_double_i32_case {
   %output = check.generate.fill value(21) : tensor<1xi32>
-  kernel.launch @store_i32[](%output) : [](tensor<1xi32>)
-  kernel.launch @double_i32[](%output) : [](tensor<1xi32>)
+  kernel.launch @store_i32(%output) : (tensor<1xi32>)
+  kernel.launch @double_i32(%output) : (tensor<1xi32>)
   %expected = check.generate.fill value(84) : tensor<1xi32>
   check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
   check.return

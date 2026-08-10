@@ -47,7 +47,7 @@ check.case @case_shared_memory_tile_reverse {
   %input = check.generate.iota offset(1) step(1) : tensor<64xi32>
   %output = check.generate.fill value(0) : tensor<64xi32>
   %expected = check.generate.iota offset(64) step(-1) : tensor<64xi32>
-  kernel.launch @shared_memory_tile_reverse[](%input, %output) : [](tensor<64xi32>, tensor<64xi32>)
+  kernel.launch @shared_memory_tile_reverse(%input, %output) : (tensor<64xi32>, tensor<64xi32>)
   check.expect.equal actual(%output) expected(%expected) : tensor<64xi32>
   check.return
 }

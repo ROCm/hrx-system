@@ -217,26 +217,26 @@ command_program_launch = Op(
     verify="loom_command_program_launch_verify",
     format=[
         SymbolRef("callee"),
-        GLUE,
-        LBRACKET,
-        Refs("specializations"),
-        RBRACKET,
+        OptionalGroup(
+            [GLUE, LBRACKET, Refs("specializations"), RBRACKET],
+            anchor="specializations",
+        ),
         GLUE,
         LPAREN,
         Refs("bindings"),
         RPAREN,
         COLON,
-        LBRACKET,
-        TypesOf("specializations"),
-        RBRACKET,
-        GLUE,
+        OptionalGroup(
+            [LBRACKET, TypesOf("specializations"), RBRACKET, GLUE],
+            anchor="specializations",
+        ),
         LPAREN,
         TypesOf("bindings"),
         RPAREN,
     ],
     examples=[
         "command.program.launch @decode[%token_count](%parameters, %transient) : [index](buffer, buffer)",
-        "command.program.launch @static_program[](%parameters) : [](buffer)",
+        "command.program.launch @static_program(%parameters) : (buffer)",
     ],
 )
 
@@ -275,15 +275,15 @@ command_parameter = Op(
         Ref("source"),
         COMMA,
         Attr("pattern"),
-        GLUE,
-        LBRACKET,
-        Refs("substitutions"),
-        RBRACKET,
+        OptionalGroup(
+            [GLUE, LBRACKET, Refs("substitutions"), RBRACKET],
+            anchor="substitutions",
+        ),
         COLON,
         ResultType("result"),
     ],
     examples=[
-        '%embedding = command.parameter %parameters, "token_embd.weight"[] : view<175030272xi8, #dense>',
+        '%embedding = command.parameter %parameters, "token_embd.weight" : view<175030272xi8, #dense>',
         '%query = command.parameter %parameters, "blk.{}.attn_q.weight"[%layer] : view<4718592xi8, #dense>',
     ],
 )

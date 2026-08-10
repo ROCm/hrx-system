@@ -488,7 +488,7 @@ func.def @launch_program(%count: index, %output: tensor<4xi32>) {
 kernel.decl @empty_launch_contract() launch()
 
 func.def @empty_launch_program() {
-  kernel.launch @empty_launch_contract[]() : []()
+  kernel.launch @empty_launch_contract() : ()
   func.return
 }
 
@@ -496,6 +496,6 @@ func.def @empty_launch_program() {
 kernel.decl @empty_launch_contract() launch()
 
 func.def @empty_launch_program() {
-  kernel.launch @empty_launch_contract[]() : []()
+  kernel.launch @empty_launch_contract() : ()
   func.return
 }

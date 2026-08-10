@@ -1,7 +1,7 @@
 // RUN: roundtrip
 
 command.program.def @static_program() launch(%parameters: buffer) {
-  %embedding = command.parameter %parameters, "token_embd.weight"[] : view<1024xi8, #dense>
+  %embedding = command.parameter %parameters, "token_embd.weight" : view<1024xi8, #dense>
   command.return
 }
 
@@ -34,7 +34,7 @@ command.program.def @bounded(%token_count: index) launch(%parameters: buffer) wh
 command.program.def @scheduled() launch(%parameters: buffer) {
   command.serial {
     command.concurrent {
-      command.program.launch @leaf[](%parameters) : [](buffer)
+      command.program.launch @leaf(%parameters) : (buffer)
     }
   }
   command.return

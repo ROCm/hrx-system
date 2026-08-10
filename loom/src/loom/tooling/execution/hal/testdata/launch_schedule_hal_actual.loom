@@ -36,9 +36,9 @@ check.case @launch_schedule_serial_case {
   %output = check.generate.fill value(-19) : tensor<1xi32>
   %terminal = check.generate.fill value(-99) : tensor<1xi32>
   kernel.launch.serial {
-    kernel.launch @launch_schedule_increment_i32[](%input, %intermediate) : [](tensor<1xi32>, tensor<1xi32>)
-    kernel.launch @launch_schedule_double_i32[](%intermediate, %output) : [](tensor<1xi32>, tensor<1xi32>)
-    kernel.launch @launch_schedule_increment_i32[](%output, %terminal) : [](tensor<1xi32>, tensor<1xi32>)
+    kernel.launch @launch_schedule_increment_i32(%input, %intermediate) : (tensor<1xi32>, tensor<1xi32>)
+    kernel.launch @launch_schedule_double_i32(%intermediate, %output) : (tensor<1xi32>, tensor<1xi32>)
+    kernel.launch @launch_schedule_increment_i32(%output, %terminal) : (tensor<1xi32>, tensor<1xi32>)
   }
   %expected = check.generate.fill value(17) : tensor<1xi32>
   check.expect.equal actual(%terminal) expected(%expected) : tensor<1xi32>
@@ -53,8 +53,8 @@ check.case @launch_schedule_concurrent_case {
   %output_a = check.generate.fill value(-1) : tensor<1xi32>
   %output_b = check.generate.fill value(-1) : tensor<1xi32>
   kernel.launch.concurrent {
-    kernel.launch @launch_schedule_increment_i32[](%input_a, %output_a) : [](tensor<1xi32>, tensor<1xi32>)
-    kernel.launch @launch_schedule_double_i32[](%input_b, %output_b) : [](tensor<1xi32>, tensor<1xi32>)
+    kernel.launch @launch_schedule_increment_i32(%input_a, %output_a) : (tensor<1xi32>, tensor<1xi32>)
+    kernel.launch @launch_schedule_double_i32(%input_b, %output_b) : (tensor<1xi32>, tensor<1xi32>)
   }
   %expected_a = check.generate.fill value(8) : tensor<1xi32>
   %expected_b = check.generate.fill value(18) : tensor<1xi32>

@@ -71,16 +71,16 @@ kernel.decl @step() launch(%output: buffer)
 
 check.case @launch_schedule {
   %output = check.generate.fill value(0) : tensor<1xi32>
-  kernel.launch @step[](%output) : [](tensor<1xi32>)
+  kernel.launch @step(%output) : (tensor<1xi32>)
   kernel.launch.concurrent {
-    kernel.launch @step[](%output) : [](tensor<1xi32>)
-    kernel.launch @step[](%output) : [](tensor<1xi32>)
+    kernel.launch @step(%output) : (tensor<1xi32>)
+    kernel.launch @step(%output) : (tensor<1xi32>)
   }
   kernel.launch.serial {
-    kernel.launch @step[](%output) : [](tensor<1xi32>)
-    kernel.launch @step[](%output) : [](tensor<1xi32>)
+    kernel.launch @step(%output) : (tensor<1xi32>)
+    kernel.launch @step(%output) : (tensor<1xi32>)
   }
-  kernel.launch @step[](%output) : [](tensor<1xi32>)
+  kernel.launch @step(%output) : (tensor<1xi32>)
   check.return
 }
 )");
@@ -114,7 +114,7 @@ check.case @nested_launch_schedule {
   %output = check.generate.fill value(0) : tensor<1xi32>
   kernel.launch.serial {
     kernel.launch.concurrent {
-      kernel.launch @step[](%output) : [](tensor<1xi32>)
+      kernel.launch @step(%output) : (tensor<1xi32>)
     }
   }
   check.return

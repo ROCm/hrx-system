@@ -28,7 +28,7 @@ kernel.def @launch_rejected_inside_device_kernel() {
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch() {
   // ERROR@+1: STRUCTURE/029 {op_name="kernel.launch", constraint_kind="forbidden", ancestor_name="kernel.def", actual_ancestor="kernel.def"}
-  kernel.launch @host_launch_only[]() : []()
+  kernel.launch @host_launch_only() : ()
   kernel.return
 }
 
@@ -38,7 +38,7 @@ kernel.decl @missing_workload_contract(%workload: index) launch()
 
 func.def @missing_workload() {
   // ERROR@+1: STRUCTURE/013 "workload" "kernel workload"
-  kernel.launch @missing_workload_contract[]() : []()
+  kernel.launch @missing_workload_contract() : ()
   func.return
 }
 
@@ -58,7 +58,7 @@ kernel.decl @missing_argument_contract() launch(%argument: i32)
 
 func.def @missing_argument() {
   // ERROR@+1: STRUCTURE/013 "argument" "kernel ABI argument"
-  kernel.launch @missing_argument_contract[]() : []()
+  kernel.launch @missing_argument_contract() : ()
   func.return
 }
 
@@ -68,7 +68,7 @@ kernel.decl @argument_type_contract() launch(%argument: i32)
 
 func.def @wrong_argument_type(%argument: f32) {
   // ERROR@+1: TYPE/001 "argument 0" "kernel ABI argument 0"
-  kernel.launch @argument_type_contract[](%argument) : [](f32)
+  kernel.launch @argument_type_contract(%argument) : (f32)
   func.return
 }
 
@@ -78,7 +78,7 @@ func.decl @ordinary_function()
 
 func.def @launch_requires_kernel_symbol() {
   // ERROR@+1: SYMBOL/003 "expected kernel"
-  kernel.launch @ordinary_function[]() : []()
+  kernel.launch @ordinary_function() : ()
   func.return
 }
 

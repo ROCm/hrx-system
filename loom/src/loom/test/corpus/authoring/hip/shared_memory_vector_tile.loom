@@ -47,7 +47,7 @@ check.case @case_shared_memory_vector_tile_roundtrip {
   %input = check.generate.iota offset(1) step(1) : tensor<64x4xi32>
   %output = check.generate.fill value(0) : tensor<64x4xi32>
   %expected = check.generate.iota offset(1) step(1) : tensor<64x4xi32>
-  kernel.launch @shared_memory_vector_tile_roundtrip[](%input, %output) : [](tensor<64x4xi32>, tensor<64x4xi32>)
+  kernel.launch @shared_memory_vector_tile_roundtrip(%input, %output) : (tensor<64x4xi32>, tensor<64x4xi32>)
   check.expect.equal actual(%output) expected(%expected) : tensor<64x4xi32>
   check.return
 }

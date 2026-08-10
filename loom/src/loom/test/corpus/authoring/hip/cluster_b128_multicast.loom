@@ -71,7 +71,7 @@ check.case public @case_cluster_b128_multicast {
   %input = check.generate.iota offset(1) step(1) : tensor<32x4xi32>
   %output = check.generate.fill value(0) : tensor<2x32xi32>
   %expected = check.generate.fill value(1) : tensor<2x32xi32>
-  kernel.launch @cluster_b128_multicast[](%input, %output) : [](tensor<32x4xi32>, tensor<2x32xi32>)
+  kernel.launch @cluster_b128_multicast(%input, %output) : (tensor<32x4xi32>, tensor<2x32xi32>)
   check.expect.equal actual(%output) expected(%expected) : tensor<2x32xi32>
   check.return
 }

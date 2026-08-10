@@ -71,7 +71,7 @@ def test_program_without_specializations_roundtrip() -> None:
 def test_parameter_roundtrip() -> None:
     _roundtrip(
         """command.program.def @parameters(%layer: index) launch(%parameters: buffer) {
-  %embedding = command.parameter %parameters, "token_embd.weight"[] : view<1024xi8, #dense>
+  %embedding = command.parameter %parameters, "token_embd.weight" : view<1024xi8, #dense>
   %query = command.parameter %parameters, "blk.{}.attn_q.weight"[%layer] : view<256xi8, #dense>
   command.return
 }
@@ -84,7 +84,7 @@ def test_structured_command_schedules_roundtrip() -> None:
         """command.program.def @scheduled() launch(%parameters: buffer) {
   command.serial {
     command.concurrent {
-      command.program.launch @leaf[](%parameters) : [](buffer)
+      command.program.launch @leaf(%parameters) : (buffer)
     }
   }
   command.return

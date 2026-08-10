@@ -41,7 +41,7 @@ kernel.def @semantic_behavior_class() {
 
 check.case public @semantic_behavior_class_case {
   // Deterministic inputs that distinguish the represented behavior.
-  kernel.launch @semantic_behavior_class[](%input, %output)
+  kernel.launch @semantic_behavior_class(%input, %output)
       : [](tensor<...>, tensor<...>)
   check.expect.close actual(...) expected(...) atol(...) rtol(...) nan(...) : ...
   check.return

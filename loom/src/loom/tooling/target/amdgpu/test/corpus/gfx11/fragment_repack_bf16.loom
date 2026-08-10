@@ -58,8 +58,8 @@ check.case public @fragment_repack_bf16_equivalence_case {
   %rhs = check.generate.iota offset(0.5) step(0.00390625) : tensor<16x16xbf16>
   %roundtrip_output = check.generate.fill value(0.0) : tensor<16x16xf32>
   %direct_output = check.generate.fill value(0.0) : tensor<16x16xf32>
-  kernel.launch @fragment_repack_roundtrip_bf16[](%input, %rhs, %roundtrip_output) : [](tensor<16x16xf32>, tensor<16x16xbf16>, tensor<16x16xf32>)
-  kernel.launch @fragment_repack_direct_bf16[](%input, %rhs, %direct_output) : [](tensor<16x16xf32>, tensor<16x16xbf16>, tensor<16x16xf32>)
+  kernel.launch @fragment_repack_roundtrip_bf16(%input, %rhs, %roundtrip_output) : (tensor<16x16xf32>, tensor<16x16xbf16>, tensor<16x16xf32>)
+  kernel.launch @fragment_repack_direct_bf16(%input, %rhs, %direct_output) : (tensor<16x16xf32>, tensor<16x16xbf16>, tensor<16x16xf32>)
   check.expect.close actual(%direct_output) expected(%roundtrip_output) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xf32>
   check.return
 }

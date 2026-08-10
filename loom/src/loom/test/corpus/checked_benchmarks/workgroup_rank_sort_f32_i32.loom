@@ -60,7 +60,7 @@ check.case public @workgroup_rank_sort_distinct_case {
   %scores = check.generate.iota offset(0.0) step(1.0) : tensor<8xf32>
   %sorted_ids = check.generate.fill value(-1) : tensor<8xi32>
   %expected_ids = check.generate.iota offset(7) step(-1) : tensor<8xi32>
-  kernel.launch @workgroup_rank_sort_f32_i32[](%scores, %sorted_ids) : [](tensor<8xf32>, tensor<8xi32>)
+  kernel.launch @workgroup_rank_sort_f32_i32(%scores, %sorted_ids) : (tensor<8xf32>, tensor<8xi32>)
   check.expect.equal actual(%sorted_ids) expected(%expected_ids) : tensor<8xi32>
   check.return
 }
@@ -69,7 +69,7 @@ check.case public @workgroup_rank_sort_tie_case {
   %scores = check.generate.fill value(3.0) : tensor<8xf32>
   %sorted_ids = check.generate.fill value(-1) : tensor<8xi32>
   %expected_ids = check.generate.iota offset(0) step(1) : tensor<8xi32>
-  kernel.launch @workgroup_rank_sort_f32_i32[](%scores, %sorted_ids) : [](tensor<8xf32>, tensor<8xi32>)
+  kernel.launch @workgroup_rank_sort_f32_i32(%scores, %sorted_ids) : (tensor<8xf32>, tensor<8xi32>)
   check.expect.equal actual(%sorted_ids) expected(%expected_ids) : tensor<8xi32>
   check.return
 }
