@@ -8,13 +8,45 @@
         "args": ["--agents_md"]
       },
       "stdout": {
-        "contains": [
-          "## loom-format",
-          "--from=text",
-          "--to=bc",
-          "--from=auto",
-          "loom-link --library"
-        ]
+        "contains": {
+          "unordered": [
+            "## loom-format",
+            "--from=text",
+            "--to=bc",
+            "--from=auto",
+            "--check",
+            "loom-link --library"
+          ]
+        }
+      }
+    },
+    {
+      "name": "accepts canonical text in check mode",
+      "run": {
+        "tool": "loom-format",
+        "args": ["--check"]
+      },
+      "stdin": {
+        "text": "func.def @identity(%value: index) -> (index) {\n  func.return %value : index\n}\n"
+      },
+      "stdout": {
+        "empty": true
+      }
+    },
+    {
+      "name": "rejects noncanonical text in check mode",
+      "run": {
+        "tool": "loom-format",
+        "args": ["--check"]
+      },
+      "stdin": {
+        "text": "\nfunc.def @identity(%value: index) -> (index) {\n  func.return %value : index\n}\n"
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": ["is not canonically formatted"]
       }
     },
     {
