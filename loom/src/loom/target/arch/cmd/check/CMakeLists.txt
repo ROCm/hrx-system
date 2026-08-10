@@ -25,6 +25,8 @@ loom_cc_library(
     loom::ops::command
     loom::pass::builtin_registry
     loom::target::arch::cmd::lower::program_plan
+    loom::target::arch::cmd::lower::serialize
+    loom::target::arch::cmd::program
     loom::tooling::compile::pipeline
     loom::tools::loom-check::execute
   TESTONLY

@@ -12,6 +12,8 @@
 #include "loom/ops/command/ops.h"
 #include "loom/pass/builtin_registry.h"
 #include "loom/target/arch/cmd/lower/program_plan.h"
+#include "loom/target/arch/cmd/lower/serialize.h"
+#include "loom/target/arch/cmd/program.h"
 #include "loom/tooling/compile/pipeline.h"
 #include "loom/tools/loom-check/diagnostics.h"
 
@@ -180,6 +182,28 @@ static iree_status_t loom_cmd_program_plan_check_print_module(
       module, &request->result->actual_output, &print_options);
 }
 
+// Exercises the complete portable artifact boundary for every prepared root.
+// Textual expectations continue to describe the source and Low semantics while
+// this closure proves that the same production plan serializes into an artifact
+// accepted by the public untrusted-byte parser.
+static iree_status_t loom_cmd_program_plan_check_roundtrip_artifacts(
+    const loom_cmd_program_plan_t* plan, iree_allocator_t host_allocator) {
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < plan->root_count && iree_status_is_ok(status); ++i) {
+    iree_byte_span_t data = iree_byte_span_empty();
+    status =
+        loom_cmd_program_plan_serialize_root(plan, i, &data, host_allocator);
+    if (iree_status_is_ok(status)) {
+      loom_cmd_program_t program = {0};
+      status = loom_cmd_program_parse(
+          iree_make_const_byte_span(data.data, data.data_length), &program);
+    }
+    iree_allocator_free(host_allocator, data.data);
+  }
+  return status;
+}
+
 static iree_status_t loom_cmd_program_plan_check_emit_provider_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request) {
@@ -233,6 +257,11 @@ static iree_status_t loom_cmd_program_plan_check_emit_provider_execute(
             "command program preparation failed without a diagnostic");
       }
     }
+  }
+  if (iree_status_is_ok(status) && pipeline_result.pass.error_count == 0 &&
+      plan_valid) {
+    status = loom_cmd_program_plan_check_roundtrip_artifacts(
+        &plan, request->host_allocator);
   }
   if (iree_status_is_ok(status) && pipeline_result.pass.error_count == 0 &&
       plan_valid) {
