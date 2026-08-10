@@ -29,9 +29,11 @@ extern "C" {
 
 // Resolved low target context for one low function.
 typedef struct loom_low_resolved_target_t {
-  // Immutable effective facts selected for this Low function.
+  // Immutable effective facts selected for this Low function, or NULL for a
+  // portable representation that does not require a hardware target.
   const loom_target_facts_t* target_facts;
-  // Borrowed effective target name without the leading '@'.
+  // Borrowed effective target name without the leading '@', or empty when
+  // |target_facts| is NULL.
   iree_string_view_t target_name;
   // Borrowed descriptor-set key selected by the Low function representation
   // contract.
@@ -159,8 +161,10 @@ static inline iree_string_view_t loom_low_descriptor_packet_diagnostic_key(
 // status. |low_func_op| must be a target-low function definition or
 // declaration. |effective_target_facts| supplies invocation-refined facts that
 // already include the function contract when non-NULL; otherwise facts are
-// resolved from the authored target witness. The arena backing |symbol_facts|
-// and |effective_target_facts| must outlive |out_target|.
+// resolved from the authored target witness. A targetless function resolves
+// only its explicit representation descriptor set and leaves the target facts
+// unset, independent of its ABI. The arena backing |symbol_facts| and
+// |effective_target_facts| must outlive |out_target|.
 iree_status_t loom_low_resolve_function_target(
     const loom_module_t* module, loom_symbol_fact_table_t* symbol_facts,
     const loom_op_t* low_func_op,
