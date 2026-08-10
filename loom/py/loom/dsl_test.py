@@ -544,10 +544,19 @@ class TestEncodingFamilyDef:
                 ],
             )
 
-    def test_rejects_namespaced_family_name(self) -> None:
-        with _raises(ValueError, match="bare ASCII identifier"):
+    def test_accepts_qualified_family_name(self) -> None:
+        family = EncodingFamilyDef(
+            "ggml.q4_k",
+            group=Dialect("encoding"),
+            role=EncodingFamilyRole.STORAGE_SCHEMA,
+        )
+
+        assert family.name == "ggml.q4_k"
+
+    def test_rejects_invalid_qualified_family_name(self) -> None:
+        with _raises(ValueError, match="dotted ASCII identifier"):
             EncodingFamilyDef(
-                "encoding.matrix_operand",
+                "ggml..q4_k",
                 group=Dialect("encoding"),
                 role=EncodingFamilyRole.STORAGE_SCHEMA,
             )

@@ -60,6 +60,9 @@ from loom.gen.ops.c_names import (
     c_parameterized_attr_prefix as _c_parameterized_attr_prefix,
 )
 from loom.gen.ops.c_names import c_prefix as _c_prefix
+from loom.gen.ops.c_names import (
+    validate_encoding_family_c_names as _validate_encoding_family_c_names,
+)
 from loom.gen.support import c_arrays
 from loom.gen.support.c import c_identifier as _c_identifier
 from loom.gen.support.c import c_string_literal as _c_string_literal
@@ -331,6 +334,8 @@ def _emit_attr_descriptor_table(
 
 def _emit_encoding_family_tables(lines: list[str], encoding_families: Sequence[EncodingFamilyDef]) -> None:
     """Emits generated encoding-family descriptors."""
+
+    _validate_encoding_family_c_names(encoding_families)
 
     shared_enum_names: dict[int, str] = {}
     for family in encoding_families:

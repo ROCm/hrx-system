@@ -462,6 +462,48 @@ def test_generate_encoding_family_metadata() -> None:
     assert ".dynamic_parameter_count = IREE_ARRAYSIZE(loom_encoding_matrix_operand_dynamic_parameter_desc)" in tables_c
 
 
+def test_generate_qualified_encoding_family_metadata() -> None:
+    family = EncodingFamilyDef(
+        "ggml.q4_k",
+        group=Dialect("encoding", dialect_id=0x09),
+        role=EncodingFamilyRole.STORAGE_SCHEMA,
+    )
+
+    ops_h = generate_ops_h("encoding", 0x09, [], (), [family])
+    tables_c = generate_tables_c("encoding", 0x09, [], (), [family])
+
+    assert "loom_encoding_ggml_q4_k_family_descriptor" in ops_h
+    assert '.name = _BSTRING(9, "ggml.q4_k")' in tables_c
+
+
+def test_rejects_colliding_encoding_family_c_names() -> None:
+    dialect = Dialect("encoding", dialect_id=0x09)
+    families = [
+        EncodingFamilyDef(
+            name,
+            group=dialect,
+            role=EncodingFamilyRole.STORAGE_SCHEMA,
+        )
+        for name in ("ggml.q4_k", "ggml_q4_k")
+    ]
+
+    with _raises_value_error("encoding families 'ggml.q4_k' and 'ggml_q4_k' both generate C prefix"):
+        generate_ops_h("encoding", 0x09, [], (), families)
+    with _raises_value_error("encoding families 'ggml.q4_k' and 'ggml_q4_k' both generate C prefix"):
+        generate_tables_c("encoding", 0x09, [], (), families)
+
+
+def test_rejects_duplicate_encoding_family_names() -> None:
+    family = EncodingFamilyDef(
+        "ggml.q4_k",
+        group=Dialect("encoding", dialect_id=0x09),
+        role=EncodingFamilyRole.STORAGE_SCHEMA,
+    )
+
+    with _raises_value_error("duplicate encoding family 'ggml.q4_k'"):
+        generate_ops_h("encoding", 0x09, [], (), [family, family])
+
+
 def test_generate_encoding_families_share_enum_vocabulary() -> None:
     dialect = Dialect("encoding", dialect_id=0x09)
     rounding = EnumDef(

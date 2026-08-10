@@ -39,6 +39,9 @@ from loom.gen.ops.c_names import (
 )
 from loom.gen.ops.c_names import c_prefix as _c_prefix
 from loom.gen.ops.c_names import guard_name as _guard_name
+from loom.gen.ops.c_names import (
+    validate_encoding_family_c_names as _validate_encoding_family_c_names,
+)
 from loom.gen.ops.c_parameterized_attrs import (
     generate_parameterized_attr_header_lines as _generate_parameterized_attr_header_lines,
 )
@@ -53,6 +56,8 @@ def generate_ops_h(
     encoding_families: Sequence[EncodingFamilyDef] = (),
 ) -> str:
     """Generates the ops.h header for a dialect."""
+    _validate_encoding_family_c_names(encoding_families)
+
     lines: list[str] = []
     guard = _guard_name(dialect_name)
     dialect_enum = _c_dialect_enum(dialect_name)

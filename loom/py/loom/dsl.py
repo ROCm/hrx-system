@@ -2876,6 +2876,12 @@ def _is_ascii_identifier(value: str) -> bool:
     )
 
 
+def _is_ascii_qualified_identifier(value: str) -> bool:
+    """Returns whether |value| is a dot-qualified Loom identifier."""
+
+    return all(_is_ascii_identifier(part) for part in value.split("."))
+
+
 def _validate_descriptor_parameters(
     owner: str, parameters: tuple[AttrDef, ...]
 ) -> None:
@@ -2945,7 +2951,7 @@ class ParameterizedAttrDef:
                 f"ParameterizedAttrDef '{name}': family name must begin with "
                 f"the owning dialect namespace '{group.name}.'"
             )
-        if not all(_is_ascii_identifier(part) for part in name_parts):
+        if not _is_ascii_qualified_identifier(name):
             raise ValueError(
                 f"ParameterizedAttrDef '{name}': family name must be a dotted "
                 "ASCII identifier"
@@ -3046,9 +3052,9 @@ class EncodingFamilyDef:
         dynamic_parameters: list[Operand] | tuple[Operand, ...] = (),
         doc: str = "",
     ) -> None:
-        if not _is_ascii_identifier(name):
+        if not _is_ascii_qualified_identifier(name):
             raise ValueError(
-                f"EncodingFamilyDef '{name}': family name must be a bare "
+                f"EncodingFamilyDef '{name}': family name must be a dotted "
                 "ASCII identifier"
             )
         if not isinstance(role, EncodingFamilyRole):

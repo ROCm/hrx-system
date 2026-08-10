@@ -1441,6 +1441,20 @@ class TestEncodingValidation:
                 "}\n"
             )
 
+    def test_qualified_encoding_name_round_trips(self) -> None:
+        parser = _op_parser()
+        parser.register_encodings(["ggml.q4_k"])
+        text = (
+            "test.func @f(%a: tile<256xi8, #ggml.q4_k>) -> "
+            "(tile<256xi8, #ggml.q4_k>) {\n"
+            "  test.yield %a : tile<256xi8, #ggml.q4_k>\n"
+            "}\n"
+        )
+
+        module = parser.parse(text)
+
+        assert _op_printer().print_module(module) == text
+
 
 # ============================================================================
 # Round-trip tests: print → parse → print
