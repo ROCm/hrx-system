@@ -11,12 +11,35 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    program_plan
+  HDRS
+    "program_plan.h"
+  SRCS
+    "program_plan.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::text_asm
+    loom::format::text::printer
+    loom::ir
+    loom::ops::command
+    loom::pass::builtin_registry
+    loom::target::arch::cmd::lower::program_plan
+    loom::tooling::compile::pipeline
+    loom::tools::loom-check::execute
+  TESTONLY
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     check_provider
   HDRS
     "provider.h"
   SRCS
     "provider.c"
   DEPS
+    ::program_plan
     iree::base
     loom::target::arch::cmd::provider
     loom::tools::loom-check::provider

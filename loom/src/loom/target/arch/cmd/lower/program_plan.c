@@ -13,6 +13,9 @@
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/type_registry.h"
+#include "loom/pass/builder.h"
+#include "loom/pass/interpreter.h"
+#include "loom/pass/program.h"
 #include "loom/target/arch/cmd/lower/lower.h"
 #include "loom/target/arch/cmd/lower/parameters.h"
 #include "loom/target/arch/cmd/lower/program_composition.h"
@@ -54,6 +57,75 @@ typedef struct loom_cmd_program_root_build_t {
   uint32_t* dependency_unit_indices;
   uint32_t dependency_count;
 } loom_cmd_program_root_build_t;
+
+static iree_status_t loom_cmd_program_plan_build_root_preparation_body(
+    loom_builder_t* builder, void* user_data) {
+  (void)user_data;
+  loom_op_t* run_op = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_pass_ir_build_run(builder, 0, IREE_SV("canonicalize"),
+                             loom_named_attr_slice_empty(), &run_op));
+  IREE_RETURN_IF_ERROR(
+      loom_pass_ir_build_run(builder, 0, IREE_SV("unroll-scf-for"),
+                             loom_named_attr_slice_empty(), &run_op));
+  return loom_pass_ir_build_run(builder, 0, IREE_SV("canonicalize"),
+                                loom_named_attr_slice_empty(), &run_op);
+}
+
+// Resolves source structure that must be static before schedule construction.
+//
+// The shared expanded-source pipeline intentionally preserves local loop
+// policies for target kernels that may acquire facts later. Command roots have
+// a stronger boundary: scheduling must see only a closed sequence of launches
+// and explicit scheduling regions. Run a function-root preparation program on
+// the selected command roots so dependency kernel bodies retain their ordinary
+// target-compilation path.
+static iree_status_t loom_cmd_program_plan_prepare_roots(
+    loom_module_t* module, const loom_func_like_t* root_programs,
+    iree_host_size_t root_program_count,
+    const loom_pass_registry_t* pass_registry,
+    iree_diagnostic_emitter_t diagnostic_emitter,
+    iree_arena_block_pool_t* block_pool, bool* out_valid) {
+  *out_valid = false;
+
+  loom_module_t* pipeline_module = NULL;
+  IREE_RETURN_IF_ERROR(loom_module_allocate(
+      module->context, IREE_SV("__command_program_preparation"), block_pool,
+      NULL, module->allocator, &pipeline_module));
+
+  loom_op_t* pipeline_op = NULL;
+  iree_status_t status = loom_pass_ir_build_pipeline(
+      pipeline_module, IREE_SV("__command_program_preparation"),
+      LOOM_PASS_ANCHOR_FUNC, loom_cmd_program_plan_build_root_preparation_body,
+      NULL, &pipeline_op);
+
+  const loom_pass_program_compile_options_t compile_options = {
+      .registry = pass_registry,
+  };
+  loom_pass_program_t program = {0};
+  if (iree_status_is_ok(status)) {
+    status = loom_pass_program_compile_pipeline(
+        pipeline_module, pipeline_op, &compile_options, block_pool, &program);
+  }
+
+  const loom_pass_interpreter_options_t interpreter_options = {
+      .block_pool = block_pool,
+      .diagnostic_emitter = diagnostic_emitter,
+  };
+  bool valid = true;
+  for (iree_host_size_t i = 0;
+       i < root_program_count && iree_status_is_ok(status) && valid; ++i) {
+    loom_pass_run_result_t result = {0};
+    status = loom_pass_interpreter_run_function(
+        &program, module, root_programs[i], &interpreter_options, &result);
+    valid = result.error_count == 0;
+  }
+
+  loom_pass_program_deinitialize(&program);
+  loom_module_free(pipeline_module);
+  if (iree_status_is_ok(status)) *out_valid = valid;
+  return status;
+}
 
 static iree_status_t loom_cmd_program_plan_compute_kernel_config_facts(
     const loom_module_t* module, const loom_cmd_program_root_build_t* roots,
@@ -283,12 +355,14 @@ iree_status_t loom_cmd_program_plan_prepare(
     const loom_module_t* source_module,
     const loom_op_t* const* source_program_ops,
     iree_host_size_t source_program_count,
+    const loom_pass_registry_t* pass_registry,
     iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_block_pool_t* block_pool, bool* out_valid,
     loom_cmd_program_plan_t* out_plan, iree_allocator_t host_allocator) {
   IREE_ASSERT_ARGUMENT(source_module);
   IREE_ASSERT_ARGUMENT(source_program_ops);
   IREE_ASSERT_GT(source_program_count, 0u);
+  IREE_ASSERT_ARGUMENT(pass_registry);
   IREE_ASSERT_ARGUMENT(block_pool);
   IREE_ASSERT_ARGUMENT(out_valid);
   IREE_ASSERT_ARGUMENT(out_plan);
@@ -362,6 +436,11 @@ iree_status_t loom_cmd_program_plan_prepare(
     status = loom_cmd_program_composition_flatten(
         preparation_module, source_module, root_programs, source_program_count,
         diagnostic_emitter, &scratch_arena, &valid);
+  }
+  if (valid && iree_status_is_ok(status)) {
+    status = loom_cmd_program_plan_prepare_roots(
+        preparation_module, root_programs, source_program_count, pass_registry,
+        diagnostic_emitter, block_pool, &valid);
   }
 
   iree_host_size_t dependency_capacity = 0;

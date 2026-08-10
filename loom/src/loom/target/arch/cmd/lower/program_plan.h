@@ -13,6 +13,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
+#include "loom/pass/registry.h"
 #include "loom/target/arch/cmd/lower/kernel_unit.h"
 #include "loom/target/arch/cmd/lower/launch_graph.h"
 #include "loom/target/arch/cmd/lower/parameters.h"
@@ -84,11 +85,17 @@ typedef struct loom_cmd_program_plan_t {
 //
 // |source_program_ops| must contain unique linked module-boundary
 // command.program.def operations. Preparation selectively links their union
-// dependency closure into one module, interns equivalent
-// launch sites across roots into private dependency units, materializes one
-// launch-count program per root, assigns plan-wide dense dependency slots, and
-// lowers every command root. The source module is unchanged and need not
-// outlive the returned plan.
+// dependency closure into one module, flattens command-program composition,
+// resolves root-local control flow and explicit unroll policies, interns
+// equivalent launch sites across roots into private dependency units,
+// materializes one launch-count program per root, assigns plan-wide dense
+// dependency slots, and lowers every command root. Dependency kernel bodies
+// retain their ordinary target-compilation path. The source module is unchanged
+// and need not outlive the returned plan.
+//
+// |pass_registry| must provide the standard canonicalize and unroll-scf-for
+// function passes used to resolve root-local source structure. It is a
+// compiler-owned resource rather than part of the authored program contract.
 //
 // Infrastructure failures return a non-OK status. Invalid source programs emit
 // diagnostics, set |out_valid| to false, leave |out_plan| empty, and return OK.
@@ -98,6 +105,7 @@ iree_status_t loom_cmd_program_plan_prepare(
     const loom_module_t* source_module,
     const loom_op_t* const* source_program_ops,
     iree_host_size_t source_program_count,
+    const loom_pass_registry_t* pass_registry,
     iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_block_pool_t* block_pool, bool* out_valid,
     loom_cmd_program_plan_t* out_plan, iree_allocator_t host_allocator);

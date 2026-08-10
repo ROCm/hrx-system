@@ -13,6 +13,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_registry.h"
+#include "loom/pass/builtin_registry.h"
 #include "loom/testing/diagnostic_matchers.h"
 #include "loom/testing/module_ptr.h"
 #include "loom/verify/verify.h"
@@ -140,6 +141,7 @@ command.program.def public @increment_twice(%element_count: index) launch(%sourc
   bool valid = false;
   IREE_ASSERT_OK(loom_cmd_program_plan_prepare(
       source_module.get(), source_programs, IREE_ARRAYSIZE(source_programs),
+      loom_pass_builtin_registry(),
       /*diagnostic_emitter=*/{}, &block_pool_, &valid, &plan,
       iree_allocator_system()));
   ASSERT_TRUE(valid);
@@ -217,6 +219,7 @@ command.program.def public @parameterized() launch(%parameters: buffer, %target:
   bool valid = false;
   IREE_ASSERT_OK(loom_cmd_program_plan_prepare(
       source_module.get(), source_programs, IREE_ARRAYSIZE(source_programs),
+      loom_pass_builtin_registry(),
       /*diagnostic_emitter=*/{}, &block_pool_, &valid, &plan,
       iree_allocator_system()));
   ASSERT_TRUE(valid);

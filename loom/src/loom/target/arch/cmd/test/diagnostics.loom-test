@@ -1,0 +1,12 @@
+// RUN: emit command-program @entry
+
+// ERROR@+1: LOWERING/049 {program_name="recursive"}
+command.program.def @recursive() launch() {
+  command.program.launch @recursive() : ()
+  command.return
+}
+
+command.program.def public @entry() launch() {
+  command.program.launch @recursive() : ()
+  command.return
+}

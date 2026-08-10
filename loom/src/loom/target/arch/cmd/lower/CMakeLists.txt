@@ -42,10 +42,8 @@ loom_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ops::op_defs
-    loom::pass::value_facts
     loom::rewrite::callable
     loom::rewrite::rewriter
-    loom::transforms::cleanup::canonicalize
   PUBLIC
 )
 
@@ -192,6 +190,10 @@ loom_cc_library(
     loom::ops::kernel
     loom::ops::op_defs
     loom::ops::type_registry
+    loom::pass::builder
+    loom::pass::interpreter
+    loom::pass::program
+    loom::pass::registry
     loom::util::fact_table
   PUBLIC
 )
@@ -211,6 +213,7 @@ loom_cc_test(
     loom::ir
     loom::ops::low
     loom::ops::op_registry
+    loom::pass::builtin_registry
     loom::testing::diagnostic_matchers
     loom::testing::module_ptr
     loom::verify

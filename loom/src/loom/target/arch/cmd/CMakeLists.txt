@@ -70,8 +70,13 @@ loom_check_test_suite(
     loom_check_file_test
   SRCS
     "test/bytecode.loom-test"
+    "test/diagnostics.loom-test"
+    "test/kernel_units.loom-test"
     "test/low.loom-test"
+    "test/preparation.loom-test"
     "test/roundtrip.loom-test"
+    "test/scheduling.loom-test"
+    "test/storage.loom-test"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

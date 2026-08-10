@@ -10,10 +10,8 @@
 #include "loom/analysis/symbol_dependencies.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/module.h"
-#include "loom/pass/value_facts.h"
 #include "loom/rewrite/callable.h"
 #include "loom/rewrite/rewriter.h"
-#include "loom/transforms/cleanup/canonicalize.h"
 
 typedef struct loom_cmd_program_composition_t {
   // Module being flattened.
@@ -110,8 +108,7 @@ static iree_status_t loom_cmd_program_composition_reject_cycles(
 
 static iree_status_t loom_cmd_program_composition_inline_component(
     loom_cmd_program_composition_t* composition, const loom_scc_t* component,
-    loom_rewriter_t* rewriter, bool* out_changed) {
-  *out_changed = false;
+    loom_rewriter_t* rewriter) {
   IREE_ASSERT_EQ(component->node_count, 1u);
   const iree_host_size_t source_symbol_id = component->nodes[0];
   loom_symbol_dependency_edge_id_t edge_id =
@@ -125,7 +122,6 @@ static iree_status_t loom_cmd_program_composition_inline_component(
     if (loom_cmd_program_composition_is_call(composition, edge)) {
       status =
           loom_callable_inline_direct_call(rewriter, (loom_op_t*)edge->user_op);
-      *out_changed = iree_status_is_ok(status);
     }
     edge_id = edge->next_outgoing_edge_id;
   }
@@ -184,45 +180,12 @@ iree_status_t loom_cmd_program_composition_flatten(
   loom_rewriter_t rewriter = {0};
   IREE_RETURN_IF_ERROR(loom_rewriter_initialize(&rewriter, module, arena));
   iree_status_t status = iree_ok_status();
-  bool composition_changed = false;
   for (iree_host_size_t i = 0; i < sccs.count && iree_status_is_ok(status);
        ++i) {
-    bool component_changed = false;
     status = loom_cmd_program_composition_inline_component(
-        &composition, &sccs.values[i], &rewriter, &component_changed);
-    composition_changed |= component_changed;
+        &composition, &sccs.values[i], &rewriter);
   }
   loom_rewriter_deinitialize(&rewriter);
-
-  // Composition substitutes caller specialization operands into each inlined
-  // program body. Canonicalize those newly exact values before the command
-  // scheduler requires every structured choice to be resolved.
-  loom_pass_value_fact_owner_t fact_owner;
-  bool fact_owner_initialized = false;
-  loom_canonicalizer_t canonicalizer = {0};
-  bool canonicalizer_initialized = false;
-  if (iree_status_is_ok(status) && composition_changed) {
-    loom_pass_value_fact_owner_initialize(arena->block_pool, &fact_owner);
-    fact_owner_initialized = true;
-    status = loom_canonicalizer_initialize(module, arena, &fact_owner,
-                                           &canonicalizer);
-    canonicalizer_initialized = iree_status_is_ok(status);
-  }
-  for (iree_host_size_t i = 0;
-       canonicalizer_initialized && i < root_program_count &&
-       iree_status_is_ok(status);
-       ++i) {
-    loom_canonicalizer_result_t result = {0};
-    status = loom_canonicalizer_run_function(&canonicalizer, root_programs[i],
-                                             &(loom_canonicalizer_options_t){0},
-                                             &result);
-  }
-  if (canonicalizer_initialized) {
-    loom_canonicalizer_deinitialize(&canonicalizer);
-  }
-  if (fact_owner_initialized) {
-    loom_pass_value_fact_owner_deinitialize(&fact_owner);
-  }
   if (iree_status_is_ok(status)) *out_valid = true;
   return status;
 }
