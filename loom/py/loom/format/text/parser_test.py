@@ -1143,6 +1143,16 @@ class TestParseAttrDictOp:
         assert op.attributes["flags"] == "debug|trace"
         assert _op_printer().print_operation(op, module) == source
 
+    def test_parameterized_attr_params_roundtrip(self) -> None:
+        source = "test.attr_params<mode = fast, scopes = [workgroup]>"
+        module = Module()
+        op = _parse_op(source, module=module, scope=NameScope())
+        options = op.attributes["options"]
+        assert isinstance(options, ParameterizedAttr)
+        assert options.family_name == "test.options"
+        assert options.get("mode") == 1
+        assert _op_printer().print_operation(op, module) == source
+
     def test_string_that_looks_like_symbol_stays_string(self) -> None:
         source = '%r = test.attrs %x {target = "@target"} : f32'
         module, scope = _setup_scope(("x", F32))

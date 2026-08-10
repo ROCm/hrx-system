@@ -3542,6 +3542,7 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
     from loom.assembly import (
         Attr,
         AttrDict,
+        AttrParams,
         AttrTable,
         BindingList,
         BlockArgs,
@@ -3588,6 +3589,7 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
                 | KeyRef(field=f)
                 | ScopedEnumRef(field=f)
                 | TemplateParam(field=f)
+                | AttrParams(field=f)
             ):
                 fields.add(f)
             case TemplateParamFlags(param=param, flags=flags):
@@ -3769,6 +3771,31 @@ def _validate_scoped_enum_fields(
                 f"Op '{op_name}': scoped_enum attr '{attr.name}' requires "
                 "exactly one top-level ScopedEnumRef"
             )
+
+
+def _validate_attr_params_fields(
+    op_name: str,
+    format_elements: tuple[FormatElement, ...],
+    attrs: tuple[AttrDef, ...],
+) -> None:
+    """Validates known-family parameterized attribute payload syntax."""
+    from loom.assembly import AttrParams, Clause, OptionalGroup, Scope
+
+    attrs_by_name = {attr.name: attr for attr in attrs}
+    for element in format_elements:
+        if isinstance(element, AttrParams):
+            attr = attrs_by_name.get(element.field)
+            if (
+                attr is None
+                or attr.attr_type != ATTR_TYPE_PARAMETERIZED
+                or attr.parameterized_attr is None
+            ):
+                raise ValueError(
+                    f"Op '{op_name}': AttrParams field '{element.field}' must "
+                    "name a parameterized attr constrained to one exact family"
+                )
+        elif isinstance(element, Clause | OptionalGroup | Scope):
+            _validate_attr_params_fields(op_name, element.elements, attrs)
 
 
 def _validate_legacy_formats(
@@ -4917,6 +4944,7 @@ class Op:
             name, frozen_operands, frozen_results, tuple(traits)
         )
         _validate_scoped_enum_fields(name, frozen_format, frozen_attrs)
+        _validate_attr_params_fields(name, frozen_format, frozen_attrs)
         # Validate that format elements reference declared fields.
         if frozen_format:
             _validate_format_fields(

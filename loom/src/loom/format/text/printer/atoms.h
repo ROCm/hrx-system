@@ -34,6 +34,11 @@ iree_status_t loom_print_attr(const loom_print_context_t* ctx,
                               const loom_attribute_t* attr,
                               const loom_attr_descriptor_t* descriptor);
 
+// Prints one exact-family parameterized attribute's angle payload.
+iree_status_t loom_print_parameterized_attr_parameters(
+    const loom_print_context_t* ctx, const loom_attribute_t* attr,
+    const loom_attr_descriptor_t* descriptor);
+
 // Prints |type| using the current contextual printer state.
 iree_status_t loom_print_type(loom_print_context_t* ctx, loom_type_t type);
 

@@ -88,6 +88,7 @@ __all__ = [
     "StableKeyRef",
     "TemplateParam",
     "TemplateParamFlags",
+    "AttrParams",
     # Type-interior format elements.
     "ShapeOf",
     "ScalarOf",
@@ -764,6 +765,19 @@ class TemplateParamFlags:
     flags: str
 
 
+@dataclass(frozen=True, slots=True)
+class AttrParams:
+    """Known-family parameterized attribute payload in angle brackets.
+
+    Prints/parses only the descriptor-backed parameter list, omitting the
+    redundant ``#family`` prefix: ``<mode = fast, scopes = [workgroup]>``.
+    The field must be a parameterized attribute constrained to one exact
+    family so the format table can recover the parameter descriptors.
+    """
+
+    field: str
+
+
 # ============================================================================
 # Type-interior format elements
 # ============================================================================
@@ -870,6 +884,7 @@ type FormatElement = (
     | StableKeyRef
     | TemplateParam
     | TemplateParamFlags
+    | AttrParams
     | ShapeOf
     | ScalarOf
     | EncodingOf

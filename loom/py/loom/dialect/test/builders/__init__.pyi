@@ -1083,3 +1083,9 @@ class TestBuilder(DialectBuilder):
         tiles: Any | None = ...,
         location_id: int | None = ...,
     ) -> None: ...
+    def attr_params(
+        self,
+        *,
+        options: Any,
+        location_id: int | None = ...,
+    ) -> None: ...

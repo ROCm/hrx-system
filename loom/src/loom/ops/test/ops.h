@@ -280,7 +280,8 @@ enum {
   LOOM_OP_TEST_PARAMETERIZED_ATTR = LOOM_OP_KIND(LOOM_DIALECT_TEST, 106),
   LOOM_OP_TEST_COMPACT_PARAMETERIZED_ATTR = LOOM_OP_KIND(LOOM_DIALECT_TEST, 107),
   LOOM_OP_TEST_PARAMETERIZED_ATTR_ARRAY = LOOM_OP_KIND(LOOM_DIALECT_TEST, 108),
-  LOOM_OP_TEST_COUNT_ = 109,
+  LOOM_OP_TEST_ATTR_PARAMS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 109),
+  LOOM_OP_TEST_COUNT_ = 110,
 };
 
 // Synthetic flags for TemplateParamFlags parser/printer coverage.
@@ -2189,6 +2190,16 @@ iree_status_t loom_test_parameterized_attr_array_build(
     loom_test_parameterized_attr_array_build_flags_t build_flags,
     loom_parameterized_attr_array_t values,
     loom_optional loom_parameterized_attr_array_t tiles,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_TEST_ATTR_PARAMS: Test op carrying a known-family parameter payload in angle brackets.
+// test.attr_params<mode = fast, scopes = [workgroup]>
+LOOM_DEFINE_ISA(loom_test_attr_params_isa, LOOM_OP_TEST_ATTR_PARAMS)
+LOOM_DEFINE_ATTR_PARAMETERIZED(loom_test_attr_params_options, 0)
+iree_status_t loom_test_attr_params_build(
+    loom_builder_t* builder,
+    loom_attribute_t options,
     loom_location_id_t location,
     loom_op_t** out_op);
 

@@ -310,6 +310,7 @@ static iree_status_t loom_parse_format_optional_group(
                  (first_inner->kind == LOOM_FORMAT_KIND_KEY_REF ||
                   first_inner->kind == LOOM_FORMAT_KIND_SCOPED_ENUM_REF ||
                   first_inner->kind == LOOM_FORMAT_KIND_STABLE_KEY_REF ||
+                  first_inner->kind == LOOM_FORMAT_KIND_ATTR_PARAMS ||
                   first_inner->kind == LOOM_FORMAT_KIND_TEMPLATE_PARAM ||
                   first_inner->kind == LOOM_FORMAT_KIND_TEMPLATE_PARAM_FLAGS)) {
         present = peek.kind == LOOM_TOKEN_LANGLE;
@@ -561,6 +562,25 @@ static iree_status_t loom_parse_format_template_param(
     loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
     return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'>'"));
   }
+  IREE_RETURN_IF_ERROR(loom_parsed_op_set_attribute(
+      parsed, &parser->parser_arena, element->field_index, attr));
+  return loom_parse_format_add_field_span(parser, parsed,
+                                          LOOM_LOCATION_FIELD_ATTRIBUTE,
+                                          element->field_index, start_token);
+}
+
+// Parses a known-family parameterized attribute payload: <key = value, ...>.
+static iree_status_t loom_parse_format_attr_params(
+    loom_parser_t* parser, const loom_op_vtable_t* vtable,
+    const loom_format_element_t* element, loom_parsed_op_t* parsed) {
+  loom_token_t start_token = loom_tokenizer_peek(&parser->tokenizer);
+  const loom_attr_descriptor_t* descriptor =
+      &vtable->attr_descriptors[element->field_index];
+  loom_attribute_t attr = {0};
+  uint32_t attr_errors_before = parser->error_count;
+  IREE_RETURN_IF_ERROR(loom_parse_parameterized_attr_parameters(
+      parser, descriptor->reference.parameterized_attr_kind, &attr));
+  if (parser->error_count > attr_errors_before) return iree_ok_status();
   IREE_RETURN_IF_ERROR(loom_parsed_op_set_attribute(
       parsed, &parser->parser_arena, element->field_index, attr));
   return loom_parse_format_add_field_span(parser, parsed,
@@ -1116,6 +1136,12 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
       case LOOM_FORMAT_KIND_TEMPLATE_PARAM: {
         IREE_RETURN_IF_ERROR(
             loom_parse_format_template_param(parser, vtable, element, parsed));
+        break;
+      }
+
+      case LOOM_FORMAT_KIND_ATTR_PARAMS: {
+        IREE_RETURN_IF_ERROR(
+            loom_parse_format_attr_params(parser, vtable, element, parsed));
         break;
       }
 

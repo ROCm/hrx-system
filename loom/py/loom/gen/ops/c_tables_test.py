@@ -13,6 +13,7 @@ from loom.assembly import (
     COMMA,
     Attr,
     AttrDict,
+    AttrParams,
     AttrTable,
     BlockRef,
     Clause,
@@ -2499,6 +2500,30 @@ def test_template_param_flags_uses_template_attr_and_instance_flags() -> None:
     assert "uint8_t instance_flags" in ops_h
     assert "loom_op_attrs(*out_op)[0] = loom_attr_enum(kind);" in builders_c
     assert "(*out_op)->instance_flags = instance_flags;" in builders_c
+
+
+def test_attr_params_uses_exact_parameterized_family() -> None:
+    dialect = Dialect("test")
+    options = ParameterizedAttrDef(
+        "test.options",
+        group=dialect,
+        parameters=[AttrDef("width", ATTR_TYPE_I64, optional=True)],
+    )
+    op = Op(
+        "test.query",
+        group=dialect,
+        attrs=[
+            AttrDef(
+                "requirements",
+                ATTR_TYPE_PARAMETERIZED,
+                parameterized_attr=options,
+            )
+        ],
+        format=[AttrParams("requirements")],
+    )
+
+    tables_c = generate_tables_c("test", 0, [op], parameterized_attrs=[options])
+    assert "{LOOM_FORMAT_KIND_ATTR_PARAMS, 0, 0}" in tables_c
 
 
 def test_operand_dict_generates_format_and_builder_support() -> None:

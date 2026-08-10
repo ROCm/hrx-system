@@ -452,6 +452,10 @@
 //                           <add> or <add, reassoc|nnan|nsz>.
 //                           Glued to the op name. Parameter p is parsed as an
 //                           attribute. Flags f are stored in instance_flags.
+//   AttrParams(field)     Known-family parameterized attribute payload:
+//                           <mode = fast, scopes = [workgroup]>.
+//                           The exact family is carried by the field descriptor
+//                           and omitted from text.
 //
 // --- Spacing rules ---
 //

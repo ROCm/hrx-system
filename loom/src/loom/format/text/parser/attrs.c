@@ -298,39 +298,11 @@ static iree_status_t loom_parse_next_parameter_is_named(loom_parser_t* parser,
   return loom_tokenizer_consume_status(&lookahead);
 }
 
-static iree_status_t loom_parse_parameterized_attr(
-    loom_parser_t* parser, loom_parameterized_attr_kind_t expected_family_kind,
+static iree_status_t loom_parse_parameterized_attr_parameters_impl(
+    loom_parser_t* parser,
+    const loom_parameterized_attr_descriptor_t* family_descriptor,
     uint16_t nesting_depth, loom_type_parse_mode_t type_mode,
     loom_attribute_t* out_attr) {
-  loom_token_t family_token = loom_tokenizer_peek(&parser->tokenizer);
-  if (family_token.kind != LOOM_TOKEN_HASH_ATTR) {
-    return loom_parser_emit_unexpected_token(
-        parser, family_token, IREE_SV("a parameterized attribute family"));
-  }
-  const loom_parameterized_attr_descriptor_t* family_descriptor =
-      loom_context_lookup_parameterized_attr_by_name(parser->context,
-                                                     family_token.text);
-  if (!family_descriptor) {
-    return loom_parser_emit_unexpected_token(
-        parser, family_token,
-        IREE_SV("a registered parameterized attribute family"));
-  }
-  if (expected_family_kind != LOOM_PARAMETERIZED_ATTR_KIND_ANY &&
-      family_descriptor->kind != expected_family_kind) {
-    const loom_parameterized_attr_descriptor_t* expected_family_descriptor =
-        loom_context_resolve_parameterized_attr(parser->context,
-                                                expected_family_kind);
-    char expected[272];
-    int expected_length = iree_snprintf(
-        expected, sizeof(expected), "'#%.*s'",
-        (int)loom_bstring_view(expected_family_descriptor->name).size,
-        loom_bstring_view(expected_family_descriptor->name).data);
-    return loom_parser_emit_unexpected_token(
-        parser, family_token,
-        iree_make_string_view(expected, (iree_host_size_t)expected_length));
-  }
-  (void)loom_tokenizer_next(&parser->tokenizer);
-
   loom_token_t opening_token = loom_token_none();
   LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_LANGLE, &opening_token);
   if (nesting_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
@@ -427,6 +399,57 @@ static iree_status_t loom_parse_parameterized_attr(
   return loom_module_make_parameterized_attr(
       parser->module, family_descriptor->kind, parameter_slots,
       family_descriptor->parameter_count, out_attr);
+}
+
+iree_status_t loom_parse_parameterized_attr_parameters(
+    loom_parser_t* parser, loom_parameterized_attr_kind_t family_kind,
+    loom_attribute_t* out_attr) {
+  const loom_parameterized_attr_descriptor_t* family_descriptor =
+      loom_context_resolve_parameterized_attr(parser->context, family_kind);
+  if (!family_descriptor) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unknown parameterized attribute family kind %u",
+                            (unsigned)family_kind);
+  }
+  return loom_parse_parameterized_attr_parameters_impl(
+      parser, family_descriptor, /*nesting_depth=*/0, LOOM_TYPE_PARSE_BODY,
+      out_attr);
+}
+
+static iree_status_t loom_parse_parameterized_attr(
+    loom_parser_t* parser, loom_parameterized_attr_kind_t expected_family_kind,
+    uint16_t nesting_depth, loom_type_parse_mode_t type_mode,
+    loom_attribute_t* out_attr) {
+  loom_token_t family_token = loom_tokenizer_peek(&parser->tokenizer);
+  if (family_token.kind != LOOM_TOKEN_HASH_ATTR) {
+    return loom_parser_emit_unexpected_token(
+        parser, family_token, IREE_SV("a parameterized attribute family"));
+  }
+  const loom_parameterized_attr_descriptor_t* family_descriptor =
+      loom_context_lookup_parameterized_attr_by_name(parser->context,
+                                                     family_token.text);
+  if (!family_descriptor) {
+    return loom_parser_emit_unexpected_token(
+        parser, family_token,
+        IREE_SV("a registered parameterized attribute family"));
+  }
+  if (expected_family_kind != LOOM_PARAMETERIZED_ATTR_KIND_ANY &&
+      family_descriptor->kind != expected_family_kind) {
+    const loom_parameterized_attr_descriptor_t* expected_family_descriptor =
+        loom_context_resolve_parameterized_attr(parser->context,
+                                                expected_family_kind);
+    char expected[272];
+    int expected_length = iree_snprintf(
+        expected, sizeof(expected), "'#%.*s'",
+        (int)loom_bstring_view(expected_family_descriptor->name).size,
+        loom_bstring_view(expected_family_descriptor->name).data);
+    return loom_parser_emit_unexpected_token(
+        parser, family_token,
+        iree_make_string_view(expected, (iree_host_size_t)expected_length));
+  }
+  (void)loom_tokenizer_next(&parser->tokenizer);
+  return loom_parse_parameterized_attr_parameters_impl(
+      parser, family_descriptor, nesting_depth, type_mode, out_attr);
 }
 
 static iree_status_t loom_parse_parameterized_attr_array(
