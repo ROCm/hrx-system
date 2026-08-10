@@ -74,7 +74,7 @@ func.template<benchmark.attention_bf16.m16n16> target(@gfx1250) priority(20) @pl
   %key_physical_view = buffer.view %key_aligned[%base] : buffer -> view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
   %value_physical_view = buffer.view %value_aligned[%base] : buffer -> view<[%hidden_size]x[%padded_token_count]xbf16, #dense>
   %output_view = buffer.view %output_aligned[%base] : buffer -> view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
-  %probability_scratch = buffer.alloca %probability_scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %probability_scratch = buffer.alloca<workgroup> align(16) %probability_scratch_bytes : buffer
   %probability_scratch_view = buffer.view %probability_scratch[%base] : buffer -> view<16x16xbf16, #dense>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
   %final_max_even, %final_sum_even, %final_max_odd, %final_sum_odd, %final_acc0, %final_acc1, %final_acc2, %final_acc3, %final_acc4, %final_acc5, %final_acc6, %final_acc7, %final_acc8, %final_acc9, %final_acc10, %final_acc11, %final_acc12, %final_acc13, %final_acc14, %final_acc15 = scf.for %key_tile = [%c0 to %key_tile_count step %tile_step](%current_max_even = %negative_vector : vector<8xf32>, %current_sum_even = %zero_vector : vector<8xf32>, %current_max_odd = %negative_vector : vector<8xf32>, %current_sum_odd = %zero_vector : vector<8xf32>, %current_acc0 = %init : vector<8xf32>, %current_acc1 = %init : vector<8xf32>, %current_acc2 = %init : vector<8xf32>, %current_acc3 = %init : vector<8xf32>, %current_acc4 = %init : vector<8xf32>, %current_acc5 = %init : vector<8xf32>, %current_acc6 = %init : vector<8xf32>, %current_acc7 = %init : vector<8xf32>, %current_acc8 = %init : vector<8xf32>, %current_acc9 = %init : vector<8xf32>, %current_acc10 = %init : vector<8xf32>, %current_acc11 = %init : vector<8xf32>, %current_acc12 = %init : vector<8xf32>, %current_acc13 = %init : vector<8xf32>, %current_acc14 = %init : vector<8xf32>, %current_acc15 = %init : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
@@ -152,7 +152,7 @@ func.template<benchmark.attention_bf16.m16n16> target(@gfx1250) priority(20) @pl
       scf.yield %old_scale_odd : vector<8xf32>
     }
     vector.fragment.store<result> %weight, %probability_scratch_view[%c0, %c0] shape [%m, %n] : vector<8xf32>, view<16x16xbf16, #dense>
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     %probability_values = scf.if %lane_group_even -> (vector<16xbf16>) {
       %loaded_probability = vector.load %probability_scratch_view[%lane_column, %c0] : view<16x16xbf16, #dense> -> vector<16xbf16>
       scf.yield %loaded_probability : vector<16xbf16>
@@ -277,7 +277,7 @@ func.template<benchmark.attention_bf16.m16n16> target(@gfx1250) priority(20) @pl
     %next13 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc13, %tile13 : vector<8xf32>
     %next14 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc14, %tile14 : vector<8xf32>
     %next15 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc15, %tile15 : vector<8xf32>
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     scf.yield %next_max_even, %next_sum_even, %next_max_odd, %next_sum_odd, %next0, %next1, %next2, %next3, %next4, %next5, %next6, %next7, %next8, %next9, %next10, %next11, %next12, %next13, %next14, %next15 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
   }
   %selected_final_sum = scf.if %lane_group_even -> (vector<8xf32>) {

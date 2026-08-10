@@ -468,11 +468,11 @@ kernel.def target(@target) @f32_fragment_memory_dynamic_lds_base() {
   %wave_offset = index.cast %wave_offset_index : index to offset
   %input_view = buffer.view %input_buffer[%base] : buffer -> view<16x16xf32, #dense>
   %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32, #dense>
-  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
   %scratch_view = buffer.view %scratch[%wave_offset] : buffer -> view<16x16xf32, #dense>
   %input_fragment = vector.fragment.load<init> %input_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<4xf32>
   vector.fragment.store<result> %input_fragment, %scratch_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %scratch_fragment = vector.fragment.load<init> %scratch_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<4xf32>
   vector.fragment.store<result> %scratch_fragment, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
   kernel.return

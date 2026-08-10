@@ -274,12 +274,12 @@ output[lane] = scratch[63 - lane];
 Loom spelling:
 
 ```loom
-%scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+%scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
 %scratch_view = buffer.view %scratch[%base] : buffer -> view<64xi32, #dense>
 
 %loaded = vector.load %input_view[%lane] : view<64xi32, #dense> -> vector<1xi32>
 vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<64xi32, #dense>
-kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 %reversed = vector.load %scratch_view[%reverse_lane] : view<64xi32, #dense> -> vector<1xi32>
 vector.store %reversed, %output_view[%lane] : vector<1xi32>, view<64xi32, #dense>
 ```
@@ -351,14 +351,14 @@ Loom spelling:
 ```loom
 %row = kernel.workitem.id<y> : index
 %column = kernel.workitem.id<x> : index
-%scratch_a = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
-%scratch_b = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+%scratch_a = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
+%scratch_b = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
 
 vector.store %loaded, %scratch_a_view[%row, %column] : vector<1xi32>, view<8x8xi32, #dense>
-kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 %transposed = vector.load %scratch_a_view[%column, %row] : view<8x8xi32, #dense> -> vector<1xi32>
 vector.store %transposed, %scratch_b_view[%row, %column] : vector<1xi32>, view<8x8xi32, #dense>
-kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 %roundtrip = vector.load %scratch_b_view[%column, %row] : view<8x8xi32, #dense> -> vector<1xi32>
 ```
 
@@ -421,12 +421,12 @@ reinterpret_cast<int4 *>(output)[lane] = scratch[lane];
 Loom spelling:
 
 ```loom
-%scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+%scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
 %scratch_view = buffer.view %scratch[%base] : buffer -> view<64x4xi32, #dense>
 
 %loaded = vector.load %input_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
 vector.store %loaded, %scratch_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
-kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
 vector.store %roundtrip, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
 ```
@@ -771,7 +771,7 @@ kernel.launch.config workgroups(%one, %two, %one)
     : view<16xi8, #dense> to view<16xi8, #dense>, i32 -> kernel.async.token
 %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
 kernel.async.wait %group {newer_groups = 0} : kernel.async.group
-kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 ```
 
 Every selected workgroup participates in the collective operation. The mask

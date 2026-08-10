@@ -159,13 +159,13 @@ kernel.def target(@hip_mcpu_gfx9_4_generic) export("batched_transpose_kernel") @
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %out_shared_bytes = index.constant 33792 : offset
-  %out_shared_buffer = buffer.alloca %out_shared_bytes {base_alignment = 2, memory_space = workgroup} : buffer
+  %out_shared_buffer = buffer.alloca<workgroup> align(2) %out_shared_bytes : buffer
   %out_shared = buffer.view %out_shared_buffer[%c0_bytes] : buffer -> view<128x132xf16, %layout>
   %tmp_bytes = index.constant 32 : offset
-  %tmp_buffer = buffer.alloca %tmp_bytes {base_alignment = 2, memory_space = private} : buffer
+  %tmp_buffer = buffer.alloca<private> align(2) %tmp_bytes : buffer
   %tmp = buffer.view %tmp_buffer[%c0_bytes] : buffer -> view<4x4xf16, %layout>
   %tmp_row_bytes = index.constant 8 : offset
-  %tmp_row_buffer = buffer.alloca %tmp_row_bytes {base_alignment = 2, memory_space = private} : buffer
+  %tmp_row_buffer = buffer.alloca<private> align(2) %tmp_row_bytes : buffer
   %tmp_row = buffer.view %tmp_row_buffer[%c0_bytes] : buffer -> view<4xf16, %layout>
   %c32 = index.constant 32 : index
   %div = index.div %thread_id, %c32 : index
@@ -208,7 +208,7 @@ kernel.def target(@hip_mcpu_gfx9_4_generic) export("batched_transpose_kernel") @
       }
     }
   }
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %c128_2 = index.constant 128 : index
   scf.for %i = [%c0 to %c128_2 step %c1] {
     scf.for %j = [%c0 to %c128_2 step %c1] {

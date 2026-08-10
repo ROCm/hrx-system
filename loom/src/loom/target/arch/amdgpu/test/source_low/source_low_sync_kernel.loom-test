@@ -7,7 +7,7 @@ kernel.def target(@target) @single_wave_barrier() {
   %threads = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   kernel.return
 }
 
@@ -26,7 +26,7 @@ kernel.def target(@target) @multi_wave_barrier() {
   %threads = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   kernel.return
 }
 
@@ -45,7 +45,7 @@ kernel.def target(@target) @global_release_barrier() {
   %threads = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<global> {ordering = release, scope = workgroup}
+  kernel.barrier<global> scope(workgroup) ordering(release)
   kernel.return
 }
 
@@ -66,7 +66,7 @@ kernel.def target(@target) @global_acquire_barrier() {
   %threads = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<global> {ordering = acquire, scope = workgroup}
+  kernel.barrier<global> scope(workgroup) ordering(acquire)
   kernel.return
 }
 
@@ -88,7 +88,7 @@ kernel.def target(@target) @global_acq_rel_barrier() {
   %threads = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<global> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<global> scope(workgroup) ordering(acq_rel)
   kernel.return
 }
 
@@ -112,7 +112,7 @@ kernel.def target(@target) @multi_wave_subgroup_barrier() {
   %threads = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
+  kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
   kernel.return
 }
 
@@ -131,7 +131,7 @@ kernel.def target(@target) @single_wave_barrier_gfx12() {
   %threads = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   kernel.return
 }
 
@@ -151,7 +151,7 @@ kernel.def target(@target) @multi_wave_barrier_gfx12() {
   %threads = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   kernel.return
 }
 
@@ -171,7 +171,7 @@ kernel.def target(@target) @global_acq_rel_barrier_gfx12() {
   %threads = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<global> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<global> scope(workgroup) ordering(acq_rel)
   kernel.return
 }
 
@@ -195,7 +195,7 @@ kernel.def target(@target) @multi_wave_subgroup_barrier_gfx12() {
   %threads = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
+  kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
   kernel.return
 }
 
@@ -214,7 +214,7 @@ kernel.def target(@target) @single_wave_barrier_gfx12_5() {
   %threads = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   kernel.return
 }
 
@@ -234,7 +234,7 @@ kernel.def target(@target) @multi_wave_barrier_gfx12_5() {
   %threads = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   kernel.return
 }
 
@@ -254,7 +254,7 @@ kernel.def target(@target) @multi_wave_subgroup_barrier_gfx12_5() {
   %threads = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
+  kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
   kernel.return
 }
 
@@ -273,7 +273,7 @@ kernel.def target(@target) @single_wave_barrier_gfx9_4() {
   %threads = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   kernel.return
 }
 
@@ -292,7 +292,7 @@ kernel.def target(@target) @global_acq_rel_barrier_gfx9_4() {
   %threads = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<global> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<global> scope(workgroup) ordering(acq_rel)
   kernel.return
 }
 
@@ -314,7 +314,7 @@ kernel.def target(@target) @multi_wave_subgroup_barrier_gfx9_4() {
   %threads = index.constant 128 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
+  kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
   kernel.return
 }
 
@@ -333,7 +333,7 @@ kernel.def target(@target) @global_acq_rel_barrier_gfx950() {
   %threads = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<global> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<global> scope(workgroup) ordering(acq_rel)
   kernel.return
 }
 
@@ -364,7 +364,7 @@ kernel.def target(@target) @uniform_global_load_controls_barrier() {
   %control_value = view.load %control_view[%control_index] : view<1xi32, #dense> -> i32
   %is_zero = scalar.cmpi eq, %control_value, %barrier_control : i32
   scf.if %is_zero {
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     scf.yield
   }
   kernel.return

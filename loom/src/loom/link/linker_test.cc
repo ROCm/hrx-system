@@ -259,7 +259,7 @@ TEST_F(LinkerTest, ConcreteRodataSupersedesDeclaration) {
 global.rodata.decl @metadata
 )"));
   loom_module_t* corpus = Parse(IREE_SV(R"(
-global.rodata.def @metadata = bytes("4c4f4f4d"), align 4
+global.rodata.def @metadata = align(4) bytes("4c4f4f4d")
 )"));
 
   loom_module_t* linked = Link({harness, corpus});
@@ -267,8 +267,9 @@ global.rodata.def @metadata = bytes("4c4f4f4d"), align 4
 
   std::string text = Print(linked);
   EXPECT_EQ(text.find("global.rodata.decl @metadata"), std::string::npos);
-  EXPECT_NE(text.find("global.rodata.def @metadata = bytes(\"4c4f4f4d\")"),
-            std::string::npos);
+  EXPECT_NE(
+      text.find("global.rodata.def @metadata = align(4) bytes(\"4c4f4f4d\")"),
+      std::string::npos);
 }
 
 TEST_F(LinkerTest, SelectiveRootMaterializesReachableSymbols) {

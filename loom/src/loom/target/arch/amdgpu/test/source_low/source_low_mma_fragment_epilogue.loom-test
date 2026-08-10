@@ -278,7 +278,7 @@ kernel.def target(@target) @bf16_result_fragment_epilogue_after_barrier() {
   %gate_f32 = vector.extf %gate_bf16 : vector<8xbf16> to vector<8xf32>
   %scale = vector.constant 2.0 : vector<8xf32>
   %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_f32, %scale : vector<8xf32>
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   vector.fragment.store<result> %product, %output_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<16x16xbf16, #dense>
   kernel.return
 }

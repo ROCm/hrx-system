@@ -408,15 +408,15 @@ kernel.def target(@target) @f16_wmmar3_fragment_memory_workgroup() {
   %rhs_buffer_view = buffer.view %rhs_buffer[%base] : buffer -> view<32x8xf16, #dense>
   %init_view = buffer.view %init_buffer[%base] : buffer -> view<16x16xf32, #dense>
   %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32, #dense>
-  %lhs_scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %rhs_scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %lhs_scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
+  %rhs_scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
   %lhs_scratch_stage = buffer.view %lhs_scratch[%base] : buffer -> view<32x8xf16, #dense>
   %rhs_scratch_stage = buffer.view %rhs_scratch[%base] : buffer -> view<32x8xf16, #dense>
   %lhs_loaded = vector.load %lhs_buffer_view[%tid, 0] : view<32x8xf16, #dense> -> vector<8xf16>
   %rhs_loaded = vector.load %rhs_buffer_view[%tid, 0] : view<32x8xf16, #dense> -> vector<8xf16>
   vector.store %lhs_loaded, %lhs_scratch_stage[%tid, 0] : vector<8xf16>, view<32x8xf16, #dense>
   vector.store %rhs_loaded, %rhs_scratch_stage[%tid, 0] : vector<8xf16>, view<32x8xf16, #dense>
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %lhs_scratch_tile = buffer.view %lhs_scratch[%base] : buffer -> view<16x16xf16, #dense>
   %rhs_scratch_tile = buffer.view %rhs_scratch[%base] : buffer -> view<16x16xf16, %rhs_layout>
   %lhs = vector.fragment.load<lhs> %lhs_scratch_tile[0, 0] shape [%m, %k] : view<16x16xf16, #dense> -> vector<16xf16>

@@ -138,7 +138,7 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("engram_hash_kernel") @engram_
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %hash_local_bytes = index.constant 8 : offset
-  %hash_local_buffer = buffer.alloca %hash_local_bytes {base_alignment = 8, memory_space = private} : buffer
+  %hash_local_buffer = buffer.alloca<private> align(8) %hash_local_bytes : buffer
   %hash_local = buffer.view %hash_local_buffer[%c0_bytes] : buffer -> view<1xi64, %layout>
   %c32 = index.constant 32 : index
   %madd = index.madd %by, %c32, %tid : index

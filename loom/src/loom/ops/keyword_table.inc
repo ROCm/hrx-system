@@ -84,3 +84,5 @@
     [LOOM_KW_MEMORY_ACCESS] = (const uint8_t*)"\x0d" "memory_access",
     [LOOM_KW_PERIOD] = (const uint8_t*)"\x06" "period",
     [LOOM_KW_REQUIRES] = (const uint8_t*)"\x08" "requires",
+    [LOOM_KW_SCOPE] = (const uint8_t*)"\x05" "scope",
+    [LOOM_KW_ORDERING] = (const uint8_t*)"\x08" "ordering",

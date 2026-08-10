@@ -185,7 +185,7 @@ iree_status_t loom_sanitizer_race_access_verify(
     iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_SANITIZER_RACE_SYNC: Observe a synchronization boundary for race detection. The original synchronization operation remains the semantic barrier or fence; this op records the boundary needed by race-detector materialization.
-// sanitizer.race.sync<workgroup> {ordering = acq_rel, scope = workgroup}
+// sanitizer.race.sync<workgroup> scope(workgroup) ordering(acq_rel)
 LOOM_DEFINE_ISA(loom_sanitizer_race_sync_isa, LOOM_OP_SANITIZER_RACE_SYNC)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_sanitizer_race_sync_memory_space, 0, loom_value_fact_memory_space_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_sanitizer_race_sync_ordering, 1, loom_atomic_ordering_t)
@@ -193,8 +193,8 @@ LOOM_DEFINE_ATTR_ENUM_TYPED(loom_sanitizer_race_sync_scope, 2, loom_atomic_scope
 iree_status_t loom_sanitizer_race_sync_build(
     loom_builder_t* builder,
     loom_value_fact_memory_space_t memory_space,
-    loom_atomic_ordering_t ordering,
     loom_atomic_scope_t scope,
+    loom_atomic_ordering_t ordering,
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_sanitizer_race_sync_verify(

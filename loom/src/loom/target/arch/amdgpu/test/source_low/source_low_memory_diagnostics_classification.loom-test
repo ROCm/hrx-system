@@ -8,7 +8,7 @@ kernel.def target(@target) @static_lds_address_fields() {
 } launch() {
   %scratch_base = index.constant 0 : offset
   %bytes = index.constant 4 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
   %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<1xi32, #dense>
   %stored_value = vector.constant 1 : vector<1xi32>
   // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="none", fallback_reason="dynamic_term_count", static_offset_bytes="0", dynamic_stride_bytes="0"}
@@ -37,7 +37,7 @@ kernel.def target(@target) @addtid_byte_stride_selected_reason_fields() {
   %lane = kernel.workitem.id<x> : index
   %scratch_base = index.constant 0 : offset
   %bytes = index.constant 64 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi8, #dense>
   %stored_value = vector.constant 1 : vector<4xi8>
   // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_addtid_b32", address_form="ds_addtid", dynamic_term_kind="vaddr", fallback_reason="selected", static_offset_bytes="0", dynamic_stride_bytes="1"}
@@ -74,7 +74,7 @@ kernel.def target(@target) @addtid_element_stride_reason_fields() {
   %lane = kernel.workitem.id<x> : index
   %scratch_base = index.constant 0 : offset
   %bytes = index.constant 128 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xi32, #dense>
   %stored_value = vector.constant 1 : vector<1xi32>
   // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="dynamic_stride_bytes", static_offset_bytes="0", dynamic_stride_bytes="4"}
@@ -110,7 +110,7 @@ kernel.def target(@target) @addtid_cross_wave_reason_fields() {
   %lane = kernel.workitem.id<x> : index
   %scratch_base = index.constant 0 : offset
   %bytes = index.constant 256 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32, #dense>
   %stored_value = vector.constant 1 : vector<1xi32>
   // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", static_offset_bytes="0", dynamic_stride_bytes="4"}
@@ -148,7 +148,7 @@ kernel.def target(@target) @addtid_dynamic_stride_reason_fields() {
   %scaled_lane = index.mul %lane, %lane_stride : index
   %scratch_base = index.constant 0 : offset
   %bytes = index.constant 256 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32, #dense>
   %stored_value = vector.constant 1 : vector<1xi32>
   %other = vector.constant 2 : vector<1xi32>
@@ -190,7 +190,7 @@ kernel.def target(@target) @addtid_payload_width_reason_fields() {
   %lane = kernel.workitem.id<x> : index
   %scratch_base = index.constant 0 : offset
   %bytes = index.constant 512 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32x4xi32, #dense>
   %stored_value = vector.constant 1 : vector<4xi32>
   // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b128", address_form="default", dynamic_term_kind="vaddr", fallback_reason="payload_width", static_offset_bytes="0", dynamic_stride_bytes="16"}
@@ -250,7 +250,7 @@ kernel.def target(@target) @multi_term_lds_address_fields() {
   %lane_y = kernel.workitem.id<y> : index
   %scratch_base = index.constant 0 : offset
   %bytes = index.constant 128 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<8x4xi32, #dense>
   %stored_value = vector.constant 1 : vector<1xi32>
   // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="multiple", fallback_reason="multidimensional_workgroup", static_offset_bytes="0", dynamic_stride_bytes="0"}
@@ -285,7 +285,7 @@ kernel.def target(@target) @lds_read2_write2_structured_fields() {
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 2048 : offset
   %layout = encoding.layout.strided [8, 2] : encoding<layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xi32, %layout>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x2xi32, #dense>
   %stored_value = vector.constant 1 : vector<2xi32>

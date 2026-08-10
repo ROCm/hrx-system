@@ -113,7 +113,7 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("mask_indices_by_tp_kernel") @
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %value_bytes = index.constant 8 : offset
-  %value_buffer = buffer.alloca %value_bytes {base_alignment = 8, memory_space = private} : buffer
+  %value_buffer = buffer.alloca<private> align(8) %value_bytes : buffer
   %value = buffer.view %value_buffer[%c0_bytes] : buffer -> view<1xi64, %layout>
   %c128 = index.constant 128 : index
   %madd = index.madd %bx, %c128, %thread_idx : index
@@ -265,7 +265,7 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("inplace_unique_group_indices_
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %group_sel_bytes = index.constant 16 : offset
-  %group_sel_buffer = buffer.alloca %group_sel_bytes {base_alignment = 8, memory_space = private} : buffer
+  %group_sel_buffer = buffer.alloca<private> align(8) %group_sel_bytes : buffer
   %group_sel = buffer.view %group_sel_buffer[%c0_bytes] : buffer -> view<2xi64, %layout>
   %c128 = index.constant 128 : index
   %madd = index.madd %bx, %c128, %thread_idx : index

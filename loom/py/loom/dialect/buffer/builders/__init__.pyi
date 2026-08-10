@@ -14,9 +14,9 @@ class BufferBuilder(DialectBuilder):
     def alloca(
         self,
         *,
-        byte_length: ValueRef,
-        base_alignment: int,
         memory_space: str,
+        base_alignment: int,
+        byte_length: ValueRef,
         results: list[Type | TiedResultSpec],
         name: str | None = ...,
         names: Sequence[str] | None = ...,

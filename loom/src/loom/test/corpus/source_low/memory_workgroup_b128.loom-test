@@ -8,7 +8,7 @@ kernel.def @lds_b128_roundtrip() {
   %lane = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 1024 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xi32, #dense>
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xi32, #dense>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32, #dense>
@@ -29,7 +29,7 @@ kernel.def @lds_b128_single_lane_extract() {
   %lane = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 1024 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xi32, #dense>
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xi32, #dense>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32, #dense>
@@ -51,7 +51,7 @@ kernel.def @lds_b128_xor_swizzle_roundtrip() {
   %lane = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 1024 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xi32, #dense>
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xi32, #dense>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32, #dense>
@@ -78,7 +78,7 @@ kernel.def @lds_b128_large_static_offset_roundtrip() {
   %buffer_base = index.constant 0 : offset
   %large = index.constant 1024 : offset
   %bytes = index.constant 4096 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xi32, #dense>
   %scratch_view = buffer.view %scratch[%large] : buffer -> view<64x4xi32, #dense>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32, #dense>
@@ -100,8 +100,8 @@ kernel.def @lds_b128_split_second_alloca_roundtrip() {
   %buffer_base = index.constant 0 : offset
   %first_bytes = index.constant 64 : offset
   %second_bytes = index.constant 2048 : offset
-  %first = buffer.alloca %first_bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %second = buffer.alloca %second_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %first = buffer.alloca<workgroup> align(16) %first_bytes : buffer
+  %second = buffer.alloca<workgroup> align(16) %second_bytes : buffer
   %first_view = buffer.view %first[%buffer_base] : buffer -> view<16xi32, #dense>
   %second_view = buffer.view %second[%buffer_base] : buffer -> view<64x8xi32, #dense>
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x8xi32, #dense>

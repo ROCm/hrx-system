@@ -213,7 +213,7 @@ kernel.def target(@target) @attention_loop_carried_accumulator_barrier() {
   %carried = scf.for %tile = [%loop_begin to %loop_end step %loop_step](%accumulator = %init_accumulator : vector<8xf32>) -> (vector<8xf32>) {
     %init = vector.fragment<init> %accumulator shape [%m, %n] : vector<8xf32>
     %next = vector.mma %lhs, %rhs0, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     scf.yield %next : vector<8xf32>
   }
   %carried_init = vector.fragment<init> %carried shape [%m, %n] : vector<8xf32>

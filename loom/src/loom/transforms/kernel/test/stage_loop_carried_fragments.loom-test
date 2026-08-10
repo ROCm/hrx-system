@@ -48,7 +48,7 @@ kernel.def target(@target) @stage_dense_accumulator_fragments() {
   %28 = index.constant 0 : offset
   %29 = index.constant 0 : index
   %30 = encoding.layout.dense : encoding<layout>
-  %31 = buffer.alloca %27 {base_alignment = 16, memory_space = workgroup} : buffer
+  %31 = buffer.alloca<workgroup> align(16) %27 : buffer
   %32 = buffer.view %31[%28] : buffer -> view<16x64xf32, %30>
   %33 = index.constant 0 : index
   vector.fragment.store<result> %init, %32[%29, %33] shape [%m, %n] : vector<8xf32>, view<16x64xf32, %30>
@@ -58,7 +58,7 @@ kernel.def target(@target) @stage_dense_accumulator_fragments() {
   vector.fragment.store<result> %init, %32[%29, %35] shape [%m, %n] : vector<8xf32>, view<16x64xf32, %30>
   %36 = index.constant 48 : index
   vector.fragment.store<result> %init, %32[%29, %36] shape [%m, %n] : vector<8xf32>, view<16x64xf32, %30>
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   scf.for %37 = [%loop_begin to %tile_count step %loop_step] {
     %38 = vector.fragment.load<init> %32[%29, %33] shape [%m, %n] : view<16x64xf32, %30> -> vector<8xf32>
     %39 = vector.fragment.load<init> %32[%29, %34] shape [%m, %n] : view<16x64xf32, %30> -> vector<8xf32>
@@ -72,7 +72,7 @@ kernel.def target(@target) @stage_dense_accumulator_fragments() {
     vector.fragment.store<result> %next1, %32[%29, %34] shape [%m, %n] : vector<8xf32>, view<16x64xf32, %30>
     vector.fragment.store<result> %next2, %32[%29, %35] shape [%m, %n] : vector<8xf32>, view<16x64xf32, %30>
     vector.fragment.store<result> %next3, %32[%29, %36] shape [%m, %n] : vector<8xf32>, view<16x64xf32, %30>
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   }
   %result3 = vector.fragment.load<init> %32[%29, %36] shape [%m, %n] : view<16x64xf32, %30> -> vector<8xf32>
   %result2 = vector.fragment.load<init> %32[%29, %35] shape [%m, %n] : view<16x64xf32, %30> -> vector<8xf32>
@@ -130,16 +130,16 @@ kernel.def target(@target) @stage_blocked_accumulator_fragment() {
   %20 = index.constant 0 : offset
   %21 = index.constant 0 : index
   %22 = encoding.layout.dense : encoding<layout>
-  %23 = buffer.alloca %19 {base_alignment = 16, memory_space = workgroup} : buffer
+  %23 = buffer.alloca<workgroup> align(16) %19 : buffer
   %24 = buffer.view %23[%20] : buffer -> view<4x16x16xf32, %22>
   %25 = index.constant 0 : index
   vector.fragment.store<result> %init, %24[%21, %21, %25] shape [blocks(%blocks), %m, %n] : vector<16xf32>, view<4x16x16xf32, %22>
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   scf.for %26 = [%loop_begin to %tile_count step %loop_step] {
     %27 = vector.fragment.load<init> %24[%21, %21, %25] shape [blocks(%blocks), %m, %n] : view<4x16x16xf32, %22> -> vector<16xf32>
     %next = vector.mma %lhs, %rhs, %27 : vector<4xf16>, vector<4xf16>, vector<16xf32>
     vector.fragment.store<result> %next, %24[%21, %21, %25] shape [blocks(%blocks), %m, %n] : vector<16xf32>, view<4x16x16xf32, %22>
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   }
   %result = vector.fragment.load<init> %24[%21, %21, %25] shape [blocks(%blocks), %m, %n] : view<4x16x16xf32, %22> -> vector<16xf32>
   test.use %result : vector<16xf32>
@@ -328,7 +328,7 @@ kernel.def target(@target) @stage_multi_subgroup_accumulator_fragments() {
   %31 = index.constant 0 : offset
   %32 = index.constant 0 : index
   %33 = encoding.layout.dense : encoding<layout>
-  %34 = buffer.alloca %30 {base_alignment = 16, memory_space = workgroup} : buffer
+  %34 = buffer.alloca<workgroup> align(16) %30 : buffer
   %35 = buffer.view %34[%31] : buffer -> view<16x128xf32, %33>
   %36 = kernel.subgroup.id : index
   %37 = index.constant 64 : index
@@ -343,7 +343,7 @@ kernel.def target(@target) @stage_multi_subgroup_accumulator_fragments() {
   %43 = index.constant 48 : index
   %44 = index.add %38, %43 : index
   vector.fragment.store<result> %input, %35[%32, %44] shape [%m, %n] : vector<8xf32>, view<16x128xf32, %33>
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   scf.for %45 = [%origin to %tile_count step %loop_step] {
     %46 = vector.fragment.load<init> %35[%32, %38] shape [%m, %n] : view<16x128xf32, %33> -> vector<8xf32>
     %47 = vector.fragment.load<init> %35[%32, %40] shape [%m, %n] : view<16x128xf32, %33> -> vector<8xf32>
@@ -357,7 +357,7 @@ kernel.def target(@target) @stage_multi_subgroup_accumulator_fragments() {
     vector.fragment.store<result> %next1, %35[%32, %40] shape [%m, %n] : vector<8xf32>, view<16x128xf32, %33>
     vector.fragment.store<result> %next2, %35[%32, %42] shape [%m, %n] : vector<8xf32>, view<16x128xf32, %33>
     vector.fragment.store<result> %next3, %35[%32, %44] shape [%m, %n] : vector<8xf32>, view<16x128xf32, %33>
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   }
   %result0 = vector.fragment.load<init> %35[%32, %38] shape [%m, %n] : view<16x128xf32, %33> -> vector<8xf32>
   %output_global = buffer.assume.memory_space<global> %output : buffer

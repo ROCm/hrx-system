@@ -148,12 +148,12 @@ kernel.def target(@target) @workgroup_addressing_i32() {
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
   %input_view = buffer.view %input_aligned[%base] : buffer -> view<4xi32, #dense>
   %output_view = buffer.view %output_aligned[%base] : buffer -> view<4xi32, #dense>
-  %scratch = buffer.alloca %scratch_byte_length {base_alignment = 4, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(4) %scratch_byte_length : buffer
   %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<6xi32, #dense>
   %scratch_subview = view.subview %scratch_view[1] : view<6xi32, #dense> -> view<4xi32, #dense>
   %input_value = view.load %input_view[%lane] : view<4xi32, #dense> -> i32
   view.store %input_value, %scratch_subview[%lane] : i32, view<4xi32, #dense>
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %workgroup_value = view.load %scratch_subview[%lane] : view<4xi32, #dense> -> i32
   view.store %workgroup_value, %output_view[%lane] : i32, view<4xi32, #dense>
   kernel.return

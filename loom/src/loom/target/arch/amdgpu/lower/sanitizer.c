@@ -398,8 +398,8 @@ static iree_status_t loom_amdgpu_sanitizer_emit_site_table_rodata(
                           &builder);
   loom_op_t* rodata_op = NULL;
   return loom_global_rodata_def_build(
-      &builder, LOOM_GLOBAL_RODATA_DEF_BUILD_FLAG_HAS_ALIGNMENT, symbol_ref,
-      site_table, 8, LOOM_LOCATION_UNKNOWN, &rodata_op);
+      &builder, LOOM_GLOBAL_RODATA_DEF_BUILD_FLAG_HAS_ALIGNMENT, symbol_ref, 8,
+      site_table, LOOM_LOCATION_UNKNOWN, &rodata_op);
 }
 
 iree_status_t loom_amdgpu_finalize_sanitizer_module(

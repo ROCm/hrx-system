@@ -22,7 +22,7 @@ kernel.def @shared_memory_vector_tile_roundtrip() {
 
   // HIP concept:
   //   __shared__ int4 scratch[64];
-  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
   %scratch_view = buffer.view %scratch[%base] : buffer -> view<64x4xi32, #dense>
 
   // HIP concept:
@@ -33,7 +33,7 @@ kernel.def @shared_memory_vector_tile_roundtrip() {
 
   // HIP concept:
   //   __syncthreads();
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 
   // HIP concept:
   //   reinterpret_cast<int4 *>(output)[threadIdx.x] =

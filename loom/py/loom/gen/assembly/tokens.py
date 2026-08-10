@@ -91,6 +91,8 @@ KEYWORD_MAP: dict[str, str] = {
     "memory_access": "LOOM_KW_MEMORY_ACCESS",
     "period": "LOOM_KW_PERIOD",
     "requires": "LOOM_KW_REQUIRES",
+    "scope": "LOOM_KW_SCOPE",
+    "ordering": "LOOM_KW_ORDERING",
 }
 
 # Maps Region(..., syntax=...) names to C parser/printer selector IDs. The

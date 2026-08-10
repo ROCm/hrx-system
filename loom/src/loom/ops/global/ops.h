@@ -79,7 +79,7 @@ iree_status_t loom_global_variable_verify(
     iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_GLOBAL_RODATA_DEF: Read-only executable data payload. This defines a named artifact symbol containing uninterpreted bytes, optionally with a stronger power-of-two byte alignment requirement. It is used for compiler-owned tables and metadata such as sanitizer site records; user-visible value globals remain global.constant/global.variable.
-// global.rodata.def @loom_sanitizer_sites = bytes("4c53495401000000"), align 8
+// global.rodata.def @loom_sanitizer_sites = align(8) bytes("4c53495401000000")
 LOOM_DEFINE_ISA(loom_global_rodata_def_isa, LOOM_OP_GLOBAL_RODATA_DEF)
 LOOM_DEFINE_ATTR_SYMBOL(loom_global_rodata_def_symbol, 0)
 LOOM_DEFINE_ATTR_BYTES(loom_global_rodata_def_contents, 1)
@@ -92,8 +92,8 @@ iree_status_t loom_global_rodata_def_build(
     loom_builder_t* builder,
     loom_global_rodata_def_build_flags_t build_flags,
     loom_symbol_ref_t symbol,
-    iree_const_byte_span_t contents,
     loom_optional int64_t alignment,
+    iree_const_byte_span_t contents,
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_global_rodata_def_verify(

@@ -10,7 +10,7 @@ kernel.def target(@target) @lds_f16x4_b64_roundtrip() {
   %lane = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 512 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 8, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(8) %bytes : buffer
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xf16, #dense>
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xf16, #dense>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xf16, #dense>
@@ -46,7 +46,7 @@ kernel.def target(@target) @lds_f16x8_b128_roundtrip() {
   %lane = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 1024 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x8xf16, #dense>
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x8xf16, #dense>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x8xf16, #dense>
@@ -80,7 +80,7 @@ kernel.def target(@target) @lds_f16x8_b128_extract_scalar_stores() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %bytes = index.constant 16 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %input_view = buffer.view %input[%base] : buffer -> view<8xf16, #dense>
   %scratch_view = buffer.view %scratch[%base] : buffer -> view<8xf16, #dense>
   %output_view = buffer.view %output[%base] : buffer -> view<8xf16, #dense>
@@ -145,7 +145,7 @@ kernel.def target(@target) @lds_bf16x4_b64_roundtrip() {
   %lane = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 512 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 8, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(8) %bytes : buffer
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xbf16, #dense>
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xbf16, #dense>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xbf16, #dense>
@@ -181,7 +181,7 @@ kernel.def target(@target) @lds_bf16x8_b128_roundtrip() {
   %lane = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 1024 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x8xbf16, #dense>
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x8xbf16, #dense>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x8xbf16, #dense>
@@ -217,7 +217,7 @@ kernel.def target(@target) @lds_f16_scalar_roundtrip() {
   %lane = kernel.workitem.id<x> : index
   %base = index.constant 0 : offset
   %bytes = index.constant 128 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 2, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(2) %bytes : buffer
   %input_view = buffer.view %input[%base] : buffer -> view<64xf16, #dense>
   %scratch_view = buffer.view %scratch[%base] : buffer -> view<64xf16, #dense>
   %output_view = buffer.view %output[%base] : buffer -> view<64xf16, #dense>
@@ -252,7 +252,7 @@ kernel.def target(@target) @lds_i8x2_b16_roundtrip() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %bytes = index.constant 2 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 2, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(2) %bytes : buffer
   %input_view = buffer.view %input[%base] : buffer -> view<2xi8, #dense>
   %scratch_view = buffer.view %scratch[%base] : buffer -> view<2xi8, #dense>
   %output_view = buffer.view %output[%base] : buffer -> view<2xi8, #dense>
@@ -285,7 +285,7 @@ kernel.def target(@target) @lds_i16_scalar_roundtrip() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %bytes = index.constant 2 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 2, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(2) %bytes : buffer
   %input_view = buffer.view %input[%base] : buffer -> view<1xi16, #dense>
   %scratch_view = buffer.view %scratch[%base] : buffer -> view<1xi16, #dense>
   %output_view = buffer.view %output[%base] : buffer -> view<1xi16, #dense>
@@ -321,7 +321,7 @@ kernel.def target(@target) @lds_bf16_scalar_roundtrip() {
   %lane = kernel.workitem.id<x> : index
   %base = index.constant 0 : offset
   %bytes = index.constant 128 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 2, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(2) %bytes : buffer
   %input_view = buffer.view %input[%base] : buffer -> view<64xbf16, #dense>
   %scratch_view = buffer.view %scratch[%base] : buffer -> view<64xbf16, #dense>
   %output_view = buffer.view %output[%base] : buffer -> view<64xbf16, #dense>
@@ -360,7 +360,7 @@ kernel.def target(@target) @lds_f16_strided_scalar_roundtrip() {
   %base = index.constant 0 : offset
   %bytes = index.constant 512 : offset
   %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 2, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(2) %bytes : buffer
   %input_view = buffer.view %input[%base] : buffer -> view<16x16xf16, #dense>
   %scratch_view = buffer.view %scratch[%base] : buffer -> view<16x16xf16, %rhs_layout>
   %output_view = buffer.view %output[%base] : buffer -> view<16x16xf16, #dense>

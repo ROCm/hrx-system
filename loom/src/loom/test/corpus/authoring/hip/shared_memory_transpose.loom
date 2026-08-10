@@ -24,8 +24,8 @@ kernel.def @shared_memory_tile_double_transpose() {
   // HIP concept:
   //   __shared__ int scratch_a[8][8];
   //   __shared__ int scratch_b[8][8];
-  %scratch_a = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_b = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_a = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
+  %scratch_b = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
   %scratch_a_view = buffer.view %scratch_a[%base] : buffer -> view<8x8xi32, #dense>
   %scratch_b_view = buffer.view %scratch_b[%base] : buffer -> view<8x8xi32, #dense>
 
@@ -36,7 +36,7 @@ kernel.def @shared_memory_tile_double_transpose() {
 
   // HIP concept:
   //   __syncthreads();
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 
   // HIP concept:
   //   scratch_b[threadIdx.y][threadIdx.x] = scratch_a[threadIdx.x][threadIdx.y];
@@ -45,7 +45,7 @@ kernel.def @shared_memory_tile_double_transpose() {
 
   // HIP concept:
   //   __syncthreads();
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 
   // HIP concept:
   //   output[threadIdx.y][threadIdx.x] = scratch_b[threadIdx.x][threadIdx.y];

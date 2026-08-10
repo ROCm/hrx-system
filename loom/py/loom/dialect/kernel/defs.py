@@ -18,6 +18,7 @@ from loom.assembly import (
     Attr,
     AttrDict,
     BlockArgs,
+    Clause,
     FormatElement,
     FuncArgs,
     OptionalGroup,
@@ -1308,12 +1309,16 @@ kernel_barrier = Op(
     ],
     traits=[MEMORY_FENCE, CONVERGENT],
     verify="loom_kernel_barrier_verify",
-    format=[TemplateParam("memory_space"), AttrDict()],
+    format=[
+        TemplateParam("memory_space"),
+        Clause("scope", Attr("scope")),
+        Clause("ordering", Attr("ordering")),
+    ],
     examples=[
-        "kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}",
-        "kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}",
-        "kernel.barrier<global> {ordering = release, scope = workgroup}",
-        "kernel.barrier<global> {ordering = acquire, scope = workgroup}",
+        "kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)",
+        "kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)",
+        "kernel.barrier<global> scope(workgroup) ordering(release)",
+        "kernel.barrier<global> scope(workgroup) ordering(acquire)",
     ],
 )
 

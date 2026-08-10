@@ -104,6 +104,6 @@ kernel.def target(@rocm_hsaco_fb) export("barrier_smoke") @barrier_smoke() {
   %c0 = index.constant 0 : index
   %c0_bytes = index.cast %c0 : index to offset
   %input = buffer.view %binding0[%c0_bytes] : buffer -> view<4xf32, #dense>
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   kernel.return
 }

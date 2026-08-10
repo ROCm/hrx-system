@@ -13,7 +13,7 @@ kernel.def target(@target) @a0_legalizes_constrained_lds_packets() {
   %regular_b32_layout = encoding.layout.strided [8, 2] : encoding<layout>
   %regular_b64_layout = encoding.layout.strided [4, 2] : encoding<layout>
   %stride64_layout = encoding.layout.strided [512, 256] : encoding<layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %regular_b32 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi32, %regular_b32_layout>
   %regular_b64 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi64, %regular_b64_layout>
   %stride64_b32 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi32, %stride64_layout>
@@ -97,7 +97,7 @@ kernel.def target(@target) @b0_retains_native_lds_packets() {
   %regular_b32_layout = encoding.layout.strided [8, 2] : encoding<layout>
   %regular_b64_layout = encoding.layout.strided [4, 2] : encoding<layout>
   %stride64_layout = encoding.layout.strided [512, 256] : encoding<layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %regular_b32 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi32, %regular_b32_layout>
   %regular_b64 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi64, %regular_b64_layout>
   %stride64_b32 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi32, %stride64_layout>

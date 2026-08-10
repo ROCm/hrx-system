@@ -552,7 +552,7 @@ static iree_status_t loom_stage_loop_carried_fragments_build_barrier(
   loom_op_t* barrier_op = NULL;
   return loom_kernel_barrier_build(
       &context->rewriter->builder, LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
-      LOOM_ATOMIC_ORDERING_ACQ_REL, LOOM_ATOMIC_SCOPE_WORKGROUP,
+      LOOM_ATOMIC_SCOPE_WORKGROUP, LOOM_ATOMIC_ORDERING_ACQ_REL,
       anchor_op->location, &barrier_op);
 }
 
@@ -699,9 +699,9 @@ static iree_status_t loom_stage_loop_carried_fragments_rewrite(
 
   loom_op_t* buffer_op = NULL;
   IREE_RETURN_IF_ERROR(loom_buffer_alloca_build(
-      &context->rewriter->builder, byte_count_value,
-      /*base_alignment=*/16, LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
-      loom_type_buffer(), op->location, &buffer_op));
+      &context->rewriter->builder, LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
+      /*base_alignment=*/16, byte_count_value, loom_type_buffer(), op->location,
+      &buffer_op));
   loom_value_id_t buffer_value = loom_buffer_alloca_result(buffer_op);
 
   loom_overflow_dim_t view_dimensions[3] = {

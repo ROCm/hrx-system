@@ -97,10 +97,10 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("normalize_weight_kernel") @no
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %weights_local_bytes = index.constant 8 : offset
-  %weights_local_buffer = buffer.alloca %weights_local_bytes {base_alignment = 4, memory_space = private} : buffer
+  %weights_local_buffer = buffer.alloca<private> align(4) %weights_local_bytes : buffer
   %weights_local = buffer.view %weights_local_buffer[%c0_bytes] : buffer -> view<2xf32, %layout>
   %total_bytes = index.constant 4 : offset
-  %total_buffer = buffer.alloca %total_bytes {base_alignment = 4, memory_space = private} : buffer
+  %total_buffer = buffer.alloca<private> align(4) %total_bytes : buffer
   %total = buffer.view %total_buffer[%c0_bytes] : buffer -> view<1xf32, %layout>
   %c128 = index.constant 128 : index
   %madd = index.madd %bx, %c128, %tid : index

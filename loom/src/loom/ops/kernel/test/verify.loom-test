@@ -332,7 +332,7 @@ kernel.def @workgroup_vote_count_rejects_narrow_result() {
 
 func.def @barrier_rejects_private_memory_space() {
   // ERROR@+1: STRUCTURE/014 "memory_space" "3" "workgroup or global memory space"
-  kernel.barrier<private> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<private> scope(workgroup) ordering(acq_rel)
   func.return
 }
 
@@ -340,7 +340,7 @@ func.def @barrier_rejects_private_memory_space() {
 
 func.def @barrier_rejects_acquire_ordering() {
   // ERROR@+1: STRUCTURE/014 "ordering" "1" "acq_rel ordering for workgroup memory"
-  kernel.barrier<workgroup> {ordering = acquire, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acquire)
   func.return
 }
 
@@ -348,7 +348,7 @@ func.def @barrier_rejects_acquire_ordering() {
 
 func.def @barrier_rejects_device_scope() {
   // ERROR@+1: STRUCTURE/014 "scope" "3" "subgroup or workgroup scope for workgroup memory"
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = device}
+  kernel.barrier<workgroup> scope(device) ordering(acq_rel)
   func.return
 }
 
@@ -356,7 +356,7 @@ func.def @barrier_rejects_device_scope() {
 
 func.def @global_barrier_rejects_subgroup_scope() {
   // ERROR@+1: STRUCTURE/014 "scope" "1" "workgroup scope for global memory"
-  kernel.barrier<global> {ordering = acquire, scope = subgroup}
+  kernel.barrier<global> scope(subgroup) ordering(acquire)
   func.return
 }
 
@@ -364,7 +364,7 @@ func.def @global_barrier_rejects_subgroup_scope() {
 
 func.def @global_barrier_rejects_relaxed_ordering() {
   // ERROR@+1: STRUCTURE/014 "ordering" "0" "acquire, release, or acq_rel ordering for global memory"
-  kernel.barrier<global> {ordering = relaxed, scope = workgroup}
+  kernel.barrier<global> scope(workgroup) ordering(relaxed)
   func.return
 }
 
@@ -372,7 +372,7 @@ func.def @global_barrier_rejects_relaxed_ordering() {
 
 func.def @global_barrier_rejects_sequentially_consistent_ordering() {
   // ERROR@+1: STRUCTURE/014 "ordering" "4" "acquire, release, or acq_rel ordering for global memory"
-  kernel.barrier<global> {ordering = seq_cst, scope = workgroup}
+  kernel.barrier<global> scope(workgroup) ordering(seq_cst)
   func.return
 }
 
@@ -386,7 +386,7 @@ kernel.def @workgroup_barrier_accepts_uniform_branch() {
   %workgroup = kernel.workgroup.id<x> : index
   %is_first_workgroup = index.cmp eq, %workgroup, %first_workgroup : index
   scf.if %is_first_workgroup {
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     scf.yield
   }
   kernel.return
@@ -404,7 +404,7 @@ kernel.def @workgroup_barrier_rejects_lane_predicated_branch() {
   %active = index.cmp ult, %lane, %limit : index
   scf.if %active {
     // ERROR@+1: STRUCTURE/038 {op_name="kernel.barrier", required_uniform_scope="workgroup", control_kind="region_selector", control_value="active", control_op_name="scf.if", control_distribution="lane_predicate"}
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     scf.yield
   }
   kernel.return
@@ -422,7 +422,7 @@ kernel.def @workgroup_barrier_rejects_lane_varying_counted_loop_bound() {
   %lane = kernel.workitem.id<x> : index
   scf.for %i = [%loop_begin to %lane step %loop_step] {
     // ERROR@+1: STRUCTURE/038 {op_name="kernel.barrier", required_uniform_scope="workgroup", control_kind="loop_upper_bound", control_value="lane", control_op_name="scf.for", control_distribution="lane_varying"}
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   }
   kernel.return
 }
@@ -446,7 +446,7 @@ kernel.def target(@test_target) @workgroup_barrier_accepts_config_derived_loop_b
   %rounded_token_count = index.add %valid_token_count, %tile_rounding_bias : index
   %tile_count = index.div %rounded_token_count, %tile_size : index
   scf.for %tile = [%loop_begin to %tile_count step %loop_step] {
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   }
   kernel.return
 }
@@ -459,7 +459,7 @@ kernel.def @workgroup_barrier_accepts_kernel_argument_control(%enabled: i1) {
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%enabled: i1) {
   scf.if %enabled {
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     scf.yield
   }
   kernel.return
@@ -476,9 +476,9 @@ kernel.def @barrier_scope_distinguishes_subgroup_control() {
   %subgroup = kernel.subgroup.id : index
   %is_first_subgroup = index.cmp eq, %subgroup, %first_subgroup : index
   scf.if %is_first_subgroup {
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
+    kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
     // ERROR@+1: STRUCTURE/038 {op_name="kernel.barrier", required_uniform_scope="workgroup", control_kind="region_selector", control_value="is_first_subgroup", control_op_name="scf.if", control_distribution="subgroup"}
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     scf.yield
   }
   kernel.return
@@ -497,7 +497,7 @@ kernel.def target(@test_target) @workgroup_barrier_accepts_exact_single_subgroup
   %subgroup = kernel.subgroup.id : index
   %is_first_subgroup = index.cmp eq, %subgroup, %first_subgroup : index
   scf.if %is_first_subgroup {
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     scf.yield
   }
   kernel.return
@@ -515,14 +515,14 @@ kernel.def @barrier_scope_distinguishes_collective_results() {
   %is_first_lane = index.cmp eq, %lane, %first_lane : index
   %subgroup_any = kernel.subgroup.vote.any %is_first_lane : i1
   scf.if %subgroup_any {
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
+    kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
     // ERROR@+1: STRUCTURE/038 {op_name="kernel.barrier", required_uniform_scope="workgroup", control_kind="region_selector", control_value="subgroup_any", control_op_name="scf.if", control_distribution="subgroup"}
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     scf.yield
   }
   %workgroup_any = kernel.workgroup.vote.any %is_first_lane : i1
   scf.if %workgroup_any {
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     scf.yield
   }
   kernel.return
@@ -542,7 +542,7 @@ kernel.def @workgroup_barrier_rejects_scan_control() {
   %is_first_prefix = scalar.cmpi eq, %prefix, %first_prefix : i32
   scf.if %is_first_prefix {
     // ERROR@+1: STRUCTURE/038 {op_name="kernel.barrier", required_uniform_scope="workgroup", control_kind="region_selector", control_value="is_first_prefix", control_op_name="scf.if", control_distribution="lane_predicate"}
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     scf.yield
   }
   kernel.return
@@ -562,7 +562,7 @@ kernel.def @workgroup_barrier_rejects_unknown_control(%arg: i32) {
   %condition = scalar.cmpf ogt, %unknown, %control_threshold : f32
   scf.if %condition {
     // ERROR@+1: STRUCTURE/038 {op_name="kernel.barrier", required_uniform_scope="workgroup", control_kind="region_selector", control_value="condition", control_op_name="scf.if", control_distribution="unknown"}
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     scf.yield
   }
   kernel.return
@@ -581,7 +581,7 @@ kernel.def @workgroup_barrier_rejects_lane_divergent_cfg_arm() {
   cfg.cond_br %active, ^active_arm, ^inactive_arm
 ^active_arm:
   // ERROR@+1: STRUCTURE/038 {op_name="kernel.barrier", required_uniform_scope="workgroup", control_kind="cfg_selector", control_value="active", control_op_name="cfg.cond_br", control_distribution="lane_predicate"}
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   cfg.br ^join
 ^inactive_arm:
   cfg.br ^join
@@ -603,7 +603,7 @@ kernel.def @workgroup_barrier_rejects_nested_cfg_control(%enabled: i1) {
 ^active_arm:
   scf.if %enabled {
     // ERROR@+1: STRUCTURE/038 {op_name="kernel.barrier", required_uniform_scope="workgroup", control_kind="cfg_selector", control_value="active", control_op_name="cfg.cond_br", control_distribution="lane_predicate"}
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     scf.yield
   }
   cfg.br ^join
@@ -631,7 +631,7 @@ kernel.def @workgroup_barrier_accepts_reconverged_cfg_join() {
 ^inactive_arm:
   cfg.br ^join
 ^join:
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   kernel.return
 }
 
@@ -647,14 +647,14 @@ kernel.def @cfg_barrier_scope_distinguishes_subgroup_control() {
   %is_first_subgroup = index.cmp eq, %subgroup, %first_subgroup : index
   cfg.cond_br %is_first_subgroup, ^first_subgroup, ^other_subgroups
 ^first_subgroup:
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
+  kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
   // ERROR@+1: STRUCTURE/038 {op_name="kernel.barrier", required_uniform_scope="workgroup", control_kind="cfg_selector", control_value="is_first_subgroup", control_op_name="cfg.cond_br", control_distribution="subgroup"}
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   cfg.br ^join
 ^other_subgroups:
   cfg.br ^join
 ^join:
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   kernel.return
 }
 
@@ -673,7 +673,7 @@ kernel.def @workgroup_barrier_rejects_lane_divergent_cfg_loop() {
   cfg.br ^header
 ^header:
   // ERROR@+1: STRUCTURE/038 {op_name="kernel.barrier", required_uniform_scope="workgroup", control_kind="cfg_selector", control_value="active", control_op_name="cfg.cond_br", control_distribution="lane_predicate"}
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   cfg.cond_br %active, ^header, ^exit
 ^exit:
   kernel.return
@@ -688,7 +688,7 @@ kernel.def @workgroup_barrier_accepts_workgroup_uniform_cfg_control(%enabled: i1
 } launch(%enabled: i1) {
   cfg.cond_br %enabled, ^enabled_arm, ^disabled_arm
 ^enabled_arm:
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   cfg.br ^join
 ^disabled_arm:
   cfg.br ^join
@@ -704,7 +704,7 @@ func.def @async_copy_requires_static_byte_footprint(%buffer: buffer, %offset: of
   %layout = encoding.layout.dense : encoding<layout>
   %global = buffer.assume.memory_space<global> %buffer : buffer
   %source = buffer.view %global[%offset] : buffer -> view<[%n]xi8, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<[%n]xi8, %layout>
   // ERROR@+2: TYPE/003 "source" "view with a static byte-addressable footprint"
   // ERROR@+1: TYPE/003 "dest" "view with a static byte-addressable footprint"
@@ -722,7 +722,7 @@ func.def @async_copy_rejects_mismatched_byte_footprint(%buffer: buffer, %offset:
   %layout = encoding.layout.dense : encoding<layout>
   %global = buffer.assume.memory_space<global> %buffer : buffer
   %source = buffer.view %global[%offset] : buffer -> view<16xi8, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<8xi8, %layout>
   // ERROR@+1: TYPE/003 "dest" "same static byte footprint as source"
   %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, %layout> to view<8xi8, %layout> -> kernel.async.token
@@ -741,7 +741,7 @@ kernel.def @async_copy_accepts_noalias_kernel_buffer_memory_space() {
   %scratch_bytes = index.constant 16 : offset
   %other_noalias, %source_noalias = buffer.assume.noalias %other_buffer, %source_buffer : buffer, buffer
   %source = buffer.view %source_noalias[%base] : buffer -> view<16xi8, #dense>
-  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<16xi8, #dense>
   %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
@@ -757,7 +757,7 @@ func.def @async_copy_rejects_unknown_source_memory(%buffer: buffer, %offset: off
   %bytes = index.constant 1024 : offset
   %layout = encoding.layout.dense : encoding<layout>
   %source = buffer.view %buffer[%offset] : buffer -> view<16xi8, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<16xi8, %layout>
   // ERROR@+1: TYPE/003 "source" "global, constant, or descriptor memory-space fact"
   %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, %layout> to view<16xi8, %layout> -> kernel.async.token
@@ -774,7 +774,7 @@ func.def @async_copy_rejects_direction_memory_mismatch(%buffer: buffer, %offset:
   %layout = encoding.layout.dense : encoding<layout>
   %global = buffer.assume.memory_space<global> %buffer : buffer
   %source = buffer.view %global[%offset] : buffer -> view<16xi8, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<16xi8, %layout>
   // ERROR@+1: TYPE/003 "source" "workgroup memory-space fact"
   %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = workgroup_to_global} : view<16xi8, %layout> to view<16xi8, %layout> -> kernel.async.token
@@ -790,7 +790,7 @@ func.def @async_copy_rejects_global_store_last_use_cache(%buffer: buffer, %offse
   %bytes = index.constant 1024 : offset
   %layout = encoding.layout.dense : encoding<layout>
   %global = buffer.assume.memory_space<global> %buffer : buffer
-  %source_buffer = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %source_buffer = buffer.alloca<workgroup> align(64) %bytes : buffer
   %source = buffer.view %source_buffer[%base] : buffer -> view<16xi8, %layout>
   %dest = buffer.view %global[%offset] : buffer -> view<16xi8, %layout>
   // ERROR@+1: STRUCTURE/014 "cache_temporal" "3" "store-compatible temporal hint"
@@ -808,7 +808,7 @@ func.def @async_copy_rejects_global_load_writeback_cache(%buffer: buffer, %offse
   %layout = encoding.layout.dense : encoding<layout>
   %global = buffer.assume.memory_space<global> %buffer : buffer
   %source = buffer.view %global[%offset] : buffer -> view<16xi8, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<16xi8, %layout>
   // ERROR@+1: STRUCTURE/014 "cache_temporal" "4" "load-compatible temporal hint"
   %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = writeback, direction = global_to_workgroup} : view<16xi8, %layout> to view<16xi8, %layout> -> kernel.async.token
@@ -825,7 +825,7 @@ func.def @async_copy_rejects_bypass_non_system_scope(%buffer: buffer, %offset: o
   %layout = encoding.layout.dense : encoding<layout>
   %global = buffer.assume.memory_space<global> %buffer : buffer
   %source = buffer.view %global[%offset] : buffer -> view<16xi8, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<16xi8, %layout>
   // ERROR@+1: STRUCTURE/014 "cache_scope" "2" "system scope for bypass temporal hint"
   %copy = kernel.async.copy %source to %dest {cache_scope = device, cache_temporal = bypass, direction = global_to_workgroup} : view<16xi8, %layout> to view<16xi8, %layout> -> kernel.async.token
@@ -842,7 +842,7 @@ func.def @async_copy_token_must_be_grouped(%buffer: buffer, %offset: offset) {
   %layout = encoding.layout.dense : encoding<layout>
   %global = buffer.assume.memory_space<global> %buffer : buffer
   %source = buffer.view %global[%offset] : buffer -> view<16xi8, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<16xi8, %layout>
   // ERROR@+1: DOMINANCE/009 "copy" "0" "exactly one kernel.async.group use"
   %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, %layout> to view<16xi8, %layout> -> kernel.async.token
@@ -857,7 +857,7 @@ func.def @async_group_must_be_used(%buffer: buffer, %offset: offset) {
   %layout = encoding.layout.dense : encoding<layout>
   %global = buffer.assume.memory_space<global> %buffer : buffer
   %source = buffer.view %global[%offset] : buffer -> view<16xi8, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<16xi8, %layout>
   %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, %layout> to view<16xi8, %layout> -> kernel.async.token
   // ERROR@+1: DOMINANCE/009 "group" "0" "at least one wait or carried group use"
@@ -920,7 +920,7 @@ func.def @async_copy_token_rejects_multiple_groups(%buffer: buffer, %offset: off
   %layout = encoding.layout.dense : encoding<layout>
   %global = buffer.assume.memory_space<global> %buffer : buffer
   %source = buffer.view %global[%offset] : buffer -> view<16xi8, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<16xi8, %layout>
   // ERROR@+1: DOMINANCE/009 "copy" "2" "exactly one kernel.async.group use"
   %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, %layout> to view<16xi8, %layout> -> kernel.async.token
@@ -939,7 +939,7 @@ func.def @async_gather_requires_lane_axis(%buffer: buffer, %offset: offset) {
   %layout = encoding.layout.dense : encoding<layout>
   %global = buffer.assume.memory_space<global> %buffer : buffer
   %source = buffer.view %global[%offset] : buffer -> view<4xi8, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<4xi8, %layout>
   // ERROR@+1: TYPE/003 "dest" "view with one leading subgroup-lane axis"
   %copy = kernel.async.gather %source to %dest {cache_scope = cu, cache_temporal = regular} : view<4xi8, %layout> to view<4xi8, %layout> -> kernel.async.token
@@ -956,7 +956,7 @@ func.def @async_gather_rejects_small_lane_slot(%buffer: buffer, %offset: offset)
   %layout = encoding.layout.dense : encoding<layout>
   %global = buffer.assume.memory_space<global> %buffer : buffer
   %source = buffer.view %global[%offset] : buffer -> view<4xi8, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<64x2xi8, %layout>
   // ERROR@+1: TYPE/003 "dest" "trailing lane byte footprint at least source footprint"
   %copy = kernel.async.gather %source to %dest {cache_scope = cu, cache_temporal = regular} : view<4xi8, %layout> to view<64x2xi8, %layout> -> kernel.async.token
@@ -973,7 +973,7 @@ func.def @async_gather_requires_static_lane_footprint(%buffer: buffer, %offset: 
   %layout = encoding.layout.dense : encoding<layout>
   %global = buffer.assume.memory_space<global> %buffer : buffer
   %source = buffer.view %global[%offset] : buffer -> view<4xi8, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<64x[%n]xi8, %layout>
   // ERROR@+1: TYPE/003 "dest" "view with static byte-addressable trailing lane footprint"
   %copy = kernel.async.gather %source to %dest {cache_scope = cu, cache_temporal = regular} : view<4xi8, %layout> to view<64x[%n]xi8, %layout> -> kernel.async.token
@@ -987,7 +987,7 @@ func.def @async_gather_requires_static_lane_footprint(%buffer: buffer, %offset: 
 func.def @async_gather_rejects_workgroup_source(%bytes: offset) {
   %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %source = buffer.view %scratch[%base] : buffer -> view<4xi8, %layout>
   %dest = buffer.view %scratch[%base] : buffer -> view<64x4xi8, %layout>
   // ERROR@+1: TYPE/003 "source" "global, constant, or descriptor memory-space fact"
@@ -1006,7 +1006,7 @@ func.def @async_cluster_gather_rejects_wrong_mask_type(%buffer: buffer, %offset:
   %bad_mask = scalar.constant 15 : i64
   %global = buffer.assume.memory_space<global> %buffer : buffer
   %source = buffer.view %global[%offset] : buffer -> view<4xi8, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<4xi8, %layout>
   // ERROR@+1: TYPE/003 "cluster_mask" "i64" "i32"
   %copy = kernel.async.cluster.gather %source to %dest using %bad_mask {cache_scope = cu, cache_temporal = regular} : view<4xi8, %layout> to view<4xi8, %layout>, i64 -> kernel.async.token
@@ -1024,7 +1024,7 @@ func.def @async_cluster_gather_rejects_unsupported_width(%buffer: buffer, %offse
   %cluster_mask = scalar.constant 15 : i32
   %global = buffer.assume.memory_space<global> %buffer : buffer
   %source = buffer.view %global[%offset] : buffer -> view<2xi8, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<2xi8, %layout>
   // ERROR@+1: TYPE/003 "source" "view with static 1, 4, 8, or 16 byte footprint"
   %copy = kernel.async.cluster.gather %source to %dest using %cluster_mask {cache_scope = cu, cache_temporal = regular} : view<2xi8, %layout> to view<2xi8, %layout>, i32 -> kernel.async.token
@@ -1042,7 +1042,7 @@ func.def @async_cluster_gather_rejects_mismatched_width(%buffer: buffer, %offset
   %cluster_mask = scalar.constant 15 : i32
   %global = buffer.assume.memory_space<global> %buffer : buffer
   %source = buffer.view %global[%offset] : buffer -> view<8xi8, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<4xi8, %layout>
   // ERROR@+1: TYPE/003 "dest" "same static byte footprint as source"
   %copy = kernel.async.cluster.gather %source to %dest using %cluster_mask {cache_scope = cu, cache_temporal = regular} : view<8xi8, %layout> to view<4xi8, %layout>, i32 -> kernel.async.token
@@ -1057,7 +1057,7 @@ func.def @async_cluster_gather_rejects_workgroup_source(%bytes: offset) {
   %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
   %cluster_mask = scalar.constant 15 : i32
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %source = buffer.view %scratch[%base] : buffer -> view<4xi8, %layout>
   %dest = buffer.view %scratch[%base] : buffer -> view<4xi8, %layout>
   // ERROR@+1: TYPE/003 "source" "global, constant, or descriptor memory-space fact"
@@ -1117,7 +1117,7 @@ func.def @async_tensor_load_rejects_wrong_descriptor_type(%buffer: buffer, %offs
   %bad_desc = vector.splat %descriptor_fill_value : vector<4xi32>
   %global = buffer.assume.memory_space<global> %buffer : buffer
   %source = buffer.view %global[%offset] : buffer -> view<64x64xf32, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 256, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(256) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<64x64xf32, %layout>
   // ERROR@+1: TYPE/003 "descriptor" "vector<4xi32>" "kernel.tensor.lds.descriptor"
   %copy = kernel.async.tensor.load.to.lds %source to %dest using %bad_desc {cache_scope = cu, cache_temporal = regular} : view<64x64xf32, %layout> to view<64x64xf32, %layout>, vector<4xi32> -> kernel.async.token
@@ -1138,7 +1138,7 @@ func.def @async_tensor_load_rejects_rank_mismatch(%buffer: buffer, %offset: offs
   %desc = kernel.tensor.lds.descriptor dgroups(%d0, %d1) : vector<4xi32>, vector<8xi32> -> kernel.tensor.lds.descriptor
   %global = buffer.assume.memory_space<global> %buffer : buffer
   %source = buffer.view %global[%offset] : buffer -> view<64x64xf32, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 256, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(256) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<64xf32, %layout>
   // ERROR@+1: TYPE/003 "dest" "same rank as source"
   %copy = kernel.async.tensor.load.to.lds %source to %dest using %desc {cache_scope = cu, cache_temporal = regular} : view<64x64xf32, %layout> to view<64xf32, %layout>, kernel.tensor.lds.descriptor -> kernel.async.token
@@ -1157,7 +1157,7 @@ func.def @async_tensor_store_rejects_constant_dest(%buffer: buffer, %offset: off
   %d0 = vector.splat %descriptor_fill_value : vector<4xi32>
   %d1 = vector.splat %descriptor_fill_value : vector<8xi32>
   %desc = kernel.tensor.lds.descriptor dgroups(%d0, %d1) : vector<4xi32>, vector<8xi32> -> kernel.tensor.lds.descriptor
-  %scratch = buffer.alloca %bytes {base_alignment = 256, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(256) %bytes : buffer
   %source = buffer.view %scratch[%base] : buffer -> view<64x64xf32, %layout>
   %constant = buffer.assume.memory_space<constant> %buffer : buffer
   %dest = buffer.view %constant[%offset] : buffer -> view<64x64xf32, %layout>

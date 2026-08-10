@@ -9,7 +9,7 @@ kernel.def target(@target) @private_f32_dynamic_roundtrip() {
   %lane = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 256 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = private} : buffer
+  %scratch = buffer.alloca<private> align(4) %bytes : buffer
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xf32, #dense>
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64xf32, #dense>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf32, #dense>
@@ -46,9 +46,9 @@ kernel.def target(@target) @private_root_static_offsets() {
   %buffer_base = index.constant 0 : offset
   %second_index_offset = index.constant 1 : index
   %first_bytes = index.constant 8 : offset
-  %first = buffer.alloca %first_bytes {base_alignment = 4, memory_space = private} : buffer
+  %first = buffer.alloca<private> align(4) %first_bytes : buffer
   %second_bytes = index.constant 16 : offset
-  %second = buffer.alloca %second_bytes {base_alignment = 8, memory_space = private} : buffer
+  %second = buffer.alloca<private> align(8) %second_bytes : buffer
   %first_view = buffer.view %first[%buffer_base] : buffer -> view<2xi32, #dense>
   %second_view = buffer.view %second[%buffer_base] : buffer -> view<4xi32, #dense>
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<2xi32, #dense>
@@ -100,7 +100,7 @@ kernel.def target(@target) @private_f16_static_and_dynamic_roundtrip() {
   %lane = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 4 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 2, memory_space = private} : buffer
+  %scratch = buffer.alloca<private> align(2) %bytes : buffer
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<2xf16, #dense>
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<2xf16, #dense>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<2xf16, #dense>
@@ -147,7 +147,7 @@ kernel.def target(@target) @private_bf16_static_and_dynamic_roundtrip() {
   %lane = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 4 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 2, memory_space = private} : buffer
+  %scratch = buffer.alloca<private> align(2) %bytes : buffer
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<2xbf16, #dense>
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<2xbf16, #dense>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<2xbf16, #dense>
@@ -194,7 +194,7 @@ kernel.def target(@target) @private_i8_static_and_dynamic_roundtrip() {
   %lane = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 2 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 1, memory_space = private} : buffer
+  %scratch = buffer.alloca<private> align(1) %bytes : buffer
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<2xi8, #dense>
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<2xi8, #dense>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<2xi8, #dense>

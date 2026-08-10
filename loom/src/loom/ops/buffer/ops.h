@@ -31,7 +31,7 @@ enum {
 };
 
 // LOOM_OP_BUFFER_ALLOCA: Create a fixed-frame scratch buffer root in an allocatable memory space. Each execution produces a distinct storage identity; identical allocas must not be commoned. The byte length is the requested physical byte count for the execution. Targets requiring a static frame reserve its proven finite non-negative maximum. base_alignment is the minimum byte alignment of the root storage base. Target lowering determines which allocatable spaces are legal for the containing program kind.
-// %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+// %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
 LOOM_DEFINE_ISA(loom_buffer_alloca_isa, LOOM_OP_BUFFER_ALLOCA)
 LOOM_DEFINE_OPERAND(loom_buffer_alloca_byte_length, 0)
 LOOM_DEFINE_RESULT(loom_buffer_alloca_result, 0)
@@ -39,9 +39,9 @@ LOOM_DEFINE_ATTR_I64(loom_buffer_alloca_base_alignment, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_buffer_alloca_memory_space, 1, loom_value_fact_memory_space_t)
 iree_status_t loom_buffer_alloca_build(
     loom_builder_t* builder,
-    loom_may_consume loom_value_id_t byte_length,
-    int64_t base_alignment,
     loom_value_fact_memory_space_t memory_space,
+    int64_t base_alignment,
+    loom_may_consume loom_value_id_t byte_length,
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);

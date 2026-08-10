@@ -19,6 +19,7 @@ from loom.assembly import (
     AlignedRefs,
     Attr,
     AttrDict,
+    Clause,
     Ref,
     Refs,
     ResultType,
@@ -108,13 +109,14 @@ buffer_alloca = Op(
     verify="loom_buffer_alloca_verify",
     facts="loom_buffer_alloca_facts",
     format=[
+        TemplateParam("memory_space"),
+        Clause("align", Attr("base_alignment")),
         Ref("byte_length"),
-        AttrDict(),
         COLON,
         ResultType("result"),
     ],
     examples=[
-        "%scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer",
+        "%scratch = buffer.alloca<workgroup> align(64) %bytes : buffer",
     ],
 )
 

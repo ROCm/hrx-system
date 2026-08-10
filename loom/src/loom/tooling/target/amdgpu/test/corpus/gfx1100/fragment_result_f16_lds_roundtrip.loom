@@ -62,10 +62,10 @@ kernel.def target(@fragment_result_lds_gfx1100_wave64) @fragment_result_f16_lds_
   %direct_view = buffer.view %direct_global[%base] : buffer -> view<16x16xf32, #dense>
   vector.fragment.store<result> %result, %direct_view[%fragment_origin, %fragment_origin] shape [%m, %n] : vector<8xf16>, view<16x16xf32, #dense>
 
-  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
   %scratch_view = buffer.view %scratch[%base] : buffer -> view<16x16xf16, #dense>
   vector.fragment.store<result> %result, %scratch_view[%fragment_origin, %fragment_origin] shape [%m, %n] : vector<8xf16>, view<16x16xf16, #dense>
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 
   %roundtrip_global = buffer.assume.memory_space<global> %roundtrip_buffer : buffer
   %roundtrip_view = buffer.view %roundtrip_global[%base] : buffer -> view<256xf32, #dense>
