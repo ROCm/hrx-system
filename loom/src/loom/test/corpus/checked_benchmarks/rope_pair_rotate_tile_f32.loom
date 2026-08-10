@@ -14,15 +14,15 @@ kernel.def @rope_pair_rotate_tile_f32() {
   %tile_origin = index.constant 0 : index
 
   %even_noalias, %odd_noalias, %angles_noalias, %rotated_even_noalias, %rotated_odd_noalias = buffer.assume.noalias %even, %odd, %angles, %rotated_even, %rotated_odd : buffer, buffer, buffer, buffer, buffer
-  %even_view = buffer.view %even_noalias[%base] : buffer -> view<4xf32, #dense>
-  %odd_view = buffer.view %odd_noalias[%base] : buffer -> view<4xf32, #dense>
-  %angles_view = buffer.view %angles_noalias[%base] : buffer -> view<4xf32, #dense>
-  %rotated_even_view = buffer.view %rotated_even_noalias[%base] : buffer -> view<4xf32, #dense>
-  %rotated_odd_view = buffer.view %rotated_odd_noalias[%base] : buffer -> view<4xf32, #dense>
+  %even_view = buffer.view %even_noalias[%base] : buffer -> view<4xf32, #encoding.layout.dense>
+  %odd_view = buffer.view %odd_noalias[%base] : buffer -> view<4xf32, #encoding.layout.dense>
+  %angles_view = buffer.view %angles_noalias[%base] : buffer -> view<4xf32, #encoding.layout.dense>
+  %rotated_even_view = buffer.view %rotated_even_noalias[%base] : buffer -> view<4xf32, #encoding.layout.dense>
+  %rotated_odd_view = buffer.view %rotated_odd_noalias[%base] : buffer -> view<4xf32, #encoding.layout.dense>
 
-  %even_values = vector.load %even_view[0] : view<4xf32, #dense> -> vector<4xf32>
-  %odd_values = vector.load %odd_view[0] : view<4xf32, #dense> -> vector<4xf32>
-  %angle_values = vector.load %angles_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %even_values = vector.load %even_view[0] : view<4xf32, #encoding.layout.dense> -> vector<4xf32>
+  %odd_values = vector.load %odd_view[0] : view<4xf32, #encoding.layout.dense> -> vector<4xf32>
+  %angle_values = vector.load %angles_view[0] : view<4xf32, #encoding.layout.dense> -> vector<4xf32>
 
   %sine = vector.sinf<afn> %angle_values : vector<4xf32>
   %cosine = vector.cosf<afn> %angle_values : vector<4xf32>
@@ -33,8 +33,8 @@ kernel.def @rope_pair_rotate_tile_f32() {
   %odd_cos = vector.mulf<reassoc|nnan|nsz|contract> %odd_values, %cosine : vector<4xf32>
   %new_odd = vector.addf<reassoc|nnan|nsz|contract> %even_sin, %odd_cos : vector<4xf32>
 
-  vector.store %new_even, %rotated_even_view[%tile_origin] : vector<4xf32>, view<4xf32, #dense>
-  vector.store %new_odd, %rotated_odd_view[%tile_origin] : vector<4xf32>, view<4xf32, #dense>
+  vector.store %new_even, %rotated_even_view[%tile_origin] : vector<4xf32>, view<4xf32, #encoding.layout.dense>
+  vector.store %new_odd, %rotated_odd_view[%tile_origin] : vector<4xf32>, view<4xf32, #encoding.layout.dense>
   kernel.return
 }
 

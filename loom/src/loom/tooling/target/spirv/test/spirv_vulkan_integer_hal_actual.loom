@@ -24,45 +24,45 @@ kernel.def target(@target) @integer_i32_truth_table() {
   %value_output_aligned = buffer.assume.alignment %value_output {minimum_alignment = 4} : buffer
   %comparison_output_aligned = buffer.assume.alignment %comparison_output {minimum_alignment = 4} : buffer
   %boolean_output_aligned = buffer.assume.alignment %boolean_output {minimum_alignment = 4} : buffer
-  %input_lhs_view = buffer.view %input_aligned[%offset0] : buffer -> view<1xi32, #dense>
-  %input_rhs_view = buffer.view %input_aligned[%offset4] : buffer -> view<1xi32, #dense>
-  %value_output0_view = buffer.view %value_output_aligned[%offset0] : buffer -> view<1xi32, #dense>
-  %value_output1_view = buffer.view %value_output_aligned[%offset4] : buffer -> view<1xi32, #dense>
-  %value_output2_view = buffer.view %value_output_aligned[%offset8] : buffer -> view<1xi32, #dense>
-  %value_output3_view = buffer.view %value_output_aligned[%offset12] : buffer -> view<1xi32, #dense>
-  %value_output4_view = buffer.view %value_output_aligned[%offset16] : buffer -> view<1xi32, #dense>
-  %value_output5_view = buffer.view %value_output_aligned[%offset20] : buffer -> view<1xi32, #dense>
-  %value_output6_view = buffer.view %value_output_aligned[%offset24] : buffer -> view<1xi32, #dense>
-  %value_output7_view = buffer.view %value_output_aligned[%offset28] : buffer -> view<1xi32, #dense>
-  %comparison_output0_view = buffer.view %comparison_output_aligned[%offset0] : buffer -> view<1xi32, #dense>
-  %comparison_output1_view = buffer.view %comparison_output_aligned[%offset4] : buffer -> view<1xi32, #dense>
-  %comparison_output2_view = buffer.view %comparison_output_aligned[%offset8] : buffer -> view<1xi32, #dense>
-  %comparison_output3_view = buffer.view %comparison_output_aligned[%offset12] : buffer -> view<1xi32, #dense>
-  %comparison_output4_view = buffer.view %comparison_output_aligned[%offset16] : buffer -> view<1xi32, #dense>
-  %comparison_output5_view = buffer.view %comparison_output_aligned[%offset20] : buffer -> view<1xi32, #dense>
-  %comparison_output6_view = buffer.view %comparison_output_aligned[%offset24] : buffer -> view<1xi32, #dense>
-  %comparison_output7_view = buffer.view %comparison_output_aligned[%offset28] : buffer -> view<1xi32, #dense>
-  %comparison_output8_view = buffer.view %comparison_output_aligned[%offset32] : buffer -> view<1xi32, #dense>
-  %comparison_output9_view = buffer.view %comparison_output_aligned[%offset36] : buffer -> view<1xi32, #dense>
-  %boolean_output0_view = buffer.view %boolean_output_aligned[%offset0] : buffer -> view<1xi32, #dense>
-  %boolean_output1_view = buffer.view %boolean_output_aligned[%offset4] : buffer -> view<1xi32, #dense>
-  %boolean_output2_view = buffer.view %boolean_output_aligned[%offset8] : buffer -> view<1xi32, #dense>
-  %boolean_output3_view = buffer.view %boolean_output_aligned[%offset12] : buffer -> view<1xi32, #dense>
-  %boolean_output4_view = buffer.view %boolean_output_aligned[%offset16] : buffer -> view<1xi32, #dense>
-  %boolean_output5_view = buffer.view %boolean_output_aligned[%offset20] : buffer -> view<1xi32, #dense>
-  %boolean_output6_view = buffer.view %boolean_output_aligned[%offset24] : buffer -> view<1xi32, #dense>
-  %boolean_output7_view = buffer.view %boolean_output_aligned[%offset28] : buffer -> view<1xi32, #dense>
-  %boolean_output8_view = buffer.view %boolean_output_aligned[%offset32] : buffer -> view<1xi32, #dense>
-  %boolean_output9_view = buffer.view %boolean_output_aligned[%offset36] : buffer -> view<1xi32, #dense>
-  %boolean_output10_view = buffer.view %boolean_output_aligned[%offset40] : buffer -> view<1xi32, #dense>
-  %boolean_output11_view = buffer.view %boolean_output_aligned[%offset44] : buffer -> view<1xi32, #dense>
-  %boolean_output12_view = buffer.view %boolean_output_aligned[%offset48] : buffer -> view<1xi32, #dense>
-  %boolean_output13_view = buffer.view %boolean_output_aligned[%offset52] : buffer -> view<1xi32, #dense>
-  %boolean_output14_view = buffer.view %boolean_output_aligned[%offset56] : buffer -> view<1xi32, #dense>
-  %boolean_output15_view = buffer.view %boolean_output_aligned[%offset60] : buffer -> view<1xi32, #dense>
+  %input_lhs_view = buffer.view %input_aligned[%offset0] : buffer -> view<1xi32, #encoding.layout.dense>
+  %input_rhs_view = buffer.view %input_aligned[%offset4] : buffer -> view<1xi32, #encoding.layout.dense>
+  %value_output0_view = buffer.view %value_output_aligned[%offset0] : buffer -> view<1xi32, #encoding.layout.dense>
+  %value_output1_view = buffer.view %value_output_aligned[%offset4] : buffer -> view<1xi32, #encoding.layout.dense>
+  %value_output2_view = buffer.view %value_output_aligned[%offset8] : buffer -> view<1xi32, #encoding.layout.dense>
+  %value_output3_view = buffer.view %value_output_aligned[%offset12] : buffer -> view<1xi32, #encoding.layout.dense>
+  %value_output4_view = buffer.view %value_output_aligned[%offset16] : buffer -> view<1xi32, #encoding.layout.dense>
+  %value_output5_view = buffer.view %value_output_aligned[%offset20] : buffer -> view<1xi32, #encoding.layout.dense>
+  %value_output6_view = buffer.view %value_output_aligned[%offset24] : buffer -> view<1xi32, #encoding.layout.dense>
+  %value_output7_view = buffer.view %value_output_aligned[%offset28] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output0_view = buffer.view %comparison_output_aligned[%offset0] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output1_view = buffer.view %comparison_output_aligned[%offset4] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output2_view = buffer.view %comparison_output_aligned[%offset8] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output3_view = buffer.view %comparison_output_aligned[%offset12] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output4_view = buffer.view %comparison_output_aligned[%offset16] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output5_view = buffer.view %comparison_output_aligned[%offset20] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output6_view = buffer.view %comparison_output_aligned[%offset24] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output7_view = buffer.view %comparison_output_aligned[%offset28] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output8_view = buffer.view %comparison_output_aligned[%offset32] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output9_view = buffer.view %comparison_output_aligned[%offset36] : buffer -> view<1xi32, #encoding.layout.dense>
+  %boolean_output0_view = buffer.view %boolean_output_aligned[%offset0] : buffer -> view<1xi32, #encoding.layout.dense>
+  %boolean_output1_view = buffer.view %boolean_output_aligned[%offset4] : buffer -> view<1xi32, #encoding.layout.dense>
+  %boolean_output2_view = buffer.view %boolean_output_aligned[%offset8] : buffer -> view<1xi32, #encoding.layout.dense>
+  %boolean_output3_view = buffer.view %boolean_output_aligned[%offset12] : buffer -> view<1xi32, #encoding.layout.dense>
+  %boolean_output4_view = buffer.view %boolean_output_aligned[%offset16] : buffer -> view<1xi32, #encoding.layout.dense>
+  %boolean_output5_view = buffer.view %boolean_output_aligned[%offset20] : buffer -> view<1xi32, #encoding.layout.dense>
+  %boolean_output6_view = buffer.view %boolean_output_aligned[%offset24] : buffer -> view<1xi32, #encoding.layout.dense>
+  %boolean_output7_view = buffer.view %boolean_output_aligned[%offset28] : buffer -> view<1xi32, #encoding.layout.dense>
+  %boolean_output8_view = buffer.view %boolean_output_aligned[%offset32] : buffer -> view<1xi32, #encoding.layout.dense>
+  %boolean_output9_view = buffer.view %boolean_output_aligned[%offset36] : buffer -> view<1xi32, #encoding.layout.dense>
+  %boolean_output10_view = buffer.view %boolean_output_aligned[%offset40] : buffer -> view<1xi32, #encoding.layout.dense>
+  %boolean_output11_view = buffer.view %boolean_output_aligned[%offset44] : buffer -> view<1xi32, #encoding.layout.dense>
+  %boolean_output12_view = buffer.view %boolean_output_aligned[%offset48] : buffer -> view<1xi32, #encoding.layout.dense>
+  %boolean_output13_view = buffer.view %boolean_output_aligned[%offset52] : buffer -> view<1xi32, #encoding.layout.dense>
+  %boolean_output14_view = buffer.view %boolean_output_aligned[%offset56] : buffer -> view<1xi32, #encoding.layout.dense>
+  %boolean_output15_view = buffer.view %boolean_output_aligned[%offset60] : buffer -> view<1xi32, #encoding.layout.dense>
 
-  %lhs = view.load %input_lhs_view[0] : view<1xi32, #dense> -> i32
-  %rhs = view.load %input_rhs_view[0] : view<1xi32, #dense> -> i32
+  %lhs = view.load %input_lhs_view[0] : view<1xi32, #encoding.layout.dense> -> i32
+  %rhs = view.load %input_rhs_view[0] : view<1xi32, #encoding.layout.dense> -> i32
   %cn8 = scalar.constant -8 : i32
   %cn6 = scalar.constant -6 : i32
   %cn1 = scalar.constant -1 : i32
@@ -79,14 +79,14 @@ kernel.def target(@target) @integer_i32_truth_table() {
   %bitwise_or = scalar.ori %c0, %c2 : i32
   %shift_right_logical = scalar.shrui %c8, %c1 : i32
   %shift_left = scalar.shli %c3, %c1 : i32
-  view.store %cn8, %value_output0_view[0] : i32, view<1xi32, #dense>
-  view.store %bitwise_and, %value_output1_view[0] : i32, view<1xi32, #dense>
-  view.store %shift_right_arithmetic, %value_output2_view[0] : i32, view<1xi32, #dense>
-  view.store %bitwise_xor, %value_output3_view[0] : i32, view<1xi32, #dense>
-  view.store %selected, %value_output4_view[0] : i32, view<1xi32, #dense>
-  view.store %bitwise_or, %value_output5_view[0] : i32, view<1xi32, #dense>
-  view.store %shift_right_logical, %value_output6_view[0] : i32, view<1xi32, #dense>
-  view.store %shift_left, %value_output7_view[0] : i32, view<1xi32, #dense>
+  view.store %cn8, %value_output0_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %bitwise_and, %value_output1_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %shift_right_arithmetic, %value_output2_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %bitwise_xor, %value_output3_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %selected, %value_output4_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %bitwise_or, %value_output5_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %shift_right_logical, %value_output6_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %shift_left, %value_output7_view[0] : i32, view<1xi32, #encoding.layout.dense>
 
   %not_equal = scalar.cmpi ne, %lhs, %rhs : i32
   %signed_less = scalar.cmpi slt, %lhs, %rhs : i32
@@ -107,16 +107,16 @@ kernel.def target(@target) @integer_i32_truth_table() {
   %unsigned_greater_i32 = scf.select %unsigned_greater, %c1, %c0 : i32
   %unsigned_less_equal_i32 = scf.select %unsigned_less_equal, %c1, %c0 : i32
   %unsigned_greater_equal_i32 = scf.select %unsigned_greater_equal, %c1, %c0 : i32
-  view.store %equal_i32, %comparison_output0_view[0] : i32, view<1xi32, #dense>
-  view.store %not_equal_i32, %comparison_output1_view[0] : i32, view<1xi32, #dense>
-  view.store %signed_greater_i32, %comparison_output2_view[0] : i32, view<1xi32, #dense>
-  view.store %signed_less_i32, %comparison_output3_view[0] : i32, view<1xi32, #dense>
-  view.store %signed_greater_equal_i32, %comparison_output4_view[0] : i32, view<1xi32, #dense>
-  view.store %signed_less_equal_i32, %comparison_output5_view[0] : i32, view<1xi32, #dense>
-  view.store %unsigned_less_i32, %comparison_output6_view[0] : i32, view<1xi32, #dense>
-  view.store %unsigned_greater_i32, %comparison_output7_view[0] : i32, view<1xi32, #dense>
-  view.store %unsigned_less_equal_i32, %comparison_output8_view[0] : i32, view<1xi32, #dense>
-  view.store %unsigned_greater_equal_i32, %comparison_output9_view[0] : i32, view<1xi32, #dense>
+  view.store %equal_i32, %comparison_output0_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %not_equal_i32, %comparison_output1_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %signed_greater_i32, %comparison_output2_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %signed_less_i32, %comparison_output3_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %signed_greater_equal_i32, %comparison_output4_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %signed_less_equal_i32, %comparison_output5_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %unsigned_less_i32, %comparison_output6_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %unsigned_greater_i32, %comparison_output7_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %unsigned_less_equal_i32, %comparison_output8_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %unsigned_greater_equal_i32, %comparison_output9_view[0] : i32, view<1xi32, #encoding.layout.dense>
 
   %constant_false = scalar.constant false : i1
   %constant_true = scalar.constant true : i1
@@ -150,22 +150,22 @@ kernel.def target(@target) @integer_i32_truth_table() {
   %xor_true_false_i32 = scf.select %xor_true_false, %c1, %c0 : i32
   %select_false_i32 = scf.select %select_false, %c1, %c0 : i32
   %select_true_i32 = scf.select %select_true, %c1, %c0 : i32
-  view.store %constant_false_i32, %boolean_output0_view[0] : i32, view<1xi32, #dense>
-  view.store %constant_true_i32, %boolean_output1_view[0] : i32, view<1xi32, #dense>
-  view.store %and_false_false_i32, %boolean_output2_view[0] : i32, view<1xi32, #dense>
-  view.store %and_true_true_i32, %boolean_output3_view[0] : i32, view<1xi32, #dense>
-  view.store %and_false_true_i32, %boolean_output4_view[0] : i32, view<1xi32, #dense>
-  view.store %or_false_true_i32, %boolean_output5_view[0] : i32, view<1xi32, #dense>
-  view.store %and_true_false_i32, %boolean_output6_view[0] : i32, view<1xi32, #dense>
-  view.store %or_true_false_i32, %boolean_output7_view[0] : i32, view<1xi32, #dense>
-  view.store %or_false_false_i32, %boolean_output8_view[0] : i32, view<1xi32, #dense>
-  view.store %or_true_true_i32, %boolean_output9_view[0] : i32, view<1xi32, #dense>
-  view.store %xor_false_false_i32, %boolean_output10_view[0] : i32, view<1xi32, #dense>
-  view.store %xor_false_true_i32, %boolean_output11_view[0] : i32, view<1xi32, #dense>
-  view.store %xor_true_true_i32, %boolean_output12_view[0] : i32, view<1xi32, #dense>
-  view.store %xor_true_false_i32, %boolean_output13_view[0] : i32, view<1xi32, #dense>
-  view.store %select_false_i32, %boolean_output14_view[0] : i32, view<1xi32, #dense>
-  view.store %select_true_i32, %boolean_output15_view[0] : i32, view<1xi32, #dense>
+  view.store %constant_false_i32, %boolean_output0_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %constant_true_i32, %boolean_output1_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %and_false_false_i32, %boolean_output2_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %and_true_true_i32, %boolean_output3_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %and_false_true_i32, %boolean_output4_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %or_false_true_i32, %boolean_output5_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %and_true_false_i32, %boolean_output6_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %or_true_false_i32, %boolean_output7_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %or_false_false_i32, %boolean_output8_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %or_true_true_i32, %boolean_output9_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %xor_false_false_i32, %boolean_output10_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %xor_false_true_i32, %boolean_output11_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %xor_true_true_i32, %boolean_output12_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %xor_true_false_i32, %boolean_output13_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %select_false_i32, %boolean_output14_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %select_true_i32, %boolean_output15_view[0] : i32, view<1xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -207,29 +207,29 @@ kernel.def target(@target) @integer_i8_truth_table() {
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 1} : buffer
   %value_output_aligned = buffer.assume.alignment %value_output {minimum_alignment = 1} : buffer
   %comparison_output_aligned = buffer.assume.alignment %comparison_output {minimum_alignment = 4} : buffer
-  %input_lhs_view = buffer.view %input_aligned[%offset0] : buffer -> view<1xi8, #dense>
-  %input_rhs_view = buffer.view %input_aligned[%offset1] : buffer -> view<1xi8, #dense>
-  %value_output0_view = buffer.view %value_output_aligned[%offset0] : buffer -> view<1xi8, #dense>
-  %value_output1_view = buffer.view %value_output_aligned[%offset1] : buffer -> view<1xi8, #dense>
-  %value_output2_view = buffer.view %value_output_aligned[%offset2] : buffer -> view<1xi8, #dense>
-  %value_output3_view = buffer.view %value_output_aligned[%offset3] : buffer -> view<1xi8, #dense>
-  %value_output4_view = buffer.view %value_output_aligned[%offset4] : buffer -> view<1xi8, #dense>
-  %value_output5_view = buffer.view %value_output_aligned[%offset5] : buffer -> view<1xi8, #dense>
-  %value_output6_view = buffer.view %value_output_aligned[%offset6] : buffer -> view<1xi8, #dense>
-  %value_output7_view = buffer.view %value_output_aligned[%offset7] : buffer -> view<1xi8, #dense>
-  %comparison_output0_view = buffer.view %comparison_output_aligned[%offset0] : buffer -> view<1xi32, #dense>
-  %comparison_output1_view = buffer.view %comparison_output_aligned[%offset4] : buffer -> view<1xi32, #dense>
-  %comparison_output2_view = buffer.view %comparison_output_aligned[%offset8] : buffer -> view<1xi32, #dense>
-  %comparison_output3_view = buffer.view %comparison_output_aligned[%offset12] : buffer -> view<1xi32, #dense>
-  %comparison_output4_view = buffer.view %comparison_output_aligned[%offset16] : buffer -> view<1xi32, #dense>
-  %comparison_output5_view = buffer.view %comparison_output_aligned[%offset20] : buffer -> view<1xi32, #dense>
-  %comparison_output6_view = buffer.view %comparison_output_aligned[%offset24] : buffer -> view<1xi32, #dense>
-  %comparison_output7_view = buffer.view %comparison_output_aligned[%offset28] : buffer -> view<1xi32, #dense>
-  %comparison_output8_view = buffer.view %comparison_output_aligned[%offset32] : buffer -> view<1xi32, #dense>
-  %comparison_output9_view = buffer.view %comparison_output_aligned[%offset36] : buffer -> view<1xi32, #dense>
+  %input_lhs_view = buffer.view %input_aligned[%offset0] : buffer -> view<1xi8, #encoding.layout.dense>
+  %input_rhs_view = buffer.view %input_aligned[%offset1] : buffer -> view<1xi8, #encoding.layout.dense>
+  %value_output0_view = buffer.view %value_output_aligned[%offset0] : buffer -> view<1xi8, #encoding.layout.dense>
+  %value_output1_view = buffer.view %value_output_aligned[%offset1] : buffer -> view<1xi8, #encoding.layout.dense>
+  %value_output2_view = buffer.view %value_output_aligned[%offset2] : buffer -> view<1xi8, #encoding.layout.dense>
+  %value_output3_view = buffer.view %value_output_aligned[%offset3] : buffer -> view<1xi8, #encoding.layout.dense>
+  %value_output4_view = buffer.view %value_output_aligned[%offset4] : buffer -> view<1xi8, #encoding.layout.dense>
+  %value_output5_view = buffer.view %value_output_aligned[%offset5] : buffer -> view<1xi8, #encoding.layout.dense>
+  %value_output6_view = buffer.view %value_output_aligned[%offset6] : buffer -> view<1xi8, #encoding.layout.dense>
+  %value_output7_view = buffer.view %value_output_aligned[%offset7] : buffer -> view<1xi8, #encoding.layout.dense>
+  %comparison_output0_view = buffer.view %comparison_output_aligned[%offset0] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output1_view = buffer.view %comparison_output_aligned[%offset4] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output2_view = buffer.view %comparison_output_aligned[%offset8] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output3_view = buffer.view %comparison_output_aligned[%offset12] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output4_view = buffer.view %comparison_output_aligned[%offset16] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output5_view = buffer.view %comparison_output_aligned[%offset20] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output6_view = buffer.view %comparison_output_aligned[%offset24] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output7_view = buffer.view %comparison_output_aligned[%offset28] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output8_view = buffer.view %comparison_output_aligned[%offset32] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output9_view = buffer.view %comparison_output_aligned[%offset36] : buffer -> view<1xi32, #encoding.layout.dense>
 
-  %lhs = view.load %input_lhs_view[0] : view<1xi8, #dense> -> i8
-  %rhs = view.load %input_rhs_view[0] : view<1xi8, #dense> -> i8
+  %lhs = view.load %input_lhs_view[0] : view<1xi8, #encoding.layout.dense> -> i8
+  %rhs = view.load %input_rhs_view[0] : view<1xi8, #encoding.layout.dense> -> i8
   %cn8 = scalar.constant -8 : i8
   %cn6 = scalar.constant -6 : i8
   %cn1 = scalar.constant -1 : i8
@@ -248,14 +248,14 @@ kernel.def target(@target) @integer_i8_truth_table() {
   %bitwise_or = scalar.ori %c0, %c2 : i8
   %shift_right_logical = scalar.shrui %c8, %c1 : i8
   %shift_left = scalar.shli %c3, %c1 : i8
-  view.store %cn8, %value_output0_view[0] : i8, view<1xi8, #dense>
-  view.store %bitwise_and, %value_output1_view[0] : i8, view<1xi8, #dense>
-  view.store %shift_right_arithmetic, %value_output2_view[0] : i8, view<1xi8, #dense>
-  view.store %bitwise_xor, %value_output3_view[0] : i8, view<1xi8, #dense>
-  view.store %selected, %value_output4_view[0] : i8, view<1xi8, #dense>
-  view.store %bitwise_or, %value_output5_view[0] : i8, view<1xi8, #dense>
-  view.store %shift_right_logical, %value_output6_view[0] : i8, view<1xi8, #dense>
-  view.store %shift_left, %value_output7_view[0] : i8, view<1xi8, #dense>
+  view.store %cn8, %value_output0_view[0] : i8, view<1xi8, #encoding.layout.dense>
+  view.store %bitwise_and, %value_output1_view[0] : i8, view<1xi8, #encoding.layout.dense>
+  view.store %shift_right_arithmetic, %value_output2_view[0] : i8, view<1xi8, #encoding.layout.dense>
+  view.store %bitwise_xor, %value_output3_view[0] : i8, view<1xi8, #encoding.layout.dense>
+  view.store %selected, %value_output4_view[0] : i8, view<1xi8, #encoding.layout.dense>
+  view.store %bitwise_or, %value_output5_view[0] : i8, view<1xi8, #encoding.layout.dense>
+  view.store %shift_right_logical, %value_output6_view[0] : i8, view<1xi8, #encoding.layout.dense>
+  view.store %shift_left, %value_output7_view[0] : i8, view<1xi8, #encoding.layout.dense>
 
   %not_equal = scalar.cmpi ne, %lhs, %rhs : i8
   %signed_less = scalar.cmpi slt, %lhs, %rhs : i8
@@ -276,16 +276,16 @@ kernel.def target(@target) @integer_i8_truth_table() {
   %unsigned_greater_i32 = scf.select %unsigned_greater, %true_i32, %false_i32 : i32
   %unsigned_less_equal_i32 = scf.select %unsigned_less_equal, %true_i32, %false_i32 : i32
   %unsigned_greater_equal_i32 = scf.select %unsigned_greater_equal, %true_i32, %false_i32 : i32
-  view.store %equal_i32, %comparison_output0_view[0] : i32, view<1xi32, #dense>
-  view.store %not_equal_i32, %comparison_output1_view[0] : i32, view<1xi32, #dense>
-  view.store %signed_greater_i32, %comparison_output2_view[0] : i32, view<1xi32, #dense>
-  view.store %signed_less_i32, %comparison_output3_view[0] : i32, view<1xi32, #dense>
-  view.store %signed_greater_equal_i32, %comparison_output4_view[0] : i32, view<1xi32, #dense>
-  view.store %signed_less_equal_i32, %comparison_output5_view[0] : i32, view<1xi32, #dense>
-  view.store %unsigned_less_i32, %comparison_output6_view[0] : i32, view<1xi32, #dense>
-  view.store %unsigned_greater_i32, %comparison_output7_view[0] : i32, view<1xi32, #dense>
-  view.store %unsigned_less_equal_i32, %comparison_output8_view[0] : i32, view<1xi32, #dense>
-  view.store %unsigned_greater_equal_i32, %comparison_output9_view[0] : i32, view<1xi32, #dense>
+  view.store %equal_i32, %comparison_output0_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %not_equal_i32, %comparison_output1_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %signed_greater_i32, %comparison_output2_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %signed_less_i32, %comparison_output3_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %signed_greater_equal_i32, %comparison_output4_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %signed_less_equal_i32, %comparison_output5_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %unsigned_less_i32, %comparison_output6_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %unsigned_greater_i32, %comparison_output7_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %unsigned_less_equal_i32, %comparison_output8_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %unsigned_greater_equal_i32, %comparison_output9_view[0] : i32, view<1xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -324,29 +324,29 @@ kernel.def target(@target) @integer_i16_truth_table() {
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 2} : buffer
   %value_output_aligned = buffer.assume.alignment %value_output {minimum_alignment = 2} : buffer
   %comparison_output_aligned = buffer.assume.alignment %comparison_output {minimum_alignment = 4} : buffer
-  %input_lhs_view = buffer.view %input_aligned[%offset0] : buffer -> view<1xi16, #dense>
-  %input_rhs_view = buffer.view %input_aligned[%offset2] : buffer -> view<1xi16, #dense>
-  %value_output0_view = buffer.view %value_output_aligned[%offset0] : buffer -> view<1xi16, #dense>
-  %value_output1_view = buffer.view %value_output_aligned[%offset2] : buffer -> view<1xi16, #dense>
-  %value_output2_view = buffer.view %value_output_aligned[%offset4] : buffer -> view<1xi16, #dense>
-  %value_output3_view = buffer.view %value_output_aligned[%offset6] : buffer -> view<1xi16, #dense>
-  %value_output4_view = buffer.view %value_output_aligned[%offset8] : buffer -> view<1xi16, #dense>
-  %value_output5_view = buffer.view %value_output_aligned[%offset10] : buffer -> view<1xi16, #dense>
-  %value_output6_view = buffer.view %value_output_aligned[%offset12] : buffer -> view<1xi16, #dense>
-  %value_output7_view = buffer.view %value_output_aligned[%offset14] : buffer -> view<1xi16, #dense>
-  %comparison_output0_view = buffer.view %comparison_output_aligned[%offset0] : buffer -> view<1xi32, #dense>
-  %comparison_output1_view = buffer.view %comparison_output_aligned[%offset4] : buffer -> view<1xi32, #dense>
-  %comparison_output2_view = buffer.view %comparison_output_aligned[%offset8] : buffer -> view<1xi32, #dense>
-  %comparison_output3_view = buffer.view %comparison_output_aligned[%offset12] : buffer -> view<1xi32, #dense>
-  %comparison_output4_view = buffer.view %comparison_output_aligned[%offset16] : buffer -> view<1xi32, #dense>
-  %comparison_output5_view = buffer.view %comparison_output_aligned[%offset20] : buffer -> view<1xi32, #dense>
-  %comparison_output6_view = buffer.view %comparison_output_aligned[%offset24] : buffer -> view<1xi32, #dense>
-  %comparison_output7_view = buffer.view %comparison_output_aligned[%offset28] : buffer -> view<1xi32, #dense>
-  %comparison_output8_view = buffer.view %comparison_output_aligned[%offset32] : buffer -> view<1xi32, #dense>
-  %comparison_output9_view = buffer.view %comparison_output_aligned[%offset36] : buffer -> view<1xi32, #dense>
+  %input_lhs_view = buffer.view %input_aligned[%offset0] : buffer -> view<1xi16, #encoding.layout.dense>
+  %input_rhs_view = buffer.view %input_aligned[%offset2] : buffer -> view<1xi16, #encoding.layout.dense>
+  %value_output0_view = buffer.view %value_output_aligned[%offset0] : buffer -> view<1xi16, #encoding.layout.dense>
+  %value_output1_view = buffer.view %value_output_aligned[%offset2] : buffer -> view<1xi16, #encoding.layout.dense>
+  %value_output2_view = buffer.view %value_output_aligned[%offset4] : buffer -> view<1xi16, #encoding.layout.dense>
+  %value_output3_view = buffer.view %value_output_aligned[%offset6] : buffer -> view<1xi16, #encoding.layout.dense>
+  %value_output4_view = buffer.view %value_output_aligned[%offset8] : buffer -> view<1xi16, #encoding.layout.dense>
+  %value_output5_view = buffer.view %value_output_aligned[%offset10] : buffer -> view<1xi16, #encoding.layout.dense>
+  %value_output6_view = buffer.view %value_output_aligned[%offset12] : buffer -> view<1xi16, #encoding.layout.dense>
+  %value_output7_view = buffer.view %value_output_aligned[%offset14] : buffer -> view<1xi16, #encoding.layout.dense>
+  %comparison_output0_view = buffer.view %comparison_output_aligned[%offset0] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output1_view = buffer.view %comparison_output_aligned[%offset4] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output2_view = buffer.view %comparison_output_aligned[%offset8] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output3_view = buffer.view %comparison_output_aligned[%offset12] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output4_view = buffer.view %comparison_output_aligned[%offset16] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output5_view = buffer.view %comparison_output_aligned[%offset20] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output6_view = buffer.view %comparison_output_aligned[%offset24] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output7_view = buffer.view %comparison_output_aligned[%offset28] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output8_view = buffer.view %comparison_output_aligned[%offset32] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output9_view = buffer.view %comparison_output_aligned[%offset36] : buffer -> view<1xi32, #encoding.layout.dense>
 
-  %lhs = view.load %input_lhs_view[0] : view<1xi16, #dense> -> i16
-  %rhs = view.load %input_rhs_view[0] : view<1xi16, #dense> -> i16
+  %lhs = view.load %input_lhs_view[0] : view<1xi16, #encoding.layout.dense> -> i16
+  %rhs = view.load %input_rhs_view[0] : view<1xi16, #encoding.layout.dense> -> i16
   %cn8 = scalar.constant -8 : i16
   %cn6 = scalar.constant -6 : i16
   %cn1 = scalar.constant -1 : i16
@@ -365,14 +365,14 @@ kernel.def target(@target) @integer_i16_truth_table() {
   %bitwise_or = scalar.ori %c0, %c2 : i16
   %shift_right_logical = scalar.shrui %c8, %c1 : i16
   %shift_left = scalar.shli %c3, %c1 : i16
-  view.store %cn8, %value_output0_view[0] : i16, view<1xi16, #dense>
-  view.store %bitwise_and, %value_output1_view[0] : i16, view<1xi16, #dense>
-  view.store %shift_right_arithmetic, %value_output2_view[0] : i16, view<1xi16, #dense>
-  view.store %bitwise_xor, %value_output3_view[0] : i16, view<1xi16, #dense>
-  view.store %selected, %value_output4_view[0] : i16, view<1xi16, #dense>
-  view.store %bitwise_or, %value_output5_view[0] : i16, view<1xi16, #dense>
-  view.store %shift_right_logical, %value_output6_view[0] : i16, view<1xi16, #dense>
-  view.store %shift_left, %value_output7_view[0] : i16, view<1xi16, #dense>
+  view.store %cn8, %value_output0_view[0] : i16, view<1xi16, #encoding.layout.dense>
+  view.store %bitwise_and, %value_output1_view[0] : i16, view<1xi16, #encoding.layout.dense>
+  view.store %shift_right_arithmetic, %value_output2_view[0] : i16, view<1xi16, #encoding.layout.dense>
+  view.store %bitwise_xor, %value_output3_view[0] : i16, view<1xi16, #encoding.layout.dense>
+  view.store %selected, %value_output4_view[0] : i16, view<1xi16, #encoding.layout.dense>
+  view.store %bitwise_or, %value_output5_view[0] : i16, view<1xi16, #encoding.layout.dense>
+  view.store %shift_right_logical, %value_output6_view[0] : i16, view<1xi16, #encoding.layout.dense>
+  view.store %shift_left, %value_output7_view[0] : i16, view<1xi16, #encoding.layout.dense>
 
   %not_equal = scalar.cmpi ne, %lhs, %rhs : i16
   %signed_less = scalar.cmpi slt, %lhs, %rhs : i16
@@ -393,16 +393,16 @@ kernel.def target(@target) @integer_i16_truth_table() {
   %unsigned_greater_i32 = scf.select %unsigned_greater, %true_i32, %false_i32 : i32
   %unsigned_less_equal_i32 = scf.select %unsigned_less_equal, %true_i32, %false_i32 : i32
   %unsigned_greater_equal_i32 = scf.select %unsigned_greater_equal, %true_i32, %false_i32 : i32
-  view.store %equal_i32, %comparison_output0_view[0] : i32, view<1xi32, #dense>
-  view.store %not_equal_i32, %comparison_output1_view[0] : i32, view<1xi32, #dense>
-  view.store %signed_greater_i32, %comparison_output2_view[0] : i32, view<1xi32, #dense>
-  view.store %signed_less_i32, %comparison_output3_view[0] : i32, view<1xi32, #dense>
-  view.store %signed_greater_equal_i32, %comparison_output4_view[0] : i32, view<1xi32, #dense>
-  view.store %signed_less_equal_i32, %comparison_output5_view[0] : i32, view<1xi32, #dense>
-  view.store %unsigned_less_i32, %comparison_output6_view[0] : i32, view<1xi32, #dense>
-  view.store %unsigned_greater_i32, %comparison_output7_view[0] : i32, view<1xi32, #dense>
-  view.store %unsigned_less_equal_i32, %comparison_output8_view[0] : i32, view<1xi32, #dense>
-  view.store %unsigned_greater_equal_i32, %comparison_output9_view[0] : i32, view<1xi32, #dense>
+  view.store %equal_i32, %comparison_output0_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %not_equal_i32, %comparison_output1_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %signed_greater_i32, %comparison_output2_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %signed_less_i32, %comparison_output3_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %signed_greater_equal_i32, %comparison_output4_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %signed_less_equal_i32, %comparison_output5_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %unsigned_less_i32, %comparison_output6_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %unsigned_greater_i32, %comparison_output7_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %unsigned_less_equal_i32, %comparison_output8_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %unsigned_greater_equal_i32, %comparison_output9_view[0] : i32, view<1xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -440,29 +440,29 @@ kernel.def target(@target) @integer_i64_truth_table() {
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 8} : buffer
   %value_output_aligned = buffer.assume.alignment %value_output {minimum_alignment = 8} : buffer
   %comparison_output_aligned = buffer.assume.alignment %comparison_output {minimum_alignment = 4} : buffer
-  %input_lhs_view = buffer.view %input_aligned[%offset0] : buffer -> view<1xi64, #dense>
-  %input_rhs_view = buffer.view %input_aligned[%offset8] : buffer -> view<1xi64, #dense>
-  %value_output0_view = buffer.view %value_output_aligned[%offset0] : buffer -> view<1xi64, #dense>
-  %value_output1_view = buffer.view %value_output_aligned[%offset8] : buffer -> view<1xi64, #dense>
-  %value_output2_view = buffer.view %value_output_aligned[%offset16] : buffer -> view<1xi64, #dense>
-  %value_output3_view = buffer.view %value_output_aligned[%offset24] : buffer -> view<1xi64, #dense>
-  %value_output4_view = buffer.view %value_output_aligned[%offset32] : buffer -> view<1xi64, #dense>
-  %value_output5_view = buffer.view %value_output_aligned[%offset40] : buffer -> view<1xi64, #dense>
-  %value_output6_view = buffer.view %value_output_aligned[%offset48] : buffer -> view<1xi64, #dense>
-  %value_output7_view = buffer.view %value_output_aligned[%offset56] : buffer -> view<1xi64, #dense>
-  %comparison_output0_view = buffer.view %comparison_output_aligned[%offset0] : buffer -> view<1xi32, #dense>
-  %comparison_output1_view = buffer.view %comparison_output_aligned[%offset4] : buffer -> view<1xi32, #dense>
-  %comparison_output2_view = buffer.view %comparison_output_aligned[%offset8] : buffer -> view<1xi32, #dense>
-  %comparison_output3_view = buffer.view %comparison_output_aligned[%offset12] : buffer -> view<1xi32, #dense>
-  %comparison_output4_view = buffer.view %comparison_output_aligned[%offset16] : buffer -> view<1xi32, #dense>
-  %comparison_output5_view = buffer.view %comparison_output_aligned[%offset20] : buffer -> view<1xi32, #dense>
-  %comparison_output6_view = buffer.view %comparison_output_aligned[%offset24] : buffer -> view<1xi32, #dense>
-  %comparison_output7_view = buffer.view %comparison_output_aligned[%offset28] : buffer -> view<1xi32, #dense>
-  %comparison_output8_view = buffer.view %comparison_output_aligned[%offset32] : buffer -> view<1xi32, #dense>
-  %comparison_output9_view = buffer.view %comparison_output_aligned[%offset36] : buffer -> view<1xi32, #dense>
+  %input_lhs_view = buffer.view %input_aligned[%offset0] : buffer -> view<1xi64, #encoding.layout.dense>
+  %input_rhs_view = buffer.view %input_aligned[%offset8] : buffer -> view<1xi64, #encoding.layout.dense>
+  %value_output0_view = buffer.view %value_output_aligned[%offset0] : buffer -> view<1xi64, #encoding.layout.dense>
+  %value_output1_view = buffer.view %value_output_aligned[%offset8] : buffer -> view<1xi64, #encoding.layout.dense>
+  %value_output2_view = buffer.view %value_output_aligned[%offset16] : buffer -> view<1xi64, #encoding.layout.dense>
+  %value_output3_view = buffer.view %value_output_aligned[%offset24] : buffer -> view<1xi64, #encoding.layout.dense>
+  %value_output4_view = buffer.view %value_output_aligned[%offset32] : buffer -> view<1xi64, #encoding.layout.dense>
+  %value_output5_view = buffer.view %value_output_aligned[%offset40] : buffer -> view<1xi64, #encoding.layout.dense>
+  %value_output6_view = buffer.view %value_output_aligned[%offset48] : buffer -> view<1xi64, #encoding.layout.dense>
+  %value_output7_view = buffer.view %value_output_aligned[%offset56] : buffer -> view<1xi64, #encoding.layout.dense>
+  %comparison_output0_view = buffer.view %comparison_output_aligned[%offset0] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output1_view = buffer.view %comparison_output_aligned[%offset4] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output2_view = buffer.view %comparison_output_aligned[%offset8] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output3_view = buffer.view %comparison_output_aligned[%offset12] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output4_view = buffer.view %comparison_output_aligned[%offset16] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output5_view = buffer.view %comparison_output_aligned[%offset20] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output6_view = buffer.view %comparison_output_aligned[%offset24] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output7_view = buffer.view %comparison_output_aligned[%offset28] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output8_view = buffer.view %comparison_output_aligned[%offset32] : buffer -> view<1xi32, #encoding.layout.dense>
+  %comparison_output9_view = buffer.view %comparison_output_aligned[%offset36] : buffer -> view<1xi32, #encoding.layout.dense>
 
-  %lhs = view.load %input_lhs_view[0] : view<1xi64, #dense> -> i64
-  %rhs = view.load %input_rhs_view[0] : view<1xi64, #dense> -> i64
+  %lhs = view.load %input_lhs_view[0] : view<1xi64, #encoding.layout.dense> -> i64
+  %rhs = view.load %input_rhs_view[0] : view<1xi64, #encoding.layout.dense> -> i64
   %cn8 = scalar.constant -8 : i64
   %cn6 = scalar.constant -6 : i64
   %cn1 = scalar.constant -1 : i64
@@ -481,14 +481,14 @@ kernel.def target(@target) @integer_i64_truth_table() {
   %bitwise_or = scalar.ori %c0, %c2 : i64
   %shift_right_logical = scalar.shrui %c8, %c1 : i64
   %shift_left = scalar.shli %c3, %c1 : i64
-  view.store %cn8, %value_output0_view[0] : i64, view<1xi64, #dense>
-  view.store %bitwise_and, %value_output1_view[0] : i64, view<1xi64, #dense>
-  view.store %shift_right_arithmetic, %value_output2_view[0] : i64, view<1xi64, #dense>
-  view.store %bitwise_xor, %value_output3_view[0] : i64, view<1xi64, #dense>
-  view.store %selected, %value_output4_view[0] : i64, view<1xi64, #dense>
-  view.store %bitwise_or, %value_output5_view[0] : i64, view<1xi64, #dense>
-  view.store %shift_right_logical, %value_output6_view[0] : i64, view<1xi64, #dense>
-  view.store %shift_left, %value_output7_view[0] : i64, view<1xi64, #dense>
+  view.store %cn8, %value_output0_view[0] : i64, view<1xi64, #encoding.layout.dense>
+  view.store %bitwise_and, %value_output1_view[0] : i64, view<1xi64, #encoding.layout.dense>
+  view.store %shift_right_arithmetic, %value_output2_view[0] : i64, view<1xi64, #encoding.layout.dense>
+  view.store %bitwise_xor, %value_output3_view[0] : i64, view<1xi64, #encoding.layout.dense>
+  view.store %selected, %value_output4_view[0] : i64, view<1xi64, #encoding.layout.dense>
+  view.store %bitwise_or, %value_output5_view[0] : i64, view<1xi64, #encoding.layout.dense>
+  view.store %shift_right_logical, %value_output6_view[0] : i64, view<1xi64, #encoding.layout.dense>
+  view.store %shift_left, %value_output7_view[0] : i64, view<1xi64, #encoding.layout.dense>
 
   %not_equal = scalar.cmpi ne, %lhs, %rhs : i64
   %signed_less = scalar.cmpi slt, %lhs, %rhs : i64
@@ -509,16 +509,16 @@ kernel.def target(@target) @integer_i64_truth_table() {
   %unsigned_greater_i32 = scf.select %unsigned_greater, %true_i32, %false_i32 : i32
   %unsigned_less_equal_i32 = scf.select %unsigned_less_equal, %true_i32, %false_i32 : i32
   %unsigned_greater_equal_i32 = scf.select %unsigned_greater_equal, %true_i32, %false_i32 : i32
-  view.store %equal_i32, %comparison_output0_view[0] : i32, view<1xi32, #dense>
-  view.store %not_equal_i32, %comparison_output1_view[0] : i32, view<1xi32, #dense>
-  view.store %signed_greater_i32, %comparison_output2_view[0] : i32, view<1xi32, #dense>
-  view.store %signed_less_i32, %comparison_output3_view[0] : i32, view<1xi32, #dense>
-  view.store %signed_greater_equal_i32, %comparison_output4_view[0] : i32, view<1xi32, #dense>
-  view.store %signed_less_equal_i32, %comparison_output5_view[0] : i32, view<1xi32, #dense>
-  view.store %unsigned_less_i32, %comparison_output6_view[0] : i32, view<1xi32, #dense>
-  view.store %unsigned_greater_i32, %comparison_output7_view[0] : i32, view<1xi32, #dense>
-  view.store %unsigned_less_equal_i32, %comparison_output8_view[0] : i32, view<1xi32, #dense>
-  view.store %unsigned_greater_equal_i32, %comparison_output9_view[0] : i32, view<1xi32, #dense>
+  view.store %equal_i32, %comparison_output0_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %not_equal_i32, %comparison_output1_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %signed_greater_i32, %comparison_output2_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %signed_less_i32, %comparison_output3_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %signed_greater_equal_i32, %comparison_output4_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %signed_less_equal_i32, %comparison_output5_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %unsigned_less_i32, %comparison_output6_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %unsigned_greater_i32, %comparison_output7_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %unsigned_less_equal_i32, %comparison_output8_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %unsigned_greater_equal_i32, %comparison_output9_view[0] : i32, view<1xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -557,58 +557,58 @@ kernel.def target(@target) @index_numeric_truth_table() {
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %arithmetic_output_aligned = buffer.assume.alignment %arithmetic_output {minimum_alignment = 4} : buffer
   %bitwise_output_aligned = buffer.assume.alignment %bitwise_output {minimum_alignment = 4} : buffer
-  %input0_view = buffer.view %input_aligned[%byte0] : buffer -> view<1xi32, #dense>
-  %input1_view = buffer.view %input_aligned[%byte4] : buffer -> view<1xi32, #dense>
-  %input2_view = buffer.view %input_aligned[%byte8] : buffer -> view<1xi32, #dense>
-  %input3_view = buffer.view %input_aligned[%byte12] : buffer -> view<1xi32, #dense>
-  %input4_view = buffer.view %input_aligned[%byte16] : buffer -> view<1xi32, #dense>
-  %input5_view = buffer.view %input_aligned[%byte20] : buffer -> view<1xi32, #dense>
-  %input6_view = buffer.view %input_aligned[%byte24] : buffer -> view<1xi32, #dense>
-  %input8_view = buffer.view %input_aligned[%byte32] : buffer -> view<1xi32, #dense>
-  %input9_view = buffer.view %input_aligned[%byte36] : buffer -> view<1xi32, #dense>
-  %input10_view = buffer.view %input_aligned[%byte40] : buffer -> view<1xi32, #dense>
-  %input11_view = buffer.view %input_aligned[%byte44] : buffer -> view<1xi32, #dense>
-  %input12_view = buffer.view %input_aligned[%byte48] : buffer -> view<1xi32, #dense>
-  %input14_view = buffer.view %input_aligned[%byte56] : buffer -> view<1xi32, #dense>
-  %input21_view = buffer.view %input_aligned[%byte84] : buffer -> view<1xi32, #dense>
-  %arithmetic0_view = buffer.view %arithmetic_output_aligned[%byte0] : buffer -> view<1xi32, #dense>
-  %arithmetic1_view = buffer.view %arithmetic_output_aligned[%byte4] : buffer -> view<1xi32, #dense>
-  %arithmetic2_view = buffer.view %arithmetic_output_aligned[%byte8] : buffer -> view<1xi32, #dense>
-  %arithmetic3_view = buffer.view %arithmetic_output_aligned[%byte12] : buffer -> view<1xi32, #dense>
-  %arithmetic4_view = buffer.view %arithmetic_output_aligned[%byte16] : buffer -> view<1xi32, #dense>
-  %arithmetic5_view = buffer.view %arithmetic_output_aligned[%byte20] : buffer -> view<1xi32, #dense>
-  %arithmetic6_view = buffer.view %arithmetic_output_aligned[%byte24] : buffer -> view<1xi32, #dense>
-  %arithmetic7_view = buffer.view %arithmetic_output_aligned[%byte28] : buffer -> view<1xi32, #dense>
-  %arithmetic8_view = buffer.view %arithmetic_output_aligned[%byte32] : buffer -> view<1xi32, #dense>
-  %arithmetic9_view = buffer.view %arithmetic_output_aligned[%byte36] : buffer -> view<1xi32, #dense>
-  %bitwise0_view = buffer.view %bitwise_output_aligned[%byte0] : buffer -> view<1xi32, #dense>
-  %bitwise1_view = buffer.view %bitwise_output_aligned[%byte4] : buffer -> view<1xi32, #dense>
-  %bitwise2_view = buffer.view %bitwise_output_aligned[%byte8] : buffer -> view<1xi32, #dense>
-  %bitwise3_view = buffer.view %bitwise_output_aligned[%byte12] : buffer -> view<1xi32, #dense>
-  %bitwise4_view = buffer.view %bitwise_output_aligned[%byte16] : buffer -> view<1xi32, #dense>
-  %bitwise5_view = buffer.view %bitwise_output_aligned[%byte20] : buffer -> view<1xi32, #dense>
-  %bitwise6_view = buffer.view %bitwise_output_aligned[%byte24] : buffer -> view<1xi32, #dense>
-  %bitwise7_view = buffer.view %bitwise_output_aligned[%byte28] : buffer -> view<1xi32, #dense>
-  %bitwise8_view = buffer.view %bitwise_output_aligned[%byte32] : buffer -> view<1xi32, #dense>
-  %bitwise9_view = buffer.view %bitwise_output_aligned[%byte36] : buffer -> view<1xi32, #dense>
-  %bitwise10_view = buffer.view %bitwise_output_aligned[%byte40] : buffer -> view<1xi32, #dense>
-  %bitwise11_view = buffer.view %bitwise_output_aligned[%byte44] : buffer -> view<1xi32, #dense>
-  %bitwise12_view = buffer.view %bitwise_output_aligned[%byte48] : buffer -> view<1xi32, #dense>
+  %input0_view = buffer.view %input_aligned[%byte0] : buffer -> view<1xi32, #encoding.layout.dense>
+  %input1_view = buffer.view %input_aligned[%byte4] : buffer -> view<1xi32, #encoding.layout.dense>
+  %input2_view = buffer.view %input_aligned[%byte8] : buffer -> view<1xi32, #encoding.layout.dense>
+  %input3_view = buffer.view %input_aligned[%byte12] : buffer -> view<1xi32, #encoding.layout.dense>
+  %input4_view = buffer.view %input_aligned[%byte16] : buffer -> view<1xi32, #encoding.layout.dense>
+  %input5_view = buffer.view %input_aligned[%byte20] : buffer -> view<1xi32, #encoding.layout.dense>
+  %input6_view = buffer.view %input_aligned[%byte24] : buffer -> view<1xi32, #encoding.layout.dense>
+  %input8_view = buffer.view %input_aligned[%byte32] : buffer -> view<1xi32, #encoding.layout.dense>
+  %input9_view = buffer.view %input_aligned[%byte36] : buffer -> view<1xi32, #encoding.layout.dense>
+  %input10_view = buffer.view %input_aligned[%byte40] : buffer -> view<1xi32, #encoding.layout.dense>
+  %input11_view = buffer.view %input_aligned[%byte44] : buffer -> view<1xi32, #encoding.layout.dense>
+  %input12_view = buffer.view %input_aligned[%byte48] : buffer -> view<1xi32, #encoding.layout.dense>
+  %input14_view = buffer.view %input_aligned[%byte56] : buffer -> view<1xi32, #encoding.layout.dense>
+  %input21_view = buffer.view %input_aligned[%byte84] : buffer -> view<1xi32, #encoding.layout.dense>
+  %arithmetic0_view = buffer.view %arithmetic_output_aligned[%byte0] : buffer -> view<1xi32, #encoding.layout.dense>
+  %arithmetic1_view = buffer.view %arithmetic_output_aligned[%byte4] : buffer -> view<1xi32, #encoding.layout.dense>
+  %arithmetic2_view = buffer.view %arithmetic_output_aligned[%byte8] : buffer -> view<1xi32, #encoding.layout.dense>
+  %arithmetic3_view = buffer.view %arithmetic_output_aligned[%byte12] : buffer -> view<1xi32, #encoding.layout.dense>
+  %arithmetic4_view = buffer.view %arithmetic_output_aligned[%byte16] : buffer -> view<1xi32, #encoding.layout.dense>
+  %arithmetic5_view = buffer.view %arithmetic_output_aligned[%byte20] : buffer -> view<1xi32, #encoding.layout.dense>
+  %arithmetic6_view = buffer.view %arithmetic_output_aligned[%byte24] : buffer -> view<1xi32, #encoding.layout.dense>
+  %arithmetic7_view = buffer.view %arithmetic_output_aligned[%byte28] : buffer -> view<1xi32, #encoding.layout.dense>
+  %arithmetic8_view = buffer.view %arithmetic_output_aligned[%byte32] : buffer -> view<1xi32, #encoding.layout.dense>
+  %arithmetic9_view = buffer.view %arithmetic_output_aligned[%byte36] : buffer -> view<1xi32, #encoding.layout.dense>
+  %bitwise0_view = buffer.view %bitwise_output_aligned[%byte0] : buffer -> view<1xi32, #encoding.layout.dense>
+  %bitwise1_view = buffer.view %bitwise_output_aligned[%byte4] : buffer -> view<1xi32, #encoding.layout.dense>
+  %bitwise2_view = buffer.view %bitwise_output_aligned[%byte8] : buffer -> view<1xi32, #encoding.layout.dense>
+  %bitwise3_view = buffer.view %bitwise_output_aligned[%byte12] : buffer -> view<1xi32, #encoding.layout.dense>
+  %bitwise4_view = buffer.view %bitwise_output_aligned[%byte16] : buffer -> view<1xi32, #encoding.layout.dense>
+  %bitwise5_view = buffer.view %bitwise_output_aligned[%byte20] : buffer -> view<1xi32, #encoding.layout.dense>
+  %bitwise6_view = buffer.view %bitwise_output_aligned[%byte24] : buffer -> view<1xi32, #encoding.layout.dense>
+  %bitwise7_view = buffer.view %bitwise_output_aligned[%byte28] : buffer -> view<1xi32, #encoding.layout.dense>
+  %bitwise8_view = buffer.view %bitwise_output_aligned[%byte32] : buffer -> view<1xi32, #encoding.layout.dense>
+  %bitwise9_view = buffer.view %bitwise_output_aligned[%byte36] : buffer -> view<1xi32, #encoding.layout.dense>
+  %bitwise10_view = buffer.view %bitwise_output_aligned[%byte40] : buffer -> view<1xi32, #encoding.layout.dense>
+  %bitwise11_view = buffer.view %bitwise_output_aligned[%byte44] : buffer -> view<1xi32, #encoding.layout.dense>
+  %bitwise12_view = buffer.view %bitwise_output_aligned[%byte48] : buffer -> view<1xi32, #encoding.layout.dense>
 
-  %value0_i32 = view.load %input0_view[0] : view<1xi32, #dense> -> i32
-  %value1_i32 = view.load %input1_view[0] : view<1xi32, #dense> -> i32
-  %value2_i32 = view.load %input2_view[0] : view<1xi32, #dense> -> i32
-  %value3_i32 = view.load %input3_view[0] : view<1xi32, #dense> -> i32
-  %value4_i32 = view.load %input4_view[0] : view<1xi32, #dense> -> i32
-  %value5_i32 = view.load %input5_view[0] : view<1xi32, #dense> -> i32
-  %value6_i32 = view.load %input6_view[0] : view<1xi32, #dense> -> i32
-  %value8_i32 = view.load %input8_view[0] : view<1xi32, #dense> -> i32
-  %value9_i32 = view.load %input9_view[0] : view<1xi32, #dense> -> i32
-  %value10_i32 = view.load %input10_view[0] : view<1xi32, #dense> -> i32
-  %value11_i32 = view.load %input11_view[0] : view<1xi32, #dense> -> i32
-  %value12_i32 = view.load %input12_view[0] : view<1xi32, #dense> -> i32
-  %value14_i32 = view.load %input14_view[0] : view<1xi32, #dense> -> i32
-  %value21_i32 = view.load %input21_view[0] : view<1xi32, #dense> -> i32
+  %value0_i32 = view.load %input0_view[0] : view<1xi32, #encoding.layout.dense> -> i32
+  %value1_i32 = view.load %input1_view[0] : view<1xi32, #encoding.layout.dense> -> i32
+  %value2_i32 = view.load %input2_view[0] : view<1xi32, #encoding.layout.dense> -> i32
+  %value3_i32 = view.load %input3_view[0] : view<1xi32, #encoding.layout.dense> -> i32
+  %value4_i32 = view.load %input4_view[0] : view<1xi32, #encoding.layout.dense> -> i32
+  %value5_i32 = view.load %input5_view[0] : view<1xi32, #encoding.layout.dense> -> i32
+  %value6_i32 = view.load %input6_view[0] : view<1xi32, #encoding.layout.dense> -> i32
+  %value8_i32 = view.load %input8_view[0] : view<1xi32, #encoding.layout.dense> -> i32
+  %value9_i32 = view.load %input9_view[0] : view<1xi32, #encoding.layout.dense> -> i32
+  %value10_i32 = view.load %input10_view[0] : view<1xi32, #encoding.layout.dense> -> i32
+  %value11_i32 = view.load %input11_view[0] : view<1xi32, #encoding.layout.dense> -> i32
+  %value12_i32 = view.load %input12_view[0] : view<1xi32, #encoding.layout.dense> -> i32
+  %value14_i32 = view.load %input14_view[0] : view<1xi32, #encoding.layout.dense> -> i32
+  %value21_i32 = view.load %input21_view[0] : view<1xi32, #encoding.layout.dense> -> i32
   %value0 = index.cast %value0_i32 : i32 to index
   %value1 = index.cast %value1_i32 : i32 to index
   %value2 = index.cast %value2_i32 : i32 to index
@@ -648,16 +648,16 @@ kernel.def target(@target) @index_numeric_truth_table() {
   %madd_i32 = index.cast %madd : index to i32
   %scaled_i32 = index.cast %scaled : offset to i32
   %selected_i32 = index.cast %selected : index to i32
-  view.store %add_i32, %arithmetic0_view[0] : i32, view<1xi32, #dense>
-  view.store %sub_i32, %arithmetic1_view[0] : i32, view<1xi32, #dense>
-  view.store %mul_i32, %arithmetic2_view[0] : i32, view<1xi32, #dense>
-  view.store %div_i32, %arithmetic3_view[0] : i32, view<1xi32, #dense>
-  view.store %rem_i32, %arithmetic4_view[0] : i32, view<1xi32, #dense>
-  view.store %min_i32, %arithmetic5_view[0] : i32, view<1xi32, #dense>
-  view.store %max_i32, %arithmetic6_view[0] : i32, view<1xi32, #dense>
-  view.store %madd_i32, %arithmetic7_view[0] : i32, view<1xi32, #dense>
-  view.store %scaled_i32, %arithmetic8_view[0] : i32, view<1xi32, #dense>
-  view.store %selected_i32, %arithmetic9_view[0] : i32, view<1xi32, #dense>
+  view.store %add_i32, %arithmetic0_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %sub_i32, %arithmetic1_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %mul_i32, %arithmetic2_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %div_i32, %arithmetic3_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %rem_i32, %arithmetic4_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %min_i32, %arithmetic5_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %max_i32, %arithmetic6_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %madd_i32, %arithmetic7_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %scaled_i32, %arithmetic8_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %selected_i32, %arithmetic9_view[0] : i32, view<1xi32, #encoding.layout.dense>
 
   %bitwise_and = index.andi %value1, %value2 : index
   %bitwise_or = index.ori %value1, %value0 : index
@@ -689,19 +689,19 @@ kernel.def target(@target) @index_numeric_truth_table() {
   %leading_zero_count_i32 = index.cast %leading_zero_count : index to i32
   %trailing_zero_count_i32 = index.cast %trailing_zero_count : index to i32
   %population_count_i32 = index.cast %population_count : index to i32
-  view.store %bitwise_and_i32, %bitwise0_view[0] : i32, view<1xi32, #dense>
-  view.store %bitwise_or_i32, %bitwise1_view[0] : i32, view<1xi32, #dense>
-  view.store %bitwise_xor_i32, %bitwise2_view[0] : i32, view<1xi32, #dense>
-  view.store %shift_left_i32, %bitwise3_view[0] : i32, view<1xi32, #dense>
-  view.store %shift_right_signed_i32, %bitwise4_view[0] : i32, view<1xi32, #dense>
-  view.store %shift_right_unsigned_i32, %bitwise5_view[0] : i32, view<1xi32, #dense>
-  view.store %rotate_left_i32, %bitwise6_view[0] : i32, view<1xi32, #dense>
-  view.store %rotate_right_i32, %bitwise7_view[0] : i32, view<1xi32, #dense>
-  view.store %rotate_left_zero_i32, %bitwise8_view[0] : i32, view<1xi32, #dense>
-  view.store %rotate_right_zero_i32, %bitwise9_view[0] : i32, view<1xi32, #dense>
-  view.store %leading_zero_count_i32, %bitwise10_view[0] : i32, view<1xi32, #dense>
-  view.store %trailing_zero_count_i32, %bitwise11_view[0] : i32, view<1xi32, #dense>
-  view.store %population_count_i32, %bitwise12_view[0] : i32, view<1xi32, #dense>
+  view.store %bitwise_and_i32, %bitwise0_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %bitwise_or_i32, %bitwise1_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %bitwise_xor_i32, %bitwise2_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %shift_left_i32, %bitwise3_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %shift_right_signed_i32, %bitwise4_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %shift_right_unsigned_i32, %bitwise5_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %rotate_left_i32, %bitwise6_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %rotate_right_i32, %bitwise7_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %rotate_left_zero_i32, %bitwise8_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %rotate_right_zero_i32, %bitwise9_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %leading_zero_count_i32, %bitwise10_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %trailing_zero_count_i32, %bitwise11_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  view.store %population_count_i32, %bitwise12_view[0] : i32, view<1xi32, #encoding.layout.dense>
   kernel.return
 }
 

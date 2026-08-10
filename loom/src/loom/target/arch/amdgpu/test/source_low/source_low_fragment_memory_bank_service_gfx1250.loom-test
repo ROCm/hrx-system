@@ -18,21 +18,21 @@ kernel.def target(@target) @gfx1250_fragment_bank_service() {
   %subgroup = kernel.subgroup.id : index
   %tile_origin = index.mul %subgroup, %tile_extent : index
   %rhs_layout = encoding.layout.strided [1, 32] : encoding<layout>
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<128x16xbf16, #dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x64xf32, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<128x16xbf16, #encoding.layout.dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x64xf32, #encoding.layout.dense>
   %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
-  %scratch_stage = buffer.view %scratch[%buffer_base] : buffer -> view<128x16xbf16, #dense>
-  %staged = vector.load %input_view[%workitem, 0] : view<128x16xbf16, #dense> -> vector<16xbf16>
-  vector.store %staged, %scratch_stage[%workitem, 0] : vector<16xbf16>, view<128x16xbf16, #dense>
+  %scratch_stage = buffer.view %scratch[%buffer_base] : buffer -> view<128x16xbf16, #encoding.layout.dense>
+  %staged = vector.load %input_view[%workitem, 0] : view<128x16xbf16, #encoding.layout.dense> -> vector<16xbf16>
+  vector.store %staged, %scratch_stage[%workitem, 0] : vector<16xbf16>, view<128x16xbf16, #encoding.layout.dense>
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-  %lhs_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x32xbf16, #dense>
+  %lhs_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x32xbf16, #encoding.layout.dense>
   %rhs_view = buffer.view %scratch[%buffer_base] : buffer -> view<32x64xbf16, %rhs_layout>
-  %lhs = vector.fragment.load<lhs> %lhs_view[%tile_origin, %fragment_origin] shape [%m, %k] : view<64x32xbf16, #dense> -> vector<16xbf16>
+  %lhs = vector.fragment.load<lhs> %lhs_view[%tile_origin, %fragment_origin] shape [%m, %k] : view<64x32xbf16, #encoding.layout.dense> -> vector<16xbf16>
   %rhs = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %tile_origin] shape [%k, %n] : view<32x64xbf16, %rhs_layout> -> vector<16xbf16>
   %zero_acc = vector.constant 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-  vector.fragment.store<result> %result, %output_view[%tile_origin, %tile_origin] shape [%m, %n] : vector<8xf32>, view<64x64xf32, #dense>
+  vector.fragment.store<result> %result, %output_view[%tile_origin, %tile_origin] shape [%m, %n] : vector<8xf32>, view<64x64xf32, #encoding.layout.dense>
   kernel.return
 }
 

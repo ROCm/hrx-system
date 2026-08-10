@@ -3379,7 +3379,9 @@ class ScalarParam:
 class EncodingParam:
     """Encoding parameter for shaped types.
 
-    Represents the optional encoding suffix in tile<256xi8, #q8_0<block=32>>.
+    Represents the optional encoding suffix in
+    tile<256xi8, #encoding.operand<element_format=i8, payload_elements=32,
+    payload_packing=dense_lanes>>.
     """
 
     name: str
@@ -3521,7 +3523,7 @@ class TypeDef:
                 format=[ShapeOf("dims"), kw("x"), ScalarOf("element_type"),
                         OptionalGroup([COMMA, EncodingOf("encoding")],
                                       anchor="encoding")])
-        # Prints: tile<4x4xf32, #q8_0>
+        # Prints: tile<4x4xf32, #test.schema>
     """
 
     name: str

@@ -92,8 +92,13 @@ def test_preserves_explicit_tilelang_float8_storage_rounding() -> None:
         )
     )
     assert finite_fn_schema is not None
-    assert finite_fn_schema.name == "fp8_e4m3fn"
-    assert finite_fn_schema.params == (("rounding", "finite_only"),)
+    assert finite_fn_schema.name == "encoding.operand"
+    assert finite_fn_schema.params == (
+        ("element_format", "f8e4m3fn"),
+        ("payload_elements", 1),
+        ("payload_packing", "dense_lanes"),
+        ("rounding", "finite_only"),
+    )
 
     raw_finite_schema = converter.buffer_storage_schema(
         Buffer(
@@ -103,8 +108,13 @@ def test_preserves_explicit_tilelang_float8_storage_rounding() -> None:
         )
     )
     assert raw_finite_schema is not None
-    assert raw_finite_schema.name == "ieee_fp8_e4m3"
-    assert raw_finite_schema.params == (("rounding", "finite_only"),)
+    assert raw_finite_schema.name == "encoding.operand"
+    assert raw_finite_schema.params == (
+        ("element_format", "f8e4m3"),
+        ("payload_elements", 1),
+        ("payload_packing", "dense_lanes"),
+        ("rounding", "finite_only"),
+    )
 
 
 def test_rejects_storage_rounding_on_non_float8_buffer() -> None:

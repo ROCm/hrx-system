@@ -17,16 +17,16 @@ kernel.def @packed_s8_fields_f16scale_f32dot() {
   %lane = kernel.workitem.id<x> : index
 
   %fields_noalias, %scales_noalias, %rhs_noalias, %output_noalias = buffer.assume.noalias %packed_fields, %scales, %rhs, %output : buffer, buffer, buffer, buffer
-  %field_view = buffer.view %fields_noalias[%base] : buffer -> view<4xi32, #dense>
-  %scale_view = buffer.view %scales_noalias[%base] : buffer -> view<4xf16, #dense>
-  %rhs_view = buffer.view %rhs_noalias[%base] : buffer -> view<16xf32, #dense>
-  %output_view = buffer.view %output_noalias[%base] : buffer -> view<4xf32, #dense>
+  %field_view = buffer.view %fields_noalias[%base] : buffer -> view<4xi32, #encoding.layout.dense>
+  %scale_view = buffer.view %scales_noalias[%base] : buffer -> view<4xf16, #encoding.layout.dense>
+  %rhs_view = buffer.view %rhs_noalias[%base] : buffer -> view<16xf32, #encoding.layout.dense>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<4xf32, #encoding.layout.dense>
 
   %rhs_base0 = index.mul %lane, %packed_field_count : index
   %rhs_base = index.assume %rhs_base0 [range(%rhs_base0, 0, 12), mul(%rhs_base0, 4)] : index
-  %packed = vector.load %field_view[%lane] : view<4xi32, #dense> -> vector<1xi32>
-  %scale_f16 = view.load %scale_view[%lane] : view<4xf16, #dense> -> f16
-  %rhs_values = vector.load %rhs_view[%rhs_base] : view<16xf32, #dense> -> vector<4xf32>
+  %packed = vector.load %field_view[%lane] : view<4xi32, #encoding.layout.dense> -> vector<1xi32>
+  %scale_f16 = view.load %scale_view[%lane] : view<4xf16, #encoding.layout.dense> -> f16
+  %rhs_values = vector.load %rhs_view[%rhs_base] : view<16xf32, #encoding.layout.dense> -> vector<4xf32>
 
   %field_i32 = vector.bitunpacks<8> %packed : vector<1xi32> -> vector<4xi32>
   %field_f32 = vector.sitofp %field_i32 : vector<4xi32> to vector<4xf32>
@@ -35,7 +35,7 @@ kernel.def @packed_s8_fields_f16scale_f32dot() {
   %scaled_fields = vector.mulf<reassoc|nnan|ninf|nsz|contract> %field_f32, %scale_vector : vector<4xf32>
   %dot_initial = scalar.constant 0.0 : f32
   %dot = vector.dotf %scaled_fields, %rhs_values, %dot_initial : vector<4xf32>, vector<4xf32>, f32
-  view.store %dot, %output_view[%lane] : f32, view<4xf32, #dense>
+  view.store %dot, %output_view[%lane] : f32, view<4xf32, #encoding.layout.dense>
   kernel.return
 }
 

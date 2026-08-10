@@ -1829,7 +1829,8 @@ class Parser:
         """Parse a complete .loom file into a Module.
 
         Handles:
-          - Attribute aliases: #enc = #q8_0<block=32>
+          - Attribute aliases: #enc = #encoding.operand<element_format=i8,
+            payload_elements=32, payload_packing=dense_lanes>
           - Function definitions and declarations
           - Top-level dispatch
         """

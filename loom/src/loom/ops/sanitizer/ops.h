@@ -152,7 +152,7 @@ iree_status_t loom_sanitizer_assert_layout_verify(
     iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_SANITIZER_RACE_ACCESS: Observe a logical indexed view access for race detection. Unlike sanitizer.assert.access, this op does not assert that the access is individually valid and does not refine the continuing path. It records a memory event that target materialization can compare against prior unordered events in the selected race detector.
-// sanitizer.race.access<read> %view[%lane] : view<64xi32, #dense>
+// sanitizer.race.access<read> %view[%lane] : view<64xi32, #encoding.layout.dense>
 LOOM_DEFINE_ISA(loom_sanitizer_race_access_isa, LOOM_OP_SANITIZER_RACE_ACCESS)
 LOOM_DEFINE_OPERAND(loom_sanitizer_race_access_view, 0)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_sanitizer_race_access_indices, 1)
@@ -202,7 +202,7 @@ iree_status_t loom_sanitizer_race_sync_verify(
     iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_SANITIZER_ASSERT_ACCESSES: Assert that a static sequence of regularly-strided logical indexed view accesses is valid. Each sub-access has the same static extent tuple, and each successive sub-access origin is advanced by the static stride tuple. This keeps structured fragment and vector footprints as one executable assertion site instead of exploding one source memory operation into many independent assertions.
-// sanitizer.assert.accesses<write> %view[%row, %col] {static_extents = [1, 16], static_strides = [1, 0], static_count = 16} : view<128x128xf32, #dense>
+// sanitizer.assert.accesses<write> %view[%row, %col] {static_extents = [1, 16], static_strides = [1, 0], static_count = 16} : view<128x128xf32, #encoding.layout.dense>
 LOOM_DEFINE_ISA(loom_sanitizer_assert_accesses_isa, LOOM_OP_SANITIZER_ASSERT_ACCESSES)
 LOOM_DEFINE_OPERAND(loom_sanitizer_assert_accesses_view, 0)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_sanitizer_assert_accesses_indices, 1)

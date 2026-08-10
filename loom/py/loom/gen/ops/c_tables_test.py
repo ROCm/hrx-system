@@ -453,7 +453,7 @@ def test_generate_encoding_family_metadata() -> None:
         [EnumCase("scale", 0), EnumCase("minimum", 3)],
     )
     family = EncodingFamilyDef(
-        "matrix_operand",
+        "operand",
         group=dialect,
         role=EncodingFamilyRole.STORAGE_SCHEMA,
         parameters=[
@@ -497,27 +497,27 @@ def test_generate_encoding_family_metadata() -> None:
     assert "LOOM_ENCODING_AUXILIARY_KEY_SCALE = 0" in ops_h
     assert "LOOM_ENCODING_AUXILIARY_KEY_MINIMUM = 3" in ops_h
     assert "loom_encoding_auxiliary_key_descriptors[LOOM_ENCODING_AUXILIARY_KEY_COUNT_]" in ops_h
-    assert "LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_PAYLOAD_ELEMENTS = 0" in ops_h
-    assert "LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_ROUNDING = 1" in ops_h
-    assert "LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_COUNT_ = 2" in ops_h
-    assert "LOOM_ENCODING_MATRIX_OPERAND_DYNAMIC_PARAMETER_MATRIX = 0" in ops_h
-    assert "LOOM_ENCODING_MATRIX_OPERAND_DYNAMIC_PARAMETER_SEED = 1" in ops_h
-    assert "LOOM_ENCODING_MATRIX_OPERAND_DYNAMIC_PARAMETER_COUNT_ = 2" in ops_h
+    assert "LOOM_ENCODING_OPERAND_PARAMETER_PAYLOAD_ELEMENTS = 0" in ops_h
+    assert "LOOM_ENCODING_OPERAND_PARAMETER_ROUNDING = 1" in ops_h
+    assert "LOOM_ENCODING_OPERAND_PARAMETER_COUNT_ = 2" in ops_h
+    assert "LOOM_ENCODING_OPERAND_DYNAMIC_PARAMETER_MATRIX = 0" in ops_h
+    assert "LOOM_ENCODING_OPERAND_DYNAMIC_PARAMETER_SEED = 1" in ops_h
+    assert "LOOM_ENCODING_OPERAND_DYNAMIC_PARAMETER_COUNT_ = 2" in ops_h
     assert "LOOM_ENCODING_FAMILY_DYNAMIC_PARAMETER_COUNT_MAX_ = 2" in ops_h
-    assert "extern const loom_encoding_family_descriptor_t loom_encoding_matrix_operand_family_descriptor;" in ops_h
-    assert '.name = _BSTRING(14, "matrix_operand")' in tables_c
+    assert "extern const loom_encoding_family_descriptor_t loom_encoding_operand_family_descriptor;" in ops_h
+    assert '.name = _BSTRING(7, "operand")' in tables_c
     assert ".role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA" in tables_c
     assert '.name = _BSTRING(16, "payload_elements")' in tables_c
     assert ".attr_kind = LOOM_ATTR_I64" in tables_c
     assert '.name = _BSTRING(8, "rounding")' in tables_c
     assert ".attr_kind = LOOM_ATTR_ENUM" in tables_c
     assert ".flags = LOOM_ATTR_OPTIONAL" in tables_c
-    assert ".parameter_count = IREE_ARRAYSIZE(loom_encoding_matrix_operand_parameter_desc)" in tables_c
-    assert "static const loom_encoding_dynamic_parameter_descriptor_t loom_encoding_matrix_operand_dynamic_parameter_desc[]" in tables_c
+    assert ".parameter_count = IREE_ARRAYSIZE(loom_encoding_operand_parameter_desc)" in tables_c
+    assert "static const loom_encoding_dynamic_parameter_descriptor_t loom_encoding_operand_dynamic_parameter_desc[]" in tables_c
     assert ".type_constraint = LOOM_TYPE_CONSTRAINT_VECTOR" in tables_c
     assert ".type_constraint = LOOM_TYPE_CONSTRAINT_INDEX" in tables_c
-    assert ".dynamic_parameter_count = IREE_ARRAYSIZE(loom_encoding_matrix_operand_dynamic_parameter_desc)" in tables_c
-    assert "static const loom_encoding_family_fixed_metadata_t loom_encoding_matrix_operand_fixed_metadata" in tables_c
+    assert ".dynamic_parameter_count = IREE_ARRAYSIZE(loom_encoding_operand_dynamic_parameter_desc)" in tables_c
+    assert "static const loom_encoding_family_fixed_metadata_t loom_encoding_operand_fixed_metadata" in tables_c
     assert ".element_format = UINT64_C(0x10000)" in tables_c
     assert ".payload_packing = UINT32_C(0x2)" in tables_c
     assert ".flags = UINT32_C(0x1)" in tables_c
@@ -535,7 +535,7 @@ def test_generate_encoding_family_metadata() -> None:
     assert ".logical_element_count = 256" in tables_c
     assert ".storage_byte_count = 144" in tables_c
     assert ".required_alignment = 16" in tables_c
-    assert ".fixed_metadata = &loom_encoding_matrix_operand_fixed_metadata" in tables_c
+    assert ".fixed_metadata = &loom_encoding_operand_fixed_metadata" in tables_c
 
 
 def test_encoding_families_require_one_auxiliary_key_vocabulary() -> None:
@@ -573,6 +573,21 @@ def test_generate_qualified_encoding_family_metadata() -> None:
 
     assert "loom_encoding_ggml_q4_k_family_descriptor" in ops_h
     assert '.name = _BSTRING(9, "ggml.q4_k")' in tables_c
+
+
+def test_generate_dialect_qualified_encoding_family_metadata() -> None:
+    family = EncodingFamilyDef(
+        "encoding.operand",
+        group=Dialect("encoding", dialect_id=0x09),
+        role=EncodingFamilyRole.STORAGE_SCHEMA,
+    )
+
+    ops_h = generate_ops_h("encoding", 0x09, [], (), [family])
+    tables_c = generate_tables_c("encoding", 0x09, [], (), [family])
+
+    assert "loom_encoding_operand_family_descriptor" in ops_h
+    assert "loom_encoding_encoding_operand" not in ops_h
+    assert '.name = _BSTRING(16, "encoding.operand")' in tables_c
 
 
 def test_rejects_colliding_encoding_family_c_names() -> None:
@@ -646,7 +661,7 @@ def test_generate_parameterized_attrs_share_encoding_enum_vocabulary() -> None:
         ],
     )
     family = EncodingFamilyDef(
-        "matrix_operand",
+        "operand",
         group=dialect,
         role=EncodingFamilyRole.STORAGE_SCHEMA,
         parameters=[

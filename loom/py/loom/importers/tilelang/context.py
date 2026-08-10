@@ -167,7 +167,7 @@ class TileLangConversionContext(SourceImportSession):
         if storage is None:
             schema_value = self.storage_schema_value(schema)
             storage = self.builder.encoding.define(
-                spec=EncodingInstance(name="physical_storage"),
+                spec=EncodingInstance(name="encoding.storage"),
                 params={"layout": layout, "schema": schema_value},
                 results=[ENCODING_STORAGE_TYPE],
                 name=self.reserve_name(_storage_encoding_name(buffer)),

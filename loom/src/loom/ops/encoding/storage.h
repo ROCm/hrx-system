@@ -6,10 +6,10 @@
 
 // Physical storage composition helpers for encoding values.
 //
-// `#physical_storage` composes an address layout with an encoded storage
+// `#encoding.storage` composes an address layout with an encoded storage
 // schema in the existing shaped-type encoding attachment slot:
 //
-//   %storage = encoding.define #physical_storage {
+//   %storage = encoding.define #encoding.storage {
 //     layout = %layout : encoding<layout>,
 //     schema = %schema : encoding<schema>
 //   } : encoding<storage>
@@ -35,10 +35,9 @@ typedef struct loom_value_fact_address_layout_t
 typedef struct loom_value_fact_storage_schema_t
     loom_value_fact_storage_schema_t;
 
-// Registers the physical-storage composition family with |context|. Built-in
+// Registers the storage-composition family with |context|. Built-in
 // context setup calls this through the encoding family registry.
-iree_status_t loom_encoding_register_physical_storage_family(
-    loom_context_t* context);
+iree_status_t loom_encoding_register_storage_family(loom_context_t* context);
 
 // Maximum static layout rank decoded into caller-provided stride storage.
 // Shaped type ranks are packed in four header bits, so no well-formed consumer
@@ -55,8 +54,8 @@ bool loom_encoding_query_static_address_layout(
     loom_value_facts_t* stride_storage, iree_host_size_t stride_capacity,
     loom_value_fact_address_layout_t* out_layout);
 
-// Decodes a static storage-schema encoding into a summary. Matrix-oriented
-// schema families fill in packed fragment and scale facts; other schema
+// Decodes a static storage-schema encoding into a summary. Generic operand
+// schemas fill in packed fragment and scale facts; other schema
 // families still return true with only static_spec_encoding_id populated.
 // Returns false when |encoding_id| is not a known storage-schema encoding or
 // recursion exceeds the safety bound.

@@ -28,14 +28,14 @@ func.def target(@target) @gfx11_wmma_families_wave32(
   %f32_bf16_result = vector.mma %bf16_lhs, %bf16_rhs, %f32_init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   %f16_result = vector.mma %f16_lhs, %f16_rhs, %f16_init : vector<16xf16>, vector<16xf16>, vector<16xf16>
   %bf16_result = vector.mma %bf16_lhs, %bf16_rhs, %bf16_init : vector<16xbf16>, vector<16xbf16>, vector<16xbf16>
-  %i8_lhs_schema = encoding.define #matrix_operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
-  %i8_rhs_schema = encoding.define #matrix_operand<element_format=u8, payload_elements=16, payload_registers=4> : encoding<schema>
+  %i8_lhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
+  %i8_rhs_schema = encoding.define #encoding.operand<element_format=u8, payload_elements=16, payload_registers=4> : encoding<schema>
   %i8_lhs = vector.fragment<lhs> %i8_lhs_data shape [%m, %k] using {schema = %i8_lhs_schema : encoding<schema>} : vector<4xi32>
   %i8_rhs = vector.fragment<rhs> %i8_rhs_data shape [%k, %n] using {schema = %i8_rhs_schema : encoding<schema>} : vector<4xi32>
   %i32_init = vector.fragment<init> %i32_init_data shape [%m, %n] : vector<8xi32>
   %i8_result = vector.mma %i8_lhs, %i8_rhs, %i32_init : vector<4xi32>, vector<4xi32>, vector<8xi32>
-  %i4_lhs_schema = encoding.define #matrix_operand<element_format=i4, payload_elements=16, payload_registers=2> : encoding<schema>
-  %i4_rhs_schema = encoding.define #matrix_operand<element_format=u4, payload_elements=16, payload_registers=2> : encoding<schema>
+  %i4_lhs_schema = encoding.define #encoding.operand<element_format=i4, payload_elements=16, payload_registers=2> : encoding<schema>
+  %i4_rhs_schema = encoding.define #encoding.operand<element_format=u4, payload_elements=16, payload_registers=2> : encoding<schema>
   %i4_lhs = vector.fragment<lhs> %i4_lhs_data shape [%m, %k] using {schema = %i4_lhs_schema : encoding<schema>} : vector<2xi32>
   %i4_rhs = vector.fragment<rhs> %i4_rhs_data shape [%k, %n] using {schema = %i4_rhs_schema : encoding<schema>} : vector<2xi32>
   %i4_result = vector.mma %i4_lhs, %i4_rhs, %i32_init : vector<2xi32>, vector<2xi32>, vector<8xi32>
@@ -89,14 +89,14 @@ func.def target(@target) @gfx11_wmma_families_wave64(
   %f32_bf16_result = vector.mma %bf16_lhs, %bf16_rhs, %f32_init : vector<16xbf16>, vector<16xbf16>, vector<4xf32>
   %f16_result = vector.mma %f16_lhs, %f16_rhs, %f16_init : vector<16xf16>, vector<16xf16>, vector<8xf16>
   %bf16_result = vector.mma %bf16_lhs, %bf16_rhs, %bf16_init : vector<16xbf16>, vector<16xbf16>, vector<8xbf16>
-  %i8_lhs_schema = encoding.define #matrix_operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
-  %i8_rhs_schema = encoding.define #matrix_operand<element_format=u8, payload_elements=16, payload_registers=4> : encoding<schema>
+  %i8_lhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
+  %i8_rhs_schema = encoding.define #encoding.operand<element_format=u8, payload_elements=16, payload_registers=4> : encoding<schema>
   %i8_lhs = vector.fragment<lhs> %i8_lhs_data shape [%m, %k] using {schema = %i8_lhs_schema : encoding<schema>} : vector<4xi32>
   %i8_rhs = vector.fragment<rhs> %i8_rhs_data shape [%k, %n] using {schema = %i8_rhs_schema : encoding<schema>} : vector<4xi32>
   %i32_init = vector.fragment<init> %i32_init_data shape [%m, %n] : vector<4xi32>
   %i8_result = vector.mma %i8_lhs, %i8_rhs, %i32_init : vector<4xi32>, vector<4xi32>, vector<4xi32>
-  %i4_lhs_schema = encoding.define #matrix_operand<element_format=i4, payload_elements=16, payload_registers=2> : encoding<schema>
-  %i4_rhs_schema = encoding.define #matrix_operand<element_format=u4, payload_elements=16, payload_registers=2> : encoding<schema>
+  %i4_lhs_schema = encoding.define #encoding.operand<element_format=i4, payload_elements=16, payload_registers=2> : encoding<schema>
+  %i4_rhs_schema = encoding.define #encoding.operand<element_format=u4, payload_elements=16, payload_registers=2> : encoding<schema>
   %i4_lhs = vector.fragment<lhs> %i4_lhs_data shape [%m, %k] using {schema = %i4_lhs_schema : encoding<schema>} : vector<2xi32>
   %i4_rhs = vector.fragment<rhs> %i4_rhs_data shape [%k, %n] using {schema = %i4_rhs_schema : encoding<schema>} : vector<2xi32>
   %i4_result = vector.mma %i4_lhs, %i4_rhs, %i32_init : vector<2xi32>, vector<2xi32>, vector<4xi32>

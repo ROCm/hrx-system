@@ -31,7 +31,7 @@ typedef struct loom_module_t loom_module_t;
 typedef enum loom_type_format_kind_e {
   LOOM_TYPE_FMT_SHAPE = 0,      // Dimension list: 4x[%M]x...
   LOOM_TYPE_FMT_SCALAR = 1,      // Element type keyword: f32, i8.
-  LOOM_TYPE_FMT_ENCODING = 2,    // Encoding ref: #q8_0 or %enc.
+  LOOM_TYPE_FMT_ENCODING = 2,    // Encoding ref: #test.schema or %enc.
   LOOM_TYPE_FMT_TYPE = 3,         // Recursive type: vm.ref<T>.
   LOOM_TYPE_FMT_ATTR = 4,         // Bare identifier attribute.
   LOOM_TYPE_FMT_KEYWORD = 5,      // Literal punctuation/word.

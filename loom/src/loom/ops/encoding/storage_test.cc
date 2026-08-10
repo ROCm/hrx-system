@@ -13,11 +13,34 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/encoding/families.h"
-#include "loom/ops/encoding/matrix_operand.h"
+#include "loom/ops/encoding/operand.h"
 #include "loom/ops/encoding/ops.h"
 
 namespace loom {
 namespace {
+
+static const loom_encoding_family_fixed_metadata_t kFixedRecordMetadata = {
+    /*.operand_summary=*/{},
+    /*.required_auxiliary_keys=*/{},
+    /*.record=*/
+    {
+        /*.logical_element_count=*/32,
+        /*.storage_byte_count=*/18,
+        /*.required_alignment=*/2,
+    },
+};
+static const loom_encoding_family_descriptor_t kFixedRecordDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(17, "test.fixed_record"),
+    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    /*.parameter_count=*/{},
+    /*.parameter_descriptors=*/{},
+    /*.dynamic_parameter_count=*/{},
+    /*.dynamic_parameter_descriptors=*/{},
+    /*.fixed_metadata=*/&kFixedRecordMetadata,
+};
+static const loom_encoding_vtable_t kFixedRecordVtable = {
+    /*.descriptor=*/&kFixedRecordDescriptor,
+};
 
 class EncodingStorageTest : public ::testing::Test {
  protected:
@@ -31,6 +54,8 @@ class EncodingStorageTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_context_register_dialect(
         &context_, LOOM_DIALECT_ENCODING, vtables, (uint16_t)vtable_count));
     IREE_ASSERT_OK(loom_context_register_builtin_encoding_vtables(&context_));
+    IREE_ASSERT_OK(
+        loom_context_register_encoding_vtable(&context_, &kFixedRecordVtable));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
   }
 
@@ -58,19 +83,37 @@ class EncodingStorageTest : public ::testing::Test {
   loom_context_t context_;
 };
 
-TEST_F(EncodingStorageTest, FixedNamedFp8Metadata) {
+TEST_F(EncodingStorageTest, FixedRecordGeometry) {
+  loom_module_t* module =
+      Parse(IREE_SV("%schema = encoding.define #test.fixed_record : "
+                    "encoding<schema>\n"));
+  ASSERT_NE(module, nullptr);
+
+  loom_encoding_record_geometry_t geometry;
+  ASSERT_TRUE(loom_encoding_query_static_record_geometry(
+      module, FirstSpecId(module), &geometry));
+  EXPECT_EQ(geometry.logical_element_count, 32u);
+  EXPECT_EQ(geometry.storage_byte_count, 18u);
+  EXPECT_EQ(geometry.required_alignment, 2u);
+
+  loom_module_free(module);
+}
+
+TEST_F(EncodingStorageTest, OperandSummaryHasNoFixedGeometry) {
   loom_module_t* module =
       Parse(IREE_SV("%schema = encoding.define "
-                    "#fp8_e4m3fn<rounding=finite_only> : encoding<schema>\n"));
+                    "#encoding.operand<element_format=f8e4m3fn, "
+                    "payload_elements=1, payload_packing=dense_lanes, "
+                    "rounding=finite_only> : encoding<schema>\n"));
   ASSERT_NE(module, nullptr);
   const uint16_t encoding_id = FirstSpecId(module);
 
-  loom_encoding_record_geometry_t geometry;
-  ASSERT_TRUE(loom_encoding_query_static_record_geometry(module, encoding_id,
-                                                         &geometry));
-  EXPECT_EQ(geometry.logical_element_count, 1u);
-  EXPECT_EQ(geometry.storage_byte_count, 1u);
-  EXPECT_EQ(geometry.required_alignment, 1u);
+  loom_encoding_record_geometry_t geometry = {1, 1, 1};
+  EXPECT_FALSE(loom_encoding_query_static_record_geometry(module, encoding_id,
+                                                          &geometry));
+  EXPECT_EQ(geometry.logical_element_count, 0u);
+  EXPECT_EQ(geometry.storage_byte_count, 0u);
+  EXPECT_EQ(geometry.required_alignment, 0u);
 
   loom_value_fact_storage_schema_t schema;
   ASSERT_TRUE(
@@ -86,19 +129,47 @@ TEST_F(EncodingStorageTest, FixedNamedFp8Metadata) {
   loom_module_free(module);
 }
 
-TEST_F(EncodingStorageTest, ParameterizedSchemaHasNoFixedGeometry) {
-  loom_module_t* module =
-      Parse(IREE_SV("%schema = encoding.define "
-                    "#matrix_operand<element_format=f16, payload_elements=16, "
-                    "payload_registers=8> : encoding<schema>\n"));
+TEST_F(EncodingStorageTest, ParameterizedOperandSummary) {
+  loom_module_t* module = Parse(IREE_SV(
+      "%schema = encoding.define #encoding.operand<affine=scale_only, "
+      "codebook=static_builtin_table, element_format=f4e2m1, "
+      "payload_elements=128, payload_packing=multi_stream, "
+      "payload_registers=16, rounding=finite_only, scale_format=f8e4m3, "
+      "scale_group_shape=[8, 16], scale_operands=1, "
+      "scale_topology=block_2d, secondary_scale_format=f32, "
+      "sparsity=n_m_structured, sparsity_group_elements=4, "
+      "sparsity_group_nonzero_elements=2, zero_scale_fallback=true> : "
+      "encoding<schema>\n"));
   ASSERT_NE(module, nullptr);
 
-  loom_encoding_record_geometry_t geometry = {1, 1, 1};
-  EXPECT_FALSE(loom_encoding_query_static_record_geometry(
-      module, FirstSpecId(module), &geometry));
-  EXPECT_EQ(geometry.logical_element_count, 0u);
-  EXPECT_EQ(geometry.storage_byte_count, 0u);
-  EXPECT_EQ(geometry.required_alignment, 0u);
+  loom_value_fact_storage_schema_t schema;
+  ASSERT_TRUE(loom_encoding_query_static_storage_schema(
+      module, FirstSpecId(module), &schema));
+  const loom_value_fact_encoded_operand_schema_t& operand =
+      schema.encoded_operand;
+  EXPECT_EQ(operand.element_format, LOOM_VALUE_FACT_NUMERIC_FORMAT_F4_E2M1);
+  EXPECT_EQ(operand.payload_packing,
+            LOOM_VALUE_FACT_PAYLOAD_PACKING_MULTI_STREAM);
+  EXPECT_EQ(operand.payload_element_count, 128u);
+  EXPECT_EQ(operand.payload_register_count, 16u);
+  EXPECT_EQ(operand.rounding_policy,
+            LOOM_VALUE_FACT_ROUNDING_POLICY_FINITE_ONLY);
+  EXPECT_EQ(operand.scale_format, LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3);
+  EXPECT_EQ(operand.secondary_scale_format, LOOM_VALUE_FACT_NUMERIC_FORMAT_F32);
+  EXPECT_EQ(operand.scale_topology, LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_2D);
+  EXPECT_EQ(operand.scale_group.element_count, 128u);
+  EXPECT_EQ(operand.scale_group.shape[0], 8u);
+  EXPECT_EQ(operand.scale_group.shape[1], 16u);
+  EXPECT_EQ(operand.scale_operand_count, 1u);
+  EXPECT_EQ(operand.affine_policy, LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_ONLY);
+  EXPECT_EQ(operand.codebook_policy,
+            LOOM_VALUE_FACT_CODEBOOK_POLICY_STATIC_BUILTIN_TABLE);
+  EXPECT_EQ(operand.sparsity_policy,
+            LOOM_VALUE_FACT_SPARSITY_POLICY_N_M_STRUCTURED);
+  EXPECT_EQ(operand.sparsity_group.element_count, 4u);
+  EXPECT_EQ(operand.sparsity_group.nonzero_element_count, 2u);
+  EXPECT_TRUE(iree_all_bits_set(
+      operand.flags, LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_ZERO_SCALE_FALLBACK));
 
   loom_module_free(module);
 }

@@ -22,8 +22,9 @@ static const char kSourceText[] =
     "  %value = scalar.constant 42 : i32\n"
     "  %global = buffer.assume.memory_space<global> %output : buffer\n"
     "  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, "
-    "#dense>\n"
-    "  view.store %value, %view[%zero_index] : i32, view<1xi32, #dense>\n"
+    "#encoding.layout.dense>\n"
+    "  view.store %value, %view[%zero_index] : i32, view<1xi32, "
+    "#encoding.layout.dense>\n"
     "  kernel.return\n"
     "}\n";
 

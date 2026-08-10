@@ -23,23 +23,23 @@ kernel.def @paged_kv_block_gather_score_tile_f32() {
   %lane_byte_stride = index.constant 4 : offset
 
   %query_noalias, %page_table_noalias, %page_pool_noalias, %score_output_noalias, %payload_output_noalias = buffer.assume.noalias %query, %page_table, %page_pool, %score_output, %payload_output : buffer, buffer, buffer, buffer, buffer
-  %query_view = buffer.view %query_noalias[%base] : buffer -> view<4xf32, #dense>
-  %score_output_view = buffer.view %score_output_noalias[%base] : buffer -> view<1xf32, #dense>
-  %payload_output_view = buffer.view %payload_output_noalias[%base] : buffer -> view<4xf32, #dense>
+  %query_view = buffer.view %query_noalias[%base] : buffer -> view<4xf32, #encoding.layout.dense>
+  %score_output_view = buffer.view %score_output_noalias[%base] : buffer -> view<1xf32, #encoding.layout.dense>
+  %payload_output_view = buffer.view %payload_output_noalias[%base] : buffer -> view<4xf32, #encoding.layout.dense>
 
   %page_entry_offset = index.scale %block_id, %page_entry_byte_stride : index, offset -> offset
-  %page_table_view = buffer.view %page_table_noalias[%page_entry_offset] : buffer -> view<1xi32, #dense>
-  %page_i32 = view.load %page_table_view[0] : view<1xi32, #dense> -> i32
+  %page_table_view = buffer.view %page_table_noalias[%page_entry_offset] : buffer -> view<1xi32, #encoding.layout.dense>
+  %page_i32 = view.load %page_table_view[0] : view<1xi32, #encoding.layout.dense> -> i32
   %page0 = index.cast %page_i32 : i32 to index
   %page = index.assume %page0 [range(%page0, 0, 1)] : index
 
   %page_base = index.scale %page, %page_byte_stride : index, offset -> offset
   %lane_offset = index.scale %lane_start, %lane_byte_stride : index, offset -> offset
   %payload_offset = index.add %page_base, %lane_offset : offset
-  %payload_view = buffer.view %page_pool_noalias[%payload_offset] : buffer -> view<4xf32, #dense>
+  %payload_view = buffer.view %page_pool_noalias[%payload_offset] : buffer -> view<4xf32, #encoding.layout.dense>
 
-  %query_values = vector.load %query_view[0] : view<4xf32, #dense> -> vector<4xf32>
-  %payload_values = vector.load %payload_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %query_values = vector.load %query_view[0] : view<4xf32, #encoding.layout.dense> -> vector<4xf32>
+  %payload_values = vector.load %payload_view[0] : view<4xf32, #encoding.layout.dense> -> vector<4xf32>
   %lanes = vector.iota %lane_sequence_begin step %lane_sequence_step : vector<4xi32>
   %valid_limits = vector.splat %valid_count : vector<4xi32>
   %valid = vector.cmpi slt, %lanes, %valid_limits : vector<4xi32> -> vector<4xi1>
@@ -48,8 +48,8 @@ kernel.def @paged_kv_block_gather_score_tile_f32() {
   %products = vector.mulf<reassoc|nnan|nsz|contract> %query_values, %masked_payload_values : vector<4xf32>
   %score = vector.reduce<addf, reassoc|nnan|nsz|contract> %products, %score_initial : vector<4xf32>, f32
 
-  view.store %score, %score_output_view[%result_index] : f32, view<1xf32, #dense>
-  vector.store %masked_payload_values, %payload_output_view[%result_index] : vector<4xf32>, view<4xf32, #dense>
+  view.store %score, %score_output_view[%result_index] : f32, view<1xf32, #encoding.layout.dense>
+  vector.store %masked_payload_values, %payload_output_view[%result_index] : vector<4xf32>, view<4xf32, #encoding.layout.dense>
   kernel.return
 }
 

@@ -13,7 +13,7 @@ values, enabling encodings/layouts that compose across library boundaries.
 
 A model author picks an encoding in one top-level file and it propagates
 through hundreds of library .loom files unchanged — function signatures
-reference %enc rather than #q8_0<block=32>.
+reference %enc rather than #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes>.
 """
 
 from loom.dialect.encoding.defs import (

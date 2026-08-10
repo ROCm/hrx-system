@@ -13,11 +13,11 @@ kernel.def target(@target) @wave_sized_workgroup_memory_workitem_x_b32() {
   %scratch_base = index.constant 0 : offset
   %bytes = index.constant 128 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xi32, #dense>
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xi32, #encoding.layout.dense>
   %stored_value = vector.constant 1 : vector<1xi32>
-  vector.store %stored_value, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #dense>
-  %loaded = vector.load %scratch_view[%lane] : view<32xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+  vector.store %stored_value, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #encoding.layout.dense>
+  %loaded = vector.load %scratch_view[%lane] : view<32xi32, #encoding.layout.dense> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -47,11 +47,11 @@ kernel.def target(@target) @wave_sized_workgroup_memory_workitem_x_i8x4() {
   %scratch_base = index.constant 0 : offset
   %bytes = index.constant 64 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi8, #dense>
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi8, #encoding.layout.dense>
   %stored_value = vector.constant 1 : vector<4xi8>
-  vector.store %stored_value, %scratch_view[%lane] : vector<4xi8>, view<64xi8, #dense>
-  %loaded = vector.load %scratch_view[%lane] : view<64xi8, #dense> -> vector<4xi8>
-  vector.store %loaded, %scratch_view[%lane] : vector<4xi8>, view<64xi8, #dense>
+  vector.store %stored_value, %scratch_view[%lane] : vector<4xi8>, view<64xi8, #encoding.layout.dense>
+  %loaded = vector.load %scratch_view[%lane] : view<64xi8, #encoding.layout.dense> -> vector<4xi8>
+  vector.store %loaded, %scratch_view[%lane] : vector<4xi8>, view<64xi8, #encoding.layout.dense>
   kernel.return
 }
 
@@ -81,11 +81,11 @@ kernel.def target(@target) @cross_wave_workgroup_memory_workitem_x_b32() {
   %scratch_base = index.constant 0 : offset
   %bytes = index.constant 256 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32, #dense>
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32, #encoding.layout.dense>
   %stored_value = vector.constant 1 : vector<1xi32>
-  vector.store %stored_value, %scratch_view[%lane] : vector<1xi32>, view<64xi32, #dense>
-  %loaded = vector.load %scratch_view[%lane] : view<64xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<64xi32, #dense>
+  vector.store %stored_value, %scratch_view[%lane] : vector<1xi32>, view<64xi32, #encoding.layout.dense>
+  %loaded = vector.load %scratch_view[%lane] : view<64xi32, #encoding.layout.dense> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<64xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -117,12 +117,12 @@ kernel.def target(@target) @workgroup_memory_scalar_loop_index_b32() {
   %loop_end = index.constant 8 : index
   %loop_step = index.constant 1 : index
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<8xi32, #dense>
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<8xi32, #encoding.layout.dense>
   %stored_value = vector.constant 1 : vector<1xi32>
   scf.for %i = [%loop_begin to %loop_end step %loop_step] {
-    vector.store %stored_value, %scratch_view[%i] : vector<1xi32>, view<8xi32, #dense>
-    %loaded = vector.load %scratch_view[%i] : view<8xi32, #dense> -> vector<1xi32>
-    vector.store %loaded, %scratch_view[%i] : vector<1xi32>, view<8xi32, #dense>
+    vector.store %stored_value, %scratch_view[%i] : vector<1xi32>, view<8xi32, #encoding.layout.dense>
+    %loaded = vector.load %scratch_view[%i] : view<8xi32, #encoding.layout.dense> -> vector<1xi32>
+    vector.store %loaded, %scratch_view[%i] : vector<1xi32>, view<8xi32, #encoding.layout.dense>
   }
   kernel.return
 }
@@ -165,11 +165,11 @@ kernel.def target(@target) @wave_sized_workgroup_memory_workitem_x_b32_static_of
   %scratch_base = index.constant 0 : offset
   %bytes = index.constant 160 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<40xi32, #dense>
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<40xi32, #encoding.layout.dense>
   %stored_value = vector.constant 1 : vector<1xi32>
-  vector.store %stored_value, %scratch_view[%element_index] : vector<1xi32>, view<40xi32, #dense>
-  %loaded = vector.load %scratch_view[%element_index] : view<40xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %scratch_view[%element_index] : vector<1xi32>, view<40xi32, #dense>
+  vector.store %stored_value, %scratch_view[%element_index] : vector<1xi32>, view<40xi32, #encoding.layout.dense>
+  %loaded = vector.load %scratch_view[%element_index] : view<40xi32, #encoding.layout.dense> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%element_index] : vector<1xi32>, view<40xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -200,14 +200,14 @@ kernel.def target(@target) @wave_sized_workgroup_memory_second_allocation_b32() 
   %bytes = index.constant 128 : offset
   %first_scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %second_scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %first_view = buffer.view %first_scratch[%scratch_base] : buffer -> view<32xi32, #dense>
-  %second_view = buffer.view %second_scratch[%scratch_base] : buffer -> view<32xi32, #dense>
+  %first_view = buffer.view %first_scratch[%scratch_base] : buffer -> view<32xi32, #encoding.layout.dense>
+  %second_view = buffer.view %second_scratch[%scratch_base] : buffer -> view<32xi32, #encoding.layout.dense>
   %first_value = vector.constant 1 : vector<1xi32>
   %second_value = vector.constant 2 : vector<1xi32>
-  vector.store %first_value, %first_view[%lane] : vector<1xi32>, view<32xi32, #dense>
-  vector.store %second_value, %second_view[%lane] : vector<1xi32>, view<32xi32, #dense>
-  %loaded = vector.load %second_view[%lane] : view<32xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %first_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+  vector.store %first_value, %first_view[%lane] : vector<1xi32>, view<32xi32, #encoding.layout.dense>
+  vector.store %second_value, %second_view[%lane] : vector<1xi32>, view<32xi32, #encoding.layout.dense>
+  %loaded = vector.load %second_view[%lane] : view<32xi32, #encoding.layout.dense> -> vector<1xi32>
+  vector.store %loaded, %first_view[%lane] : vector<1xi32>, view<32xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -242,11 +242,11 @@ kernel.def target(@target) @wave_sized_workgroup_memory_view_base_and_element_of
   %base = index.constant 32 : offset
   %bytes = index.constant 224 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %scratch_view = buffer.view %scratch[%base] : buffer -> view<40xi32, #dense>
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<40xi32, #encoding.layout.dense>
   %stored_value = vector.constant 1 : vector<1xi32>
-  vector.store %stored_value, %scratch_view[%element_index] : vector<1xi32>, view<40xi32, #dense>
-  %loaded = vector.load %scratch_view[%element_index] : view<40xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %scratch_view[%element_index] : vector<1xi32>, view<40xi32, #dense>
+  vector.store %stored_value, %scratch_view[%element_index] : vector<1xi32>, view<40xi32, #encoding.layout.dense>
+  %loaded = vector.load %scratch_view[%element_index] : view<40xi32, #encoding.layout.dense> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%element_index] : vector<1xi32>, view<40xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -278,13 +278,13 @@ kernel.def target(@target) @wave_sized_workgroup_memory_interleaved_addtid_and_v
   %scratch_base = index.constant 0 : offset
   %bytes = index.constant 256 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32, #dense>
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32, #encoding.layout.dense>
   %lane_value = vector.constant 1 : vector<1xi32>
   %other = vector.constant 2 : vector<1xi32>
-  vector.store %lane_value, %scratch_view[%lane] : vector<1xi32>, view<64xi32, #dense>
-  vector.store %other, %scratch_view[%scaled_lane] : vector<1xi32>, view<64xi32, #dense>
-  %loaded = vector.load %scratch_view[%lane] : view<64xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %scratch_view[%scaled_lane] : vector<1xi32>, view<64xi32, #dense>
+  vector.store %lane_value, %scratch_view[%lane] : vector<1xi32>, view<64xi32, #encoding.layout.dense>
+  vector.store %other, %scratch_view[%scaled_lane] : vector<1xi32>, view<64xi32, #encoding.layout.dense>
+  %loaded = vector.load %scratch_view[%lane] : view<64xi32, #encoding.layout.dense> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%scaled_lane] : vector<1xi32>, view<64xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -318,11 +318,11 @@ kernel.def target(@target) @wave_sized_workgroup_memory_roundtrip_lane_cast_b32(
   %scratch_base = index.constant 0 : offset
   %bytes = index.constant 128 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xi32, #dense>
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xi32, #encoding.layout.dense>
   %stored_value = vector.constant 1 : vector<1xi32>
-  vector.store %stored_value, %scratch_view[%lane_index] : vector<1xi32>, view<32xi32, #dense>
-  %loaded = vector.load %scratch_view[%lane_index] : view<32xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %scratch_view[%lane_index] : vector<1xi32>, view<32xi32, #dense>
+  vector.store %stored_value, %scratch_view[%lane_index] : vector<1xi32>, view<32xi32, #encoding.layout.dense>
+  %loaded = vector.load %scratch_view[%lane_index] : view<32xi32, #encoding.layout.dense> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%lane_index] : vector<1xi32>, view<32xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -357,11 +357,11 @@ kernel.def target(@target) @wave_sized_workgroup_memory_select_same_lane_b32() {
   %scratch_base = index.constant 0 : offset
   %bytes = index.constant 128 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xi32, #dense>
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xi32, #encoding.layout.dense>
   %stored_value = vector.constant 1 : vector<1xi32>
-  vector.store %stored_value, %scratch_view[%selected_lane] : vector<1xi32>, view<32xi32, #dense>
-  %loaded = vector.load %scratch_view[%selected_lane] : view<32xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %scratch_view[%selected_lane] : vector<1xi32>, view<32xi32, #dense>
+  vector.store %stored_value, %scratch_view[%selected_lane] : vector<1xi32>, view<32xi32, #encoding.layout.dense>
+  %loaded = vector.load %scratch_view[%selected_lane] : view<32xi32, #encoding.layout.dense> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%selected_lane] : vector<1xi32>, view<32xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -396,11 +396,11 @@ kernel.def target(@target) @wave_sized_workgroup_memory_select_scaled_lane_b32()
   %scratch_base = index.constant 0 : offset
   %bytes = index.constant 256 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32, #dense>
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32, #encoding.layout.dense>
   %stored_value = vector.constant 1 : vector<1xi32>
-  vector.store %stored_value, %scratch_view[%element_index] : vector<1xi32>, view<64xi32, #dense>
-  %loaded = vector.load %scratch_view[%element_index] : view<64xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %scratch_view[%element_index] : vector<1xi32>, view<64xi32, #dense>
+  vector.store %stored_value, %scratch_view[%element_index] : vector<1xi32>, view<64xi32, #encoding.layout.dense>
+  %loaded = vector.load %scratch_view[%element_index] : view<64xi32, #encoding.layout.dense> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%element_index] : vector<1xi32>, view<64xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -437,15 +437,15 @@ kernel.def target(@target) @wave_sized_workgroup_memory_guarded_lane_store_b32()
   %scratch_base = index.constant 0 : offset
   %bytes = index.constant 128 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xi32, #dense>
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xi32, #encoding.layout.dense>
   %initial = vector.constant 0 : vector<1xi32>
   %replacement = vector.constant 1 : vector<1xi32>
-  vector.store %initial, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+  vector.store %initial, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #encoding.layout.dense>
   scf.if %inside {
-    vector.store %replacement, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+    vector.store %replacement, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #encoding.layout.dense>
   }
-  %loaded = vector.load %scratch_view[%lane] : view<32xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+  %loaded = vector.load %scratch_view[%lane] : view<32xi32, #encoding.layout.dense> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -485,12 +485,12 @@ kernel.def target(@target) @wave_sized_workgroup_memory_guarded_lane_load_b32() 
   %scratch_base = index.constant 0 : offset
   %bytes = index.constant 128 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xi32, #dense>
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xi32, #encoding.layout.dense>
   %stored_value = vector.constant 1 : vector<1xi32>
-  vector.store %stored_value, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+  vector.store %stored_value, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #encoding.layout.dense>
   scf.if %inside {
-    %loaded = vector.load %scratch_view[%lane] : view<32xi32, #dense> -> vector<1xi32>
-    vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+    %loaded = vector.load %scratch_view[%lane] : view<32xi32, #encoding.layout.dense> -> vector<1xi32>
+    vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #encoding.layout.dense>
   }
   kernel.return
 }

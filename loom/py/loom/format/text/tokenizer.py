@@ -67,7 +67,7 @@ class TokenKind(IntEnum):
     # References.
     SSA_VALUE = 3  # %name, %0, %arg0
     SYMBOL = 4  # @name
-    HASH_ATTR = 5  # #q8_0, #test.options, #enc
+    HASH_ATTR = 5  # #test.schema, #test.options, #enc
     BLOCK_LABEL = 6  # ^bb0, ^entry
 
     # Identifiers.
@@ -300,7 +300,9 @@ class Tokenizer:
         """Scan from current position to the matching '>'.
 
         The opening '<' must already have been consumed. Handles
-        nested angle brackets (for encodings like #q8_0<block=32>>)
+        nested angle brackets (for encodings like
+        #encoding.operand<element_format=i8, payload_elements=32,
+        payload_packing=dense_lanes>>)
         and ignores brackets inside string literals.
         Returns the text between the brackets (exclusive).
         """
@@ -539,7 +541,7 @@ class Tokenizer:
         """Scan #name (hash attr).
 
         Token text is the bare name without the '#' sigil:
-        #q8_0 -> "q8_0", #test.options -> "test.options".
+        #test.schema -> "test.schema", #test.options -> "test.options".
         """
         self._advance()  # skip #
         name_start = self._position

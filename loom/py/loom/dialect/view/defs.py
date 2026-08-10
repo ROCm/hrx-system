@@ -218,7 +218,7 @@ view_refine = Op(
         ResultType("result"),
     ],
     examples=[
-        "%refined = view.refine %view : view<[%M]xf32, %layout> -> view<16xf32, #dense>",
+        "%refined = view.refine %view : view<[%M]xf32, %layout> -> view<16xf32, #encoding.layout.dense>",
     ],
 )
 

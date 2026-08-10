@@ -208,11 +208,11 @@ TEST_F(EncodingVerifyTest, UnusedMalformedStaticEncodingIsDiagnosed) {
                                       nullptr, iree_allocator_system(),
                                       &module));
   loom_string_id_t encoding_name_id = LOOM_STRING_ID_INVALID;
-  IREE_ASSERT_OK(
-      loom_module_intern_string(module, IREE_SV("q8_0"), &encoding_name_id));
+  IREE_ASSERT_OK(loom_module_intern_string(
+      module, IREE_SV("encoding.layout.strided"), &encoding_name_id));
   loom_string_id_t parameter_name_id = LOOM_STRING_ID_INVALID;
-  IREE_ASSERT_OK(
-      loom_module_intern_string(module, IREE_SV("block"), &parameter_name_id));
+  IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("strides"),
+                                           &parameter_name_id));
   loom_string_id_t value_id = LOOM_STRING_ID_INVALID;
   IREE_ASSERT_OK(
       loom_module_intern_string(module, IREE_SV("thirty_two"), &value_id));
@@ -242,9 +242,9 @@ TEST_F(EncodingVerifyTest, UnusedMalformedStaticEncodingIsDiagnosed) {
   ExpectError(*diagnostic,
               loom_error_def_lookup(LOOM_ERROR_DOMAIN_ENCODING, 10),
               LOOM_EMITTER_VERIFIER);
-  EXPECT_EQ(GetStringParam(*diagnostic, 0), "q8_0");
-  EXPECT_EQ(GetStringParam(*diagnostic, 1), "block");
-  EXPECT_EQ(GetStringParam(*diagnostic, 3), "integer");
+  EXPECT_EQ(GetStringParam(*diagnostic, 0), "encoding.layout.strided");
+  EXPECT_EQ(GetStringParam(*diagnostic, 1), "strides");
+  EXPECT_EQ(GetStringParam(*diagnostic, 3), "integer array");
   loom_module_free(module);
 }
 

@@ -7,8 +7,8 @@ kernel.def target(@target) @subgroup_broadcast_dynamic_lane_rejected() {
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%input: buffer) {
   %input_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%input_base] : buffer -> view<1xi32, #dense>
-  %lane_vector = vector.load %input_view[0] : view<1xi32, #dense> -> vector<1xi32>
+  %input_view = buffer.view %input[%input_base] : buffer -> view<1xi32, #encoding.layout.dense>
+  %lane_vector = vector.load %input_view[0] : view<1xi32, #encoding.layout.dense> -> vector<1xi32>
   %lane = vector.extract %lane_vector[0] : vector<1xi32> -> i32
   %workitem = kernel.workitem.id<x> : index
   %value = index.cast %workitem : index to i32
@@ -75,8 +75,8 @@ kernel.def target(@target) @subgroup_shuffle_dynamic_offset_rejected() {
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%input: buffer) {
   %input_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%input_base] : buffer -> view<1xi32, #dense>
-  %offset_vector = vector.load %input_view[0] : view<1xi32, #dense> -> vector<1xi32>
+  %input_view = buffer.view %input[%input_base] : buffer -> view<1xi32, #encoding.layout.dense>
+  %offset_vector = vector.load %input_view[0] : view<1xi32, #encoding.layout.dense> -> vector<1xi32>
   %offset = vector.extract %offset_vector[0] : vector<1xi32> -> i32
   %width = scalar.constant 32 : i32
   %value = scalar.constant 1 : i32
@@ -95,8 +95,8 @@ kernel.def target(@target) @subgroup_shuffle_dynamic_width_rejected() {
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%input: buffer) {
   %input_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%input_base] : buffer -> view<1xi32, #dense>
-  %width_vector = vector.load %input_view[0] : view<1xi32, #dense> -> vector<1xi32>
+  %input_view = buffer.view %input[%input_base] : buffer -> view<1xi32, #encoding.layout.dense>
+  %width_vector = vector.load %input_view[0] : view<1xi32, #encoding.layout.dense> -> vector<1xi32>
   %width = vector.extract %width_vector[0] : vector<1xi32> -> i32
   %offset = scalar.constant 1 : i32
   %value = scalar.constant 1 : i32

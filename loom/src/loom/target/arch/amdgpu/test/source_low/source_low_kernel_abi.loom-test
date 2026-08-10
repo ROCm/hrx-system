@@ -8,9 +8,9 @@ kernel.def target(@target) export("mixed_scalar_buffer_scalar") @mixed_scalar_bu
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%value32: i32, %output: buffer, %value64: i64) {
   %base = index.constant 0 : offset
-  %output_view = buffer.view %output[%base] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32, #encoding.layout.dense>
   %stored = vector.from_elements %value32 : vector<1xi32>
-  vector.store %stored, %output_view[0] : vector<1xi32>, view<1xi32, #dense>
+  vector.store %stored, %output_view[0] : vector<1xi32>, view<1xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -33,10 +33,10 @@ kernel.def target(@target) export("unused_buffer_parameters") @unused_buffer_par
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %unused_middle: buffer, %output: buffer, %unused_trailing: buffer) {
   %base = index.constant 0 : offset
-  %input_view = buffer.view %input[%base] : buffer -> view<1xi32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<1xi32, #dense>
-  %loaded = vector.load %input_view[0] : view<1xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %output_view[0] : vector<1xi32>, view<1xi32, #dense>
+  %input_view = buffer.view %input[%base] : buffer -> view<1xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32, #encoding.layout.dense>
+  %loaded = vector.load %input_view[0] : view<1xi32, #encoding.layout.dense> -> vector<1xi32>
+  vector.store %loaded, %output_view[0] : vector<1xi32>, view<1xi32, #encoding.layout.dense>
   kernel.return
 }
 

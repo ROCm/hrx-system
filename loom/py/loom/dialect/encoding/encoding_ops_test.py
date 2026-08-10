@@ -49,7 +49,7 @@ class TestEncodingDefineRoundTrip:
         module = _parse_module(
             _module_text(
                 "test.func @f() {",
-                "  %enc = encoding.define #q8_0<block=32> : encoding<schema>",
+                "  %enc = encoding.define #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes> : encoding<schema>",
                 "  test.yield",
                 "}",
             )
@@ -59,29 +59,43 @@ class TestEncodingDefineRoundTrip:
         define_op = func_op.regions[0].blocks[0].ops[0]
         assert define_op.name == "encoding.define"
         assert define_op.attributes["spec"] == EncodingInstance(
-            name="q8_0",
-            params=(("block", 32),),
+            name="encoding.operand",
+            params=(
+                ("element_format", "i8"),
+                ("payload_elements", 32),
+                ("payload_packing", "dense_lanes"),
+            ),
         )
-        assert module.encodings == [EncodingInstance(name="q8_0", params=(("block", 32),))]
+        assert module.encodings == [
+            EncodingInstance(
+                name="encoding.operand",
+                params=(
+                    ("element_format", "i8"),
+                    ("payload_elements", 32),
+                    ("payload_packing", "dense_lanes"),
+                ),
+            )
+        ]
 
     def test_dynamic_params_print_in_canonical_order(self) -> None:
         module = _parse_module(
             "test.func @f(%group_size: index, %scales: tensor<[%group_size]xf32>) {\n"
-            "  %enc = encoding.define #q8_0<block=32> "
+            "  %enc = encoding.define #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes> "
             "{scales = %scales : tensor<[%group_size]xf32>, "
             "group_size = %group_size : index} : encoding<schema>\n"
             "  test.yield\n"
             "}\n"
         )
         printed = _print_module(module)
-        assert printed == (
+        expected = (
             "test.func @f(%group_size: index, %scales: tensor<[%group_size]xf32>) {\n"
-            "  %enc = encoding.define #q8_0<block=32> "
+            '  %enc = encoding.define #encoding.operand<element_format="i8", payload_elements=32, payload_packing="dense_lanes"> '
             "{group_size = %group_size : index, "
             "scales = %scales : tensor<[%group_size]xf32>} : encoding<schema>\n"
             "  test.yield\n"
             "}\n"
         )
+        assert printed == expected, printed
         func_op = module.symbols[0].op
         assert func_op is not None
         define_op = func_op.regions[0].blocks[0].ops[0]
@@ -92,8 +106,8 @@ class TestEncodingDefineRoundTrip:
         with pytest.raises(ParseError, match="both static and dynamic"):
             _parse_module(
                 _module_text(
-                    "test.func @f(%block: index) {",
-                    "  %enc = encoding.define #q8_0<block=32> {block = %block : index} : encoding<schema>",
+                    "test.func @f(%payload_elements: index) {",
+                    "  %enc = encoding.define #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes> {payload_elements = %payload_elements : index} : encoding<schema>",
                     "  test.yield",
                     "}",
                 )
@@ -104,7 +118,7 @@ class TestEncodingDefineRoundTrip:
             _parse_module(
                 _module_text(
                     "test.func @f(%group_size: index) {",
-                    "  %enc = encoding.define #q8_0<group_size=%group_size> : encoding<schema>",
+                    "  %enc = encoding.define #encoding.operand<element_format=i8, payload_elements=%group_size, payload_packing=dense_lanes> : encoding<schema>",
                     "  test.yield",
                     "}",
                 )
@@ -113,7 +127,7 @@ class TestEncodingDefineRoundTrip:
     def test_alias_spec_attr(self) -> None:
         module = _parse_module(
             _module_text(
-                "#enc = #q8_0<block=32>",
+                "#enc = #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes>",
                 "test.func @f() {",
                 "  %enc = encoding.define #enc : encoding<schema>",
                 "  test.yield",
@@ -124,14 +138,22 @@ class TestEncodingDefineRoundTrip:
         assert func_op is not None
         define_op = func_op.regions[0].blocks[0].ops[0]
         assert define_op.attributes["spec"] == EncodingInstance(
-            name="q8_0",
+            name="encoding.operand",
             alias="enc",
-            params=(("block", 32),),
+            params=(
+                ("element_format", "i8"),
+                ("payload_elements", 32),
+                ("payload_packing", "dense_lanes"),
+            ),
         )
         assert module.encodings == [
             EncodingInstance(
-                name="q8_0",
+                name="encoding.operand",
                 alias="enc",
-                params=(("block", 32),),
+                params=(
+                    ("element_format", "i8"),
+                    ("payload_elements", 32),
+                    ("payload_packing", "dense_lanes"),
+                ),
             )
         ]

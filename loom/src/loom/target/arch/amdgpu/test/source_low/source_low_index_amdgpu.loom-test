@@ -175,16 +175,16 @@ kernel.def target(@target) @index_matvec_block_lane_range_global_b32() {
   %block_step = index.constant 4 : index
   %lanes_per_group = index.constant 16 : index
   %block_stride = index.constant 105 : index
-  %input_view = buffer.view %input[%base_offset] : buffer -> view<1260xi32, #dense>
-  %output_view = buffer.view %output[%base_offset] : buffer -> view<1260xi32, #dense>
+  %input_view = buffer.view %input[%base_offset] : buffer -> view<1260xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%base_offset] : buffer -> view<1260xi32, #encoding.layout.dense>
   scf.for %block_base = [%block_begin to %block_end step %block_step] {
     %lane_group = index.div %lane, %lanes_per_group : index
     %lane_offset = index.rem %lane, %lanes_per_group : index
     %block = index.add %block_base, %lane_group : index
     %block_origin = index.mul %block, %block_stride : index
     %linear = index.add %block_origin, %lane_offset : index
-    %loaded = vector.load %input_view[%linear] : view<1260xi32, #dense> -> vector<1xi32>
-    vector.store %loaded, %output_view[%linear] : vector<1xi32>, view<1260xi32, #dense>
+    %loaded = vector.load %input_view[%linear] : view<1260xi32, #encoding.layout.dense> -> vector<1xi32>
+    vector.store %loaded, %output_view[%linear] : vector<1xi32>, view<1260xi32, #encoding.layout.dense>
   }
   kernel.return
 }

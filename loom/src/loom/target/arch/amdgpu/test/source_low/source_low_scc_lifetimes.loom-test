@@ -44,10 +44,10 @@ kernel.def target(@target) @select_nested_global_buffer(%select_lhs: index, %sel
   %use_rhs = index.cmp eq, %select_rhs, %rhs_selector : index
   %middle_or_rhs = scf.select %use_rhs, %rhs, %middle : buffer
   %selected = scf.select %use_lhs, %lhs, %middle_or_rhs : buffer
-  %selected_view = buffer.view %selected[%buffer_base] : buffer -> view<1xi32, #dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32, #dense>
-  %selected_value = view.load %selected_view[%c0] : view<1xi32, #dense> -> i32
-  view.store %selected_value, %output_view[%c0] : i32, view<1xi32, #dense>
+  %selected_view = buffer.view %selected[%buffer_base] : buffer -> view<1xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32, #encoding.layout.dense>
+  %selected_value = view.load %selected_view[%c0] : view<1xi32, #encoding.layout.dense> -> i32
+  view.store %selected_value, %output_view[%c0] : i32, view<1xi32, #encoding.layout.dense>
   kernel.return
 }
 

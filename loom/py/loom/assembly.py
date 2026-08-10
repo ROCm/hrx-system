@@ -860,7 +860,9 @@ class ScalarOf:
 class EncodingOf:
     """Encoding reference in a shaped type interior.
 
-    Prints/parses: #q8_0 or #q8_0<block=32>
+    Prints/parses: #test.schema or
+    #encoding.operand<element_format=i8, payload_elements=32,
+    payload_packing=dense_lanes>
 
     The field names an EncodingParam on the TypeDef. The printer
     uses the module's encoding table to resolve the encoding name

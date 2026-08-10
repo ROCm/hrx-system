@@ -811,11 +811,13 @@ class EncodingInstance:
     entry. `ShapedType.encoding` holds the encoding object directly in Python;
     bytecode writers assign table indices during numbering.
 
-    name: Encoding name ("q8_0", "q6_k", "dense"). Always present.
-        This is the name used in textual format: #q8_0, #q6_k.
+    name: Qualified encoding family name ("encoding.operand",
+        "encoding.layout.dense", "ggml.q4_k"). Always present and used in
+        textual format.
     alias: Attribute alias for pretty-printing ("enc"), or empty.
         When set, the printer uses the alias instead of the full
-        #name<params> form. Defined at file level: #enc = #q8_0<block=32>
+        #name<params> form. Defined at file level:
+        #enc = #test.schema<block=32>
         Aliases are display-only and do not participate in equality/hash.
     params: Canonical static attributes as sorted key-value pairs. Values use
         the same Python attribute domain as op attrs: ints, floats, bools,

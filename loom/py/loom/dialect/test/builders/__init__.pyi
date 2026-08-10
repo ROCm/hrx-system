@@ -597,7 +597,7 @@ class TestBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> ValueRef: ...
-    def fact_encoding_matrix_field(
+    def fact_encoding_operand_field(
         self,
         *,
         value: ValueRef,

@@ -9,13 +9,13 @@ kernel.def target(@target) @workgroup_reduce_addf_f32_multi_wave_gfx1250() {
 } launch(%input: buffer, %output: buffer) {
   %tid = kernel.workitem.id<x> : index
   %start = index.constant 0 : offset
-  %input_view = buffer.view %input[%start] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%start] : buffer -> view<64xf32, #dense>
-  %loaded = vector.load %input_view[%tid] : view<64xf32, #dense> -> vector<1xf32>
+  %input_view = buffer.view %input[%start] : buffer -> view<64xf32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%start] : buffer -> view<64xf32, #encoding.layout.dense>
+  %loaded = vector.load %input_view[%tid] : view<64xf32, #encoding.layout.dense> -> vector<1xf32>
   %value = vector.extract %loaded[0] : vector<1xf32> -> f32
   %sum = kernel.workgroup.reduce<addf> %value : f32
   %result = vector.from_elements %sum : vector<1xf32>
-  vector.store %result, %output_view[%tid] : vector<1xf32>, view<64xf32, #dense>
+  vector.store %result, %output_view[%tid] : vector<1xf32>, view<64xf32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -74,13 +74,13 @@ kernel.def target(@target) @workgroup_scan_inclusive_addi_i32_multi_wave_gfx1250
 } launch(%input: buffer, %output: buffer) {
   %tid = kernel.workitem.id<x> : index
   %start = index.constant 0 : offset
-  %input_view = buffer.view %input[%start] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%start] : buffer -> view<64xi32, #dense>
-  %loaded = vector.load %input_view[%tid] : view<64xi32, #dense> -> vector<1xi32>
+  %input_view = buffer.view %input[%start] : buffer -> view<64xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%start] : buffer -> view<64xi32, #encoding.layout.dense>
+  %loaded = vector.load %input_view[%tid] : view<64xi32, #encoding.layout.dense> -> vector<1xi32>
   %value = vector.extract %loaded[0] : vector<1xi32> -> i32
   %prefix = kernel.workgroup.scan<addi> %value {direction = forward, mode = inclusive} : i32
   %result = vector.from_elements %prefix : vector<1xi32>
-  vector.store %result, %output_view[%tid] : vector<1xi32>, view<64xi32, #dense>
+  vector.store %result, %output_view[%tid] : vector<1xi32>, view<64xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -162,8 +162,8 @@ kernel.def target(@target) @subgroup_vote_any_wave64_gfx12() {
 } launch(%input: buffer) {
   %tid = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32, #dense>
-  %loaded = vector.load %input_view[%tid] : view<64xi32, #dense> -> vector<1xi32>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32, #encoding.layout.dense>
+  %loaded = vector.load %input_view[%tid] : view<64xi32, #encoding.layout.dense> -> vector<1xi32>
   %value = vector.extract %loaded[0] : vector<1xi32> -> i32
   %threshold = scalar.constant 0 : i32
   %predicate = scalar.cmpi sgt, %value, %threshold : i32
@@ -203,8 +203,8 @@ kernel.def target(@target) @subgroup_vote_all_wave64_gfx12() {
 } launch(%input: buffer) {
   %tid = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32, #dense>
-  %loaded = vector.load %input_view[%tid] : view<64xi32, #dense> -> vector<1xi32>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32, #encoding.layout.dense>
+  %loaded = vector.load %input_view[%tid] : view<64xi32, #encoding.layout.dense> -> vector<1xi32>
   %value = vector.extract %loaded[0] : vector<1xi32> -> i32
   %threshold = scalar.constant 0 : i32
   %predicate = scalar.cmpi sgt, %value, %threshold : i32
@@ -243,13 +243,13 @@ kernel.def target(@target) @subgroup_broadcast_first_i32_wave64_gfx12() {
 } launch(%input: buffer, %output: buffer) {
   %tid = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32, #dense>
-  %loaded = vector.load %input_view[%tid] : view<64xi32, #dense> -> vector<1xi32>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32, #encoding.layout.dense>
+  %loaded = vector.load %input_view[%tid] : view<64xi32, #encoding.layout.dense> -> vector<1xi32>
   %value = vector.extract %loaded[0] : vector<1xi32> -> i32
   %broadcast = kernel.subgroup.broadcast.first %value : i32
   %result = vector.from_elements %broadcast : vector<1xi32>
-  vector.store %result, %output_view[%tid] : vector<1xi32>, view<64xi32, #dense>
+  vector.store %result, %output_view[%tid] : vector<1xi32>, view<64xi32, #encoding.layout.dense>
   kernel.return
 }
 

@@ -11,7 +11,7 @@
 #include <stdint.h>
 
 #include "loom/ir/module.h"
-#include "loom/ops/encoding/matrix_operand.h"
+#include "loom/ops/encoding/operand.h"
 #include "loom/ops/encoding/ops.h"
 #include "loom/ops/encoding/params.h"
 #include "loom/ops/encoding/roles.h"

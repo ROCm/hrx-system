@@ -2,8 +2,8 @@
 
 func.def @prefetch_static(%input: buffer) {
   %base = index.constant 16 : offset
-  %input_view = buffer.view %input[%base] : buffer -> view<64xi32, #dense>
-  view.prefetch %input_view[4] {intent = read, locality = l1} : view<64xi32, #dense>
+  %input_view = buffer.view %input[%base] : buffer -> view<64xi32, #encoding.layout.dense>
+  view.prefetch %input_view[4] {intent = read, locality = l1} : view<64xi32, #encoding.layout.dense>
   func.return
 }
 
@@ -16,8 +16,8 @@ kernel.def @prefetch_workgroup_id() {
 } launch(%input: buffer) {
   %workgroup = kernel.workgroup.id<x> : index
   %input_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%input_base] : buffer -> view<1025xi32, #dense>
-  view.prefetch %input_view[%workgroup] {intent = read, locality = l2} : view<1025xi32, #dense>
+  %input_view = buffer.view %input[%input_base] : buffer -> view<1025xi32, #encoding.layout.dense>
+  view.prefetch %input_view[%workgroup] {intent = read, locality = l2} : view<1025xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -37,8 +37,8 @@ kernel.def @prefetch_fixed_query_offset() {
   %offset1 = index.add %offset0, %subgroup_size : index
   %offset = index.add %offset1, %subgroup_count : index
   %input_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%input_base] : buffer -> view<64xi32, #dense>
-  view.prefetch %input_view[%offset] {intent = read, locality = l1} : view<64xi32, #dense>
+  %input_view = buffer.view %input[%input_base] : buffer -> view<64xi32, #encoding.layout.dense>
+  view.prefetch %input_view[%offset] {intent = read, locality = l1} : view<64xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -51,7 +51,7 @@ kernel.def @prefetch_workitem_dropped() {
 } launch(%input: buffer) {
   %lane = kernel.workitem.id<x> : index
   %input_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%input_base] : buffer -> view<64xi32, #dense>
-  view.prefetch %input_view[%lane] {intent = read, locality = l1} : view<64xi32, #dense>
+  %input_view = buffer.view %input[%input_base] : buffer -> view<64xi32, #encoding.layout.dense>
+  view.prefetch %input_view[%lane] {intent = read, locality = l1} : view<64xi32, #encoding.layout.dense>
   kernel.return
 }

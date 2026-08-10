@@ -389,7 +389,7 @@ func.def @encoded_mma(%lhs_data: vector<6xi32>, %rhs_data: vector<6xi32>, %init_
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 128 : index
-  %schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {scale = %scale : vector<1xf16>, schema = %schema : encoding<schema>} : vector<6xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {scale = %scale : vector<1xf16>, schema = %schema : encoding<schema>} : vector<6xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
@@ -460,7 +460,7 @@ func.def @fp8_mma(%lhs_data: vector<2xi32>, %rhs_data: vector<2xi32>, %init_data
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 32 : index
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3fnuz, payload_elements=8, payload_registers=2> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3fnuz, payload_elements=8, payload_registers=2> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<2xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<2xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>

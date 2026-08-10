@@ -13,10 +13,10 @@ kernel.def target(@target) @select_global_buffer(%select_rhs: index) {
   %buffer_base = index.constant 0 : offset
   %use_rhs = index.cmp eq, %select_rhs, %rhs_selector : index
   %selected = scf.select %use_rhs, %rhs, %lhs : buffer
-  %selected_view = buffer.view %selected[%buffer_base] : buffer -> view<1xi32, #dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32, #dense>
-  %selected_value = view.load %selected_view[%element_index] : view<1xi32, #dense> -> i32
-  view.store %selected_value, %output_view[%element_index] : i32, view<1xi32, #dense>
+  %selected_view = buffer.view %selected[%buffer_base] : buffer -> view<1xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32, #encoding.layout.dense>
+  %selected_value = view.load %selected_view[%element_index] : view<1xi32, #encoding.layout.dense> -> i32
+  view.store %selected_value, %output_view[%element_index] : i32, view<1xi32, #encoding.layout.dense>
   kernel.return
 }
 

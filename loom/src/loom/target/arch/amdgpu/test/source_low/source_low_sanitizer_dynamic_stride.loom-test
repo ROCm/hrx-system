@@ -13,8 +13,8 @@ func.def target(@target) @sanitizer_bounded_dynamic_stride_write(
   %row0 = index.cast %row_i32 : i32 to index
   %row = index.assume %row0 [range(%row0, 0, 511), lt(%row0, %row_count)] : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %output_global[%base] : buffer -> view<[%row_count]x[%row_size]xf32, #dense>
-  sanitizer.assert.access<write> %output_view[%row, %column] : view<[%row_count]x[%row_size]xf32, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%row_count]x[%row_size]xf32, #encoding.layout.dense>
+  sanitizer.assert.access<write> %output_view[%row, %column] : view<[%row_count]x[%row_size]xf32, #encoding.layout.dense>
   func.return
 }
 
@@ -126,8 +126,8 @@ kernel.def target(@target) @sanitizer_bounded_lane_dynamic_stride_write(
   %row_size0 = index.cast %row_size_i32 : i32 to index
   %row_size = index.assume %row_size0 [range(%row_size0, 1, 4096)] : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %output_global[%base] : buffer -> view<64x[%row_size]xf32, #dense>
-  sanitizer.assert.access<write> %output_view[%row, %column] : view<64x[%row_size]xf32, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<64x[%row_size]xf32, #encoding.layout.dense>
+  sanitizer.assert.access<write> %output_view[%row, %column] : view<64x[%row_size]xf32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -230,8 +230,8 @@ func.def target(@target) @sanitizer_wide_dynamic_stride_write_rejected(
   %row0 = index.cast %row_i32 : i32 to index
   %row = index.assume %row0 [range(%row0, 0, 1)] : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %output_global[%base] : buffer -> view<2x[%row_size]xf32, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<2x[%row_size]xf32, #encoding.layout.dense>
   // ERROR@+1: AMDGPU/020
-  sanitizer.assert.access<write> %output_view[%row, %column] : view<2x[%row_size]xf32, #dense>
+  sanitizer.assert.access<write> %output_view[%row, %column] : view<2x[%row_size]xf32, #encoding.layout.dense>
   func.return
 }

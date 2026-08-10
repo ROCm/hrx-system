@@ -132,7 +132,7 @@ func.def @refine_missing_result_layout(%buffer: buffer, %offset: offset, %m: ind
 // A static strided layout must provide one stride per result view rank.
 func.def @buffer_view_stride_rank_mismatch(%buffer: buffer, %offset: offset) {
   // ERROR@+1: SHAPE/001 "result type" "2" "layout stride list" "1"
-  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, #strided<stride=1>>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, #encoding.layout.strided<strides=[1]>>
   func.return
 }
 

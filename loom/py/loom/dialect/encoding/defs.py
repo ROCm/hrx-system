@@ -46,8 +46,6 @@ from loom.dsl import (
     Dialect,
     EncodingFamilyDef,
     EncodingFamilyRole,
-    EncodingOperandSummaryDef,
-    EncodingRecordDef,
     EnumCase,
     EnumDef,
     Op,
@@ -67,11 +65,6 @@ encoding_ops = Dialect("encoding", dialect_id=0x09, doc="Encoding definition and
 # ============================================================================
 # Static encoding families
 # ============================================================================
-
-
-def _one_hot_enum_fact(enum_def: EnumDef, keyword: str) -> int:
-    value = enum_def.case(keyword).value
-    return 0 if value == 0 else 1 << (value - 1)
 
 
 NumericFormat = EnumDef(
@@ -247,17 +240,7 @@ _BLOCK_STORAGE_PARAMETERS = (
     AttrDef("storage_bytes", ATTR_TYPE_I64, optional=True),
 )
 
-_NAMED_FP8_PARAMETERS = (
-    AttrDef(
-        "rounding",
-        ATTR_TYPE_ENUM,
-        enum_def=RoundingPolicy,
-        optional=True,
-    ),
-    AttrDef("storage_bits", ATTR_TYPE_I64, optional=True),
-)
-
-_MATRIX_OPERAND_PARAMETERS = (
+_OPERAND_PARAMETERS = (
     AttrDef("affine", ATTR_TYPE_ENUM, enum_def=AffinePolicy, optional=True),
     AttrDef("codebook", ATTR_TYPE_ENUM, enum_def=CodebookPolicy, optional=True),
     AttrDef("element_format", ATTR_TYPE_ENUM, enum_def=NumericFormat),
@@ -268,7 +251,7 @@ _MATRIX_OPERAND_PARAMETERS = (
         enum_def=PayloadPacking,
         optional=True,
     ),
-    AttrDef("payload_registers", ATTR_TYPE_I64),
+    AttrDef("payload_registers", ATTR_TYPE_I64, optional=True),
     AttrDef("rounding", ATTR_TYPE_ENUM, enum_def=RoundingPolicy, optional=True),
     AttrDef("scale_format", ATTR_TYPE_ENUM, enum_def=NumericFormat, optional=True),
     AttrDef("scale_group_elements", ATTR_TYPE_I64, optional=True),
@@ -313,7 +296,7 @@ _TURBOQUANT_KV_PARAMETERS = (
 
 ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
     EncodingFamilyDef(
-        "physical_storage",
+        "encoding.storage",
         group=encoding_ops,
         role=EncodingFamilyRole.PHYSICAL_STORAGE,
         parameters=(
@@ -327,27 +310,17 @@ ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
         doc="Composes an address layout and storage schema.",
     ),
     EncodingFamilyDef(
-        "dense",
+        "encoding.layout.dense",
         group=encoding_ops,
         role=EncodingFamilyRole.ADDRESS_LAYOUT,
         doc="Dense row-major address layout.",
     ),
     EncodingFamilyDef(
-        "strided",
+        "encoding.layout.strided",
         group=encoding_ops,
         role=EncodingFamilyRole.ADDRESS_LAYOUT,
-        parameters=(
-            AttrDef("stride", ATTR_TYPE_I64, optional=True),
-            AttrDef("strides", ATTR_TYPE_I64_ARRAY, optional=True),
-        ),
+        parameters=(AttrDef("strides", ATTR_TYPE_I64_ARRAY),),
         doc="Explicit element-stride address layout.",
-    ),
-    EncodingFamilyDef(
-        "q8_0",
-        group=encoding_ops,
-        role=EncodingFamilyRole.STORAGE_SCHEMA,
-        parameters=(AttrDef("block", ATTR_TYPE_I64, optional=True),),
-        doc="Blockwise eight-bit quantized storage schema.",
     ),
     *(
         EncodingFamilyDef(
@@ -360,12 +333,6 @@ ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
         for name in ("ggml_q4_0", "ggml_q8_0")
     ),
     EncodingFamilyDef(
-        "q6_k",
-        group=encoding_ops,
-        role=EncodingFamilyRole.STORAGE_SCHEMA,
-        doc="Six-bit K-quant storage schema.",
-    ),
-    EncodingFamilyDef(
         "ggml_q6_k",
         group=encoding_ops,
         role=EncodingFamilyRole.STORAGE_SCHEMA,
@@ -373,54 +340,12 @@ ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
         doc="GGML-compatible block storage schema.",
     ),
     EncodingFamilyDef(
-        "ggml_iq_grid",
+        "encoding.operand",
         group=encoding_ops,
         role=EncodingFamilyRole.STORAGE_SCHEMA,
-        parameters=(
-            AttrDef("code_bits", ATTR_TYPE_I64),
-            AttrDef("grid_elems", ATTR_TYPE_I64),
-        ),
-        doc="GGML indexed-grid storage schema.",
-    ),
-    EncodingFamilyDef(
-        "loom_fp4_table",
-        group=encoding_ops,
-        role=EncodingFamilyRole.STORAGE_SCHEMA,
-        parameters=(
-            AttrDef("code_bits", ATTR_TYPE_I64),
-            AttrDef("table_elems", ATTR_TYPE_I64),
-        ),
-        doc="Table-decoded four-bit storage schema.",
-    ),
-    *(
-        EncodingFamilyDef(
-            name,
-            group=encoding_ops,
-            role=EncodingFamilyRole.STORAGE_SCHEMA,
-            parameters=_NAMED_FP8_PARAMETERS,
-            fixed_record=EncodingRecordDef(1, 1),
-            fixed_operand_summary=EncodingOperandSummaryDef(
-                element_format=_one_hot_enum_fact(NumericFormat, numeric_format),
-                payload_packing=_one_hot_enum_fact(PayloadPacking, "dense_lanes"),
-                payload_element_count=1,
-            ),
-            doc="Named eight-bit floating-point storage schema.",
-        )
-        for name, numeric_format in (
-            ("ieee_fp8_e4m3", "f8e4m3"),
-            ("ieee_fp8_e5m2", "f8e5m2"),
-            ("fp8_e4m3fn", "f8e4m3fn"),
-            ("fp8_e4m3fnuz", "f8e4m3fnuz"),
-            ("fp8_e5m2fnuz", "f8e5m2fnuz"),
-        )
-    ),
-    EncodingFamilyDef(
-        "matrix_operand",
-        group=encoding_ops,
-        role=EncodingFamilyRole.STORAGE_SCHEMA,
-        parameters=_MATRIX_OPERAND_PARAMETERS,
+        parameters=_OPERAND_PARAMETERS,
         auxiliary_key_enum=AuxiliaryKey,
-        doc="Target-independent encoded matrix operand schema.",
+        doc="Target-independent encoded operand schema.",
     ),
     EncodingFamilyDef(
         "numeric_transform",
@@ -436,12 +361,6 @@ ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
             Operand("signs", VECTOR),
         ),
         doc="Numerical transform with static shape and policy parameters.",
-    ),
-    EncodingFamilyDef(
-        "orthogonal_transform",
-        group=encoding_ops,
-        role=EncodingFamilyRole.NUMERIC_TRANSFORM,
-        doc="Orthogonal numerical transform.",
     ),
     EncodingFamilyDef(
         "turboquant_kv",
@@ -623,8 +542,8 @@ encoding_define = Op(
         TypeOf("result"),
     ],
     examples=[
-        "%enc = encoding.define #q8_0<block=32> : encoding<schema>",
-        "%enc = encoding.define #q8_0<block=32> {group_size = %group_size : index} : encoding<schema>",
+        "%enc = encoding.define #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes> : encoding<schema>",
+        "%enc = encoding.define #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes> {group_size = %group_size : index} : encoding<schema>",
     ],
 )
 

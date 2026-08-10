@@ -6,7 +6,7 @@ func.def target(@target) @a0_k128_matrix_selection(%lhs_data: vector<16xi32>, %r
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 128 : index
-  %schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=64, payload_registers=16> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=64, payload_registers=16> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<16xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<16xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf16>
@@ -19,7 +19,7 @@ func.def target(@target) @a0_k64_matrix_selection(%lhs_data: vector<8xi32>, %rhs
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 64 : index
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=32, payload_registers=8> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=32, payload_registers=8> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<8xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<8xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
@@ -32,7 +32,7 @@ func.def target(@target) @a0_k64_f16_matrix_selection(%lhs_data: vector<8xi32>, 
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 64 : index
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=32, payload_registers=8> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=32, payload_registers=8> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<8xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<8xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf16>
@@ -45,8 +45,8 @@ func.def target(@target) @a0_sparse_f32_matrix_selection(%lhs_data: vector<8xi32
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 128 : index
-  %lhs_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=32, payload_registers=8, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %rhs_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=64, payload_registers=16> : encoding<schema>
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=32, payload_registers=8, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=64, payload_registers=16> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %metadata : vector<2xi32>, schema = %lhs_schema : encoding<schema>} : vector<8xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<16xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
@@ -59,8 +59,8 @@ func.def target(@target) @a0_sparse_f16_matrix_selection(%lhs_data: vector<8xi32
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 128 : index
-  %lhs_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=32, payload_registers=8, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %rhs_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=64, payload_registers=16> : encoding<schema>
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=32, payload_registers=8, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=64, payload_registers=16> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %metadata : vector<2xi32>, schema = %lhs_schema : encoding<schema>} : vector<8xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<16xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf16>
@@ -73,8 +73,8 @@ func.def target(@target) @a0_sparse_k32_matrix_selection(%lhs_data: vector<2xi32
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 32 : index
-  %lhs_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %rhs_schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=16, payload_registers=4> : encoding<schema>
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=16, payload_registers=4> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %metadata : vector<1xi32>, schema = %lhs_schema : encoding<schema>} : vector<2xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<4xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
@@ -91,10 +91,10 @@ func.def target(@target) @b0_sparse_k32_matrix_selection(%fp8_lhs_data: vector<2
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 32 : index
-  %fp8_lhs_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %fp8_rhs_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=16, payload_registers=4> : encoding<schema>
-  %bf8_lhs_schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %bf8_rhs_schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=16, payload_registers=4> : encoding<schema>
+  %fp8_lhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %fp8_rhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=16, payload_registers=4> : encoding<schema>
+  %bf8_lhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %bf8_rhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=16, payload_registers=4> : encoding<schema>
   %fp8_lhs = vector.fragment<lhs> %fp8_lhs_data shape [%m, %k] using {sparsity = %metadata : vector<1xi32>, schema = %fp8_lhs_schema : encoding<schema>} : vector<2xi32>
   %fp8_rhs = vector.fragment<rhs> %fp8_rhs_data shape [%k, %n] using {schema = %fp8_rhs_schema : encoding<schema>} : vector<4xi32>
   %bf8_lhs = vector.fragment<lhs> %bf8_lhs_data shape [%m, %k] using {sparsity = %metadata : vector<1xi32>, schema = %bf8_lhs_schema : encoding<schema>} : vector<2xi32>

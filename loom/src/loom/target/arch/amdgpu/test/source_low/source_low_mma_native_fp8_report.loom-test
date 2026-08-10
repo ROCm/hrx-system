@@ -6,8 +6,8 @@ func.def target(@target) @report_cdna3_native_bf8_fp8_mfma(%lhs_data: vector<2xi
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 32 : index
-  %lhs_schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=8, payload_registers=2> : encoding<schema>
-  %rhs_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2> : encoding<schema>
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=8, payload_registers=2> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<2xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<2xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
@@ -31,7 +31,7 @@ func.def target(@target) @report_cdna3_native_fp8_fp8_mfma(%lhs_data: vector<2xi
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 32 : index
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<2xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<2xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
@@ -55,8 +55,8 @@ func.def target(@target) @report_cdna3_native_bf8_fp8_smfmac(%lhs_data: vector<2
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 64 : index
-  %lhs_schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %rhs_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=16, payload_registers=4> : encoding<schema>
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=16, payload_registers=4> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %sparsity : vector<1xi32>, schema = %lhs_schema : encoding<schema>} : vector<2xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<4xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
@@ -80,8 +80,8 @@ func.def target(@target) @report_cdna3_native_fp8_bf8_mfma_32x32(%lhs_data: vect
   %m = index.constant 32 : index
   %n = index.constant 32 : index
   %k = index.constant 16 : index
-  %lhs_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2> : encoding<schema>
-  %rhs_schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=8, payload_registers=2> : encoding<schema>
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=8, payload_registers=2> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<2xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<2xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<16xf32>
@@ -105,8 +105,8 @@ func.def target(@target) @report_cdna4_native_fp8_bf8_mfma(%lhs_data: vector<2xi
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 32 : index
-  %lhs_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2> : encoding<schema>
-  %rhs_schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=8, payload_registers=2> : encoding<schema>
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=8, payload_registers=2> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<2xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<2xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
@@ -130,8 +130,8 @@ func.def target(@target) @report_cdna4_native_fp8_bf8_smfmac(%lhs_data: vector<4
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 128 : index
-  %lhs_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=16, payload_registers=4, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %rhs_schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=32, payload_registers=8> : encoding<schema>
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=16, payload_registers=4, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=32, payload_registers=8> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %sparsity : vector<1xi32>, schema = %lhs_schema : encoding<schema>} : vector<4xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<8xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
@@ -155,7 +155,7 @@ func.def target(@target) @report_rdna4_native_fp8_fp8_wmma(%lhs_data: vector<2xi
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<2xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<2xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
@@ -179,8 +179,8 @@ func.def target(@target) @report_rdna4_native_bf8_fp8_wmma(%lhs_data: vector<2xi
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
-  %lhs_schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=8, payload_registers=2> : encoding<schema>
-  %rhs_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2> : encoding<schema>
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=8, payload_registers=2> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<2xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<2xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
@@ -204,8 +204,8 @@ func.def target(@target) @report_gfx1250_native_fp8_bf8_wmma_x64(%lhs_data: vect
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 64 : index
-  %lhs_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=32, payload_registers=8> : encoding<schema>
-  %rhs_schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=32, payload_registers=8> : encoding<schema>
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=32, payload_registers=8> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=32, payload_registers=8> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<8xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<8xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
@@ -229,7 +229,7 @@ func.def target(@target) @report_gfx1250_native_fp8_fp8_wmma_x64(%lhs_data: vect
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 64 : index
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=32, payload_registers=8> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=32, payload_registers=8> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<8xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<8xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>

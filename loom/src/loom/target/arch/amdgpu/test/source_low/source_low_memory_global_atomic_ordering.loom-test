@@ -9,9 +9,9 @@ kernel.def target(@target) @global_atomic_release_reduce_i32() {
   %tid = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
-  %view = buffer.view %global[%buffer_base] : buffer -> view<64xi32, #dense>
+  %view = buffer.view %global[%buffer_base] : buffer -> view<64xi32, #encoding.layout.dense>
   %increment = scalar.constant 1 : i32
-  view.atomic.reduce<addi> %increment, %view[%tid] {ordering = release, scope = device} : i32, view<64xi32, #dense>
+  view.atomic.reduce<addi> %increment, %view[%tid] {ordering = release, scope = device} : i32, view<64xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -45,9 +45,9 @@ kernel.def target(@target) @global_atomic_acquire_rmw_i32() {
   %tid = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
-  %view = buffer.view %global[%buffer_base] : buffer -> view<64xi32, #dense>
+  %view = buffer.view %global[%buffer_base] : buffer -> view<64xi32, #encoding.layout.dense>
   %increment = scalar.constant 1 : i32
-  %old = view.atomic.rmw<addi> %increment, %view[%tid] {ordering = acquire, scope = device} : i32, view<64xi32, #dense> -> i32
+  %old = view.atomic.rmw<addi> %increment, %view[%tid] {ordering = acquire, scope = device} : i32, view<64xi32, #encoding.layout.dense> -> i32
   kernel.return
 }
 
@@ -82,9 +82,9 @@ kernel.def target(@target) @global_atomic_acq_rel_rmw_i32() {
   %tid = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
-  %view = buffer.view %global[%buffer_base] : buffer -> view<64xi32, #dense>
+  %view = buffer.view %global[%buffer_base] : buffer -> view<64xi32, #encoding.layout.dense>
   %increment = scalar.constant 1 : i32
-  %old = view.atomic.rmw<addi> %increment, %view[%tid] {ordering = acq_rel, scope = device} : i32, view<64xi32, #dense> -> i32
+  %old = view.atomic.rmw<addi> %increment, %view[%tid] {ordering = acq_rel, scope = device} : i32, view<64xi32, #encoding.layout.dense> -> i32
   kernel.return
 }
 
@@ -121,10 +121,10 @@ kernel.def target(@target) @global_atomic_acq_rel_cmpxchg_i32() {
   %tid = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
-  %view = buffer.view %global[%buffer_base] : buffer -> view<64xi32, #dense>
+  %view = buffer.view %global[%buffer_base] : buffer -> view<64xi32, #encoding.layout.dense>
   %expected = scalar.constant 7 : i32
   %replacement = scalar.constant 9 : i32
-  %old = view.atomic.cmpxchg %expected, %replacement, %view[%tid] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i32, view<64xi32, #dense> -> i32
+  %old = view.atomic.cmpxchg %expected, %replacement, %view[%tid] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i32, view<64xi32, #encoding.layout.dense> -> i32
   kernel.return
 }
 
@@ -163,9 +163,9 @@ kernel.def target(@target) @global_atomic_seq_cst_reduce_i32() {
   %tid = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
-  %view = buffer.view %global[%buffer_base] : buffer -> view<64xi32, #dense>
+  %view = buffer.view %global[%buffer_base] : buffer -> view<64xi32, #encoding.layout.dense>
   %increment = scalar.constant 1 : i32
-  view.atomic.reduce<addi> %increment, %view[%tid] {ordering = seq_cst, scope = device} : i32, view<64xi32, #dense>
+  view.atomic.reduce<addi> %increment, %view[%tid] {ordering = seq_cst, scope = device} : i32, view<64xi32, #encoding.layout.dense>
   kernel.return
 }
 

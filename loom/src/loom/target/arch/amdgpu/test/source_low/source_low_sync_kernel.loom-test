@@ -360,8 +360,8 @@ kernel.def target(@target) @uniform_global_load_controls_barrier() {
   %control_index = index.constant 0 : index
   %control_base = index.constant 0 : offset
   %barrier_control = scalar.constant 0 : i32
-  %control_view = buffer.view %control[%control_base] : buffer -> view<1xi32, #dense>
-  %control_value = view.load %control_view[%control_index] : view<1xi32, #dense> -> i32
+  %control_view = buffer.view %control[%control_base] : buffer -> view<1xi32, #encoding.layout.dense>
+  %control_value = view.load %control_view[%control_index] : view<1xi32, #encoding.layout.dense> -> i32
   %is_zero = scalar.cmpi eq, %control_value, %barrier_control : i32
   scf.if %is_zero {
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)

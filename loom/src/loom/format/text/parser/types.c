@@ -465,7 +465,9 @@ static iree_status_t loom_parse_dim(loom_parser_t* parser,
 // Parses a type encoding after the comma in a shaped type interior.
 // Called after COMMA has been consumed, with in_dim_list already false.
 // Handles SSA encodings (`%enc`), static encoding aliases (`#enc`), and
-// canonical family spellings (`#q8_0` or `#q8_0<block=32>`).
+// canonical family spellings (`#test.schema` or
+// `#encoding.operand<element_format=i8, payload_elements=32,
+// payload_packing=dense_lanes>`).
 static iree_status_t loom_parse_type_encoding(
     loom_parser_t* parser, loom_type_parse_mode_t mode,
     uint16_t* out_encoding_id, loom_encoding_flags_t* out_encoding_flags) {

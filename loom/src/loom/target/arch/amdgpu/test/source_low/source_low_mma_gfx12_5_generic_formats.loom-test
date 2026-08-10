@@ -5,8 +5,8 @@ func.def target(@target) @wmma_f8_f6(%lhs_data: vector<16xi32>, %rhs_data: vecto
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 128 : index
-  %lhs_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=64, payload_registers=16> : encoding<schema>
-  %rhs_schema = encoding.define #matrix_operand<element_format=f6e2m3, payload_elements=64, payload_registers=12> : encoding<schema>
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=64, payload_registers=16> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f6e2m3, payload_elements=64, payload_registers=12> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<16xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<12xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
@@ -28,8 +28,8 @@ func.def target(@target) @wmma_f8_f4(%lhs_data: vector<16xi32>, %rhs_data: vecto
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 128 : index
-  %lhs_schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=64, payload_registers=16> : encoding<schema>
-  %rhs_schema = encoding.define #matrix_operand<element_format=f4e2m1, payload_elements=64, payload_registers=8> : encoding<schema>
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=64, payload_registers=16> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=64, payload_registers=8> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<16xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<8xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
@@ -51,8 +51,8 @@ func.def target(@target) @wmma_f6_f8(%lhs_data: vector<12xi32>, %rhs_data: vecto
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 128 : index
-  %lhs_schema = encoding.define #matrix_operand<element_format=bf6, payload_elements=64, payload_registers=12> : encoding<schema>
-  %rhs_schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=64, payload_registers=16> : encoding<schema>
+  %lhs_schema = encoding.define #encoding.operand<element_format=bf6, payload_elements=64, payload_registers=12> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=64, payload_registers=16> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<12xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<16xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
@@ -74,8 +74,8 @@ func.def target(@target) @wmma_f6_f4(%lhs_data: vector<12xi32>, %rhs_data: vecto
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 128 : index
-  %lhs_schema = encoding.define #matrix_operand<element_format=f6e2m3, payload_elements=64, payload_registers=12> : encoding<schema>
-  %rhs_schema = encoding.define #matrix_operand<element_format=f4e2m1, payload_elements=64, payload_registers=8> : encoding<schema>
+  %lhs_schema = encoding.define #encoding.operand<element_format=f6e2m3, payload_elements=64, payload_registers=12> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=64, payload_registers=8> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<12xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<8xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
@@ -97,8 +97,8 @@ func.def target(@target) @wmma_f4_f8(%lhs_data: vector<8xi32>, %rhs_data: vector
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 128 : index
-  %lhs_schema = encoding.define #matrix_operand<element_format=f4e2m1, payload_elements=64, payload_registers=8> : encoding<schema>
-  %rhs_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=64, payload_registers=16> : encoding<schema>
+  %lhs_schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=64, payload_registers=8> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=64, payload_registers=16> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<8xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<16xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
@@ -120,8 +120,8 @@ func.def target(@target) @wmma_f4_f6(%lhs_data: vector<8xi32>, %rhs_data: vector
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 128 : index
-  %lhs_schema = encoding.define #matrix_operand<element_format=f4e2m1, payload_elements=64, payload_registers=8> : encoding<schema>
-  %rhs_schema = encoding.define #matrix_operand<element_format=bf6, payload_elements=64, payload_registers=12> : encoding<schema>
+  %lhs_schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=64, payload_registers=8> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=bf6, payload_elements=64, payload_registers=12> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<8xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<12xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>

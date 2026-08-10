@@ -303,7 +303,7 @@ static bool loom_test_string_id_equal(const loom_module_t* module,
   return iree_string_view_equal(module->strings.entries[string_id], expected);
 }
 
-iree_status_t loom_test_fact_encoding_matrix_field_facts(
+iree_status_t loom_test_fact_encoding_operand_field_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts) {
@@ -311,7 +311,7 @@ iree_status_t loom_test_fact_encoding_matrix_field_facts(
       loom_test_encoding_summary_or_empty(context, operand_facts[0]);
   loom_value_fact_storage_schema_t schema = summary.storage_schema;
   loom_value_fact_encoded_operand_schema_t encoded = schema.encoded_operand;
-  loom_string_id_t field = loom_test_fact_encoding_matrix_field_field(op);
+  loom_string_id_t field = loom_test_fact_encoding_operand_field_field(op);
   int64_t value = INT64_MIN;
   if (loom_test_string_id_equal(module, field, IREE_SV("element_format"))) {
     value = (int64_t)encoded.element_format;

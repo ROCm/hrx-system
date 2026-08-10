@@ -152,7 +152,7 @@ def test_cdna_fp8_high_level_gemm_imports_to_mfma_fragments() -> None:
     )
 
     for fragment in (
-        'matrix_operand<element_format="f8e4m3fnuz"',
+        'operand<element_format="f8e4m3fnuz"',
         "kernel.barrier<workgroup>",
         "vector.bitcast",
         "vector.fragment<lhs>",

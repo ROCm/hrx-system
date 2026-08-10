@@ -48,9 +48,9 @@ kernel.def @q8_block_unroll_wg64() {
   // State the noalias fact from `__restrict__`, then form typed views at the
   // point where pointer arithmetic becomes typed.
   %src0_noalias, %src1_noalias, %dst_noalias = buffer.assume.noalias %src0, %src1, %dst : buffer, buffer, buffer
-  %src0_f16_view = buffer.view %src0_noalias[%base] : buffer -> view<17408xf16, #dense>
-  %src1_view = buffer.view %src1_noalias[%base] : buffer -> view<4096xf32, #dense>
-  %dst_view = buffer.view %dst_noalias[%base] : buffer -> view<512xf32, #dense>
+  %src0_f16_view = buffer.view %src0_noalias[%base] : buffer -> view<17408xf16, #encoding.layout.dense>
+  %src1_view = buffer.view %src1_noalias[%base] : buffer -> view<4096xf32, #encoding.layout.dense>
+  %dst_view = buffer.view %dst_noalias[%base] : buffer -> view<512xf32, #encoding.layout.dense>
 
   %src1_col_base = index.mul %col, %k : index
   %dst_col_base = index.mul %col, %rows : index
@@ -79,8 +79,8 @@ kernel.def @q8_block_unroll_wg64() {
     // Loom spelling: build an i32 view at the byte offset, then vector-load one
     // i32 lane and unpack bytes explicitly. Adjacent scalar loads are not a
     // request for coalescing; source load width is part of the contract.
-    %q_word_view = buffer.view %src0_noalias[%q_byte_offset] : buffer -> view<1xi32, #dense>
-    %q_packed = vector.load %q_word_view[%packed_word_index] : view<1xi32, #dense> -> vector<1xi32>
+    %q_word_view = buffer.view %src0_noalias[%q_byte_offset] : buffer -> view<1xi32, #encoding.layout.dense>
+    %q_packed = vector.load %q_word_view[%packed_word_index] : view<1xi32, #encoding.layout.dense> -> vector<1xi32>
     %q_i32 = vector.bitunpacks<8> %q_packed : vector<1xi32> -> vector<4xi32>
     %q_f32 = vector.sitofp %q_i32 : vector<4xi32> to vector<4xf32>
 
@@ -89,9 +89,9 @@ kernel.def @q8_block_unroll_wg64() {
     // Loom spelling: explicit vector load, scalar scale load/extend/splat,
     // fast-math multiply, and `vector.dotf` as the dot-shaped source op.
     %src1_index = index.add %src1_col_base, %src_base : index
-    %rhs = vector.load %src1_view[%src1_index] : view<4096xf32, #dense> -> vector<4xf32>
+    %rhs = vector.load %src1_view[%src1_index] : view<4096xf32, #encoding.layout.dense> -> vector<4xf32>
     %block_f16_base = index.mul %linear_block, %block_f16s : index
-    %d_f16 = view.load %src0_f16_view[%block_f16_base] : view<17408xf16, #dense> -> f16
+    %d_f16 = view.load %src0_f16_view[%block_f16_base] : view<17408xf16, #encoding.layout.dense> -> f16
     %d = scalar.extf %d_f16 : f16 to f32
     %d_vec = vector.splat %d : vector<4xf32>
     %q_scaled = vector.mulf<reassoc|nnan|ninf|nsz|contract> %q_f32, %d_vec : vector<4xf32>
@@ -107,7 +107,7 @@ kernel.def @q8_block_unroll_wg64() {
   %lane_i32 = index.cast %lane : index to i32
   %is_lane0 = scalar.cmpi eq, %lane_i32, %leader_lane : i32
   scf.if %is_lane0 {
-    view.store %dot, %dst_view[%dst_index] : f32, view<512xf32, #dense>
+    view.store %dot, %dst_view[%dst_index] : f32, view<512xf32, #encoding.layout.dense>
   }
   kernel.return
 }

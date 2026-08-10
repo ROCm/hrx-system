@@ -24,11 +24,11 @@ kernel.def target(@target) @double_i32_at_byte_offset() {
   %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 4)] : offset
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xi32, #dense>
-  %loaded = view.load %input_view[0] : view<1xi32, #dense> -> i32
+  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xi32, #encoding.layout.dense>
+  %loaded = view.load %input_view[0] : view<1xi32, #encoding.layout.dense> -> i32
   %doubled = scalar.addi %loaded, %loaded : i32
-  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xi32, #dense>
-  view.store %doubled, %output_view[0] : i32, view<1xi32, #dense>
+  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xi32, #encoding.layout.dense>
+  view.store %doubled, %output_view[0] : i32, view<1xi32, #encoding.layout.dense>
   kernel.return
 }
 )";

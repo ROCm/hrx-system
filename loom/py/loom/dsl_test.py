@@ -502,7 +502,7 @@ class TestParameterizedAttrDef:
 class TestEncodingFamilyDef:
     def test_declares_lexically_indexed_sparse_parameters(self) -> None:
         family = EncodingFamilyDef(
-            "matrix_operand",
+            "operand",
             group=Dialect("encoding"),
             role=EncodingFamilyRole.STORAGE_SCHEMA,
             parameters=[
@@ -511,7 +511,7 @@ class TestEncodingFamilyDef:
             ],
         )
 
-        assert family.name == "matrix_operand"
+        assert family.name == "operand"
         assert family.role is EncodingFamilyRole.STORAGE_SCHEMA
         assert tuple(parameter.name for parameter in family.parameters) == (
             "payload_elements",
@@ -520,7 +520,7 @@ class TestEncodingFamilyDef:
 
     def test_declares_lexically_indexed_dynamic_parameters(self) -> None:
         family = EncodingFamilyDef(
-            "physical_storage",
+            "storage",
             group=Dialect("encoding"),
             role=EncodingFamilyRole.PHYSICAL_STORAGE,
             dynamic_parameters=[

@@ -115,17 +115,18 @@ class VectorMemoryTest : public ::testing::Test {
   }
 
   uint16_t AddStaticStridedLayout(int64_t stride) {
-    loom_string_id_t stride_name = LOOM_STRING_ID_INVALID;
+    loom_string_id_t strides_name = LOOM_STRING_ID_INVALID;
     IREE_CHECK_OK(
-        loom_module_intern_string(module_, IREE_SV("stride"), &stride_name));
+        loom_module_intern_string(module_, IREE_SV("strides"), &strides_name));
+    int64_t strides[] = {stride};
     loom_named_attr_t attributes[] = {
         {
-            /*.name_id=*/stride_name,
+            /*.name_id=*/strides_name,
             /*.reserved=*/{},
-            /*.value=*/loom_attr_i64(stride),
+            /*.value=*/loom_attr_i64_array(strides, IREE_ARRAYSIZE(strides)),
         },
     };
-    return AddEncoding(IREE_SV("strided"), attributes,
+    return AddEncoding(IREE_SV("encoding.layout.strided"), attributes,
                        (uint8_t)IREE_ARRAYSIZE(attributes));
   }
 
@@ -148,7 +149,7 @@ class VectorMemoryTest : public ::testing::Test {
             /*.value=*/loom_attr_encoding(schema),
         },
     };
-    return AddEncoding(IREE_SV("physical_storage"), attributes,
+    return AddEncoding(IREE_SV("encoding.storage"), attributes,
                        (uint8_t)IREE_ARRAYSIZE(attributes));
   }
 
@@ -165,7 +166,7 @@ class VectorMemoryTest : public ::testing::Test {
   void BuildPhysicalStorage(loom_value_id_t layout, loom_value_id_t schema,
                             loom_value_id_t* out_storage) {
     uint16_t spec =
-        AddEncoding(IREE_SV("physical_storage"), /*attributes=*/nullptr,
+        AddEncoding(IREE_SV("encoding.storage"), /*attributes=*/nullptr,
                     /*attribute_count=*/0);
     loom_string_id_t layout_name = LOOM_STRING_ID_INVALID;
     loom_string_id_t schema_name = LOOM_STRING_ID_INVALID;

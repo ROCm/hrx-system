@@ -141,7 +141,9 @@ class TypePrintContext:
 
     When printing a type that belongs to a specific Value, the context
     provides dim name resolution (DynamicDim -> [%M]) and encoding
-    resolution (encoding_instance -> #enc or #q8_0<block=32>).
+    resolution (encoding_instance -> #enc or
+    #encoding.operand<element_format=i8, payload_elements=32,
+    payload_packing=dense_lanes>).
 
     Without context, dynamic dims print as '?' and encodings are omitted.
     """

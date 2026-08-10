@@ -620,9 +620,9 @@ kernel.def target(@target) @index_minmax_vgpr_select() {
   %cond = index.cmp slt, %lane, %limit : index
   %selected = scf.select %cond, %min, %max : index
   %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<64xi32, #dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<64xi32, #encoding.layout.dense>
   %stored = vector.constant 1 : vector<1xi32>
-  vector.store %stored, %output_view[%selected] : vector<1xi32>, view<64xi32, #dense>
+  vector.store %stored, %output_view[%selected] : vector<1xi32>, view<64xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -649,15 +649,15 @@ llvmir.target<object> @target {
 }
 func.def target(@target) @f32_reduce_minnum_maxnum(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xf32, #dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<2xf32, #dense>
-  %loaded = vector.load %input_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xf32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<2xf32, #encoding.layout.dense>
+  %loaded = vector.load %input_view[0] : view<4xf32, #encoding.layout.dense> -> vector<4xf32>
   %min_init = scalar.constant 1000.0 : f32
   %min = vector.reduce<minnumf, reassoc|nnan|nsz> %loaded, %min_init : vector<4xf32>, f32
   %max_init = scalar.constant -1000.0 : f32
   %max = vector.reduce<maxnumf, reassoc|nnan|nsz> %loaded, %max_init : vector<4xf32>, f32
   %stored = vector.from_elements %min, %max : vector<2xf32>
-  vector.store %stored, %output_view[0] : vector<2xf32>, view<2xf32, #dense>
+  vector.store %stored, %output_view[0] : vector<2xf32>, view<2xf32, #encoding.layout.dense>
   func.return
 }
 

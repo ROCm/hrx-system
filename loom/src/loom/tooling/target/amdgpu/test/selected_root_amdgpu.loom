@@ -12,8 +12,8 @@ kernel.def target(@gfx11_generic_target) export("selected_store_i32") @selected_
   %output_index = index.constant 0 : index
   %value = scalar.constant 42 : i32
   %global = buffer.assume.memory_space<global> %output : buffer
-  %view = buffer.view %global[%base] : buffer -> view<1xi32, #dense>
-  view.store %value, %view[%output_index] : i32, view<1xi32, #dense>
+  %view = buffer.view %global[%base] : buffer -> view<1xi32, #encoding.layout.dense>
+  view.store %value, %view[%output_index] : i32, view<1xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -27,8 +27,8 @@ kernel.def export("configured_targetless_store_i32") @configured_targetless_stor
   %output_index = index.constant 0 : index
   %value = scalar.constant 7 : i32
   %global = buffer.assume.memory_space<global> %output : buffer
-  %view = buffer.view %global[%base] : buffer -> view<1xi32, #dense>
-  view.store %value, %view[%output_index] : i32, view<1xi32, #dense>
+  %view = buffer.view %global[%base] : buffer -> view<1xi32, #encoding.layout.dense>
+  view.store %value, %view[%output_index] : i32, view<1xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -40,11 +40,11 @@ kernel.def export("targetless_math_f32") @targetless_math_f32() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %element_index = index.constant 0 : index
-  %input_view = buffer.view %input[%base] : buffer -> view<1xf32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<1xf32, #dense>
-  %input_value = view.load %input_view[%element_index] : view<1xf32, #dense> -> f32
+  %input_view = buffer.view %input[%base] : buffer -> view<1xf32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xf32, #encoding.layout.dense>
+  %input_value = view.load %input_view[%element_index] : view<1xf32, #encoding.layout.dense> -> f32
   %activated = scalar.siluf %input_value : f32
   %rounded = scalar.roundf %activated : f32
-  view.store %rounded, %output_view[%element_index] : f32, view<1xf32, #dense>
+  view.store %rounded, %output_view[%element_index] : f32, view<1xf32, #encoding.layout.dense>
   kernel.return
 }

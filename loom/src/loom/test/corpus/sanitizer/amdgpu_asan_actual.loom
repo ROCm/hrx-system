@@ -6,8 +6,8 @@ kernel.def @asan_global_store_valid() {
   %output_index = index.constant 0 : index
   %value = scalar.constant 7 : i32
   %global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %global[%base] : buffer -> view<1xi32, #dense>
-  view.store %value, %output_view[%output_index] : i32, view<1xi32, #dense>
+  %output_view = buffer.view %global[%base] : buffer -> view<1xi32, #encoding.layout.dense>
+  view.store %value, %output_view[%output_index] : i32, view<1xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -21,9 +21,9 @@ kernel.def @asan_global_store_redzone() {
   %value = scalar.constant 11 : i32
   %continued_value = scalar.constant 99 : i32
   %global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %global[%base] : buffer -> view<2xi32, #dense>
-  view.store %value, %output_view[%redzone_index] : i32, view<2xi32, #dense>
-  view.store %continued_value, %output_view[%valid_index] : i32, view<2xi32, #dense>
+  %output_view = buffer.view %global[%base] : buffer -> view<2xi32, #encoding.layout.dense>
+  view.store %value, %output_view[%redzone_index] : i32, view<2xi32, #encoding.layout.dense>
+  view.store %continued_value, %output_view[%valid_index] : i32, view<2xi32, #encoding.layout.dense>
   kernel.return
 }
 

@@ -10,9 +10,9 @@ kernel.def @config_decl_facts_bound_dynamic_view() {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
   %columns = config.get @runtime.column_count : index
-  %input_view = buffer.view %input[%base] : buffer -> view<[%columns]xi32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<[%columns]xi32, #dense>
-  %loaded = vector.load %input_view[%lane] : view<[%columns]xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %output_view[%lane] : vector<1xi32>, view<[%columns]xi32, #dense>
+  %input_view = buffer.view %input[%base] : buffer -> view<[%columns]xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%columns]xi32, #encoding.layout.dense>
+  %loaded = vector.load %input_view[%lane] : view<[%columns]xi32, #encoding.layout.dense> -> vector<1xi32>
+  vector.store %loaded, %output_view[%lane] : vector<1xi32>, view<[%columns]xi32, #encoding.layout.dense>
   kernel.return
 }

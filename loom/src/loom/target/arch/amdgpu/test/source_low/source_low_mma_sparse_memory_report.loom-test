@@ -12,24 +12,24 @@ kernel.def target(@target) @report_sparse_fragment_payload_and_metadata() {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 32 : index
-  %lhs_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %rhs_schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=16, payload_registers=4> : encoding<schema>
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=16, payload_registers=4> : encoding<schema>
   %lhs_layout = encoding.layout.dense : encoding<layout>
   %rhs_layout = encoding.layout.strided [1, 32] : encoding<layout>
-  %lhs_storage = encoding.define #physical_storage {layout = %lhs_layout : encoding<layout>, schema = %lhs_schema : encoding<schema>} : encoding<storage>
-  %rhs_storage = encoding.define #physical_storage {layout = %rhs_layout : encoding<layout>, schema = %rhs_schema : encoding<schema>} : encoding<storage>
+  %lhs_storage = encoding.define #encoding.storage {layout = %lhs_layout : encoding<layout>, schema = %lhs_schema : encoding<schema>} : encoding<storage>
+  %rhs_storage = encoding.define #encoding.storage {layout = %rhs_layout : encoding<layout>, schema = %rhs_schema : encoding<schema>} : encoding<storage>
   %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xf8E4M3, %lhs_storage>
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<32x16xf8E5M2, %rhs_storage>
-  %metadata_view = buffer.view %metadata_buffer[%base] : buffer -> view<32xi32, #dense>
-  %output_view = buffer.view %output_buffer[%base] : buffer -> view<32xf32, #dense>
-  %metadata = vector.load %metadata_view[%tid] : view<32xi32, #dense> -> vector<1xi32>
+  %metadata_view = buffer.view %metadata_buffer[%base] : buffer -> view<32xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output_buffer[%base] : buffer -> view<32xf32, #encoding.layout.dense>
+  %metadata = vector.load %metadata_view[%tid] : view<32xi32, #encoding.layout.dense> -> vector<1xi32>
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] using {sparsity = %metadata : vector<1xi32>} : view<16x16xf8E4M3, %lhs_storage> -> vector<2xi32>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<32x16xf8E5M2, %rhs_storage> -> vector<4xi32>
   %initial_values = vector.constant 0.0 : vector<8xf32>
   %init = vector.fragment<init> %initial_values shape [%m, %n] : vector<8xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<2xi32>, vector<4xi32>, vector<8xf32>
   %lane0 = vector.extract %result[0] : vector<8xf32> -> f32
-  view.store %lane0, %output_view[%tid] : f32, view<32xf32, #dense>
+  view.store %lane0, %output_view[%tid] : f32, view<32xf32, #encoding.layout.dense>
   kernel.return
 }
 

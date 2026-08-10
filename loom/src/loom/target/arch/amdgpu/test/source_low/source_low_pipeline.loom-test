@@ -324,15 +324,15 @@ func.template<pipeline.late_fragment_epilogue> target(@target) @late_fragment_ep
   %n = index.constant 16 : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x[%column_count]xbf16, #dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x[%column_count]xbf16, #encoding.layout.dense>
   %epilogue0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload0, %payload0 : vector<8xf32>
   %epilogue1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload1, %payload1 : vector<8xf32>
   %epilogue2 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload2, %payload2 : vector<8xf32>
   %epilogue3 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload3, %payload3 : vector<8xf32>
-  vector.fragment.store<result> %epilogue0, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x[%column_count]xbf16, #dense>
-  vector.fragment.store<result> %epilogue1, %output_view[0, 16] shape [%m, %n] : vector<8xf32>, view<16x[%column_count]xbf16, #dense>
-  vector.fragment.store<result> %epilogue2, %output_view[0, 32] shape [%m, %n] : vector<8xf32>, view<16x[%column_count]xbf16, #dense>
-  vector.fragment.store<result> %epilogue3, %output_view[0, 48] shape [%m, %n] : vector<8xf32>, view<16x[%column_count]xbf16, #dense>
+  vector.fragment.store<result> %epilogue0, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x[%column_count]xbf16, #encoding.layout.dense>
+  vector.fragment.store<result> %epilogue1, %output_view[0, 16] shape [%m, %n] : vector<8xf32>, view<16x[%column_count]xbf16, #encoding.layout.dense>
+  vector.fragment.store<result> %epilogue2, %output_view[0, 32] shape [%m, %n] : vector<8xf32>, view<16x[%column_count]xbf16, #encoding.layout.dense>
+  vector.fragment.store<result> %epilogue3, %output_view[0, 48] shape [%m, %n] : vector<8xf32>, view<16x[%column_count]xbf16, #encoding.layout.dense>
   func.return
 }
 

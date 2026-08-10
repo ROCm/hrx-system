@@ -44,15 +44,15 @@ kernel.def target(@gfx11_target) @packed_f16_affine_epilogue_kernel() {
 } launch(%input: buffer, %scale_buffer: buffer, %bias_buffer: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %tid = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xf16, #dense>
-  %scale_view = buffer.view %scale_buffer[%buffer_base] : buffer -> view<64x4xf16, #dense>
-  %bias_view = buffer.view %bias_buffer[%buffer_base] : buffer -> view<64x4xf16, #dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xf16, #dense>
-  %x = vector.load %input_view[%tid, 0] : view<64x4xf16, #dense> -> vector<4xf16>
-  %scale = vector.load %scale_view[%tid, 0] : view<64x4xf16, #dense> -> vector<4xf16>
-  %bias = vector.load %bias_view[%tid, 0] : view<64x4xf16, #dense> -> vector<4xf16>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xf16, #encoding.layout.dense>
+  %scale_view = buffer.view %scale_buffer[%buffer_base] : buffer -> view<64x4xf16, #encoding.layout.dense>
+  %bias_view = buffer.view %bias_buffer[%buffer_base] : buffer -> view<64x4xf16, #encoding.layout.dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xf16, #encoding.layout.dense>
+  %x = vector.load %input_view[%tid, 0] : view<64x4xf16, #encoding.layout.dense> -> vector<4xf16>
+  %scale = vector.load %scale_view[%tid, 0] : view<64x4xf16, #encoding.layout.dense> -> vector<4xf16>
+  %bias = vector.load %bias_view[%tid, 0] : view<64x4xf16, #encoding.layout.dense> -> vector<4xf16>
   %result = vector.fmaf %x, %scale, %bias : vector<4xf16>
-  vector.store %result, %output_view[%tid, 0] : vector<4xf16>, view<64x4xf16, #dense>
+  vector.store %result, %output_view[%tid, 0] : vector<4xf16>, view<64x4xf16, #encoding.layout.dense>
   kernel.return
 }
 
@@ -125,15 +125,15 @@ kernel.def target(@gfx9_4_target) @packed_f32_uniform_vector4_fma() {
 } launch(%a_buffer: buffer, %b_buffer: buffer, %c_buffer: buffer, %result_buffer: buffer) {
   %base = index.constant 0 : offset
   %a_noalias, %b_noalias, %c_noalias, %result_noalias = buffer.assume.noalias %a_buffer, %b_buffer, %c_buffer, %result_buffer : buffer, buffer, buffer, buffer
-  %a_view = buffer.view %a_noalias[%base] : buffer -> view<4xf32, #dense>
-  %b_view = buffer.view %b_noalias[%base] : buffer -> view<4xf32, #dense>
-  %c_view = buffer.view %c_noalias[%base] : buffer -> view<4xf32, #dense>
-  %result_view = buffer.view %result_noalias[%base] : buffer -> view<4xf32, #dense>
-  %a = vector.load %a_view[0] : view<4xf32, #dense> -> vector<4xf32>
-  %b = vector.load %b_view[0] : view<4xf32, #dense> -> vector<4xf32>
-  %c = vector.load %c_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %a_view = buffer.view %a_noalias[%base] : buffer -> view<4xf32, #encoding.layout.dense>
+  %b_view = buffer.view %b_noalias[%base] : buffer -> view<4xf32, #encoding.layout.dense>
+  %c_view = buffer.view %c_noalias[%base] : buffer -> view<4xf32, #encoding.layout.dense>
+  %result_view = buffer.view %result_noalias[%base] : buffer -> view<4xf32, #encoding.layout.dense>
+  %a = vector.load %a_view[0] : view<4xf32, #encoding.layout.dense> -> vector<4xf32>
+  %b = vector.load %b_view[0] : view<4xf32, #encoding.layout.dense> -> vector<4xf32>
+  %c = vector.load %c_view[0] : view<4xf32, #encoding.layout.dense> -> vector<4xf32>
   %result = vector.fmaf %a, %b, %c : vector<4xf32>
-  vector.store %result, %result_view[0] : vector<4xf32>, view<4xf32, #dense>
+  vector.store %result, %result_view[0] : vector<4xf32>, view<4xf32, #encoding.layout.dense>
   kernel.return
 }
 

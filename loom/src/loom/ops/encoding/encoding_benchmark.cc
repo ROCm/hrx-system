@@ -228,11 +228,11 @@ static std::string BuildEncodingModule(SchemaPopulation population,
     source.append("%schema");
     source.append(std::to_string(i));
     source.append(
-        " = encoding.define #matrix_operand<element_format=f8e4m3, "
+        " = encoding.define #encoding.operand<element_format=f8e4m3, "
         "payload_elements=");
     source.append(std::to_string(payload_element_count));
     source.append(
-        ", payload_packing=dense_lanes, payload_registers=0, "
+        ", payload_packing=dense_lanes, "
         "rounding=finite_only> : encoding<schema>\n");
   }
   return source;
@@ -248,7 +248,7 @@ static std::string BuildDynamicEncodingModule(int64_t definition_count) {
     source.append("  %storage");
     source.append(std::to_string(i));
     source.append(
-        " = encoding.define #physical_storage {layout = %layout : "
+        " = encoding.define #encoding.storage {layout = %layout : "
         "encoding<layout>, schema = %schema : encoding<schema>} : "
         "encoding<storage>\n");
   }
@@ -284,9 +284,9 @@ static std::string BuildVectorEncodingUseModule(int64_t pair_count) {
       "func.def @encoding_uses(%source: vector<32xf32>, %scale: "
       "vector<1xf32>) {\n"
       "  %schema = encoding.define "
-      "#matrix_operand<element_format=f8e4m3fn, "
+      "#encoding.operand<element_format=f8e4m3fn, "
       "payload_elements=32, payload_packing=dense_lanes, "
-      "payload_registers=0, scale_format=f32, "
+      "scale_format=f32, "
       "scale_group_elements=32, scale_operands=1, "
       "scale_topology=block_1d, affine=scale_only> : "
       "encoding<schema>\n");
@@ -317,7 +317,7 @@ static std::string BuildDynamicEncodingQueryBranchModule(int64_t branch_count) {
     const bool use_exact_query = (i & 1) == 0;
     const char* query =
         use_exact_query
-            ? " = encoding.isa<#matrix_operand<affine=scale_plus_min, "
+            ? " = encoding.isa<#encoding.operand<affine=scale_plus_min, "
               "element_format=u4, payload_elements=256, "
               "payload_packing=multi_stream, payload_registers=8>> %schema "
               ": encoding<schema>\n"
@@ -626,13 +626,14 @@ static void BM_QueryDistinctStaticStorageSchemas(benchmark::State& state) {
 }
 BENCHMARK(BM_QueryDistinctStaticStorageSchemas)->Apply(ScaledEncodingCounts);
 
-static void BM_QueryFixedNamedFp8StorageSchema(benchmark::State& state) {
+static void BM_QueryStaticFp8OperandSchema(benchmark::State& state) {
   const int64_t query_count = state.range(0);
   EncodingBenchmarkFixture fixture;
-  loom_module_t* module =
-      ParseModule(fixture,
-                  "%schema = encoding.define #fp8_e4m3fn<rounding=finite_only> "
-                  ": encoding<schema>\n");
+  loom_module_t* module = ParseModule(
+      fixture,
+      "%schema = encoding.define #encoding.operand<element_format=f8e4m3fn, "
+      "payload_elements=1, payload_packing=dense_lanes, rounding=finite_only> "
+      ": encoding<schema>\n");
   OperationMemoryTracker memory_tracker(fixture.block_pool());
   const loom_op_t* define_op =
       loom_block_const_op(loom_module_block(module), 0);
@@ -645,7 +646,7 @@ static void BM_QueryFixedNamedFp8StorageSchema(benchmark::State& state) {
           LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN ||
       schema.encoded_operand.rounding_policy !=
           LOOM_VALUE_FACT_ROUNDING_POLICY_FINITE_ONLY) {
-    state.SkipWithError("fixed named FP8 schema query produced wrong facts");
+    state.SkipWithError("static FP8 operand schema query produced wrong facts");
     loom_module_free(module);
     return;
   }
@@ -663,7 +664,7 @@ static void BM_QueryFixedNamedFp8StorageSchema(benchmark::State& state) {
   state.SetItemsProcessed(state.iterations() * query_count);
   loom_module_free(module);
 }
-BENCHMARK(BM_QueryFixedNamedFp8StorageSchema)->Apply(ScaledEncodingCounts);
+BENCHMARK(BM_QueryStaticFp8OperandSchema)->Apply(ScaledEncodingCounts);
 
 static void BM_ParseDynamicEncodingDefinitions(benchmark::State& state) {
   const int64_t definition_count = state.range(0);

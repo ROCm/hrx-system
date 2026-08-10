@@ -58,7 +58,9 @@ enum loom_encoding_family_flag_bits_e {
 };
 typedef uint8_t loom_encoding_family_flags_t;
 
-// A single static encoding instance, such as `#q8_0<block=32>`.
+// A single static encoding instance, such as
+// `#encoding.operand<element_format=i8, payload_elements=32,
+// payload_packing=dense_lanes>`.
 //
 // The encoding family name and optional file-local alias are interned string
 // IDs in the owning module. Parameters are named attributes so families can
@@ -290,7 +292,8 @@ typedef struct loom_encoding_table_t {
   loom_encoding_t* entries;
 } loom_encoding_table_t;
 
-// Vtable for one encoding family (`q6_k`, `q8_0`, `dense`, etc.).
+// Vtable for one encoding family (`encoding.operand`,
+// `encoding.layout.dense`, etc.).
 //
 // Module encoding entries store only static family name + canonical parameter
 // attrs. Dynamic parameters are ordinary SSA operands on encoding.define, named

@@ -62,9 +62,10 @@
 // slot for address layout. Vector types are pure register lane grids and do not
 // carry layout attachments.
 //
-//   tile<256x256xf32, #q6_k>
-//   tensor<[%N]x[%K]xi8, #q8_0<block=32>>
-//   view<[%N]xf32, #strided<stride=64>>
+//   tile<256x256xf32, #encoding.layout.dense>
+//   tensor<[%N]x[%K]xi8, #encoding.operand<element_format=i8,
+//       payload_elements=32, payload_packing=dense_lanes>>
+//   view<[%N]xf32, #encoding.layout.strided<strides=[64]>>
 //
 // The encoding/layout attachment is metadata: it doesn't change the logical
 // shape or element type, but determines how bytes map to logical elements.
@@ -76,12 +77,15 @@
 // built-in type registry while its value remains packed into the type header.
 // Static attachments use only attribute parameters:
 //
-//   tile<256xi8, #q8_0<block=32>>
+//   tile<256xi8, #encoding.operand<element_format=i8, payload_elements=32,
+//       payload_packing=dense_lanes>>
 //
 // Dynamic parameters are named operands on encoding.define, and the resulting
 // `%enc` value is attached to shaped types:
 //
-//   %enc = encoding.define #q8_0<block=32> {group_size = %g : index}
+//   %enc = encoding.define #encoding.operand<element_format=i8,
+//       payload_elements=32, payload_packing=dense_lanes>
+//       {group_size = %g : index}
 //       : encoding<schema>
 //   tile<256xi8, %enc>
 //

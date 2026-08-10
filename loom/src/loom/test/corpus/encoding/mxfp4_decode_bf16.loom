@@ -4,7 +4,7 @@
 // preserve the BF16 payloads so minimum scales, signed zero, overflow, and the
 // E8M0 NaN encoding are checked without host floating-point conversions.
 func.def inline @decode_mxfp4_group_bits_impl(%payload: vector<4xi32>, %scale: vector<1xi32>) -> (vector<16xi32>) {
-  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f4e2m1, payload_elements=32, payload_packing=little_endian_nibbles, payload_registers=4, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %schema = encoding.define #encoding.operand<affine=scale_only, element_format=f4e2m1, payload_elements=32, payload_packing=little_endian_nibbles, payload_registers=4, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xi32>} : vector<4xi32>, encoding<schema> -> vector<32xbf16>
   %bits = vector.bitcast %decoded : vector<32xbf16> to vector<16xi32>
   func.return %bits : vector<16xi32>
@@ -14,7 +14,7 @@ func.def inline @decode_mxfp4_group_bits_impl(%payload: vector<4xi32>, %scale: v
 // second encoded scale byte from the first while keeping the expected payload
 // uniform and exact.
 func.def inline @decode_mxfp4_second_group_bits_impl(%payload: vector<8xi32>, %scale: vector<1xi32>) -> (vector<16xi32>) {
-  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f4e2m1, payload_elements=64, payload_packing=little_endian_nibbles, payload_registers=8, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %schema = encoding.define #encoding.operand<affine=scale_only, element_format=f4e2m1, payload_elements=64, payload_packing=little_endian_nibbles, payload_registers=8, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xi32>} : vector<8xi32>, encoding<schema> -> vector<64xbf16>
   %second_group = vector.slice %decoded[32] : vector<64xbf16> -> vector<32xbf16>
   %bits = vector.bitcast %second_group : vector<32xbf16> to vector<16xi32>
@@ -26,13 +26,13 @@ kernel.def @decode_mxfp4_group_bits() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%payload_buffer: buffer, %scale_buffer: buffer, %out_buffer: buffer) {
   %base = index.constant 0 : offset
-  %payload_view = buffer.view %payload_buffer[%base] : buffer -> view<4xi32, #dense>
-  %scale_view = buffer.view %scale_buffer[%base] : buffer -> view<1xi32, #dense>
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16xi32, #dense>
-  %payload = vector.load %payload_view[0] : view<4xi32, #dense> -> vector<4xi32>
-  %scale = vector.load %scale_view[0] : view<1xi32, #dense> -> vector<1xi32>
+  %payload_view = buffer.view %payload_buffer[%base] : buffer -> view<4xi32, #encoding.layout.dense>
+  %scale_view = buffer.view %scale_buffer[%base] : buffer -> view<1xi32, #encoding.layout.dense>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16xi32, #encoding.layout.dense>
+  %payload = vector.load %payload_view[0] : view<4xi32, #encoding.layout.dense> -> vector<4xi32>
+  %scale = vector.load %scale_view[0] : view<1xi32, #encoding.layout.dense> -> vector<1xi32>
   %bits = func.call @decode_mxfp4_group_bits_impl(%payload, %scale) : (vector<4xi32>, vector<1xi32>) -> (vector<16xi32>)
-  vector.store %bits, %out_view[0] : vector<16xi32>, view<16xi32, #dense>
+  vector.store %bits, %out_view[0] : vector<16xi32>, view<16xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -41,13 +41,13 @@ kernel.def @decode_mxfp4_second_group_bits() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%payload_buffer: buffer, %scale_buffer: buffer, %out_buffer: buffer) {
   %base = index.constant 0 : offset
-  %payload_view = buffer.view %payload_buffer[%base] : buffer -> view<8xi32, #dense>
-  %scale_view = buffer.view %scale_buffer[%base] : buffer -> view<1xi32, #dense>
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16xi32, #dense>
-  %payload = vector.load %payload_view[0] : view<8xi32, #dense> -> vector<8xi32>
-  %scale = vector.load %scale_view[0] : view<1xi32, #dense> -> vector<1xi32>
+  %payload_view = buffer.view %payload_buffer[%base] : buffer -> view<8xi32, #encoding.layout.dense>
+  %scale_view = buffer.view %scale_buffer[%base] : buffer -> view<1xi32, #encoding.layout.dense>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16xi32, #encoding.layout.dense>
+  %payload = vector.load %payload_view[0] : view<8xi32, #encoding.layout.dense> -> vector<8xi32>
+  %scale = vector.load %scale_view[0] : view<1xi32, #encoding.layout.dense> -> vector<1xi32>
   %bits = func.call @decode_mxfp4_second_group_bits_impl(%payload, %scale) : (vector<8xi32>, vector<1xi32>) -> (vector<16xi32>)
-  vector.store %bits, %out_view[0] : vector<16xi32>, view<16xi32, #dense>
+  vector.store %bits, %out_view[0] : vector<16xi32>, view<16xi32, #encoding.layout.dense>
   kernel.return
 }
 

@@ -655,8 +655,8 @@ source hid storage materialization inside the matrix kernel.
 
 ```loom
 %weight_layout = encoding.layout.strided [1, %input_size] : encoding<layout>
-%weight_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=16, payload_registers=4, rounding=finite_only> : encoding<schema>
-%weight_storage = encoding.define #physical_storage {layout = %weight_layout : encoding<layout>, schema = %weight_schema : encoding<schema>} : encoding<storage>
+%weight_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=16, payload_registers=4, rounding=finite_only> : encoding<schema>
+%weight_storage = encoding.define #encoding.storage {layout = %weight_layout : encoding<layout>, schema = %weight_schema : encoding<schema>} : encoding<storage>
 %weight_view = buffer.view %weight_buffer[%base] : buffer -> view<[%input_size]x[%output_size]xf8E4M3, %weight_storage>
 ```
 

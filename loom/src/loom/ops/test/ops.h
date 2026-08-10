@@ -229,7 +229,7 @@ enum {
   LOOM_OP_TEST_FACT_IS_VECTOR_PREFIX_MASK = LOOM_OP_KIND(LOOM_DIALECT_TEST, 55),
   LOOM_OP_TEST_FACT_ENCODING_LAYOUT_KIND = LOOM_OP_KIND(LOOM_DIALECT_TEST, 56),
   LOOM_OP_TEST_FACT_ENCODING_LAYOUT_STRIDE_HI = LOOM_OP_KIND(LOOM_DIALECT_TEST, 57),
-  LOOM_OP_TEST_FACT_ENCODING_MATRIX_FIELD = LOOM_OP_KIND(LOOM_DIALECT_TEST, 58),
+  LOOM_OP_TEST_FACT_ENCODING_OPERAND_FIELD = LOOM_OP_KIND(LOOM_DIALECT_TEST, 58),
   LOOM_OP_TEST_FACT_IS_BUFFER_REFERENCE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 59),
   LOOM_OP_TEST_FACT_IS_VIEW_REFERENCE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 60),
   LOOM_OP_TEST_FACT_BUFFER_MEMORY_SPACE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 61),
@@ -1332,20 +1332,20 @@ iree_status_t loom_test_fact_encoding_layout_stride_hi_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_TEST_FACT_ENCODING_MATRIX_FIELD: Exposes an encoded-operand storage-schema summary field as an i64 constant. Supported fields are element_format, payload_packing, scale_topology, scale_format, secondary_scale_format, affine, rounding, codebook, sparsity, sparsity_group_elements, sparsity_group_nonzero_elements, payload_registers, payload_elements, scale_group_elements, scale_group_rank, scale_group_dim0 through scale_group_dim3, scale_operands, zero_scale_fallback, and static_spec.
-// %format = test.fact_encoding_matrix_field %schema["element_format"] : encoding<schema> -> i64
-LOOM_DEFINE_ISA(loom_test_fact_encoding_matrix_field_isa, LOOM_OP_TEST_FACT_ENCODING_MATRIX_FIELD)
-LOOM_DEFINE_OPERAND(loom_test_fact_encoding_matrix_field_value, 0)
-LOOM_DEFINE_RESULT(loom_test_fact_encoding_matrix_field_result, 0)
-LOOM_DEFINE_ATTR_STRING(loom_test_fact_encoding_matrix_field_field, 0)
-iree_status_t loom_test_fact_encoding_matrix_field_build(
+// LOOM_OP_TEST_FACT_ENCODING_OPERAND_FIELD: Exposes an encoded-operand storage-schema summary field as an i64 constant. Supported fields are element_format, payload_packing, scale_topology, scale_format, secondary_scale_format, affine, rounding, codebook, sparsity, sparsity_group_elements, sparsity_group_nonzero_elements, payload_registers, payload_elements, scale_group_elements, scale_group_rank, scale_group_dim0 through scale_group_dim3, scale_operands, zero_scale_fallback, and static_spec.
+// %format = test.fact_encoding_operand_field %schema["element_format"] : encoding<schema> -> i64
+LOOM_DEFINE_ISA(loom_test_fact_encoding_operand_field_isa, LOOM_OP_TEST_FACT_ENCODING_OPERAND_FIELD)
+LOOM_DEFINE_OPERAND(loom_test_fact_encoding_operand_field_value, 0)
+LOOM_DEFINE_RESULT(loom_test_fact_encoding_operand_field_result, 0)
+LOOM_DEFINE_ATTR_STRING(loom_test_fact_encoding_operand_field_field, 0)
+iree_status_t loom_test_fact_encoding_operand_field_build(
     loom_builder_t* builder,
     loom_may_consume loom_value_id_t value,
     loom_string_id_t field,
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
-iree_status_t loom_test_fact_encoding_matrix_field_facts(
+iree_status_t loom_test_fact_encoding_operand_field_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,

@@ -970,7 +970,7 @@ func.def @encode_requires_schema_role(%values: vector<32xf32>, %xf: encoding<tra
 // Auxiliary operands are keyed by a small vector-owned vocabulary so lowering
 // can resolve a compact bitset instead of matching arbitrary strings later.
 func.def @decode_rejects_unknown_auxiliary_key(%payload: vector<6xi32>, %scale: vector<1xf16>) {
-  %schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   // ERROR@+1: ENCODING/015 "vector.decode" "mystery"
   %values = vector.decode %payload using %schema {mystery = %scale : vector<1xf16>} : vector<6xi32>, encoding<schema> -> vector<32xf32>
   func.return
@@ -980,7 +980,7 @@ func.def @decode_rejects_unknown_auxiliary_key(%payload: vector<6xi32>, %scale: 
 
 // Static encoded matrix schemas can require named auxiliary operands.
 func.def @decode_requires_schema_scale_auxiliary(%payload: vector<6xi32>) {
-  %schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   // ERROR@+1: ENCODING/016 "vector.decode" "scale"
   %values = vector.decode %payload using %schema : vector<6xi32>, encoding<schema> -> vector<32xf32>
   func.return
@@ -1080,9 +1080,9 @@ func.def @fragment_load_rejects_unknown_auxiliary_key(%buffer: buffer, %offset: 
 // Static sparse fragment-load storage schemas require explicit metadata SSA
 // operands at the load boundary.
 func.def @fragment_load_requires_sparse_auxiliary(%buffer: buffer, %offset: offset, %row: index, %m: index, %k: index) {
-  %view = buffer.view %buffer[%offset] : buffer -> view<16x16xf8E4M3, #physical_storage<layout=#dense, schema=#matrix_operand<element_format=f8e4m3, payload_elements=16, payload_registers=4, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2>>>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16x16xf8E4M3, #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.operand<element_format=f8e4m3, payload_elements=16, payload_registers=4, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2>>>
   // ERROR@+1: ENCODING/016 "vector.fragment.load" "sparsity"
-  %lhs = vector.fragment.load<lhs> %view[%row, 0] shape [%m, %k] : view<16x16xf8E4M3, #physical_storage<layout=#dense, schema=#matrix_operand<element_format=f8e4m3, payload_elements=16, payload_registers=4, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2>>> -> vector<4xi32>
+  %lhs = vector.fragment.load<lhs> %view[%row, 0] shape [%m, %k] : view<16x16xf8E4M3, #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.operand<element_format=f8e4m3, payload_elements=16, payload_registers=4, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2>>> -> vector<4xi32>
   func.return
 }
 
@@ -1131,7 +1131,7 @@ func.def @fragment_requires_schema_role(%payload: vector<6xi32>, %m: index, %k: 
 
 // Fragment parameter keys share the vector auxiliary vocabulary.
 func.def @fragment_rejects_unknown_auxiliary_key(%payload: vector<6xi32>, %m: index, %k: index, %scale: vector<1xf16>) {
-  %schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   // ERROR@+1: ENCODING/015 "vector.fragment" "mystery"
   %fragment = vector.fragment<lhs> %payload shape [%m, %k] using {mystery = %scale : vector<1xf16>, schema = %schema : encoding<schema>} : vector<6xi32>
   func.return
@@ -1141,7 +1141,7 @@ func.def @fragment_rejects_unknown_auxiliary_key(%payload: vector<6xi32>, %m: in
 
 // Static encoded fragment schemas can require named auxiliary operands.
 func.def @fragment_requires_schema_scale_auxiliary(%payload: vector<6xi32>, %m: index, %k: index) {
-  %schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   // ERROR@+1: ENCODING/016 "vector.fragment" "scale"
   %fragment = vector.fragment<lhs> %payload shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<6xi32>
   func.return

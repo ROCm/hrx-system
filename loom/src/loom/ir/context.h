@@ -270,7 +270,8 @@ const loom_parameterized_attr_descriptor_t*
 loom_context_lookup_parameterized_attr_by_name(const loom_context_t* context,
                                                iree_string_view_t name);
 
-// Looks up an encoding family by its bare name (`q8_0`, `dense`, ...).
+// Looks up an encoding family by its bare name (`encoding.operand`,
+// `encoding.layout.dense`, ...).
 // Returns LOOM_ENCODING_FAMILY_ID_INVALID when no matching family is
 // registered. The context must be finalized.
 loom_encoding_family_id_t loom_context_lookup_encoding_family_by_name(

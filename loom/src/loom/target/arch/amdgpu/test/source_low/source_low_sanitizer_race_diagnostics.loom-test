@@ -4,9 +4,9 @@ amdgpu.target<gfx11-generic> @target
 func.def target(@target) @race_access_global_rejected(%input: buffer) {
   %input_base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
-  %view = buffer.view %global[%input_base] : buffer -> view<1xi32, #dense>
+  %view = buffer.view %global[%input_base] : buffer -> view<1xi32, #encoding.layout.dense>
   // ERROR@+1: AMDGPU/023 {constraint_key="target_contract.sanitizer_race.workgroup_memory_required"}
-  sanitizer.race.access<read> %view[0] : view<1xi32, #dense>
+  sanitizer.race.access<read> %view[0] : view<1xi32, #encoding.layout.dense>
   func.return
 }
 

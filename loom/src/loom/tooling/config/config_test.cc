@@ -262,16 +262,17 @@ config.decl @model36.layout : encoding<layout>
 
   loom_tooling_config_binding_t binding = {
       /*.key=*/IREE_SV("@model36.layout"),
-      /*.value=*/IREE_SV(" #dense "),
+      /*.value=*/IREE_SV(" #encoding.layout.dense "),
   };
   loom_tooling_config_materialize_result_t result = {0};
   IREE_ASSERT_OK(Materialize(module.get(), &binding, 1, &result));
   EXPECT_EQ(result.materialized_count, 1u);
 
   std::string printed = Print(module.get());
-  EXPECT_NE(printed.find("config.def @model36.layout = #dense : "
-                         "encoding<layout>"),
-            std::string::npos);
+  EXPECT_NE(
+      printed.find("config.def @model36.layout = #encoding.layout.dense : "
+                   "encoding<layout>"),
+      std::string::npos);
 }
 
 TEST_F(ConfigMaterializeTest, RejectsWrongEncodingRole) {

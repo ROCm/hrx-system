@@ -17,11 +17,11 @@ kernel.def target(@target) @subgroup_shuffle_dynamic_index_i32() {
   %source_lane = index.assume %source_lane0 [range(%source_lane0, 0, 15)] : index
   %source_lane_i32 = index.cast %source_lane : index to i32
   %width = scalar.constant 16 : i32
-  %input_view = buffer.view %input[%c0] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%c0] : buffer -> view<64xi32, #dense>
-  %value = view.load %input_view[%lane] : view<64xi32, #dense> -> i32
+  %input_view = buffer.view %input[%c0] : buffer -> view<64xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%c0] : buffer -> view<64xi32, #encoding.layout.dense>
+  %value = view.load %input_view[%lane] : view<64xi32, #encoding.layout.dense> -> i32
   %shuffled, %valid = kernel.subgroup.shuffle<index> %value, %source_lane_i32, %width : i32, i32, i32
-  view.store %shuffled, %output_view[%lane] : i32, view<64xi32, #dense>
+  view.store %shuffled, %output_view[%lane] : i32, view<64xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -64,11 +64,11 @@ kernel.def target(@target) @subgroup_shuffle_dynamic_xor_i32() {
   %source_lane = index.assume %source_lane0 [range(%source_lane0, 0, 15)] : index
   %source_lane_i32 = index.cast %source_lane : index to i32
   %width = scalar.constant 16 : i32
-  %input_view = buffer.view %input[%c0] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%c0] : buffer -> view<64xi32, #dense>
-  %value = view.load %input_view[%lane] : view<64xi32, #dense> -> i32
+  %input_view = buffer.view %input[%c0] : buffer -> view<64xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%c0] : buffer -> view<64xi32, #encoding.layout.dense>
+  %value = view.load %input_view[%lane] : view<64xi32, #encoding.layout.dense> -> i32
   %shuffled, %valid = kernel.subgroup.shuffle<xor> %value, %source_lane_i32, %width : i32, i32, i32
-  view.store %shuffled, %output_view[%lane] : i32, view<64xi32, #dense>
+  view.store %shuffled, %output_view[%lane] : i32, view<64xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -110,12 +110,12 @@ kernel.def target(@target) @subgroup_shuffle_dynamic_up_i32() {
   %source_lane = index.assume %source_lane0 [range(%source_lane0, 0, 15)] : index
   %source_lane_i32 = index.cast %source_lane : index to i32
   %width = scalar.constant 16 : i32
-  %input_view = buffer.view %input[%c0] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%c0] : buffer -> view<64xi32, #dense>
-  %value = view.load %input_view[%lane] : view<64xi32, #dense> -> i32
+  %input_view = buffer.view %input[%c0] : buffer -> view<64xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%c0] : buffer -> view<64xi32, #encoding.layout.dense>
+  %value = view.load %input_view[%lane] : view<64xi32, #encoding.layout.dense> -> i32
   %shuffled, %valid = kernel.subgroup.shuffle<up> %value, %source_lane_i32, %width : i32, i32, i32
   scf.if %valid {
-    view.store %shuffled, %output_view[%lane] : i32, view<64xi32, #dense>
+    view.store %shuffled, %output_view[%lane] : i32, view<64xi32, #encoding.layout.dense>
   }
   kernel.return
 }
@@ -166,12 +166,12 @@ kernel.def target(@target) @subgroup_shuffle_dynamic_down_i32() {
   %source_lane = index.assume %source_lane0 [range(%source_lane0, 0, 15)] : index
   %source_lane_i32 = index.cast %source_lane : index to i32
   %width = scalar.constant 16 : i32
-  %input_view = buffer.view %input[%c0] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%c0] : buffer -> view<64xi32, #dense>
-  %value = view.load %input_view[%lane] : view<64xi32, #dense> -> i32
+  %input_view = buffer.view %input[%c0] : buffer -> view<64xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%c0] : buffer -> view<64xi32, #encoding.layout.dense>
+  %value = view.load %input_view[%lane] : view<64xi32, #encoding.layout.dense> -> i32
   %shuffled, %valid = kernel.subgroup.shuffle<down> %value, %source_lane_i32, %width : i32, i32, i32
   scf.if %valid {
-    view.store %shuffled, %output_view[%lane] : i32, view<64xi32, #dense>
+    view.store %shuffled, %output_view[%lane] : i32, view<64xi32, #encoding.layout.dense>
   }
   kernel.return
 }

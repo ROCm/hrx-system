@@ -12,10 +12,10 @@ kernel.def target(@target) @config_decl_facts_bound_dynamic_view() {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
   %columns = config.get @runtime.column_count : index
-  %input_view = buffer.view %input[%base] : buffer -> view<[%columns]xi32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<[%columns]xi32, #dense>
-  %loaded = vector.load %input_view[%lane] : view<[%columns]xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %output_view[%lane] : vector<1xi32>, view<[%columns]xi32, #dense>
+  %input_view = buffer.view %input[%base] : buffer -> view<[%columns]xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%columns]xi32, #encoding.layout.dense>
+  %loaded = vector.load %input_view[%lane] : view<[%columns]xi32, #encoding.layout.dense> -> vector<1xi32>
+  vector.store %loaded, %output_view[%lane] : vector<1xi32>, view<[%columns]xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -49,16 +49,16 @@ kernel.def target(@target) @config_decl_matvec_block_lane_vec4_dynamic_view() {
   %block_step = index.constant 4 : index
   %lanes_per_group = index.constant 16 : index
   %block_stride = index.constant 105 : index
-  %input_view = buffer.view %input[%base_offset] : buffer -> view<[%columns]xf32, #dense>
-  %output_view = buffer.view %output[%base_offset] : buffer -> view<[%columns]xf32, #dense>
+  %input_view = buffer.view %input[%base_offset] : buffer -> view<[%columns]xf32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%base_offset] : buffer -> view<[%columns]xf32, #encoding.layout.dense>
   scf.for %block_base = [%block_begin to %block_end step %block_step] {
     %lane_group = index.div %lane, %lanes_per_group : index
     %lane_offset = index.rem %lane, %lanes_per_group : index
     %block = index.add %block_base, %lane_group : index
     %block_origin = index.mul %block, %block_stride : index
     %origin = index.add %block_origin, %lane_offset : index
-    %loaded = vector.load %input_view[%origin] : view<[%columns]xf32, #dense> -> vector<4xf32>
-    vector.store %loaded, %output_view[%origin] : vector<4xf32>, view<[%columns]xf32, #dense>
+    %loaded = vector.load %input_view[%origin] : view<[%columns]xf32, #encoding.layout.dense> -> vector<4xf32>
+    vector.store %loaded, %output_view[%origin] : vector<4xf32>, view<[%columns]xf32, #encoding.layout.dense>
   }
   kernel.return
 }
@@ -105,12 +105,12 @@ kernel.def target(@target) @config_decl_missing_bounds_for_dynamic_view() {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
   %columns = config.get @runtime.column_count : index
-  %input_view = buffer.view %input[%base] : buffer -> view<[%columns]xi32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<[%columns]xi32, #dense>
+  %input_view = buffer.view %input[%base] : buffer -> view<[%columns]xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%columns]xi32, #encoding.layout.dense>
   // ERROR@+1: SUBRANGE/018 {config_key="runtime.column_count", constraint_key="config_decl.where.vector_footprint_upper_bound"}
-  %loaded = vector.load %input_view[%lane] : view<[%columns]xi32, #dense> -> vector<1xi32>
+  %loaded = vector.load %input_view[%lane] : view<[%columns]xi32, #encoding.layout.dense> -> vector<1xi32>
   // ERROR@+1: SUBRANGE/018 {config_key="runtime.column_count", constraint_key="config_decl.where.vector_footprint_upper_bound"}
-  vector.store %loaded, %output_view[%lane] : vector<1xi32>, view<[%columns]xi32, #dense>
+  vector.store %loaded, %output_view[%lane] : vector<1xi32>, view<[%columns]xi32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -133,8 +133,8 @@ kernel.def target(@target) @config_decl_missing_bounds_for_matvec_vec4_dynamic_v
   %block_step = index.constant 4 : index
   %lanes_per_group = index.constant 16 : index
   %block_stride = index.constant 105 : index
-  %input_view = buffer.view %input[%base_offset] : buffer -> view<[%columns]xf32, #dense>
-  %output_view = buffer.view %output[%base_offset] : buffer -> view<[%columns]xf32, #dense>
+  %input_view = buffer.view %input[%base_offset] : buffer -> view<[%columns]xf32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%base_offset] : buffer -> view<[%columns]xf32, #encoding.layout.dense>
   scf.for %block_base = [%block_begin to %block_end step %block_step] {
     %lane_group = index.div %lane, %lanes_per_group : index
     %lane_offset = index.rem %lane, %lanes_per_group : index
@@ -142,9 +142,9 @@ kernel.def target(@target) @config_decl_missing_bounds_for_matvec_vec4_dynamic_v
     %block_origin = index.mul %block, %block_stride : index
     %origin = index.add %block_origin, %lane_offset : index
     // ERROR@+1: SUBRANGE/018 {config_key="runtime.column_count", constraint_key="config_decl.where.vector_footprint_upper_bound"}
-    %loaded = vector.load %input_view[%origin] : view<[%columns]xf32, #dense> -> vector<4xf32>
+    %loaded = vector.load %input_view[%origin] : view<[%columns]xf32, #encoding.layout.dense> -> vector<4xf32>
     // ERROR@+1: SUBRANGE/018 {config_key="runtime.column_count", constraint_key="config_decl.where.vector_footprint_upper_bound"}
-    vector.store %loaded, %output_view[%origin] : vector<4xf32>, view<[%columns]xf32, #dense>
+    vector.store %loaded, %output_view[%origin] : vector<4xf32>, view<[%columns]xf32, #encoding.layout.dense>
   }
   kernel.return
 }
@@ -161,11 +161,11 @@ kernel.def target(@target) @config_decl_runtime_use_stays_illegal() {
 } launch(%output: buffer) {
   %base = index.constant 0 : offset
   %output_index = index.constant 0 : index
-  %output_view = buffer.view %output[%base] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32, #encoding.layout.dense>
   // ERROR@+1: TARGET/003 {subject_role="value", subject_name="result", constraint_key="no_ordinary_uses"}
   %columns = config.get @runtime.scalar_count : index
   %columns_i32 = index.cast %columns : index to i32
   %stored = vector.splat %columns_i32 : vector<1xi32>
-  vector.store %stored, %output_view[%output_index] : vector<1xi32>, view<1xi32, #dense>
+  vector.store %stored, %output_view[%output_index] : vector<1xi32>, view<1xi32, #encoding.layout.dense>
   kernel.return
 }

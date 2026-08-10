@@ -63,7 +63,8 @@ def c_parameterized_attr_enum_name(attr_def: ParameterizedAttrDef) -> str:
 def c_encoding_family_prefix(family: EncodingFamilyDef) -> str:
     """Returns the C function/variable prefix for an encoding family."""
 
-    return "loom_encoding_" + family.name.replace(".", "_")
+    local_name = family.name.removeprefix(f"{family.group.name}.")
+    return "loom_encoding_" + local_name.replace(".", "_")
 
 
 def validate_encoding_family_c_names(

@@ -69,16 +69,16 @@ kernel.def @kernel_reference_distribution(%buffer: buffer, %m: index) {
 } launch(%buffer: buffer, %m: index) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %source = buffer.view %buffer[%base] : buffer -> view<[%m]xi32, #dense>
-  %refined = view.refine %source : view<[%m]xi32, #dense> -> view<64xi32, #dense>
-  %lane_view = view.subview %refined[%lane] : view<64xi32, #dense> -> view<1xi32, #dense>
-  %uniform_value = view.load %refined[0] : view<64xi32, #dense> -> i32
-  %lane_value = view.load %lane_view[0] : view<1xi32, #dense> -> i32
+  %source = buffer.view %buffer[%base] : buffer -> view<[%m]xi32, #encoding.layout.dense>
+  %refined = view.refine %source : view<[%m]xi32, #encoding.layout.dense> -> view<64xi32, #encoding.layout.dense>
+  %lane_view = view.subview %refined[%lane] : view<64xi32, #encoding.layout.dense> -> view<1xi32, #encoding.layout.dense>
+  %uniform_value = view.load %refined[0] : view<64xi32, #encoding.layout.dense> -> i32
+  %lane_value = view.load %lane_view[0] : view<1xi32, #encoding.layout.dense> -> i32
   %buffer_uniform = test.fact_cluster_uniform %buffer : buffer -> i1
-  %source_uniform = test.fact_cluster_uniform %source : view<[%m]xi32, #dense> -> i1
-  %refined_uniform = test.fact_cluster_uniform %refined : view<64xi32, #dense> -> i1
+  %source_uniform = test.fact_cluster_uniform %source : view<[%m]xi32, #encoding.layout.dense> -> i1
+  %refined_uniform = test.fact_cluster_uniform %refined : view<64xi32, #encoding.layout.dense> -> i1
   %uniform_value_uniform = test.fact_cluster_uniform %uniform_value : i32 -> i1
-  %lane_view_varying = test.fact_lane_varying %lane_view : view<1xi32, #dense> -> i1
+  %lane_view_varying = test.fact_lane_varying %lane_view : view<1xi32, #encoding.layout.dense> -> i1
   %lane_value_varying = test.fact_lane_varying %lane_value : i32 -> i1
   test.use %buffer_uniform, %source_uniform, %refined_uniform, %uniform_value_uniform, %lane_view_varying, %lane_value_varying : i1, i1, i1, i1, i1, i1
   kernel.return
@@ -341,17 +341,17 @@ func.def @strided_static_footprint(%buffer: buffer) -> (i64) {
 
 // Physical-storage encodings resolve through their nested layout parameter
 // instead of forcing fact consumers to special-case storage schemas.
-func.def @physical_storage_resolves_layout(%buffer: buffer) -> (i64) {
+func.def @storage_resolves_layout(%buffer: buffer) -> (i64) {
   %offset = index.constant 0 : offset
   %layout = encoding.layout.strided [8, 1] : encoding<layout>
   %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
-  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, %storage>
   %length_hi = test.fact_view_byte_length_hi %view : view<4x4xf32, %storage> -> i64
   func.return %length_hi : i64
 }
 // ----
-func.def @physical_storage_resolves_layout(%buffer: buffer) -> (i64) {
+func.def @storage_resolves_layout(%buffer: buffer) -> (i64) {
   %length_hi = scalar.constant 112 : i64
   func.return %length_hi : i64
 }
@@ -360,22 +360,22 @@ func.def @physical_storage_resolves_layout(%buffer: buffer) -> (i64) {
 
 // Dynamic physical-storage parameters carry layout/schema semantics through
 // their SSA encoding value; canonicalization must not replace them with a bare
-// static #physical_storage family shell.
-func.def @dynamic_physical_storage_encoding_remains_ssa(%buffer: buffer, %i: index) -> (f8E4M3) {
+// static #encoding.storage family shell.
+func.def @dynamic_storage_encoding_remains_ssa(%buffer: buffer, %i: index) -> (f8E4M3) {
   %offset = index.constant 0 : offset
   %layout = encoding.layout.strided [1] : encoding<layout>
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
-  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E4M3, %storage>
   %value = view.load %view[%i] : view<4xf8E4M3, %storage> -> f8E4M3
   func.return %value : f8E4M3
 }
 // ----
-func.def @dynamic_physical_storage_encoding_remains_ssa(%buffer: buffer, %i: index) -> (f8E4M3) {
+func.def @dynamic_storage_encoding_remains_ssa(%buffer: buffer, %i: index) -> (f8E4M3) {
   %offset = index.constant 0 : offset
   %layout = encoding.layout.strided [1] : encoding<layout>
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
-  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E4M3, %storage>
   %value = view.load %view[%i] : view<4xf8E4M3, %storage> -> f8E4M3
   func.return %value : f8E4M3
@@ -387,8 +387,8 @@ func.def @dynamic_physical_storage_encoding_remains_ssa(%buffer: buffer, %i: ind
 // local SSA layout op just to recover dense footprints.
 func.def @static_dense_type_layout_facts(%buffer: buffer) -> (i64) {
   %offset = index.constant 0 : offset
-  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, #dense>
-  %length_hi = test.fact_view_byte_length_hi %view : view<4xf32, #dense> -> i64
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, #encoding.layout.dense>
+  %length_hi = test.fact_view_byte_length_hi %view : view<4xf32, #encoding.layout.dense> -> i64
   func.return %length_hi : i64
 }
 // ----
@@ -403,8 +403,8 @@ func.def @static_dense_type_layout_facts(%buffer: buffer) -> (i64) {
 // values.
 func.def @static_strided_type_layout_facts(%buffer: buffer) -> (i64) {
   %offset = index.constant 0 : offset
-  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, #strided<stride=8>>
-  %length_hi = test.fact_view_byte_length_hi %view : view<4xf32, #strided<stride=8>> -> i64
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, #encoding.layout.strided<strides=[8]>>
+  %length_hi = test.fact_view_byte_length_hi %view : view<4xf32, #encoding.layout.strided<strides=[8]>> -> i64
   func.return %length_hi : i64
 }
 // ----
@@ -418,15 +418,15 @@ func.def @static_strided_type_layout_facts(%buffer: buffer) -> (i64) {
 // Static physical-storage encodings expose their nested address layout through
 // encoding facts even when the local op resolver has no dynamic layout operand
 // to chase.
-func.def @static_physical_storage_resolves_layout(%buffer: buffer) -> (i64) {
+func.def @static_storage_resolves_layout(%buffer: buffer) -> (i64) {
   %offset = index.constant 0 : offset
-  %storage = encoding.define #physical_storage<layout=#dense, schema=#ggml_q4_0<block_elems=32, storage_bytes=18>> : encoding<storage>
+  %storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#ggml_q4_0<block_elems=32, storage_bytes=18>> : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %storage>
   %length_hi = test.fact_view_byte_length_hi %view : view<4xf32, %storage> -> i64
   func.return %length_hi : i64
 }
 // ----
-func.def @static_physical_storage_resolves_layout(%buffer: buffer) -> (i64) {
+func.def @static_storage_resolves_layout(%buffer: buffer) -> (i64) {
   %length_hi = scalar.constant 16 : i64
   func.return %length_hi : i64
 }
@@ -556,8 +556,8 @@ func.def @unknown_dynamic_stride_degrades_footprint(%buffer: buffer, %stride: in
 func.def @finite_only_storage_view_load_content(%buffer: buffer) -> (i1) {
   %offset = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
-  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E4M3, %storage>
   %value = view.load %view[0] : view<4xf8E4M3, %storage> -> f8E4M3
   %finite = scalar.isfinitef %value : f8E4M3
@@ -575,8 +575,8 @@ func.def @finite_only_storage_view_load_content(%buffer: buffer) -> (i1) {
 func.def @fnuz_fp8_storage_view_load_content(%buffer: buffer) -> (i1, i1) {
   %offset = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #fp8_e5m2fnuz : encoding<schema>
-  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %schema = encoding.define #encoding.operand<element_format=f8e5m2fnuz, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E5M2, %storage>
   %value = view.load %view[0] : view<4xf8E5M2, %storage> -> f8E5M2
   %inf = scalar.isinff %value : f8E5M2
@@ -587,8 +587,8 @@ func.def @fnuz_fp8_storage_view_load_content(%buffer: buffer) -> (i1, i1) {
 func.def @fnuz_fp8_storage_view_load_content(%buffer: buffer) -> (i1, i1) {
   %offset = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #fp8_e5m2fnuz : encoding<schema>
-  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %schema = encoding.define #encoding.operand<element_format=f8e5m2fnuz, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E5M2, %storage>
   %value = view.load %view[0] : view<4xf8E5M2, %storage> -> f8E5M2
   %inf = scalar.constant false : i1
@@ -603,8 +603,8 @@ func.def @fnuz_fp8_storage_view_load_content(%buffer: buffer) -> (i1, i1) {
 func.def @ieee_e5m2_storage_view_load_content_is_unknown(%buffer: buffer) -> (i1, i1) {
   %offset = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #ieee_fp8_e5m2 : encoding<schema>
-  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E5M2, %storage>
   %value = view.load %view[0] : view<4xf8E5M2, %storage> -> f8E5M2
   %inf = scalar.isinff %value : f8E5M2
@@ -615,8 +615,8 @@ func.def @ieee_e5m2_storage_view_load_content_is_unknown(%buffer: buffer) -> (i1
 func.def @ieee_e5m2_storage_view_load_content_is_unknown(%buffer: buffer) -> (i1, i1) {
   %offset = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #ieee_fp8_e5m2 : encoding<schema>
-  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E5M2, %storage>
   %value = view.load %view[0] : view<4xf8E5M2, %storage> -> f8E5M2
   %inf = scalar.isinff %value : f8E5M2

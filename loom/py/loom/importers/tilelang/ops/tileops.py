@@ -1970,7 +1970,7 @@ def _cdna_fp8_matrix_schema(
 ) -> ValueRef:
     return context.storage_schema_value(
         EncodingInstance(
-            name="matrix_operand",
+            name="encoding.operand",
             params=(
                 ("element_format", element_format),
                 ("payload_elements", 8),

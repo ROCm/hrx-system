@@ -75,7 +75,7 @@ iree_status_t loom_view_subview_verify(
     iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_VIEW_REFINE: Refine the static type information attached to an existing view while preserving the same storage root and byte base. This is an explicit SSA assertion point for layout, shape, and encoding facts discovered or required by earlier analysis.
-// %refined = view.refine %view : view<[%M]xf32, %layout> -> view<16xf32, #dense>
+// %refined = view.refine %view : view<[%M]xf32, %layout> -> view<16xf32, #encoding.layout.dense>
 LOOM_DEFINE_ISA(loom_view_refine_isa, LOOM_OP_VIEW_REFINE)
 LOOM_DEFINE_OPERAND(loom_view_refine_source, 0)
 LOOM_DEFINE_RESULT(loom_view_refine_result, 0)

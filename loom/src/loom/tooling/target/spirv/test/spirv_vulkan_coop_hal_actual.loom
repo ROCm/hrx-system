@@ -24,15 +24,15 @@ kernel.def target(@target) @cooperative_matrix_f16_two_tiles() {
   %rhs_aligned = buffer.assume.alignment %rhs_buffer {minimum_alignment = 16} : buffer
   %init_aligned = buffer.assume.alignment %init_buffer {minimum_alignment = 16} : buffer
   %out_aligned = buffer.assume.alignment %out_buffer {minimum_alignment = 16} : buffer
-  %lhs_view = buffer.view %lhs_aligned[%lhs_byte_offset_aligned] : buffer -> view<16x16xf16, #dense>
-  %rhs_view = buffer.view %rhs_aligned[%rhs_base_aligned] : buffer -> view<16x16xf16, #dense>
-  %init_view = buffer.view %init_aligned[%acc_byte_offset_aligned] : buffer -> view<16x16xf32, #dense>
-  %out_view = buffer.view %out_aligned[%acc_byte_offset_aligned] : buffer -> view<16x16xf32, #dense>
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16, #dense> -> vector<16xf16>
-  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xf16, #dense> -> vector<16xf16>
-  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<8xf32>
+  %lhs_view = buffer.view %lhs_aligned[%lhs_byte_offset_aligned] : buffer -> view<16x16xf16, #encoding.layout.dense>
+  %rhs_view = buffer.view %rhs_aligned[%rhs_base_aligned] : buffer -> view<16x16xf16, #encoding.layout.dense>
+  %init_view = buffer.view %init_aligned[%acc_byte_offset_aligned] : buffer -> view<16x16xf32, #encoding.layout.dense>
+  %out_view = buffer.view %out_aligned[%acc_byte_offset_aligned] : buffer -> view<16x16xf32, #encoding.layout.dense>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16, #encoding.layout.dense> -> vector<16xf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xf16, #encoding.layout.dense> -> vector<16xf16>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32, #encoding.layout.dense> -> vector<8xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf32>
-  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -78,9 +78,9 @@ kernel.def target(@target) @dense_projection_tiled_f16_128() {
   %rhs_aligned = buffer.assume.alignment %rhs_buffer {minimum_alignment = 16} : buffer
   %init_aligned = buffer.assume.alignment %init_buffer {minimum_alignment = 16} : buffer
   %out_aligned = buffer.assume.alignment %out_buffer {minimum_alignment = 16} : buffer
-  %init_view = buffer.view %init_aligned[%out_byte_offset_aligned] : buffer -> view<16x16xf32, #dense>
-  %out_view = buffer.view %out_aligned[%out_byte_offset_aligned] : buffer -> view<16x16xf32, #dense>
-  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<8xf32>
+  %init_view = buffer.view %init_aligned[%out_byte_offset_aligned] : buffer -> view<16x16xf32, #encoding.layout.dense>
+  %out_view = buffer.view %out_aligned[%out_byte_offset_aligned] : buffer -> view<16x16xf32, #encoding.layout.dense>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32, #encoding.layout.dense> -> vector<8xf32>
   %result = scf.for %kt = [%loop_begin to %k_tiles step %unit](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
     %lhs_tile_index = index.madd %workgroup_m, %k_tiles, %kt : index
     %rhs_tile_index = index.madd %kt, %n_tiles, %workgroup_n : index
@@ -90,14 +90,14 @@ kernel.def target(@target) @dense_projection_tiled_f16_128() {
     %rhs_byte_offset = index.cast %rhs_byte_index : index to offset
     %lhs_byte_offset_aligned = index.assume %lhs_byte_offset [mul(%lhs_byte_offset, 16)] : offset
     %rhs_byte_offset_aligned = index.assume %rhs_byte_offset [mul(%rhs_byte_offset, 16)] : offset
-    %lhs_view = buffer.view %lhs_aligned[%lhs_byte_offset_aligned] : buffer -> view<16x16xf16, #dense>
-    %rhs_view = buffer.view %rhs_aligned[%rhs_byte_offset_aligned] : buffer -> view<16x16xf16, #dense>
-    %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16, #dense> -> vector<16xf16>
-    %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xf16, #dense> -> vector<16xf16>
+    %lhs_view = buffer.view %lhs_aligned[%lhs_byte_offset_aligned] : buffer -> view<16x16xf16, #encoding.layout.dense>
+    %rhs_view = buffer.view %rhs_aligned[%rhs_byte_offset_aligned] : buffer -> view<16x16xf16, #encoding.layout.dense>
+    %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16, #encoding.layout.dense> -> vector<16xf16>
+    %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xf16, #encoding.layout.dense> -> vector<16xf16>
     %next = vector.mma %lhs, %rhs, %acc : vector<16xf16>, vector<16xf16>, vector<8xf32>
     scf.yield %next : vector<8xf32>
   }
-  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -143,9 +143,9 @@ kernel.def target(@target) @narrow_score_tiled_f16_128x16_m1() {
   %rhs_aligned = buffer.assume.alignment %rhs_buffer {minimum_alignment = 16} : buffer
   %init_aligned = buffer.assume.alignment %init_buffer {minimum_alignment = 16} : buffer
   %out_aligned = buffer.assume.alignment %out_buffer {minimum_alignment = 16} : buffer
-  %init_view = buffer.view %init_aligned[%out_byte_offset_aligned] : buffer -> view<16x16xf32, #dense>
-  %out_view = buffer.view %out_aligned[%out_byte_offset_aligned] : buffer -> view<16x16xf32, #dense>
-  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<8xf32>
+  %init_view = buffer.view %init_aligned[%out_byte_offset_aligned] : buffer -> view<16x16xf32, #encoding.layout.dense>
+  %out_view = buffer.view %out_aligned[%out_byte_offset_aligned] : buffer -> view<16x16xf32, #encoding.layout.dense>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32, #encoding.layout.dense> -> vector<8xf32>
   %result = scf.for %kt = [%c0 to %k_tiles step %unit](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
     %lhs_tile_index = index.madd %workgroup_m, %k_tiles, %kt : index
     %rhs_tile_index = index.madd %kt, %n_tiles, %c0 : index
@@ -155,14 +155,14 @@ kernel.def target(@target) @narrow_score_tiled_f16_128x16_m1() {
     %rhs_byte_offset = index.cast %rhs_byte_index : index to offset
     %lhs_byte_offset_aligned = index.assume %lhs_byte_offset [mul(%lhs_byte_offset, 16)] : offset
     %rhs_byte_offset_aligned = index.assume %rhs_byte_offset [mul(%rhs_byte_offset, 16)] : offset
-    %lhs_view = buffer.view %lhs_aligned[%lhs_byte_offset_aligned] : buffer -> view<16x16xf16, #dense>
-    %rhs_view = buffer.view %rhs_aligned[%rhs_byte_offset_aligned] : buffer -> view<16x16xf16, #dense>
-    %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16, #dense> -> vector<16xf16>
-    %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xf16, #dense> -> vector<16xf16>
+    %lhs_view = buffer.view %lhs_aligned[%lhs_byte_offset_aligned] : buffer -> view<16x16xf16, #encoding.layout.dense>
+    %rhs_view = buffer.view %rhs_aligned[%rhs_byte_offset_aligned] : buffer -> view<16x16xf16, #encoding.layout.dense>
+    %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16, #encoding.layout.dense> -> vector<16xf16>
+    %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xf16, #encoding.layout.dense> -> vector<16xf16>
     %next = vector.mma %lhs, %rhs, %acc : vector<16xf16>, vector<16xf16>, vector<8xf32>
     scf.yield %next : vector<8xf32>
   }
-  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #encoding.layout.dense>
   kernel.return
 }
 
@@ -194,9 +194,9 @@ kernel.def target(@target) @narrow_score_tiled_f16_128x16_m2() {
   %out_byte_index0 = index.mul %out_tile_index0, %acc_tile_bytes : index
   %out_byte_offset0 = index.cast %out_byte_index0 : index to offset
   %out_byte_offset_aligned0 = index.assume %out_byte_offset0 [mul(%out_byte_offset0, 16)] : offset
-  %init_view0 = buffer.view %init_aligned[%out_byte_offset_aligned0] : buffer -> view<16x16xf32, #dense>
-  %out_view0 = buffer.view %out_aligned[%out_byte_offset_aligned0] : buffer -> view<16x16xf32, #dense>
-  %init0 = vector.fragment.load<init> %init_view0[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<8xf32>
+  %init_view0 = buffer.view %init_aligned[%out_byte_offset_aligned0] : buffer -> view<16x16xf32, #encoding.layout.dense>
+  %out_view0 = buffer.view %out_aligned[%out_byte_offset_aligned0] : buffer -> view<16x16xf32, #encoding.layout.dense>
+  %init0 = vector.fragment.load<init> %init_view0[0, 0] shape [%m, %n] : view<16x16xf32, #encoding.layout.dense> -> vector<8xf32>
   %result0 = scf.for %kt0 = [%c0 to %k_tiles step %unit](%acc0 = %init0 : vector<8xf32>) -> (vector<8xf32>) {
     %lhs_tile_index0 = index.madd %workgroup_m0, %k_tiles, %kt0 : index
     %rhs_tile_index0 = index.madd %kt0, %n_tiles, %c0 : index
@@ -206,21 +206,21 @@ kernel.def target(@target) @narrow_score_tiled_f16_128x16_m2() {
     %rhs_byte_offset0 = index.cast %rhs_byte_index0 : index to offset
     %lhs_byte_offset_aligned0 = index.assume %lhs_byte_offset0 [mul(%lhs_byte_offset0, 16)] : offset
     %rhs_byte_offset_aligned0 = index.assume %rhs_byte_offset0 [mul(%rhs_byte_offset0, 16)] : offset
-    %lhs_view0 = buffer.view %lhs_aligned[%lhs_byte_offset_aligned0] : buffer -> view<16x16xf16, #dense>
-    %rhs_view0 = buffer.view %rhs_aligned[%rhs_byte_offset_aligned0] : buffer -> view<16x16xf16, #dense>
-    %lhs0 = vector.fragment.load<lhs> %lhs_view0[0, 0] shape [%m, %k] : view<16x16xf16, #dense> -> vector<16xf16>
-    %rhs0 = vector.fragment.load<rhs> %rhs_view0[0, 0] shape [%k, %n] : view<16x16xf16, #dense> -> vector<16xf16>
+    %lhs_view0 = buffer.view %lhs_aligned[%lhs_byte_offset_aligned0] : buffer -> view<16x16xf16, #encoding.layout.dense>
+    %rhs_view0 = buffer.view %rhs_aligned[%rhs_byte_offset_aligned0] : buffer -> view<16x16xf16, #encoding.layout.dense>
+    %lhs0 = vector.fragment.load<lhs> %lhs_view0[0, 0] shape [%m, %k] : view<16x16xf16, #encoding.layout.dense> -> vector<16xf16>
+    %rhs0 = vector.fragment.load<rhs> %rhs_view0[0, 0] shape [%k, %n] : view<16x16xf16, #encoding.layout.dense> -> vector<16xf16>
     %next0 = vector.mma %lhs0, %rhs0, %acc0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
     scf.yield %next0 : vector<8xf32>
   }
-  vector.fragment.store<result> %result0, %out_view0[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %result0, %out_view0[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #encoding.layout.dense>
   %out_tile_index1 = index.madd %workgroup_m1, %n_tiles, %c0 : index
   %out_byte_index1 = index.mul %out_tile_index1, %acc_tile_bytes : index
   %out_byte_offset1 = index.cast %out_byte_index1 : index to offset
   %out_byte_offset_aligned1 = index.assume %out_byte_offset1 [mul(%out_byte_offset1, 16)] : offset
-  %init_view1 = buffer.view %init_aligned[%out_byte_offset_aligned1] : buffer -> view<16x16xf32, #dense>
-  %out_view1 = buffer.view %out_aligned[%out_byte_offset_aligned1] : buffer -> view<16x16xf32, #dense>
-  %init1 = vector.fragment.load<init> %init_view1[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<8xf32>
+  %init_view1 = buffer.view %init_aligned[%out_byte_offset_aligned1] : buffer -> view<16x16xf32, #encoding.layout.dense>
+  %out_view1 = buffer.view %out_aligned[%out_byte_offset_aligned1] : buffer -> view<16x16xf32, #encoding.layout.dense>
+  %init1 = vector.fragment.load<init> %init_view1[0, 0] shape [%m, %n] : view<16x16xf32, #encoding.layout.dense> -> vector<8xf32>
   %result1 = scf.for %kt1 = [%c0 to %k_tiles step %unit](%acc1 = %init1 : vector<8xf32>) -> (vector<8xf32>) {
     %lhs_tile_index1 = index.madd %workgroup_m1, %k_tiles, %kt1 : index
     %rhs_tile_index1 = index.madd %kt1, %n_tiles, %c0 : index
@@ -230,14 +230,14 @@ kernel.def target(@target) @narrow_score_tiled_f16_128x16_m2() {
     %rhs_byte_offset1 = index.cast %rhs_byte_index1 : index to offset
     %lhs_byte_offset_aligned1 = index.assume %lhs_byte_offset1 [mul(%lhs_byte_offset1, 16)] : offset
     %rhs_byte_offset_aligned1 = index.assume %rhs_byte_offset1 [mul(%rhs_byte_offset1, 16)] : offset
-    %lhs_view1 = buffer.view %lhs_aligned[%lhs_byte_offset_aligned1] : buffer -> view<16x16xf16, #dense>
-    %rhs_view1 = buffer.view %rhs_aligned[%rhs_byte_offset_aligned1] : buffer -> view<16x16xf16, #dense>
-    %lhs1 = vector.fragment.load<lhs> %lhs_view1[0, 0] shape [%m, %k] : view<16x16xf16, #dense> -> vector<16xf16>
-    %rhs1 = vector.fragment.load<rhs> %rhs_view1[0, 0] shape [%k, %n] : view<16x16xf16, #dense> -> vector<16xf16>
+    %lhs_view1 = buffer.view %lhs_aligned[%lhs_byte_offset_aligned1] : buffer -> view<16x16xf16, #encoding.layout.dense>
+    %rhs_view1 = buffer.view %rhs_aligned[%rhs_byte_offset_aligned1] : buffer -> view<16x16xf16, #encoding.layout.dense>
+    %lhs1 = vector.fragment.load<lhs> %lhs_view1[0, 0] shape [%m, %k] : view<16x16xf16, #encoding.layout.dense> -> vector<16xf16>
+    %rhs1 = vector.fragment.load<rhs> %rhs_view1[0, 0] shape [%k, %n] : view<16x16xf16, #encoding.layout.dense> -> vector<16xf16>
     %next1 = vector.mma %lhs1, %rhs1, %acc1 : vector<16xf16>, vector<16xf16>, vector<8xf32>
     scf.yield %next1 : vector<8xf32>
   }
-  vector.fragment.store<result> %result1, %out_view1[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %result1, %out_view1[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #encoding.layout.dense>
   kernel.return
 }
 
