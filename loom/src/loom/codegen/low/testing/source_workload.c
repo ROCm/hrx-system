@@ -23,6 +23,7 @@
 #include "loom/ops/pass/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/test/ops.h"
+#include "loom/ops/test/registry.h"
 #include "loom/ops/vector/ops.h"
 
 enum {
@@ -172,9 +173,7 @@ static iree_status_t loom_low_source_workload_register_dialect(
 
 iree_status_t loom_low_source_workload_register_dialects(
     loom_context_t* context) {
-  IREE_RETURN_IF_ERROR(loom_low_source_workload_register_dialect(
-      context, LOOM_DIALECT_TEST, loom_test_dialect_vtables,
-      loom_test_dialect_op_semantics));
+  IREE_RETURN_IF_ERROR(loom_test_dialect_register(context));
   IREE_RETURN_IF_ERROR(loom_low_source_workload_register_dialect(
       context, LOOM_DIALECT_CFG, loom_cfg_dialect_vtables,
       loom_cfg_dialect_op_semantics));

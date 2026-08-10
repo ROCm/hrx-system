@@ -64,6 +64,8 @@ from loom.dsl import (
     BitRangeWithinElementWidth,
     Borrow,
     CallLikeInterface,
+    ConditionRefinement,
+    ConditionRefinementTruth,
     Constraint,
     ContractFamily,
     Dialect,
@@ -347,6 +349,27 @@ def test_generate_op_registry_emits_registration_tables() -> None:
     assert "loom_test_dialect_vtables" in op_registry_tables_c
     assert "loom_op_registry_register_dialect" not in op_registry_tables_c
     assert "iree_make_status" not in op_registry_tables_c
+
+
+def test_generate_op_registry_wires_condition_refinement_tables() -> None:
+    dialect = Dialect("test", dialect_id=0x01)
+    op = Op(
+        "test.is_positive",
+        group=dialect,
+        operands=[Operand("value", INTEGER)],
+        results=[Result("matches", TypeConstraint.I1)],
+        condition_refinement=ConditionRefinement(
+            source="value",
+            truth=ConditionRefinementTruth.TRUE,
+            materialize="loom_test_is_positive_materialize",
+        ),
+    )
+
+    _, tables_h, tables_c = generate_op_registry([(dialect, [op], ())])
+
+    assert "loom_op_registry_condition_refinements_fn_t" in tables_h
+    assert "condition_refinements_fn" in tables_h
+    assert "loom_test_dialect_condition_refinements" in tables_c
 
 
 def test_generate_parameterized_attribute_family_metadata() -> None:
@@ -671,6 +694,65 @@ def test_generate_dialect_tables_emit_dense_op_semantics() -> None:
     assert "loom_dialect_semantics_lookup(" in tables_c
     assert "kind, LOOM_DIALECT_TEST, loom_test_semantics_array," in tables_c
     assert "loom_op_dialect_id(kind)" not in tables_c
+
+
+def test_generate_dialect_tables_emit_sparse_condition_refinements() -> None:
+    dialect = Dialect("test", dialect_id=0x01)
+    op = Op(
+        "test.is_positive",
+        group=dialect,
+        operands=[Operand("value", INTEGER)],
+        results=[Result("matches", TypeConstraint.I1)],
+        condition_refinement=ConditionRefinement(
+            source="value",
+            truth=ConditionRefinementTruth.TRUE,
+            materialize="loom_test_is_positive_materialize",
+        ),
+    )
+
+    ops_h = generate_ops_h("test", 0x01, [op])
+    tables_c = generate_tables_c("test", 0x01, [op])
+
+    assert "iree_status_t loom_test_is_positive_materialize(" in ops_h
+    assert "loom_test_dialect_condition_refinements(" in ops_h
+    assert "loom_test_condition_refinement_array[]" in tables_c
+    assert ".materialize = loom_test_is_positive_materialize," in tables_c
+    assert ".source_operand_index = 0," in tables_c
+    assert ".truth_flags = LOOM_CONDITION_REFINEMENT_TRUTH_TRUE," in tables_c
+    assert ".condition_refinement_index = 1," in tables_c
+
+
+def test_condition_refinement_requires_a_required_operand_and_i1_result() -> None:
+    dialect = Dialect("test")
+    refinement = ConditionRefinement(
+        source="value",
+        truth=ConditionRefinementTruth.TRUE,
+        materialize="loom_test_is_positive_materialize",
+    )
+
+    with _raises_value_error("does not name an operand"):
+        Op(
+            "test.missing_source",
+            group=dialect,
+            results=[Result("matches", TypeConstraint.I1)],
+            condition_refinement=refinement,
+        )
+    with _raises_value_error("must be a required non-variadic operand"):
+        Op(
+            "test.optional_source",
+            group=dialect,
+            operands=[Operand("value", INTEGER, optional=True)],
+            results=[Result("matches", TypeConstraint.I1)],
+            condition_refinement=refinement,
+        )
+    with _raises_value_error("requires exactly one non-variadic i1 result"):
+        Op(
+            "test.non_boolean",
+            group=dialect,
+            operands=[Operand("value", INTEGER)],
+            results=[Result("result", INTEGER)],
+            condition_refinement=refinement,
+        )
 
 
 def test_generate_tables_omits_zero_default_vtable_fields() -> None:

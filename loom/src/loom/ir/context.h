@@ -41,10 +41,15 @@ extern "C" {
 typedef struct loom_dialect_vtables_t {
   // Number of operation slots in the dialect arrays.
   uint16_t op_count;
+  // Number of sparse condition-refinement descriptors.
+  uint8_t condition_refinement_count;
   // Dense generated vtable array, indexed by dialect-local operation index.
   const loom_op_vtable_t* const* entries;
   // Dense generated semantic metadata array, or NULL when none is registered.
   const loom_op_semantics_t* semantics;
+  // Sparse generated condition-refinement descriptors, or NULL when none of
+  // the dialect's operations refine values on control-flow edges.
+  const loom_condition_refinement_descriptor_t* condition_refinements;
 } loom_dialect_vtables_t;
 
 // Two-level op metadata registry: dialect table indexed by dialect_id, each
@@ -196,6 +201,16 @@ iree_status_t loom_context_register_dialect_semantics(
     loom_context_t* context, uint8_t dialect_id,
     const loom_op_semantics_t* semantics, uint16_t op_count);
 
+// Registers one dialect's sparse condition-refinement descriptors.
+//
+// Semantic rows address this table with one-based byte indexes. Descriptor
+// storage must remain valid for the context lifetime. The dialect and its
+// semantic rows must already be registered. Empty tables are omitted.
+iree_status_t loom_context_register_condition_refinements(
+    loom_context_t* context, uint8_t dialect_id,
+    const loom_condition_refinement_descriptor_t* descriptors,
+    iree_host_size_t descriptor_count);
+
 // Registers one dialect's dense parameterized attribute descriptors.
 //
 // Descriptor storage must remain valid for the context lifetime. Family kinds
@@ -230,6 +245,12 @@ const loom_op_vtable_t* loom_context_resolve_op(const loom_context_t* context,
 // dialect, or the op index is out of range.
 loom_op_semantics_t loom_context_resolve_op_semantics(
     const loom_context_t* context, loom_op_kind_t kind);
+
+// Resolves the optional condition-refinement descriptor for an op kind.
+// Returns NULL when the op does not declare one or its dialect is absent.
+const loom_condition_refinement_descriptor_t*
+loom_context_resolve_condition_refinement(const loom_context_t* context,
+                                          loom_op_kind_t kind);
 
 // Looks up an op by its dotted name string (e.g., "test.addi").
 // Returns the vtable pointer, or NULL if not found. On success,

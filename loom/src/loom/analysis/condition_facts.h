@@ -66,6 +66,30 @@ typedef struct loom_condition_fact_set_t {
   iree_host_size_t integer_relation_capacity;
 } loom_condition_fact_set_t;
 
+// One dialect-owned operand refinement guaranteed on a selected condition
+// edge. The descriptor and condition op are borrowed from immutable compiler
+// state; source is the descriptor-selected condition operand.
+typedef struct loom_condition_edge_refinement_t {
+  // Condition operation whose result controls the selected edge.
+  const loom_op_t* condition_op;
+  // Dialect-owned materialization contract for condition_op.
+  const loom_condition_refinement_descriptor_t* descriptor;
+  // Source operand refined by the selected edge.
+  loom_value_id_t source;
+  // Truth value assumed for condition_op on the selected edge.
+  bool assumed_truth;
+} loom_condition_edge_refinement_t;
+
+// Caller-owned bounded storage for semantic condition refinements.
+typedef struct loom_condition_edge_refinement_set_t {
+  // Refinement storage populated in condition-expression traversal order.
+  loom_condition_edge_refinement_t* refinements;
+  // Number of populated refinements.
+  iree_host_size_t refinement_count;
+  // Allocated entry count in refinements.
+  iree_host_size_t refinement_capacity;
+} loom_condition_edge_refinement_set_t;
+
 // Initializes a caller-owned fact set over fixed storage.
 void loom_condition_fact_set_initialize(
     loom_condition_integer_relation_t* integer_relation_storage,
@@ -74,6 +98,16 @@ void loom_condition_fact_set_initialize(
 
 // Resets a fact set while retaining caller-owned storage.
 void loom_condition_fact_set_reset(loom_condition_fact_set_t* facts);
+
+// Initializes caller-owned semantic refinement storage.
+void loom_condition_edge_refinement_set_initialize(
+    loom_condition_edge_refinement_t* refinement_storage,
+    iree_host_size_t refinement_capacity,
+    loom_condition_edge_refinement_set_t* out_refinements);
+
+// Resets semantic refinement storage while retaining caller-owned memory.
+void loom_condition_edge_refinement_set_reset(
+    loom_condition_edge_refinement_set_t* refinements);
 
 // Derives facts implied by assuming |condition_value| evaluates to
 // |assumed_truth|. An otherwise opaque i1 producer contributes the fundamental
@@ -87,6 +121,15 @@ bool loom_condition_facts_query(const loom_module_t* module,
                                 loom_value_id_t condition_value,
                                 bool assumed_truth,
                                 loom_condition_fact_set_t* out_facts);
+
+// Derives integer relations and dialect-owned semantic refinements in one
+// traversal of a boolean condition expression. Either output may use empty
+// caller-owned storage when that fact class is not needed.
+bool loom_condition_facts_query_edge(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t condition_value, bool assumed_truth,
+    loom_condition_fact_set_t* out_facts,
+    loom_condition_edge_refinement_set_t* out_refinements);
 
 // Appends facts implied by assuming |condition_value| evaluates to
 // |assumed_truth| into |inout_facts|. This has the same derivation semantics as

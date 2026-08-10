@@ -16,6 +16,7 @@ from loom.dsl import (
     ATTR_TYPE_FLAGS,
     ATTR_TYPE_PREDICATE_LIST,
     AttrDef,
+    ConditionRefinementTruth,
     ContractFamily,
     EffectKind,
     EncodingFamilyDef,
@@ -91,19 +92,59 @@ def _op_phase_c_name(op: Op) -> str:
     return phase.c_name
 
 
-def _op_semantics_row(op: Op) -> list[str]:
+def _op_semantics_row(op: Op, condition_refinement_index: int = 0) -> list[str]:
     """Returns a sparse initializer row for one op semantic metadata row."""
     contract_families = _contract_family_mask(op.contracts)
     row = [f".phase = {_op_phase_c_name(op)},"]
+    if condition_refinement_index:
+        row.append(f".condition_refinement_index = {condition_refinement_index},")
     if contract_families != "0":
         row.append(f".contract_families = {contract_families},")
     return row
+
+
+def _condition_refinement_truth_flags(truth: ConditionRefinementTruth) -> str:
+    """Returns the C truth-edge flags for one refinement declaration."""
+    if truth is ConditionRefinementTruth.TRUE:
+        return "LOOM_CONDITION_REFINEMENT_TRUTH_TRUE"
+    if truth is ConditionRefinementTruth.FALSE:
+        return "LOOM_CONDITION_REFINEMENT_TRUTH_FALSE"
+    return "LOOM_CONDITION_REFINEMENT_TRUTH_TRUE | LOOM_CONDITION_REFINEMENT_TRUTH_FALSE"
+
+
+def _emit_condition_refinement_table(lines: list[str], dialect_name: str, ops: Sequence[Op]) -> dict[str, int]:
+    """Emits a sparse condition-refinement table and returns one-based indexes."""
+    refinement_ops = [op for op in ops if op.condition_refinement is not None]
+    if not refinement_ops:
+        return {}
+    rows: list[list[str]] = []
+    indexes: dict[str, int] = {}
+    for descriptor_index, op in enumerate(refinement_ops, start=1):
+        refinement = op.condition_refinement
+        assert refinement is not None
+        source_operand_index = next(i for i, operand in enumerate(op.operands) if operand.name == refinement.source)
+        indexes[op.name] = descriptor_index
+        rows.append(
+            [
+                f".materialize = {refinement.materialize},",
+                f".source_operand_index = {source_operand_index},",
+                f".truth_flags = {_condition_refinement_truth_flags(refinement.truth)},",
+            ]
+        )
+    c_arrays.append_struct_array(
+        lines,
+        "loom_condition_refinement_descriptor_t",
+        f"loom_{dialect_name}_condition_refinement_array",
+        rows,
+    )
+    return indexes
 
 
 def _emit_dialect_table_accessors(
     lines: list[str],
     dialect_name: str,
     parameterized_attrs: Sequence[ParameterizedAttrDef] = (),
+    has_condition_refinements: bool = False,
 ) -> None:
     """Emits dialect-specific wrappers around shared table helper algorithms."""
 
@@ -116,6 +157,13 @@ def _emit_dialect_table_accessors(
     lines.append("      out_count);")
     lines.append("}")
     lines.append("")
+    if has_condition_refinements:
+        lines.append(f"const loom_condition_refinement_descriptor_t* loom_{dialect_name}_dialect_condition_refinements(")
+        lines.append("    iree_host_size_t* out_count) {")
+        lines.append(f"  *out_count = IREE_ARRAYSIZE(loom_{dialect_name}_condition_refinement_array);")
+        lines.append(f"  return loom_{dialect_name}_condition_refinement_array;")
+        lines.append("}")
+        lines.append("")
     if parameterized_attrs:
         lines.append(f"const loom_parameterized_attr_descriptor_t* loom_{dialect_name}_dialect_parameterized_attrs(")
         lines.append("    iree_host_size_t* out_count) {")
@@ -876,13 +924,19 @@ def generate_tables_c(
         f"loom_{dialect_name}_vtable_array",
         [f"&{_c_prefix(op)}_vtable" for op in ops],
     )
+    condition_refinement_indexes = _emit_condition_refinement_table(lines, dialect_name, ops)
     c_arrays.append_struct_array(
         lines,
         "loom_op_semantics_t",
         f"loom_{dialect_name}_semantics_array",
-        [_op_semantics_row(op) for op in ops],
+        [_op_semantics_row(op, condition_refinement_indexes.get(op.name, 0)) for op in ops],
     )
-    _emit_dialect_table_accessors(lines, dialect_name, parameterized_attrs)
+    _emit_dialect_table_accessors(
+        lines,
+        dialect_name,
+        parameterized_attrs,
+        has_condition_refinements=bool(condition_refinement_indexes),
+    )
 
     return "\n".join(lines)
 
@@ -947,13 +1001,19 @@ def generate_tables_aggregator_c(
         f"loom_{dialect_name}_vtable_array",
         [f"&{_c_prefix(op)}_vtable" for op in ops],
     )
+    condition_refinement_indexes = _emit_condition_refinement_table(lines, dialect_name, ops)
     c_arrays.append_struct_array(
         lines,
         "loom_op_semantics_t",
         f"loom_{dialect_name}_semantics_array",
-        [_op_semantics_row(op) for op in ops],
+        [_op_semantics_row(op, condition_refinement_indexes.get(op.name, 0)) for op in ops],
     )
-    _emit_dialect_table_accessors(lines, dialect_name, parameterized_attrs)
+    _emit_dialect_table_accessors(
+        lines,
+        dialect_name,
+        parameterized_attrs,
+        has_condition_refinements=bool(condition_refinement_indexes),
+    )
 
     return "\n".join(lines)
 

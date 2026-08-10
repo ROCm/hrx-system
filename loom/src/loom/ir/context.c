@@ -6,6 +6,7 @@
 
 #include "loom/ir/context.h"
 
+#include <stdint.h>
 #include <string.h>
 
 //===----------------------------------------------------------------------===//
@@ -100,6 +101,60 @@ iree_status_t loom_context_register_dialect_semantics(
         "dialect ID %u semantic metadata is already registered", dialect_id);
   }
   dialect->semantics = semantics;
+  return iree_ok_status();
+}
+
+iree_status_t loom_context_register_condition_refinements(
+    loom_context_t* context, uint8_t dialect_id,
+    const loom_condition_refinement_descriptor_t* descriptors,
+    iree_host_size_t descriptor_count) {
+  if (dialect_id >= LOOM_DIALECT_BUILTIN_COUNT_) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "dialect ID %u exceeds maximum %u", dialect_id,
+                            LOOM_DIALECT_BUILTIN_COUNT_ - 1);
+  }
+  if (descriptor_count == 0 || descriptors == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "dialect ID %u condition-refinement registration requires descriptors",
+        dialect_id);
+  }
+  if (descriptor_count > UINT8_MAX) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "dialect ID %u has %" PRIhsz
+        " condition refinements, exceeding the uint8_t registry cap",
+        dialect_id, descriptor_count);
+  }
+  loom_dialect_vtables_t* dialect = &context->op_vtables.dialects[dialect_id];
+  if (dialect->semantics == NULL) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "dialect ID %u semantic metadata must be registered before "
+        "condition refinements",
+        dialect_id);
+  }
+  if (dialect->condition_refinements != NULL) {
+    return iree_make_status(
+        IREE_STATUS_ALREADY_EXISTS,
+        "dialect ID %u condition refinements are already registered",
+        dialect_id);
+  }
+  for (iree_host_size_t i = 0; i < descriptor_count; ++i) {
+    const loom_condition_refinement_descriptor_t* descriptor = &descriptors[i];
+    if (descriptor->materialize == NULL || descriptor->truth_flags == 0 ||
+        (descriptor->truth_flags & ~(LOOM_CONDITION_REFINEMENT_TRUTH_TRUE |
+                                     LOOM_CONDITION_REFINEMENT_TRUTH_FALSE)) !=
+            0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "dialect ID %u condition-refinement descriptor %" PRIhsz
+          " is incomplete",
+          dialect_id, i);
+    }
+  }
+  dialect->condition_refinement_count = (uint8_t)descriptor_count;
+  dialect->condition_refinements = descriptors;
   return iree_ok_status();
 }
 
@@ -390,7 +445,43 @@ static iree_status_t loom_context_build_parameterized_attr_name_table(
   return iree_ok_status();
 }
 
+static iree_status_t loom_context_validate_condition_refinements(
+    const loom_context_t* context) {
+  for (uint8_t dialect_id = 0; dialect_id < LOOM_DIALECT_BUILTIN_COUNT_;
+       ++dialect_id) {
+    const loom_dialect_vtables_t* dialect =
+        &context->op_vtables.dialects[dialect_id];
+    if (dialect->semantics == NULL) continue;
+    for (uint16_t op_index = 0; op_index < dialect->op_count; ++op_index) {
+      uint8_t descriptor_index =
+          dialect->semantics[op_index].condition_refinement_index;
+      if (descriptor_index == 0) continue;
+      if (dialect->condition_refinements == NULL ||
+          descriptor_index > dialect->condition_refinement_count) {
+        return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "dialect ID %u op index %u references absent "
+                                "condition-refinement descriptor %u",
+                                dialect_id, op_index, descriptor_index);
+      }
+      const loom_op_vtable_t* vtable = dialect->entries[op_index];
+      const loom_condition_refinement_descriptor_t* descriptor =
+          &dialect->condition_refinements[descriptor_index - 1];
+      if (vtable == NULL ||
+          descriptor->source_operand_index >=
+              loom_op_vtable_operand_descriptor_count(vtable)) {
+        return iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "dialect ID %u op index %u condition-refinement source operand "
+            "%u is out of range",
+            dialect_id, op_index, descriptor->source_operand_index);
+      }
+    }
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_context_finalize(loom_context_t* context) {
+  IREE_RETURN_IF_ERROR(loom_context_validate_condition_refinements(context));
   IREE_RETURN_IF_ERROR(loom_context_build_encoding_family_name_table(context));
   IREE_RETURN_IF_ERROR(
       loom_context_build_parameterized_attr_name_table(context));
@@ -425,6 +516,24 @@ loom_op_semantics_t loom_context_resolve_op_semantics(
     return loom_op_semantics_empty();
   }
   return dialect->semantics[op_index];
+}
+
+const loom_condition_refinement_descriptor_t*
+loom_context_resolve_condition_refinement(const loom_context_t* context,
+                                          loom_op_kind_t kind) {
+  uint8_t dialect_id = loom_op_dialect_id(kind);
+  if (dialect_id >= LOOM_DIALECT_BUILTIN_COUNT_) return NULL;
+  const loom_dialect_vtables_t* dialect =
+      &context->op_vtables.dialects[dialect_id];
+  uint8_t op_index = loom_op_dialect_index(kind);
+  if (op_index >= dialect->op_count || dialect->semantics == NULL) return NULL;
+  uint8_t descriptor_index =
+      dialect->semantics[op_index].condition_refinement_index;
+  if (descriptor_index == 0 ||
+      descriptor_index > dialect->condition_refinement_count) {
+    return NULL;
+  }
+  return &dialect->condition_refinements[descriptor_index - 1];
 }
 
 const loom_op_vtable_t* loom_context_lookup_op_by_name(

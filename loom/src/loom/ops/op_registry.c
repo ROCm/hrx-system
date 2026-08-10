@@ -37,6 +37,15 @@ static iree_status_t loom_op_registry_register_dialect(
   IREE_RETURN_IF_ERROR(loom_context_register_dialect_semantics(
       context, registration->dialect_id, semantics, (uint16_t)count));
 
+  if (registration->condition_refinements_fn != NULL) {
+    iree_host_size_t condition_refinement_count = 0;
+    const loom_condition_refinement_descriptor_t* condition_refinements =
+        registration->condition_refinements_fn(&condition_refinement_count);
+    IREE_RETURN_IF_ERROR(loom_context_register_condition_refinements(
+        context, registration->dialect_id, condition_refinements,
+        condition_refinement_count));
+  }
+
   iree_host_size_t parameterized_attr_count = 0;
   if (registration->parameterized_attrs_fn == NULL) return iree_ok_status();
   const loom_parameterized_attr_descriptor_t* parameterized_attrs =

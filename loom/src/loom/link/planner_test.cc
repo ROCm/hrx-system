@@ -24,6 +24,7 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/test/ops.h"
+#include "loom/ops/test/registry.h"
 
 namespace loom {
 namespace {
@@ -58,8 +59,7 @@ class LinkPlannerTest : public ::testing::Test {
                     loom_func_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables,
                     loom_target_dialect_op_semantics);
-    RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables,
-                    loom_test_dialect_op_semantics);
+    IREE_ASSERT_OK(loom_test_dialect_register(&context_));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
   }
 

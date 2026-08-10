@@ -304,6 +304,7 @@ def generate_ops_h(
 
     # Per-op sections.
     emitted_canonicalize_declarations: set[str] = set()
+    emitted_condition_refinement_declarations: set[str] = set()
     emitted_type_transfer_declarations: set[str] = set()
     for op in ops:
         prefix = _c_prefix(op)
@@ -426,6 +427,15 @@ def generate_ops_h(
             lines.append("    const loom_module_t* module, loom_op_t* op);")
             emitted_type_transfer_declarations.add(op.type_transfer)
 
+        # Edge-local condition-refinement materializer (hand-written, linked in).
+        if op.condition_refinement is not None and op.condition_refinement.materialize not in emitted_condition_refinement_declarations:
+            materialize = op.condition_refinement.materialize
+            lines.append(f"iree_status_t {materialize}(")
+            lines.append("    loom_rewriter_t* rewriter, const loom_op_t* condition_op,")
+            lines.append("    loom_value_id_t source, bool assumed_truth,")
+            lines.append("    loom_value_id_t* out_refined_value);")
+            emitted_condition_refinement_declarations.add(materialize)
+
         # Verify function declaration (hand-written, linked in).
         if op.verify:
             lines.append(f"iree_status_t {op.verify}(")
@@ -448,6 +458,12 @@ def generate_ops_h(
     lines.append(f"loom_op_semantics_t loom_{dialect_name}_op_semantics(")
     lines.append("    loom_op_kind_t kind);")
     lines.append("")
+
+    if any(op.condition_refinement is not None for op in ops):
+        lines.append(f"// Returns sparse condition-refinement descriptors for the {dialect_name} dialect.")
+        lines.append(f"const loom_condition_refinement_descriptor_t* loom_{dialect_name}_dialect_condition_refinements(")
+        lines.append("    iree_host_size_t* out_count);")
+        lines.append("")
 
     if parameterized_attrs:
         lines.append(f"// Returns parameterized attribute descriptors for the {dialect_name} dialect.")

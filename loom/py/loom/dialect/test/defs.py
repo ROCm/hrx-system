@@ -96,6 +96,8 @@ from loom.dsl import (
     BorrowedResult,
     CallLikeInterface,
     CallLikeKind,
+    ConditionRefinement,
+    ConditionRefinementTruth,
     Consume,
     Dialect,
     DimIndexInBounds,
@@ -2283,6 +2285,28 @@ test_assume = Op(
 )
 
 # ============================================================================
+# test.condition_refines_positive — generic condition-refinement metadata
+# ============================================================================
+
+test_condition_refines_positive = Op(
+    "test.condition_refines_positive",
+    group=test_ops,
+    doc="Test a boolean query that refines its source on the true edge.",
+    operands=[Operand("value", INDEX)],
+    results=[Result("result", I1)],
+    traits=[PURE],
+    condition_refinement=ConditionRefinement(
+        source="value",
+        truth=ConditionRefinementTruth.TRUE,
+        materialize="loom_test_condition_refines_positive_materialize",
+    ),
+    format=[Ref("value"), COLON, TypeOf("value")],
+    examples=[
+        "%positive = test.condition_refines_positive %value : index",
+    ],
+)
+
+# ============================================================================
 # test.convert — single bare result type (ResultType, no parens)
 # ============================================================================
 
@@ -2844,4 +2868,5 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_compact_parameterized_attr,
     test_parameterized_attr_array,
     test_attr_params,
+    test_condition_refines_positive,
 )

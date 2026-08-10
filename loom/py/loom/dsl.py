@@ -145,6 +145,8 @@ __all__ = [
     # Semantic phase/contract metadata.
     "OpPhase",
     "ContractFamily",
+    "ConditionRefinement",
+    "ConditionRefinementTruth",
     "TypeSemantic",
     "OpCategory",
     # Trait constructors.
@@ -1202,6 +1204,30 @@ class ContractFamily(Enum):
         self.key = key
         self.c_name = c_name
         self.diagnostic_name = diagnostic_name
+
+
+@unique
+class ConditionRefinementTruth(Enum):
+    """Control-flow edges on which an op can refine one of its operands."""
+
+    TRUE = "true"
+    FALSE = "false"
+    BOTH = "both"
+
+
+@dataclass(frozen=True, slots=True)
+class ConditionRefinement:
+    """Dialect-owned operand refinement implied by a boolean result.
+
+    Generated metadata names the source operand by ordinal and points at a
+    dialect callback that materializes its edge-local fact identity. Generic
+    control-flow transforms invoke the callback only when the source is used on
+    an edge whose truth value is listed here.
+    """
+
+    source: str
+    truth: ConditionRefinementTruth
+    materialize: str
 
 
 def _validate_metadata_key(kind: str, key: str) -> None:
@@ -4643,6 +4669,44 @@ class LegacyFormat:
         object.__setattr__(self, "rewrite_hook", rewrite_hook)
 
 
+def _validate_condition_refinement(
+    op_name: str,
+    refinement: ConditionRefinement | None,
+    operands: tuple[Operand, ...],
+    results: tuple[Result | TiedResult, ...],
+) -> None:
+    if refinement is None:
+        return
+    source_operand = next(
+        (operand for operand in operands if operand.name == refinement.source),
+        None,
+    )
+    if source_operand is None:
+        raise ValueError(
+            f"Op '{op_name}': condition refinement source "
+            f"'{refinement.source}' does not name an operand"
+        )
+    if source_operand.variadic or source_operand.optional:
+        raise ValueError(
+            f"Op '{op_name}': condition refinement source "
+            f"'{refinement.source}' must be a required non-variadic operand"
+        )
+    if (
+        len(results) != 1
+        or not isinstance(results[0], Result)
+        or results[0].type_constraint is not I1
+        or results[0].variadic
+    ):
+        raise ValueError(
+            f"Op '{op_name}': condition refinement requires exactly one "
+            "non-variadic i1 result"
+        )
+    if not refinement.materialize:
+        raise ValueError(
+            f"Op '{op_name}': condition refinement materializer must be non-empty"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class Op:
     """A complete operation declaration.
@@ -4697,6 +4761,7 @@ class Op:
     )
     facts: str = ""  # C function name for fact inference, or "".
     type_transfer: str = ""  # C function name for semantic type transfer, or "".
+    condition_refinement: ConditionRefinement | None = None
     verify: str = ""  # C function name for op-specific verification, or "".
     builder_name: str | None = None  # Python builder method override, or None.
     generate_c_builder: bool = True  # False when construction requires domain context.
@@ -4732,6 +4797,7 @@ class Op:
         effective_traits: str = "",
         facts: str = "",
         type_transfer: str = "",
+        condition_refinement: ConditionRefinement | None = None,
         verify: str = "",
         builder_name: str | None = None,
         generate_c_builder: bool = True,
@@ -4771,11 +4837,15 @@ class Op:
         object.__setattr__(self, "effective_traits", effective_traits)
         object.__setattr__(self, "facts", facts)
         object.__setattr__(self, "type_transfer", type_transfer)
+        object.__setattr__(self, "condition_refinement", condition_refinement)
         object.__setattr__(self, "verify", verify)
         object.__setattr__(self, "builder_name", builder_name)
         object.__setattr__(self, "generate_c_builder", generate_c_builder)
         object.__setattr__(self, "phase", phase)
         object.__setattr__(self, "contracts", tuple(contracts))
+        _validate_condition_refinement(
+            name, condition_refinement, frozen_operands, frozen_results
+        )
         if (
             category is not None
             and group is not None

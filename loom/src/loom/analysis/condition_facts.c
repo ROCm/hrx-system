@@ -6,6 +6,7 @@
 
 #include "loom/analysis/condition_facts.h"
 
+#include "loom/ir/context.h"
 #include "loom/ops/index/compare.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/compare.h"
@@ -24,6 +25,56 @@ void loom_condition_fact_set_initialize(
 
 void loom_condition_fact_set_reset(loom_condition_fact_set_t* facts) {
   facts->integer_relation_count = 0;
+}
+
+void loom_condition_edge_refinement_set_initialize(
+    loom_condition_edge_refinement_t* refinement_storage,
+    iree_host_size_t refinement_capacity,
+    loom_condition_edge_refinement_set_t* out_refinements) {
+  *out_refinements = (loom_condition_edge_refinement_set_t){
+      .refinements = refinement_storage,
+      .refinement_count = 0,
+      .refinement_capacity = refinement_capacity,
+  };
+}
+
+void loom_condition_edge_refinement_set_reset(
+    loom_condition_edge_refinement_set_t* refinements) {
+  refinements->refinement_count = 0;
+}
+
+static void loom_condition_edge_refinement_set_append(
+    const loom_module_t* module, const loom_op_t* condition_op,
+    bool assumed_truth, loom_condition_edge_refinement_set_t* out_refinements) {
+  if (out_refinements == NULL) return;
+  const loom_condition_refinement_descriptor_t* descriptor =
+      loom_context_resolve_condition_refinement(module->context,
+                                                condition_op->kind);
+  if (descriptor == NULL) return;
+  loom_condition_refinement_truth_flags_t required_truth_flag =
+      assumed_truth ? LOOM_CONDITION_REFINEMENT_TRUTH_TRUE
+                    : LOOM_CONDITION_REFINEMENT_TRUTH_FALSE;
+  if ((descriptor->truth_flags & required_truth_flag) == 0) return;
+  for (iree_host_size_t i = 0; i < out_refinements->refinement_count; ++i) {
+    const loom_condition_edge_refinement_t* existing =
+        &out_refinements->refinements[i];
+    if (existing->condition_op == condition_op &&
+        existing->assumed_truth == assumed_truth) {
+      return;
+    }
+  }
+  if (out_refinements->refinement_count >=
+      out_refinements->refinement_capacity) {
+    return;
+  }
+  out_refinements->refinements[out_refinements->refinement_count++] =
+      (loom_condition_edge_refinement_t){
+          .condition_op = condition_op,
+          .descriptor = descriptor,
+          .source = loom_op_const_operands(
+              condition_op)[descriptor->source_operand_index],
+          .assumed_truth = assumed_truth,
+      };
 }
 
 bool loom_condition_integer_operands_equal(
@@ -285,19 +336,23 @@ static bool loom_condition_facts_query_integer_compare(
 static bool loom_condition_facts_query_impl(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     loom_value_id_t condition_value, bool assumed_truth,
-    loom_condition_fact_set_t* out_facts, uint8_t recursion_depth);
+    loom_condition_fact_set_t* out_facts,
+    loom_condition_edge_refinement_set_t* out_refinements,
+    uint8_t recursion_depth);
 
 static bool loom_condition_facts_query_child(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     loom_value_id_t condition_value, bool assumed_truth,
-    loom_condition_fact_set_t* out_facts, uint8_t recursion_depth) {
+    loom_condition_fact_set_t* out_facts,
+    loom_condition_edge_refinement_set_t* out_refinements,
+    uint8_t recursion_depth) {
   loom_condition_integer_relation_t relation_storage[16];
   loom_condition_fact_set_t child_facts;
   loom_condition_fact_set_initialize(
       relation_storage, IREE_ARRAYSIZE(relation_storage), &child_facts);
   bool child_complete = loom_condition_facts_query_impl(
       module, fact_table, condition_value, assumed_truth, &child_facts,
-      (uint8_t)(recursion_depth + 1));
+      out_refinements, (uint8_t)(recursion_depth + 1));
   bool append_complete =
       loom_condition_fact_set_append_all(out_facts, &child_facts);
   return child_complete && append_complete;
@@ -306,12 +361,16 @@ static bool loom_condition_facts_query_child(
 static bool loom_condition_facts_query_boolean_and(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     loom_value_id_t lhs, loom_value_id_t rhs, bool assumed_truth,
-    loom_condition_fact_set_t* out_facts, uint8_t recursion_depth) {
+    loom_condition_fact_set_t* out_facts,
+    loom_condition_edge_refinement_set_t* out_refinements,
+    uint8_t recursion_depth) {
   if (assumed_truth) {
     bool lhs_complete = loom_condition_facts_query_child(
-        module, fact_table, lhs, true, out_facts, recursion_depth);
+        module, fact_table, lhs, true, out_facts, out_refinements,
+        recursion_depth);
     bool rhs_complete = loom_condition_facts_query_child(
-        module, fact_table, rhs, true, out_facts, recursion_depth);
+        module, fact_table, rhs, true, out_facts, out_refinements,
+        recursion_depth);
     return lhs_complete && rhs_complete;
   }
 
@@ -320,14 +379,16 @@ static bool loom_condition_facts_query_boolean_and(
   if (loom_condition_value_exact_bool(fact_table, lhs, &lhs_truth)) {
     if (lhs_truth) {
       return loom_condition_facts_query_child(module, fact_table, rhs, false,
-                                              out_facts, recursion_depth);
+                                              out_facts, out_refinements,
+                                              recursion_depth);
     }
     return true;
   }
   if (loom_condition_value_exact_bool(fact_table, rhs, &rhs_truth)) {
     if (rhs_truth) {
       return loom_condition_facts_query_child(module, fact_table, lhs, false,
-                                              out_facts, recursion_depth);
+                                              out_facts, out_refinements,
+                                              recursion_depth);
     }
     return true;
   }
@@ -337,12 +398,16 @@ static bool loom_condition_facts_query_boolean_and(
 static bool loom_condition_facts_query_boolean_or(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     loom_value_id_t lhs, loom_value_id_t rhs, bool assumed_truth,
-    loom_condition_fact_set_t* out_facts, uint8_t recursion_depth) {
+    loom_condition_fact_set_t* out_facts,
+    loom_condition_edge_refinement_set_t* out_refinements,
+    uint8_t recursion_depth) {
   if (!assumed_truth) {
     bool lhs_complete = loom_condition_facts_query_child(
-        module, fact_table, lhs, false, out_facts, recursion_depth);
+        module, fact_table, lhs, false, out_facts, out_refinements,
+        recursion_depth);
     bool rhs_complete = loom_condition_facts_query_child(
-        module, fact_table, rhs, false, out_facts, recursion_depth);
+        module, fact_table, rhs, false, out_facts, out_refinements,
+        recursion_depth);
     return lhs_complete && rhs_complete;
   }
 
@@ -351,14 +416,16 @@ static bool loom_condition_facts_query_boolean_or(
   if (loom_condition_value_exact_bool(fact_table, lhs, &lhs_truth)) {
     if (!lhs_truth) {
       return loom_condition_facts_query_child(module, fact_table, rhs, true,
-                                              out_facts, recursion_depth);
+                                              out_facts, out_refinements,
+                                              recursion_depth);
     }
     return true;
   }
   if (loom_condition_value_exact_bool(fact_table, rhs, &rhs_truth)) {
     if (!rhs_truth) {
       return loom_condition_facts_query_child(module, fact_table, lhs, true,
-                                              out_facts, recursion_depth);
+                                              out_facts, out_refinements,
+                                              recursion_depth);
     }
     return true;
   }
@@ -368,18 +435,20 @@ static bool loom_condition_facts_query_boolean_or(
 static bool loom_condition_facts_query_boolean_xor(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     loom_value_id_t lhs, loom_value_id_t rhs, bool assumed_truth,
-    loom_condition_fact_set_t* out_facts, uint8_t recursion_depth) {
+    loom_condition_fact_set_t* out_facts,
+    loom_condition_edge_refinement_set_t* out_refinements,
+    uint8_t recursion_depth) {
   bool lhs_truth = false;
   bool rhs_truth = false;
   if (loom_condition_value_exact_bool(fact_table, lhs, &lhs_truth)) {
-    return loom_condition_facts_query_child(module, fact_table, rhs,
-                                            assumed_truth != lhs_truth,
-                                            out_facts, recursion_depth);
+    return loom_condition_facts_query_child(
+        module, fact_table, rhs, assumed_truth != lhs_truth, out_facts,
+        out_refinements, recursion_depth);
   }
   if (loom_condition_value_exact_bool(fact_table, rhs, &rhs_truth)) {
-    return loom_condition_facts_query_child(module, fact_table, lhs,
-                                            assumed_truth != rhs_truth,
-                                            out_facts, recursion_depth);
+    return loom_condition_facts_query_child(
+        module, fact_table, lhs, assumed_truth != rhs_truth, out_facts,
+        out_refinements, recursion_depth);
   }
   return true;
 }
@@ -387,7 +456,9 @@ static bool loom_condition_facts_query_boolean_xor(
 static bool loom_condition_facts_query_impl(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     loom_value_id_t condition_value, bool assumed_truth,
-    loom_condition_fact_set_t* out_facts, uint8_t recursion_depth) {
+    loom_condition_fact_set_t* out_facts,
+    loom_condition_edge_refinement_set_t* out_refinements,
+    uint8_t recursion_depth) {
   if (recursion_depth > 16) return false;
   if (!module || condition_value >= module->values.count) {
     return true;
@@ -402,6 +473,9 @@ static bool loom_condition_facts_query_impl(
     return loom_condition_facts_query_opaque_boolean(module, condition_value,
                                                      assumed_truth, out_facts);
   }
+
+  loom_condition_edge_refinement_set_append(module, defining_op, assumed_truth,
+                                            out_refinements);
 
   switch (defining_op->kind) {
     case LOOM_OP_INDEX_CMP:
@@ -428,7 +502,7 @@ static bool loom_condition_facts_query_impl(
       return loom_condition_facts_query_boolean_and(
           module, fact_table, loom_scalar_andi_lhs(defining_op),
           loom_scalar_andi_rhs(defining_op), assumed_truth, out_facts,
-          recursion_depth);
+          out_refinements, recursion_depth);
     case LOOM_OP_SCALAR_ORI:
       if (!loom_condition_value_is_i1(module,
                                       loom_op_const_results(defining_op)[0]) ||
@@ -441,7 +515,7 @@ static bool loom_condition_facts_query_impl(
       return loom_condition_facts_query_boolean_or(
           module, fact_table, loom_scalar_ori_lhs(defining_op),
           loom_scalar_ori_rhs(defining_op), assumed_truth, out_facts,
-          recursion_depth);
+          out_refinements, recursion_depth);
     case LOOM_OP_SCALAR_XORI:
       if (!loom_condition_value_is_i1(module,
                                       loom_op_const_results(defining_op)[0]) ||
@@ -454,7 +528,7 @@ static bool loom_condition_facts_query_impl(
       return loom_condition_facts_query_boolean_xor(
           module, fact_table, loom_scalar_xori_lhs(defining_op),
           loom_scalar_xori_rhs(defining_op), assumed_truth, out_facts,
-          recursion_depth);
+          out_refinements, recursion_depth);
     default:
       return loom_condition_facts_query_opaque_boolean(
           module, condition_value, assumed_truth, out_facts);
@@ -469,7 +543,20 @@ bool loom_condition_facts_query(const loom_module_t* module,
   loom_condition_fact_set_reset(out_facts);
   return loom_condition_facts_query_impl(module, fact_table, condition_value,
                                          assumed_truth, out_facts,
+                                         /*out_refinements=*/NULL,
                                          /*recursion_depth=*/0);
+}
+
+bool loom_condition_facts_query_edge(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t condition_value, bool assumed_truth,
+    loom_condition_fact_set_t* out_facts,
+    loom_condition_edge_refinement_set_t* out_refinements) {
+  loom_condition_fact_set_reset(out_facts);
+  loom_condition_edge_refinement_set_reset(out_refinements);
+  return loom_condition_facts_query_impl(
+      module, fact_table, condition_value, assumed_truth, out_facts,
+      out_refinements, /*recursion_depth=*/0);
 }
 
 bool loom_condition_facts_query_into(const loom_module_t* module,
@@ -479,6 +566,7 @@ bool loom_condition_facts_query_into(const loom_module_t* module,
                                      loom_condition_fact_set_t* inout_facts) {
   return loom_condition_facts_query_impl(module, fact_table, condition_value,
                                          assumed_truth, inout_facts,
+                                         /*out_refinements=*/NULL,
                                          /*recursion_depth=*/0);
 }
 
