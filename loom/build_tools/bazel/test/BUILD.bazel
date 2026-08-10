@@ -8,11 +8,23 @@
 
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//build_tools/bazel:executable.bzl", "iree_executable_test")
+load(
+    "//loom/build_tools/bazel:defs.bzl",
+    "loom_kernel_library",
+)
 load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
 load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
 load(":loom_check_rules_test.bzl", "loom_check_rules_test_suite")
 
 package(default_visibility = ["//visibility:public"])
+
+loom_kernel_library(
+    name = "public_kernel_library",
+    srcs = [
+        "link_checks.loom",
+        "link_kernels.loom",
+    ],
+)
 
 loom_check_test(
     name = "loom_check_wrapper_subject",
@@ -53,5 +65,6 @@ test_suite(
         ":loom_check_rules_tests",
         ":loom_check_wrapper_direct_test",
         ":loom_link_module_direct_test",
+        ":public_kernel_library_test",
     ],
 )

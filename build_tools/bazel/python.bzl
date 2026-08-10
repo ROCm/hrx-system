@@ -17,7 +17,11 @@ def iree_py_library(**kwargs):
     _py_library(**kwargs)
 
 def iree_py_binary(**kwargs):
+    if "python_version" not in kwargs:
+        kwargs["python_version"] = "3.12"
     _py_binary(**kwargs)
 
 def iree_py_test(**kwargs):
+    if "python_version" not in kwargs:
+        kwargs["python_version"] = "3.12"
     _py_test(**kwargs)

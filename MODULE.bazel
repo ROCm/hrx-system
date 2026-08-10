@@ -15,3 +15,8 @@ module(
 include("//build_tools/bazel:deps.MODULE.bazel")
 include("//build_tools/third_party:deps.MODULE.bazel")
 include("//loom/build_tools/bazel:deps.MODULE.bazel")
+
+# Source repositories consume Loom through this toolchain identity. Root
+# modules may register a higher-priority released implementation, while a
+# local module override keeps the same labels and rebuilds these source tools.
+register_toolchains("//loom/build_tools/bazel:source_toolchain")
