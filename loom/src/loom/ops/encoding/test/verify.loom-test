@@ -54,6 +54,14 @@ func.def @encoding_matches_rejects_empty_requirements(%schema: encoding<schema>)
 
 // ====
 
+func.def @encoding_assume_match_rejects_empty_requirements(%schema: encoding<schema>) {
+  // ERROR@+1: ENCODING/022
+  %schema2 = encoding.assume.match<> %schema : encoding<schema>
+  func.return
+}
+
+// ====
+
 func.def @encoding_matches_requires_schema_role(%layout: encoding<layout>) {
   // ERROR@+1: TYPE/003 "encoding<schema>"
   %is = encoding.matches<element_format = u4> %layout : encoding<layout>

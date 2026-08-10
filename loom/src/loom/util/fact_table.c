@@ -419,7 +419,10 @@ bool loom_value_fact_encoded_operand_schema_has_scale(
   return schema.scale_format != LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE ||
          schema.secondary_scale_format != LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE ||
          schema.scale_topology != LOOM_VALUE_FACT_SCALE_TOPOLOGY_NONE ||
-         schema.flags != 0 || schema.scale_group.element_count != 0 ||
+         iree_any_bit_set(
+             schema.flags,
+             LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_ZERO_SCALE_FALLBACK) ||
+         schema.scale_group.element_count != 0 ||
          schema.scale_group.shape[0] != 0 || schema.scale_operand_count != 0;
 }
 

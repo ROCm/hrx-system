@@ -369,6 +369,11 @@ typedef uint32_t loom_value_fact_sparsity_policy_flags_t;
 typedef enum loom_value_fact_encoded_operand_flag_bits_e {
   // A zero scale can refine to an unscaled target contract.
   LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_ZERO_SCALE_FALLBACK = 1u << 0,
+  // The logical element format is known to be semantic none rather than
+  // unknown.
+  LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_ELEMENT_FORMAT_NONE = 1u << 1,
+  // The affine policy is known to be semantic none rather than unknown.
+  LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_AFFINE_NONE = 1u << 2,
 } loom_value_fact_encoded_operand_flag_bits_t;
 
 typedef uint32_t loom_value_fact_encoded_operand_flags_t;

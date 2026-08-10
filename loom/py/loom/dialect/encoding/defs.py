@@ -34,12 +34,15 @@ from loom.dsl import (
     ENCODING_LAYOUT,
     ENCODING_SCHEMA,
     ENCODING_TRANSFORM,
+    FACT_IDENTITY,
     I1,
     INDEX,
     PURE,
     VECTOR,
     VIEW,
     AttrDef,
+    ConditionRefinement,
+    ConditionRefinementTruth,
     Dialect,
     EncodingFamilyDef,
     EncodingFamilyRole,
@@ -596,7 +599,7 @@ encoding_assume_spec = Op(
     results=[Result("result", ANY_ENCODING, doc="Encoding value with exact static-spec facts.")],
     attrs=[AttrDef("spec", ATTR_TYPE_ENCODING, doc="Exact static encoding specification.")],
     constraints=[SameType("enc", "result")],
-    traits=[PURE],
+    traits=[PURE, FACT_IDENTITY],
     verify="loom_encoding_assume_spec_verify",
     facts="loom_encoding_assume_spec_facts",
     format=[
@@ -623,6 +626,11 @@ encoding_isa = Op(
     results=[Result("result", I1)],
     attrs=[AttrDef("spec", ATTR_TYPE_ENCODING, doc="Exact static encoding specification.")],
     traits=[PURE],
+    condition_refinement=ConditionRefinement(
+        source="enc",
+        truth=ConditionRefinementTruth.TRUE,
+        materialize="loom_encoding_isa_materialize_refinement",
+    ),
     verify="loom_encoding_isa_verify",
     facts="loom_encoding_isa_facts",
     format=[TemplateParam("spec"), Ref("enc"), COLON, TypeOf("enc")],
@@ -650,11 +658,45 @@ encoding_matches = Op(
         ),
     ],
     traits=[PURE],
+    condition_refinement=ConditionRefinement(
+        source="enc",
+        truth=ConditionRefinementTruth.TRUE,
+        materialize="loom_encoding_matches_materialize_refinement",
+    ),
     verify="loom_encoding_matches_verify",
     facts="loom_encoding_matches_facts",
     format=[AttrParams("requirements"), Ref("enc"), COLON, TypeOf("enc")],
     examples=[
         "%supports = encoding.matches<element_format = u4, payload_packing = multi_stream, affine = scale_plus_min> %schema : encoding<schema>",
+    ],
+)
+
+# ============================================================================
+# encoding.assume.match — local semantic encoding refinement
+# ============================================================================
+
+encoding_assume_match = Op(
+    name="encoding.assume.match",
+    group=encoding_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Refine a storage schema with typed semantic requirements. Omitted fields retain their existing facts."),
+    operands=[Operand("enc", ENCODING_SCHEMA, doc="Storage schema to refine.")],
+    results=[Result("result", ENCODING_SCHEMA, doc="Schema with stronger semantic facts.")],
+    attrs=[
+        AttrDef(
+            "requirements",
+            ATTR_TYPE_PARAMETERIZED,
+            parameterized_attr=encoding_match_requirements,
+            doc="Authored semantic requirements; omitted fields are unchanged.",
+        ),
+    ],
+    constraints=[SameType("enc", "result")],
+    traits=[PURE, FACT_IDENTITY],
+    verify="loom_encoding_assume_match_verify",
+    facts="loom_encoding_assume_match_facts",
+    format=[AttrParams("requirements"), Ref("enc"), COLON, TypeOf("enc")],
+    examples=[
+        "%schema2 = encoding.assume.match<element_format = u4, affine = scale_plus_min> %schema : encoding<schema>",
     ],
 )
 
@@ -671,4 +713,5 @@ ALL_ENCODING_OPS: tuple[Op, ...] = (
     encoding_layout_assume_strided,
     encoding_assume_spec,
     encoding_matches,
+    encoding_assume_match,
 )

@@ -78,6 +78,94 @@ func.def @dynamic_semantic_query(%schema: encoding<schema>) -> (i1) {
 
 // ====
 
+// Semantic assumptions refine only authored fields and make repeated queries
+// fold without requiring an exact static family.
+func.def @assume_semantic_match(%schema: encoding<schema>) -> (i1, i1, i1) {
+  %schema2 = encoding.assume.match<element_format = u4, affine = scale_plus_min> %schema : encoding<schema>
+  %format = encoding.matches<element_format = u4> %schema2 : encoding<schema>
+  %affine = encoding.matches<affine = scale_plus_min> %schema2 : encoding<schema>
+  %packing = encoding.matches<payload_packing = multi_stream> %schema2 : encoding<schema>
+  func.return %format, %affine, %packing : i1, i1, i1
+}
+// ----
+func.def @assume_semantic_match(%schema: encoding<schema>) -> (i1, i1, i1) {
+  %schema2 = encoding.assume.match<element_format = u4, affine = scale_plus_min> %schema : encoding<schema>
+  %format = scalar.constant true : i1
+  %affine = scalar.constant true : i1
+  %packing = encoding.matches<payload_packing = multi_stream> %schema2 : encoding<schema>
+  func.return %format, %affine, %packing : i1, i1, i1
+}
+
+// ====
+
+// Explicit semantic absence remains distinct from an unknown zero-valued fact.
+func.def @assume_semantic_absence(%schema: encoding<schema>) -> (i1, i1, i1, i1) {
+  %schema2 = encoding.assume.match<element_format = none, affine = none> %schema : encoding<schema>
+  %format_none = encoding.matches<element_format = none> %schema2 : encoding<schema>
+  %format_u4 = encoding.matches<element_format = u4> %schema2 : encoding<schema>
+  %affine_none = encoding.matches<affine = none> %schema2 : encoding<schema>
+  %affine_scale = encoding.matches<affine = scale_only> %schema2 : encoding<schema>
+  func.return %format_none, %format_u4, %affine_none, %affine_scale : i1, i1, i1, i1
+}
+// ----
+func.def @assume_semantic_absence(%schema: encoding<schema>) -> (i1, i1, i1, i1) {
+  %format_none = scalar.constant true : i1
+  %format_u4 = scalar.constant false : i1
+  %affine_none = scalar.constant true : i1
+  %affine_scale = scalar.constant false : i1
+  func.return %format_none, %format_u4, %affine_none, %affine_scale : i1, i1, i1, i1
+}
+
+// ====
+
+// Exact predicates refine their source on the true branch, allowing a repeated
+// query to fold without specializing the function argument.
+func.def @exact_query_refines_true_branch(%schema: encoding<schema>) {
+  %is_q4 = encoding.isa<#ggml_q4_0<block_elems=32, storage_bytes=18>> %schema : encoding<schema>
+  scf.if %is_q4 {
+    %known = encoding.isa<#ggml_q4_0<block_elems=32, storage_bytes=18>> %schema : encoding<schema>
+    test.use %known : i1
+  }
+  func.return
+}
+// ----
+func.def @exact_query_refines_true_branch(%schema: encoding<schema>) {
+  %is_q4 = encoding.isa<#ggml_q4_0<block_elems=32, storage_bytes=18>> %schema : encoding<schema>
+  scf.if %is_q4 {
+    %known = scalar.constant true : i1
+    test.use %known : i1
+  }
+  func.return
+}
+
+// ====
+
+// Independent semantic predicates chain their edge-local assumptions. Both
+// facts are available to a combined query in the selected region.
+func.def @semantic_queries_refine_true_branch(%schema: encoding<schema>) {
+  %is_u4 = encoding.matches<element_format = u4> %schema : encoding<schema>
+  %has_min = encoding.matches<affine = scale_plus_min> %schema : encoding<schema>
+  %condition = scalar.andi %is_u4, %has_min : i1
+  scf.if %condition {
+    %known = encoding.matches<element_format = u4, affine = scale_plus_min> %schema : encoding<schema>
+    test.use %known : i1
+  }
+  func.return
+}
+// ----
+func.def @semantic_queries_refine_true_branch(%schema: encoding<schema>) {
+  %is_u4 = encoding.matches<element_format = u4> %schema : encoding<schema>
+  %has_min = encoding.matches<affine = scale_plus_min> %schema : encoding<schema>
+  %condition = scalar.andi %is_u4, %has_min : i1
+  scf.if %condition {
+    %known = scalar.constant true : i1
+    test.use %known : i1
+  }
+  func.return
+}
+
+// ====
+
 // Dense layout ops seed address-layout summary facts.
 func.def @dense_layout_summary() -> (i64) {
   %layout = encoding.layout.dense : encoding<layout>

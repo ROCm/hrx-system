@@ -15,6 +15,7 @@ loom_generated_cc_library(
   GENERATOR
     loom::py::loom::gen::ops::c_tables_encoding_generator
   SRCS
+    "condition_refinement.c"
     "facts.c"
     "families.c"
     "matrix_operand.c"
@@ -47,6 +48,7 @@ loom_generated_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ops::op_defs
+    loom::rewrite::rewriter
     loom::util::fact_table
     loom::util::numeric_format
     loom::util::stable_id

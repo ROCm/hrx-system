@@ -69,6 +69,16 @@ func.def @static_spec_assumption(%schema: encoding<schema>) {
 
 // ====
 
+// Semantic assumptions use the same typed requirement surface as matches and
+// leave omitted facts unchanged.
+func.def @semantic_match_assumption(%schema: encoding<schema>) {
+  %schema2 = encoding.assume.match<element_format = u4, affine = scale_plus_min> %schema : encoding<schema>
+  test.use %schema2 : encoding<schema>
+  func.return
+}
+
+// ====
+
 // TurboQuant-style KV storage schemas keep physical byte layout static while
 // table storage and transform descriptors remain ordinary SSA operands.
 func.def @turboquant_kv_schema(%params: buffer, %thresholds_offset: offset, %centroids_offset: offset) {

@@ -217,16 +217,20 @@ typedef enum loom_encoding_match_result_e {
 } loom_encoding_match_result_t;
 
 // Matches one exclusive enum fact. Multiple possible actual values remain
-// unknown unless they are disjoint from the requested value. Zero can prove
-// semantic absence only when the complete schema is known.
+// unknown unless they are disjoint from the requested value. Explicit absence
+// facts distinguish semantic none from an unknown zero-valued summary field.
 static loom_encoding_match_result_t loom_encoding_match_exclusive_fact(
-    uint64_t actual, uint64_t required, bool schema_complete) {
+    uint64_t actual, uint64_t required, bool known_absent,
+    bool schema_complete) {
   if (required == 0) {
     if (actual != 0) return LOOM_ENCODING_MATCH_RESULT_FALSE;
-    return schema_complete ? LOOM_ENCODING_MATCH_RESULT_TRUE
-                           : LOOM_ENCODING_MATCH_RESULT_UNKNOWN;
+    return known_absent || schema_complete ? LOOM_ENCODING_MATCH_RESULT_TRUE
+                                           : LOOM_ENCODING_MATCH_RESULT_UNKNOWN;
   }
-  if (actual == 0) return LOOM_ENCODING_MATCH_RESULT_UNKNOWN;
+  if (actual == 0) {
+    return known_absent ? LOOM_ENCODING_MATCH_RESULT_FALSE
+                        : LOOM_ENCODING_MATCH_RESULT_UNKNOWN;
+  }
   if ((actual & required) == 0) return LOOM_ENCODING_MATCH_RESULT_FALSE;
   return actual == required ? LOOM_ENCODING_MATCH_RESULT_TRUE
                             : LOOM_ENCODING_MATCH_RESULT_UNKNOWN;
@@ -245,6 +249,49 @@ static loom_encoding_match_result_t loom_encoding_match_and(
   return LOOM_ENCODING_MATCH_RESULT_TRUE;
 }
 
+static loom_encoding_match_result_t loom_encoding_match_requirements(
+    loom_value_fact_encoding_summary_t summary, loom_attribute_t requirements) {
+  const loom_value_fact_encoded_operand_schema_t schema =
+      summary.storage_schema.encoded_operand;
+  const bool schema_complete =
+      summary.storage_schema.static_spec_encoding_id != 0 &&
+      !loom_value_fact_encoded_operand_schema_is_unknown(schema);
+  loom_encoding_match_result_t match = LOOM_ENCODING_MATCH_RESULT_TRUE;
+
+  if (loom_encoding_match_attr_has_element_format(requirements)) {
+    match = loom_encoding_match_and(
+        match,
+        loom_encoding_match_exclusive_fact(
+            schema.element_format,
+            loom_encoding_numeric_format_fact(
+                loom_encoding_match_attr_element_format(requirements)),
+            iree_any_bit_set(
+                schema.flags,
+                LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_ELEMENT_FORMAT_NONE),
+            schema_complete));
+  }
+  if (loom_encoding_match_attr_has_payload_packing(requirements)) {
+    match = loom_encoding_match_and(
+        match, loom_encoding_match_exclusive_fact(
+                   schema.payload_packing,
+                   loom_encoding_payload_packing_fact(
+                       loom_encoding_match_attr_payload_packing(requirements)),
+                   /*known_absent=*/false, schema_complete));
+  }
+  if (loom_encoding_match_attr_has_affine(requirements)) {
+    match = loom_encoding_match_and(
+        match,
+        loom_encoding_match_exclusive_fact(
+            schema.affine_policy,
+            loom_encoding_affine_policy_fact(
+                loom_encoding_match_attr_affine(requirements)),
+            iree_any_bit_set(schema.flags,
+                             LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_AFFINE_NONE),
+            schema_complete));
+  }
+  return match;
+}
+
 iree_status_t loom_encoding_matches_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,
@@ -256,39 +303,8 @@ iree_status_t loom_encoding_matches_facts(
     return iree_ok_status();
   }
 
-  const loom_value_fact_encoded_operand_schema_t schema =
-      summary.storage_schema.encoded_operand;
-  const bool schema_complete =
-      summary.storage_schema.static_spec_encoding_id != 0 &&
-      !loom_value_fact_encoded_operand_schema_is_unknown(schema);
-  const loom_attribute_t requirements = loom_encoding_matches_requirements(op);
-  loom_encoding_match_result_t match = LOOM_ENCODING_MATCH_RESULT_TRUE;
-
-  if (loom_encoding_match_attr_has_element_format(requirements)) {
-    match = loom_encoding_match_and(
-        match, loom_encoding_match_exclusive_fact(
-                   schema.element_format,
-                   loom_encoding_numeric_format_fact(
-                       loom_encoding_match_attr_element_format(requirements)),
-                   schema_complete));
-  }
-  if (loom_encoding_match_attr_has_payload_packing(requirements)) {
-    match = loom_encoding_match_and(
-        match, loom_encoding_match_exclusive_fact(
-                   schema.payload_packing,
-                   loom_encoding_payload_packing_fact(
-                       loom_encoding_match_attr_payload_packing(requirements)),
-                   schema_complete));
-  }
-  if (loom_encoding_match_attr_has_affine(requirements)) {
-    match = loom_encoding_match_and(
-        match, loom_encoding_match_exclusive_fact(
-                   schema.affine_policy,
-                   loom_encoding_affine_policy_fact(
-                       loom_encoding_match_attr_affine(requirements)),
-                   schema_complete));
-  }
-
+  const loom_encoding_match_result_t match = loom_encoding_match_requirements(
+      summary, loom_encoding_matches_requirements(op));
   if (match == LOOM_ENCODING_MATCH_RESULT_UNKNOWN) {
     result_facts[0] = loom_value_facts_make(0, 1, 1);
   } else {
@@ -296,4 +312,49 @@ iree_status_t loom_encoding_matches_facts(
         loom_value_facts_exact_i64(match == LOOM_ENCODING_MATCH_RESULT_TRUE);
   }
   return iree_ok_status();
+}
+
+iree_status_t loom_encoding_assume_match_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  loom_value_fact_encoding_summary_t summary = {
+      .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+  };
+  (void)loom_value_facts_query_encoding_summary(context, operand_facts[0],
+                                                &summary);
+  summary.role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA;
+
+  loom_value_fact_encoded_operand_schema_t* schema =
+      &summary.storage_schema.encoded_operand;
+  const loom_attribute_t requirements =
+      loom_encoding_assume_match_requirements(op);
+  if (loom_encoding_match_attr_has_element_format(requirements)) {
+    const loom_encoding_numeric_format_t element_format =
+        loom_encoding_match_attr_element_format(requirements);
+    schema->element_format = loom_encoding_numeric_format_fact(element_format);
+    if (element_format == LOOM_ENCODING_NUMERIC_FORMAT_NONE) {
+      schema->flags |= LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_ELEMENT_FORMAT_NONE;
+    } else {
+      schema->flags &=
+          ~LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_ELEMENT_FORMAT_NONE;
+    }
+  }
+  if (loom_encoding_match_attr_has_payload_packing(requirements)) {
+    schema->payload_packing = loom_encoding_payload_packing_fact(
+        loom_encoding_match_attr_payload_packing(requirements));
+  }
+  if (loom_encoding_match_attr_has_affine(requirements)) {
+    const loom_encoding_affine_policy_t affine =
+        loom_encoding_match_attr_affine(requirements);
+    schema->affine_policy = loom_encoding_affine_policy_fact(affine);
+    if (affine == LOOM_ENCODING_AFFINE_POLICY_NONE) {
+      schema->flags |= LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_AFFINE_NONE;
+    } else {
+      schema->flags &= ~LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_AFFINE_NONE;
+    }
+  }
+
+  return loom_value_facts_make_encoding_summary(context, summary,
+                                                &result_facts[0]);
 }
