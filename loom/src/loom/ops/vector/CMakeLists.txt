@@ -27,7 +27,6 @@ loom_generated_cc_library(
     loom::py::loom::gen::ops::c_tables_vector_generator
   SRCS
     "canonicalize.c"
-    "encoding_auxiliary.c"
     "facts.c"
     "fragment.c"
     "memory.c"
@@ -72,7 +71,6 @@ loom_generated_cc_library(
     "tables/reduction.c"
     "tables/table.c"
   HDRS
-    "encoding_auxiliary.h"
     "fragment.h"
     "memory.h"
     "ops.h"
@@ -101,19 +99,6 @@ loom_generated_cc_library(
     loom::util::fact_table
     loom::util::numeric_format
     loom::util::stable_id
-)
-
-loom_cc_test(
-  NAME
-    encoding_auxiliary_test
-  SRCS
-    "encoding_auxiliary_test.cc"
-  DEPS
-    ::vector
-    iree::base::internal::arena
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::ir
 )
 
 loom_cc_test(

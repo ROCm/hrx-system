@@ -464,6 +464,7 @@ loom_cc_library(
         ":contract",
         ":contract_storage",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/encoding",
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",

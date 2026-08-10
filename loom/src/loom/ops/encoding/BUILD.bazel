@@ -15,6 +15,7 @@ package(
 loom_generated_cc_library(
     name = "encoding",
     srcs = [
+        "auxiliary.c",
         "condition_refinement.c",
         "facts.c",
         "families.c",
@@ -27,6 +28,7 @@ loom_generated_cc_library(
         "verify.c",
     ],
     hdrs = [
+        "auxiliary.h",
         "facts.h",
         "families.h",
         "matrix_operand.h",
@@ -57,6 +59,18 @@ loom_generated_cc_library(
         "//loom/src/loom/util:numeric_format",
         "//loom/src/loom/util:stable_id",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "auxiliary_test",
+    srcs = ["auxiliary_test.cc"],
+    deps = [
+        ":encoding",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

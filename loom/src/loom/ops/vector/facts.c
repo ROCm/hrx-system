@@ -779,15 +779,14 @@ static iree_status_t loom_vector_try_preserve_lanewise_fragment_facts(
 }
 
 static void loom_vector_fragment_copy_present_auxiliary(
-    loom_vector_encoding_auxiliary_view_t source,
-    loom_vector_encoding_auxiliary_view_t* out_target) {
+    loom_encoding_auxiliary_view_t source,
+    loom_encoding_auxiliary_view_t* out_target) {
   memset(out_target, 0, sizeof(*out_target));
   out_target->present_keys = source.present_keys;
-  for (uint8_t i = 0; i < LOOM_VECTOR_ENCODING_AUXILIARY_KEY_COUNT_; ++i) {
-    loom_vector_encoding_auxiliary_key_t key =
-        (loom_vector_encoding_auxiliary_key_t)i;
-    loom_vector_encoding_auxiliary_key_flags_t key_flag =
-        loom_vector_encoding_auxiliary_key_flag(key);
+  for (uint8_t i = 0; i < LOOM_ENCODING_AUXILIARY_KEY_COUNT_; ++i) {
+    loom_encoding_auxiliary_key_t key = (loom_encoding_auxiliary_key_t)i;
+    loom_encoding_auxiliary_key_flags_t key_flag =
+        loom_encoding_auxiliary_key_flag(key);
     if (!iree_any_bit_set(source.present_keys, key_flag)) {
       continue;
     }
@@ -996,8 +995,8 @@ iree_status_t loom_vector_fragment_load_facts(
   }
   fact.flags |= LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_NATIVE_STORAGE;
 
-  loom_vector_encoding_auxiliary_view_t auxiliary;
-  if (!loom_vector_encoding_auxiliary_view_resolve(
+  loom_encoding_auxiliary_view_t auxiliary;
+  if (!loom_encoding_auxiliary_view_resolve(
           module, loom_vector_fragment_load_auxiliary(op),
           loom_vector_fragment_load_auxiliary_names(op), &auxiliary, NULL)) {
     result_facts[0] = loom_value_facts_unknown();

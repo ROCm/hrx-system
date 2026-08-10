@@ -533,6 +533,7 @@ loom_cc_library(
     ::contract_storage
     iree::base
     loom::ir
+    loom::ops::encoding
     loom::ops::vector
     loom::util::fact_table
   PUBLIC

@@ -15,7 +15,7 @@
 #define LOOM_TRANSFORMS_VECTOR_TO_SCALAR_ENCODING_H_
 
 #include "iree/base/api.h"
-#include "loom/ops/vector/encoding_auxiliary.h"
+#include "loom/ops/encoding/auxiliary.h"
 #include "loom/transforms/vector/to_scalar_lanes.h"
 
 #ifdef __cplusplus
@@ -35,7 +35,7 @@ typedef struct loom_vector_to_scalar_encoded_operand_t {
   loom_value_fact_encoded_operand_schema_t schema;
 
   // Explicit auxiliary SSA operands keyed by vector auxiliary enum bits.
-  loom_vector_encoding_auxiliary_view_t auxiliary;
+  loom_encoding_auxiliary_view_t auxiliary;
 
   // Independent logical block count for block-indexed auxiliary topologies.
   loom_vector_to_scalar_index_term_t blocks;

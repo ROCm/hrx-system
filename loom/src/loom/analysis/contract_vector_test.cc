@@ -437,7 +437,7 @@ func.def @encoded_mma(%lhs_data: vector<6xi32>, %rhs_data: vector<6xi32>, %init_
       loom_contract_value_ref_value_id(
           request.lhs.encoded
               .auxiliary_value_refs[LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SCALE]),
-      lhs_fragment.auxiliary.values[LOOM_VECTOR_ENCODING_AUXILIARY_KEY_SCALE]);
+      lhs_fragment.auxiliary.values[LOOM_ENCODING_AUXILIARY_KEY_SCALE]);
   EXPECT_EQ(loom_contract_value_ref_value_id(
                 request.lhs.encoded.auxiliary_value_refs
                     [LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_CODEBOOK_TABLE]),
@@ -449,7 +449,7 @@ func.def @encoded_mma(%lhs_data: vector<6xi32>, %rhs_data: vector<6xi32>, %init_
       loom_contract_value_ref_value_id(
           request.rhs.encoded
               .auxiliary_value_refs[LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SCALE]),
-      rhs_fragment.auxiliary.values[LOOM_VECTOR_ENCODING_AUXILIARY_KEY_SCALE]);
+      rhs_fragment.auxiliary.values[LOOM_ENCODING_AUXILIARY_KEY_SCALE]);
   EXPECT_EQ(request.shape.k, 128);
   loom_pass_value_fact_owner_deinitialize(&value_facts);
 }

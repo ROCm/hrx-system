@@ -8,7 +8,7 @@
 
 #include "loom/analysis/contract_storage.h"
 #include "loom/ir/scalar_type.h"
-#include "loom/ops/vector/encoding_auxiliary.h"
+#include "loom/ops/encoding/auxiliary.h"
 #include "loom/ops/vector/fragment.h"
 #include "loom/ops/vector/ops.h"
 
@@ -263,60 +263,58 @@ static bool loom_contract_vector_query_fragment_fact(
   return true;
 }
 
-static const loom_vector_encoding_auxiliary_key_flags_t
+static const loom_encoding_auxiliary_key_flags_t
     loom_contract_vector_auxiliary_key_flags[] = {
         [LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SCALE] =
-            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SCALE,
+            (UINT64_C(1) << LOOM_ENCODING_AUXILIARY_KEY_SCALE),
         [LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SECONDARY_SCALE] =
-            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SECONDARY_SCALE |
-            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SCALE2 |
-            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SCALE3 |
-            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SCALE4 |
-            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SCALE5 |
-            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SCALE6 |
-            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SCALE7,
+            (UINT64_C(1) << LOOM_ENCODING_AUXILIARY_KEY_SECONDARY_SCALE) |
+            (UINT64_C(1) << LOOM_ENCODING_AUXILIARY_KEY_SCALE2) |
+            (UINT64_C(1) << LOOM_ENCODING_AUXILIARY_KEY_SCALE3) |
+            (UINT64_C(1) << LOOM_ENCODING_AUXILIARY_KEY_SCALE4) |
+            (UINT64_C(1) << LOOM_ENCODING_AUXILIARY_KEY_SCALE5) |
+            (UINT64_C(1) << LOOM_ENCODING_AUXILIARY_KEY_SCALE6) |
+            (UINT64_C(1) << LOOM_ENCODING_AUXILIARY_KEY_SCALE7),
         [LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_ZERO_POINT] =
-            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_ZERO_POINT,
+            (UINT64_C(1) << LOOM_ENCODING_AUXILIARY_KEY_ZERO_POINT),
         [LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_MIN] =
-            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_MINIMUM,
+            (UINT64_C(1) << LOOM_ENCODING_AUXILIARY_KEY_MINIMUM),
         [LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SPARSE_METADATA] =
-            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SPARSITY |
-            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_METADATA |
-            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_INDICES |
-            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_OFFSETS |
-            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_MASK,
+            (UINT64_C(1) << LOOM_ENCODING_AUXILIARY_KEY_SPARSITY) |
+            (UINT64_C(1) << LOOM_ENCODING_AUXILIARY_KEY_METADATA) |
+            (UINT64_C(1) << LOOM_ENCODING_AUXILIARY_KEY_INDICES) |
+            (UINT64_C(1) << LOOM_ENCODING_AUXILIARY_KEY_OFFSETS) |
+            (UINT64_C(1) << LOOM_ENCODING_AUXILIARY_KEY_MASK),
         [LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_CODEBOOK_TABLE] =
-            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_CODEBOOK |
-            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_THRESHOLDS |
-            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_CENTROIDS,
+            (UINT64_C(1) << LOOM_ENCODING_AUXILIARY_KEY_CODEBOOK) |
+            (UINT64_C(1) << LOOM_ENCODING_AUXILIARY_KEY_THRESHOLDS) |
+            (UINT64_C(1) << LOOM_ENCODING_AUXILIARY_KEY_CENTROIDS),
         [LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_RESIDUAL] =
-            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_RESIDUAL |
-            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_OUTLIERS,
+            (UINT64_C(1) << LOOM_ENCODING_AUXILIARY_KEY_RESIDUAL) |
+            (UINT64_C(1) << LOOM_ENCODING_AUXILIARY_KEY_OUTLIERS),
         [LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SIGN] =
-            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SIGNS,
+            (UINT64_C(1) << LOOM_ENCODING_AUXILIARY_KEY_SIGNS),
         [LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_RUNTIME_AMAX] =
-            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_AMAX,
+            (UINT64_C(1) << LOOM_ENCODING_AUXILIARY_KEY_AMAX),
 };
 static_assert(IREE_ARRAYSIZE(loom_contract_vector_auxiliary_key_flags) ==
                   LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_COUNT_,
               "contract auxiliary map must cover every key");
 
 static bool loom_contract_vector_auxiliary_group_value(
-    const loom_vector_encoding_auxiliary_view_t* auxiliary,
-    loom_vector_encoding_auxiliary_key_flags_t vector_key_flags,
+    const loom_encoding_auxiliary_view_t* auxiliary,
+    loom_encoding_auxiliary_key_flags_t vector_key_flags,
     loom_value_id_t* out_value) {
   *out_value = LOOM_VALUE_ID_INVALID;
-  loom_vector_encoding_auxiliary_key_flags_t present_group_keys =
+  loom_encoding_auxiliary_key_flags_t present_group_keys =
       auxiliary->present_keys & vector_key_flags;
   if (present_group_keys == 0) {
     return false;
   }
-  for (uint8_t i = 0; i < LOOM_VECTOR_ENCODING_AUXILIARY_KEY_COUNT_; ++i) {
-    loom_vector_encoding_auxiliary_key_t vector_key =
-        (loom_vector_encoding_auxiliary_key_t)i;
-    if (!iree_any_bit_set(
-            present_group_keys,
-            loom_vector_encoding_auxiliary_key_flag(vector_key))) {
+  for (uint8_t i = 0; i < LOOM_ENCODING_AUXILIARY_KEY_COUNT_; ++i) {
+    loom_encoding_auxiliary_key_t vector_key = (loom_encoding_auxiliary_key_t)i;
+    if (!iree_any_bit_set(present_group_keys,
+                          loom_encoding_auxiliary_key_flag(vector_key))) {
       continue;
     }
     *out_value = auxiliary->values[vector_key];
@@ -326,7 +324,7 @@ static bool loom_contract_vector_auxiliary_group_value(
 }
 
 static void loom_contract_vector_populate_auxiliary_operands(
-    const loom_vector_encoding_auxiliary_view_t* auxiliary,
+    const loom_encoding_auxiliary_view_t* auxiliary,
     loom_contract_encoded_operand_t* encoded) {
   for (uint8_t i = 0; i < LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_COUNT_; ++i) {
     loom_contract_auxiliary_operand_key_t contract_key =
