@@ -184,6 +184,10 @@ uint8_t iree_async_frontier_tracker_session_epoch(
 uint8_t iree_async_frontier_tracker_machine_index(
     const iree_async_frontier_tracker_t* tracker);
 
+// Returns the maximum number of axes that may be registered with the tracker.
+uint32_t iree_async_frontier_tracker_axis_capacity(
+    const iree_async_frontier_tracker_t* tracker);
+
 // Registers an axis for the lifetime of the tracker. Axis IDs are never reused:
 // once registered, an axis remains reserved even after retirement.
 //

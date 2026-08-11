@@ -123,6 +123,11 @@ TEST(InitializeTest, BasicInitialization) {
       iree_async_frontier_tracker_query_epoch(fixture.tracker(), Axis(0), 1));
 }
 
+TEST(InitializeTest, AxisCapacity) {
+  TrackerFixture fixture(37);
+  EXPECT_EQ(iree_async_frontier_tracker_axis_capacity(fixture.tracker()), 37u);
+}
+
 TEST(InitializeTest, ZeroCapacity) {
   TrackerFixture fixture(0);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,

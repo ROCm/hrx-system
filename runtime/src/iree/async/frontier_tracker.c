@@ -433,6 +433,12 @@ IREE_API_EXPORT uint8_t iree_async_frontier_tracker_machine_index(
   return tracker->machine_index;
 }
 
+IREE_API_EXPORT uint32_t iree_async_frontier_tracker_axis_capacity(
+    const iree_async_frontier_tracker_t* tracker) {
+  IREE_ASSERT_ARGUMENT(tracker);
+  return tracker->axis_table.capacity;
+}
+
 IREE_API_EXPORT iree_status_t iree_async_frontier_tracker_register_axis(
     iree_async_frontier_tracker_t* tracker, iree_async_axis_t axis,
     iree_async_semaphore_t* semaphore) {
