@@ -77,3 +77,22 @@ func.def target(@target) @floating_atomic_add_reference(%input: buffer, %index: 
   }
   func.return %old : f32
 }
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @hadamard_transform(%input: vector<4xf32>) -> (vector<4xf32>) {
+  %transform = encoding.define #transform.hadamard : encoding<transform>
+  %result = vector.transform %input, %transform : vector<4xf32>, encoding<transform> -> vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @hadamard_transform(%input: vector<4xf32>) -> (vector<4xf32>) {
+  %transform = encoding.define #transform.hadamard : encoding<transform>
+  %result = vector.transform %input, %transform : vector<4xf32>, encoding<transform> -> vector<4xf32>
+  func.return %result : vector<4xf32>
+}

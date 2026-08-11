@@ -189,8 +189,15 @@ typedef enum loom_encoding_sparsity_policy_e {
   LOOM_ENCODING_SPARSITY_POLICY_COUNT_ = 10,
 } loom_encoding_sparsity_policy_t;
 
+// Normalization applied by a numeric transform.
+typedef enum loom_encoding_transform_normalization_e {
+  LOOM_ENCODING_TRANSFORM_NORMALIZATION_NONE = 0,
+  LOOM_ENCODING_TRANSFORM_NORMALIZATION_ORTHONORMAL = 1,
+  LOOM_ENCODING_TRANSFORM_NORMALIZATION_COUNT_ = 2,
+} loom_encoding_transform_normalization_t;
+
 enum {
-  LOOM_ENCODING_FAMILY_DYNAMIC_PARAMETER_COUNT_MAX_ = 6,
+  LOOM_ENCODING_FAMILY_DYNAMIC_PARAMETER_COUNT_MAX_ = 2,
 };
 
 // Composes an address layout and storage schema.
@@ -234,46 +241,11 @@ typedef enum loom_encoding_operand_parameter_e {
   LOOM_ENCODING_OPERAND_PARAMETER_COUNT_ = 17,
 } loom_encoding_operand_parameter_t;
 
-// Numerical transform with static shape and policy parameters.
-typedef enum loom_encoding_numeric_transform_parameter_e {
-  LOOM_ENCODING_NUMERIC_TRANSFORM_PARAMETER_FAMILY = 0,
-  LOOM_ENCODING_NUMERIC_TRANSFORM_PARAMETER_INPUT_ELEMS = 1,
-  LOOM_ENCODING_NUMERIC_TRANSFORM_PARAMETER_NORMALIZATION = 2,
-  LOOM_ENCODING_NUMERIC_TRANSFORM_PARAMETER_OUTPUT_ELEMS = 3,
-  LOOM_ENCODING_NUMERIC_TRANSFORM_PARAMETER_COUNT_ = 4,
-} loom_encoding_numeric_transform_parameter_t;
-
-typedef enum loom_encoding_numeric_transform_dynamic_parameter_e {
-  LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_INPUT_ELEMS = 0,
-  LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_MATRIX = 1,
-  LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_OUTPUT_ELEMS = 2,
-  LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_PERMUTATION = 3,
-  LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_SEED = 4,
-  LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_SIGNS = 5,
-  LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_COUNT_ = 6,
-} loom_encoding_numeric_transform_dynamic_parameter_t;
-
-// TurboQuant key/value storage schema.
-typedef enum loom_encoding_turboquant_kv_parameter_e {
-  LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_FIRST_STAGE_BITS = 0,
-  LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_LOGICAL_ELEMENT = 1,
-  LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_LOGICAL_ELEMS = 2,
-  LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_PACK_ORDER = 3,
-  LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_QJL_ROWS = 4,
-  LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_RECORD_BYTES = 5,
-  LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_RESIDUAL_BITS = 6,
-  LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_SCALAR_QUANTIZER = 7,
-  LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_TRANSFORM_FAMILY = 8,
-  LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_COUNT_ = 9,
-} loom_encoding_turboquant_kv_parameter_t;
-
-typedef enum loom_encoding_turboquant_kv_dynamic_parameter_e {
-  LOOM_ENCODING_TURBOQUANT_KV_DYNAMIC_PARAMETER_CENTROIDS = 0,
-  LOOM_ENCODING_TURBOQUANT_KV_DYNAMIC_PARAMETER_QJL_TRANSFORM = 1,
-  LOOM_ENCODING_TURBOQUANT_KV_DYNAMIC_PARAMETER_THRESHOLDS = 2,
-  LOOM_ENCODING_TURBOQUANT_KV_DYNAMIC_PARAMETER_TRANSFORM = 3,
-  LOOM_ENCODING_TURBOQUANT_KV_DYNAMIC_PARAMETER_COUNT_ = 4,
-} loom_encoding_turboquant_kv_dynamic_parameter_t;
+// Sylvester Hadamard transform over the final vector axis.
+typedef enum loom_encoding_transform_hadamard_parameter_e {
+  LOOM_ENCODING_TRANSFORM_HADAMARD_PARAMETER_NORMALIZATION = 0,
+  LOOM_ENCODING_TRANSFORM_HADAMARD_PARAMETER_COUNT_ = 1,
+} loom_encoding_transform_hadamard_parameter_t;
 
 #ifdef __cplusplus
 extern "C" {
@@ -329,8 +301,7 @@ extern const loom_encoding_family_descriptor_t loom_encoding_ggml_q4_k_family_de
 extern const loom_encoding_family_descriptor_t loom_encoding_ggml_q6_k_family_descriptor;
 extern const loom_encoding_family_descriptor_t loom_encoding_ggml_q8_1_x4_family_descriptor;
 extern const loom_encoding_family_descriptor_t loom_encoding_operand_family_descriptor;
-extern const loom_encoding_family_descriptor_t loom_encoding_numeric_transform_family_descriptor;
-extern const loom_encoding_family_descriptor_t loom_encoding_turboquant_kv_family_descriptor;
+extern const loom_encoding_family_descriptor_t loom_encoding_transform_hadamard_family_descriptor;
 
 enum {
   LOOM_OP_ENCODING_LAYOUT_DENSE = LOOM_OP_KIND(LOOM_DIALECT_ENCODING, 0),

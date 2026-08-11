@@ -479,32 +479,29 @@ func.def @blocked_matrix_fragments(%lhs: vector<2xf16>, %rhs: vector<2xf16>, %ac
 
 // ====
 
-// Numeric transforms are explicit register transforms described by SSA
-// encodings. The descriptor carries its input and output last-axis extents so
-// target matching does not infer transform domains from loose metadata.
-func.def @numeric_transform_hadamard(%v: vector<128xf32>, %signs: vector<128xi1>) -> (vector<128xf32>) {
-  %xf = encoding.define #numeric_transform<family="hadamard_sign", input_elems=128, normalization="orthonormal", output_elems=128> {signs = %signs : vector<128xi1>} : encoding<transform>
+// Hadamard transforms apply independently to invocation-local vector lanes.
+func.def @transform_hadamard(%v: vector<128xf32>) -> (vector<128xf32>) {
+  %xf = encoding.define #transform.hadamard : encoding<transform>
   %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
   func.return %r : vector<128xf32>
 }
 
 // ====
 
-// JL-style descriptors can change only the last vector axis; leading axes stay
-// tied to the source so batched sketches remain structurally obvious.
-func.def @numeric_transform_jl(%v: vector<4x128xf32>, %matrix: vector<64x128xf32>) -> (vector<4x64xf32>) {
-  %jl = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %matrix : vector<64x128xf32>} : encoding<transform>
-  %sketch = vector.transform %v, %jl : vector<4x128xf32>, encoding<transform> -> vector<4x64xf32>
-  func.return %sketch : vector<4x64xf32>
+// Leading axes are independent transform batches and orthonormal scaling is a
+// typed descriptor choice.
+func.def @transform_hadamard_orthonormal(%v: vector<4x128xf32>) -> (vector<4x128xf32>) {
+  %xf = encoding.define #transform.hadamard<normalization=orthonormal> : encoding<transform>
+  %r = vector.transform %v, %xf : vector<4x128xf32>, encoding<transform> -> vector<4x128xf32>
+  func.return %r : vector<4x128xf32>
 }
 
 // ====
 
-// Dynamic transform extents use the same SSA values as the source/result type
-// dimensions, preserving the use-def link instead of relying on an attribute
-// side channel.
-func.def @numeric_transform_dynamic(%n: index, %v: vector<[%n]xf32>) -> (vector<[%n]xf32>) {
-  %xf = encoding.define #numeric_transform<family="hadamard", normalization="none"> {input_elems = %n : index, output_elems = %n : index} : encoding<transform>
+// Dynamic vectors retain their shape relation without duplicating extents in
+// the transform descriptor.
+func.def @transform_hadamard_dynamic(%n: index, %v: vector<[%n]xf32>) -> (vector<[%n]xf32>) {
+  %xf = encoding.define #transform.hadamard : encoding<transform>
   %r = vector.transform %v, %xf : vector<[%n]xf32>, encoding<transform> -> vector<[%n]xf32>
   func.return %r : vector<[%n]xf32>
 }

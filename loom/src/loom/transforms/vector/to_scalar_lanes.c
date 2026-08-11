@@ -721,7 +721,6 @@ static const loom_vector_to_scalar_lane_lowerer_t
         loom_vector_to_scalar_build_table_quantize_lane,
         loom_vector_to_scalar_build_decode_lane,
         loom_vector_to_scalar_build_encode_lane,
-        loom_vector_to_scalar_build_transform_lane,
         loom_vector_to_scalar_build_load_lane,
         loom_vector_to_scalar_build_masked_load_lane,
         loom_vector_to_scalar_build_gather_lane,

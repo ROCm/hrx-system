@@ -1171,8 +1171,8 @@ func.def @table_quantize_unsorted_thresholds(%values: vector<4xf32>) {
 
 // ====
 
-// Numeric transforms require an encoding with the numeric-transform role, not
-// an arbitrary storage schema.
+// Numeric transforms require a transform encoding, not an arbitrary storage
+// schema.
 func.def @transform_role_mismatch(%v: vector<128xf32>) {
   %schema = encoding.define #ggml.q4_0 : encoding<schema>
   // ERROR@+1: TYPE/003 "encoding<transform>"
@@ -1182,106 +1182,9 @@ func.def @transform_role_mismatch(%v: vector<128xf32>) {
 
 // ====
 
-// Numeric transform descriptors spell their family explicitly.
-func.def @transform_missing_family(%v: vector<128xf32>) {
-  // ERROR@+1: ENCODING/007 "numeric_transform" "family"
-  %xf = encoding.define #numeric_transform<input_elems=128, output_elems=128> : encoding<transform>
-  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
-  func.return
-}
-
-// ====
-
-// Numeric transform descriptors carry input and output extents.
-func.def @transform_missing_extent(%v: vector<128xf32>) {
-  // ERROR@+1: ENCODING/007 "numeric_transform" "input_elems"
-  %xf = encoding.define #numeric_transform<family="hadamard", output_elems=128> : encoding<transform>
-  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
-  func.return
-}
-
-// ====
-
-// Unknown transform descriptor parameters are rejected instead of flowing
-// through as target-specific magic.
-func.def @transform_unknown_param(%v: vector<128xf32>) {
-  // ERROR@+1: ENCODING/008 "numeric_transform" "window"
-  %xf = encoding.define #numeric_transform<family="hadamard", input_elems=128, output_elems=128, window=8> : encoding<transform>
-  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
-  func.return
-}
-
-// ====
-
-// Transform extent parameters must be positive integer attributes when static.
-func.def @transform_static_extent_kind_mismatch(%v: vector<128xf32>) {
-  // ERROR@+1: PARSE/003
-  %xf = encoding.define #numeric_transform<family="hadamard", input_elems="128", output_elems=128> : encoding<transform>
-  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
-  func.return
-}
-
-// ====
-
-// Static transform extents describe lane counts and must be positive.
-func.def @transform_static_extent_not_positive(%v: vector<128xf32>) {
-  // ERROR@+1: STRUCTURE/014 "input_elems" "0" "positive extent"
-  %xf = encoding.define #numeric_transform<family="hadamard", input_elems=0, output_elems=128> : encoding<transform>
-  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
-  func.return
-}
-
-// ====
-
-// Transform input extent must match the source last axis.
-func.def @transform_input_extent_mismatch(%v: vector<64xf32>) {
-  %matrix = vector.constant 0.0 : vector<64x64xf32>
-  %xf = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %matrix : vector<64x64xf32>} : encoding<transform>
-  // ERROR@+1: TYPE/003 "last axis matching static transform extent"
-  %r = vector.transform %v, %xf : vector<64xf32>, encoding<transform> -> vector<64xf32>
-  func.return
-}
-
-// ====
-
-// Transform output extent must match the result last axis.
-func.def @transform_output_extent_mismatch(%v: vector<128xf32>) {
-  %matrix = vector.constant 0.0 : vector<32x128xf32>
-  %xf = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %matrix : vector<32x128xf32>} : encoding<transform>
-  // ERROR@+1: TYPE/004 "last axis matching static transform extent"
-  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<32xf32>
-  func.return
-}
-
-// ====
-
-// JL dense matrices must use the source element type because the transform
-// multiplies matrix and source lanes directly.
-func.def @transform_matrix_element_type_mismatch(%v: vector<128xf32>) {
-  %matrix = vector.constant 0.0 : vector<64x128xf16>
-  // ERROR@+1: ENCODING/009 "matrix" "rank-2 source-element-type matrix matching output x input extents"
-  %xf = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %matrix : vector<64x128xf16>} : encoding<transform>
-  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<64xf32>
-  func.return
-}
-
-// ====
-
-// Dynamic transform extents must use the same SSA value as the corresponding
-// dynamic vector dimension.
-func.def @transform_dynamic_extent_mismatch(%n: index, %m: index, %v: vector<[%n]xf32>) {
-  %xf = encoding.define #numeric_transform<family="hadamard"> {input_elems = %m : index, output_elems = %n : index} : encoding<transform>
-  // ERROR@+1: TYPE/003 "last axis matching dynamic transform extent"
-  %r = vector.transform %v, %xf : vector<[%n]xf32>, encoding<transform> -> vector<[%n]xf32>
-  func.return
-}
-
-// ====
-
-// Hadamard-style transforms are square transforms over a power-of-two last
-// axis when the extent is statically known.
+// Hadamard transforms require a power-of-two final axis when statically known.
 func.def @transform_hadamard_non_power_of_two(%v: vector<96xf32>) {
-  %xf = encoding.define #numeric_transform<family="hadamard", input_elems=96, output_elems=96> : encoding<transform>
+  %xf = encoding.define #transform.hadamard : encoding<transform>
   // ERROR@+1: TYPE/003 "power-of-two last axis extent for Hadamard transform"
   %r = vector.transform %v, %xf : vector<96xf32>, encoding<transform> -> vector<96xf32>
   func.return
@@ -1289,56 +1192,21 @@ func.def @transform_hadamard_non_power_of_two(%v: vector<96xf32>) {
 
 // ====
 
-// Hadamard-style transforms preserve shape.
+// Hadamard transforms preserve the complete vector type.
 func.def @transform_hadamard_shape_mismatch(%v: vector<128xf32>) {
-  %xf = encoding.define #numeric_transform<family="hadamard", input_elems=128, output_elems=64> : encoding<transform>
-  // ERROR@+1: SHAPE/002
+  %xf = encoding.define #transform.hadamard : encoding<transform>
+  // ERROR@+1: TYPE/001
   %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<64xf32>
   func.return
 }
 
 // ====
 
-// Sign vectors must match the source shape and have i1 lanes.
-func.def @transform_signs_shape_mismatch(%v: vector<128xf32>, %signs: vector<64xi1>) {
-  // ERROR@+1: ENCODING/009 "numeric_transform" "signs"
-  %xf = encoding.define #numeric_transform<family="hadamard_sign", input_elems=128, output_elems=128> {signs = %signs : vector<64xi1>} : encoding<transform>
-  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
-  func.return
-}
-
-// ====
-
-// Static permutation maps must name in-bounds source lanes.
-func.def @transform_permutation_out_of_bounds(%v: vector<2xf32>, %signs: vector<2xi1>) {
-  %p0 = scalar.constant 0 : i64
-  %p2 = scalar.constant 2 : i64
-  %permutation = vector.from_elements %p0, %p2 : vector<2xi64>
-  %xf = encoding.define #numeric_transform<family="sign_permute_hadamard", input_elems=2, output_elems=2> {permutation = %permutation : vector<2xi64>, signs = %signs : vector<2xi1>} : encoding<transform>
-  // ERROR@+1: SUBRANGE/004
-  %r = vector.transform %v, %xf : vector<2xf32>, encoding<transform> -> vector<2xf32>
-  func.return
-}
-
-// ====
-
-// Static permutation maps must name each source lane once.
-func.def @transform_permutation_duplicate(%v: vector<2xf32>, %signs: vector<2xi1>) {
-  %p0 = scalar.constant 0 : i64
-  %permutation = vector.from_elements %p0, %p0 : vector<2xi64>
-  %xf = encoding.define #numeric_transform<family="sign_permute_hadamard", input_elems=2, output_elems=2> {permutation = %permutation : vector<2xi64>, signs = %signs : vector<2xi1>} : encoding<transform>
-  // ERROR@+1: STRUCTURE/014 "permutation" "0" "unique lane indices"
-  %r = vector.transform %v, %xf : vector<2xf32>, encoding<transform> -> vector<2xf32>
-  func.return
-}
-
-// ====
-
-// Numeric transform families are intentionally enumerated.
-func.def @transform_unknown_family(%v: vector<128xf32>) {
-  // ERROR@+1: ENCODING/013 "numeric_transform" "family" "mystery"
-  %xf = encoding.define #numeric_transform<family="mystery", input_elems=128, output_elems=128> : encoding<transform>
-  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
+// Hadamard transforms preserve element types as well as shape.
+func.def @transform_hadamard_element_mismatch(%v: vector<128xf32>) {
+  %xf = encoding.define #transform.hadamard : encoding<transform>
+  // ERROR@+1: TYPE/001
+  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf16>
   func.return
 }
 

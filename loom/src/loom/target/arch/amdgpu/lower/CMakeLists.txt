@@ -128,6 +128,7 @@ loom_cc_library(
     "matrix_fragment_memory_packet.h"
     "matrix_fragment_memory_plan.h"
     "matrix_fragment_repack.h"
+    "matrix_fragment_repack_packed_b16.h"
     "matrix_fragment_state.h"
     "memory.h"
     "memory_bank_service.h"
@@ -152,6 +153,7 @@ loom_cc_library(
     "value/storage.h"
     "value/vector_construct.h"
     "value/vector_conversion.h"
+    "value/vector_transform.h"
     "workgroup.h"
   TEXTUAL_HDRS
     "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/records/target_records_tables.inl"
@@ -209,6 +211,7 @@ loom_cc_library(
     "matrix_fragment_memory_packet.c"
     "matrix_fragment_memory_plan.c"
     "matrix_fragment_repack.c"
+    "matrix_fragment_repack_packed_b16.c"
     "matrix_fragment_state.c"
     "memory.c"
     "memory_bank_service.c"
@@ -242,6 +245,7 @@ loom_cc_library(
     "value/storage.c"
     "value/vector_construct.c"
     "value/vector_conversion.c"
+    "value/vector_transform.c"
   DEPS
     ::kinds
     ::materializers

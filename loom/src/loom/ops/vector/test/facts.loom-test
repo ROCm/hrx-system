@@ -682,16 +682,15 @@ func.def @table_quantize_small_lanes() -> (i8, i8, i8) {
 
 // ====
 
-// Numeric transform facts follow the same Hadamard lane parity as
-// vector-to-scalar lowering, so exact small vectors can fold before reference
-// expansion.
+// Hadamard facts use the same staged butterfly as scalar lowering so exact
+// vectors can fold without constructing a dense transform matrix.
 func.def @transform_hadamard_small_static_lanes() -> (f32, f32, f32, f32) {
   %c0 = scalar.constant 1.0 : f32
   %c1 = scalar.constant 2.0 : f32
   %c2 = scalar.constant 3.0 : f32
   %c3 = scalar.constant 4.0 : f32
   %v = vector.from_elements %c0, %c1, %c2, %c3 : vector<4xf32>
-  %xf = encoding.define #numeric_transform<family="hadamard", input_elems=4, output_elems=4> : encoding<transform>
+  %xf = encoding.define #transform.hadamard : encoding<transform>
   %r = vector.transform %v, %xf : vector<4xf32>, encoding<transform> -> vector<4xf32>
   %r0 = vector.extract %r[0] : vector<4xf32> -> f32
   %r1 = vector.extract %r[1] : vector<4xf32> -> f32
@@ -710,18 +709,14 @@ func.def @transform_hadamard_small_static_lanes() -> (f32, f32, f32, f32) {
 
 // ====
 
-// TurboQuant-style explicit sign vectors participate in exact Hadamard facts
-// when the sign table is itself known.
-func.def @transform_hadamard_sign_small_static_lanes() -> (f32, f32, f32, f32) {
+// Orthonormal normalization scales the staged butterfly by 1/sqrt(N).
+func.def @transform_hadamard_orthonormal_small_static_lanes() -> (f32, f32, f32, f32) {
   %c0 = scalar.constant 1.0 : f32
   %c1 = scalar.constant 2.0 : f32
   %c2 = scalar.constant 3.0 : f32
   %c3 = scalar.constant 4.0 : f32
-  %false = scalar.constant false : i1
-  %true = scalar.constant true : i1
   %v = vector.from_elements %c0, %c1, %c2, %c3 : vector<4xf32>
-  %signs = vector.from_elements %false, %true, %false, %true : vector<4xi1>
-  %xf = encoding.define #numeric_transform<family="hadamard_sign", input_elems=4, output_elems=4> {signs = %signs : vector<4xi1>} : encoding<transform>
+  %xf = encoding.define #transform.hadamard<normalization=orthonormal> : encoding<transform>
   %r = vector.transform %v, %xf : vector<4xf32>, encoding<transform> -> vector<4xf32>
   %r0 = vector.extract %r[0] : vector<4xf32> -> f32
   %r1 = vector.extract %r[1] : vector<4xf32> -> f32
@@ -730,121 +725,12 @@ func.def @transform_hadamard_sign_small_static_lanes() -> (f32, f32, f32, f32) {
   func.return %r0, %r1, %r2, %r3 : f32, f32, f32, f32
 }
 // ----
-func.def @transform_hadamard_sign_small_static_lanes() -> (f32, f32, f32, f32) {
-  %r0 = scalar.constant -2.0 : f32
-  %r1 = scalar.constant 10.0 : f32
-  %r2 = scalar.constant 0.0 : f32
-  %r3 = scalar.constant -4.0 : f32
-  func.return %r0, %r1, %r2, %r3 : f32, f32, f32, f32
-}
-
-// ====
-
-// Exact seeds use the same SplitMix64 low-bit signs as vector-to-scalar
-// lowering.
-func.def @transform_hadamard_sign_exact_seed_small_static_lanes() -> (f32, f32, f32, f32) {
-  %seed = index.constant 0 : index
-  %c0 = scalar.constant 1.0 : f32
-  %c1 = scalar.constant 2.0 : f32
-  %c2 = scalar.constant 3.0 : f32
-  %c3 = scalar.constant 4.0 : f32
-  %v = vector.from_elements %c0, %c1, %c2, %c3 : vector<4xf32>
-  %xf = encoding.define #numeric_transform<family="hadamard_sign", input_elems=4, output_elems=4> {seed = %seed : index} : encoding<transform>
-  %r = vector.transform %v, %xf : vector<4xf32>, encoding<transform> -> vector<4xf32>
-  %r0 = vector.extract %r[0] : vector<4xf32> -> f32
-  %r1 = vector.extract %r[1] : vector<4xf32> -> f32
-  %r2 = vector.extract %r[2] : vector<4xf32> -> f32
-  %r3 = vector.extract %r[3] : vector<4xf32> -> f32
-  func.return %r0, %r1, %r2, %r3 : f32, f32, f32, f32
-}
-// ----
-func.def @transform_hadamard_sign_exact_seed_small_static_lanes() -> (f32, f32, f32, f32) {
-  %r0 = scalar.constant -4.0 : f32
-  %r1 = scalar.constant 8.0 : f32
+func.def @transform_hadamard_orthonormal_small_static_lanes() -> (f32, f32, f32, f32) {
+  %r0 = scalar.constant 5.0 : f32
+  %r1 = scalar.constant -1.0 : f32
   %r2 = scalar.constant -2.0 : f32
-  %r3 = scalar.constant -6.0 : f32
+  %r3 = scalar.constant 0.0 : f32
   func.return %r0, %r1, %r2, %r3 : f32, f32, f32, f32
-}
-
-// ====
-
-// Dynamic seeds remain conservative; without an exact seed fact, the transform
-// result should not collapse to a guessed lane value.
-func.def @transform_hadamard_sign_dynamic_seed_keeps_transform(%seed: index) -> (f32) {
-  %c0 = scalar.constant 1.0 : f32
-  %c1 = scalar.constant 2.0 : f32
-  %v = vector.from_elements %c0, %c1 : vector<2xf32>
-  %xf = encoding.define #numeric_transform<family="hadamard_sign", input_elems=2, output_elems=2> {seed = %seed : index} : encoding<transform>
-  %r = vector.transform %v, %xf : vector<2xf32>, encoding<transform> -> vector<2xf32>
-  %r0 = vector.extract %r[0] : vector<2xf32> -> f32
-  func.return %r0 : f32
-}
-// ----
-func.def @transform_hadamard_sign_dynamic_seed_keeps_transform(%seed: index) -> (f32) {
-  %c0 = scalar.constant 1.0 : f32
-  %c1 = scalar.constant 2.0 : f32
-  %v = vector.from_elements %c0, %c1 : vector<2xf32>
-  %xf = encoding.define #numeric_transform<family="hadamard_sign", input_elems=2, output_elems=2> {seed = %seed : index} : encoding<transform>
-  %r = vector.transform %v, %xf : vector<2xf32>, encoding<transform> -> vector<2xf32>
-  %r0 = vector.extract %r[0] : vector<2xf32> -> f32
-  func.return %r0 : f32
-}
-
-// ====
-
-// Explicit sign/permutation transforms use the permutation table for the source
-// lane but still use the loop input lane for Hadamard phase selection.
-func.def @transform_sign_permute_hadamard_small_static_lanes() -> (f32, f32) {
-  %c0 = scalar.constant 10.0 : f32
-  %c1 = scalar.constant 20.0 : f32
-  %false = scalar.constant false : i1
-  %true = scalar.constant true : i1
-  %p1 = index.constant 1 : index
-  %p0 = index.constant 0 : index
-  %v = vector.from_elements %c0, %c1 : vector<2xf32>
-  %signs = vector.from_elements %false, %true : vector<2xi1>
-  %permutation = vector.from_elements %p1, %p0 : vector<2xindex>
-  %xf = encoding.define #numeric_transform<family="sign_permute_hadamard", input_elems=2, output_elems=2> {permutation = %permutation : vector<2xindex>, signs = %signs : vector<2xi1>} : encoding<transform>
-  %r = vector.transform %v, %xf : vector<2xf32>, encoding<transform> -> vector<2xf32>
-  %r0 = vector.extract %r[0] : vector<2xf32> -> f32
-  %r1 = vector.extract %r[1] : vector<2xf32> -> f32
-  func.return %r0, %r1 : f32, f32
-}
-// ----
-func.def @transform_sign_permute_hadamard_small_static_lanes() -> (f32, f32) {
-  %r0 = scalar.constant -10.0 : f32
-  %r1 = scalar.constant -30.0 : f32
-  func.return %r0, %r1 : f32, f32
-}
-
-// ====
-
-// QJL-style dense projection facts compute the explicit matrix dot for small
-// static operands.
-func.def @transform_jl_dense_small_static_lanes() -> (f32, f32, f32) {
-  %v0 = scalar.constant 2.0 : f32
-  %v1 = scalar.constant 3.0 : f32
-  %m00 = scalar.constant 1.0 : f32
-  %m01 = scalar.constant 0.0 : f32
-  %m10 = scalar.constant 0.0 : f32
-  %m11 = scalar.constant 1.0 : f32
-  %m20 = scalar.constant 1.0 : f32
-  %m21 = scalar.constant 1.0 : f32
-  %v = vector.from_elements %v0, %v1 : vector<2xf32>
-  %matrix = vector.from_elements %m00, %m01, %m10, %m11, %m20, %m21 : vector<3x2xf32>
-  %xf = encoding.define #numeric_transform<family="jl_dense", input_elems=2, output_elems=3> {matrix = %matrix : vector<3x2xf32>} : encoding<transform>
-  %r = vector.transform %v, %xf : vector<2xf32>, encoding<transform> -> vector<3xf32>
-  %r0 = vector.extract %r[0] : vector<3xf32> -> f32
-  %r1 = vector.extract %r[1] : vector<3xf32> -> f32
-  %r2 = vector.extract %r[2] : vector<3xf32> -> f32
-  func.return %r0, %r1, %r2 : f32, f32, f32
-}
-// ----
-func.def @transform_jl_dense_small_static_lanes() -> (f32, f32, f32) {
-  %r0 = scalar.constant 2.0 : f32
-  %r1 = scalar.constant 3.0 : f32
-  %r2 = scalar.constant 5.0 : f32
-  func.return %r0, %r1, %r2 : f32, f32, f32
 }
 
 // ====
@@ -857,37 +743,13 @@ func.def @transform_hadamard_rounds_each_step() -> (f32) {
   %negative_large = scalar.constant -16777216.0 : f32
   %c0 = scalar.constant 0.0 : f32
   %v = vector.from_elements %large, %c1, %negative_large, %c0 : vector<4xf32>
-  %xf = encoding.define #numeric_transform<family="hadamard", input_elems=4, output_elems=4> : encoding<transform>
+  %xf = encoding.define #transform.hadamard : encoding<transform>
   %r = vector.transform %v, %xf : vector<4xf32>, encoding<transform> -> vector<4xf32>
   %r0 = vector.extract %r[0] : vector<4xf32> -> f32
   func.return %r0 : f32
 }
 // ----
 func.def @transform_hadamard_rounds_each_step() -> (f32) {
-  %r0 = scalar.constant 0.0 : f32
-  func.return %r0 : f32
-}
-
-// ====
-
-// Dense projection facts mirror the scalarized mulf/addf program and round
-// each intermediate f32 value.
-func.def @transform_jl_dense_rounds_each_step() -> (f32) {
-  %large = scalar.constant 16777216.0 : f32
-  %c1 = scalar.constant 1.0 : f32
-  %negative_large = scalar.constant -16777216.0 : f32
-  %v = vector.from_elements %large, %c1, %negative_large : vector<3xf32>
-  %m0 = scalar.constant 1.0 : f32
-  %m1 = scalar.constant 1.0 : f32
-  %m2 = scalar.constant 1.0 : f32
-  %matrix = vector.from_elements %m0, %m1, %m2 : vector<1x3xf32>
-  %xf = encoding.define #numeric_transform<family="jl_dense", input_elems=3, output_elems=1> {matrix = %matrix : vector<1x3xf32>} : encoding<transform>
-  %r = vector.transform %v, %xf : vector<3xf32>, encoding<transform> -> vector<1xf32>
-  %r0 = vector.extract %r[0] : vector<1xf32> -> f32
-  func.return %r0 : f32
-}
-// ----
-func.def @transform_jl_dense_rounds_each_step() -> (f32) {
   %r0 = scalar.constant 0.0 : f32
   func.return %r0 : f32
 }

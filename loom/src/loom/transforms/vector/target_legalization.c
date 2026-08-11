@@ -125,6 +125,25 @@ static iree_status_t loom_vector_legalize_dotf(
   return iree_ok_status();
 }
 
+static iree_status_t loom_vector_legalize_transform(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
+  };
+  bool rewritten = false;
+  IREE_RETURN_IF_ERROR(loom_vector_transform_to_scalar_rewrite_op(
+      context->pass, context->rewriter, op, &rewritten));
+  if (rewritten) {
+    *out_result = (loom_target_legalizer_result_t){
+        .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,
+    };
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_vector_legalize_decode(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
@@ -314,6 +333,10 @@ static const loom_target_legalizer_entry_t kVectorLegalizerEntries[] = {
     {
         .root_kind = LOOM_OP_VECTOR_DOTF,
         .legalize = loom_vector_legalize_dotf,
+    },
+    {
+        .root_kind = LOOM_OP_VECTOR_TRANSFORM,
+        .legalize = loom_vector_legalize_transform,
     },
     {
         .root_kind = LOOM_OP_VECTOR_DOT2F,

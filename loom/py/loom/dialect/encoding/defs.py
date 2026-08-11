@@ -30,16 +30,12 @@ from loom.dsl import (
     ATTR_TYPE_I64,
     ATTR_TYPE_I64_ARRAY,
     ATTR_TYPE_PARAMETERIZED,
-    ATTR_TYPE_STRING,
     ENCODING_LAYOUT,
     ENCODING_SCHEMA,
-    ENCODING_TRANSFORM,
     FACT_IDENTITY,
     I1,
     INDEX,
     PURE,
-    VECTOR,
-    VIEW,
     AttrDef,
     ConditionRefinement,
     ConditionRefinementTruth,
@@ -244,6 +240,15 @@ SparsityPolicy = EnumDef(
     doc="Sparse payload organization for encoded values.",
 )
 
+TransformNormalization = EnumDef(
+    "TransformNormalization",
+    [
+        EnumCase("none", 0),
+        EnumCase("orthonormal", 1),
+    ],
+    doc="Normalization applied by a numeric transform.",
+)
+
 _OPERAND_PARAMETERS = (
     AttrDef("affine", ATTR_TYPE_ENUM, enum_def=AffinePolicy, optional=True),
     AttrDef("codebook", ATTR_TYPE_ENUM, enum_def=CodebookPolicy, optional=True),
@@ -277,25 +282,6 @@ _OPERAND_PARAMETERS = (
     AttrDef("sparsity_group_elements", ATTR_TYPE_I64, optional=True),
     AttrDef("sparsity_group_nonzero_elements", ATTR_TYPE_I64, optional=True),
     AttrDef("zero_scale_fallback", ATTR_TYPE_BOOL, optional=True),
-)
-
-_NUMERIC_TRANSFORM_PARAMETERS = (
-    AttrDef("family", ATTR_TYPE_STRING),
-    AttrDef("input_elems", ATTR_TYPE_I64, optional=True),
-    AttrDef("normalization", ATTR_TYPE_STRING, optional=True),
-    AttrDef("output_elems", ATTR_TYPE_I64, optional=True),
-)
-
-_TURBOQUANT_KV_PARAMETERS = (
-    AttrDef("first_stage_bits", ATTR_TYPE_I64),
-    AttrDef("logical_element", ATTR_TYPE_STRING),
-    AttrDef("logical_elems", ATTR_TYPE_I64),
-    AttrDef("pack_order", ATTR_TYPE_STRING),
-    AttrDef("qjl_rows", ATTR_TYPE_I64),
-    AttrDef("record_bytes", ATTR_TYPE_I64),
-    AttrDef("residual_bits", ATTR_TYPE_I64),
-    AttrDef("scalar_quantizer", ATTR_TYPE_STRING),
-    AttrDef("transform_family", ATTR_TYPE_STRING),
 )
 
 _CANONICAL_NUMERIC_SCHEMA_FORMATS = (
@@ -491,32 +477,18 @@ ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
         doc="Target-independent encoded operand schema.",
     ),
     EncodingFamilyDef(
-        "numeric_transform",
+        "transform.hadamard",
         group=encoding_ops,
         role=EncodingFamilyRole.NUMERIC_TRANSFORM,
-        parameters=_NUMERIC_TRANSFORM_PARAMETERS,
-        dynamic_parameters=(
-            Operand("input_elems", INDEX),
-            Operand("matrix", VECTOR),
-            Operand("output_elems", INDEX),
-            Operand("permutation", VECTOR),
-            Operand("seed", INDEX),
-            Operand("signs", VECTOR),
+        parameters=(
+            AttrDef(
+                "normalization",
+                ATTR_TYPE_ENUM,
+                enum_def=TransformNormalization,
+                optional=True,
+            ),
         ),
-        doc="Numerical transform with static shape and policy parameters.",
-    ),
-    EncodingFamilyDef(
-        "turboquant_kv",
-        group=encoding_ops,
-        role=EncodingFamilyRole.STORAGE_SCHEMA,
-        parameters=_TURBOQUANT_KV_PARAMETERS,
-        dynamic_parameters=(
-            Operand("centroids", VIEW),
-            Operand("qjl_transform", ENCODING_TRANSFORM),
-            Operand("thresholds", VIEW),
-            Operand("transform", ENCODING_TRANSFORM),
-        ),
-        doc="TurboQuant key/value storage schema.",
+        doc="Sylvester Hadamard transform over the final vector axis.",
     ),
 )
 

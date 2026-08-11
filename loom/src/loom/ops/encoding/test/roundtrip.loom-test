@@ -96,20 +96,3 @@ func.def @semantic_match_assumption(%schema: encoding<schema>) {
   test.use %schema2 : encoding<schema>
   func.return
 }
-
-// ====
-
-// TurboQuant-style KV storage schemas keep physical byte layout static while
-// table storage and transform descriptors remain ordinary SSA operands.
-func.def @turboquant_kv_schema(%params: buffer, %thresholds_offset: offset, %centroids_offset: offset) {
-  %dense = encoding.layout.dense : encoding<layout>
-  %thresholds = buffer.view %params[%thresholds_offset] : buffer -> view<3xf32, %dense>
-  %centroids = buffer.view %params[%centroids_offset] : buffer -> view<4xf16, %dense>
-  %signs = vector.constant false : vector<128xi1>
-  %qjl_matrix = vector.constant 0.0 : vector<64x128xf32>
-  %transform = encoding.define #numeric_transform<family="hadamard_sign", input_elems=128, output_elems=128> {signs = %signs : vector<128xi1>} : encoding<transform>
-  %qjl_transform = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %qjl_matrix : vector<64x128xf32>} : encoding<transform>
-  %schema = encoding.define #turboquant_kv<first_stage_bits=2, logical_element="f16", logical_elems=128, pack_order="lsb0", qjl_rows=64, record_bytes=40, residual_bits=1, scalar_quantizer="lloyd_max", transform_family="hadamard_sign"> {centroids = %centroids : view<4xf16, %dense>, qjl_transform = %qjl_transform : encoding<transform>, thresholds = %thresholds : view<3xf32, %dense>, transform = %transform : encoding<transform>} : encoding<schema>
-  test.use %schema : encoding<schema>
-  func.return
-}

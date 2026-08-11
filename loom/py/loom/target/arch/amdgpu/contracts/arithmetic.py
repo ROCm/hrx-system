@@ -986,6 +986,19 @@ def _vector_extract_recipe_rules() -> tuple[RecipeRule, ...]:
     )
 
 
+def _vector_transform_recipe_rule() -> RecipeRule:
+    return RecipeRule(
+        source_op=vector.vector_transform,
+        guards=(
+            _value_type("source", _VEC_F32_STATIC),
+            _value_type("result", _VEC_F32_STATIC),
+            Guard.descriptor_available(_descriptor("amdgpu.v_add_f32")),
+            Guard.descriptor_available(_descriptor("amdgpu.v_sub_f32")),
+            Guard.descriptor_available(_descriptor("amdgpu.v_mul_f32.lit")),
+        ),
+    )
+
+
 def _vector_splat_recipe_rule(
     scalar_type: TypePattern,
     result_type: TypePattern,
@@ -3785,6 +3798,7 @@ def _rules() -> tuple[ContractCase, ...]:
             *_packed_i16_vector_fmai_rules(),
             *_vector_extract_recipe_rules(),
             *_vector_16bit_float_conversion_recipe_rules(),
+            _vector_transform_recipe_rule(),
             *_f32_fma_rules(vector.vector_fmaf, _VEC_F32),
             _unary_rule(vector.vector_exp2f, _VEC_F32, "amdgpu.v_exp_f32"),
             _unary_rule(vector.vector_log2f, _VEC_F32, "amdgpu.v_log_f32"),

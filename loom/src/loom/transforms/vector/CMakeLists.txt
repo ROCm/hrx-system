@@ -156,10 +156,12 @@ loom_cc_test(
     loom::analysis::matrix_fragment_layout
     loom::format::text::parser
     loom::ir
+    loom::ops::encoding
     loom::ops::index
     loom::ops::kernel
     loom::ops::scalar
     loom::ops::scf
+    loom::ops::test
     loom::ops::vector
     loom::pass::types
     loom::pass::value_facts

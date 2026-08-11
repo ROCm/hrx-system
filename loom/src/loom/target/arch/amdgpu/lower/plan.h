@@ -606,6 +606,19 @@ typedef struct loom_amdgpu_vector_extract_plan_t {
   bool is_dynamic;
 } loom_amdgpu_vector_extract_plan_t;
 
+typedef struct loom_amdgpu_vector_transform_plan_t {
+  // Source vector consumed by the register-local transform.
+  loom_value_id_t source;
+  // Result vector produced by the register-local transform.
+  loom_value_id_t result;
+  // Total number of 32-bit lanes in the source and result vectors.
+  uint32_t lane_count;
+  // Number of lanes in each independently transformed final-axis slice.
+  uint32_t slice_extent;
+  // Optional f32 scale bit pattern applied after the butterfly stages.
+  uint32_t normalization_scale_bits;
+} loom_amdgpu_vector_transform_plan_t;
+
 typedef struct loom_amdgpu_buffer_alloca_plan_t {
   // Exact allocation byte length proven during planning.
   int64_t byte_length;
@@ -1486,6 +1499,8 @@ typedef enum loom_amdgpu_fragment_repack_strategy_e {
       4,
   // Source and result require a target strategy that is not implemented.
   LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_DIAGNOSTIC = 5,
+  // Packed B16 result rows are exchanged and repacked into RHS registers.
+  LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_RHS_PACKED_B16_XOR_PERMUTE = 6,
 } loom_amdgpu_fragment_repack_strategy_t;
 
 typedef enum loom_amdgpu_fragment_repack_reason_e {
@@ -1591,9 +1606,14 @@ typedef struct loom_amdgpu_fragment_repack_plan_t {
   loom_amdgpu_fragment_repack_lane_recipe_t source_lane_group;
   // Recipe constructing one packed pair from adjacent source columns.
   loom_amdgpu_fragment_repack_packed_pair_recipe_t packed_pair;
-  // Cross-lane exchange recipes in increasing transposed-bit order.
-  loom_amdgpu_fragment_repack_transpose_stage_t
-      transpose_stages[LOOM_AMDGPU_FRAGMENT_REPACK_TRANSPOSE_STAGE_CAPACITY];
+  // Strategy-specific repack recipes selected during planning.
+  union {
+    // Cross-lane exchange recipes in increasing transposed-bit order.
+    loom_amdgpu_fragment_repack_transpose_stage_t
+        transpose_stages[LOOM_AMDGPU_FRAGMENT_REPACK_TRANSPOSE_STAGE_CAPACITY];
+    // Cross-lane exchange pairing low-subword result rows for RHS packing.
+    loom_amdgpu_direct_xor_lane_recipe_t result_to_rhs_exchange;
+  } strategy_payload;
   // Physical VCC predicates enabling fused conditional transpose stages.
   struct {
     // Descriptor materializing a constant wave32 predicate into VCC_LO.

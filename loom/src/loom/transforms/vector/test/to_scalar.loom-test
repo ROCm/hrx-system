@@ -1041,28 +1041,6 @@ func.def @rejects_static_lane_count_beyond_value_slice() {
 
 // ====
 
-func.def @rejects_out_of_bounds_transform_iota_permutation(%v: vector<2xf32>, %signs: vector<2xi1>) -> (vector<2xf32>) {
-  %permutation_start = index.constant 1 : index
-  %permutation_step = index.constant 1 : index
-  %permutation = vector.iota %permutation_start step %permutation_step : vector<2xindex>
-  %xf = encoding.define #numeric_transform<family="sign_permute_hadamard", input_elems=2, output_elems=2> {permutation = %permutation : vector<2xindex>, signs = %signs : vector<2xi1>} : encoding<transform>
-  // ERROR@+1: ENCODING/020 {op_name="vector.transform", pass_name="vector-to-scalar"}
-  %r = vector.transform %v, %xf : vector<2xf32>, encoding<transform> -> vector<2xf32>
-  func.return %r : vector<2xf32>
-}
-
-// ====
-
-func.def @rejects_duplicate_transform_uniform_permutation(%v: vector<2xf32>, %signs: vector<2xi1>) -> (vector<2xf32>) {
-  %permutation = vector.constant 0 : vector<2xindex>
-  %xf = encoding.define #numeric_transform<family="sign_permute_hadamard", input_elems=2, output_elems=2> {permutation = %permutation : vector<2xindex>, signs = %signs : vector<2xi1>} : encoding<transform>
-  // ERROR@+1: ENCODING/019 {op_name="vector.transform", pass_name="vector-to-scalar"}
-  %r = vector.transform %v, %xf : vector<2xf32>, encoding<transform> -> vector<2xf32>
-  func.return %r : vector<2xf32>
-}
-
-// ====
-
 func.def @rejects_nonlocal_transform_descriptor(%v: vector<2xf32>, %xf: encoding<transform>) -> (vector<2xf32>) {
   // ERROR@+1: ENCODING/017 {op_name="vector.transform", pass_name="vector-to-scalar"}
   %r = vector.transform %v, %xf : vector<2xf32>, encoding<transform> -> vector<2xf32>
@@ -1072,7 +1050,7 @@ func.def @rejects_nonlocal_transform_descriptor(%v: vector<2xf32>, %xf: encoding
 // ====
 
 func.def @rejects_dynamic_transform_last_axis(%n: index, %v: vector<[%n]xf32>) -> (vector<[%n]xf32>) {
-  %xf = encoding.define #numeric_transform<family="hadamard"> {input_elems = %n : index, output_elems = %n : index} : encoding<transform>
+  %xf = encoding.define #transform.hadamard : encoding<transform>
   // ERROR@+1: SHAPE/006 {op_name="vector.transform", pass_name="vector-to-scalar"}
   %r = vector.transform %v, %xf : vector<[%n]xf32>, encoding<transform> -> vector<[%n]xf32>
   func.return %r : vector<[%n]xf32>
