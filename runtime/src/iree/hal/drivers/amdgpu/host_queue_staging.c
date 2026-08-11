@@ -127,7 +127,8 @@ static iree_status_t iree_hal_amdgpu_staging_pool_resolve_access_agents(
       .queue_count_per_physical_device = topology->gpu_agent_queue_count,
   };
   return iree_hal_amdgpu_access_agent_list_resolve(
-      topology, domain, queue_affinity_mask, out_agent_list);
+      topology, domain, queue_affinity_mask,
+      IREE_HAL_AMDGPU_MEMORY_AGENT_CLASS_ALL, out_agent_list);
 }
 
 static void iree_hal_amdgpu_staging_allocation_release(

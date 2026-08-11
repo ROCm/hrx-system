@@ -24,8 +24,6 @@ typedef struct iree_hal_amdgpu_virtual_memory_range_t {
   // Byte length of the ROCr virtual reservation.
   iree_device_size_t size;
 
-  // HAL queues permitted to access the reservation.
-  iree_hal_queue_affinity_t queue_affinity;
 } iree_hal_amdgpu_virtual_memory_range_t;
 
 struct iree_hal_physical_memory_t {
@@ -57,6 +55,9 @@ struct iree_hal_amdgpu_virtual_memory_state_t {
 
   // Unowned HAL device used to validate reservation ownership.
   iree_hal_device_t* device;
+
+  // Queues represented by the logical device that owns this VMM state.
+  iree_hal_queue_affinity_t supported_queue_affinity;
 
   // Unowned allocator statistics updated for physical allocations.
   iree_hal_allocator_statistics_t* statistics;
@@ -204,7 +205,32 @@ static iree_status_t iree_hal_amdgpu_virtual_memory_resolve_range(
   *out_range = (iree_hal_amdgpu_virtual_memory_range_t){
       .base_ptr = base_ptr,
       .size = iree_hal_buffer_allocation_size(virtual_buffer),
-      .queue_affinity = placement.queue_affinity,
+  };
+  return iree_ok_status();
+}
+
+// Resolves a reservation created by any AMDGPU logical device. ROCr virtual
+// addresses are process-global, so a different logical device may update the
+// access permissions for its own agents. Ownership-sensitive operations still
+// use iree_hal_amdgpu_virtual_memory_resolve_range above.
+static iree_status_t iree_hal_amdgpu_virtual_memory_resolve_access_range(
+    iree_hal_buffer_t* virtual_buffer,
+    iree_hal_amdgpu_virtual_memory_range_t* out_range) {
+  *out_range = (iree_hal_amdgpu_virtual_memory_range_t){0};
+  if (!iree_hal_amdgpu_buffer_uses_release_callback_function(
+          virtual_buffer, iree_hal_amdgpu_virtual_memory_release_reservation)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "virtual buffer is not an AMDGPU virtual-memory reservation");
+  }
+  void* base_ptr = iree_hal_amdgpu_buffer_device_pointer(virtual_buffer);
+  if (IREE_UNLIKELY(!base_ptr)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "AMDGPU virtual reservation has no device address");
+  }
+  *out_range = (iree_hal_amdgpu_virtual_memory_range_t){
+      .base_ptr = base_ptr,
+      .size = iree_hal_buffer_allocation_size(virtual_buffer),
   };
   return iree_ok_status();
 }
@@ -212,6 +238,7 @@ static iree_status_t iree_hal_amdgpu_virtual_memory_resolve_range(
 iree_status_t iree_hal_amdgpu_virtual_memory_state_create(
     const iree_hal_amdgpu_libhsa_t* libhsa,
     const iree_hal_amdgpu_topology_t* topology, iree_hal_device_t* device,
+    iree_hal_queue_affinity_t supported_queue_affinity,
     iree_hal_allocator_statistics_t* statistics,
     iree_allocator_t host_allocator,
     iree_hal_amdgpu_virtual_memory_state_t** out_state) {
@@ -228,6 +255,7 @@ iree_status_t iree_hal_amdgpu_virtual_memory_state_create(
       .libhsa = libhsa,
       .topology = topology,
       .device = device,
+      .supported_queue_affinity = supported_queue_affinity,
       .statistics = statistics,
       .host_allocator = host_allocator,
   };
@@ -417,11 +445,6 @@ iree_status_t iree_hal_amdgpu_virtual_memory_map(
   IREE_ASSERT_ARGUMENT(state);
   IREE_ASSERT_ARGUMENT(virtual_buffer);
   IREE_ASSERT_ARGUMENT(physical_memory);
-  if (physical_memory->state != state) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "physical memory belongs to a different AMDGPU "
-                            "VMM context");
-  }
   if (IREE_UNLIKELY(physical_offset != 0 ||
                     size != physical_memory->allocation_size)) {
     return iree_make_status(
@@ -450,8 +473,11 @@ iree_status_t iree_hal_amdgpu_virtual_memory_map(
         "AMDGPU virtual-memory map address is not aligned to the physical "
         "allocation granule");
   }
-  return iree_hsa_amd_vmem_map(IREE_LIBHSA(state->libhsa), map_ptr, size,
-                               /*in_offset=*/0,
+  // ROCr allocation handles and virtual addresses are process-global. The
+  // reservation and physical allocation may therefore originate from
+  // different logical-device allocators in the same process.
+  return iree_hsa_amd_vmem_map(IREE_LIBHSA(physical_memory->state->libhsa),
+                               map_ptr, size, /*in_offset=*/0,
                                physical_memory->allocation_handle, /*flags=*/0);
 }
 
@@ -481,6 +507,7 @@ iree_status_t iree_hal_amdgpu_virtual_memory_protect(
     iree_hal_amdgpu_virtual_memory_state_t* state,
     iree_hal_buffer_t* virtual_buffer, iree_device_size_t virtual_offset,
     iree_device_size_t size, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_amdgpu_memory_agent_classes_t agent_classes,
     iree_hal_memory_protection_t protection) {
   IREE_ASSERT_ARGUMENT(state);
   IREE_ASSERT_ARGUMENT(virtual_buffer);
@@ -495,8 +522,8 @@ iree_status_t iree_hal_amdgpu_virtual_memory_protect(
   }
 
   iree_hal_amdgpu_virtual_memory_range_t range;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_virtual_memory_resolve_range(
-      state, virtual_buffer, &range));
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_virtual_memory_resolve_access_range(
+      virtual_buffer, &range));
   if (IREE_UNLIKELY(size == 0 ||
                     !iree_hal_amdgpu_virtual_memory_range_is_in_bounds(
                         range.size, virtual_offset, size))) {
@@ -506,13 +533,13 @@ iree_status_t iree_hal_amdgpu_virtual_memory_protect(
   }
 
   const iree_hal_amdgpu_queue_affinity_domain_t domain = {
-      .supported_affinity = range.queue_affinity,
+      .supported_affinity = state->supported_queue_affinity,
       .physical_device_count = state->topology->gpu_agent_count,
       .queue_count_per_physical_device = state->topology->gpu_agent_queue_count,
   };
   iree_hal_amdgpu_access_agent_list_t agent_list;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_access_agent_list_resolve(
-      state->topology, domain, queue_affinity, &agent_list));
+      state->topology, domain, queue_affinity, agent_classes, &agent_list));
 
   hsa_amd_memory_access_desc_t access_descs[IREE_HAL_AMDGPU_MAX_CPU_AGENT +
                                             IREE_HAL_AMDGPU_MAX_GPU_AGENT];

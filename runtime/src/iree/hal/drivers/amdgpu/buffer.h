@@ -128,6 +128,11 @@ bool iree_hal_amdgpu_buffer_uses_release_callback(
     iree_hal_buffer_t* buffer,
     iree_hal_buffer_release_callback_t release_callback);
 
+// Returns true if |buffer| is a direct AMDGPU buffer using the given callback
+// function, regardless of callback user data.
+bool iree_hal_amdgpu_buffer_uses_release_callback_function(
+    iree_hal_buffer_t* buffer, iree_hal_buffer_release_fn_t release_fn);
+
 // Disarms callback-owned storage that has already been released externally.
 //
 // |buffer| must be a direct AMDGPU buffer using exactly |release_callback|.

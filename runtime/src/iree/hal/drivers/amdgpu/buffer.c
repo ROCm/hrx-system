@@ -249,6 +249,17 @@ bool iree_hal_amdgpu_buffer_uses_release_callback(
          buffer->release_callback.user_data == release_callback.user_data;
 }
 
+bool iree_hal_amdgpu_buffer_uses_release_callback_function(
+    iree_hal_buffer_t* base_buffer, iree_hal_buffer_release_fn_t release_fn) {
+  if (!iree_hal_resource_is((const iree_hal_resource_t*)base_buffer,
+                            &iree_hal_amdgpu_buffer_vtable)) {
+    return false;
+  }
+  const iree_hal_amdgpu_buffer_t* buffer =
+      (const iree_hal_amdgpu_buffer_t*)base_buffer;
+  return buffer->release_callback.fn == release_fn;
+}
+
 void iree_hal_amdgpu_buffer_disarm_storage(
     iree_hal_buffer_t* base_buffer,
     iree_hal_buffer_release_callback_t release_callback) {

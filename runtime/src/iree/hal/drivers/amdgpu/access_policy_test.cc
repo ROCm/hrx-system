@@ -58,7 +58,8 @@ TEST(AccessPolicyTest, AnySelectsLogicalTopologyAgents) {
 
   iree_hal_amdgpu_access_agent_list_t agent_list;
   IREE_ASSERT_OK(iree_hal_amdgpu_access_agent_list_resolve(
-      &topology, ThreeGpuDomain(), IREE_HAL_QUEUE_AFFINITY_ANY, &agent_list));
+      &topology, ThreeGpuDomain(), IREE_HAL_QUEUE_AFFINITY_ANY,
+      IREE_HAL_AMDGPU_MEMORY_AGENT_CLASS_ALL, &agent_list));
 
   EXPECT_EQ(agent_list.count, 5u);
   EXPECT_TRUE(AgentListContains(agent_list, topology.cpu_agents[0]));
@@ -73,7 +74,8 @@ TEST(AccessPolicyTest, PhysicalDeviceAffinitySelectsGpuAndNearestCpu) {
 
   iree_hal_amdgpu_access_agent_list_t agent_list;
   IREE_ASSERT_OK(iree_hal_amdgpu_access_agent_list_resolve(
-      &topology, ThreeGpuDomain(), 0xCull, &agent_list));
+      &topology, ThreeGpuDomain(), 0xCull,
+      IREE_HAL_AMDGPU_MEMORY_AGENT_CLASS_ALL, &agent_list));
 
   EXPECT_EQ(agent_list.count, 2u);
   EXPECT_TRUE(AgentListContains(agent_list, topology.cpu_agents[0]));
@@ -85,7 +87,8 @@ TEST(AccessPolicyTest, CrossDeviceAffinityDeduplicatesCpuAgents) {
 
   iree_hal_amdgpu_access_agent_list_t agent_list;
   IREE_ASSERT_OK(iree_hal_amdgpu_access_agent_list_resolve(
-      &topology, ThreeGpuDomain(), 0x5ull, &agent_list));
+      &topology, ThreeGpuDomain(), 0x5ull,
+      IREE_HAL_AMDGPU_MEMORY_AGENT_CLASS_ALL, &agent_list));
 
   EXPECT_EQ(agent_list.count, 3u);
   EXPECT_TRUE(AgentListContains(agent_list, topology.cpu_agents[0]));
@@ -98,9 +101,52 @@ TEST(AccessPolicyTest, RejectsInvalidGpuCpuMap) {
   topology.gpu_cpu_map[1] = 2;
 
   iree_hal_amdgpu_access_agent_list_t agent_list;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        iree_hal_amdgpu_access_agent_list_resolve(
-                            &topology, ThreeGpuDomain(), 0x4ull, &agent_list));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      iree_hal_amdgpu_access_agent_list_resolve(
+          &topology, ThreeGpuDomain(), 0x4ull,
+          IREE_HAL_AMDGPU_MEMORY_AGENT_CLASS_ALL, &agent_list));
+}
+
+TEST(AccessPolicyTest, AccessScopeSelectsAgentClass) {
+  iree_hal_amdgpu_topology_t topology = MakeThreeGpuTopology();
+
+  iree_hal_amdgpu_access_agent_list_t host_agents;
+  IREE_ASSERT_OK(iree_hal_amdgpu_access_agent_list_resolve(
+      &topology, ThreeGpuDomain(), 0x5ull,
+      IREE_HAL_AMDGPU_MEMORY_AGENT_CLASS_HOST, &host_agents));
+  EXPECT_EQ(host_agents.count, 1u);
+  EXPECT_TRUE(AgentListContains(host_agents, topology.cpu_agents[0]));
+
+  iree_hal_amdgpu_access_agent_list_t device_agents;
+  IREE_ASSERT_OK(iree_hal_amdgpu_access_agent_list_resolve(
+      &topology, ThreeGpuDomain(), 0x5ull,
+      IREE_HAL_AMDGPU_MEMORY_AGENT_CLASS_DEVICE, &device_agents));
+  EXPECT_EQ(device_agents.count, 2u);
+  EXPECT_TRUE(AgentListContains(device_agents, topology.gpu_agents[0]));
+  EXPECT_TRUE(AgentListContains(device_agents, topology.gpu_agents[1]));
+}
+
+TEST(AccessPolicyTest, RequiresAnAgentClass) {
+  iree_hal_amdgpu_topology_t topology = MakeThreeGpuTopology();
+
+  iree_hal_amdgpu_access_agent_list_t agent_list;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_amdgpu_access_agent_list_resolve(
+          &topology, ThreeGpuDomain(), IREE_HAL_QUEUE_AFFINITY_ANY,
+          IREE_HAL_AMDGPU_MEMORY_AGENT_CLASS_NONE, &agent_list));
+}
+
+TEST(AccessPolicyTest, RejectsUnknownAgentClasses) {
+  iree_hal_amdgpu_topology_t topology = MakeThreeGpuTopology();
+
+  iree_hal_amdgpu_access_agent_list_t agent_list;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_amdgpu_access_agent_list_resolve(
+          &topology, ThreeGpuDomain(), IREE_HAL_QUEUE_AFFINITY_ANY,
+          (iree_hal_amdgpu_memory_agent_classes_t)(1u << 7), &agent_list));
 }
 
 }  // namespace

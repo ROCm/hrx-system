@@ -301,7 +301,7 @@ static iree_status_t iree_hal_amdgpu_allocator_resolve_access_agents(
   return iree_hal_amdgpu_access_agent_list_resolve(
       allocator->topology,
       iree_hal_amdgpu_allocator_queue_affinity_domain(allocator),
-      queue_affinity, out_agent_list);
+      queue_affinity, IREE_HAL_AMDGPU_MEMORY_AGENT_CLASS_ALL, out_agent_list);
 }
 
 static bool iree_hal_amdgpu_allocator_find_gpu_agent_ordinal(
@@ -416,11 +416,19 @@ static iree_status_t iree_hal_amdgpu_allocator_query_device_pointer_range(
   }
 
   iree_host_size_t owner_ordinal = 0;
-  if (IREE_UNLIKELY(!iree_hal_amdgpu_allocator_find_gpu_agent_ordinal(
-          allocator, pointer_info.agentOwner, &owner_ordinal))) {
+  const bool owner_is_local_gpu =
+      iree_hal_amdgpu_allocator_find_gpu_agent_ordinal(
+          allocator, pointer_info.agentOwner, &owner_ordinal);
+  hsa_device_type_t owner_device_type = HSA_DEVICE_TYPE_CPU;
+  IREE_RETURN_IF_ERROR(iree_hsa_agent_get_info(
+      IREE_LIBHSA(allocator->libhsa), pointer_info.agentOwner,
+      HSA_AGENT_INFO_DEVICE, &owner_device_type));
+  const bool owner_is_gpu = owner_device_type == HSA_DEVICE_TYPE_GPU;
+  const bool owner_is_cpu = owner_device_type == HSA_DEVICE_TYPE_CPU;
+  if (IREE_UNLIKELY(!owner_is_gpu && !owner_is_cpu)) {
     return iree_make_status(
         IREE_STATUS_PERMISSION_DENIED,
-        "device allocation is owned by an HSA GPU agent outside the AMDGPU HAL "
+        "device allocation is owned by an HSA agent outside the AMDGPU HAL "
         "logical topology");
   }
 
@@ -439,23 +447,29 @@ static iree_status_t iree_hal_amdgpu_allocator_query_device_pointer_range(
   }
 
   const iree_hal_amdgpu_physical_device_t* owner_device =
-      allocator->logical_device->physical_devices[owner_ordinal];
+      owner_is_local_gpu
+          ? allocator->logical_device->physical_devices[owner_ordinal]
+          : NULL;
   const bool direct_host_access =
       owner_device && owner_device->memory_system.svm.direct_host_access;
-  iree_hal_memory_type_t actual_memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  if (fine_grained && direct_host_access) {
-    actual_memory_type |=
-        IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_HOST_COHERENT;
+  iree_hal_memory_type_t actual_memory_type = 0;
+  if (owner_is_gpu) {
+    actual_memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+    if (fine_grained && direct_host_access) {
+      actual_memory_type |= IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+                            IREE_HAL_MEMORY_TYPE_HOST_COHERENT;
+    }
+  } else {
+    actual_memory_type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                         IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+                         IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+    if (fine_grained) {
+      actual_memory_type |= IREE_HAL_MEMORY_TYPE_HOST_COHERENT;
+    }
   }
 
   const iree_hal_memory_type_t required_memory_type =
       requested_memory_type & ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
-  if (IREE_UNLIKELY(iree_any_bit_set(required_memory_type,
-                                     IREE_HAL_MEMORY_TYPE_HOST_LOCAL))) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "device allocation import cannot satisfy HOST_LOCAL memory");
-  }
   if (IREE_UNLIKELY(
           !iree_all_bits_set(actual_memory_type, required_memory_type))) {
     return iree_make_status(
@@ -485,7 +499,10 @@ static iree_status_t iree_hal_amdgpu_allocator_query_device_pointer_range(
   out_range->agent_base = pointer_info.agentBaseAddress;
   out_range->allocation_size = allocation_size;
   out_range->memory_type = actual_memory_type;
-  out_range->physical_device_ordinal = (uint32_t)owner_ordinal;
+  // CPU and external GPU owners have no local profiling ordinal, but their
+  // allocations can still be imported and made accessible to local agents.
+  out_range->physical_device_ordinal =
+      owner_is_local_gpu ? (uint32_t)owner_ordinal : UINT32_MAX;
   return iree_ok_status();
 }
 
@@ -772,8 +789,9 @@ iree_status_t iree_hal_amdgpu_allocator_create(
     iree_hal_allocator_statistics_t* statistics = NULL;
     IREE_STATISTICS(statistics = &allocator->statistics);
     status = iree_hal_amdgpu_virtual_memory_state_create(
-        libhsa, topology, (iree_hal_device_t*)logical_device, statistics,
-        host_allocator, &allocator->virtual_memory);
+        libhsa, topology, (iree_hal_device_t*)logical_device,
+        logical_device->queue_affinity_mask, statistics, host_allocator,
+        &allocator->virtual_memory);
   }
 
   if (iree_status_is_ok(status)) {
@@ -992,14 +1010,14 @@ iree_hal_amdgpu_allocator_query_buffer_compatibility(
                         IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
                             IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE) &&
       !iree_all_bits_set(params->type, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL);
+  const bool placement_is_device_addressable = iree_any_bit_set(
+      placement.memory_type,
+      IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE);
   const bool device_allocation_import_compatible =
       allocation_size_valid && allocation_alignment_valid &&
-      iree_all_bits_set(placement.memory_type,
-                        IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL);
+      placement_is_device_addressable;
   const bool device_allocation_export_compatible =
-      allocation_compatible &&
-      iree_all_bits_set(placement.memory_type,
-                        IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL);
+      allocation_compatible && placement_is_device_addressable;
   if (!allocation_compatible && !host_allocation_import_compatible &&
       !device_allocation_import_compatible) {
     return IREE_HAL_BUFFER_COMPATIBILITY_NONE;
@@ -1880,12 +1898,13 @@ static iree_status_t iree_hal_amdgpu_allocator_export_buffer(
   switch (requested_type) {
     case IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION: {
       if (IREE_UNLIKELY(
-              !iree_all_bits_set(iree_hal_buffer_memory_type(buffer),
-                                 IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL))) {
+              !iree_any_bit_set(iree_hal_buffer_memory_type(buffer),
+                                IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
+                                    IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE))) {
         return iree_make_status(
             IREE_STATUS_UNAVAILABLE,
-            "AMDGPU buffer memory type is not supported for export as an "
-            "external device allocation");
+            "AMDGPU buffer is not device-visible and cannot be exported as "
+            "an external device allocation");
       }
       out_external_buffer->handle.device_allocation.ptr =
           (uint64_t)(uintptr_t)view_ptr;
@@ -2041,7 +2060,23 @@ static iree_status_t iree_hal_amdgpu_allocator_virtual_memory_protect(
       iree_hal_amdgpu_allocator_require_virtual_memory(allocator));
   return iree_hal_amdgpu_virtual_memory_protect(
       allocator->virtual_memory, virtual_buffer, virtual_offset, size,
-      queue_affinity, protection);
+      queue_affinity, IREE_HAL_AMDGPU_MEMORY_AGENT_CLASS_ALL, protection);
+}
+
+IREE_API_EXPORT iree_status_t
+iree_hal_amdgpu_allocator_virtual_memory_protect_agents(
+    iree_hal_allocator_t* base_allocator, iree_hal_buffer_t* virtual_buffer,
+    iree_device_size_t virtual_offset, iree_device_size_t size,
+    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_amdgpu_memory_agent_classes_t agent_classes,
+    iree_hal_memory_protection_t protection) {
+  iree_hal_amdgpu_allocator_t* allocator =
+      iree_hal_amdgpu_allocator_cast(base_allocator);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_allocator_require_virtual_memory(allocator));
+  return iree_hal_amdgpu_virtual_memory_protect(
+      allocator->virtual_memory, virtual_buffer, virtual_offset, size,
+      queue_affinity, agent_classes, protection);
 }
 
 static iree_status_t iree_hal_amdgpu_allocator_virtual_memory_advise(
