@@ -719,6 +719,37 @@ TEST_F(PrintOpTest, SuccessorReferenceSynthesizesBlockLabels) {
             "^_bb1");
 }
 
+TEST_F(PrintOpTest, SyntheticBlockLabelAvoidsExplicitCollision) {
+  loom_symbol_ref_t callee = make_symbol("cfg");
+
+  loom_op_t* func_op = NULL;
+  IREE_ASSERT_OK(loom_test_func_build(&builder_, 0, 0, 0, callee, NULL, 0, NULL,
+                                      0, NULL, 0, NULL, 0,
+                                      LOOM_LOCATION_UNKNOWN, &func_op));
+
+  loom_region_t* body = loom_test_func_body(func_op);
+  ASSERT_NE(body, nullptr);
+  loom_block_t* target_block = nullptr;
+  IREE_ASSERT_OK(loom_region_append_block(module_, body, &target_block));
+  loom_block_t* collision_block = nullptr;
+  IREE_ASSERT_OK(loom_region_append_block(module_, body, &collision_block));
+  IREE_ASSERT_OK(loom_module_intern_string(module_, IREE_SV("_bb1"),
+                                           &collision_block->label_id));
+
+  loom_builder_ip_t saved = loom_builder_enter_region(&builder_, func_op, body);
+  loom_op_t* branch_op = NULL;
+  IREE_ASSERT_OK(loom_test_br_build(&builder_, target_block,
+                                    LOOM_LOCATION_UNKNOWN, &branch_op));
+  loom_builder_restore(&builder_, saved);
+
+  EXPECT_EQ(print_op(func_op, LOOM_TEXT_PRINT_DEFAULT),
+            "test.func @cfg() {\n"
+            "  test.br ^_bb1_1\n"
+            "^_bb1_1:\n"
+            "^_bb1:\n"
+            "}\n");
+}
+
 TEST_F(PrintOpTest, SyntheticEntryBlockLabelOmitsParentDeclaredArgs) {
   loom_symbol_ref_t callee = make_symbol("cycle");
   loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
