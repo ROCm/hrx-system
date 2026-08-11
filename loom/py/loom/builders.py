@@ -19,7 +19,7 @@ from loom.builder_model import (
     BuilderParam,
     BuilderParamKind,
     BuilderSignature,
-    python_name,
+    dialect_python_name,
     signatures_for_ops,
 )
 from loom.builtin_types import ALL_BUILTIN_TYPES
@@ -753,7 +753,7 @@ def _build_dialect_registries(ops: Sequence[Op]) -> dict[str, _DialectRegistry]:
         grouped_ops.setdefault(dialect_name, []).append(op)
     registries: dict[str, _DialectRegistry] = {}
     for dialect_name, dialect_ops in sorted(grouped_ops.items()):
-        attr_name = python_name(dialect_name)
+        attr_name = dialect_python_name(dialect_name)
         registries[attr_name] = _DialectRegistry(
             attr_name=attr_name,
             ir_name=dialect_name,
@@ -775,6 +775,7 @@ def default_ops() -> tuple[Op, ...]:
     from loom.dialect.kernel import ALL_KERNEL_OPS
     from loom.dialect.llvmir import ALL_LLVMIR_OPS
     from loom.dialect.low import ALL_LOW_OPS
+    from loom.dialect.module import ALL_MODULE_OPS
     from loom.dialect.pass_ import ALL_PASS_OPS
     from loom.dialect.pool import ALL_POOL_OPS
     from loom.dialect.sanitizer import ALL_SANITIZER_OPS
@@ -797,6 +798,7 @@ def default_ops() -> tuple[Op, ...]:
         *ALL_KERNEL_OPS,
         *ALL_LLVMIR_OPS,
         *ALL_LOW_OPS,
+        *ALL_MODULE_OPS,
         *ALL_PASS_OPS,
         *ALL_POOL_OPS,
         *ALL_SANITIZER_OPS,

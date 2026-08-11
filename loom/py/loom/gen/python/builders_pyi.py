@@ -20,6 +20,7 @@ from loom.builder_model import (
     BuilderParam,
     BuilderParamKind,
     BuilderSignature,
+    dialect_python_name,
     python_name,
     signatures_for_ops,
 )
@@ -239,7 +240,7 @@ def _dialect_stubs(
 
     dialects: list[_DialectStub] = []
     for dialect_name, dialect_ops in sorted(grouped_ops.items()):
-        attr_name = python_name(dialect_name)
+        attr_name = dialect_python_name(dialect_name)
         package_name = _package_name(dialect_name)
         class_name = _builder_class_name(attr_name)
         all_signatures = signatures_for_ops(dialect_ops)

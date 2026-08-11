@@ -1261,9 +1261,15 @@ class Printer:
                     f"#{encoding.alias} = "
                     f"{_format_encoding_instance(encoding, use_alias=False)}"
                 )
-        for operation in module.body.ops:
+        for operation_index, operation in enumerate(module.body.ops):
+            op_decl = self._registry.get(operation.name)
+            if (
+                operation_index > 0
+                and op_decl is not None
+                and _is_symbol_define(op_decl)
+            ):
+                self._lines.append("")
             self._print_top_level_op(operation, module)
-            self._lines.append("")
         # Remove trailing blank line.
         while self._lines and self._lines[-1] == "":
             self._lines.pop()

@@ -209,6 +209,7 @@ loom_cc_library(
     loom::ops::index
     loom::ops::kernel
     loom::ops::low
+    loom::ops::module
     loom::ops::pass
     loom::ops::pool
     loom::ops::sanitizer
@@ -287,6 +288,7 @@ loom_cc_test(
     loom::ops::func
     loom::ops::index
     loom::ops::kernel
+    loom::ops::module
     loom::ops::test
     loom::ops::vector
     loom::util::fact_table

@@ -19,6 +19,7 @@ from loom.dialect.index.builders import IndexBuilder
 from loom.dialect.kernel.builders import KernelBuilder
 from loom.dialect.llvmir.builders import LlvmirBuilder
 from loom.dialect.low.builders import LowBuilder
+from loom.dialect.module.builders import ModuleBuilder
 from loom.dialect.pass_.builders import PassBuilder
 from loom.dialect.pool.builders import PoolBuilder
 from loom.dialect.sanitizer.builders import SanitizerBuilder
@@ -72,6 +73,8 @@ class LoomBuilder:
     def llvmir(self) -> LlvmirBuilder: ...
     @property
     def low(self) -> LowBuilder: ...
+    @property
+    def module_(self) -> ModuleBuilder: ...
     @property
     def pass_(self) -> PassBuilder: ...
     @property

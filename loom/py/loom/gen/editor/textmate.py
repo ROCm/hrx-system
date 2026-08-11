@@ -422,6 +422,7 @@ def _default_grammar_inputs() -> tuple[tuple[Op, ...], tuple[TypeDef, ...]]:
     from loom.dialect.index import ALL_INDEX_OPS
     from loom.dialect.kernel import ALL_KERNEL_OPS, ALL_KERNEL_TYPES
     from loom.dialect.llvmir import ALL_LLVMIR_OPS
+    from loom.dialect.module import ALL_MODULE_OPS
     from loom.dialect.pool import ALL_POOL_OPS
     from loom.dialect.sanitizer import ALL_SANITIZER_OPS
     from loom.dialect.scalar import ALL_SCALAR_OPS
@@ -450,6 +451,7 @@ def _default_grammar_inputs() -> tuple[tuple[Op, ...], tuple[TypeDef, ...]]:
         *ALL_INDEX_OPS,
         *ALL_KERNEL_OPS,
         *ALL_LLVMIR_OPS,
+        *ALL_MODULE_OPS,
     )
     type_defs = (
         *ALL_BUILTIN_TYPES,
