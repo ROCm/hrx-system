@@ -66,6 +66,9 @@ bool loom_symbol_pruning_symbol_is_root(void* user_data,
                                         loom_symbol_id_t symbol_id,
                                         const loom_symbol_t* symbol) {
   (void)symbol_id;
+  // Unlinked placeholders become live only through a reachable dependency.
+  // Availability metadata may name them but must never root them indirectly.
+  if (!symbol->defining_op) return false;
   const loom_symbol_pruning_options_t* options =
       (const loom_symbol_pruning_options_t*)user_data;
   return !loom_symbol_pruning_symbol_is_erasable_with_options(module, symbol,

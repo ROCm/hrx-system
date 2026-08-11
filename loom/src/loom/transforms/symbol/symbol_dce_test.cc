@@ -23,10 +23,12 @@
 #include "loom/ops/config/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/module/ops.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/target/test/descriptors.h"
 #include "loom/testing/module_ptr.h"
+#include "loom/verify/verify.h"
 
 namespace loom {
 namespace {
@@ -48,6 +50,7 @@ class SymbolDCETest : public ::testing::Test {
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_LOW, loom_low_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_MODULE, loom_module_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     low_descriptor_registry_ = {};
@@ -103,7 +106,9 @@ class SymbolDCETest : public ::testing::Test {
   }
 
   void RunSymbolDCE(loom_module_t* module, int64_t expected_symbols_eliminated,
-                    int64_t expected_functions_eliminated) {
+                    int64_t expected_functions_eliminated,
+                    int64_t expected_import_anchors_eliminated = 0,
+                    int64_t expected_imports_eliminated = 0) {
     iree_arena_allocator_t pass_arena;
     iree_arena_initialize(&block_pool_, &pass_arena);
     const loom_pass_info_t* pass_info = loom_symbol_dce_pass_info();
@@ -121,9 +126,25 @@ class SymbolDCETest : public ::testing::Test {
         storage + statistic_layout->fields[0].offset);
     const int64_t functions_eliminated = *reinterpret_cast<const int64_t*>(
         storage + statistic_layout->fields[1].offset);
+    const int64_t import_anchors_eliminated = *reinterpret_cast<const int64_t*>(
+        storage + statistic_layout->fields[2].offset);
+    const int64_t imports_eliminated = *reinterpret_cast<const int64_t*>(
+        storage + statistic_layout->fields[3].offset);
     EXPECT_EQ(symbols_eliminated, expected_symbols_eliminated);
     EXPECT_EQ(functions_eliminated, expected_functions_eliminated);
+    EXPECT_EQ(import_anchors_eliminated, expected_import_anchors_eliminated);
+    EXPECT_EQ(imports_eliminated, expected_imports_eliminated);
     iree_arena_deinitialize(&pass_arena);
+  }
+
+  void VerifyOk(loom_module_t* module) {
+    loom_verify_options_t options = {
+        /*.sink=*/{loom_diagnostic_stderr_sink, NULL},
+        /*.max_errors=*/20,
+    };
+    loom_verify_result_t result = {};
+    IREE_EXPECT_OK(loom_verify_module(module, &options, &result));
+    EXPECT_EQ(result.error_count, 0u);
   }
 
   iree_status_t WriteModule(const loom_module_t* module,
@@ -257,6 +278,43 @@ func.def public @entry() -> (index) {
   EXPECT_NE(pruned_text.find("config.decl @live_config"), std::string::npos);
   EXPECT_EQ(pruned_text.find("config.decl @dead_config"), std::string::npos);
   EXPECT_NE(pruned_text.find("config.get @live_config"), std::string::npos);
+}
+
+TEST_F(SymbolDCETest, PrunesProviderAnchorsAndEmptyImports) {
+  const char* source = R"(
+module.import "partial" [@dead_decl, @live_decl]
+module.import "orphan" [@orphan]
+
+func.decl @live_decl()
+func.decl @dead_decl()
+
+func.def public @entry() {
+  func.call @live_decl() : ()
+  func.return
+}
+)";
+
+  ModulePtr module(Parse(iree_make_cstring_view(source)));
+  ASSERT_NE(module.get(), nullptr);
+  VerifyOk(module.get());
+
+  RunSymbolDCE(module.get(), 1, 1, 2, 1);
+  VerifyOk(module.get());
+
+  std::string pruned_text = Print(module.get());
+  EXPECT_NE(pruned_text.find("module.import \"partial\" [@live_decl]"),
+            std::string::npos);
+  EXPECT_EQ(pruned_text.find("module.import \"orphan\""), std::string::npos);
+  EXPECT_EQ(pruned_text.find("@dead_decl"), std::string::npos);
+  EXPECT_EQ(pruned_text.find("@orphan"), std::string::npos);
+  EXPECT_NE(pruned_text.find("func.decl @live_decl()"), std::string::npos);
+  EXPECT_NE(pruned_text.find("func.call @live_decl() : ()"), std::string::npos);
+
+  loom_string_id_t orphan_name_id =
+      loom_module_lookup_string(module.get(), IREE_SV("orphan"));
+  ASSERT_NE(orphan_name_id, LOOM_STRING_ID_INVALID);
+  EXPECT_EQ(loom_module_find_symbol(module.get(), orphan_name_id),
+            LOOM_SYMBOL_ID_INVALID);
 }
 
 }  // namespace

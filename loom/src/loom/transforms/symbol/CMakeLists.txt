@@ -145,6 +145,7 @@ loom_cc_library(
     loom::analysis::symbol_liveness
     loom::analysis::symbol_references
     loom::ir
+    loom::ops::module
     loom::pass::types
     loom::target::pass_environment
   PUBLIC
@@ -170,10 +171,27 @@ loom_cc_test(
     loom::ops::config
     loom::ops::func
     loom::ops::low
+    loom::ops::module
     loom::ops::target
     loom::ops::test
     loom::target::test::descriptors
     loom::testing::module_ptr
+    loom::verify
+)
+
+loom_cc_benchmark(
+  NAME
+    symbol_dce_benchmark
+  SRCS
+    "symbol_dce_benchmark.cc"
+  DEPS
+    ::symbol_dce
+    iree::base::internal::arena
+    iree::testing::benchmark_main
+    loom::ir
+    loom::ops::module
+    loom::ops::test
+  TESTONLY
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
