@@ -1080,6 +1080,13 @@ iree_status_t loom_low_lower_allocate_function_array(
     loom_low_lower_context_t* context, iree_host_size_t count,
     iree_host_size_t element_size, void** out_ptr);
 
+// Allocates temporary planning storage. The allocation is invalid when the
+// current source-op selection callback returns and must not be retained by a
+// selected plan.
+iree_status_t loom_low_lower_allocate_planning_array(
+    loom_low_lower_context_t* context, iree_host_size_t count,
+    iree_host_size_t element_size, void** out_ptr);
+
 // Allocates temporary low-IR construction storage. The allocation is invalid
 // when the active function-construction, source-op, or target setup or
 // finalization callback returns and must not be retained by plans, target

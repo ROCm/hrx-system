@@ -240,6 +240,10 @@ struct loom_low_lower_context_t {
   loom_low_lower_result_t* result;
   // Arena retaining function plans, maps, analyses, and target state.
   iree_arena_allocator_t function_arena;
+  // Arena reset after each source-op planning callback.
+  iree_arena_allocator_t planning_arena;
+  // True only while a source-op planning callback may request scratch storage.
+  bool planning_arena_active;
   // Arena reset after each bounded low-IR emission scope.
   iree_arena_allocator_t emission_arena;
   // True only while a low-IR builder callback may request emission storage.
