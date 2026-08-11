@@ -27,6 +27,7 @@ iree_py_library(
     name = "checked_in_artifacts",
     srcs = ["checked_in_artifacts.py"],
     tags = ["skip-bazel_to_cmake"],
+    visibility = ["//loom/build_tools:__pkg__"],
     deps = [
         ":bootstrap",
         "//loom/build_tools/amdgpu:target_config",

@@ -15,6 +15,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(REPO_ROOT / "loom/py"))
+
+from loom.gen import checked_in_artifacts
 
 from build_tools.devtools import project_presubmit
 from build_tools.devtools.source_lock import NonEmptyTrackedFileSnapshot
@@ -77,15 +80,19 @@ def should_run_presubmit(files_from: str | None) -> bool:
     )
 
 
-def run_generated_builder_check() -> bool:
-    return run_command(
-        [
-            sys.executable,
-            "loom/py/loom/gen/run.py",
-            "builders_pyi",
-            "--check",
-        ],
-        "Generated builder stubs",
+def run_generated_artifact_maintenance(fix: bool) -> bool:
+    print("loom presubmit: Checked-in generated artifacts")
+    result = checked_in_artifacts.maintain_checked_in_artifacts(
+        "update" if fix else "check"
+    )
+    if not result.ok:
+        return False
+    if not fix:
+        return True
+    return project_presubmit.stage_changed_paths(
+        PROJECT_NAME,
+        REPO_ROOT,
+        result.changed_paths,
     )
 
 
@@ -149,7 +156,7 @@ def run_presubmit(args: argparse.Namespace) -> int:
         return 0
     ok = True
     if args.hygiene:
-        ok = run_generated_builder_check() and ok
+        ok = run_generated_artifact_maintenance(args.fix) and ok
         ok = run_source_lint() and ok
     if args.tests:
         if args.lane == "bazel":

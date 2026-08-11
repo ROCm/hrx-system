@@ -12,6 +12,7 @@ import argparse
 import os
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 CMAKE_BUILD_DIR_ENV = "IREE_CMAKE_BUILD_DIR"
@@ -24,8 +25,16 @@ def add_common_arguments(
 ) -> None:
     """Adds the phases and inputs understood by every project presubmit."""
     mutation = parser.add_mutually_exclusive_group()
-    mutation.add_argument("--fix", action="store_true", help="Accepted for symmetry.")
-    mutation.add_argument("--check", action="store_true", help="Accepted for symmetry.")
+    mutation.add_argument(
+        "--fix",
+        action="store_true",
+        help="Apply and stage supported project-local source maintenance.",
+    )
+    mutation.add_argument(
+        "--check",
+        action="store_true",
+        help="Check project-local source maintenance without writing files.",
+    )
     parser.add_argument(
         "--lane",
         choices=("bazel", "cmake"),
@@ -111,3 +120,49 @@ def run_command(
         f"{result.returncode}"
     )
     return False
+
+
+def stage_changed_paths(
+    project_name: str,
+    repo_root: Path,
+    paths: Sequence[str],
+) -> bool:
+    """Stages only named paths that still exist or are tracked deletions."""
+    exact_paths = tuple(sorted(set(paths)))
+    if not exact_paths:
+        return True
+
+    tracked_result = subprocess.run(
+        ["git", "--literal-pathspecs", "ls-files", "-z", "--", *exact_paths],
+        cwd=repo_root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if tracked_result.returncode != 0:
+        print(
+            f"{project_name} presubmit: failed to query tracked source updates",
+            file=sys.stderr,
+        )
+        if tracked_result.stderr:
+            print(
+                tracked_result.stderr.decode("utf-8", errors="replace").rstrip(),
+                file=sys.stderr,
+            )
+        return False
+
+    tracked_paths = {path for path in tracked_result.stdout.split(b"\0") if path}
+    stage_paths = [
+        path
+        for path in exact_paths
+        if path.encode("utf-8") in tracked_paths
+        or (repo_root / path).is_file()
+        or (repo_root / path).is_symlink()
+    ]
+    if not stage_paths:
+        return True
+    return run_command(
+        project_name,
+        ["git", "--literal-pathspecs", "add", "--", *stage_paths],
+        "Stage project source updates",
+        cwd=repo_root,
+    )

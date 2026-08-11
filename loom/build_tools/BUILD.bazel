@@ -17,7 +17,10 @@ py_test(
         "presubmit.py",
         "presubmit_test.py",
     ],
-    deps = ["//build_tools/devtools"],
+    deps = [
+        "//build_tools/devtools",
+        "//loom/py/loom/gen:checked_in_artifacts",
+    ],
 )
 
 py_test(
