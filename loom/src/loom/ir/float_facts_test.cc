@@ -532,6 +532,34 @@ TEST(FloatFacts, RawNanBitcastRemainsNonMaterializable) {
   EXPECT_TRUE(loom_value_facts_is_unknown(roundtrip_bits));
 }
 
+TEST(FloatFacts, ConstructsExactFactsFromDeclaredWidthBits) {
+  loom_value_facts_t bf16_value = loom_value_facts_unknown();
+  ASSERT_TRUE(loom_value_facts_from_float_bits(
+      LOOM_SCALAR_TYPE_BF16, UINT64_C(0xFFFF000000003F80), &bf16_value));
+  EXPECT_DOUBLE_EQ(ExactFloatValue(LOOM_SCALAR_TYPE_BF16, bf16_value), 1.0);
+
+  loom_value_facts_t negative_zero = loom_value_facts_unknown();
+  ASSERT_TRUE(loom_value_facts_from_float_bits(
+      LOOM_SCALAR_TYPE_F32, UINT64_C(0xFFFFFFFF80000000), &negative_zero));
+  const double negative_zero_value =
+      ExactFloatValue(LOOM_SCALAR_TYPE_F32, negative_zero);
+  EXPECT_EQ(negative_zero_value, 0.0);
+  EXPECT_TRUE(std::signbit(negative_zero_value));
+}
+
+TEST(FloatFacts, ConstructsKnownNanFactsFromRawPayloads) {
+  loom_value_facts_t signaling_nan = loom_value_facts_unknown();
+  ASSERT_TRUE(loom_value_facts_from_float_bits(
+      LOOM_SCALAR_TYPE_F32, UINT32_C(0x7F800001), &signaling_nan));
+  EXPECT_TRUE(loom_value_facts_is_nan(signaling_nan));
+  EXPECT_FALSE(loom_value_facts_is_exact(signaling_nan));
+
+  loom_value_facts_t unsupported = loom_value_facts_exact_i64(7);
+  EXPECT_FALSE(loom_value_facts_from_float_bits(
+      LOOM_SCALAR_TYPE_I32, UINT32_C(0x3F800000), &unsupported));
+  EXPECT_TRUE(loom_value_facts_is_exact(unsupported));
+}
+
 TEST(FloatFacts, BitcastPreservesBF16SubnormalUnderFlushToZero) {
   loom_value_facts_t source_bits = loom_value_facts_exact_i64(1);
   loom_value_facts_t value = loom_value_facts_unknown();
