@@ -83,6 +83,7 @@ static iree_status_t RegisterFakeTargetContext(loom_context_t* context) {
 
 static const loom_target_provider_t kFakeTargetProvider = {
     /*.profile_type=*/&kFakeTargetProfileType,
+    /*.materialize_definition=*/nullptr,
     /*.register_context=*/RegisterFakeTargetContext,
     /*.initialize_low_descriptor_registry=*/nullptr,
     /*.initialize_low_lower_policy_registry=*/nullptr,

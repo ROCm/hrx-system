@@ -18,6 +18,8 @@
 extern "C" {
 #endif
 
+typedef struct loom_target_provider_t loom_target_provider_t;
+
 typedef struct loom_target_function_version_t {
   // Generic compiler function-version base. Must remain the first field.
   loom_function_version_t base;
@@ -29,14 +31,20 @@ typedef struct loom_target_function_version_t {
   // Facts projected from the authored target witness, or NULL when absent.
   const loom_target_facts_t* authored_target_facts;
 
+  // Non-NULL target-family provider selected with the structured profile. Its
+  // |profile_type| is non-NULL and remains paired with every derived context so
+  // artifact boundaries can materialize facts without rediscovering their
+  // family.
+  const loom_target_provider_t* target_provider;
+
   // Exact invocation context inherited by retained semantic callees.
   //
-  // These facts contain the profile projection and authored target requirement
-  // without function-local ABI or export overlays.
+  // This non-NULL fact set contains the profile projection and authored target
+  // requirement without function-local ABI or export overlays.
   const loom_target_facts_t* target_context_facts;
 
-  // Exact invocation-refined facts used to compile this function version,
-  // including its function-local ABI and export contract.
+  // Non-NULL exact invocation-refined facts used to compile this function
+  // version, including its function-local ABI and export contract.
   const loom_target_facts_t* effective_target_facts;
 } loom_target_function_version_t;
 
@@ -67,7 +75,6 @@ loom_target_function_version_effective_facts(
   const loom_target_function_version_t* target_version =
       loom_target_function_version_const_cast(version);
   if (target_version == NULL) return NULL;
-  IREE_ASSERT(target_version->effective_target_facts != NULL);
   return target_version->effective_target_facts;
 }
 
@@ -110,7 +117,6 @@ static inline loom_function_version_t*
 loom_target_function_version_snapshot_handle_at(
     const loom_target_function_version_snapshot_t* snapshot,
     loom_symbol_id_t symbol_id) {
-  IREE_ASSERT_LT(symbol_id, snapshot->symbol_count);
   return snapshot->version_handles_by_symbol != NULL
              ? snapshot->version_handles_by_symbol[symbol_id]
              : NULL;

@@ -123,9 +123,6 @@ iree_status_t loom_target_pass_resolve_function_facts(
   const loom_target_function_version_t* version =
       loom_target_function_version_const_cast(pass->function_version);
   if (version != NULL) {
-    IREE_ASSERT(version->base.function.op == function.op &&
-                version->base.function.vtable == function.vtable);
-    IREE_ASSERT(version->effective_target_facts != NULL);
     *out_facts = version->effective_target_facts;
     *out_resolved = true;
     return iree_ok_status();
@@ -136,7 +133,6 @@ iree_status_t loom_target_pass_resolve_function_facts(
     return iree_ok_status();
   }
 
-  IREE_ASSERT(pass->instance_arena != NULL);
   loom_symbol_fact_table_t fact_table = {0};
   loom_symbol_fact_table_initialize(&fact_table, pass->instance_arena);
   const loom_symbol_facts_base_t* base_facts = NULL;

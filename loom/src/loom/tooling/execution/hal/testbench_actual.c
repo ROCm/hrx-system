@@ -663,8 +663,6 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
       loom_target_function_version_list_find(
           &provider->launch_config_pipeline_result.function_versions.list,
           launch_config_func);
-  IREE_ASSERT(launch_config_function_version != NULL);
-  IREE_ASSERT(launch_config_function_version->effective_target_facts != NULL);
   provider->launch_config_target_facts =
       launch_config_function_version->effective_target_facts;
 

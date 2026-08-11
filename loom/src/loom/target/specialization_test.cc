@@ -72,6 +72,7 @@ static TestTargetProfile MakeTestProfile(loom_test_target_kind_t kind) {
 
 static const loom_target_provider_t kTestProvider = {
     /*.profile_type=*/&kTestProfileType,
+    /*.materialize_definition=*/nullptr,
     /*.register_context=*/nullptr,
     /*.initialize_low_descriptor_registry=*/nullptr,
     /*.initialize_low_lower_policy_registry=*/nullptr,
@@ -264,6 +265,7 @@ func.def public target(@unrequested_family) @unrequested() {
       loom_target_function_version_list_find(&result.function_versions.list,
                                              generic);
   ASSERT_NE(generic_version, nullptr);
+  EXPECT_EQ(generic_version->target_provider, &kTestProvider);
   ASSERT_NE(generic_version->authored_target_facts, nullptr);
   EXPECT_EQ(generic_version->authored_target_facts->selector,
             LOOM_TEST_TARGET_KIND_LOW_CORE);
@@ -275,6 +277,7 @@ func.def public target(@unrequested_family) @unrequested() {
       loom_target_function_version_list_find(&result.function_versions.list,
                                              targetless);
   ASSERT_NE(targetless_version, nullptr);
+  EXPECT_EQ(targetless_version->target_provider, &kTestProvider);
   EXPECT_EQ(targetless_version->authored_target_facts, nullptr);
   ASSERT_NE(targetless_version->effective_target_facts, nullptr);
   EXPECT_EQ(targetless_version->effective_target_facts->selector,

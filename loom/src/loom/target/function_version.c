@@ -46,17 +46,8 @@ iree_status_t loom_target_function_version_snapshot_build(
     const loom_target_function_version_t* function_version =
         loom_target_function_version_const_cast(version_handle);
     if (function_version == NULL) continue;
-    IREE_ASSERT(function_version->effective_target_facts != NULL);
     const loom_symbol_ref_t function_ref =
         loom_func_like_callee(function_version->base.function);
-    IREE_ASSERT(loom_symbol_ref_is_valid(function_ref));
-    IREE_ASSERT(function_ref.module_id == 0);
-    IREE_ASSERT(function_ref.symbol_id < module->symbols.count);
-    IREE_ASSERT(module->symbols.entries[function_ref.symbol_id].defining_op ==
-                function_version->base.function.op);
-    IREE_ASSERT(
-        out_snapshot->version_handles_by_symbol[function_ref.symbol_id] ==
-        NULL);
     out_snapshot->version_handles_by_symbol[function_ref.symbol_id] =
         version_handle;
   }

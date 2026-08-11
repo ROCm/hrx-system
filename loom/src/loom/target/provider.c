@@ -333,7 +333,7 @@ const loom_pass_registry_t* loom_target_environment_pass_registry(
       &environment->pass_registry_storage);
 }
 
-bool loom_target_environment_supports_profile_type(
+const loom_target_provider_t* loom_target_environment_lookup_profile_provider(
     const loom_target_environment_t* environment,
     const loom_target_profile_type_t* profile_type) {
   IREE_ASSERT_ARGUMENT(environment);
@@ -341,10 +341,10 @@ bool loom_target_environment_supports_profile_type(
   for (iree_host_size_t i = 0; i < environment->provider_set->provider_count;
        ++i) {
     if (environment->provider_set->providers[i]->profile_type == profile_type) {
-      return true;
+      return environment->provider_set->providers[i];
     }
   }
-  return false;
+  return NULL;
 }
 
 iree_status_t loom_target_environment_contribute_pipeline(

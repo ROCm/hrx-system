@@ -73,6 +73,9 @@ struct loom_target_callgraph_context_t {
   // Stable compiler-owned facts represented by this context.
   const loom_target_facts_t* facts;
 
+  // Direct target-family interface retained with |facts|.
+  const loom_target_provider_t* target_provider;
+
   // Requirement applied to construct this context, or NULL for a targetless
   // root context.
   const loom_target_facts_t* applied_requirement;
@@ -300,10 +303,12 @@ static iree_status_t loom_target_callgraph_prepare_symbol(
 
 static loom_target_callgraph_context_t* loom_target_callgraph_find_root_context(
     const loom_target_callgraph_state_t* state,
+    const loom_target_provider_t* target_provider,
     const loom_target_facts_t* facts, const loom_target_facts_t* requirement) {
   for (loom_target_callgraph_context_t* context = state->root_contexts;
        context != NULL; context = context->next_root) {
-    if (context->facts == facts &&
+    if (context->target_provider == target_provider &&
+        context->facts == facts &&
         context->applied_requirement == requirement) {
       return context;
     }
@@ -312,11 +317,12 @@ static loom_target_callgraph_context_t* loom_target_callgraph_find_root_context(
 }
 
 static iree_status_t loom_target_callgraph_get_root_context(
-    loom_target_callgraph_state_t* state, const loom_target_facts_t* facts,
-    const loom_target_facts_t* requirement,
+    loom_target_callgraph_state_t* state,
+    const loom_target_provider_t* target_provider,
+    const loom_target_facts_t* facts, const loom_target_facts_t* requirement,
     loom_target_callgraph_context_t** out_context) {
-  *out_context =
-      loom_target_callgraph_find_root_context(state, facts, requirement);
+  *out_context = loom_target_callgraph_find_root_context(state, target_provider,
+                                                         facts, requirement);
   if (*out_context != NULL) return iree_ok_status();
 
   loom_target_callgraph_context_t* context = NULL;
@@ -324,6 +330,7 @@ static iree_status_t loom_target_callgraph_get_root_context(
                                            (void**)&context));
   *context = (loom_target_callgraph_context_t){
       .facts = facts,
+      .target_provider = target_provider,
       .applied_requirement = requirement,
       .next_root = state->root_contexts,
   };
@@ -437,6 +444,7 @@ static iree_status_t loom_target_callgraph_derive_context(
                                            (void**)&context));
   *context = (loom_target_callgraph_context_t){
       .facts = derived_facts,
+      .target_provider = parent->target_provider,
       .applied_requirement = callee->authored_target_requirement,
       .parent = parent,
       .next_sibling = parent->first_child,
@@ -530,12 +538,11 @@ static iree_status_t loom_target_callgraph_seed_versions(
     loom_target_function_version_t* version = loom_target_function_version_cast(
         loom_target_function_version_snapshot_handle_at(&snapshot, symbol_id));
     if (version == NULL) continue;
-    IREE_ASSERT(version->target_context_facts != NULL);
     IREE_RETURN_IF_ERROR(
         loom_target_callgraph_prepare_symbol(state, symbol_id));
     loom_target_callgraph_context_t* context = NULL;
     IREE_RETURN_IF_ERROR(loom_target_callgraph_get_root_context(
-        state, version->target_context_facts,
+        state, version->target_provider, version->target_context_facts,
         state->symbols[symbol_id].authored_target_requirement, &context));
     loom_target_callgraph_row_id_t row_id =
         LOOM_TARGET_CALLGRAPH_ROW_ID_INVALID;
@@ -756,6 +763,7 @@ static iree_status_t loom_target_callgraph_prepare_materializations(
             },
         .authored_target_name = info->authored_target_name,
         .authored_target_facts = info->authored_target_requirement,
+        .target_provider = row->context->target_provider,
         .target_context_facts = row->context->facts,
         .effective_target_facts = effective_facts,
     };
