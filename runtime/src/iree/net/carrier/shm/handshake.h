@@ -89,7 +89,7 @@ typedef struct iree_net_shm_handshake_header_t {
   uint8_t reserved[3];
   // OFFER only: total size of the SHM region in bytes.
   uint32_t region_size;
-  // OFFER only: SPSC ring data capacity in bytes (power of two).
+  // OFFER only: MPSC queue data capacity in bytes (power of two).
   uint32_t ring_capacity;
   // Size of the wake epoch SHM region (always one page, but sent for
   // validation).

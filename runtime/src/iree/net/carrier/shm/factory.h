@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// SHM transport factory: shared memory transport via SPSC ring buffers.
+// SHM transport factory: shared memory transport via MPSC queues.
 //
 // The SHM factory creates connections backed by shared memory carrier pairs.
 // It implements the same iree_net_transport_factory_t interface as TCP and

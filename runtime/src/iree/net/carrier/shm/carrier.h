@@ -13,13 +13,13 @@
 //
 // Design:
 //   - Two carriers share a single SHM region (connected via create_pair or a
-//     cross-process factory). The region contains two SPSC rings (one per
-//     direction) plus shared epoch counters and armed flags for adaptive
-//     signaling.
-//   - send() writes data inline into the TX ring (memcpy) under a slim mutex
-//     to serialize producers. Completion fires synchronously after the data is
-//     committed to the ring — matching TCP's "commit to transport" semantics.
-//     The caller's buffers are copied during send() and immediately free.
+//     cross-process factory). The region contains two MPSC queues (one per
+//     direction) plus armed flags for adaptive signaling.
+//   - send() reserves MPSC queue entries directly from concurrent producers
+//     and writes data inline into the TX queue. Completion fires synchronously
+//     after the data is committed to the queue, matching TCP's "commit to
+//     transport" semantics. The caller's buffers are copied during send() and
+//     immediately free.
 //   - A single NOTIFICATION_WAIT per carrier wakes the proactor when the peer
 //     signals. The drain callback checks the RX ring for new data — a single
 //     acquire-load, so spurious wakes cost ~50ns.
@@ -46,13 +46,13 @@
 // naturally aligning reference descriptors.
 //
 // Capabilities:
-//   - RELIABLE: no drops (shared memory, single producer/consumer per ring).
-//   - ORDERED: FIFO (SPSC ring preserves insertion order).
+//   - RELIABLE: no drops (shared memory with explicit queue backpressure).
+//   - ORDERED: FIFO by MPSC reservation order.
 //   - ZERO_COPY_TX: advertised for large-data CTS tests; inline sends copy but
 //     one-sided writes into registered buffers avoid the copy entirely.
 //
 // Thread safety:
-//   - send() is thread-safe (serialized by slim mutex).
+//   - send() is thread-safe across concurrent MPSC producers.
 //   - All RX delivery and TX completion callbacks fire from the proactor
 //   thread.
 
@@ -71,12 +71,6 @@ typedef struct iree_net_shm_file_transfer_t iree_net_shm_file_transfer_t;
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
-
-// Magic number identifying an SHM carrier region header ("SHMC" in LE).
-#define IREE_NET_SHM_CARRIER_MAGIC ((uint32_t)0x434D4853)
-
-// Current SHM carrier region ABI version.
-#define IREE_NET_SHM_CARRIER_VERSION ((uint32_t)1)
 
 // Default ring capacity in bytes (256KB). Must be a power of two.
 #define IREE_NET_SHM_CARRIER_DEFAULT_RING_CAPACITY ((uint32_t)(256 * 1024))
@@ -124,50 +118,6 @@ typedef struct iree_net_shm_reference_descriptor_t {
   uint64_t length;     // Byte length of the referenced data.
 } iree_net_shm_reference_descriptor_t;
 
-// Byte offsets of shared state fields within the SHM region.
-// Each field is cache-line aligned (64 bytes) to prevent false sharing.
-//
-// Layout:
-//   0x0000  Region header (64B): magic, version, ring_capacity, reserved
-//   0x0040  epoch_a (64B): notification epoch for Ring A consumer (client)
-//   0x0080  epoch_b (64B): notification epoch for Ring B consumer (server)
-//   0x00C0  consumer_a_armed (64B): client armed flag (server checks on write)
-//   0x0100  consumer_b_armed (64B): server armed flag (client checks on write)
-//   0x0140  Reserved padding (192B) to 0x0200
-//   0x0200  Ring A: SPSC ring (256 + ring_capacity bytes)
-//   Ring B follows Ring A: SPSC ring (256 + ring_capacity bytes)
-//
-// Epochs are in SHM because shared notifications require a
-// cross-process-visible epoch address. Both processes atomically increment and
-// observe the epoch:
-//   epoch_a: incremented when the client should wake (server wrote to Ring A or
-//     server consumed from Ring B)
-//   epoch_b: incremented when the server should wake (client wrote to Ring B or
-//     client consumed from Ring A)
-//
-// Armed flags control adaptive signaling. When a consumer has no work, it sets
-// its armed flag before sleeping. The producer checks the peer's armed flag
-// after writing; if set, it signals the peer's notification to wake it.
-//
-// Ring assignment:
-//   Client TX = Ring B, Client RX = Ring A
-//   Server TX = Ring A, Server RX = Ring B
-#define IREE_NET_SHM_OFFSET_HEADER ((iree_host_size_t)0x0000)
-#define IREE_NET_SHM_OFFSET_EPOCH_A ((iree_host_size_t)0x0040)
-#define IREE_NET_SHM_OFFSET_EPOCH_B ((iree_host_size_t)0x0080)
-#define IREE_NET_SHM_OFFSET_CONSUMER_A_ARMED ((iree_host_size_t)0x00C0)
-#define IREE_NET_SHM_OFFSET_CONSUMER_B_ARMED ((iree_host_size_t)0x0100)
-#define IREE_NET_SHM_OFFSET_RINGS ((iree_host_size_t)0x0200)
-
-// Immutable header at offset 0 of the SHM region. Written once by the creator.
-typedef struct iree_net_shm_region_header_t {
-  uint32_t magic;
-  uint32_t version;
-  // SPSC ring data capacity in bytes (power of two).
-  uint32_t ring_capacity;
-  uint8_t reserved[52];
-} iree_net_shm_region_header_t;
-
 // Describes a memory region known to the carrier for buffer registration
 // and direct read/write. Both sides of a carrier pair must populate matching
 // region IDs — the region_id in a remote handle is the array index.
@@ -185,7 +135,7 @@ enum iree_net_shm_carrier_mode_bits_e {
 
 typedef struct iree_net_shm_carrier_options_t {
   // Ring buffer data capacity in bytes. Must be a power of two and >=
-  // IREE_SPSC_QUEUE_MIN_CAPACITY.
+  // IREE_MPSC_QUEUE_MIN_CAPACITY.
   uint32_t ring_capacity;
   // Mode bitfield controlling carrier behavior.
   iree_net_shm_carrier_mode_t mode;

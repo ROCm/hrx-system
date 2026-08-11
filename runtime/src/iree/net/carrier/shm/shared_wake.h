@@ -13,7 +13,7 @@
 // This provides O(1) fd consumption per proactor regardless of carrier count,
 // and enables wake coalescing: multiple carriers signaling simultaneously
 // produce one kernel wake followed by one scan. The scan cost per carrier is
-// a single acquire-load on the SPSC ring position (~50ns), which is negligible
+// a single acquire-load on the MPSC queue position (~50ns), which is negligible
 // against the kernel wake latency (1-5us).
 //
 // The shared wake maintains an intrusive singly-linked list of carriers in

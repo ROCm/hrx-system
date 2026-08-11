@@ -21,8 +21,8 @@
 //===----------------------------------------------------------------------===//
 
 // Thin adapter that bridges SHM carrier recv_handler to message_endpoint
-// callbacks. SHM carrier delivers NULL lease (data is a view into the SPSC
-// ring, valid only during the callback), but message_endpoint consumers expect
+// callbacks. SHM carrier delivers NULL lease (data is a view into the MPSC
+// queue, valid only during the callback), but message_endpoint consumers expect
 // valid leases. This adapter copies into host-backed ownership and delivers
 // with a valid lease.
 typedef struct iree_net_shm_endpoint_adapter_t {

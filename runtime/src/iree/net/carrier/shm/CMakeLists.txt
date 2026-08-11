@@ -41,6 +41,20 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    region
+  HDRS
+    "region.h"
+  SRCS
+    "region.c"
+  DEPS
+    iree::base
+    iree::base::internal::mpsc_queue
+    iree::base::internal::shm
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     handshake
   HDRS
     "handshake.h"
@@ -49,13 +63,13 @@ iree_cc_library(
     "handshake_posix.c"
     "handshake_win32.c"
   DEPS
+    ::region
     ::shared_wake
     ::shm
     ::xproc_context
     iree::async
     iree::base
     iree::base::internal
-    iree::base::internal::mpsc_queue
     iree::base::internal::shm
   PUBLIC
 )
@@ -98,6 +112,7 @@ iree_cc_library(
   SRCS
     "carrier_pair.c"
   DEPS
+    ::region
     ::shared_wake
     ::shm
     iree::async
@@ -137,6 +152,18 @@ iree_cc_library(
     iree::net::message_endpoint
     iree::net::transport_factory
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    region_test
+  SRCS
+    "region_test.cc"
+  DEPS
+    ::region
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 iree_cc_test(

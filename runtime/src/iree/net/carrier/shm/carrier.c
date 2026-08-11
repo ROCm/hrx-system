@@ -62,8 +62,9 @@ typedef struct iree_net_shm_carrier_t {
 
   // Adaptive polling state (progress callback mode).
   // When traffic is hot, the carrier registers a progress callback with the
-  // proactor that polls the SPSC ring directly each poll() iteration, bypassing
-  // the kernel notification path (~50ns acquire-load vs ~1-5µs notification).
+  // proactor that polls the MPSC queue directly each poll() iteration,
+  // bypassing the kernel notification path (~50ns acquire-load vs ~1-5us
+  // notification).
   struct {
     // Progress callback entry registered with the proactor. The entry's fn and
     // user_data are set once during the first sleep-to-poll transition and
