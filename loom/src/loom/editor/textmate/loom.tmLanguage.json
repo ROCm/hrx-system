@@ -5,7 +5,7 @@
   "fileTypes": [
     "loom"
   ],
-  "comment": "GENERATED FILE: DO NOT EDIT. Generator: loom.gen.editor.textmate. Regenerate: python3 loom/py/loom/gen/run.py textmate",
+  "comment": "GENERATED FILE: DO NOT EDIT. Generator: loom.gen.editor.textmate. Regenerate: python3 loom/py/loom/gen/run.py textmate --in-place",
   "patterns": [
     {
       "include": "#strings"
@@ -77,7 +77,7 @@
       "patterns": [
         {
           "name": "meta.operation-name.loom",
-          "match": "\\b(buffer)\\.(assume\\.memory_space|assume\\.alignment|assume\\.same_root|assume\\.noalias|alloca|view)\\b",
+          "match": "\\b(buffer)\\.(assume\\.memory_space|assume\\.alignment|assume\\.same_root|assume\\.noalias|alloca|pack|view)\\b",
           "captures": {
             "1": {
               "name": "support.namespace.dialect.loom"
@@ -89,7 +89,7 @@
         },
         {
           "name": "meta.operation-name.loom",
-          "match": "\\b(check)\\.(generate\\.random\\.uniform|expect\\.bitwise|file\\.write\\.npy|file\\.read\\.npy|generate\\.fill|generate\\.iota|expect\\.close|expect\\.equal|expect\\.event|expect\\.shape|param\\.choice|oracle\\.call|param\\.range|param\\.seed|benchmark|requires|literal|skip_if|expect|return|case)\\b",
+          "match": "\\b(check)\\.(generate\\.random\\.uniform|expect\\.bitwise|file\\.write\\.npy|file\\.read\\.npy|generate\\.fill|generate\\.iota|expect\\.close|expect\\.equal|expect\\.event|expect\\.shape|param\\.choice|oracle\\.call|param\\.range|tensor\\.view|param\\.seed|benchmark|requires|literal|skip_if|expect|return|case)\\b",
           "captures": {
             "1": {
               "name": "support.namespace.dialect.loom"
@@ -101,7 +101,7 @@
         },
         {
           "name": "meta.operation-name.loom",
-          "match": "\\b(command)\\.(program\\.launch|program\\.decl|program\\.def|concurrent|return|serial|yield)\\b",
+          "match": "\\b(command)\\.(program\\.launch|program\\.decl|program\\.def|concurrent|parameter|return|serial|yield)\\b",
           "captures": {
             "1": {
               "name": "support.namespace.dialect.loom"
@@ -125,7 +125,7 @@
         },
         {
           "name": "meta.operation-name.loom",
-          "match": "\\b(encoding)\\.(layout\\.assume\\.strided|layout\\.assume\\.dense|layout\\.strided|layout\\.dense|assume\\.spec|define|isa)\\b",
+          "match": "\\b(encoding)\\.(layout\\.assume\\.strided|layout\\.assume\\.dense|layout\\.strided|assume\\.match|layout\\.dense|assume\\.spec|matches|define|isa)\\b",
           "captures": {
             "1": {
               "name": "support.namespace.dialect.loom"
@@ -245,7 +245,7 @@
         },
         {
           "name": "meta.operation-name.loom",
-          "match": "\\b(test)\\.(fact_storage_byte_offset_divisor|fact_encoding_layout_stride_hi|fact_view_root_min_alignment|fact_storage_byte_length_hi|fact_storage_byte_length_lo|fact_storage_byte_offset_hi|fact_storage_byte_offset_lo|template_param_symbol_flags|fact_encoding_operand_field|fact_is_vector_prefix_mask|fact_storage_min_alignment|fact_buffer_min_alignment|fact_encoding_layout_kind|fact_is_storage_reference|fact_storage_same_backing|fact_alias_scope_matches|fact_buffer_memory_space|fact_is_buffer_reference|fact_view_byte_length_hi|fact_view_byte_length_lo|fact_view_byte_offset_hi|fact_view_byte_offset_lo|fact_all_equal_range_hi|fact_all_equal_range_lo|fact_subgroup_lane_mask|fact_view_element_bytes|fact_view_min_alignment|fact_alias_scope_known|fact_is_view_reference|fact_view_memory_space|fact_view_root_matches|fact_workgroup_uniform|fact_subgroup_uniform|template_param_symbol|fact_cluster_uniform|fact_is_vector_iota|fact_lane_predicate|resource\\.borrow_ref|effectful_constant|fact_not_subnormal|fact_storage_space|parameterized_attr|fact_lane_varying|fact_non_negative|fact_power_of_two|resource\\.borrowed|enum_array_attrs|resource\\.consume|resource\\.discard|resource\\.release|clause_constant|isolated_region|mutate_resource|optional_region|resource\\.borrow|resource\\.escape|resource\\.retain|implicit_yield|resource\\.alias|resource\\.alloc|write_resource|fact_non_zero|fact_positive|fact_range_hi|fact_range_lo|read_resource|region_syntax|fact_divisor|operand_dict|region_table|clause_copy|fact_finite|attr_table|block_args|convergent|low_invoke|split_func|segmented|typed_use|constant|low_call|convert|counter|deflate|assume|branch|invoke|record|reduce|target|update|alloc|attrs|shape|slice|yield|addi|cast|decl|func|loop|cmp|dim|map|neg|use|br)\\b",
+          "match": "\\b(test)\\.(fact_storage_byte_offset_divisor|fact_encoding_layout_stride_hi|fact_view_root_min_alignment|fact_encoding_operand_field|fact_storage_byte_length_hi|fact_storage_byte_length_lo|fact_storage_byte_offset_hi|fact_storage_byte_offset_lo|template_param_symbol_flags|compact_parameterized_attr|condition_refines_positive|fact_is_vector_prefix_mask|fact_storage_min_alignment|fact_buffer_min_alignment|fact_encoding_layout_kind|fact_is_storage_reference|fact_storage_same_backing|fact_alias_scope_matches|fact_buffer_memory_space|fact_is_buffer_reference|fact_view_byte_length_hi|fact_view_byte_length_lo|fact_view_byte_offset_hi|fact_view_byte_offset_lo|parameterized_attr_array|fact_all_equal_range_hi|fact_all_equal_range_lo|fact_subgroup_lane_mask|fact_view_element_bytes|fact_view_min_alignment|fact_alias_scope_known|fact_is_view_reference|fact_view_memory_space|fact_view_root_matches|fact_workgroup_uniform|fact_subgroup_uniform|template_param_symbol|fact_cluster_uniform|fact_is_vector_iota|fact_lane_predicate|resource\\.borrow_ref|effectful_constant|fact_not_subnormal|fact_storage_space|parameterized_attr|fact_lane_varying|fact_non_negative|fact_power_of_two|resource\\.borrowed|enum_array_attrs|partitioned_call|resource\\.consume|resource\\.discard|resource\\.release|clause_constant|isolated_region|mutate_resource|optional_region|resource\\.borrow|resource\\.escape|resource\\.retain|implicit_yield|resource\\.alias|resource\\.alloc|write_resource|fact_non_zero|fact_positive|fact_range_hi|fact_range_lo|read_resource|region_syntax|fact_divisor|operand_dict|region_table|attr_params|clause_copy|fact_finite|attr_table|block_args|convergent|low_invoke|split_func|segmented|typed_use|constant|low_call|convert|counter|deflate|assume|branch|invoke|record|reduce|target|update|alloc|attrs|shape|slice|yield|addi|cast|decl|func|loop|cmp|dim|map|neg|use|br)\\b",
           "captures": {
             "1": {
               "name": "support.namespace.dialect.loom"
@@ -353,7 +353,7 @@
       "patterns": [
         {
           "name": "keyword.other.loom",
-          "match": "\\b(?:workgroup_count|workgroup_size|memory_access|cluster_size|abi_layout|allocation|workgroups|iter_args|artifact|expected|priority|requires|schedule|default|dgroups|linkage|ordinal|actual|blocks|bounds|callee|config|device|export|extent|import|inputs|launch|layout|module|offset|period|public|reason|source|symbol|target|unroll|values|align|attrs|count|range|shape|using|value|where|atol|axes|base|case|else|from|host|into|mode|name|path|rtol|seed|step|abi|for|nan|as|do|to|x)\\b"
+          "match": "\\b(?:workgroup_count|workgroup_size|memory_access|cluster_size|abi_layout|allocation|workgroups|iter_args|artifact|expected|ordering|priority|requires|schedule|default|dgroups|linkage|ordinal|actual|blocks|bounds|callee|config|device|export|extent|import|inputs|launch|layout|module|offset|period|public|reason|source|symbol|target|unroll|values|align|attrs|count|range|scope|shape|using|value|where|atol|axes|base|case|else|from|host|into|mode|name|path|rtol|seed|step|abi|for|nan|as|do|to|x)\\b"
         },
         {
           "name": "constant.language.boolean.loom",

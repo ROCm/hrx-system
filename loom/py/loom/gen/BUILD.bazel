@@ -32,6 +32,7 @@ iree_py_library(
         ":bootstrap",
         "//loom/build_tools/amdgpu:target_config",
         "//loom/py/loom/dialect:package",
+        "//loom/py/loom/gen/editor:textmate",
         "//loom/py/loom/gen/ops:c_tables",
         "//loom/py/loom/gen/python",
         "//loom/py/loom/gen/support",

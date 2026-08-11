@@ -15,6 +15,7 @@ from collections.abc import Sequence
 from types import ModuleType
 
 from loom.gen import bootstrap as _bootstrap
+from loom.gen.editor import textmate
 from loom.gen.ops import c_tables
 from loom.gen.python import builders_pyi, package_inits
 from loom.gen.support.generated_file import (
@@ -67,6 +68,11 @@ def checked_in_artifact_families() -> tuple[GeneratedFileFamily, ...]:
             description=amdgpu_target_config.DESCRIPTION,
             regenerate_command=amdgpu_target_config.REGENERATE_COMMAND,
             file_set=amdgpu_target_config.checked_in_file_set(),
+        ),
+        GeneratedFileFamily(
+            description=textmate.DESCRIPTION,
+            regenerate_command=textmate.REGENERATE_COMMAND,
+            file_set=textmate.checked_in_file_set(),
         ),
     )
 
