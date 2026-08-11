@@ -13,10 +13,12 @@ import pytest
 from loom.gen.support.generated_file import (
     GENERATED_FILE_MARKER,
     GeneratedFile,
+    GeneratedFileFamily,
     GeneratedFileSet,
     generated_comment,
     inspect_generated_file_set,
     line_comment_header,
+    maintain_generated_file_families,
     maintain_generated_file_set,
     update_generated_file_set,
 )
@@ -151,3 +153,58 @@ def test_maintain_generated_file_set_reports_check_and_update(
     assert update_result.ok
     assert update_result.changed_paths == ("generated/file.txt",)
     assert "updated 1 of 1 generated files" in capsys.readouterr().out
+
+
+def test_maintain_generated_file_families_reports_exact_changed_paths(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    families = (
+        GeneratedFileFamily(
+            description="first artifacts",
+            regenerate_command="python first.py --in-place",
+            file_set=GeneratedFileSet.from_mapping({"generated/first.txt": "first\n"}),
+        ),
+        GeneratedFileFamily(
+            description="second artifacts",
+            regenerate_command="python second.py --in-place",
+            file_set=GeneratedFileSet.from_mapping({"generated/second.txt": "second\n"}),
+        ),
+    )
+
+    result = maintain_generated_file_families(tmp_path, families, mode="update")
+
+    assert result.ok
+    assert result.changed_paths == (
+        "generated/first.txt",
+        "generated/second.txt",
+    )
+    output = capsys.readouterr().out
+    assert "first artifacts: updated 1 of 1 generated files" in output
+    assert "second artifacts: updated 1 of 1 generated files" in output
+
+
+def test_maintain_generated_file_families_rejects_shared_ownership(
+    tmp_path: Path,
+) -> None:
+    shared_path = "generated/shared.txt"
+    families = (
+        GeneratedFileFamily(
+            description="current artifacts",
+            regenerate_command="python current.py --in-place",
+            file_set=GeneratedFileSet.from_mapping({shared_path: "current\n"}),
+        ),
+        GeneratedFileFamily(
+            description="legacy artifacts",
+            regenerate_command="python legacy.py --in-place",
+            file_set=GeneratedFileSet.from_mapping(
+                {},
+                obsolete_paths=(shared_path,),
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="owned by both"):
+        maintain_generated_file_families(tmp_path, families, mode="update")
+
+    assert not (tmp_path / shared_path).exists()

@@ -78,6 +78,21 @@ class GeneratedFileMaintenanceResult:
     changed_paths: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class GeneratedFileFamily:
+    """One named generated artifact family and its maintenance metadata."""
+
+    description: str
+    regenerate_command: str
+    file_set: GeneratedFileSet
+
+    def __post_init__(self) -> None:
+        if not self.description:
+            raise ValueError("generated file family description must not be empty")
+        if not self.regenerate_command:
+            raise ValueError("generated file family regenerate command must not be empty")
+
+
 def _validate_repo_relative_path(path: str) -> str:
     if not path:
         raise ValueError("generated file path must not be empty")
@@ -164,6 +179,36 @@ def maintain_generated_file_set(
         return GeneratedFileMaintenanceResult(False)
     print(f"{description}: checked {len(generated_file_set.files)} generated files")
     return GeneratedFileMaintenanceResult(True)
+
+
+def maintain_generated_file_families(
+    repo_root: Path,
+    families: Sequence[GeneratedFileFamily],
+    *,
+    mode: GeneratedFileMaintenanceMode,
+) -> GeneratedFileMaintenanceResult:
+    """Checks or updates non-overlapping generated artifact families."""
+    owners: dict[str, str] = {}
+    for family in families:
+        for path in (*family.file_set.output_paths, *family.file_set.obsolete_paths):
+            previous_owner = owners.get(path)
+            if previous_owner is not None:
+                raise ValueError(f"generated file path {path!r} is owned by both {previous_owner!r} and {family.description!r}")
+            owners[path] = family.description
+
+    ok = True
+    changed_paths: list[str] = []
+    for family in families:
+        result = maintain_generated_file_set(
+            repo_root,
+            family.file_set,
+            mode=mode,
+            description=family.description,
+            regenerate_command=family.regenerate_command,
+        )
+        ok = result.ok and ok
+        changed_paths.extend(result.changed_paths)
+    return GeneratedFileMaintenanceResult(ok, tuple(sorted(changed_paths)))
 
 
 def line_comment_header(

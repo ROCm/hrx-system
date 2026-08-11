@@ -9,6 +9,8 @@
 Usage:
     python3 loom/py/loom/gen/run.py builders_pyi --in-place
     python3 loom/py/loom/gen/run.py builders_pyi --check
+    python3 loom/py/loom/gen/run.py checked_in_artifacts --check
+    python3 loom/py/loom/gen/run.py checked_in_artifacts --in-place
     python3 loom/py/loom/gen/run.py c_errors --check
     python3 loom/py/loom/gen/run.py c_tables --check
     python3 loom/py/loom/gen/run.py c_tables --in-place
@@ -30,6 +32,7 @@ GENERATORS = {
     "builders_pyi": "loom.gen.python.builders_pyi",
     "c_errors": "loom.gen.error.c_errors",
     "c_tables": "loom.gen.ops.c_tables",
+    "checked_in_artifacts": "loom.gen.checked_in_artifacts",
     "low_descriptors": "loom.gen.target.low.low_descriptors",
     "package_inits": "loom.gen.python.package_inits",
     "textmate": "loom.gen.editor.textmate",
@@ -41,6 +44,7 @@ ARGUMENT_GENERATORS: set[str] = {
     "builders_pyi",
     "c_errors",
     "c_tables",
+    "checked_in_artifacts",
     "package_inits",
     "x86_packed_dot_contract",
     "x86_target_profiles",

@@ -46,7 +46,9 @@ REGENERATE_COMMAND = "python3 loom/build_tools/amdgpu/target_config.py --in-plac
 def find_repo_root() -> Path:
     current = Path(__file__).resolve()
     while current != current.parent:
-        if (current / "runtime" / "src" / "iree").exists():
+        if (current / "loom" / "py" / "loom").is_dir() and (
+            current / "build_tools" / "amdgpu" / "target_map.py"
+        ).is_file():
             return current
         current = current.parent
     print("error: could not find IREE repository root", file=sys.stderr)
@@ -660,8 +662,11 @@ def generated_outputs(config: TargetConfig) -> dict[str, str]:
     }
 
 
-def checked_in_file_set(config: TargetConfig) -> GeneratedFileSet:
+def checked_in_file_set(config: TargetConfig | None = None) -> GeneratedFileSet:
     """Returns the complete checked-in target-configuration ownership set."""
+    if config is None:
+        repo_root = find_repo_root()
+        config = load_target_config(repo_root)
     return GeneratedFileSet.from_mapping(generated_outputs(config))
 
 
