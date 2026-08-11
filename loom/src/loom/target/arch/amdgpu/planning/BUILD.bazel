@@ -9,7 +9,6 @@ load(
     "loom_cc_library",
     "loom_cc_test",
     "loom_generated_cc_library",
-    "loom_generated_textual_header",
 )
 
 package(
@@ -19,8 +18,6 @@ package(
 )
 
 _AMDGPU_OCCUPANCY_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/planning:occupancy_tables"
-
-_AMDGPU_TARGET_INFO_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu:target_info"
 
 _AMDGPU_ROOT_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu:__pkg__"]
 
@@ -104,18 +101,11 @@ loom_cc_test(
     ],
 )
 
-loom_generated_textual_header(
-    name = "matrix_coexecution_source_layouts_gen",
-    generator = _AMDGPU_TARGET_INFO_GENERATOR,
-    output = "matrix_coexecution_source_layouts.inl",
-    output_flag = "--matrix-coexecution-source-layouts",
-)
-
 loom_cc_library(
     name = "matrix_coexecution",
     srcs = ["matrix_coexecution.c"],
     hdrs = ["matrix_coexecution.h"],
-    textual_hdrs = [":matrix_coexecution_source_layouts.inl"],
+    textual_hdrs = ["//loom/src/loom/target/arch/amdgpu:matrix_coexecution_source_layouts.inl"],
     deps = [
         ":descriptor_semantics",
         ":structural_packet",

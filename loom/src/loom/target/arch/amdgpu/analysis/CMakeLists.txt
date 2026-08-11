@@ -10,26 +10,13 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    lds_bank_service_model_rows_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::target_info
-  OUTPUT
-    "lds_bank_service_model_rows.inl"
-  OUTPUT_FLAG
-    "--lds-bank-service-model-rows"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
     lds_bank_service
   HDRS
     "lds_bank_service.h"
   TEXTUAL_HDRS
-    "lds_bank_service_model_rows.inl"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/lds_bank_service_model_rows.inl"
   SRCS
     "lds_bank_service.c"
   DEPS

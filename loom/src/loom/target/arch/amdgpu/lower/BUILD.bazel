@@ -35,8 +35,6 @@ _AMDGPU_MEMORY_CANDIDATE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/lowe
 
 _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/lower:narrow_float_tables"
 
-_AMDGPU_TARGET_INFO_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu:target_info"
-
 loom_cc_library(
     name = "kinds",
     hdrs = ["kinds.h"],
@@ -71,19 +69,6 @@ loom_generated_file_family(
     outputs = [
         "memory_descriptor_candidate_ranges.inl",
         "memory_descriptor_candidates.inl",
-    ],
-)
-
-loom_generated_file_family(
-    name = "memory_cache_policy_tables_gen",
-    generator = _AMDGPU_TARGET_INFO_GENERATOR,
-    output_flags = [
-        "--cache-policy-encoding-rows",
-        "--cache-policy-temporal-th",
-    ],
-    outputs = [
-        "memory_cache_policy_encoding_rows.inl",
-        "memory_cache_policy_temporal_th.inl",
     ],
 )
 
@@ -262,8 +247,8 @@ loom_cc_library(
         ":encoding/fp8_packed_repair_reason_rows.inl",
         ":encoding/fp8_scaled_descriptor_ref_rows.inl",
         ":encoding/fp8_subnormal_table_rows.inl",
-        ":memory_cache_policy_encoding_rows.inl",
-        ":memory_cache_policy_temporal_th.inl",
+        "//loom/src/loom/target/arch/amdgpu:memory_cache_policy_encoding_rows.inl",
+        "//loom/src/loom/target/arch/amdgpu:memory_cache_policy_temporal_th.inl",
         ":memory_descriptor_candidate_ranges.inl",
         ":memory_descriptor_candidates.inl",
         "registry_tables.inl",

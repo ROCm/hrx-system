@@ -77,6 +77,16 @@ loom_generated_cc_library(
     "--header"
   GENERATED_HDRS
     "target_info.h"
+  EXTRA_OUTPUT_FLAGS
+    "--cache-policy-encoding-rows"
+    "--cache-policy-temporal-th"
+    "--lds-bank-service-model-rows"
+    "--matrix-coexecution-source-layouts"
+  EXTRA_OUTPUTS
+    "memory_cache_policy_encoding_rows.inl"
+    "memory_cache_policy_temporal_th.inl"
+    "lds_bank_service_model_rows.inl"
+    "matrix_coexecution_source_layouts.inl"
   DEPS
     ::target_info_defs
     iree::base

@@ -102,26 +102,13 @@ loom_cc_test(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    matrix_coexecution_source_layouts_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::target_info
-  OUTPUT
-    "matrix_coexecution_source_layouts.inl"
-  OUTPUT_FLAG
-    "--matrix-coexecution-source-layouts"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
     matrix_coexecution
   HDRS
     "matrix_coexecution.h"
   TEXTUAL_HDRS
-    "matrix_coexecution_source_layouts.inl"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/matrix_coexecution_source_layouts.inl"
   SRCS
     "matrix_coexecution.c"
   DEPS

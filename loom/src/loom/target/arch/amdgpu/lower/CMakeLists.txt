@@ -52,21 +52,6 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_generated_file_family(
   NAME
-    memory_cache_policy_tables_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::target_info
-  OUTPUTS
-    "memory_cache_policy_encoding_rows.inl"
-    "memory_cache_policy_temporal_th.inl"
-  OUTPUT_FLAGS
-    "--cache-policy-encoding-rows"
-    "--cache-policy-temporal-th"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_file_family(
-  NAME
     fp8_tables_gen
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
@@ -156,6 +141,8 @@ loom_cc_library(
     "value/vector_transform.h"
     "workgroup.h"
   TEXTUAL_HDRS
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/memory_cache_policy_encoding_rows.inl"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/memory_cache_policy_temporal_th.inl"
     "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/records/target_records_tables.inl"
     "encoding/fp8_decode_plan_descriptor_rows.inl"
     "encoding/fp8_encoded_operand_format_rows.inl"
@@ -164,8 +151,6 @@ loom_cc_library(
     "encoding/fp8_packed_repair_reason_rows.inl"
     "encoding/fp8_scaled_descriptor_ref_rows.inl"
     "encoding/fp8_subnormal_table_rows.inl"
-    "memory_cache_policy_encoding_rows.inl"
-    "memory_cache_policy_temporal_th.inl"
     "memory_descriptor_candidate_ranges.inl"
     "memory_descriptor_candidates.inl"
     "registry_tables.inl"

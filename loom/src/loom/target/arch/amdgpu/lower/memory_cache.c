@@ -83,12 +83,12 @@ typedef struct loom_amdgpu_memory_cache_policy_encoding_row_t {
 } loom_amdgpu_memory_cache_policy_encoding_row_t;
 
 static const int64_t kAmdgpuGfx12CacheTemporalTh[LOOM_CACHE_TEMPORAL_COUNT_] = {
-#include "loom/target/arch/amdgpu/lower/memory_cache_policy_temporal_th.inl"
+#include "loom/target/arch/amdgpu/memory_cache_policy_temporal_th.inl"
 };
 
 static const loom_amdgpu_memory_cache_policy_encoding_row_t
     kAmdgpuMemoryCachePolicyEncodingRows[] = {
-#include "loom/target/arch/amdgpu/lower/memory_cache_policy_encoding_rows.inl"
+#include "loom/target/arch/amdgpu/memory_cache_policy_encoding_rows.inl"
 };
 
 static const loom_amdgpu_memory_cache_policy_encoding_row_t*
