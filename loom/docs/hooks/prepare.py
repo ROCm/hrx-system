@@ -109,6 +109,14 @@ def on_pre_build(config: Any) -> None:
     _prepare_staged_source(Path(config["docs_dir"]), c_api_html_root)
 
 
+def on_serve(server: Any, config: Any, builder: Any) -> Any:
+    """Watches canonical inputs without watching generated staging output."""
+
+    del builder
+    server.unwatch(str(config["docs_dir"]))
+    return server
+
+
 def on_page_context(context: Any, page: Any, config: Any, nav: Any) -> Any:
     """Hides edit links for build-generated reference pages."""
 

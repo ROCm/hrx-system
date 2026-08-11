@@ -27,6 +27,10 @@ iree_py_library(
         "reference.py",
     ],
     tags = ["skip-bazel_to_cmake"],
+    visibility = [
+        "//loom/docs:__pkg__",
+        "//loom/py/loom/gen:__subpackages__",
+    ],
     deps = [
         "//loom/py/loom:core",
         "//loom/py/loom/gen/ops:model",
