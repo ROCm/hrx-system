@@ -50,27 +50,16 @@ loom_generated_textual_header_family(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
+loom_generated_textual_header_family(
   NAME
-    memory_cache_policy_encoding_rows_gen
+    memory_cache_policy_tables_gen
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::target_info
-  OUTPUT
+  OUTPUTS
     "memory_cache_policy_encoding_rows.inl"
-  OUTPUT_FLAG
-    "--cache-policy-encoding-rows"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    memory_cache_policy_temporal_th_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::target_info
-  OUTPUT
     "memory_cache_policy_temporal_th.inl"
-  OUTPUT_FLAG
+  OUTPUT_FLAGS
+    "--cache-policy-encoding-rows"
     "--cache-policy-temporal-th"
 )
 endif()

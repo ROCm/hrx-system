@@ -75,18 +75,17 @@ loom_generated_textual_header_family(
     ],
 )
 
-loom_generated_textual_header(
-    name = "memory_cache_policy_encoding_rows_gen",
+loom_generated_textual_header_family(
+    name = "memory_cache_policy_tables_gen",
     generator = _AMDGPU_TARGET_INFO_GENERATOR,
-    output = "memory_cache_policy_encoding_rows.inl",
-    output_flag = "--cache-policy-encoding-rows",
-)
-
-loom_generated_textual_header(
-    name = "memory_cache_policy_temporal_th_gen",
-    generator = _AMDGPU_TARGET_INFO_GENERATOR,
-    output = "memory_cache_policy_temporal_th.inl",
-    output_flag = "--cache-policy-temporal-th",
+    output_flags = [
+        "--cache-policy-encoding-rows",
+        "--cache-policy-temporal-th",
+    ],
+    outputs = [
+        "memory_cache_policy_encoding_rows.inl",
+        "memory_cache_policy_temporal_th.inl",
+    ],
 )
 
 loom_generated_textual_header_family(
