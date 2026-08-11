@@ -4,17 +4,17 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Rebuildable module symbol dependency table.
+// Rebuildable module symbol reference table.
 //
 // This analysis is the canonical symbol-use substrate for module-level
-// analyses. It records occurrence edges from the symbol whose definition owns
+// analyses. It records occurrences from the symbol whose definition owns
 // an operation to each module-local symbol referenced by that operation, nested
 // attributes, static encoding attributes, and value types. The table is
 // intentionally rebuilt from immutable IR instead of maintained on every IR
 // mutation path; callers that rewrite symbols should rebuild after mutation.
 
-#ifndef LOOM_ANALYSIS_SYMBOL_DEPENDENCIES_H_
-#define LOOM_ANALYSIS_SYMBOL_DEPENDENCIES_H_
+#ifndef LOOM_ANALYSIS_SYMBOL_REFERENCES_H_
+#define LOOM_ANALYSIS_SYMBOL_REFERENCES_H_
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
@@ -25,59 +25,59 @@
 extern "C" {
 #endif
 
-// Index into a symbol dependency table's edge array.
-typedef uint32_t loom_symbol_dependency_edge_id_t;
-#define LOOM_SYMBOL_DEPENDENCY_EDGE_ID_INVALID \
-  ((loom_symbol_dependency_edge_id_t)UINT32_MAX)
+// Index into a symbol reference table's occurrence array.
+typedef uint32_t loom_symbol_reference_occurrence_id_t;
+#define LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID \
+  ((loom_symbol_reference_occurrence_id_t)UINT32_MAX)
 
-// Index into a symbol dependency table's abstract contract-demand array.
+// Index into a symbol reference table's abstract contract-demand array.
 typedef uint32_t loom_func_contract_demand_id_t;
 #define LOOM_FUNC_CONTRACT_DEMAND_ID_INVALID \
   ((loom_func_contract_demand_id_t)UINT32_MAX)
 
-// Sentinel for edges that are not attached to a concrete op attribute.
-#define LOOM_SYMBOL_DEPENDENCY_ATTR_INDEX_NONE ((uint16_t)UINT16_MAX)
+// Sentinel for occurrences not attached to a concrete op attribute.
+#define LOOM_SYMBOL_REFERENCE_ATTR_INDEX_NONE ((uint16_t)UINT16_MAX)
 
-// Classifies where a symbol dependency occurrence was found.
-typedef enum loom_symbol_dependency_edge_kind_e {
+// Classifies where a symbol reference occurrence was found.
+typedef enum loom_symbol_reference_occurrence_kind_e {
   // Invalid default used only for zero-initialized storage.
-  LOOM_SYMBOL_DEPENDENCY_EDGE_NONE = 0,
+  LOOM_SYMBOL_REFERENCE_OCCURRENCE_NONE = 0,
   // Direct generated symbol-reference op attribute.
-  LOOM_SYMBOL_DEPENDENCY_EDGE_SYMBOL_ATTR = 1,
+  LOOM_SYMBOL_REFERENCE_OCCURRENCE_SYMBOL_ATTR = 1,
   // Direct call-like callee attribute.
-  LOOM_SYMBOL_DEPENDENCY_EDGE_CALL = 2,
+  LOOM_SYMBOL_REFERENCE_OCCURRENCE_CALL = 2,
   // Direct global-like load/store/reference attribute.
-  LOOM_SYMBOL_DEPENDENCY_EDGE_GLOBAL_ACCESS = 3,
+  LOOM_SYMBOL_REFERENCE_OCCURRENCE_GLOBAL_ACCESS = 3,
   // Symbol reference nested inside a DICT attribute.
-  LOOM_SYMBOL_DEPENDENCY_EDGE_NESTED_ATTR = 4,
+  LOOM_SYMBOL_REFERENCE_OCCURRENCE_NESTED_ATTR = 4,
   // Symbol reference reached through an AttrType static encoding.
-  LOOM_SYMBOL_DEPENDENCY_EDGE_TYPE_ATTR = 5,
+  LOOM_SYMBOL_REFERENCE_OCCURRENCE_TYPE_ATTR = 5,
   // Symbol reference reached through an AttrEncoding static encoding.
-  LOOM_SYMBOL_DEPENDENCY_EDGE_ENCODING_ATTR = 6,
+  LOOM_SYMBOL_REFERENCE_OCCURRENCE_ENCODING_ATTR = 6,
   // Symbol reference reached through an SSA value type's static encoding.
-  LOOM_SYMBOL_DEPENDENCY_EDGE_VALUE_TYPE = 7,
+  LOOM_SYMBOL_REFERENCE_OCCURRENCE_VALUE_TYPE = 7,
   // Symbol reference reached through a module encoding table record.
-  LOOM_SYMBOL_DEPENDENCY_EDGE_MODULE_ENCODING = 8,
-} loom_symbol_dependency_edge_kind_t;
+  LOOM_SYMBOL_REFERENCE_OCCURRENCE_MODULE_ENCODING = 8,
+} loom_symbol_reference_occurrence_kind_t;
 
 // One symbol reference occurrence.
-typedef struct loom_symbol_dependency_edge_t {
+typedef struct loom_symbol_reference_occurrence_t {
   // Symbol that owns this reference, or LOOM_SYMBOL_ID_INVALID for module-root
   // records such as static module encodings.
   loom_symbol_id_t source_symbol_id;
   // Module-local symbol referenced by this occurrence.
   loom_symbol_id_t target_symbol_id;
   // Classified source of the occurrence.
-  loom_symbol_dependency_edge_kind_t kind;
+  loom_symbol_reference_occurrence_kind_t kind;
   // Attribute index on user_op when the occurrence came from an op attribute.
   uint16_t attr_index;
   // Operation that owns the occurrence, or NULL for module-root records.
   const loom_op_t* user_op;
   // Next occurrence with the same source symbol.
-  loom_symbol_dependency_edge_id_t next_outgoing_edge_id;
+  loom_symbol_reference_occurrence_id_t next_outgoing_occurrence_id;
   // Next occurrence with the same target symbol.
-  loom_symbol_dependency_edge_id_t next_incoming_edge_id;
-} loom_symbol_dependency_edge_t;
+  loom_symbol_reference_occurrence_id_t next_incoming_occurrence_id;
+} loom_symbol_reference_occurrence_t;
 
 // One abstract func.apply provider demand.
 typedef struct loom_func_contract_demand_t {
@@ -93,38 +93,38 @@ typedef struct loom_func_contract_demand_t {
   loom_func_contract_demand_id_t next_source_demand_id;
 } loom_func_contract_demand_t;
 
-// Concrete edge and abstract demand list heads for one symbol.
-typedef struct loom_symbol_dependency_symbol_edges_t {
-  // First edge whose source_symbol_id is this symbol.
-  loom_symbol_dependency_edge_id_t first_outgoing_edge_id;
-  // First edge whose target_symbol_id is this symbol.
-  loom_symbol_dependency_edge_id_t first_incoming_edge_id;
-  // Number of outgoing occurrence edges.
+// Incoming/outgoing occurrence-list heads for one symbol.
+typedef struct loom_symbol_reference_symbol_occurrences_t {
+  // First occurrence whose source_symbol_id is this symbol.
+  loom_symbol_reference_occurrence_id_t first_outgoing_occurrence_id;
+  // First occurrence whose target_symbol_id is this symbol.
+  loom_symbol_reference_occurrence_id_t first_incoming_occurrence_id;
+  // Number of outgoing occurrences.
   uint32_t outgoing_count;
-  // Number of incoming occurrence edges.
+  // Number of incoming occurrences.
   uint32_t incoming_count;
   // First abstract provider demand owned by this symbol.
   loom_func_contract_demand_id_t first_contract_demand_id;
   // Number of abstract provider demands owned by this symbol.
   uint32_t contract_demand_count;
-} loom_symbol_dependency_symbol_edges_t;
+} loom_symbol_reference_symbol_occurrences_t;
 
-// Built dependency table for one module snapshot.
-typedef struct loom_symbol_dependency_table_t {
+// Built reference table for one module snapshot.
+typedef struct loom_symbol_reference_table_t {
   // Module this table was built from.
   const loom_module_t* module;
   // Dense per-symbol incoming/outgoing lists.
-  const loom_symbol_dependency_symbol_edges_t* symbols;
+  const loom_symbol_reference_symbol_occurrences_t* symbols;
   // Number of entries in symbols.
   iree_host_size_t symbol_count;
-  // Occurrence edges owned by the caller-provided arena.
-  const loom_symbol_dependency_edge_t* edges;
-  // Number of entries in edges.
-  iree_host_size_t edge_count;
-  // First module-root edge.
-  loom_symbol_dependency_edge_id_t first_module_edge_id;
-  // Number of module-root edges.
-  uint32_t module_edge_count;
+  // Occurrences owned by the caller-provided arena.
+  const loom_symbol_reference_occurrence_t* occurrences;
+  // Number of entries in occurrences.
+  iree_host_size_t occurrence_count;
+  // First module-root occurrence.
+  loom_symbol_reference_occurrence_id_t first_module_occurrence_id;
+  // Number of module-root occurrences.
+  uint32_t module_occurrence_count;
   // Abstract func.apply provider demands owned by module symbols.
   const loom_func_contract_demand_t* contract_demands;
   // Number of entries in contract_demands.
@@ -132,28 +132,28 @@ typedef struct loom_symbol_dependency_table_t {
   // Dense bitset indexed by module string ID for demanded contracts, or NULL
   // when the module contains no abstract contract demands.
   const uint64_t* contract_demand_bits;
-} loom_symbol_dependency_table_t;
+} loom_symbol_reference_table_t;
 
 // Returns true when at least one func.apply demands |contract_id|.
 // |contract_id| must be valid in the table's module string table.
-static inline bool loom_symbol_dependency_contract_is_demanded(
-    const loom_symbol_dependency_table_t* table, loom_string_id_t contract_id) {
+static inline bool loom_symbol_reference_contract_is_demanded(
+    const loom_symbol_reference_table_t* table, loom_string_id_t contract_id) {
   return table->contract_demand_bits &&
          (table->contract_demand_bits[contract_id >> 6] &
           (UINT64_C(1) << (contract_id & 63u))) != 0;
 }
 
-// Builds the symbol dependency table for |module| into |arena|.
-iree_status_t loom_symbol_dependency_table_build(
+// Builds the symbol reference table for |module| into |arena|.
+iree_status_t loom_symbol_reference_table_build(
     const loom_module_t* module, iree_arena_allocator_t* arena,
-    loom_symbol_dependency_table_t* out_table);
+    loom_symbol_reference_table_t* out_table);
 
-// Returns an SCC graph adapter whose node ordinals are module symbol IDs.
-loom_scc_graph_t loom_symbol_dependency_scc_graph(
-    const loom_symbol_dependency_table_t* table);
+// Returns the dependency SCC graph whose node ordinals are module symbol IDs.
+loom_scc_graph_t loom_symbol_reference_dependency_scc_graph(
+    const loom_symbol_reference_table_t* table);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif  // LOOM_ANALYSIS_SYMBOL_DEPENDENCIES_H_
+#endif  // LOOM_ANALYSIS_SYMBOL_REFERENCES_H_

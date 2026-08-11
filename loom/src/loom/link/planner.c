@@ -8,20 +8,20 @@
 
 #include <string.h>
 
-#include "loom/analysis/symbol_dependencies.h"
+#include "loom/analysis/symbol_references.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/util/walk.h"
 
 typedef struct loom_link_plan_module_state_t {
-  // True once dependency_table has been built.
+  // True once reference_table has been built.
   bool dependencies_built;
   // True once module-root dependency edges have been scanned.
   bool module_edges_scanned;
   // Materialized provider module used for dependency scans.
   const loom_module_t* materialized_module;
-  // Dependency table for a materialized provider module.
-  loom_symbol_dependency_table_t dependency_table;
+  // Reference table for a materialized provider module.
+  loom_symbol_reference_table_t reference_table;
 } loom_link_plan_module_state_t;
 
 struct loom_link_plan_t {
@@ -29,7 +29,7 @@ struct loom_link_plan_t {
   const loom_link_module_index_t* index;
   // Host allocator for growable arrays.
   iree_allocator_t allocator;
-  // Arena backing dependency tables.
+  // Arena backing reference tables.
   iree_arena_allocator_t arena;
   // Live symbol selections in stable plan order.
   loom_link_plan_symbol_t* symbols;
@@ -280,8 +280,8 @@ static iree_status_t loom_link_plan_build_module_dependencies(
                             dependency_module->symbols.count,
                             module->symbol_count);
   }
-  IREE_RETURN_IF_ERROR(loom_symbol_dependency_table_build(
-      dependency_module, &plan->arena, &state->dependency_table));
+  IREE_RETURN_IF_ERROR(loom_symbol_reference_table_build(
+      dependency_module, &plan->arena, &state->reference_table));
   state->materialized_module = dependency_module;
   state->dependencies_built = true;
   *out_state = state;
@@ -328,14 +328,14 @@ static iree_status_t loom_link_plan_scan_module_edges(
     return iree_ok_status();
   }
   state->module_edges_scanned = true;
-  loom_symbol_dependency_edge_id_t edge_id =
-      state->dependency_table.first_module_edge_id;
-  while (edge_id != LOOM_SYMBOL_DEPENDENCY_EDGE_ID_INVALID) {
-    const loom_symbol_dependency_edge_t* edge =
-        &state->dependency_table.edges[edge_id];
+  loom_symbol_reference_occurrence_id_t edge_id =
+      state->reference_table.first_module_occurrence_id;
+  while (edge_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
+    const loom_symbol_reference_occurrence_t* edge =
+        &state->reference_table.occurrences[edge_id];
     IREE_RETURN_IF_ERROR(loom_link_plan_select_dependency_target(
         plan, options, module, edge->target_symbol_id, cause_ordinal));
-    edge_id = edge->next_outgoing_edge_id;
+    edge_id = edge->next_outgoing_occurrence_id;
   }
   return iree_ok_status();
 }
@@ -363,21 +363,22 @@ static iree_status_t loom_link_plan_expand_symbol_dependencies(
   IREE_RETURN_IF_ERROR(loom_link_plan_scan_module_edges(plan, options, module,
                                                         state, plan_ordinal));
 
-  if (symbol->module_symbol_ordinal >= state->dependency_table.symbol_count) {
+  if (symbol->module_symbol_ordinal >= state->reference_table.symbol_count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "planned symbol ordinal %" PRIhsz
-                            " exceeds dependency table size",
+                            " exceeds reference table size",
                             symbol->module_symbol_ordinal);
   }
-  const loom_symbol_dependency_symbol_edges_t* edges =
-      &state->dependency_table.symbols[symbol->module_symbol_ordinal];
-  loom_symbol_dependency_edge_id_t edge_id = edges->first_outgoing_edge_id;
-  while (edge_id != LOOM_SYMBOL_DEPENDENCY_EDGE_ID_INVALID) {
-    const loom_symbol_dependency_edge_t* edge =
-        &state->dependency_table.edges[edge_id];
+  const loom_symbol_reference_symbol_occurrences_t* edges =
+      &state->reference_table.symbols[symbol->module_symbol_ordinal];
+  loom_symbol_reference_occurrence_id_t edge_id =
+      edges->first_outgoing_occurrence_id;
+  while (edge_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
+    const loom_symbol_reference_occurrence_t* edge =
+        &state->reference_table.occurrences[edge_id];
     IREE_RETURN_IF_ERROR(loom_link_plan_select_dependency_target(
         plan, options, module, edge->target_symbol_id, plan_ordinal));
-    edge_id = edge->next_outgoing_edge_id;
+    edge_id = edge->next_outgoing_occurrence_id;
   }
   return iree_ok_status();
 }

@@ -34,7 +34,7 @@ loom_cc_library(
     hdrs = ["artifact_manifest_collect.h"],
     deps = [
         ":artifact_manifest",
-        "//loom/src/loom/analysis:symbol_dependencies",
+        "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/low",
@@ -158,7 +158,7 @@ loom_cc_test(
     deps = [
         ":artifact_manifest",
         ":artifact_manifest_collect",
-        "//loom/src/loom/analysis:symbol_dependencies",
+        "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",

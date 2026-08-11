@@ -15,7 +15,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
-#include "loom/analysis/symbol_dependencies.h"
+#include "loom/analysis/symbol_references.h"
 #include "loom/ir/ir.h"
 
 #ifdef __cplusplus
@@ -53,8 +53,8 @@ typedef struct loom_symbol_liveness_contributor_context_t {
   // Module being analyzed.
   const loom_module_t* module;
 
-  // Concrete symbol dependencies for the same module snapshot.
-  const loom_symbol_dependency_table_t* dependencies;
+  // Concrete symbol references for the same module snapshot.
+  const loom_symbol_reference_table_t* references;
 
   // Arena owned by this liveness computation.
   iree_arena_allocator_t* arena;
@@ -103,8 +103,8 @@ typedef struct loom_symbol_liveness_t {
   // Module this result describes.
   const loom_module_t* module;
 
-  // Concrete dependency table used for this result.
-  const loom_symbol_dependency_table_t* dependencies;
+  // Concrete reference table used for this result.
+  const loom_symbol_reference_table_t* references;
 
   // One byte per symbol: non-zero means live.
   const uint8_t* live_symbols;
@@ -132,7 +132,7 @@ iree_status_t loom_symbol_liveness_mark_symbol_ref(
 // Computes symbol liveness into |arena|.
 iree_status_t loom_symbol_liveness_compute(
     const loom_module_t* module,
-    const loom_symbol_dependency_table_t* dependencies,
+    const loom_symbol_reference_table_t* references,
     const loom_symbol_liveness_options_t* options,
     iree_arena_allocator_t* arena, loom_symbol_liveness_t* out_liveness);
 

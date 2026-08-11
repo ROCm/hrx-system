@@ -9,7 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "loom/analysis/symbol_dependencies.h"
+#include "loom/analysis/symbol_references.h"
 #include "loom/analysis/symbol_value_constraints.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -65,7 +65,7 @@ typedef struct loom_linker_source_t {
   // Source symbols whose outgoing dependency edges have been scanned.
   uint8_t* scanned_symbols;
   // Source-module dependency graph. Built only for selective adds.
-  loom_symbol_dependency_table_t dependency_table;
+  loom_symbol_reference_table_t reference_table;
   // Lazily initialized source-to-target remap table.
   loom_ir_remap_t remap;
   // True when root filtering is active for this add operation.
@@ -1273,8 +1273,8 @@ static iree_status_t loom_linker_mark_existing_target_apply_dependencies_live(
 
 static iree_status_t loom_linker_resolve_live_symbols(
     loom_linker_source_t* source) {
-  IREE_RETURN_IF_ERROR(loom_symbol_dependency_table_build(
-      source->module, source->arena, &source->dependency_table));
+  IREE_RETURN_IF_ERROR(loom_symbol_reference_table_build(
+      source->module, source->arena, &source->reference_table));
 
   bool changed = true;
   while (changed) {
@@ -1287,22 +1287,23 @@ static iree_status_t loom_linker_resolve_live_symbols(
       }
       source->scanned_symbols[symbol_id] = 1;
       changed = true;
-      if (symbol_id >= source->dependency_table.symbol_count) {
+      if (symbol_id >= source->reference_table.symbol_count) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "source symbol %u is out of range for "
-                                "dependency table with %" PRIhsz " symbols",
+                                "reference table with %" PRIhsz " symbols",
                                 (unsigned)symbol_id,
-                                source->dependency_table.symbol_count);
+                                source->reference_table.symbol_count);
       }
 
-      loom_symbol_dependency_edge_id_t edge_id =
-          source->dependency_table.symbols[symbol_id].first_outgoing_edge_id;
-      while (edge_id != LOOM_SYMBOL_DEPENDENCY_EDGE_ID_INVALID) {
-        const loom_symbol_dependency_edge_t* edge =
-            &source->dependency_table.edges[edge_id];
+      loom_symbol_reference_occurrence_id_t edge_id =
+          source->reference_table.symbols[symbol_id]
+              .first_outgoing_occurrence_id;
+      while (edge_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
+        const loom_symbol_reference_occurrence_t* edge =
+            &source->reference_table.occurrences[edge_id];
         IREE_RETURN_IF_ERROR(loom_linker_mark_source_symbol_live(
             source, edge->target_symbol_id));
-        edge_id = edge->next_outgoing_edge_id;
+        edge_id = edge->next_outgoing_occurrence_id;
       }
 
       const loom_symbol_t* symbol = &source->module->symbols.entries[symbol_id];

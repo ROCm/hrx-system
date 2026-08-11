@@ -765,11 +765,11 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
-    symbol_dependencies
+    symbol_references
   HDRS
-    "symbol_dependencies.h"
+    "symbol_references.h"
   SRCS
-    "symbol_dependencies.c"
+    "symbol_references.c"
   DEPS
     ::scc
     iree::base
@@ -782,11 +782,11 @@ loom_cc_library(
 
 loom_cc_test(
   NAME
-    symbol_dependencies_test
+    symbol_references_test
   SRCS
-    "symbol_dependencies_test.cc"
+    "symbol_references_test.cc"
   DEPS
-    ::symbol_dependencies
+    ::symbol_references
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
@@ -840,7 +840,7 @@ loom_cc_library(
   SRCS
     "symbol_liveness.c"
   DEPS
-    ::symbol_dependencies
+    ::symbol_references
     iree::base
     iree::base::internal::arena
     loom::ir
@@ -854,8 +854,8 @@ loom_cc_test(
   SRCS
     "symbol_liveness_test.cc"
   DEPS
-    ::symbol_dependencies
     ::symbol_liveness
+    ::symbol_references
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main

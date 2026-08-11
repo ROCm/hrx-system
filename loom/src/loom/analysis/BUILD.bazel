@@ -666,9 +666,9 @@ loom_cc_test(
 )
 
 loom_cc_library(
-    name = "symbol_dependencies",
-    srcs = ["symbol_dependencies.c"],
-    hdrs = ["symbol_dependencies.h"],
+    name = "symbol_references",
+    srcs = ["symbol_references.c"],
+    hdrs = ["symbol_references.h"],
     deps = [
         ":scc",
         "//loom/src/loom/ir",
@@ -680,10 +680,10 @@ loom_cc_library(
 )
 
 loom_cc_test(
-    name = "symbol_dependencies_test",
-    srcs = ["symbol_dependencies_test.cc"],
+    name = "symbol_references_test",
+    srcs = ["symbol_references_test.cc"],
     deps = [
-        ":symbol_dependencies",
+        ":symbol_references",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
@@ -731,7 +731,7 @@ loom_cc_library(
     srcs = ["symbol_liveness.c"],
     hdrs = ["symbol_liveness.h"],
     deps = [
-        ":symbol_dependencies",
+        ":symbol_references",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",
@@ -743,8 +743,8 @@ loom_cc_test(
     name = "symbol_liveness_test",
     srcs = ["symbol_liveness_test.cc"],
     deps = [
-        ":symbol_dependencies",
         ":symbol_liveness",
+        ":symbol_references",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",

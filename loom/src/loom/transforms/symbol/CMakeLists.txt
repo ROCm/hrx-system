@@ -40,9 +40,9 @@ loom_cc_library(
     iree::base::internal::arena
     loom::analysis::condition_facts
     loom::analysis::func_provider_catalog
-    loom::analysis::symbol_dependencies
     loom::analysis::symbol_facts
     loom::analysis::symbol_liveness
+    loom::analysis::symbol_references
     loom::error::error_defs
     loom::ir
     loom::ir::facts
@@ -72,7 +72,7 @@ loom_cc_library(
   DEPS
     iree::base
     loom::analysis::scc
-    loom::analysis::symbol_dependencies
+    loom::analysis::symbol_references
     loom::error::error_defs
     loom::ir
     loom::ops::func
@@ -142,8 +142,8 @@ loom_cc_library(
   DEPS
     ::symbol_pruning
     iree::base
-    loom::analysis::symbol_dependencies
     loom::analysis::symbol_liveness
+    loom::analysis::symbol_references
     loom::ir
     loom::pass::types
     loom::target::pass_environment

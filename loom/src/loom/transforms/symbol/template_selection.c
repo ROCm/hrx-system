@@ -11,9 +11,9 @@
 
 #include "loom/analysis/condition_facts.h"
 #include "loom/analysis/func_provider_catalog.h"
-#include "loom/analysis/symbol_dependencies.h"
 #include "loom/analysis/symbol_facts.h"
 #include "loom/analysis/symbol_liveness.h"
+#include "loom/analysis/symbol_references.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
 #include "loom/ir/facts.h"
@@ -330,8 +330,8 @@ typedef struct loom_template_selection_state_t {
   // Local provider catalog keyed by func.apply contract.
   loom_func_provider_catalog_t catalog;
 
-  // Concrete symbol dependencies for this module snapshot.
-  loom_symbol_dependency_table_t dependencies;
+  // Concrete symbol references for this module snapshot.
+  loom_symbol_reference_table_t references;
 
   // Symbol-pruning policy shared with the liveness root classifier.
   loom_symbol_pruning_options_t pruning_options;
@@ -2088,7 +2088,7 @@ static iree_status_t loom_template_selection_build_liveness(
       .contributors = &contributor,
       .contributor_count = 1,
   };
-  return loom_symbol_liveness_compute(state->module, &state->dependencies,
+  return loom_symbol_liveness_compute(state->module, &state->references,
                                       &options, state->pass->arena,
                                       &state->liveness);
 }
@@ -2117,8 +2117,8 @@ iree_status_t loom_template_selection_run(loom_pass_t* pass,
       pass->arena, &state.target_versions));
   IREE_RETURN_IF_ERROR(loom_func_provider_catalog_build_local(
       &state.catalog, module, &state.fact_table));
-  IREE_RETURN_IF_ERROR(loom_symbol_dependency_table_build(module, pass->arena,
-                                                          &state.dependencies));
+  IREE_RETURN_IF_ERROR(loom_symbol_reference_table_build(module, pass->arena,
+                                                         &state.references));
   IREE_RETURN_IF_ERROR(loom_template_selection_build_liveness(&state));
 
   if (state.mode == LOOM_TEMPLATE_SELECTION_MODE_FINAL) {

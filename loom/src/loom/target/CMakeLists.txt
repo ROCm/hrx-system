@@ -103,8 +103,8 @@ loom_cc_library(
     ::pass_environment
     iree::base
     iree::base::internal::arena
-    loom::analysis::symbol_dependencies
     loom::analysis::symbol_facts
+    loom::analysis::symbol_references
     loom::error::error_defs
     loom::ir
     loom::ops::func_symbol_facts

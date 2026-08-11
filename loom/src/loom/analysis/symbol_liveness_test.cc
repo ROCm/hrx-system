@@ -90,11 +90,11 @@ class SymbolLivenessTest : public ::testing::Test {
   loom_symbol_liveness_t ComputeLiveness(
       const loom_module_t* module,
       const loom_symbol_liveness_options_t* options) {
-    loom_symbol_dependency_table_t dependencies = {};
-    IREE_CHECK_OK(loom_symbol_dependency_table_build(module, &analysis_arena_,
-                                                     &dependencies));
+    loom_symbol_reference_table_t references = {};
+    IREE_CHECK_OK(loom_symbol_reference_table_build(module, &analysis_arena_,
+                                                    &references));
     loom_symbol_liveness_t liveness = {};
-    IREE_CHECK_OK(loom_symbol_liveness_compute(module, &dependencies, options,
+    IREE_CHECK_OK(loom_symbol_liveness_compute(module, &references, options,
                                                &analysis_arena_, &liveness));
     return liveness;
   }

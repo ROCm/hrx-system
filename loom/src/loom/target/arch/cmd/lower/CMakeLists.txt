@@ -37,7 +37,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::analysis::scc
-    loom::analysis::symbol_dependencies
+    loom::analysis::symbol_references
     loom::error::emitter
     loom::error::error_defs
     loom::ir

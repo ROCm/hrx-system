@@ -112,7 +112,7 @@ typedef struct loom_link_plan_symbol_t {
 
 // Builds a link plan from |index|.
 //
-// |block_pool| backs planner-owned dependency tables. The caller owns the
+// |block_pool| backs planner-owned reference tables. The caller owns the
 // returned plan and must release it with loom_link_plan_free().
 iree_status_t loom_link_plan_build(const loom_link_module_index_t* index,
                                    const loom_link_plan_options_t* options,

@@ -34,7 +34,7 @@ loom_cc_library(
     ::symbol_policy
     iree::base
     iree::base::internal::arena
-    loom::analysis::symbol_dependencies
+    loom::analysis::symbol_references
     loom::analysis::symbol_value_constraints
     loom::ir
     loom::ir::symbol_map
@@ -120,7 +120,7 @@ loom_cc_library(
     ::module_index
     iree::base
     iree::base::internal::arena
-    loom::analysis::symbol_dependencies
+    loom::analysis::symbol_references
     loom::ops::func
     loom::ops::op_defs
     loom::util::walk

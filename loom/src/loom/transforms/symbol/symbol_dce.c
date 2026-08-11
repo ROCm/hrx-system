@@ -6,8 +6,8 @@
 
 #include "loom/transforms/symbol/symbol_dce.h"
 
-#include "loom/analysis/symbol_dependencies.h"
 #include "loom/analysis/symbol_liveness.h"
+#include "loom/analysis/symbol_references.h"
 #include "loom/ir/module.h"
 #include "loom/target/pass_environment.h"
 #include "loom/transforms/symbol/symbol_pruning.h"
@@ -44,8 +44,8 @@ typedef struct loom_symbol_dce_state_t {
   loom_symbol_dce_statistics_t* statistics;
   // Module being rewritten.
   loom_module_t* module;
-  // Rebuilt module symbol dependency table.
-  loom_symbol_dependency_table_t dependencies;
+  // Rebuilt module symbol reference table.
+  loom_symbol_reference_table_t references;
   // Computed live symbol set.
   loom_symbol_liveness_t liveness;
 } loom_symbol_dce_state_t;
@@ -56,15 +56,15 @@ typedef struct loom_symbol_dce_state_t {
 
 static iree_status_t loom_symbol_dce_compute_live_symbols(
     loom_symbol_dce_state_t* state) {
-  IREE_RETURN_IF_ERROR(loom_symbol_dependency_table_build(
-      state->module, state->pass->arena, &state->dependencies));
+  IREE_RETURN_IF_ERROR(loom_symbol_reference_table_build(
+      state->module, state->pass->arena, &state->references));
   loom_symbol_liveness_options_t options = {
       // Encodings are module-table records that serialize with the module.
       // Until there is encoding-table DCE, their symbol refs are roots.
       .flags = LOOM_SYMBOL_LIVENESS_INCLUDE_MODULE_EDGES,
       .root_query = loom_symbol_pruning_symbol_is_root,
   };
-  return loom_symbol_liveness_compute(state->module, &state->dependencies,
+  return loom_symbol_liveness_compute(state->module, &state->references,
                                       &options, state->pass->arena,
                                       &state->liveness);
 }

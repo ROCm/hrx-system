@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/analysis/symbol_dependencies.h"
+#include "loom/analysis/symbol_references.h"
 
 #include <algorithm>
 #include <vector>
@@ -28,7 +28,7 @@ namespace {
 
 using ModulePtr = ::loom::testing::ModulePtr;
 
-class SymbolDependenciesTest : public ::testing::Test {
+class SymbolReferencesTest : public ::testing::Test {
  protected:
   void SetUp() override {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(),
@@ -70,7 +70,7 @@ class SymbolDependenciesTest : public ::testing::Test {
     loom_module_t* module = nullptr;
     loom_text_parse_options_t options = {};
     IREE_CHECK_OK(loom_text_parse(iree_make_cstring_view(source),
-                                  IREE_SV("symbol_dependencies_test.loom"),
+                                  IREE_SV("symbol_references_test.loom"),
                                   &context_, &block_pool_, &options, &module));
     return ModulePtr(module);
   }
@@ -131,37 +131,42 @@ class SymbolDependenciesTest : public ::testing::Test {
     return dict;
   }
 
-  loom_symbol_dependency_table_t BuildTable(const loom_module_t* module) {
-    loom_symbol_dependency_table_t table = {};
+  loom_symbol_reference_table_t BuildTable(const loom_module_t* module) {
+    loom_symbol_reference_table_t table = {};
     IREE_CHECK_OK(
-        loom_symbol_dependency_table_build(module, &analysis_arena_, &table));
+        loom_symbol_reference_table_build(module, &analysis_arena_, &table));
     return table;
   }
 
-  const loom_symbol_dependency_edge_t* FindEdge(
-      const loom_symbol_dependency_table_t& table,
+  const loom_symbol_reference_occurrence_t* FindOccurrence(
+      const loom_symbol_reference_table_t& table,
       loom_symbol_id_t source_symbol_id, loom_symbol_id_t target_symbol_id,
-      loom_symbol_dependency_edge_kind_t kind) {
+      loom_symbol_reference_occurrence_kind_t kind) {
     if (source_symbol_id == LOOM_SYMBOL_ID_INVALID) {
-      loom_symbol_dependency_edge_id_t edge_id = table.first_module_edge_id;
-      while (edge_id != LOOM_SYMBOL_DEPENDENCY_EDGE_ID_INVALID) {
-        const loom_symbol_dependency_edge_t* edge = &table.edges[edge_id];
-        if (edge->target_symbol_id == target_symbol_id && edge->kind == kind) {
-          return edge;
+      loom_symbol_reference_occurrence_id_t occurrence_id =
+          table.first_module_occurrence_id;
+      while (occurrence_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
+        const loom_symbol_reference_occurrence_t* occurrence =
+            &table.occurrences[occurrence_id];
+        if (occurrence->target_symbol_id == target_symbol_id &&
+            occurrence->kind == kind) {
+          return occurrence;
         }
-        edge_id = edge->next_outgoing_edge_id;
+        occurrence_id = occurrence->next_outgoing_occurrence_id;
       }
       return nullptr;
     }
 
-    loom_symbol_dependency_edge_id_t edge_id =
-        table.symbols[source_symbol_id].first_outgoing_edge_id;
-    while (edge_id != LOOM_SYMBOL_DEPENDENCY_EDGE_ID_INVALID) {
-      const loom_symbol_dependency_edge_t* edge = &table.edges[edge_id];
-      if (edge->target_symbol_id == target_symbol_id && edge->kind == kind) {
-        return edge;
+    loom_symbol_reference_occurrence_id_t occurrence_id =
+        table.symbols[source_symbol_id].first_outgoing_occurrence_id;
+    while (occurrence_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
+      const loom_symbol_reference_occurrence_t* occurrence =
+          &table.occurrences[occurrence_id];
+      if (occurrence->target_symbol_id == target_symbol_id &&
+          occurrence->kind == kind) {
+        return occurrence;
       }
-      edge_id = edge->next_outgoing_edge_id;
+      occurrence_id = occurrence->next_outgoing_occurrence_id;
     }
     return nullptr;
   }
@@ -178,7 +183,7 @@ class SymbolDependenciesTest : public ::testing::Test {
   iree_arena_allocator_t analysis_arena_;
 };
 
-TEST_F(SymbolDependenciesTest, CallsAndGlobalAccessesUseGeneratedDescriptors) {
+TEST_F(SymbolReferencesTest, CallsAndGlobalAccessesUseGeneratedDescriptors) {
   ModulePtr module = ParseModule(R"(
 global.variable @state : index
 
@@ -203,31 +208,31 @@ func.def @entry() -> (index) {
   loom_symbol_id_t writer = FindSymbol(module.get(), IREE_SV("writer"));
   loom_symbol_id_t entry = FindSymbol(module.get(), IREE_SV("entry"));
 
-  loom_symbol_dependency_table_t table = BuildTable(module.get());
+  loom_symbol_reference_table_t table = BuildTable(module.get());
 
-  const loom_symbol_dependency_edge_t* read_edge =
-      FindEdge(table, reader, state, LOOM_SYMBOL_DEPENDENCY_EDGE_GLOBAL_ACCESS);
-  ASSERT_NE(read_edge, nullptr);
-  ASSERT_NE(read_edge->user_op, nullptr);
-  EXPECT_EQ(read_edge->user_op->kind, LOOM_OP_GLOBAL_LOAD);
+  const loom_symbol_reference_occurrence_t* read_occurrence = FindOccurrence(
+      table, reader, state, LOOM_SYMBOL_REFERENCE_OCCURRENCE_GLOBAL_ACCESS);
+  ASSERT_NE(read_occurrence, nullptr);
+  ASSERT_NE(read_occurrence->user_op, nullptr);
+  EXPECT_EQ(read_occurrence->user_op->kind, LOOM_OP_GLOBAL_LOAD);
 
-  const loom_symbol_dependency_edge_t* write_edge =
-      FindEdge(table, writer, state, LOOM_SYMBOL_DEPENDENCY_EDGE_GLOBAL_ACCESS);
-  ASSERT_NE(write_edge, nullptr);
-  ASSERT_NE(write_edge->user_op, nullptr);
-  EXPECT_EQ(write_edge->user_op->kind, LOOM_OP_GLOBAL_STORE);
+  const loom_symbol_reference_occurrence_t* write_occurrence = FindOccurrence(
+      table, writer, state, LOOM_SYMBOL_REFERENCE_OCCURRENCE_GLOBAL_ACCESS);
+  ASSERT_NE(write_occurrence, nullptr);
+  ASSERT_NE(write_occurrence->user_op, nullptr);
+  EXPECT_EQ(write_occurrence->user_op->kind, LOOM_OP_GLOBAL_STORE);
 
-  const loom_symbol_dependency_edge_t* call_edge =
-      FindEdge(table, entry, reader, LOOM_SYMBOL_DEPENDENCY_EDGE_CALL);
-  ASSERT_NE(call_edge, nullptr);
-  ASSERT_NE(call_edge->user_op, nullptr);
-  EXPECT_EQ(call_edge->user_op->kind, LOOM_OP_FUNC_CALL);
+  const loom_symbol_reference_occurrence_t* call_occurrence = FindOccurrence(
+      table, entry, reader, LOOM_SYMBOL_REFERENCE_OCCURRENCE_CALL);
+  ASSERT_NE(call_occurrence, nullptr);
+  ASSERT_NE(call_occurrence->user_op, nullptr);
+  EXPECT_EQ(call_occurrence->user_op->kind, LOOM_OP_FUNC_CALL);
 
   EXPECT_EQ(table.symbols[state].incoming_count, 2u);
   EXPECT_EQ(table.symbols[reader].incoming_count, 1u);
 }
 
-TEST_F(SymbolDependenciesTest, ContractDemandsRetainOwningSymbol) {
+TEST_F(SymbolReferencesTest, ContractDemandsRetainOwningSymbol) {
   ModulePtr module = ParseModule(R"(
 func.template<outer.contract> @outer_provider(%value: i32) -> (i32) {
   %result = func.apply<demo.contract>(%value) : (i32) -> (i32)
@@ -254,11 +259,11 @@ func.def public @entry(%arg: i32) -> (i32) {
   ASSERT_NE(contract_id, LOOM_STRING_ID_INVALID);
   ASSERT_NE(undemanded_contract_id, LOOM_STRING_ID_INVALID);
 
-  const loom_symbol_dependency_table_t table = BuildTable(module.get());
+  const loom_symbol_reference_table_t table = BuildTable(module.get());
 
   ASSERT_EQ(table.contract_demand_count, 2u);
-  EXPECT_TRUE(loom_symbol_dependency_contract_is_demanded(&table, contract_id));
-  EXPECT_FALSE(loom_symbol_dependency_contract_is_demanded(
+  EXPECT_TRUE(loom_symbol_reference_contract_is_demanded(&table, contract_id));
+  EXPECT_FALSE(loom_symbol_reference_contract_is_demanded(
       &table, undemanded_contract_id));
   const loom_symbol_id_t source_symbol_ids[] = {outer_provider, entry};
   for (loom_symbol_id_t source_symbol_id : source_symbol_ids) {
@@ -277,7 +282,7 @@ func.def public @entry(%arg: i32) -> (i32) {
   }
 }
 
-TEST_F(SymbolDependenciesTest, OpenParameterizedArraysAreNotSymbolReferences) {
+TEST_F(SymbolReferencesTest, OpenParameterizedArraysAreNotSymbolReferences) {
   ModulePtr module = ParseModule(R"(
 func.template<demo.contract> requires [#target.subgroup.size<64>] @conditional(%arg: i32) -> (i32) {
   func.return %arg : i32
@@ -286,14 +291,14 @@ func.template<demo.contract> requires [#target.subgroup.size<64>] @conditional(%
 
   loom_symbol_id_t conditional =
       FindSymbol(module.get(), IREE_SV("conditional"));
-  loom_symbol_dependency_table_t table = BuildTable(module.get());
+  loom_symbol_reference_table_t table = BuildTable(module.get());
 
   ASSERT_EQ(table.symbol_count, 1u);
   EXPECT_EQ(table.symbols[conditional].outgoing_count, 0u);
-  EXPECT_EQ(table.edge_count, 0u);
+  EXPECT_EQ(table.occurrence_count, 0u);
 }
 
-TEST_F(SymbolDependenciesTest, ConfigReadsUseNormalSymbolAttrEdges) {
+TEST_F(SymbolReferencesTest, ConfigReadsUseNormalSymbolAttrOccurrences) {
   ModulePtr module = ParseModule(R"(
 config.def @enable_mtp = true : i1
 
@@ -306,17 +311,17 @@ func.def @reader() -> (i1) {
   loom_symbol_id_t enable_mtp = FindSymbol(module.get(), IREE_SV("enable_mtp"));
   loom_symbol_id_t reader = FindSymbol(module.get(), IREE_SV("reader"));
 
-  loom_symbol_dependency_table_t table = BuildTable(module.get());
+  loom_symbol_reference_table_t table = BuildTable(module.get());
 
-  const loom_symbol_dependency_edge_t* config_edge = FindEdge(
-      table, reader, enable_mtp, LOOM_SYMBOL_DEPENDENCY_EDGE_SYMBOL_ATTR);
-  ASSERT_NE(config_edge, nullptr);
-  ASSERT_NE(config_edge->user_op, nullptr);
-  EXPECT_EQ(config_edge->user_op->kind, LOOM_OP_CONFIG_GET);
+  const loom_symbol_reference_occurrence_t* config_occurrence = FindOccurrence(
+      table, reader, enable_mtp, LOOM_SYMBOL_REFERENCE_OCCURRENCE_SYMBOL_ATTR);
+  ASSERT_NE(config_occurrence, nullptr);
+  ASSERT_NE(config_occurrence->user_op, nullptr);
+  EXPECT_EQ(config_occurrence->user_op->kind, LOOM_OP_CONFIG_GET);
   EXPECT_EQ(table.symbols[enable_mtp].incoming_count, 1u);
 }
 
-TEST_F(SymbolDependenciesTest, NestedDictRefsFeedSymbolSccGraph) {
+TEST_F(SymbolReferencesTest, NestedDictRefsFeedSymbolSccGraph) {
   ModulePtr module = ParseModule(R"(
 test.record @base
 test.record @derived {depends = @base}
@@ -329,18 +334,20 @@ test.record @b {depends = @a}
   loom_symbol_id_t a = FindSymbol(module.get(), IREE_SV("a"));
   loom_symbol_id_t b = FindSymbol(module.get(), IREE_SV("b"));
 
-  loom_symbol_dependency_table_t table = BuildTable(module.get());
+  loom_symbol_reference_table_t table = BuildTable(module.get());
 
+  EXPECT_NE(FindOccurrence(table, derived, base,
+                           LOOM_SYMBOL_REFERENCE_OCCURRENCE_NESTED_ATTR),
+            nullptr);
   EXPECT_NE(
-      FindEdge(table, derived, base, LOOM_SYMBOL_DEPENDENCY_EDGE_NESTED_ATTR),
+      FindOccurrence(table, a, b, LOOM_SYMBOL_REFERENCE_OCCURRENCE_NESTED_ATTR),
       nullptr);
-  EXPECT_NE(FindEdge(table, a, b, LOOM_SYMBOL_DEPENDENCY_EDGE_NESTED_ATTR),
-            nullptr);
-  EXPECT_NE(FindEdge(table, b, a, LOOM_SYMBOL_DEPENDENCY_EDGE_NESTED_ATTR),
-            nullptr);
+  EXPECT_NE(
+      FindOccurrence(table, b, a, LOOM_SYMBOL_REFERENCE_OCCURRENCE_NESTED_ATTR),
+      nullptr);
 
   loom_scc_list_t sccs = {};
-  loom_scc_graph_t graph = loom_symbol_dependency_scc_graph(&table);
+  loom_scc_graph_t graph = loom_symbol_reference_dependency_scc_graph(&table);
   IREE_ASSERT_OK(loom_scc_compute(&graph, nullptr, &analysis_arena_, &sccs));
 
   bool found_cycle = false;
@@ -353,7 +360,7 @@ test.record @b {depends = @a}
   EXPECT_TRUE(found_cycle);
 }
 
-TEST_F(SymbolDependenciesTest, RebuildsAfterAttrMutationAndErase) {
+TEST_F(SymbolReferencesTest, RebuildsAfterAttrMutationAndErase) {
   ModulePtr module = AllocateModule();
   loom_builder_t builder = {};
   loom_builder_initialize(module.get(), &module->arena,
@@ -374,32 +381,32 @@ TEST_F(SymbolDependenciesTest, RebuildsAfterAttrMutationAndErase) {
       loom_make_named_attr_slice(&depends_attr, 1), LOOM_LOCATION_UNKNOWN,
       &derived_op));
 
-  loom_symbol_dependency_table_t table = BuildTable(module.get());
-  EXPECT_NE(FindEdge(table, derived_ref.symbol_id, base_ref.symbol_id,
-                     LOOM_SYMBOL_DEPENDENCY_EDGE_NESTED_ATTR),
+  loom_symbol_reference_table_t table = BuildTable(module.get());
+  EXPECT_NE(FindOccurrence(table, derived_ref.symbol_id, base_ref.symbol_id,
+                           LOOM_SYMBOL_REFERENCE_OCCURRENCE_NESTED_ATTR),
             nullptr);
 
   loom_op_attrs(derived_op)[2] = MakeEmptyDict(module.get());
   table = BuildTable(module.get());
-  EXPECT_EQ(FindEdge(table, derived_ref.symbol_id, base_ref.symbol_id,
-                     LOOM_SYMBOL_DEPENDENCY_EDGE_NESTED_ATTR),
+  EXPECT_EQ(FindOccurrence(table, derived_ref.symbol_id, base_ref.symbol_id,
+                           LOOM_SYMBOL_REFERENCE_OCCURRENCE_NESTED_ATTR),
             nullptr);
 
   loom_op_attrs(derived_op)[2] =
       MakeSymbolDict(module.get(), IREE_SV("depends"), base_ref);
   table = BuildTable(module.get());
-  EXPECT_NE(FindEdge(table, derived_ref.symbol_id, base_ref.symbol_id,
-                     LOOM_SYMBOL_DEPENDENCY_EDGE_NESTED_ATTR),
+  EXPECT_NE(FindOccurrence(table, derived_ref.symbol_id, base_ref.symbol_id,
+                           LOOM_SYMBOL_REFERENCE_OCCURRENCE_NESTED_ATTR),
             nullptr);
 
   IREE_ASSERT_OK(loom_op_erase(module.get(), derived_op));
   table = BuildTable(module.get());
-  EXPECT_EQ(FindEdge(table, derived_ref.symbol_id, base_ref.symbol_id,
-                     LOOM_SYMBOL_DEPENDENCY_EDGE_NESTED_ATTR),
+  EXPECT_EQ(FindOccurrence(table, derived_ref.symbol_id, base_ref.symbol_id,
+                           LOOM_SYMBOL_REFERENCE_OCCURRENCE_NESTED_ATTR),
             nullptr);
 }
 
-TEST_F(SymbolDependenciesTest, CompactionRemapsRebuiltDependencies) {
+TEST_F(SymbolReferencesTest, CompactionRemapsRebuiltReferences) {
   ModulePtr module = AllocateModule();
   loom_builder_t builder = {};
   loom_builder_initialize(module.get(), &module->arena,
@@ -424,9 +431,9 @@ TEST_F(SymbolDependenciesTest, CompactionRemapsRebuiltDependencies) {
   EXPECT_EQ(dead_ref.symbol_id, 0u);
   EXPECT_EQ(base_ref.symbol_id, 1u);
   EXPECT_EQ(owner_ref.symbol_id, 2u);
-  loom_symbol_dependency_table_t table = BuildTable(module.get());
-  EXPECT_NE(FindEdge(table, owner_ref.symbol_id, base_ref.symbol_id,
-                     LOOM_SYMBOL_DEPENDENCY_EDGE_NESTED_ATTR),
+  loom_symbol_reference_table_t table = BuildTable(module.get());
+  EXPECT_NE(FindOccurrence(table, owner_ref.symbol_id, base_ref.symbol_id,
+                           LOOM_SYMBOL_REFERENCE_OCCURRENCE_NESTED_ATTR),
             nullptr);
 
   iree_host_size_t removed_count = 0;
@@ -441,12 +448,12 @@ TEST_F(SymbolDependenciesTest, CompactionRemapsRebuiltDependencies) {
 
   table = BuildTable(module.get());
   EXPECT_EQ(table.symbol_count, 2u);
-  EXPECT_NE(
-      FindEdge(table, owner, base, LOOM_SYMBOL_DEPENDENCY_EDGE_NESTED_ATTR),
-      nullptr);
+  EXPECT_NE(FindOccurrence(table, owner, base,
+                           LOOM_SYMBOL_REFERENCE_OCCURRENCE_NESTED_ATTR),
+            nullptr);
 }
 
-TEST_F(SymbolDependenciesTest, TypeAndEncodingRefsUseOneTable) {
+TEST_F(SymbolReferencesTest, TypeAndEncodingRefsUseOneTable) {
   ModulePtr module = AllocateModule();
   loom_builder_t builder = {};
   loom_builder_initialize(module.get(), &module->arena,
@@ -533,25 +540,26 @@ TEST_F(SymbolDependenciesTest, TypeAndEncodingRefsUseOneTable) {
       &builder, 0, 0, 0, register_func_ref, nullptr, 0, &register_type, 1,
       nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &register_func_op));
 
-  loom_symbol_dependency_table_t table = BuildTable(module.get());
+  loom_symbol_reference_table_t table = BuildTable(module.get());
   loom_symbol_id_t meta = meta_ref.symbol_id;
   loom_symbol_id_t owner = owner_ref.symbol_id;
   loom_symbol_id_t typed_func = typed_func_ref.symbol_id;
   loom_symbol_id_t register_func = register_func_ref.symbol_id;
 
-  EXPECT_NE(FindEdge(table, owner, meta, LOOM_SYMBOL_DEPENDENCY_EDGE_TYPE_ATTR),
+  EXPECT_NE(FindOccurrence(table, owner, meta,
+                           LOOM_SYMBOL_REFERENCE_OCCURRENCE_TYPE_ATTR),
             nullptr);
-  EXPECT_NE(
-      FindEdge(table, owner, meta, LOOM_SYMBOL_DEPENDENCY_EDGE_ENCODING_ATTR),
-      nullptr);
-  EXPECT_NE(
-      FindEdge(table, typed_func, meta, LOOM_SYMBOL_DEPENDENCY_EDGE_VALUE_TYPE),
-      nullptr);
-  EXPECT_NE(FindEdge(table, register_func, meta,
-                     LOOM_SYMBOL_DEPENDENCY_EDGE_VALUE_TYPE),
+  EXPECT_NE(FindOccurrence(table, owner, meta,
+                           LOOM_SYMBOL_REFERENCE_OCCURRENCE_ENCODING_ATTR),
             nullptr);
-  EXPECT_NE(FindEdge(table, LOOM_SYMBOL_ID_INVALID, meta,
-                     LOOM_SYMBOL_DEPENDENCY_EDGE_MODULE_ENCODING),
+  EXPECT_NE(FindOccurrence(table, typed_func, meta,
+                           LOOM_SYMBOL_REFERENCE_OCCURRENCE_VALUE_TYPE),
+            nullptr);
+  EXPECT_NE(FindOccurrence(table, register_func, meta,
+                           LOOM_SYMBOL_REFERENCE_OCCURRENCE_VALUE_TYPE),
+            nullptr);
+  EXPECT_NE(FindOccurrence(table, LOOM_SYMBOL_ID_INVALID, meta,
+                           LOOM_SYMBOL_REFERENCE_OCCURRENCE_MODULE_ENCODING),
             nullptr);
 }
 

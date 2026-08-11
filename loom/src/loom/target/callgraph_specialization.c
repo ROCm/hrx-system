@@ -10,8 +10,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "loom/analysis/symbol_dependencies.h"
 #include "loom/analysis/symbol_facts.h"
+#include "loom/analysis/symbol_references.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func_symbol_facts.h"
@@ -165,8 +165,8 @@ typedef struct loom_target_callgraph_state_t {
   // Typed pass statistics storage.
   loom_target_callgraph_specialization_statistics_t* statistics;
 
-  // Post-authoring symbol dependency snapshot.
-  loom_symbol_dependency_table_t dependencies;
+  // Post-authoring symbol reference snapshot.
+  loom_symbol_reference_table_t references;
 
   // Lazy symbol-fact cache valid until materialization begins.
   loom_symbol_fact_table_t fact_table;
@@ -558,15 +558,15 @@ static iree_status_t loom_target_callgraph_plan_reachable_rows(
         state->rows[row_id].source_symbol_id;
     loom_target_callgraph_context_t* caller_context =
         state->rows[row_id].context;
-    loom_symbol_dependency_edge_id_t edge_id =
-        state->dependencies.symbols[caller_source_symbol_id]
-            .first_outgoing_edge_id;
+    loom_symbol_reference_occurrence_id_t edge_id =
+        state->references.symbols[caller_source_symbol_id]
+            .first_outgoing_occurrence_id;
     while (state->plan_valid &&
-           edge_id != LOOM_SYMBOL_DEPENDENCY_EDGE_ID_INVALID) {
-      const loom_symbol_dependency_edge_t* edge =
-          &state->dependencies.edges[edge_id];
-      edge_id = edge->next_outgoing_edge_id;
-      if (edge->kind != LOOM_SYMBOL_DEPENDENCY_EDGE_CALL ||
+           edge_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
+      const loom_symbol_reference_occurrence_t* edge =
+          &state->references.occurrences[edge_id];
+      edge_id = edge->next_outgoing_occurrence_id;
+      if (edge->kind != LOOM_SYMBOL_REFERENCE_OCCURRENCE_CALL ||
           edge->user_op == NULL) {
         continue;
       }
@@ -954,8 +954,8 @@ iree_status_t loom_target_callgraph_specialization_run(loom_pass_t* pass,
   if (state.source_symbol_count == 0 || version_owner->list.count == 0) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_symbol_dependency_table_build(module, pass->arena,
-                                                          &state.dependencies));
+  IREE_RETURN_IF_ERROR(loom_symbol_reference_table_build(module, pass->arena,
+                                                         &state.references));
   IREE_RETURN_IF_ERROR(loom_target_callgraph_seed_versions(&state));
   if (!state.plan_valid) return iree_ok_status();
   IREE_RETURN_IF_ERROR(loom_target_callgraph_plan_reachable_rows(&state));
