@@ -172,6 +172,14 @@ static bool loom_attribute_equal_impl(const loom_attribute_t* a,
       if (a->signed_enum_set_words == b->signed_enum_set_words) return true;
       return memcmp(a->signed_enum_set_words, b->signed_enum_set_words,
                     (iree_host_size_t)a->count * 2 * sizeof(uint64_t)) == 0;
+    case LOOM_ATTR_SYMBOL_ARRAY:
+      if (a->count != b->count) return false;
+      if (a->count == 0) return true;
+      if (a->symbol_array == NULL || b->symbol_array == NULL) return false;
+      if (a->symbol_array == b->symbol_array) return true;
+      return memcmp(a->symbol_array, b->symbol_array,
+                    (iree_host_size_t)a->count * sizeof(loom_symbol_ref_t)) ==
+             0;
     case LOOM_ATTR_PREDICATE_LIST:
       if (a->count != b->count) return false;
       if (a->predicate_list == b->predicate_list) return true;
@@ -258,6 +266,14 @@ static uint32_t loom_attribute_hash_impl(const loom_attribute_t* attr,
         hash = loom_hash_bytes(
             attr->signed_enum_set_words,
             (iree_host_size_t)attr->count * 2 * sizeof(uint64_t), hash);
+      }
+      break;
+    case LOOM_ATTR_SYMBOL_ARRAY:
+      hash = loom_hash_bytes(&attr->count, sizeof(attr->count), hash);
+      if (attr->count != 0 && attr->symbol_array != NULL) {
+        hash = loom_hash_bytes(
+            attr->symbol_array,
+            (iree_host_size_t)attr->count * sizeof(loom_symbol_ref_t), hash);
       }
       break;
     case LOOM_ATTR_PREDICATE_LIST:

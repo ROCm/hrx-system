@@ -134,6 +134,7 @@ __all__ = [
     "symbol_from_operation",
     "SymbolRef",
     "SymbolName",
+    "SymbolNameArray",
     "SYMBOL_FLAG_IMPORT",
     "SYMBOL_FLAG_DECLARATION",
     "SYMBOL_FLAG_TEST_ONLY",
@@ -1826,6 +1827,37 @@ class SymbolName(str):
     """Module-local symbol-name attribute payload."""
 
     __slots__ = ()
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class SymbolNameArray:
+    """Ordered module-local symbol-name attribute payloads.
+
+    The enclosing field descriptor owns the symbol interface and reference
+    role. Ordering and duplicate names are preserved.
+    """
+
+    values: tuple[SymbolName, ...]
+
+    def __init__(self, values: Iterable[SymbolName] = ()) -> None:
+        frozen_values = tuple(values)
+        if len(frozen_values) > 0xFFFF:
+            raise ValueError(
+                f"symbol name array length {len(frozen_values)} exceeds UINT16_MAX"
+            )
+        for index, value in enumerate(frozen_values):
+            if not isinstance(value, SymbolName):
+                raise TypeError(
+                    f"symbol name array element {index} must be a SymbolName, "
+                    f"got {value!r}"
+                )
+        object.__setattr__(self, "values", frozen_values)
+
+    def __iter__(self) -> Iterator[SymbolName]:
+        return iter(self.values)
+
+    def __len__(self) -> int:
+        return len(self.values)
 
 
 @dataclass(slots=True)

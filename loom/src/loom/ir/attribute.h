@@ -282,6 +282,30 @@ static inline loom_i64_array_t loom_make_i64_array(const int64_t* values,
   return array;
 }
 
+// A borrowed ordered array of module-local symbol references.
+//
+// The descriptor of the operation field carrying the array owns the symbol
+// interface and reference role. Ordering and duplicate references are
+// preserved.
+typedef struct loom_symbol_ref_array_t {
+  const loom_symbol_ref_t* values;
+  iree_host_size_t count;
+} loom_symbol_ref_array_t;
+
+static inline loom_symbol_ref_array_t loom_symbol_ref_array_empty(void) {
+  loom_symbol_ref_array_t array = {0};
+  return array;
+}
+
+static inline loom_symbol_ref_array_t loom_make_symbol_ref_array(
+    const loom_symbol_ref_t* values, iree_host_size_t count) {
+  loom_symbol_ref_array_t array = {
+      /*.values=*/count > 0 ? values : NULL,
+      /*.count=*/count,
+  };
+  return array;
+}
+
 // A borrowed range of named attributes.
 //
 // This is the pass-facing view of DICT attribute entries and the input shape
@@ -367,6 +391,10 @@ typedef enum loom_attr_kind_e {
   // The operation field descriptor supplies the closed enum domain; generic
   // dictionaries cannot carry this kind.
   LOOM_ATTR_SIGNED_ENUM_SET = 18,
+  // Arena-allocated ordered symbol references. The operation field descriptor
+  // supplies the symbol interface and reference role; generic dictionaries
+  // cannot carry this kind.
+  LOOM_ATTR_SYMBOL_ARRAY = 19,
   LOOM_ATTR_COUNT_,
 } loom_attr_kind_t;
 
@@ -379,7 +407,7 @@ typedef enum loom_attr_kind_e {
 // parameters, and anywhere a typed scalar/aggregate is needed.
 //
 // The kind tag (byte 0) determines which union member is active.
-// For I64_ARRAY, ENUM_ARRAY, PREDICATE_LIST, PARAMETERIZED,
+// For I64_ARRAY, ENUM_ARRAY, SYMBOL_ARRAY, PREDICATE_LIST, PARAMETERIZED,
 // PARAMETERIZED_ARRAY, and SIGNED_ENUM_SET, the count field holds the element,
 // parameter, or per-polarity word count and the payload holds a pointer to
 // arena-allocated storage. PARAMETERIZED uses reserved_1 for its family kind.
@@ -394,6 +422,7 @@ typedef struct loom_attribute_t {
     double f64;
     loom_string_id_t string_id;
     loom_symbol_ref_t symbol;
+    const loom_symbol_ref_t* symbol_array;
     int64_t* i64_array;
     const uint8_t* enum_array;
     const uint64_t* signed_enum_set_words;
@@ -502,6 +531,18 @@ static inline loom_attribute_t loom_attr_scoped_enum(uint32_t case_ordinal) {
 static inline loom_attribute_t loom_attr_symbol(loom_symbol_ref_t ref) {
   loom_attribute_t attr = loom_attr_make_present(LOOM_ATTR_SYMBOL);
   attr.symbol = ref;
+  return attr;
+}
+
+// Constructs a symbol reference array attribute. The references must be
+// arena-allocated and outlive the attribute. A zero-length array is present
+// and canonicalized to a NULL payload, unlike the all-zero absent sentinel.
+static inline loom_attribute_t loom_attr_symbol_array(
+    const loom_symbol_ref_t* values, iree_host_size_t count) {
+  IREE_ASSERT(count <= UINT16_MAX);
+  loom_attribute_t attr = loom_attr_make_present(LOOM_ATTR_SYMBOL_ARRAY);
+  attr.count = (uint16_t)count;
+  attr.symbol_array = count > 0 ? values : NULL;
   return attr;
 }
 
@@ -743,6 +784,17 @@ static inline loom_symbol_ref_t loom_attr_as_symbol(loom_attribute_t attr) {
     return loom_symbol_ref_null();
   }
   return attr.symbol;
+}
+
+// Returns the ordered references of a SYMBOL_ARRAY attribute.
+//
+// An absent optional attribute reads as an empty array. Call
+// loom_attr_is_absent when presence matters.
+static inline loom_symbol_ref_array_t loom_attr_as_symbol_array(
+    loom_attribute_t attr) {
+  if (loom_attr_is_absent(attr)) return loom_symbol_ref_array_empty();
+  IREE_ASSERT(attr.kind == LOOM_ATTR_SYMBOL_ARRAY);
+  return loom_make_symbol_ref_array(attr.symbol_array, attr.count);
 }
 
 // Returns the type table index of a TYPE attribute.

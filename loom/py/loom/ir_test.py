@@ -81,6 +81,7 @@ from loom.ir import (
     Symbol,
     SymbolKind,
     SymbolName,
+    SymbolNameArray,
     SymbolRef,
     TaggedLocation,
     TiedResult,
@@ -926,6 +927,32 @@ class TestOperations:
         for value in (False, -1, 256, "low"):
             with pytest.raises(ValueError, match="signed enum set positive"):
                 SignedEnumSetAttr([value])  # type: ignore[list-item]
+
+    def test_symbol_name_array_preserves_order_and_duplicates(self) -> None:
+        values = SymbolNameArray(
+            [
+                SymbolName("provider_b"),
+                SymbolName("provider_a"),
+                SymbolName("provider_b"),
+            ]
+        )
+        op = Operation(
+            kind=4,
+            name="test.symbol_array_attrs",
+            attributes={"providers": values},
+        )
+
+        assert op.attributes["providers"] is values
+        assert values.values == (
+            SymbolName("provider_b"),
+            SymbolName("provider_a"),
+            SymbolName("provider_b"),
+        )
+        assert len(SymbolNameArray()) == 0
+
+    def test_symbol_name_array_rejects_untyped_strings(self) -> None:
+        with pytest.raises(TypeError, match="symbol name array element 1"):
+            SymbolNameArray([SymbolName("typed"), "untyped"])  # type: ignore[list-item]
 
     def test_op_with_nested_canonical_attr_dict(self) -> None:
         op = Operation(

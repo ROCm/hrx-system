@@ -902,6 +902,28 @@ static iree_status_t loom_ir_remap_attribute_impl(
       return loom_ir_remap_symbol_ref(remap, source_attr.symbol,
                                       &out_target_attr->symbol);
 
+    case LOOM_ATTR_SYMBOL_ARRAY: {
+      if (source_attr.count == 0) {
+        *out_target_attr = loom_attr_symbol_array(NULL, 0);
+        return iree_ok_status();
+      }
+      if (!source_attr.symbol_array) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "non-empty symbol array attribute has a NULL payload");
+      }
+      loom_symbol_ref_t* target_refs = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          payload_arena, source_attr.count, sizeof(*target_refs),
+          (void**)&target_refs));
+      for (uint16_t i = 0; i < source_attr.count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_ir_remap_symbol_ref(
+            remap, source_attr.symbol_array[i], &target_refs[i]));
+      }
+      *out_target_attr = loom_attr_symbol_array(target_refs, source_attr.count);
+      return iree_ok_status();
+    }
+
     case LOOM_ATTR_TYPE:
       return loom_ir_remap_type_id(remap, source_attr.type_id,
                                    &out_target_attr->type_id);

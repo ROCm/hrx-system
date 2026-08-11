@@ -646,6 +646,69 @@ static iree_status_t RemapSymbolByName(void* user_data,
   return iree_ok_status();
 }
 
+TEST_F(RemapTest, RemapsOrderedSymbolArraysAcrossModules) {
+  loom_string_id_t alpha_name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(source_, IREE_SV("alpha"), &alpha_name_id));
+  uint16_t alpha_symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_add_symbol(source_, alpha_name_id, &alpha_symbol_id));
+  loom_string_id_t beta_name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(source_, IREE_SV("beta"), &beta_name_id));
+  uint16_t beta_symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_add_symbol(source_, beta_name_id, &beta_symbol_id));
+
+  const loom_symbol_ref_t source_refs[] = {
+      {/*.module_id=*/0, /*.symbol_id=*/beta_symbol_id},
+      {/*.module_id=*/0, /*.symbol_id=*/alpha_symbol_id},
+      {/*.module_id=*/0, /*.symbol_id=*/beta_symbol_id},
+  };
+  const loom_symbol_ref_t equal_refs[] = {
+      {/*.module_id=*/0, /*.symbol_id=*/beta_symbol_id},
+      {/*.module_id=*/0, /*.symbol_id=*/alpha_symbol_id},
+      {/*.module_id=*/0, /*.symbol_id=*/beta_symbol_id},
+  };
+  const loom_symbol_ref_t reordered_refs[] = {
+      {/*.module_id=*/0, /*.symbol_id=*/alpha_symbol_id},
+      {/*.module_id=*/0, /*.symbol_id=*/beta_symbol_id},
+      {/*.module_id=*/0, /*.symbol_id=*/beta_symbol_id},
+  };
+  loom_attribute_t source_attr =
+      loom_attr_symbol_array(source_refs, IREE_ARRAYSIZE(source_refs));
+  loom_attribute_t equal_attr =
+      loom_attr_symbol_array(equal_refs, IREE_ARRAYSIZE(equal_refs));
+  loom_attribute_t reordered_attr =
+      loom_attr_symbol_array(reordered_refs, IREE_ARRAYSIZE(reordered_refs));
+  EXPECT_TRUE(loom_attribute_equal(&source_attr, &equal_attr));
+  EXPECT_EQ(loom_attribute_hash(&source_attr),
+            loom_attribute_hash(&equal_attr));
+  EXPECT_FALSE(loom_attribute_equal(&source_attr, &reordered_attr));
+
+  loom_ir_remap_options_t options = {
+      /*.allow_unmapped_values=*/{}, /*.remap_symbol=*/
+      loom_ir_remap_symbol_callback_make(RemapSymbolByName, NULL),
+  };
+  loom_ir_remap_t remap = InitializeRemap(&options);
+  loom_attribute_t target_attr = loom_attr_absent();
+  IREE_ASSERT_OK(loom_ir_remap_attribute(&remap, source_attr, &target_attr));
+
+  loom_symbol_ref_array_t target_refs = loom_attr_as_symbol_array(target_attr);
+  ASSERT_EQ(target_refs.count, IREE_ARRAYSIZE(source_refs));
+  EXPECT_NE(target_refs.values, source_refs);
+  EXPECT_EQ(target_refs.values[0].symbol_id, target_refs.values[2].symbol_id);
+  EXPECT_NE(target_refs.values[0].symbol_id, target_refs.values[1].symbol_id);
+  const loom_string_id_t target_beta_name_id =
+      target_->symbols.entries[target_refs.values[0].symbol_id].name_id;
+  const loom_string_id_t target_alpha_name_id =
+      target_->symbols.entries[target_refs.values[1].symbol_id].name_id;
+  EXPECT_TRUE(iree_string_view_equal(
+      target_->strings.entries[target_beta_name_id], IREE_SV("beta")));
+  EXPECT_TRUE(iree_string_view_equal(
+      target_->strings.entries[target_alpha_name_id], IREE_SV("alpha")));
+}
+
 TEST_F(RemapTest, RemapsParameterizedAttributeArraysAcrossModules) {
   loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   loom_value_id_t source_dim = DefineValue(source_, index_type);
