@@ -16,7 +16,12 @@ load(
 load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
 load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
 load(":loom_check_rules_test.bzl", "loom_check_rules_test_suite")
-load(":loom_library_rules_test.bzl", "loom_library_rules_test_suite")
+load(
+    ":loom_library_rules_test.bzl",
+    "REFERENCE_PROFILE",
+    "SERIALIZED_REFERENCE_PROFILE",
+    "loom_library_rules_test_suite",
+)
 
 package(default_visibility = ["//visibility:public"])
 
@@ -45,6 +50,16 @@ loom_library(
     name = "archive_aggregate",
     tags = ["manual"],
     deps = [":archive_consumer"],
+)
+
+loom_library(
+    name = "profiled_library",
+    srcs = ["profile_cases.loom"],
+    execution_profiles = [
+        REFERENCE_PROFILE,
+        SERIALIZED_REFERENCE_PROFILE,
+    ],
+    tags = ["manual"],
 )
 
 loom_check_test(
@@ -105,6 +120,7 @@ test_suite(
         ":loom_library_archive_direct_test",
         ":loom_library_rules_tests",
         ":loom_link_module_direct_test",
+        ":profiled_library_execute_reference_test",
         ":public_kernel_library_test",
     ],
 )

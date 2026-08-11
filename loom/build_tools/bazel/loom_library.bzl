@@ -6,6 +6,9 @@
 
 """Public rules for reusable Loom source and kernel libraries."""
 
+load("//build_tools/bazel:cc_attrs.bzl", "cc_attrs")
+load("//build_tools/bazel:requirements.bzl", "apply_test_requirements")
+
 _LOOM_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:loom_toolchain_type")
 
 LoomLibraryInfo = provider(
@@ -33,6 +36,84 @@ LoomCompilationInfo = provider(
         "target": "Target qualification profile used for compilation.",
     },
 )
+
+LoomExecutionTestInfo = provider(
+    doc = "A correctness test executing one Loom library through one profile.",
+    fields = {
+        "library": "Loom library consumed by the correctness runner.",
+        "profile_name": "Stable execution profile name.",
+        "runner": "Resolved correctness runner executable.",
+        "runner_args": "Arguments passed to the correctness runner.",
+    },
+)
+
+def loom_execution_profile(
+        name,
+        target_family,
+        target_class,
+        executor,
+        runner_args = [],
+        build_requirements = [],
+        run_requirements = [],
+        resource_group = None,
+        tags = []):
+    """Defines immutable execution policy expanded by Loom library macros.
+
+    Args:
+      name: Stable profile name used in generated target names and query tags.
+      target_family: Compiler target family, such as amdgpu or spirv.
+      target_class: Broad target class, such as gpu or cpu.
+      executor: Execution environment, such as hardware or reference.
+      runner_args: Arguments appended after the library passed to iree-test-loom.
+      build_requirements: Build requirements needed by the correctness runner.
+      run_requirements: Runtime resources needed to execute the test.
+      resource_group: Optional local resource group serializing competing tests.
+      tags: Additional stable tags applied to generated tests.
+
+    Returns:
+      An immutable profile value suitable for execution_profiles lists.
+    """
+    for field_name, value in [
+        ("name", name),
+        ("target_family", target_family),
+        ("target_class", target_class),
+        ("executor", executor),
+    ]:
+        if type(value) != type("") or not value:
+            fail("loom execution profile %s must be a non-empty string" % field_name)
+    requirement_ids = {}
+    for phase, requirements in [
+        ("build", build_requirements),
+        ("run", run_requirements),
+    ]:
+        for requirement in requirements:
+            if requirement.phase != phase:
+                fail(
+                    "execution profile %s received %s requirement %s as %s" % (
+                        name,
+                        requirement.phase,
+                        requirement.id,
+                        phase,
+                    ),
+                )
+            if requirement.id in requirement_ids:
+                fail(
+                    "execution profile %s repeats requirement %s" %
+                    (name, requirement.id),
+                )
+            requirement_ids[requirement.id] = True
+    return struct(
+        build_requirements = build_requirements,
+        executor = executor,
+        kind = "loom_execution_profile",
+        name = name,
+        resource_group = resource_group,
+        run_requirements = run_requirements,
+        runner_args = runner_args,
+        tags = tags,
+        target_class = target_class,
+        target_family = target_family,
+    )
 
 def _loom_compile_target_impl(ctx):
     if not ctx.attr.backend:
@@ -190,10 +271,13 @@ def _tool_runfiles(ctx, tool, files):
         runfiles = runfiles.merge(tool.runfiles)
     return runfiles
 
+def _shell_quote(value):
+    return "'" + value.replace("'", "'\"'\"'") + "'"
+
 def _write_test_launcher(ctx, tool, input_file, tool_args):
     output = ctx.actions.declare_file(ctx.label.name + ".sh")
     command_args = "".join([
-        " \\\n  \"%s\"" % arg
+        " \\\n  %s" % _shell_quote(arg)
         for arg in tool_args
     ])
     content = (
@@ -214,6 +298,50 @@ def _write_test_launcher(ctx, tool, input_file, tool_args):
         output = output,
     )
     return output
+
+def _loom_execution_test_impl(ctx):
+    tool = ctx.toolchains[_LOOM_TOOLCHAIN_TYPE].test
+    library = ctx.attr.library[LoomLibraryInfo]
+    output = _write_test_launcher(
+        ctx,
+        tool,
+        library.module,
+        ctx.attr.runner_args,
+    )
+    return [
+        DefaultInfo(
+            executable = output,
+            files = depset([output]),
+            runfiles = _tool_runfiles(ctx, tool, [library.module]),
+        ),
+        LoomExecutionTestInfo(
+            library = library,
+            profile_name = ctx.attr.profile_name,
+            runner = tool.executable,
+            runner_args = ctx.attr.runner_args,
+        ),
+    ]
+
+_loom_execution_test = rule(
+    implementation = _loom_execution_test_impl,
+    attrs = {
+        "library": attr.label(
+            mandatory = True,
+            providers = [LoomLibraryInfo],
+            doc = "Loom library containing the correctness cases to execute.",
+        ),
+        "profile_name": attr.string(
+            mandatory = True,
+            doc = "Stable execution profile name.",
+        ),
+        "runner_args": attr.string_list(
+            doc = "Arguments appended after the library passed to iree-test-loom.",
+        ),
+    },
+    doc = "Executes Loom correctness cases through one execution profile.",
+    test = True,
+    toolchains = [_LOOM_TOOLCHAIN_TYPE],
+)
 
 def _loom_format_test_impl(ctx):
     tool = ctx.toolchains[_LOOM_TOOLCHAIN_TYPE].format
@@ -342,11 +470,46 @@ def _compile_target_suffix(target):
         target_text = target_text.split("/")[-1]
     return target_text.replace("-", "_").replace(".", "_").replace("+", "_")
 
+def _execution_profile_tags(profile):
+    return [
+        "loom-execution-profile=%s" % profile.name,
+        "loom-target-family=%s" % profile.target_family,
+        "loom-target-class=%s" % profile.target_class,
+        "loom-executor=%s" % profile.executor,
+    ]
+
+def _declare_execution_test(name, library, profile, tags):
+    if getattr(profile, "kind", None) != "loom_execution_profile":
+        fail("%s execution profile was not created by loom_execution_profile" % name)
+    test_kwargs = apply_test_requirements(
+        {
+            "tags": tags + profile.tags + _execution_profile_tags(profile),
+        },
+        build_requirements = profile.build_requirements,
+        run_requirements = profile.run_requirements,
+        resource_group = profile.resource_group,
+    )
+    resource_group = test_kwargs.pop("resource_group", None)
+    test_kwargs["tags"] = cc_attrs.with_resource_group_tags(
+        test_kwargs.get("tags"),
+        resource_group,
+    )
+    _loom_execution_test(
+        name = name,
+        library = library,
+        profile_name = profile.name,
+        runner_args = profile.runner_args,
+        testonly = True,
+        visibility = ["//visibility:private"],
+        **test_kwargs
+    )
+
 def _declare_library(
         name,
         srcs,
         deps,
         compile_targets,
+        execution_profiles,
         plan_benchmarks,
         tags,
         visibility):
@@ -379,6 +542,27 @@ def _declare_library(
         )
         tests.append(plan_test_name)
 
+    execution_names = {}
+    for profile in execution_profiles:
+        profile_suffix = _compile_target_suffix(profile.name)
+        execution_name = "%s_execute_%s_test" % (name, profile_suffix)
+        if execution_name in execution_names:
+            fail(
+                "%s execution profile %s has the same generated name as %s" % (
+                    name,
+                    profile.name,
+                    execution_names[execution_name],
+                ),
+            )
+        execution_names[execution_name] = profile.name
+        _declare_execution_test(
+            name = execution_name,
+            library = ":" + name,
+            profile = profile,
+            tags = tags,
+        )
+        tests.append(execution_name)
+
     compile_names = {}
     for target in compile_targets:
         compile_name = "%s_compile_%s" % (name, _compile_target_suffix(target))
@@ -409,7 +593,7 @@ def _declare_library(
 
     suite_kwargs = {
         "name": name + "_test",
-        "tags": tags + ["hostonly"],
+        "tags": tags,
         "tests": tests,
     }
     if visibility != None:
@@ -420,14 +604,16 @@ def loom_library(
         name,
         srcs = [],
         deps = [],
+        execution_profiles = [],
         tags = [],
         visibility = None):
-    """Declares a reusable function/template library and format coverage."""
+    """Declares a reusable Loom library with format and correctness coverage."""
     _declare_library(
         name = name,
         srcs = srcs,
         deps = deps,
         compile_targets = [],
+        execution_profiles = execution_profiles,
         plan_benchmarks = False,
         tags = tags,
         visibility = visibility,
@@ -438,6 +624,7 @@ def loom_kernel_library(
         srcs,
         deps = [],
         compile_targets = [],
+        execution_profiles = [],
         tags = [],
         visibility = None):
     """Declares launchable kernels with format, plan, and compile coverage."""
@@ -446,6 +633,7 @@ def loom_kernel_library(
         srcs = srcs,
         deps = deps,
         compile_targets = compile_targets,
+        execution_profiles = execution_profiles,
         plan_benchmarks = True,
         tags = tags,
         visibility = visibility,

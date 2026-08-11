@@ -10,7 +10,26 @@ load("@rules_testing//lib:analysis_test.bzl", "analysis_test", "test_suite")
 load("@rules_testing//lib:util.bzl", "TestingAspectInfo")
 load(
     "//loom/build_tools/bazel:defs.bzl",
+    "LoomExecutionTestInfo",
     "LoomLibraryInfo",
+    "loom_execution_profile",
+)
+
+REFERENCE_PROFILE = loom_execution_profile(
+    name = "reference",
+    executor = "reference",
+    runner_args = ["--case=@scalar_case"],
+    target_class = "cpu",
+    target_family = "test",
+)
+
+SERIALIZED_REFERENCE_PROFILE = loom_execution_profile(
+    name = "serialized_reference",
+    executor = "reference",
+    resource_group = "loom-profile-analysis-tests",
+    runner_args = ["--case=@scalar_case"],
+    target_class = "cpu",
+    target_family = "test",
 )
 
 def _find_action(env, actions, mnemonic):
@@ -97,11 +116,66 @@ def _test_deps_only_library_consumes_archive_impl(env, target):
     _expect_no_basename(env, inputs, "link_checks.loom")
     _expect_no_basename(env, inputs, "link_kernels.loom")
 
+def _test_execution_profile_consumes_shared_archive(name, **kwargs):
+    analysis_test(
+        name = name,
+        attr_values = {
+            "timeout": "short",
+        },
+        impl = _test_execution_profile_consumes_shared_archive_impl,
+        target = ":profiled_library_execute_reference_test",
+        **kwargs
+    )
+
+def _test_execution_profile_consumes_shared_archive_impl(env, target):
+    info = target[LoomExecutionTestInfo]
+    env.expect.that_str(info.library.module.basename).equals("profiled_library.loombc")
+    env.expect.that_str(info.profile_name).equals("reference")
+    if info.runner_args != ["--case=@scalar_case"]:
+        env.fail("unexpected runner args %r" % info.runner_args)
+
+    tags = target[TestingAspectInfo].attrs.tags
+    for expected_tag in [
+        "loom-execution-profile=reference",
+        "loom-target-family=test",
+        "loom-target-class=cpu",
+        "loom-executor=reference",
+    ]:
+        if expected_tag not in tags:
+            env.fail("expected %r in test tags %r" % (expected_tag, tags))
+
+def _test_resource_profile_consumes_shared_archive(name, **kwargs):
+    analysis_test(
+        name = name,
+        attr_values = {
+            "timeout": "short",
+        },
+        impl = _test_resource_profile_consumes_shared_archive_impl,
+        target = ":profiled_library_execute_serialized_reference_test",
+        **kwargs
+    )
+
+def _test_resource_profile_consumes_shared_archive_impl(env, target):
+    info = target[LoomExecutionTestInfo]
+    env.expect.that_str(info.library.module.basename).equals("profiled_library.loombc")
+    env.expect.that_str(info.profile_name).equals("serialized_reference")
+
+    tags = target[TestingAspectInfo].attrs.tags
+    for expected_tag in [
+        "loom-execution-profile=serialized_reference",
+        "exclusive-if-local",
+        "resource_group:loom-profile-analysis-tests",
+    ]:
+        if expected_tag not in tags:
+            env.fail("expected %r in test tags %r" % (expected_tag, tags))
+
 def loom_library_rules_test_suite(name):
     test_suite(
         name = name,
         tests = [
             _test_deps_only_library_consumes_archive,
+            _test_execution_profile_consumes_shared_archive,
             _test_library_consumes_dependency_archive,
+            _test_resource_profile_consumes_shared_archive,
         ],
     )
