@@ -43,14 +43,70 @@ static void iree_hal_amdgpu_system_event_initialize(void) {
   iree_mutex_initialize(&iree_hal_amdgpu_system_event_registry.mutex);
 }
 
+static bool iree_hal_amdgpu_system_event_agent(
+    const hsa_amd_event_t* event, hsa_agent_t* out_agent) {
+  *out_agent = (hsa_agent_t){0};
+  switch (event->event_type) {
+    case HSA_AMD_GPU_MEMORY_FAULT_EVENT:
+      *out_agent = event->memory_fault.agent;
+      return true;
+    case HSA_AMD_GPU_HW_EXCEPTION_EVENT:
+      *out_agent = event->hw_exception.agent;
+      return true;
+    case HSA_AMD_GPU_MEMORY_ERROR_EVENT:
+      *out_agent = event->memory_error.agent;
+      return true;
+    default:
+      return false;
+  }
+}
+
+static iree_status_t iree_hal_amdgpu_system_event_make_status(
+    const hsa_amd_event_t* event) {
+  switch (event->event_type) {
+    case HSA_AMD_GPU_MEMORY_FAULT_EVENT:
+      return iree_make_status(
+          IREE_STATUS_ABORTED,
+          "AMDGPU memory access fault at device address 0x%016" PRIx64
+          " (reason mask 0x%08" PRIx32 ")",
+          event->memory_fault.virtual_address,
+          event->memory_fault.fault_reason_mask);
+    case HSA_AMD_GPU_HW_EXCEPTION_EVENT:
+      return iree_make_status(
+          IREE_STATUS_ABORTED,
+          "AMDGPU hardware exception (reset type 0x%08" PRIx32
+          ", cause 0x%08" PRIx32 ")",
+          (uint32_t)event->hw_exception.reset_type,
+          (uint32_t)event->hw_exception.reset_cause);
+    case HSA_AMD_GPU_MEMORY_ERROR_EVENT:
+      return iree_make_status(
+          IREE_STATUS_ABORTED,
+          "AMDGPU memory error at device address 0x%016" PRIx64
+          " (reason mask 0x%08" PRIx32 ")",
+          event->memory_error.virtual_address,
+          event->memory_error.error_reason_mask);
+    default:
+      return iree_make_status(IREE_STATUS_ABORTED,
+                              "unrecognized AMDGPU system event");
+  }
+}
+
 static hsa_status_t iree_hal_amdgpu_system_event_callback(
     const hsa_amd_event_t* event, void* user_data) {
   (void)user_data;
-  if (event->event_type != HSA_AMD_GPU_MEMORY_FAULT_EVENT) {
+  if (event->event_type == HSA_AMD_SYSTEM_SHUTDOWN_EVENT) {
+    // The final hsa_shut_down destroys the runtime's callback registry. Reset
+    // our process state so a later HSA lifetime registers this handler again.
+    iree_mutex_lock(&iree_hal_amdgpu_system_event_registry.mutex);
+    iree_hal_amdgpu_system_event_registry.is_hsa_handler_registered = false;
+    iree_mutex_unlock(&iree_hal_amdgpu_system_event_registry.mutex);
+    return HSA_STATUS_SUCCESS;
+  }
+  hsa_agent_t event_agent;
+  if (!iree_hal_amdgpu_system_event_agent(event, &event_agent)) {
     return HSA_STATUS_ERROR;
   }
 
-  const hsa_amd_gpu_memory_fault_info_t* fault = &event->memory_fault;
   bool handled = false;
   iree_mutex_lock(&iree_hal_amdgpu_system_event_registry.mutex);
   for (iree_hal_amdgpu_system_event_device_t* entry =
@@ -58,7 +114,7 @@ static hsa_status_t iree_hal_amdgpu_system_event_callback(
        entry != NULL; entry = entry->next) {
     bool agent_matches = false;
     for (iree_host_size_t i = 0; i < entry->agent_count; ++i) {
-      if (entry->agents[i].handle == fault->agent.handle) {
+      if (entry->agents[i].handle == event_agent.handle) {
         agent_matches = true;
         break;
       }
@@ -74,27 +130,18 @@ static hsa_status_t iree_hal_amdgpu_system_event_callback(
          ++i) {
       iree_hal_amdgpu_physical_device_t* physical_device =
           logical_device->physical_devices[i];
-      if (physical_device->device_agent.handle != fault->agent.handle) continue;
+      if (physical_device->device_agent.handle != event_agent.handle) continue;
 
       logical_device_faulted = true;
       for (iree_host_size_t j = 0; j < physical_device->host_queue_count; ++j) {
         iree_hal_amdgpu_host_queue_fail(
             &physical_device->host_queues[j],
-            iree_make_status(
-                IREE_STATUS_ABORTED,
-                "AMDGPU memory access fault at device address 0x%016" PRIx64
-                " (reason mask 0x%08" PRIx32 ")",
-                fault->virtual_address, fault->fault_reason_mask));
+            iree_hal_amdgpu_system_event_make_status(event));
       }
     }
     if (logical_device_faulted) {
       iree_hal_amdgpu_logical_device_error_handler(
-          logical_device,
-          iree_make_status(
-              IREE_STATUS_ABORTED,
-              "AMDGPU memory access fault at device address 0x%016" PRIx64
-              " (reason mask 0x%08" PRIx32 ")",
-              fault->virtual_address, fault->fault_reason_mask));
+          logical_device, iree_hal_amdgpu_system_event_make_status(event));
     }
   }
   iree_mutex_unlock(&iree_hal_amdgpu_system_event_registry.mutex);
