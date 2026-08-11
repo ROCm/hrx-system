@@ -100,7 +100,7 @@ typedef struct iree_net_shm_handshake_header_t {
 //===----------------------------------------------------------------------===//
 // Internal platform interface
 //===----------------------------------------------------------------------===//
-// Implemented in handshake_posix.c and handshake_win32.c.
+// Send and receive are implemented in handshake_posix.c and handshake_win32.c.
 
 // Handles exchanged alongside a handshake message. The OFFER includes the
 // SHM region handle plus wake handles, the ACCEPT includes only wake handles,
@@ -109,13 +109,24 @@ typedef struct iree_net_shm_handshake_handles_t {
   // Sending process ID for platforms where the receiver needs it to interpret
   // handle values. Zero when the platform does not provide a process ID.
   uint32_t sender_process_id;
-  // SHM region handle (OFFER only; zero/invalid for ACCEPT).
+  // SHM region handle (OFFER only; invalid for ACCEPT and READY).
   iree_shm_handle_t shm_region;
-  // Wake epoch SHM handle.
+  // Wake epoch SHM handle (OFFER and ACCEPT; invalid for READY).
   iree_shm_handle_t wake_epoch_shm;
-  // Signal primitive (eventfd/pipe write end/Event HANDLE).
+  // Signal primitive (OFFER and ACCEPT; NONE for READY).
   iree_async_primitive_t signal_primitive;
 } iree_net_shm_handshake_handles_t;
+
+// Returns an empty handle set that is safe to close.
+static inline iree_net_shm_handshake_handles_t
+iree_net_shm_handshake_handles_empty(void) {
+  iree_net_shm_handshake_handles_t handles;
+  handles.sender_process_id = 0;
+  handles.shm_region = IREE_SHM_HANDLE_INVALID;
+  handles.wake_epoch_shm = IREE_SHM_HANDLE_INVALID;
+  handles.signal_primitive = iree_async_primitive_none();
+  return handles;
+}
 
 // Sends a handshake message with attached handles over the channel.
 // Platform-specific: POSIX uses SCM_RIGHTS over sendmsg; Windows uses
@@ -128,14 +139,14 @@ iree_status_t iree_net_shm_handshake_send(
 
 // Receives a handshake message with attached handles from the channel.
 // Blocks until data is available, cancellation is requested, or the peer
-// disconnects.
+// disconnects. |out_handles| is empty on failure.
 iree_status_t iree_net_shm_handshake_recv(
     iree_async_primitive_t channel,
     const iree_net_shm_handshake_cancellation_t* cancellation,
     iree_net_shm_handshake_header_t* out_header,
     iree_net_shm_handshake_handles_t* out_handles);
 
-// Closes all handles in a handshake_handles_t. Used for error cleanup.
+// Closes all handles and resets the set to empty.
 void iree_net_shm_handshake_handles_close(
     iree_net_shm_handshake_handles_t* handles);
 

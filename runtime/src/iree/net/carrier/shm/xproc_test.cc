@@ -1361,10 +1361,8 @@ static int factory_stalled_bootstrap_client_role(int argc, char** argv,
   XPROC_CHECK_OK(OpenRawFactoryChannel(temp_directory, &channel));
 
   iree_net_shm_handshake_header_t header;
-  iree_net_shm_handshake_handles_t handles;
-  memset(&handles, 0, sizeof(handles));
-  handles.shm_region = IREE_SHM_HANDLE_INVALID;
-  handles.wake_epoch_shm = IREE_SHM_HANDLE_INVALID;
+  iree_net_shm_handshake_handles_t handles =
+      iree_net_shm_handshake_handles_empty();
   iree_status_t status = iree_net_shm_handshake_recv(
       channel, /*cancellation=*/NULL, &header, &handles);
   if (iree_status_is_ok(status)) {
@@ -1374,9 +1372,7 @@ static int factory_stalled_bootstrap_client_role(int argc, char** argv,
     iree_net_shm_handshake_handles_close(&handles);
     XPROC_CHECK(valid_offer, "raw factory peer received a malformed OFFER");
 
-    memset(&handles, 0, sizeof(handles));
-    handles.shm_region = IREE_SHM_HANDLE_INVALID;
-    handles.wake_epoch_shm = IREE_SHM_HANDLE_INVALID;
+    handles = iree_net_shm_handshake_handles_empty();
     status = iree_net_shm_handshake_recv(channel, /*cancellation=*/NULL,
                                          &header, &handles);
   }

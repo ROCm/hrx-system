@@ -190,16 +190,14 @@ iree_status_t iree_net_shm_handshake_recv(
     const iree_net_shm_handshake_cancellation_t* cancellation,
     iree_net_shm_handshake_header_t* out_header,
     iree_net_shm_handshake_handles_t* out_handles) {
+  memset(out_header, 0, sizeof(*out_header));
+  *out_handles = iree_net_shm_handshake_handles_empty();
+
   int channel_fd = iree_async_primitive_to_fd(channel);
   if (channel_fd < 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "handshake channel is not a valid POSIX fd");
   }
-
-  memset(out_header, 0, sizeof(*out_header));
-  memset(out_handles, 0, sizeof(*out_handles));
-  out_handles->shm_region = IREE_SHM_HANDLE_INVALID;
-  out_handles->wake_epoch_shm = IREE_SHM_HANDLE_INVALID;
 
   int fds[MAX_HANDSHAKE_FDS];
   int fd_count = 0;
@@ -325,14 +323,6 @@ iree_status_t iree_net_shm_handshake_recv(
   }
 
   return iree_ok_status();
-}
-
-void iree_net_shm_handshake_handles_close(
-    iree_net_shm_handshake_handles_t* handles) {
-  if (!handles) return;
-  iree_shm_handle_close(&handles->shm_region);
-  iree_shm_handle_close(&handles->wake_epoch_shm);
-  iree_async_primitive_close(&handles->signal_primitive);
 }
 
 #endif  // !IREE_PLATFORM_WINDOWS

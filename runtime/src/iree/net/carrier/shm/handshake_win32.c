@@ -304,16 +304,14 @@ iree_status_t iree_net_shm_handshake_recv(
     const iree_net_shm_handshake_cancellation_t* cancellation,
     iree_net_shm_handshake_header_t* out_header,
     iree_net_shm_handshake_handles_t* out_handles) {
+  memset(out_header, 0, sizeof(*out_header));
+  *out_handles = iree_net_shm_handshake_handles_empty();
+
   if (channel.type != IREE_ASYNC_PRIMITIVE_TYPE_WIN32_HANDLE) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "handshake channel is not a valid Windows handle");
   }
   HANDLE channel_handle = (HANDLE)channel.value.win32_handle;
-
-  memset(out_header, 0, sizeof(*out_header));
-  memset(out_handles, 0, sizeof(*out_handles));
-  out_handles->shm_region = IREE_SHM_HANDLE_INVALID;
-  out_handles->wake_epoch_shm = IREE_SHM_HANDLE_INVALID;
 
   // Create event for overlapped I/O.
   HANDLE event = CreateEventW(NULL, /*bManualReset=*/TRUE,
@@ -426,14 +424,6 @@ iree_status_t iree_net_shm_handshake_recv(
   }
 
   return iree_ok_status();
-}
-
-void iree_net_shm_handshake_handles_close(
-    iree_net_shm_handshake_handles_t* handles) {
-  if (!handles) return;
-  iree_shm_handle_close(&handles->shm_region);
-  iree_shm_handle_close(&handles->wake_epoch_shm);
-  iree_async_primitive_close(&handles->signal_primitive);
 }
 
 #endif  // IREE_PLATFORM_WINDOWS

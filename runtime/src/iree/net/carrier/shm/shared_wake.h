@@ -142,10 +142,21 @@ typedef struct iree_net_shm_shared_wake_export_t {
   iree_async_primitive_t signal_primitive;
 } iree_net_shm_shared_wake_export_t;
 
+// Returns an empty export that is safe to close.
+static inline iree_net_shm_shared_wake_export_t
+iree_net_shm_shared_wake_export_empty(void) {
+  iree_net_shm_shared_wake_export_t value;
+  value.epoch_shm_handle = IREE_SHM_HANDLE_INVALID;
+  value.epoch_shm_size = 0;
+  value.signal_primitive = iree_async_primitive_none();
+  return value;
+}
+
 // Exports duplicated handles for cross-process handshake.
 //
 // Each call produces fresh duplicates safe for one IPC transfer. The caller
 // must close the returned handles after sending them (or on error).
+// |out_export| is empty on failure.
 //
 // Requires the shared wake to have been created with create_shared().
 // Returns FAILED_PRECONDITION if called on a local shared wake.

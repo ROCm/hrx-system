@@ -294,7 +294,7 @@ iree_net_shm_shared_wake_export(iree_net_shm_shared_wake_t* shared_wake,
                                 iree_net_shm_shared_wake_export_t* out_export) {
   IREE_ASSERT_ARGUMENT(shared_wake);
   IREE_ASSERT_ARGUMENT(out_export);
-  memset(out_export, 0, sizeof(*out_export));
+  *out_export = iree_net_shm_shared_wake_export_empty();
 
   if (!shared_wake->is_shared) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,

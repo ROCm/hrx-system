@@ -20,6 +20,7 @@
 
 #if !defined(IREE_PLATFORM_WINDOWS)
 #include <sys/socket.h>
+#include <unistd.h>
 #else
 #include <windows.h>
 #endif  // !IREE_PLATFORM_WINDOWS
@@ -42,7 +43,7 @@ class HandshakeTest : public ::testing::Test {
         iree_async_proactor_options_default(), iree_allocator_system(),
         &proactor_);
     if (iree_status_is_unavailable(status)) {
-      iree_status_ignore(status);
+      iree_status_free(status);
       GTEST_SKIP() << "Platform proactor unavailable";
     }
     IREE_ASSERT_OK(status);
@@ -286,7 +287,29 @@ TEST_F(HandshakeTest, InvalidRingCapacityFailsValidation) {
   iree_async_primitive_close(&client_channel);
 }
 
+TEST_F(HandshakeTest, SharedWakeExportFailureLeavesEmpty) {
+  iree_net_shm_shared_wake_t* local_wake = nullptr;
+  IREE_ASSERT_OK(iree_net_shm_shared_wake_create(
+      proactor_, iree_allocator_system(), &local_wake));
+
+  iree_net_shm_shared_wake_export_t export_value = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      iree_net_shm_shared_wake_export(local_wake, &export_value));
+  EXPECT_FALSE(iree_shm_handle_is_valid(export_value.epoch_shm_handle));
+  EXPECT_EQ(export_value.epoch_shm_size, 0u);
+  EXPECT_TRUE(iree_async_primitive_is_none(export_value.signal_primitive));
+
+  iree_net_shm_shared_wake_release(local_wake);
+}
+
 TEST_F(HandshakeTest, NoneChannelFails) {
+#if !defined(IREE_PLATFORM_WINDOWS)
+  int stdin_duplicate = dup(STDIN_FILENO);
+  if (stdin_duplicate < 0) GTEST_SKIP() << "stdin is not open";
+  close(stdin_duplicate);
+#endif  // !IREE_PLATFORM_WINDOWS
+
   iree_net_shm_handshake_result_t result = {};
 
   // Server with NONE channel should fail.
@@ -295,6 +318,12 @@ TEST_F(HandshakeTest, NoneChannelFails) {
                             iree_async_primitive_none(), server_wake_,
                             iree_net_shm_carrier_options_default(), proactor_,
                             iree_allocator_system(), &result));
+
+#if !defined(IREE_PLATFORM_WINDOWS)
+  stdin_duplicate = dup(STDIN_FILENO);
+  EXPECT_GE(stdin_duplicate, 0) << strerror(errno);
+  if (stdin_duplicate >= 0) close(stdin_duplicate);
+#endif  // !IREE_PLATFORM_WINDOWS
 }
 
 }  // namespace

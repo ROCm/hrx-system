@@ -9,6 +9,19 @@
 #include "iree/net/carrier/shm/region.h"
 
 //===----------------------------------------------------------------------===//
+// Handle ownership
+//===----------------------------------------------------------------------===//
+
+void iree_net_shm_handshake_handles_close(
+    iree_net_shm_handshake_handles_t* handles) {
+  if (!handles) return;
+  iree_shm_handle_close(&handles->shm_region);
+  iree_shm_handle_close(&handles->wake_epoch_shm);
+  iree_async_primitive_close(&handles->signal_primitive);
+  *handles = iree_net_shm_handshake_handles_empty();
+}
+
+//===----------------------------------------------------------------------===//
 // Header validation
 //===----------------------------------------------------------------------===//
 
@@ -35,14 +48,6 @@ static iree_status_t iree_net_shm_handshake_validate_header(
   return iree_ok_status();
 }
 
-static void iree_net_shm_handshake_initialize_empty_handles(
-    iree_net_shm_handshake_handles_t* out_handles) {
-  memset(out_handles, 0, sizeof(*out_handles));
-  out_handles->shm_region = IREE_SHM_HANDLE_INVALID;
-  out_handles->wake_epoch_shm = IREE_SHM_HANDLE_INVALID;
-  out_handles->signal_primitive = iree_async_primitive_none();
-}
-
 // Sends the terminal acknowledgement proving that all ACCEPT handles have
 // been duplicated and all endpoint resources have been established.
 static iree_status_t iree_net_shm_handshake_send_ready(
@@ -53,8 +58,8 @@ static iree_status_t iree_net_shm_handshake_send_ready(
   header.magic = IREE_NET_SHM_HANDSHAKE_MAGIC;
   header.version = IREE_NET_SHM_HANDSHAKE_VERSION;
   header.type = IREE_NET_SHM_HANDSHAKE_MESSAGE_READY;
-  iree_net_shm_handshake_handles_t handles;
-  iree_net_shm_handshake_initialize_empty_handles(&handles);
+  iree_net_shm_handshake_handles_t handles =
+      iree_net_shm_handshake_handles_empty();
   return iree_net_shm_handshake_send(channel, cancellation, &header, &handles);
 }
 
@@ -64,8 +69,8 @@ static iree_status_t iree_net_shm_handshake_recv_ready(
     iree_async_primitive_t channel,
     const iree_net_shm_handshake_cancellation_t* cancellation) {
   iree_net_shm_handshake_header_t header;
-  iree_net_shm_handshake_handles_t handles;
-  iree_net_shm_handshake_initialize_empty_handles(&handles);
+  iree_net_shm_handshake_handles_t handles =
+      iree_net_shm_handshake_handles_empty();
   iree_status_t status =
       iree_net_shm_handshake_recv(channel, cancellation, &header, &handles);
   if (iree_status_is_ok(status)) {
@@ -228,8 +233,8 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server_endpoint(
   }
 
   // Export our shared_wake handles.
-  iree_net_shm_shared_wake_export_t our_export;
-  memset(&our_export, 0, sizeof(our_export));
+  iree_net_shm_shared_wake_export_t our_export =
+      iree_net_shm_shared_wake_export_empty();
   if (iree_status_is_ok(status)) {
     status = iree_net_shm_shared_wake_export(shared_wake, &our_export);
   }
@@ -251,8 +256,8 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server_endpoint(
     offer_header.ring_capacity = ring_capacity;
     offer_header.wake_epoch_size = (uint32_t)our_export.epoch_shm_size;
 
-    iree_net_shm_handshake_handles_t offer_handles;
-    memset(&offer_handles, 0, sizeof(offer_handles));
+    iree_net_shm_handshake_handles_t offer_handles =
+        iree_net_shm_handshake_handles_empty();
     offer_handles.shm_region = region_handle_dup;
     offer_handles.wake_epoch_shm = our_export.epoch_shm_handle;
     offer_handles.signal_primitive = our_export.signal_primitive;
@@ -263,9 +268,9 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server_endpoint(
 
   // Receive ACCEPT: client's wake handles.
   iree_net_shm_handshake_header_t accept_header;
-  iree_net_shm_handshake_handles_t accept_handles;
+  iree_net_shm_handshake_handles_t accept_handles =
+      iree_net_shm_handshake_handles_empty();
   memset(&accept_header, 0, sizeof(accept_header));
-  memset(&accept_handles, 0, sizeof(accept_handles));
   if (iree_status_is_ok(status)) {
     status = iree_net_shm_handshake_recv(channel, cancellation, &accept_header,
                                          &accept_handles);
@@ -364,9 +369,9 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_client_endpoint(
 
   // Receive OFFER from server.
   iree_net_shm_handshake_header_t offer_header;
-  iree_net_shm_handshake_handles_t offer_handles;
+  iree_net_shm_handshake_handles_t offer_handles =
+      iree_net_shm_handshake_handles_empty();
   memset(&offer_header, 0, sizeof(offer_header));
-  memset(&offer_handles, 0, sizeof(offer_handles));
   iree_status_t status = iree_net_shm_handshake_recv(
       channel, cancellation, &offer_header, &offer_handles);
   if (iree_status_is_ok(status)) {
@@ -419,8 +424,8 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_client_endpoint(
   }
 
   // Export our shared_wake handles for the ACCEPT.
-  iree_net_shm_shared_wake_export_t our_export;
-  memset(&our_export, 0, sizeof(our_export));
+  iree_net_shm_shared_wake_export_t our_export =
+      iree_net_shm_shared_wake_export_empty();
   if (iree_status_is_ok(status)) {
     status = iree_net_shm_shared_wake_export(shared_wake, &our_export);
   }
@@ -434,9 +439,8 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_client_endpoint(
     accept_header.type = IREE_NET_SHM_HANDSHAKE_MESSAGE_ACCEPT;
     accept_header.wake_epoch_size = (uint32_t)our_export.epoch_shm_size;
 
-    iree_net_shm_handshake_handles_t accept_handles;
-    memset(&accept_handles, 0, sizeof(accept_handles));
-    accept_handles.shm_region = IREE_SHM_HANDLE_INVALID;
+    iree_net_shm_handshake_handles_t accept_handles =
+        iree_net_shm_handshake_handles_empty();
     accept_handles.wake_epoch_shm = our_export.epoch_shm_handle;
     accept_handles.signal_primitive = our_export.signal_primitive;
 
