@@ -514,15 +514,6 @@ void loom_verify_op_structure(loom_verify_state_t* state, const loom_op_t* op,
   }
 }
 
-static bool loom_verify_region_directly_contains_block(
-    const loom_region_t* region, const loom_block_t* target) {
-  if (!region || !target) return false;
-  for (uint16_t i = 0; i < region->block_count; ++i) {
-    if (loom_region_const_block(region, i) == target) return true;
-  }
-  return false;
-}
-
 void loom_verify_successor_targets(loom_verify_state_t* state,
                                    const loom_op_t* op,
                                    const loom_op_vtable_t* vtable) {
@@ -543,9 +534,7 @@ void loom_verify_successor_targets(loom_verify_state_t* state,
                                   IREE_ARRAYSIZE(params));
       continue;
     }
-    if (successors[i]->parent_region != parent_region ||
-        !loom_verify_region_directly_contains_block(parent_region,
-                                                    successors[i])) {
+    if (!loom_region_try_block_index(parent_region, successors[i], NULL)) {
       loom_diagnostic_param_t params[] = {
           loom_param_string(op_name),
           loom_param_with_field_ref(loom_param_u32(i), successor_ref),
