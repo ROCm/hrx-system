@@ -157,6 +157,31 @@ static iree_status_t iree_hal_amdgpu_logical_device_ensure_host_queue(
   return status;
 }
 
+static iree_status_t iree_hal_amdgpu_logical_device_activate_all_host_queues(
+    iree_hal_amdgpu_logical_device_t* logical_device) {
+  const iree_hal_amdgpu_queue_affinity_domain_t domain =
+      iree_hal_amdgpu_logical_device_queue_affinity_domain(logical_device);
+  for (iree_host_size_t physical_device_ordinal = 0;
+       physical_device_ordinal < logical_device->physical_device_count;
+       ++physical_device_ordinal) {
+    const iree_hal_amdgpu_physical_device_t* physical_device =
+        logical_device->physical_devices[physical_device_ordinal];
+    if (physical_device->host_queue_count ==
+        physical_device->host_queue_capacity) {
+      continue;
+    }
+    const iree_host_size_t queue_ordinal =
+        physical_device_ordinal * domain.queue_count_per_physical_device +
+        physical_device->host_queue_capacity - 1;
+    iree_hal_amdgpu_queue_affinity_resolved_t resolved;
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_queue_affinity_resolve_ordinal(
+        domain, queue_ordinal, &resolved));
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_ensure_host_queue(
+        logical_device, &resolved));
+  }
+  return iree_ok_status();
+}
+
 // Returns the queue for a flattened logical queue ordinal.
 static iree_status_t iree_hal_amdgpu_logical_device_queue_from_ordinal(
     iree_hal_amdgpu_logical_device_t* logical_device,
@@ -3378,6 +3403,20 @@ iree_hal_amdgpu_device_queue_set_execution_unit_mask(
         queue_affinity, &resolved);
   }
   if (iree_status_is_ok(status)) {
+    iree_hal_amdgpu_physical_device_t* physical_device =
+        logical_device->physical_devices[resolved.physical_device_ordinal];
+    const iree_host_size_t expected_mask_bit_count =
+        iree_host_align((iree_host_size_t)physical_device->compute_unit_count,
+                        32);
+    if (IREE_UNLIKELY(mask && mask_bit_count != expected_mask_bit_count)) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "execution-unit mask has %" PRIhsz " bits; physical device requires "
+          "%" PRIhsz,
+          mask_bit_count, expected_mask_bit_count);
+    }
+  }
+  if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_logical_device_ensure_host_queue(logical_device,
                                                               &resolved);
   }
@@ -3453,9 +3492,11 @@ static iree_status_t iree_hal_amdgpu_logical_device_profiling_begin(
         iree_hal_amdgpu_logical_device_verify_queue_device_profiling_supported(
             logical_device));
   }
-  // Profiling setup installs per-queue state over the current active set. Stop
-  // new queue activation and drain any activation already in progress before
-  // taking that snapshot. Existing exact-affinity queues remain usable.
+  // Profiling installs state for a fixed queue set. Materialize every
+  // advertised queue before freezing that set so profiling does not make a
+  // previously unused queue affinity unavailable.
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_logical_device_activate_all_host_queues(logical_device));
   iree_atomic_store(&logical_device->queue_topology_frozen, 1,
                     iree_memory_order_release);
   iree_slim_mutex_lock(&logical_device->host_queue_activation_mutex);
