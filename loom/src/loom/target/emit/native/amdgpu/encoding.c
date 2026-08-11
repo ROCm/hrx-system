@@ -132,7 +132,7 @@ typedef struct loom_amdgpu_encode_native_insertion_output_t {
 
 typedef struct loom_amdgpu_encode_traversal_state_t {
   // Scheduled packet currently being expanded into native instructions.
-  const loom_low_packet_view_t* current_packet;
+  loom_low_packet_view_t current_packet;
   // Low byte of MODE's current VGPR-MSB selector state.
   uint8_t current_vgpr_msb_mode;
   // Block-local per-SGPR PC component facts used by symbolic rel32 fixups.
@@ -349,13 +349,12 @@ static void loom_amdgpu_record_native_insertion(
   if (state->native_insertions.values != NULL) {
     IREE_ASSERT_LT(state->native_insertions.count,
                    state->native_insertions.capacity);
-    const loom_low_schedule_node_t* node =
-        state->traversal.current_packet->node;
+    const loom_low_schedule_node_t* node = state->traversal.current_packet.node;
     state->native_insertions.values[state->native_insertions.count] =
         (loom_amdgpu_native_insertion_t){
             .kind = kind,
             .block_index = node->block_index,
-            .node_index = state->traversal.current_packet->node_index,
+            .node_index = state->traversal.current_packet.node_index,
             .scheduled_ordinal = node->scheduled_ordinal,
             .immediate = immediate,
             .descriptor_ref = descriptor_ref,
@@ -2115,7 +2114,6 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_into_state(
   state->stream.instruction_count = 0;
   state->text_fixups.count = 0;
   state->native_insertions.count = 0;
-  state->traversal.current_packet = NULL;
   state->traversal.current_vgpr_msb_mode = 0;
   state->packet_plan.next_address_state_index = 0;
   state->packet_plan.next_wait_packet_index = 0;
@@ -2140,15 +2138,13 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_into_state(
          scheduled_ordinal < block->scheduled_node_count; ++scheduled_ordinal) {
       const iree_host_size_t packet_index =
           block->scheduled_node_start + scheduled_ordinal;
-      const loom_low_packet_view_t packet =
+      state->traversal.current_packet =
           loom_low_packet_at(state->inputs.schedule, packet_index);
-      state->traversal.current_packet = &packet;
+      const loom_low_packet_view_t* packet = &state->traversal.current_packet;
       IREE_RETURN_IF_ERROR(
           loom_amdgpu_encode_branch_groups_before_packet(state, packet_index));
       const iree_host_size_t packet_start = state->stream.length;
-      iree_status_t status = loom_amdgpu_encode_packet(state, &packet);
-      state->traversal.current_packet = NULL;
-      IREE_RETURN_IF_ERROR(status);
+      IREE_RETURN_IF_ERROR(loom_amdgpu_encode_packet(state, packet));
       loom_amdgpu_encode_branch_measurement_t* measurement =
           &state->branches.measurement;
       if (measurement->anchors != NULL &&
