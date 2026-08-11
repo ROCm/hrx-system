@@ -19,6 +19,7 @@ loom_cc_library(
   DEPS
     iree::base
     loom::codegen::low::descriptors
+    loom::codegen::low::launch_config_program
     loom::codegen::low::lower
     loom::codegen::low::lower::source_selection
     loom::codegen::low::pipeline::pass_environment
