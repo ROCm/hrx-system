@@ -1,21 +1,12 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Regression test for hipGetProcAddress()-family symbol resolution scope.
+// Regression tests for dynamic HIP entry-point resolution.
 //
-// hipGetProcAddress() must resolve symbols against the HIP runtime library
-// that defines them, NOT the process-global symbol scope. Consumers such as
-// Triton's AMD backend dlopen() libamdhip64 with RTLD_LOCAL and then resolve
-// the whole HIP API through hipGetProcAddress(). When these entry points were
-// implemented as dlsym(dlopen(NULL), symbol) they searched only the global
-// scope, so an RTLD_LOCAL load left our symbols invisible and every lookup
-// (starting with the very first, hipGetLastError) failed with
-// hipErrorNotFound -- taking down Triton at driver-init time. See issue for
-// details.
-//
-// The same lookup backs the stream-per-thread variants
-// (hipGetProcAddress_spt / hipGetDriverEntryPoint_spt via hrx_hip_spt_lookup),
-// so those had the identical bug and are exercised here too.
+// These entry points must resolve against the HIP runtime library that defines
+// them. A process-global lookup cannot find a HIP runtime opened with
+// RTLD_LOCAL, even though the caller has a valid entry-point function pointer
+// from that library.
 //
 // The library under test is located via, in order: the HRX_TEST_LIBAMDHIP64
 // environment variable (an explicit override), then the
@@ -29,6 +20,7 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 
 #include "iree/testing/gtest.h"
 
@@ -36,10 +28,17 @@ namespace {
 
 // hipSuccess is 0 in the HIP ABI.
 constexpr int kHipSuccess = 0;
+constexpr int kHipErrorInvalidValue = 1;
+constexpr uint64_t kHipGetProcAddressDefault = 0;
+constexpr uint64_t kHipGetProcAddressInvalidFlags =
+    std::numeric_limits<uint64_t>::max();
 
 using hipGetProcAddressFn = int (*)(const char* symbol, void** pfn,
                                     int hipVersion, uint64_t flags,
                                     void* symbolStatus);
+using hipGetDriverEntryPointFn = int (*)(const char* symbol, void** pfn,
+                                         unsigned long long flags,
+                                         void* symbolStatus);
 
 const char* CandidateLibPath() {
   if (const char* env = std::getenv("HRX_TEST_LIBAMDHIP64");
@@ -53,10 +52,8 @@ const char* CandidateLibPath() {
 #endif
 }
 
-// Resolves `entry_point` from the RTLD_LOCAL-loaded library and asserts it can
-// look up a core HIP symbol (hipGetLastError, the first thing Triton needs).
-// Opening RTLD_LOCAL is the whole point: it mirrors how Triton loads the HIP
-// runtime and is the condition that exposed the bug.
+// Resolves an entry point from an RTLD_LOCAL-loaded runtime and verifies that
+// it can look up a core HIP symbol.
 void ExpectResolvesUnderRtldLocal(const char* entry_point) {
   const char* path = CandidateLibPath();
   void* lib = dlopen(path, RTLD_LAZY | RTLD_LOCAL);
@@ -71,9 +68,57 @@ void ExpectResolvesUnderRtldLocal(const char* entry_point) {
 
   void* pfn = nullptr;
   int symbol_status = -1;
-  // hipVersion 60000000 == major 6; matches the minimum Triton requires.
+  // hipVersion 60000000 selects the version-6 entry-point aliases.
   int rc = get_proc_address("hipGetLastError", &pfn, 60000000,
-                            /*flags=*/0, &symbol_status);
+                            kHipGetProcAddressDefault, &symbol_status);
+
+  EXPECT_EQ(rc, kHipSuccess)
+      << entry_point << " must resolve own symbols under RTLD_LOCAL";
+  EXPECT_NE(pfn, nullptr) << "resolved function pointer must be non-null";
+  EXPECT_EQ(symbol_status, 0) << "symbolStatus must report success";
+
+  dlclose(lib);
+}
+
+void ExpectRejectsInvalidFlagsUnderRtldLocal(const char* entry_point) {
+  const char* path = CandidateLibPath();
+  void* lib = dlopen(path, RTLD_LAZY | RTLD_LOCAL);
+  if (lib == nullptr) {
+    GTEST_SKIP() << "cannot dlopen " << path << ": " << dlerror();
+  }
+
+  auto get_proc_address =
+      reinterpret_cast<hipGetProcAddressFn>(dlsym(lib, entry_point));
+  ASSERT_NE(get_proc_address, nullptr)
+      << entry_point << " not exported by " << path;
+
+  void* pfn = nullptr;
+  int symbol_status = -1;
+  int rc = get_proc_address("hipGetLastError", &pfn, 60000000,
+                            kHipGetProcAddressInvalidFlags, &symbol_status);
+
+  EXPECT_EQ(rc, kHipErrorInvalidValue)
+      << entry_point << " must reject an unsupported lookup mode";
+
+  dlclose(lib);
+}
+
+void ExpectDriverEntryPointResolvesUnderRtldLocal(const char* entry_point) {
+  const char* path = CandidateLibPath();
+  void* lib = dlopen(path, RTLD_LAZY | RTLD_LOCAL);
+  if (lib == nullptr) {
+    GTEST_SKIP() << "cannot dlopen " << path << ": " << dlerror();
+  }
+
+  auto get_driver_entry_point =
+      reinterpret_cast<hipGetDriverEntryPointFn>(dlsym(lib, entry_point));
+  ASSERT_NE(get_driver_entry_point, nullptr)
+      << entry_point << " not exported by " << path;
+
+  void* pfn = nullptr;
+  int symbol_status = -1;
+  int rc = get_driver_entry_point("hipGetLastError", &pfn,
+                                  kHipGetProcAddressDefault, &symbol_status);
 
   EXPECT_EQ(rc, kHipSuccess)
       << entry_point << " must resolve own symbols under RTLD_LOCAL";
@@ -87,10 +132,19 @@ TEST(HipGetProcAddressTest, ResolvesOwnSymbolWhenLoadedRtldLocal) {
   ExpectResolvesUnderRtldLocal("hipGetProcAddress");
 }
 
-// The stream-per-thread entry point shares the same underlying lookup
-// (hrx_hip_spt_lookup) and had the identical process-global-scope bug.
 TEST(HipGetProcAddressTest, SptEntryPointResolvesOwnSymbolWhenLoadedRtldLocal) {
   ExpectResolvesUnderRtldLocal("hipGetProcAddress_spt");
+}
+
+TEST(HipGetProcAddressTest, RejectsInvalidLookupFlagsWhenLoadedRtldLocal) {
+  ExpectRejectsInvalidFlagsUnderRtldLocal("hipGetProcAddress");
+  ExpectRejectsInvalidFlagsUnderRtldLocal("hipGetProcAddress_spt");
+}
+
+TEST(HipGetProcAddressTest,
+     DriverEntryPointsResolveOwnSymbolsWhenLoadedRtldLocal) {
+  ExpectDriverEntryPointResolvesUnderRtldLocal("hipGetDriverEntryPoint");
+  ExpectDriverEntryPointResolvesUnderRtldLocal("hipGetDriverEntryPoint_spt");
 }
 
 }  // namespace

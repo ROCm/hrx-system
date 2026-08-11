@@ -106,11 +106,25 @@ hrx_cc_library(
     ],
 )
 
+hrx_cc_library(
+    name = "spirv_linker_compiler",
+    srcs = ["spirv_linker_compiler.c"],
+    hdrs = ["spirv_linker_compiler.h"],
+    includes = ["../.."],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
+)
+
 hrx_cc_shared_library(
     name = "amdhip64",
     srcs = [
         "abi_stubs.c",
         "api.c",
+        "library.c",
+        "linker.c",
     ],
     hdrs = [
         "api.h",
@@ -134,10 +148,12 @@ hrx_cc_shared_library(
     deps = [
         ":blocking_printf_provider",
         ":launch_params",
+        ":spirv_linker_compiler",
         "//libhrx/src/binding/common",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amdgpu",
     ],
 )
 

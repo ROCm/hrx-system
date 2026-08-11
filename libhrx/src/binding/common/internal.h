@@ -154,10 +154,11 @@ typedef struct iree_hal_streaming_context_symbol_entry_t {
   iree_hal_streaming_symbol_t* symbol;
 } iree_hal_streaming_context_symbol_entry_t;
 
-// Per-context cache of compiled symbols.
-// Lock-free for lookups (thread-local access).
-// Updated via notifications from global registry.
+// Per-context cache of compiled symbols shared by all threads using the
+// context. Mutations include lazy module loading and table growth.
 typedef struct iree_hal_streaming_context_symbol_map_t {
+  // Serializes table access and the loaded-module list.
+  iree_slim_mutex_t mutex;
   // Hash table: host pointer -> compiled symbol on the context device.
   iree_hal_streaming_context_symbol_entry_t* entries;
   iree_host_size_t capacity;
@@ -249,10 +250,11 @@ struct iree_hal_streaming_context_t {
   // Host allocator.
   iree_allocator_t host_allocator;
 
-  // Stream tracking (non-owning references - streams are not retained).
-  // NOTE: Streams are NOT retained by this list to avoid reference cycles.
-  // Streams must unregister themselves before destruction.
-  iree_hal_streaming_stream_t** streams;  // Non-owning pointers.
+  // Stream tracking. The list owns one reference to every registered stream so
+  // context-wide operations can take stable snapshots while streams are being
+  // destroyed concurrently. Streams explicitly unregister before releasing
+  // their caller-owned reference, avoiding a context/stream reference cycle.
+  iree_hal_streaming_stream_t** streams;
   iree_host_size_t stream_count;
   iree_host_size_t stream_capacity;
 
@@ -658,6 +660,8 @@ typedef struct iree_hal_streaming_symbol_t {
   iree_hal_occupancy_info_t occupancy_info;
   // Cached generic facts and mutable compatibility limits.
   iree_hal_streaming_function_attributes_t function_attributes;
+  // Preferred shared-memory carveout percentage, or -1 for the device default.
+  int preferred_shared_memory_carveout;
 
   // Function parameter information used for argument packing and unpacking.
   iree_hal_streaming_parameter_info_t parameters;
@@ -667,6 +671,9 @@ typedef struct iree_hal_streaming_symbol_t {
   iree_hal_executable_global_t global_handle;
   // Cached streaming wrapper around the executable-owned global buffer.
   iree_hal_streaming_buffer_t* global_buffer;
+  // Runtime-owned host/device-visible storage for a managed global pointer
+  // slot, or NULL when this global is not managed or has not been resolved.
+  iree_hal_streaming_buffer_t* managed_buffer;
   // HIP-visible device pointer for the global storage.
   iree_hal_streaming_deviceptr_t device_address;
   // Byte length of the global storage.
@@ -1472,8 +1479,8 @@ iree_status_t iree_hal_streaming_context_disable_peer_access(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_context_t* peer_context);
 
-// Registers a stream with the context (non-owning).
-// Called during stream creation. Does NOT retain the stream.
+// Registers a stream with the context and retains it until unregistration.
+// Called during stream creation.
 // Synchronization: none (thread-safe internal locking).
 iree_status_t iree_hal_streaming_context_register_stream(
     iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream);
@@ -1618,10 +1625,18 @@ iree_status_t iree_hal_streaming_stream_begin_locked(
 // Synchronization: none (submits to queue, non-blocking).
 iree_status_t iree_hal_streaming_stream_flush(
     iree_hal_streaming_stream_t* stream);
+// Flushes a retained stream snapshot using the context that owns the snapshot.
+// This remains valid if concurrent stream destruction detaches |stream|.
+iree_status_t iree_hal_streaming_stream_flush_in_context(
+    iree_hal_streaming_stream_t* stream, iree_hal_streaming_context_t* context);
 
 // Synchronization: none (queries stream status, non-blocking).
 iree_status_t iree_hal_streaming_stream_query(
     iree_hal_streaming_stream_t* stream, int* status);
+// Queries a retained stream snapshot using the context that owns the snapshot.
+iree_status_t iree_hal_streaming_stream_query_in_context(
+    iree_hal_streaming_stream_t* stream, iree_hal_streaming_context_t* context,
+    int* status);
 
 // Synchronization: stream (blocks until stream idle).
 iree_status_t iree_hal_streaming_stream_synchronize(
@@ -1629,6 +1644,12 @@ iree_status_t iree_hal_streaming_stream_synchronize(
 // Synchronizes stream work that the caller has already flushed/submitted.
 iree_status_t iree_hal_streaming_stream_synchronize_flushed(
     iree_hal_streaming_stream_t* stream);
+// Synchronizes a retained stream snapshot using the context that owns the
+// snapshot. |flush_context| controls whether all context streams are submitted
+// before waiting.
+iree_status_t iree_hal_streaming_stream_synchronize_in_context(
+    iree_hal_streaming_stream_t* stream, iree_hal_streaming_context_t* context,
+    bool flush_context);
 
 // Wait for already-submitted work on this stream to complete.
 // Does NOT flush in-progress recordings - safe to call from other threads.
@@ -1681,6 +1702,23 @@ iree_status_t iree_hal_streaming_launch_kernel(
     iree_hal_streaming_symbol_t* symbol,
     const iree_hal_streaming_dispatch_params_t* params,
     iree_hal_streaming_stream_t* stream);
+
+typedef struct iree_hal_streaming_kernel_launch_t {
+  // Function symbol to dispatch.
+  iree_hal_streaming_symbol_t* symbol;
+  // Dispatch dimensions and pointer-array arguments.
+  iree_hal_streaming_dispatch_params_t params;
+  // Stream that receives the dispatch.
+  iree_hal_streaming_stream_t* stream;
+} iree_hal_streaming_kernel_launch_t;
+
+// Prepares all argument images and then records the dispatches while holding
+// every participating stream lock. Each launch must use ARGS_ARRAY parameter
+// storage and each stream must appear at most once.
+// Synchronization: atomically enqueues the launch set across its streams.
+iree_status_t iree_hal_streaming_launch_kernel_batch(
+    iree_host_size_t launch_count,
+    const iree_hal_streaming_kernel_launch_t* launches);
 
 // Launches a host function on the stream.
 // The function will be called with user_data when the stream reaches this
@@ -1807,7 +1845,7 @@ iree_status_t iree_hal_streaming_memory_free_device_async(
 // Releases completed stream-ordered frees retained for conservative reuse.
 // Synchronization: stream (requires |stream| to be idle).
 iree_status_t iree_hal_streaming_memory_release_completed_async_frees(
-    iree_hal_streaming_stream_t* stream);
+    iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream);
 
 // Releases every terminal stream-ordered free owned by |context|.
 // Synchronization: all context streams have reached terminal queue state.

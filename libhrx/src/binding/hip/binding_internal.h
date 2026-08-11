@@ -7,20 +7,20 @@
 #ifndef HRX_BINDING_HIP_BINDING_INTERNAL_H_
 #define HRX_BINDING_HIP_BINDING_INTERNAL_H_
 
+#include "binding/hip/api.h"
 #include "common/internal.h"
 
 // Returns a dlopen handle scoped to THIS shared object (the HIP shim), or NULL
 // if it could not be established. The handle is resolved once and cached for
 // the process lifetime; callers must NOT dlclose() it.
 //
-// This is the single source of truth for the "resolve HIP symbols against our
-// own library" behavior shared by hipGetProcAddress() and the _spt lookup
-// (hipGetProcAddress_spt/hipGetDriverEntryPoint_spt). It exists because a
-// consumer may dlopen the HIP runtime with RTLD_LOCAL (Triton's AMD backend
-// does exactly this), which keeps our symbols out of the process-global scope;
-// a dlsym(dlopen(NULL), ...) lookup would then spuriously fail. Callers should
-// dlsym() against this handle and fall back to the global scope only if it is
-// NULL. Defined in api.c (which enables the GNU extensions it needs).
+// Dynamic entry-point lookup resolves symbols through this handle. A runtime
+// opened with RTLD_LOCAL is intentionally absent from the process-global
+// scope, so dlsym(dlopen(NULL), ...) cannot find its symbols. Defined in api.c
+// (which enables the GNU extensions it needs).
 void* iree_hip_self_dl_handle(void);
+
+// Converts and consumes an IREE status returned by the common binding layer.
+hipError_t iree_hip_status_to_result(iree_status_t status);
 
 #endif  // HRX_BINDING_HIP_BINDING_INTERNAL_H_
