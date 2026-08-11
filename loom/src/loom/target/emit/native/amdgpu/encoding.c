@@ -18,10 +18,16 @@
 #include "loom/target/arch/amdgpu/planning/packet_plan.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_info.h"
+#include "loom/target/emit/native/amdgpu/branch_layout.h"
 #include "loom/target/emit/native/amdgpu/register_class.h"
 #include "loom/target/emit/native/amdgpu/storage_layout.h"
 
 #define LOOM_AMDGPU_SGPR_COUNT 128u
+
+// Maximum byte distance between an unrelaxed block boundary and branch packet
+// for which every possible signed SOPP displacement is directly encodable.
+#define LOOM_AMDGPU_SOPP_BRANCH_SPAN_BYTE_COUNT \
+  ((uint64_t)(-(int64_t)INT16_MIN) * 4u)
 
 typedef uint8_t loom_amdgpu_pc_component_t;
 enum loom_amdgpu_pc_component_e {
@@ -133,9 +139,37 @@ typedef struct loom_amdgpu_encode_traversal_state_t {
   loom_amdgpu_pc_register_state_t pc_registers[LOOM_AMDGPU_SGPR_COUNT];
 } loom_amdgpu_encode_traversal_state_t;
 
-typedef struct loom_amdgpu_encode_branch_state_t {
+typedef struct loom_amdgpu_encode_branch_measurement_t {
   // Planned byte offset for each scheduled block.
-  iree_host_size_t* block_offsets;
+  loom_amdgpu_branch_layout_block_t* blocks;
+  // Emitted SOPP edges captured during exact branch measurement.
+  loom_amdgpu_branch_layout_input_edge_t* edges;
+  // Capacity of |edges|.
+  iree_host_size_t edge_capacity;
+  // Number of entries written to |edges|.
+  iree_host_size_t edge_count;
+  // Positive-size packet boundaries captured during exact measurement.
+  loom_amdgpu_branch_layout_anchor_t* anchors;
+  // Capacity of |anchors|.
+  iree_host_size_t anchor_capacity;
+  // Number of entries written to |anchors|.
+  iree_host_size_t anchor_count;
+} loom_amdgpu_encode_branch_measurement_t;
+
+typedef struct loom_amdgpu_encode_branch_emission_t {
+  // Optional converged island layout consumed during the writing pass.
+  const loom_amdgpu_branch_layout_t* layout;
+  // Next original edge consumed from |layout|.
+  iree_host_size_t next_edge_index;
+  // Next island group consumed from |layout|.
+  iree_host_size_t next_group_index;
+} loom_amdgpu_encode_branch_emission_t;
+
+typedef struct loom_amdgpu_encode_branch_state_t {
+  // Unrelaxed offsets and optional exceptional-path measurements.
+  loom_amdgpu_encode_branch_measurement_t measurement;
+  // Final relaxed plan and writing-pass cursors.
+  loom_amdgpu_encode_branch_emission_t emission;
 } loom_amdgpu_encode_branch_state_t;
 
 typedef struct loom_amdgpu_encode_state_t {
@@ -1524,20 +1558,38 @@ static iree_status_t loom_amdgpu_encode_branch_offset(
                             "in the scheduled low function");
   }
   if (state->stream.data == NULL) {
+    loom_amdgpu_encode_branch_measurement_t* measurement =
+        &state->branches.measurement;
+    if (measurement->edges != NULL) {
+      IREE_ASSERT_LT(measurement->edge_count, measurement->edge_capacity);
+      measurement->edges[measurement->edge_count++] =
+          (loom_amdgpu_branch_layout_input_edge_t){
+              .source_byte_offset = state->stream.length,
+              .target_block_index = target_block_index,
+          };
+    }
     return iree_ok_status();
   }
-  IREE_ASSERT(state->branches.block_offsets != NULL);
+  loom_amdgpu_encode_branch_emission_t* emission = &state->branches.emission;
+  if (emission->layout != NULL) {
+    IREE_ASSERT_LT(emission->next_edge_index, emission->layout->edge_count);
+    const loom_amdgpu_branch_layout_edge_t* edge =
+        &emission->layout->edges[emission->next_edge_index++];
+    *out_immediate = (uint16_t)edge->relative_dword_offset;
+    return iree_ok_status();
+  }
+  const loom_amdgpu_branch_layout_block_t* blocks =
+      state->branches.measurement.blocks;
+  IREE_ASSERT(blocks != NULL);
   if (state->stream.length > (iree_host_size_t)INT64_MAX - 4 ||
-      state->branches.block_offsets[target_block_index] >
-          (iree_host_size_t)INT64_MAX) {
+      blocks[target_block_index].byte_offset > (uint64_t)INT64_MAX) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "AMDGPU native encoding branch target byte offset exceeds int64_t");
   }
 
   const int64_t branch_base_offset = (int64_t)state->stream.length + 4;
-  const int64_t target_offset =
-      (int64_t)state->branches.block_offsets[target_block_index];
+  const int64_t target_offset = (int64_t)blocks[target_block_index].byte_offset;
   const int64_t relative_byte_offset = target_offset - branch_base_offset;
   if ((relative_byte_offset % 4) != 0) {
     return iree_make_status(
@@ -1554,6 +1606,29 @@ static iree_status_t loom_amdgpu_encode_branch_offset(
   }
   *out_immediate =
       (uint16_t)((uint32_t)relative_dword_offset & UINT32_C(0xFFFF));
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_encode_branch_groups_before_packet(
+    loom_amdgpu_encode_state_t* state, iree_host_size_t packet_index) {
+  loom_amdgpu_encode_branch_emission_t* emission = &state->branches.emission;
+  if (emission->layout == NULL) return iree_ok_status();
+  while (emission->next_group_index < emission->layout->group_count) {
+    const loom_amdgpu_branch_layout_group_t* group =
+        &emission->layout->groups[emission->next_group_index];
+    if (group->packet_index != packet_index) break;
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_encode_sopp_simm16(state, state->inputs.target->sopp.branch,
+                                       (uint16_t)group->island_count));
+    for (uint32_t i = 0; i < group->island_count; ++i) {
+      const loom_amdgpu_branch_layout_island_t* island =
+          &emission->layout->islands[group->island_start + i];
+      IREE_RETURN_IF_ERROR(loom_amdgpu_encode_sopp_simm16(
+          state, state->inputs.target->sopp.branch,
+          (uint16_t)island->relative_dword_offset));
+    }
+    ++emission->next_group_index;
+  }
   return iree_ok_status();
 }
 
@@ -1938,6 +2013,95 @@ static iree_status_t loom_amdgpu_resolve_immediate_name_ids(
   return iree_ok_status();
 }
 
+typedef struct loom_amdgpu_branch_measurement_requirements_t {
+  // Exact number of emitted non-fallthrough SOPP edges.
+  iree_host_size_t edge_count;
+  // Whether at least one edge may exceed the signed SOPP range.
+  bool may_require_relaxation;
+} loom_amdgpu_branch_measurement_requirements_t;
+
+static void loom_amdgpu_accumulate_branch_measurement_requirement(
+    const loom_low_schedule_table_t* schedule,
+    const loom_amdgpu_branch_layout_block_t* blocks, uint64_t byte_length,
+    uint32_t source_block_index, const loom_block_t* target_block,
+    loom_amdgpu_branch_measurement_requirements_t* requirements) {
+  ++requirements->edge_count;
+  const uint32_t target_block_index =
+      loom_low_packet_block_index(schedule, target_block);
+  IREE_ASSERT_NE(target_block_index, LOOM_LOW_PACKET_INDEX_NONE);
+  const uint64_t source_start = blocks[source_block_index].byte_offset;
+  const uint64_t source_end = source_block_index + 1u < schedule->block_count
+                                  ? blocks[source_block_index + 1u].byte_offset
+                                  : byte_length;
+  const uint64_t target = blocks[target_block_index].byte_offset;
+  if ((target > source_start &&
+       target - source_start > LOOM_AMDGPU_SOPP_BRANCH_SPAN_BYTE_COUNT) ||
+      (source_end > target &&
+       source_end - target > LOOM_AMDGPU_SOPP_BRANCH_SPAN_BYTE_COUNT)) {
+    requirements->may_require_relaxation = true;
+  }
+}
+
+static loom_amdgpu_branch_measurement_requirements_t
+loom_amdgpu_query_branch_measurement_requirements(
+    const loom_low_schedule_table_t* schedule,
+    const loom_amdgpu_branch_layout_block_t* blocks, uint64_t byte_length) {
+  loom_amdgpu_branch_measurement_requirements_t requirements = {0};
+  if (byte_length <= LOOM_AMDGPU_SOPP_BRANCH_SPAN_BYTE_COUNT) {
+    return requirements;
+  }
+  for (uint32_t block_index = 0; block_index < schedule->block_count;
+       ++block_index) {
+    const loom_low_schedule_block_t* block = &schedule->blocks[block_index];
+    if (block->scheduled_node_count == 0) continue;
+    const loom_low_packet_view_t packet = loom_low_packet_at_block_ordinal(
+        schedule, block_index, block->scheduled_node_count - 1u);
+    const loom_op_t* op = packet.node->op;
+    if (loom_low_br_isa(op)) {
+      const loom_block_t* target_block = loom_low_br_dest(op);
+      const uint32_t target_block_index =
+          loom_low_packet_block_index(schedule, target_block);
+      IREE_ASSERT_NE(target_block_index, LOOM_LOW_PACKET_INDEX_NONE);
+      if (target_block_index != block_index + 1u) {
+        loom_amdgpu_accumulate_branch_measurement_requirement(
+            schedule, blocks, byte_length, block_index, target_block,
+            &requirements);
+      }
+      continue;
+    }
+    if (!loom_low_cond_br_isa(op)) continue;
+    const loom_block_t* true_target = loom_low_cond_br_true_dest(op);
+    const loom_block_t* false_target = loom_low_cond_br_false_dest(op);
+    const uint32_t true_target_index =
+        loom_low_packet_block_index(schedule, true_target);
+    const uint32_t false_target_index =
+        loom_low_packet_block_index(schedule, false_target);
+    IREE_ASSERT_NE(true_target_index, LOOM_LOW_PACKET_INDEX_NONE);
+    IREE_ASSERT_NE(false_target_index, LOOM_LOW_PACKET_INDEX_NONE);
+    if (true_target == false_target) {
+      if (true_target_index != block_index + 1u) {
+        loom_amdgpu_accumulate_branch_measurement_requirement(
+            schedule, blocks, byte_length, block_index, true_target,
+            &requirements);
+      }
+    } else if (true_target_index == block_index + 1u) {
+      loom_amdgpu_accumulate_branch_measurement_requirement(
+          schedule, blocks, byte_length, block_index, false_target,
+          &requirements);
+    } else {
+      loom_amdgpu_accumulate_branch_measurement_requirement(
+          schedule, blocks, byte_length, block_index, true_target,
+          &requirements);
+      if (false_target_index != block_index + 1u) {
+        loom_amdgpu_accumulate_branch_measurement_requirement(
+            schedule, blocks, byte_length, block_index, false_target,
+            &requirements);
+      }
+    }
+  }
+  return requirements;
+}
+
 static iree_status_t loom_amdgpu_encode_instruction_stream_into_state(
     loom_amdgpu_encode_state_t* state) {
   state->stream.length = 0;
@@ -1949,6 +2113,10 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_into_state(
   state->packet_plan.next_address_state_index = 0;
   state->packet_plan.next_wait_packet_index = 0;
   state->packet_plan.next_wait_state_index = 0;
+  state->branches.measurement.edge_count = 0;
+  state->branches.measurement.anchor_count = 0;
+  state->branches.emission.next_edge_index = 0;
+  state->branches.emission.next_group_index = 0;
   memset(state->traversal.pc_registers, 0,
          sizeof(state->traversal.pc_registers));
   for (iree_host_size_t block_index = 0;
@@ -1957,8 +2125,9 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_into_state(
         &state->inputs.schedule->blocks[block_index];
     memset(state->traversal.pc_registers, 0,
            sizeof(state->traversal.pc_registers));
-    if (state->branches.block_offsets != NULL) {
-      state->branches.block_offsets[block_index] = state->stream.length;
+    if (state->branches.measurement.blocks != NULL) {
+      state->branches.measurement.blocks[block_index].byte_offset =
+          state->stream.length;
     }
     for (uint32_t scheduled_ordinal = 0;
          scheduled_ordinal < block->scheduled_node_count; ++scheduled_ordinal) {
@@ -1967,9 +2136,24 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_into_state(
       const loom_low_packet_view_t packet =
           loom_low_packet_at(state->inputs.schedule, packet_index);
       state->traversal.current_packet = &packet;
+      IREE_RETURN_IF_ERROR(
+          loom_amdgpu_encode_branch_groups_before_packet(state, packet_index));
+      const iree_host_size_t packet_start = state->stream.length;
       iree_status_t status = loom_amdgpu_encode_packet(state, &packet);
       state->traversal.current_packet = NULL;
       IREE_RETURN_IF_ERROR(status);
+      loom_amdgpu_encode_branch_measurement_t* measurement =
+          &state->branches.measurement;
+      if (measurement->anchors != NULL &&
+          state->stream.length != packet_start) {
+        IREE_ASSERT_LT(measurement->anchor_count, measurement->anchor_capacity);
+        IREE_ASSERT_LE(packet_index, UINT32_MAX);
+        measurement->anchors[measurement->anchor_count++] =
+            (loom_amdgpu_branch_layout_anchor_t){
+                .byte_offset = packet_start,
+                .packet_index = (uint32_t)packet_index,
+            };
+      }
     }
     if (state->packet_plan.address_state == NULL) {
       if (state->traversal.current_vgpr_msb_mode != 0) {
@@ -1992,6 +2176,12 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_into_state(
   if (state->packet_plan.wait_states != NULL) {
     IREE_ASSERT_EQ(state->packet_plan.next_wait_state_index,
                    state->packet_plan.wait_states->state_count);
+  }
+  if (state->branches.emission.layout != NULL) {
+    IREE_ASSERT_EQ(state->branches.emission.next_edge_index,
+                   state->branches.emission.layout->edge_count);
+    IREE_ASSERT_EQ(state->branches.emission.next_group_index,
+                   state->branches.emission.layout->group_count);
   }
   return iree_ok_status();
 }
@@ -2052,11 +2242,11 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
           schedule->target.descriptor_set,
           LOOM_AMDGPU_DESCRIPTOR_REF_S_ADDC_U32_RHS_SYMBOL_REL32_HI),
   };
-  iree_host_size_t* block_offsets = NULL;
+  loom_amdgpu_branch_layout_block_t* branch_blocks = NULL;
   if (schedule->block_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, schedule->block_count,
-                                                   sizeof(*block_offsets),
-                                                   (void**)&block_offsets));
+                                                   sizeof(*branch_blocks),
+                                                   (void**)&branch_blocks));
   }
 
   loom_low_allocation_value_scratch_t scratch = {0};
@@ -2084,17 +2274,76 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
       .packet_plan = packet_plan_state,
       .branches =
           {
-              .block_offsets = block_offsets,
+              .measurement =
+                  {
+                      .blocks = branch_blocks,
+                  },
           },
   };
   if (iree_status_is_ok(status)) {
     status = loom_amdgpu_encode_instruction_stream_into_state(&sizing_state);
   }
 
+  loom_amdgpu_branch_layout_t branch_layout = {0};
+  if (iree_status_is_ok(status)) {
+    const loom_amdgpu_branch_measurement_requirements_t requirements =
+        loom_amdgpu_query_branch_measurement_requirements(
+            schedule, branch_blocks, sizing_state.stream.length);
+    if (requirements.may_require_relaxation) {
+      loom_amdgpu_branch_layout_input_edge_t* measured_edges = NULL;
+      status = iree_arena_allocate_array(arena, requirements.edge_count,
+                                         sizeof(*measured_edges),
+                                         (void**)&measured_edges);
+      loom_amdgpu_branch_layout_anchor_t* measured_anchors = NULL;
+      if (iree_status_is_ok(status)) {
+        status = iree_arena_allocate_array(
+            arena, schedule->scheduled_node_count, sizeof(*measured_anchors),
+            (void**)&measured_anchors);
+      }
+      if (iree_status_is_ok(status)) {
+        sizing_state.branches.measurement.edges = measured_edges;
+        sizing_state.branches.measurement.edge_capacity =
+            requirements.edge_count;
+        sizing_state.branches.measurement.anchors = measured_anchors;
+        sizing_state.branches.measurement.anchor_capacity =
+            schedule->scheduled_node_count;
+        status =
+            loom_amdgpu_encode_instruction_stream_into_state(&sizing_state);
+      }
+      if (iree_status_is_ok(status)) {
+        IREE_ASSERT_EQ(sizing_state.branches.measurement.edge_count,
+                       requirements.edge_count);
+        const loom_amdgpu_branch_layout_input_t branch_layout_input = {
+            .byte_length = sizing_state.stream.length,
+            .blocks = branch_blocks,
+            .block_count = schedule->block_count,
+            .edges = measured_edges,
+            .edge_count = sizing_state.branches.measurement.edge_count,
+            .anchors = measured_anchors,
+            .anchor_count = sizing_state.branches.measurement.anchor_count,
+        };
+        status = loom_amdgpu_branch_layout_build(&branch_layout_input, arena,
+                                                 &branch_layout);
+      }
+    }
+  }
+
+  iree_host_size_t final_byte_length = sizing_state.stream.length;
+  const loom_amdgpu_branch_layout_t* active_branch_layout = NULL;
+  if (iree_status_is_ok(status) && branch_layout.island_count != 0) {
+    if (branch_layout.byte_length > IREE_HOST_SIZE_MAX) {
+      status = iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "AMDGPU relaxed branch layout exceeds host address range");
+    } else {
+      final_byte_length = (iree_host_size_t)branch_layout.byte_length;
+      active_branch_layout = &branch_layout;
+    }
+  }
+
   uint8_t* data = NULL;
-  if (iree_status_is_ok(status) && sizing_state.stream.length != 0) {
-    status =
-        iree_arena_allocate(arena, sizing_state.stream.length, (void**)&data);
+  if (iree_status_is_ok(status) && final_byte_length != 0) {
+    status = iree_arena_allocate(arena, final_byte_length, (void**)&data);
   }
   loom_amdgpu_hsaco_text_fixup_t* text_fixups = NULL;
   if (iree_status_is_ok(status) && sizing_state.text_fixups.count != 0) {
@@ -2114,7 +2363,7 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
       .stream =
           {
               .data = data,
-              .capacity = sizing_state.stream.length,
+              .capacity = final_byte_length,
           },
       .text_fixups =
           {
@@ -2128,21 +2377,29 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
           },
       .branches =
           {
-              .block_offsets = block_offsets,
+              .measurement =
+                  {
+                      .blocks = branch_blocks,
+                  },
+              .emission =
+                  {
+                      .layout = active_branch_layout,
+                  },
           },
   };
-  if (iree_status_is_ok(status) && sizing_state.stream.length != 0) {
+  if (iree_status_is_ok(status) && final_byte_length != 0) {
     status = loom_amdgpu_encode_instruction_stream_into_state(&writing_state);
   }
   if (iree_status_is_ok(status)) {
-    IREE_ASSERT_EQ(writing_state.stream.length, sizing_state.stream.length);
+    IREE_ASSERT_EQ(writing_state.stream.length, final_byte_length);
     IREE_ASSERT_EQ(writing_state.stream.instruction_count,
-                   sizing_state.stream.instruction_count);
+                   sizing_state.stream.instruction_count +
+                       branch_layout.group_count + branch_layout.island_count);
     IREE_ASSERT_EQ(writing_state.text_fixups.count,
                    sizing_state.text_fixups.count);
     IREE_ASSERT_EQ(writing_state.native_insertions.count,
                    sizing_state.native_insertions.count);
-    if (sizing_state.stream.length != 0) {
+    if (final_byte_length != 0) {
       *out_stream = (loom_amdgpu_encoded_instruction_stream_t){
           .text = iree_make_const_byte_span(data, writing_state.stream.length),
           .instruction_count = writing_state.stream.instruction_count,

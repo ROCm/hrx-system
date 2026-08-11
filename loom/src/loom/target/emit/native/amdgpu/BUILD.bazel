@@ -226,6 +226,7 @@ loom_cc_library(
     srcs = ["encoding.c"],
     hdrs = ["encoding.h"],
     deps = [
+        ":branch_layout",
         ":register_class",
         ":storage_layout",
         ":text_fixup",

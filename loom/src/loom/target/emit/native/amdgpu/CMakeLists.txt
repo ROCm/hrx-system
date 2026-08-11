@@ -254,6 +254,7 @@ loom_cc_library(
   SRCS
     "encoding.c"
   DEPS
+    ::branch_layout
     ::register_class
     ::storage_layout
     ::text_fixup
