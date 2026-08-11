@@ -132,7 +132,7 @@ void loom_run_module_deinitialize(loom_run_module_t* run_module);
 
 // Returns a source resolver for diagnostics against |run_module|.
 loom_source_resolver_t loom_run_module_source_resolver(
-    loom_run_module_t* run_module);
+    const loom_run_module_t* run_module);
 
 #ifdef __cplusplus
 }  // extern "C"

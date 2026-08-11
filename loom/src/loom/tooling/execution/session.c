@@ -203,12 +203,12 @@ void loom_run_module_deinitialize(loom_run_module_t* run_module) {
 }
 
 loom_source_resolver_t loom_run_module_source_resolver(
-    loom_run_module_t* run_module) {
+    const loom_run_module_t* run_module) {
   if (run_module == NULL || !run_module->has_source_entry) {
     return (loom_source_resolver_t){0};
   }
   return (loom_source_resolver_t){
       .fn = loom_source_table_resolve,
-      .user_data = &run_module->source_table_resolver,
+      .user_data = (void*)&run_module->source_table_resolver,
   };
 }

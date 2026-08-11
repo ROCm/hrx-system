@@ -312,12 +312,10 @@ static iree_status_t iree_test_loom_configure_hal_actual_sequence(
       .context = hal_context,
       .session = session,
       .target_environment = configuration->target_environment,
-      .filename = run_module->filename,
-      .source = run_module->source,
+      .run_module = run_module,
       .pipeline = iree_make_cstring_view(FLAG_pipeline),
       .sanitizer = *sanitizer_options,
       .config_set = config_set,
-      .test_module = module_plan->module,
       .case_plan = case_plan,
   };
   IREE_RETURN_IF_ERROR(loom_run_hal_testbench_actual_sequence_initialize(

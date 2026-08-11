@@ -100,25 +100,22 @@ iree_status_t loom_run_hal_testbench_count_kernel_launches(
 typedef struct loom_run_hal_testbench_actual_provider_options_t {
   // Shared HAL context used to prepare and dispatch the candidate.
   loom_run_hal_testbench_context_t* context;
-  // Execution session used to parse the private compile copy.
+  // Execution session used to clone and compile the private module copy.
   loom_run_session_t* session;
   // Target environment used by the source-to-low pipeline.
   const loom_target_environment_t* target_environment;
-  // Source filename used for diagnostics.
-  iree_string_view_t filename;
-  // Source text used to parse a private compile copy.
-  iree_string_view_t source;
+  // Canonical parsed module that owns |kernel_launch|. Borrowed through
+  // provider deinitialization.
+  const loom_run_module_t* run_module;
   // User-selected pass pipeline.
   iree_string_view_t pipeline;
   // Sanitizer checks inserted by the target pipeline.
   loom_sanitizer_options_t sanitizer;
   // Config bindings materialized into the private compile copy.
   const loom_tooling_config_set_t* config_set;
-  // Module that owns |kernel_launch|.
-  const loom_module_t* test_module;
   // Kernel launch selected from the owning check.case.
   const loom_testbench_invocation_plan_t* kernel_launch;
-  // Diagnostic sink used while parsing, lowering, and emitting the candidate.
+  // Diagnostic sink used while lowering and emitting the candidate.
   loom_diagnostic_sink_t diagnostic_sink;
   // Maximum diagnostics to emit before stopping. Zero uses the default.
   uint32_t max_errors;
@@ -133,25 +130,22 @@ typedef struct loom_run_hal_testbench_actual_provider_options_t {
 typedef struct loom_run_hal_testbench_actual_provider_t {
   // Shared HAL context used to prepare and dispatch the candidate.
   loom_run_hal_testbench_context_t* context;
-  // Execution session used to parse the private compile copy.
+  // Execution session used to clone and compile the private module copy.
   loom_run_session_t* session;
   // Target environment used by the source-to-low pipeline.
   const loom_target_environment_t* target_environment;
-  // Source filename used for diagnostics.
-  iree_string_view_t filename;
-  // Source text used to parse a private compile copy.
-  iree_string_view_t source;
+  // Canonical parsed module that owns |kernel_launch|. Borrowed through
+  // provider deinitialization.
+  const loom_run_module_t* run_module;
   // User-selected pass pipeline.
   iree_string_view_t pipeline;
   // Sanitizer checks inserted by the target pipeline.
   loom_sanitizer_options_t sanitizer;
   // Config bindings materialized into the private compile copy.
   const loom_tooling_config_set_t* config_set;
-  // Module that owns |kernel_launch|.
-  const loom_module_t* test_module;
   // Kernel launch selected from the owning check.case.
   const loom_testbench_invocation_plan_t* kernel_launch;
-  // Diagnostic sink used while parsing, lowering, and emitting the candidate.
+  // Diagnostic sink used while lowering and emitting the candidate.
   loom_diagnostic_sink_t diagnostic_sink;
   // Maximum diagnostics to emit before stopping. Zero uses the default.
   uint32_t max_errors;
@@ -161,7 +155,7 @@ typedef struct loom_run_hal_testbench_actual_provider_t {
   loom_run_candidate_artifact_flags_t artifact_flags;
   // Optional artifact manifest requested from the selected backend.
   loom_run_candidate_artifact_manifest_options_t artifact_manifest;
-  // Parsed compile module owned by this provider.
+  // Private compile module owned by this provider.
   loom_run_module_t compile_module;
   // Config-materialized source kernel retained for launch evaluation.
   loom_module_t* launch_config_module;
@@ -214,25 +208,22 @@ typedef struct loom_run_hal_testbench_actual_sequence_execution_t
 typedef struct loom_run_hal_testbench_actual_sequence_options_t {
   // Shared HAL context used to prepare and dispatch all actual candidates.
   loom_run_hal_testbench_context_t* context;
-  // Execution session used to parse each private compile copy.
+  // Execution session used to clone and compile each private module copy.
   loom_run_session_t* session;
   // Target environment used by the source-to-low pipeline.
   const loom_target_environment_t* target_environment;
-  // Source filename used for diagnostics.
-  iree_string_view_t filename;
-  // Source text used to parse each private compile copy.
-  iree_string_view_t source;
+  // Canonical parsed module that owns |case_plan|. Borrowed through sequence
+  // deinitialization.
+  const loom_run_module_t* run_module;
   // User-selected pass pipeline.
   iree_string_view_t pipeline;
   // Sanitizer checks inserted by the target pipeline.
   loom_sanitizer_options_t sanitizer;
   // Config bindings materialized into each private compile copy.
   const loom_tooling_config_set_t* config_set;
-  // Module that owns |case_plan|.
-  const loom_module_t* test_module;
   // Case plan whose kernel launches are executed by the sequence.
   const loom_testbench_case_plan_t* case_plan;
-  // Diagnostic sink used while parsing, lowering, and emitting candidates.
+  // Diagnostic sink used while lowering and emitting candidates.
   loom_diagnostic_sink_t diagnostic_sink;
   // Maximum diagnostics to emit before stopping. Zero uses the default.
   uint32_t max_errors;

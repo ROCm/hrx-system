@@ -9,6 +9,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/link/linker.h"
 #include "loom/ops/check/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/index/ops.h"
@@ -168,6 +169,15 @@ static bool ModuleHasSymbol(const loom_module_t* module,
          loom_module_find_symbol(module, name_id) != LOOM_SYMBOL_ID_INVALID;
 }
 
+static bool ModuleSymbolIsFuncDef(const loom_module_t* module,
+                                  iree_string_view_t name) {
+  const loom_string_id_t name_id = loom_module_lookup_string(module, name);
+  if (name_id == LOOM_STRING_ID_INVALID) return false;
+  const uint16_t symbol_id = loom_module_find_symbol(module, name_id);
+  return symbol_id != LOOM_SYMBOL_ID_INVALID &&
+         loom_func_def_isa(module->symbols.entries[symbol_id].defining_op);
+}
+
 TEST_F(HalTestbenchActualTest, RequiresExplicitDeviceWhenHalProviderExists) {
   const loom_run_hal_artifact_provider_t* artifact_providers[] = {
       &kFakeHalArtifactProvider,
@@ -308,12 +318,15 @@ check.case @nested_launch_schedule {
   loom_run_module_deinitialize(&run_module);
 }
 
-TEST_F(HalTestbenchActualTest, CompileModuleContainsOnlySelectedEntry) {
-  static constexpr char kSource[] = R"(
+TEST_F(HalTestbenchActualTest, CompileModuleClonesLinkedSelectedEntry) {
+  static constexpr char kInputSource[] = R"(
+func.decl @linked_identity(%value: index) -> (index)
+
 kernel.def @selected() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%element_count: index) {
+  %unused = func.call @linked_identity(%element_count) : (index) -> (index)
   kernel.return
 }
 
@@ -330,9 +343,44 @@ check.case @selected_case {
   check.return
 }
 )";
+  static constexpr char kLibrarySource[] = R"(
+func.def inline @linked_identity(%value: index) -> (index) {
+  func.return %value : index
+}
+)";
+  loom_run_module_t input_module = {};
+  loom_run_module_parse_options_t parse_options = {};
+  loom_run_module_parse_options_initialize(&parse_options);
+  parse_options.filename = IREE_SV("hal_testbench_actual_input.loom");
+  parse_options.source = IREE_SV(kInputSource);
+  IREE_ASSERT_OK(
+      loom_run_module_parse(&session_, &parse_options, &input_module));
+
+  loom_run_module_t library_module = {};
+  parse_options.filename = IREE_SV("hal_testbench_actual_library.loom");
+  parse_options.source = IREE_SV(kLibrarySource);
+  IREE_ASSERT_OK(
+      loom_run_module_parse(&session_, &parse_options, &library_module));
+
+  const loom_module_t* source_modules[] = {
+      input_module.module,
+      library_module.module,
+  };
+  const loom_link_options_t link_options = {
+      /*.module_name=*/IREE_SV("linked_test"),
+  };
   loom_run_module_t run_module = {};
+  IREE_ASSERT_OK(loom_link_materialized_modules(
+      source_modules, IREE_ARRAYSIZE(source_modules), &link_options,
+      loom_run_session_block_pool(&session_), iree_allocator_system(),
+      &run_module.module));
+  loom_run_module_deinitialize(&library_module);
+  loom_run_module_deinitialize(&input_module);
+
   loom_testbench_module_plan_t module_plan = {};
-  ParseAndPlan(IREE_SV(kSource), &run_module, &module_plan);
+  IREE_ASSERT_OK(loom_testbench_plan_module(run_module.module, nullptr,
+                                            &plan_arena_, &module_plan));
+  ASSERT_EQ(module_plan.issue_count, 0u);
   ASSERT_EQ(module_plan.case_count, 1u);
   const loom_testbench_case_plan_t* case_plan = &module_plan.cases[0];
   const loom_testbench_invocation_plan_t* kernel_launch = nullptr;
@@ -350,9 +398,7 @@ check.case @selected_case {
   loom_run_hal_testbench_actual_provider_options_t options = {};
   options.context = &context;
   options.session = &session_;
-  options.filename = IREE_SV("hal_testbench_actual_test.loom");
-  options.source = IREE_SV(kSource);
-  options.test_module = run_module.module;
+  options.run_module = &run_module;
   options.kernel_launch = kernel_launch;
 
   loom_run_hal_testbench_actual_provider_t provider = {};
@@ -362,6 +408,8 @@ check.case @selected_case {
       loom_run_hal_testbench_actual_provider_compile(&provider));
   EXPECT_TRUE(
       ModuleHasSymbol(provider.compile_module.module, IREE_SV("selected")));
+  EXPECT_TRUE(ModuleSymbolIsFuncDef(provider.compile_module.module,
+                                    IREE_SV("linked_identity")));
   EXPECT_FALSE(
       ModuleHasSymbol(provider.compile_module.module, IREE_SV("uncalled")));
   EXPECT_FALSE(ModuleHasSymbol(provider.compile_module.module,
