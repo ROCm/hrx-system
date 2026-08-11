@@ -5,6 +5,7 @@
 
 #include <stdio.h>
 
+#include "allocator.h"
 #include "hrx_internal.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/buffer.h"
@@ -36,8 +37,8 @@ typedef struct hrx_vmm_slab_provider_t {
   // Slabs currently published to the owning HAL pools.
   hrx_vmm_slab_t* active_slab_head;
 
-  // Allocators whose device agents have access to every active slab.
-  iree_hal_allocator_t* access_allocators[HRX_MAX_DEVICES];
+  // HRX allocators whose device agents have access to every active slab.
+  hrx_allocator_t access_allocators[HRX_MAX_DEVICES];
 
   // Protection associated with each entry in |access_allocators|.
   iree_hal_memory_protection_t access_protections[HRX_MAX_DEVICES];
@@ -110,7 +111,7 @@ static void hrx_vmm_slab_provider_destroy(
   IREE_ASSERT(provider->active_slab_head == NULL,
               "VMM slab provider destroyed with active slabs");
   for (iree_host_size_t i = 0; i < HRX_MAX_DEVICES; ++i) {
-    iree_hal_allocator_release(provider->access_allocators[i]);
+    hrx_allocator_release(provider->access_allocators[i]);
   }
   iree_slim_mutex_deinitialize(&provider->mutex);
   iree_hal_allocator_release(provider->allocator);
@@ -177,12 +178,12 @@ static void hrx_vmm_slab_provider_remove_active_locked(
 }
 
 static iree_status_t hrx_vmm_slab_provider_protect_slab(
-    iree_hal_allocator_t* accessor_allocator, hrx_vmm_slab_t* slab,
+    hrx_allocator_t accessor_allocator, hrx_vmm_slab_t* slab,
     iree_hal_memory_protection_t protection) {
-  return iree_hal_allocator_virtual_memory_protect(
+  return hrx_allocator_virtual_memory_protect_hal(
       accessor_allocator, slab->virtual_buffer, /*virtual_offset=*/0,
-      slab->allocation_size, IREE_HAL_QUEUE_AFFINITY_ANY,
-      IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE, protection);
+      slab->allocation_size, HRX_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE,
+      protection);
 }
 
 static iree_status_t hrx_vmm_slab_provider_retry_failed_releases(
@@ -493,7 +494,7 @@ iree_status_t hrx_vmm_slab_provider_create(
 
 iree_status_t hrx_vmm_slab_provider_set_access(
     iree_hal_slab_provider_t* base_provider, iree_host_size_t device_ordinal,
-    iree_hal_allocator_t* accessor_allocator,
+    hrx_allocator_t accessor_allocator,
     iree_hal_memory_protection_t protection) {
   IREE_ASSERT_ARGUMENT(base_provider);
   IREE_ASSERT_ARGUMENT(accessor_allocator);
@@ -509,7 +510,7 @@ iree_status_t hrx_vmm_slab_provider_set_access(
 
   hrx_vmm_slab_provider_t* provider = hrx_vmm_slab_provider_cast(base_provider);
   iree_slim_mutex_lock(&provider->mutex);
-  iree_hal_allocator_t* previous_allocator =
+  hrx_allocator_t previous_allocator =
       provider->access_allocators[device_ordinal];
   const iree_hal_memory_protection_t previous_protection =
       provider->access_protections[device_ordinal];
@@ -546,8 +547,8 @@ iree_status_t hrx_vmm_slab_provider_set_access(
   }
   if (iree_status_is_ok(status)) {
     if (provider->access_allocators[device_ordinal] != accessor_allocator) {
-      iree_hal_allocator_retain(accessor_allocator);
-      iree_hal_allocator_release(provider->access_allocators[device_ordinal]);
+      hrx_allocator_retain(accessor_allocator);
+      hrx_allocator_release(provider->access_allocators[device_ordinal]);
       provider->access_allocators[device_ordinal] = accessor_allocator;
     }
     provider->access_protections[device_ordinal] = protection;
