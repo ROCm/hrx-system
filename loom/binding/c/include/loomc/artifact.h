@@ -62,6 +62,13 @@ typedef enum loomc_artifact_kind_e {
 
   /// Loom module artifact. The format indicates text or bytecode.
   LOOMC_ARTIFACT_KIND_MODULE = 3,
+
+  /// Runtime launch-configuration module.
+  ///
+  /// The format identifies the backing representation. Functions in the
+  /// module evaluate invocation workload values into packed workgroup-count
+  /// tuples without retaining the originating module.
+  LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG = 4,
 } loomc_artifact_kind_t;
 
 /// Borrowed artifact view owned by a result object.

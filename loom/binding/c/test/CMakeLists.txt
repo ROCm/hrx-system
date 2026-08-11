@@ -147,9 +147,9 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
-    launch_config_test
+    launch_config_module_test
   SRCS
-    "launch_config_test.cc"
+    "launch_config_module_test.cc"
   DEPS
     ::test_util
     iree::testing::gtest

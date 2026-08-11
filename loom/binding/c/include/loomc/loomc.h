@@ -24,6 +24,7 @@
 #include "loomc/diagnostic.h"
 #include "loomc/emit.h"
 #include "loomc/launch_config.h"
+#include "loomc/launch_config_module.h"
 #include "loomc/link.h"
 #include "loomc/link_index.h"
 #include "loomc/module.h"

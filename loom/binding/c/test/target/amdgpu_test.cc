@@ -428,8 +428,7 @@ ResultPtr EmitModule(loomc_target_environment_t* target_environment,
   return ResultPtr(result);
 }
 
-TEST(AmdgpuTargetTest,
-     EvaluateLaunchConfigCombinesIdentityAndSubgroupRequirements) {
+TEST(AmdgpuTargetTest, TargetQualifiedLaunchProvidersRoundTrip) {
   TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
   ContextPtr context = CreateAmdgpuContext(target_environment.get());
   WorkspacePtr workspace = CreateWorkspace();
@@ -459,61 +458,6 @@ kernel.def target(@gfx11_wave64) @target_specialized_launch(%expert_count: index
 )");
   ModulePtr module =
       DeserializeModule(context.get(), workspace.get(), source.get());
-
-  struct TargetCase {
-    const char* target;
-    uint32_t expected_workgroup_count;
-  };
-  const TargetCase target_cases[] = {
-      {"gfx1100", 32},
-      {"gfx1151", 64},
-  };
-  for (const TargetCase& target_case : target_cases) {
-    TargetProfilePtr profile =
-        CreateTargetProfile(target_environment.get(), target_case.target);
-    const loomc_target_specialization_t specialization = {
-        /*.function_symbol=*/
-        loomc_make_cstring_view("target_specialized_launch"),
-        /*.target_profile=*/profile.get(),
-    };
-    const loomc_target_specialization_options_t target_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-        /*.structure_size=*/sizeof(target_options),
-        /*.next=*/nullptr,
-        /*.specializations=*/&specialization,
-        /*.specialization_count=*/1,
-    };
-    const int64_t workload_arguments[] = {128};
-    const loomc_launch_config_eval_options_t options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG_EVAL_OPTIONS,
-        /*.structure_size=*/sizeof(options),
-        /*.next=*/&target_options,
-        /*.function_symbol=*/
-        loomc_make_cstring_view("target_specialized_launch"),
-        /*.config=*/{},
-        /*.workload_arguments=*/workload_arguments,
-        /*.workload_argument_count=*/IREE_ARRAYSIZE(workload_arguments),
-        /*.required_fields=*/
-        LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT |
-            LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE,
-    };
-    loomc_launch_config_t launch_config = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
-        /*.structure_size=*/sizeof(launch_config),
-    };
-    loomc_result_t* result = nullptr;
-    LOOMC_EXPECT_OK(loomc_module_evaluate_launch_config(
-        module.get(), workspace.get(), &options, loomc_allocator_system(),
-        &launch_config, &result));
-    ResultPtr result_ptr(result);
-    ExpectSucceededResult(result_ptr.get());
-    EXPECT_EQ(launch_config.workgroup_count.x,
-              target_case.expected_workgroup_count)
-        << target_case.target;
-    EXPECT_EQ(launch_config.workgroup_count.y, 1u) << target_case.target;
-    EXPECT_EQ(launch_config.workgroup_count.z, 1u) << target_case.target;
-    EXPECT_EQ(launch_config.workgroup_size.x, 64u) << target_case.target;
-  }
 
   const std::string module_text = SerializeModuleToText(module.get());
   EXPECT_NE(module_text.find(

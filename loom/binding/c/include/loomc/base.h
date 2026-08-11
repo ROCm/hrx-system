@@ -263,14 +263,23 @@ typedef enum loomc_structure_type_e {
   /// `loomc_sanitizer_options_t`.
   LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS = 32,
 
-  /// `loomc_launch_config_eval_options_t`.
-  LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG_EVAL_OPTIONS = 33,
-
   /// `loomc_launch_config_t`.
   LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG = 34,
 
   /// `loomc_amdgpu_iree_hal_profile_options_t`.
   LOOMC_STRUCTURE_TYPE_AMDGPU_IREE_HAL_PROFILE_OPTIONS = 35,
+
+  /// `loomc_launch_config_module_load_options_t`.
+  LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG_MODULE_LOAD_OPTIONS = 36,
+
+  /// `loomc_launch_config_function_info_t`.
+  LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG_FUNCTION_INFO = 37,
+
+  /// `loomc_launch_config_arguments_t`.
+  LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG_ARGUMENTS = 38,
+
+  /// `loomc_launch_config_outputs_t`.
+  LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG_OUTPUTS = 39,
 } loomc_structure_type_t;
 
 /// One loose string option entry.

@@ -150,8 +150,8 @@ loom_cc_test(
 )
 
 loom_cc_test(
-    name = "launch_config_test",
-    srcs = ["launch_config_test.cc"],
+    name = "launch_config_module_test",
+    srcs = ["launch_config_module_test.cc"],
     deps = [
         ":test_util",
         "//loom/binding/c:loomc",
