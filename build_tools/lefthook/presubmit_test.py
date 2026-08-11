@@ -628,7 +628,10 @@ class PresubmitTest(unittest.TestCase):
         run_command.assert_not_called()
         self.assertIn("enforced by the Linux paranoid presubmit", output.getvalue())
 
-    def test_requirements_files_trigger_root_devtools_tests(self):
+    def test_requirements_and_docs_workflow_trigger_root_devtools_tests(self):
+        self.assertTrue(
+            presubmit.is_root_devtools_trigger(".github/workflows/docs_loom.yml")
+        )
         self.assertTrue(presubmit.is_root_devtools_trigger("requirements-analysis.in"))
         self.assertTrue(
             presubmit.is_root_devtools_trigger("requirements-analysis.lock.txt")
