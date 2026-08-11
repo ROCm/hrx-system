@@ -25,7 +25,6 @@
 //   thread-safe and may be called from any thread.
 //
 // Lifecycle: backend-specific _create functions → _retain/_release.
-// Destroy is at vtable offset 0 for toll-free bridging to iree_vm_ref_t.
 
 #ifndef IREE_ASYNC_PROACTOR_H_
 #define IREE_ASYNC_PROACTOR_H_
@@ -550,7 +549,6 @@ struct iree_async_signal_subscription_t {
 //===----------------------------------------------------------------------===//
 
 typedef struct iree_async_proactor_vtable_t {
-  // Offset 0: destroy. Required for toll-free bridging to iree_vm_ref_t.
   // Called when ref_count reaches zero. Must release all backend resources.
   void (*destroy)(iree_async_proactor_t* proactor);
 

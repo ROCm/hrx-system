@@ -319,9 +319,9 @@ the requested output path when -o/--output is supplied.""",
   python dev.py bazel clang-tidy
   python dev.py bazel clang-tidy --base origin/main
   python dev.py bazel clang-tidy --all --profile ci
-  python dev.py bazel clang-tidy --fix runtime/src/iree/vm/native_module.c
-  python dev.py bazel clang-tidy runtime/src/iree/vm/native_module.c
-  python dev.py bazel clang-tidy //runtime/src/iree/vm:all
+  python dev.py bazel clang-tidy --fix runtime/src/iree/tokenizer/tokenizer.c
+  python dev.py bazel clang-tidy runtime/src/iree/tokenizer/tokenizer.c
+  python dev.py bazel clang-tidy //runtime/src/iree/tokenizer:all
 
 With no input option, this checks local staged, unstaged, and untracked files.
 Repo-relative paths and git scopes use the presubmit clang-tidy provider, which
@@ -337,8 +337,8 @@ fixes through Bazel, applies them outside Bazel, then re-runs the check.""",
   python dev.py cmake clang-tidy
   python dev.py cmake clang-tidy --base origin/main
   python dev.py cmake clang-tidy --all --profile ci
-  python dev.py cmake clang-tidy --fix runtime/src/iree/vm/native_module.c
-  python dev.py cmake clang-tidy runtime/src/iree/vm/native_module.c
+  python dev.py cmake clang-tidy --fix runtime/src/iree/tokenizer/tokenizer.c
+  python dev.py cmake clang-tidy runtime/src/iree/tokenizer/tokenizer.c
   python dev.py --cmake-build-dir build/cmake-asan cmake clang-tidy runtime/src/iree/base/status.c
 
 With no input option, this checks local staged, unstaged, and untracked files.
@@ -442,9 +442,9 @@ Presubmit stays non-mutating.""",
             arguments="Bazel target and build options, followed by -- and program arguments.",
             epilog="""Examples:
   python dev.py bazel run //runtime/src/iree/base:allocator_benchmark
-  python dev.py bazel run //runtime/src/tools:iree-run-module -- --help
+  python dev.py bazel run //tools:iree-dump-cpuinfo -- --help
   python dev.py bazel run --config=asan //runtime/src/iree/base:allocator_test
-  python dev.py bazel run -p //runtime/src/tools:iree-run-module
+  python dev.py bazel run -p //tools:iree-dump-cpuinfo
 
 This asks Bazel to write its canonical target launcher, then hands off to it
 after Bazel releases the server lock. The target observes the caller's current
@@ -514,9 +514,9 @@ run iree-cmake-configure -DIREE_ENABLE_FUZZING=ON first.""",
             description="Run an already-built CMake executable target.",
             arguments="CMake executable target, followed by -- and program arguments.",
             epilog="""Examples:
-  python dev.py cmake run iree-run-module -- --help
-  python dev.py cmake run iree::tools::iree-run-module -- --help
-  python dev.py cmake run -p iree-run-module
+  python dev.py cmake run iree-dump-cpuinfo -- --help
+  python dev.py cmake run iree::tools::iree-dump-cpuinfo -- --help
+  python dev.py cmake run -p iree-dump-cpuinfo
 
 This resolves the executable with the CMake File API and then execs it from the
 current directory. It does not build; run `iree-cmake-build <target>` first.""",
@@ -634,7 +634,7 @@ iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIR
 iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF
 iree-cmake-build hrx::hrx
 iree-cmake-test -R hrx
-iree-cmake-run iree::tools::iree-run-module -- --help
+iree-cmake-run iree::tools::iree-dump-cpuinfo -- --help
 iree-cmake-fuzz iree::tokenizer::special_tokens_fuzz -- -max_total_time=60
 python dev.py cmake compile-commands
 python dev.py cmake clang-tidy
@@ -781,9 +781,9 @@ exercise one package or subtree directly.
 python dev.py bazel clang-tidy
 python dev.py bazel clang-tidy --base origin/main
 python dev.py bazel clang-tidy --all --profile ci
-python dev.py bazel clang-tidy --fix runtime/src/iree/vm/native_module.c
-python dev.py bazel clang-tidy runtime/src/iree/vm/native_module.c
-python dev.py bazel clang-tidy //runtime/src/iree/vm:all
+python dev.py bazel clang-tidy --fix runtime/src/iree/tokenizer/tokenizer.c
+python dev.py bazel clang-tidy runtime/src/iree/tokenizer/tokenizer.c
+python dev.py bazel clang-tidy //runtime/src/iree/tokenizer:all
 ```
 
 Git scopes and repo-relative paths route through the presubmit provider so the
@@ -803,9 +803,9 @@ while the program runs, and signals/PID-based tools see the final process.
 
 ```bash
 iree-bazel-run //runtime/src/iree/base:allocator_benchmark
-iree-bazel-run //runtime/src/tools:iree-run-module -- --help
+iree-bazel-run //tools:iree-dump-cpuinfo -- --help
 iree-bazel-run --config=asan //runtime/src/iree/base:allocator_test
-iree-bazel-run -p //runtime/src/tools:iree-run-module
+iree-bazel-run -p //tools:iree-dump-cpuinfo
 ```
 
 Put Bazel build options before the program-argument separator. Put executable
@@ -952,10 +952,10 @@ resolves the target with the CMake File API and execs the binary from the
 current directory. It does not build; run `iree-cmake-build <target>` first.
 
 ```bash
-iree-cmake-build iree-run-module
-iree-cmake-run iree-run-module -- --help
-iree-cmake-run iree::tools::iree-run-module -- --help
-iree-cmake-run -p iree-run-module
+iree-cmake-build iree-dump-cpuinfo
+iree-cmake-run iree-dump-cpuinfo -- --help
+iree-cmake-run iree::tools::iree-dump-cpuinfo -- --help
+iree-cmake-run -p iree-dump-cpuinfo
 ```
 
 Program arguments go after `--`. `-p/--print-path` prints the resolved binary

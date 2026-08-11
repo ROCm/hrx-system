@@ -238,16 +238,8 @@ const FieldDecl* FirstField(const RecordDecl* Record) {
   return nullptr;
 }
 
-bool IsAllowedRefCountFieldName(const FieldDecl* Field,
-                                const SourceManager& SourceManager) {
-  if (Field->getName() == "ref_count") {
-    return true;
-  }
-
-  SourceLocation Location = SourceManager.getExpansionLoc(Field->getLocation());
-  StringRef Filename = SourceManager.getFilename(Location);
-  return Field->getName() == "counter" &&
-         Filename.ends_with("runtime/src/iree/vm/ref.h");
+bool IsAllowedRefCountFieldName(const FieldDecl* Field, const SourceManager&) {
+  return Field->getName() == "ref_count";
 }
 
 bool IsRefCountAnchorField(const FieldDecl* Field,

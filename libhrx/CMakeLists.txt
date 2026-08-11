@@ -14,7 +14,7 @@ include(CMakePackageConfigHelpers)
 set(LIBHRX_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(LIBHRX_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}")
 
-if(NOT TARGET iree_vm_vm)
+if(NOT TARGET iree_hal_hal)
   message(FATAL_ERROR
     "libhrx must be added after the reduced IREE runtime has been configured")
 endif()

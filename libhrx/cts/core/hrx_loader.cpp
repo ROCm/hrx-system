@@ -181,25 +181,6 @@ void HrxLoader::load(const std::string& path) {
   LOAD(queue_dispatch);
   LOAD(queue_host_call);
 
-  LOAD(module_load_vmfb);
-  LOAD(module_retain);
-  LOAD(module_release);
-  LOAD(module_lookup_function);
-  LOAD(function_retain);
-  LOAD(function_release);
-  LOAD(function_invoke);
-
-  LOAD(value_list_create);
-  LOAD(value_list_retain);
-  LOAD(value_list_release);
-  LOAD(value_list_size);
-  LOAD(value_list_push_i64);
-  LOAD(value_list_get_i64);
-  LOAD(value_list_push_null_ref);
-  LOAD(value_list_push_buffer);
-  LOAD(value_list_push_buffer_view);
-  LOAD(value_list_push_fence);
-
   LOAD(fence_create);
   LOAD(fence_create_at);
   LOAD(fence_retain);

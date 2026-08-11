@@ -108,24 +108,6 @@ class RuntimeBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
     def iree_checked_glob(self, files, **kwargs):
         return files
 
-    def iree_generated_files(self, name, srcs, outs, args, output_args, tool, **kwargs):
-        if tool != ":generate_vm_isa":
-            raise NotImplementedError(f"iree_generated_files tool: {tool}")
-        cmd_parts = ["${Python3_EXECUTABLE} $(rootpath generate_vm_isa.py)"]
-        cmd_parts.extend(arg.replace("$(location ", "$(rootpath ") for arg in args)
-        for out in outs:
-            cmd_parts.extend([output_args[out], f"$(execpath {out})"])
-        self.iree_genrule(
-            name=name,
-            srcs=["generate_vm_isa.py"] + srcs,
-            outs=outs,
-            cmd=" ".join(cmd_parts),
-        )
-
-    def iree_runtime_vmasm_module(self, deps=[], **kwargs):
-        kwargs = self._apply_runtime_cmake_policy(kwargs)
-        self.iree_vmasm_module(deps=deps + ["//runtime/src:defines"], **kwargs)
-
     def iree_runtime_hal_cts_test_suite(self, **kwargs):
         kwargs = self._apply_runtime_cmake_policy(
             kwargs,

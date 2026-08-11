@@ -14,9 +14,6 @@
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/task/executable/loaders/registration/init.h"
 #include "iree/hal/utils/resource_set.h"
-#include "iree/modules/hal/module.h"
-#include "iree/modules/hal/types.h"
-#include "iree/vm/api.h"
 #include "iree_hal_compat.h"
 
 #ifdef __cplusplus
@@ -556,28 +553,6 @@ typedef struct hrx_mem_pool_s {
   iree_slim_mutex_t mutex;
 } hrx_mem_pool_s;
 
-// Loaded VM module with a context containing HAL + bytecode modules.
-typedef struct hrx_module_s {
-  iree_atomic_ref_count_t ref_count;
-  hrx_device_t device;
-  iree_vm_module_t* bytecode_module;
-  iree_vm_module_t* hal_module;
-  iree_vm_context_t* context;
-} hrx_module_s;
-
-// Resolved VM function retained with its parent module.
-typedef struct hrx_function_s {
-  iree_atomic_ref_count_t ref_count;
-  hrx_module_t module;
-  iree_vm_function_t vm_function;
-} hrx_function_s;
-
-// Growable VM argument/result list.
-typedef struct hrx_value_list_s {
-  iree_atomic_ref_count_t ref_count;
-  iree_vm_list_t* vm_list;
-} hrx_value_list_s;
-
 // Timeline fence wrapper.
 typedef struct hrx_fence_s {
   iree_atomic_ref_count_t ref_count;
@@ -626,7 +601,6 @@ typedef struct hrx_gpu_state_t {
 } hrx_gpu_state_t;
 
 typedef struct hrx_shared_state_t {
-  iree_vm_instance_t* vm_instance;
   iree_async_proactor_pool_t* proactor_pool;
   iree_allocator_t host_allocator;
   int init_count;

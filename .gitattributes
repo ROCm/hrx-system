@@ -50,5 +50,4 @@ build_tools/embed_data/testdata/crlf.bin binary -eol
 *.png binary -eol
 *.so binary -eol
 *.spv binary -eol
-*.vmfb binary -eol
 *.wasm binary -eol

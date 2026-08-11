@@ -405,7 +405,7 @@ function(iree_package_ns PACKAGE_NS)
       endif()
     endif()
   else()
-    # Get the relative path of the current dir (i.e. runtime/src/iree/vm).
+    # Get the relative path of the current dir (i.e. runtime/src/iree/hal).
     string(REPLACE ${IREE_ROOT_DIR} "" _IREE_RELATIVE_PATH ${CMAKE_CURRENT_LIST_DIR})
     string(SUBSTRING ${_IREE_RELATIVE_PATH} 1 -1 _IREE_RELATIVE_PATH)
 

@@ -59,40 +59,17 @@ The script captures:
 
 ## Testing with Snapshots
 
-To test with sysfs snapshots, compile IREE with the `IREE_SYSFS_ROOT` define
-pointing to your snapshot directory:
+To inspect a sysfs snapshot, configure IREE with the `IREE_SYSFS_ROOT` define
+pointing to the absolute snapshot directory, build `iree-dump-cpuinfo`, and ask
+it to print the selected task topologies:
 
 ```bash
-# Configure with sysfs snapshot path
-cmake -B build/ -S . \
-  -DCMAKE_C_FLAGS="-DIREE_SYSFS_ROOT=\\\"/path/to/arm64_pixel6_tensor\\\"" \
-  -DCMAKE_CXX_FLAGS="-DIREE_SYSFS_ROOT=\\\"/path/to/arm64_pixel6_tensor\\\""
-
-# Build and test
-cmake --build build/ --target iree-run-module
-
-# Test ARM64 big.LITTLE with default settings (all cores, scatter distribution)
-./build/tools/iree-run-module --dump_task_topologies
-
-# Test ARM64 big.LITTLE with HIGH performance cores only
-./build/tools/iree-run-module \
-  --task_topology_performance_level=high \
-  --dump_task_topologies
-
-# Test ARM64 with compact distribution (fill cache domains sequentially)
-./build/tools/iree-run-module \
-  --task_topology_distribution=compact \
-  --dump_task_topologies
-
-# Test ARM64 with latency preset (compact + high performance)
-./build/tools/iree-run-module \
-  --task_topology_favor=latency \
-  --dump_task_topologies
-
-# Test ARM64 with only LITTLE cores (low power)
-./build/tools/iree-run-module \
-  --task_topology_performance_level=low \
-  --dump_task_topologies
+SNAPSHOT_ROOT=$(realpath arm64_pixel6_tensor)
+iree-cmake-configure \
+  "-DCMAKE_C_FLAGS=-DIREE_SYSFS_ROOT=\\\"${SNAPSHOT_ROOT}\\\"" \
+  "-DCMAKE_CXX_FLAGS=-DIREE_SYSFS_ROOT=\\\"${SNAPSHOT_ROOT}\\\""
+iree-cmake-build iree-dump-cpuinfo
+iree-cmake-run iree-dump-cpuinfo -- --dump_task_topologies
 ```
 
 Available flags for topology configuration:

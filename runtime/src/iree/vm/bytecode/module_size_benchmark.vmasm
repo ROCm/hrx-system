@@ -1,7 +1,0 @@
-vm.module @bytecode_module_size_benchmark version 0
-
-vm.export @empty_func
-vm.func @empty_func() -> () {
-^bb0:
-  vm.return
-}

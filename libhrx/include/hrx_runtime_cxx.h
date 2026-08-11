@@ -113,11 +113,6 @@ using semaphore_ptr =
     hrx_ptr<hrx_semaphore_t, hrx_semaphore_retain, hrx_semaphore_release>;
 using stream_ptr = hrx_ptr<hrx_stream_t, hrx_stream_retain, hrx_stream_release>;
 using buffer_ptr = hrx_ptr<hrx_buffer_t, hrx_buffer_retain, hrx_buffer_release>;
-using module_ptr = hrx_ptr<hrx_module_t, hrx_module_retain, hrx_module_release>;
-using function_ptr =
-    hrx_ptr<hrx_function_t, hrx_function_retain, hrx_function_release>;
-using value_list_ptr =
-    hrx_ptr<hrx_value_list_t, hrx_value_list_retain, hrx_value_list_release>;
 using fence_ptr = hrx_ptr<hrx_fence_t, hrx_fence_retain, hrx_fence_release>;
 using buffer_view_ptr =
     hrx_ptr<hrx_buffer_view_t, hrx_buffer_view_retain, hrx_buffer_view_release>;

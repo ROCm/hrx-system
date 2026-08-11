@@ -9,18 +9,6 @@
 
 iree_add_all_subdirs()
 
-flatbuffer_c_library(
-  NAME
-    bytecode_module_def_c_fbs
-  SRCS
-    "bytecode_module_def.fbs"
-  FLATCC_ARGS
-    "--reader"
-    "--builder"
-    "--verifier"
-  PUBLIC
-)
-
 add_custom_command(OUTPUT cpu_data_headers_filegroup.stamp
     COMMAND ${CMAKE_COMMAND} -E touch cpu_data_headers_filegroup.stamp
   DEPENDS

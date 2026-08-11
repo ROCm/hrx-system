@@ -9,9 +9,3 @@ package(
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
 )
-
-alias(
-    name = "iree-as-module",
-    actual = "//runtime/src/iree/tools/iree-as-module",
-    visibility = ["//visibility:public"],
-)

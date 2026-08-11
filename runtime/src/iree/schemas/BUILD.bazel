@@ -5,24 +5,11 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
-load("//runtime/build_tools/bazel:flatcc.bzl", "iree_runtime_flatbuffer_c_library")
 
 package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
-)
-
-FLATCC_ARGS = [
-    "--reader",
-    "--builder",
-    "--verifier",
-]
-
-iree_runtime_flatbuffer_c_library(
-    name = "bytecode_module_def_c_fbs",
-    srcs = ["bytecode_module_def.fbs"],
-    flatcc_args = FLATCC_ARGS,
 )
 
 cpu_data_headers = [

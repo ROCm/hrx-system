@@ -93,8 +93,3 @@ for cpu_dir in /sys/devices/system/cpu/cpu[0-9]*; do
 done
 
 echo "Successfully captured ${CPU_COUNT} CPUs to ${DEST}"
-echo ""
-echo "To test with this snapshot:"
-echo "  ./build/tools/iree-run-module \\"
-echo "    --task_topology_sysfs_root=$(realpath "${DEST}") \\"
-echo "    --dump_task_topologies"

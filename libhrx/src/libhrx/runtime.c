@@ -1,8 +1,8 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 //
-// Global runtime state management. Shared infrastructure (VM instance) is
-// created on first accelerator init and destroyed when last shuts down.
+// Global runtime state management. Shared infrastructure is created on first
+// accelerator initialization and destroyed when the last shuts down.
 // Device creation follows the proven pattern from PyTorch's hrx backend:
 // driver-based creation via iree_hal_task_driver_create +
 // iree_hal_driver_create_default_device.
@@ -18,7 +18,6 @@
 #include "iree/hal/drivers/task/driver.h"
 #include "iree/hal/utils/profile_file.h"
 #include "iree/io/file_handle.h"
-#include "iree/modules/hal/types.h"
 #include "iree/task/api.h"
 
 #ifdef HRX_HAS_IREE_AMDGPU_DRIVER
@@ -235,27 +234,12 @@ hrx_status_t hrx_ensure_shared_state(void) {
   }
   g_shared.host_allocator = iree_allocator_system();
 
-  iree_status_t status =
-      iree_vm_instance_create(IREE_VM_TYPE_CAPACITY_DEFAULT,
-                              g_shared.host_allocator, &g_shared.vm_instance);
-  if (!iree_status_is_ok(status)) {
-    return hrx_status_from_iree(status);
-  }
-  status = iree_hal_module_register_all_types(g_shared.vm_instance);
-  if (!iree_status_is_ok(status)) {
-    iree_vm_instance_release(g_shared.vm_instance);
-    g_shared.vm_instance = NULL;
-    return hrx_status_from_iree(status);
-  }
-
   // Create proactor pool for async I/O (required by local-task devices).
   uint32_t node_id = 0;
-  status = iree_async_proactor_pool_create(
+  iree_status_t status = iree_async_proactor_pool_create(
       /*node_count=*/1, &node_id, iree_async_proactor_pool_options_default(),
       g_shared.host_allocator, &g_shared.proactor_pool);
   if (!iree_status_is_ok(status)) {
-    iree_vm_instance_release(g_shared.vm_instance);
-    g_shared.vm_instance = NULL;
     return hrx_status_from_iree(status);
   }
 
@@ -310,8 +294,6 @@ static void hrx_release_shared_state(void) {
 
   iree_async_proactor_pool_release(g_shared.proactor_pool);
   g_shared.proactor_pool = NULL;
-  iree_vm_instance_release(g_shared.vm_instance);
-  g_shared.vm_instance = NULL;
   g_shared.shared_initialized = false;
 }
 

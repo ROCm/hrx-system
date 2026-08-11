@@ -375,9 +375,10 @@ descriptors without owning a deinitialize contract.
 caller-owned storage backing that typed view:
 
 ```c
-iree_status_t iree_vm_stack_initialize(
-    iree_byte_span_t storage, iree_vm_invocation_flags_t flags,
-    iree_vm_stack_t** out_stack);
+iree_status_t iree_tokenizer_decode_state_initialize(
+    const iree_tokenizer_t* tokenizer, iree_tokenizer_decode_flags_t flags,
+    iree_byte_span_t state_storage,
+    iree_tokenizer_decode_state_t** out_state);
 ```
 
 Without an explicit `storage` or `*_storage` parameter, a pointer-to-pointer
@@ -396,11 +397,9 @@ participate in this check.
 
 `iree-refcount-lifecycle` treats `iree_atomic_ref_count_t` as an object
 lifetime primitive, not as a generic atomic counter. A refcounted IREE C object
-is anchored by an offset-zero `iree_atomic_ref_count_t ref_count` field. The VM
-type-erased reference base uses an explicit `counter` field in
-`runtime/src/iree/vm/ref.h` because VM descriptors store the counter offset.
-Other structures are not inferred to be refcounted merely because they mention
-the primitive.
+is anchored by an offset-zero `iree_atomic_ref_count_t ref_count` field. Other
+structures are not inferred to be refcounted merely because they mention the
+primitive.
 
 Anchored refcounted objects should expose retain/release operations with the
 normal C ownership contract:

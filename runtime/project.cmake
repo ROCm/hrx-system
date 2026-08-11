@@ -105,7 +105,6 @@ include(selectors)
 include(cts)
 include(iree_execution_test_suite)
 include(iree_runtime_amdgpu_toolchain)
-include(iree_vmasm_module)
 include(iree_runtime_hal_cts_test_suite)
 include(iree_wasm_library)
 

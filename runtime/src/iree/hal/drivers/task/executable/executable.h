@@ -23,8 +23,8 @@ typedef struct iree_hal_task_executable_t {
   // local memory requirements). NULL if the executable has no dispatch attrs.
   const iree_hal_executable_dispatch_attrs_v0_t* dispatch_attrs;
 
-  // Per-entry point native function pointers. NULL for backends that don't
-  // support direct dispatch through an implementation-defined call path.
+  // Per-entry point native function pointers. NULL for backends that require
+  // indirect dispatch through the executable vtable.
   // Enables recording-time function resolution for the block ISA command
   // buffer: the raw function pointer is baked into .text at recording time
   // so execution has zero indirection.

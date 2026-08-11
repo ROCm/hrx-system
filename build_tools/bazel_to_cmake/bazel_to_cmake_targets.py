@@ -157,7 +157,8 @@ class TargetConverter:
         # IREE root paths map to package names based on explicit rules.
         #   * runtime/src/iree/ creates its own root path by trimming down to
         #     just "iree"
-        #   * tools/ uses an empty root, for binary target names like "iree-run-module"
+        #   * tools/ uses an empty root, for binary target names like
+        #     "iree-dump-cpuinfo"
         #   * other top level directories add back an 'iree' prefix
         # If changing these, make the corresponding change in iree_macros.cmake
         # (iree_package_ns function).
