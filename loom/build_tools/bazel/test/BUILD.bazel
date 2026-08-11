@@ -60,6 +60,7 @@ loom_library(
         SERIALIZED_REFERENCE_PROFILE,
     ],
     tags = ["manual"],
+    deps = [":archive_dependency"],
 )
 
 loom_check_test(

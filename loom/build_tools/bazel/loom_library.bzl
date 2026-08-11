@@ -38,12 +38,13 @@ LoomCompilationInfo = provider(
 )
 
 LoomExecutionTestInfo = provider(
-    doc = "A correctness test executing one Loom library through one profile.",
+    doc = "A correctness test executing one authored Loom source through one profile.",
     fields = {
-        "library": "Loom library consumed by the correctness runner.",
+        "libraries": "Ordered Loom libraries supplied to the correctness runner.",
         "profile_name": "Stable execution profile name.",
         "runner": "Resolved correctness runner executable.",
-        "runner_args": "Arguments passed to the correctness runner.",
+        "runner_args": "Profile arguments passed to the correctness runner.",
+        "source": "Authored Loom source consumed as the primary input.",
     },
 )
 
@@ -64,7 +65,8 @@ def loom_execution_profile(
       target_family: Compiler target family, such as amdgpu or spirv.
       target_class: Broad target class, such as gpu or cpu.
       executor: Execution environment, such as hardware or reference.
-      runner_args: Arguments appended after the library passed to iree-test-loom.
+      runner_args: Arguments appended after explicit libraries passed to
+        iree-test-loom.
       build_requirements: Build requirements needed by the correctness runner.
       run_requirements: Runtime resources needed to execute the test.
       resource_group: Optional local resource group serializing competing tests.
@@ -301,44 +303,55 @@ def _write_test_launcher(ctx, tool, input_file, tool_args):
 
 def _loom_execution_test_impl(ctx):
     tool = ctx.toolchains[_LOOM_TOOLCHAIN_TYPE].test
-    library = ctx.attr.library[LoomLibraryInfo]
+    libraries = [dep[LoomLibraryInfo] for dep in ctx.attr.libraries]
+    library_modules = [library.module for library in libraries]
     output = _write_test_launcher(
         ctx,
         tool,
-        library.module,
+        ctx.file.src,
+        ["--library=%s" % module.short_path for module in library_modules] +
         ctx.attr.runner_args,
     )
     return [
         DefaultInfo(
             executable = output,
             files = depset([output]),
-            runfiles = _tool_runfiles(ctx, tool, [library.module]),
+            runfiles = _tool_runfiles(
+                ctx,
+                tool,
+                [ctx.file.src] + library_modules,
+            ),
         ),
         LoomExecutionTestInfo(
-            library = library,
+            libraries = libraries,
             profile_name = ctx.attr.profile_name,
             runner = tool.executable,
             runner_args = ctx.attr.runner_args,
+            source = ctx.file.src,
         ),
     ]
 
 _loom_execution_test = rule(
     implementation = _loom_execution_test_impl,
     attrs = {
-        "library": attr.label(
-            mandatory = True,
+        "libraries": attr.label_list(
             providers = [LoomLibraryInfo],
-            doc = "Loom library containing the correctness cases to execute.",
+            doc = "Loom libraries linked into the authored test source.",
         ),
         "profile_name": attr.string(
             mandatory = True,
             doc = "Stable execution profile name.",
         ),
         "runner_args": attr.string_list(
-            doc = "Arguments appended after the library passed to iree-test-loom.",
+            doc = "Profile arguments appended after explicit libraries.",
+        ),
+        "src": attr.label(
+            allow_single_file = [".loom"],
+            mandatory = True,
+            doc = "Authored Loom source containing correctness cases.",
         ),
     },
-    doc = "Executes Loom correctness cases through one execution profile.",
+    doc = "Executes one authored Loom source through one execution profile.",
     test = True,
     toolchains = [_LOOM_TOOLCHAIN_TYPE],
 )
@@ -478,7 +491,7 @@ def _execution_profile_tags(profile):
         "loom-executor=%s" % profile.executor,
     ]
 
-def _declare_execution_test(name, library, profile, tags):
+def _declare_execution_test(name, src, libraries, profile, tags):
     if getattr(profile, "kind", None) != "loom_execution_profile":
         fail("%s execution profile was not created by loom_execution_profile" % name)
     test_kwargs = apply_test_requirements(
@@ -496,9 +509,10 @@ def _declare_execution_test(name, library, profile, tags):
     )
     _loom_execution_test(
         name = name,
-        library = library,
+        libraries = libraries,
         profile_name = profile.name,
         runner_args = profile.runner_args,
+        src = src,
         testonly = True,
         visibility = ["//visibility:private"],
         **test_kwargs
@@ -542,26 +556,37 @@ def _declare_library(
         )
         tests.append(plan_test_name)
 
+    if execution_profiles and not srcs:
+        fail("%s requires authored srcs for execution profiles" % name)
     execution_names = {}
     for profile in execution_profiles:
         profile_suffix = _compile_target_suffix(profile.name)
-        execution_name = "%s_execute_%s_test" % (name, profile_suffix)
-        if execution_name in execution_names:
-            fail(
-                "%s execution profile %s has the same generated name as %s" % (
+        for source_index, src in enumerate(srcs):
+            if len(srcs) == 1:
+                execution_name = "%s_execute_%s_test" % (name, profile_suffix)
+            else:
+                execution_name = "%s_execute_%s_%d_test" % (
                     name,
-                    profile.name,
-                    execution_names[execution_name],
-                ),
+                    profile_suffix,
+                    source_index,
+                )
+            if execution_name in execution_names:
+                fail(
+                    "%s execution profile %s has the same generated name as %s" % (
+                        name,
+                        profile.name,
+                        execution_names[execution_name],
+                    ),
+                )
+            execution_names[execution_name] = profile.name
+            _declare_execution_test(
+                name = execution_name,
+                src = src,
+                libraries = deps,
+                profile = profile,
+                tags = tags,
             )
-        execution_names[execution_name] = profile.name
-        _declare_execution_test(
-            name = execution_name,
-            library = ":" + name,
-            profile = profile,
-            tags = tags,
-        )
-        tests.append(execution_name)
+            tests.append(execution_name)
 
     compile_names = {}
     for target in compile_targets:

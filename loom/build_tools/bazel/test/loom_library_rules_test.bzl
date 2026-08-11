@@ -116,23 +116,33 @@ def _test_deps_only_library_consumes_archive_impl(env, target):
     _expect_no_basename(env, inputs, "link_checks.loom")
     _expect_no_basename(env, inputs, "link_kernels.loom")
 
-def _test_execution_profile_consumes_shared_archive(name, **kwargs):
+def _test_execution_profile_consumes_source_and_dependency_archive(name, **kwargs):
     analysis_test(
         name = name,
         attr_values = {
             "timeout": "short",
         },
-        impl = _test_execution_profile_consumes_shared_archive_impl,
+        impl = _test_execution_profile_consumes_source_and_dependency_archive_impl,
         target = ":profiled_library_execute_reference_test",
         **kwargs
     )
 
-def _test_execution_profile_consumes_shared_archive_impl(env, target):
+def _test_execution_profile_consumes_source_and_dependency_archive_impl(env, target):
     info = target[LoomExecutionTestInfo]
-    env.expect.that_str(info.library.module.basename).equals("profiled_library.loombc")
+    env.expect.that_str(info.source.basename).equals("profile_cases.loom")
+    if len(info.libraries) != 1:
+        env.fail("expected one execution library, got %r" % info.libraries)
+    env.expect.that_str(info.libraries[0].module.basename).equals(
+        "archive_dependency.loombc",
+    )
     env.expect.that_str(info.profile_name).equals("reference")
     if info.runner_args != ["--case=@scalar_case"]:
         env.fail("unexpected runner args %r" % info.runner_args)
+
+    runfiles = target[DefaultInfo].default_runfiles.files.to_list()
+    _expect_basename(env, runfiles, "profile_cases.loom")
+    _expect_basename(env, runfiles, "archive_dependency.loombc")
+    _expect_no_basename(env, runfiles, "profiled_library.loombc")
 
     tags = target[TestingAspectInfo].attrs.tags
     for expected_tag in [
@@ -144,20 +154,25 @@ def _test_execution_profile_consumes_shared_archive_impl(env, target):
         if expected_tag not in tags:
             env.fail("expected %r in test tags %r" % (expected_tag, tags))
 
-def _test_resource_profile_consumes_shared_archive(name, **kwargs):
+def _test_resource_profile_preserves_direct_execution(name, **kwargs):
     analysis_test(
         name = name,
         attr_values = {
             "timeout": "short",
         },
-        impl = _test_resource_profile_consumes_shared_archive_impl,
+        impl = _test_resource_profile_preserves_direct_execution_impl,
         target = ":profiled_library_execute_serialized_reference_test",
         **kwargs
     )
 
-def _test_resource_profile_consumes_shared_archive_impl(env, target):
+def _test_resource_profile_preserves_direct_execution_impl(env, target):
     info = target[LoomExecutionTestInfo]
-    env.expect.that_str(info.library.module.basename).equals("profiled_library.loombc")
+    env.expect.that_str(info.source.basename).equals("profile_cases.loom")
+    if len(info.libraries) != 1:
+        env.fail("expected one execution library, got %r" % info.libraries)
+    env.expect.that_str(info.libraries[0].module.basename).equals(
+        "archive_dependency.loombc",
+    )
     env.expect.that_str(info.profile_name).equals("serialized_reference")
 
     tags = target[TestingAspectInfo].attrs.tags
@@ -174,8 +189,8 @@ def loom_library_rules_test_suite(name):
         name = name,
         tests = [
             _test_deps_only_library_consumes_archive,
-            _test_execution_profile_consumes_shared_archive,
+            _test_execution_profile_consumes_source_and_dependency_archive,
             _test_library_consumes_dependency_archive,
-            _test_resource_profile_consumes_shared_archive,
+            _test_resource_profile_preserves_direct_execution,
         ],
     )
