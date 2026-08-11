@@ -1,0 +1,55 @@
+// RUN: emit launch-config-module
+
+config.def @model.prefill_tile = 128 : index
+
+test.target<low_core> @wave32 {subgroup_size = 32}
+
+func.template<test.items_per_workgroup> requires [#target.subgroup.size<32>] priority(10) @wave32_items_per_workgroup() -> (index) {
+  %c4 = index.constant 4 : index
+  func.return %c4 : index
+}
+
+func.template<test.items_per_workgroup> priority(1) @fallback_items_per_workgroup() -> (index) {
+  %c8 = index.constant 8 : index
+  func.return %c8 : index
+}
+
+kernel.def target(@wave32) @prefill(%token_count: index) {
+  %unit = index.constant 1 : index
+  %tile = config.get @model.prefill_tile : index
+  %rounding = index.sub %tile, %unit : index
+  %rounded = index.add %token_count, %rounding : index
+  %items_per_workgroup = func.apply<test.items_per_workgroup>() : () -> (index)
+  %workgroups = index.div %rounded, %items_per_workgroup : index
+  %subgroup_size = target.subgroup.size : index
+  kernel.launch.config workgroups(%workgroups, %subgroup_size, %unit) workgroup_size(%subgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %capacity: index) where [range(%capacity, 1, 4096)] {
+  kernel.return
+}
+
+kernel.def @decode(%sequence_length: index, %batch_count: i32) {
+  %unit = index.constant 1 : index
+  %batch_count_index = index.cast %batch_count : i32 to index
+  %workgroups = index.mul %sequence_length, %batch_count_index : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  kernel.return
+}
+
+// ----
+func.def public pure @prefill(%token_count: index) -> (index, index, index) {
+  %unit = index.constant 1 : index
+  %rounding = index.constant 127 : index
+  %rounded = index.add %token_count, %rounding : index
+  %c4 = index.constant 4 : index
+  %workgroups = index.div %rounded, %c4 : index
+  %subgroup_size = index.constant 32 : index
+  func.return %workgroups, %subgroup_size, %unit : index, index, index
+}
+
+func.def public pure @decode(%sequence_length: index, %batch_count: i32) -> (index, index, index) {
+  %unit = index.constant 1 : index
+  %batch_count_index = index.cast %batch_count : i32 to index
+  %workgroups = index.mul %sequence_length, %batch_count_index : index
+  func.return %workgroups, %unit, %unit : index, index, index
+}

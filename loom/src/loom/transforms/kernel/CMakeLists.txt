@@ -28,6 +28,26 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    launch_config_module
+  HDRS
+    "launch_config_module.h"
+  SRCS
+    "launch_config_module.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::ops::func
+    loom::ops::kernel
+    loom::ops::op_defs
+    loom::rewrite::materialize
+    loom::rewrite::remap
+    loom::transforms::cleanup::dce
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     kernel_resources
   HDRS
     "kernel_resources.h"

@@ -17,6 +17,7 @@ loom_check_test_suite(
     srcs = [
         "kernel_async_legality.loom-test",
         "kernel_resources.loom-test",
+        "launch_config_module.loom-test",
         "promote_private_fragments.loom-test",
         "promote_private_fragments_after_unroll.loom-test",
         "promote_private_fragments_footprint.loom-test",

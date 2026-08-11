@@ -571,6 +571,7 @@ loom_cc_binary(
         ":provider",
         ":test_provider",
         "//loom/src/loom/target/arch/cmd/check:check_provider",
+        "//loom/src/loom/transforms/kernel/check:provider",
         "//runtime/src/iree/base",
     ] + _LOOM_CHECK_PROVIDER_DEPS,
 )

@@ -12,6 +12,7 @@
 #include "loom/target/arch/cmd/check/provider.h"
 #include "loom/tools/loom-check/provider.h"
 #include "loom/tools/loom-check/test_provider.h"
+#include "loom/transforms/kernel/check/provider.h"
 
 #ifndef LOOM_CHECK_HAVE_EMIT_AMDGPU
 #define LOOM_CHECK_HAVE_EMIT_AMDGPU 0
@@ -67,7 +68,9 @@
 #endif  // LOOM_CHECK_HAVE_TARGET_X86
 
 static const loom_check_provider_t* const kLoomCheckProviders[] = {
-    &loom_check_test_provider,          &loom_cmd_check_provider,
+    &loom_check_test_provider,
+    &loom_cmd_check_provider,
+    &loom_kernel_transform_check_provider,
 #if LOOM_CHECK_HAVE_EMIT_AMDGPU
     &loom_amdgpu_check_provider,
 #endif  // LOOM_CHECK_HAVE_EMIT_AMDGPU
