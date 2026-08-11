@@ -14,6 +14,7 @@
 #include "iree/base/string_builder.h"
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/schedule/types.h"
+#include "loom/target/emit/native/amdgpu/branch_layout.h"
 #include "loom/target/emit/native/amdgpu/storage_layout.h"
 
 #ifdef __cplusplus
@@ -25,6 +26,8 @@ typedef struct loom_amdgpu_assembly_fragment_options_t {
   const struct loom_amdgpu_packet_plan_t* packet_plan;
   // Optional function-local storage layout shared with kernel metadata.
   const loom_amdgpu_storage_layout_t* storage_layout;
+  // Optional exact branch-island layout shared with native encoding.
+  const loom_amdgpu_branch_layout_t* branch_layout;
 } loom_amdgpu_assembly_fragment_options_t;
 
 // Emits an AMDGPU assembly fragment for one scheduled and allocated AMDGPU

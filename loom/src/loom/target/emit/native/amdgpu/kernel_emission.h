@@ -25,8 +25,9 @@ extern "C" {
 // Builds one native kernel contribution and optional assembly listing.
 //
 // This is the ownership boundary for target packet planning and native
-// instruction reporting. The same packet plan is applied to assembly and
-// machine-code emission so both products describe the same kernel.
+// instruction reporting. Assembly emission consumes the packet plan and exact
+// branch layout produced for machine-code emission so both products describe
+// the same kernel.
 iree_status_t loom_amdgpu_kernel_emission_build(
     const loom_low_emission_frame_t* frame,
     const loom_amdgpu_hal_kernel_abi_layout_t* abi_layout,

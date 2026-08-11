@@ -73,11 +73,22 @@ typedef struct loom_amdgpu_assembly_traversal_state_t {
   uint8_t current_vgpr_msb_mode;
 } loom_amdgpu_assembly_traversal_state_t;
 
+typedef struct loom_amdgpu_assembly_branch_state_t {
+  // Exact converged branch-island layout, or NULL when no islands were needed.
+  const loom_amdgpu_branch_layout_t* layout;
+  // Next original branch edge consumed from |layout|.
+  iree_host_size_t next_edge_index;
+  // Next island group consumed from |layout|.
+  iree_host_size_t next_group_index;
+} loom_amdgpu_assembly_branch_state_t;
+
 typedef struct loom_amdgpu_assembly_emit_state_t {
   // Function-local storage layout shared by all storage-address packets.
   const loom_amdgpu_storage_layout_t* storage_layout;
   // Target packet plan and its emission-order consumption cursors.
   loom_amdgpu_assembly_packet_plan_state_t packet_plan;
+  // Function-local branch placement and emission cursors.
+  loom_amdgpu_assembly_branch_state_t branches;
   // Packet traversal and simulated architectural state.
   loom_amdgpu_assembly_traversal_state_t traversal;
 } loom_amdgpu_assembly_emit_state_t;
@@ -2111,6 +2122,62 @@ static iree_status_t loom_amdgpu_append_materialized_wait_packet(
   return iree_string_builder_append_cstring(context->builder, "\n");
 }
 
+static iree_status_t loom_amdgpu_append_branch_target_label(
+    const loom_amdgpu_assembly_emit_state_t* state,
+    const loom_native_assembly_packet_context_t* context,
+    loom_amdgpu_branch_target_t target) {
+  switch (target.kind) {
+    case LOOM_AMDGPU_BRANCH_TARGET_BLOCK: {
+      IREE_ASSERT_LT(target.index, context->schedule->block_count);
+      return loom_native_assembly_append_block_label(
+          context->schedule, context->schedule->blocks[target.index].block,
+          context->builder);
+    }
+    case LOOM_AMDGPU_BRANCH_TARGET_ISLAND:
+      IREE_ASSERT(state->branches.layout != NULL);
+      IREE_ASSERT_LT(target.index, state->branches.layout->island_count);
+      return iree_string_builder_append_format(
+          context->builder, ".Lbranch_island%" PRIu32, target.index);
+    default:
+      IREE_ASSERT_UNREACHABLE("invalid AMDGPU branch target kind");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+}
+
+static iree_status_t loom_amdgpu_append_branch_groups_before_packet(
+    loom_amdgpu_assembly_emit_state_t* state,
+    const loom_native_assembly_packet_context_t* context) {
+  if (state->branches.layout == NULL) return iree_ok_status();
+  while (state->branches.next_group_index <
+         state->branches.layout->group_count) {
+    const iree_host_size_t group_index = state->branches.next_group_index;
+    const loom_amdgpu_branch_layout_group_t* group =
+        &state->branches.layout->groups[group_index];
+    if (group->packet_index != context->packet->packet_index) break;
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        context->builder, "  s_branch .Lbranch_island_group_end%" PRIhsz "\n",
+        group_index));
+    for (uint32_t i = 0; i < group->island_count; ++i) {
+      const uint32_t island_index = group->island_start + i;
+      IREE_ASSERT_LT(island_index, state->branches.layout->island_count);
+      const loom_amdgpu_branch_layout_island_t* island =
+          &state->branches.layout->islands[island_index];
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          context->builder, ".Lbranch_island%" PRIu32 ":\n  s_branch ",
+          island_index));
+      IREE_RETURN_IF_ERROR(loom_amdgpu_append_branch_target_label(
+          state, context, island->target));
+      IREE_RETURN_IF_ERROR(
+          iree_string_builder_append_cstring(context->builder, "\n"));
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        context->builder, ".Lbranch_island_group_end%" PRIhsz ":\n",
+        group_index));
+    ++state->branches.next_group_index;
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_amdgpu_prepare_packet(
     void* user_data, const loom_native_assembly_packet_context_t* context) {
   loom_amdgpu_assembly_emit_state_t* state =
@@ -2285,9 +2352,11 @@ static iree_status_t loom_amdgpu_append_wait_states_before_packet(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_append_waits_before_packet(
+static iree_status_t loom_amdgpu_append_insertions_before_packet(
     void* user_data, const loom_native_assembly_packet_context_t* context) {
   IREE_RETURN_IF_ERROR(loom_amdgpu_prepare_packet(user_data, context));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_branch_groups_before_packet(
+      (loom_amdgpu_assembly_emit_state_t*)user_data, context));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_append_address_state_before_packet(user_data, context));
   IREE_RETURN_IF_ERROR(
@@ -3409,6 +3478,21 @@ static iree_status_t loom_amdgpu_append_return_packet(
   return iree_string_builder_append_cstring(context->builder, "s_endpgm");
 }
 
+static iree_status_t loom_amdgpu_append_original_branch_target(
+    loom_amdgpu_assembly_emit_state_t* state,
+    const loom_native_assembly_packet_context_t* context,
+    const loom_block_t* direct_target) {
+  if (state->branches.layout == NULL) {
+    return loom_native_assembly_append_block_label(
+        context->schedule, direct_target, context->builder);
+  }
+  IREE_ASSERT_LT(state->branches.next_edge_index,
+                 state->branches.layout->edge_count);
+  const loom_amdgpu_branch_layout_edge_t* edge =
+      &state->branches.layout->edges[state->branches.next_edge_index++];
+  return loom_amdgpu_append_branch_target_label(state, context, edge->target);
+}
+
 static iree_status_t loom_amdgpu_append_branch_packet(
     void* user_data, const loom_native_assembly_packet_context_t* context) {
   loom_amdgpu_assembly_emit_state_t* emit_state =
@@ -3441,8 +3525,7 @@ static iree_status_t loom_amdgpu_append_branch_packet(
   }
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, "s_branch "));
-  return loom_native_assembly_append_block_label(context->schedule, dest,
-                                                 context->builder);
+  return loom_amdgpu_append_original_branch_target(emit_state, context, dest);
 }
 
 static iree_status_t loom_amdgpu_verify_scc_condition_assignment(
@@ -3465,7 +3548,8 @@ static iree_status_t loom_amdgpu_verify_scc_condition_assignment(
 
 static iree_status_t loom_amdgpu_append_cond_branch_packet(
     void* user_data, const loom_native_assembly_packet_context_t* context) {
-  (void)user_data;
+  loom_amdgpu_assembly_emit_state_t* emit_state =
+      (loom_amdgpu_assembly_emit_state_t*)user_data;
   const loom_op_t* op = context->packet->node->op;
   IREE_RETURN_IF_ERROR(loom_amdgpu_verify_scc_condition_assignment(
       context, loom_low_cond_br_condition(op)));
@@ -3482,26 +3566,26 @@ static iree_status_t loom_amdgpu_append_cond_branch_packet(
     }
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(context->builder, "s_branch "));
-    return loom_native_assembly_append_block_label(context->schedule, true_dest,
-                                                   context->builder);
+    return loom_amdgpu_append_original_branch_target(emit_state, context,
+                                                     true_dest);
   }
   if (true_block_index == current_block_index + 1) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(context->builder,
                                                             "s_cbranch_scc0 "));
-    return loom_native_assembly_append_block_label(
-        context->schedule, false_dest, context->builder);
+    return loom_amdgpu_append_original_branch_target(emit_state, context,
+                                                     false_dest);
   }
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, "s_cbranch_scc1 "));
-  IREE_RETURN_IF_ERROR(loom_native_assembly_append_block_label(
-      context->schedule, true_dest, context->builder));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_original_branch_target(
+      emit_state, context, true_dest));
   if (false_block_index == current_block_index + 1) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, "\n  s_branch "));
-  return loom_native_assembly_append_block_label(context->schedule, false_dest,
-                                                 context->builder);
+  return loom_amdgpu_append_original_branch_target(emit_state, context,
+                                                   false_dest);
 }
 
 static iree_status_t loom_amdgpu_verify_assembly_target(
@@ -3591,6 +3675,10 @@ iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
       packet_plan ? &packet_plan->wait_states : NULL;
   const loom_amdgpu_vopd_plan_t* vopd_plan =
       packet_plan ? &packet_plan->vopd_plan : NULL;
+  const loom_amdgpu_branch_layout_t* branch_layout =
+      options && options->branch_layout && options->branch_layout->island_count
+          ? options->branch_layout
+          : NULL;
 
   loom_amdgpu_assembly_emit_state_t emit_state = {
       .storage_layout = storage_layout,
@@ -3601,6 +3689,10 @@ iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
               .wait_states = wait_states,
               .vopd_plan = vopd_plan,
           },
+      .branches =
+          {
+              .layout = branch_layout,
+          },
       .traversal =
           {
               .current_block_index = LOOM_LOW_PACKET_INDEX_NONE,
@@ -3610,7 +3702,7 @@ iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
       loom_amdgpu_assembly_options(
           &emit_state,
           (loom_native_assembly_append_packet_callback_t){
-              .fn = loom_amdgpu_append_waits_before_packet,
+              .fn = loom_amdgpu_append_insertions_before_packet,
               .user_data = &emit_state,
           },
           (loom_native_assembly_append_packet_callback_t){
@@ -3631,6 +3723,12 @@ iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
   if (wait_states != NULL) {
     IREE_ASSERT_EQ(emit_state.packet_plan.next_wait_state_index,
                    wait_states->state_count);
+  }
+  if (branch_layout != NULL) {
+    IREE_ASSERT_EQ(emit_state.branches.next_edge_index,
+                   branch_layout->edge_count);
+    IREE_ASSERT_EQ(emit_state.branches.next_group_index,
+                   branch_layout->group_count);
   }
   return iree_ok_status();
 }

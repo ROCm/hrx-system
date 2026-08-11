@@ -379,22 +379,6 @@ iree_status_t loom_amdgpu_kernel_emission_build(
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_kernel_emission_record_wait_plan(report, &packet_plan));
 
-  if (target_listing != NULL) {
-    if (iree_string_builder_size(target_listing) != 0) {
-      IREE_RETURN_IF_ERROR(
-          iree_string_builder_append_cstring(target_listing, "\n\n"));
-    }
-    const loom_amdgpu_kernel_assembly_options_t assembly_options = {
-        .abi_layout = abi_layout,
-        .abi_verify = abi_verify,
-        .preflight = preflight,
-        .packet_plan = &packet_plan,
-    };
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_kernel_assembly(
-        &frame->schedule, &frame->allocation, &assembly_options, target_listing,
-        table_arena));
-  }
-
   const loom_amdgpu_kernel_hsaco_options_t hsaco_options = {
       .abi_layout = abi_layout,
       .abi_verify = abi_verify,
@@ -408,6 +392,24 @@ iree_status_t loom_amdgpu_kernel_emission_build(
   IREE_RETURN_IF_ERROR(loom_amdgpu_build_kernel_hsaco_contribution(
       &frame->schedule, &frame->allocation, &hsaco_options, out_contribution,
       table_arena));
+
+  if (target_listing != NULL) {
+    if (iree_string_builder_size(target_listing) != 0) {
+      IREE_RETURN_IF_ERROR(
+          iree_string_builder_append_cstring(target_listing, "\n\n"));
+    }
+    const loom_amdgpu_kernel_assembly_options_t assembly_options = {
+        .abi_layout = abi_layout,
+        .abi_verify = abi_verify,
+        .preflight = preflight,
+        .packet_plan = &packet_plan,
+        .branch_layout = &out_contribution->branch_layout,
+    };
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_kernel_assembly(
+        &frame->schedule, &frame->allocation, &assembly_options, target_listing,
+        table_arena));
+  }
+
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_emission_record_native_insertions(
       report, frame, out_contribution));
   loom_amdgpu_kernel_emission_record_summary(report,

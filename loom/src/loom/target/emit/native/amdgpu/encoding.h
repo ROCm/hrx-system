@@ -13,6 +13,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/schedule/types.h"
+#include "loom/target/emit/native/amdgpu/branch_layout.h"
 #include "loom/target/emit/native/amdgpu/storage_layout.h"
 #include "loom/target/emit/native/amdgpu/text_fixup.h"
 
@@ -75,6 +76,9 @@ typedef struct loom_amdgpu_encoded_instruction_stream_t {
   iree_const_byte_span_t text;
   // Number of native instructions encoded in |text|.
   uint64_t instruction_count;
+  // Exact branch-island layout applied to |text|, or empty when every branch
+  // was directly encodable.
+  loom_amdgpu_branch_layout_t branch_layout;
   // Text literal fixups resolved after final HSACO section layout.
   const loom_amdgpu_hsaco_text_fixup_t* text_fixups;
   // Number of entries in |text_fixups|.

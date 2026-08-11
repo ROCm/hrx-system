@@ -2399,16 +2399,15 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
                    sizing_state.text_fixups.count);
     IREE_ASSERT_EQ(writing_state.native_insertions.count,
                    sizing_state.native_insertions.count);
-    if (final_byte_length != 0) {
-      *out_stream = (loom_amdgpu_encoded_instruction_stream_t){
-          .text = iree_make_const_byte_span(data, writing_state.stream.length),
-          .instruction_count = writing_state.stream.instruction_count,
-          .text_fixups = text_fixups,
-          .text_fixup_count = writing_state.text_fixups.count,
-          .native_insertions = native_insertions,
-          .native_insertion_count = writing_state.native_insertions.count,
-      };
-    }
+    *out_stream = (loom_amdgpu_encoded_instruction_stream_t){
+        .text = iree_make_const_byte_span(data, writing_state.stream.length),
+        .instruction_count = writing_state.stream.instruction_count,
+        .branch_layout = branch_layout,
+        .text_fixups = text_fixups,
+        .text_fixup_count = writing_state.text_fixups.count,
+        .native_insertions = native_insertions,
+        .native_insertion_count = writing_state.native_insertions.count,
+    };
   }
   loom_low_allocation_release_value_scratch(&scratch);
   return status;

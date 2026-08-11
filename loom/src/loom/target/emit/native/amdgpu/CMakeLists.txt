@@ -63,6 +63,7 @@ loom_cc_library(
   SRCS
     "assembly.c"
   DEPS
+    ::branch_layout
     ::register_class
     ::storage_layout
     iree::base

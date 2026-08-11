@@ -78,6 +78,7 @@ loom_cc_library(
     srcs = ["assembly.c"],
     hdrs = ["assembly.h"],
     deps = [
+        ":branch_layout",
         ":register_class",
         ":storage_layout",
         "//loom/src/loom/codegen/low:allocation",

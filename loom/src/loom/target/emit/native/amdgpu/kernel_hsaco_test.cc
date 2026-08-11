@@ -188,6 +188,7 @@ loom_amdgpu_kernel_hsaco_contribution_t Contribution(
           /*.descriptor_options=*/{},
           /*.text=*/text,
       },
+      /*.branch_layout=*/{},
       /*.native_insertions=*/nullptr,
       /*.native_insertion_count=*/0,
       /*.summary=*/
