@@ -866,18 +866,19 @@ iree_status_t loom_module_add_encoding(loom_module_t* module,
       .alias_id = encoding->alias_id,
       .attribute_count = canonical_attr_dict.count,
       .family.id = name_resolution.family_id,
+      .family.flags = vtable ? vtable->descriptor->family_flags : 0,
       .attributes = canonical_attr_dict.dict_entries,
   };
 
   if (vtable && canonical_encoding.attribute_count > 0) {
     // Canonical dictionary entries are freshly allocated by this function and
     // have not yet been published through their const module-owned view.
-    canonical_encoding.family.flags = loom_module_bind_encoding_parameters(
+    canonical_encoding.family.flags |= loom_module_bind_encoding_parameters(
         module, vtable->descriptor,
         (loom_named_attr_t*)canonical_encoding.attributes,
         canonical_encoding.attribute_count);
   } else if (vtable) {
-    canonical_encoding.family.flags =
+    canonical_encoding.family.flags |=
         LOOM_ENCODING_FAMILY_STATIC_PARAMETERS_VALID;
   }
   const uint32_t hash = loom_encoding_hash(&canonical_encoding);
@@ -3569,9 +3570,26 @@ static iree_status_t loom_module_retain_type_from_context(
   return iree_ok_status();
 }
 
+// Erases the redundant static spelling of the native dense representation
+// before type hashing and interning. Dynamic attachments remain explicit SSA
+// references, and all non-default static families retain their module IDs.
+static loom_type_t loom_module_canonicalize_shaped_type_attachment(
+    const loom_module_t* module, loom_type_t type) {
+  if (!loom_type_has_static_encoding(type)) return type;
+  const loom_encoding_t* encoding =
+      loom_module_encoding(module, type.encoding_id);
+  if (!encoding || !loom_encoding_is_implicit_shaped_attachment(encoding)) {
+    return type;
+  }
+  type.encoding_id = 0;
+  type.encoding_flags = 0;
+  return type;
+}
+
 static iree_status_t loom_module_intern_type_with_dependencies(
     loom_module_t* module, loom_type_t type, loom_type_t* out_interned_type,
     loom_type_id_t* out_type_id) {
+  type = loom_module_canonicalize_shaped_type_attachment(module, type);
   if (loom_type_is_register(type) && loom_type_register_has_value_type(type)) {
     const loom_type_id_t recent_type_id =
         loom_module_find_recent_register_type_exact(module, type);

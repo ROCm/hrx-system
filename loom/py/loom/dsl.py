@@ -3322,6 +3322,7 @@ class EncodingFamilyDef:
     fixed_operand_summary: EncodingOperandSummaryDef | None = None
     auxiliary_key_enum: EnumDef | None = None
     required_auxiliary_keys: tuple[EnumCase, ...] = ()
+    implicit_shaped_attachment: bool = False
     doc: str = ""
 
     def __init__(
@@ -3337,6 +3338,7 @@ class EncodingFamilyDef:
         fixed_operand_summary: EncodingOperandSummaryDef | None = None,
         auxiliary_key_enum: EnumDef | None = None,
         required_auxiliary_keys: list[EnumCase] | tuple[EnumCase, ...] = (),
+        implicit_shaped_attachment: bool = False,
         doc: str = "",
     ) -> None:
         if not _is_ascii_qualified_identifier(name):
@@ -3348,6 +3350,21 @@ class EncodingFamilyDef:
             raise ValueError(
                 f"EncodingFamilyDef '{name}': role must be an EncodingFamilyRole"
             )
+        if type(implicit_shaped_attachment) is not bool:
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': implicit_shaped_attachment must be a bool"
+            )
+        if implicit_shaped_attachment:
+            if role is not EncodingFamilyRole.ADDRESS_LAYOUT:
+                raise ValueError(
+                    f"EncodingFamilyDef '{name}': an implicit shaped attachment "
+                    "must have the ADDRESS_LAYOUT role"
+                )
+            if parameters or dynamic_parameters:
+                raise ValueError(
+                    f"EncodingFamilyDef '{name}': an implicit shaped attachment "
+                    "cannot have static or dynamic parameters"
+                )
         if fixed_record is not None and not isinstance(fixed_record, EncodingRecordDef):
             raise ValueError(
                 f"EncodingFamilyDef '{name}': fixed_record must be an EncodingRecordDef"
@@ -3509,6 +3526,9 @@ class EncodingFamilyDef:
         object.__setattr__(self, "auxiliary_key_enum", auxiliary_key_enum)
         object.__setattr__(
             self, "required_auxiliary_keys", frozen_required_auxiliary_keys
+        )
+        object.__setattr__(
+            self, "implicit_shaped_attachment", implicit_shaped_attachment
         )
         object.__setattr__(self, "doc", doc)
 

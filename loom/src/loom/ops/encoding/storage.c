@@ -345,7 +345,12 @@ bool loom_encoding_query_type_address_layout(
     loom_value_fact_address_layout_t* out_layout) {
   if (!out_layout) return false;
   *out_layout = (loom_value_fact_address_layout_t){0};
-  if (!module || !loom_type_has_encoding(type)) return false;
+  if (!loom_type_has_encoding(type)) {
+    if (!loom_type_can_have_encoding(type)) return false;
+    out_layout->kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE;
+    return true;
+  }
+  if (!module) return false;
 
   if (loom_type_has_static_encoding(type)) {
     return loom_encoding_query_static_address_layout(

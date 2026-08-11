@@ -153,11 +153,11 @@ kernel.def target(@target) @uniform_global_i32_to_u8x4_bitunpack_store() {
   %base = index.constant 0 : offset
   %index = index.constant 0 : index
   %values_noalias, %output_noalias = buffer.assume.noalias %values, %output : buffer, buffer
-  %values_view = buffer.view %values_noalias[%base] : buffer -> view<1xi32, #encoding.layout.dense>
-  %output_view = buffer.view %output_noalias[%base] : buffer -> view<4xi32, #encoding.layout.dense>
-  %packed = vector.load %values_view[%index] : view<1xi32, #encoding.layout.dense> -> vector<1xi32>
+  %values_view = buffer.view %values_noalias[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<4xi32>
+  %packed = vector.load %values_view[%index] : view<1xi32> -> vector<1xi32>
   %unpacked = vector.bitunpacku<8> %packed : vector<1xi32> -> vector<4xi32>
-  vector.store %unpacked, %output_view[%index] : vector<4xi32>, view<4xi32, #encoding.layout.dense>
+  vector.store %unpacked, %output_view[%index] : vector<4xi32>, view<4xi32>
   kernel.return
 }
 

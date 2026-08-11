@@ -68,10 +68,10 @@ command.program.def @wrong_symbol_kind() launch() {
 
 command.program.def @invalid_parameter_patterns(%layer: index) launch(%parameters: buffer) {
   // ERROR@+1: STRUCTURE/027 {attr_name="pattern", actual_value="", expected_constraint="a non-empty parameter key pattern"}
-  %empty = command.parameter %parameters, "" : view<16xi8, #encoding.layout.dense>
+  %empty = command.parameter %parameters, "" : view<16xi8>
   // ERROR@+1: STRUCTURE/027 {attr_name="pattern", actual_value="blk.{.weight", expected_constraint="only complete '{}' index placeholders"}
-  %malformed = command.parameter %parameters, "blk.{.weight"[%layer] : view<16xi8, #encoding.layout.dense>
+  %malformed = command.parameter %parameters, "blk.{.weight"[%layer] : view<16xi8>
   // ERROR@+1: STRUCTURE/027 {attr_name="pattern", actual_value="blk.{}.{}.weight", expected_constraint="exactly 1 '{}' placeholders"}
-  %mismatch = command.parameter %parameters, "blk.{}.{}.weight"[%layer] : view<16xi8, #encoding.layout.dense>
+  %mismatch = command.parameter %parameters, "blk.{}.{}.weight"[%layer] : view<16xi8>
   command.return
 }

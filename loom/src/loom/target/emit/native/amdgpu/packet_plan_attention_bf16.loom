@@ -70,12 +70,12 @@ func.template<benchmark.attention_bf16.m16n16> target(@gfx1250) priority(20) @pl
   %key_aligned = buffer.assume.alignment %key_global {minimum_alignment = 16} : buffer
   %value_aligned = buffer.assume.alignment %value_global {minimum_alignment = 16} : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
-  %query_view = buffer.view %query_aligned[%base] : buffer -> view<[%padded_token_count]x[%hidden_size]xbf16, #encoding.layout.dense>
-  %key_physical_view = buffer.view %key_aligned[%base] : buffer -> view<[%padded_token_count]x[%hidden_size]xbf16, #encoding.layout.dense>
-  %value_physical_view = buffer.view %value_aligned[%base] : buffer -> view<[%hidden_size]x[%padded_token_count]xbf16, #encoding.layout.dense>
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<[%padded_token_count]x[%hidden_size]xbf16, #encoding.layout.dense>
+  %query_view = buffer.view %query_aligned[%base] : buffer -> view<[%padded_token_count]x[%hidden_size]xbf16>
+  %key_physical_view = buffer.view %key_aligned[%base] : buffer -> view<[%padded_token_count]x[%hidden_size]xbf16>
+  %value_physical_view = buffer.view %value_aligned[%base] : buffer -> view<[%hidden_size]x[%padded_token_count]xbf16>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<[%padded_token_count]x[%hidden_size]xbf16>
   %probability_scratch = buffer.alloca<workgroup> align(16) %probability_scratch_bytes : buffer
-  %probability_scratch_view = buffer.view %probability_scratch[%base] : buffer -> view<16x16xbf16, #encoding.layout.dense>
+  %probability_scratch_view = buffer.view %probability_scratch[%base] : buffer -> view<16x16xbf16>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
   %final_max_even, %final_sum_even, %final_max_odd, %final_sum_odd, %final_acc0, %final_acc1, %final_acc2, %final_acc3, %final_acc4, %final_acc5, %final_acc6, %final_acc7, %final_acc8, %final_acc9, %final_acc10, %final_acc11, %final_acc12, %final_acc13, %final_acc14, %final_acc15 = scf.for %key_tile = [%c0 to %key_tile_count step %tile_step](%current_max_even = %negative_vector : vector<8xf32>, %current_sum_even = %zero_vector : vector<8xf32>, %current_max_odd = %negative_vector : vector<8xf32>, %current_sum_odd = %zero_vector : vector<8xf32>, %current_acc0 = %init : vector<8xf32>, %current_acc1 = %init : vector<8xf32>, %current_acc2 = %init : vector<8xf32>, %current_acc3 = %init : vector<8xf32>, %current_acc4 = %init : vector<8xf32>, %current_acc5 = %init : vector<8xf32>, %current_acc6 = %init : vector<8xf32>, %current_acc7 = %init : vector<8xf32>, %current_acc8 = %init : vector<8xf32>, %current_acc9 = %init : vector<8xf32>, %current_acc10 = %init : vector<8xf32>, %current_acc11 = %init : vector<8xf32>, %current_acc12 = %init : vector<8xf32>, %current_acc13 = %init : vector<8xf32>, %current_acc14 = %init : vector<8xf32>, %current_acc15 = %init : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
     %key_origin = index.mul %key_tile, %tile_extent : index
@@ -87,8 +87,8 @@ func.template<benchmark.attention_bf16.m16n16> target(@gfx1250) priority(20) @pl
       %head_pair_offset = index.mul %head_pair_tile, %k_step_gfx1250 : index
       %lane_head_origin = index.add %head_pair_offset, %lane_head_offset : index
       %query_channel = index.add %head_base, %lane_head_origin : index
-      %lhs_values = vector.load %query_view[%lane_query_token, %query_channel] : view<[%padded_token_count]x[%hidden_size]xbf16, #encoding.layout.dense> -> vector<16xbf16>
-      %rhs_values = vector.load %key_physical_view[%key_token, %query_channel] : view<[%padded_token_count]x[%hidden_size]xbf16, #encoding.layout.dense> -> vector<16xbf16>
+      %lhs_values = vector.load %query_view[%lane_query_token, %query_channel] : view<[%padded_token_count]x[%hidden_size]xbf16> -> vector<16xbf16>
+      %rhs_values = vector.load %key_physical_view[%key_token, %query_channel] : view<[%padded_token_count]x[%hidden_size]xbf16> -> vector<16xbf16>
       %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
       %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xbf16>
       %next = vector.mma %lhs, %rhs, %qk_acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
@@ -151,10 +151,10 @@ func.template<benchmark.attention_bf16.m16n16> target(@gfx1250) priority(20) @pl
     } else {
       scf.yield %old_scale_odd : vector<8xf32>
     }
-    vector.fragment.store<result> %weight, %probability_scratch_view[%c0, %c0] shape [%m, %n] : vector<8xf32>, view<16x16xbf16, #encoding.layout.dense>
+    vector.fragment.store<result> %weight, %probability_scratch_view[%c0, %c0] shape [%m, %n] : vector<8xf32>, view<16x16xbf16>
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     %probability_values = scf.if %lane_group_even -> (vector<16xbf16>) {
-      %loaded_probability = vector.load %probability_scratch_view[%lane_column, %c0] : view<16x16xbf16, #encoding.layout.dense> -> vector<16xbf16>
+      %loaded_probability = vector.load %probability_scratch_view[%lane_column, %c0] : view<16x16xbf16> -> vector<16xbf16>
       scf.yield %loaded_probability : vector<16xbf16>
     } else {
       scf.yield %zero_operand : vector<16xbf16>
@@ -193,22 +193,22 @@ func.template<benchmark.attention_bf16.m16n16> target(@gfx1250) priority(20) @pl
     %lane_channel14 = index.add %channel14, %lane_column : index
     %lane_channel15 = index.add %channel15, %lane_column : index
     %rhs_values0, %rhs_values1, %rhs_values2, %rhs_values3, %rhs_values4, %rhs_values5, %rhs_values6, %rhs_values7, %rhs_values8, %rhs_values9, %rhs_values10, %rhs_values11, %rhs_values12, %rhs_values13, %rhs_values14, %rhs_values15 = scf.if %lane_group_even -> (vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>) {
-      %loaded0 = vector.load %value_physical_view[%lane_channel0, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16, #encoding.layout.dense> -> vector<16xbf16>
-      %loaded1 = vector.load %value_physical_view[%lane_channel1, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16, #encoding.layout.dense> -> vector<16xbf16>
-      %loaded2 = vector.load %value_physical_view[%lane_channel2, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16, #encoding.layout.dense> -> vector<16xbf16>
-      %loaded3 = vector.load %value_physical_view[%lane_channel3, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16, #encoding.layout.dense> -> vector<16xbf16>
-      %loaded4 = vector.load %value_physical_view[%lane_channel4, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16, #encoding.layout.dense> -> vector<16xbf16>
-      %loaded5 = vector.load %value_physical_view[%lane_channel5, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16, #encoding.layout.dense> -> vector<16xbf16>
-      %loaded6 = vector.load %value_physical_view[%lane_channel6, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16, #encoding.layout.dense> -> vector<16xbf16>
-      %loaded7 = vector.load %value_physical_view[%lane_channel7, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16, #encoding.layout.dense> -> vector<16xbf16>
-      %loaded8 = vector.load %value_physical_view[%lane_channel8, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16, #encoding.layout.dense> -> vector<16xbf16>
-      %loaded9 = vector.load %value_physical_view[%lane_channel9, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16, #encoding.layout.dense> -> vector<16xbf16>
-      %loaded10 = vector.load %value_physical_view[%lane_channel10, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16, #encoding.layout.dense> -> vector<16xbf16>
-      %loaded11 = vector.load %value_physical_view[%lane_channel11, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16, #encoding.layout.dense> -> vector<16xbf16>
-      %loaded12 = vector.load %value_physical_view[%lane_channel12, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16, #encoding.layout.dense> -> vector<16xbf16>
-      %loaded13 = vector.load %value_physical_view[%lane_channel13, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16, #encoding.layout.dense> -> vector<16xbf16>
-      %loaded14 = vector.load %value_physical_view[%lane_channel14, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16, #encoding.layout.dense> -> vector<16xbf16>
-      %loaded15 = vector.load %value_physical_view[%lane_channel15, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16, #encoding.layout.dense> -> vector<16xbf16>
+      %loaded0 = vector.load %value_physical_view[%lane_channel0, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded1 = vector.load %value_physical_view[%lane_channel1, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded2 = vector.load %value_physical_view[%lane_channel2, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded3 = vector.load %value_physical_view[%lane_channel3, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded4 = vector.load %value_physical_view[%lane_channel4, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded5 = vector.load %value_physical_view[%lane_channel5, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded6 = vector.load %value_physical_view[%lane_channel6, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded7 = vector.load %value_physical_view[%lane_channel7, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded8 = vector.load %value_physical_view[%lane_channel8, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded9 = vector.load %value_physical_view[%lane_channel9, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded10 = vector.load %value_physical_view[%lane_channel10, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded11 = vector.load %value_physical_view[%lane_channel11, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded12 = vector.load %value_physical_view[%lane_channel12, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded13 = vector.load %value_physical_view[%lane_channel13, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded14 = vector.load %value_physical_view[%lane_channel14, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded15 = vector.load %value_physical_view[%lane_channel15, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
       scf.yield %loaded0, %loaded1, %loaded2, %loaded3, %loaded4, %loaded5, %loaded6, %loaded7, %loaded8, %loaded9, %loaded10, %loaded11, %loaded12, %loaded13, %loaded14, %loaded15 : vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>
     } else {
       scf.yield %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand : vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>
@@ -317,21 +317,21 @@ func.template<benchmark.attention_bf16.m16n16> target(@gfx1250) priority(20) @pl
   %channel13 = index.add %channel12, %tile_extent : index
   %channel14 = index.add %channel13, %tile_extent : index
   %channel15 = index.add %channel14, %tile_extent : index
-  vector.fragment.store<result> %output0, %output_view[%query_origin, %channel0] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %output1, %output_view[%query_origin, %channel1] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %output2, %output_view[%query_origin, %channel2] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %output3, %output_view[%query_origin, %channel3] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %output4, %output_view[%query_origin, %channel4] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %output5, %output_view[%query_origin, %channel5] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %output6, %output_view[%query_origin, %channel6] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %output7, %output_view[%query_origin, %channel7] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %output8, %output_view[%query_origin, %channel8] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %output9, %output_view[%query_origin, %channel9] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %output10, %output_view[%query_origin, %channel10] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %output11, %output_view[%query_origin, %channel11] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %output12, %output_view[%query_origin, %channel12] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %output13, %output_view[%query_origin, %channel13] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %output14, %output_view[%query_origin, %channel14] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %output15, %output_view[%query_origin, %channel15] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #encoding.layout.dense>
+  vector.fragment.store<result> %output0, %output_view[%query_origin, %channel0] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output1, %output_view[%query_origin, %channel1] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output2, %output_view[%query_origin, %channel2] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output3, %output_view[%query_origin, %channel3] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output4, %output_view[%query_origin, %channel4] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output5, %output_view[%query_origin, %channel5] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output6, %output_view[%query_origin, %channel6] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output7, %output_view[%query_origin, %channel7] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output8, %output_view[%query_origin, %channel8] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output9, %output_view[%query_origin, %channel9] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output10, %output_view[%query_origin, %channel10] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output11, %output_view[%query_origin, %channel11] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output12, %output_view[%query_origin, %channel12] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output13, %output_view[%query_origin, %channel13] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output14, %output_view[%query_origin, %channel14] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output15, %output_view[%query_origin, %channel15] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
   func.return
 }

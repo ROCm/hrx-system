@@ -38,25 +38,25 @@ kernel.def @mlp_down_projection_residual_bf16(%rows: index) {
     %input_base0 = index.mul %lane, %vector_width : index
     %input_base = index.assume %input_base0 [mul(%input_base0, 32)] : index
     %input_noalias, %down_weight_noalias, %residual_noalias, %output_noalias = buffer.assume.noalias %input, %down_weight, %residual, %output : buffer, buffer, buffer, buffer
-    %input_view = buffer.view %input_noalias[%base] : buffer -> view<18944xf32, #encoding.layout.dense>
-    %down_weight_view = buffer.view %down_weight_noalias[%base] : buffer -> view<[%row_count]x18944xbf16, #encoding.layout.dense>
-    %residual_view = buffer.view %residual_noalias[%base] : buffer -> view<[%row_count]xf32, #encoding.layout.dense>
-    %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%row_count]xf32, #encoding.layout.dense>
-    %input_values = vector.load %input_view[%input_base] : view<18944xf32, #encoding.layout.dense> -> vector<32xf32>
-    %weight_bf16_0 = vector.load %down_weight_view[%bounded_row_base, %input_base] : view<[%row_count]x18944xbf16, #encoding.layout.dense> -> vector<32xbf16>
+    %input_view = buffer.view %input_noalias[%base] : buffer -> view<18944xf32>
+    %down_weight_view = buffer.view %down_weight_noalias[%base] : buffer -> view<[%row_count]x18944xbf16>
+    %residual_view = buffer.view %residual_noalias[%base] : buffer -> view<[%row_count]xf32>
+    %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%row_count]xf32>
+    %input_values = vector.load %input_view[%input_base] : view<18944xf32> -> vector<32xf32>
+    %weight_bf16_0 = vector.load %down_weight_view[%bounded_row_base, %input_base] : view<[%row_count]x18944xbf16> -> vector<32xbf16>
     %sum0 = func.call @bf16_dot32(%input_values, %weight_bf16_0) : (vector<32xf32>, vector<32xbf16>) -> (f32)
-    %weight_bf16_1 = vector.load %down_weight_view[%bounded_row1, %input_base] : view<[%row_count]x18944xbf16, #encoding.layout.dense> -> vector<32xbf16>
+    %weight_bf16_1 = vector.load %down_weight_view[%bounded_row1, %input_base] : view<[%row_count]x18944xbf16> -> vector<32xbf16>
     %sum1 = func.call @bf16_dot32(%input_values, %weight_bf16_1) : (vector<32xf32>, vector<32xbf16>) -> (f32)
     %dot0 = kernel.workgroup.reduce<addf> %sum0 : f32
     %dot1 = kernel.workgroup.reduce<addf> %sum1 : f32
-    %residual_value0 = view.load %residual_view[%bounded_row_base] : view<[%row_count]xf32, #encoding.layout.dense> -> f32
+    %residual_value0 = view.load %residual_view[%bounded_row_base] : view<[%row_count]xf32> -> f32
     %result0 = scalar.addf<reassoc|nnan|ninf|nsz> %residual_value0, %dot0 : f32
-    %residual_value1 = view.load %residual_view[%bounded_row1] : view<[%row_count]xf32, #encoding.layout.dense> -> f32
+    %residual_value1 = view.load %residual_view[%bounded_row1] : view<[%row_count]xf32> -> f32
     %result1 = scalar.addf<reassoc|nnan|ninf|nsz> %residual_value1, %dot1 : f32
     %is_leader = index.cmp eq, %lane, %leader : index
     scf.if %is_leader {
-      view.store %result0, %output_view[%bounded_row_base] : f32, view<[%row_count]xf32, #encoding.layout.dense>
-      view.store %result1, %output_view[%bounded_row1] : f32, view<[%row_count]xf32, #encoding.layout.dense>
+      view.store %result0, %output_view[%bounded_row_base] : f32, view<[%row_count]xf32>
+      view.store %result1, %output_view[%bounded_row1] : f32, view<[%row_count]xf32>
     }
   }
   kernel.return

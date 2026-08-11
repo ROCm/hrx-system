@@ -69,16 +69,16 @@ kernel.def @kernel_reference_distribution(%buffer: buffer, %m: index) {
 } launch(%buffer: buffer, %m: index) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %source = buffer.view %buffer[%base] : buffer -> view<[%m]xi32, #encoding.layout.dense>
-  %refined = view.refine %source : view<[%m]xi32, #encoding.layout.dense> -> view<64xi32, #encoding.layout.dense>
-  %lane_view = view.subview %refined[%lane] : view<64xi32, #encoding.layout.dense> -> view<1xi32, #encoding.layout.dense>
-  %uniform_value = view.load %refined[0] : view<64xi32, #encoding.layout.dense> -> i32
-  %lane_value = view.load %lane_view[0] : view<1xi32, #encoding.layout.dense> -> i32
+  %source = buffer.view %buffer[%base] : buffer -> view<[%m]xi32>
+  %refined = view.refine %source : view<[%m]xi32> -> view<64xi32>
+  %lane_view = view.subview %refined[%lane] : view<64xi32> -> view<1xi32>
+  %uniform_value = view.load %refined[0] : view<64xi32> -> i32
+  %lane_value = view.load %lane_view[0] : view<1xi32> -> i32
   %buffer_uniform = test.fact_cluster_uniform %buffer : buffer -> i1
-  %source_uniform = test.fact_cluster_uniform %source : view<[%m]xi32, #encoding.layout.dense> -> i1
-  %refined_uniform = test.fact_cluster_uniform %refined : view<64xi32, #encoding.layout.dense> -> i1
+  %source_uniform = test.fact_cluster_uniform %source : view<[%m]xi32> -> i1
+  %refined_uniform = test.fact_cluster_uniform %refined : view<64xi32> -> i1
   %uniform_value_uniform = test.fact_cluster_uniform %uniform_value : i32 -> i1
-  %lane_view_varying = test.fact_lane_varying %lane_view : view<1xi32, #encoding.layout.dense> -> i1
+  %lane_view_varying = test.fact_lane_varying %lane_view : view<1xi32> -> i1
   %lane_value_varying = test.fact_lane_varying %lane_value : i32 -> i1
   test.use %buffer_uniform, %source_uniform, %refined_uniform, %uniform_value_uniform, %lane_view_varying, %lane_value_varying : i1, i1, i1, i1, i1, i1
   kernel.return
@@ -387,8 +387,8 @@ func.def @dynamic_storage_encoding_remains_ssa(%buffer: buffer, %i: index) -> (f
 // local SSA layout op just to recover dense footprints.
 func.def @static_dense_type_layout_facts(%buffer: buffer) -> (i64) {
   %offset = index.constant 0 : offset
-  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, #encoding.layout.dense>
-  %length_hi = test.fact_view_byte_length_hi %view : view<4xf32, #encoding.layout.dense> -> i64
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32>
+  %length_hi = test.fact_view_byte_length_hi %view : view<4xf32> -> i64
   func.return %length_hi : i64
 }
 // ----

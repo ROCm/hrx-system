@@ -210,15 +210,6 @@ iree_status_t loom_buffer_view_verify(const loom_module_t* module,
     return iree_ok_status();
   }
 
-  if (!loom_type_has_encoding(result_type)) {
-    loom_diagnostic_param_t params[] = {
-        loom_param_string(IREE_SV("result type layout")),
-        loom_param_string(IREE_SV("view result type")),
-    };
-    return loom_buffer_emit(emitter, op, LOOM_ERR_ENCODING_001, params,
-                            IREE_ARRAYSIZE(params));
-  }
-
   return loom_buffer_verify_strided_layout_rank(module, op, emitter,
                                                 result_type);
 }

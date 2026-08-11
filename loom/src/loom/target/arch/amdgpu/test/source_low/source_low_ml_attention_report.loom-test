@@ -19,7 +19,7 @@ kernel.def target(@target) @report_attention_tail_peel_accumulator_merge() {
   %has_tail_tile = scalar.cmpi ne, %tail_tile_count, %no_tail_tiles : i32
   %output_global = buffer.assume.memory_space<global> %output_buffer : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32, #encoding.layout.dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32>
   %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
   %rhs0 = vector.fragment<rhs> %rhs_values0 shape [%k, %n] : vector<16xbf16>
   %rhs1 = vector.fragment<rhs> %rhs_values1 shape [%k, %n] : vector<16xbf16>
@@ -35,7 +35,7 @@ kernel.def target(@target) @report_attention_tail_peel_accumulator_merge() {
   } else {
     scf.yield %carried : vector<8xf32>
   }
-  vector.fragment.store<result> %output_accumulator, %output_view[%c0, %c0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #encoding.layout.dense>
+  vector.fragment.store<result> %output_accumulator, %output_view[%c0, %c0] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
   kernel.return
 }
 

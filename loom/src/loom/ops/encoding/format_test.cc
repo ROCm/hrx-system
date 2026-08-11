@@ -43,6 +43,7 @@ static const loom_attr_descriptor_t kTestSchemaEncodingParameters[] = {
 static const loom_encoding_family_descriptor_t kTestSchemaEncodingDescriptor = {
     /*.name=*/LOOM_BSTRING_REF(11, "test.schema"),
     /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    /*.family_flags=*/{},
     /*.parameter_count=*/IREE_ARRAYSIZE(kTestSchemaEncodingParameters),
     /*.parameter_descriptors=*/kTestSchemaEncodingParameters,
 };
@@ -57,6 +58,7 @@ static const loom_attr_descriptor_t kQuantizationParameters[] = {{
 static const loom_encoding_family_descriptor_t kQuantizationDescriptor = {
     /*.name=*/LOOM_BSTRING_REF(12, "quantization"),
     /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    /*.family_flags=*/{},
     /*.parameter_count=*/IREE_ARRAYSIZE(kQuantizationParameters),
     /*.parameter_descriptors=*/kQuantizationParameters,
 };
@@ -181,6 +183,27 @@ TEST_F(EncodingFormatTest, DefineInlineSpec) {
   EXPECT_EQ(PrintModule(module),
             "%enc = encoding.define #test.schema<block=32> : "
             "encoding<schema>\n");
+  loom_module_free(module);
+}
+
+TEST_F(EncodingFormatTest, DenseShapedAttachmentIsImplicit) {
+  loom_module_t* module = ParseOk(
+      "test.func @test(%arg: view<4xf32, #encoding.layout.dense>) {\n"
+      "  test.yield\n"
+      "}\n");
+  ASSERT_NE(module, nullptr);
+
+  loom_op_t* func_op = GetFirstFunctionOp(module);
+  ASSERT_NE(func_op, nullptr);
+  loom_block_t* entry = GetEntryBlock(loom_test_func_body(func_op));
+  ASSERT_NE(entry, nullptr);
+  ASSERT_EQ(entry->arg_count, 1u);
+  EXPECT_FALSE(loom_type_has_encoding(
+      loom_module_value_type(module, entry->arg_ids[0])));
+  EXPECT_EQ(PrintModule(module),
+            "test.func @test(%arg: view<4xf32>) {\n"
+            "  test.yield\n"
+            "}\n");
   loom_module_free(module);
 }
 

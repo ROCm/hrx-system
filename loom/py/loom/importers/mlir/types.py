@@ -57,7 +57,7 @@ class MlirTypeConverter:
         body = source_type[len(prefix) : -1]
         shape_and_element = _split_top_level_comma(body)[0].strip()
         flattened_element = _flatten_vector_element(shape_and_element)
-        return f"view<{flattened_element}, #encoding.layout.dense>"
+        return f"view<{flattened_element}>"
 
     def coerce_constant_value(self, value: Any, value_type: str) -> Any:
         if not isinstance(value, str):

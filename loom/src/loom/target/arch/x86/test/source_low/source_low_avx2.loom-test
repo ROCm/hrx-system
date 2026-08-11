@@ -91,10 +91,10 @@ x86.target<avx2> @target
 func.def target(@target) @i32x4_memory_indexed(%input: buffer, %output: buffer, %i: index) {
   %bounded_i = index.assume %i [range(%i, 0, 12)] : index
   %buffer_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<16xi32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<16xi32, #encoding.layout.dense>
-  %loaded = vector.load %input_view[%bounded_i] : view<16xi32, #encoding.layout.dense> -> vector<4xi32>
-  vector.store %loaded, %output_view[%bounded_i] : vector<4xi32>, view<16xi32, #encoding.layout.dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<16xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<16xi32>
+  %loaded = vector.load %input_view[%bounded_i] : view<16xi32> -> vector<4xi32>
+  vector.store %loaded, %output_view[%bounded_i] : vector<4xi32>, view<16xi32>
   func.return
 }
 
@@ -115,10 +115,10 @@ func.def target(@target) @i32x4_index_madd_scaled_bias_memory(%input: buffer, %o
   %bias = index.constant 1 : index
   %linear = index.madd %row, %stride, %bias : index
   %bounded_linear = index.assume %linear [range(%linear, 0, 16)] : index
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<32xi32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<32xi32, #encoding.layout.dense>
-  %loaded = vector.load %input_view[%bounded_linear] : view<32xi32, #encoding.layout.dense> -> vector<4xi32>
-  vector.store %loaded, %output_view[%bounded_linear] : vector<4xi32>, view<32xi32, #encoding.layout.dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<32xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<32xi32>
+  %loaded = vector.load %input_view[%bounded_linear] : view<32xi32> -> vector<4xi32>
+  vector.store %loaded, %output_view[%bounded_linear] : vector<4xi32>, view<32xi32>
   func.return
 }
 

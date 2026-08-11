@@ -52,6 +52,7 @@ static const uint8_t kQ8_0EncodingAliasOrdinals[] = {1};
 static const loom_encoding_family_descriptor_t kQ8_0EncodingDescriptor = {
     /*.name=*/LOOM_BSTRING_REF(4, "q8_0"),
     /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    /*.family_flags=*/{},
     /*.parameter_count=*/IREE_ARRAYSIZE(kQ8_0EncodingParameters),
     /*.parameter_descriptors=*/kQ8_0EncodingParameters,
     /*.dynamic_parameter_count=*/0,
@@ -525,6 +526,7 @@ TEST_F(ContextTest, RegisterEncodingVtableRejectsMissingParameterDescriptors) {
   static const loom_encoding_family_descriptor_t kMalformedDescriptor = {
       /*.name=*/LOOM_BSTRING_REF(9, "malformed"),
       /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+      /*.family_flags=*/{},
       /*.parameter_count=*/1,
       /*.parameter_descriptors=*/nullptr,
   };
@@ -551,6 +553,7 @@ TEST_F(ContextTest, RegisterEncodingVtableRejectsMalformedFixedMetadata) {
   static const loom_encoding_family_descriptor_t kMalformedDescriptor = {
       /*.name=*/LOOM_BSTRING_REF(9, "malformed"),
       /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+      /*.family_flags=*/{},
       /*.parameter_count=*/{},
       /*.parameter_descriptors=*/{},
       /*.dynamic_parameter_count=*/{},
@@ -571,6 +574,7 @@ TEST_F(ContextTest, RegisterEncodingVtableRestrictsFixedMetadataToSchemas) {
   static const loom_encoding_family_descriptor_t kMalformedDescriptor = {
       /*.name=*/LOOM_BSTRING_REF(9, "malformed"),
       /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+      /*.family_flags=*/{},
       /*.parameter_count=*/{},
       /*.parameter_descriptors=*/{},
       /*.dynamic_parameter_count=*/{},

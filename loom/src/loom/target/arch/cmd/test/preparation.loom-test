@@ -39,10 +39,10 @@ kernel.def @copy(%element_count: index) {
 } launch(%source: buffer, %target: buffer) {
   %base = index.constant 0 : offset
   %workgroup = kernel.workgroup.id<x> : index
-  %source_view = buffer.view %source[%base] : buffer -> view<128xi32, #encoding.layout.dense>
-  %target_view = buffer.view %target[%base] : buffer -> view<128xi32, #encoding.layout.dense>
-  %value = view.load %source_view[%workgroup] : view<128xi32, #encoding.layout.dense> -> i32
-  view.store %value, %target_view[%workgroup] : i32, view<128xi32, #encoding.layout.dense>
+  %source_view = buffer.view %source[%base] : buffer -> view<128xi32>
+  %target_view = buffer.view %target[%base] : buffer -> view<128xi32>
+  %value = view.load %source_view[%workgroup] : view<128xi32> -> i32
+  view.store %value, %target_view[%workgroup] : i32, view<128xi32>
   kernel.return
 }
 
@@ -83,22 +83,22 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 kernel.def @combine() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
-} launch(%lhs: view<3xi32, #encoding.layout.dense>, %rhs: view<4xi32, #encoding.layout.dense>, %target: buffer, %unused: buffer) {
+} launch(%lhs: view<3xi32>, %rhs: view<4xi32>, %target: buffer, %unused: buffer) {
   %c0 = index.constant 0 : index
   %base = index.constant 0 : offset
-  %lhs_value = view.load %lhs[%c0] : view<3xi32, #encoding.layout.dense> -> i32
-  %rhs_value = view.load %rhs[%c0] : view<4xi32, #encoding.layout.dense> -> i32
+  %lhs_value = view.load %lhs[%c0] : view<3xi32> -> i32
+  %rhs_value = view.load %rhs[%c0] : view<4xi32> -> i32
   %sum = scalar.addi %lhs_value, %rhs_value : i32
-  %target_view = buffer.view %target[%base] : buffer -> view<1xi32, #encoding.layout.dense>
-  view.store %sum, %target_view[%c0] : i32, view<1xi32, #encoding.layout.dense>
+  %target_view = buffer.view %target[%base] : buffer -> view<1xi32>
+  view.store %sum, %target_view[%c0] : i32, view<1xi32>
   kernel.return
 }
 
 command.program.def public @parameterized() launch(%parameters: buffer, %target: buffer, %unused: buffer) {
   %layer = index.constant 3 : index
-  %lhs = command.parameter %parameters, "blk.{}.lhs"[%layer] : view<3xi32, #encoding.layout.dense>
-  %rhs = command.parameter %parameters, "shared.rhs" : view<4xi32, #encoding.layout.dense>
-  kernel.launch @combine(%lhs, %rhs, %target, %unused) : (view<3xi32, #encoding.layout.dense>, view<4xi32, #encoding.layout.dense>, buffer, buffer)
+  %lhs = command.parameter %parameters, "blk.{}.lhs"[%layer] : view<3xi32>
+  %rhs = command.parameter %parameters, "shared.rhs" : view<4xi32>
+  kernel.launch @combine(%lhs, %rhs, %target, %unused) : (view<3xi32>, view<4xi32>, buffer, buffer)
   command.return
 }
 
@@ -108,15 +108,15 @@ kernel.def retain @combine() {
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%0: buffer, %1: buffer, %target: buffer) {
   %11 = index.constant 0 : offset
-  %lhs = buffer.view %0[%11] : buffer -> view<3xi32, #encoding.layout.dense>
-  %rhs = buffer.view %1[%11] : buffer -> view<4xi32, #encoding.layout.dense>
+  %lhs = buffer.view %0[%11] : buffer -> view<3xi32>
+  %rhs = buffer.view %1[%11] : buffer -> view<4xi32>
   %c0 = index.constant 0 : index
   %base = index.constant 0 : offset
-  %lhs_value = view.load %lhs[%c0] : view<3xi32, #encoding.layout.dense> -> i32
-  %rhs_value = view.load %rhs[%c0] : view<4xi32, #encoding.layout.dense> -> i32
+  %lhs_value = view.load %lhs[%c0] : view<3xi32> -> i32
+  %rhs_value = view.load %rhs[%c0] : view<4xi32> -> i32
   %sum = scalar.addi %lhs_value, %rhs_value : i32
-  %target_view = buffer.view %target[%base] : buffer -> view<1xi32, #encoding.layout.dense>
-  view.store %sum, %target_view[%c0] : i32, view<1xi32, #encoding.layout.dense>
+  %target_view = buffer.view %target[%base] : buffer -> view<1xi32>
+  view.store %sum, %target_view[%c0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -130,10 +130,10 @@ kernel.def @copy_one() {
 } launch(%source: buffer, %target: buffer) {
   %base = index.constant 0 : offset
   %c0 = index.constant 0 : index
-  %source_view = buffer.view %source[%base] : buffer -> view<1xi32, #encoding.layout.dense>
-  %target_view = buffer.view %target[%base] : buffer -> view<1xi32, #encoding.layout.dense>
-  %value = view.load %source_view[%c0] : view<1xi32, #encoding.layout.dense> -> i32
-  view.store %value, %target_view[%c0] : i32, view<1xi32, #encoding.layout.dense>
+  %source_view = buffer.view %source[%base] : buffer -> view<1xi32>
+  %target_view = buffer.view %target[%base] : buffer -> view<1xi32>
+  %value = view.load %source_view[%c0] : view<1xi32> -> i32
+  view.store %value, %target_view[%c0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -174,11 +174,11 @@ kernel.def @increment(%element_count: index) {
   %base = index.constant 0 : offset
   %workgroup = kernel.workgroup.id<x> : index
   %c1 = scalar.constant 1 : i32
-  %source_view = buffer.view %source[%base] : buffer -> view<128xi32, #encoding.layout.dense>
-  %target_view = buffer.view %target[%base] : buffer -> view<128xi32, #encoding.layout.dense>
-  %value = view.load %source_view[%workgroup] : view<128xi32, #encoding.layout.dense> -> i32
+  %source_view = buffer.view %source[%base] : buffer -> view<128xi32>
+  %target_view = buffer.view %target[%base] : buffer -> view<128xi32>
+  %value = view.load %source_view[%workgroup] : view<128xi32> -> i32
   %result = scalar.addi %value, %c1 : i32
-  view.store %result, %target_view[%workgroup] : i32, view<128xi32, #encoding.layout.dense>
+  view.store %result, %target_view[%workgroup] : i32, view<128xi32>
   kernel.return
 }
 
@@ -189,11 +189,11 @@ kernel.def @double(%element_count: index) {
   %base = index.constant 0 : offset
   %workgroup = kernel.workgroup.id<x> : index
   %c2 = scalar.constant 2 : i32
-  %source_view = buffer.view %source[%base] : buffer -> view<128xi32, #encoding.layout.dense>
-  %target_view = buffer.view %target[%base] : buffer -> view<128xi32, #encoding.layout.dense>
-  %value = view.load %source_view[%workgroup] : view<128xi32, #encoding.layout.dense> -> i32
+  %source_view = buffer.view %source[%base] : buffer -> view<128xi32>
+  %target_view = buffer.view %target[%base] : buffer -> view<128xi32>
+  %value = view.load %source_view[%workgroup] : view<128xi32> -> i32
   %result = scalar.muli %value, %c2 : i32
-  view.store %result, %target_view[%workgroup] : i32, view<128xi32, #encoding.layout.dense>
+  view.store %result, %target_view[%workgroup] : i32, view<128xi32>
   kernel.return
 }
 
@@ -254,10 +254,10 @@ kernel.def @copy_element() {
 } launch(%source: buffer, %target: buffer) {
   %base = index.constant 0 : offset
   %element = index.constant 0 : index
-  %source_view = buffer.view %source[%base] : buffer -> view<1xi32, #encoding.layout.dense>
-  %target_view = buffer.view %target[%base] : buffer -> view<1xi32, #encoding.layout.dense>
-  %value = view.load %source_view[%element] : view<1xi32, #encoding.layout.dense> -> i32
-  view.store %value, %target_view[%element] : i32, view<1xi32, #encoding.layout.dense>
+  %source_view = buffer.view %source[%base] : buffer -> view<1xi32>
+  %target_view = buffer.view %target[%base] : buffer -> view<1xi32>
+  %value = view.load %source_view[%element] : view<1xi32> -> i32
+  view.store %value, %target_view[%element] : i32, view<1xi32>
   kernel.return
 }
 
@@ -295,10 +295,10 @@ kernel.def @copy_one() {
 } launch(%source: buffer, %target: buffer) {
   %base = index.constant 0 : offset
   %c0 = index.constant 0 : index
-  %source_view = buffer.view %source[%base] : buffer -> view<1xi32, #encoding.layout.dense>
-  %target_view = buffer.view %target[%base] : buffer -> view<1xi32, #encoding.layout.dense>
-  %value = view.load %source_view[%c0] : view<1xi32, #encoding.layout.dense> -> i32
-  view.store %value, %target_view[%c0] : i32, view<1xi32, #encoding.layout.dense>
+  %source_view = buffer.view %source[%base] : buffer -> view<1xi32>
+  %target_view = buffer.view %target[%base] : buffer -> view<1xi32>
+  %value = view.load %source_view[%c0] : view<1xi32> -> i32
+  view.store %value, %target_view[%c0] : i32, view<1xi32>
   kernel.return
 }
 

@@ -240,7 +240,7 @@ sanitizer_assert_accesses = Op(
         TypeOf("view"),
     ],
     examples=[
-        "sanitizer.assert.accesses<write> %view[%row, %col] {static_extents = [1, 16], static_strides = [1, 0], static_count = 16} : view<128x128xf32, #encoding.layout.dense>",
+        "sanitizer.assert.accesses<write> %view[%row, %col] {static_extents = [1, 16], static_strides = [1, 0], static_count = 16} : view<128x128xf32>",
     ],
 )
 
@@ -454,8 +454,8 @@ sanitizer_race_access = Op(
         TypeOf("view"),
     ],
     examples=[
-        "sanitizer.race.access<read> %view[%lane] : view<64xi32, #encoding.layout.dense>",
-        "sanitizer.race.access<read_write> %view[%lane] {atomic = true, ordering = acq_rel, scope = workgroup} : view<64xi32, #encoding.layout.dense>",
+        "sanitizer.race.access<read> %view[%lane] : view<64xi32>",
+        "sanitizer.race.access<read_write> %view[%lane] {atomic = true, ordering = acq_rel, scope = workgroup} : view<64xi32>",
     ],
 )
 

@@ -62,7 +62,7 @@
 // slot for address layout. Vector types are pure register lane grids and do not
 // carry layout attachments.
 //
-//   tile<256x256xf32, #encoding.layout.dense>
+//   tile<256x256xf32>
 //   tensor<[%N]x[%K]xi8, #encoding.operand<element_format=i8,
 //       payload_elements=32, payload_packing=dense_lanes>>
 //   view<[%N]xf32, #encoding.layout.strided<strides=[64]>>

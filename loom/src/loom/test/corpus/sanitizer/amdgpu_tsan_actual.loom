@@ -9,12 +9,12 @@ kernel.def @tsan_workgroup_write_race() {
   %value = scalar.constant 1 : i32
   %continued_value = scalar.constant 9 : i32
   %global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %global[%base] : buffer -> view<1xi32, #encoding.layout.dense>
-  view.store %value, %output_view[%element_index] : i32, view<1xi32, #encoding.layout.dense>
+  %output_view = buffer.view %global[%base] : buffer -> view<1xi32>
+  view.store %value, %output_view[%element_index] : i32, view<1xi32>
   %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
-  %scratch_view = buffer.view %scratch[%base] : buffer -> view<1xi32, #encoding.layout.dense>
-  view.store %value, %scratch_view[%element_index] : i32, view<1xi32, #encoding.layout.dense>
-  view.store %continued_value, %output_view[%element_index] : i32, view<1xi32, #encoding.layout.dense>
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<1xi32>
+  view.store %value, %scratch_view[%element_index] : i32, view<1xi32>
+  view.store %continued_value, %output_view[%element_index] : i32, view<1xi32>
   kernel.return
 }
 
@@ -31,24 +31,24 @@ kernel.def @tsan_workgroup_barrier_safe_write() {
   %after_value = scalar.constant 2 : i32
   %lane = kernel.workitem.id<x> : index
   %global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %global[%base] : buffer -> view<1xi32, #encoding.layout.dense>
+  %output_view = buffer.view %global[%base] : buffer -> view<1xi32>
   %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
-  %scratch_view = buffer.view %scratch[%base] : buffer -> view<1xi32, #encoding.layout.dense>
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<1xi32>
   %is_first_lane = index.cmp eq, %lane, %first_lane : index
   scf.if %is_first_lane {
-    view.store %before_value, %scratch_view[%first_lane] : i32, view<1xi32, #encoding.layout.dense>
+    view.store %before_value, %scratch_view[%first_lane] : i32, view<1xi32>
     scf.yield
   }
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %is_second_lane = index.cmp eq, %lane, %second_lane : index
   scf.if %is_second_lane {
-    view.store %after_value, %scratch_view[%first_lane] : i32, view<1xi32, #encoding.layout.dense>
+    view.store %after_value, %scratch_view[%first_lane] : i32, view<1xi32>
     scf.yield
   }
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   scf.if %is_first_lane {
-    %result = view.load %scratch_view[%first_lane] : view<1xi32, #encoding.layout.dense> -> i32
-    view.store %result, %output_view[%first_lane] : i32, view<1xi32, #encoding.layout.dense>
+    %result = view.load %scratch_view[%first_lane] : view<1xi32> -> i32
+    view.store %result, %output_view[%first_lane] : i32, view<1xi32>
     scf.yield
   }
   kernel.return

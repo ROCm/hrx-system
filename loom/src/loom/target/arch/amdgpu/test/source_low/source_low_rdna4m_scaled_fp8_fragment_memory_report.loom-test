@@ -14,12 +14,12 @@ kernel.def target(@target) @report_scaled_fp8_rhs_fragment_memory() {
   %weight_schema = encoding.define #encoding.f8e4m3<affine=scale_only, payload_elements=8, rounding=finite_only, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %weight_storage = encoding.define #encoding.storage {layout = %weight_layout : encoding<layout>, schema = %weight_schema : encoding<schema>} : encoding<storage>
   %weight_view = buffer.view %weight[%base] : buffer -> view<16x16xf8E4M3, %weight_storage>
-  %scale_view = buffer.view %scale[%base] : buffer -> view<1xf32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<8xbf16, #encoding.layout.dense>
-  %scale_scalar = view.load %scale_view[0] : view<1xf32, #encoding.layout.dense> -> f32
+  %scale_view = buffer.view %scale[%base] : buffer -> view<1xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<8xbf16>
+  %scale_scalar = view.load %scale_view[0] : view<1xf32> -> f32
   %scale_vector = vector.splat %scale_scalar : vector<1xf32>
   %rhs = vector.fragment.load<rhs> %weight_view[0, 0] shape [%k, %n] using {scale = %scale_vector : vector<1xf32>} : view<16x16xf8E4M3, %weight_storage> -> vector<8xbf16>
-  vector.store %rhs, %output_view[0] : vector<8xbf16>, view<8xbf16, #encoding.layout.dense>
+  vector.store %rhs, %output_view[0] : vector<8xbf16>, view<8xbf16>
   kernel.return
 }
 

@@ -11,11 +11,11 @@ kernel.def target(@target) @cluster_gather_requires_target_packets() {
   %bytes = index.constant 256 : offset
   %participants = scalar.constant 3 : i32
   %global = buffer.assume.memory_space<global> %input : buffer
-  %source = buffer.view %global[%buffer_base] : buffer -> view<4xi8, #encoding.layout.dense>
+  %source = buffer.view %global[%buffer_base] : buffer -> view<4xi8>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %dest = buffer.view %scratch[%buffer_base] : buffer -> view<4xi8, #encoding.layout.dense>
+  %dest = buffer.view %scratch[%buffer_base] : buffer -> view<4xi8>
   // ERROR@+1: AMDGPU/023 {constraint_key="cluster_gather.descriptor_missing"}
-  %copy = kernel.async.cluster.gather %source to %dest using %participants {cache_scope = device, cache_temporal = regular} : view<4xi8, #encoding.layout.dense> to view<4xi8, #encoding.layout.dense>, i32 -> kernel.async.token
+  %copy = kernel.async.cluster.gather %source to %dest using %participants {cache_scope = device, cache_temporal = regular} : view<4xi8> to view<4xi8>, i32 -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
   // ERROR@+1: AMDGPU/023 {constraint_key="async_wait.descriptor"}
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
@@ -36,11 +36,11 @@ kernel.def target(@target) @masked_cluster_gather_is_not_yet_lowered() {
   %participants = scalar.constant 3 : i32
   %predicate = scalar.constant true : i1
   %global = buffer.assume.memory_space<global> %input : buffer
-  %source = buffer.view %global[%buffer_base] : buffer -> view<4xi8, #encoding.layout.dense>
+  %source = buffer.view %global[%buffer_base] : buffer -> view<4xi8>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %dest = buffer.view %scratch[%buffer_base] : buffer -> view<4xi8, #encoding.layout.dense>
+  %dest = buffer.view %scratch[%buffer_base] : buffer -> view<4xi8>
   // ERROR@+1: AMDGPU/023 {constraint_key="async.transfer_packet"}
-  %copy = kernel.async.cluster.gather.mask %source to %dest using %participants, %predicate {cache_scope = device, cache_temporal = regular} : view<4xi8, #encoding.layout.dense> to view<4xi8, #encoding.layout.dense>, i32, i1 -> kernel.async.token
+  %copy = kernel.async.cluster.gather.mask %source to %dest using %participants, %predicate {cache_scope = device, cache_temporal = regular} : view<4xi8> to view<4xi8>, i32, i1 -> kernel.async.token
   // ERROR@+1: AMDGPU/023 {constraint_key="async_group.local_transfer_tokens"}
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
   // ERROR@+1: AMDGPU/023 {constraint_key="async_wait.group_token"}
@@ -65,12 +65,12 @@ kernel.def target(@target) @cluster_gather_same_root_overlap() {
   %lane_base = index.mul %lane, %c64 : index
   %offset = index.cast %lane_base : index to offset
   %global = buffer.assume.memory_space<global> %input : buffer
-  %source = buffer.view %global[%buffer_base] : buffer -> view<16xi8, #encoding.layout.dense>
+  %source = buffer.view %global[%buffer_base] : buffer -> view<16xi8>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %dest = buffer.view %scratch[%offset] : buffer -> view<16xi8, #encoding.layout.dense>
-  %copy0 = kernel.async.cluster.gather %source to %dest using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8, #encoding.layout.dense> to view<16xi8, #encoding.layout.dense>, i32 -> kernel.async.token
+  %dest = buffer.view %scratch[%offset] : buffer -> view<16xi8>
+  %copy0 = kernel.async.cluster.gather %source to %dest using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8> to view<16xi8>, i32 -> kernel.async.token
   // ERROR@+1: LOWERING/026
-  %copy1 = kernel.async.cluster.gather %source to %dest using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8, #encoding.layout.dense> to view<16xi8, #encoding.layout.dense>, i32 -> kernel.async.token
+  %copy1 = kernel.async.cluster.gather %source to %dest using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8> to view<16xi8>, i32 -> kernel.async.token
   %group = kernel.async.group %copy0, %copy1 : kernel.async.token, kernel.async.token -> kernel.async.group
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
   kernel.return

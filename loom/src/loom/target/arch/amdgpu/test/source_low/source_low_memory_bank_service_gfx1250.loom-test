@@ -18,7 +18,7 @@ kernel.def target(@target) @gfx1250_b128_bank_service() {
   %scratch64 = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch80 = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch96 = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<32x16xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<32x16xi32>
   %view16 = buffer.view %scratch16[%buffer_base] : buffer -> view<32x4xi32, %stride16>
   %view64 = buffer.view %scratch64[%buffer_base] : buffer -> view<32x4xi32, %stride64>
   %view80 = buffer.view %scratch80[%buffer_base] : buffer -> view<32x4xi32, %stride80>
@@ -32,10 +32,10 @@ kernel.def target(@target) @gfx1250_b128_bank_service() {
   %loaded64 = vector.load %view64[%lane, 0] : view<32x4xi32, %stride64> -> vector<4xi32>
   %loaded80 = vector.load %view80[%lane, 0] : view<32x4xi32, %stride80> -> vector<4xi32>
   %loaded96 = vector.load %view96[%lane, 0] : view<32x4xi32, %stride96> -> vector<4xi32>
-  vector.store %loaded16, %output_view[%lane, 0] : vector<4xi32>, view<32x16xi32, #encoding.layout.dense>
-  vector.store %loaded64, %output_view[%lane, 4] : vector<4xi32>, view<32x16xi32, #encoding.layout.dense>
-  vector.store %loaded80, %output_view[%lane, 8] : vector<4xi32>, view<32x16xi32, #encoding.layout.dense>
-  vector.store %loaded96, %output_view[%lane, 12] : vector<4xi32>, view<32x16xi32, #encoding.layout.dense>
+  vector.store %loaded16, %output_view[%lane, 0] : vector<4xi32>, view<32x16xi32>
+  vector.store %loaded64, %output_view[%lane, 4] : vector<4xi32>, view<32x16xi32>
+  vector.store %loaded80, %output_view[%lane, 8] : vector<4xi32>, view<32x16xi32>
+  vector.store %loaded96, %output_view[%lane, 12] : vector<4xi32>, view<32x16xi32>
   kernel.return
 }
 

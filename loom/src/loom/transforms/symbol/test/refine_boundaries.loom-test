@@ -489,29 +489,29 @@ func.def public @call_effectful_return_duplicate_computed(%x: index) -> (index) 
 // Exact boundary facts refine dynamic dimensions carried only through private
 // function signatures. Once the view extent is static, the size argument is
 // ordinary dead boundary state and can be pruned with the call operand.
-func.def @private_extent_view(%buffer: buffer, %n: index) -> (view<[%n]xf32, #encoding.layout.dense>) {
+func.def @private_extent_view(%buffer: buffer, %n: index) -> (view<[%n]xf32>) {
   %offset = index.constant 0 : offset
-  %view = buffer.view %buffer[%offset] : buffer -> view<[%n]xf32, #encoding.layout.dense>
-  func.return %view : view<[%n]xf32, #encoding.layout.dense>
+  %view = buffer.view %buffer[%offset] : buffer -> view<[%n]xf32>
+  func.return %view : view<[%n]xf32>
 }
 
 func.def public @call_private_extent_view(%buffer: buffer) {
   %n = index.constant 4 : index
-  %view = func.call @private_extent_view(%buffer, %n) : (buffer, index) -> (view<[%n]xf32, #encoding.layout.dense>)
-  test.use %view : view<[%n]xf32, #encoding.layout.dense>
+  %view = func.call @private_extent_view(%buffer, %n) : (buffer, index) -> (view<[%n]xf32>)
+  test.use %view : view<[%n]xf32>
   func.return
 }
 
 // ----
-func.def @private_extent_view(%buffer: buffer) -> (view<4xf32, #encoding.layout.dense>) {
+func.def @private_extent_view(%buffer: buffer) -> (view<4xf32>) {
   %offset = index.constant 0 : offset
-  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, #encoding.layout.dense>
-  func.return %view : view<4xf32, #encoding.layout.dense>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32>
+  func.return %view : view<4xf32>
 }
 
 func.def public @call_private_extent_view(%buffer: buffer) {
-  %view = func.call pure @private_extent_view(%buffer) : (buffer) -> (view<4xf32, #encoding.layout.dense>)
-  test.use %view : view<4xf32, #encoding.layout.dense>
+  %view = func.call pure @private_extent_view(%buffer) : (buffer) -> (view<4xf32>)
+  test.use %view : view<4xf32>
   func.return
 }
 
@@ -535,15 +535,15 @@ func.def public @call_private_dense_view(%buffer: buffer) {
 }
 
 // ----
-func.def @private_dense_view(%buffer: buffer) -> (view<4xf32, #encoding.layout.dense>) {
+func.def @private_dense_view(%buffer: buffer) -> (view<4xf32>) {
   %offset = index.constant 0 : offset
-  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, #encoding.layout.dense>
-  func.return %view : view<4xf32, #encoding.layout.dense>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32>
+  func.return %view : view<4xf32>
 }
 
 func.def public @call_private_dense_view(%buffer: buffer) {
-  %view = func.call pure @private_dense_view(%buffer) : (buffer) -> (view<4xf32, #encoding.layout.dense>)
-  test.use %view : view<4xf32, #encoding.layout.dense>
+  %view = func.call pure @private_dense_view(%buffer) : (buffer) -> (view<4xf32>)
+  test.use %view : view<4xf32>
   func.return
 }
 
@@ -610,10 +610,10 @@ func.def @private_conflicting_layout_view() {
   func.return
 }
 
-func.def @private_conflicting_layout_view_spec0(%buffer: buffer) -> (view<4xf32, #encoding.layout.dense>) {
+func.def @private_conflicting_layout_view_spec0(%buffer: buffer) -> (view<4xf32>) {
   %offset = index.constant 0 : offset
-  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, #encoding.layout.dense>
-  func.return %view : view<4xf32, #encoding.layout.dense>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32>
+  func.return %view : view<4xf32>
 }
 
 func.def @private_conflicting_layout_view_spec1(%buffer: buffer) -> (view<4xf32, #encoding.layout.strided<strides=[8]>>) {
@@ -623,9 +623,9 @@ func.def @private_conflicting_layout_view_spec1(%buffer: buffer) -> (view<4xf32,
 }
 
 func.def public @call_private_conflicting_layout_view(%buffer: buffer) {
-  %view0 = func.call pure @private_conflicting_layout_view_spec0(%buffer) : (buffer) -> (view<4xf32, #encoding.layout.dense>)
+  %view0 = func.call pure @private_conflicting_layout_view_spec0(%buffer) : (buffer) -> (view<4xf32>)
   %view1 = func.call pure @private_conflicting_layout_view_spec1(%buffer) : (buffer) -> (view<4xf32, #encoding.layout.strided<strides=[8]>>)
-  test.use %view0, %view1 : view<4xf32, #encoding.layout.dense>, view<4xf32, #encoding.layout.strided<strides=[8]>>
+  test.use %view0, %view1 : view<4xf32>, view<4xf32, #encoding.layout.strided<strides=[8]>>
   func.return
 }
 

@@ -217,10 +217,10 @@ func.def target(@target) @llvmir_i32_dynamic_memory(%input: buffer, %output: buf
   %input_base = index.constant 16 : offset
   %output_base = index.constant 32 : offset
   %bounded_i = index.assume %i [range(%i, 0, 16)] : index
-  %input_view = buffer.view %input[%input_base] : buffer -> view<32xi32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%output_base] : buffer -> view<32xi32, #encoding.layout.dense>
-  %loaded = view.load %input_view[%bounded_i] : view<32xi32, #encoding.layout.dense> -> i32
-  view.store %loaded, %output_view[%bounded_i] : i32, view<32xi32, #encoding.layout.dense>
+  %input_view = buffer.view %input[%input_base] : buffer -> view<32xi32>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<32xi32>
+  %loaded = view.load %input_view[%bounded_i] : view<32xi32> -> i32
+  view.store %loaded, %output_view[%bounded_i] : i32, view<32xi32>
   func.return %loaded : i32
 }
 
@@ -243,10 +243,10 @@ kernel.def target(@target) @llvmir_hal_buffer_resources() {
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<1xi32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32, #encoding.layout.dense>
-  %loaded = view.load %input_view[0] : view<1xi32, #encoding.layout.dense> -> i32
-  view.store %loaded, %output_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
+  %loaded = view.load %input_view[0] : view<1xi32> -> i32
+  view.store %loaded, %output_view[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -272,15 +272,15 @@ func.def target(@target) @llvmir_canonical_dynamic_memory_address(%input: buffer
   %index_bias = index.constant 4 : index
   %element_index = index.madd %i, %index_stride, %index_bias : index
   %bounded_index = index.assume %element_index [range(%element_index, 0, 31)] : index
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32, #encoding.layout.dense>
-  %loaded = view.load %input_view[%bounded_index] : view<64xi32, #encoding.layout.dense> -> i32
-  view.store %loaded, %output_view[%bounded_index] : i32, view<64xi32, #encoding.layout.dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32>
+  %loaded = view.load %input_view[%bounded_index] : view<64xi32> -> i32
+  view.store %loaded, %output_view[%bounded_index] : i32, view<64xi32>
   %increment = scalar.constant 1 : i32
-  view.atomic.reduce<addi> %increment, %output_view[%bounded_index] {ordering = relaxed, scope = device} : i32, view<64xi32, #encoding.layout.dense>
-  %old = view.atomic.rmw<addi> %increment, %output_view[%bounded_index] {ordering = relaxed, scope = device} : i32, view<64xi32, #encoding.layout.dense> -> i32
+  view.atomic.reduce<addi> %increment, %output_view[%bounded_index] {ordering = relaxed, scope = device} : i32, view<64xi32>
+  %old = view.atomic.rmw<addi> %increment, %output_view[%bounded_index] {ordering = relaxed, scope = device} : i32, view<64xi32> -> i32
   %replacement = scalar.constant 9 : i32
-  %previous = view.atomic.cmpxchg %old, %replacement, %output_view[%bounded_index] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i32, view<64xi32, #encoding.layout.dense> -> i32
+  %previous = view.atomic.cmpxchg %old, %replacement, %output_view[%bounded_index] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i32, view<64xi32> -> i32
   func.return
 }
 

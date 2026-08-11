@@ -3,10 +3,10 @@
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @unknown_atomic_is_not_flat(%input: buffer) {
   %input_base = index.constant 0 : offset
-  %view = buffer.view %input[%input_base] : buffer -> view<1xi32, #encoding.layout.dense>
+  %view = buffer.view %input[%input_base] : buffer -> view<1xi32>
   %increment = scalar.constant 1 : i32
   // ERROR@+1: AMDGPU/023 {constraint_key="atomic.memory_space"}
-  view.atomic.reduce<addi> %increment, %view[0] {ordering = relaxed, scope = device} : i32, view<1xi32, #encoding.layout.dense>
+  view.atomic.reduce<addi> %increment, %view[0] {ordering = relaxed, scope = device} : i32, view<1xi32>
   func.return
 }
 
@@ -22,9 +22,9 @@ kernel.def target(@target) @generic_dynamic_atomic_rejected() {
   %tid = kernel.workitem.id<x> : index
   %input_base = index.constant 0 : offset
   %generic = buffer.assume.memory_space<generic> %input : buffer
-  %view = buffer.view %generic[%input_base] : buffer -> view<64xi32, #encoding.layout.dense>
+  %view = buffer.view %generic[%input_base] : buffer -> view<64xi32>
   %increment = scalar.constant 1 : i32
   // ERROR@+1: AMDGPU/020 {op_name="view.atomic.reduce", operation_kind="atomic_reduce", memory_space="generic", dynamic_term_index="0", byte_stride="4"}
-  view.atomic.reduce<addi> %increment, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #encoding.layout.dense>
+  view.atomic.reduce<addi> %increment, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32>
   kernel.return
 }

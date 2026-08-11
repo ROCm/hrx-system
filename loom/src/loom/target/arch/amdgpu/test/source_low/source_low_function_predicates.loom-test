@@ -12,9 +12,9 @@ kernel.def target(@target) @function_predicates_follow_direct_abi() {
 } launch(%token_count: index, %storage: buffer, %capacity: index) where [range(%token_count, 4, 2048), le(%token_count, %capacity), range(%capacity, 4, 4096)] {
   %c0 = index.constant 0 : index
   %base = index.constant 0 : offset
-  %storage_view = buffer.view %storage[%base] : buffer -> view<[%token_count]xi32, #encoding.layout.dense>
-  %value = vector.load %storage_view[%c0] : view<[%token_count]xi32, #encoding.layout.dense> -> vector<4xi32>
-  vector.store %value, %storage_view[%c0] : vector<4xi32>, view<[%token_count]xi32, #encoding.layout.dense>
+  %storage_view = buffer.view %storage[%base] : buffer -> view<[%token_count]xi32>
+  %value = vector.load %storage_view[%c0] : view<[%token_count]xi32> -> vector<4xi32>
+  vector.store %value, %storage_view[%c0] : vector<4xi32>, view<[%token_count]xi32>
   kernel.return
 }
 

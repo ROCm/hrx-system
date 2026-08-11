@@ -9,13 +9,13 @@ kernel.def @lds_f16x4_b64_roundtrip() {
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 512 : offset
   %scratch = buffer.alloca<workgroup> align(8) %bytes : buffer
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xf16, #encoding.layout.dense>
-  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xf16, #encoding.layout.dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xf16, #encoding.layout.dense>
-  %loaded = vector.load %input_view[%lane, 0] : view<64x4xf16, #encoding.layout.dense> -> vector<4xf16>
-  vector.store %loaded, %scratch_view[%lane, 0] : vector<4xf16>, view<64x4xf16, #encoding.layout.dense>
-  %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x4xf16, #encoding.layout.dense> -> vector<4xf16>
-  vector.store %roundtrip, %output_view[%lane, 0] : vector<4xf16>, view<64x4xf16, #encoding.layout.dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xf16>
+  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xf16>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xf16>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x4xf16> -> vector<4xf16>
+  vector.store %loaded, %scratch_view[%lane, 0] : vector<4xf16>, view<64x4xf16>
+  %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x4xf16> -> vector<4xf16>
+  vector.store %roundtrip, %output_view[%lane, 0] : vector<4xf16>, view<64x4xf16>
   kernel.return
 }
 
@@ -30,13 +30,13 @@ kernel.def @lds_f16x8_b128_roundtrip() {
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 1024 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x8xf16, #encoding.layout.dense>
-  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x8xf16, #encoding.layout.dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x8xf16, #encoding.layout.dense>
-  %loaded = vector.load %input_view[%lane, 0] : view<64x8xf16, #encoding.layout.dense> -> vector<8xf16>
-  vector.store %loaded, %scratch_view[%lane, 0] : vector<8xf16>, view<64x8xf16, #encoding.layout.dense>
-  %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x8xf16, #encoding.layout.dense> -> vector<8xf16>
-  vector.store %roundtrip, %output_view[%lane, 0] : vector<8xf16>, view<64x8xf16, #encoding.layout.dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x8xf16>
+  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x8xf16>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x8xf16>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x8xf16> -> vector<8xf16>
+  vector.store %loaded, %scratch_view[%lane, 0] : vector<8xf16>, view<64x8xf16>
+  %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x8xf16> -> vector<8xf16>
+  vector.store %roundtrip, %output_view[%lane, 0] : vector<8xf16>, view<64x8xf16>
   kernel.return
 }
 
@@ -49,28 +49,28 @@ kernel.def @lds_f16x8_b128_extract_scalar_stores() {
   %base = index.constant 0 : offset
   %bytes = index.constant 16 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %input_view = buffer.view %input[%base] : buffer -> view<8xf16, #encoding.layout.dense>
-  %scratch_view = buffer.view %scratch[%base] : buffer -> view<8xf16, #encoding.layout.dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<8xf16, #encoding.layout.dense>
-  %loaded = vector.load %input_view[0] : view<8xf16, #encoding.layout.dense> -> vector<8xf16>
+  %input_view = buffer.view %input[%base] : buffer -> view<8xf16>
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<8xf16>
+  %output_view = buffer.view %output[%base] : buffer -> view<8xf16>
+  %loaded = vector.load %input_view[0] : view<8xf16> -> vector<8xf16>
   %lane0 = vector.extract %loaded[0] : vector<8xf16> -> f16
-  view.store %lane0, %scratch_view[0] : f16, view<8xf16, #encoding.layout.dense>
+  view.store %lane0, %scratch_view[0] : f16, view<8xf16>
   %lane1 = vector.extract %loaded[1] : vector<8xf16> -> f16
-  view.store %lane1, %scratch_view[1] : f16, view<8xf16, #encoding.layout.dense>
+  view.store %lane1, %scratch_view[1] : f16, view<8xf16>
   %lane2 = vector.extract %loaded[2] : vector<8xf16> -> f16
-  view.store %lane2, %scratch_view[2] : f16, view<8xf16, #encoding.layout.dense>
+  view.store %lane2, %scratch_view[2] : f16, view<8xf16>
   %lane3 = vector.extract %loaded[3] : vector<8xf16> -> f16
-  view.store %lane3, %scratch_view[3] : f16, view<8xf16, #encoding.layout.dense>
+  view.store %lane3, %scratch_view[3] : f16, view<8xf16>
   %lane4 = vector.extract %loaded[4] : vector<8xf16> -> f16
-  view.store %lane4, %scratch_view[4] : f16, view<8xf16, #encoding.layout.dense>
+  view.store %lane4, %scratch_view[4] : f16, view<8xf16>
   %lane5 = vector.extract %loaded[5] : vector<8xf16> -> f16
-  view.store %lane5, %scratch_view[5] : f16, view<8xf16, #encoding.layout.dense>
+  view.store %lane5, %scratch_view[5] : f16, view<8xf16>
   %lane6 = vector.extract %loaded[6] : vector<8xf16> -> f16
-  view.store %lane6, %scratch_view[6] : f16, view<8xf16, #encoding.layout.dense>
+  view.store %lane6, %scratch_view[6] : f16, view<8xf16>
   %lane7 = vector.extract %loaded[7] : vector<8xf16> -> f16
-  view.store %lane7, %scratch_view[7] : f16, view<8xf16, #encoding.layout.dense>
-  %roundtrip = vector.load %scratch_view[0] : view<8xf16, #encoding.layout.dense> -> vector<8xf16>
-  vector.store %roundtrip, %output_view[0] : vector<8xf16>, view<8xf16, #encoding.layout.dense>
+  view.store %lane7, %scratch_view[7] : f16, view<8xf16>
+  %roundtrip = vector.load %scratch_view[0] : view<8xf16> -> vector<8xf16>
+  vector.store %roundtrip, %output_view[0] : vector<8xf16>, view<8xf16>
   kernel.return
 }
 
@@ -85,13 +85,13 @@ kernel.def @lds_bf16x4_b64_roundtrip() {
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 512 : offset
   %scratch = buffer.alloca<workgroup> align(8) %bytes : buffer
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xbf16, #encoding.layout.dense>
-  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xbf16, #encoding.layout.dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xbf16, #encoding.layout.dense>
-  %loaded = vector.load %input_view[%lane, 0] : view<64x4xbf16, #encoding.layout.dense> -> vector<4xbf16>
-  vector.store %loaded, %scratch_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16, #encoding.layout.dense>
-  %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x4xbf16, #encoding.layout.dense> -> vector<4xbf16>
-  vector.store %roundtrip, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16, #encoding.layout.dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xbf16>
+  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xbf16>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xbf16>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x4xbf16> -> vector<4xbf16>
+  vector.store %loaded, %scratch_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
+  %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x4xbf16> -> vector<4xbf16>
+  vector.store %roundtrip, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
   kernel.return
 }
 
@@ -106,13 +106,13 @@ kernel.def @lds_bf16x8_b128_roundtrip() {
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 1024 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x8xbf16, #encoding.layout.dense>
-  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x8xbf16, #encoding.layout.dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x8xbf16, #encoding.layout.dense>
-  %loaded = vector.load %input_view[%lane, 0] : view<64x8xbf16, #encoding.layout.dense> -> vector<8xbf16>
-  vector.store %loaded, %scratch_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16, #encoding.layout.dense>
-  %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x8xbf16, #encoding.layout.dense> -> vector<8xbf16>
-  vector.store %roundtrip, %output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16, #encoding.layout.dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x8xbf16>
+  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x8xbf16>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x8xbf16>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x8xbf16> -> vector<8xbf16>
+  vector.store %loaded, %scratch_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16>
+  %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x8xbf16> -> vector<8xbf16>
+  vector.store %roundtrip, %output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16>
   kernel.return
 }
 
@@ -127,13 +127,13 @@ kernel.def @lds_f16_scalar_roundtrip() {
   %base = index.constant 0 : offset
   %bytes = index.constant 128 : offset
   %scratch = buffer.alloca<workgroup> align(2) %bytes : buffer
-  %input_view = buffer.view %input[%base] : buffer -> view<64xf16, #encoding.layout.dense>
-  %scratch_view = buffer.view %scratch[%base] : buffer -> view<64xf16, #encoding.layout.dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64xf16, #encoding.layout.dense>
-  %loaded = view.load %input_view[%lane] : view<64xf16, #encoding.layout.dense> -> f16
-  view.store %loaded, %scratch_view[%lane] : f16, view<64xf16, #encoding.layout.dense>
-  %roundtrip = view.load %scratch_view[%lane] : view<64xf16, #encoding.layout.dense> -> f16
-  view.store %roundtrip, %output_view[%lane] : f16, view<64xf16, #encoding.layout.dense>
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf16>
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<64xf16>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf16>
+  %loaded = view.load %input_view[%lane] : view<64xf16> -> f16
+  view.store %loaded, %scratch_view[%lane] : f16, view<64xf16>
+  %roundtrip = view.load %scratch_view[%lane] : view<64xf16> -> f16
+  view.store %roundtrip, %output_view[%lane] : f16, view<64xf16>
   kernel.return
 }
 
@@ -146,13 +146,13 @@ kernel.def @lds_i8x2_b16_roundtrip() {
   %base = index.constant 0 : offset
   %bytes = index.constant 2 : offset
   %scratch = buffer.alloca<workgroup> align(2) %bytes : buffer
-  %input_view = buffer.view %input[%base] : buffer -> view<2xi8, #encoding.layout.dense>
-  %scratch_view = buffer.view %scratch[%base] : buffer -> view<2xi8, #encoding.layout.dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<2xi8, #encoding.layout.dense>
-  %loaded = vector.load %input_view[0] : view<2xi8, #encoding.layout.dense> -> vector<2xi8>
-  vector.store %loaded, %scratch_view[0] : vector<2xi8>, view<2xi8, #encoding.layout.dense>
-  %roundtrip = vector.load %scratch_view[0] : view<2xi8, #encoding.layout.dense> -> vector<2xi8>
-  vector.store %roundtrip, %output_view[0] : vector<2xi8>, view<2xi8, #encoding.layout.dense>
+  %input_view = buffer.view %input[%base] : buffer -> view<2xi8>
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<2xi8>
+  %output_view = buffer.view %output[%base] : buffer -> view<2xi8>
+  %loaded = vector.load %input_view[0] : view<2xi8> -> vector<2xi8>
+  vector.store %loaded, %scratch_view[0] : vector<2xi8>, view<2xi8>
+  %roundtrip = vector.load %scratch_view[0] : view<2xi8> -> vector<2xi8>
+  vector.store %roundtrip, %output_view[0] : vector<2xi8>, view<2xi8>
   kernel.return
 }
 
@@ -165,13 +165,13 @@ kernel.def @lds_i16_scalar_roundtrip() {
   %base = index.constant 0 : offset
   %bytes = index.constant 2 : offset
   %scratch = buffer.alloca<workgroup> align(2) %bytes : buffer
-  %input_view = buffer.view %input[%base] : buffer -> view<1xi16, #encoding.layout.dense>
-  %scratch_view = buffer.view %scratch[%base] : buffer -> view<1xi16, #encoding.layout.dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<1xi16, #encoding.layout.dense>
-  %loaded = view.load %input_view[0] : view<1xi16, #encoding.layout.dense> -> i16
-  view.store %loaded, %scratch_view[0] : i16, view<1xi16, #encoding.layout.dense>
-  %roundtrip = view.load %scratch_view[0] : view<1xi16, #encoding.layout.dense> -> i16
-  view.store %roundtrip, %output_view[0] : i16, view<1xi16, #encoding.layout.dense>
+  %input_view = buffer.view %input[%base] : buffer -> view<1xi16>
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<1xi16>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi16>
+  %loaded = view.load %input_view[0] : view<1xi16> -> i16
+  view.store %loaded, %scratch_view[0] : i16, view<1xi16>
+  %roundtrip = view.load %scratch_view[0] : view<1xi16> -> i16
+  view.store %roundtrip, %output_view[0] : i16, view<1xi16>
   kernel.return
 }
 
@@ -186,13 +186,13 @@ kernel.def @lds_bf16_scalar_roundtrip() {
   %base = index.constant 0 : offset
   %bytes = index.constant 128 : offset
   %scratch = buffer.alloca<workgroup> align(2) %bytes : buffer
-  %input_view = buffer.view %input[%base] : buffer -> view<64xbf16, #encoding.layout.dense>
-  %scratch_view = buffer.view %scratch[%base] : buffer -> view<64xbf16, #encoding.layout.dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64xbf16, #encoding.layout.dense>
-  %loaded = view.load %input_view[%lane] : view<64xbf16, #encoding.layout.dense> -> bf16
-  view.store %loaded, %scratch_view[%lane] : bf16, view<64xbf16, #encoding.layout.dense>
-  %roundtrip = view.load %scratch_view[%lane] : view<64xbf16, #encoding.layout.dense> -> bf16
-  view.store %roundtrip, %output_view[%lane] : bf16, view<64xbf16, #encoding.layout.dense>
+  %input_view = buffer.view %input[%base] : buffer -> view<64xbf16>
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<64xbf16>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xbf16>
+  %loaded = view.load %input_view[%lane] : view<64xbf16> -> bf16
+  view.store %loaded, %scratch_view[%lane] : bf16, view<64xbf16>
+  %roundtrip = view.load %scratch_view[%lane] : view<64xbf16> -> bf16
+  view.store %roundtrip, %output_view[%lane] : bf16, view<64xbf16>
   kernel.return
 }
 
@@ -209,12 +209,12 @@ kernel.def @lds_f16_strided_scalar_roundtrip() {
   %bytes = index.constant 512 : offset
   %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
   %scratch = buffer.alloca<workgroup> align(2) %bytes : buffer
-  %input_view = buffer.view %input[%base] : buffer -> view<16x16xf16, #encoding.layout.dense>
+  %input_view = buffer.view %input[%base] : buffer -> view<16x16xf16>
   %scratch_view = buffer.view %scratch[%base] : buffer -> view<16x16xf16, %rhs_layout>
-  %output_view = buffer.view %output[%base] : buffer -> view<16x16xf16, #encoding.layout.dense>
-  %loaded = view.load %input_view[%row, %column] : view<16x16xf16, #encoding.layout.dense> -> f16
+  %output_view = buffer.view %output[%base] : buffer -> view<16x16xf16>
+  %loaded = view.load %input_view[%row, %column] : view<16x16xf16> -> f16
   view.store %loaded, %scratch_view[%row, %column] : f16, view<16x16xf16, %rhs_layout>
   %roundtrip = view.load %scratch_view[%row, %column] : view<16x16xf16, %rhs_layout> -> f16
-  view.store %roundtrip, %output_view[%row, %column] : f16, view<16x16xf16, #encoding.layout.dense>
+  view.store %roundtrip, %output_view[%row, %column] : f16, view<16x16xf16>
   kernel.return
 }

@@ -16,27 +16,27 @@ kernel.def @weighted_expert_route_gather_f32() {
   %combined_payload_origin = index.constant 0 : index
 
   %route_ids_noalias, %route_weights_noalias, %expert_payloads_noalias, %combined_payload_noalias = buffer.assume.noalias %route_ids, %route_weights, %expert_payloads, %combined_payload : buffer, buffer, buffer, buffer
-  %route_ids_view = buffer.view %route_ids_noalias[%base] : buffer -> view<2xi32, #encoding.layout.dense>
-  %route_weights_view = buffer.view %route_weights_noalias[%base] : buffer -> view<2xf32, #encoding.layout.dense>
-  %expert_payloads_view = buffer.view %expert_payloads_noalias[%base] : buffer -> view<4x4xf32, #encoding.layout.dense>
-  %combined_payload_view = buffer.view %combined_payload_noalias[%base] : buffer -> view<4xf32, #encoding.layout.dense>
+  %route_ids_view = buffer.view %route_ids_noalias[%base] : buffer -> view<2xi32>
+  %route_weights_view = buffer.view %route_weights_noalias[%base] : buffer -> view<2xf32>
+  %expert_payloads_view = buffer.view %expert_payloads_noalias[%base] : buffer -> view<4x4xf32>
+  %combined_payload_view = buffer.view %combined_payload_noalias[%base] : buffer -> view<4xf32>
 
-  %route_id0_i32 = view.load %route_ids_view[0] : view<2xi32, #encoding.layout.dense> -> i32
-  %route_id1_i32 = view.load %route_ids_view[1] : view<2xi32, #encoding.layout.dense> -> i32
+  %route_id0_i32 = view.load %route_ids_view[0] : view<2xi32> -> i32
+  %route_id1_i32 = view.load %route_ids_view[1] : view<2xi32> -> i32
   %route_id0_index0 = index.cast %route_id0_i32 : i32 to index
   %route_id1_index0 = index.cast %route_id1_i32 : i32 to index
   %route_id0 = index.assume %route_id0_index0 [range(%route_id0_index0, 0, 3)] : index
   %route_id1 = index.assume %route_id1_index0 [range(%route_id1_index0, 0, 3)] : index
-  %weight0 = view.load %route_weights_view[0] : view<2xf32, #encoding.layout.dense> -> f32
-  %weight1 = view.load %route_weights_view[1] : view<2xf32, #encoding.layout.dense> -> f32
-  %payload0 = vector.load %expert_payloads_view[%route_id0, %payload_origin] : view<4x4xf32, #encoding.layout.dense> -> vector<4xf32>
-  %payload1 = vector.load %expert_payloads_view[%route_id1, %payload_origin] : view<4x4xf32, #encoding.layout.dense> -> vector<4xf32>
+  %weight0 = view.load %route_weights_view[0] : view<2xf32> -> f32
+  %weight1 = view.load %route_weights_view[1] : view<2xf32> -> f32
+  %payload0 = vector.load %expert_payloads_view[%route_id0, %payload_origin] : view<4x4xf32> -> vector<4xf32>
+  %payload1 = vector.load %expert_payloads_view[%route_id1, %payload_origin] : view<4x4xf32> -> vector<4xf32>
   %weight0_vector = vector.splat %weight0 : vector<4xf32>
   %weight1_vector = vector.splat %weight1 : vector<4xf32>
   %weighted_payload0 = vector.mulf<reassoc|nnan|nsz|contract> %payload0, %weight0_vector : vector<4xf32>
   %weighted_payload1 = vector.mulf<reassoc|nnan|nsz|contract> %payload1, %weight1_vector : vector<4xf32>
   %combined = vector.addf<reassoc|nnan|nsz|contract> %weighted_payload0, %weighted_payload1 : vector<4xf32>
-  vector.store %combined, %combined_payload_view[%combined_payload_origin] : vector<4xf32>, view<4xf32, #encoding.layout.dense>
+  vector.store %combined, %combined_payload_view[%combined_payload_origin] : vector<4xf32>, view<4xf32>
   kernel.return
 }
 

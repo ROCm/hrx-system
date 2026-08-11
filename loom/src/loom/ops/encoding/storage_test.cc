@@ -33,6 +33,7 @@ static const loom_encoding_family_fixed_metadata_t kFixedRecordMetadata = {
 static const loom_encoding_family_descriptor_t kFixedRecordDescriptor = {
     /*.name=*/LOOM_BSTRING_REF(17, "test.fixed_record"),
     /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    /*.family_flags=*/{},
     /*.parameter_count=*/{},
     /*.parameter_descriptors=*/{},
     /*.dynamic_parameter_count=*/{},
@@ -83,6 +84,34 @@ class EncodingStorageTest : public ::testing::Test {
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_;
 };
+
+TEST(EncodingStorageQueryTest, AbsentShapedAttachmentIsDense) {
+  const loom_type_kind_t shaped_kinds[] = {
+      LOOM_TYPE_TILE,
+      LOOM_TYPE_TENSOR,
+      LOOM_TYPE_VIEW,
+  };
+  for (loom_type_kind_t shaped_kind : shaped_kinds) {
+    const loom_type_t type = loom_type_shaped_1d(
+        shaped_kind, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(16), 0);
+    loom_value_fact_address_layout_t layout = {};
+    EXPECT_TRUE(loom_encoding_query_type_address_layout(
+        /*context=*/nullptr, /*module=*/nullptr, type,
+        /*stride_storage=*/nullptr, /*stride_capacity=*/0, &layout));
+    EXPECT_EQ(layout.kind, LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE);
+
+    loom_value_fact_storage_schema_t storage_schema = {};
+    EXPECT_FALSE(loom_encoding_query_type_storage_schema(
+        /*context=*/nullptr, /*module=*/nullptr, type, &storage_schema));
+  }
+
+  const loom_type_t vector_type = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(16), 0);
+  loom_value_fact_address_layout_t vector_layout = {};
+  EXPECT_FALSE(loom_encoding_query_type_address_layout(
+      /*context=*/nullptr, /*module=*/nullptr, vector_type,
+      /*stride_storage=*/nullptr, /*stride_capacity=*/0, &vector_layout));
+}
 
 TEST_F(EncodingStorageTest, FixedRecordGeometry) {
   loom_module_t* module =

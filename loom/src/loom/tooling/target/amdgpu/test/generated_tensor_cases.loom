@@ -7,12 +7,12 @@ kernel.def @decode_f8e4m3_one() {
 
   %input_global = buffer.assume.memory_space<global> %input : buffer
   %output_global = buffer.assume.memory_space<global> %output : buffer
-  %input_view = buffer.view %input_global[%base] : buffer -> view<1xf8E4M3, #encoding.layout.dense>
-  %output_view = buffer.view %output_global[%base] : buffer -> view<1xf32, #encoding.layout.dense>
+  %input_view = buffer.view %input_global[%base] : buffer -> view<1xf8E4M3>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<1xf32>
 
-  %fp8 = view.load %input_view[%element] : view<1xf8E4M3, #encoding.layout.dense> -> f8E4M3
+  %fp8 = view.load %input_view[%element] : view<1xf8E4M3> -> f8E4M3
   %decoded = scalar.extf %fp8 : f8E4M3 to f32
-  view.store %decoded, %output_view[%element] : f32, view<1xf32, #encoding.layout.dense>
+  view.store %decoded, %output_view[%element] : f32, view<1xf32>
   kernel.return
 }
 
@@ -25,12 +25,12 @@ kernel.def @decode_f8e5m2_one() {
 
   %input_global = buffer.assume.memory_space<global> %input : buffer
   %output_global = buffer.assume.memory_space<global> %output : buffer
-  %input_view = buffer.view %input_global[%base] : buffer -> view<1xf8E5M2, #encoding.layout.dense>
-  %output_view = buffer.view %output_global[%base] : buffer -> view<1xf32, #encoding.layout.dense>
+  %input_view = buffer.view %input_global[%base] : buffer -> view<1xf8E5M2>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<1xf32>
 
-  %fp8 = view.load %input_view[%element] : view<1xf8E5M2, #encoding.layout.dense> -> f8E5M2
+  %fp8 = view.load %input_view[%element] : view<1xf8E5M2> -> f8E5M2
   %decoded = scalar.extf %fp8 : f8E5M2 to f32
-  view.store %decoded, %output_view[%element] : f32, view<1xf32, #encoding.layout.dense>
+  view.store %decoded, %output_view[%element] : f32, view<1xf32>
   kernel.return
 }
 

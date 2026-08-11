@@ -11,10 +11,10 @@ kernel.def target(@target) @cluster_gather_b32() {
   %bytes = index.constant 256 : offset
   %participants = scalar.constant 3 : i32
   %global = buffer.assume.memory_space<global> %input : buffer
-  %source = buffer.view %global[%buffer_base] : buffer -> view<4xi8, #encoding.layout.dense>
+  %source = buffer.view %global[%buffer_base] : buffer -> view<4xi8>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %dest = buffer.view %scratch[%buffer_base] : buffer -> view<4xi8, #encoding.layout.dense>
-  %copy = kernel.async.cluster.gather %source to %dest using %participants {cache_scope = device, cache_temporal = regular} : view<4xi8, #encoding.layout.dense> to view<4xi8, #encoding.layout.dense>, i32 -> kernel.async.token
+  %dest = buffer.view %scratch[%buffer_base] : buffer -> view<4xi8>
+  %copy = kernel.async.cluster.gather %source to %dest using %participants {cache_scope = device, cache_temporal = regular} : view<4xi8> to view<4xi8>, i32 -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
   kernel.return
@@ -46,18 +46,18 @@ kernel.def target(@target) @cluster_gather_packet_widths() {
   %bytes16 = index.constant 16 : offset
   %participants = scalar.constant 3 : i32
   %global = buffer.assume.memory_space<global> %input : buffer
-  %source8 = buffer.view %global[%buffer_base] : buffer -> view<1xi8, #encoding.layout.dense>
-  %source64 = buffer.view %global[%offset16] : buffer -> view<8xi8, #encoding.layout.dense>
-  %source128 = buffer.view %global[%offset32] : buffer -> view<16xi8, #encoding.layout.dense>
+  %source8 = buffer.view %global[%buffer_base] : buffer -> view<1xi8>
+  %source64 = buffer.view %global[%offset16] : buffer -> view<8xi8>
+  %source128 = buffer.view %global[%offset32] : buffer -> view<16xi8>
   %scratch8 = buffer.alloca<workgroup> align(16) %bytes16 : buffer
   %scratch64 = buffer.alloca<workgroup> align(16) %bytes16 : buffer
   %scratch128 = buffer.alloca<workgroup> align(16) %bytes16 : buffer
-  %dest8 = buffer.view %scratch8[%buffer_base] : buffer -> view<1xi8, #encoding.layout.dense>
-  %dest64 = buffer.view %scratch64[%buffer_base] : buffer -> view<8xi8, #encoding.layout.dense>
-  %dest128 = buffer.view %scratch128[%buffer_base] : buffer -> view<16xi8, #encoding.layout.dense>
-  %copy8 = kernel.async.cluster.gather %source8 to %dest8 using %participants {cache_scope = cu, cache_temporal = regular} : view<1xi8, #encoding.layout.dense> to view<1xi8, #encoding.layout.dense>, i32 -> kernel.async.token
-  %copy64 = kernel.async.cluster.gather %source64 to %dest64 using %participants {cache_scope = se, cache_temporal = high_temporal} : view<8xi8, #encoding.layout.dense> to view<8xi8, #encoding.layout.dense>, i32 -> kernel.async.token
-  %copy128 = kernel.async.cluster.gather %source128 to %dest128 using %participants {cache_scope = system, cache_temporal = bypass} : view<16xi8, #encoding.layout.dense> to view<16xi8, #encoding.layout.dense>, i32 -> kernel.async.token
+  %dest8 = buffer.view %scratch8[%buffer_base] : buffer -> view<1xi8>
+  %dest64 = buffer.view %scratch64[%buffer_base] : buffer -> view<8xi8>
+  %dest128 = buffer.view %scratch128[%buffer_base] : buffer -> view<16xi8>
+  %copy8 = kernel.async.cluster.gather %source8 to %dest8 using %participants {cache_scope = cu, cache_temporal = regular} : view<1xi8> to view<1xi8>, i32 -> kernel.async.token
+  %copy64 = kernel.async.cluster.gather %source64 to %dest64 using %participants {cache_scope = se, cache_temporal = high_temporal} : view<8xi8> to view<8xi8>, i32 -> kernel.async.token
+  %copy128 = kernel.async.cluster.gather %source128 to %dest128 using %participants {cache_scope = system, cache_temporal = bypass} : view<16xi8> to view<16xi8>, i32 -> kernel.async.token
   %group = kernel.async.group %copy8, %copy64, %copy128 : kernel.async.token, kernel.async.token, kernel.async.token -> kernel.async.group
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
   kernel.return
@@ -99,10 +99,10 @@ kernel.def target(@target) @cluster_gather_dynamic_addresses() {
   %lane_byte_index = index.mul %lane, %c16 : index
   %lane_byte_offset = index.cast %lane_byte_index : index to offset
   %global = buffer.assume.memory_space<global> %input : buffer
-  %source = buffer.view %global[%lane_byte_offset] : buffer -> view<4xi8, #encoding.layout.dense>
+  %source = buffer.view %global[%lane_byte_offset] : buffer -> view<4xi8>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %dest = buffer.view %scratch[%lane_byte_offset] : buffer -> view<4xi8, #encoding.layout.dense>
-  %copy = kernel.async.cluster.gather %source to %dest using %participants {cache_scope = device, cache_temporal = regular} : view<4xi8, #encoding.layout.dense> to view<4xi8, #encoding.layout.dense>, i32 -> kernel.async.token
+  %dest = buffer.view %scratch[%lane_byte_offset] : buffer -> view<4xi8>
+  %copy = kernel.async.cluster.gather %source to %dest using %participants {cache_scope = device, cache_temporal = regular} : view<4xi8> to view<4xi8>, i32 -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
   kernel.return
@@ -133,23 +133,23 @@ kernel.def target(@target) @cluster_gather_two_stage_wait_depth() {
   %bytes16 = index.constant 16 : offset
   %participants = scalar.constant 3 : i32
   %global = buffer.assume.memory_space<global> %input : buffer
-  %source = buffer.view %global[%buffer_base] : buffer -> view<16xi8, #encoding.layout.dense>
+  %source = buffer.view %global[%buffer_base] : buffer -> view<16xi8>
   %scratch0 = buffer.alloca<workgroup> align(16) %bytes16 : buffer
   %scratch1 = buffer.alloca<workgroup> align(16) %bytes16 : buffer
   %scratch2 = buffer.alloca<workgroup> align(16) %bytes16 : buffer
   %scratch3 = buffer.alloca<workgroup> align(16) %bytes16 : buffer
   %scratch4 = buffer.alloca<workgroup> align(16) %bytes16 : buffer
-  %dest0 = buffer.view %scratch0[%buffer_base] : buffer -> view<16xi8, #encoding.layout.dense>
-  %dest1 = buffer.view %scratch1[%buffer_base] : buffer -> view<16xi8, #encoding.layout.dense>
-  %dest2 = buffer.view %scratch2[%buffer_base] : buffer -> view<16xi8, #encoding.layout.dense>
-  %dest3 = buffer.view %scratch3[%buffer_base] : buffer -> view<16xi8, #encoding.layout.dense>
-  %dest4 = buffer.view %scratch4[%buffer_base] : buffer -> view<16xi8, #encoding.layout.dense>
-  %copy0 = kernel.async.cluster.gather %source to %dest0 using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8, #encoding.layout.dense> to view<16xi8, #encoding.layout.dense>, i32 -> kernel.async.token
+  %dest0 = buffer.view %scratch0[%buffer_base] : buffer -> view<16xi8>
+  %dest1 = buffer.view %scratch1[%buffer_base] : buffer -> view<16xi8>
+  %dest2 = buffer.view %scratch2[%buffer_base] : buffer -> view<16xi8>
+  %dest3 = buffer.view %scratch3[%buffer_base] : buffer -> view<16xi8>
+  %dest4 = buffer.view %scratch4[%buffer_base] : buffer -> view<16xi8>
+  %copy0 = kernel.async.cluster.gather %source to %dest0 using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8> to view<16xi8>, i32 -> kernel.async.token
   %group0 = kernel.async.group %copy0 : kernel.async.token -> kernel.async.group
-  %copy1 = kernel.async.cluster.gather %source to %dest1 using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8, #encoding.layout.dense> to view<16xi8, #encoding.layout.dense>, i32 -> kernel.async.token
-  %copy2 = kernel.async.cluster.gather %source to %dest2 using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8, #encoding.layout.dense> to view<16xi8, #encoding.layout.dense>, i32 -> kernel.async.token
-  %copy3 = kernel.async.cluster.gather %source to %dest3 using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8, #encoding.layout.dense> to view<16xi8, #encoding.layout.dense>, i32 -> kernel.async.token
-  %copy4 = kernel.async.cluster.gather %source to %dest4 using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8, #encoding.layout.dense> to view<16xi8, #encoding.layout.dense>, i32 -> kernel.async.token
+  %copy1 = kernel.async.cluster.gather %source to %dest1 using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8> to view<16xi8>, i32 -> kernel.async.token
+  %copy2 = kernel.async.cluster.gather %source to %dest2 using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8> to view<16xi8>, i32 -> kernel.async.token
+  %copy3 = kernel.async.cluster.gather %source to %dest3 using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8> to view<16xi8>, i32 -> kernel.async.token
+  %copy4 = kernel.async.cluster.gather %source to %dest4 using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8> to view<16xi8>, i32 -> kernel.async.token
   %group1 = kernel.async.group %copy1, %copy2, %copy3, %copy4 : kernel.async.token, kernel.async.token, kernel.async.token, kernel.async.token -> kernel.async.group
   kernel.async.wait %group0 {newer_groups = 1} : kernel.async.group
   kernel.async.wait %group1 {newer_groups = 0} : kernel.async.group
@@ -210,16 +210,16 @@ kernel.def target(@target) @cluster_gather_same_root_disjoint_slots() {
   %offset2 = index.cast %slot2 : index to offset
   %offset3 = index.cast %slot3 : index to offset
   %global = buffer.assume.memory_space<global> %input : buffer
-  %source = buffer.view %global[%buffer_base] : buffer -> view<16xi8, #encoding.layout.dense>
+  %source = buffer.view %global[%buffer_base] : buffer -> view<16xi8>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %dest0 = buffer.view %scratch[%offset0] : buffer -> view<16xi8, #encoding.layout.dense>
-  %dest1 = buffer.view %scratch[%offset1] : buffer -> view<16xi8, #encoding.layout.dense>
-  %dest2 = buffer.view %scratch[%offset2] : buffer -> view<16xi8, #encoding.layout.dense>
-  %dest3 = buffer.view %scratch[%offset3] : buffer -> view<16xi8, #encoding.layout.dense>
-  %copy0 = kernel.async.cluster.gather %source to %dest0 using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8, #encoding.layout.dense> to view<16xi8, #encoding.layout.dense>, i32 -> kernel.async.token
-  %copy1 = kernel.async.cluster.gather %source to %dest1 using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8, #encoding.layout.dense> to view<16xi8, #encoding.layout.dense>, i32 -> kernel.async.token
-  %copy2 = kernel.async.cluster.gather %source to %dest2 using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8, #encoding.layout.dense> to view<16xi8, #encoding.layout.dense>, i32 -> kernel.async.token
-  %copy3 = kernel.async.cluster.gather %source to %dest3 using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8, #encoding.layout.dense> to view<16xi8, #encoding.layout.dense>, i32 -> kernel.async.token
+  %dest0 = buffer.view %scratch[%offset0] : buffer -> view<16xi8>
+  %dest1 = buffer.view %scratch[%offset1] : buffer -> view<16xi8>
+  %dest2 = buffer.view %scratch[%offset2] : buffer -> view<16xi8>
+  %dest3 = buffer.view %scratch[%offset3] : buffer -> view<16xi8>
+  %copy0 = kernel.async.cluster.gather %source to %dest0 using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8> to view<16xi8>, i32 -> kernel.async.token
+  %copy1 = kernel.async.cluster.gather %source to %dest1 using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8> to view<16xi8>, i32 -> kernel.async.token
+  %copy2 = kernel.async.cluster.gather %source to %dest2 using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8> to view<16xi8>, i32 -> kernel.async.token
+  %copy3 = kernel.async.cluster.gather %source to %dest3 using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8> to view<16xi8>, i32 -> kernel.async.token
   %group = kernel.async.group %copy0, %copy1, %copy2, %copy3 : kernel.async.token, kernel.async.token, kernel.async.token, kernel.async.token -> kernel.async.group
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
   kernel.return
@@ -265,16 +265,16 @@ kernel.def target(@target) @cluster_gather_disjoint_workgroup_store() {
   %lane_byte_offset = index.cast %lane_byte_index : index to offset
   %global_input = buffer.assume.memory_space<global> %input : buffer
   %global_payload = buffer.assume.memory_space<global> %payload : buffer
-  %source = buffer.view %global_input[%lane_byte_offset] : buffer -> view<16xi8, #encoding.layout.dense>
-  %payload_view = buffer.view %global_payload[%lane_byte_offset] : buffer -> view<4xi32, #encoding.layout.dense>
+  %source = buffer.view %global_input[%lane_byte_offset] : buffer -> view<16xi8>
+  %payload_view = buffer.view %global_payload[%lane_byte_offset] : buffer -> view<4xi32>
   %lhs_scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %rhs_scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %dest = buffer.view %lhs_scratch[%lane_byte_offset] : buffer -> view<16xi8, #encoding.layout.dense>
-  %rhs_view = buffer.view %rhs_scratch[%lane_byte_offset] : buffer -> view<4xi32, #encoding.layout.dense>
-  %copy = kernel.async.cluster.gather %source to %dest using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8, #encoding.layout.dense> to view<16xi8, #encoding.layout.dense>, i32 -> kernel.async.token
+  %dest = buffer.view %lhs_scratch[%lane_byte_offset] : buffer -> view<16xi8>
+  %rhs_view = buffer.view %rhs_scratch[%lane_byte_offset] : buffer -> view<4xi32>
+  %copy = kernel.async.cluster.gather %source to %dest using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8> to view<16xi8>, i32 -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
-  %value = vector.load %payload_view[0] : view<4xi32, #encoding.layout.dense> -> vector<4xi32>
-  vector.store %value, %rhs_view[0] : vector<4xi32>, view<4xi32, #encoding.layout.dense>
+  %value = vector.load %payload_view[0] : view<4xi32> -> vector<4xi32>
+  vector.store %value, %rhs_view[0] : vector<4xi32>, view<4xi32>
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
   kernel.return
 }

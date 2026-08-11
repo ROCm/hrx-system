@@ -133,8 +133,8 @@ kernel.def target(@target) @read_kernel() {
 } launch(%input: buffer) {
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
-  %input_view = buffer.view %input_global[%base] : buffer -> view<1xi32, #encoding.layout.dense>
-  sanitizer.assert.access<read> %input_view[0] : view<1xi32, #encoding.layout.dense>
+  %input_view = buffer.view %input_global[%base] : buffer -> view<1xi32>
+  sanitizer.assert.access<read> %input_view[0] : view<1xi32>
   kernel.return
 }
 
@@ -144,8 +144,8 @@ kernel.def target(@target) @write_kernel() {
 } launch(%output: buffer) {
   %base = index.constant 0 : offset
   %output_global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %output_global[%base] : buffer -> view<1xi32, #encoding.layout.dense>
-  sanitizer.assert.access<write> %output_view[0] : view<1xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<1xi32>
+  sanitizer.assert.access<write> %output_view[0] : view<1xi32>
   kernel.return
 }
 )";

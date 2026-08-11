@@ -23,9 +23,9 @@ kernel.def @memset_i8(%element_length: index) {
   %element_index = index.madd %workgroup, %workgroup_size, %lane : index
   %in_bounds = index.cmp ult, %element_index, %bounded_element_length : index
   %pattern_i8 = scalar.trunci %pattern : i64 to i8
-  %target_view = buffer.view %target[%base] : buffer -> view<[%bounded_element_length]xi8, #encoding.layout.dense>
+  %target_view = buffer.view %target[%base] : buffer -> view<[%bounded_element_length]xi8>
   scf.if %in_bounds {
-    view.store %pattern_i8, %target_view[%element_index] : i8, view<[%bounded_element_length]xi8, #encoding.layout.dense>
+    view.store %pattern_i8, %target_view[%element_index] : i8, view<[%bounded_element_length]xi8>
   }
   kernel.return
 }

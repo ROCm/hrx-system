@@ -21,17 +21,17 @@ kernel.def @online_softmax_tail_attention_tile_f32() {
   %negative_large = scalar.constant -1000000000.0 : f32
 
   %old_state_noalias, %old_acc_noalias, %scores_noalias, %values_noalias, %new_state_noalias, %new_acc_noalias = buffer.assume.noalias %old_state, %old_acc, %scores, %values, %new_state, %new_acc : buffer, buffer, buffer, buffer, buffer, buffer
-  %old_state_view = buffer.view %old_state_noalias[%base] : buffer -> view<2xf32, #encoding.layout.dense>
-  %old_acc_view = buffer.view %old_acc_noalias[%base] : buffer -> view<4xf32, #encoding.layout.dense>
-  %scores_view = buffer.view %scores_noalias[%base] : buffer -> view<4xf32, #encoding.layout.dense>
-  %values_view = buffer.view %values_noalias[%base] : buffer -> view<4x4xf32, #encoding.layout.dense>
-  %new_state_view = buffer.view %new_state_noalias[%base] : buffer -> view<2xf32, #encoding.layout.dense>
-  %new_acc_view = buffer.view %new_acc_noalias[%base] : buffer -> view<4xf32, #encoding.layout.dense>
+  %old_state_view = buffer.view %old_state_noalias[%base] : buffer -> view<2xf32>
+  %old_acc_view = buffer.view %old_acc_noalias[%base] : buffer -> view<4xf32>
+  %scores_view = buffer.view %scores_noalias[%base] : buffer -> view<4xf32>
+  %values_view = buffer.view %values_noalias[%base] : buffer -> view<4x4xf32>
+  %new_state_view = buffer.view %new_state_noalias[%base] : buffer -> view<2xf32>
+  %new_acc_view = buffer.view %new_acc_noalias[%base] : buffer -> view<4xf32>
 
-  %old_max = view.load %old_state_view[0] : view<2xf32, #encoding.layout.dense> -> f32
-  %old_sum = view.load %old_state_view[1] : view<2xf32, #encoding.layout.dense> -> f32
-  %old_acc_values = vector.load %old_acc_view[0] : view<4xf32, #encoding.layout.dense> -> vector<4xf32>
-  %score_values = vector.load %scores_view[0] : view<4xf32, #encoding.layout.dense> -> vector<4xf32>
+  %old_max = view.load %old_state_view[0] : view<2xf32> -> f32
+  %old_sum = view.load %old_state_view[1] : view<2xf32> -> f32
+  %old_acc_values = vector.load %old_acc_view[0] : view<4xf32> -> vector<4xf32>
+  %score_values = vector.load %scores_view[0] : view<4xf32> -> vector<4xf32>
 
   %lanes = vector.iota %lane_sequence_begin step %lane_sequence_step : vector<4xi32>
   %valid_limits = vector.splat %valid_count : vector<4xi32>
@@ -55,10 +55,10 @@ kernel.def @online_softmax_tail_attention_tile_f32() {
   %block_sum = vector.reduce<addf, reassoc|nnan|nsz> %weights, %sum_initial : vector<4xf32>, f32
   %new_sum = scalar.addf<reassoc|nnan|nsz|contract> %rescaled_old_sum, %block_sum : f32
 
-  %value0 = vector.load %values_view[0, 0] : view<4x4xf32, #encoding.layout.dense> -> vector<4xf32>
-  %value1 = vector.load %values_view[1, 0] : view<4x4xf32, #encoding.layout.dense> -> vector<4xf32>
-  %value2 = vector.load %values_view[2, 0] : view<4x4xf32, #encoding.layout.dense> -> vector<4xf32>
-  %value3 = vector.load %values_view[3, 0] : view<4x4xf32, #encoding.layout.dense> -> vector<4xf32>
+  %value0 = vector.load %values_view[0, 0] : view<4x4xf32> -> vector<4xf32>
+  %value1 = vector.load %values_view[1, 0] : view<4x4xf32> -> vector<4xf32>
+  %value2 = vector.load %values_view[2, 0] : view<4x4xf32> -> vector<4xf32>
+  %value3 = vector.load %values_view[3, 0] : view<4x4xf32> -> vector<4xf32>
   %weight0 = vector.extract %weights[0] : vector<4xf32> -> f32
   %weight1 = vector.extract %weights[1] : vector<4xf32> -> f32
   %weight2 = vector.extract %weights[2] : vector<4xf32> -> f32
@@ -76,9 +76,9 @@ kernel.def @online_softmax_tail_attention_tile_f32() {
   %new_acc2 = vector.addf<reassoc|nnan|nsz|contract> %new_acc1, %weighted_value2 : vector<4xf32>
   %new_acc3 = vector.addf<reassoc|nnan|nsz|contract> %new_acc2, %weighted_value3 : vector<4xf32>
 
-  view.store %new_max, %new_state_view[%max_state_index] : f32, view<2xf32, #encoding.layout.dense>
-  view.store %new_sum, %new_state_view[1] : f32, view<2xf32, #encoding.layout.dense>
-  vector.store %new_acc3, %new_acc_view[0] : vector<4xf32>, view<4xf32, #encoding.layout.dense>
+  view.store %new_max, %new_state_view[%max_state_index] : f32, view<2xf32>
+  view.store %new_sum, %new_state_view[1] : f32, view<2xf32>
+  vector.store %new_acc3, %new_acc_view[0] : vector<4xf32>, view<4xf32>
   kernel.return
 }
 

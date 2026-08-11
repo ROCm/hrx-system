@@ -12,6 +12,7 @@ import pytest
 
 from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.dialect.encoding import (
+    ALL_ENCODING_FAMILIES,
     ALL_ENCODING_OPS,
 )
 from loom.dialect.test import ALL_TEST_OPS
@@ -30,6 +31,7 @@ def _parse_module(text: str) -> Module:
     parser = Parser()
     parser.register_ops(_all_roundtrip_ops())
     parser.register_types(ALL_BUILTIN_TYPES)
+    parser.register_encoding_families(ALL_ENCODING_FAMILIES)
     return parser.parse(text)
 
 
@@ -45,6 +47,26 @@ def _module_text(*lines: str) -> str:
 
 
 class TestEncodingDefineRoundTrip:
+    def test_dense_shaped_attachment_is_implicit(self) -> None:
+        module = _parse_module(
+            _module_text(
+                "test.func @f(%arg: view<4xf32, #encoding.layout.dense>) {",
+                "  test.yield",
+                "}",
+            )
+        )
+
+        function = module.symbols[0].op
+        assert function is not None
+        argument_id = function.regions[0].blocks[0].arg_ids[0]
+        argument = module.values[argument_id]
+        assert argument.type.encoding is None
+        assert _print_module(module) == _module_text(
+            "test.func @f(%arg: view<4xf32>) {",
+            "  test.yield",
+            "}",
+        )
+
     def test_inline_spec_attr(self) -> None:
         module = _parse_module(
             _module_text(

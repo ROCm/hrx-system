@@ -4,8 +4,8 @@ wasm.target<simd128> @target
 func.def target(@target) @i32x4_memory_wasm32_address_boundary(%input: buffer, %i: index) -> (vector<4xi32>) {
   %bounded_i = index.assume %i [range(%i, 0, 1073741820)] : index
   %input_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%input_base] : buffer -> view<1073741824xi32, #encoding.layout.dense>
-  %loaded = vector.load %input_view[%bounded_i] : view<1073741824xi32, #encoding.layout.dense> -> vector<4xi32>
+  %input_view = buffer.view %input[%input_base] : buffer -> view<1073741824xi32>
+  %loaded = vector.load %input_view[%bounded_i] : view<1073741824xi32> -> vector<4xi32>
   func.return %loaded : vector<4xi32>
 }
 

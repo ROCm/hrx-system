@@ -63,6 +63,7 @@ from loom.assembly import (
 )
 from loom.dsl import (
     AttrDef,
+    EncodingFamilyDef,
     FuncLikeInterface,
     Op,
     ParameterizedAttrDef,
@@ -152,6 +153,7 @@ __all__ = [
 # in the call chain. Reset to None/empty between parses.
 _CURRENT_ALIASES: dict[str, EncodingInstance] | None = None
 _CURRENT_KNOWN_ENCODINGS: set[str] | None = None
+_CURRENT_IMPLICIT_SHAPED_ATTACHMENTS: set[str] | None = None
 
 
 def _parse_special_float(text: str) -> float | None:
@@ -1656,6 +1658,12 @@ def _parse_compact_shape_type_from_tokens(
         encoding, encoding_binding = _parse_type_encoding_from_tokens(
             tokenizer, scope, module, mode, filename
         )
+        if (
+            isinstance(encoding, EncodingInstance)
+            and _CURRENT_IMPLICIT_SHAPED_ATTACHMENTS is not None
+            and encoding.name in _CURRENT_IMPLICIT_SHAPED_ATTACHMENTS
+        ):
+            encoding = None
     if encoding_binding >= 0:
         dim_bindings[-1] = encoding_binding
 
@@ -1778,6 +1786,7 @@ class Parser:
         self._implicit_source_id: int | None = None
         self._encoding_aliases: dict[str, EncodingInstance] = {}
         self._known_encodings: set[str] = set()
+        self._implicit_shaped_attachments: set[str] = set()
         self._reserved_result_names: list[str] = []
         self._reserved_result_ids: list[int] = []
         self._definition_scope_active: bool = False
@@ -1817,6 +1826,13 @@ class Parser:
         """Register known encoding names for validation."""
         self._known_encodings.update(names)
 
+    def register_encoding_families(self, families: Sequence[EncodingFamilyDef]) -> None:
+        """Register encoding declarations and their generated type semantics."""
+        self._known_encodings.update(family.name for family in families)
+        self._implicit_shaped_attachments.update(
+            family.name for family in families if family.implicit_shaped_attachment
+        )
+
     # --- Top-level parsing ---
 
     def parse(
@@ -1835,6 +1851,7 @@ class Parser:
           - Top-level dispatch
         """
         global _CURRENT_ALIASES, _CURRENT_KNOWN_ENCODINGS
+        global _CURRENT_IMPLICIT_SHAPED_ATTACHMENTS
         self._tokenizer = Tokenizer(source, filename)
         self._module = Module()
         self._implicit_source_id = (
@@ -1845,6 +1862,11 @@ class Parser:
         _CURRENT_ALIASES = self._encoding_aliases
         _CURRENT_KNOWN_ENCODINGS = (
             self._known_encodings if self._known_encodings else None
+        )
+        _CURRENT_IMPLICIT_SHAPED_ATTACHMENTS = (
+            self._implicit_shaped_attachments
+            if self._implicit_shaped_attachments
+            else None
         )
         tok = self._tokenizer
 
@@ -1870,6 +1892,7 @@ class Parser:
 
         _CURRENT_ALIASES = None
         _CURRENT_KNOWN_ENCODINGS = None
+        _CURRENT_IMPLICIT_SHAPED_ATTACHMENTS = None
         rebuild_value_metadata(self._module)
         if verify:
             from loom.verify import verify_module

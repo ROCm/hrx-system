@@ -559,6 +559,20 @@ def test_generate_encoding_family_metadata() -> None:
     assert ".fixed_metadata = &loom_encoding_operand_fixed_metadata" in tables_c
 
 
+def test_generate_implicit_shaped_attachment_metadata() -> None:
+    dialect = Dialect("encoding", dialect_id=0x09)
+    family = EncodingFamilyDef(
+        "encoding.layout.dense",
+        group=dialect,
+        role=EncodingFamilyRole.ADDRESS_LAYOUT,
+        implicit_shaped_attachment=True,
+    )
+
+    tables_c = generate_tables_c("encoding", 0x09, [], encoding_families=[family])
+
+    assert ".family_flags = LOOM_ENCODING_FAMILY_IMPLICIT_SHAPED_ATTACHMENT" in tables_c
+
+
 def test_encoding_families_require_one_auxiliary_key_vocabulary() -> None:
     dialect = Dialect("encoding", dialect_id=0x09)
     first_keys = EnumDef("FirstKeys", [EnumCase("scale", 0)])

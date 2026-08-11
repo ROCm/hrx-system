@@ -28,10 +28,10 @@ kernel.def target(@target) @global_atomic_ieee_minimum_rejected() {
   %tid = kernel.workitem.id<x> : index
   %input_base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
-  %view = buffer.view %global[%input_base] : buffer -> view<64xf32, #encoding.layout.dense>
+  %view = buffer.view %global[%input_base] : buffer -> view<64xf32>
   %limit = scalar.constant 1.0 : f32
   // ERROR@+1: AMDGPU/023 {constraint_key="atomic.kind"}
-  view.atomic.reduce<minimumf> %limit, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32, #encoding.layout.dense>
+  view.atomic.reduce<minimumf> %limit, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32>
   kernel.return
 }
 
@@ -47,9 +47,9 @@ kernel.def target(@target) @lds_atomic_ieee_maximum_rejected() {
   %scratch_base = index.constant 0 : offset
   %bytes = index.constant 256 : offset
   %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
-  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xf32, #encoding.layout.dense>
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xf32>
   %limit = scalar.constant 1.0 : f32
   // ERROR@+1: AMDGPU/023 {constraint_key="atomic.kind"}
-  view.atomic.reduce<maximumf> %limit, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : f32, view<64xf32, #encoding.layout.dense>
+  view.atomic.reduce<maximumf> %limit, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : f32, view<64xf32>
   kernel.return
 }

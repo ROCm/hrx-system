@@ -30,7 +30,6 @@ static bool loom_vector_memory_query_layout(
     loom_type_t view_type, loom_value_facts_t* stride_storage,
     iree_host_size_t stride_capacity,
     loom_value_fact_address_layout_t* out_layout) {
-  if (!module || !loom_type_has_encoding(view_type)) return false;
   return loom_encoding_query_type_address_layout(
       context, module, view_type, stride_storage, stride_capacity, out_layout);
 }

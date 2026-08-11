@@ -67,6 +67,7 @@ static const loom_encoding_dynamic_parameter_descriptor_t
 static const loom_encoding_family_descriptor_t kRequiresLayoutDescriptor = {
     /*.name=*/LOOM_BSTRING_REF(15, "requires_layout"),
     /*.role=*/LOOM_ENCODING_ROLE_UNKNOWN,
+    /*.family_flags=*/{},
     /*.parameter_count=*/{},
     /*.parameter_descriptors=*/{},
     /*.dynamic_parameter_count=*/

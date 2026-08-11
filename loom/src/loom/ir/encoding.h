@@ -10,6 +10,8 @@
 //   - a dynamic encoding SSA binding (`%enc`) in `loom_type_t.encoding_id`
 //     with `LOOM_ENCODING_FLAG_SSA`, or
 //   - a 1-based index into a module-owned `loom_encoding_table_t`.
+// No attachment denotes the native dense representation. Static families
+// declared as implicit shaped attachments canonicalize to this zero state.
 // Vector types are shaped but intentionally cannot carry this attachment slot.
 // Encoding SSA values may use role-qualified types such as `encoding<layout>`
 // and `encoding<schema>` so producers and consumers declare the exact encoding
@@ -55,6 +57,9 @@ enum loom_encoding_family_flag_bits_e {
   LOOM_ENCODING_FAMILY_STATIC_PARAMETERS_VALID = 1u << 0,
   // Family-specific semantics of the structurally valid parameters hold.
   LOOM_ENCODING_FAMILY_STATIC_SEMANTICS_VALID = 1u << 1,
+  // A static attachment from this family is the native dense shaped-type
+  // representation and canonicalizes to the absent attachment state.
+  LOOM_ENCODING_FAMILY_IMPLICIT_SHAPED_ATTACHMENT = 1u << 2,
 };
 typedef uint8_t loom_encoding_family_flags_t;
 
@@ -128,6 +133,14 @@ static inline bool loom_encoding_static_is_valid(
   return iree_all_bits_set(encoding->family.flags,
                            LOOM_ENCODING_FAMILY_STATIC_PARAMETERS_VALID |
                                LOOM_ENCODING_FAMILY_STATIC_SEMANTICS_VALID);
+}
+
+// Returns true when attaching |encoding| statically to a shaped type carries
+// no information beyond the native dense representation.
+static inline bool loom_encoding_is_implicit_shaped_attachment(
+    const loom_encoding_t* encoding) {
+  return iree_all_bits_set(encoding->family.flags,
+                           LOOM_ENCODING_FAMILY_IMPLICIT_SHAPED_ATTACHMENT);
 }
 
 // Materializes the sparse parameter array into caller-owned descriptor-indexed
@@ -313,6 +326,8 @@ typedef struct loom_encoding_family_descriptor_t {
   loom_bstring_t name;
   // Semantic role carried by instances of the family.
   loom_encoding_role_t role;
+  // Generated family properties copied into each module encoding instance.
+  loom_encoding_family_flags_t family_flags;
   // Number of lexically ordered descriptors in |parameter_descriptors|.
   uint8_t parameter_count;
   // Lexically ordered static parameter descriptors, or NULL when empty.

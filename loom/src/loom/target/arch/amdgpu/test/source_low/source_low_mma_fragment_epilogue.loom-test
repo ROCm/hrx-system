@@ -22,19 +22,19 @@ kernel.def target(@target) @bf16_result_fragment_epilogue_two_tiles() {
   %gate_aligned = buffer.assume.alignment %gate_noalias {minimum_alignment = 16} : buffer
   %scale_aligned = buffer.assume.alignment %scale_noalias {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output_noalias {minimum_alignment = 16} : buffer
-  %gate_view = buffer.view %gate_aligned[%base] : buffer -> view<64x64xbf16, #encoding.layout.dense>
-  %scale_view = buffer.view %scale_aligned[%base] : buffer -> view<1xf32, #encoding.layout.dense>
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<64x64xbf16, #encoding.layout.dense>
-  %gate0_bf16 = vector.fragment.load<result> %gate_view[%token_origin, %row_origin0] shape [%tile_extent, %tile_extent] : view<64x64xbf16, #encoding.layout.dense> -> vector<8xbf16>
-  %gate1_bf16 = vector.fragment.load<result> %gate_view[%token_origin, %row_origin1] shape [%tile_extent, %tile_extent] : view<64x64xbf16, #encoding.layout.dense> -> vector<8xbf16>
+  %gate_view = buffer.view %gate_aligned[%base] : buffer -> view<64x64xbf16>
+  %scale_view = buffer.view %scale_aligned[%base] : buffer -> view<1xf32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<64x64xbf16>
+  %gate0_bf16 = vector.fragment.load<result> %gate_view[%token_origin, %row_origin0] shape [%tile_extent, %tile_extent] : view<64x64xbf16> -> vector<8xbf16>
+  %gate1_bf16 = vector.fragment.load<result> %gate_view[%token_origin, %row_origin1] shape [%tile_extent, %tile_extent] : view<64x64xbf16> -> vector<8xbf16>
   %gate0 = vector.extf %gate0_bf16 : vector<8xbf16> to vector<8xf32>
   %gate1 = vector.extf %gate1_bf16 : vector<8xbf16> to vector<8xf32>
-  %scale = view.load %scale_view[0] : view<1xf32, #encoding.layout.dense> -> f32
+  %scale = view.load %scale_view[0] : view<1xf32> -> f32
   %scale_vector = vector.splat %scale : vector<8xf32>
   %product0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate0, %scale_vector : vector<8xf32>
   %product1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %scale_vector, %gate1 : vector<8xf32>
-  vector.fragment.store<result> %product0, %output_view[%token_origin, %row_origin0] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<64x64xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %product1, %output_view[%token_origin, %row_origin1] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<64x64xbf16, #encoding.layout.dense>
+  vector.fragment.store<result> %product0, %output_view[%token_origin, %row_origin0] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<64x64xbf16>
+  vector.fragment.store<result> %product1, %output_view[%token_origin, %row_origin1] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<64x64xbf16>
   kernel.return
 }
 
@@ -272,14 +272,14 @@ kernel.def target(@target) @bf16_result_fragment_epilogue_after_barrier() {
   %gate_noalias, %output_noalias = buffer.assume.noalias %gate_global, %output_global : buffer, buffer
   %gate_aligned = buffer.assume.alignment %gate_noalias {minimum_alignment = 16} : buffer
   %output_aligned = buffer.assume.alignment %output_noalias {minimum_alignment = 16} : buffer
-  %gate_view = buffer.view %gate_aligned[%base] : buffer -> view<16x16xbf16, #encoding.layout.dense>
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xbf16, #encoding.layout.dense>
-  %gate_bf16 = vector.fragment.load<result> %gate_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xbf16, #encoding.layout.dense> -> vector<8xbf16>
+  %gate_view = buffer.view %gate_aligned[%base] : buffer -> view<16x16xbf16>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xbf16>
+  %gate_bf16 = vector.fragment.load<result> %gate_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xbf16> -> vector<8xbf16>
   %gate_f32 = vector.extf %gate_bf16 : vector<8xbf16> to vector<8xf32>
   %scale = vector.constant 2.0 : vector<8xf32>
   %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_f32, %scale : vector<8xf32>
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-  vector.fragment.store<result> %product, %output_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<16x16xbf16, #encoding.layout.dense>
+  vector.fragment.store<result> %product, %output_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<16x16xbf16>
   kernel.return
 }
 
@@ -425,13 +425,13 @@ kernel.def target(@target) @result_fragment_repack_to_lhs_bf16_bpermute() {
   %k = index.constant 16 : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xbf16, #encoding.layout.dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xbf16>
   %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
   %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xbf16>
   %init = vector.fragment<init> %init_values shape [%m, %n] : vector<8xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   %repacked = vector.fragment.repack<lhs> %result shape [%m, %k] : vector<8xf32> -> vector<16xbf16>
-  vector.fragment.store<lhs> %repacked, %output_view[0, 0] shape [%m, %k] : vector<16xbf16>, view<16x16xbf16, #encoding.layout.dense>
+  vector.fragment.store<lhs> %repacked, %output_view[0, 0] shape [%m, %k] : vector<16xbf16>, view<16x16xbf16>
   kernel.return
 }
 
@@ -556,14 +556,14 @@ kernel.def target(@target) @result_fragment_repack_to_lhs_bf16_mma_chain() {
   %k = index.constant 16 : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32, #encoding.layout.dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32>
   %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
   %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xbf16>
   %init = vector.fragment<init> %init_values shape [%m, %n] : vector<8xf32>
   %first = vector.mma %lhs, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   %repacked = vector.fragment.repack<lhs> %first shape [%m, %k] : vector<8xf32> -> vector<16xbf16>
   %second = vector.mma %repacked, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-  vector.fragment.store<result> %second, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #encoding.layout.dense>
+  vector.fragment.store<result> %second, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
   kernel.return
 }
 
@@ -700,13 +700,13 @@ kernel.def target(@wave64_target) @result_fragment_repack_to_lhs_bf16_bpermute_w
   %k = index.constant 16 : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xbf16, #encoding.layout.dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xbf16>
   %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
   %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xbf16>
   %init = vector.fragment<init> %init_values shape [%m, %n] : vector<4xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<4xf32>
   %repacked = vector.fragment.repack<lhs> %result shape [%m, %k] : vector<4xf32> -> vector<16xbf16>
-  vector.fragment.store<lhs> %repacked, %output_view[0, 0] shape [%m, %k] : vector<16xbf16>, view<16x16xbf16, #encoding.layout.dense>
+  vector.fragment.store<lhs> %repacked, %output_view[0, 0] shape [%m, %k] : vector<16xbf16>, view<16x16xbf16>
   kernel.return
 }
 
@@ -791,14 +791,14 @@ kernel.def target(@target) @cdna_result_fragment_repack_to_lhs_bf16_mma_chain() 
   %k = index.constant 16 : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32, #encoding.layout.dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<4xbf16>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<4xbf16>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
   %first = vector.mma %lhs, %rhs, %init : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
   %repacked = vector.fragment.repack<lhs> %first shape [%m, %k] : vector<4xf32> -> vector<4xbf16>
   %second = vector.mma %repacked, %rhs, %init : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
-  vector.fragment.store<result> %second, %output_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #encoding.layout.dense>
+  vector.fragment.store<result> %second, %output_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
   kernel.return
 }
 
@@ -901,14 +901,14 @@ kernel.def target(@target) @rdna4_result_fragment_repack_to_lhs_bf16_mma_chain()
   %k = index.constant 16 : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32, #encoding.layout.dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<8xbf16>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<8xbf16>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
   %first = vector.mma %lhs, %rhs, %init : vector<8xbf16>, vector<8xbf16>, vector<8xf32>
   %repacked = vector.fragment.repack<lhs> %first shape [%m, %k] : vector<8xf32> -> vector<8xbf16>
   %second = vector.mma %repacked, %rhs, %init : vector<8xbf16>, vector<8xbf16>, vector<8xf32>
-  vector.fragment.store<result> %second, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #encoding.layout.dense>
+  vector.fragment.store<result> %second, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
   kernel.return
 }
 
@@ -1049,7 +1049,7 @@ kernel.def target(@target) @gfx1250_rejects_legacy_k16_bf16_mma_chain() {
   %k = index.constant 16 : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32, #encoding.layout.dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<8xbf16>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<8xbf16>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
@@ -1058,7 +1058,7 @@ kernel.def target(@target) @gfx1250_rejects_legacy_k16_bf16_mma_chain() {
   %repacked = vector.fragment.repack<lhs> %first shape [%m, %k] : vector<8xf32> -> vector<8xbf16>
   // ERROR@+1: AMDGPU/021 {matrix_constraint="processor_features"}
   %second = vector.mma %repacked, %rhs, %init : vector<8xbf16>, vector<8xbf16>, vector<8xf32>
-  vector.fragment.store<result> %second, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #encoding.layout.dense>
+  vector.fragment.store<result> %second, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
   kernel.return
 }
 
@@ -1077,14 +1077,14 @@ kernel.def target(@target) @gfx950_result_fragment_repack_to_lhs_bf16_mma_chain(
   %k = index.constant 16 : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32, #encoding.layout.dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<4xbf16>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<4xbf16>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
   %first = vector.mma %lhs, %rhs, %init : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
   %repacked = vector.fragment.repack<lhs> %first shape [%m, %k] : vector<4xf32> -> vector<4xbf16>
   %second = vector.mma %repacked, %rhs, %init : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
-  vector.fragment.store<result> %second, %output_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #encoding.layout.dense>
+  vector.fragment.store<result> %second, %output_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
   kernel.return
 }
 
@@ -1165,11 +1165,11 @@ kernel.def target(@target) @bf16_wmmar3_dual_result_product_bf16_epilogue() {
   %n = index.constant 16 : index
   %k = index.constant 16 : index
   %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
-  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xbf16, #encoding.layout.dense>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xbf16>
   %gate_view = buffer.view %gate_buffer[%base] : buffer -> view<16x16xbf16, %rhs_layout>
   %up_view = buffer.view %up_buffer[%base] : buffer -> view<16x16xbf16, %rhs_layout>
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xbf16, #encoding.layout.dense>
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xbf16, #encoding.layout.dense> -> vector<16xbf16>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xbf16>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xbf16> -> vector<16xbf16>
   %gate_rhs = vector.fragment.load<rhs> %gate_view[0, 0] shape [%k, %n] : view<16x16xbf16, %rhs_layout> -> vector<16xbf16>
   %up_rhs = vector.fragment.load<rhs> %up_view[0, 0] shape [%k, %n] : view<16x16xbf16, %rhs_layout> -> vector<16xbf16>
   %initial_values = vector.constant 0.0 : vector<8xf32>
@@ -1177,7 +1177,7 @@ kernel.def target(@target) @bf16_wmmar3_dual_result_product_bf16_epilogue() {
   %gate = vector.mma %lhs, %gate_rhs, %zero_acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   %up = vector.mma %lhs, %up_rhs, %zero_acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate, %up : vector<8xf32>
-  vector.fragment.store<result> %product, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xbf16, #encoding.layout.dense>
+  vector.fragment.store<result> %product, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xbf16>
   kernel.return
 }
 
@@ -1309,10 +1309,10 @@ kernel.def target(@target) @report_result_fragment_repack_to_lhs_bf16() {
   %k = index.constant 16 : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xbf16, #encoding.layout.dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xbf16>
   %fragment = vector.fragment<result> %payload shape [%m, %k] : vector<8xf32>
   %repacked = vector.fragment.repack<lhs> %fragment shape [%m, %k] : vector<8xf32> -> vector<16xbf16>
-  vector.fragment.store<lhs> %repacked, %output_view[0, 0] shape [%m, %k] : vector<16xbf16>, view<16x16xbf16, #encoding.layout.dense>
+  vector.fragment.store<lhs> %repacked, %output_view[0, 0] shape [%m, %k] : vector<16xbf16>, view<16x16xbf16>
   kernel.return
 }
 
@@ -1348,7 +1348,7 @@ kernel.def target(@target) @report_select_fptrunc_bf16_result_fragment_epilogue(
   %false_selector = scalar.constant 0 : i32
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xbf16, #encoding.layout.dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xbf16>
   %selector_true = scalar.assume %selector [range(%selector, 1, 1)] : i32
   %condition = scalar.cmpi ne, %selector_true, %false_selector : i32
   %mask = vector.splat %condition : vector<8xi1>
@@ -1356,7 +1356,7 @@ kernel.def target(@target) @report_select_fptrunc_bf16_result_fragment_epilogue(
   %rounded_true = vector.fptrunc %payload : vector<8xf32> to vector<8xbf16>
   %rounded_false = vector.fptrunc %payload_alias : vector<8xf32> to vector<8xbf16>
   %selected = vector.select %mask, %rounded_true, %rounded_false : vector<8xbf16>
-  vector.fragment.store<result> %selected, %output_view[0, 0] shape [%m, %n] : vector<8xbf16>, view<16x16xbf16, #encoding.layout.dense>
+  vector.fragment.store<result> %selected, %output_view[0, 0] shape [%m, %n] : vector<8xbf16>, view<16x16xbf16>
   kernel.return
 }
 
@@ -1452,15 +1452,15 @@ kernel.def target(@target) @report_large_bf16_result_epilogue_group() {
   %n = index.constant 16 : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x64xbf16, #encoding.layout.dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x64xbf16>
   %epilogue0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload0, %payload0 : vector<8xf32>
   %epilogue1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload1, %payload1 : vector<8xf32>
   %epilogue2 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload2, %payload2 : vector<8xf32>
   %epilogue3 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload3, %payload3 : vector<8xf32>
-  vector.fragment.store<result> %epilogue0, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x64xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %epilogue1, %output_view[0, 16] shape [%m, %n] : vector<8xf32>, view<16x64xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %epilogue2, %output_view[0, 32] shape [%m, %n] : vector<8xf32>, view<16x64xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %epilogue3, %output_view[0, 48] shape [%m, %n] : vector<8xf32>, view<16x64xbf16, #encoding.layout.dense>
+  vector.fragment.store<result> %epilogue0, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x64xbf16>
+  vector.fragment.store<result> %epilogue1, %output_view[0, 16] shape [%m, %n] : vector<8xf32>, view<16x64xbf16>
+  vector.fragment.store<result> %epilogue2, %output_view[0, 32] shape [%m, %n] : vector<8xf32>, view<16x64xbf16>
+  vector.fragment.store<result> %epilogue3, %output_view[0, 48] shape [%m, %n] : vector<8xf32>, view<16x64xbf16>
   kernel.return
 }
 
@@ -1475,7 +1475,7 @@ kernel.def target(@target) @report_large_bf16_result_epilogue_group() {
   %base = index.constant 0 : offset
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x64xbf16, #encoding.layout.dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x64xbf16>
   %17 = index.constant 0 : index
   %18 = index.constant 8 : index
   %19 = index.constant 1 : index
@@ -1491,7 +1491,7 @@ kernel.def target(@target) @report_large_bf16_result_epilogue_group() {
     %89 = index.madd %20, %28, %91 : index
     %87 = index.constant 15 : index
     %88 = index.andi %21, %87 : index
-    view.store %25, %output_view[%89, %88] : bf16, view<16x64xbf16, #encoding.layout.dense>
+    view.store %25, %output_view[%89, %88] : bf16, view<16x64xbf16>
     %33 = vector.extract %payload1[%20] : vector<8xf32> -> f32
     %34 = vector.extract %payload1[%20] : vector<8xf32> -> f32
     %35 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %33, %34 : f32
@@ -1504,7 +1504,7 @@ kernel.def target(@target) @report_large_bf16_result_epilogue_group() {
     %83 = index.andi %21, %82 : index
     %44 = index.constant 16 : index
     %45 = index.add %44, %83 : index
-    view.store %36, %output_view[%84, %45] : bf16, view<16x64xbf16, #encoding.layout.dense>
+    view.store %36, %output_view[%84, %45] : bf16, view<16x64xbf16>
     %46 = vector.extract %payload2[%20] : vector<8xf32> -> f32
     %47 = vector.extract %payload2[%20] : vector<8xf32> -> f32
     %48 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %46, %47 : f32
@@ -1517,7 +1517,7 @@ kernel.def target(@target) @report_large_bf16_result_epilogue_group() {
     %78 = index.andi %21, %77 : index
     %57 = index.constant 32 : index
     %58 = index.add %57, %78 : index
-    view.store %49, %output_view[%79, %58] : bf16, view<16x64xbf16, #encoding.layout.dense>
+    view.store %49, %output_view[%79, %58] : bf16, view<16x64xbf16>
     %59 = vector.extract %payload3[%20] : vector<8xf32> -> f32
     %60 = vector.extract %payload3[%20] : vector<8xf32> -> f32
     %61 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %59, %60 : f32
@@ -1530,7 +1530,7 @@ kernel.def target(@target) @report_large_bf16_result_epilogue_group() {
     %73 = index.andi %21, %72 : index
     %70 = index.constant 48 : index
     %71 = index.add %70, %73 : index
-    view.store %62, %output_view[%74, %71] : bf16, view<16x64xbf16, #encoding.layout.dense>
+    view.store %62, %output_view[%74, %71] : bf16, view<16x64xbf16>
   }
   kernel.return
 }
@@ -1550,7 +1550,7 @@ kernel.def target(@target) @report_mixed_bf16_result_epilogue_group() {
   %n = index.constant 16 : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x128xbf16, #encoding.layout.dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x128xbf16>
   %scale_vector = vector.splat %scale : vector<8xf32>
   %epilogue0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload0, %payload0 : vector<8xf32>
   %epilogue1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload1, %payload1 : vector<8xf32>
@@ -1560,14 +1560,14 @@ kernel.def target(@target) @report_mixed_bf16_result_epilogue_group() {
   %epilogue5 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload5, %scale_vector : vector<8xf32>
   %epilogue6 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload6, %scale_vector : vector<8xf32>
   %epilogue7 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload7, %scale_vector : vector<8xf32>
-  vector.fragment.store<result> %epilogue0, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x128xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %epilogue1, %output_view[0, 16] shape [%m, %n] : vector<8xf32>, view<16x128xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %epilogue2, %output_view[0, 32] shape [%m, %n] : vector<8xf32>, view<16x128xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %epilogue3, %output_view[0, 48] shape [%m, %n] : vector<8xf32>, view<16x128xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %epilogue4, %output_view[0, 64] shape [%m, %n] : vector<8xf32>, view<16x128xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %epilogue5, %output_view[0, 80] shape [%m, %n] : vector<8xf32>, view<16x128xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %epilogue6, %output_view[0, 96] shape [%m, %n] : vector<8xf32>, view<16x128xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %epilogue7, %output_view[0, 112] shape [%m, %n] : vector<8xf32>, view<16x128xbf16, #encoding.layout.dense>
+  vector.fragment.store<result> %epilogue0, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x128xbf16>
+  vector.fragment.store<result> %epilogue1, %output_view[0, 16] shape [%m, %n] : vector<8xf32>, view<16x128xbf16>
+  vector.fragment.store<result> %epilogue2, %output_view[0, 32] shape [%m, %n] : vector<8xf32>, view<16x128xbf16>
+  vector.fragment.store<result> %epilogue3, %output_view[0, 48] shape [%m, %n] : vector<8xf32>, view<16x128xbf16>
+  vector.fragment.store<result> %epilogue4, %output_view[0, 64] shape [%m, %n] : vector<8xf32>, view<16x128xbf16>
+  vector.fragment.store<result> %epilogue5, %output_view[0, 80] shape [%m, %n] : vector<8xf32>, view<16x128xbf16>
+  vector.fragment.store<result> %epilogue6, %output_view[0, 96] shape [%m, %n] : vector<8xf32>, view<16x128xbf16>
+  vector.fragment.store<result> %epilogue7, %output_view[0, 112] shape [%m, %n] : vector<8xf32>, view<16x128xbf16>
   kernel.return
 }
 
@@ -1584,7 +1584,7 @@ kernel.def target(@target) @report_mixed_bf16_result_epilogue_group() {
   %n = index.constant 16 : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x128xbf16, #encoding.layout.dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x128xbf16>
   %scale_vector = vector.splat %scale : vector<8xf32>
   %epilogue4 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload4, %scale_vector : vector<8xf32>
   %epilogue5 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload5, %scale_vector : vector<8xf32>
@@ -1605,7 +1605,7 @@ kernel.def target(@target) @report_mixed_bf16_result_epilogue_group() {
     %99 = index.madd %30, %38, %101 : index
     %97 = index.constant 15 : index
     %98 = index.andi %31, %97 : index
-    view.store %35, %output_view[%99, %98] : bf16, view<16x128xbf16, #encoding.layout.dense>
+    view.store %35, %output_view[%99, %98] : bf16, view<16x128xbf16>
     %43 = vector.extract %payload1[%30] : vector<8xf32> -> f32
     %44 = vector.extract %payload1[%30] : vector<8xf32> -> f32
     %45 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %43, %44 : f32
@@ -1618,7 +1618,7 @@ kernel.def target(@target) @report_mixed_bf16_result_epilogue_group() {
     %93 = index.andi %31, %92 : index
     %54 = index.constant 16 : index
     %55 = index.add %54, %93 : index
-    view.store %46, %output_view[%94, %55] : bf16, view<16x128xbf16, #encoding.layout.dense>
+    view.store %46, %output_view[%94, %55] : bf16, view<16x128xbf16>
     %56 = vector.extract %payload2[%30] : vector<8xf32> -> f32
     %57 = vector.extract %payload2[%30] : vector<8xf32> -> f32
     %58 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %56, %57 : f32
@@ -1631,7 +1631,7 @@ kernel.def target(@target) @report_mixed_bf16_result_epilogue_group() {
     %88 = index.andi %31, %87 : index
     %67 = index.constant 32 : index
     %68 = index.add %67, %88 : index
-    view.store %59, %output_view[%89, %68] : bf16, view<16x128xbf16, #encoding.layout.dense>
+    view.store %59, %output_view[%89, %68] : bf16, view<16x128xbf16>
     %69 = vector.extract %payload3[%30] : vector<8xf32> -> f32
     %70 = vector.extract %payload3[%30] : vector<8xf32> -> f32
     %71 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %69, %70 : f32
@@ -1644,12 +1644,12 @@ kernel.def target(@target) @report_mixed_bf16_result_epilogue_group() {
     %83 = index.andi %31, %82 : index
     %80 = index.constant 48 : index
     %81 = index.add %80, %83 : index
-    view.store %72, %output_view[%84, %81] : bf16, view<16x128xbf16, #encoding.layout.dense>
+    view.store %72, %output_view[%84, %81] : bf16, view<16x128xbf16>
   }
-  vector.fragment.store<result> %epilogue4, %output_view[0, 64] shape [%m, %n] : vector<8xf32>, view<16x128xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %epilogue5, %output_view[0, 80] shape [%m, %n] : vector<8xf32>, view<16x128xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %epilogue6, %output_view[0, 96] shape [%m, %n] : vector<8xf32>, view<16x128xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %epilogue7, %output_view[0, 112] shape [%m, %n] : vector<8xf32>, view<16x128xbf16, #encoding.layout.dense>
+  vector.fragment.store<result> %epilogue4, %output_view[0, 64] shape [%m, %n] : vector<8xf32>, view<16x128xbf16>
+  vector.fragment.store<result> %epilogue5, %output_view[0, 80] shape [%m, %n] : vector<8xf32>, view<16x128xbf16>
+  vector.fragment.store<result> %epilogue6, %output_view[0, 96] shape [%m, %n] : vector<8xf32>, view<16x128xbf16>
+  vector.fragment.store<result> %epilogue7, %output_view[0, 112] shape [%m, %n] : vector<8xf32>, view<16x128xbf16>
   kernel.return
 }
 
@@ -1668,16 +1668,16 @@ kernel.def target(@target) @report_large_scaled_bf16_result_epilogue_group() {
   %n = index.constant 16 : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x64xbf16, #encoding.layout.dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x64xbf16>
   %scale_vector = vector.splat %scale : vector<8xf32>
   %epilogue0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload0, %scale_vector : vector<8xf32>
   %epilogue1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload1, %scale_vector : vector<8xf32>
   %epilogue2 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload2, %scale_vector : vector<8xf32>
   %epilogue3 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload3, %scale_vector : vector<8xf32>
-  vector.fragment.store<result> %epilogue0, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x64xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %epilogue1, %output_view[0, 16] shape [%m, %n] : vector<8xf32>, view<16x64xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %epilogue2, %output_view[0, 32] shape [%m, %n] : vector<8xf32>, view<16x64xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %epilogue3, %output_view[0, 48] shape [%m, %n] : vector<8xf32>, view<16x64xbf16, #encoding.layout.dense>
+  vector.fragment.store<result> %epilogue0, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x64xbf16>
+  vector.fragment.store<result> %epilogue1, %output_view[0, 16] shape [%m, %n] : vector<8xf32>, view<16x64xbf16>
+  vector.fragment.store<result> %epilogue2, %output_view[0, 32] shape [%m, %n] : vector<8xf32>, view<16x64xbf16>
+  vector.fragment.store<result> %epilogue3, %output_view[0, 48] shape [%m, %n] : vector<8xf32>, view<16x64xbf16>
   kernel.return
 }
 
@@ -1694,15 +1694,15 @@ kernel.def target(@target) @report_large_scaled_bf16_result_epilogue_group() {
   %n = index.constant 16 : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x64xbf16, #encoding.layout.dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x64xbf16>
   %scale_vector = vector.splat %scale : vector<8xf32>
   %epilogue0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload0, %scale_vector : vector<8xf32>
   %epilogue1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload1, %scale_vector : vector<8xf32>
   %epilogue2 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload2, %scale_vector : vector<8xf32>
   %epilogue3 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload3, %scale_vector : vector<8xf32>
-  vector.fragment.store<result> %epilogue0, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x64xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %epilogue1, %output_view[0, 16] shape [%m, %n] : vector<8xf32>, view<16x64xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %epilogue2, %output_view[0, 32] shape [%m, %n] : vector<8xf32>, view<16x64xbf16, #encoding.layout.dense>
-  vector.fragment.store<result> %epilogue3, %output_view[0, 48] shape [%m, %n] : vector<8xf32>, view<16x64xbf16, #encoding.layout.dense>
+  vector.fragment.store<result> %epilogue0, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x64xbf16>
+  vector.fragment.store<result> %epilogue1, %output_view[0, 16] shape [%m, %n] : vector<8xf32>, view<16x64xbf16>
+  vector.fragment.store<result> %epilogue2, %output_view[0, 32] shape [%m, %n] : vector<8xf32>, view<16x64xbf16>
+  vector.fragment.store<result> %epilogue3, %output_view[0, 48] shape [%m, %n] : vector<8xf32>, view<16x64xbf16>
   kernel.return
 }

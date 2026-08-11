@@ -32,19 +32,19 @@ kernel.def target(@gfx1250) @cluster_b128_multicast() {
   %lane_byte_offset = index.scale %lane, %lane_transfer_bytes : index, offset -> offset
 
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
-  %source = buffer.view %input_noalias[%lane_byte_offset] : buffer -> view<16xi8, #encoding.layout.dense>
-  %output_view = buffer.view %output_noalias[%base] : buffer -> view<2x32xi32, #encoding.layout.dense>
+  %source = buffer.view %input_noalias[%lane_byte_offset] : buffer -> view<16xi8>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<2x32xi32>
 
   %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
-  %destination = buffer.view %scratch[%lane_byte_offset] : buffer -> view<16xi8, #encoding.layout.dense>
-  %scratch_view = buffer.view %scratch[%base] : buffer -> view<32x4xi32, #encoding.layout.dense>
+  %destination = buffer.view %scratch[%lane_byte_offset] : buffer -> view<16xi8>
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<32x4xi32>
 
-  %copy = kernel.async.cluster.gather %source to %destination using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8, #encoding.layout.dense> to view<16xi8, #encoding.layout.dense>, i32 -> kernel.async.token
+  %copy = kernel.async.cluster.gather %source to %destination using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8> to view<16xi8>, i32 -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 
-  %actual = vector.load %scratch_view[%lane, 0] : view<32x4xi32, #encoding.layout.dense> -> vector<4xi32>
+  %actual = vector.load %scratch_view[%lane, 0] : view<32x4xi32> -> vector<4xi32>
   %actual0 = vector.extract %actual[0] : vector<4xi32> -> i32
   %actual1 = vector.extract %actual[1] : vector<4xi32> -> i32
   %actual2 = vector.extract %actual[2] : vector<4xi32> -> i32
@@ -63,7 +63,7 @@ kernel.def target(@gfx1250) @cluster_b128_multicast() {
   %valid23 = scalar.andi %valid2, %valid3 : i1
   %valid = scalar.andi %valid01, %valid23 : i1
   %result = scf.select %valid, %success_value, %failure_value : i32
-  view.store %result, %output_view[%workgroup_y, %lane] : i32, view<2x32xi32, #encoding.layout.dense>
+  view.store %result, %output_view[%workgroup_y, %lane] : i32, view<2x32xi32>
   kernel.return
 }
 

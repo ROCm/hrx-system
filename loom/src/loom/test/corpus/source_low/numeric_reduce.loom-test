@@ -2,13 +2,13 @@
 
 func.def @i32_reduce_add(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xi32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32, #encoding.layout.dense>
-  %loaded = vector.load %input_view[0] : view<4xi32, #encoding.layout.dense> -> vector<4xi32>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
+  %loaded = vector.load %input_view[0] : view<4xi32> -> vector<4xi32>
   %init = scalar.constant 0 : i32
   %sum = vector.reduce<addi> %loaded, %init : vector<4xi32>, i32
   %stored = vector.from_elements %sum : vector<1xi32>
-  vector.store %stored, %output_view[0] : vector<1xi32>, view<1xi32, #encoding.layout.dense>
+  vector.store %stored, %output_view[0] : vector<1xi32>, view<1xi32>
   func.return
 }
 
@@ -16,13 +16,13 @@ func.def @i32_reduce_add(%input: buffer, %output: buffer) {
 
 func.def @f32_reduce_add(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xf32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32, #encoding.layout.dense>
-  %loaded = vector.load %input_view[0] : view<4xf32, #encoding.layout.dense> -> vector<4xf32>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32>
+  %loaded = vector.load %input_view[0] : view<4xf32> -> vector<4xf32>
   %init = scalar.constant 0.0 : f32
   %sum = vector.reduce<addf> %loaded, %init : vector<4xf32>, f32
   %stored = vector.from_elements %sum : vector<1xf32>
-  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32, #encoding.layout.dense>
+  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32>
   func.return
 }
 
@@ -30,13 +30,13 @@ func.def @f32_reduce_add(%input: buffer, %output: buffer) {
 
 func.def @f32_reduce_add_fastmath(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xf32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32, #encoding.layout.dense>
-  %loaded = vector.load %input_view[0] : view<4xf32, #encoding.layout.dense> -> vector<4xf32>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32>
+  %loaded = vector.load %input_view[0] : view<4xf32> -> vector<4xf32>
   %init = scalar.constant 0.0 : f32
   %sum = vector.reduce<addf, reassoc|nnan|nsz> %loaded, %init : vector<4xf32>, f32
   %stored = vector.from_elements %sum : vector<1xf32>
-  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32, #encoding.layout.dense>
+  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32>
   func.return
 }
 
@@ -44,13 +44,13 @@ func.def @f32_reduce_add_fastmath(%input: buffer, %output: buffer) {
 
 func.def @f32x64_reduce_add_fastmath(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xf32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32, #encoding.layout.dense>
-  %loaded = vector.load %input_view[0] : view<64xf32, #encoding.layout.dense> -> vector<64xf32>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32>
+  %loaded = vector.load %input_view[0] : view<64xf32> -> vector<64xf32>
   %init = scalar.constant 0.0 : f32
   %sum = vector.reduce<addf, reassoc|nnan|nsz> %loaded, %init : vector<64xf32>, f32
   %stored = vector.from_elements %sum : vector<1xf32>
-  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32, #encoding.layout.dense>
+  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32>
   func.return
 }
 
@@ -69,16 +69,16 @@ kernel.def @f32_configured_width_square_reduce() {
   %vector_width = config.get @runtime.vector_width : index
   %vector_width_bounded = index.assume %vector_width [range(%vector_width, 2, 4)] : index
   %element_count = index.constant 256 : index
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<[%element_count]xf32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32, #encoding.layout.dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<[%element_count]xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32>
   %linear0 = index.mul %lane, %vector_width_bounded : index
   %linear = index.assume %linear0 [range(%linear0, 0, 252)] : index
-  %loaded = vector.load %input_view[%linear] : view<[%element_count]xf32, #encoding.layout.dense> -> vector<[%vector_width_bounded]xf32>
+  %loaded = vector.load %input_view[%linear] : view<[%element_count]xf32> -> vector<[%vector_width_bounded]xf32>
   %squared = vector.mulf<reassoc|nnan|ninf|nsz|contract> %loaded, %loaded : vector<[%vector_width_bounded]xf32>
   %initial_sum = scalar.constant 0.0 : f32
   %sum = vector.reduce<addf, reassoc|nnan|ninf|nsz|contract> %squared, %initial_sum : vector<[%vector_width_bounded]xf32>, f32
   %stored = vector.from_elements %sum : vector<1xf32>
-  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32, #encoding.layout.dense>
+  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32>
   kernel.return
 }
 

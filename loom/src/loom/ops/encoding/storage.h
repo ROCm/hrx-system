@@ -69,12 +69,13 @@ bool loom_encoding_query_static_record_geometry(
     const loom_module_t* module, uint16_t encoding_id,
     loom_encoding_record_geometry_t* out_geometry);
 
-// Queries a shaped type's address-layout summary from static encodings or
-// context-owned SSA encoding facts. This does not walk call graphs or inspect
-// callers; block-argument encodings only resolve when a previous analysis has
-// seeded facts for them in |context|. Strided static layouts use caller-owned
-// |stride_storage| with the same lifetime rules as
-// loom_encoding_query_static_address_layout().
+// Queries a shaped type's address-layout summary. An absent attachment on a
+// tile, tensor, or view is the native dense layout. Explicit static encodings
+// resolve through the module, while SSA encodings use context-owned facts. This
+// does not walk call graphs or inspect callers; block-argument encodings only
+// resolve when a previous analysis has seeded facts for them in |context|.
+// Strided static layouts use caller-owned |stride_storage| with the same
+// lifetime rules as loom_encoding_query_static_address_layout().
 bool loom_encoding_query_type_address_layout(
     const loom_fact_context_t* context, const loom_module_t* module,
     loom_type_t type, loom_value_facts_t* stride_storage,

@@ -248,8 +248,8 @@
 //   tensor<[%N]xi8, #encoding.operand<element_format=i8,
 //       payload_elements=32, payload_packing=dense_lanes>>
 //                                       Dynamic dim + parameterized encoding.
-//   view<[%N]xf32, #encoding.layout.dense>
-//                                       Dynamic view + static layout.
+//   view<[%N]xf32>
+//                                       Dynamic view + native dense layout.
 //   view<[%N]xf32, #encoding.layout.strided<strides=[64]>>
 //                                       Dynamic view + explicit strides.
 //   view<[%N]xf32, %layout>            Dynamic dim + SSA layout.

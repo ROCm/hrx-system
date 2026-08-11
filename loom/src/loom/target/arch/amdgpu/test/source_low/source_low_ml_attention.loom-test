@@ -61,13 +61,13 @@ kernel.def target(@target) @attention_probability_value_mma_repack() {
   %k = index.constant 16 : index
   %output_global = buffer.assume.memory_space<global> %output_buffer : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32, #encoding.layout.dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32>
   %probability_fragment = vector.fragment<result> %probabilities shape [%m, %k] : vector<8xf32>
   %lhs = vector.fragment.repack<lhs> %probability_fragment shape [%m, %k] : vector<8xf32> -> vector<16xbf16>
   %rhs = vector.fragment<rhs> %values shape [%k, %n] : vector<16xbf16>
   %init = vector.fragment<init> %init_accumulator shape [%m, %n] : vector<8xf32>
   %output = vector.mma %lhs, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-  vector.fragment.store<result> %output, %output_view[%output_origin, %output_origin] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #encoding.layout.dense>
+  vector.fragment.store<result> %output, %output_view[%output_origin, %output_origin] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
   kernel.return
 }
 
@@ -206,7 +206,7 @@ kernel.def target(@target) @attention_loop_carried_accumulator_barrier() {
   %k = index.constant 16 : index
   %output_global = buffer.assume.memory_space<global> %output_buffer : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32, #encoding.layout.dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32>
   %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
   %rhs0 = vector.fragment<rhs> %rhs_values0 shape [%k, %n] : vector<16xbf16>
   %rhs1 = vector.fragment<rhs> %rhs_values1 shape [%k, %n] : vector<16xbf16>
@@ -218,7 +218,7 @@ kernel.def target(@target) @attention_loop_carried_accumulator_barrier() {
   }
   %carried_init = vector.fragment<init> %carried shape [%m, %n] : vector<8xf32>
   %output = vector.mma %lhs, %rhs1, %carried_init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-  vector.fragment.store<result> %output, %output_view[%output_origin, %output_origin] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #encoding.layout.dense>
+  vector.fragment.store<result> %output, %output_view[%output_origin, %output_origin] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
   kernel.return
 }
 
@@ -271,7 +271,7 @@ kernel.def target(@target) @attention_tail_peel_accumulator_merge() {
   %has_tail_tile = scalar.cmpi ne, %tail_tile_count, %no_tail_tiles : i32
   %output_global = buffer.assume.memory_space<global> %output_buffer : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32, #encoding.layout.dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32>
   %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
   %rhs0 = vector.fragment<rhs> %rhs_values0 shape [%k, %n] : vector<16xbf16>
   %rhs1 = vector.fragment<rhs> %rhs_values1 shape [%k, %n] : vector<16xbf16>
@@ -287,7 +287,7 @@ kernel.def target(@target) @attention_tail_peel_accumulator_merge() {
   } else {
     scf.yield %carried : vector<8xf32>
   }
-  vector.fragment.store<result> %output_accumulator, %output_view[%output_origin, %output_origin] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #encoding.layout.dense>
+  vector.fragment.store<result> %output_accumulator, %output_view[%output_origin, %output_origin] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
   kernel.return
 }
 
@@ -399,16 +399,16 @@ func.def target(@target) @paged_kv_cache_block_load(%page_table: buffer, %page_p
   %block_entry_offset = index.scale %block, %page_entry_byte_stride : index, offset -> offset
   %page_entry_offset = index.add %row_base, %block_entry_offset : offset
   %page_table_global = buffer.assume.memory_space<global> %page_table : buffer
-  %page_entry_view = buffer.view %page_table_global[%page_entry_offset] : buffer -> view<1xi32, #encoding.layout.dense>
-  %page_i32 = view.load %page_entry_view[0] : view<1xi32, #encoding.layout.dense> -> i32
+  %page_entry_view = buffer.view %page_table_global[%page_entry_offset] : buffer -> view<1xi32>
+  %page_i32 = view.load %page_entry_view[0] : view<1xi32> -> i32
   %page0 = index.cast %page_i32 : i32 to index
   %page = index.assume %page0 [range(%page0, 0, 4095)] : index
   %page_base = index.scale %page, %page_byte_stride : index, offset -> offset
   %lane_offset = index.scale %lane, %lane_byte_stride : index, offset -> offset
   %kv_offset = index.add %page_base, %lane_offset : offset
   %page_pool_global = buffer.assume.memory_space<global> %page_pool : buffer
-  %kv_view = buffer.view %page_pool_global[%kv_offset] : buffer -> view<4xbf16, #encoding.layout.dense>
-  %key_values = vector.load %kv_view[0] : view<4xbf16, #encoding.layout.dense> -> vector<4xbf16>
+  %kv_view = buffer.view %page_pool_global[%kv_offset] : buffer -> view<4xbf16>
+  %key_values = vector.load %kv_view[0] : view<4xbf16> -> vector<4xbf16>
   func.return %page_i32, %key_values : i32, vector<4xbf16>
 }
 

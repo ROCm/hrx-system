@@ -354,6 +354,7 @@ ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
         "encoding.layout.dense",
         group=encoding_ops,
         role=EncodingFamilyRole.ADDRESS_LAYOUT,
+        implicit_shaped_attachment=True,
         doc="Dense row-major address layout.",
     ),
     EncodingFamilyDef(

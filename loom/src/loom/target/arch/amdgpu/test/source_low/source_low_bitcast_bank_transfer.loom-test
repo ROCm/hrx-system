@@ -5,8 +5,8 @@ func.def target(@target) @i32_uniform_vector_bitcast(%input: buffer) -> (vector<
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
   %input_noalias = buffer.assume.noalias %input_global : buffer
-  %input_view = buffer.view %input_noalias[%base] : buffer -> view<4xi32, #encoding.layout.dense>
-  %loaded = vector.load %input_view[0] : view<4xi32, #encoding.layout.dense> -> vector<4xi32>
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<4xi32>
+  %loaded = vector.load %input_view[0] : view<4xi32> -> vector<4xi32>
   %floats = vector.bitcast %loaded : vector<4xi32> to vector<4xf32>
   func.return %floats : vector<4xf32>
 }

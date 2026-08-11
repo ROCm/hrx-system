@@ -12,19 +12,19 @@ kernel.def target(@target) @divergent_loop_carry() {
   %initial_count = scalar.constant 0 : i32
   %buffer_base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %upper_bound_view = buffer.view %upper_bounds[%buffer_base] : buffer -> view<64xi32, #encoding.layout.dense>
-  %value_view = buffer.view %values[%buffer_base] : buffer -> view<64xi32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32, #encoding.layout.dense>
-  %upper_bound_i32 = view.load %upper_bound_view[%lane] : view<64xi32, #encoding.layout.dense> -> i32
+  %upper_bound_view = buffer.view %upper_bounds[%buffer_base] : buffer -> view<64xi32>
+  %value_view = buffer.view %values[%buffer_base] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32>
+  %upper_bound_i32 = view.load %upper_bound_view[%lane] : view<64xi32> -> i32
   %upper_bound0 = index.cast %upper_bound_i32 : i32 to index
   %upper_bound = index.assume %upper_bound0 [range(%upper_bound0, 0, 64)] : index
   %count = scf.for %position = [%loop_begin to %upper_bound step %loop_step](%running_count = %initial_count : i32) -> (i32) {
     %bounded_position = index.assume %position [range(%position, 0, 63)] : index
-    %value = view.load %value_view[%bounded_position] : view<64xi32, #encoding.layout.dense> -> i32
+    %value = view.load %value_view[%bounded_position] : view<64xi32> -> i32
     %next_count = scalar.addi %running_count, %value : i32
     scf.yield %next_count : i32
   }
-  view.store %count, %output_view[%lane] : i32, view<64xi32, #encoding.layout.dense>
+  view.store %count, %output_view[%lane] : i32, view<64xi32>
   kernel.return
 }
 

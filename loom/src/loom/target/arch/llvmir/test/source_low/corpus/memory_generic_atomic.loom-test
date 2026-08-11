@@ -8,10 +8,10 @@ llvmir.target<object> @target {
 func.def target(@target) @generic_atomic_i32_static(%input: buffer) {
   %buffer_base = index.constant 0 : offset
   %generic = buffer.assume.memory_space<generic> %input : buffer
-  %view = buffer.view %generic[%buffer_base] : buffer -> view<1xi32, #encoding.layout.dense>
+  %view = buffer.view %generic[%buffer_base] : buffer -> view<1xi32>
   %increment = scalar.constant 1 : i32
-  view.atomic.reduce<addi> %increment, %view[0] {ordering = relaxed, scope = device} : i32, view<1xi32, #encoding.layout.dense>
-  %old_add = view.atomic.rmw<addi> %increment, %view[0] {ordering = relaxed, scope = device} : i32, view<1xi32, #encoding.layout.dense> -> i32
+  view.atomic.reduce<addi> %increment, %view[0] {ordering = relaxed, scope = device} : i32, view<1xi32>
+  %old_add = view.atomic.rmw<addi> %increment, %view[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
   func.return
 }
 
@@ -32,10 +32,10 @@ llvmir.target<object> @target {
 func.def target(@target) @generic_atomic_cmpxchg_i32_static(%input: buffer) {
   %buffer_base = index.constant 0 : offset
   %generic = buffer.assume.memory_space<generic> %input : buffer
-  %view = buffer.view %generic[%buffer_base] : buffer -> view<1xi32, #encoding.layout.dense>
+  %view = buffer.view %generic[%buffer_base] : buffer -> view<1xi32>
   %expected = scalar.constant 7 : i32
   %replacement = scalar.constant 9 : i32
-  %old_cmpxchg = view.atomic.cmpxchg %expected, %replacement, %view[0] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i32, view<1xi32, #encoding.layout.dense> -> i32
+  %old_cmpxchg = view.atomic.cmpxchg %expected, %replacement, %view[0] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i32, view<1xi32> -> i32
   func.return
 }
 

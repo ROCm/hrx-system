@@ -299,8 +299,8 @@ kernel.def target(@target) @stage_multi_subgroup_accumulator_fragments() {
     scf.yield %next0, %next1, %next2, %next3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
   }
   %output_global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %output_global[%base] : buffer -> view<16x64xf32, #encoding.layout.dense>
-  vector.fragment.store<result> %result0, %output_view[%origin, %origin] shape [%m, %n] : vector<8xf32>, view<16x64xf32, #encoding.layout.dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<16x64xf32>
+  vector.fragment.store<result> %result0, %output_view[%origin, %origin] shape [%m, %n] : vector<8xf32>, view<16x64xf32>
   kernel.return
 }
 
@@ -361,8 +361,8 @@ kernel.def target(@target) @stage_multi_subgroup_accumulator_fragments() {
   }
   %result0 = vector.fragment.load<init> %35[%32, %38] shape [%m, %n] : view<16x128xf32, %33> -> vector<8xf32>
   %output_global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %output_global[%base] : buffer -> view<16x64xf32, #encoding.layout.dense>
-  vector.fragment.store<result> %result0, %output_view[%origin, %origin] shape [%m, %n] : vector<8xf32>, view<16x64xf32, #encoding.layout.dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<16x64xf32>
+  vector.fragment.store<result> %result0, %output_view[%origin, %origin] shape [%m, %n] : vector<8xf32>, view<16x64xf32>
   kernel.return
 }
 

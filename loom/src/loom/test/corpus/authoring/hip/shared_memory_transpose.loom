@@ -18,21 +18,21 @@ kernel.def @shared_memory_tile_double_transpose() {
   %scratch_bytes = index.constant 256 : offset
 
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
-  %input_view = buffer.view %input_noalias[%base] : buffer -> view<8x8xi32, #encoding.layout.dense>
-  %output_view = buffer.view %output_noalias[%base] : buffer -> view<8x8xi32, #encoding.layout.dense>
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<8x8xi32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<8x8xi32>
 
   // HIP concept:
   //   __shared__ int scratch_a[8][8];
   //   __shared__ int scratch_b[8][8];
   %scratch_a = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
   %scratch_b = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
-  %scratch_a_view = buffer.view %scratch_a[%base] : buffer -> view<8x8xi32, #encoding.layout.dense>
-  %scratch_b_view = buffer.view %scratch_b[%base] : buffer -> view<8x8xi32, #encoding.layout.dense>
+  %scratch_a_view = buffer.view %scratch_a[%base] : buffer -> view<8x8xi32>
+  %scratch_b_view = buffer.view %scratch_b[%base] : buffer -> view<8x8xi32>
 
   // HIP concept:
   //   scratch_a[threadIdx.y][threadIdx.x] = input[threadIdx.y][threadIdx.x];
-  %loaded = vector.load %input_view[%row, %column] : view<8x8xi32, #encoding.layout.dense> -> vector<1xi32>
-  vector.store %loaded, %scratch_a_view[%row, %column] : vector<1xi32>, view<8x8xi32, #encoding.layout.dense>
+  %loaded = vector.load %input_view[%row, %column] : view<8x8xi32> -> vector<1xi32>
+  vector.store %loaded, %scratch_a_view[%row, %column] : vector<1xi32>, view<8x8xi32>
 
   // HIP concept:
   //   __syncthreads();
@@ -40,8 +40,8 @@ kernel.def @shared_memory_tile_double_transpose() {
 
   // HIP concept:
   //   scratch_b[threadIdx.y][threadIdx.x] = scratch_a[threadIdx.x][threadIdx.y];
-  %transposed = vector.load %scratch_a_view[%column, %row] : view<8x8xi32, #encoding.layout.dense> -> vector<1xi32>
-  vector.store %transposed, %scratch_b_view[%row, %column] : vector<1xi32>, view<8x8xi32, #encoding.layout.dense>
+  %transposed = vector.load %scratch_a_view[%column, %row] : view<8x8xi32> -> vector<1xi32>
+  vector.store %transposed, %scratch_b_view[%row, %column] : vector<1xi32>, view<8x8xi32>
 
   // HIP concept:
   //   __syncthreads();
@@ -49,8 +49,8 @@ kernel.def @shared_memory_tile_double_transpose() {
 
   // HIP concept:
   //   output[threadIdx.y][threadIdx.x] = scratch_b[threadIdx.x][threadIdx.y];
-  %roundtrip = vector.load %scratch_b_view[%column, %row] : view<8x8xi32, #encoding.layout.dense> -> vector<1xi32>
-  vector.store %roundtrip, %output_view[%row, %column] : vector<1xi32>, view<8x8xi32, #encoding.layout.dense>
+  %roundtrip = vector.load %scratch_b_view[%column, %row] : view<8x8xi32> -> vector<1xi32>
+  vector.store %roundtrip, %output_view[%row, %column] : vector<1xi32>, view<8x8xi32>
   kernel.return
 }
 

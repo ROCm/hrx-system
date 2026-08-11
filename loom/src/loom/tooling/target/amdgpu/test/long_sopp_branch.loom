@@ -19,8 +19,8 @@ kernel.def target(@long_sopp_branch_target) @long_sopp_branch() {
   %lane0 = kernel.workitem.id<x> : index
   %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
-  %input_view = buffer.view %input_noalias[%c0_offset] : buffer -> view<10240xf32, #dense>
-  %output_view = buffer.view %output_noalias[%c0_offset] : buffer -> view<32xf32, #dense>
+  %input_view = buffer.view %input_noalias[%c0_offset] : buffer -> view<10240xf32>
+  %output_view = buffer.view %output_noalias[%c0_offset] : buffer -> view<32xf32>
   %sum = scf.for %pass = [%c0 to %c2 step %c1](%pass_accumulator = %c0_f32 : f32) -> (f32) {
     %pass_base = index.mul %pass, %c5120 : index
     %pass_sum = scf.for %element = [%c0 to %c160 step %c1](%element_accumulator = %pass_accumulator : f32) -> (f32) unroll {
@@ -28,12 +28,12 @@ kernel.def target(@long_sopp_branch_target) @long_sopp_branch() {
       %pass_element = index.add %pass_base, %element_base : index
       %input_index0 = index.add %pass_element, %lane : index
       %input_index = index.assume %input_index0 [range(%input_index0, 0, 10239)] : index
-      %value = view.load %input_view[%input_index] : view<10240xf32, #dense> -> f32
+      %value = view.load %input_view[%input_index] : view<10240xf32> -> f32
       %next = scalar.addf<reassoc|nnan|ninf|nsz> %element_accumulator, %value : f32
       scf.yield %next : f32
     }
     scf.yield %pass_sum : f32
   }
-  view.store %sum, %output_view[%lane] : f32, view<32xf32, #dense>
+  view.store %sum, %output_view[%lane] : f32, view<32xf32>
   kernel.return
 }

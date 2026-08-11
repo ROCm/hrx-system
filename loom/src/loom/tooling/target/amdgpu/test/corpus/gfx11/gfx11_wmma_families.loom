@@ -16,12 +16,12 @@ kernel.def target(@gfx11_wmma_families_wave32_target) @gfx11_wmma_families_wave3
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
-  %f32_f16_output_view = buffer.view %f32_f16_output[%base] : buffer -> view<16x16xf32, #encoding.layout.dense>
-  %f32_bf16_output_view = buffer.view %f32_bf16_output[%base] : buffer -> view<16x16xf32, #encoding.layout.dense>
-  %f16_output_view = buffer.view %f16_output[%base] : buffer -> view<16x16xf16, #encoding.layout.dense>
-  %bf16_output_view = buffer.view %bf16_output[%base] : buffer -> view<16x16xbf16, #encoding.layout.dense>
-  %i8_output_view = buffer.view %i8_output[%base] : buffer -> view<16x16xi32, #encoding.layout.dense>
-  %i4_output_view = buffer.view %i4_output[%base] : buffer -> view<16x16xi32, #encoding.layout.dense>
+  %f32_f16_output_view = buffer.view %f32_f16_output[%base] : buffer -> view<16x16xf32>
+  %f32_bf16_output_view = buffer.view %f32_bf16_output[%base] : buffer -> view<16x16xf32>
+  %f16_output_view = buffer.view %f16_output[%base] : buffer -> view<16x16xf16>
+  %bf16_output_view = buffer.view %bf16_output[%base] : buffer -> view<16x16xbf16>
+  %i8_output_view = buffer.view %i8_output[%base] : buffer -> view<16x16xi32>
+  %i4_output_view = buffer.view %i4_output[%base] : buffer -> view<16x16xi32>
 
   %f16_operand_elements = vector.constant 1.0 : vector<16xf16>
   %f16_lhs = vector.fragment<lhs> %f16_operand_elements shape [%m, %k] : vector<16xf16>
@@ -29,23 +29,23 @@ kernel.def target(@gfx11_wmma_families_wave32_target) @gfx11_wmma_families_wave3
   %f32_accumulator_elements = vector.constant 0.0 : vector<8xf32>
   %f32_init = vector.fragment<init> %f32_accumulator_elements shape [%m, %n] : vector<8xf32>
   %f32_f16_result = vector.mma %f16_lhs, %f16_rhs, %f32_init : vector<16xf16>, vector<16xf16>, vector<8xf32>
-  vector.fragment.store<result> %f32_f16_result, %f32_f16_output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #encoding.layout.dense>
+  vector.fragment.store<result> %f32_f16_result, %f32_f16_output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
 
   %bf16_operand_elements = vector.constant 1.0 : vector<16xbf16>
   %bf16_lhs = vector.fragment<lhs> %bf16_operand_elements shape [%m, %k] : vector<16xbf16>
   %bf16_rhs = vector.fragment<rhs> %bf16_operand_elements shape [%k, %n] : vector<16xbf16>
   %f32_bf16_result = vector.mma %bf16_lhs, %bf16_rhs, %f32_init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-  vector.fragment.store<result> %f32_bf16_result, %f32_bf16_output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #encoding.layout.dense>
+  vector.fragment.store<result> %f32_bf16_result, %f32_bf16_output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
 
   %f16_accumulator_elements = vector.constant 0.0 : vector<16xf16>
   %f16_init = vector.fragment<init> %f16_accumulator_elements shape [%m, %n] : vector<16xf16>
   %f16_result = vector.mma %f16_lhs, %f16_rhs, %f16_init : vector<16xf16>, vector<16xf16>, vector<16xf16>
-  vector.fragment.store<result> %f16_result, %f16_output_view[0, 0] shape [%m, %n] : vector<16xf16>, view<16x16xf16, #encoding.layout.dense>
+  vector.fragment.store<result> %f16_result, %f16_output_view[0, 0] shape [%m, %n] : vector<16xf16>, view<16x16xf16>
 
   %bf16_accumulator_elements = vector.constant 0.0 : vector<16xbf16>
   %bf16_init = vector.fragment<init> %bf16_accumulator_elements shape [%m, %n] : vector<16xbf16>
   %bf16_result = vector.mma %bf16_lhs, %bf16_rhs, %bf16_init : vector<16xbf16>, vector<16xbf16>, vector<16xbf16>
-  vector.fragment.store<result> %bf16_result, %bf16_output_view[0, 0] shape [%m, %n] : vector<16xbf16>, view<16x16xbf16, #encoding.layout.dense>
+  vector.fragment.store<result> %bf16_result, %bf16_output_view[0, 0] shape [%m, %n] : vector<16xbf16>, view<16x16xbf16>
 
   %i8_lhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
   %i8_rhs_schema = encoding.define #encoding.operand<element_format=u8, payload_elements=16, payload_registers=4> : encoding<schema>
@@ -56,7 +56,7 @@ kernel.def target(@gfx11_wmma_families_wave32_target) @gfx11_wmma_families_wave3
   %i32_accumulator_elements = vector.constant 0 : vector<8xi32>
   %i32_init = vector.fragment<init> %i32_accumulator_elements shape [%m, %n] : vector<8xi32>
   %i8_result = vector.mma %i8_lhs, %i8_rhs, %i32_init : vector<4xi32>, vector<4xi32>, vector<8xi32>
-  vector.fragment.store<result> %i8_result, %i8_output_view[0, 0] shape [%m, %n] : vector<8xi32>, view<16x16xi32, #encoding.layout.dense>
+  vector.fragment.store<result> %i8_result, %i8_output_view[0, 0] shape [%m, %n] : vector<8xi32>, view<16x16xi32>
 
   %i4_lhs_schema = encoding.define #encoding.operand<element_format=i4, payload_elements=16, payload_registers=2> : encoding<schema>
   %i4_rhs_schema = encoding.define #encoding.operand<element_format=u4, payload_elements=16, payload_registers=2> : encoding<schema>
@@ -65,7 +65,7 @@ kernel.def target(@gfx11_wmma_families_wave32_target) @gfx11_wmma_families_wave3
   %i4_lhs = vector.fragment<lhs> %i4_lhs_words shape [%m, %k] using {schema = %i4_lhs_schema : encoding<schema>} : vector<2xi32>
   %i4_rhs = vector.fragment<rhs> %i4_rhs_words shape [%k, %n] using {schema = %i4_rhs_schema : encoding<schema>} : vector<2xi32>
   %i4_result = vector.mma %i4_lhs, %i4_rhs, %i32_init : vector<2xi32>, vector<2xi32>, vector<8xi32>
-  vector.fragment.store<result> %i4_result, %i4_output_view[0, 0] shape [%m, %n] : vector<8xi32>, view<16x16xi32, #encoding.layout.dense>
+  vector.fragment.store<result> %i4_result, %i4_output_view[0, 0] shape [%m, %n] : vector<8xi32>, view<16x16xi32>
   kernel.return
 }
 
@@ -78,12 +78,12 @@ kernel.def target(@gfx11_wmma_families_wave64_target) @gfx11_wmma_families_wave6
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
-  %f32_f16_output_view = buffer.view %f32_f16_output[%base] : buffer -> view<16x16xf32, #encoding.layout.dense>
-  %f32_bf16_output_view = buffer.view %f32_bf16_output[%base] : buffer -> view<16x16xf32, #encoding.layout.dense>
-  %f16_output_view = buffer.view %f16_output[%base] : buffer -> view<16x16xf16, #encoding.layout.dense>
-  %bf16_output_view = buffer.view %bf16_output[%base] : buffer -> view<16x16xbf16, #encoding.layout.dense>
-  %i8_output_view = buffer.view %i8_output[%base] : buffer -> view<16x16xi32, #encoding.layout.dense>
-  %i4_output_view = buffer.view %i4_output[%base] : buffer -> view<16x16xi32, #encoding.layout.dense>
+  %f32_f16_output_view = buffer.view %f32_f16_output[%base] : buffer -> view<16x16xf32>
+  %f32_bf16_output_view = buffer.view %f32_bf16_output[%base] : buffer -> view<16x16xf32>
+  %f16_output_view = buffer.view %f16_output[%base] : buffer -> view<16x16xf16>
+  %bf16_output_view = buffer.view %bf16_output[%base] : buffer -> view<16x16xbf16>
+  %i8_output_view = buffer.view %i8_output[%base] : buffer -> view<16x16xi32>
+  %i4_output_view = buffer.view %i4_output[%base] : buffer -> view<16x16xi32>
 
   %f16_operand_elements = vector.constant 1.0 : vector<16xf16>
   %f16_lhs = vector.fragment<lhs> %f16_operand_elements shape [%m, %k] : vector<16xf16>
@@ -91,23 +91,23 @@ kernel.def target(@gfx11_wmma_families_wave64_target) @gfx11_wmma_families_wave6
   %f32_accumulator_elements = vector.constant 0.0 : vector<4xf32>
   %f32_init = vector.fragment<init> %f32_accumulator_elements shape [%m, %n] : vector<4xf32>
   %f32_f16_result = vector.mma %f16_lhs, %f16_rhs, %f32_init : vector<16xf16>, vector<16xf16>, vector<4xf32>
-  vector.fragment.store<result> %f32_f16_result, %f32_f16_output_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #encoding.layout.dense>
+  vector.fragment.store<result> %f32_f16_result, %f32_f16_output_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
 
   %bf16_operand_elements = vector.constant 1.0 : vector<16xbf16>
   %bf16_lhs = vector.fragment<lhs> %bf16_operand_elements shape [%m, %k] : vector<16xbf16>
   %bf16_rhs = vector.fragment<rhs> %bf16_operand_elements shape [%k, %n] : vector<16xbf16>
   %f32_bf16_result = vector.mma %bf16_lhs, %bf16_rhs, %f32_init : vector<16xbf16>, vector<16xbf16>, vector<4xf32>
-  vector.fragment.store<result> %f32_bf16_result, %f32_bf16_output_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #encoding.layout.dense>
+  vector.fragment.store<result> %f32_bf16_result, %f32_bf16_output_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
 
   %f16_accumulator_elements = vector.constant 0.0 : vector<8xf16>
   %f16_init = vector.fragment<init> %f16_accumulator_elements shape [%m, %n] : vector<8xf16>
   %f16_result = vector.mma %f16_lhs, %f16_rhs, %f16_init : vector<16xf16>, vector<16xf16>, vector<8xf16>
-  vector.fragment.store<result> %f16_result, %f16_output_view[0, 0] shape [%m, %n] : vector<8xf16>, view<16x16xf16, #encoding.layout.dense>
+  vector.fragment.store<result> %f16_result, %f16_output_view[0, 0] shape [%m, %n] : vector<8xf16>, view<16x16xf16>
 
   %bf16_accumulator_elements = vector.constant 0.0 : vector<8xbf16>
   %bf16_init = vector.fragment<init> %bf16_accumulator_elements shape [%m, %n] : vector<8xbf16>
   %bf16_result = vector.mma %bf16_lhs, %bf16_rhs, %bf16_init : vector<16xbf16>, vector<16xbf16>, vector<8xbf16>
-  vector.fragment.store<result> %bf16_result, %bf16_output_view[0, 0] shape [%m, %n] : vector<8xbf16>, view<16x16xbf16, #encoding.layout.dense>
+  vector.fragment.store<result> %bf16_result, %bf16_output_view[0, 0] shape [%m, %n] : vector<8xbf16>, view<16x16xbf16>
 
   %i8_lhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
   %i8_rhs_schema = encoding.define #encoding.operand<element_format=u8, payload_elements=16, payload_registers=4> : encoding<schema>
@@ -118,7 +118,7 @@ kernel.def target(@gfx11_wmma_families_wave64_target) @gfx11_wmma_families_wave6
   %i32_accumulator_elements = vector.constant 0 : vector<4xi32>
   %i32_init = vector.fragment<init> %i32_accumulator_elements shape [%m, %n] : vector<4xi32>
   %i8_result = vector.mma %i8_lhs, %i8_rhs, %i32_init : vector<4xi32>, vector<4xi32>, vector<4xi32>
-  vector.fragment.store<result> %i8_result, %i8_output_view[0, 0] shape [%m, %n] : vector<4xi32>, view<16x16xi32, #encoding.layout.dense>
+  vector.fragment.store<result> %i8_result, %i8_output_view[0, 0] shape [%m, %n] : vector<4xi32>, view<16x16xi32>
 
   %i4_lhs_schema = encoding.define #encoding.operand<element_format=i4, payload_elements=16, payload_registers=2> : encoding<schema>
   %i4_rhs_schema = encoding.define #encoding.operand<element_format=u4, payload_elements=16, payload_registers=2> : encoding<schema>
@@ -127,7 +127,7 @@ kernel.def target(@gfx11_wmma_families_wave64_target) @gfx11_wmma_families_wave6
   %i4_lhs = vector.fragment<lhs> %i4_lhs_words shape [%m, %k] using {schema = %i4_lhs_schema : encoding<schema>} : vector<2xi32>
   %i4_rhs = vector.fragment<rhs> %i4_rhs_words shape [%k, %n] using {schema = %i4_rhs_schema : encoding<schema>} : vector<2xi32>
   %i4_result = vector.mma %i4_lhs, %i4_rhs, %i32_init : vector<2xi32>, vector<2xi32>, vector<4xi32>
-  vector.fragment.store<result> %i4_result, %i4_output_view[0, 0] shape [%m, %n] : vector<4xi32>, view<16x16xi32, #encoding.layout.dense>
+  vector.fragment.store<result> %i4_result, %i4_output_view[0, 0] shape [%m, %n] : vector<4xi32>, view<16x16xi32>
   kernel.return
 }
 

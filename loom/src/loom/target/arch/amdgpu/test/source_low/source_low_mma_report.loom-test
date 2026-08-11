@@ -50,12 +50,12 @@ kernel.def target(@target) @report_strided_packed_b16_fragment_load() {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
-  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x128xf16, #encoding.layout.dense>
-  %output_view = buffer.view %output_buffer[%base] : buffer -> view<64xf16, #encoding.layout.dense>
-  %rhs = vector.fragment.load<rhs> %rhs_view[%fragment_row_origin, %column_origin] shape [%k, %n] : view<16x128xf16, #encoding.layout.dense> -> vector<16xf16>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x128xf16>
+  %output_view = buffer.view %output_buffer[%base] : buffer -> view<64xf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[%fragment_row_origin, %column_origin] shape [%k, %n] : view<16x128xf16> -> vector<16xf16>
   %lane0 = vector.extract %rhs[0] : vector<16xf16> -> f16
   %lane = kernel.workitem.id<x> : index
-  view.store %lane0, %output_view[%lane] : f16, view<64xf16, #encoding.layout.dense>
+  view.store %lane0, %output_view[%lane] : f16, view<64xf16>
   kernel.return
 }
 

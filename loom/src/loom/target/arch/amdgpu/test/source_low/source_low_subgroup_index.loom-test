@@ -8,9 +8,9 @@ kernel.def target(@target) @subgroup_id_x_wave32() {
 } launch(%output: buffer) {
   %subgroup_id = kernel.subgroup.id : index
   %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<2xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<2xi32>
   %marker_value = vector.constant 1 : vector<1xi32>
-  vector.store %marker_value, %output_view[%subgroup_id] : vector<1xi32>, view<2xi32, #encoding.layout.dense>
+  vector.store %marker_value, %output_view[%subgroup_id] : vector<1xi32>, view<2xi32>
   kernel.return
 }
 
@@ -36,9 +36,9 @@ kernel.def target(@target) @subgroup_id_single_wave_gfx11() {
 } launch(%output: buffer) {
   %subgroup_id = kernel.subgroup.id : index
   %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
   %marker_value = vector.constant 1 : vector<1xi32>
-  vector.store %marker_value, %output_view[%subgroup_id] : vector<1xi32>, view<1xi32, #encoding.layout.dense>
+  vector.store %marker_value, %output_view[%subgroup_id] : vector<1xi32>, view<1xi32>
   kernel.return
 }
 
@@ -64,9 +64,9 @@ kernel.def target(@target) @subgroup_lane_id_xyz_wave32() {
 } launch(%output: buffer) {
   %lane_id = kernel.subgroup.lane.id : index
   %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<32xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<32xi32>
   %marker_value = vector.constant 1 : vector<1xi32>
-  vector.store %marker_value, %output_view[%lane_id] : vector<1xi32>, view<32xi32, #encoding.layout.dense>
+  vector.store %marker_value, %output_view[%lane_id] : vector<1xi32>, view<32xi32>
   kernel.return
 }
 
@@ -102,9 +102,9 @@ kernel.def target(@target) @subgroup_lane_id_xyz_wave32_gfx12() {
 } launch(%output: buffer) {
   %lane_id = kernel.subgroup.lane.id : index
   %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<32xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<32xi32>
   %marker_value = vector.constant 1 : vector<1xi32>
-  vector.store %marker_value, %output_view[%lane_id] : vector<1xi32>, view<32xi32, #encoding.layout.dense>
+  vector.store %marker_value, %output_view[%lane_id] : vector<1xi32>, view<32xi32>
   kernel.return
 }
 
@@ -138,9 +138,9 @@ kernel.def target(@target) @subgroup_id_x_wave64() {
 } launch(%output: buffer) {
   %subgroup_id = kernel.subgroup.id : index
   %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<2xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<2xi32>
   %marker_value = vector.constant 1 : vector<1xi32>
-  vector.store %marker_value, %output_view[%subgroup_id] : vector<1xi32>, view<2xi32, #encoding.layout.dense>
+  vector.store %marker_value, %output_view[%subgroup_id] : vector<1xi32>, view<2xi32>
   kernel.return
 }
 
@@ -166,9 +166,9 @@ kernel.def target(@target) @subgroup_lane_id_x_wave64() {
 } launch(%output: buffer) {
   %lane_id = kernel.subgroup.lane.id : index
   %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<64xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<64xi32>
   %marker_value = vector.constant 1 : vector<1xi32>
-  vector.store %marker_value, %output_view[%lane_id] : vector<1xi32>, view<64xi32, #encoding.layout.dense>
+  vector.store %marker_value, %output_view[%lane_id] : vector<1xi32>, view<64xi32>
   kernel.return
 }
 

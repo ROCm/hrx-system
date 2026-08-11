@@ -36,8 +36,8 @@ test.target<low_core> @test_target
 func.def target(@test_target) @reports_vector_store_deferred_to_later_phase(%out_buffer: buffer, %value: vector<4xf32>) {
   %base = index.constant 0 : offset
   %origin = index.constant 0 : index
-  %view = buffer.view %out_buffer[%base] : buffer -> view<4xf32, #encoding.layout.dense>
-  vector.store %value, %view[%origin] : vector<4xf32>, view<4xf32, #encoding.layout.dense>
+  %view = buffer.view %out_buffer[%base] : buffer -> view<4xf32>
+  vector.store %value, %view[%origin] : vector<4xf32>, view<4xf32>
   func.return
 }
 

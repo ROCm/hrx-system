@@ -16,10 +16,10 @@ kernel.def target(@target) @global_vector_record_non_power_two_stride() {
   %input_noalias = buffer.assume.noalias %input_global : buffer
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_noalias = buffer.assume.noalias %output_global : buffer
-  %input_view = buffer.view %input_noalias[%base] : buffer -> view<256x6119424xi8, #encoding.layout.dense>
-  %output_view = buffer.view %output_noalias[%base] : buffer -> view<256x512xi8, #encoding.layout.dense>
-  %loaded = vector.load %input_view[%expert, %channel] : view<256x6119424xi8, #encoding.layout.dense> -> vector<16xi8>
-  vector.store %loaded, %output_view[%expert, %channel] : vector<16xi8>, view<256x512xi8, #encoding.layout.dense>
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<256x6119424xi8>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<256x512xi8>
+  %loaded = vector.load %input_view[%expert, %channel] : view<256x6119424xi8> -> vector<16xi8>
+  vector.store %loaded, %output_view[%expert, %channel] : vector<16xi8>, view<256x512xi8>
   kernel.return
 }
 

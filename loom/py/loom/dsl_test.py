@@ -501,6 +501,35 @@ class TestParameterizedAttrDef:
 
 
 class TestEncodingFamilyDef:
+    def test_declares_implicit_shaped_attachment(self) -> None:
+        family = EncodingFamilyDef(
+            "encoding.layout.dense",
+            group=Dialect("encoding"),
+            role=EncodingFamilyRole.ADDRESS_LAYOUT,
+            implicit_shaped_attachment=True,
+        )
+
+        assert family.implicit_shaped_attachment
+
+    def test_rejects_parameterized_implicit_shaped_attachment(self) -> None:
+        with _raises(ValueError, match="cannot have static or dynamic parameters"):
+            EncodingFamilyDef(
+                "encoding.layout.parameterized",
+                group=Dialect("encoding"),
+                role=EncodingFamilyRole.ADDRESS_LAYOUT,
+                parameters=[AttrDef("value", "i64")],
+                implicit_shaped_attachment=True,
+            )
+
+    def test_rejects_non_layout_implicit_shaped_attachment(self) -> None:
+        with _raises(ValueError, match="must have the ADDRESS_LAYOUT role"):
+            EncodingFamilyDef(
+                "encoding.schema.dense",
+                group=Dialect("encoding"),
+                role=EncodingFamilyRole.STORAGE_SCHEMA,
+                implicit_shaped_attachment=True,
+            )
+
     def test_declares_canonical_alias_with_typed_fixed_parameters(self) -> None:
         numeric_format = EnumDef(
             "NumericFormat", [EnumCase("f16", 0), EnumCase("bf16", 1)]

@@ -41,8 +41,8 @@ kernel.def @target_specialized_launch_config(%item_count: index) {
       %covered_item_count = index.mul %items_per_workgroup, %workgroup_count : index
       %covered_item_count_i32 = index.cast %covered_item_count : index to i32
       %output_global = buffer.assume.memory_space<global> %output : buffer
-      %output_view = buffer.view %output_global[%base] : buffer -> view<1xi32, #encoding.layout.dense>
-      view.store %covered_item_count_i32, %output_view[%c0] : i32, view<1xi32, #encoding.layout.dense>
+      %output_view = buffer.view %output_global[%base] : buffer -> view<1xi32>
+      view.store %covered_item_count_i32, %output_view[%c0] : i32, view<1xi32>
     }
   }
   kernel.return

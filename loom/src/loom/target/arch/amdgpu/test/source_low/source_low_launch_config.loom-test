@@ -38,8 +38,8 @@ kernel.def target(@target) @ordinary_gfx1200_workgroup_identity() {
   %xyz = scalar.addi %xy, %z : i32
   %result = vector.from_elements %xyz : vector<1xi32>
   %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32, #encoding.layout.dense>
-  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
   kernel.return
 }
 
@@ -156,8 +156,8 @@ kernel.def target(@target) @exact_workgroup_count_uses_facts() {
   %count_i32 = index.cast %count_xyz : index to i32
   %result = vector.from_elements %count_i32 : vector<1xi32>
   %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32, #encoding.layout.dense>
-  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
   kernel.return
 }
 
@@ -208,8 +208,8 @@ kernel.def target(@target) @dynamic_workgroup_count(%workgroups_x: index, %workg
   %count_i32 = index.cast %count : index to i32
   %result = vector.from_elements %count_i32 : vector<1xi32>
   %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32, #encoding.layout.dense>
-  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
   kernel.return
 }
 
@@ -248,8 +248,8 @@ kernel.def target(@target) @target_subgroup_queries_use_wavefront_size() {
   %sum_i32 = index.cast %sum : index to i32
   %value = vector.splat %sum_i32 : vector<1xi32>
   %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32, #encoding.layout.dense>
-  vector.store %value, %output_view[0] : vector<1xi32>, view<1xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %value, %output_view[0] : vector<1xi32>, view<1xi32>
   kernel.return
 }
 
@@ -338,8 +338,8 @@ kernel.def target(@target) @clustered_launch_queries(%workgroups_x: index, %work
   %sum_i32 = index.cast %sum : index to i32
   %result = vector.from_elements %sum_i32 : vector<1xi32>
   %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32, #encoding.layout.dense>
-  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
   kernel.return
 }
 
@@ -413,8 +413,8 @@ kernel.def target(@target) @ordinary_gfx1250_workgroup_identity() {
   %xyz = scalar.addi %xy, %z : i32
   %result = vector.from_elements %xyz : vector<1xi32>
   %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32, #encoding.layout.dense>
-  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
   kernel.return
 }
 
@@ -447,8 +447,8 @@ kernel.def target(@target) @ordinary_gfx1250_workgroup_y() {
   %value = index.cast %workgroup_y : index to i32
   %result = vector.from_elements %value : vector<1xi32>
   %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32, #encoding.layout.dense>
-  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
   kernel.return
 }
 
@@ -477,8 +477,8 @@ kernel.def target(@target) @ordinary_gfx1250_workgroup_z() {
   %value = index.cast %workgroup_z : index to i32
   %result = vector.from_elements %value : vector<1xi32>
   %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32, #encoding.layout.dense>
-  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
   kernel.return
 }
 
@@ -508,8 +508,8 @@ kernel.def target(@target) @cluster_local_workgroup_y() {
   %value = index.cast %local_y : index to i32
   %result = vector.from_elements %value : vector<1xi32>
   %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32, #encoding.layout.dense>
-  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
   kernel.return
 }
 
@@ -539,8 +539,8 @@ kernel.def target(@target) @cluster_local_workgroup_z() {
   %value = index.cast %local_z : index to i32
   %result = vector.from_elements %value : vector<1xi32>
   %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32, #encoding.layout.dense>
-  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
   kernel.return
 }
 
@@ -570,8 +570,8 @@ kernel.def target(@target) @ordinary_gfx1250_workgroup_counts(%workgroups_y: ind
   %value = index.cast %sum : index to i32
   %result = vector.from_elements %value : vector<1xi32>
   %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32, #encoding.layout.dense>
-  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
   kernel.return
 }
 
@@ -603,8 +603,8 @@ kernel.def target(@target) @unsupported_cluster_workgroup_identity() {
   %value = index.cast %workgroup_x : index to i32
   %result = vector.from_elements %value : vector<1xi32>
   %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32, #encoding.layout.dense>
-  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
   kernel.return
 }
 
@@ -624,7 +624,7 @@ kernel.def target(@target) @unmodeled_cluster_revision_identity() {
   %value = index.cast %cluster_x : index to i32
   %result = vector.from_elements %value : vector<1xi32>
   %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32, #encoding.layout.dense>
-  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
   kernel.return
 }

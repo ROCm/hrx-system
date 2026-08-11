@@ -12,12 +12,12 @@ kernel.def target(@target) @dynamic_tail_dispatch_id_global_b32(%element_count: 
 } launch(%input: buffer, %output: buffer, %element_count: index) {
   %base = index.constant 0 : offset
   %linear = kernel.workitem.dispatch.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<[%element_count]xf32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<[%element_count]xf32, #encoding.layout.dense>
+  %input_view = buffer.view %input[%base] : buffer -> view<[%element_count]xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%element_count]xf32>
   %in_bounds = index.cmp ult, %linear, %element_count : index
   scf.if %in_bounds {
-    %loaded = vector.load %input_view[%linear] : view<[%element_count]xf32, #encoding.layout.dense> -> vector<1xf32>
-    vector.store %loaded, %output_view[%linear] : vector<1xf32>, view<[%element_count]xf32, #encoding.layout.dense>
+    %loaded = vector.load %input_view[%linear] : view<[%element_count]xf32> -> vector<1xf32>
+    vector.store %loaded, %output_view[%linear] : vector<1xf32>, view<[%element_count]xf32>
   }
   kernel.return
 }
@@ -83,12 +83,12 @@ kernel.def target(@target) @dynamic_tail_manual_madd_global_b32(%element_count: 
   %lane = kernel.workitem.id<x> : index
   %workgroup_size = index.constant 64 : index
   %linear = index.madd %workgroup, %workgroup_size, %lane : index
-  %input_view = buffer.view %input[%base] : buffer -> view<[%element_count]xf32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<[%element_count]xf32, #encoding.layout.dense>
+  %input_view = buffer.view %input[%base] : buffer -> view<[%element_count]xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%element_count]xf32>
   %in_bounds = index.cmp ult, %linear, %element_count : index
   scf.if %in_bounds {
-    %loaded = vector.load %input_view[%linear] : view<[%element_count]xf32, #encoding.layout.dense> -> vector<1xf32>
-    vector.store %loaded, %output_view[%linear] : vector<1xf32>, view<[%element_count]xf32, #encoding.layout.dense>
+    %loaded = vector.load %input_view[%linear] : view<[%element_count]xf32> -> vector<1xf32>
+    vector.store %loaded, %output_view[%linear] : vector<1xf32>, view<[%element_count]xf32>
   }
   kernel.return
 }
@@ -157,10 +157,10 @@ kernel.def target(@target) @fixed_multidim_madd_global_b32() {
   %y = kernel.workitem.id<y> : index
   %row_stride = index.constant 8 : index
   %linear = index.madd %y, %row_stride, %x : index
-  %input_view = buffer.view %input[%base] : buffer -> view<32xi32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<32xi32, #encoding.layout.dense>
-  %loaded = vector.load %input_view[%linear] : view<32xi32, #encoding.layout.dense> -> vector<1xi32>
-  vector.store %loaded, %output_view[%linear] : vector<1xi32>, view<32xi32, #encoding.layout.dense>
+  %input_view = buffer.view %input[%base] : buffer -> view<32xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<32xi32>
+  %loaded = vector.load %input_view[%linear] : view<32xi32> -> vector<1xi32>
+  vector.store %loaded, %output_view[%linear] : vector<1xi32>, view<32xi32>
   kernel.return
 }
 
@@ -196,10 +196,10 @@ kernel.def target(@target) @config_bound_workgroup_vector_copy() {
   %origin = index.mul %workgroup, %tile : index
   %workgroups = kernel.workgroup.count<x> : index
   %element_count = index.mul %workgroups, %tile : index
-  %input_view = buffer.view %input[%base] : buffer -> view<[%element_count]xf32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<[%element_count]xf32, #encoding.layout.dense>
-  %loaded = vector.load %input_view[%origin] : view<[%element_count]xf32, #encoding.layout.dense> -> vector<4xf32>
-  vector.store %loaded, %output_view[%origin] : vector<4xf32>, view<[%element_count]xf32, #encoding.layout.dense>
+  %input_view = buffer.view %input[%base] : buffer -> view<[%element_count]xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%element_count]xf32>
+  %loaded = vector.load %input_view[%origin] : view<[%element_count]xf32> -> vector<4xf32>
+  vector.store %loaded, %output_view[%origin] : vector<4xf32>, view<[%element_count]xf32>
   kernel.return
 }
 

@@ -11,16 +11,16 @@ kernel.def target(@target) @f32_arith() {
 } launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs_buffer[%buffer_base] : buffer -> view<64xf32, #encoding.layout.dense>
-  %rhs_view = buffer.view %rhs_buffer[%buffer_base] : buffer -> view<64xf32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf32, #encoding.layout.dense>
-  %lhs = vector.load %lhs_view[%lane] : view<64xf32, #encoding.layout.dense> -> vector<1xf32>
-  %rhs = vector.load %rhs_view[%lane] : view<64xf32, #encoding.layout.dense> -> vector<1xf32>
+  %lhs_view = buffer.view %lhs_buffer[%buffer_base] : buffer -> view<64xf32>
+  %rhs_view = buffer.view %rhs_buffer[%buffer_base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf32>
+  %lhs = vector.load %lhs_view[%lane] : view<64xf32> -> vector<1xf32>
+  %rhs = vector.load %rhs_view[%lane] : view<64xf32> -> vector<1xf32>
   %sum = vector.addf %lhs, %rhs : vector<1xf32>
   %product = vector.mulf %sum, %rhs : vector<1xf32>
   %negated = vector.negf %product : vector<1xf32>
   %absolute = vector.absf %negated : vector<1xf32>
-  vector.store %absolute, %output_view[%lane] : vector<1xf32>, view<64xf32, #encoding.layout.dense>
+  vector.store %absolute, %output_view[%lane] : vector<1xf32>, view<64xf32>
   kernel.return
 }
 
@@ -52,15 +52,15 @@ kernel.def target(@target) @f32_fma() {
 } launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs_buffer[%buffer_base] : buffer -> view<64xf32, #encoding.layout.dense>
-  %rhs_view = buffer.view %rhs_buffer[%buffer_base] : buffer -> view<64xf32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf32, #encoding.layout.dense>
-  %lhs = vector.load %lhs_view[%lane] : view<64xf32, #encoding.layout.dense> -> vector<1xf32>
-  %rhs = vector.load %rhs_view[%lane] : view<64xf32, #encoding.layout.dense> -> vector<1xf32>
+  %lhs_view = buffer.view %lhs_buffer[%buffer_base] : buffer -> view<64xf32>
+  %rhs_view = buffer.view %rhs_buffer[%buffer_base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf32>
+  %lhs = vector.load %lhs_view[%lane] : view<64xf32> -> vector<1xf32>
+  %rhs = vector.load %rhs_view[%lane] : view<64xf32> -> vector<1xf32>
   %bias = vector.constant 0.5 : vector<1xf32>
   %fma = vector.fmaf %lhs, %rhs, %bias : vector<1xf32>
   %result = vector.subf %fma, %bias : vector<1xf32>
-  vector.store %result, %output_view[%lane] : vector<1xf32>, view<64xf32, #encoding.layout.dense>
+  vector.store %result, %output_view[%lane] : vector<1xf32>, view<64xf32>
   kernel.return
 }
 
@@ -91,13 +91,13 @@ kernel.def target(@target) @f32_arcp_div() {
 } launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs_buffer[%buffer_base] : buffer -> view<64x4xf32, #encoding.layout.dense>
-  %rhs_view = buffer.view %rhs_buffer[%buffer_base] : buffer -> view<64x4xf32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xf32, #encoding.layout.dense>
-  %lhs = vector.load %lhs_view[%lane, 0] : view<64x4xf32, #encoding.layout.dense> -> vector<4xf32>
-  %rhs = vector.load %rhs_view[%lane, 0] : view<64x4xf32, #encoding.layout.dense> -> vector<4xf32>
+  %lhs_view = buffer.view %lhs_buffer[%buffer_base] : buffer -> view<64x4xf32>
+  %rhs_view = buffer.view %rhs_buffer[%buffer_base] : buffer -> view<64x4xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xf32>
+  %lhs = vector.load %lhs_view[%lane, 0] : view<64x4xf32> -> vector<4xf32>
+  %rhs = vector.load %rhs_view[%lane, 0] : view<64x4xf32> -> vector<4xf32>
   %quotient = vector.divf<nnan|ninf|nsz|arcp> %lhs, %rhs : vector<4xf32>
-  vector.store %quotient, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32, #encoding.layout.dense>
+  vector.store %quotient, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32>
   kernel.return
 }
 
@@ -236,13 +236,13 @@ kernel.def target(@target) @f32_exact_vector_div() {
 } launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs_buffer[%buffer_base] : buffer -> view<64xf32, #encoding.layout.dense>
-  %rhs_view = buffer.view %rhs_buffer[%buffer_base] : buffer -> view<64xf32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf32, #encoding.layout.dense>
-  %lhs = vector.load %lhs_view[%lane] : view<64xf32, #encoding.layout.dense> -> vector<1xf32>
-  %rhs = vector.load %rhs_view[%lane] : view<64xf32, #encoding.layout.dense> -> vector<1xf32>
+  %lhs_view = buffer.view %lhs_buffer[%buffer_base] : buffer -> view<64xf32>
+  %rhs_view = buffer.view %rhs_buffer[%buffer_base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf32>
+  %lhs = vector.load %lhs_view[%lane] : view<64xf32> -> vector<1xf32>
+  %rhs = vector.load %rhs_view[%lane] : view<64xf32> -> vector<1xf32>
   %quotient = vector.divf %lhs, %rhs : vector<1xf32>
-  vector.store %quotient, %output_view[%lane] : vector<1xf32>, view<64xf32, #encoding.layout.dense>
+  vector.store %quotient, %output_view[%lane] : vector<1xf32>, view<64xf32>
   kernel.return
 }
 
@@ -269,10 +269,10 @@ func.def target(@target) @f32_exact_scalar_div(%lhs_buffer: buffer, %rhs_buffer:
   %lhs_global = buffer.assume.memory_space<global> %lhs_buffer : buffer
   %rhs_global = buffer.assume.memory_space<global> %rhs_buffer : buffer
   %lhs_noalias, %rhs_noalias = buffer.assume.noalias %lhs_global, %rhs_global : buffer, buffer
-  %lhs_view = buffer.view %lhs_noalias[%base] : buffer -> view<1xf32, #encoding.layout.dense>
-  %rhs_view = buffer.view %rhs_noalias[%base] : buffer -> view<1xf32, #encoding.layout.dense>
-  %lhs = view.load %lhs_view[0] : view<1xf32, #encoding.layout.dense> -> f32
-  %rhs = view.load %rhs_view[0] : view<1xf32, #encoding.layout.dense> -> f32
+  %lhs_view = buffer.view %lhs_noalias[%base] : buffer -> view<1xf32>
+  %rhs_view = buffer.view %rhs_noalias[%base] : buffer -> view<1xf32>
+  %lhs = view.load %lhs_view[0] : view<1xf32> -> f32
+  %rhs = view.load %rhs_view[0] : view<1xf32> -> f32
   %quotient = scalar.divf %lhs, %rhs : f32
   func.return %quotient : f32
 }
@@ -297,11 +297,11 @@ kernel.def target(@target) @f32_scalarized() {
 } launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs_buffer[%buffer_base] : buffer -> view<64x4xf32, #encoding.layout.dense>
-  %rhs_view = buffer.view %rhs_buffer[%buffer_base] : buffer -> view<64x4xf32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xf32, #encoding.layout.dense>
-  %lhs = vector.load %lhs_view[%lane, 0] : view<64x4xf32, #encoding.layout.dense> -> vector<4xf32>
-  %rhs = vector.load %rhs_view[%lane, 0] : view<64x4xf32, #encoding.layout.dense> -> vector<4xf32>
+  %lhs_view = buffer.view %lhs_buffer[%buffer_base] : buffer -> view<64x4xf32>
+  %rhs_view = buffer.view %rhs_buffer[%buffer_base] : buffer -> view<64x4xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xf32>
+  %lhs = vector.load %lhs_view[%lane, 0] : view<64x4xf32> -> vector<4xf32>
+  %rhs = vector.load %rhs_view[%lane, 0] : view<64x4xf32> -> vector<4xf32>
   %lhs0 = vector.extract %lhs[0] : vector<4xf32> -> f32
   %rhs0 = vector.extract %rhs[0] : vector<4xf32> -> f32
   %lane0 = scalar.addf %lhs0, %rhs0 : f32
@@ -318,7 +318,7 @@ kernel.def target(@target) @f32_scalarized() {
   %bias = scalar.constant 0.5 : f32
   %lane3 = scalar.fmaf %lhs3, %rhs3, %bias : f32
   %result = vector.from_elements %lane0, %lane1, %lane2, %lane3 : vector<4xf32>
-  vector.store %result, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32, #encoding.layout.dense>
+  vector.store %result, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32>
   kernel.return
 }
 
@@ -359,8 +359,8 @@ func.def target(@target) @f32_uniform_vector_bitops(%input: buffer) -> (vector<4
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
   %input_noalias = buffer.assume.noalias %input_global : buffer
-  %input_view = buffer.view %input_noalias[%base] : buffer -> view<4xf32, #encoding.layout.dense>
-  %loaded = vector.load %input_view[0] : view<4xf32, #encoding.layout.dense> -> vector<4xf32>
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<4xf32>
+  %loaded = vector.load %input_view[0] : view<4xf32> -> vector<4xf32>
   %negated = vector.negf %loaded : vector<4xf32>
   %absolute = vector.absf %loaded : vector<4xf32>
   %result = vector.addf %negated, %absolute : vector<4xf32>
@@ -387,10 +387,10 @@ func.def target(@target) @f32_uniform_vector_binary(%lhs_buffer: buffer, %rhs_bu
   %lhs_global = buffer.assume.memory_space<global> %lhs_buffer : buffer
   %rhs_global = buffer.assume.memory_space<global> %rhs_buffer : buffer
   %lhs_noalias, %rhs_noalias = buffer.assume.noalias %lhs_global, %rhs_global : buffer, buffer
-  %lhs_view = buffer.view %lhs_noalias[%base] : buffer -> view<4xf32, #encoding.layout.dense>
-  %rhs_view = buffer.view %rhs_noalias[%base] : buffer -> view<4xf32, #encoding.layout.dense>
-  %lhs = vector.load %lhs_view[0] : view<4xf32, #encoding.layout.dense> -> vector<4xf32>
-  %rhs = vector.load %rhs_view[0] : view<4xf32, #encoding.layout.dense> -> vector<4xf32>
+  %lhs_view = buffer.view %lhs_noalias[%base] : buffer -> view<4xf32>
+  %rhs_view = buffer.view %rhs_noalias[%base] : buffer -> view<4xf32>
+  %lhs = vector.load %lhs_view[0] : view<4xf32> -> vector<4xf32>
+  %rhs = vector.load %rhs_view[0] : view<4xf32> -> vector<4xf32>
   %product = vector.mulf %lhs, %rhs : vector<4xf32>
   %sum = vector.addf %lhs, %rhs : vector<4xf32>
   %difference = vector.subf %lhs, %rhs : vector<4xf32>
@@ -428,10 +428,10 @@ func.def target(@target) @f32_uniform_scalar_binary(%lhs_buffer: buffer, %rhs_bu
   %lhs_global = buffer.assume.memory_space<global> %lhs_buffer : buffer
   %rhs_global = buffer.assume.memory_space<global> %rhs_buffer : buffer
   %lhs_noalias, %rhs_noalias = buffer.assume.noalias %lhs_global, %rhs_global : buffer, buffer
-  %lhs_view = buffer.view %lhs_noalias[%base] : buffer -> view<1xf32, #encoding.layout.dense>
-  %rhs_view = buffer.view %rhs_noalias[%base] : buffer -> view<1xf32, #encoding.layout.dense>
-  %lhs = view.load %lhs_view[0] : view<1xf32, #encoding.layout.dense> -> f32
-  %rhs = view.load %rhs_view[0] : view<1xf32, #encoding.layout.dense> -> f32
+  %lhs_view = buffer.view %lhs_noalias[%base] : buffer -> view<1xf32>
+  %rhs_view = buffer.view %rhs_noalias[%base] : buffer -> view<1xf32>
+  %lhs = view.load %lhs_view[0] : view<1xf32> -> f32
+  %rhs = view.load %rhs_view[0] : view<1xf32> -> f32
   %sum = scalar.addf %lhs, %rhs : f32
   func.return %sum : f32
 }
@@ -478,12 +478,12 @@ func.def target(@target) @f32_uniform_scalar_fma(%a_buffer: buffer, %b_buffer: b
   %b_global = buffer.assume.memory_space<global> %b_buffer : buffer
   %c_global = buffer.assume.memory_space<global> %c_buffer : buffer
   %a_noalias, %b_noalias, %c_noalias = buffer.assume.noalias %a_global, %b_global, %c_global : buffer, buffer, buffer
-  %a_view = buffer.view %a_noalias[%base] : buffer -> view<1xf32, #encoding.layout.dense>
-  %b_view = buffer.view %b_noalias[%base] : buffer -> view<1xf32, #encoding.layout.dense>
-  %c_view = buffer.view %c_noalias[%base] : buffer -> view<1xf32, #encoding.layout.dense>
-  %a = view.load %a_view[0] : view<1xf32, #encoding.layout.dense> -> f32
-  %b = view.load %b_view[0] : view<1xf32, #encoding.layout.dense> -> f32
-  %c = view.load %c_view[0] : view<1xf32, #encoding.layout.dense> -> f32
+  %a_view = buffer.view %a_noalias[%base] : buffer -> view<1xf32>
+  %b_view = buffer.view %b_noalias[%base] : buffer -> view<1xf32>
+  %c_view = buffer.view %c_noalias[%base] : buffer -> view<1xf32>
+  %a = view.load %a_view[0] : view<1xf32> -> f32
+  %b = view.load %b_view[0] : view<1xf32> -> f32
+  %c = view.load %c_view[0] : view<1xf32> -> f32
   %result = scalar.fmaf %a, %b, %c : f32
   func.return %result : f32
 }
@@ -509,12 +509,12 @@ func.def target(@target) @f32_uniform_vector_fma(%a_buffer: buffer, %b_buffer: b
   %b_global = buffer.assume.memory_space<global> %b_buffer : buffer
   %c_global = buffer.assume.memory_space<global> %c_buffer : buffer
   %a_noalias, %b_noalias, %c_noalias = buffer.assume.noalias %a_global, %b_global, %c_global : buffer, buffer, buffer
-  %a_view = buffer.view %a_noalias[%base] : buffer -> view<4xf32, #encoding.layout.dense>
-  %b_view = buffer.view %b_noalias[%base] : buffer -> view<4xf32, #encoding.layout.dense>
-  %c_view = buffer.view %c_noalias[%base] : buffer -> view<4xf32, #encoding.layout.dense>
-  %a = vector.load %a_view[0] : view<4xf32, #encoding.layout.dense> -> vector<4xf32>
-  %b = vector.load %b_view[0] : view<4xf32, #encoding.layout.dense> -> vector<4xf32>
-  %c = vector.load %c_view[0] : view<4xf32, #encoding.layout.dense> -> vector<4xf32>
+  %a_view = buffer.view %a_noalias[%base] : buffer -> view<4xf32>
+  %b_view = buffer.view %b_noalias[%base] : buffer -> view<4xf32>
+  %c_view = buffer.view %c_noalias[%base] : buffer -> view<4xf32>
+  %a = vector.load %a_view[0] : view<4xf32> -> vector<4xf32>
+  %b = vector.load %b_view[0] : view<4xf32> -> vector<4xf32>
+  %c = vector.load %c_view[0] : view<4xf32> -> vector<4xf32>
   %result = vector.fmaf %a, %b, %c : vector<4xf32>
   func.return %result : vector<4xf32>
 }
@@ -539,10 +539,10 @@ kernel.def target(@target) @f32_direct_arg_scale() {
 } launch(%output: buffer, %scale: f32) {
   %output_base = index.constant 0 : offset
   %output_element = index.constant 0 : index
-  %output_view = buffer.view %output[%output_base] : buffer -> view<1xf32, #encoding.layout.dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xf32>
   %unit = scalar.constant 1.0 : f32
   %scaled = scalar.mulf %unit, %scale : f32
-  view.store %scaled, %output_view[%output_element] : f32, view<1xf32, #encoding.layout.dense>
+  view.store %scaled, %output_view[%output_element] : f32, view<1xf32>
   kernel.return
 }
 

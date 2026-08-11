@@ -7,9 +7,9 @@ kernel.def @cache_device_non_temporal_load_store() {
 } launch(%input: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xi32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32, #encoding.layout.dense>
-  %loaded = vector.load %input_view[%lane, 0] {cache_scope = device, cache_temporal = non_temporal} : view<64x4xi32, #encoding.layout.dense> -> vector<4xi32>
-  vector.store %loaded, %output_view[%lane, 0] {cache_scope = device, cache_temporal = non_temporal} : vector<4xi32>, view<64x4xi32, #encoding.layout.dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32>
+  %loaded = vector.load %input_view[%lane, 0] {cache_scope = device, cache_temporal = non_temporal} : view<64x4xi32> -> vector<4xi32>
+  vector.store %loaded, %output_view[%lane, 0] {cache_scope = device, cache_temporal = non_temporal} : vector<4xi32>, view<64x4xi32>
   kernel.return
 }

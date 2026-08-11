@@ -18,7 +18,7 @@ kernel.def target(@target) @a0_legalizes_constrained_lds_packets() {
   %regular_b64 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi64, %regular_b64_layout>
   %stride64_b32 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi32, %stride64_layout>
   %stride64_b64 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi64, %stride64_layout>
-  %dense = buffer.view %scratch[%scratch_base] : buffer -> view<4096xi8, #encoding.layout.dense>
+  %dense = buffer.view %scratch[%scratch_base] : buffer -> view<4096xi8>
   %pair_b32 = vector.constant 1 : vector<2xi32>
   %pair_b64 = vector.constant 1 : vector<2xi64>
   vector.store %pair_b32, %regular_b32[0, 0] : vector<2xi32>, view<1x2xi32, %regular_b32_layout>
@@ -34,9 +34,9 @@ kernel.def target(@target) @a0_legalizes_constrained_lds_packets() {
   %loaded_stride64_b64 = vector.load %stride64_b64[0, 0] : view<1x2xi64, %stride64_layout> -> vector<2xi64>
   vector.store %loaded_stride64_b64, %stride64_b64[0, 0] : vector<2xi64>, view<1x2xi64, %stride64_layout>
   %word = vector.constant 1 : vector<4xi8>
-  vector.store %word, %dense[%lane] : vector<4xi8>, view<4096xi8, #encoding.layout.dense>
-  %loaded_word = vector.load %dense[%lane] : view<4096xi8, #encoding.layout.dense> -> vector<4xi8>
-  vector.store %loaded_word, %dense[%lane] : vector<4xi8>, view<4096xi8, #encoding.layout.dense>
+  vector.store %word, %dense[%lane] : vector<4xi8>, view<4096xi8>
+  %loaded_word = vector.load %dense[%lane] : view<4096xi8> -> vector<4xi8>
+  vector.store %loaded_word, %dense[%lane] : vector<4xi8>, view<4096xi8>
   kernel.return
 }
 
@@ -102,7 +102,7 @@ kernel.def target(@target) @b0_retains_native_lds_packets() {
   %regular_b64 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi64, %regular_b64_layout>
   %stride64_b32 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi32, %stride64_layout>
   %stride64_b64 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi64, %stride64_layout>
-  %dense = buffer.view %scratch[%scratch_base] : buffer -> view<4096xi8, #encoding.layout.dense>
+  %dense = buffer.view %scratch[%scratch_base] : buffer -> view<4096xi8>
   %pair_b32 = vector.constant 1 : vector<2xi32>
   %pair_b64 = vector.constant 1 : vector<2xi64>
   vector.store %pair_b32, %regular_b32[0, 0] : vector<2xi32>, view<1x2xi32, %regular_b32_layout>
@@ -118,9 +118,9 @@ kernel.def target(@target) @b0_retains_native_lds_packets() {
   %loaded_stride64_b64 = vector.load %stride64_b64[0, 0] : view<1x2xi64, %stride64_layout> -> vector<2xi64>
   vector.store %loaded_stride64_b64, %stride64_b64[0, 0] : vector<2xi64>, view<1x2xi64, %stride64_layout>
   %word = vector.constant 1 : vector<4xi8>
-  vector.store %word, %dense[%lane] : vector<4xi8>, view<4096xi8, #encoding.layout.dense>
-  %loaded_word = vector.load %dense[%lane] : view<4096xi8, #encoding.layout.dense> -> vector<4xi8>
-  vector.store %loaded_word, %dense[%lane] : vector<4xi8>, view<4096xi8, #encoding.layout.dense>
+  vector.store %word, %dense[%lane] : vector<4xi8>, view<4096xi8>
+  %loaded_word = vector.load %dense[%lane] : view<4096xi8> -> vector<4xi8>
+  vector.store %loaded_word, %dense[%lane] : vector<4xi8>, view<4096xi8>
   kernel.return
 }
 

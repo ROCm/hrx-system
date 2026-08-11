@@ -421,14 +421,10 @@ TEST_F(VectorMemoryTest, OpFootprintKindClassifiesMemoryFamilies) {
             LOOM_VECTOR_MEMORY_FOOTPRINT_NONE);
 }
 
-TEST_F(VectorMemoryTest, DenseLayoutComputesLaneOffsets) {
-  loom_value_id_t layout = LOOM_VALUE_ID_INVALID;
-  BuildDenseLayout(&layout);
-  loom_type_t view_type = ViewWithLayout(
-      loom_type_shaped_2d(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_F32,
-                          loom_dim_pack_static(8), loom_dim_pack_static(16),
-                          /*encoding_id=*/0),
-      layout);
+TEST_F(VectorMemoryTest, NativeDenseLayoutComputesLaneOffsets) {
+  loom_type_t view_type = loom_type_shaped_2d(
+      LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(8),
+      loom_dim_pack_static(16), /*encoding_id=*/0);
   loom_type_t vector_type =
       loom_type_shaped_2d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32,
                           loom_dim_pack_static(2), loom_dim_pack_static(4),

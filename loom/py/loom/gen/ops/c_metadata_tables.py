@@ -612,6 +612,8 @@ def _emit_encoding_family_tables(
         lines.append(f"const loom_encoding_family_descriptor_t {_c_encoding_family_descriptor_name(family)} = {{")
         lines.append(f"    .name = {_bstring_expr(family.name)},")
         lines.append(f"    .role = {family.role.c_name},")
+        if family.implicit_shaped_attachment:
+            lines.append("    .family_flags = LOOM_ENCODING_FAMILY_IMPLICIT_SHAPED_ATTACHMENT,")
         if parameter_table is not None:
             lines.append(f"    .parameter_count = IREE_ARRAYSIZE({parameter_table}),")
             lines.append(f"    .parameter_descriptors = {parameter_table},")

@@ -7,11 +7,11 @@ kernel.def target(@target) @double_i32_at_byte_offset() {
   %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 4)] : offset
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xi32, #encoding.layout.dense>
-  %loaded = view.load %input_view[0] : view<1xi32, #encoding.layout.dense> -> i32
+  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xi32>
+  %loaded = view.load %input_view[0] : view<1xi32> -> i32
   %doubled = scalar.addi %loaded, %loaded : i32
-  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xi32, #encoding.layout.dense>
-  view.store %doubled, %output_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xi32>
+  view.store %doubled, %output_view[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -34,12 +34,12 @@ kernel.def target(@target) @increment_i32() {
   %base = index.constant 0 : offset
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%base] : buffer -> view<1xi32, #encoding.layout.dense>
-  %value = view.load %input_view[0] : view<1xi32, #encoding.layout.dense> -> i32
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<1xi32>
+  %value = view.load %input_view[0] : view<1xi32> -> i32
   %increment = scalar.constant 1 : i32
   %incremented = scalar.addi %value, %increment : i32
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<1xi32, #encoding.layout.dense>
-  view.store %incremented, %output_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<1xi32>
+  view.store %incremented, %output_view[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -50,11 +50,11 @@ kernel.def target(@target) @double_i32() {
   %base = index.constant 0 : offset
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%base] : buffer -> view<1xi32, #encoding.layout.dense>
-  %value = view.load %input_view[0] : view<1xi32, #encoding.layout.dense> -> i32
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<1xi32>
+  %value = view.load %input_view[0] : view<1xi32> -> i32
   %doubled = scalar.addi %value, %value : i32
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<1xi32, #encoding.layout.dense>
-  view.store %doubled, %output_view[0] : i32, view<1xi32, #encoding.layout.dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<1xi32>
+  view.store %doubled, %output_view[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -93,29 +93,29 @@ kernel.def target(@target) @scalar_addressing_i32() {
   %subview_element_bounded = index.assume %subview_element [range(%subview_element, 0, 3)] : index
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %static_view = buffer.view %input_aligned[%static_base] : buffer -> view<2x4xi32, #encoding.layout.dense>
-  %dynamic_base_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<4xi32, #encoding.layout.dense>
-  %dynamic_index_view = buffer.view %input_aligned[%buffer_base] : buffer -> view<16xi32, #encoding.layout.dense>
-  %mixed_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<4x8xi32, #encoding.layout.dense>
-  %dynamic_stride_view = buffer.view %input_aligned[%buffer_base] : buffer -> view<4x[%columns_bounded]xi32, #encoding.layout.dense>
-  %subview_source = buffer.view %input_aligned[%subview_base] : buffer -> view<8xi32, #encoding.layout.dense>
-  %subview = view.subview %subview_source[1] : view<8xi32, #encoding.layout.dense> -> view<4xi32, #encoding.layout.dense>
-  %materialized_base_view = buffer.view %input_aligned[%biased_base] : buffer -> view<8xi32, #encoding.layout.dense>
-  %output_view = buffer.view %output_aligned[%buffer_base] : buffer -> view<7xi32, #encoding.layout.dense>
-  %static_value = view.load %static_view[1, 2] : view<2x4xi32, #encoding.layout.dense> -> i32
-  %dynamic_base_value = view.load %dynamic_base_view[2] : view<4xi32, #encoding.layout.dense> -> i32
-  %dynamic_index_value = view.load %dynamic_index_view[%element_bounded] : view<16xi32, #encoding.layout.dense> -> i32
-  %mixed_value = view.load %mixed_view[%mixed_row_bounded, %column_bounded] : view<4x8xi32, #encoding.layout.dense> -> i32
-  %dynamic_stride_value = view.load %dynamic_stride_view[%stride_row_bounded, %stride_column_bounded] : view<4x[%columns_bounded]xi32, #encoding.layout.dense> -> i32
-  %subview_value = view.load %subview[%subview_element_bounded] : view<4xi32, #encoding.layout.dense> -> i32
-  %materialized_base_value = view.load %materialized_base_view[6] : view<8xi32, #encoding.layout.dense> -> i32
-  view.store %static_value, %output_view[0] : i32, view<7xi32, #encoding.layout.dense>
-  view.store %dynamic_base_value, %output_view[1] : i32, view<7xi32, #encoding.layout.dense>
-  view.store %dynamic_index_value, %output_view[2] : i32, view<7xi32, #encoding.layout.dense>
-  view.store %mixed_value, %output_view[3] : i32, view<7xi32, #encoding.layout.dense>
-  view.store %dynamic_stride_value, %output_view[4] : i32, view<7xi32, #encoding.layout.dense>
-  view.store %subview_value, %output_view[5] : i32, view<7xi32, #encoding.layout.dense>
-  view.store %materialized_base_value, %output_view[6] : i32, view<7xi32, #encoding.layout.dense>
+  %static_view = buffer.view %input_aligned[%static_base] : buffer -> view<2x4xi32>
+  %dynamic_base_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<4xi32>
+  %dynamic_index_view = buffer.view %input_aligned[%buffer_base] : buffer -> view<16xi32>
+  %mixed_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<4x8xi32>
+  %dynamic_stride_view = buffer.view %input_aligned[%buffer_base] : buffer -> view<4x[%columns_bounded]xi32>
+  %subview_source = buffer.view %input_aligned[%subview_base] : buffer -> view<8xi32>
+  %subview = view.subview %subview_source[1] : view<8xi32> -> view<4xi32>
+  %materialized_base_view = buffer.view %input_aligned[%biased_base] : buffer -> view<8xi32>
+  %output_view = buffer.view %output_aligned[%buffer_base] : buffer -> view<7xi32>
+  %static_value = view.load %static_view[1, 2] : view<2x4xi32> -> i32
+  %dynamic_base_value = view.load %dynamic_base_view[2] : view<4xi32> -> i32
+  %dynamic_index_value = view.load %dynamic_index_view[%element_bounded] : view<16xi32> -> i32
+  %mixed_value = view.load %mixed_view[%mixed_row_bounded, %column_bounded] : view<4x8xi32> -> i32
+  %dynamic_stride_value = view.load %dynamic_stride_view[%stride_row_bounded, %stride_column_bounded] : view<4x[%columns_bounded]xi32> -> i32
+  %subview_value = view.load %subview[%subview_element_bounded] : view<4xi32> -> i32
+  %materialized_base_value = view.load %materialized_base_view[6] : view<8xi32> -> i32
+  view.store %static_value, %output_view[0] : i32, view<7xi32>
+  view.store %dynamic_base_value, %output_view[1] : i32, view<7xi32>
+  view.store %dynamic_index_value, %output_view[2] : i32, view<7xi32>
+  view.store %mixed_value, %output_view[3] : i32, view<7xi32>
+  view.store %dynamic_stride_value, %output_view[4] : i32, view<7xi32>
+  view.store %subview_value, %output_view[5] : i32, view<7xi32>
+  view.store %materialized_base_value, %output_view[6] : i32, view<7xi32>
   kernel.return
 }
 
@@ -146,16 +146,16 @@ kernel.def target(@target) @workgroup_addressing_i32() {
   %scratch_byte_length = index.constant 32 : offset
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%base] : buffer -> view<4xi32, #encoding.layout.dense>
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<4xi32, #encoding.layout.dense>
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<4xi32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<4xi32>
   %scratch = buffer.alloca<workgroup> align(4) %scratch_byte_length : buffer
-  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<6xi32, #encoding.layout.dense>
-  %scratch_subview = view.subview %scratch_view[1] : view<6xi32, #encoding.layout.dense> -> view<4xi32, #encoding.layout.dense>
-  %input_value = view.load %input_view[%lane] : view<4xi32, #encoding.layout.dense> -> i32
-  view.store %input_value, %scratch_subview[%lane] : i32, view<4xi32, #encoding.layout.dense>
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<6xi32>
+  %scratch_subview = view.subview %scratch_view[1] : view<6xi32> -> view<4xi32>
+  %input_value = view.load %input_view[%lane] : view<4xi32> -> i32
+  view.store %input_value, %scratch_subview[%lane] : i32, view<4xi32>
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-  %workgroup_value = view.load %scratch_subview[%lane] : view<4xi32, #encoding.layout.dense> -> i32
-  view.store %workgroup_value, %output_view[%lane] : i32, view<4xi32, #encoding.layout.dense>
+  %workgroup_value = view.load %scratch_subview[%lane] : view<4xi32> -> i32
+  view.store %workgroup_value, %output_view[%lane] : i32, view<4xi32>
   kernel.return
 }
 
@@ -175,12 +175,12 @@ kernel.def target(@target) @ordinary_vector_structure_i32() {
   %base_byte_offset = index.constant 0 : offset
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%base_byte_offset] : buffer -> view<4xi32, #encoding.layout.dense>
-  %output_view = buffer.view %output_aligned[%base_byte_offset] : buffer -> view<4xi32, #encoding.layout.dense>
-  %a = view.load %input_view[0] : view<4xi32, #encoding.layout.dense> -> i32
-  %b = view.load %input_view[1] : view<4xi32, #encoding.layout.dense> -> i32
-  %c = view.load %input_view[2] : view<4xi32, #encoding.layout.dense> -> i32
-  %d = view.load %input_view[3] : view<4xi32, #encoding.layout.dense> -> i32
+  %input_view = buffer.view %input_aligned[%base_byte_offset] : buffer -> view<4xi32>
+  %output_view = buffer.view %output_aligned[%base_byte_offset] : buffer -> view<4xi32>
+  %a = view.load %input_view[0] : view<4xi32> -> i32
+  %b = view.load %input_view[1] : view<4xi32> -> i32
+  %c = view.load %input_view[2] : view<4xi32> -> i32
+  %d = view.load %input_view[3] : view<4xi32> -> i32
   %condition = scalar.cmpi sgt, %a, %b : i32
   %singleton_from = vector.from_elements %b : vector<1xi32>
   %singleton_splat = vector.splat %a : vector<1xi32>
@@ -194,10 +194,10 @@ kernel.def target(@target) @ordinary_vector_structure_i32() {
   %splat = vector.splat %singleton_value : vector<4xi32>
   %candidate = scf.select %condition, %from, %constant : vector<4xi32>
   %selected = scf.if %condition -> (vector<4xi32>) {
-    view.store %a, %output_view[0] : i32, view<4xi32, #encoding.layout.dense>
+    view.store %a, %output_view[0] : i32, view<4xi32>
     scf.yield %candidate : vector<4xi32>
   } else {
-    view.store %b, %output_view[0] : i32, view<4xi32, #encoding.layout.dense>
+    view.store %b, %output_view[0] : i32, view<4xi32>
     scf.yield %splat : vector<4xi32>
   }
   %inserted = vector.insert %singleton_constant_value into %selected[2] : i32, vector<4xi32>
@@ -206,10 +206,10 @@ kernel.def target(@target) @ordinary_vector_structure_i32() {
   %result1 = vector.extract %final[1] : vector<4xi32> -> i32
   %result2 = vector.extract %final[2] : vector<4xi32> -> i32
   %result3 = vector.extract %final[3] : vector<4xi32> -> i32
-  view.store %result0, %output_view[0] : i32, view<4xi32, #encoding.layout.dense>
-  view.store %result1, %output_view[1] : i32, view<4xi32, #encoding.layout.dense>
-  view.store %result2, %output_view[2] : i32, view<4xi32, #encoding.layout.dense>
-  view.store %result3, %output_view[3] : i32, view<4xi32, #encoding.layout.dense>
+  view.store %result0, %output_view[0] : i32, view<4xi32>
+  view.store %result1, %output_view[1] : i32, view<4xi32>
+  view.store %result2, %output_view[2] : i32, view<4xi32>
+  view.store %result3, %output_view[3] : i32, view<4xi32>
   kernel.return
 }
 
