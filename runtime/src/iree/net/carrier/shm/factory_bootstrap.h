@@ -59,6 +59,11 @@ typedef struct iree_net_shm_bootstrap_callback_t {
 // This lets listeners publish the bootstrap in their cancellation set before
 // peer I/O can begin.
 //
+// The call must be serialized with |proactor| polling through the subsequent
+// iree_net_shm_bootstrap_launch(). Production factory paths perform both from a
+// proactor callback. This keeps the submitted completion wait from dispatching
+// before the caller publishes the suspended bootstrap.
+//
 // On success, |channel| is consumed and set to NONE. On failure, the caller
 // retains |channel| and no callback will fire.
 iree_status_t iree_net_shm_bootstrap_prepare(

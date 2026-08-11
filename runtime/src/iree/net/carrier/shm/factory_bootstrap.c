@@ -25,7 +25,7 @@ struct iree_net_shm_bootstrap_t {
   iree_net_shm_factory_t* factory;
   // Proactor retained through terminal callback delivery.
   iree_async_proactor_t* proactor;
-  // Channel owned until attached to a successful connection or closed.
+  // Channel owned after prepare succeeds until attached or closed.
   iree_async_primitive_t channel;
   // Shared wake owned by |factory| and stable while the factory is retained.
   iree_net_shm_shared_wake_t* shared_wake;
@@ -221,7 +221,7 @@ iree_status_t iree_net_shm_bootstrap_prepare(
   iree_net_transport_factory_retain(&factory->base);
   bootstrap->proactor = proactor;
   iree_async_proactor_retain(proactor);
-  bootstrap->channel = *channel;
+  bootstrap->channel = iree_async_primitive_none();
   bootstrap->role = role;
   bootstrap->endpoint_count = factory->options.max_endpoint_count;
   bootstrap->worker_status = iree_ok_status();
@@ -281,13 +281,13 @@ iree_status_t iree_net_shm_bootstrap_prepare(
   }
 
   if (iree_status_is_ok(status)) {
+    bootstrap->channel = *channel;
     *channel = iree_async_primitive_none();
     *out_bootstrap = bootstrap;
   } else {
     // The thread was created suspended. Resume it without launch permission so
     // it exits without touching the caller-owned channel, then join exactly.
     if (bootstrap->worker_thread) {
-      bootstrap->channel = iree_async_primitive_none();
       iree_thread_resume(bootstrap->worker_thread);
       iree_thread_release(bootstrap->worker_thread);
       bootstrap->worker_thread = NULL;

@@ -104,12 +104,14 @@ iree_runtime_cc_library(
     srcs = [
         "factory.c",
         "factory_bootstrap.c",
-        "factory_bootstrap.h",
         "factory_state.h",
         "factory_unix.c",
         "factory_win32.c",
     ],
-    hdrs = ["factory.h"],
+    hdrs = [
+        "factory.h",
+        "factory_bootstrap.h",
+    ],
     deps = [
         ":handshake",
         ":shared_wake",
@@ -152,6 +154,20 @@ iree_runtime_cc_test(
         ":shm",
         "//runtime/src/iree/async:platform",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "factory_bootstrap_test",
+    srcs = ["factory_bootstrap_test.cc"],
+    deps = [
+        ":factory",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/net:connection",
+        "//runtime/src/iree/net:transport_factory",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
