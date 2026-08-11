@@ -42,15 +42,26 @@ static void iree_hal_remote_client_profile_transfer_list_free(
   }
 }
 
-static void iree_hal_remote_client_bulk_profile_receiver_release_transfer(
+static iree_hal_remote_client_profile_transfer_t*
+iree_hal_remote_client_bulk_profile_receiver_take_transfer(
     iree_net_bulk_transfer_table_t* table, iree_net_bulk_transfer_t* transfer) {
   const uint64_t transfer_id = iree_net_bulk_transfer_id(transfer);
   iree_hal_remote_client_bulk_transfer_t* bulk_transfer =
       iree_hal_remote_client_bulk_transfer_storage(transfer);
-  iree_hal_remote_client_bulk_profile_receiver_free_transfer(
-      bulk_transfer->profile_receive);
+  iree_hal_remote_client_profile_transfer_t* profile_transfer =
+      bulk_transfer->profile_receive;
   memset(bulk_transfer, 0, sizeof(*bulk_transfer));
-  iree_net_bulk_transfer_table_remove(table, transfer_id);
+  bool was_removed = iree_net_bulk_transfer_table_remove(table, transfer_id);
+  IREE_ASSERT(was_removed);
+  (void)was_removed;
+  return profile_transfer;
+}
+
+static void iree_hal_remote_client_bulk_profile_receiver_release_transfer(
+    iree_net_bulk_transfer_table_t* table, iree_net_bulk_transfer_t* transfer) {
+  iree_hal_remote_client_bulk_profile_receiver_free_transfer(
+      iree_hal_remote_client_bulk_profile_receiver_take_transfer(table,
+                                                                 transfer));
 }
 
 static void iree_hal_remote_client_bulk_profile_receiver_release_pending_locked(
@@ -58,29 +69,7 @@ static void iree_hal_remote_client_bulk_profile_receiver_release_pending_locked(
   iree_net_sequence_node_t* pending_list = NULL;
   iree_net_sequence_window_take_pending(
       &device->bulk_session.profile_sequence_window, &pending_list);
-  while (pending_list) {
-    iree_net_sequence_node_t* next = pending_list->next;
-    iree_hal_remote_client_profile_transfer_t* profile_transfer =
-        iree_hal_remote_client_profile_transfer_from_sequence_node(
-            pending_list);
-    iree_net_bulk_transfer_t* table_transfer =
-        iree_net_bulk_transfer_table_lookup(device->bulk_session.transfers,
-                                            profile_transfer->transfer_id);
-    if (table_transfer) {
-      iree_hal_remote_client_bulk_transfer_t* bulk_transfer =
-          iree_hal_remote_client_bulk_transfer_storage(table_transfer);
-      if (bulk_transfer->kind ==
-              IREE_HAL_REMOTE_CLIENT_BULK_TRANSFER_KIND_PROFILE_RECEIVE &&
-          bulk_transfer->profile_receive == profile_transfer) {
-        bulk_transfer->profile_receive = NULL;
-        iree_hal_remote_client_bulk_profile_receiver_release_transfer(
-            device->bulk_session.transfers, table_transfer);
-      }
-    }
-    iree_hal_remote_client_bulk_profile_receiver_free_transfer(
-        profile_transfer);
-    pending_list = next;
-  }
+  iree_hal_remote_client_profile_transfer_list_free(pending_list);
 }
 
 static void iree_hal_remote_client_bulk_collect_profile_transfer(
@@ -360,61 +349,6 @@ iree_status_t iree_hal_remote_client_bulk_profile_receiver_begin_locked(
   return status;
 }
 
-static iree_status_t iree_hal_remote_client_collect_ready_profile_transfers(
-    iree_hal_remote_client_device_t* device,
-    iree_net_sequence_node_t* ready_list,
-    iree_net_sequence_node_t** out_dispatch_list) {
-  *out_dispatch_list = NULL;
-  iree_net_sequence_node_t** dispatch_tail = out_dispatch_list;
-  iree_status_t status = iree_ok_status();
-  while (ready_list && iree_status_is_ok(status)) {
-    iree_net_sequence_node_t* next = ready_list->next;
-    iree_hal_remote_client_profile_transfer_t* profile_transfer =
-        iree_hal_remote_client_profile_transfer_from_sequence_node(ready_list);
-    bool profile_transfer_transferred = false;
-    iree_net_bulk_transfer_t* table_transfer =
-        iree_net_bulk_transfer_table_lookup(device->bulk_session.transfers,
-                                            profile_transfer->transfer_id);
-    if (!table_transfer) {
-      status = iree_make_status(IREE_STATUS_NOT_FOUND,
-                                "ready remote profile transfer_id=%" PRIu64
-                                " is missing",
-                                profile_transfer->transfer_id);
-    } else {
-      iree_hal_remote_client_bulk_transfer_t* bulk_transfer =
-          iree_hal_remote_client_bulk_transfer_storage(table_transfer);
-      if (bulk_transfer->kind !=
-              IREE_HAL_REMOTE_CLIENT_BULK_TRANSFER_KIND_PROFILE_RECEIVE ||
-          bulk_transfer->profile_receive != profile_transfer) {
-        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "ready remote profile transfer_id=%" PRIu64
-                                  " does not match profile receive state",
-                                  profile_transfer->transfer_id);
-      } else {
-        bulk_transfer->profile_receive = NULL;
-        iree_hal_remote_client_bulk_profile_receiver_release_transfer(
-            device->bulk_session.transfers, table_transfer);
-        profile_transfer->sequence_node.next = NULL;
-        *dispatch_tail = &profile_transfer->sequence_node;
-        dispatch_tail = &profile_transfer->sequence_node.next;
-        profile_transfer_transferred = true;
-      }
-    }
-    if (!iree_status_is_ok(status) && !profile_transfer_transferred) {
-      profile_transfer->sequence_node.next = NULL;
-      iree_hal_remote_client_bulk_profile_receiver_free_transfer(
-          profile_transfer);
-    }
-    ready_list = next;
-  }
-  if (!iree_status_is_ok(status)) {
-    iree_hal_remote_client_profile_transfer_list_free(ready_list);
-    iree_hal_remote_client_profile_transfer_list_free(*out_dispatch_list);
-    *out_dispatch_list = NULL;
-  }
-  return status;
-}
-
 static iree_status_t iree_hal_remote_client_dispatch_profile_transfers(
     iree_net_bulk_channel_t* bulk_channel, iree_hal_profile_sink_t* sink,
     iree_net_sequence_node_t* dispatch_list) {
@@ -608,37 +542,40 @@ iree_status_t iree_hal_remote_client_bulk_profile_receiver_on_complete(
           profile_transfer->header.sequence);
     }
     if (iree_status_is_ok(status)) {
-      iree_net_sequence_node_t* ready_list = NULL;
       status = iree_net_sequence_window_observe(
           &device->bulk_session.profile_sequence_window,
-          profile_transfer->header.sequence, &ready_list);
+          profile_transfer->header.sequence, &profile_dispatch_list);
       if (iree_status_is_ok(status)) {
+        profile_transfer =
+            iree_hal_remote_client_bulk_profile_receiver_take_transfer(
+                device->bulk_session.transfers, transfer);
+        transfer = NULL;
         if (profile_transfer->header.sequence <=
             iree_net_sequence_window_observed(
                 &device->bulk_session.profile_sequence_window)) {
-          profile_transfer->sequence_node.next = ready_list;
+          profile_transfer->sequence_node.next = profile_dispatch_list;
           profile_transfer->sequence_node.sequence =
               profile_transfer->header.sequence;
-          ready_list = &profile_transfer->sequence_node;
+          profile_dispatch_list = &profile_transfer->sequence_node;
           profile_transfer_transferred = true;
         } else {
           status = iree_net_sequence_window_defer_until(
               &device->bulk_session.profile_sequence_window,
               profile_transfer->header.sequence,
-              &profile_transfer->sequence_node, &ready_list);
+              &profile_transfer->sequence_node, &profile_dispatch_list);
           if (iree_status_is_ok(status)) profile_transfer_transferred = true;
         }
-      }
-      if (iree_status_is_ok(status)) {
-        status = iree_hal_remote_client_collect_ready_profile_transfers(
-            device, ready_list, &profile_dispatch_list);
       }
     }
     if (!iree_status_is_ok(status)) {
       if (!profile_transfer_transferred) {
-        iree_hal_remote_client_bulk_profile_receiver_release_transfer(
-            device->bulk_session.transfers, transfer);
-        transfer = NULL;
+        if (transfer) {
+          iree_hal_remote_client_bulk_profile_receiver_release_transfer(
+              device->bulk_session.transfers, transfer);
+        } else {
+          iree_hal_remote_client_bulk_profile_receiver_free_transfer(
+              profile_transfer);
+        }
       }
     }
   }

@@ -312,6 +312,60 @@ TEST_F(ClientBulkProfileReceiverTest,
   }
 }
 
+TEST_F(ClientBulkProfileReceiverTest,
+       DeferredProfileCannotBeAbortedThroughTransferTable) {
+  constexpr uint64_t kTransfer2 = 200;
+  constexpr uint64_t kTransfer1 = 100;
+  std::vector<uint8_t> payload2 = BuildWritePayload(/*sequence=*/2, {2});
+  std::vector<uint8_t> payload1 = BuildWritePayload(/*sequence=*/1, {1});
+
+  BeginTransfer(kTransfer2, payload2);
+  ReceivePayload(kTransfer2, payload2);
+  CompleteTransfer(kTransfer2);
+  EXPECT_EQ(iree_net_bulk_transfer_table_count(device_.bulk_session.transfers),
+            0u);
+
+  bool handled = true;
+  IREE_EXPECT_OK(iree_hal_remote_client_bulk_profile_receiver_on_abort(
+      &device_, kTransfer2, &handled));
+  EXPECT_FALSE(handled);
+
+  BeginTransfer(kTransfer1, payload1);
+  ReceivePayload(kTransfer1, payload1);
+  CompleteTransfer(kTransfer1);
+
+  ASSERT_EQ(profile_records_.size(), 2u);
+  EXPECT_EQ(profile_records_[0].event_id, 1u);
+  EXPECT_EQ(profile_records_[1].event_id, 2u);
+}
+
+TEST_F(ClientBulkProfileReceiverTest,
+       DuplicateCompleteCannotReleaseDeferredProfile) {
+  constexpr uint64_t kTransfer2 = 200;
+  constexpr uint64_t kTransfer1 = 100;
+  std::vector<uint8_t> payload2 = BuildWritePayload(/*sequence=*/2, {2});
+  std::vector<uint8_t> payload1 = BuildWritePayload(/*sequence=*/1, {1});
+
+  BeginTransfer(kTransfer2, payload2);
+  ReceivePayload(kTransfer2, payload2);
+  CompleteTransfer(kTransfer2);
+
+  bool handled = false;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_NOT_FOUND,
+      iree_hal_remote_client_bulk_profile_receiver_on_complete(
+          &device_, bulk_channel_, kTransfer2, &handled));
+  EXPECT_TRUE(handled);
+
+  BeginTransfer(kTransfer1, payload1);
+  ReceivePayload(kTransfer1, payload1);
+  CompleteTransfer(kTransfer1);
+
+  ASSERT_EQ(profile_records_.size(), 2u);
+  EXPECT_EQ(profile_records_[0].event_id, 1u);
+  EXPECT_EQ(profile_records_[1].event_id, 2u);
+}
+
 TEST_F(ClientBulkProfileReceiverTest, RejectsOutOfRangeData) {
   constexpr uint64_t kTransferId = 100;
   std::vector<uint8_t> payload = BuildWritePayload(/*sequence=*/1, {1, 2});
@@ -384,9 +438,30 @@ TEST_F(ClientBulkProfileReceiverTest, EndSessionDropsPendingProfileTransfers) {
   CompleteTransfer(kTransferId);
   EXPECT_TRUE(profile_records_.empty());
   EXPECT_EQ(iree_net_bulk_transfer_table_count(device_.bulk_session.transfers),
-            1u);
+            0u);
 
   iree_hal_remote_client_bulk_end_profile_session(&device_);
+
+  EXPECT_FALSE(iree_hal_remote_client_bulk_has_profile_session(&device_));
+  EXPECT_EQ(iree_net_bulk_transfer_table_count(device_.bulk_session.transfers),
+            0u);
+}
+
+TEST_F(ClientBulkProfileReceiverTest,
+       TerminalFailureDropsDeferredProfileTransfer) {
+  constexpr uint64_t kTransferId = 200;
+  std::vector<uint8_t> payload = BuildWritePayload(/*sequence=*/2, {2});
+
+  BeginTransfer(kTransferId, payload);
+  ReceivePayload(kTransferId, payload);
+  CompleteTransfer(kTransferId);
+  EXPECT_TRUE(profile_records_.empty());
+  EXPECT_EQ(iree_net_bulk_transfer_table_count(device_.bulk_session.transfers),
+            0u);
+
+  iree_hal_remote_client_bulk_fail_transfers(
+      &device_, iree_make_status(IREE_STATUS_UNAVAILABLE,
+                                 "injected bulk transport failure"));
 
   EXPECT_FALSE(iree_hal_remote_client_bulk_has_profile_session(&device_));
   EXPECT_EQ(iree_net_bulk_transfer_table_count(device_.bulk_session.transfers),

@@ -126,7 +126,7 @@ typedef struct iree_hal_remote_client_profile_transfer_t {
   // Host allocator used for this transfer and reassembled contents.
   iree_allocator_t host_allocator;
 
-  // Bulk transfer ID used for ACK/ABORT and table removal.
+  // Bulk transfer ID used for protocol acknowledgement and active-table lookup.
   uint64_t transfer_id;
 
   // Reassembled transfer payload bytes.
