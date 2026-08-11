@@ -336,10 +336,11 @@ TEST_F(MaterializeTest, ClonesRegionSourcePresentation) {
   EXPECT_EQ(cloned_region->source_flags, source_region->source_flags);
 }
 
-TEST_F(MaterializeTest, ClonesOperationAndBlockComments) {
+TEST_F(MaterializeTest, ClonesOperationAndBlockSourcePresentation) {
   loom_region_t* source_region = nullptr;
   IREE_ASSERT_OK(loom_module_allocate_region(source_, 1, &source_region));
   loom_block_t* source_block = loom_region_entry_block(source_region);
+  source_block->flags |= LOOM_BLOCK_FLAG_LEADING_BLANK_LINE;
   const iree_string_view_t block_comments[] = {
       IREE_SV(" block heading"),
   };
@@ -354,6 +355,7 @@ TEST_F(MaterializeTest, ClonesOperationAndBlockComments) {
       loom_test_constant_build(&source_region_builder, loom_attr_i64(42),
                                loom_type_scalar(LOOM_SCALAR_TYPE_I32),
                                LOOM_LOCATION_UNKNOWN, &source_op));
+  source_op->flags |= LOOM_OP_FLAG_LEADING_BLANK_LINE;
   const iree_string_view_t op_comments[] = {
       IREE_SV(" operation heading"),
       IREE_SV(" operation detail"),
@@ -368,6 +370,8 @@ TEST_F(MaterializeTest, ClonesOperationAndBlockComments) {
 
   const loom_block_t* cloned_block =
       loom_region_const_entry_block(cloned_region);
+  EXPECT_TRUE(iree_any_bit_set(cloned_block->flags,
+                               LOOM_BLOCK_FLAG_LEADING_BLANK_LINE));
   iree_host_size_t cloned_block_comment_count = 0;
   const iree_string_view_t* cloned_block_comments = loom_module_block_comments(
       target_, cloned_block, &cloned_block_comment_count);
@@ -376,6 +380,8 @@ TEST_F(MaterializeTest, ClonesOperationAndBlockComments) {
       iree_string_view_equal(cloned_block_comments[0], block_comments[0]));
 
   const loom_op_t* cloned_op = loom_block_const_op(cloned_block, 0);
+  EXPECT_TRUE(
+      iree_any_bit_set(cloned_op->flags, LOOM_OP_FLAG_LEADING_BLANK_LINE));
   iree_host_size_t cloned_op_comment_count = 0;
   const iree_string_view_t* cloned_op_comments =
       loom_module_op_comments(target_, cloned_op, &cloned_op_comment_count);

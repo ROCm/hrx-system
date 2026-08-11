@@ -623,8 +623,16 @@ enum loom_op_flag_bits_e {
   // their own counted flags. Set when an op is finalized or use-def data is
   // recomputed, and cleared when the op is erased.
   LOOM_OP_FLAG_EFFECTS_COUNTED = 1u << 2,
+
+  // At least one empty source line preceded the operation. Text printers
+  // canonicalize any authored run to exactly one empty line. This is
+  // non-semantic source presentation preserved across exact cloning.
+  LOOM_OP_FLAG_LEADING_BLANK_LINE = 1u << 3,
 };
 typedef uint8_t loom_op_flags_t;
+
+#define LOOM_OP_SOURCE_PRESENTATION_FLAG_MASK \
+  ((loom_op_flags_t)LOOM_OP_FLAG_LEADING_BLANK_LINE)
 
 // Generic semantic trait bitfield. Op vtables carry construction defaults and
 // op instances carry the effective trait word consumed by pass hot paths.
@@ -1507,7 +1515,7 @@ typedef struct loom_op_t {
   uint8_t successor_count;
   // Number of attributes in trailing storage.
   uint8_t attribute_count;
-  // Per-op lifecycle/worklist flags.
+  // Per-op lifecycle, worklist, and source-presentation flags.
   loom_op_flags_t flags;
   // Per-op-instance flags: fast-math flags for float ops, overflow
   // flags for integer ops. Declared via the Flags format element in
@@ -1647,6 +1655,17 @@ static inline const uint16_t* loom_op_const_operand_segment_counts(
 // Sentinel region_index value for blocks not attached to a region.
 #define LOOM_BLOCK_REGION_INDEX_INVALID UINT16_MAX
 
+enum loom_block_flag_bits_e {
+  // At least one empty source line preceded the explicit block label. Text
+  // printers canonicalize any authored run to exactly one empty line. This is
+  // non-semantic source presentation preserved across exact cloning.
+  LOOM_BLOCK_FLAG_LEADING_BLANK_LINE = 1u << 0,
+};
+typedef uint16_t loom_block_flags_t;
+
+#define LOOM_BLOCK_SOURCE_PRESENTATION_FLAG_MASK \
+  ((loom_block_flags_t)LOOM_BLOCK_FLAG_LEADING_BLANK_LINE)
+
 // A basic block: a linear sequence of operations with optional
 // block arguments.
 //
@@ -1663,7 +1682,7 @@ typedef struct loom_block_t {
   // Number of live operations linked into this block.
   uint32_t op_count;
   // Per-block instance flags.
-  uint16_t flags;
+  loom_block_flags_t flags;
   // Position in parent_region->blocks, or LOOM_BLOCK_REGION_INDEX_INVALID.
   uint16_t region_index;
   // Block argument value IDs.
