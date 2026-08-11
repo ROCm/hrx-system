@@ -128,16 +128,6 @@ LowResourceImportKind = EnumDef(
             doc="Native object-function pointer argument materialized as a register value.",
         ),
         EnumCase(
-            "vm_state",
-            2,
-            doc="IREE VM module state or context handle materialized as a register value.",
-        ),
-        EnumCase(
-            "vm_import",
-            3,
-            doc="IREE VM imported-function or imported-resource handle materialized as a register value.",
-        ),
-        EnumCase(
             "hal_binding",
             4,
             doc="IREE HAL dispatch binding payload materialized as a register value.",
@@ -206,7 +196,6 @@ LowScfForUnrollPolicy = EnumDef(
 LowCodeImportKind = EnumDef(
     "LowCodeImportKind",
     [
-        EnumCase("vm", 1, doc="Imported implementation is an IREE VM symbol."),
         EnumCase("native", 2, doc="Imported implementation is a native callable symbol."),
         EnumCase("rocasm", 3, doc="Imported implementation is an AMDGPU rocasm symbol."),
         EnumCase("object", 4, doc="Imported implementation is a linked object-file symbol."),
@@ -689,7 +678,7 @@ low_func_call = Op(
     ],
     examples=[
         "%result = low.func.call @extern_add(%lhs, %rhs) : (reg<amdgpu.vgpr x1>, reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>)",
-        "%result = low.func.call pure @extern_add(%lhs) : (reg<vm.i32>) -> (reg<vm.i32>)",
+        "%result = low.func.call pure @extern_add(%lhs) : (reg<test.i32>) -> (reg<test.i32>)",
     ],
 )
 
@@ -722,7 +711,7 @@ low_br = Op(
     ],
     examples=[
         "low.br ^done",
-        "low.br ^join(%value: reg<vm.i32>)",
+        "low.br ^join(%value: reg<test.i32>)",
     ],
 )
 
@@ -753,7 +742,7 @@ low_cond_br = Op(
         TypeOf("condition"),
     ],
     examples=[
-        "low.cond_br %condition, ^then, ^else : reg<vm.i32>",
+        "low.cond_br %condition, ^then, ^else : reg<test.i32>",
     ],
 )
 
@@ -1542,7 +1531,7 @@ low_resource = Op(
         ResultType("result"),
     ],
     examples=[
-        "%state = low.resource<vm_state> {index = 0, source_type = i64} : reg<vm.i64>",
+        "%binding = low.resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<test.ptr>",
         "%binding = low.resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>",
         "%dynamic = low.resource<hal_binding> extent(%extent) {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>",
         "%swizzled = low.resource<hal_binding> {index = 1, source_type = hal.buffer, cache_swizzle_stride = 64} : reg<amdgpu.sgpr x2>",

@@ -85,10 +85,10 @@ CARDINALITY_ALIAS_PATTERN = re.compile(
 )
 
 TARGET_EXECUTION_INCLUDE_PATTERN = re.compile(
-    r'#\s*include\s+"loom/tooling/execution/(?:hal|ireevm)/'
+    r'#\s*include\s+"loom/tooling/execution/hal/'
 )
 TARGET_EXECUTION_DEP_LABEL_PATTERN = re.compile(
-    r"//loom/src/loom/tooling/execution/(?:hal|ireevm)(?::|/)"
+    r"//loom/src/loom/tooling/execution/hal(?::|/)"
 )
 TARGET_PHYSICAL_TEST_SRC_PATTERN = re.compile(
     r'\bsrc\s*=\s*"(?P<label>//loom/src/loom/tools/'
@@ -108,7 +108,6 @@ TARGET_PRIVATE_EXECUTION_SYMBOL_PATTERN = re.compile(
     r"\b(?:"
     r"loom_run_hal_[A-Za-z0-9_]*"
     r"|loom_run_execution_(?:backend|provider)[A-Za-z0-9_]*"
-    r"|loom_ireevm_execution_[A-Za-z0-9_]*"
     r")\b"
 )
 
@@ -795,11 +794,8 @@ def _run_self_tests() -> int:
     )
     ok &= _expect_target_execution_self_test(
         "execution package visibility grant passes",
-        "loom/src/loom/target/arch/ireevm/BUILD.bazel",
-        (
-            "_EXECUTION_VISIBILITY = ["
-            '"//loom/src/loom/tooling/execution/ireevm:__pkg__"]\n'
-        ),
+        "loom/src/loom/target/arch/amdgpu/BUILD.bazel",
+        ('_EXECUTION_VISIBILITY = ["//loom/src/loom/tooling/execution/hal:__pkg__"]\n'),
         (),
     )
     ok &= _expect_target_execution_self_test(

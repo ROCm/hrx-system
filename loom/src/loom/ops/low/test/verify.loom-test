@@ -186,13 +186,13 @@ test.target<low_core> @test_target
 
 // Import attrs on low.func.decl are valid without changing the referenced low
 // descriptor contract set.
-low.func.decl import(vm, "iree.vm.core.add_i32") target<test.low.core>(@test_target) @extern_imported(%lhs: reg<test.i32>) -> (reg<test.i32>)
+low.func.decl import(native, "host.add_i32") target<test.low.core>(@test_target) @extern_imported(%lhs: reg<test.i32>) -> (reg<test.i32>)
 
 // ====
 
 test.target<low_core> @test_target
 
-func.def @semantic(%value: i32, %state: vm.state) -> (i32) {
+func.def @semantic(%value: i32, %token: i64) -> (i32) {
   func.return %value : i32
 }
 
@@ -200,8 +200,8 @@ low.func.def target<test.low.core>(@test_target) @semantic_low(%value: reg<test.
   low.return %value : reg<test.i32>
 }
 
-func.def @invoke_explicit_low(%value: i32, %state: vm.state) -> (i32) {
-  %result = low.invoke @semantic_low(%value, %state) : (i32, vm.state) -> (i32)
+func.def @invoke_explicit_low(%value: i32, %token: i64) -> (i32) {
+  %result = low.invoke @semantic_low(%value, %token) : (i32, i64) -> (i32)
   func.return %result : i32
 }
 
@@ -468,9 +468,9 @@ low.func.def target<test.low.core>(@test_target) @resource_bad_swizzle_stride() 
 test.target<low_core> @test_target
 
 low.func.def target<test.low.core>(@test_target) abi(object_function) @resource_wrong_export_abi() -> (reg<test.ptr>) {
-  // ERROR@+1: TARGET/041 {op_name="low.resource", field_name="import_kind", import_kind="vm_state", expected_abi="vm_module_function", actual_abi="object_function"}
-  %state = low.resource<vm_state> {index = 0, source_type = vm.state} : reg<test.ptr>
-  low.return %state : reg<test.ptr>
+  // ERROR@+1: TARGET/041 {op_name="low.resource", field_name="import_kind", import_kind="hal_binding", expected_abi="hal_kernel", actual_abi="object_function"}
+  %binding = low.resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<test.ptr>
+  low.return %binding : reg<test.ptr>
 }
 
 // ====

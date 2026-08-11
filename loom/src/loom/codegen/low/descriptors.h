@@ -238,8 +238,6 @@ typedef enum loom_low_memory_space_e {
   LOOM_LOW_MEMORY_SPACE_WORKGROUP = 3,
   // Stack, frame, or spill memory.
   LOOM_LOW_MEMORY_SPACE_STACK = 4,
-  // IREE VM reference table or reference state.
-  LOOM_LOW_MEMORY_SPACE_VM_REF = 5,
   // Wasm linear memory.
   LOOM_LOW_MEMORY_SPACE_WASM_MEMORY = 6,
 } loom_low_memory_space_t;

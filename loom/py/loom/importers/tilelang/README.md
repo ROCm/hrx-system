@@ -214,6 +214,6 @@ iree-bazel-run --config=asan \
 The reusable Loom-side API lives in
 `loom.importers.tilelang.differential.capture_loom_amdgpu_artifact`. The checker
 uses it to write the imported Loom module, compile through the AMDGPU HAL
-backend, emit the target HSACO and VMFB, record the compile report and artifact
-manifest, disassemble with `llvm-objdump`, and return an
+backend, emit the loader artifact and target HSACO, record the compile report
+and artifact manifest, disassemble with `llvm-objdump`, and return an
 `AmdgpuDifferentialArtifact` ready for `compare_amdgpu_artifacts`.

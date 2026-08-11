@@ -8,7 +8,7 @@
 //
 // This layer resolves target/oracle providers once per planned case and then
 // executes the resulting direct callbacks against materialized values. It stays
-// target-free: VM, HAL, native, or reference execution providers are injected
+// target-free: HAL, native, or reference execution providers are injected
 // by callers instead of linked into the core testbench library.
 
 #ifndef LOOM_TOOLING_TESTBENCH_INVOCATION_H_

@@ -96,7 +96,6 @@ typedef enum loom_low_retain_e {
 
 // External code source kind for an imported low function declaration.
 typedef enum loom_low_func_decl_import_kind_e {
-  LOOM_LOW_FUNC_DECL_IMPORT_KIND_VM = 1,
   LOOM_LOW_FUNC_DECL_IMPORT_KIND_NATIVE = 2,
   LOOM_LOW_FUNC_DECL_IMPORT_KIND_ROCASM = 3,
   LOOM_LOW_FUNC_DECL_IMPORT_KIND_OBJECT = 4,
@@ -106,8 +105,6 @@ typedef enum loom_low_func_decl_import_kind_e {
 // Target-provided ABI resource imported into a low function body.
 typedef enum loom_low_resource_import_kind_e {
   LOOM_LOW_RESOURCE_IMPORT_KIND_NATIVE_POINTER = 1,
-  LOOM_LOW_RESOURCE_IMPORT_KIND_VM_STATE = 2,
-  LOOM_LOW_RESOURCE_IMPORT_KIND_VM_IMPORT = 3,
   LOOM_LOW_RESOURCE_IMPORT_KIND_HAL_BINDING = 4,
   LOOM_LOW_RESOURCE_IMPORT_KIND_COMMAND_INPUT = 5,
   LOOM_LOW_RESOURCE_IMPORT_KIND_COUNT_ = 6,
@@ -630,7 +627,7 @@ iree_status_t loom_low_br_verify(
     iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_LOW_COND_BR: Conditional branch to one of two low successor blocks based on a register predicate.
-// low.cond_br %condition, ^then, ^else : reg<vm.i32>
+// low.cond_br %condition, ^then, ^else : reg<test.i32>
 LOOM_DEFINE_ISA(loom_low_cond_br_isa, LOOM_OP_LOW_COND_BR)
 LOOM_DEFINE_OPERAND(loom_low_cond_br_condition, 0)
 LOOM_DEFINE_SUCCESSOR(loom_low_cond_br_true_dest, 0)
@@ -647,7 +644,7 @@ iree_status_t loom_low_cond_br_verify(
     iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_LOW_RESOURCE: Import a function-local target resource into a low register value.
-// %state = low.resource<vm_state> {index = 0, source_type = i64} : reg<vm.i64>
+// %binding = low.resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<test.ptr>
 LOOM_DEFINE_ISA(loom_low_resource_isa, LOOM_OP_LOW_RESOURCE)
 LOOM_DEFINE_OPTIONAL_OPERAND(loom_low_resource_extent_value, 0)
 LOOM_DEFINE_RESULT(loom_low_resource_result, 0)

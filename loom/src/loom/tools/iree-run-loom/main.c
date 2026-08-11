@@ -26,11 +26,8 @@
 #include "loom/tooling/execution/session.h"
 #include "loom/tooling/io/file.h"
 
-IREE_FLAG(string, backend, "vm",
-          "Compilation backend to run, such as 'vm' or a linked native "
-          "backend.");
-IREE_FLAG_NAMED(string, module_name, "module-name", "loom",
-                "Module name to store in the compiled VM bytecode archive.");
+IREE_FLAG(string, backend, "",
+          "Registered compilation and execution backend to run.");
 IREE_FLAG(string, pipeline, "default",
           "Pass pipeline to run before execution. Use 'default' or empty for "
           "the comprehensive prepared-low pipeline, 'none' to disable pass "
@@ -40,19 +37,10 @@ IREE_FLAG(string, sanitizer, "none",
           "Sanitizer checks to insert in the default target pipeline: none, "
           "all, or a '|'-separated set of access, value, operation, and race.");
 IREE_FLAG(string, function, "",
-          "Function/export name to invoke. Empty selects the single VM export "
-          "or HAL executable function.");
-IREE_FLAG_LIST(string, input,
-               "Appends a VM function input in IREE function I/O syntax.");
-IREE_FLAG_LIST(string, output,
-               "Appends a VM function output handling spec in IREE function "
-               "I/O syntax. Empty prints all outputs.");
-IREE_FLAG_LIST_NAMED(
-    string, expected_output, "expected-output",
-    "Appends an expected VM function output in IREE function I/O syntax. "
-    "Expected outputs take precedence over --output.");
+          "HAL executable function to invoke. Empty selects the single "
+          "function.");
 IREE_FLAG_NAMED(int32_t, output_max_element_count, "output-max-element-count",
-                1024, "Maximum number of VM output elements to format.");
+                1024, "Maximum number of HAL output elements to format.");
 IREE_FLAG_NAMED(
     string, workgroup_count, "workgroup-count", "",
     "Optional HAL dispatch workgroup count as `x,y,z`. When omitted, a static "
@@ -275,25 +263,6 @@ static iree_status_t iree_run_loom_one_shot_options_initialize(
   }
 
   if (iree_any_bit_set(backend->flags,
-                       LOOM_RUN_EXECUTION_BACKEND_FLAG_VM_OPTIONS)) {
-    out_options->vm_function_name = iree_make_cstring_view(FLAG_function);
-    out_options->vm_inputs = (loom_run_one_shot_value_specs_t){
-        .values = FLAG_input_list().values,
-        .count = FLAG_input_list().count,
-    };
-    out_options->vm_outputs = (loom_run_one_shot_value_specs_t){
-        .values = FLAG_output_list().values,
-        .count = FLAG_output_list().count,
-    };
-    out_options->vm_expected_outputs = (loom_run_one_shot_value_specs_t){
-        .values = FLAG_expected_output_list().values,
-        .count = FLAG_expected_output_list().count,
-    };
-    out_options->vm_max_output_element_count =
-        (iree_host_size_t)FLAG_output_max_element_count;
-  }
-
-  if (iree_any_bit_set(backend->flags,
                        LOOM_RUN_EXECUTION_BACKEND_FLAG_HAL_OPTIONS)) {
     const iree_string_view_t function_name =
         iree_make_cstring_view(FLAG_function);
@@ -402,23 +371,9 @@ static void iree_run_loom_print_agents_markdown(FILE* stream) {
       "\n"
       "`iree-run-loom` compiles one Loom module and invokes one export. Use "
       "it\n"
-      "for quick scalar VM checks, single-kernel HAL smoke tests, and "
-      "emit-only\n"
-      "artifact probes before moving a scenario into `check.case` or\n"
+      "for single-kernel HAL smoke tests and emit-only artifact probes before\n"
+      "moving a scenario into `check.case` or\n"
       "`check.benchmark`.\n"
-      "\n"
-      "### VM flow\n"
-      "\n"
-      "```shell\n"
-      "iree-run-loom module.loom --backend=vm --function=branchy \\\n"
-      "  --input=0 --input=21 --expected-output=42\n"
-      "iree-run-loom module.loom --backend=vm --function=branchy \\\n"
-      "  --input=50 --input=8 --output=-\n"
-      "```\n"
-      "\n"
-      "VM inputs and outputs use IREE function I/O syntax. Empty `--function`\n"
-      "selects the single export when the module has exactly one runnable\n"
-      "export.\n"
       "\n"
       "### HAL flow\n"
       "\n"
@@ -433,7 +388,7 @@ static void iree_run_loom_print_agents_markdown(FILE* stream) {
       "  --kernel-input-buffer=4096xf32=0\n"
       "iree-run-loom kernel.loom --backend=amdgpu-hal --emit-only \\\n"
       "  --emit-target-artifact=kernel.hsaco "
-      "--emit-hal-executable=kernel.vmfb\n"
+      "--emit-hal-executable=kernel.bin\n"
       "iree-run-loom --backend=amdgpu-hal --probe-hal\n"
       "```\n"
       "\n"
@@ -467,16 +422,14 @@ int iree_run_loom_main(int argc, char** argv,
       "export.\n"
       "\n"
       "Usage:\n"
-      "  iree-run-loom [file.loom] --function=name --input=... "
-      "--expected-output=...\n"
-      "  cat module.loom | iree-run-loom - --function=name --input=...\n"
+      "  iree-run-loom [file.loom] --backend=name --function=name "
+      "--binding=...\n"
+      "  cat module.loom | iree-run-loom - --backend=name "
+      "--function=name\n"
       "  iree-run-loom --agents_md\n"
       "\n"
-      "The 'vm' backend compiles VM-targeted functions into a real IREE VM "
-      "bytecode archive and runs them with IREE function I/O syntax for "
-      "--input, --output, and --expected-output. Native execution backends "
-      "compile target-low kernels into runtime artifacts and dispatch them "
-      "through their production runtime path.\n");
+      "Execution backends compile target-low kernels into runtime artifacts "
+      "and dispatch them through their production runtime path.\n");
   for (int i = 1; i < argc; ++i) {
     if (loom_tooling_cli_is_agents_markdown_arg(argv[i])) {
       iree_run_loom_print_agents_markdown(stdout);
@@ -580,7 +533,6 @@ int iree_run_loom_main(int argc, char** argv,
   loom_run_candidate_compile_options_t compile_options = {0};
   loom_run_candidate_compile_options_initialize(&compile_options);
   loom_compile_pipeline_result_t pipeline_result = {0};
-  compile_options.module_name = iree_make_cstring_view(FLAG_module_name);
   if (iree_status_is_ok(status)) {
     status = iree_run_loom_sanitizer_options_initialize(
         &compile_options.target_pipeline_options.sanitizer);

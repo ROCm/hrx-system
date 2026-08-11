@@ -14,7 +14,6 @@ package(
 REFERENCE_MODEL_DEPS = [
     "//loom/py/loom/dialect:package",
     "//loom/py/loom/target/arch/amdgpu:dialect",
-    "//loom/py/loom/target/arch/ireevm:dialect",
     "//loom/py/loom/target/arch/spirv:dialect",
     "//loom/py/loom/target/arch/wasm:dialect",
     "//loom/py/loom/target/arch/x86:dialect",

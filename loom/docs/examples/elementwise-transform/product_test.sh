@@ -8,7 +8,6 @@
 set -euo pipefail
 
 product_root="${TEST_SRCDIR}/${TEST_WORKSPACE}/loom/docs/examples/elementwise-transform"
-iree_run_module="${TEST_SRCDIR}/${TEST_WORKSPACE}/$1"
 
 assert_elf() {
   local artifact_path="$1"
@@ -26,11 +25,3 @@ command_artifacts="${product_root}/elementwise_command.commands"
 grep -q '"format":"loom-command-set"' "${command_manifest}"
 grep -q '"symbol":"elementwise_transform"' "${command_manifest}"
 test "$(find -L "${command_artifacts}" -maxdepth 1 -type f -name '*.loomcmd' | wc -l)" -eq 1
-
-vmfb="${product_root}/elementwise_vm.vmfb"
-test -s "${vmfb}"
-"${iree_run_module}" \
-  --module="${vmfb}" \
-  --function=double_i32 \
-  --input=21 \
-  | grep -q "i32=42"

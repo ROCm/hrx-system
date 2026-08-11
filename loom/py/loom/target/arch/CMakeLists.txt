@@ -43,8 +43,6 @@ iree_py_library(
     loom::py::loom::target::arch::amdgpu::descriptors
     loom::py::loom::target::arch::amdgpu::dialect
     loom::py::loom::target::arch::cmd::descriptors
-    loom::py::loom::target::arch::ireevm::descriptors
-    loom::py::loom::target::arch::ireevm::dialect
     loom::py::loom::target::arch::llvmir::contracts
     loom::py::loom::target::arch::llvmir::descriptors
     loom::py::loom::target::arch::spirv::descriptors

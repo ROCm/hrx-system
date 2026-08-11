@@ -34,20 +34,6 @@ _AMDGPU_TARGET_DEPS = iree_select({
     "//conditions:default": [],
 })
 
-_IREE_VM_EXECUTION_COPTS = iree_select({
-    "//loom/config/execute:iree_vm_execution": [
-        "-DIREE_TEST_LOOM_HAVE_IREE_VM=1",
-    ],
-    "//conditions:default": [],
-})
-
-_IREE_VM_EXECUTION_DEPS = iree_select({
-    "//loom/config/execute:iree_vm_execution": [
-        "//loom/src/loom/tooling/execution/ireevm:provider",
-    ],
-    "//conditions:default": [],
-})
-
 _SPIRV_VULKAN_TARGET_COPTS = iree_select({
     "//loom/config/target:spirv_vulkan_artifacts": [
         "-DIREE_TEST_LOOM_HAVE_SPIRV=1",
@@ -65,15 +51,11 @@ _SPIRV_VULKAN_TARGET_DEPS = iree_select({
 })
 
 _IREE_TEST_LOOM_TARGET_COPTS = (
-    _AMDGPU_TARGET_COPTS +
-    _IREE_VM_EXECUTION_COPTS +
-    _SPIRV_VULKAN_TARGET_COPTS
+    _AMDGPU_TARGET_COPTS + _SPIRV_VULKAN_TARGET_COPTS
 )
 
 _IREE_TEST_LOOM_TARGET_DEPS = (
-    _AMDGPU_TARGET_DEPS +
-    _IREE_VM_EXECUTION_DEPS +
-    _SPIRV_VULKAN_TARGET_DEPS
+    _AMDGPU_TARGET_DEPS + _SPIRV_VULKAN_TARGET_DEPS
 )
 
 loom_cc_library(

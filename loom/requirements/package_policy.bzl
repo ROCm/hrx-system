@@ -16,16 +16,13 @@ load(
 load(
     "//loom/requirements:defs.bzl",
     "EMIT_AMDGPU",
-    "EMIT_IREE_VM",
     "EMIT_LLVMIR",
     "EMIT_SPIRV",
     "EMIT_WASM",
     "EXECUTE_IREE_HAL",
-    "EXECUTE_IREE_VM",
     "IMPORT_MLIR",
     "IMPORT_TILELANG",
     "TARGET_ARCH_AMDGPU",
-    "TARGET_ARCH_IREE_VM",
     "TARGET_ARCH_LLVMIR",
     "TARGET_ARCH_SPIRV",
     "TARGET_ARCH_WASM",
@@ -49,10 +46,6 @@ PACKAGE_POLICIES = [
         forbidden_deps = ["//runtime/src/iree/hal/drivers/amdgpu/..."],
     ),
     package_policy(
-        packages = ["loom/src/loom/target/arch/ireevm/..."],
-        build_requirements = [TARGET_ARCH_IREE_VM],
-    ),
-    package_policy(
         packages = ["loom/src/loom/target/arch/llvmir/..."],
         build_requirements = [TARGET_ARCH_LLVMIR],
     ),
@@ -67,10 +60,6 @@ PACKAGE_POLICIES = [
     package_policy(
         packages = ["loom/src/loom/target/arch/x86/..."],
         build_requirements = [TARGET_ARCH_X86],
-    ),
-    package_policy(
-        packages = ["loom/src/loom/target/emit/ireevm/..."],
-        build_requirements = [TARGET_ARCH_IREE_VM, EMIT_IREE_VM],
     ),
     package_policy(
         packages = ["loom/src/loom/target/emit/llvmir/..."],
@@ -100,10 +89,6 @@ PACKAGE_POLICIES = [
     package_policy(
         packages = ["loom/src/loom/target/emit/wasm/..."],
         build_requirements = [TARGET_ARCH_WASM, EMIT_WASM],
-    ),
-    package_policy(
-        packages = ["loom/src/loom/tooling/execution/ireevm/..."],
-        build_requirements = [TARGET_ARCH_IREE_VM, EMIT_IREE_VM, EXECUTE_IREE_VM],
     ),
     package_policy(
         packages = ["loom/src/loom/tooling/target/amdgpu/..."],

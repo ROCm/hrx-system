@@ -1326,8 +1326,6 @@ static iree_status_t loom_llvmir_emit_pointer_address_space_for_low_value(
         *out_address_space =
             state->target_profile->target_env->address_spaces.global;
         return iree_ok_status();
-      case LOOM_LOW_RESOURCE_IMPORT_KIND_VM_STATE:
-      case LOOM_LOW_RESOURCE_IMPORT_KIND_VM_IMPORT:
       default:
         *out_supported = false;
         return loom_llvmir_emit_value_type_diagnostic(

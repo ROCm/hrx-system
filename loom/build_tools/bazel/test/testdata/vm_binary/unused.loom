@@ -1,5 +1,0 @@
-target.decl @vm_target
-
-func.def public target(@vm_target) @unused(%value: i32) -> (i32) {
-  func.return %value : i32
-}

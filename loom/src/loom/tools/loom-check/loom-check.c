@@ -16,9 +16,6 @@
 #ifndef LOOM_CHECK_HAVE_EMIT_AMDGPU
 #define LOOM_CHECK_HAVE_EMIT_AMDGPU 0
 #endif  // LOOM_CHECK_HAVE_EMIT_AMDGPU
-#ifndef LOOM_CHECK_HAVE_TARGET_IREE_VM
-#define LOOM_CHECK_HAVE_TARGET_IREE_VM 0
-#endif  // LOOM_CHECK_HAVE_TARGET_IREE_VM
 #ifndef LOOM_CHECK_HAVE_EMIT_LLVMIR
 #define LOOM_CHECK_HAVE_EMIT_LLVMIR 0
 #endif  // LOOM_CHECK_HAVE_EMIT_LLVMIR
@@ -41,9 +38,6 @@
 #if LOOM_CHECK_HAVE_EMIT_AMDGPU
 #include "loom/target/arch/amdgpu/check/provider.h"
 #endif  // LOOM_CHECK_HAVE_EMIT_AMDGPU
-#if LOOM_CHECK_HAVE_TARGET_IREE_VM
-#include "loom/target/arch/ireevm/check/provider.h"
-#endif  // LOOM_CHECK_HAVE_TARGET_IREE_VM
 #if LOOM_CHECK_HAVE_TARGET_LLVMIR
 #include "loom/target/arch/llvmir/check/provider.h"
 #endif  // LOOM_CHECK_HAVE_TARGET_LLVMIR
@@ -71,9 +65,6 @@ static const loom_check_provider_t* const kLoomCheckProviders[] = {
 #if LOOM_CHECK_HAVE_EMIT_AMDGPU
     &loom_amdgpu_check_provider,
 #endif  // LOOM_CHECK_HAVE_EMIT_AMDGPU
-#if LOOM_CHECK_HAVE_TARGET_IREE_VM
-    &loom_ireevm_check_provider,
-#endif  // LOOM_CHECK_HAVE_TARGET_IREE_VM
 #if LOOM_CHECK_HAVE_TARGET_LLVMIR
     &loom_llvmir_target_check_provider,
 #endif  // LOOM_CHECK_HAVE_TARGET_LLVMIR

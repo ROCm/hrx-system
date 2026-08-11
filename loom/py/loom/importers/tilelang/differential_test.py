@@ -119,7 +119,7 @@ def test_capture_loom_amdgpu_artifact_runs_production_compiler(
                 stderr="",
             )
         if command[0] == str(loom_compile):
-            _write_arg_path(command, "--output=", b"vmfb")
+            _write_arg_path(command, "--output=", b"hal artifact")
             _write_arg_path(command, "--emit-target-artifact=", b"hsaco")
             _write_arg_path(
                 command,

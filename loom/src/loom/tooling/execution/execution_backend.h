@@ -23,8 +23,6 @@ typedef struct loom_run_one_shot_request_t loom_run_one_shot_request_t;
 typedef uint32_t loom_run_execution_backend_flags_t;
 
 enum {
-  // One-shot requests for this backend consume VM invocation options.
-  LOOM_RUN_EXECUTION_BACKEND_FLAG_VM_OPTIONS = 1u << 0,
   // One-shot requests for this backend consume HAL invocation options.
   LOOM_RUN_EXECUTION_BACKEND_FLAG_HAL_OPTIONS = 1u << 1,
 };

@@ -27,7 +27,7 @@ facts are still visible enough to compile, inspect, specialize, and tune.
 | `loomc` public C API | Active embedding surface for AOT, JIT, packaging, caller-owned artifact caches, and tuning/search |
 | AMDGPU HSACO | Most established native target path |
 | SPIR-V/Vulkan | Working examples and tests; still hardening as a product target |
-| x86, Wasm, IREEVM | Real early target paths with providers, lowering/check coverage, and initial emission infrastructure; not mature product targets |
+| x86, Wasm | Real early target paths with providers, lowering/check coverage, and initial emission infrastructure; not mature product targets |
 | Portable command programs | Source dialect, multi-root preparation, target-neutral Low ISA, and immutable artifact core; public embedding and materialization are staged separately |
 | Whole host programs | Direction of travel beyond reusable command-buffer-shaped subgraphs |
 

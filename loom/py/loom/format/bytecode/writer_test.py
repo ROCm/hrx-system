@@ -878,11 +878,11 @@ class TestTypesSection:
         self._roundtrip_type(DialectType("hal.buffer"))
 
     def test_dialect_type_parameterized(self) -> None:
-        self._roundtrip_type(DialectType("vm.ref", (DialectType("hal.buffer"),)))
+        self._roundtrip_type(DialectType("test.ref", (DialectType("hal.buffer"),)))
 
     def test_dialect_type_nested(self) -> None:
-        inner = DialectType("vm.list", (I32,))
-        self._roundtrip_type(DialectType("vm.ref", (inner,)))
+        inner = DialectType("test.list", (I32,))
+        self._roundtrip_type(DialectType("test.ref", (inner,)))
 
     def test_descriptor_backed_types(self) -> None:
         types = (
@@ -915,7 +915,7 @@ class TestTypesSection:
         self._roundtrip_type(_test_ptr_register_type(4, vector_type))
 
     def test_register_dialect_value_type(self) -> None:
-        dialect_type = DialectType("vm.ref", (I32,))
+        dialect_type = DialectType("test.ref", (I32,))
         self._roundtrip_type(_test_ptr_register_type(value_type=dialect_type))
 
     def test_pool_static(self) -> None:
@@ -2059,7 +2059,7 @@ class TestCrossFormatRoundTrip:
     def test_enum_future_ordinal_survives_bytecode(self) -> None:
         text = (
             "target.generic<reference> @future_target "
-            "{artifact_format = elf, codegen_format = vm}\n"
+            "{artifact_format = elf, codegen_format = llvmir}\n"
         )
         parser = Parser()
         parser.register_ops(ALL_TARGET_OPS)

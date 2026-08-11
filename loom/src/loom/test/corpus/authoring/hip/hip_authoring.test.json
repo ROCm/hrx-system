@@ -140,7 +140,7 @@
           "{srcdir}/shared_memory_tile.loom",
           "--backend=amdgpu-hal",
           "--target=gfx11-generic",
-          "--output={tmp}/shared_memory_tile.vmfb",
+          "--output={tmp}/shared_memory_tile.hal",
           "--emit-target-artifact={tmp}/shared_memory_tile.hsaco",
           "--artifact-manifest=summary",
           "--compile-report=summary"
@@ -160,7 +160,7 @@
       },
       "files": [
         {
-          "path": "{tmp}/shared_memory_tile.vmfb",
+          "path": "{tmp}/shared_memory_tile.hal",
           "non_empty": true
         },
         {
@@ -211,7 +211,7 @@
           "{srcdir}/shared_memory_wave_tile.loom",
           "--backend=amdgpu-hal",
           "--target=gfx11-generic",
-          "--output={tmp}/shared_memory_wave_tile.vmfb",
+          "--output={tmp}/shared_memory_wave_tile.hal",
           "--emit-target-artifact={tmp}/shared_memory_wave_tile.hsaco",
           "--artifact-manifest=summary",
           "--compile-report=summary"
@@ -236,7 +236,7 @@
       },
       "files": [
         {
-          "path": "{tmp}/shared_memory_wave_tile.vmfb",
+          "path": "{tmp}/shared_memory_wave_tile.hal",
           "non_empty": true
         },
         {
@@ -281,7 +281,7 @@
           "{srcdir}/wave64_reductions.loom",
           "--backend=amdgpu-hal",
           "--target=gfx1151",
-          "--output={tmp}/wave64_reductions.vmfb",
+          "--output={tmp}/wave64_reductions.hal",
           "--emit-target-artifact={tmp}/wave64_reductions.hsaco",
           "--artifact-manifest=summary",
           "--compile-report=summary"
@@ -304,7 +304,7 @@
       },
       "files": [
         {
-          "path": "{tmp}/wave64_reductions.vmfb",
+          "path": "{tmp}/wave64_reductions.hal",
           "non_empty": true
         },
         {
@@ -354,7 +354,7 @@
           "{srcdir}/shared_memory_transpose.loom",
           "--backend=amdgpu-hal",
           "--target=gfx11-generic",
-          "--output={tmp}/shared_memory_transpose.vmfb",
+          "--output={tmp}/shared_memory_transpose.hal",
           "--emit-target-artifact={tmp}/shared_memory_transpose.hsaco",
           "--artifact-manifest=summary",
           "--compile-report=summary"
@@ -374,7 +374,7 @@
       },
       "files": [
         {
-          "path": "{tmp}/shared_memory_transpose.vmfb",
+          "path": "{tmp}/shared_memory_transpose.hal",
           "non_empty": true
         },
         {
@@ -419,7 +419,7 @@
           "{srcdir}/shared_memory_vector_tile.loom",
           "--backend=amdgpu-hal",
           "--target=gfx11-generic",
-          "--output={tmp}/shared_memory_vector_tile.vmfb",
+          "--output={tmp}/shared_memory_vector_tile.hal",
           "--emit-target-artifact={tmp}/shared_memory_vector_tile.hsaco",
           "--artifact-manifest=summary",
           "--compile-report=summary"
@@ -439,7 +439,7 @@
       },
       "files": [
         {
-          "path": "{tmp}/shared_memory_vector_tile.vmfb",
+          "path": "{tmp}/shared_memory_vector_tile.hal",
           "non_empty": true
         },
         {
@@ -514,7 +514,7 @@
           "{srcdir}/target_provider_selection.loom",
           "--backend=amdgpu-hal",
           "--target=gfx11-generic",
-          "--output={tmp}/target_provider_gfx11_generic.vmfb",
+          "--output={tmp}/target_provider_gfx11_generic.hal",
           "--emit-target-artifact={tmp}/target_provider_gfx11_generic.hsaco",
           "--compile-report=summary",
           "--dump-ir-after=select-templates",
@@ -531,7 +531,7 @@
       },
       "files": [
         {
-          "path": "{tmp}/target_provider_gfx11_generic.vmfb",
+          "path": "{tmp}/target_provider_gfx11_generic.hal",
           "non_empty": true
         },
         {
@@ -565,7 +565,7 @@
           "{srcdir}/target_provider_selection.loom",
           "--backend=amdgpu-hal",
           "--target=gfx9-4-generic",
-          "--output={tmp}/target_provider_gfx9_4_generic.vmfb",
+          "--output={tmp}/target_provider_gfx9_4_generic.hal",
           "--emit-target-artifact={tmp}/target_provider_gfx9_4_generic.hsaco",
           "--compile-report=summary",
           "--dump-ir-after=select-templates",
@@ -582,7 +582,7 @@
       },
       "files": [
         {
-          "path": "{tmp}/target_provider_gfx9_4_generic.vmfb",
+          "path": "{tmp}/target_provider_gfx9_4_generic.hal",
           "non_empty": true
         },
         {
@@ -616,7 +616,7 @@
           "{srcdir}/target_provider_selection.loom",
           "--backend=amdgpu-hal",
           "--target=gfx1151",
-          "--output={tmp}/target_provider_gfx1151.vmfb",
+          "--output={tmp}/target_provider_gfx1151.loader.hsaco",
           "--emit-target-artifact={tmp}/target_provider_gfx1151.hsaco",
           "--compile-report=summary",
           "--dump-ir-after=select-templates",
@@ -633,7 +633,7 @@
       },
       "files": [
         {
-          "path": "{tmp}/target_provider_gfx1151.vmfb",
+          "path": "{tmp}/target_provider_gfx1151.loader.hsaco",
           "non_empty": true
         },
         {
@@ -667,7 +667,7 @@
           "{srcdir}/template_math_legalization.loom",
           "--backend=amdgpu-hal",
           "--target=gfx11-generic",
-          "--output={tmp}/template_math_legalization.vmfb",
+          "--output={tmp}/template_math_legalization.hal",
           "--emit-target-artifact={tmp}/template_math_legalization.hsaco",
           "--artifact-manifest=summary",
           "--compile-report=summary"
@@ -685,7 +685,7 @@
       },
       "files": [
         {
-          "path": "{tmp}/template_math_legalization.vmfb",
+          "path": "{tmp}/template_math_legalization.hal",
           "non_empty": true
         },
         {
@@ -706,7 +706,7 @@
           "{srcdir}/cluster_b128_multicast.loom",
           "--backend=amdgpu-hal",
           "--target=gfx1250",
-          "--output={tmp}/cluster_b128_multicast.vmfb",
+          "--output={tmp}/cluster_b128_multicast.hal",
           "--emit-target-artifact={tmp}/cluster_b128_multicast.hsaco",
           "--artifact-manifest=summary",
           "--compile-report=summary"
@@ -727,7 +727,7 @@
       },
       "files": [
         {
-          "path": "{tmp}/cluster_b128_multicast.vmfb",
+          "path": "{tmp}/cluster_b128_multicast.hal",
           "non_empty": true
         },
         {

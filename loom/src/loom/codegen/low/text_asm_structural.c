@@ -80,14 +80,6 @@ static iree_status_t loom_low_descriptor_text_asm_resource_key_to_kind(
     *out_kind = LOOM_LOW_RESOURCE_IMPORT_KIND_NATIVE_POINTER;
     return iree_ok_status();
   }
-  if (iree_string_view_equal(key, IREE_SV("vm_state"))) {
-    *out_kind = LOOM_LOW_RESOURCE_IMPORT_KIND_VM_STATE;
-    return iree_ok_status();
-  }
-  if (iree_string_view_equal(key, IREE_SV("vm_import"))) {
-    *out_kind = LOOM_LOW_RESOURCE_IMPORT_KIND_VM_IMPORT;
-    return iree_ok_status();
-  }
   if (iree_string_view_equal(key, IREE_SV("hal_binding"))) {
     *out_kind = LOOM_LOW_RESOURCE_IMPORT_KIND_HAL_BINDING;
     return iree_ok_status();
@@ -106,12 +98,6 @@ static iree_status_t loom_low_descriptor_text_asm_resource_kind_to_key(
   switch (kind) {
     case LOOM_LOW_RESOURCE_IMPORT_KIND_NATIVE_POINTER:
       *out_key = IREE_SV("native_pointer");
-      return iree_ok_status();
-    case LOOM_LOW_RESOURCE_IMPORT_KIND_VM_STATE:
-      *out_key = IREE_SV("vm_state");
-      return iree_ok_status();
-    case LOOM_LOW_RESOURCE_IMPORT_KIND_VM_IMPORT:
-      *out_key = IREE_SV("vm_import");
       return iree_ok_status();
     case LOOM_LOW_RESOURCE_IMPORT_KIND_HAL_BINDING:
       *out_key = IREE_SV("hal_binding");

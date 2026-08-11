@@ -56,12 +56,12 @@ func.def inline @current_subgroup_size() -> (index) {
   func.return %size : index
 }
 
-func.def target(@wave32) @caller_wave32() -> (index) {
+func.def target(@wave32) abi(object_function) @caller_wave32() -> (index) {
   %size = func.call @current_subgroup_size() : () -> (index)
   func.return %size : index
 }
 
-func.def target(@wave64) @caller_wave64() -> (index) {
+func.def target(@wave64) abi(object_function) @caller_wave64() -> (index) {
   %size = func.call @current_subgroup_size() : () -> (index)
   func.return %size : index
 }
@@ -71,12 +71,12 @@ target.generic<reference> @wave32 {subgroup_size = 32}
 
 target.generic<reference> @wave64 {subgroup_size = 64}
 
-func.def target(@wave32) @caller_wave32() -> (index) {
+func.def target(@wave32) abi(object_function) @caller_wave32() -> (index) {
   %size = index.constant 32 : index
   func.return %size : index
 }
 
-func.def target(@wave64) @caller_wave64() -> (index) {
+func.def target(@wave64) abi(object_function) @caller_wave64() -> (index) {
   %size = index.constant 64 : index
   func.return %size : index
 }

@@ -9,11 +9,11 @@
 These TypeDefs define the textual format for the core loom types.
 Scalar types (f32, i32, index) are keywords, not TypeDefs. Core named types
 such as encoding, tile<...>, tensor<...>, vector<...>, view<...>, bare buffer,
-and pool<...>, plus dotted dialect types such as hal.buffer and vm.ref<...>,
+and pool<...>, plus dotted dialect types such as hal.buffer and test.ref<...>,
 are TypeDefs.
 
 Dialect-specific types are declared in their respective dialect files
-(e.g., dialect/hal/, dialect/vm/) using the same TypeDef pattern.
+(e.g., dialect/hal/ and dialect/kernel/) using the same TypeDef pattern.
 """
 
 from loom.assembly import (

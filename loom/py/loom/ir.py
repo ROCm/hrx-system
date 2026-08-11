@@ -480,15 +480,15 @@ class RegisterType:
 
 @dataclass(frozen=True, slots=True)
 class DialectType:
-    """A dialect-defined type (hal.buffer, vm.ref<T>, etc.).
+    """A dialect-defined type (hal.buffer, test.ref<T>, etc.).
 
     Catch-all for types defined by dialects outside the built-in set.
     Built-in types (ScalarType, ShapedType, FunctionType)
     keep their specific dataclasses for performance and ergonomics.
     Dialect types use DialectType with the TypeDef driving print/parse.
 
-    name: Full type name as it appears in text ("hal.buffer", "vm.ref").
-    params: Type parameters (e.g., the hal.buffer in vm.ref<hal.buffer>).
+    name: Full type name as it appears in text ("hal.buffer", "test.ref").
+    params: Type parameters (e.g., the hal.buffer in test.ref<hal.buffer>).
     """
 
     name: str

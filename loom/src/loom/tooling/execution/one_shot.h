@@ -30,13 +30,6 @@ enum {
   LOOM_RUN_ONE_SHOT_HAL_MAX_BINDING_COUNT = 64,
 };
 
-typedef struct loom_run_one_shot_value_specs_t {
-  // Textual value specs in IREE function I/O syntax.
-  const iree_string_view_t* values;
-  // Number of entries in |values|.
-  iree_host_size_t count;
-} loom_run_one_shot_value_specs_t;
-
 typedef struct loom_run_one_shot_binding_specs_t {
   // Textual binding specs in HAL binding ordinal order.
   const iree_string_view_t* values;
@@ -46,21 +39,10 @@ typedef struct loom_run_one_shot_binding_specs_t {
 
 // Invocation options for the current one-shot run front door.
 //
-// This intentionally preserves the existing textual VM/HAL input specs used by
-// CLI and loom-check adapters without depending on the concrete VM or HAL
-// invocation headers. Benchmark/tune hot loops should use typed invocation
-// plans instead of this structure.
+// This preserves the textual HAL input specs used by CLI and loom-check
+// adapters without depending on concrete HAL invocation headers.
+// Benchmark/tune hot loops should use typed invocation plans instead.
 typedef struct loom_run_one_shot_options_t {
-  // VM function name to invoke. Empty selects the single export.
-  iree_string_view_t vm_function_name;
-  // VM function input specs.
-  loom_run_one_shot_value_specs_t vm_inputs;
-  // VM function output materialization specs.
-  loom_run_one_shot_value_specs_t vm_outputs;
-  // VM expected output specs. When present, these take precedence over outputs.
-  loom_run_one_shot_value_specs_t vm_expected_outputs;
-  // Maximum number of VM output elements to format.
-  iree_host_size_t vm_max_output_element_count;
   // HAL executable function symbol to dispatch. Empty selects the only named
   // function in the prepared executable.
   iree_string_view_t hal_function_name;

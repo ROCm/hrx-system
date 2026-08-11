@@ -39,7 +39,7 @@ class LoomPresubmitTest(unittest.TestCase):
         self.assertEqual(command[:3], ["bazel", "test", "--config=presubmit"])
         self.assertEqual(command[-1], "//loom/...")
         self.assertIn(
-            "--//loom/config/target:enable=amdgpu,iree_vm,llvmir,spirv,x86",
+            "--//loom/config/target:enable=amdgpu,llvmir,spirv,x86",
             command,
         )
 
@@ -318,7 +318,6 @@ class LoomPresubmitTest(unittest.TestCase):
     def test_cmake_source_format_reports_missing_target_providers(self):
         cache_values = {
             "LOOM_TARGET_AMDGPU": "OFF",
-            "LOOM_TARGET_IREE_VM": "ON",
             "LOOM_TARGET_LLVMIR": "ON",
             "LOOM_TARGET_SPIRV": "OFF",
             "LOOM_TARGET_X86": "ON",
@@ -421,7 +420,7 @@ class LoomPresubmitTest(unittest.TestCase):
             cmake_target="loom::tools::loom-format",
             bazel_args=(
                 "--config=locked",
-                "--//loom/config/target:enable=amdgpu,iree_vm,llvmir,spirv,x86",
+                "--//loom/config/target:enable=amdgpu,llvmir,spirv,x86",
             ),
         )
         run_command.assert_called_once_with(

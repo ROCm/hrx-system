@@ -39,7 +39,7 @@ enum {
   LOOM_RUN_MEASUREMENT_BOUNDARY_PREPARE_INVOCATION = 1u << 2,
   // Submit-only execution once a backend exposes non-blocking submission.
   LOOM_RUN_MEASUREMENT_BOUNDARY_SUBMIT = 1u << 3,
-  // Dispatch or VM function invocation through completion.
+  // Dispatch or host function invocation through completion.
   LOOM_RUN_MEASUREMENT_BOUNDARY_INVOKE = 1u << 4,
   // Result transfer, formatting, comparison, or validation.
   LOOM_RUN_MEASUREMENT_BOUNDARY_COLLECT_RESULTS = 1u << 5,

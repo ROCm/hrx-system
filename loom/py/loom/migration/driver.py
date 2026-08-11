@@ -436,7 +436,6 @@ def default_migration_ops() -> tuple[Any, ...]:
     from loom.dialect.vector import ALL_VECTOR_OPS
     from loom.dialect.view import ALL_VIEW_OPS
     from loom.target.arch.amdgpu.dialect import ALL_AMDGPU_OPS
-    from loom.target.arch.ireevm.dialect import ALL_IREEVM_OPS
     from loom.target.arch.spirv.dialect import ALL_SPIRV_OPS
     from loom.target.arch.wasm.dialect import ALL_WASM_OPS
     from loom.target.arch.x86.dialect import ALL_X86_OPS
@@ -466,7 +465,6 @@ def default_migration_ops() -> tuple[Any, ...]:
         *ALL_X86_OPS,
         *ALL_SPIRV_OPS,
         *ALL_WASM_OPS,
-        *ALL_IREEVM_OPS,
     )
 
 
@@ -475,7 +473,6 @@ def default_migration_types() -> tuple[Any, ...]:
     from loom.builtin_types import ALL_BUILTIN_TYPES
     from loom.dialect.hal import ALL_HAL_TYPES
     from loom.dialect.kernel import ALL_KERNEL_TYPES
-    from loom.target.arch.ireevm.dialect import ALL_IREEVM_TYPES
     from loom.target.arch.spirv.dialect import ALL_SPIRV_TYPES
 
     return (
@@ -483,7 +480,6 @@ def default_migration_types() -> tuple[Any, ...]:
         *ALL_HAL_TYPES,
         *ALL_KERNEL_TYPES,
         *ALL_SPIRV_TYPES,
-        *ALL_IREEVM_TYPES,
     )
 
 
