@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Cross-language bytecode coverage for structural register value types."""
+"""Cross-language bytecode coverage for bytecode-stable IR structure."""
 
 from __future__ import annotations
 
@@ -65,9 +65,16 @@ def _typed_register_module() -> tuple[Module, RegisterType]:
         "low.func.decl target<test.low.core> "
         "@typed_identity(%arg: reg<test.ptr : vector<4xi16>>) -> "
         "(reg<test.ptr : vector<4xi16>>)\n"
+        "\n"
+        "// Enum and parameterized attribute coverage.\n"
         "test.func @enum_arrays() {\n"
+        "\n"
+        "// Explicit entry block coverage.\n"
+        "^entry:\n"
         "  test.enum_array_attrs [low, high, low] "
         "using [middle, <42>, middle]\n"
+        "\n"
+        "  // Grouped operation coverage.\n"
         "  test.parameterized_attr "
         "#test.options<mode = fast, scopes = [subgroup, <254>], "
         "element_type = bf16, tile = #test.tile<width = 16>, "
@@ -75,6 +82,7 @@ def _typed_register_module() -> tuple[Module, RegisterType]:
         "tiles = [#test.tile<width = 4>, #test.tile<width = 8>]>\n"
         "  test.parameterized_attr "
         "#test.options<mode = precise, scopes = []>\n"
+        "\n"
         "  test.parameterized_attr #test.options<mode = fast>\n"
         "  test.parameterized_attr_array "
         "[#test.tile<width = 8>, #test.options<mode = precise>, "
@@ -131,15 +139,29 @@ def main() -> None:
         )
         if enum_function is None:
             raise AssertionError("Python reader did not recover enum_arrays")
-        enum_op = enum_function.regions[0].blocks[0].ops[0]
+        if not enum_function.leading_blank_line or enum_function.comments != (
+            " Enum and parameterized attribute coverage.",
+        ):
+            raise AssertionError("symbol source trivia did not survive C bytecode")
+        entry_block = enum_function.regions[0].blocks[0]
+        if not entry_block.leading_blank_line or entry_block.comments != (
+            " Explicit entry block coverage.",
+        ):
+            raise AssertionError("block source trivia did not survive C bytecode")
+        enum_op = entry_block.ops[0]
         if enum_op.attributes["required_values"] != EnumArrayAttr([1, 255, 1]):
             raise AssertionError("required enum array did not survive C bytecode")
         if enum_op.attributes["optional_values"] != EnumArrayAttr([7, 42, 7]):
             raise AssertionError("open enum array did not survive C bytecode")
-        options = [
-            op.attributes["options"]
-            for op in enum_function.regions[0].blocks[0].ops[1:4]
-        ]
+        options = [op.attributes["options"] for op in entry_block.ops[1:4]]
+        if not entry_block.ops[1].leading_blank_line or entry_block.ops[1].comments != (
+            " Grouped operation coverage.",
+        ):
+            raise AssertionError("commented op source trivia did not survive bytecode")
+        if entry_block.ops[2].leading_blank_line:
+            raise AssertionError("adjacent operations gained a blank line")
+        if not entry_block.ops[3].leading_blank_line or entry_block.ops[3].comments:
+            raise AssertionError("blank-only op source trivia did not survive bytecode")
         if not all(isinstance(value, ParameterizedAttr) for value in options):
             raise AssertionError("Python reader did not recover parameterized attrs")
         first, present_empty, absent = options
@@ -169,7 +191,7 @@ def main() -> None:
             raise AssertionError("present empty parameter did not survive C bytecode")
         if absent.has("scopes"):
             raise AssertionError("absent parameter became present in C bytecode")
-        array_op = enum_function.regions[0].blocks[0].ops[4]
+        array_op = entry_block.ops[4]
         array_values = array_op.attributes["values"]
         if not isinstance(array_values, ParameterizedAttrArray):
             raise AssertionError("Python reader did not recover parameterized array")

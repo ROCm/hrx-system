@@ -382,22 +382,27 @@ static iree_status_t loom_bytecode_reader_read_span(
   return loom_bytecode_cursor_read_span(&cursor->cursor, host_length, out_span);
 }
 
-static iree_status_t loom_bytecode_reader_read_comment_list(
+static iree_status_t loom_bytecode_reader_read_source_trivia(
     loom_bytecode_reader_state_t* reader, loom_bytecode_reader_cursor_t* cursor,
-    iree_arena_allocator_t* arena, const iree_string_view_t** out_comments,
+    iree_arena_allocator_t* arena, bool* out_leading_blank_line,
+    const iree_string_view_t** out_comments,
     iree_host_size_t* out_comment_count) {
+  if (out_leading_blank_line) *out_leading_blank_line = false;
   if (out_comments) *out_comments = NULL;
   if (out_comment_count) *out_comment_count = 0;
 
-  uint64_t count_offset = loom_bytecode_reader_cursor_absolute_position(cursor);
-  uint64_t count = 0;
+  uint64_t source_trivia_offset =
+      loom_bytecode_reader_cursor_absolute_position(cursor);
+  uint64_t source_trivia = 0;
   IREE_RETURN_IF_ERROR(
-      loom_bytecode_reader_read_uvarint(reader, cursor, &count));
+      loom_bytecode_reader_read_uvarint(reader, cursor, &source_trivia));
   if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+  uint64_t count =
+      source_trivia >> LOOM_BYTECODE_SOURCE_TRIVIA_COMMENT_COUNT_SHIFT;
   if (count > UINT16_MAX || count > IREE_HOST_SIZE_MAX) {
     return loom_bytecode_reader_emit_invalid_field(
         reader, cursor->range_name, IREE_SV("comment_list"), 0,
-        IREE_SV("comment_count"), count_offset,
+        IREE_SV("comment_count"), source_trivia_offset,
         IREE_SV("comment_count_exceeds_field_width"));
   }
 
@@ -427,6 +432,10 @@ static iree_status_t loom_bytecode_reader_read_comment_list(
       comments[i] =
           iree_make_string_view((const char*)span.data, span.data_length);
     }
+  }
+  if (out_leading_blank_line) {
+    *out_leading_blank_line =
+        (source_trivia & LOOM_BYTECODE_SOURCE_TRIVIA_LEADING_BLANK_LINE) != 0;
   }
   if (out_comments) *out_comments = comments;
   if (out_comment_count) *out_comment_count = (iree_host_size_t)count;
@@ -3268,11 +3277,12 @@ static iree_status_t loom_bytecode_body_reader_read_op(
       return iree_ok_status();
   }
 
+  bool op_leading_blank_line = false;
   const iree_string_view_t* op_comments = NULL;
   iree_host_size_t op_comment_count = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_comment_list(
-      body_reader->reader, cursor, body_reader->arena, &op_comments,
-      &op_comment_count));
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_source_trivia(
+      body_reader->reader, cursor, body_reader->arena, &op_leading_blank_line,
+      &op_comments, &op_comment_count));
   if (loom_bytecode_reader_has_errors(body_reader->reader))
     return iree_ok_status();
 
@@ -3594,6 +3604,9 @@ static iree_status_t loom_bytecode_body_reader_read_op(
   if (has_effective_traits) {
     op->traits = effective_traits;
   }
+  if (op_leading_blank_line) {
+    op->flags |= LOOM_OP_FLAG_LEADING_BLANK_LINE;
+  }
   op->instance_flags = instance_flags;
   for (uint64_t i = 0; i < region_count; ++i) {
     loom_region_t* region = NULL;
@@ -3640,13 +3653,17 @@ static iree_status_t loom_bytecode_body_reader_read_block(
     block->label_id = (loom_string_id_t)label_id;
   }
 
+  bool block_leading_blank_line = false;
   const iree_string_view_t* block_comments = NULL;
   iree_host_size_t block_comment_count = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_comment_list(
-      body_reader->reader, cursor, body_reader->arena, &block_comments,
-      &block_comment_count));
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_source_trivia(
+      body_reader->reader, cursor, body_reader->arena,
+      &block_leading_blank_line, &block_comments, &block_comment_count));
   if (loom_bytecode_reader_has_errors(body_reader->reader))
     return iree_ok_status();
+  if (block_leading_blank_line) {
+    block->flags |= LOOM_BLOCK_FLAG_LEADING_BLANK_LINE;
+  }
   if (block_comment_count > 0) {
     IREE_RETURN_IF_ERROR(loom_module_attach_block_comments(
         body_reader->reader->output_module, block, block_comments,
@@ -4392,8 +4409,8 @@ static iree_status_t loom_bytecode_reader_skip_global_payload(
     symbol_metadata->interfaces = vtable->symbol_def->interfaces;
   }
 
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_comment_list(
-      reader, cursor, reader->arena, NULL, NULL));
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_source_trivia(
+      reader, cursor, reader->arena, NULL, NULL, NULL));
   if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
 
   uint64_t result_count = 0;
@@ -4518,8 +4535,8 @@ static iree_status_t loom_bytecode_reader_skip_record_payload(
     symbol_metadata->interfaces = vtable->symbol_def->interfaces;
   }
 
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_comment_list(
-      reader, cursor, reader->arena, NULL, NULL));
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_source_trivia(
+      reader, cursor, reader->arena, NULL, NULL, NULL));
   if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
 
   uint64_t attr_count = 0;
@@ -4645,8 +4662,8 @@ static iree_status_t loom_bytecode_reader_skip_symbol_payload(
 
     uint64_t value = 0;
     uint8_t byte_value = 0;
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_comment_list(
-        reader, cursor, reader->arena, NULL, NULL));
+    IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_source_trivia(
+        reader, cursor, reader->arena, NULL, NULL, NULL));
     IREE_RETURN_IF_ERROR(
         loom_bytecode_reader_read_u8(reader, cursor, &byte_value));
     IREE_RETURN_IF_ERROR(
@@ -4819,10 +4836,12 @@ static iree_status_t loom_bytecode_reader_materialize_function_symbol(
   loom_op_kind_t op_kind = reader->op_kinds[op_table_index_plus1 - 1];
   const loom_func_like_vtable_t* func_like = vtable->func_like;
 
+  bool symbol_leading_blank_line = false;
   const iree_string_view_t* symbol_comments = NULL;
   iree_host_size_t symbol_comment_count = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_comment_list(
-      reader, cursor, reader->arena, &symbol_comments, &symbol_comment_count));
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_source_trivia(
+      reader, cursor, reader->arena, &symbol_leading_blank_line,
+      &symbol_comments, &symbol_comment_count));
   if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
 
   uint8_t calling_convention = 0;
@@ -5133,6 +5152,9 @@ static iree_status_t loom_bytecode_reader_materialize_function_symbol(
         region_count, tied_result_count, vtable->attribute_count,
         LOOM_LOCATION_NONE, &op));
   }
+  if (symbol_leading_blank_line) {
+    op->flags |= LOOM_OP_FLAG_LEADING_BLANK_LINE;
+  }
   if (workload_operand_field_index != LOOM_OPERAND_INDEX_NONE) {
     loom_value_slice_t workload_operands =
         loom_op_operand_field_span(vtable, op, workload_operand_field_index);
@@ -5226,10 +5248,12 @@ static iree_status_t loom_bytecode_reader_materialize_global_symbol(
   if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
   loom_op_kind_t op_kind = reader->op_kinds[op_table_index_plus1 - 1];
 
+  bool symbol_leading_blank_line = false;
   const iree_string_view_t* symbol_comments = NULL;
   iree_host_size_t symbol_comment_count = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_comment_list(
-      reader, cursor, reader->arena, &symbol_comments, &symbol_comment_count));
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_source_trivia(
+      reader, cursor, reader->arena, &symbol_leading_blank_line,
+      &symbol_comments, &symbol_comment_count));
   if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
 
   uint64_t result_count = 0;
@@ -5353,6 +5377,9 @@ static iree_status_t loom_bytecode_reader_materialize_global_symbol(
   IREE_RETURN_IF_ERROR(loom_builder_allocate_op(
       builder, op_kind, 0, (uint16_t)result_count, 0, 0,
       vtable->attribute_count, LOOM_LOCATION_NONE, &op));
+  if (symbol_leading_blank_line) {
+    op->flags |= LOOM_OP_FLAG_LEADING_BLANK_LINE;
+  }
   memcpy(loom_op_results(op), local_values,
          (iree_host_size_t)result_count * sizeof(loom_value_id_t));
   if (vtable->attribute_count > 0) {
@@ -5396,10 +5423,12 @@ static iree_status_t loom_bytecode_reader_materialize_record_symbol(
   if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
   loom_op_kind_t op_kind = reader->op_kinds[op_table_index_plus1 - 1];
 
+  bool symbol_leading_blank_line = false;
   const iree_string_view_t* symbol_comments = NULL;
   iree_host_size_t symbol_comment_count = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_comment_list(
-      reader, cursor, reader->arena, &symbol_comments, &symbol_comment_count));
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_source_trivia(
+      reader, cursor, reader->arena, &symbol_leading_blank_line,
+      &symbol_comments, &symbol_comment_count));
   if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
 
   loom_attribute_t* attrs = NULL;
@@ -5504,6 +5533,9 @@ static iree_status_t loom_bytecode_reader_materialize_record_symbol(
   IREE_RETURN_IF_ERROR(loom_builder_allocate_op(
       builder, op_kind, 0, 0, region_count, 0, vtable->attribute_count,
       LOOM_LOCATION_NONE, &op));
+  if (symbol_leading_blank_line) {
+    op->flags |= LOOM_OP_FLAG_LEADING_BLANK_LINE;
+  }
   if (vtable->attribute_count > 0) {
     memcpy(loom_op_attrs(op), attrs,
            vtable->attribute_count * sizeof(loom_attribute_t));
@@ -5837,8 +5869,8 @@ static iree_status_t loom_bytecode_reader_read_symbols(
         symbol_metadata->defining_op_name = loom_op_vtable_name(unused_vtable);
         symbol_metadata->interfaces = unused_vtable->symbol_def->interfaces;
       }
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_comment_list(
-          reader, &cursor, reader->arena, NULL, NULL));
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_source_trivia(
+          reader, &cursor, reader->arena, NULL, NULL, NULL));
       if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
 
       uint8_t calling_convention = 0;

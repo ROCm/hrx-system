@@ -154,6 +154,23 @@ static iree_string_view_t AuthoredLowSyntaxText() {
       "}\n");
 }
 
+static iree_string_view_t GroupedSourceText() {
+  return IREE_SV(
+      "func.def @first() {\n"
+      "  func.return\n"
+      "}\n"
+      "\n"
+      "// Grouped symbol.\n"
+      "func.def @grouped() {\n"
+      "\n"
+      "// Explicit entry block.\n"
+      "^entry:\n"
+      "\n"
+      "  // Grouped terminator.\n"
+      "  func.return\n"
+      "}\n");
+}
+
 TEST(FormatKind, ParsesAcceptedSpellings) {
   loom_module_format_t format = LOOM_MODULE_FORMAT_AUTO;
 
@@ -243,6 +260,15 @@ TEST_F(LoomFormatConvertTest, BytecodePreservesAuthoredLowSyntax) {
       LOOM_MODULE_FORMAT_BYTECODE, LOOM_MODULE_FORMAT_TEXT);
   EXPECT_EQ(text, std::string(AuthoredLowSyntaxText().data,
                               AuthoredLowSyntaxText().size));
+}
+
+TEST_F(LoomFormatConvertTest, BytecodePreservesVerticalSourceGrouping) {
+  std::string bytecode = ConvertTextToBytecode(GroupedSourceText());
+  std::string text = ConvertToString(
+      iree_make_const_byte_span(bytecode.data(), bytecode.size()),
+      LOOM_MODULE_FORMAT_BYTECODE, LOOM_MODULE_FORMAT_TEXT);
+  EXPECT_EQ(text,
+            std::string(GroupedSourceText().data, GroupedSourceText().size));
 }
 
 TEST_F(LoomFormatConvertTest, ExplicitBytecodeInputRoundTripsToText) {

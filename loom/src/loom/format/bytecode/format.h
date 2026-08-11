@@ -87,6 +87,9 @@ extern "C" {
 #define LOOM_BYTECODE_MAGIC_LENGTH 4
 #define LOOM_BYTECODE_FORMAT_VERSION 24
 
+#define LOOM_BYTECODE_SOURCE_TRIVIA_LEADING_BLANK_LINE (1u << 0)
+#define LOOM_BYTECODE_SOURCE_TRIVIA_COMMENT_COUNT_SHIFT 1
+
 // File-level source-location mode stored in the file header.
 enum loom_bytecode_location_mode_e {
   // Operation locations reference source/fused/opaque location records in the
@@ -497,6 +500,11 @@ typedef enum loom_bytecode_section_kind_e {
 // The export offset table lets the linker enumerate available
 // symbols without scanning private internals.
 //
+// Source trivia: every [source_trivia: varint] scalar packs the following
+// leading-comment count in bits 1 and above and a leading-blank-line bit in
+// bit 0. The comment count is therefore source_trivia >> 1. Writers
+// canonicalize any authored run of empty lines to the single retained bit.
+//
 // Symbol entry format:
 //
 //   [name_id: varint]
@@ -523,7 +531,7 @@ typedef enum loom_bytecode_section_kind_e {
 //                         name is OPS[N - 1]. The symbol kind is semantic
 //                         linkage metadata; this op reference preserves the
 //                         exact dialect op used to define the symbol.
-//     [comment_count: varint]
+//     [source_trivia: varint]
 //     For each leading comment attached to the symbol op:
 //       [comment_length: varint]
 //       [comment_data: comment_length bytes]  bytes after the leading // marker
@@ -594,7 +602,7 @@ typedef enum loom_bytecode_section_kind_e {
 //                         0 is invalid. N > 0 means the defining global op
 //                         name is OPS[N - 1]. The op must define a GLOBAL
 //                         symbol and have no operands or regions.
-//     [comment_count: varint]
+//     [source_trivia: varint]
 //     For each leading comment attached to the symbol op:
 //       [comment_length: varint]
 //       [comment_data: comment_length bytes]  bytes after the leading // marker
@@ -629,7 +637,7 @@ typedef enum loom_bytecode_section_kind_e {
 //                         name is OPS[N - 1]. The op must define a RECORD
 //                         symbol and have no operands or results. It may have
 //                         one fixed body region.
-//     [comment_count: varint]
+//     [source_trivia: varint]
 //     For each leading comment attached to the symbol op:
 //       [comment_length: varint]
 //       [comment_data: comment_length bytes]  bytes after the leading // marker
@@ -679,7 +687,7 @@ typedef enum loom_bytecode_section_kind_e {
 //   For each block:
 //     [has_label: byte]
 //     (if has_label: [label_id: varint])
-//     [comment_count: varint]
+//     [source_trivia: varint]
 //     For each leading comment attached to the block label:
 //       [comment_length: varint]
 //       [comment_data: comment_length bytes]  bytes after the leading // marker
@@ -702,7 +710,7 @@ typedef enum loom_bytecode_section_kind_e {
 //       [instance_flags: byte]  Per-op-instance flags. Zero for ops without a
 //                               Flags format element.
 //       [location_id: varint]
-//       [comment_count: varint]
+//       [source_trivia: varint]
 //       For each leading comment attached to the op:
 //         [comment_length: varint]
 //         [comment_data: comment_length bytes] bytes after the leading //
