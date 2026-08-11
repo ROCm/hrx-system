@@ -469,8 +469,14 @@ static iree_status_t iree_hal_amdgpu_host_queue_prepare_wait_value_dispatch(
         IREE_STATUS_INVALID_ARGUMENT,
         "target buffer must be backed by an AMDGPU allocation");
   }
-  target_device_ptr +=
-      iree_hal_buffer_byte_offset(target_buffer) + target_offset;
+  iree_device_size_t target_device_offset = 0;
+  if (IREE_UNLIKELY(!iree_device_size_checked_add(
+          iree_hal_buffer_byte_offset(target_buffer), target_offset,
+          &target_device_offset))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "wait value target offset overflows");
+  }
+  target_device_ptr += target_device_offset;
 
   iree_hsa_kernel_dispatch_packet_t dispatch_packet;
   memset(&dispatch_packet, 0, sizeof(dispatch_packet));

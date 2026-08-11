@@ -3011,14 +3011,21 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_device_queue_wait_value(
     uint64_t value, uint64_t mask, iree_host_size_t value_length,
     iree_hal_amdgpu_wait_value_condition_t condition,
     iree_hal_amdgpu_wait_value_flags_t flags) {
-  IREE_ASSERT_ARGUMENT(base_device);
-  IREE_ASSERT_ARGUMENT(
-      !wait_semaphore_list.count ||
-      (wait_semaphore_list.semaphores && wait_semaphore_list.payload_values));
-  IREE_ASSERT_ARGUMENT(!signal_semaphore_list.count ||
-                       (signal_semaphore_list.semaphores &&
-                        signal_semaphore_list.payload_values));
-  IREE_ASSERT_ARGUMENT(target_buffer);
+  if (IREE_UNLIKELY(!base_device || !target_buffer)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "device and target buffer must be non-null");
+  }
+  if (IREE_UNLIKELY(
+          (wait_semaphore_list.count &&
+           (!wait_semaphore_list.semaphores ||
+            !wait_semaphore_list.payload_values)) ||
+          (signal_semaphore_list.count &&
+           (!signal_semaphore_list.semaphores ||
+            !signal_semaphore_list.payload_values)))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "non-empty semaphore lists require semaphores and payload values");
+  }
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_hal_amdgpu_logical_device_t* logical_device =
       iree_hal_amdgpu_logical_device_cast(base_device);
