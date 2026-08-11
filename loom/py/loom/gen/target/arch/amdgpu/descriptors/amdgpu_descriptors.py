@@ -31,7 +31,7 @@ from loom.gen.target.low.low_descriptors import (  # noqa: E402
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS,
     amdgpu_core_descriptor_set_instruction_names_by_isa_key,
-    build_amdgpu_core_descriptor_set_from_specs,
+    build_amdgpu_core_descriptor_sets_from_specs,
 )
 from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
     parse_amdgpu_isa_xml_paths_for_instructions,
@@ -149,9 +149,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         _parse_isa_xml_paths(args.isa_xml),
         amdgpu_core_descriptor_set_instruction_names_by_isa_key(descriptor_set_infos),
     )
-    descriptor_set = build_amdgpu_core_descriptor_set_from_specs(args.target, isa_specs)
+    descriptor_sets = build_amdgpu_core_descriptor_sets_from_specs(
+        tuple(info.generator_target for info in descriptor_set_infos),
+        isa_specs,
+    )
+    descriptor_set = descriptor_sets[args.target]
     if view_infos:
-        view_descriptor_sets = tuple(build_amdgpu_core_descriptor_set_from_specs(info.generator_target, isa_specs) for info in view_infos)
+        view_descriptor_sets = tuple(descriptor_sets[info.generator_target] for info in view_infos)
         storage_descriptor_set = _shared_storage_descriptor_set(
             descriptor_set,
             view_descriptor_sets,

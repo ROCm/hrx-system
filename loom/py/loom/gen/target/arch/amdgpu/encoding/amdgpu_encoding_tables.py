@@ -29,7 +29,7 @@ _ensure_runtime_py_on_path()
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     amdgpu_core_descriptor_set_instruction_names_by_isa_key,
-    build_amdgpu_core_descriptor_set_from_specs,
+    build_amdgpu_core_descriptor_sets_from_specs,
 )
 from loom.target.arch.amdgpu.encoding import (  # noqa: E402
     AMDGPU_ENCODING_FIELD_IDS,
@@ -1099,10 +1099,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ValueError(f"AMDGPU encoding target '{args.target}' is missing ISA XML key '{storage_isa_info.isa_xml_key}'") from exc
     if spec.architecture_name != storage_isa_info.isa_architecture_name or spec.architecture_id != storage_isa_info.isa_architecture_id:
         raise ValueError(f"{spec.source_name}: AMDGPU encoding target '{args.target}' expects {storage_isa_info.isa_architecture_name} architecture id {storage_isa_info.isa_architecture_id}")
-    storage_descriptor_set = build_amdgpu_core_descriptor_set_from_specs(
-        args.target,
+    descriptor_sets = build_amdgpu_core_descriptor_sets_from_specs(
+        tuple(info.generator_target for info in (descriptor_set_info, *view_infos)),
         isa_specs,
     )
+    storage_descriptor_set = descriptor_sets[args.target]
     vop3_unused_source_value = _vop3_unused_source_value(spec, storage_isa_info)
     storage_contract = _compile_encoding_contract(
         args.target,
@@ -1111,10 +1112,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         vop3_unused_source_value,
     )
     for view_info in view_infos:
-        view_descriptor_set = build_amdgpu_core_descriptor_set_from_specs(
-            view_info.generator_target,
-            isa_specs,
-        )
+        view_descriptor_set = descriptor_sets[view_info.generator_target]
         _validate_view_encoding_contract(
             args.target,
             spec,

@@ -77,17 +77,22 @@ def test_storage_generation_reuses_parsed_isa_for_declared_views() -> None:
     view_info = _descriptor_set_info(view_target, storage_target=storage_target)
     parsed_spec = object()
     parse_calls: list[Path] = []
-    build_calls: list[tuple[str, object]] = []
+    build_calls: list[tuple[tuple[str, ...], object]] = []
 
     def parse_xml(paths: dict[str, Path], instruction_names: dict[str, tuple[str, ...]]) -> dict[str, object]:
         assert instruction_names == {"test": ("TEST",)}
         parse_calls.extend(paths.values())
         return {"test": parsed_spec}
 
-    def build_descriptor_set(target: str, specs: dict[str, object]) -> DescriptorSet:
-        build_calls.append((target, specs))
-        descriptor_count = 2 if target == view_target else 1
-        return _descriptor_set(target, descriptor_count)
+    def build_descriptor_sets(targets: tuple[str, ...], specs: dict[str, object]) -> dict[str, DescriptorSet]:
+        build_calls.append((targets, specs))
+        return {
+            target: _descriptor_set(
+                target,
+                2 if target == view_target else 1,
+            )
+            for target in targets
+        }
 
     def generate_descriptor_set_family(
         storage_descriptor_set: DescriptorSet,
@@ -151,8 +156,8 @@ def test_storage_generation_reuses_parsed_isa_for_declared_views() -> None:
         ),
         mock.patch.object(
             amdgpu_descriptors,
-            "build_amdgpu_core_descriptor_set_from_specs",
-            build_descriptor_set,
+            "build_amdgpu_core_descriptor_sets_from_specs",
+            build_descriptor_sets,
         ),
         mock.patch.object(
             amdgpu_descriptors,
@@ -178,6 +183,5 @@ def test_storage_generation_reuses_parsed_isa_for_declared_views() -> None:
 
     assert parse_calls == [xml_path]
     assert build_calls == [
-        (storage_target, {"test": parsed_spec}),
-        (view_target, {"test": parsed_spec}),
+        ((storage_target, view_target), {"test": parsed_spec}),
     ]
