@@ -59,6 +59,21 @@ def test_reference_generation_is_deterministic_and_complete() -> None:
             assert f"dialects/{dialect_name}/ops/{local_name}.md" in first
 
 
+def test_dialect_index_sorts_each_user_facing_section() -> None:
+    index = generate_reference_files()["dialects/index.md"]
+    sections = re.split(r"^## ", index, flags=re.MULTILINE)[1:]
+
+    assert sections
+    for section in sections:
+        dialect_names = re.findall(
+            r"^\| \[`([^`]+)`\]\([^)]*\) \|",
+            section,
+            flags=re.MULTILINE,
+        )
+        assert dialect_names
+        assert dialect_names == sorted(dialect_names)
+
+
 def test_generated_reference_links_resolve() -> None:
     files = generate_reference_files()
     for source_path, contents in files.items():

@@ -521,7 +521,10 @@ def _render_dialect_index(
         "",
     ]
     for section in REFERENCE_SECTIONS:
-        section_specs = [spec for spec in specs if spec.section == section.key]
+        section_specs = sorted(
+            (spec for spec in specs if spec.section == section.key),
+            key=lambda spec: spec.name,
+        )
         lines.extend([f"## {section.title}", "", section.doc, ""])
         lines.extend(
             _table(

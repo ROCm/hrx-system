@@ -7,6 +7,8 @@
   --md-primary-fg-color--light: #46375e;
   --md-primary-fg-color--dark: #15101d;
   --md-accent-fg-color: #c74775;
+  --md-default-bg-color: #ffffff;
+  --md-typeset-a-color: #604092;
   --loom-gradient-start: #7048a8;
   --loom-gradient-end: #d34871;
 }
@@ -15,6 +17,7 @@
   --md-primary-fg-color: #17121f;
   --md-accent-fg-color: #ff709f;
   --md-default-bg-color: #111016;
+  --md-typeset-a-color: #d6b3ff;
   --loom-gradient-start: #a078d5;
   --loom-gradient-end: #ff709f;
 }

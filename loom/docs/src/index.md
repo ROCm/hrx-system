@@ -1,5 +1,10 @@
 # Loom programming guide
 
+!!! info "Programming guide preview"
+    This preview establishes the site structure and generated references. The
+    landing-page narrative and executable tutorial sequence are placeholders
+    while the checked guide programs are completed.
+
 <div class="loom-hero" markdown>
 
 ## One program, specialized all the way down
