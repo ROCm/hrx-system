@@ -798,12 +798,19 @@ def _with_gfx125x_operand_address_state(
 
 
 def _with_gfx125x_vgpr_msb_address_state(descriptor: Descriptor) -> Descriptor:
-    operands = tuple(
-        _with_gfx125x_operand_address_state(descriptor, operand)
-        for operand in descriptor.operands
-    )
-    updated_descriptor = replace(descriptor, operands=operands)
-    if any(operand.address_state_slot != 0 for operand in operands):
+    operands: list[Operand] = []
+    operands_changed = False
+    has_address_state = False
+    for operand in descriptor.operands:
+        projected_operand = _with_gfx125x_operand_address_state(descriptor, operand)
+        operands.append(projected_operand)
+        operands_changed |= projected_operand is not operand
+        has_address_state |= projected_operand.address_state_slot != 0
+
+    updated_descriptor = descriptor
+    if operands_changed:
+        updated_descriptor = replace(descriptor, operands=tuple(operands))
+    if has_address_state:
         updated_descriptor = _with_mode_state_read(updated_descriptor)
     return updated_descriptor
 
@@ -811,13 +818,14 @@ def _with_gfx125x_vgpr_msb_address_state(descriptor: Descriptor) -> Descriptor:
 def _with_gfx125x_vgpr_msb_address_states(
     descriptor_set: DescriptorSet,
 ) -> DescriptorSet:
-    descriptor_set = replace(
-        descriptor_set,
-        descriptors=tuple(
-            _with_gfx125x_vgpr_msb_address_state(descriptor)
-            for descriptor in descriptor_set.descriptors
-        ),
-    )
+    descriptors: list[Descriptor] = []
+    descriptors_changed = False
+    for descriptor in descriptor_set.descriptors:
+        projected_descriptor = _with_gfx125x_vgpr_msb_address_state(descriptor)
+        descriptors.append(projected_descriptor)
+        descriptors_changed |= projected_descriptor is not descriptor
+    if descriptors_changed:
+        descriptor_set = replace(descriptor_set, descriptors=tuple(descriptors))
     _validate_gfx125x_vgpr_msb_address_state(descriptor_set)
     return descriptor_set
 
@@ -1320,20 +1328,22 @@ def _with_storage_lease_rows(
         schedule_class.name: schedule_class
         for schedule_class in descriptor_set.schedule_classes
     }
-    return replace(
-        descriptor_set,
-        descriptors=tuple(
-            replace(
-                descriptor,
-                storage_leases=_amdgpu_descriptor_storage_leases(
-                    schedule_classes,
-                    descriptor,
-                    enable_gfx125x_xcnt=enable_gfx125x_xcnt,
-                ),
-            )
-            for descriptor in descriptor_set.descriptors
-        ),
-    )
+    descriptors: list[Descriptor] = []
+    descriptors_changed = False
+    for descriptor in descriptor_set.descriptors:
+        storage_leases = _amdgpu_descriptor_storage_leases(
+            schedule_classes,
+            descriptor,
+            enable_gfx125x_xcnt=enable_gfx125x_xcnt,
+        )
+        if storage_leases == descriptor.storage_leases:
+            descriptors.append(descriptor)
+            continue
+        descriptors.append(replace(descriptor, storage_leases=storage_leases))
+        descriptors_changed = True
+    if not descriptors_changed:
+        return descriptor_set
+    return replace(descriptor_set, descriptors=tuple(descriptors))
 
 
 _AMDGPU_SCHEDULE_INSTRUCTION_CLASSES = {
@@ -1379,7 +1389,8 @@ _AMDGPU_KEY_INSTRUCTION_CLASSES = (
 
 
 def _with_instruction_classes(descriptor_set: DescriptorSet) -> DescriptorSet:
-    descriptors = []
+    descriptors: list[Descriptor] = []
+    descriptors_changed = False
     for descriptor in descriptor_set.descriptors:
         instruction_classes = set(descriptor.instruction_classes)
         schedule_instruction_classes = _AMDGPU_SCHEDULE_INSTRUCTION_CLASSES.get(
@@ -1401,16 +1412,23 @@ def _with_instruction_classes(descriptor_set: DescriptorSet) -> DescriptorSet:
             if descriptor.key.startswith(key_prefix):
                 instruction_classes.add(instruction_class)
                 break
+        projected_instruction_classes = tuple(
+            instruction_class
+            for instruction_class in InstructionClass
+            if instruction_class in instruction_classes
+        )
+        if projected_instruction_classes == descriptor.instruction_classes:
+            descriptors.append(descriptor)
+            continue
         descriptors.append(
             replace(
                 descriptor,
-                instruction_classes=tuple(
-                    instruction_class
-                    for instruction_class in InstructionClass
-                    if instruction_class in instruction_classes
-                ),
+                instruction_classes=projected_instruction_classes,
             )
         )
+        descriptors_changed = True
+    if not descriptors_changed:
+        return descriptor_set
     return replace(descriptor_set, descriptors=tuple(descriptors))
 
 
