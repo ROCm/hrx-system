@@ -198,6 +198,10 @@ typedef struct iree_hal_streaming_graph_memory_size_entry_t {
   uint32_t reference_count;
 } iree_hal_streaming_graph_memory_size_entry_t;
 
+// Maximum number of devices supported by the stream HAL.
+// This avoids dynamic enumeration overhead during initialization.
+#define IREE_HAL_STREAMING_MAX_DEVICES 64
+
 // Stream context mapped to HAL device.
 struct iree_hal_streaming_context_t {
   // Reference counting.
@@ -229,6 +233,13 @@ struct iree_hal_streaming_context_t {
   iree_hal_streaming_context_t** peer_contexts;
   iree_host_size_t peer_count;
   iree_host_size_t peer_capacity;
+
+  // Number of contexts on each device that may access this context's ordinary
+  // device allocations. Protected by |peer_access_mutex|.
+  uint16_t peer_accessor_counts[IREE_HAL_STREAMING_MAX_DEVICES];
+
+  // Serializes peer-access changes with device-allocation publication.
+  iree_slim_mutex_t peer_access_mutex;
 
   // Buffer mapping table (pyre unified implementation).
   hrx_buffer_table_t buffer_table;
@@ -304,10 +315,6 @@ static inline void iree_hal_streaming_context_leave_capture(
 //===----------------------------------------------------------------------===//
 // Device types
 //===----------------------------------------------------------------------===//
-
-// Maximum number of devices supported by the stream HAL.
-// This avoids dynamic enumeration overhead during initialization.
-#define IREE_HAL_STREAMING_MAX_DEVICES 64
 
 // Device registry entry for multi-device support.
 typedef struct iree_hal_streaming_device_t {
@@ -779,14 +786,14 @@ typedef enum iree_hal_streaming_buffer_context_ownership_e {
   IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED = 1,
 } iree_hal_streaming_buffer_context_ownership_t;
 
-typedef struct iree_hal_streaming_context_import_t {
+typedef struct iree_hal_streaming_device_import_t {
   // Next imported HAL buffer wrapper for the same HIP-visible allocation.
-  struct iree_hal_streaming_context_import_t* next;
-  // Context whose allocator imported |buffer|.
-  iree_hal_streaming_context_t* context;
+  struct iree_hal_streaming_device_import_t* next;
+  // Device whose allocator imported |buffer|.
+  iree_hal_streaming_device_ordinal_t device_ordinal;
   // Imported HAL buffer wrapper over the original allocation.
   iree_hal_buffer_t* buffer;
-} iree_hal_streaming_context_import_t;
+} iree_hal_streaming_device_import_t;
 
 // Buffer wrapper for device memory.
 typedef struct iree_hal_streaming_buffer_t {
@@ -868,11 +875,11 @@ typedef struct iree_hal_streaming_buffer_t {
   // Per-page coherency mode for hipMallocManaged allocations.
   int32_t* managed_coherency_modes;
 
-  // Guards cross-context import cache mutation.
-  iree_slim_mutex_t context_import_mutex;
+  // Guards cross-device import cache mutation.
+  iree_slim_mutex_t device_import_mutex;
 
-  // Per-context imported wrappers over the same HIP-visible allocation.
-  iree_hal_streaming_context_import_t* context_imports;
+  // Per-device imported wrappers over the same HIP-visible allocation.
+  iree_hal_streaming_device_import_t* device_imports;
 
   // Platform-specific IPC handle, if the buffer is IPC enabled.
   void* ipc_handle;
@@ -1489,9 +1496,14 @@ void iree_hal_streaming_context_unregister_stream(
 iree_status_t iree_hal_streaming_context_allocate_capture_id(
     iree_hal_streaming_context_t* context, unsigned long long* out_capture_id);
 
-// Returns true when another context is present in the global context list.
+// Returns true when this context has enabled access to any peer context.
 bool iree_hal_streaming_context_has_peer_contexts(
     iree_hal_streaming_context_t* context);
+
+// Returns true when this context has enabled access to |peer_context|.
+bool iree_hal_streaming_context_can_access_peer(
+    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_context_t* peer_context);
 
 // Waits for all streams in the context to become idle.
 // Synchronization: all streams in context (blocking wait).
