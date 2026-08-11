@@ -613,9 +613,9 @@ static bool loom_float_bits_are_nan(loom_scalar_type_t scalar_type,
   }
 }
 
-static bool loom_float_facts_from_bits(loom_scalar_type_t scalar_type,
-                                       uint64_t bits,
-                                       loom_value_facts_t* out_facts) {
+bool loom_value_facts_from_float_bits(loom_scalar_type_t scalar_type,
+                                      uint64_t bits,
+                                      loom_value_facts_t* out_facts) {
   if (!loom_float_type_is_supported(scalar_type)) return false;
   const int32_t bit_count = loom_scalar_type_bitwidth(scalar_type);
   bits = iree_math_mask_low_bits_u64(bits, bit_count);
@@ -679,7 +679,8 @@ void loom_value_facts_eval_scalar_bitcast(
 
   bool converted = false;
   if (loom_scalar_type_is_float(result_type)) {
-    converted = loom_float_facts_from_bits(result_type, bits, out_result_facts);
+    converted =
+        loom_value_facts_from_float_bits(result_type, bits, out_result_facts);
   } else if (result_type == LOOM_SCALAR_TYPE_I1) {
     *out_result_facts = loom_value_facts_exact_i64((bits & 1) != 0 ? 1 : 0);
     converted = true;
