@@ -9,10 +9,9 @@
 _LOOM_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:loom_toolchain_type")
 
 LoomLibraryInfo = provider(
-    doc = "A verified Loom source closure and its linked archive.",
+    doc = "A verified reusable Loom bytecode archive.",
     fields = {
         "module": "Linked Loom bytecode archive.",
-        "sources": "Ordered depset of source modules in the archive.",
     },
 )
 
@@ -77,27 +76,21 @@ loom_compile_target = rule(
 def _loom_library_impl(ctx):
     if not ctx.files.srcs and not ctx.attr.deps:
         fail("%s requires at least one source across srcs and deps" % ctx.label)
-    transitive_sources = [
-        dep[LoomLibraryInfo].sources
-        for dep in ctx.attr.deps
-    ]
-    sources = depset(
-        direct = ctx.files.srcs,
-        transitive = transitive_sources,
-        order = "preorder",
-    )
+    libraries = [dep[LoomLibraryInfo].module for dep in ctx.attr.deps]
+    inputs = depset(direct = ctx.files.srcs + libraries)
     output = ctx.actions.declare_file(ctx.label.name + ".loombc")
     args = ctx.actions.args()
     args.add("--mode=archive")
     args.add("--to=bc")
     args.add("--output=%s" % output.path)
-    args.add_all(sources)
+    args.add_all(ctx.files.srcs)
+    args.add_all(libraries, format_each = "--library=%s")
 
     toolchain = ctx.toolchains[_LOOM_TOOLCHAIN_TYPE]
     ctx.actions.run(
         arguments = [args],
         executable = toolchain.link.files_to_run,
-        inputs = sources,
+        inputs = inputs,
         mnemonic = "LoomLibrary",
         outputs = [output],
         progress_message = "Linking Loom library %s" % ctx.label,
@@ -107,7 +100,6 @@ def _loom_library_impl(ctx):
         DefaultInfo(files = depset([output])),
         LoomLibraryInfo(
             module = output,
-            sources = sources,
         ),
     ]
 
@@ -116,7 +108,7 @@ _loom_library = rule(
     attrs = {
         "deps": attr.label_list(
             providers = [LoomLibraryInfo],
-            doc = "Loom libraries supplying transitive source modules.",
+            doc = "Loom bytecode archives supplying library providers.",
         ),
         "srcs": attr.label_list(
             allow_files = [".loom", ".loombc"],
@@ -426,7 +418,7 @@ def _declare_library(
 
 def loom_library(
         name,
-        srcs,
+        srcs = [],
         deps = [],
         tags = [],
         visibility = None):

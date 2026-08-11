@@ -11,10 +11,12 @@ load("//build_tools/bazel:executable.bzl", "iree_executable_test")
 load(
     "//loom/build_tools/bazel:defs.bzl",
     "loom_kernel_library",
+    "loom_library",
 )
 load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
 load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
 load(":loom_check_rules_test.bzl", "loom_check_rules_test_suite")
+load(":loom_library_rules_test.bzl", "loom_library_rules_test_suite")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -26,6 +28,25 @@ loom_kernel_library(
     ],
 )
 
+loom_library(
+    name = "archive_dependency",
+    srcs = ["link_kernels.loom"],
+    tags = ["manual"],
+)
+
+loom_library(
+    name = "archive_consumer",
+    srcs = ["link_checks.loom"],
+    tags = ["manual"],
+    deps = [":archive_dependency"],
+)
+
+loom_library(
+    name = "archive_aggregate",
+    tags = ["manual"],
+    deps = [":archive_consumer"],
+)
+
 loom_check_test(
     name = "loom_check_wrapper_subject",
     src = "roundtrip.loom-test",
@@ -34,6 +55,8 @@ loom_check_test(
 )
 
 loom_check_rules_test_suite(name = "loom_check_rules_tests")
+
+loom_library_rules_test_suite(name = "loom_library_rules_tests")
 
 loom_link_module(
     name = "linked_module",
@@ -46,6 +69,20 @@ iree_executable_test(
     src = "//loom/src/loom/tools/loom-format",
     args = ["$(rootpath :linked_module)"],
     data = [":linked_module"],
+)
+
+iree_executable_test(
+    name = "loom_library_archive_direct_test",
+    src = "//loom/src/loom/tools/loom-format",
+    args = ["$(rootpath :archive_consumer)"],
+    data = [":archive_consumer"],
+)
+
+iree_executable_test(
+    name = "loom_library_aggregate_direct_test",
+    src = "//loom/src/loom/tools/loom-format",
+    args = ["$(rootpath :archive_aggregate)"],
+    data = [":archive_aggregate"],
 )
 
 sh_test(
@@ -64,6 +101,9 @@ test_suite(
     tests = [
         ":loom_check_rules_tests",
         ":loom_check_wrapper_direct_test",
+        ":loom_library_aggregate_direct_test",
+        ":loom_library_archive_direct_test",
+        ":loom_library_rules_tests",
         ":loom_link_module_direct_test",
         ":public_kernel_library_test",
     ],
