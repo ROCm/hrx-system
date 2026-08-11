@@ -779,8 +779,8 @@ typedef enum loom_bytecode_section_kind_e {
 // values: 0=I64, 1=F64, 2=STRING, 3=BOOL, 4=ENUM, 5=I64_ARRAY, 6=SYMBOL,
 // 7=TYPE, 8=PREDICATE_LIST, 9=DICT, 10=ENCODING, 11=BYTES,
 // 12=SCOPED_ENUM, 13=ENUM_ARRAY, 14=PARAMETERIZED,
-// 15=PARAMETERIZED_ARRAY, 16=SIGNED_ENUM_SET. ABSENT is never encoded as a
-// payload value.
+// 15=PARAMETERIZED_ARRAY, 16=SIGNED_ENUM_SET, 17=SYMBOL_ARRAY. ABSENT is never
+// encoded as a payload value.
 // ENUM value_data is the raw uint8 case ordinal;
 // bytecode readers preserve it without consulting enum case tables so open enum
 // attrs can survive tools whose op tables do not yet name the ordinal. Closed
@@ -814,6 +814,14 @@ typedef enum loom_bytecode_section_kind_e {
 // The enclosing kind proves that every element is parameterized, so elements
 // do not carry a redundant attribute-kind byte. Empty arrays require a
 // descriptor-backed field to distinguish them from other aggregate kinds.
+// SYMBOL_ARRAY value_data is encoded as:
+//   [element_count: varint]
+//   For each element in order:
+//     [symbol_name_id: varint]
+// Symbol names are stable identities in STRINGS; context-local symbol ordinals
+// never serialize. Ordering and duplicate references are preserved. Empty
+// arrays require a descriptor-backed field to provide the element interface
+// and reference role.
 //       [region_count: varint]
 //       For each region:
 //         (recursive: source_flags, block_count, blocks...)
@@ -840,6 +848,7 @@ typedef enum loom_bytecode_attr_kind_e {
   LOOM_BYTECODE_ATTR_PARAMETERIZED = 14,
   LOOM_BYTECODE_ATTR_PARAMETERIZED_ARRAY = 15,
   LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET = 16,
+  LOOM_BYTECODE_ATTR_SYMBOL_ARRAY = 17,
   LOOM_BYTECODE_ATTR_COUNT,
 } loom_bytecode_attr_kind_t;
 

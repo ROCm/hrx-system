@@ -67,6 +67,13 @@ class ReaderTest : public ::testing::Test {
     size_t nested_dict_second_key = 0;
   };
 
+  struct AttributeValueOffsets {
+    // Byte offset of the attribute value kind byte.
+    size_t kind = 0;
+    // Byte offset of the attribute payload after the kind byte.
+    size_t payload = 0;
+  };
+
   struct RegisterTypeOffsets {
     // Byte offset of the register value-type presence tag.
     size_t has_value_type = 0;
@@ -330,6 +337,55 @@ class ReaderTest : public ::testing::Test {
         loom_make_signed_enum_set(required_words, 4),
         loom_signed_enum_set_empty(), loom_named_attr_slice_empty(),
         LOOM_LOCATION_UNKNOWN, &op));
+    loom_op_t* yield_op = nullptr;
+    IREE_CHECK_OK(loom_test_yield_build(&body_builder, /*values=*/nullptr,
+                                        /*value_count=*/0,
+                                        LOOM_LOCATION_UNKNOWN, &yield_op));
+    return module;
+  }
+
+  loom_module_t* CreateSymbolArrayModule() {
+    loom_module_t* module = CreateModule("reader_symbol_array");
+    loom_builder_t builder;
+    loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                            &builder);
+    auto add_record = [&](iree_string_view_t name) {
+      loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+      IREE_CHECK_OK(loom_builder_intern_string(&builder, name, &name_id));
+      uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
+      IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
+      loom_symbol_ref_t symbol = {/*.module_id=*/0,
+                                  /*.symbol_id=*/symbol_id};
+      loom_op_t* record_op = nullptr;
+      IREE_CHECK_OK(loom_test_record_build(
+          &builder, /*build_flags=*/0, /*kind=*/0, symbol,
+          loom_named_attr_slice_empty(), LOOM_LOCATION_UNKNOWN, &record_op));
+      return symbol;
+    };
+    const loom_symbol_ref_t a = add_record(IREE_SV("a"));
+    const loom_symbol_ref_t b = add_record(IREE_SV("b"));
+
+    loom_region_t* body = AddVoidFunction(module, "symbol_arrays");
+    loom_builder_t body_builder;
+    loom_builder_initialize(module, &module->arena,
+                            loom_region_entry_block(body), &body_builder);
+    const loom_symbol_ref_t dependencies[] = {b, a, b};
+    const loom_symbol_ref_t available[] = {a};
+    loom_op_t* mixed_op = nullptr;
+    IREE_CHECK_OK(loom_test_symbol_array_attrs_build(
+        &body_builder, LOOM_TEST_SYMBOL_ARRAY_ATTRS_BUILD_FLAG_HAS_AVAILABLE,
+        loom_make_symbol_ref_array(dependencies, IREE_ARRAYSIZE(dependencies)),
+        loom_make_symbol_ref_array(available, IREE_ARRAYSIZE(available)),
+        LOOM_LOCATION_UNKNOWN, &mixed_op));
+    loom_op_t* present_empty_op = nullptr;
+    IREE_CHECK_OK(loom_test_symbol_array_attrs_build(
+        &body_builder, LOOM_TEST_SYMBOL_ARRAY_ATTRS_BUILD_FLAG_HAS_AVAILABLE,
+        loom_symbol_ref_array_empty(), loom_symbol_ref_array_empty(),
+        LOOM_LOCATION_UNKNOWN, &present_empty_op));
+    loom_op_t* absent_op = nullptr;
+    IREE_CHECK_OK(loom_test_symbol_array_attrs_build(
+        &body_builder, /*build_flags=*/0, loom_symbol_ref_array_empty(),
+        loom_symbol_ref_array_empty(), LOOM_LOCATION_UNKNOWN, &absent_op));
     loom_op_t* yield_op = nullptr;
     IREE_CHECK_OK(loom_test_yield_build(&body_builder, /*values=*/nullptr,
                                         /*value_count=*/0,
@@ -1379,7 +1435,6 @@ class ReaderTest : public ::testing::Test {
         *offset += sizeof(double);
         break;
       case 2:   // STRING.
-      case 4:   // ENUM.
       case 6:   // SYMBOL.
       case 7:   // TYPE.
       case 10:  // ENCODING.
@@ -1387,6 +1442,7 @@ class ReaderTest : public ::testing::Test {
         ReadUVarint(bytes, offset);
         break;
       case 3:  // BOOL.
+      case 4:  // ENUM.
         *offset += 1;
         break;
       case 5: {  // I64_ARRAY.
@@ -1417,6 +1473,13 @@ class ReaderTest : public ::testing::Test {
       case 16: {  // SIGNED_ENUM_SET.
         uint8_t word_count = bytes[(*offset)++];
         *offset += (size_t)word_count * 2 * sizeof(uint64_t);
+        break;
+      }
+      case 17: {  // SYMBOL_ARRAY.
+        uint64_t count = ReadUVarint(bytes, offset);
+        for (uint64_t i = 0; i < count; ++i) {
+          ReadUVarint(bytes, offset);
+        }
         break;
       }
       default:
@@ -1726,7 +1789,7 @@ class ReaderTest : public ::testing::Test {
     return offset;
   }
 
-  size_t FirstBodyOpFirstAttrKindOffset(const std::vector<uint8_t>& bytes) {
+  size_t FirstBodyOpAttributeListOffset(const std::vector<uint8_t>& bytes) {
     uint64_t arg_count = 0;
     size_t offset = RootBlockValueListOffset(bytes, &arg_count);
     for (uint64_t i = 0; i < arg_count; ++i) {
@@ -1755,17 +1818,28 @@ class ReaderTest : public ::testing::Test {
       ReadUVarint(bytes, &offset);
       ReadUVarint(bytes, &offset);
     }
-
-    uint64_t attr_count = ReadUVarint(bytes, &offset);
-    EXPECT_GE(attr_count, 1u);
-    ReadUVarint(bytes, &offset);  // First attribute name ID.
     return offset;
   }
 
+  AttributeValueOffsets FirstBodyOpFirstAttributeValueOffsets(
+      const std::vector<uint8_t>& bytes) {
+    size_t offset = FirstBodyOpAttributeListOffset(bytes);
+    uint64_t attr_count = ReadUVarint(bytes, &offset);
+    EXPECT_GE(attr_count, 1u);
+    ReadUVarint(bytes, &offset);  // key_id
+    AttributeValueOffsets value_offsets = {
+        /*.kind=*/offset,
+        /*.payload=*/offset + 1,
+    };
+    return value_offsets;
+  }
+
   BodyOpAttrOffsets FirstBodyOpAttrOffsets(const std::vector<uint8_t>& bytes) {
-    size_t offset = FirstBodyOpFirstAttrKindOffset(bytes);
+    AttributeValueOffsets value_offsets =
+        FirstBodyOpFirstAttributeValueOffsets(bytes);
     BodyOpAttrOffsets attr_offsets;
-    attr_offsets.attr_kind = offset;
+    attr_offsets.attr_kind = value_offsets.kind;
+    size_t offset = value_offsets.kind;
     uint8_t attr_kind = bytes[offset++];
     EXPECT_EQ(attr_kind, 9u);
     uint64_t dict_count = ReadUVarint(bytes, &offset);
@@ -2561,6 +2635,69 @@ TEST_F(ReaderTest, SignedEnumSetsPreserveAssertionsAndPresence) {
       loom_test_signed_enum_set_attrs_optional_features(op);
   EXPECT_EQ(optional.word_count, 0u);
   EXPECT_EQ(optional.words, nullptr);
+
+  loom_module_free(read_module);
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, SymbolArraysPreserveNamesPresenceAndOrder) {
+  loom_module_t* module = CreateSymbolArrayModule();
+  auto bytes = WriteModule(module);
+
+  loom_module_t* read_module = nullptr;
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result =
+      ReadModule(bytes, &read_module, &error_ids, /*verify_module=*/true);
+
+  EXPECT_EQ(result.error_count, 0u) << ::testing::PrintToString(error_ids);
+  EXPECT_TRUE(error_ids.empty()) << ::testing::PrintToString(error_ids);
+  ASSERT_NE(read_module, nullptr);
+  ASSERT_EQ(read_module->symbols.count, 3u);
+  const loom_string_id_t function_name_id =
+      loom_module_lookup_string(read_module, IREE_SV("symbol_arrays"));
+  const uint16_t function_symbol_id =
+      loom_module_find_symbol(read_module, function_name_id);
+  ASSERT_NE(function_symbol_id, LOOM_SYMBOL_ID_INVALID);
+  loom_op_t* func_op =
+      read_module->symbols.entries[function_symbol_id].defining_op;
+  ASSERT_NE(func_op, nullptr);
+  ASSERT_TRUE(loom_test_func_isa(func_op));
+  loom_block_t* entry = loom_region_entry_block(loom_test_func_body(func_op));
+  ASSERT_NE(entry, nullptr);
+  ASSERT_EQ(entry->op_count, 4u);
+
+  const loom_string_id_t a_name_id =
+      loom_module_lookup_string(read_module, IREE_SV("a"));
+  const loom_string_id_t b_name_id =
+      loom_module_lookup_string(read_module, IREE_SV("b"));
+  const uint16_t a_symbol_id = loom_module_find_symbol(read_module, a_name_id);
+  const uint16_t b_symbol_id = loom_module_find_symbol(read_module, b_name_id);
+  ASSERT_NE(a_symbol_id, LOOM_SYMBOL_ID_INVALID);
+  ASSERT_NE(b_symbol_id, LOOM_SYMBOL_ID_INVALID);
+
+  loom_op_t* mixed_op = loom_block_op(entry, 0);
+  ASSERT_TRUE(loom_test_symbol_array_attrs_isa(mixed_op));
+  loom_symbol_ref_array_t dependencies =
+      loom_test_symbol_array_attrs_dependencies(mixed_op);
+  ASSERT_EQ(dependencies.count, 3u);
+  EXPECT_EQ(dependencies.values[0].symbol_id, b_symbol_id);
+  EXPECT_EQ(dependencies.values[1].symbol_id, a_symbol_id);
+  EXPECT_EQ(dependencies.values[2].symbol_id, b_symbol_id);
+  loom_symbol_ref_array_t available =
+      loom_test_symbol_array_attrs_available(mixed_op);
+  ASSERT_EQ(available.count, 1u);
+  EXPECT_EQ(available.values[0].symbol_id, a_symbol_id);
+
+  loom_op_t* present_empty_op = loom_block_op(entry, 1);
+  ASSERT_TRUE(loom_test_symbol_array_attrs_isa(present_empty_op));
+  EXPECT_FALSE(loom_attr_is_absent(loom_op_attrs(
+      present_empty_op)[loom_test_symbol_array_attrs_available_ATTR_INDEX]));
+  EXPECT_EQ(loom_test_symbol_array_attrs_available(present_empty_op).count, 0u);
+
+  loom_op_t* absent_op = loom_block_op(entry, 2);
+  ASSERT_TRUE(loom_test_symbol_array_attrs_isa(absent_op));
+  EXPECT_TRUE(loom_attr_is_absent(loom_op_attrs(
+      absent_op)[loom_test_symbol_array_attrs_available_ATTR_INDEX]));
 
   loom_module_free(read_module);
   loom_module_free(module);
@@ -3396,13 +3533,54 @@ TEST_F(ReaderTest, RejectsSignedEnumSetForNonSignedEnumSetField) {
   loom_module_free(module);
 }
 
+TEST_F(ReaderTest, RejectsSymbolArrayForNonSymbolArrayField) {
+  loom_module_t* module = CreateAttributeFunctionModule();
+  auto bytes = WriteModule(module);
+  BodyOpAttrOffsets attr_offsets = FirstBodyOpAttrOffsets(bytes);
+  bytes[attr_offsets.attr_kind] = LOOM_BYTECODE_ATTR_SYMBOL_ARRAY;
+
+  ExpectReadModuleError(bytes, "ERR_BYTECODE_006");
+
+  loom_module_free(module);
+}
+
 TEST_F(ReaderTest, RejectsSignedEnumSetWithExcessWordCount) {
   loom_module_t* module = CreateSignedEnumSetModule();
   auto bytes = WriteModule(module);
-  size_t attr_kind_offset = FirstBodyOpFirstAttrKindOffset(bytes);
-  ASSERT_EQ(bytes[attr_kind_offset], LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET);
-  ASSERT_EQ(bytes[attr_kind_offset + 1], 4u);
-  bytes[attr_kind_offset + 1] = 5;
+  AttributeValueOffsets value_offsets =
+      FirstBodyOpFirstAttributeValueOffsets(bytes);
+  ASSERT_EQ(bytes[value_offsets.kind], LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET);
+  ASSERT_EQ(bytes[value_offsets.payload], 4u);
+  bytes[value_offsets.payload] = 5;
+
+  ExpectReadModuleError(bytes, "ERR_BYTECODE_009");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsSymbolArrayNestedInGenericDictionary) {
+  loom_module_t* module = CreateAttributeFunctionModule();
+  auto bytes = WriteModule(module);
+  BodyOpAttrOffsets attr_offsets = FirstBodyOpAttrOffsets(bytes);
+  bytes[attr_offsets.nested_dict_first_value_kind] =
+      LOOM_BYTECODE_ATTR_SYMBOL_ARRAY;
+
+  ExpectReadModuleError(bytes, "ERR_BYTECODE_006");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsOversizedSymbolArray) {
+  loom_module_t* module = CreateSymbolArrayModule();
+  auto bytes = WriteModule(module);
+  AttributeValueOffsets value_offsets =
+      FirstBodyOpFirstAttributeValueOffsets(bytes);
+  ASSERT_EQ(bytes[value_offsets.kind], LOOM_BYTECODE_ATTR_SYMBOL_ARRAY);
+  ASSERT_EQ(bytes[value_offsets.payload], 3u);
+  ASSERT_LT(value_offsets.payload + 2, bytes.size());
+  bytes[value_offsets.payload] = 0x80;
+  bytes[value_offsets.payload + 1] = 0x80;
+  bytes[value_offsets.payload + 2] = 0x04;
 
   ExpectReadModuleError(bytes, "ERR_BYTECODE_009");
 
@@ -3412,9 +3590,10 @@ TEST_F(ReaderTest, RejectsSignedEnumSetWithExcessWordCount) {
 TEST_F(ReaderTest, RejectsSignedEnumSetWithContradictoryAssertion) {
   loom_module_t* module = CreateSignedEnumSetModule();
   auto bytes = WriteModule(module);
-  size_t attr_kind_offset = FirstBodyOpFirstAttrKindOffset(bytes);
-  ASSERT_EQ(bytes[attr_kind_offset], LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET);
-  const size_t positive_word_offset = attr_kind_offset + 2;
+  AttributeValueOffsets value_offsets =
+      FirstBodyOpFirstAttributeValueOffsets(bytes);
+  ASSERT_EQ(bytes[value_offsets.kind], LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET);
+  const size_t positive_word_offset = value_offsets.payload + 1;
   const size_t negative_word_offset =
       positive_word_offset + 4 * sizeof(uint64_t);
   WriteU64LE(&bytes, negative_word_offset,
@@ -3429,9 +3608,10 @@ TEST_F(ReaderTest, RejectsSignedEnumSetWithContradictoryAssertion) {
 TEST_F(ReaderTest, RejectsSignedEnumSetWithTrailingZeroPair) {
   loom_module_t* module = CreateSignedEnumSetModule();
   auto bytes = WriteModule(module);
-  size_t attr_kind_offset = FirstBodyOpFirstAttrKindOffset(bytes);
-  ASSERT_EQ(bytes[attr_kind_offset], LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET);
-  const size_t positive_word_offset = attr_kind_offset + 2;
+  AttributeValueOffsets value_offsets =
+      FirstBodyOpFirstAttributeValueOffsets(bytes);
+  ASSERT_EQ(bytes[value_offsets.kind], LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET);
+  const size_t positive_word_offset = value_offsets.payload + 1;
   ASSERT_NE(ReadU64LE(bytes, positive_word_offset + 3 * sizeof(uint64_t)), 0u);
   WriteU64LE(&bytes, positive_word_offset + 3 * sizeof(uint64_t), 0);
 
@@ -3443,11 +3623,42 @@ TEST_F(ReaderTest, RejectsSignedEnumSetWithTrailingZeroPair) {
 TEST_F(ReaderTest, RejectsSignedEnumSetWithUndeclaredStableValue) {
   loom_module_t* module = CreateSignedEnumSetModule();
   auto bytes = WriteModule(module);
-  size_t attr_kind_offset = FirstBodyOpFirstAttrKindOffset(bytes);
-  ASSERT_EQ(bytes[attr_kind_offset], LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET);
-  const size_t positive_word_offset = attr_kind_offset + 2;
+  AttributeValueOffsets value_offsets =
+      FirstBodyOpFirstAttributeValueOffsets(bytes);
+  ASSERT_EQ(bytes[value_offsets.kind], LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET);
+  const size_t positive_word_offset = value_offsets.payload + 1;
   WriteU64LE(&bytes, positive_word_offset,
              ReadU64LE(bytes, positive_word_offset) | (UINT64_C(1) << 2));
+
+  ExpectReadModuleError(bytes, "ERR_BYTECODE_006");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsOutOfRangeSymbolArrayName) {
+  loom_module_t* module = CreateSymbolArrayModule();
+  auto bytes = WriteModule(module);
+  AttributeValueOffsets value_offsets =
+      FirstBodyOpFirstAttributeValueOffsets(bytes);
+  ASSERT_EQ(bytes[value_offsets.kind], LOOM_BYTECODE_ATTR_SYMBOL_ARRAY);
+  ASSERT_EQ(bytes[value_offsets.payload], 3u);
+  ASSERT_LT(value_offsets.payload + 1, bytes.size());
+  bytes[value_offsets.payload + 1] = 0x7F;
+
+  ExpectReadModuleError(bytes, "ERR_BYTECODE_010");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsUnknownSymbolArrayName) {
+  loom_module_t* module = CreateSymbolArrayModule();
+  auto bytes = WriteModule(module);
+  AttributeValueOffsets value_offsets =
+      FirstBodyOpFirstAttributeValueOffsets(bytes);
+  ASSERT_EQ(bytes[value_offsets.kind], LOOM_BYTECODE_ATTR_SYMBOL_ARRAY);
+  ASSERT_EQ(bytes[value_offsets.payload], 3u);
+  ASSERT_LT(value_offsets.payload + 1, bytes.size());
+  bytes[value_offsets.payload + 1] = 0;
 
   ExpectReadModuleError(bytes, "ERR_BYTECODE_006");
 

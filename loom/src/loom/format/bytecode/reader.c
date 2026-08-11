@@ -912,6 +912,38 @@ static iree_status_t loom_bytecode_reader_skip_attr_value_at_depth(
       return loom_bytecode_reader_validate_string_ref(
           reader, symbol_name_id, IREE_SV("attribute_symbol"), offset, &unused);
     }
+    case LOOM_BYTECODE_ATTR_SYMBOL_ARRAY: {
+      uint64_t count_offset =
+          loom_bytecode_reader_cursor_absolute_position(cursor);
+      if (!descriptor || descriptor->attr_kind != LOOM_ATTR_SYMBOL_ARRAY) {
+        return loom_bytecode_reader_emit_invalid_field(
+            reader, cursor->range_name, IREE_SV("attribute"), 0,
+            IREE_SV("symbol_array"), count_offset,
+            IREE_SV("symbol_array_requires_a_descriptor_backed_field"));
+      }
+      uint64_t count = 0;
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_reader_read_uvarint(reader, cursor, &count));
+      if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+      if (count > UINT16_MAX) {
+        return loom_bytecode_reader_emit_count_exceeds(
+            reader, IREE_SV("symbol_array"), count, UINT16_MAX, count_offset);
+      }
+      for (uint64_t i = 0; i < count; ++i) {
+        uint64_t name_offset =
+            loom_bytecode_reader_cursor_absolute_position(cursor);
+        uint64_t name_id = 0;
+        IREE_RETURN_IF_ERROR(
+            loom_bytecode_reader_read_uvarint(reader, cursor, &name_id));
+        if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+        iree_string_view_t unused = iree_string_view_empty();
+        IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_string_ref(
+            reader, name_id, IREE_SV("symbol_array_element"), name_offset,
+            &unused));
+        if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+      }
+      return iree_ok_status();
+    }
     case LOOM_BYTECODE_ATTR_TYPE: {
       uint64_t type_id = 0;
       uint64_t offset = loom_bytecode_reader_cursor_absolute_position(cursor);
@@ -1550,6 +1582,54 @@ static iree_status_t loom_bytecode_reader_read_attr_value_at_depth(
             IREE_SV("symbol_attribute_references_an_unknown_symbol"));
       }
       *out_attr = loom_attr_symbol((loom_symbol_ref_t){0, symbol_id});
+      return iree_ok_status();
+    }
+    case LOOM_BYTECODE_ATTR_SYMBOL_ARRAY: {
+      uint64_t count_offset =
+          loom_bytecode_reader_cursor_absolute_position(cursor);
+      if (!descriptor || descriptor->attr_kind != LOOM_ATTR_SYMBOL_ARRAY) {
+        return loom_bytecode_reader_emit_invalid_field(
+            reader, cursor->range_name, IREE_SV("attribute"), 0,
+            IREE_SV("symbol_array"), count_offset,
+            IREE_SV("symbol_array_requires_a_descriptor_backed_field"));
+      }
+      uint64_t count = 0;
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_reader_read_uvarint(reader, cursor, &count));
+      if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+      if (count > UINT16_MAX || count > IREE_HOST_SIZE_MAX) {
+        return loom_bytecode_reader_emit_count_exceeds(
+            reader, IREE_SV("symbol_array"), count, UINT16_MAX, count_offset);
+      }
+      loom_symbol_ref_t* values = NULL;
+      if (count > 0) {
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            &reader->output_module->arena, (iree_host_size_t)count,
+            sizeof(loom_symbol_ref_t), (void**)&values));
+      }
+      for (uint64_t i = 0; i < count; ++i) {
+        uint64_t name_offset =
+            loom_bytecode_reader_cursor_absolute_position(cursor);
+        uint64_t name_id = 0;
+        IREE_RETURN_IF_ERROR(
+            loom_bytecode_reader_read_uvarint(reader, cursor, &name_id));
+        if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+        iree_string_view_t unused = iree_string_view_empty();
+        IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_string_ref(
+            reader, name_id, IREE_SV("symbol_array_element"), name_offset,
+            &unused));
+        if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+        const uint16_t symbol_id = loom_module_find_symbol(
+            reader->output_module, (loom_string_id_t)name_id);
+        if (symbol_id == LOOM_SYMBOL_ID_INVALID) {
+          return loom_bytecode_reader_emit_invalid_field(
+              reader, cursor->range_name, IREE_SV("symbol_array"), i,
+              IREE_SV("symbol"), name_offset,
+              IREE_SV("symbol_array_attribute_references_an_unknown_symbol"));
+        }
+        values[i] = (loom_symbol_ref_t){0, symbol_id};
+      }
+      *out_attr = loom_attr_symbol_array(values, (uint16_t)count);
       return iree_ok_status();
     }
     case LOOM_BYTECODE_ATTR_TYPE: {

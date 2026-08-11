@@ -111,6 +111,7 @@ from loom.ir import (
     Symbol,
     SymbolKind,
     SymbolName,
+    SymbolNameArray,
     TaggedLocation,
     TiedResult,
     Type,
@@ -1514,6 +1515,35 @@ class TestCrossFormatRoundTrip:
         assert "optional_features" not in body_ops[2].attributes
         assert _roundtrip_text_through_bytecode(text) == text
 
+    def test_symbol_arrays_survive_bytecode_with_presence_and_order(self) -> None:
+        text = (
+            "test.func @symbol_arrays() {\n"
+            "  test.symbol_array_attrs [@b, @a, @b] using [@a]\n"
+            "  test.symbol_array_attrs [] using []\n"
+            "  test.symbol_array_attrs []\n"
+            "  test.yield\n"
+            "}\n"
+            "\n"
+            "test.record @a\n"
+            "\n"
+            "test.record @b\n"
+        )
+
+        loaded = _parse_write_read(text)
+        function = next(
+            symbol.op for symbol in loaded.symbols if symbol.name == "symbol_arrays"
+        )
+        assert function is not None
+        body_ops = function.regions[0].blocks[0].ops
+        assert body_ops[0].attributes["dependencies"] == SymbolNameArray(
+            [SymbolName("b"), SymbolName("a"), SymbolName("b")]
+        )
+        assert body_ops[0].attributes["available"] == SymbolNameArray([SymbolName("a")])
+        assert body_ops[1].attributes["available"] == SymbolNameArray()
+        assert "available" not in body_ops[2].attributes
+        roundtrip_text = _roundtrip_text_through_bytecode(text)
+        assert roundtrip_text == text, roundtrip_text
+
     def test_parameterized_attrs_survive_bytecode_with_named_slots(self) -> None:
         text = (
             "test.func @parameterized() {\n"
@@ -1631,6 +1661,23 @@ class TestCrossFormatRoundTrip:
         operation = Operation(
             name="test.attrs",
             attributes={"dict": {"modes": EnumArrayAttr([1, 7])}},
+        )
+        body = Region(blocks=[Block(ops=[operation, Operation(name="test.yield")])])
+        function = Operation(
+            name="test.func",
+            attributes={"callee": "f"},
+            regions=[body],
+        )
+        module.add_symbol(Symbol(name="f", kind=SymbolKind.FUNC_DEF, op=function))
+
+        with pytest.raises(ValueError, match="descriptor-backed field"):
+            write_module(module)
+
+    def test_symbol_array_in_generic_dict_is_rejected(self) -> None:
+        module = Module(name="test")
+        operation = Operation(
+            name="test.attrs",
+            attributes={"dict": {"symbols": SymbolNameArray([SymbolName("record")])}},
         )
         body = Region(blocks=[Block(ops=[operation, Operation(name="test.yield")])])
         function = Operation(

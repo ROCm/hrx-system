@@ -63,6 +63,7 @@ from loom.ir import (
     StorageType,
     SymbolKind,
     SymbolName,
+    SymbolNameArray,
     TaggedLocation,
     Type,
     TypeKind,
@@ -143,6 +144,7 @@ ATTR_KIND_ENUM_ARRAY = 13
 ATTR_KIND_PARAMETERIZED = 14
 ATTR_KIND_PARAMETERIZED_ARRAY = 15
 ATTR_KIND_SIGNED_ENUM_SET = 16
+ATTR_KIND_SYMBOL_ARRAY = 17
 
 # Type kind bytes. These must match loom_bytecode_type_kind_e, not just the
 # current Python enum spelling.
@@ -677,9 +679,15 @@ class BytecodeWriter:
         aggregate_nesting_depth: int = 0,
     ) -> None:
         """Intern strings referenced by attribute values."""
-        if getattr(attr_def, "attr_type", None) == "enum":
+        attr_type = getattr(attr_def, "attr_type", None)
+        if attr_type == "enum":
             return
-        if isinstance(value, ParameterizedAttr):
+        if isinstance(value, SymbolNameArray):
+            if attr_type != "symbol_array":
+                raise ValueError("symbol arrays require a descriptor-backed field")
+            for name in value:
+                self._ctx.intern_string(str(name))
+        elif isinstance(value, ParameterizedAttr):
             if aggregate_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
                 raise ValueError(
                     "aggregate attribute nesting exceeds maximum depth "
@@ -1461,6 +1469,8 @@ class BytecodeWriter:
             aggregate_nesting_depth,
         ):
             return
+        if self._dispatch_symbol_attr_value(buf, value, attr_def):
+            return
         if attr_type == "predicate_list":
             if not isinstance(value, list) or not all(
                 isinstance(predicate, Predicate) for predicate in value
@@ -1476,14 +1486,6 @@ class BytecodeWriter:
         if isinstance(value, list) and value and isinstance(value[0], Predicate):
             buf.write_u8(ATTR_KIND_PREDICATE_LIST)
             self._write_predicate_list(buf, value, value_numbers_by_name)
-            return
-        if attr_type == "symbol":
-            if not isinstance(value, str):
-                raise TypeError(
-                    f"symbol attribute value must be a string, got {value!r}"
-                )
-            buf.write_u8(ATTR_KIND_SYMBOL)
-            buf.write_varint(self._ctx.strings[value])
             return
         if self._dispatch_enum_attr_value(buf, value, attr_def):
             return
@@ -1535,6 +1537,8 @@ class BytecodeWriter:
             raise ValueError("enum arrays require a descriptor-backed field")
         elif isinstance(value, SignedEnumSetAttr):
             raise ValueError("signed enum sets require a descriptor-backed field")
+        elif isinstance(value, SymbolNameArray):
+            raise ValueError("symbol arrays require a descriptor-backed field")
         elif isinstance(value, Mapping):
             self._write_dict_attr_value(
                 buf, value, value_numbers_by_name, aggregate_nesting_depth
@@ -1639,6 +1643,35 @@ class BytecodeWriter:
         buf.write_u8(word_count)
         for word in positive_words + negative_words:
             buf.write_u64_le(word)
+
+    def _dispatch_symbol_attr_value(
+        self,
+        buf: ByteBuffer,
+        value: Any,
+        attr_def: Any | None,
+    ) -> bool:
+        """Write a descriptor-backed symbol payload when applicable."""
+        attr_type = getattr(attr_def, "attr_type", None)
+        if attr_type == "symbol":
+            if not isinstance(value, str):
+                raise TypeError(
+                    f"symbol attribute value must be a string, got {value!r}"
+                )
+            buf.write_u8(ATTR_KIND_SYMBOL)
+            buf.write_varint(self._ctx.strings[value])
+            return True
+        if attr_type == "symbol_array":
+            if not isinstance(value, SymbolNameArray):
+                raise TypeError(
+                    "symbol-array attribute value must be SymbolNameArray, "
+                    f"got {value!r}"
+                )
+            buf.write_u8(ATTR_KIND_SYMBOL_ARRAY)
+            buf.write_varint(len(value))
+            for name in value:
+                buf.write_varint(self._ctx.strings[str(name)])
+            return True
+        return False
 
     # Predicate arg tag bytes.
     _PRED_ARG_TAG_VALUE = 1

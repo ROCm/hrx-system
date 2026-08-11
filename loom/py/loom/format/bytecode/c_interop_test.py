@@ -38,6 +38,7 @@ from loom.ir import (
     RegisterType,
     SignedEnumSetAttr,
     SymbolName,
+    SymbolNameArray,
 )
 
 
@@ -55,7 +56,7 @@ def _run_loom_format(arguments: list[object]) -> subprocess.CompletedProcess[str
     return result
 
 
-def _typed_register_module() -> tuple[Module, RegisterType]:
+def _interop_module() -> tuple[Module, RegisterType]:
     parser = Parser()
     parser.register_ops(ALL_LOW_OPS)
     parser.register_ops(ALL_TEST_OPS)
@@ -69,13 +70,18 @@ def _typed_register_module() -> tuple[Module, RegisterType]:
         "@typed_identity(%arg: reg<test.ptr : vector<4xi16>>) -> "
         "(reg<test.ptr : vector<4xi16>>)\n"
         "\n"
-        "// Enum and parameterized attribute coverage.\n"
-        "test.func @enum_arrays() {\n"
+        "// Descriptor-backed attribute coverage.\n"
+        "test.func @descriptor_attrs() {\n"
         "\n"
         "// Explicit entry block coverage.\n"
         "^entry:\n"
         "  test.enum_array_attrs [low, high, low] "
         "using [middle, <42>, middle]\n"
+        "  test.symbol_array_attrs "
+        "[@other_record, @parameterized_record, @other_record] "
+        "using [@parameterized_record]\n"
+        "  test.symbol_array_attrs [] using []\n"
+        "  test.symbol_array_attrs []\n"
         "\n"
         "  // Grouped operation coverage.\n"
         "  test.parameterized_attr "
@@ -97,6 +103,7 @@ def _typed_register_module() -> tuple[Module, RegisterType]:
         "}\n"
         "test.record @parameterized_record "
         "{options = #test.options<mode = precise, scopes = []>}\n"
+        "test.record @other_record\n"
         "test.decl @parameterized_types("
         "%scope: test.scope<subgroup>, "
         "%matrix: test.matrix<bf16, scope = workgroup, rows = 16, "
@@ -118,7 +125,7 @@ def main() -> None:
     if len(sys.argv) != 2:
         raise ValueError("expected the C loom-format binary path")
     loom_format = Path(sys.argv[1])
-    module, register_type = _typed_register_module()
+    module, register_type = _interop_module()
 
     with tempfile.TemporaryDirectory(prefix="loom-bytecode-interop-") as temp_dir:
         temp_path = Path(temp_dir)
@@ -146,16 +153,16 @@ def main() -> None:
             raise AssertionError(
                 "Python reader did not recover the C-written structural register type"
             )
-        enum_function = next(
-            symbol.op for symbol in loaded.symbols if symbol.name == "enum_arrays"
+        attribute_function = next(
+            symbol.op for symbol in loaded.symbols if symbol.name == "descriptor_attrs"
         )
-        if enum_function is None:
-            raise AssertionError("Python reader did not recover enum_arrays")
-        if not enum_function.leading_blank_line or enum_function.comments != (
-            "Enum and parameterized attribute coverage.",
+        if attribute_function is None:
+            raise AssertionError("Python reader did not recover descriptor_attrs")
+        if not attribute_function.leading_blank_line or attribute_function.comments != (
+            "Descriptor-backed attribute coverage.",
         ):
             raise AssertionError("symbol source trivia did not survive C bytecode")
-        entry_block = enum_function.regions[0].blocks[0]
+        entry_block = attribute_function.regions[0].blocks[0]
         if not entry_block.leading_blank_line or entry_block.comments != (
             "Explicit entry block coverage.",
         ):
@@ -165,14 +172,31 @@ def main() -> None:
             raise AssertionError("required enum array did not survive C bytecode")
         if enum_op.attributes["optional_values"] != EnumArrayAttr([7, 42, 7]):
             raise AssertionError("open enum array did not survive C bytecode")
-        options = [op.attributes["options"] for op in entry_block.ops[1:4]]
-        if not entry_block.ops[1].leading_blank_line or entry_block.ops[1].comments != (
+        symbol_ops = entry_block.ops[1:4]
+        if symbol_ops[0].attributes["dependencies"] != SymbolNameArray(
+            [
+                SymbolName("other_record"),
+                SymbolName("parameterized_record"),
+                SymbolName("other_record"),
+            ]
+        ):
+            raise AssertionError("symbol array lost order or duplicate names")
+        if symbol_ops[0].attributes["available"] != SymbolNameArray(
+            [SymbolName("parameterized_record")]
+        ):
+            raise AssertionError("optional symbol array changed")
+        if symbol_ops[1].attributes["available"] != SymbolNameArray():
+            raise AssertionError("present empty symbol array changed")
+        if "available" in symbol_ops[2].attributes:
+            raise AssertionError("absent symbol array became present")
+        options = [op.attributes["options"] for op in entry_block.ops[4:7]]
+        if not entry_block.ops[4].leading_blank_line or entry_block.ops[4].comments != (
             "Grouped operation coverage.",
         ):
             raise AssertionError("commented op source trivia did not survive bytecode")
-        if entry_block.ops[2].leading_blank_line:
+        if entry_block.ops[5].leading_blank_line:
             raise AssertionError("adjacent operations gained a blank line")
-        if not entry_block.ops[3].leading_blank_line or entry_block.ops[3].comments:
+        if not entry_block.ops[6].leading_blank_line or entry_block.ops[6].comments:
             raise AssertionError("blank-only op source trivia did not survive bytecode")
         if not all(isinstance(value, ParameterizedAttr) for value in options):
             raise AssertionError("Python reader did not recover parameterized attrs")
@@ -203,7 +227,7 @@ def main() -> None:
             raise AssertionError("present empty parameter did not survive C bytecode")
         if absent.has("scopes"):
             raise AssertionError("absent parameter became present in C bytecode")
-        array_op = entry_block.ops[4]
+        array_op = entry_block.ops[7]
         array_values = array_op.attributes["values"]
         if not isinstance(array_values, ParameterizedAttrArray):
             raise AssertionError("Python reader did not recover parameterized array")
@@ -222,7 +246,7 @@ def main() -> None:
             [test_tile_attr(width=4)]
         ):
             raise AssertionError("exact-family parameterized array changed")
-        signed_set_op = entry_block.ops[5]
+        signed_set_op = entry_block.ops[8]
         if signed_set_op.attributes["required_features"] != SignedEnumSetAttr(
             [1, 255], [7]
         ):

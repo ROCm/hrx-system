@@ -93,6 +93,7 @@ from loom.ir import (
     Symbol,
     SymbolKind,
     SymbolName,
+    SymbolNameArray,
     TaggedLocation,
     TiedResult,
     Type,
@@ -2011,6 +2012,27 @@ class BytecodeReader:
                 return ParameterizedAttrArray(values), offset
             case 16:  # SIGNED_ENUM_SET
                 return self._read_signed_enum_set_attr(data, offset, attr_def)
+            case 17:  # SYMBOL_ARRAY
+                if getattr(attr_def, "attr_type", None) != "symbol_array":
+                    raise BytecodeError(
+                        "symbol-array attributes require a descriptor-backed field"
+                    )
+                count, offset = decode_varint(data, offset)
+                if count > 0xFFFF:
+                    raise BytecodeError(
+                        f"symbol-array length {count} exceeds UINT16_MAX"
+                    )
+                values: list[SymbolName] = []
+                for index in range(count):
+                    name_id, offset = decode_varint(data, offset)
+                    if name_id >= len(self._strings):
+                        raise BytecodeError(
+                            "symbol-array element "
+                            f"{index} string_id {name_id} out of range "
+                            f"(string table has {len(self._strings)} entries)"
+                        )
+                    values.append(SymbolName(self._strings[name_id]))
+                return SymbolNameArray(values), offset
             case _:
                 raise BytecodeError(f"unknown attr value kind: {kind}")
 

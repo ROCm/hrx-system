@@ -1410,6 +1410,33 @@ static iree_status_t loom_bytecode_get_signed_enum_set(
   return iree_ok_status();
 }
 
+static iree_status_t loom_bytecode_get_symbol_array(
+    const loom_bytecode_numbering_t* numbering, loom_attribute_t attr,
+    const loom_attr_descriptor_t* descriptor,
+    loom_symbol_ref_array_t* out_array) {
+  if (attr.kind != LOOM_ATTR_SYMBOL_ARRAY || !descriptor ||
+      descriptor->attr_kind != LOOM_ATTR_SYMBOL_ARRAY) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "symbol arrays require a descriptor-backed field");
+  }
+  if (attr.count > 0 && !attr.symbol_array) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "symbol array has nonzero count but NULL references");
+  }
+  *out_array = loom_attr_as_symbol_array(attr);
+  for (iree_host_size_t i = 0; i < out_array->count; ++i) {
+    const loom_symbol_ref_t ref = out_array->values[i];
+    if (!loom_symbol_ref_is_valid(ref) || ref.module_id != 0 ||
+        ref.symbol_id >= numbering->module->symbols.count) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "symbol array reference %" PRIhsz " is not a local module symbol", i);
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_bytecode_get_parameterized_attr(
     const loom_bytecode_numbering_t* numbering, loom_attribute_t attr,
     const loom_attr_descriptor_t* descriptor,
@@ -1605,6 +1632,18 @@ static iree_status_t loom_bytecode_number_attr_value_at_depth(
           ref.symbol_id < numbering->module->symbols.count) {
         const loom_symbol_t* target_symbol =
             &numbering->module->symbols.entries[ref.symbol_id];
+        IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
+            numbering, target_symbol->name_id, &unused_id));
+      }
+      break;
+    }
+    case LOOM_ATTR_SYMBOL_ARRAY: {
+      loom_symbol_ref_array_t array = loom_symbol_ref_array_empty();
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_get_symbol_array(numbering, attr, descriptor, &array));
+      for (iree_host_size_t i = 0; i < array.count; ++i) {
+        const loom_symbol_t* target_symbol =
+            &numbering->module->symbols.entries[array.values[i].symbol_id];
         IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
             numbering, target_symbol->name_id, &unused_id));
       }
@@ -2761,6 +2800,25 @@ static iree_status_t loom_bytecode_write_attr_value_at_depth(
           loom_bytecode_page_writer_write_uvarint(writer, string_writer_id));
       break;
     }
+    case LOOM_ATTR_SYMBOL_ARRAY: {
+      loom_symbol_ref_array_t array = loom_symbol_ref_array_empty();
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_get_symbol_array(numbering, attr, descriptor, &array));
+      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(
+          writer, LOOM_BYTECODE_ATTR_SYMBOL_ARRAY));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_page_writer_write_uvarint(writer, array.count));
+      for (iree_host_size_t i = 0; i < array.count; ++i) {
+        const loom_symbol_t* target =
+            &numbering->module->symbols.entries[array.values[i].symbol_id];
+        uint32_t string_writer_id = 0;
+        IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
+            numbering, target->name_id, &string_writer_id));
+        IREE_RETURN_IF_ERROR(
+            loom_bytecode_page_writer_write_uvarint(writer, string_writer_id));
+      }
+      break;
+    }
     case LOOM_ATTR_TYPE: {
       if (attr.type_id >= numbering->module->types.count) {
         return iree_make_status(
@@ -3095,6 +3153,24 @@ static iree_status_t loom_bytecode_emit_attr_value_at_depth(
           loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_SYMBOL));
       IREE_RETURN_IF_ERROR(
           loom_bytecode_emit_uvarint(builder, string_writer_id));
+      break;
+    }
+    case LOOM_ATTR_SYMBOL_ARRAY: {
+      loom_symbol_ref_array_t array = loom_symbol_ref_array_empty();
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_get_symbol_array(numbering, attr, descriptor, &array));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_SYMBOL_ARRAY));
+      IREE_RETURN_IF_ERROR(loom_bytecode_emit_uvarint(builder, array.count));
+      for (iree_host_size_t i = 0; i < array.count; ++i) {
+        const loom_symbol_t* target =
+            &numbering->module->symbols.entries[array.values[i].symbol_id];
+        uint32_t string_writer_id = 0;
+        IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
+            numbering, target->name_id, &string_writer_id));
+        IREE_RETURN_IF_ERROR(
+            loom_bytecode_emit_uvarint(builder, string_writer_id));
+      }
       break;
     }
     case LOOM_ATTR_TYPE: {
