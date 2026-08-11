@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import replace
+from itertools import combinations_with_replacement
 
 import pytest
 
@@ -88,6 +89,88 @@ def _descriptor_set(
         register_parts=(),
         descriptors=descriptors,
     )
+
+
+def test_physical_base_domain_matches_enumerated_contract() -> None:
+    windows = tuple(
+        validation._PhysicalAddressWindow(
+            window_size=window_size,
+            maximum_base_remainder=window_size - operand_width,
+        )
+        for window_size in range(1, 9)
+        for operand_width in range(1, window_size + 1)
+    )
+    window_sets = [()]
+    window_sets.extend((window,) for window in windows)
+    window_sets.extend(combinations_with_replacement(windows, 2))
+
+    for maximum_base in (-1, 0, 1, 7, 8, 15, 31):
+        for address_windows in window_sets:
+            expected_bases = tuple(base for base in range(maximum_base + 1) if all(base % window.window_size <= window.maximum_base_remainder for window in address_windows))
+            domain = validation._PhysicalBaseDomain(
+                maximum_base=maximum_base,
+                address_windows=tuple(address_windows),
+            )
+            for lower_bound in range(maximum_base + 2):
+                expected = next(
+                    (base for base in expected_bases if base >= lower_bound),
+                    None,
+                )
+                assert domain.first_at_or_above(lower_bound) == expected
+
+
+def test_physical_component_base_domain_combines_address_maps() -> None:
+    descriptor = _descriptor(
+        "test.address.maps",
+        (
+            _physical_operand(
+                "dst",
+                OperandRole.RESULT,
+                "test.phys",
+                unit_count=2,
+            ),
+            _physical_operand(
+                "bounded",
+                OperandRole.OPERAND,
+                "test.phys",
+                unit_count=2,
+                address_map_kind=OperandAddressMapKind.LOW_SUBSET,
+                addressable_unit_count=6,
+            ),
+            _physical_operand(
+                "windowed",
+                OperandRole.OPERAND,
+                "test.phys",
+                unit_count=2,
+                address_map_kind=OperandAddressMapKind.TARGET_STATE,
+                addressable_unit_count=4,
+                address_state_slot=1,
+            ),
+        ),
+        constraints=(
+            Constraint(ConstraintKind.TIED, 0, 1),
+            Constraint(ConstraintKind.TIED, 0, 2),
+        ),
+    )
+    component = validation._PhysicalComponent(
+        operand_indices=(0, 1, 2),
+        resource_keys=frozenset(("class:test.phys",)),
+        pre_width=2,
+        post_width=2,
+    )
+
+    domain = validation._component_base_domain(
+        descriptor,
+        component,
+        resource_capacity=16,
+        early_clobber_results=frozenset(),
+    )
+
+    assert domain.maximum_base == 4
+    assert domain.first_at_or_above(0) == 0
+    assert domain.first_at_or_above(2) == 2
+    assert domain.first_at_or_above(3) == 4
+    assert domain.first_at_or_above(5) is None
 
 
 def test_physical_descriptor_set_accepts_reserved_resource_envelope() -> None:
