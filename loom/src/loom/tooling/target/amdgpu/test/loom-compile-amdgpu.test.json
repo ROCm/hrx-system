@@ -2,6 +2,65 @@
   "version": 1,
   "cases": [
     {
+      "name": "compiles named-lane wave64 broadcasts across native wave32 halves",
+      "steps": [
+        {
+          "name": "compile-gfx11-generic",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/wave64_named_lane_broadcast.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx11-generic",
+              "--output={tmp}/wave64_named_lane_broadcast_gfx11.hal",
+              "--emit-target-artifact={tmp}/wave64_named_lane_broadcast_gfx11.hsaco",
+              "--compile-report=details",
+              "--compile-report-output={tmp}/wave64_named_lane_broadcast_gfx11_report.json"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/wave64_named_lane_broadcast_gfx11.hal",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/wave64_named_lane_broadcast_gfx11.hsaco",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/wave64_named_lane_broadcast_gfx11_report.json",
+              "contains": [
+                "amdgpu.subgroup_broadcast.strategy.scalar_readlane.named_lane"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "compile-gfx1151",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/wave64_named_lane_broadcast.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1151",
+              "--output={tmp}/wave64_named_lane_broadcast_gfx1151.hal",
+              "--emit-target-artifact={tmp}/wave64_named_lane_broadcast_gfx1151.hsaco"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/wave64_named_lane_broadcast_gfx1151.hal",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/wave64_named_lane_broadcast_gfx1151.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "compiles HAL kernel closures from complete authoring modules",
       "run": {
         "tool": "loom-compile",

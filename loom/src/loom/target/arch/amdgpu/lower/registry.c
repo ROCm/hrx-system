@@ -161,8 +161,11 @@ enum loom_amdgpu_report_key_kind_e {
   LOOM_AMDGPU_REPORT_KEY_VECTOR_16BIT_FLOAT_CONVERSION_STRATEGY = 6,
   // Report the concrete gfx125x tensor-memory packet form.
   LOOM_AMDGPU_REPORT_KEY_TENSOR_MEMORY_PACKET = 7,
+  // Report the subgroup-broadcast exchange and publication strategy.
+  LOOM_AMDGPU_REPORT_KEY_SUBGROUP_BROADCAST_STRATEGY = 8,
   // Maximum report-key kind accepted by dispatch rows.
-  LOOM_AMDGPU_REPORT_KEY_MAX = LOOM_AMDGPU_REPORT_KEY_TENSOR_MEMORY_PACKET,
+  LOOM_AMDGPU_REPORT_KEY_MAX =
+      LOOM_AMDGPU_REPORT_KEY_SUBGROUP_BROADCAST_STRATEGY,
 };
 
 // Packing constants bridge the storage and preselection enum domains into the
@@ -1345,6 +1348,20 @@ static iree_string_view_t loom_amdgpu_workgroup_reduce_plan_key(
       plan->publication_kind);
 }
 
+static iree_string_view_t loom_amdgpu_subgroup_broadcast_plan_key(
+    const loom_amdgpu_subgroup_broadcast_plan_t* plan) {
+  switch (plan->strategy) {
+    case LOOM_AMDGPU_SUBGROUP_BROADCAST_STRATEGY_BPERMUTE:
+      return IREE_SV(
+          "amdgpu.subgroup_broadcast.strategy.ds_bpermute.full_crossbar");
+    case LOOM_AMDGPU_SUBGROUP_BROADCAST_STRATEGY_SCALAR_READLANE:
+      return IREE_SV(
+          "amdgpu.subgroup_broadcast.strategy.scalar_readlane.named_lane");
+    default:
+      return iree_string_view_empty();
+  }
+}
+
 typedef struct loom_amdgpu_subgroup_reduce_strategy_report_row_t {
   // Cross-lane exchange strategy selected for the subgroup tree.
   loom_amdgpu_subgroup_reduce_crosslane_kind_t crosslane_kind;
@@ -1453,6 +1470,12 @@ static iree_string_view_t loom_amdgpu_plan_key(
       }
       return loom_amdgpu_subgroup_reduce_plan_key(
           (const loom_amdgpu_subgroup_reduce_plan_t*)plan.target_data);
+    case LOOM_AMDGPU_REPORT_KEY_SUBGROUP_BROADCAST_STRATEGY:
+      if (plan.target_data == NULL) {
+        return iree_string_view_empty();
+      }
+      return loom_amdgpu_subgroup_broadcast_plan_key(
+          (const loom_amdgpu_subgroup_broadcast_plan_t*)plan.target_data);
     case LOOM_AMDGPU_REPORT_KEY_TABLE_LOOKUP_STRATEGY:
       if (plan.target_data == NULL) {
         return iree_string_view_empty();

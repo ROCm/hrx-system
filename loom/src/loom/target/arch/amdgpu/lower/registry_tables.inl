@@ -693,13 +693,14 @@ static const loom_amdgpu_lower_dispatch_row_t
                 loom_amdgpu_low_legality_verify_kernel_subgroup_shuffle,
                 LOOM_AMDGPU_STORAGE_SUBGROUP_SHUFFLE),
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_SUBGROUP_BROADCAST)] =
-            LOOM_AMDGPU_RECIPE_DATA_STORAGE_ROW(
+            LOOM_AMDGPU_RECIPE_DATA_STORAGE_REPORT_KEY_ROW(
                 LOOM_OP_KERNEL_SUBGROUP_BROADCAST,
                 loom_amdgpu_subgroup_broadcast_plan_t,
                 loom_amdgpu_select_kernel_subgroup_broadcast_dispatch,
                 loom_amdgpu_emit_kernel_subgroup_broadcast_dispatch,
                 loom_amdgpu_low_legality_verify_kernel_subgroup_broadcast,
-                LOOM_AMDGPU_STORAGE_SUBGROUP_BROADCAST),
+                LOOM_AMDGPU_STORAGE_SUBGROUP_BROADCAST,
+                LOOM_AMDGPU_REPORT_KEY_SUBGROUP_BROADCAST_STRATEGY),
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_SUBGROUP_BROADCAST_FIRST)] =
             LOOM_AMDGPU_RECIPE_DATA_SOURCE_ROW(
                 LOOM_OP_KERNEL_SUBGROUP_BROADCAST_FIRST,

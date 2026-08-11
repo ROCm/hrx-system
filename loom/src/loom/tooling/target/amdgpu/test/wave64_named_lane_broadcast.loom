@@ -1,0 +1,17 @@
+amdgpu.target<gfx11-generic> @wave64_target {subgroup_size = 64}
+
+kernel.def target(@wave64_target) @wave64_named_lane_broadcast() {
+  %unit = index.constant 1 : index
+  %wave_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%wave_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.subgroup.lane.id : index
+  %source_lane = scalar.constant 33 : i32
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32, #dense>
+  %value = view.load %input_view[%lane] : view<64xi32, #dense> -> i32
+  %broadcast = kernel.subgroup.broadcast %value from %source_lane : i32, i32
+  view.store %broadcast, %output_view[%lane] : i32, view<64xi32, #dense>
+  kernel.return
+}
