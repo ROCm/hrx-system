@@ -2546,6 +2546,31 @@ iree_status_t iree_hal_streaming_memory_memcpy(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_streaming_validate_peer_context_access(
+    iree_hal_streaming_context_t* stream_context,
+    iree_hal_streaming_context_t* dst_context,
+    iree_hal_streaming_context_t* src_context) {
+  const iree_host_size_t stream_device_ordinal = stream_context->device_ordinal;
+  const iree_host_size_t operand_device_ordinals[2] = {
+      src_context->device_ordinal,
+      dst_context->device_ordinal,
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(operand_device_ordinals);
+       ++i) {
+    if (operand_device_ordinals[i] == stream_device_ordinal) continue;
+    bool can_access = false;
+    IREE_RETURN_IF_ERROR(iree_hal_streaming_device_can_access_peer(
+        stream_device_ordinal, operand_device_ordinals[i], &can_access));
+    if (!can_access) {
+      return iree_make_status(
+          IREE_STATUS_PERMISSION_DENIED,
+          "stream device %" PRIhsz " cannot access operand device %" PRIhsz,
+          stream_device_ordinal, operand_device_ordinals[i]);
+    }
+  }
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_streaming_memcpy_peer(
     iree_hal_streaming_context_t* dst_context,
     iree_hal_streaming_deviceptr_t dst,
@@ -2559,27 +2584,9 @@ iree_status_t iree_hal_streaming_memcpy_peer(
 
   const iree_host_size_t stream_device_ordinal =
       stream->context->device_ordinal;
-  const iree_host_size_t operand_device_ordinals[2] = {
-      src_context->device_ordinal,
-      dst_context->device_ordinal,
-  };
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(operand_device_ordinals);
-       ++i) {
-    if (operand_device_ordinals[i] == stream_device_ordinal) continue;
-    bool can_access = false;
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0,
-        iree_hal_streaming_device_can_access_peer(
-            stream_device_ordinal, operand_device_ordinals[i], &can_access));
-    if (!can_access) {
-      IREE_RETURN_AND_END_ZONE_IF_ERROR(
-          z0,
-          iree_make_status(IREE_STATUS_PERMISSION_DENIED,
-                           "stream device %" PRIhsz
-                           " cannot access operand device %" PRIhsz,
-                           stream_device_ordinal, operand_device_ordinals[i]));
-    }
-  }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_validate_peer_context_access(
+              stream->context, dst_context, src_context));
 
   // Look up buffers from device pointers.
   iree_hal_streaming_buffer_ref_t dst_ref;
@@ -2621,6 +2628,116 @@ iree_status_t iree_hal_streaming_memcpy_peer(
     status = iree_hal_command_buffer_copy_buffer(stream->command_buffer,
                                                  src_buffer_ref, dst_buffer_ref,
                                                  IREE_HAL_COPY_FLAG_NONE);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_command_buffer_barrier(stream->command_buffer);
+  }
+  iree_slim_mutex_unlock(&stream->mutex);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
+
+  IREE_TRACE_ZONE_END(z0);
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_streaming_strided_3d_span(
+    iree_device_size_t row_pitch, iree_device_size_t slice_pitch,
+    iree_device_size_t width, iree_host_size_t height, iree_host_size_t depth,
+    iree_device_size_t* out_span) {
+  *out_span = 0;
+  if (IREE_UNLIKELY(width == 0 || height == 0 || depth == 0 ||
+                    width > row_pitch)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid strided copy dimensions");
+  }
+  iree_device_size_t minimum_slice_pitch = 0;
+  iree_device_size_t last_slice_offset = 0;
+  iree_device_size_t last_row_offset = 0;
+  if (IREE_UNLIKELY(
+          !iree_device_size_checked_mul(row_pitch, height,
+                                        &minimum_slice_pitch) ||
+          slice_pitch < minimum_slice_pitch ||
+          !iree_device_size_checked_mul(depth - 1, slice_pitch,
+                                        &last_slice_offset) ||
+          !iree_device_size_checked_mul(height - 1, row_pitch,
+                                        &last_row_offset) ||
+          !iree_device_size_checked_add(last_slice_offset, last_row_offset,
+                                        out_span) ||
+          !iree_device_size_checked_add(*out_span, width, out_span))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "strided copy range overflows");
+  }
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_streaming_memcpy_peer_3d(
+    iree_hal_streaming_context_t* dst_context,
+    iree_hal_streaming_deviceptr_t dst, iree_device_size_t dst_row_pitch,
+    iree_device_size_t dst_slice_pitch,
+    iree_hal_streaming_context_t* src_context,
+    iree_hal_streaming_deviceptr_t src, iree_device_size_t src_row_pitch,
+    iree_device_size_t src_slice_pitch, iree_device_size_t width,
+    iree_host_size_t height, iree_host_size_t depth,
+    iree_hal_streaming_stream_t* stream) {
+  IREE_ASSERT_ARGUMENT(dst_context);
+  IREE_ASSERT_ARGUMENT(src_context);
+  IREE_ASSERT_ARGUMENT(stream);
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_device_size_t dst_span = 0;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_strided_3d_span(dst_row_pitch, dst_slice_pitch,
+                                             width, height, depth, &dst_span));
+  iree_device_size_t src_span = 0;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_strided_3d_span(src_row_pitch, src_slice_pitch,
+                                             width, height, depth, &src_span));
+
+  const iree_host_size_t stream_device_ordinal =
+      stream->context->device_ordinal;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_validate_peer_context_access(
+              stream->context, dst_context, src_context));
+
+  iree_hal_streaming_buffer_ref_t dst_ref;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_memory_lookup_range(dst_context, dst, dst_span,
+                                                 &dst_ref));
+  iree_hal_streaming_buffer_ref_t src_ref;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_memory_lookup_range(src_context, src, src_span,
+                                                 &src_ref));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_memory_validate_pool_access(
+              dst_ref.buffer, stream_device_ordinal, HRX_MEMORY_ACCESS_WRITE));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_memory_validate_pool_access(
+              src_ref.buffer, stream_device_ordinal, HRX_MEMORY_ACCESS_READ));
+
+  iree_hal_buffer_t* dst_buffer = NULL;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_memory_import_buffer_for_context(
+              stream->context, dst_ref.buffer, &dst_buffer, NULL));
+  iree_hal_buffer_t* src_buffer = NULL;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_memory_import_buffer_for_context(
+              stream->context, src_ref.buffer, &src_buffer, NULL));
+
+  iree_slim_mutex_lock(&stream->mutex);
+  iree_status_t status = iree_hal_streaming_stream_begin_locked(stream);
+  for (iree_host_size_t z = 0; z < depth && iree_status_is_ok(status); ++z) {
+    const iree_device_size_t dst_slice_offset = z * dst_slice_pitch;
+    const iree_device_size_t src_slice_offset = z * src_slice_pitch;
+    for (iree_host_size_t y = 0; y < height && iree_status_is_ok(status); ++y) {
+      const iree_hal_buffer_ref_t src_buffer_ref = iree_hal_make_buffer_ref(
+          src_buffer, src_ref.offset + src_slice_offset + y * src_row_pitch,
+          width);
+      const iree_hal_buffer_ref_t dst_buffer_ref = iree_hal_make_buffer_ref(
+          dst_buffer, dst_ref.offset + dst_slice_offset + y * dst_row_pitch,
+          width);
+      status = iree_hal_command_buffer_copy_buffer(
+          stream->command_buffer, src_buffer_ref, dst_buffer_ref,
+          IREE_HAL_COPY_FLAG_NONE);
+    }
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_command_buffer_barrier(stream->command_buffer);
