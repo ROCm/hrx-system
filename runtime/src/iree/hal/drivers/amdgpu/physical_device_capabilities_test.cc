@@ -680,6 +680,8 @@ TEST_F(PhysicalDeviceCapabilitiesTest, SelectsXgmiPhysicalTopologyEdge) {
   EXPECT_TRUE(iree_any_bit_set(
       edge.link.flags, IREE_HAL_AMDGPU_PHYSICAL_TOPOLOGY_LINK_FLAG_XGMI));
   EXPECT_EQ(edge.link.link_class, IREE_HAL_TOPOLOGY_LINK_CLASS_NVLINK_IF);
+  EXPECT_EQ(edge.link.link_type, IREE_HAL_AMDGPU_LINK_TYPE_XGMI);
+  EXPECT_EQ(edge.link.path_hop_count, 1);
   EXPECT_EQ(edge.link.copy_cost, 3);
   EXPECT_EQ(edge.link.latency_class, 3);
   EXPECT_EQ(edge.link.numa_distance, 3);
@@ -718,6 +720,8 @@ TEST_F(PhysicalDeviceCapabilitiesTest,
       IREE_HAL_AMDGPU_PHYSICAL_TOPOLOGY_LINK_FLAG_XGMI |
           IREE_HAL_AMDGPU_PHYSICAL_TOPOLOGY_LINK_FLAG_HYPERTRANSPORT));
   EXPECT_EQ(edge.link.link_class, IREE_HAL_TOPOLOGY_LINK_CLASS_PCIE_CROSS_ROOT);
+  EXPECT_EQ(edge.link.link_type, IREE_HAL_AMDGPU_LINK_TYPE_XGMI);
+  EXPECT_EQ(edge.link.path_hop_count, 3);
   EXPECT_EQ(edge.link.copy_cost, 9);
   EXPECT_EQ(edge.link.latency_class, 9);
   EXPECT_EQ(edge.link.numa_distance, 9);
@@ -745,6 +749,7 @@ TEST_F(PhysicalDeviceCapabilitiesTest,
   EXPECT_TRUE(iree_any_bit_set(
       edge.link.flags, IREE_HAL_AMDGPU_PHYSICAL_TOPOLOGY_LINK_FLAG_PCIE));
   EXPECT_EQ(edge.link.link_class, IREE_HAL_TOPOLOGY_LINK_CLASS_PCIE_SAME_ROOT);
+  EXPECT_EQ(edge.link.link_type, IREE_HAL_AMDGPU_LINK_TYPE_PCIE);
   EXPECT_EQ(edge.link.copy_cost, 7);
   EXPECT_EQ(edge.link.latency_class, 7);
   EXPECT_TRUE(iree_any_bit_set(edge.capabilities.guaranteed,

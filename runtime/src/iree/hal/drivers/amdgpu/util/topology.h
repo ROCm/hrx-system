@@ -24,6 +24,16 @@ extern "C" {
 // Default number of logical HAL queues exposed per GPU agent.
 #define IREE_HAL_AMDGPU_DEFAULT_GPU_AGENT_QUEUE_COUNT (2)
 
+// Physical interconnect technology reported for the first hop in a peer path.
+typedef enum iree_hal_amdgpu_link_type_e {
+  IREE_HAL_AMDGPU_LINK_TYPE_UNKNOWN = 0,
+  IREE_HAL_AMDGPU_LINK_TYPE_HYPERTRANSPORT = 1,
+  IREE_HAL_AMDGPU_LINK_TYPE_QPI = 2,
+  IREE_HAL_AMDGPU_LINK_TYPE_PCIE = 3,
+  IREE_HAL_AMDGPU_LINK_TYPE_INFINIBAND = 4,
+  IREE_HAL_AMDGPU_LINK_TYPE_XGMI = 5,
+} iree_hal_amdgpu_link_type_t;
+
 // Defines a system topology specifying which agents are to be used by the HAL.
 //
 // Today many internal structures assume at most 64 CPU agents and 64 GPU

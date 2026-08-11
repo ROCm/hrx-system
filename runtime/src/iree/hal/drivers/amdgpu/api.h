@@ -495,6 +495,11 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_logical_device_create(
     const iree_hal_device_create_params_t* create_params,
     iree_allocator_t host_allocator, iree_hal_device_t** out_device);
 
+// Queries immutable physical-link details between two AMDGPU logical devices.
+IREE_API_EXPORT iree_status_t iree_hal_amdgpu_device_query_peer_link(
+    iree_hal_device_t* source_device, iree_hal_device_t* destination_device,
+    iree_hal_amdgpu_link_type_t* out_link_type, uint32_t* out_hop_count);
+
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_driver_t
 //===----------------------------------------------------------------------===//

@@ -417,6 +417,25 @@ static iree_hal_topology_link_class_t iree_hal_amdgpu_link_type_to_link_class(
   }
 }
 
+static iree_hal_amdgpu_link_type_t
+iree_hal_amdgpu_link_type_to_amdgpu_link_type(
+    hsa_amd_link_info_type_t link_type) {
+  switch (link_type) {
+    case HSA_AMD_LINK_INFO_TYPE_HYPERTRANSPORT:
+      return IREE_HAL_AMDGPU_LINK_TYPE_HYPERTRANSPORT;
+    case HSA_AMD_LINK_INFO_TYPE_QPI:
+      return IREE_HAL_AMDGPU_LINK_TYPE_QPI;
+    case HSA_AMD_LINK_INFO_TYPE_PCIE:
+      return IREE_HAL_AMDGPU_LINK_TYPE_PCIE;
+    case HSA_AMD_LINK_INFO_TYPE_INFINBAND:
+      return IREE_HAL_AMDGPU_LINK_TYPE_INFINIBAND;
+    case HSA_AMD_LINK_INFO_TYPE_XGMI:
+      return IREE_HAL_AMDGPU_LINK_TYPE_XGMI;
+    default:
+      return IREE_HAL_AMDGPU_LINK_TYPE_UNKNOWN;
+  }
+}
+
 static iree_hal_amdgpu_physical_topology_link_flags_t
 iree_hal_amdgpu_link_type_to_physical_topology_link_flags(
     hsa_amd_link_info_type_t link_type) {
@@ -500,6 +519,7 @@ static void iree_hal_amdgpu_physical_topology_edge_initialize(
   out_edge->coherency.all_hops_coherent = 1;
   out_edge->atomics.all_hops_32bit = 1;
   out_edge->atomics.all_hops_64bit = 1;
+  out_edge->link.link_type = IREE_HAL_AMDGPU_LINK_TYPE_UNKNOWN;
   out_edge->link.link_class = IREE_HAL_TOPOLOGY_LINK_CLASS_SAME_DIE;
   out_edge->modes.noncoherent_read = IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY;
   out_edge->modes.noncoherent_write = IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY;
@@ -566,6 +586,30 @@ iree_status_t iree_hal_amdgpu_select_physical_topology_edge(
       HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED;
   out_edge->memory_access.fine_accessible =
       selection->memory_access.fine != HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED;
+
+  if (selection->link.count > 0) {
+    const hsa_amd_memory_pool_link_info_t* first_hop = &selection->link.hops[0];
+    out_edge->link.link_type =
+        iree_hal_amdgpu_link_type_to_amdgpu_link_type(first_hop->link_type);
+
+    // HSA runtimes may expose one aggregate link record for a path containing
+    // several physical hops. NUMA distance retains that path length: direct
+    // xGMI links use distance 13 and other direct links use distance 20.
+    uint64_t path_distance = 0;
+    for (iree_host_size_t i = 0; i < selection->link.count; ++i) {
+      path_distance += selection->link.hops[i].numa_distance;
+    }
+    const uint32_t direct_link_distance =
+        first_hop->link_type == HSA_AMD_LINK_INFO_TYPE_XGMI ? 13u : 20u;
+    const uint64_t path_hop_count = path_distance / direct_link_distance;
+    if (IREE_UNLIKELY(path_hop_count > UINT8_MAX)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "physical topology path has %" PRIu64
+                              " hops (maximum %u)",
+                              path_hop_count, UINT8_MAX);
+    }
+    out_edge->link.path_hop_count = (uint8_t)path_hop_count;
+  }
 
   for (iree_host_size_t i = 0; i < selection->link.count; ++i) {
     const hsa_amd_memory_pool_link_info_t* link_hop = &selection->link.hops[i];

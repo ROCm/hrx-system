@@ -2345,6 +2345,12 @@ typedef struct iree_hal_amdgpu_topology_edge_aggregate_t {
   uint8_t latency_class;
   // Worst normalized NUMA distance across all physical pairs.
   uint8_t numa_distance;
+  // Longest physical path across all physical pairs.
+  uint8_t path_hop_count;
+  // Common first-hop interconnect technology, or UNKNOWN when pairs differ.
+  iree_hal_amdgpu_link_type_t link_type;
+  // True once |link_type| contains the first physical pair's value.
+  bool has_link_type;
 } iree_hal_amdgpu_topology_edge_aggregate_t;
 
 static iree_status_t iree_hal_amdgpu_query_physical_topology_edge(
@@ -2447,6 +2453,9 @@ static void iree_hal_amdgpu_topology_edge_aggregate_initialize(
   out_aggregate->copy_cost = 0;
   out_aggregate->latency_class = 0;
   out_aggregate->numa_distance = iree_hal_topology_edge_numa_distance(edge.lo);
+  out_aggregate->path_hop_count = 0;
+  out_aggregate->link_type = IREE_HAL_AMDGPU_LINK_TYPE_UNKNOWN;
+  out_aggregate->has_link_type = false;
 }
 
 static void iree_hal_amdgpu_topology_edge_aggregate_include(
@@ -2479,6 +2488,15 @@ static void iree_hal_amdgpu_topology_edge_aggregate_include(
   if (physical_edge->link.numa_distance > aggregate->numa_distance) {
     aggregate->numa_distance = physical_edge->link.numa_distance;
   }
+  if (physical_edge->link.path_hop_count > aggregate->path_hop_count) {
+    aggregate->path_hop_count = physical_edge->link.path_hop_count;
+  }
+  if (!aggregate->has_link_type) {
+    aggregate->link_type = physical_edge->link.link_type;
+    aggregate->has_link_type = true;
+  } else if (aggregate->link_type != physical_edge->link.link_type) {
+    aggregate->link_type = IREE_HAL_AMDGPU_LINK_TYPE_UNKNOWN;
+  }
 }
 
 static void iree_hal_amdgpu_topology_edge_apply_aggregate(
@@ -2501,7 +2519,6 @@ static void iree_hal_amdgpu_topology_edge_apply_aggregate(
                                                       aggregate->latency_class);
   edge->lo = iree_hal_topology_edge_set_numa_distance(edge->lo,
                                                       aggregate->numa_distance);
-
   iree_hal_topology_capability_t capabilities =
       iree_hal_topology_edge_capability_flags(edge->lo);
   const iree_hal_topology_capability_t physical_guaranteed_capability_mask =
@@ -2521,13 +2538,10 @@ static void iree_hal_amdgpu_topology_edge_apply_aggregate(
       iree_hal_topology_edge_set_capability_flags(edge->lo, capabilities);
 }
 
-static iree_status_t iree_hal_amdgpu_logical_device_refine_topology_edge(
-    iree_hal_device_t* src_device, iree_hal_device_t* dst_device,
-    iree_hal_topology_edge_t* edge) {
-  iree_hal_amdgpu_logical_device_t* src_logical =
-      iree_hal_amdgpu_logical_device_cast(src_device);
-  iree_hal_amdgpu_logical_device_t* dst_logical =
-      iree_hal_amdgpu_logical_device_cast(dst_device);
+static iree_status_t iree_hal_amdgpu_logical_device_query_topology_aggregate(
+    iree_hal_amdgpu_logical_device_t* src_logical,
+    iree_hal_amdgpu_logical_device_t* dst_logical,
+    iree_hal_amdgpu_topology_edge_aggregate_t* aggregate) {
   const iree_hal_amdgpu_libhsa_t* libhsa = &src_logical->system->libhsa;
   if (src_logical->physical_device_count == 0 ||
       dst_logical->physical_device_count == 0) {
@@ -2536,13 +2550,8 @@ static iree_status_t iree_hal_amdgpu_logical_device_refine_topology_edge(
         "cannot refine AMDGPU topology edge with an empty physical device set");
   }
 
-  iree_hal_amdgpu_topology_edge_aggregate_t aggregate;
-  iree_hal_topology_edge_refine_same_runtime_domain(edge);
-  iree_hal_amdgpu_topology_edge_aggregate_initialize(*edge, &aggregate);
-
-  // A composite logical device has one generic HAL topology node but several
-  // physical HSA agents. The generic edge must be valid for any source/dest
-  // physical pair because the scheduler cannot encode a subset-specific edge.
+  // A composite logical device has several physical HSA agents. Aggregate
+  // every source/destination pair because callers cannot select a subset.
   for (iree_host_size_t source_index = 0;
        source_index < src_logical->physical_device_count; ++source_index) {
     const iree_hal_amdgpu_physical_device_t* source_physical_device =
@@ -2557,11 +2566,51 @@ static iree_status_t iree_hal_amdgpu_logical_device_refine_topology_edge(
           libhsa, source_physical_device, destination_physical_device,
           &physical_edge));
       iree_hal_amdgpu_topology_edge_aggregate_include(&physical_edge,
-                                                      &aggregate);
+                                                      aggregate);
     }
   }
 
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_amdgpu_logical_device_refine_topology_edge(
+    iree_hal_device_t* src_device, iree_hal_device_t* dst_device,
+    iree_hal_topology_edge_t* edge) {
+  iree_hal_amdgpu_logical_device_t* src_logical =
+      iree_hal_amdgpu_logical_device_cast(src_device);
+  iree_hal_amdgpu_logical_device_t* dst_logical =
+      iree_hal_amdgpu_logical_device_cast(dst_device);
+  iree_hal_amdgpu_topology_edge_aggregate_t aggregate;
+  iree_hal_topology_edge_refine_same_runtime_domain(edge);
+  iree_hal_amdgpu_topology_edge_aggregate_initialize(*edge, &aggregate);
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_query_topology_aggregate(
+      src_logical, dst_logical, &aggregate));
+
   iree_hal_amdgpu_topology_edge_apply_aggregate(&aggregate, edge);
+  return iree_ok_status();
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_amdgpu_device_query_peer_link(
+    iree_hal_device_t* source_device, iree_hal_device_t* destination_device,
+    iree_hal_amdgpu_link_type_t* out_link_type, uint32_t* out_hop_count) {
+  IREE_ASSERT_ARGUMENT(source_device);
+  IREE_ASSERT_ARGUMENT(destination_device);
+  IREE_ASSERT_ARGUMENT(out_link_type);
+  IREE_ASSERT_ARGUMENT(out_hop_count);
+  *out_link_type = IREE_HAL_AMDGPU_LINK_TYPE_UNKNOWN;
+  *out_hop_count = 0;
+
+  iree_hal_amdgpu_logical_device_t* source_logical =
+      iree_hal_amdgpu_logical_device_cast(source_device);
+  iree_hal_amdgpu_logical_device_t* destination_logical =
+      iree_hal_amdgpu_logical_device_cast(destination_device);
+  iree_hal_amdgpu_topology_edge_aggregate_t aggregate;
+  iree_hal_amdgpu_topology_edge_aggregate_initialize(
+      iree_hal_topology_edge_make_host_staged(), &aggregate);
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_query_topology_aggregate(
+      source_logical, destination_logical, &aggregate));
+  *out_link_type = aggregate.link_type;
+  *out_hop_count = aggregate.path_hop_count;
   return iree_ok_status();
 }
 
