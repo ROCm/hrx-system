@@ -630,7 +630,7 @@ class PresubmitTest(unittest.TestCase):
 
     def test_requirements_and_docs_workflow_trigger_root_devtools_tests(self):
         self.assertTrue(
-            presubmit.is_root_devtools_trigger(".github/workflows/docs_loom.yml")
+            presubmit.is_root_devtools_trigger(".github/workflows/docs.yml")
         )
         self.assertTrue(presubmit.is_root_devtools_trigger("requirements-analysis.in"))
         self.assertTrue(

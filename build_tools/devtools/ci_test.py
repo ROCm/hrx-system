@@ -1062,8 +1062,8 @@ class CiTest(unittest.TestCase):
         )
 
     def test_loom_docs_workflow_builds_review_artifact_without_deploy_access(self):
-        text = Path(".github/workflows/docs_loom.yml").read_text()
-        block = self.workflow_job_block(".github/workflows/docs_loom.yml", "build_docs")
+        text = Path(".github/workflows/docs.yml").read_text()
+        block = self.workflow_job_block(".github/workflows/docs.yml", "build_docs")
 
         for path in (
             '"requirements-analysis.lock.txt"',

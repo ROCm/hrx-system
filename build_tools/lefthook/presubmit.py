@@ -180,7 +180,7 @@ GLOBAL_PROJECT_TRIGGERS = (
     "requirements",
 )
 ROOT_DEVTOOLS_TRIGGERS = (
-    ".github/workflows/docs_loom.yml",
+    ".github/workflows/docs.yml",
     ".github/workflows/presubmit.yml",
     "CONTRIBUTING.md",
     "README.md",

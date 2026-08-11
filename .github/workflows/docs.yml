@@ -4,13 +4,13 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-name: Loom Documentation
+name: Documentation
 
 on:
   workflow_dispatch:
   pull_request:
     paths:
-      - ".github/workflows/docs_loom.yml"
+      - ".github/workflows/docs.yml"
       - "dev.py"
       - "requirements-analysis.lock.txt"
       - "requirements-dev.lock.txt"
@@ -24,7 +24,7 @@ on:
       - main
       - main-staging
     paths:
-      - ".github/workflows/docs_loom.yml"
+      - ".github/workflows/docs.yml"
       - "dev.py"
       - "requirements-analysis.lock.txt"
       - "requirements-dev.lock.txt"
@@ -43,7 +43,7 @@ permissions:
 
 jobs:
   build_docs:
-    name: Linux / Loom Documentation
+    name: Linux / Documentation
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
