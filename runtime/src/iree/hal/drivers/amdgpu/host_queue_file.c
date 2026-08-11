@@ -496,8 +496,20 @@ static iree_status_t iree_hal_amdgpu_file_action_copy_memory_file(
         IREE_STATUS_INVALID_ARGUMENT,
         "AMDGPU memory-file transfer requires AMDGPU buffers");
   }
-  source_ptr += iree_hal_buffer_byte_offset(source_buffer) + source_offset;
-  target_ptr += iree_hal_buffer_byte_offset(target_buffer) + target_offset;
+  iree_device_size_t source_device_offset = 0;
+  iree_device_size_t target_device_offset = 0;
+  if (IREE_UNLIKELY(
+          !iree_device_size_checked_add(
+              iree_hal_buffer_byte_offset(source_buffer), source_offset,
+              &source_device_offset) ||
+          !iree_device_size_checked_add(
+              iree_hal_buffer_byte_offset(target_buffer), target_offset,
+              &target_device_offset))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AMDGPU memory-file buffer offset overflows");
+  }
+  source_ptr += source_device_offset;
+  target_ptr += target_device_offset;
   return iree_hsa_memory_copy(IREE_LIBHSA(state->queue->libhsa), target_ptr,
                               source_ptr, state->requested_length);
 }
