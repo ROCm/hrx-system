@@ -128,6 +128,7 @@ from loom.gen.ops.c_location_tags import generate_location_tag_table_inc
 from loom.gen.ops.c_registry import generate_op_registry
 from loom.gen.ops.c_scalar_types import generate_scalar_type_table_inc
 from loom.gen.ops.c_tables import (
+    checked_in_file_set,
     generate_dialect_type_registry,
     generate_ops_h,
     generate_sharded_tables_c,
@@ -193,6 +194,32 @@ def test_load_dialect_generation_calls_only_requested_loader() -> None:
 
     assert actual is expected
     assert calls == ["wanted"]
+
+
+def test_checked_in_file_set_separates_public_artifacts_from_build_outputs() -> None:
+    dialect = Dialect("artifact_test", dialect_id=0x7D)
+    model = c_table_model.GenerationModel(
+        dialects=[
+            c_table_model.DialectGeneration(
+                dialect=dialect,
+                ops=[],
+                table_shards=None,
+            )
+        ],
+        types=[],
+    )
+
+    generated_file_set = checked_in_file_set(model)
+
+    assert "loom/src/loom/ops/artifact_test/ops.h" in generated_file_set.output_paths
+    assert "loom/src/loom/ops/op_registry.h" in generated_file_set.output_paths
+    assert "loom/src/loom/ir/scalar_type_table.inc" in generated_file_set.output_paths
+    assert "loom/src/loom/ops/artifact_test/builders.c" in generated_file_set.obsolete_paths
+    assert "loom/src/loom/ops/artifact_test/tables.c" in generated_file_set.obsolete_paths
+    assert "loom/src/loom/ops/op_registry_tables.c" in generated_file_set.obsolete_paths
+    assert "loom/src/loom/ops/op_registry_tables.h" in generated_file_set.obsolete_paths
+    assert all(not path.endswith(".c") for path in generated_file_set.output_paths)
+    assert set(generated_file_set.output_paths).isdisjoint(generated_file_set.obsolete_paths)
 
 
 def test_type_constraint_map_covers_every_constraint() -> None:
