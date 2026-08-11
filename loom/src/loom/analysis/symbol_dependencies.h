@@ -129,7 +129,19 @@ typedef struct loom_symbol_dependency_table_t {
   const loom_func_contract_demand_t* contract_demands;
   // Number of entries in contract_demands.
   iree_host_size_t contract_demand_count;
+  // Dense bitset indexed by module string ID for demanded contracts, or NULL
+  // when the module contains no abstract contract demands.
+  const uint64_t* contract_demand_bits;
 } loom_symbol_dependency_table_t;
+
+// Returns true when at least one func.apply demands |contract_id|.
+// |contract_id| must be valid in the table's module string table.
+static inline bool loom_symbol_dependency_contract_is_demanded(
+    const loom_symbol_dependency_table_t* table, loom_string_id_t contract_id) {
+  return table->contract_demand_bits &&
+         (table->contract_demand_bits[contract_id >> 6] &
+          (UINT64_C(1) << (contract_id & 63u))) != 0;
+}
 
 // Builds the symbol dependency table for |module| into |arena|.
 iree_status_t loom_symbol_dependency_table_build(

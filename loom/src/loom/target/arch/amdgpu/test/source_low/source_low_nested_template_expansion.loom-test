@@ -62,6 +62,7 @@ kernel.def target(@target) @nested_kernel_template_expansion() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch() {
   func.apply<nested.kernel_outer>() : ()
+  func.apply<nested.kernel_inner>() : ()
   kernel.return
 }
 

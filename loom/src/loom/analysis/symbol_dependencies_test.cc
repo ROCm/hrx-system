@@ -249,11 +249,17 @@ func.def public @entry(%arg: i32) -> (i32) {
   const loom_symbol_id_t entry = FindSymbol(module.get(), IREE_SV("entry"));
   const loom_string_id_t contract_id =
       loom_module_lookup_string(module.get(), IREE_SV("demo.contract"));
+  const loom_string_id_t undemanded_contract_id =
+      loom_module_lookup_string(module.get(), IREE_SV("outer.contract"));
   ASSERT_NE(contract_id, LOOM_STRING_ID_INVALID);
+  ASSERT_NE(undemanded_contract_id, LOOM_STRING_ID_INVALID);
 
   const loom_symbol_dependency_table_t table = BuildTable(module.get());
 
   ASSERT_EQ(table.contract_demand_count, 2u);
+  EXPECT_TRUE(loom_symbol_dependency_contract_is_demanded(&table, contract_id));
+  EXPECT_FALSE(loom_symbol_dependency_contract_is_demanded(
+      &table, undemanded_contract_id));
   const loom_symbol_id_t source_symbol_ids[] = {outer_provider, entry};
   for (loom_symbol_id_t source_symbol_id : source_symbol_ids) {
     ASSERT_EQ(table.symbols[source_symbol_id].contract_demand_count, 1u);

@@ -36,6 +36,8 @@ typedef struct loom_symbol_dependency_builder_t {
   iree_host_size_t contract_demand_count;
   // Number of allocated contract-demand slots.
   iree_host_size_t contract_demand_capacity;
+  // Dense bitset indexed by module string ID for demanded contracts.
+  uint64_t* contract_demand_bits;
 } loom_symbol_dependency_builder_t;
 
 static void loom_symbol_dependency_initialize_symbol_edges(
@@ -165,6 +167,15 @@ static iree_status_t loom_symbol_dependency_append_contract_demand(
         &builder->contract_demand_capacity,
         (void**)&builder->contract_demands));
   }
+  if (!builder->contract_demand_bits) {
+    const iree_host_size_t word_count =
+        (builder->module->strings.count + 63u) / 64u;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        builder->arena, word_count, sizeof(*builder->contract_demand_bits),
+        (void**)&builder->contract_demand_bits));
+    memset(builder->contract_demand_bits, 0,
+           word_count * sizeof(*builder->contract_demand_bits));
+  }
 
   const loom_func_contract_demand_id_t demand_id =
       (loom_func_contract_demand_id_t)builder->contract_demand_count++;
@@ -178,6 +189,8 @@ static iree_status_t loom_symbol_dependency_append_contract_demand(
   };
   source->first_contract_demand_id = demand_id;
   ++source->contract_demand_count;
+  builder->contract_demand_bits[contract_id >> 6] |= UINT64_C(1)
+                                                     << (contract_id & 63u);
   return iree_ok_status();
 }
 
@@ -539,6 +552,7 @@ iree_status_t loom_symbol_dependency_table_build(
       .module_edge_count = builder.module_edge_count,
       .contract_demands = builder.contract_demands,
       .contract_demand_count = builder.contract_demand_count,
+      .contract_demand_bits = builder.contract_demand_bits,
   };
   return iree_ok_status();
 }
