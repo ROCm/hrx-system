@@ -243,7 +243,7 @@ def _parse_isa_xml_paths(values: Sequence[str]) -> dict[str, Path]:
     return paths
 
 
-def _select_descriptor_set_infos(
+def select_target_ref_descriptor_set_infos(
     descriptor_set_keys: Sequence[str],
 ) -> tuple[AmdgpuDescriptorSetInfo, ...]:
     if not descriptor_set_keys:
@@ -868,7 +868,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    descriptor_set_infos = _select_descriptor_set_infos(args.descriptor_set)
+    descriptor_set_infos = select_target_ref_descriptor_set_infos(args.descriptor_set)
     isa_specs = parse_amdgpu_isa_xml_paths_for_instructions(
         _parse_isa_xml_paths(args.isa_xml),
         amdgpu_core_descriptor_set_instruction_names_by_isa_key(descriptor_set_infos),

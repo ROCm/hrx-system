@@ -92,9 +92,9 @@ iree_py_binary(
 )
 
 iree_py_binary(
-    name = "planning_tables",
-    srcs = ["amdgpu_planning_tables.py"],
-    main = "amdgpu_planning_tables.py",
+    name = "descriptor_derived_tables",
+    srcs = ["amdgpu_descriptor_derived_tables.py"],
+    main = "amdgpu_descriptor_derived_tables.py",
     visibility = GENERATOR_VISIBILITY,
     deps = [
         ":package_init",
@@ -102,6 +102,7 @@ iree_py_binary(
         ":vopd_component_tables_module",
         ":wait_packet_tables_module",
         "//loom/py/loom/gen/support",
+        "//loom/py/loom/gen/target/arch/amdgpu/refs:target_refs_module",
         "//loom/py/loom/gen/target/low:low_descriptors",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch/amdgpu:descriptors",

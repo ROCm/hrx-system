@@ -95,17 +95,18 @@ iree_py_library(
 
 iree_py_library(
   NAME
-    planning_tables
+    descriptor_derived_tables
   MAIN
-    "amdgpu_planning_tables.py"
+    "amdgpu_descriptor_derived_tables.py"
   SRCS
-    "amdgpu_planning_tables.py"
+    "amdgpu_descriptor_derived_tables.py"
   DEPS
     loom::py::loom::gen::target::arch::amdgpu::descriptors::package_init
     loom::py::loom::gen::target::arch::amdgpu::descriptors::planning_table_inputs
     loom::py::loom::gen::target::arch::amdgpu::descriptors::vopd_component_tables_module
     loom::py::loom::gen::target::arch::amdgpu::descriptors::wait_packet_tables_module
     loom::py::loom::gen::support::support
+    loom::py::loom::gen::target::arch::amdgpu::refs::target_refs_module
     loom::py::loom::gen::target::low::low_descriptors
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::descriptors

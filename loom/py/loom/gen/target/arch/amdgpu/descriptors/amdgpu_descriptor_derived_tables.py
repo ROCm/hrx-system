@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Generator: AMDGPU ISA XML -> descriptor-derived planning table family."""
+"""Generator: AMDGPU ISA XML -> global descriptor-derived table family."""
 
 from __future__ import annotations
 
@@ -33,15 +33,31 @@ from loom.gen.target.arch.amdgpu.descriptors.amdgpu_vopd_component_tables import
 from loom.gen.target.arch.amdgpu.descriptors.amdgpu_wait_packet_tables import (  # noqa: E402
     generate_wait_packet_table_outputs,
 )
+from loom.gen.target.arch.amdgpu.refs.amdgpu_target_refs import (  # noqa: E402
+    generate_target_ref_outputs,
+    select_target_ref_descriptor_set_infos,
+)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=("Generate AMDGPU descriptor-derived planning tables from one ISA corpus."))
+    parser = argparse.ArgumentParser(description=("Generate global AMDGPU descriptor-derived tables from one ISA corpus."))
     parser.add_argument(
         "--isa-xml",
         action="append",
         default=[],
         help="ISA XML fact source as <key>:<path>.",
+    )
+    parser.add_argument(
+        "--descriptor-set",
+        action="append",
+        default=[],
+        help="Descriptor-set key to include in target-reference tables.",
+    )
+    parser.add_argument("--target-ref-header", type=Path, required=True)
+    parser.add_argument("--target-ref-source", type=Path, required=True)
+    parser.add_argument(
+        "--target-ref-public-header",
+        default="loom/target/arch/amdgpu/refs/target_refs.h",
     )
     parser.add_argument("--wait-descriptor-rows", type=Path, required=True)
     parser.add_argument("--wait-immediate-rows", type=Path, required=True)
@@ -67,6 +83,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     inputs = load_amdgpu_planning_table_inputs(
         args.isa_xml,
         amdgpu_vopd_instruction_names_by_isa_key(),
+    )
+    generate_target_ref_outputs(
+        public_header=args.target_ref_public_header,
+        descriptor_set_infos=select_target_ref_descriptor_set_infos(args.descriptor_set),
+        descriptor_sets_by_key=inputs.descriptor_sets_by_key,
+        header_path=args.target_ref_header,
+        source_path=args.target_ref_source,
     )
     generate_wait_packet_table_outputs(
         inputs,

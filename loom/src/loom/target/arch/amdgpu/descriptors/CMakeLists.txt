@@ -27,11 +27,51 @@ endif()
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
+set(_descriptor_derived_tables_gen_platform_args "")
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA3_CORE)
+  list(APPEND _descriptor_derived_tables_gen_platform_args "--descriptor-set=amdgpu.cdna3.core")
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA4_CORE)
+  list(APPEND _descriptor_derived_tables_gen_platform_args "--descriptor-set=amdgpu.cdna4.core")
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_CORE)
+  list(APPEND _descriptor_derived_tables_gen_platform_args "--descriptor-set=amdgpu.rdna3.core")
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_CORE)
+  list(APPEND _descriptor_derived_tables_gen_platform_args "--descriptor-set=amdgpu.rdna4.core")
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX125X_CORE)
+  list(APPEND _descriptor_derived_tables_gen_platform_args "--descriptor-set=amdgpu.rdna4.gfx125x.core")
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE)
+  list(APPEND _descriptor_derived_tables_gen_platform_args "--descriptor-set=amdgpu.rdna3_5.core")
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE)
+  list(APPEND _descriptor_derived_tables_gen_platform_args "--descriptor-set=amdgpu.rdna4m.core")
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1251_CORE)
+  list(APPEND _descriptor_derived_tables_gen_platform_args "--descriptor-set=amdgpu.rdna4.gfx1251.core")
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE)
+  list(APPEND _descriptor_derived_tables_gen_platform_args "--descriptor-set=amdgpu.gfx9_4.generic.core")
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE)
+  list(APPEND _descriptor_derived_tables_gen_platform_args "--descriptor-set=amdgpu.gfx11.generic.core")
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE)
+  list(APPEND _descriptor_derived_tables_gen_platform_args "--descriptor-set=amdgpu.gfx12.generic.core")
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
+  list(APPEND _descriptor_derived_tables_gen_platform_args "--descriptor-set=amdgpu.gfx12_5.generic.core")
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1250_A0_CORE)
+  list(APPEND _descriptor_derived_tables_gen_platform_args "--descriptor-set=amdgpu.rdna4.gfx1250_a0.core")
+endif()
 loom_generated_file_family(
   NAME
-    planning_tables_gen
+    descriptor_derived_tables_gen
   GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::descriptors::planning_tables
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::descriptor_derived_tables
   OUTPUTS
     "wait_packet_descriptor_ranges.inl"
     "wait_packet_descriptors.inl"
@@ -44,6 +84,8 @@ loom_generated_file_family(
     "vopd_pair_affinity_ranges.inl"
     "vopd_pair_affinities.inl"
     "vopd_pair_placement_recipes.inl"
+    "target_refs_data.c"
+    "target_refs_tables.h"
   OUTPUT_FLAGS
     "--wait-descriptor-ranges"
     "--wait-descriptor-rows"
@@ -56,12 +98,16 @@ loom_generated_file_family(
     "--vopd-pair-affinity-ranges"
     "--vopd-pair-affinities"
     "--vopd-pair-placement-recipes"
+    "--target-ref-source"
+    "--target-ref-header"
   ARGS
     "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
     "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
     "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
     "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
     "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+    "--target-ref-public-header=loom/target/arch/amdgpu/refs/target_refs.h"
+    ${_descriptor_derived_tables_gen_platform_args}
   INPUTS
     "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
     "loom_amdgpu_isa_xml"
@@ -70,7 +116,7 @@ loom_generated_file_family(
     "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
     "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
   COMMENT
-    "Generating AMDGPU descriptor-derived planning table family"
+    "Generating AMDGPU global descriptor-derived table family"
 )
 endif()
 

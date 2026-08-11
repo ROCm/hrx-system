@@ -80,6 +80,7 @@ _LOOM_CONFIG_CMAKE_OPTIONS = {
 _LOOM_CONFIG_CMAKE_OPTIONS.update(_loom_amdgpu_config_cmake_options())
 
 _GENERATED_ROOTPATH_PATTERN = re.compile(r"\$\(rootpath ([^)]+)\)")
+_GENERATED_LOCATION_PATTERN = re.compile(r"\$\(location ([^)]+)\)")
 
 
 class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
@@ -304,6 +305,14 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
     def loom_amdgpu_selected_descriptor_set_generator_args(self, args):
         return self.loom_amdgpu_selected_descriptor_set_values(args)
 
+    def loom_amdgpu_selected_descriptor_set_key_args(self):
+        return self.loom_amdgpu_selected_descriptor_set_values(
+            {
+                capability: "--descriptor-set=" + descriptor_set_key
+                for descriptor_set_key, capability in self.LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY.items()
+            }
+        )
+
     def loom_amdgpu_selected_descriptor_set_deps(self, targets):
         return self.loom_amdgpu_selected_descriptor_set_values(targets)
 
@@ -490,7 +499,14 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         def replace_rootpath(match):
             return self._convert_generated_file_label(match.group(1))
 
-        return _GENERATED_ROOTPATH_PATTERN.sub(replace_rootpath, arg)
+        def replace_external_location(match):
+            label = match.group(1)
+            if label.startswith("@"):
+                return self._convert_generated_file_label(label)
+            return match.group(0)
+
+        arg = _GENERATED_ROOTPATH_PATTERN.sub(replace_rootpath, arg)
+        return _GENERATED_LOCATION_PATTERN.sub(replace_external_location, arg)
 
     def _convert_generated_args(self, args):
         def convert(args):

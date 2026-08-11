@@ -9,6 +9,7 @@ load(
     "loom_amdgpu_descriptor_set_compatible_with",
     "loom_amdgpu_low_descriptor_deps",
     "loom_amdgpu_selected_descriptor_set_defines",
+    "loom_amdgpu_selected_descriptor_set_key_args",
 )
 load(
     "//loom/build_tools/amdgpu:target_config.bzl",
@@ -33,7 +34,7 @@ package(
 
 _AMDGPU_DESCRIPTOR_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/descriptors:descriptors"
 
-_AMDGPU_PLANNING_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/descriptors:planning_tables"
+_AMDGPU_DESCRIPTOR_DERIVED_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/descriptors:descriptor_derived_tables"
 
 _AMDGPU_CONFIG_TABLES_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu:config_tables"
 
@@ -71,11 +72,11 @@ loom_low_descriptor_data_archive(
 )
 
 _AMDGPU_ISA_XML_ARGS = [
-    "--isa-xml=cdna3:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_cdna3.xml)",
-    "--isa-xml=cdna4:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_cdna4.xml)",
-    "--isa-xml=rdna3:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna3.xml)",
-    "--isa-xml=rdna3_5:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml)",
-    "--isa-xml=rdna4:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna4.xml)",
+    "--isa-xml=cdna3:$(location @amdgpu_isa_xml//:amdgpu_isa_cdna3.xml)",
+    "--isa-xml=cdna4:$(location @amdgpu_isa_xml//:amdgpu_isa_cdna4.xml)",
+    "--isa-xml=rdna3:$(location @amdgpu_isa_xml//:amdgpu_isa_rdna3.xml)",
+    "--isa-xml=rdna3_5:$(location @amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml)",
+    "--isa-xml=rdna4:$(location @amdgpu_isa_xml//:amdgpu_isa_rdna4.xml)",
 ]
 
 _AMDGPU_ISA_XML_INPUTS = [
@@ -86,15 +87,20 @@ _AMDGPU_ISA_XML_INPUTS = [
     "@amdgpu_isa_xml//:amdgpu_isa_rdna4.xml",
 ]
 
-_AMDGPU_PLANNING_FACT_VISIBILITY = [
+_AMDGPU_DESCRIPTOR_DERIVED_TABLE_VISIBILITY = [
     "//loom/src/loom/target/arch/amdgpu/planning:__pkg__",
+    "//loom/src/loom/target/arch/amdgpu/refs:__pkg__",
 ]
 
 loom_generated_file_family(
-    name = "planning_tables_gen",
-    args = _AMDGPU_ISA_XML_ARGS,
-    comment = "Generating AMDGPU descriptor-derived planning table family",
-    generator = _AMDGPU_PLANNING_TABLE_GENERATOR,
+    name = "descriptor_derived_tables_gen",
+    args = (
+        _AMDGPU_ISA_XML_ARGS + [
+            "--target-ref-public-header=loom/target/arch/amdgpu/refs/target_refs.h",
+        ] + loom_amdgpu_selected_descriptor_set_key_args()
+    ),
+    comment = "Generating AMDGPU global descriptor-derived table family",
+    generator = _AMDGPU_DESCRIPTOR_DERIVED_TABLE_GENERATOR,
     inputs = _AMDGPU_ISA_XML_INPUTS,
     output_flags = [
         "--wait-descriptor-ranges",
@@ -108,6 +114,8 @@ loom_generated_file_family(
         "--vopd-pair-affinity-ranges",
         "--vopd-pair-affinities",
         "--vopd-pair-placement-recipes",
+        "--target-ref-source",
+        "--target-ref-header",
     ],
     outputs = [
         "wait_packet_descriptor_ranges.inl",
@@ -121,8 +129,10 @@ loom_generated_file_family(
         "vopd_pair_affinity_ranges.inl",
         "vopd_pair_affinities.inl",
         "vopd_pair_placement_recipes.inl",
+        "target_refs_data.c",
+        "target_refs_tables.h",
     ],
-    visibility = _AMDGPU_PLANNING_FACT_VISIBILITY,
+    visibility = _AMDGPU_DESCRIPTOR_DERIVED_TABLE_VISIBILITY,
 )
 
 loom_low_descriptor_cc_library(
