@@ -119,7 +119,7 @@ loom_cc_library(
     ::scalar_types
     iree::base
     loom::ir
-    loom::ops::type_registry
+    loom::target::arch::spirv::ops
   PUBLIC
 )
 endif()
@@ -424,7 +424,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::ir
-    loom::ops::type_registry
+    loom::target::arch::spirv::ops
   LABELS
     "iree-build-requirement=loom.target.arch.spirv"
 )

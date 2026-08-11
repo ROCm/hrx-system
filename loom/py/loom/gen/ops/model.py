@@ -24,6 +24,7 @@ class DialectGeneration:
     table_shards: Sequence[tuple[Any, Sequence[Op]]] | None
     parameterized_attrs: Sequence[ParameterizedAttrDef] = ()
     encoding_families: Sequence[EncodingFamilyDef] = ()
+    types: Sequence[Any] = ()
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,7 @@ def _load_test_generation() -> DialectGeneration:
     from loom.dialect.test import (
         ALL_TEST_OPS,
         ALL_TEST_PARAMETERIZED_ATTRS,
+        ALL_TEST_TYPES,
         test_ops,
     )
 
@@ -49,6 +51,7 @@ def _load_test_generation() -> DialectGeneration:
         list(ALL_TEST_OPS),
         None,
         ALL_TEST_PARAMETERIZED_ATTRS,
+        types=ALL_TEST_TYPES,
     )
 
 
@@ -205,9 +208,9 @@ def _load_x86_generation() -> DialectGeneration:
 
 
 def _load_spirv_generation() -> DialectGeneration:
-    from loom.target.arch.spirv.dialect import ALL_SPIRV_OPS, spirv_ops
+    from loom.target.arch.spirv.dialect import ALL_SPIRV_OPS, ALL_SPIRV_TYPES, spirv_ops
 
-    return DialectGeneration(spirv_ops, list(ALL_SPIRV_OPS), None)
+    return DialectGeneration(spirv_ops, list(ALL_SPIRV_OPS), None, types=ALL_SPIRV_TYPES)
 
 
 def _load_wasm_generation() -> DialectGeneration:
@@ -217,9 +220,9 @@ def _load_wasm_generation() -> DialectGeneration:
 
 
 def _load_ireevm_generation() -> DialectGeneration:
-    from loom.target.arch.ireevm.dialect import ALL_IREEVM_OPS, ireevm_ops
+    from loom.target.arch.ireevm.dialect import ALL_IREEVM_OPS, ALL_IREEVM_TYPES, ireevm_ops
 
-    return DialectGeneration(ireevm_ops, list(ALL_IREEVM_OPS), None)
+    return DialectGeneration(ireevm_ops, list(ALL_IREEVM_OPS), None, types=ALL_IREEVM_TYPES)
 
 
 _DIALECT_GENERATION_LOADERS: tuple[tuple[str, DialectGenerationLoader], ...] = (
@@ -257,21 +260,15 @@ def dialect_names() -> tuple[str, ...]:
     return tuple(name for name, _ in _DIALECT_GENERATION_LOADERS)
 
 
-def _load_all_types() -> list[Any]:
+def _load_core_types() -> list[Any]:
     from loom.builtin_types import ALL_BUILTIN_TYPES
     from loom.dialect.hal import ALL_HAL_TYPES
     from loom.dialect.kernel import ALL_KERNEL_TYPES
-    from loom.dialect.test import ALL_TEST_TYPES
-    from loom.target.arch.ireevm.dialect import ALL_IREEVM_TYPES
-    from loom.target.arch.spirv.dialect import ALL_SPIRV_TYPES
 
     return [
         *ALL_BUILTIN_TYPES,
         *ALL_HAL_TYPES,
         *ALL_KERNEL_TYPES,
-        *ALL_TEST_TYPES,
-        *ALL_SPIRV_TYPES,
-        *ALL_IREEVM_TYPES,
     ]
 
 
@@ -279,7 +276,7 @@ def load_generation_model() -> GenerationModel:
     """Loads all Python DSL declarations needed for C table generation."""
     return GenerationModel(
         dialects=[loader() for _, loader in _DIALECT_GENERATION_LOADERS],
-        types=_load_all_types(),
+        types=_load_core_types(),
     )
 
 

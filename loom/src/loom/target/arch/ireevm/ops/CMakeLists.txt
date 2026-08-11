@@ -21,12 +21,15 @@ loom_generated_cc_library(
   GENERATED_SRC_FLAGS
     "--builders"
     "--tables"
+    "--types"
   GENERATED_SRCS
     "builders.c"
     "tables.c"
+    "types.c"
   HDRS
     "ops.h"
     "registry.h"
+    "types.h"
   ARGS
     "--dialect=ireevm"
   DEPS
@@ -38,6 +41,7 @@ loom_generated_cc_library(
     loom::ops::function_contract_verify
     loom::ops::op_defs
     loom::ops::target
+    loom::ops::type_registry
     loom::target::arch::ireevm::records::target_records
     loom::target::types
 )

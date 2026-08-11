@@ -21,12 +21,15 @@ loom_generated_cc_library(
   GENERATED_SRC_FLAGS
     "--builders"
     "--tables"
+    "--types"
   GENERATED_SRCS
     "builders.c"
     "tables.c"
+    "types.c"
   HDRS
     "ops.h"
     "registry.h"
+    "types.h"
   ARGS
     "--dialect=spirv"
   DEPS
@@ -35,8 +38,11 @@ loom_generated_cc_library(
     loom::ir
     loom::ops::op_defs
     loom::ops::target
+    loom::ops::type_registry
     loom::target::arch::spirv::facts
+    loom::target::arch::spirv::isa
     loom::target::arch::spirv::records::target_records
+    loom::target::arch::spirv::scalar_types
     loom::target::types
 )
 endif()

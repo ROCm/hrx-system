@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/ops/test/registry.h"
+
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -112,15 +114,15 @@ TEST(OpSemantics, DialectTablesAreDenseAndQueryable) {
 }
 
 TEST(TypeRegistry, DescriptorsCarrySemantics) {
-  const loom_type_descriptor_t* token =
-      loom_type_registry_lookup(iree_make_cstring_view("kernel.async.token"));
+  const loom_type_descriptor_t* token = loom_type_registry_lookup(
+      nullptr, iree_make_cstring_view("kernel.async.token"));
   ASSERT_NE(token, nullptr);
   EXPECT_EQ(token->semantics.semantic, LOOM_TYPE_SEMANTIC_CONTROL_TOKEN);
   EXPECT_TRUE(loom_contract_family_set_has_any(
       token->semantics.contract_families, LOOM_CONTRACT_KERNEL_ASYNC));
 
   const loom_type_descriptor_t* tensor_descriptor = loom_type_registry_lookup(
-      iree_make_cstring_view("kernel.tensor.lds.descriptor"));
+      nullptr, iree_make_cstring_view("kernel.tensor.lds.descriptor"));
   ASSERT_NE(tensor_descriptor, nullptr);
   EXPECT_EQ(tensor_descriptor->semantics.semantic,
             LOOM_TYPE_SEMANTIC_TARGET_CONTRACT_VALUE);
@@ -129,7 +131,7 @@ TEST(TypeRegistry, DescriptorsCarrySemantics) {
       LOOM_CONTRACT_TENSOR_MEMORY));
 
   const loom_type_descriptor_t* tile =
-      loom_type_registry_lookup(iree_make_cstring_view("tile"));
+      loom_type_registry_lookup(nullptr, iree_make_cstring_view("tile"));
   ASSERT_NE(tile, nullptr);
   EXPECT_EQ(tile->semantics.semantic, LOOM_TYPE_SEMANTIC_ORDINARY);
   EXPECT_EQ(tile->semantics.contract_families, 0u);
@@ -458,7 +460,7 @@ TEST(TypeConstraint, EncodingRolesAreExplicit) {
 TEST(TypeRegistry, LookupBuiltinTypes) {
   const loom_type_descriptor_t* desc;
 
-  desc = loom_type_registry_lookup(iree_make_cstring_view("tile"));
+  desc = loom_type_registry_lookup(nullptr, iree_make_cstring_view("tile"));
   ASSERT_NE(desc, nullptr);
   EXPECT_EQ(desc->ir_kind, LOOM_TYPE_TILE);
   EXPECT_EQ(loom_type_registry_lookup_builtin(LOOM_TYPE_TILE), desc);
@@ -466,38 +468,38 @@ TEST(TypeRegistry, LookupBuiltinTypes) {
   EXPECT_NE(desc->format_elements, nullptr);
   EXPECT_GT(desc->format_element_count, 0);
 
-  desc = loom_type_registry_lookup(iree_make_cstring_view("tensor"));
+  desc = loom_type_registry_lookup(nullptr, iree_make_cstring_view("tensor"));
   ASSERT_NE(desc, nullptr);
   EXPECT_EQ(desc->ir_kind, LOOM_TYPE_TENSOR);
   EXPECT_EQ(desc->param_count, 3);
 
-  desc = loom_type_registry_lookup(iree_make_cstring_view("vector"));
+  desc = loom_type_registry_lookup(nullptr, iree_make_cstring_view("vector"));
   ASSERT_NE(desc, nullptr);
   EXPECT_EQ(desc->ir_kind, LOOM_TYPE_VECTOR);
   EXPECT_EQ(desc->param_count, 2);
   EXPECT_NE(desc->format_elements, nullptr);
   EXPECT_EQ(desc->format_element_count, 3);
 
-  desc = loom_type_registry_lookup(iree_make_cstring_view("view"));
+  desc = loom_type_registry_lookup(nullptr, iree_make_cstring_view("view"));
   ASSERT_NE(desc, nullptr);
   EXPECT_EQ(desc->ir_kind, LOOM_TYPE_VIEW);
   EXPECT_EQ(desc->param_count, 3);
   EXPECT_NE(desc->format_elements, nullptr);
   EXPECT_EQ(desc->format_element_count, 6);
 
-  desc = loom_type_registry_lookup(iree_make_cstring_view("buffer"));
+  desc = loom_type_registry_lookup(nullptr, iree_make_cstring_view("buffer"));
   ASSERT_NE(desc, nullptr);
   EXPECT_EQ(desc->ir_kind, LOOM_TYPE_BUFFER);
   EXPECT_EQ(desc->param_count, 0);
   EXPECT_EQ(desc->format_elements, nullptr);
   EXPECT_EQ(desc->format_element_count, 0);
 
-  desc = loom_type_registry_lookup(iree_make_cstring_view("pool"));
+  desc = loom_type_registry_lookup(nullptr, iree_make_cstring_view("pool"));
   ASSERT_NE(desc, nullptr);
   EXPECT_EQ(desc->ir_kind, LOOM_TYPE_POOL);
   EXPECT_EQ(desc->param_count, 1);
 
-  desc = loom_type_registry_lookup(iree_make_cstring_view("encoding"));
+  desc = loom_type_registry_lookup(nullptr, iree_make_cstring_view("encoding"));
   ASSERT_NE(desc, nullptr);
   EXPECT_EQ(desc->ir_kind, LOOM_TYPE_ENCODING);
   EXPECT_EQ(loom_type_registry_lookup_builtin(LOOM_TYPE_ENCODING), desc);
@@ -506,7 +508,8 @@ TEST(TypeRegistry, LookupBuiltinTypes) {
       loom_encoding_type_role_name(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT),
       IREE_SV("layout")));
 
-  desc = loom_type_registry_lookup(iree_make_cstring_view("low.storage"));
+  desc =
+      loom_type_registry_lookup(nullptr, iree_make_cstring_view("low.storage"));
   ASSERT_NE(desc, nullptr);
   EXPECT_EQ(desc->ir_kind, LOOM_TYPE_STORAGE);
   EXPECT_EQ(loom_type_registry_lookup_builtin(LOOM_TYPE_STORAGE), desc);
@@ -535,12 +538,30 @@ TEST(TypeRegistry, RegisteredNamesCarryOpeningAngleByte) {
 
 TEST(TypeRegistry, LookupDialectType) {
   const loom_type_descriptor_t* desc =
-      loom_type_registry_lookup(iree_make_cstring_view("hal.buffer"));
+      loom_type_registry_lookup(nullptr, iree_make_cstring_view("hal.buffer"));
   ASSERT_NE(desc, nullptr);
   EXPECT_EQ(desc->ir_kind, LOOM_TYPE_DIALECT);
   EXPECT_EQ(desc->param_count, 0);
   EXPECT_EQ(desc->format_elements, nullptr);
   EXPECT_EQ(desc->format_element_count, 0);
+}
+
+TEST(TypeRegistry, DialectOwnedTypesRequireDialectRegistration) {
+  EXPECT_EQ(loom_type_registry_lookup(nullptr, IREE_SV("test.scope")), nullptr);
+
+  loom_context_t context;
+  loom_context_initialize(iree_allocator_system(), &context);
+  IREE_ASSERT_OK(loom_test_dialect_register(&context));
+  IREE_ASSERT_OK(loom_context_finalize(&context));
+
+  const loom_type_descriptor_t* descriptor =
+      loom_type_registry_lookup(&context, IREE_SV("test.scope"));
+  ASSERT_NE(descriptor, nullptr);
+  EXPECT_EQ(descriptor->ir_kind, LOOM_TYPE_PARAMETERIZED);
+  EXPECT_EQ(loom_type_registry_lookup(&context, IREE_SV("tile")),
+            loom_type_registry_lookup_builtin(LOOM_TYPE_TILE));
+
+  loom_context_deinitialize(&context);
 }
 
 TEST(TypeRegistry, ConfiguresFactContextResolver) {
@@ -565,13 +586,14 @@ TEST(TypeRegistry, ConfiguresFactContextResolver) {
 }
 
 TEST(TypeRegistry, LookupUnknownReturnsNull) {
-  EXPECT_EQ(
-      loom_type_registry_lookup(iree_make_cstring_view("nonexistent.type")),
-      nullptr);
+  EXPECT_EQ(loom_type_registry_lookup(
+                nullptr, iree_make_cstring_view("nonexistent.type")),
+            nullptr);
 }
 
 TEST(TypeRegistry, LookupEmptyString) {
-  EXPECT_EQ(loom_type_registry_lookup(iree_make_cstring_view("")), nullptr);
+  EXPECT_EQ(loom_type_registry_lookup(nullptr, iree_make_cstring_view("")),
+            nullptr);
 }
 
 TEST(TypeRegistry, EntriesAreSorted) {
@@ -594,7 +616,7 @@ TEST(TypeRegistry, AllEntriesValid) {
   for (iree_host_size_t i = 0; i < count; ++i) {
     EXPECT_GT(entries[i].name.size, 0u) << "entry " << i << " has empty name";
     const loom_type_descriptor_t* desc =
-        loom_type_registry_lookup(entries[i].name);
+        loom_type_registry_lookup(nullptr, entries[i].name);
     EXPECT_NE(desc, nullptr)
         << "entry " << i << " (\""
         << std::string(entries[i].name.data, entries[i].name.size)
@@ -604,7 +626,7 @@ TEST(TypeRegistry, AllEntriesValid) {
 
 TEST(TypeRegistry, TileFormatElements) {
   const loom_type_descriptor_t* desc =
-      loom_type_registry_lookup(iree_make_cstring_view("tile"));
+      loom_type_registry_lookup(nullptr, iree_make_cstring_view("tile"));
   ASSERT_NE(desc, nullptr);
   ASSERT_EQ(desc->format_element_count, 6);
   // ShapeOf, Keyword(x), ScalarOf, Optional, Keyword(,), EncodingOf.
@@ -620,7 +642,7 @@ TEST(TypeRegistry, TileFormatElements) {
 
 TEST(TypeRegistry, VectorFormatElements) {
   const loom_type_descriptor_t* desc =
-      loom_type_registry_lookup(iree_make_cstring_view("vector"));
+      loom_type_registry_lookup(nullptr, iree_make_cstring_view("vector"));
   ASSERT_NE(desc, nullptr);
   ASSERT_EQ(desc->format_element_count, 3);
   // ShapeOf, Keyword(x), ScalarOf.
@@ -632,7 +654,7 @@ TEST(TypeRegistry, VectorFormatElements) {
 
 TEST(TypeRegistry, ViewFormatElements) {
   const loom_type_descriptor_t* desc =
-      loom_type_registry_lookup(iree_make_cstring_view("view"));
+      loom_type_registry_lookup(nullptr, iree_make_cstring_view("view"));
   ASSERT_NE(desc, nullptr);
   ASSERT_EQ(desc->format_element_count, 6);
   // ShapeOf, Keyword(x), ScalarOf, Optional, Keyword(,), EncodingOf.

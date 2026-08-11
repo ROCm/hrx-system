@@ -63,8 +63,6 @@ _SPIRV_TOOLING_VISIBILITY = [
     "//loom/src/loom/tooling/target/spirv/execution:__pkg__",
 ]
 
-_TYPE_REGISTRY_VISIBILITY = ["//loom/src/loom/ops:__pkg__"]
-
 #===------------------------------------------------------------------------===#
 # SPIR-V low descriptors
 #===------------------------------------------------------------------------===#
@@ -94,7 +92,7 @@ loom_cc_library(
     visibility = (
         _SPIRV_EMIT_VISIBILITY +
         _SPIRV_LOWER_VISIBILITY +
-        _TYPE_REGISTRY_VISIBILITY
+        _SPIRV_OPS_VISIBILITY
     ),
 )
 
@@ -131,7 +129,7 @@ loom_cc_library(
     name = "scalar_types",
     srcs = ["scalar_types.c"],
     hdrs = ["scalar_types.h"],
-    visibility = _SPIRV_EMIT_VISIBILITY + _SPIRV_LOWER_VISIBILITY + _TYPE_REGISTRY_VISIBILITY,
+    visibility = _SPIRV_EMIT_VISIBILITY + _SPIRV_LOWER_VISIBILITY + _SPIRV_OPS_VISIBILITY,
     deps = [
         ":features",
         "//loom/src/loom/util:numeric_format",
@@ -148,7 +146,7 @@ loom_cc_library(
         ":isa",
         ":scalar_types",
         "//loom/src/loom/ir",
-        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/target/arch/spirv/ops",
         "//runtime/src/iree/base",
     ],
 )
@@ -371,7 +369,7 @@ loom_cc_test(
     deps = [
         ":value_types",
         "//loom/src/loom/ir",
-        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/target/arch/spirv/ops",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

@@ -11,79 +11,16 @@
 #define LOOM_OPS_TYPE_REGISTRY_H_
 
 #include "iree/base/api.h"
-#include "loom/ir/parameterized_type.h"
-#include "loom/ir/types.h"
+#include "loom/ir/type_descriptor.h"
 #include "loom/ops/op_defs.h"
-#include "loom/target/arch/spirv/isa.h"
-#include "loom/target/arch/spirv/scalar_types.h"
+#include "loom/ir/types.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef struct loom_value_fact_domain_t loom_value_fact_domain_t;
 typedef struct loom_module_t loom_module_t;
-
-// Format element kinds for type interiors (inside <...>).
-// These are separate from op format elements because type
-// interiors have different semantics (shape dims, element
-// types, encodings) than op bodies (operand refs, attr values).
-typedef enum loom_type_format_kind_e {
-  LOOM_TYPE_FMT_SHAPE = 0,      // Dimension list: 4x[%M]x...
-  LOOM_TYPE_FMT_SCALAR = 1,      // Element type keyword: f32, i8.
-  LOOM_TYPE_FMT_ENCODING = 2,    // Encoding ref: #test.schema or %enc.
-  LOOM_TYPE_FMT_TYPE = 3,         // Recursive type: vm.ref<T>.
-  LOOM_TYPE_FMT_ATTR = 4,         // Bare identifier attribute.
-  LOOM_TYPE_FMT_KEYWORD = 5,      // Literal punctuation/word.
-  LOOM_TYPE_FMT_OPTIONAL = 6,     // Conditional elements.
-  LOOM_TYPE_FMT_GLUE = 7,         // Suppress space.
-  LOOM_TYPE_FMT_PARAM = 8,        // Descriptor-backed attribute value.
-  LOOM_TYPE_FMT_PARAM_KEY = 9,    // Descriptor-backed parameter name.
-} loom_type_format_kind_t;
-
-// A 4-byte format element for type interiors. Same layout
-// as loom_format_element_t for consistent handling.
-typedef struct loom_type_format_element_t {
-  // Format opcode, encoded as loom_type_format_kind_t.
-  uint8_t kind;
-
-  // Parameter index consumed by this element.
-  uint8_t field_index;
-
-  // Kind-specific payload such as a keyword ID or skip count.
-  uint16_t data;
-} loom_type_format_element_t;
-
-// Descriptor for a registered type. Contains the name,
-// the IR type kind to construct, parameter count, and
-// format elements describing the type interior syntax.
-typedef struct loom_type_descriptor_t {
-  // B-string name with a trailing '<' outside its declared length.
-  const uint8_t* name;
-
-  // What IR type kind to construct when parsing.
-  loom_type_kind_t ir_kind;
-
-  // Number of declared parameters.
-  uint8_t param_count;
-
-  // Optional type-owned value fact domain. NULL means the type only has generic
-  // scalar facts or uses the domain-free extension behavior.
-  const loom_value_fact_domain_t* fact_domain;
-
-  // Semantic role and target-contract families for this type.
-  loom_type_semantics_t semantics;
-
-  // Format element array for the type interior (inside <...>).
-  // NULL for opaque types (no angle brackets).
-  const loom_type_format_element_t* format_elements;
-
-  // Number of entries in |format_elements|.
-  uint8_t format_element_count;
-
-  // Descriptor-backed parameter schema, or NULL when not declared.
-  const loom_parameterized_type_descriptor_t* parameterized;
-} loom_type_descriptor_t;
+typedef struct loom_context_t loom_context_t;
 
 extern const loom_parameterized_type_descriptor_t loom_encoding_type_parameterized_descriptor;
 static inline iree_string_view_t loom_encoding_type_role_name(loom_encoding_role_t value) {
@@ -117,182 +54,22 @@ static inline bool loom_low_storage_type_space_parse(iree_string_view_t name, lo
   return true;
 }
 
-// Synthetic scope for parameterized value coverage.
-typedef enum loom_test_scope_type_scope_e {
-  LOOM_TEST_SCOPE_TYPE_SCOPE_WORKGROUP = 1,
-  LOOM_TEST_SCOPE_TYPE_SCOPE_SUBGROUP = 2,
-  LOOM_TEST_SCOPE_TYPE_SCOPE_COUNT_ = 3,
-} loom_test_scope_type_scope_t;
-
-extern const loom_parameterized_type_descriptor_t loom_test_scope_type_parameterized_descriptor;
-static inline bool loom_test_scope_type_isa(loom_type_t type) {
-  return loom_type_is_parameterized(type) && loom_type_parameterized_descriptor(type) == &loom_test_scope_type_parameterized_descriptor;
-}
-enum { LOOM_TEST_SCOPE_TYPE_SCOPE_PARAMETER_INDEX = 0 };
-static inline loom_test_scope_type_scope_t loom_test_scope_type_scope(loom_type_t type) {
-  return (loom_test_scope_type_scope_t)loom_attr_as_enum(loom_type_parameterized_parameters(type)[LOOM_TEST_SCOPE_TYPE_SCOPE_PARAMETER_INDEX]);
-}
-iree_status_t loom_test_scope_type_make(
-    loom_module_t* module,
-    loom_test_scope_type_scope_t scope,
-    loom_type_t* out_type);
-
-// Synthetic scope for parameterized value coverage.
-typedef enum loom_test_matrix_type_scope_e {
-  LOOM_TEST_MATRIX_TYPE_SCOPE_WORKGROUP = 1,
-  LOOM_TEST_MATRIX_TYPE_SCOPE_SUBGROUP = 2,
-  LOOM_TEST_MATRIX_TYPE_SCOPE_COUNT_ = 3,
-} loom_test_matrix_type_scope_t;
-
-extern const loom_parameterized_type_descriptor_t loom_test_matrix_type_parameterized_descriptor;
-enum loom_test_matrix_type_build_flag_bits_e {
-  LOOM_TEST_MATRIX_TYPE_BUILD_FLAG_HAS_TARGET = 1u << 0,
-};
-typedef uint32_t loom_test_matrix_type_build_flags_t;
-
-static inline bool loom_test_matrix_type_isa(loom_type_t type) {
-  return loom_type_is_parameterized(type) && loom_type_parameterized_descriptor(type) == &loom_test_matrix_type_parameterized_descriptor;
-}
-enum { LOOM_TEST_MATRIX_TYPE_ELEMENT_TYPE_PARAMETER_INDEX = 0 };
-static inline loom_type_id_t loom_test_matrix_type_element_type(loom_type_t type) {
-  return loom_attr_as_type_id(loom_type_parameterized_parameters(type)[LOOM_TEST_MATRIX_TYPE_ELEMENT_TYPE_PARAMETER_INDEX]);
-}
-enum { LOOM_TEST_MATRIX_TYPE_SCOPE_PARAMETER_INDEX = 1 };
-static inline loom_test_matrix_type_scope_t loom_test_matrix_type_scope(loom_type_t type) {
-  return (loom_test_matrix_type_scope_t)loom_attr_as_enum(loom_type_parameterized_parameters(type)[LOOM_TEST_MATRIX_TYPE_SCOPE_PARAMETER_INDEX]);
-}
-enum { LOOM_TEST_MATRIX_TYPE_ROWS_PARAMETER_INDEX = 2 };
-static inline int64_t loom_test_matrix_type_rows(loom_type_t type) {
-  return loom_attr_as_i64(loom_type_parameterized_parameters(type)[LOOM_TEST_MATRIX_TYPE_ROWS_PARAMETER_INDEX]);
-}
-enum { LOOM_TEST_MATRIX_TYPE_TARGET_PARAMETER_INDEX = 3 };
-static inline bool loom_test_matrix_type_has_target(loom_type_t type) {
-  return !loom_attr_is_absent(loom_type_parameterized_parameters(type)[LOOM_TEST_MATRIX_TYPE_TARGET_PARAMETER_INDEX]);
-}
-static inline loom_symbol_ref_t loom_test_matrix_type_target(loom_type_t type) {
-  return loom_attr_as_symbol(loom_type_parameterized_parameters(type)[LOOM_TEST_MATRIX_TYPE_TARGET_PARAMETER_INDEX]);
-}
-iree_status_t loom_test_matrix_type_make(
-    loom_module_t* module,
-    loom_test_matrix_type_build_flags_t build_flags,
-    loom_type_id_t element_type,
-    loom_test_matrix_type_scope_t scope,
-    int64_t rows,
-    loom_symbol_ref_t target,
-    loom_type_t* out_type);
-
-extern const loom_parameterized_type_descriptor_t loom_test_array_type_parameterized_descriptor;
-enum loom_test_array_type_build_flag_bits_e {
-  LOOM_TEST_ARRAY_TYPE_BUILD_FLAG_HAS_ALIGNMENT = 1u << 0,
-  LOOM_TEST_ARRAY_TYPE_BUILD_FLAG_HAS_METADATA = 1u << 1,
-};
-typedef uint32_t loom_test_array_type_build_flags_t;
-
-static inline bool loom_test_array_type_isa(loom_type_t type) {
-  return loom_type_is_parameterized(type) && loom_type_parameterized_descriptor(type) == &loom_test_array_type_parameterized_descriptor;
-}
-enum { LOOM_TEST_ARRAY_TYPE_ELEMENT_TYPE_PARAMETER_INDEX = 0 };
-static inline loom_type_id_t loom_test_array_type_element_type(loom_type_t type) {
-  return loom_attr_as_type_id(loom_type_parameterized_parameters(type)[LOOM_TEST_ARRAY_TYPE_ELEMENT_TYPE_PARAMETER_INDEX]);
-}
-enum { LOOM_TEST_ARRAY_TYPE_ALIGNMENT_PARAMETER_INDEX = 1 };
-static inline bool loom_test_array_type_has_alignment(loom_type_t type) {
-  return !loom_attr_is_absent(loom_type_parameterized_parameters(type)[LOOM_TEST_ARRAY_TYPE_ALIGNMENT_PARAMETER_INDEX]);
-}
-static inline int64_t loom_test_array_type_alignment(loom_type_t type) {
-  return loom_attr_as_i64(loom_type_parameterized_parameters(type)[LOOM_TEST_ARRAY_TYPE_ALIGNMENT_PARAMETER_INDEX]);
-}
-enum { LOOM_TEST_ARRAY_TYPE_METADATA_PARAMETER_INDEX = 2 };
-static inline bool loom_test_array_type_has_metadata(loom_type_t type) {
-  return !loom_attr_is_absent(loom_type_parameterized_parameters(type)[LOOM_TEST_ARRAY_TYPE_METADATA_PARAMETER_INDEX]);
-}
-static inline loom_named_attr_slice_t loom_test_array_type_metadata(loom_type_t type) {
-  return loom_attr_as_dict(loom_type_parameterized_parameters(type)[LOOM_TEST_ARRAY_TYPE_METADATA_PARAMETER_INDEX]);
-}
-iree_status_t loom_test_array_type_make(
-    loom_module_t* module,
-    loom_test_array_type_build_flags_t build_flags,
-    loom_type_id_t element_type,
-    int64_t alignment,
-    loom_named_attr_slice_t metadata,
-    loom_type_t* out_type);
-
-extern const loom_parameterized_type_descriptor_t loom_test_variant_set_type_parameterized_descriptor;
-enum loom_test_variant_set_type_build_flag_bits_e {
-  LOOM_TEST_VARIANT_SET_TYPE_BUILD_FLAG_HAS_ALTERNATIVES = 1u << 0,
-};
-typedef uint32_t loom_test_variant_set_type_build_flags_t;
-
-static inline bool loom_test_variant_set_type_isa(loom_type_t type) {
-  return loom_type_is_parameterized(type) && loom_type_parameterized_descriptor(type) == &loom_test_variant_set_type_parameterized_descriptor;
-}
-enum { LOOM_TEST_VARIANT_SET_TYPE_VALUES_PARAMETER_INDEX = 0 };
-static inline loom_parameterized_attr_array_t loom_test_variant_set_type_values(loom_type_t type) {
-  return loom_attr_as_parameterized_array(loom_type_parameterized_parameters(type)[LOOM_TEST_VARIANT_SET_TYPE_VALUES_PARAMETER_INDEX]);
-}
-enum { LOOM_TEST_VARIANT_SET_TYPE_ALTERNATIVES_PARAMETER_INDEX = 1 };
-static inline bool loom_test_variant_set_type_has_alternatives(loom_type_t type) {
-  return !loom_attr_is_absent(loom_type_parameterized_parameters(type)[LOOM_TEST_VARIANT_SET_TYPE_ALTERNATIVES_PARAMETER_INDEX]);
-}
-static inline loom_parameterized_attr_array_t loom_test_variant_set_type_alternatives(loom_type_t type) {
-  return loom_attr_as_parameterized_array(loom_type_parameterized_parameters(type)[LOOM_TEST_VARIANT_SET_TYPE_ALTERNATIVES_PARAMETER_INDEX]);
-}
-iree_status_t loom_test_variant_set_type_make(
-    loom_module_t* module,
-    loom_test_variant_set_type_build_flags_t build_flags,
-    loom_parameterized_attr_array_t values,
-    loom_parameterized_attr_array_t alternatives,
-    loom_type_t* out_type);
-
-extern const loom_parameterized_type_descriptor_t loom_spirv_cooperative_matrix_type_parameterized_descriptor;
-static inline bool loom_spirv_cooperative_matrix_type_isa(loom_type_t type) {
-  return loom_type_is_parameterized(type) && loom_type_parameterized_descriptor(type) == &loom_spirv_cooperative_matrix_type_parameterized_descriptor;
-}
-enum { LOOM_SPIRV_COOPERATIVE_MATRIX_TYPE_ROWS_PARAMETER_INDEX = 0 };
-static inline int64_t loom_spirv_cooperative_matrix_type_rows(loom_type_t type) {
-  return loom_attr_as_i64(loom_type_parameterized_parameters(type)[LOOM_SPIRV_COOPERATIVE_MATRIX_TYPE_ROWS_PARAMETER_INDEX]);
-}
-enum { LOOM_SPIRV_COOPERATIVE_MATRIX_TYPE_COLUMNS_PARAMETER_INDEX = 1 };
-static inline int64_t loom_spirv_cooperative_matrix_type_columns(loom_type_t type) {
-  return loom_attr_as_i64(loom_type_parameterized_parameters(type)[LOOM_SPIRV_COOPERATIVE_MATRIX_TYPE_COLUMNS_PARAMETER_INDEX]);
-}
-enum { LOOM_SPIRV_COOPERATIVE_MATRIX_TYPE_COMPONENT_TYPE_PARAMETER_INDEX = 2 };
-static inline loom_spirv_scalar_type_t loom_spirv_cooperative_matrix_type_component_type(loom_type_t type) {
-  return (loom_spirv_scalar_type_t)loom_attr_as_enum(loom_type_parameterized_parameters(type)[LOOM_SPIRV_COOPERATIVE_MATRIX_TYPE_COMPONENT_TYPE_PARAMETER_INDEX]);
-}
-enum { LOOM_SPIRV_COOPERATIVE_MATRIX_TYPE_SCOPE_PARAMETER_INDEX = 3 };
-static inline loom_spirv_scope_t loom_spirv_cooperative_matrix_type_scope(loom_type_t type) {
-  return (loom_spirv_scope_t)loom_attr_as_enum(loom_type_parameterized_parameters(type)[LOOM_SPIRV_COOPERATIVE_MATRIX_TYPE_SCOPE_PARAMETER_INDEX]);
-}
-enum { LOOM_SPIRV_COOPERATIVE_MATRIX_TYPE_USE_PARAMETER_INDEX = 4 };
-static inline loom_spirv_cooperative_matrix_use_t loom_spirv_cooperative_matrix_type_use(loom_type_t type) {
-  return (loom_spirv_cooperative_matrix_use_t)loom_attr_as_enum(loom_type_parameterized_parameters(type)[LOOM_SPIRV_COOPERATIVE_MATRIX_TYPE_USE_PARAMETER_INDEX]);
-}
-iree_status_t loom_spirv_cooperative_matrix_type_make(
-    loom_module_t* module,
-    int64_t rows,
-    int64_t columns,
-    loom_spirv_scalar_type_t component_type,
-    loom_spirv_scope_t scope,
-    loom_spirv_cooperative_matrix_use_t use,
-    loom_type_t* out_type);
-
-// Entry in the sorted type registry.
-typedef struct loom_type_registry_entry_t {
-  iree_string_view_t name;
-  const loom_type_descriptor_t* descriptor;
-} loom_type_registry_entry_t;
-
-// Returns the number of entries in the global type registry.
+// Returns the number of entries in the common type registry.
 iree_host_size_t loom_type_registry_count(void);
 
-// Returns the sorted registry array (for iteration/testing).
+// Returns the sorted common registry array (for iteration/testing).
 const loom_type_registry_entry_t* loom_type_registry_entries(void);
 
-// Looks up a type descriptor by name (e.g., "tile", "hal.buffer").
+// Registers a generated dialect-owned type table with |context|.
+// Common and previously registered names cannot be replaced.
+iree_status_t loom_type_registry_register_types(
+    loom_context_t* context, const loom_type_registry_entry_t* entries,
+    iree_host_size_t entry_count);
+
+// Looks up a common or context-registered type by name.
 // Returns the descriptor on success, NULL if not found.
 const loom_type_descriptor_t* loom_type_registry_lookup(
-    iree_string_view_t name);
+    const loom_context_t* context, iree_string_view_t name);
 
 // Looks up a registered built-in descriptor by runtime type kind.
 // Returns NULL for dialect, generic parameterized, or invalid kinds.

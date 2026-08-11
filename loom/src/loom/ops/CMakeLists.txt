@@ -197,7 +197,6 @@ loom_generated_cc_library(
     loom::ops::global
     loom::ops::index
     loom::ops::kernel
-    loom::ops::llvmir
     loom::ops::low
     loom::ops::pass
     loom::ops::pool
@@ -251,8 +250,6 @@ loom_generated_cc_library(
     loom::ir
     loom::ops::buffer
     loom::ops::vector
-    loom::target::arch::spirv::isa
-    loom::target::arch::spirv::scalar_types
     loom::util::fact_table
 )
 
@@ -285,6 +282,7 @@ loom_cc_test(
     loom::ops::func
     loom::ops::index
     loom::ops::kernel
+    loom::ops::test
     loom::ops::vector
     loom::util::fact_table
 )

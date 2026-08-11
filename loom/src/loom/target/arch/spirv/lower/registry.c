@@ -6,7 +6,6 @@
 
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
-#include "loom/ops/type_registry.h"
 #include "loom/ops/vector/fragment.h"
 #include "loom/target/arch/spirv/contracts/logical_core.h"
 #include "loom/target/arch/spirv/contracts/logical_core_lower_rules.h"
@@ -15,6 +14,7 @@
 #include "loom/target/arch/spirv/lower/lower.h"
 #include "loom/target/arch/spirv/lower/matrix.h"
 #include "loom/target/arch/spirv/lower/workgroup.h"
+#include "loom/target/arch/spirv/ops/types.h"
 #include "loom/target/arch/spirv/value_types.h"
 #include "loom/target/registers.h"
 

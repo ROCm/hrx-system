@@ -30,15 +30,18 @@ loom_generated_cc_library(
     hdrs = [
         "ops.h",
         "registry.h",
+        "types.h",
     ],
     args = ["--dialect=ireevm"],
     generated_src_flags = [
         "--builders",
         "--tables",
+        "--types",
     ],
     generated_srcs = [
         "builders.c",
         "tables.c",
+        "types.c",
     ],
     generator = "//loom/py/loom/gen/ops:c_tables_ireevm_generator",
     visibility = _IREEVM_ROOT_VISIBILITY + _IREEVM_EXECUTION_VISIBILITY + _IREEVM_LOWER_VISIBILITY,
@@ -49,6 +52,7 @@ loom_generated_cc_library(
         "//loom/src/loom/ops:func_symbol_facts",
         "//loom/src/loom/ops:function_contract_verify",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/arch/ireevm/records:target_records",

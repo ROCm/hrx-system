@@ -352,6 +352,30 @@ test_matrix_type = TypeDef(
     doc="Mixed positional and keyed descriptor-backed type witness.",
 )
 
+test_compact_matrix_type = TypeDef(
+    "test.compact_matrix",
+    params=[
+        AttrDef("rows", "i64"),
+        AttrDef("columns", "i64"),
+        AttrDef("element_type", "type"),
+        AttrDef("scope", ATTR_TYPE_ENUM, enum_def=_ParameterizedScope),
+    ],
+    format=[
+        Param("rows"),
+        GLUE,
+        kw("x"),
+        GLUE,
+        Param("columns"),
+        GLUE,
+        kw("x"),
+        GLUE,
+        Param("element_type"),
+        COMMA,
+        Param("scope"),
+    ],
+    doc="Compact shape syntax witness for descriptor-backed type parsing.",
+)
+
 test_array_type = TypeDef(
     "test.array",
     params=[
@@ -401,6 +425,7 @@ test_variant_set_type = TypeDef(
 ALL_TEST_TYPES = (
     test_scope_type,
     test_matrix_type,
+    test_compact_matrix_type,
     test_array_type,
     test_variant_set_type,
 )

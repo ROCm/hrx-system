@@ -11,7 +11,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/ir/context.h"
 #include "loom/ops/test/ops.h"
-#include "loom/ops/type_registry.h"
+#include "loom/ops/test/types.h"
 
 namespace loom {
 namespace {

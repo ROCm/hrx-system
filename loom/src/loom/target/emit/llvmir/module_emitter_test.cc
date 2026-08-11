@@ -18,6 +18,7 @@
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ops/func_symbol_facts.h"
+#include "loom/ops/llvmir/registry.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/op_registry.h"
 #include "loom/ops/target/facts.h"
@@ -140,6 +141,7 @@ class LlvmirModuleEmitterTest : public ::testing::Test {
                                      &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
     IREE_ASSERT_OK(loom_op_registry_register_all_dialects(&context_));
+    IREE_ASSERT_OK(loom_llvmir_ops_register_dialect(&context_));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     loom_llvmir_low_descriptor_registry_initialize(&low_registry_);
   }

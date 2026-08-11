@@ -357,8 +357,8 @@ static iree_status_t loom_print_descriptor_backed_type(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "parameterized type has no family descriptor");
     }
-    descriptor =
-        loom_type_registry_lookup(loom_bstring_view(parameterized->name));
+    descriptor = loom_type_registry_lookup(
+        module->context, loom_bstring_view(parameterized->name));
     parameter_count = loom_type_parameterized_parameter_count(type);
     parameters = loom_type_parameterized_parameters(type);
   } else {

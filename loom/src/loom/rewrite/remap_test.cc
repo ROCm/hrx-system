@@ -15,7 +15,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
-#include "loom/ops/type_registry.h"
+#include "loom/ops/test/types.h"
 
 namespace loom {
 namespace {
