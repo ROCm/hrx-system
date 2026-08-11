@@ -273,6 +273,39 @@
       ]
     },
     {
+      "name": "relaxes long SOPP branches after sanitizer expansion",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/long_sopp_branch.loom",
+          "--backend=amdgpu-hal",
+          "--target=gfx11-generic",
+          "--root=long_sopp_branch",
+          "--sanitizer=access",
+          "--output={tmp}/long_sopp_branch.hal",
+          "--emit-target-artifact={tmp}/long_sopp_branch.hsaco",
+          "--compile-report=details",
+          "--compile-report-output={tmp}/long_sopp_branch_report.json"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/long_sopp_branch.hal",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/long_sopp_branch.hsaco",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/long_sopp_branch_report.json",
+          "contains": [
+            "\"packet_key\":\"amdgpu.s_branch\""
+          ]
+        }
+      ]
+    },
+    {
       "name": "reports invocation-specialized targets to suggestion providers",
       "steps": [
         {

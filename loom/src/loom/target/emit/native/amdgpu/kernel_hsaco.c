@@ -103,6 +103,7 @@ iree_status_t loom_amdgpu_build_kernel_hsaco_contribution(
       .code_object_target_id = record.code_object_target_id,
       .processor = record.processor->name,
       .kernel = kernel,
+      .branch_layout = stream.branch_layout,
       .native_insertions = stream.native_insertions,
       .native_insertion_count = stream.native_insertion_count,
       .summary =

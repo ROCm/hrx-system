@@ -25,12 +25,45 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_cc_library(
   NAME
+    branch_layout
+  HDRS
+    "branch_layout.h"
+  SRCS
+    "branch_layout.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_cc_test(
+  NAME
+    branch_layout_test
+  SRCS
+    "branch_layout_test.cc"
+  DEPS
+    ::branch_layout
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_cc_library(
+  NAME
     assembly
   HDRS
     "assembly.h"
   SRCS
     "assembly.c"
   DEPS
+    ::branch_layout
     ::register_class
     ::storage_layout
     iree::base
@@ -222,6 +255,7 @@ loom_cc_library(
   SRCS
     "encoding.c"
   DEPS
+    ::branch_layout
     ::register_class
     ::storage_layout
     ::text_fixup

@@ -278,6 +278,7 @@ static iree_status_t loom_amdgpu_kernel_assembly_emit(
   const loom_amdgpu_assembly_fragment_options_t assembly_options = {
       .packet_plan = options->packet_plan,
       .storage_layout = &record.storage_layout,
+      .branch_layout = options->branch_layout,
   };
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_assembly_fragment_with_options(
       schedule, allocation, &assembly_options, builder, scratch_arena));

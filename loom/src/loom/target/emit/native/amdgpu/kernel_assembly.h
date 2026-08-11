@@ -35,6 +35,8 @@ typedef struct loom_amdgpu_kernel_assembly_options_t {
   const loom_amdgpu_native_preflight_t* preflight;
   // Optional target-owned packet plan applied during assembly emission.
   const struct loom_amdgpu_packet_plan_t* packet_plan;
+  // Optional exact branch-island layout shared with native encoding.
+  const struct loom_amdgpu_branch_layout_t* branch_layout;
 } loom_amdgpu_kernel_assembly_options_t;
 
 // Emits complete AMDGPU assembly with target-owned ABI facts and optional
