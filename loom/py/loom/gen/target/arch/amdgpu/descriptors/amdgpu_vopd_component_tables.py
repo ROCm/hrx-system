@@ -26,15 +26,15 @@ _ensure_runtime_py_on_path()
 
 from loom.gen.support.c import c_string_arg as _c_string_arg  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
-from loom.gen.target.low.validation import operand_role_is_packet_input  # noqa: E402
-from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
-    build_amdgpu_core_descriptor_set_from_specs,
+from loom.gen.target.arch.amdgpu.descriptors.amdgpu_planning_table_inputs import (  # noqa: E402
+    AmdgpuPlanningTableInputs,
+    load_amdgpu_planning_table_inputs,
 )
+from loom.gen.target.low.validation import operand_role_is_packet_input  # noqa: E402
 from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
     AmdgpuIsaFactSource,
     AmdgpuIsaInstruction,
     AmdgpuIsaInstructionEncoding,
-    parse_amdgpu_isa_xml_path,
 )
 from loom.target.arch.amdgpu.names import amdgpu_c_identifier_fragment  # noqa: E402
 from loom.target.arch.amdgpu.target_info import (  # noqa: E402
@@ -42,9 +42,8 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION,
     AmdgpuDescriptorSetInfo,
     amdgpu_descriptor_set_ordinal,
-    sorted_descriptor_set_infos,
 )
-from loom.target.low_descriptors import ConstraintKind, Descriptor, DescriptorSet  # noqa: E402
+from loom.target.low_descriptors import ConstraintKind, Descriptor  # noqa: E402
 
 _UINT16_MAX = 0xFFFF
 _VOPD_COMPONENT_REGISTER_UNIT_COUNT = 1
@@ -173,28 +172,6 @@ class _VopdComponentTables:
     pair_affinity_ranges: tuple[_VopdPairAffinityRange, ...]
     pair_affinity_rows: tuple[_VopdPairAffinityRow, ...]
     pair_placement_recipes: tuple[_VopdPairPlacementRecipe, ...]
-
-
-def _parse_isa_xml_argument(value: str) -> tuple[str, Path]:
-    key, separator, path = value.partition(":")
-    if not separator or not key or not path:
-        raise ValueError("AMDGPU VOPD --isa-xml entries must be key:path pairs")
-    return key, Path(path)
-
-
-def _parse_isa_xml_arguments(values: Sequence[str]) -> dict[str, AmdgpuIsaFactSource]:
-    paths: dict[str, Path] = {}
-    specs: dict[str, AmdgpuIsaFactSource] = {}
-    for value in values:
-        key, path = _parse_isa_xml_argument(value)
-        existing_path = paths.get(key)
-        if existing_path is not None:
-            if existing_path != path:
-                raise ValueError(f"AMDGPU VOPD ISA XML key '{key}' has conflicting paths '{existing_path}' and '{path}'")
-            continue
-        paths[key] = path
-        specs[key] = parse_amdgpu_isa_xml_path(path)
-    return specs
 
 
 def _descriptor_set_supports_vopd(info: AmdgpuDescriptorSetInfo) -> bool:
@@ -492,22 +469,6 @@ def _descriptor_set_infos_by_key(
     descriptor_set_infos: Sequence[AmdgpuDescriptorSetInfo],
 ) -> dict[str, AmdgpuDescriptorSetInfo]:
     return {info.key: info for info in descriptor_set_infos}
-
-
-def _descriptor_sets_by_key(
-    descriptor_set_infos: Sequence[AmdgpuDescriptorSetInfo],
-    isa_specs: Mapping[str, AmdgpuIsaFactSource],
-) -> dict[str, DescriptorSet]:
-    descriptor_sets: dict[str, DescriptorSet] = {}
-    for info in descriptor_set_infos:
-        descriptor_set = build_amdgpu_core_descriptor_set_from_specs(
-            info.generator_target,
-            isa_specs,
-        )
-        if descriptor_set.key != info.key:
-            raise ValueError(f"AMDGPU descriptor-set builder '{info.generator_target}' produced '{descriptor_set.key}', expected '{info.key}'")
-        descriptor_sets[info.key] = descriptor_set
-    return descriptor_sets
 
 
 def _validate_component_definition(
@@ -1127,11 +1088,12 @@ def _validate_vopd_component_tables(tables: _VopdComponentTables) -> None:
 
 
 def _materialize_vopd_component_tables(
-    descriptor_set_infos: Sequence[AmdgpuDescriptorSetInfo],
-    isa_specs: Mapping[str, AmdgpuIsaFactSource],
+    inputs: AmdgpuPlanningTableInputs,
 ) -> _VopdComponentTables:
+    descriptor_set_infos = inputs.descriptor_set_infos
+    isa_specs = inputs.isa_specs
     infos_by_key = _descriptor_set_infos_by_key(descriptor_set_infos)
-    descriptor_sets_by_key = _descriptor_sets_by_key(descriptor_set_infos, isa_specs)
+    descriptor_sets_by_key = inputs.descriptor_sets_by_key
     descriptor_keys_by_set_key = {key: tuple(descriptor.key for descriptor in descriptor_set.descriptors) for key, descriptor_set in descriptor_sets_by_key.items()}
     descriptors_by_set_key = {key: {descriptor.key: descriptor for descriptor in descriptor_set.descriptors} for key, descriptor_set in descriptor_sets_by_key.items()}
     components = _component_definitions()
@@ -1451,6 +1413,45 @@ def _write_output(path: Path, contents: str) -> None:
     path.write_text(contents, encoding="utf-8")
 
 
+def generate_vopd_component_table_outputs(
+    inputs: AmdgpuPlanningTableInputs,
+    *,
+    component_rules_path: Path | None = None,
+    descriptor_lookup_ranges_path: Path | None = None,
+    descriptor_lookups_path: Path | None = None,
+    pair_affinity_ranges_path: Path | None = None,
+    pair_affinities_path: Path | None = None,
+    pair_placement_recipes_path: Path | None = None,
+) -> None:
+    """Generates the requested VOPD component table fragments."""
+
+    tables = _materialize_vopd_component_tables(inputs)
+    if component_rules_path is not None:
+        _write_output(component_rules_path, _emit_component_rules(tables))
+    if descriptor_lookup_ranges_path is not None:
+        _write_output(
+            descriptor_lookup_ranges_path,
+            _emit_descriptor_lookup_ranges(tables),
+        )
+    if descriptor_lookups_path is not None:
+        _write_output(
+            descriptor_lookups_path,
+            _emit_descriptor_lookup_rows(tables),
+        )
+    if pair_affinity_ranges_path is not None:
+        _write_output(
+            pair_affinity_ranges_path,
+            _emit_pair_affinity_ranges(tables),
+        )
+    if pair_affinities_path is not None:
+        _write_output(pair_affinities_path, _emit_pair_affinity_rows(tables))
+    if pair_placement_recipes_path is not None:
+        _write_output(
+            pair_placement_recipes_path,
+            _emit_pair_placement_recipes(tables),
+        )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate AMDGPU descriptor-derived VOPD table fragments.")
     parser.add_argument(
@@ -1501,31 +1502,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not any(path is not None for path in requested_outputs):
         parser.error("at least one output path is required")
 
-    tables = _materialize_vopd_component_tables(
-        sorted_descriptor_set_infos(),
-        _parse_isa_xml_arguments(args.isa_xml),
+    generate_vopd_component_table_outputs(
+        load_amdgpu_planning_table_inputs(args.isa_xml),
+        component_rules_path=args.component_rules,
+        descriptor_lookup_ranges_path=args.descriptor_lookup_ranges,
+        descriptor_lookups_path=args.descriptor_lookups,
+        pair_affinity_ranges_path=args.pair_affinity_ranges,
+        pair_affinities_path=args.pair_affinities,
+        pair_placement_recipes_path=args.pair_placement_recipes,
     )
-    if args.component_rules is not None:
-        _write_output(args.component_rules, _emit_component_rules(tables))
-    if args.descriptor_lookup_ranges is not None:
-        _write_output(
-            args.descriptor_lookup_ranges,
-            _emit_descriptor_lookup_ranges(tables),
-        )
-    if args.descriptor_lookups is not None:
-        _write_output(args.descriptor_lookups, _emit_descriptor_lookup_rows(tables))
-    if args.pair_affinity_ranges is not None:
-        _write_output(
-            args.pair_affinity_ranges,
-            _emit_pair_affinity_ranges(tables),
-        )
-    if args.pair_affinities is not None:
-        _write_output(args.pair_affinities, _emit_pair_affinity_rows(tables))
-    if args.pair_placement_recipes is not None:
-        _write_output(
-            args.pair_placement_recipes,
-            _emit_pair_placement_recipes(tables),
-        )
     return 0
 
 

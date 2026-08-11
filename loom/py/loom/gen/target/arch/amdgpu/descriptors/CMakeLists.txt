@@ -11,6 +11,18 @@ iree_add_all_subdirs()
 
 iree_py_library(
   NAME
+    planning_table_inputs
+  SRCS
+    "amdgpu_planning_table_inputs.py"
+  DEPS
+    loom::py::loom::target::low_descriptors
+    loom::py::loom::target::arch::amdgpu::descriptors
+    loom::py::loom::target::arch::amdgpu::isa_xml
+    loom::py::loom::target::arch::amdgpu::target_info
+)
+
+iree_py_library(
+  NAME
     descriptors
   MAIN
     "amdgpu_descriptors.py"
@@ -34,10 +46,10 @@ iree_py_library(
     "__init__.py"
     "amdgpu_wait_packet_tables.py"
   DEPS
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::planning_table_inputs
     loom::py::loom::gen::support::support
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::descriptors
-    loom::py::loom::target::arch::amdgpu::isa_xml
     loom::py::loom::target::arch::amdgpu::target_info
 )
 
@@ -50,6 +62,27 @@ iree_py_library(
     "__init__.py"
     "amdgpu_vopd_component_tables.py"
   DEPS
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::planning_table_inputs
+    loom::py::loom::gen::support::support
+    loom::py::loom::gen::target::low::low_descriptors
+    loom::py::loom::target::low_descriptors
+    loom::py::loom::target::arch::amdgpu::descriptors
+    loom::py::loom::target::arch::amdgpu::isa_xml
+    loom::py::loom::target::arch::amdgpu::target_info
+)
+
+iree_py_library(
+  NAME
+    planning_tables
+  MAIN
+    "amdgpu_planning_tables.py"
+  SRCS
+    "__init__.py"
+    "amdgpu_planning_tables.py"
+    "amdgpu_vopd_component_tables.py"
+    "amdgpu_wait_packet_tables.py"
+  DEPS
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::planning_table_inputs
     loom::py::loom::gen::support::support
     loom::py::loom::gen::target::low::low_descriptors
     loom::py::loom::target::low_descriptors

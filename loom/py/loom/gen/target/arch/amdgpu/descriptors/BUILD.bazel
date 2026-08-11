@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_test")
+load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_library", "iree_py_test")
 
 package(
     default_visibility = ["//loom/py/loom/gen:__subpackages__"],
@@ -16,6 +16,17 @@ GENERATOR_VISIBILITY = [
     "//loom/src/loom/target/arch/amdgpu:__pkg__",
     "//loom/src/loom/target/arch/amdgpu:__subpackages__",
 ]
+
+iree_py_library(
+    name = "planning_table_inputs",
+    srcs = ["amdgpu_planning_table_inputs.py"],
+    deps = [
+        "//loom/py/loom/target:low_descriptors",
+        "//loom/py/loom/target/arch/amdgpu:descriptors",
+        "//loom/py/loom/target/arch/amdgpu:isa_xml",
+        "//loom/py/loom/target/arch/amdgpu:target_info",
+    ],
+)
 
 iree_py_binary(
     name = "descriptors",
@@ -43,10 +54,10 @@ iree_py_binary(
     main = "amdgpu_wait_packet_tables.py",
     visibility = GENERATOR_VISIBILITY,
     deps = [
+        ":planning_table_inputs",
         "//loom/py/loom/gen/support",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch/amdgpu:descriptors",
-        "//loom/py/loom/target/arch/amdgpu:isa_xml",
         "//loom/py/loom/target/arch/amdgpu:target_info",
     ],
 )
@@ -60,6 +71,28 @@ iree_py_binary(
     main = "amdgpu_vopd_component_tables.py",
     visibility = GENERATOR_VISIBILITY,
     deps = [
+        ":planning_table_inputs",
+        "//loom/py/loom/gen/support",
+        "//loom/py/loom/gen/target/low:low_descriptors",
+        "//loom/py/loom/target:low_descriptors",
+        "//loom/py/loom/target/arch/amdgpu:descriptors",
+        "//loom/py/loom/target/arch/amdgpu:isa_xml",
+        "//loom/py/loom/target/arch/amdgpu:target_info",
+    ],
+)
+
+iree_py_binary(
+    name = "planning_tables",
+    srcs = [
+        "__init__.py",
+        "amdgpu_planning_tables.py",
+        "amdgpu_vopd_component_tables.py",
+        "amdgpu_wait_packet_tables.py",
+    ],
+    main = "amdgpu_planning_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        ":planning_table_inputs",
         "//loom/py/loom/gen/support",
         "//loom/py/loom/gen/target/low:low_descriptors",
         "//loom/py/loom/target:low_descriptors",

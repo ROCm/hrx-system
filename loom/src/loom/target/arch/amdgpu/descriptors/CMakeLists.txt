@@ -29,46 +29,15 @@ iree_add_all_subdirs()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_generated_textual_header_family(
   NAME
-    wait_packet_tables_gen
+    planning_tables_gen
   GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::descriptors::wait_packet_tables
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::planning_tables
   OUTPUTS
     "wait_packet_descriptor_ranges.inl"
     "wait_packet_descriptors.inl"
     "wait_packet_descriptor_lookups.inl"
     "wait_packet_immediates.inl"
     "wait_packet_selections.inl"
-  OUTPUT_FLAGS
-    "--descriptor-ranges"
-    "--descriptor-rows"
-    "--descriptor-lookups"
-    "--immediate-rows"
-    "--selection-rows"
-  ARGS
-    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-  INPUTS
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "loom_amdgpu_isa_xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-  COMMENT
-    "Generating AMDGPU wait-packet table family"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header_family(
-  NAME
-    vopd_component_tables_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::descriptors::vopd_component_tables
-  OUTPUTS
     "vopd_component_rules.inl"
     "vopd_component_descriptor_lookup_ranges.inl"
     "vopd_component_descriptor_lookups.inl"
@@ -76,12 +45,17 @@ loom_generated_textual_header_family(
     "vopd_pair_affinities.inl"
     "vopd_pair_placement_recipes.inl"
   OUTPUT_FLAGS
-    "--component-rules"
-    "--descriptor-lookup-ranges"
-    "--descriptor-lookups"
-    "--pair-affinity-ranges"
-    "--pair-affinities"
-    "--pair-placement-recipes"
+    "--wait-descriptor-ranges"
+    "--wait-descriptor-rows"
+    "--wait-descriptor-lookups"
+    "--wait-immediate-rows"
+    "--wait-selection-rows"
+    "--vopd-component-rules"
+    "--vopd-descriptor-lookup-ranges"
+    "--vopd-descriptor-lookups"
+    "--vopd-pair-affinity-ranges"
+    "--vopd-pair-affinities"
+    "--vopd-pair-placement-recipes"
   ARGS
     "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
     "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
@@ -96,7 +70,7 @@ loom_generated_textual_header_family(
     "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
     "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
   COMMENT
-    "Generating AMDGPU VOPD component table family"
+    "Generating AMDGPU descriptor-derived planning table family"
 )
 endif()
 

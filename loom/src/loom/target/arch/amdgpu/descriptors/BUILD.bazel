@@ -33,9 +33,7 @@ package(
 
 _AMDGPU_DESCRIPTOR_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/descriptors:descriptors"
 
-_AMDGPU_WAIT_PACKET_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/descriptors:wait_packet_tables"
-
-_AMDGPU_VOPD_COMPONENT_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/descriptors:vopd_component_tables"
+_AMDGPU_PLANNING_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/descriptors:planning_tables"
 
 _AMDGPU_CONFIG_TABLES_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu:config_tables"
 
@@ -93,17 +91,23 @@ _AMDGPU_PLANNING_FACT_VISIBILITY = [
 ]
 
 loom_generated_textual_header_family(
-    name = "wait_packet_tables_gen",
+    name = "planning_tables_gen",
     args = _AMDGPU_ISA_XML_ARGS,
-    comment = "Generating AMDGPU wait-packet table family",
-    generator = _AMDGPU_WAIT_PACKET_TABLE_GENERATOR,
+    comment = "Generating AMDGPU descriptor-derived planning table family",
+    generator = _AMDGPU_PLANNING_TABLE_GENERATOR,
     inputs = _AMDGPU_ISA_XML_INPUTS,
     output_flags = [
-        "--descriptor-ranges",
-        "--descriptor-rows",
-        "--descriptor-lookups",
-        "--immediate-rows",
-        "--selection-rows",
+        "--wait-descriptor-ranges",
+        "--wait-descriptor-rows",
+        "--wait-descriptor-lookups",
+        "--wait-immediate-rows",
+        "--wait-selection-rows",
+        "--vopd-component-rules",
+        "--vopd-descriptor-lookup-ranges",
+        "--vopd-descriptor-lookups",
+        "--vopd-pair-affinity-ranges",
+        "--vopd-pair-affinities",
+        "--vopd-pair-placement-recipes",
     ],
     outputs = [
         "wait_packet_descriptor_ranges.inl",
@@ -111,25 +115,6 @@ loom_generated_textual_header_family(
         "wait_packet_descriptor_lookups.inl",
         "wait_packet_immediates.inl",
         "wait_packet_selections.inl",
-    ],
-    visibility = _AMDGPU_PLANNING_FACT_VISIBILITY,
-)
-
-loom_generated_textual_header_family(
-    name = "vopd_component_tables_gen",
-    args = _AMDGPU_ISA_XML_ARGS,
-    comment = "Generating AMDGPU VOPD component table family",
-    generator = _AMDGPU_VOPD_COMPONENT_TABLE_GENERATOR,
-    inputs = _AMDGPU_ISA_XML_INPUTS,
-    output_flags = [
-        "--component-rules",
-        "--descriptor-lookup-ranges",
-        "--descriptor-lookups",
-        "--pair-affinity-ranges",
-        "--pair-affinities",
-        "--pair-placement-recipes",
-    ],
-    outputs = [
         "vopd_component_rules.inl",
         "vopd_component_descriptor_lookup_ranges.inl",
         "vopd_component_descriptor_lookups.inl",
