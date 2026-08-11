@@ -1022,6 +1022,8 @@ def generate_tables_c(
             vtable_flag_bits.append("LOOM_OP_VTABLE_TYPE_PROPAGATION_CANDIDATE")
         if any(kind == "LOOM_FORMAT_KIND_OPERAND_DICT" for kind, _, _ in elements):
             vtable_flag_bits.append("LOOM_OP_VTABLE_HAS_OPERAND_DICT")
+        if op.keyed_module_record_attr is not None:
+            vtable_flag_bits.append("LOOM_OP_VTABLE_KEYED_MODULE_RECORD")
         vtable_flags_str = " | ".join(vtable_flag_bits) if vtable_flag_bits else "0"
 
         sym_kind = _symbol_kind(op)
@@ -1096,6 +1098,13 @@ def generate_tables_c(
         if has_flags:
             lines.append(f"    .instance_flags_case_names = {prefix}_instance_flags_names,")
             lines.append(f"    .instance_flags_case_count = IREE_ARRAYSIZE({prefix}_instance_flags_names),")
+        if op.keyed_module_record_attr is not None:
+            key_attr_index = c_queries.resolve_attr_index(
+                op,
+                op.keyed_module_record_attr,
+                "KeyedModuleRecord",
+            )
+            lines.append(f"    .module_record_key_attr_index = {key_attr_index},")
         for spec in c_interfaces.INTERFACES:
             interface_ptr = interface_ptrs[spec.vtable_field]
             if interface_ptr != "NULL":

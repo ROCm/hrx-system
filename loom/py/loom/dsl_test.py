@@ -67,6 +67,7 @@ from loom.dsl import (
     INTEGER_ELEMENT,
     INVOLUTION,
     MEMORY_FENCE,
+    MODULE_SCOPE,
     NON_DETERMINISTIC,
     OFFSET,
     POOL,
@@ -131,6 +132,7 @@ from loom.dsl import (
     HasRankOneVector,
     HasRegister,
     ImplicitTerminator,
+    KeyedModuleRecord,
     LastAxisGroupedBy,
     LegacyFieldDefault,
     LegacyFieldMapping,
@@ -2431,6 +2433,35 @@ class TestOp:
         assert op.is_terminator
         assert op.has_trait("Pure")
         assert not op.has_trait("Idempotent")
+
+    def test_keyed_module_record_contract(self) -> None:
+        op = Op(
+            "module.record",
+            attrs=[AttrDef("key", "string"), AttrDef("payload", "i64")],
+            traits=[MODULE_SCOPE, KeyedModuleRecord("key")],
+        )
+        assert op.keyed_module_record_attr == "key"
+
+    def test_keyed_module_record_requires_attr_only_module_metadata(self) -> None:
+        with _raises(ValueError, match="requires the ModuleScope trait"):
+            Op(
+                "test.record",
+                attrs=[AttrDef("key", "string")],
+                traits=[KeyedModuleRecord("key")],
+            )
+        with _raises(ValueError, match="key attr 'key' must be a required string"):
+            Op(
+                "module.record",
+                attrs=[AttrDef("key", "string", optional=True)],
+                traits=[MODULE_SCOPE, KeyedModuleRecord("key")],
+            )
+        with _raises(ValueError, match="must be attr-only"):
+            Op(
+                "module.record",
+                operands=[Operand("input", ANY)],
+                attrs=[AttrDef("key", "string")],
+                traits=[MODULE_SCOPE, KeyedModuleRecord("key")],
+            )
 
     def test_no_traits(self) -> None:
         op = Op("test.op")

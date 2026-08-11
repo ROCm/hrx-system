@@ -334,9 +334,35 @@ iree_status_t loom_print_region_body(
   return iree_ok_status();
 }
 
+static iree_status_t loom_print_module_op(loom_print_context_t* ctx,
+                                          const loom_op_t* op,
+                                          bool* printed_any) {
+  if (*printed_any) {
+    if (iree_any_bit_set(op->flags, LOOM_OP_FLAG_LEADING_BLANK_LINE)) {
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '\n'));
+    } else {
+      const loom_op_vtable_t* vtable = loom_op_vtable(ctx->module, op);
+      if (vtable &&
+          iree_any_bit_set(vtable->traits, LOOM_TRAIT_SYMBOL_DEFINE)) {
+        IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '\n'));
+      }
+    }
+  }
+  *printed_any = true;
+  IREE_RETURN_IF_ERROR(loom_print_op_comments(ctx, op));
+  IREE_RETURN_IF_ERROR(loom_print_indent(ctx));
+  return loom_print_op(ctx, op);
+}
+
 iree_status_t loom_print_module_body(loom_print_context_t* ctx,
-                                     const loom_region_t* region) {
+                                     const loom_region_t* region,
+                                     const loom_module_record_plan_t* plan) {
   bool printed_any = false;
+  for (iree_host_size_t i = 0; i < plan->record_count; ++i) {
+    IREE_RETURN_IF_ERROR(
+        loom_print_module_op(ctx, plan->records[i].op, &printed_any));
+  }
+
   for (uint16_t block_index = 0; block_index < region->block_count;
        ++block_index) {
     const loom_block_t* block = loom_region_const_block(region, block_index);
@@ -353,25 +379,9 @@ iree_status_t loom_print_module_body(loom_print_context_t* ctx,
 
     const loom_op_t* current_op = NULL;
     loom_block_for_each_op(block, current_op) {
-      if (printed_any) {
-        if (iree_any_bit_set(current_op->flags,
-                             LOOM_OP_FLAG_LEADING_BLANK_LINE)) {
-          IREE_RETURN_IF_ERROR(
-              loom_output_stream_write_char(ctx->stream, '\n'));
-        } else {
-          const loom_op_vtable_t* current_vtable =
-              loom_op_vtable(ctx->module, current_op);
-          if (current_vtable &&
-              (current_vtable->traits & LOOM_TRAIT_SYMBOL_DEFINE)) {
-            IREE_RETURN_IF_ERROR(
-                loom_output_stream_write_char(ctx->stream, '\n'));
-          }
-        }
-      }
-      printed_any = true;
-      IREE_RETURN_IF_ERROR(loom_print_op_comments(ctx, current_op));
-      IREE_RETURN_IF_ERROR(loom_print_indent(ctx));
-      IREE_RETURN_IF_ERROR(loom_print_op(ctx, current_op));
+      const loom_op_vtable_t* vtable = loom_op_vtable(ctx->module, current_op);
+      if (loom_op_vtable_is_keyed_module_record(vtable)) continue;
+      IREE_RETURN_IF_ERROR(loom_print_module_op(ctx, current_op, &printed_any));
     }
   }
   return iree_ok_status();

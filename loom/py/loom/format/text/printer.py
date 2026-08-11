@@ -1273,19 +1273,49 @@ class Printer:
                     f"#{encoding.alias} = "
                     f"{_format_encoding_instance(encoding, use_alias=False)}"
                 )
-        for operation_index, operation in enumerate(module.body.ops):
+        printed_operation = False
+        for operation in self._module_operation_projection(module):
             op_decl = self._registry.get(operation.name)
-            if (
-                operation_index > 0
-                and op_decl is not None
-                and _is_symbol_define(op_decl)
+            if printed_operation and (
+                operation.leading_blank_line
+                or (op_decl is not None and _is_symbol_define(op_decl))
             ):
                 self._lines.append("")
             self._print_top_level_op(operation, module)
+            printed_operation = True
         # Remove trailing blank line.
         while self._lines and self._lines[-1] == "":
             self._lines.pop()
         return "\n".join(self._lines) + "\n" if self._lines else ""
+
+    def _module_operation_projection(self, module: Module) -> list[Operation]:
+        """Returns keyed records first in canonical order, then ordinary ops."""
+
+        records: list[tuple[bytes, bytes, int, Operation]] = []
+        ordinary_operations: list[Operation] = []
+        for operation_index, operation in enumerate(module.body.ops):
+            if operation.is_dead:
+                continue
+            declaration = self._registry.get(operation.name)
+            key_attr = (
+                declaration.keyed_module_record_attr
+                if declaration is not None
+                else None
+            )
+            if key_attr is None:
+                ordinary_operations.append(operation)
+                continue
+            key = cast(str, operation.attributes[key_attr])
+            records.append(
+                (
+                    operation.name.encode("utf-8"),
+                    key.encode("utf-8"),
+                    operation_index,
+                    operation,
+                )
+            )
+        records.sort(key=lambda record: record[:3])
+        return [record[3] for record in records] + ordinary_operations
 
     def _print_top_level_op(self, op: Operation, module: Module) -> None:
         """Print a module-scope op using the format-element-driven walker.

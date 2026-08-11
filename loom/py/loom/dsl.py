@@ -138,6 +138,7 @@ __all__ = [
     "DECOMPOSABLE",
     "SYMBOL_DEFINE",
     "MODULE_SCOPE",
+    "KeyedModuleRecord",
     "ISOLATED_FROM_ABOVE",
     "NON_DETERMINISTIC",
     "UNKNOWN_EFFECTS",
@@ -1552,6 +1553,12 @@ _RESOURCE_TYPE_CONSTRAINTS = frozenset(
 def AllTypesMatch(*fields: str) -> Trait:
     """All named fields must have identical types."""
     return Trait("AllTypesMatch", *fields)
+
+
+def KeyedModuleRecord(key_attr: str) -> Trait:
+    """Declares attr-only module metadata canonically ordered by one key."""
+
+    return Trait("KeyedModuleRecord", key_attr)
 
 
 def HasAncestor(op_name: str) -> Trait:
@@ -5342,6 +5349,58 @@ def _validate_condition_refinement(
         )
 
 
+def _validate_keyed_module_record(
+    op_name: str,
+    operands: tuple[Operand, ...],
+    results: tuple[Result | TiedResult, ...],
+    attrs: tuple[AttrDef, ...],
+    successors: tuple[Successor, ...],
+    regions: tuple[RegionDef, ...],
+    traits: tuple[Trait, ...],
+    effects: tuple[Effect, ...],
+    ownership_effects: tuple[OperandOwnershipEffect | ResultOwnershipEffect, ...],
+) -> None:
+    record_traits = [trait for trait in traits if trait.name == "KeyedModuleRecord"]
+    if not record_traits:
+        return
+    if len(record_traits) != 1 or len(record_traits[0].args) != 1:
+        raise ValueError(
+            f"Op '{op_name}': KeyedModuleRecord requires exactly one key attr"
+        )
+    if not any(trait.name == "ModuleScope" for trait in traits):
+        raise ValueError(
+            f"Op '{op_name}': KeyedModuleRecord requires the ModuleScope trait"
+        )
+    unsupported_traits = sorted(
+        trait.name
+        for trait in traits
+        if trait.name not in ("KeyedModuleRecord", "ModuleScope", "Pure")
+    )
+    if unsupported_traits:
+        raise ValueError(
+            f"Op '{op_name}': KeyedModuleRecord cannot carry semantic traits "
+            f"{unsupported_traits}"
+        )
+    if operands or results or successors or regions or effects or ownership_effects:
+        raise ValueError(f"Op '{op_name}': KeyedModuleRecord must be attr-only")
+    key_attr_name = record_traits[0].args[0]
+    key_attr = next((attr for attr in attrs if attr.name == key_attr_name), None)
+    if key_attr is None:
+        raise ValueError(
+            f"Op '{op_name}': KeyedModuleRecord key attr "
+            f"'{key_attr_name}' is not declared"
+        )
+    if (
+        key_attr.attr_type != ATTR_TYPE_STRING
+        or key_attr.optional
+        or key_attr.default is not None
+    ):
+        raise ValueError(
+            f"Op '{op_name}': KeyedModuleRecord key attr "
+            f"'{key_attr_name}' must be a required string"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class Op:
     """A complete operation declaration.
@@ -5648,6 +5707,17 @@ class Op:
         _validate_trait_field_contracts(
             name, frozen_operands, frozen_results, tuple(traits)
         )
+        _validate_keyed_module_record(
+            name,
+            frozen_operands,
+            frozen_results,
+            frozen_attrs,
+            frozen_successors,
+            frozen_regions,
+            tuple(traits),
+            frozen_effects,
+            frozen_ownership_effects,
+        )
         _validate_scoped_enum_fields(name, frozen_format, frozen_attrs)
         _validate_attr_params_fields(name, frozen_format, frozen_attrs)
         _validate_func_args_partitions(name, frozen_format, frozen_attrs)
@@ -5723,6 +5793,15 @@ class Op:
     def has_trait(self, trait_name: str) -> bool:
         """Check if this op has a trait by name."""
         return any(t.name == trait_name for t in self.traits)
+
+    @property
+    def keyed_module_record_attr(self) -> str | None:
+        """Returns the canonical module-record key attr, when declared."""
+
+        for trait in self.traits:
+            if trait.name == "KeyedModuleRecord":
+                return trait.args[0]
+        return None
 
     @property
     def effective_phase(self) -> OpPhase | None:

@@ -57,6 +57,17 @@ class ModuleOpsTest : public ::testing::Test {
     return module;
   }
 
+  loom_source_id_t FindModuleSourceId(const loom_module_t* module,
+                                      iree_string_view_t filename) {
+    for (iree_host_size_t i = 0; i < module->sources.count; ++i) {
+      if (iree_string_view_equal(module->sources.entries[i], filename)) {
+        return (loom_source_id_t)i;
+      }
+    }
+    ADD_FAILURE() << "Expected module source table to contain the source";
+    return LOOM_SOURCE_ID_INVALID;
+  }
+
   std::string Print(const loom_module_t* module) {
     iree_string_builder_t builder;
     iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -115,6 +126,83 @@ TEST_F(ModuleOpsTest, ParsePrintAndVerifyImports) {
       loom_module_import_symbols(target_import_op);
   ASSERT_EQ(target_symbols.count, 1u);
   EXPECT_EQ(target_symbols.values[0].symbol_id, symbols.values[0].symbol_id);
+
+  loom_module_free(module);
+}
+
+TEST_F(ModuleOpsTest, CanonicalProviderOrderPreservesCommentOwnership) {
+  static const char kSource[] =
+      "// zeta provider\n"
+      "module.import \"zeta\" [@zeta]\n"
+      "// alpha provider\n"
+      "module.import \"alpha\" [@alpha]\n";
+  static const char kExpected[] =
+      "// alpha provider\n"
+      "module.import \"alpha\" [@alpha]\n"
+      "// zeta provider\n"
+      "module.import \"zeta\" [@zeta]\n";
+
+  loom_module_t* module = Parse(IREE_SV(kSource));
+  ASSERT_NE(module, nullptr);
+  VerifyOk(module);
+
+  const loom_block_t* body = loom_module_block(module);
+  iree_host_size_t comment_count = 0;
+  const iree_string_view_t* comments =
+      loom_module_block_comments(module, body, &comment_count);
+  EXPECT_EQ(comments, nullptr);
+  EXPECT_EQ(comment_count, 0u);
+
+  const loom_op_t* zeta_import = loom_block_const_op(body, 0);
+  comments = loom_module_op_comments(module, zeta_import, &comment_count);
+  ASSERT_EQ(comment_count, 1u);
+  EXPECT_TRUE(iree_string_view_equal(comments[0], IREE_SV(" zeta provider")));
+  const loom_op_t* alpha_import = loom_block_const_op(body, 1);
+  comments = loom_module_op_comments(module, alpha_import, &comment_count);
+  ASSERT_EQ(comment_count, 1u);
+  EXPECT_TRUE(iree_string_view_equal(comments[0], IREE_SV(" alpha provider")));
+
+  EXPECT_EQ(Print(module),
+            std::string(kExpected, IREE_ARRAYSIZE(kExpected) - 1));
+  loom_module_free(module);
+}
+
+TEST_F(ModuleOpsTest, VerifierRejectsDuplicateProviderRecord) {
+  static const char kSource[] =
+      "module.import \"provider\" [@alpha]\n"
+      "module.import \"provider\" [@zeta]\n";
+  loom_module_t* module = Parse(IREE_SV(kSource));
+  ASSERT_NE(module, nullptr);
+
+  loom_source_entry_t source_entries[] = {{
+      /*.source_id=*/FindModuleSourceId(module, IREE_SV("imports.loom")),
+      /*.source=*/IREE_SV(kSource),
+      /*.filename=*/IREE_SV("imports.loom"),
+  }};
+  ASSERT_NE(source_entries[0].source_id, LOOM_SOURCE_ID_INVALID);
+  loom_source_table_resolver_t resolver_data = {
+      /*.entries=*/source_entries,
+      /*.count=*/IREE_ARRAYSIZE(source_entries),
+  };
+
+  DiagnosticCapture capture;
+  loom_verify_options_t options = {
+      /*.sink=*/capture.sink(),
+      /*.max_errors=*/20,
+      /*.source_resolver=*/{loom_source_table_resolve, &resolver_data},
+  };
+  loom_verify_result_t result = {};
+  IREE_ASSERT_OK(loom_verify_module(module, &options, &result));
+  ASSERT_EQ(result.error_count, 1u);
+  ASSERT_EQ(capture.diagnostics.size(), 1u);
+  ExpectError(capture.diagnostics[0],
+              loom_error_def_lookup(LOOM_ERROR_DOMAIN_STRUCTURE, 51),
+              LOOM_EMITTER_VERIFIER);
+  EXPECT_EQ(GetStringParam(capture.diagnostics[0], 0), "module.import");
+  EXPECT_EQ(GetStringParam(capture.diagnostics[0], 1), "provider");
+  ASSERT_EQ(capture.diagnostics[0].related_locations.size(), 1u);
+  EXPECT_EQ(capture.diagnostics[0].related_locations[0].label,
+            "previous record here");
 
   loom_module_free(module);
 }

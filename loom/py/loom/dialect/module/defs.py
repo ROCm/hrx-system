@@ -13,6 +13,7 @@ from loom.dsl import (
     MODULE_SCOPE,
     AttrDef,
     Dialect,
+    KeyedModuleRecord,
     Op,
     SymbolReference,
     SymbolReferenceRole,
@@ -43,7 +44,7 @@ module_import = Op(
         "symbol selection. This metadata is consumed only by compile-time "
         "linking."
     ),
-    traits=[MODULE_SCOPE],
+    traits=[MODULE_SCOPE, KeyedModuleRecord("provider")],
     attrs=[
         AttrDef(
             "provider",

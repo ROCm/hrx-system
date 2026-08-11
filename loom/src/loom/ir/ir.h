@@ -850,6 +850,9 @@ enum loom_op_vtable_flag_bits_e {
   // The op kind's assembly format contains an operand dictionary requiring
   // structural verification against its keyed operand segment.
   LOOM_OP_VTABLE_HAS_OPERAND_DICT = 1u << 6,
+  // The attr-only module-scope op is canonically projected by its generated
+  // string key instead of physical module-body order.
+  LOOM_OP_VTABLE_KEYED_MODULE_RECORD = 1u << 7,
 };
 typedef uint8_t loom_op_vtable_flags_t;
 
@@ -1441,7 +1444,10 @@ struct loom_op_vtable_t {
   const loom_bstring_t* instance_flags_case_names;
   uint16_t format_element_count;
   uint8_t instance_flags_case_count;
-  // 5 bytes padding to 128.
+  // String attribute that identifies a keyed module record. Valid when
+  // LOOM_OP_VTABLE_KEYED_MODULE_RECORD is set.
+  uint8_t module_record_key_attr_index;
+  // 4 bytes padding to 128.
 
   // --- Cache line 3: interface and placement pointers (128-191) ---
   //
@@ -1475,6 +1481,14 @@ static inline uint8_t loom_op_vtable_operand_descriptor_count(
   const uint8_t variadic_count =
       (vtable->vtable_flags & LOOM_OP_VTABLE_VARIADIC_OPERANDS) ? 1 : 0;
   return (uint8_t)(vtable->fixed_operand_count + variadic_count);
+}
+
+// Returns true when the op is attr-only module metadata with a generated
+// canonical key.
+static inline bool loom_op_vtable_is_keyed_module_record(
+    const loom_op_vtable_t* vtable) {
+  return vtable && iree_any_bit_set(vtable->vtable_flags,
+                                    LOOM_OP_VTABLE_KEYED_MODULE_RECORD);
 }
 
 // Returns the full dotted name as a string view (e.g., "test.addi").

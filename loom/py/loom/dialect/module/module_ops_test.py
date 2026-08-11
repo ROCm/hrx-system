@@ -41,6 +41,34 @@ def test_import_roundtrip_sorts_anchors_by_exact_name() -> None:
     assert _roundtrip_text(source) == expected
 
 
+def test_import_roundtrip_sorts_providers_and_preserves_comment_ownership() -> None:
+    source = '// zeta provider\nmodule.import "zeta" [@zeta]\n// alpha provider\nmodule.import "alpha" [@alpha]\n'
+    expected = '// alpha provider\nmodule.import "alpha" [@alpha]\n// zeta provider\nmodule.import "zeta" [@zeta]\n'
+
+    parser = Parser()
+    parser.register_ops(ALL_MODULE_OPS)
+    module = parser.parse(source)
+    assert module.body.comments == ()
+    assert module.body.ops[0].comments == (" zeta provider",)
+    assert module.body.ops[1].comments == (" alpha provider",)
+
+    printer = Printer()
+    printer.register_ops(ALL_MODULE_OPS)
+    printed = printer.print_module(module)
+    assert printed == expected
+    assert _roundtrip_text(printed) == printed
+
+
+def test_import_verifier_rejects_duplicate_provider_record() -> None:
+    parser = Parser()
+    parser.register_ops(ALL_MODULE_OPS)
+    module = parser.parse('module.import "provider" [@alpha]\nmodule.import "provider" [@zeta]\n')
+
+    diagnostics = verify_module(module, ops=ALL_MODULE_OPS)
+    assert diagnostics.has_errors
+    assert any(diagnostic.message == "duplicate keyed module record" for diagnostic in diagnostics.diagnostics)
+
+
 def test_import_parser_rejects_duplicate_anchor() -> None:
     parser = Parser()
     parser.register_ops(ALL_MODULE_OPS)

@@ -57,6 +57,7 @@ from loom.dsl import (
     ELEMENTWISE,
     HINT,
     INTEGER,
+    MODULE_SCOPE,
     POOL,
     SYMBOL_DEFINE,
     TERMINATOR,
@@ -87,6 +88,7 @@ from loom.dsl import (
     FuncLikeInterfaceFlag,
     HasParent,
     IterArgsMatchResults,
+    KeyedModuleRecord,
     LiteralMatchesElementType,
     LoopLikeInterface,
     MemoryAccessInterface,
@@ -1126,6 +1128,20 @@ def test_generate_tables_omits_type_propagation_flag_for_scalar_only_constraints
 
     assert "LOOM_OP_VTABLE_TYPE_PROPAGATION_CANDIDATE" not in tables_c
     assert ".vtable_flags =" not in tables_c
+
+
+def test_generate_tables_emits_keyed_module_record_metadata() -> None:
+    op = Op(
+        "module.record",
+        group=Dialect("module"),
+        attrs=[AttrDef("payload", ATTR_TYPE_I64), AttrDef("key", ATTR_TYPE_STRING)],
+        traits=[MODULE_SCOPE, KeyedModuleRecord("key")],
+    )
+
+    tables_c = generate_tables_c("module", 0x01, [op])
+
+    assert ".vtable_flags = LOOM_OP_VTABLE_KEYED_MODULE_RECORD," in tables_c
+    assert ".module_record_key_attr_index = 1," in tables_c
 
 
 def test_generate_tables_derives_decomposable_for_same_type_elementwise_vector_ops() -> None:

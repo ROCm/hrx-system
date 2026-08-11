@@ -833,6 +833,20 @@ ERR_STRUCTURE_050 = ErrorDef(
     fix_hint="Sort symbol names and remove duplicate entries",
 )
 
+# ERR_STRUCTURE_051: Duplicate keyed module record.
+ERR_STRUCTURE_051 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=51,
+    severity=Severity.ERROR,
+    summary="Duplicate keyed module record.",
+    message="duplicate '{op_name}' module record with key '{record_key}'",
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("record_key", ParamKind.STRING),
+    ),
+    fix_hint="Merge the duplicate records or give each record a unique key",
+)
+
 ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_001,
     ERR_STRUCTURE_002,
@@ -883,4 +897,5 @@ ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_048,
     ERR_STRUCTURE_049,
     ERR_STRUCTURE_050,
+    ERR_STRUCTURE_051,
 )

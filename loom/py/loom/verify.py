@@ -106,6 +106,8 @@ class ModuleVerifier:
                 f"module operation[{operation_index}]",
                 parent_stack=(),
             )
+        if not self.diagnostics.has_errors:
+            self._verify_keyed_module_records()
 
     def _verify_symbol_table(self) -> None:
         seen: dict[str, int] = {}
@@ -173,6 +175,29 @@ class ModuleVerifier:
                     "module body symbol definition is missing from the symbol table",
                     source=f"module operation[{operation_index}] {operation.name}",
                 )
+
+    def _verify_keyed_module_records(self) -> None:
+        seen: dict[tuple[str, str], int] = {}
+        for operation_index, operation in enumerate(self.module.body.ops):
+            if operation.is_dead:
+                continue
+            declaration = self.registry.op(operation.name)
+            if declaration is None or declaration.keyed_module_record_attr is None:
+                continue
+            key = operation.attributes[declaration.keyed_module_record_attr]
+            identity = (operation.name, key)
+            previous_index = seen.get(identity)
+            if previous_index is not None:
+                self.diagnostics.error(
+                    "duplicate keyed module record",
+                    source=f"module operation[{operation_index}] {operation.name}",
+                    details=(
+                        f"key is {key!r}",
+                        f"previous record is module operation[{previous_index}]",
+                    ),
+                )
+                continue
+            seen[identity] = operation_index
 
     def _verify_operation(
         self,
