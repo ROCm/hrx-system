@@ -74,14 +74,6 @@ def generate_descriptor_set_shared_header(
     return c_emit.emit_header_for_spec(compiled, view_spec)
 
 
-def write_descriptor_set(spec: DescriptorSet, allowlist: DescriptorAllowlist | None = None) -> None:
-    from loom.gen import bootstrap as _bootstrap
-
-    generated = generate_descriptor_set(spec, allowlist)
-    (_bootstrap.REPO_ROOT / spec.c_header_path).write_text(generated.header, encoding="utf-8")
-    (_bootstrap.REPO_ROOT / spec.c_source_path).write_text(generated.source, encoding="utf-8")
-
-
 def write_descriptor_set_to_paths(
     spec: DescriptorSet,
     *,
@@ -94,16 +86,3 @@ def write_descriptor_set_to_paths(
     source_path.parent.mkdir(parents=True, exist_ok=True)
     header_path.write_text(generated.header, encoding="utf-8")
     source_path.write_text(generated.source, encoding="utf-8")
-
-
-def main() -> None:
-    from loom.target.descriptor_sets import iter_checked_in_c_descriptor_sets
-
-    descriptor_sets = tuple(iter_checked_in_c_descriptor_sets())
-    for descriptor_set in descriptor_sets:
-        write_descriptor_set(descriptor_set)
-    print(f"Generated {len(descriptor_sets)} low descriptor sets")
-
-
-if __name__ == "__main__":
-    main()

@@ -13,7 +13,6 @@ import pytest
 from loom.gen.target.low.low_descriptor_shard import main
 from loom.target.descriptor_sets import (
     descriptor_set_names,
-    iter_checked_in_c_descriptor_sets,
     resolve_descriptor_set,
 )
 
@@ -33,10 +32,6 @@ def test_descriptor_set_names_include_keys_and_aliases() -> None:
     assert "test_low_core" in names
     assert "test.low.alt" in names
     assert "test_low_alt" in names
-
-
-def test_checked_in_c_generation_excludes_build_generated_shards() -> None:
-    assert tuple(iter_checked_in_c_descriptor_sets()) == ()
 
 
 def test_main_generates_selected_descriptor_set(tmp_path: Path) -> None:

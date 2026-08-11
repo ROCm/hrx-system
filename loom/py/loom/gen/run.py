@@ -14,7 +14,6 @@ Usage:
     python3 loom/py/loom/gen/run.py c_errors --check
     python3 loom/py/loom/gen/run.py c_tables --check
     python3 loom/py/loom/gen/run.py c_tables --in-place
-    python3 loom/py/loom/gen/run.py low_descriptors
     python3 loom/py/loom/gen/run.py numeric_conversion_matrix --check
     python3 loom/py/loom/gen/run.py numeric_conversion_matrix --in-place
     python3 loom/py/loom/gen/run.py textmate --in-place
@@ -37,24 +36,11 @@ GENERATORS = {
     "c_errors": "loom.gen.error.c_errors",
     "c_tables": "loom.gen.ops.c_tables",
     "checked_in_artifacts": "loom.gen.checked_in_artifacts",
-    "low_descriptors": "loom.gen.target.low.low_descriptors",
     "numeric_conversion_matrix": "loom.gen.test.numeric_conversion_matrix",
     "package_inits": "loom.gen.python.package_inits",
     "textmate": "loom.gen.editor.textmate",
     "x86_packed_dot_contract": "loom.gen.target.arch.x86.x86_packed_dot_contract",
     "x86_target_profiles": "loom.gen.target.arch.x86.x86_target_profiles",
-}
-
-ARGUMENT_GENERATORS: set[str] = {
-    "builders_pyi",
-    "c_errors",
-    "c_tables",
-    "checked_in_artifacts",
-    "numeric_conversion_matrix",
-    "package_inits",
-    "textmate",
-    "x86_packed_dot_contract",
-    "x86_target_profiles",
 }
 
 
@@ -67,9 +53,6 @@ def main(argv: list[str]) -> int:
     if len(argv) < 2 or argv[1] not in GENERATORS:
         print(_usage(), file=sys.stderr)
         return 2
-    if argv[1] not in ARGUMENT_GENERATORS and len(argv) != 2:
-        print(_usage(), file=sys.stderr)
-        return 2
 
     repo_root = bootstrap.ensure_repository_packages_on_path(Path(__file__))
     if Path.cwd().resolve() != repo_root:
@@ -77,10 +60,7 @@ def main(argv: list[str]) -> int:
         return 2
 
     module = importlib.import_module(GENERATORS[argv[1]])
-    if argv[1] in ARGUMENT_GENERATORS:
-        return int(module.main(argv[2:]))
-    module.main()
-    return 0
+    return int(module.main(argv[2:]))
 
 
 if __name__ == "__main__":
