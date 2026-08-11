@@ -10,9 +10,9 @@ kernel.def @dynamic_workgroup_fill(%workgroup_count: index) {
   %value = scalar.constant 42 : i32
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
   %global_output = buffer.assume.memory_space<global> %output_aligned : buffer
-  %output_view = buffer.view %global_output[%base] : buffer -> view<4xi32, #dense>
+  %output_view = buffer.view %global_output[%base] : buffer -> view<4xi32>
   scf.for %i = [%workgroup_id to %element_count step %workgroup_count_bounded] {
-    view.store %value, %output_view[%i] : i32, view<4xi32, #dense>
+    view.store %value, %output_view[%i] : i32, view<4xi32>
   }
   kernel.return
 }

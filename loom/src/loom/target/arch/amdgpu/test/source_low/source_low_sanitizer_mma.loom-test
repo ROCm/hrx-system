@@ -12,7 +12,7 @@ kernel.def target(@target) @sanitizer_fragment_result_store() {
   %n = index.constant 16 : index
   %k = index.constant 16 : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %output_global[%base] : buffer -> view<16x16xf32, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<16x16xf32>
   %lhs_data = vector.constant 0.0 : vector<16xf16>
   %rhs_data = vector.constant 0.0 : vector<16xf16>
   %init_data = vector.constant 0.0 : vector<8xf32>
@@ -20,7 +20,7 @@ kernel.def target(@target) @sanitizer_fragment_result_store() {
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<16xf16>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf32>
-  vector.fragment.store<result> %result, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %result, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
   kernel.return
 }
 

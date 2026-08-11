@@ -5,8 +5,8 @@ amdgpu.target<gfx11-generic> @target
 func.def target(@target) @sanitizer_explicit_gfx11_access_read(%input: buffer) {
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
-  %input_view = buffer.view %input_global[%base] : buffer -> view<1xi32, #dense>
-  sanitizer.assert.access<read> %input_view[0] : view<1xi32, #dense>
+  %input_view = buffer.view %input_global[%base] : buffer -> view<1xi32>
+  sanitizer.assert.access<read> %input_view[0] : view<1xi32>
   func.return
 }
 
@@ -98,8 +98,8 @@ amdgpu.target<gfx11-generic> @target
 func.def target(@target) @sanitizer_explicit_gfx11_access_write(%output: buffer) {
   %base = index.constant 0 : offset
   %output_global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %output_global[%base] : buffer -> view<1xf32, #dense>
-  sanitizer.assert.access<write> %output_view[0] : view<1xf32, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<1xf32>
+  sanitizer.assert.access<write> %output_view[0] : view<1xf32>
   func.return
 }
 
@@ -280,8 +280,8 @@ amdgpu.target<gfx11-generic> @target
 func.def target(@target) @sanitizer_explicit_gfx11_vector_access_read(%input: buffer) {
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
-  %input_view = buffer.view %input_global[%base] : buffer -> view<4xi32, #dense>
-  sanitizer.assert.access<read> %input_view[0] {static_extents = [4]} : view<4xi32, #dense>
+  %input_view = buffer.view %input_global[%base] : buffer -> view<4xi32>
+  sanitizer.assert.access<read> %input_view[0] {static_extents = [4]} : view<4xi32>
   func.return
 }
 
@@ -367,9 +367,9 @@ amdgpu.target<gfx11-generic> @target
 func.def target(@target) @sanitizer_explicit_gfx11_access_reads_share_trap(%input: buffer) {
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
-  %input_view = buffer.view %input_global[%base] : buffer -> view<2xi32, #dense>
-  sanitizer.assert.access<read> %input_view[0] : view<2xi32, #dense>
-  sanitizer.assert.access<read> %input_view[1] : view<2xi32, #dense>
+  %input_view = buffer.view %input_global[%base] : buffer -> view<2xi32>
+  sanitizer.assert.access<read> %input_view[0] : view<2xi32>
+  sanitizer.assert.access<read> %input_view[1] : view<2xi32>
   func.return
 }
 
@@ -526,8 +526,8 @@ amdgpu.target<gfx11-generic> @target
 func.def target(@target) @sanitizer_trap_terminates_returning_func(%input: buffer, %value: i32) -> (i32) {
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
-  %input_view = buffer.view %input_global[%base] : buffer -> view<1xi32, #dense>
-  sanitizer.assert.access<read> %input_view[0] : view<1xi32, #dense>
+  %input_view = buffer.view %input_global[%base] : buffer -> view<1xi32>
+  sanitizer.assert.access<read> %input_view[0] : view<1xi32>
   func.return %value : i32
 }
 
@@ -619,8 +619,8 @@ amdgpu.target<gfx942> @target
 func.def target(@target) @sanitizer_explicit_cdna3_access_read(%input: buffer) {
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
-  %input_view = buffer.view %input_global[%base] : buffer -> view<1xi32, #dense>
-  sanitizer.assert.access<read> %input_view[0] : view<1xi32, #dense>
+  %input_view = buffer.view %input_global[%base] : buffer -> view<1xi32>
+  sanitizer.assert.access<read> %input_view[0] : view<1xi32>
   func.return
 }
 
@@ -705,8 +705,8 @@ amdgpu.target<gfx1200> @target
 func.def target(@target) @sanitizer_explicit_rdna4_access_read(%input: buffer) {
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
-  %input_view = buffer.view %input_global[%base] : buffer -> view<1xi32, #dense>
-  sanitizer.assert.access<read> %input_view[0] : view<1xi32, #dense>
+  %input_view = buffer.view %input_global[%base] : buffer -> view<1xi32>
+  sanitizer.assert.access<read> %input_view[0] : view<1xi32>
   func.return
 }
 
@@ -804,8 +804,8 @@ kernel.def target(@target) @sanitizer_dynamic_byte_stride_read() {
   %lane0 = kernel.workitem.id<x> : index
   %row = index.assume %lane0 [range(%lane0, 0, 255)] : index
   %input_global = buffer.assume.memory_space<global> %input : buffer
-  %input_view = buffer.view %input_global[%base] : buffer -> view<256x210xi8, #dense>
-  sanitizer.assert.access<read> %input_view[%row, 0] : view<256x210xi8, #dense>
+  %input_view = buffer.view %input_global[%base] : buffer -> view<256x210xi8>
+  sanitizer.assert.access<read> %input_view[%row, 0] : view<256x210xi8>
   kernel.return
 }
 

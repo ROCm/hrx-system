@@ -34,11 +34,11 @@ kernel.def target(@target) export("configured_fragment_bank") @configured_fragme
   %scratch_bytes = index.cast %scratch_bytes_index : index to offset
   %lane = kernel.workitem.id<x> : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %output_global[%base] : buffer -> view<[%m_extent]x[%n_extent]xf32, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%m_extent]x[%n_extent]xf32>
   %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
-  %scratch_view = buffer.view %scratch[%base] : buffer -> view<[%scratch_elements]xi32, #dense>
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<[%scratch_elements]xi32>
   %marker = vector.constant 0 : vector<1xi32>
-  vector.store %marker, %scratch_view[%lane] : vector<1xi32>, view<[%scratch_elements]xi32, #dense>
+  vector.store %marker, %scratch_view[%lane] : vector<1xi32>, view<[%scratch_elements]xi32>
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %lhs_payload = vector.constant 1.0 : vector<16xbf16>
   %rhs_payload = vector.constant 1.0 : vector<16xbf16>
@@ -69,7 +69,7 @@ kernel.def target(@target) export("configured_fragment_bank") @configured_fragme
       %store_n_offset = index.mul %store_n, %tile_extent : index
       %store_payload = vector.extract %result_bank[%store_m, %store_n] : vector<[%m_fragments]x[%n_fragments]x8xf32> -> vector<8xf32>
       %store_fragment = vector.fragment<result> %store_payload shape [%matrix_m, %matrix_n] : vector<8xf32>
-      vector.fragment.store<result> %store_fragment, %output_view[%store_m_offset, %store_n_offset] shape [%matrix_m, %matrix_n] : vector<8xf32>, view<[%m_extent]x[%n_extent]xf32, #dense>
+      vector.fragment.store<result> %store_fragment, %output_view[%store_m_offset, %store_n_offset] shape [%matrix_m, %matrix_n] : vector<8xf32>, view<[%m_extent]x[%n_extent]xf32>
     }
   }
   kernel.return

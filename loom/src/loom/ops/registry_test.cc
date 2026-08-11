@@ -56,8 +56,9 @@ TEST(OpRegistry, RegistersProductionContextSurface) {
       iota_semantics.contract_families, LOOM_CONTRACT_VECTOR_COORDINATE));
 
   loom_encoding_family_id_t dense_family_id =
-      loom_context_lookup_encoding_family_by_name(
-          &context, iree_make_cstring_view("dense"));
+      loom_context_resolve_encoding_name(&context,
+                                         IREE_SV("encoding.layout.dense"))
+          .family_id;
   EXPECT_NE(dense_family_id, LOOM_ENCODING_FAMILY_ID_INVALID);
   EXPECT_NE(loom_context_resolve_encoding_vtable(&context, dense_family_id),
             nullptr);

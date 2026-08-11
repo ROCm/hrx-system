@@ -287,8 +287,8 @@ command_parameter = Op(
         ResultType("result"),
     ],
     examples=[
-        '%embedding = command.parameter %parameters, "token_embd.weight" : view<175030272xi8, #dense>',
-        '%query = command.parameter %parameters, "blk.{}.attn_q.weight"[%layer] : view<4718592xi8, #dense>',
+        '%embedding = command.parameter %parameters, "token_embd.weight" : view<175030272xi8>',
+        '%query = command.parameter %parameters, "blk.{}.attn_q.weight"[%layer] : view<4718592xi8>',
     ],
 )
 

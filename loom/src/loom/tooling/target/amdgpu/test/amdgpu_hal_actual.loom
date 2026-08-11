@@ -6,8 +6,8 @@ kernel.def @store_i32() {
   %output_index = index.constant 0 : index
   %value = scalar.constant 42 : i32
   %global = buffer.assume.memory_space<global> %output : buffer
-  %view = buffer.view %global[%base] : buffer -> view<1xi32, #dense>
-  view.store %value, %view[%output_index] : i32, view<1xi32, #dense>
+  %view = buffer.view %global[%base] : buffer -> view<1xi32>
+  view.store %value, %view[%output_index] : i32, view<1xi32>
   kernel.return
 }
 
@@ -18,10 +18,10 @@ kernel.def @double_i32() {
   %base = index.constant 0 : offset
   %output_index = index.constant 0 : index
   %global = buffer.assume.memory_space<global> %output : buffer
-  %view = buffer.view %global[%base] : buffer -> view<1xi32, #dense>
-  %loaded = view.load %view[%output_index] : view<1xi32, #dense> -> i32
+  %view = buffer.view %global[%base] : buffer -> view<1xi32>
+  %loaded = view.load %view[%output_index] : view<1xi32> -> i32
   %doubled = scalar.addi %loaded, %loaded : i32
-  view.store %doubled, %view[%output_index] : i32, view<1xi32, #dense>
+  view.store %doubled, %view[%output_index] : i32, view<1xi32>
   kernel.return
 }
 

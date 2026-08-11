@@ -71,8 +71,8 @@ def test_program_without_specializations_roundtrip() -> None:
 def test_parameter_roundtrip() -> None:
     _roundtrip(
         """command.program.def @parameters(%layer: index) launch(%parameters: buffer) {
-  %embedding = command.parameter %parameters, "token_embd.weight" : view<1024xi8, #dense>
-  %query = command.parameter %parameters, "blk.{}.attn_q.weight"[%layer] : view<256xi8, #dense>
+  %embedding = command.parameter %parameters, "token_embd.weight" : view<1024xi8>
+  %query = command.parameter %parameters, "blk.{}.attn_q.weight"[%layer] : view<256xi8>
   command.return
 }
 """

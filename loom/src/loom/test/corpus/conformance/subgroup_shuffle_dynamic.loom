@@ -23,12 +23,12 @@ kernel.def @subgroup_shuffle_dynamic_index() {
   %source_lane = index.assume %source_lane0 [range(%source_lane0, 0, 15)] : index
   %source_lane_i32 = index.cast %source_lane : index to i32
   %width = scalar.constant 16 : i32
-  %input_view = buffer.view %input[%c0] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%c0] : buffer -> view<64xi32, #dense>
-  %value = view.load %input_view[%workitem] : view<64xi32, #dense> -> i32
+  %input_view = buffer.view %input[%c0] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%c0] : buffer -> view<64xi32>
+  %value = view.load %input_view[%workitem] : view<64xi32> -> i32
   %shuffled, %valid = kernel.subgroup.shuffle<index> %value, %source_lane_i32, %width : i32, i32, i32
   scf.if %valid {
-    view.store %shuffled, %output_view[%workitem] : i32, view<64xi32, #dense>
+    view.store %shuffled, %output_view[%workitem] : i32, view<64xi32>
   }
   kernel.return
 }
@@ -48,12 +48,12 @@ kernel.def @subgroup_shuffle_dynamic_xor() {
   %source_lane = index.assume %source_lane0 [range(%source_lane0, 0, 15)] : index
   %source_lane_i32 = index.cast %source_lane : index to i32
   %width = scalar.constant 16 : i32
-  %input_view = buffer.view %input[%c0] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%c0] : buffer -> view<64xi32, #dense>
-  %value = view.load %input_view[%workitem] : view<64xi32, #dense> -> i32
+  %input_view = buffer.view %input[%c0] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%c0] : buffer -> view<64xi32>
+  %value = view.load %input_view[%workitem] : view<64xi32> -> i32
   %shuffled, %valid = kernel.subgroup.shuffle<xor> %value, %source_lane_i32, %width : i32, i32, i32
   scf.if %valid {
-    view.store %shuffled, %output_view[%workitem] : i32, view<64xi32, #dense>
+    view.store %shuffled, %output_view[%workitem] : i32, view<64xi32>
   }
   kernel.return
 }
@@ -76,12 +76,12 @@ kernel.def @subgroup_shuffle_dynamic_up() {
   %source_lane = index.assume %source_lane0 [range(%source_lane0, 0, 1)] : index
   %source_lane_i32 = index.cast %source_lane : index to i32
   %width = scalar.constant 2 : i32
-  %input_view = buffer.view %input[%c0] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%c0] : buffer -> view<64xi32, #dense>
-  %value = view.load %input_view[%workitem] : view<64xi32, #dense> -> i32
+  %input_view = buffer.view %input[%c0] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%c0] : buffer -> view<64xi32>
+  %value = view.load %input_view[%workitem] : view<64xi32> -> i32
   %shuffled, %valid = kernel.subgroup.shuffle<up> %value, %source_lane_i32, %width : i32, i32, i32
   scf.if %valid {
-    view.store %shuffled, %output_view[%workitem] : i32, view<64xi32, #dense>
+    view.store %shuffled, %output_view[%workitem] : i32, view<64xi32>
   }
   kernel.return
 }
@@ -102,12 +102,12 @@ kernel.def @subgroup_shuffle_dynamic_down() {
   %source_lane = index.assume %source_lane0 [range(%source_lane0, 0, 1)] : index
   %source_lane_i32 = index.cast %source_lane : index to i32
   %width = scalar.constant 2 : i32
-  %input_view = buffer.view %input[%c0] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%c0] : buffer -> view<64xi32, #dense>
-  %value = view.load %input_view[%workitem] : view<64xi32, #dense> -> i32
+  %input_view = buffer.view %input[%c0] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%c0] : buffer -> view<64xi32>
+  %value = view.load %input_view[%workitem] : view<64xi32> -> i32
   %shuffled, %valid = kernel.subgroup.shuffle<down> %value, %source_lane_i32, %width : i32, i32, i32
   scf.if %valid {
-    view.store %shuffled, %output_view[%workitem] : i32, view<64xi32, #dense>
+    view.store %shuffled, %output_view[%workitem] : i32, view<64xi32>
   }
   kernel.return
 }

@@ -12,8 +12,11 @@ from collections.abc import Sequence
 from typing import Any
 
 from loom.dsl import (
+    ATTR_TYPE_BOOL,
     ATTR_TYPE_ENUM,
+    ATTR_TYPE_F64,
     ATTR_TYPE_FLAGS,
+    ATTR_TYPE_I64,
     ATTR_TYPE_PREDICATE_LIST,
     AttrDef,
     ConditionRefinementTruth,
@@ -30,6 +33,9 @@ from loom.dsl import (
 )
 from loom.fields import FieldKind, compute_layout
 from loom.gen.ops import c_format, c_interfaces, c_queries, c_symbols, c_traits
+from loom.gen.ops.c_enum_attrs import (
+    collect_encoding_auxiliary_key_enum as _collect_encoding_auxiliary_key_enum,
+)
 from loom.gen.ops.c_enum_attrs import collect_shared_enums as _collect_shared_enums
 from loom.gen.ops.c_enum_attrs import enum_names_array_name as _enum_names_array_name
 from loom.gen.ops.c_enums import (
@@ -68,6 +74,7 @@ from loom.gen.support import c_arrays
 from loom.gen.support.c import c_identifier as _c_identifier
 from loom.gen.support.c import c_string_literal as _c_string_literal
 from loom.gen.support.generated_file import line_comment_header
+from loom.stable_id import stable_id_from_string as _stable_id_from_string
 
 
 def _contract_family_mask(contracts: Sequence[ContractFamily]) -> str:
@@ -401,6 +408,35 @@ def _emit_encoding_enum_case_names(
     return shared_enum_names
 
 
+def _emit_encoding_auxiliary_key_descriptors(
+    lines: list[str],
+    dialect_name: str,
+    encoding_families: Sequence[EncodingFamilyDef],
+) -> None:
+    """Emits the shared auxiliary-key vocabulary for encoding families."""
+    enum_def = _collect_encoding_auxiliary_key_enum(encoding_families)
+    if enum_def is None:
+        return
+
+    c_prefix = _c_encoding_enum_prefix(dialect_name, enum_def)
+    cases_by_value = {case.value: case for case in enum_def.cases}
+    descriptor_count = max(cases_by_value) + 1
+    descriptor_count_expression = f"{c_prefix.upper()}_COUNT_" if enum_def.c_type is None else str(descriptor_count)
+    lines.append(f"const loom_encoding_auxiliary_key_descriptor_t {c_prefix}_descriptors[{descriptor_count_expression}] = {{")
+    for value in range(descriptor_count):
+        case = cases_by_value.get(value)
+        if case is None:
+            lines.append("    {0},")
+            continue
+        stable_id = _stable_id_from_string(case.keyword)
+        lines.append("    {")
+        lines.append(f"        .name = {_bstring_expr(case.keyword)},")
+        lines.append(f"        .stable_id = UINT64_C(0x{stable_id:016x}),")
+        lines.append("    },")
+    lines.append("};")
+    lines.append("")
+
+
 def _emit_encoding_family_fixed_metadata(lines: list[str], family: EncodingFamilyDef, prefix: str) -> str | None:
     """Emits family-wide constant encoding metadata when present."""
     summary = family.fixed_operand_summary
@@ -469,6 +505,84 @@ def _emit_encoding_family_fixed_metadata(lines: list[str], family: EncodingFamil
     return table_name
 
 
+def _c_encoding_alias_value(parameter: AttrDef, value: Any) -> str:
+    """Returns a static module-independent loom_attribute_t initializer."""
+
+    if parameter.attr_type == ATTR_TYPE_I64:
+        literal = f"INT64_C({value})" if value >= 0 else f"-INT64_C({-value})"
+        return f"{{.kind = LOOM_ATTR_I64, .i64 = {literal}}}"
+    if parameter.attr_type == ATTR_TYPE_F64:
+        return f"{{.kind = LOOM_ATTR_F64, .f64 = {float(value)!r}}}"
+    if parameter.attr_type == ATTR_TYPE_BOOL:
+        return f"{{.kind = LOOM_ATTR_BOOL, .raw = {1 if value else 0}}}"
+    if parameter.attr_type == ATTR_TYPE_ENUM:
+        assert parameter.enum_def is not None
+        return f"{{.kind = LOOM_ATTR_ENUM, .raw = {parameter.enum_def.case(value).value}}}"
+    raise AssertionError(f"unsupported encoding alias parameter kind {parameter.attr_type!r}")
+
+
+def _emit_encoding_family_aliases(lines: list[str], family: EncodingFamilyDef, prefix: str) -> str | None:
+    """Emits canonical spelling rows for one structural encoding family."""
+
+    if not family.aliases:
+        return None
+    parameters_by_name = {parameter.name: parameter for parameter in family.parameters}
+    parameter_indexes = {parameter.name: index for index, parameter in enumerate(family.parameters)}
+    alias_parameter_tables: list[str] = []
+    for alias_index, alias in enumerate(family.aliases):
+        table_name = f"{prefix}_alias_{alias_index}_parameters"
+        alias_parameter_tables.append(table_name)
+        lines.append(f"static const loom_encoding_alias_parameter_t {table_name}[] = {{")
+        fixed_parameter_names = {parameter_name for parameter_name, _ in alias.fixed_parameters}
+        for parameter_name, value in alias.parameters:
+            parameter = parameters_by_name[parameter_name]
+            lines.append("    {")
+            lines.append(f"        .parameter_index = {parameter_indexes[parameter_name]},")
+            if parameter_name in fixed_parameter_names:
+                lines.append("        .flags = LOOM_ENCODING_ALIAS_PARAMETER_FIXED,")
+            lines.append(f"        .value = {_c_encoding_alias_value(parameter, value)},")
+            lines.append("    },")
+        lines.append("};")
+        lines.append("")
+
+    table_name = f"{prefix}_aliases"
+    lines.append(f"static const loom_encoding_alias_descriptor_t {table_name}[] = {{")
+    for alias, parameter_table in zip(family.aliases, alias_parameter_tables, strict=True):
+        lines.append("    {")
+        lines.append(f"        .name = {_bstring_expr(alias.name)},")
+        lines.append(f"        .parameter_count = IREE_ARRAYSIZE({parameter_table}),")
+        lines.append(f"        .parameters = {parameter_table},")
+        lines.append("    },")
+    lines.append("};")
+    lines.append("")
+    return table_name
+
+
+def _emit_encoding_family_alias_discriminator(lines: list[str], family: EncodingFamilyDef, prefix: str) -> tuple[int, str] | None:
+    """Emits the direct enum-value-to-alias lookup for one family."""
+
+    discriminator = family.alias_discriminator
+    if discriminator is None:
+        return None
+    assert discriminator.enum_def is not None
+    parameter_index = family.parameters.index(discriminator)
+    value_count = max(case.value for case in discriminator.enum_def.cases) + 1
+    alias_ordinals = [0] * value_count
+    for alias_index, alias in enumerate(family.aliases):
+        discriminator_keyword = dict(alias.fixed_parameters)[discriminator.name]
+        discriminator_value = discriminator.enum_def.case(discriminator_keyword).value
+        alias_ordinals[discriminator_value] = alias_index + 1
+
+    table_name = f"{prefix}_alias_ordinals"
+    lines.append(f"static const uint8_t {table_name}[{value_count}] = {{")
+    for value_index, alias_ordinal in enumerate(alias_ordinals):
+        if alias_ordinal != 0:
+            lines.append(f"    [{value_index}] = {alias_ordinal},")
+    lines.append("};")
+    lines.append("")
+    return parameter_index, table_name
+
+
 def _emit_encoding_family_tables(
     lines: list[str],
     encoding_families: Sequence[EncodingFamilyDef],
@@ -481,6 +595,8 @@ def _emit_encoding_family_tables(
     for family in encoding_families:
         prefix = _c_encoding_family_prefix(family)
         parameter_table = _emit_attr_descriptor_table(lines, prefix, family.parameters, shared_enum_names)
+        alias_table = _emit_encoding_family_aliases(lines, family, prefix)
+        alias_discriminator = _emit_encoding_family_alias_discriminator(lines, family, prefix)
         fixed_metadata = _emit_encoding_family_fixed_metadata(lines, family, prefix)
         dynamic_parameter_table = None
         if family.dynamic_parameters:
@@ -496,9 +612,18 @@ def _emit_encoding_family_tables(
         lines.append(f"const loom_encoding_family_descriptor_t {_c_encoding_family_descriptor_name(family)} = {{")
         lines.append(f"    .name = {_bstring_expr(family.name)},")
         lines.append(f"    .role = {family.role.c_name},")
+        if family.implicit_shaped_attachment:
+            lines.append("    .family_flags = LOOM_ENCODING_FAMILY_IMPLICIT_SHAPED_ATTACHMENT,")
         if parameter_table is not None:
             lines.append(f"    .parameter_count = IREE_ARRAYSIZE({parameter_table}),")
             lines.append(f"    .parameter_descriptors = {parameter_table},")
+        if alias_table is not None:
+            lines.append(f"    .alias_count = IREE_ARRAYSIZE({alias_table}),")
+            lines.append(f"    .aliases = {alias_table},")
+        if alias_discriminator is not None:
+            parameter_index, ordinal_table = alias_discriminator
+            lines.append(f"    .alias_discriminator_parameter_index = {parameter_index},")
+            lines.append(f"    .alias_ordinals_by_discriminator = {ordinal_table},")
         if dynamic_parameter_table is not None:
             lines.append(f"    .dynamic_parameter_count = IREE_ARRAYSIZE({dynamic_parameter_table}),")
             lines.append(f"    .dynamic_parameter_descriptors = {dynamic_parameter_table},")
@@ -978,6 +1103,7 @@ def generate_tables_c(
     # Parameterized attribute families share the ordinary attribute schema but
     # retain a distinct dialect-owned outer identity.
     encoding_enum_names = _emit_encoding_enum_case_names(lines, encoding_families)
+    _emit_encoding_auxiliary_key_descriptors(lines, dialect_name, encoding_families)
     _emit_parameterized_attr_tables(lines, dialect_name, parameterized_attrs, encoding_enum_names)
     _emit_encoding_family_tables(lines, encoding_families, encoding_enum_names)
 
@@ -1063,6 +1189,7 @@ def generate_tables_aggregator_c(
     lines.append("")
 
     encoding_enum_names = _emit_encoding_enum_case_names(lines, encoding_families)
+    _emit_encoding_auxiliary_key_descriptors(lines, dialect_name, encoding_families)
     _emit_parameterized_attr_tables(lines, dialect_name, parameterized_attrs, encoding_enum_names)
     _emit_encoding_family_tables(lines, encoding_families, encoding_enum_names)
 

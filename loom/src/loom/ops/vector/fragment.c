@@ -143,7 +143,7 @@ bool loom_vector_fragment_parameter_view_resolve(
   memset(out_view, 0, sizeof(*out_view));
   out_view->schema_value_id = LOOM_VALUE_ID_INVALID;
   out_view->schema_parameter_ordinal = UINT16_MAX;
-  loom_vector_encoding_auxiliary_view_initialize(&out_view->auxiliary);
+  loom_encoding_auxiliary_view_initialize(&out_view->auxiliary);
   if (out_unknown_key) {
     *out_unknown_key = iree_string_view_empty();
   }
@@ -170,9 +170,9 @@ bool loom_vector_fragment_parameter_view_resolve(
       continue;
     }
 
-    loom_vector_encoding_auxiliary_key_t auxiliary_key = 0;
-    if (!loom_vector_encoding_auxiliary_key_lookup_stable_id(stable_id,
-                                                             &auxiliary_key)) {
+    loom_encoding_auxiliary_key_t auxiliary_key = 0;
+    if (!loom_encoding_auxiliary_key_lookup_stable_id(stable_id,
+                                                      &auxiliary_key)) {
       if (out_unknown_key) {
         *out_unknown_key = key_name;
       }
@@ -181,7 +181,7 @@ bool loom_vector_fragment_parameter_view_resolve(
     out_view->auxiliary.values[auxiliary_key] =
         parameter_values.values[ordinal];
     out_view->auxiliary.present_keys |=
-        loom_vector_encoding_auxiliary_key_flag(auxiliary_key);
+        loom_encoding_auxiliary_key_flag(auxiliary_key);
   }
   return true;
 }

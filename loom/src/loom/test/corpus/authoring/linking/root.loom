@@ -14,12 +14,12 @@ kernel.def export("scale_i32_buffer") @scale_i32_buffer(%element_count: index) {
   %base = index.constant 0 : offset
   %element_index = index.madd %workgroup, %workgroup_size, %lane : index
   %in_bounds = index.cmp ult, %element_index, %element_count : index
-  %input_view = buffer.view %input[%base] : buffer -> view<[%element_count]xi32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<[%element_count]xi32, #dense>
+  %input_view = buffer.view %input[%base] : buffer -> view<[%element_count]xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%element_count]xi32>
   scf.if %in_bounds {
-    %value = view.load %input_view[%element_index] : view<[%element_count]xi32, #dense> -> i32
+    %value = view.load %input_view[%element_index] : view<[%element_count]xi32> -> i32
     %scaled = func.apply<authoring.link.scale_i32>(%value) : (i32) -> (i32)
-    view.store %scaled, %output_view[%element_index] : i32, view<[%element_count]xi32, #dense>
+    view.store %scaled, %output_view[%element_index] : i32, view<[%element_count]xi32>
   }
   kernel.return
 }

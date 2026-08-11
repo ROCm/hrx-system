@@ -22,8 +22,8 @@ func.def @allocated_dense_view_ends_at_root_boundary() {
   %byte_length = index.constant 64 : offset
   %base = index.constant 0 : offset
   %scratch = buffer.alloca<workgroup> align(16) %byte_length : buffer
-  %view = buffer.view %scratch[%base] : buffer -> view<16xf32, #dense>
-  %loaded = vector.load %view[12] : view<16xf32, #dense> -> vector<4xf32>
+  %view = buffer.view %scratch[%base] : buffer -> view<16xf32>
+  %loaded = vector.load %view[12] : view<16xf32> -> vector<4xf32>
   test.use %loaded : vector<4xf32>
   func.return
 }
@@ -34,8 +34,8 @@ func.def @allocated_dense_view_allows_access_inside_root() {
   %byte_length = index.constant 64 : offset
   %base = index.constant 4 : offset
   %scratch = buffer.alloca<workgroup> align(16) %byte_length : buffer
-  %view = buffer.view %scratch[%base] : buffer -> view<16xf32, #dense>
-  %loaded = view.load %view[0] : view<16xf32, #dense> -> f32
+  %view = buffer.view %scratch[%base] : buffer -> view<16xf32>
+  %loaded = view.load %view[0] : view<16xf32> -> f32
   test.use %loaded : f32
   func.return
 }
@@ -46,9 +46,9 @@ func.def @allocated_dense_view_rejects_access_past_root() {
   %byte_length = index.constant 64 : offset
   %base = index.constant 4 : offset
   %scratch = buffer.alloca<workgroup> align(16) %byte_length : buffer
-  %view = buffer.view %scratch[%base] : buffer -> view<16xf32, #dense>
+  %view = buffer.view %scratch[%base] : buffer -> view<16xf32>
   // ERROR@+1: SUBRANGE/026 {op_name="view.load", maximum_access_byte_end="68", root_byte_extent="64"}
-  %loaded = view.load %view[15] : view<16xf32, #dense> -> f32
+  %loaded = view.load %view[15] : view<16xf32> -> f32
   test.use %loaded : f32
   func.return
 }
@@ -88,9 +88,9 @@ func.def @fragment_load_rejects_storage_root_overflow() {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %scratch = buffer.alloca<workgroup> align(16) %byte_length : buffer
-  %view = buffer.view %scratch[%base] : buffer -> view<16x16xf32, #dense>
+  %view = buffer.view %scratch[%base] : buffer -> view<16x16xf32>
   // ERROR@+1: SUBRANGE/026 {op_name="vector.fragment.load", maximum_access_byte_end="1024", root_byte_extent="1020"}
-  %loaded = vector.fragment.load<init> %view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<8xf32>
+  %loaded = vector.fragment.load<init> %view[0, 0] shape [%m, %n] : view<16x16xf32> -> vector<8xf32>
   test.use %loaded : vector<8xf32>
   func.return
 }
@@ -126,9 +126,9 @@ func.def @strided_fragment_rejects_subgroup_dependent_root_overflow(%subgroup0: 
 func.def @sparse_lhs_fragment_load_uses_compact_physical_extent(%buffer: buffer, %base: offset, %metadata: vector<1xi32>) {
   %m = index.constant 16 : index
   %k = index.constant 64 : index
-  %schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
   %layout = encoding.layout.dense : encoding<layout>
-  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%base] : buffer -> view<16x32xf8E5M2, %storage>
   %loaded = vector.fragment.load<lhs> %view[0, 0] shape [%m, %k] using {sparsity = %metadata : vector<1xi32>} : view<16x32xf8E5M2, %storage> -> vector<2xi32>
   test.use %loaded : vector<2xi32>
@@ -144,9 +144,9 @@ func.def @dynamic_sparse_lhs_fragment_load_proves_compact_physical_extent(%buffe
   %m = index.constant 16 : index
   %physical_k = index.mul %group_count, %physical_group_elements : index
   %logical_k = index.mul %group_count, %logical_group_elements : index
-  %schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
   %layout = encoding.layout.dense : encoding<layout>
-  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%base] : buffer -> view<16x[%physical_k]xf8E5M2, %storage>
   %loaded = vector.fragment.load<lhs> %view[0, 0] shape [%m, %logical_k] using {sparsity = %metadata : vector<1xi32>} : view<16x[%physical_k]xf8E5M2, %storage> -> vector<2xi32>
   test.use %loaded : vector<2xi32>
@@ -158,9 +158,9 @@ func.def @dynamic_sparse_lhs_fragment_load_proves_compact_physical_extent(%buffe
 func.def @sparse_lhs_fragment_load_rejects_compact_physical_tail(%buffer: buffer, %base: offset, %metadata: vector<1xi32>) {
   %m = index.constant 16 : index
   %k = index.constant 64 : index
-  %schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
   %layout = encoding.layout.dense : encoding<layout>
-  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%base] : buffer -> view<16x31xf8E5M2, %storage>
   // ERROR@+1: SUBRANGE/010 {op_name="vector.fragment.load", view_axis="1", vector_axis="1", vector_extent="32", view_bound="31", required_origin_upper_bound="-1", constraint_key="vector_footprint.full_vector_upper_bound"}
   %loaded = vector.fragment.load<lhs> %view[0, 0] shape [%m, %k] using {sparsity = %metadata : vector<1xi32>} : view<16x31xf8E5M2, %storage> -> vector<2xi32>
@@ -173,9 +173,9 @@ func.def @sparse_lhs_fragment_load_rejects_compact_physical_tail(%buffer: buffer
 func.def @sparse_lhs_fragment_load_uses_physical_origin(%buffer: buffer, %base: offset, %metadata: vector<1xi32>) {
   %m = index.constant 16 : index
   %k = index.constant 64 : index
-  %schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
   %layout = encoding.layout.dense : encoding<layout>
-  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%base] : buffer -> view<16x64xf8E5M2, %storage>
   %loaded = vector.fragment.load<lhs> %view[0, 32] shape [%m, %k] using {sparsity = %metadata : vector<1xi32>} : view<16x64xf8E5M2, %storage> -> vector<2xi32>
   test.use %loaded : vector<2xi32>
@@ -200,9 +200,9 @@ func.def @dense_lhs_fragment_load_retains_logical_extent(%buffer: buffer, %base:
 func.def @sparse_rhs_fragment_load_uses_compact_physical_extent(%buffer: buffer, %base: offset, %metadata: vector<1xi32>) {
   %k = index.constant 64 : index
   %n = index.constant 16 : index
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
   %layout = encoding.layout.strided [1, 32] : encoding<layout>
-  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%base] : buffer -> view<32x16xf8E4M3, %storage>
   %loaded = vector.fragment.load<rhs> %view[0, 0] shape [%k, %n] using {sparsity = %metadata : vector<1xi32>} : view<32x16xf8E4M3, %storage> -> vector<2xi32>
   test.use %loaded : vector<2xi32>
@@ -701,10 +701,10 @@ func.def @guarded_flattened_store_proves_dynamic_axis_bounds(%payload: buffer, %
   %writes_output = scalar.andi %valid_column, %is_lane_zero : i1
   scf.if %writes_output {
     %element_count = index.mul %row_count, %column_count : index
-    %view = buffer.view %payload[%base] : buffer -> view<[%element_count]xf32, #dense>
+    %view = buffer.view %payload[%base] : buffer -> view<[%element_count]xf32>
     %row_base = index.mul %row, %column_count : index
     %origin = index.add %row_base, %column : index
-    view.store %value, %view[%origin] : f32, view<[%element_count]xf32, #dense>
+    view.store %value, %view[%origin] : f32, view<[%element_count]xf32>
   }
   func.return
 }
@@ -731,8 +731,8 @@ func.def @guarded_recomputed_quotient_proves_dynamic_axis_bound(%payload: buffer
     %inner_padded_count = index.add %inner_active_count, %block_rounding_bias : index
     %inner_block_count0 = index.div %inner_padded_count, %block_size : index
     %inner_block_count = index.assume %inner_block_count0 [range(%inner_block_count0, 1, 512)] : index
-    %view = buffer.view %payload[%base] : buffer -> view<[%inner_block_count]xi32, #dense>
-    view.store %value, %view[%active_block] : i32, view<[%inner_block_count]xi32, #dense>
+    %view = buffer.view %payload[%base] : buffer -> view<[%inner_block_count]xi32>
+    view.store %value, %view[%active_block] : i32, view<[%inner_block_count]xi32>
   }
   func.return
 }
@@ -754,9 +754,9 @@ func.def @guarded_distinct_quotient_rejects_unproven_dynamic_axis_bound(%payload
     %inner_padded_count = index.add %inner_active_count, %block_rounding_bias : index
     %inner_block_count0 = index.div %inner_padded_count, %inner_block_size : index
     %inner_block_count = index.assume %inner_block_count0 [range(%inner_block_count0, 1, 256)] : index
-    %view = buffer.view %payload[%base] : buffer -> view<[%inner_block_count]xi32, #dense>
+    %view = buffer.view %payload[%base] : buffer -> view<[%inner_block_count]xi32>
     // ERROR@+1: SUBRANGE/024 {op_name="view.store", view_axis="0"}
-    view.store %value, %view[%block] : i32, view<[%inner_block_count]xi32, #dense>
+    view.store %value, %view[%block] : i32, view<[%inner_block_count]xi32>
   }
   func.return
 }
@@ -1055,9 +1055,9 @@ func.def @masked_tail_uses_active_storage_root_end() {
   %step = index.constant 1 : index
   %old = vector.constant 0.0 : vector<4xf32>
   %scratch = buffer.alloca<workgroup> align(16) %byte_length : buffer
-  %view = buffer.view %scratch[%base] : buffer -> view<16xf32, #dense>
+  %view = buffer.view %scratch[%base] : buffer -> view<16xf32>
   %mask = vector.mask.range [%origin to %limit step %step] : index -> vector<4xi1>
-  %loaded = vector.load.mask %view[%origin], %mask, %old : view<16xf32, #dense>, vector<4xi1>, vector<4xf32>
+  %loaded = vector.load.mask %view[%origin], %mask, %old : view<16xf32>, vector<4xi1>, vector<4xf32>
   test.use %loaded : vector<4xf32>
   func.return
 }
@@ -1072,10 +1072,10 @@ func.def @masked_tail_rejects_active_storage_root_overflow() {
   %step = index.constant 1 : index
   %old = vector.constant 0.0 : vector<4xf32>
   %scratch = buffer.alloca<workgroup> align(16) %byte_length : buffer
-  %view = buffer.view %scratch[%base] : buffer -> view<16xf32, #dense>
+  %view = buffer.view %scratch[%base] : buffer -> view<16xf32>
   %mask = vector.mask.range [%origin to %limit step %step] : index -> vector<4xi1>
   // ERROR@+1: SUBRANGE/026 {op_name="vector.load.mask", maximum_access_byte_end="44", root_byte_extent="40"}
-  %loaded = vector.load.mask %view[%origin], %mask, %old : view<16xf32, #dense>, vector<4xi1>, vector<4xf32>
+  %loaded = vector.load.mask %view[%origin], %mask, %old : view<16xf32>, vector<4xi1>, vector<4xf32>
   test.use %loaded : vector<4xf32>
   func.return
 }
@@ -1090,9 +1090,9 @@ func.def @saturated_tail_clamps_to_vector_extent() {
   %step = index.constant 1 : index
   %old = vector.constant 0.0 : vector<4xf32>
   %scratch = buffer.alloca<workgroup> align(16) %byte_length : buffer
-  %view = buffer.view %scratch[%base] : buffer -> view<32xf32, #dense>
+  %view = buffer.view %scratch[%base] : buffer -> view<32xf32>
   %mask = vector.mask.range [%origin to %limit step %step] : index -> vector<4xi1>
-  %loaded = vector.load.mask %view[%origin], %mask, %old : view<32xf32, #dense>, vector<4xi1>, vector<4xf32>
+  %loaded = vector.load.mask %view[%origin], %mask, %old : view<32xf32>, vector<4xi1>, vector<4xf32>
   test.use %loaded : vector<4xf32>
   func.return
 }
@@ -1107,10 +1107,10 @@ func.def @dynamic_empty_tail_skips_access(%origin0: index, %limit0: index, %old:
   %base = index.constant 0 : offset
   %step = index.constant 1 : index
   %scratch = buffer.alloca<workgroup> align(16) %byte_length : buffer
-  %view = buffer.view %scratch[%base] : buffer -> view<16xf32, #dense>
+  %view = buffer.view %scratch[%base] : buffer -> view<16xf32>
   scf.if %empty {
     %mask = vector.mask.range [%origin to %limit step %step] : index -> vector<4xi1>
-    %loaded = vector.load.mask %view[%origin], %mask, %old : view<16xf32, #dense>, vector<4xi1>, vector<4xf32>
+    %loaded = vector.load.mask %view[%origin], %mask, %old : view<16xf32>, vector<4xi1>, vector<4xf32>
     test.use %loaded : vector<4xf32>
   } else {
   }
@@ -1124,9 +1124,9 @@ func.def @opaque_mask_requires_full_storage_root_footprint(%mask: vector<4xi1>, 
   %base = index.constant 0 : offset
   %origin = index.constant 8 : index
   %scratch = buffer.alloca<workgroup> align(16) %byte_length : buffer
-  %view = buffer.view %scratch[%base] : buffer -> view<16xf32, #dense>
+  %view = buffer.view %scratch[%base] : buffer -> view<16xf32>
   // ERROR@+1: SUBRANGE/026 {op_name="vector.load.mask", maximum_access_byte_end="48", root_byte_extent="40"}
-  %loaded = vector.load.mask %view[%origin], %mask, %old : view<16xf32, #dense>, vector<4xi1>, vector<4xf32>
+  %loaded = vector.load.mask %view[%origin], %mask, %old : view<16xf32>, vector<4xi1>, vector<4xf32>
   test.use %loaded : vector<4xf32>
   func.return
 }
@@ -1139,10 +1139,10 @@ func.def @opaque_gather_mask_requires_full_storage_root_footprint(%mask: vector<
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %scratch = buffer.alloca<workgroup> align(16) %byte_length : buffer
-  %view = buffer.view %scratch[%base] : buffer -> view<4xf32, #dense>
+  %view = buffer.view %scratch[%base] : buffer -> view<4xf32>
   %offsets = vector.iota %c0 step %c1 : vector<4xindex>
   // ERROR@+1: SUBRANGE/026 {op_name="vector.gather.mask", maximum_access_byte_end="20", root_byte_extent="16"}
-  %loaded = vector.gather.mask %view[%c0][%offsets], %mask, %old : view<4xf32, #dense>, vector<4xindex>, vector<4xi1>, vector<4xf32>
+  %loaded = vector.gather.mask %view[%c0][%offsets], %mask, %old : view<4xf32>, vector<4xindex>, vector<4xi1>, vector<4xf32>
   test.use %loaded : vector<4xf32>
   func.return
 }
@@ -1167,10 +1167,10 @@ func.def @iota_gather_rejects_storage_root_overflow() {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %scratch = buffer.alloca<workgroup> align(16) %byte_length : buffer
-  %view = buffer.view %scratch[%base] : buffer -> view<4xf32, #dense>
+  %view = buffer.view %scratch[%base] : buffer -> view<4xf32>
   %offsets = vector.iota %c0 step %c1 : vector<4xindex>
   // ERROR@+1: SUBRANGE/026 {op_name="vector.gather", maximum_access_byte_end="20", root_byte_extent="16"}
-  %loaded = vector.gather %view[%c0][%offsets] : view<4xf32, #dense>, vector<4xindex> -> vector<4xf32>
+  %loaded = vector.gather %view[%c0][%offsets] : view<4xf32>, vector<4xindex> -> vector<4xf32>
   test.use %loaded : vector<4xf32>
   func.return
 }

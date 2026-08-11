@@ -9,10 +9,10 @@ func.def target(@target) @swmmac_f32_packed8(
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 32 : index
-  %fp8_lhs_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %bf8_lhs_schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %fp8_rhs_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=16, payload_registers=4> : encoding<schema>
-  %bf8_rhs_schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=16, payload_registers=4> : encoding<schema>
+  %fp8_lhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %bf8_lhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %fp8_rhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=16, payload_registers=4> : encoding<schema>
+  %bf8_rhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=16, payload_registers=4> : encoding<schema>
   %fp8_lhs = vector.fragment<lhs> %fp8_lhs_data shape [%m, %k] using {sparsity = %metadata : vector<1xi32>, schema = %fp8_lhs_schema : encoding<schema>} : vector<2xi32>
   %bf8_lhs = vector.fragment<lhs> %bf8_lhs_data shape [%m, %k] using {sparsity = %metadata : vector<1xi32>, schema = %bf8_lhs_schema : encoding<schema>} : vector<2xi32>
   %fp8_rhs = vector.fragment<rhs> %fp8_rhs_data shape [%k, %n] using {schema = %fp8_rhs_schema : encoding<schema>} : vector<4xi32>
@@ -50,10 +50,10 @@ func.def target(@target) @swmmac_packed16(
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 32 : index
-  %f16_lhs_schema = encoding.define #matrix_operand<element_format=f16, payload_elements=8, payload_registers=4, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %bf16_lhs_schema = encoding.define #matrix_operand<element_format=bf16, payload_elements=8, payload_registers=4, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %f16_rhs_schema = encoding.define #matrix_operand<element_format=f16, payload_elements=16, payload_registers=8> : encoding<schema>
-  %bf16_rhs_schema = encoding.define #matrix_operand<element_format=bf16, payload_elements=16, payload_registers=8> : encoding<schema>
+  %f16_lhs_schema = encoding.define #encoding.operand<element_format=f16, payload_elements=8, payload_registers=4, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %bf16_lhs_schema = encoding.define #encoding.operand<element_format=bf16, payload_elements=8, payload_registers=4, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %f16_rhs_schema = encoding.define #encoding.operand<element_format=f16, payload_elements=16, payload_registers=8> : encoding<schema>
+  %bf16_rhs_schema = encoding.define #encoding.operand<element_format=bf16, payload_elements=16, payload_registers=8> : encoding<schema>
   %f16_lhs = vector.fragment<lhs> %f16_lhs_data shape [%m, %k] using {sparsity = %metadata : vector<1xi32>, schema = %f16_lhs_schema : encoding<schema>} : vector<4xi32>
   %bf16_lhs = vector.fragment<lhs> %bf16_lhs_data shape [%m, %k] using {sparsity = %metadata : vector<1xi32>, schema = %bf16_lhs_schema : encoding<schema>} : vector<4xi32>
   %f16_rhs = vector.fragment<rhs> %f16_rhs_data shape [%k, %n] using {schema = %f16_rhs_schema : encoding<schema>} : vector<8xi32>
@@ -92,10 +92,10 @@ func.def target(@target) @swmmac_i32_iu8(
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 32 : index
-  %u8_lhs_schema = encoding.define #matrix_operand<element_format=u8, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %i8_lhs_schema = encoding.define #matrix_operand<element_format=i8, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %u8_rhs_schema = encoding.define #matrix_operand<element_format=u8, payload_elements=16, payload_registers=4> : encoding<schema>
-  %i8_rhs_schema = encoding.define #matrix_operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
+  %u8_lhs_schema = encoding.define #encoding.operand<element_format=u8, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %i8_lhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %u8_rhs_schema = encoding.define #encoding.operand<element_format=u8, payload_elements=16, payload_registers=4> : encoding<schema>
+  %i8_rhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
   %u8_lhs = vector.fragment<lhs> %u8_lhs_data shape [%m, %k] using {sparsity = %metadata : vector<1xi32>, schema = %u8_lhs_schema : encoding<schema>} : vector<2xi32>
   %i8_lhs = vector.fragment<lhs> %i8_lhs_data shape [%m, %k] using {sparsity = %metadata : vector<1xi32>, schema = %i8_lhs_schema : encoding<schema>} : vector<2xi32>
   %u8_rhs = vector.fragment<rhs> %u8_rhs_data shape [%k, %n] using {schema = %u8_rhs_schema : encoding<schema>} : vector<4xi32>
@@ -132,10 +132,10 @@ func.def target(@target) @swmmac_i32_iu4_k32(
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 32 : index
-  %u4_lhs_schema = encoding.define #matrix_operand<element_format=u4, payload_elements=8, payload_registers=1, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %i4_lhs_schema = encoding.define #matrix_operand<element_format=i4, payload_elements=8, payload_registers=1, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %u4_rhs_schema = encoding.define #matrix_operand<element_format=u4, payload_elements=16, payload_registers=2> : encoding<schema>
-  %i4_rhs_schema = encoding.define #matrix_operand<element_format=i4, payload_elements=16, payload_registers=2> : encoding<schema>
+  %u4_lhs_schema = encoding.define #encoding.operand<element_format=u4, payload_elements=8, payload_registers=1, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %i4_lhs_schema = encoding.define #encoding.operand<element_format=i4, payload_elements=8, payload_registers=1, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %u4_rhs_schema = encoding.define #encoding.operand<element_format=u4, payload_elements=16, payload_registers=2> : encoding<schema>
+  %i4_rhs_schema = encoding.define #encoding.operand<element_format=i4, payload_elements=16, payload_registers=2> : encoding<schema>
   %u4_lhs = vector.fragment<lhs> %u4_lhs_data shape [%m, %k] using {sparsity = %metadata : vector<1xi32>, schema = %u4_lhs_schema : encoding<schema>} : vector<1xi32>
   %i4_lhs = vector.fragment<lhs> %i4_lhs_data shape [%m, %k] using {sparsity = %metadata : vector<1xi32>, schema = %i4_lhs_schema : encoding<schema>} : vector<1xi32>
   %u4_rhs = vector.fragment<rhs> %u4_rhs_data shape [%k, %n] using {schema = %u4_rhs_schema : encoding<schema>} : vector<2xi32>
@@ -172,10 +172,10 @@ func.def target(@target) @swmmac_i32_iu4_k64(
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 64 : index
-  %u4_lhs_schema = encoding.define #matrix_operand<element_format=u4, payload_elements=16, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %i4_lhs_schema = encoding.define #matrix_operand<element_format=i4, payload_elements=16, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %u4_rhs_schema = encoding.define #matrix_operand<element_format=u4, payload_elements=32, payload_registers=4> : encoding<schema>
-  %i4_rhs_schema = encoding.define #matrix_operand<element_format=i4, payload_elements=32, payload_registers=4> : encoding<schema>
+  %u4_lhs_schema = encoding.define #encoding.operand<element_format=u4, payload_elements=16, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %i4_lhs_schema = encoding.define #encoding.operand<element_format=i4, payload_elements=16, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %u4_rhs_schema = encoding.define #encoding.operand<element_format=u4, payload_elements=32, payload_registers=4> : encoding<schema>
+  %i4_rhs_schema = encoding.define #encoding.operand<element_format=i4, payload_elements=32, payload_registers=4> : encoding<schema>
   %u4_lhs = vector.fragment<lhs> %u4_lhs_data shape [%m, %k] using {sparsity = %metadata : vector<1xi32>, schema = %u4_lhs_schema : encoding<schema>} : vector<2xi32>
   %i4_lhs = vector.fragment<lhs> %i4_lhs_data shape [%m, %k] using {sparsity = %metadata : vector<1xi32>, schema = %i4_lhs_schema : encoding<schema>} : vector<2xi32>
   %u4_rhs = vector.fragment<rhs> %u4_rhs_data shape [%k, %n] using {schema = %u4_rhs_schema : encoding<schema>} : vector<4xi32>

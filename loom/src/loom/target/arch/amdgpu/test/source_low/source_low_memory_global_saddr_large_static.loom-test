@@ -18,10 +18,10 @@ kernel.def target(@target) @i32x4_global_saddr_large_static_non_power_two_stride
   %output_row_byte_base_i32 = scalar.muli %row_i32, %output_row_byte_stride_i32 : i32
   %output_row_byte_base = index.cast %output_row_byte_base_i32 : i32 to offset
   %vector_origin = index.constant 0 : index
-  %input_view = buffer.view %input[%row_byte_base] : buffer -> view<210xi32, #dense>
-  %output_view = buffer.view %output[%output_row_byte_base] : buffer -> view<4xi32, #dense>
-  %value = vector.load %input_view[%vector_origin] : view<210xi32, #dense> -> vector<4xi32>
-  vector.store %value, %output_view[%vector_origin] : vector<4xi32>, view<4xi32, #dense>
+  %input_view = buffer.view %input[%row_byte_base] : buffer -> view<210xi32>
+  %output_view = buffer.view %output[%output_row_byte_base] : buffer -> view<4xi32>
+  %value = vector.load %input_view[%vector_origin] : view<210xi32> -> vector<4xi32>
+  vector.store %value, %output_view[%vector_origin] : vector<4xi32>, view<4xi32>
   kernel.return
 }
 

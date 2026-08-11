@@ -29,6 +29,8 @@ namespace {
 enum class SyntaxWorkload {
   kScalarTypes,
   kShapedTypes,
+  kNativeDenseShapedTypes,
+  kExplicitDenseShapedTypes,
   kTaggedLocations,
 };
 
@@ -50,6 +52,20 @@ static constexpr std::array<const char*, 5> kShapedTypeNames = {
     "tensor<1x64x64xf16, %layout>",
     "view<1024x512xf8E4M3, %layout>",
     "pool<4096>",
+};
+
+static constexpr std::array<const char*, 4> kNativeDenseShapedTypeNames = {
+    "tile<8x8xf32>",
+    "tensor<1x64x64xf16>",
+    "view<1024x512xf8E4M3>",
+    "view<1x32x4096xbf16>",
+};
+
+static constexpr std::array<const char*, 4> kExplicitDenseShapedTypeNames = {
+    "tile<8x8xf32, #encoding.layout.dense>",
+    "tensor<1x64x64xf16, #encoding.layout.dense>",
+    "view<1024x512xf8E4M3, #encoding.layout.dense>",
+    "view<1x32x4096xbf16, #encoding.layout.dense>",
 };
 
 static constexpr std::array<loom_location_tag_t, 4> kBuiltinLocationTags = {
@@ -114,6 +130,8 @@ static std::string BuildSyntaxModule(SyntaxWorkload workload,
       estimated_bytes_per_operation = 40;
       break;
     case SyntaxWorkload::kShapedTypes:
+    case SyntaxWorkload::kNativeDenseShapedTypes:
+    case SyntaxWorkload::kExplicitDenseShapedTypes:
       estimated_bytes_per_operation = 56;
       break;
     case SyntaxWorkload::kTaggedLocations:
@@ -136,6 +154,15 @@ static std::string BuildSyntaxModule(SyntaxWorkload workload,
       }
       case SyntaxWorkload::kShapedTypes:
         source.append(kShapedTypeNames[(size_t)i % kShapedTypeNames.size()]);
+        break;
+      case SyntaxWorkload::kNativeDenseShapedTypes:
+        source.append(
+            kNativeDenseShapedTypeNames[(size_t)i %
+                                        kNativeDenseShapedTypeNames.size()]);
+        break;
+      case SyntaxWorkload::kExplicitDenseShapedTypes:
+        source.append(kExplicitDenseShapedTypeNames
+                          [(size_t)i % kExplicitDenseShapedTypeNames.size()]);
         break;
       case SyntaxWorkload::kTaggedLocations: {
         source.append("i32 loc(tagged<");
@@ -305,6 +332,46 @@ static void BM_PrintShapedTypes(benchmark::State& state) {
   BenchmarkPrintModule(state, SyntaxWorkload::kShapedTypes);
 }
 BENCHMARK(BM_PrintShapedTypes)
+    ->Arg(16)
+    ->Arg(100)
+    ->Arg(1000)
+    ->Arg(10000)
+    ->Arg(100000);
+
+static void BM_ParseNativeDenseShapedTypes(benchmark::State& state) {
+  BenchmarkParseModule(state, SyntaxWorkload::kNativeDenseShapedTypes);
+}
+BENCHMARK(BM_ParseNativeDenseShapedTypes)
+    ->Arg(16)
+    ->Arg(100)
+    ->Arg(1000)
+    ->Arg(10000)
+    ->Arg(100000);
+
+static void BM_PrintNativeDenseShapedTypes(benchmark::State& state) {
+  BenchmarkPrintModule(state, SyntaxWorkload::kNativeDenseShapedTypes);
+}
+BENCHMARK(BM_PrintNativeDenseShapedTypes)
+    ->Arg(16)
+    ->Arg(100)
+    ->Arg(1000)
+    ->Arg(10000)
+    ->Arg(100000);
+
+static void BM_ParseExplicitDenseShapedTypes(benchmark::State& state) {
+  BenchmarkParseModule(state, SyntaxWorkload::kExplicitDenseShapedTypes);
+}
+BENCHMARK(BM_ParseExplicitDenseShapedTypes)
+    ->Arg(16)
+    ->Arg(100)
+    ->Arg(1000)
+    ->Arg(10000)
+    ->Arg(100000);
+
+static void BM_PrintExplicitDenseShapedTypes(benchmark::State& state) {
+  BenchmarkPrintModule(state, SyntaxWorkload::kExplicitDenseShapedTypes);
+}
+BENCHMARK(BM_PrintExplicitDenseShapedTypes)
     ->Arg(16)
     ->Arg(100)
     ->Arg(1000)

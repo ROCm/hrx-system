@@ -122,15 +122,15 @@ kernel.def target(@target) @bf16_mfma_fragment_memory() {
   %n = index.constant 16 : index
   %k = index.constant 16 : index
   %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
-  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xbf16, #dense>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xbf16>
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x16xbf16, %rhs_layout>
-  %init_view = buffer.view %init_buffer[%base] : buffer -> view<16x16xf32, #dense>
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32, #dense>
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xbf16, #dense> -> vector<4xbf16>
+  %init_view = buffer.view %init_buffer[%base] : buffer -> view<16x16xf32>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xbf16> -> vector<4xbf16>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xbf16, %rhs_layout> -> vector<4xbf16>
-  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<4xf32>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32> -> vector<4xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
-  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
   kernel.return
 }
 
@@ -193,16 +193,16 @@ kernel.def target(@target) @bf16_mfma_fragment_memory_bf16_output() {
   %n = index.constant 16 : index
   %k = index.constant 16 : index
   %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
-  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xbf16, #dense>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xbf16>
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x16xbf16, %rhs_layout>
-  %init_view = buffer.view %init_buffer[%base] : buffer -> view<16x16xf32, #dense>
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xbf16, #dense>
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xbf16, #dense> -> vector<4xbf16>
+  %init_view = buffer.view %init_buffer[%base] : buffer -> view<16x16xf32>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xbf16>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xbf16> -> vector<4xbf16>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xbf16, %rhs_layout> -> vector<4xbf16>
-  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<4xf32>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32> -> vector<4xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
   %rounded = vector.fptrunc %result : vector<4xf32> to vector<4xbf16>
-  vector.fragment.store<result> %rounded, %out_view[0, 0] shape [%m, %n] : vector<4xbf16>, view<16x16xbf16, #dense>
+  vector.fragment.store<result> %rounded, %out_view[0, 0] shape [%m, %n] : vector<4xbf16>, view<16x16xbf16>
   kernel.return
 }
 
@@ -301,13 +301,13 @@ kernel.def target(@target) @bf16_mfma_fragment_memory_bf16_column_major_output()
   %k = index.constant 16 : index
   %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
   %out_layout = encoding.layout.strided [1, 16] : encoding<layout>
-  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xbf16, #dense>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xbf16>
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x16xbf16, %rhs_layout>
-  %init_view = buffer.view %init_buffer[%base] : buffer -> view<16x16xf32, #dense>
+  %init_view = buffer.view %init_buffer[%base] : buffer -> view<16x16xf32>
   %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xbf16, %out_layout>
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xbf16, #dense> -> vector<4xbf16>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xbf16> -> vector<4xbf16>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xbf16, %rhs_layout> -> vector<4xbf16>
-  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<4xf32>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32> -> vector<4xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
   %rounded = vector.fptrunc %result : vector<4xf32> to vector<4xbf16>
   vector.fragment.store<result> %rounded, %out_view[0, 0] shape [%m, %n] : vector<4xbf16>, view<16x16xbf16, %out_layout>
@@ -390,15 +390,15 @@ kernel.def target(@target) @f32_mfma_fragment_memory() {
   %n = index.constant 16 : index
   %k = index.constant 4 : index
   %rhs_layout = encoding.layout.strided [1, 4] : encoding<layout>
-  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x4xf32, #dense>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x4xf32>
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<4x16xf32, %rhs_layout>
-  %init_view = buffer.view %init_buffer[%base] : buffer -> view<16x16xf32, #dense>
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32, #dense>
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x4xf32, #dense> -> vector<1xf32>
+  %init_view = buffer.view %init_buffer[%base] : buffer -> view<16x16xf32>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x4xf32> -> vector<1xf32>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<4x16xf32, %rhs_layout> -> vector<1xf32>
-  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<4xf32>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32> -> vector<4xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<1xf32>, vector<1xf32>, vector<4xf32>
-  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
   kernel.return
 }
 
@@ -466,15 +466,15 @@ kernel.def target(@target) @f32_fragment_memory_dynamic_lds_base() {
   %wave = index.div %tid, %subgroup_size : index
   %wave_offset_index = index.mul %wave, %wave_stride_bytes : index
   %wave_offset = index.cast %wave_offset_index : index to offset
-  %input_view = buffer.view %input_buffer[%base] : buffer -> view<16x16xf32, #dense>
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32, #dense>
+  %input_view = buffer.view %input_buffer[%base] : buffer -> view<16x16xf32>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32>
   %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
-  %scratch_view = buffer.view %scratch[%wave_offset] : buffer -> view<16x16xf32, #dense>
-  %input_fragment = vector.fragment.load<init> %input_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<4xf32>
-  vector.fragment.store<result> %input_fragment, %scratch_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
+  %scratch_view = buffer.view %scratch[%wave_offset] : buffer -> view<16x16xf32>
+  %input_fragment = vector.fragment.load<init> %input_view[0, 0] shape [%m, %n] : view<16x16xf32> -> vector<4xf32>
+  vector.fragment.store<result> %input_fragment, %scratch_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-  %scratch_fragment = vector.fragment.load<init> %scratch_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<4xf32>
-  vector.fragment.store<result> %scratch_fragment, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
+  %scratch_fragment = vector.fragment.load<init> %scratch_view[0, 0] shape [%m, %n] : view<16x16xf32> -> vector<4xf32>
+  vector.fragment.store<result> %scratch_fragment, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
   kernel.return
 }
 
@@ -539,15 +539,15 @@ kernel.def target(@target) @f16_mfma_fragment_memory() {
   %n = index.constant 16 : index
   %k = index.constant 16 : index
   %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
-  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xf16, #dense>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xf16>
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x16xf16, %rhs_layout>
-  %init_view = buffer.view %init_buffer[%base] : buffer -> view<16x16xf32, #dense>
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32, #dense>
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16, #dense> -> vector<4xf16>
+  %init_view = buffer.view %init_buffer[%base] : buffer -> view<16x16xf32>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16> -> vector<4xf16>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xf16, %rhs_layout> -> vector<4xf16>
-  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<4xf32>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32> -> vector<4xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<4xf32>
-  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
   kernel.return
 }
 
@@ -608,10 +608,10 @@ kernel.def target(@target) @f32_fragment_memory_static_offsets() {
   %out_base = index.constant 512 : offset
   %m = index.constant 16 : index
   %n = index.constant 16 : index
-  %input_view = buffer.view %input_buffer[%input_base] : buffer -> view<32x32xf32, #dense>
-  %out_view = buffer.view %out_buffer[%out_base] : buffer -> view<32x32xf32, #dense>
-  %fragment = vector.fragment.load<init> %input_view[1, 2] shape [%m, %n] : view<32x32xf32, #dense> -> vector<4xf32>
-  vector.fragment.store<result> %fragment, %out_view[3, 4] shape [%m, %n] : vector<4xf32>, view<32x32xf32, #dense>
+  %input_view = buffer.view %input_buffer[%input_base] : buffer -> view<32x32xf32>
+  %out_view = buffer.view %out_buffer[%out_base] : buffer -> view<32x32xf32>
+  %fragment = vector.fragment.load<init> %input_view[1, 2] shape [%m, %n] : view<32x32xf32> -> vector<4xf32>
+  vector.fragment.store<result> %fragment, %out_view[3, 4] shape [%m, %n] : vector<4xf32>, view<32x32xf32>
   kernel.return
 }
 
@@ -651,7 +651,7 @@ func.def target(@target) @fp8_mfma_fnuz_schema(%lhs_data: vector<2xi32>, %rhs_da
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 32 : index
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3fnuz, payload_elements=8, payload_registers=2> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3fnuz, payload_elements=8, payload_registers=2> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<2xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<2xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
@@ -673,8 +673,8 @@ func.def target(@target) @bf16_smfmac(%lhs_data: vector<2xi32>, %rhs_data: vecto
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 32 : index
-  %lhs_schema = encoding.define #matrix_operand<element_format=bf16, payload_elements=4, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %rhs_schema = encoding.define #matrix_operand<element_format=bf16, payload_elements=8, payload_registers=4> : encoding<schema>
+  %lhs_schema = encoding.define #encoding.operand<element_format=bf16, payload_elements=4, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=bf16, payload_elements=8, payload_registers=4> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %sparsity : vector<1xi32>, schema = %lhs_schema : encoding<schema>} : vector<2xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<4xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
@@ -696,8 +696,8 @@ func.def target(@target) @fp8_bf8_smfmac(%lhs_data: vector<2xi32>, %rhs_data: ve
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 64 : index
-  %lhs_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %rhs_schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=16, payload_registers=4> : encoding<schema>
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=16, payload_registers=4> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %sparsity : vector<1xi32>, schema = %lhs_schema : encoding<schema>} : vector<2xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<4xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
@@ -741,15 +741,15 @@ kernel.def target(@target) @fp8_mfma_fragment_memory() {
   %n = index.constant 16 : index
   %k = index.constant 32 : index
   %rhs_layout = encoding.layout.strided [1, 32] : encoding<layout>
-  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x32xf8E4M3, #dense>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x32xf8E4M3>
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<32x16xf8E4M3, %rhs_layout>
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32, #dense>
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x32xf8E4M3, #dense> -> vector<8xf8E4M3>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x32xf8E4M3> -> vector<8xf8E4M3>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<32x16xf8E4M3, %rhs_layout> -> vector<8xf8E4M3>
   %zero_acc = vector.constant 0.0 : vector<4xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<4xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<8xf8E4M3>, vector<8xf8E4M3>, vector<4xf32>
-  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
   kernel.return
 }
 
@@ -804,15 +804,15 @@ kernel.def target(@target) @bf8_fp8_mfma_fragment_memory() {
   %n = index.constant 16 : index
   %k = index.constant 32 : index
   %rhs_layout = encoding.layout.strided [1, 32] : encoding<layout>
-  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x32xf8E5M2, #dense>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x32xf8E5M2>
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<32x16xf8E4M3, %rhs_layout>
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32, #dense>
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x32xf8E5M2, #dense> -> vector<8xf8E5M2>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x32xf8E5M2> -> vector<8xf8E5M2>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<32x16xf8E4M3, %rhs_layout> -> vector<8xf8E4M3>
   %zero_acc = vector.constant 0.0 : vector<4xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<4xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<8xf8E5M2>, vector<8xf8E4M3>, vector<4xf32>
-  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
   kernel.return
 }
 
@@ -860,7 +860,7 @@ func.def target(@target) @tf32_mfma_16x16x8(%lhs_data: vector<2xi32>, %rhs_data:
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 8 : index
-  %schema = encoding.define #matrix_operand<element_format=tf32, payload_elements=2, payload_registers=2> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=tf32, payload_elements=2, payload_registers=2> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<2xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<2xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
@@ -882,7 +882,7 @@ func.def target(@target) @tf32_mfma_32x32x4(%lhs_data: vector<2xi32>, %rhs_data:
   %m = index.constant 32 : index
   %n = index.constant 32 : index
   %k = index.constant 4 : index
-  %schema = encoding.define #matrix_operand<element_format=tf32, payload_elements=2, payload_registers=2> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=tf32, payload_elements=2, payload_registers=2> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<2xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<2xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<16xf32>
@@ -911,15 +911,15 @@ kernel.def target(@target) @f32_mfma_32x32x2_fragment_memory() {
   %n = index.constant 32 : index
   %k = index.constant 2 : index
   %rhs_layout = encoding.layout.strided [1, 2] : encoding<layout>
-  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<32x2xf32, #dense>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<32x2xf32>
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<2x32xf32, %rhs_layout>
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<32x32xf32, #dense>
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<32x2xf32, #dense> -> vector<1xf32>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<32x32xf32>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<32x2xf32> -> vector<1xf32>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<2x32xf32, %rhs_layout> -> vector<1xf32>
   %zero_acc = vector.constant 0.0 : vector<16xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<16xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<1xf32>, vector<1xf32>, vector<16xf32>
-  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<16xf32>, view<32x32xf32, #dense>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<16xf32>, view<32x32xf32>
   kernel.return
 }
 
@@ -1010,15 +1010,15 @@ kernel.def target(@target) @f16_mfma_32x32x8_fragment_memory() {
   %n = index.constant 32 : index
   %k = index.constant 8 : index
   %rhs_layout = encoding.layout.strided [1, 8] : encoding<layout>
-  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<32x8xf16, #dense>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<32x8xf16>
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<8x32xf16, %rhs_layout>
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<32x32xf32, #dense>
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<32x8xf16, #dense> -> vector<4xf16>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<32x32xf32>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<32x8xf16> -> vector<4xf16>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<8x32xf16, %rhs_layout> -> vector<4xf16>
   %zero_acc = vector.constant 0.0 : vector<16xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<16xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<16xf32>
-  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<16xf32>, view<32x32xf32, #dense>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<16xf32>, view<32x32xf32>
   kernel.return
 }
 
@@ -1109,15 +1109,15 @@ kernel.def target(@target) @bf16_mfma_32x32x8_fragment_memory() {
   %n = index.constant 32 : index
   %k = index.constant 8 : index
   %rhs_layout = encoding.layout.strided [1, 8] : encoding<layout>
-  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<32x8xbf16, #dense>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<32x8xbf16>
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<8x32xbf16, %rhs_layout>
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<32x32xf32, #dense>
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<32x8xbf16, #dense> -> vector<4xbf16>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<32x32xf32>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<32x8xbf16> -> vector<4xbf16>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<8x32xbf16, %rhs_layout> -> vector<4xbf16>
   %zero_acc = vector.constant 0.0 : vector<16xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<16xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<4xbf16>, vector<4xbf16>, vector<16xf32>
-  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<16xf32>, view<32x32xf32, #dense>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<16xf32>, view<32x32xf32>
   kernel.return
 }
 
@@ -1207,20 +1207,20 @@ kernel.def target(@target) @tf32_mfma_16x16x8_fragment_memory() {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 8 : index
-  %schema = encoding.define #matrix_operand<element_format=tf32, payload_elements=2, payload_registers=2> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=tf32, payload_elements=2, payload_registers=2> : encoding<schema>
   %lhs_layout = encoding.layout.dense : encoding<layout>
   %rhs_layout = encoding.layout.strided [1, 8] : encoding<layout>
-  %lhs_storage = encoding.define #physical_storage {layout = %lhs_layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
-  %rhs_storage = encoding.define #physical_storage {layout = %rhs_layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %lhs_storage = encoding.define #encoding.storage {layout = %lhs_layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %rhs_storage = encoding.define #encoding.storage {layout = %rhs_layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x8xf32, %lhs_storage>
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<8x16xf32, %rhs_storage>
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32, #dense>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32>
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x8xf32, %lhs_storage> -> vector<2xi32>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<8x16xf32, %rhs_storage> -> vector<2xi32>
   %zero_acc = vector.constant 0.0 : vector<4xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<4xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<2xi32>, vector<2xi32>, vector<4xf32>
-  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
   kernel.return
 }
 
@@ -1274,20 +1274,20 @@ kernel.def target(@target) @tf32_mfma_32x32x4_fragment_memory() {
   %m = index.constant 32 : index
   %n = index.constant 32 : index
   %k = index.constant 4 : index
-  %schema = encoding.define #matrix_operand<element_format=tf32, payload_elements=2, payload_registers=2> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=tf32, payload_elements=2, payload_registers=2> : encoding<schema>
   %lhs_layout = encoding.layout.dense : encoding<layout>
   %rhs_layout = encoding.layout.strided [1, 4] : encoding<layout>
-  %lhs_storage = encoding.define #physical_storage {layout = %lhs_layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
-  %rhs_storage = encoding.define #physical_storage {layout = %rhs_layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %lhs_storage = encoding.define #encoding.storage {layout = %lhs_layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %rhs_storage = encoding.define #encoding.storage {layout = %rhs_layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<32x4xf32, %lhs_storage>
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<4x32xf32, %rhs_storage>
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<32x32xf32, #dense>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<32x32xf32>
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<32x4xf32, %lhs_storage> -> vector<2xi32>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<4x32xf32, %rhs_storage> -> vector<2xi32>
   %zero_acc = vector.constant 0.0 : vector<16xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<16xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<2xi32>, vector<2xi32>, vector<16xf32>
-  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<16xf32>, view<32x32xf32, #dense>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<16xf32>, view<32x32xf32>
   kernel.return
 }
 

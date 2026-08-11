@@ -24,18 +24,18 @@ kernel.def @workgroup_rank_sort_f32_i32() {
   %lane_i32 = index.cast %lane : index to i32
 
   %scores_noalias, %sorted_ids_noalias = buffer.assume.noalias %scores, %sorted_ids : buffer, buffer
-  %scores_view = buffer.view %scores_noalias[%base] : buffer -> view<8xf32, #dense>
-  %sorted_ids_view = buffer.view %sorted_ids_noalias[%base] : buffer -> view<8xi32, #dense>
+  %scores_view = buffer.view %scores_noalias[%base] : buffer -> view<8xf32>
+  %sorted_ids_view = buffer.view %sorted_ids_noalias[%base] : buffer -> view<8xi32>
   %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
-  %scratch_view = buffer.view %scratch[%base] : buffer -> view<8xf32, #dense>
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<8xf32>
 
-  %score = view.load %scores_view[%lane] : view<8xf32, #dense> -> f32
-  view.store %score, %scratch_view[%lane] : f32, view<8xf32, #dense>
+  %score = view.load %scores_view[%lane] : view<8xf32> -> f32
+  view.store %score, %scratch_view[%lane] : f32, view<8xf32>
 
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 
   %rank = scf.for %other = [%peer_begin to %peer_end step %peer_step](%acc = %initial_rank : i32) -> (i32) {
-    %other_score = view.load %scratch_view[%other] : view<8xf32, #dense> -> f32
+    %other_score = view.load %scratch_view[%other] : view<8xf32> -> f32
     %other_i32 = index.cast %other : index to i32
     %greater = scalar.cmpf ogt, %other_score, %score : f32
     %equal = scalar.cmpf oeq, %other_score, %score : f32
@@ -52,7 +52,7 @@ kernel.def @workgroup_rank_sort_f32_i32() {
   }
   %rank_index0 = index.cast %rank : i32 to index
   %rank_index = index.assume %rank_index0 [range(%rank_index0, 0, 7)] : index
-  view.store %lane_i32, %sorted_ids_view[%rank_index] : i32, view<8xi32, #dense>
+  view.store %lane_i32, %sorted_ids_view[%rank_index] : i32, view<8xi32>
   kernel.return
 }
 

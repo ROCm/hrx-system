@@ -9,7 +9,7 @@
 // Q4_0 logical order is all lows followed by all highs, with a -8 bias.
 // Expected signed codes: -8, -6, -4, -2, -7, -5, -3, -1
 func.def @q4_0_reference_chunk() -> (i1) {
-  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
   test.use %schema : encoding<schema>
 
   %b0 = scalar.constant 0x10 : i8
@@ -48,7 +48,7 @@ func.def @q4_0_reference_chunk() -> (i1) {
 // Scale: 0.5
 // Expected f16 lanes: -1.5, -0.5, 1.0, 3.5
 func.def @q8_0_reference_chunk() -> (i1) {
-  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  %schema = encoding.define #ggml.q8_0 : encoding<schema>
   test.use %schema : encoding<schema>
 
   %q0 = scalar.constant -3 : i8
@@ -83,7 +83,7 @@ func.def @q8_0_reference_chunk() -> (i1) {
 // Acc lane: 10
 // Expected mathematical lane: 10 + (-12) + (-5) + (-4) + 7 = -4
 func.def @q8_0_dot4_reference_chunk() -> (vector<1xi32>) {
-  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  %schema = encoding.define #ggml.q8_0 : encoding<schema>
   test.use %schema : encoding<schema>
 
   %a0 = scalar.constant -3 : i8
@@ -118,7 +118,7 @@ func.def @q8_0_dot4_reference_chunk() -> (vector<1xi32>) {
 // Expected signed lanes after -32 bias:
 //   -32, 17, -14, 3, 4, -11, -26, -25
 func.def @q6_k_reference_chunk() -> (i1) {
-  %schema = encoding.define #ggml_q6_k<block_elems=256, storage_bytes=210> : encoding<schema>
+  %schema = encoding.define #ggml.q6_k : encoding<schema>
   test.use %schema : encoding<schema>
 
   %l0 = scalar.constant 0x10 : i8
@@ -165,7 +165,7 @@ func.def @q6_k_reference_chunk() -> (i1) {
 // Packed 4-bit codes: 0x10, 0x32 -> code lanes 0, 1, 2, 3.
 // Expected lanes are the first four entries of the explicit grid.
 func.def @iq_grid_reference_chunk() -> (i1) {
-  %schema = encoding.define #ggml_iq_grid<code_bits=4, grid_elems=16> : encoding<schema>
+  %schema = encoding.define #encoding.u4<codebook=dynamic_table_operand, payload_elements=4, payload_packing=codebook_indices> : encoding<schema>
   test.use %schema : encoding<schema>
 
   %p0 = scalar.constant 0x10 : i8
@@ -212,7 +212,7 @@ func.def @turboquant_kv_page_views(%transient: buffer, %params: buffer, %kv_offs
   %transform = encoding.define #numeric_transform<family="hadamard_sign", input_elems=128, output_elems=128> {signs = %signs : vector<128xi1>} : encoding<transform>
   %qjl_transform = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %qjl_matrix : vector<64x128xf32>} : encoding<transform>
   %schema = encoding.define #turboquant_kv<first_stage_bits=2, logical_element="f16", logical_elems=128, pack_order="lsb0", qjl_rows=64, record_bytes=40, residual_bits=1, scalar_quantizer="lloyd_max", transform_family="hadamard_sign"> {centroids = %centroids : view<4xf16, %dense>, qjl_transform = %qjl_transform : encoding<transform>, thresholds = %thresholds : view<3xf32, %dense>, transform = %transform : encoding<transform>} : encoding<schema>
-  %storage = encoding.define #physical_storage {layout = %dense : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %storage = encoding.define #encoding.storage {layout = %dense : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %kv_pages = buffer.view %transient[%kv_offset] : buffer -> view<[%max_pages]x2x[%heads]x[%page_size]x40xi8, %storage>
   %row_ptr = buffer.view %transient[%row_ptr_offset] : buffer -> view<[%rows_plus_one]xindex, %dense>
   %col_idx = buffer.view %transient[%col_idx_offset] : buffer -> view<[%nnz]xindex, %dense>
@@ -313,7 +313,7 @@ func.def @turboquant_logit_reference(%query: vector<4xf16>, %packed_codes: vecto
 //
 // Packed 4-bit codes: 0x20, 0x31 -> code lanes 0, 2, 1, 3.
 func.def @fp4_table_reference_chunk() -> (i1) {
-  %schema = encoding.define #loom_fp4_table<code_bits=4, table_elems=16> : encoding<schema>
+  %schema = encoding.define #encoding.f4e2m1<codebook=dynamic_table_operand, payload_elements=4, payload_packing=codebook_indices> : encoding<schema>
   test.use %schema : encoding<schema>
 
   %p0 = scalar.constant 0x20 : i8
@@ -353,7 +353,7 @@ func.def @fp4_table_reference_chunk() -> (i1) {
 // format-specific FP8 variants that are not primitive scalar types should stay
 // encoded as integer bytes plus an explicit table or arithmetic expansion.
 func.def @fp8_e4m3_storage_reinterpret(%bytes: vector<4xi8>) -> (vector<4xf16>) {
-  %schema = encoding.define #ieee_fp8_e4m3<storage_bits=8> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3 : encoding<schema>
   test.use %schema : encoding<schema>
 
   %fp8 = vector.bitcast %bytes : vector<4xi8> to vector<4xf8E4M3>

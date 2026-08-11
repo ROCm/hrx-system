@@ -9,16 +9,16 @@ kernel.def @f32_table_lookup_i8_codes() {
   %base_offset = index.constant 0 : offset
   %code_stride = index.constant 4 : index
   %base = index.mul %lane, %code_stride : index
-  %codes_view = buffer.view %codes_buffer[%base_offset] : buffer -> view<8xi8, #dense>
-  %output_view = buffer.view %output[%base_offset] : buffer -> view<8xf32, #dense>
-  %codes = vector.load %codes_view[%base] : view<8xi8, #dense> -> vector<4xi8>
+  %codes_view = buffer.view %codes_buffer[%base_offset] : buffer -> view<8xi8>
+  %output_view = buffer.view %output[%base_offset] : buffer -> view<8xf32>
+  %codes = vector.load %codes_view[%base] : view<8xi8> -> vector<4xi8>
   %g0 = scalar.constant -1.0 : f32
   %g1 = scalar.constant -0.5 : f32
   %g2 = scalar.constant 0.5 : f32
   %g3 = scalar.constant 1.5 : f32
   %grid = vector.from_elements %g0, %g1, %g2, %g3 : vector<4xf32>
   %decoded = vector.table.lookup %grid[%codes] : vector<4xf32>, vector<4xi8> -> vector<4xf32>
-  vector.store %decoded, %output_view[%base] : vector<4xf32>, view<8xf32, #dense>
+  vector.store %decoded, %output_view[%base] : vector<4xf32>, view<8xf32>
   kernel.return
 }
 

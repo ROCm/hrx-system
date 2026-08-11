@@ -5,10 +5,10 @@ kernel.def export("scale") @scale() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<4xi32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<4xi32, #dense>
-  %value = view.load %input_view[%lane] : view<4xi32, #dense> -> i32
+  %input_view = buffer.view %input[%base] : buffer -> view<4xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<4xi32>
+  %value = view.load %input_view[%lane] : view<4xi32> -> i32
   %scaled = scalar.addi %value, %value : i32
-  view.store %scaled, %output_view[%lane] : i32, view<4xi32, #dense>
+  view.store %scaled, %output_view[%lane] : i32, view<4xi32>
   kernel.return
 }

@@ -18,14 +18,14 @@ kernel.def target(@gfx9_4_generic) @gfx9_4_mfma_families() {
   %k16 = index.constant 16 : index
   %k32 = index.constant 32 : index
   %k64 = index.constant 64 : index
-  %f16_output_view = buffer.view %f16_output[%base] : buffer -> view<16x16xf32, #dense>
-  %bf16_output_view = buffer.view %bf16_output[%base] : buffer -> view<16x16xf32, #dense>
-  %f32_output_view = buffer.view %f32_output[%base] : buffer -> view<16x16xf32, #dense>
-  %f64_output_view = buffer.view %f64_output[%base] : buffer -> view<16x16xf64, #dense>
-  %i8_output_view = buffer.view %i8_output[%base] : buffer -> view<16x16xi32, #dense>
-  %sparse_f16_output_view = buffer.view %sparse_f16_output[%base] : buffer -> view<16x16xf32, #dense>
-  %sparse_bf16_output_view = buffer.view %sparse_bf16_output[%base] : buffer -> view<16x16xf32, #dense>
-  %sparse_i8_output_view = buffer.view %sparse_i8_output[%base] : buffer -> view<16x16xi32, #dense>
+  %f16_output_view = buffer.view %f16_output[%base] : buffer -> view<16x16xf32>
+  %bf16_output_view = buffer.view %bf16_output[%base] : buffer -> view<16x16xf32>
+  %f32_output_view = buffer.view %f32_output[%base] : buffer -> view<16x16xf32>
+  %f64_output_view = buffer.view %f64_output[%base] : buffer -> view<16x16xf64>
+  %i8_output_view = buffer.view %i8_output[%base] : buffer -> view<16x16xi32>
+  %sparse_f16_output_view = buffer.view %sparse_f16_output[%base] : buffer -> view<16x16xf32>
+  %sparse_bf16_output_view = buffer.view %sparse_bf16_output[%base] : buffer -> view<16x16xf32>
+  %sparse_i8_output_view = buffer.view %sparse_i8_output[%base] : buffer -> view<16x16xi32>
 
   %f16_operand_elements = vector.constant 1.0 : vector<4xf16>
   %f16_lhs = vector.fragment<lhs> %f16_operand_elements shape [%m, %k16] : vector<4xf16>
@@ -33,19 +33,19 @@ kernel.def target(@gfx9_4_generic) @gfx9_4_mfma_families() {
   %f32_accumulator_elements = vector.constant 0.0 : vector<4xf32>
   %f32_init = vector.fragment<init> %f32_accumulator_elements shape [%m, %n] : vector<4xf32>
   %f16_result = vector.mma %f16_lhs, %f16_rhs, %f32_init : vector<4xf16>, vector<4xf16>, vector<4xf32>
-  vector.fragment.store<result> %f16_result, %f16_output_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %f16_result, %f16_output_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
 
   %bf16_operand_elements = vector.constant 1.0 : vector<4xbf16>
   %bf16_lhs = vector.fragment<lhs> %bf16_operand_elements shape [%m, %k16] : vector<4xbf16>
   %bf16_rhs = vector.fragment<rhs> %bf16_operand_elements shape [%k16, %n] : vector<4xbf16>
   %bf16_result = vector.mma %bf16_lhs, %bf16_rhs, %f32_init : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
-  vector.fragment.store<result> %bf16_result, %bf16_output_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %bf16_result, %bf16_output_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
 
   %f32_operand_elements = vector.constant 1.0 : vector<1xf32>
   %f32_lhs = vector.fragment<lhs> %f32_operand_elements shape [%m, %k4] : vector<1xf32>
   %f32_rhs = vector.fragment<rhs> %f32_operand_elements shape [%k4, %n] : vector<1xf32>
   %f32_result = vector.mma %f32_lhs, %f32_rhs, %f32_init : vector<1xf32>, vector<1xf32>, vector<4xf32>
-  vector.fragment.store<result> %f32_result, %f32_output_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %f32_result, %f32_output_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
 
   %f64_operand_elements = vector.constant 1.0 : vector<1xf64>
   %f64_lhs = vector.fragment<lhs> %f64_operand_elements shape [%m, %k4] : vector<1xf64>
@@ -53,46 +53,46 @@ kernel.def target(@gfx9_4_generic) @gfx9_4_mfma_families() {
   %f64_accumulator_elements = vector.constant 0.0 : vector<4xf64>
   %f64_init = vector.fragment<init> %f64_accumulator_elements shape [%m, %n] : vector<4xf64>
   %f64_result = vector.mma %f64_lhs, %f64_rhs, %f64_init : vector<1xf64>, vector<1xf64>, vector<4xf64>
-  vector.fragment.store<result> %f64_result, %f64_output_view[0, 0] shape [%m, %n] : vector<4xf64>, view<16x16xf64, #dense>
+  vector.fragment.store<result> %f64_result, %f64_output_view[0, 0] shape [%m, %n] : vector<4xf64>, view<16x16xf64>
 
-  %i8_schema = encoding.define #matrix_operand<element_format=i8, payload_elements=8, payload_registers=2> : encoding<schema>
+  %i8_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=8, payload_registers=2> : encoding<schema>
   %i8_operand_words = vector.constant 16843009 : vector<2xi32>
   %i8_lhs = vector.fragment<lhs> %i8_operand_words shape [%m, %k32] using {schema = %i8_schema : encoding<schema>} : vector<2xi32>
   %i8_rhs = vector.fragment<rhs> %i8_operand_words shape [%k32, %n] using {schema = %i8_schema : encoding<schema>} : vector<2xi32>
   %i32_accumulator_elements = vector.constant 0 : vector<4xi32>
   %i32_init = vector.fragment<init> %i32_accumulator_elements shape [%m, %n] : vector<4xi32>
   %i8_result = vector.mma %i8_lhs, %i8_rhs, %i32_init : vector<2xi32>, vector<2xi32>, vector<4xi32>
-  vector.fragment.store<result> %i8_result, %i8_output_view[0, 0] shape [%m, %n] : vector<4xi32>, view<16x16xi32, #dense>
+  vector.fragment.store<result> %i8_result, %i8_output_view[0, 0] shape [%m, %n] : vector<4xi32>, view<16x16xi32>
 
   %metadata_value = scalar.constant 1145324612 : i32
   %metadata = vector.splat %metadata_value : vector<1xi32>
 
-  %sparse_f16_lhs_schema = encoding.define #matrix_operand<element_format=f16, payload_elements=4, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %sparse_f16_rhs_schema = encoding.define #matrix_operand<element_format=f16, payload_elements=8, payload_registers=4> : encoding<schema>
+  %sparse_f16_lhs_schema = encoding.define #encoding.operand<element_format=f16, payload_elements=4, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %sparse_f16_rhs_schema = encoding.define #encoding.operand<element_format=f16, payload_elements=8, payload_registers=4> : encoding<schema>
   %sparse_f16_lhs_words = vector.constant 1006648320 : vector<2xi32>
   %sparse_f16_rhs_words = vector.constant 1006648320 : vector<4xi32>
   %sparse_f16_lhs = vector.fragment<lhs> %sparse_f16_lhs_words shape [%m, %k32] using {sparsity = %metadata : vector<1xi32>, schema = %sparse_f16_lhs_schema : encoding<schema>} : vector<2xi32>
   %sparse_f16_rhs = vector.fragment<rhs> %sparse_f16_rhs_words shape [%k32, %n] using {schema = %sparse_f16_rhs_schema : encoding<schema>} : vector<4xi32>
   %sparse_f16_result = vector.mma %sparse_f16_lhs, %sparse_f16_rhs, %f32_init : vector<2xi32>, vector<4xi32>, vector<4xf32>
-  vector.fragment.store<result> %sparse_f16_result, %sparse_f16_output_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %sparse_f16_result, %sparse_f16_output_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
 
-  %sparse_bf16_lhs_schema = encoding.define #matrix_operand<element_format=bf16, payload_elements=4, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %sparse_bf16_rhs_schema = encoding.define #matrix_operand<element_format=bf16, payload_elements=8, payload_registers=4> : encoding<schema>
+  %sparse_bf16_lhs_schema = encoding.define #encoding.operand<element_format=bf16, payload_elements=4, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %sparse_bf16_rhs_schema = encoding.define #encoding.operand<element_format=bf16, payload_elements=8, payload_registers=4> : encoding<schema>
   %sparse_bf16_lhs_words = vector.constant 1065369472 : vector<2xi32>
   %sparse_bf16_rhs_words = vector.constant 1065369472 : vector<4xi32>
   %sparse_bf16_lhs = vector.fragment<lhs> %sparse_bf16_lhs_words shape [%m, %k32] using {sparsity = %metadata : vector<1xi32>, schema = %sparse_bf16_lhs_schema : encoding<schema>} : vector<2xi32>
   %sparse_bf16_rhs = vector.fragment<rhs> %sparse_bf16_rhs_words shape [%k32, %n] using {schema = %sparse_bf16_rhs_schema : encoding<schema>} : vector<4xi32>
   %sparse_bf16_result = vector.mma %sparse_bf16_lhs, %sparse_bf16_rhs, %f32_init : vector<2xi32>, vector<4xi32>, vector<4xf32>
-  vector.fragment.store<result> %sparse_bf16_result, %sparse_bf16_output_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %sparse_bf16_result, %sparse_bf16_output_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
 
-  %sparse_i8_lhs_schema = encoding.define #matrix_operand<element_format=i8, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %sparse_i8_rhs_schema = encoding.define #matrix_operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
+  %sparse_i8_lhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %sparse_i8_rhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
   %sparse_i8_lhs_words = vector.constant 16843009 : vector<2xi32>
   %sparse_i8_rhs_words = vector.constant 16843009 : vector<4xi32>
   %sparse_i8_lhs = vector.fragment<lhs> %sparse_i8_lhs_words shape [%m, %k64] using {sparsity = %metadata : vector<1xi32>, schema = %sparse_i8_lhs_schema : encoding<schema>} : vector<2xi32>
   %sparse_i8_rhs = vector.fragment<rhs> %sparse_i8_rhs_words shape [%k64, %n] using {schema = %sparse_i8_rhs_schema : encoding<schema>} : vector<4xi32>
   %sparse_i8_result = vector.mma %sparse_i8_lhs, %sparse_i8_rhs, %i32_init : vector<2xi32>, vector<4xi32>, vector<4xi32>
-  vector.fragment.store<result> %sparse_i8_result, %sparse_i8_output_view[0, 0] shape [%m, %n] : vector<4xi32>, view<16x16xi32, #dense>
+  vector.fragment.store<result> %sparse_i8_result, %sparse_i8_output_view[0, 0] shape [%m, %n] : vector<4xi32>, view<16x16xi32>
   kernel.return
 }
 

@@ -233,11 +233,11 @@ kernel.def target(@target) @uniform_global_i32x4_to_i8x4_bitpack_store() {
   %base = index.constant 0 : offset
   %index = index.constant 0 : index
   %values_noalias, %output_noalias = buffer.assume.noalias %values, %output : buffer, buffer
-  %values_view = buffer.view %values_noalias[%base] : buffer -> view<4xi32, #dense>
-  %output_view = buffer.view %output_noalias[%base] : buffer -> view<4xi8, #dense>
-  %codes = vector.load %values_view[%index] : view<4xi32, #dense> -> vector<4xi32>
+  %values_view = buffer.view %values_noalias[%base] : buffer -> view<4xi32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<4xi8>
+  %codes = vector.load %values_view[%index] : view<4xi32> -> vector<4xi32>
   %packed = vector.bitpack<8> %codes : vector<4xi32> -> vector<4xi8>
-  vector.store %packed, %output_view[%index] : vector<4xi8>, view<4xi8, #dense>
+  vector.store %packed, %output_view[%index] : vector<4xi8>, view<4xi8>
   kernel.return
 }
 

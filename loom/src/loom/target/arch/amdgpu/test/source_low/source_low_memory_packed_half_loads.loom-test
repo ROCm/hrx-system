@@ -9,13 +9,13 @@ kernel.def target(@target) @adjacent_f16_scalar_loads_pack() {
   %lane = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
   %next_element_offset = index.constant 1 : index
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xf16, #dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf16, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xf16>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf16>
   %next = index.add %lane, %next_element_offset : index
-  %a = view.load %input_view[%lane] : view<64xf16, #dense> -> f16
-  %b = view.load %input_view[%next] : view<64xf16, #dense> -> f16
-  view.store %a, %output_view[%lane] : f16, view<64xf16, #dense>
-  view.store %b, %output_view[%next] : f16, view<64xf16, #dense>
+  %a = view.load %input_view[%lane] : view<64xf16> -> f16
+  %b = view.load %input_view[%next] : view<64xf16> -> f16
+  view.store %a, %output_view[%lane] : f16, view<64xf16>
+  view.store %b, %output_view[%next] : f16, view<64xf16>
   kernel.return
 }
 

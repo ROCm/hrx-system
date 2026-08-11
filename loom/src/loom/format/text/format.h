@@ -103,8 +103,9 @@
 //
 // Attribute aliases define shorthand for encoding attributes:
 //
-//   #enc = #q8_0<block=32>
-//   #weights_enc = #q6_k
+//   #weights = #encoding.operand<element_format=i8, payload_elements=32,
+//       payload_packing=dense_lanes>
+//   #row_major = #encoding.layout.dense
 //
 // Alias names are file-local, must be unique, and must not shadow a registered
 // encoding family name.
@@ -133,7 +134,7 @@
 //                            @model36.model.hidden_size
 //
 //   Hash attr:     '#' identifier
-//                  Examples: #q6_k, #enc, #q8_0
+//                  Examples: #encoding.operand, #enc, #encoding.layout.dense
 //
 //   Integer:       [-] digit+ | '0x' hexdigit+
 //                  Examples: 42, -1, 0xFF
@@ -231,8 +232,9 @@
 // is an SSA value of type 'encoding' and is resolved at compilation time.
 // Dynamic parameters are introduced explicitly by encoding.define:
 //
-//   %enc = encoding.define #q8_0<block=32> {group_size = %g : index}
-//       : encoding<schema>
+//   %enc = encoding.define #encoding.operand<element_format=i8,
+//       payload_elements=32, payload_packing=dense_lanes>
+//       {group_size = %g : index} : encoding<schema>
 //
 // This enables library functions generic over encoding:
 //
@@ -243,9 +245,13 @@
 //   tile<[%M]x4xf32>                   First dim dynamic, named %M.
 //   tensor<[%M]x[%K]xf32>              Both dims dynamic.
 //   vector<[%N]xf32>                   Dynamic 1-D register vector.
-//   tile<256x256xf32, #q6_k>           With static encoding (no params).
-//   tensor<[%N]xi8, #q8_0<block=32>>   Dynamic dim + parameterized encoding.
-//   view<[%N]xf32, #strided<stride=64>> Dynamic view + static layout.
+//   tensor<[%N]xi8, #encoding.operand<element_format=i8,
+//       payload_elements=32, payload_packing=dense_lanes>>
+//                                       Dynamic dim + parameterized encoding.
+//   view<[%N]xf32>
+//                                       Dynamic view + native dense layout.
+//   view<[%N]xf32, #encoding.layout.strided<strides=[64]>>
+//                                       Dynamic view + explicit strides.
 //   view<[%N]xf32, %layout>            Dynamic dim + SSA layout.
 //   tile<4xf32, %enc>                  SSA encoding (dynamic).
 //   tile<f32>                          0-d (scalar) tile.
@@ -254,9 +260,9 @@
 // attachments. Use explicit splat/broadcast/conversion ops to cross between
 // scalar and vector values.
 //
-// Static encodings are pluggable: each has a name ("q8_0", "q6_k")
-// and optional parameters. The encoding name indexes into a vtable
-// registered at context creation.
+// Static encodings are pluggable: each has a qualified family name and
+// optional parameters. The encoding name indexes into a vtable registered at
+// context creation.
 //
 // SSA encodings are created by encoding.define and propagated as
 // values. The compiler's encoding resolution pass converts SSA
@@ -644,18 +650,18 @@
 //
 //   // Template: visible implementation of tile.contract, matched by
 //   // where-clause constraints. Compiler can inline and optimize.
-//   func.template<tile.contract> public device @vnni_q8_matvec(%weights: tensor<[%M]x[%K]xi8, #q8_0<block=32>>, %input: tensor<[%K]xf32>) -> (tensor<[%M]xf32>) where [mul(%M, 16), mul(%K, 32)] {
+//   func.template<tile.contract> public device @vnni_q8_matvec(%weights: tensor<[%M]x[%K]xi8, #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes>>, %input: tensor<[%K]xf32>) -> (tensor<[%M]xf32>) where [mul(%M, 16), mul(%K, 32)] {
 //     ...
 //   }
 //
 //   // Ukernel: opaque implementation, matched by same constraints.
-//   func.ukernel<tile.contract> device @vnni_q8_asm(%weights: tensor<[%M]x[%K]xi8, #q8_0<block=32>>, %input: tensor<[%K]xf32>) -> (tensor<[%M]xf32>) where [mul(%M, 16), mul(%K, 32)]
+//   func.ukernel<tile.contract> device @vnni_q8_asm(%weights: tensor<[%M]x[%K]xi8, #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes>>, %input: tensor<[%K]xf32>) -> (tensor<[%M]xf32>) where [mul(%M, 16), mul(%K, 32)]
 //
 //   // Call: runtime function call.
 //   %r = func.call @negate(%input) : (tensor<4x4xf32>) -> (tensor<4x4xf32>)
 //
 //   // Apply: compile-time contract demand.
-//   %r = func.apply<tile.contract>(%w, %x) : (tensor<16x32xi8, #q8_0<block=32>>, tensor<32xf32>) -> (tensor<16xf32>)
+//   %r = func.apply<tile.contract>(%w, %x) : (tensor<16x32xi8, #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes>>, tensor<32xf32>) -> (tensor<16xf32>)
 //
 //   // Return: exit function body.
 //   func.return %result : tensor<[%M]xf32>
@@ -827,7 +833,7 @@
 //
 // With user-assigned names (what a human or agent writes):
 //
-//   #enc = #q8_0<block=32>
+//   #enc = #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes>
 //
 //   func.def @tiled_matvec(%weights: tensor<[%M]x4xf32>, %input: tensor<4xf32>, %output: tensor<[%M]xf32>) -> (%output as tensor<[%M]xf32>) {
 //     %c0 = index.constant 0 : index

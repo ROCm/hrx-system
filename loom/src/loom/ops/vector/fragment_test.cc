@@ -89,8 +89,9 @@ TEST(VectorFragmentFactsTest, PayloadRoundTripsThroughValueFacts) {
   fact.shape_rank = 2;
   fact.shape_value_ids[0] = 78;
   fact.shape_value_ids[1] = 90;
-  fact.auxiliary.present_keys = LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SCALE;
-  fact.auxiliary.values[LOOM_VECTOR_ENCODING_AUXILIARY_KEY_SCALE] = 123;
+  fact.auxiliary.present_keys =
+      loom_encoding_auxiliary_key_flag(LOOM_ENCODING_AUXILIARY_KEY_SCALE);
+  fact.auxiliary.values[LOOM_ENCODING_AUXILIARY_KEY_SCALE] = 123;
   fact.encoded_operand.scale_operand_count = 1;
 
   loom_value_facts_t facts = loom_value_facts_unknown();
@@ -160,13 +161,12 @@ TEST_F(VectorFragmentTest, ParameterViewResolveMapsSchemaAndAuxiliaryKeys) {
   EXPECT_TRUE(view.has_schema);
   EXPECT_EQ(view.schema_value_id, 12);
   EXPECT_EQ(view.schema_parameter_ordinal, 0);
-  EXPECT_TRUE(
-      iree_all_bits_set(view.auxiliary.present_keys,
-                        LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SCALE |
-                            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_AMAX));
-  EXPECT_EQ(view.auxiliary.values[LOOM_VECTOR_ENCODING_AUXILIARY_KEY_SCALE],
-            34);
-  EXPECT_EQ(view.auxiliary.values[LOOM_VECTOR_ENCODING_AUXILIARY_KEY_AMAX], 56);
+  EXPECT_TRUE(iree_all_bits_set(
+      view.auxiliary.present_keys,
+      loom_encoding_auxiliary_key_flag(LOOM_ENCODING_AUXILIARY_KEY_SCALE) |
+          loom_encoding_auxiliary_key_flag(LOOM_ENCODING_AUXILIARY_KEY_AMAX)));
+  EXPECT_EQ(view.auxiliary.values[LOOM_ENCODING_AUXILIARY_KEY_SCALE], 34);
+  EXPECT_EQ(view.auxiliary.values[LOOM_ENCODING_AUXILIARY_KEY_AMAX], 56);
 }
 
 TEST_F(VectorFragmentTest, ParameterViewResolveReportsUnknownKeys) {

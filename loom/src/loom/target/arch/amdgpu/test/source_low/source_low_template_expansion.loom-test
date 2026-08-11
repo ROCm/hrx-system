@@ -20,20 +20,20 @@ func.template<hip.recipe.vector_loop> device @vector_loop_provider(%publish_opti
   %workitem = kernel.workitem.id<x> : index
   %word_element_add = index.mul %workitem, %vector_width : index
   %input_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %output : buffer, buffer, buffer
-  %input_view = buffer.view %input_noalias[%buffer_base] : buffer -> view<2048xf32, #dense>
-  %weight_view = buffer.view %weight_noalias[%buffer_base] : buffer -> view<2048xf32, #dense>
-  %optional_output_view = buffer.view %optional_output[%buffer_base] : buffer -> view<2048xf32, #dense>
-  %output_view = buffer.view %output_noalias[%buffer_base] : buffer -> view<2048xf32, #dense>
+  %input_view = buffer.view %input_noalias[%buffer_base] : buffer -> view<2048xf32>
+  %weight_view = buffer.view %weight_noalias[%buffer_base] : buffer -> view<2048xf32>
+  %optional_output_view = buffer.view %optional_output[%buffer_base] : buffer -> view<2048xf32>
+  %output_view = buffer.view %output_noalias[%buffer_base] : buffer -> view<2048xf32>
   scf.for %stripe_base = [%loop_begin to %element_count step %stripe_step] {
     %channel = index.add %stripe_base, %word_element_add : index
     %mask = vector.mask.range [%channel to %element_count step %mask_step] : index -> vector<4xi1>
-    %input_values = vector.load.mask %input_view[%channel], %mask, %masked_zero : view<2048xf32, #dense>, vector<4xi1>, vector<4xf32>
-    %weight_values = vector.load.mask %weight_view[%channel], %mask, %masked_zero : view<2048xf32, #dense>, vector<4xi1>, vector<4xf32>
+    %input_values = vector.load.mask %input_view[%channel], %mask, %masked_zero : view<2048xf32>, vector<4xi1>, vector<4xf32>
+    %weight_values = vector.load.mask %weight_view[%channel], %mask, %masked_zero : view<2048xf32>, vector<4xi1>, vector<4xf32>
     %result = vector.mulf %input_values, %weight_values : vector<4xf32>
     scf.if %publish_optional {
-      vector.store.mask %result, %optional_output_view[%channel], %mask : vector<4xf32>, view<2048xf32, #dense>, vector<4xi1>
+      vector.store.mask %result, %optional_output_view[%channel], %mask : vector<4xf32>, view<2048xf32>, vector<4xi1>
     }
-    vector.store.mask %result, %output_view[%channel], %mask : vector<4xf32>, view<2048xf32, #dense>, vector<4xi1>
+    vector.store.mask %result, %output_view[%channel], %mask : vector<4xf32>, view<2048xf32>, vector<4xi1>
   }
   func.return
 }

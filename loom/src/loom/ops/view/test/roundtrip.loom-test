@@ -100,10 +100,10 @@ func.def @scalar_view_atomics(%buffer: buffer, %offset: offset, %row: index, %co
 
 // Encoded physical storage composes an address layout with a storage schema.
 // Loads from this view still produce physical i8 records; decode is explicit.
-func.def @encoded_physical_storage_view(%buffer: buffer, %offset: offset, %m: index, %kb: index) {
+func.def @encoded_storage_view(%buffer: buffer, %offset: offset, %m: index, %kb: index) {
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
-  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<[%m]x[%kb]x18xi8, %storage>
   test.use %view : view<[%m]x[%kb]x18xi8, %storage>
   func.return

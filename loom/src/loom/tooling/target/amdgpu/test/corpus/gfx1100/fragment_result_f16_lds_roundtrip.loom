@@ -59,24 +59,24 @@ kernel.def target(@fragment_result_lds_gfx1100_wave64) @fragment_result_f16_lds_
   %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf16>
 
   %direct_global = buffer.assume.memory_space<global> %direct_buffer : buffer
-  %direct_view = buffer.view %direct_global[%base] : buffer -> view<16x16xf32, #dense>
-  vector.fragment.store<result> %result, %direct_view[%fragment_origin, %fragment_origin] shape [%m, %n] : vector<8xf16>, view<16x16xf32, #dense>
+  %direct_view = buffer.view %direct_global[%base] : buffer -> view<16x16xf32>
+  vector.fragment.store<result> %result, %direct_view[%fragment_origin, %fragment_origin] shape [%m, %n] : vector<8xf16>, view<16x16xf32>
 
   %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
-  %scratch_view = buffer.view %scratch[%base] : buffer -> view<16x16xf16, #dense>
-  vector.fragment.store<result> %result, %scratch_view[%fragment_origin, %fragment_origin] shape [%m, %n] : vector<8xf16>, view<16x16xf16, #dense>
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<16x16xf16>
+  vector.fragment.store<result> %result, %scratch_view[%fragment_origin, %fragment_origin] shape [%m, %n] : vector<8xf16>, view<16x16xf16>
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 
   %roundtrip_global = buffer.assume.memory_space<global> %roundtrip_buffer : buffer
-  %roundtrip_view = buffer.view %roundtrip_global[%base] : buffer -> view<256xf32, #dense>
+  %roundtrip_view = buffer.view %roundtrip_global[%base] : buffer -> view<256xf32>
   scf.for %i = [%loop_begin to %lane_segment_count step %loop_step] {
     %linear_lane = index.mul %i, %wave_size : index
     %linear = index.add %linear_lane, %lane : index
     %row = index.div %linear, %tile_extent : index
     %column = index.rem %linear, %tile_extent : index
-    %value_f16 = view.load %scratch_view[%row, %column] : view<16x16xf16, #dense> -> f16
+    %value_f16 = view.load %scratch_view[%row, %column] : view<16x16xf16> -> f16
     %value = scalar.extf %value_f16 : f16 to f32
-    view.store %value, %roundtrip_view[%linear] : f32, view<256xf32, #dense>
+    view.store %value, %roundtrip_view[%linear] : f32, view<256xf32>
   }
   kernel.return
 }

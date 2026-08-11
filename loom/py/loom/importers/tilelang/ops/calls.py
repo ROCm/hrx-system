@@ -1630,7 +1630,7 @@ def _tvm_mfma_matrix_schema(
 ) -> ValueRef:
     return context.storage_schema_value(
         EncodingInstance(
-            name="matrix_operand",
+            name="encoding.operand",
             params=(
                 ("element_format", operand_format.element_format),
                 ("payload_elements", operand_format.lane_count),

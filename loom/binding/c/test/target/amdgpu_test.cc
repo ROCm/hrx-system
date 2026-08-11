@@ -560,8 +560,8 @@ kernel.def target(@gfx11_generic) @configured_store() {
   %zero_index = index.constant 0 : index
   %value = scalar.constant 7 : i32
   %global = buffer.assume.memory_space<global> %output : buffer
-  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, #dense>
-  view.store %value, %view[%zero_index] : i32, view<1xi32, #dense>
+  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32>
+  view.store %value, %view[%zero_index] : i32, view<1xi32>
   kernel.return
 }
 )");
@@ -695,8 +695,8 @@ kernel.def @wave32_root() {
   %zero_offset = index.constant 0 : offset
   %zero_index = index.constant 0 : index
   %global = buffer.assume.memory_space<global> %output : buffer
-  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, #dense>
-  view.store %size_i32, %view[%zero_index] : i32, view<1xi32, #dense>
+  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32>
+  view.store %size_i32, %view[%zero_index] : i32, view<1xi32>
   kernel.return
 }
 
@@ -709,8 +709,8 @@ kernel.def @wave64_root() {
   %zero_offset = index.constant 0 : offset
   %zero_index = index.constant 0 : index
   %global = buffer.assume.memory_space<global> %output : buffer
-  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, #dense>
-  view.store %size_i32, %view[%zero_index] : i32, view<1xi32, #dense>
+  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32>
+  view.store %size_i32, %view[%zero_index] : i32, view<1xi32>
   kernel.return
 }
 )");

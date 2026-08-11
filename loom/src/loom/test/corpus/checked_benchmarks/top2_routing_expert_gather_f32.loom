@@ -43,13 +43,13 @@ kernel.def @top2_routing_expert_gather_f32() {
   %negative_large = scalar.constant -1000000000.0 : f32
 
   %scores_noalias, %expert_payloads_noalias, %route_ids_noalias, %route_scores_noalias, %combined_payload_noalias = buffer.assume.noalias %scores, %expert_payloads, %route_ids, %route_scores, %combined_payload : buffer, buffer, buffer, buffer, buffer
-  %scores_view = buffer.view %scores_noalias[%base] : buffer -> view<4xf32, #dense>
-  %expert_payloads_view = buffer.view %expert_payloads_noalias[%base] : buffer -> view<4x4xf32, #dense>
-  %route_ids_view = buffer.view %route_ids_noalias[%base] : buffer -> view<2xi32, #dense>
-  %route_scores_view = buffer.view %route_scores_noalias[%base] : buffer -> view<2xf32, #dense>
-  %combined_payload_view = buffer.view %combined_payload_noalias[%base] : buffer -> view<4xf32, #dense>
+  %scores_view = buffer.view %scores_noalias[%base] : buffer -> view<4xf32>
+  %expert_payloads_view = buffer.view %expert_payloads_noalias[%base] : buffer -> view<4x4xf32>
+  %route_ids_view = buffer.view %route_ids_noalias[%base] : buffer -> view<2xi32>
+  %route_scores_view = buffer.view %route_scores_noalias[%base] : buffer -> view<2xf32>
+  %combined_payload_view = buffer.view %combined_payload_noalias[%base] : buffer -> view<4xf32>
 
-  %score_values = vector.load %scores_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %score_values = vector.load %scores_view[0] : view<4xf32> -> vector<4xf32>
   %score0 = vector.extract %score_values[0] : vector<4xf32> -> f32
   %score1 = vector.extract %score_values[1] : vector<4xf32> -> f32
   %score2 = vector.extract %score_values[2] : vector<4xf32> -> f32
@@ -60,15 +60,15 @@ kernel.def @top2_routing_expert_gather_f32() {
   %best_score2, %best_id2, %best_row2, %second_score2, %second_id2, %second_row2 = func.call @top2_route_update(%score2, %expert_id2, %expert_row2, %best_score1, %best_id1, %best_row1, %second_score1, %second_id1, %second_row1) : (f32, i32, index, f32, i32, index, f32, i32, index) -> (f32, i32, index, f32, i32, index)
   %best_score3, %best_id3, %best_row3, %second_score3, %second_id3, %second_row3 = func.call @top2_route_update(%score3, %expert_id3, %expert_row3, %best_score2, %best_id2, %best_row2, %second_score2, %second_id2, %second_row2) : (f32, i32, index, f32, i32, index, f32, i32, index) -> (f32, i32, index, f32, i32, index)
 
-  %best_payload = vector.load %expert_payloads_view[%best_row3, %payload_origin] : view<4x4xf32, #dense> -> vector<4xf32>
-  %second_payload = vector.load %expert_payloads_view[%second_row3, %payload_origin] : view<4x4xf32, #dense> -> vector<4xf32>
+  %best_payload = vector.load %expert_payloads_view[%best_row3, %payload_origin] : view<4x4xf32> -> vector<4xf32>
+  %second_payload = vector.load %expert_payloads_view[%second_row3, %payload_origin] : view<4x4xf32> -> vector<4xf32>
   %combined = vector.addf<reassoc|nnan|nsz> %best_payload, %second_payload : vector<4xf32>
 
-  view.store %best_id3, %route_ids_view[%best_route_slot] : i32, view<2xi32, #dense>
-  view.store %second_id3, %route_ids_view[%second_route_slot] : i32, view<2xi32, #dense>
-  view.store %best_score3, %route_scores_view[%best_route_slot] : f32, view<2xf32, #dense>
-  view.store %second_score3, %route_scores_view[%second_route_slot] : f32, view<2xf32, #dense>
-  vector.store %combined, %combined_payload_view[0] : vector<4xf32>, view<4xf32, #dense>
+  view.store %best_id3, %route_ids_view[%best_route_slot] : i32, view<2xi32>
+  view.store %second_id3, %route_ids_view[%second_route_slot] : i32, view<2xi32>
+  view.store %best_score3, %route_scores_view[%best_route_slot] : f32, view<2xf32>
+  view.store %second_score3, %route_scores_view[%second_route_slot] : f32, view<2xf32>
+  vector.store %combined, %combined_payload_view[0] : vector<4xf32>, view<4xf32>
   kernel.return
 }
 

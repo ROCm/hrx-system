@@ -15,11 +15,12 @@ loom_generated_cc_library(
   GENERATOR
     loom::py::loom::gen::ops::c_tables_encoding_generator
   SRCS
+    "auxiliary.c"
     "condition_refinement.c"
     "facts.c"
     "families.c"
-    "matrix_operand.c"
     "numeric_transform.c"
+    "operand.c"
     "params.c"
     "roles.c"
     "storage.c"
@@ -32,10 +33,11 @@ loom_generated_cc_library(
     "builders.c"
     "tables.c"
   HDRS
+    "auxiliary.h"
     "facts.h"
     "families.h"
-    "matrix_operand.h"
     "numeric_transform.h"
+    "operand.h"
     "ops.h"
     "params.h"
     "roles.h"
@@ -53,6 +55,19 @@ loom_generated_cc_library(
     loom::util::fact_table
     loom::util::numeric_format
     loom::util::stable_id
+)
+
+loom_cc_test(
+  NAME
+    auxiliary_test
+  SRCS
+    "auxiliary_test.cc"
+  DEPS
+    ::encoding
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
 )
 
 loom_cc_benchmark(

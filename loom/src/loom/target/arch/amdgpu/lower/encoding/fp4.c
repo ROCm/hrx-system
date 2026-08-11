@@ -10,7 +10,7 @@
 #include <string.h>
 
 #include "loom/ir/context.h"
-#include "loom/ops/vector/encoding_auxiliary.h"
+#include "loom/ops/encoding/auxiliary.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/vector/storage.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
@@ -578,18 +578,18 @@ static bool loom_amdgpu_fp4_scale_source(
     const loom_amdgpu_fp4_scale_shape_t* scale_shape,
     loom_value_id_t* out_scale_source) {
   *out_scale_source = LOOM_VALUE_ID_INVALID;
-  loom_vector_encoding_auxiliary_view_t auxiliary_view = {0};
+  loom_encoding_auxiliary_view_t auxiliary_view = {0};
   iree_string_view_t unknown_key = iree_string_view_empty();
-  if (!loom_vector_encoding_auxiliary_view_resolve(
+  if (!loom_encoding_auxiliary_view_resolve(
           module, loom_vector_decode_auxiliary(source_op),
           loom_vector_decode_auxiliary_names(source_op), &auxiliary_view,
           &unknown_key) ||
       auxiliary_view.present_keys !=
-          LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SCALE) {
+          loom_encoding_auxiliary_key_flag(LOOM_ENCODING_AUXILIARY_KEY_SCALE)) {
     return false;
   }
   const loom_value_id_t scale_source =
-      auxiliary_view.values[LOOM_VECTOR_ENCODING_AUXILIARY_KEY_SCALE];
+      auxiliary_view.values[LOOM_ENCODING_AUXILIARY_KEY_SCALE];
   if (scale_source == LOOM_VALUE_ID_INVALID ||
       scale_source >= module->values.count ||
       loom_vector_static_rank1_lane_count(

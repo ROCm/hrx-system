@@ -66,7 +66,7 @@ config.def @bad_schema = 1 : encoding<schema>
 
 // Static encoding initializers must have the declared semantic role.
 // ERROR@+1: TYPE/001 "value" "encoding<layout>" "config" "encoding<schema>"
-config.def @bad_schema_role = #dense : encoding<schema>
+config.def @bad_schema_role = #encoding.layout.dense : encoding<schema>
 
 // ====
 

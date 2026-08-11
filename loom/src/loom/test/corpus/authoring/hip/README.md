@@ -217,14 +217,14 @@ uint4 wide = *reinterpret_cast<const uint4 *>(words);
 Loom spelling:
 
 ```loom
-%input_words = buffer.view %input_noalias[%base] : buffer -> view<4xi32, #dense>
+%input_words = buffer.view %input_noalias[%base] : buffer -> view<4xi32>
 
-%w0 = vector.load %input_words[0] : view<4xi32, #dense> -> vector<1xi32>
-%w1 = vector.load %input_words[1] : view<4xi32, #dense> -> vector<1xi32>
-%w2 = vector.load %input_words[2] : view<4xi32, #dense> -> vector<1xi32>
-%w3 = vector.load %input_words[3] : view<4xi32, #dense> -> vector<1xi32>
+%w0 = vector.load %input_words[0] : view<4xi32> -> vector<1xi32>
+%w1 = vector.load %input_words[1] : view<4xi32> -> vector<1xi32>
+%w2 = vector.load %input_words[2] : view<4xi32> -> vector<1xi32>
+%w3 = vector.load %input_words[3] : view<4xi32> -> vector<1xi32>
 
-%wide = vector.load %input_words[0] : view<4xi32, #dense> -> vector<4xi32>
+%wide = vector.load %input_words[0] : view<4xi32> -> vector<4xi32>
 ```
 
 The scalar path and vector path are both correct source shapes. They are not
@@ -252,8 +252,8 @@ rg 'vector.load .*vector<(1|4)xi32>' /tmp/q8-load-width.loom
 Expected signal:
 
 ```loom
-%w0 = vector.load %input_words[0] : view<4xi32, #dense> -> vector<1xi32>
-%wide = vector.load %input_words[0] : view<4xi32, #dense> -> vector<4xi32>
+%w0 = vector.load %input_words[0] : view<4xi32> -> vector<1xi32>
+%wide = vector.load %input_words[0] : view<4xi32> -> vector<4xi32>
 ```
 
 ## Shared Memory Tile
@@ -275,13 +275,13 @@ Loom spelling:
 
 ```loom
 %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
-%scratch_view = buffer.view %scratch[%base] : buffer -> view<64xi32, #dense>
+%scratch_view = buffer.view %scratch[%base] : buffer -> view<64xi32>
 
-%loaded = vector.load %input_view[%lane] : view<64xi32, #dense> -> vector<1xi32>
-vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<64xi32, #dense>
+%loaded = vector.load %input_view[%lane] : view<64xi32> -> vector<1xi32>
+vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<64xi32>
 kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-%reversed = vector.load %scratch_view[%reverse_lane] : view<64xi32, #dense> -> vector<1xi32>
-vector.store %reversed, %output_view[%lane] : vector<1xi32>, view<64xi32, #dense>
+%reversed = vector.load %scratch_view[%reverse_lane] : view<64xi32> -> vector<1xi32>
+vector.store %reversed, %output_view[%lane] : vector<1xi32>, view<64xi32>
 ```
 
 The contract is the memory space and synchronization relationship.
@@ -354,12 +354,12 @@ Loom spelling:
 %scratch_a = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
 %scratch_b = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
 
-vector.store %loaded, %scratch_a_view[%row, %column] : vector<1xi32>, view<8x8xi32, #dense>
+vector.store %loaded, %scratch_a_view[%row, %column] : vector<1xi32>, view<8x8xi32>
 kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-%transposed = vector.load %scratch_a_view[%column, %row] : view<8x8xi32, #dense> -> vector<1xi32>
-vector.store %transposed, %scratch_b_view[%row, %column] : vector<1xi32>, view<8x8xi32, #dense>
+%transposed = vector.load %scratch_a_view[%column, %row] : view<8x8xi32> -> vector<1xi32>
+vector.store %transposed, %scratch_b_view[%row, %column] : vector<1xi32>, view<8x8xi32>
 kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-%roundtrip = vector.load %scratch_b_view[%column, %row] : view<8x8xi32, #dense> -> vector<1xi32>
+%roundtrip = vector.load %scratch_b_view[%column, %row] : view<8x8xi32> -> vector<1xi32>
 ```
 
 This recipe is a stronger LDS smoke test than a one-dimensional lane exchange:
@@ -422,13 +422,13 @@ Loom spelling:
 
 ```loom
 %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
-%scratch_view = buffer.view %scratch[%base] : buffer -> view<64x4xi32, #dense>
+%scratch_view = buffer.view %scratch[%base] : buffer -> view<64x4xi32>
 
-%loaded = vector.load %input_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
-vector.store %loaded, %scratch_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
+%loaded = vector.load %input_view[%lane, 0] : view<64x4xi32> -> vector<4xi32>
+vector.store %loaded, %scratch_view[%lane, 0] : vector<4xi32>, view<64x4xi32>
 kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-%roundtrip = vector.load %scratch_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
-vector.store %roundtrip, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
+%roundtrip = vector.load %scratch_view[%lane, 0] : view<64x4xi32> -> vector<4xi32>
+vector.store %roundtrip, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32>
 ```
 
 This recipe covers the wide-row shared-memory path that HIP code often spells
@@ -515,7 +515,7 @@ acc = __builtin_amdgcn_sdot4(/* unsigned lhs, signed rhs */);
 Loom spelling:
 
 ```loom
-%q8_word = vector.load %q8_words[0] : view<1xi32, #dense> -> vector<1xi32>
+%q8_word = vector.load %q8_words[0] : view<1xi32> -> vector<1xi32>
 %q8_unsigned = vector.bitunpacku<8> %q8_word : vector<1xi32> -> vector<4xi32>
 %q8_signed = vector.bitunpacks<8> %q8_word : vector<1xi32> -> vector<4xi32>
 
@@ -768,7 +768,7 @@ kernel.launch.config workgroups(%one, %two, %one)
 
 %copy = kernel.async.cluster.gather %source to %destination using %participants
     {cache_scope = device, cache_temporal = regular}
-    : view<16xi8, #dense> to view<16xi8, #dense>, i32 -> kernel.async.token
+    : view<16xi8> to view<16xi8>, i32 -> kernel.async.token
 %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
 kernel.async.wait %group {newer_groups = 0} : kernel.async.group
 kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)

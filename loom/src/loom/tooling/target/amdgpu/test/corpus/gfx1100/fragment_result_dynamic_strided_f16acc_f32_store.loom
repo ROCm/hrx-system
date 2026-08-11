@@ -80,8 +80,8 @@ kernel.def @fill_fragment_result_dynamic_strided_f16acc_f32_store_expected() {
   %tile_value = scalar.uitofp %tile_value_i32 : i32 to f32
 
   %out_global = buffer.assume.memory_space<global> %out_buffer : buffer
-  %out_view = buffer.view %out_global[%base] : buffer -> view<4096xf32, #dense>
-  view.store %tile_value, %out_view[%element_index] : f32, view<4096xf32, #dense>
+  %out_view = buffer.view %out_global[%base] : buffer -> view<4096xf32>
+  view.store %tile_value, %out_view[%element_index] : f32, view<4096xf32>
   kernel.return
 }
 

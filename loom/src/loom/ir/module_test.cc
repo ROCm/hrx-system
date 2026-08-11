@@ -24,6 +24,7 @@ static const loom_attr_descriptor_t kQ8_0EncodingParameters[] = {{
 static const loom_encoding_family_descriptor_t kQ8_0EncodingDescriptor = {
     /*.name=*/LOOM_BSTRING_REF(4, "q8_0"),
     /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    /*.family_flags=*/{},
     /*.parameter_count=*/IREE_ARRAYSIZE(kQ8_0EncodingParameters),
     /*.parameter_descriptors=*/kQ8_0EncodingParameters,
 };
@@ -42,6 +43,7 @@ static const loom_encoding_vtable_t kQ6KEncodingVtable = {
 static const loom_encoding_family_descriptor_t kDenseEncodingDescriptor = {
     /*.name=*/LOOM_BSTRING_REF(5, "dense"),
     /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+    /*.family_flags=*/LOOM_ENCODING_FAMILY_IMPLICIT_SHAPED_ATTACHMENT,
 };
 static const loom_encoding_vtable_t kDenseEncodingVtable = {
     /*.descriptor=*/&kDenseEncodingDescriptor,
@@ -2546,6 +2548,40 @@ TEST_F(ModuleTest, InternShapedType) {
   EXPECT_TRUE(loom_type_equal(module->types.entries[0],
                               loom_type_scalar(LOOM_SCALAR_TYPE_F32)));
   EXPECT_TRUE(loom_type_equal(module->types.entries[1], interned1));
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, InternImplicitShapedAttachmentUsesAbsentIdentity) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_string_id_t dense_name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("dense"), &dense_name_id));
+  const loom_encoding_t dense_encoding = {
+      /*.name_id=*/dense_name_id,
+      /*.alias_id=*/LOOM_STRING_ID_INVALID,
+  };
+  uint16_t dense_encoding_id = 0;
+  IREE_ASSERT_OK(
+      loom_module_add_encoding(module, &dense_encoding, &dense_encoding_id));
+
+  const uint64_t rows = loom_dim_pack_static(4);
+  const uint64_t columns = loom_dim_pack_static(8);
+  const loom_type_t implicit_type = loom_type_shaped_2d(
+      LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_F32, rows, columns, 0);
+  const loom_type_t explicit_type = loom_type_shaped_2d(
+      LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_F32, rows, columns, dense_encoding_id);
+  loom_type_id_t implicit_type_id = LOOM_TYPE_ID_INVALID;
+  loom_type_id_t explicit_type_id = LOOM_TYPE_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_type_id(module, implicit_type, &implicit_type_id));
+  IREE_ASSERT_OK(
+      loom_module_intern_type_id(module, explicit_type, &explicit_type_id));
+
+  EXPECT_EQ(explicit_type_id, implicit_type_id);
+  EXPECT_FALSE(loom_type_has_encoding(module->types.entries[implicit_type_id]));
   loom_module_free(module);
 }
 

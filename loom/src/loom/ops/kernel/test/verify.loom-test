@@ -740,10 +740,10 @@ kernel.def @async_copy_accepts_noalias_kernel_buffer_memory_space() {
   %base = index.constant 0 : offset
   %scratch_bytes = index.constant 16 : offset
   %other_noalias, %source_noalias = buffer.assume.noalias %other_buffer, %source_buffer : buffer, buffer
-  %source = buffer.view %source_noalias[%base] : buffer -> view<16xi8, #dense>
+  %source = buffer.view %source_noalias[%base] : buffer -> view<16xi8>
   %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
-  %dest = buffer.view %scratch[%base] : buffer -> view<16xi8, #dense>
-  %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
+  %dest = buffer.view %scratch[%base] : buffer -> view<16xi8>
+  %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
   test.use %other_noalias : buffer

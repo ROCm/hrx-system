@@ -18,7 +18,7 @@ COMPILE-REPORT: target_legalization[0] function=records_reduce_axes_reference_re
 test.target<low_core> @test_target
 
 func.def target(@test_target) @records_decode_reference_rewrite(%payload: vector<2xf8E4M3>, %scale: vector<1xf32>) -> (vector<2xf32>) {
-  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3, payload_elements=2, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3<affine=scale_only, payload_elements=2, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf32>} : vector<2xf8E4M3>, encoding<schema> -> vector<2xf32>
   func.return %decoded : vector<2xf32>
 }
@@ -36,8 +36,8 @@ test.target<low_core> @test_target
 func.def target(@test_target) @reports_vector_store_deferred_to_later_phase(%out_buffer: buffer, %value: vector<4xf32>) {
   %base = index.constant 0 : offset
   %origin = index.constant 0 : index
-  %view = buffer.view %out_buffer[%base] : buffer -> view<4xf32, #dense>
-  vector.store %value, %view[%origin] : vector<4xf32>, view<4xf32, #dense>
+  %view = buffer.view %out_buffer[%base] : buffer -> view<4xf32>
+  vector.store %value, %view[%origin] : vector<4xf32>, view<4xf32>
   func.return
 }
 

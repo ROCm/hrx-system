@@ -336,11 +336,17 @@ iree_status_t loom_context_register_encoding_vtable(
 
 static iree_status_t loom_context_build_encoding_family_name_table(
     loom_context_t* context) {
-  iree_host_size_t family_count = context->encodings.vtables.count;
+  const iree_host_size_t family_count = context->encodings.vtables.count;
   if (family_count == 0) return iree_ok_status();
 
+  iree_host_size_t name_count = family_count;
+  for (iree_host_size_t i = 0; i < family_count; ++i) {
+    name_count +=
+        context->encodings.vtables.entries[i]->descriptor->alias_count;
+  }
+
   uint32_t capacity = iree_host_size_next_power_of_two(
-      (iree_host_size_t)(family_count * 4 + 2) / 3);
+      (iree_host_size_t)(name_count * 4 + 2) / 3);
   if (capacity < 8) capacity = 8;
   loom_encoding_family_name_entry_t* entries = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
@@ -351,18 +357,33 @@ static iree_status_t loom_context_build_encoding_family_name_table(
   for (iree_host_size_t i = 0; i < family_count; ++i) {
     const loom_encoding_vtable_t* vtable =
         context->encodings.vtables.entries[i];
-    iree_string_view_t name = loom_bstring_view(vtable->descriptor->name);
-    uint32_t slot = loom_hash_string(name) & mask;
-    while (entries[slot].family_id != LOOM_ENCODING_FAMILY_ID_INVALID) {
-      slot = (slot + 1) & mask;
+    for (uint16_t name_index = 0; name_index <= vtable->descriptor->alias_count;
+         ++name_index) {
+      const loom_encoding_alias_descriptor_t* alias =
+          name_index == 0 ? NULL : &vtable->descriptor->aliases[name_index - 1];
+      iree_string_view_t name =
+          alias ? loom_bstring_view(alias->name)
+                : loom_bstring_view(vtable->descriptor->name);
+      uint32_t slot = loom_hash_string(name) & mask;
+      while (entries[slot].family_id != LOOM_ENCODING_FAMILY_ID_INVALID) {
+        if (iree_string_view_equal(entries[slot].name, name)) {
+          iree_allocator_free(context->allocator, entries);
+          return iree_make_status(
+              IREE_STATUS_ALREADY_EXISTS,
+              "encoding family or alias '%.*s' is registered twice",
+              (int)name.size, name.data);
+        }
+        slot = (slot + 1) & mask;
+      }
+      entries[slot].name = name;
+      entries[slot].family_id = (loom_encoding_family_id_t)(i + 1);
+      entries[slot].alias = alias;
     }
-    entries[slot].name = name;
-    entries[slot].family_id = (loom_encoding_family_id_t)(i + 1);
   }
 
   context->encodings.names.entries = entries;
   context->encodings.names.capacity = capacity;
-  context->encodings.names.count = (uint32_t)family_count;
+  context->encodings.names.count = (uint32_t)name_count;
   return iree_ok_status();
 }
 
@@ -438,7 +459,7 @@ static iree_status_t loom_context_build_parameterized_attr_name_table(
       const loom_parameterized_attr_descriptor_t* descriptor =
           &dialect->entries[family_index];
       iree_string_view_t name = loom_bstring_view(descriptor->name);
-      if (loom_context_lookup_encoding_family_by_name(context, name) !=
+      if (loom_context_resolve_encoding_name(context, name).family_id !=
           LOOM_ENCODING_FAMILY_ID_INVALID) {
         iree_allocator_free(context->allocator, entries);
         return iree_make_status(
@@ -608,19 +629,24 @@ loom_context_lookup_parameterized_attr_by_name(const loom_context_t* context,
   return NULL;
 }
 
-loom_encoding_family_id_t loom_context_lookup_encoding_family_by_name(
+loom_encoding_name_resolution_t loom_context_resolve_encoding_name(
     const loom_context_t* context, iree_string_view_t name) {
   const loom_encoding_family_name_table_t* table = &context->encodings.names;
-  if (table->capacity == 0) return LOOM_ENCODING_FAMILY_ID_INVALID;
+  if (table->capacity == 0) {
+    return (loom_encoding_name_resolution_t){0};
+  }
   uint32_t mask = table->capacity - 1;
   uint32_t slot = loom_hash_string(name) & mask;
   while (table->entries[slot].family_id != LOOM_ENCODING_FAMILY_ID_INVALID) {
     if (iree_string_view_equal(table->entries[slot].name, name)) {
-      return table->entries[slot].family_id;
+      return (loom_encoding_name_resolution_t){
+          .family_id = table->entries[slot].family_id,
+          .alias = table->entries[slot].alias,
+      };
     }
     slot = (slot + 1) & mask;
   }
-  return LOOM_ENCODING_FAMILY_ID_INVALID;
+  return (loom_encoding_name_resolution_t){0};
 }
 
 const loom_encoding_vtable_t* loom_context_resolve_encoding_vtable(

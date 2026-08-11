@@ -19,9 +19,9 @@ kernel.def target(@target) @dense_projection_tiled_u8_128() {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 32 : index
-  %lhs_storage = encoding.define #physical_storage<layout=#dense, schema=#matrix_operand<element_format=u8, payload_elements=32, payload_registers=8>> : encoding<storage>
-  %rhs_storage = encoding.define #physical_storage<layout=#dense, schema=#matrix_operand<element_format=u8, payload_elements=32, payload_registers=8>> : encoding<storage>
-  %acc_storage = encoding.define #physical_storage<layout=#dense, schema=#matrix_operand<element_format=u32, payload_elements=8, payload_registers=8>> : encoding<storage>
+  %lhs_storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.operand<element_format=u8, payload_elements=32, payload_registers=8>> : encoding<storage>
+  %rhs_storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.operand<element_format=u8, payload_elements=32, payload_registers=8>> : encoding<storage>
+  %acc_storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.operand<element_format=u32, payload_elements=8, payload_registers=8>> : encoding<storage>
   %out_tile_index = index.madd %workgroup_m, %n_tiles, %workgroup_n : index
   %out_byte_index = index.mul %out_tile_index, %acc_tile_bytes : index
   %out_byte_offset = index.cast %out_byte_index : index to offset

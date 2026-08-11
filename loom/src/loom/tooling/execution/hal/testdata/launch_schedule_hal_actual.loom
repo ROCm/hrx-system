@@ -5,12 +5,12 @@ kernel.def @launch_schedule_increment_i32() {
   %base = index.constant 0 : offset
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%base] : buffer -> view<1xi32, #dense>
-  %value = view.load %input_view[0] : view<1xi32, #dense> -> i32
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<1xi32>
+  %value = view.load %input_view[0] : view<1xi32> -> i32
   %increment = scalar.constant 1 : i32
   %incremented = scalar.addi %value, %increment : i32
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<1xi32, #dense>
-  view.store %incremented, %output_view[0] : i32, view<1xi32, #dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<1xi32>
+  view.store %incremented, %output_view[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -21,11 +21,11 @@ kernel.def @launch_schedule_double_i32() {
   %base = index.constant 0 : offset
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%base] : buffer -> view<1xi32, #dense>
-  %value = view.load %input_view[0] : view<1xi32, #dense> -> i32
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<1xi32>
+  %value = view.load %input_view[0] : view<1xi32> -> i32
   %doubled = scalar.addi %value, %value : i32
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<1xi32, #dense>
-  view.store %doubled, %output_view[0] : i32, view<1xi32, #dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<1xi32>
+  view.store %doubled, %output_view[0] : i32, view<1xi32>
   kernel.return
 }
 

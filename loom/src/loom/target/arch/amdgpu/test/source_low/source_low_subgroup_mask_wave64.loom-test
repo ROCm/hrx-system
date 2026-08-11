@@ -9,10 +9,10 @@ kernel.def target(@target) @subgroup_active_mask_i64_wave64() {
 } launch(%output: buffer) {
   %tid = kernel.workitem.id<x> : index
   %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<64xi64, #dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<64xi64>
   %mask = kernel.subgroup.active.mask : i64
   %result = vector.from_elements %mask : vector<1xi64>
-  vector.store %result, %output_view[%tid] : vector<1xi64>, view<64xi64, #dense>
+  vector.store %result, %output_view[%tid] : vector<1xi64>, view<64xi64>
   kernel.return
 }
 
@@ -42,14 +42,14 @@ kernel.def target(@target) @subgroup_vote_ballot_i64_wave64() {
 } launch(%output: buffer) {
   %tid = kernel.workitem.id<x> : index
   %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<64xi64, #dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<64xi64>
   %lane = kernel.subgroup.lane.id : index
   %lane_i32 = index.cast %lane : index to i32
   %limit = scalar.constant 32 : i32
   %predicate = scalar.cmpi slt, %lane_i32, %limit : i32
   %mask = kernel.subgroup.vote.ballot %predicate : i1 -> i64
   %result = vector.from_elements %mask : vector<1xi64>
-  vector.store %result, %output_view[%tid] : vector<1xi64>, view<64xi64, #dense>
+  vector.store %result, %output_view[%tid] : vector<1xi64>, view<64xi64>
   kernel.return
 }
 

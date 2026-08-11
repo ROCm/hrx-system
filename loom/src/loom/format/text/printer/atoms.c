@@ -136,27 +136,117 @@ static iree_status_t loom_print_attr_impl(
     const loom_module_t* module, const loom_attr_descriptor_t* descriptor,
     const loom_print_context_t* type_context);
 
+static const loom_encoding_alias_descriptor_t*
+loom_select_canonical_encoding_alias(const loom_module_t* module,
+                                     const loom_encoding_t* encoding) {
+  const loom_encoding_vtable_t* vtable =
+      loom_module_encoding_vtable(module, encoding);
+  if (!vtable || !loom_encoding_static_parameters_are_valid(encoding) ||
+      vtable->descriptor->alias_count == 0) {
+    return NULL;
+  }
+  const uint8_t discriminator_index =
+      vtable->descriptor->alias_discriminator_parameter_index;
+  for (uint8_t i = 0; i < encoding->attribute_count; ++i) {
+    const loom_named_attr_t* parameter = &encoding->attributes[i];
+    const uint8_t parameter_index =
+        loom_encoding_parameter_descriptor_index(parameter);
+    if (parameter_index < discriminator_index) continue;
+    if (parameter_index > discriminator_index ||
+        parameter->value.kind != LOOM_ATTR_ENUM) {
+      return NULL;
+    }
+    const uint8_t discriminator_value = loom_attr_as_enum(parameter->value);
+    const uint8_t alias_ordinal =
+        vtable->descriptor
+            ->alias_ordinals_by_discriminator[discriminator_value];
+    if (alias_ordinal == 0) return NULL;
+    const loom_encoding_alias_descriptor_t* alias =
+        &vtable->descriptor->aliases[alias_ordinal - 1];
+
+    // An alias must reproduce the complete structural encoding when reparsed.
+    // Require every contributed parameter to be present and every fixed value
+    // to match. Default parameters may differ and are printed as overrides.
+    uint8_t encoding_parameter_index = 0;
+    for (uint8_t alias_parameter_index = 0;
+         alias_parameter_index < alias->parameter_count;
+         ++alias_parameter_index) {
+      const loom_encoding_alias_parameter_t* alias_parameter =
+          &alias->parameters[alias_parameter_index];
+      while (encoding_parameter_index < encoding->attribute_count &&
+             loom_encoding_parameter_descriptor_index(
+                 &encoding->attributes[encoding_parameter_index]) <
+                 alias_parameter->parameter_index) {
+        ++encoding_parameter_index;
+      }
+      if (encoding_parameter_index == encoding->attribute_count) return NULL;
+      const loom_named_attr_t* encoding_parameter =
+          &encoding->attributes[encoding_parameter_index];
+      if (loom_encoding_parameter_descriptor_index(encoding_parameter) !=
+          alias_parameter->parameter_index) {
+        return NULL;
+      }
+      if (iree_any_bit_set(alias_parameter->flags,
+                           LOOM_ENCODING_ALIAS_PARAMETER_FIXED) &&
+          !loom_attribute_equal(&encoding_parameter->value,
+                                &alias_parameter->value)) {
+        return NULL;
+      }
+      ++encoding_parameter_index;
+    }
+    return alias;
+  }
+  return NULL;
+}
+
 static iree_status_t loom_print_canonical_encoding(
     loom_output_stream_t* stream, const loom_module_t* module,
     const loom_encoding_t* encoding, const loom_print_context_t* ctx) {
+  const loom_encoding_alias_descriptor_t* alias =
+      loom_select_canonical_encoding_alias(module, encoding);
   IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '#'));
-  if (encoding->name_id < module->strings.count) {
+  if (alias) {
+    IREE_RETURN_IF_ERROR(
+        loom_output_stream_write(stream, loom_bstring_view(alias->name)));
+  } else if (encoding->name_id < module->strings.count) {
     IREE_RETURN_IF_ERROR(loom_output_stream_write(
         stream, module->strings.entries[encoding->name_id]));
-  }
-  if (encoding->attribute_count == 0) {
-    return iree_ok_status();
   }
 
   const loom_encoding_vtable_t* vtable =
       loom_module_encoding_vtable(module, encoding);
 
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '<'));
+  bool parameter_list_open = false;
+  uint8_t alias_parameter_index = 0;
   for (uint8_t i = 0; i < encoding->attribute_count; ++i) {
-    if (i > 0) {
+    const loom_named_attr_t* param = &encoding->attributes[i];
+    const uint8_t parameter_descriptor_index =
+        loom_encoding_parameter_descriptor_index(param);
+    const loom_encoding_alias_parameter_t* alias_parameter = NULL;
+    if (alias) {
+      while (alias_parameter_index < alias->parameter_count &&
+             alias->parameters[alias_parameter_index].parameter_index <
+                 parameter_descriptor_index) {
+        ++alias_parameter_index;
+      }
+      if (alias_parameter_index < alias->parameter_count &&
+          alias->parameters[alias_parameter_index].parameter_index ==
+              parameter_descriptor_index) {
+        alias_parameter = &alias->parameters[alias_parameter_index];
+      }
+    }
+    if (alias_parameter &&
+        (iree_any_bit_set(alias_parameter->flags,
+                          LOOM_ENCODING_ALIAS_PARAMETER_FIXED) ||
+         loom_attribute_equal(&param->value, &alias_parameter->value))) {
+      continue;
+    }
+    if (!parameter_list_open) {
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '<'));
+      parameter_list_open = true;
+    } else {
       IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ", "));
     }
-    const loom_named_attr_t* param = &encoding->attributes[i];
     if (param->name_id < module->strings.count) {
       IREE_RETURN_IF_ERROR(loom_output_stream_write(
           stream, module->strings.entries[param->name_id]));
@@ -164,17 +254,16 @@ static iree_status_t loom_print_canonical_encoding(
     IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '='));
     const loom_attr_descriptor_t* descriptor = NULL;
     if (vtable) {
-      const uint8_t descriptor_index =
-          loom_encoding_parameter_descriptor_index(param);
-      if (descriptor_index != LOOM_ENCODING_PARAMETER_INDEX_INVALID) {
-        descriptor =
-            &vtable->descriptor->parameter_descriptors[descriptor_index];
+      if (parameter_descriptor_index != LOOM_ENCODING_PARAMETER_INDEX_INVALID) {
+        descriptor = &vtable->descriptor
+                          ->parameter_descriptors[parameter_descriptor_index];
       }
     }
     IREE_RETURN_IF_ERROR(
         loom_print_attr_impl(stream, &param->value, module, descriptor, ctx));
   }
-  return loom_output_stream_write_char(stream, '>');
+  return parameter_list_open ? loom_output_stream_write_char(stream, '>')
+                             : iree_ok_status();
 }
 
 static iree_status_t loom_print_static_encoding(

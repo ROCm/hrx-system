@@ -1800,7 +1800,7 @@ static iree_status_t loom_bytecode_reader_read_encodings(
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_string_ref(
         reader, name_id, IREE_SV("encoding_family_name"), name_offset, &name));
     if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
-    if (loom_context_lookup_encoding_family_by_name(reader->context, name) ==
+    if (loom_context_resolve_encoding_name(reader->context, name).family_id ==
         LOOM_ENCODING_FAMILY_ID_INVALID) {
       return loom_bytecode_reader_emit_invalid_field(
           reader, IREE_SV("ENCODINGS"), IREE_SV("family"), i,

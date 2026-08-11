@@ -96,11 +96,11 @@ kernel.def @increment(%element_count: index) {
   %base = index.constant 0 : offset
   %workgroup = kernel.workgroup.id<x> : index
   %c1 = scalar.constant 1 : i32
-  %source_view = buffer.view %source[%base] : buffer -> view<128xi32, #dense>
-  %target_view = buffer.view %target[%base] : buffer -> view<128xi32, #dense>
-  %value = view.load %source_view[%workgroup] : view<128xi32, #dense> -> i32
+  %source_view = buffer.view %source[%base] : buffer -> view<128xi32>
+  %target_view = buffer.view %target[%base] : buffer -> view<128xi32>
+  %value = view.load %source_view[%workgroup] : view<128xi32> -> i32
   %result = scalar.addi %value, %c1 : i32
-  view.store %result, %target_view[%workgroup] : i32, view<128xi32, #dense>
+  view.store %result, %target_view[%workgroup] : i32, view<128xi32>
   kernel.return
 }
 
@@ -111,11 +111,11 @@ kernel.def @double(%element_count: index) {
   %base = index.constant 0 : offset
   %workgroup = kernel.workgroup.id<x> : index
   %c2 = scalar.constant 2 : i32
-  %source_view = buffer.view %source[%base] : buffer -> view<128xi32, #dense>
-  %target_view = buffer.view %target[%base] : buffer -> view<128xi32, #dense>
-  %value = view.load %source_view[%workgroup] : view<128xi32, #dense> -> i32
+  %source_view = buffer.view %source[%base] : buffer -> view<128xi32>
+  %target_view = buffer.view %target[%base] : buffer -> view<128xi32>
+  %value = view.load %source_view[%workgroup] : view<128xi32> -> i32
   %result = scalar.muli %value, %c2 : i32
-  view.store %result, %target_view[%workgroup] : i32, view<128xi32, #dense>
+  view.store %result, %target_view[%workgroup] : i32, view<128xi32>
   kernel.return
 }
 
@@ -191,22 +191,22 @@ TEST_F(CmdProgramPlanTest, OwnsParameterRequirementTables) {
 kernel.def @combine() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
-} launch(%lhs: view<3xi32, #dense>, %rhs: view<4xi32, #dense>, %target: buffer) {
+} launch(%lhs: view<3xi32>, %rhs: view<4xi32>, %target: buffer) {
   %element = index.constant 0 : index
   %base = index.constant 0 : offset
-  %lhs_value = view.load %lhs[%element] : view<3xi32, #dense> -> i32
-  %rhs_value = view.load %rhs[%element] : view<4xi32, #dense> -> i32
+  %lhs_value = view.load %lhs[%element] : view<3xi32> -> i32
+  %rhs_value = view.load %rhs[%element] : view<4xi32> -> i32
   %sum = scalar.addi %lhs_value, %rhs_value : i32
-  %target_view = buffer.view %target[%base] : buffer -> view<1xi32, #dense>
-  view.store %sum, %target_view[%element] : i32, view<1xi32, #dense>
+  %target_view = buffer.view %target[%base] : buffer -> view<1xi32>
+  view.store %sum, %target_view[%element] : i32, view<1xi32>
   kernel.return
 }
 
 command.program.def public @parameterized() launch(%parameters: buffer, %target: buffer) {
   %layer = index.constant 3 : index
-  %lhs = command.parameter %parameters, "blk.{}.lhs"[%layer] : view<3xi32, #dense>
-  %rhs = command.parameter %parameters, "shared.rhs" : view<4xi32, #dense>
-  kernel.launch @combine(%lhs, %rhs, %target) : (view<3xi32, #dense>, view<4xi32, #dense>, buffer)
+  %lhs = command.parameter %parameters, "blk.{}.lhs"[%layer] : view<3xi32>
+  %rhs = command.parameter %parameters, "shared.rhs" : view<4xi32>
+  kernel.launch @combine(%lhs, %rhs, %target) : (view<3xi32>, view<4xi32>, buffer)
   command.return
 }
 )");

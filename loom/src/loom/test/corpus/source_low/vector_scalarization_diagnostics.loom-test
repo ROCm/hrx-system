@@ -2,8 +2,8 @@
 
 func.def @oversized_static_vector_store_rejected(%output: buffer, %value: vector<65536xf32>) {
   %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<65536xf32, #dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<65536xf32>
   // ERROR@+1: SHAPE/007 {op_name="vector.store", pass_name="vector-to-scalar", vector_type="vector<65536xf32>"}
-  vector.store %value, %output_view[0] : vector<65536xf32>, view<65536xf32, #dense>
+  vector.store %value, %output_view[0] : vector<65536xf32>, view<65536xf32>
   func.return
 }

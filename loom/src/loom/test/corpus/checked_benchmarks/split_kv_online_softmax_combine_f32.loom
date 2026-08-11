@@ -16,19 +16,19 @@ kernel.def @split_kv_online_softmax_combine_f32() {
   %max_state_index = index.constant 0 : index
 
   %state0_noalias, %acc0_noalias, %state1_noalias, %acc1_noalias, %combined_state_noalias, %combined_acc_noalias = buffer.assume.noalias %state0, %acc0, %state1, %acc1, %combined_state, %combined_acc : buffer, buffer, buffer, buffer, buffer, buffer
-  %state0_view = buffer.view %state0_noalias[%base] : buffer -> view<2xf32, #dense>
-  %acc0_view = buffer.view %acc0_noalias[%base] : buffer -> view<4xf32, #dense>
-  %state1_view = buffer.view %state1_noalias[%base] : buffer -> view<2xf32, #dense>
-  %acc1_view = buffer.view %acc1_noalias[%base] : buffer -> view<4xf32, #dense>
-  %combined_state_view = buffer.view %combined_state_noalias[%base] : buffer -> view<2xf32, #dense>
-  %combined_acc_view = buffer.view %combined_acc_noalias[%base] : buffer -> view<4xf32, #dense>
+  %state0_view = buffer.view %state0_noalias[%base] : buffer -> view<2xf32>
+  %acc0_view = buffer.view %acc0_noalias[%base] : buffer -> view<4xf32>
+  %state1_view = buffer.view %state1_noalias[%base] : buffer -> view<2xf32>
+  %acc1_view = buffer.view %acc1_noalias[%base] : buffer -> view<4xf32>
+  %combined_state_view = buffer.view %combined_state_noalias[%base] : buffer -> view<2xf32>
+  %combined_acc_view = buffer.view %combined_acc_noalias[%base] : buffer -> view<4xf32>
 
-  %max0 = view.load %state0_view[0] : view<2xf32, #dense> -> f32
-  %sum0 = view.load %state0_view[1] : view<2xf32, #dense> -> f32
-  %max1 = view.load %state1_view[0] : view<2xf32, #dense> -> f32
-  %sum1 = view.load %state1_view[1] : view<2xf32, #dense> -> f32
-  %acc0_values = vector.load %acc0_view[0] : view<4xf32, #dense> -> vector<4xf32>
-  %acc1_values = vector.load %acc1_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %max0 = view.load %state0_view[0] : view<2xf32> -> f32
+  %sum0 = view.load %state0_view[1] : view<2xf32> -> f32
+  %max1 = view.load %state1_view[0] : view<2xf32> -> f32
+  %sum1 = view.load %state1_view[1] : view<2xf32> -> f32
+  %acc0_values = vector.load %acc0_view[0] : view<4xf32> -> vector<4xf32>
+  %acc1_values = vector.load %acc1_view[0] : view<4xf32> -> vector<4xf32>
 
   %combined_max = scalar.maxnumf %max0, %max1 : f32
   %delta0 = scalar.subf %max0, %combined_max : f32
@@ -45,9 +45,9 @@ kernel.def @split_kv_online_softmax_combine_f32() {
   %scaled_acc1 = vector.mulf<reassoc|nnan|nsz|contract> %acc1_values, %scale1_vector : vector<4xf32>
   %combined_acc_values = vector.addf<reassoc|nnan|nsz|contract> %scaled_acc0, %scaled_acc1 : vector<4xf32>
 
-  view.store %combined_max, %combined_state_view[%max_state_index] : f32, view<2xf32, #dense>
-  view.store %combined_sum, %combined_state_view[1] : f32, view<2xf32, #dense>
-  vector.store %combined_acc_values, %combined_acc_view[0] : vector<4xf32>, view<4xf32, #dense>
+  view.store %combined_max, %combined_state_view[%max_state_index] : f32, view<2xf32>
+  view.store %combined_sum, %combined_state_view[1] : f32, view<2xf32>
+  vector.store %combined_acc_values, %combined_acc_view[0] : vector<4xf32>, view<4xf32>
   kernel.return
 }
 

@@ -38,12 +38,12 @@ static const char kSourceText[] =
     "  %output_aligned = buffer.assume.alignment %output {minimum_alignment = "
     "4} : buffer\n"
     "  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : "
-    "buffer -> view<1xi32, #dense>\n"
-    "  %loaded = view.load %input_view[0] : view<1xi32, #dense> -> i32\n"
+    "buffer -> view<1xi32>\n"
+    "  %loaded = view.load %input_view[0] : view<1xi32> -> i32\n"
     "  %doubled = scalar.addi %loaded, %loaded : i32\n"
     "  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : "
-    "buffer -> view<1xi32, #dense>\n"
-    "  view.store %doubled, %output_view[0] : i32, view<1xi32, #dense>\n"
+    "buffer -> view<1xi32>\n"
+    "  view.store %doubled, %output_view[0] : i32, view<1xi32>\n"
     "  kernel.return\n"
     "}\n";
 

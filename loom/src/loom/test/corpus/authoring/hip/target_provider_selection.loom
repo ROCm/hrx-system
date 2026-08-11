@@ -34,11 +34,11 @@ kernel.def @selects_subgroup_provider() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %element_index = index.constant 0 : index
-  %input_view = buffer.view %input[%base] : buffer -> view<1xi32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<1xi32, #dense>
-  %value = view.load %input_view[%element_index] : view<1xi32, #dense> -> i32
+  %input_view = buffer.view %input[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %value = view.load %input_view[%element_index] : view<1xi32> -> i32
   %scaled = func.apply<hip.recipe.scale_i32>(%value) : (i32) -> (i32)
-  view.store %scaled, %output_view[%element_index] : i32, view<1xi32, #dense>
+  view.store %scaled, %output_view[%element_index] : i32, view<1xi32>
   kernel.return
 }
 

@@ -21,10 +21,10 @@ kernel.def @unused_middle_binding() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%input: buffer, %unused: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %input_view = buffer.view %input[%base] : buffer -> view<1xi32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<1xi32, #dense>
-  %value = view.load %input_view[0] : view<1xi32, #dense> -> i32
-  view.store %value, %output_view[0] : i32, view<1xi32, #dense>
+  %input_view = buffer.view %input[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %value = view.load %input_view[0] : view<1xi32> -> i32
+  view.store %value, %output_view[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -51,10 +51,10 @@ kernel.def @selected_buffer(%select_rhs: index) {
   } else {
     scf.yield %lhs : buffer
   }
-  %selected_view = buffer.view %selected[%base] : buffer -> view<1xi32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<1xi32, #dense>
-  %value = view.load %selected_view[0] : view<1xi32, #dense> -> i32
-  view.store %value, %output_view[0] : i32, view<1xi32, #dense>
+  %selected_view = buffer.view %selected[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %value = view.load %selected_view[0] : view<1xi32> -> i32
+  view.store %value, %output_view[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -94,10 +94,10 @@ kernel.def @selected_buffer_per_workgroup() {
   %use_rhs = index.cmp eq, %workgroup, %rhs_workgroup : index
   %middle_or_rhs = scf.select %use_rhs, %rhs, %middle : buffer
   %selected = scf.select %use_lhs, %lhs, %middle_or_rhs : buffer
-  %selected_view = buffer.view %selected[%base] : buffer -> view<1xi32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<3xi32, #dense>
-  %value = view.load %selected_view[0] : view<1xi32, #dense> -> i32
-  view.store %value, %output_view[%workgroup] : i32, view<3xi32, #dense>
+  %selected_view = buffer.view %selected[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<3xi32>
+  %value = view.load %selected_view[0] : view<1xi32> -> i32
+  view.store %value, %output_view[%workgroup] : i32, view<3xi32>
   kernel.return
 }
 

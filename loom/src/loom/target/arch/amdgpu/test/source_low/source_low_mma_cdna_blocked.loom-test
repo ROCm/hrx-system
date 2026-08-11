@@ -174,15 +174,15 @@ kernel.def target(@target) @mfma_f32_4x4x1_16_blocks_memory() {
   %m = index.constant 4 : index
   %n = index.constant 4 : index
   %k = index.constant 1 : index
-  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x4x1xf32, #dense>
-  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x1x4xf32, #dense>
-  %init_view = buffer.view %init_buffer[%base] : buffer -> view<16x4x4xf32, #dense>
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x4x4xf32, #dense>
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0, 0] shape [blocks(%blocks), %m, %k] : view<16x4x1xf32, #dense> -> vector<1xf32>
-  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0, 0] shape [blocks(%blocks), %k, %n] : view<16x1x4xf32, #dense> -> vector<1xf32>
-  %init = vector.fragment.load<init> %init_view[0, 0, 0] shape [blocks(%blocks), %m, %n] : view<16x4x4xf32, #dense> -> vector<4xf32>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x4x1xf32>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x1x4xf32>
+  %init_view = buffer.view %init_buffer[%base] : buffer -> view<16x4x4xf32>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x4x4xf32>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0, 0] shape [blocks(%blocks), %m, %k] : view<16x4x1xf32> -> vector<1xf32>
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0, 0] shape [blocks(%blocks), %k, %n] : view<16x1x4xf32> -> vector<1xf32>
+  %init = vector.fragment.load<init> %init_view[0, 0, 0] shape [blocks(%blocks), %m, %n] : view<16x4x4xf32> -> vector<4xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<1xf32>, vector<1xf32>, vector<4xf32>
-  vector.fragment.store<result> %result, %out_view[0, 0, 0] shape [blocks(%blocks), %m, %n] : vector<4xf32>, view<16x4x4xf32, #dense>
+  vector.fragment.store<result> %result, %out_view[0, 0, 0] shape [blocks(%blocks), %m, %n] : vector<4xf32>, view<16x4x4xf32>
   kernel.return
 }
 
@@ -197,15 +197,15 @@ kernel.def target(@target) @mfma_f32_16x16x4_f16_4_blocks_memory() {
   %n = index.constant 16 : index
   %k = index.constant 4 : index
   %rhs_layout = encoding.layout.strided [64, 1, 4] : encoding<layout>
-  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<4x16x4xf16, #dense>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<4x16x4xf16>
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<4x4x16xf16, %rhs_layout>
-  %init_view = buffer.view %init_buffer[%base] : buffer -> view<4x16x16xf32, #dense>
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<4x16x16xf32, #dense>
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0, 0] shape [blocks(%blocks), %m, %k] : view<4x16x4xf16, #dense> -> vector<4xf16>
+  %init_view = buffer.view %init_buffer[%base] : buffer -> view<4x16x16xf32>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<4x16x16xf32>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0, 0] shape [blocks(%blocks), %m, %k] : view<4x16x4xf16> -> vector<4xf16>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0, 0] shape [blocks(%blocks), %k, %n] : view<4x4x16xf16, %rhs_layout> -> vector<4xf16>
-  %init = vector.fragment.load<init> %init_view[0, 0, 0] shape [blocks(%blocks), %m, %n] : view<4x16x16xf32, #dense> -> vector<16xf32>
+  %init = vector.fragment.load<init> %init_view[0, 0, 0] shape [blocks(%blocks), %m, %n] : view<4x16x16xf32> -> vector<16xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<16xf32>
-  vector.fragment.store<result> %result, %out_view[0, 0, 0] shape [blocks(%blocks), %m, %n] : vector<16xf32>, view<4x16x16xf32, #dense>
+  vector.fragment.store<result> %result, %out_view[0, 0, 0] shape [blocks(%blocks), %m, %n] : vector<16xf32>, view<4x16x16xf32>
   kernel.return
 }
 
@@ -220,15 +220,15 @@ kernel.def target(@target) @mfma_i32_32x32x4_i8_2_blocks_memory() {
   %n = index.constant 32 : index
   %k = index.constant 4 : index
   %rhs_layout = encoding.layout.strided [128, 1, 4] : encoding<layout>
-  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<2x32x4xi8, #dense>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<2x32x4xi8>
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<2x4x32xi8, %rhs_layout>
-  %init_view = buffer.view %init_buffer[%base] : buffer -> view<2x32x32xi32, #dense>
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<2x32x32xi32, #dense>
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0, 0] shape [blocks(%blocks), %m, %k] : view<2x32x4xi8, #dense> -> vector<4xi8>
+  %init_view = buffer.view %init_buffer[%base] : buffer -> view<2x32x32xi32>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<2x32x32xi32>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0, 0] shape [blocks(%blocks), %m, %k] : view<2x32x4xi8> -> vector<4xi8>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0, 0] shape [blocks(%blocks), %k, %n] : view<2x4x32xi8, %rhs_layout> -> vector<4xi8>
-  %init = vector.fragment.load<init> %init_view[0, 0, 0] shape [blocks(%blocks), %m, %n] : view<2x32x32xi32, #dense> -> vector<32xi32>
+  %init = vector.fragment.load<init> %init_view[0, 0, 0] shape [blocks(%blocks), %m, %n] : view<2x32x32xi32> -> vector<32xi32>
   %result = vector.mma %lhs, %rhs, %init : vector<4xi8>, vector<4xi8>, vector<32xi32>
-  vector.fragment.store<result> %result, %out_view[0, 0, 0] shape [blocks(%blocks), %m, %n] : vector<32xi32>, view<2x32x32xi32, #dense>
+  vector.fragment.store<result> %result, %out_view[0, 0, 0] shape [blocks(%blocks), %m, %n] : vector<32xi32>, view<2x32x32xi32>
   kernel.return
 }
 
@@ -243,15 +243,15 @@ kernel.def target(@target) @mfma_f64_4x4x4_4_blocks_memory() {
   %n = index.constant 4 : index
   %k = index.constant 4 : index
   %rhs_layout = encoding.layout.strided [16, 1, 4] : encoding<layout>
-  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<4x4x4xf64, #dense>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<4x4x4xf64>
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<4x4x4xf64, %rhs_layout>
-  %init_view = buffer.view %init_buffer[%base] : buffer -> view<4x4x4xf64, #dense>
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<4x4x4xf64, #dense>
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0, 0] shape [blocks(%blocks), %m, %k] : view<4x4x4xf64, #dense> -> vector<1xf64>
+  %init_view = buffer.view %init_buffer[%base] : buffer -> view<4x4x4xf64>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<4x4x4xf64>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0, 0] shape [blocks(%blocks), %m, %k] : view<4x4x4xf64> -> vector<1xf64>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0, 0] shape [blocks(%blocks), %k, %n] : view<4x4x4xf64, %rhs_layout> -> vector<1xf64>
-  %init = vector.fragment.load<init> %init_view[0, 0, 0] shape [blocks(%blocks), %m, %n] : view<4x4x4xf64, #dense> -> vector<1xf64>
+  %init = vector.fragment.load<init> %init_view[0, 0, 0] shape [blocks(%blocks), %m, %n] : view<4x4x4xf64> -> vector<1xf64>
   %result = vector.mma %lhs, %rhs, %init : vector<1xf64>, vector<1xf64>, vector<1xf64>
-  vector.fragment.store<result> %result, %out_view[0, 0, 0] shape [blocks(%blocks), %m, %n] : vector<1xf64>, view<4x4x4xf64, #dense>
+  vector.fragment.store<result> %result, %out_view[0, 0, 0] shape [blocks(%blocks), %m, %n] : vector<1xf64>, view<4x4x4xf64>
   kernel.return
 }
 

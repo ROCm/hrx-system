@@ -9,10 +9,10 @@ func.def target(@target) @spirv_workgroup_storage_i32_roundtrip(%value: i32, %in
   %byte_index = index.mul %bounded_index, %scale : index
   %byte_offset = index.cast %byte_index : index to offset
   %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
-  %scratch_view = buffer.view %scratch[%byte_offset] : buffer -> view<1xi32, #dense>
-  view.store %value, %scratch_view[0] : i32, view<1xi32, #dense>
+  %scratch_view = buffer.view %scratch[%byte_offset] : buffer -> view<1xi32>
+  view.store %value, %scratch_view[0] : i32, view<1xi32>
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-  %loaded = view.load %scratch_view[0] : view<1xi32, #dense> -> i32
+  %loaded = view.load %scratch_view[0] : view<1xi32> -> i32
   func.return %loaded : i32
 }
 
@@ -38,10 +38,10 @@ func.def target(@target) @spirv_bounded_dynamic_workgroup_storage(%value: i32, %
   %byte_length = index.assume %byte_length0 [range(%byte_length0, 4, 8192)] : offset
   %scratch_base = index.constant 0 : offset
   %scratch = buffer.alloca<workgroup> align(4) %byte_length : buffer
-  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<1xi32, #dense>
-  view.store %value, %scratch_view[0] : i32, view<1xi32, #dense>
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<1xi32>
+  view.store %value, %scratch_view[0] : i32, view<1xi32>
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-  %loaded = view.load %scratch_view[0] : view<1xi32, #dense> -> i32
+  %loaded = view.load %scratch_view[0] : view<1xi32> -> i32
   func.return %loaded : i32
 }
 

@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/ops/encoding/matrix_operand.h"
+#include "loom/ops/encoding/operand.h"
 
 #include <stdint.h>
 
@@ -31,22 +31,22 @@ static bool loom_encoding_rounding_fact_enum(uint64_t value,
   return loom_encoding_one_hot_fact_enum(value, out_enum_value);
 }
 
-iree_string_view_t loom_encoding_matrix_operand_fact_name(
-    loom_encoding_matrix_operand_parameter_t parameter, uint64_t value) {
+iree_string_view_t loom_encoding_operand_fact_name(
+    loom_encoding_operand_parameter_t parameter, uint64_t value) {
   uint8_t enum_value = 0;
   bool has_enum_value = false;
   switch (parameter) {
-    case LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_ELEMENT_FORMAT:
-    case LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SCALE_FORMAT:
-    case LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SECONDARY_SCALE_FORMAT:
-    case LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_PAYLOAD_PACKING:
-    case LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SCALE_TOPOLOGY:
-    case LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_AFFINE:
-    case LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_CODEBOOK:
-    case LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SPARSITY:
+    case LOOM_ENCODING_OPERAND_PARAMETER_ELEMENT_FORMAT:
+    case LOOM_ENCODING_OPERAND_PARAMETER_SCALE_FORMAT:
+    case LOOM_ENCODING_OPERAND_PARAMETER_SECONDARY_SCALE_FORMAT:
+    case LOOM_ENCODING_OPERAND_PARAMETER_PAYLOAD_PACKING:
+    case LOOM_ENCODING_OPERAND_PARAMETER_SCALE_TOPOLOGY:
+    case LOOM_ENCODING_OPERAND_PARAMETER_AFFINE:
+    case LOOM_ENCODING_OPERAND_PARAMETER_CODEBOOK:
+    case LOOM_ENCODING_OPERAND_PARAMETER_SPARSITY:
       has_enum_value = loom_encoding_one_hot_fact_enum(value, &enum_value);
       break;
-    case LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_ROUNDING:
+    case LOOM_ENCODING_OPERAND_PARAMETER_ROUNDING:
       has_enum_value = loom_encoding_rounding_fact_enum(value, &enum_value);
       break;
     default:
@@ -55,8 +55,7 @@ iree_string_view_t loom_encoding_matrix_operand_fact_name(
   if (!has_enum_value) return iree_string_view_empty();
 
   const loom_attr_descriptor_t* descriptor =
-      &loom_encoding_matrix_operand_family_descriptor
-           .parameter_descriptors[parameter];
+      &loom_encoding_operand_family_descriptor.parameter_descriptors[parameter];
   const loom_bstring_t name =
       loom_attr_descriptor_enum_case_name(descriptor, enum_value);
   return name ? loom_bstring_view(name) : iree_string_view_empty();

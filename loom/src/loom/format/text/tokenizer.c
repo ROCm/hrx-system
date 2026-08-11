@@ -880,7 +880,8 @@ static iree_status_t loom_tokenizer_scan_symbol(loom_tokenizer_t* t,
 }
 
 // Scans a '#' prefixed hash attr. The returned token text excludes the
-// '#' prefix (e.g., '#q8_0' → 'q8_0'). Rejects bare '#' and '#digits'.
+// '#' prefix (e.g., '#test.schema' → 'test.schema'). Rejects bare '#' and
+// '#digits'.
 static iree_status_t loom_tokenizer_scan_hash(loom_tokenizer_t* t,
                                               loom_token_t* out_token) {
   uint32_t start_line = t->line;
@@ -892,7 +893,7 @@ static iree_status_t loom_tokenizer_scan_hash(loom_tokenizer_t* t,
   // Token text starts after the '#' prefix.
   iree_host_size_t name_start = t->position;
 
-  // Hash attr: #q8_0, #test.options, #enc.
+  // Hash attr: #test.schema, #test.options, #enc.
   if (!loom_is_ident_start(loom_tokenizer_char(t))) {
     loom_diagnostic_param_t params[] = {
         loom_param_string(IREE_SV("#")),

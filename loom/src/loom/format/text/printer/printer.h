@@ -31,7 +31,9 @@ extern "C" {
 enum loom_text_print_flag_bits_e {
   // Update each op's location to point at its byte range in the output.
   LOOM_TEXT_PRINT_CAPTURE_LOCATIONS = 1u << 0,
-  // Use encoding aliases (#enc) instead of inlining (#q8_0<block=32>).
+  // Use encoding aliases (#enc) instead of inlining
+  // (#encoding.operand<element_format=i8, payload_elements=32,
+  // payload_packing=dense_lanes>).
   LOOM_TEXT_PRINT_USE_ALIASES = 1u << 1,
   // Pretty-print with 2-space indentation (default on).
   LOOM_TEXT_PRINT_INDENT = 1u << 2,

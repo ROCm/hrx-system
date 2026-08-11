@@ -433,15 +433,15 @@ func.def @divf_arcp_constant_rhs_to_reciprocal_mulf(%values: vector<4xf32>) -> (
 // view.load. This avoids forcing wide payload lowering for table-style record
 // loads where only one field is used.
 func.def @extract_single_use_load_to_view_load(%input: buffer, %offset: offset) -> (i32) {
-  %view = buffer.view %input[%offset] : buffer -> view<4xi32, #dense>
-  %wide = vector.load %view[0] : view<4xi32, #dense> -> vector<4xi32>
+  %view = buffer.view %input[%offset] : buffer -> view<4xi32>
+  %wide = vector.load %view[0] : view<4xi32> -> vector<4xi32>
   %lane2 = vector.extract %wide[2] : vector<4xi32> -> i32
   func.return %lane2 : i32
 }
 // ----
 func.def @extract_single_use_load_to_view_load(%input: buffer, %offset: offset) -> (i32) {
-  %view = buffer.view %input[%offset] : buffer -> view<4xi32, #dense>
-  %lane2 = view.load %view[2] : view<4xi32, #dense> -> i32
+  %view = buffer.view %input[%offset] : buffer -> view<4xi32>
+  %lane2 = view.load %view[2] : view<4xi32> -> i32
   func.return %lane2 : i32
 }
 
@@ -457,12 +457,12 @@ kernel.def @extract_single_use_workgroup_load_keeps_wide_load() {
   %base = index.constant 0 : offset
   %bytes = index.constant 64 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %view = buffer.view %scratch[%base] : buffer -> view<4xi32, #dense>
+  %view = buffer.view %scratch[%base] : buffer -> view<4xi32>
   %seed = vector.constant 1 : vector<4xi32>
-  vector.store %seed, %view[0] : vector<4xi32>, view<4xi32, #dense>
-  %wide = vector.load %view[0] : view<4xi32, #dense> -> vector<4xi32>
+  vector.store %seed, %view[0] : vector<4xi32>, view<4xi32>
+  %wide = vector.load %view[0] : view<4xi32> -> vector<4xi32>
   %lane2 = vector.extract %wide[2] : vector<4xi32> -> i32
-  view.store %lane2, %view[0] : i32, view<4xi32, #dense>
+  view.store %lane2, %view[0] : i32, view<4xi32>
   kernel.return
 }
 
@@ -472,8 +472,8 @@ kernel.def @extract_single_use_workgroup_load_keeps_wide_load() {
 // better canonical form: target lowering can select one coalesced memory op and
 // slice registers instead of scalarizing into several smaller loads.
 func.def @extract_multi_use_load_keeps_wide_load(%input: buffer, %offset: offset) -> (i32, i32) {
-  %view = buffer.view %input[%offset] : buffer -> view<4xi32, #dense>
-  %wide = vector.load %view[0] : view<4xi32, #dense> -> vector<4xi32>
+  %view = buffer.view %input[%offset] : buffer -> view<4xi32>
+  %wide = vector.load %view[0] : view<4xi32> -> vector<4xi32>
   %lane1 = vector.extract %wide[1] : vector<4xi32> -> i32
   %lane2 = vector.extract %wide[2] : vector<4xi32> -> i32
   func.return %lane1, %lane2 : i32, i32

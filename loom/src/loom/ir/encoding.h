@@ -10,6 +10,8 @@
 //   - a dynamic encoding SSA binding (`%enc`) in `loom_type_t.encoding_id`
 //     with `LOOM_ENCODING_FLAG_SSA`, or
 //   - a 1-based index into a module-owned `loom_encoding_table_t`.
+// No attachment denotes the native dense representation. Static families
+// declared as implicit shaped attachments canonicalize to this zero state.
 // Vector types are shaped but intentionally cannot carry this attachment slot.
 // Encoding SSA values may use role-qualified types such as `encoding<layout>`
 // and `encoding<schema>` so producers and consumers declare the exact encoding
@@ -55,10 +57,15 @@ enum loom_encoding_family_flag_bits_e {
   LOOM_ENCODING_FAMILY_STATIC_PARAMETERS_VALID = 1u << 0,
   // Family-specific semantics of the structurally valid parameters hold.
   LOOM_ENCODING_FAMILY_STATIC_SEMANTICS_VALID = 1u << 1,
+  // A static attachment from this family is the native dense shaped-type
+  // representation and canonicalizes to the absent attachment state.
+  LOOM_ENCODING_FAMILY_IMPLICIT_SHAPED_ATTACHMENT = 1u << 2,
 };
 typedef uint8_t loom_encoding_family_flags_t;
 
-// A single static encoding instance, such as `#q8_0<block=32>`.
+// A single static encoding instance, such as
+// `#encoding.operand<element_format=i8, payload_elements=32,
+// payload_packing=dense_lanes>`.
 //
 // The encoding family name and optional file-local alias are interned string
 // IDs in the owning module. Parameters are named attributes so families can
@@ -126,6 +133,14 @@ static inline bool loom_encoding_static_is_valid(
   return iree_all_bits_set(encoding->family.flags,
                            LOOM_ENCODING_FAMILY_STATIC_PARAMETERS_VALID |
                                LOOM_ENCODING_FAMILY_STATIC_SEMANTICS_VALID);
+}
+
+// Returns true when attaching |encoding| statically to a shaped type carries
+// no information beyond the native dense representation.
+static inline bool loom_encoding_is_implicit_shaped_attachment(
+    const loom_encoding_t* encoding) {
+  return iree_all_bits_set(encoding->family.flags,
+                           LOOM_ENCODING_FAMILY_IMPLICIT_SHAPED_ATTACHMENT);
 }
 
 // Materializes the sparse parameter array into caller-owned descriptor-indexed
@@ -241,6 +256,15 @@ typedef struct loom_encoding_record_geometry_t {
 // Dense bitset of family-declared auxiliary operand keys.
 typedef uint64_t loom_encoding_auxiliary_key_flags_t;
 
+// Generated read-only metadata for one auxiliary operand key.
+typedef struct loom_encoding_auxiliary_key_descriptor_t {
+  // Stable textual key used in authored IR and diagnostics.
+  loom_bstring_t name;
+
+  // Stable hash of |name| used after parsing to avoid string comparisons.
+  uint64_t stable_id;
+} loom_encoding_auxiliary_key_descriptor_t;
+
 // Generated constants shared by every instance of a fixed encoding family.
 // This data is process-lifetime read-only storage referenced by the family
 // descriptor and never copied into a module.
@@ -255,12 +279,55 @@ typedef struct loom_encoding_family_fixed_metadata_t {
   loom_encoding_record_geometry_t record;
 } loom_encoding_family_fixed_metadata_t;
 
+// Flags describing how a canonical encoding alias contributes a parameter.
+enum loom_encoding_alias_parameter_flag_bits_e {
+  // The parameter establishes alias identity and cannot be restated.
+  LOOM_ENCODING_ALIAS_PARAMETER_FIXED = 1u << 0,
+};
+typedef uint8_t loom_encoding_alias_parameter_flags_t;
+
+// One parameter contributed by a canonical encoding alias.
+//
+// Parameter indexes address the target family's generated descriptor table.
+// Values are process-lifetime literals and must not contain module-relative
+// string, symbol, type, or encoding IDs.
+typedef struct loom_encoding_alias_parameter_t {
+  // Zero-based target family parameter descriptor index.
+  uint8_t parameter_index;
+
+  // Identity behavior; zero denotes an overrideable default value.
+  loom_encoding_alias_parameter_flags_t flags;
+
+  // Module-independent fixed or default parameter value.
+  loom_attribute_t value;
+} loom_encoding_alias_parameter_t;
+
+// Generated canonical source spelling for one structural family instance.
+//
+// Alias parameters are expanded before module interning. Fixed parameters
+// establish identity and cannot be restated; default parameters may be
+// overridden. The module retains only the target family and merged structural
+// parameter dictionary; this descriptor is consulted again only by text
+// printing.
+typedef struct loom_encoding_alias_descriptor_t {
+  // Stable canonical source name without a leading '#'.
+  loom_bstring_t name;
+
+  // Number of lexically ordered contributed parameters in |parameters|.
+  uint8_t parameter_count;
+
+  // Generated process-lifetime parameter rows, or NULL when empty.
+  const loom_encoding_alias_parameter_t* parameters;
+} loom_encoding_alias_descriptor_t;
+
 // Generated structural metadata for one registered encoding family.
 typedef struct loom_encoding_family_descriptor_t {
   // Stable public family name without a leading '#'.
   loom_bstring_t name;
   // Semantic role carried by instances of the family.
   loom_encoding_role_t role;
+  // Generated family properties copied into each module encoding instance.
+  loom_encoding_family_flags_t family_flags;
   // Number of lexically ordered descriptors in |parameter_descriptors|.
   uint8_t parameter_count;
   // Lexically ordered static parameter descriptors, or NULL when empty.
@@ -272,6 +339,14 @@ typedef struct loom_encoding_family_descriptor_t {
       dynamic_parameter_descriptors;
   // Generated family-wide constants, or NULL when every fact is parameterized.
   const loom_encoding_family_fixed_metadata_t* fixed_metadata;
+  // Number of canonical source aliases in |aliases|.
+  uint8_t alias_count;
+  // Parameter descriptor index whose enum value directly selects an alias.
+  uint8_t alias_discriminator_parameter_index;
+  // Generated canonical aliases for structural family instances, or NULL.
+  const loom_encoding_alias_descriptor_t* aliases;
+  // Dense enum-value table of one-based alias ordinals; zero means no alias.
+  const uint8_t* alias_ordinals_by_discriminator;
 } loom_encoding_family_descriptor_t;
 
 // A module-owned table of unique static encoding instances.
@@ -281,17 +356,17 @@ typedef struct loom_encoding_table_t {
   loom_encoding_t* entries;
 } loom_encoding_table_t;
 
-// Vtable for one encoding family (`q6_k`, `q8_0`, `dense`, etc.).
+// Vtable for one encoding family (`encoding.operand`,
+// `encoding.layout.dense`, etc.).
 //
 // Module encoding entries store only static family name + canonical parameter
 // attrs. Dynamic parameters are ordinary SSA operands on encoding.define, named
 // by OperandDict metadata so the merged parameter view is explicit in the IR
 // instead of hidden inside attribute payloads.
 //
-// The context-owned family vtable supplies runtime hooks for interpreting
-// static instances: parameter verification, storage sizing, and byte
-// encode/decode. Text and bytecode syntax are generic named attrs, so
-// parsing/printing do not go through the family vtable.
+// The context-owned family vtable supplies compiler hooks for validating and
+// summarizing family instances. Text and bytecode syntax are generic named
+// attrs, so parsing/printing do not go through the family vtable.
 typedef struct loom_encoding_vtable_t {
   // Generated family schema. Required and process-lifetime stable.
   const loom_encoding_family_descriptor_t* descriptor;
@@ -333,29 +408,6 @@ typedef struct loom_encoding_vtable_t {
   // infallible and only write parameterized or composed facts.
   void (*summarize)(const loom_encoding_family_summary_request_t* request,
                     loom_encoding_family_summary_t* out_summary);
-
-  // Computes storage size in bytes for `element_count` logical elements.
-  // May be NULL for families that are compile-time-only metadata.
-  iree_status_t (*storage_size)(const loom_module_t* module,
-                                const loom_encoding_t* encoding,
-                                iree_host_size_t element_count,
-                                iree_host_size_t* out_storage_size);
-
-  // Decodes encoded bytes into dense elements.
-  // May be NULL if the family has no host-side codec yet.
-  iree_status_t (*decode)(const loom_module_t* module,
-                          const loom_encoding_t* encoding,
-                          iree_const_byte_span_t encoded_data,
-                          iree_byte_span_t decoded_data,
-                          iree_host_size_t element_count);
-
-  // Encodes dense elements into the family-specific byte layout.
-  // May be NULL if the family has no host-side codec yet.
-  iree_status_t (*encode)(const loom_module_t* module,
-                          const loom_encoding_t* encoding,
-                          iree_const_byte_span_t decoded_data,
-                          iree_byte_span_t encoded_data,
-                          iree_host_size_t element_count);
 } loom_encoding_vtable_t;
 
 // Context-owned dense list of registered encoding family vtables.

@@ -5,9 +5,9 @@ func.def @dynamic_interleaved_tile_indices_remain_in_bounds(%payload: buffer, %b
   %loop_step = index.constant 1 : index
   %unroll_factor = index.constant 4 : index
   %end = index.assume %end0 [range(%end0, 1, 32)] : index
-  %view = buffer.view %payload[%base] : buffer -> view<[%end]xi32, #dense>
+  %view = buffer.view %payload[%base] : buffer -> view<[%end]xi32>
   scf.for %i = [%loop_begin to %end step %loop_step] unroll(%unroll_factor) schedule(interleaved) {
-    view.store %value, %view[%i] : i32, view<[%end]xi32, #dense>
+    view.store %value, %view[%i] : i32, view<[%end]xi32>
   }
   func.return
 }
@@ -18,7 +18,7 @@ func.def @dynamic_interleaved_tile_indices_remain_in_bounds(%payload: buffer, %b
   %loop_step = index.constant 1 : index
   %unroll_factor = index.constant 4 : index
   %end = index.assume %end0 [range(%end0, 1, 32)] : index
-  %view = buffer.view %payload[%base] : buffer -> view<[%end]xi32, #dense>
+  %view = buffer.view %payload[%base] : buffer -> view<[%end]xi32>
   %10 = index.constant 4 : index
   %11 = index.constant 0 : index
   %12 = index.sub %end, %loop_begin : index
@@ -40,10 +40,10 @@ func.def @dynamic_interleaved_tile_indices_remain_in_bounds(%payload: buffer, %b
   %23 = index.constant 3 : index
   %24 = index.add %31, %23 : index
   %i$25, %i_1, %i_2, %i_3 = index.assume %31, %20, %22, %24 [lt(%31, %end), lt(%20, %end), lt(%22, %end), lt(%24, %end)] : index, index, index, index
-  view.store %value, %view[%i$25] : i32, view<[%end]xi32, #dense>
-  view.store %value, %view[%i_1] : i32, view<[%end]xi32, #dense>
-  view.store %value, %view[%i_2] : i32, view<[%end]xi32, #dense>
-  view.store %value, %view[%i_3] : i32, view<[%end]xi32, #dense>
+  view.store %value, %view[%i$25] : i32, view<[%end]xi32>
+  view.store %value, %view[%i_1] : i32, view<[%end]xi32>
+  view.store %value, %view[%i_2] : i32, view<[%end]xi32>
+  view.store %value, %view[%i_3] : i32, view<[%end]xi32>
   %33 = index.add %31, %10 : index
   cfg.br ^_bb1(%33: index)
 ^_bb3:
@@ -53,7 +53,7 @@ func.def @dynamic_interleaved_tile_indices_remain_in_bounds(%payload: buffer, %b
   cfg.cond_br %36, ^_bb5, ^_bb6
 ^_bb5:
   %i$35 = index.assume %34 [range(%34, 0, 31), ge(%34, %17), lt(%34, %end)] : index
-  view.store %value, %view[%i$35] : i32, view<[%end]xi32, #dense>
+  view.store %value, %view[%i$35] : i32, view<[%end]xi32>
   %37 = index.add %i$35, %loop_step : index
   cfg.br ^_bb4(%37: index)
 ^_bb6:
@@ -71,9 +71,9 @@ func.def @ranged_lower_full_span_vector_origins(%payload: buffer, %base: offset,
   %channel_start = index.mul %lane, %vector_width : index
   %channel_end = index.constant 2048 : index
   %channel_step = index.constant 128 : index
-  %view = buffer.view %payload[%base] : buffer -> view<2048xf32, #dense>
+  %view = buffer.view %payload[%base] : buffer -> view<2048xf32>
   scf.for %channel = [%channel_start to %channel_end step %channel_step] unroll(%vector_width) schedule(interleaved) {
-    %values = vector.load %view[%channel] : view<2048xf32, #dense> -> vector<4xf32>
+    %values = vector.load %view[%channel] : view<2048xf32> -> vector<4xf32>
     test.use %values : vector<4xf32>
   }
   func.return
@@ -86,7 +86,7 @@ func.def @ranged_lower_full_span_vector_origins(%payload: buffer, %base: offset,
   %channel_start = index.mul %lane, %vector_width : index
   %channel_end = index.constant 2048 : index
   %channel_step = index.constant 128 : index
-  %view = buffer.view %payload[%base] : buffer -> view<2048xf32, #dense>
+  %view = buffer.view %payload[%base] : buffer -> view<2048xf32>
   %11 = index.constant 512 : index
   cfg.br ^_bb1(%channel_start: index)
 ^_bb1(%23: index):
@@ -100,13 +100,13 @@ func.def @ranged_lower_full_span_vector_origins(%payload: buffer, %base: offset,
   %channel_256 = index.add %channel, %15 : index
   %17 = index.constant 384 : index
   %channel_384 = index.add %channel, %17 : index
-  %values = vector.load %view[%channel] : view<2048xf32, #dense> -> vector<4xf32>
+  %values = vector.load %view[%channel] : view<2048xf32> -> vector<4xf32>
   test.use %values : vector<4xf32>
-  %values_1 = vector.load %view[%channel_128] : view<2048xf32, #dense> -> vector<4xf32>
+  %values_1 = vector.load %view[%channel_128] : view<2048xf32> -> vector<4xf32>
   test.use %values_1 : vector<4xf32>
-  %values_2 = vector.load %view[%channel_256] : view<2048xf32, #dense> -> vector<4xf32>
+  %values_2 = vector.load %view[%channel_256] : view<2048xf32> -> vector<4xf32>
   test.use %values_2 : vector<4xf32>
-  %values_3 = vector.load %view[%channel_384] : view<2048xf32, #dense> -> vector<4xf32>
+  %values_3 = vector.load %view[%channel_384] : view<2048xf32> -> vector<4xf32>
   test.use %values_3 : vector<4xf32>
   %26 = index.add %channel, %11 : index
   cfg.br ^_bb1(%26: index)

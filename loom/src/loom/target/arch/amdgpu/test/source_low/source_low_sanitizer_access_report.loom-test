@@ -5,8 +5,8 @@ amdgpu.target<gfx11-generic> @target
 func.def target(@target) @sanitizer_access_report_default(%input: buffer) {
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
-  %input_view = buffer.view %input_global[%base] : buffer -> view<1xi32, #dense>
-  sanitizer.assert.access<read> %input_view[0] : view<1xi32, #dense>
+  %input_view = buffer.view %input_global[%base] : buffer -> view<1xi32>
+  sanitizer.assert.access<read> %input_view[0] : view<1xi32>
   func.return
 }
 

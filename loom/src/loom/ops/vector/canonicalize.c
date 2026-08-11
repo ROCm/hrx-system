@@ -9,10 +9,10 @@
 #include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/combining.h"
+#include "loom/ops/encoding/auxiliary.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/ops.h"
-#include "loom/ops/vector/encoding_auxiliary.h"
 #include "loom/ops/vector/memory.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
@@ -2212,14 +2212,14 @@ static iree_status_t loom_vector_canonicalize_dense_q8_0_decode(
     return iree_ok_status();
   }
 
-  loom_vector_encoding_auxiliary_view_t auxiliary = {0};
-  if (!loom_vector_encoding_auxiliary_view_resolve(
+  loom_encoding_auxiliary_view_t auxiliary = {0};
+  if (!loom_encoding_auxiliary_view_resolve(
           rewriter->module, loom_vector_decode_auxiliary(op),
           loom_vector_decode_auxiliary_names(op), &auxiliary, NULL)) {
     return iree_ok_status();
   }
   loom_value_id_t scale_vector =
-      auxiliary.values[LOOM_VECTOR_ENCODING_AUXILIARY_KEY_SCALE];
+      auxiliary.values[LOOM_ENCODING_AUXILIARY_KEY_SCALE];
   if (scale_vector == LOOM_VALUE_ID_INVALID ||
       scale_vector >= rewriter->module->values.count) {
     return iree_ok_status();

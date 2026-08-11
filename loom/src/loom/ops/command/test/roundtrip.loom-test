@@ -1,7 +1,7 @@
 // RUN: roundtrip
 
 command.program.def @static_program() launch(%parameters: buffer) {
-  %embedding = command.parameter %parameters, "token_embd.weight" : view<1024xi8, #dense>
+  %embedding = command.parameter %parameters, "token_embd.weight" : view<1024xi8>
   command.return
 }
 
@@ -25,7 +25,7 @@ command.program.decl retain @decode(%token_count: index) launch(%parameters: buf
 // ====
 
 command.program.def @bounded(%token_count: index) launch(%parameters: buffer) where [range(%token_count, 1, 1024)] {
-  %weight = command.parameter %parameters, "blk.{}.weight"[%token_count] : view<256xi8, #dense>
+  %weight = command.parameter %parameters, "blk.{}.weight"[%token_count] : view<256xi8>
   command.return
 }
 

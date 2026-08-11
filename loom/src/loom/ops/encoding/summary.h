@@ -154,22 +154,16 @@ loom_encoding_summarize_verified_define(
 }
 
 // Built-in family summary callbacks referenced by encoding vtables.
-void loom_encoding_dense_summarize(
+void loom_encoding_layout_dense_summarize(
     const loom_encoding_family_summary_request_t* request,
     loom_encoding_family_summary_t* out_summary);
-void loom_encoding_strided_summarize(
+void loom_encoding_layout_strided_summarize(
     const loom_encoding_family_summary_request_t* request,
     loom_encoding_family_summary_t* out_summary);
-void loom_encoding_physical_storage_summarize(
+void loom_encoding_storage_summarize(
     const loom_encoding_family_summary_request_t* request,
     loom_encoding_family_summary_t* out_summary);
-void loom_encoding_ggml_q8_0_summarize(
-    const loom_encoding_family_summary_request_t* request,
-    loom_encoding_family_summary_t* out_summary);
-void loom_encoding_named_fp8_summarize(
-    const loom_encoding_family_summary_request_t* request,
-    loom_encoding_family_summary_t* out_summary);
-void loom_encoding_matrix_operand_summarize(
+void loom_encoding_operand_summarize(
     const loom_encoding_family_summary_request_t* request,
     loom_encoding_family_summary_t* out_summary);
 

@@ -74,20 +74,24 @@ class TileLangTypeConverter:
 
     def buffer_storage_schema(self, buffer: object) -> EncodingInstance | None:
         dtype = _attribute(buffer, "dtype")
-        schema_name = _FP8_STORAGE_SCHEMAS.get(str(dtype))
+        numeric_format = _FP8_STORAGE_FORMATS.get(str(dtype))
         rounding_policy = _buffer_storage_rounding_policy(buffer)
-        if schema_name is None and rounding_policy is not None:
-            schema_name = _FP8_RAW_STORAGE_SCHEMAS.get(str(dtype))
-        if schema_name is None:
+        if numeric_format is None and rounding_policy is not None:
+            numeric_format = _FP8_RAW_STORAGE_FORMATS.get(str(dtype))
+        if numeric_format is None:
             if rounding_policy is not None:
                 raise TileLangTypeConversionError(
                     "`loom.storage.rounding` metadata requires an FP8 buffer dtype"
                 )
             return None
-        params = ()
+        params: tuple[tuple[str, object], ...] = (
+            ("element_format", numeric_format),
+            ("payload_elements", 1),
+            ("payload_packing", "dense_lanes"),
+        )
         if rounding_policy is not None:
-            params = (("rounding", rounding_policy),)
-        return EncodingInstance(name=schema_name, params=params)
+            params += (("rounding", rounding_policy),)
+        return EncodingInstance(name="encoding.operand", params=params)
 
     def buffer_byte_length(self, buffer: object) -> int | None:
         view_type = self.view_type(buffer)
@@ -106,6 +110,15 @@ class TileLangTypeConverter:
     def buffer_base_alignment(self, buffer: object) -> int:
         element_type = self.view_type(buffer).element_type
         return _ELEMENT_BYTE_SIZES.get(str(element_type), 1)
+
+
+def storage_schema_name_hint(schema: EncodingInstance) -> str:
+    """Returns a readable SSA name hint for a materialized storage schema."""
+    if schema.name == "encoding.operand":
+        for parameter_name, parameter_value in schema.params:
+            if parameter_name == "element_format" and isinstance(parameter_value, str):
+                return f"{parameter_value}_schema"
+    return f"{schema.name}_schema"
 
 
 def _shape_dim(value: object) -> StaticDim | DynamicDim:
@@ -231,15 +244,15 @@ _FP8_FORMATS: dict[str, tuple[ScalarType, str]] = {
     "float8_e5m2fnuz": (F8E5M2, "e5m2fnuz"),
 }
 
-_FP8_STORAGE_SCHEMAS: dict[str, str] = {
-    "float8_e4m3fn": "fp8_e4m3fn",
-    "float8_e4m3fnuz": "fp8_e4m3fnuz",
-    "float8_e5m2fnuz": "fp8_e5m2fnuz",
+_FP8_STORAGE_FORMATS: dict[str, str] = {
+    "float8_e4m3fn": "f8e4m3fn",
+    "float8_e4m3fnuz": "f8e4m3fnuz",
+    "float8_e5m2fnuz": "f8e5m2fnuz",
 }
 
-_FP8_RAW_STORAGE_SCHEMAS: dict[str, str] = {
-    "float8_e4m3": "ieee_fp8_e4m3",
-    "float8_e5m2": "ieee_fp8_e5m2",
+_FP8_RAW_STORAGE_FORMATS: dict[str, str] = {
+    "float8_e4m3": "f8e4m3",
+    "float8_e5m2": "f8e5m2",
 }
 
 _FP8_STORAGE_ROUNDING_ATTR = "loom.storage.rounding"

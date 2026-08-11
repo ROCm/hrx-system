@@ -14,22 +14,22 @@ kernel.def target(@target) @report_nested_cfg_loop_memory_counts() {
   %initial_sum = scalar.constant 0.0 : f32
   %input_global = buffer.assume.memory_space<global> %input : buffer
   %output_global = buffer.assume.memory_space<global> %output : buffer
-  %input_view = buffer.view %input_global[%base] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output_global[%base] : buffer -> view<64xf32, #dense>
+  %input_view = buffer.view %input_global[%base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<64xf32>
   %sum = scf.for %outer = [%c0 to %outer_end step %loop_step](%current = %initial_sum : f32) -> (f32) {
     %row_base = index.mul %outer, %inner_end : index
     %inner_sum = scf.for %inner = [%c0 to %inner_end step %loop_step](%inner_current = %current : f32) -> (f32) {
       %position = index.add %row_base, %inner : index
-      %loaded = view.load %input_view[%position] : view<64xf32, #dense> -> f32
+      %loaded = view.load %input_view[%position] : view<64xf32> -> f32
       %next = scalar.addf<reassoc|nnan|nsz> %inner_current, %loaded : f32
-      view.store %next, %output_view[%position] : f32, view<64xf32, #dense>
+      view.store %next, %output_view[%position] : f32, view<64xf32>
       scf.yield %next : f32
     }
-    %tail_value = view.load %input_view[%row_base] : view<64xf32, #dense> -> f32
-    view.store %tail_value, %output_view[%row_base] : f32, view<64xf32, #dense>
+    %tail_value = view.load %input_view[%row_base] : view<64xf32> -> f32
+    view.store %tail_value, %output_view[%row_base] : f32, view<64xf32>
     scf.yield %inner_sum : f32
   }
-  view.store %sum, %output_view[%c0] : f32, view<64xf32, #dense>
+  view.store %sum, %output_view[%c0] : f32, view<64xf32>
   kernel.return
 }
 

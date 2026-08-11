@@ -11,9 +11,9 @@ kernel.def target(@target) @default_source_low_memory_diagnostics_stay_silent() 
   %scratch_base = index.constant 0 : offset
   %bytes = index.constant 256 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32, #dense>
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32>
   %stored_value = vector.constant 1 : vector<1xi32>
-  vector.store %stored_value, %scratch_view[%tid] : vector<1xi32>, view<64xi32, #dense>
+  vector.store %stored_value, %scratch_view[%tid] : vector<1xi32>, view<64xi32>
   kernel.return
 }
 

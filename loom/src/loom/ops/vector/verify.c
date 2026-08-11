@@ -15,12 +15,12 @@
 #include "loom/ops/atomic.h"
 #include "loom/ops/cache.h"
 #include "loom/ops/combining.h"
+#include "loom/ops/encoding/auxiliary.h"
 #include "loom/ops/encoding/numeric_transform.h"
 #include "loom/ops/encoding/ops.h"
 #include "loom/ops/encoding/roles.h"
 #include "loom/ops/encoding/storage.h"
 #include "loom/ops/scalar/ops.h"
-#include "loom/ops/vector/encoding_auxiliary.h"
 #include "loom/ops/vector/fragment.h"
 #include "loom/ops/vector/memory.h"
 #include "loom/ops/vector/ops.h"
@@ -1662,28 +1662,25 @@ static bool loom_vector_query_static_storage_schema_for_schema_value(
 
 static iree_status_t loom_vector_verify_required_auxiliary_key(
     const loom_module_t* module, iree_diagnostic_emitter_t emitter,
-    const loom_op_t* op,
-    loom_vector_encoding_auxiliary_key_flags_t present_keys,
-    loom_vector_encoding_auxiliary_key_t key) {
-  loom_vector_encoding_auxiliary_key_flags_t required_key =
-      loom_vector_encoding_auxiliary_key_flag(key);
+    const loom_op_t* op, loom_encoding_auxiliary_key_flags_t present_keys,
+    loom_encoding_auxiliary_key_t key) {
+  loom_encoding_auxiliary_key_flags_t required_key =
+      loom_encoding_auxiliary_key_flag(key);
   if (required_key != 0 && iree_any_bit_set(present_keys, required_key)) {
     return iree_ok_status();
   }
-  iree_string_view_t key_name = loom_vector_encoding_auxiliary_key_name(key);
+  iree_string_view_t key_name = loom_encoding_auxiliary_key_name(key);
   return loom_vector_emit_missing_auxiliary_key(module, emitter, op, key_name);
 }
 
 static iree_status_t loom_vector_verify_required_auxiliary_keys(
     const loom_module_t* module, iree_diagnostic_emitter_t emitter,
-    const loom_op_t* op,
-    loom_vector_encoding_auxiliary_key_flags_t present_keys,
-    loom_vector_encoding_auxiliary_key_flags_t required_keys) {
-  for (uint8_t i = 0; i < LOOM_VECTOR_ENCODING_AUXILIARY_KEY_COUNT_; ++i) {
-    loom_vector_encoding_auxiliary_key_t key =
-        (loom_vector_encoding_auxiliary_key_t)i;
-    loom_vector_encoding_auxiliary_key_flags_t key_flag =
-        loom_vector_encoding_auxiliary_key_flag(key);
+    const loom_op_t* op, loom_encoding_auxiliary_key_flags_t present_keys,
+    loom_encoding_auxiliary_key_flags_t required_keys) {
+  for (uint8_t i = 0; i < LOOM_ENCODING_AUXILIARY_KEY_COUNT_; ++i) {
+    loom_encoding_auxiliary_key_t key = (loom_encoding_auxiliary_key_t)i;
+    loom_encoding_auxiliary_key_flags_t key_flag =
+        loom_encoding_auxiliary_key_flag(key);
     if (!iree_any_bit_set(required_keys, key_flag)) {
       continue;
     }
@@ -1698,11 +1695,11 @@ static iree_status_t loom_vector_verify_encoded_auxiliary(
     iree_diagnostic_emitter_t emitter, loom_value_id_t schema_value,
     loom_value_slice_t auxiliary_values,
     loom_named_attr_slice_t auxiliary_names) {
-  loom_vector_encoding_auxiliary_view_t auxiliary_view;
+  loom_encoding_auxiliary_view_t auxiliary_view;
   iree_string_view_t unknown_key = iree_string_view_empty();
-  if (!loom_vector_encoding_auxiliary_view_resolve(
-          module, auxiliary_values, auxiliary_names, &auxiliary_view,
-          &unknown_key)) {
+  if (!loom_encoding_auxiliary_view_resolve(module, auxiliary_values,
+                                            auxiliary_names, &auxiliary_view,
+                                            &unknown_key)) {
     return loom_vector_emit_unknown_auxiliary_key(module, emitter, op,
                                                   unknown_key);
   }
@@ -1716,8 +1713,8 @@ static iree_status_t loom_vector_verify_encoded_auxiliary(
           storage_schema.encoded_operand)) {
     return iree_ok_status();
   }
-  loom_vector_encoding_auxiliary_key_flags_t required_keys = 0;
-  if (!loom_vector_encoding_auxiliary_required_keys_from_schema(
+  loom_encoding_auxiliary_key_flags_t required_keys = 0;
+  if (!loom_encoding_auxiliary_required_keys_from_schema(
           storage_schema.encoded_operand, &required_keys, NULL)) {
     return loom_vector_emit_missing_auxiliary_key(module, emitter, op,
                                                   IREE_SV("scale"));
@@ -1763,12 +1760,11 @@ static iree_status_t loom_vector_verify_fragment_schema_type(
 static iree_status_t loom_vector_verify_fragment_auxiliary_types(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter,
-    loom_vector_encoding_auxiliary_view_t auxiliary) {
-  for (uint8_t i = 0; i < LOOM_VECTOR_ENCODING_AUXILIARY_KEY_COUNT_; ++i) {
-    loom_vector_encoding_auxiliary_key_t key =
-        (loom_vector_encoding_auxiliary_key_t)i;
-    loom_vector_encoding_auxiliary_key_flags_t key_flag =
-        loom_vector_encoding_auxiliary_key_flag(key);
+    loom_encoding_auxiliary_view_t auxiliary) {
+  for (uint8_t i = 0; i < LOOM_ENCODING_AUXILIARY_KEY_COUNT_; ++i) {
+    loom_encoding_auxiliary_key_t key = (loom_encoding_auxiliary_key_t)i;
+    loom_encoding_auxiliary_key_flags_t key_flag =
+        loom_encoding_auxiliary_key_flag(key);
     if (!iree_any_bit_set(auxiliary.present_keys, key_flag)) {
       continue;
     }
@@ -1782,7 +1778,7 @@ static iree_status_t loom_vector_verify_fragment_auxiliary_types(
       continue;
     }
     return loom_vector_emit_operand_constraint(
-        emitter, op, loom_vector_encoding_auxiliary_key_name(key), value_type,
+        emitter, op, loom_encoding_auxiliary_key_name(key), value_type,
         iree_make_cstring_view(
             loom_type_constraint_name(LOOM_TYPE_CONSTRAINT_VECTOR)));
   }
@@ -1804,9 +1800,9 @@ iree_status_t loom_vector_fragment_load_verify(
       loom_vector_fragment_load_cache_temporal_ATTR_INDEX,
       LOOM_CACHE_POLICY_ACCESS_LOAD));
 
-  loom_vector_encoding_auxiliary_view_t auxiliary;
+  loom_encoding_auxiliary_view_t auxiliary;
   iree_string_view_t unknown_key = iree_string_view_empty();
-  if (!loom_vector_encoding_auxiliary_view_resolve(
+  if (!loom_encoding_auxiliary_view_resolve(
           module, loom_vector_fragment_load_auxiliary(op),
           loom_vector_fragment_load_auxiliary_names(op), &auxiliary,
           &unknown_key)) {
@@ -1826,8 +1822,8 @@ iree_status_t loom_vector_fragment_load_verify(
     return iree_ok_status();
   }
 
-  loom_vector_encoding_auxiliary_key_flags_t required_keys = 0;
-  if (!loom_vector_encoding_auxiliary_required_keys_from_schema(
+  loom_encoding_auxiliary_key_flags_t required_keys = 0;
+  if (!loom_encoding_auxiliary_required_keys_from_schema(
           storage_schema.encoded_operand, &required_keys, NULL)) {
     return loom_vector_emit_missing_auxiliary_key(module, emitter, op,
                                                   IREE_SV("scale"));
@@ -1872,8 +1868,8 @@ iree_status_t loom_vector_fragment_verify(const loom_module_t* module,
     return iree_ok_status();
   }
 
-  loom_vector_encoding_auxiliary_key_flags_t required_keys = 0;
-  if (!loom_vector_encoding_auxiliary_required_keys_from_schema(
+  loom_encoding_auxiliary_key_flags_t required_keys = 0;
+  if (!loom_encoding_auxiliary_required_keys_from_schema(
           storage_schema.encoded_operand, &required_keys, NULL)) {
     return loom_vector_emit_missing_auxiliary_key(module, emitter, op,
                                                   IREE_SV("scale"));

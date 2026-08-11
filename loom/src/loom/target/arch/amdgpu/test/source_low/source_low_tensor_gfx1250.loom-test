@@ -12,10 +12,10 @@ kernel.def target(@target) @tensor_load_to_lds_d4() {
   %d1 = vector.constant 0 : vector<8xi32>
   %descriptor = kernel.tensor.lds.descriptor dgroups(%d0, %d1, %d0, %d0) : vector<4xi32>, vector<8xi32>, vector<4xi32>, vector<4xi32> -> kernel.tensor.lds.descriptor
   %global = buffer.assume.memory_space<global> %input : buffer
-  %source = buffer.view %global[%buffer_base] : buffer -> view<64x64xf32, #dense>
+  %source = buffer.view %global[%buffer_base] : buffer -> view<64x64xf32>
   %scratch = buffer.alloca<workgroup> align(256) %bytes : buffer
-  %dest = buffer.view %scratch[%buffer_base] : buffer -> view<64x64xf32, #dense>
-  %copy = kernel.async.tensor.load.to.lds %source to %dest using %descriptor {cache_scope = cu, cache_temporal = regular} : view<64x64xf32, #dense> to view<64x64xf32, #dense>, kernel.tensor.lds.descriptor -> kernel.async.token
+  %dest = buffer.view %scratch[%buffer_base] : buffer -> view<64x64xf32>
+  %copy = kernel.async.tensor.load.to.lds %source to %dest using %descriptor {cache_scope = cu, cache_temporal = regular} : view<64x64xf32> to view<64x64xf32>, kernel.tensor.lds.descriptor -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
   kernel.return
@@ -68,10 +68,10 @@ kernel.def target(@target) @tensor_load_to_lds_d2() {
   %d1 = vector.constant 0 : vector<8xi32>
   %descriptor = kernel.tensor.lds.descriptor dgroups(%d0, %d1) : vector<4xi32>, vector<8xi32> -> kernel.tensor.lds.descriptor
   %global = buffer.assume.memory_space<global> %input : buffer
-  %source = buffer.view %global[%buffer_base] : buffer -> view<64x64xf32, #dense>
+  %source = buffer.view %global[%buffer_base] : buffer -> view<64x64xf32>
   %scratch = buffer.alloca<workgroup> align(256) %bytes : buffer
-  %dest = buffer.view %scratch[%buffer_base] : buffer -> view<64x64xf32, #dense>
-  %copy = kernel.async.tensor.load.to.lds %source to %dest using %descriptor {cache_scope = cu, cache_temporal = regular} : view<64x64xf32, #dense> to view<64x64xf32, #dense>, kernel.tensor.lds.descriptor -> kernel.async.token
+  %dest = buffer.view %scratch[%buffer_base] : buffer -> view<64x64xf32>
+  %copy = kernel.async.tensor.load.to.lds %source to %dest using %descriptor {cache_scope = cu, cache_temporal = regular} : view<64x64xf32> to view<64x64xf32>, kernel.tensor.lds.descriptor -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
   kernel.return
@@ -114,14 +114,14 @@ kernel.def target(@target) @tensor_load_two_stage_wait_depth() {
   %d1 = vector.constant 0 : vector<8xi32>
   %descriptor = kernel.tensor.lds.descriptor dgroups(%d0, %d1) : vector<4xi32>, vector<8xi32> -> kernel.tensor.lds.descriptor
   %global = buffer.assume.memory_space<global> %input : buffer
-  %source = buffer.view %global[%buffer_base] : buffer -> view<64x64xf32, #dense>
+  %source = buffer.view %global[%buffer_base] : buffer -> view<64x64xf32>
   %scratch0 = buffer.alloca<workgroup> align(256) %bytes : buffer
-  %dest0 = buffer.view %scratch0[%buffer_base] : buffer -> view<64x64xf32, #dense>
-  %copy0 = kernel.async.tensor.load.to.lds %source to %dest0 using %descriptor {cache_scope = cu, cache_temporal = regular} : view<64x64xf32, #dense> to view<64x64xf32, #dense>, kernel.tensor.lds.descriptor -> kernel.async.token
+  %dest0 = buffer.view %scratch0[%buffer_base] : buffer -> view<64x64xf32>
+  %copy0 = kernel.async.tensor.load.to.lds %source to %dest0 using %descriptor {cache_scope = cu, cache_temporal = regular} : view<64x64xf32> to view<64x64xf32>, kernel.tensor.lds.descriptor -> kernel.async.token
   %group0 = kernel.async.group %copy0 : kernel.async.token -> kernel.async.group
   %scratch1 = buffer.alloca<workgroup> align(256) %bytes : buffer
-  %dest1 = buffer.view %scratch1[%buffer_base] : buffer -> view<64x64xf32, #dense>
-  %copy1 = kernel.async.tensor.load.to.lds %source to %dest1 using %descriptor {cache_scope = cu, cache_temporal = regular} : view<64x64xf32, #dense> to view<64x64xf32, #dense>, kernel.tensor.lds.descriptor -> kernel.async.token
+  %dest1 = buffer.view %scratch1[%buffer_base] : buffer -> view<64x64xf32>
+  %copy1 = kernel.async.tensor.load.to.lds %source to %dest1 using %descriptor {cache_scope = cu, cache_temporal = regular} : view<64x64xf32> to view<64x64xf32>, kernel.tensor.lds.descriptor -> kernel.async.token
   %group1 = kernel.async.group %copy1 : kernel.async.token -> kernel.async.group
   kernel.async.wait %group0 {newer_groups = 1} : kernel.async.group
   kernel.async.wait %group1 {newer_groups = 0} : kernel.async.group

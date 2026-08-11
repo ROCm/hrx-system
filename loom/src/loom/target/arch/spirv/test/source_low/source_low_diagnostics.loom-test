@@ -85,12 +85,12 @@ func.def target(@target) @storage_buffer_f16_requires_target_features(%input: bu
   %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 2)] : offset
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 2} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 2} : buffer
-  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xf16, #dense>
+  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xf16>
   // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_ptr_access_chain.storage_buffer.f16.byte_offset", constraint_key="descriptor_available"}
-  %loaded = view.load %input_view[0] : view<1xf16, #dense> -> f16
-  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xf16, #dense>
+  %loaded = view.load %input_view[0] : view<1xf16> -> f16
+  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xf16>
   // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_ptr_access_chain.storage_buffer.f16.byte_offset", constraint_key="descriptor_available"}
-  view.store %loaded, %output_view[0] : f16, view<1xf16, #dense>
+  view.store %loaded, %output_view[0] : f16, view<1xf16>
   func.return
 }
 
@@ -100,9 +100,9 @@ spirv.target<vulkan1_3> @target
 
 func.def target(@target) @storage_buffer_i32_requires_known_root_alignment(%input: buffer, %byte_offset: offset) -> (i32) {
   %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 4)] : offset
-  %input_view = buffer.view %input[%byte_offset_aligned] : buffer -> view<1xi32, #dense>
+  %input_view = buffer.view %input[%byte_offset_aligned] : buffer -> view<1xi32>
   // ERROR@+1: TARGET/050 {required_alignment="4", known_alignment="1"}
-  %loaded = view.load %input_view[0] : view<1xi32, #dense> -> i32
+  %loaded = view.load %input_view[0] : view<1xi32> -> i32
   func.return %loaded : i32
 }
 
@@ -115,9 +115,9 @@ func.def target(@target) @cooperative_matrix_rejects_noncompact_storage_tile(%in
   %m = index.constant 16 : index
   %k = index.constant 16 : index
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
-  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<32x16xf16, #dense>
+  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<32x16xf16>
   // ERROR@+1: TARGET/003 {subject_role="value", subject_name="view", constraint_key="cooperative_matrix.compact_storage_tile"}
-  %fragment = vector.fragment.load<lhs> %input_view[0, 0] shape [%m, %k] : view<32x16xf16, #dense> -> vector<16xf16>
+  %fragment = vector.fragment.load<lhs> %input_view[0, 0] shape [%m, %k] : view<32x16xf16> -> vector<16xf16>
   func.return %fragment : vector<16xf16>
 }
 
@@ -177,9 +177,9 @@ spirv.target<vulkan1_3> @target
 func.def target(@target) @storage_buffer_i32_rejects_misaligned_static_offset(%input: buffer) -> (i32) {
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %misaligned_base = index.constant 2 : offset
-  %input_view = buffer.view %input_aligned[%misaligned_base] : buffer -> view<1xi32, #dense>
+  %input_view = buffer.view %input_aligned[%misaligned_base] : buffer -> view<1xi32>
   // ERROR@+1: TARGET/050 {required_alignment="4", known_alignment="2"}
-  %loaded = view.load %input_view[0] : view<1xi32, #dense> -> i32
+  %loaded = view.load %input_view[0] : view<1xi32> -> i32
   func.return %loaded : i32
 }
 
@@ -191,9 +191,9 @@ func.def target(@target) @storage_buffer_i32_rejects_wide_index(%input: buffer, 
   %input_base = index.constant 0 : offset
   %element = index.assume %element0 [range(%element0, 0, 2147483648)] : index
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%input_base] : buffer -> view<2147483649xi32, #dense>
+  %input_view = buffer.view %input_aligned[%input_base] : buffer -> view<2147483649xi32>
   // ERROR@+1: SPIRV/028 {required_range_lo="0", required_range_hi="2147483647", constraint_key="source_memory.address_index_non_negative_s32"}
-  %loaded = view.load %input_view[%element] : view<2147483649xi32, #dense> -> i32
+  %loaded = view.load %input_view[%element] : view<2147483649xi32> -> i32
   func.return %loaded : i32
 }
 
@@ -206,9 +206,9 @@ func.def target(@target) @storage_buffer_i32_rejects_wide_dynamic_stride(%input:
   %columns = index.assume %columns0 [range(%columns0, 1, 2147483648)] : index
   %row = index.assume %row0 [range(%row0, 0, 3)] : index
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%input_base] : buffer -> view<4x[%columns]xi32, #dense>
+  %input_view = buffer.view %input_aligned[%input_base] : buffer -> view<4x[%columns]xi32>
   // ERROR@+1: SPIRV/028 {required_range_lo="0", required_range_hi="2147483647", constraint_key="source_memory.address_index_non_negative_s32"}
-  %loaded = view.load %input_view[%row, 0] : view<4x[%columns]xi32, #dense> -> i32
+  %loaded = view.load %input_view[%row, 0] : view<4x[%columns]xi32> -> i32
   func.return %loaded : i32
 }
 
@@ -220,9 +220,9 @@ func.def target(@target) @workgroup_i32_rejects_wide_element_index() -> (i32) {
   %byte_length = index.constant 8589934596 : offset
   %scratch_base = index.constant 0 : offset
   %scratch = buffer.alloca<workgroup> align(4) %byte_length : buffer
-  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<2147483649xi32, #dense>
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<2147483649xi32>
   // ERROR@+1: SPIRV/029 {element_byte_count="4", required_range_lo="0", required_range_hi="2147483647", constraint_key="source_memory.workgroup_element_index_non_negative_s32"}
-  %loaded = view.load %scratch_view[2147483648] : view<2147483649xi32, #dense> -> i32
+  %loaded = view.load %scratch_view[2147483648] : view<2147483649xi32> -> i32
   func.return %loaded : i32
 }
 
@@ -234,9 +234,9 @@ func.def target(@target) @workgroup_i32_requires_element_expression(%byte_offset
   %byte_length = index.constant 128 : offset
   %byte_offset = index.assume %byte_offset0 [range(%byte_offset0, 0, 124), mul(%byte_offset0, 4)] : offset
   %scratch = buffer.alloca<workgroup> align(4) %byte_length : buffer
-  %scratch_view = buffer.view %scratch[%byte_offset] : buffer -> view<1xi32, #dense>
+  %scratch_view = buffer.view %scratch[%byte_offset] : buffer -> view<1xi32>
   // ERROR@+1: SPIRV/029 {element_byte_count="4", required_range_lo="0", required_range_hi="2147483647", constraint_key="source_memory.workgroup_element_index_non_negative_s32"}
-  %loaded = view.load %scratch_view[0] : view<1xi32, #dense> -> i32
+  %loaded = view.load %scratch_view[0] : view<1xi32> -> i32
   func.return %loaded : i32
 }
 

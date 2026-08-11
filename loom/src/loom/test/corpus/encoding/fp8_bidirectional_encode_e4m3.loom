@@ -22,9 +22,9 @@ kernel.def @fp8_encode_f8e4m3_f32_exact() {
   %base = index.constant 0 : offset
   %head_offset = index.constant 0 : index
   %tail_offset = index.constant 8 : index
-  %output_view = buffer.view %output[%base] : buffer -> view<16xi8, #dense>
-  %head_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
-  %tail_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi8>
+  %head_schema = encoding.define #encoding.f8e4m3<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e4m3<payload_elements=8> : encoding<schema>
   %source_positive_zero_encode = scalar.constant 0 : i32
   %expected_positive_zero_encode = scalar.constant 0 : i8
   %source_negative_zero_encode = scalar.constant -2147483648 : i32
@@ -61,14 +61,14 @@ kernel.def @fp8_encode_f8e4m3_f32_exact() {
   %encoded_head = vector.encode %source_head using %head_schema : vector<8xf32>, encoding<schema> -> vector<8xf8E4M3>
   %encoded_bits_head = vector.bitcast %encoded_head : vector<8xf8E4M3> to vector<8xi8>
   %difference_head = vector.xori %encoded_bits_head, %expected_bits_head : vector<8xi8>
-  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8, #dense>
+  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8>
   %source_bits_tail = vector.from_elements %source_one_encode, %source_negative_one_encode, %source_one_next_tie_encode, %source_maximum_finite_encode, %source_positive_infinity_encode, %source_negative_infinity_encode, %source_quiet_nan_encode, %source_positive_zero_encode : vector<8xi32>
   %expected_bits_tail = vector.from_elements %expected_one_encode, %expected_negative_one_encode, %expected_one_next_tie_encode, %expected_maximum_finite_encode, %expected_positive_infinity_encode, %expected_negative_infinity_encode, %expected_quiet_nan_encode, %expected_positive_zero_encode : vector<8xi8>
   %source_tail = vector.bitcast %source_bits_tail : vector<8xi32> to vector<8xf32>
   %encoded_tail = vector.encode %source_tail using %tail_schema : vector<8xf32>, encoding<schema> -> vector<8xf8E4M3>
   %encoded_bits_tail = vector.bitcast %encoded_tail : vector<8xf8E4M3> to vector<8xi8>
   %difference_tail = vector.xori %encoded_bits_tail, %expected_bits_tail : vector<8xi8>
-  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8, #dense>
+  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8>
   kernel.return
 }
 
@@ -91,14 +91,14 @@ kernel.def @fp8_encode_f8e4m3_f32_rows(%row_count: index) {
   %column = index.constant 0 : index
   %in_bounds = index.cmp ult, %row, %bounded_row_count : index
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
-  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xf32, #dense>
-  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8, #dense>
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xf32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8>
+  %schema = encoding.define #encoding.f8e4m3<payload_elements=8> : encoding<schema>
   scf.if %in_bounds {
-    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xf32, #dense> -> vector<8xf32>
+    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xf32> -> vector<8xf32>
     %encoded = vector.encode %source using %schema : vector<8xf32>, encoding<schema> -> vector<8xf8E4M3>
     %encoded_bits = vector.bitcast %encoded : vector<8xf8E4M3> to vector<8xi8>
-    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8, #dense>
+    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8>
   }
   kernel.return
 }
@@ -133,9 +133,9 @@ kernel.def @fp8_encode_f8e4m3_f16_exact() {
   %base = index.constant 0 : offset
   %head_offset = index.constant 0 : index
   %tail_offset = index.constant 8 : index
-  %output_view = buffer.view %output[%base] : buffer -> view<16xi8, #dense>
-  %head_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
-  %tail_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi8>
+  %head_schema = encoding.define #encoding.f8e4m3<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e4m3<payload_elements=8> : encoding<schema>
   %source_positive_zero_encode = scalar.constant 0 : i16
   %expected_positive_zero_encode = scalar.constant 0 : i8
   %source_negative_zero_encode = scalar.constant -32768 : i16
@@ -172,14 +172,14 @@ kernel.def @fp8_encode_f8e4m3_f16_exact() {
   %encoded_head = vector.encode %source_head using %head_schema : vector<8xf16>, encoding<schema> -> vector<8xf8E4M3>
   %encoded_bits_head = vector.bitcast %encoded_head : vector<8xf8E4M3> to vector<8xi8>
   %difference_head = vector.xori %encoded_bits_head, %expected_bits_head : vector<8xi8>
-  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8, #dense>
+  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8>
   %source_bits_tail = vector.from_elements %source_one_encode, %source_negative_one_encode, %source_one_next_tie_encode, %source_maximum_finite_encode, %source_positive_infinity_encode, %source_negative_infinity_encode, %source_quiet_nan_encode, %source_positive_zero_encode : vector<8xi16>
   %expected_bits_tail = vector.from_elements %expected_one_encode, %expected_negative_one_encode, %expected_one_next_tie_encode, %expected_maximum_finite_encode, %expected_positive_infinity_encode, %expected_negative_infinity_encode, %expected_quiet_nan_encode, %expected_positive_zero_encode : vector<8xi8>
   %source_tail = vector.bitcast %source_bits_tail : vector<8xi16> to vector<8xf16>
   %encoded_tail = vector.encode %source_tail using %tail_schema : vector<8xf16>, encoding<schema> -> vector<8xf8E4M3>
   %encoded_bits_tail = vector.bitcast %encoded_tail : vector<8xf8E4M3> to vector<8xi8>
   %difference_tail = vector.xori %encoded_bits_tail, %expected_bits_tail : vector<8xi8>
-  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8, #dense>
+  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8>
   kernel.return
 }
 
@@ -202,14 +202,14 @@ kernel.def @fp8_encode_f8e4m3_f16_rows(%row_count: index) {
   %column = index.constant 0 : index
   %in_bounds = index.cmp ult, %row, %bounded_row_count : index
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
-  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xf16, #dense>
-  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8, #dense>
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xf16>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8>
+  %schema = encoding.define #encoding.f8e4m3<payload_elements=8> : encoding<schema>
   scf.if %in_bounds {
-    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xf16, #dense> -> vector<8xf16>
+    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xf16> -> vector<8xf16>
     %encoded = vector.encode %source using %schema : vector<8xf16>, encoding<schema> -> vector<8xf8E4M3>
     %encoded_bits = vector.bitcast %encoded : vector<8xf8E4M3> to vector<8xi8>
-    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8, #dense>
+    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8>
   }
   kernel.return
 }
@@ -244,9 +244,9 @@ kernel.def @fp8_encode_f8e4m3_bf16_exact() {
   %base = index.constant 0 : offset
   %head_offset = index.constant 0 : index
   %tail_offset = index.constant 8 : index
-  %output_view = buffer.view %output[%base] : buffer -> view<16xi8, #dense>
-  %head_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
-  %tail_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi8>
+  %head_schema = encoding.define #encoding.f8e4m3<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e4m3<payload_elements=8> : encoding<schema>
   %source_positive_zero_encode = scalar.constant 0 : i16
   %expected_positive_zero_encode = scalar.constant 0 : i8
   %source_negative_zero_encode = scalar.constant -32768 : i16
@@ -283,14 +283,14 @@ kernel.def @fp8_encode_f8e4m3_bf16_exact() {
   %encoded_head = vector.encode %source_head using %head_schema : vector<8xbf16>, encoding<schema> -> vector<8xf8E4M3>
   %encoded_bits_head = vector.bitcast %encoded_head : vector<8xf8E4M3> to vector<8xi8>
   %difference_head = vector.xori %encoded_bits_head, %expected_bits_head : vector<8xi8>
-  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8, #dense>
+  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8>
   %source_bits_tail = vector.from_elements %source_one_encode, %source_negative_one_encode, %source_one_next_tie_encode, %source_maximum_finite_encode, %source_positive_infinity_encode, %source_negative_infinity_encode, %source_quiet_nan_encode, %source_positive_zero_encode : vector<8xi16>
   %expected_bits_tail = vector.from_elements %expected_one_encode, %expected_negative_one_encode, %expected_one_next_tie_encode, %expected_maximum_finite_encode, %expected_positive_infinity_encode, %expected_negative_infinity_encode, %expected_quiet_nan_encode, %expected_positive_zero_encode : vector<8xi8>
   %source_tail = vector.bitcast %source_bits_tail : vector<8xi16> to vector<8xbf16>
   %encoded_tail = vector.encode %source_tail using %tail_schema : vector<8xbf16>, encoding<schema> -> vector<8xf8E4M3>
   %encoded_bits_tail = vector.bitcast %encoded_tail : vector<8xf8E4M3> to vector<8xi8>
   %difference_tail = vector.xori %encoded_bits_tail, %expected_bits_tail : vector<8xi8>
-  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8, #dense>
+  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8>
   kernel.return
 }
 
@@ -313,14 +313,14 @@ kernel.def @fp8_encode_f8e4m3_bf16_rows(%row_count: index) {
   %column = index.constant 0 : index
   %in_bounds = index.cmp ult, %row, %bounded_row_count : index
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
-  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xbf16, #dense>
-  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8, #dense>
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xbf16>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8>
+  %schema = encoding.define #encoding.f8e4m3<payload_elements=8> : encoding<schema>
   scf.if %in_bounds {
-    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xbf16, #dense> -> vector<8xbf16>
+    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xbf16> -> vector<8xbf16>
     %encoded = vector.encode %source using %schema : vector<8xbf16>, encoding<schema> -> vector<8xf8E4M3>
     %encoded_bits = vector.bitcast %encoded : vector<8xf8E4M3> to vector<8xi8>
-    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8, #dense>
+    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8>
   }
   kernel.return
 }
@@ -355,9 +355,9 @@ kernel.def @fp8_encode_f8e4m3fn_f32_exact() {
   %base = index.constant 0 : offset
   %head_offset = index.constant 0 : index
   %tail_offset = index.constant 8 : index
-  %output_view = buffer.view %output[%base] : buffer -> view<16xi8, #dense>
-  %head_schema = encoding.define #matrix_operand<element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
-  %tail_schema = encoding.define #matrix_operand<element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi8>
+  %head_schema = encoding.define #encoding.f8e4m3fn<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e4m3fn<payload_elements=8> : encoding<schema>
   %source_positive_zero_encode = scalar.constant 0 : i32
   %expected_positive_zero_encode = scalar.constant 0 : i8
   %source_negative_zero_encode = scalar.constant -2147483648 : i32
@@ -394,14 +394,14 @@ kernel.def @fp8_encode_f8e4m3fn_f32_exact() {
   %encoded_head = vector.encode %source_head using %head_schema : vector<8xf32>, encoding<schema> -> vector<8xf8E4M3>
   %encoded_bits_head = vector.bitcast %encoded_head : vector<8xf8E4M3> to vector<8xi8>
   %difference_head = vector.xori %encoded_bits_head, %expected_bits_head : vector<8xi8>
-  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8, #dense>
+  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8>
   %source_bits_tail = vector.from_elements %source_one_encode, %source_negative_one_encode, %source_one_next_tie_encode, %source_maximum_finite_encode, %source_positive_infinity_encode, %source_negative_infinity_encode, %source_quiet_nan_encode, %source_positive_zero_encode : vector<8xi32>
   %expected_bits_tail = vector.from_elements %expected_one_encode, %expected_negative_one_encode, %expected_one_next_tie_encode, %expected_maximum_finite_encode, %expected_positive_infinity_encode, %expected_negative_infinity_encode, %expected_quiet_nan_encode, %expected_positive_zero_encode : vector<8xi8>
   %source_tail = vector.bitcast %source_bits_tail : vector<8xi32> to vector<8xf32>
   %encoded_tail = vector.encode %source_tail using %tail_schema : vector<8xf32>, encoding<schema> -> vector<8xf8E4M3>
   %encoded_bits_tail = vector.bitcast %encoded_tail : vector<8xf8E4M3> to vector<8xi8>
   %difference_tail = vector.xori %encoded_bits_tail, %expected_bits_tail : vector<8xi8>
-  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8, #dense>
+  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8>
   kernel.return
 }
 
@@ -424,14 +424,14 @@ kernel.def @fp8_encode_f8e4m3fn_f32_rows(%row_count: index) {
   %column = index.constant 0 : index
   %in_bounds = index.cmp ult, %row, %bounded_row_count : index
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
-  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xf32, #dense>
-  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8, #dense>
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xf32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8>
+  %schema = encoding.define #encoding.f8e4m3fn<payload_elements=8> : encoding<schema>
   scf.if %in_bounds {
-    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xf32, #dense> -> vector<8xf32>
+    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xf32> -> vector<8xf32>
     %encoded = vector.encode %source using %schema : vector<8xf32>, encoding<schema> -> vector<8xf8E4M3>
     %encoded_bits = vector.bitcast %encoded : vector<8xf8E4M3> to vector<8xi8>
-    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8, #dense>
+    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8>
   }
   kernel.return
 }
@@ -466,9 +466,9 @@ kernel.def @fp8_encode_f8e4m3fn_f16_exact() {
   %base = index.constant 0 : offset
   %head_offset = index.constant 0 : index
   %tail_offset = index.constant 8 : index
-  %output_view = buffer.view %output[%base] : buffer -> view<16xi8, #dense>
-  %head_schema = encoding.define #matrix_operand<element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
-  %tail_schema = encoding.define #matrix_operand<element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi8>
+  %head_schema = encoding.define #encoding.f8e4m3fn<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e4m3fn<payload_elements=8> : encoding<schema>
   %source_positive_zero_encode = scalar.constant 0 : i16
   %expected_positive_zero_encode = scalar.constant 0 : i8
   %source_negative_zero_encode = scalar.constant -32768 : i16
@@ -505,14 +505,14 @@ kernel.def @fp8_encode_f8e4m3fn_f16_exact() {
   %encoded_head = vector.encode %source_head using %head_schema : vector<8xf16>, encoding<schema> -> vector<8xf8E4M3>
   %encoded_bits_head = vector.bitcast %encoded_head : vector<8xf8E4M3> to vector<8xi8>
   %difference_head = vector.xori %encoded_bits_head, %expected_bits_head : vector<8xi8>
-  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8, #dense>
+  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8>
   %source_bits_tail = vector.from_elements %source_one_encode, %source_negative_one_encode, %source_one_next_tie_encode, %source_maximum_finite_encode, %source_positive_infinity_encode, %source_negative_infinity_encode, %source_quiet_nan_encode, %source_positive_zero_encode : vector<8xi16>
   %expected_bits_tail = vector.from_elements %expected_one_encode, %expected_negative_one_encode, %expected_one_next_tie_encode, %expected_maximum_finite_encode, %expected_positive_infinity_encode, %expected_negative_infinity_encode, %expected_quiet_nan_encode, %expected_positive_zero_encode : vector<8xi8>
   %source_tail = vector.bitcast %source_bits_tail : vector<8xi16> to vector<8xf16>
   %encoded_tail = vector.encode %source_tail using %tail_schema : vector<8xf16>, encoding<schema> -> vector<8xf8E4M3>
   %encoded_bits_tail = vector.bitcast %encoded_tail : vector<8xf8E4M3> to vector<8xi8>
   %difference_tail = vector.xori %encoded_bits_tail, %expected_bits_tail : vector<8xi8>
-  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8, #dense>
+  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8>
   kernel.return
 }
 
@@ -535,14 +535,14 @@ kernel.def @fp8_encode_f8e4m3fn_f16_rows(%row_count: index) {
   %column = index.constant 0 : index
   %in_bounds = index.cmp ult, %row, %bounded_row_count : index
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
-  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xf16, #dense>
-  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8, #dense>
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xf16>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8>
+  %schema = encoding.define #encoding.f8e4m3fn<payload_elements=8> : encoding<schema>
   scf.if %in_bounds {
-    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xf16, #dense> -> vector<8xf16>
+    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xf16> -> vector<8xf16>
     %encoded = vector.encode %source using %schema : vector<8xf16>, encoding<schema> -> vector<8xf8E4M3>
     %encoded_bits = vector.bitcast %encoded : vector<8xf8E4M3> to vector<8xi8>
-    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8, #dense>
+    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8>
   }
   kernel.return
 }
@@ -577,9 +577,9 @@ kernel.def @fp8_encode_f8e4m3fn_bf16_exact() {
   %base = index.constant 0 : offset
   %head_offset = index.constant 0 : index
   %tail_offset = index.constant 8 : index
-  %output_view = buffer.view %output[%base] : buffer -> view<16xi8, #dense>
-  %head_schema = encoding.define #matrix_operand<element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
-  %tail_schema = encoding.define #matrix_operand<element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi8>
+  %head_schema = encoding.define #encoding.f8e4m3fn<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e4m3fn<payload_elements=8> : encoding<schema>
   %source_positive_zero_encode = scalar.constant 0 : i16
   %expected_positive_zero_encode = scalar.constant 0 : i8
   %source_negative_zero_encode = scalar.constant -32768 : i16
@@ -616,14 +616,14 @@ kernel.def @fp8_encode_f8e4m3fn_bf16_exact() {
   %encoded_head = vector.encode %source_head using %head_schema : vector<8xbf16>, encoding<schema> -> vector<8xf8E4M3>
   %encoded_bits_head = vector.bitcast %encoded_head : vector<8xf8E4M3> to vector<8xi8>
   %difference_head = vector.xori %encoded_bits_head, %expected_bits_head : vector<8xi8>
-  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8, #dense>
+  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8>
   %source_bits_tail = vector.from_elements %source_one_encode, %source_negative_one_encode, %source_one_next_tie_encode, %source_maximum_finite_encode, %source_positive_infinity_encode, %source_negative_infinity_encode, %source_quiet_nan_encode, %source_positive_zero_encode : vector<8xi16>
   %expected_bits_tail = vector.from_elements %expected_one_encode, %expected_negative_one_encode, %expected_one_next_tie_encode, %expected_maximum_finite_encode, %expected_positive_infinity_encode, %expected_negative_infinity_encode, %expected_quiet_nan_encode, %expected_positive_zero_encode : vector<8xi8>
   %source_tail = vector.bitcast %source_bits_tail : vector<8xi16> to vector<8xbf16>
   %encoded_tail = vector.encode %source_tail using %tail_schema : vector<8xbf16>, encoding<schema> -> vector<8xf8E4M3>
   %encoded_bits_tail = vector.bitcast %encoded_tail : vector<8xf8E4M3> to vector<8xi8>
   %difference_tail = vector.xori %encoded_bits_tail, %expected_bits_tail : vector<8xi8>
-  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8, #dense>
+  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8>
   kernel.return
 }
 
@@ -646,14 +646,14 @@ kernel.def @fp8_encode_f8e4m3fn_bf16_rows(%row_count: index) {
   %column = index.constant 0 : index
   %in_bounds = index.cmp ult, %row, %bounded_row_count : index
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
-  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xbf16, #dense>
-  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8, #dense>
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xbf16>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8>
+  %schema = encoding.define #encoding.f8e4m3fn<payload_elements=8> : encoding<schema>
   scf.if %in_bounds {
-    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xbf16, #dense> -> vector<8xbf16>
+    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xbf16> -> vector<8xbf16>
     %encoded = vector.encode %source using %schema : vector<8xbf16>, encoding<schema> -> vector<8xf8E4M3>
     %encoded_bits = vector.bitcast %encoded : vector<8xf8E4M3> to vector<8xi8>
-    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8, #dense>
+    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8>
   }
   kernel.return
 }
@@ -688,9 +688,9 @@ kernel.def @fp8_encode_f8e4m3fnuz_f32_exact() {
   %base = index.constant 0 : offset
   %head_offset = index.constant 0 : index
   %tail_offset = index.constant 8 : index
-  %output_view = buffer.view %output[%base] : buffer -> view<16xi8, #dense>
-  %head_schema = encoding.define #matrix_operand<element_format=f8e4m3fnuz, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
-  %tail_schema = encoding.define #matrix_operand<element_format=f8e4m3fnuz, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi8>
+  %head_schema = encoding.define #encoding.f8e4m3fnuz<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e4m3fnuz<payload_elements=8> : encoding<schema>
   %source_positive_zero_encode = scalar.constant 0 : i32
   %expected_positive_zero_encode = scalar.constant 0 : i8
   %source_negative_zero_encode = scalar.constant -2147483648 : i32
@@ -727,14 +727,14 @@ kernel.def @fp8_encode_f8e4m3fnuz_f32_exact() {
   %encoded_head = vector.encode %source_head using %head_schema : vector<8xf32>, encoding<schema> -> vector<8xf8E4M3>
   %encoded_bits_head = vector.bitcast %encoded_head : vector<8xf8E4M3> to vector<8xi8>
   %difference_head = vector.xori %encoded_bits_head, %expected_bits_head : vector<8xi8>
-  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8, #dense>
+  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8>
   %source_bits_tail = vector.from_elements %source_one_encode, %source_negative_one_encode, %source_one_next_tie_encode, %source_maximum_finite_encode, %source_positive_infinity_encode, %source_negative_infinity_encode, %source_quiet_nan_encode, %source_positive_zero_encode : vector<8xi32>
   %expected_bits_tail = vector.from_elements %expected_one_encode, %expected_negative_one_encode, %expected_one_next_tie_encode, %expected_maximum_finite_encode, %expected_positive_infinity_encode, %expected_negative_infinity_encode, %expected_quiet_nan_encode, %expected_positive_zero_encode : vector<8xi8>
   %source_tail = vector.bitcast %source_bits_tail : vector<8xi32> to vector<8xf32>
   %encoded_tail = vector.encode %source_tail using %tail_schema : vector<8xf32>, encoding<schema> -> vector<8xf8E4M3>
   %encoded_bits_tail = vector.bitcast %encoded_tail : vector<8xf8E4M3> to vector<8xi8>
   %difference_tail = vector.xori %encoded_bits_tail, %expected_bits_tail : vector<8xi8>
-  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8, #dense>
+  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8>
   kernel.return
 }
 
@@ -757,14 +757,14 @@ kernel.def @fp8_encode_f8e4m3fnuz_f32_rows(%row_count: index) {
   %column = index.constant 0 : index
   %in_bounds = index.cmp ult, %row, %bounded_row_count : index
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
-  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xf32, #dense>
-  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8, #dense>
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3fnuz, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xf32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8>
+  %schema = encoding.define #encoding.f8e4m3fnuz<payload_elements=8> : encoding<schema>
   scf.if %in_bounds {
-    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xf32, #dense> -> vector<8xf32>
+    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xf32> -> vector<8xf32>
     %encoded = vector.encode %source using %schema : vector<8xf32>, encoding<schema> -> vector<8xf8E4M3>
     %encoded_bits = vector.bitcast %encoded : vector<8xf8E4M3> to vector<8xi8>
-    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8, #dense>
+    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8>
   }
   kernel.return
 }
@@ -799,9 +799,9 @@ kernel.def @fp8_encode_f8e4m3fnuz_f16_exact() {
   %base = index.constant 0 : offset
   %head_offset = index.constant 0 : index
   %tail_offset = index.constant 8 : index
-  %output_view = buffer.view %output[%base] : buffer -> view<16xi8, #dense>
-  %head_schema = encoding.define #matrix_operand<element_format=f8e4m3fnuz, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
-  %tail_schema = encoding.define #matrix_operand<element_format=f8e4m3fnuz, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi8>
+  %head_schema = encoding.define #encoding.f8e4m3fnuz<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e4m3fnuz<payload_elements=8> : encoding<schema>
   %source_positive_zero_encode = scalar.constant 0 : i16
   %expected_positive_zero_encode = scalar.constant 0 : i8
   %source_negative_zero_encode = scalar.constant -32768 : i16
@@ -838,14 +838,14 @@ kernel.def @fp8_encode_f8e4m3fnuz_f16_exact() {
   %encoded_head = vector.encode %source_head using %head_schema : vector<8xf16>, encoding<schema> -> vector<8xf8E4M3>
   %encoded_bits_head = vector.bitcast %encoded_head : vector<8xf8E4M3> to vector<8xi8>
   %difference_head = vector.xori %encoded_bits_head, %expected_bits_head : vector<8xi8>
-  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8, #dense>
+  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8>
   %source_bits_tail = vector.from_elements %source_one_encode, %source_negative_one_encode, %source_one_next_tie_encode, %source_maximum_finite_encode, %source_positive_infinity_encode, %source_negative_infinity_encode, %source_quiet_nan_encode, %source_positive_zero_encode : vector<8xi16>
   %expected_bits_tail = vector.from_elements %expected_one_encode, %expected_negative_one_encode, %expected_one_next_tie_encode, %expected_maximum_finite_encode, %expected_positive_infinity_encode, %expected_negative_infinity_encode, %expected_quiet_nan_encode, %expected_positive_zero_encode : vector<8xi8>
   %source_tail = vector.bitcast %source_bits_tail : vector<8xi16> to vector<8xf16>
   %encoded_tail = vector.encode %source_tail using %tail_schema : vector<8xf16>, encoding<schema> -> vector<8xf8E4M3>
   %encoded_bits_tail = vector.bitcast %encoded_tail : vector<8xf8E4M3> to vector<8xi8>
   %difference_tail = vector.xori %encoded_bits_tail, %expected_bits_tail : vector<8xi8>
-  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8, #dense>
+  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8>
   kernel.return
 }
 
@@ -868,14 +868,14 @@ kernel.def @fp8_encode_f8e4m3fnuz_f16_rows(%row_count: index) {
   %column = index.constant 0 : index
   %in_bounds = index.cmp ult, %row, %bounded_row_count : index
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
-  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xf16, #dense>
-  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8, #dense>
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3fnuz, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xf16>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8>
+  %schema = encoding.define #encoding.f8e4m3fnuz<payload_elements=8> : encoding<schema>
   scf.if %in_bounds {
-    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xf16, #dense> -> vector<8xf16>
+    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xf16> -> vector<8xf16>
     %encoded = vector.encode %source using %schema : vector<8xf16>, encoding<schema> -> vector<8xf8E4M3>
     %encoded_bits = vector.bitcast %encoded : vector<8xf8E4M3> to vector<8xi8>
-    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8, #dense>
+    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8>
   }
   kernel.return
 }
@@ -910,9 +910,9 @@ kernel.def @fp8_encode_f8e4m3fnuz_bf16_exact() {
   %base = index.constant 0 : offset
   %head_offset = index.constant 0 : index
   %tail_offset = index.constant 8 : index
-  %output_view = buffer.view %output[%base] : buffer -> view<16xi8, #dense>
-  %head_schema = encoding.define #matrix_operand<element_format=f8e4m3fnuz, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
-  %tail_schema = encoding.define #matrix_operand<element_format=f8e4m3fnuz, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi8>
+  %head_schema = encoding.define #encoding.f8e4m3fnuz<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e4m3fnuz<payload_elements=8> : encoding<schema>
   %source_positive_zero_encode = scalar.constant 0 : i16
   %expected_positive_zero_encode = scalar.constant 0 : i8
   %source_negative_zero_encode = scalar.constant -32768 : i16
@@ -949,14 +949,14 @@ kernel.def @fp8_encode_f8e4m3fnuz_bf16_exact() {
   %encoded_head = vector.encode %source_head using %head_schema : vector<8xbf16>, encoding<schema> -> vector<8xf8E4M3>
   %encoded_bits_head = vector.bitcast %encoded_head : vector<8xf8E4M3> to vector<8xi8>
   %difference_head = vector.xori %encoded_bits_head, %expected_bits_head : vector<8xi8>
-  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8, #dense>
+  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8>
   %source_bits_tail = vector.from_elements %source_one_encode, %source_negative_one_encode, %source_one_next_tie_encode, %source_maximum_finite_encode, %source_positive_infinity_encode, %source_negative_infinity_encode, %source_quiet_nan_encode, %source_positive_zero_encode : vector<8xi16>
   %expected_bits_tail = vector.from_elements %expected_one_encode, %expected_negative_one_encode, %expected_one_next_tie_encode, %expected_maximum_finite_encode, %expected_positive_infinity_encode, %expected_negative_infinity_encode, %expected_quiet_nan_encode, %expected_positive_zero_encode : vector<8xi8>
   %source_tail = vector.bitcast %source_bits_tail : vector<8xi16> to vector<8xbf16>
   %encoded_tail = vector.encode %source_tail using %tail_schema : vector<8xbf16>, encoding<schema> -> vector<8xf8E4M3>
   %encoded_bits_tail = vector.bitcast %encoded_tail : vector<8xf8E4M3> to vector<8xi8>
   %difference_tail = vector.xori %encoded_bits_tail, %expected_bits_tail : vector<8xi8>
-  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8, #dense>
+  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8>
   kernel.return
 }
 
@@ -979,14 +979,14 @@ kernel.def @fp8_encode_f8e4m3fnuz_bf16_rows(%row_count: index) {
   %column = index.constant 0 : index
   %in_bounds = index.cmp ult, %row, %bounded_row_count : index
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
-  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xbf16, #dense>
-  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8, #dense>
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3fnuz, payload_elements=8, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xbf16>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8>
+  %schema = encoding.define #encoding.f8e4m3fnuz<payload_elements=8> : encoding<schema>
   scf.if %in_bounds {
-    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xbf16, #dense> -> vector<8xbf16>
+    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xbf16> -> vector<8xbf16>
     %encoded = vector.encode %source using %schema : vector<8xbf16>, encoding<schema> -> vector<8xf8E4M3>
     %encoded_bits = vector.bitcast %encoded : vector<8xf8E4M3> to vector<8xi8>
-    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8, #dense>
+    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8>
   }
   kernel.return
 }

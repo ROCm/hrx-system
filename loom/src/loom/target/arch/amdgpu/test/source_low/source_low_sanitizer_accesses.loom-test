@@ -5,8 +5,8 @@ amdgpu.target<gfx11-generic> @target
 func.def target(@target) @sanitizer_repeated_dense_access_read(%input: buffer) {
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
-  %input_view = buffer.view %input_global[%base] : buffer -> view<2xi32, #dense>
-  sanitizer.assert.accesses<read> %input_view[0] {static_count = 2, static_extents = [1], static_strides = [1]} : view<2xi32, #dense>
+  %input_view = buffer.view %input_global[%base] : buffer -> view<2xi32>
+  sanitizer.assert.accesses<read> %input_view[0] {static_count = 2, static_extents = [1], static_strides = [1]} : view<2xi32>
   func.return
 }
 
@@ -141,8 +141,8 @@ func.def target(@target) @sanitizer_repeated_aligned_rows_read(%input: buffer) {
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
   %input_aligned = buffer.assume.alignment %input_global {minimum_alignment = 32} : buffer
-  %input_view = buffer.view %input_aligned[%base] : buffer -> view<64xi8, #dense>
-  sanitizer.assert.accesses<read> %input_view[0] {static_count = 2, static_extents = [32], static_strides = [32]} : view<64xi8, #dense>
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<64xi8>
+  sanitizer.assert.accesses<read> %input_view[0] {static_count = 2, static_extents = [32], static_strides = [32]} : view<64xi8>
   func.return
 }
 
@@ -227,8 +227,8 @@ func.def target(@target) @sanitizer_aligned_granule_access_read(%input: buffer) 
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
   %input_aligned = buffer.assume.alignment %input_global {minimum_alignment = 64} : buffer
-  %input_view = buffer.view %input_aligned[%base] : buffer -> view<16xi32, #dense>
-  sanitizer.assert.access<read> %input_view[0] {static_extents = [16]} : view<16xi32, #dense>
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<16xi32>
+  sanitizer.assert.access<read> %input_view[0] {static_extents = [16]} : view<16xi32>
   func.return
 }
 
@@ -299,8 +299,8 @@ func.def target(@target) @sanitizer_cdna3_aligned_vector_read(%input: buffer) {
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
   %input_aligned = buffer.assume.alignment %input_global {minimum_alignment = 32} : buffer
-  %input_view = buffer.view %input_aligned[%base] : buffer -> view<32xi8, #dense>
-  sanitizer.assert.access<read> %input_view[0] {static_extents = [32]} : view<32xi8, #dense>
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<32xi8>
+  sanitizer.assert.access<read> %input_view[0] {static_extents = [32]} : view<32xi8>
   func.return
 }
 
@@ -359,8 +359,8 @@ func.def target(@target) @sanitizer_rdna4_aligned_vector_read(%input: buffer) {
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
   %input_aligned = buffer.assume.alignment %input_global {minimum_alignment = 32} : buffer
-  %input_view = buffer.view %input_aligned[%base] : buffer -> view<32xi8, #dense>
-  sanitizer.assert.access<read> %input_view[0] {static_extents = [32]} : view<32xi8, #dense>
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<32xi8>
+  sanitizer.assert.access<read> %input_view[0] {static_extents = [32]} : view<32xi8>
   func.return
 }
 

@@ -30,7 +30,7 @@ func.def target(@target) @vector_decode_splat_f8_scale(%input: buffer, %base: of
   %input_view = buffer.view %input[%base] : buffer -> view<1xf8E4M3, %layout>
   %raw = view.load %input_view[0] : view<1xf8E4M3, %layout> -> f8E4M3
   %payload = vector.splat %raw : vector<2xf8E4M3>
-  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3, payload_elements=2, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3<affine=scale_only, payload_elements=2, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf32>} : vector<2xf8E4M3>, encoding<schema> -> vector<2xf32>
   func.return %decoded : vector<2xf32>
 }
@@ -724,11 +724,11 @@ kernel.def target(@target) @scalar_sitofp_i8_load_store() {
   %input_global = buffer.assume.memory_space<global> %input : buffer
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %input_noalias, %output_noalias = buffer.assume.noalias %input_global, %output_global : buffer, buffer
-  %input_view = buffer.view %input_noalias[%base] : buffer -> view<1xi8, #dense>
-  %output_view = buffer.view %output_noalias[%base] : buffer -> view<1xf32, #dense>
-  %loaded = view.load %input_view[%index] : view<1xi8, #dense> -> i8
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<1xi8>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<1xf32>
+  %loaded = view.load %input_view[%index] : view<1xi8> -> i8
   %converted = scalar.sitofp %loaded : i8 to f32
-  view.store %converted, %output_view[%index] : f32, view<1xf32, #dense>
+  view.store %converted, %output_view[%index] : f32, view<1xf32>
   kernel.return
 }
 
@@ -791,11 +791,11 @@ kernel.def target(@target) @scalar_extf_bf16_load_store() {
   %input_global = buffer.assume.memory_space<global> %input : buffer
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %input_noalias, %output_noalias = buffer.assume.noalias %input_global, %output_global : buffer, buffer
-  %input_view = buffer.view %input_noalias[%base] : buffer -> view<1xbf16, #dense>
-  %output_view = buffer.view %output_noalias[%base] : buffer -> view<1xf32, #dense>
-  %loaded = view.load %input_view[%index] : view<1xbf16, #dense> -> bf16
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<1xbf16>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<1xf32>
+  %loaded = view.load %input_view[%index] : view<1xbf16> -> bf16
   %converted = scalar.extf %loaded : bf16 to f32
-  view.store %converted, %output_view[%index] : f32, view<1xf32, #dense>
+  view.store %converted, %output_view[%index] : f32, view<1xf32>
   kernel.return
 }
 
@@ -817,9 +817,9 @@ llvmir.target<object> @target {
 }
 func.def target(@target) @scalar_fptrunc_f32_store(%output: buffer, %input: f32) {
   %base = index.constant 0 : offset
-  %output_view = buffer.view %output[%base] : buffer -> view<1xf16, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xf16>
   %converted = scalar.fptrunc %input : f32 to f16
-  view.store %converted, %output_view[0] : f16, view<1xf16, #dense>
+  view.store %converted, %output_view[0] : f16, view<1xf16>
   func.return
 }
 
@@ -889,9 +889,9 @@ llvmir.target<object> @target {
 }
 func.def target(@target) @scalar_fptrunc_bf16_store(%output: buffer, %input: f32) {
   %base = index.constant 0 : offset
-  %output_view = buffer.view %output[%base] : buffer -> view<1xbf16, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xbf16>
   %converted = scalar.fptrunc %input : f32 to bf16
-  view.store %converted, %output_view[0] : bf16, view<1xbf16, #dense>
+  view.store %converted, %output_view[0] : bf16, view<1xbf16>
   func.return
 }
 
@@ -1257,11 +1257,11 @@ kernel.def target(@target) @scalar_bitcast_direct_i32_arg_f32_store() {
 } launch(%output: buffer, %scale_bits: i32) {
   %output_base = index.constant 0 : offset
   %output_element = index.constant 0 : index
-  %output_view = buffer.view %output[%output_base] : buffer -> view<1xf32, #dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xf32>
   %scale = scalar.bitcast %scale_bits : i32 to f32
   %unit = scalar.constant 1.0 : f32
   %scaled = scalar.mulf %unit, %scale : f32
-  view.store %scaled, %output_view[%output_element] : f32, view<1xf32, #dense>
+  view.store %scaled, %output_view[%output_element] : f32, view<1xf32>
   kernel.return
 }
 
@@ -1287,9 +1287,9 @@ kernel.def target(@target) @scalar_bitcast_lane_byte_decode_select_tree_store() 
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64xi8, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64xf32, #dense>
-  %byte = view.load %input_view[%lane] : view<64xi8, #dense> -> i8
+  %input_view = buffer.view %input[%base] : buffer -> view<64xi8>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf32>
+  %byte = view.load %input_view[%lane] : view<64xi8> -> i8
   %wide = scalar.extui %byte : i8 to i32
   %sign_mask = scalar.constant 128 : i32
   %sign = scalar.andi %wide, %sign_mask : i32
@@ -1341,7 +1341,7 @@ kernel.def target(@target) @scalar_bitcast_lane_byte_decode_select_tree_store() 
   %nan_bits = scalar.constant 2143289344 : i32
   %bits = scf.select %use_nan, %nan_bits, %finite_bits : i32
   %value = scalar.bitcast %bits : i32 to f32
-  view.store %value, %output_view[%lane] : f32, view<64xf32, #dense>
+  view.store %value, %output_view[%lane] : f32, view<64xf32>
   kernel.return
 }
 
@@ -1359,11 +1359,11 @@ kernel.def target(@target) @scalar_extf_direct_f8e4m3_load_store() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64xf32, #dense>
-  %packed = view.load %input_view[%lane] : view<64xf8E4M3, #dense> -> f8E4M3
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf32>
+  %packed = view.load %input_view[%lane] : view<64xf8E4M3> -> f8E4M3
   %value = scalar.extf %packed : f8E4M3 to f32
-  view.store %value, %output_view[%lane] : f32, view<64xf32, #dense>
+  view.store %value, %output_view[%lane] : f32, view<64xf32>
   kernel.return
 }
 
@@ -1381,11 +1381,11 @@ kernel.def target(@target) @scalar_extf_direct_f8e5m2_load_store() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64xf32, #dense>
-  %packed = view.load %input_view[%lane] : view<64xf8E5M2, #dense> -> f8E5M2
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf32>
+  %packed = view.load %input_view[%lane] : view<64xf8E5M2> -> f8E5M2
   %value = scalar.extf %packed : f8E5M2 to f32
-  view.store %value, %output_view[%lane] : f32, view<64xf32, #dense>
+  view.store %value, %output_view[%lane] : f32, view<64xf32>
   kernel.return
 }
 
@@ -1403,11 +1403,11 @@ kernel.def target(@target) @vector_extf_direct_f8e4m3_load_store() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
   %value = vector.extf %packed : vector<4xf8E4M3> to vector<4xf32>
-  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32>
   kernel.return
 }
 
@@ -1425,16 +1425,16 @@ kernel.def target(@target) @vector_extf_scaled_f8e4m3_to_bf16_store() {
 } launch(%input: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
-  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
   %wide = vector.extf %packed : vector<4xf8E4M3> to vector<4xf32>
-  %row_scale = view.load %scale_view[%lane] : view<64xf32, #dense> -> f32
+  %row_scale = view.load %scale_view[%lane] : view<64xf32> -> f32
   %scale_vector = vector.splat %row_scale : vector<4xf32>
   %scaled = vector.mulf %wide, %scale_vector : vector<4xf32>
   %rounded = vector.fptrunc %scaled : vector<4xf32> to vector<4xbf16>
-  vector.store %rounded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16, #dense>
+  vector.store %rounded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
   kernel.return
 }
 
@@ -1452,11 +1452,11 @@ kernel.def target(@target) @vector_extf_direct_f8e4m3_to_bf16_store() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
   %value = vector.extf %packed : vector<4xf8E4M3> to vector<4xbf16>
-  vector.store %value, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
   kernel.return
 }
 
@@ -1474,11 +1474,11 @@ kernel.def target(@target) @vector_extf_direct_f8e5m2_load_store() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
   %value = vector.extf %packed : vector<4xf8E5M2> to vector<4xf32>
-  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32>
   kernel.return
 }
 
@@ -1496,11 +1496,11 @@ kernel.def target(@target) @vector_extf_direct_f8e5m2_to_bf16_store() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
   %value = vector.extf %packed : vector<4xf8E5M2> to vector<4xbf16>
-  vector.store %value, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
   kernel.return
 }
 
@@ -1518,16 +1518,16 @@ kernel.def target(@target) @vector_extf_scaled_f8e5m2_to_bf16_store() {
 } launch(%input: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
-  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
   %wide = vector.extf %packed : vector<4xf8E5M2> to vector<4xf32>
-  %row_scale = view.load %scale_view[%lane] : view<64xf32, #dense> -> f32
+  %row_scale = view.load %scale_view[%lane] : view<64xf32> -> f32
   %scale_vector = vector.splat %row_scale : vector<4xf32>
   %scaled = vector.mulf %wide, %scale_vector : vector<4xf32>
   %rounded = vector.fptrunc %scaled : vector<4xf32> to vector<4xbf16>
-  vector.store %rounded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16, #dense>
+  vector.store %rounded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
   kernel.return
 }
 
@@ -1540,13 +1540,13 @@ llvmir.target<object> @target {
 }
 func.def target(@target) @vector_extf_splat_finite_f8e4m3_to_bf16_store(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %input_view = buffer.view %input[%base] : buffer -> view<1xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<2xbf16, #dense>
-  %raw = view.load %input_view[0] : view<1xf8E4M3, #dense> -> f8E4M3
+  %input_view = buffer.view %input[%base] : buffer -> view<1xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<2xbf16>
+  %raw = view.load %input_view[0] : view<1xf8E4M3> -> f8E4M3
   %finite = scalar.assume %raw [finite(%raw)] : f8E4M3
   %packed = vector.splat %finite : vector<2xf8E4M3>
   %value = vector.extf %packed : vector<2xf8E4M3> to vector<2xbf16>
-  vector.store %value, %output_view[0] : vector<2xbf16>, view<2xbf16, #dense>
+  vector.store %value, %output_view[0] : vector<2xbf16>, view<2xbf16>
   func.return
 }
 
@@ -1559,13 +1559,13 @@ llvmir.target<object> @target {
 }
 func.def target(@target) @vector_extf_splat_finite_f8e5m2_to_bf16_store(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %input_view = buffer.view %input[%base] : buffer -> view<1xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<2xbf16, #dense>
-  %raw = view.load %input_view[0] : view<1xf8E5M2, #dense> -> f8E5M2
+  %input_view = buffer.view %input[%base] : buffer -> view<1xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<2xbf16>
+  %raw = view.load %input_view[0] : view<1xf8E5M2> -> f8E5M2
   %finite = scalar.assume %raw [finite(%raw)] : f8E5M2
   %packed = vector.splat %finite : vector<2xf8E5M2>
   %value = vector.extf %packed : vector<2xf8E5M2> to vector<2xbf16>
-  vector.store %value, %output_view[0] : vector<2xbf16>, view<2xbf16, #dense>
+  vector.store %value, %output_view[0] : vector<2xbf16>, view<2xbf16>
   func.return
 }
 
@@ -1578,13 +1578,13 @@ llvmir.target<object> @target {
 }
 func.def target(@target) @vector_extf_splat_not_nan_f8e5m2_to_bf16_store(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %input_view = buffer.view %input[%base] : buffer -> view<1xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<2xbf16, #dense>
-  %raw = view.load %input_view[0] : view<1xf8E5M2, #dense> -> f8E5M2
+  %input_view = buffer.view %input[%base] : buffer -> view<1xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<2xbf16>
+  %raw = view.load %input_view[0] : view<1xf8E5M2> -> f8E5M2
   %not_nan = scalar.assume %raw [not_nan(%raw)] : f8E5M2
   %packed = vector.splat %not_nan : vector<2xf8E5M2>
   %value = vector.extf %packed : vector<2xf8E5M2> to vector<2xbf16>
-  vector.store %value, %output_view[0] : vector<2xbf16>, view<2xbf16, #dense>
+  vector.store %value, %output_view[0] : vector<2xbf16>, view<2xbf16>
   func.return
 }
 
@@ -1597,13 +1597,13 @@ llvmir.target<object> @target {
 }
 func.def target(@target) @vector_extf_splat_not_inf_f8e5m2_to_bf16_store(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %input_view = buffer.view %input[%base] : buffer -> view<1xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<2xbf16, #dense>
-  %raw = view.load %input_view[0] : view<1xf8E5M2, #dense> -> f8E5M2
+  %input_view = buffer.view %input[%base] : buffer -> view<1xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<2xbf16>
+  %raw = view.load %input_view[0] : view<1xf8E5M2> -> f8E5M2
   %not_inf = scalar.assume %raw [not_inf(%raw)] : f8E5M2
   %packed = vector.splat %not_inf : vector<2xf8E5M2>
   %value = vector.extf %packed : vector<2xf8E5M2> to vector<2xbf16>
-  vector.store %value, %output_view[0] : vector<2xbf16>, view<2xbf16, #dense>
+  vector.store %value, %output_view[0] : vector<2xbf16>, view<2xbf16>
   func.return
 }
 
@@ -1632,9 +1632,9 @@ llvmir.target<object> @target {
 }
 func.def target(@target) @scalar_extsi_i32_store(%output: buffer, %input: i32) {
   %base = index.constant 0 : offset
-  %output_view = buffer.view %output[%base] : buffer -> view<1xi64, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi64>
   %converted = scalar.extsi %input : i32 to i64
-  view.store %converted, %output_view[0] : i64, view<1xi64, #dense>
+  view.store %converted, %output_view[0] : i64, view<1xi64>
   func.return
 }
 
@@ -1653,9 +1653,9 @@ llvmir.target<object> @target {
 }
 func.def target(@target) @scalar_extui_i32_store(%output: buffer, %input: i32) {
   %base = index.constant 0 : offset
-  %output_view = buffer.view %output[%base] : buffer -> view<1xi64, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi64>
   %converted = scalar.extui %input : i32 to i64
-  view.store %converted, %output_view[0] : i64, view<1xi64, #dense>
+  view.store %converted, %output_view[0] : i64, view<1xi64>
   func.return
 }
 
@@ -1674,12 +1674,12 @@ llvmir.target<object> @target {
 }
 func.def target(@target) @scalar_extui_i32_store_mask(%output: buffer, %input: i32) {
   %base = index.constant 0 : offset
-  %output_view = buffer.view %output[%base] : buffer -> view<1xi64, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi64>
   %true = scalar.constant true : i1
   %mask = vector.splat %true : vector<1xi1>
   %converted = scalar.extui %input : i32 to i64
   %value = vector.splat %converted : vector<1xi64>
-  vector.store.mask %value, %output_view[0], %mask : vector<1xi64>, view<1xi64, #dense>, vector<1xi1>
+  vector.store.mask %value, %output_view[0], %mask : vector<1xi64>, view<1xi64>, vector<1xi1>
   func.return
 }
 

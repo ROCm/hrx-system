@@ -10,13 +10,13 @@ kernel.def target(@target) @report_gfx1100_fp8_to_bf16_software_decode() {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
   %identity_scale = scalar.constant 1.0 : f32
-  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, rounding=finite_only, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %input_view = buffer.view %input[%base] : buffer -> view<64x8xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x8xbf16, #dense>
-  %payload = vector.load %input_view[%lane, 0] : view<64x8xf8E4M3, #dense> -> vector<8xf8E4M3>
+  %schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=8, rounding=finite_only, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x8xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x8xbf16>
+  %payload = vector.load %input_view[%lane, 0] : view<64x8xf8E4M3> -> vector<8xf8E4M3>
   %scale_vector = vector.splat %identity_scale : vector<1xf32>
   %decoded = vector.decode %payload using %schema {scale = %scale_vector : vector<1xf32>} : vector<8xf8E4M3>, encoding<schema> -> vector<8xbf16>
-  vector.store %decoded, %output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16, #dense>
+  vector.store %decoded, %output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16>
   kernel.return
 }
 
@@ -54,15 +54,15 @@ kernel.def target(@target) @report_gfx1100_fp8_f32_scale_to_bf16_software_decode
 } launch(%input: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, rounding=finite_only, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %input_view = buffer.view %input[%base] : buffer -> view<64x8xf8E4M3, #dense>
-  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x8xbf16, #dense>
-  %payload = vector.load %input_view[%lane, 0] : view<64x8xf8E4M3, #dense> -> vector<8xf8E4M3>
-  %row_scale = view.load %scale_view[%lane] : view<64xf32, #dense> -> f32
+  %schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=8, rounding=finite_only, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x8xf8E4M3>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x8xbf16>
+  %payload = vector.load %input_view[%lane, 0] : view<64x8xf8E4M3> -> vector<8xf8E4M3>
+  %row_scale = view.load %scale_view[%lane] : view<64xf32> -> f32
   %scale_vector = vector.splat %row_scale : vector<1xf32>
   %decoded = vector.decode %payload using %schema {scale = %scale_vector : vector<1xf32>} : vector<8xf8E4M3>, encoding<schema> -> vector<8xbf16>
-  vector.store %decoded, %output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16, #dense>
+  vector.store %decoded, %output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16>
   kernel.return
 }
 
@@ -105,21 +105,21 @@ kernel.def target(@target) @report_gfx942_fp8_bf8_f32_scale_manual_bf16_pack() {
 } launch(%fp8_input: buffer, %bf8_input: buffer, %scale: buffer, %fp8_output: buffer, %bf8_output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %fp8_schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %bf8_schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e5m2, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %fp8_input_view = buffer.view %fp8_input[%base] : buffer -> view<64x8xf8E4M3, #dense>
-  %bf8_input_view = buffer.view %bf8_input[%base] : buffer -> view<64x8xf8E5M2, #dense>
-  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #dense>
-  %fp8_output_view = buffer.view %fp8_output[%base] : buffer -> view<64x8xbf16, #dense>
-  %bf8_output_view = buffer.view %bf8_output[%base] : buffer -> view<64x8xbf16, #dense>
-  %fp8_payload = vector.load %fp8_input_view[%lane, 0] : view<64x8xf8E4M3, #dense> -> vector<8xf8E4M3>
-  %bf8_payload = vector.load %bf8_input_view[%lane, 0] : view<64x8xf8E5M2, #dense> -> vector<8xf8E5M2>
-  %row_scale = view.load %scale_view[%lane] : view<64xf32, #dense> -> f32
+  %fp8_schema = encoding.define #encoding.f8e4m3<affine=scale_only, payload_elements=8, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %bf8_schema = encoding.define #encoding.f8e5m2<affine=scale_only, payload_elements=8, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %fp8_input_view = buffer.view %fp8_input[%base] : buffer -> view<64x8xf8E4M3>
+  %bf8_input_view = buffer.view %bf8_input[%base] : buffer -> view<64x8xf8E5M2>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32>
+  %fp8_output_view = buffer.view %fp8_output[%base] : buffer -> view<64x8xbf16>
+  %bf8_output_view = buffer.view %bf8_output[%base] : buffer -> view<64x8xbf16>
+  %fp8_payload = vector.load %fp8_input_view[%lane, 0] : view<64x8xf8E4M3> -> vector<8xf8E4M3>
+  %bf8_payload = vector.load %bf8_input_view[%lane, 0] : view<64x8xf8E5M2> -> vector<8xf8E5M2>
+  %row_scale = view.load %scale_view[%lane] : view<64xf32> -> f32
   %scale_vector = vector.splat %row_scale : vector<1xf32>
   %fp8_decoded = vector.decode %fp8_payload using %fp8_schema {scale = %scale_vector : vector<1xf32>} : vector<8xf8E4M3>, encoding<schema> -> vector<8xbf16>
   %bf8_decoded = vector.decode %bf8_payload using %bf8_schema {scale = %scale_vector : vector<1xf32>} : vector<8xf8E5M2>, encoding<schema> -> vector<8xbf16>
-  vector.store %fp8_decoded, %fp8_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16, #dense>
-  vector.store %bf8_decoded, %bf8_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16, #dense>
+  vector.store %fp8_decoded, %fp8_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16>
+  vector.store %bf8_decoded, %bf8_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16>
   kernel.return
 }
 
@@ -175,18 +175,18 @@ kernel.def target(@target) @report_gfx942_finite_fp8_bf8_to_bf16_packed_decode()
 } launch(%fp8_input: buffer, %bf8_input: buffer, %fp8_output: buffer, %bf8_output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %fp8_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, rounding=finite_only> : encoding<schema>
-  %bf8_schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, rounding=finite_only> : encoding<schema>
-  %fp8_input_view = buffer.view %fp8_input[%base] : buffer -> view<64x8xf8E4M3, #dense>
-  %bf8_input_view = buffer.view %bf8_input[%base] : buffer -> view<64x8xf8E5M2, #dense>
-  %fp8_output_view = buffer.view %fp8_output[%base] : buffer -> view<64x8xbf16, #dense>
-  %bf8_output_view = buffer.view %bf8_output[%base] : buffer -> view<64x8xbf16, #dense>
-  %fp8_payload = vector.load %fp8_input_view[%lane, 0] : view<64x8xf8E4M3, #dense> -> vector<8xf8E4M3>
-  %bf8_payload = vector.load %bf8_input_view[%lane, 0] : view<64x8xf8E5M2, #dense> -> vector<8xf8E5M2>
+  %fp8_schema = encoding.define #encoding.f8e4m3<payload_elements=8, rounding=finite_only> : encoding<schema>
+  %bf8_schema = encoding.define #encoding.f8e5m2<payload_elements=8, rounding=finite_only> : encoding<schema>
+  %fp8_input_view = buffer.view %fp8_input[%base] : buffer -> view<64x8xf8E4M3>
+  %bf8_input_view = buffer.view %bf8_input[%base] : buffer -> view<64x8xf8E5M2>
+  %fp8_output_view = buffer.view %fp8_output[%base] : buffer -> view<64x8xbf16>
+  %bf8_output_view = buffer.view %bf8_output[%base] : buffer -> view<64x8xbf16>
+  %fp8_payload = vector.load %fp8_input_view[%lane, 0] : view<64x8xf8E4M3> -> vector<8xf8E4M3>
+  %bf8_payload = vector.load %bf8_input_view[%lane, 0] : view<64x8xf8E5M2> -> vector<8xf8E5M2>
   %fp8_decoded = vector.decode %fp8_payload using %fp8_schema : vector<8xf8E4M3>, encoding<schema> -> vector<8xbf16>
   %bf8_decoded = vector.decode %bf8_payload using %bf8_schema : vector<8xf8E5M2>, encoding<schema> -> vector<8xbf16>
-  vector.store %fp8_decoded, %fp8_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16, #dense>
-  vector.store %bf8_decoded, %bf8_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16, #dense>
+  vector.store %fp8_decoded, %fp8_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16>
+  vector.store %bf8_decoded, %bf8_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16>
   kernel.return
 }
 
@@ -235,21 +235,21 @@ kernel.def target(@target) @report_gfx950_fp8_bf8_scalef32_native_decode_variant
 } launch(%fp8_input: buffer, %bf8_input: buffer, %scale: buffer, %fp8_output: buffer, %bf8_output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %fp8_schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %bf8_schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e5m2, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %fp8_input_view = buffer.view %fp8_input[%base] : buffer -> view<64x8xf8E4M3, #dense>
-  %bf8_input_view = buffer.view %bf8_input[%base] : buffer -> view<64x8xf8E5M2, #dense>
-  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #dense>
-  %fp8_output_view = buffer.view %fp8_output[%base] : buffer -> view<64x8xbf16, #dense>
-  %bf8_output_view = buffer.view %bf8_output[%base] : buffer -> view<64x8xbf16, #dense>
-  %fp8_payload = vector.load %fp8_input_view[%lane, 0] : view<64x8xf8E4M3, #dense> -> vector<8xf8E4M3>
-  %bf8_payload = vector.load %bf8_input_view[%lane, 0] : view<64x8xf8E5M2, #dense> -> vector<8xf8E5M2>
-  %row_scale = view.load %scale_view[%lane] : view<64xf32, #dense> -> f32
+  %fp8_schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=8, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %bf8_schema = encoding.define #encoding.f8e5m2<affine=scale_only, payload_elements=8, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %fp8_input_view = buffer.view %fp8_input[%base] : buffer -> view<64x8xf8E4M3>
+  %bf8_input_view = buffer.view %bf8_input[%base] : buffer -> view<64x8xf8E5M2>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32>
+  %fp8_output_view = buffer.view %fp8_output[%base] : buffer -> view<64x8xbf16>
+  %bf8_output_view = buffer.view %bf8_output[%base] : buffer -> view<64x8xbf16>
+  %fp8_payload = vector.load %fp8_input_view[%lane, 0] : view<64x8xf8E4M3> -> vector<8xf8E4M3>
+  %bf8_payload = vector.load %bf8_input_view[%lane, 0] : view<64x8xf8E5M2> -> vector<8xf8E5M2>
+  %row_scale = view.load %scale_view[%lane] : view<64xf32> -> f32
   %scale_vector = vector.splat %row_scale : vector<1xf32>
   %fp8_decoded = vector.decode %fp8_payload using %fp8_schema {scale = %scale_vector : vector<1xf32>} : vector<8xf8E4M3>, encoding<schema> -> vector<8xbf16>
   %bf8_decoded = vector.decode %bf8_payload using %bf8_schema {scale = %scale_vector : vector<1xf32>} : vector<8xf8E5M2>, encoding<schema> -> vector<8xbf16>
-  vector.store %fp8_decoded, %fp8_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16, #dense>
-  vector.store %bf8_decoded, %bf8_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16, #dense>
+  vector.store %fp8_decoded, %fp8_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16>
+  vector.store %bf8_decoded, %bf8_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16>
   kernel.return
 }
 
@@ -305,15 +305,15 @@ kernel.def target(@target) @report_gfx1200_bf8_f32_scale_native_f32_pair() {
 } launch(%input: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e5m2, payload_elements=4, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=4, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
-  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32, #dense>
-  %payload = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
-  %row_scale = view.load %scale_view[%lane] : view<64xf32, #dense> -> f32
+  %schema = encoding.define #encoding.f8e5m2<affine=scale_only, payload_elements=4, scale_format=f32, scale_group_elements=4, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32>
+  %payload = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
+  %row_scale = view.load %scale_view[%lane] : view<64xf32> -> f32
   %scale_vector = vector.splat %row_scale : vector<1xf32>
   %decoded = vector.decode %payload using %schema {scale = %scale_vector : vector<1xf32>} : vector<4xf8E5M2>, encoding<schema> -> vector<4xf32>
-  vector.store %decoded, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32, #dense>
+  vector.store %decoded, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32>
   kernel.return
 }
 
@@ -356,16 +356,16 @@ kernel.def target(@target) @report_gfx1200_bf8_f32_scale_sliced_native_f32_pair(
 } launch(%input: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e5m2, payload_elements=3, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=3, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
-  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x3xf32, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %schema = encoding.define #encoding.f8e5m2<affine=scale_only, payload_elements=3, scale_format=f32, scale_group_elements=3, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x3xf32>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
   %payload = vector.slice %packed[0] : vector<4xf8E5M2> -> vector<3xf8E5M2>
-  %row_scale = view.load %scale_view[%lane] : view<64xf32, #dense> -> f32
+  %row_scale = view.load %scale_view[%lane] : view<64xf32> -> f32
   %scale_vector = vector.splat %row_scale : vector<1xf32>
   %decoded = vector.decode %payload using %schema {scale = %scale_vector : vector<1xf32>} : vector<3xf8E5M2>, encoding<schema> -> vector<3xf32>
-  vector.store %decoded, %output_view[%lane, 0] : vector<3xf32>, view<64x3xf32, #dense>
+  vector.store %decoded, %output_view[%lane, 0] : vector<3xf32>, view<64x3xf32>
   kernel.return
 }
 
@@ -409,21 +409,21 @@ kernel.def target(@target) @report_gfx1200_fp8_bf8_f32_scale_manual_16bit_pack()
 } launch(%fp8_input: buffer, %bf8_input: buffer, %scale: buffer, %bf16_output: buffer, %f16_output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %fp8_schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %bf8_schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e5m2, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %fp8_input_view = buffer.view %fp8_input[%base] : buffer -> view<64x8xf8E4M3, #dense>
-  %bf8_input_view = buffer.view %bf8_input[%base] : buffer -> view<64x8xf8E5M2, #dense>
-  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #dense>
-  %bf16_output_view = buffer.view %bf16_output[%base] : buffer -> view<64x8xbf16, #dense>
-  %f16_output_view = buffer.view %f16_output[%base] : buffer -> view<64x8xf16, #dense>
-  %fp8_payload = vector.load %fp8_input_view[%lane, 0] : view<64x8xf8E4M3, #dense> -> vector<8xf8E4M3>
-  %bf8_payload = vector.load %bf8_input_view[%lane, 0] : view<64x8xf8E5M2, #dense> -> vector<8xf8E5M2>
-  %row_scale = view.load %scale_view[%lane] : view<64xf32, #dense> -> f32
+  %fp8_schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=8, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %bf8_schema = encoding.define #encoding.f8e5m2<affine=scale_only, payload_elements=8, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %fp8_input_view = buffer.view %fp8_input[%base] : buffer -> view<64x8xf8E4M3>
+  %bf8_input_view = buffer.view %bf8_input[%base] : buffer -> view<64x8xf8E5M2>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32>
+  %bf16_output_view = buffer.view %bf16_output[%base] : buffer -> view<64x8xbf16>
+  %f16_output_view = buffer.view %f16_output[%base] : buffer -> view<64x8xf16>
+  %fp8_payload = vector.load %fp8_input_view[%lane, 0] : view<64x8xf8E4M3> -> vector<8xf8E4M3>
+  %bf8_payload = vector.load %bf8_input_view[%lane, 0] : view<64x8xf8E5M2> -> vector<8xf8E5M2>
+  %row_scale = view.load %scale_view[%lane] : view<64xf32> -> f32
   %scale_vector = vector.splat %row_scale : vector<1xf32>
   %bf16_decoded = vector.decode %fp8_payload using %fp8_schema {scale = %scale_vector : vector<1xf32>} : vector<8xf8E4M3>, encoding<schema> -> vector<8xbf16>
   %f16_decoded = vector.decode %bf8_payload using %bf8_schema {scale = %scale_vector : vector<1xf32>} : vector<8xf8E5M2>, encoding<schema> -> vector<8xf16>
-  vector.store %bf16_decoded, %bf16_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16, #dense>
-  vector.store %f16_decoded, %f16_output_view[%lane, 0] : vector<8xf16>, view<64x8xf16, #dense>
+  vector.store %bf16_decoded, %bf16_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16>
+  vector.store %f16_decoded, %f16_output_view[%lane, 0] : vector<8xf16>, view<64x8xf16>
   kernel.return
 }
 
@@ -479,18 +479,18 @@ kernel.def target(@target) @report_gfx1200_finite_fp8_bf8_to_bf16_packed_decode(
 } launch(%fp8_input: buffer, %bf8_input: buffer, %fp8_output: buffer, %bf8_output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %fp8_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, rounding=finite_only> : encoding<schema>
-  %bf8_schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, rounding=finite_only> : encoding<schema>
-  %fp8_input_view = buffer.view %fp8_input[%base] : buffer -> view<64x8xf8E4M3, #dense>
-  %bf8_input_view = buffer.view %bf8_input[%base] : buffer -> view<64x8xf8E5M2, #dense>
-  %fp8_output_view = buffer.view %fp8_output[%base] : buffer -> view<64x8xbf16, #dense>
-  %bf8_output_view = buffer.view %bf8_output[%base] : buffer -> view<64x8xbf16, #dense>
-  %fp8_payload = vector.load %fp8_input_view[%lane, 0] : view<64x8xf8E4M3, #dense> -> vector<8xf8E4M3>
-  %bf8_payload = vector.load %bf8_input_view[%lane, 0] : view<64x8xf8E5M2, #dense> -> vector<8xf8E5M2>
+  %fp8_schema = encoding.define #encoding.f8e4m3<payload_elements=8, rounding=finite_only> : encoding<schema>
+  %bf8_schema = encoding.define #encoding.f8e5m2<payload_elements=8, rounding=finite_only> : encoding<schema>
+  %fp8_input_view = buffer.view %fp8_input[%base] : buffer -> view<64x8xf8E4M3>
+  %bf8_input_view = buffer.view %bf8_input[%base] : buffer -> view<64x8xf8E5M2>
+  %fp8_output_view = buffer.view %fp8_output[%base] : buffer -> view<64x8xbf16>
+  %bf8_output_view = buffer.view %bf8_output[%base] : buffer -> view<64x8xbf16>
+  %fp8_payload = vector.load %fp8_input_view[%lane, 0] : view<64x8xf8E4M3> -> vector<8xf8E4M3>
+  %bf8_payload = vector.load %bf8_input_view[%lane, 0] : view<64x8xf8E5M2> -> vector<8xf8E5M2>
   %fp8_decoded = vector.decode %fp8_payload using %fp8_schema : vector<8xf8E4M3>, encoding<schema> -> vector<8xbf16>
   %bf8_decoded = vector.decode %bf8_payload using %bf8_schema : vector<8xf8E5M2>, encoding<schema> -> vector<8xbf16>
-  vector.store %fp8_decoded, %fp8_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16, #dense>
-  vector.store %bf8_decoded, %bf8_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16, #dense>
+  vector.store %fp8_decoded, %fp8_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16>
+  vector.store %bf8_decoded, %bf8_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16>
   kernel.return
 }
 
@@ -539,21 +539,21 @@ kernel.def target(@target) @report_gfx1250_fp8_bf8_f32_scale_native_f32_pair_nat
 } launch(%fp8_input: buffer, %bf8_input: buffer, %scale: buffer, %fp8_output: buffer, %bf8_output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %fp8_schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %bf8_schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e5m2, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %fp8_input_view = buffer.view %fp8_input[%base] : buffer -> view<64x8xf8E4M3, #dense>
-  %bf8_input_view = buffer.view %bf8_input[%base] : buffer -> view<64x8xf8E5M2, #dense>
-  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #dense>
-  %fp8_output_view = buffer.view %fp8_output[%base] : buffer -> view<64x8xbf16, #dense>
-  %bf8_output_view = buffer.view %bf8_output[%base] : buffer -> view<64x8xbf16, #dense>
-  %fp8_payload = vector.load %fp8_input_view[%lane, 0] : view<64x8xf8E4M3, #dense> -> vector<8xf8E4M3>
-  %bf8_payload = vector.load %bf8_input_view[%lane, 0] : view<64x8xf8E5M2, #dense> -> vector<8xf8E5M2>
-  %row_scale = view.load %scale_view[%lane] : view<64xf32, #dense> -> f32
+  %fp8_schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=8, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %bf8_schema = encoding.define #encoding.f8e5m2<affine=scale_only, payload_elements=8, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %fp8_input_view = buffer.view %fp8_input[%base] : buffer -> view<64x8xf8E4M3>
+  %bf8_input_view = buffer.view %bf8_input[%base] : buffer -> view<64x8xf8E5M2>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32>
+  %fp8_output_view = buffer.view %fp8_output[%base] : buffer -> view<64x8xbf16>
+  %bf8_output_view = buffer.view %bf8_output[%base] : buffer -> view<64x8xbf16>
+  %fp8_payload = vector.load %fp8_input_view[%lane, 0] : view<64x8xf8E4M3> -> vector<8xf8E4M3>
+  %bf8_payload = vector.load %bf8_input_view[%lane, 0] : view<64x8xf8E5M2> -> vector<8xf8E5M2>
+  %row_scale = view.load %scale_view[%lane] : view<64xf32> -> f32
   %scale_vector = vector.splat %row_scale : vector<1xf32>
   %fp8_decoded = vector.decode %fp8_payload using %fp8_schema {scale = %scale_vector : vector<1xf32>} : vector<8xf8E4M3>, encoding<schema> -> vector<8xbf16>
   %bf8_decoded = vector.decode %bf8_payload using %bf8_schema {scale = %scale_vector : vector<1xf32>} : vector<8xf8E5M2>, encoding<schema> -> vector<8xbf16>
-  vector.store %fp8_decoded, %fp8_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16, #dense>
-  vector.store %bf8_decoded, %bf8_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16, #dense>
+  vector.store %fp8_decoded, %fp8_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16>
+  vector.store %bf8_decoded, %bf8_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16>
   kernel.return
 }
 
@@ -609,14 +609,14 @@ kernel.def target(@target) @report_gfx1250_fp8_e8m0_native_decode() {
 } launch(%input: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, scale_format=e8m0, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %input_view = buffer.view %input[%base] : buffer -> view<64x8xf8E4M3, #dense>
-  %scale_view = buffer.view %scale[%base] : buffer -> view<64x1xi32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x8xbf16, #dense>
-  %payload = vector.load %input_view[%lane, 0] : view<64x8xf8E4M3, #dense> -> vector<8xf8E4M3>
-  %scale_vector = vector.load %scale_view[%lane, 0] : view<64x1xi32, #dense> -> vector<1xi32>
+  %schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=8, scale_format=e8m0, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x8xf8E4M3>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64x1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x8xbf16>
+  %payload = vector.load %input_view[%lane, 0] : view<64x8xf8E4M3> -> vector<8xf8E4M3>
+  %scale_vector = vector.load %scale_view[%lane, 0] : view<64x1xi32> -> vector<1xi32>
   %decoded = vector.decode %payload using %schema {scale = %scale_vector : vector<1xi32>} : vector<8xf8E4M3>, encoding<schema> -> vector<8xbf16>
-  vector.store %decoded, %output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16, #dense>
+  vector.store %decoded, %output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16>
   kernel.return
 }
 
@@ -658,32 +658,32 @@ kernel.def target(@target) @report_gfx1250_fp8_bf8_e8m0_native_decode_variants()
 } launch(%fp8_input: buffer, %bf8_input: buffer, %scale: buffer, %fp8_bf16_output: buffer, %fp8_f16_output: buffer, %fp8_f32_output: buffer, %bf8_bf16_output: buffer, %bf8_f16_output: buffer, %bf8_f32_output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %fp8_schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, scale_format=e8m0, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %bf8_schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e5m2, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, scale_format=e8m0, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %fp8_input_view = buffer.view %fp8_input[%base] : buffer -> view<64x8xf8E4M3, #dense>
-  %bf8_input_view = buffer.view %bf8_input[%base] : buffer -> view<64x8xf8E5M2, #dense>
-  %scale_view = buffer.view %scale[%base] : buffer -> view<64x1xi32, #dense>
-  %fp8_bf16_output_view = buffer.view %fp8_bf16_output[%base] : buffer -> view<64x8xbf16, #dense>
-  %fp8_f16_output_view = buffer.view %fp8_f16_output[%base] : buffer -> view<64x8xf16, #dense>
-  %fp8_f32_output_view = buffer.view %fp8_f32_output[%base] : buffer -> view<64x8xf32, #dense>
-  %bf8_bf16_output_view = buffer.view %bf8_bf16_output[%base] : buffer -> view<64x8xbf16, #dense>
-  %bf8_f16_output_view = buffer.view %bf8_f16_output[%base] : buffer -> view<64x8xf16, #dense>
-  %bf8_f32_output_view = buffer.view %bf8_f32_output[%base] : buffer -> view<64x8xf32, #dense>
-  %fp8_payload = vector.load %fp8_input_view[%lane, 0] : view<64x8xf8E4M3, #dense> -> vector<8xf8E4M3>
-  %bf8_payload = vector.load %bf8_input_view[%lane, 0] : view<64x8xf8E5M2, #dense> -> vector<8xf8E5M2>
-  %scale_vector = vector.load %scale_view[%lane, 0] : view<64x1xi32, #dense> -> vector<1xi32>
+  %fp8_schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=8, scale_format=e8m0, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %bf8_schema = encoding.define #encoding.f8e5m2<affine=scale_only, payload_elements=8, scale_format=e8m0, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %fp8_input_view = buffer.view %fp8_input[%base] : buffer -> view<64x8xf8E4M3>
+  %bf8_input_view = buffer.view %bf8_input[%base] : buffer -> view<64x8xf8E5M2>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64x1xi32>
+  %fp8_bf16_output_view = buffer.view %fp8_bf16_output[%base] : buffer -> view<64x8xbf16>
+  %fp8_f16_output_view = buffer.view %fp8_f16_output[%base] : buffer -> view<64x8xf16>
+  %fp8_f32_output_view = buffer.view %fp8_f32_output[%base] : buffer -> view<64x8xf32>
+  %bf8_bf16_output_view = buffer.view %bf8_bf16_output[%base] : buffer -> view<64x8xbf16>
+  %bf8_f16_output_view = buffer.view %bf8_f16_output[%base] : buffer -> view<64x8xf16>
+  %bf8_f32_output_view = buffer.view %bf8_f32_output[%base] : buffer -> view<64x8xf32>
+  %fp8_payload = vector.load %fp8_input_view[%lane, 0] : view<64x8xf8E4M3> -> vector<8xf8E4M3>
+  %bf8_payload = vector.load %bf8_input_view[%lane, 0] : view<64x8xf8E5M2> -> vector<8xf8E5M2>
+  %scale_vector = vector.load %scale_view[%lane, 0] : view<64x1xi32> -> vector<1xi32>
   %fp8_bf16 = vector.decode %fp8_payload using %fp8_schema {scale = %scale_vector : vector<1xi32>} : vector<8xf8E4M3>, encoding<schema> -> vector<8xbf16>
   %fp8_f16 = vector.decode %fp8_payload using %fp8_schema {scale = %scale_vector : vector<1xi32>} : vector<8xf8E4M3>, encoding<schema> -> vector<8xf16>
   %fp8_f32 = vector.decode %fp8_payload using %fp8_schema {scale = %scale_vector : vector<1xi32>} : vector<8xf8E4M3>, encoding<schema> -> vector<8xf32>
   %bf8_bf16 = vector.decode %bf8_payload using %bf8_schema {scale = %scale_vector : vector<1xi32>} : vector<8xf8E5M2>, encoding<schema> -> vector<8xbf16>
   %bf8_f16 = vector.decode %bf8_payload using %bf8_schema {scale = %scale_vector : vector<1xi32>} : vector<8xf8E5M2>, encoding<schema> -> vector<8xf16>
   %bf8_f32 = vector.decode %bf8_payload using %bf8_schema {scale = %scale_vector : vector<1xi32>} : vector<8xf8E5M2>, encoding<schema> -> vector<8xf32>
-  vector.store %fp8_bf16, %fp8_bf16_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16, #dense>
-  vector.store %fp8_f16, %fp8_f16_output_view[%lane, 0] : vector<8xf16>, view<64x8xf16, #dense>
-  vector.store %fp8_f32, %fp8_f32_output_view[%lane, 0] : vector<8xf32>, view<64x8xf32, #dense>
-  vector.store %bf8_bf16, %bf8_bf16_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16, #dense>
-  vector.store %bf8_f16, %bf8_f16_output_view[%lane, 0] : vector<8xf16>, view<64x8xf16, #dense>
-  vector.store %bf8_f32, %bf8_f32_output_view[%lane, 0] : vector<8xf32>, view<64x8xf32, #dense>
+  vector.store %fp8_bf16, %fp8_bf16_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16>
+  vector.store %fp8_f16, %fp8_f16_output_view[%lane, 0] : vector<8xf16>, view<64x8xf16>
+  vector.store %fp8_f32, %fp8_f32_output_view[%lane, 0] : vector<8xf32>, view<64x8xf32>
+  vector.store %bf8_bf16, %bf8_bf16_output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16>
+  vector.store %bf8_f16, %bf8_f16_output_view[%lane, 0] : vector<8xf16>, view<64x8xf16>
+  vector.store %bf8_f32, %bf8_f32_output_view[%lane, 0] : vector<8xf32>, view<64x8xf32>
   kernel.return
 }
 

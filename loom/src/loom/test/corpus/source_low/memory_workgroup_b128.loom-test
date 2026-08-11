@@ -9,13 +9,13 @@ kernel.def @lds_b128_roundtrip() {
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 1024 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xi32, #dense>
-  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xi32, #dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32, #dense>
-  %loaded = vector.load %input_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
-  vector.store %loaded, %scratch_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
-  %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
-  vector.store %roundtrip, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xi32>
+  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x4xi32> -> vector<4xi32>
+  vector.store %loaded, %scratch_view[%lane, 0] : vector<4xi32>, view<64x4xi32>
+  %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x4xi32> -> vector<4xi32>
+  vector.store %roundtrip, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32>
   kernel.return
 }
 
@@ -30,14 +30,14 @@ kernel.def @lds_b128_single_lane_extract() {
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 1024 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xi32, #dense>
-  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xi32, #dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32, #dense>
-  %loaded = vector.load %input_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
-  vector.store %loaded, %scratch_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
-  %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xi32>
+  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x4xi32> -> vector<4xi32>
+  vector.store %loaded, %scratch_view[%lane, 0] : vector<4xi32>, view<64x4xi32>
+  %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x4xi32> -> vector<4xi32>
   %lane2 = vector.extract %roundtrip[2] : vector<4xi32> -> i32
-  view.store %lane2, %output_view[%lane] : i32, view<64xi32, #dense>
+  view.store %lane2, %output_view[%lane] : i32, view<64xi32>
   kernel.return
 }
 
@@ -52,18 +52,18 @@ kernel.def @lds_b128_xor_swizzle_roundtrip() {
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 1024 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xi32, #dense>
-  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xi32, #dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xi32>
+  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32>
   %shift = index.constant 4 : index
   %shifted = index.shrui %lane, %shift : index
   %mask = index.constant 3 : index
   %swizzle_bits = index.andi %shifted, %mask : index
   %swizzled = index.xori %lane, %swizzle_bits : index
-  %loaded = vector.load %input_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
-  vector.store %loaded, %scratch_view[%swizzled, 0] : vector<4xi32>, view<64x4xi32, #dense>
-  %roundtrip = vector.load %scratch_view[%swizzled, 0] : view<64x4xi32, #dense> -> vector<4xi32>
-  vector.store %roundtrip, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x4xi32> -> vector<4xi32>
+  vector.store %loaded, %scratch_view[%swizzled, 0] : vector<4xi32>, view<64x4xi32>
+  %roundtrip = vector.load %scratch_view[%swizzled, 0] : view<64x4xi32> -> vector<4xi32>
+  vector.store %roundtrip, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32>
   kernel.return
 }
 
@@ -79,13 +79,13 @@ kernel.def @lds_b128_large_static_offset_roundtrip() {
   %large = index.constant 1024 : offset
   %bytes = index.constant 4096 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xi32, #dense>
-  %scratch_view = buffer.view %scratch[%large] : buffer -> view<64x4xi32, #dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32, #dense>
-  %loaded = vector.load %input_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
-  vector.store %loaded, %scratch_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
-  %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
-  vector.store %roundtrip, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xi32>
+  %scratch_view = buffer.view %scratch[%large] : buffer -> view<64x4xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x4xi32> -> vector<4xi32>
+  vector.store %loaded, %scratch_view[%lane, 0] : vector<4xi32>, view<64x4xi32>
+  %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x4xi32> -> vector<4xi32>
+  vector.store %roundtrip, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32>
   kernel.return
 }
 
@@ -102,15 +102,15 @@ kernel.def @lds_b128_split_second_alloca_roundtrip() {
   %second_bytes = index.constant 2048 : offset
   %first = buffer.alloca<workgroup> align(16) %first_bytes : buffer
   %second = buffer.alloca<workgroup> align(16) %second_bytes : buffer
-  %first_view = buffer.view %first[%buffer_base] : buffer -> view<16xi32, #dense>
-  %second_view = buffer.view %second[%buffer_base] : buffer -> view<64x8xi32, #dense>
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x8xi32, #dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x8xi32, #dense>
-  %loaded = vector.load %input_view[%lane, 0] : view<64x8xi32, #dense> -> vector<8xi32>
-  vector.store %loaded, %second_view[%lane, 0] : vector<8xi32>, view<64x8xi32, #dense>
-  %roundtrip = vector.load %second_view[%lane, 0] : view<64x8xi32, #dense> -> vector<8xi32>
-  vector.store %roundtrip, %output_view[%lane, 0] : vector<8xi32>, view<64x8xi32, #dense>
-  %sentinel = view.load %first_view[0] : view<16xi32, #dense> -> i32
-  view.store %sentinel, %first_view[1] : i32, view<16xi32, #dense>
+  %first_view = buffer.view %first[%buffer_base] : buffer -> view<16xi32>
+  %second_view = buffer.view %second[%buffer_base] : buffer -> view<64x8xi32>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x8xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x8xi32>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x8xi32> -> vector<8xi32>
+  vector.store %loaded, %second_view[%lane, 0] : vector<8xi32>, view<64x8xi32>
+  %roundtrip = vector.load %second_view[%lane, 0] : view<64x8xi32> -> vector<8xi32>
+  vector.store %roundtrip, %output_view[%lane, 0] : vector<8xi32>, view<64x8xi32>
+  %sentinel = view.load %first_view[0] : view<16xi32> -> i32
+  view.store %sentinel, %first_view[1] : i32, view<16xi32>
   kernel.return
 }

@@ -6,7 +6,7 @@ func.def target(@target) @gfx950_vector_decode_scalef32_f8e4m3fn_to_f16(%input: 
   %layout = encoding.layout.dense : encoding<layout>
   %input_view = buffer.view %input[%base] : buffer -> view<2xf8E4M3, %layout>
   %payload = vector.load %input_view[0] : view<2xf8E4M3, %layout> -> vector<2xf8E4M3>
-  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=2, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=2, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf32>} : vector<2xf8E4M3>, encoding<schema> -> vector<2xf16>
   func.return %decoded : vector<2xf16>
 }
@@ -15,7 +15,7 @@ func.def target(@target) @gfx950_vector_decode_scalef32_f8e5m2_to_f16(%input: bu
   %layout = encoding.layout.dense : encoding<layout>
   %input_view = buffer.view %input[%base] : buffer -> view<2xf8E5M2, %layout>
   %payload = vector.load %input_view[0] : view<2xf8E5M2, %layout> -> vector<2xf8E5M2>
-  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e5m2, payload_elements=2, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %schema = encoding.define #encoding.f8e5m2<affine=scale_only, payload_elements=2, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf32>} : vector<2xf8E5M2>, encoding<schema> -> vector<2xf16>
   func.return %decoded : vector<2xf16>
 }
@@ -24,7 +24,7 @@ func.def target(@target) @gfx950_vector_decode_scalef32_f8e4m3fn_to_bf16(%input:
   %layout = encoding.layout.dense : encoding<layout>
   %input_view = buffer.view %input[%base] : buffer -> view<2xf8E4M3, %layout>
   %payload = vector.load %input_view[0] : view<2xf8E4M3, %layout> -> vector<2xf8E4M3>
-  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=2, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=2, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf32>} : vector<2xf8E4M3>, encoding<schema> -> vector<2xbf16>
   func.return %decoded : vector<2xbf16>
 }
@@ -33,7 +33,7 @@ func.def target(@target) @gfx950_vector_decode_scalef32_f8e5m2_to_bf16(%input: b
   %layout = encoding.layout.dense : encoding<layout>
   %input_view = buffer.view %input[%base] : buffer -> view<2xf8E5M2, %layout>
   %payload = vector.load %input_view[0] : view<2xf8E5M2, %layout> -> vector<2xf8E5M2>
-  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e5m2, payload_elements=2, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %schema = encoding.define #encoding.f8e5m2<affine=scale_only, payload_elements=2, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf32>} : vector<2xf8E5M2>, encoding<schema> -> vector<2xbf16>
   func.return %decoded : vector<2xbf16>
 }
@@ -42,7 +42,7 @@ func.def target(@target) @gfx950_vector_decode_scalef32_f8e4m3fn_to_f32(%input: 
   %layout = encoding.layout.dense : encoding<layout>
   %input_view = buffer.view %input[%base] : buffer -> view<2xf8E4M3, %layout>
   %payload = vector.load %input_view[0] : view<2xf8E4M3, %layout> -> vector<2xf8E4M3>
-  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=2, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=2, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf32>} : vector<2xf8E4M3>, encoding<schema> -> vector<2xf32>
   func.return %decoded : vector<2xf32>
 }
@@ -51,7 +51,7 @@ func.def target(@target) @gfx950_vector_decode_scalef32_f8e5m2_to_f32(%input: bu
   %layout = encoding.layout.dense : encoding<layout>
   %input_view = buffer.view %input[%base] : buffer -> view<2xf8E5M2, %layout>
   %payload = vector.load %input_view[0] : view<2xf8E5M2, %layout> -> vector<2xf8E5M2>
-  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e5m2, payload_elements=2, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %schema = encoding.define #encoding.f8e5m2<affine=scale_only, payload_elements=2, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf32>} : vector<2xf8E5M2>, encoding<schema> -> vector<2xf32>
   func.return %decoded : vector<2xf32>
 }
@@ -60,7 +60,7 @@ func.def target(@target) @gfx950_vector_decode_f8e4m3fnuz_then_scalef32_to_bf16(
   %layout = encoding.layout.dense : encoding<layout>
   %input_view = buffer.view %input[%base] : buffer -> view<2xf8E4M3, %layout>
   %payload = vector.load %input_view[0] : view<2xf8E4M3, %layout> -> vector<2xf8E4M3>
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3fnuz, payload_elements=2, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fnuz<payload_elements=2> : encoding<schema>
   %wide = vector.decode %payload using %schema : vector<2xf8E4M3>, encoding<schema> -> vector<2xf32>
   %scale_vector = vector.splat %scale : vector<2xf32>
   %scaled = vector.mulf %wide, %scale_vector : vector<2xf32>

@@ -147,7 +147,7 @@ config_def = Op(
     examples=[
         "config.def @model36.model.hidden_size = 2048 : index",
         "config.def @model36.features.enable_mtp = true : i1",
-        "config.def @model36.quant.dense_encoding = #q8_0<block=32> : encoding<schema>",
+        "config.def @model36.quant.dense_encoding = #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes> : encoding<schema>",
     ],
 )
 

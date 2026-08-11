@@ -21,25 +21,34 @@ enum {
   LOOM_PARAMETERIZED_ATTR_ENCODING_COUNT_ = 1,
 };
 
-// Rounding and exceptional-value policy for encoded values.
-typedef enum loom_encoding_rounding_policy_e {
-  LOOM_ENCODING_ROUNDING_POLICY_NONE = 0,
-  LOOM_ENCODING_ROUNDING_POLICY_NEAREST_EVEN = 1,
-  LOOM_ENCODING_ROUNDING_POLICY_NEAREST_AWAY = 2,
-  LOOM_ENCODING_ROUNDING_POLICY_TOWARD_ZERO = 3,
-  LOOM_ENCODING_ROUNDING_POLICY_DOWN = 4,
-  LOOM_ENCODING_ROUNDING_POLICY_UP = 5,
-  LOOM_ENCODING_ROUNDING_POLICY_STOCHASTIC = 6,
-  LOOM_ENCODING_ROUNDING_POLICY_SATFINITE = 7,
-  LOOM_ENCODING_ROUNDING_POLICY_OVERFLOW_TO_INF = 8,
-  LOOM_ENCODING_ROUNDING_POLICY_OVERFLOW_TO_NAN = 9,
-  LOOM_ENCODING_ROUNDING_POLICY_FLUSH_SUBNORMAL = 10,
-  LOOM_ENCODING_ROUNDING_POLICY_PRESERVE_SUBNORMAL = 11,
-  LOOM_ENCODING_ROUNDING_POLICY_RELU_CLAMP = 12,
-  LOOM_ENCODING_ROUNDING_POLICY_FINITE_ONLY = 13,
-  LOOM_ENCODING_ROUNDING_POLICY_FINITE_FLUSH_SUBNORMAL = 14,
-  LOOM_ENCODING_ROUNDING_POLICY_COUNT_ = 15,
-} loom_encoding_rounding_policy_t;
+// Auxiliary SSA operand key shared by encoded storage schemas.
+typedef enum loom_encoding_auxiliary_key_e {
+  LOOM_ENCODING_AUXILIARY_KEY_SCALE = 0,
+  LOOM_ENCODING_AUXILIARY_KEY_SECONDARY_SCALE = 1,
+  LOOM_ENCODING_AUXILIARY_KEY_SCALE2 = 2,
+  LOOM_ENCODING_AUXILIARY_KEY_SCALE3 = 3,
+  LOOM_ENCODING_AUXILIARY_KEY_SCALE4 = 4,
+  LOOM_ENCODING_AUXILIARY_KEY_SCALE5 = 5,
+  LOOM_ENCODING_AUXILIARY_KEY_SCALE6 = 6,
+  LOOM_ENCODING_AUXILIARY_KEY_SCALE7 = 7,
+  LOOM_ENCODING_AUXILIARY_KEY_ZERO_POINT = 8,
+  LOOM_ENCODING_AUXILIARY_KEY_MINIMUM = 9,
+  LOOM_ENCODING_AUXILIARY_KEY_BIAS = 10,
+  LOOM_ENCODING_AUXILIARY_KEY_SUM_CORRECTION = 11,
+  LOOM_ENCODING_AUXILIARY_KEY_CODEBOOK = 12,
+  LOOM_ENCODING_AUXILIARY_KEY_SPARSITY = 13,
+  LOOM_ENCODING_AUXILIARY_KEY_METADATA = 14,
+  LOOM_ENCODING_AUXILIARY_KEY_INDICES = 15,
+  LOOM_ENCODING_AUXILIARY_KEY_OFFSETS = 16,
+  LOOM_ENCODING_AUXILIARY_KEY_MASK = 17,
+  LOOM_ENCODING_AUXILIARY_KEY_SIGNS = 18,
+  LOOM_ENCODING_AUXILIARY_KEY_RESIDUAL = 19,
+  LOOM_ENCODING_AUXILIARY_KEY_AMAX = 20,
+  LOOM_ENCODING_AUXILIARY_KEY_THRESHOLDS = 21,
+  LOOM_ENCODING_AUXILIARY_KEY_CENTROIDS = 22,
+  LOOM_ENCODING_AUXILIARY_KEY_OUTLIERS = 23,
+  LOOM_ENCODING_AUXILIARY_KEY_COUNT_ = 24,
+} loom_encoding_auxiliary_key_t;
 
 // Affine transform applied to encoded values.
 typedef enum loom_encoding_affine_policy_e {
@@ -126,6 +135,26 @@ typedef enum loom_encoding_payload_packing_e {
   LOOM_ENCODING_PAYLOAD_PACKING_COUNT_ = 12,
 } loom_encoding_payload_packing_t;
 
+// Rounding and exceptional-value policy for encoded values.
+typedef enum loom_encoding_rounding_policy_e {
+  LOOM_ENCODING_ROUNDING_POLICY_NONE = 0,
+  LOOM_ENCODING_ROUNDING_POLICY_NEAREST_EVEN = 1,
+  LOOM_ENCODING_ROUNDING_POLICY_NEAREST_AWAY = 2,
+  LOOM_ENCODING_ROUNDING_POLICY_TOWARD_ZERO = 3,
+  LOOM_ENCODING_ROUNDING_POLICY_DOWN = 4,
+  LOOM_ENCODING_ROUNDING_POLICY_UP = 5,
+  LOOM_ENCODING_ROUNDING_POLICY_STOCHASTIC = 6,
+  LOOM_ENCODING_ROUNDING_POLICY_SATFINITE = 7,
+  LOOM_ENCODING_ROUNDING_POLICY_OVERFLOW_TO_INF = 8,
+  LOOM_ENCODING_ROUNDING_POLICY_OVERFLOW_TO_NAN = 9,
+  LOOM_ENCODING_ROUNDING_POLICY_FLUSH_SUBNORMAL = 10,
+  LOOM_ENCODING_ROUNDING_POLICY_PRESERVE_SUBNORMAL = 11,
+  LOOM_ENCODING_ROUNDING_POLICY_RELU_CLAMP = 12,
+  LOOM_ENCODING_ROUNDING_POLICY_FINITE_ONLY = 13,
+  LOOM_ENCODING_ROUNDING_POLICY_FINITE_FLUSH_SUBNORMAL = 14,
+  LOOM_ENCODING_ROUNDING_POLICY_COUNT_ = 15,
+} loom_encoding_rounding_policy_t;
+
 // Scale sharing topology for encoded values.
 typedef enum loom_encoding_scale_topology_e {
   LOOM_ENCODING_SCALE_TOPOLOGY_NONE = 0,
@@ -165,122 +194,45 @@ enum {
 };
 
 // Composes an address layout and storage schema.
-typedef enum loom_encoding_physical_storage_parameter_e {
-  LOOM_ENCODING_PHYSICAL_STORAGE_PARAMETER_LAYOUT = 0,
-  LOOM_ENCODING_PHYSICAL_STORAGE_PARAMETER_SCHEMA = 1,
-  LOOM_ENCODING_PHYSICAL_STORAGE_PARAMETER_COUNT_ = 2,
-} loom_encoding_physical_storage_parameter_t;
+typedef enum loom_encoding_storage_parameter_e {
+  LOOM_ENCODING_STORAGE_PARAMETER_LAYOUT = 0,
+  LOOM_ENCODING_STORAGE_PARAMETER_SCHEMA = 1,
+  LOOM_ENCODING_STORAGE_PARAMETER_COUNT_ = 2,
+} loom_encoding_storage_parameter_t;
 
-typedef enum loom_encoding_physical_storage_dynamic_parameter_e {
-  LOOM_ENCODING_PHYSICAL_STORAGE_DYNAMIC_PARAMETER_LAYOUT = 0,
-  LOOM_ENCODING_PHYSICAL_STORAGE_DYNAMIC_PARAMETER_SCHEMA = 1,
-  LOOM_ENCODING_PHYSICAL_STORAGE_DYNAMIC_PARAMETER_COUNT_ = 2,
-} loom_encoding_physical_storage_dynamic_parameter_t;
+typedef enum loom_encoding_storage_dynamic_parameter_e {
+  LOOM_ENCODING_STORAGE_DYNAMIC_PARAMETER_LAYOUT = 0,
+  LOOM_ENCODING_STORAGE_DYNAMIC_PARAMETER_SCHEMA = 1,
+  LOOM_ENCODING_STORAGE_DYNAMIC_PARAMETER_COUNT_ = 2,
+} loom_encoding_storage_dynamic_parameter_t;
 
 // Explicit element-stride address layout.
-typedef enum loom_encoding_strided_parameter_e {
-  LOOM_ENCODING_STRIDED_PARAMETER_STRIDE = 0,
-  LOOM_ENCODING_STRIDED_PARAMETER_STRIDES = 1,
-  LOOM_ENCODING_STRIDED_PARAMETER_COUNT_ = 2,
-} loom_encoding_strided_parameter_t;
+typedef enum loom_encoding_layout_strided_parameter_e {
+  LOOM_ENCODING_LAYOUT_STRIDED_PARAMETER_STRIDES = 0,
+  LOOM_ENCODING_LAYOUT_STRIDED_PARAMETER_COUNT_ = 1,
+} loom_encoding_layout_strided_parameter_t;
 
-// Blockwise eight-bit quantized storage schema.
-typedef enum loom_encoding_q8_0_parameter_e {
-  LOOM_ENCODING_Q8_0_PARAMETER_BLOCK = 0,
-  LOOM_ENCODING_Q8_0_PARAMETER_COUNT_ = 1,
-} loom_encoding_q8_0_parameter_t;
-
-// GGML-compatible block storage schema.
-typedef enum loom_encoding_ggml_q4_0_parameter_e {
-  LOOM_ENCODING_GGML_Q4_0_PARAMETER_BLOCK_ELEMS = 0,
-  LOOM_ENCODING_GGML_Q4_0_PARAMETER_STORAGE_BYTES = 1,
-  LOOM_ENCODING_GGML_Q4_0_PARAMETER_COUNT_ = 2,
-} loom_encoding_ggml_q4_0_parameter_t;
-
-// GGML-compatible block storage schema.
-typedef enum loom_encoding_ggml_q8_0_parameter_e {
-  LOOM_ENCODING_GGML_Q8_0_PARAMETER_BLOCK_ELEMS = 0,
-  LOOM_ENCODING_GGML_Q8_0_PARAMETER_STORAGE_BYTES = 1,
-  LOOM_ENCODING_GGML_Q8_0_PARAMETER_COUNT_ = 2,
-} loom_encoding_ggml_q8_0_parameter_t;
-
-// GGML-compatible block storage schema.
-typedef enum loom_encoding_ggml_q6_k_parameter_e {
-  LOOM_ENCODING_GGML_Q6_K_PARAMETER_BLOCK_ELEMS = 0,
-  LOOM_ENCODING_GGML_Q6_K_PARAMETER_STORAGE_BYTES = 1,
-  LOOM_ENCODING_GGML_Q6_K_PARAMETER_COUNT_ = 2,
-} loom_encoding_ggml_q6_k_parameter_t;
-
-// GGML indexed-grid storage schema.
-typedef enum loom_encoding_ggml_iq_grid_parameter_e {
-  LOOM_ENCODING_GGML_IQ_GRID_PARAMETER_CODE_BITS = 0,
-  LOOM_ENCODING_GGML_IQ_GRID_PARAMETER_GRID_ELEMS = 1,
-  LOOM_ENCODING_GGML_IQ_GRID_PARAMETER_COUNT_ = 2,
-} loom_encoding_ggml_iq_grid_parameter_t;
-
-// Table-decoded four-bit storage schema.
-typedef enum loom_encoding_loom_fp4_table_parameter_e {
-  LOOM_ENCODING_LOOM_FP4_TABLE_PARAMETER_CODE_BITS = 0,
-  LOOM_ENCODING_LOOM_FP4_TABLE_PARAMETER_TABLE_ELEMS = 1,
-  LOOM_ENCODING_LOOM_FP4_TABLE_PARAMETER_COUNT_ = 2,
-} loom_encoding_loom_fp4_table_parameter_t;
-
-// Named eight-bit floating-point storage schema.
-typedef enum loom_encoding_ieee_fp8_e4m3_parameter_e {
-  LOOM_ENCODING_IEEE_FP8_E4M3_PARAMETER_ROUNDING = 0,
-  LOOM_ENCODING_IEEE_FP8_E4M3_PARAMETER_STORAGE_BITS = 1,
-  LOOM_ENCODING_IEEE_FP8_E4M3_PARAMETER_COUNT_ = 2,
-} loom_encoding_ieee_fp8_e4m3_parameter_t;
-
-// Named eight-bit floating-point storage schema.
-typedef enum loom_encoding_ieee_fp8_e5m2_parameter_e {
-  LOOM_ENCODING_IEEE_FP8_E5M2_PARAMETER_ROUNDING = 0,
-  LOOM_ENCODING_IEEE_FP8_E5M2_PARAMETER_STORAGE_BITS = 1,
-  LOOM_ENCODING_IEEE_FP8_E5M2_PARAMETER_COUNT_ = 2,
-} loom_encoding_ieee_fp8_e5m2_parameter_t;
-
-// Named eight-bit floating-point storage schema.
-typedef enum loom_encoding_fp8_e4m3fn_parameter_e {
-  LOOM_ENCODING_FP8_E4M3FN_PARAMETER_ROUNDING = 0,
-  LOOM_ENCODING_FP8_E4M3FN_PARAMETER_STORAGE_BITS = 1,
-  LOOM_ENCODING_FP8_E4M3FN_PARAMETER_COUNT_ = 2,
-} loom_encoding_fp8_e4m3fn_parameter_t;
-
-// Named eight-bit floating-point storage schema.
-typedef enum loom_encoding_fp8_e4m3fnuz_parameter_e {
-  LOOM_ENCODING_FP8_E4M3FNUZ_PARAMETER_ROUNDING = 0,
-  LOOM_ENCODING_FP8_E4M3FNUZ_PARAMETER_STORAGE_BITS = 1,
-  LOOM_ENCODING_FP8_E4M3FNUZ_PARAMETER_COUNT_ = 2,
-} loom_encoding_fp8_e4m3fnuz_parameter_t;
-
-// Named eight-bit floating-point storage schema.
-typedef enum loom_encoding_fp8_e5m2fnuz_parameter_e {
-  LOOM_ENCODING_FP8_E5M2FNUZ_PARAMETER_ROUNDING = 0,
-  LOOM_ENCODING_FP8_E5M2FNUZ_PARAMETER_STORAGE_BITS = 1,
-  LOOM_ENCODING_FP8_E5M2FNUZ_PARAMETER_COUNT_ = 2,
-} loom_encoding_fp8_e5m2fnuz_parameter_t;
-
-// Target-independent encoded matrix operand schema.
-typedef enum loom_encoding_matrix_operand_parameter_e {
-  LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_AFFINE = 0,
-  LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_CODEBOOK = 1,
-  LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_ELEMENT_FORMAT = 2,
-  LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_PAYLOAD_ELEMENTS = 3,
-  LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_PAYLOAD_PACKING = 4,
-  LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_PAYLOAD_REGISTERS = 5,
-  LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_ROUNDING = 6,
-  LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SCALE_FORMAT = 7,
-  LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SCALE_GROUP_ELEMENTS = 8,
-  LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SCALE_GROUP_SHAPE = 9,
-  LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SCALE_OPERANDS = 10,
-  LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SCALE_TOPOLOGY = 11,
-  LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SECONDARY_SCALE_FORMAT = 12,
-  LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SPARSITY = 13,
-  LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SPARSITY_GROUP_ELEMENTS = 14,
-  LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SPARSITY_GROUP_NONZERO_ELEMENTS = 15,
-  LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_ZERO_SCALE_FALLBACK = 16,
-  LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_COUNT_ = 17,
-} loom_encoding_matrix_operand_parameter_t;
+// Target-independent encoded operand schema.
+typedef enum loom_encoding_operand_parameter_e {
+  LOOM_ENCODING_OPERAND_PARAMETER_AFFINE = 0,
+  LOOM_ENCODING_OPERAND_PARAMETER_CODEBOOK = 1,
+  LOOM_ENCODING_OPERAND_PARAMETER_ELEMENT_FORMAT = 2,
+  LOOM_ENCODING_OPERAND_PARAMETER_PAYLOAD_ELEMENTS = 3,
+  LOOM_ENCODING_OPERAND_PARAMETER_PAYLOAD_PACKING = 4,
+  LOOM_ENCODING_OPERAND_PARAMETER_PAYLOAD_REGISTERS = 5,
+  LOOM_ENCODING_OPERAND_PARAMETER_ROUNDING = 6,
+  LOOM_ENCODING_OPERAND_PARAMETER_SCALE_FORMAT = 7,
+  LOOM_ENCODING_OPERAND_PARAMETER_SCALE_GROUP_ELEMENTS = 8,
+  LOOM_ENCODING_OPERAND_PARAMETER_SCALE_GROUP_SHAPE = 9,
+  LOOM_ENCODING_OPERAND_PARAMETER_SCALE_OPERANDS = 10,
+  LOOM_ENCODING_OPERAND_PARAMETER_SCALE_TOPOLOGY = 11,
+  LOOM_ENCODING_OPERAND_PARAMETER_SECONDARY_SCALE_FORMAT = 12,
+  LOOM_ENCODING_OPERAND_PARAMETER_SPARSITY = 13,
+  LOOM_ENCODING_OPERAND_PARAMETER_SPARSITY_GROUP_ELEMENTS = 14,
+  LOOM_ENCODING_OPERAND_PARAMETER_SPARSITY_GROUP_NONZERO_ELEMENTS = 15,
+  LOOM_ENCODING_OPERAND_PARAMETER_ZERO_SCALE_FALLBACK = 16,
+  LOOM_ENCODING_OPERAND_PARAMETER_COUNT_ = 17,
+} loom_encoding_operand_parameter_t;
 
 // Numerical transform with static shape and policy parameters.
 typedef enum loom_encoding_numeric_transform_parameter_e {
@@ -327,6 +279,8 @@ typedef enum loom_encoding_turboquant_kv_dynamic_parameter_e {
 extern "C" {
 #endif
 
+extern const loom_encoding_auxiliary_key_descriptor_t loom_encoding_auxiliary_key_descriptors[LOOM_ENCODING_AUXILIARY_KEY_COUNT_];
+
 // Typed semantic requirements for an encoded storage schema.
 enum loom_encoding_match_attr_build_flag_bits_e {
   LOOM_ENCODING_MATCH_ATTR_BUILD_FLAG_HAS_ELEMENT_FORMAT = 1u << 0,
@@ -366,24 +320,16 @@ iree_status_t loom_encoding_match_attr_make(
     loom_encoding_affine_policy_t affine,
     loom_attribute_t* out_attr);
 
-extern const loom_encoding_family_descriptor_t loom_encoding_physical_storage_family_descriptor;
-extern const loom_encoding_family_descriptor_t loom_encoding_dense_family_descriptor;
-extern const loom_encoding_family_descriptor_t loom_encoding_strided_family_descriptor;
-extern const loom_encoding_family_descriptor_t loom_encoding_q8_0_family_descriptor;
+extern const loom_encoding_family_descriptor_t loom_encoding_storage_family_descriptor;
+extern const loom_encoding_family_descriptor_t loom_encoding_layout_dense_family_descriptor;
+extern const loom_encoding_family_descriptor_t loom_encoding_layout_strided_family_descriptor;
 extern const loom_encoding_family_descriptor_t loom_encoding_ggml_q4_0_family_descriptor;
 extern const loom_encoding_family_descriptor_t loom_encoding_ggml_q8_0_family_descriptor;
-extern const loom_encoding_family_descriptor_t loom_encoding_q6_k_family_descriptor;
+extern const loom_encoding_family_descriptor_t loom_encoding_ggml_q4_k_family_descriptor;
 extern const loom_encoding_family_descriptor_t loom_encoding_ggml_q6_k_family_descriptor;
-extern const loom_encoding_family_descriptor_t loom_encoding_ggml_iq_grid_family_descriptor;
-extern const loom_encoding_family_descriptor_t loom_encoding_loom_fp4_table_family_descriptor;
-extern const loom_encoding_family_descriptor_t loom_encoding_ieee_fp8_e4m3_family_descriptor;
-extern const loom_encoding_family_descriptor_t loom_encoding_ieee_fp8_e5m2_family_descriptor;
-extern const loom_encoding_family_descriptor_t loom_encoding_fp8_e4m3fn_family_descriptor;
-extern const loom_encoding_family_descriptor_t loom_encoding_fp8_e4m3fnuz_family_descriptor;
-extern const loom_encoding_family_descriptor_t loom_encoding_fp8_e5m2fnuz_family_descriptor;
-extern const loom_encoding_family_descriptor_t loom_encoding_matrix_operand_family_descriptor;
+extern const loom_encoding_family_descriptor_t loom_encoding_ggml_q8_1_x4_family_descriptor;
+extern const loom_encoding_family_descriptor_t loom_encoding_operand_family_descriptor;
 extern const loom_encoding_family_descriptor_t loom_encoding_numeric_transform_family_descriptor;
-extern const loom_encoding_family_descriptor_t loom_encoding_orthogonal_transform_family_descriptor;
 extern const loom_encoding_family_descriptor_t loom_encoding_turboquant_kv_family_descriptor;
 
 enum {
@@ -439,7 +385,7 @@ iree_status_t loom_encoding_layout_strided_verify(
     iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_ENCODING_DEFINE: Create an encoding value from a static encoding specification.
-// %enc = encoding.define #q8_0<block=32> : encoding<schema>
+// %enc = encoding.define #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes> : encoding<schema>
 LOOM_DEFINE_ISA(loom_encoding_define_isa, LOOM_OP_ENCODING_DEFINE)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_encoding_define_params, 0)
 LOOM_DEFINE_RESULT(loom_encoding_define_result, 0)
@@ -528,7 +474,7 @@ iree_status_t loom_encoding_layout_assume_strided_verify(
     iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_ENCODING_ASSUME_SPEC: Refine an existing encoding value with an exact static encoding specification. Dynamic values remain ordinary SSA operands elsewhere; this op only states the selected static family and static parameters.
-// %schema2 = encoding.assume.spec %schema, #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+// %schema2 = encoding.assume.spec %schema, #ggml.q4_0 : encoding<schema>
 LOOM_DEFINE_ISA(loom_encoding_assume_spec_isa, LOOM_OP_ENCODING_ASSUME_SPEC)
 LOOM_DEFINE_OPERAND(loom_encoding_assume_spec_enc, 0)
 LOOM_DEFINE_RESULT(loom_encoding_assume_spec_result, 0)

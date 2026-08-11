@@ -81,9 +81,9 @@
         {
           "path": "{tmp}/q8_load_width.loom",
           "contains": [
-            "vector.load %input_words[0] : view<4xi32, #dense> -> vector<1xi32>",
-            "vector.load %input_words[0] : view<4xi32, #dense> -> vector<4xi32>",
-            "vector.store %wide, %vector_words[0] : vector<4xi32>, view<4xi32, #dense>"
+            "vector.load %input_words[0] : view<4xi32> -> vector<1xi32>",
+            "vector.load %input_words[0] : view<4xi32> -> vector<4xi32>",
+            "vector.store %wide, %vector_words[0] : vector<4xi32>, view<4xi32>"
           ]
         }
       ]
@@ -125,9 +125,9 @@
           "path": "{tmp}/shared_memory_tile.loom",
           "contains": [
             "buffer.alloca<workgroup> align(16) %scratch_bytes : buffer",
-            "vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<64xi32, #dense>",
+            "vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<64xi32>",
             "kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)",
-            "vector.load %scratch_view[%reverse_lane] : view<64xi32, #dense> -> vector<1xi32>"
+            "vector.load %scratch_view[%reverse_lane] : view<64xi32> -> vector<1xi32>"
           ]
         }
       ]
@@ -187,18 +187,18 @@
         {
           "path": "{tmp}/shared_memory_wave_tile.loom",
           "contains": [
-            "view.store %value, %scratch_view[%lane] : i32, view<32xi32, #dense>",
+            "view.store %value, %scratch_view[%lane] : i32, view<32xi32>",
             "kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)",
-            "view.load %scratch_view[%lane] : view<32xi32, #dense> -> i32",
-            "view.store %value, %scratch_view[%scratch_index] : i32, view<40xi32, #dense>",
-            "view.load %scratch_view[%scratch_index] : view<40xi32, #dense> -> i32",
+            "view.load %scratch_view[%lane] : view<32xi32> -> i32",
+            "view.store %value, %scratch_view[%scratch_index] : i32, view<40xi32>",
+            "view.load %scratch_view[%scratch_index] : view<40xi32> -> i32",
             "%result = scf.if %is_active_lane -> (i32)",
             "scf.yield %roundtrip : i32",
             "scf.yield %value : i32",
-            "vector.store %word0, %scratch_view[%lane] : vector<1xi32>, view<256xi32, #dense>",
-            "vector.store %word1, %scratch_view[%second_region_index] : vector<1xi32>, view<256xi32, #dense>",
-            "vector.load %scratch_view[%lane] : view<256xi32, #dense> -> vector<1xi32>",
-            "vector.load %scratch_view[%second_region_index] : view<256xi32, #dense> -> vector<1xi32>"
+            "vector.store %word0, %scratch_view[%lane] : vector<1xi32>, view<256xi32>",
+            "vector.store %word1, %scratch_view[%second_region_index] : vector<1xi32>, view<256xi32>",
+            "vector.load %scratch_view[%lane] : view<256xi32> -> vector<1xi32>",
+            "vector.load %scratch_view[%second_region_index] : view<256xi32> -> vector<1xi32>"
           ]
         }
       ]
@@ -339,9 +339,9 @@
             "kernel.workitem.id<y>",
             "kernel.workitem.id<x>",
             "buffer.alloca<workgroup> align(16) %scratch_bytes : buffer",
-            "vector.load %scratch_a_view[%column, %row] : view<8x8xi32, #dense> -> vector<1xi32>",
-            "vector.store %transposed, %scratch_b_view[%row, %column] : vector<1xi32>, view<8x8xi32, #dense>",
-            "vector.load %scratch_b_view[%column, %row] : view<8x8xi32, #dense> -> vector<1xi32>"
+            "vector.load %scratch_a_view[%column, %row] : view<8x8xi32> -> vector<1xi32>",
+            "vector.store %transposed, %scratch_b_view[%row, %column] : vector<1xi32>, view<8x8xi32>",
+            "vector.load %scratch_b_view[%column, %row] : view<8x8xi32> -> vector<1xi32>"
           ]
         }
       ]
@@ -402,11 +402,11 @@
           "path": "{tmp}/shared_memory_vector_tile.loom",
           "contains": [
             "buffer.alloca<workgroup> align(16) %scratch_bytes : buffer",
-            "vector.load %input_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>",
-            "vector.store %loaded, %scratch_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>",
+            "vector.load %input_view[%lane, 0] : view<64x4xi32> -> vector<4xi32>",
+            "vector.store %loaded, %scratch_view[%lane, 0] : vector<4xi32>, view<64x4xi32>",
             "kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)",
-            "vector.load %scratch_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>",
-            "vector.store %roundtrip, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>"
+            "vector.load %scratch_view[%lane, 0] : view<64x4xi32> -> vector<4xi32>",
+            "vector.store %roundtrip, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32>"
           ]
         }
       ]

@@ -1036,7 +1036,7 @@ kernel.def @copy(%n: index) {
   %c0_i32 = scalar.constant 0 : i32
   %zero_point = scalar.constant 128 : i32
   %fourth_word_ordinal = scalar.constant 4 : i32
-  %input_view = buffer.view %input[%base] : buffer -> view<[%n]xf32, #dense>
+  %input_view = buffer.view %input[%base] : buffer -> view<[%n]xf32>
   test.use %batch_size, %c2, %c0_i32, %zero_point, %fourth_word_ordinal : index, index, i32, i32, i32
   kernel.return
 }
@@ -1171,7 +1171,7 @@ kernel.def @copy(%n: index) {
     )
     ok &= _expect_authoring_self_test(
         "authoring sentinel extent fails",
-        "%view = buffer.view %input[%zero] : buffer -> view<2147483647xi8, #dense>\n",
+        "%view = buffer.view %input[%zero] : buffer -> view<2147483647xi8>\n",
         ("authoring corpus must not use sentinel-sized view extents",),
     )
     ok &= _expect_authoring_self_test(

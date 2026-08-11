@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/ops/vector/encoding_auxiliary.h"
+#include "loom/ops/encoding/auxiliary.h"
 
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
@@ -53,26 +53,25 @@ class VectorEncodingAuxiliaryTest : public ::testing::Test {
 };
 
 TEST(VectorEncodingAuxiliaryKeysTest, ScaleKeysUseStableDenseSlots) {
-  loom_vector_encoding_auxiliary_key_t key =
-      LOOM_VECTOR_ENCODING_AUXILIARY_KEY_COUNT_;
+  loom_encoding_auxiliary_key_t key = LOOM_ENCODING_AUXILIARY_KEY_COUNT_;
 
-  ASSERT_TRUE(loom_vector_encoding_auxiliary_scale_key(0, &key));
-  EXPECT_EQ(key, LOOM_VECTOR_ENCODING_AUXILIARY_KEY_SCALE);
-  EXPECT_TRUE(iree_string_view_equal(
-      loom_vector_encoding_auxiliary_key_name(key), IREE_SV("scale")));
+  ASSERT_TRUE(loom_encoding_auxiliary_scale_key(0, &key));
+  EXPECT_EQ(key, LOOM_ENCODING_AUXILIARY_KEY_SCALE);
+  EXPECT_TRUE(iree_string_view_equal(loom_encoding_auxiliary_key_name(key),
+                                     IREE_SV("scale")));
 
-  ASSERT_TRUE(loom_vector_encoding_auxiliary_scale_key(1, &key));
-  EXPECT_EQ(key, LOOM_VECTOR_ENCODING_AUXILIARY_KEY_SECONDARY_SCALE);
-  EXPECT_TRUE(
-      iree_string_view_equal(loom_vector_encoding_auxiliary_key_name(key),
-                             IREE_SV("secondary_scale")));
+  ASSERT_TRUE(loom_encoding_auxiliary_scale_key(1, &key));
+  EXPECT_EQ(key, LOOM_ENCODING_AUXILIARY_KEY_SECONDARY_SCALE);
+  EXPECT_TRUE(iree_string_view_equal(loom_encoding_auxiliary_key_name(key),
+                                     IREE_SV("secondary_scale")));
 
-  ASSERT_TRUE(loom_vector_encoding_auxiliary_scale_key(7, &key));
-  EXPECT_EQ(key, LOOM_VECTOR_ENCODING_AUXILIARY_KEY_SCALE7);
-  EXPECT_EQ(loom_vector_encoding_auxiliary_key_flag(key),
-            LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SCALE7);
+  ASSERT_TRUE(loom_encoding_auxiliary_scale_key(7, &key));
+  EXPECT_EQ(key, LOOM_ENCODING_AUXILIARY_KEY_SCALE7);
+  EXPECT_EQ(
+      loom_encoding_auxiliary_key_flag(key),
+      loom_encoding_auxiliary_key_flag(LOOM_ENCODING_AUXILIARY_KEY_SCALE7));
 
-  EXPECT_FALSE(loom_vector_encoding_auxiliary_scale_key(8, &key));
+  EXPECT_FALSE(loom_encoding_auxiliary_scale_key(8, &key));
 }
 
 TEST_F(VectorEncodingAuxiliaryTest, ViewResolveMapsNamesToDenseValueSlots) {
@@ -90,20 +89,21 @@ TEST_F(VectorEncodingAuxiliaryTest, ViewResolveMapsNamesToDenseValueSlots) {
       },
   };
 
-  loom_vector_encoding_auxiliary_view_t view;
+  loom_encoding_auxiliary_view_t view;
   iree_string_view_t unknown_key = iree_string_view_empty();
-  ASSERT_TRUE(loom_vector_encoding_auxiliary_view_resolve(
+  ASSERT_TRUE(loom_encoding_auxiliary_view_resolve(
       module_, ValueSlice(auxiliary_values, 2),
       loom_make_named_attr_slice(auxiliary_names,
                                  IREE_ARRAYSIZE(auxiliary_names)),
       &view, &unknown_key));
 
   EXPECT_TRUE(iree_all_bits_set(
-      view.present_keys, LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SCALE |
-                             LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_AMAX));
-  EXPECT_EQ(view.values[LOOM_VECTOR_ENCODING_AUXILIARY_KEY_SCALE], 12);
-  EXPECT_EQ(view.values[LOOM_VECTOR_ENCODING_AUXILIARY_KEY_AMAX], 34);
-  EXPECT_EQ(view.values[LOOM_VECTOR_ENCODING_AUXILIARY_KEY_CODEBOOK],
+      view.present_keys,
+      loom_encoding_auxiliary_key_flag(LOOM_ENCODING_AUXILIARY_KEY_SCALE) |
+          loom_encoding_auxiliary_key_flag(LOOM_ENCODING_AUXILIARY_KEY_AMAX)));
+  EXPECT_EQ(view.values[LOOM_ENCODING_AUXILIARY_KEY_SCALE], 12);
+  EXPECT_EQ(view.values[LOOM_ENCODING_AUXILIARY_KEY_AMAX], 34);
+  EXPECT_EQ(view.values[LOOM_ENCODING_AUXILIARY_KEY_CODEBOOK],
             LOOM_VALUE_ID_INVALID);
 }
 
@@ -117,9 +117,9 @@ TEST_F(VectorEncodingAuxiliaryTest, ViewResolveReportsUnknownKeys) {
       },
   };
 
-  loom_vector_encoding_auxiliary_view_t view;
+  loom_encoding_auxiliary_view_t view;
   iree_string_view_t unknown_key = iree_string_view_empty();
-  EXPECT_FALSE(loom_vector_encoding_auxiliary_view_resolve(
+  EXPECT_FALSE(loom_encoding_auxiliary_view_resolve(
       module_, ValueSlice(auxiliary_values, 1),
       loom_make_named_attr_slice(auxiliary_names,
                                  IREE_ARRAYSIZE(auxiliary_names)),
@@ -148,18 +148,23 @@ TEST(VectorEncodingAuxiliaryKeysTest, RequiredKeysComeFromSchemaFacts) {
       /*.scale_operand_count=*/2,
   };
 
-  loom_vector_encoding_auxiliary_key_flags_t required_keys = 0;
-  ASSERT_TRUE(loom_vector_encoding_auxiliary_required_keys_from_schema(
+  loom_encoding_auxiliary_key_flags_t required_keys = 0;
+  ASSERT_TRUE(loom_encoding_auxiliary_required_keys_from_schema(
       schema, &required_keys, nullptr));
   EXPECT_TRUE(iree_all_bits_set(
       required_keys,
-      LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SCALE |
-          LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SECONDARY_SCALE |
-          LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_AMAX |
-          LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_ZERO_POINT |
-          LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SUM_CORRECTION |
-          LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_CODEBOOK |
-          LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SPARSITY));
+      loom_encoding_auxiliary_key_flag(LOOM_ENCODING_AUXILIARY_KEY_SCALE) |
+          loom_encoding_auxiliary_key_flag(
+              LOOM_ENCODING_AUXILIARY_KEY_SECONDARY_SCALE) |
+          loom_encoding_auxiliary_key_flag(LOOM_ENCODING_AUXILIARY_KEY_AMAX) |
+          loom_encoding_auxiliary_key_flag(
+              LOOM_ENCODING_AUXILIARY_KEY_ZERO_POINT) |
+          loom_encoding_auxiliary_key_flag(
+              LOOM_ENCODING_AUXILIARY_KEY_SUM_CORRECTION) |
+          loom_encoding_auxiliary_key_flag(
+              LOOM_ENCODING_AUXILIARY_KEY_CODEBOOK) |
+          loom_encoding_auxiliary_key_flag(
+              LOOM_ENCODING_AUXILIARY_KEY_SPARSITY)));
 }
 
 TEST(VectorEncodingAuxiliaryKeysTest, RequiredKeysRejectUnsupportedScaleCount) {
@@ -182,20 +187,22 @@ TEST(VectorEncodingAuxiliaryKeysTest, RequiredKeysRejectUnsupportedScaleCount) {
   };
 
   uint16_t unsupported_scale_index = UINT16_MAX;
-  loom_vector_encoding_auxiliary_key_flags_t required_keys = 0;
-  EXPECT_FALSE(loom_vector_encoding_auxiliary_required_keys_from_schema(
+  loom_encoding_auxiliary_key_flags_t required_keys = 0;
+  EXPECT_FALSE(loom_encoding_auxiliary_required_keys_from_schema(
       schema, &required_keys, &unsupported_scale_index));
   EXPECT_EQ(unsupported_scale_index, 8);
   EXPECT_TRUE(iree_all_bits_set(
       required_keys,
-      LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SCALE |
-          LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SECONDARY_SCALE |
-          LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SCALE2 |
-          LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SCALE3 |
-          LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SCALE4 |
-          LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SCALE5 |
-          LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SCALE6 |
-          LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SCALE7));
+      loom_encoding_auxiliary_key_flag(LOOM_ENCODING_AUXILIARY_KEY_SCALE) |
+          loom_encoding_auxiliary_key_flag(
+              LOOM_ENCODING_AUXILIARY_KEY_SECONDARY_SCALE) |
+          loom_encoding_auxiliary_key_flag(LOOM_ENCODING_AUXILIARY_KEY_SCALE2) |
+          loom_encoding_auxiliary_key_flag(LOOM_ENCODING_AUXILIARY_KEY_SCALE3) |
+          loom_encoding_auxiliary_key_flag(LOOM_ENCODING_AUXILIARY_KEY_SCALE4) |
+          loom_encoding_auxiliary_key_flag(LOOM_ENCODING_AUXILIARY_KEY_SCALE5) |
+          loom_encoding_auxiliary_key_flag(LOOM_ENCODING_AUXILIARY_KEY_SCALE6) |
+          loom_encoding_auxiliary_key_flag(
+              LOOM_ENCODING_AUXILIARY_KEY_SCALE7)));
 }
 
 }  // namespace

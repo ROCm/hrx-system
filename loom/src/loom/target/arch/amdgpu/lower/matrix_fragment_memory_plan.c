@@ -1506,11 +1506,12 @@ static bool loom_amdgpu_fragment_memory_fp8_load_scale_source(
     return false;
   }
   if (!iree_any_bit_set(fragment_fact.auxiliary.present_keys,
-                        LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SCALE)) {
+                        loom_encoding_auxiliary_key_flag(
+                            LOOM_ENCODING_AUXILIARY_KEY_SCALE))) {
     return false;
   }
   const loom_value_id_t scale_source =
-      fragment_fact.auxiliary.values[LOOM_VECTOR_ENCODING_AUXILIARY_KEY_SCALE];
+      fragment_fact.auxiliary.values[LOOM_ENCODING_AUXILIARY_KEY_SCALE];
   *out_scale_source = scale_source;
   return true;
 }

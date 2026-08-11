@@ -8,11 +8,11 @@ kernel.def target(@target) @gfx942_scalar_extf_direct_f8e4m3_load_store() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64xf32, #dense>
-  %packed = view.load %input_view[%lane] : view<64xf8E4M3, #dense> -> f8E4M3
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf32>
+  %packed = view.load %input_view[%lane] : view<64xf8E4M3> -> f8E4M3
   %value = scalar.extf %packed : f8E4M3 to f32
-  view.store %value, %output_view[%lane] : f32, view<64xf32, #dense>
+  view.store %value, %output_view[%lane] : f32, view<64xf32>
   kernel.return
 }
 
@@ -78,11 +78,11 @@ kernel.def target(@target) @gfx942_scalar_extf_direct_f8e5m2_load_store() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64xf32, #dense>
-  %packed = view.load %input_view[%lane] : view<64xf8E5M2, #dense> -> f8E5M2
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf32>
+  %packed = view.load %input_view[%lane] : view<64xf8E5M2> -> f8E5M2
   %value = scalar.extf %packed : f8E5M2 to f32
-  view.store %value, %output_view[%lane] : f32, view<64xf32, #dense>
+  view.store %value, %output_view[%lane] : f32, view<64xf32>
   kernel.return
 }
 
@@ -145,11 +145,11 @@ kernel.def target(@target) @gfx950_scalar_extf_direct_f8e4m3_load_store() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64xf32, #dense>
-  %packed = view.load %input_view[%lane] : view<64xf8E4M3, #dense> -> f8E4M3
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf32>
+  %packed = view.load %input_view[%lane] : view<64xf8E4M3> -> f8E4M3
   %value = scalar.extf %packed : f8E4M3 to f32
-  view.store %value, %output_view[%lane] : f32, view<64xf32, #dense>
+  view.store %value, %output_view[%lane] : f32, view<64xf32>
   kernel.return
 }
 
@@ -177,11 +177,11 @@ kernel.def target(@target) @gfx950_scalar_extf_direct_f8e5m2_load_store() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64xf32, #dense>
-  %packed = view.load %input_view[%lane] : view<64xf8E5M2, #dense> -> f8E5M2
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf32>
+  %packed = view.load %input_view[%lane] : view<64xf8E5M2> -> f8E5M2
   %value = scalar.extf %packed : f8E5M2 to f32
-  view.store %value, %output_view[%lane] : f32, view<64xf32, #dense>
+  view.store %value, %output_view[%lane] : f32, view<64xf32>
   kernel.return
 }
 
@@ -209,11 +209,11 @@ kernel.def target(@target) @gfx1200_scalar_extf_direct_f8e4m3_load_store() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64xf32, #dense>
-  %packed = view.load %input_view[%lane] : view<64xf8E4M3, #dense> -> f8E4M3
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf32>
+  %packed = view.load %input_view[%lane] : view<64xf8E4M3> -> f8E4M3
   %value = scalar.extf %packed : f8E4M3 to f32
-  view.store %value, %output_view[%lane] : f32, view<64xf32, #dense>
+  view.store %value, %output_view[%lane] : f32, view<64xf32>
   kernel.return
 }
 
@@ -239,11 +239,11 @@ kernel.def target(@target) @gfx1200_scalar_extf_direct_f8e5m2_load_store() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64xf32, #dense>
-  %packed = view.load %input_view[%lane] : view<64xf8E5M2, #dense> -> f8E5M2
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf32>
+  %packed = view.load %input_view[%lane] : view<64xf8E5M2> -> f8E5M2
   %value = scalar.extf %packed : f8E5M2 to f32
-  view.store %value, %output_view[%lane] : f32, view<64xf32, #dense>
+  view.store %value, %output_view[%lane] : f32, view<64xf32>
   kernel.return
 }
 
@@ -269,11 +269,11 @@ kernel.def target(@target) @gfx1250_scalar_extf_direct_f8e4m3_load_store() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64xf32, #dense>
-  %packed = view.load %input_view[%lane] : view<64xf8E4M3, #dense> -> f8E4M3
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf32>
+  %packed = view.load %input_view[%lane] : view<64xf8E4M3> -> f8E4M3
   %value = scalar.extf %packed : f8E4M3 to f32
-  view.store %value, %output_view[%lane] : f32, view<64xf32, #dense>
+  view.store %value, %output_view[%lane] : f32, view<64xf32>
   kernel.return
 }
 
@@ -299,11 +299,11 @@ kernel.def target(@target) @gfx1250_scalar_extf_direct_f8e5m2_load_store() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64xf32, #dense>
-  %packed = view.load %input_view[%lane] : view<64xf8E5M2, #dense> -> f8E5M2
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf32>
+  %packed = view.load %input_view[%lane] : view<64xf8E5M2> -> f8E5M2
   %value = scalar.extf %packed : f8E5M2 to f32
-  view.store %value, %output_view[%lane] : f32, view<64xf32, #dense>
+  view.store %value, %output_view[%lane] : f32, view<64xf32>
   kernel.return
 }
 
@@ -329,11 +329,11 @@ kernel.def target(@target) @gfx942_vector_extf_direct_f8e4m3_load_store() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
   %value = vector.extf %packed : vector<4xf8E4M3> to vector<4xf32>
-  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32>
   kernel.return
 }
 
@@ -426,11 +426,11 @@ kernel.def target(@target) @gfx942_vector_extf_direct_f8e5m2_load_store() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
   %value = vector.extf %packed : vector<4xf8E5M2> to vector<4xf32>
-  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32>
   kernel.return
 }
 
@@ -534,11 +534,11 @@ kernel.def target(@target) @gfx950_vector_extf_direct_f8e4m3_load_store() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
   %value = vector.extf %packed : vector<4xf8E4M3> to vector<4xf32>
-  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32>
   kernel.return
 }
 
@@ -574,11 +574,11 @@ kernel.def target(@target) @gfx950_vector_extf_direct_f8e5m2_load_store() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
   %value = vector.extf %packed : vector<4xf8E5M2> to vector<4xf32>
-  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32>
   kernel.return
 }
 
@@ -614,11 +614,11 @@ kernel.def target(@target) @gfx1200_vector_extf_direct_f8e4m3_load_store() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
   %value = vector.extf %packed : vector<4xf8E4M3> to vector<4xf32>
-  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32>
   kernel.return
 }
 
@@ -652,11 +652,11 @@ kernel.def target(@target) @gfx1200_vector_extf_direct_f8e5m2_load_store() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
   %value = vector.extf %packed : vector<4xf8E5M2> to vector<4xf32>
-  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32>
   kernel.return
 }
 
@@ -690,11 +690,11 @@ kernel.def target(@target) @gfx1250_vector_extf_direct_f8e4m3_load_store() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
   %value = vector.extf %packed : vector<4xf8E4M3> to vector<4xf32>
-  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32>
   kernel.return
 }
 
@@ -728,11 +728,11 @@ kernel.def target(@target) @gfx1250_vector_extf_direct_f8e5m2_load_store() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
   %value = vector.extf %packed : vector<4xf8E5M2> to vector<4xf32>
-  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32>
   kernel.return
 }
 
@@ -766,11 +766,11 @@ kernel.def target(@target) @gfx942_vector_extf_direct_f8e4m3_to_bf16_load_store(
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
   %value = vector.extf %packed : vector<4xf8E4M3> to vector<4xbf16>
-  vector.store %value, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
   kernel.return
 }
 
@@ -859,11 +859,11 @@ kernel.def target(@target) @gfx942_vector_extf_direct_f8e5m2_to_bf16_load_store(
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
   %value = vector.extf %packed : vector<4xf8E5M2> to vector<4xbf16>
-  vector.store %value, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
   kernel.return
 }
 
@@ -963,11 +963,11 @@ kernel.def target(@target) @gfx950_vector_extf_direct_f8e4m3_to_bf16_load_store(
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
   %value = vector.extf %packed : vector<4xf8E4M3> to vector<4xbf16>
-  vector.store %value, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
   kernel.return
 }
 
@@ -1000,11 +1000,11 @@ kernel.def target(@target) @gfx950_vector_extf_direct_f8e5m2_to_bf16_load_store(
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
   %value = vector.extf %packed : vector<4xf8E5M2> to vector<4xbf16>
-  vector.store %value, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
   kernel.return
 }
 
@@ -1037,11 +1037,11 @@ kernel.def target(@target) @gfx950_vector_extf_direct_f8e4m3_to_f16_load_store()
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
   %value = vector.extf %packed : vector<4xf8E4M3> to vector<4xf16>
-  vector.store %value, %output_view[%lane, 0] : vector<4xf16>, view<64x4xf16, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xf16>, view<64x4xf16>
   kernel.return
 }
 
@@ -1074,12 +1074,12 @@ kernel.def target(@target) @gfx950_vector_extf_direct_f8e4m3_x3_to_f16_load_stor
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x3xf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x3xf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
   %payload = vector.slice %packed[0] : vector<4xf8E4M3> -> vector<3xf8E4M3>
   %value = vector.extf %payload : vector<3xf8E4M3> to vector<3xf16>
-  vector.store %value, %output_view[%lane, 0] : vector<3xf16>, view<64x3xf16, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<3xf16>, view<64x3xf16>
   kernel.return
 }
 
@@ -1114,11 +1114,11 @@ kernel.def target(@target) @gfx950_vector_extf_direct_f8e5m2_to_f16_load_store()
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
   %value = vector.extf %packed : vector<4xf8E5M2> to vector<4xf16>
-  vector.store %value, %output_view[%lane, 0] : vector<4xf16>, view<64x4xf16, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xf16>, view<64x4xf16>
   kernel.return
 }
 
@@ -1151,12 +1151,12 @@ kernel.def target(@target) @gfx950_vector_extf_direct_f8e5m2_x3_to_f16_load_stor
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x3xf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x3xf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
   %payload = vector.slice %packed[0] : vector<4xf8E5M2> -> vector<3xf8E5M2>
   %value = vector.extf %payload : vector<3xf8E5M2> to vector<3xf16>
-  vector.store %value, %output_view[%lane, 0] : vector<3xf16>, view<64x3xf16, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<3xf16>, view<64x3xf16>
   kernel.return
 }
 
@@ -1191,11 +1191,11 @@ kernel.def target(@target) @gfx1200_vector_extf_direct_f8e4m3_to_bf16_load_store
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
   %value = vector.extf %packed : vector<4xf8E4M3> to vector<4xbf16>
-  vector.store %value, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
   kernel.return
 }
 
@@ -1247,11 +1247,11 @@ kernel.def target(@target) @gfx1200_vector_extf_direct_f8e5m2_to_bf16_load_store
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
   %value = vector.extf %packed : vector<4xf8E5M2> to vector<4xbf16>
-  vector.store %value, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
   kernel.return
 }
 
@@ -1303,11 +1303,11 @@ kernel.def target(@target) @gfx1200_vector_extf_direct_f8e4m3_to_f16_load_store(
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
   %value = vector.extf %packed : vector<4xf8E4M3> to vector<4xf16>
-  vector.store %value, %output_view[%lane, 0] : vector<4xf16>, view<64x4xf16, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xf16>, view<64x4xf16>
   kernel.return
 }
 
@@ -1351,11 +1351,11 @@ kernel.def target(@target) @gfx1200_vector_extf_direct_f8e5m2_to_f16_load_store(
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
   %value = vector.extf %packed : vector<4xf8E5M2> to vector<4xf16>
-  vector.store %value, %output_view[%lane, 0] : vector<4xf16>, view<64x4xf16, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xf16>, view<64x4xf16>
   kernel.return
 }
 
@@ -1399,11 +1399,11 @@ kernel.def target(@target) @gfx1250_vector_extf_direct_f8e4m3_to_bf16_load_store
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
   %value = vector.extf %packed : vector<4xf8E4M3> to vector<4xbf16>
-  vector.store %value, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
   kernel.return
 }
 
@@ -1439,11 +1439,11 @@ kernel.def target(@target) @gfx1250_vector_extf_direct_f8e5m2_to_bf16_load_store
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
   %value = vector.extf %packed : vector<4xf8E5M2> to vector<4xbf16>
-  vector.store %value, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
   kernel.return
 }
 
@@ -1479,11 +1479,11 @@ kernel.def target(@target) @gfx1250_vector_extf_direct_f8e4m3_to_f16_load_store(
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
   %value = vector.extf %packed : vector<4xf8E4M3> to vector<4xf16>
-  vector.store %value, %output_view[%lane, 0] : vector<4xf16>, view<64x4xf16, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xf16>, view<64x4xf16>
   kernel.return
 }
 
@@ -1513,12 +1513,12 @@ kernel.def target(@target) @gfx1250_vector_extf_direct_f8e4m3_x3_to_f16_load_sto
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x3xf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x3xf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
   %payload = vector.slice %packed[0] : vector<4xf8E4M3> -> vector<3xf8E4M3>
   %value = vector.extf %payload : vector<3xf8E4M3> to vector<3xf16>
-  vector.store %value, %output_view[%lane, 0] : vector<3xf16>, view<64x3xf16, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<3xf16>, view<64x3xf16>
   kernel.return
 }
 
@@ -1546,12 +1546,12 @@ kernel.def target(@target) @gfx1250_vector_extf_sliced_f8e4m3_byte1_to_f16() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %input_view = buffer.view %input[%base] : buffer -> view<4xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<1xf16, #dense>
-  %packed = vector.load %input_view[0] : view<4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %input_view = buffer.view %input[%base] : buffer -> view<4xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xf16>
+  %packed = vector.load %input_view[0] : view<4xf8E4M3> -> vector<4xf8E4M3>
   %payload = vector.slice %packed[1] : vector<4xf8E4M3> -> vector<1xf8E4M3>
   %value = vector.extf %payload : vector<1xf8E4M3> to vector<1xf16>
-  vector.store %value, %output_view[0] : vector<1xf16>, view<1xf16, #dense>
+  vector.store %value, %output_view[0] : vector<1xf16>, view<1xf16>
   kernel.return
 }
 
@@ -1577,12 +1577,12 @@ kernel.def target(@target) @gfx1250_vector_extf_direct_f8e5m2_x3_to_f16_load_sto
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x3xf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x3xf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
   %payload = vector.slice %packed[0] : vector<4xf8E5M2> -> vector<3xf8E5M2>
   %value = vector.extf %payload : vector<3xf8E5M2> to vector<3xf16>
-  vector.store %value, %output_view[%lane, 0] : vector<3xf16>, view<64x3xf16, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<3xf16>, view<64x3xf16>
   kernel.return
 }
 
@@ -1610,12 +1610,12 @@ kernel.def target(@target) @gfx1250_vector_extf_sliced_f8e5m2_byte3_to_f16() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %input_view = buffer.view %input[%base] : buffer -> view<4xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<3xf16, #dense>
-  %packed = vector.load %input_view[0] : view<4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %input_view = buffer.view %input[%base] : buffer -> view<4xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<3xf16>
+  %packed = vector.load %input_view[0] : view<4xf8E5M2> -> vector<4xf8E5M2>
   %payload = vector.slice %packed[1] : vector<4xf8E5M2> -> vector<3xf8E5M2>
   %value = vector.extf %payload : vector<3xf8E5M2> to vector<3xf16>
-  vector.store %value, %output_view[0] : vector<3xf16>, view<3xf16, #dense>
+  vector.store %value, %output_view[0] : vector<3xf16>, view<3xf16>
   kernel.return
 }
 
@@ -1643,11 +1643,11 @@ kernel.def target(@target) @gfx1250_vector_extf_direct_f8e5m2_to_f16_load_store(
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
   %value = vector.extf %packed : vector<4xf8E5M2> to vector<4xf16>
-  vector.store %value, %output_view[%lane, 0] : vector<4xf16>, view<64x4xf16, #dense>
+  vector.store %value, %output_view[%lane, 0] : vector<4xf16>, view<64x4xf16>
   kernel.return
 }
 
@@ -1677,16 +1677,16 @@ kernel.def target(@target) @gfx942_vector_extf_scaled_f8e4m3_to_bf16_store() {
 } launch(%input: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
-  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
   %wide = vector.extf %packed : vector<4xf8E4M3> to vector<4xf32>
-  %row_scale = view.load %scale_view[%lane] : view<64xf32, #dense> -> f32
+  %row_scale = view.load %scale_view[%lane] : view<64xf32> -> f32
   %scale_vector = vector.splat %row_scale : vector<4xf32>
   %scaled = vector.mulf %wide, %scale_vector : vector<4xf32>
   %rounded = vector.fptrunc %scaled : vector<4xf32> to vector<4xbf16>
-  vector.store %rounded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16, #dense>
+  vector.store %rounded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
   kernel.return
 }
 
@@ -1817,16 +1817,16 @@ kernel.def target(@target) @gfx942_vector_extf_scaled_f8e5m2_to_bf16_store() {
 } launch(%input: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
-  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
   %wide = vector.extf %packed : vector<4xf8E5M2> to vector<4xf32>
-  %row_scale = view.load %scale_view[%lane] : view<64xf32, #dense> -> f32
+  %row_scale = view.load %scale_view[%lane] : view<64xf32> -> f32
   %scale_vector = vector.splat %row_scale : vector<4xf32>
   %scaled = vector.mulf %wide, %scale_vector : vector<4xf32>
   %rounded = vector.fptrunc %scaled : vector<4xf32> to vector<4xbf16>
-  vector.store %rounded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16, #dense>
+  vector.store %rounded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
   kernel.return
 }
 
@@ -1968,16 +1968,16 @@ kernel.def target(@target) @gfx950_vector_extf_scaled_f8e4m3_to_bf16_store() {
 } launch(%input: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
-  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
   %wide = vector.extf %packed : vector<4xf8E4M3> to vector<4xf32>
-  %row_scale = view.load %scale_view[%lane] : view<64xf32, #dense> -> f32
+  %row_scale = view.load %scale_view[%lane] : view<64xf32> -> f32
   %scale_vector = vector.splat %row_scale : vector<4xf32>
   %scaled = vector.mulf %wide, %scale_vector : vector<4xf32>
   %rounded = vector.fptrunc %scaled : vector<4xf32> to vector<4xbf16>
-  vector.store %rounded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16, #dense>
+  vector.store %rounded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
   kernel.return
 }
 
@@ -2012,16 +2012,16 @@ kernel.def target(@target) @gfx950_vector_extf_scaled_f8e5m2_to_bf16_store() {
 } launch(%input: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
-  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
   %wide = vector.extf %packed : vector<4xf8E5M2> to vector<4xf32>
-  %row_scale = view.load %scale_view[%lane] : view<64xf32, #dense> -> f32
+  %row_scale = view.load %scale_view[%lane] : view<64xf32> -> f32
   %scale_vector = vector.splat %row_scale : vector<4xf32>
   %scaled = vector.mulf %wide, %scale_vector : vector<4xf32>
   %rounded = vector.fptrunc %scaled : vector<4xf32> to vector<4xbf16>
-  vector.store %rounded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16, #dense>
+  vector.store %rounded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
   kernel.return
 }
 
@@ -2056,17 +2056,17 @@ kernel.def target(@target) @gfx950_vector_extf_scaled_f8e4m3_x3_to_bf16_store() 
 } launch(%input: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
-  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x3xbf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x3xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
   %payload = vector.slice %packed[0] : vector<4xf8E4M3> -> vector<3xf8E4M3>
   %wide = vector.extf %payload : vector<3xf8E4M3> to vector<3xf32>
-  %row_scale = view.load %scale_view[%lane] : view<64xf32, #dense> -> f32
+  %row_scale = view.load %scale_view[%lane] : view<64xf32> -> f32
   %scale_vector = vector.splat %row_scale : vector<3xf32>
   %scaled = vector.mulf %wide, %scale_vector : vector<3xf32>
   %rounded = vector.fptrunc %scaled : vector<3xf32> to vector<3xbf16>
-  vector.store %rounded, %output_view[%lane, 0] : vector<3xbf16>, view<64x3xbf16, #dense>
+  vector.store %rounded, %output_view[%lane, 0] : vector<3xbf16>, view<64x3xbf16>
   kernel.return
 }
 
@@ -2103,17 +2103,17 @@ kernel.def target(@target) @gfx950_vector_extf_scaled_f8e5m2_x3_to_bf16_store() 
 } launch(%input: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
-  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x3xbf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x3xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
   %payload = vector.slice %packed[0] : vector<4xf8E5M2> -> vector<3xf8E5M2>
   %wide = vector.extf %payload : vector<3xf8E5M2> to vector<3xf32>
-  %row_scale = view.load %scale_view[%lane] : view<64xf32, #dense> -> f32
+  %row_scale = view.load %scale_view[%lane] : view<64xf32> -> f32
   %scale_vector = vector.splat %row_scale : vector<3xf32>
   %scaled = vector.mulf %wide, %scale_vector : vector<3xf32>
   %rounded = vector.fptrunc %scaled : vector<3xf32> to vector<3xbf16>
-  vector.store %rounded, %output_view[%lane, 0] : vector<3xbf16>, view<64x3xbf16, #dense>
+  vector.store %rounded, %output_view[%lane, 0] : vector<3xbf16>, view<64x3xbf16>
   kernel.return
 }
 
@@ -2150,16 +2150,16 @@ kernel.def target(@target) @gfx1200_vector_extf_scaled_f8e4m3_to_bf16_store() {
 } launch(%input: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
-  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
   %wide = vector.extf %packed : vector<4xf8E4M3> to vector<4xf32>
-  %row_scale = view.load %scale_view[%lane] : view<64xf32, #dense> -> f32
+  %row_scale = view.load %scale_view[%lane] : view<64xf32> -> f32
   %scale_vector = vector.splat %row_scale : vector<4xf32>
   %scaled = vector.mulf %wide, %scale_vector : vector<4xf32>
   %rounded = vector.fptrunc %scaled : vector<4xf32> to vector<4xbf16>
-  vector.store %rounded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16, #dense>
+  vector.store %rounded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
   kernel.return
 }
 
@@ -2217,16 +2217,16 @@ kernel.def target(@target) @gfx1200_vector_extf_scaled_f8e5m2_to_bf16_store() {
 } launch(%input: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
-  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
   %wide = vector.extf %packed : vector<4xf8E5M2> to vector<4xf32>
-  %row_scale = view.load %scale_view[%lane] : view<64xf32, #dense> -> f32
+  %row_scale = view.load %scale_view[%lane] : view<64xf32> -> f32
   %scale_vector = vector.splat %row_scale : vector<4xf32>
   %scaled = vector.mulf %wide, %scale_vector : vector<4xf32>
   %rounded = vector.fptrunc %scaled : vector<4xf32> to vector<4xbf16>
-  vector.store %rounded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16, #dense>
+  vector.store %rounded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
   kernel.return
 }
 
@@ -2284,16 +2284,16 @@ kernel.def target(@target) @gfx1250_vector_extf_scaled_f8e4m3_to_bf16_store() {
 } launch(%input: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
-  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
   %wide = vector.extf %packed : vector<4xf8E4M3> to vector<4xf32>
-  %row_scale = view.load %scale_view[%lane] : view<64xf32, #dense> -> f32
+  %row_scale = view.load %scale_view[%lane] : view<64xf32> -> f32
   %scale_vector = vector.splat %row_scale : vector<4xf32>
   %scaled = vector.mulf %wide, %scale_vector : vector<4xf32>
   %rounded = vector.fptrunc %scaled : vector<4xf32> to vector<4xbf16>
-  vector.store %rounded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16, #dense>
+  vector.store %rounded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
   kernel.return
 }
 
@@ -2335,16 +2335,16 @@ kernel.def target(@target) @gfx1250_vector_extf_scaled_f8e5m2_to_bf16_store() {
 } launch(%input: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
-  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16, #dense>
-  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
   %wide = vector.extf %packed : vector<4xf8E5M2> to vector<4xf32>
-  %row_scale = view.load %scale_view[%lane] : view<64xf32, #dense> -> f32
+  %row_scale = view.load %scale_view[%lane] : view<64xf32> -> f32
   %scale_vector = vector.splat %row_scale : vector<4xf32>
   %scaled = vector.mulf %wide, %scale_vector : vector<4xf32>
   %rounded = vector.fptrunc %scaled : vector<4xf32> to vector<4xbf16>
-  vector.store %rounded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16, #dense>
+  vector.store %rounded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
   kernel.return
 }
 
@@ -2383,7 +2383,7 @@ func.def target(@target) @gfx942_vector_decode_f8e4m3fnuz_to_f32(%input: buffer,
   %layout = encoding.layout.dense : encoding<layout>
   %input_view = buffer.view %input[%base] : buffer -> view<4xf8E4M3, %layout>
   %payload = vector.load %input_view[0] : view<4xf8E4M3, %layout> -> vector<4xf8E4M3>
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3fnuz, payload_elements=4, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fnuz<payload_elements=4> : encoding<schema>
   %decoded = vector.decode %payload using %schema : vector<4xf8E4M3>, encoding<schema> -> vector<4xf32>
   func.return %decoded : vector<4xf32>
 }
@@ -2419,7 +2419,7 @@ func.def target(@target) @gfx942_vector_decode_f8e5m2fnuz_to_f32(%input: buffer,
   %layout = encoding.layout.dense : encoding<layout>
   %input_view = buffer.view %input[%base] : buffer -> view<4xf8E5M2, %layout>
   %payload = vector.load %input_view[0] : view<4xf8E5M2, %layout> -> vector<4xf8E5M2>
-  %schema = encoding.define #matrix_operand<element_format=f8e5m2fnuz, payload_elements=4, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %schema = encoding.define #encoding.f8e5m2fnuz<payload_elements=4> : encoding<schema>
   %decoded = vector.decode %payload using %schema : vector<4xf8E5M2>, encoding<schema> -> vector<4xf32>
   func.return %decoded : vector<4xf32>
 }
@@ -2455,7 +2455,7 @@ func.def target(@target) @gfx950_vector_decode_f8e4m3fnuz_to_f32(%input: buffer,
   %layout = encoding.layout.dense : encoding<layout>
   %input_view = buffer.view %input[%base] : buffer -> view<4xf8E4M3, %layout>
   %payload = vector.load %input_view[0] : view<4xf8E4M3, %layout> -> vector<4xf8E4M3>
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3fnuz, payload_elements=4, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fnuz<payload_elements=4> : encoding<schema>
   %decoded = vector.decode %payload using %schema : vector<4xf8E4M3>, encoding<schema> -> vector<4xf32>
   func.return %decoded : vector<4xf32>
 }
@@ -2552,7 +2552,7 @@ func.def target(@target) @gfx950_vector_decode_f8e5m2fnuz_to_f32(%input: buffer,
   %layout = encoding.layout.dense : encoding<layout>
   %input_view = buffer.view %input[%base] : buffer -> view<4xf8E5M2, %layout>
   %payload = vector.load %input_view[0] : view<4xf8E5M2, %layout> -> vector<4xf8E5M2>
-  %schema = encoding.define #matrix_operand<element_format=f8e5m2fnuz, payload_elements=4, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %schema = encoding.define #encoding.f8e5m2fnuz<payload_elements=4> : encoding<schema>
   %decoded = vector.decode %payload using %schema : vector<4xf8E5M2>, encoding<schema> -> vector<4xf32>
   func.return %decoded : vector<4xf32>
 }
@@ -2654,7 +2654,7 @@ func.def target(@target) @gfx1200_vector_decode_f8e4m3fnuz_to_f32(%input: buffer
   %layout = encoding.layout.dense : encoding<layout>
   %input_view = buffer.view %input[%base] : buffer -> view<4xf8E4M3, %layout>
   %payload = vector.load %input_view[0] : view<4xf8E4M3, %layout> -> vector<4xf8E4M3>
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3fnuz, payload_elements=4, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fnuz<payload_elements=4> : encoding<schema>
   %decoded = vector.decode %payload using %schema : vector<4xf8E4M3>, encoding<schema> -> vector<4xf32>
   func.return %decoded : vector<4xf32>
 }
@@ -2750,11 +2750,11 @@ kernel.def target(@target) @gfx12_5_scalar_extf_f8e4m3_to_f16() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E4M3, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64xf16, #dense>
-  %packed = view.load %input_view[%lane] : view<64xf8E4M3, #dense> -> f8E4M3
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf16>
+  %packed = view.load %input_view[%lane] : view<64xf8E4M3> -> f8E4M3
   %value = scalar.extf %packed : f8E4M3 to f16
-  view.store %value, %output_view[%lane] : f16, view<64xf16, #dense>
+  view.store %value, %output_view[%lane] : f16, view<64xf16>
   kernel.return
 }
 
@@ -2781,11 +2781,11 @@ kernel.def target(@target) @gfx12_5_scalar_extf_f8e5m2_to_f16() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E5M2, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<64xf16, #dense>
-  %packed = view.load %input_view[%lane] : view<64xf8E5M2, #dense> -> f8E5M2
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf16>
+  %packed = view.load %input_view[%lane] : view<64xf8E5M2> -> f8E5M2
   %value = scalar.extf %packed : f8E5M2 to f16
-  view.store %value, %output_view[%lane] : f16, view<64xf16, #dense>
+  view.store %value, %output_view[%lane] : f16, view<64xf16>
   kernel.return
 }
 
@@ -2809,7 +2809,7 @@ func.def target(@target) @gfx1200_vector_decode_f8e5m2fnuz_to_f32(%input: buffer
   %layout = encoding.layout.dense : encoding<layout>
   %input_view = buffer.view %input[%base] : buffer -> view<4xf8E5M2, %layout>
   %payload = vector.load %input_view[0] : view<4xf8E5M2, %layout> -> vector<4xf8E5M2>
-  %schema = encoding.define #matrix_operand<element_format=f8e5m2fnuz, payload_elements=4, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %schema = encoding.define #encoding.f8e5m2fnuz<payload_elements=4> : encoding<schema>
   %decoded = vector.decode %payload using %schema : vector<4xf8E5M2>, encoding<schema> -> vector<4xf32>
   func.return %decoded : vector<4xf32>
 }

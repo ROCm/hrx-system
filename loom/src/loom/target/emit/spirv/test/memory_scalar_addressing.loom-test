@@ -8,10 +8,10 @@ func.def target(@target) @scalar_static_rank2_i32(%input: buffer, %output: buffe
   %output_base = index.constant 12 : offset
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%input_base] : buffer -> view<2x4xi32, #dense>
-  %output_view = buffer.view %output_aligned[%output_base] : buffer -> view<2x4xi32, #dense>
-  %loaded = view.load %input_view[1, 2] : view<2x4xi32, #dense> -> i32
-  view.store %loaded, %output_view[0, 3] : i32, view<2x4xi32, #dense>
+  %input_view = buffer.view %input_aligned[%input_base] : buffer -> view<2x4xi32>
+  %output_view = buffer.view %output_aligned[%output_base] : buffer -> view<2x4xi32>
+  %loaded = view.load %input_view[1, 2] : view<2x4xi32> -> i32
+  view.store %loaded, %output_view[0, 3] : i32, view<2x4xi32>
   func.return %loaded : i32
 }
 
@@ -82,10 +82,10 @@ func.def target(@target) @scalar_dynamic_view_base_i32(%input: buffer, %output: 
   %output_base = index.constant 0 : offset
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<4xi32, #dense>
-  %output_view = buffer.view %output_aligned[%output_base] : buffer -> view<1xi32, #dense>
-  %loaded = view.load %input_view[2] : view<4xi32, #dense> -> i32
-  view.store %loaded, %output_view[0] : i32, view<1xi32, #dense>
+  %input_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<4xi32>
+  %output_view = buffer.view %output_aligned[%output_base] : buffer -> view<1xi32>
+  %loaded = view.load %input_view[2] : view<4xi32> -> i32
+  view.store %loaded, %output_view[0] : i32, view<1xi32>
   func.return %loaded : i32
 }
 
@@ -164,10 +164,10 @@ func.def target(@target) @scalar_materialized_view_base_suffix_i32(%input: buffe
   %biased_base = index.add %base_aligned, %bias : offset
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%biased_base] : buffer -> view<8xi32, #dense>
-  %output_view = buffer.view %output_aligned[%biased_base] : buffer -> view<8xi32, #dense>
-  %loaded = view.load %input_view[2] : view<8xi32, #dense> -> i32
-  view.store %loaded, %output_view[3] : i32, view<8xi32, #dense>
+  %input_view = buffer.view %input_aligned[%biased_base] : buffer -> view<8xi32>
+  %output_view = buffer.view %output_aligned[%biased_base] : buffer -> view<8xi32>
+  %loaded = view.load %input_view[2] : view<8xi32> -> i32
+  view.store %loaded, %output_view[3] : i32, view<8xi32>
   func.return %loaded : i32
 }
 
@@ -250,10 +250,10 @@ func.def target(@target) @scalar_dynamic_index_i32(%input: buffer, %output: buff
   %element_bounded = index.assume %element [range(%element, 0, 7)] : index
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%buffer_base] : buffer -> view<8xi32, #dense>
-  %output_view = buffer.view %output_aligned[%buffer_base] : buffer -> view<8xi32, #dense>
-  %loaded = view.load %input_view[%element_bounded] : view<8xi32, #dense> -> i32
-  view.store %loaded, %output_view[%element_bounded] : i32, view<8xi32, #dense>
+  %input_view = buffer.view %input_aligned[%buffer_base] : buffer -> view<8xi32>
+  %output_view = buffer.view %output_aligned[%buffer_base] : buffer -> view<8xi32>
+  %loaded = view.load %input_view[%element_bounded] : view<8xi32> -> i32
+  view.store %loaded, %output_view[%element_bounded] : i32, view<8xi32>
   func.return %loaded : i32
 }
 
@@ -334,10 +334,10 @@ func.def target(@target) @scalar_mixed_rank2_i32(%input: buffer, %output: buffer
   %column_bounded = index.assume %column [range(%column, 0, 7)] : index
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<4x8xi32, #dense>
-  %output_view = buffer.view %output_aligned[%base_aligned] : buffer -> view<4x8xi32, #dense>
-  %loaded = view.load %input_view[%row_bounded, %column_bounded] : view<4x8xi32, #dense> -> i32
-  view.store %loaded, %output_view[%row_bounded, %column_bounded] : i32, view<4x8xi32, #dense>
+  %input_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<4x8xi32>
+  %output_view = buffer.view %output_aligned[%base_aligned] : buffer -> view<4x8xi32>
+  %loaded = view.load %input_view[%row_bounded, %column_bounded] : view<4x8xi32> -> i32
+  view.store %loaded, %output_view[%row_bounded, %column_bounded] : i32, view<4x8xi32>
   func.return %loaded : i32
 }
 
@@ -437,10 +437,10 @@ func.def target(@target) @scalar_dynamic_stride_i32(%input: buffer, %output: buf
   %column_bounded = index.assume %column [range(%column, 0, 7), lt(%column, %columns_bounded)] : index
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%buffer_base] : buffer -> view<4x[%columns_bounded]xi32, #dense>
-  %output_view = buffer.view %output_aligned[%buffer_base] : buffer -> view<4x[%columns_bounded]xi32, #dense>
-  %loaded = view.load %input_view[%row_bounded, %column_bounded] : view<4x[%columns_bounded]xi32, #dense> -> i32
-  view.store %loaded, %output_view[%row_bounded, %column_bounded] : i32, view<4x[%columns_bounded]xi32, #dense>
+  %input_view = buffer.view %input_aligned[%buffer_base] : buffer -> view<4x[%columns_bounded]xi32>
+  %output_view = buffer.view %output_aligned[%buffer_base] : buffer -> view<4x[%columns_bounded]xi32>
+  %loaded = view.load %input_view[%row_bounded, %column_bounded] : view<4x[%columns_bounded]xi32> -> i32
+  view.store %loaded, %output_view[%row_bounded, %column_bounded] : i32, view<4x[%columns_bounded]xi32>
   func.return %loaded : i32
 }
 
@@ -539,14 +539,14 @@ func.def target(@target) @scalar_subview_dynamic_index_i32(%input: buffer, %outp
   %element_bounded = index.assume %element [range(%element, 0, 3)] : index
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<8xi32, #dense>
-  %output_view = buffer.view %output_aligned[%base_aligned] : buffer -> view<8xi32, #dense>
-  %input_subview = view.subview %input_view[1] : view<8xi32, #dense> -> view<4xi32, #dense>
-  %output_subview = view.subview %output_view[1] : view<8xi32, #dense> -> view<4xi32, #dense>
-  %input_refined = view.refine %input_subview : view<4xi32, #dense> -> view<4xi32, #dense>
-  %output_refined = view.refine %output_subview : view<4xi32, #dense> -> view<4xi32, #dense>
-  %loaded = view.load %input_refined[%element_bounded] : view<4xi32, #dense> -> i32
-  view.store %loaded, %output_refined[%element_bounded] : i32, view<4xi32, #dense>
+  %input_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<8xi32>
+  %output_view = buffer.view %output_aligned[%base_aligned] : buffer -> view<8xi32>
+  %input_subview = view.subview %input_view[1] : view<8xi32> -> view<4xi32>
+  %output_subview = view.subview %output_view[1] : view<8xi32> -> view<4xi32>
+  %input_refined = view.refine %input_subview : view<4xi32> -> view<4xi32>
+  %output_refined = view.refine %output_subview : view<4xi32> -> view<4xi32>
+  %loaded = view.load %input_refined[%element_bounded] : view<4xi32> -> i32
+  view.store %loaded, %output_refined[%element_bounded] : i32, view<4xi32>
   func.return %loaded : i32
 }
 

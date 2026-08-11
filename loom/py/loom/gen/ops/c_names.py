@@ -63,7 +63,8 @@ def c_parameterized_attr_enum_name(attr_def: ParameterizedAttrDef) -> str:
 def c_encoding_family_prefix(family: EncodingFamilyDef) -> str:
     """Returns the C function/variable prefix for an encoding family."""
 
-    return "loom_encoding_" + family.name.replace(".", "_")
+    local_name = family.name.removeprefix(f"{family.group.name}.")
+    return "loom_encoding_" + local_name.replace(".", "_")
 
 
 def validate_encoding_family_c_names(
@@ -72,6 +73,7 @@ def validate_encoding_family_c_names(
     """Rejects duplicate or colliding generated encoding-family names."""
 
     families_by_prefix: dict[str, EncodingFamilyDef] = {}
+    public_names: dict[str, str] = {}
     for family in families:
         prefix = c_encoding_family_prefix(family)
         previous_family = families_by_prefix.get(prefix)
@@ -80,6 +82,11 @@ def validate_encoding_family_c_names(
                 raise ValueError(f"duplicate encoding family '{family.name}'")
             raise ValueError(f"encoding families '{previous_family.name}' and '{family.name}' both generate C prefix '{prefix}'")
         families_by_prefix[prefix] = family
+        for public_name in (family.name, *(alias.name for alias in family.aliases)):
+            previous_owner = public_names.get(public_name)
+            if previous_owner is not None:
+                raise ValueError(f"encoding name '{public_name}' is declared by both '{previous_owner}' and '{family.name}'")
+            public_names[public_name] = family.name
 
 
 def c_encoding_family_descriptor_name(family: EncodingFamilyDef) -> str:

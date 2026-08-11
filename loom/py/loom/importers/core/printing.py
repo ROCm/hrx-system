@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import loom
+from loom.dialect.encoding import ALL_ENCODING_FAMILIES
 from loom.dsl import Op
 from loom.format.text.printer import Printer
 from loom.ir import Module
@@ -25,4 +26,5 @@ def print_loom_module(
     printer = Printer(print_locations=print_locations)
     printer.register_ops(tuple(ops) if ops is not None else loom.default_ops())
     printer.register_types(loom.default_types())
+    printer.register_encoding_families(ALL_ENCODING_FAMILIES)
     return printer.print_module(module)

@@ -59,7 +59,7 @@ def test_decodes_fnuz_tvm_mfma_operand_as_matrix_schema() -> None:
         schema_value = calls._tvm_mfma_matrix_schema(context, operand_format)
 
     expected_schema = EncodingInstance(
-        name="matrix_operand",
+        name="encoding.operand",
         params=(
             ("element_format", "f8e4m3fnuz"),
             ("payload_elements", 8),

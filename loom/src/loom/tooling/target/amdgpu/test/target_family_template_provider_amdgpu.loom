@@ -18,7 +18,7 @@ kernel.def export("target_family_template_provider") @target_family_template_pro
   %value = scalar.constant 42 : i32
   %selected = func.apply<demo.target_family>(%value) : (i32) -> (i32)
   %global = buffer.assume.memory_space<global> %output : buffer
-  %view = buffer.view %global[%base] : buffer -> view<1xi32, #dense>
-  view.store %selected, %view[%output_index] : i32, view<1xi32, #dense>
+  %view = buffer.view %global[%base] : buffer -> view<1xi32>
+  view.store %selected, %view[%output_index] : i32, view<1xi32>
   kernel.return
 }

@@ -20,21 +20,21 @@ kernel.def target(@target) @f16_lhs_packed_e2m1_rhs_grouped_scale_wmma() {
   %k_base = index.mul %k_half, %packed_k_width : index
 
   %payload_layout = encoding.layout.dense : encoding<layout>
-  %payload_schema = encoding.define #matrix_operand<element_format=f4e2m1, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2> : encoding<schema>
-  %payload_storage = encoding.define #physical_storage {layout = %payload_layout : encoding<layout>, schema = %payload_schema : encoding<schema>} : encoding<storage>
+  %payload_schema = encoding.define #encoding.f4e2m1<payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2> : encoding<schema>
+  %payload_storage = encoding.define #encoding.storage {layout = %payload_layout : encoding<layout>, schema = %payload_schema : encoding<schema>} : encoding<storage>
   %scale_layout = encoding.layout.strided [1, 1] : encoding<layout>
-  %scale_schema = encoding.define #fp8_e4m3fn : encoding<schema>
-  %scale_storage = encoding.define #physical_storage {layout = %scale_layout : encoding<layout>, schema = %scale_schema : encoding<schema>} : encoding<storage>
-  %decode_schema = encoding.define #matrix_operand<affine=scale_only, element_format=f4e2m1, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2, scale_format=f8e4m3fn, scale_group_elements=2, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %scale_schema = encoding.define #encoding.f8e4m3fn : encoding<schema>
+  %scale_storage = encoding.define #encoding.storage {layout = %scale_layout : encoding<layout>, schema = %scale_schema : encoding<schema>} : encoding<storage>
+  %decode_schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2, scale_format=f8e4m3fn, scale_group_elements=2, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
 
   %lhs_noalias, %payload_noalias, %scale_noalias, %global_scale_noalias, %out_noalias = buffer.assume.noalias %lhs_buffer, %payload_buffer, %scale_buffer, %global_scale_buffer, %out_buffer : buffer, buffer, buffer, buffer, buffer
-  %lhs_view = buffer.view %lhs_noalias[%base] : buffer -> view<16x16xf16, #dense>
+  %lhs_view = buffer.view %lhs_noalias[%base] : buffer -> view<16x16xf16>
   %payload_view = buffer.view %payload_noalias[%base] : buffer -> view<128xi8, %payload_storage>
   %scale_view = buffer.view %scale_noalias[%base] : buffer -> view<1x16xf8E4M3, %scale_storage>
-  %global_scale_view = buffer.view %global_scale_noalias[%base] : buffer -> view<2xf32, #dense>
-  %out_view = buffer.view %out_noalias[%base] : buffer -> view<16x16xf32, #dense>
+  %global_scale_view = buffer.view %global_scale_noalias[%base] : buffer -> view<2xf32>
+  %out_view = buffer.view %out_noalias[%base] : buffer -> view<16x16xf32>
 
-  %lhs = vector.fragment.load<lhs> %lhs_view[%c0, %c0] shape [%tile_extent, %tile_extent] : view<16x16xf16, #dense> -> vector<8xf16>
+  %lhs = vector.fragment.load<lhs> %lhs_view[%c0, %c0] shape [%tile_extent, %tile_extent] : view<16x16xf16> -> vector<8xf16>
   // compressed-tensors stores the two N-adjacent E2M1 values in each
   // little-endian byte of its dense [K, N/2] payload. Each lane gathers one
   // byte from eight K rows, decodes both N columns, then selects its parity.
@@ -55,12 +55,12 @@ kernel.def target(@target) @f16_lhs_packed_e2m1_rhs_grouped_scale_wmma() {
   %init = vector.fragment<init> %zero_accumulator shape [%tile_extent, %tile_extent] : vector<8xf32>
   %local_result = vector.mma %lhs, %rhs, %init : vector<8xf16>, vector<8xf16>, vector<8xf32>
 
-  %input_global_scale = view.load %global_scale_view[%c0] : view<2xf32, #dense> -> f32
-  %weight_global_scale = view.load %global_scale_view[%c1] : view<2xf32, #dense> -> f32
+  %input_global_scale = view.load %global_scale_view[%c0] : view<2xf32> -> f32
+  %weight_global_scale = view.load %global_scale_view[%c1] : view<2xf32> -> f32
   %global_scale = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %input_global_scale, %weight_global_scale : f32
   %global_scale_vector = vector.splat %global_scale : vector<8xf32>
   %result = vector.mulf<reassoc|nnan|ninf|nsz|contract> %local_result, %global_scale_vector : vector<8xf32>
-  vector.fragment.store<result> %result, %out_view[%c0, %c0] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %result, %out_view[%c0, %c0] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<16x16xf32>
   kernel.return
 }
 

@@ -11,7 +11,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/cache.h"
-#include "loom/ops/encoding/matrix_operand.h"
+#include "loom/ops/encoding/operand.h"
 #include "loom/ops/encoding/storage.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/vector/ops.h"
@@ -381,12 +381,12 @@ static uint32_t loom_amdgpu_memory_report_dynamic_stride_bytes(
 }
 
 static iree_string_view_t loom_amdgpu_memory_report_storage_name(
-    loom_encoding_matrix_operand_parameter_t parameter, uint64_t value,
+    loom_encoding_operand_parameter_t parameter, uint64_t value,
     uint64_t omitted_value) {
   if (value == omitted_value) {
     return iree_string_view_empty();
   }
-  return loom_encoding_matrix_operand_fact_name(parameter, value);
+  return loom_encoding_operand_fact_name(parameter, value);
 }
 
 static void loom_amdgpu_memory_report_row_set_storage_schema(
@@ -399,31 +399,31 @@ static void loom_amdgpu_memory_report_row_set_storage_schema(
   const loom_value_fact_encoded_operand_schema_t encoded =
       schema->encoded_operand;
   row->storage_element_format = loom_amdgpu_memory_report_storage_name(
-      LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_ELEMENT_FORMAT,
-      encoded.element_format, LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
+      LOOM_ENCODING_OPERAND_PARAMETER_ELEMENT_FORMAT, encoded.element_format,
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
   row->storage_scale_format = loom_amdgpu_memory_report_storage_name(
-      LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SCALE_FORMAT, encoded.scale_format,
+      LOOM_ENCODING_OPERAND_PARAMETER_SCALE_FORMAT, encoded.scale_format,
       LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
   row->storage_secondary_scale_format = loom_amdgpu_memory_report_storage_name(
-      LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SECONDARY_SCALE_FORMAT,
+      LOOM_ENCODING_OPERAND_PARAMETER_SECONDARY_SCALE_FORMAT,
       encoded.secondary_scale_format, LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
   row->storage_payload_packing = loom_amdgpu_memory_report_storage_name(
-      LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_PAYLOAD_PACKING,
-      encoded.payload_packing, LOOM_VALUE_FACT_PAYLOAD_PACKING_UNKNOWN);
+      LOOM_ENCODING_OPERAND_PARAMETER_PAYLOAD_PACKING, encoded.payload_packing,
+      LOOM_VALUE_FACT_PAYLOAD_PACKING_UNKNOWN);
   row->storage_scale_topology = loom_amdgpu_memory_report_storage_name(
-      LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SCALE_TOPOLOGY,
-      encoded.scale_topology, LOOM_VALUE_FACT_SCALE_TOPOLOGY_NONE);
+      LOOM_ENCODING_OPERAND_PARAMETER_SCALE_TOPOLOGY, encoded.scale_topology,
+      LOOM_VALUE_FACT_SCALE_TOPOLOGY_NONE);
   row->storage_affine_policy = loom_amdgpu_memory_report_storage_name(
-      LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_AFFINE, encoded.affine_policy,
+      LOOM_ENCODING_OPERAND_PARAMETER_AFFINE, encoded.affine_policy,
       LOOM_VALUE_FACT_AFFINE_POLICY_NONE);
   row->storage_rounding_policy = loom_amdgpu_memory_report_storage_name(
-      LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_ROUNDING, encoded.rounding_policy,
+      LOOM_ENCODING_OPERAND_PARAMETER_ROUNDING, encoded.rounding_policy,
       LOOM_VALUE_FACT_ROUNDING_POLICY_NONE);
   row->storage_codebook_policy = loom_amdgpu_memory_report_storage_name(
-      LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_CODEBOOK, encoded.codebook_policy,
+      LOOM_ENCODING_OPERAND_PARAMETER_CODEBOOK, encoded.codebook_policy,
       LOOM_VALUE_FACT_CODEBOOK_POLICY_NONE);
   row->storage_sparsity_policy = loom_amdgpu_memory_report_storage_name(
-      LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_SPARSITY, encoded.sparsity_policy,
+      LOOM_ENCODING_OPERAND_PARAMETER_SPARSITY, encoded.sparsity_policy,
       LOOM_VALUE_FACT_SPARSITY_POLICY_NONE);
 }
 
@@ -451,7 +451,7 @@ void loom_amdgpu_memory_report_row_populate_storage_schema(
     const loom_value_fact_numeric_format_flags_t element_format =
         loom_numeric_format_from_scalar_type(loom_type_element_type(view_type));
     row->storage_element_format = loom_amdgpu_memory_report_storage_name(
-        LOOM_ENCODING_MATRIX_OPERAND_PARAMETER_ELEMENT_FORMAT, element_format,
+        LOOM_ENCODING_OPERAND_PARAMETER_ELEMENT_FORMAT, element_format,
         LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
   }
 }

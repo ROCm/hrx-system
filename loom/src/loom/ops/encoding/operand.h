@@ -4,10 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Matrix-operand encoding fact conversion.
+// Encoded-operand fact conversion.
 
-#ifndef LOOM_OPS_ENCODING_MATRIX_OPERAND_H_
-#define LOOM_OPS_ENCODING_MATRIX_OPERAND_H_
+#ifndef LOOM_OPS_ENCODING_OPERAND_H_
+#define LOOM_OPS_ENCODING_OPERAND_H_
 
 #include "iree/base/api.h"
 #include "loom/ops/encoding/ops.h"
@@ -78,14 +78,14 @@ loom_encoding_sparsity_policy_fact(loom_encoding_sparsity_policy_t value) {
   return (uint32_t)loom_encoding_one_hot_enum_fact((uint8_t)value);
 }
 
-// Returns the authored enum keyword for an exact matrix-operand parameter fact
+// Returns the authored enum keyword for an exact encoded-operand parameter fact
 // value, or an empty string when the fact cannot be represented by one enum
 // case. This is a cold reporting path; compilation consumes numeric facts.
-iree_string_view_t loom_encoding_matrix_operand_fact_name(
-    loom_encoding_matrix_operand_parameter_t parameter, uint64_t value);
+iree_string_view_t loom_encoding_operand_fact_name(
+    loom_encoding_operand_parameter_t parameter, uint64_t value);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif  // LOOM_OPS_ENCODING_MATRIX_OPERAND_H_
+#endif  // LOOM_OPS_ENCODING_OPERAND_H_

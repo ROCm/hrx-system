@@ -152,14 +152,14 @@ func.def target(@target_scalar_payloads) @spirv_scalar_float_constants(%f16_outp
   %bf16 = scalar.constant 1.5 : bf16
   %f32 = scalar.constant 3.25 : f32
   %f64 = scalar.constant -0.125 : f64
-  %f16_view = buffer.view %f16_output_aligned[%output_base] : buffer -> view<1xf16, #dense>
-  %bf16_view = buffer.view %bf16_output_aligned[%output_base] : buffer -> view<1xbf16, #dense>
-  %f32_view = buffer.view %f32_output_aligned[%output_base] : buffer -> view<1xf32, #dense>
-  %f64_view = buffer.view %f64_output_aligned[%output_base] : buffer -> view<1xf64, #dense>
-  view.store %f16, %f16_view[0] : f16, view<1xf16, #dense>
-  view.store %bf16, %bf16_view[0] : bf16, view<1xbf16, #dense>
-  view.store %f32, %f32_view[0] : f32, view<1xf32, #dense>
-  view.store %f64, %f64_view[0] : f64, view<1xf64, #dense>
+  %f16_view = buffer.view %f16_output_aligned[%output_base] : buffer -> view<1xf16>
+  %bf16_view = buffer.view %bf16_output_aligned[%output_base] : buffer -> view<1xbf16>
+  %f32_view = buffer.view %f32_output_aligned[%output_base] : buffer -> view<1xf32>
+  %f64_view = buffer.view %f64_output_aligned[%output_base] : buffer -> view<1xf64>
+  view.store %f16, %f16_view[0] : f16, view<1xf16>
+  view.store %bf16, %bf16_view[0] : bf16, view<1xbf16>
+  view.store %f32, %f32_view[0] : f32, view<1xf32>
+  view.store %f64, %f64_view[0] : f64, view<1xf64>
   func.return
 }
 
@@ -195,8 +195,8 @@ kernel.def target(@hal_target_scalar_payloads) @spirv_hal_direct_scalar_payload_
 } launch(%i8: i8, %output: buffer, %byte_offset: offset) {
   %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 1)] : offset
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 1} : buffer
-  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xi8, #dense>
-  view.store %i8, %output_view[0] : i8, view<1xi8, #dense>
+  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xi8>
+  view.store %i8, %output_view[0] : i8, view<1xi8>
   kernel.return
 }
 
@@ -257,8 +257,8 @@ func.def target(@target) @spirv_offset_addressing(%base: buffer, %row: offset) -
   %row_aligned = index.assume %row [mul(%row, 4)] : offset
   %base_aligned = buffer.assume.alignment %base {minimum_alignment = 4} : buffer
   %byte_offset = index.add %row_aligned, %column : offset
-  %view = buffer.view %base_aligned[%byte_offset] : buffer -> view<1xi32, #dense>
-  %loaded = view.load %view[0] : view<1xi32, #dense> -> i32
+  %view = buffer.view %base_aligned[%byte_offset] : buffer -> view<1xi32>
+  %loaded = view.load %view[0] : view<1xi32> -> i32
   func.return %loaded : i32
 }
 
@@ -293,10 +293,10 @@ kernel.def target(@hal_target) @spirv_dynamic_builtin_storage_buffer_i32() {
   %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 4)] : offset
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xi32, #dense>
-  %loaded = view.load %input_view[0] : view<1xi32, #dense> -> i32
-  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xi32, #dense>
-  view.store %loaded, %output_view[0] : i32, view<1xi32, #dense>
+  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xi32>
+  %loaded = view.load %input_view[0] : view<1xi32> -> i32
+  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xi32>
+  view.store %loaded, %output_view[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -328,11 +328,11 @@ func.def target(@target) @spirv_storage_buffer_i32_roundtrip(%input: buffer, %ou
   %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 4)] : offset
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xi32, #dense>
-  %loaded = view.load %input_view[0] : view<1xi32, #dense> -> i32
+  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xi32>
+  %loaded = view.load %input_view[0] : view<1xi32> -> i32
   %incremented = scalar.addi %loaded, %loaded : i32
-  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xi32, #dense>
-  view.store %incremented, %output_view[0] : i32, view<1xi32, #dense>
+  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xi32>
+  view.store %incremented, %output_view[0] : i32, view<1xi32>
   func.return %loaded : i32
 }
 
@@ -357,11 +357,11 @@ kernel.def target(@hal_target) @spirv_hal_resource_storage_buffer_i32() {
   %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 4)] : offset
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xi32, #dense>
-  %loaded = view.load %input_view[0] : view<1xi32, #dense> -> i32
+  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xi32>
+  %loaded = view.load %input_view[0] : view<1xi32> -> i32
   %incremented = scalar.addi %loaded, %loaded : i32
-  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xi32, #dense>
-  view.store %incremented, %output_view[0] : i32, view<1xi32, #dense>
+  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xi32>
+  view.store %incremented, %output_view[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -390,11 +390,11 @@ kernel.def target(@hal_target) @spirv_hal_resource_storage_buffer_i32_guard() {
   scf.if %inside {
     %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
     %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-    %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xi32, #dense>
-    %loaded = view.load %input_view[0] : view<1xi32, #dense> -> i32
+    %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xi32>
+    %loaded = view.load %input_view[0] : view<1xi32> -> i32
     %incremented = scalar.addi %loaded, %loaded : i32
-    %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xi32, #dense>
-    view.store %incremented, %output_view[0] : i32, view<1xi32, #dense>
+    %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xi32>
+    view.store %incremented, %output_view[0] : i32, view<1xi32>
     scf.yield
   }
   kernel.return
@@ -426,14 +426,14 @@ kernel.def target(@hal_target) @spirv_hal_resource_storage_buffer_f32() {
   %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 4)] : offset
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xf32, #dense>
-  %loaded = view.load %input_view[0] : view<1xf32, #dense> -> f32
+  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xf32>
+  %loaded = view.load %input_view[0] : view<1xf32> -> f32
   %sum = scalar.addf %loaded, %loaded : f32
   %product = scalar.mulf %sum, %loaded : f32
   %quotient = scalar.divf %product, %loaded : f32
   %remainder = scalar.remf %quotient, %loaded : f32
-  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xf32, #dense>
-  view.store %remainder, %output_view[0] : f32, view<1xf32, #dense>
+  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xf32>
+  view.store %remainder, %output_view[0] : f32, view<1xf32>
   kernel.return
 }
 
@@ -463,13 +463,13 @@ kernel.def target(@hal_target) @spirv_hal_resource_storage_buffer_i64() {
   %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 8)] : offset
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 8} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 8} : buffer
-  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xi64, #dense>
-  %loaded = view.load %input_view[0] : view<1xi64, #dense> -> i64
+  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xi64>
+  %loaded = view.load %input_view[0] : view<1xi64> -> i64
   %sum = scalar.addi %loaded, %loaded : i64
   %larger = scalar.cmpi sgt, %sum, %loaded : i64
   %selected = scf.select %larger, %sum, %loaded : i64
-  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xi64, #dense>
-  view.store %selected, %output_view[0] : i64, view<1xi64, #dense>
+  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xi64>
+  view.store %selected, %output_view[0] : i64, view<1xi64>
   kernel.return
 }
 
@@ -506,30 +506,30 @@ kernel.def target(@hal_target) @spirv_hal_resource_storage_buffer_feature_widths
   %output_bf16_aligned = buffer.assume.alignment %output_bf16 {minimum_alignment = 8} : buffer
   %input_f64_aligned = buffer.assume.alignment %input_f64 {minimum_alignment = 8} : buffer
   %output_f64_aligned = buffer.assume.alignment %output_f64 {minimum_alignment = 8} : buffer
-  %input_i8_view = buffer.view %input_i8_aligned[%byte_offset_aligned] : buffer -> view<1xi8, #dense>
-  %loaded_i8 = view.load %input_i8_view[0] : view<1xi8, #dense> -> i8
+  %input_i8_view = buffer.view %input_i8_aligned[%byte_offset_aligned] : buffer -> view<1xi8>
+  %loaded_i8 = view.load %input_i8_view[0] : view<1xi8> -> i8
   %sum_i8 = scalar.addi %loaded_i8, %loaded_i8 : i8
-  %output_i8_view = buffer.view %output_i8_aligned[%byte_offset_aligned] : buffer -> view<1xi8, #dense>
-  view.store %sum_i8, %output_i8_view[0] : i8, view<1xi8, #dense>
-  %input_i16_view = buffer.view %input_i16_aligned[%byte_offset_aligned] : buffer -> view<1xi16, #dense>
-  %loaded_i16 = view.load %input_i16_view[0] : view<1xi16, #dense> -> i16
+  %output_i8_view = buffer.view %output_i8_aligned[%byte_offset_aligned] : buffer -> view<1xi8>
+  view.store %sum_i8, %output_i8_view[0] : i8, view<1xi8>
+  %input_i16_view = buffer.view %input_i16_aligned[%byte_offset_aligned] : buffer -> view<1xi16>
+  %loaded_i16 = view.load %input_i16_view[0] : view<1xi16> -> i16
   %sum_i16 = scalar.addi %loaded_i16, %loaded_i16 : i16
-  %output_i16_view = buffer.view %output_i16_aligned[%byte_offset_aligned] : buffer -> view<1xi16, #dense>
-  view.store %sum_i16, %output_i16_view[0] : i16, view<1xi16, #dense>
-  %input_f16_view = buffer.view %input_f16_aligned[%byte_offset_aligned] : buffer -> view<1xf16, #dense>
-  %loaded_f16 = view.load %input_f16_view[0] : view<1xf16, #dense> -> f16
+  %output_i16_view = buffer.view %output_i16_aligned[%byte_offset_aligned] : buffer -> view<1xi16>
+  view.store %sum_i16, %output_i16_view[0] : i16, view<1xi16>
+  %input_f16_view = buffer.view %input_f16_aligned[%byte_offset_aligned] : buffer -> view<1xf16>
+  %loaded_f16 = view.load %input_f16_view[0] : view<1xf16> -> f16
   %sum_f16 = scalar.addf %loaded_f16, %loaded_f16 : f16
-  %output_f16_view = buffer.view %output_f16_aligned[%byte_offset_aligned] : buffer -> view<1xf16, #dense>
-  view.store %sum_f16, %output_f16_view[0] : f16, view<1xf16, #dense>
-  %input_bf16_view = buffer.view %input_bf16_aligned[%byte_offset_aligned] : buffer -> view<1xbf16, #dense>
-  %loaded_bf16 = view.load %input_bf16_view[0] : view<1xbf16, #dense> -> bf16
-  %output_bf16_view = buffer.view %output_bf16_aligned[%byte_offset_aligned] : buffer -> view<1xbf16, #dense>
-  view.store %loaded_bf16, %output_bf16_view[0] : bf16, view<1xbf16, #dense>
-  %input_f64_view = buffer.view %input_f64_aligned[%byte_offset_aligned] : buffer -> view<1xf64, #dense>
-  %loaded_f64 = view.load %input_f64_view[0] : view<1xf64, #dense> -> f64
+  %output_f16_view = buffer.view %output_f16_aligned[%byte_offset_aligned] : buffer -> view<1xf16>
+  view.store %sum_f16, %output_f16_view[0] : f16, view<1xf16>
+  %input_bf16_view = buffer.view %input_bf16_aligned[%byte_offset_aligned] : buffer -> view<1xbf16>
+  %loaded_bf16 = view.load %input_bf16_view[0] : view<1xbf16> -> bf16
+  %output_bf16_view = buffer.view %output_bf16_aligned[%byte_offset_aligned] : buffer -> view<1xbf16>
+  view.store %loaded_bf16, %output_bf16_view[0] : bf16, view<1xbf16>
+  %input_f64_view = buffer.view %input_f64_aligned[%byte_offset_aligned] : buffer -> view<1xf64>
+  %loaded_f64 = view.load %input_f64_view[0] : view<1xf64> -> f64
   %sum_f64 = scalar.addf %loaded_f64, %loaded_f64 : f64
-  %output_f64_view = buffer.view %output_f64_aligned[%byte_offset_aligned] : buffer -> view<1xf64, #dense>
-  view.store %sum_f64, %output_f64_view[0] : f64, view<1xf64, #dense>
+  %output_f64_view = buffer.view %output_f64_aligned[%byte_offset_aligned] : buffer -> view<1xf64>
+  view.store %sum_f64, %output_f64_view[0] : f64, view<1xf64>
   kernel.return
 }
 
@@ -595,43 +595,43 @@ kernel.def target(@hal_target) @spirv_hal_scalar_conversions() {
   %output_fptosi_i16_aligned = buffer.assume.alignment %output_fptosi_i16 {minimum_alignment = 8} : buffer
   %input_i32_bits_aligned = buffer.assume.alignment %input_i32_bits {minimum_alignment = 8} : buffer
   %output_bitcast_f32_aligned = buffer.assume.alignment %output_bitcast_f32 {minimum_alignment = 8} : buffer
-  %input_i8_view = buffer.view %input_i8_aligned[%byte_offset_aligned] : buffer -> view<1xi8, #dense>
-  %loaded_i8 = view.load %input_i8_view[0] : view<1xi8, #dense> -> i8
+  %input_i8_view = buffer.view %input_i8_aligned[%byte_offset_aligned] : buffer -> view<1xi8>
+  %loaded_i8 = view.load %input_i8_view[0] : view<1xi8> -> i8
   %extended_i32 = scalar.extsi %loaded_i8 : i8 to i32
-  %output_ext_i32_view = buffer.view %output_ext_i32_aligned[%byte_offset_aligned] : buffer -> view<1xi32, #dense>
-  view.store %extended_i32, %output_ext_i32_view[0] : i32, view<1xi32, #dense>
+  %output_ext_i32_view = buffer.view %output_ext_i32_aligned[%byte_offset_aligned] : buffer -> view<1xi32>
+  view.store %extended_i32, %output_ext_i32_view[0] : i32, view<1xi32>
   %extended_unsigned_i32 = scalar.extui %loaded_i8 : i8 to i32
-  %output_extui_i32_view = buffer.view %output_extui_i32_aligned[%byte_offset_aligned] : buffer -> view<1xi32, #dense>
-  view.store %extended_unsigned_i32, %output_extui_i32_view[0] : i32, view<1xi32, #dense>
+  %output_extui_i32_view = buffer.view %output_extui_i32_aligned[%byte_offset_aligned] : buffer -> view<1xi32>
+  view.store %extended_unsigned_i32, %output_extui_i32_view[0] : i32, view<1xi32>
   %converted_f32 = scalar.sitofp %loaded_i8 : i8 to f32
-  %output_sitofp_f32_view = buffer.view %output_sitofp_f32_aligned[%byte_offset_aligned] : buffer -> view<1xf32, #dense>
-  view.store %converted_f32, %output_sitofp_f32_view[0] : f32, view<1xf32, #dense>
+  %output_sitofp_f32_view = buffer.view %output_sitofp_f32_aligned[%byte_offset_aligned] : buffer -> view<1xf32>
+  view.store %converted_f32, %output_sitofp_f32_view[0] : f32, view<1xf32>
   %converted_unsigned_f32 = scalar.uitofp %extended_unsigned_i32 : i32 to f32
-  %output_uitofp_f32_view = buffer.view %output_uitofp_f32_aligned[%byte_offset_aligned] : buffer -> view<1xf32, #dense>
-  view.store %converted_unsigned_f32, %output_uitofp_f32_view[0] : f32, view<1xf32, #dense>
-  %input_i64_view = buffer.view %input_i64_aligned[%byte_offset_aligned] : buffer -> view<1xi64, #dense>
-  %loaded_i64 = view.load %input_i64_view[0] : view<1xi64, #dense> -> i64
+  %output_uitofp_f32_view = buffer.view %output_uitofp_f32_aligned[%byte_offset_aligned] : buffer -> view<1xf32>
+  view.store %converted_unsigned_f32, %output_uitofp_f32_view[0] : f32, view<1xf32>
+  %input_i64_view = buffer.view %input_i64_aligned[%byte_offset_aligned] : buffer -> view<1xi64>
+  %loaded_i64 = view.load %input_i64_view[0] : view<1xi64> -> i64
   %truncated_i32 = scalar.trunci %loaded_i64 : i64 to i32
-  %output_trunc_i32_view = buffer.view %output_trunc_i32_aligned[%byte_offset_aligned] : buffer -> view<1xi32, #dense>
-  view.store %truncated_i32, %output_trunc_i32_view[0] : i32, view<1xi32, #dense>
-  %input_f16_view = buffer.view %input_f16_aligned[%byte_offset_aligned] : buffer -> view<1xf16, #dense>
-  %loaded_f16 = view.load %input_f16_view[0] : view<1xf16, #dense> -> f16
+  %output_trunc_i32_view = buffer.view %output_trunc_i32_aligned[%byte_offset_aligned] : buffer -> view<1xi32>
+  view.store %truncated_i32, %output_trunc_i32_view[0] : i32, view<1xi32>
+  %input_f16_view = buffer.view %input_f16_aligned[%byte_offset_aligned] : buffer -> view<1xf16>
+  %loaded_f16 = view.load %input_f16_view[0] : view<1xf16> -> f16
   %extended_f32 = scalar.extf %loaded_f16 : f16 to f32
-  %output_extf_f32_view = buffer.view %output_extf_f32_aligned[%byte_offset_aligned] : buffer -> view<1xf32, #dense>
-  view.store %extended_f32, %output_extf_f32_view[0] : f32, view<1xf32, #dense>
-  %input_f32_view = buffer.view %input_f32_aligned[%byte_offset_aligned] : buffer -> view<1xf32, #dense>
-  %loaded_f32 = view.load %input_f32_view[0] : view<1xf32, #dense> -> f32
+  %output_extf_f32_view = buffer.view %output_extf_f32_aligned[%byte_offset_aligned] : buffer -> view<1xf32>
+  view.store %extended_f32, %output_extf_f32_view[0] : f32, view<1xf32>
+  %input_f32_view = buffer.view %input_f32_aligned[%byte_offset_aligned] : buffer -> view<1xf32>
+  %loaded_f32 = view.load %input_f32_view[0] : view<1xf32> -> f32
   %truncated_f16 = scalar.fptrunc %loaded_f32 : f32 to f16
-  %output_fptrunc_f16_view = buffer.view %output_fptrunc_f16_aligned[%byte_offset_aligned] : buffer -> view<1xf16, #dense>
-  view.store %truncated_f16, %output_fptrunc_f16_view[0] : f16, view<1xf16, #dense>
+  %output_fptrunc_f16_view = buffer.view %output_fptrunc_f16_aligned[%byte_offset_aligned] : buffer -> view<1xf16>
+  view.store %truncated_f16, %output_fptrunc_f16_view[0] : f16, view<1xf16>
   %converted_i16 = scalar.fptosi %loaded_f32 : f32 to i16
-  %output_fptosi_i16_view = buffer.view %output_fptosi_i16_aligned[%byte_offset_aligned] : buffer -> view<1xi16, #dense>
-  view.store %converted_i16, %output_fptosi_i16_view[0] : i16, view<1xi16, #dense>
-  %input_i32_bits_view = buffer.view %input_i32_bits_aligned[%byte_offset_aligned] : buffer -> view<1xi32, #dense>
-  %loaded_i32_bits = view.load %input_i32_bits_view[0] : view<1xi32, #dense> -> i32
+  %output_fptosi_i16_view = buffer.view %output_fptosi_i16_aligned[%byte_offset_aligned] : buffer -> view<1xi16>
+  view.store %converted_i16, %output_fptosi_i16_view[0] : i16, view<1xi16>
+  %input_i32_bits_view = buffer.view %input_i32_bits_aligned[%byte_offset_aligned] : buffer -> view<1xi32>
+  %loaded_i32_bits = view.load %input_i32_bits_view[0] : view<1xi32> -> i32
   %bitcast_f32 = scalar.bitcast %loaded_i32_bits : i32 to f32
-  %output_bitcast_f32_view = buffer.view %output_bitcast_f32_aligned[%byte_offset_aligned] : buffer -> view<1xf32, #dense>
-  view.store %bitcast_f32, %output_bitcast_f32_view[0] : f32, view<1xf32, #dense>
+  %output_bitcast_f32_view = buffer.view %output_bitcast_f32_aligned[%byte_offset_aligned] : buffer -> view<1xf32>
+  view.store %bitcast_f32, %output_bitcast_f32_view[0] : f32, view<1xf32>
   kernel.return
 }
 
@@ -711,15 +711,15 @@ kernel.def target(@hal_target_coop_f16) @spirv_hal_cooperative_matrix_f16() {
   %rhs_aligned = buffer.assume.alignment %rhs_buffer {minimum_alignment = 16} : buffer
   %init_aligned = buffer.assume.alignment %init_buffer {minimum_alignment = 16} : buffer
   %out_aligned = buffer.assume.alignment %out_buffer {minimum_alignment = 16} : buffer
-  %lhs_view = buffer.view %lhs_aligned[%byte_offset_aligned] : buffer -> view<16x16xf16, #dense>
-  %rhs_view = buffer.view %rhs_aligned[%byte_offset_aligned] : buffer -> view<16x16xf16, #dense>
-  %init_view = buffer.view %init_aligned[%byte_offset_aligned] : buffer -> view<16x16xf32, #dense>
-  %out_view = buffer.view %out_aligned[%byte_offset_aligned] : buffer -> view<16x16xf32, #dense>
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16, #dense> -> vector<16xf16>
-  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xf16, #dense> -> vector<16xf16>
-  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<8xf32>
+  %lhs_view = buffer.view %lhs_aligned[%byte_offset_aligned] : buffer -> view<16x16xf16>
+  %rhs_view = buffer.view %rhs_aligned[%byte_offset_aligned] : buffer -> view<16x16xf16>
+  %init_view = buffer.view %init_aligned[%byte_offset_aligned] : buffer -> view<16x16xf32>
+  %out_view = buffer.view %out_aligned[%byte_offset_aligned] : buffer -> view<16x16xf32>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16> -> vector<16xf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xf16> -> vector<16xf16>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32> -> vector<8xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf32>
-  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
   kernel.return
 }
 
@@ -758,15 +758,15 @@ kernel.def target(@hal_target_coop_bf16) @spirv_hal_cooperative_matrix_bf16() {
   %rhs_aligned = buffer.assume.alignment %rhs_buffer {minimum_alignment = 16} : buffer
   %init_aligned = buffer.assume.alignment %init_buffer {minimum_alignment = 16} : buffer
   %out_aligned = buffer.assume.alignment %out_buffer {minimum_alignment = 16} : buffer
-  %lhs_view = buffer.view %lhs_aligned[%byte_offset_aligned] : buffer -> view<16x16xbf16, #dense>
-  %rhs_view = buffer.view %rhs_aligned[%byte_offset_aligned] : buffer -> view<16x16xbf16, #dense>
-  %init_view = buffer.view %init_aligned[%byte_offset_aligned] : buffer -> view<16x16xf32, #dense>
-  %out_view = buffer.view %out_aligned[%byte_offset_aligned] : buffer -> view<16x16xf32, #dense>
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xbf16, #dense> -> vector<16xbf16>
-  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xbf16, #dense> -> vector<16xbf16>
-  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<8xf32>
+  %lhs_view = buffer.view %lhs_aligned[%byte_offset_aligned] : buffer -> view<16x16xbf16>
+  %rhs_view = buffer.view %rhs_aligned[%byte_offset_aligned] : buffer -> view<16x16xbf16>
+  %init_view = buffer.view %init_aligned[%byte_offset_aligned] : buffer -> view<16x16xf32>
+  %out_view = buffer.view %out_aligned[%byte_offset_aligned] : buffer -> view<16x16xf32>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xbf16> -> vector<16xbf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xbf16> -> vector<16xbf16>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32> -> vector<8xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
   kernel.return
 }
 
@@ -801,9 +801,9 @@ kernel.def target(@hal_target_coop_u8) @spirv_hal_cooperative_matrix_u8() {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 32 : index
-  %lhs_storage = encoding.define #physical_storage<layout=#dense, schema=#matrix_operand<element_format=u8, payload_elements=32, payload_registers=8>> : encoding<storage>
-  %rhs_storage = encoding.define #physical_storage<layout=#dense, schema=#matrix_operand<element_format=u8, payload_elements=32, payload_registers=8>> : encoding<storage>
-  %acc_storage = encoding.define #physical_storage<layout=#dense, schema=#matrix_operand<element_format=u32, payload_elements=8, payload_registers=8>> : encoding<storage>
+  %lhs_storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.operand<element_format=u8, payload_elements=32, payload_registers=8>> : encoding<storage>
+  %rhs_storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.operand<element_format=u8, payload_elements=32, payload_registers=8>> : encoding<storage>
+  %acc_storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.operand<element_format=u32, payload_elements=8, payload_registers=8>> : encoding<storage>
   %lhs_aligned = buffer.assume.alignment %lhs_buffer {minimum_alignment = 16} : buffer
   %rhs_aligned = buffer.assume.alignment %rhs_buffer {minimum_alignment = 16} : buffer
   %init_aligned = buffer.assume.alignment %init_buffer {minimum_alignment = 16} : buffer
