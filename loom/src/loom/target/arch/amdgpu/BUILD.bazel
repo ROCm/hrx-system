@@ -25,6 +25,8 @@ _AMDGPU_CHECK_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/check:__pkg__"]
 
 _AMDGPU_ANALYSIS_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/analysis:__pkg__"]
 
+_AMDGPU_DESCRIPTORS_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/descriptors:__pkg__"]
+
 _AMDGPU_ENCODING_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/encoding:__pkg__"]
 
 _AMDGPU_HAL_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/hal:__pkg__"]
@@ -124,12 +126,18 @@ loom_generated_cc_library(
         "--cache-policy-temporal-th",
         "--lds-bank-service-model-rows",
         "--matrix-coexecution-source-layouts",
+        "--low-registry-tables",
+        "--encoding-field-ids",
+        "--encoding-tables",
     ],
     extra_outputs = [
         "memory_cache_policy_encoding_rows.inl",
         "memory_cache_policy_temporal_th.inl",
         "lds_bank_service_model_rows.inl",
         "matrix_coexecution_source_layouts.inl",
+        "low_registry_tables.inl",
+        "encoding_field_ids.inl",
+        "encoding_tables.inl",
     ],
     generated_hdr_flags = ["--header"],
     generated_hdrs = ["target_info.h"],
@@ -139,6 +147,7 @@ loom_generated_cc_library(
     source = "target_info_tables.c",
     visibility = (
         _AMDGPU_ANALYSIS_VISIBILITY +
+        _AMDGPU_DESCRIPTORS_VISIBILITY +
         _AMDGPU_ENCODING_VISIBILITY +
         _AMDGPU_HAL_VISIBILITY +
         _AMDGPU_LOWER_VISIBILITY +

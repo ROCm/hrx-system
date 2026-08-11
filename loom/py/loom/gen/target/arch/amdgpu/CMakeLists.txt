@@ -46,8 +46,6 @@ iree_py_library(
 iree_py_library(
   NAME
     config_tables
-  MAIN
-    "amdgpu_config_tables.py"
   SRCS
     "amdgpu_config_tables.py"
   DEPS
@@ -97,6 +95,7 @@ iree_py_library(
   SRCS
     "amdgpu_target_info.py"
   DEPS
+    loom::py::loom::gen::target::arch::amdgpu::config_tables
     loom::py::loom::gen::target::arch::amdgpu::package_init
     loom::py::loom::gen::support::support
     loom::py::loom::target::low_descriptors

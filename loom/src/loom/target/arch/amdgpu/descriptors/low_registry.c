@@ -8,12 +8,12 @@
 
 #define LOOM_AMDGPU_LOW_DESCRIPTOR_PROVIDER_DECL(provider) \
   const loom_low_descriptor_set_t* provider(void);
-#include "loom/target/arch/amdgpu/descriptors/low_registry_tables.inl"
+#include "loom/target/arch/amdgpu/low_registry_tables.inl"
 #undef LOOM_AMDGPU_LOW_DESCRIPTOR_PROVIDER_DECL
 
 #define LOOM_AMDGPU_LOW_DESCRIPTOR_PROVIDER(provider) provider,
 static const loom_low_descriptor_set_provider_t kLowDescriptorSetProviders[] = {
-#include "loom/target/arch/amdgpu/descriptors/low_registry_tables.inl"
+#include "loom/target/arch/amdgpu/low_registry_tables.inl"
 };
 #undef LOOM_AMDGPU_LOW_DESCRIPTOR_PROVIDER
 

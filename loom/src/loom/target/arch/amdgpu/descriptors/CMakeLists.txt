@@ -271,19 +271,6 @@ loom_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    low_registry_tables_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::config_tables
-  OUTPUT
-    "low_registry_tables.inl"
-  OUTPUT_FLAG
-    "--low-registry-tables"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
 set(_low_registry_platform_defines "")
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA3_CORE)
   list(APPEND _low_registry_platform_defines "LOOM_AMDGPU_DESCRIPTOR_SET_CDNA3_CORE")
@@ -370,7 +357,7 @@ loom_cc_library(
   HDRS
     "low_registry.h"
   TEXTUAL_HDRS
-    "low_registry_tables.inl"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/low_registry_tables.inl"
   SRCS
     "low_registry.c"
   DEPS

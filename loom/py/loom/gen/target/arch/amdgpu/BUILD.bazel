@@ -47,11 +47,9 @@ iree_py_binary(
     ],
 )
 
-iree_py_binary(
+iree_py_library(
     name = "config_tables",
     srcs = ["amdgpu_config_tables.py"],
-    main = "amdgpu_config_tables.py",
-    visibility = GENERATOR_VISIBILITY,
     deps = [
         ":package_init",
         "//loom/py/loom/gen/support",
@@ -90,6 +88,7 @@ iree_py_binary(
     main = "amdgpu_target_info.py",
     visibility = GENERATOR_VISIBILITY,
     deps = [
+        ":config_tables",
         ":package_init",
         "//loom/py/loom/gen/support",
         "//loom/py/loom/target:low_descriptors",

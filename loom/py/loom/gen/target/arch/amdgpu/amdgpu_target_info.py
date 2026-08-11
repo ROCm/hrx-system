@@ -31,6 +31,9 @@ from build_tools.amdgpu.target_map_data import (  # noqa: E402
 from loom.gen.support.c import c_string_arg as _c_string_arg  # noqa: E402
 from loom.gen.support.c import c_string_literal as _c_string_literal  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
+from loom.gen.target.arch.amdgpu.amdgpu_config_tables import (  # noqa: E402
+    write_config_tables_to_paths,
+)
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     amdgpu_descriptor_ref_keys,
 )
@@ -1478,14 +1481,14 @@ def _emit_tables_source(
     return "\n".join(lines) + "\n"
 
 
-def write_target_info_to_paths(
+def _write_target_info_to_paths(
     header_path: Path,
     source_path: Path,
     tables_header_path: Path,
+    descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
+    processors: Sequence[AmdgpuProcessorInfo],
+    targets: Sequence[AmdgpuTargetInfo],
 ) -> None:
-    descriptor_sets = sorted_descriptor_set_infos()
-    processors = sorted_processor_infos()
-    targets = sorted_target_infos()
     _validate_descriptor_sets(descriptor_sets)
     descriptor_set_rows = _materialize_descriptor_set_rows(descriptor_sets)
     _validate_descriptor_set_rows(descriptor_set_rows)
@@ -1515,69 +1518,92 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--header",
         type=Path,
+        required=True,
         help="Generated target-info header path.",
     )
     parser.add_argument(
         "--source",
         type=Path,
+        required=True,
         help="Generated target-info source path.",
     )
     parser.add_argument(
         "--tables-header",
         type=Path,
+        required=True,
         help="Generated target-info private table header path.",
     )
     parser.add_argument(
         "--cache-policy-encoding-rows",
         type=Path,
+        required=True,
         help="Generated memory cache-policy encoding row fragment path.",
     )
     parser.add_argument(
         "--cache-policy-temporal-th",
         type=Path,
+        required=True,
         help="Generated memory cache-policy temporal TH fragment path.",
     )
     parser.add_argument(
         "--lds-bank-service-model-rows",
         type=Path,
+        required=True,
         help="Generated LDS bank-service model-set fragment path.",
     )
     parser.add_argument(
         "--matrix-coexecution-source-layouts",
         type=Path,
+        required=True,
         help="Generated matrix coexecution source-layout fragment path.",
+    )
+    parser.add_argument(
+        "--low-registry-tables",
+        type=Path,
+        required=True,
+        help="Generated low descriptor registry X-macro table path.",
+    )
+    parser.add_argument(
+        "--encoding-tables",
+        type=Path,
+        required=True,
+        help="Generated encoding table X-macro table path.",
+    )
+    parser.add_argument(
+        "--encoding-field-ids",
+        type=Path,
+        required=True,
+        help="Generated encoding field ID X-macro row fragment path.",
     )
     args = parser.parse_args(argv)
 
-    wrote_output = False
-    target_info_paths = (args.header, args.source, args.tables_header)
-    if any(path is not None for path in target_info_paths):
-        if not all(path is not None for path in target_info_paths):
-            parser.error("--header, --source, and --tables-header must be provided together")
-        write_target_info_to_paths(
-            header_path=args.header,
-            source_path=args.source,
-            tables_header_path=args.tables_header,
-        )
-        wrote_output = True
-    if args.cache_policy_encoding_rows is not None:
-        args.cache_policy_encoding_rows.parent.mkdir(parents=True, exist_ok=True)
-        args.cache_policy_encoding_rows.write_text(_emit_memory_cache_policy_encoding_rows(), encoding="utf-8")
-        wrote_output = True
-    if args.cache_policy_temporal_th is not None:
-        args.cache_policy_temporal_th.parent.mkdir(parents=True, exist_ok=True)
-        args.cache_policy_temporal_th.write_text(_emit_memory_cache_policy_temporal_th(), encoding="utf-8")
-        wrote_output = True
-    if args.lds_bank_service_model_rows is not None:
-        args.lds_bank_service_model_rows.parent.mkdir(parents=True, exist_ok=True)
-        args.lds_bank_service_model_rows.write_text(_emit_lds_bank_service_model_rows(), encoding="utf-8")
-        wrote_output = True
-    if args.matrix_coexecution_source_layouts is not None:
-        args.matrix_coexecution_source_layouts.parent.mkdir(parents=True, exist_ok=True)
-        args.matrix_coexecution_source_layouts.write_text(_emit_matrix_coexecution_source_layouts(), encoding="utf-8")
-        wrote_output = True
-    if not wrote_output:
-        parser.error("at least one output path is required")
+    descriptor_sets = sorted_descriptor_set_infos()
+    processors = sorted_processor_infos()
+    targets = sorted_target_infos()
+    _write_target_info_to_paths(
+        header_path=args.header,
+        source_path=args.source,
+        tables_header_path=args.tables_header,
+        descriptor_sets=descriptor_sets,
+        processors=processors,
+        targets=targets,
+    )
+    args.cache_policy_encoding_rows.parent.mkdir(parents=True, exist_ok=True)
+    args.cache_policy_encoding_rows.write_text(_emit_memory_cache_policy_encoding_rows(), encoding="utf-8")
+    args.cache_policy_temporal_th.parent.mkdir(parents=True, exist_ok=True)
+    args.cache_policy_temporal_th.write_text(_emit_memory_cache_policy_temporal_th(), encoding="utf-8")
+    args.lds_bank_service_model_rows.parent.mkdir(parents=True, exist_ok=True)
+    args.lds_bank_service_model_rows.write_text(_emit_lds_bank_service_model_rows(), encoding="utf-8")
+    args.matrix_coexecution_source_layouts.parent.mkdir(parents=True, exist_ok=True)
+    args.matrix_coexecution_source_layouts.write_text(_emit_matrix_coexecution_source_layouts(), encoding="utf-8")
+    write_config_tables_to_paths(
+        descriptor_sets=descriptor_sets,
+        processors=processors,
+        targets=targets,
+        low_registry_tables_path=args.low_registry_tables,
+        encoding_tables_path=args.encoding_tables,
+        encoding_field_ids_path=args.encoding_field_ids,
+    )
     return 0
 
 

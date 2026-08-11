@@ -206,7 +206,7 @@ typedef struct loom_amdgpu_dpp_control_decoding_t {
 // loom_amdgpu_encoding_field_value_t arrays.
 enum {
 #define LOOM_AMDGPU_ENCODING_FIELD(symbol, value) symbol = value,
-#include "loom/target/arch/amdgpu/encoding/encoding_field_ids.inl"
+#include "loom/target/arch/amdgpu/encoding_field_ids.inl"
 #undef LOOM_AMDGPU_ENCODING_FIELD
 };
 

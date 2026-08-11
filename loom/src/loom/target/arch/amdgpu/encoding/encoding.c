@@ -58,7 +58,7 @@ static const loom_amdgpu_encoding_format_flags_t
 
 #define LOOM_AMDGPU_ENCODING_TABLE_DECL(descriptor_set_ordinal, table_fn) \
   const loom_amdgpu_encoding_table_t* table_fn(void);
-#include "loom/target/arch/amdgpu/encoding/encoding_tables.inl"
+#include "loom/target/arch/amdgpu/encoding_tables.inl"
 #undef LOOM_AMDGPU_ENCODING_TABLE_DECL
 
 static uint64_t loom_amdgpu_encoding_u64_mask(uint8_t bit_count) {
@@ -485,7 +485,7 @@ loom_amdgpu_encoding_table_for_descriptor_set_ordinal(
       tables[LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_COUNT] = {
 #define LOOM_AMDGPU_ENCODING_TABLE(descriptor_set_ordinal, table_fn) \
   [descriptor_set_ordinal] = table_fn(),
-#include "loom/target/arch/amdgpu/encoding/encoding_tables.inl"
+#include "loom/target/arch/amdgpu/encoding_tables.inl"
 #undef LOOM_AMDGPU_ENCODING_TABLE
       };
   if (descriptor_set_ordinal >= IREE_ARRAYSIZE(tables)) {

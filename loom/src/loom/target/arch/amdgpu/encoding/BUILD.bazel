@@ -18,7 +18,6 @@ load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
     "loom_cc_test",
-    "loom_generated_file_family",
     "loom_low_descriptor_exclude_from_cmake_all",
 )
 
@@ -27,8 +26,6 @@ package(
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
 )
-
-_AMDGPU_CONFIG_TABLES_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu:config_tables"
 
 _DESCRIPTOR_SET_CDNA4 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.cdna4.core"]
 
@@ -60,24 +57,10 @@ exports_files(
     visibility = ["//loom/py/loom/target/arch/amdgpu:__pkg__"],
 )
 
-loom_generated_file_family(
-    name = "encoding_config_tables_gen",
-    generator = _AMDGPU_CONFIG_TABLES_GENERATOR,
-    output_flags = [
-        "--encoding-field-ids",
-        "--encoding-tables",
-    ],
-    outputs = [
-        "encoding_field_ids.inl",
-        "encoding_tables.inl",
-    ],
-    visibility = _AMDGPU_ENCODING_VISIBILITY,
-)
-
 loom_cc_library(
     name = "encoding_defs",
     hdrs = ["encoding.h"],
-    textual_hdrs = [":encoding_field_ids.inl"],
+    textual_hdrs = ["//loom/src/loom/target/arch/amdgpu:encoding_field_ids.inl"],
     visibility = _AMDGPU_ENCODING_VISIBILITY,
     deps = ["//runtime/src/iree/base"],
 )
@@ -213,7 +196,7 @@ loom_cc_library(
     srcs = ["encoding.c"],
     hdrs = ["encoding.h"],
     defines = loom_amdgpu_selected_descriptor_set_defines(),
-    textual_hdrs = [":encoding_tables.inl"],
+    textual_hdrs = ["//loom/src/loom/target/arch/amdgpu:encoding_tables.inl"],
     visibility = _AMDGPU_ENCODING_VISIBILITY,
     deps = loom_amdgpu_encoding_table_deps() + [
         ":encoding_defs",

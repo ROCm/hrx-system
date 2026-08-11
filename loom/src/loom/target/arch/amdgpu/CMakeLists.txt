@@ -82,11 +82,17 @@ loom_generated_cc_library(
     "--cache-policy-temporal-th"
     "--lds-bank-service-model-rows"
     "--matrix-coexecution-source-layouts"
+    "--low-registry-tables"
+    "--encoding-field-ids"
+    "--encoding-tables"
   EXTRA_OUTPUTS
     "memory_cache_policy_encoding_rows.inl"
     "memory_cache_policy_temporal_th.inl"
     "lds_bank_service_model_rows.inl"
     "matrix_coexecution_source_layouts.inl"
+    "low_registry_tables.inl"
+    "encoding_field_ids.inl"
+    "encoding_tables.inl"
   DEPS
     ::target_info_defs
     iree::base

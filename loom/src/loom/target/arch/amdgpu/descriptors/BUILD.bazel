@@ -20,7 +20,6 @@ load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
     "loom_generated_file_family",
-    "loom_generated_textual_header",
     "loom_low_descriptor_data_archive",
     "loom_low_descriptor_exclude_from_cmake_all",
 )
@@ -32,8 +31,6 @@ package(
 )
 
 _AMDGPU_DESCRIPTOR_DERIVED_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/descriptors:descriptor_derived_tables"
-
-_AMDGPU_CONFIG_TABLES_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu:config_tables"
 
 _DESCRIPTOR_SET_CDNA4 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.cdna4.core"]
 
@@ -231,20 +228,12 @@ loom_cc_library(
     deps = ["//loom/src/loom/codegen/low:descriptors"],
 )
 
-loom_generated_textual_header(
-    name = "low_registry_tables_gen",
-    generator = _AMDGPU_CONFIG_TABLES_GENERATOR,
-    output = "low_registry_tables.inl",
-    output_flag = "--low-registry-tables",
-    visibility = _AMDGPU_LOW_REGISTRY_VISIBILITY,
-)
-
 loom_cc_library(
     name = "low_registry",
     srcs = ["low_registry.c"],
     hdrs = ["low_registry.h"],
     defines = loom_amdgpu_selected_descriptor_set_defines(),
-    textual_hdrs = [":low_registry_tables.inl"],
+    textual_hdrs = ["//loom/src/loom/target/arch/amdgpu:low_registry_tables.inl"],
     visibility = _AMDGPU_LOW_REGISTRY_VISIBILITY,
     deps = loom_amdgpu_low_descriptor_deps() + [
         "//loom/src/loom/codegen/low:descriptors",

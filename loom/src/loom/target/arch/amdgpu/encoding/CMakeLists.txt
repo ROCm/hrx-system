@@ -10,28 +10,13 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_file_family(
-  NAME
-    encoding_config_tables_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::config_tables
-  OUTPUTS
-    "encoding_field_ids.inl"
-    "encoding_tables.inl"
-  OUTPUT_FLAGS
-    "--encoding-field-ids"
-    "--encoding-tables"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
     encoding_defs
   HDRS
     "encoding.h"
   TEXTUAL_HDRS
-    "encoding_field_ids.inl"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/encoding_field_ids.inl"
   DEPS
     iree::base
   PUBLIC
@@ -288,7 +273,7 @@ loom_cc_library(
   HDRS
     "encoding.h"
   TEXTUAL_HDRS
-    "encoding_tables.inl"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/encoding_tables.inl"
   SRCS
     "encoding.c"
   DEPS
