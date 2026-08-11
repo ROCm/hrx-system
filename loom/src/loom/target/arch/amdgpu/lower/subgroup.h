@@ -35,6 +35,13 @@ iree_status_t loom_amdgpu_emit_subgroup_bpermute_register(
     loom_value_id_t low_source_value, loom_type_t lane_type,
     loom_value_id_t* out_low_result);
 
+// Reads one statically named subgroup lane into an SGPR.
+iree_status_t loom_amdgpu_emit_subgroup_readlane_register(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_resolved_descriptor_t* descriptor,
+    loom_value_id_t source_value, uint32_t lane, loom_type_t result_type,
+    loom_value_id_t* out_low_result);
+
 // Emits one direct DPP or DS swizzle cross-lane read for a 32-bit payload
 // register.
 iree_status_t loom_amdgpu_emit_direct_crosslane_register(
@@ -172,13 +179,13 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_subgroup_vote_all(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     bool* out_handled);
 
-// Selects a native AMDGPU cross-lane packet for a source subgroup broadcast.
+// Selects a native AMDGPU exchange strategy for a source subgroup broadcast.
 iree_status_t loom_amdgpu_select_kernel_subgroup_broadcast_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_amdgpu_subgroup_broadcast_plan_t* out_plan, bool* out_selected);
 
-// Lowers a source subgroup broadcast using one DS bpermute per 32-bit payload
-// register.
+// Lowers a source subgroup broadcast using the selected native exchange and
+// publication strategy.
 iree_status_t loom_amdgpu_lower_kernel_subgroup_broadcast(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_subgroup_broadcast_plan_t* plan);
