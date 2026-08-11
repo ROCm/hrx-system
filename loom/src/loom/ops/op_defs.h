@@ -1287,6 +1287,14 @@ loom_string_id_t loom_func_like_import_symbol(loom_func_like_t func);
 // |func| has no target contract.
 loom_symbol_ref_t loom_func_like_target(loom_func_like_t func);
 
+// Retargets a verified target-assignable function to |target|.
+//
+// The function and symbol reference must belong to |module|. This refreshes
+// callback-backed effective traits and transitive effect summaries; callers
+// remain responsible for invalidating any higher-level analyses.
+void loom_func_like_set_target(loom_module_t* module, loom_func_like_t func,
+                               loom_symbol_ref_t target);
+
 // Returns the authored representation-contract key for a func-like op, or
 // LOOM_STRING_ID_INVALID when none is present.
 loom_string_id_t loom_func_like_repr_contract(loom_func_like_t func);

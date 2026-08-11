@@ -156,6 +156,53 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    module_sealing
+  HDRS
+    "module_sealing.h"
+  SRCS
+    "module_sealing.c"
+  DEPS
+    ::facts
+    ::function_version
+    ::provider
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::symbol_facts
+    loom::ir
+    loom::ir::symbol_map
+    loom::link::linker
+    loom::ops::op_defs
+    loom::ops::target
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    module_sealing_test
+  SRCS
+    "module_sealing_test.cc"
+  DEPS
+    ::facts_builder
+    ::module_sealing
+    ::provider
+    ::specialization
+    iree::base
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::format::text::printer
+    loom::ir
+    loom::ops::func
+    loom::ops::op_defs
+    loom::ops::target
+    loom::ops::test
+    loom::target::test::target_record_table
+    loom::testing::module_ptr
+)
+
 loom_cc_test(
   NAME
     function_version_test
