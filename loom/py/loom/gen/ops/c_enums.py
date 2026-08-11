@@ -104,6 +104,7 @@ RESULT_OWNERSHIP_EFFECT_MAP: dict[ResultOwnershipEffectKind, str] = {
     ResultOwnershipEffectKind.BORROWED: "LOOM_RESULT_OWNERSHIP_BORROWED",
     ResultOwnershipEffectKind.RETAINED: "LOOM_RESULT_OWNERSHIP_RETAINED",
     ResultOwnershipEffectKind.ALIAS: "LOOM_RESULT_OWNERSHIP_ALIAS",
+    ResultOwnershipEffectKind.MOVED: "LOOM_RESULT_OWNERSHIP_MOVED",
 }
 
 _ERROR_REF_CODE_BITS = 10

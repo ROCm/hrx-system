@@ -100,6 +100,8 @@ typedef enum loom_type_semantic_e {
   LOOM_TYPE_SEMANTIC_CONTROL_TOKEN = 1,
   // Opaque value whose payload represents a target contract.
   LOOM_TYPE_SEMANTIC_TARGET_CONTRACT_VALUE = 2,
+  // Reference-counted resource requiring ownership-aware lowering.
+  LOOM_TYPE_SEMANTIC_MANAGED_REFERENCE = 3,
 } loom_type_semantic_e;
 
 // Generated semantic metadata for one registered type declaration.

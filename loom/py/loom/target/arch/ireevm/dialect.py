@@ -60,6 +60,7 @@ from loom.dsl import (
     TargetLikeInterface,
     TypeDef,
     TypeParam,
+    TypeSemantic,
     Writes,
 )
 
@@ -84,6 +85,7 @@ ireevm_ref_type = TypeDef(
     name="ireevm.ref",
     params=[TypeParam("object", ANY)],
     format=[TypeOf("object")],
+    semantic=TypeSemantic.MANAGED_REFERENCE,
     doc="IREE VM reference-counted object reference.",
 )
 

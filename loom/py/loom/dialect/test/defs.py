@@ -112,6 +112,7 @@ from loom.dsl import (
     IterArgsMatchResults,
     LiteralMatchesElementType,
     LoopLikeInterface,
+    MovedResult,
     OffsetCountMatchesRank,
     Op,
     Operand,
@@ -2777,6 +2778,26 @@ test_resource_borrowed = Op(
     ],
 )
 
+test_resource_move = Op(
+    "test.resource.move",
+    group=test_ops,
+    doc="Test moving the exact ownership state of a resource.",
+    operands=[Operand("source", POOL, doc="Resource state to move.")],
+    results=[Result("result", POOL, doc="Moved resource state.")],
+    constraints=[SameType("source", "result")],
+    ownership_effects=[MovedResult("result", "source")],
+    format=[
+        Ref("source"),
+        COLON,
+        TypeOf("source"),
+        ARROW,
+        ResultType("result"),
+    ],
+    examples=[
+        "%moved = test.resource.move %resource : pool<[%BS]> -> pool<[%BS]>",
+    ],
+)
+
 # ============================================================================
 # test.isolated_region — isolated single-block region (for CSE testing)
 # ============================================================================
@@ -3019,6 +3040,7 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_resource_escape,
     test_resource_alias,
     test_resource_borrowed,
+    test_resource_move,
     test_segmented,
     test_template_param_symbol,
     test_template_param_symbol_flags,

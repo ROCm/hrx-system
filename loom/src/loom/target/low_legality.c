@@ -599,6 +599,15 @@ static iree_status_t loom_target_low_legality_verify_registered_type(
     case LOOM_TYPE_SEMANTIC_TARGET_CONTRACT_VALUE:
       return loom_target_low_legality_emit_type_constraint(
           context, op, type, IREE_SV("type.matching_contract_family"));
+    case LOOM_TYPE_SEMANTIC_MANAGED_REFERENCE:
+      if (context->options->type_supported.fn != NULL &&
+          context->options->type_supported.fn(
+              context->options->type_supported.user_data, context->module,
+              type)) {
+        return iree_ok_status();
+      }
+      return loom_target_low_legality_emit_type_constraint(
+          context, op, type, IREE_SV("type.target_low_mapping"));
     default:
       return loom_target_low_legality_emit_type_constraint(
           context, op, type, IREE_SV("type.target_low_mapping"));

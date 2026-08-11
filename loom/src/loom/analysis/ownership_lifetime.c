@@ -866,7 +866,7 @@ static iree_status_t loom_ownership_lifetime_apply_operand_effect(
   return iree_ok_status();
 }
 
-static iree_status_t loom_ownership_lifetime_apply_tied_result(
+static iree_status_t loom_ownership_lifetime_apply_source_state_result(
     loom_ownership_lifetime_state_t* state,
     loom_ownership_lifetime_state_bits_t bits, const loom_op_t* op,
     const loom_ownership_result_effect_t* effect) {
@@ -935,7 +935,9 @@ static iree_status_t loom_ownership_lifetime_apply_result_effect(
           state, value_ordinal, LOOM_OWNERSHIP_LIFETIME_ARG_INDEX_NONE);
       return iree_ok_status();
     case LOOM_RESULT_OWNERSHIP_TIED:
-      return loom_ownership_lifetime_apply_tied_result(state, bits, op, effect);
+    case LOOM_RESULT_OWNERSHIP_MOVED:
+      return loom_ownership_lifetime_apply_source_state_result(state, bits, op,
+                                                               effect);
     case LOOM_RESULT_OWNERSHIP_NONE:
       return iree_ok_status();
   }
