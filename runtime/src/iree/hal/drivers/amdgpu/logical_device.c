@@ -3003,6 +3003,41 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_fill(
                              pattern_length, flags);
 }
 
+IREE_API_EXPORT iree_status_t iree_hal_amdgpu_device_queue_wait_value(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    uint64_t value, uint64_t mask, iree_host_size_t value_length,
+    iree_hal_amdgpu_wait_value_condition_t condition,
+    iree_hal_amdgpu_wait_value_flags_t flags) {
+  IREE_ASSERT_ARGUMENT(base_device);
+  IREE_ASSERT_ARGUMENT(
+      !wait_semaphore_list.count ||
+      (wait_semaphore_list.semaphores && wait_semaphore_list.payload_values));
+  IREE_ASSERT_ARGUMENT(!signal_semaphore_list.count ||
+                       (signal_semaphore_list.semaphores &&
+                        signal_semaphore_list.payload_values));
+  IREE_ASSERT_ARGUMENT(target_buffer);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_hal_amdgpu_logical_device_t* logical_device =
+      iree_hal_amdgpu_logical_device_cast(base_device);
+  iree_status_t status =
+      iree_hal_amdgpu_logical_device_check_failure(logical_device);
+  iree_hal_amdgpu_virtual_queue_t* queue = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amdgpu_logical_device_select_host_queue(
+        logical_device, queue_affinity, &queue);
+  }
+  if (iree_status_is_ok(status)) {
+    status = queue->vtable->wait_value(
+        queue, wait_semaphore_list, signal_semaphore_list, target_buffer,
+        target_offset, value, mask, value_length, condition, flags);
+  }
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
 static iree_status_t iree_hal_amdgpu_logical_device_queue_update(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,

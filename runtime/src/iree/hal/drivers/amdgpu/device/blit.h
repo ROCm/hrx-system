@@ -76,6 +76,32 @@ typedef struct iree_hal_amdgpu_device_buffer_copy_kernargs_t {
     IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_STAGED_SOURCE_ALIGNMENT - 1) & \
    ~(IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_STAGED_SOURCE_ALIGNMENT - 1))
 
+// Kernel arguments for `iree_hal_amdgpu_device_buffer_wait_value`.
+typedef uint32_t iree_hal_amdgpu_device_buffer_wait_value_condition_t;
+enum iree_hal_amdgpu_device_buffer_wait_value_condition_e {
+  IREE_HAL_AMDGPU_DEVICE_BUFFER_WAIT_VALUE_CONDITION_GREATER_THAN_OR_EQUAL = 0u,
+  IREE_HAL_AMDGPU_DEVICE_BUFFER_WAIT_VALUE_CONDITION_EQUAL = 1u,
+  IREE_HAL_AMDGPU_DEVICE_BUFFER_WAIT_VALUE_CONDITION_BITWISE_AND = 2u,
+  IREE_HAL_AMDGPU_DEVICE_BUFFER_WAIT_VALUE_CONDITION_BITWISE_NOR = 3u,
+};
+
+typedef struct iree_hal_amdgpu_device_buffer_wait_value_kernargs_t {
+  // Naturally aligned device address polled by the kernel.
+  const void* target_ptr;
+  // Comparison value, narrowed to |value_length| by the kernel.
+  uint64_t value;
+  // Mask applied to each loaded value before comparison.
+  uint64_t mask;
+  // Width of the value at |target_ptr| in bytes; either 4 or 8.
+  uint32_t value_length;
+  // Queue wait comparison condition encoded by the AMDGPU API.
+  iree_hal_amdgpu_device_buffer_wait_value_condition_t condition;
+} iree_hal_amdgpu_device_buffer_wait_value_kernargs_t;
+#define IREE_HAL_AMDGPU_DEVICE_BUFFER_WAIT_VALUE_KERNARG_SIZE \
+  sizeof(iree_hal_amdgpu_device_buffer_wait_value_kernargs_t)
+#define IREE_HAL_AMDGPU_DEVICE_BUFFER_WAIT_VALUE_KERNARG_ALIGNMENT \
+  IREE_AMDGPU_ALIGNOF(iree_hal_amdgpu_device_buffer_wait_value_kernargs_t)
+
 // Populates a builtin fill dispatch packet and its kernargs in already-reserved
 // storage. The caller owns packet header commit, completion signal assignment,
 // and queue doorbell signaling.
@@ -103,6 +129,18 @@ bool iree_hal_amdgpu_device_buffer_copy_emplace(
         context,
     iree_hsa_kernel_dispatch_packet_t* IREE_AMDGPU_RESTRICT dispatch_packet,
     const void* source_ptr, void* target_ptr, uint64_t length,
+    void* IREE_AMDGPU_RESTRICT kernarg_ptr);
+
+// Populates a one-work-item buffer value wait dispatch and its kernargs in
+// already-reserved storage. Returns false for unsupported value widths,
+// conditions, or target alignment.
+bool iree_hal_amdgpu_device_buffer_wait_value_emplace(
+    const iree_hal_amdgpu_device_buffer_transfer_context_t* IREE_AMDGPU_RESTRICT
+        context,
+    iree_hsa_kernel_dispatch_packet_t* IREE_AMDGPU_RESTRICT dispatch_packet,
+    const void* target_ptr, uint64_t value, uint64_t mask,
+    uint32_t value_length,
+    iree_hal_amdgpu_device_buffer_wait_value_condition_t condition,
     void* IREE_AMDGPU_RESTRICT kernarg_ptr);
 
 #ifdef __cplusplus

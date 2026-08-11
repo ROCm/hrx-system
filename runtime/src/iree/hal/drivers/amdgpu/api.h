@@ -495,6 +495,40 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_logical_device_create(
     const iree_hal_device_create_params_t* create_params,
     iree_allocator_t host_allocator, iree_hal_device_t** out_device);
 
+// Condition used by an AMDGPU queue-ordered buffer value wait.
+typedef uint32_t iree_hal_amdgpu_wait_value_condition_t;
+enum iree_hal_amdgpu_wait_value_condition_e {
+  // Waits until (loaded_value & mask) >= value.
+  IREE_HAL_AMDGPU_WAIT_VALUE_CONDITION_GREATER_THAN_OR_EQUAL = 0u,
+  // Waits until (loaded_value & mask) == value.
+  IREE_HAL_AMDGPU_WAIT_VALUE_CONDITION_EQUAL = 1u,
+  // Waits until ((loaded_value & mask) & value) != 0.
+  IREE_HAL_AMDGPU_WAIT_VALUE_CONDITION_BITWISE_AND = 2u,
+  // Waits until ((loaded_value | value) & mask) != mask.
+  IREE_HAL_AMDGPU_WAIT_VALUE_CONDITION_BITWISE_NOR = 3u,
+};
+
+// Bitfield specifying flags controlling an AMDGPU buffer value wait.
+typedef uint64_t iree_hal_amdgpu_wait_value_flags_t;
+enum iree_hal_amdgpu_wait_value_flag_bits_t {
+  IREE_HAL_AMDGPU_WAIT_VALUE_FLAG_NONE = 0ull,
+};
+
+// Enqueues an AMDGPU queue wait on a 32- or 64-bit buffer value.
+//
+// The operation waits until the value at |target_offset| satisfies |condition|
+// after applying |mask|. |value_length| must be 4 or 8 and both the buffer
+// offset and backing device address must be naturally aligned to that length.
+// |target_buffer| is retained until the wait completes.
+IREE_API_EXPORT iree_status_t iree_hal_amdgpu_device_queue_wait_value(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    uint64_t value, uint64_t mask, iree_host_size_t value_length,
+    iree_hal_amdgpu_wait_value_condition_t condition,
+    iree_hal_amdgpu_wait_value_flags_t flags);
+
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_driver_t
 //===----------------------------------------------------------------------===//

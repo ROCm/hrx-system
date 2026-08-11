@@ -767,3 +767,98 @@ bool iree_hal_amdgpu_device_buffer_copy_emplace(
                                         grid_size_x, grid_size_y, kernarg_ptr);
   return true;
 }
+
+//===----------------------------------------------------------------------===//
+// iree_hal_amdgpu_device_buffer_wait_value
+//===----------------------------------------------------------------------===//
+
+#if defined(IREE_AMDGPU_TARGET_DEVICE)
+
+static inline IREE_AMDGPU_ATTRIBUTE_ALWAYS_INLINE bool
+iree_hal_amdgpu_device_buffer_wait_value_is_ready(uint64_t loaded_value,
+                                                  uint64_t value, uint64_t mask,
+                                                  uint32_t condition) {
+  switch (condition) {
+    case 0:
+      return (loaded_value & mask) >= value;
+    case 1:
+      return (loaded_value & mask) == value;
+    case 2:
+      return ((loaded_value & mask) & value) != 0;
+    case 3:
+      return ((loaded_value | value) & mask) != mask;
+    default:
+      return true;
+  }
+}
+
+IREE_AMDGPU_ATTRIBUTE_KERNEL void iree_hal_amdgpu_device_buffer_wait_value(
+    const void* target_ptr, const uint64_t value, const uint64_t mask,
+    const uint32_t value_length, const uint32_t condition) {
+  if (value_length == sizeof(uint32_t)) {
+    const iree_amdgpu_scoped_atomic_uint32_t* target =
+        (const iree_amdgpu_scoped_atomic_uint32_t*)target_ptr;
+    while (!iree_hal_amdgpu_device_buffer_wait_value_is_ready(
+        iree_amdgpu_scoped_atomic_load(target, iree_amdgpu_memory_order_relaxed,
+                                       iree_amdgpu_memory_scope_system),
+        (uint32_t)value, (uint32_t)mask, condition)) {
+      iree_amdgpu_yield();
+    }
+  } else {
+    const iree_amdgpu_scoped_atomic_uint64_t* target =
+        (const iree_amdgpu_scoped_atomic_uint64_t*)target_ptr;
+    while (!iree_hal_amdgpu_device_buffer_wait_value_is_ready(
+        iree_amdgpu_scoped_atomic_load(target, iree_amdgpu_memory_order_relaxed,
+                                       iree_amdgpu_memory_scope_system),
+        value, mask, condition)) {
+      iree_amdgpu_yield();
+    }
+  }
+}
+
+#endif  // IREE_AMDGPU_TARGET_DEVICE
+
+bool iree_hal_amdgpu_device_buffer_wait_value_emplace(
+    const iree_hal_amdgpu_device_buffer_transfer_context_t* IREE_AMDGPU_RESTRICT
+        context,
+    iree_hsa_kernel_dispatch_packet_t* IREE_AMDGPU_RESTRICT dispatch_packet,
+    const void* target_ptr, uint64_t value, uint64_t mask,
+    uint32_t value_length,
+    iree_hal_amdgpu_device_buffer_wait_value_condition_t condition,
+    void* IREE_AMDGPU_RESTRICT kernarg_ptr) {
+  if (IREE_AMDGPU_UNLIKELY(
+          !target_ptr ||
+          (value_length != sizeof(uint32_t) &&
+           value_length != sizeof(uint64_t)) ||
+          condition >
+              IREE_HAL_AMDGPU_DEVICE_BUFFER_WAIT_VALUE_CONDITION_BITWISE_NOR ||
+          !iree_amdgpu_has_alignment((uintptr_t)target_ptr, value_length))) {
+    return false;
+  }
+
+  iree_hal_amdgpu_device_buffer_wait_value_kernargs_t* kernargs =
+      (iree_hal_amdgpu_device_buffer_wait_value_kernargs_t*)kernarg_ptr;
+  kernargs->target_ptr = target_ptr;
+  kernargs->value = value;
+  kernargs->mask = mask;
+  kernargs->value_length = value_length;
+  kernargs->condition = condition;
+
+  const iree_hal_amdgpu_device_kernel_args_t* kernel_args =
+      &context->kernels->iree_hal_amdgpu_device_buffer_wait_value;
+  dispatch_packet->setup = kernel_args->setup;
+  dispatch_packet->workgroup_size[0] = 1;
+  dispatch_packet->workgroup_size[1] = 1;
+  dispatch_packet->workgroup_size[2] = 1;
+  dispatch_packet->reserved0 = 0;
+  dispatch_packet->grid_size[0] = 1;
+  dispatch_packet->grid_size[1] = 1;
+  dispatch_packet->grid_size[2] = 1;
+  dispatch_packet->private_segment_size = kernel_args->private_segment_size;
+  dispatch_packet->group_segment_size = kernel_args->group_segment_size;
+  dispatch_packet->kernel_object = kernel_args->kernel_object;
+  dispatch_packet->kernarg_address = kernarg_ptr;
+  dispatch_packet->reserved2 = 0;
+  dispatch_packet->completion_signal = iree_hsa_signal_null();
+  return true;
+}

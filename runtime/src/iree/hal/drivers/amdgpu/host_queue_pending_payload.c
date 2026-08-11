@@ -48,6 +48,22 @@ static iree_status_t iree_hal_amdgpu_pending_op_issue_timestamp(
   return status;
 }
 
+static iree_status_t iree_hal_amdgpu_pending_op_issue_wait_value(
+    iree_hal_amdgpu_pending_op_t* op,
+    const iree_hal_amdgpu_wait_resolution_t* resolution,
+    iree_hal_amdgpu_pending_op_payload_issue_t* issue) {
+  iree_status_t status = iree_hal_amdgpu_host_queue_submit_wait_value(
+      op->queue, resolution, op->signal_semaphore_list,
+      op->wait_value.target_buffer, op->wait_value.target_offset,
+      op->wait_value.value, op->wait_value.mask, op->wait_value.value_length,
+      op->wait_value.condition, op->wait_value.flags,
+      IREE_HAL_AMDGPU_HOST_QUEUE_SUBMISSION_FLAG_NONE, &issue->ready);
+  if (iree_status_is_ok(status) && issue->ready) {
+    op->retained_resource_count = 0;
+  }
+  return status;
+}
+
 static iree_status_t iree_hal_amdgpu_pending_op_issue_copy(
     iree_hal_amdgpu_pending_op_t* op,
     const iree_hal_amdgpu_wait_resolution_t* resolution,
@@ -192,6 +208,8 @@ iree_status_t iree_hal_amdgpu_pending_op_issue_payload(
   switch (op->type) {
     case IREE_HAL_AMDGPU_PENDING_OP_FILL:
       return iree_hal_amdgpu_pending_op_issue_fill(op, resolution, issue);
+    case IREE_HAL_AMDGPU_PENDING_OP_WAIT_VALUE:
+      return iree_hal_amdgpu_pending_op_issue_wait_value(op, resolution, issue);
     case IREE_HAL_AMDGPU_PENDING_OP_COPY:
       return iree_hal_amdgpu_pending_op_issue_copy(op, resolution, issue);
     case IREE_HAL_AMDGPU_PENDING_OP_UPDATE:
@@ -312,6 +330,35 @@ iree_status_t iree_hal_amdgpu_host_queue_defer_timestamp(
   op->timestamp.target_buffer = target_buffer;
   op->timestamp.target_offset = target_offset;
   op->timestamp.flags = flags;
+  *out_op = op;
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amdgpu_host_queue_defer_wait_value(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_semaphore_list_t* wait_semaphore_list,
+    const iree_hal_semaphore_list_t* signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    uint64_t value, uint64_t mask, iree_host_size_t value_length,
+    iree_hal_amdgpu_wait_value_condition_t condition,
+    iree_hal_amdgpu_wait_value_flags_t flags,
+    iree_hal_amdgpu_pending_op_t** out_op) {
+  uint16_t max_resources = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_count_reclaim_resources(
+      signal_semaphore_list->count,
+      /*operation_resource_count=*/1, &max_resources));
+  iree_hal_amdgpu_pending_op_t* op = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pending_op_allocate(
+      queue, wait_semaphore_list, signal_semaphore_list,
+      IREE_HAL_AMDGPU_PENDING_OP_WAIT_VALUE, max_resources, &op));
+  iree_hal_amdgpu_pending_op_retain(op, (iree_hal_resource_t*)target_buffer);
+  op->wait_value.target_buffer = target_buffer;
+  op->wait_value.target_offset = target_offset;
+  op->wait_value.value = value;
+  op->wait_value.mask = mask;
+  op->wait_value.value_length = value_length;
+  op->wait_value.condition = condition;
+  op->wait_value.flags = flags;
   *out_op = op;
   return iree_ok_status();
 }

@@ -6,6 +6,7 @@
 
 #include "iree/hal/drivers/amdgpu/device/blit.h"
 
+#include "iree/hal/device.h"
 #include "iree/testing/gtest.h"
 
 namespace iree::hal::amdgpu {
@@ -24,6 +25,7 @@ constexpr uint64_t kCopyBlockX4KernelObject = 0xC40u;
 constexpr uint64_t kCopyBlockX8KernelObject = 0xC80u;
 constexpr uint64_t kCopyBlockX16KernelObject = 0xC160u;
 constexpr uint64_t kCopyBlockUnalignedX16KernelObject = 0xC161u;
+constexpr uint64_t kWaitValueKernelObject = 0xA17u;
 
 static iree_hal_amdgpu_device_kernel_args_t MakeKernelArgs(
     uint64_t kernel_object, uint16_t setup, uint16_t workgroup_size_x,
@@ -65,6 +67,8 @@ static iree_hal_amdgpu_device_kernels_t MakeKernels() {
       MakeKernelArgs(kCopyBlockX16KernelObject, 10, 32, 13, 17);
   kernels.iree_hal_amdgpu_device_buffer_copy_block_unaligned_x16 =
       MakeKernelArgs(kCopyBlockUnalignedX16KernelObject, 11, 32, 14, 18);
+  kernels.iree_hal_amdgpu_device_buffer_wait_value =
+      MakeKernelArgs(kWaitValueKernelObject, 12, 1, 15, 19);
   return kernels;
 }
 
@@ -562,6 +566,81 @@ TEST(BlitTest, CopyEmplaceUsesTwoDimensionalGridWhenResidentWorkExceedsXDim) {
   EXPECT_EQ(packet.grid_size[2], 1);
   EXPECT_EQ(packet.kernel_object, kCopyBlockUnalignedX16KernelObject);
   EXPECT_EQ(kernargs.element_length, UINT64_MAX);
+}
+
+TEST(BlitTest, WaitValueEmplacePopulatesOneWorkItemDispatch) {
+  const iree_hal_amdgpu_device_kernels_t kernels = MakeKernels();
+  const iree_hal_amdgpu_device_buffer_transfer_context_t context =
+      MakeContext(&kernels);
+  iree_hsa_kernel_dispatch_packet_t packet = {};
+  iree_hal_amdgpu_device_buffer_wait_value_kernargs_t kernargs = {};
+
+  ASSERT_TRUE(iree_hal_amdgpu_device_buffer_wait_value_emplace(
+      &context, &packet, (const void*)0x8000, 0x1122334455667788ull,
+      0xFFEEDDCCBBAA0099ull, sizeof(uint64_t),
+      IREE_HAL_AMDGPU_DEVICE_BUFFER_WAIT_VALUE_CONDITION_BITWISE_NOR,
+      &kernargs));
+
+  EXPECT_EQ(packet.setup, 12);
+  EXPECT_EQ(packet.workgroup_size[0], 1);
+  EXPECT_EQ(packet.workgroup_size[1], 1);
+  EXPECT_EQ(packet.workgroup_size[2], 1);
+  EXPECT_EQ(packet.grid_size[0], 1);
+  EXPECT_EQ(packet.grid_size[1], 1);
+  EXPECT_EQ(packet.grid_size[2], 1);
+  EXPECT_EQ(packet.private_segment_size, 15);
+  EXPECT_EQ(packet.group_segment_size, 19);
+  EXPECT_EQ(packet.kernel_object, kWaitValueKernelObject);
+  EXPECT_EQ(packet.kernarg_address, &kernargs);
+  EXPECT_EQ(packet.completion_signal.handle, iree_hsa_signal_null().handle);
+
+  EXPECT_EQ(kernargs.target_ptr, (const void*)0x8000);
+  EXPECT_EQ(kernargs.value, 0x1122334455667788ull);
+  EXPECT_EQ(kernargs.mask, 0xFFEEDDCCBBAA0099ull);
+  EXPECT_EQ(kernargs.value_length, sizeof(uint64_t));
+  EXPECT_EQ(kernargs.condition,
+            IREE_HAL_AMDGPU_DEVICE_BUFFER_WAIT_VALUE_CONDITION_BITWISE_NOR);
+}
+
+TEST(BlitTest, WaitValueEmplaceAcceptsAligned32BitValues) {
+  const iree_hal_amdgpu_device_kernels_t kernels = MakeKernels();
+  const iree_hal_amdgpu_device_buffer_transfer_context_t context =
+      MakeContext(&kernels);
+  iree_hsa_kernel_dispatch_packet_t packet = {};
+  iree_hal_amdgpu_device_buffer_wait_value_kernargs_t kernargs = {};
+
+  ASSERT_TRUE(iree_hal_amdgpu_device_buffer_wait_value_emplace(
+      &context, &packet, (const void*)0x8004, 7, UINT32_MAX, sizeof(uint32_t),
+      IREE_HAL_AMDGPU_DEVICE_BUFFER_WAIT_VALUE_CONDITION_EQUAL, &kernargs));
+
+  EXPECT_EQ(kernargs.target_ptr, (const void*)0x8004);
+  EXPECT_EQ(kernargs.value, 7u);
+  EXPECT_EQ(kernargs.mask, UINT32_MAX);
+  EXPECT_EQ(kernargs.value_length, sizeof(uint32_t));
+  EXPECT_EQ(kernargs.condition,
+            IREE_HAL_AMDGPU_DEVICE_BUFFER_WAIT_VALUE_CONDITION_EQUAL);
+}
+
+TEST(BlitTest, WaitValueEmplaceRejectsInvalidInputs) {
+  const iree_hal_amdgpu_device_kernels_t kernels = MakeKernels();
+  const iree_hal_amdgpu_device_buffer_transfer_context_t context =
+      MakeContext(&kernels);
+  iree_hsa_kernel_dispatch_packet_t packet = {};
+  iree_hal_amdgpu_device_buffer_wait_value_kernargs_t kernargs = {};
+
+  EXPECT_FALSE(iree_hal_amdgpu_device_buffer_wait_value_emplace(
+      &context, &packet, nullptr, 0, 0, sizeof(uint32_t),
+      IREE_HAL_AMDGPU_DEVICE_BUFFER_WAIT_VALUE_CONDITION_EQUAL, &kernargs));
+  EXPECT_FALSE(iree_hal_amdgpu_device_buffer_wait_value_emplace(
+      &context, &packet, (const void*)0x8002, 0, 0, sizeof(uint32_t),
+      IREE_HAL_AMDGPU_DEVICE_BUFFER_WAIT_VALUE_CONDITION_EQUAL, &kernargs));
+  EXPECT_FALSE(iree_hal_amdgpu_device_buffer_wait_value_emplace(
+      &context, &packet, (const void*)0x8000, 0, 0, sizeof(uint16_t),
+      IREE_HAL_AMDGPU_DEVICE_BUFFER_WAIT_VALUE_CONDITION_EQUAL, &kernargs));
+  EXPECT_FALSE(iree_hal_amdgpu_device_buffer_wait_value_emplace(
+      &context, &packet, (const void*)0x8000, 0, 0, sizeof(uint32_t),
+      IREE_HAL_AMDGPU_DEVICE_BUFFER_WAIT_VALUE_CONDITION_BITWISE_NOR + 1,
+      &kernargs));
 }
 
 }  // namespace

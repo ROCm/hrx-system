@@ -23,6 +23,7 @@ typedef struct iree_hal_amdgpu_wait_entry_t iree_hal_amdgpu_wait_entry_t;
 // a per-operation capture struct in the pending_op_t union.
 typedef enum iree_hal_amdgpu_pending_op_type_e {
   IREE_HAL_AMDGPU_PENDING_OP_FILL,
+  IREE_HAL_AMDGPU_PENDING_OP_WAIT_VALUE,
   IREE_HAL_AMDGPU_PENDING_OP_COPY,
   IREE_HAL_AMDGPU_PENDING_OP_UPDATE,
   IREE_HAL_AMDGPU_PENDING_OP_DISPATCH,
@@ -114,6 +115,24 @@ struct iree_hal_amdgpu_pending_op_t {
       // HAL fill flags captured from queue_fill.
       iree_hal_fill_flags_t flags;
     } fill;
+
+    // Captured queue_wait_value payload.
+    struct {
+      // Target buffer retained until the deferred wait operation issues.
+      iree_hal_buffer_t* target_buffer;
+      // Target byte offset captured from queue_wait_value.
+      iree_device_size_t target_offset;
+      // Comparison value captured from queue_wait_value.
+      uint64_t value;
+      // Comparison mask captured from queue_wait_value.
+      uint64_t mask;
+      // Width of the target value in bytes.
+      iree_host_size_t value_length;
+      // Comparison condition captured from queue_wait_value.
+      iree_hal_amdgpu_wait_value_condition_t condition;
+      // Wait flags captured from queue_wait_value.
+      iree_hal_amdgpu_wait_value_flags_t flags;
+    } wait_value;
 
     // Captured queue_copy/read/write payload.
     struct {

@@ -401,6 +401,139 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_fill(
   return status;
 }
 
+static_assert(IREE_HAL_AMDGPU_DEVICE_BUFFER_WAIT_VALUE_KERNARG_SIZE <=
+                  sizeof(iree_hal_amdgpu_kernarg_block_t),
+              "wait value kernargs must fit in one kernarg ring block");
+static_assert(
+    (uint32_t)IREE_HAL_AMDGPU_WAIT_VALUE_CONDITION_GREATER_THAN_OR_EQUAL ==
+        (uint32_t)
+            IREE_HAL_AMDGPU_DEVICE_BUFFER_WAIT_VALUE_CONDITION_GREATER_THAN_OR_EQUAL,
+    "public and builtin wait conditions must match");
+static_assert((uint32_t)IREE_HAL_AMDGPU_WAIT_VALUE_CONDITION_EQUAL ==
+                  (uint32_t)
+                      IREE_HAL_AMDGPU_DEVICE_BUFFER_WAIT_VALUE_CONDITION_EQUAL,
+              "public and builtin wait conditions must match");
+static_assert(
+    (uint32_t)IREE_HAL_AMDGPU_WAIT_VALUE_CONDITION_BITWISE_AND ==
+        (uint32_t)
+            IREE_HAL_AMDGPU_DEVICE_BUFFER_WAIT_VALUE_CONDITION_BITWISE_AND,
+    "public and builtin wait conditions must match");
+static_assert(
+    (uint32_t)IREE_HAL_AMDGPU_WAIT_VALUE_CONDITION_BITWISE_NOR ==
+        (uint32_t)
+            IREE_HAL_AMDGPU_DEVICE_BUFFER_WAIT_VALUE_CONDITION_BITWISE_NOR,
+    "public and builtin wait conditions must match");
+
+static iree_status_t iree_hal_amdgpu_host_queue_prepare_wait_value_dispatch(
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    uint64_t value, uint64_t mask, iree_host_size_t value_length,
+    iree_hal_amdgpu_wait_value_condition_t condition,
+    iree_hal_amdgpu_wait_value_flags_t flags,
+    const iree_hal_amdgpu_device_buffer_transfer_context_t* transfer_context,
+    iree_hsa_kernel_dispatch_packet_t* out_dispatch_packet,
+    iree_hal_amdgpu_device_buffer_wait_value_kernargs_t* out_kernargs) {
+  if (IREE_UNLIKELY(!target_buffer)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "target buffer must be non-null");
+  }
+  if (IREE_UNLIKELY(value_length != sizeof(uint32_t) &&
+                    value_length != sizeof(uint64_t))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "wait value length must be 4 or 8 bytes");
+  }
+  if (IREE_UNLIKELY(condition >
+                    IREE_HAL_AMDGPU_WAIT_VALUE_CONDITION_BITWISE_NOR)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported wait value condition: %u", condition);
+  }
+  if (IREE_UNLIKELY(flags != IREE_HAL_AMDGPU_WAIT_VALUE_FLAG_NONE)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported wait value flags: 0x%" PRIx64, flags);
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_usage(
+      iree_hal_buffer_allowed_usage(target_buffer),
+      IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ));
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_access(
+      iree_hal_buffer_allowed_access(target_buffer),
+      IREE_HAL_MEMORY_ACCESS_READ));
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_range(
+      target_buffer, target_offset, value_length));
+
+  iree_hal_buffer_t* allocated_target_buffer =
+      iree_hal_buffer_allocated_buffer(target_buffer);
+  const uint8_t* target_device_ptr =
+      (const uint8_t*)iree_hal_amdgpu_buffer_device_pointer(
+          allocated_target_buffer);
+  if (IREE_UNLIKELY(!target_device_ptr)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "target buffer must be backed by an AMDGPU allocation");
+  }
+  target_device_ptr +=
+      iree_hal_buffer_byte_offset(target_buffer) + target_offset;
+
+  iree_hsa_kernel_dispatch_packet_t dispatch_packet;
+  memset(&dispatch_packet, 0, sizeof(dispatch_packet));
+  iree_hal_amdgpu_device_buffer_wait_value_kernargs_t kernargs;
+  memset(&kernargs, 0, sizeof(kernargs));
+  if (IREE_UNLIKELY(!iree_hal_amdgpu_device_buffer_wait_value_emplace(
+          transfer_context, &dispatch_packet, target_device_ptr, value, mask,
+          (uint32_t)value_length,
+          (iree_hal_amdgpu_device_buffer_wait_value_condition_t)condition,
+          &kernargs))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "wait value target offset must be naturally aligned");
+  }
+  dispatch_packet.kernarg_address = NULL;
+  *out_dispatch_packet = dispatch_packet;
+  *out_kernargs = kernargs;
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amdgpu_host_queue_submit_wait_value(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_amdgpu_wait_resolution_t* resolution,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    uint64_t value, uint64_t mask, iree_host_size_t value_length,
+    iree_hal_amdgpu_wait_value_condition_t condition,
+    iree_hal_amdgpu_wait_value_flags_t flags,
+    iree_hal_amdgpu_host_queue_submission_flags_t submission_flags,
+    bool* out_ready) {
+  IREE_ASSERT_ARGUMENT(out_ready);
+  *out_ready = false;
+  if (IREE_UNLIKELY(queue->is_shutting_down)) {
+    return iree_make_status(IREE_STATUS_CANCELLED, "queue shutting down");
+  }
+
+  iree_hsa_kernel_dispatch_packet_t dispatch_packet;
+  iree_hal_amdgpu_device_buffer_wait_value_kernargs_t kernargs;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_prepare_wait_value_dispatch(
+      target_buffer, target_offset, value, mask, value_length, condition, flags,
+      queue->transfer_context, &dispatch_packet, &kernargs));
+
+  iree_hal_resource_t* operation_resources[1] = {
+      (iree_hal_resource_t*)target_buffer,
+  };
+  iree_hal_amdgpu_host_queue_profile_event_info_t profile_event_info =
+      iree_hal_amdgpu_host_queue_make_blit_profile_event_info(
+          IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_BARRIER, 0);
+  uint64_t submission_id = 0;
+  iree_status_t status = iree_hal_amdgpu_host_queue_submit_dispatch_packet(
+      queue, resolution, signal_semaphore_list, &dispatch_packet, &kernargs,
+      sizeof(kernargs), operation_resources,
+      IREE_ARRAYSIZE(operation_resources), IREE_HSA_FENCE_SCOPE_SYSTEM,
+      IREE_HSA_FENCE_SCOPE_NONE, &profile_event_info, submission_flags,
+      out_ready, &submission_id);
+  if (iree_status_is_ok(status) && *out_ready) {
+    iree_hal_amdgpu_host_queue_record_submitted_blit_profile_event(
+        queue, resolution, signal_semaphore_list, submission_id,
+        &profile_event_info);
+  }
+  return status;
+}
+
 static_assert(IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_KERNARG_SIZE <=
                   sizeof(iree_hal_amdgpu_kernarg_block_t),
               "copy kernargs must fit in one kernarg ring block");

@@ -61,6 +61,7 @@ IREE_HAL_AMDGPU_DEVICE_KERNEL(
     IREE_HAL_AMDGPU_BLIT_WORKGROUP_SIZE_X,
     IREE_HAL_AMDGPU_BLIT_WORKGROUP_SIZE_Y,
     IREE_HAL_AMDGPU_BLIT_WORKGROUP_SIZE_Z)
+IREE_HAL_AMDGPU_DEVICE_KERNEL(iree_hal_amdgpu_device_buffer_wait_value, 1, 1, 1)
 
 //===----------------------------------------------------------------------===//
 // Dispatch helpers (dispatch.h)
