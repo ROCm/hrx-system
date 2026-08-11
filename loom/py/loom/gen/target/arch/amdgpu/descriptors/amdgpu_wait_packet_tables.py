@@ -751,7 +751,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("at least one output path is required")
 
     generate_wait_packet_table_outputs(
-        load_amdgpu_planning_table_inputs(args.isa_xml),
+        load_amdgpu_planning_table_inputs(args.isa_xml, {}),
         descriptor_rows_path=args.descriptor_rows,
         immediate_rows_path=args.immediate_rows,
         descriptor_ranges_path=args.descriptor_ranges,

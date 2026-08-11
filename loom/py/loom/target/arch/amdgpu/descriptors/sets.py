@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from functools import cache
 
 from loom.target.arch.amdgpu.encoding import (
     AMDGPU_GFX125X_VOP3_SCALE_SEL_BIT_COUNT,
@@ -892,6 +893,7 @@ def _cdna_core_overlays(
     )
 
 
+@cache
 def _gfx940_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return _cdna_core_overlays(
         packed8_source_semantics="fnuz",
@@ -905,6 +907,7 @@ def _gfx940_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     )
 
 
+@cache
 def _gfx950_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return _cdna_core_overlays(
         packed8_source_semantics="ocp",
@@ -918,6 +921,7 @@ def _gfx950_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     )
 
 
+@cache
 def _gfx9_4_generic_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     common_overlays = _amdgpu_descriptor_overlay_intersection(
         _gfx940_core_overlays(), _gfx950_core_overlays()
@@ -961,6 +965,7 @@ def _gfx9_4_generic_core_overlay_descriptors(
     )
 
 
+@cache
 def _gfx11_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         _s_add_u32_overlay(),
@@ -1473,6 +1478,7 @@ def _gfx11_core_overlay_descriptors(
     )
 
 
+@cache
 def _gfx115x_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         *_gfx11_core_overlays(),
@@ -1494,6 +1500,7 @@ def _gfx115x_core_overlay_descriptors(
     )
 
 
+@cache
 def _gfx11_generic_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return _amdgpu_descriptor_overlay_intersection(
         _gfx11_core_overlays(),
@@ -1734,6 +1741,7 @@ def _rdna4m_minmax_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     )
 
 
+@cache
 def _rdna4m_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     minmax_overlays = _rdna4m_minmax_overlays()
     minmax_descriptor_keys = {overlay.descriptor_key for overlay in minmax_overlays}
@@ -1780,6 +1788,7 @@ def _gfx11_generic_core_overlay_descriptors(
     )
 
 
+@cache
 def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         _s_add_u32_overlay(),
@@ -2163,6 +2172,7 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     )
 
 
+@cache
 def _gfx12_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return _rdna4_core_overlays()
 
@@ -2175,6 +2185,7 @@ def _gfx12_core_overlay_descriptors(
     )
 
 
+@cache
 def _gfx12_generic_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return _amdgpu_descriptor_overlay_intersection(_gfx12_core_overlays())
 
@@ -2187,6 +2198,7 @@ def _gfx12_generic_core_overlay_descriptors(
     )
 
 
+@cache
 def _gfx125x_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         *(
@@ -2639,6 +2651,7 @@ def _gfx1250_a0_core_overlay_descriptors(
     return _with_gfx1250_a0_matrix_schedules(_gfx125x_core_overlay_descriptors(spec))
 
 
+@cache
 def _gfx12_5_generic_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return tuple(
         overlay

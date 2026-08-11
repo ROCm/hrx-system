@@ -8,17 +8,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 
 from loom.target.arch.amdgpu.descriptors import (
+    amdgpu_core_descriptor_set_instruction_names_by_isa_key,
     build_amdgpu_core_descriptor_set_from_specs,
 )
 from loom.target.arch.amdgpu.isa_xml import (
     AmdgpuIsaFactSource,
-    parse_amdgpu_isa_xml_path,
+    parse_amdgpu_isa_xml_paths_for_instructions,
 )
 from loom.target.arch.amdgpu.target_info import (
     AmdgpuDescriptorSetInfo,
@@ -39,11 +40,10 @@ class AmdgpuPlanningTableInputs:
     descriptor_sets_by_key: Mapping[str, DescriptorSet]
 
 
-def _parse_isa_xml_arguments(
+def _parse_isa_xml_paths(
     values: Sequence[str],
-) -> dict[str, AmdgpuIsaFactSource]:
+) -> dict[str, Path]:
     paths: dict[str, Path] = {}
-    specs: dict[str, AmdgpuIsaFactSource] = {}
     for value in values:
         key, separator, path_text = value.partition(":")
         if not separator or not key or not path_text:
@@ -55,17 +55,23 @@ def _parse_isa_xml_arguments(
                 raise ValueError(f"AMDGPU planning-table ISA XML key '{key}' has conflicting paths '{existing_path}' and '{path}'")
             continue
         paths[key] = path
-        specs[key] = parse_amdgpu_isa_xml_path(path)
-    return specs
+    return paths
 
 
 def load_amdgpu_planning_table_inputs(
     isa_xml_arguments: Sequence[str],
+    additional_instruction_names_by_isa_key: Mapping[str, Iterable[str]],
 ) -> AmdgpuPlanningTableInputs:
     """Loads one ISA corpus and materializes every registered descriptor set."""
 
     descriptor_set_infos = sorted_descriptor_set_infos()
-    isa_specs = _parse_isa_xml_arguments(isa_xml_arguments)
+    instruction_names_by_isa_key = {isa_key: set(instruction_names) for isa_key, instruction_names in (amdgpu_core_descriptor_set_instruction_names_by_isa_key(descriptor_set_infos).items())}
+    for isa_key, additional_instruction_names in additional_instruction_names_by_isa_key.items():
+        instruction_names_by_isa_key.setdefault(isa_key, set()).update(additional_instruction_names)
+    isa_specs = parse_amdgpu_isa_xml_paths_for_instructions(
+        _parse_isa_xml_paths(isa_xml_arguments),
+        instruction_names_by_isa_key,
+    )
     descriptor_sets_by_key: dict[str, DescriptorSet] = {}
     for info in descriptor_set_infos:
         descriptor_set = build_amdgpu_core_descriptor_set_from_specs(

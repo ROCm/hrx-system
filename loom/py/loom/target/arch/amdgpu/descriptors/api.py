@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from functools import cache
 
 from loom.target.arch.amdgpu.encoding import (
@@ -39,6 +39,7 @@ from loom.target.arch.amdgpu.target_info import (
     AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA,
     AMDGPU_PROCESSOR_INFOS,
     AMDGPU_TARGET_INFOS,
+    AmdgpuDescriptorSetInfo,
     amdgpu_descriptor_set_info_by_generator_target,
     amdgpu_descriptor_set_supported_target_contract_keys,
     amdgpu_target_descriptor_set_key,
@@ -49,6 +50,10 @@ from .categories import *
 from .cluster import _gfx125x_cluster_descriptors
 from .common import *
 from .control import _s_delay_alu_descriptor, _s_wait_xcnt_descriptor
+from .rdna4m import (
+    _RDNA4M_IEEE_MINMAX_INSTRUCTION_ROWS,
+    _RDNA4M_NUMERIC_MINMAX_INSTRUCTION_ROWS,
+)
 from .sets import *
 from .tensor import _gfx125x_tensor_descriptors
 
@@ -1411,13 +1416,27 @@ def _with_instruction_classes(descriptor_set: DescriptorSet) -> DescriptorSet:
 
 _AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X = 1 << 0
 
+_AMDGPU_CORE_INSTRUCTION_FACT_NAMES = (
+    "S_GETPC_B64",
+    "S_MOV_B32",
+    "S_MOV_B64",
+    "S_XOR_B64",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class _AmdgpuCoreDescriptorSetBuilder:
+    # Static target-low descriptor-set skeleton.
     base: DescriptorSet
+    # Pure source overlay rows owned by the target contract.
     overlay_rows: Callable[[], tuple[AmdgpuDescriptorOverlay, ...]]
+    # Materializer that applies the overlay rows to imported ISA facts.
     overlay_descriptors: Callable[[AmdgpuIsaFactSource], tuple[Descriptor, ...]]
+    # XML donor instructions needed to synthesize target-owned facts.
+    source_instruction_names: tuple[str, ...] = ()
+    # Target-owned descriptors that have no XML overlay.
     extra_descriptors: tuple[Descriptor, ...] = ()
+    # Builder behavior flags.
     flags: int = 0
 
 
@@ -1480,6 +1499,17 @@ _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
         base=_AMDGPU_RDNA4M_CORE_DESCRIPTOR_SET_BASE,
         overlay_rows=_rdna4m_core_overlays,
         overlay_descriptors=_rdna4m_core_overlay_descriptors,
+        source_instruction_names=tuple(
+            sorted(
+                {
+                    row[0]
+                    for row in (
+                        *_RDNA4M_NUMERIC_MINMAX_INSTRUCTION_ROWS,
+                        *_RDNA4M_IEEE_MINMAX_INSTRUCTION_ROWS,
+                    )
+                }
+            )
+        ),
         extra_descriptors=(_s_delay_alu_descriptor(),),
     ),
     "rdna4": _AmdgpuCoreDescriptorSetBuilder(
@@ -1514,6 +1544,44 @@ _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
 AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS = tuple(
     sorted(_AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)
 )
+
+
+@cache
+def amdgpu_core_descriptor_set_instruction_names(target: str) -> tuple[str, ...]:
+    """Returns the imported instruction facts needed by one target contract."""
+
+    try:
+        builder = _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS[target]
+    except KeyError as exc:
+        supported = ", ".join(AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS)
+        raise ValueError(
+            f"unsupported AMDGPU descriptor target '{target}'; "
+            f"expected one of: {supported}"
+        ) from exc
+    names = set(_AMDGPU_CORE_INSTRUCTION_FACT_NAMES)
+    names.update(overlay.instruction_name for overlay in builder.overlay_rows())
+    names.update(builder.source_instruction_names)
+    return tuple(sorted(names))
+
+
+def amdgpu_core_descriptor_set_instruction_names_by_isa_key(
+    descriptor_set_infos: Iterable[AmdgpuDescriptorSetInfo],
+) -> dict[str, tuple[str, ...]]:
+    """Returns the union of imported instruction facts required per ISA XML."""
+
+    names_by_isa_key: dict[str, set[str]] = {}
+    for info in descriptor_set_infos:
+        instruction_names = amdgpu_core_descriptor_set_instruction_names(
+            info.generator_target
+        )
+        for isa_info in info.isa_infos:
+            names_by_isa_key.setdefault(isa_info.isa_xml_key, set()).update(
+                instruction_names
+            )
+    return {
+        isa_key: tuple(sorted(instruction_names))
+        for isa_key, instruction_names in sorted(names_by_isa_key.items())
+    }
 
 
 def _build_amdgpu_core_descriptor_set_from_spec(
@@ -1639,6 +1707,8 @@ __all__ = (
     "_validate_dpp_control_fields",
     "_with_overlay_descriptors",
     "amdgpu_common_reg_class_ids",
+    "amdgpu_core_descriptor_set_instruction_names",
+    "amdgpu_core_descriptor_set_instruction_names_by_isa_key",
     "amdgpu_descriptor_id_keys",
     "amdgpu_descriptor_ref_keys",
     "amdgpu_immediate_encoding_id_items",

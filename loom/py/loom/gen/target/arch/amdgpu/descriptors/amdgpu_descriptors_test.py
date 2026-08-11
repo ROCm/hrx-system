@@ -79,9 +79,10 @@ def test_storage_generation_reuses_parsed_isa_for_declared_views() -> None:
     parse_calls: list[Path] = []
     build_calls: list[tuple[str, object]] = []
 
-    def parse_xml(path: Path) -> object:
-        parse_calls.append(path)
-        return parsed_spec
+    def parse_xml(paths: dict[str, Path], instruction_names: dict[str, tuple[str, ...]]) -> dict[str, object]:
+        assert instruction_names == {"test": ("TEST",)}
+        parse_calls.extend(paths.values())
+        return {"test": parsed_spec}
 
     def build_descriptor_set(target: str, specs: dict[str, object]) -> DescriptorSet:
         build_calls.append((target, specs))
@@ -138,7 +139,16 @@ def test_storage_generation_reuses_parsed_isa_for_declared_views() -> None:
             "amdgpu_descriptor_set_view_infos_by_storage_generator_target",
             view_infos_by_storage_target,
         ),
-        mock.patch.object(amdgpu_descriptors, "parse_amdgpu_isa_xml_path", parse_xml),
+        mock.patch.object(
+            amdgpu_descriptors,
+            "amdgpu_core_descriptor_set_instruction_names_by_isa_key",
+            return_value={"test": ("TEST",)},
+        ),
+        mock.patch.object(
+            amdgpu_descriptors,
+            "parse_amdgpu_isa_xml_paths_for_instructions",
+            parse_xml,
+        ),
         mock.patch.object(
             amdgpu_descriptors,
             "build_amdgpu_core_descriptor_set_from_specs",

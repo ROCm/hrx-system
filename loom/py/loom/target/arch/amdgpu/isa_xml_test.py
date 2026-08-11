@@ -14,6 +14,7 @@ from loom.target.arch.amdgpu.isa_xml import (
     AmdgpuIsaXmlError,
     parse_amdgpu_isa_xml_instructions_path,
     parse_amdgpu_isa_xml_path,
+    parse_amdgpu_isa_xml_path_for_instructions,
     parse_amdgpu_isa_xml_text,
 )
 
@@ -509,6 +510,27 @@ def test_parse_amdgpu_isa_xml_instructions_path_matches_full_facts(
         full_spec.instruction_encoding_summaries(
             instruction_names, include_aliases=False
         )
+    )
+
+
+def test_parse_amdgpu_isa_xml_path_for_instructions_preserves_shared_facts(
+    tmp_path: Path,
+) -> None:
+    xml_path = tmp_path / "amdgpu_isa.xml"
+    xml_path.write_text(SAMPLE_XML)
+
+    full_spec = parse_amdgpu_isa_xml_path(xml_path)
+    selected_spec = parse_amdgpu_isa_xml_path_for_instructions(
+        xml_path,
+        ("S_ADD_U32", "S_WAIT_IDLE", "MISSING"),
+    )
+
+    assert selected_spec.architecture_name == full_spec.architecture_name
+    assert selected_spec.architecture_id == full_spec.architecture_id
+    assert selected_spec.encodings == full_spec.encodings
+    assert selected_spec.operand_types == full_spec.operand_types
+    assert selected_spec.instructions == full_spec.select_instructions(
+        ("S_ADD_U32", "S_WAIT_IDLE")
     )
 
 

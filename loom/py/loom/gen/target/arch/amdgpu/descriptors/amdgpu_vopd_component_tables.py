@@ -42,6 +42,7 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION,
     AmdgpuDescriptorSetInfo,
     amdgpu_descriptor_set_ordinal,
+    sorted_descriptor_set_infos,
 )
 from loom.target.low_descriptors import ConstraintKind, Descriptor  # noqa: E402
 
@@ -463,6 +464,29 @@ def _component_definitions() -> tuple[_VopdComponentDefinition, ...]:
             xml_instruction_name=None,
         ),
     )
+
+
+def amdgpu_vopd_instruction_names_by_isa_key() -> dict[str, tuple[str, ...]]:
+    """Returns XML instruction facts consumed by VOPD table validation."""
+
+    descriptor_set_infos = sorted_descriptor_set_infos()
+    descriptor_set_infos_by_key = _descriptor_set_infos_by_key(descriptor_set_infos)
+    names_by_isa_key: dict[str, set[str]] = {}
+    for component in _component_definitions():
+        descriptor_set_keys = _descriptor_set_keys_for_group(
+            component.descriptor_set_group,
+            descriptor_set_infos,
+        )
+        for descriptor_set_key in descriptor_set_keys:
+            info = descriptor_set_infos_by_key[descriptor_set_key]
+            for isa_info in info.isa_infos:
+                instruction_name = _xml_instruction_name(
+                    component,
+                    isa_info.isa_xml_key,
+                )
+                if instruction_name is not None:
+                    names_by_isa_key.setdefault(isa_info.isa_xml_key, set()).add(instruction_name)
+    return {isa_key: tuple(sorted(instruction_names)) for isa_key, instruction_names in sorted(names_by_isa_key.items())}
 
 
 def _descriptor_set_infos_by_key(
@@ -1503,7 +1527,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("at least one output path is required")
 
     generate_vopd_component_table_outputs(
-        load_amdgpu_planning_table_inputs(args.isa_xml),
+        load_amdgpu_planning_table_inputs(
+            args.isa_xml,
+            amdgpu_vopd_instruction_names_by_isa_key(),
+        ),
         component_rules_path=args.component_rules,
         descriptor_lookup_ranges_path=args.descriptor_lookup_ranges,
         descriptor_lookups_path=args.descriptor_lookups,

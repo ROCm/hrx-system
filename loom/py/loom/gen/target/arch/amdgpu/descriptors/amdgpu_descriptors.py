@@ -30,11 +30,11 @@ from loom.gen.target.low.low_descriptors import (  # noqa: E402
 )
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS,
+    amdgpu_core_descriptor_set_instruction_names_by_isa_key,
     build_amdgpu_core_descriptor_set_from_specs,
 )
 from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
-    AmdgpuIsaFactSource,
-    parse_amdgpu_isa_xml_path,
+    parse_amdgpu_isa_xml_paths_for_instructions,
 )
 from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AmdgpuDescriptorSetInfo,
@@ -57,18 +57,18 @@ def _parse_view_headers(values: Sequence[str]) -> dict[str, Path]:
     return view_headers
 
 
-def _parse_isa_xml_arguments(
+def _parse_isa_xml_paths(
     values: Sequence[str],
-) -> dict[str, AmdgpuIsaFactSource]:
-    specs: dict[str, AmdgpuIsaFactSource] = {}
+) -> dict[str, Path]:
+    paths: dict[str, Path] = {}
     for value in values:
         key, separator, path = value.partition(":")
         if not separator or not key or not path:
             raise ValueError("AMDGPU descriptor --isa-xml entries must be key:path pairs")
-        if key in specs:
+        if key in paths:
             raise ValueError(f"AMDGPU descriptor ISA XML key '{key}' is duplicate")
-        specs[key] = parse_amdgpu_isa_xml_path(Path(path))
-    return specs
+        paths[key] = Path(path)
+    return paths
 
 
 def _view_infos_for_storage_target(
@@ -144,7 +144,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if storage_info != descriptor_set_info:
         raise ValueError(f"AMDGPU descriptor target {args.target} is a view of storage target {storage_info.generator_target}; generate the storage target with --view-header instead")
     view_infos = _view_infos_for_storage_target(descriptor_set_info, view_headers)
-    isa_specs = _parse_isa_xml_arguments(args.isa_xml)
+    descriptor_set_infos = (descriptor_set_info, *view_infos)
+    isa_specs = parse_amdgpu_isa_xml_paths_for_instructions(
+        _parse_isa_xml_paths(args.isa_xml),
+        amdgpu_core_descriptor_set_instruction_names_by_isa_key(descriptor_set_infos),
+    )
     descriptor_set = build_amdgpu_core_descriptor_set_from_specs(args.target, isa_specs)
     if view_infos:
         view_descriptor_sets = tuple(build_amdgpu_core_descriptor_set_from_specs(info.generator_target, isa_specs) for info in view_infos)

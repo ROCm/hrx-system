@@ -15,7 +15,7 @@ overlays keyed by the normalized instruction facts produced here.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -407,6 +407,53 @@ def parse_amdgpu_isa_xml_path(path: str | Path) -> AmdgpuIsaSpec:
     return _parse_spec_root(root, source_name)
 
 
+def parse_amdgpu_isa_xml_path_for_instructions(
+    path: str | Path, instruction_names: Iterable[str]
+) -> AmdgpuIsaSpec:
+    """Parses complete shared facts and only the requested instructions.
+
+    Instruction aliases participate in selection so the returned fact source
+    preserves normal ``select_instructions(..., include_aliases=True)``
+    behavior for every requested name. Names absent from the XML are omitted so
+    consumers can supplement or reject them according to their own contract.
+    """
+    root, source_name = _parse_amdgpu_isa_xml_root_path(path)
+    return _parse_spec_root(
+        root,
+        source_name,
+        instruction_names=frozenset(instruction_names),
+    )
+
+
+def parse_amdgpu_isa_xml_paths_for_instructions(
+    paths_by_isa_key: Mapping[str, str | Path],
+    instruction_names_by_isa_key: Mapping[str, Iterable[str]],
+) -> dict[str, AmdgpuIsaSpec]:
+    """Parses a keyed ISA corpus using its exact instruction fact demands."""
+
+    path_keys = paths_by_isa_key.keys()
+    instruction_keys = instruction_names_by_isa_key.keys()
+    missing_keys = sorted(instruction_keys - path_keys)
+    unexpected_keys = sorted(path_keys - instruction_keys)
+    if missing_keys or unexpected_keys:
+        details = []
+        if missing_keys:
+            details.append("missing " + ", ".join(missing_keys))
+        if unexpected_keys:
+            details.append("unexpected " + ", ".join(unexpected_keys))
+        raise ValueError(
+            "AMDGPU ISA XML paths do not match instruction fact demands: "
+            + "; ".join(details)
+        )
+    return {
+        isa_key: parse_amdgpu_isa_xml_path_for_instructions(
+            paths_by_isa_key[isa_key],
+            instruction_names,
+        )
+        for isa_key, instruction_names in instruction_names_by_isa_key.items()
+    }
+
+
 def parse_amdgpu_isa_xml_instructions_path(
     path: str | Path, instruction_names: Iterable[str]
 ) -> AmdgpuIsaInstructionSet:
@@ -544,7 +591,12 @@ def _parse_instruction_set_root(
     )
 
 
-def _parse_spec_root(root: ElementTree.Element, source_name: str) -> AmdgpuIsaSpec:
+def _parse_spec_root(
+    root: ElementTree.Element,
+    source_name: str,
+    *,
+    instruction_names: frozenset[str] | None = None,
+) -> AmdgpuIsaSpec:
     isa_element, architecture_name, architecture_id = _parse_spec_identity(
         root, source_name
     )
@@ -573,6 +625,12 @@ def _parse_spec_root(root: ElementTree.Element, source_name: str) -> AmdgpuIsaSp
             (
                 _parse_instruction(instruction_element, source_name)
                 for instruction_element in instructions_element.findall("Instruction")
+                if instruction_names is None
+                or _instruction_element_matches_names(
+                    instruction_element,
+                    source_name,
+                    instruction_names,
+                )
             ),
             key=lambda instruction: instruction.name,
         )
@@ -614,6 +672,26 @@ def _parse_spec_root(root: ElementTree.Element, source_name: str) -> AmdgpuIsaSp
         encodings=encodings,
         instructions=instructions,
         operand_types=operand_types,
+    )
+
+
+def _instruction_element_matches_names(
+    instruction_element: ElementTree.Element,
+    source_name: str,
+    instruction_names: frozenset[str],
+) -> bool:
+    if (
+        _required_text(instruction_element, "InstructionName", source_name)
+        in instruction_names
+    ):
+        return True
+    aliases_element = instruction_element.find("AliasedInstructionNames")
+    if aliases_element is None:
+        return False
+    return any(
+        _required_element_text(alias_element, source_name, "Instruction/alias")
+        in instruction_names
+        for alias_element in aliases_element.findall("InstructionName")
     )
 
 
