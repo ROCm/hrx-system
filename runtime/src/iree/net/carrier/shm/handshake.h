@@ -34,29 +34,13 @@
 #include "iree/base/internal/atomics.h"
 #include "iree/base/internal/shm.h"
 #include "iree/net/carrier/shm/carrier.h"
+#include "iree/net/carrier/shm/handshake_message.h"
 #include "iree/net/carrier/shm/shared_wake.h"
 #include "iree/net/carrier/shm/xproc_context.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
-
-//===----------------------------------------------------------------------===//
-// Protocol constants
-//===----------------------------------------------------------------------===//
-
-#define IREE_NET_SHM_HANDSHAKE_MAGIC 0x49524853u  // "IRHS" (IREE Handshake SHM)
-#define IREE_NET_SHM_HANDSHAKE_VERSION 2u
-
-enum iree_net_shm_handshake_message_type_e {
-  // Server → Client: offering the SHM region and server's wake handles.
-  IREE_NET_SHM_HANDSHAKE_MESSAGE_OFFER = 1u,
-  // Client → Server: accepting with client's wake handles.
-  IREE_NET_SHM_HANDSHAKE_MESSAGE_ACCEPT = 2u,
-  // Server → Client: receiver ownership of all handles is established.
-  IREE_NET_SHM_HANDSHAKE_MESSAGE_READY = 3u,
-};
-typedef uint8_t iree_net_shm_handshake_message_type_t;
 
 // Cooperative cancellation checked around each blocking channel operation.
 // A NULL pointer or NULL |requested| field represents no cancellation.
@@ -74,28 +58,6 @@ static inline bool iree_net_shm_handshake_cancellation_is_requested(
          iree_atomic_load(cancellation->requested, iree_memory_order_acquire) !=
              0;
 }
-
-// Fixed-size message header. Sent as the primary payload on the socket.
-// Handles are sent alongside (POSIX: SCM_RIGHTS ancillary data; Windows:
-// named object strings appended after the header).
-typedef struct iree_net_shm_handshake_header_t {
-  // Protocol magic identifying SHM bootstrap messages.
-  uint32_t magic;
-  // Protocol version governing message and ownership semantics.
-  uint32_t version;
-  // Message payload and attached-handle shape.
-  iree_net_shm_handshake_message_type_t type;
-  // Reserved for future message flags; must be zero.
-  uint8_t reserved[3];
-  // OFFER only: total size of the SHM region in bytes.
-  uint32_t region_size;
-  // OFFER only: MPSC queue data capacity in bytes (power of two).
-  uint32_t ring_capacity;
-  // Size of the wake epoch SHM region (always one page, but sent for
-  // validation).
-  uint32_t wake_epoch_size;
-  uint8_t padding[8];
-} iree_net_shm_handshake_header_t;
 
 //===----------------------------------------------------------------------===//
 // Internal platform interface

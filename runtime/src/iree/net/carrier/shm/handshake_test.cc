@@ -29,7 +29,9 @@
 #include <thread>
 
 #include "iree/async/proactor_platform.h"
+#include "iree/base/internal/shm.h"
 #include "iree/net/carrier/shm/carrier.h"
+#include "iree/net/carrier/shm/region.h"
 #include "iree/net/carrier/shm/shared_wake.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -285,6 +287,79 @@ TEST_F(HandshakeTest, InvalidRingCapacityFailsValidation) {
 
   // Server closed its channel. Clean up the client channel.
   iree_async_primitive_close(&client_channel);
+}
+
+TEST_F(HandshakeTest, ClientRejectsReservedOfferBytes) {
+  iree_net_shm_region_layout_t layout;
+  IREE_ASSERT_OK(iree_net_shm_region_layout_calculate(
+      iree_net_shm_carrier_options_default().ring_capacity,
+      iree_shm_required_size(0), &layout));
+
+  iree_shm_mapping_t region_mapping = {};
+  region_mapping.handle = IREE_SHM_HANDLE_INVALID;
+  IREE_ASSERT_OK(iree_shm_create(/*options=*/nullptr, layout.region_size,
+                                 &region_mapping));
+
+  iree_mpsc_queue_t ring_a = {};
+  iree_mpsc_queue_t ring_b = {};
+  iree_status_t status = iree_net_shm_region_initialize(
+      &layout, &region_mapping, &ring_a, &ring_b);
+  if (!iree_status_is_ok(status)) {
+    iree_shm_close(&region_mapping);
+  }
+  IREE_ASSERT_OK(status);
+
+  iree_net_shm_shared_wake_export_t wake_export =
+      iree_net_shm_shared_wake_export_empty();
+  status = iree_net_shm_shared_wake_export(server_wake_, &wake_export);
+  if (!iree_status_is_ok(status)) {
+    iree_shm_close(&region_mapping);
+  }
+  IREE_ASSERT_OK(status);
+
+  iree_async_primitive_t server_channel;
+  iree_async_primitive_t client_channel;
+  CreateChannelPair(&server_channel, &client_channel);
+
+  iree_net_shm_handshake_header_t offer_header = {};
+  offer_header.magic = IREE_NET_SHM_HANDSHAKE_MAGIC;
+  offer_header.version = IREE_NET_SHM_HANDSHAKE_VERSION;
+  offer_header.transport_region_size = layout.region_size;
+  offer_header.ring_capacity = layout.ring_capacity;
+  offer_header.wake_epoch_size = (uint32_t)wake_export.epoch_shm_size;
+  offer_header.type = IREE_NET_SHM_HANDSHAKE_MESSAGE_OFFER;
+  offer_header.reserved[0] = 1;
+
+  iree_net_shm_handshake_handles_t offer_handles =
+      iree_net_shm_handshake_handles_empty();
+  offer_handles.shm_region = region_mapping.handle;
+  offer_handles.wake_epoch_shm = wake_export.epoch_shm_handle;
+  offer_handles.signal_primitive = wake_export.signal_primitive;
+
+  iree_status_code_t send_status_code = IREE_STATUS_UNKNOWN;
+  std::thread server_thread([&] {
+    iree_status_t send_status =
+        iree_net_shm_handshake_send(server_channel, /*cancellation=*/nullptr,
+                                    &offer_header, &offer_handles);
+    send_status_code = iree_status_code(send_status);
+    iree_status_free(send_status);
+    iree_async_primitive_close(&server_channel);
+  });
+
+  iree_net_shm_handshake_result_t client_result = {};
+  iree_status_t client_status = iree_net_shm_handshake_client_endpoint(
+      client_channel, /*cancellation=*/nullptr, client_wake_, proactor_,
+      iree_allocator_system(), &client_result);
+  server_thread.join();
+
+  iree_async_primitive_close(&client_channel);
+  iree_shm_handle_close(&wake_export.epoch_shm_handle);
+  iree_async_primitive_close(&wake_export.signal_primitive);
+  iree_shm_close(&region_mapping);
+
+  EXPECT_EQ(send_status_code, IREE_STATUS_OK);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, client_status);
+  EXPECT_EQ(client_result.context, nullptr);
 }
 
 TEST_F(HandshakeTest, SharedWakeExportFailureLeavesEmpty) {

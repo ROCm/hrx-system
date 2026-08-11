@@ -7,6 +7,7 @@
 # Shared memory carrier: high-performance IPC via MPSC rings in shared memory.
 
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_fuzz.bzl", "iree_runtime_cc_fuzz")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
 package(
@@ -51,6 +52,16 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "handshake_message",
+    srcs = ["handshake_message.c"],
+    hdrs = ["handshake_message.h"],
+    deps = [
+        ":region",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "handshake",
     srcs = [
         "handshake.c",
@@ -59,6 +70,7 @@ iree_runtime_cc_library(
     ],
     hdrs = ["handshake.h"],
     deps = [
+        ":handshake_message",
         ":region",
         ":shared_wake",
         ":shm",
@@ -155,6 +167,28 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "handshake_message_test",
+    srcs = ["handshake_message_test.cc"],
+    deps = [
+        ":handshake_message",
+        ":region",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_fuzz(
+    name = "handshake_message_fuzz",
+    srcs = ["handshake_message_fuzz.cc"],
+    deps = [
+        ":handshake_message",
+        ":region",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "carrier_test",
     srcs = ["carrier_test.cc"],
     deps = [
@@ -173,10 +207,12 @@ iree_runtime_cc_test(
     srcs = ["handshake_test.cc"],
     deps = [
         ":handshake",
+        ":region",
         ":shared_wake",
         ":shm",
         "//runtime/src/iree/async:platform",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:shm",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

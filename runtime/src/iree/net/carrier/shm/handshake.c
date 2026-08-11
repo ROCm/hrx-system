@@ -21,33 +21,6 @@ void iree_net_shm_handshake_handles_close(
   *handles = iree_net_shm_handshake_handles_empty();
 }
 
-//===----------------------------------------------------------------------===//
-// Header validation
-//===----------------------------------------------------------------------===//
-
-static iree_status_t iree_net_shm_handshake_validate_header(
-    const iree_net_shm_handshake_header_t* header,
-    iree_net_shm_handshake_message_type_t expected_type) {
-  if (header->magic != IREE_NET_SHM_HANDSHAKE_MAGIC) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "handshake magic mismatch: got 0x%08x, expected 0x%08x", header->magic,
-        IREE_NET_SHM_HANDSHAKE_MAGIC);
-  }
-  if (header->version != IREE_NET_SHM_HANDSHAKE_VERSION) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "handshake version mismatch: got %u, expected %u",
-                            header->version, IREE_NET_SHM_HANDSHAKE_VERSION);
-  }
-  if (header->type != expected_type) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unexpected handshake message type: got %u, "
-                            "expected %u",
-                            (unsigned)header->type, (unsigned)expected_type);
-  }
-  return iree_ok_status();
-}
-
 // Sends the terminal acknowledgement proving that all ACCEPT handles have
 // been duplicated and all endpoint resources have been established.
 static iree_status_t iree_net_shm_handshake_send_ready(
@@ -74,8 +47,7 @@ static iree_status_t iree_net_shm_handshake_recv_ready(
   iree_status_t status =
       iree_net_shm_handshake_recv(channel, cancellation, &header, &handles);
   if (iree_status_is_ok(status)) {
-    status = iree_net_shm_handshake_validate_header(
-        &header, IREE_NET_SHM_HANDSHAKE_MESSAGE_READY);
+    status = iree_net_shm_handshake_message_validate_ready(&header);
   }
   iree_net_shm_handshake_handles_close(&handles);
   return status;
@@ -252,7 +224,7 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server_endpoint(
     offer_header.magic = IREE_NET_SHM_HANDSHAKE_MAGIC;
     offer_header.version = IREE_NET_SHM_HANDSHAKE_VERSION;
     offer_header.type = IREE_NET_SHM_HANDSHAKE_MESSAGE_OFFER;
-    offer_header.region_size = (uint32_t)region_mapping.size;
+    offer_header.transport_region_size = layout.region_size;
     offer_header.ring_capacity = ring_capacity;
     offer_header.wake_epoch_size = (uint32_t)our_export.epoch_shm_size;
 
@@ -276,8 +248,7 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server_endpoint(
                                          &accept_handles);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_net_shm_handshake_validate_header(
-        &accept_header, IREE_NET_SHM_HANDSHAKE_MESSAGE_ACCEPT);
+    status = iree_net_shm_handshake_message_validate_accept(&accept_header);
   }
 
   // Map the peer's wake epoch SHM.
@@ -374,24 +345,12 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_client_endpoint(
   memset(&offer_header, 0, sizeof(offer_header));
   iree_status_t status = iree_net_shm_handshake_recv(
       channel, cancellation, &offer_header, &offer_handles);
-  if (iree_status_is_ok(status)) {
-    status = iree_net_shm_handshake_validate_header(
-        &offer_header, IREE_NET_SHM_HANDSHAKE_MESSAGE_OFFER);
-  }
-
-  // Derive the only canonical mapping geometry from creator-owned fields.
+  // Validate all peer-controlled geometry before mapping any handle.
   iree_net_shm_region_layout_t layout;
   memset(&layout, 0, sizeof(layout));
   if (iree_status_is_ok(status)) {
-    status = iree_net_shm_region_layout_calculate(
-        offer_header.ring_capacity, offer_header.wake_epoch_size, &layout);
-  }
-  if (iree_status_is_ok(status) &&
-      offer_header.region_size != layout.region_size) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "offered SHM region size %" PRIu32
-                              " does not match expected %" PRIhsz,
-                              offer_header.region_size, layout.region_size);
+    status =
+        iree_net_shm_handshake_message_validate_offer(&offer_header, &layout);
   }
 
   // Map the SHM region from the received handle.

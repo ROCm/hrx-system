@@ -55,6 +55,19 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    handshake_message
+  HDRS
+    "handshake_message.h"
+  SRCS
+    "handshake_message.c"
+  DEPS
+    ::region
+    iree::base
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     handshake
   HDRS
     "handshake.h"
@@ -63,6 +76,7 @@ iree_cc_library(
     "handshake_posix.c"
     "handshake_win32.c"
   DEPS
+    ::handshake_message
     ::region
     ::shared_wake
     ::shm
@@ -168,6 +182,30 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    handshake_message_test
+  SRCS
+    "handshake_message_test.cc"
+  DEPS
+    ::handshake_message
+    ::region
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_fuzz(
+  NAME
+    handshake_message_fuzz
+  SRCS
+    "handshake_message_fuzz.cc"
+  DEPS
+    ::handshake_message
+    ::region
+    iree::base
+)
+
+iree_cc_test(
+  NAME
     carrier_test
   SRCS
     "carrier_test.cc"
@@ -188,10 +226,12 @@ iree_cc_test(
     "handshake_test.cc"
   DEPS
     ::handshake
+    ::region
     ::shared_wake
     ::shm
     iree::async::platform
     iree::base
+    iree::base::internal::shm
     iree::testing::gtest
     iree::testing::gtest_main
 )
