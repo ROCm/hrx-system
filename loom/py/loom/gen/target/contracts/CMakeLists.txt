@@ -51,6 +51,19 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    contract_table_family
+  SRCS
+    "__init__.py"
+    "contract_table_family.py"
+  DEPS
+    loom::py::loom::gen::target::contracts::contract_fragments
+    loom::py::loom::gen::target::contracts::lower_rules
+    loom::py::loom::target::contract_fragments
+    loom::py::loom::target::contracts::contracts
+)
+
+iree_py_library(
+  NAME
     lower_rule_shard
   SRCS
     "__init__.py"
@@ -70,6 +83,19 @@ iree_py_library(
     "contract_fragment.py"
   DEPS
     loom::py::loom::gen::target::contracts::contract_fragment
+    loom::py::loom::target::arch::amdgpu::contracts::contracts
+)
+
+iree_py_library(
+  NAME
+    amdgpu_contract_table_family
+  MAIN
+    "contract_table_family.py"
+  SRCS
+    "__init__.py"
+    "contract_table_family.py"
+  DEPS
+    loom::py::loom::gen::target::contracts::contract_table_family
     loom::py::loom::target::arch::amdgpu::contracts::contracts
 )
 

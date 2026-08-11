@@ -198,6 +198,109 @@ function(loom_target_table_cc_library)
   endif()
 endfunction()
 
+function(loom_target_contract_table_cc_libraries)
+  cmake_parse_arguments(
+    _RULE
+    "TESTONLY"
+    "NAME;GENERATOR"
+    "ARGS;INPUTS;CONTRACT_DEPS;LOWER_RULE_DEPS"
+    ${ARGN}
+  )
+
+  if(NOT _RULE_NAME)
+    message(FATAL_ERROR
+      "loom_target_contract_table_cc_libraries requires NAME")
+  endif()
+  if(NOT _RULE_GENERATOR)
+    message(FATAL_ERROR
+      "loom_target_contract_table_cc_libraries requires GENERATOR")
+  endif()
+  if(_RULE_TESTONLY AND NOT IREE_BUILD_TESTS)
+    return()
+  endif()
+  if(_RULE_TESTONLY)
+    set(_TESTONLY_ARG TESTONLY)
+  else()
+    set(_TESTONLY_ARG)
+  endif()
+
+  set(_CONTRACT_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_NAME}.c")
+  set(_CONTRACT_HEADER "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_NAME}.h")
+  set(_LOWER_RULE_SOURCE
+    "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_NAME}_lower_rules.c")
+  set(_LOWER_RULE_HEADER
+    "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_NAME}_lower_rules.h")
+
+  iree_py_library_main(_GENERATOR "${_RULE_GENERATOR}")
+  iree_py_library_collect_sources(_GENERATOR_INPUTS "${_RULE_GENERATOR}")
+  _loom_python_command_prefix(_PYTHON_COMMAND_PREFIX "${_RULE_GENERATOR}")
+
+  add_custom_command(
+    OUTPUT
+      "${_CONTRACT_SOURCE}"
+      "${_CONTRACT_HEADER}"
+      "${_LOWER_RULE_SOURCE}"
+      "${_LOWER_RULE_HEADER}"
+    COMMAND
+      ${_PYTHON_COMMAND_PREFIX}
+      "${Python3_EXECUTABLE}"
+      "${_GENERATOR}"
+      ${_RULE_ARGS}
+      "--contract-source=${_CONTRACT_SOURCE}"
+      "--contract-header=${_CONTRACT_HEADER}"
+      "--lower-rule-source=${_LOWER_RULE_SOURCE}"
+      "--lower-rule-header=${_LOWER_RULE_HEADER}"
+    DEPENDS
+      ${_GENERATOR_INPUTS}
+      ${_RULE_INPUTS}
+    COMMENT
+      "Generating ${_RULE_NAME} contract table family"
+    VERBATIM
+  )
+
+  iree_package_name(_PACKAGE_NAME)
+  set(_GEN_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}_gen")
+  add_custom_target("${_GEN_TARGET}"
+    DEPENDS
+      "${_CONTRACT_SOURCE}"
+      "${_CONTRACT_HEADER}"
+      "${_LOWER_RULE_SOURCE}"
+      "${_LOWER_RULE_HEADER}"
+  )
+  iree_register_generated_compile_input("${_GEN_TARGET}"
+    OUTPUTS
+      "${_CONTRACT_SOURCE}"
+      "${_CONTRACT_HEADER}"
+      "${_LOWER_RULE_SOURCE}"
+      "${_LOWER_RULE_HEADER}"
+  )
+
+  loom_cc_library(
+    NAME
+      "${_RULE_NAME}"
+    HDRS
+      "${_CONTRACT_HEADER}"
+    SRCS
+      "${_CONTRACT_SOURCE}"
+    DEPS
+      ${_RULE_CONTRACT_DEPS}
+    ${_TESTONLY_ARG}
+    PUBLIC
+  )
+  loom_cc_library(
+    NAME
+      "${_RULE_NAME}_lower_rules"
+    HDRS
+      "${_LOWER_RULE_HEADER}"
+    SRCS
+      "${_LOWER_RULE_SOURCE}"
+    DEPS
+      ${_RULE_LOWER_RULE_DEPS}
+    ${_TESTONLY_ARG}
+    PUBLIC
+  )
+endfunction()
+
 function(loom_low_descriptor_cc_library)
   cmake_parse_arguments(
     _RULE

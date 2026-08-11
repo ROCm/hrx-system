@@ -21,6 +21,7 @@ from loom.target.contracts import (
     CompiledContractFragment,
     CompiledDescriptorMatrix,
     CompiledDescriptorRule,
+    CompiledLowerRuleSet,
     ContractFragment,
     ContractSystem,
     compile_contract_fragment,
@@ -62,6 +63,21 @@ def generate_contract_fragment(
     """Generates C/H text for a compact target contract fragment."""
 
     lower_rules = compile_lower_rule_set(table, dialect_ops=dialect_ops)
+    return generate_contract_fragment_from_lower_rules(
+        table,
+        dialect_ops=dialect_ops,
+        lower_rules=lower_rules,
+    )
+
+
+def generate_contract_fragment_from_lower_rules(
+    table: ContractFragment,
+    *,
+    dialect_ops: Mapping[str, Sequence[Op]],
+    lower_rules: CompiledLowerRuleSet,
+) -> GeneratedContractFragment:
+    """Generates C/H text using the fragment's compiled lower-rule rows."""
+
     lower_rule_indices = {authored_case_index: rule_index for rule_index, authored_case_index in enumerate(lower_rules.authored_case_indices)}
     descriptor_rule_rows = {
         authored_case_index: CompiledDescriptorRule(rule_index=rule_index)

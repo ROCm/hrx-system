@@ -58,6 +58,16 @@ def generate_lower_rule_set(
     """Generates C/H text for a generated target-low lower-rule set."""
 
     compiled = compile_lower_rule_set(table, dialect_ops=dialect_ops)
+    return generate_lower_rule_set_from_compiled(table, compiled=compiled)
+
+
+def generate_lower_rule_set_from_compiled(
+    table: ContractFragment,
+    *,
+    compiled: CompiledLowerRuleSet,
+) -> GeneratedLowerRuleSet:
+    """Generates C/H text from compiled target-low lower-rule rows."""
+
     public_header = lower_rule_spelling.generated_public_header(table)
     symbol_name = lower_rule_spelling.generated_symbol_name(table)
     c_table_prefix = _c_identifier(lower_rule_spelling.generated_table_prefix(table))

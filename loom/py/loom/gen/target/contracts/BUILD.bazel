@@ -71,6 +71,20 @@ iree_py_library(
     deps = LOWER_RULE_DEPS,
 )
 
+iree_py_library(
+    name = "contract_table_family",
+    srcs = [
+        "__init__.py",
+        "contract_table_family.py",
+    ],
+    deps = [
+        ":contract_fragments",
+        ":lower_rules",
+        "//loom/py/loom/target:contract_fragments",
+        "//loom/py/loom/target/contracts",
+    ],
+)
+
 LOWER_RULE_SHARD_DEPS = [
     ":lower_rules",
     "//loom/py/loom/target:contract_fragments",
@@ -95,6 +109,20 @@ iree_py_binary(
     visibility = GENERATOR_VISIBILITY,
     deps = [
         ":contract_fragment",
+        "//loom/py/loom/target/arch/amdgpu/contracts",
+    ],
+)
+
+iree_py_binary(
+    name = "amdgpu_contract_table_family",
+    srcs = [
+        "__init__.py",
+        "contract_table_family.py",
+    ],
+    main = "contract_table_family.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        ":contract_table_family",
         "//loom/py/loom/target/arch/amdgpu/contracts",
     ],
 )

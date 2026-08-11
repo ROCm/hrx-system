@@ -331,6 +331,87 @@ def loom_target_table_cc_library(
         **kwargs
     )
 
+def loom_target_contract_table_cc_libraries(
+        name,
+        generator,
+        args = [],
+        inputs = [],
+        contract_deps = [],
+        lower_rule_deps = [],
+        tags = [],
+        testonly = False,
+        visibility = None,
+        **kwargs):
+    """Generates one contract fragment and its lower rules in one action.
+
+    The contract and lower-rule tables share one materialized Python fragment
+    but remain separate C libraries with independent runtime dependencies.
+
+    Args:
+      name: Contract C library name and generated file stem. The lower-rule
+        library and files use the same stem with a _lower_rules suffix.
+      generator: Python executable that writes both C/H output pairs.
+      args: Generator arguments before the four output flags.
+      inputs: Source data labels consumed by the generator.
+      contract_deps: Runtime dependencies of the contract C library.
+      lower_rule_deps: Runtime dependencies of the lower-rule C library.
+      tags: Additional Bazel tags for the generator action.
+      testonly: Passed through to both runtime C libraries.
+      visibility: Passed through to the generator and runtime C libraries.
+      **kwargs: Additional arguments passed through to both C libraries.
+    """
+    rule_kwargs = {}
+    if visibility != None:
+        rule_kwargs["visibility"] = visibility
+    rule_kwargs["tags"] = tags + ["skip-bazel_to_cmake"]
+    rule_kwargs = apply_loom_target_policy(rule_kwargs)
+
+    contract_source = name + ".c"
+    contract_header = name + ".h"
+    lower_rule_source = name + "_lower_rules.c"
+    lower_rule_header = name + "_lower_rules.h"
+    outputs = [
+        contract_source,
+        contract_header,
+        lower_rule_source,
+        lower_rule_header,
+    ]
+    output_flags = [
+        "--contract-source",
+        "--contract-header",
+        "--lower-rule-source",
+        "--lower-rule-header",
+    ]
+    iree_generated_files(
+        name = name + "_gen",
+        srcs = inputs,
+        outs = outputs,
+        args = _loom_bazel_generator_args(args),
+        output_args = _loom_output_args(output_flags, outputs),
+        tool = generator,
+        **rule_kwargs
+    )
+
+    package_name = native.package_name()
+    loom_cc_library(
+        name = name,
+        srcs = ["//%s:%s" % (package_name, contract_source)],
+        hdrs = ["//%s:%s" % (package_name, contract_header)],
+        deps = contract_deps,
+        testonly = testonly,
+        visibility = visibility,
+        **kwargs
+    )
+    loom_cc_library(
+        name = name + "_lower_rules",
+        srcs = ["//%s:%s" % (package_name, lower_rule_source)],
+        hdrs = ["//%s:%s" % (package_name, lower_rule_header)],
+        deps = lower_rule_deps,
+        testonly = testonly,
+        visibility = visibility,
+        **kwargs
+    )
+
 def loom_generated_cc_library(
         name,
         generator,

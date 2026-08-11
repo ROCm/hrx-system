@@ -7,6 +7,7 @@
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
+    "loom_target_contract_table_cc_libraries",
     "loom_target_table_cc_library",
 )
 
@@ -18,20 +19,16 @@ package(
 
 _AMDGPU_CONTRACT_FRAGMENT_GENERATOR = "//loom/py/loom/gen/target/contracts:amdgpu_contract_fragment"
 
+_AMDGPU_CONTRACT_TABLE_FAMILY_GENERATOR = "//loom/py/loom/gen/target/contracts:amdgpu_contract_table_family"
+
 _AMDGPU_LOWER_RULE_GENERATOR = "//loom/py/loom/gen/target/contracts:amdgpu_lower_rule_shard"
 
-loom_target_table_cc_library(
+loom_target_contract_table_cc_libraries(
     name = "arithmetic",
     args = ["--contract-fragment=amdgpu.arithmetic"],
-    generator = _AMDGPU_CONTRACT_FRAGMENT_GENERATOR,
-    deps = ["//loom/src/loom/target:contract"],
-)
-
-loom_target_table_cc_library(
-    name = "arithmetic_lower_rules",
-    args = ["--contract-fragment=amdgpu.arithmetic"],
-    generator = _AMDGPU_LOWER_RULE_GENERATOR,
-    deps = [
+    contract_deps = ["//loom/src/loom/target:contract"],
+    generator = _AMDGPU_CONTRACT_TABLE_FAMILY_GENERATOR,
+    lower_rule_deps = [
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/scalar",

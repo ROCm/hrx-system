@@ -10,27 +10,16 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_target_table_cc_library(
+loom_target_contract_table_cc_libraries(
   NAME
     arithmetic
   GENERATOR
-    loom::py::loom::gen::target::contracts::amdgpu_contract_fragment
+    loom::py::loom::gen::target::contracts::amdgpu_contract_table_family
   ARGS
     "--contract-fragment=amdgpu.arithmetic"
-  DEPS
+  CONTRACT_DEPS
     loom::target::contract
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_target_table_cc_library(
-  NAME
-    arithmetic_lower_rules
-  GENERATOR
-    loom::py::loom::gen::target::contracts::amdgpu_lower_rule_shard
-  ARGS
-    "--contract-fragment=amdgpu.arithmetic"
-  DEPS
+  LOWER_RULE_DEPS
     loom::codegen::low::lower
     loom::ops::index
     loom::ops::scalar
