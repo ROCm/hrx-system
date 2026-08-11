@@ -2241,6 +2241,25 @@ def _occupancy_capacity(pool_units: int, granularity: int, units: int) -> int:
     return pool_units // _occupancy_rounded_units(units, granularity)
 
 
+def _occupancy_capacity_change_points(
+    maximum_units: int, granularities: Sequence[int]
+) -> tuple[int, ...]:
+    """Returns positive demands where any compared capacity may change.
+
+    For allocation granularity g, rounded demand is constant over each interval
+    ((k - 1) * g, k * g]. Capacity can therefore change only at one or at the
+    start k * g + 1 of a later interval. The union of those starts preserves
+    every capacity comparison across descriptor sets with different
+    granularities.
+    """
+    if maximum_units < 1:
+        return ()
+    change_points = {1}
+    for granularity in granularities:
+        change_points.update(range(granularity + 1, maximum_units + 1, granularity))
+    return tuple(sorted(change_points))
+
+
 def _validate_portable_occupancy_model(
     generic_processor: str,
     wave_size: int,
@@ -2278,7 +2297,13 @@ def _validate_portable_occupancy_model(
     maximum_local_memory_bytes = max(
         model.domain.local_memory_bytes for model in member_models
     )
-    for local_memory_bytes in range(1, maximum_local_memory_bytes + 1):
+    local_memory_granularities = (
+        generic_model.domain.local_memory_allocation_granularity,
+        *(model.domain.local_memory_allocation_granularity for model in member_models),
+    )
+    for local_memory_bytes in _occupancy_capacity_change_points(
+        maximum_local_memory_bytes, local_memory_granularities
+    ):
         generic_capacity = _occupancy_capacity(
             generic_model.domain.local_memory_bytes,
             generic_model.domain.local_memory_allocation_granularity,
@@ -2338,7 +2363,17 @@ def _validate_portable_occupancy_model(
             for member_row in member_rows
             if member_row is not None
         )
-        for units in range(1, maximum_units + 1):
+        register_granularities = (
+            generic_register_class.allocation_granularity,
+            *(
+                member_row.allocation_granularity
+                for member_row in member_rows
+                if member_row is not None and member_row.limits_occupancy
+            ),
+        )
+        for units in _occupancy_capacity_change_points(
+            maximum_units, register_granularities
+        ):
             generic_capacity = min(
                 generic_model.max_waves_per_simd,
                 _occupancy_capacity(
