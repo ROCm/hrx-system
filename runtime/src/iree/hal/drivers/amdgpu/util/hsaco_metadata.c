@@ -1037,6 +1037,11 @@ static iree_status_t iree_hal_amdgpu_hsaco_metadata_parse_kernel(
       }
       IREE_RETURN_IF_ERROR(iree_hal_amdgpu_msgpack_read_uint32(
           reader, &out_kernel->max_flat_workgroup_size));
+      if (out_kernel->max_flat_workgroup_size == 0) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "AMDGPU maximum flat workgroup size must be at least one");
+      }
       fields.has_max_flat_workgroup_size = true;
     } else if (iree_string_view_equal(key, IREE_SV(".vgpr_count"))) {
       if (fields.has_vgpr_count) {
@@ -1106,7 +1111,9 @@ static iree_status_t iree_hal_amdgpu_hsaco_metadata_parse_kernel(
   if (!fields.has_symbol_name || !fields.has_kernarg_segment_size ||
       !fields.has_kernarg_segment_alignment ||
       !fields.has_group_segment_fixed_size ||
-      !fields.has_private_segment_fixed_size || !fields.has_args) {
+      !fields.has_private_segment_fixed_size ||
+      !fields.has_max_flat_workgroup_size || !fields.has_vgpr_count ||
+      !fields.has_args) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "AMDGPU kernel metadata missing required fields");
   }
