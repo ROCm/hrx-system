@@ -11,18 +11,26 @@ iree_add_all_subdirs()
 
 iree_py_library(
   NAME
-    encoding_tables
-  MAIN
-    "amdgpu_encoding_tables.py"
+    encoding_tables_module
   SRCS
     "__init__.py"
     "amdgpu_encoding_tables.py"
   DEPS
     loom::py::loom::gen::support::support
+    loom::py::loom::gen::target::arch::amdgpu::target_table_family
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::descriptors
     loom::py::loom::target::arch::amdgpu::isa_xml
     loom::py::loom::target::arch::amdgpu::target_info
+)
+
+iree_py_library(
+  NAME
+    encoding_tables
+  MAIN_MODULE
+    "loom.gen.target.arch.amdgpu.encoding.amdgpu_encoding_tables"
+  DEPS
+    loom::py::loom::gen::target::arch::amdgpu::encoding::encoding_tables_module
 )
 
 iree_py_test(
@@ -36,7 +44,7 @@ iree_py_test(
   ARGS
     "loom.gen.target.arch.amdgpu.encoding.amdgpu_encoding_tables_test"
   DEPS
-    loom::py::loom::gen::target::arch::amdgpu::encoding::encoding_tables
+    loom::py::loom::gen::target::arch::amdgpu::encoding::encoding_tables_module
     loom::py::loom::target::low_descriptors
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"

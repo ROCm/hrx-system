@@ -11,6 +11,9 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest import mock
 
+from loom.gen.target.arch.amdgpu.amdgpu_target_table_family import (
+    AmdgpuTargetTableFamily,
+)
 from loom.gen.target.arch.amdgpu.descriptors import amdgpu_descriptors
 from loom.target.arch.amdgpu.target_info import (
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
@@ -105,25 +108,6 @@ def test_storage_generation_reuses_parsed_isa_for_declared_views() -> None:
             view_headers=tuple(f"// {descriptor_set.key}\n" for descriptor_set in view_descriptor_sets),
         )
 
-    def descriptor_set_info_by_target(target: str) -> AmdgpuDescriptorSetInfo:
-        if target == storage_target:
-            return storage_info
-        if target == view_target:
-            return view_info
-        raise ValueError(target)
-
-    def storage_info_by_target(target: str) -> AmdgpuDescriptorSetInfo:
-        if target in (storage_target, view_target):
-            return storage_info
-        raise ValueError(target)
-
-    def view_infos_by_storage_target(
-        target: str,
-    ) -> tuple[AmdgpuDescriptorSetInfo, ...]:
-        if target == storage_target:
-            return (view_info,)
-        return ()
-
     with (
         TemporaryDirectory() as temporary_directory,
         mock.patch.object(
@@ -133,18 +117,11 @@ def test_storage_generation_reuses_parsed_isa_for_declared_views() -> None:
         ),
         mock.patch.object(
             amdgpu_descriptors,
-            "amdgpu_descriptor_set_info_by_generator_target",
-            descriptor_set_info_by_target,
-        ),
-        mock.patch.object(
-            amdgpu_descriptors,
-            "amdgpu_descriptor_set_storage_info_by_generator_target",
-            storage_info_by_target,
-        ),
-        mock.patch.object(
-            amdgpu_descriptors,
-            "amdgpu_descriptor_set_view_infos_by_storage_generator_target",
-            view_infos_by_storage_target,
+            "amdgpu_target_table_family",
+            return_value=AmdgpuTargetTableFamily(
+                storage_info=storage_info,
+                view_infos=(view_info,),
+            ),
         ),
         mock.patch.object(
             amdgpu_descriptors,

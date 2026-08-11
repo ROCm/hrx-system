@@ -22,6 +22,16 @@ iree_py_library(
     srcs = ["__init__.py"],
 )
 
+iree_py_library(
+    name = "target_table_family",
+    srcs = ["amdgpu_target_table_family.py"],
+    deps = [
+        ":package_init",
+        "//loom/py/loom/target/arch/amdgpu:descriptors",
+        "//loom/py/loom/target/arch/amdgpu:target_info",
+    ],
+)
+
 iree_py_binary(
     name = "config_tables",
     srcs = ["amdgpu_config_tables.py"],

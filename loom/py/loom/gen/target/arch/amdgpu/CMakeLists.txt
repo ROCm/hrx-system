@@ -18,6 +18,17 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    target_table_family
+  SRCS
+    "amdgpu_target_table_family.py"
+  DEPS
+    loom::py::loom::gen::target::arch::amdgpu::package_init
+    loom::py::loom::target::arch::amdgpu::descriptors
+    loom::py::loom::target::arch::amdgpu::target_info
+)
+
+iree_py_library(
+  NAME
     config_tables
   MAIN
     "amdgpu_config_tables.py"

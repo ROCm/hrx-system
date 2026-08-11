@@ -31,18 +31,26 @@ iree_py_library(
 
 iree_py_library(
   NAME
-    descriptors
-  MAIN
-    "amdgpu_descriptors.py"
+    descriptors_module
   SRCS
     "amdgpu_descriptors.py"
   DEPS
     loom::py::loom::gen::target::arch::amdgpu::descriptors::package_init
+    loom::py::loom::gen::target::arch::amdgpu::target_table_family
     loom::py::loom::gen::target::low::low_descriptors
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::descriptors
     loom::py::loom::target::arch::amdgpu::isa_xml
     loom::py::loom::target::arch::amdgpu::target_info
+)
+
+iree_py_library(
+  NAME
+    descriptors
+  MAIN_MODULE
+    "loom.gen.target.arch.amdgpu.descriptors.amdgpu_descriptors"
+  DEPS
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::descriptors_module
 )
 
 iree_py_library(
@@ -125,7 +133,8 @@ iree_py_test(
   ARGS
     "loom.gen.target.arch.amdgpu.descriptors.amdgpu_descriptors_test"
   DEPS
-    loom::py::loom::gen::target::arch::amdgpu::descriptors::descriptors
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::descriptors_module
+    loom::py::loom::gen::target::arch::amdgpu::target_table_family
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::target_info
   PACKAGE_DIRS
