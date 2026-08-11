@@ -28,34 +28,34 @@ func.def @dynamic_interleaved_tile_indices_remain_in_bounds(%payload: buffer, %b
   %16 = index.mul %15, %10 : index
   %17 = index.add %loop_begin, %16 : index
   cfg.br ^_bb1(%loop_begin: index)
-^_bb1(%30: index):
-  %32 = index.cmp slt, %30, %17 : index
-  cfg.cond_br %32, ^_bb2, ^_bb3
+^_bb1(%34: index):
+  %36 = index.cmp slt, %34, %17 : index
+  cfg.cond_br %36, ^_bb2, ^_bb3
 ^_bb2:
-  %31 = index.assume %30 [range(%30, 0, 28), mul(%30, 4), lt(%30, %17)] : index
+  %35 = index.assume %34 [range(%34, 0, 28), mul(%34, 4), lt(%34, %17)] : index
   %19 = index.constant 1 : index
-  %20 = index.add %31, %19 : index
+  %20 = index.add %35, %19 : index
   %21 = index.constant 2 : index
-  %22 = index.add %31, %21 : index
+  %22 = index.add %35, %21 : index
   %23 = index.constant 3 : index
-  %24 = index.add %31, %23 : index
-  %i$25, %i_1, %i_2, %i_3 = index.assume %31, %20, %22, %24 [lt(%31, %end), lt(%20, %end), lt(%22, %end), lt(%24, %end)] : index, index, index, index
+  %24 = index.add %35, %23 : index
+  %i$25, %i_1, %i_2, %i_3 = index.assume %35, %20, %22, %24 [lt(%35, %end), lt(%20, %end), lt(%22, %end), lt(%24, %end)] : index, index, index, index
   view.store %value, %view[%i$25] : i32, view<[%end]xi32>
   view.store %value, %view[%i_1] : i32, view<[%end]xi32>
   view.store %value, %view[%i_2] : i32, view<[%end]xi32>
   view.store %value, %view[%i_3] : i32, view<[%end]xi32>
-  %33 = index.add %31, %10 : index
-  cfg.br ^_bb1(%33: index)
+  %37 = index.add %35, %10 : index
+  cfg.br ^_bb1(%37: index)
 ^_bb3:
   cfg.br ^_bb4(%17: index)
-^_bb4(%34: index):
-  %36 = index.cmp slt, %34, %end : index
-  cfg.cond_br %36, ^_bb5, ^_bb6
+^_bb4(%30: index):
+  %32 = index.cmp slt, %30, %end : index
+  cfg.cond_br %32, ^_bb5, ^_bb6
 ^_bb5:
-  %i$35 = index.assume %34 [range(%34, 0, 31), ge(%34, %17), lt(%34, %end)] : index
-  view.store %value, %view[%i$35] : i32, view<[%end]xi32>
-  %37 = index.add %i$35, %loop_step : index
-  cfg.br ^_bb4(%37: index)
+  %i$31 = index.assume %30 [range(%30, 0, 31), ge(%30, %17), lt(%30, %end)] : index
+  view.store %value, %view[%i$31] : i32, view<[%end]xi32>
+  %33 = index.add %i$31, %loop_step : index
+  cfg.br ^_bb4(%33: index)
 ^_bb6:
   func.return
 }

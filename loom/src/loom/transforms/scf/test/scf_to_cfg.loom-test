@@ -281,6 +281,54 @@ func.def @remaps_join_argument_dependent_type(%cond: i1, %buffer: buffer, %offse
 
 // ====
 
+func.def @lowers_outer_frontier_before_nested_frontier(%first_condition: i1, %second_condition: i1, %a: i32, %b: i32) -> (i32) {
+  %first = scf.if %first_condition -> (i32) {
+    %nested = scf.if %second_condition -> (i32) {
+      scf.yield %a : i32
+    } else {
+      scf.yield %b : i32
+    }
+    scf.yield %nested : i32
+  } else {
+    scf.yield %b : i32
+  }
+  %second = scf.if %second_condition -> (i32) {
+    %sum = test.addi %first, %a : i32
+    scf.yield %sum : i32
+  } else {
+    %sum = test.addi %first, %b : i32
+    scf.yield %sum : i32
+  }
+  func.return %second : i32
+}
+
+// ----
+func.def @lowers_outer_frontier_before_nested_frontier(%first_condition: i1, %second_condition: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %first_condition, ^_bb1, ^_bb5
+^_bb1:
+  cfg.cond_br %second_condition, ^_bb2, ^_bb3
+^_bb2:
+  cfg.br ^_bb4(%a: i32)
+^_bb3:
+  cfg.br ^_bb4(%b: i32)
+^_bb4(%nested: i32):
+  cfg.br ^_bb6(%nested: i32)
+^_bb5:
+  cfg.br ^_bb6(%b: i32)
+^_bb6(%first: i32):
+  cfg.cond_br %second_condition, ^_bb7, ^_bb8
+^_bb7:
+  %sum$8 = test.addi %first, %a : i32
+  cfg.br ^_bb9(%sum$8: i32)
+^_bb8:
+  %sum$9 = test.addi %first, %b : i32
+  cfg.br ^_bb9(%sum$9: i32)
+^_bb9(%second: i32):
+  func.return %second : i32
+}
+
+// ====
+
 func.def @rejects_unknown_for_step(%n: index, %step: index) {
   %loop_begin = index.constant 0 : index
   // ERROR@+1: STRUCTURE/035 {op_name="scf.for", pass_name="scf-to-cfg"}
