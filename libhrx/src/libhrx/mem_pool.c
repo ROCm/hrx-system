@@ -169,7 +169,7 @@ static iree_status_t hrx_mem_pool_apply_vmm_access_policy_locked(
             ? IREE_HAL_MEMORY_PROTECTION_READ_WRITE
             : IREE_HAL_MEMORY_PROTECTION_READ;
     IREE_RETURN_IF_ERROR(hrx_vmm_slab_provider_set_access(
-        slab_provider, i, device->allocator.hal_allocator, protection));
+        slab_provider, i, &device->allocator, protection));
   }
   return iree_ok_status();
 }
@@ -459,7 +459,7 @@ hrx_status_t hrx_mem_pool_set_device_access(hrx_mem_pool_t pool,
             : IREE_HAL_MEMORY_PROTECTION_READ;
     status = hrx_status_from_iree(hrx_vmm_slab_provider_set_access(
         pool->vmm_slab_provider, (iree_host_size_t)device->ordinal,
-        device->allocator.hal_allocator, protection));
+        &device->allocator, protection));
   }
   if (hrx_status_is_ok(status)) {
     pool->device_access[device->ordinal] = access;
