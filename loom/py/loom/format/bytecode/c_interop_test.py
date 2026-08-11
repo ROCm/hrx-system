@@ -39,6 +39,7 @@ from loom.ir import (
     SignedEnumSetAttr,
     SymbolName,
     SymbolNameArray,
+    SymbolNameSet,
 )
 
 
@@ -82,6 +83,7 @@ def _interop_module() -> tuple[Module, RegisterType]:
         "using [@parameterized_record]\n"
         "  test.symbol_array_attrs [] using []\n"
         "  test.symbol_array_attrs []\n"
+        "  test.symbol_set_attrs [@parameterized_record, @other_record]\n"
         "\n"
         "  // Grouped operation coverage.\n"
         "  test.parameterized_attr "
@@ -189,14 +191,21 @@ def main() -> None:
             raise AssertionError("present empty symbol array changed")
         if "available" in symbol_ops[2].attributes:
             raise AssertionError("absent symbol array became present")
-        options = [op.attributes["options"] for op in entry_block.ops[4:7]]
-        if not entry_block.ops[4].leading_blank_line or entry_block.ops[4].comments != (
+        symbol_set_op = next(
+            op for op in entry_block.ops if op.name == "test.symbol_set_attrs"
+        )
+        if symbol_set_op.attributes["symbols"] != SymbolNameSet(
+            [SymbolName("other_record"), SymbolName("parameterized_record")]
+        ):
+            raise AssertionError("symbol set lost canonical name order")
+        options = [op.attributes["options"] for op in entry_block.ops[5:8]]
+        if not entry_block.ops[5].leading_blank_line or entry_block.ops[5].comments != (
             "Grouped operation coverage.",
         ):
             raise AssertionError("commented op source trivia did not survive bytecode")
-        if entry_block.ops[5].leading_blank_line:
+        if entry_block.ops[6].leading_blank_line:
             raise AssertionError("adjacent operations gained a blank line")
-        if not entry_block.ops[6].leading_blank_line or entry_block.ops[6].comments:
+        if not entry_block.ops[7].leading_blank_line or entry_block.ops[7].comments:
             raise AssertionError("blank-only op source trivia did not survive bytecode")
         if not all(isinstance(value, ParameterizedAttr) for value in options):
             raise AssertionError("Python reader did not recover parameterized attrs")
@@ -227,7 +236,11 @@ def main() -> None:
             raise AssertionError("present empty parameter did not survive C bytecode")
         if absent.has("scopes"):
             raise AssertionError("absent parameter became present in C bytecode")
-        array_op = entry_block.ops[7]
+        array_op = next(
+            op
+            for op in entry_block.ops
+            if op.name == "test.parameterized_attr_array"
+        )
         array_values = array_op.attributes["values"]
         if not isinstance(array_values, ParameterizedAttrArray):
             raise AssertionError("Python reader did not recover parameterized array")
@@ -246,7 +259,11 @@ def main() -> None:
             [test_tile_attr(width=4)]
         ):
             raise AssertionError("exact-family parameterized array changed")
-        signed_set_op = entry_block.ops[8]
+        signed_set_op = next(
+            op
+            for op in entry_block.ops
+            if op.name == "test.signed_enum_set_attrs"
+        )
         if signed_set_op.attributes["required_features"] != SignedEnumSetAttr(
             [1, 255], [7]
         ):

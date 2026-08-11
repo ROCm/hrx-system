@@ -43,6 +43,7 @@ loom_cc_test(
     loom::format::text::parser
     loom::format::text::printer
     loom::ir
+    loom::testing::diagnostic_matchers
     loom::verify
 )
 

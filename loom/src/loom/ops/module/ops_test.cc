@@ -15,10 +15,15 @@
 #include "loom/format/text/printer.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/testing/diagnostic_matchers.h"
 #include "loom/verify/verify.h"
 
 namespace loom {
 namespace {
+
+using ::loom::testing::DiagnosticCapture;
+using ::loom::testing::ExpectError;
+using ::loom::testing::GetStringParam;
 
 class ModuleOpsTest : public ::testing::Test {
  protected:
@@ -79,6 +84,9 @@ class ModuleOpsTest : public ::testing::Test {
 
 TEST_F(ModuleOpsTest, ParsePrintAndVerifyImports) {
   static const char kSource[] =
+      "module.import \"motif/format/ggml.loom\" [@decode_q6, @decode_q4]\n"
+      "module.import \"target/amdgpu/format/ggml.loom\" [@decode_q4]\n";
+  static const char kExpected[] =
       "module.import \"motif/format/ggml.loom\" [@decode_q4, @decode_q6]\n"
       "module.import \"target/amdgpu/format/ggml.loom\" [@decode_q4]\n";
   iree_string_view_t source =
@@ -87,7 +95,8 @@ TEST_F(ModuleOpsTest, ParsePrintAndVerifyImports) {
   loom_module_t* module = Parse(source);
   ASSERT_NE(module, nullptr);
   VerifyOk(module);
-  EXPECT_EQ(Print(module), std::string(source.data, source.size));
+  EXPECT_EQ(Print(module),
+            std::string(kExpected, IREE_ARRAYSIZE(kExpected) - 1));
 
   const loom_block_t* body = loom_module_block(module);
   ASSERT_EQ(body->op_count, 2u);
@@ -107,6 +116,107 @@ TEST_F(ModuleOpsTest, ParsePrintAndVerifyImports) {
   ASSERT_EQ(target_symbols.count, 1u);
   EXPECT_EQ(target_symbols.values[0].symbol_id, symbols.values[0].symbol_id);
 
+  loom_module_free(module);
+}
+
+TEST_F(ModuleOpsTest, ParserDiagnosesDuplicateAnchorAtSecondOccurrence) {
+  DiagnosticCapture capture;
+  loom_text_parse_options_t options = {
+      /*.diagnostic_sink=*/capture.sink(),
+      /*.max_errors=*/20,
+  };
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_text_parse(
+      IREE_SV("module.import \"provider\" [@decode_q4, @decode_q4]\n"),
+      IREE_SV("imports.loom"), &context_, &block_pool_, &options, &module));
+
+  EXPECT_EQ(module, nullptr);
+  ASSERT_EQ(capture.diagnostics.size(), 1u);
+  ExpectError(capture.diagnostics[0],
+              loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 35));
+  EXPECT_EQ(GetStringParam(capture.diagnostics[0], 0), "decode_q4");
+  ASSERT_EQ(capture.diagnostics[0].related_locations.size(), 1u);
+  EXPECT_EQ(capture.diagnostics[0].related_locations[0].label,
+            "previously listed here");
+}
+
+TEST_F(ModuleOpsTest, BuilderCanonicalizesAnchorsBeforeAllocatingImport) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+  loom_builder_t builder;
+  loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                          &builder);
+
+  loom_string_id_t provider_id = LOOM_STRING_ID_INVALID;
+  loom_string_id_t zeta_name_id = LOOM_STRING_ID_INVALID;
+  loom_string_id_t alpha_name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("provider"), &provider_id));
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("zeta"), &zeta_name_id));
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("alpha"), &alpha_name_id));
+  uint16_t zeta_symbol_id = LOOM_SYMBOL_ID_INVALID;
+  uint16_t alpha_symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_add_symbol(module, zeta_name_id, &zeta_symbol_id));
+  IREE_ASSERT_OK(
+      loom_module_add_symbol(module, alpha_name_id, &alpha_symbol_id));
+
+  loom_symbol_ref_t refs[] = {
+      {/*.module_id=*/0, /*.symbol_id=*/zeta_symbol_id},
+      {/*.module_id=*/0, /*.symbol_id=*/alpha_symbol_id},
+  };
+  loom_op_t* import_op = NULL;
+  IREE_ASSERT_OK(loom_module_import_build(
+      &builder, provider_id,
+      loom_make_symbol_ref_array(refs, IREE_ARRAYSIZE(refs)),
+      LOOM_LOCATION_UNKNOWN, &import_op));
+  ASSERT_NE(import_op, nullptr);
+  loom_symbol_ref_array_t canonical_refs =
+      loom_module_import_symbols(import_op);
+  ASSERT_EQ(canonical_refs.count, 2u);
+  EXPECT_EQ(canonical_refs.values[0].symbol_id, alpha_symbol_id);
+  EXPECT_EQ(canonical_refs.values[1].symbol_id, zeta_symbol_id);
+
+  loom_symbol_ref_t duplicates[] = {
+      {/*.module_id=*/0, /*.symbol_id=*/alpha_symbol_id},
+      {/*.module_id=*/0, /*.symbol_id=*/alpha_symbol_id},
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_module_import_build(
+          &builder, provider_id,
+          loom_make_symbol_ref_array(duplicates, IREE_ARRAYSIZE(duplicates)),
+          LOOM_LOCATION_UNKNOWN, &import_op));
+  EXPECT_EQ(loom_module_block(module)->op_count, 1u)
+      << "duplicate rejection must happen before op allocation";
+
+  loom_module_free(module);
+}
+
+TEST_F(ModuleOpsTest, VerifierRejectsNoncanonicalRawAnchorSet) {
+  loom_module_t* module =
+      Parse(IREE_SV("module.import \"provider\" [@alpha, @zeta]\n"));
+  ASSERT_NE(module, nullptr);
+  loom_op_t* import_op = loom_block_op(loom_module_block(module), 0);
+  loom_symbol_ref_array_t canonical_refs =
+      loom_module_import_symbols(import_op);
+  ASSERT_EQ(canonical_refs.count, 2u);
+  loom_symbol_ref_t reversed_refs[] = {
+      canonical_refs.values[1],
+      canonical_refs.values[0],
+  };
+  loom_op_attrs(import_op)[1] = loom_attr_symbol_set(
+      reversed_refs, (uint16_t)IREE_ARRAYSIZE(reversed_refs));
+
+  loom_verify_options_t options = {
+      /*.sink=*/{NULL, NULL},
+      /*.max_errors=*/20,
+  };
+  loom_verify_result_t result = {};
+  IREE_ASSERT_OK(loom_verify_module(module, &options, &result));
+  EXPECT_EQ(result.error_count, 1u);
   loom_module_free(module);
 }
 

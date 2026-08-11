@@ -333,13 +333,16 @@ static iree_status_t loom_symbol_reference_visit_attr(
                                            loom_attr_as_symbol(attr), kind,
                                            role, attr_index, user_op);
     }
-    case LOOM_ATTR_SYMBOL_ARRAY: {
+    case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET: {
       loom_symbol_reference_role_t role = LOOM_SYMBOL_REFERENCE_ROLE_DEPENDENCY;
-      if (descriptor && descriptor->attr_kind == LOOM_ATTR_SYMBOL_ARRAY &&
+      if (descriptor && descriptor->attr_kind == attr.kind &&
           descriptor->reference.symbol_ref) {
         role = descriptor->reference.symbol_ref->role;
       }
-      loom_symbol_ref_array_t refs = loom_attr_as_symbol_array(attr);
+      loom_symbol_ref_array_t refs = attr.kind == LOOM_ATTR_SYMBOL_SET
+                                         ? loom_attr_as_symbol_set(attr)
+                                         : loom_attr_as_symbol_array(attr);
       for (uint16_t i = 0; i < refs.count; ++i) {
         IREE_RETURN_IF_ERROR(loom_symbol_reference_add_ref(
             builder, source_symbol_id, refs.values[i], kind, role, attr_index,

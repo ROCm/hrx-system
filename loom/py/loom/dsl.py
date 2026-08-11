@@ -111,6 +111,7 @@ __all__ = [
     "ATTR_TYPE_ANY",
     "ATTR_TYPE_SYMBOL",
     "ATTR_TYPE_SYMBOL_ARRAY",
+    "ATTR_TYPE_SYMBOL_SET",
     "ATTR_TYPE_FLAGS",
     "ATTR_TYPE_PREDICATE_LIST",
     "ATTR_TYPE_DICT",
@@ -532,6 +533,7 @@ ATTR_TYPE_ENCODING = "encoding"
 ATTR_TYPE_ANY = "any"
 ATTR_TYPE_SYMBOL = "symbol"
 ATTR_TYPE_SYMBOL_ARRAY = "symbol_array"
+ATTR_TYPE_SYMBOL_SET = "symbol_set"
 ATTR_TYPE_FLAGS = "flags"
 ATTR_TYPE_PREDICATE_LIST = "predicate_list"
 ATTR_TYPE_DICT = "dict"  # Named attribute dictionary.
@@ -555,6 +557,7 @@ _VALID_ATTR_TYPES = frozenset(
         ATTR_TYPE_ANY,
         ATTR_TYPE_SYMBOL,
         ATTR_TYPE_SYMBOL_ARRAY,
+        ATTR_TYPE_SYMBOL_SET,
         ATTR_TYPE_FLAGS,
         ATTR_TYPE_PREDICATE_LIST,
         ATTR_TYPE_DICT,
@@ -815,8 +818,10 @@ class AttrDef:
     attr_type: The kind of attribute value. Must be one of the ATTR_TYPE_*
         constants. Scoped enums use a stable key at format boundaries and a
         dense ordinal interpreted by the enclosing representation contract in
-        C IR. Parameterized attribute arrays and symbol arrays preserve order
-        and repeated elements and are valid only in descriptor-backed fields.
+        C IR. Parameterized attribute arrays and ordinary symbol arrays
+        preserve order and repeated elements. Symbol sets are ordered by exact
+        symbol-name bytes and contain no duplicates. All three collection kinds
+        are valid only in descriptor-backed fields.
     doc: Human-readable description.
     default: Default value (None = required, not optional).
     enum_def: For enum and enum-array attrs, the EnumDef describing valid
@@ -834,7 +839,7 @@ class AttrDef:
         attributes or every element of a parameterized attribute array. None
         leaves the family open.
     symbol_ref: Target interface and graph-role contract for a symbol or every
-        element of a symbol array.
+        element of a symbol array or symbol set.
     """
 
     name: str
@@ -887,14 +892,23 @@ class AttrDef:
         if self.symbol_ref is not None and self.attr_type not in (
             ATTR_TYPE_SYMBOL,
             ATTR_TYPE_SYMBOL_ARRAY,
+            ATTR_TYPE_SYMBOL_SET,
         ):
             raise ValueError(
                 f"AttrDef '{self.name}': symbol_ref requires "
-                "attr_type='symbol' or 'symbol_array'"
+                "attr_type='symbol', 'symbol_array', or 'symbol_set'"
             )
-        if self.attr_type == ATTR_TYPE_SYMBOL_ARRAY and self.symbol_ref is None:
+        if (
+            self.attr_type
+            in (
+                ATTR_TYPE_SYMBOL_ARRAY,
+                ATTR_TYPE_SYMBOL_SET,
+            )
+            and self.symbol_ref is None
+        ):
             raise ValueError(
-                f"AttrDef '{self.name}': attr_type='symbol_array' requires symbol_ref"
+                f"AttrDef '{self.name}': attr_type='{self.attr_type}' requires "
+                "symbol_ref"
             )
         if self.parameterized_attr is not None and self.attr_type not in (
             ATTR_TYPE_PARAMETERIZED,

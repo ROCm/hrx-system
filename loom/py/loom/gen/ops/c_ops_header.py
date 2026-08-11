@@ -396,6 +396,7 @@ def generate_ops_h(
                 "scoped_enum": "LOOM_DEFINE_ATTR_SCOPED_ENUM",
                 "symbol": "LOOM_DEFINE_ATTR_SYMBOL",
                 "symbol_array": "LOOM_DEFINE_ATTR_SYMBOL_ARRAY",
+                "symbol_set": "LOOM_DEFINE_ATTR_SYMBOL_SET",
                 "type": "LOOM_DEFINE_ATTR_TYPE",
                 "parameterized": "LOOM_DEFINE_ATTR_PARAMETERIZED",
                 "parameterized_array": "LOOM_DEFINE_ATTR_PARAMETERIZED_ARRAY",

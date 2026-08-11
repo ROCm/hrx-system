@@ -116,6 +116,7 @@ from loom.ir import (
     StorageType,
     SymbolName,
     SymbolNameArray,
+    SymbolNameSet,
     Type,
     Value,
 )
@@ -786,6 +787,12 @@ def _format_attr_value(
                 f"symbol-array attribute value must be SymbolNameArray: {value!r}"
             )
         return "[" + ", ".join("@" + str(element) for element in value) + "]"
+    if attr_def is not None and attr_def.attr_type == "symbol_set":
+        if not isinstance(value, SymbolNameSet):
+            raise TypeError(
+                f"symbol-set attribute value must be SymbolNameSet: {value!r}"
+            )
+        return "[" + ", ".join("@" + str(element) for element in value) + "]"
     if attr_def is not None and attr_def.attr_type == "type":
         if not isinstance(value, _IR_TYPE_CLASSES):
             raise TypeError(f"type attribute value must be a Type: {value!r}")
@@ -1003,6 +1010,11 @@ def _is_pipeline_printable_attr_value(
         return _is_pipeline_printable_name(str(value), allow_dot=False)
     if attr_def is not None and attr_def.attr_type == "symbol_array":
         return isinstance(value, SymbolNameArray) and all(
+            _is_pipeline_printable_name(str(element), allow_dot=False)
+            for element in value
+        )
+    if attr_def is not None and attr_def.attr_type == "symbol_set":
+        return isinstance(value, SymbolNameSet) and all(
             _is_pipeline_printable_name(str(element), allow_dot=False)
             for element in value
         )

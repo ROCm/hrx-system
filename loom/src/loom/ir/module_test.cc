@@ -1584,6 +1584,113 @@ TEST_F(ModuleTest, LookupString) {
 }
 
 //===----------------------------------------------------------------------===//
+// Symbol-set attributes
+//===----------------------------------------------------------------------===//
+
+TEST_F(ModuleTest, MakeSymbolSetSortsByNameAndCopiesReferences) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_string_id_t zeta_name = LOOM_STRING_ID_INVALID;
+  loom_string_id_t alpha_name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("zeta"), &zeta_name));
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("alpha"), &alpha_name));
+  uint16_t zeta_symbol = LOOM_SYMBOL_ID_INVALID;
+  uint16_t alpha_symbol = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_add_symbol(module, zeta_name, &zeta_symbol));
+  IREE_ASSERT_OK(loom_module_add_symbol(module, alpha_name, &alpha_symbol));
+  ASSERT_LT(zeta_symbol, alpha_symbol)
+      << "setup must distinguish symbol-id order from name order";
+
+  loom_symbol_ref_t refs[] = {
+      {/*.module_id=*/0, /*.symbol_id=*/zeta_symbol},
+      {/*.module_id=*/0, /*.symbol_id=*/alpha_symbol},
+  };
+  loom_symbol_ref_t duplicate_ref = loom_symbol_ref_null();
+  loom_attribute_t attr = loom_attr_absent();
+  IREE_ASSERT_OK(loom_module_try_make_symbol_set(
+      module, loom_make_symbol_ref_array(refs, IREE_ARRAYSIZE(refs)),
+      &duplicate_ref, &attr));
+
+  EXPECT_FALSE(loom_symbol_ref_is_valid(duplicate_ref));
+  ASSERT_EQ(attr.kind, LOOM_ATTR_SYMBOL_SET);
+  loom_symbol_ref_array_t set = loom_attr_as_symbol_set(attr);
+  ASSERT_EQ(set.count, 2);
+  ASSERT_NE(set.values, refs);
+  EXPECT_EQ(set.values[0].symbol_id, alpha_symbol);
+  EXPECT_EQ(set.values[1].symbol_id, zeta_symbol);
+
+  loom_symbol_ref_t reversed_refs[] = {
+      {/*.module_id=*/0, /*.symbol_id=*/alpha_symbol},
+      {/*.module_id=*/0, /*.symbol_id=*/zeta_symbol},
+  };
+  loom_attribute_t equal_attr = loom_attr_absent();
+  IREE_ASSERT_OK(loom_module_try_make_symbol_set(
+      module,
+      loom_make_symbol_ref_array(reversed_refs, IREE_ARRAYSIZE(reversed_refs)),
+      &duplicate_ref, &equal_attr));
+  EXPECT_TRUE(loom_attribute_equal(&attr, &equal_attr));
+  EXPECT_EQ(loom_attribute_hash(&attr), loom_attribute_hash(&equal_attr));
+
+  refs[0].symbol_id = alpha_symbol;
+  EXPECT_EQ(set.values[1].symbol_id, zeta_symbol);
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, MakeSymbolSetReportsDuplicateName) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_string_id_t name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("shared"), &name));
+  uint16_t first_symbol = LOOM_SYMBOL_ID_INVALID;
+  uint16_t second_symbol = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_add_symbol(module, name, &first_symbol));
+  IREE_ASSERT_OK(loom_module_add_symbol(module, name, &second_symbol));
+
+  loom_symbol_ref_t refs[] = {
+      {/*.module_id=*/0, /*.symbol_id=*/first_symbol},
+      {/*.module_id=*/0, /*.symbol_id=*/second_symbol},
+  };
+  loom_symbol_ref_t duplicate_ref = loom_symbol_ref_null();
+  loom_attribute_t attr = loom_attr_i64(42);
+  IREE_ASSERT_OK(loom_module_try_make_symbol_set(
+      module, loom_make_symbol_ref_array(refs, IREE_ARRAYSIZE(refs)),
+      &duplicate_ref, &attr));
+
+  EXPECT_TRUE(loom_symbol_ref_is_valid(duplicate_ref));
+  EXPECT_EQ(module->symbols.entries[duplicate_ref.symbol_id].name_id, name);
+  EXPECT_TRUE(loom_attr_is_absent(attr));
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, MakeSymbolSetValidatesReferencesAndEmptySet) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_symbol_ref_t duplicate_ref = loom_symbol_ref_null();
+  loom_attribute_t attr = loom_attr_absent();
+  IREE_ASSERT_OK(loom_module_try_make_symbol_set(
+      module, loom_symbol_ref_array_empty(), &duplicate_ref, &attr));
+  EXPECT_FALSE(loom_symbol_ref_is_valid(duplicate_ref));
+  EXPECT_EQ(attr.kind, LOOM_ATTR_SYMBOL_SET);
+  EXPECT_EQ(attr.count, 0);
+  EXPECT_EQ(loom_attr_as_symbol_set(attr).values, nullptr);
+
+  loom_symbol_ref_t remote_ref = {/*.module_id=*/1, /*.symbol_id=*/0};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_module_try_make_symbol_set(
+                            module, loom_make_symbol_ref_array(&remote_ref, 1),
+                            &duplicate_ref, &attr));
+  loom_module_free(module);
+}
+
+//===----------------------------------------------------------------------===//
 // Canonical dictionary attributes
 //===----------------------------------------------------------------------===//
 

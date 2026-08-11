@@ -832,6 +832,35 @@ func.def @helper(%x: i32) -> (i32) {
   EXPECT_NE(text.find("func.call @helper$link0(%x)"), std::string::npos);
 }
 
+TEST_F(LinkerTest, PrivateRenameRecanonicalizesIndexedImportAnchors) {
+  loom_module_t* first = Parse(IREE_SV(R"(
+module.import "provider" [@helper, @helper$link0]
+
+func.def @helper(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.def @helper$link0(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"));
+  loom_module_t* second = Parse(IREE_SV(R"(
+func.def public @helper(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"));
+
+  loom_module_t* linked = Link({first, second});
+  Verify(linked);
+
+  std::string text = Print(linked);
+  EXPECT_NE(text.find("module.import \"provider\" "
+                      "[@helper$link0, @helper$link1]"),
+            std::string::npos);
+  EXPECT_NE(text.find("func.def @helper$link1("), std::string::npos);
+  EXPECT_NE(text.find("func.def public @helper("), std::string::npos);
+}
+
 TEST_F(LinkerTest, PrivateRenameOutputIsStable) {
   loom_module_t* first = Parse(IREE_SV(R"(
 func.def public @entry_a(%x: i32) -> (i32) {

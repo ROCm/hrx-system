@@ -83,6 +83,7 @@ from loom.ir import (
     SymbolKind,
     SymbolName,
     SymbolNameArray,
+    SymbolNameSet,
     SymbolRef,
     TaggedLocation,
     TiedResult,
@@ -998,6 +999,31 @@ class TestOperations:
     def test_symbol_name_array_rejects_untyped_strings(self) -> None:
         with pytest.raises(TypeError, match="symbol name array element 1"):
             SymbolNameArray([SymbolName("typed"), "untyped"])  # type: ignore[list-item]
+
+    def test_symbol_name_set_sorts_and_rejects_duplicates(self) -> None:
+        values = SymbolNameSet(
+            [
+                SymbolName("provider_b"),
+                SymbolName("provider_a"),
+            ]
+        )
+
+        assert values.values == (
+            SymbolName("provider_a"),
+            SymbolName("provider_b"),
+        )
+        assert len(SymbolNameSet()) == 0
+        with pytest.raises(ValueError, match="duplicate symbol name '@provider_a'"):
+            SymbolNameSet(
+                [
+                    SymbolName("provider_a"),
+                    SymbolName("provider_a"),
+                ]
+            )
+
+    def test_symbol_name_set_rejects_untyped_strings(self) -> None:
+        with pytest.raises(TypeError, match="symbol name set element 1"):
+            SymbolNameSet([SymbolName("typed"), "untyped"])  # type: ignore[list-item]
 
     def test_op_with_nested_canonical_attr_dict(self) -> None:
         op = Operation(

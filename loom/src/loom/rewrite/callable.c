@@ -279,14 +279,15 @@ static bool loom_callable_attr_may_reference_symbol_in_mode(
       return loom_callable_symbol_scan_matches(loom_attr_as_symbol(*attr),
                                                target_ref, mode);
     case LOOM_ATTR_SYMBOL_ARRAY:
-      if (attr->count > 0 && !attr->symbol_array) return true;
+    case LOOM_ATTR_SYMBOL_SET: {
       for (uint16_t i = 0; i < attr->count; ++i) {
-        if (loom_callable_symbol_scan_matches(attr->symbol_array[i], target_ref,
+        if (loom_callable_symbol_scan_matches(attr->symbol_refs[i], target_ref,
                                               mode)) {
           return true;
         }
       }
       return false;
+    }
     case LOOM_ATTR_DICT:
       if (attr->count > 0 && !attr->dict_entries) return true;
       for (uint16_t i = 0; i < attr->count; ++i) {

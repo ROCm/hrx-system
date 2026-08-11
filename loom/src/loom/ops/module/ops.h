@@ -27,7 +27,7 @@ enum {
 // module.import "motif/format/ggml.loom" [@decode_q4, @decode_q6]
 LOOM_DEFINE_ISA(loom_module_import_isa, LOOM_OP_MODULE_IMPORT)
 LOOM_DEFINE_ATTR_STRING(loom_module_import_provider, 0)
-LOOM_DEFINE_ATTR_SYMBOL_ARRAY(loom_module_import_symbols, 1)
+LOOM_DEFINE_ATTR_SYMBOL_SET(loom_module_import_symbols, 1)
 iree_status_t loom_module_import_build(
     loom_builder_t* builder,
     loom_string_id_t provider,

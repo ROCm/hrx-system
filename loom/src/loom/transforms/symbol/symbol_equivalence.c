@@ -242,20 +242,20 @@ static iree_status_t loom_symbol_equivalence_compare_attributes(
       return loom_symbol_equivalence_compare_symbol_refs(
           state, lhs_attr->symbol, rhs_attr->symbol, out_equivalent);
     case LOOM_ATTR_SYMBOL_ARRAY:
-      if (lhs_attr->count != rhs_attr->count ||
-          (lhs_attr->count > 0 &&
-           (!lhs_attr->symbol_array || !rhs_attr->symbol_array))) {
+    case LOOM_ATTR_SYMBOL_SET: {
+      if (lhs_attr->count != rhs_attr->count) {
         return iree_ok_status();
       }
       for (uint16_t i = 0; i < lhs_attr->count; ++i) {
         bool element_equivalent = false;
         IREE_RETURN_IF_ERROR(loom_symbol_equivalence_compare_symbol_refs(
-            state, lhs_attr->symbol_array[i], rhs_attr->symbol_array[i],
+            state, lhs_attr->symbol_refs[i], rhs_attr->symbol_refs[i],
             &element_equivalent));
         if (!element_equivalent) return iree_ok_status();
       }
       *out_equivalent = true;
       return iree_ok_status();
+    }
     case LOOM_ATTR_TYPE:
       *out_equivalent = loom_symbol_equivalence_types_equal(
           state, state->module->types.entries[lhs_attr->type_id],

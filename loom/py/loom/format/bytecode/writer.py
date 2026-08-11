@@ -64,6 +64,7 @@ from loom.ir import (
     SymbolKind,
     SymbolName,
     SymbolNameArray,
+    SymbolNameSet,
     TaggedLocation,
     Type,
     TypeKind,
@@ -145,6 +146,7 @@ ATTR_KIND_PARAMETERIZED = 14
 ATTR_KIND_PARAMETERIZED_ARRAY = 15
 ATTR_KIND_SIGNED_ENUM_SET = 16
 ATTR_KIND_SYMBOL_ARRAY = 17
+ATTR_KIND_SYMBOL_SET = 18
 
 # Type kind bytes. These must match loom_bytecode_type_kind_e, not just the
 # current Python enum spelling.
@@ -171,7 +173,7 @@ BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
 
 # File magic and version.
 MAGIC = b"LOOM"
-FORMAT_VERSION = 24
+FORMAT_VERSION = 25
 PRODUCER = "loom-py"
 
 SOURCE_TRIVIA_LEADING_BLANK_LINE = 1
@@ -685,6 +687,11 @@ class BytecodeWriter:
         if isinstance(value, SymbolNameArray):
             if attr_type != "symbol_array":
                 raise ValueError("symbol arrays require a descriptor-backed field")
+            for name in value:
+                self._ctx.intern_string(str(name))
+        elif isinstance(value, SymbolNameSet):
+            if attr_type != "symbol_set":
+                raise ValueError("symbol sets require a descriptor-backed field")
             for name in value:
                 self._ctx.intern_string(str(name))
         elif isinstance(value, ParameterizedAttr):
@@ -1539,6 +1546,8 @@ class BytecodeWriter:
             raise ValueError("signed enum sets require a descriptor-backed field")
         elif isinstance(value, SymbolNameArray):
             raise ValueError("symbol arrays require a descriptor-backed field")
+        elif isinstance(value, SymbolNameSet):
+            raise ValueError("symbol sets require a descriptor-backed field")
         elif isinstance(value, Mapping):
             self._write_dict_attr_value(
                 buf, value, value_numbers_by_name, aggregate_nesting_depth
@@ -1667,6 +1676,16 @@ class BytecodeWriter:
                     f"got {value!r}"
                 )
             buf.write_u8(ATTR_KIND_SYMBOL_ARRAY)
+            buf.write_varint(len(value))
+            for name in value:
+                buf.write_varint(self._ctx.strings[str(name)])
+            return True
+        if attr_type == "symbol_set":
+            if not isinstance(value, SymbolNameSet):
+                raise TypeError(
+                    f"symbol-set attribute value must be SymbolNameSet, got {value!r}"
+                )
+            buf.write_u8(ATTR_KIND_SYMBOL_SET)
             buf.write_varint(len(value))
             for name in value:
                 buf.write_varint(self._ctx.strings[str(name)])

@@ -1787,6 +1787,13 @@ loom_attribute_t loom_memory_access_atomic_scope(loom_memory_access_t access);
     return loom_attr_as_symbol_array(loom_op_attrs(op)[(index)]);        \
   }
 
+// Defines a function that reads a symbol-set attribute by index.
+#define LOOM_DEFINE_ATTR_SYMBOL_SET(func_name, index)                    \
+  enum { func_name##_ATTR_INDEX = (index) };                             \
+  static inline loom_symbol_ref_array_t func_name(const loom_op_t* op) { \
+    return loom_attr_as_symbol_set(loom_op_attrs(op)[(index)]);          \
+  }
+
 // Defines a function that reads a string attribute by index.
 #define LOOM_DEFINE_ATTR_STRING(func_name, index)                 \
   enum { func_name##_ATTR_INDEX = (index) };                      \

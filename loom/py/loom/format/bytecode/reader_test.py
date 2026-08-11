@@ -25,6 +25,7 @@ from loom.dialect.test.defs import (
     test_parameterized_attr_array,
     test_signed_enum_set_attrs,
     test_symbol_array_attrs,
+    test_symbol_set_attrs,
 )
 from loom.format.bytecode.encoding import (
     decode_varint,
@@ -87,6 +88,7 @@ from loom.ir import (
     SymbolKind,
     SymbolName,
     SymbolNameArray,
+    SymbolNameSet,
     TaggedLocation,
     TiedResult,
     Type,
@@ -2065,6 +2067,52 @@ class TestSymbolArrayAttributeWireFormat:
 
         with pytest.raises(BytecodeError, match="descriptor-backed"):
             reader._read_attr_value(data, 0)
+
+
+class TestSymbolSetAttributeWireFormat:
+    def _read_symbol_set(self, data: bytes) -> tuple[SymbolNameSet, int]:
+        reader = BytecodeReader(b"", op_decls=[test_symbol_set_attrs])
+        reader._strings = ["", "a", "b"]
+        attr_def = reader._attr_def_for_op_attr("test.symbol_set_attrs", "symbols")
+        value, offset = reader._read_attr_value(data, 0, attr_def=attr_def)
+        assert isinstance(value, SymbolNameSet)
+        return value, offset
+
+    def test_reads_sorted_unique_names(self) -> None:
+        value, offset = self._read_symbol_set(bytes([18, 2, 1, 2]))
+
+        assert value == SymbolNameSet([SymbolName("a"), SymbolName("b")])
+        assert offset == 4
+
+    @pytest.mark.parametrize(
+        "name_ids",
+        [
+            (2, 1),
+            (1, 1),
+        ],
+    )
+    def test_rejects_noncanonical_names(self, name_ids: tuple[int, int]) -> None:
+        with pytest.raises(BytecodeError, match="not sorted and unique"):
+            self._read_symbol_set(bytes([18, 2, *name_ids]))
+
+    def test_rejects_out_of_range_symbol_name(self) -> None:
+        with pytest.raises(BytecodeError, match="string_id 3 out of range"):
+            self._read_symbol_set(bytes([18, 1, 3]))
+
+    def test_rejects_set_without_field_descriptor(self) -> None:
+        reader = BytecodeReader(b"")
+
+        with pytest.raises(BytecodeError, match="descriptor-backed"):
+            reader._read_attr_value(bytes([18, 0]), 0)
+
+    def test_rejects_set_for_symbol_array_field(self) -> None:
+        reader = BytecodeReader(b"", op_decls=[test_symbol_array_attrs])
+        attr_def = reader._attr_def_for_op_attr(
+            "test.symbol_array_attrs", "dependencies"
+        )
+
+        with pytest.raises(BytecodeError, match="descriptor-backed"):
+            reader._read_attr_value(bytes([18, 0]), 0, attr_def=attr_def)
 
 
 class TestParameterizedAttributeWireFormat:

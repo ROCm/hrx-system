@@ -902,15 +902,13 @@ static iree_status_t loom_ir_remap_attribute_impl(
       return loom_ir_remap_symbol_ref(remap, source_attr.symbol,
                                       &out_target_attr->symbol);
 
-    case LOOM_ATTR_SYMBOL_ARRAY: {
+    case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET: {
       if (source_attr.count == 0) {
-        *out_target_attr = loom_attr_symbol_array(NULL, 0);
+        *out_target_attr = source_attr.kind == LOOM_ATTR_SYMBOL_SET
+                               ? loom_attr_symbol_set(NULL, 0)
+                               : loom_attr_symbol_array(NULL, 0);
         return iree_ok_status();
-      }
-      if (!source_attr.symbol_array) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "non-empty symbol array attribute has a NULL payload");
       }
       loom_symbol_ref_t* target_refs = NULL;
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -918,9 +916,26 @@ static iree_status_t loom_ir_remap_attribute_impl(
           (void**)&target_refs));
       for (uint16_t i = 0; i < source_attr.count; ++i) {
         IREE_RETURN_IF_ERROR(loom_ir_remap_symbol_ref(
-            remap, source_attr.symbol_array[i], &target_refs[i]));
+            remap, source_attr.symbol_refs[i], &target_refs[i]));
       }
-      *out_target_attr = loom_attr_symbol_array(target_refs, source_attr.count);
+      if (source_attr.kind == LOOM_ATTR_SYMBOL_SET) {
+        loom_symbol_ref_t duplicate_ref = loom_module_canonicalize_symbol_set(
+            remap->target_module, target_refs, source_attr.count);
+        if (loom_symbol_ref_is_valid(duplicate_ref)) {
+          const loom_symbol_t* duplicate_symbol =
+              &remap->target_module->symbols.entries[duplicate_ref.symbol_id];
+          iree_string_view_t duplicate_name =
+              remap->target_module->strings.entries[duplicate_symbol->name_id];
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "remapped symbol set contains duplicate '@%.*s'",
+              (int)duplicate_name.size, duplicate_name.data);
+        }
+        *out_target_attr = loom_attr_symbol_set(target_refs, source_attr.count);
+      } else {
+        *out_target_attr =
+            loom_attr_symbol_array(target_refs, source_attr.count);
+      }
       return iree_ok_status();
     }
 
@@ -1203,7 +1218,7 @@ iree_status_t loom_ir_remap_encoding_id(loom_ir_remap_t* remap,
         /*allow_invalid=*/false, &target_attrs[i].name_id);
     if (!iree_status_is_ok(status)) continue;
     status = loom_ir_remap_attribute_impl(
-        remap, source_encoding->attributes[i].value, /*dict_depth=*/0,
+        remap, source_encoding->attributes[i].value, /*aggregate_depth=*/0,
         remap->arena, &target_attrs[i].value);
   }
 

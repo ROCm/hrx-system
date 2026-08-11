@@ -239,6 +239,7 @@ static iree_status_t loom_availability_attr_is_available_before_op_impl(
     case LOOM_ATTR_SIGNED_ENUM_SET:
     case LOOM_ATTR_SYMBOL:
     case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET:
     case LOOM_ATTR_BYTES:
       *out_available = true;
       return iree_ok_status();

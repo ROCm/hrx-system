@@ -161,7 +161,7 @@ def attr_type_hint(attr_def: AttrDef | None) -> str:
             return "SignedEnumSetAttr | Mapping[str | int, bool]"
         case "symbol":
             return "str"
-        case "symbol_array":
+        case "symbol_array" | "symbol_set":
             return "Sequence[str]"
         case "type":
             return "Type"

@@ -1014,19 +1014,16 @@ static iree_status_t loom_module_mark_symbol_references_in_attr(
       return iree_ok_status();
     }
     case LOOM_ATTR_SYMBOL_ARRAY:
-      if (attr->count > 0 && !attr->symbol_array) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "non-empty symbol array attribute has a NULL payload");
-      }
+    case LOOM_ATTR_SYMBOL_SET: {
       for (uint16_t i = 0; i < attr->count; ++i) {
-        loom_symbol_ref_t symbol_ref = attr->symbol_array[i];
+        loom_symbol_ref_t symbol_ref = attr->symbol_refs[i];
         if (loom_symbol_ref_is_valid(symbol_ref) && symbol_ref.module_id == 0 &&
             symbol_ref.symbol_id < module->symbols.count) {
           referenced_symbols[symbol_ref.symbol_id] = 1;
         }
       }
       return iree_ok_status();
+    }
     case LOOM_ATTR_DICT:
       if (dict_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
         return iree_make_status(
@@ -1174,16 +1171,12 @@ static iree_status_t loom_module_remap_symbol_attr(
       }
       return iree_ok_status();
     }
-    case LOOM_ATTR_SYMBOL_ARRAY: {
+    case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET: {
       if (source_attr.count == 0) return iree_ok_status();
-      if (!source_attr.symbol_array) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "non-empty symbol array attribute has a NULL payload");
-      }
       loom_symbol_ref_t* target_refs = NULL;
       for (uint16_t i = 0; i < source_attr.count; ++i) {
-        loom_symbol_ref_t source_ref = source_attr.symbol_array[i];
+        loom_symbol_ref_t source_ref = source_attr.symbol_refs[i];
         if (!loom_symbol_ref_is_valid(source_ref) ||
             source_ref.module_id != 0 ||
             source_ref.symbol_id >= old_symbol_count) {
@@ -1202,14 +1195,16 @@ static iree_status_t loom_module_remap_symbol_attr(
           IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
               &module->arena, source_attr.count, sizeof(*target_refs),
               (void**)&target_refs));
-          memcpy(target_refs, source_attr.symbol_array,
+          memcpy(target_refs, source_attr.symbol_refs,
                  (iree_host_size_t)source_attr.count * sizeof(*target_refs));
         }
         target_refs[i].symbol_id = new_symbol_id;
       }
       if (target_refs) {
         *out_target_attr =
-            loom_attr_symbol_array(target_refs, source_attr.count);
+            source_attr.kind == LOOM_ATTR_SYMBOL_SET
+                ? loom_attr_symbol_set(target_refs, source_attr.count)
+                : loom_attr_symbol_array(target_refs, source_attr.count);
         *out_changed = true;
       }
       return iree_ok_status();
@@ -2343,6 +2338,140 @@ loom_string_id_t loom_module_lookup_string(const loom_module_t* module,
 }
 
 //===----------------------------------------------------------------------===//
+// Symbol-set attributes
+//===----------------------------------------------------------------------===//
+
+static iree_status_t loom_module_resolve_symbol_ref_name(
+    const loom_module_t* module, loom_symbol_ref_t ref,
+    iree_string_view_t* out_name) {
+  if (!loom_symbol_ref_is_valid(ref) || ref.module_id != 0 ||
+      ref.symbol_id >= module->symbols.count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "symbol set reference {module=%u, symbol=%u} is not a valid local "
+        "symbol (module has %" PRIhsz " symbols)",
+        (unsigned)ref.module_id, (unsigned)ref.symbol_id,
+        module->symbols.count);
+  }
+  const loom_string_id_t name_id =
+      module->symbols.entries[ref.symbol_id].name_id;
+  *out_name = module->strings.entries[name_id];
+  return iree_ok_status();
+}
+
+static int loom_module_compare_symbol_refs_by_name(const loom_module_t* module,
+                                                   loom_symbol_ref_t lhs,
+                                                   loom_symbol_ref_t rhs) {
+  loom_string_id_t lhs_name_id = module->symbols.entries[lhs.symbol_id].name_id;
+  loom_string_id_t rhs_name_id = module->symbols.entries[rhs.symbol_id].name_id;
+  return iree_string_view_compare(module->strings.entries[lhs_name_id],
+                                  module->strings.entries[rhs_name_id]);
+}
+
+static void loom_module_sift_symbol_ref_heap(const loom_module_t* module,
+                                             loom_symbol_ref_t* refs,
+                                             iree_host_size_t root,
+                                             iree_host_size_t count) {
+  while (root * 2 + 1 < count) {
+    iree_host_size_t larger = root;
+    iree_host_size_t left = root * 2 + 1;
+    iree_host_size_t right = left + 1;
+    if (loom_module_compare_symbol_refs_by_name(module, refs[larger],
+                                                refs[left]) < 0) {
+      larger = left;
+    }
+    if (right < count && loom_module_compare_symbol_refs_by_name(
+                             module, refs[larger], refs[right]) < 0) {
+      larger = right;
+    }
+    if (larger == root) return;
+    loom_symbol_ref_t temporary = refs[root];
+    refs[root] = refs[larger];
+    refs[larger] = temporary;
+    root = larger;
+  }
+}
+
+static void loom_module_sort_symbol_refs_by_name(const loom_module_t* module,
+                                                 loom_symbol_ref_t* refs,
+                                                 iree_host_size_t count) {
+  for (iree_host_size_t start = count / 2; start > 0; --start) {
+    loom_module_sift_symbol_ref_heap(module, refs, start - 1, count);
+  }
+  for (iree_host_size_t end = count; end > 1; --end) {
+    loom_symbol_ref_t temporary = refs[0];
+    refs[0] = refs[end - 1];
+    refs[end - 1] = temporary;
+    loom_module_sift_symbol_ref_heap(module, refs, 0, end - 1);
+  }
+}
+
+static iree_status_t loom_module_validate_symbol_set(
+    const loom_module_t* module, const loom_symbol_ref_t* refs,
+    iree_host_size_t ref_count) {
+  if (ref_count > UINT16_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "symbol set has %" PRIhsz " elements, max %u",
+                            ref_count, (unsigned)UINT16_MAX);
+  }
+  if (ref_count > 0 && !refs) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "non-empty symbol set has a NULL payload");
+  }
+  for (iree_host_size_t i = 0; i < ref_count; ++i) {
+    iree_string_view_t name = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(
+        loom_module_resolve_symbol_ref_name(module, refs[i], &name));
+  }
+  return iree_ok_status();
+}
+
+loom_symbol_ref_t loom_module_canonicalize_symbol_set(
+    const loom_module_t* module, loom_symbol_ref_t* refs, uint16_t ref_count) {
+  loom_module_sort_symbol_refs_by_name(module, refs, ref_count);
+  for (uint16_t i = 1; i < ref_count; ++i) {
+    if (loom_module_compare_symbol_refs_by_name(module, refs[i - 1], refs[i]) ==
+        0) {
+      return refs[i];
+    }
+  }
+  return loom_symbol_ref_null();
+}
+
+iree_status_t loom_module_try_make_symbol_set(
+    loom_module_t* module, loom_symbol_ref_array_t refs,
+    loom_symbol_ref_t* out_duplicate_ref, loom_attribute_t* out_attr) {
+  *out_duplicate_ref = loom_symbol_ref_null();
+  *out_attr = loom_attr_absent();
+  IREE_RETURN_IF_ERROR(
+      loom_module_validate_symbol_set(module, refs.values, refs.count));
+  if (refs.count == 0) {
+    *out_attr = loom_attr_symbol_set(NULL, 0);
+    return iree_ok_status();
+  }
+
+  const iree_arena_checkpoint_t checkpoint =
+      iree_arena_checkpoint_save(&module->arena);
+  loom_symbol_ref_t* sorted_refs = NULL;
+  iree_status_t status = iree_arena_allocate_array(
+      &module->arena, refs.count, sizeof(*sorted_refs), (void**)&sorted_refs);
+  if (!iree_status_is_ok(status)) {
+    iree_arena_checkpoint_restore(&checkpoint);
+    return status;
+  }
+  memcpy(sorted_refs, refs.values, refs.count * sizeof(*sorted_refs));
+  *out_duplicate_ref = loom_module_canonicalize_symbol_set(
+      module, sorted_refs, (uint16_t)refs.count);
+  if (loom_symbol_ref_is_valid(*out_duplicate_ref)) {
+    iree_arena_checkpoint_restore(&checkpoint);
+    return iree_ok_status();
+  }
+
+  *out_attr = loom_attr_symbol_set(sorted_refs, (uint16_t)refs.count);
+  return iree_ok_status();
+}
+
+//===----------------------------------------------------------------------===//
 // Canonical dictionary attributes
 //===----------------------------------------------------------------------===//
 
@@ -2744,7 +2873,7 @@ static iree_status_t loom_module_canonicalize_attr_value(
         *out_value = loom_attr_symbol_array(NULL, 0);
         return iree_ok_status();
       }
-      if (value.symbol_array == NULL) {
+      if (value.symbol_refs == NULL) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "non-empty symbol array attribute has a NULL payload");
@@ -2752,9 +2881,29 @@ static iree_status_t loom_module_canonicalize_attr_value(
       loom_symbol_ref_t* values = NULL;
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
           &module->arena, value.count, sizeof(*values), (void**)&values));
-      memcpy(values, value.symbol_array,
+      memcpy(values, value.symbol_refs,
              (iree_host_size_t)value.count * sizeof(*values));
       *out_value = loom_attr_symbol_array(values, value.count);
+      return iree_ok_status();
+    }
+    case LOOM_ATTR_SYMBOL_SET: {
+      if (descriptor == NULL) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "symbol set attributes require a descriptor-backed field");
+      }
+      loom_symbol_ref_t duplicate_ref = loom_symbol_ref_null();
+      IREE_RETURN_IF_ERROR(loom_module_try_make_symbol_set(
+          module, loom_make_symbol_ref_array(value.symbol_refs, value.count),
+          &duplicate_ref, out_value));
+      if (loom_symbol_ref_is_valid(duplicate_ref)) {
+        iree_string_view_t duplicate_name = iree_string_view_empty();
+        IREE_RETURN_IF_ERROR(loom_module_resolve_symbol_ref_name(
+            module, duplicate_ref, &duplicate_name));
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "symbol set contains duplicate '@%.*s'",
+                                (int)duplicate_name.size, duplicate_name.data);
+      }
       return iree_ok_status();
     }
     case LOOM_ATTR_TYPE:
@@ -3168,10 +3317,38 @@ static iree_status_t loom_module_verify_canonical_attr_value(
             IREE_STATUS_INVALID_ARGUMENT,
             "symbol array attributes require a descriptor-backed field");
       }
-      if ((value->count > 0) != (value->symbol_array != NULL)) {
+      if ((value->count > 0) != (value->symbol_refs != NULL)) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "symbol array attribute pointer does not match its element count");
+      }
+      return iree_ok_status();
+    }
+    case LOOM_ATTR_SYMBOL_SET: {
+      IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_header(
+          value, IREE_SV("symbol set attribute")));
+      if (descriptor == NULL) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "symbol set attributes require a descriptor-backed field");
+      }
+      if ((value->count > 0) != (value->symbol_refs != NULL)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "symbol set attribute pointer does not match its element count");
+      }
+      iree_string_view_t previous_name = iree_string_view_empty();
+      for (uint16_t i = 0; i < value->count; ++i) {
+        iree_string_view_t current_name = iree_string_view_empty();
+        IREE_RETURN_IF_ERROR(loom_module_resolve_symbol_ref_name(
+            module, value->symbol_refs[i], &current_name));
+        if (i > 0 &&
+            iree_string_view_compare(previous_name, current_name) >= 0) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "symbol set attribute is not sorted and unique");
+        }
+        previous_name = current_name;
       }
       return iree_ok_status();
     }
@@ -4241,6 +4418,7 @@ static iree_status_t loom_module_replace_attribute_value_refs_impl(
     case LOOM_ATTR_SCOPED_ENUM:
     case LOOM_ATTR_SYMBOL:
     case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET:
     case LOOM_ATTR_I64_ARRAY:
     case LOOM_ATTR_ENUM_ARRAY:
     case LOOM_ATTR_SIGNED_ENUM_SET:

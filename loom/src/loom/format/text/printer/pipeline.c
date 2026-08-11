@@ -211,12 +211,13 @@ static bool loom_print_pipeline_attr_value_is_printable(
                  ctx->module->strings.entries[name_id], /*allow_dot=*/false);
     }
     case LOOM_ATTR_SYMBOL_ARRAY:
-      if (!descriptor || descriptor->attr_kind != LOOM_ATTR_SYMBOL_ARRAY ||
-          (attr->count > 0 && !attr->symbol_array)) {
+    case LOOM_ATTR_SYMBOL_SET: {
+      if (!descriptor || descriptor->attr_kind != attr->kind ||
+          (attr->count > 0 && !attr->symbol_refs)) {
         return false;
       }
       for (uint16_t i = 0; i < attr->count; ++i) {
-        loom_symbol_ref_t ref = attr->symbol_array[i];
+        loom_symbol_ref_t ref = attr->symbol_refs[i];
         if (ref.module_id != 0 || ref.symbol_id >= ctx->module->symbols.count) {
           return false;
         }
@@ -229,6 +230,7 @@ static bool loom_print_pipeline_attr_value_is_printable(
         }
       }
       return true;
+    }
     case LOOM_ATTR_TYPE:
       return attr->type_id < ctx->module->types.count;
     case LOOM_ATTR_ENCODING:

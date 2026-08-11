@@ -344,26 +344,28 @@ class ReaderTest : public ::testing::Test {
     return module;
   }
 
+  loom_symbol_ref_t AddRecord(loom_module_t* module, loom_builder_t* builder,
+                              iree_string_view_t name) {
+    loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+    IREE_CHECK_OK(loom_builder_intern_string(builder, name, &name_id));
+    uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
+    IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
+    loom_symbol_ref_t symbol = {/*.module_id=*/0,
+                                /*.symbol_id=*/symbol_id};
+    loom_op_t* record_op = nullptr;
+    IREE_CHECK_OK(loom_test_record_build(builder, /*build_flags=*/0, /*kind=*/0,
+                                         symbol, loom_named_attr_slice_empty(),
+                                         LOOM_LOCATION_UNKNOWN, &record_op));
+    return symbol;
+  }
+
   loom_module_t* CreateSymbolArrayModule() {
     loom_module_t* module = CreateModule("reader_symbol_array");
     loom_builder_t builder;
     loom_builder_initialize(module, &module->arena, loom_module_block(module),
                             &builder);
-    auto add_record = [&](iree_string_view_t name) {
-      loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
-      IREE_CHECK_OK(loom_builder_intern_string(&builder, name, &name_id));
-      uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
-      IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-      loom_symbol_ref_t symbol = {/*.module_id=*/0,
-                                  /*.symbol_id=*/symbol_id};
-      loom_op_t* record_op = nullptr;
-      IREE_CHECK_OK(loom_test_record_build(
-          &builder, /*build_flags=*/0, /*kind=*/0, symbol,
-          loom_named_attr_slice_empty(), LOOM_LOCATION_UNKNOWN, &record_op));
-      return symbol;
-    };
-    const loom_symbol_ref_t a = add_record(IREE_SV("a"));
-    const loom_symbol_ref_t b = add_record(IREE_SV("b"));
+    const loom_symbol_ref_t a = AddRecord(module, &builder, IREE_SV("a"));
+    const loom_symbol_ref_t b = AddRecord(module, &builder, IREE_SV("b"));
 
     loom_region_t* body = AddVoidFunction(module, "symbol_arrays");
     loom_builder_t body_builder;
@@ -386,6 +388,37 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_test_symbol_array_attrs_build(
         &body_builder, /*build_flags=*/0, loom_symbol_ref_array_empty(),
         loom_symbol_ref_array_empty(), LOOM_LOCATION_UNKNOWN, &absent_op));
+    loom_op_t* yield_op = nullptr;
+    IREE_CHECK_OK(loom_test_yield_build(&body_builder, /*values=*/nullptr,
+                                        /*value_count=*/0,
+                                        LOOM_LOCATION_UNKNOWN, &yield_op));
+    return module;
+  }
+
+  loom_module_t* CreateSymbolSetModule() {
+    loom_module_t* module = CreateModule("reader_symbol_set");
+    loom_builder_t builder;
+    loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                            &builder);
+    const loom_symbol_ref_t zeta = AddRecord(module, &builder, IREE_SV("zeta"));
+    const loom_symbol_ref_t alpha =
+        AddRecord(module, &builder, IREE_SV("alpha"));
+
+    loom_region_t* body = AddVoidFunction(module, "symbol_sets");
+    loom_builder_t body_builder;
+    loom_builder_initialize(module, &module->arena,
+                            loom_region_entry_block(body), &body_builder);
+    const loom_symbol_ref_t unsorted_symbols[] = {zeta, alpha};
+    loom_op_t* populated_op = nullptr;
+    IREE_CHECK_OK(loom_test_symbol_set_attrs_build(
+        &body_builder,
+        loom_make_symbol_ref_array(unsorted_symbols,
+                                   IREE_ARRAYSIZE(unsorted_symbols)),
+        LOOM_LOCATION_UNKNOWN, &populated_op));
+    loom_op_t* empty_op = nullptr;
+    IREE_CHECK_OK(loom_test_symbol_set_attrs_build(
+        &body_builder, loom_symbol_ref_array_empty(), LOOM_LOCATION_UNKNOWN,
+        &empty_op));
     loom_op_t* yield_op = nullptr;
     IREE_CHECK_OK(loom_test_yield_build(&body_builder, /*values=*/nullptr,
                                         /*value_count=*/0,
@@ -1475,7 +1508,8 @@ class ReaderTest : public ::testing::Test {
         *offset += (size_t)word_count * 2 * sizeof(uint64_t);
         break;
       }
-      case 17: {  // SYMBOL_ARRAY.
+      case 17:    // SYMBOL_ARRAY.
+      case 18: {  // SYMBOL_SET.
         uint64_t count = ReadUVarint(bytes, offset);
         for (uint64_t i = 0; i < count; ++i) {
           ReadUVarint(bytes, offset);
@@ -2703,6 +2737,60 @@ TEST_F(ReaderTest, SymbolArraysPreserveNamesPresenceAndOrder) {
   loom_module_free(module);
 }
 
+TEST_F(ReaderTest, SymbolSetsPreserveCanonicalNamesAndPresence) {
+  loom_module_t* module = CreateSymbolSetModule();
+  auto bytes = WriteModule(module);
+  AttributeValueOffsets value_offsets =
+      FirstBodyOpFirstAttributeValueOffsets(bytes);
+  ASSERT_EQ(bytes[value_offsets.kind], LOOM_BYTECODE_ATTR_SYMBOL_SET);
+
+  loom_module_t* read_module = nullptr;
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result =
+      ReadModule(bytes, &read_module, &error_ids, /*verify_module=*/true);
+
+  EXPECT_EQ(result.error_count, 0u) << ::testing::PrintToString(error_ids);
+  EXPECT_TRUE(error_ids.empty()) << ::testing::PrintToString(error_ids);
+  ASSERT_NE(read_module, nullptr);
+  const loom_string_id_t function_name_id =
+      loom_module_lookup_string(read_module, IREE_SV("symbol_sets"));
+  const uint16_t function_symbol_id =
+      loom_module_find_symbol(read_module, function_name_id);
+  ASSERT_NE(function_symbol_id, LOOM_SYMBOL_ID_INVALID);
+  loom_op_t* func_op =
+      read_module->symbols.entries[function_symbol_id].defining_op;
+  ASSERT_NE(func_op, nullptr);
+  loom_block_t* entry = loom_region_entry_block(loom_test_func_body(func_op));
+  ASSERT_NE(entry, nullptr);
+  ASSERT_EQ(entry->op_count, 3u);
+
+  const loom_string_id_t alpha_name_id =
+      loom_module_lookup_string(read_module, IREE_SV("alpha"));
+  const loom_string_id_t zeta_name_id =
+      loom_module_lookup_string(read_module, IREE_SV("zeta"));
+  const uint16_t alpha_symbol_id =
+      loom_module_find_symbol(read_module, alpha_name_id);
+  const uint16_t zeta_symbol_id =
+      loom_module_find_symbol(read_module, zeta_name_id);
+  ASSERT_NE(alpha_symbol_id, LOOM_SYMBOL_ID_INVALID);
+  ASSERT_NE(zeta_symbol_id, LOOM_SYMBOL_ID_INVALID);
+
+  loom_op_t* populated_op = loom_block_op(entry, 0);
+  ASSERT_TRUE(loom_test_symbol_set_attrs_isa(populated_op));
+  loom_symbol_ref_array_t symbols =
+      loom_test_symbol_set_attrs_symbols(populated_op);
+  ASSERT_EQ(symbols.count, 2u);
+  EXPECT_EQ(symbols.values[0].symbol_id, alpha_symbol_id);
+  EXPECT_EQ(symbols.values[1].symbol_id, zeta_symbol_id);
+
+  loom_op_t* empty_op = loom_block_op(entry, 1);
+  ASSERT_TRUE(loom_test_symbol_set_attrs_isa(empty_op));
+  EXPECT_EQ(loom_test_symbol_set_attrs_symbols(empty_op).count, 0u);
+
+  loom_module_free(read_module);
+  loom_module_free(module);
+}
+
 TEST_F(ReaderTest, ParameterizedAttrsPreserveNamedSlotsAndPresence) {
   loom_module_t* module = CreateParameterizedAttrModule();
   auto bytes = WriteModule(module);
@@ -3659,6 +3747,49 @@ TEST_F(ReaderTest, RejectsUnknownSymbolArrayName) {
   ASSERT_EQ(bytes[value_offsets.payload], 3u);
   ASSERT_LT(value_offsets.payload + 1, bytes.size());
   bytes[value_offsets.payload + 1] = 0;
+
+  ExpectReadModuleError(bytes, "ERR_BYTECODE_006");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsNoncanonicalSymbolSetOrder) {
+  loom_module_t* module = CreateSymbolSetModule();
+  auto bytes = WriteModule(module);
+  AttributeValueOffsets value_offsets =
+      FirstBodyOpFirstAttributeValueOffsets(bytes);
+  ASSERT_EQ(bytes[value_offsets.kind], LOOM_BYTECODE_ATTR_SYMBOL_SET);
+  ASSERT_EQ(bytes[value_offsets.payload], 2u);
+  ASSERT_LT(value_offsets.payload + 2, bytes.size());
+  std::swap(bytes[value_offsets.payload + 1], bytes[value_offsets.payload + 2]);
+
+  ExpectReadModuleError(bytes, "ERR_BYTECODE_006");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsDuplicateSymbolSetName) {
+  loom_module_t* module = CreateSymbolSetModule();
+  auto bytes = WriteModule(module);
+  AttributeValueOffsets value_offsets =
+      FirstBodyOpFirstAttributeValueOffsets(bytes);
+  ASSERT_EQ(bytes[value_offsets.kind], LOOM_BYTECODE_ATTR_SYMBOL_SET);
+  ASSERT_EQ(bytes[value_offsets.payload], 2u);
+  ASSERT_LT(value_offsets.payload + 2, bytes.size());
+  bytes[value_offsets.payload + 2] = bytes[value_offsets.payload + 1];
+
+  ExpectReadModuleError(bytes, "ERR_BYTECODE_006");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsSymbolArrayForSymbolSetField) {
+  loom_module_t* module = CreateSymbolSetModule();
+  auto bytes = WriteModule(module);
+  AttributeValueOffsets value_offsets =
+      FirstBodyOpFirstAttributeValueOffsets(bytes);
+  ASSERT_EQ(bytes[value_offsets.kind], LOOM_BYTECODE_ATTR_SYMBOL_SET);
+  bytes[value_offsets.kind] = LOOM_BYTECODE_ATTR_SYMBOL_ARRAY;
 
   ExpectReadModuleError(bytes, "ERR_BYTECODE_006");
 

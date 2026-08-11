@@ -252,15 +252,16 @@ static iree_status_t loom_pass_program_copy_attr_value(
     case LOOM_ATTR_SYMBOL:
       out_value->symbol_value = source_attr.symbol;
       return iree_ok_status();
-    case LOOM_ATTR_SYMBOL_ARRAY: {
+    case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET: {
       if (source_attr.count == 0) return iree_ok_status();
       loom_symbol_ref_t* values = NULL;
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
           &compiler->program->arena, source_attr.count, sizeof(*values),
           (void**)&values));
-      memcpy(values, source_attr.symbol_array,
+      memcpy(values, source_attr.symbol_refs,
              source_attr.count * sizeof(*values));
-      out_value->symbol_array = values;
+      out_value->symbol_refs = values;
       return iree_ok_status();
     }
     case LOOM_ATTR_TYPE:

@@ -815,6 +815,24 @@ ERR_STRUCTURE_049 = ErrorDef(
     fix_hint="Move '{op_name}' to the module body",
 )
 
+# ERR_STRUCTURE_050: Symbol set is not strictly ordered.
+ERR_STRUCTURE_050 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=50,
+    severity=Severity.ERROR,
+    summary="Symbol set is not strictly ordered.",
+    message=(
+        "attribute '{attr_name}' symbol set places '@{current_name}' "
+        "after '@{previous_name}'"
+    ),
+    params=(
+        ErrorParam("attr_name", ParamKind.STRING),
+        ErrorParam("current_name", ParamKind.STRING),
+        ErrorParam("previous_name", ParamKind.STRING),
+    ),
+    fix_hint="Sort symbol names and remove duplicate entries",
+)
+
 ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_001,
     ERR_STRUCTURE_002,
@@ -864,4 +882,5 @@ ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_047,
     ERR_STRUCTURE_048,
     ERR_STRUCTURE_049,
+    ERR_STRUCTURE_050,
 )

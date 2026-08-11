@@ -9,7 +9,7 @@
 from loom.assembly import Attr
 from loom.dsl import (
     ATTR_TYPE_STRING,
-    ATTR_TYPE_SYMBOL_ARRAY,
+    ATTR_TYPE_SYMBOL_SET,
     MODULE_SCOPE,
     AttrDef,
     Dialect,
@@ -52,13 +52,13 @@ module_import = Op(
         ),
         AttrDef(
             "symbols",
-            ATTR_TYPE_SYMBOL_ARRAY,
+            ATTR_TYPE_SYMBOL_SET,
             symbol_ref=SymbolReference(
                 "symbol",
                 [],
                 role=SymbolReferenceRole.AVAILABILITY,
             ),
-            doc="Ordered symbol anchors that the provider may define.",
+            doc="Canonical symbol anchors that the provider may define.",
         ),
     ],
     format=[

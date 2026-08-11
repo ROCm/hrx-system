@@ -820,6 +820,31 @@ static iree_status_t RemapSameModuleSymbol(void* user_data,
   return iree_ok_status();
 }
 
+typedef struct SymbolPairRemap {
+  loom_symbol_ref_t source_refs[2];
+  loom_symbol_ref_t target_refs[2];
+  uint32_t invocation_count;
+} SymbolPairRemap;
+
+static iree_status_t RemapSymbolPair(void* user_data,
+                                     const loom_module_t* source_module,
+                                     loom_module_t* target_module,
+                                     loom_symbol_ref_t source_ref,
+                                     loom_symbol_ref_t* out_target_ref) {
+  auto* state = static_cast<SymbolPairRemap*>(user_data);
+  EXPECT_EQ(source_module, target_module);
+  ++state->invocation_count;
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(state->source_refs); ++i) {
+    if (source_ref.module_id == state->source_refs[i].module_id &&
+        source_ref.symbol_id == state->source_refs[i].symbol_id) {
+      *out_target_ref = state->target_refs[i];
+      return iree_ok_status();
+    }
+  }
+  *out_target_ref = source_ref;
+  return iree_ok_status();
+}
+
 TEST_F(RemapTest, SameModuleSymbolsRemapOnlyWhenEnabled) {
   loom_string_id_t source_name_id = LOOM_STRING_ID_INVALID;
   IREE_ASSERT_OK(
@@ -866,6 +891,54 @@ TEST_F(RemapTest, SameModuleSymbolsRemapOnlyWhenEnabled) {
       &symbol_remap, loom_attr_symbol(source_ref), &target_attr));
   EXPECT_EQ(target_attr.symbol.symbol_id, target_ref.symbol_id);
   EXPECT_EQ(state.invocation_count, 1u);
+}
+
+TEST_F(RemapTest, SymbolSetRemapCanonicalizesByTargetSymbolName) {
+  loom_symbol_ref_t refs[4] = {};
+  const iree_string_view_t names[] = {
+      IREE_SV("alpha"),
+      IREE_SV("zeta"),
+      IREE_SV("omega"),
+      IREE_SV("beta"),
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(names); ++i) {
+    loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+    IREE_ASSERT_OK(loom_module_intern_string(source_, names[i], &name_id));
+    uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
+    IREE_ASSERT_OK(loom_module_add_symbol(source_, name_id, &symbol_id));
+    refs[i] = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+  }
+
+  SymbolPairRemap state = {
+      /*.source_refs=*/{refs[0], refs[1]},
+      /*.target_refs=*/{refs[2], refs[3]},
+      /*.invocation_count=*/0,
+  };
+  loom_ir_remap_options_t options = {
+      /*.allow_unmapped_values=*/false,
+      /*.remap_symbol=*/
+      loom_ir_remap_symbol_callback_make(RemapSymbolPair, &state),
+      /*.remap_same_module_symbols=*/true,
+  };
+  loom_ir_remap_t remap = {};
+  IREE_ASSERT_OK(loom_ir_remap_initialize(source_, source_, &remap_arena_,
+                                          &options, &remap));
+  loom_attribute_t target_attr = loom_attr_absent();
+  IREE_ASSERT_OK(loom_ir_remap_attribute(
+      &remap, loom_attr_symbol_set(refs, /*count=*/2), &target_attr));
+  ASSERT_EQ(target_attr.kind, LOOM_ATTR_SYMBOL_SET);
+  loom_symbol_ref_array_t target_set = loom_attr_as_symbol_set(target_attr);
+  ASSERT_EQ(target_set.count, 2u);
+  EXPECT_EQ(target_set.values[0].symbol_id, refs[3].symbol_id);
+  EXPECT_EQ(target_set.values[1].symbol_id, refs[2].symbol_id);
+  EXPECT_EQ(state.invocation_count, 2u);
+
+  state.target_refs[0] = refs[3];
+  state.target_refs[1] = refs[3];
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_ir_remap_attribute(&remap, loom_attr_symbol_set(refs, /*count=*/2),
+                              &target_attr));
 }
 
 TEST_F(RemapTest, CrossModuleSymbolRefsRequirePolicy) {

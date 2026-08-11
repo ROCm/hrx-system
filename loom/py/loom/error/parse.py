@@ -398,6 +398,17 @@ ERR_PARSE_034 = ErrorDef(
     params=(ErrorParam("detail", ParamKind.STRING),),
 )
 
+# ERR_PARSE_035: Duplicate symbol-set entry.
+ERR_PARSE_035 = ErrorDef(
+    domain=ErrorDomain.PARSE,
+    code=35,
+    severity=Severity.ERROR,
+    summary="Duplicate symbol-set entry.",
+    message="symbol set contains duplicate '@{symbol_name}'",
+    params=(ErrorParam("symbol_name", ParamKind.STRING),),
+    fix_hint="List each symbol at most once",
+)
+
 ALL_PARSE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_PARSE_001,
     ERR_PARSE_002,
@@ -433,4 +444,5 @@ ALL_PARSE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_PARSE_032,
     ERR_PARSE_033,
     ERR_PARSE_034,
+    ERR_PARSE_035,
 )

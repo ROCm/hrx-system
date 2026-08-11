@@ -110,6 +110,29 @@ def _emit_builder_symbol_array_storage(
     lines.append(f"{indent}    &{storage}));")
 
 
+def _emit_builder_symbol_set(
+    lines: list[str],
+    *,
+    source: str,
+    storage: str,
+    op_name: str,
+    field_name: str,
+    indent: str = "",
+) -> None:
+    """Emits pre-allocation symbol-set construction."""
+    duplicate = f"{storage}_duplicate"
+    lines.append(f"{indent}loom_symbol_ref_t {duplicate} = loom_symbol_ref_null();")
+    lines.append(f"{indent}IREE_RETURN_IF_ERROR(")
+    lines.append(f"{indent}    loom_module_try_make_symbol_set(")
+    lines.append(f"{indent}        builder->module, {source}, &{duplicate}, &{storage}));")
+    lines.append(f"{indent}if (loom_symbol_ref_is_valid({duplicate})) {{")
+    lines.append(f"{indent}  return iree_make_status(")
+    lines.append(f"{indent}      IREE_STATUS_INVALID_ARGUMENT,")
+    lines.append(f'{indent}      "{op_name} {field_name} contains duplicate symbol id %u",')
+    lines.append(f"{indent}      (unsigned){duplicate}.symbol_id);")
+    lines.append(f"{indent}}}")
+
+
 def _emit_builder_predicate_list_storage(
     lines: list[str],
     *,
@@ -318,6 +341,34 @@ def _generate_builder_implementation(
                 count=f"{_c_parameter_name(param['name'])}_count",
                 max_value="UINT16_MAX",
                 label=f"{op.name} i64 array attribute",
+            )
+
+    symbol_sets = [param for param in params if param["kind"] == "attr" and param["attr_type"] == "symbol_set"]
+    for param in symbol_sets:
+        field_name = param["name"]
+        name = _c_parameter_name(field_name)
+        storage = f"_{field_name}_set"
+        lines.append(f"  loom_attribute_t {storage} = loom_attr_absent();")
+        optional_flag = c_builder_model.build_flag_bit_name(prefix, param) if c_builder_model.optional_param_uses_build_flag(param) else ""
+        if optional_flag:
+            lines.append(f"  if (iree_any_bit_set(build_flags, {optional_flag})) {{")
+            _emit_builder_symbol_set(
+                lines,
+                source=name,
+                storage=storage,
+                op_name=op.name,
+                field_name=field_name,
+                indent="    ",
+            )
+            lines.append("  }")
+        else:
+            _emit_builder_symbol_set(
+                lines,
+                source=name,
+                storage=storage,
+                op_name=op.name,
+                field_name=field_name,
+                indent="  ",
             )
 
     optional_operand_params = [param for param in params if param["kind"] == "operand" and param.get("optional")]
@@ -763,6 +814,7 @@ def _generate_builder_implementation(
                 "signed_enum_set": f"loom_attr_signed_enum_set(_{field_name}_storage, _{field_name}_word_count)",
                 "symbol": f"loom_attr_symbol({name})",
                 "symbol_array": f"loom_attr_symbol_array(_{field_name}_storage, (uint16_t){name}.count)",
+                "symbol_set": f"_{field_name}_set",
                 "type": f"loom_attr_type({name})",
                 "encoding": f"loom_attr_encoding({name})",
                 "bytes": f"loom_attr_bytes(_{field_name}_storage, (uint32_t){name}.data_length)",
@@ -845,6 +897,13 @@ def _generate_builder_implementation(
                         op_name=op.name,
                         field_name=field_name,
                     )
+                    lines.append(f"  loom_op_attrs(*out_op)[{idx}] = {constructor};")
+            elif attr_type == "symbol_set":
+                if optional_flag:
+                    lines.append(f"  if (iree_any_bit_set(build_flags, {optional_flag})) {{")
+                    lines.append(f"    loom_op_attrs(*out_op)[{idx}] = {constructor};")
+                    lines.append("  }")
+                else:
                     lines.append(f"  loom_op_attrs(*out_op)[{idx}] = {constructor};")
             elif attr_type == "symbol_array":
                 storage = f"_{field_name}_storage"

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import struct
 from collections.abc import Iterable
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar, Literal, cast
 
 from loom.fields import compute_layout
 from loom.format.bytecode.encoding import decode_signed_varint, decode_varint
@@ -94,6 +94,7 @@ from loom.ir import (
     SymbolKind,
     SymbolName,
     SymbolNameArray,
+    SymbolNameSet,
     TaggedLocation,
     TiedResult,
     Type,
@@ -2013,26 +2014,13 @@ class BytecodeReader:
             case 16:  # SIGNED_ENUM_SET
                 return self._read_signed_enum_set_attr(data, offset, attr_def)
             case 17:  # SYMBOL_ARRAY
-                if getattr(attr_def, "attr_type", None) != "symbol_array":
-                    raise BytecodeError(
-                        "symbol-array attributes require a descriptor-backed field"
-                    )
-                count, offset = decode_varint(data, offset)
-                if count > 0xFFFF:
-                    raise BytecodeError(
-                        f"symbol-array length {count} exceeds UINT16_MAX"
-                    )
-                values: list[SymbolName] = []
-                for index in range(count):
-                    name_id, offset = decode_varint(data, offset)
-                    if name_id >= len(self._strings):
-                        raise BytecodeError(
-                            "symbol-array element "
-                            f"{index} string_id {name_id} out of range "
-                            f"(string table has {len(self._strings)} entries)"
-                        )
-                    values.append(SymbolName(self._strings[name_id]))
-                return SymbolNameArray(values), offset
+                return self._read_symbol_collection(
+                    data, offset, attr_def, "symbol_array"
+                )
+            case 18:  # SYMBOL_SET
+                return self._read_symbol_collection(
+                    data, offset, attr_def, "symbol_set"
+                )
             case _:
                 raise BytecodeError(f"unknown attr value kind: {kind}")
 
@@ -2096,6 +2084,45 @@ class BytecodeReader:
                 f"{undeclared_values}"
             )
         return SignedEnumSetAttr(positive_values, negative_values), payload_end
+
+    def _read_symbol_collection(
+        self,
+        data: bytes,
+        offset: int,
+        attr_def: Any | None,
+        collection_type: Literal["symbol_array", "symbol_set"],
+    ) -> tuple[SymbolNameArray | SymbolNameSet, int]:
+        collection_name = collection_type.replace("_", "-")
+        if getattr(attr_def, "attr_type", None) != collection_type:
+            raise BytecodeError(
+                f"{collection_name} attributes require a descriptor-backed field"
+            )
+        count, offset = decode_varint(data, offset)
+        if count > 0xFFFF:
+            raise BytecodeError(f"{collection_name} length {count} exceeds UINT16_MAX")
+        values: list[SymbolName] = []
+        previous_name_bytes: bytes | None = None
+        for index in range(count):
+            name_id, offset = decode_varint(data, offset)
+            if name_id >= len(self._strings):
+                raise BytecodeError(
+                    f"{collection_name} element {index} string_id {name_id} "
+                    "out of range "
+                    f"(string table has {len(self._strings)} entries)"
+                )
+            name = SymbolName(self._strings[name_id])
+            if collection_type == "symbol_set":
+                name_bytes = name.encode("utf-8")
+                if (
+                    previous_name_bytes is not None
+                    and previous_name_bytes >= name_bytes
+                ):
+                    raise BytecodeError("symbol-set elements are not sorted and unique")
+                previous_name_bytes = name_bytes
+            values.append(name)
+        if collection_type == "symbol_set":
+            return SymbolNameSet(values), offset
+        return SymbolNameArray(values), offset
 
     def _read_attr_dict_entries(
         self,

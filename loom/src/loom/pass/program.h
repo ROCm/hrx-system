@@ -70,8 +70,9 @@ typedef struct loom_pass_program_attr_value_t {
     const uint64_t* signed_enum_set_words;
     // Source-module symbol reference payload for LOOM_ATTR_SYMBOL.
     loom_symbol_ref_t symbol_value;
-    // Program-owned symbol reference payload for LOOM_ATTR_SYMBOL_ARRAY.
-    const loom_symbol_ref_t* symbol_array;
+    // Program-owned payload for LOOM_ATTR_SYMBOL_ARRAY and
+    // LOOM_ATTR_SYMBOL_SET.
+    const loom_symbol_ref_t* symbol_refs;
     // Source-module type table index for LOOM_ATTR_TYPE.
     loom_type_id_t type_id;
     // Source-module encoding table index for LOOM_ATTR_ENCODING.

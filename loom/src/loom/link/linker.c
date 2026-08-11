@@ -30,6 +30,40 @@ typedef struct loom_link_func_contract_attr_t {
   iree_string_view_t field_name;
 } loom_link_func_contract_attr_t;
 
+typedef uint32_t loom_linker_symbol_set_attr_id_t;
+
+typedef uint32_t loom_linker_symbol_set_use_id_t;
+#define LOOM_LINKER_SYMBOL_SET_USE_ID_INVALID \
+  ((loom_linker_symbol_set_use_id_t)UINT32_MAX)
+
+// One incoming symbol-set use of a target symbol.
+typedef struct loom_linker_symbol_set_use_t {
+  // Symbol-set operation attribute containing the symbol.
+  loom_linker_symbol_set_attr_id_t attr_id;
+  // Next use containing the same target symbol.
+  loom_linker_symbol_set_use_id_t next_use_id;
+} loom_linker_symbol_set_use_t;
+
+// Construction-time incoming-use index for symbol-set attributes.
+typedef struct loom_linker_symbol_set_index_t {
+  // Per-target-symbol heads into |uses|.
+  loom_linker_symbol_set_use_id_t* symbol_use_heads;
+  // Allocated target-symbol slots in |symbol_use_heads|.
+  iree_host_size_t symbol_use_head_capacity;
+  // Stable target operation attribute slots carrying symbol sets.
+  loom_attribute_t** attrs;
+  // Number of live entries in |attrs|.
+  iree_host_size_t attr_count;
+  // Allocated entries in |attrs|.
+  iree_host_size_t attr_capacity;
+  // Per-symbol incoming uses of symbol-set operation attributes.
+  loom_linker_symbol_set_use_t* uses;
+  // Number of live entries in |uses|.
+  iree_host_size_t use_count;
+  // Allocated entries in |uses|.
+  iree_host_size_t use_capacity;
+} loom_linker_symbol_set_index_t;
+
 struct loom_linker_t {
   // Context shared by all source modules and the target module.
   loom_context_t* context;
@@ -45,6 +79,8 @@ struct loom_linker_t {
   loom_symbol_map_t target_symbol_lookup;
   // Monotonic ordinal used when assigning deterministic private conflict names.
   iree_host_size_t private_name_ordinal;
+  // Symbol-set attributes indexed by referenced target symbol.
+  loom_linker_symbol_set_index_t symbol_set_index;
   // True once finish has transferred the output module to the caller.
   bool finished;
 };
@@ -146,9 +182,109 @@ static iree_status_t loom_linker_allocate_fresh_private_name(
   return status;
 }
 
+static iree_status_t loom_linker_ensure_symbol_set_capacity(
+    loom_linker_t* linker, iree_host_size_t required_capacity) {
+  loom_linker_symbol_set_index_t* index = &linker->symbol_set_index;
+  if (required_capacity <= index->symbol_use_head_capacity) {
+    return iree_ok_status();
+  }
+  const iree_host_size_t old_capacity = index->symbol_use_head_capacity;
+  IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+      &linker->scratch_arena, old_capacity, required_capacity,
+      sizeof(*index->symbol_use_heads), &index->symbol_use_head_capacity,
+      (void**)&index->symbol_use_heads));
+  for (iree_host_size_t i = old_capacity; i < index->symbol_use_head_capacity;
+       ++i) {
+    index->symbol_use_heads[i] = LOOM_LINKER_SYMBOL_SET_USE_ID_INVALID;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_linker_register_symbol_set(loom_linker_t* linker,
+                                                     loom_attribute_t* attr) {
+  if (attr->count == 0) return iree_ok_status();
+  loom_linker_symbol_set_index_t* index = &linker->symbol_set_index;
+  if (index->attr_count >= UINT32_MAX) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "linker symbol-set index cannot exceed %u attributes",
+        (unsigned)UINT32_MAX);
+  }
+  if (index->use_count > UINT32_MAX - attr->count) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "linker symbol-set index cannot exceed "
+                            "%u uses",
+                            (unsigned)UINT32_MAX);
+  }
+  IREE_RETURN_IF_ERROR(loom_linker_ensure_symbol_set_capacity(
+      linker, linker->target_module->symbols.count));
+  if (index->attr_count >= index->attr_capacity) {
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        &linker->scratch_arena, index->attr_count, index->attr_count + 1,
+        sizeof(*index->attrs), &index->attr_capacity, (void**)&index->attrs));
+  }
+  const iree_host_size_t required_use_count = index->use_count + attr->count;
+  if (required_use_count > index->use_capacity) {
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        &linker->scratch_arena, index->use_count, required_use_count,
+        sizeof(*index->uses), &index->use_capacity, (void**)&index->uses));
+  }
+
+  const loom_linker_symbol_set_attr_id_t attr_id =
+      (loom_linker_symbol_set_attr_id_t)index->attr_count++;
+  index->attrs[attr_id] = attr;
+  for (uint16_t i = 0; i < attr->count; ++i) {
+    const uint16_t symbol_id = attr->symbol_refs[i].symbol_id;
+    const loom_linker_symbol_set_use_id_t use_id =
+        (loom_linker_symbol_set_use_id_t)index->use_count++;
+    index->uses[use_id] = (loom_linker_symbol_set_use_t){
+        .attr_id = attr_id,
+        .next_use_id = index->symbol_use_heads[symbol_id],
+    };
+    index->symbol_use_heads[symbol_id] = use_id;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_linker_register_op_symbol_sets(void* user_data,
+                                                         loom_op_t* op) {
+  loom_linker_t* linker = (loom_linker_t*)user_data;
+  loom_attribute_t* attrs = loom_op_attrs(op);
+  for (uint8_t i = 0; i < op->attribute_count; ++i) {
+    if (attrs[i].kind != LOOM_ATTR_SYMBOL_SET) continue;
+    IREE_RETURN_IF_ERROR(loom_linker_register_symbol_set(linker, &attrs[i]));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_linker_recanonicalize_symbol_uses(
+    loom_linker_t* linker, uint16_t symbol_id) {
+  loom_linker_symbol_set_index_t* index = &linker->symbol_set_index;
+  loom_linker_symbol_set_use_id_t use_id = index->symbol_use_heads[symbol_id];
+  while (use_id != LOOM_LINKER_SYMBOL_SET_USE_ID_INVALID) {
+    const loom_linker_symbol_set_use_t* use = &index->uses[use_id];
+    loom_attribute_t* attr = index->attrs[use->attr_id];
+    const uint16_t ref_count = attr->count;
+    loom_symbol_ref_t* replacement_refs = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        &linker->target_module->arena, ref_count, sizeof(*replacement_refs),
+        (void**)&replacement_refs));
+    memcpy(replacement_refs, attr->symbol_refs,
+           (iree_host_size_t)ref_count * sizeof(*replacement_refs));
+    loom_symbol_ref_t duplicate_ref = loom_module_canonicalize_symbol_set(
+        linker->target_module, replacement_refs, ref_count);
+    IREE_ASSERT(!loom_symbol_ref_is_valid(duplicate_ref));
+    *attr = loom_attr_symbol_set(replacement_refs, ref_count);
+    use_id = use->next_use_id;
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_linker_add_target_symbol(
     loom_linker_t* linker, loom_string_id_t target_name_id,
     uint16_t* out_target_symbol_id) {
+  IREE_RETURN_IF_ERROR(loom_linker_ensure_symbol_set_capacity(
+      linker, linker->target_module->symbols.count + 1));
   uint16_t target_symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_module_add_symbol(
       linker->target_module, target_name_id, &target_symbol_id));
@@ -185,7 +321,7 @@ static iree_status_t loom_linker_rename_private_target_symbol(
   IREE_RETURN_IF_ERROR(loom_symbol_map_insert(&linker->target_symbol_lookup,
                                               &linker->scratch_arena,
                                               new_name_id, target_symbol_id));
-  return iree_ok_status();
+  return loom_linker_recanonicalize_symbol_uses(linker, target_symbol_id);
 }
 
 static iree_status_t loom_linker_map_source_symbol(
@@ -1013,6 +1149,8 @@ static iree_status_t loom_linker_clone_source_op(loom_linker_source_t* source,
   loom_builder_initialize(
       source->linker->target_module, &source->linker->target_module->arena,
       loom_module_block(source->linker->target_module), &builder);
+  builder.on_op_finalized.fn = loom_linker_register_op_symbol_sets;
+  builder.on_op_finalized.user_data = source->linker;
   if (before_op) {
     loom_builder_set_before(&builder, before_op);
   }

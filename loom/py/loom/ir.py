@@ -23,6 +23,7 @@ import math
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import IntEnum, unique
+from itertools import pairwise
 from typing import Any
 
 from loom.location_tag import (
@@ -135,6 +136,7 @@ __all__ = [
     "SymbolRef",
     "SymbolName",
     "SymbolNameArray",
+    "SymbolNameSet",
     "SYMBOL_FLAG_IMPORT",
     "SYMBOL_FLAG_DECLARATION",
     "SYMBOL_FLAG_TEST_ONLY",
@@ -1860,6 +1862,43 @@ class SymbolNameArray:
                     f"got {value!r}"
                 )
         object.__setattr__(self, "values", frozen_values)
+
+    def __iter__(self) -> Iterator[SymbolName]:
+        return iter(self.values)
+
+    def __len__(self) -> int:
+        return len(self.values)
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class SymbolNameSet:
+    """Canonical module-local symbol-name set attribute payloads.
+
+    Values are stored in strict UTF-8 byte order with no duplicates. The
+    enclosing field descriptor owns the symbol interface and reference role.
+    """
+
+    values: tuple[SymbolName, ...]
+
+    def __init__(self, values: Iterable[SymbolName] = ()) -> None:
+        frozen_values = tuple(values)
+        if len(frozen_values) > 0xFFFF:
+            raise ValueError(
+                f"symbol name set length {len(frozen_values)} exceeds UINT16_MAX"
+            )
+        for index, value in enumerate(frozen_values):
+            if not isinstance(value, SymbolName):
+                raise TypeError(
+                    f"symbol name set element {index} must be a SymbolName, "
+                    f"got {value!r}"
+                )
+        ordered_values = tuple(
+            sorted(frozen_values, key=lambda value: value.encode("utf-8"))
+        )
+        for previous, current in pairwise(ordered_values):
+            if previous == current:
+                raise ValueError(f"duplicate symbol name '@{current}'")
+        object.__setattr__(self, "values", ordered_values)
 
     def __iter__(self) -> Iterator[SymbolName]:
         return iter(self.values)

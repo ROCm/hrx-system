@@ -112,6 +112,7 @@ from loom.ir import (
     SymbolKind,
     SymbolName,
     SymbolNameArray,
+    SymbolNameSet,
     TaggedLocation,
     TiedResult,
     Type,
@@ -1544,6 +1545,32 @@ class TestCrossFormatRoundTrip:
         roundtrip_text = _roundtrip_text_through_bytecode(text)
         assert roundtrip_text == text, roundtrip_text
 
+    def test_symbol_sets_survive_bytecode_in_canonical_order(self) -> None:
+        text = (
+            "test.func @symbol_sets() {\n"
+            "  test.symbol_set_attrs [@zeta, @alpha]\n"
+            "  test.symbol_set_attrs []\n"
+            "  test.yield\n"
+            "}\n"
+            "\n"
+            "test.record @alpha\n"
+            "\n"
+            "test.record @zeta\n"
+        )
+        expected = text.replace("[@zeta, @alpha]", "[@alpha, @zeta]")
+
+        loaded = _parse_write_read(text)
+        function = next(
+            symbol.op for symbol in loaded.symbols if symbol.name == "symbol_sets"
+        )
+        assert function is not None
+        body_ops = function.regions[0].blocks[0].ops
+        assert body_ops[0].attributes["symbols"] == SymbolNameSet(
+            [SymbolName("alpha"), SymbolName("zeta")]
+        )
+        assert body_ops[1].attributes["symbols"] == SymbolNameSet()
+        assert _roundtrip_text_through_bytecode(text) == expected
+
     def test_parameterized_attrs_survive_bytecode_with_named_slots(self) -> None:
         text = (
             "test.func @parameterized() {\n"
@@ -1678,6 +1705,23 @@ class TestCrossFormatRoundTrip:
         operation = Operation(
             name="test.attrs",
             attributes={"dict": {"symbols": SymbolNameArray([SymbolName("record")])}},
+        )
+        body = Region(blocks=[Block(ops=[operation, Operation(name="test.yield")])])
+        function = Operation(
+            name="test.func",
+            attributes={"callee": "f"},
+            regions=[body],
+        )
+        module.add_symbol(Symbol(name="f", kind=SymbolKind.FUNC_DEF, op=function))
+
+        with pytest.raises(ValueError, match="descriptor-backed field"):
+            write_module(module)
+
+    def test_symbol_set_in_generic_dict_is_rejected(self) -> None:
+        module = Module(name="test")
+        operation = Operation(
+            name="test.attrs",
+            attributes={"dict": {"symbols": SymbolNameSet([SymbolName("record")])}},
         )
         body = Region(blocks=[Block(ops=[operation, Operation(name="test.yield")])])
         function = Operation(

@@ -85,7 +85,7 @@ extern "C" {
 
 #define LOOM_BYTECODE_MAGIC "LOOM"
 #define LOOM_BYTECODE_MAGIC_LENGTH 4
-#define LOOM_BYTECODE_FORMAT_VERSION 24
+#define LOOM_BYTECODE_FORMAT_VERSION 25
 
 #define LOOM_BYTECODE_SOURCE_TRIVIA_LEADING_BLANK_LINE (1u << 0)
 #define LOOM_BYTECODE_SOURCE_TRIVIA_COMMENT_COUNT_SHIFT 1
@@ -779,7 +779,8 @@ typedef enum loom_bytecode_section_kind_e {
 // values: 0=I64, 1=F64, 2=STRING, 3=BOOL, 4=ENUM, 5=I64_ARRAY, 6=SYMBOL,
 // 7=TYPE, 8=PREDICATE_LIST, 9=DICT, 10=ENCODING, 11=BYTES,
 // 12=SCOPED_ENUM, 13=ENUM_ARRAY, 14=PARAMETERIZED,
-// 15=PARAMETERIZED_ARRAY, 16=SIGNED_ENUM_SET, 17=SYMBOL_ARRAY. ABSENT is never
+// 15=PARAMETERIZED_ARRAY, 16=SIGNED_ENUM_SET, 17=SYMBOL_ARRAY,
+// 18=SYMBOL_SET. ABSENT is never
 // encoded as a payload value.
 // ENUM value_data is the raw uint8 case ordinal;
 // bytecode readers preserve it without consulting enum case tables so open enum
@@ -822,6 +823,10 @@ typedef enum loom_bytecode_section_kind_e {
 // never serialize. Ordering and duplicate references are preserved. Empty
 // arrays require a descriptor-backed field to provide the element interface
 // and reference role.
+// SYMBOL_SET value_data has the same element encoding as SYMBOL_ARRAY. Names
+// MUST be stored in strict decoded UTF-8 byte order with no duplicates.
+// Readers reject noncanonical order; writers trust canonical IR and emit
+// references as-is.
 //       [region_count: varint]
 //       For each region:
 //         (recursive: source_flags, block_count, blocks...)
@@ -849,6 +854,7 @@ typedef enum loom_bytecode_attr_kind_e {
   LOOM_BYTECODE_ATTR_PARAMETERIZED_ARRAY = 15,
   LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET = 16,
   LOOM_BYTECODE_ATTR_SYMBOL_ARRAY = 17,
+  LOOM_BYTECODE_ATTR_SYMBOL_SET = 18,
   LOOM_BYTECODE_ATTR_COUNT,
 } loom_bytecode_attr_kind_t;
 

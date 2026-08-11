@@ -42,6 +42,7 @@ from loom.dsl import (
     ATTR_TYPE_PARAMETERIZED,
     ATTR_TYPE_SYMBOL,
     ATTR_TYPE_SYMBOL_ARRAY,
+    ATTR_TYPE_SYMBOL_SET,
     BUFFER,
     BY_REFERENCE,
     COMMUTATIVE,
@@ -390,10 +391,33 @@ class TestAttrDef:
             ATTR_TYPE_SYMBOL_ARRAY,
             symbol_ref=SymbolReference("record", ["record"]),
         )
+        AttrDef(
+            "test",
+            ATTR_TYPE_SYMBOL_SET,
+            symbol_ref=SymbolReference("record", ["record"]),
+        )
 
     def test_symbol_array_requires_reference_contract(self) -> None:
         with _raises(ValueError, match="symbol_array.*requires symbol_ref"):
             AttrDef("providers", ATTR_TYPE_SYMBOL_ARRAY)
+
+    def test_symbol_set_requires_reference_contract(self) -> None:
+        with _raises(ValueError, match="symbol_set.*requires symbol_ref"):
+            AttrDef("providers", ATTR_TYPE_SYMBOL_SET)
+
+    def test_symbol_set_cannot_be_a_parameter(self) -> None:
+        with _raises(ValueError, match="unsupported kind 'symbol_set'"):
+            ParameterizedAttrDef(
+                "test.providers",
+                group=Dialect("test"),
+                parameters=[
+                    AttrDef(
+                        "providers",
+                        ATTR_TYPE_SYMBOL_SET,
+                        symbol_ref=SymbolReference("record", ["record"]),
+                    )
+                ],
+            )
 
     def test_symbol_reference_contract_requires_symbol_kind(self) -> None:
         with _raises(ValueError, match="symbol_ref requires"):

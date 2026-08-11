@@ -96,7 +96,8 @@ typedef struct loom_attr_descriptor_t {
   const loom_bstring_t* enum_case_names;
   // Mutually exclusive reference contract selected by |attr_kind|.
   union {
-    // Expected symbol target contract for SYMBOL attributes.
+    // Expected symbol target contract for SYMBOL, SYMBOL_ARRAY, and SYMBOL_SET
+    // attributes.
     const loom_symbol_reference_descriptor_t* symbol_ref;
     // Expected family kind for PARAMETERIZED attributes and every element of
     // PARAMETERIZED_ARRAY attributes, or LOOM_PARAMETERIZED_ATTR_KIND_ANY when
@@ -179,7 +180,7 @@ static inline bool loom_attr_descriptor_accepts_kind(
          kind != LOOM_ATTR_ANY && kind != LOOM_ATTR_SCOPED_ENUM &&
          kind != LOOM_ATTR_ENUM_ARRAY && kind != LOOM_ATTR_SIGNED_ENUM_SET &&
          kind != LOOM_ATTR_PARAMETERIZED_ARRAY &&
-         kind != LOOM_ATTR_SYMBOL_ARRAY;
+         kind != LOOM_ATTR_SYMBOL_ARRAY && kind != LOOM_ATTR_SYMBOL_SET;
 }
 
 // Returns the explicit zero/false scalar value implied by ELIDE_DEFAULT.

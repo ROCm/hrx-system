@@ -39,6 +39,7 @@ from loom.ir import (
     StorageType,
     Symbol,
     SymbolNameArray,
+    SymbolNameSet,
     Type,
     TypeKind,
 )
@@ -623,6 +624,15 @@ class ModuleVerifier:
                     )
                     continue
                 target_names = tuple(value)
+            elif attr_def.attr_type == "symbol_set":
+                if not isinstance(value, SymbolNameSet):
+                    self.diagnostics.error(
+                        "symbol reference set attribute must be a SymbolNameSet",
+                        source=path,
+                        details=(f"attribute '{attr_def.name}' has value {value!r}",),
+                    )
+                    continue
+                target_names = tuple(value)
             elif isinstance(value, str):
                 target_names = (value,)
             else:
@@ -634,7 +644,7 @@ class ModuleVerifier:
                 continue
             for index, target_name in enumerate(target_names):
                 field = f"attribute '{attr_def.name}'"
-                if attr_def.attr_type == "symbol_array":
+                if attr_def.attr_type in ("symbol_array", "symbol_set"):
                     field += f" element {index}"
                 target_symbol = self._symbols_by_name.get(target_name)
                 if target_symbol is None:

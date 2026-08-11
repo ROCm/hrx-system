@@ -122,6 +122,7 @@ from loom.ir import (
     StaticDim,
     SymbolName,
     SymbolNameArray,
+    SymbolNameSet,
     TaggedLocation,
     Type,
     TypeKind,
@@ -835,22 +836,38 @@ def _parse_descriptor_attr_value_from_tokens(
             return SignedEnumSetAttr(positive_values, negative_values)
         case "symbol":
             return tokenizer.expect(TokenKind.SYMBOL).text
-        case "symbol_array":
+        case "symbol_array" | "symbol_set":
+            collection_name = descriptor.attr_type.replace("_", "-")
             tokenizer.expect(TokenKind.LBRACKET)
-            values: list[SymbolName] = []
+            names: list[SymbolName] = []
+            seen_names: set[SymbolName] | None = (
+                set() if descriptor.attr_type == "symbol_set" else None
+            )
             if not tokenizer.at(TokenKind.RBRACKET):
                 while True:
-                    if len(values) == 0xFFFF:
+                    if len(names) == 0xFFFF:
                         raise ParseError(
-                            "symbol-array length exceeds UINT16_MAX",
+                            f"{collection_name} length exceeds UINT16_MAX",
                             tokenizer.peek().location,
                             filename,
                         )
-                    values.append(SymbolName(tokenizer.expect(TokenKind.SYMBOL).text))
+                    token = tokenizer.expect(TokenKind.SYMBOL)
+                    name = SymbolName(token.text)
+                    if seen_names is not None:
+                        if name in seen_names:
+                            raise ParseError(
+                                f"duplicate symbol name '@{name}' in symbol set",
+                                token.location,
+                                filename,
+                            )
+                        seen_names.add(name)
+                    names.append(name)
                     if not tokenizer.try_consume(TokenKind.COMMA):
                         break
             tokenizer.expect(TokenKind.RBRACKET)
-            return SymbolNameArray(values)
+            if descriptor.attr_type == "symbol_set":
+                return SymbolNameSet(names)
+            return SymbolNameArray(names)
         case "type":
             if scope is None or type_registry is None:
                 raise ValueError("type attribute parsing requires a type context")
@@ -1510,6 +1527,7 @@ def _type_optional_present(
                         "enum_array"
                         | "i64_array"
                         | "symbol_array"
+                        | "symbol_set"
                         | "parameterized_array"
                     ):
                         return token.kind == TokenKind.LBRACKET

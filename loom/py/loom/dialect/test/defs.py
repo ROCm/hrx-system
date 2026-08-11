@@ -69,6 +69,7 @@ from loom.dsl import (
     ATTR_TYPE_SIGNED_ENUM_SET,
     ATTR_TYPE_SYMBOL,
     ATTR_TYPE_SYMBOL_ARRAY,
+    ATTR_TYPE_SYMBOL_SET,
     BY_REFERENCE,
     CONSTANT_LIKE,
     CONVERGENT,
@@ -2334,6 +2335,26 @@ test_symbol_array_attrs = Op(
 )
 
 # ============================================================================
+# test.symbol_set_attrs — self-describing symbol-set attributes
+# ============================================================================
+
+test_symbol_set_attrs = Op(
+    "test.symbol_set_attrs",
+    group=test_ops,
+    doc="Test op with a canonical symbol set.",
+    attrs=[
+        AttrDef(
+            "symbols",
+            ATTR_TYPE_SYMBOL_SET,
+            symbol_ref=SymbolReference("record", ["record"]),
+            doc="Sorted unique record references.",
+        ),
+    ],
+    format=[Attr("symbols")],
+    examples=["test.symbol_set_attrs [@a, @b]"],
+)
+
+# ============================================================================
 # test.module_metadata — module-scope operation placement
 # ============================================================================
 
@@ -3105,6 +3126,7 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_enum_array_attrs,
     test_signed_enum_set_attrs,
     test_symbol_array_attrs,
+    test_symbol_set_attrs,
     test_parameterized_attr,
     test_compact_parameterized_attr,
     test_parameterized_attr_array,

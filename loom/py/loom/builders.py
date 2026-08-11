@@ -28,6 +28,7 @@ from loom.dsl import (
     ATTR_TYPE_PARAMETERIZED_ARRAY,
     ATTR_TYPE_SIGNED_ENUM_SET,
     ATTR_TYPE_SYMBOL_ARRAY,
+    ATTR_TYPE_SYMBOL_SET,
     AttrDef,
     Op,
     TypeDef,
@@ -42,6 +43,7 @@ from loom.ir import (
     SignedEnumSetAttr,
     SymbolName,
     SymbolNameArray,
+    SymbolNameSet,
     Type,
 )
 from loom.stable_id import stable_id_from_string
@@ -233,9 +235,10 @@ class OpCallable:
                             )
                         elif (
                             param.attr_def is not None
-                            and param.attr_def.attr_type == ATTR_TYPE_SYMBOL_ARRAY
+                            and param.attr_def.attr_type
+                            in (ATTR_TYPE_SYMBOL_ARRAY, ATTR_TYPE_SYMBOL_SET)
                         ):
-                            value = _normalize_symbol_array_attr(
+                            value = _normalize_symbol_collection_attr(
                                 op.name, param.attr_def, value
                             )
                         attributes[param.name] = value
@@ -619,30 +622,40 @@ def _normalize_parameterized_attr_array(
     return array
 
 
-def _normalize_symbol_array_attr(
+def _normalize_symbol_collection_attr(
     op_name: str, attr_def: AttrDef, value: Any
-) -> SymbolNameArray:
-    """Canonicalizes a symbol-array field while preserving order and repeats."""
-    values = value.values if isinstance(value, SymbolNameArray) else value
+) -> SymbolNameArray | SymbolNameSet:
+    """Normalizes an ordered symbol array or symbol set."""
+    values = (
+        value.values if isinstance(value, SymbolNameArray | SymbolNameSet) else value
+    )
     if isinstance(values, str | bytes | bytearray) or not isinstance(values, Iterable):
         raise TypeError(
-            f"{op_name}: symbol array '{attr_def.name}' must be an iterable "
+            f"{op_name}: {attr_def.attr_type.replace('_', ' ')} "
+            f"'{attr_def.name}' must be an iterable "
             "of symbol names"
         )
     names: list[SymbolName] = []
     for index, element in enumerate(values):
         if not isinstance(element, str):
             raise TypeError(
-                f"{op_name}: symbol array '{attr_def.name}' element {index} "
+                f"{op_name}: {attr_def.attr_type.replace('_', ' ')} "
+                f"'{attr_def.name}' element {index} "
                 f"must be a symbol name, got {element!r}"
             )
         if element.startswith("@"):
             raise ValueError(
-                f"{op_name}: symbol array '{attr_def.name}' element {index} "
+                f"{op_name}: {attr_def.attr_type.replace('_', ' ')} "
+                f"'{attr_def.name}' element {index} "
                 "must not include '@'"
             )
         names.append(SymbolName(element))
-    return SymbolNameArray(names)
+    if attr_def.attr_type == ATTR_TYPE_SYMBOL_ARRAY:
+        return SymbolNameArray(names)
+    try:
+        return SymbolNameSet(names)
+    except ValueError as exc:
+        raise ValueError(f"{op_name}: symbol set '{attr_def.name}' {exc}") from exc
 
 
 def _normalize_result_names(

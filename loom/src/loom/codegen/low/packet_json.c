@@ -414,13 +414,14 @@ static iree_status_t loom_low_packet_json_write_attr(
     case LOOM_ATTR_SYMBOL:
       return loom_low_packet_json_write_symbol_attr(module, attr->symbol,
                                                     stream);
-    case LOOM_ATTR_SYMBOL_ARRAY: {
+    case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET: {
       loom_json_array_writer_t array;
       IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &array));
       for (uint16_t i = 0; i < attr->count; ++i) {
         IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&array));
         IREE_RETURN_IF_ERROR(loom_low_packet_json_write_symbol_attr(
-            module, attr->symbol_array[i], stream));
+            module, attr->symbol_refs[i], stream));
       }
       return loom_json_array_end(&array);
     }

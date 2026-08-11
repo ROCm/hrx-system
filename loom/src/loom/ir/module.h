@@ -357,6 +357,28 @@ iree_status_t loom_module_intern_string(loom_module_t* module,
 loom_string_id_t loom_module_lookup_string(const loom_module_t* module,
                                            iree_string_view_t string);
 
+// Canonicalizes a trusted mutable symbol-reference array in place.
+//
+// Every reference must name a module-local symbol. Exact symbol-name bytes
+// define ordering and identity. Returns one duplicate reference when two
+// symbols have the same name or a null reference when the set is unique. The
+// array remains caller-owned and is not retained by |module|.
+loom_symbol_ref_t loom_module_canonicalize_symbol_set(
+    const loom_module_t* module, loom_symbol_ref_t* refs, uint16_t ref_count);
+
+// Tries to build a symbol-set attribute in |module|.
+//
+// The input may be in any order and may point to temporary storage. Every
+// reference must name a module-local symbol. Exact symbol-name bytes define
+// ordering and identity. A duplicate name is reported through
+// |out_duplicate_ref| without constructing an error status so text parsers can
+// attach a structured diagnostic to the authored occurrences; |out_attr| is
+// absent in that case. Otherwise the sorted immutable payload is copied into
+// the module arena and |out_duplicate_ref| is null.
+iree_status_t loom_module_try_make_symbol_set(
+    loom_module_t* module, loom_symbol_ref_array_t refs,
+    loom_symbol_ref_t* out_duplicate_ref, loom_attribute_t* out_attr);
+
 // Builds a canonical DICT attribute in |module| from |entries|.
 //
 // The input entries may be in any order and may point to temporary storage.

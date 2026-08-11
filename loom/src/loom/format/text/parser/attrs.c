@@ -15,6 +15,7 @@
 #include "loom/format/text/parser/regions.h"
 #include "loom/format/text/parser/types.h"
 #include "loom/ir/context.h"
+#include "loom/ir/module.h"
 
 static bool loom_parse_special_f64_spelling(iree_string_view_t text,
                                             double* out_value) {
@@ -276,8 +277,9 @@ static iree_status_t loom_parse_signed_enum_set_attr(
   return iree_ok_status();
 }
 
-static iree_status_t loom_parse_symbol_array_attr(loom_parser_t* parser,
-                                                  loom_attribute_t* out_attr) {
+static iree_status_t loom_parse_symbol_collection_attr(
+    loom_parser_t* parser, loom_attr_kind_t kind, loom_attribute_t* out_attr) {
+  const bool is_set = kind == LOOM_ATTR_SYMBOL_SET;
   if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LBRACKET)) {
     loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
     return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'['"));
@@ -285,7 +287,10 @@ static iree_status_t loom_parse_symbol_array_attr(loom_parser_t* parser,
 
   loom_symbol_ref_t inline_values[32];
   loom_symbol_ref_t* values = inline_values;
-  iree_host_size_t capacity = IREE_ARRAYSIZE(inline_values);
+  iree_host_size_t value_capacity = IREE_ARRAYSIZE(inline_values);
+  loom_token_t inline_tokens[32];
+  loom_token_t* tokens = inline_tokens;
+  iree_host_size_t token_capacity = IREE_ARRAYSIZE(inline_tokens);
   iree_host_size_t count = 0;
   while (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_RBRACKET) &&
          !loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_EOF)) {
@@ -298,11 +303,17 @@ static iree_status_t loom_parse_symbol_array_attr(loom_parser_t* parser,
       return loom_parser_emit_unexpected_token(
           parser, peek, IREE_SV("at most 65535 symbol references"));
     }
-    if (count >= capacity) {
-      IREE_RETURN_IF_ERROR(iree_arena_grow_array(&parser->parser_arena, count,
-                                                 count + 1, sizeof(*values),
-                                                 &capacity, (void**)&values));
+    if (count >= value_capacity) {
+      IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+          &parser->parser_arena, count, count + 1, sizeof(*values),
+          &value_capacity, (void**)&values));
     }
+    if (is_set && count >= token_capacity) {
+      IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+          &parser->parser_arena, count, count + 1, sizeof(*tokens),
+          &token_capacity, (void**)&tokens));
+    }
+    if (is_set) tokens[count] = loom_tokenizer_peek(&parser->tokenizer);
     loom_attribute_t value = loom_attr_absent();
     IREE_RETURN_IF_ERROR(loom_parse_symbol_ref_attr(parser, &value));
     values[count++] = loom_attr_as_symbol(value);
@@ -310,6 +321,41 @@ static iree_status_t loom_parse_symbol_array_attr(loom_parser_t* parser,
   if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_RBRACKET)) {
     loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
     return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("']'"));
+  }
+
+  if (is_set) {
+    loom_symbol_ref_t duplicate_ref = loom_symbol_ref_null();
+    IREE_RETURN_IF_ERROR(loom_module_try_make_symbol_set(
+        parser->module, loom_make_symbol_ref_array(values, count),
+        &duplicate_ref, out_attr));
+    if (loom_symbol_ref_is_valid(duplicate_ref)) {
+      loom_string_id_t duplicate_name_id =
+          parser->module->symbols.entries[duplicate_ref.symbol_id].name_id;
+      iree_string_view_t duplicate_name =
+          parser->module->strings.entries[duplicate_name_id];
+      loom_token_t first_token = loom_token_none();
+      loom_token_t duplicate_token = loom_token_none();
+      bool found_first = false;
+      for (iree_host_size_t i = 0; i < count; ++i) {
+        if (!iree_string_view_equal(tokens[i].text, duplicate_name)) continue;
+        if (!found_first) {
+          first_token = tokens[i];
+          found_first = true;
+        } else {
+          duplicate_token = tokens[i];
+          break;
+        }
+      }
+      IREE_ASSERT(found_first);
+      IREE_ASSERT(duplicate_token.kind != LOOM_TOKEN_NONE);
+      loom_diagnostic_param_t params[] = {
+          loom_param_string(duplicate_name),
+      };
+      return loom_parser_emit_related(
+          parser, LOOM_ERR_PARSE_035, params, IREE_ARRAYSIZE(params),
+          duplicate_token, IREE_SV("previously listed here"), first_token);
+    }
+    return iree_ok_status();
   }
 
   loom_symbol_ref_t* arena_values = NULL;
@@ -680,7 +726,9 @@ static iree_status_t loom_parse_attr_value_at_depth(
       return loom_parse_symbol_ref_attr(parser, out_attr);
     }
     case LOOM_ATTR_SYMBOL_ARRAY:
-      return loom_parse_symbol_array_attr(parser, out_attr);
+    case LOOM_ATTR_SYMBOL_SET:
+      return loom_parse_symbol_collection_attr(
+          parser, (loom_attr_kind_t)descriptor->attr_kind, out_attr);
     case LOOM_ATTR_ENUM: {
       uint8_t value = 0;
       IREE_RETURN_IF_ERROR(
