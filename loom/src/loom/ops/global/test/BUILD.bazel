@@ -17,6 +17,7 @@ loom_check_test_suite(
     srcs = [
         "bytecode.loom-test",
         "canonicalize.loom-test",
+        "facts.loom-test",
         "roundtrip.loom-test",
         "verify.loom-test",
     ],

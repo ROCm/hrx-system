@@ -317,6 +317,12 @@ iree_status_t loom_global_load_verify(const loom_module_t* module,
   if (symbol->definition == NULL || symbol->defining_op == NULL) {
     return iree_ok_status();
   }
+  if (loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_RODATA)) {
+    IREE_RETURN_IF_ERROR(loom_global_verify_load_results(module, op, emitter));
+    return loom_global_verify_result_type(
+        module, op, emitter, loom_global_load_result(op), /*result_index=*/0,
+        LOOM_TYPE_CONSTRAINT_BUFFER);
+  }
   if (!loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_GLOBAL)) {
     return iree_ok_status();
   }

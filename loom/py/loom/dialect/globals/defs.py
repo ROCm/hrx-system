@@ -20,8 +20,8 @@ Body ops (inside function/template bodies):
 
 Global definitions are module-private today. `global.rodata.def` is executable
 data, not a value global: it gives target emitters named bytes they can place
-in read-only artifact sections without making the payload loadable through
-`global.load`.
+in read-only artifact sections. Loading one materializes the complete payload
+as an opaque read-only `buffer` root.
 """
 
 from loom.assembly import (
@@ -236,12 +236,20 @@ global_rodata_decl = Op(
 global_load = Op(
     "global.load",
     group=global_ops,
-    doc=("Load a value from a global. Dynamic dims and encodings in the type annotation reference co-results by name. Predicates on the global definition are propagated as value facts."),
+    doc=(
+        "Load a value global or materialize a read-only data symbol. Value-global "
+        "dynamic dims and encodings in the type annotation reference co-results "
+        "by name, and predicates on the definition are propagated as value facts. "
+        "A read-only data symbol requires one `buffer` result representing the "
+        "complete payload with constant-memory provenance. Definitions provide "
+        "exact byte-extent and authored alignment facts; declarations remain "
+        "conservative until linking supplies their definition."
+    ),
     attrs=[
         AttrDef(
             "global",
             "symbol",
-            symbol_ref=SymbolReference("global", ["global"]),
+            symbol_ref=SymbolReference("global or read-only data", ["global", "rodata"]),
         ),
     ],
     # Variadic results: the loaded value + any dim/encoding co-results.
@@ -260,6 +268,7 @@ global_load = Op(
         "%tile, %m, %k = global.load @weights : tile<[%m]x[%k]xf32>",
         "%tile = global.load @bias : tile<[%m]xf32>",
         "%cache, %s, %d = global.load @kv_cache : tile<[%s]x[%s]x[%d]xf32>",
+        "%message = global.load @message : buffer",
     ],
 )
 

@@ -45,6 +45,26 @@ global.rodata.decl @external_rodata
 
 // ====
 
+// Read-only data definitions materialize as complete buffer roots.
+global.rodata.def @message = align(8) bytes("6c6f6f6d")
+
+func.def @load_rodata_definition() -> (buffer) {
+  %message = global.load @message : buffer
+  func.return %message : buffer
+}
+
+// ====
+
+// External read-only data uses the same buffer materialization contract.
+global.rodata.decl @external_message
+
+func.def @load_rodata_declaration() -> (buffer) {
+  %message = global.load @external_message : buffer
+  func.return %message : buffer
+}
+
+// ====
+
 // Load from scalar global.
 global.constant @c_pi : f32
 

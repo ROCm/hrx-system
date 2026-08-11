@@ -39,4 +39,22 @@ loom_generated_cc_library(
     loom::util::fact_table
 )
 
+loom_cc_test(
+  NAME
+    facts_test
+  SRCS
+    "facts_test.cc"
+  DEPS
+    ::global
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ir
+    loom::link::linker
+    loom::ops::test
+    loom::testing::module_ptr
+    loom::util::fact_table
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
