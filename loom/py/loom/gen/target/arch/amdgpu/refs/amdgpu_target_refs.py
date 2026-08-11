@@ -31,7 +31,7 @@ from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     amdgpu_core_descriptor_set_instruction_names_by_isa_key,
     amdgpu_descriptor_ref_keys,
     amdgpu_immediate_encoding_id_items,
-    build_amdgpu_core_descriptor_set_from_specs,
+    build_amdgpu_core_descriptor_sets_from_specs,
 )
 from loom.target.arch.amdgpu.descriptors.memory import (  # noqa: E402
     _FLAT_LOAD_DESCRIPTOR_KEYS,
@@ -605,12 +605,13 @@ def _materialize_descriptor_ref_tables(
     _validate_descriptor_trait_keys()
     descriptor_ref_keys = amdgpu_descriptor_ref_keys()
     descriptor_ref_key_set = frozenset(descriptor_ref_keys)
+    descriptor_sets_by_target = build_amdgpu_core_descriptor_sets_from_specs(
+        tuple(info.generator_target for info in descriptor_set_infos),
+        isa_specs,
+    )
     descriptor_set_tables: list[_DescriptorSetRefTable] = []
     for descriptor_set_info in descriptor_set_infos:
-        descriptor_set = build_amdgpu_core_descriptor_set_from_specs(
-            descriptor_set_info.generator_target,
-            isa_specs,
-        )
+        descriptor_set = descriptor_sets_by_target[descriptor_set_info.generator_target]
         if descriptor_set.key != descriptor_set_info.key:
             raise ValueError(f"AMDGPU descriptor-set builder '{descriptor_set_info.generator_target}' produced '{descriptor_set.key}', expected '{descriptor_set_info.key}'")
         _validate_lowering_descriptor_contracts(descriptor_set)

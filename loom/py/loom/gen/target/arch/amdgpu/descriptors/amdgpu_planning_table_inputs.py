@@ -15,7 +15,7 @@ from types import MappingProxyType
 
 from loom.target.arch.amdgpu.descriptors import (
     amdgpu_core_descriptor_set_instruction_names_by_isa_key,
-    build_amdgpu_core_descriptor_set_from_specs,
+    build_amdgpu_core_descriptor_sets_from_specs,
 )
 from loom.target.arch.amdgpu.isa_xml import (
     AmdgpuIsaFactSource,
@@ -72,12 +72,13 @@ def load_amdgpu_planning_table_inputs(
         _parse_isa_xml_paths(isa_xml_arguments),
         instruction_names_by_isa_key,
     )
+    descriptor_sets_by_target = build_amdgpu_core_descriptor_sets_from_specs(
+        tuple(info.generator_target for info in descriptor_set_infos),
+        isa_specs,
+    )
     descriptor_sets_by_key: dict[str, DescriptorSet] = {}
     for info in descriptor_set_infos:
-        descriptor_set = build_amdgpu_core_descriptor_set_from_specs(
-            info.generator_target,
-            isa_specs,
-        )
+        descriptor_set = descriptor_sets_by_target[info.generator_target]
         if descriptor_set.key != info.key:
             raise ValueError(f"AMDGPU descriptor-set builder '{info.generator_target}' produced '{descriptor_set.key}', expected '{info.key}'")
         descriptor_sets_by_key[info.key] = descriptor_set
