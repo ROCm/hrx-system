@@ -64,7 +64,7 @@ function(_loom_generated_textual_headers)
     set(_RULE_COMMENT "Generating ${_RULE_NAME}")
   endif()
 
-  iree_py_library_main(_GENERATOR "${_RULE_GENERATOR}")
+  iree_py_library_entrypoint(_GENERATOR_ENTRYPOINT "${_RULE_GENERATOR}")
   iree_py_library_collect_sources(_GENERATOR_INPUTS "${_RULE_GENERATOR}")
   _loom_python_command_prefix(_PYTHON_COMMAND_PREFIX "${_RULE_GENERATOR}")
 
@@ -74,7 +74,7 @@ function(_loom_generated_textual_headers)
     COMMAND
       ${_PYTHON_COMMAND_PREFIX}
       "${Python3_EXECUTABLE}"
-      "${_GENERATOR}"
+      ${_GENERATOR_ENTRYPOINT}
       ${_RULE_ARGS}
       ${_OUTPUT_ARGS}
     DEPENDS
@@ -247,7 +247,7 @@ function(loom_generated_cc_library)
     endforeach()
   endif()
 
-  iree_py_library_main(_GENERATOR "${_RULE_GENERATOR}")
+  iree_py_library_entrypoint(_GENERATOR_ENTRYPOINT "${_RULE_GENERATOR}")
   iree_py_library_collect_sources(_GENERATOR_INPUTS "${_RULE_GENERATOR}")
   _loom_python_command_prefix(_PYTHON_COMMAND_PREFIX "${_RULE_GENERATOR}")
 
@@ -257,7 +257,7 @@ function(loom_generated_cc_library)
     COMMAND
       ${_PYTHON_COMMAND_PREFIX}
       "${Python3_EXECUTABLE}"
-      "${_GENERATOR}"
+      ${_GENERATOR_ENTRYPOINT}
       ${_RULE_ARGS}
       ${_OUTPUT_ARGS}
     DEPENDS

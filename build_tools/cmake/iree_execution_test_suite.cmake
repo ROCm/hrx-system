@@ -87,20 +87,24 @@ function(iree_execution_test_suite)
       get_property(
         _TOOL_IS_PYTHON
         TARGET "${_TOOL_CMAKE_TARGET}"
-        PROPERTY IREE_PY_MAIN
+        PROPERTY IREE_PY_ENTRYPOINT_ARGUMENTS
         SET
       )
     endif()
     if(_TOOL_IS_PYTHON)
-      iree_py_library_main(_TOOL_MAIN "${_TOOL_TARGET}")
+      iree_py_library_entrypoint(_TOOL_ENTRYPOINT_ARGUMENTS "${_TOOL_TARGET}")
       iree_py_library_collect_sources(_TOOL_SOURCE_FILES "${_TOOL_TARGET}")
       iree_py_library_collect_package_dirs(
         _TOOL_PACKAGE_DIRS "${_TOOL_TARGET}"
       )
       list(APPEND _TEST_ARGS
         "--tool=${_TOOL_NAME}=${Python3_EXECUTABLE}"
-        "--tool-arg=${_TOOL_NAME}=${_TOOL_MAIN}"
       )
+      foreach(_TOOL_ARGUMENT IN LISTS _TOOL_ENTRYPOINT_ARGUMENTS)
+        list(APPEND _TEST_ARGS
+          "--tool-arg=${_TOOL_NAME}=${_TOOL_ARGUMENT}"
+        )
+      endforeach()
       list(APPEND _REQUIRED_FILES ${_TOOL_SOURCE_FILES})
       list(APPEND _TOOL_PYTHON_PACKAGE_DIRS ${_TOOL_PACKAGE_DIRS})
     else()

@@ -80,7 +80,7 @@ iree_py_binary(
     ],
 )
 
-C_TABLES_BASE_DEPS = [
+C_TABLES_LIBRARY_DEPS = [
     ":model",
     "//loom/py/loom:core",
     "//loom/py/loom/error",
@@ -92,77 +92,70 @@ C_TABLES_BASE_DEPS = [
 iree_py_library(
     name = "c_tables",
     srcs = C_TABLES_SRCS,
-    deps = C_TABLES_BASE_DEPS,
+    deps = C_TABLES_LIBRARY_DEPS,
 )
+
+C_TABLES_BASE_DEPS = [":c_tables"]
 
 iree_py_binary(
     name = "c_tables_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + C_TABLE_MODEL_ALL_DIALECT_DEPS,
 )
 
 iree_py_binary(
     name = "c_tables_amdgpu_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/target/arch/amdgpu:dialect"],
 )
 
 iree_py_binary(
     name = "c_tables_buffer_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/buffer"],
 )
 
 iree_py_binary(
     name = "c_tables_cfg_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/cfg"],
 )
 
 iree_py_binary(
     name = "c_tables_check_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/check"],
 )
 
 iree_py_binary(
     name = "c_tables_command_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/command"],
 )
 
 iree_py_binary(
     name = "c_tables_config_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/config"],
 )
 
 iree_py_binary(
     name = "c_tables_encoding_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/encoding"],
 )
 
 iree_py_binary(
     name = "c_tables_func_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + [
         "//loom/py/loom/dialect/func",
@@ -172,32 +165,28 @@ iree_py_binary(
 
 iree_py_binary(
     name = "c_tables_global_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/globals"],
 )
 
 iree_py_binary(
     name = "c_tables_index_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/index"],
 )
 
 iree_py_binary(
     name = "c_tables_ireevm_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/target/arch/ireevm:dialect"],
 )
 
 iree_py_binary(
     name = "c_tables_kernel_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + [
         "//loom/py/loom/dialect/kernel",
@@ -207,8 +196,7 @@ iree_py_binary(
 
 iree_py_binary(
     name = "c_tables_llvmir_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + [
         "//loom/py/loom/dialect/llvmir",
@@ -218,8 +206,7 @@ iree_py_binary(
 
 iree_py_binary(
     name = "c_tables_low_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + [
         "//loom/py/loom/dialect/low",
@@ -229,64 +216,56 @@ iree_py_binary(
 
 iree_py_binary(
     name = "c_tables_pass_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/pass_"],
 )
 
 iree_py_binary(
     name = "c_tables_pool_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/pool"],
 )
 
 iree_py_binary(
     name = "c_tables_sanitizer_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/sanitizer"],
 )
 
 iree_py_binary(
     name = "c_tables_scalar_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/scalar"],
 )
 
 iree_py_binary(
     name = "c_tables_scf_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/scf"],
 )
 
 iree_py_binary(
     name = "c_tables_spirv_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/target/arch/spirv:dialect"],
 )
 
 iree_py_binary(
     name = "c_tables_target_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/target"],
 )
 
 iree_py_binary(
     name = "c_tables_test_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + [
         "//loom/py/loom/dialect/target",
@@ -296,32 +275,28 @@ iree_py_binary(
 
 iree_py_binary(
     name = "c_tables_vector_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/vector"],
 )
 
 iree_py_binary(
     name = "c_tables_view_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/view"],
 )
 
 iree_py_binary(
     name = "c_tables_wasm_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/target/arch/wasm:dialect"],
 )
 
 iree_py_binary(
     name = "c_tables_x86_generator",
-    srcs = C_TABLES_SRCS,
-    main = "c_tables.py",
+    main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/target/arch/x86:dialect"],
 )

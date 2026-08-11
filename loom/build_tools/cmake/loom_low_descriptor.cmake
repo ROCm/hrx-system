@@ -141,7 +141,7 @@ function(loom_target_table_cc_library)
     message(FATAL_ERROR "loom_target_table_cc_library requires GENERATOR")
   endif()
 
-  iree_py_library_main(_GENERATOR "${_RULE_GENERATOR}")
+  iree_py_library_entrypoint(_GENERATOR_ENTRYPOINT "${_RULE_GENERATOR}")
   iree_py_library_collect_sources(_GENERATOR_INPUTS "${_RULE_GENERATOR}")
   _loom_python_command_prefix(_PYTHON_COMMAND_PREFIX "${_RULE_GENERATOR}")
 
@@ -153,7 +153,7 @@ function(loom_target_table_cc_library)
     COMMAND
       ${_PYTHON_COMMAND_PREFIX}
       "${Python3_EXECUTABLE}"
-      "${_GENERATOR}"
+      ${_GENERATOR_ENTRYPOINT}
       ${_RULE_ARGS}
       "--source=${_SOURCE}"
       "--header=${_HEADER}"
@@ -231,7 +231,7 @@ function(loom_target_contract_table_cc_libraries)
   set(_LOWER_RULE_HEADER
     "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_NAME}_lower_rules.h")
 
-  iree_py_library_main(_GENERATOR "${_RULE_GENERATOR}")
+  iree_py_library_entrypoint(_GENERATOR_ENTRYPOINT "${_RULE_GENERATOR}")
   iree_py_library_collect_sources(_GENERATOR_INPUTS "${_RULE_GENERATOR}")
   _loom_python_command_prefix(_PYTHON_COMMAND_PREFIX "${_RULE_GENERATOR}")
 
@@ -244,7 +244,7 @@ function(loom_target_contract_table_cc_libraries)
     COMMAND
       ${_PYTHON_COMMAND_PREFIX}
       "${Python3_EXECUTABLE}"
-      "${_GENERATOR}"
+      ${_GENERATOR_ENTRYPOINT}
       ${_RULE_ARGS}
       "--contract-source=${_CONTRACT_SOURCE}"
       "--contract-header=${_CONTRACT_HEADER}"
