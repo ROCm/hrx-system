@@ -79,7 +79,7 @@ def _loom_output_args(flags, outputs):
         output_args[_loom_output_basename(outputs[i])] = _loom_output_arg(flags[i])
     return output_args
 
-def _loom_generated_textual_headers(
+def _loom_generated_files(
         name,
         generator,
         outputs,
@@ -90,9 +90,9 @@ def _loom_generated_textual_headers(
         visibility = None,
         comment = None):
     if not outputs:
-        fail("generated textual headers require at least one output")
+        fail("generated file actions require at least one output")
     if len(output_flags) != len(outputs):
-        fail("generated textual header output flags and outputs must be paired")
+        fail("generated file output flags and outputs must be paired")
 
     rule_kwargs = {}
     if visibility != None:
@@ -136,7 +136,7 @@ def loom_generated_textual_header(
       comment: Optional progress message for the generator action.
     """
 
-    _loom_generated_textual_headers(
+    _loom_generated_files(
         name = name,
         generator = generator,
         outputs = [output],
@@ -148,7 +148,7 @@ def loom_generated_textual_header(
         comment = comment,
     )
 
-def loom_generated_textual_header_family(
+def loom_generated_file_family(
         name,
         generator,
         outputs,
@@ -158,7 +158,7 @@ def loom_generated_textual_header_family(
         tags = [],
         visibility = None,
         comment = None):
-    """Generates a coherent family of textual headers in one action.
+    """Generates a coherent family of files in one action.
 
     The generator must derive all outputs from the same materialized source
     model. Outputs that can be generated independently belong in separate
@@ -166,8 +166,8 @@ def loom_generated_textual_header_family(
 
     Args:
       name: Generator action target name.
-      generator: Executable label that writes every textual header.
-      outputs: Generated textual header filenames.
+      generator: Executable label that writes every output.
+      outputs: Generated filenames.
       output_flags: Generator flags paired positionally with outputs.
       args: Generator arguments before the output flags.
       inputs: Source data labels consumed by the generator.
@@ -176,8 +176,8 @@ def loom_generated_textual_header_family(
       comment: Optional progress message for the generator action.
     """
     if len(outputs) < 2:
-        fail("generated textual header families require at least two outputs")
-    _loom_generated_textual_headers(
+        fail("generated file families require at least two outputs")
+    _loom_generated_files(
         name = name,
         generator = generator,
         outputs = outputs,

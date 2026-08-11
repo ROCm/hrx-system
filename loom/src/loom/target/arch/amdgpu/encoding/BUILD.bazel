@@ -19,7 +19,7 @@ load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
     "loom_cc_test",
-    "loom_generated_textual_header_family",
+    "loom_generated_file_family",
     "loom_low_descriptor_data_archive",
     "loom_target_table_cc_library",
 )
@@ -71,7 +71,7 @@ loom_low_descriptor_data_archive(
     urls = AMDGPU_ISA_XML_ARCHIVE["urls"],
 )
 
-loom_generated_textual_header_family(
+loom_generated_file_family(
     name = "encoding_config_tables_gen",
     generator = _AMDGPU_CONFIG_TABLES_GENERATOR,
     output_flags = [

@@ -25,7 +25,7 @@ function(_loom_python_command_prefix OUTPUT_PREFIX GENERATOR)
   )
 endfunction()
 
-function(_loom_generated_textual_headers)
+function(_loom_generated_files)
   cmake_parse_arguments(
     _RULE
     ""
@@ -35,19 +35,19 @@ function(_loom_generated_textual_headers)
   )
 
   if(NOT _RULE_NAME)
-    message(FATAL_ERROR "generated textual headers require NAME")
+    message(FATAL_ERROR "generated file actions require NAME")
   endif()
   if(NOT _RULE_GENERATOR)
-    message(FATAL_ERROR "generated textual headers require GENERATOR")
+    message(FATAL_ERROR "generated file actions require GENERATOR")
   endif()
   list(LENGTH _RULE_OUTPUTS _OUTPUT_COUNT)
   if(_OUTPUT_COUNT EQUAL 0)
-    message(FATAL_ERROR "generated textual headers require at least one output")
+    message(FATAL_ERROR "generated file actions require at least one output")
   endif()
   list(LENGTH _RULE_OUTPUT_FLAGS _OUTPUT_FLAG_COUNT)
   if(NOT _OUTPUT_FLAG_COUNT EQUAL _OUTPUT_COUNT)
     message(FATAL_ERROR
-      "generated textual header output flags and outputs must be paired")
+      "generated file output flags and outputs must be paired")
   endif()
 
   set(_OUTPUTS)
@@ -123,7 +123,7 @@ function(loom_generated_textual_header)
     message(FATAL_ERROR "loom_generated_textual_header requires OUTPUT_FLAG")
   endif()
 
-  _loom_generated_textual_headers(
+  _loom_generated_files(
     NAME "${_RULE_NAME}"
     GENERATOR "${_RULE_GENERATOR}"
     OUTPUTS "${_RULE_OUTPUT}"
@@ -134,7 +134,7 @@ function(loom_generated_textual_header)
   )
 endfunction()
 
-function(loom_generated_textual_header_family)
+function(loom_generated_file_family)
   cmake_parse_arguments(
     _RULE
     ""
@@ -146,10 +146,10 @@ function(loom_generated_textual_header_family)
   list(LENGTH _RULE_OUTPUTS _OUTPUT_COUNT)
   if(_OUTPUT_COUNT LESS 2)
     message(FATAL_ERROR
-      "loom_generated_textual_header_family requires at least two outputs")
+      "loom_generated_file_family requires at least two outputs")
   endif()
 
-  _loom_generated_textual_headers(
+  _loom_generated_files(
     NAME "${_RULE_NAME}"
     GENERATOR "${_RULE_GENERATOR}"
     OUTPUTS ${_RULE_OUTPUTS}

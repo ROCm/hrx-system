@@ -18,8 +18,8 @@ load("//loom/build_tools/amdgpu/isa_xml:archive.bzl", "AMDGPU_ISA_XML_ARCHIVE")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
+    "loom_generated_file_family",
     "loom_generated_textual_header",
-    "loom_generated_textual_header_family",
     "loom_low_descriptor_cc_library",
     "loom_low_descriptor_data_archive",
     "loom_low_descriptor_exclude_from_cmake_all",
@@ -90,7 +90,7 @@ _AMDGPU_PLANNING_FACT_VISIBILITY = [
     "//loom/src/loom/target/arch/amdgpu/planning:__pkg__",
 ]
 
-loom_generated_textual_header_family(
+loom_generated_file_family(
     name = "planning_tables_gen",
     args = _AMDGPU_ISA_XML_ARGS,
     comment = "Generating AMDGPU descriptor-derived planning table family",

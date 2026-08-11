@@ -595,7 +595,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         )
         self._emit_platform_guard_end(target_compatible_with)
 
-    def loom_generated_textual_header_family(
+    def loom_generated_file_family(
         self,
         name,
         generator,
@@ -642,7 +642,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         if platform_inputs_block:
             self._converter.body += platform_inputs_block
         self._converter.body += (
-            f"loom_generated_textual_header_family(\n"
+            f"loom_generated_file_family(\n"
             f"{name_block}"
             f"{generator_block}"
             f"{outputs_block}"

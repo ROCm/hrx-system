@@ -35,7 +35,7 @@ loom_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header_family(
+loom_generated_file_family(
   NAME
     memory_descriptor_candidate_tables_gen
   GENERATOR
@@ -50,7 +50,7 @@ loom_generated_textual_header_family(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header_family(
+loom_generated_file_family(
   NAME
     memory_cache_policy_tables_gen
   GENERATOR
@@ -65,7 +65,7 @@ loom_generated_textual_header_family(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header_family(
+loom_generated_file_family(
   NAME
     fp8_tables_gen
   GENERATOR

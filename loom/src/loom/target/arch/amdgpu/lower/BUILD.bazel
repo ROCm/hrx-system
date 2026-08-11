@@ -8,8 +8,7 @@ load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
     "loom_cc_test",
-    "loom_generated_textual_header",
-    "loom_generated_textual_header_family",
+    "loom_generated_file_family",
 )
 
 package(
@@ -62,7 +61,7 @@ exports_files(
     visibility = ["//loom/py/loom/target/arch/amdgpu/contracts:__pkg__"],
 )
 
-loom_generated_textual_header_family(
+loom_generated_file_family(
     name = "memory_descriptor_candidate_tables_gen",
     generator = _AMDGPU_MEMORY_CANDIDATE_GENERATOR,
     output_flags = [
@@ -75,7 +74,7 @@ loom_generated_textual_header_family(
     ],
 )
 
-loom_generated_textual_header_family(
+loom_generated_file_family(
     name = "memory_cache_policy_tables_gen",
     generator = _AMDGPU_TARGET_INFO_GENERATOR,
     output_flags = [
@@ -88,7 +87,7 @@ loom_generated_textual_header_family(
     ],
 )
 
-loom_generated_textual_header_family(
+loom_generated_file_family(
     name = "fp8_tables_gen",
     generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
     output_flags = [

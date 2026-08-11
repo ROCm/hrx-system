@@ -27,7 +27,7 @@ endif()
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header_family(
+loom_generated_file_family(
   NAME
     planning_tables_gen
   GENERATOR
