@@ -1,0 +1,91 @@
+# Copyright 2026 The IREE Authors
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+site_name: Loom Programming Guide
+site_description: Author, specialize, test, benchmark, and embed Loom programs.
+site_url: https://rocm.github.io/hrx-system/loom/
+repo_url: https://github.com/ROCm/hrx-system
+repo_name: ROCm/hrx-system
+edit_uri: edit/main/loom/docs/src/
+
+docs_dir: src
+strict: true
+
+theme:
+  name: material
+  language: en
+  features:
+    - content.code.annotate
+    - content.code.copy
+    - navigation.footer
+    - navigation.indexes
+    - navigation.sections
+    - navigation.tabs
+    - navigation.top
+    - search.highlight
+    - search.suggest
+    - toc.follow
+  icon:
+    logo: octicons/cpu-24
+    repo: octicons/mark-github-16
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: octicons/moon-24
+        name: Use dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: octicons/sun-24
+        name: Use light mode
+
+nav:
+  - Loom: index.md
+  - Get started:
+      - Acquiring Loom: getting-started/acquiring-loom.md
+  - Reference:
+      - Reference map: reference/index.md
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets:
+      base_path:
+        - loom/docs
+      check_paths: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+validation:
+  nav:
+    omitted_files: info
+    not_found: warn
+  links:
+    not_found: warn
+    unrecognized_links: warn
+
+extra_css:
+  - stylesheets/extra.css
+
+copyright: Copyright &copy; 2026 The IREE Authors
