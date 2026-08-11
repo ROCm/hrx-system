@@ -202,11 +202,9 @@ py_test(
 
 py_test(
     name = "project_presubmit_test",
-    srcs = [
-        "project_presubmit.py",
-        "project_presubmit_test.py",
-    ],
+    srcs = ["project_presubmit_test.py"],
     main = "project_presubmit_test.py",
+    deps = [":devtools"],
 )
 
 py_test(

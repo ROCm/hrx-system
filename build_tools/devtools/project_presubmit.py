@@ -15,6 +15,9 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from build_tools.devtools import bazel as bazel_dev
+from build_tools.devtools import cmake_file_api
+
 CMAKE_BUILD_DIR_ENV = "IREE_CMAKE_BUILD_DIR"
 
 
@@ -120,6 +123,91 @@ def run_command(
         f"{result.returncode}"
     )
     return False
+
+
+def build_and_resolve_executable(
+    project_name: str,
+    repo_root: Path,
+    *,
+    lane: str,
+    bazel_target: str,
+    cmake_target: str,
+    bazel_args: Sequence[str] = (),
+) -> Path | None:
+    """Builds an executable target and returns its resolved artifact path."""
+    executable_path: Path | None = None
+    if lane == "bazel":
+        bazel_args = tuple(bazel_args)
+        if not run_command(
+            project_name,
+            ["bazel", "build", *bazel_args, bazel_target],
+            f"Build Bazel executable {bazel_target}",
+            cwd=repo_root,
+        ):
+            return None
+        executable_path = bazel_dev.resolve_bazel_output_path(
+            bazel="bazel",
+            target=bazel_target,
+            bazel_args=list(bazel_args),
+            cwd=repo_root,
+            env=None,
+        )
+        if executable_path is None:
+            print(
+                f"{project_name} presubmit: Bazel target {bazel_target} "
+                "has no executable output",
+                file=sys.stderr,
+            )
+            return None
+    elif lane == "cmake":
+        build_dir = cmake_build_dir(repo_root)
+        if not validate_cmake_build_tree(project_name, build_dir):
+            return None
+        try:
+            resolved_target = cmake_file_api.resolve_target_name(
+                build_dir, cmake_target
+            )
+        except cmake_file_api.FileApiError as exc:
+            print(f"{project_name} presubmit: {exc}", file=sys.stderr)
+            return None
+        if not run_command(
+            project_name,
+            [
+                "cmake",
+                "--build",
+                str(build_dir),
+                "--target",
+                resolved_target,
+                "--parallel",
+            ],
+            f"Build CMake executable {cmake_target}",
+            cwd=repo_root,
+        ):
+            return None
+        try:
+            executable_path = cmake_file_api.resolve_executable(
+                build_dir, cmake_target
+            ).path
+        except cmake_file_api.FileApiError as exc:
+            print(f"{project_name} presubmit: {exc}", file=sys.stderr)
+            return None
+    else:
+        raise ValueError(f"unknown lane: {lane}")
+
+    if not executable_path.is_file():
+        print(
+            f"{project_name} presubmit: built executable is missing: {executable_path}",
+            file=sys.stderr,
+        )
+        return None
+    if not os.access(executable_path, os.X_OK):
+        print(
+            f"{project_name} presubmit: built output is not executable: "
+            f"{executable_path}",
+            file=sys.stderr,
+        )
+        return None
+    return executable_path
 
 
 def stage_changed_paths(

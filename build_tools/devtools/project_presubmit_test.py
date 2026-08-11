@@ -68,6 +68,139 @@ class ProjectPresubmitTest(unittest.TestCase):
 
             self.assertIn("mixed generator state", output.getvalue())
 
+    def test_build_and_resolve_bazel_executable(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repo_root = Path(temporary_directory)
+            executable_path = repo_root / "bazel-bin/example/tool"
+            executable_path.parent.mkdir(parents=True)
+            executable_path.write_text("tool\n", encoding="utf-8")
+            executable_path.chmod(0o755)
+
+            with (
+                mock.patch.object(
+                    project_presubmit, "run_command", return_value=True
+                ) as run_command,
+                mock.patch.object(
+                    project_presubmit.bazel_dev,
+                    "resolve_bazel_output_path",
+                    return_value=executable_path,
+                ) as resolve_bazel_output_path,
+            ):
+                result = project_presubmit.build_and_resolve_executable(
+                    "example",
+                    repo_root,
+                    lane="bazel",
+                    bazel_target="//example:tool",
+                    cmake_target="example::tool",
+                    bazel_args=("--config=presubmit",),
+                )
+
+            self.assertEqual(result, executable_path)
+            run_command.assert_called_once_with(
+                "example",
+                [
+                    "bazel",
+                    "build",
+                    "--config=presubmit",
+                    "//example:tool",
+                ],
+                "Build Bazel executable //example:tool",
+                cwd=repo_root,
+            )
+            resolve_bazel_output_path.assert_called_once_with(
+                bazel="bazel",
+                target="//example:tool",
+                bazel_args=["--config=presubmit"],
+                cwd=repo_root,
+                env=None,
+            )
+
+    def test_build_and_resolve_cmake_executable(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repo_root = Path(temporary_directory)
+            build_dir = repo_root / "build"
+            executable_path = build_dir / "bin/tool"
+            executable_path.parent.mkdir(parents=True)
+            executable_path.write_text("tool\n", encoding="utf-8")
+            executable_path.chmod(0o755)
+            target = project_presubmit.cmake_file_api.CMakeExecutableTarget(
+                name="example_tool",
+                path=executable_path,
+            )
+
+            with (
+                mock.patch.object(
+                    project_presubmit,
+                    "cmake_build_dir",
+                    return_value=build_dir,
+                ),
+                mock.patch.object(
+                    project_presubmit,
+                    "validate_cmake_build_tree",
+                    return_value=True,
+                ) as validate_cmake_build_tree,
+                mock.patch.object(
+                    project_presubmit.cmake_file_api,
+                    "resolve_target_name",
+                    return_value="example_tool",
+                ) as resolve_target_name,
+                mock.patch.object(
+                    project_presubmit, "run_command", return_value=True
+                ) as run_command,
+                mock.patch.object(
+                    project_presubmit.cmake_file_api,
+                    "resolve_executable",
+                    return_value=target,
+                ) as resolve_executable,
+            ):
+                result = project_presubmit.build_and_resolve_executable(
+                    "example",
+                    repo_root,
+                    lane="cmake",
+                    bazel_target="//example:tool",
+                    cmake_target="example::tool",
+                )
+
+            self.assertEqual(result, executable_path)
+            validate_cmake_build_tree.assert_called_once_with("example", build_dir)
+            resolve_target_name.assert_called_once_with(build_dir, "example::tool")
+            run_command.assert_called_once_with(
+                "example",
+                [
+                    "cmake",
+                    "--build",
+                    str(build_dir),
+                    "--target",
+                    "example_tool",
+                    "--parallel",
+                ],
+                "Build CMake executable example::tool",
+                cwd=repo_root,
+            )
+            resolve_executable.assert_called_once_with(build_dir, "example::tool")
+
+    def test_build_and_resolve_rejects_missing_bazel_output(self):
+        output = io.StringIO()
+        with (
+            mock.patch.object(project_presubmit, "run_command", return_value=True),
+            mock.patch.object(
+                project_presubmit.bazel_dev,
+                "resolve_bazel_output_path",
+                return_value=None,
+            ),
+            contextlib.redirect_stderr(output),
+        ):
+            result = project_presubmit.build_and_resolve_executable(
+                "example",
+                Path("/repo"),
+                lane="bazel",
+                bazel_target="//example:tool",
+                cmake_target="example::tool",
+            )
+
+        self.assertIsNone(result)
+        self.assertIn("has no executable output", output.getvalue())
+
     def test_stage_changed_paths_stages_only_existing_or_tracked_paths(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             repo_root = Path(temporary_directory)
