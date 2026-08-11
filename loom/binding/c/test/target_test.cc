@@ -51,6 +51,41 @@ using TargetProfilePtr =
     HandlePtr<loomc_target_profile_t, loomc_target_profile_release>;
 using WorkspacePtr = HandlePtr<loomc_workspace_t, loomc_workspace_release>;
 
+struct PublishedVersionAllocatorState {
+  // Module whose function-version publication is observed during allocation.
+  loomc_module_t* module = nullptr;
+
+  // Whether the first allocation observing published versions must fail.
+  bool fail_when_published = false;
+
+  // Whether an allocation observed published function versions.
+  bool observed_published_versions = false;
+};
+
+loomc_status_t PublishedVersionAllocatorControl(
+    void* self, loomc_allocator_command_t command, const void* params,
+    void** inout_ptr) {
+  auto* state = static_cast<PublishedVersionAllocatorState*>(self);
+  if (command != LOOMC_ALLOCATOR_COMMAND_FREE && state->module != nullptr &&
+      loomc_module_function_versions(state->module) != nullptr) {
+    state->observed_published_versions = true;
+    if (state->fail_when_published) {
+      return loomc_status_from_code(LOOMC_STATUS_RESOURCE_EXHAUSTED);
+    }
+  }
+  loomc_allocator_t system_allocator = loomc_allocator_system();
+  return system_allocator.ctl(system_allocator.self, command, params,
+                              inout_ptr);
+}
+
+loomc_allocator_t PublishedVersionAllocator(
+    PublishedVersionAllocatorState* state) {
+  return {
+      /*.self=*/state,
+      /*.ctl=*/PublishedVersionAllocatorControl,
+  };
+}
+
 void FakeArtifactRelease(void* storage, iree_allocator_t allocator) {
   iree_allocator_free(allocator, storage);
 }
@@ -1003,6 +1038,61 @@ TEST(TargetTest, RetainsSpecializationVersionWithoutChangingTargetlessIr) {
     EXPECT_EQ(result, nullptr);
     EXPECT_EQ(loomc_module_function_versions(module.get()), nullptr);
     target_options.specializations = &specialization;
+  }
+}
+
+TEST(TargetTest, PublishesSpecializationVersionsBeforeModuleArtifacts) {
+  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
+  TargetProfilePtr profile = CreateSpirvProfile(target_environment.get());
+  ContextPtr context = CreateSpirvContext(target_environment.get());
+  CompilerPtr compiler = CreateCompiler(context.get());
+  PassProgramPtr pass_program = CreateEmptyPassProgram(context.get());
+
+  const loomc_target_specialization_t specialization = {
+      /*.function_symbol=*/loomc_make_cstring_view("entry"),
+      /*.target_profile=*/profile.get(),
+  };
+  loomc_target_specialization_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      /*.structure_size=*/sizeof(target_options),
+      /*.next=*/nullptr,
+      /*.specializations=*/&specialization,
+      /*.specialization_count=*/1,
+  };
+  loomc_compile_options_t compile_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      /*.structure_size=*/sizeof(compile_options),
+      /*.next=*/&target_options,
+      /*.module_name=*/loomc_make_cstring_view("jit_kernel"),
+      /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
+      /*.config=*/{},
+  };
+
+  for (bool fail_when_published : {false, true}) {
+    WorkspacePtr workspace = CreateWorkspace();
+    ModulePtr module =
+        CreateIdentityModule(context.get(), workspace.get(), "entry");
+    PublishedVersionAllocatorState allocator_state = {
+        /*.module=*/module.get(),
+        /*.fail_when_published=*/fail_when_published,
+    };
+    loomc_result_t* result = nullptr;
+    loomc_status_t status = loomc_compile_module(
+        compiler.get(), workspace.get(), pass_program.get(), module.get(),
+        &compile_options, PublishedVersionAllocator(&allocator_state), &result);
+    ResultPtr result_ptr(result);
+
+    EXPECT_TRUE(allocator_state.observed_published_versions);
+    if (fail_when_published) {
+      LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_RESOURCE_EXHAUSTED, status);
+      EXPECT_EQ(result, nullptr);
+      EXPECT_EQ(loomc_module_function_versions(module.get()), nullptr);
+    } else {
+      LOOMC_EXPECT_OK(status);
+      ExpectSucceededResult(result_ptr.get());
+      EXPECT_NE(loomc_module_function_versions(module.get()), nullptr);
+      EXPECT_EQ(loomc_result_artifact_count(result_ptr.get()), 1u);
+    }
   }
 }
 

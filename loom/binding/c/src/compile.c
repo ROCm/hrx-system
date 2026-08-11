@@ -559,15 +559,16 @@ loomc_status_t loomc_compile_module(loomc_compiler_t* compiler,
     status = loomc_result_verify_loom_module(launch_config_module,
                                              /*source=*/NULL, result);
   }
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
+    loomc_module_publish_function_versions(module, function_versions);
+  }
   if (loomc_status_is_ok(status)) {
     status = loomc_compile_emit_requested_artifacts(result, options, module,
                                                     launch_config_module);
   }
   const bool compilation_succeeded =
       loomc_status_is_ok(status) && loomc_result_succeeded(result);
-  if (compilation_succeeded) {
-    loomc_module_publish_function_versions(module, function_versions);
-  } else {
+  if (!compilation_succeeded) {
     loomc_module_prepare_function_versions(module);
   }
   if (loomc_status_is_ok(status)) {
