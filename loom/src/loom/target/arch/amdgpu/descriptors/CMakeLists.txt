@@ -27,118 +27,22 @@ endif()
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
+loom_generated_textual_header_family(
   NAME
-    wait_packet_descriptor_ranges_gen
+    wait_packet_tables_gen
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::descriptors::wait_packet_tables
-  OUTPUT
+  OUTPUTS
     "wait_packet_descriptor_ranges.inl"
-  OUTPUT_FLAG
-    "--descriptor-ranges"
-  ARGS
-    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-  INPUTS
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "loom_amdgpu_isa_xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    wait_packet_descriptors_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::descriptors::wait_packet_tables
-  OUTPUT
     "wait_packet_descriptors.inl"
-  OUTPUT_FLAG
-    "--descriptor-rows"
-  ARGS
-    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-  INPUTS
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "loom_amdgpu_isa_xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    wait_packet_descriptor_lookups_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::descriptors::wait_packet_tables
-  OUTPUT
     "wait_packet_descriptor_lookups.inl"
-  OUTPUT_FLAG
-    "--descriptor-lookups"
-  ARGS
-    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-  INPUTS
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "loom_amdgpu_isa_xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    wait_packet_immediates_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::descriptors::wait_packet_tables
-  OUTPUT
     "wait_packet_immediates.inl"
-  OUTPUT_FLAG
-    "--immediate-rows"
-  ARGS
-    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-  INPUTS
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "loom_amdgpu_isa_xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    wait_packet_selections_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::descriptors::wait_packet_tables
-  OUTPUT
     "wait_packet_selections.inl"
-  OUTPUT_FLAG
+  OUTPUT_FLAGS
+    "--descriptor-ranges"
+    "--descriptor-rows"
+    "--descriptor-lookups"
+    "--immediate-rows"
     "--selection-rows"
   ARGS
     "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
@@ -153,148 +57,30 @@ loom_generated_textual_header(
     "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
     "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
     "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+  COMMENT
+    "Generating AMDGPU wait-packet table family"
 )
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
+loom_generated_textual_header_family(
   NAME
-    vopd_component_rules_gen
+    vopd_component_tables_gen
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::descriptors::vopd_component_tables
-  OUTPUT
+  OUTPUTS
     "vopd_component_rules.inl"
-  OUTPUT_FLAG
-    "--component-rules"
-  ARGS
-    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-  INPUTS
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "loom_amdgpu_isa_xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    vopd_component_descriptor_lookup_ranges_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::descriptors::vopd_component_tables
-  OUTPUT
     "vopd_component_descriptor_lookup_ranges.inl"
-  OUTPUT_FLAG
-    "--descriptor-lookup-ranges"
-  ARGS
-    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-  INPUTS
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "loom_amdgpu_isa_xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    vopd_component_descriptor_lookups_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::descriptors::vopd_component_tables
-  OUTPUT
     "vopd_component_descriptor_lookups.inl"
-  OUTPUT_FLAG
-    "--descriptor-lookups"
-  ARGS
-    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-  INPUTS
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "loom_amdgpu_isa_xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    vopd_pair_affinity_ranges_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::descriptors::vopd_component_tables
-  OUTPUT
     "vopd_pair_affinity_ranges.inl"
-  OUTPUT_FLAG
-    "--pair-affinity-ranges"
-  ARGS
-    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-  INPUTS
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "loom_amdgpu_isa_xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    vopd_pair_affinities_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::descriptors::vopd_component_tables
-  OUTPUT
     "vopd_pair_affinities.inl"
-  OUTPUT_FLAG
-    "--pair-affinities"
-  ARGS
-    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-  INPUTS
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "loom_amdgpu_isa_xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    vopd_pair_placement_recipes_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::descriptors::vopd_component_tables
-  OUTPUT
     "vopd_pair_placement_recipes.inl"
-  OUTPUT_FLAG
+  OUTPUT_FLAGS
+    "--component-rules"
+    "--descriptor-lookup-ranges"
+    "--descriptor-lookups"
+    "--pair-affinity-ranges"
+    "--pair-affinities"
     "--pair-placement-recipes"
   ARGS
     "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
@@ -309,6 +95,8 @@ loom_generated_textual_header(
     "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
     "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
     "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+  COMMENT
+    "Generating AMDGPU VOPD component table family"
 )
 endif()
 

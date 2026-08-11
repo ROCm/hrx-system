@@ -25,6 +25,82 @@ function(_loom_python_command_prefix OUTPUT_PREFIX GENERATOR)
   )
 endfunction()
 
+function(_loom_generated_textual_headers)
+  cmake_parse_arguments(
+    _RULE
+    ""
+    "NAME;GENERATOR;COMMENT"
+    "OUTPUTS;OUTPUT_FLAGS;ARGS;INPUTS"
+    ${ARGN}
+  )
+
+  if(NOT _RULE_NAME)
+    message(FATAL_ERROR "generated textual headers require NAME")
+  endif()
+  if(NOT _RULE_GENERATOR)
+    message(FATAL_ERROR "generated textual headers require GENERATOR")
+  endif()
+  list(LENGTH _RULE_OUTPUTS _OUTPUT_COUNT)
+  if(_OUTPUT_COUNT EQUAL 0)
+    message(FATAL_ERROR "generated textual headers require at least one output")
+  endif()
+  list(LENGTH _RULE_OUTPUT_FLAGS _OUTPUT_FLAG_COUNT)
+  if(NOT _OUTPUT_FLAG_COUNT EQUAL _OUTPUT_COUNT)
+    message(FATAL_ERROR
+      "generated textual header output flags and outputs must be paired")
+  endif()
+
+  set(_OUTPUTS)
+  set(_OUTPUT_ARGS)
+  math(EXPR _OUTPUT_LAST "${_OUTPUT_COUNT} - 1")
+  foreach(_INDEX RANGE 0 ${_OUTPUT_LAST})
+    list(GET _RULE_OUTPUTS ${_INDEX} _OUTPUT)
+    list(GET _RULE_OUTPUT_FLAGS ${_INDEX} _OUTPUT_FLAG)
+    set(_OUTPUT_PATH "${CMAKE_CURRENT_BINARY_DIR}/${_OUTPUT}")
+    list(APPEND _OUTPUTS "${_OUTPUT_PATH}")
+    list(APPEND _OUTPUT_ARGS "${_OUTPUT_FLAG}=${_OUTPUT_PATH}")
+  endforeach()
+  if(NOT _RULE_COMMENT)
+    set(_RULE_COMMENT "Generating ${_RULE_NAME}")
+  endif()
+
+  iree_py_library_main(_GENERATOR "${_RULE_GENERATOR}")
+  iree_py_library_collect_sources(_GENERATOR_INPUTS "${_RULE_GENERATOR}")
+  _loom_python_command_prefix(_PYTHON_COMMAND_PREFIX "${_RULE_GENERATOR}")
+
+  add_custom_command(
+    OUTPUT
+      ${_OUTPUTS}
+    COMMAND
+      ${_PYTHON_COMMAND_PREFIX}
+      "${Python3_EXECUTABLE}"
+      "${_GENERATOR}"
+      ${_RULE_ARGS}
+      ${_OUTPUT_ARGS}
+    DEPENDS
+      ${_GENERATOR_INPUTS}
+      ${_RULE_INPUTS}
+    COMMENT
+      "${_RULE_COMMENT}"
+    VERBATIM
+  )
+  set_source_files_properties(
+    ${_RULE_OUTPUTS}
+    ${_OUTPUTS}
+    PROPERTIES GENERATED TRUE
+  )
+
+  iree_package_name(_PACKAGE_NAME)
+  set(_GEN_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}")
+  add_custom_target("${_GEN_TARGET}"
+    DEPENDS
+      ${_OUTPUTS}
+  )
+  iree_register_generated_compile_input("${_GEN_TARGET}"
+    OUTPUTS ${_OUTPUTS}
+  )
+endfunction()
+
 function(loom_generated_textual_header)
   cmake_parse_arguments(
     _RULE
@@ -47,45 +123,40 @@ function(loom_generated_textual_header)
     message(FATAL_ERROR "loom_generated_textual_header requires OUTPUT_FLAG")
   endif()
 
-  set(_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_OUTPUT}")
-  if(NOT _RULE_COMMENT)
-    set(_RULE_COMMENT "Generating ${_RULE_NAME}")
+  _loom_generated_textual_headers(
+    NAME "${_RULE_NAME}"
+    GENERATOR "${_RULE_GENERATOR}"
+    OUTPUTS "${_RULE_OUTPUT}"
+    OUTPUT_FLAGS "${_RULE_OUTPUT_FLAG}"
+    ARGS ${_RULE_ARGS}
+    INPUTS ${_RULE_INPUTS}
+    COMMENT "${_RULE_COMMENT}"
+  )
+endfunction()
+
+function(loom_generated_textual_header_family)
+  cmake_parse_arguments(
+    _RULE
+    ""
+    "NAME;GENERATOR;COMMENT"
+    "OUTPUTS;OUTPUT_FLAGS;ARGS;INPUTS"
+    ${ARGN}
+  )
+
+  list(LENGTH _RULE_OUTPUTS _OUTPUT_COUNT)
+  if(_OUTPUT_COUNT LESS 2)
+    message(FATAL_ERROR
+      "loom_generated_textual_header_family requires at least two outputs")
   endif()
 
-  iree_py_library_main(_GENERATOR "${_RULE_GENERATOR}")
-  iree_py_library_collect_sources(_GENERATOR_INPUTS "${_RULE_GENERATOR}")
-  _loom_python_command_prefix(_PYTHON_COMMAND_PREFIX "${_RULE_GENERATOR}")
-
-  add_custom_command(
-    OUTPUT
-      "${_OUTPUT}"
-    COMMAND
-      ${_PYTHON_COMMAND_PREFIX}
-      "${Python3_EXECUTABLE}"
-      "${_GENERATOR}"
-      ${_RULE_ARGS}
-      "${_RULE_OUTPUT_FLAG}=${_OUTPUT}"
-    DEPENDS
-      ${_GENERATOR_INPUTS}
-      ${_RULE_INPUTS}
-    COMMENT
-      "${_RULE_COMMENT}"
-    VERBATIM
-  )
-  set_source_files_properties(
-    "${_RULE_OUTPUT}"
-    "${_OUTPUT}"
-    PROPERTIES GENERATED TRUE
-  )
-
-  iree_package_name(_PACKAGE_NAME)
-  set(_GEN_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}")
-  add_custom_target("${_GEN_TARGET}"
-    DEPENDS
-      "${_OUTPUT}"
-  )
-  iree_register_generated_compile_input("${_GEN_TARGET}"
-    OUTPUTS "${_OUTPUT}"
+  _loom_generated_textual_headers(
+    NAME "${_RULE_NAME}"
+    GENERATOR "${_RULE_GENERATOR}"
+    OUTPUTS ${_RULE_OUTPUTS}
+    OUTPUT_FLAGS ${_RULE_OUTPUT_FLAGS}
+    ARGS ${_RULE_ARGS}
+    INPUTS ${_RULE_INPUTS}
+    COMMENT "${_RULE_COMMENT}"
   )
 endfunction()
 
