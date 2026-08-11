@@ -289,6 +289,8 @@ iree_cc_library(
     "transient_buffer.h"
     "tsan_state.c"
     "tsan_state.h"
+    "virtual_memory.c"
+    "virtual_memory.h"
     "virtual_queue.h"
   DEPS
     ::access_policy
@@ -403,6 +405,7 @@ iree_cc_library(
     "system.h"
     "transient_buffer.h"
     "tsan_state.h"
+    "virtual_memory.h"
     "virtual_queue.h"
   DEPS
     ::profile_events

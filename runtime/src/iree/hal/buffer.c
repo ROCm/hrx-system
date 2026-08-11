@@ -30,6 +30,7 @@ static const iree_bitfield_string_mapping_t iree_hal_memory_type_mappings[] = {
     {IREE_HAL_MEMORY_TYPE_HOST_COHERENT, IREE_SVL("HOST_COHERENT")},
     {IREE_HAL_MEMORY_TYPE_HOST_CACHED, IREE_SVL("HOST_CACHED")},
     {IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE, IREE_SVL("DEVICE_VISIBLE")},
+    {IREE_HAL_MEMORY_TYPE_DEVICE_UNCACHED, IREE_SVL("DEVICE_UNCACHED")},
 };
 
 IREE_API_EXPORT iree_status_t iree_hal_memory_type_parse(
@@ -123,8 +124,14 @@ IREE_API_EXPORT iree_string_view_t iree_hal_buffer_usage_format(
 //===----------------------------------------------------------------------===//
 
 typedef struct iree_hal_subspan_buffer_t {
+  // Base HAL buffer resource exposed through this subspan.
   iree_hal_buffer_t base;
+
+  // Allocator used for the subspan wrapper itself.
   iree_allocator_t host_allocator;
+
+  // Invoked after |base.allocated_buffer| is released during destruction.
+  iree_hal_buffer_release_callback_t release_callback;
 } iree_hal_subspan_buffer_t;
 
 static const iree_hal_buffer_vtable_t iree_hal_subspan_buffer_vtable;
@@ -133,6 +140,16 @@ IREE_API_EXPORT iree_status_t iree_hal_subspan_buffer_create(
     iree_hal_buffer_t* allocated_buffer, iree_device_size_t byte_offset,
     iree_device_size_t byte_length, iree_allocator_t host_allocator,
     iree_hal_buffer_t** out_buffer) {
+  return iree_hal_subspan_buffer_create_with_callback(
+      allocated_buffer, byte_offset, byte_length,
+      iree_hal_buffer_release_callback_null(), host_allocator, out_buffer);
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_subspan_buffer_create_with_callback(
+    iree_hal_buffer_t* allocated_buffer, iree_device_size_t byte_offset,
+    iree_device_size_t byte_length,
+    iree_hal_buffer_release_callback_t release_callback,
+    iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer) {
   IREE_ASSERT_ARGUMENT(allocated_buffer);
   IREE_ASSERT_ARGUMENT(out_buffer);
   *out_buffer = NULL;
@@ -149,6 +166,7 @@ IREE_API_EXPORT iree_status_t iree_hal_subspan_buffer_create(
         allocated_buffer->allowed_usage, &iree_hal_subspan_buffer_vtable,
         &buffer->base);
     buffer->host_allocator = host_allocator;
+    buffer->release_callback = release_callback;
     *out_buffer = &buffer->base;
   }
 
@@ -162,6 +180,10 @@ static void iree_hal_subspan_buffer_destroy(iree_hal_buffer_t* base_buffer) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_buffer_release(base_buffer->allocated_buffer);
+  if (buffer->release_callback.fn) {
+    buffer->release_callback.fn(buffer->release_callback.user_data,
+                                base_buffer);
+  }
   iree_allocator_free(host_allocator, buffer);
 
   IREE_TRACE_ZONE_END(z0);

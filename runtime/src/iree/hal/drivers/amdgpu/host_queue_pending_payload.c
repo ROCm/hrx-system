@@ -574,15 +574,16 @@ iree_status_t iree_hal_amdgpu_host_queue_defer_host_call(
     const iree_hal_semaphore_list_t* signal_semaphore_list,
     iree_hal_host_call_t call, const uint64_t args[4],
     iree_hal_host_call_flags_t flags, iree_hal_amdgpu_pending_op_t** out_op) {
+  const iree_host_size_t operation_resource_count = call.resource ? 1 : 0;
   uint16_t max_resources = 0;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_count_reclaim_resources(
-      signal_semaphore_list->count,
-      /*operation_resource_count=*/0, &max_resources));
+      signal_semaphore_list->count, operation_resource_count, &max_resources));
   iree_hal_amdgpu_pending_op_t* op = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pending_op_allocate(
       queue, wait_semaphore_list, signal_semaphore_list,
       IREE_HAL_AMDGPU_PENDING_OP_HOST_CALL, max_resources, &op));
   op->host_call.call = call;
+  iree_hal_amdgpu_pending_op_retain(op, call.resource);
   memcpy(op->host_call.args, args, sizeof(op->host_call.args));
   op->host_call.flags = flags;
   *out_op = op;

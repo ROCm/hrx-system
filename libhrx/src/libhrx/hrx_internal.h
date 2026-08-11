@@ -466,19 +466,43 @@ iree_status_t hrx_graph_exec_instantiate_locked(
 
 // Buffer allocation.
 typedef struct hrx_buffer_s {
+  // References held by callers of the public buffer handle.
   iree_atomic_ref_count_t ref_count;
+
+  // HAL buffer owning the underlying allocation.
   iree_hal_buffer_t* hal_buffer;
+
+  // HAL pool that materialized |hal_buffer|.
   iree_hal_pool_t* hal_pool;
+
+  // Device associated with the buffer's allocation.
   hrx_device_t device;
+
+  // Memory properties selected for the allocation.
   hrx_memory_type_t mem_type;
+
+  // User-visible allocation length in bytes.
   size_t size;
+
+  // Optional bounded pool that charged |allocation_budget_size|.
+  hrx_mem_pool_t allocation_budget_pool;
+
+  // Bytes charged against |allocation_budget_pool|.
+  size_t allocation_budget_size;
+
+  // Active scoped mapping, valid only while |is_mapped| is true.
   iree_hal_buffer_mapping_t mapping;
+
+  // True when |mapping| currently owns an active mapping.
   bool is_mapped;
+
+  // Cached host pointer for the active mapping.
   void* mapped_ptr;
 } hrx_buffer_s;
 
 // Memory pool (stream-ordered memory management).
 typedef struct hrx_mem_pool_s {
+  // References held by public handles and bounded allocations.
   iree_atomic_ref_count_t ref_count;
 
   // Device whose HAL pool backend supplies this pool's backing storage.
@@ -487,11 +511,23 @@ typedef struct hrx_mem_pool_s {
   // HIP/CUDA-style creation properties used for attribute queries.
   hrx_mem_pool_props_t props;
 
-  // HAL pool lazily created on first allocation.
+  // TLSF HAL pool serving allocations up to |suballocation_max_size|.
   iree_hal_pool_t* hal_pool;
+
+  // Pass-through HAL pool serving allocations larger than the TLSF slab size.
+  iree_hal_pool_t* oversized_hal_pool;
+
+  // Largest request routed to |hal_pool| rather than |oversized_hal_pool|.
+  iree_device_size_t suballocation_max_size;
+
+  // Bytes charged to the immutable |props.max_size| allocation limit.
+  size_t allocation_budget_current;
 
   // HIP/CUDA release threshold attribute in bytes.
   uint64_t release_threshold;
+
+  // Allocations that have retained the HAL pool but have not reserved from it.
+  uint32_t inflight_allocation_count;
 
   // True when internal dependency insertion is allowed for reuse.
   bool reuse_allow_internal_dependencies;
@@ -519,15 +555,6 @@ typedef struct hrx_mem_pool_s {
 
   // Guards mutable pool attributes and lazy HAL pool creation.
   iree_slim_mutex_t mutex;
-
-  // True when the device allocator exposes HAL virtual-memory operations.
-  bool supports_virtual_memory;
-
-  // Minimum virtual-memory page size reported by the HAL allocator.
-  iree_device_size_t vm_page_size_min;
-
-  // Recommended virtual-memory page size reported by the HAL allocator.
-  iree_device_size_t vm_page_size_recommended;
 } hrx_mem_pool_s;
 
 // Loaded VM module with a context containing HAL + bytecode modules.

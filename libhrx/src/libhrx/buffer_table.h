@@ -30,6 +30,8 @@ typedef struct hrx_buffer_table_t {
   hrx_buffer_table_entry_t* entries;
   size_t count;
   size_t capacity;
+  // Slots promised to callers that require allocation-free rollback.
+  size_t reserved_insert_count;
 } hrx_buffer_table_t;
 
 void hrx_buffer_table_initialize(hrx_buffer_table_t* table);
@@ -47,6 +49,22 @@ hrx_status_t hrx_buffer_table_insert_if_new(hrx_buffer_table_t* table,
                                             uint64_t device_ptr, void* host_ptr,
                                             size_t size, hrx_buffer_t buffer,
                                             void* user_data);
+
+// Reserves capacity for one future insertion. Regular insertions cannot consume
+// the reserved slot. A successful call must be paired with either
+// hrx_buffer_table_insert_reserved or hrx_buffer_table_cancel_reserved_insert.
+hrx_status_t hrx_buffer_table_reserve_insert(hrx_buffer_table_t* table);
+
+// Inserts an entry using capacity reserved by hrx_buffer_table_reserve_insert.
+// This consumes one reservation even if pointer validation rejects the entry.
+hrx_status_t hrx_buffer_table_insert_reserved(hrx_buffer_table_t* table,
+                                              uint64_t device_ptr,
+                                              void* host_ptr, size_t size,
+                                              hrx_buffer_t buffer,
+                                              void* user_data);
+
+// Cancels one insertion reservation without inserting an entry.
+void hrx_buffer_table_cancel_reserved_insert(hrx_buffer_table_t* table);
 
 hrx_status_t hrx_buffer_table_remove(hrx_buffer_table_t* table,
                                      uint64_t any_ptr);

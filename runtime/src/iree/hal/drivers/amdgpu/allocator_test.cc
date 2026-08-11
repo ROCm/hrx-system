@@ -21,11 +21,15 @@
 namespace iree::hal::amdgpu {
 namespace {
 
+constexpr iree_hal_queue_affinity_t kQueueAffinity0 =
+    ((iree_hal_queue_affinity_t)1ull) << 0;
+
 static void CountingReleaseCallback(void* user_data, iree_hal_buffer_t*) {
   ++*static_cast<int*>(user_data);
 }
 
 static iree_status_t QueueFillAndWait(iree_hal_device_t* device,
+                                      iree_hal_queue_affinity_t queue_affinity,
                                       iree_hal_buffer_t* target_buffer,
                                       iree_device_size_t length,
                                       const void* pattern,
@@ -33,12 +37,138 @@ static iree_status_t QueueFillAndWait(iree_hal_device_t* device,
   iree::hal::cts::SemaphoreList empty_wait;
   iree::hal::cts::SemaphoreList fill_signal(device, {0}, {1});
   IREE_RETURN_IF_ERROR(iree_hal_device_queue_fill(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, fill_signal,
-      target_buffer, /*target_offset=*/0, length, pattern, pattern_length,
+      device, queue_affinity, empty_wait, fill_signal, target_buffer,
+      /*target_offset=*/0, length, pattern, pattern_length,
       IREE_HAL_FILL_FLAG_NONE));
   return iree_hal_semaphore_list_wait(fill_signal, iree_infinite_timeout(),
                                       IREE_ASYNC_WAIT_FLAG_NONE);
 }
+
+static iree_hal_buffer_params_t DeviceLocalVirtualMemoryParams() {
+  return (iree_hal_buffer_params_t){
+      /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER |
+          IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
+      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
+      /*.type=*/IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+      /*.queue_affinity=*/kQueueAffinity0,
+  };
+}
+
+static iree_hal_buffer_params_t HostLocalVirtualMemoryParams() {
+  return (iree_hal_buffer_params_t){
+      /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER,
+      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
+      /*.type=*/
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      /*.queue_affinity=*/kQueueAffinity0,
+  };
+}
+
+static iree_hal_buffer_params_t DeviceLocalHostVisibleVirtualMemoryParams() {
+  return (iree_hal_buffer_params_t){
+      /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER,
+      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
+      /*.type=*/IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
+          IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+          IREE_HAL_MEMORY_TYPE_HOST_COHERENT,
+      /*.queue_affinity=*/kQueueAffinity0,
+  };
+}
+
+class VirtualMemoryReservation {
+ public:
+  explicit VirtualMemoryReservation(iree_hal_allocator_t* allocator)
+      : allocator_(allocator) {}
+  ~VirtualMemoryReservation() { Reset(); }
+
+  VirtualMemoryReservation(const VirtualMemoryReservation&) = delete;
+  VirtualMemoryReservation& operator=(const VirtualMemoryReservation&) = delete;
+
+  iree_hal_buffer_t* get() const { return buffer_; }
+  iree_hal_buffer_t** out() { return &buffer_; }
+
+  iree_status_t Release() {
+    if (!buffer_) return iree_ok_status();
+    iree_status_t status =
+        iree_hal_allocator_virtual_memory_release(allocator_, buffer_);
+    if (iree_status_is_ok(status)) buffer_ = nullptr;
+    return status;
+  }
+
+  void Reset() { IREE_EXPECT_OK(Release()); }
+
+ private:
+  iree_hal_allocator_t* allocator_ = nullptr;
+  iree_hal_buffer_t* buffer_ = nullptr;
+};
+
+class PhysicalMemoryAllocation {
+ public:
+  explicit PhysicalMemoryAllocation(iree_hal_allocator_t* allocator)
+      : allocator_(allocator) {}
+  ~PhysicalMemoryAllocation() { Reset(); }
+
+  PhysicalMemoryAllocation(const PhysicalMemoryAllocation&) = delete;
+  PhysicalMemoryAllocation& operator=(const PhysicalMemoryAllocation&) = delete;
+
+  iree_hal_physical_memory_t* get() const { return memory_; }
+  iree_hal_physical_memory_t** out() { return &memory_; }
+
+  iree_status_t Release() {
+    if (!memory_) return iree_ok_status();
+    iree_status_t status =
+        iree_hal_allocator_physical_memory_free(allocator_, memory_);
+    if (iree_status_is_ok(status)) memory_ = nullptr;
+    return status;
+  }
+
+  void Reset() { IREE_EXPECT_OK(Release()); }
+
+ private:
+  iree_hal_allocator_t* allocator_ = nullptr;
+  iree_hal_physical_memory_t* memory_ = nullptr;
+};
+
+class VirtualMemoryMapping {
+ public:
+  VirtualMemoryMapping(iree_hal_allocator_t* allocator,
+                       iree_hal_buffer_t* virtual_buffer,
+                       iree_device_size_t virtual_offset,
+                       iree_device_size_t size)
+      : allocator_(allocator),
+        virtual_buffer_(virtual_buffer),
+        virtual_offset_(virtual_offset),
+        size_(size) {}
+  ~VirtualMemoryMapping() { Reset(); }
+
+  VirtualMemoryMapping(const VirtualMemoryMapping&) = delete;
+  VirtualMemoryMapping& operator=(const VirtualMemoryMapping&) = delete;
+
+  iree_status_t Map(iree_hal_physical_memory_t* physical_memory) {
+    iree_status_t status = iree_hal_allocator_virtual_memory_map(
+        allocator_, virtual_buffer_, virtual_offset_, physical_memory,
+        /*physical_offset=*/0, size_);
+    is_mapped_ = iree_status_is_ok(status);
+    return status;
+  }
+
+  iree_status_t Unmap() {
+    if (!is_mapped_) return iree_ok_status();
+    iree_status_t status = iree_hal_allocator_virtual_memory_unmap(
+        allocator_, virtual_buffer_, virtual_offset_, size_);
+    if (iree_status_is_ok(status)) is_mapped_ = false;
+    return status;
+  }
+
+  void Reset() { IREE_EXPECT_OK(Unmap()); }
+
+ private:
+  iree_hal_allocator_t* allocator_ = nullptr;
+  iree_hal_buffer_t* virtual_buffer_ = nullptr;
+  iree_device_size_t virtual_offset_ = 0;
+  iree_device_size_t size_ = 0;
+  bool is_mapped_ = false;
+};
 
 static iree_status_t AllocateAndExportDevicePointer(
     iree_hal_allocator_t* allocator, iree_hal_buffer_params_t params,
@@ -232,6 +362,179 @@ iree_allocator_t AllocatorTest::host_allocator_;
 iree_hal_amdgpu_libhsa_t AllocatorTest::libhsa_;
 iree_hal_amdgpu_system_info_t AllocatorTest::system_info_;
 iree_hal_amdgpu_topology_t AllocatorTest::topology_;
+
+TEST_F(AllocatorTest, VirtualMemoryLifecycleUsesNativeState) {
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(test_device.Initialize(&libhsa_, &topology_, host_allocator_));
+  iree_hal_allocator_t* allocator = test_device.allocator();
+  ASSERT_TRUE(iree_hal_allocator_supports_virtual_memory(allocator));
+
+  const iree_hal_buffer_params_t params = DeviceLocalVirtualMemoryParams();
+  iree_device_size_t minimum_page_size = 0;
+  iree_device_size_t recommended_page_size = 0;
+  IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_query_granularity(
+      allocator, params, &minimum_page_size, &recommended_page_size));
+  ASSERT_NE(0u, minimum_page_size);
+  ASSERT_GE(recommended_page_size, minimum_page_size);
+
+  hsa_amd_memory_pool_t device_memory_pool = {0};
+  IREE_ASSERT_OK(iree_hal_amdgpu_find_coarse_global_memory_pool(
+      &libhsa_, topology_.gpu_agents[0], &device_memory_pool));
+  iree_hal_amdgpu_vmem_granularity_t native_granularity;
+  IREE_ASSERT_OK(iree_hal_amdgpu_vmem_query_alloc_granularity(
+      &libhsa_, device_memory_pool, &native_granularity));
+  EXPECT_EQ(native_granularity.minimum, minimum_page_size);
+  EXPECT_EQ(native_granularity.recommended, recommended_page_size);
+
+  iree_hal_allocator_statistics_t before_statistics = {};
+  iree_hal_allocator_query_statistics(allocator, &before_statistics);
+
+  VirtualMemoryReservation virtual_memory(allocator);
+  IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_reserve(
+      allocator, kQueueAffinity0, recommended_page_size, virtual_memory.out()));
+  ASSERT_NE(nullptr, virtual_memory.get());
+
+  PhysicalMemoryAllocation physical_memory(allocator);
+  IREE_ASSERT_OK(iree_hal_allocator_physical_memory_allocate(
+      allocator, params, recommended_page_size, host_allocator_,
+      physical_memory.out()));
+  ASSERT_NE(nullptr, physical_memory.get());
+
+#if IREE_STATISTICS_ENABLE
+  iree_hal_allocator_statistics_t allocated_statistics = {};
+  iree_hal_allocator_query_statistics(allocator, &allocated_statistics);
+  EXPECT_EQ(before_statistics.device_bytes_allocated + recommended_page_size,
+            allocated_statistics.device_bytes_allocated);
+  EXPECT_GE(allocated_statistics.device_bytes_peak, recommended_page_size);
+#endif  // IREE_STATISTICS_ENABLE
+
+  // ROCr owns the mapping state and rejects operations that require a mapping
+  // before one exists.
+  IREE_ASSERT_NOT_OK(iree_hal_allocator_virtual_memory_unmap(
+      allocator, virtual_memory.get(), /*virtual_offset=*/0,
+      recommended_page_size));
+  IREE_ASSERT_NOT_OK(iree_hal_allocator_virtual_memory_protect(
+      allocator, virtual_memory.get(), /*virtual_offset=*/0,
+      recommended_page_size, kQueueAffinity0,
+      IREE_HAL_MEMORY_PROTECTION_READ_WRITE));
+
+  VirtualMemoryMapping mapping(allocator, virtual_memory.get(),
+                               /*virtual_offset=*/0, recommended_page_size);
+  IREE_ASSERT_OK(mapping.Map(physical_memory.get()));
+
+  // Native mapping state also rejects overlapping mappings without a second
+  // driver-owned ownership registry.
+  IREE_ASSERT_NOT_OK(iree_hal_allocator_virtual_memory_map(
+      allocator, virtual_memory.get(), /*virtual_offset=*/0,
+      physical_memory.get(), /*physical_offset=*/0, recommended_page_size));
+
+  // ROCr rejects releasing an address reservation while mappings remain. The
+  // failed operation must leave the same HAL buffer available for retry.
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        virtual_memory.Release());
+
+  IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_protect(
+      allocator, virtual_memory.get(), /*virtual_offset=*/0,
+      recommended_page_size, kQueueAffinity0,
+      IREE_HAL_MEMORY_PROTECTION_READ_WRITE));
+
+  constexpr iree_device_size_t kTouchedSize = 256;
+  ASSERT_GE(recommended_page_size, kTouchedSize);
+  constexpr uint32_t kPattern = 0xA110CA7Eu;
+  IREE_ASSERT_OK(QueueFillAndWait(test_device.device(), kQueueAffinity0,
+                                  virtual_memory.get(), kTouchedSize, &kPattern,
+                                  sizeof(kPattern)));
+  std::array<uint32_t, kTouchedSize / sizeof(uint32_t)> observed = {};
+  IREE_ASSERT_OK(iree_hsa_memory_copy(
+      IREE_LIBHSA(&libhsa_), observed.data(),
+      iree_hal_amdgpu_buffer_device_pointer(virtual_memory.get()),
+      sizeof(observed)));
+  for (uint32_t value : observed) {
+    EXPECT_EQ(kPattern, value);
+  }
+
+  IREE_ASSERT_OK(mapping.Unmap());
+  IREE_ASSERT_OK(physical_memory.Release());
+
+#if IREE_STATISTICS_ENABLE
+  iree_hal_allocator_statistics_t freed_statistics = {};
+  iree_hal_allocator_query_statistics(allocator, &freed_statistics);
+  EXPECT_EQ(before_statistics.device_bytes_freed + recommended_page_size,
+            freed_statistics.device_bytes_freed);
+#endif  // IREE_STATISTICS_ENABLE
+
+  IREE_ASSERT_OK(virtual_memory.Release());
+}
+
+TEST_F(AllocatorTest, VirtualMemoryMapsMinimumGranuleAcrossPools) {
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(test_device.Initialize(&libhsa_, &topology_, host_allocator_));
+  iree_hal_allocator_t* allocator = test_device.allocator();
+  ASSERT_TRUE(iree_hal_allocator_supports_virtual_memory(allocator));
+
+  const iree_hal_buffer_params_t device_params =
+      DeviceLocalVirtualMemoryParams();
+  iree_device_size_t device_minimum_page_size = 0;
+  iree_device_size_t device_recommended_page_size = 0;
+  IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_query_granularity(
+      allocator, device_params, &device_minimum_page_size,
+      &device_recommended_page_size));
+  ASSERT_NE(0u, device_minimum_page_size);
+  ASSERT_GE(device_recommended_page_size, device_minimum_page_size);
+
+  const iree_hal_buffer_params_t host_params =
+      DeviceLocalHostVisibleVirtualMemoryParams();
+  iree_device_size_t host_minimum_page_size = 0;
+  iree_device_size_t host_recommended_page_size = 0;
+  iree_status_t host_granularity_status =
+      iree_hal_allocator_virtual_memory_query_granularity(
+          allocator, host_params, &host_minimum_page_size,
+          &host_recommended_page_size);
+  if (iree_status_is_invalid_argument(host_granularity_status)) {
+    iree_status_free(host_granularity_status);
+    GTEST_SKIP() << "device-local host-visible VMM backing is unavailable";
+  }
+  IREE_ASSERT_OK(host_granularity_status);
+  ASSERT_NE(0u, host_minimum_page_size);
+  ASSERT_GE(host_recommended_page_size, host_minimum_page_size);
+
+  const iree_device_size_t reservation_size =
+      iree_max(device_recommended_page_size, host_minimum_page_size);
+  ASSERT_TRUE(iree_device_size_has_alignment(reservation_size,
+                                             device_minimum_page_size));
+
+  VirtualMemoryReservation virtual_memory(allocator);
+  IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_reserve(
+      allocator, kQueueAffinity0, reservation_size, virtual_memory.out()));
+
+  PhysicalMemoryAllocation physical_memory(allocator);
+  IREE_ASSERT_OK(iree_hal_allocator_physical_memory_allocate(
+      allocator, host_params, host_minimum_page_size, host_allocator_,
+      physical_memory.out()));
+
+  VirtualMemoryMapping mapping(allocator, virtual_memory.get(),
+                               /*virtual_offset=*/0, host_minimum_page_size);
+  IREE_ASSERT_OK(mapping.Map(physical_memory.get()));
+  IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_protect(
+      allocator, virtual_memory.get(), /*virtual_offset=*/0,
+      host_minimum_page_size, kQueueAffinity0,
+      IREE_HAL_MEMORY_PROTECTION_READ_WRITE));
+
+  IREE_ASSERT_OK(mapping.Unmap());
+}
+
+TEST_F(AllocatorTest, VirtualMemoryRejectsHostLocalBacking) {
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(test_device.Initialize(&libhsa_, &topology_, host_allocator_));
+  iree_hal_allocator_t* allocator = test_device.allocator();
+
+  iree_device_size_t minimum_page_size = 0;
+  iree_device_size_t recommended_page_size = 0;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_allocator_virtual_memory_query_granularity(
+                            allocator, HostLocalVirtualMemoryParams(),
+                            &minimum_page_size, &recommended_page_size));
+}
 
 TEST_F(AllocatorTest, AsanStateReservesDefaultShadowMapWhenEnabled) {
   iree_hal_amdgpu_logical_device_options_t options;
@@ -579,9 +882,9 @@ TEST_F(AllocatorTest, QueryMemoryHeapsReportsHsaLimits) {
                             test_device.allocator(),
                             /*capacity=*/0, /*heaps=*/NULL, &heap_count));
   ASSERT_GE(heap_count, 2u);
-  ASSERT_LE(heap_count, 3u);
+  ASSERT_LE(heap_count, 4u);
 
-  std::array<iree_hal_allocator_memory_heap_t, 3> heaps;
+  std::array<iree_hal_allocator_memory_heap_t, 4> heaps;
   IREE_ASSERT_OK(iree_hal_allocator_query_memory_heaps(
       test_device.allocator(), heaps.size(), heaps.data(), &heap_count));
   ASSERT_GE(heap_count, 2u);
@@ -600,7 +903,7 @@ TEST_F(AllocatorTest, OversizedAllocationIsRejectedByCompatibility) {
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(test_device.Initialize(&libhsa_, &topology_, host_allocator_));
 
-  std::array<iree_hal_allocator_memory_heap_t, 3> heaps;
+  std::array<iree_hal_allocator_memory_heap_t, 4> heaps;
   iree_host_size_t heap_count = 0;
   IREE_ASSERT_OK(iree_hal_allocator_query_memory_heaps(
       test_device.allocator(), heaps.size(), heaps.data(), &heap_count));
@@ -745,7 +1048,7 @@ TEST_F(AllocatorTest, OverAlignedAllocationIsRejected) {
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(test_device.Initialize(&libhsa_, &topology_, host_allocator_));
 
-  std::array<iree_hal_allocator_memory_heap_t, 3> heaps;
+  std::array<iree_hal_allocator_memory_heap_t, 4> heaps;
   iree_host_size_t heap_count = 0;
   IREE_ASSERT_OK(iree_hal_allocator_query_memory_heaps(
       test_device.allocator(), heaps.size(), heaps.data(), &heap_count));
@@ -986,8 +1289,9 @@ TEST_F(AllocatorTest, DeviceAllocationImportWrapsHsaAllocation) {
             external_buffer.handle.device_allocation.ptr);
 
   constexpr uint32_t kPattern = 0xACCE551u;
-  IREE_ASSERT_OK(QueueFillAndWait(test_device.device(), buffer, kAllocationSize,
-                                  &kPattern, sizeof(kPattern)));
+  IREE_ASSERT_OK(
+      QueueFillAndWait(test_device.device(), IREE_HAL_QUEUE_AFFINITY_ANY,
+                       buffer, kAllocationSize, &kPattern, sizeof(kPattern)));
   std::array<uint32_t, kAllocationSize / sizeof(uint32_t)> observed = {};
   IREE_ASSERT_OK(iree_hsa_memory_copy(IREE_LIBHSA(&libhsa_), observed.data(),
                                       allocation.ptr(), kAllocationSize));
@@ -1253,9 +1557,9 @@ TEST_F(AllocatorTest, DeviceAllocationExportReportsHsaPointer) {
   EXPECT_GE(pointer_info.sizeInBytes, external_buffer.size);
 
   constexpr uint32_t kPattern = 0xA110CA7Eu;
-  IREE_ASSERT_OK(QueueFillAndWait(test_device.device(), buffer,
-                                  external_buffer.size, &kPattern,
-                                  sizeof(kPattern)));
+  IREE_ASSERT_OK(QueueFillAndWait(
+      test_device.device(), IREE_HAL_QUEUE_AFFINITY_ANY, buffer,
+      external_buffer.size, &kPattern, sizeof(kPattern)));
   std::array<uint32_t, 4096 / sizeof(uint32_t)> observed = {};
   IREE_ASSERT_OK(iree_hsa_memory_copy(
       IREE_LIBHSA(&libhsa_), observed.data(),

@@ -29,6 +29,8 @@ typedef struct iree_hal_streaming_context_module_entry_t
     iree_hal_streaming_context_module_entry_t;
 typedef struct iree_hal_streaming_context_symbol_map_t
     iree_hal_streaming_context_symbol_map_t;
+typedef struct iree_hal_streaming_deferred_device_free_t
+    iree_hal_streaming_deferred_device_free_t;
 typedef struct iree_hal_streaming_device_t iree_hal_streaming_device_t;
 typedef struct iree_hal_streaming_device_registry_t
     iree_hal_streaming_device_registry_t;
@@ -220,6 +222,13 @@ struct iree_hal_streaming_context_t {
   // Buffer mapping table (pyre unified implementation).
   hrx_buffer_table_t buffer_table;
 
+  // Stream-ordered frees available for dependency-aware reuse in this context.
+  // Protected by |pending_free_mutex|.
+  iree_hal_streaming_deferred_device_free_t* pending_free_head;
+
+  // Serializes access to |pending_free_head| and terminal free callbacks.
+  iree_slim_mutex_t pending_free_mutex;
+
   // Cached host-visible staging buffer for blocking pageable H2D transfers.
   // Guarded by |mutex| and released during context destruction.
   iree_hal_streaming_buffer_t* pageable_h2d_staging_buffer;
@@ -233,6 +242,8 @@ struct iree_hal_streaming_context_t {
 
   // Synchronization.
   iree_slim_mutex_t mutex;
+  // Serializes direct HAL device transfer calls issued outside command buffers.
+  iree_slim_mutex_t direct_transfer_mutex;
 
   // Host allocator.
   iree_allocator_t host_allocator;
@@ -321,8 +332,8 @@ typedef struct iree_hal_streaming_device_t {
   uint32_t compute_capability_minor;
   // Total HIP-visible memory reported for the device.
   iree_device_size_t total_memory;
-  // Approximate HIP-visible free memory tracked by the binding.
-  iree_device_size_t free_memory;
+  // Approximate HIP-visible free memory tracked atomically by the binding.
+  iree_atomic_uint64_t free_memory;
   // True when cooperative launches are supported by the device.
   bool supports_cooperative_launch;
 
@@ -351,10 +362,10 @@ typedef struct iree_hal_streaming_device_t {
   // Primary context flags.
   iree_hal_streaming_context_flags_t primary_context_flags;
 
-  // Primary context mutex for thread-safe lazy initialization.
+  // Serializes primary-context publication and allocation-pool selection.
   iree_slim_mutex_t primary_context_mutex;
 
-  // Primary context (lazily created on first access).
+  // Fully initialized primary context, published under primary_context_mutex.
   iree_hal_streaming_context_t* primary_context;
 
   // Primary context reference count.
@@ -363,9 +374,9 @@ typedef struct iree_hal_streaming_device_t {
   // Protected by primary_context_mutex.
   int32_t primary_context_ref_count;
 
-  // Default device allocation pool used when no explicit pool is selected.
+  // Default device allocation pool, protected by primary_context_mutex.
   hrx_mem_pool_t default_mem_pool;
-  // Current device allocation pool used by HIP runtime allocation APIs.
+  // Current device allocation pool, protected by primary_context_mutex.
   hrx_mem_pool_t current_mem_pool;
 
   // Guards graph-memory accounting fields.
@@ -454,6 +465,14 @@ typedef enum iree_hal_streaming_capture_dependencies_mode_e {
   IREE_HAL_STREAMING_CAPTURE_DEPENDENCIES_ADD = 1,
 } iree_hal_streaming_capture_dependencies_mode_t;
 
+// A source-stream timeline point that orders all later work on a stream.
+typedef struct iree_hal_streaming_memory_reuse_dependency_t {
+  // Stable identifier of the source stream that recorded the event.
+  unsigned long long source_stream_id;
+  // Source timeline value the event is known to follow.
+  uint64_t source_timeline_value;
+} iree_hal_streaming_memory_reuse_dependency_t;
+
 // Stream for asynchronous execution.
 typedef struct iree_hal_streaming_stream_t {
   // Reference counting.
@@ -496,6 +515,13 @@ typedef struct iree_hal_streaming_stream_t {
   iree_hal_streaming_event_t** recorded_events;
   iree_host_size_t event_count;
   iree_host_size_t event_capacity;
+
+  // Event dependencies that establish safe cross-stream allocation reuse.
+  iree_hal_streaming_memory_reuse_dependency_t* memory_reuse_dependencies;
+  // Number of valid entries in |memory_reuse_dependencies|.
+  iree_host_size_t memory_reuse_dependency_count;
+  // Allocated entry capacity of |memory_reuse_dependencies|.
+  iree_host_size_t memory_reuse_dependency_capacity;
 
   // Stream capture state.
   iree_hal_streaming_capture_status_t capture_status;
@@ -739,6 +765,8 @@ typedef enum iree_hal_streaming_host_register_flag_bits_e {
   IREE_HAL_STREAMING_HOST_REGISTER_FLAG_WRITE_COMBINED = 1ull << 2,
   // Read-only from device.
   IREE_HAL_STREAMING_HOST_REGISTER_FLAG_READ_ONLY = 1ull << 3,
+  // HIP signal-memory allocation freed through hipFree.
+  IREE_HAL_STREAMING_HOST_REGISTER_FLAG_HIP_SIGNAL_MEMORY = 1ull << 27,
   // HIP uncached host allocation flag.
   IREE_HAL_STREAMING_HOST_REGISTER_FLAG_HIP_UNCACHED = 1ull << 28,
   // HIP NUMA-user host allocation flag.
@@ -805,6 +833,9 @@ typedef struct iree_hal_streaming_buffer_t {
 
   // HRX memory pool retained while |buffer| may borrow its HAL pool.
   hrx_mem_pool_t allocation_pool;
+
+  // True while this pool-backed buffer contributes to logical pool usage.
+  bool is_pool_allocation_live;
 
   // Platform-specific memory type.
   int memory_type;
@@ -1298,7 +1329,7 @@ iree_status_t iree_hal_streaming_device_primary_context_state(
 
 // Gets or creates the primary context for a device (thread-safe).
 // This performs lazy initialization of the primary context on first access.
-// Synchronization: none (thread-safe creation with internal locking).
+// Synchronization: thread-safe (serializes initialization and publication).
 iree_status_t iree_hal_streaming_device_get_or_create_primary_context(
     iree_hal_streaming_device_t* device,
     iree_hal_streaming_context_t** out_context);
@@ -1306,7 +1337,7 @@ iree_status_t iree_hal_streaming_device_get_or_create_primary_context(
 // Retains the primary context, creating it if necessary.
 // Increments device-level reference count.
 // Returns the retained context.
-// Synchronization: none (protected by internal mutex).
+// Synchronization: thread-safe (serializes initialization and retention).
 iree_status_t iree_hal_streaming_device_retain_primary_context(
     iree_hal_streaming_device_t* device,
     iree_hal_streaming_context_t** out_context);
@@ -1610,6 +1641,12 @@ iree_status_t iree_hal_streaming_stream_wait_submitted(
 iree_status_t iree_hal_streaming_stream_wait_event(
     iree_hal_streaming_stream_t* stream, iree_hal_streaming_event_t* event);
 
+// Returns whether work on |stream| is ordered after |source_timeline_value|
+// from the stream identified by |source_stream_id|.
+bool iree_hal_streaming_stream_has_memory_reuse_dependency(
+    iree_hal_streaming_stream_t* stream, unsigned long long source_stream_id,
+    uint64_t source_timeline_value);
+
 //===----------------------------------------------------------------------===//
 // Execution control
 //===----------------------------------------------------------------------===//
@@ -1694,6 +1731,7 @@ typedef enum iree_hal_streaming_memory_flag_bits_e {
   IREE_HAL_STREAMING_MEMORY_FLAG_PINNED = 1ull << 0,
   IREE_HAL_STREAMING_MEMORY_FLAG_PORTABLE = 1ull << 1,
   IREE_HAL_STREAMING_MEMORY_FLAG_WRITE_COMBINED = 1ull << 2,
+  IREE_HAL_STREAMING_MEMORY_FLAG_UNCACHED = 1ull << 3,
 } iree_hal_streaming_memory_flags_t;
 
 // Synchronization: none (returns pointer value).
@@ -1740,6 +1778,17 @@ iree_status_t iree_hal_streaming_memory_allocate_device_from_pool(
     iree_device_size_t size, iree_hal_streaming_memory_flags_t flags,
     iree_hal_streaming_buffer_t** out_buffer);
 
+// Synchronization: stream-ordered. Reuses a pending same-stream free when
+// possible and otherwise allocates memory from |pool|.
+iree_status_t iree_hal_streaming_memory_allocate_device_from_pool_async(
+    iree_hal_streaming_context_t* context, hrx_mem_pool_t pool,
+    iree_device_size_t size, iree_hal_streaming_memory_flags_t flags,
+    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_buffer_t** out_buffer);
+
+// Row pitch alignment used by HIP pitched allocations.
+#define IREE_HAL_STREAMING_PITCHED_ALLOCATION_ALIGNMENT 256u
+
 // Synchronization: none (allocates pitched memory).
 iree_status_t iree_hal_streaming_memory_allocate_device_pitched(
     iree_hal_streaming_context_t* context, iree_device_size_t width_bytes,
@@ -1755,6 +1804,21 @@ iree_status_t iree_hal_streaming_memory_free_device(
 iree_status_t iree_hal_streaming_memory_free_device_async(
     iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t ptr,
     iree_hal_streaming_stream_t* stream);
+
+// Releases completed stream-ordered frees retained for conservative reuse.
+// Synchronization: stream (requires |stream| to be idle).
+iree_status_t iree_hal_streaming_memory_release_completed_async_frees(
+    iree_hal_streaming_stream_t* stream);
+
+// Releases every terminal stream-ordered free owned by |context|.
+// Synchronization: all context streams have reached terminal queue state.
+iree_status_t iree_hal_streaming_memory_release_terminal_async_frees(
+    iree_hal_streaming_context_t* context);
+
+// Releases completed stream-ordered frees retained by |pool|.
+// Synchronization: none (each free has reached its queued host callback).
+iree_status_t iree_hal_streaming_memory_release_completed_async_frees_from_pool(
+    hrx_mem_pool_t pool);
 
 // Synchronization: none (allocates host memory).
 iree_status_t iree_hal_streaming_memory_allocate_host(
@@ -1843,6 +1907,16 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
     iree_hal_streaming_deviceptr_t src, iree_device_size_t size,
     iree_hal_streaming_stream_t* stream);
 
+// Enqueues a pitched D2H copy through queue-visible staging. A stream-ordered
+// host call scatters the packed staging rows into |dst| after the device copies
+// complete.
+// Synchronization: stream-ordered.
+iree_status_t iree_hal_streaming_memcpy_device_to_host_2d(
+    iree_hal_streaming_context_t* context, void* dst,
+    iree_device_size_t dst_pitch, iree_hal_streaming_deviceptr_t src,
+    iree_device_size_t src_pitch, iree_device_size_t width,
+    iree_host_size_t height, iree_hal_streaming_stream_t* stream);
+
 // Synchronization: stream or blocking (async if stream, sync if NULL stream).
 iree_status_t iree_hal_streaming_memcpy_device_to_device(
     iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
@@ -1876,14 +1950,28 @@ typedef enum iree_hal_streaming_mem_location_type_e {
 } iree_hal_streaming_mem_location_type_t;
 
 // Device pool accessors.
+// Returns a device-owned pool handle that remains valid while selected.
 hrx_mem_pool_t iree_hal_streaming_device_default_mem_pool(
     iree_hal_streaming_device_t* device);
+// Returns a device-owned pool handle that remains valid while selected.
 hrx_mem_pool_t iree_hal_streaming_device_mem_pool(
+    iree_hal_streaming_device_t* device);
+// Retains the selected pool for use outside the device lock. The caller must
+// release the returned handle with hrx_mem_pool_release.
+hrx_mem_pool_t iree_hal_streaming_device_retain_mem_pool(
+    iree_hal_streaming_device_t* device);
+// Retains the device default pool for use outside the device lock. The caller
+// must release the returned handle with hrx_mem_pool_release.
+hrx_mem_pool_t iree_hal_streaming_device_retain_default_mem_pool(
     iree_hal_streaming_device_t* device);
 iree_status_t iree_hal_streaming_device_ensure_default_mem_pool(
     iree_hal_streaming_device_t* device);
+// Replaces the selected pool while preserving any in-flight pool users.
 void iree_hal_streaming_device_set_mem_pool(iree_hal_streaming_device_t* device,
                                             hrx_mem_pool_t pool);
+// Restores the default pool only when |pool| is the selected pool.
+void iree_hal_streaming_device_reset_mem_pool_if_current(
+    iree_hal_streaming_device_t* device, hrx_mem_pool_t pool);
 
 //===----------------------------------------------------------------------===//
 // Graph management

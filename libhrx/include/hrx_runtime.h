@@ -1001,9 +1001,14 @@ typedef enum hrx_mem_pool_attr_t {
 } hrx_mem_pool_attr_t;
 
 typedef struct hrx_mem_pool_props_t {
+  // Platform allocation-handle types requested when the pool was created.
   uint32_t alloc_handle_type;
+  // Platform location type for the pool's backing storage.
   uint32_t location_type;
+  // Platform device ordinal for the pool's backing storage.
   int location_id;
+  // Maximum live reservation bytes, or zero when the pool is unbounded.
+  size_t max_size;
 } hrx_mem_pool_props_t;
 
 HRX_API hrx_status_t hrx_mem_pool_create(hrx_device_t device,
@@ -1019,6 +1024,21 @@ HRX_API hrx_status_t hrx_mem_pool_set_attribute(hrx_mem_pool_t pool,
                                                 uint64_t value);
 HRX_API hrx_status_t hrx_mem_pool_trim(hrx_mem_pool_t pool,
                                        size_t min_bytes_to_keep);
+
+// Trims unused backing storage toward the pool's configured release threshold.
+// This is intended for stream-ordered free completion paths.
+HRX_API hrx_status_t hrx_mem_pool_release_unused(hrx_mem_pool_t pool);
+
+// Records a logical allocation backed by |pool|. Logical usage is distinct
+// from physical TLSF reservations, which can remain retained for later
+// stream-ordered reuse.
+HRX_API void hrx_mem_pool_record_logical_allocation(hrx_mem_pool_t pool,
+                                                    size_t size);
+
+// Records retirement of a logical allocation backed by |pool|. The physical
+// reservation remains owned by its buffer until that buffer is released or
+// reused.
+HRX_API void hrx_mem_pool_record_logical_free(hrx_mem_pool_t pool, size_t size);
 
 // Allocates a buffer from |pool| using the same parameter contract as
 // hrx_allocator_allocate_buffer. The returned buffer owns the allocation and

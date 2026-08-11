@@ -41,11 +41,14 @@ HRX_SRCS = [
     "stream.c",
     "transfer.c",
     "value_list.c",
+    "vmm_slab_provider.c",
+    "vmm_slab_provider.h",
 ]
 
 HRX_HDRS = [
     "buffer_table.h",
     "hrx_internal.h",
+    "mem_pool.h",
     "//libhrx/src:iree_hal_compat.h",
 ]
 
@@ -66,6 +69,9 @@ HRX_DEPS = [
     "//runtime/src/iree/async/util:proactor_pool",
     "//runtime/src/iree/hal",
     "//runtime/src/iree/hal/executable/amdgpu:executable_target",
+    "//runtime/src/iree/hal/memory:asan",
+    "//runtime/src/iree/hal/memory:passthrough_pool",
+    "//runtime/src/iree/hal/memory:slab_provider",
     "//runtime/src/iree/hal/memory:tlsf_pool",
     "//runtime/src/iree/hal/drivers/local_task:task_driver",
     "//runtime/src/iree/hal/local/loaders/registration",

@@ -78,12 +78,15 @@ iree_status_t iree_hal_streaming_context_create(
   context->peer_capacity = 0;
   memset(&context->symbol_map, 0, sizeof(context->symbol_map));
   memset(&context->buffer_table, 0, sizeof(context->buffer_table));
+  context->pending_free_head = NULL;
   context->pageable_h2d_staging_buffer = NULL;
   context->pageable_h2d_staging_size = 0;
   iree_atomic_store(&context->capture_stream_count, 0,
                     iree_memory_order_relaxed);
   context->host_allocator = host_allocator;
   iree_slim_mutex_initialize(&context->mutex);
+  iree_slim_mutex_initialize(&context->direct_transfer_mutex);
+  iree_slim_mutex_initialize(&context->pending_free_mutex);
 
   // Initialize global list pointers.
   context->context_list_entry.next = NULL;
@@ -167,7 +170,16 @@ static void iree_hal_streaming_context_destroy(
 
   // Synchronize all streams before detaching them from the context; pending
   // command buffers require the context/device to flush correctly.
-  iree_status_ignore(iree_hal_streaming_context_synchronize(context));
+  iree_status_t status = iree_hal_streaming_context_synchronize(context);
+  if (!iree_status_is_ok(status)) {
+    iree_status_fprint(stderr, status);
+    iree_status_free(status);
+  }
+  status = iree_hal_streaming_memory_release_terminal_async_frees(context);
+  if (!iree_status_is_ok(status)) {
+    iree_status_fprint(stderr, status);
+    iree_status_free(status);
+  }
 
   iree_hal_streaming_memory_release_pageable_staging(context);
 
@@ -177,6 +189,10 @@ static void iree_hal_streaming_context_destroy(
 
   // Deinitialize buffer mapping table.
   hrx_buffer_table_deinitialize(&context->buffer_table);
+  IREE_ASSERT(context->pending_free_head == NULL,
+              "pending asynchronous frees must be drained before context "
+              "destruction");
+  iree_slim_mutex_deinitialize(&context->pending_free_mutex);
 
   // Release default stream.
   // This releases the context's reference but not the list's reference.
@@ -210,6 +226,7 @@ static void iree_hal_streaming_context_destroy(
   iree_hal_device_release(context->device);
 
   // Deinitialize synchronization.
+  iree_slim_mutex_deinitialize(&context->direct_transfer_mutex);
   iree_slim_mutex_deinitialize(&context->mutex);
 
   // Free context memory.

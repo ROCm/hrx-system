@@ -1692,6 +1692,7 @@ static iree_status_t iree_hal_task_queue_drain_host_call(
                                      operation->host_call.args, &context);
     if (is_nonblocking || iree_status_is_deferred(call_status)) {
       // User callback will signal in the future (or fire-and-forget).
+      iree_status_free(call_status);
     } else if (iree_status_is_ok(call_status)) {
       // Signal callback completed synchronously.
       if (!is_nonblocking) {
@@ -3498,8 +3499,11 @@ iree_status_t iree_hal_task_queue_submit_host_call(
   memcpy(operation->host_call.args, args, sizeof(operation->host_call.args));
   operation->host_call.flags = flags;
 
+  iree_hal_resource_t* operation_resources[1] = {
+      call.resource,
+  };
   status = iree_hal_task_queue_submit_op_finish(
-      operation, wait_semaphores, /*resource_count=*/0, /*resources=*/NULL);
+      operation, wait_semaphores, call.resource ? 1 : 0, operation_resources);
 
   IREE_TRACE_ZONE_END(z0);
   return status;

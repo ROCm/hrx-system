@@ -1484,6 +1484,28 @@ static bool iree_hal_streaming_graph_node_has_recorded_dependency_hazard(
   return false;
 }
 
+static iree_status_t iree_hal_streaming_graph_record_dependency_barrier(
+    iree_hal_command_buffer_t* command_buffer) {
+  // A dependency orders both command execution and memory visibility. Graph
+  // nodes can alternate between dispatches and transfers, so make writes from
+  // either operation class available to reads by either class.
+  static const iree_hal_memory_barrier_t memory_barrier = {
+      .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+  };
+  return iree_hal_command_buffer_execution_barrier(
+      command_buffer,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 1, &memory_barrier, 0, NULL);
+}
+
 // Helper to record nodes from a partition into a command buffer.
 static iree_status_t iree_hal_streaming_graph_record_partition(
     iree_hal_streaming_graph_exec_t* exec,
@@ -1534,10 +1556,8 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
               node, additional_edges, node_index_map, &barrier_index_set);
       if (preserve_sorted_order || has_dependency_hazard) {
         IREE_RETURN_AND_END_ZONE_IF_ERROR(
-            z0, iree_hal_command_buffer_execution_barrier(
-                    command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
-                    IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
-                    IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 0, NULL, 0, NULL));
+            z0,
+            iree_hal_streaming_graph_record_dependency_barrier(command_buffer));
         iree_hal_streaming_node_index_set_reset(&barrier_index_set);
       }
     }

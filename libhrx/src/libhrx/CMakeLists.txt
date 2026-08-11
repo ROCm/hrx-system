@@ -25,6 +25,7 @@ iree_cc_library(
   HDRS
     "buffer_table.h"
     "hrx_internal.h"
+    "mem_pool.h"
   SRCS
     "allocator.c"
     "buffer.c"
@@ -48,6 +49,8 @@ iree_cc_library(
     "stream.c"
     "transfer.c"
     "value_list.c"
+    "vmm_slab_provider.c"
+    "vmm_slab_provider.h"
   DEPS
     ${CMAKE_DL_LIBS}
     iree::async
@@ -61,6 +64,9 @@ iree_cc_library(
     iree::hal::drivers::local_task::task_driver
     iree::hal::executable::amdgpu::executable_target
     iree::hal::local::loaders::registration
+    iree::hal::memory::asan
+    iree::hal::memory::passthrough_pool
+    iree::hal::memory::slab_provider
     iree::hal::memory::tlsf_pool
     iree::hal::utils::profile_file
     iree::hal::utils::resource_set
@@ -96,6 +102,7 @@ iree_cc_library(
   HDRS
     "buffer_table.h"
     "hrx_internal.h"
+    "mem_pool.h"
   SRCS
     "allocator.c"
     "buffer.c"
@@ -119,6 +126,8 @@ iree_cc_library(
     "stream.c"
     "transfer.c"
     "value_list.c"
+    "vmm_slab_provider.c"
+    "vmm_slab_provider.h"
   DEPS
     ${CMAKE_DL_LIBS}
     iree::async
@@ -132,6 +141,9 @@ iree_cc_library(
     iree::hal::drivers::local_task::task_driver
     iree::hal::executable::amdgpu::executable_target
     iree::hal::local::loaders::registration
+    iree::hal::memory::asan
+    iree::hal::memory::passthrough_pool
+    iree::hal::memory::slab_provider
     iree::hal::memory::tlsf_pool
     iree::hal::utils::profile_file
     iree::hal::utils::resource_set
