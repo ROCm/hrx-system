@@ -69,15 +69,12 @@ iree_py_test(
     deps = [":config_tables"],
 )
 
-iree_py_binary(
+iree_py_library(
     name = "low_aliases",
     srcs = ["amdgpu_low_aliases.py"],
-    main = "amdgpu_low_aliases.py",
-    visibility = GENERATOR_VISIBILITY,
     deps = [
         ":package_init",
         "//loom/py/loom/gen/support",
-        "//loom/py/loom/target/arch/amdgpu:descriptors",
         "//loom/py/loom/target/arch/amdgpu:low_aliases",
     ],
 )
@@ -89,6 +86,7 @@ iree_py_binary(
     visibility = GENERATOR_VISIBILITY,
     deps = [
         ":config_tables",
+        ":low_aliases",
         ":package_init",
         "//loom/py/loom/gen/support",
         "//loom/py/loom/target:low_descriptors",

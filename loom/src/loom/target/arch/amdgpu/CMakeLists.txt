@@ -85,6 +85,7 @@ loom_generated_cc_library(
     "--low-registry-tables"
     "--encoding-field-ids"
     "--encoding-tables"
+    "--low-alias-source"
   EXTRA_OUTPUTS
     "memory_cache_policy_encoding_rows.inl"
     "memory_cache_policy_temporal_th.inl"
@@ -93,6 +94,7 @@ loom_generated_cc_library(
     "low_registry_tables.inl"
     "encoding_field_ids.inl"
     "encoding_tables.inl"
+    "low_aliases.c"
   DEPS
     ::target_info_defs
     iree::base
@@ -272,17 +274,16 @@ loom_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_cc_library(
+loom_cc_library(
   NAME
     low_aliases
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::low_aliases
-  SOURCE
-    "low_aliases.c"
   HDRS
     "low_aliases.h"
+  SRCS
+    "low_aliases.c"
   DEPS
     iree::base
+  PUBLIC
 )
 endif()
 

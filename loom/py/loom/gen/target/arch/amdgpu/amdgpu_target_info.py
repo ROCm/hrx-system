@@ -34,6 +34,9 @@ from loom.gen.support.generated_file import line_comment_header  # noqa: E402
 from loom.gen.target.arch.amdgpu.amdgpu_config_tables import (  # noqa: E402
     write_config_tables_to_paths,
 )
+from loom.gen.target.arch.amdgpu.amdgpu_low_aliases import (  # noqa: E402
+    write_low_aliases_to_path,
+)
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     amdgpu_descriptor_ref_keys,
 )
@@ -1575,6 +1578,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         required=True,
         help="Generated encoding field ID X-macro row fragment path.",
     )
+    parser.add_argument(
+        "--low-alias-source",
+        type=Path,
+        required=True,
+        help="Generated blocked low-alias C source path.",
+    )
     args = parser.parse_args(argv)
 
     descriptor_sets = sorted_descriptor_set_infos()
@@ -1604,6 +1613,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         encoding_tables_path=args.encoding_tables,
         encoding_field_ids_path=args.encoding_field_ids,
     )
+    write_low_aliases_to_path(args.low_alias_source)
     return 0
 
 

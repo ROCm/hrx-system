@@ -122,6 +122,8 @@ iree_py_library(
     low_aliases
   SRCS
     "low_aliases.py"
+  DEPS
+    loom::py::loom::target::arch::amdgpu::descriptors
 )
 
 iree_py_library(

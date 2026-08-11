@@ -76,14 +76,11 @@ iree_py_test(
 iree_py_library(
   NAME
     low_aliases
-  MAIN
-    "amdgpu_low_aliases.py"
   SRCS
     "amdgpu_low_aliases.py"
   DEPS
     loom::py::loom::gen::target::arch::amdgpu::package_init
     loom::py::loom::gen::support::support
-    loom::py::loom::target::arch::amdgpu::descriptors
     loom::py::loom::target::arch::amdgpu::low_aliases
 )
 
@@ -96,6 +93,7 @@ iree_py_library(
     "amdgpu_target_info.py"
   DEPS
     loom::py::loom::gen::target::arch::amdgpu::config_tables
+    loom::py::loom::gen::target::arch::amdgpu::low_aliases
     loom::py::loom::gen::target::arch::amdgpu::package_init
     loom::py::loom::gen::support::support
     loom::py::loom::target::low_descriptors

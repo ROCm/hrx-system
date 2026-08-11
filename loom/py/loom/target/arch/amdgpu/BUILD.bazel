@@ -103,6 +103,7 @@ iree_py_library(
 iree_py_library(
     name = "low_aliases",
     srcs = ["low_aliases.py"],
+    deps = [":descriptors"],
 )
 
 iree_py_library(

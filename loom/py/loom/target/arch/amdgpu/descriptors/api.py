@@ -1659,6 +1659,14 @@ def _amdgpu_core_descriptor_set_builder(
         ) from exc
 
 
+def amdgpu_core_descriptor_set_overlay_rows(
+    target: str,
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
+    """Returns the XML-free descriptor overlay rows for a generator target."""
+
+    return _amdgpu_core_descriptor_set_builder(target).overlay_rows()
+
+
 def _build_amdgpu_core_descriptor_set_from_specs(
     target: str,
     builder: _AmdgpuCoreDescriptorSetBuilder,
@@ -1813,6 +1821,7 @@ __all__ = (
     "amdgpu_common_reg_class_ids",
     "amdgpu_core_descriptor_set_instruction_names",
     "amdgpu_core_descriptor_set_instruction_names_by_isa_key",
+    "amdgpu_core_descriptor_set_overlay_rows",
     "amdgpu_descriptor_id_keys",
     "amdgpu_descriptor_ref_keys",
     "amdgpu_immediate_encoding_id_items",

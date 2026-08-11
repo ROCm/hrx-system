@@ -129,6 +129,7 @@ loom_generated_cc_library(
         "--low-registry-tables",
         "--encoding-field-ids",
         "--encoding-tables",
+        "--low-alias-source",
     ],
     extra_outputs = [
         "memory_cache_policy_encoding_rows.inl",
@@ -138,6 +139,7 @@ loom_generated_cc_library(
         "low_registry_tables.inl",
         "encoding_field_ids.inl",
         "encoding_tables.inl",
+        "low_aliases.c",
     ],
     generated_hdr_flags = ["--header"],
     generated_hdrs = ["target_info.h"],
@@ -310,11 +312,10 @@ loom_cc_library(
     ],
 )
 
-loom_generated_cc_library(
+loom_cc_library(
     name = "low_aliases",
+    srcs = [":low_aliases.c"],
     hdrs = ["low_aliases.h"],
-    generator = "//loom/py/loom/gen/target/arch/amdgpu:low_aliases",
-    source = "low_aliases.c",
     deps = ["//runtime/src/iree/base"],
 )
 
