@@ -31,19 +31,19 @@ iree_status_t iree_hal_amdgpu_access_agent_list_resolve(
     const iree_hal_amdgpu_topology_t* topology,
     iree_hal_amdgpu_queue_affinity_domain_t queue_affinity_domain,
     iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_amdgpu_memory_agent_classes_t agent_classes,
+    iree_hal_virtual_memory_access_scope_t access_scope,
     iree_hal_amdgpu_access_agent_list_t* out_agent_list) {
   IREE_ASSERT_ARGUMENT(topology);
   IREE_ASSERT_ARGUMENT(out_agent_list);
   memset(out_agent_list, 0, sizeof(*out_agent_list));
 
   if (IREE_UNLIKELY(
-          agent_classes == IREE_HAL_AMDGPU_MEMORY_AGENT_CLASS_NONE ||
-          iree_any_bit_set(agent_classes,
-                           ~(iree_hal_amdgpu_memory_agent_classes_t)
-                               IREE_HAL_AMDGPU_MEMORY_AGENT_CLASS_ALL))) {
+          access_scope == IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_NONE ||
+          iree_any_bit_set(access_scope,
+                           ~(iree_hal_virtual_memory_access_scope_t)
+                               IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_ALL))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "invalid AMDGPU memory agent classes");
+                            "invalid virtual-memory access scope");
   }
 
   if (IREE_UNLIKELY(queue_affinity_domain.physical_device_count >
@@ -79,14 +79,14 @@ iree_status_t iree_hal_amdgpu_access_agent_list_resolve(
       break;
     }
 
-    if (iree_all_bits_set(agent_classes,
-                          IREE_HAL_AMDGPU_MEMORY_AGENT_CLASS_DEVICE)) {
+    if (iree_all_bits_set(access_scope,
+                          IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE)) {
       status = iree_hal_amdgpu_access_agent_list_append_unique(
           out_agent_list, topology->gpu_agents[physical_device_ordinal]);
     }
     if (iree_status_is_ok(status) &&
-        iree_all_bits_set(agent_classes,
-                          IREE_HAL_AMDGPU_MEMORY_AGENT_CLASS_HOST)) {
+        iree_all_bits_set(access_scope,
+                          IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_HOST)) {
       status = iree_hal_amdgpu_access_agent_list_append_unique(
           out_agent_list, topology->cpu_agents[cpu_agent_ordinal]);
     }

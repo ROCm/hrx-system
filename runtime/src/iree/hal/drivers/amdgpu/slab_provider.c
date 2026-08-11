@@ -193,7 +193,7 @@ static iree_status_t iree_hal_amdgpu_slab_provider_resolve_access_agents(
   };
   return iree_hal_amdgpu_access_agent_list_resolve(
       provider->topology, domain, provider->queue_affinity_mask,
-      IREE_HAL_AMDGPU_MEMORY_AGENT_CLASS_ALL, out_agent_list);
+      IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_ALL, out_agent_list);
 }
 
 static iree_status_t iree_hal_amdgpu_slab_provider_build_vmem_access_descs(

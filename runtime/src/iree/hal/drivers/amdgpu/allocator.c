@@ -395,7 +395,7 @@ static iree_status_t iree_hal_amdgpu_allocator_resolve_access_agents(
   return iree_hal_amdgpu_access_agent_list_resolve(
       allocator->topology,
       iree_hal_amdgpu_allocator_queue_affinity_domain(allocator),
-      queue_affinity, IREE_HAL_AMDGPU_MEMORY_AGENT_CLASS_ALL, out_agent_list);
+      queue_affinity, IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_ALL, out_agent_list);
 }
 
 static bool iree_hal_amdgpu_allocator_find_gpu_agent_ordinal(
@@ -2267,6 +2267,7 @@ static iree_status_t iree_hal_amdgpu_allocator_virtual_memory_protect(
     iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
     iree_device_size_t virtual_offset, iree_device_size_t size,
     iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_virtual_memory_access_scope_t access_scope,
     iree_hal_memory_protection_t protection) {
   iree_hal_amdgpu_allocator_t* allocator =
       iree_hal_amdgpu_allocator_cast(base_allocator);
@@ -2274,23 +2275,7 @@ static iree_status_t iree_hal_amdgpu_allocator_virtual_memory_protect(
       iree_hal_amdgpu_allocator_require_virtual_memory(allocator));
   return iree_hal_amdgpu_virtual_memory_protect(
       allocator->virtual_memory, virtual_buffer, virtual_offset, size,
-      queue_affinity, IREE_HAL_AMDGPU_MEMORY_AGENT_CLASS_ALL, protection);
-}
-
-IREE_API_EXPORT iree_status_t
-iree_hal_amdgpu_allocator_virtual_memory_protect_agents(
-    iree_hal_allocator_t* base_allocator, iree_hal_buffer_t* virtual_buffer,
-    iree_device_size_t virtual_offset, iree_device_size_t size,
-    iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_amdgpu_memory_agent_classes_t agent_classes,
-    iree_hal_memory_protection_t protection) {
-  iree_hal_amdgpu_allocator_t* allocator =
-      iree_hal_amdgpu_allocator_cast(base_allocator);
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_allocator_require_virtual_memory(allocator));
-  return iree_hal_amdgpu_virtual_memory_protect(
-      allocator->virtual_memory, virtual_buffer, virtual_offset, size,
-      queue_affinity, agent_classes, protection);
+      queue_affinity, access_scope, protection);
 }
 
 static iree_status_t iree_hal_amdgpu_allocator_virtual_memory_advise(

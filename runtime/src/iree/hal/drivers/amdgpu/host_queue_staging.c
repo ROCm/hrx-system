@@ -128,7 +128,7 @@ static iree_status_t iree_hal_amdgpu_staging_pool_resolve_access_agents(
   };
   return iree_hal_amdgpu_access_agent_list_resolve(
       topology, domain, queue_affinity_mask,
-      IREE_HAL_AMDGPU_MEMORY_AGENT_CLASS_ALL, out_agent_list);
+      IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_ALL, out_agent_list);
 }
 
 static void iree_hal_amdgpu_staging_allocation_release(

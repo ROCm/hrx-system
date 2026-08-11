@@ -260,6 +260,25 @@ typedef struct iree_hal_external_buffer_t {
 // mapped to a virtual address space.
 typedef struct iree_hal_physical_memory_t iree_hal_physical_memory_t;
 
+// Bitfield selecting the execution domains granted access to a virtual-memory
+// range. Queue affinity further restricts the selected domains to the topology
+// associated with those queues.
+enum iree_hal_virtual_memory_access_scope_bits_t {
+  IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_NONE = 0u,
+
+  // Device execution queues selected by queue affinity.
+  IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE = 1u << 0,
+
+  // Host execution domains associated with the selected device topology.
+  // For remote devices this refers to the execution-side host, not the caller.
+  IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_HOST = 1u << 1,
+
+  IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_ALL =
+      IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE |
+      IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_HOST,
+};
+typedef uint32_t iree_hal_virtual_memory_access_scope_t;
+
 // Memory protection flags for controlling access to virtual address ranges.
 // Maps to mprotect/VirtualProtect (POSIX/Windows), cuMemSetAccess (CUDA), etc.
 enum iree_hal_memory_protection_bits_t {
@@ -598,9 +617,12 @@ IREE_API_EXPORT iree_status_t iree_hal_allocator_virtual_memory_unmap(
 // Sets access permissions for a virtual address range.
 //
 // |virtual_buffer| is the reserved VA range. |virtual_offset| and |size|
-// specify the range (must be page aligned). |queue_affinity| specifies which
-// device queues get the specified permissions. |protection| is a bitmask of
-// iree_hal_memory_protection_bits_t flags.
+// specify the range (must be page aligned). |queue_affinity| selects the device
+// topology where permissions apply and |access_scope| selects host execution,
+// device execution, or both within that topology. |protection| is a bitmask of
+// iree_hal_memory_protection_bits_t flags. Backends return
+// IREE_STATUS_UNIMPLEMENTED when they cannot independently enforce the
+// requested access scope.
 //
 // By default, reserved VA ranges have no access permissions. Callers must
 // explicitly grant permissions after mapping physical memory.
@@ -611,6 +633,7 @@ IREE_API_EXPORT iree_status_t iree_hal_allocator_virtual_memory_protect(
     iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
     iree_device_size_t virtual_offset, iree_device_size_t size,
     iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_virtual_memory_access_scope_t access_scope,
     iree_hal_memory_protection_t protection);
 
 // Provides usage hints for a virtual address range to optimize performance.
@@ -738,6 +761,7 @@ typedef struct iree_hal_allocator_vtable_t {
       iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
       iree_device_size_t virtual_offset, iree_device_size_t size,
       iree_hal_queue_affinity_t queue_affinity,
+      iree_hal_virtual_memory_access_scope_t access_scope,
       iree_hal_memory_protection_t protection);
   iree_status_t(IREE_API_PTR* virtual_memory_advise)(
       iree_hal_allocator_t* IREE_RESTRICT allocator,
