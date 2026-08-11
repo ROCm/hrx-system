@@ -20,6 +20,7 @@
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/encoding/float16.h"
+#include "loom/target/arch/amdgpu/lower/matrix_fragment_repack_packed_b16.h"
 #include "loom/target/arch/amdgpu/lower/subgroup.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
@@ -120,6 +121,10 @@ iree_string_view_t loom_amdgpu_fragment_repack_plan_key(
       return IREE_SV(
           "amdgpu.fragment_repack.strategy."
           "result_to_lhs_bf16_transpose_bpermute");
+    case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_RHS_PACKED_B16_XOR_PERMUTE:
+      return IREE_SV(
+          "amdgpu.fragment_repack.strategy."
+          "result_to_rhs_packed_b16_xor_permute");
     case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_DIAGNOSTIC:
       return IREE_SV("amdgpu.fragment_repack.strategy.diagnostic");
     case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_NONE:
@@ -474,8 +479,8 @@ static bool loom_amdgpu_fragment_repack_select_transpose_strategy(
       LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_LHS_BF16_TRANSPOSE_BPERMUTE;
   plan->transpose_bit_count = transpose_bit_count;
   plan->transposed_source_register_candidate_count = candidate_count;
-  memcpy(plan->transpose_stages, transpose_stages,
-         sizeof(plan->transpose_stages));
+  memcpy(plan->strategy_payload.transpose_stages, transpose_stages,
+         sizeof(plan->strategy_payload.transpose_stages));
   if (use_wave32_constant_predicates) {
     plan->transpose_predicate.constant =
         LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32_VCC_IMM;
@@ -743,6 +748,11 @@ static bool loom_amdgpu_fragment_repack_select_target_strategy(
     }
     found_storage_candidate = true;
 
+    if (loom_amdgpu_select_result_to_rhs_packed_b16_fragment_repack_plan(
+            descriptor_set, layout, source_role_layout, result_role_layout,
+            plan)) {
+      return true;
+    }
     if (loom_amdgpu_fragment_repack_select_result_to_lhs_bf16_bpermute_strategy(
             descriptor_set, layout, source_role_layout, result_role_layout,
             plan)) {
@@ -1210,7 +1220,8 @@ static iree_status_t loom_amdgpu_emit_fragment_repack_transpose_lane_bits(
   for (uint16_t bit_index = 0; bit_index < plan->transpose_bit_count;
        ++bit_index) {
     has_dynamic_predicate |=
-        plan->transpose_stages[bit_index].lane_bit_set_mask == 0;
+        plan->strategy_payload.transpose_stages[bit_index].lane_bit_set_mask ==
+        0;
   }
   if (!has_dynamic_predicate) return iree_ok_status();
 
@@ -1218,7 +1229,10 @@ static iree_status_t loom_amdgpu_emit_fragment_repack_transpose_lane_bits(
       context, source_op, plan->lane_divisor, vgpr_type, lane_ids));
   for (uint16_t bit_index = 0; bit_index < plan->transpose_bit_count;
        ++bit_index) {
-    if (plan->transpose_stages[bit_index].lane_bit_set_mask != 0) continue;
+    if (plan->strategy_payload.transpose_stages[bit_index].lane_bit_set_mask !=
+        0) {
+      continue;
+    }
     const uint32_t lane_bit = UINT32_C(2) << bit_index;
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
         context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT,
@@ -1368,7 +1382,7 @@ loom_amdgpu_emit_fragment_repack_fused_transposed_registers(
        ++bit_index) {
     const uint16_t register_bit = (uint16_t)(UINT16_C(1) << bit_index);
     const loom_amdgpu_fragment_repack_transpose_stage_t* stage =
-        &plan->transpose_stages[bit_index];
+        &plan->strategy_payload.transpose_stages[bit_index];
     const loom_amdgpu_direct_xor_lane_recipe_t* recipe = &stage->exchange;
     loom_low_lower_resolved_descriptor_t conditional_descriptor = {0};
     IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
@@ -1463,7 +1477,7 @@ static iree_status_t loom_amdgpu_emit_fragment_repack_transposed_registers(
        ++bit_index) {
     const uint16_t register_bit = (uint16_t)(UINT16_C(1) << bit_index);
     const loom_amdgpu_direct_xor_lane_recipe_t* recipe =
-        &plan->transpose_stages[bit_index].exchange;
+        &plan->strategy_payload.transpose_stages[bit_index].exchange;
     loom_low_lower_resolved_descriptor_t descriptor = {0};
     IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
         context, recipe->descriptor_ref, &descriptor));
@@ -1800,6 +1814,9 @@ iree_status_t loom_amdgpu_lower_vector_fragment_repack(
     case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_LHS_BF16_BPERMUTE:
     case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_LHS_BF16_TRANSPOSE_BPERMUTE:
       return loom_amdgpu_emit_fragment_repack_result_to_lhs_bf16_bpermute(
+          context, source_op, plan);
+    case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_RHS_PACKED_B16_XOR_PERMUTE:
+      return loom_amdgpu_lower_result_to_rhs_packed_b16_fragment_repack(
           context, source_op, plan);
     case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_DIAGNOSTIC:
       return loom_amdgpu_emit_fragment_repack_diagnostic(context, source_op,
