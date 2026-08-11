@@ -1730,6 +1730,17 @@ static iree_status_t loom_low_lower_plan_op(loom_low_lower_context_t* context,
   return loom_low_lower_emit_no_target_contract(context, source_op);
 }
 
+static void loom_low_lower_planning_scope_begin(
+    loom_low_lower_context_t* context) {
+  context->planning_arena_active = true;
+}
+
+static void loom_low_lower_planning_scope_end(
+    loom_low_lower_context_t* context) {
+  context->planning_arena_active = false;
+  iree_arena_reset(&context->planning_arena);
+}
+
 static iree_status_t loom_low_lower_plan_region(
     loom_low_lower_context_t* context, loom_region_t* source_region,
     const loom_op_t* block_arg_context_op, bool skip_entry_block_args) {
@@ -1748,7 +1759,10 @@ static iree_status_t loom_low_lower_plan_region(
     }
     loom_op_t* op = NULL;
     loom_block_for_each_op(block, op) {
-      IREE_RETURN_IF_ERROR(loom_low_lower_plan_op(context, op));
+      loom_low_lower_planning_scope_begin(context);
+      iree_status_t status = loom_low_lower_plan_op(context, op);
+      loom_low_lower_planning_scope_end(context);
+      IREE_RETURN_IF_ERROR(status);
       if (loom_low_lower_context_should_stop(context)) {
         return iree_ok_status();
       }
@@ -3632,7 +3646,9 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
     }
   }
   if (iree_status_is_ok(status)) {
+    iree_arena_initialize(module->arena.block_pool, &context.planning_arena);
     status = loom_low_lower_plan_body(&context, source_body);
+    iree_arena_deinitialize(&context.planning_arena);
   }
   if (iree_status_is_ok(status) && context.result->error_count == 0) {
     loom_symbol_ref_t low_func_ref = loom_func_like_callee(source_function);

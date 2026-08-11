@@ -39,36 +39,15 @@ bool loom_print_block_has_label(const loom_print_context_t* ctx,
          block->label_id < ctx->module->strings.count;
 }
 
-static bool loom_print_region_label_exists(const loom_print_context_t* ctx,
-                                           const loom_region_t* region,
-                                           iree_string_view_t label) {
+static bool loom_print_region_label_exists(const loom_region_t* region,
+                                           loom_string_id_t label_id) {
   if (!region) {
     return false;
   }
   for (uint16_t block_index = 0; block_index < region->block_count;
        ++block_index) {
     const loom_block_t* block = loom_region_const_block(region, block_index);
-    if (!loom_print_block_has_label(ctx, block)) {
-      continue;
-    }
-    if (iree_string_view_equal(ctx->module->strings.entries[block->label_id],
-                               label)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-static bool loom_print_region_find_block_index(const loom_region_t* region,
-                                               const loom_block_t* block,
-                                               uint16_t* out_block_index) {
-  if (!region || !block) {
-    return false;
-  }
-  for (uint16_t block_index = 0; block_index < region->block_count;
-       ++block_index) {
-    if (loom_region_const_block(region, block_index) == block) {
-      *out_block_index = block_index;
+    if (block->label_id == label_id) {
       return true;
     }
   }
@@ -84,7 +63,7 @@ static iree_status_t loom_print_block_label_view(
     return iree_ok_status();
   }
   uint16_t block_index = 0;
-  if (!loom_print_region_find_block_index(region, block, &block_index)) {
+  if (!loom_region_try_block_index(region, block, &block_index)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "successor target block is not in the printed "
                             "region and has no explicit label");
@@ -102,7 +81,10 @@ static iree_status_t loom_print_block_label_view(
     }
     iree_string_view_t candidate =
         iree_make_string_view(synthetic_buffer, (iree_host_size_t)length);
-    if (!loom_print_region_label_exists(ctx, region, candidate)) {
+    loom_string_id_t candidate_id =
+        loom_module_lookup_string(ctx->module, candidate);
+    if (candidate_id == LOOM_STRING_ID_INVALID ||
+        !loom_print_region_label_exists(region, candidate_id)) {
       *out_label = candidate;
       return iree_ok_status();
     }

@@ -380,6 +380,19 @@ iree_status_t loom_low_lower_allocate_function_array(
                                    element_size, out_ptr);
 }
 
+iree_status_t loom_low_lower_allocate_planning_array(
+    loom_low_lower_context_t* context, iree_host_size_t count,
+    iree_host_size_t element_size, void** out_ptr) {
+  *out_ptr = NULL;
+  if (count == 0) {
+    return iree_ok_status();
+  }
+  IREE_ASSERT(context->planning_arena_active,
+              "planning storage requested outside source-op selection");
+  return iree_arena_allocate_array(&context->planning_arena, count,
+                                   element_size, out_ptr);
+}
+
 iree_status_t loom_low_lower_allocate_emission_array(
     loom_low_lower_context_t* context, iree_host_size_t count,
     iree_host_size_t element_size, void** out_ptr) {
