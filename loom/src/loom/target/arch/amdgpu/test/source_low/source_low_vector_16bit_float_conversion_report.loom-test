@@ -10,7 +10,7 @@ kernel.def target(@target) @report_gfx1100_fp8_to_bf16_software_decode() {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
   %identity_scale = scalar.constant 1.0 : f32
-  %schema = encoding.define #encoding.operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, rounding=finite_only, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=8, rounding=finite_only, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %input_view = buffer.view %input[%base] : buffer -> view<64x8xf8E4M3, #encoding.layout.dense>
   %output_view = buffer.view %output[%base] : buffer -> view<64x8xbf16, #encoding.layout.dense>
   %payload = vector.load %input_view[%lane, 0] : view<64x8xf8E4M3, #encoding.layout.dense> -> vector<8xf8E4M3>
@@ -54,7 +54,7 @@ kernel.def target(@target) @report_gfx1100_fp8_f32_scale_to_bf16_software_decode
 } launch(%input: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %schema = encoding.define #encoding.operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, rounding=finite_only, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=8, rounding=finite_only, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %input_view = buffer.view %input[%base] : buffer -> view<64x8xf8E4M3, #encoding.layout.dense>
   %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #encoding.layout.dense>
   %output_view = buffer.view %output[%base] : buffer -> view<64x8xbf16, #encoding.layout.dense>
@@ -105,8 +105,8 @@ kernel.def target(@target) @report_gfx942_fp8_bf8_f32_scale_manual_bf16_pack() {
 } launch(%fp8_input: buffer, %bf8_input: buffer, %scale: buffer, %fp8_output: buffer, %bf8_output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %fp8_schema = encoding.define #encoding.operand<affine=scale_only, element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %bf8_schema = encoding.define #encoding.operand<affine=scale_only, element_format=f8e5m2, payload_elements=8, payload_packing=dense_lanes, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %fp8_schema = encoding.define #encoding.f8e4m3<affine=scale_only, payload_elements=8, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %bf8_schema = encoding.define #encoding.f8e5m2<affine=scale_only, payload_elements=8, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %fp8_input_view = buffer.view %fp8_input[%base] : buffer -> view<64x8xf8E4M3, #encoding.layout.dense>
   %bf8_input_view = buffer.view %bf8_input[%base] : buffer -> view<64x8xf8E5M2, #encoding.layout.dense>
   %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #encoding.layout.dense>
@@ -175,8 +175,8 @@ kernel.def target(@target) @report_gfx942_finite_fp8_bf8_to_bf16_packed_decode()
 } launch(%fp8_input: buffer, %bf8_input: buffer, %fp8_output: buffer, %bf8_output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %fp8_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes, rounding=finite_only> : encoding<schema>
-  %bf8_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=8, payload_packing=dense_lanes, rounding=finite_only> : encoding<schema>
+  %fp8_schema = encoding.define #encoding.f8e4m3<payload_elements=8, rounding=finite_only> : encoding<schema>
+  %bf8_schema = encoding.define #encoding.f8e5m2<payload_elements=8, rounding=finite_only> : encoding<schema>
   %fp8_input_view = buffer.view %fp8_input[%base] : buffer -> view<64x8xf8E4M3, #encoding.layout.dense>
   %bf8_input_view = buffer.view %bf8_input[%base] : buffer -> view<64x8xf8E5M2, #encoding.layout.dense>
   %fp8_output_view = buffer.view %fp8_output[%base] : buffer -> view<64x8xbf16, #encoding.layout.dense>
@@ -235,8 +235,8 @@ kernel.def target(@target) @report_gfx950_fp8_bf8_scalef32_native_decode_variant
 } launch(%fp8_input: buffer, %bf8_input: buffer, %scale: buffer, %fp8_output: buffer, %bf8_output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %fp8_schema = encoding.define #encoding.operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %bf8_schema = encoding.define #encoding.operand<affine=scale_only, element_format=f8e5m2, payload_elements=8, payload_packing=dense_lanes, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %fp8_schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=8, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %bf8_schema = encoding.define #encoding.f8e5m2<affine=scale_only, payload_elements=8, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %fp8_input_view = buffer.view %fp8_input[%base] : buffer -> view<64x8xf8E4M3, #encoding.layout.dense>
   %bf8_input_view = buffer.view %bf8_input[%base] : buffer -> view<64x8xf8E5M2, #encoding.layout.dense>
   %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #encoding.layout.dense>
@@ -305,7 +305,7 @@ kernel.def target(@target) @report_gfx1200_bf8_f32_scale_native_f32_pair() {
 } launch(%input: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %schema = encoding.define #encoding.operand<affine=scale_only, element_format=f8e5m2, payload_elements=4, payload_packing=dense_lanes, scale_format=f32, scale_group_elements=4, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %schema = encoding.define #encoding.f8e5m2<affine=scale_only, payload_elements=4, scale_format=f32, scale_group_elements=4, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #encoding.layout.dense>
   %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #encoding.layout.dense>
   %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32, #encoding.layout.dense>
@@ -356,7 +356,7 @@ kernel.def target(@target) @report_gfx1200_bf8_f32_scale_sliced_native_f32_pair(
 } launch(%input: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %schema = encoding.define #encoding.operand<affine=scale_only, element_format=f8e5m2, payload_elements=3, payload_packing=dense_lanes, scale_format=f32, scale_group_elements=3, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %schema = encoding.define #encoding.f8e5m2<affine=scale_only, payload_elements=3, scale_format=f32, scale_group_elements=3, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #encoding.layout.dense>
   %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #encoding.layout.dense>
   %output_view = buffer.view %output[%base] : buffer -> view<64x3xf32, #encoding.layout.dense>
@@ -409,8 +409,8 @@ kernel.def target(@target) @report_gfx1200_fp8_bf8_f32_scale_manual_16bit_pack()
 } launch(%fp8_input: buffer, %bf8_input: buffer, %scale: buffer, %bf16_output: buffer, %f16_output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %fp8_schema = encoding.define #encoding.operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %bf8_schema = encoding.define #encoding.operand<affine=scale_only, element_format=f8e5m2, payload_elements=8, payload_packing=dense_lanes, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %fp8_schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=8, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %bf8_schema = encoding.define #encoding.f8e5m2<affine=scale_only, payload_elements=8, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %fp8_input_view = buffer.view %fp8_input[%base] : buffer -> view<64x8xf8E4M3, #encoding.layout.dense>
   %bf8_input_view = buffer.view %bf8_input[%base] : buffer -> view<64x8xf8E5M2, #encoding.layout.dense>
   %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #encoding.layout.dense>
@@ -479,8 +479,8 @@ kernel.def target(@target) @report_gfx1200_finite_fp8_bf8_to_bf16_packed_decode(
 } launch(%fp8_input: buffer, %bf8_input: buffer, %fp8_output: buffer, %bf8_output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %fp8_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes, rounding=finite_only> : encoding<schema>
-  %bf8_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=8, payload_packing=dense_lanes, rounding=finite_only> : encoding<schema>
+  %fp8_schema = encoding.define #encoding.f8e4m3<payload_elements=8, rounding=finite_only> : encoding<schema>
+  %bf8_schema = encoding.define #encoding.f8e5m2<payload_elements=8, rounding=finite_only> : encoding<schema>
   %fp8_input_view = buffer.view %fp8_input[%base] : buffer -> view<64x8xf8E4M3, #encoding.layout.dense>
   %bf8_input_view = buffer.view %bf8_input[%base] : buffer -> view<64x8xf8E5M2, #encoding.layout.dense>
   %fp8_output_view = buffer.view %fp8_output[%base] : buffer -> view<64x8xbf16, #encoding.layout.dense>
@@ -539,8 +539,8 @@ kernel.def target(@target) @report_gfx1250_fp8_bf8_f32_scale_native_f32_pair_nat
 } launch(%fp8_input: buffer, %bf8_input: buffer, %scale: buffer, %fp8_output: buffer, %bf8_output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %fp8_schema = encoding.define #encoding.operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %bf8_schema = encoding.define #encoding.operand<affine=scale_only, element_format=f8e5m2, payload_elements=8, payload_packing=dense_lanes, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %fp8_schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=8, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %bf8_schema = encoding.define #encoding.f8e5m2<affine=scale_only, payload_elements=8, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %fp8_input_view = buffer.view %fp8_input[%base] : buffer -> view<64x8xf8E4M3, #encoding.layout.dense>
   %bf8_input_view = buffer.view %bf8_input[%base] : buffer -> view<64x8xf8E5M2, #encoding.layout.dense>
   %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #encoding.layout.dense>
@@ -609,7 +609,7 @@ kernel.def target(@target) @report_gfx1250_fp8_e8m0_native_decode() {
 } launch(%input: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %schema = encoding.define #encoding.operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, scale_format=e8m0, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=8, scale_format=e8m0, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %input_view = buffer.view %input[%base] : buffer -> view<64x8xf8E4M3, #encoding.layout.dense>
   %scale_view = buffer.view %scale[%base] : buffer -> view<64x1xi32, #encoding.layout.dense>
   %output_view = buffer.view %output[%base] : buffer -> view<64x8xbf16, #encoding.layout.dense>
@@ -658,8 +658,8 @@ kernel.def target(@target) @report_gfx1250_fp8_bf8_e8m0_native_decode_variants()
 } launch(%fp8_input: buffer, %bf8_input: buffer, %scale: buffer, %fp8_bf16_output: buffer, %fp8_f16_output: buffer, %fp8_f32_output: buffer, %bf8_bf16_output: buffer, %bf8_f16_output: buffer, %bf8_f32_output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %fp8_schema = encoding.define #encoding.operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, scale_format=e8m0, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %bf8_schema = encoding.define #encoding.operand<affine=scale_only, element_format=f8e5m2, payload_elements=8, payload_packing=dense_lanes, scale_format=e8m0, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %fp8_schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=8, scale_format=e8m0, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %bf8_schema = encoding.define #encoding.f8e5m2<affine=scale_only, payload_elements=8, scale_format=e8m0, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %fp8_input_view = buffer.view %fp8_input[%base] : buffer -> view<64x8xf8E4M3, #encoding.layout.dense>
   %bf8_input_view = buffer.view %bf8_input[%base] : buffer -> view<64x8xf8E5M2, #encoding.layout.dense>
   %scale_view = buffer.view %scale[%base] : buffer -> view<64x1xi32, #encoding.layout.dense>

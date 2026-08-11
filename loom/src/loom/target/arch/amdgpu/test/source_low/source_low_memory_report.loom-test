@@ -712,7 +712,7 @@ kernel.def target(@target) @report_fp8_fragment_finite_nan_storage_packed_decode
   %n = index.constant 16 : index
   %k = index.constant 16 : index
   %input_layout = encoding.layout.strided [1, 16] : encoding<layout>
-  %input_schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
+  %input_schema = encoding.define #encoding.f8e4m3fn : encoding<schema>
   %input_storage = encoding.define #encoding.storage {layout = %input_layout : encoding<layout>, schema = %input_schema : encoding<schema>} : encoding<storage>
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<16x16xf8E4M3, %input_storage>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<16xbf16, #encoding.layout.dense>
@@ -759,7 +759,7 @@ kernel.def target(@target) @report_fp8_fragment_finite_only_storage_packed_decod
   %n = index.constant 16 : index
   %k = index.constant 16 : index
   %input_layout = encoding.layout.strided [1, 16] : encoding<layout>
-  %input_schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=16, payload_packing=dense_lanes, rounding=finite_only> : encoding<schema>
+  %input_schema = encoding.define #encoding.f8e4m3fn<payload_elements=16, rounding=finite_only> : encoding<schema>
   %input_storage = encoding.define #encoding.storage {layout = %input_layout : encoding<layout>, schema = %input_schema : encoding<schema>} : encoding<storage>
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<16x16xf8E4M3, %input_storage>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<16xbf16, #encoding.layout.dense>

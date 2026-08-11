@@ -165,7 +165,7 @@ func.def @q6_k_reference_chunk() -> (i1) {
 // Packed 4-bit codes: 0x10, 0x32 -> code lanes 0, 1, 2, 3.
 // Expected lanes are the first four entries of the explicit grid.
 func.def @iq_grid_reference_chunk() -> (i1) {
-  %schema = encoding.define #encoding.operand<codebook=dynamic_table_operand, element_format=u4, payload_elements=4, payload_packing=codebook_indices> : encoding<schema>
+  %schema = encoding.define #encoding.u4<codebook=dynamic_table_operand, payload_elements=4, payload_packing=codebook_indices> : encoding<schema>
   test.use %schema : encoding<schema>
 
   %p0 = scalar.constant 0x10 : i8
@@ -313,7 +313,7 @@ func.def @turboquant_logit_reference(%query: vector<4xf16>, %packed_codes: vecto
 //
 // Packed 4-bit codes: 0x20, 0x31 -> code lanes 0, 2, 1, 3.
 func.def @fp4_table_reference_chunk() -> (i1) {
-  %schema = encoding.define #encoding.operand<codebook=dynamic_table_operand, element_format=f4e2m1, payload_elements=4, payload_packing=codebook_indices> : encoding<schema>
+  %schema = encoding.define #encoding.f4e2m1<codebook=dynamic_table_operand, payload_elements=4, payload_packing=codebook_indices> : encoding<schema>
   test.use %schema : encoding<schema>
 
   %p0 = scalar.constant 0x20 : i8
@@ -353,7 +353,7 @@ func.def @fp4_table_reference_chunk() -> (i1) {
 // format-specific FP8 variants that are not primitive scalar types should stay
 // encoded as integer bytes plus an explicit table or arithmetic expansion.
 func.def @fp8_e4m3_storage_reinterpret(%bytes: vector<4xi8>) -> (vector<4xf16>) {
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3 : encoding<schema>
   test.use %schema : encoding<schema>
 
   %fp8 = vector.bitcast %bytes : vector<4xi8> to vector<4xf8E4M3>

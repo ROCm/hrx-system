@@ -23,9 +23,44 @@ class ContextTest : public ::testing::Test {
   loom_context_t context_;
 };
 
+static const loom_bstring_t kQ8_0EncodingFormatNames[] = {
+    LOOM_BSTRING_REF(2, "i8"),
+};
+static const loom_attr_descriptor_t kQ8_0EncodingParameters[] = {{
+    /*.name=*/LOOM_BSTRING_REF(6, "format"),
+    /*.attr_kind=*/LOOM_ATTR_ENUM,
+    /*.flags=*/0,
+    /*.enum_max_value=*/0,
+    /*.enum_case_names=*/kQ8_0EncodingFormatNames,
+}};
+static const loom_encoding_alias_parameter_t kQ8_0EncodingAliasParameters[] = {
+    {
+        /*.parameter_index=*/0,
+        /*.flags=*/LOOM_ENCODING_ALIAS_PARAMETER_FIXED,
+        /*.value=*/loom_attr_enum(0),
+    },
+};
+static const loom_encoding_alias_descriptor_t kQ8_0EncodingAliases[] = {
+    {
+        /*.name=*/LOOM_BSTRING_REF(16, "encoding.test_i8"),
+        /*.parameter_count=*/IREE_ARRAYSIZE(kQ8_0EncodingAliasParameters),
+        /*.parameters=*/kQ8_0EncodingAliasParameters,
+    },
+};
+static const uint8_t kQ8_0EncodingAliasOrdinals[] = {1};
+
 static const loom_encoding_family_descriptor_t kQ8_0EncodingDescriptor = {
     /*.name=*/LOOM_BSTRING_REF(4, "q8_0"),
     /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    /*.parameter_count=*/IREE_ARRAYSIZE(kQ8_0EncodingParameters),
+    /*.parameter_descriptors=*/kQ8_0EncodingParameters,
+    /*.dynamic_parameter_count=*/0,
+    /*.dynamic_parameter_descriptors=*/nullptr,
+    /*.fixed_metadata=*/nullptr,
+    /*.alias_count=*/IREE_ARRAYSIZE(kQ8_0EncodingAliases),
+    /*.alias_discriminator_parameter_index=*/0,
+    /*.aliases=*/kQ8_0EncodingAliases,
+    /*.alias_ordinals_by_discriminator=*/kQ8_0EncodingAliasOrdinals,
 };
 
 static const loom_encoding_vtable_t kQ8_0EncodingVtable = {
@@ -438,13 +473,20 @@ TEST_F(ContextTest, RegisterEncodingVtableAndLookupByName) {
       loom_context_register_encoding_vtable(&context_, &kQ8_0EncodingVtable));
   IREE_ASSERT_OK(loom_context_finalize(&context_));
 
-  loom_encoding_family_id_t family_id =
-      loom_context_lookup_encoding_family_by_name(&context_, IREE_SV("q8_0"));
+  const loom_encoding_name_resolution_t family_resolution =
+      loom_context_resolve_encoding_name(&context_, IREE_SV("q8_0"));
+  loom_encoding_family_id_t family_id = family_resolution.family_id;
   EXPECT_NE(family_id, LOOM_ENCODING_FAMILY_ID_INVALID);
+  EXPECT_EQ(family_resolution.alias, nullptr);
   EXPECT_EQ(loom_context_resolve_encoding_vtable(&context_, family_id),
             &kQ8_0EncodingVtable);
+  const loom_encoding_name_resolution_t alias_resolution =
+      loom_context_resolve_encoding_name(&context_,
+                                         IREE_SV("encoding.test_i8"));
+  EXPECT_EQ(alias_resolution.family_id, family_id);
+  EXPECT_EQ(alias_resolution.alias, &kQ8_0EncodingAliases[0]);
   EXPECT_EQ(
-      loom_context_lookup_encoding_family_by_name(&context_, IREE_SV("q6_k")),
+      loom_context_resolve_encoding_name(&context_, IREE_SV("q6_k")).family_id,
       LOOM_ENCODING_FAMILY_ID_INVALID);
   EXPECT_EQ(loom_context_resolve_encoding_vtable(
                 &context_, LOOM_ENCODING_FAMILY_ID_INVALID),

@@ -86,15 +86,15 @@ func.def @load_equal_dims() {
 // ====
 
 // Constant with static encoding.
-global.constant @q_weights : tile<[%m]x[%k]xi8, #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes>>
+global.constant @q_weights : tile<[%m]x[%k]xi8, #encoding.i8<payload_elements=32>>
 
 // ====
 
 // Load from encoded global — encoding is static, dims are co-results.
-global.constant @qw : tile<[%m]x[%k]xi8, #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes>>
+global.constant @qw : tile<[%m]x[%k]xi8, #encoding.i8<payload_elements=32>>
 
 func.def @load_encoded() {
-  %tile, %m, %k = global.load @qw : tile<[%m]x[%k]xi8, #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes>>
+  %tile, %m, %k = global.load @qw : tile<[%m]x[%k]xi8, #encoding.i8<payload_elements=32>>
   func.return
 }
 
@@ -145,10 +145,10 @@ func.def @load_static_dims_encoding() {
 // ====
 
 // Store to global with static encoding.
-global.variable @q_state : tile<[%n]xi8, #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes>>
+global.variable @q_state : tile<[%n]xi8, #encoding.i8<payload_elements=32>>
 
-func.def @store_encoded(%n: index, %tile: tile<[%n]xi8, #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes>>) {
-  global.store %tile, @q_state : tile<[%n]xi8, #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes>>
+func.def @store_encoded(%n: index, %tile: tile<[%n]xi8, #encoding.i8<payload_elements=32>>) {
+  global.store %tile, @q_state : tile<[%n]xi8, #encoding.i8<payload_elements=32>>
   func.return
 }
 

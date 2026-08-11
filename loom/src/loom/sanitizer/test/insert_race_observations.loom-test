@@ -274,7 +274,7 @@ kernel.def @race_site_payload_locations() {
   %i = index.constant 0 : index loc("loom/src/loom/sanitizer/test/insert_race_observations.loom-test":6:3 to 6:32)
   %bytes = index.constant 4 : offset loc("loom/src/loom/sanitizer/test/insert_race_observations.loom-test":7:3 to 7:37)
   %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer loc("loom/src/loom/sanitizer/test/insert_race_observations.loom-test":8:3 to 8:63)
-  %view = buffer.view %scratch[%base] : buffer -> view<1xi32, #encoding.layout.dense> loc("loom/src/loom/sanitizer/test/insert_race_observations.loom-test":9:3 to 9:70)
+  %view = buffer.view %scratch[%base] : buffer -> view<1xi32, #encoding.layout.dense> loc("loom/src/loom/sanitizer/test/insert_race_observations.loom-test":9:3 to 9:86)
   sanitizer.race.access<read> %view[%i] : view<1xi32, #encoding.layout.dense> loc(tagged<sanitizer_site, "00050f0402010000", "race.loom":8:1>)
   %value = view.load %view[%i] : view<1xi32, #encoding.layout.dense> -> i32 loc("race.loom":8:1)
   sanitizer.race.access<write> %view[%i] : view<1xi32, #encoding.layout.dense> loc(tagged<sanitizer_site, "00050f0402010000", "race.loom":9:1>)

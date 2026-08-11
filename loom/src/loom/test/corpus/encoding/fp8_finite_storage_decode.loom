@@ -164,7 +164,7 @@ kernel.def @fp8_finite_storage_scale_decode_bf16(%row_count: index) {
   %input_layout = encoding.layout.strided [4, 1] : encoding<layout>
   %input_schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=4, payload_registers=1, rounding=finite_only> : encoding<schema>
   %input_storage = encoding.define #encoding.storage {layout = %input_layout : encoding<layout>, schema = %input_schema : encoding<schema>} : encoding<storage>
-  %decode_schema = encoding.define #encoding.operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=4, payload_packing=dense_lanes, rounding=finite_only, scale_format=f32, scale_group_elements=4, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %decode_schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=4, rounding=finite_only, scale_format=f32, scale_group_elements=4, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x4xf8E4M3, %input_storage>
   %scale_view = buffer.view %scale_noalias[%base] : buffer -> view<[%bounded_row_count]xf32, #encoding.layout.dense>
   %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x4xbf16, #encoding.layout.dense>
@@ -201,7 +201,7 @@ kernel.def @bf8_finite_storage_scale_decode_bf16(%row_count: index) {
   %input_layout = encoding.layout.strided [4, 1] : encoding<layout>
   %input_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=4, payload_registers=1, rounding=finite_only> : encoding<schema>
   %input_storage = encoding.define #encoding.storage {layout = %input_layout : encoding<layout>, schema = %input_schema : encoding<schema>} : encoding<storage>
-  %decode_schema = encoding.define #encoding.operand<affine=scale_only, element_format=f8e5m2, payload_elements=4, payload_packing=dense_lanes, rounding=finite_only, scale_format=f32, scale_group_elements=4, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %decode_schema = encoding.define #encoding.f8e5m2<affine=scale_only, payload_elements=4, rounding=finite_only, scale_format=f32, scale_group_elements=4, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x4xf8E5M2, %input_storage>
   %scale_view = buffer.view %scale_noalias[%base] : buffer -> view<[%bounded_row_count]xf32, #encoding.layout.dense>
   %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x4xbf16, #encoding.layout.dense>

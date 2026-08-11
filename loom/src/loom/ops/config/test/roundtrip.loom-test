@@ -29,7 +29,7 @@ config.def @model36.model.rope_theta = 1000000.0 : f32
 // ====
 
 // Static encoding config definitions.
-config.def @model36.quant.dense_schema = #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes> : encoding<schema>
+config.def @model36.quant.dense_schema = #encoding.i8<payload_elements=32> : encoding<schema>
 
 config.def @model36.kv_cache.layout = #encoding.layout.dense : encoding<layout>
 
@@ -49,7 +49,7 @@ func.def @read_scalar_configs() -> (index, i1) {
 // ====
 
 // Reads from encoding configs.
-config.def @dense_schema = #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes> : encoding<schema>
+config.def @dense_schema = #encoding.i8<payload_elements=32> : encoding<schema>
 
 config.def @dense_layout = #encoding.layout.dense : encoding<layout>
 

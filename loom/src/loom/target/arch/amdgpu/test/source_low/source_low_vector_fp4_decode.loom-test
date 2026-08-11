@@ -2,7 +2,7 @@
 
 amdgpu.target<gfx942> @target
 func.def target(@target) @decode_packed_e2m1_to_f16(%payload: vector<2xi32>) -> (vector<16xf16>) {
-  %schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2> : encoding<schema>
+  %schema = encoding.define #encoding.f4e2m1<payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2> : encoding<schema>
   %decoded = vector.decode %payload using %schema : vector<2xi32>, encoding<schema> -> vector<16xf16>
   func.return %decoded : vector<16xf16>
 }
@@ -83,7 +83,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @decode_packed_e
 
 amdgpu.target<gfx950> @target
 func.def target(@target) @decode_packed_e2m1_to_f16(%payload: vector<2xi32>) -> (vector<16xf16>) {
-  %schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2> : encoding<schema>
+  %schema = encoding.define #encoding.f4e2m1<payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2> : encoding<schema>
   %decoded = vector.decode %payload using %schema : vector<2xi32>, encoding<schema> -> vector<16xf16>
   func.return %decoded : vector<16xf16>
 }
@@ -164,7 +164,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @decode_packed_e
 
 amdgpu.target<gfx1100> @target
 func.def target(@target) @decode_packed_e2m1_to_f16(%payload: vector<2xi32>) -> (vector<16xf16>) {
-  %schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2> : encoding<schema>
+  %schema = encoding.define #encoding.f4e2m1<payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2> : encoding<schema>
   %decoded = vector.decode %payload using %schema : vector<2xi32>, encoding<schema> -> vector<16xf16>
   func.return %decoded : vector<16xf16>
 }
@@ -241,7 +241,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @decode_packed_e
 
 amdgpu.target<gfx1151> @target
 func.def target(@target) @decode_packed_e2m1_to_f16(%payload: vector<2xi32>) -> (vector<16xf16>) {
-  %schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2> : encoding<schema>
+  %schema = encoding.define #encoding.f4e2m1<payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2> : encoding<schema>
   %decoded = vector.decode %payload using %schema : vector<2xi32>, encoding<schema> -> vector<16xf16>
   func.return %decoded : vector<16xf16>
 }
@@ -318,7 +318,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @decode_packed
 
 amdgpu.target<gfx1200> @target
 func.def target(@target) @decode_packed_e2m1_to_f16(%payload: vector<2xi32>) -> (vector<16xf16>) {
-  %schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2> : encoding<schema>
+  %schema = encoding.define #encoding.f4e2m1<payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2> : encoding<schema>
   %decoded = vector.decode %payload using %schema : vector<2xi32>, encoding<schema> -> vector<16xf16>
   func.return %decoded : vector<16xf16>
 }
@@ -395,7 +395,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @decode_packed_e
 
 amdgpu.target<gfx1250> @target
 func.def target(@target) @decode_packed_e2m1_to_f16(%payload: vector<2xi32>) -> (vector<16xf16>) {
-  %schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2> : encoding<schema>
+  %schema = encoding.define #encoding.f4e2m1<payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2> : encoding<schema>
   %decoded = vector.decode %payload using %schema : vector<2xi32>, encoding<schema> -> vector<16xf16>
   func.return %decoded : vector<16xf16>
 }

@@ -97,6 +97,7 @@ from loom.dsl import (
     ElementWidthAtLeastAttr,
     ElementWidthGreaterThan,
     ElementWidthLessThan,
+    EncodingAliasDef,
     EncodingFamilyDef,
     EncodingFamilyRole,
     EncodingOperandSummaryDef,
@@ -500,6 +501,93 @@ class TestParameterizedAttrDef:
 
 
 class TestEncodingFamilyDef:
+    def test_declares_canonical_alias_with_typed_fixed_parameters(self) -> None:
+        numeric_format = EnumDef(
+            "NumericFormat", [EnumCase("f16", 0), EnumCase("bf16", 1)]
+        )
+        family = EncodingFamilyDef(
+            "encoding.operand",
+            group=Dialect("encoding"),
+            role=EncodingFamilyRole.STORAGE_SCHEMA,
+            parameters=[
+                AttrDef("payload_elements", "i64"),
+                AttrDef("element_format", "enum", enum_def=numeric_format),
+            ],
+            aliases=[
+                EncodingAliasDef(
+                    "encoding.f16",
+                    fixed_parameters={"element_format": "f16"},
+                    default_parameters={"payload_elements": 1},
+                )
+            ],
+        )
+
+        assert family.aliases[0].fixed_parameters == (("element_format", "f16"),)
+        assert family.aliases[0].default_parameters == (("payload_elements", 1),)
+        assert family.alias_discriminator is not None
+        assert family.alias_discriminator.name == "element_format"
+
+    def test_rejects_alias_that_fixes_unknown_parameter(self) -> None:
+        with _raises(ValueError, match="references unknown parameter 'missing'"):
+            EncodingFamilyDef(
+                "encoding.operand",
+                group=Dialect("encoding"),
+                role=EncodingFamilyRole.STORAGE_SCHEMA,
+                aliases=[
+                    EncodingAliasDef("encoding.f16", fixed_parameters={"missing": 1})
+                ],
+            )
+
+    def test_rejects_aliases_without_one_direct_enum_discriminator(self) -> None:
+        numeric_format = EnumDef(
+            "NumericFormat", [EnumCase("f16", 0), EnumCase("bf16", 1)]
+        )
+        with _raises(ValueError, match="require one shared enum fixed parameter"):
+            EncodingFamilyDef(
+                "encoding.operand",
+                group=Dialect("encoding"),
+                role=EncodingFamilyRole.STORAGE_SCHEMA,
+                parameters=[
+                    AttrDef("element_format", "enum", enum_def=numeric_format),
+                    AttrDef("payload_elements", "i64"),
+                ],
+                aliases=[
+                    EncodingAliasDef(
+                        "encoding.f16",
+                        fixed_parameters={"element_format": "f16"},
+                    ),
+                    EncodingAliasDef(
+                        "encoding.f16_scalar",
+                        fixed_parameters={
+                            "element_format": "f16",
+                            "payload_elements": 1,
+                        },
+                    ),
+                ],
+            )
+
+    def test_rejects_more_than_uint8_alias_ordinals(self) -> None:
+        numeric_format = EnumDef(
+            "NumericFormat",
+            [EnumCase(f"f{value}", value) for value in range(256)],
+        )
+        with _raises(ValueError, match="256 aliases exceed the uint8_t ordinal limit"):
+            EncodingFamilyDef(
+                "encoding.operand",
+                group=Dialect("encoding"),
+                role=EncodingFamilyRole.STORAGE_SCHEMA,
+                parameters=[
+                    AttrDef("element_format", "enum", enum_def=numeric_format),
+                ],
+                aliases=[
+                    EncodingAliasDef(
+                        f"encoding.f{value}",
+                        fixed_parameters={"element_format": f"f{value}"},
+                    )
+                    for value in range(256)
+                ],
+            )
+
     def test_declares_lexically_indexed_sparse_parameters(self) -> None:
         family = EncodingFamilyDef(
             "operand",

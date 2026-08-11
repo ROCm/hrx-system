@@ -4,7 +4,7 @@
 // parameter namespace; a name can appear in only one place.
 func.def @static_dynamic_duplicate(%payload_elements: index) {
   // ERROR@+1: ENCODING/006 "payload_elements"
-  %enc = encoding.define #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes> {payload_elements = %payload_elements : index} : encoding<schema>
+  %enc = encoding.define #encoding.i8<payload_elements=32> {payload_elements = %payload_elements : index} : encoding<schema>
   func.return
 }
 
@@ -24,7 +24,7 @@ func.def @static_param_ssa_value(%group_size: index) {
 // later consumers.
 func.def @encoding_define_generic_result_role() {
   // ERROR@+1: ENCODING/012 {encoding_name="encoding.operand", actual_type="encoding", expected_type="encoding<schema>"}
-  %enc = encoding.define #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes> : encoding
+  %enc = encoding.define #encoding.i8<payload_elements=32> : encoding
   func.return
 }
 
@@ -32,7 +32,7 @@ func.def @encoding_define_generic_result_role() {
 
 func.def @encoding_define_wrong_result_role() {
   // ERROR@+1: ENCODING/012 {encoding_name="encoding.operand", actual_type="encoding<transform>", expected_type="encoding<schema>"}
-  %enc = encoding.define #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes> : encoding<transform>
+  %enc = encoding.define #encoding.i8<payload_elements=32> : encoding<transform>
   func.return
 }
 
@@ -105,7 +105,7 @@ func.def @assume_spec_rejects_negative_static_stride(%layout: encoding<layout>) 
 
 func.def @assume_spec_rejects_bad_named_fp8_rounding(%schema: encoding<schema>) {
   // ERROR@+1: PARSE/017 "rounding" "wat"
-  %bad = encoding.assume.spec %schema, #encoding.operand<element_format=f8e4m3fn, payload_elements=1, payload_packing=dense_lanes, rounding=wat> : encoding<schema>
+  %bad = encoding.assume.spec %schema, #encoding.f8e4m3fn<rounding=wat> : encoding<schema>
   func.return
 }
 
@@ -147,18 +147,18 @@ func.def @storage_static_params() {
 
 func.def @storage_fp8_fnuz_params() {
   %layout = encoding.layout.dense : encoding<layout>
-  %ieee_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
+  %ieee_schema = encoding.define #encoding.f8e5m2 : encoding<schema>
   %storage0 = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %ieee_schema : encoding<schema>} : encoding<storage>
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3fnuz, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fnuz : encoding<schema>
   %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
-  %storage2 = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.operand<element_format=f8e5m2fnuz, payload_elements=1, payload_packing=dense_lanes>> : encoding<storage>
+  %storage2 = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.f8e5m2fnuz> : encoding<storage>
   func.return
 }
 
 // ====
 
 func.def @operand_fp8_schema_rounding_params() {
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=1, payload_packing=dense_lanes, rounding=finite_only> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fn<rounding=finite_only> : encoding<schema>
   func.return
 }
 
@@ -166,7 +166,7 @@ func.def @operand_fp8_schema_rounding_params() {
 
 func.def @operand_fp8_schema_unsupported_param() {
   // ERROR@+1: ENCODING/008 "encoding.operand" "bogus"
-  %schema = encoding.define #encoding.operand<bogus=16, element_format=f8e4m3fn, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fn<bogus=16> : encoding<schema>
   func.return
 }
 
@@ -174,7 +174,7 @@ func.def @operand_fp8_schema_unsupported_param() {
 
 func.def @operand_fp8_schema_bad_rounding() {
   // ERROR@+1: PARSE/017 "rounding" "wat"
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=1, payload_packing=dense_lanes, rounding=wat> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fn<rounding=wat> : encoding<schema>
   func.return
 }
 
@@ -182,7 +182,7 @@ func.def @operand_fp8_schema_bad_rounding() {
 
 func.def @operand_fp8_schema_rejects_storage_bits() {
   // ERROR@+1: ENCODING/008 "encoding.operand" "storage_bits"
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=1, payload_packing=dense_lanes, storage_bits=16> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3<storage_bits=16> : encoding<schema>
   func.return
 }
 
@@ -399,7 +399,7 @@ func.def @operand_rejects_scale_group_shape_product_overflow() {
 
 func.def @operand_rejects_target_fragment_without_payload_registers() {
   // ERROR@+1: STRUCTURE/014 "payload_registers" "0"
-  %schema = encoding.define #encoding.operand<element_format=f6e3m2, payload_elements=32, payload_packing=target_fragment> : encoding<schema>
+  %schema = encoding.define #encoding.f6e3m2<payload_elements=32, payload_packing=target_fragment> : encoding<schema>
   func.return
 }
 
@@ -528,7 +528,7 @@ func.def @turboquant_transform_role_mismatch(%params: buffer, %thresholds_offset
   %dense = encoding.layout.dense : encoding<layout>
   %thresholds = buffer.view %params[%thresholds_offset] : buffer -> view<3xf32, %dense>
   %centroids = buffer.view %params[%centroids_offset] : buffer -> view<4xf16, %dense>
-  %schema_param = encoding.define #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes> : encoding<schema>
+  %schema_param = encoding.define #encoding.i8<payload_elements=32> : encoding<schema>
   %qjl_matrix = vector.constant 0.0 : vector<64x128xf32>
   %qjl_transform = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %qjl_matrix : vector<64x128xf32>} : encoding<transform>
   // ERROR@+1: ENCODING/009 "turboquant_kv" "transform" "encoding<schema>" "encoding<transform>"

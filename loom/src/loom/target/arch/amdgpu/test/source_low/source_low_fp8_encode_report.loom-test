@@ -121,7 +121,7 @@ COMPILE-REPORT: source_low[0] function=report_f32_to_fp8_fnuz_bridge source_op=v
 // scalar-format conversion instead of scalarizing the logical lanes.
 amdgpu.target<gfx1100> @target
 func.def target(@target) @report_schema_f32_to_fp8_software(%input: vector<4xf32>) -> (vector<4xf8E4M3>) {
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=4, payload_packing=dense_lanes, rounding=finite_only> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fn<payload_elements=4, rounding=finite_only> : encoding<schema>
   %encoded = vector.encode %input using %schema : vector<4xf32>, encoding<schema> -> vector<4xf8E4M3>
   func.return %encoded : vector<4xf8E4M3>
 }
@@ -135,7 +135,7 @@ COMPILE-REPORT: source_low[0] function=report_schema_f32_to_fp8_software source_
 
 amdgpu.target<gfx950> @target
 func.def target(@target) @report_schema_f32_to_fp8_native(%input: vector<4xf32>) -> (vector<4xf8E4M3>) {
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=4, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fn<payload_elements=4> : encoding<schema>
   %encoded = vector.encode %input using %schema : vector<4xf32>, encoding<schema> -> vector<4xf8E4M3>
   func.return %encoded : vector<4xf8E4M3>
 }
@@ -149,7 +149,7 @@ COMPILE-REPORT: source_low[0] function=report_schema_f32_to_fp8_native source_op
 
 amdgpu.target<gfx1151> @target
 func.def target(@target) @report_schema_f16_to_bf8_software(%input: vector<4xf16>) -> (vector<4xf8E5M2>) {
-  %schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=4, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e5m2<payload_elements=4> : encoding<schema>
   %encoded = vector.encode %input using %schema : vector<4xf16>, encoding<schema> -> vector<4xf8E5M2>
   func.return %encoded : vector<4xf8E5M2>
 }

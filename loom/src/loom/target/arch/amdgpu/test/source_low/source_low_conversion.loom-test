@@ -30,7 +30,7 @@ func.def target(@target) @vector_decode_splat_f8_scale(%input: buffer, %base: of
   %input_view = buffer.view %input[%base] : buffer -> view<1xf8E4M3, %layout>
   %raw = view.load %input_view[0] : view<1xf8E4M3, %layout> -> f8E4M3
   %payload = vector.splat %raw : vector<2xf8E4M3>
-  %schema = encoding.define #encoding.operand<affine=scale_only, element_format=f8e4m3, payload_elements=2, payload_packing=dense_lanes, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3<affine=scale_only, payload_elements=2, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf32>} : vector<2xf8E4M3>, encoding<schema> -> vector<2xf32>
   func.return %decoded : vector<2xf32>
 }

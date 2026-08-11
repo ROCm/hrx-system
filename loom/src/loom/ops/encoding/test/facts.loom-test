@@ -33,7 +33,7 @@ func.def @dynamic_static_spec_query(%schema: encoding<schema>) -> (i1) {
 
 // Typed semantic predicates fold independently for each authored property.
 func.def @static_semantic_queries() -> (i1, i1, i1, i1) {
-  %schema = encoding.define #encoding.operand<affine=scale_plus_min, element_format=u4, payload_elements=256, payload_packing=multi_stream, payload_registers=8> : encoding<schema>
+  %schema = encoding.define #encoding.u4<affine=scale_plus_min, payload_elements=256, payload_packing=multi_stream, payload_registers=8> : encoding<schema>
   %all = encoding.matches<element_format = u4, payload_packing = multi_stream, affine = scale_plus_min> %schema : encoding<schema>
   %partial = encoding.matches<element_format = u4> %schema : encoding<schema>
   %wrong_format = encoding.matches<element_format = u6> %schema : encoding<schema>
@@ -53,7 +53,7 @@ func.def @static_semantic_queries() -> (i1, i1, i1, i1) {
 
 // A complete static schema proves that omitted affine behavior is `none`.
 func.def @static_semantic_absence() -> (i1) {
-  %schema = encoding.define #encoding.operand<element_format=f16, payload_elements=16, payload_packing=dense_lanes, payload_registers=8> : encoding<schema>
+  %schema = encoding.define #encoding.f16<payload_elements=16, payload_registers=8> : encoding<schema>
   %unscaled = encoding.matches<affine = none> %schema : encoding<schema>
   func.return %unscaled : i1
 }
@@ -340,9 +340,9 @@ func.def @operand_schema_summary() -> (i64, i64, i64, i64, i64, i64) {
 // Exact logical scale-group shapes distinguish groups with the same element
 // count but different axis boundaries.
 func.def @operand_scale_group_shapes() -> (i64, i64, i64, i64, i64, i64, i64, i64, i64) {
-  %square = encoding.define #encoding.operand<affine=scale_only, element_format=f4e2m1, payload_elements=256, payload_packing=separate_scale_payload, scale_format=f8e4m3fn, scale_group_shape=[16, 16], scale_operands=1, scale_topology=block_2d> : encoding<schema>
-  %row = encoding.define #encoding.operand<affine=scale_only, element_format=f4e2m1, payload_elements=16, payload_packing=separate_scale_payload, scale_format=f8e4m3fn, scale_group_shape=[1, 16], scale_operands=1, scale_topology=block_2d> : encoding<schema>
-  %linear = encoding.define #encoding.operand<affine=scale_only, element_format=f4e2m1, payload_elements=32, payload_packing=separate_scale_payload, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %square = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=256, payload_packing=separate_scale_payload, scale_format=f8e4m3fn, scale_group_shape=[16, 16], scale_operands=1, scale_topology=block_2d> : encoding<schema>
+  %row = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=16, payload_packing=separate_scale_payload, scale_format=f8e4m3fn, scale_group_shape=[1, 16], scale_operands=1, scale_topology=block_2d> : encoding<schema>
+  %linear = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=32, payload_packing=separate_scale_payload, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %square_rank = test.fact_encoding_operand_field %square["scale_group_rank"] : encoding<schema> -> i64
   %square_dim0 = test.fact_encoding_operand_field %square["scale_group_dim0"] : encoding<schema> -> i64
   %square_dim1 = test.fact_encoding_operand_field %square["scale_group_dim1"] : encoding<schema> -> i64
@@ -419,12 +419,12 @@ func.def @ggml_q8_0_schema_summary() -> (i64, i64, i64, i64, i64, i64, i64) {
 // Generic FP8 operand schemas expose their target-independent numeric format
 // and dense one-byte payload contract.
 func.def @operand_fp8_schema_summary() -> (i64, i64, i64, i64, i64, i64) {
-  %ieee_e4m3 = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
-  %ieee_e5m2 = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
-  %fn = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
-  %finite_fn = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=1, payload_packing=dense_lanes, rounding=finite_only> : encoding<schema>
-  %fnuz = encoding.define #encoding.operand<element_format=f8e4m3fnuz, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
-  %e5m2fnuz = encoding.define #encoding.operand<element_format=f8e5m2fnuz, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
+  %ieee_e4m3 = encoding.define #encoding.f8e4m3 : encoding<schema>
+  %ieee_e5m2 = encoding.define #encoding.f8e5m2 : encoding<schema>
+  %fn = encoding.define #encoding.f8e4m3fn : encoding<schema>
+  %finite_fn = encoding.define #encoding.f8e4m3fn<rounding=finite_only> : encoding<schema>
+  %fnuz = encoding.define #encoding.f8e4m3fnuz : encoding<schema>
+  %e5m2fnuz = encoding.define #encoding.f8e5m2fnuz : encoding<schema>
   %ieee_e4m3_format = test.fact_encoding_operand_field %ieee_e4m3["element_format"] : encoding<schema> -> i64
   %ieee_e5m2_format = test.fact_encoding_operand_field %ieee_e5m2["element_format"] : encoding<schema> -> i64
   %fn_format = test.fact_encoding_operand_field %fn["element_format"] : encoding<schema> -> i64

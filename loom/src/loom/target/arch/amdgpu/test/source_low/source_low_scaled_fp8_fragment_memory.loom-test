@@ -12,7 +12,7 @@ kernel.def target(@target) @scaled_fp8_rhs_bf16_wmma_fragment_memory() {
   %n = index.constant 16 : index
   %k = index.constant 16 : index
   %weight_layout = encoding.layout.strided [1, 16] : encoding<layout>
-  %weight_schema = encoding.define #encoding.operand<affine=scale_only, element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes, rounding=finite_only, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %weight_schema = encoding.define #encoding.f8e4m3<affine=scale_only, payload_elements=8, rounding=finite_only, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %weight_storage = encoding.define #encoding.storage {layout = %weight_layout : encoding<layout>, schema = %weight_schema : encoding<schema>} : encoding<storage>
   %input_view = buffer.view %input[%base] : buffer -> view<16x16xbf16, #encoding.layout.dense>
   %weight_view = buffer.view %weight[%base] : buffer -> view<16x16xf8E4M3, %weight_storage>
@@ -147,7 +147,7 @@ kernel.def target(@target) @scaled_fp8_rhs_bf16_fragment_memory() {
   %k = index.constant 16 : index
   %n = index.constant 16 : index
   %weight_layout = encoding.layout.strided [1, 16] : encoding<layout>
-  %weight_schema = encoding.define #encoding.operand<affine=scale_only, element_format=f8e4m3, payload_elements=4, payload_packing=dense_lanes, rounding=finite_only, scale_format=f32, scale_group_elements=4, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %weight_schema = encoding.define #encoding.f8e4m3<affine=scale_only, payload_elements=4, rounding=finite_only, scale_format=f32, scale_group_elements=4, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %weight_storage = encoding.define #encoding.storage {layout = %weight_layout : encoding<layout>, schema = %weight_schema : encoding<schema>} : encoding<storage>
   %weight_view = buffer.view %weight[%base] : buffer -> view<16x16xf8E4M3, %weight_storage>
   %scale_view = buffer.view %scale[%base] : buffer -> view<1xf32, #encoding.layout.dense>
@@ -198,7 +198,7 @@ kernel.def target(@target) @scaled_bf8_rhs_bf16_wmma_fragment_memory() {
   %n = index.constant 16 : index
   %k = index.constant 16 : index
   %weight_layout = encoding.layout.strided [1, 16] : encoding<layout>
-  %weight_schema = encoding.define #encoding.operand<affine=scale_only, element_format=f8e5m2, payload_elements=8, payload_packing=dense_lanes, rounding=finite_only, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %weight_schema = encoding.define #encoding.f8e5m2<affine=scale_only, payload_elements=8, rounding=finite_only, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %weight_storage = encoding.define #encoding.storage {layout = %weight_layout : encoding<layout>, schema = %weight_schema : encoding<schema>} : encoding<storage>
   %input_view = buffer.view %input[%base] : buffer -> view<16x16xbf16, #encoding.layout.dense>
   %weight_view = buffer.view %weight[%base] : buffer -> view<16x16xf8E5M2, %weight_storage>

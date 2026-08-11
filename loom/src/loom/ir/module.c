@@ -771,13 +771,88 @@ iree_status_t loom_module_add_encoding(loom_module_t* module,
   }
 
   iree_string_view_t encoding_name = module->strings.entries[encoding->name_id];
+  const loom_encoding_name_resolution_t name_resolution =
+      loom_context_resolve_encoding_name(module->context, encoding_name);
+  const loom_encoding_vtable_t* vtable = loom_context_resolve_encoding_vtable(
+      module->context, name_resolution.family_id);
+  if (!vtable && module->context->encodings.vtables.count > 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unknown encoding family '%.*s'",
+                            (int)encoding_name.size, encoding_name.data);
+  }
 
   loom_attribute_t canonical_attr_dict = {0};
-  IREE_RETURN_IF_ERROR(loom_module_make_canonical_attr_dict(
-      module,
-      loom_make_named_attr_slice(encoding->attributes,
-                                 encoding->attribute_count),
-      &canonical_attr_dict));
+  loom_string_id_t canonical_name_id = encoding->name_id;
+  if (name_resolution.alias) {
+    const loom_encoding_alias_descriptor_t* alias = name_resolution.alias;
+    IREE_RETURN_IF_ERROR(loom_module_intern_string(
+        module, loom_bstring_view(vtable->descriptor->name),
+        &canonical_name_id));
+
+    loom_named_attr_t* alias_entries = NULL;
+    if (alias->parameter_count > 0) {
+      alias_entries = (loom_named_attr_t*)iree_alloca(alias->parameter_count *
+                                                      sizeof(*alias_entries));
+    }
+    for (uint8_t i = 0; i < alias->parameter_count; ++i) {
+      const loom_encoding_alias_parameter_t* parameter = &alias->parameters[i];
+      const loom_attr_descriptor_t* parameter_descriptor =
+          &vtable->descriptor
+               ->parameter_descriptors[parameter->parameter_index];
+      IREE_RETURN_IF_ERROR(loom_module_intern_string(
+          module, loom_attr_descriptor_name(parameter_descriptor),
+          &alias_entries[i].name_id));
+      alias_entries[i].reserved = 0;
+      alias_entries[i].value = parameter->value;
+    }
+
+    loom_named_attr_update_t* authored_updates = NULL;
+    if (encoding->attribute_count > 0) {
+      authored_updates = (loom_named_attr_update_t*)iree_alloca(
+          encoding->attribute_count * sizeof(*authored_updates));
+    }
+    for (uint8_t i = 0; i < encoding->attribute_count; ++i) {
+      for (uint8_t alias_parameter_index = 0;
+           alias_parameter_index < alias->parameter_count;
+           ++alias_parameter_index) {
+        const loom_encoding_alias_parameter_t* alias_parameter =
+            &alias->parameters[alias_parameter_index];
+        if (!iree_any_bit_set(alias_parameter->flags,
+                              LOOM_ENCODING_ALIAS_PARAMETER_FIXED)) {
+          continue;
+        }
+        if (encoding->attributes[i].name_id !=
+            alias_entries[alias_parameter_index].name_id) {
+          continue;
+        }
+        const iree_string_view_t parameter_name =
+            module->strings
+                .entries[alias_entries[alias_parameter_index].name_id];
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "encoding alias '%.*s' fixes parameter '%.*s'; the parameter "
+            "cannot be restated",
+            (int)encoding_name.size, encoding_name.data,
+            (int)parameter_name.size, parameter_name.data);
+      }
+      authored_updates[i] = loom_named_attr_replace(
+          encoding->attributes[i].name_id, encoding->attributes[i].value);
+    }
+    IREE_RETURN_IF_ERROR(loom_module_replace_canonical_attr_dict(
+        module,
+        loom_make_named_attr_slice(alias_entries, alias->parameter_count),
+        (loom_named_attr_update_slice_t){
+            .updates = authored_updates,
+            .count = encoding->attribute_count,
+        },
+        &canonical_attr_dict));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_module_make_canonical_attr_dict(
+        module,
+        loom_make_named_attr_slice(encoding->attributes,
+                                   encoding->attribute_count),
+        &canonical_attr_dict));
+  }
   if (canonical_attr_dict.count > UINT8_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "encoding '%.*s' has %u parameters, max %u",
@@ -787,21 +862,13 @@ iree_status_t loom_module_add_encoding(loom_module_t* module,
   }
 
   loom_encoding_t canonical_encoding = {
-      .name_id = encoding->name_id,
+      .name_id = canonical_name_id,
       .alias_id = encoding->alias_id,
       .attribute_count = canonical_attr_dict.count,
-      .family.id = loom_context_lookup_encoding_family_by_name(module->context,
-                                                               encoding_name),
+      .family.id = name_resolution.family_id,
       .attributes = canonical_attr_dict.dict_entries,
   };
 
-  const loom_encoding_vtable_t* vtable = loom_context_resolve_encoding_vtable(
-      module->context, canonical_encoding.family.id);
-  if (!vtable && module->context->encodings.vtables.count > 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unknown encoding family '%.*s'",
-                            (int)encoding_name.size, encoding_name.data);
-  }
   if (vtable && canonical_encoding.attribute_count > 0) {
     // Canonical dictionary entries are freshly allocated by this function and
     // have not yet been published through their const module-owned view.

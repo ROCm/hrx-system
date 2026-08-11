@@ -405,6 +405,7 @@ def _emit_decode_comparison_vector(
 
 def _emit_encode_pair(row: Fp8Format, source_format: _BinaryFormat) -> str:
     format_name = row.keyword
+    schema_spelling = f"#encoding.{format_name}<payload_elements=8>"
     source_name = source_format.type_spelling
     carrier_type = _scalar_type_spelling(row.carrier_type)
     kernel_name = f"fp8_encode_{format_name}_{source_name}_exact"
@@ -429,8 +430,8 @@ def _emit_encode_pair(row: Fp8Format, source_format: _BinaryFormat) -> str:
         "  %head_offset = index.constant 0 : index",
         "  %tail_offset = index.constant 8 : index",
         f"  %output_view = buffer.view %output[%base] : buffer -> view<{exact_width}xi8, #encoding.layout.dense>",
-        f"  %head_schema = encoding.define #encoding.operand<element_format={format_name}, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>",
-        f"  %tail_schema = encoding.define #encoding.operand<element_format={format_name}, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>",
+        f"  %head_schema = encoding.define {schema_spelling} : encoding<schema>",
+        f"  %tail_schema = encoding.define {schema_spelling} : encoding<schema>",
         *_emit_exact_constants(
             values,
             source_format.integer_type_spelling,
@@ -491,7 +492,7 @@ def _emit_encode_pair(row: Fp8Format, source_format: _BinaryFormat) -> str:
         "  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer",
         f"  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8x{source_name}, #encoding.layout.dense>",
         "  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8, #encoding.layout.dense>",
-        f"  %schema = encoding.define #encoding.operand<element_format={format_name}, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>",
+        f"  %schema = encoding.define {schema_spelling} : encoding<schema>",
         "  scf.if %in_bounds {",
         f"    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8x{source_name}, #encoding.layout.dense> -> vector<8x{source_name}>",
         f"    %encoded = vector.encode %source using %schema : vector<8x{source_name}>, encoding<schema> -> vector<8x{carrier_type}>",
@@ -527,6 +528,7 @@ def _emit_encode_pair(row: Fp8Format, source_format: _BinaryFormat) -> str:
 
 def _emit_decode_pair(row: Fp8Format, result_format: _BinaryFormat) -> str:
     format_name = row.keyword
+    schema_spelling = f"#encoding.{format_name}<payload_elements=8>"
     result_name = result_format.type_spelling
     carrier_type = _scalar_type_spelling(row.carrier_type)
     kernel_name = f"fp8_decode_{format_name}_{result_name}_exact"
@@ -554,8 +556,8 @@ def _emit_decode_pair(row: Fp8Format, result_format: _BinaryFormat) -> str:
         "  %head_offset = index.constant 0 : index",
         "  %tail_offset = index.constant 8 : index",
         f"  %output_view = buffer.view %output[%base] : buffer -> view<{exact_width}x{output_integer_type}, #encoding.layout.dense>",
-        f"  %head_schema = encoding.define #encoding.operand<element_format={format_name}, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>",
-        f"  %tail_schema = encoding.define #encoding.operand<element_format={format_name}, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>",
+        f"  %head_schema = encoding.define {schema_spelling} : encoding<schema>",
+        f"  %tail_schema = encoding.define {schema_spelling} : encoding<schema>",
         f"  %comparison_mask_all_bits = scalar.constant -1 : {output_integer_type}",
         f"  %comparison_mask_without_sign = scalar.constant {(1 << (result_format.bit_count - 1)) - 1} : {output_integer_type}",
         *_emit_exact_constants(
@@ -634,7 +636,7 @@ def _emit_decode_pair(row: Fp8Format, result_format: _BinaryFormat) -> str:
         "  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer",
         "  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8, #encoding.layout.dense>",
         f"  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8x{result_name}, #encoding.layout.dense>",
-        f"  %schema = encoding.define #encoding.operand<element_format={format_name}, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>",
+        f"  %schema = encoding.define {schema_spelling} : encoding<schema>",
         "  scf.if %in_bounds {",
         "    %source_bits = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xi8, #encoding.layout.dense> -> vector<8xi8>",
         f"    %source = vector.bitcast %source_bits : vector<8xi8> to vector<8x{carrier_type}>",

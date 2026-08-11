@@ -266,6 +266,47 @@ typedef struct loom_encoding_family_fixed_metadata_t {
   loom_encoding_record_geometry_t record;
 } loom_encoding_family_fixed_metadata_t;
 
+// Flags describing how a canonical encoding alias contributes a parameter.
+enum loom_encoding_alias_parameter_flag_bits_e {
+  // The parameter establishes alias identity and cannot be restated.
+  LOOM_ENCODING_ALIAS_PARAMETER_FIXED = 1u << 0,
+};
+typedef uint8_t loom_encoding_alias_parameter_flags_t;
+
+// One parameter contributed by a canonical encoding alias.
+//
+// Parameter indexes address the target family's generated descriptor table.
+// Values are process-lifetime literals and must not contain module-relative
+// string, symbol, type, or encoding IDs.
+typedef struct loom_encoding_alias_parameter_t {
+  // Zero-based target family parameter descriptor index.
+  uint8_t parameter_index;
+
+  // Identity behavior; zero denotes an overrideable default value.
+  loom_encoding_alias_parameter_flags_t flags;
+
+  // Module-independent fixed or default parameter value.
+  loom_attribute_t value;
+} loom_encoding_alias_parameter_t;
+
+// Generated canonical source spelling for one structural family instance.
+//
+// Alias parameters are expanded before module interning. Fixed parameters
+// establish identity and cannot be restated; default parameters may be
+// overridden. The module retains only the target family and merged structural
+// parameter dictionary; this descriptor is consulted again only by text
+// printing.
+typedef struct loom_encoding_alias_descriptor_t {
+  // Stable canonical source name without a leading '#'.
+  loom_bstring_t name;
+
+  // Number of lexically ordered contributed parameters in |parameters|.
+  uint8_t parameter_count;
+
+  // Generated process-lifetime parameter rows, or NULL when empty.
+  const loom_encoding_alias_parameter_t* parameters;
+} loom_encoding_alias_descriptor_t;
+
 // Generated structural metadata for one registered encoding family.
 typedef struct loom_encoding_family_descriptor_t {
   // Stable public family name without a leading '#'.
@@ -283,6 +324,14 @@ typedef struct loom_encoding_family_descriptor_t {
       dynamic_parameter_descriptors;
   // Generated family-wide constants, or NULL when every fact is parameterized.
   const loom_encoding_family_fixed_metadata_t* fixed_metadata;
+  // Number of canonical source aliases in |aliases|.
+  uint8_t alias_count;
+  // Parameter descriptor index whose enum value directly selects an alias.
+  uint8_t alias_discriminator_parameter_index;
+  // Generated canonical aliases for structural family instances, or NULL.
+  const loom_encoding_alias_descriptor_t* aliases;
+  // Dense enum-value table of one-based alias ordinals; zero means no alias.
+  const uint8_t* alias_ordinals_by_discriminator;
 } loom_encoding_family_descriptor_t;
 
 // A module-owned table of unique static encoding instances.

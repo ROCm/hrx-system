@@ -73,6 +73,7 @@ from loom.dsl import (
     Dialect,
     ElementWidthAtLeastAttr,
     ElementWidthGreaterThan,
+    EncodingAliasDef,
     EncodingFamilyDef,
     EncodingFamilyRole,
     EncodingOperandSummaryDef,
@@ -460,6 +461,13 @@ def test_generate_encoding_family_metadata() -> None:
             AttrDef("rounding", ATTR_TYPE_ENUM, enum_def=rounding, optional=True),
             AttrDef("payload_elements", ATTR_TYPE_I64),
         ],
+        aliases=[
+            EncodingAliasDef(
+                "encoding.scalar_nearest",
+                fixed_parameters={"rounding": "nearest_even"},
+                default_parameters={"payload_elements": 1},
+            )
+        ],
         dynamic_parameters=[
             Operand("matrix", TypeConstraint.VECTOR),
             Operand("seed", TypeConstraint.INDEX),
@@ -513,6 +521,19 @@ def test_generate_encoding_family_metadata() -> None:
     assert ".attr_kind = LOOM_ATTR_ENUM" in tables_c
     assert ".flags = LOOM_ATTR_OPTIONAL" in tables_c
     assert ".parameter_count = IREE_ARRAYSIZE(loom_encoding_operand_parameter_desc)" in tables_c
+    assert "loom_encoding_operand_alias_0_parameters[]" in tables_c
+    assert ".parameter_index = 0" in tables_c
+    assert ".value = {.kind = LOOM_ATTR_I64, .i64 = INT64_C(1)}" in tables_c
+    assert ".parameter_index = 1" in tables_c
+    assert ".flags = LOOM_ENCODING_ALIAS_PARAMETER_FIXED" in tables_c
+    assert ".value = {.kind = LOOM_ATTR_ENUM, .raw = 1}" in tables_c
+    assert '.name = _BSTRING(23, "encoding.scalar_nearest")' in tables_c
+    assert ".alias_count = IREE_ARRAYSIZE(loom_encoding_operand_aliases)" in tables_c
+    assert ".aliases = loom_encoding_operand_aliases" in tables_c
+    assert "static const uint8_t loom_encoding_operand_alias_ordinals[2]" in tables_c
+    assert "[1] = 1" in tables_c
+    assert ".alias_discriminator_parameter_index = 1" in tables_c
+    assert ".alias_ordinals_by_discriminator = loom_encoding_operand_alias_ordinals" in tables_c
     assert "static const loom_encoding_dynamic_parameter_descriptor_t loom_encoding_operand_dynamic_parameter_desc[]" in tables_c
     assert ".type_constraint = LOOM_TYPE_CONSTRAINT_VECTOR" in tables_c
     assert ".type_constraint = LOOM_TYPE_CONSTRAINT_INDEX" in tables_c

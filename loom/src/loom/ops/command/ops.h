@@ -174,7 +174,7 @@ iree_status_t loom_command_concurrent_build(
     loom_op_t** out_op);
 
 // LOOM_OP_COMMAND_PARAMETER: Associate immutable named parameter content with an explicit command-program buffer root. The pattern contains one canonical decimal placeholder for each index substitution. The result is a logical typed view; this operation performs no allocation, lookup, transfer, or synchronization.
-// %embedding = command.parameter %parameters, "token_embd.weight" : view<175030272xi8, #dense>
+// %embedding = command.parameter %parameters, "token_embd.weight" : view<175030272xi8, #encoding.layout.dense>
 LOOM_DEFINE_ISA(loom_command_parameter_isa, LOOM_OP_COMMAND_PARAMETER)
 LOOM_DEFINE_OPERAND(loom_command_parameter_source, 0)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_command_parameter_substitutions, 1)

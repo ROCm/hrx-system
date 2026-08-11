@@ -39,7 +39,7 @@ Quick reference — declaring an op:
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum, unique
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
@@ -234,6 +234,7 @@ __all__ = [
     "RegisterUnitsSumTo",
     # Op group.
     "Dialect",
+    "EncodingAliasDef",
     "EncodingOperandSummaryDef",
     "EncodingFamilyDef",
     "EncodingFamilyRole",
@@ -3192,6 +3193,115 @@ class EncodingOperandSummaryDef:
 
 
 @dataclass(frozen=True, slots=True)
+class EncodingAliasDef:
+    """Declares one canonical name for a parameterized encoding schema.
+
+    Aliases are source spellings for a structural family instance, not
+    independent encoding families. Fixed parameters establish identity and
+    cannot be restated. Default parameters are expanded before module interning
+    and may be overridden explicitly. Other family parameters remain available
+    normally.
+    """
+
+    name: str
+    fixed_parameters: tuple[tuple[str, Any], ...]
+    default_parameters: tuple[tuple[str, Any], ...]
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        fixed_parameters: Mapping[str, Any],
+        default_parameters: Mapping[str, Any] | None = None,
+    ) -> None:
+        if not _is_ascii_qualified_identifier(name):
+            raise ValueError(
+                f"EncodingAliasDef '{name}': alias name must be a dotted "
+                "ASCII identifier"
+            )
+        lexical_fixed_parameters = tuple(
+            sorted(
+                (parameter_name, _freeze_encoding_alias_parameter(value))
+                for parameter_name, value in fixed_parameters.items()
+            )
+        )
+        lexical_default_parameters = tuple(
+            sorted(
+                (parameter_name, _freeze_encoding_alias_parameter(value))
+                for parameter_name, value in (default_parameters or {}).items()
+            )
+        )
+        parameter_count = len(lexical_fixed_parameters) + len(
+            lexical_default_parameters
+        )
+        if parameter_count > 0xFF:
+            raise ValueError(
+                f"EncodingAliasDef '{name}': {parameter_count} "
+                "parameters exceed the uint8_t slot limit"
+            )
+        fixed_names = {name for name, _ in lexical_fixed_parameters}
+        default_names = {name for name, _ in lexical_default_parameters}
+        duplicate_names = fixed_names & default_names
+        if duplicate_names:
+            duplicate_name = min(duplicate_names)
+            raise ValueError(
+                f"EncodingAliasDef '{name}': parameter '{duplicate_name}' is "
+                "both fixed and defaulted"
+            )
+        for parameter_name in fixed_names | default_names:
+            if not _is_ascii_identifier(parameter_name):
+                raise ValueError(
+                    f"EncodingAliasDef '{name}': parameter '{parameter_name}' "
+                    "must be a bare ASCII identifier"
+                )
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "fixed_parameters", lexical_fixed_parameters)
+        object.__setattr__(self, "default_parameters", lexical_default_parameters)
+
+    @property
+    def parameters(self) -> tuple[tuple[str, Any], ...]:
+        """Returns every contributed parameter in lexical order."""
+
+        return tuple(sorted((*self.fixed_parameters, *self.default_parameters)))
+
+
+def _freeze_encoding_alias_parameter(value: Any) -> Any:
+    if isinstance(value, list | tuple):
+        return tuple(_freeze_encoding_alias_parameter(item) for item in value)
+    return value
+
+
+def _validate_encoding_alias_parameter(
+    family_name: str,
+    alias_name: str,
+    descriptor: AttrDef,
+    value: Any,
+) -> None:
+    """Validates one process-lifetime alias literal against its descriptor."""
+
+    valid = False
+    match descriptor.attr_type:
+        case "i64":
+            valid = type(value) is int and -(1 << 63) <= value < (1 << 63)
+        case "f64":
+            valid = type(value) in (int, float) and math.isfinite(float(value))
+        case "bool":
+            valid = type(value) is bool
+        case "enum":
+            valid = (
+                type(value) is str
+                and descriptor.enum_def is not None
+                and value in descriptor.enum_def.keywords
+            )
+    if not valid:
+        raise ValueError(
+            f"EncodingFamilyDef '{family_name}': alias '{alias_name}' value "
+            f"{value!r} does not satisfy {descriptor.attr_type} parameter "
+            f"'{descriptor.name}'"
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class EncodingFamilyDef:
     """Declares one registered encoding family.
 
@@ -3205,6 +3315,8 @@ class EncodingFamilyDef:
     group: Dialect
     role: EncodingFamilyRole
     parameters: tuple[AttrDef, ...] = ()
+    aliases: tuple[EncodingAliasDef, ...] = ()
+    alias_discriminator: AttrDef | None = None
     dynamic_parameters: tuple[Operand, ...] = ()
     fixed_record: EncodingRecordDef | None = None
     fixed_operand_summary: EncodingOperandSummaryDef | None = None
@@ -3219,6 +3331,7 @@ class EncodingFamilyDef:
         group: Dialect,
         role: EncodingFamilyRole,
         parameters: list[AttrDef] | tuple[AttrDef, ...] = (),
+        aliases: list[EncodingAliasDef] | tuple[EncodingAliasDef, ...] = (),
         dynamic_parameters: list[Operand] | tuple[Operand, ...] = (),
         fixed_record: EncodingRecordDef | None = None,
         fixed_operand_summary: EncodingOperandSummaryDef | None = None,
@@ -3292,6 +3405,70 @@ class EncodingFamilyDef:
         _validate_descriptor_parameters(
             f"EncodingFamilyDef '{name}'", lexical_parameters
         )
+        descriptors_by_name = {
+            parameter.name: parameter for parameter in lexical_parameters
+        }
+        frozen_aliases = tuple(aliases)
+        if len(frozen_aliases) > 0xFF:
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': {len(frozen_aliases)} aliases "
+                "exceed the uint8_t ordinal limit"
+            )
+        seen_alias_names: set[str] = set()
+        for alias in frozen_aliases:
+            if not isinstance(alias, EncodingAliasDef):
+                raise ValueError(
+                    f"EncodingFamilyDef '{name}': alias {alias!r} must be an "
+                    "EncodingAliasDef"
+                )
+            if alias.name == name:
+                raise ValueError(
+                    f"EncodingFamilyDef '{name}': alias repeats the family name"
+                )
+            if alias.name in seen_alias_names:
+                raise ValueError(
+                    f"EncodingFamilyDef '{name}': duplicate alias '{alias.name}'"
+                )
+            seen_alias_names.add(alias.name)
+            for parameter_name, parameter_value in alias.parameters:
+                descriptor = descriptors_by_name.get(parameter_name)
+                if descriptor is None:
+                    raise ValueError(
+                        f"EncodingFamilyDef '{name}': alias '{alias.name}' "
+                        f"references unknown parameter '{parameter_name}'"
+                    )
+                _validate_encoding_alias_parameter(
+                    name, alias.name, descriptor, parameter_value
+                )
+        frozen_aliases = tuple(sorted(frozen_aliases, key=lambda alias: alias.name))
+        alias_discriminator = None
+        if frozen_aliases:
+            common_fixed_names = {
+                parameter_name
+                for parameter_name, _ in frozen_aliases[0].fixed_parameters
+            }
+            for alias in frozen_aliases[1:]:
+                common_fixed_names &= {
+                    parameter_name for parameter_name, _ in alias.fixed_parameters
+                }
+            for descriptor in lexical_parameters:
+                if (
+                    descriptor.name not in common_fixed_names
+                    or descriptor.attr_type != ATTR_TYPE_ENUM
+                ):
+                    continue
+                discriminator_values = {
+                    dict(alias.fixed_parameters)[descriptor.name]
+                    for alias in frozen_aliases
+                }
+                if len(discriminator_values) == len(frozen_aliases):
+                    alias_discriminator = descriptor
+                    break
+            if alias_discriminator is None:
+                raise ValueError(
+                    f"EncodingFamilyDef '{name}': canonical aliases require "
+                    "one shared enum fixed parameter with a unique value per alias"
+                )
         lexical_dynamic_parameters = tuple(
             sorted(dynamic_parameters, key=lambda value: value.name)
         )
@@ -3324,6 +3501,8 @@ class EncodingFamilyDef:
         object.__setattr__(self, "group", group)
         object.__setattr__(self, "role", role)
         object.__setattr__(self, "parameters", lexical_parameters)
+        object.__setattr__(self, "aliases", frozen_aliases)
+        object.__setattr__(self, "alias_discriminator", alias_discriminator)
         object.__setattr__(self, "dynamic_parameters", lexical_dynamic_parameters)
         object.__setattr__(self, "fixed_record", fixed_record)
         object.__setattr__(self, "fixed_operand_summary", fixed_operand_summary)

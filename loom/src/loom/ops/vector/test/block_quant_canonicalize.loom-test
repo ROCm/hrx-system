@@ -416,7 +416,7 @@ func.def @q6_k_reference_chunk_folds() -> (i1) {
 // Grid/table-based formats keep the table explicit; facts can still fold exact
 // code streams through vector.table.lookup and vector.cmpf.
 func.def @iq_grid_reference_chunk_folds() -> (i1) {
-  %schema = encoding.define #encoding.operand<codebook=dynamic_table_operand, element_format=u4, payload_elements=4, payload_packing=codebook_indices> : encoding<schema>
+  %schema = encoding.define #encoding.u4<codebook=dynamic_table_operand, payload_elements=4, payload_packing=codebook_indices> : encoding<schema>
   test.use %schema : encoding<schema>
 
   %p0 = scalar.constant 0x10 : i8
@@ -450,7 +450,7 @@ func.def @iq_grid_reference_chunk_folds() -> (i1) {
 }
 // ----
 func.def @iq_grid_reference_chunk_folds() -> (i1) {
-  %schema = encoding.define #encoding.operand<codebook=dynamic_table_operand, element_format=u4, payload_elements=4, payload_packing=codebook_indices> : encoding<schema>
+  %schema = encoding.define #encoding.u4<codebook=dynamic_table_operand, payload_elements=4, payload_packing=codebook_indices> : encoding<schema>
   test.use %schema : encoding<schema>
   %ok = scalar.constant true : i1
   func.return %ok : i1

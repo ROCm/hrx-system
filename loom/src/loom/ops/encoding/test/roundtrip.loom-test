@@ -40,7 +40,7 @@ func.def @semantic_schema_query(%schema: encoding<schema>) -> (i1) {
 
 // Dynamic encoding parameters are named SSA operands on encoding.define.
 func.def @dynamic_encoding_params(%group_size: index, %scale: f32) {
-  %enc = encoding.define #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes> {group_size = %group_size : index, scale = %scale : f32} : encoding<schema>
+  %enc = encoding.define #encoding.i8<payload_elements=32> {group_size = %group_size : index, scale = %scale : f32} : encoding<schema>
   test.use %enc : encoding<schema>
   func.return
 }
@@ -49,7 +49,7 @@ func.def @dynamic_encoding_params(%group_size: index, %scale: f32) {
 
 // The resulting encoding value is attached explicitly in shaped types.
 func.def @dynamic_encoding_attachment(%group_size: index) {
-  %enc = encoding.define #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes> {group_size = %group_size : index} : encoding<schema>
+  %enc = encoding.define #encoding.i8<payload_elements=32> {group_size = %group_size : index} : encoding<schema>
   %tile = test.constant 0 : tile<256xi8, %enc>
   test.use %tile : tile<256xi8, %enc>
   func.return
@@ -60,7 +60,7 @@ func.def @dynamic_encoding_attachment(%group_size: index) {
 // Multidimensional scale groups are logical schema structure; physical scale
 // tensor padding and swizzling remain in the enclosing storage layout.
 func.def @multidimensional_scale_group() {
-  %schema = encoding.define #encoding.operand<affine=scale_only, element_format=f4e2m1, payload_elements=256, payload_packing=separate_scale_payload, scale_format=f8e4m3fn, scale_group_shape=[16, 16], scale_operands=1, scale_topology=block_2d> : encoding<schema>
+  %schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=256, payload_packing=separate_scale_payload, scale_format=f8e4m3fn, scale_group_shape=[16, 16], scale_operands=1, scale_topology=block_2d> : encoding<schema>
   test.use %schema : encoding<schema>
   func.return
 }

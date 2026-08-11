@@ -23,8 +23,8 @@ kernel.def @fp8_encode_f8e4m3_f32_exact() {
   %head_offset = index.constant 0 : index
   %tail_offset = index.constant 8 : index
   %output_view = buffer.view %output[%base] : buffer -> view<16xi8, #encoding.layout.dense>
-  %head_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
-  %tail_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
+  %head_schema = encoding.define #encoding.f8e4m3<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e4m3<payload_elements=8> : encoding<schema>
   %source_positive_zero_encode = scalar.constant 0 : i32
   %expected_positive_zero_encode = scalar.constant 0 : i8
   %source_negative_zero_encode = scalar.constant -2147483648 : i32
@@ -93,7 +93,7 @@ kernel.def @fp8_encode_f8e4m3_f32_rows(%row_count: index) {
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
   %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xf32, #encoding.layout.dense>
   %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8, #encoding.layout.dense>
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3<payload_elements=8> : encoding<schema>
   scf.if %in_bounds {
     %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xf32, #encoding.layout.dense> -> vector<8xf32>
     %encoded = vector.encode %source using %schema : vector<8xf32>, encoding<schema> -> vector<8xf8E4M3>
@@ -134,8 +134,8 @@ kernel.def @fp8_encode_f8e4m3_f16_exact() {
   %head_offset = index.constant 0 : index
   %tail_offset = index.constant 8 : index
   %output_view = buffer.view %output[%base] : buffer -> view<16xi8, #encoding.layout.dense>
-  %head_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
-  %tail_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
+  %head_schema = encoding.define #encoding.f8e4m3<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e4m3<payload_elements=8> : encoding<schema>
   %source_positive_zero_encode = scalar.constant 0 : i16
   %expected_positive_zero_encode = scalar.constant 0 : i8
   %source_negative_zero_encode = scalar.constant -32768 : i16
@@ -204,7 +204,7 @@ kernel.def @fp8_encode_f8e4m3_f16_rows(%row_count: index) {
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
   %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xf16, #encoding.layout.dense>
   %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8, #encoding.layout.dense>
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3<payload_elements=8> : encoding<schema>
   scf.if %in_bounds {
     %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xf16, #encoding.layout.dense> -> vector<8xf16>
     %encoded = vector.encode %source using %schema : vector<8xf16>, encoding<schema> -> vector<8xf8E4M3>
@@ -245,8 +245,8 @@ kernel.def @fp8_encode_f8e4m3_bf16_exact() {
   %head_offset = index.constant 0 : index
   %tail_offset = index.constant 8 : index
   %output_view = buffer.view %output[%base] : buffer -> view<16xi8, #encoding.layout.dense>
-  %head_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
-  %tail_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
+  %head_schema = encoding.define #encoding.f8e4m3<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e4m3<payload_elements=8> : encoding<schema>
   %source_positive_zero_encode = scalar.constant 0 : i16
   %expected_positive_zero_encode = scalar.constant 0 : i8
   %source_negative_zero_encode = scalar.constant -32768 : i16
@@ -315,7 +315,7 @@ kernel.def @fp8_encode_f8e4m3_bf16_rows(%row_count: index) {
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
   %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xbf16, #encoding.layout.dense>
   %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8, #encoding.layout.dense>
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3<payload_elements=8> : encoding<schema>
   scf.if %in_bounds {
     %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xbf16, #encoding.layout.dense> -> vector<8xbf16>
     %encoded = vector.encode %source using %schema : vector<8xbf16>, encoding<schema> -> vector<8xf8E4M3>
@@ -356,8 +356,8 @@ kernel.def @fp8_encode_f8e4m3fn_f32_exact() {
   %head_offset = index.constant 0 : index
   %tail_offset = index.constant 8 : index
   %output_view = buffer.view %output[%base] : buffer -> view<16xi8, #encoding.layout.dense>
-  %head_schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
-  %tail_schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
+  %head_schema = encoding.define #encoding.f8e4m3fn<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e4m3fn<payload_elements=8> : encoding<schema>
   %source_positive_zero_encode = scalar.constant 0 : i32
   %expected_positive_zero_encode = scalar.constant 0 : i8
   %source_negative_zero_encode = scalar.constant -2147483648 : i32
@@ -426,7 +426,7 @@ kernel.def @fp8_encode_f8e4m3fn_f32_rows(%row_count: index) {
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
   %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xf32, #encoding.layout.dense>
   %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8, #encoding.layout.dense>
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fn<payload_elements=8> : encoding<schema>
   scf.if %in_bounds {
     %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xf32, #encoding.layout.dense> -> vector<8xf32>
     %encoded = vector.encode %source using %schema : vector<8xf32>, encoding<schema> -> vector<8xf8E4M3>
@@ -467,8 +467,8 @@ kernel.def @fp8_encode_f8e4m3fn_f16_exact() {
   %head_offset = index.constant 0 : index
   %tail_offset = index.constant 8 : index
   %output_view = buffer.view %output[%base] : buffer -> view<16xi8, #encoding.layout.dense>
-  %head_schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
-  %tail_schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
+  %head_schema = encoding.define #encoding.f8e4m3fn<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e4m3fn<payload_elements=8> : encoding<schema>
   %source_positive_zero_encode = scalar.constant 0 : i16
   %expected_positive_zero_encode = scalar.constant 0 : i8
   %source_negative_zero_encode = scalar.constant -32768 : i16
@@ -537,7 +537,7 @@ kernel.def @fp8_encode_f8e4m3fn_f16_rows(%row_count: index) {
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
   %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xf16, #encoding.layout.dense>
   %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8, #encoding.layout.dense>
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fn<payload_elements=8> : encoding<schema>
   scf.if %in_bounds {
     %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xf16, #encoding.layout.dense> -> vector<8xf16>
     %encoded = vector.encode %source using %schema : vector<8xf16>, encoding<schema> -> vector<8xf8E4M3>
@@ -578,8 +578,8 @@ kernel.def @fp8_encode_f8e4m3fn_bf16_exact() {
   %head_offset = index.constant 0 : index
   %tail_offset = index.constant 8 : index
   %output_view = buffer.view %output[%base] : buffer -> view<16xi8, #encoding.layout.dense>
-  %head_schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
-  %tail_schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
+  %head_schema = encoding.define #encoding.f8e4m3fn<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e4m3fn<payload_elements=8> : encoding<schema>
   %source_positive_zero_encode = scalar.constant 0 : i16
   %expected_positive_zero_encode = scalar.constant 0 : i8
   %source_negative_zero_encode = scalar.constant -32768 : i16
@@ -648,7 +648,7 @@ kernel.def @fp8_encode_f8e4m3fn_bf16_rows(%row_count: index) {
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
   %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xbf16, #encoding.layout.dense>
   %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8, #encoding.layout.dense>
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fn<payload_elements=8> : encoding<schema>
   scf.if %in_bounds {
     %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xbf16, #encoding.layout.dense> -> vector<8xbf16>
     %encoded = vector.encode %source using %schema : vector<8xbf16>, encoding<schema> -> vector<8xf8E4M3>
@@ -689,8 +689,8 @@ kernel.def @fp8_encode_f8e4m3fnuz_f32_exact() {
   %head_offset = index.constant 0 : index
   %tail_offset = index.constant 8 : index
   %output_view = buffer.view %output[%base] : buffer -> view<16xi8, #encoding.layout.dense>
-  %head_schema = encoding.define #encoding.operand<element_format=f8e4m3fnuz, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
-  %tail_schema = encoding.define #encoding.operand<element_format=f8e4m3fnuz, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
+  %head_schema = encoding.define #encoding.f8e4m3fnuz<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e4m3fnuz<payload_elements=8> : encoding<schema>
   %source_positive_zero_encode = scalar.constant 0 : i32
   %expected_positive_zero_encode = scalar.constant 0 : i8
   %source_negative_zero_encode = scalar.constant -2147483648 : i32
@@ -759,7 +759,7 @@ kernel.def @fp8_encode_f8e4m3fnuz_f32_rows(%row_count: index) {
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
   %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xf32, #encoding.layout.dense>
   %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8, #encoding.layout.dense>
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3fnuz, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fnuz<payload_elements=8> : encoding<schema>
   scf.if %in_bounds {
     %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xf32, #encoding.layout.dense> -> vector<8xf32>
     %encoded = vector.encode %source using %schema : vector<8xf32>, encoding<schema> -> vector<8xf8E4M3>
@@ -800,8 +800,8 @@ kernel.def @fp8_encode_f8e4m3fnuz_f16_exact() {
   %head_offset = index.constant 0 : index
   %tail_offset = index.constant 8 : index
   %output_view = buffer.view %output[%base] : buffer -> view<16xi8, #encoding.layout.dense>
-  %head_schema = encoding.define #encoding.operand<element_format=f8e4m3fnuz, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
-  %tail_schema = encoding.define #encoding.operand<element_format=f8e4m3fnuz, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
+  %head_schema = encoding.define #encoding.f8e4m3fnuz<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e4m3fnuz<payload_elements=8> : encoding<schema>
   %source_positive_zero_encode = scalar.constant 0 : i16
   %expected_positive_zero_encode = scalar.constant 0 : i8
   %source_negative_zero_encode = scalar.constant -32768 : i16
@@ -870,7 +870,7 @@ kernel.def @fp8_encode_f8e4m3fnuz_f16_rows(%row_count: index) {
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
   %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xf16, #encoding.layout.dense>
   %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8, #encoding.layout.dense>
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3fnuz, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fnuz<payload_elements=8> : encoding<schema>
   scf.if %in_bounds {
     %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xf16, #encoding.layout.dense> -> vector<8xf16>
     %encoded = vector.encode %source using %schema : vector<8xf16>, encoding<schema> -> vector<8xf8E4M3>
@@ -911,8 +911,8 @@ kernel.def @fp8_encode_f8e4m3fnuz_bf16_exact() {
   %head_offset = index.constant 0 : index
   %tail_offset = index.constant 8 : index
   %output_view = buffer.view %output[%base] : buffer -> view<16xi8, #encoding.layout.dense>
-  %head_schema = encoding.define #encoding.operand<element_format=f8e4m3fnuz, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
-  %tail_schema = encoding.define #encoding.operand<element_format=f8e4m3fnuz, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
+  %head_schema = encoding.define #encoding.f8e4m3fnuz<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e4m3fnuz<payload_elements=8> : encoding<schema>
   %source_positive_zero_encode = scalar.constant 0 : i16
   %expected_positive_zero_encode = scalar.constant 0 : i8
   %source_negative_zero_encode = scalar.constant -32768 : i16
@@ -981,7 +981,7 @@ kernel.def @fp8_encode_f8e4m3fnuz_bf16_rows(%row_count: index) {
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
   %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xbf16, #encoding.layout.dense>
   %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8, #encoding.layout.dense>
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3fnuz, payload_elements=8, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fnuz<payload_elements=8> : encoding<schema>
   scf.if %in_bounds {
     %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xbf16, #encoding.layout.dense> -> vector<8xbf16>
     %encoded = vector.encode %source using %schema : vector<8xbf16>, encoding<schema> -> vector<8xf8E4M3>

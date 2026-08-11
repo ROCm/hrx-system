@@ -118,10 +118,12 @@ typedef struct loom_parameterized_attr_name_table_t {
 
 // Entry in the finalized encoding family-name lookup table.
 typedef struct loom_encoding_family_name_entry_t {
-  // Borrowed public family name from the generated descriptor.
+  // Borrowed public family or canonical alias name.
   iree_string_view_t name;
   // Dense one-based identity in the context encoding registry.
   loom_encoding_family_id_t family_id;
+  // Borrowed canonical alias descriptor, or NULL for the family name itself.
+  const loom_encoding_alias_descriptor_t* alias;
 } loom_encoding_family_name_entry_t;
 
 // Finalized encoding family-name hash table used at format and module
@@ -142,6 +144,15 @@ typedef struct loom_encoding_registry_t {
   // Public family spelling to dense identity lookup table.
   loom_encoding_family_name_table_t names;
 } loom_encoding_registry_t;
+
+// Result of resolving one public encoding family or canonical alias name.
+typedef struct loom_encoding_name_resolution_t {
+  // Dense one-based identity of the target structural family.
+  loom_encoding_family_id_t family_id;
+  // Canonical alias that contributed fixed identity and default parameters, or
+  // NULL when the authored name was the target family name itself.
+  const loom_encoding_alias_descriptor_t* alias;
+} loom_encoding_name_resolution_t;
 
 // The global context: vtables, allocator, and shared language registries.
 //
@@ -270,11 +281,10 @@ const loom_parameterized_attr_descriptor_t*
 loom_context_lookup_parameterized_attr_by_name(const loom_context_t* context,
                                                iree_string_view_t name);
 
-// Looks up an encoding family by its bare name (`encoding.operand`,
-// `encoding.layout.dense`, ...).
-// Returns LOOM_ENCODING_FAMILY_ID_INVALID when no matching family is
-// registered. The context must be finalized.
-loom_encoding_family_id_t loom_context_lookup_encoding_family_by_name(
+// Resolves an encoding family or canonical alias by its bare public name.
+// Returns an invalid family identity when no matching name is registered. The
+// context must be finalized.
+loom_encoding_name_resolution_t loom_context_resolve_encoding_name(
     const loom_context_t* context, iree_string_view_t name);
 
 // Resolves a dense context-local encoding family identity to its vtable.

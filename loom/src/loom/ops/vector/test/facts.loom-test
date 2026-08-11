@@ -1763,7 +1763,7 @@ func.def @f8e4m3_type_fragment_load_content(%buffer: buffer) -> (i1, i1) {
 func.def @finite_only_storage_vector_load_content(%buffer: buffer) -> (i1, i1) {
   %offset = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=1, payload_packing=dense_lanes, rounding=finite_only> : encoding<schema>
+  %schema = encoding.define #encoding.f8e5m2<rounding=finite_only> : encoding<schema>
   %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<16xf8E5M2, %storage>
   %value = vector.load %view[0] : view<16xf8E5M2, %storage> -> vector<4xf8E5M2>
@@ -1808,7 +1808,7 @@ func.def @finite_flush_storage_vector_load_content(%buffer: buffer) -> (i1, i1) 
 func.def @fn_fp8_storage_vector_load_content(%buffer: buffer) -> (i1, i1) {
   %offset = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fn : encoding<schema>
   %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<16xf8E4M3, %storage>
   %value = vector.load %view[0] : view<16xf8E4M3, %storage> -> vector<4xf8E4M3>
@@ -1822,7 +1822,7 @@ func.def @fn_fp8_storage_vector_load_content(%buffer: buffer) -> (i1, i1) {
 func.def @fn_fp8_storage_vector_load_content(%buffer: buffer) -> (i1, i1) {
   %offset = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fn : encoding<schema>
   %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<16xf8E4M3, %storage>
   %value = vector.load %view[0] : view<16xf8E4M3, %storage> -> vector<4xf8E4M3>
@@ -1839,7 +1839,7 @@ func.def @fn_fp8_storage_vector_load_content(%buffer: buffer) -> (i1, i1) {
 func.def @fnuz_fp8_storage_vector_load_content(%buffer: buffer) -> (i1, i1) {
   %offset = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3fnuz, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fnuz : encoding<schema>
   %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<16xf8E4M3, %storage>
   %value = vector.load %view[0] : view<16xf8E4M3, %storage> -> vector<4xf8E4M3>
@@ -1853,7 +1853,7 @@ func.def @fnuz_fp8_storage_vector_load_content(%buffer: buffer) -> (i1, i1) {
 func.def @fnuz_fp8_storage_vector_load_content(%buffer: buffer) -> (i1, i1) {
   %offset = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3fnuz, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fnuz : encoding<schema>
   %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<16xf8E4M3, %storage>
   %value = vector.load %view[0] : view<16xf8E4M3, %storage> -> vector<4xf8E4M3>
@@ -1872,7 +1872,7 @@ func.def @fn_fp8_storage_fragment_load_content(%buffer: buffer) -> (i1, i1) {
   %origin = index.constant 0 : index
   %fragment_extent = index.constant 16 : index
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fn : encoding<schema>
   %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<16x16xf8E4M3, %storage>
   %fragment = vector.fragment.load<rhs> %view[%origin, %origin] shape [%fragment_extent, %fragment_extent] : view<16x16xf8E4M3, %storage> -> vector<16xbf16>
@@ -1888,7 +1888,7 @@ func.def @fn_fp8_storage_fragment_load_content(%buffer: buffer) -> (i1, i1) {
   %origin = index.constant 0 : index
   %fragment_extent = index.constant 16 : index
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fn : encoding<schema>
   %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<16x16xf8E4M3, %storage>
   %fragment = vector.fragment.load<rhs> %view[%origin, %origin] shape [%fragment_extent, %fragment_extent] : view<16x16xf8E4M3, %storage> -> vector<16xbf16>
@@ -1907,7 +1907,7 @@ func.def @fnuz_fp8_storage_fragment_load_content(%buffer: buffer) -> (i1, i1) {
   %origin = index.constant 0 : index
   %fragment_extent = index.constant 16 : index
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3fnuz, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fnuz : encoding<schema>
   %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<16x16xf8E4M3, %storage>
   %fragment = vector.fragment.load<rhs> %view[%origin, %origin] shape [%fragment_extent, %fragment_extent] : view<16x16xf8E4M3, %storage> -> vector<16xbf16>
@@ -1923,7 +1923,7 @@ func.def @fnuz_fp8_storage_fragment_load_content(%buffer: buffer) -> (i1, i1) {
   %origin = index.constant 0 : index
   %fragment_extent = index.constant 16 : index
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3fnuz, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fnuz : encoding<schema>
   %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<16x16xf8E4M3, %storage>
   %fragment = vector.fragment.load<rhs> %view[%origin, %origin] shape [%fragment_extent, %fragment_extent] : view<16x16xf8E4M3, %storage> -> vector<16xbf16>
@@ -1962,7 +1962,7 @@ func.def @finite_only_storage_fragment_load_content(%buffer: buffer) -> (i1, i1)
 // Explicit decodes carry the same finite-only content facts as encoded storage
 // while preserving subnormal uncertainty.
 func.def @finite_only_vector_decode_content(%payload: vector<2xf8E4M3>) -> (i1, i1) {
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=2, payload_packing=dense_lanes, rounding=finite_only> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3<payload_elements=2, rounding=finite_only> : encoding<schema>
   %decoded = vector.decode %payload using %schema : vector<2xf8E4M3>, encoding<schema> -> vector<2xbf16>
   %lane = vector.extract %decoded[0] : vector<2xbf16> -> bf16
   %finite = test.fact_finite %lane : bf16 -> i1
@@ -1982,7 +1982,7 @@ func.def @finite_only_vector_decode_content(%payload: vector<2xf8E4M3>) -> (i1, 
 // Explicit finite-flush decodes carry both finite and not-subnormal content
 // facts to consumers when the payload source has the same storage contract.
 func.def @finite_flush_vector_decode_content(%payload: vector<2xf8E4M3>) -> (i1, i1) {
-  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=2, payload_packing=dense_lanes, rounding=finite_flush_subnormal> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3<payload_elements=2, rounding=finite_flush_subnormal> : encoding<schema>
   %decoded = vector.decode %payload using %schema : vector<2xf8E4M3>, encoding<schema> -> vector<2xbf16>
   %lane = vector.extract %decoded[0] : vector<2xbf16> -> bf16
   %finite = test.fact_finite %lane : bf16 -> i1

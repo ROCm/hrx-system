@@ -2,7 +2,7 @@
 
 amdgpu.target<gfx942> @target
 func.def target(@target) @nvfp4_f16_mfma_gfx942(%lhs_payload: vector<2xi32>, %lhs_scale: vector<1xi32>, %rhs_payload: vector<2xi32>, %rhs_scale: vector<1xi32>, %init_data: vector<4xf32>) -> (vector<4xf32>) {
-  %schema = encoding.define #encoding.operand<affine=scale_only, element_format=f4e2m1, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2, scale_format=f8e4m3fn, scale_group_elements=16, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2, scale_format=f8e4m3fn, scale_group_elements=16, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   %lhs_data = vector.decode %lhs_payload using %schema {scale = %lhs_scale : vector<1xi32>} : vector<2xi32>, encoding<schema> -> vector<16xf16>
   %rhs_data = vector.decode %rhs_payload using %schema {scale = %rhs_scale : vector<1xi32>} : vector<2xi32>, encoding<schema> -> vector<16xf16>
   %m = index.constant 16 : index
@@ -238,7 +238,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @nvfp4_f16_mfma_
 
 amdgpu.target<gfx950> @target
 func.def target(@target) @nvfp4_f16_mfma_gfx950(%lhs_payload: vector<2xi32>, %lhs_scale: vector<1xi32>, %rhs_payload: vector<2xi32>, %rhs_scale: vector<1xi32>, %init_data: vector<4xf32>) -> (vector<4xf32>) {
-  %schema = encoding.define #encoding.operand<affine=scale_only, element_format=f4e2m1, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2, scale_format=f8e4m3fn, scale_group_elements=16, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2, scale_format=f8e4m3fn, scale_group_elements=16, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   %lhs_data = vector.decode %lhs_payload using %schema {scale = %lhs_scale : vector<1xi32>} : vector<2xi32>, encoding<schema> -> vector<16xf16>
   %rhs_data = vector.decode %rhs_payload using %schema {scale = %rhs_scale : vector<1xi32>} : vector<2xi32>, encoding<schema> -> vector<16xf16>
   %m = index.constant 16 : index
@@ -456,7 +456,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @nvfp4_f16_mfma_
 
 amdgpu.target<gfx1100> @target
 func.def target(@target) @nvfp4_f16_wmma_gfx1100(%lhs_payload: vector<2xi32>, %lhs_scale: vector<1xi32>, %rhs_payload: vector<2xi32>, %rhs_scale: vector<1xi32>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
-  %schema = encoding.define #encoding.operand<affine=scale_only, element_format=f4e2m1, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2, scale_format=f8e4m3fn, scale_group_elements=16, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2, scale_format=f8e4m3fn, scale_group_elements=16, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   %lhs_data = vector.decode %lhs_payload using %schema {scale = %lhs_scale : vector<1xi32>} : vector<2xi32>, encoding<schema> -> vector<16xf16>
   %rhs_data = vector.decode %rhs_payload using %schema {scale = %rhs_scale : vector<1xi32>} : vector<2xi32>, encoding<schema> -> vector<16xf16>
   %m = index.constant 16 : index
@@ -656,7 +656,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @nvfp4_f16_wmma_
 
 amdgpu.target<gfx1151> @target
 func.def target(@target) @nvfp4_f16_wmma_gfx1151(%lhs_payload: vector<2xi32>, %lhs_scale: vector<1xi32>, %rhs_payload: vector<2xi32>, %rhs_scale: vector<1xi32>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
-  %schema = encoding.define #encoding.operand<affine=scale_only, element_format=f4e2m1, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2, scale_format=f8e4m3fn, scale_group_elements=16, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2, scale_format=f8e4m3fn, scale_group_elements=16, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   %lhs_data = vector.decode %lhs_payload using %schema {scale = %lhs_scale : vector<1xi32>} : vector<2xi32>, encoding<schema> -> vector<16xf16>
   %rhs_data = vector.decode %rhs_payload using %schema {scale = %rhs_scale : vector<1xi32>} : vector<2xi32>, encoding<schema> -> vector<16xf16>
   %m = index.constant 16 : index
@@ -856,7 +856,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @nvfp4_f16_wmm
 
 amdgpu.target<gfx1200> @target
 func.def target(@target) @nvfp4_f16_wmma_gfx1200(%lhs_payload: vector<2xi32>, %lhs_scale: vector<1xi32>, %rhs_payload: vector<2xi32>, %rhs_scale: vector<1xi32>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
-  %schema = encoding.define #encoding.operand<affine=scale_only, element_format=f4e2m1, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2, scale_format=f8e4m3fn, scale_group_elements=16, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2, scale_format=f8e4m3fn, scale_group_elements=16, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   %lhs_data = vector.decode %lhs_payload using %schema {scale = %lhs_scale : vector<1xi32>} : vector<2xi32>, encoding<schema> -> vector<16xf16>
   %rhs_data = vector.decode %rhs_payload using %schema {scale = %rhs_scale : vector<1xi32>} : vector<2xi32>, encoding<schema> -> vector<16xf16>
   %m = index.constant 16 : index
@@ -1067,7 +1067,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @nvfp4_f16_wmma_
 
 amdgpu.target<gfx1250> @target
 func.def target(@target) @nvfp4_f16_wmma_gfx1250(%lhs_payload: vector<2xi32>, %lhs_scale: vector<1xi32>, %rhs_payload: vector<2xi32>, %rhs_scale: vector<1xi32>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
-  %schema = encoding.define #encoding.operand<affine=scale_only, element_format=f4e2m1, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2, scale_format=f8e4m3fn, scale_group_elements=16, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2, scale_format=f8e4m3fn, scale_group_elements=16, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   %lhs_data = vector.decode %lhs_payload using %schema {scale = %lhs_scale : vector<1xi32>} : vector<2xi32>, encoding<schema> -> vector<16xf16>
   %rhs_data = vector.decode %rhs_payload using %schema {scale = %rhs_scale : vector<1xi32>} : vector<2xi32>, encoding<schema> -> vector<16xf16>
   %m = index.constant 16 : index

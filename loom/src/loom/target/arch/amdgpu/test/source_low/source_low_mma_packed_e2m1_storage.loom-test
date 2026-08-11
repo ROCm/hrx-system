@@ -20,12 +20,12 @@ kernel.def target(@target) @f16_lhs_packed_e2m1_rhs_grouped_scale_wmma() {
   %k_base = index.mul %k_half, %packed_k_width : index
 
   %payload_layout = encoding.layout.dense : encoding<layout>
-  %payload_schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2> : encoding<schema>
+  %payload_schema = encoding.define #encoding.f4e2m1<payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2> : encoding<schema>
   %payload_storage = encoding.define #encoding.storage {layout = %payload_layout : encoding<layout>, schema = %payload_schema : encoding<schema>} : encoding<storage>
   %scale_layout = encoding.layout.strided [1, 1] : encoding<layout>
-  %scale_schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
+  %scale_schema = encoding.define #encoding.f8e4m3fn : encoding<schema>
   %scale_storage = encoding.define #encoding.storage {layout = %scale_layout : encoding<layout>, schema = %scale_schema : encoding<schema>} : encoding<storage>
-  %decode_schema = encoding.define #encoding.operand<affine=scale_only, element_format=f4e2m1, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2, scale_format=f8e4m3fn, scale_group_elements=2, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %decode_schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2, scale_format=f8e4m3fn, scale_group_elements=2, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
 
   %lhs_noalias, %payload_noalias, %scale_noalias, %global_scale_noalias, %out_noalias = buffer.assume.noalias %lhs_buffer, %payload_buffer, %scale_buffer, %global_scale_buffer, %out_buffer : buffer, buffer, buffer, buffer, buffer
   %lhs_view = buffer.view %lhs_noalias[%base] : buffer -> view<16x16xf16, #encoding.layout.dense>

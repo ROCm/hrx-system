@@ -167,10 +167,10 @@ iree_status_t loom_parse_static_encoding(loom_parser_t* parser,
     return iree_ok_status();
   }
 
-  const loom_encoding_family_id_t family_id =
-      loom_context_lookup_encoding_family_by_name(parser->context, token.text);
+  const loom_encoding_name_resolution_t name_resolution =
+      loom_context_resolve_encoding_name(parser->context, token.text);
   if (parser->context->encodings.vtables.count > 0 &&
-      family_id == LOOM_ENCODING_FAMILY_ID_INVALID) {
+      name_resolution.family_id == LOOM_ENCODING_FAMILY_ID_INVALID) {
     loom_diagnostic_param_t params[] = {
         loom_param_string(token.text),
     };
@@ -178,7 +178,8 @@ iree_status_t loom_parse_static_encoding(loom_parser_t* parser,
                             IREE_ARRAYSIZE(params), token);
   }
   const loom_encoding_vtable_t* family_vtable =
-      loom_context_resolve_encoding_vtable(parser->context, family_id);
+      loom_context_resolve_encoding_vtable(parser->context,
+                                           name_resolution.family_id);
   const loom_encoding_family_descriptor_t* family_descriptor =
       family_vtable ? family_vtable->descriptor : NULL;
 

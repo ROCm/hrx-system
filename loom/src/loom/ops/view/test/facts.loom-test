@@ -575,7 +575,7 @@ func.def @finite_only_storage_view_load_content(%buffer: buffer) -> (i1) {
 func.def @fnuz_fp8_storage_view_load_content(%buffer: buffer) -> (i1, i1) {
   %offset = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #encoding.operand<element_format=f8e5m2fnuz, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e5m2fnuz : encoding<schema>
   %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E5M2, %storage>
   %value = view.load %view[0] : view<4xf8E5M2, %storage> -> f8E5M2
@@ -587,7 +587,7 @@ func.def @fnuz_fp8_storage_view_load_content(%buffer: buffer) -> (i1, i1) {
 func.def @fnuz_fp8_storage_view_load_content(%buffer: buffer) -> (i1, i1) {
   %offset = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #encoding.operand<element_format=f8e5m2fnuz, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e5m2fnuz : encoding<schema>
   %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E5M2, %storage>
   %value = view.load %view[0] : view<4xf8E5M2, %storage> -> f8E5M2
@@ -603,7 +603,7 @@ func.def @fnuz_fp8_storage_view_load_content(%buffer: buffer) -> (i1, i1) {
 func.def @ieee_e5m2_storage_view_load_content_is_unknown(%buffer: buffer) -> (i1, i1) {
   %offset = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e5m2 : encoding<schema>
   %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E5M2, %storage>
   %value = view.load %view[0] : view<4xf8E5M2, %storage> -> f8E5M2
@@ -615,7 +615,7 @@ func.def @ieee_e5m2_storage_view_load_content_is_unknown(%buffer: buffer) -> (i1
 func.def @ieee_e5m2_storage_view_load_content_is_unknown(%buffer: buffer) -> (i1, i1) {
   %offset = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
+  %schema = encoding.define #encoding.f8e5m2 : encoding<schema>
   %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E5M2, %storage>
   %value = view.load %view[0] : view<4xf8E5M2, %storage> -> f8E5M2

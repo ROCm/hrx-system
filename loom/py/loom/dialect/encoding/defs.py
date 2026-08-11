@@ -44,6 +44,7 @@ from loom.dsl import (
     ConditionRefinement,
     ConditionRefinementTruth,
     Dialect,
+    EncodingAliasDef,
     EncodingFamilyDef,
     EncodingFamilyRole,
     EncodingOperandSummaryDef,
@@ -297,6 +298,43 @@ _TURBOQUANT_KV_PARAMETERS = (
     AttrDef("transform_family", ATTR_TYPE_STRING),
 )
 
+_CANONICAL_NUMERIC_SCHEMA_FORMATS = (
+    "f64",
+    "f32",
+    "tf32",
+    "f16",
+    "bf16",
+    "i32",
+    "u32",
+    "i16",
+    "u16",
+    "i8",
+    "u8",
+    "i6",
+    "u6",
+    "i5",
+    "u5",
+    "i4",
+    "u4",
+    "i3",
+    "u3",
+    "i2",
+    "u2",
+    "i1",
+    "u1",
+    "f8e4m3",
+    "f8e5m2",
+    "f8e4m3fn",
+    "f8e4m3fnuz",
+    "f8e5m2fnuz",
+    "e8m0",
+    "bf8",
+    "f6e3m2",
+    "f6e2m3",
+    "bf6",
+    "f4e2m1",
+)
+
 ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
     EncodingFamilyDef(
         "encoding.storage",
@@ -437,6 +475,17 @@ ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
         group=encoding_ops,
         role=EncodingFamilyRole.STORAGE_SCHEMA,
         parameters=_OPERAND_PARAMETERS,
+        aliases=tuple(
+            EncodingAliasDef(
+                f"encoding.{numeric_format}",
+                fixed_parameters={"element_format": numeric_format},
+                default_parameters={
+                    "payload_elements": 1,
+                    "payload_packing": "dense_lanes",
+                },
+            )
+            for numeric_format in _CANONICAL_NUMERIC_SCHEMA_FORMATS
+        ),
         auxiliary_key_enum=AuxiliaryKey,
         doc="Target-independent encoded operand schema.",
     ),
