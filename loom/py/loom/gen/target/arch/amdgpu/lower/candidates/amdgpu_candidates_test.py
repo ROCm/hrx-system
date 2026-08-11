@@ -240,8 +240,9 @@ def test_candidate_range_validation_rejects_uint16_overflow() -> None:
 
 
 def test_memory_generator_emits_data_fragments_only() -> None:
-    candidate_rows = amdgpu_memory_candidates._emit_candidate_rows()
-    candidate_ranges = amdgpu_memory_candidates._emit_candidate_ranges()
+    candidates = amdgpu_memory_candidates._ordered_candidates(amdgpu_memory_candidates.amdgpu_memory_descriptor_candidates())
+    candidate_rows = amdgpu_memory_candidates._emit_candidate_rows(candidates)
+    candidate_ranges = amdgpu_memory_candidates._emit_candidate_ranges(candidates)
 
     for source in (candidate_rows, candidate_ranges):
         assert "typedef " not in source

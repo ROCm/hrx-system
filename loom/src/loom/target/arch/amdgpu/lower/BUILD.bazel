@@ -62,18 +62,17 @@ exports_files(
     visibility = ["//loom/py/loom/target/arch/amdgpu/contracts:__pkg__"],
 )
 
-loom_generated_textual_header(
-    name = "memory_descriptor_candidate_ranges_gen",
+loom_generated_textual_header_family(
+    name = "memory_descriptor_candidate_tables_gen",
     generator = _AMDGPU_MEMORY_CANDIDATE_GENERATOR,
-    output = "memory_descriptor_candidate_ranges.inl",
-    output_flag = "--candidate-ranges",
-)
-
-loom_generated_textual_header(
-    name = "memory_descriptor_candidates_gen",
-    generator = _AMDGPU_MEMORY_CANDIDATE_GENERATOR,
-    output = "memory_descriptor_candidates.inl",
-    output_flag = "--candidate-rows",
+    output_flags = [
+        "--candidate-ranges",
+        "--candidate-rows",
+    ],
+    outputs = [
+        "memory_descriptor_candidate_ranges.inl",
+        "memory_descriptor_candidates.inl",
+    ],
 )
 
 loom_generated_textual_header(

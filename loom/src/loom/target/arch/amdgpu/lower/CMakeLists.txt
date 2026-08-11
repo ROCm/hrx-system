@@ -35,27 +35,16 @@ loom_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
+loom_generated_textual_header_family(
   NAME
-    memory_descriptor_candidate_ranges_gen
+    memory_descriptor_candidate_tables_gen
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::lower::candidates::memory_candidates
-  OUTPUT
+  OUTPUTS
     "memory_descriptor_candidate_ranges.inl"
-  OUTPUT_FLAG
-    "--candidate-ranges"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    memory_descriptor_candidates_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::lower::candidates::memory_candidates
-  OUTPUT
     "memory_descriptor_candidates.inl"
-  OUTPUT_FLAG
+  OUTPUT_FLAGS
+    "--candidate-ranges"
     "--candidate-rows"
 )
 endif()
