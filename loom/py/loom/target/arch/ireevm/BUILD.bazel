@@ -12,12 +12,16 @@ package(
 )
 
 iree_py_library(
+    name = "package_init",
+    srcs = ["__init__.py"],
+    deps = ["//loom/py/loom/target/arch:package_init"],
+)
+
+iree_py_library(
     name = "dialect",
-    srcs = [
-        "__init__.py",
-        "dialect.py",
-    ],
+    srcs = ["dialect.py"],
     deps = [
+        ":package_init",
         "//loom/py/loom:core",
         "//loom/py/loom/dialect/func",
         "//loom/py/loom/dialect/target",
@@ -26,11 +30,9 @@ iree_py_library(
 
 iree_py_library(
     name = "descriptors",
-    srcs = [
-        "__init__.py",
-        "descriptors.py",
-    ],
+    srcs = ["descriptors.py"],
     deps = [
+        ":package_init",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch:package",
     ],

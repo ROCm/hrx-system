@@ -24,7 +24,6 @@ iree_py_library(
   NAME
     contracts
   SRCS
-    "__init__.py"
     "contracts.py"
   DEPS
     loom::py::loom::target::arch::llvmir::descriptors

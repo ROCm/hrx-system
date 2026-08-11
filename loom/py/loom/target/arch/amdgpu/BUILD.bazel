@@ -91,7 +91,6 @@ iree_py_library(
 iree_py_library(
     name = "dialect",
     srcs = [
-        "__init__.py",
         "dialect.py",
     ],
     deps = [
@@ -144,7 +143,6 @@ iree_py_test(
 iree_py_library(
     name = "descriptors",
     srcs = [
-        "__init__.py",
         "descriptor_overlay.py",
         "descriptors/__init__.py",
         "descriptors/alu.py",
@@ -168,7 +166,6 @@ iree_py_library(
         "descriptors/sets.py",
         "descriptors/tensor.py",
         "descriptors/workgroup.py",
-        "target_info.py",
     ],
     deps = [
         ":encoding_info",

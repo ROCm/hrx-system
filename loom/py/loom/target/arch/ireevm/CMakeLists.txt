@@ -11,11 +11,20 @@ iree_add_all_subdirs()
 
 iree_py_library(
   NAME
-    dialect
+    package_init
   SRCS
     "__init__.py"
+  DEPS
+    loom::py::loom::target::arch::package_init
+)
+
+iree_py_library(
+  NAME
+    dialect
+  SRCS
     "dialect.py"
   DEPS
+    loom::py::loom::target::arch::ireevm::package_init
     loom::py::loom::core
     loom::py::loom::dialect::func::func
     loom::py::loom::dialect::target::target
@@ -25,9 +34,9 @@ iree_py_library(
   NAME
     descriptors
   SRCS
-    "__init__.py"
     "descriptors.py"
   DEPS
+    loom::py::loom::target::arch::ireevm::package_init
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::package
 )

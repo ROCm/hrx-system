@@ -36,7 +36,6 @@ iree_py_library(
   NAME
     c_tables
   SRCS
-    "__init__.py"
     "c_builder_declarations.py"
     "c_builder_model.py"
     "c_builder_source.py"

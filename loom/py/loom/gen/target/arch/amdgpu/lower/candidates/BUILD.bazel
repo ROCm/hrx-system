@@ -31,14 +31,11 @@ iree_py_library(
 
 iree_py_binary(
     name = "arithmetic_candidates",
-    srcs = [
-        "__init__.py",
-        "amdgpu_arithmetic_candidates.py",
-        "validation.py",
-    ],
+    srcs = ["amdgpu_arithmetic_candidates.py"],
     main = "amdgpu_arithmetic_candidates.py",
     visibility = GENERATOR_VISIBILITY,
     deps = [
+        ":validation",
         "//loom/py/loom/gen/support",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch/amdgpu:descriptors",
@@ -47,14 +44,11 @@ iree_py_binary(
 
 iree_py_binary(
     name = "async_gather_candidates",
-    srcs = [
-        "__init__.py",
-        "amdgpu_async_gather_candidates.py",
-        "validation.py",
-    ],
+    srcs = ["amdgpu_async_gather_candidates.py"],
     main = "amdgpu_async_gather_candidates.py",
     visibility = GENERATOR_VISIBILITY,
     deps = [
+        ":validation",
         "//loom/py/loom/gen/support",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch/amdgpu:descriptors",
@@ -63,14 +57,11 @@ iree_py_binary(
 
 iree_py_binary(
     name = "atomic_candidates",
-    srcs = [
-        "__init__.py",
-        "amdgpu_atomic_candidates.py",
-        "validation.py",
-    ],
+    srcs = ["amdgpu_atomic_candidates.py"],
     main = "amdgpu_atomic_candidates.py",
     visibility = GENERATOR_VISIBILITY,
     deps = [
+        ":validation",
         "//loom/py/loom/gen/support",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch/amdgpu:descriptors",
@@ -79,14 +70,11 @@ iree_py_binary(
 
 iree_py_binary(
     name = "compare_candidates",
-    srcs = [
-        "__init__.py",
-        "amdgpu_compare_candidates.py",
-        "validation.py",
-    ],
+    srcs = ["amdgpu_compare_candidates.py"],
     main = "amdgpu_compare_candidates.py",
     visibility = GENERATOR_VISIBILITY,
     deps = [
+        ":validation",
         "//loom/py/loom/dialect/scalar",
         "//loom/py/loom/dialect/vector",
         "//loom/py/loom/gen/support",
@@ -97,14 +85,11 @@ iree_py_binary(
 
 iree_py_binary(
     name = "memory_candidates",
-    srcs = [
-        "__init__.py",
-        "amdgpu_memory_candidates.py",
-        "validation.py",
-    ],
+    srcs = ["amdgpu_memory_candidates.py"],
     main = "amdgpu_memory_candidates.py",
     visibility = GENERATOR_VISIBILITY,
     deps = [
+        ":validation",
         "//loom/py/loom/gen/support",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch/amdgpu:descriptors",

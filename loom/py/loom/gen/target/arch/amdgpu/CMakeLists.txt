@@ -11,13 +11,20 @@ iree_add_all_subdirs()
 
 iree_py_library(
   NAME
+    package_init
+  SRCS
+    "__init__.py"
+)
+
+iree_py_library(
+  NAME
     config_tables
   MAIN
     "amdgpu_config_tables.py"
   SRCS
-    "__init__.py"
     "amdgpu_config_tables.py"
   DEPS
+    loom::py::loom::gen::target::arch::amdgpu::package_init
     loom::py::loom::gen::support::support
     loom::py::loom::target::arch::amdgpu::encoding_info
     loom::py::loom::target::arch::amdgpu::target_info
@@ -47,9 +54,9 @@ iree_py_library(
   MAIN
     "amdgpu_low_aliases.py"
   SRCS
-    "__init__.py"
     "amdgpu_low_aliases.py"
   DEPS
+    loom::py::loom::gen::target::arch::amdgpu::package_init
     loom::py::loom::gen::support::support
     loom::py::loom::target::arch::amdgpu::descriptors
     loom::py::loom::target::arch::amdgpu::low_aliases
@@ -61,9 +68,9 @@ iree_py_library(
   MAIN
     "amdgpu_target_info.py"
   SRCS
-    "__init__.py"
     "amdgpu_target_info.py"
   DEPS
+    loom::py::loom::gen::target::arch::amdgpu::package_init
     loom::py::loom::gen::support::support
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::descriptors

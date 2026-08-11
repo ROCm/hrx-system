@@ -21,7 +21,6 @@ set(IREE_PACKAGE_ROOT_PREFIX "loom/py/loom")
 
 iree_py_library(
     name = "package",
-    srcs = ["__init__.py"],
     imports = [".."],
     deps = [
         ":core",

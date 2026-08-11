@@ -25,10 +25,7 @@ iree_py_library(
 
 iree_py_library(
     name = "contracts",
-    srcs = [
-        "__init__.py",
-        "contracts.py",
-    ],
+    srcs = ["contracts.py"],
     deps = [
         ":descriptors",
         "//loom/py/loom:core",

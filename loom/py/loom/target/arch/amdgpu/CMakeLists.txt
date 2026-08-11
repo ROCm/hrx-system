@@ -110,7 +110,6 @@ iree_py_library(
   NAME
     dialect
   SRCS
-    "__init__.py"
     "dialect.py"
   DEPS
     loom::py::loom::core
@@ -175,7 +174,6 @@ iree_py_library(
   NAME
     descriptors
   SRCS
-    "__init__.py"
     "descriptor_overlay.py"
     "descriptors/__init__.py"
     "descriptors/alu.py"
@@ -199,7 +197,6 @@ iree_py_library(
     "descriptors/sets.py"
     "descriptors/tensor.py"
     "descriptors/workgroup.py"
-    "target_info.py"
   DEPS
     loom::py::loom::target::arch::amdgpu::encoding_info
     loom::py::loom::target::arch::amdgpu::isa_xml

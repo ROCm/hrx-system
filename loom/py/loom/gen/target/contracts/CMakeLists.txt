@@ -11,11 +11,18 @@ iree_add_all_subdirs()
 
 iree_py_library(
   NAME
-    contract_fragments
+    package_init
   SRCS
     "__init__.py"
+)
+
+iree_py_library(
+  NAME
+    contract_fragments
+  SRCS
     "contract_fragments.py"
   DEPS
+    loom::py::loom::gen::target::contracts::package_init
     loom::py::loom::core
     loom::py::loom::gen::support::support
     loom::py::loom::gen::target::package
@@ -26,7 +33,6 @@ iree_py_library(
   NAME
     contract_fragment
   SRCS
-    "__init__.py"
     "contract_fragment.py"
   DEPS
     loom::py::loom::gen::target::contracts::contract_fragments
@@ -37,11 +43,11 @@ iree_py_library(
   NAME
     lower_rules
   SRCS
-    "__init__.py"
     "lower_rule_rows.py"
     "lower_rule_spelling.py"
     "lower_rules.py"
   DEPS
+    loom::py::loom::gen::target::contracts::package_init
     loom::py::loom::core
     loom::py::loom::gen::support::support
     loom::py::loom::gen::target::package
@@ -53,7 +59,6 @@ iree_py_library(
   NAME
     contract_table_family
   SRCS
-    "__init__.py"
     "contract_table_family.py"
   DEPS
     loom::py::loom::gen::target::contracts::contract_fragments
@@ -65,11 +70,8 @@ iree_py_library(
 iree_py_library(
   NAME
     amdgpu_contract_fragment
-  MAIN
-    "contract_fragment.py"
-  SRCS
-    "__init__.py"
-    "contract_fragment.py"
+  MAIN_MODULE
+    "loom.gen.target.contracts.contract_fragment"
   DEPS
     loom::py::loom::gen::target::contracts::contract_fragment
     loom::py::loom::target::arch::amdgpu::contracts::contracts
@@ -78,11 +80,8 @@ iree_py_library(
 iree_py_library(
   NAME
     amdgpu_contract_table_family
-  MAIN
-    "contract_table_family.py"
-  SRCS
-    "__init__.py"
-    "contract_table_family.py"
+  MAIN_MODULE
+    "loom.gen.target.contracts.contract_table_family"
   DEPS
     loom::py::loom::gen::target::contracts::contract_table_family
     loom::py::loom::target::arch::amdgpu::contracts::contracts
@@ -91,11 +90,8 @@ iree_py_library(
 iree_py_library(
   NAME
     ireevm_contract_table_family
-  MAIN
-    "contract_table_family.py"
-  SRCS
-    "__init__.py"
-    "contract_table_family.py"
+  MAIN_MODULE
+    "loom.gen.target.contracts.contract_table_family"
   DEPS
     loom::py::loom::gen::target::contracts::contract_table_family
     loom::py::loom::target::arch::ireevm::contracts::contracts
@@ -104,11 +100,8 @@ iree_py_library(
 iree_py_library(
   NAME
     llvmir_contract_table_family
-  MAIN
-    "contract_table_family.py"
-  SRCS
-    "__init__.py"
-    "contract_table_family.py"
+  MAIN_MODULE
+    "loom.gen.target.contracts.contract_table_family"
   DEPS
     loom::py::loom::gen::target::contracts::contract_table_family
     loom::py::loom::target::arch::llvmir::contracts
@@ -117,11 +110,8 @@ iree_py_library(
 iree_py_library(
   NAME
     spirv_contract_table_family
-  MAIN
-    "contract_table_family.py"
-  SRCS
-    "__init__.py"
-    "contract_table_family.py"
+  MAIN_MODULE
+    "loom.gen.target.contracts.contract_table_family"
   DEPS
     loom::py::loom::gen::target::contracts::contract_table_family
     loom::py::loom::target::arch::spirv::contracts::contracts
@@ -130,11 +120,8 @@ iree_py_library(
 iree_py_library(
   NAME
     test_low_contract_table_family
-  MAIN
-    "contract_table_family.py"
-  SRCS
-    "__init__.py"
-    "contract_table_family.py"
+  MAIN_MODULE
+    "loom.gen.target.contracts.contract_table_family"
   DEPS
     loom::py::loom::gen::target::contracts::contract_table_family
     loom::py::loom::target::test::contracts
@@ -143,11 +130,8 @@ iree_py_library(
 iree_py_library(
   NAME
     wasm_contract_table_family
-  MAIN
-    "contract_table_family.py"
-  SRCS
-    "__init__.py"
-    "contract_table_family.py"
+  MAIN_MODULE
+    "loom.gen.target.contracts.contract_table_family"
   DEPS
     loom::py::loom::gen::target::contracts::contract_table_family
     loom::py::loom::target::emit::wasm::contracts
@@ -156,11 +140,8 @@ iree_py_library(
 iree_py_library(
   NAME
     x86_contract_table_family
-  MAIN
-    "contract_table_family.py"
-  SRCS
-    "__init__.py"
-    "contract_table_family.py"
+  MAIN_MODULE
+    "loom.gen.target.contracts.contract_table_family"
   DEPS
     loom::py::loom::gen::target::contracts::contract_table_family
     loom::py::loom::target::arch::x86::contracts::contracts

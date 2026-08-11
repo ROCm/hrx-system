@@ -18,9 +18,15 @@ GENERATOR_VISIBILITY = [
 ]
 
 iree_py_library(
+    name = "package_init",
+    srcs = ["__init__.py"],
+)
+
+iree_py_library(
     name = "planning_table_inputs",
     srcs = ["amdgpu_planning_table_inputs.py"],
     deps = [
+        ":package_init",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch/amdgpu:descriptors",
         "//loom/py/loom/target/arch/amdgpu:isa_xml",
@@ -30,47 +36,44 @@ iree_py_library(
 
 iree_py_binary(
     name = "descriptors",
-    srcs = [
-        "__init__.py",
-        "amdgpu_descriptors.py",
-    ],
+    srcs = ["amdgpu_descriptors.py"],
     main = "amdgpu_descriptors.py",
     visibility = GENERATOR_VISIBILITY,
     deps = [
+        ":package_init",
         "//loom/py/loom/gen/target/low:low_descriptors",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch/amdgpu:descriptors",
         "//loom/py/loom/target/arch/amdgpu:isa_xml",
+        "//loom/py/loom/target/arch/amdgpu:target_info",
+    ],
+)
+
+iree_py_library(
+    name = "wait_packet_tables_module",
+    srcs = ["amdgpu_wait_packet_tables.py"],
+    deps = [
+        ":package_init",
+        ":planning_table_inputs",
+        "//loom/py/loom/gen/support",
+        "//loom/py/loom/target:low_descriptors",
+        "//loom/py/loom/target/arch/amdgpu:descriptors",
         "//loom/py/loom/target/arch/amdgpu:target_info",
     ],
 )
 
 iree_py_binary(
     name = "wait_packet_tables",
-    srcs = [
-        "__init__.py",
-        "amdgpu_wait_packet_tables.py",
-    ],
-    main = "amdgpu_wait_packet_tables.py",
+    main_module = "loom.gen.target.arch.amdgpu.descriptors.amdgpu_wait_packet_tables",
     visibility = GENERATOR_VISIBILITY,
-    deps = [
-        ":planning_table_inputs",
-        "//loom/py/loom/gen/support",
-        "//loom/py/loom/target:low_descriptors",
-        "//loom/py/loom/target/arch/amdgpu:descriptors",
-        "//loom/py/loom/target/arch/amdgpu:target_info",
-    ],
+    deps = [":wait_packet_tables_module"],
 )
 
-iree_py_binary(
-    name = "vopd_component_tables",
-    srcs = [
-        "__init__.py",
-        "amdgpu_vopd_component_tables.py",
-    ],
-    main = "amdgpu_vopd_component_tables.py",
-    visibility = GENERATOR_VISIBILITY,
+iree_py_library(
+    name = "vopd_component_tables_module",
+    srcs = ["amdgpu_vopd_component_tables.py"],
     deps = [
+        ":package_init",
         ":planning_table_inputs",
         "//loom/py/loom/gen/support",
         "//loom/py/loom/gen/target/low:low_descriptors",
@@ -82,17 +85,22 @@ iree_py_binary(
 )
 
 iree_py_binary(
+    name = "vopd_component_tables",
+    main_module = "loom.gen.target.arch.amdgpu.descriptors.amdgpu_vopd_component_tables",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [":vopd_component_tables_module"],
+)
+
+iree_py_binary(
     name = "planning_tables",
-    srcs = [
-        "__init__.py",
-        "amdgpu_planning_tables.py",
-        "amdgpu_vopd_component_tables.py",
-        "amdgpu_wait_packet_tables.py",
-    ],
+    srcs = ["amdgpu_planning_tables.py"],
     main = "amdgpu_planning_tables.py",
     visibility = GENERATOR_VISIBILITY,
     deps = [
+        ":package_init",
         ":planning_table_inputs",
+        ":vopd_component_tables_module",
+        ":wait_packet_tables_module",
         "//loom/py/loom/gen/support",
         "//loom/py/loom/gen/target/low:low_descriptors",
         "//loom/py/loom/target:low_descriptors",
@@ -125,7 +133,7 @@ iree_py_test(
     ],
     args = ["loom.gen.target.arch.amdgpu.descriptors.amdgpu_vopd_component_tables_test"],
     main = "pytest_style_runner.py",
-    deps = [":vopd_component_tables"],
+    deps = [":vopd_component_tables_module"],
 )
 
 iree_py_test(
@@ -137,7 +145,7 @@ iree_py_test(
     args = ["loom.gen.target.arch.amdgpu.descriptors.amdgpu_wait_packet_tables_test"],
     main = "pytest_style_runner.py",
     deps = [
-        ":wait_packet_tables",
+        ":wait_packet_tables_module",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch/amdgpu:descriptors",
     ],
