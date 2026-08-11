@@ -77,6 +77,36 @@ class _PhysicalComponent:
     post_width: int
 
 
+@dataclass(frozen=True, slots=True)
+class _PhysicalAddressWindow:
+    # Allocation units in each independently addressable window.
+    window_size: int
+    # Largest base remainder that keeps the component inside one window.
+    maximum_base_remainder: int
+
+
+@dataclass(frozen=True, slots=True)
+class _PhysicalBaseDomain:
+    # Largest base that keeps the complete component inside the resource.
+    maximum_base: int
+    # Periodic address-window restrictions applied to candidate bases.
+    address_windows: tuple[_PhysicalAddressWindow, ...]
+
+    def first_at_or_above(self, lower_bound: int) -> int | None:
+        """Returns the least admissible base at or above `lower_bound`."""
+
+        candidate = lower_bound
+        while candidate <= self.maximum_base:
+            previous_candidate = candidate
+            for window in self.address_windows:
+                remainder = candidate % window.window_size
+                if remainder > window.maximum_base_remainder:
+                    candidate += window.window_size - remainder
+            if candidate == previous_candidate:
+                return candidate
+        return None
+
+
 def _physical_resource_key(register_class: RegClass) -> str:
     if register_class.alias_set_id:
         return f"alias:{register_class.alias_set_id}"
@@ -134,47 +164,44 @@ def _descriptor_tied_operand_roots(descriptor: Descriptor) -> tuple[int, ...]:
     return tuple(find(operand_index) for operand_index in range(len(parent)))
 
 
-def _operand_allows_base(operand: Operand, base: int) -> bool:
-    assigned_end = base + operand.unit_count
-    if operand.address_map_kind is OperandAddressMapKind.LOW_SUBSET:
-        return assigned_end <= operand.addressable_unit_count
-    if operand.address_map_kind is OperandAddressMapKind.TARGET_STATE:
-        window_size = operand.addressable_unit_count
-        return base // window_size == (assigned_end - 1) // window_size
-    return True
-
-
-def _component_allowed_bases(
+def _component_base_domain(
     descriptor: Descriptor,
     component: _PhysicalComponent,
     resource_capacity: int,
     early_clobber_results: frozenset[int],
-) -> tuple[int, ...]:
+) -> _PhysicalBaseDomain:
     component_width = max(component.pre_width, component.post_width)
-    if component_width > resource_capacity:
-        return ()
-    allowed_bases = []
-    for base in range(resource_capacity - component_width + 1):
-        is_allowed = True
-        for operand_index in component.operand_indices:
-            operand = descriptor.operands[operand_index]
-            reads_pre, writes_post = _operand_phase_accesses(
-                operand,
-                is_early_clobber=operand_index in early_clobber_results,
+    maximum_base = resource_capacity - component_width
+    address_windows = []
+    for operand_index in component.operand_indices:
+        operand = descriptor.operands[operand_index]
+        reads_pre, writes_post = _operand_phase_accesses(
+            operand,
+            is_early_clobber=operand_index in early_clobber_results,
+        )
+        if not reads_pre and not writes_post:
+            continue
+        if operand.address_map_kind is OperandAddressMapKind.LOW_SUBSET:
+            maximum_base = min(
+                maximum_base,
+                operand.addressable_unit_count - operand.unit_count,
             )
-            if not reads_pre and not writes_post:
-                continue
-            if not _operand_allows_base(operand, base):
-                is_allowed = False
-                break
-        if is_allowed:
-            allowed_bases.append(base)
-    return tuple(allowed_bases)
+        elif operand.address_map_kind is OperandAddressMapKind.TARGET_STATE:
+            address_windows.append(
+                _PhysicalAddressWindow(
+                    window_size=operand.addressable_unit_count,
+                    maximum_base_remainder=(operand.addressable_unit_count - operand.unit_count),
+                )
+            )
+    return _PhysicalBaseDomain(
+        maximum_base=maximum_base,
+        address_windows=tuple(address_windows),
+    )
 
 
 def _solve_physical_component_order_pair(
     components: Sequence[_PhysicalComponent],
-    allowed_bases: Sequence[tuple[int, ...]],
+    base_domains: Sequence[_PhysicalBaseDomain],
     pre_order: tuple[int, ...],
     post_order: tuple[int, ...],
 ) -> bool:
@@ -197,10 +224,7 @@ def _solve_physical_component_order_pair(
     while ready:
         component_index = ready.pop()
         visited_count += 1
-        base = next(
-            (candidate for candidate in allowed_bases[component_index] if candidate >= lower_bounds[component_index]),
-            None,
-        )
+        base = base_domains[component_index].first_at_or_above(lower_bounds[component_index])
         if base is None:
             return False
         for successor_index, width in successors[component_index]:
@@ -213,7 +237,7 @@ def _solve_physical_component_order_pair(
 
 def _physical_components_admit_placement(
     components: Sequence[_PhysicalComponent],
-    allowed_bases: Sequence[tuple[int, ...]],
+    base_domains: Sequence[_PhysicalBaseDomain],
 ) -> bool:
     pre_components = tuple(index for index, component in enumerate(components) if component.pre_width)
     post_components = tuple(index for index, component in enumerate(components) if component.post_width)
@@ -221,7 +245,7 @@ def _physical_components_admit_placement(
         for post_order in permutations(post_components):
             if _solve_physical_component_order_pair(
                 components,
-                allowed_bases,
+                base_domains,
                 pre_order,
                 post_order,
             ):
@@ -401,8 +425,8 @@ def validate_physical_descriptor_set(
                 limits.maximum_phase_order_pair_count,
                 descriptor_key=descriptor.key,
             )
-            allowed_bases = tuple(
-                _component_allowed_bases(
+            base_domains = tuple(
+                _component_base_domain(
                     descriptor,
                     component,
                     resource_capacity,
@@ -410,7 +434,7 @@ def validate_physical_descriptor_set(
                 )
                 for component in resource_components
             )
-            if any(not bases for bases in allowed_bases) or not (_physical_components_admit_placement(resource_components, allowed_bases)):
+            if any(domain.first_at_or_above(0) is None for domain in base_domains) or not _physical_components_admit_placement(resource_components, base_domains):
                 raise ValueError(
                     f"descriptor set '{descriptor_set.key}' descriptor '{descriptor.key}' physical resource '{resource_key}' does not admit a legal pre/post placement within {resource_capacity} units"
                 )
