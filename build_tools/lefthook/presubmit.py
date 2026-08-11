@@ -1588,8 +1588,8 @@ def run_semgrep(inputs: PresubmitInputs, profile: str, verbose: bool) -> bool:
             "semgrep-core.exe is not distributed for native Windows; "
             "enforced by the Linux paranoid presubmit",
         )
-    if not require_static_tool("semgrep", "Semgrep", profile):
-        return False
+    if shutil.which("semgrep") is None:
+        return require_static_tool("semgrep", "Semgrep", profile)
 
     ok = True
     if validate_config:
