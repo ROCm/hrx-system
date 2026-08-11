@@ -1620,12 +1620,19 @@ static iree_status_t loom_amdgpu_encode_branch_groups_before_packet(
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_encode_sopp_simm16(state, state->inputs.target->sopp.branch,
                                        (uint16_t)group->island_count));
+    loom_amdgpu_record_native_insertion(
+        state, LOOM_AMDGPU_NATIVE_INSERTION_BRANCH_ISLAND_SKIP,
+        LOOM_AMDGPU_DESCRIPTOR_REF_NONE, (uint16_t)group->island_count);
     for (uint32_t i = 0; i < group->island_count; ++i) {
       const loom_amdgpu_branch_layout_island_t* island =
           &emission->layout->islands[group->island_start + i];
       IREE_RETURN_IF_ERROR(loom_amdgpu_encode_sopp_simm16(
           state, state->inputs.target->sopp.branch,
           (uint16_t)island->relative_dword_offset));
+      loom_amdgpu_record_native_insertion(
+          state, LOOM_AMDGPU_NATIVE_INSERTION_BRANCH_ISLAND_HOP,
+          LOOM_AMDGPU_DESCRIPTOR_REF_NONE,
+          (uint16_t)island->relative_dword_offset);
     }
     ++emission->next_group_index;
   }
@@ -2351,11 +2358,24 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
         iree_arena_allocate_array(arena, sizing_state.text_fixups.count,
                                   sizeof(text_fixups[0]), (void**)&text_fixups);
   }
+  iree_host_size_t native_insertion_capacity =
+      sizing_state.native_insertions.count;
+  if (active_branch_layout != NULL &&
+      iree_all_bits_set(
+          flags,
+          LOOM_AMDGPU_ENCODE_INSTRUCTION_STREAM_FLAG_CAPTURE_NATIVE_INSERTIONS)) {
+    IREE_ASSERT_LE(active_branch_layout->group_count,
+                   IREE_HOST_SIZE_MAX - native_insertion_capacity);
+    native_insertion_capacity += active_branch_layout->group_count;
+    IREE_ASSERT_LE(active_branch_layout->island_count,
+                   IREE_HOST_SIZE_MAX - native_insertion_capacity);
+    native_insertion_capacity += active_branch_layout->island_count;
+  }
   loom_amdgpu_native_insertion_t* native_insertions = NULL;
-  if (iree_status_is_ok(status) && sizing_state.native_insertions.count != 0) {
-    status = iree_arena_allocate_array(
-        arena, sizing_state.native_insertions.count,
-        sizeof(native_insertions[0]), (void**)&native_insertions);
+  if (iree_status_is_ok(status) && native_insertion_capacity != 0) {
+    status = iree_arena_allocate_array(arena, native_insertion_capacity,
+                                       sizeof(native_insertions[0]),
+                                       (void**)&native_insertions);
   }
   loom_amdgpu_encode_state_t writing_state = {
       .inputs = inputs,
@@ -2373,7 +2393,7 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
       .native_insertions =
           {
               .values = native_insertions,
-              .capacity = sizing_state.native_insertions.count,
+              .capacity = native_insertion_capacity,
           },
       .branches =
           {
@@ -2398,7 +2418,7 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
     IREE_ASSERT_EQ(writing_state.text_fixups.count,
                    sizing_state.text_fixups.count);
     IREE_ASSERT_EQ(writing_state.native_insertions.count,
-                   sizing_state.native_insertions.count);
+                   native_insertion_capacity);
     *out_stream = (loom_amdgpu_encoded_instruction_stream_t){
         .text = iree_make_const_byte_span(data, writing_state.stream.length),
         .instruction_count = writing_state.stream.instruction_count,

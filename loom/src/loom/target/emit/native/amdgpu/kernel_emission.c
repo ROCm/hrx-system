@@ -272,6 +272,11 @@ static iree_status_t loom_amdgpu_kernel_emission_record_native_insertions(
         insertion_kind = LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_DELAY;
         packet_key = IREE_SV("amdgpu.v_nop");
         break;
+      case LOOM_AMDGPU_NATIVE_INSERTION_BRANCH_ISLAND_SKIP:
+      case LOOM_AMDGPU_NATIVE_INSERTION_BRANCH_ISLAND_HOP:
+        insertion_kind = LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_OTHER;
+        packet_key = IREE_SV("amdgpu.s_branch");
+        break;
       case LOOM_AMDGPU_NATIVE_INSERTION_NONE:
       default:
         IREE_ASSERT_UNREACHABLE(
@@ -307,7 +312,8 @@ static iree_status_t loom_amdgpu_kernel_emission_record_native_insertions(
         .static_packet_count = 1,
     };
     uint64_t execution_multiplier = 0;
-    if (dynamic_context.exact &&
+    if (insertion->kind != LOOM_AMDGPU_NATIVE_INSERTION_BRANCH_ISLAND_HOP &&
+        dynamic_context.exact &&
         loom_target_compile_report_low_node_execution_multiplier(
             frame->module, &dynamic_context.fact_table,
             dynamic_context.block_multipliers, node, &execution_multiplier)) {

@@ -283,7 +283,9 @@
           "--root=long_sopp_branch",
           "--sanitizer=access",
           "--output={tmp}/long_sopp_branch.hal",
-          "--emit-target-artifact={tmp}/long_sopp_branch.hsaco"
+          "--emit-target-artifact={tmp}/long_sopp_branch.hsaco",
+          "--compile-report=details",
+          "--compile-report-output={tmp}/long_sopp_branch_report.json"
         ]
       },
       "files": [
@@ -294,6 +296,12 @@
         {
           "path": "{tmp}/long_sopp_branch.hsaco",
           "non_empty": true
+        },
+        {
+          "path": "{tmp}/long_sopp_branch_report.json",
+          "contains": [
+            "\"packet_key\":\"amdgpu.s_branch\""
+          ]
         }
       ]
     },

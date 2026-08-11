@@ -34,6 +34,10 @@ typedef enum loom_amdgpu_native_insertion_kind_e {
   LOOM_AMDGPU_NATIVE_INSERTION_S_DELAY_ALU = 4,
   // A V_NOP vector issue packet.
   LOOM_AMDGPU_NATIVE_INSERTION_V_NOP = 5,
+  // An S_BRANCH skipping a co-located branch-island group.
+  LOOM_AMDGPU_NATIVE_INSERTION_BRANCH_ISLAND_SKIP = 6,
+  // An S_BRANCH implementing one branch-island hop.
+  LOOM_AMDGPU_NATIVE_INSERTION_BRANCH_ISLAND_HOP = 7,
 } loom_amdgpu_native_insertion_kind_t;
 
 // One target-owned instruction inserted while encoding a scheduled packet.
