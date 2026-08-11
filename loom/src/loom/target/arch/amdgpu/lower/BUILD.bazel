@@ -9,6 +9,7 @@ load(
     "loom_cc_library",
     "loom_cc_test",
     "loom_generated_textual_header",
+    "loom_generated_textual_header_family",
 )
 
 package(
@@ -61,81 +62,53 @@ exports_files(
     visibility = ["//loom/py/loom/target/arch/amdgpu/contracts:__pkg__"],
 )
 
-loom_generated_textual_header(
-    name = "memory_descriptor_candidate_ranges_gen",
+loom_generated_textual_header_family(
+    name = "memory_descriptor_candidate_tables_gen",
     generator = _AMDGPU_MEMORY_CANDIDATE_GENERATOR,
-    output = "memory_descriptor_candidate_ranges.inl",
-    output_flag = "--candidate-ranges",
+    output_flags = [
+        "--candidate-ranges",
+        "--candidate-rows",
+    ],
+    outputs = [
+        "memory_descriptor_candidate_ranges.inl",
+        "memory_descriptor_candidates.inl",
+    ],
 )
 
-loom_generated_textual_header(
-    name = "memory_descriptor_candidates_gen",
-    generator = _AMDGPU_MEMORY_CANDIDATE_GENERATOR,
-    output = "memory_descriptor_candidates.inl",
-    output_flag = "--candidate-rows",
-)
-
-loom_generated_textual_header(
-    name = "memory_cache_policy_encoding_rows_gen",
+loom_generated_textual_header_family(
+    name = "memory_cache_policy_tables_gen",
     generator = _AMDGPU_TARGET_INFO_GENERATOR,
-    output = "memory_cache_policy_encoding_rows.inl",
-    output_flag = "--cache-policy-encoding-rows",
+    output_flags = [
+        "--cache-policy-encoding-rows",
+        "--cache-policy-temporal-th",
+    ],
+    outputs = [
+        "memory_cache_policy_encoding_rows.inl",
+        "memory_cache_policy_temporal_th.inl",
+    ],
 )
 
-loom_generated_textual_header(
-    name = "memory_cache_policy_temporal_th_gen",
-    generator = _AMDGPU_TARGET_INFO_GENERATOR,
-    output = "memory_cache_policy_temporal_th.inl",
-    output_flag = "--cache-policy-temporal-th",
-)
-
-loom_generated_textual_header(
-    name = "fp8_decode_plan_descriptor_rows_gen",
+loom_generated_textual_header_family(
+    name = "fp8_tables_gen",
     generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
-    output = "encoding/fp8_decode_plan_descriptor_rows.inl",
-    output_flag = "--fp8-decode-plan-descriptor-rows",
-)
-
-loom_generated_textual_header(
-    name = "fp8_encoded_operand_format_rows_gen",
-    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
-    output = "encoding/fp8_encoded_operand_format_rows.inl",
-    output_flag = "--fp8-encoded-operand-format-rows",
-)
-
-loom_generated_textual_header(
-    name = "fp8_encoded_operand_schema_requirement_rows_gen",
-    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
-    output = "encoding/fp8_encoded_operand_schema_requirement_rows.inl",
-    output_flag = "--fp8-encoded-operand-schema-requirement-rows",
-)
-
-loom_generated_textual_header(
-    name = "fp8_native_descriptor_ref_rows_gen",
-    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
-    output = "encoding/fp8_native_descriptor_ref_rows.inl",
-    output_flag = "--fp8-native-descriptor-ref-rows",
-)
-
-loom_generated_textual_header(
-    name = "fp8_scaled_descriptor_ref_rows_gen",
-    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
-    output = "encoding/fp8_scaled_descriptor_ref_rows.inl",
-    output_flag = "--fp8-scaled-descriptor-ref-rows",
-)
-
-loom_generated_textual_header(
-    name = "fp8_subnormal_table_rows_gen",
-    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
-    output = "encoding/fp8_subnormal_table_rows.inl",
-    output_flag = "--fp8-subnormal-table-rows",
-)
-
-loom_generated_textual_header(
-    name = "fp8_packed_repair_reason_rows_gen",
-    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
-    output = "encoding/fp8_packed_repair_reason_rows.inl",
-    output_flag = "--fp8-packed-repair-reason-rows",
+    output_flags = [
+        "--fp8-decode-plan-descriptor-rows",
+        "--fp8-encoded-operand-format-rows",
+        "--fp8-encoded-operand-schema-requirement-rows",
+        "--fp8-native-descriptor-ref-rows",
+        "--fp8-scaled-descriptor-ref-rows",
+        "--fp8-subnormal-table-rows",
+        "--fp8-packed-repair-reason-rows",
+    ],
+    outputs = [
+        "encoding/fp8_decode_plan_descriptor_rows.inl",
+        "encoding/fp8_encoded_operand_format_rows.inl",
+        "encoding/fp8_encoded_operand_schema_requirement_rows.inl",
+        "encoding/fp8_native_descriptor_ref_rows.inl",
+        "encoding/fp8_scaled_descriptor_ref_rows.inl",
+        "encoding/fp8_subnormal_table_rows.inl",
+        "encoding/fp8_packed_repair_reason_rows.inl",
+    ],
 )
 
 loom_cc_library(

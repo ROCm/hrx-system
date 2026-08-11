@@ -260,8 +260,9 @@ def _generated_header() -> list[str]:
     ]
 
 
-def _emit_candidate_rows() -> str:
-    candidates = _ordered_candidates(amdgpu_memory_descriptor_candidates())
+def _emit_candidate_rows(
+    candidates: Sequence[AmdgpuMemoryDescriptorCandidate],
+) -> str:
     return (
         "\n".join(
             [
@@ -273,8 +274,9 @@ def _emit_candidate_rows() -> str:
     )
 
 
-def _emit_candidate_ranges() -> str:
-    candidates = _ordered_candidates(amdgpu_memory_descriptor_candidates())
+def _emit_candidate_ranges(
+    candidates: Sequence[AmdgpuMemoryDescriptorCandidate],
+) -> str:
     ranges = _candidate_ranges(candidates)
     return (
         "\n".join(
@@ -308,10 +310,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.candidate_rows is None and args.candidate_ranges is None:
         parser.error("at least one output path is required")
+    candidates = _ordered_candidates(amdgpu_memory_descriptor_candidates())
     if args.candidate_rows is not None:
-        _write_output(args.candidate_rows, _emit_candidate_rows())
+        _write_output(args.candidate_rows, _emit_candidate_rows(candidates))
     if args.candidate_ranges is not None:
-        _write_output(args.candidate_ranges, _emit_candidate_ranges())
+        _write_output(args.candidate_ranges, _emit_candidate_ranges(candidates))
     return 0
 
 

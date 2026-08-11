@@ -35,144 +35,56 @@ loom_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
+loom_generated_textual_header_family(
   NAME
-    memory_descriptor_candidate_ranges_gen
+    memory_descriptor_candidate_tables_gen
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::lower::candidates::memory_candidates
-  OUTPUT
+  OUTPUTS
     "memory_descriptor_candidate_ranges.inl"
-  OUTPUT_FLAG
-    "--candidate-ranges"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    memory_descriptor_candidates_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::lower::candidates::memory_candidates
-  OUTPUT
     "memory_descriptor_candidates.inl"
-  OUTPUT_FLAG
+  OUTPUT_FLAGS
+    "--candidate-ranges"
     "--candidate-rows"
 )
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
+loom_generated_textual_header_family(
   NAME
-    memory_cache_policy_encoding_rows_gen
+    memory_cache_policy_tables_gen
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::target_info
-  OUTPUT
+  OUTPUTS
     "memory_cache_policy_encoding_rows.inl"
-  OUTPUT_FLAG
-    "--cache-policy-encoding-rows"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    memory_cache_policy_temporal_th_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::target_info
-  OUTPUT
     "memory_cache_policy_temporal_th.inl"
-  OUTPUT_FLAG
+  OUTPUT_FLAGS
+    "--cache-policy-encoding-rows"
     "--cache-policy-temporal-th"
 )
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
+loom_generated_textual_header_family(
   NAME
-    fp8_decode_plan_descriptor_rows_gen
+    fp8_tables_gen
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
-  OUTPUT
+  OUTPUTS
     "encoding/fp8_decode_plan_descriptor_rows.inl"
-  OUTPUT_FLAG
-    "--fp8-decode-plan-descriptor-rows"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    fp8_encoded_operand_format_rows_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
-  OUTPUT
     "encoding/fp8_encoded_operand_format_rows.inl"
-  OUTPUT_FLAG
-    "--fp8-encoded-operand-format-rows"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    fp8_encoded_operand_schema_requirement_rows_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
-  OUTPUT
     "encoding/fp8_encoded_operand_schema_requirement_rows.inl"
-  OUTPUT_FLAG
-    "--fp8-encoded-operand-schema-requirement-rows"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    fp8_native_descriptor_ref_rows_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
-  OUTPUT
     "encoding/fp8_native_descriptor_ref_rows.inl"
-  OUTPUT_FLAG
-    "--fp8-native-descriptor-ref-rows"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    fp8_scaled_descriptor_ref_rows_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
-  OUTPUT
     "encoding/fp8_scaled_descriptor_ref_rows.inl"
-  OUTPUT_FLAG
-    "--fp8-scaled-descriptor-ref-rows"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    fp8_subnormal_table_rows_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
-  OUTPUT
     "encoding/fp8_subnormal_table_rows.inl"
-  OUTPUT_FLAG
-    "--fp8-subnormal-table-rows"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    fp8_packed_repair_reason_rows_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
-  OUTPUT
     "encoding/fp8_packed_repair_reason_rows.inl"
-  OUTPUT_FLAG
+  OUTPUT_FLAGS
+    "--fp8-decode-plan-descriptor-rows"
+    "--fp8-encoded-operand-format-rows"
+    "--fp8-encoded-operand-schema-requirement-rows"
+    "--fp8-native-descriptor-ref-rows"
+    "--fp8-scaled-descriptor-ref-rows"
+    "--fp8-subnormal-table-rows"
     "--fp8-packed-repair-reason-rows"
 )
 endif()

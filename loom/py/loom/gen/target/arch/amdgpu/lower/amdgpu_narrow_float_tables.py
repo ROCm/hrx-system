@@ -914,10 +914,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         and args.fp8_packed_repair_reason_rows is None
     ):
         parser.error("at least one output path is required")
+    descriptor_ref_key_set = (
+        set(amdgpu_descriptor_ref_keys())
+        if args.fp8_decode_plan_descriptor_rows is not None or args.fp8_native_descriptor_ref_rows is not None or args.fp8_scaled_descriptor_ref_rows is not None
+        else None
+    )
     if args.fp8_decode_plan_descriptor_rows is not None:
         _write_output(
             args.fp8_decode_plan_descriptor_rows,
-            _emit_fp8_decode_plan_descriptor_rows(),
+            _emit_fp8_decode_plan_descriptor_rows(descriptor_ref_key_set=descriptor_ref_key_set),
         )
     if args.fp8_encoded_operand_format_rows is not None:
         _write_output(
@@ -932,12 +937,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.fp8_native_descriptor_ref_rows is not None:
         _write_output(
             args.fp8_native_descriptor_ref_rows,
-            _emit_fp8_native_descriptor_ref_rows(),
+            _emit_fp8_native_descriptor_ref_rows(descriptor_ref_key_set=descriptor_ref_key_set),
         )
     if args.fp8_scaled_descriptor_ref_rows is not None:
         _write_output(
             args.fp8_scaled_descriptor_ref_rows,
-            _emit_fp8_scaled_descriptor_ref_rows(),
+            _emit_fp8_scaled_descriptor_ref_rows(descriptor_ref_key_set=descriptor_ref_key_set),
         )
     if args.fp8_subnormal_table_rows is not None:
         _write_output(
