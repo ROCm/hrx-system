@@ -30,6 +30,11 @@ typedef uint32_t loom_symbol_dependency_edge_id_t;
 #define LOOM_SYMBOL_DEPENDENCY_EDGE_ID_INVALID \
   ((loom_symbol_dependency_edge_id_t)UINT32_MAX)
 
+// Index into a symbol dependency table's abstract contract-demand array.
+typedef uint32_t loom_func_contract_demand_id_t;
+#define LOOM_FUNC_CONTRACT_DEMAND_ID_INVALID \
+  ((loom_func_contract_demand_id_t)UINT32_MAX)
+
 // Sentinel for edges that are not attached to a concrete op attribute.
 #define LOOM_SYMBOL_DEPENDENCY_ATTR_INDEX_NONE ((uint16_t)UINT16_MAX)
 
@@ -74,7 +79,21 @@ typedef struct loom_symbol_dependency_edge_t {
   loom_symbol_dependency_edge_id_t next_incoming_edge_id;
 } loom_symbol_dependency_edge_t;
 
-// Incoming/outgoing edge-list heads for one symbol.
+// One abstract func.apply provider demand.
+typedef struct loom_func_contract_demand_t {
+  // Interned provider contract requested by the application.
+  loom_string_id_t contract_id;
+  // Symbol whose definition owns the application.
+  loom_symbol_id_t source_symbol_id;
+  // Reserved padding.
+  uint16_t reserved;
+  // func.apply operation carrying this demand.
+  const loom_op_t* apply_op;
+  // Next demand owned by the same source symbol.
+  loom_func_contract_demand_id_t next_source_demand_id;
+} loom_func_contract_demand_t;
+
+// Concrete edge and abstract demand list heads for one symbol.
 typedef struct loom_symbol_dependency_symbol_edges_t {
   // First edge whose source_symbol_id is this symbol.
   loom_symbol_dependency_edge_id_t first_outgoing_edge_id;
@@ -84,6 +103,10 @@ typedef struct loom_symbol_dependency_symbol_edges_t {
   uint32_t outgoing_count;
   // Number of incoming occurrence edges.
   uint32_t incoming_count;
+  // First abstract provider demand owned by this symbol.
+  loom_func_contract_demand_id_t first_contract_demand_id;
+  // Number of abstract provider demands owned by this symbol.
+  uint32_t contract_demand_count;
 } loom_symbol_dependency_symbol_edges_t;
 
 // Built dependency table for one module snapshot.
@@ -102,7 +125,23 @@ typedef struct loom_symbol_dependency_table_t {
   loom_symbol_dependency_edge_id_t first_module_edge_id;
   // Number of module-root edges.
   uint32_t module_edge_count;
+  // Abstract func.apply provider demands owned by module symbols.
+  const loom_func_contract_demand_t* contract_demands;
+  // Number of entries in contract_demands.
+  iree_host_size_t contract_demand_count;
+  // Dense bitset indexed by module string ID for demanded contracts, or NULL
+  // when the module contains no abstract contract demands.
+  const uint64_t* contract_demand_bits;
 } loom_symbol_dependency_table_t;
+
+// Returns true when at least one func.apply demands |contract_id|.
+// |contract_id| must be valid in the table's module string table.
+static inline bool loom_symbol_dependency_contract_is_demanded(
+    const loom_symbol_dependency_table_t* table, loom_string_id_t contract_id) {
+  return table->contract_demand_bits &&
+         (table->contract_demand_bits[contract_id >> 6] &
+          (UINT64_C(1) << (contract_id & 63u))) != 0;
+}
 
 // Builds the symbol dependency table for |module| into |arena|.
 iree_status_t loom_symbol_dependency_table_build(

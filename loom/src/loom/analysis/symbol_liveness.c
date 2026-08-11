@@ -9,10 +9,9 @@
 #include <string.h>
 
 #include "loom/ir/module.h"
-#include "loom/ops/op_defs.h"
 
 typedef struct loom_symbol_liveness_worklist_t {
-  // Symbol ids still waiting for defining-op traversal.
+  // Symbol ids still waiting for dependency expansion.
   loom_symbol_id_t* entries;
 
   // Number of queued symbol ids.
@@ -145,7 +144,8 @@ static iree_status_t loom_symbol_liveness_mark_module_root_edges(
 
 static iree_status_t loom_symbol_liveness_visit_contributors(
     loom_symbol_liveness_state_t* state, loom_symbol_id_t source_symbol_id,
-    const loom_symbol_t* source_symbol, const loom_op_t* op) {
+    const loom_symbol_t* source_symbol,
+    const loom_func_contract_demand_t* demand) {
   if (!state->has_contributors) {
     return iree_ok_status();
   }
@@ -160,41 +160,9 @@ static iree_status_t loom_symbol_liveness_visit_contributors(
   for (iree_host_size_t i = 0; i < state->options.contributor_count; ++i) {
     const loom_symbol_liveness_contributor_t* contributor =
         &state->options.contributors[i];
-    if (!contributor->visit_op) continue;
-    IREE_RETURN_IF_ERROR(
-        contributor->visit_op(contributor->user_data, &context, op));
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_symbol_liveness_scan_op(
-    loom_symbol_liveness_state_t* state, loom_symbol_id_t source_symbol_id,
-    const loom_symbol_t* source_symbol, const loom_op_t* op) {
-  if (!op || iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) {
-    return iree_ok_status();
-  }
-
-  loom_symbol_ref_t nested_symbol_ref = loom_symbol_ref_null();
-  if (loom_op_defining_symbol_ref(state->module, op, &nested_symbol_ref) &&
-      nested_symbol_ref.symbol_id != source_symbol_id) {
-    return iree_ok_status();
-  }
-
-  IREE_RETURN_IF_ERROR(loom_symbol_liveness_visit_contributors(
-      state, source_symbol_id, source_symbol, op));
-
-  loom_region_t** regions = loom_op_regions(op);
-  for (uint8_t i = 0; i < op->region_count; ++i) {
-    const loom_region_t* region = regions[i];
-    if (!region) continue;
-    const loom_block_t* block = NULL;
-    loom_region_for_each_block(region, block) {
-      const loom_op_t* nested_op = NULL;
-      loom_block_for_each_op(block, nested_op) {
-        IREE_RETURN_IF_ERROR(loom_symbol_liveness_scan_op(
-            state, source_symbol_id, source_symbol, nested_op));
-      }
-    }
+    if (!contributor->visit_contract_demand) continue;
+    IREE_RETURN_IF_ERROR(contributor->visit_contract_demand(
+        contributor->user_data, &context, demand));
   }
   return iree_ok_status();
 }
@@ -216,8 +184,15 @@ static iree_status_t loom_symbol_liveness_traverse_symbol(
 
   if (!state->has_contributors) return iree_ok_status();
   const loom_symbol_t* symbol = &state->module->symbols.entries[symbol_id];
-  IREE_RETURN_IF_ERROR(loom_symbol_liveness_scan_op(state, symbol_id, symbol,
-                                                    symbol->defining_op));
+  loom_func_contract_demand_id_t demand_id =
+      state->dependencies->symbols[symbol_id].first_contract_demand_id;
+  while (demand_id != LOOM_FUNC_CONTRACT_DEMAND_ID_INVALID) {
+    const loom_func_contract_demand_t* demand =
+        &state->dependencies->contract_demands[demand_id];
+    IREE_RETURN_IF_ERROR(loom_symbol_liveness_visit_contributors(
+        state, symbol_id, symbol, demand));
+    demand_id = demand->next_source_demand_id;
+  }
   return iree_ok_status();
 }
 
@@ -227,7 +202,7 @@ static bool loom_symbol_liveness_options_have_contributors(
     return false;
   }
   for (iree_host_size_t i = 0; i < options->contributor_count; ++i) {
-    if (options->contributors[i].visit_op) return true;
+    if (options->contributors[i].visit_contract_demand) return true;
   }
   return false;
 }

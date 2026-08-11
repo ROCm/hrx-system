@@ -684,6 +684,13 @@ static bool loom_inline_symbol_can_transfer(const loom_inline_state_t* state,
   if (!loom_inline_symbol_is_transferable(state->module, info->symbol)) {
     return false;
   }
+  const loom_string_id_t contract_id =
+      loom_func_like_implements(info->function);
+  if (contract_id != LOOM_STRING_ID_INVALID &&
+      loom_symbol_dependency_contract_is_demanded(&state->dependencies,
+                                                  contract_id)) {
+    return false;
+  }
   return loom_func_like_body(info->function) != NULL;
 }
 

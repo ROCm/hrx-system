@@ -227,6 +227,56 @@ func.def @entry() -> (index) {
   EXPECT_EQ(table.symbols[reader].incoming_count, 1u);
 }
 
+TEST_F(SymbolDependenciesTest, ContractDemandsRetainOwningSymbol) {
+  ModulePtr module = ParseModule(R"(
+func.template<outer.contract> @outer_provider(%value: i32) -> (i32) {
+  %result = func.apply<demo.contract>(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.template<demo.contract> @demo_provider(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = func.apply<demo.contract>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+)");
+
+  const loom_symbol_id_t outer_provider =
+      FindSymbol(module.get(), IREE_SV("outer_provider"));
+  const loom_symbol_id_t entry = FindSymbol(module.get(), IREE_SV("entry"));
+  const loom_string_id_t contract_id =
+      loom_module_lookup_string(module.get(), IREE_SV("demo.contract"));
+  const loom_string_id_t undemanded_contract_id =
+      loom_module_lookup_string(module.get(), IREE_SV("outer.contract"));
+  ASSERT_NE(contract_id, LOOM_STRING_ID_INVALID);
+  ASSERT_NE(undemanded_contract_id, LOOM_STRING_ID_INVALID);
+
+  const loom_symbol_dependency_table_t table = BuildTable(module.get());
+
+  ASSERT_EQ(table.contract_demand_count, 2u);
+  EXPECT_TRUE(loom_symbol_dependency_contract_is_demanded(&table, contract_id));
+  EXPECT_FALSE(loom_symbol_dependency_contract_is_demanded(
+      &table, undemanded_contract_id));
+  const loom_symbol_id_t source_symbol_ids[] = {outer_provider, entry};
+  for (loom_symbol_id_t source_symbol_id : source_symbol_ids) {
+    ASSERT_EQ(table.symbols[source_symbol_id].contract_demand_count, 1u);
+    loom_func_contract_demand_id_t demand_id =
+        table.symbols[source_symbol_id].first_contract_demand_id;
+    ASSERT_NE(demand_id, LOOM_FUNC_CONTRACT_DEMAND_ID_INVALID);
+    const loom_func_contract_demand_t& demand =
+        table.contract_demands[demand_id];
+    EXPECT_EQ(demand.source_symbol_id, source_symbol_id);
+    EXPECT_EQ(demand.contract_id, contract_id);
+    ASSERT_NE(demand.apply_op, nullptr);
+    EXPECT_EQ(demand.apply_op->kind, LOOM_OP_FUNC_APPLY);
+    EXPECT_EQ(demand.next_source_demand_id,
+              LOOM_FUNC_CONTRACT_DEMAND_ID_INVALID);
+  }
+}
+
 TEST_F(SymbolDependenciesTest, OpenParameterizedArraysAreNotSymbolReferences) {
   ModulePtr module = ParseModule(R"(
 func.template<demo.contract> requires [#target.subgroup.size<64>] @conditional(%arg: i32) -> (i32) {

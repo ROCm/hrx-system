@@ -10,6 +10,7 @@
 
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/func/ops.h"
 #include "loom/ops/op_defs.h"
 
 typedef struct loom_symbol_dependency_builder_t {
@@ -29,6 +30,14 @@ typedef struct loom_symbol_dependency_builder_t {
   loom_symbol_dependency_edge_id_t first_module_edge_id;
   // Number of module-root edges.
   uint32_t module_edge_count;
+  // Mutable abstract contract-demand storage.
+  loom_func_contract_demand_t* contract_demands;
+  // Number of live contract-demand entries.
+  iree_host_size_t contract_demand_count;
+  // Number of allocated contract-demand slots.
+  iree_host_size_t contract_demand_capacity;
+  // Dense bitset indexed by module string ID for demanded contracts.
+  uint64_t* contract_demand_bits;
 } loom_symbol_dependency_builder_t;
 
 static void loom_symbol_dependency_initialize_symbol_edges(
@@ -38,6 +47,7 @@ static void loom_symbol_dependency_initialize_symbol_edges(
     symbols[i] = (loom_symbol_dependency_symbol_edges_t){
         .first_outgoing_edge_id = LOOM_SYMBOL_DEPENDENCY_EDGE_ID_INVALID,
         .first_incoming_edge_id = LOOM_SYMBOL_DEPENDENCY_EDGE_ID_INVALID,
+        .first_contract_demand_id = LOOM_FUNC_CONTRACT_DEMAND_ID_INVALID,
     };
   }
 }
@@ -129,6 +139,59 @@ static iree_status_t loom_symbol_dependency_add_ref(
   return loom_symbol_dependency_builder_append_edge(builder, source_symbol_id,
                                                     target_ref.symbol_id, kind,
                                                     attr_index, user_op);
+}
+
+static iree_status_t loom_symbol_dependency_append_contract_demand(
+    loom_symbol_dependency_builder_t* builder,
+    loom_symbol_id_t source_symbol_id, const loom_op_t* apply_op) {
+  if (source_symbol_id >= builder->module->symbols.count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "func.apply is not owned by a module symbol");
+  }
+  const loom_string_id_t contract_id = loom_func_apply_contract(apply_op);
+  if (contract_id == LOOM_STRING_ID_INVALID ||
+      contract_id >= builder->module->strings.count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "func.apply has an invalid contract string id");
+  }
+  if (builder->contract_demand_count >= UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "symbol dependency table exceeds %u abstract "
+                            "provider demands",
+                            (unsigned)(UINT32_MAX - 1));
+  }
+  if (builder->contract_demand_count >= builder->contract_demand_capacity) {
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        builder->arena, builder->contract_demand_count,
+        builder->contract_demand_count + 1, sizeof(*builder->contract_demands),
+        &builder->contract_demand_capacity,
+        (void**)&builder->contract_demands));
+  }
+  if (!builder->contract_demand_bits) {
+    const iree_host_size_t word_count =
+        (builder->module->strings.count + 63u) / 64u;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        builder->arena, word_count, sizeof(*builder->contract_demand_bits),
+        (void**)&builder->contract_demand_bits));
+    memset(builder->contract_demand_bits, 0,
+           word_count * sizeof(*builder->contract_demand_bits));
+  }
+
+  const loom_func_contract_demand_id_t demand_id =
+      (loom_func_contract_demand_id_t)builder->contract_demand_count++;
+  loom_symbol_dependency_symbol_edges_t* source =
+      &builder->symbols[source_symbol_id];
+  builder->contract_demands[demand_id] = (loom_func_contract_demand_t){
+      .contract_id = contract_id,
+      .source_symbol_id = source_symbol_id,
+      .apply_op = apply_op,
+      .next_source_demand_id = source->first_contract_demand_id,
+  };
+  source->first_contract_demand_id = demand_id;
+  ++source->contract_demand_count;
+  builder->contract_demand_bits[contract_id >> 6] |= UINT64_C(1)
+                                                     << (contract_id & 63u);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_symbol_dependency_visit_type(
@@ -426,6 +489,10 @@ static iree_status_t loom_symbol_dependency_visit_region(
       if (loom_op_defining_symbol_ref(builder->module, op, &op_symbol_ref)) {
         nested_source_symbol_id = op_symbol_ref.symbol_id;
       }
+      if (loom_func_apply_isa(op)) {
+        IREE_RETURN_IF_ERROR(loom_symbol_dependency_append_contract_demand(
+            builder, nested_source_symbol_id, op));
+      }
       IREE_RETURN_IF_ERROR(loom_symbol_dependency_visit_op_value_types(
           builder, nested_source_symbol_id, op));
       IREE_RETURN_IF_ERROR(loom_symbol_dependency_visit_op_attrs(
@@ -483,6 +550,9 @@ iree_status_t loom_symbol_dependency_table_build(
       .edge_count = builder.edge_count,
       .first_module_edge_id = builder.first_module_edge_id,
       .module_edge_count = builder.module_edge_count,
+      .contract_demands = builder.contract_demands,
+      .contract_demand_count = builder.contract_demand_count,
+      .contract_demand_bits = builder.contract_demand_bits,
   };
   return iree_ok_status();
 }

@@ -8,7 +8,7 @@
 //
 // The engine computes live module symbols from an explicit root policy,
 // concrete symbol dependency edges, and optional dialect/provider contributed
-// edges discovered while scanning reachable symbol bodies.
+// edges derived from indexed abstract contract demands.
 
 #ifndef LOOM_ANALYSIS_SYMBOL_LIVENESS_H_
 #define LOOM_ANALYSIS_SYMBOL_LIVENESS_H_
@@ -42,11 +42,11 @@ typedef bool (*loom_symbol_liveness_root_query_fn_t)(
     void* user_data, const loom_module_t* module, loom_symbol_id_t symbol_id,
     const loom_symbol_t* symbol);
 
-// Visits one operation inside a reachable symbol body and may add synthetic
-// liveness edges through loom_symbol_liveness_mark_* helpers.
-typedef iree_status_t (*loom_symbol_liveness_visit_op_fn_t)(
+// Visits one abstract contract demand owned by a reachable symbol and may add
+// synthetic liveness edges through loom_symbol_liveness_mark_* helpers.
+typedef iree_status_t (*loom_symbol_liveness_visit_contract_demand_fn_t)(
     void* user_data, loom_symbol_liveness_contributor_context_t* context,
-    const loom_op_t* op);
+    const loom_func_contract_demand_t* demand);
 
 // Context passed to liveness contributors.
 typedef struct loom_symbol_liveness_contributor_context_t {
@@ -71,10 +71,11 @@ typedef struct loom_symbol_liveness_contributor_context_t {
 
 // Dialect/provider liveness contributor.
 typedef struct loom_symbol_liveness_contributor_t {
-  // Optional callback invoked for each op in reachable symbol bodies.
-  loom_symbol_liveness_visit_op_fn_t visit_op;
+  // Optional callback invoked for each contract demand owned by a reachable
+  // symbol.
+  loom_symbol_liveness_visit_contract_demand_fn_t visit_contract_demand;
 
-  // Opaque payload passed to visit_op.
+  // Opaque payload passed to visit_contract_demand.
   void* user_data;
 } loom_symbol_liveness_contributor_t;
 
