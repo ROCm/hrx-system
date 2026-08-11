@@ -90,6 +90,8 @@ iree_cc_library(
     bootstrap
   HDRS
     "bootstrap.h"
+  SRCS
+    "bootstrap.c"
   DEPS
     iree::base
   PUBLIC
@@ -151,6 +153,28 @@ iree_cc_library(
     iree::base
     iree::base::threading
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    bootstrap_test
+  SRCS
+    "bootstrap_test.cc"
+  DEPS
+    ::bootstrap
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_fuzz(
+  NAME
+    bootstrap_fuzz
+  SRCS
+    "bootstrap_fuzz.cc"
+  DEPS
+    ::bootstrap
+    iree::base
 )
 
 iree_cc_test(

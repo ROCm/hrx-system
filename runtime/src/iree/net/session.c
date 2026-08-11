@@ -20,6 +20,11 @@
 #include "iree/net/channel/util/frame_sender.h"
 #include "iree/net/transport_factory.h"
 
+// Maximum peer-provided REJECT reason bytes included in a local status
+// message. The parser retains the complete reason; bounding only the diagnostic
+// avoids amplifying an untrusted payload into a second large allocation.
+#define IREE_NET_SESSION_REJECT_REASON_DIAGNOSTIC_BYTE_LIMIT 1024
+
 //===----------------------------------------------------------------------===//
 // Internal types
 //===----------------------------------------------------------------------===//
@@ -292,9 +297,10 @@ static iree_status_t iree_net_session_validate_endpoint_capacity(
 }
 
 static iree_status_t iree_net_session_validate_required_capabilities(
-    const iree_net_session_t* session) {
+    const iree_net_session_t* session,
+    iree_net_bootstrap_capabilities_t negotiated_capabilities) {
   iree_net_bootstrap_capabilities_t missing_capabilities =
-      session->required_capabilities & ~session->negotiated_capabilities;
+      session->required_capabilities & ~negotiated_capabilities;
   if (missing_capabilities == IREE_NET_BOOTSTRAP_CAPABILITY_NONE) {
     return iree_ok_status();
   }
@@ -302,48 +308,8 @@ static iree_status_t iree_net_session_validate_required_capabilities(
       IREE_STATUS_UNAVAILABLE,
       "required session capabilities were not negotiated: required=0x%08x "
       "negotiated=0x%08x missing=0x%08x",
-      session->required_capabilities, session->negotiated_capabilities,
+      session->required_capabilities, negotiated_capabilities,
       missing_capabilities);
-}
-
-static iree_status_t iree_net_session_bootstrap_payload_layout(
-    iree_host_size_t header_size, uint32_t axis_count,
-    iree_host_size_t application_data_length,
-    iree_host_size_t* out_application_data_offset,
-    iree_host_size_t* out_payload_size) {
-  iree_host_size_t axis_entries_size = 0;
-  if (!iree_host_size_checked_mul(axis_count,
-                                  sizeof(iree_net_bootstrap_axis_entry_t),
-                                  &axis_entries_size)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "bootstrap axis entry size overflow");
-  }
-
-  iree_host_size_t application_data_offset = 0;
-  if (!iree_host_size_checked_add(header_size, axis_entries_size,
-                                  &application_data_offset)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "bootstrap payload header size overflow");
-  }
-
-  iree_host_size_t padded_application_data_length = 0;
-  if (!iree_host_size_checked_align(application_data_length, 8,
-                                    &padded_application_data_length)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "bootstrap application data size overflow");
-  }
-
-  iree_host_size_t payload_size = 0;
-  if (!iree_host_size_checked_add(application_data_offset,
-                                  padded_application_data_length,
-                                  &payload_size)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "bootstrap payload size overflow");
-  }
-
-  *out_application_data_offset = application_data_offset;
-  *out_payload_size = payload_size;
-  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
@@ -524,8 +490,9 @@ IREE_API_EXPORT void iree_net_session_fail(iree_net_session_t* session,
 // frontier_tracker. Called during bootstrap after receiving the peer's
 // topology.
 static iree_status_t iree_net_session_register_remote_axes(
-    iree_net_session_t* session, const iree_net_bootstrap_axis_entry_t* entries,
-    uint32_t axis_count) {
+    iree_net_session_t* session,
+    const iree_net_bootstrap_axis_list_t* axis_list) {
+  uint32_t axis_count = axis_list->count;
   if (axis_count == 0) return iree_ok_status();
 
   // Allocate parallel arrays for remote topology and proxy semaphores.
@@ -549,25 +516,32 @@ static iree_status_t iree_net_session_register_remote_axes(
   // Create proxy semaphores and register axes.
   iree_status_t status = iree_ok_status();
   for (uint32_t i = 0; i < axis_count && iree_status_is_ok(status); ++i) {
-    session->remote_axes[i] = (iree_async_axis_t)entries[i].axis;
-    session->remote_epochs[i] = entries[i].current_epoch;
+    iree_net_bootstrap_axis_entry_t entry =
+        iree_net_bootstrap_axis_list_get(axis_list, i);
+    session->remote_axes[i] = (iree_async_axis_t)entry.axis;
+    session->remote_epochs[i] = entry.current_epoch;
 
     // Create a software proxy semaphore for the remote axis. The tracker
     // advance below synchronizes its epoch with the remote's bootstrap epoch
     // through the same bridge path used by later ADVANCE frames.
+    iree_async_semaphore_t* proxy_semaphore = NULL;
     status = iree_async_semaphore_create(
         session->proactor, /*initial_value=*/0,
         IREE_ASYNC_SEMAPHORE_DEFAULT_FRONTIER_CAPACITY, session->host_allocator,
-        &session->proxy_semaphores[i]);
+        &proxy_semaphore);
     if (!iree_status_is_ok(status)) break;
 
     status = iree_async_frontier_tracker_register_axis(
-        session->frontier_tracker, session->remote_axes[i],
-        session->proxy_semaphores[i]);
-    if (iree_status_is_ok(status) && entries[i].current_epoch > 0) {
-      iree_async_frontier_tracker_advance(session->frontier_tracker,
-                                          session->remote_axes[i],
-                                          entries[i].current_epoch);
+        session->frontier_tracker, session->remote_axes[i], proxy_semaphore);
+    if (iree_status_is_ok(status)) {
+      session->proxy_semaphores[i] = proxy_semaphore;
+      if (entry.current_epoch > 0) {
+        iree_async_frontier_tracker_advance(session->frontier_tracker,
+                                            session->remote_axes[i],
+                                            entry.current_epoch);
+      }
+    } else {
+      iree_async_semaphore_release(proxy_semaphore);
     }
   }
 
@@ -628,18 +602,16 @@ static void iree_net_session_on_bootstrap_send_complete(
 static iree_status_t iree_net_session_send_hello(iree_net_session_t* session) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_host_size_t application_data_offset = 0;
-  iree_host_size_t payload_size = 0;
+  iree_net_bootstrap_topology_layout_t layout;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_net_session_bootstrap_payload_layout(
-              sizeof(iree_net_bootstrap_hello_t), session->local_axis_count,
-              session->local_application_data_length, &application_data_offset,
-              &payload_size));
+      z0, iree_net_bootstrap_topology_layout_calculate(
+              IREE_NET_BOOTSTRAP_TYPE_HELLO, session->local_axis_count,
+              session->local_application_data_length, &layout));
   uint8_t* buffer = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(session->host_allocator, payload_size,
+      z0, iree_allocator_malloc(session->host_allocator, layout.payload_length,
                                 (void**)&buffer));
-  memset(buffer, 0, payload_size);
+  memset(buffer, 0, layout.payload_length);
 
   iree_net_bootstrap_hello_t* hello = (iree_net_bootstrap_hello_t*)buffer;
   hello->header.type = IREE_NET_BOOTSTRAP_TYPE_HELLO;
@@ -652,21 +624,22 @@ static iree_status_t iree_net_session_send_hello(iree_net_session_t* session) {
       (uint64_t)session->local_application_data_length;
 
   iree_net_bootstrap_axis_entry_t* entries =
-      (iree_net_bootstrap_axis_entry_t*)(buffer +
-                                         sizeof(iree_net_bootstrap_hello_t));
+      (iree_net_bootstrap_axis_entry_t*)(buffer + layout.axis_entries_offset);
   for (uint32_t i = 0; i < session->local_axis_count; ++i) {
     entries[i].axis = (uint64_t)session->local_axes[i];
     entries[i].current_epoch = session->local_epochs[i];
   }
   if (session->local_application_data_length > 0) {
-    memcpy(buffer + application_data_offset, session->local_application_data,
+    memcpy(buffer + layout.application_data_offset,
+           session->local_application_data,
            session->local_application_data_length);
   }
 
   // Send with zero-copy payload and a protocol-owned completion. Application
   // DATA may begin as soon as the peer's response arrives, before this send's
   // completion, so bootstrap traffic must not share the application callback.
-  iree_async_span_t span = iree_async_span_from_ptr(buffer, payload_size);
+  iree_async_span_t span =
+      iree_async_span_from_ptr(buffer, layout.payload_length);
   iree_async_span_list_t span_list = iree_async_span_list_make(&span, 1);
   iree_net_control_channel_send_completion_t completion = {
       .fn = iree_net_session_on_bootstrap_send_complete,
@@ -685,26 +658,25 @@ static iree_status_t iree_net_session_send_hello(iree_net_session_t* session) {
 
 // Builds and sends a HELLO_ACK message on the control channel.
 static iree_status_t iree_net_session_send_hello_ack(
-    iree_net_session_t* session) {
+    iree_net_session_t* session,
+    iree_net_bootstrap_capabilities_t negotiated_capabilities) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_host_size_t application_data_offset = 0;
-  iree_host_size_t payload_size = 0;
+  iree_net_bootstrap_topology_layout_t layout;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_net_session_bootstrap_payload_layout(
-              sizeof(iree_net_bootstrap_hello_ack_t), session->local_axis_count,
-              session->local_application_data_length, &application_data_offset,
-              &payload_size));
+      z0, iree_net_bootstrap_topology_layout_calculate(
+              IREE_NET_BOOTSTRAP_TYPE_HELLO_ACK, session->local_axis_count,
+              session->local_application_data_length, &layout));
   uint8_t* buffer = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(session->host_allocator, payload_size,
+      z0, iree_allocator_malloc(session->host_allocator, layout.payload_length,
                                 (void**)&buffer));
-  memset(buffer, 0, payload_size);
+  memset(buffer, 0, layout.payload_length);
 
   iree_net_bootstrap_hello_ack_t* ack = (iree_net_bootstrap_hello_ack_t*)buffer;
   ack->header.type = IREE_NET_BOOTSTRAP_TYPE_HELLO_ACK;
   ack->session_id = session->session_id;
-  ack->negotiated_capabilities = session->negotiated_capabilities;
+  ack->negotiated_capabilities = negotiated_capabilities;
   ack->machine_index = session->local_machine_index;
   ack->session_epoch = session->local_session_epoch;
   ack->axis_count = (uint16_t)session->local_axis_count;
@@ -712,20 +684,20 @@ static iree_status_t iree_net_session_send_hello_ack(
       (uint64_t)session->local_application_data_length;
 
   iree_net_bootstrap_axis_entry_t* entries =
-      (iree_net_bootstrap_axis_entry_t*)(buffer +
-                                         sizeof(
-                                             iree_net_bootstrap_hello_ack_t));
+      (iree_net_bootstrap_axis_entry_t*)(buffer + layout.axis_entries_offset);
   for (uint32_t i = 0; i < session->local_axis_count; ++i) {
     entries[i].axis = (uint64_t)session->local_axes[i];
     entries[i].current_epoch = session->local_epochs[i];
   }
   if (session->local_application_data_length > 0) {
-    memcpy(buffer + application_data_offset, session->local_application_data,
+    memcpy(buffer + layout.application_data_offset,
+           session->local_application_data,
            session->local_application_data_length);
   }
 
   // Send with zero-copy payload and a protocol-owned completion.
-  iree_async_span_t span = iree_async_span_from_ptr(buffer, payload_size);
+  iree_async_span_t span =
+      iree_async_span_from_ptr(buffer, layout.payload_length);
   iree_async_span_list_t span_list = iree_async_span_list_make(&span, 1);
   iree_net_control_channel_send_completion_t completion = {
       .fn = iree_net_session_on_bootstrap_send_complete,
@@ -782,31 +754,38 @@ static iree_status_t iree_net_session_send_reject(
   return status;
 }
 
-// Completes bootstrap by registering remote axes and transitioning to
-// OPERATIONAL. Called by both client (after HELLO_ACK) and server (after
-// processing HELLO and sending HELLO_ACK).
-static void iree_net_session_complete_bootstrap(
-    iree_net_session_t* session, const iree_net_bootstrap_axis_entry_t* entries,
-    uint32_t axis_count, uint8_t remote_machine_index,
-    uint8_t remote_session_epoch, iree_const_byte_span_t application_data) {
-  // Guard: if the session was failed during bootstrap (e.g., bootstrap timeout
-  // expired while messages were in flight), do not transition to OPERATIONAL.
-  if (iree_net_session_load_state(session) == IREE_NET_SESSION_STATE_ERROR) {
-    return;
+// Validates peer topology against local capacity, cancels the bootstrap timer,
+// and registers all remote axes. No acceptance message or application callback
+// may run until this succeeds.
+static iree_status_t iree_net_session_prepare_bootstrap_completion(
+    iree_net_session_t* session,
+    const iree_net_bootstrap_axis_list_t* axis_list) {
+  if (iree_net_session_load_state(session) !=
+      IREE_NET_SESSION_STATE_BOOTSTRAPPING) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "session left bootstrapping before peer topology "
+                            "could be registered");
   }
 
+  uint32_t axis_capacity =
+      iree_async_frontier_tracker_axis_capacity(session->frontier_tracker);
+  if (axis_list->count > axis_capacity) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "peer topology has %u axes but the frontier tracker capacity is %u",
+        axis_list->count, axis_capacity);
+  }
+
+  iree_net_session_cancel_bootstrap_timer(session);
+  return iree_net_session_register_remote_axes(session, axis_list);
+}
+
+// Commits validated peer state and transitions the session to OPERATIONAL.
+static void iree_net_session_complete_bootstrap(
+    iree_net_session_t* session, uint8_t remote_machine_index,
+    uint8_t remote_session_epoch, iree_const_byte_span_t application_data) {
   session->remote_machine_index = remote_machine_index;
   session->remote_session_epoch = remote_session_epoch;
-
-  // Cancel the bootstrap timer — bootstrap completed successfully.
-  iree_net_session_cancel_bootstrap_timer(session);
-
-  iree_status_t status =
-      iree_net_session_register_remote_axes(session, entries, axis_count);
-  if (!iree_status_is_ok(status)) {
-    iree_net_session_fail(session, status);
-    return;
-  }
 
   iree_net_session_set_state(session, IREE_NET_SESSION_STATE_OPERATIONAL);
 
@@ -829,7 +808,7 @@ static void iree_net_session_complete_bootstrap(
 
 // Handles a received HELLO (server side).
 static iree_status_t iree_net_session_handle_hello(
-    iree_net_session_t* session, iree_const_byte_span_t payload) {
+    iree_net_session_t* session, const iree_net_bootstrap_hello_view_t* hello) {
   if (session->role != IREE_NET_SESSION_ROLE_SERVER ||
       session->bootstrap_phase != IREE_NET_SESSION_BOOTSTRAP_WAITING_HELLO) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -837,83 +816,29 @@ static iree_status_t iree_net_session_handle_hello(
                             (int)session->role, (int)session->bootstrap_phase);
   }
 
-  if (payload.data_length < sizeof(iree_net_bootstrap_hello_t)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "HELLO too short: %" PRIhsz " bytes (need at least %zu)",
-        payload.data_length, sizeof(iree_net_bootstrap_hello_t));
-  }
-
-  iree_net_bootstrap_hello_t hello;
-  memcpy(&hello, payload.data, sizeof(hello));
-
-  // Validate protocol version.
-  if (hello.protocol_version != IREE_NET_BOOTSTRAP_PROTOCOL_VERSION) {
-    // Send REJECT and fail.
-    // (For now, just fail — REJECT sending is a refinement.)
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unsupported protocol version: %u (expected %u)",
-                            hello.protocol_version,
-                            IREE_NET_BOOTSTRAP_PROTOCOL_VERSION);
-  }
-
-  if (hello.application_data_length > (uint64_t)IREE_HOST_SIZE_MAX) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "HELLO application data length exceeds host size: %" PRIu64,
-        hello.application_data_length);
-  }
-
-  iree_host_size_t application_data_offset = 0;
-  iree_host_size_t expected_size = 0;
-  IREE_RETURN_IF_ERROR(iree_net_session_bootstrap_payload_layout(
-      sizeof(iree_net_bootstrap_hello_t), hello.axis_count,
-      (iree_host_size_t)hello.application_data_length, &application_data_offset,
-      &expected_size));
-  if (payload.data_length < expected_size) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "HELLO payload too short: %" PRIhsz
-                            " bytes (need %" PRIhsz " for %u axes and %" PRIu64
-                            " application bytes)",
-                            payload.data_length, expected_size,
-                            hello.axis_count, hello.application_data_length);
-  }
-  iree_const_byte_span_t application_data = iree_make_const_byte_span(
-      payload.data + application_data_offset,
-      (iree_host_size_t)hello.application_data_length);
-
-  // Negotiate capabilities.
-  session->negotiated_capabilities = hello.capabilities & session->capabilities;
+  iree_net_bootstrap_capabilities_t negotiated_capabilities =
+      hello->fixed.capabilities & session->capabilities;
+  IREE_RETURN_IF_ERROR(iree_net_session_validate_required_capabilities(
+      session, negotiated_capabilities));
   IREE_RETURN_IF_ERROR(
-      iree_net_session_validate_required_capabilities(session));
+      iree_net_session_prepare_bootstrap_completion(session, &hello->axes));
 
-  // Session ID was set from options during session_accept().
+  // Submit acceptance only after every local resource required by the peer
+  // topology has been acquired successfully.
+  IREE_RETURN_IF_ERROR(
+      iree_net_session_send_hello_ack(session, negotiated_capabilities));
 
-  // Send HELLO_ACK.
-  iree_status_t status = iree_net_session_send_hello_ack(session);
-  if (!iree_status_is_ok(status)) return status;
-
-  // Register remote (client) axes and complete bootstrap.
-  const iree_net_bootstrap_axis_entry_t* entries =
-      (const iree_net_bootstrap_axis_entry_t*)(payload.data +
-                                               sizeof(
-                                                   iree_net_bootstrap_hello_t));
-  iree_net_session_complete_bootstrap(session, entries, hello.axis_count,
-                                      hello.machine_index, hello.session_epoch,
-                                      application_data);
-
-  // complete_bootstrap may have called fail() internally. Propagate the error
-  // so the control channel knows to shut down.
-  if (iree_net_session_load_state(session) == IREE_NET_SESSION_STATE_ERROR) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "bootstrap failed during axis registration");
-  }
+  session->negotiated_capabilities = negotiated_capabilities;
+  iree_net_session_complete_bootstrap(session, hello->fixed.machine_index,
+                                      hello->fixed.session_epoch,
+                                      hello->application_data);
   return iree_ok_status();
 }
 
 // Handles a received HELLO_ACK (client side).
 static iree_status_t iree_net_session_handle_hello_ack(
-    iree_net_session_t* session, iree_const_byte_span_t payload) {
+    iree_net_session_t* session,
+    const iree_net_bootstrap_hello_ack_view_t* hello_ack) {
   if (session->role != IREE_NET_SESSION_ROLE_CLIENT ||
       session->bootstrap_phase != IREE_NET_SESSION_BOOTSTRAP_HELLO_SENT) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -921,83 +846,64 @@ static iree_status_t iree_net_session_handle_hello_ack(
                             (int)session->role, (int)session->bootstrap_phase);
   }
 
-  if (payload.data_length < sizeof(iree_net_bootstrap_hello_ack_t)) {
+  iree_net_bootstrap_capabilities_t unoffered_capabilities =
+      hello_ack->fixed.negotiated_capabilities & ~session->capabilities;
+  if (unoffered_capabilities != IREE_NET_BOOTSTRAP_CAPABILITY_NONE) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "HELLO_ACK too short: %" PRIhsz " bytes (need at least %zu)",
-        payload.data_length, sizeof(iree_net_bootstrap_hello_ack_t));
+        "HELLO_ACK negotiated capabilities not offered by the client: "
+        "offered=0x%08x negotiated=0x%08x unoffered=0x%08x",
+        session->capabilities, hello_ack->fixed.negotiated_capabilities,
+        unoffered_capabilities);
   }
-
-  iree_net_bootstrap_hello_ack_t ack;
-  memcpy(&ack, payload.data, sizeof(ack));
-
-  if (ack.application_data_length > (uint64_t)IREE_HOST_SIZE_MAX) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "HELLO_ACK application data length exceeds host size: %" PRIu64,
-        ack.application_data_length);
-  }
-
-  iree_host_size_t application_data_offset = 0;
-  iree_host_size_t expected_size = 0;
-  IREE_RETURN_IF_ERROR(iree_net_session_bootstrap_payload_layout(
-      sizeof(iree_net_bootstrap_hello_ack_t), ack.axis_count,
-      (iree_host_size_t)ack.application_data_length, &application_data_offset,
-      &expected_size));
-  if (payload.data_length < expected_size) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "HELLO_ACK payload too short: %" PRIhsz
-                            " bytes (need %" PRIhsz " for %u axes and %" PRIu64
-                            " application bytes)",
-                            payload.data_length, expected_size, ack.axis_count,
-                            ack.application_data_length);
-  }
-  iree_const_byte_span_t application_data =
-      iree_make_const_byte_span(payload.data + application_data_offset,
-                                (iree_host_size_t)ack.application_data_length);
-
-  session->session_id = ack.session_id;
-  session->negotiated_capabilities = ack.negotiated_capabilities;
+  IREE_RETURN_IF_ERROR(iree_net_session_validate_required_capabilities(
+      session, hello_ack->fixed.negotiated_capabilities));
   IREE_RETURN_IF_ERROR(
-      iree_net_session_validate_required_capabilities(session));
+      iree_net_session_prepare_bootstrap_completion(session, &hello_ack->axes));
 
-  // Register remote (server) axes and complete bootstrap.
-  const iree_net_bootstrap_axis_entry_t* entries =
-      (const iree_net_bootstrap_axis_entry_t*)(payload.data +
-                                               sizeof(
-                                                   iree_net_bootstrap_hello_ack_t));
-  iree_net_session_complete_bootstrap(session, entries, ack.axis_count,
-                                      ack.machine_index, ack.session_epoch,
-                                      application_data);
-
-  // complete_bootstrap may have called fail() internally.
-  if (iree_net_session_load_state(session) == IREE_NET_SESSION_STATE_ERROR) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "bootstrap failed during axis registration");
-  }
+  session->session_id = hello_ack->fixed.session_id;
+  session->negotiated_capabilities = hello_ack->fixed.negotiated_capabilities;
+  iree_net_session_complete_bootstrap(session, hello_ack->fixed.machine_index,
+                                      hello_ack->fixed.session_epoch,
+                                      hello_ack->application_data);
   return iree_ok_status();
 }
 
 // Handles a received REJECT (client side).
 static iree_status_t iree_net_session_handle_reject(
-    iree_net_session_t* session, iree_const_byte_span_t payload) {
-  if (payload.data_length < sizeof(iree_net_bootstrap_reject_t)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "REJECT too short: %" PRIhsz " bytes (need at least %zu)",
-        payload.data_length, sizeof(iree_net_bootstrap_reject_t));
+    iree_net_session_t* session,
+    const iree_net_bootstrap_reject_view_t* reject) {
+  if (session->role != IREE_NET_SESSION_ROLE_CLIENT ||
+      session->bootstrap_phase != IREE_NET_SESSION_BOOTSTRAP_HELLO_SENT) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "unexpected REJECT (role=%d, phase=%d)",
+                            (int)session->role, (int)session->bootstrap_phase);
   }
 
-  iree_net_bootstrap_reject_t reject;
-  memcpy(&reject, payload.data, sizeof(reject));
+  int reason_length = (int)iree_min(
+      reject->reason.size,
+      (iree_host_size_t)IREE_NET_SESSION_REJECT_REASON_DIAGNOSTIC_BYTE_LIMIT);
+  return iree_make_status((iree_status_code_t)reject->fixed.reason_code,
+                          "session rejected: %.*s", reason_length,
+                          reject->reason.data);
+}
 
-  iree_string_view_t reason =
-      iree_make_string_view((const char*)payload.data + sizeof(reject),
-                            payload.data_length - sizeof(reject));
-
-  return iree_make_status((iree_status_code_t)reject.reason_code,
-                          "session rejected: %.*s", (int)reason.size,
-                          reason.data);
+static iree_status_t iree_net_session_apply_bootstrap_message(
+    iree_net_session_t* session,
+    const iree_net_bootstrap_message_view_t* message) {
+  switch (message->type) {
+    case IREE_NET_BOOTSTRAP_TYPE_HELLO:
+      return iree_net_session_handle_hello(session, &message->value.hello);
+    case IREE_NET_BOOTSTRAP_TYPE_HELLO_ACK:
+      return iree_net_session_handle_hello_ack(session,
+                                               &message->value.hello_ack);
+    case IREE_NET_BOOTSTRAP_TYPE_REJECT:
+      return iree_net_session_handle_reject(session, &message->value.reject);
+    default:
+      return iree_make_status(IREE_STATUS_INTERNAL,
+                              "parsed bootstrap message type %u is invalid",
+                              (unsigned)message->type);
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -1038,38 +944,18 @@ static iree_status_t iree_net_session_on_data(
                             "session in terminal state %d", (int)state);
   }
 
-  // Parse bootstrap message header.
-  if (payload.data_length < sizeof(iree_net_bootstrap_header_t)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "bootstrap message too short: %" PRIhsz " bytes",
-                            payload.data_length);
+  iree_net_bootstrap_message_view_t message;
+  memset(&message, 0, sizeof(message));
+  if (flags != IREE_NET_CONTROL_DATA_FLAG_NONE) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "bootstrap DATA flags must be zero, got 0x%02x",
+                              flags);
   }
-
-  iree_net_bootstrap_header_t header;
-  memcpy(&header, payload.data, sizeof(header));
-
-  // Validate reserved fields.
-  if (header.reserved0[0] != 0 || header.reserved0[1] != 0 ||
-      header.reserved0[2] != 0 || header.reserved1 != 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "bootstrap header reserved fields must be 0");
+  if (iree_status_is_ok(status)) {
+    status = iree_net_bootstrap_message_parse(payload, &message);
   }
-
-  switch ((iree_net_bootstrap_type_t)header.type) {
-    case IREE_NET_BOOTSTRAP_TYPE_HELLO:
-      status = iree_net_session_handle_hello(session, payload);
-      break;
-    case IREE_NET_BOOTSTRAP_TYPE_HELLO_ACK:
-      status = iree_net_session_handle_hello_ack(session, payload);
-      break;
-    case IREE_NET_BOOTSTRAP_TYPE_REJECT:
-      status = iree_net_session_handle_reject(session, payload);
-      break;
-    default:
-      status =
-          iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                           "unknown bootstrap message type: %u", header.type);
-      break;
+  if (iree_status_is_ok(status)) {
+    status = iree_net_session_apply_bootstrap_message(session, &message);
   }
 
   // Route bootstrap failures through fail() so the session transitions to
@@ -1332,6 +1218,14 @@ static iree_status_t iree_net_session_create_common(
                             "application endpoint count overflows required "
                             "endpoint count");
   }
+  iree_net_bootstrap_capabilities_t unrecognized_capabilities =
+      options->capabilities & ~IREE_NET_BOOTSTRAP_CAPABILITY_ALL_RECOGNIZED;
+  if (unrecognized_capabilities != IREE_NET_BOOTSTRAP_CAPABILITY_NONE) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "session capabilities contain unrecognized bits 0x%08x",
+        unrecognized_capabilities);
+  }
   if ((options->required_capabilities & ~options->capabilities) != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -1347,6 +1241,21 @@ static iree_status_t iree_net_session_create_common(
         IREE_STATUS_INVALID_ARGUMENT,
         "local axis count %u exceeds wire format maximum %u", local_axis_count,
         (uint32_t)UINT16_MAX);
+  }
+  if (local_axis_count > 0 && !options->local_topology.axes) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "local topology axes must have storage when axis_count is nonzero");
+  }
+  if (local_axis_count > 0 && !options->local_topology.current_epochs) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "local topology epochs must have storage when axis_count is nonzero");
+  }
+  if (options->local_topology.reserved[0] != 0 ||
+      options->local_topology.reserved[1] != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "local topology reserved bytes must be zero");
   }
   iree_host_size_t local_application_data_length =
       options->local_topology.application_data.data_length;

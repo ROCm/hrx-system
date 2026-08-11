@@ -146,8 +146,10 @@ iree_cc_library(
     iree::net::bootstrap
     iree::net::carrier::cts::util::registry
     iree::net::carrier::cts::util::session_test_base
+    iree::net::channel::control::control_channel
     iree::net::channel::queue::frame
     iree::net::channel::queue::queue_channel
+    iree::net::channel::util::frame_sender
     iree::testing::gtest
   TESTONLY
   ALWAYSLINK

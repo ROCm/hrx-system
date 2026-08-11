@@ -31,8 +31,10 @@
 #include "iree/net/bootstrap.h"
 #include "iree/net/carrier/cts/util/registry.h"
 #include "iree/net/carrier/cts/util/session_test_base.h"
+#include "iree/net/channel/control/control_channel.h"
 #include "iree/net/channel/queue/frame.h"
 #include "iree/net/channel/queue/queue_channel.h"
+#include "iree/net/channel/util/frame_sender.h"
 
 namespace iree::net::carrier::cts {
 namespace {
@@ -115,6 +117,172 @@ class CallbackGate {
   bool released_ = false;
   bool poll_finished_ = false;
 };
+
+// Minimal real control-channel peer used to inject bootstrap DATA while the
+// session under test remains on its production connection path.
+struct BootstrapPeer {
+  using DataHandler = iree_status_t (*)(BootstrapPeer* peer,
+                                        iree_net_control_frame_flags_t flags,
+                                        iree_const_byte_span_t payload);
+
+  // Owned connection backing the control channel.
+  iree_net_connection_t* connection = nullptr;
+  // Owned control channel over the first connection endpoint.
+  iree_net_control_channel_t* channel = nullptr;
+  // Terminal endpoint and channel setup status.
+  iree::Status setup_status;
+  // True after the control channel is active.
+  bool endpoint_ready = false;
+  // True after at least one DATA message arrived.
+  bool data_fired = false;
+  // Copy of the most recently received DATA payload.
+  std::vector<uint8_t> data;
+  // Terminal error observed by the peer control channel.
+  iree::Status channel_status;
+  // True after a peer DATA send completes.
+  bool send_completed = false;
+  // Completion status of the peer DATA send.
+  iree::Status send_status;
+  // True after connection deactivation completes.
+  bool deactivated = false;
+  // Optional handler invoked for received DATA.
+  DataHandler data_handler = nullptr;
+
+  static void OnEndpointReady(void* user_data, iree_status_t status,
+                              iree_net_message_endpoint_t endpoint) {
+    auto* self = static_cast<BootstrapPeer*>(user_data);
+    self->setup_status = iree::Status(std::move(status));
+    if (!self->setup_status.ok()) return;
+
+    iree_net_control_channel_callbacks_t callbacks = {};
+    callbacks.on_data = OnData;
+    callbacks.on_error = OnChannelError;
+    callbacks.on_transport_error = OnChannelError;
+    callbacks.on_send_complete = OnSendComplete;
+    callbacks.user_data = self;
+    self->setup_status = iree::Status(iree_net_control_channel_create(
+        endpoint, IREE_NET_FRAME_SENDER_MAX_SPANS,
+        iree_net_control_channel_options_default(), callbacks,
+        iree_allocator_system(), &self->channel));
+    if (!self->setup_status.ok()) return;
+    self->setup_status =
+        iree::Status(iree_net_control_channel_activate(self->channel));
+    self->endpoint_ready = self->setup_status.ok();
+  }
+
+  static iree_status_t OnData(void* user_data,
+                              iree_net_control_frame_flags_t flags,
+                              iree_const_byte_span_t payload,
+                              iree_async_buffer_lease_t*) {
+    auto* self = static_cast<BootstrapPeer*>(user_data);
+    self->data_fired = true;
+    self->data.assign(payload.data, payload.data + payload.data_length);
+    if (self->data_handler) return self->data_handler(self, flags, payload);
+    return iree_ok_status();
+  }
+
+  static void OnSendComplete(void* user_data, uint64_t, iree_status_t status) {
+    auto* self = static_cast<BootstrapPeer*>(user_data);
+    self->send_completed = true;
+    self->send_status = iree::Status(std::move(status));
+  }
+
+  static void OnChannelError(void* user_data, iree_status_t status) {
+    auto* self = static_cast<BootstrapPeer*>(user_data);
+    self->channel_status = iree::Status(std::move(status));
+  }
+
+  static void OnAccept(void* user_data, iree_status_t status,
+                       iree_net_connection_t* connection) {
+    auto* self = static_cast<BootstrapPeer*>(user_data);
+    self->setup_status = iree::Status(std::move(status));
+    if (!self->setup_status.ok()) {
+      iree_net_connection_release(connection);
+      return;
+    }
+    self->Open(connection);
+  }
+
+  void Open(iree_net_connection_t* value) {
+    connection = value;
+    setup_status = iree::Status(
+        iree_net_connection_open_endpoint(connection, {OnEndpointReady, this}));
+  }
+
+  bool HasAsyncFailure() const {
+    return !setup_status.ok() || !channel_status.ok() ||
+           (send_completed && !send_status.ok());
+  }
+
+  void BeginDeactivation() {
+    iree_net_connection_deactivate(
+        connection, {[](void* user_data) {
+                       static_cast<BootstrapPeer*>(user_data)->deactivated =
+                           true;
+                     },
+                     this});
+  }
+
+  void Release() {
+    iree_net_control_channel_release(channel);
+    channel = nullptr;
+    iree_net_connection_release(connection);
+    connection = nullptr;
+  }
+};
+
+static iree_status_t ValidateClientHello(iree_net_control_frame_flags_t flags,
+                                         iree_const_byte_span_t payload) {
+  if (flags != IREE_NET_CONTROL_DATA_FLAG_NONE) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "client HELLO used unexpected DATA flags");
+  }
+  iree_net_bootstrap_message_view_t hello;
+  IREE_RETURN_IF_ERROR(iree_net_bootstrap_message_parse(payload, &hello));
+  if (hello.type != IREE_NET_BOOTSTRAP_TYPE_HELLO) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "expected HELLO from client, got type %u",
+                            (unsigned)hello.type);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t SendUnofferedHelloAck(BootstrapPeer* peer,
+                                           iree_net_control_frame_flags_t flags,
+                                           iree_const_byte_span_t payload) {
+  IREE_RETURN_IF_ERROR(ValidateClientHello(flags, payload));
+
+  iree_net_bootstrap_hello_ack_t hello_ack = {};
+  hello_ack.header.type = IREE_NET_BOOTSTRAP_TYPE_HELLO_ACK;
+  hello_ack.session_id = 42;
+  hello_ack.negotiated_capabilities =
+      IREE_NET_BOOTSTRAP_CAPABILITY_BULK_TRANSFER;
+  iree_async_span_t span =
+      iree_async_span_from_ptr(&hello_ack, sizeof(hello_ack));
+  iree_async_span_list_t span_list = iree_async_span_list_make(&span, 1);
+  return iree_net_control_channel_send_data_copy(
+      peer->channel, IREE_NET_CONTROL_DATA_FLAG_NONE, span_list,
+      /*operation_user_data=*/0);
+}
+
+static iree_status_t SendLongReject(BootstrapPeer* peer,
+                                    iree_net_control_frame_flags_t flags,
+                                    iree_const_byte_span_t payload) {
+  IREE_RETURN_IF_ERROR(ValidateClientHello(flags, payload));
+
+  iree_net_bootstrap_reject_t reject = {};
+  reject.header.type = IREE_NET_BOOTSTRAP_TYPE_REJECT;
+  reject.reason_code = IREE_STATUS_RESOURCE_EXHAUSTED;
+  std::string reason(2048, 'r');
+  iree_async_span_t spans[] = {
+      iree_async_span_from_ptr(&reject, sizeof(reject)),
+      iree_async_span_from_ptr(reason.data(), reason.size()),
+  };
+  return iree_net_control_channel_send_data_copy(
+      peer->channel, IREE_NET_CONTROL_DATA_FLAG_NONE,
+      iree_async_span_list_make(spans, IREE_ARRAYSIZE(spans)),
+      /*operation_user_data=*/0);
+}
 
 using SessionTest = SessionTestBase;
 
@@ -268,6 +436,279 @@ TEST_P(SessionTest, RequiredCapabilitiesRejectMissingPeerSupport) {
     return iree_net_session_state(client_session_) !=
            IREE_NET_SESSION_STATE_BOOTSTRAPPING;
   }));
+}
+
+TEST_P(SessionTest, PeerTopologyExceedingTrackerCapacityIsRejected) {
+  IREE_ASSERT_OK_AND_ASSIGN(std::string bind_str, MakeBindAddress());
+  iree_string_view_t bind_addr = iree_make_cstring_view(bind_str.c_str());
+
+  struct AcceptCtx {
+    iree_async_proactor_t* proactor = nullptr;
+    iree_async_frontier_tracker_t* tracker = nullptr;
+    SessionCallbackTracker* callbacks = nullptr;
+    iree_net_session_t** out_session = nullptr;
+    iree::Status status;
+  } accept_ctx;
+  accept_ctx.proactor = proactor_;
+  accept_ctx.tracker = server_tracker_;
+  accept_ctx.callbacks = &server_callbacks_;
+  accept_ctx.out_session = &server_session_;
+
+  IREE_ASSERT_OK(iree_net_transport_factory_create_listener(
+      factory_, bind_addr, proactor_, recv_pool_,
+      [](void* user_data, iree_status_t status,
+         iree_net_connection_t* connection) {
+        auto* ctx = static_cast<AcceptCtx*>(user_data);
+        ctx->status = iree::Status(std::move(status));
+        if (ctx->status.ok()) {
+          iree_net_session_options_t options =
+              iree_net_session_options_default();
+          options.session_id = 42;
+          ctx->status = iree::Status(iree_net_session_accept(
+              connection, ctx->proactor, ctx->tracker, &options,
+              ctx->callbacks->MakeCallbacks(), iree_allocator_system(),
+              ctx->out_session));
+        }
+        iree_net_connection_release(connection);
+      },
+      &accept_ctx, iree_allocator_system(), &listener_));
+
+  IREE_ASSERT_OK_AND_ASSIGN(std::string connect_str,
+                            ResolveConnectAddress(bind_str, listener_));
+  std::vector<iree_async_axis_t> axes(kAxisTableCapacity + 1);
+  std::vector<uint64_t> epochs(kAxisTableCapacity + 1, 0);
+  for (uint32_t i = 0; i < axes.size(); ++i) axes[i] = 0x1000 + i;
+
+  iree_net_session_options_t options = iree_net_session_options_default();
+  options.local_topology.axes = axes.data();
+  options.local_topology.current_epochs = epochs.data();
+  options.local_topology.axis_count = axes.size();
+  IREE_ASSERT_OK(iree_net_session_connect(
+      factory_, iree_make_string_view(connect_str.c_str(), connect_str.size()),
+      proactor_, recv_pool_, client_tracker_, &options,
+      client_callbacks_.MakeCallbacks(), iree_allocator_system(),
+      &client_session_));
+
+  ASSERT_TRUE(PollUntil([&]() {
+    return !accept_ctx.status.ok() || server_callbacks_.error_fired;
+  }));
+  IREE_ASSERT_OK(accept_ctx.status);
+  EXPECT_EQ(server_callbacks_.error_code, IREE_STATUS_RESOURCE_EXHAUSTED);
+  EXPECT_FALSE(server_callbacks_.ready_fired);
+
+  ASSERT_TRUE(PollUntil([&]() {
+    return iree_net_session_state(client_session_) !=
+           IREE_NET_SESSION_STATE_BOOTSTRAPPING;
+  }));
+  EXPECT_EQ(client_callbacks_.error_code, IREE_STATUS_RESOURCE_EXHAUSTED);
+  EXPECT_FALSE(client_callbacks_.ready_fired);
+}
+
+TEST_P(SessionTest, DuplicatePeerAxisDoesNotRetireExistingTrackerAxis) {
+  iree_async_axis_t existing_axis = 0x1234;
+  iree_async_semaphore_t* existing_semaphore = nullptr;
+  IREE_ASSERT_OK(iree_async_semaphore_create(
+      proactor_, /*initial_value=*/0,
+      IREE_ASYNC_SEMAPHORE_DEFAULT_FRONTIER_CAPACITY, iree_allocator_system(),
+      &existing_semaphore));
+  IREE_ASSERT_OK(iree_async_frontier_tracker_register_axis(
+      server_tracker_, existing_axis, existing_semaphore));
+
+  IREE_ASSERT_OK_AND_ASSIGN(std::string bind_str, MakeBindAddress());
+  iree_string_view_t bind_addr = iree_make_cstring_view(bind_str.c_str());
+  struct AcceptCtx {
+    iree_async_proactor_t* proactor = nullptr;
+    iree_async_frontier_tracker_t* tracker = nullptr;
+    SessionCallbackTracker* callbacks = nullptr;
+    iree_net_session_t** out_session = nullptr;
+    iree::Status status;
+  } accept_ctx;
+  accept_ctx.proactor = proactor_;
+  accept_ctx.tracker = server_tracker_;
+  accept_ctx.callbacks = &server_callbacks_;
+  accept_ctx.out_session = &server_session_;
+
+  IREE_ASSERT_OK(iree_net_transport_factory_create_listener(
+      factory_, bind_addr, proactor_, recv_pool_,
+      [](void* user_data, iree_status_t status,
+         iree_net_connection_t* connection) {
+        auto* ctx = static_cast<AcceptCtx*>(user_data);
+        ctx->status = iree::Status(std::move(status));
+        if (ctx->status.ok()) {
+          iree_net_session_options_t options =
+              iree_net_session_options_default();
+          options.session_id = 42;
+          ctx->status = iree::Status(iree_net_session_accept(
+              connection, ctx->proactor, ctx->tracker, &options,
+              ctx->callbacks->MakeCallbacks(), iree_allocator_system(),
+              ctx->out_session));
+        }
+        iree_net_connection_release(connection);
+      },
+      &accept_ctx, iree_allocator_system(), &listener_));
+
+  IREE_ASSERT_OK_AND_ASSIGN(std::string connect_str,
+                            ResolveConnectAddress(bind_str, listener_));
+  uint64_t existing_epoch = 0;
+  iree_net_session_options_t options = iree_net_session_options_default();
+  options.local_topology.axes = &existing_axis;
+  options.local_topology.current_epochs = &existing_epoch;
+  options.local_topology.axis_count = 1;
+  IREE_ASSERT_OK(iree_net_session_connect(
+      factory_, iree_make_string_view(connect_str.c_str(), connect_str.size()),
+      proactor_, recv_pool_, client_tracker_, &options,
+      client_callbacks_.MakeCallbacks(), iree_allocator_system(),
+      &client_session_));
+
+  ASSERT_TRUE(PollUntil([&]() {
+    return !accept_ctx.status.ok() || server_callbacks_.error_fired;
+  }));
+  IREE_ASSERT_OK(accept_ctx.status);
+  EXPECT_EQ(server_callbacks_.error_code, IREE_STATUS_ALREADY_EXISTS);
+  EXPECT_FALSE(server_callbacks_.ready_fired);
+  ASSERT_TRUE(PollUntil([&]() {
+    return iree_net_session_state(client_session_) !=
+           IREE_NET_SESSION_STATE_BOOTSTRAPPING;
+  }));
+  EXPECT_EQ(client_callbacks_.error_code, IREE_STATUS_ALREADY_EXISTS);
+
+  iree_async_frontier_tracker_advance(server_tracker_, existing_axis, 1);
+  EXPECT_EQ(iree_async_semaphore_query(existing_semaphore), 1u);
+
+  iree_async_frontier_tracker_retire_axis(
+      server_tracker_, existing_axis,
+      iree_make_status(IREE_STATUS_CANCELLED, "test axis retired"));
+  iree_async_semaphore_release(existing_semaphore);
+}
+
+TEST_P(SessionTest, BootstrapDataFlagsAreRejected) {
+  IREE_ASSERT_OK_AND_ASSIGN(auto pair, EstablishConnection());
+  listener_ = pair.listener;
+  pair.listener = nullptr;
+
+  iree_net_session_options_t options = iree_net_session_options_default();
+  options.session_id = 42;
+  IREE_ASSERT_OK(
+      iree_net_session_accept(pair.server, proactor_, server_tracker_, &options,
+                              server_callbacks_.MakeCallbacks(),
+                              iree_allocator_system(), &server_session_));
+  iree_net_connection_release(pair.server);
+  pair.server = nullptr;
+
+  BootstrapPeer peer;
+  peer.Open(pair.client);
+  pair.client = nullptr;
+  ASSERT_TRUE(PollUntil(
+      [&]() { return peer.endpoint_ready || !peer.setup_status.ok(); }));
+  IREE_ASSERT_OK(peer.setup_status);
+
+  iree_net_bootstrap_hello_t hello = {};
+  hello.header.type = IREE_NET_BOOTSTRAP_TYPE_HELLO;
+  hello.protocol_version = IREE_NET_BOOTSTRAP_PROTOCOL_VERSION;
+  iree_async_span_t span = iree_async_span_from_ptr(&hello, sizeof(hello));
+  iree_async_span_list_t span_list = iree_async_span_list_make(&span, 1);
+  IREE_ASSERT_OK(iree_net_control_channel_send_data_copy(
+      peer.channel, /*flags=*/1, span_list, /*operation_user_data=*/0));
+
+  ASSERT_TRUE(PollUntil([&]() { return server_callbacks_.error_fired; }));
+  EXPECT_EQ(server_callbacks_.error_code, IREE_STATUS_INVALID_ARGUMENT);
+  EXPECT_FALSE(server_callbacks_.ready_fired);
+
+  ASSERT_TRUE(PollUntil(
+      [&]() { return peer.data_fired || !peer.channel_status.ok(); }));
+  IREE_ASSERT_OK(peer.channel_status);
+  ASSERT_TRUE(peer.data_fired);
+  iree_net_bootstrap_message_view_t reject;
+  IREE_ASSERT_OK(iree_net_bootstrap_message_parse(
+      iree_make_const_byte_span(peer.data.data(), peer.data.size()), &reject));
+  ASSERT_EQ(reject.type, IREE_NET_BOOTSTRAP_TYPE_REJECT);
+  EXPECT_EQ(reject.value.reject.fixed.reason_code,
+            IREE_STATUS_INVALID_ARGUMENT);
+
+  DeactivateSession(server_session_, server_deactivation_);
+  peer.BeginDeactivation();
+  ASSERT_TRUE(PollUntil(
+      [&]() { return server_deactivation_.completed && peer.deactivated; }));
+  peer.Release();
+}
+
+TEST_P(SessionTest, HelloAckCannotAddUnofferedCapabilities) {
+  IREE_ASSERT_OK_AND_ASSIGN(std::string bind_str, MakeBindAddress());
+  iree_string_view_t bind_addr = iree_make_cstring_view(bind_str.c_str());
+
+  BootstrapPeer peer;
+  peer.data_handler = SendUnofferedHelloAck;
+  IREE_ASSERT_OK(iree_net_transport_factory_create_listener(
+      factory_, bind_addr, proactor_, recv_pool_, BootstrapPeer::OnAccept,
+      &peer, iree_allocator_system(), &listener_));
+  IREE_ASSERT_OK_AND_ASSIGN(std::string connect_str,
+                            ResolveConnectAddress(bind_str, listener_));
+
+  iree_net_session_options_t options = iree_net_session_options_default();
+  IREE_ASSERT_OK(iree_net_session_connect(
+      factory_, iree_make_string_view(connect_str.c_str(), connect_str.size()),
+      proactor_, recv_pool_, client_tracker_, &options,
+      client_callbacks_.MakeCallbacks(), iree_allocator_system(),
+      &client_session_));
+
+  ASSERT_TRUE(PollUntil([&]() {
+    return peer.HasAsyncFailure() || client_callbacks_.error_fired;
+  }));
+  IREE_ASSERT_OK(peer.setup_status);
+  IREE_ASSERT_OK(peer.channel_status);
+  if (peer.send_completed) IREE_ASSERT_OK(peer.send_status);
+  ASSERT_TRUE(peer.endpoint_ready);
+  ASSERT_TRUE(peer.data_fired);
+  EXPECT_EQ(client_callbacks_.error_code, IREE_STATUS_INVALID_ARGUMENT);
+  EXPECT_FALSE(client_callbacks_.ready_fired);
+  EXPECT_EQ(iree_net_session_id(client_session_), 0u);
+
+  DeactivateSession(client_session_, client_deactivation_);
+  peer.BeginDeactivation();
+  ASSERT_TRUE(PollUntil(
+      [&]() { return client_deactivation_.completed && peer.deactivated; }));
+  peer.Release();
+}
+
+TEST_P(SessionTest, RejectDiagnosticIsBoundedWithoutLimitingWireReason) {
+  IREE_ASSERT_OK_AND_ASSIGN(std::string bind_str, MakeBindAddress());
+  iree_string_view_t bind_addr = iree_make_cstring_view(bind_str.c_str());
+
+  BootstrapPeer peer;
+  peer.data_handler = SendLongReject;
+  IREE_ASSERT_OK(iree_net_transport_factory_create_listener(
+      factory_, bind_addr, proactor_, recv_pool_, BootstrapPeer::OnAccept,
+      &peer, iree_allocator_system(), &listener_));
+  IREE_ASSERT_OK_AND_ASSIGN(std::string connect_str,
+                            ResolveConnectAddress(bind_str, listener_));
+
+  iree_net_session_options_t options = iree_net_session_options_default();
+  IREE_ASSERT_OK(iree_net_session_connect(
+      factory_, iree_make_string_view(connect_str.c_str(), connect_str.size()),
+      proactor_, recv_pool_, client_tracker_, &options,
+      client_callbacks_.MakeCallbacks(), iree_allocator_system(),
+      &client_session_));
+
+  ASSERT_TRUE(PollUntil([&]() {
+    return peer.HasAsyncFailure() || client_callbacks_.error_fired;
+  }));
+  IREE_ASSERT_OK(peer.setup_status);
+  IREE_ASSERT_OK(peer.channel_status);
+  if (peer.send_completed) IREE_ASSERT_OK(peer.send_status);
+  ASSERT_TRUE(peer.endpoint_ready);
+  ASSERT_TRUE(peer.data_fired);
+  EXPECT_EQ(client_callbacks_.error_code, IREE_STATUS_RESOURCE_EXHAUSTED);
+  EXPECT_FALSE(client_callbacks_.ready_fired);
+  EXPECT_NE(client_callbacks_.error_message.find(std::string(1024, 'r')),
+            std::string::npos);
+  EXPECT_EQ(client_callbacks_.error_message.find(std::string(1025, 'r')),
+            std::string::npos);
+
+  DeactivateSession(client_session_, client_deactivation_);
+  peer.BeginDeactivation();
+  ASSERT_TRUE(PollUntil(
+      [&]() { return client_deactivation_.completed && peer.deactivated; }));
+  peer.Release();
 }
 
 //===----------------------------------------------------------------------===//
@@ -633,6 +1074,58 @@ TEST_P(SessionTest, OnControlDataCallbackRequired) {
                         iree_net_session_accept(
                             pair.server, proactor_, server_tracker_, &options,
                             bad_callbacks, iree_allocator_system(), &session));
+  EXPECT_EQ(session, nullptr);
+
+  iree_net_connection_release(pair.client);
+  iree_net_connection_release(pair.server);
+  StopAndWait(pair.listener);
+  iree_net_listener_free(pair.listener);
+}
+
+TEST_P(SessionTest, InvalidLocalBootstrapConfigurationIsRejected) {
+  IREE_ASSERT_OK_AND_ASSIGN(auto pair, EstablishConnection());
+  ASSERT_NE(pair.server, nullptr);
+
+  SessionCallbackTracker callbacks;
+  iree_net_session_options_t options = iree_net_session_options_default();
+  options.session_id = 1;
+  options.local_topology.axis_count = 1;
+
+  iree_net_session_t* session = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_net_session_accept(pair.server, proactor_, server_tracker_, &options,
+                              callbacks.MakeCallbacks(),
+                              iree_allocator_system(), &session));
+  EXPECT_EQ(session, nullptr);
+
+  iree_async_axis_t axis = 1;
+  options.local_topology.axes = &axis;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_net_session_accept(pair.server, proactor_, server_tracker_, &options,
+                              callbacks.MakeCallbacks(),
+                              iree_allocator_system(), &session));
+  EXPECT_EQ(session, nullptr);
+
+  uint64_t epoch = 0;
+  options.local_topology.current_epochs = &epoch;
+  options.local_topology.reserved[0] = 1;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_net_session_accept(pair.server, proactor_, server_tracker_, &options,
+                              callbacks.MakeCallbacks(),
+                              iree_allocator_system(), &session));
+  EXPECT_EQ(session, nullptr);
+
+  options.local_topology.reserved[0] = 0;
+  options.capabilities =
+      IREE_NET_BOOTSTRAP_CAPABILITY_ALL_RECOGNIZED | (1u << 31);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_net_session_accept(pair.server, proactor_, server_tracker_, &options,
+                              callbacks.MakeCallbacks(),
+                              iree_allocator_system(), &session));
   EXPECT_EQ(session, nullptr);
 
   iree_net_connection_release(pair.client);

@@ -100,7 +100,13 @@
 #ifndef IREE_NET_BOOTSTRAP_H_
 #define IREE_NET_BOOTSTRAP_H_
 
+#include <stddef.h>
+
 #include "iree/base/api.h"
+
+#if !defined(IREE_ENDIANNESS_LITTLE) || !IREE_ENDIANNESS_LITTLE
+#error "session bootstrap messages require a little-endian target"
+#endif  // !IREE_ENDIANNESS_LITTLE
 
 #ifdef __cplusplus
 extern "C" {
@@ -145,6 +151,11 @@ typedef enum iree_net_bootstrap_capability_bits_e {
   // When set, bulk transfers may use RDMA instead of message-based copy.
   // Requires the transport to advertise IREE_NET_TRANSPORT_CAPABILITY_RDMA.
   IREE_NET_BOOTSTRAP_CAPABILITY_RDMA = 1u << 1,
+
+  // All capability bits recognized by the current protocol version.
+  IREE_NET_BOOTSTRAP_CAPABILITY_ALL_RECOGNIZED =
+      IREE_NET_BOOTSTRAP_CAPABILITY_BULK_TRANSFER |
+      IREE_NET_BOOTSTRAP_CAPABILITY_RDMA,
 } iree_net_bootstrap_capability_bits_t;
 typedef uint32_t iree_net_bootstrap_capabilities_t;
 
@@ -164,6 +175,9 @@ typedef struct iree_net_bootstrap_header_t {
   uint32_t reserved1;
 } iree_net_bootstrap_header_t;
 static_assert(sizeof(iree_net_bootstrap_header_t) == 8, "");
+static_assert(offsetof(iree_net_bootstrap_header_t, type) == 0, "");
+static_assert(offsetof(iree_net_bootstrap_header_t, reserved0) == 1, "");
+static_assert(offsetof(iree_net_bootstrap_header_t, reserved1) == 4, "");
 
 //===----------------------------------------------------------------------===//
 // Axis entry
@@ -181,6 +195,9 @@ typedef struct iree_net_bootstrap_axis_entry_t {
   uint64_t current_epoch;
 } iree_net_bootstrap_axis_entry_t;
 static_assert(sizeof(iree_net_bootstrap_axis_entry_t) == 16, "");
+static_assert(offsetof(iree_net_bootstrap_axis_entry_t, axis) == 0, "");
+static_assert(offsetof(iree_net_bootstrap_axis_entry_t, current_epoch) == 8,
+              "");
 
 //===----------------------------------------------------------------------===//
 // HELLO (client -> server)
@@ -220,6 +237,16 @@ typedef struct iree_net_bootstrap_hello_t {
   uint64_t application_data_length;
 } iree_net_bootstrap_hello_t;
 static_assert(sizeof(iree_net_bootstrap_hello_t) == 32, "");
+static_assert(offsetof(iree_net_bootstrap_hello_t, header) == 0, "");
+static_assert(offsetof(iree_net_bootstrap_hello_t, protocol_version) == 8, "");
+static_assert(offsetof(iree_net_bootstrap_hello_t, capabilities) == 12, "");
+static_assert(offsetof(iree_net_bootstrap_hello_t, machine_index) == 16, "");
+static_assert(offsetof(iree_net_bootstrap_hello_t, session_epoch) == 17, "");
+static_assert(offsetof(iree_net_bootstrap_hello_t, axis_count) == 18, "");
+static_assert(offsetof(iree_net_bootstrap_hello_t, reserved) == 20, "");
+static_assert(offsetof(iree_net_bootstrap_hello_t, application_data_length) ==
+                  24,
+              "");
 
 //===----------------------------------------------------------------------===//
 // HELLO_ACK (server -> client)
@@ -256,6 +283,19 @@ typedef struct iree_net_bootstrap_hello_ack_t {
   uint16_t axis_count;
 } iree_net_bootstrap_hello_ack_t;
 static_assert(sizeof(iree_net_bootstrap_hello_ack_t) == 32, "");
+static_assert(offsetof(iree_net_bootstrap_hello_ack_t, header) == 0, "");
+static_assert(offsetof(iree_net_bootstrap_hello_ack_t, session_id) == 8, "");
+static_assert(offsetof(iree_net_bootstrap_hello_ack_t,
+                       application_data_length) == 16,
+              "");
+static_assert(offsetof(iree_net_bootstrap_hello_ack_t,
+                       negotiated_capabilities) == 24,
+              "");
+static_assert(offsetof(iree_net_bootstrap_hello_ack_t, machine_index) == 28,
+              "");
+static_assert(offsetof(iree_net_bootstrap_hello_ack_t, session_epoch) == 29,
+              "");
+static_assert(offsetof(iree_net_bootstrap_hello_ack_t, axis_count) == 30, "");
 
 //===----------------------------------------------------------------------===//
 // REJECT (server -> client)
@@ -278,6 +318,102 @@ typedef struct iree_net_bootstrap_reject_t {
   uint32_t reserved;
 } iree_net_bootstrap_reject_t;
 static_assert(sizeof(iree_net_bootstrap_reject_t) == 16, "");
+static_assert(offsetof(iree_net_bootstrap_reject_t, header) == 0, "");
+static_assert(offsetof(iree_net_bootstrap_reject_t, reason_code) == 8, "");
+static_assert(offsetof(iree_net_bootstrap_reject_t, reserved) == 12, "");
+
+//===----------------------------------------------------------------------===//
+// Canonical topology layout
+//===----------------------------------------------------------------------===//
+
+// Canonical byte layout of a HELLO or HELLO_ACK payload.
+typedef struct iree_net_bootstrap_topology_layout_t {
+  // Byte offset of the first encoded axis entry.
+  iree_host_size_t axis_entries_offset;
+  // Byte offset of the unpadded application data.
+  iree_host_size_t application_data_offset;
+  // Total payload length including zero alignment padding.
+  iree_host_size_t payload_length;
+} iree_net_bootstrap_topology_layout_t;
+
+// Calculates the canonical layout of a topology-bearing bootstrap message.
+// |message_type| must be HELLO or HELLO_ACK. The output is zeroed on failure.
+iree_status_t iree_net_bootstrap_topology_layout_calculate(
+    iree_net_bootstrap_type_t message_type, uint32_t axis_count,
+    iree_host_size_t application_data_length,
+    iree_net_bootstrap_topology_layout_t* out_layout);
+
+//===----------------------------------------------------------------------===//
+// Parsed message views
+//===----------------------------------------------------------------------===//
+
+// Borrowed encoded axis entries from a structurally validated message.
+typedef struct iree_net_bootstrap_axis_list_t {
+  // Complete encoded entries in their original wire storage.
+  iree_const_byte_span_t encoded_entries;
+  // Number of fixed-size entries in |encoded_entries|.
+  uint32_t count;
+} iree_net_bootstrap_axis_list_t;
+
+// Returns an aligned copy of axis entry |index| using an unaligned-safe load.
+// |axis_list| must come from a successfully parsed message and |index| must be
+// less than |axis_list->count|.
+iree_net_bootstrap_axis_entry_t iree_net_bootstrap_axis_list_get(
+    const iree_net_bootstrap_axis_list_t* axis_list, uint32_t index);
+
+// Structurally validated borrowed view of a HELLO message.
+typedef struct iree_net_bootstrap_hello_view_t {
+  // Aligned copy of the fixed wire prefix.
+  iree_net_bootstrap_hello_t fixed;
+  // Borrowed encoded axis list.
+  iree_net_bootstrap_axis_list_t axes;
+  // Borrowed unpadded application bytes.
+  iree_const_byte_span_t application_data;
+} iree_net_bootstrap_hello_view_t;
+
+// Structurally validated borrowed view of a HELLO_ACK message.
+typedef struct iree_net_bootstrap_hello_ack_view_t {
+  // Aligned copy of the fixed wire prefix.
+  iree_net_bootstrap_hello_ack_t fixed;
+  // Borrowed encoded axis list.
+  iree_net_bootstrap_axis_list_t axes;
+  // Borrowed unpadded application bytes.
+  iree_const_byte_span_t application_data;
+} iree_net_bootstrap_hello_ack_view_t;
+
+// Structurally validated borrowed view of a REJECT message.
+typedef struct iree_net_bootstrap_reject_view_t {
+  // Aligned copy of the fixed wire prefix.
+  iree_net_bootstrap_reject_t fixed;
+  // Borrowed diagnostic reason bytes interpreted as an opaque string.
+  iree_string_view_t reason;
+} iree_net_bootstrap_reject_view_t;
+
+// Structurally validated borrowed view of one complete bootstrap message.
+typedef struct iree_net_bootstrap_message_view_t {
+  // Parsed message type selecting the active union member.
+  iree_net_bootstrap_type_t type;
+  // Message-specific validated view.
+  union {
+    // HELLO view when |type| is IREE_NET_BOOTSTRAP_TYPE_HELLO.
+    iree_net_bootstrap_hello_view_t hello;
+    // HELLO_ACK view when |type| is IREE_NET_BOOTSTRAP_TYPE_HELLO_ACK.
+    iree_net_bootstrap_hello_ack_view_t hello_ack;
+    // REJECT view when |type| is IREE_NET_BOOTSTRAP_TYPE_REJECT.
+    iree_net_bootstrap_reject_view_t reject;
+  } value;
+} iree_net_bootstrap_message_view_t;
+
+// Parses and structurally validates one complete bootstrap DATA payload.
+//
+// Fixed prefixes are copied into aligned view storage. Axis entries,
+// application data, and rejection reasons borrow |payload| and remain valid
+// for the same lifetime. Validation covers current-version framing, reserved
+// fields, recognized capabilities, exact extents, and zero alignment padding.
+// The output is zeroed on failure.
+iree_status_t iree_net_bootstrap_message_parse(
+    iree_const_byte_span_t payload,
+    iree_net_bootstrap_message_view_t* out_message);
 
 #ifdef __cplusplus
 }  // extern "C"

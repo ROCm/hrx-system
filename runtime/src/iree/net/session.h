@@ -128,6 +128,7 @@ typedef struct iree_net_session_topology_t {
   // Session epoch for ABA prevention in axis encoding.
   uint8_t session_epoch;
 
+  // Reserved bytes that must be zero.
   uint8_t reserved[2];
 } iree_net_session_topology_t;
 
