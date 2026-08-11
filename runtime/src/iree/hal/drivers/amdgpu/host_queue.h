@@ -716,6 +716,12 @@ void iree_hal_amdgpu_host_queue_deinitialize_tsan_state(
 void iree_hal_amdgpu_host_queue_deinitialize(
     iree_hal_amdgpu_host_queue_t* queue);
 
+// Records an unrecoverable asynchronous queue failure and wakes the completion
+// service so all submitted and deferred operations fail promptly. Consumes
+// |status| and preserves only the first failure.
+void iree_hal_amdgpu_host_queue_fail(iree_hal_amdgpu_host_queue_t* queue,
+                                     iree_status_t status);
+
 // Populates |out_scope| with immutable queue identity and AQL ring facts.
 void iree_hal_amdgpu_host_queue_query_scope(
     const iree_hal_amdgpu_host_queue_t* queue,
