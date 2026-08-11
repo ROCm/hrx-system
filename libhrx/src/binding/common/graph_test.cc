@@ -136,6 +136,89 @@ TEST(GraphTest, KernelParameterUpdateIsFailureAtomic) {
   }
 }
 
+TEST(GraphTest, KernelParameterUpdatePacksAndClearsNativeAbiGaps) {
+  std::array<iree_hal_streaming_parameter_op_t, 3> operations = {};
+  operations[0].copy = {
+      /*.size=*/sizeof(uint32_t),
+      /*.native_abi_destination_offset=*/0,
+      /*.source_offset=*/0,
+      /*.source_ordinal=*/0,
+      /*.constant_destination_offset=*/0,
+  };
+  operations[1].copy = {
+      /*.size=*/sizeof(uint16_t),
+      /*.native_abi_destination_offset=*/16,
+      /*.source_offset=*/12,
+      /*.source_ordinal=*/2,
+      /*.constant_destination_offset=*/4,
+  };
+  operations[2].resolve = {
+      /*.native_abi_destination_offset=*/8,
+      /*.reserved=*/0,
+      /*.source_offset=*/4,
+      /*.source_ordinal=*/1,
+      /*.destination_ordinal=*/0,
+  };
+
+  iree_hal_streaming_symbol_t symbol = {};
+  symbol.type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
+  symbol.parameters.buffer_size = 14;
+  symbol.parameters.constant_bytes = 6;
+  symbol.parameters.direct_arg_bytes = 24;
+  symbol.parameters.binding_count = 1;
+  symbol.parameters.copy_count = 2;
+  symbol.parameters.ops = operations.data();
+
+  iree_hal_streaming_graph_t graph = {};
+  graph.host_allocator = iree_allocator_system();
+  std::array<uint8_t, 24> constants;
+  constants.fill(0xA5);
+  std::array<iree_hal_buffer_ref_t, 1> bindings = {};
+  GraphNodeStorage node_storage;
+  iree_hal_streaming_graph_node_t& node = *node_storage.get();
+  node.graph = &graph;
+  node.type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL;
+  node.attrs.kernel.constants =
+      iree_make_const_byte_span(constants.data(), constants.size());
+  node.attrs.kernel.constants_capacity = constants.size();
+  node.attrs.kernel.bindings = {
+      /*.count=*/bindings.size(),
+      /*.values=*/bindings.data(),
+  };
+  node.attrs.kernel.binding_capacity = bindings.size();
+
+  uint32_t first_value = 0x44332211u;
+  void* device_pointer =
+      reinterpret_cast<void*>(uintptr_t{0x8877665544332211u});
+  uint16_t last_value = 0xAA99u;
+  std::array<void*, 3> arguments = {
+      &first_value,
+      &device_pointer,
+      &last_value,
+  };
+  const iree_hal_streaming_dispatch_params_t params = {
+      /*.grid_dim=*/{1, 1, 1},
+      /*.block_dim=*/{1, 1, 1},
+      /*.shared_memory_bytes=*/0,
+      /*.buffer=*/arguments.data(),
+      /*.buffer_size=*/0,
+      /*.flags=*/IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY,
+  };
+
+  IREE_ASSERT_OK(
+      iree_hal_streaming_graph_set_kernel_node_params(&node, &symbol, &params));
+
+  std::array<uint8_t, 24> expected = {};
+  memcpy(expected.data(), &first_value, sizeof(first_value));
+  const uintptr_t device_pointer_value =
+      reinterpret_cast<uintptr_t>(device_pointer);
+  memcpy(expected.data() + 8, &device_pointer_value,
+         sizeof(device_pointer_value));
+  memcpy(expected.data() + 16, &last_value, sizeof(last_value));
+  EXPECT_EQ(expected, constants);
+  EXPECT_EQ(0u, node.attrs.kernel.bindings.count);
+}
+
 TEST(GraphTest, KernelParameterUpdateRejectsShortPrepackedSpan) {
   iree_hal_streaming_graph_t graph = {};
   graph.host_allocator = iree_allocator_system();

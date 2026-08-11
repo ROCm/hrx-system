@@ -41,6 +41,9 @@ typedef int hipDevice_t;
 typedef struct hipCtx_st* hipCtx_t;
 typedef struct hipModule_st* hipModule_t;
 typedef struct hipFunction_st* hipFunction_t;
+typedef struct hipKernel_st* hipKernel_t;
+typedef struct hipLibrary_st* hipLibrary_t;
+typedef struct ihipLinkState_t* hipLinkState_t;
 typedef struct hipStream_st* hipStream_t;
 typedef struct hipEvent_st* hipEvent_t;
 typedef struct hipArray_st* hipArray_t;
@@ -78,6 +81,27 @@ typedef struct HIP_ARRAY3D_DESCRIPTOR {
 typedef struct dim3 {
   unsigned int x, y, z;
 } dim3;
+
+// Per-device launch description used by multi-device launch APIs.
+typedef struct hipLaunchParams_t {
+  // Registered host function address.
+  void* func;
+  // Grid dimensions in blocks.
+  dim3 gridDim;
+  // Block dimensions in threads.
+  dim3 blockDim;
+  // Array of pointers to argument values.
+  void** args;
+  // Dynamic shared memory bytes per block.
+  size_t sharedMem;
+  // Explicit stream associated with the target device.
+  hipStream_t stream;
+} hipLaunchParams;
+
+// Omits synchronization of participating streams before the launch set.
+#define hipCooperativeLaunchMultiDeviceNoPreSync 0x01
+// Omits synchronization of participating streams after the launch set.
+#define hipCooperativeLaunchMultiDeviceNoPostSync 0x02
 
 // Pitched pointer type.
 typedef struct hipPitchedPtr {
@@ -424,6 +448,8 @@ typedef enum hipFuncAttribute {
   hipFuncAttributePreferredSharedMemoryCarveout = 9,
   hipFuncAttributeMax
 } hipFuncAttribute_t;
+
+typedef int hipFunction_attribute;
 
 typedef enum hipLimit_t {
   hipLimitStackSize = 0x00,
@@ -777,8 +803,39 @@ typedef enum hipJitOption {
   hipJitOptionCacheMode = 14,
   hipJitOptionSm3xOpt = 15,
   hipJitOptionFastCompile = 16,
-  hipJitOptionNumOptions
+  hipJitOptionGlobalSymbolNames = 17,
+  hipJitOptionGlobalSymbolAddresses = 18,
+  hipJitOptionGlobalSymbolCount = 19,
+  hipJitOptionLto = 20,
+  hipJitOptionFtz = 21,
+  hipJitOptionPrecDiv = 22,
+  hipJitOptionPrecSqrt = 23,
+  hipJitOptionFma = 24,
+  hipJitOptionPositionIndependentCode = 25,
+  hipJitOptionMinCTAPerSM = 26,
+  hipJitOptionMaxThreadsPerBlock = 27,
+  hipJitOptionOverrideDirectiveValues = 28,
+  hipJitOptionNumOptions = 29,
+  hipJitOptionIRtoISAOptExt = 10000,
+  hipJitOptionIRtoISAOptCountExt = 10001,
 } hipJitOption;
+
+typedef enum hipJitInputType {
+  hipJitInputCubin = 0,
+  hipJitInputPtx = 1,
+  hipJitInputFatBinary = 2,
+  hipJitInputObject = 3,
+  hipJitInputLibrary = 4,
+  hipJitInputNvvm = 5,
+  hipJitNumLegacyInputTypes = 6,
+  hipJitInputLLVMBitcode = 100,
+  hipJitInputLLVMBundledBitcode = 101,
+  hipJitInputLLVMArchivesOfBundledBitcode = 102,
+  hipJitInputSpirv = 103,
+  hipJitNumInputTypes = 10,
+} hipJitInputType;
+
+typedef int hipLibraryOption;
 
 typedef void (*hipHostFn_t)(void* userData);
 
@@ -1283,6 +1340,8 @@ HIPAPI hipError_t hipDeviceSetLimit(hipLimit_t limit, size_t value);
 // Module management
 HIPAPI hipError_t hipModuleLoad(hipModule_t* module, const char* fname);
 HIPAPI hipError_t hipModuleLoadData(hipModule_t* module, const void* image);
+HIPAPI hipError_t hipModuleLoadFatBinary(hipModule_t* module,
+                                         const void* fatbin);
 HIPAPI hipError_t hipModuleLoadDataEx(hipModule_t* module, const void* image,
                                       unsigned int numOptions,
                                       hipJitOption* options,
@@ -1292,6 +1351,59 @@ HIPAPI hipError_t hipModuleGetFunction(hipFunction_t* hfunc, hipModule_t hmod,
                                        const char* name);
 HIPAPI hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes,
                                      hipModule_t hmod, const char* name);
+HIPAPI hipError_t hipLinkCreate(unsigned int numOptions, hipJitOption* options,
+                                void** optionValues, hipLinkState_t* stateOut);
+HIPAPI hipError_t hipLinkAddData(hipLinkState_t state, hipJitInputType type,
+                                 void* data, size_t size, const char* name,
+                                 unsigned int numOptions, hipJitOption* options,
+                                 void** optionValues);
+HIPAPI hipError_t hipLinkAddFile(hipLinkState_t state, hipJitInputType type,
+                                 const char* path, unsigned int numOptions,
+                                 hipJitOption* options, void** optionValues);
+HIPAPI hipError_t hipLinkComplete(hipLinkState_t state, void** hipBinOut,
+                                  size_t* sizeOut);
+HIPAPI hipError_t hipLinkDestroy(hipLinkState_t state);
+
+// Library and kernel management.
+HIPAPI hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* code,
+                                     hipJitOption* jitOptions,
+                                     void** jitOptionsValues,
+                                     unsigned int numJitOptions,
+                                     hipLibraryOption* libraryOptions,
+                                     void** libraryOptionValues,
+                                     unsigned int numLibraryOptions);
+HIPAPI hipError_t hipLibraryLoadFromFile(
+    hipLibrary_t* library, const char* fileName, hipJitOption* jitOptions,
+    void** jitOptionsValues, unsigned int numJitOptions,
+    hipLibraryOption* libraryOptions, void** libraryOptionValues,
+    unsigned int numLibraryOptions);
+HIPAPI hipError_t hipLibraryUnload(hipLibrary_t library);
+HIPAPI hipError_t hipLibraryGetKernel(hipKernel_t* kernel, hipLibrary_t library,
+                                      const char* name);
+HIPAPI hipError_t hipLibraryGetKernelCount(unsigned int* count,
+                                           hipLibrary_t library);
+HIPAPI hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels,
+                                             unsigned int kernelCount,
+                                             hipLibrary_t library);
+HIPAPI hipError_t hipLibraryGetGlobal(void** devicePointer, size_t* byteCount,
+                                      hipLibrary_t library, const char* name);
+HIPAPI hipError_t hipLibraryGetManaged(void** hostPointer, size_t* byteCount,
+                                       hipLibrary_t library, const char* name);
+HIPAPI hipError_t hipKernelGetAttribute(int* value,
+                                        hipFunction_attribute attribute,
+                                        hipKernel_t kernel, hipDevice_t device);
+HIPAPI hipError_t hipKernelGetFunction(hipFunction_t* function,
+                                       hipKernel_t kernel);
+HIPAPI hipError_t hipKernelGetLibrary(hipLibrary_t* library,
+                                      hipKernel_t kernel);
+HIPAPI hipError_t hipKernelGetName(const char** name, hipKernel_t kernel);
+HIPAPI hipError_t hipKernelGetParamInfo(hipKernel_t kernel,
+                                        size_t parameterIndex,
+                                        size_t* parameterOffset,
+                                        size_t* parameterSize);
+HIPAPI hipError_t hipKernelSetAttribute(hipFunction_attribute attribute,
+                                        int value, hipKernel_t kernel,
+                                        hipDevice_t device);
 
 // Memory management
 HIPAPI hipError_t hipMemGetInfo(size_t* free, size_t* total);
@@ -1529,7 +1641,7 @@ HIPAPI hipError_t hipEventElapsedTime(float* pMilliseconds, hipEvent_t hStart,
 HIPAPI hipError_t hipFuncGetAttribute(int* pi, hipFuncAttribute_t attrib,
                                       hipFunction_t hfunc);
 HIPAPI hipError_t hipFuncGetAttributes(hipFuncAttributes* attr,
-                                       hipFunction_t hfunc);
+                                       const void* function_address);
 HIPAPI hipError_t hipFuncSetAttribute(hipFunction_t hfunc,
                                       hipFuncAttribute_t attrib, int value);
 HIPAPI hipError_t hipFuncSetCacheConfig(hipFunction_t hfunc,
@@ -1546,6 +1658,8 @@ HIPAPI const char* hipKernelNameRefByPtr(const void* hostFunction,
 HIPAPI hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
                                   dim3 dimBlocks, void** args,
                                   size_t sharedMemBytes, hipStream_t stream);
+HIPAPI hipError_t hipExtLaunchMultiKernelMultiDevice(
+    hipLaunchParams* launchParamsList, int numDevices, unsigned int flags);
 HIPAPI hipError_t hipModuleLaunchKernel(
     hipFunction_t f, unsigned int gridDimX, unsigned int gridDimY,
     unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY,
@@ -1564,9 +1678,15 @@ HIPAPI hipError_t hipExtLaunchKernel(const void* function_address,
 HIPAPI hipError_t hipExtModuleLaunchKernel(
     hipFunction_t f, unsigned int gridDimX, unsigned int gridDimY,
     unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY,
-    unsigned int blockDimZ, unsigned int sharedMemBytes, hipStream_t hStream,
+    unsigned int blockDimZ, size_t sharedMemBytes, hipStream_t hStream,
     void** kernelParams, void** extra, hipEvent_t startEvent,
-    hipEvent_t stopEvent, int flags);
+    hipEvent_t stopEvent, uint32_t flags);
+HIPAPI hipError_t hipHccModuleLaunchKernel(
+    hipFunction_t f, uint32_t globalWorkSizeX, uint32_t globalWorkSizeY,
+    uint32_t globalWorkSizeZ, uint32_t localWorkSizeX, uint32_t localWorkSizeY,
+    uint32_t localWorkSizeZ, size_t sharedMemBytes, hipStream_t hStream,
+    void** kernelParams, void** extra, hipEvent_t startEvent,
+    hipEvent_t stopEvent);
 HIPAPI hipError_t hipLaunchHostFunc(hipStream_t hStream, hipHostFn_t fn,
                                     void* userData);
 

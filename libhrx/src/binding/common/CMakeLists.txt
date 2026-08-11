@@ -37,6 +37,7 @@ iree_cc_library(
     "kernel_arguments.h"
     "kpack.h"
     "memory.h"
+    "module.h"
     "stream.h"
     "tls.h"
   SRCS
