@@ -1157,7 +1157,8 @@ ERR_BACKEND_046 = ErrorDef(
         "target '{target_key}' export '{export_name}' config '{config_key}' "
         "split fixed value '{source_value_name}' into '{split_value_name}' "
         "for value class '{value_class}' in '@{function_name}' after "
-        "'{trigger_kind}' by inserting {copy_packet_count} copy packet(s), "
+        "'{trigger_kind}' by inserting {transfer_packet_count} transfer "
+        "packet(s), "
         "rewriting {rewritten_operand_count} operand use(s), and applying "
         "reason key '{reason_key}'"
     ),
@@ -1170,7 +1171,7 @@ ERR_BACKEND_046 = ErrorDef(
         ErrorParam("split_value_name", ParamKind.STRING),
         ErrorParam("value_class", ParamKind.STRING),
         ErrorParam("trigger_kind", ParamKind.STRING),
-        ErrorParam("copy_packet_count", ParamKind.U32),
+        ErrorParam("transfer_packet_count", ParamKind.U32),
         ErrorParam("rewritten_operand_count", ParamKind.U32),
         ErrorParam("reason_key", ParamKind.STRING),
     ),

@@ -230,15 +230,19 @@ loom_cc_test(
     "program_plan_test.cc"
   DEPS
     ::program_plan
+    ::serialize
     iree::base
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::codegen::low::text_asm
     loom::format::text::parser
     loom::ir
     loom::ops::low
     loom::ops::op_registry
     loom::pass::builtin_registry
+    loom::target::arch::cmd::descriptors
+    loom::target::arch::cmd::program
     loom::testing::diagnostic_matchers
     loom::testing::module_ptr
     loom::verify

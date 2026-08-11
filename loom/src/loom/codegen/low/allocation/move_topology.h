@@ -21,10 +21,12 @@ typedef enum loom_low_allocation_packet_move_op_kind_e {
   LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_NONE = 0,
   // Operation is low.copy.
   LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_COPY = 1,
+  // Operation is low.move.
+  LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_MOVE = 2,
   // Operation is low.slice.
-  LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_SLICE = 2,
+  LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_SLICE = 3,
   // Operation is low.concat.
-  LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_CONCAT = 3,
+  LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_CONCAT = 4,
 } loom_low_allocation_packet_move_op_kind_t;
 
 // Returns true when a low.concat must materialize its result as packet-local

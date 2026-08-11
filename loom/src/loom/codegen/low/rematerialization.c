@@ -127,6 +127,16 @@ iree_status_t loom_low_rematerialize_value_uses(
     return iree_ok_status();
   }
 
+  const loom_type_t value_type = loom_module_value_type(module, value_id);
+  const loom_low_register_type_resolver_t register_type_resolver =
+      loom_low_register_type_resolver_for_descriptor_set(
+          target->descriptor_set);
+  if (loom_low_register_type_resolver_has_class_flags(
+          &register_type_resolver, value_type,
+          LOOM_LOW_REG_CLASS_FLAG_REFERENCE)) {
+    return iree_ok_status();
+  }
+
   const uint16_t result_index = loom_value_def_index(value);
   loom_op_t* defining_op = loom_value_def_op(value);
   if (defining_op == NULL ||

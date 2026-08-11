@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/analysis/consumption.h"
+#include "loom/analysis/ownership.h"
 #include "loom/error/error_catalog.h"
 #include "loom/util/adaptive_sort.h"
 #include "loom/verify/verify_diagnostics.h"
@@ -204,6 +205,32 @@ static void loom_verify_emit_consumed_value_use(loom_verify_state_t* state,
       .related_op_count = IREE_ARRAYSIZE(related_ops),
   };
   loom_verify_emit_diagnostic(state, &emission);
+}
+
+static iree_status_t loom_verify_consume_value_after_op(
+    loom_verify_state_t* state, const loom_op_t* op,
+    loom_value_id_t consumed_id) {
+  const loom_region_t* parent_region =
+      op->parent_block ? op->parent_block->parent_region : NULL;
+  if (parent_region &&
+      iree_any_bit_set(parent_region->flags, LOOM_REGION_INSTANCE_FLAG_CFG)) {
+    if (!state->current_consumption_query) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "verifier CFG consumed-value checks require a consumption query");
+    }
+    loom_consumption_use_t use = {0};
+    bool found_use = false;
+    IREE_RETURN_IF_ERROR(loom_consumption_find_use_after(
+        state->current_consumption_query, op, consumed_id, &use, &found_use));
+    if (found_use) {
+      loom_verify_emit_consumed_value_use(state, use.op, use.operand_index,
+                                          consumed_id, op);
+    }
+  } else {
+    loom_verify_consume_value(state, consumed_id, op);
+  }
+  return iree_ok_status();
 }
 
 void loom_verify_operand_dominance(loom_verify_state_t* state,
@@ -485,27 +512,28 @@ iree_status_t loom_verify_tied_results(loom_verify_state_t* state,
     // Ties on regular body ops consume the operand's storage. Func-like symbol
     // signatures are caller-side ownership contracts, so their entry args are
     // validated as tie targets but not marked consumed at function entry.
-    const loom_region_t* parent_region =
-        op->parent_block ? op->parent_block->parent_region : NULL;
-    if (!has_signature_ties && parent_region &&
-        iree_any_bit_set(parent_region->flags, LOOM_REGION_INSTANCE_FLAG_CFG)) {
-      if (!state->current_consumption_query) {
-        return iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "verifier CFG tied-result checks require a consumption query");
-      }
-      loom_consumption_use_t use = {0};
-      bool found_use = false;
-      IREE_RETURN_IF_ERROR(loom_consumption_find_use_after(
-          state->current_consumption_query, op, consumed_id, &use, &found_use));
-      if (found_use) {
-        loom_verify_emit_consumed_value_use(state, use.op, use.operand_index,
-                                            consumed_id, op);
-      }
-    } else if (!has_signature_ties) {
-      loom_verify_consume_value(state, consumed_id, op);
+    if (!has_signature_ties) {
+      IREE_RETURN_IF_ERROR(
+          loom_verify_consume_value_after_op(state, op, consumed_id));
     }
   }
 
+  return iree_ok_status();
+}
+
+iree_status_t loom_verify_moved_results(loom_verify_state_t* state,
+                                        const loom_op_t* op) {
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    loom_ownership_result_effect_t effect = {0};
+    if (!loom_ownership_result_effect_at(state->module, op, i, &effect) ||
+        effect.effect != LOOM_RESULT_OWNERSHIP_MOVED) {
+      continue;
+    }
+    IREE_ASSERT_LT(effect.source_operand_index, op->operand_count,
+                   "generated moved-result source index must reference a "
+                   "verified operand");
+    IREE_RETURN_IF_ERROR(loom_verify_consume_value_after_op(
+        state, op, loom_op_const_operands(op)[effect.source_operand_index]));
+  }
   return iree_ok_status();
 }

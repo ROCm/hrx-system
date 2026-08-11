@@ -725,9 +725,13 @@ static iree_status_t loom_print_low_asm_structural_slice(
   return iree_ok_status();
 }
 
-static iree_status_t loom_print_low_asm_structural_copy(
+static iree_status_t loom_print_low_asm_structural_transfer(
     loom_print_context_t* ctx, const loom_text_low_asm_statement_t* statement) {
-  IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "copy", false));
+  IREE_RETURN_IF_ERROR(loom_print_emit_cstr(
+      ctx,
+      statement->structural_kind == LOOM_TEXT_LOW_ASM_STRUCTURAL_MOVE ? "move"
+                                                                      : "copy",
+      false));
   IREE_RETURN_IF_ERROR(loom_print_low_asm_value_list(ctx, statement->operands,
                                                      statement->operand_count,
                                                      LOOM_PRINT_FIELD_OPERAND));
@@ -808,7 +812,8 @@ static iree_status_t loom_print_low_asm_structural(
     case LOOM_TEXT_LOW_ASM_STRUCTURAL_STORAGE_VIEW:
       return loom_print_low_asm_structural_storage_view(ctx, statement);
     case LOOM_TEXT_LOW_ASM_STRUCTURAL_COPY:
-      return loom_print_low_asm_structural_copy(ctx, statement);
+    case LOOM_TEXT_LOW_ASM_STRUCTURAL_MOVE:
+      return loom_print_low_asm_structural_transfer(ctx, statement);
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "unknown low asm structural kind %u",

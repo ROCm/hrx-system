@@ -520,7 +520,7 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
         loom_low_materialize_allocation_statistics_t* statistics =
             loom_low_materialize_allocation_statistics(pass);
         statistics->live_range_splits +=
-            (int64_t)split_result.copy_packet_count;
+            (int64_t)split_result.transfer_packet_count;
         loom_pass_mark_changed(pass);
         ++rematerialization_iteration_count;
         continue;

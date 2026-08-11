@@ -23,7 +23,7 @@ typedef enum loom_amdgpu_structural_packet_analysis_flag_bits_e {
 typedef uint32_t loom_amdgpu_structural_packet_analysis_flags_t;
 
 typedef enum loom_amdgpu_structural_packet_flag_bits_e {
-  // The op is a structural movement packet such as low.copy/slice/concat.
+  // The op is a structural movement packet such as low.copy/move/slice/concat.
   LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MOVEMENT = 1u << 0,
   // The packet emits concrete target instructions.
   LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MATERIALIZES = 1u << 1,

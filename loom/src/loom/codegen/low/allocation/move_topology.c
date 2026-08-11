@@ -32,6 +32,9 @@ loom_low_allocation_move_topology_packet_move_op_kind(const loom_op_t* op) {
   if (loom_low_copy_isa(op)) {
     return LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_COPY;
   }
+  if (loom_low_move_isa(op)) {
+    return LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_MOVE;
+  }
   if (loom_low_slice_isa(op)) {
     return LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_SLICE;
   }

@@ -49,6 +49,17 @@ bool loom_low_register_type_resolver_try_resolve(
   return true;
 }
 
+bool loom_low_register_type_resolver_has_class_flags(
+    const loom_low_register_type_resolver_t* resolver, loom_type_t type,
+    loom_low_reg_class_flags_t flags) {
+  uint16_t descriptor_register_class_id = LOOM_LOW_REG_CLASS_NONE;
+  const loom_low_reg_class_t* descriptor_register_class = NULL;
+  return loom_low_register_type_resolver_try_resolve(
+             resolver, type, &descriptor_register_class_id,
+             &descriptor_register_class) &&
+         iree_all_bits_set(descriptor_register_class->flags, flags);
+}
+
 static iree_status_t loom_low_emit(iree_diagnostic_emitter_t emitter,
                                    const loom_op_t* op,
                                    const loom_error_def_t* error,

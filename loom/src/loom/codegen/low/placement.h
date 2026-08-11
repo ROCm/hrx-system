@@ -33,18 +33,20 @@ typedef enum loom_low_placement_cause_bits_e {
   LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT = 1,
   // low.copy source/result storage affinity.
   LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY = 2,
+  // low.move source/result storage affinity.
+  LOOM_LOW_PLACEMENT_CAUSE_LOW_MOVE = 3,
   // low.slice source/result subrange affinity.
-  LOOM_LOW_PLACEMENT_CAUSE_LOW_SLICE = 3,
+  LOOM_LOW_PLACEMENT_CAUSE_LOW_SLICE = 4,
   // low.concat source/result contiguous packing affinity.
-  LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT = 4,
+  LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT = 5,
   // low.br edge payload source/block-argument affinity.
-  LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH = 5,
+  LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH = 6,
   // low.scf.for initial iter_arg/body-argument affinity.
-  LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR = 6,
+  LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR = 7,
   // low.scf.yield payload/result or backedge affinity.
-  LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD = 7,
+  LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD = 8,
   // Scheduled target-packet pair location affinity.
-  LOOM_LOW_PLACEMENT_CAUSE_SCHEDULE_PAIR_AFFINITY = 8,
+  LOOM_LOW_PLACEMENT_CAUSE_SCHEDULE_PAIR_AFFINITY = 9,
 } loom_low_placement_cause_bits_t;
 typedef uint8_t loom_low_placement_cause_t;
 
@@ -160,9 +162,10 @@ typedef struct loom_low_placement_table_t {
   iree_host_size_t relation_count;
   // Number of relations constraining concrete location choice.
   iree_host_size_t location_relation_count;
-  // Number of low.copy/slice/concat operations that may require packet moves.
+  // Number of low.copy/move/slice/concat operations that may require packet
+  // moves.
   uint32_t packet_move_group_count;
-  // Total units covered by low.copy/slice/concat relations.
+  // Total units covered by low.copy/move/slice/concat relations.
   iree_host_size_t packet_move_unit_count;
   // Number of low.br operations that may require edge copies.
   uint32_t edge_copy_group_count;

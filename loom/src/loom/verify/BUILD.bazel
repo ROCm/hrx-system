@@ -32,6 +32,7 @@ loom_cc_library(
     ],
     deps = [
         "//loom/src/loom/analysis:consumption",
+        "//loom/src/loom/analysis:ownership",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",

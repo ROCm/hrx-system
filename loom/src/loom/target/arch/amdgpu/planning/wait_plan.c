@@ -2731,8 +2731,8 @@ static iree_status_t loom_amdgpu_wait_plan_handle_materialized_result_writes(
         assignment->location_base, assignment->location_count));
   }
   if (node->op != NULL &&
-      (loom_low_copy_isa(node->op) || loom_low_slice_isa(node->op) ||
-       loom_low_concat_isa(node->op))) {
+      (loom_low_copy_isa(node->op) || loom_low_move_isa(node->op) ||
+       loom_low_slice_isa(node->op) || loom_low_concat_isa(node->op))) {
     const loom_low_allocation_packet_move_group_t* group =
         loom_low_allocation_find_packet_move_group_by_source_ordinal(
             builder->allocation, node->source_ordinal);

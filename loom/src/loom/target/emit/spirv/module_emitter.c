@@ -964,13 +964,13 @@ static iree_status_t loom_spirv_emit_control_barrier_packet(
       row->opcode, instruction_operands, IREE_ARRAYSIZE(instruction_operands));
 }
 
-static iree_status_t loom_spirv_emit_copy(loom_spirv_emit_state_t* state,
-                                          const loom_op_t* op) {
+static iree_status_t loom_spirv_emit_transfer(loom_spirv_emit_state_t* state,
+                                              const loom_op_t* op) {
   loom_spirv_module_value_ref_t source = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_spirv_emit_lookup_value(state, loom_low_copy_source(op), &source));
-  return loom_spirv_emit_define_value(state, loom_low_copy_result(op), source,
-                                      false);
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_lookup_value(
+      state, loom_op_const_operands(op)[0], &source));
+  return loom_spirv_emit_define_value(state, loom_op_const_results(op)[0],
+                                      source, false);
 }
 
 static iree_status_t loom_spirv_emit_descriptor_packet(
@@ -1511,8 +1511,8 @@ static iree_status_t loom_spirv_emit_low_op(loom_spirv_emit_state_t* state,
     return loom_spirv_emit_define_value(
         state, loom_low_storage_address_result(op), value_ref, true);
   }
-  if (loom_low_copy_isa(op)) {
-    return loom_spirv_emit_copy(state, op);
+  if (loom_low_copy_isa(op) || loom_low_move_isa(op)) {
+    return loom_spirv_emit_transfer(state, op);
   }
 
   loom_low_descriptor_packet_t packet = {0};

@@ -765,15 +765,16 @@ static iree_status_t loom_spirv_low_verify_packet(
   return loom_spirv_low_define_packet_results(state, packet, row);
 }
 
-static iree_status_t loom_spirv_low_verify_copy(
+static iree_status_t loom_spirv_low_verify_transfer(
     loom_spirv_low_verify_state_t* state, const loom_op_t* op) {
   loom_spirv_value_type_t source_type = {0};
   if (!loom_spirv_low_value_type_table_lookup(
-          &state->value_types, loom_low_copy_source(op), &source_type)) {
+          &state->value_types, loom_op_const_operands(op)[0], &source_type)) {
     return iree_ok_status();
   }
-  return loom_spirv_low_value_type_table_define(
-      &state->value_types, loom_low_copy_result(op), source_type, state->arena);
+  return loom_spirv_low_value_type_table_define(&state->value_types,
+                                                loom_op_const_results(op)[0],
+                                                source_type, state->arena);
 }
 
 static iree_status_t loom_spirv_low_emit_return_type_mismatch(
@@ -1311,8 +1312,8 @@ static iree_status_t loom_spirv_low_verify_op(
   if (loom_low_storage_address_isa(op)) {
     return loom_spirv_low_verify_storage_address(context, state, op);
   }
-  if (loom_low_copy_isa(op)) {
-    return loom_spirv_low_verify_copy(state, op);
+  if (loom_low_copy_isa(op) || loom_low_move_isa(op)) {
+    return loom_spirv_low_verify_transfer(state, op);
   }
   if (packet->kind != LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
     return loom_spirv_low_verify_packet(context, state, packet);

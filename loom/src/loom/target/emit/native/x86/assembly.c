@@ -972,13 +972,13 @@ static iree_status_t loom_x86_append_const_packet(
   return iree_string_builder_append_format(context->builder, "%" PRId64, value);
 }
 
-static iree_status_t loom_x86_append_copy_packet(
+static iree_status_t loom_x86_append_transfer_packet(
     void* user_data, const loom_native_assembly_packet_context_t* context) {
   const loom_op_t* op = context->packet->node->op;
   const loom_low_allocation_assignment_t* source_assignment =
-      loom_x86_map_assignment(context, loom_low_copy_source(op));
+      loom_x86_map_assignment(context, loom_op_const_operands(op)[0]);
   const loom_low_allocation_assignment_t* result_assignment =
-      loom_x86_map_assignment(context, loom_low_copy_result(op));
+      loom_x86_map_assignment(context, loom_op_const_results(op)[0]);
   if (loom_x86_assignments_match(source_assignment, result_assignment)) {
     return iree_ok_status();
   }
@@ -993,7 +993,7 @@ static iree_status_t loom_x86_append_copy_packet(
         context->allocation, result_assignment, &result_register_class));
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
-        "x86 assembly copy between register classes '%.*s' and '%.*s' is "
+        "x86 assembly transfer between register classes '%.*s' and '%.*s' is "
         "unsupported",
         (int)source_register_class.size, source_register_class.data,
         (int)result_register_class.size, result_register_class.data);
@@ -1190,7 +1190,8 @@ static iree_status_t loom_x86_append_structural_packet(
   const loom_op_t* op = context->packet->node->op;
   switch (op->kind) {
     case LOOM_OP_LOW_COPY:
-      return loom_x86_append_copy_packet(user_data, context);
+    case LOOM_OP_LOW_MOVE:
+      return loom_x86_append_transfer_packet(user_data, context);
     case LOOM_OP_LOW_RETURN:
       return loom_x86_append_return_packet(user_data, context);
     case LOOM_OP_LOW_BR:

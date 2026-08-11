@@ -1955,6 +1955,7 @@ static iree_status_t loom_amdgpu_encode_packet(
     case LOOM_OP_LOW_STORAGE_VIEW:
       return loom_amdgpu_encode_storage_view_packet(state, packet);
     case LOOM_OP_LOW_COPY:
+    case LOOM_OP_LOW_MOVE:
       return loom_amdgpu_encode_copy_packet(state, packet);
     case LOOM_OP_LOW_SLICE:
       return loom_amdgpu_encode_slice_packet(state, packet);

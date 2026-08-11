@@ -6,11 +6,11 @@
 
 // Queries for linear value consumption.
 //
-// Tied low results consume their tied operands: after the consuming op executes
-// along one dynamic path, later operations on that same path must observe the
-// tied result, not the consumed value. CFG regions make that a path-sensitive
-// question because a value can be re-created by a block argument or an earlier
-// same-block definition on a later dynamic entry.
+// Tied and moved results consume their source operands: after the consuming op
+// executes along one dynamic path, later operations on that same path must
+// observe the result, not the consumed value. CFG regions make that a
+// path-sensitive question because a value can be re-created by a block argument
+// or an earlier same-block definition on a later dynamic entry.
 
 #ifndef LOOM_ANALYSIS_CONSUMPTION_H_
 #define LOOM_ANALYSIS_CONSUMPTION_H_
@@ -74,7 +74,7 @@ typedef struct loom_consumption_use_after_query_t {
 } loom_consumption_use_after_query_t;
 
 // Initializes reusable consumption query state for |region|. CFG extraction is
-// lazy: regions without tied-result consumption do not pay graph construction.
+// lazy: regions without consumed values do not pay graph construction.
 void loom_consumption_region_query_initialize(
     const loom_module_t* module, const loom_region_t* region,
     iree_arena_allocator_t* arena, loom_consumption_region_query_t* out_query);

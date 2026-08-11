@@ -796,6 +796,15 @@ static iree_status_t loom_low_select_operand_form_rematerialize_operand(
   if (loom_value_is_block_arg(value) || loom_value_is_consumed(value)) {
     return iree_ok_status();
   }
+  const loom_low_register_type_resolver_t register_type_resolver =
+      loom_low_register_type_resolver_for_descriptor_set(
+          state->target->descriptor_set);
+  if (loom_low_register_type_resolver_has_class_flags(
+          &register_type_resolver,
+          loom_module_value_type(state->module, *inout_value_id),
+          LOOM_LOW_REG_CLASS_FLAG_REFERENCE)) {
+    return iree_ok_status();
+  }
   if (!loom_low_select_operand_form_rematerialization_shortens_live_range(
           value, before_op)) {
     return iree_ok_status();

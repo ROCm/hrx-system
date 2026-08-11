@@ -9,6 +9,7 @@
 #include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/storage.h"
 #include "loom/codegen/low/diagnostics.h"
+#include "loom/codegen/low/target_binding.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
@@ -44,6 +45,17 @@ typedef struct loom_low_allocation_pair_replication_candidate_t {
   uint64_t gross_packet_savings;
 } loom_low_allocation_pair_replication_candidate_t;
 
+static bool loom_low_allocation_value_is_reference_register(
+    const loom_module_t* module, const loom_low_allocation_table_t* table,
+    loom_value_id_t value_id) {
+  const loom_low_register_type_resolver_t resolver =
+      loom_low_register_type_resolver_for_descriptor_set(
+          table->target.descriptor_set);
+  return loom_low_register_type_resolver_has_class_flags(
+      &resolver, loom_module_value_type(module, value_id),
+      LOOM_LOW_REG_CLASS_FLAG_REFERENCE);
+}
+
 static bool loom_low_allocation_fixed_value_overlaps_spill_assignment(
     const loom_low_allocation_resolved_fixed_value_t* fixed_value,
     const loom_low_allocation_assignment_t* spill_assignment) {
@@ -53,14 +65,15 @@ static bool loom_low_allocation_fixed_value_overlaps_spill_assignment(
              spill_assignment, fixed_value->interval);
 }
 
-static bool loom_low_allocation_fixed_value_has_only_split_copy_use(
+static bool loom_low_allocation_fixed_value_has_only_split_transfer_use(
     const loom_value_t* value) {
   if (value->use_count != 1) {
     return false;
   }
   const loom_use_t use = loom_value_uses(value)[0];
   const loom_op_t* user_op = loom_use_user_op(use);
-  return loom_low_copy_isa(user_op) && loom_use_operand_index(use) == 0;
+  return (loom_low_copy_isa(user_op) || loom_low_move_isa(user_op)) &&
+         loom_use_operand_index(use) == 0;
 }
 
 static bool loom_low_allocation_split_use_is_eligible(
@@ -298,10 +311,13 @@ static bool loom_low_allocation_pair_try_select_replica_operand(
 }
 
 static bool loom_low_allocation_pair_replication_source_is_eligible(
-    const loom_module_t* module, loom_value_id_t source_value_id) {
+    const loom_module_t* module, const loom_low_allocation_table_t* table,
+    loom_value_id_t source_value_id) {
   const loom_value_t* source_value = loom_module_value(module, source_value_id);
   IREE_ASSERT_NE(source_value->use_count, 0);
-  return !loom_value_is_consumed(source_value);
+  return !loom_value_is_consumed(source_value) &&
+         !loom_low_allocation_value_is_reference_register(module, table,
+                                                          source_value_id);
 }
 
 static iree_status_t loom_low_allocation_pair_replication_rollback_edits(
@@ -371,7 +387,7 @@ iree_status_t loom_low_allocation_replicate_pair_sources(
     if (!loom_low_allocation_pair_try_select_replica_operand(
             table, use, recipe, &user_op, &operand_index, &source_value_id) ||
         !loom_low_allocation_pair_replication_source_is_eligible(
-            module, source_value_id)) {
+            module, table, source_value_id)) {
       continue;
     }
     if (candidates == NULL) {
@@ -555,7 +571,7 @@ static iree_status_t loom_low_allocation_try_split_fixed_value(
                                                      fixed_value->value_id) ||
       loom_module_value_has_type_uses(module, fixed_value->value_id) ||
       value->use_count == 0 ||
-      loom_low_allocation_fixed_value_has_only_split_copy_use(value)) {
+      loom_low_allocation_fixed_value_has_only_split_transfer_use(value)) {
     return iree_ok_status();
   }
 
@@ -587,25 +603,30 @@ static iree_status_t loom_low_allocation_try_split_fixed_value(
     loom_builder_set_block(&rewriter.builder, insertion_block);
   }
 
-  loom_op_t* copy_op = NULL;
+  loom_op_t* transfer_op = NULL;
+  const loom_type_t value_type =
+      loom_module_value_type(module, fixed_value->value_id);
   iree_status_t status =
-      loom_low_copy_build(&rewriter.builder, fixed_value->value_id, true,
-                          loom_module_value_type(module, fixed_value->value_id),
-                          LOOM_LOCATION_NONE, &copy_op);
+      loom_low_allocation_value_is_reference_register(module, table,
+                                                      fixed_value->value_id)
+          ? loom_low_move_build(&rewriter.builder, fixed_value->value_id, true,
+                                value_type, LOOM_LOCATION_NONE, &transfer_op)
+          : loom_low_copy_build(&rewriter.builder, fixed_value->value_id, true,
+                                value_type, LOOM_LOCATION_NONE, &transfer_op);
   loom_builder_restore(&rewriter.builder, saved_ip);
   if (iree_status_is_ok(status)) {
-    const loom_value_id_t split_value_id = loom_low_copy_result(copy_op);
+    const loom_value_id_t split_value_id = loom_op_results(transfer_op)[0];
     status = loom_rewriter_try_set_derived_value_name(
         &rewriter, fixed_value->value_id, split_value_id, IREE_SV("split"));
     if (iree_status_is_ok(status)) {
       status = loom_rewriter_replace_all_uses_except(
-          &rewriter, fixed_value->value_id, split_value_id, copy_op);
+          &rewriter, fixed_value->value_id, split_value_id, transfer_op);
     }
     if (iree_status_is_ok(status)) {
       result->source_value_id = fixed_value->value_id;
       result->split_value_id = split_value_id;
       result->source_assignment_index = source_assignment_index;
-      result->copy_packet_count = 1;
+      result->transfer_packet_count = 1;
       result->rewritten_operand_count = original_use_count;
     }
   }
@@ -705,7 +726,7 @@ iree_status_t loom_low_allocation_live_range_split_emit_decision(
           loom_low_allocation_live_range_split_value_class_name(table, result)),
       loom_param_string(
           loom_low_allocation_live_range_split_trigger_name(trigger)),
-      loom_param_u32(result->copy_packet_count),
+      loom_param_u32(result->transfer_packet_count),
       loom_param_u32(result->rewritten_operand_count),
       loom_param_string(IREE_SV("fixed-value-spill-plan")),
   };

@@ -413,11 +413,11 @@ static iree_status_t loom_parse_low_asm_structural_slice(
       result_type, parsed_spans);
 }
 
-static iree_status_t loom_parse_low_asm_structural_copy(
-    loom_parser_t* parser, const loom_low_asm_result_names_t* result_names,
-    loom_token_t start_token, loom_token_t mnemonic_token,
-    const iree_string_view_t* comments, iree_host_size_t comment_count,
-    loom_parsed_op_t* parsed_spans) {
+static iree_status_t loom_parse_low_asm_structural_transfer(
+    loom_parser_t* parser, loom_text_low_asm_structural_kind_t kind,
+    const loom_low_asm_result_names_t* result_names, loom_token_t start_token,
+    loom_token_t mnemonic_token, const iree_string_view_t* comments,
+    iree_host_size_t comment_count, loom_parsed_op_t* parsed_spans) {
   const uint32_t errors_before = parser->error_count;
   IREE_RETURN_IF_ERROR(loom_parse_low_asm_expect_single_result(
       parser, result_names, mnemonic_token));
@@ -434,7 +434,7 @@ static iree_status_t loom_parse_low_asm_structural_copy(
 
   loom_named_attr_slice_t attrs = loom_named_attr_slice_empty();
   IREE_RETURN_IF_ERROR(loom_parse_low_asm_structural_attr_dict(
-      parser, LOOM_TEXT_LOW_ASM_STRUCTURAL_COPY, mnemonic_token, &attrs));
+      parser, kind, mnemonic_token, &attrs));
   if (parser->error_count > errors_before) {
     return iree_ok_status();
   }
@@ -457,9 +457,9 @@ static iree_status_t loom_parse_low_asm_structural_copy(
   }
 
   return loom_parse_low_asm_structural_location_and_build(
-      parser, LOOM_TEXT_LOW_ASM_STRUCTURAL_COPY, 0, result_names, start_token,
-      mnemonic_token, comments, comment_count, &source, 1, attrs,
-      iree_string_view_empty(), 0, result_type, parsed_spans);
+      parser, kind, 0, result_names, start_token, mnemonic_token, comments,
+      comment_count, &source, 1, attrs, iree_string_view_empty(), 0,
+      result_type, parsed_spans);
 }
 
 static iree_status_t loom_parse_low_asm_structural_storage_reserve(
@@ -638,6 +638,10 @@ bool loom_low_asm_structural_kind_from_token(
     *out_kind = LOOM_TEXT_LOW_ASM_STRUCTURAL_COPY;
     return true;
   }
+  if (iree_string_view_equal(token.text, IREE_SV("move"))) {
+    *out_kind = LOOM_TEXT_LOW_ASM_STRUCTURAL_MOVE;
+    return true;
+  }
   return false;
 }
 
@@ -673,8 +677,9 @@ iree_status_t loom_parse_low_asm_structural(
           parser, result_names, start_token, mnemonic_token, comments,
           comment_count, parsed_spans);
     case LOOM_TEXT_LOW_ASM_STRUCTURAL_COPY:
-      return loom_parse_low_asm_structural_copy(
-          parser, result_names, start_token, mnemonic_token, comments,
+    case LOOM_TEXT_LOW_ASM_STRUCTURAL_MOVE:
+      return loom_parse_low_asm_structural_transfer(
+          parser, kind, result_names, start_token, mnemonic_token, comments,
           comment_count, parsed_spans);
     default:
       return loom_parser_emit_low_asm_error(

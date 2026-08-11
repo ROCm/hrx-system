@@ -206,7 +206,8 @@ typedef struct loom_low_allocation_edge_copy_group_t {
 
 // Final move group for one materialized packet-local parallel move operation.
 typedef struct loom_low_allocation_packet_move_group_t {
-  // Source-order ordinal of the owning low.copy, low.slice, or low.concat.
+  // Source-order ordinal of the owning low.copy, low.move, low.slice, or
+  // low.concat.
   uint32_t source_ordinal;
   // Structural placement cause that produced the move group.
   loom_low_placement_cause_t cause;

@@ -6,7 +6,8 @@ low.kernel.def target<test.low.core>(@target) @low_const_concat_uniform_zero() {
   %zero = low.const<test.const.i32> {i32_value = 0} : reg<test.i32>
   %quad = low.concat(%zero, %zero, %zero, %zero) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
   %copy = low.copy %quad : reg<test.i32 x4> -> reg<test.i32 x4>
-  %slice = low.slice %copy[1] : reg<test.i32 x4> -> reg<test.i32 x2>
+  %moved = low.move %copy : reg<test.i32 x4> -> reg<test.i32 x4>
+  %slice = low.slice %moved[1] : reg<test.i32 x4> -> reg<test.i32 x2>
   %wide = low.concat(%slice, %slice) : (reg<test.i32 x2>, reg<test.i32 x2>) -> reg<test.i32 x4>
   %lo = test.fact_all_equal_range_lo %wide : reg<test.i32 x4> -> i64
   %hi = test.fact_all_equal_range_hi %wide : reg<test.i32 x4> -> i64

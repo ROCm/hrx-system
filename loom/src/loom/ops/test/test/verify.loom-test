@@ -7,3 +7,16 @@ test.split_func @projected(%arg: i32, %other: i32) {
 } launch {
   test.yield
 }
+
+// ====
+
+// Moved results invalidate their source in the ordinary verifier. This is a
+// core SSA lifetime rule, not an ownership-lifetime pass convention.
+func.def @reject_move_source_reuse(%size: index) {
+  %resource = test.resource.alloc %size : index -> pool<16>
+  %moved = test.resource.move %resource : pool<16> -> pool<16>
+  // ERROR@+1: DOMINANCE/002 {value_name="resource"}
+  test.resource.borrow %resource : pool<16>
+  test.resource.release %moved : pool<16>
+  func.return
+}

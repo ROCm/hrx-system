@@ -291,7 +291,7 @@ static iree_status_t loom_low_schedule_initialize_pair_affinity_index(
 
 static iree_status_t loom_low_schedule_initialize_pair_setup_index(
     loom_low_schedule_build_state_t* state) {
-  if (state->detached_copy_node_count == 0 ||
+  if (state->detached_transfer_node_count == 0 ||
       state->pair_affinity_record_count == 0) {
     return iree_ok_status();
   }

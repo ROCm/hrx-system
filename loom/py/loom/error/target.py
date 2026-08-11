@@ -1269,6 +1269,27 @@ ERR_TARGET_070 = ErrorDef(
     ),
 )
 
+# ERR_TARGET_071: Source-preserving operation cannot carry a reference register.
+ERR_TARGET_071 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=71,
+    severity=Severity.ERROR,
+    summary="Source-preserving operation cannot carry a reference register.",
+    message=(
+        "low function '@{function_name}' uses source-preserving operation "
+        "'{op_name}' with reference register type {actual_type}"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("actual_type", ParamKind.TYPE),
+    ),
+    fix_hint=(
+        "Use low.move when ownership transfers, or use a target operation "
+        "that explicitly retains the reference before creating another value"
+    ),
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1331,4 +1352,5 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_068,
     ERR_TARGET_069,
     ERR_TARGET_070,
+    ERR_TARGET_071,
 )

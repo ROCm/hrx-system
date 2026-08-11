@@ -73,6 +73,12 @@ bool loom_low_register_type_resolver_try_resolve(
     uint16_t* out_descriptor_register_class_id,
     const loom_low_reg_class_t** out_descriptor_register_class);
 
+// Returns true when |type| resolves and its register class contains every
+// requested flag bit.
+bool loom_low_register_type_resolver_has_class_flags(
+    const loom_low_register_type_resolver_t* resolver, loom_type_t type,
+    loom_low_reg_class_flags_t flags);
+
 typedef enum loom_low_descriptor_packet_kind_e {
   // Not a descriptor-backed low packet.
   LOOM_LOW_DESCRIPTOR_PACKET_NONE = 0,

@@ -100,7 +100,7 @@ loom_target_compile_report_pressure_origin_from_low_op(const loom_op_t* op) {
   if (loom_low_const_isa(op)) {
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_CONSTANT;
   }
-  if (loom_low_copy_isa(op)) {
+  if (loom_low_copy_isa(op) || loom_low_move_isa(op)) {
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_COPY;
   }
   if (loom_low_slice_isa(op)) {

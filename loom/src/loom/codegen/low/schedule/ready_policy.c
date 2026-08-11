@@ -65,7 +65,7 @@ iree_status_t loom_low_schedule_ready_policy_initialize(
       node_count, state->target.descriptor_set->descriptor_count, view_count,
       state->arena, &out_policy->frontier));
   if (node_count == 0 || state->pair_affinity_reverse_heads == NULL ||
-      state->detached_copy_node_count == 0) {
+      state->detached_transfer_node_count == 0) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(

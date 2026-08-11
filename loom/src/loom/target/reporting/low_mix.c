@@ -76,8 +76,8 @@ static uint64_t loom_target_compile_report_low_structural_move_count(
             allocation, node->source_ordinal);
     return group != NULL ? group->move_group.moves.count : 0;
   }
-  if (!loom_low_copy_isa(node->op) && !loom_low_slice_isa(node->op) &&
-      !loom_low_concat_isa(node->op)) {
+  if (!loom_low_copy_isa(node->op) && !loom_low_move_isa(node->op) &&
+      !loom_low_slice_isa(node->op) && !loom_low_concat_isa(node->op)) {
     return 0;
   }
   const loom_low_allocation_packet_move_group_t* group =

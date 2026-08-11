@@ -286,7 +286,7 @@ loom_low_allocation_coalescing_select_ignored_counterpart_value(
 }
 
 static const loom_low_placement_relation_t*
-loom_low_allocation_coalescing_copy_relation_for_result_ordinal(
+loom_low_allocation_coalescing_transfer_relation_for_result_ordinal(
     const loom_low_allocation_coalescing_context_t* context,
     loom_value_ordinal_t result_ordinal) {
   const loom_low_placement_relation_range_t range =
@@ -295,7 +295,8 @@ loom_low_allocation_coalescing_copy_relation_for_result_ordinal(
   for (uint32_t i = 0; i < range.count; ++i) {
     const loom_low_placement_relation_t* relation =
         &context->placement->relations[range.start + i];
-    if (relation->cause == LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY) {
+    if (relation->cause == LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY ||
+        relation->cause == LOOM_LOW_PLACEMENT_CAUSE_LOW_MOVE) {
       return relation;
     }
   }
@@ -428,7 +429,7 @@ loom_low_allocation_coalescing_storage_units_have_use_after_clobber(
 }
 
 static iree_status_t
-loom_low_allocation_coalescing_copy_source_live_at_tied_definition(
+loom_low_allocation_coalescing_transfer_source_live_at_tied_definition(
     const loom_low_allocation_coalescing_context_t* context,
     const loom_low_placement_relation_t* tied_relation,
     const loom_low_placement_relation_t* copy_relation,
@@ -478,6 +479,7 @@ static bool loom_low_allocation_coalescing_storage_alias_relation(
   }
   switch (relation->cause) {
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY:
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_MOVE:
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_SLICE:
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT:
       return true;
@@ -946,7 +948,7 @@ static iree_status_t loom_low_allocation_coalescing_assign_relation_interval(
 }
 
 static iree_status_t
-loom_low_allocation_coalescing_copy_ignored_aliases_for_tied_consume(
+loom_low_allocation_coalescing_transfer_ignored_aliases_for_tied_consume(
     loom_low_allocation_coalescing_context_t* context,
     const loom_liveness_interval_t* copy_interval,
     const loom_low_placement_relation_t* copy_relation,
@@ -973,7 +975,7 @@ loom_low_allocation_coalescing_copy_ignored_aliases_for_tied_consume(
       continue;
     }
     const loom_low_placement_relation_t* tied_operand_copy_relation =
-        loom_low_allocation_coalescing_copy_relation_for_result_ordinal(
+        loom_low_allocation_coalescing_transfer_relation_for_result_ordinal(
             context, tied_relation->source_ordinal);
     if (tied_operand_copy_relation != copy_relation) {
       continue;
@@ -982,7 +984,7 @@ loom_low_allocation_coalescing_copy_ignored_aliases_for_tied_consume(
     loom_value_id_t copy_source_id = LOOM_VALUE_ID_INVALID;
     bool copy_source_live = false;
     IREE_RETURN_IF_ERROR(
-        loom_low_allocation_coalescing_copy_source_live_at_tied_definition(
+        loom_low_allocation_coalescing_transfer_source_live_at_tied_definition(
             context, tied_relation, copy_relation, &copy_source_id,
             &copy_source_live));
     if (copy_source_live) {
@@ -1002,7 +1004,7 @@ loom_low_allocation_coalescing_copy_ignored_aliases_for_tied_consume(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_allocation_coalescing_assign_copy_interval(
+static iree_status_t loom_low_allocation_coalescing_assign_transfer_interval(
     loom_low_allocation_coalescing_context_t* context,
     const loom_liveness_interval_t* interval,
     const loom_low_placement_relation_t* relation, bool* out_assigned) {
@@ -1011,7 +1013,7 @@ static iree_status_t loom_low_allocation_coalescing_assign_copy_interval(
   uint16_t ignored_value_count = 0;
   bool requires_materialized_storage = false;
   IREE_RETURN_IF_ERROR(
-      loom_low_allocation_coalescing_copy_ignored_aliases_for_tied_consume(
+      loom_low_allocation_coalescing_transfer_ignored_aliases_for_tied_consume(
           context, interval, relation, ignored_value_ids,
           (uint16_t)IREE_ARRAYSIZE(ignored_value_ids), &ignored_value_count,
           &requires_materialized_storage));
@@ -1962,12 +1964,12 @@ iree_status_t loom_low_allocation_coalescing_assign_tied_interval(
       (uint16_t)IREE_ARRAYSIZE(ignored_value_ids);
   uint16_t ignored_value_count = 1;
   const loom_low_placement_relation_t* tied_operand_copy_relation =
-      loom_low_allocation_coalescing_copy_relation_for_result_ordinal(
+      loom_low_allocation_coalescing_transfer_relation_for_result_ordinal(
           context, relation->source_ordinal);
   loom_value_id_t copy_source_id = LOOM_VALUE_ID_INVALID;
   bool copy_source_live = false;
   IREE_RETURN_IF_ERROR(
-      loom_low_allocation_coalescing_copy_source_live_at_tied_definition(
+      loom_low_allocation_coalescing_transfer_source_live_at_tied_definition(
           context, relation, tied_operand_copy_relation, &copy_source_id,
           &copy_source_live));
   if (copy_source_id != LOOM_VALUE_ID_INVALID && !copy_source_live) {
@@ -2232,7 +2234,16 @@ iree_status_t loom_low_allocation_coalescing_assign_structural_interval(
     switch (relation->cause) {
       case LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY: {
         IREE_RETURN_IF_ERROR(
-            loom_low_allocation_coalescing_assign_copy_interval(
+            loom_low_allocation_coalescing_assign_transfer_interval(
+                context, interval, relation, out_assigned));
+        if (*out_assigned) {
+          return iree_ok_status();
+        }
+        break;
+      }
+      case LOOM_LOW_PLACEMENT_CAUSE_LOW_MOVE: {
+        IREE_RETURN_IF_ERROR(
+            loom_low_allocation_coalescing_assign_transfer_interval(
                 context, interval, relation, out_assigned));
         if (*out_assigned) {
           return iree_ok_status();

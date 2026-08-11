@@ -346,8 +346,9 @@ typedef struct loom_low_schedule_build_state_t {
   iree_host_size_t pair_affinity_record_count;
   // Number of consumers published to final-producer unlock summaries.
   uint64_t unlock_summary_publication_count;
-  // Number of detached-copy nodes that can set up placement-sensitive pairs.
-  iree_host_size_t detached_copy_node_count;
+  // Number of detached transfer nodes that can set up placement-sensitive
+  // pairs.
+  iree_host_size_t detached_transfer_node_count;
   // Number of populated placement-pair use records.
   iree_host_size_t placement_pair_use_count;
   // Allocated state-chain read record capacity.
