@@ -53,11 +53,9 @@ extern "C" {
 // Size of the queue frame header in bytes.
 #define IREE_NET_QUEUE_FRAME_HEADER_SIZE 16
 
-// Default maximum frame size (header + payload) for the framing accumulator.
-// Individual queue frames are limited to this size on the wire. Command
-// payloads larger than this (common — typical range is 64KB-512KB) are
-// fragmented into DATA/DATA_END frames by stream_id and reassembled by
-// the channel before delivery.
+// Conservative frame size used by clients when deciding whether data should
+// travel inline on the queue channel. This is a strategy threshold, not a wire
+// limit; actual message capacity is selected by the carrier and receive pool.
 #define IREE_NET_QUEUE_FRAME_DEFAULT_MAX_SIZE (64 * 1024)
 
 //===----------------------------------------------------------------------===//
@@ -74,10 +72,10 @@ typedef enum iree_net_queue_frame_type_e {
   // provisional→resolved buffer ID mappings for alloca).
   IREE_NET_QUEUE_FRAME_TYPE_ADVANCE = 0x02,
 
-  // Partial command data (more fragments follow).
+  // Reserved for a partial command-data fragment. Currently rejected.
   IREE_NET_QUEUE_FRAME_TYPE_DATA = 0x80,
 
-  // Final command data fragment.
+  // Reserved for a final command-data fragment. Currently rejected.
   IREE_NET_QUEUE_FRAME_TYPE_DATA_END = 0x81,
 } iree_net_queue_frame_type_t;
 

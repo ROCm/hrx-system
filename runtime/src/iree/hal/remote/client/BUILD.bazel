@@ -123,6 +123,43 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_library(
+    name = "command_buffer_test_util",
+    testonly = True,
+    srcs = [
+        "command_buffer.h",
+        "command_buffer_test_util.c",
+    ],
+    hdrs = ["command_buffer_test_util.h"],
+    deps = [
+        ":client",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/remote/protocol:common",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "command_buffer_test",
+    srcs = [
+        "command_buffer.h",
+        "command_buffer_test.cc",
+    ],
+    deps = [
+        ":client",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/remote/protocol:commands",
+        "//runtime/src/iree/hal/remote/protocol:common",
+        "//runtime/src/iree/hal/remote/util:recv_pool",
+        "//runtime/src/iree/net/carrier/loopback:factory",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_runtime_cc_test(
     name = "device_failure_test",
     srcs = [

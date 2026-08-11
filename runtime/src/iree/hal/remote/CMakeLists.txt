@@ -43,6 +43,8 @@ iree_cc_test(
     iree::hal
     iree::hal::drivers::local_task::registration
     iree::hal::remote::client
+    iree::hal::remote::client::command_buffer_test_util
+    iree::hal::remote::protocol::commands
     iree::hal::remote::protocol::common
     iree::hal::remote::server
     iree::hal::remote::util::recv_pool

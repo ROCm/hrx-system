@@ -14,8 +14,7 @@
 // The channel is agnostic to what the command payload contains — HAL
 // operations, pipeline commands, collective ops, etc. It handles framing,
 // frontier extraction, and delivery; consumers interpret the payload.
-// Command payloads are typically 64KB-512KB (serialized HAL command buffers)
-// and are always sent zero-copy through the span list.
+// Stable command payloads can be sent zero-copy through the span list.
 //
 // ## Frontier handling
 //
@@ -32,8 +31,8 @@
 //
 // Each queue frame carries a stream_id for multiplexing command streams over
 // a single endpoint. COMMAND frames are self-contained (one frame = one
-// command). DATA/DATA_END frames fragment large payloads by stream_id,
-// reassembled by the channel before delivery.
+// command). DATA/DATA_END frame types are reserved for future fragmentation
+// and are currently rejected.
 //
 // ## Threading
 //
@@ -184,8 +183,8 @@ typedef struct iree_net_queue_channel_t iree_net_queue_channel_t;
 // of the pool and frees it on destroy. This ensures the pool remains valid as
 // long as any reference to the channel exists (e.g.,
 // barrier completion contexts that retain the channel for async sends).
-// Note: the command payload (typically 64KB-512KB) is NOT copied into pool
-// buffers — it is sent zero-copy through the span list.
+// The command payload is not copied into pool buffers; stable payload spans
+// are passed directly to the endpoint send path.
 //
 // |max_send_spans| is the maximum scatter-gather spans per send, accounting
 // for overhead from the endpoint's send path.
@@ -251,8 +250,8 @@ bool iree_net_queue_channel_has_pending_sends(
 //
 // |stream_id| identifies the command stream (for multiplexing).
 // |wait_frontier| and |signal_frontier| may be NULL if no frontier is needed.
-// |command_payload| is a scatter-gather list of command data (typically
-// 64KB-512KB of serialized HAL commands) sent zero-copy.
+// |command_payload| is a scatter-gather list of stable command data passed
+// directly to the endpoint send path.
 // |operation_user_data| is echoed to on_send_complete for correlation.
 //
 // The queue frame header and frontier data (up to ~1KB) are copied into

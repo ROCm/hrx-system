@@ -22,6 +22,41 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    commands
+  HDRS
+    "commands.h"
+  SRCS
+    "commands.c"
+  DEPS
+    ::common
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    commands_test
+  SRCS
+    "commands_test.cc"
+  DEPS
+    ::commands
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_fuzz(
+  NAME
+    commands_fuzz
+  SRCS
+    "commands_fuzz.cc"
+  DEPS
+    ::commands
+    iree::base
+)
+
 iree_cc_fuzz(
   NAME
     bootstrap_fuzz
@@ -31,16 +66,6 @@ iree_cc_fuzz(
     ::bootstrap
     iree::base
     iree::hal
-)
-
-iree_cc_library(
-  NAME
-    commands
-  HDRS
-    "commands.h"
-  DEPS
-    ::common
-  PUBLIC
 )
 
 iree_cc_library(

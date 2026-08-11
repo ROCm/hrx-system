@@ -291,8 +291,7 @@ static_assert(offsetof(iree_hal_remote_dispatch_op_t, dispatch_flags) == 88,
 //   - INLINE_COMMAND_STREAM clear: execute the uploaded CB identified by
 //     command_buffer_id. Binding table provides indirect binding resolution.
 //   - INLINE_COMMAND_STREAM set: command_buffer_id is ignored. The serialized
-//     command stream follows the binding table (possibly preceded by DATA
-//     frames carrying earlier pages of the stream).
+//     command stream follows the binding table in the same queue message.
 typedef struct iree_hal_remote_command_buffer_execute_op_t {
   iree_hal_remote_queue_op_header_t header;
   iree_hal_remote_resource_id_t command_buffer_id;
@@ -304,9 +303,6 @@ typedef struct iree_hal_remote_command_buffer_execute_op_t {
   //   iree_hal_remote_binding_t binding_table[binding_count]
   // If INLINE_COMMAND_STREAM:
   //   Serialized command stream (iree_hal_remote_cmd_header_t sequence).
-  //   For large streams, preceding DATA frames carry pages of the stream;
-  //   the stream here is the final fragment (or empty if all pages were
-  //   sent as DATA frames).
 } iree_hal_remote_command_buffer_execute_op_t;
 static_assert(sizeof(iree_hal_remote_command_buffer_execute_op_t) == 32, "");
 

@@ -123,6 +123,43 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    command_buffer_test_util
+  HDRS
+    "command_buffer_test_util.h"
+  SRCS
+    "command_buffer.h"
+    "command_buffer_test_util.c"
+  DEPS
+    ::client
+    iree::base
+    iree::hal
+    iree::hal::remote::protocol::common
+  TESTONLY
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    command_buffer_test
+  SRCS
+    "command_buffer.h"
+    "command_buffer_test.cc"
+  DEPS
+    ::client
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::hal
+    iree::hal::remote::protocol::commands
+    iree::hal::remote::protocol::common
+    iree::hal::remote::util::recv_pool
+    iree::net::carrier::loopback::factory
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 iree_cc_test(
   NAME
     device_failure_test

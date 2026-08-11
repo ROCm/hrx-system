@@ -37,6 +37,8 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/local_task/registration",
         "//runtime/src/iree/hal/remote/client",
+        "//runtime/src/iree/hal/remote/client:command_buffer_test_util",
+        "//runtime/src/iree/hal/remote/protocol:commands",
         "//runtime/src/iree/hal/remote/protocol:common",
         "//runtime/src/iree/hal/remote/server",
         "//runtime/src/iree/hal/remote/util:recv_pool",

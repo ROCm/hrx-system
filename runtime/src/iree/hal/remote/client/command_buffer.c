@@ -138,36 +138,34 @@ static iree_status_t iree_hal_remote_client_cb_ensure_capacity(
   }
   if (required <= command_buffer->stream_capacity) return iree_ok_status();
 
-  // Grow by at least 2x to amortize reallocation cost.
-  iree_host_size_t new_capacity = command_buffer->stream_capacity * 2;
-  if (new_capacity < required) new_capacity = required;
-
-  return iree_allocator_realloc(command_buffer->host_allocator, new_capacity,
-                                (void**)&command_buffer->stream_data);
+  return iree_allocator_grow_array(
+      command_buffer->host_allocator, required, /*element_size=*/1,
+      &command_buffer->stream_capacity, (void**)&command_buffer->stream_data);
 }
 
-// Returns a pointer to |size| bytes at the current write position, growing
-// the buffer if needed. Advances stream_length. The returned memory is zeroed.
-static iree_status_t iree_hal_remote_client_cb_append(
+// Appends one complete zeroed command and initializes its common header.
+static iree_status_t iree_hal_remote_client_cb_append_command(
     iree_hal_remote_client_command_buffer_t* command_buffer,
-    iree_host_size_t size, void** out_ptr) {
-  IREE_RETURN_IF_ERROR(
-      iree_hal_remote_client_cb_ensure_capacity(command_buffer, size));
-  uint8_t* ptr = command_buffer->stream_data + command_buffer->stream_length;
-  memset(ptr, 0, size);
-  command_buffer->stream_length += size;
-  *out_ptr = ptr;
-  return iree_ok_status();
-}
-
-static iree_status_t iree_hal_remote_client_cb_validate_command_length(
-    iree_host_size_t command_length) {
-  if (command_length > UINT16_MAX) {
+    iree_hal_remote_cmd_type_t command_type, iree_host_size_t command_length,
+    void** out_command) {
+  IREE_ASSERT(command_length >= sizeof(iree_hal_remote_cmd_header_t));
+  IREE_ASSERT(iree_host_size_has_alignment(command_length, 8));
+  if (command_length > UINT32_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "remote command length %" PRIhsz
                             " exceeds wire limit %u",
-                            command_length, (unsigned)UINT16_MAX);
+                            command_length, (unsigned)UINT32_MAX);
   }
+
+  IREE_RETURN_IF_ERROR(iree_hal_remote_client_cb_ensure_capacity(
+      command_buffer, command_length));
+  uint8_t* ptr = command_buffer->stream_data + command_buffer->stream_length;
+  memset(ptr, 0, command_length);
+  iree_hal_remote_cmd_header_t* header = (iree_hal_remote_cmd_header_t*)ptr;
+  header->type = (uint16_t)command_type;
+  header->length = (uint32_t)command_length;
+  command_buffer->stream_length += command_length;
+  *out_command = ptr;
   return iree_ok_status();
 }
 
@@ -305,6 +303,14 @@ static iree_status_t iree_hal_remote_client_command_buffer_begin_debug_group(
     const iree_hal_label_location_t* location) {
   iree_hal_remote_client_command_buffer_t* command_buffer =
       iree_hal_remote_client_command_buffer_cast(base_command_buffer);
+  (void)location;
+
+  if (label.size > UINT16_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "debug label length %" PRIhsz
+                            " exceeds wire limit %u",
+                            label.size, (unsigned)UINT16_MAX);
+  }
 
   iree_host_size_t label_offset = 0;
   iree_host_size_t total_size = 0;
@@ -314,13 +320,11 @@ static iree_status_t iree_hal_remote_client_command_buffer_begin_debug_group(
       IREE_STRUCT_FIELD_ALIGNED(0, uint8_t, 8, NULL)));
 
   void* ptr = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_remote_client_cb_append(command_buffer, total_size, &ptr));
+  IREE_RETURN_IF_ERROR(iree_hal_remote_client_cb_append_command(
+      command_buffer, IREE_HAL_REMOTE_CMD_DEBUG_GROUP_BEGIN, total_size, &ptr));
 
   iree_hal_remote_debug_group_begin_cmd_t* cmd =
       (iree_hal_remote_debug_group_begin_cmd_t*)ptr;
-  cmd->header.type = IREE_HAL_REMOTE_CMD_DEBUG_GROUP_BEGIN;
-  cmd->header.length = (uint16_t)total_size;
   cmd->label_color = label_color.value;
   cmd->label_length = (uint16_t)label.size;
 
@@ -337,14 +341,9 @@ static iree_status_t iree_hal_remote_client_command_buffer_end_debug_group(
       iree_hal_remote_client_command_buffer_cast(base_command_buffer);
 
   void* ptr = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_remote_client_cb_append(
-      command_buffer, sizeof(iree_hal_remote_debug_group_end_cmd_t), &ptr));
-
-  iree_hal_remote_debug_group_end_cmd_t* cmd =
-      (iree_hal_remote_debug_group_end_cmd_t*)ptr;
-  cmd->header.type = IREE_HAL_REMOTE_CMD_DEBUG_GROUP_END;
-  cmd->header.length = (uint16_t)sizeof(*cmd);
-  return iree_ok_status();
+  return iree_hal_remote_client_cb_append_command(
+      command_buffer, IREE_HAL_REMOTE_CMD_DEBUG_GROUP_END,
+      sizeof(iree_hal_remote_debug_group_end_cmd_t), &ptr);
 }
 
 //===----------------------------------------------------------------------===//
@@ -400,21 +399,17 @@ static iree_status_t iree_hal_remote_client_command_buffer_execution_barrier(
                           &buffer_barriers_offset),
         IREE_STRUCT_FIELD_ALIGNED(0, uint8_t, 8, NULL));
   }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_client_cb_validate_command_length(total_size);
-  }
-
   const iree_host_size_t stream_start = command_buffer->stream_length;
   void* ptr = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_client_cb_append(command_buffer, total_size, &ptr);
+    status = iree_hal_remote_client_cb_append_command(
+        command_buffer, IREE_HAL_REMOTE_CMD_EXECUTION_BARRIER, total_size,
+        &ptr);
   }
 
   if (iree_status_is_ok(status)) {
     iree_hal_remote_execution_barrier_cmd_t* cmd =
         (iree_hal_remote_execution_barrier_cmd_t*)ptr;
-    cmd->header.type = IREE_HAL_REMOTE_CMD_EXECUTION_BARRIER;
-    cmd->header.length = (uint16_t)total_size;
     cmd->source_stage_mask = (uint32_t)source_stage_mask;
     cmd->target_stage_mask = (uint32_t)target_stage_mask;
     cmd->memory_barrier_count = (uint16_t)memory_barrier_count;
@@ -463,8 +458,9 @@ static iree_status_t iree_hal_remote_client_command_buffer_signal_event(
 
   const iree_host_size_t stream_start = command_buffer->stream_length;
   void* ptr = NULL;
-  iree_status_t status = iree_hal_remote_client_cb_append(
-      command_buffer, sizeof(iree_hal_remote_event_signal_cmd_t), &ptr);
+  iree_status_t status = iree_hal_remote_client_cb_append_command(
+      command_buffer, IREE_HAL_REMOTE_CMD_EVENT_SIGNAL,
+      sizeof(iree_hal_remote_event_signal_cmd_t), &ptr);
   if (iree_status_is_ok(status)) {
     if (!iree_hal_remote_client_event_isa(event)) {
       status = iree_make_status(
@@ -480,8 +476,6 @@ static iree_status_t iree_hal_remote_client_command_buffer_signal_event(
   if (iree_status_is_ok(status)) {
     iree_hal_remote_event_signal_cmd_t* cmd =
         (iree_hal_remote_event_signal_cmd_t*)ptr;
-    cmd->header.type = IREE_HAL_REMOTE_CMD_EVENT_SIGNAL;
-    cmd->header.length = (uint16_t)sizeof(*cmd);
     cmd->event_id = iree_hal_remote_client_event_resource_id(event);
     cmd->source_stage_mask = (uint32_t)source_stage_mask;
   }
@@ -500,8 +494,9 @@ static iree_status_t iree_hal_remote_client_command_buffer_reset_event(
 
   const iree_host_size_t stream_start = command_buffer->stream_length;
   void* ptr = NULL;
-  iree_status_t status = iree_hal_remote_client_cb_append(
-      command_buffer, sizeof(iree_hal_remote_event_reset_cmd_t), &ptr);
+  iree_status_t status = iree_hal_remote_client_cb_append_command(
+      command_buffer, IREE_HAL_REMOTE_CMD_EVENT_RESET,
+      sizeof(iree_hal_remote_event_reset_cmd_t), &ptr);
   if (iree_status_is_ok(status)) {
     if (!iree_hal_remote_client_event_isa(event)) {
       status = iree_make_status(
@@ -517,8 +512,6 @@ static iree_status_t iree_hal_remote_client_command_buffer_reset_event(
   if (iree_status_is_ok(status)) {
     iree_hal_remote_event_reset_cmd_t* cmd =
         (iree_hal_remote_event_reset_cmd_t*)ptr;
-    cmd->header.type = IREE_HAL_REMOTE_CMD_EVENT_RESET;
-    cmd->header.length = (uint16_t)sizeof(*cmd);
     cmd->event_id = iree_hal_remote_client_event_resource_id(event);
     cmd->source_stage_mask = (uint32_t)source_stage_mask;
   }
@@ -591,21 +584,16 @@ static iree_status_t iree_hal_remote_client_command_buffer_wait_events(
                           &buffer_barriers_offset),
         IREE_STRUCT_FIELD_ALIGNED(0, uint8_t, 8, NULL));
   }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_client_cb_validate_command_length(total_size);
-  }
-
   const iree_host_size_t stream_start = command_buffer->stream_length;
   void* ptr = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_client_cb_append(command_buffer, total_size, &ptr);
+    status = iree_hal_remote_client_cb_append_command(
+        command_buffer, IREE_HAL_REMOTE_CMD_EVENT_WAIT, total_size, &ptr);
   }
 
   if (iree_status_is_ok(status)) {
     iree_hal_remote_event_wait_cmd_t* cmd =
         (iree_hal_remote_event_wait_cmd_t*)ptr;
-    cmd->header.type = IREE_HAL_REMOTE_CMD_EVENT_WAIT;
-    cmd->header.length = (uint16_t)total_size;
     cmd->source_stage_mask = (uint32_t)source_stage_mask;
     cmd->target_stage_mask = (uint32_t)target_stage_mask;
     cmd->event_count = (uint16_t)event_count;
@@ -678,14 +666,13 @@ static iree_status_t iree_hal_remote_client_command_buffer_fill_buffer(
 
   const iree_host_size_t stream_start = command_buffer->stream_length;
   void* ptr = NULL;
-  iree_status_t status = iree_hal_remote_client_cb_append(
-      command_buffer, sizeof(iree_hal_remote_buffer_fill_cmd_t), &ptr);
+  iree_status_t status = iree_hal_remote_client_cb_append_command(
+      command_buffer, IREE_HAL_REMOTE_CMD_BUFFER_FILL,
+      sizeof(iree_hal_remote_buffer_fill_cmd_t), &ptr);
 
   if (iree_status_is_ok(status)) {
     iree_hal_remote_buffer_fill_cmd_t* cmd =
         (iree_hal_remote_buffer_fill_cmd_t*)ptr;
-    cmd->header.type = IREE_HAL_REMOTE_CMD_BUFFER_FILL;
-    cmd->header.length = (uint16_t)sizeof(*cmd);
     uint64_t target_offset = 0;
     uint64_t target_length = 0;
     iree_hal_remote_client_cb_encode_buffer_ref(
@@ -716,6 +703,12 @@ static iree_status_t iree_hal_remote_client_command_buffer_update_buffer(
   iree_hal_remote_client_command_buffer_t* command_buffer =
       iree_hal_remote_client_command_buffer_cast(base_command_buffer);
 
+  if (target_ref.length > IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "update length %" PRIdsz " exceeds HAL limit %u",
+                            target_ref.length,
+                            (unsigned)IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE);
+  }
   iree_host_size_t data_length = (iree_host_size_t)target_ref.length;
   iree_host_size_t data_offset = 0;
   iree_host_size_t total_size = 0;
@@ -726,14 +719,12 @@ static iree_status_t iree_hal_remote_client_command_buffer_update_buffer(
 
   const iree_host_size_t stream_start = command_buffer->stream_length;
   void* ptr = NULL;
-  iree_status_t status =
-      iree_hal_remote_client_cb_append(command_buffer, total_size, &ptr);
+  iree_status_t status = iree_hal_remote_client_cb_append_command(
+      command_buffer, IREE_HAL_REMOTE_CMD_BUFFER_UPDATE, total_size, &ptr);
 
   if (iree_status_is_ok(status)) {
     iree_hal_remote_buffer_update_cmd_t* cmd =
         (iree_hal_remote_buffer_update_cmd_t*)ptr;
-    cmd->header.type = IREE_HAL_REMOTE_CMD_BUFFER_UPDATE;
-    cmd->header.length = (uint16_t)total_size;
     uint64_t update_target_offset = 0;
     uint64_t update_target_length = 0;
     iree_hal_remote_client_cb_encode_buffer_ref(
@@ -766,14 +757,13 @@ static iree_status_t iree_hal_remote_client_command_buffer_copy_buffer(
 
   const iree_host_size_t stream_start = command_buffer->stream_length;
   void* ptr = NULL;
-  iree_status_t status = iree_hal_remote_client_cb_append(
-      command_buffer, sizeof(iree_hal_remote_buffer_copy_cmd_t), &ptr);
+  iree_status_t status = iree_hal_remote_client_cb_append_command(
+      command_buffer, IREE_HAL_REMOTE_CMD_BUFFER_COPY,
+      sizeof(iree_hal_remote_buffer_copy_cmd_t), &ptr);
 
   if (iree_status_is_ok(status)) {
     iree_hal_remote_buffer_copy_cmd_t* cmd =
         (iree_hal_remote_buffer_copy_cmd_t*)ptr;
-    cmd->header.type = IREE_HAL_REMOTE_CMD_BUFFER_COPY;
-    cmd->header.length = (uint16_t)sizeof(*cmd);
     uint64_t copy_source_offset = 0;
     uint64_t copy_source_length = 0;
     uint64_t copy_target_offset = 0;
@@ -811,14 +801,13 @@ static iree_status_t iree_hal_remote_client_command_buffer_advise_buffer(
 
   const iree_host_size_t stream_start = command_buffer->stream_length;
   void* ptr = NULL;
-  iree_status_t status = iree_hal_remote_client_cb_append(
-      command_buffer, sizeof(iree_hal_remote_buffer_advise_cmd_t), &ptr);
+  iree_status_t status = iree_hal_remote_client_cb_append_command(
+      command_buffer, IREE_HAL_REMOTE_CMD_BUFFER_ADVISE,
+      sizeof(iree_hal_remote_buffer_advise_cmd_t), &ptr);
 
   if (iree_status_is_ok(status)) {
     iree_hal_remote_buffer_advise_cmd_t* cmd =
         (iree_hal_remote_buffer_advise_cmd_t*)ptr;
-    cmd->header.type = IREE_HAL_REMOTE_CMD_BUFFER_ADVISE;
-    cmd->header.length = (uint16_t)sizeof(*cmd);
     uint64_t advise_offset = 0;
     uint64_t advise_length = 0;
     iree_hal_remote_client_cb_encode_buffer_ref(
@@ -900,7 +889,8 @@ static iree_status_t iree_hal_remote_client_command_buffer_dispatch(
 
   const iree_host_size_t stream_start = command_buffer->stream_length;
   void* ptr = NULL;
-  status = iree_hal_remote_client_cb_append(command_buffer, total_size, &ptr);
+  status = iree_hal_remote_client_cb_append_command(
+      command_buffer, IREE_HAL_REMOTE_CMD_DISPATCH, total_size, &ptr);
 
   if (iree_status_is_ok(status)) {
     status = iree_hal_remote_client_command_buffer_retain_resource(
@@ -909,8 +899,6 @@ static iree_status_t iree_hal_remote_client_command_buffer_dispatch(
 
   if (iree_status_is_ok(status)) {
     iree_hal_remote_dispatch_cmd_t* cmd = (iree_hal_remote_dispatch_cmd_t*)ptr;
-    cmd->header.type = IREE_HAL_REMOTE_CMD_DISPATCH;
-    cmd->header.length = (uint16_t)total_size;
     cmd->executable_id =
         iree_hal_remote_client_executable_resource_id(executable);
     cmd->function_value = function.value;

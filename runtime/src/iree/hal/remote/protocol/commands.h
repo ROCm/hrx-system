@@ -12,12 +12,15 @@
 //
 //   - Inline (one-shot): Command stream appended directly to a
 //     COMMAND_BUFFER_EXECUTE queue op. The hot path for compiler-generated
-//     workloads. Large streams are fragmented across preceding DATA frames
-//     with pages sent as they fill during recording.
+//     workloads. The complete stream currently travels in one queue message.
 //
 //   - Uploaded (reusable): Complete command stream sent via
 //     COMMAND_BUFFER_UPLOAD on the control channel. Executed later via
 //     COMMAND_BUFFER_EXECUTE referencing the uploaded resource ID.
+//
+// Both delivery paths currently require the complete message to fit the
+// selected carrier and receive pool. Queue DATA fragmentation is reserved but
+// not implemented.
 //
 // ## Dependency policy
 //
@@ -69,18 +72,24 @@ typedef enum iree_hal_remote_cmd_type_e {
 // Command buffer command header
 //===----------------------------------------------------------------------===//
 
-// Common header for all serialized commands. 8 bytes: type and length plus
-// padding for natural alignment of subsequent uint64_t fields.
+// Common header for all serialized commands. 8 bytes, naturally aligning
+// subsequent uint64_t fields.
 //
 // The length field covers the entire command including this header and any
 // variable-length tail, rounded up to the next 8-byte boundary. The stream
 // iterator advances by `length` bytes to reach the next command.
 typedef struct iree_hal_remote_cmd_header_t {
-  uint16_t type;      // iree_hal_remote_cmd_type_t
-  uint16_t length;    // Total bytes (header + payload), multiple of 8.
-  uint32_t reserved;  // Must be 0.
+  // Command type from iree_hal_remote_cmd_type_t.
+  uint16_t type;
+  // Must be zero.
+  uint16_t reserved;
+  // Total bytes including this header and payload, padded to a multiple of 8.
+  uint32_t length;
 } iree_hal_remote_cmd_header_t;
 static_assert(sizeof(iree_hal_remote_cmd_header_t) == 8, "");
+static_assert(offsetof(iree_hal_remote_cmd_header_t, type) == 0, "");
+static_assert(offsetof(iree_hal_remote_cmd_header_t, reserved) == 2, "");
+static_assert(offsetof(iree_hal_remote_cmd_header_t, length) == 4, "");
 
 //===----------------------------------------------------------------------===//
 // Barrier entries
@@ -241,20 +250,14 @@ static_assert(offsetof(iree_hal_remote_dispatch_cmd_t, dispatch_flags) == 88,
               "");
 
 // DEBUG_GROUP_BEGIN: Begin a named debug group. Variable-length tail:
-// UTF-8 label string and optional source location.
+// UTF-8 label string.
 typedef struct iree_hal_remote_debug_group_begin_cmd_t {
   iree_hal_remote_cmd_header_t header;
   uint32_t label_color;   // RGBA packed color for debug visualization.
   uint16_t label_length;  // UTF-8 byte count (not null-terminated).
-  uint8_t has_location;   // Nonzero if source location follows the label.
-  uint8_t reserved;       // Must be 0.
+  uint16_t reserved;      // Must be 0.
   // Followed by:
   //   uint8_t label[label_length]  (padded to 8-byte alignment)
-  //   [if has_location]:
-  //     uint16_t file_length
-  //     uint16_t line
-  //     uint32_t reserved  (must be 0)
-  //     uint8_t file[file_length]  (padded to 8-byte alignment)
 } iree_hal_remote_debug_group_begin_cmd_t;
 static_assert(sizeof(iree_hal_remote_debug_group_begin_cmd_t) == 16, "");
 
@@ -276,6 +279,29 @@ typedef struct iree_hal_remote_command_extension_cmd_t {
   //   uint8_t payload[payload_length]  (padded to 8-byte alignment)
 } iree_hal_remote_command_extension_cmd_t;
 static_assert(sizeof(iree_hal_remote_command_extension_cmd_t) == 24, "");
+
+// A structurally validated view of one command in a serialized stream.
+// The command bytes alias the input passed to
+// iree_hal_remote_command_parse and remain valid for the same lifetime.
+typedef struct iree_hal_remote_command_view_t {
+  // Aligned copy of the command's common header.
+  iree_hal_remote_cmd_header_t header;
+  // Complete command bytes including the header and padded payload.
+  iree_const_byte_span_t bytes;
+} iree_hal_remote_command_view_t;
+
+// Parses and structurally validates the first command in |stream_bytes|.
+// Validation covers common framing, canonical command length, reserved fields,
+// and variable tail extents. Resource IDs and HAL operation semantics are
+// resolved by the replay layer after this external-input boundary.
+//
+// On success |out_command| references exactly the first command. Callers can
+// advance by |out_command->bytes.data_length| to parse a following command.
+// Returns an error when |stream_bytes| is empty, truncated, malformed, or has
+// an unsupported command type.
+iree_status_t iree_hal_remote_command_parse(
+    iree_const_byte_span_t stream_bytes,
+    iree_hal_remote_command_view_t* out_command);
 
 #ifdef __cplusplus
 }  // extern "C"

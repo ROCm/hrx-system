@@ -34,6 +34,8 @@
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/local_task/registration/driver_module.h"
 #include "iree/hal/remote/client/api.h"
+#include "iree/hal/remote/client/command_buffer_test_util.h"
+#include "iree/hal/remote/protocol/commands.h"
 #include "iree/hal/remote/protocol/common.h"
 #include "iree/hal/remote/server/api.h"
 #include "iree/hal/remote/server/file_index.h"
@@ -3042,6 +3044,176 @@ TEST_F(RemoteBufferTest, QueueDispatchAbsF32) {
 //===----------------------------------------------------------------------===//
 // Command buffer tests
 //===----------------------------------------------------------------------===//
+
+TEST_F(RemoteBufferTest, CommandBufferUpdateOneShotAndReusable) {
+  constexpr iree_host_size_t kUpdateLength = 1024;
+  std::vector<uint8_t> source_data(kUpdateLength);
+  for (iree_host_size_t i = 0; i < source_data.size(); ++i) {
+    source_data[i] = static_cast<uint8_t>(i * 31u + 7u);
+  }
+  std::string maximum_label(UINT16_MAX, 'L');
+
+  const iree_hal_command_buffer_mode_t modes[] = {
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+  };
+  for (iree_hal_command_buffer_mode_t mode : modes) {
+    SCOPED_TRACE(mode);
+    iree_hal_buffer_t* target_buffer = nullptr;
+    AllocateMappableBuffer(kUpdateLength, &target_buffer);
+
+    iree_hal_command_buffer_t* command_buffer = nullptr;
+    IREE_ASSERT_OK(iree_hal_command_buffer_create(
+        client_device_, mode, IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+        IREE_HAL_QUEUE_AFFINITY_ANY, /*binding_capacity=*/0, &command_buffer));
+    IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+    IREE_ASSERT_OK(iree_hal_command_buffer_begin_debug_group(
+        command_buffer,
+        iree_make_string_view(maximum_label.data(), maximum_label.size()),
+        iree_hal_label_color_unspecified(), /*location=*/nullptr));
+    IREE_ASSERT_OK(iree_hal_command_buffer_end_debug_group(command_buffer));
+    IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+        command_buffer, source_data.data(), /*source_offset=*/0,
+        iree_hal_make_buffer_ref(target_buffer, /*offset=*/0, kUpdateLength),
+        IREE_HAL_UPDATE_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+
+    iree_hal_semaphore_t* semaphore = nullptr;
+    IREE_ASSERT_OK(iree_hal_semaphore_create(
+        client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+        IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
+    SemaphoreListHelper signal(semaphore, 1);
+    IREE_ASSERT_OK(iree_hal_device_queue_execute(
+        client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+        iree_hal_semaphore_list_empty(), signal.list, command_buffer,
+        iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(
+        semaphore, 1, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+
+    iree_hal_buffer_mapping_t mapping;
+    IREE_ASSERT_OK(
+        iree_hal_buffer_map_range(target_buffer, IREE_HAL_MAPPING_MODE_SCOPED,
+                                  IREE_HAL_MEMORY_ACCESS_READ,
+                                  /*byte_offset=*/0, kUpdateLength, &mapping));
+    EXPECT_EQ(memcmp(mapping.contents.data, source_data.data(), kUpdateLength),
+              0);
+    IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
+
+    iree_hal_semaphore_release(semaphore);
+    iree_hal_command_buffer_release(command_buffer);
+    iree_hal_buffer_release(target_buffer);
+  }
+}
+
+TEST_F(RemoteBufferTest, CommandBufferDispatchConstantsUse32BitLength) {
+  iree_const_byte_span_t binary =
+      LookupTestdata("command_buffer_dispatch_test.bin");
+  ASSERT_GT(binary.data_length, 0u);
+  const iree_hal_executable_target_t* target = FindExecutableTarget(
+      client_device_, IREE_SV("ireevm"), IREE_SV("bytecode"));
+  if (!target) {
+    GTEST_SKIP() << "VMVX executable loading is not enabled";
+  }
+
+  iree_hal_executable_load_params_t load_params;
+  iree_hal_executable_load_params_initialize(&load_params);
+  load_params.executable_data = binary;
+  iree_hal_executable_t* executable = nullptr;
+  IREE_ASSERT_OK(iree_hal_device_load_executable(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, target, &load_params,
+      &executable));
+
+  iree_hal_command_buffer_t* command_buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      client_device_,
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
+          IREE_HAL_COMMAND_BUFFER_MODE_UNVALIDATED,
+      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*binding_capacity=*/0, &command_buffer));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+
+  std::vector<uint32_t> constants(16383);
+  IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+      command_buffer, executable, iree_hal_executable_function_from_index(0),
+      iree_hal_make_static_dispatch_config(1, 1, 1),
+      iree_make_const_byte_span(constants.data(),
+                                constants.size() * sizeof(constants[0])),
+      iree_hal_buffer_ref_list_empty(), IREE_HAL_DISPATCH_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+
+  iree_hal_remote_command_view_t command;
+  iree_byte_span_t stream =
+      iree_hal_remote_client_command_buffer_test_stream(command_buffer);
+  IREE_ASSERT_OK(iree_hal_remote_command_parse(
+      iree_make_const_byte_span(stream.data, stream.data_length), &command));
+  EXPECT_EQ(command.header.type, IREE_HAL_REMOTE_CMD_DISPATCH);
+  EXPECT_EQ(command.header.length, 65632u);
+
+  iree_hal_command_buffer_release(command_buffer);
+  iree_hal_executable_release(executable);
+}
+
+TEST_F(RemoteBufferTest, MalformedLaterCommandNeverSubmitsPartialRecording) {
+  constexpr iree_host_size_t kBufferLength = 256;
+  iree_hal_buffer_t* target_buffer = nullptr;
+  AllocateMappableBuffer(kBufferLength, &target_buffer);
+  std::vector<uint8_t> initial_data(kBufferLength, 0);
+  QueueUpdateAndWait(initial_data.data(), initial_data.size(), target_buffer,
+                     /*target_offset=*/0);
+
+  iree_hal_command_buffer_t* command_buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      client_device_,
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
+          IREE_HAL_COMMAND_BUFFER_MODE_UNVALIDATED,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*binding_capacity=*/0, &command_buffer));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+  const uint8_t pattern = 0xA5;
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+      command_buffer,
+      iree_hal_make_buffer_ref(target_buffer, /*offset=*/0, kBufferLength),
+      &pattern, sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end_debug_group(command_buffer));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+
+  iree_byte_span_t stream =
+      iree_hal_remote_client_command_buffer_test_stream(command_buffer);
+  iree_hal_remote_command_view_t first_command;
+  IREE_ASSERT_OK(iree_hal_remote_command_parse(
+      iree_make_const_byte_span(stream.data, stream.data_length),
+      &first_command));
+  ASSERT_LT(first_command.bytes.data_length, stream.data_length);
+  auto* malformed_header = reinterpret_cast<iree_hal_remote_cmd_header_t*>(
+      stream.data + first_command.bytes.data_length);
+  malformed_header->reserved = 1;
+
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
+  SemaphoreListHelper signal(semaphore, 1);
+  IREE_ASSERT_OK(iree_hal_device_queue_execute(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      iree_hal_semaphore_list_empty(), signal.list, command_buffer,
+      iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_semaphore_wait(semaphore, 1, iree_infinite_timeout(),
+                              IREE_ASYNC_WAIT_FLAG_NONE));
+
+  iree_hal_buffer_mapping_t mapping;
+  IREE_ASSERT_OK(iree_hal_buffer_map_range(
+      target_buffer, IREE_HAL_MAPPING_MODE_SCOPED, IREE_HAL_MEMORY_ACCESS_READ,
+      /*byte_offset=*/0, kBufferLength, &mapping));
+  EXPECT_EQ(memcmp(mapping.contents.data, initial_data.data(), kBufferLength),
+            0);
+  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
+
+  iree_hal_semaphore_release(semaphore);
+  iree_hal_command_buffer_release(command_buffer);
+  iree_hal_buffer_release(target_buffer);
+}
 
 TEST_F(RemoteBufferTest, OneShotCommandBufferDispatch) {
   iree_const_byte_span_t binary =
