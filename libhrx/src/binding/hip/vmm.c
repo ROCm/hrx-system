@@ -1046,7 +1046,6 @@ hipError_t iree_hip_vmm_map(void* ptr, size_t size, size_t offset,
       !iree_hip_vmm_range_is_valid(reservation->size, virtual_offset, size,
                                    reservation->granularity) ||
       offset > allocation->size || size > allocation->size - offset ||
-      reservation->device_ordinal != allocation->device_ordinal ||
       iree_hip_vmm_mapping_range_overlaps(reservation, virtual_offset, size)) {
     result = hipErrorInvalidValue;
   }
