@@ -355,13 +355,23 @@ IREE_API_EXPORT iree_status_t iree_hal_allocator_virtual_memory_protect(
     iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
     iree_device_size_t virtual_offset, iree_device_size_t size,
     iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_virtual_memory_access_scope_t access_scope,
     iree_hal_memory_protection_t protection) {
   IREE_ASSERT_ARGUMENT(allocator);
   IREE_ASSERT_ARGUMENT(virtual_buffer);
+  if (IREE_UNLIKELY(
+          access_scope == IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_NONE ||
+          iree_any_bit_set(access_scope,
+                           ~(iree_hal_virtual_memory_access_scope_t)
+                               IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_ALL))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid virtual-memory access scope 0x%08" PRIx32,
+                            access_scope);
+  }
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_status_t status = _VTABLE_DISPATCH(allocator, virtual_memory_protect)(
       allocator, virtual_buffer, virtual_offset, size, queue_affinity,
-      protection);
+      access_scope, protection);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }

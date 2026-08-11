@@ -511,6 +511,7 @@ static iree_status_t iree_hal_replay_recorder_allocator_virtual_memory_protect(
     iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
     iree_device_size_t virtual_offset, iree_device_size_t size,
     iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_virtual_memory_access_scope_t access_scope,
     iree_hal_memory_protection_t protection) {
   iree_hal_replay_recorder_allocator_t* allocator =
       iree_hal_replay_recorder_allocator_cast(base_allocator);
@@ -524,7 +525,7 @@ static iree_status_t iree_hal_replay_recorder_allocator_virtual_memory_protect(
       iree_hal_allocator_virtual_memory_protect(
           allocator->base_allocator,
           iree_hal_replay_recorder_buffer_base_or_self(virtual_buffer),
-          virtual_offset, size, queue_affinity, protection));
+          virtual_offset, size, queue_affinity, access_scope, protection));
 }
 
 static iree_status_t iree_hal_replay_recorder_allocator_virtual_memory_advise(

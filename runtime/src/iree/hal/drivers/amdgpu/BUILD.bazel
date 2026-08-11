@@ -149,6 +149,7 @@ iree_runtime_cc_library(
     name = "amdgpu",
     srcs = [
         "allocator.c",
+        "allocator.h",
         "aql_block_processor.c",
         "aql_block_processor.h",
         "aql_block_processor_profile.c",
@@ -251,7 +252,6 @@ iree_runtime_cc_library(
         "virtual_queue.h",
     ],
     hdrs = [
-        "allocator.h",
         "api.h",
     ],
     deps = [

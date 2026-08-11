@@ -939,10 +939,12 @@ TEST_P(BdaSpirvTest, CommandBufferExecutesBdaShaderWithSparseBindings) {
   IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_protect(
       device_allocator_, input_buffer.get(), /*virtual_offset=*/0,
       recommended_page_size, IREE_HAL_QUEUE_AFFINITY_ANY,
+      IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE,
       IREE_HAL_MEMORY_PROTECTION_READ_WRITE));
   IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_protect(
       device_allocator_, output_buffer.get(), /*virtual_offset=*/0,
       recommended_page_size, IREE_HAL_QUEUE_AFFINITY_ANY,
+      IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE,
       IREE_HAL_MEMORY_PROTECTION_READ_WRITE));
 
   const int32_t input_pattern = 5;

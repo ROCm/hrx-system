@@ -111,6 +111,7 @@ TEST_P(VulkanVirtualMemoryTest, ReserveMapTransferUnmap) {
   iree_status_t protect_status = iree_hal_allocator_virtual_memory_protect(
       device_allocator_, virtual_buffer.get(), /*virtual_offset=*/0,
       recommended_page_size, IREE_HAL_QUEUE_AFFINITY_ANY,
+      IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE,
       IREE_HAL_MEMORY_PROTECTION_READ_WRITE);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION, protect_status);
 
@@ -120,6 +121,7 @@ TEST_P(VulkanVirtualMemoryTest, ReserveMapTransferUnmap) {
   IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_protect(
       device_allocator_, virtual_buffer.get(), /*virtual_offset=*/0,
       recommended_page_size, IREE_HAL_QUEUE_AFFINITY_ANY,
+      IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE,
       IREE_HAL_MEMORY_PROTECTION_READ_WRITE));
 
   constexpr iree_device_size_t kTouchedSize = 256;

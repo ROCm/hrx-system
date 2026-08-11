@@ -845,6 +845,7 @@ static iree_status_t iree_hal_cuda_allocator_virtual_memory_protect(
     iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
     iree_device_size_t virtual_offset, iree_device_size_t size,
     iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_virtual_memory_access_scope_t access_scope,
     iree_hal_memory_protection_t protection) {
   return iree_make_status(IREE_STATUS_UNAVAILABLE,
                           "CUDA allocator does not support virtual memory");

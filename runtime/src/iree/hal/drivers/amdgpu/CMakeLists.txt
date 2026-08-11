@@ -188,10 +188,10 @@ iree_cc_library(
   NAME
     amdgpu
   HDRS
-    "allocator.h"
     "api.h"
   SRCS
     "allocator.c"
+    "allocator.h"
     "aql_block_processor.c"
     "aql_block_processor.h"
     "aql_block_processor_profile.c"

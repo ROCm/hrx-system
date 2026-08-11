@@ -9,7 +9,6 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/allocator.h"
-#include "iree/hal/drivers/amdgpu/allocator.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 
 #ifdef __cplusplus
@@ -104,7 +103,7 @@ iree_status_t iree_hal_amdgpu_virtual_memory_protect(
     iree_hal_amdgpu_virtual_memory_state_t* state,
     iree_hal_buffer_t* virtual_buffer, iree_device_size_t virtual_offset,
     iree_device_size_t size, iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_amdgpu_memory_agent_classes_t agent_classes,
+    iree_hal_virtual_memory_access_scope_t access_scope,
     iree_hal_memory_protection_t protection);
 
 // Validates an advisory virtual-address range and otherwise performs no work.

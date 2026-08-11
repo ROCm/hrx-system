@@ -219,6 +219,7 @@ static iree_status_t hrx_vmm_slab_provider_acquire_slab(
     status = iree_hal_allocator_virtual_memory_protect(
         provider->allocator, slab->virtual_buffer, /*virtual_offset=*/0,
         allocation_size, provider->buffer_params.queue_affinity,
+        IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_ALL,
         IREE_HAL_MEMORY_PROTECTION_READ_WRITE);
   }
 

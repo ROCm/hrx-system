@@ -416,6 +416,7 @@ TEST_F(AllocatorTest, VirtualMemoryLifecycleUsesNativeState) {
   IREE_ASSERT_NOT_OK(iree_hal_allocator_virtual_memory_protect(
       allocator, virtual_memory.get(), /*virtual_offset=*/0,
       recommended_page_size, kQueueAffinity0,
+      IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_ALL,
       IREE_HAL_MEMORY_PROTECTION_READ_WRITE));
 
   VirtualMemoryMapping mapping(allocator, virtual_memory.get(),
@@ -436,6 +437,12 @@ TEST_F(AllocatorTest, VirtualMemoryLifecycleUsesNativeState) {
   IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_protect(
       allocator, virtual_memory.get(), /*virtual_offset=*/0,
       recommended_page_size, kQueueAffinity0,
+      IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE,
+      IREE_HAL_MEMORY_PROTECTION_READ_WRITE));
+  IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_protect(
+      allocator, virtual_memory.get(), /*virtual_offset=*/0,
+      recommended_page_size, kQueueAffinity0,
+      IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_HOST,
       IREE_HAL_MEMORY_PROTECTION_READ_WRITE));
 
   constexpr iree_device_size_t kTouchedSize = 256;
@@ -518,6 +525,7 @@ TEST_F(AllocatorTest, VirtualMemoryMapsMinimumGranuleAcrossPools) {
   IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_protect(
       allocator, virtual_memory.get(), /*virtual_offset=*/0,
       host_minimum_page_size, kQueueAffinity0,
+      IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_ALL,
       IREE_HAL_MEMORY_PROTECTION_READ_WRITE));
 
   IREE_ASSERT_OK(mapping.Unmap());
