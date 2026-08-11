@@ -21,9 +21,6 @@ iree_status_t loom_amdgpu_target_materialize_definition(
     loom_op_t** out_target_op) {
   const loom_amdgpu_target_facts_t* facts =
       loom_amdgpu_target_facts_cast(base_facts);
-  IREE_ASSERT(facts != NULL);
-  IREE_ASSERT(facts->identity.target != NULL);
-  IREE_ASSERT_EQ(facts->identity.target->target_kind, facts->base.selector);
   static_assert(LOOM_TARGET_FACT_FIELD_COUNT_ == 30,
                 "AMDGPU target flags reserve the first 30 bits for common "
                 "target facts");

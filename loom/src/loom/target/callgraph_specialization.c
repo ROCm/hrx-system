@@ -538,8 +538,6 @@ static iree_status_t loom_target_callgraph_seed_versions(
     loom_target_function_version_t* version = loom_target_function_version_cast(
         loom_target_function_version_snapshot_handle_at(&snapshot, symbol_id));
     if (version == NULL) continue;
-    IREE_ASSERT(version->target_context_facts != NULL);
-    IREE_ASSERT(version->target_provider != NULL);
     IREE_RETURN_IF_ERROR(
         loom_target_callgraph_prepare_symbol(state, symbol_id));
     loom_target_callgraph_context_t* context = NULL;
