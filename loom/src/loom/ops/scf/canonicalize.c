@@ -8,6 +8,7 @@
 
 #include "loom/analysis/availability.h"
 #include "loom/ir/attribute.h"
+#include "loom/ir/context.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
 #include "loom/ir/types.h"
@@ -478,6 +479,16 @@ static iree_status_t loom_scf_region_branch_tail_ops_match(
       !loom_scf_region_branch_tail_op_can_factor(candidate_tail)) {
     return iree_ok_status();
   }
+  const loom_op_vtable_t* tail_vtable =
+      loom_op_vtable(rewriter->module, reference_tail);
+  const uint8_t operand_segment_count =
+      loom_op_vtable_operand_segment_count(tail_vtable);
+  if (operand_segment_count > 0 &&
+      memcmp(loom_op_const_operand_segment_counts(reference_tail),
+             loom_op_const_operand_segment_counts(candidate_tail),
+             (iree_host_size_t)operand_segment_count * sizeof(uint16_t)) != 0) {
+    return iree_ok_status();
+  }
   if (!loom_scf_region_branch_tail_result_has_single_yield_use(
           rewriter->module, reference_tail) ||
       !loom_scf_region_branch_tail_result_has_single_yield_use(
@@ -608,10 +619,22 @@ static iree_status_t loom_scf_region_branch_clone_tail_after_branch(
     const loom_op_t* tail_op, loom_op_t* new_branch, loom_type_t result_type,
     loom_op_t** out_cloned_tail) {
   loom_builder_set_after(&rewriter->builder, new_branch);
-  IREE_RETURN_IF_ERROR(loom_builder_allocate_op(
-      &rewriter->builder, tail_op->kind, tail_op->operand_count,
-      tail_op->result_count, 0, 0, tail_op->attribute_count, tail_op->location,
-      out_cloned_tail));
+  const loom_op_vtable_t* tail_vtable =
+      loom_op_vtable(rewriter->module, tail_op);
+  const uint8_t operand_segment_count =
+      loom_op_vtable_operand_segment_count(tail_vtable);
+  if (operand_segment_count > 0) {
+    IREE_RETURN_IF_ERROR(loom_builder_allocate_segmented_op(
+        &rewriter->builder, tail_op->kind, tail_op->operand_count,
+        loom_op_const_operand_segment_counts(tail_op), operand_segment_count,
+        tail_op->result_count, /*region_count=*/0, /*tied_result_count=*/0,
+        tail_op->attribute_count, tail_op->location, out_cloned_tail));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_builder_allocate_op(
+        &rewriter->builder, tail_op->kind, tail_op->operand_count,
+        tail_op->result_count, /*region_count=*/0, /*tied_result_count=*/0,
+        tail_op->attribute_count, tail_op->location, out_cloned_tail));
+  }
   (*out_cloned_tail)->instance_flags = tail_op->instance_flags;
   (*out_cloned_tail)->traits = tail_op->traits;
 

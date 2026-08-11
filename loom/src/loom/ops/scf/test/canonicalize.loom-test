@@ -675,6 +675,46 @@ func.def @if_factors_common_pure_tail(%cond: i1, %a: i32, %b: i32) -> (i32) {
 
 // ====
 
+// Factoring a segmented tail preserves its independent operand field spans.
+func.def @if_factors_common_segmented_tail(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  %result = scf.if %cond -> (i32) {
+    %then = test.segmented %a base %b values %a, %b expected %a : i32 -> i32
+    scf.yield %then : i32
+  } else {
+    %else = test.segmented %b base %a values %b, %a expected %b : i32 -> i32
+    scf.yield %else : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @if_factors_common_segmented_tail(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  %13 = scf.select %cond, %a, %b : i32
+  %14 = scf.select %cond, %b, %a : i32
+  %15 = scf.select %cond, %a, %b : i32
+  %16 = scf.select %cond, %b, %a : i32
+  %17 = scf.select %cond, %a, %b : i32
+  %result = test.segmented %13 base %14 values %15, %16 expected %17 : i32 -> i32
+  func.return %result : i32
+}
+
+// ====
+
+// Equal flat operand counts do not make different segmented field partitions
+// equivalent.
+func.def @if_preserves_mismatched_segmented_tail_partitions(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  %result = scf.if %cond -> (i32) {
+    %then = test.segmented %a base %b values %a, %b expected %a : i32 -> i32
+    scf.yield %then : i32
+  } else {
+    %else = test.segmented %b values %a, %b expected %a, %b : i32 -> i32
+    scf.yield %else : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
 // Branch effects remain branch-local. Only the shared pure tail is factored.
 func.def @if_factors_tail_and_preserves_branch_effects(%cond: i1, %a: i32, %b: i32) -> (i32) {
   %result = scf.if %cond -> (i32) {
