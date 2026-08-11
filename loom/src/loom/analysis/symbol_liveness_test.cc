@@ -37,12 +37,11 @@ static bool RootPublicFunc(void* user_data, const loom_module_t* module,
          loom_func_like_visibility(function) == LOOM_FUNC_VISIBILITY_PUBLIC;
 }
 
-static iree_status_t MarkProviderForApply(
+static iree_status_t MarkProviderForDemand(
     void* user_data, loom_symbol_liveness_contributor_context_t* context,
-    const loom_op_t* op) {
+    const loom_func_contract_demand_t* demand) {
   ApplyEdgeTestState* state = (ApplyEdgeTestState*)user_data;
-  if (!loom_func_apply_isa(op)) return iree_ok_status();
-  if (loom_func_apply_contract(op) != state->contract_id) {
+  if (demand->contract_id != state->contract_id) {
     return iree_ok_status();
   }
   return loom_symbol_liveness_mark_symbol_id(context,
@@ -169,7 +168,7 @@ func.def @dead_user(%arg0: i32) -> (i32) {
   };
   ASSERT_NE(apply_state.contract_id, LOOM_STRING_ID_INVALID);
   loom_symbol_liveness_contributor_t contributor = {
-      /*.visit_op=*/MarkProviderForApply,
+      /*.visit_contract_demand=*/MarkProviderForDemand,
       /*.user_data=*/&apply_state,
   };
   loom_symbol_liveness_options_t options = {

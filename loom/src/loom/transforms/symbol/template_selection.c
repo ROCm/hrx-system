@@ -1897,12 +1897,11 @@ static iree_status_t loom_template_selection_analyze_apply(
       possible_count, best_match_count, highest_provider_priority);
 }
 
-static iree_status_t loom_template_selection_visit_reachable_op(
+static iree_status_t loom_template_selection_visit_reachable_demand(
     void* user_data, loom_symbol_liveness_contributor_context_t* context,
-    const loom_op_t* op) {
-  if (!loom_func_apply_isa(op)) return iree_ok_status();
+    const loom_func_contract_demand_t* demand) {
   return loom_template_selection_analyze_apply(
-      (loom_template_selection_state_t*)user_data, context, op);
+      (loom_template_selection_state_t*)user_data, context, demand->apply_op);
 }
 
 //===----------------------------------------------------------------------===//
@@ -2079,7 +2078,7 @@ static iree_status_t loom_template_selection_execute_rewrites(
 static iree_status_t loom_template_selection_build_liveness(
     loom_template_selection_state_t* state) {
   loom_symbol_liveness_contributor_t contributor = {
-      .visit_op = loom_template_selection_visit_reachable_op,
+      .visit_contract_demand = loom_template_selection_visit_reachable_demand,
       .user_data = state,
   };
   loom_symbol_liveness_options_t options = {
