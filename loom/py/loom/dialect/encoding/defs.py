@@ -33,13 +33,11 @@ from loom.dsl import (
     ATTR_TYPE_STRING,
     ENCODING_LAYOUT,
     ENCODING_SCHEMA,
-    ENCODING_TRANSFORM,
     FACT_IDENTITY,
     I1,
     INDEX,
     PURE,
     VECTOR,
-    VIEW,
     AttrDef,
     ConditionRefinement,
     ConditionRefinementTruth,
@@ -286,18 +284,6 @@ _NUMERIC_TRANSFORM_PARAMETERS = (
     AttrDef("output_elems", ATTR_TYPE_I64, optional=True),
 )
 
-_TURBOQUANT_KV_PARAMETERS = (
-    AttrDef("first_stage_bits", ATTR_TYPE_I64),
-    AttrDef("logical_element", ATTR_TYPE_STRING),
-    AttrDef("logical_elems", ATTR_TYPE_I64),
-    AttrDef("pack_order", ATTR_TYPE_STRING),
-    AttrDef("qjl_rows", ATTR_TYPE_I64),
-    AttrDef("record_bytes", ATTR_TYPE_I64),
-    AttrDef("residual_bits", ATTR_TYPE_I64),
-    AttrDef("scalar_quantizer", ATTR_TYPE_STRING),
-    AttrDef("transform_family", ATTR_TYPE_STRING),
-)
-
 _CANONICAL_NUMERIC_SCHEMA_FORMATS = (
     "f64",
     "f32",
@@ -504,19 +490,6 @@ ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
             Operand("signs", VECTOR),
         ),
         doc="Numerical transform with static shape and policy parameters.",
-    ),
-    EncodingFamilyDef(
-        "turboquant_kv",
-        group=encoding_ops,
-        role=EncodingFamilyRole.STORAGE_SCHEMA,
-        parameters=_TURBOQUANT_KV_PARAMETERS,
-        dynamic_parameters=(
-            Operand("centroids", VIEW),
-            Operand("qjl_transform", ENCODING_TRANSFORM),
-            Operand("thresholds", VIEW),
-            Operand("transform", ENCODING_TRANSFORM),
-        ),
-        doc="TurboQuant key/value storage schema.",
     ),
 )
 

@@ -710,7 +710,7 @@ func.def @transform_hadamard_small_static_lanes() -> (f32, f32, f32, f32) {
 
 // ====
 
-// TurboQuant-style explicit sign vectors participate in exact Hadamard facts
+// Explicit sign vectors participate in exact signed-Hadamard facts
 // when the sign table is itself known.
 func.def @transform_hadamard_sign_small_static_lanes() -> (f32, f32, f32, f32) {
   %c0 = scalar.constant 1.0 : f32

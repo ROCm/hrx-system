@@ -200,48 +200,13 @@ func.def @iq_grid_reference_chunk() -> (i1) {
 
 // ====
 
-// Encoded KV cache pages are still physical byte views. The schema says how a
-// record can be decoded, but the memory operation below only moves i8 bytes.
-// BSR/page descriptors are ordinary index views over the same slabs.
-func.def @turboquant_kv_page_views(%transient: buffer, %params: buffer, %kv_offset: offset, %thresholds_offset: offset, %centroids_offset: offset, %row_ptr_offset: offset, %col_idx_offset: offset, %page: index, %head: index, %token: index, %max_pages: index, %heads: index, %page_size: index, %rows_plus_one: index, %nnz: index) -> (vector<40xi8>) {
-  %dense = encoding.layout.dense : encoding<layout>
-  %thresholds = buffer.view %params[%thresholds_offset] : buffer -> view<3xf32, %dense>
-  %centroids = buffer.view %params[%centroids_offset] : buffer -> view<4xf16, %dense>
-  %signs = vector.constant false : vector<128xi1>
-  %qjl_matrix = vector.constant 0.0 : vector<64x128xf32>
-  %transform = encoding.define #numeric_transform<family="hadamard_sign", input_elems=128, output_elems=128> {signs = %signs : vector<128xi1>} : encoding<transform>
-  %qjl_transform = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %qjl_matrix : vector<64x128xf32>} : encoding<transform>
-  %schema = encoding.define #turboquant_kv<first_stage_bits=2, logical_element="f16", logical_elems=128, pack_order="lsb0", qjl_rows=64, record_bytes=40, residual_bits=1, scalar_quantizer="lloyd_max", transform_family="hadamard_sign"> {centroids = %centroids : view<4xf16, %dense>, qjl_transform = %qjl_transform : encoding<transform>, thresholds = %thresholds : view<3xf32, %dense>, transform = %transform : encoding<transform>} : encoding<schema>
-  %storage = encoding.define #encoding.storage {layout = %dense : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
-  %kv_pages = buffer.view %transient[%kv_offset] : buffer -> view<[%max_pages]x2x[%heads]x[%page_size]x40xi8, %storage>
-  %row_ptr = buffer.view %transient[%row_ptr_offset] : buffer -> view<[%rows_plus_one]xindex, %dense>
-  %col_idx = buffer.view %transient[%col_idx_offset] : buffer -> view<[%nnz]xindex, %dense>
-  test.use %row_ptr : view<[%rows_plus_one]xindex, %dense>
-  test.use %col_idx : view<[%nnz]xindex, %dense>
-  %record = vector.load %kv_pages[%page, 0, %head, %token, 0] : view<[%max_pages]x2x[%heads]x[%page_size]x40xi8, %storage> -> vector<40xi8>
-  vector.store %record, %kv_pages[%page, 0, %head, %token, 0] : vector<40xi8>, view<[%max_pages]x2x[%heads]x[%page_size]x40xi8, %storage>
-  func.return %record : vector<40xi8>
-}
-
-// ====
-
-// Online scalar quantizer encode uses explicit ordered thresholds. A reference
+// Online table quantization uses explicit ordered thresholds. A reference
 // lowering compares each input lane with every threshold and counts passed
 // thresholds: tie=lower counts threshold < value, while tie=upper counts
 // threshold <= value. Targets can match that compare-and-count shape to vector
 // compares plus mask popcount or add trees without recovering intent from
 // arithmetic soup.
-func.def @turboquant_threshold_encode_reference(%values: vector<4xf16>, %params: buffer, %thresholds_offset: offset, %centroids_offset: offset) -> (vector<4xi8>) {
-  %dense = encoding.layout.dense : encoding<layout>
-  %threshold_view = buffer.view %params[%thresholds_offset] : buffer -> view<3xf16, %dense>
-  %centroid_view = buffer.view %params[%centroids_offset] : buffer -> view<4xf16, %dense>
-  %signs = vector.constant false : vector<4xi1>
-  %qjl_matrix = vector.constant 0.0 : vector<8x4xf32>
-  %transform = encoding.define #numeric_transform<family="hadamard_sign", input_elems=4, output_elems=4> {signs = %signs : vector<4xi1>} : encoding<transform>
-  %qjl_transform = encoding.define #numeric_transform<family="jl_dense", input_elems=4, output_elems=8> {matrix = %qjl_matrix : vector<8x4xf32>} : encoding<transform>
-  %schema = encoding.define #turboquant_kv<first_stage_bits=2, logical_element="f16", logical_elems=4, pack_order="lsb0", qjl_rows=8, record_bytes=2, residual_bits=1, scalar_quantizer="lloyd_max", transform_family="hadamard_sign"> {centroids = %centroid_view : view<4xf16, %dense>, qjl_transform = %qjl_transform : encoding<transform>, thresholds = %threshold_view : view<3xf16, %dense>, transform = %transform : encoding<transform>} : encoding<schema>
-  test.use %schema : encoding<schema>
-
+func.def @table_quantize_reference(%values: vector<4xf16>) -> (vector<4xi8>) {
   %t0 = scalar.constant -1.0 : f16
   %t1 = scalar.constant 0.0 : f16
   %t2 = scalar.constant 1.0 : f16
@@ -254,17 +219,7 @@ func.def @turboquant_threshold_encode_reference(%values: vector<4xf16>, %params:
 
 // Reference decode keeps the table lookup visible instead of hiding it inside a
 // load. A fused target kernel should match before this expansion when possible.
-func.def @turboquant_decode_reference(%packed_codes: vector<1xi8>, %params: buffer, %thresholds_offset: offset, %centroids_offset: offset) -> (vector<4xf16>) {
-  %dense = encoding.layout.dense : encoding<layout>
-  %threshold_view = buffer.view %params[%thresholds_offset] : buffer -> view<3xf16, %dense>
-  %centroid_view = buffer.view %params[%centroids_offset] : buffer -> view<4xf16, %dense>
-  %signs = vector.constant false : vector<4xi1>
-  %qjl_matrix = vector.constant 0.0 : vector<8x4xf32>
-  %transform = encoding.define #numeric_transform<family="hadamard_sign", input_elems=4, output_elems=4> {signs = %signs : vector<4xi1>} : encoding<transform>
-  %qjl_transform = encoding.define #numeric_transform<family="jl_dense", input_elems=4, output_elems=8> {matrix = %qjl_matrix : vector<8x4xf32>} : encoding<transform>
-  %schema = encoding.define #turboquant_kv<first_stage_bits=2, logical_element="f16", logical_elems=4, pack_order="lsb0", qjl_rows=8, record_bytes=2, residual_bits=1, scalar_quantizer="lloyd_max", transform_family="hadamard_sign"> {centroids = %centroid_view : view<4xf16, %dense>, qjl_transform = %qjl_transform : encoding<transform>, thresholds = %threshold_view : view<3xf16, %dense>, transform = %transform : encoding<transform>} : encoding<schema>
-  test.use %schema : encoding<schema>
-
+func.def @table_decode_reference(%packed_codes: vector<1xi8>) -> (vector<4xf16>) {
   %codes = vector.bitunpacku<2> %packed_codes : vector<1xi8> -> vector<4xi8>
   %c0 = scalar.constant -1.5 : f16
   %c1 = scalar.constant -0.5 : f16
@@ -277,20 +232,10 @@ func.def @turboquant_decode_reference(%packed_codes: vector<1xi8>, %params: buff
 
 // ====
 
-// The scalar-quantized contribution to an attention logit is an ordinary dot
-// after reference decode. P0 lowering should match the encoded tile contract
-// before expanding to this shape, but this remains the portable fallback.
-func.def @turboquant_logit_reference(%query: vector<4xf16>, %packed_codes: vector<1xi8>, %params: buffer, %thresholds_offset: offset, %centroids_offset: offset) -> (f32) {
-  %dense = encoding.layout.dense : encoding<layout>
-  %threshold_view = buffer.view %params[%thresholds_offset] : buffer -> view<3xf16, %dense>
-  %centroid_view = buffer.view %params[%centroids_offset] : buffer -> view<4xf16, %dense>
-  %signs = vector.constant false : vector<4xi1>
-  %qjl_matrix = vector.constant 0.0 : vector<8x4xf32>
-  %transform = encoding.define #numeric_transform<family="hadamard_sign", input_elems=4, output_elems=4> {signs = %signs : vector<4xi1>} : encoding<transform>
-  %qjl_transform = encoding.define #numeric_transform<family="jl_dense", input_elems=4, output_elems=8> {matrix = %qjl_matrix : vector<8x4xf32>} : encoding<transform>
-  %schema = encoding.define #turboquant_kv<first_stage_bits=2, logical_element="f16", logical_elems=4, pack_order="lsb0", qjl_rows=8, record_bytes=2, residual_bits=1, scalar_quantizer="lloyd_max", transform_family="hadamard_sign"> {centroids = %centroid_view : view<4xf16, %dense>, qjl_transform = %qjl_transform : encoding<transform>, thresholds = %threshold_view : view<3xf16, %dense>, transform = %transform : encoding<transform>} : encoding<schema>
-  test.use %schema : encoding<schema>
-
+// A table-quantized contribution is an ordinary dot after reference decode.
+// Target lowering should match the encoded tile contract before expanding to
+// this shape, but the explicit form remains a portable fallback.
+func.def @table_dot_reference(%query: vector<4xf16>, %packed_codes: vector<1xi8>) -> (f32) {
   %codes = vector.bitunpacku<2> %packed_codes : vector<1xi8> -> vector<4xi8>
   %c0 = scalar.constant -1.5 : f16
   %c1 = scalar.constant -0.5 : f16

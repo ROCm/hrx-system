@@ -253,28 +253,6 @@ typedef enum loom_encoding_numeric_transform_dynamic_parameter_e {
   LOOM_ENCODING_NUMERIC_TRANSFORM_DYNAMIC_PARAMETER_COUNT_ = 6,
 } loom_encoding_numeric_transform_dynamic_parameter_t;
 
-// TurboQuant key/value storage schema.
-typedef enum loom_encoding_turboquant_kv_parameter_e {
-  LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_FIRST_STAGE_BITS = 0,
-  LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_LOGICAL_ELEMENT = 1,
-  LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_LOGICAL_ELEMS = 2,
-  LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_PACK_ORDER = 3,
-  LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_QJL_ROWS = 4,
-  LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_RECORD_BYTES = 5,
-  LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_RESIDUAL_BITS = 6,
-  LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_SCALAR_QUANTIZER = 7,
-  LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_TRANSFORM_FAMILY = 8,
-  LOOM_ENCODING_TURBOQUANT_KV_PARAMETER_COUNT_ = 9,
-} loom_encoding_turboquant_kv_parameter_t;
-
-typedef enum loom_encoding_turboquant_kv_dynamic_parameter_e {
-  LOOM_ENCODING_TURBOQUANT_KV_DYNAMIC_PARAMETER_CENTROIDS = 0,
-  LOOM_ENCODING_TURBOQUANT_KV_DYNAMIC_PARAMETER_QJL_TRANSFORM = 1,
-  LOOM_ENCODING_TURBOQUANT_KV_DYNAMIC_PARAMETER_THRESHOLDS = 2,
-  LOOM_ENCODING_TURBOQUANT_KV_DYNAMIC_PARAMETER_TRANSFORM = 3,
-  LOOM_ENCODING_TURBOQUANT_KV_DYNAMIC_PARAMETER_COUNT_ = 4,
-} loom_encoding_turboquant_kv_dynamic_parameter_t;
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -330,7 +308,6 @@ extern const loom_encoding_family_descriptor_t loom_encoding_ggml_q6_k_family_de
 extern const loom_encoding_family_descriptor_t loom_encoding_ggml_q8_1_x4_family_descriptor;
 extern const loom_encoding_family_descriptor_t loom_encoding_operand_family_descriptor;
 extern const loom_encoding_family_descriptor_t loom_encoding_numeric_transform_family_descriptor;
-extern const loom_encoding_family_descriptor_t loom_encoding_turboquant_kv_family_descriptor;
 
 enum {
   LOOM_OP_ENCODING_LAYOUT_DENSE = LOOM_OP_KIND(LOOM_DIALECT_ENCODING, 0),
