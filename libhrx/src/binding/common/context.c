@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "common/internal.h"
+#include "common/memory.h"
 
 //===----------------------------------------------------------------------===//
 // Global state
@@ -78,6 +79,8 @@ iree_status_t iree_hal_streaming_context_create(
   context->peer_contexts = NULL;
   context->peer_count = 0;
   context->peer_capacity = 0;
+  memset(context->peer_accessor_counts, 0,
+         sizeof(context->peer_accessor_counts));
   memset(&context->symbol_map, 0, sizeof(context->symbol_map));
   memset(&context->buffer_table, 0, sizeof(context->buffer_table));
   context->pending_free_head = NULL;
@@ -87,6 +90,7 @@ iree_status_t iree_hal_streaming_context_create(
                     iree_memory_order_relaxed);
   context->host_allocator = host_allocator;
   iree_slim_mutex_initialize(&context->mutex);
+  iree_slim_mutex_initialize(&context->peer_access_mutex);
   iree_slim_mutex_initialize(&context->direct_transfer_mutex);
   iree_slim_mutex_initialize(&context->pending_free_mutex);
 
@@ -165,7 +169,13 @@ static void iree_hal_streaming_context_destroy(
   // Clean up peer contexts array.
   if (context->peer_contexts) {
     for (iree_host_size_t i = 0; i < context->peer_count; ++i) {
-      iree_hal_streaming_context_release(context->peer_contexts[i]);
+      iree_hal_streaming_context_t* peer_context = context->peer_contexts[i];
+      iree_slim_mutex_lock(&peer_context->peer_access_mutex);
+      IREE_ASSERT(peer_context->peer_accessor_counts[context->device_ordinal] >
+                  0);
+      --peer_context->peer_accessor_counts[context->device_ordinal];
+      iree_slim_mutex_unlock(&peer_context->peer_access_mutex);
+      iree_hal_streaming_context_release(peer_context);
     }
     iree_allocator_free(context->host_allocator, context->peer_contexts);
   }
@@ -191,6 +201,7 @@ static void iree_hal_streaming_context_destroy(
 
   // Deinitialize buffer mapping table.
   hrx_buffer_table_deinitialize(&context->buffer_table);
+  iree_slim_mutex_deinitialize(&context->peer_access_mutex);
   IREE_ASSERT(context->pending_free_head == NULL,
               "pending asynchronous frees must be drained before context "
               "destruction");
@@ -538,13 +549,26 @@ iree_status_t iree_hal_streaming_context_enable_peer_access(
     context->peer_capacity = new_capacity;
   }
 
-  // Add peer context.
-  iree_hal_streaming_context_retain(peer_context);
-  context->peer_contexts[context->peer_count++] = peer_context;
+  iree_slim_mutex_lock(&peer_context->peer_access_mutex);
+  iree_status_t status = iree_ok_status();
+  if (IREE_UNLIKELY(
+          peer_context->peer_accessor_counts[context->device_ordinal] ==
+          UINT16_MAX)) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "peer accessor count overflow");
+  } else {
+    status = iree_hal_streaming_memory_grant_peer_access(peer_context, context);
+  }
+  if (iree_status_is_ok(status)) {
+    ++peer_context->peer_accessor_counts[context->device_ordinal];
+    iree_hal_streaming_context_retain(peer_context);
+    context->peer_contexts[context->peer_count++] = peer_context;
+  }
+  iree_slim_mutex_unlock(&peer_context->peer_access_mutex);
 
   iree_slim_mutex_unlock(&context->mutex);
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  return status;
 }
 
 iree_status_t iree_hal_streaming_context_disable_peer_access(
@@ -559,8 +583,11 @@ iree_status_t iree_hal_streaming_context_disable_peer_access(
   // Find and remove peer.
   for (iree_host_size_t i = 0; i < context->peer_count; ++i) {
     if (context->peer_contexts[i] == peer_context) {
-      // Release peer context.
-      iree_hal_streaming_context_release(peer_context);
+      iree_slim_mutex_lock(&peer_context->peer_access_mutex);
+      IREE_ASSERT(peer_context->peer_accessor_counts[context->device_ordinal] >
+                  0);
+      --peer_context->peer_accessor_counts[context->device_ordinal];
+      iree_slim_mutex_unlock(&peer_context->peer_access_mutex);
 
       // Shift remaining peers.
       for (iree_host_size_t j = i + 1; j < context->peer_count; ++j) {
@@ -569,6 +596,7 @@ iree_status_t iree_hal_streaming_context_disable_peer_access(
       context->peer_count--;
 
       iree_slim_mutex_unlock(&context->mutex);
+      iree_hal_streaming_context_release(peer_context);
       IREE_TRACE_ZONE_END(z0);
       return iree_ok_status();
     }
@@ -685,22 +713,25 @@ void iree_hal_streaming_context_unregister_stream(
 
 bool iree_hal_streaming_context_has_peer_contexts(
     iree_hal_streaming_context_t* context) {
-  iree_hal_streaming_device_registry_t* device_registry =
-      iree_hal_streaming_device_registry();
-  if (!device_registry) return false;
+  iree_slim_mutex_lock(&context->mutex);
+  const bool has_peer = context->peer_count != 0;
+  iree_slim_mutex_unlock(&context->mutex);
+  return has_peer;
+}
 
-  bool has_peer = false;
-  iree_slim_mutex_lock(&device_registry->context_list.mutex);
-  for (iree_hal_streaming_context_t* candidate =
-           device_registry->context_list.head;
-       candidate; candidate = candidate->context_list_entry.next) {
-    if (candidate != context) {
-      has_peer = true;
+bool iree_hal_streaming_context_can_access_peer(
+    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_context_t* peer_context) {
+  bool can_access = false;
+  iree_slim_mutex_lock(&context->mutex);
+  for (iree_host_size_t i = 0; i < context->peer_count; ++i) {
+    if (context->peer_contexts[i] == peer_context) {
+      can_access = true;
       break;
     }
   }
-  iree_slim_mutex_unlock(&device_registry->context_list.mutex);
-  return has_peer;
+  iree_slim_mutex_unlock(&context->mutex);
+  return can_access;
 }
 
 // Takes a retained snapshot of the current stream list so callers can wait or

@@ -9,6 +9,7 @@
 
 #include "hrx_runtime.h"
 #include "iree/base/api.h"
+#include "iree/hal/buffer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -54,6 +55,20 @@ void iree_hal_streaming_memory_prepare_virtual_reservation_release(
 // Restores a prepared virtual reservation after the allocator rejects release.
 void iree_hal_streaming_memory_restore_virtual_reservation(
     iree_hal_streaming_buffer_t* buffer, hrx_buffer_t virtual_buffer);
+
+// Returns a HAL buffer representing |buffer| on |context|'s device. Imports
+// the allocation once per device when the original buffer belongs to another
+// context.
+iree_status_t iree_hal_streaming_memory_import_buffer_for_context(
+    iree_hal_streaming_context_t* context, iree_hal_streaming_buffer_t* buffer,
+    iree_hal_buffer_t** out_buffer, uint64_t* out_device_ptr);
+
+// Grants |accessor_context|'s device access to all ordinary device allocations
+// currently published by |owner_context|. The caller must serialize this scan
+// with ordinary device-allocation publication.
+iree_status_t iree_hal_streaming_memory_grant_peer_access(
+    iree_hal_streaming_context_t* owner_context,
+    iree_hal_streaming_context_t* accessor_context);
 
 #ifdef __cplusplus
 }  // extern "C"
