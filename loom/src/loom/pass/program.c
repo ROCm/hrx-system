@@ -238,6 +238,17 @@ static iree_status_t loom_pass_program_copy_attr_value(
       out_value->enum_array = values;
       return iree_ok_status();
     }
+    case LOOM_ATTR_SIGNED_ENUM_SET: {
+      if (source_attr.count == 0) return iree_ok_status();
+      uint64_t* words = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          &compiler->program->arena, (iree_host_size_t)source_attr.count * 2,
+          sizeof(*words), (void**)&words));
+      memcpy(words, source_attr.signed_enum_set_words,
+             (iree_host_size_t)source_attr.count * 2 * sizeof(*words));
+      out_value->signed_enum_set_words = words;
+      return iree_ok_status();
+    }
     case LOOM_ATTR_SYMBOL:
       out_value->symbol_value = source_attr.symbol;
       return iree_ok_status();

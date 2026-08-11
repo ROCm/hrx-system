@@ -58,6 +58,7 @@ from loom.ir import (
     RegisterType,
     ScalarType,
     ShapedType,
+    SignedEnumSetAttr,
     StaticDim,
     StorageType,
     SymbolKind,
@@ -139,6 +140,7 @@ ATTR_KIND_SCOPED_ENUM = 12
 ATTR_KIND_ENUM_ARRAY = 13
 ATTR_KIND_PARAMETERIZED = 14
 ATTR_KIND_PARAMETERIZED_ARRAY = 15
+ATTR_KIND_SIGNED_ENUM_SET = 16
 
 # Type kind bytes. These must match loom_bytecode_type_kind_e, not just the
 # current Python enum spelling.
@@ -1471,43 +1473,7 @@ class BytecodeWriter:
             buf.write_u8(ATTR_KIND_SYMBOL)
             buf.write_varint(self._ctx.strings[value])
             return
-        if attr_type == "enum":
-            enum_def = getattr(attr_def, "enum_def", None)
-            if isinstance(value, str):
-                for enum_case in getattr(enum_def, "cases", ()):
-                    if enum_case.keyword == value:
-                        value = enum_case.value
-                        break
-                else:
-                    raise ValueError(
-                        f"enum attribute value {value!r} is not declared by "
-                        f"{getattr(enum_def, 'name', 'enum')}"
-                    )
-            if type(value) is not int or value < 0 or value > 0xFF:
-                raise TypeError(
-                    "enum attribute value must be a keyword or uint8 ordinal, "
-                    f"got {value!r}"
-                )
-            if not getattr(attr_def, "open_enum", False):
-                known_values = {
-                    enum_case.value for enum_case in getattr(enum_def, "cases", ())
-                }
-                if value not in known_values:
-                    raise ValueError(
-                        f"enum attribute ordinal {value} is not declared by "
-                        f"{getattr(enum_def, 'name', 'enum')}"
-                    )
-            buf.write_u8(ATTR_KIND_ENUM)
-            buf.write_u8(value)
-            return
-        if attr_type == "enum_array":
-            if not isinstance(value, EnumArrayAttr):
-                raise TypeError(
-                    f"enum-array attribute value must be EnumArrayAttr, got {value!r}"
-                )
-            buf.write_u8(ATTR_KIND_ENUM_ARRAY)
-            buf.write_varint(len(value))
-            buf.write_bytes(bytes(value.values))
+        if self._dispatch_enum_attr_value(buf, value, attr_def):
             return
         if attr_type == "scoped_enum":
             if not isinstance(value, str):
@@ -1555,6 +1521,8 @@ class BytecodeWriter:
             buf.write_bytes(data)
         elif isinstance(value, EnumArrayAttr):
             raise ValueError("enum arrays require a descriptor-backed field")
+        elif isinstance(value, SignedEnumSetAttr):
+            raise ValueError("signed enum sets require a descriptor-backed field")
         elif isinstance(value, Mapping):
             self._write_dict_attr_value(
                 buf, value, value_numbers_by_name, aggregate_nesting_depth
@@ -1576,6 +1544,89 @@ class BytecodeWriter:
         else:
             buf.write_u8(ATTR_KIND_STRING)
             buf.write_varint(self._ctx.strings[str(value)])
+
+    def _dispatch_enum_attr_value(
+        self, buf: ByteBuffer, value: Any, attr_def: Any | None
+    ) -> bool:
+        """Writes a descriptor-backed enum-shaped field when applicable."""
+        attr_type = getattr(attr_def, "attr_type", None)
+        if attr_type == "enum":
+            enum_def = getattr(attr_def, "enum_def", None)
+            if isinstance(value, str):
+                for enum_case in getattr(enum_def, "cases", ()):
+                    if enum_case.keyword == value:
+                        value = enum_case.value
+                        break
+                else:
+                    raise ValueError(
+                        f"enum attribute value {value!r} is not declared by "
+                        f"{getattr(enum_def, 'name', 'enum')}"
+                    )
+            if type(value) is not int or value < 0 or value > 0xFF:
+                raise TypeError(
+                    "enum attribute value must be a keyword or uint8 ordinal, "
+                    f"got {value!r}"
+                )
+            if not getattr(attr_def, "open_enum", False):
+                known_values = {
+                    enum_case.value for enum_case in getattr(enum_def, "cases", ())
+                }
+                if value not in known_values:
+                    raise ValueError(
+                        f"enum attribute ordinal {value} is not declared by "
+                        f"{getattr(enum_def, 'name', 'enum')}"
+                    )
+            buf.write_u8(ATTR_KIND_ENUM)
+            buf.write_u8(value)
+            return True
+        if attr_type == "enum_array":
+            if not isinstance(value, EnumArrayAttr):
+                raise TypeError(
+                    f"enum-array attribute value must be EnumArrayAttr, got {value!r}"
+                )
+            buf.write_u8(ATTR_KIND_ENUM_ARRAY)
+            buf.write_varint(len(value))
+            buf.write_bytes(bytes(value.values))
+            return True
+        if attr_type == "signed_enum_set":
+            self._write_signed_enum_set_attr_value(buf, value, attr_def)
+            return True
+        return False
+
+    def _write_signed_enum_set_attr_value(
+        self, buf: ByteBuffer, value: Any, attr_def: Any
+    ) -> None:
+        if not isinstance(value, SignedEnumSetAttr):
+            raise TypeError(
+                "signed enum-set attribute value must be SignedEnumSetAttr, "
+                f"got {value!r}"
+            )
+        if getattr(attr_def, "open_enum", False):
+            raise ValueError("signed enum sets require a closed enum descriptor")
+        enum_def = getattr(attr_def, "enum_def", None)
+        if enum_def is None:
+            raise ValueError("signed enum sets require an enum descriptor")
+        declared_values = {enum_case.value for enum_case in enum_def.cases}
+        asserted_values = value.positive_values + value.negative_values
+        undeclared_values = sorted(set(asserted_values) - declared_values)
+        if undeclared_values:
+            raise ValueError(
+                "signed enum set contains undeclared stable value(s) "
+                f"{undeclared_values}"
+            )
+
+        word_count = max(asserted_values, default=-1) // 64 + 1
+        positive_words = [0] * word_count
+        negative_words = [0] * word_count
+        for stable_value in value.positive_values:
+            positive_words[stable_value // 64] |= 1 << (stable_value % 64)
+        for stable_value in value.negative_values:
+            negative_words[stable_value // 64] |= 1 << (stable_value % 64)
+
+        buf.write_u8(ATTR_KIND_SIGNED_ENUM_SET)
+        buf.write_u8(word_count)
+        for word in positive_words + negative_words:
+            buf.write_u64_le(word)
 
     # Predicate arg tag bytes.
     _PRED_ARG_TAG_VALUE = 1

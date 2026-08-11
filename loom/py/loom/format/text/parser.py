@@ -118,6 +118,7 @@ from loom.ir import (
     ScalarType,
     ScalarTypeKind,
     ShapedType,
+    SignedEnumSetAttr,
     StaticDim,
     SymbolName,
     TaggedLocation,
@@ -785,6 +786,42 @@ def _parse_descriptor_attr_value_from_tokens(
                     append_value()
             tokenizer.expect(TokenKind.RBRACKET)
             return EnumArrayAttr(values)
+        case "signed_enum_set":
+            tokenizer.expect(TokenKind.LBRACKET)
+            assert descriptor.enum_def is not None
+            value_by_keyword = {
+                enum_case.keyword: enum_case.value
+                for enum_case in descriptor.enum_def.cases
+            }
+            positive_values: list[int] = []
+            negative_values: list[int] = []
+            seen_values: set[int] = set()
+
+            def append_value() -> None:
+                is_negative = tokenizer.try_consume(TokenKind.MINUS)
+                parsed_value = _parse_enum_attr_value_from_tokens(tokenizer, descriptor)
+                stable_value = (
+                    parsed_value
+                    if isinstance(parsed_value, int)
+                    else value_by_keyword[parsed_value]
+                )
+                if stable_value in seen_values:
+                    raise ParseError(
+                        f"signed enum value {stable_value} appears more than once",
+                        tokenizer.peek().location,
+                        filename,
+                    )
+                seen_values.add(stable_value)
+                (negative_values if is_negative else positive_values).append(
+                    stable_value
+                )
+
+            if not tokenizer.at(TokenKind.RBRACKET):
+                append_value()
+                while tokenizer.try_consume(TokenKind.COMMA):
+                    append_value()
+            tokenizer.expect(TokenKind.RBRACKET)
+            return SignedEnumSetAttr(positive_values, negative_values)
         case "symbol":
             return tokenizer.expect(TokenKind.SYMBOL).text
         case "type":

@@ -1014,6 +1014,55 @@ static iree_status_t loom_print_attr_impl(
       }
       return loom_output_stream_write_char(stream, ']');
     }
+    case LOOM_ATTR_SIGNED_ENUM_SET: {
+      if (!descriptor || descriptor->attr_kind != LOOM_ATTR_SIGNED_ENUM_SET ||
+          !descriptor->enum_case_names ||
+          iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM)) {
+        return iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "printing a signed enum set requires a closed descriptor-backed "
+            "field");
+      }
+      iree_host_size_t canonical_word_count = 0;
+      IREE_RETURN_IF_ERROR(loom_signed_enum_set_canonical_word_count(
+          loom_attr_as_signed_enum_set(*attr), &canonical_word_count));
+      if (canonical_word_count != attr->count) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "signed enum-set field '%.*s' is not canonically trimmed",
+            (int)loom_attr_descriptor_name(descriptor).size,
+            loom_attr_descriptor_name(descriptor).data);
+      }
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '['));
+      bool wrote_value = false;
+      loom_signed_enum_set_t set = loom_attr_as_signed_enum_set(*attr);
+      for (iree_host_size_t value = 0; value < 256; ++value) {
+        bool positive =
+            loom_signed_enum_set_contains_positive(set, (uint8_t)value);
+        bool negative =
+            loom_signed_enum_set_contains_negative(set, (uint8_t)value);
+        if (!positive && !negative) continue;
+        loom_bstring_t case_name =
+            loom_attr_descriptor_enum_case_name(descriptor, (uint8_t)value);
+        if (!case_name) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "closed signed enum-set field '%.*s' has no value %u",
+              (int)loom_attr_descriptor_name(descriptor).size,
+              loom_attr_descriptor_name(descriptor).data, (unsigned)value);
+        }
+        if (wrote_value) {
+          IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ", "));
+        }
+        if (negative) {
+          IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '-'));
+        }
+        IREE_RETURN_IF_ERROR(
+            loom_output_stream_write(stream, loom_bstring_view(case_name)));
+        wrote_value = true;
+      }
+      return loom_output_stream_write_char(stream, ']');
+    }
     case LOOM_ATTR_SYMBOL: {
       loom_symbol_ref_t ref = attr->symbol;
       if (module && ref.symbol_id < module->symbols.count) {

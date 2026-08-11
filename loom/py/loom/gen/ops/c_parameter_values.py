@@ -24,6 +24,7 @@ def parameter_value_c_type(parameter: AttrDef, enum_type: Callable[[AttrDef], st
         "string": "loom_string_id_t",
         "bool": "bool",
         "enum_array": "loom_enum_array_t",
+        "signed_enum_set": "loom_signed_enum_set_t",
         "type": "loom_type_id_t",
         "i64_array": "loom_i64_array_t",
         "bytes": "iree_const_byte_span_t",
@@ -46,6 +47,7 @@ def parameter_value_constructor_expr(parameter: AttrDef) -> str:
         "bool": f"loom_attr_bool({name})",
         "enum": f"loom_attr_enum((uint8_t){name})",
         "enum_array": f"loom_attr_enum_array({name}.values, (uint16_t){name}.count)",
+        "signed_enum_set": f"loom_attr_signed_enum_set({name}.words, (uint16_t){name}.word_count)",
         "type": f"loom_attr_type({name})",
         "i64_array": f"loom_attr_i64_array((int64_t*){name}.values, (uint16_t){name}.count)",
         "bytes": f"loom_attr_bytes({name}.data, (uint32_t){name}.data_length)",
@@ -67,6 +69,7 @@ def parameter_value_accessor_expr(parameter: AttrDef, slot_expr: str, c_type: st
         "bool": f"loom_attr_as_bool({slot_expr})",
         "enum": f"({c_type})loom_attr_as_enum({slot_expr})",
         "enum_array": f"loom_attr_as_enum_array({slot_expr})",
+        "signed_enum_set": f"loom_attr_as_signed_enum_set({slot_expr})",
         "type": f"loom_attr_as_type_id({slot_expr})",
         "i64_array": f"loom_attr_as_i64_array({slot_expr})",
         "bytes": f"loom_attr_as_bytes({slot_expr})",
@@ -163,6 +166,15 @@ def append_parameter_slot_initializers(
                 parameter,
                 f"{parameter.name}.count > UINT16_MAX",
                 "UINT16_MAX elements",
+                indent,
+            )
+        elif parameter.attr_type == "signed_enum_set":
+            _append_parameter_range_check(
+                lines,
+                family_name,
+                parameter,
+                f"{parameter.name}.word_count > LOOM_SIGNED_ENUM_SET_MAX_WORD_COUNT",
+                "LOOM_SIGNED_ENUM_SET_MAX_WORD_COUNT words per polarity",
                 indent,
             )
         elif parameter.attr_type == "bytes":

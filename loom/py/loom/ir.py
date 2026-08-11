@@ -103,6 +103,7 @@ __all__ = [
     "CanonicalAttrDict",
     "ATTR_AGGREGATE_MAX_NESTING_DEPTH",
     "EnumArrayAttr",
+    "SignedEnumSetAttr",
     "ParameterizedAttr",
     "ParameterizedAttrArray",
     "canonicalize_attr_dict",
@@ -1216,6 +1217,47 @@ def _canonicalize_parameterized_attr_array(
     return array
 
 
+def _canonicalize_parameterized_signed_enum_set(
+    family_name: str, parameter: Any, value: Any
+) -> SignedEnumSetAttr:
+    """Canonicalizes a signed enum set against its enclosing enum domain."""
+    if isinstance(value, SignedEnumSetAttr):
+        assertions: Mapping[str | int, bool] = {
+            **{ordinal: True for ordinal in value.positive_values},
+            **{ordinal: False for ordinal in value.negative_values},
+        }
+    elif isinstance(value, Mapping):
+        assertions = value
+    else:
+        raise TypeError(
+            f"{family_name}: parameter '{parameter.name}' must be a signed "
+            "enum set or mapping of enum values to Booleans, "
+            f"got {value!r}"
+        )
+
+    positive_values: list[int] = []
+    negative_values: list[int] = []
+    resolved_values: set[int] = set()
+    for enum_value, assertion in assertions.items():
+        if type(assertion) is not bool:
+            raise TypeError(
+                f"{family_name}: parameter '{parameter.name}' must be a "
+                "mapping of enum values to exact Boolean assertions, "
+                f"got {value!r}"
+            )
+        stable_value = _canonicalize_parameterized_enum_value(
+            family_name, parameter, enum_value
+        )
+        if stable_value in resolved_values:
+            raise ValueError(
+                f"{family_name}: parameter '{parameter.name}' names stable "
+                f"enum value {stable_value} more than once"
+            )
+        resolved_values.add(stable_value)
+        (positive_values if assertion else negative_values).append(stable_value)
+    return SignedEnumSetAttr(positive_values, negative_values)
+
+
 def _canonicalize_parameterized_value(
     family_name: str, parameter: Any, value: Any
 ) -> Any:
@@ -1231,6 +1273,7 @@ def _canonicalize_parameterized_value(
         ATTR_TYPE_I64_ARRAY,
         ATTR_TYPE_PARAMETERIZED,
         ATTR_TYPE_PARAMETERIZED_ARRAY,
+        ATTR_TYPE_SIGNED_ENUM_SET,
         ATTR_TYPE_STRING,
         ATTR_TYPE_SYMBOL,
         ATTR_TYPE_TYPE,
@@ -1268,6 +1311,10 @@ def _canonicalize_parameterized_value(
             return EnumArrayAttr(
                 _canonicalize_parameterized_enum_value(family_name, parameter, element)
                 for element in values
+            )
+        case kind if kind == ATTR_TYPE_SIGNED_ENUM_SET:
+            return _canonicalize_parameterized_signed_enum_set(
+                family_name, parameter, value
             )
         case kind if kind == ATTR_TYPE_TYPE:
             if not isinstance(
@@ -1371,6 +1418,45 @@ class EnumArrayAttr:
 
     def __len__(self) -> int:
         return len(self.values)
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class SignedEnumSetAttr:
+    """Sparse positive and negative assertions over a stable enum domain."""
+
+    positive_values: tuple[int, ...]
+    negative_values: tuple[int, ...]
+
+    def __init__(
+        self,
+        positive_values: Iterable[int] = (),
+        negative_values: Iterable[int] = (),
+    ) -> None:
+        positive = self._canonicalize_values("positive", positive_values)
+        negative = self._canonicalize_values("negative", negative_values)
+        contradictory_values = sorted(set(positive) & set(negative))
+        if contradictory_values:
+            raise ValueError(
+                "signed enum set contains contradictory assertions for "
+                f"stable value(s) {contradictory_values}"
+            )
+        object.__setattr__(self, "positive_values", positive)
+        object.__setattr__(self, "negative_values", negative)
+
+    @staticmethod
+    def _canonicalize_values(polarity: str, values: Iterable[int]) -> tuple[int, ...]:
+        frozen_values = tuple(values)
+        for index, value in enumerate(frozen_values):
+            if type(value) is not int or not 0 <= value <= 0xFF:
+                raise ValueError(
+                    f"signed enum set {polarity} element {index} must be an "
+                    f"integer in [0, 255], got {value!r}"
+                )
+        if len(set(frozen_values)) != len(frozen_values):
+            raise ValueError(
+                f"signed enum set contains duplicate {polarity} assertions"
+            )
+        return tuple(sorted(frozen_values))
 
 
 @dataclass(frozen=True, slots=True, init=False)

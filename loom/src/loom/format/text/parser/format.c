@@ -293,7 +293,8 @@ static iree_status_t loom_parse_format_optional_group(
               }
             }
           }
-        } else if (descriptor->attr_kind == LOOM_ATTR_ENUM_ARRAY) {
+        } else if (descriptor->attr_kind == LOOM_ATTR_ENUM_ARRAY ||
+                   descriptor->attr_kind == LOOM_ATTR_SIGNED_ENUM_SET) {
           present = peek.kind == LOOM_TOKEN_LBRACKET;
         } else {
           present = (peek.kind == LOOM_TOKEN_INTEGER ||

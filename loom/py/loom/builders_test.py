@@ -15,6 +15,7 @@ import pytest
 # dialect imports belong in dialect-specific importer/builder coverage, not here.
 import loom
 import loom.dialect as dialect
+from loom.assembly import Attr
 from loom.builder import ValueRef, tied
 from loom.builders import LoomBuilder, module_builder
 from loom.builtin_types import ALL_BUILTIN_TYPES
@@ -27,6 +28,7 @@ from loom.dialect.test import (
     test_options_attr,
     test_tile_attr,
 )
+from loom.dsl import AttrDef, Dialect, EnumCase, EnumDef, Op
 from loom.format.text.printer import Printer
 from loom.ir import (
     F32,
@@ -37,6 +39,7 @@ from loom.ir import (
     OpaqueLocation,
     ParameterizedAttrArray,
     ShapedType,
+    SignedEnumSetAttr,
     StaticDim,
     TypeKind,
 )
@@ -117,6 +120,41 @@ def test_dynamic_builder_rejects_undeclared_closed_enum_array_value() -> None:
 
     with pytest.raises(ValueError, match="undeclared value 42"):
         builder.test.enum_array_attrs(required_values=[42])
+
+
+def test_dynamic_builder_normalizes_signed_enum_set_assertions() -> None:
+    feature = EnumDef(
+        "Feature",
+        [EnumCase("low", 1), EnumCase("middle", 7), EnumCase("high", 255)],
+    )
+    op = Op(
+        "signed.features",
+        group=Dialect("signed"),
+        attrs=[AttrDef("features", "signed_enum_set", enum_def=feature)],
+        format=[Attr("features")],
+    )
+    block = Block()
+    _module, builder = module_builder(insertion_block=block, ops=[op])
+
+    builder.signed.features(features={"high": True, "low": False, 7: True})
+
+    assert block.ops[0].attributes["features"] == SignedEnumSetAttr([7, 255], [1])
+
+
+def test_dynamic_builder_rejects_invalid_signed_enum_set_assertions() -> None:
+    feature = EnumDef("Feature", [EnumCase("low", 1)])
+    op = Op(
+        "signed.features",
+        group=Dialect("signed"),
+        attrs=[AttrDef("features", "signed_enum_set", enum_def=feature)],
+        format=[Attr("features")],
+    )
+    _module, builder = module_builder(ops=[op])
+
+    with pytest.raises(ValueError, match="undeclared value 7"):
+        builder.signed.features(features={7: True})
+    with pytest.raises(TypeError, match="must be a Boolean"):
+        builder.signed.features(features={"low": 1})
 
 
 def test_dynamic_builder_normalizes_parameterized_attribute_arrays() -> None:

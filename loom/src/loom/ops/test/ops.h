@@ -21,7 +21,8 @@ enum {
   LOOM_PARAMETERIZED_ATTR_TEST_OPTIONS = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 1),
   LOOM_PARAMETERIZED_ATTR_TEST_COMPACT = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 2),
   LOOM_PARAMETERIZED_ATTR_TEST_NODE = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 3),
-  LOOM_PARAMETERIZED_ATTR_TEST_COUNT_ = 4,
+  LOOM_PARAMETERIZED_ATTR_TEST_FEATURE_SET = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 4),
+  LOOM_PARAMETERIZED_ATTR_TEST_COUNT_ = 5,
 };
 
 // Synthetic mode for parameterized attribute coverage.
@@ -38,6 +39,14 @@ typedef enum loom_test_options_scopes_e {
   LOOM_TEST_OPTIONS_SCOPES_SUBGROUP = 2,
   LOOM_TEST_OPTIONS_SCOPES_COUNT_ = 3,
 } loom_test_options_scopes_e;
+
+// Synthetic sparse enum for descriptor-backed aggregate coverage.
+typedef enum loom_test_feature_set_features_e {
+  LOOM_TEST_FEATURE_SET_FEATURES_LOW = 1,
+  LOOM_TEST_FEATURE_SET_FEATURES_MIDDLE = 7,
+  LOOM_TEST_FEATURE_SET_FEATURES_HIGH = 255,
+  LOOM_TEST_FEATURE_SET_FEATURES_COUNT_ = 256,
+} loom_test_feature_set_features_t;
 
 #ifdef __cplusplus
 extern "C" {
@@ -170,6 +179,19 @@ iree_status_t loom_test_node_attr_make(
     loom_parameterized_attr_array_t children,
     loom_attribute_t* out_attr);
 
+// Signed enum-set parameter lifecycle witness.
+static inline bool loom_test_feature_set_attr_isa(loom_attribute_t attr) {
+  return attr.kind == LOOM_ATTR_PARAMETERIZED && loom_attr_as_parameterized_kind(attr) == LOOM_PARAMETERIZED_ATTR_TEST_FEATURE_SET;
+}
+enum { LOOM_TEST_FEATURE_SET_ATTR_FEATURES_PARAMETER_INDEX = 0 };
+static inline loom_signed_enum_set_t loom_test_feature_set_attr_features(loom_attribute_t attr) {
+  return loom_attr_as_signed_enum_set(loom_attr_as_parameterized_slots(attr)[LOOM_TEST_FEATURE_SET_ATTR_FEATURES_PARAMETER_INDEX]);
+}
+iree_status_t loom_test_feature_set_attr_make(
+    loom_module_t* module,
+    loom_signed_enum_set_t features,
+    loom_attribute_t* out_attr);
+
 enum {
   LOOM_OP_TEST_ADDI = LOOM_OP_KIND(LOOM_DIALECT_TEST, 0),
   LOOM_OP_TEST_NEG = LOOM_OP_KIND(LOOM_DIALECT_TEST, 1),
@@ -277,13 +299,14 @@ enum {
   LOOM_OP_TEST_FACT_NOT_SUBNORMAL = LOOM_OP_KIND(LOOM_DIALECT_TEST, 103),
   LOOM_OP_TEST_FACT_CLUSTER_UNIFORM = LOOM_OP_KIND(LOOM_DIALECT_TEST, 104),
   LOOM_OP_TEST_ENUM_ARRAY_ATTRS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 105),
-  LOOM_OP_TEST_PARAMETERIZED_ATTR = LOOM_OP_KIND(LOOM_DIALECT_TEST, 106),
-  LOOM_OP_TEST_COMPACT_PARAMETERIZED_ATTR = LOOM_OP_KIND(LOOM_DIALECT_TEST, 107),
-  LOOM_OP_TEST_PARAMETERIZED_ATTR_ARRAY = LOOM_OP_KIND(LOOM_DIALECT_TEST, 108),
-  LOOM_OP_TEST_ATTR_PARAMS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 109),
-  LOOM_OP_TEST_CONDITION_REFINES_POSITIVE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 110),
-  LOOM_OP_TEST_PARTITIONED_CALL = LOOM_OP_KIND(LOOM_DIALECT_TEST, 111),
-  LOOM_OP_TEST_COUNT_ = 112,
+  LOOM_OP_TEST_SIGNED_ENUM_SET_ATTRS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 106),
+  LOOM_OP_TEST_PARAMETERIZED_ATTR = LOOM_OP_KIND(LOOM_DIALECT_TEST, 107),
+  LOOM_OP_TEST_COMPACT_PARAMETERIZED_ATTR = LOOM_OP_KIND(LOOM_DIALECT_TEST, 108),
+  LOOM_OP_TEST_PARAMETERIZED_ATTR_ARRAY = LOOM_OP_KIND(LOOM_DIALECT_TEST, 109),
+  LOOM_OP_TEST_ATTR_PARAMS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 110),
+  LOOM_OP_TEST_CONDITION_REFINES_POSITIVE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 111),
+  LOOM_OP_TEST_PARTITIONED_CALL = LOOM_OP_KIND(LOOM_DIALECT_TEST, 112),
+  LOOM_OP_TEST_COUNT_ = 113,
 };
 
 // Synthetic flags for TemplateParamFlags parser/printer coverage.
@@ -330,7 +353,7 @@ typedef enum loom_test_target_kind_e {
   LOOM_TEST_TARGET_KIND_COUNT_ = 3,
 } loom_test_target_kind_t;
 
-// Synthetic sparse enum for enum-array lifecycle coverage.
+// Synthetic sparse enum for descriptor-backed aggregate coverage.
 typedef enum loom_test_enum_array_attrs_required_values_e {
   LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_LOW = 1,
   LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_MIDDLE = 7,
@@ -338,7 +361,7 @@ typedef enum loom_test_enum_array_attrs_required_values_e {
   LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_COUNT_ = 256,
 } loom_test_enum_array_attrs_required_values_t;
 
-// Synthetic sparse enum for enum-array lifecycle coverage.
+// Synthetic sparse enum for descriptor-backed aggregate coverage.
 typedef uint8_t loom_test_enum_array_attrs_optional_values_t;
 typedef enum loom_test_enum_array_attrs_optional_values_e {
   LOOM_TEST_ENUM_ARRAY_ATTRS_OPTIONAL_VALUES_LOW = 1,
@@ -346,6 +369,22 @@ typedef enum loom_test_enum_array_attrs_optional_values_e {
   LOOM_TEST_ENUM_ARRAY_ATTRS_OPTIONAL_VALUES_HIGH = 255,
   LOOM_TEST_ENUM_ARRAY_ATTRS_OPTIONAL_VALUES_COUNT_ = 256,
 } loom_test_enum_array_attrs_optional_values_e;
+
+// Synthetic sparse enum for descriptor-backed aggregate coverage.
+typedef enum loom_test_signed_enum_set_attrs_required_features_e {
+  LOOM_TEST_SIGNED_ENUM_SET_ATTRS_REQUIRED_FEATURES_LOW = 1,
+  LOOM_TEST_SIGNED_ENUM_SET_ATTRS_REQUIRED_FEATURES_MIDDLE = 7,
+  LOOM_TEST_SIGNED_ENUM_SET_ATTRS_REQUIRED_FEATURES_HIGH = 255,
+  LOOM_TEST_SIGNED_ENUM_SET_ATTRS_REQUIRED_FEATURES_COUNT_ = 256,
+} loom_test_signed_enum_set_attrs_required_features_t;
+
+// Synthetic sparse enum for descriptor-backed aggregate coverage.
+typedef enum loom_test_signed_enum_set_attrs_optional_features_e {
+  LOOM_TEST_SIGNED_ENUM_SET_ATTRS_OPTIONAL_FEATURES_LOW = 1,
+  LOOM_TEST_SIGNED_ENUM_SET_ATTRS_OPTIONAL_FEATURES_MIDDLE = 7,
+  LOOM_TEST_SIGNED_ENUM_SET_ATTRS_OPTIONAL_FEATURES_HIGH = 255,
+  LOOM_TEST_SIGNED_ENUM_SET_ATTRS_OPTIONAL_FEATURES_COUNT_ = 256,
+} loom_test_signed_enum_set_attrs_optional_features_t;
 
 // LOOM_OP_TEST_ADDI: Test binary integer op.
 // %result = test.addi %lhs, %rhs : i32
@@ -2152,6 +2191,26 @@ iree_status_t loom_test_enum_array_attrs_build(
     loom_test_enum_array_attrs_build_flags_t build_flags,
     loom_enum_array_t required_values,
     loom_optional loom_enum_array_t optional_values,
+    loom_optional loom_named_attr_slice_t dict,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_TEST_SIGNED_ENUM_SET_ATTRS: Test op with required and optional signed enum sets.
+// test.signed_enum_set_attrs [low, -middle, high] using []
+LOOM_DEFINE_ISA(loom_test_signed_enum_set_attrs_isa, LOOM_OP_TEST_SIGNED_ENUM_SET_ATTRS)
+LOOM_DEFINE_ATTR_SIGNED_ENUM_SET(loom_test_signed_enum_set_attrs_required_features, 0)
+LOOM_DEFINE_ATTR_SIGNED_ENUM_SET(loom_test_signed_enum_set_attrs_optional_features, 1)
+LOOM_DEFINE_ATTR_DICT(loom_test_signed_enum_set_attrs_dict, 2)
+enum loom_test_signed_enum_set_attrs_build_flag_bits_e {
+  LOOM_TEST_SIGNED_ENUM_SET_ATTRS_BUILD_FLAG_HAS_OPTIONAL_FEATURES = 1u << 0,
+  LOOM_TEST_SIGNED_ENUM_SET_ATTRS_BUILD_FLAG_HAS_DICT = 1u << 1,
+};
+typedef uint32_t loom_test_signed_enum_set_attrs_build_flags_t;
+iree_status_t loom_test_signed_enum_set_attrs_build(
+    loom_builder_t* builder,
+    loom_test_signed_enum_set_attrs_build_flags_t build_flags,
+    loom_signed_enum_set_t required_features,
+    loom_optional loom_signed_enum_set_t optional_features,
     loom_optional loom_named_attr_slice_t dict,
     loom_location_id_t location,
     loom_op_t** out_op);

@@ -347,6 +347,25 @@ def test_generate_type_registry_emits_compact_enum_descriptor() -> None:
     assert "[LOOM_TYPE_ENCODING] = &loom_type_test_compact_descriptor," in type_registry_tables_c
 
 
+def test_generate_type_registry_emits_signed_enum_set_parameter() -> None:
+    feature = EnumDef(
+        "Feature",
+        [EnumCase("low", 1), EnumCase("high", 255)],
+    )
+    type_def = TypeDef(
+        name="test.featured",
+        params=[AttrDef("features", "signed_enum_set", enum_def=feature)],
+        format=[Param("features")],
+    )
+
+    type_registry_h, _, type_registry_tables_c = generate_type_registry([type_def])
+
+    assert "loom_signed_enum_set_t features" in type_registry_h
+    assert "loom_attr_as_signed_enum_set(" in type_registry_h
+    assert "LOOM_ATTR_SIGNED_ENUM_SET" in type_registry_tables_c
+    assert ".enum_case_names" in type_registry_tables_c
+
+
 def test_generate_type_registry_deduplicates_external_enum_include() -> None:
     mode = EnumDef(
         "Mode",
@@ -2015,6 +2034,42 @@ def test_generate_descriptor_backed_enum_array_surface() -> None:
     assert optional_guard < optional_copy < optional_assignment
     assert "LOOM_ATTR_ENUM_ARRAY" in tables_c
     assert "(uint8_t)(IREE_ARRAYSIZE(" in tables_c
+
+
+def test_generate_descriptor_backed_signed_enum_set_surface() -> None:
+    feature = EnumDef(
+        "Feature",
+        [EnumCase("low", 1), EnumCase("high", 255)],
+    )
+    op = Op(
+        "test.features",
+        group=Dialect("test"),
+        attrs=[
+            AttrDef("required", "signed_enum_set", enum_def=feature),
+            AttrDef("optional", "signed_enum_set", enum_def=feature, optional=True),
+        ],
+        format=[
+            Attr("required"),
+            OptionalGroup([Attr("optional")], anchor="optional"),
+        ],
+    )
+
+    ops_h = generate_ops_h("test", 0, [op])
+    builders_c = generate_builders_c("test", [op])
+    tables_c = generate_tables_c("test", 0, [op])
+
+    assert "LOOM_DEFINE_ATTR_SIGNED_ENUM_SET(loom_test_features_required, 0)" in ops_h
+    assert "loom_signed_enum_set_t required" in ops_h
+    assert "loom_optional loom_signed_enum_set_t optional" in ops_h
+    assert "LOOM_TEST_FEATURES_BUILD_FLAG_HAS_OPTIONAL" in ops_h
+    assert "loom_builder_copy_signed_enum_set_attr_storage" in builders_c
+    assert "loom_attr_signed_enum_set(_optional_storage" in builders_c
+    optional_guard = builders_c.index("iree_any_bit_set(build_flags, LOOM_TEST_FEATURES_BUILD_FLAG_HAS_OPTIONAL)")
+    optional_copy = builders_c.index("loom_builder_copy_signed_enum_set_attr_storage(", optional_guard)
+    optional_assignment = builders_c.index("loom_attr_signed_enum_set(_optional_storage", optional_copy)
+    assert optional_guard < optional_copy < optional_assignment
+    assert "LOOM_ATTR_SIGNED_ENUM_SET" in tables_c
+    assert ".enum_case_names" in tables_c
 
 
 def test_generate_builders_copy_i64_array_attrs_into_builder_arena() -> None:

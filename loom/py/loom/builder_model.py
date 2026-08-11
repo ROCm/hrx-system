@@ -144,6 +144,8 @@ def attr_type_hint(attr_def: AttrDef | None) -> str:
             return "str"
         case "enum_array":
             return "Sequence[str | int]"
+        case "signed_enum_set":
+            return "SignedEnumSetAttr | Mapping[str | int, bool]"
         case "symbol":
             return "str"
         case "type":

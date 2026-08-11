@@ -14,6 +14,7 @@ import pytest
 from loom.dialect.test import (
     test_array_type,
     test_compact_attr,
+    test_feature_set_attr,
     test_matrix_type,
     test_node_attr,
     test_options_attr,
@@ -72,6 +73,7 @@ from loom.ir import (
     ScalarType,
     ScalarTypeKind,
     ShapedType,
+    SignedEnumSetAttr,
     StaticDim,
     StorageSpace,
     StorageType,
@@ -737,6 +739,17 @@ class TestParameterizedAttr:
         assert hash(lhs) == hash(rhs)
         assert {lhs, rhs} == {lhs}
 
+    def test_signed_enum_set_parameter_resolves_sparse_domain(self) -> None:
+        features = test_feature_set_attr(features={"high": True, "low": False, 7: True})
+
+        assert features.slots == (SignedEnumSetAttr([7, 255], [1]),)
+
+    def test_signed_enum_set_parameter_rejects_invalid_assertions(self) -> None:
+        with pytest.raises(ValueError, match="undeclared enum value 2"):
+            test_feature_set_attr(features={2: True})
+        with pytest.raises(TypeError, match="exact Boolean assertions"):
+            test_feature_set_attr(features={"low": 1})
+
 
 class TestParameterizedAttrArray:
     def test_preserves_order_repetition_and_mixed_families(self) -> None:
@@ -895,6 +908,24 @@ class TestOperations:
         for values in ([False], [-1], [256], ["low"]):
             with pytest.raises(ValueError, match="enum array element"):
                 EnumArrayAttr(values)  # type: ignore[arg-type]
+
+    def test_signed_enum_set_is_canonical_and_distinguishes_polarity(self) -> None:
+        value = SignedEnumSetAttr([255, 1], [7])
+
+        assert value.positive_values == (1, 255)
+        assert value.negative_values == (7,)
+        assert value == SignedEnumSetAttr([1, 255], [7])
+        assert hash(value) == hash(SignedEnumSetAttr([1, 255], [7]))
+        assert SignedEnumSetAttr() != value
+
+    def test_signed_enum_set_rejects_invalid_and_ambiguous_values(self) -> None:
+        with pytest.raises(ValueError, match="duplicate positive"):
+            SignedEnumSetAttr([1, 1])
+        with pytest.raises(ValueError, match="contradictory assertions"):
+            SignedEnumSetAttr([1], [1])
+        for value in (False, -1, 256, "low"):
+            with pytest.raises(ValueError, match="signed enum set positive"):
+                SignedEnumSetAttr([value])  # type: ignore[list-item]
 
     def test_op_with_nested_canonical_attr_dict(self) -> None:
         op = Operation(

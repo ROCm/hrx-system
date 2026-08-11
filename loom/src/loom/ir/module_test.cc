@@ -2333,6 +2333,63 @@ TEST_F(ModuleTest, ParameterizedAttrRejectsMalformedSlots) {
   loom_module_free(module);
 }
 
+TEST_F(ModuleTest, SignedEnumSetParameterizedAttrCanonicalizesAndOwnsWords) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  uint64_t source_words[] = {
+      UINT64_C(1) << 1, 0, 0, 0, UINT64_C(1) << 7, 0, 0, 0,
+  };
+  loom_attribute_t feature_set = loom_attr_absent();
+  IREE_ASSERT_OK(loom_test_feature_set_attr_make(
+      module,
+      loom_make_signed_enum_set(source_words, IREE_ARRAYSIZE(source_words) / 2),
+      &feature_set));
+
+  loom_signed_enum_set_t canonical =
+      loom_test_feature_set_attr_features(feature_set);
+  EXPECT_EQ(canonical.word_count, 1u);
+  EXPECT_NE(canonical.words, source_words);
+  EXPECT_TRUE(loom_signed_enum_set_contains_positive(canonical, 1));
+  EXPECT_TRUE(loom_signed_enum_set_contains_negative(canonical, 7));
+  source_words[0] = 0;
+  source_words[4] = 0;
+  EXPECT_TRUE(loom_signed_enum_set_contains_positive(canonical, 1));
+  EXPECT_TRUE(loom_signed_enum_set_contains_negative(canonical, 7));
+
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, SignedEnumSetParameterizedAttrRejectsInvalidValues) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  uint64_t undeclared_words[] = {
+      UINT64_C(1) << 2,
+      0,
+  };
+  loom_attribute_t feature_set = loom_attr_absent();
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_test_feature_set_attr_make(
+          module, loom_make_signed_enum_set(undeclared_words, 1),
+          &feature_set));
+
+  uint64_t contradictory_words[] = {
+      UINT64_C(1) << 1,
+      UINT64_C(1) << 1,
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_test_feature_set_attr_make(
+          module, loom_make_signed_enum_set(contradictory_words, 1),
+          &feature_set));
+
+  loom_module_free(module);
+}
+
 TEST_F(ModuleTest, ParameterizedTypeBuilderInternsDescriptorIndexedSlots) {
   loom_module_t* module = NULL;
   IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,

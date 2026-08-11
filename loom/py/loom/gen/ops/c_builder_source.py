@@ -75,6 +75,25 @@ def _emit_builder_enum_array_storage(
     lines.append(f"{indent}    &{storage}));")
 
 
+def _emit_builder_signed_enum_set_storage(
+    lines: list[str],
+    *,
+    source: str,
+    storage: str,
+    word_count: str,
+    op_name: str,
+    field_name: str,
+    indent: str = "",
+) -> None:
+    """Emits C code that canonicalizes a signed enum-set into the builder."""
+    lines.append(f"{indent}const uint64_t* {storage} = NULL;")
+    lines.append(f"{indent}uint16_t {word_count} = 0;")
+    lines.append(f"{indent}IREE_RETURN_IF_ERROR(")
+    lines.append(f"{indent}    loom_builder_copy_signed_enum_set_attr_storage(")
+    lines.append(f'{indent}        builder, {source}, IREE_SV("{op_name} {field_name}"),')
+    lines.append(f"{indent}        &{storage}, &{word_count}));")
+
+
 def _emit_builder_predicate_list_storage(
     lines: list[str],
     *,
@@ -725,6 +744,7 @@ def _generate_builder_implementation(
                 "bool": f"loom_attr_bool({name})",
                 "enum": f"loom_attr_enum({name})",
                 "enum_array": f"loom_attr_enum_array(_{field_name}_storage, (uint16_t){name}.count)",
+                "signed_enum_set": f"loom_attr_signed_enum_set(_{field_name}_storage, _{field_name}_word_count)",
                 "symbol": f"loom_attr_symbol({name})",
                 "type": f"loom_attr_type({name})",
                 "encoding": f"loom_attr_encoding({name})",
@@ -779,6 +799,32 @@ def _generate_builder_implementation(
                         lines,
                         source=name,
                         storage=storage,
+                        op_name=op.name,
+                        field_name=field_name,
+                    )
+                    lines.append(f"  loom_op_attrs(*out_op)[{idx}] = {constructor};")
+            elif attr_type == "signed_enum_set":
+                storage = f"_{field_name}_storage"
+                word_count = f"_{field_name}_word_count"
+                if optional_flag:
+                    lines.append(f"  if (iree_any_bit_set(build_flags, {optional_flag})) {{")
+                    _emit_builder_signed_enum_set_storage(
+                        lines,
+                        source=name,
+                        storage=storage,
+                        word_count=word_count,
+                        op_name=op.name,
+                        field_name=field_name,
+                        indent="    ",
+                    )
+                    lines.append(f"    loom_op_attrs(*out_op)[{idx}] = {constructor};")
+                    lines.append("  }")
+                else:
+                    _emit_builder_signed_enum_set_storage(
+                        lines,
+                        source=name,
+                        storage=storage,
+                        word_count=word_count,
                         op_name=op.name,
                         field_name=field_name,
                     )

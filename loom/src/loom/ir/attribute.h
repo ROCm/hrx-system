@@ -191,6 +191,77 @@ static inline loom_enum_array_t loom_make_enum_array(const uint8_t* values,
   return array;
 }
 
+// Maximum number of 64-bit words in either polarity of a signed enum set.
+// Stable enum identities are bytes, so four words cover the complete domain.
+#define LOOM_SIGNED_ENUM_SET_MAX_WORD_COUNT 4
+
+// A borrowed canonical set of positive and negative stable enum assertions.
+//
+// The enclosing field descriptor owns the enum domain. |words| points to two
+// adjacent |word_count|-word partitions: positive assertions followed by
+// negative assertions. Canonical values have disjoint partitions and no
+// trailing word pair that is zero in both partitions.
+typedef struct loom_signed_enum_set_t {
+  // Positive words followed by negative words, or NULL when empty.
+  const uint64_t* words;
+  // Number of words in each polarity partition.
+  iree_host_size_t word_count;
+} loom_signed_enum_set_t;
+
+static inline loom_signed_enum_set_t loom_signed_enum_set_empty(void) {
+  loom_signed_enum_set_t set = {0};
+  return set;
+}
+
+static inline loom_signed_enum_set_t loom_make_signed_enum_set(
+    const uint64_t* words, iree_host_size_t word_count) {
+  loom_signed_enum_set_t set = {
+      /*.words=*/word_count > 0 ? words : NULL,
+      /*.word_count=*/word_count,
+  };
+  return set;
+}
+
+// Returns the positive assertion partition of |set|.
+static inline const uint64_t* loom_signed_enum_set_positive_words(
+    loom_signed_enum_set_t set) {
+  return set.word_count > 0 ? set.words : NULL;
+}
+
+// Returns the negative assertion partition of |set|.
+static inline const uint64_t* loom_signed_enum_set_negative_words(
+    loom_signed_enum_set_t set) {
+  return set.word_count > 0 && set.words != NULL ? set.words + set.word_count
+                                                 : NULL;
+}
+
+// Returns whether |value| has a positive assertion in |set|.
+static inline bool loom_signed_enum_set_contains_positive(
+    loom_signed_enum_set_t set, uint8_t value) {
+  const iree_host_size_t word_index = value / 64u;
+  return word_index < set.word_count && set.words != NULL &&
+         iree_any_bit_set(set.words[word_index], UINT64_C(1) << (value % 64u));
+}
+
+// Returns whether |value| has a negative assertion in |set|.
+static inline bool loom_signed_enum_set_contains_negative(
+    loom_signed_enum_set_t set, uint8_t value) {
+  const iree_host_size_t word_index = value / 64u;
+  const uint64_t* negative_words = loom_signed_enum_set_negative_words(set);
+  return word_index < set.word_count && negative_words != NULL &&
+         iree_any_bit_set(negative_words[word_index], UINT64_C(1)
+                                                          << (value % 64u));
+}
+
+// Validates |set| and returns the canonical word count after trimming trailing
+// word pairs that are zero in both polarity partitions.
+//
+// This validates only representation invariants. Descriptor-aware callers
+// separately validate that every asserted stable value belongs to the closed
+// enum domain of the enclosing field.
+iree_status_t loom_signed_enum_set_canonical_word_count(
+    loom_signed_enum_set_t set, iree_host_size_t* out_word_count);
+
 // A borrowed ordered array of signed 64-bit integers.
 typedef struct loom_i64_array_t {
   const int64_t* values;
@@ -292,6 +363,10 @@ typedef enum loom_attr_kind_e {
   // descriptor supplies an optional exact family constraint; generic
   // dictionaries cannot carry this kind.
   LOOM_ATTR_PARAMETERIZED_ARRAY = 17,
+  // Arena-allocated canonical positive and negative stable enum assertions.
+  // The operation field descriptor supplies the closed enum domain; generic
+  // dictionaries cannot carry this kind.
+  LOOM_ATTR_SIGNED_ENUM_SET = 18,
   LOOM_ATTR_COUNT_,
 } loom_attr_kind_t;
 
@@ -304,11 +379,11 @@ typedef enum loom_attr_kind_e {
 // parameters, and anywhere a typed scalar/aggregate is needed.
 //
 // The kind tag (byte 0) determines which union member is active.
-// For I64_ARRAY, ENUM_ARRAY, PREDICATE_LIST, PARAMETERIZED, and
-// PARAMETERIZED_ARRAY, the count field holds the element or parameter count and
-// the payload holds a pointer to arena-allocated storage. PARAMETERIZED uses
-// reserved_1 for its family kind. BYTES uses reserved_1 for its byte length and
-// points to immutable bytes.
+// For I64_ARRAY, ENUM_ARRAY, PREDICATE_LIST, PARAMETERIZED,
+// PARAMETERIZED_ARRAY, and SIGNED_ENUM_SET, the count field holds the element,
+// parameter, or per-polarity word count and the payload holds a pointer to
+// arena-allocated storage. PARAMETERIZED uses reserved_1 for its family kind.
+// BYTES uses reserved_1 for its byte length and points to immutable bytes.
 typedef struct loom_attribute_t {
   uint8_t kind;
   uint8_t reserved_0;
@@ -321,6 +396,7 @@ typedef struct loom_attribute_t {
     loom_symbol_ref_t symbol;
     int64_t* i64_array;
     const uint8_t* enum_array;
+    const uint64_t* signed_enum_set_words;
     loom_type_id_t type_id;
     uint32_t encoding_id;
     uint32_t scoped_enum;
@@ -471,6 +547,18 @@ static inline loom_attribute_t loom_attr_enum_array(const uint8_t* values,
   loom_attribute_t attr = loom_attr_make_present(LOOM_ATTR_ENUM_ARRAY);
   attr.count = count;
   attr.enum_array = count > 0 ? values : NULL;
+  return attr;
+}
+
+// Constructs a signed enum-set attribute from canonical packed storage. The
+// two word partitions must be arena-allocated and outlive the attribute. A
+// zero-word set is present and canonicalized to a NULL payload, unlike the
+// all-zero absent attribute sentinel.
+static inline loom_attribute_t loom_attr_signed_enum_set(const uint64_t* words,
+                                                         uint16_t word_count) {
+  loom_attribute_t attr = loom_attr_make_present(LOOM_ATTR_SIGNED_ENUM_SET);
+  attr.count = word_count;
+  attr.signed_enum_set_words = word_count > 0 ? words : NULL;
   return attr;
 }
 
@@ -684,6 +772,17 @@ static inline loom_enum_array_t loom_attr_as_enum_array(loom_attribute_t attr) {
   if (loom_attr_is_absent(attr)) return loom_enum_array_empty();
   IREE_ASSERT(attr.kind == LOOM_ATTR_ENUM_ARRAY);
   return loom_make_enum_array(attr.enum_array, attr.count);
+}
+
+// Returns the canonical signed assertions of a SIGNED_ENUM_SET attribute.
+//
+// An absent optional attribute reads as an empty set. Call loom_attr_is_absent
+// when presence matters.
+static inline loom_signed_enum_set_t loom_attr_as_signed_enum_set(
+    loom_attribute_t attr) {
+  if (loom_attr_is_absent(attr)) return loom_signed_enum_set_empty();
+  IREE_ASSERT(attr.kind == LOOM_ATTR_SIGNED_ENUM_SET);
+  return loom_make_signed_enum_set(attr.signed_enum_set_words, attr.count);
 }
 
 // Returns the ordered integers of an I64_ARRAY attribute.

@@ -1359,6 +1359,37 @@ static iree_status_t loom_bytecode_get_enum_array(
   return iree_ok_status();
 }
 
+static iree_status_t loom_bytecode_get_signed_enum_set(
+    loom_attribute_t attr, const loom_attr_descriptor_t* descriptor,
+    loom_signed_enum_set_t* out_set) {
+  if (!descriptor || descriptor->attr_kind != LOOM_ATTR_SIGNED_ENUM_SET ||
+      iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "signed enum sets require a closed descriptor-backed field");
+  }
+  *out_set = loom_attr_as_signed_enum_set(attr);
+  iree_host_size_t canonical_word_count = 0;
+  IREE_RETURN_IF_ERROR(loom_signed_enum_set_canonical_word_count(
+      *out_set, &canonical_word_count));
+  if (canonical_word_count != out_set->word_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "signed enum set is not canonically trimmed");
+  }
+  for (iree_host_size_t value = 0; value < 256; ++value) {
+    if (!loom_signed_enum_set_contains_positive(*out_set, (uint8_t)value) &&
+        !loom_signed_enum_set_contains_negative(*out_set, (uint8_t)value)) {
+      continue;
+    }
+    if (!loom_attr_descriptor_has_enum_case(descriptor, (uint8_t)value)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "signed enum-set value %u has no declared case",
+                              (unsigned)value);
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_bytecode_get_parameterized_attr(
     const loom_bytecode_numbering_t* numbering, loom_attribute_t attr,
     const loom_attr_descriptor_t* descriptor,
@@ -1541,6 +1572,10 @@ static iree_status_t loom_bytecode_number_attr_value_at_depth(
     case LOOM_ATTR_ENUM_ARRAY: {
       loom_enum_array_t unused_array = loom_enum_array_empty();
       return loom_bytecode_get_enum_array(attr, descriptor, &unused_array);
+    }
+    case LOOM_ATTR_SIGNED_ENUM_SET: {
+      loom_signed_enum_set_t unused_set = loom_signed_enum_set_empty();
+      return loom_bytecode_get_signed_enum_set(attr, descriptor, &unused_set);
     }
     case LOOM_ATTR_SCOPED_ENUM:
       return loom_bytecode_number_scoped_enum(numbering, attr);
@@ -2655,6 +2690,20 @@ static iree_status_t loom_bytecode_write_attr_value_at_depth(
           loom_bytecode_page_writer_write(writer, array.values, array.count));
       break;
     }
+    case LOOM_ATTR_SIGNED_ENUM_SET: {
+      loom_signed_enum_set_t set = loom_signed_enum_set_empty();
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_get_signed_enum_set(attr, descriptor, &set));
+      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(
+          writer, LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_page_writer_write_u8(writer, (uint8_t)set.word_count));
+      for (iree_host_size_t i = 0; i < set.word_count * 2; ++i) {
+        IREE_RETURN_IF_ERROR(
+            loom_bytecode_page_writer_write_u64_le(writer, set.words[i]));
+      }
+      break;
+    }
     case LOOM_ATTR_I64_ARRAY: {
       IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(
           writer, LOOM_BYTECODE_ATTR_I64_ARRAY));
@@ -2973,6 +3022,19 @@ static iree_status_t loom_bytecode_emit_attr_value_at_depth(
         IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
             builder,
             iree_make_string_view((const char*)array.values, array.count)));
+      }
+      break;
+    }
+    case LOOM_ATTR_SIGNED_ENUM_SET: {
+      loom_signed_enum_set_t set = loom_signed_enum_set_empty();
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_get_signed_enum_set(attr, descriptor, &set));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_emit_u8(builder, (uint8_t)set.word_count));
+      for (iree_host_size_t i = 0; i < set.word_count * 2; ++i) {
+        IREE_RETURN_IF_ERROR(loom_bytecode_emit_u64_le(builder, set.words[i]));
       }
       break;
     }

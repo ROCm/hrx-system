@@ -307,6 +307,10 @@ class TestPunctuation:
 
     def test_arrow(self) -> None:
         assert _texts("->") == ["->"]
+
+    def test_standalone_minus(self) -> None:
+        assert _kinds("-feature") == [TokenKind.MINUS, TokenKind.BARE_IDENT]
+        assert _texts("-feature") == ["-", "feature"]
         assert _kinds("->") == [TokenKind.ARROW]
 
     def test_arrow_vs_negative(self) -> None:
@@ -724,10 +728,8 @@ class TestEdgeCases:
         assert tokens[1].kind == TokenKind.BARE_IDENT
         assert tokens[1].text == "tile"
 
-    def test_negative_sign_error(self) -> None:
-        """'-' not followed by '>' or digit is an error."""
-        with pytest.raises(ParseError, match="unexpected '-'"):
-            _tokens("- x")
+    def test_standalone_minus_before_whitespace(self) -> None:
+        assert _kinds("- x") == [TokenKind.MINUS, TokenKind.BARE_IDENT]
 
     def test_hash_error(self) -> None:
         """'#' not followed by an identifier is an error."""

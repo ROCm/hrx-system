@@ -568,6 +568,7 @@ static iree_status_t loom_tooling_config_copy_attr(
     case LOOM_ATTR_PREDICATE_LIST:
     case LOOM_ATTR_SCOPED_ENUM:
     case LOOM_ATTR_ENUM_ARRAY:
+    case LOOM_ATTR_SIGNED_ENUM_SET:
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "config encoding value contains unsupported attribute kind %u",

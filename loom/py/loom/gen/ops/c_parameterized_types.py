@@ -119,7 +119,7 @@ def generate_header_lines(types: Sequence[TypeDef]) -> list[str]:
         descriptor_symbol = type_descriptor_symbol(type_def)
         for parameter in type_def.params:
             enum_def = parameter.enum_def
-            if parameter.attr_type not in ("enum", "enum_array") or enum_def is None or enum_def.c_type is not None:
+            if parameter.attr_type not in ("enum", "enum_array", "signed_enum_set") or enum_def is None or enum_def.c_type is not None:
                 continue
             enum_prefix = _parameter_prefix(type_def, parameter)
             enum_tag = f"{enum_prefix}_e"
@@ -225,7 +225,7 @@ def generate_metadata_lines(types: Sequence[TypeDef]) -> list[str]:
     for type_def in parameterized_type_defs(types):
         prefix = type_api_prefix(type_def)
         for parameter in type_def.params:
-            if parameter.attr_type in ("enum", "enum_array"):
+            if parameter.attr_type in ("enum", "enum_array", "signed_enum_set"):
                 assert parameter.enum_def is not None
                 cases_by_value = {case.value: case.keyword for case in parameter.enum_def.cases}
                 max_value = max(cases_by_value)
@@ -250,7 +250,7 @@ def generate_metadata_lines(types: Sequence[TypeDef]) -> list[str]:
             lines.append(f"        .attr_kind = {ATTR_KIND_MAP[parameter.attr_type]},")
             if flags:
                 lines.append(f"        .flags = {' | '.join(flags)},")
-            if parameter.attr_type in ("enum", "enum_array"):
+            if parameter.attr_type in ("enum", "enum_array", "signed_enum_set"):
                 enum_names = f"{prefix}_{parameter.name}_enum_names"
                 lines.append(f"        .enum_max_value = (uint8_t)(IREE_ARRAYSIZE({enum_names}) - 1),")
                 lines.append(f"        .enum_case_names = {enum_names},")

@@ -1754,6 +1754,13 @@ loom_attribute_t loom_memory_access_atomic_scope(loom_memory_access_t access);
     return loom_attr_as_enum_array(loom_op_attrs(op)[(index)]);    \
   }
 
+// Defines a function that reads a signed enum-set attribute by index.
+#define LOOM_DEFINE_ATTR_SIGNED_ENUM_SET(func_name, index)              \
+  enum { func_name##_ATTR_INDEX = (index) };                            \
+  static inline loom_signed_enum_set_t func_name(const loom_op_t* op) { \
+    return loom_attr_as_signed_enum_set(loom_op_attrs(op)[(index)]);    \
+  }
+
 // Defines a function that reads a representation-scoped enum by index.
 #define LOOM_DEFINE_ATTR_SCOPED_ENUM(func_name, index)           \
   enum { func_name##_ATTR_INDEX = (index) };                     \
@@ -2020,6 +2027,13 @@ iree_status_t loom_builder_copy_i64_array_attr_storage(loom_builder_t* builder,
 iree_status_t loom_builder_copy_enum_array_attr_storage(
     loom_builder_t* builder, loom_enum_array_t values, iree_string_view_t label,
     const uint8_t** out_storage);
+
+// Validates, canonicalizes, and copies a signed enum-set attribute payload into
+// the builder arena.
+iree_status_t loom_builder_copy_signed_enum_set_attr_storage(
+    loom_builder_t* builder, loom_signed_enum_set_t set,
+    iree_string_view_t label, const uint64_t** out_storage,
+    uint16_t* out_word_count);
 
 // Copies a predicate-list attribute payload into the builder arena.
 iree_status_t loom_builder_copy_predicate_list_attr_storage(

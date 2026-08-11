@@ -60,10 +60,11 @@ typedef enum loom_token_kind_e {
   LOOM_TOKEN_ARROW = 20,
   LOOM_TOKEN_DIM_X = 21,  // 'x' dimension separator (only when in_dim_list).
   LOOM_TOKEN_PIPE = 22,
+  LOOM_TOKEN_MINUS = 23,
 
   // Special.
-  LOOM_TOKEN_EOF = 23,
-  LOOM_TOKEN_ERROR = 24,
+  LOOM_TOKEN_EOF = 24,
+  LOOM_TOKEN_ERROR = 25,
   LOOM_TOKEN_COUNT_,
 
   // Sentinel for "no token" (uninitialized lookahead).

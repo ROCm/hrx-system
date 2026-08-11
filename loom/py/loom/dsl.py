@@ -102,6 +102,7 @@ __all__ = [
     "ATTR_TYPE_BOOL",
     "ATTR_TYPE_ENUM",
     "ATTR_TYPE_ENUM_ARRAY",
+    "ATTR_TYPE_SIGNED_ENUM_SET",
     "ATTR_TYPE_SCOPED_ENUM",
     "ATTR_TYPE_TYPE",
     "ATTR_TYPE_I64_ARRAY",
@@ -517,6 +518,7 @@ ATTR_TYPE_STRING = "string"
 ATTR_TYPE_BOOL = "bool"
 ATTR_TYPE_ENUM = "enum"
 ATTR_TYPE_ENUM_ARRAY = "enum_array"
+ATTR_TYPE_SIGNED_ENUM_SET = "signed_enum_set"
 ATTR_TYPE_SCOPED_ENUM = "scoped_enum"
 ATTR_TYPE_TYPE = "type"
 ATTR_TYPE_I64_ARRAY = "i64_array"
@@ -538,6 +540,7 @@ _VALID_ATTR_TYPES = frozenset(
         ATTR_TYPE_BOOL,
         ATTR_TYPE_ENUM,
         ATTR_TYPE_ENUM_ARRAY,
+        ATTR_TYPE_SIGNED_ENUM_SET,
         ATTR_TYPE_SCOPED_ENUM,
         ATTR_TYPE_TYPE,
         ATTR_TYPE_I64_ARRAY,
@@ -827,7 +830,8 @@ class AttrDef:
                 f"'{self.attr_type}', must be one of {sorted(_VALID_ATTR_TYPES)}"
             )
         if (
-            self.attr_type in (ATTR_TYPE_ENUM, ATTR_TYPE_ENUM_ARRAY)
+            self.attr_type
+            in (ATTR_TYPE_ENUM, ATTR_TYPE_ENUM_ARRAY, ATTR_TYPE_SIGNED_ENUM_SET)
             and self.enum_def is None
         ):
             raise ValueError(
@@ -2897,6 +2901,7 @@ _DESCRIPTOR_PARAMETER_TYPES = frozenset(
         ATTR_TYPE_BOOL,
         ATTR_TYPE_ENUM,
         ATTR_TYPE_ENUM_ARRAY,
+        ATTR_TYPE_SIGNED_ENUM_SET,
         ATTR_TYPE_TYPE,
         ATTR_TYPE_I64_ARRAY,
         ATTR_TYPE_BYTES,
