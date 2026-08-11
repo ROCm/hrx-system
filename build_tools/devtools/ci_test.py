@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import io
 import re
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -77,6 +78,71 @@ class CiTest(unittest.TestCase):
             "--test_tag_filters=" + ",".join(ci_config.CPU_RESOURCE_TAG_EXCLUDES),
             text,
         )
+
+    def test_bazel_profiles_are_named_for_each_build_and_test_phase(self):
+        profile_dir = Path("/tmp/iree-bazel-profiles")
+        args = ci.parse_arguments(
+            [
+                "iree-bazel-cpu",
+                "--target",
+                "//runtime/...",
+                "--bazel-profile-dir",
+                str(profile_dir),
+            ]
+        )
+
+        steps = ci.steps_from_args(args)
+
+        self.assertEqual(
+            [
+                arg
+                for step in steps
+                for arg in step.argv
+                if arg.startswith("--profile=")
+            ],
+            [
+                f"--profile={profile_dir}/build-iree.profile.gz",
+                f"--profile={profile_dir}/test-iree.profile.gz",
+            ],
+        )
+
+    def test_bazel_profile_names_must_be_unique(self):
+        duplicate_steps = [
+            ci.bazel_build_step("Compile IREE", ("//runtime/...",)),
+            ci.bazel_test_step("Compile IREE", ("//runtime/...",)),
+        ]
+
+        with self.assertRaisesRegex(ValueError, "Bazel profile path collision"):
+            ci.add_bazel_profiles(duplicate_steps, Path("/tmp/profiles"))
+
+    def test_non_bazel_commands_reject_bazel_profile_directory(self):
+        for command in ("iree-cmake-cpu", "iree-importers-tilelang"):
+            with self.subTest(command=command):
+                args = ci.parse_arguments(
+                    [command, "--bazel-profile-dir", "/tmp/profiles"]
+                )
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "--bazel-profile-dir is only supported for Bazel CI commands",
+                ):
+                    ci.steps_from_args(args)
+
+    def test_main_creates_bazel_profile_directory_only_when_executing(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            profile_dir = Path(temporary_dir) / "profiles"
+            argv = [
+                "iree-bazel-cpu",
+                "--target",
+                "//runtime/...",
+                "--bazel-profile-dir",
+                str(profile_dir),
+            ]
+            with mock.patch.object(ci, "run_steps", return_value=0):
+                self.assertEqual(ci.main([*argv, "--dry-run"]), 0)
+                self.assertFalse(profile_dir.exists())
+
+                self.assertEqual(ci.main(argv), 0)
+                self.assertTrue(profile_dir.is_dir())
 
     def test_bazel_default_targets_include_loom(self):
         args = ci.parse_arguments(["iree-bazel-cpu"])
@@ -794,13 +860,59 @@ class CiTest(unittest.TestCase):
         self.assertNotIn("iree-bazel-amdgpu-msan", block)
         self.assertNotIn("iree-bazel-amdgpu-sanitizers", block)
 
+    def test_bazel_workflow_uploads_profiles_for_each_attempted_job(self):
+        cases = (
+            (
+                "linux_bazel_cpu",
+                "bazel-profiles-${{ matrix.command }}-attempt-"
+                "${{ github.run_attempt }}",
+            ),
+            (
+                "linux_bazel_vulkan",
+                "bazel-profiles-iree-bazel-vulkan-attempt-${{ github.run_attempt }}",
+            ),
+            (
+                "linux_bazel_amdgpu",
+                "bazel-profiles-${{ matrix.command }}-"
+                "${{ matrix.target_selector }}-attempt-${{ github.run_attempt }}",
+            ),
+        )
+        for job_name, artifact_name in cases:
+            with self.subTest(job=job_name):
+                block = self.workflow_job_block(
+                    ".github/workflows/ci_iree_bazel.yml", job_name
+                )
+                self.assertIn("id: iree_bazel_ci", block)
+                self.assertIn(
+                    '--bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles"', block
+                )
+                self.assertIn(
+                    "if: ${{ always() && steps.iree_bazel_ci.outcome != 'skipped' }}",
+                    block,
+                )
+                self.assertIn(
+                    "uses: actions/upload-artifact@"
+                    "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
+                    block,
+                )
+                self.assertIn(f"name: {artifact_name}", block)
+                self.assertIn(
+                    "path: ${{ runner.temp }}/bazel-profiles/*.profile.gz", block
+                )
+                self.assertIn("if-no-files-found: error", block)
+                self.assertIn("compression-level: 0", block)
+                self.assertLess(
+                    block.index("name: Run IREE Bazel CI"),
+                    block.index("name: Upload Bazel profiles"),
+                )
+
     def test_bazel_vulkan_workflow_has_no_nonexecuting_sanitizer_lane(self):
         block = self.workflow_job_block(
             ".github/workflows/ci_iree_bazel.yml", "linux_bazel_vulkan"
         )
         self.assertIn("name: Linux / Vulkan", block)
         self.assertIn(
-            "python3 build_tools/devtools/ci.py iree-bazel-vulkan --keep-going",
+            "python3 build_tools/devtools/ci.py iree-bazel-vulkan",
             block,
         )
         self.assertNotIn("matrix.", block)

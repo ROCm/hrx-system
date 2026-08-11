@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -815,7 +816,7 @@ def tilelang_importer_steps(command_name: str) -> list[CiStep]:
     ]
 
 
-def steps_from_args(args: argparse.Namespace) -> list[CiStep]:
+def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
     is_amdgpu_command = (
         args.command in BAZEL_COMMANDS and BAZEL_COMMANDS[args.command][0] == "amdgpu"
     ) or (
@@ -878,6 +879,59 @@ def steps_from_args(args: argparse.Namespace) -> list[CiStep]:
     if bazel_target == "vulkan":
         return vulkan_steps(targets)
     raise ValueError(f"unknown Bazel CI target: {bazel_target}")
+
+
+def add_bazel_profiles(steps: list[CiStep], profile_dir: Path) -> list[CiStep]:
+    profiled_steps = []
+    profile_owners = {}
+    for step in steps:
+        if step.argv[1:4] not in (
+            ("dev.py", "bazel", "build"),
+            ("dev.py", "bazel", "test"),
+        ):
+            profiled_steps.append(step)
+            continue
+
+        if any(
+            arg == "--profile" or arg.startswith("--profile=") for arg in step.argv[4:]
+        ):
+            raise ValueError(f"{step.name} already configures a Bazel profile")
+        profile_stem = "-".join(
+            token.lower() for token in re.findall(r"[A-Za-z0-9]+", step.name)
+        )
+        if not profile_stem:
+            raise ValueError(f"cannot derive a Bazel profile name from {step.name!r}")
+        profile_path = profile_dir / f"{profile_stem}.profile.gz"
+        if previous_owner := profile_owners.get(profile_path):
+            raise ValueError(
+                f"Bazel profile path collision between {previous_owner!r} and "
+                f"{step.name!r}: {profile_path}"
+            )
+        profile_owners[profile_path] = step.name
+        profiled_steps.append(
+            CiStep(
+                step.name,
+                step.argv[:4] + (f"--profile={profile_path}",) + step.argv[4:],
+                step.env,
+            )
+        )
+    return profiled_steps
+
+
+def bazel_profile_dir(args: argparse.Namespace) -> Path | None:
+    if args.bazel_profile_dir is None:
+        return None
+    return args.bazel_profile_dir.expanduser().resolve()
+
+
+def steps_from_args(args: argparse.Namespace) -> list[CiStep]:
+    profile_dir = bazel_profile_dir(args)
+    if profile_dir is not None and args.command not in BAZEL_COMMANDS:
+        raise ValueError("--bazel-profile-dir is only supported for Bazel CI commands")
+    steps = _steps_from_args(args)
+    if profile_dir is not None:
+        steps = add_bazel_profiles(steps, profile_dir)
+    return steps
 
 
 def github_actions_enabled() -> bool:
@@ -1014,6 +1068,14 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--bazel-profile-dir",
+        type=Path,
+        help=(
+            "Write one compressed Bazel execution profile per build/test phase "
+            "to this directory. Only supported for Bazel CI commands."
+        ),
+    )
+    parser.add_argument(
         "--target",
         action="append",
         help=(
@@ -1026,8 +1088,12 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_arguments(argv)
+    steps = steps_from_args(args)
+    profile_dir = bazel_profile_dir(args)
+    if profile_dir is not None and not args.dry_run:
+        profile_dir.mkdir(parents=True, exist_ok=True)
     return run_steps(
-        steps_from_args(args),
+        steps,
         dry_run=args.dry_run,
         keep_going=args.keep_going,
         verbose=args.verbose,

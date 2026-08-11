@@ -165,9 +165,20 @@ jobs:
           test -d "${HRX_ROCM_ROOT}/include"
 
       - name: Run IREE Bazel CI
+        id: iree_bazel_ci
         run: |
-          echo "python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going"
-          python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going
+          echo "python3 build_tools/devtools/ci.py ${{ matrix.command }} --bazel-profile-dir ${RUNNER_TEMP}/bazel-profiles --keep-going"
+          python3 build_tools/devtools/ci.py ${{ matrix.command }} \
+            --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles" --keep-going
+
+      - name: Upload Bazel profiles
+        if: ${{ always() && steps.iree_bazel_ci.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-profiles-${{ matrix.command }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bazel-profiles/*.profile.gz
+          if-no-files-found: error
+          compression-level: 0
 
   linux_bazel_vulkan:
     name: Linux / Vulkan
@@ -215,9 +226,20 @@ jobs:
           test -d "${HRX_ROCM_ROOT}/include"
 
       - name: Run IREE Bazel CI
+        id: iree_bazel_ci
         run: |
-          echo "python3 build_tools/devtools/ci.py iree-bazel-vulkan --keep-going"
-          python3 build_tools/devtools/ci.py iree-bazel-vulkan --keep-going
+          echo "python3 build_tools/devtools/ci.py iree-bazel-vulkan --bazel-profile-dir ${RUNNER_TEMP}/bazel-profiles --keep-going"
+          python3 build_tools/devtools/ci.py iree-bazel-vulkan \
+            --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles" --keep-going
+
+      - name: Upload Bazel profiles
+        if: ${{ always() && steps.iree_bazel_ci.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-profiles-iree-bazel-vulkan-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bazel-profiles/*.profile.gz
+          if-no-files-found: error
+          compression-level: 0
 
   linux_bazel_amdgpu:
     name: ${{ matrix.name }}
@@ -326,7 +348,18 @@ jobs:
         run: bash .github/scripts/check_rocm_environment.sh
 
       - name: Run IREE Bazel CI
+        id: iree_bazel_ci
         run: |
-          echo "python3 build_tools/devtools/ci.py ${{ matrix.command }} --amdgpu-target ${{ matrix.target_selector }} --keep-going"
+          echo "python3 build_tools/devtools/ci.py ${{ matrix.command }} --amdgpu-target ${{ matrix.target_selector }} --bazel-profile-dir ${RUNNER_TEMP}/bazel-profiles --keep-going"
           python3 build_tools/devtools/ci.py ${{ matrix.command }} \
-            --amdgpu-target "${{ matrix.target_selector }}" --keep-going
+            --amdgpu-target "${{ matrix.target_selector }}" \
+            --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles" --keep-going
+
+      - name: Upload Bazel profiles
+        if: ${{ always() && steps.iree_bazel_ci.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-profiles-${{ matrix.command }}-${{ matrix.target_selector }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bazel-profiles/*.profile.gz
+          if-no-files-found: error
+          compression-level: 0
