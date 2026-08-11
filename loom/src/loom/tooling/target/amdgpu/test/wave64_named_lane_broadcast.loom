@@ -8,10 +8,10 @@ kernel.def target(@wave64_target) @wave64_named_lane_broadcast() {
   %lane = kernel.subgroup.lane.id : index
   %source_lane = scalar.constant 33 : i32
   %buffer_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32, #encoding.layout.dense>
-  %value = view.load %input_view[%lane] : view<64xi32, #encoding.layout.dense> -> i32
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32>
+  %value = view.load %input_view[%lane] : view<64xi32> -> i32
   %broadcast = kernel.subgroup.broadcast %value from %source_lane : i32, i32
-  view.store %broadcast, %output_view[%lane] : i32, view<64xi32, #encoding.layout.dense>
+  view.store %broadcast, %output_view[%lane] : i32, view<64xi32>
   kernel.return
 }
