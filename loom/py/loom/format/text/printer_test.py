@@ -303,10 +303,10 @@ class TestPrintType:
             print_type(_test_ptr_register_type(4, vector_type))
             == "reg<test.ptr x4 : vector<4xi32>>"
         )
-        dialect_type = DialectType("vm.ref", (I32,))
+        dialect_type = DialectType("test.ref", (I32,))
         assert (
             print_type(_test_ptr_register_type(value_type=dialect_type))
-            == "reg<test.ptr : vm.ref<i32>>"
+            == "reg<test.ptr : test.ref<i32>>"
         )
 
     def test_dialect_type_opaque(self) -> None:
@@ -317,21 +317,21 @@ class TestPrintType:
     def test_dialect_type_parameterized(self) -> None:
         from loom.ir import DialectType
 
-        t = DialectType("vm.ref", (DialectType("hal.buffer"),))
-        assert print_type(t) == "vm.ref<hal.buffer>"
+        t = DialectType("test.ref", (DialectType("hal.buffer"),))
+        assert print_type(t) == "test.ref<hal.buffer>"
 
     def test_dialect_type_nested(self) -> None:
         from loom.ir import DialectType
 
-        inner = DialectType("vm.list", (I32,))
-        outer = DialectType("vm.ref", (inner,))
-        assert print_type(outer) == "vm.ref<vm.list<i32>>"
+        inner = DialectType("test.list", (I32,))
+        outer = DialectType("test.ref", (inner,))
+        assert print_type(outer) == "test.ref<test.list<i32>>"
 
     def test_dialect_type_with_scalar_param(self) -> None:
         from loom.ir import DialectType
 
-        t = DialectType("vm.list", (F32,))
-        assert print_type(t) == "vm.list<f32>"
+        t = DialectType("test.list", (F32,))
+        assert print_type(t) == "test.list<f32>"
 
     def test_dialect_type_with_format_spec(self) -> None:
         """Printer walks TypeDef format spec when type_registry is provided."""

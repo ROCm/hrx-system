@@ -22,7 +22,6 @@ package(
 
 ALL_TARGETS_ENABLED = loom_config_compatible_with([
     "//loom/config/target/arch:amdgpu",
-    "//loom/config/target/arch:iree_vm",
     "//loom/config/target/arch:spirv",
     "//loom/config/target/arch:wasm",
     "//loom/config/target/arch:x86",
@@ -37,7 +36,6 @@ loom_cc_library(
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/arch/amdgpu:provider",
         "//loom/src/loom/target/arch/cmd:provider",
-        "//loom/src/loom/target/arch/ireevm:provider",
         "//loom/src/loom/target/arch/spirv:provider",
         "//loom/src/loom/target/arch/wasm:provider",
         "//loom/src/loom/target/arch/x86:provider",

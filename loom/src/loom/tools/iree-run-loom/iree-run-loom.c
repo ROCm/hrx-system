@@ -15,23 +15,16 @@
 #ifndef IREE_RUN_LOOM_HAVE_AMDGPU
 #define IREE_RUN_LOOM_HAVE_AMDGPU 0
 #endif  // IREE_RUN_LOOM_HAVE_AMDGPU
-#ifndef IREE_RUN_LOOM_HAVE_IREE_VM
-#define IREE_RUN_LOOM_HAVE_IREE_VM 0
-#endif  // IREE_RUN_LOOM_HAVE_IREE_VM
 #ifndef IREE_RUN_LOOM_HAVE_SPIRV
 #define IREE_RUN_LOOM_HAVE_SPIRV 0
 #endif  // IREE_RUN_LOOM_HAVE_SPIRV
 
-#define IREE_RUN_LOOM_HAVE_ANY_PROVIDER                       \
-  (IREE_RUN_LOOM_HAVE_AMDGPU || IREE_RUN_LOOM_HAVE_IREE_VM || \
-   IREE_RUN_LOOM_HAVE_SPIRV)
+#define IREE_RUN_LOOM_HAVE_ANY_PROVIDER \
+  (IREE_RUN_LOOM_HAVE_AMDGPU || IREE_RUN_LOOM_HAVE_SPIRV)
 
 #if IREE_RUN_LOOM_HAVE_AMDGPU
 #include "loom/tooling/target/amdgpu/execution/provider.h"
 #endif  // IREE_RUN_LOOM_HAVE_AMDGPU
-#if IREE_RUN_LOOM_HAVE_IREE_VM
-#include "loom/tooling/execution/ireevm/provider.h"
-#endif  // IREE_RUN_LOOM_HAVE_IREE_VM
 #if IREE_RUN_LOOM_HAVE_SPIRV
 #include "loom/tooling/target/spirv/execution/provider.h"
 #endif  // IREE_RUN_LOOM_HAVE_SPIRV
@@ -41,9 +34,6 @@ static const loom_run_execution_provider_t* const kIreeRunLoomProviders[] = {
 #if IREE_RUN_LOOM_HAVE_AMDGPU
     &loom_amdgpu_hal_execution_provider,
 #endif  // IREE_RUN_LOOM_HAVE_AMDGPU
-#if IREE_RUN_LOOM_HAVE_IREE_VM
-    &loom_ireevm_execution_provider,
-#endif  // IREE_RUN_LOOM_HAVE_IREE_VM
 #if IREE_RUN_LOOM_HAVE_SPIRV
     &loom_spirv_vulkan_hal_execution_provider,
 #endif  // IREE_RUN_LOOM_HAVE_SPIRV

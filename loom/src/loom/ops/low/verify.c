@@ -1091,8 +1091,6 @@ static iree_status_t loom_low_verify_storage_use(
 static bool loom_low_resource_kind_is_known(uint8_t kind) {
   switch (kind) {
     case LOOM_LOW_RESOURCE_IMPORT_KIND_NATIVE_POINTER:
-    case LOOM_LOW_RESOURCE_IMPORT_KIND_VM_STATE:
-    case LOOM_LOW_RESOURCE_IMPORT_KIND_VM_IMPORT:
     case LOOM_LOW_RESOURCE_IMPORT_KIND_HAL_BINDING:
     case LOOM_LOW_RESOURCE_IMPORT_KIND_COMMAND_INPUT:
       return true;
@@ -1105,10 +1103,6 @@ static iree_string_view_t loom_low_resource_import_kind_name(uint8_t kind) {
   switch (kind) {
     case LOOM_LOW_RESOURCE_IMPORT_KIND_NATIVE_POINTER:
       return IREE_SV("native_pointer");
-    case LOOM_LOW_RESOURCE_IMPORT_KIND_VM_STATE:
-      return IREE_SV("vm_state");
-    case LOOM_LOW_RESOURCE_IMPORT_KIND_VM_IMPORT:
-      return IREE_SV("vm_import");
     case LOOM_LOW_RESOURCE_IMPORT_KIND_HAL_BINDING:
       return IREE_SV("hal_binding");
     case LOOM_LOW_RESOURCE_IMPORT_KIND_COMMAND_INPUT:
@@ -1123,9 +1117,6 @@ static bool loom_low_resource_matches_export_abi(uint8_t kind,
   switch (kind) {
     case LOOM_LOW_RESOURCE_IMPORT_KIND_NATIVE_POINTER:
       return abi == LOOM_TARGET_ABI_OBJECT_FUNCTION;
-    case LOOM_LOW_RESOURCE_IMPORT_KIND_VM_STATE:
-    case LOOM_LOW_RESOURCE_IMPORT_KIND_VM_IMPORT:
-      return abi == LOOM_TARGET_ABI_VM_MODULE_FUNCTION;
     case LOOM_LOW_RESOURCE_IMPORT_KIND_HAL_BINDING:
       return abi == LOOM_TARGET_ABI_HAL_KERNEL;
     case LOOM_LOW_RESOURCE_IMPORT_KIND_COMMAND_INPUT:
@@ -1139,9 +1130,6 @@ static loom_target_abi_kind_t loom_low_resource_expected_abi(uint8_t kind) {
   switch (kind) {
     case LOOM_LOW_RESOURCE_IMPORT_KIND_NATIVE_POINTER:
       return LOOM_TARGET_ABI_OBJECT_FUNCTION;
-    case LOOM_LOW_RESOURCE_IMPORT_KIND_VM_STATE:
-    case LOOM_LOW_RESOURCE_IMPORT_KIND_VM_IMPORT:
-      return LOOM_TARGET_ABI_VM_MODULE_FUNCTION;
     case LOOM_LOW_RESOURCE_IMPORT_KIND_HAL_BINDING:
       return LOOM_TARGET_ABI_HAL_KERNEL;
     case LOOM_LOW_RESOURCE_IMPORT_KIND_COMMAND_INPUT:

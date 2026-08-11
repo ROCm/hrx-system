@@ -40,7 +40,7 @@ RESOURCE_TEST_TAG_FILTERS = (
     "-iree-run-requirement=runtime.resource.webgpu_device",
 )
 CTEST_RESOURCE_LABEL_EXCLUDE_REGEX = "runtime-resource="
-CI_LOOM_TARGETS = "amdgpu,iree_vm,llvmir,spirv,x86"
+CI_LOOM_TARGETS = "amdgpu,llvmir,spirv,x86"
 LOOM_FORMAT_BAZEL_TARGET = "//loom/src/loom/tools/loom-format:loom-format"
 LOOM_FORMAT_CMAKE_TARGET = "loom::tools::loom-format"
 LOOM_LINT_BAZEL_TARGET = "//loom/py/loom/tools:loom-lint"

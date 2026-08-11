@@ -982,11 +982,12 @@ TEST(Tokenizer, AngleInterior) {
 }
 
 TEST(Tokenizer, NestedAngleBrackets) {
-  ScopedTokenizer t("<vm.ref<hal.buffer>>");
+  ScopedTokenizer t("<test.ref<hal.buffer>>");
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_LANGLE);
   iree_string_view_t interior;
   IREE_ASSERT_OK(loom_tokenizer_scan_angle_interior(t.get(), &interior));
-  EXPECT_TRUE(iree_string_view_equal(interior, IREE_SV("vm.ref<hal.buffer>")));
+  EXPECT_TRUE(
+      iree_string_view_equal(interior, IREE_SV("test.ref<hal.buffer>")));
 }
 
 TEST(Tokenizer, AngleInteriorWithEscapedQuotes) {

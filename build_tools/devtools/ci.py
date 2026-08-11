@@ -55,7 +55,6 @@ REPOSITORY_BUILD_HAL_DRIVERS = (
 )
 REPOSITORY_BUILD_LOOM_TARGETS = (
     "amdgpu",
-    "iree_vm",
     "llvmir",
     "spirv",
     "wasm",

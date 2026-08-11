@@ -11,12 +11,10 @@ package(default_visibility = ["//visibility:public"])
 
 DEFAULT_ENABLED = [
     "iree_hal",
-    "iree_vm",
 ]
 
 SUPPORTED_VALUES = [
     "iree_hal",
-    "iree_vm",
 ]
 
 string_list_flag(
@@ -58,15 +56,6 @@ selects.config_setting_group(
         ":iree_hal_amdgpu",
         "//loom/config/target/arch:amdgpu",
         "//loom/config/emit:amdgpu",
-    ],
-)
-
-selects.config_setting_group(
-    name = "iree_vm_execution",
-    match_all = [
-        ":iree_vm",
-        "//loom/config/target/arch:iree_vm",
-        "//loom/config/emit:iree_vm",
     ],
 )
 

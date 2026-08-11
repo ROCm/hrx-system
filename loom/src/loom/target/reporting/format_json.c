@@ -1527,9 +1527,6 @@ iree_status_t loom_target_compile_report_format_json(
   }
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_json_write_optional_string_field(
-          &object, IREE_SV("module"), report->module_name));
-  IREE_RETURN_IF_ERROR(
-      loom_target_compile_report_json_write_optional_string_field(
           &object, IREE_SV("function"), report->function_name));
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_json_write_optional_string_field(

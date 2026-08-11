@@ -107,8 +107,6 @@ iree_string_view_t loom_low_memory_space_name(
       return IREE_SV("workgroup");
     case LOOM_LOW_MEMORY_SPACE_STACK:
       return IREE_SV("stack");
-    case LOOM_LOW_MEMORY_SPACE_VM_REF:
-      return IREE_SV("vm_ref");
     case LOOM_LOW_MEMORY_SPACE_WASM_MEMORY:
       return IREE_SV("wasm_memory");
     default:

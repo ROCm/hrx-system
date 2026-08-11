@@ -327,6 +327,7 @@ func.def target(@test_target) abi(object_function) export("entry") @entry(%lhs: 
 TEST_F(ArtifactManifestCollectTest, CollectsTargetDetailsInDetailsMode) {
   ModulePtr module = ParseModule(R"(
 target.generic<reference> @gpu {
+  artifact_format = elf,
   default_pointer_bitwidth = 64,
   index_bitwidth = 32,
   offset_bitwidth = 64,
@@ -361,7 +362,7 @@ func.def target(@gpu) abi(object_function) export("entry") @entry() {
       output, IREE_SV("{\"kind\":\"loom.artifact_manifest\","
                       "\"schema_version\":1,"
                       "\"mode\":\"details\","
-                      "\"artifact\":{\"format\":\"vm-bytecode\"},"
+                      "\"artifact\":{\"format\":\"elf\"},"
                       "\"targets\":[{\"name\":\"gpu\","
                       "\"default_pointer_bitwidth\":64,"
                       "\"index_bitwidth\":32,"

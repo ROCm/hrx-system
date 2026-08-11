@@ -232,7 +232,7 @@ def capture_loom_amdgpu_artifact(
     output_directory.mkdir(parents=True, exist_ok=True)
     file_stem = f"{stem}.{_file_safe_target(target_text)}"
     source_path = output_directory / f"{file_stem}.loom"
-    vmfb_path = output_directory / f"{file_stem}.vmfb"
+    hal_artifact_path = output_directory / f"{file_stem}.hal"
     code_object_path = output_directory / f"{file_stem}.hsaco"
     compile_report_path = output_directory / f"{file_stem}.compile.json"
     manifest_path = output_directory / f"{file_stem}.manifest.json"
@@ -247,7 +247,7 @@ def capture_loom_amdgpu_artifact(
             str(source_path),
             "--backend=amdgpu-hal",
             f"--target={target_text}",
-            f"--output={vmfb_path}",
+            f"--output={hal_artifact_path}",
             f"--emit-target-artifact={code_object_path}",
             "--compile-report=summary",
             f"--compile-report-output={compile_report_path}",
@@ -271,7 +271,7 @@ def capture_loom_amdgpu_artifact(
         "backend": "amdgpu-hal",
         "target": target_text,
         "source_path": str(source_path),
-        "vmfb_path": str(vmfb_path),
+        "hal_artifact_path": str(hal_artifact_path),
         "compile_report_path": str(compile_report_path),
         "artifact_manifest_path": str(manifest_path),
         "loom_compile": dict(_tool_identity(loom_compile)),

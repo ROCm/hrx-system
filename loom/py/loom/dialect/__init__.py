@@ -35,7 +35,6 @@ from loom.dialect import (
     tile,
     vector,
     view,
-    vm,
 )
 
 __all__ = [
@@ -63,5 +62,4 @@ __all__ = [
     "tile",
     "vector",
     "view",
-    "vm",
 ]

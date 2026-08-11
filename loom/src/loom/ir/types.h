@@ -255,7 +255,7 @@ enum loom_type_kind_e {
   LOOM_TYPE_TENSOR = 3,  // tensor<[%M]xf32>
   // Value 4 is intentionally unassigned and must not be reused.
   LOOM_TYPE_FUNCTION = 5,   // (types) -> (types)
-  LOOM_TYPE_DIALECT = 6,    // hal.buffer, vm.ref<T>, etc.
+  LOOM_TYPE_DIALECT = 6,    // hal.buffer, test.ref<T>, etc.
   LOOM_TYPE_ENCODING = 7,   // encoding<role> (first-class SSA encoding value)
   LOOM_TYPE_POOL = 8,       // pool<[%block_size]> (block-managed memory)
   LOOM_TYPE_VECTOR = 9,     // vector<[%M]xf32> (register lane grid)
@@ -961,7 +961,7 @@ iree_status_t loom_type_function_build(const loom_type_t* arg_types,
 //===----------------------------------------------------------------------===//
 //
 // Dialect types represent types from external dialects (hal.buffer,
-// vm.ref<T>, etc.). They reuse the 24-byte loom_type_t layout:
+// test.ref<T>, etc.). They reuse the 24-byte loom_type_t layout:
 //   dims[1]        → string_id (type name in the module string table)
 //   encoding_id    → unused
 //   encoding_flags → param_count (number of type parameters)

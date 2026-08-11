@@ -40,13 +40,13 @@
       }
     },
     {
-      "name": "compiles branchy module",
+      "name": "compiles source module",
       "steps": [
         {
           "name": "write-source",
           "write": {
-            "path": "{tmp}/branchy.loom",
-            "text": "ireevm.target<core> @vm_target\n\nfunc.def public target(@vm_target) @branchy(%lhs: i32, %rhs: i32) -> (i32) {\n  %c0 = scalar.constant 0 : i32\n  %is_zero = scalar.cmpi eq, %lhs, %c0 : i32\n  cfg.cond_br %is_zero, ^then, ^else\n^then:\n  %sum = scalar.addi %rhs, %rhs : i32\n  func.return %sum : i32\n^else:\n  %diff = scalar.subi %lhs, %rhs : i32\n  func.return %diff : i32\n}\n"
+            "path": "{tmp}/arithmetic.loom",
+            "text": "llvmir.target<object> @target {\n  triple = \"loom-direct64-unknown-none\",\n  data_layout = \"e-p:64:64-i64:64-n8:16:32:64-S128\"\n}\n\nfunc.def public target(@target) @arithmetic(%lhs: i32, %rhs: i32) -> (i32) {\n  %sum = scalar.addi %lhs, %rhs : i32\n  func.return %sum : i32\n}\n"
           }
         },
         {
@@ -54,24 +54,22 @@
           "run": {
             "tool": "loom-compile",
             "args": [
-              "{tmp}/branchy.loom",
-              "--output={tmp}/branchy.vmfb",
+              "--backend=llvmir-text",
+              "{tmp}/arithmetic.loom",
+              "--output={tmp}/arithmetic.ll",
               "--compile-report=summary"
             ]
           },
           "stderr": {
             "save": "{tmp}/compile_report.json",
             "contains": [
-              "\"kind\":\"loom.compile_report\"",
-              "\"schema_version\":0",
-              "\"mode\":\"summary\"",
-              "\"artifact_kind\":\"vm-archive\"",
+              "\"artifact_kind\":\"target-artifact\"",
               "\"status\":{\"code\":0,\"name\":\"OK\"}"
             ]
           },
           "files": [
             {
-              "path": "{tmp}/branchy.vmfb",
+              "path": "{tmp}/arithmetic.ll",
               "non_empty": true
             }
           ]
@@ -84,8 +82,8 @@
         {
           "name": "write-source",
           "write": {
-            "path": "{tmp}/branchy.loom",
-            "text": "ireevm.target<core> @vm_target\n\nfunc.def public target(@vm_target) @branchy(%lhs: i32, %rhs: i32) -> (i32) {\n  %c0 = scalar.constant 0 : i32\n  %is_zero = scalar.cmpi eq, %lhs, %c0 : i32\n  cfg.cond_br %is_zero, ^then, ^else\n^then:\n  %sum = scalar.addi %rhs, %rhs : i32\n  func.return %sum : i32\n^else:\n  %diff = scalar.subi %lhs, %rhs : i32\n  func.return %diff : i32\n}\n"
+            "path": "{tmp}/arithmetic.loom",
+            "text": "llvmir.target<object> @target {\n  triple = \"loom-direct64-unknown-none\",\n  data_layout = \"e-p:64:64-i64:64-n8:16:32:64-S128\"\n}\n\nfunc.def public target(@target) @arithmetic(%lhs: i32, %rhs: i32) -> (i32) {\n  %sum = scalar.addi %lhs, %rhs : i32\n  func.return %sum : i32\n}\n"
           }
         },
         {
@@ -93,15 +91,15 @@
           "run": {
             "tool": "loom-format",
             "args": [
-              "{tmp}/branchy.loom",
+              "{tmp}/arithmetic.loom",
               "--from=text",
               "--to=bytecode",
-              "--output={tmp}/branchy.loombc"
+              "--output={tmp}/arithmetic.loombc"
             ]
           },
           "files": [
             {
-              "path": "{tmp}/branchy.loombc",
+              "path": "{tmp}/arithmetic.loombc",
               "non_empty": true
             }
           ]
@@ -111,20 +109,21 @@
           "run": {
             "tool": "loom-compile",
             "args": [
-              "{tmp}/branchy.loombc",
-              "--output={tmp}/branchy.vmfb",
+              "--backend=llvmir-text",
+              "{tmp}/arithmetic.loombc",
+              "--output={tmp}/arithmetic.ll",
               "--compile-report=summary"
             ]
           },
           "stderr": {
             "contains": [
-              "\"artifact_kind\":\"vm-archive\"",
+              "\"artifact_kind\":\"target-artifact\"",
               "\"status\":{\"code\":0,\"name\":\"OK\"}"
             ]
           },
           "files": [
             {
-              "path": "{tmp}/branchy.vmfb",
+              "path": "{tmp}/arithmetic.ll",
               "non_empty": true
             }
           ]
@@ -139,15 +138,16 @@
           "run": {
             "tool": "loom-compile",
             "args": [
+              "--backend=llvmir-text",
               "{srcdir}/rooted_template_provider.loom",
               "--root=@entry",
-              "--output={tmp}/rooted_template.vmfb",
+              "--output={tmp}/rooted_template.ll",
               "--compile-report=summary"
             ]
           },
           "stderr": {
             "contains": [
-              "\"artifact_kind\":\"vm-archive\"",
+              "\"artifact_kind\":\"target-artifact\"",
               "\"status\":{\"code\":0,\"name\":\"OK\"}"
             ],
             "not_contains": [
@@ -156,7 +156,7 @@
           },
           "files": [
             {
-              "path": "{tmp}/rooted_template.vmfb",
+              "path": "{tmp}/rooted_template.ll",
               "non_empty": true
             }
           ]
@@ -170,7 +170,7 @@
           "name": "write-source",
           "write": {
             "path": "{tmp}/trace.loom",
-            "text": "ireevm.target<core> @vm_target\n\nfunc.def public target(@vm_target) @trace(%lhs: i32, %rhs: i32) -> (i32) {\n  %sum = scalar.addi %lhs, %rhs : i32\n  func.return %sum : i32\n}\n"
+            "text": "llvmir.target<object> @target {\n  triple = \"loom-direct64-unknown-none\",\n  data_layout = \"e-p:64:64-i64:64-n8:16:32:64-S128\"\n}\n\nfunc.def public target(@target) @trace(%lhs: i32, %rhs: i32) -> (i32) {\n  %sum = scalar.addi %lhs, %rhs : i32\n  func.return %sum : i32\n}\n"
           }
         },
         {
@@ -178,8 +178,9 @@
           "run": {
             "tool": "loom-compile",
             "args": [
+              "--backend=llvmir-text",
               "{tmp}/trace.loom",
-              "--output={tmp}/trace.vmfb",
+              "--output={tmp}/trace.ll",
               "--dump-ir-after-all",
               "--dump-ir-format=jsonl",
               "--dump-ir-output=stderr"
@@ -196,7 +197,7 @@
           },
           "files": [
             {
-              "path": "{tmp}/trace.vmfb",
+              "path": "{tmp}/trace.ll",
               "non_empty": true
             }
           ]
@@ -210,7 +211,7 @@
           "name": "write-source",
           "write": {
             "path": "{tmp}/sanitizer.loom",
-            "text": "ireevm.target<core> @vm_target\n\nfunc.def public target(@vm_target) @sanitizer(%lhs: i32, %rhs: i32) -> (i32) {\n  %sum = scalar.addi %lhs, %rhs : i32\n  func.return %sum : i32\n}\n"
+            "text": "llvmir.target<object> @target {\n  triple = \"loom-direct64-unknown-none\",\n  data_layout = \"e-p:64:64-i64:64-n8:16:32:64-S128\"\n}\n\nfunc.def public target(@target) @sanitizer(%lhs: i32, %rhs: i32) -> (i32) {\n  %sum = scalar.addi %lhs, %rhs : i32\n  func.return %sum : i32\n}\n"
           }
         },
         {
@@ -218,8 +219,9 @@
           "run": {
             "tool": "loom-compile",
             "args": [
+              "--backend=llvmir-text",
               "{tmp}/sanitizer.loom",
-              "--output={tmp}/sanitizer.vmfb",
+              "--output={tmp}/sanitizer.ll",
               "--sanitizer=access",
               "--dump-ir-before=sanitizer-insert-assertions",
               "--dump-ir-format=jsonl",
@@ -235,7 +237,7 @@
           },
           "files": [
             {
-              "path": "{tmp}/sanitizer.vmfb",
+              "path": "{tmp}/sanitizer.ll",
               "non_empty": true
             }
           ]
@@ -248,8 +250,8 @@
         {
           "name": "write-source",
           "write": {
-            "path": "{tmp}/branchy.loom",
-            "text": "ireevm.target<core> @vm_target\n\nfunc.def public target(@vm_target) @branchy(%lhs: i32, %rhs: i32) -> (i32) {\n  %c0 = scalar.constant 0 : i32\n  %is_zero = scalar.cmpi eq, %lhs, %c0 : i32\n  cfg.cond_br %is_zero, ^then, ^else\n^then:\n  %sum = scalar.addi %rhs, %rhs : i32\n  func.return %sum : i32\n^else:\n  %diff = scalar.subi %lhs, %rhs : i32\n  func.return %diff : i32\n}\n"
+            "path": "{tmp}/arithmetic.loom",
+            "text": "llvmir.target<object> @target {\n  triple = \"loom-direct64-unknown-none\",\n  data_layout = \"e-p:64:64-i64:64-n8:16:32:64-S128\"\n}\n\nfunc.def public target(@target) @arithmetic(%lhs: i32, %rhs: i32) -> (i32) {\n  %sum = scalar.addi %lhs, %rhs : i32\n  func.return %sum : i32\n}\n"
           }
         },
         {
@@ -257,15 +259,16 @@
           "run": {
             "tool": "loom-compile",
             "args": [
-              "{tmp}/branchy.loom",
-              "--output={tmp}/branchy.vmfb",
+              "--backend=llvmir-text",
+              "{tmp}/arithmetic.loom",
+              "--output={tmp}/arithmetic.ll",
               "--compile-report=details",
               "--compile-report-output={tmp}/report.json"
             ]
           },
           "files": [
             {
-              "path": "{tmp}/branchy.vmfb",
+              "path": "{tmp}/arithmetic.ll",
               "non_empty": true
             },
             {
@@ -279,18 +282,16 @@
           "run": {
             "tool": "loom-compile",
             "args": [
-              "{tmp}/branchy.loom",
-              "--output={tmp}/unused.vmfb",
+              "--backend=llvmir-text",
+              "{tmp}/arithmetic.loom",
+              "--output={tmp}/unused.ll",
               "--compile-report=summary",
               "--compile-report-output=-"
             ]
           },
           "stdout": {
             "contains": [
-              "\"kind\":\"loom.compile_report\"",
-              "\"schema_version\":0",
-              "\"mode\":\"summary\"",
-              "\"artifact_kind\":\"vm-archive\"",
+              "\"artifact_kind\":\"target-artifact\"",
               "\"status\":{\"code\":0,\"name\":\"OK\"}"
             ]
           }
@@ -311,7 +312,7 @@
           "name": "write-source",
           "write": {
             "path": "{tmp}/configured.loom",
-            "text": "ireevm.target<core> @vm_target\n\nconfig.decl @model36.model.delta : i32\n\nfunc.def public target(@vm_target) @configured(%lhs: i32) -> (i32) {\n  %delta = config.get @model36.model.delta : i32\n  %sum = scalar.addi %lhs, %delta : i32\n  func.return %sum : i32\n}\n"
+            "text": "llvmir.target<object> @target {\n  triple = \"loom-direct64-unknown-none\",\n  data_layout = \"e-p:64:64-i64:64-n8:16:32:64-S128\"\n}\n\nconfig.decl @model36.model.delta : i32\n\nfunc.def public target(@target) @configured(%lhs: i32) -> (i32) {\n  %delta = config.get @model36.model.delta : i32\n  %sum = scalar.addi %lhs, %delta : i32\n  func.return %sum : i32\n}\n"
           }
         },
         {
@@ -319,14 +320,15 @@
           "run": {
             "tool": "loom-compile",
             "args": [
+              "--backend=llvmir-text",
               "{tmp}/configured.loom",
               "--config-file={tmp}/config.json",
-              "--output={tmp}/configured.vmfb"
+              "--output={tmp}/configured.ll"
             ]
           },
           "files": [
             {
-              "path": "{tmp}/configured.vmfb",
+              "path": "{tmp}/configured.ll",
               "non_empty": true
             }
           ]
@@ -336,10 +338,11 @@
           "run": {
             "tool": "loom-compile",
             "args": [
+              "--backend=llvmir-text",
               "{tmp}/configured.loom",
               "--config-file={tmp}/config.json",
               "--config=model36.model.delta=16",
-              "--output={tmp}/unused.vmfb"
+              "--output={tmp}/unused.ll"
             ]
           },
           "exit": {
@@ -354,9 +357,10 @@
           "run": {
             "tool": "loom-compile",
             "args": [
+              "--backend=llvmir-text",
               "{tmp}/configured.loom",
               "--pipeline=none",
-              "--output={tmp}/unused.vmfb"
+              "--output={tmp}/unused.ll"
             ]
           },
           "exit": {

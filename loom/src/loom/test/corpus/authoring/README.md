@@ -100,7 +100,7 @@ loom-compile \
   loom/src/loom/test/corpus/authoring/ffn_gate_up_swiglu_q6q8.loom \
   --backend=amdgpu-hal \
   --target=gfx11-generic \
-  --output=/tmp/loom-q6q8.vmfb \
+  --output=/tmp/loom-q6q8.hal \
   --emit-target-artifact=/tmp/loom-q6q8.hsaco \
   --artifact-manifest=summary \
   --emit-artifact-manifest=/tmp/loom-q6q8.manifest.json \
@@ -211,7 +211,7 @@ loom-compile \
   loom/src/loom/test/corpus/authoring/ffn_gate_up_swiglu_q6q8.loom \
   --backend=amdgpu-hal \
   --target=gfx11-generic \
-  --output=/tmp/loom-q6q8.vmfb \
+  --output=/tmp/loom-q6q8.hal \
   --emit-target-artifact=/tmp/loom-q6q8.hsaco \
   --dump-ir-after=select-templates \
   --dump-ir-after=inline-callables \
@@ -482,7 +482,7 @@ padding, swizzling, vectorization, or imported kernel staging choices:
 loom-compile loom/src/loom/test/corpus/authoring/hip/shared_memory_vector_tile.loom \
   --backend=amdgpu-hal \
   --target=gfx11-generic \
-  --output=/tmp/shared-memory-vector-tile.vmfb \
+  --output=/tmp/shared-memory-vector-tile.hal \
   --compile-report=json-details \
   --compile-report-output=/tmp/shared-memory-vector-tile.compile-report.json
 ```
@@ -522,7 +522,7 @@ greppable report is more convenient:
 loom-compile loom/src/loom/test/corpus/authoring/hip/shared_memory_vector_tile.loom \
   --backend=amdgpu-hal \
   --target=gfx11-generic \
-  --output=/tmp/shared-memory-vector-tile.vmfb \
+  --output=/tmp/shared-memory-vector-tile.hal \
   --compile-report=text-details \
   --compile-report-output=/tmp/shared-memory-vector-tile.compile-report.txt
 

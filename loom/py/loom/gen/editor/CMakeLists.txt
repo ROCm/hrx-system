@@ -37,7 +37,6 @@ iree_py_test(
     loom::py::loom::gen::editor::textmate
     loom::py::loom::core
     loom::py::loom::dialect::package
-    loom::py::loom::target::arch::ireevm::dialect
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"

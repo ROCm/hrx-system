@@ -29,7 +29,7 @@ typedef enum loom_type_format_kind_e {
   LOOM_TYPE_FMT_SCALAR = 1,
   // Encoding reference such as `#test.schema` or `%encoding`.
   LOOM_TYPE_FMT_ENCODING = 2,
-  // Recursive type such as `ireevm.ref<T>`.
+  // Recursive type such as `test.ref<T>`.
   LOOM_TYPE_FMT_TYPE = 3,
   // Bare identifier attribute.
   LOOM_TYPE_FMT_ATTR = 4,

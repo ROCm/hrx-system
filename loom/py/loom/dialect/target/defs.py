@@ -70,7 +70,6 @@ SnapshotCodegenFormat = EnumDef(
         EnumCase("unknown", 0, doc="No codegen format selected."),
         EnumCase("llvmir", 1, doc="LLVM IR emission target."),
         EnumCase("spirv", 2, doc="SPIR-V emission target."),
-        EnumCase("vm", 3, doc="IREE VM bytecode target."),
         EnumCase("low_native", 4, doc="Native low dialect code emission target."),
         EnumCase("wasm", 5, doc="WebAssembly module emission target."),
     ],
@@ -86,7 +85,6 @@ _ARTIFACT_FORMAT_CASES = [
     EnumCase("coff", 2, doc="COFF object artifact."),
     EnumCase("macho", 3, doc="Mach-O object artifact."),
     EnumCase("spirv_binary", 4, doc="SPIR-V binary artifact."),
-    EnumCase("vm_bytecode", 5, doc="IREE VM bytecode artifact."),
     EnumCase("wasm_binary", 6, doc="WebAssembly binary module artifact."),
     EnumCase("llvmir_text", 7, doc="Textual LLVM IR module artifact."),
     EnumCase("llvmir_bitcode", 8, doc="LLVM bitcode module artifact."),
@@ -107,7 +105,6 @@ ExportAbiKind = EnumDef(
         EnumCase("unknown", 0, doc="No ABI selected."),
         EnumCase("object_function", 1, doc="Native object function ABI."),
         EnumCase("hal_kernel", 2, doc="IREE HAL dispatch kernel ABI."),
-        EnumCase("vm_module_function", 3, doc="IREE VM module function ABI."),
         EnumCase("shader_entry_point", 4, doc="Graphics shader entry point ABI."),
         EnumCase("wasm_function", 5, doc="WebAssembly module function ABI."),
         EnumCase(

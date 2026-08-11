@@ -219,12 +219,6 @@ def _load_wasm_generation() -> DialectGeneration:
     return DialectGeneration(wasm_ops, list(ALL_WASM_OPS), None)
 
 
-def _load_ireevm_generation() -> DialectGeneration:
-    from loom.target.arch.ireevm.dialect import ALL_IREEVM_OPS, ALL_IREEVM_TYPES, ireevm_ops
-
-    return DialectGeneration(ireevm_ops, list(ALL_IREEVM_OPS), None, types=ALL_IREEVM_TYPES)
-
-
 _DIALECT_GENERATION_LOADERS: tuple[tuple[str, DialectGenerationLoader], ...] = (
     ("test", _load_test_generation),
     ("scalar", _load_scalar_generation),
@@ -251,7 +245,6 @@ _DIALECT_GENERATION_LOADERS: tuple[tuple[str, DialectGenerationLoader], ...] = (
     ("x86", _load_x86_generation),
     ("spirv", _load_spirv_generation),
     ("wasm", _load_wasm_generation),
-    ("ireevm", _load_ireevm_generation),
 )
 
 

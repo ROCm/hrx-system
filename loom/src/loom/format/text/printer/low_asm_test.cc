@@ -294,8 +294,8 @@ TEST_F(LowAsmPrinterTest, PrintsStructuralIntrinsics) {
   const char* source =
       "low.func.def target<test.low.core> @structural() -> "
       "(reg<test.i32>) asm {\n"
-      "  %state = resource<vm_state> {index = 0, source_type = i64} : "
-      "reg<test.i64>\n"
+      "  %binding = resource<hal_binding> {index = 0, source_type = "
+      "hal.buffer} : reg<test.ptr>\n"
       "  %arg0 = live_in<test.arg0> {} : reg<test.i32>\n"
       "  %pair = concat(%arg0, %arg0) : (reg<test.i32>, reg<test.i32>) -> "
       "reg<test.i32 x2>\n"

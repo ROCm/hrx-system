@@ -79,8 +79,8 @@ static void loom_target_symbol_fact_project_record(
 
 static const loom_target_snapshot_t kGenericReferenceSnapshot = {
     .name = IREE_SVL("target-generic-reference"),
-    .codegen_format = LOOM_TARGET_CODEGEN_FORMAT_VM,
-    .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_VM_BYTECODE,
+    .codegen_format = LOOM_TARGET_CODEGEN_FORMAT_UNKNOWN,
+    .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN,
     .default_pointer_bitwidth = 64,
     .index_bitwidth = 64,
     .offset_bitwidth = 64,
@@ -88,7 +88,7 @@ static const loom_target_snapshot_t kGenericReferenceSnapshot = {
 
 static const loom_target_export_plan_t kGenericReferenceExportPlan = {
     .name = IREE_SVL("target-generic-reference"),
-    .abi_kind = LOOM_TARGET_ABI_VM_MODULE_FUNCTION,
+    .abi_kind = LOOM_TARGET_ABI_UNKNOWN,
     .linkage = LOOM_TARGET_LINKAGE_DEFAULT,
 };
 

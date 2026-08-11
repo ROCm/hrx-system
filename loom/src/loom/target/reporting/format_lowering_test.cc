@@ -313,8 +313,8 @@ TEST(CompileReportFormatTest, FormatsMathAndTargetLegalization) {
   math.function_name = IREE_SVL("branchy");
   math.source_op_name = IREE_SVL("scalar.roundf");
   math.source_op_kind = 44;
-  math.target_bundle_name = IREE_SVL("vm_target");
-  math.target_config_name = IREE_SVL("vm_o0");
+  math.target_bundle_name = IREE_SVL("test_target");
+  math.target_config_name = IREE_SVL("test_o0");
   math.policy_name = IREE_SVL("amdgpu-math");
   math.constraint_key = IREE_SVL("math.recipe.round_away_f32");
   math.math_op = LOOM_TARGET_MATH_OP_ROUNDF;
@@ -330,8 +330,8 @@ TEST(CompileReportFormatTest, FormatsMathAndTargetLegalization) {
   legalization.function_name = IREE_SVL("branchy");
   legalization.source_op_name = IREE_SVL("vector.reduce.axes");
   legalization.source_op_kind = 73;
-  legalization.target_bundle_name = IREE_SVL("vm_target");
-  legalization.target_config_name = IREE_SVL("vm_o0");
+  legalization.target_bundle_name = IREE_SVL("test_target");
+  legalization.target_config_name = IREE_SVL("test_o0");
   legalization.legalizer_name = IREE_SVL("vector");
   legalization.legalizer_strategy =
       LOOM_TARGET_COMPILE_REPORT_LEGALIZER_STRATEGY_REFERENCE;

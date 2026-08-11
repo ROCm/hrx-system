@@ -716,7 +716,7 @@ static iree_status_t loom_parse_dialect_type_params(
   return iree_ok_status();
 }
 
-// Parses a dialect type (e.g., hal.buffer, vm.ref<i32>) from the
+// Parses a dialect type (e.g., hal.buffer, test.ref<i32>) from the
 // token stream. Called after the OP_NAME token has been consumed.
 static iree_status_t loom_parse_dialect_type(loom_parser_t* parser,
                                              loom_token_t name_token,

@@ -5,11 +5,11 @@ test.target<low_core> @test_target
 func.decl @add_i32(%lhs: i32, %rhs: i32) -> (i32)
 
 func.def public @entry(%lhs: i32, %rhs: i32) -> (i32) {
-  %is_vm = scalar.constant 1 : i1
-  cfg.cond_br %is_vm, ^vm, ^fallback
-^vm:
-  %vm_sum = low.invoke @vm_add(%lhs, %rhs) : (i32, i32) -> (i32)
-  cfg.br ^join(%vm_sum: i32)
+  %use_primary = scalar.constant 1 : i1
+  cfg.cond_br %use_primary, ^primary, ^fallback
+^primary:
+  %primary_sum = low.invoke @primary_add(%lhs, %rhs) : (i32, i32) -> (i32)
+  cfg.br ^join(%primary_sum: i32)
 ^fallback:
   %fallback_sum = low.invoke @fallback_add(%lhs, %rhs) : (i32, i32) -> (i32)
   cfg.br ^join(%fallback_sum: i32)
@@ -17,7 +17,7 @@ func.def public @entry(%lhs: i32, %rhs: i32) -> (i32) {
   func.return %sum : i32
 }
 
-low.func.def target<test.low.core>(@test_target) @vm_add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @primary_add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
   %sum = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   low.return %sum : reg<test.i32>
 }
@@ -31,11 +31,11 @@ low.func.def target<test.low.core>(@test_target) @fallback_add(%lhs: reg<test.i3
 test.target<low_core> @test_target
 
 func.def public @entry(%lhs: i32, %rhs: i32) -> (i32) {
-  %vm_sum = low.invoke @vm_add(%lhs, %rhs) : (i32, i32) -> (i32)
-  func.return %vm_sum : i32
+  %primary_sum = low.invoke @primary_add(%lhs, %rhs) : (i32, i32) -> (i32)
+  func.return %primary_sum : i32
 }
 
-low.func.def target<test.low.core>(@test_target) @vm_add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @primary_add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
   %sum = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   low.return %sum : reg<test.i32>
 }

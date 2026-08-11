@@ -73,7 +73,7 @@ static iree_status_t loom_low_materialize_allocation_emit_live_range_split(
 static const loom_pass_option_def_t kLowMaterializeAllocationOptions[] = {
     {IREE_SVL("budgets"),
      IREE_SVL("Semicolon-separated register class budgets, such as "
-              "vm.i32=2;x86.zmm=1.")},
+              "test.i32=2;x86.zmm=1.")},
     {IREE_SVL("diagnostics"),
      IREE_SVL("Diagnostic feedback to emit: none or spills.")},
     {IREE_SVL("spill-storage-spaces"),

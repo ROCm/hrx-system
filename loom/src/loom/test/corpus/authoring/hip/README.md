@@ -304,7 +304,7 @@ Target compile evidence:
 loom-compile shared_memory_tile.loom \
   --backend=amdgpu-hal \
   --target=gfx11-generic \
-  --output=/tmp/shared-memory-tile.vmfb \
+  --output=/tmp/shared-memory-tile.hal \
   --emit-target-artifact=/tmp/shared-memory-tile.hsaco \
   --artifact-manifest=summary \
   --compile-report=summary \
@@ -379,7 +379,7 @@ Target compile evidence:
 loom-compile shared_memory_transpose.loom \
   --backend=amdgpu-hal \
   --target=gfx11-generic \
-  --output=/tmp/shared-memory-transpose.vmfb \
+  --output=/tmp/shared-memory-transpose.hal \
   --emit-target-artifact=/tmp/shared-memory-transpose.hsaco \
   --artifact-manifest=summary \
   --compile-report=summary \
@@ -449,7 +449,7 @@ Target compile evidence:
 loom-compile shared_memory_vector_tile.loom \
   --backend=amdgpu-hal \
   --target=gfx11-generic \
-  --output=/tmp/shared-memory-vector-tile.vmfb \
+  --output=/tmp/shared-memory-vector-tile.hal \
   --emit-target-artifact=/tmp/shared-memory-vector-tile.hsaco \
   --artifact-manifest=summary \
   --compile-report=summary \
@@ -705,7 +705,7 @@ Compile the same source for generic wave32 and wave64 target profiles:
 loom-compile target_provider_selection.loom \
   --backend=amdgpu-hal \
   --target=gfx11-generic \
-  --output=/tmp/target-provider-gfx11-generic.vmfb \
+  --output=/tmp/target-provider-gfx11-generic.hal \
   --emit-target-artifact=/tmp/target-provider-gfx11-generic.hsaco \
   --dump-ir-after=select-templates \
   --dump-ir-format=jsonl \
@@ -714,7 +714,7 @@ loom-compile target_provider_selection.loom \
 loom-compile target_provider_selection.loom \
   --backend=amdgpu-hal \
   --target=gfx9-4-generic \
-  --output=/tmp/target-provider-gfx9-4-generic.vmfb \
+  --output=/tmp/target-provider-gfx9-4-generic.hal \
   --emit-target-artifact=/tmp/target-provider-gfx9-4-generic.hsaco \
   --dump-ir-after=select-templates \
   --dump-ir-format=jsonl \
@@ -793,7 +793,7 @@ Proof command:
 loom-compile cluster_b128_multicast.loom \
   --backend=amdgpu-hal \
   --target=gfx1250 \
-  --output=/tmp/cluster-b128-multicast.vmfb \
+  --output=/tmp/cluster-b128-multicast.hal \
   --emit-target-artifact=/tmp/cluster-b128-multicast.hsaco \
   --artifact-manifest=summary \
   --emit-artifact-manifest=/tmp/cluster-b128-multicast.manifest.json \

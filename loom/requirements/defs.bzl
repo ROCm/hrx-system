@@ -18,13 +18,6 @@ EMIT_AMDGPU = build_requirement(
     cmake_condition = "LOOM_EMIT_AMDGPU",
 )
 
-EMIT_IREE_VM = build_requirement(
-    id = "loom.emit.iree_vm",
-    label = Label("//loom/requirements:emit_iree_vm"),
-    enabled_by = Label("//loom/config/emit:iree_vm"),
-    cmake_condition = "LOOM_EMIT_IREE_VM",
-)
-
 EMIT_LLVMIR = build_requirement(
     id = "loom.emit.llvmir",
     label = Label("//loom/requirements:emit_llvmir"),
@@ -53,13 +46,6 @@ EXECUTE_IREE_HAL = build_requirement(
     cmake_condition = "LOOM_EXECUTE_IREE_HAL",
 )
 
-EXECUTE_IREE_VM = build_requirement(
-    id = "loom.execute.iree_vm",
-    label = Label("//loom/requirements:execute_iree_vm"),
-    enabled_by = Label("//loom/config/execute:iree_vm"),
-    cmake_condition = "LOOM_EXECUTE_IREE_VM",
-)
-
 IMPORT_MLIR = build_requirement(
     id = "loom.import.mlir",
     label = Label("//loom/requirements:import_mlir"),
@@ -79,13 +65,6 @@ TARGET_ARCH_AMDGPU = build_requirement(
     label = Label("//loom/requirements:target_arch_amdgpu"),
     enabled_by = Label("//loom/config/target/arch:amdgpu"),
     cmake_condition = "LOOM_TARGET_ARCH_AMDGPU",
-)
-
-TARGET_ARCH_IREE_VM = build_requirement(
-    id = "loom.target.arch.iree_vm",
-    label = Label("//loom/requirements:target_arch_iree_vm"),
-    enabled_by = Label("//loom/config/target/arch:iree_vm"),
-    cmake_condition = "LOOM_TARGET_ARCH_IREE_VM",
 )
 
 TARGET_ARCH_LLVMIR = build_requirement(
@@ -118,16 +97,13 @@ TARGET_ARCH_X86 = build_requirement(
 
 REQUIREMENTS = [
     EMIT_AMDGPU,
-    EMIT_IREE_VM,
     EMIT_LLVMIR,
     EMIT_SPIRV,
     EMIT_WASM,
     EXECUTE_IREE_HAL,
-    EXECUTE_IREE_VM,
     IMPORT_MLIR,
     IMPORT_TILELANG,
     TARGET_ARCH_AMDGPU,
-    TARGET_ARCH_IREE_VM,
     TARGET_ARCH_LLVMIR,
     TARGET_ARCH_SPIRV,
     TARGET_ARCH_WASM,

@@ -3562,7 +3562,7 @@ class EncodingFamilyDef:
 class TypeParam:
     """A type parameter — another type nested inside this type.
 
-    Used for parameterized types like vm.ref<hal.buffer> where the
+    Used for parameterized types like test.ref<hal.buffer> where the
     inner type (hal.buffer) is a type parameter.
     """
 
@@ -3707,7 +3707,7 @@ class TypeDef:
 
     The format describes the interior of name<...>:
       - Empty format = opaque type (no angle brackets): hal.buffer
-      - Non-empty format = parameterized: vm.ref<hal.buffer>, tile<4x4xf32>
+      - Non-empty format = parameterized: test.ref<hal.buffer>, tile<4x4xf32>
     The optional fact_domain names a C ``loom_value_fact_domain_t`` symbol
     attached to the generated type descriptor; typed fact extensions use the
     value's type to find this domain instead of a global schema registry.
@@ -3722,10 +3722,10 @@ class TypeDef:
         # Prints: hal.buffer
 
         # Single type parameter:
-        TypeDef(name="vm.ref",
+        TypeDef(name="test.ref",
                 params=[TypeParam("object", ANY)],
                 format=[TypeOf("object")])
-        # Prints: vm.ref<hal.buffer>
+        # Prints: test.ref<hal.buffer>
 
         # Descriptor-backed parameters with positional and keyed text:
         TypeDef(name="test.matrix",

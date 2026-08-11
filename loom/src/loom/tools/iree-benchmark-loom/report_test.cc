@@ -158,7 +158,7 @@ TEST(BenchmarkReportTest, WritesCanonicalCompileReportTree) {
       &capture_options, allocator, &capture));
 
   loom_target_compile_report_t* report = &capture.report;
-  report->artifact_kind = LOOM_TARGET_COMPILE_ARTIFACT_KIND_VM_ARCHIVE;
+  report->artifact_kind = LOOM_TARGET_COMPILE_ARTIFACT_KIND_TARGET_ARTIFACT;
   report->backend_name = IREE_SV("test-hal");
   report->target_family_name = IREE_SV("test");
   report->target_key = IREE_SV("test-target");
@@ -252,7 +252,7 @@ TEST(BenchmarkReportTest, WritesCanonicalCompileReportTree) {
   iree_string_view_t compile_report =
       LookupObject(root, IREE_SV("compile_report"));
   ExpectObjectValueEquals(compile_report, IREE_SV("artifact_kind"),
-                          IREE_SV("vm-archive"));
+                          IREE_SV("target-artifact"));
   ExpectStatusObject(LookupObject(compile_report, IREE_SV("status")),
                      IREE_STATUS_OK, iree_string_view_empty());
   ExpectObjectValueEquals(compile_report, IREE_SV("backend"),

@@ -112,21 +112,6 @@ pipeline. Specialization can therefore select providers and remove unreachable
 paths before later compilation work. Nested JSON keys flatten with `.`
 separators; explicit bindings not referenced by the module are ignored.
 
-## Compile a VM-targeted module
-
-The VM backend emits a VM bytecode archive from functions authored for an
-`ireevm.target`:
-
-```shell
-loom-compile program.loom \
-  --backend=vm \
-  --output=program.vmfb
-```
-
-This is an artifact backend, not an implicit reference interpreter for an
-arbitrary device kernel. The module still states which functions target the VM
-and which entry points are public.
-
 Target-owned emitters can also expose intermediate deployment formats directly.
 For example, an installation with the LLVM IR emitter can write textual or
 bitcode artifacts:

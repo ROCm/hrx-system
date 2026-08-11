@@ -1406,7 +1406,6 @@ static bool loom_low_memory_space_is_valid(loom_low_memory_space_t space) {
     case LOOM_LOW_MEMORY_SPACE_GLOBAL:
     case LOOM_LOW_MEMORY_SPACE_WORKGROUP:
     case LOOM_LOW_MEMORY_SPACE_STACK:
-    case LOOM_LOW_MEMORY_SPACE_VM_REF:
     case LOOM_LOW_MEMORY_SPACE_WASM_MEMORY:
       return true;
     default:

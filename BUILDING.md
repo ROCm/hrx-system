@@ -263,10 +263,10 @@ separate concern controlled by Loom execution support and the runtime
 `IREE_HAL_DRIVER_*` options.
 
 The default dependency-satisfied Loom target set is
-`amdgpu,iree_vm,spirv,x86`. AMDGPU and SPIR-V target compilation use pinned
+`amdgpu,llvmir,spirv,x86`. AMDGPU and SPIR-V target compilation use pinned
 source dependencies by default and do not enable the matching runtime HAL
 drivers. WebAssembly remains opt-in until the WASI SDK repository is available
-in this checkout. The default execution substrate set is `iree_hal,iree_vm`;
+in this checkout. The default execution substrate set is `iree_hal`;
 backend execution providers still require a matching runtime HAL driver such as
 `IREE_HAL_DRIVER_VULKAN` or
 `IREE_HAL_DRIVER_AMDGPU`.
@@ -336,21 +336,19 @@ should usually keep `loom_defaults`.
 | --- | --- | --- | --- | --- |
 | `LOOM_TARGET_AMDGPU` | `ON`, `OFF` | Builds Loom AMDGPU target support and production AMDGPU emission. | Adds or removes `amdgpu` from the Loom target product set. | `--//loom/config/target:enable=<complete-target-list>` |
 | `LOOM_TARGET_AMDGPU_TARGETS` | AMDGPU selectors | Selects descriptor-backed AMDGPU processors compiled into Loom AMDGPU target support. | Not exposed as a portable `-D` option. | `--//loom/config/target/amdgpu:targets=<complete-selector-list>` |
-| `LOOM_TARGET_IREE_VM` | `ON`, `OFF` | Builds Loom IREE VM target support and production IREE VM emission. | Adds or removes `iree_vm` from the Loom target product set. | `--//loom/config/target:enable=<complete-target-list>` |
 | `LOOM_TARGET_SPIRV` | `ON`, `OFF` | Builds Loom SPIR-V target support and production SPIR-V emission. | Adds or removes `spirv` from the Loom target product set. | `--//loom/config/target:enable=<complete-target-list>` |
 | `LOOM_TARGET_WASM` | `ON`, `OFF` | Builds Loom WebAssembly target support and production Wasm emission. | Adds or removes `wasm` from the Loom target product set. | `--//loom/config/target:enable=<complete-target-list>` |
 | `LOOM_TARGET_X86` | `ON`, `OFF` | Builds Loom x86 target support. | Adds or removes `x86` from the Loom target product set. | `--//loom/config/target:enable=<complete-target-list>` |
 | `LOOM_EMIT_LLVMIR` | `ON`, `OFF` | Builds LLVM IR debug/developer emission for enabled target archs. | Adds or removes `llvmir` from the explicit Loom emitter set. | `--//loom/config/emit:enable=<complete-emitter-list>` |
 | `LOOM_EXECUTE_IREE_HAL` | `ON`, `OFF` | Builds Loom execution providers that run through IREE HAL when a matching runtime HAL driver is enabled. | Adds or removes `iree_hal` from the Loom execute substrate set. | `--//loom/config/execute:enable=<complete-execute-list>` |
-| `LOOM_EXECUTE_IREE_VM` | `ON`, `OFF` | Builds Loom execution providers that run through the IREE VM substrate. | Adds or removes `iree_vm` from the Loom execute substrate set. | `--//loom/config/execute:enable=<complete-execute-list>` |
 
 The native Loom target flag is a complete list. The default target set is
-`amdgpu,iree_vm,spirv,x86`, and the default execution substrate set is
-`iree_hal,iree_vm`:
+`amdgpu,llvmir,spirv,x86`, and the default execution substrate set is
+`iree_hal`:
 
 ```bash
 python dev.py bazel configure \
-  --//loom/config/target:enable=amdgpu,iree_vm,spirv,x86
+  --//loom/config/target:enable=amdgpu,llvmir,spirv,x86
 ```
 
 AMDGPU compiler target selection is also a complete list. Bazel uses

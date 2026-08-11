@@ -39,7 +39,6 @@ iree_py_library(
         "//loom/py/loom/dialect/tile",
         "//loom/py/loom/dialect/vector",
         "//loom/py/loom/dialect/view",
-        "//loom/py/loom/dialect/vm",
     ],
 )
 

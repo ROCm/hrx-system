@@ -22,8 +22,6 @@ extern "C" {
 typedef enum loom_target_compile_artifact_kind_e {
   // No artifact was produced.
   LOOM_TARGET_COMPILE_ARTIFACT_KIND_NONE = 0,
-  // IREE VM bytecode archive artifact.
-  LOOM_TARGET_COMPILE_ARTIFACT_KIND_VM_ARCHIVE = 1,
   // IREE HAL loader executable artifact.
   LOOM_TARGET_COMPILE_ARTIFACT_KIND_HAL_EXECUTABLE = 2,
   // Target-native HAL kernel library artifact.
@@ -1863,8 +1861,6 @@ typedef struct loom_target_compile_report_t {
   loom_target_compile_report_detail_flags_t detail_flags;
   // Target artifact function symbol when exactly one entry is described.
   iree_string_view_t function_name;
-  // VM module name requested for archive emission.
-  iree_string_view_t module_name;
   // Execution or codegen backend name that produced the candidate, if any.
   iree_string_view_t backend_name;
   // Target family name selected by the backend, if any.

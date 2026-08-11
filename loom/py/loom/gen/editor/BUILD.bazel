@@ -40,6 +40,5 @@ iree_py_test(
         ":textmate",
         "//loom/py/loom:core",
         "//loom/py/loom/dialect:package",
-        "//loom/py/loom/target/arch/ireevm:dialect",
     ],
 )

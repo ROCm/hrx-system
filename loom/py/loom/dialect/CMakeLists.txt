@@ -39,7 +39,6 @@ iree_py_library(
     loom::py::loom::dialect::tile::tile
     loom::py::loom::dialect::vector::vector
     loom::py::loom::dialect::view::view
-    loom::py::loom::dialect::vm::vm
 )
 
 iree_py_library(

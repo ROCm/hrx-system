@@ -50,10 +50,6 @@ PACKAGE_INITS = (
         "Sharded AMDGPU source-to-low contract fragments.",
     ),
     PackageInit(
-        "loom/py/loom/target/arch/ireevm/__init__.py",
-        "IREE VM target-family descriptor and dialect inputs.",
-    ),
-    PackageInit(
         "loom/py/loom/target/arch/spirv/__init__.py",
         "SPIR-V target-family descriptor and dialect inputs.",
     ),
@@ -68,10 +64,6 @@ PACKAGE_INITS = (
     PackageInit(
         "loom/py/loom/target/arch/x86/contracts/__init__.py",
         "x86 source-to-low contract fragments.",
-    ),
-    PackageInit(
-        "loom/py/loom/target/arch/ireevm/contracts/__init__.py",
-        "IREE VM source-to-low contract fragments.",
     ),
     PackageInit(
         "loom/py/loom/target/emit/__init__.py",

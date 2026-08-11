@@ -21,9 +21,6 @@ option(LOOM_TARGET_DEFAULTS
 if(NOT DEFINED LOOM_TARGET_AMDGPU_DEFAULT)
   set(LOOM_TARGET_AMDGPU_DEFAULT ${LOOM_TARGET_DEFAULTS})
 endif()
-if(NOT DEFINED LOOM_TARGET_IREE_VM_DEFAULT)
-  set(LOOM_TARGET_IREE_VM_DEFAULT ${LOOM_TARGET_DEFAULTS})
-endif()
 if(NOT DEFINED LOOM_TARGET_LLVMIR_DEFAULT)
   set(LOOM_TARGET_LLVMIR_DEFAULT ${LOOM_TARGET_DEFAULTS})
 endif()
@@ -45,9 +42,6 @@ if(NOT DEFINED LOOM_TARGET_AMDGPU_TARGETS)
     CACHE STRING
     "Loom AMDGPU target selectors to compile into AMDGPU target support.")
 endif()
-option(LOOM_TARGET_IREE_VM
-  "Enables Loom IREE VM target support."
-  ${LOOM_TARGET_IREE_VM_DEFAULT})
 option(LOOM_TARGET_LLVMIR
   "Enables Loom LLVM IR oracle target support."
   ${LOOM_TARGET_LLVMIR_DEFAULT})
@@ -64,9 +58,6 @@ option(LOOM_TARGET_X86
 option(LOOM_TARGET_ARCH_AMDGPU
   "Enables the AMDGPU Loom target architecture slice."
   OFF)
-option(LOOM_TARGET_ARCH_IREE_VM
-  "Enables the IREE VM Loom target architecture slice."
-  OFF)
 option(LOOM_TARGET_ARCH_LLVMIR
   "Enables the LLVM IR Loom oracle target architecture slice."
   OFF)
@@ -81,7 +72,6 @@ option(LOOM_TARGET_ARCH_X86
   OFF)
 mark_as_advanced(
   LOOM_TARGET_ARCH_AMDGPU
-  LOOM_TARGET_ARCH_IREE_VM
   LOOM_TARGET_ARCH_LLVMIR
   LOOM_TARGET_ARCH_SPIRV
   LOOM_TARGET_ARCH_WASM
@@ -90,9 +80,6 @@ mark_as_advanced(
 
 option(LOOM_EMIT_AMDGPU
   "Enables the AMDGPU Loom artifact emitter slice."
-  OFF)
-option(LOOM_EMIT_IREE_VM
-  "Enables the IREE VM Loom artifact emitter slice."
   OFF)
 option(LOOM_EMIT_LLVMIR
   "Enables the LLVM IR Loom debug artifact emitter slice." OFF)
@@ -104,7 +91,6 @@ option(LOOM_EMIT_WASM
   OFF)
 mark_as_advanced(
   LOOM_EMIT_AMDGPU
-  LOOM_EMIT_IREE_VM
   LOOM_EMIT_LLVMIR
   LOOM_EMIT_SPIRV
   LOOM_EMIT_WASM
@@ -113,10 +99,6 @@ mark_as_advanced(
 if(LOOM_TARGET_AMDGPU)
   set(LOOM_TARGET_ARCH_AMDGPU ON)
   set(LOOM_EMIT_AMDGPU ON)
-endif()
-if(LOOM_TARGET_IREE_VM)
-  set(LOOM_TARGET_ARCH_IREE_VM ON)
-  set(LOOM_EMIT_IREE_VM ON)
 endif()
 if(LOOM_TARGET_LLVMIR)
   set(LOOM_TARGET_ARCH_LLVMIR ON)
@@ -143,15 +125,9 @@ option(LOOM_EXECUTE_DEFAULTS
 if(NOT DEFINED LOOM_EXECUTE_IREE_HAL_DEFAULT)
   set(LOOM_EXECUTE_IREE_HAL_DEFAULT ${LOOM_EXECUTE_DEFAULTS})
 endif()
-if(NOT DEFINED LOOM_EXECUTE_IREE_VM_DEFAULT)
-  set(LOOM_EXECUTE_IREE_VM_DEFAULT ${LOOM_EXECUTE_DEFAULTS})
-endif()
 option(LOOM_EXECUTE_IREE_HAL
   "Enables Loom execution providers that use IREE HAL runtime support."
   ${LOOM_EXECUTE_IREE_HAL_DEFAULT})
-option(LOOM_EXECUTE_IREE_VM
-  "Enables Loom execution tests that use IREE VM runtime support."
-  ${LOOM_EXECUTE_IREE_VM_DEFAULT})
 
 option(LOOM_IMPORT_MLIR
   "Enables the Loom MLIR importer package and importer tests." OFF)
@@ -161,11 +137,6 @@ option(LOOM_IMPORT_TILELANG
 if(LOOM_EMIT_AMDGPU AND NOT LOOM_TARGET_ARCH_AMDGPU)
   message(FATAL_ERROR
     "LOOM_EMIT_AMDGPU=ON requires LOOM_TARGET_ARCH_AMDGPU=ON.")
-endif()
-
-if(LOOM_EMIT_IREE_VM AND NOT LOOM_TARGET_ARCH_IREE_VM)
-  message(FATAL_ERROR
-    "LOOM_EMIT_IREE_VM=ON requires LOOM_TARGET_ARCH_IREE_VM=ON.")
 endif()
 
 if(LOOM_EMIT_LLVMIR AND NOT LOOM_TARGET_ARCH_LLVMIR)

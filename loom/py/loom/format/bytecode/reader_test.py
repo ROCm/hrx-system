@@ -1098,21 +1098,21 @@ class TestTypeRoundTrips:
         assert self._roundtrip_type(t) == t
 
     def test_dialect_parameterized(self) -> None:
-        t = DialectType("vm.ref", (DialectType("hal.buffer"),))
+        t = DialectType("test.ref", (DialectType("hal.buffer"),))
         loaded = self._roundtrip_type(t)
         assert isinstance(loaded, DialectType)
-        assert loaded.name == "vm.ref"
+        assert loaded.name == "test.ref"
         assert isinstance(loaded.params[0], DialectType)
         assert loaded.params[0].name == "hal.buffer"
 
     def test_dialect_nested(self) -> None:
-        inner = DialectType("vm.list", (I32,))
-        t = DialectType("vm.ref", (inner,))
+        inner = DialectType("test.list", (I32,))
+        t = DialectType("test.ref", (inner,))
         loaded = self._roundtrip_type(t)
         assert isinstance(loaded, DialectType)
-        assert loaded.name == "vm.ref"
+        assert loaded.name == "test.ref"
         assert isinstance(loaded.params[0], DialectType)
-        assert loaded.params[0].name == "vm.list"
+        assert loaded.params[0].name == "test.list"
         assert loaded.params[0].params[0] == I32
 
     def test_dialect_multiple_params(self) -> None:
@@ -1141,7 +1141,7 @@ class TestTypeRoundTrips:
         assert self._roundtrip_type(t) == t
 
     def test_register_dialect_value_type(self) -> None:
-        dialect_type = DialectType("vm.ref", (I32,))
+        dialect_type = DialectType("test.ref", (I32,))
         t = _test_ptr_register_type(value_type=dialect_type)
         assert self._roundtrip_type(t) == t
 

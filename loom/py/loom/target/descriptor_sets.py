@@ -42,12 +42,6 @@ DESCRIPTOR_SET_REGISTRATIONS = (
         aliases=("cmd_core",),
     ),
     DescriptorSetRegistration(
-        key="ireevm.core",
-        module_name="loom.target.arch.ireevm.descriptors",
-        symbol_name="IREEVM_CORE_DESCRIPTOR_SET",
-        aliases=("ireevm_core",),
-    ),
-    DescriptorSetRegistration(
         key="llvmir.generic.core",
         module_name="loom.target.arch.llvmir.descriptors",
         symbol_name="LLVMIR_GENERIC_CORE_DESCRIPTOR_SET",
