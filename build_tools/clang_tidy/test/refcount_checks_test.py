@@ -44,6 +44,7 @@ class RefCountChecksTest(clang_tidy_test.ClangTidyAssertions):
                 "field in a refcounted object",
                 "iree_atomic_ref_count_t field pending_submissions must model "
                 "object lifetime",
+                "iree_atomic_ref_count_t field counter must model object lifetime",
                 "iree_atomic_ref_count_t field queued_callbacks must model "
                 "object lifetime",
                 "refcounted object factory "
