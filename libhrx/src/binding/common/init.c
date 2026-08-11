@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "common/internal.h"
+#include "iree/hal/topology_builder.h"
 //===----------------------------------------------------------------------===//
 // Global state
 //===----------------------------------------------------------------------===//
@@ -362,44 +363,61 @@ static iree_status_t iree_hal_streaming_query_p2p_capabilities(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Allocate P2P topology array.
-  registry->p2p_link_count = registry->device_count * registry->device_count;
-  const iree_host_size_t topology_size =
-      registry->p2p_link_count * sizeof(iree_hal_streaming_p2p_link_t);
+  iree_host_size_t topology_size = 0;
+  if (!iree_host_size_checked_mul(registry->device_count,
+                                  registry->device_count,
+                                  &registry->p2p_link_count) ||
+      !iree_host_size_checked_mul(registry->p2p_link_count,
+                                  sizeof(iree_hal_streaming_p2p_link_t),
+                                  &topology_size)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "P2P topology allocation size overflow");
+  }
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_allocator_malloc(registry->host_allocator, topology_size,
                                 (void**)&registry->p2p_topology));
   memset(registry->p2p_topology, 0, topology_size);
 
-  // Populate P2P links for all device pairs.
+  // Refine every directed pair while the device registry is being built. The
+  // resulting table is immutable and keeps live backend topology queries out
+  // of API call paths.
   iree_host_size_t link_index = 0;
-  for (iree_host_size_t i = 0; i < registry->device_count; ++i) {
-    for (iree_host_size_t j = 0; j < registry->device_count; ++j) {
-      iree_hal_streaming_p2p_link_t* link =
-          &registry->p2p_topology[link_index++];
-      link->src_device = i;
-      link->dst_device = j;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < registry->device_count && iree_status_is_ok(status); ++i) {
+    for (iree_host_size_t j = 0;
+         j < registry->device_count && iree_status_is_ok(status); ++j) {
+      iree_hal_streaming_device_t* source_device = &registry->devices[i];
+      iree_hal_streaming_device_t* destination_device = &registry->devices[j];
+      iree_hal_topology_edge_t topology_edge;
       if (i == j) {
-        // Device can always access itself with best performance.
-        link->access_supported = true;
-        link->native_atomic_supported = true;
-        link->cuda_array_access_supported = true;
-        link->performance_rank = 100;   // Highest rank for same device.
-        link->bandwidth_mbps = 900000;  // 900 GB/s typical for device memory.
-        link->latency_ns = 10;          // Very low latency.
+        topology_edge = iree_hal_topology_edge_make_self();
       } else {
-        // TODO: Query actual P2P capabilities from pyre/HSA.
-        link->access_supported = false;
-        link->native_atomic_supported = false;
-        link->cuda_array_access_supported = false;
-        link->performance_rank = -1;  // Not supported.
-        link->bandwidth_mbps = 0;
-        link->latency_ns = 0;
+        topology_edge = iree_hal_topology_edge_from_device_specs(
+            iree_hal_device_spec(source_device->hal_device),
+            iree_hal_device_spec(destination_device->hal_device));
+        status = iree_hal_device_refine_topology_edge(
+            source_device->hal_device, destination_device->hal_device,
+            &topology_edge);
+        if (!iree_status_is_ok(status)) continue;
       }
+
+      iree_hal_streaming_p2p_link_initialize(
+          i, j, iree_make_cstring_view(source_device->gcn_arch_name),
+          iree_make_cstring_view(destination_device->gcn_arch_name),
+          topology_edge, &registry->p2p_topology[link_index++]);
     }
   }
 
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(registry->host_allocator, registry->p2p_topology);
+    registry->p2p_topology = NULL;
+    registry->p2p_link_count = 0;
+  }
+
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  return status;
 }
 
 //===----------------------------------------------------------------------===//

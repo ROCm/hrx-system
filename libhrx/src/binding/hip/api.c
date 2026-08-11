@@ -2611,9 +2611,74 @@ HIPAPI hipError_t hipDeviceCanAccessPeer(int* canAccessPeer, int device,
     return hipSuccess;
   }
 
-  // Direct peer access is not advertised until backend topology reports it.
-  // Copy APIs may still stage transfers through host memory.
+  bool can_access = false;
+  iree_status_t status = iree_hal_streaming_device_can_access_peer(
+      (iree_host_size_t)device, (iree_host_size_t)peerDevice, &can_access);
+  if (!iree_status_is_ok(status)) {
+    HIP_RETURN_ERROR(iree_status_to_hip_result(status));
+  }
+  *canAccessPeer = can_access ? 1 : 0;
   return hipSuccess;
+}
+
+typedef enum iree_hip_link_type_e {
+  IREE_HIP_LINK_TYPE_HYPERTRANSPORT = 0,
+  IREE_HIP_LINK_TYPE_QPI = 1,
+  IREE_HIP_LINK_TYPE_PCIE = 2,
+  IREE_HIP_LINK_TYPE_INFINIBAND = 3,
+  IREE_HIP_LINK_TYPE_XGMI = 4,
+} iree_hip_link_type_t;
+
+static bool iree_hip_link_type_from_topology(
+    iree_hal_topology_link_type_t topology_link_type,
+    iree_hip_link_type_t* out_link_type) {
+  switch (topology_link_type) {
+    case IREE_HAL_TOPOLOGY_LINK_TYPE_HYPERTRANSPORT:
+      *out_link_type = IREE_HIP_LINK_TYPE_HYPERTRANSPORT;
+      return true;
+    case IREE_HAL_TOPOLOGY_LINK_TYPE_QPI:
+      *out_link_type = IREE_HIP_LINK_TYPE_QPI;
+      return true;
+    case IREE_HAL_TOPOLOGY_LINK_TYPE_PCIE:
+      *out_link_type = IREE_HIP_LINK_TYPE_PCIE;
+      return true;
+    case IREE_HAL_TOPOLOGY_LINK_TYPE_INFINIBAND:
+      *out_link_type = IREE_HIP_LINK_TYPE_INFINIBAND;
+      return true;
+    case IREE_HAL_TOPOLOGY_LINK_TYPE_XGMI:
+      *out_link_type = IREE_HIP_LINK_TYPE_XGMI;
+      return true;
+    default:
+      return false;
+  }
+}
+
+static hipError_t iree_hip_enable_peer_access_status_to_result(
+    iree_status_t status) {
+  if (iree_status_is_ok(status)) return hipSuccess;
+  const iree_status_code_t code = iree_status_code(status);
+  iree_status_free(status);
+  switch (code) {
+    case IREE_STATUS_ALREADY_EXISTS:
+      return hipErrorPeerAccessAlreadyEnabled;
+    case IREE_STATUS_INVALID_ARGUMENT:
+      return hipErrorInvalidDevice;
+    case IREE_STATUS_UNAVAILABLE:
+      return hipErrorPeerAccessUnsupported;
+    case IREE_STATUS_RESOURCE_EXHAUSTED:
+      return hipErrorOutOfMemory;
+    default:
+      return hipErrorUnknown;
+  }
+}
+
+static hipError_t iree_hip_disable_peer_access_status_to_result(
+    iree_status_t status) {
+  if (iree_status_is_ok(status)) return hipSuccess;
+  const iree_status_code_t code = iree_status_code(status);
+  iree_status_free(status);
+  return code == IREE_STATUS_NOT_FOUND ? hipErrorPeerAccessNotEnabled
+                                       : hipErrorUnknown;
 }
 
 // Gets peer-to-peer attributes between two devices.
@@ -2623,7 +2688,7 @@ HIPAPI hipError_t hipDeviceCanAccessPeer(int* canAccessPeer, int device,
 //  - attrib: [IN] P2P attribute to query (hipDevP2PAttrPerformanceRank,
 //                 hipDevP2PAttrAccessSupported,
 //                 hipDevP2PAttrNativeAtomicSupported,
-//                 hipDevP2PAttrCudaArrayAccessSupported).
+//                 hipDevP2PAttrHipArrayAccessSupported).
 //  - srcDevice: [IN] Source device in P2P pair.
 //  - dstDevice: [IN] Destination device in P2P pair.
 //
@@ -2635,10 +2700,10 @@ HIPAPI hipError_t hipDeviceCanAccessPeer(int* canAccessPeer, int device,
 // Synchronization: This operation is synchronous.
 //
 // P2P attributes:
-// - hipDevP2PAttrPerformanceRank: Relative performance (higher is better).
+// - hipDevP2PAttrPerformanceRank: Physical transport rank reported by HIP.
 // - hipDevP2PAttrAccessSupported: 1 if P2P access is supported.
 // - hipDevP2PAttrNativeAtomicSupported: 1 if atomic operations supported.
-// - hipDevP2PAttrCudaArrayAccessSupported: 1 if array access supported.
+// - hipDevP2PAttrHipArrayAccessSupported: 1 if array access supported.
 //
 // Multi-GPU:
 // - Queries capabilities of direct GPU-to-GPU communication.
@@ -2662,8 +2727,18 @@ HIPAPI hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attrib,
     HIP_RETURN_ERROR(init_result);
   }
 
-  // Look up P2P link.
-  iree_hal_streaming_p2p_link_t* link =
+  if (srcDevice < 0 || dstDevice < 0) {
+    *value = 0;
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidDevice);
+  }
+  if (srcDevice == dstDevice) {
+    *value = 0;
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidDevice);
+  }
+
+  const iree_hal_streaming_p2p_link_t* link =
       iree_hal_streaming_device_lookup_p2p_link(srcDevice, dstDevice);
   if (!link) {
     *value = 0;
@@ -2680,18 +2755,53 @@ HIPAPI hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attrib,
       *value = link->native_atomic_supported ? 1 : 0;
       break;
     case hipDevP2PAttrHipArrayAccessSupported:
-      *value = link->cuda_array_access_supported ? 1 : 0;
+      *value = link->array_access_supported ? 1 : 0;
       break;
-    case hipDevP2PAttrPerformanceRank:
-      *value = link->performance_rank;
+    case hipDevP2PAttrPerformanceRank: {
+      iree_hip_link_type_t link_type;
+      if (!iree_hip_link_type_from_topology(link->link_type, &link_type)) {
+        *value = 0;
+        IREE_TRACE_ZONE_END(z0);
+        HIP_RETURN_ERROR(hipErrorNotSupported);
+      }
+      *value = (int)link_type;
       break;
+    }
     default:
-      // Unsupported attribute.
       *value = 0;
-      break;
+      IREE_TRACE_ZONE_END(z0);
+      HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
   IREE_TRACE_ZONE_END(z0);
+  return hipSuccess;
+}
+
+HIPAPI hipError_t hipExtGetLinkTypeAndHopCount(int device1, int device2,
+                                               uint32_t* linktype,
+                                               uint32_t* hopcount) {
+  if (!linktype || !hopcount || device1 < 0 || device2 < 0 ||
+      device1 == device2) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  hipError_t init_result = iree_hip_ensure_initialized();
+  if (init_result != hipSuccess) {
+    HIP_RETURN_ERROR(init_result);
+  }
+
+  const iree_hal_streaming_p2p_link_t* link =
+      iree_hal_streaming_device_lookup_p2p_link(device1, device2);
+  if (!link) {
+    HIP_RETURN_ERROR(hipErrorInvalidDevice);
+  }
+  iree_hip_link_type_t hip_link_type;
+  if (!iree_hip_link_type_from_topology(link->link_type, &hip_link_type)) {
+    HIP_RETURN_ERROR(hipErrorNotSupported);
+  }
+
+  *linktype = (uint32_t)hip_link_type;
+  *hopcount = link->hop_count;
   return hipSuccess;
 }
 
@@ -2729,6 +2839,11 @@ HIPAPI hipError_t hipDeviceEnablePeerAccess(int peerDevice,
                                             unsigned int flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  if (flags != 0) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
   // Get the current context.
   // Ensure initialization and get context.
   iree_hal_streaming_context_t* context = NULL;
@@ -2754,14 +2869,13 @@ HIPAPI hipError_t hipDeviceEnablePeerAccess(int peerDevice,
           peer_device, &peer_primary_context),
       hipErrorOutOfMemory);
 
-  // Enable peer access between the current context and the peer device's
-  // context.
-  // TODO(benvanik): check for hipErrorPeerAccessAlreadyEnabled.
-  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_hal_streaming_context_enable_peer_access(context,
-                                                    peer_primary_context),
-      hipErrorPeerAccessUnsupported);
+  iree_status_t status = iree_hal_streaming_context_enable_peer_access(
+      context, peer_primary_context);
+  hipError_t result = iree_hip_enable_peer_access_status_to_result(status);
+  if (result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(result);
+  }
 
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -2823,11 +2937,13 @@ HIPAPI hipError_t hipDeviceDisablePeerAccess(int peerDevice) {
 
   // Disable peer access between the current context and the peer device's
   // context.
-  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
-      z0,
+  hipError_t result = iree_hip_disable_peer_access_status_to_result(
       iree_hal_streaming_context_disable_peer_access(context,
-                                                     peer_primary_context),
-      hipErrorPeerAccessNotEnabled);
+                                                     peer_primary_context));
+  if (result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(result);
+  }
 
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -4008,108 +4124,19 @@ HIPAPI hipError_t hipCtxSynchronize(void) {
   return result;
 }
 
-// Enables peer access from current context to peer context.
-//
-// Parameters:
-//  - peerContext: [IN] Peer context to enable access to.
-//  - flags: [IN] Reserved for future use (must be 0).
-//
-// Returns:
-//  - hipSuccess: Peer access enabled successfully.
-//  - hipErrorInvalidValue: peerContext is NULL or invalid flags.
-//  - hipErrorInvalidContext: No current context.
-//  - hipErrorPeerAccessAlreadyEnabled: Access already enabled.
-//  - hipErrorPeerAccessUnsupported: Devices cannot access each other.
-//  - hipErrorInvalidDevice: Contexts on same device.
-//
-// Synchronization: This operation is synchronous.
-//
-// Peer access behavior:
-// - Enables current context to access memory in peer context.
-// - Access is unidirectional (must enable separately for bidirectional).
-// - Contexts must be on different devices.
-// - Devices must support P2P access.
-// - Remains enabled until explicitly disabled.
-//
-// Multi-GPU:
-// - Enables direct GPU-to-GPU memory access.
-// - Avoids staging through host memory.
-// - Improves performance for multi-GPU applications.
-//
-// See also: hipCtxDisablePeerAccess, hipDeviceCanAccessPeer,
-//           hipDeviceEnablePeerAccess.
+// Legacy context peer-access entry point retained as a compatibility no-op.
+// Device-level peer-access APIs own the active peer relationship.
 HIPAPI hipError_t hipCtxEnablePeerAccess(hipCtx_t peerContext,
                                          unsigned int flags) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-  if (!peerContext) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-
-  // Ensure initialization and get context.
-  iree_hal_streaming_context_t* context = NULL;
-  hipError_t init_result = iree_hip_ensure_context(&context);
-  if (init_result != hipSuccess) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
-  }
-
-  iree_status_t status = iree_hal_streaming_context_enable_peer_access(
-      context, (iree_hal_streaming_context_t*)peerContext);
-
-  hipError_t result = iree_status_to_hip_result(status);
-  IREE_TRACE_ZONE_END(z0);
-  return result;
+  (void)peerContext;
+  (void)flags;
+  return hipSuccess;
 }
 
-// Disables peer access from current context to peer context.
-//
-// Parameters:
-//  - peerContext: [IN] Peer context to disable access to.
-//
-// Returns:
-//  - hipSuccess: Peer access disabled successfully.
-//  - hipErrorInvalidValue: peerContext is NULL.
-//  - hipErrorInvalidContext: No current context.
-//  - hipErrorPeerAccessNotEnabled: Peer access was not enabled.
-//
-// Synchronization: This operation is synchronous. Waits for all peer
-// operations to complete.
-//
-// Peer access behavior:
-// - Disables current context's access to peer context memory.
-// - Only affects current context's access (unidirectional).
-// - Subsequent peer operations will fail.
-// - All ongoing peer operations complete before disabling.
-//
-// Multi-GPU:
-// - Returns to staged copy behavior through host memory.
-// - May reduce performance for multi-GPU operations.
-//
-// Warning: Ensure no kernels are actively using peer memory.
-//
-// See also: hipCtxEnablePeerAccess, hipDeviceDisablePeerAccess.
+// Legacy context peer-access disable entry point paired with the no-op enable.
 HIPAPI hipError_t hipCtxDisablePeerAccess(hipCtx_t peerContext) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-  if (!peerContext) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-
-  // Ensure initialization and get context.
-  iree_hal_streaming_context_t* context = NULL;
-  hipError_t init_result = iree_hip_ensure_context(&context);
-  if (init_result != hipSuccess) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
-  }
-
-  iree_status_t status = iree_hal_streaming_context_disable_peer_access(
-      context, (iree_hal_streaming_context_t*)peerContext);
-
-  hipError_t result = iree_status_to_hip_result(status);
-  IREE_TRACE_ZONE_END(z0);
-  return result;
+  (void)peerContext;
+  return hipSuccess;
 }
 
 // Gets resource limits for the current device.

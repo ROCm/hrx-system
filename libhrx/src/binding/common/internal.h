@@ -10,6 +10,7 @@
 #include "common/fat_binary.h"
 #include "common/function_attributes.h"
 #include "common/hrx_bridge.h"
+#include "common/p2p_topology.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/api.h"
@@ -307,22 +308,6 @@ static inline void iree_hal_streaming_context_leave_capture(
 // Maximum number of devices supported by the stream HAL.
 // This avoids dynamic enumeration overhead during initialization.
 #define IREE_HAL_STREAMING_MAX_DEVICES 64
-
-// P2P link information between two devices.
-typedef struct iree_hal_streaming_p2p_link_t {
-  iree_host_size_t src_device;
-  iree_host_size_t dst_device;
-
-  // P2P attributes.
-  bool access_supported;             // Basic P2P access.
-  bool native_atomic_supported;      // Native atomic operations.
-  bool cuda_array_access_supported;  // HIP array access.
-  int32_t performance_rank;          // Performance ranking (higher is better).
-
-  // Additional link properties.
-  uint64_t bandwidth_mbps;  // Estimated bandwidth in MB/s.
-  uint64_t latency_ns;      // Estimated latency in nanoseconds.
-} iree_hal_streaming_p2p_link_t;
 
 // Device registry entry for multi-device support.
 typedef struct iree_hal_streaming_device_t {
@@ -1334,7 +1319,7 @@ iree_status_t iree_hal_streaming_device_can_access_peer(
 // Looks up a P2P link between two devices.
 // Returns NULL if no link exists.
 // Synchronization: none (queries static link info).
-iree_hal_streaming_p2p_link_t* iree_hal_streaming_device_lookup_p2p_link(
+const iree_hal_streaming_p2p_link_t* iree_hal_streaming_device_lookup_p2p_link(
     iree_hal_streaming_device_ordinal_t src_device,
     iree_hal_streaming_device_ordinal_t dst_device);
 

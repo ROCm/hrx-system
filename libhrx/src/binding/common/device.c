@@ -136,7 +136,7 @@ iree_status_t iree_hal_streaming_device_get_string_property(
   return iree_ok_status();
 }
 
-iree_hal_streaming_p2p_link_t* iree_hal_streaming_device_lookup_p2p_link(
+const iree_hal_streaming_p2p_link_t* iree_hal_streaming_device_lookup_p2p_link(
     iree_hal_streaming_device_ordinal_t src_device,
     iree_hal_streaming_device_ordinal_t dst_device) {
   iree_hal_streaming_device_registry_t* device_registry =
@@ -196,14 +196,15 @@ iree_status_t iree_hal_streaming_device_can_access_peer(
   }
 
   // Look up P2P link in topology.
-  iree_hal_streaming_p2p_link_t* link =
+  const iree_hal_streaming_p2p_link_t* link =
       iree_hal_streaming_device_lookup_p2p_link(device_ordinal,
                                                 peer_device_ordinal);
   if (!link) {
-    *can_access = true;
-  } else {
-    *can_access = link->access_supported ? true : false;
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INTERNAL,
+                             "peer topology is missing a device pair"));
   }
+  *can_access = link->access_supported;
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
