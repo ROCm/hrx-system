@@ -16,14 +16,14 @@ Doxygen binary into `.venv`; it does not depend on distribution packages.
 Build the strict static site:
 
 ```bash
-.venv/bin/python loom/docs/build.py build
+python dev.py docs build
 ```
 
 The result is written to `build/loom-docs/site/`. Serve it with live reload
 while editing:
 
 ```bash
-.venv/bin/python loom/docs/build.py serve
+python dev.py docs serve
 ```
 
 Hand-authored pages live under `src/`. Executable guide programs live under
