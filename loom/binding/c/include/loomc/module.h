@@ -88,18 +88,6 @@ extern "C" {
 /// such as compiling a module require exclusive access to that module handle.
 typedef struct loomc_module_t loomc_module_t;
 
-/// Three-dimensional unsigned extent used by Loom C API structs.
-typedef struct loomc_dimension3_t {
-  /// Extent along the x dimension.
-  uint32_t x;
-
-  /// Extent along the y dimension.
-  uint32_t y;
-
-  /// Extent along the z dimension.
-  uint32_t z;
-} loomc_dimension3_t;
-
 /// Public function category reported from a module query.
 typedef enum loomc_module_function_kind_e {
   /// No specific function kind was requested or reported.

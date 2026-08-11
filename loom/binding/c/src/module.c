@@ -618,7 +618,7 @@ static loomc_status_t loomc_module_serialize_bytecode_to_stream(
   return status;
 }
 
-static loomc_status_t loomc_module_serialize_bytecode_to_source(
+loomc_status_t loomc_module_serialize_internal_bytecode_to_source(
     const loomc_module_t* module, const loom_module_t* internal_module,
     loomc_string_view_t identifier, loomc_allocator_t allocator,
     loomc_source_t** out_source) {
@@ -1105,7 +1105,7 @@ loomc_status_t loomc_module_serialize_to_source(
       return loomc_module_serialize_text_to_source(
           module, internal_module, &resolved_options, allocator, out_source);
     case LOOMC_SOURCE_FORMAT_BYTECODE:
-      return loomc_module_serialize_bytecode_to_source(
+      return loomc_module_serialize_internal_bytecode_to_source(
           module, internal_module, resolved_options.identifier, allocator,
           out_source);
     default:
@@ -1136,7 +1136,7 @@ loomc_status_t loomc_module_serialize_to_file(
   }
 
   loomc_source_t* source = NULL;
-  loomc_status_t status = loomc_module_serialize_bytecode_to_source(
+  loomc_status_t status = loomc_module_serialize_internal_bytecode_to_source(
       module, internal_module, resolved_options.identifier,
       loomc_module_allocator(module), &source);
   if (loomc_status_is_ok(status)) {

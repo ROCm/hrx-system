@@ -116,8 +116,8 @@ TEST(LoomcSpirvIreeHalExecutionTest,
       loomc_make_cstring_view("double_i32_at_byte_offset.loom");
   target.source_text = loomc_make_cstring_view(kSourceText);
   target.module_name = loomc_make_cstring_view("live_vulkan_execution_test");
-  target.kernel_function_symbol =
-      loomc_make_cstring_view("@double_i32_at_byte_offset");
+  target.kernel_export_name =
+      loomc_make_cstring_view("double_i32_at_byte_offset");
   target.target_pipeline_identifier =
       loomc_make_cstring_view("live-vulkan-prepared-low");
   target.target_pipeline_kind = LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW;

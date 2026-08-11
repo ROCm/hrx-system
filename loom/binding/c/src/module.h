@@ -48,6 +48,14 @@ LOOMC_API_PRIVATE loom_module_t* loomc_module_loom_module(
 LOOMC_API_PRIVATE const loom_module_t* loomc_module_const_loom_module(
     const loomc_module_t* module);
 
+// Serializes |internal_module| with the context and representation providers
+// owned by |module| into an in-memory Loom bytecode source.
+LOOMC_API_PRIVATE loomc_status_t
+loomc_module_serialize_internal_bytecode_to_source(
+    const loomc_module_t* module, const loom_module_t* internal_module,
+    loomc_string_view_t identifier, loomc_allocator_t allocator,
+    loomc_source_t** out_source);
+
 // Clears prior compiler products and returns their module-owned arena.
 //
 // The returned arena remains live until the next compilation or module

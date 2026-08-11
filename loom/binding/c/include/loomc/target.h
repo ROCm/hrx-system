@@ -182,10 +182,9 @@ typedef struct loomc_target_specialization_t {
 
 /// Option extension carrying per-function target specializations.
 ///
-/// Put this descriptor on `loomc_compile_options_t::next` or
-/// `loomc_launch_config_eval_options_t::next`. Every row is validated before
-/// any function target is changed. The invocation borrows the row array,
-/// symbol strings, and profiles for the duration of the call.
+/// Put this descriptor on `loomc_compile_options_t::next`. Every row is
+/// validated before any function target is changed. The invocation borrows the
+/// row array, symbol strings, and profiles for the duration of the call.
 typedef struct loomc_target_specialization_options_t {
   /// Structure type. Must be
   /// `LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS`.

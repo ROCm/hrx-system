@@ -161,6 +161,18 @@ static inline loomc_byte_span_t loomc_make_byte_span(
   return value;
 }
 
+/// Three-dimensional unsigned extent used by Loom C API structs.
+typedef struct loomc_dimension3_t {
+  /// Extent along the x dimension.
+  uint32_t x;
+
+  /// Extent along the y dimension.
+  uint32_t y;
+
+  /// Extent along the z dimension.
+  uint32_t z;
+} loomc_dimension3_t;
+
 /// Structure type values used by extensible public descriptors.
 ///
 /// Extensible descriptors store one of these values in their `type` field and
@@ -262,9 +274,6 @@ typedef enum loomc_structure_type_e {
 
   /// `loomc_sanitizer_options_t`.
   LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS = 32,
-
-  /// `loomc_launch_config_eval_options_t`.
-  LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG_EVAL_OPTIONS = 33,
 
   /// `loomc_launch_config_t`.
   LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG = 34,

@@ -62,6 +62,9 @@ typedef enum loomc_artifact_kind_e {
 
   /// Loom module artifact. The format indicates text or bytecode.
   LOOMC_ARTIFACT_KIND_MODULE = 3,
+
+  /// Compiled kernel launch-configuration program.
+  LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG = 4,
 } loomc_artifact_kind_t;
 
 /// Borrowed artifact view owned by a result object.
@@ -83,6 +86,16 @@ typedef struct loomc_artifact_t {
   /// Artifact bytes.
   loomc_byte_span_t contents;
 } loomc_artifact_t;
+
+/// Callback used to release artifact contents transferred to a consumer.
+///
+/// @param user_data Caller-provided value passed to the consuming operation.
+/// @param contents Original artifact contents transferred to the consumer.
+///
+/// The consuming operation documents when the callback runs. The callback is
+/// invoked exactly once after that operation accepts ownership of the bytes.
+typedef void(LOOMC_API_PTR* loomc_artifact_release_fn_t)(
+    void* user_data, loomc_byte_span_t contents);
 
 /// Creates an immutable source handle from an artifact.
 ///
