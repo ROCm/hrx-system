@@ -11,6 +11,18 @@ edit_uri: edit/main/loom/docs/src/
 docs_dir: src
 strict: true
 
+hooks:
+  - hooks/prepare.py
+
+watch:
+  - src
+  - ../py/loom/builtin_types.py
+  - ../py/loom/dialect
+  - ../py/loom/dsl.py
+  - ../py/loom/gen/docs
+  - ../py/loom/gen/ops/model.py
+  - ../py/loom/target
+
 theme:
   name: material
   language: en
@@ -50,6 +62,10 @@ nav:
       - Acquiring Loom: getting-started/acquiring-loom.md
   - Reference:
       - Reference map: reference/index.md
+      - Dialects: reference/dialects/index.md
+      - Types: reference/types/index.md
+      - Attributes: reference/attributes/index.md
+      - Encodings: reference/encodings/index.md
 
 plugins:
   - search
@@ -79,7 +95,7 @@ markdown_extensions:
 
 validation:
   nav:
-    omitted_files: info
+    omitted_files: ignore
     not_found: warn
   links:
     not_found: warn

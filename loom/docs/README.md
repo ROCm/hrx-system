@@ -30,4 +30,4 @@ Hand-authored pages live under `src/`. Executable guide programs live under
 `examples/` so the compiler and execution-test infrastructure can validate the
 same source readers see. Generated dialect reference pages and C API output are
 assembled only in the build tree; generated Markdown and HTML are not checked
-in.
+in. Set `LOOM_DOCS_WORK_DIR` to relocate that isolated build tree when needed.
