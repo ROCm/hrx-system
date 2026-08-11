@@ -18,6 +18,7 @@ on:
       - "loom/binding/c/**"
       - "loom/docs/**"
       - "loom/py/loom/**"
+      - "loom/src/loom/editor/textmate/**"
   push:
     branches:
       - main
@@ -31,6 +32,7 @@ on:
       - "loom/binding/c/**"
       - "loom/docs/**"
       - "loom/py/loom/**"
+      - "loom/src/loom/editor/textmate/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
@@ -63,6 +65,8 @@ jobs:
 
       - name: Build documentation
         run: |
+          PYTHONPATH=loom/docs .venv/bin/python -m unittest \
+            loom_docs.highlight_test
           .venv/bin/python loom/docs/build.py build \
             --site-dir build/loom-pages/loom
           test -f build/loom-pages/loom/index.html

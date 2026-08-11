@@ -1072,10 +1072,12 @@ class CiTest(unittest.TestCase):
             '"loom/binding/c/**"',
             '"loom/docs/**"',
             '"loom/py/loom/**"',
+            '"loom/src/loom/editor/textmate/**"',
         ):
             self.assertIn(f"- {path}", text)
         self.assertIn("runs-on: ubuntu-24.04", block)
         self.assertIn("python3 dev.py setup --docs", block)
+        self.assertIn("loom_docs.highlight_test", block)
         self.assertIn(
             "--site-dir build/loom-pages/loom",
             block,

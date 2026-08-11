@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -36,7 +37,12 @@ def _run_mkdocs(arguments: list[str]) -> None:
         str(MKDOCS_CONFIG),
         "--strict",
     ]
-    subprocess.run(command, cwd=REPO_ROOT, check=True)
+    environment = os.environ.copy()
+    python_paths = [str(DOCS_ROOT)]
+    if configured_python_path := environment.get("PYTHONPATH"):
+        python_paths.append(configured_python_path)
+    environment["PYTHONPATH"] = os.pathsep.join(python_paths)
+    subprocess.run(command, cwd=REPO_ROOT, env=environment, check=True)
 
 
 def _build(args: argparse.Namespace) -> None:

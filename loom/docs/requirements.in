@@ -7,3 +7,6 @@
 -c ../../requirements-analysis.lock.txt
 
 mkdocs-material==9.7.7
+
+# Build-time syntax highlighting from the checked-in editor grammars.
+textmate-grammar-python==0.6.1
