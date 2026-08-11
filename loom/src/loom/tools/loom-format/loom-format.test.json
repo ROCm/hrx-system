@@ -15,6 +15,7 @@
             "--to=bc",
             "--from=auto",
             "--check",
+            "--in-place",
             "loom-link --library"
           ]
         }
@@ -32,6 +33,263 @@
       "stdout": {
         "empty": true
       }
+    },
+    {
+      "name": "checks multiple canonical text files",
+      "steps": [
+        {
+          "name": "write-first-source",
+          "write": {
+            "path": "{tmp}/first.loom",
+            "text": "func.def @first(%value: index) -> (index) {\n  func.return %value : index\n}\n"
+          }
+        },
+        {
+          "name": "write-second-source",
+          "write": {
+            "path": "{tmp}/second.loom",
+            "text": "func.def @second(%value: i32) -> (i32) {\n  func.return %value : i32\n}\n"
+          }
+        },
+        {
+          "name": "check",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "--check",
+              "{tmp}/first.loom",
+              "{tmp}/second.loom"
+            ]
+          },
+          "stdout": {
+            "contains": ["loom-format: PASS (2 checked, 0 failed)"]
+          },
+          "stderr": {
+            "empty": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "formats multiple verified text files in place",
+      "steps": [
+        {
+          "name": "write-noncanonical-source",
+          "write": {
+            "path": "{tmp}/noncanonical.loom",
+            "text": "\nfunc.def @noncanonical(%value: index) -> (index) {\n  func.return %value : index\n}\n"
+          }
+        },
+        {
+          "name": "write-canonical-source",
+          "write": {
+            "path": "{tmp}/canonical.loom",
+            "text": "func.def @canonical(%value: i32) -> (i32) {\n  func.return %value : i32\n}\n"
+          }
+        },
+        {
+          "name": "format",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "--in-place",
+              "{tmp}/noncanonical.loom",
+              "{tmp}/canonical.loom"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "loom-format: formatted",
+              "loom-format: 1 formatted, 1 unchanged, 0 failed"
+            ]
+          },
+          "stderr": {
+            "empty": true
+          }
+        },
+        {
+          "name": "check",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "--check",
+              "{tmp}/noncanonical.loom",
+              "{tmp}/canonical.loom"
+            ]
+          },
+          "stdout": {
+            "contains": ["loom-format: PASS (2 checked, 0 failed)"]
+          },
+          "stderr": {
+            "empty": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "reports every batch check failure",
+      "steps": [
+        {
+          "name": "write-noncanonical-source",
+          "write": {
+            "path": "{tmp}/noncanonical.loom",
+            "text": "\nfunc.def @noncanonical(%value: index) -> (index) {\n  func.return %value : index\n}\n"
+          }
+        },
+        {
+          "name": "write-invalid-source",
+          "write": {
+            "path": "{tmp}/invalid.loom",
+            "text": "func.def @invalid(%value: index) -> (index) {\n  %result = func.call @missing(%value) : (index) -> (index)\n  func.return %result : index\n}\n"
+          }
+        },
+        {
+          "name": "check",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "--check",
+              "{tmp}/noncanonical.loom",
+              "{tmp}/invalid.loom"
+            ]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": [
+              "noncanonical.loom' is not canonically formatted",
+              "symbol '@missing' is referenced but not defined",
+              "loom-format: FAIL (2 checked, 2 failed)"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "does not rewrite an invalid in-place input",
+      "steps": [
+        {
+          "name": "write-invalid-source",
+          "write": {
+            "path": "{tmp}/invalid.loom",
+            "text": "func.def @invalid(%value: index) -> (index) {\n  %result = func.call @missing(%value) : (index) -> (index)\n  func.return %result : index\n}\n"
+          }
+        },
+        {
+          "name": "format",
+          "run": {
+            "tool": "loom-format",
+            "args": ["--in-place", "{tmp}/invalid.loom"]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": [
+              "symbol '@missing' is referenced but not defined",
+              "loom-format: 0 formatted, 0 unchanged, 1 failed"
+            ]
+          }
+        },
+        {
+          "name": "format-again",
+          "run": {
+            "tool": "loom-format",
+            "args": ["--in-place", "{tmp}/invalid.loom"]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": [
+              "symbol '@missing' is referenced but not defined",
+              "loom-format: 0 formatted, 0 unchanged, 1 failed"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "requires an input file for in-place formatting",
+      "run": {
+        "tool": "loom-format",
+        "args": ["--in-place"]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": ["--in-place requires at least one input file"]
+      }
+    },
+    {
+      "name": "rejects conflicting maintenance modes",
+      "run": {
+        "tool": "loom-format",
+        "args": ["--check", "--in-place"]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": ["--check and --in-place are mutually exclusive"]
+      }
+    },
+    {
+      "name": "does not rewrite bytecode in place",
+      "steps": [
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/source.loom",
+            "text": "func.def @identity(%value: index) -> (index) {\n  func.return %value : index\n}\n"
+          }
+        },
+        {
+          "name": "encode",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "--from=text",
+              "--to=bc",
+              "--output={tmp}/source.loombc",
+              "{tmp}/source.loom"
+            ]
+          }
+        },
+        {
+          "name": "format",
+          "run": {
+            "tool": "loom-format",
+            "args": ["--in-place", "{tmp}/source.loombc"]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": [
+              "--in-place requires text input",
+              "contains bc",
+              "loom-format: 0 formatted, 0 unchanged, 1 failed"
+            ]
+          }
+        },
+        {
+          "name": "decode",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "--from=bc",
+              "--to=text",
+              "{tmp}/source.loombc"
+            ]
+          },
+          "stdout": {
+            "contains": ["func.def @identity(%value: index) -> (index)"]
+          }
+        }
+      ]
     },
     {
       "name": "rejects noncanonical text in check mode",
