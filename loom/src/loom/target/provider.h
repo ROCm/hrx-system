@@ -33,6 +33,7 @@
 #include "loom/target/profile.h"
 #include "loom/target/reporting/artifact_manifest.h"
 #include "loom/target/reporting/report.h"
+#include "loom/target/resolved_target.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -56,15 +57,14 @@ typedef void (*loom_target_math_policy_registry_initializer_t)(
 
 typedef struct loom_builder_t loom_builder_t;
 typedef struct loom_target_environment_t loom_target_environment_t;
-typedef struct loom_target_provider_t loom_target_provider_t;
 
-// Materializes exact target-context facts as an ordinary target definition.
+// Materializes an exact resolved target as an ordinary target definition.
 //
-// The facts must have been projected by the provider's |profile_type| and may
-// include compatible authored target requirements. Builder allocation and
-// string interning are the only fallible operations for verified facts.
+// The resolved facts may include compatible authored target requirements but
+// exclude function-local ABI/export overlays. Builder allocation and string
+// interning are the only fallible operations for a verified resolved target.
 typedef iree_status_t (*loom_target_materialize_definition_fn_t)(
-    loom_builder_t* builder, const loom_target_facts_t* facts,
+    loom_builder_t* builder, const loom_resolved_target_t* resolved_target,
     loom_symbol_ref_t symbol, loom_location_id_t location,
     loom_op_t** out_target_op);
 

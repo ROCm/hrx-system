@@ -265,7 +265,8 @@ func.def public target(@unrequested_family) @unrequested() {
       loom_target_function_version_list_find(&result.function_versions.list,
                                              generic);
   ASSERT_NE(generic_version, nullptr);
-  EXPECT_EQ(generic_version->target_provider, &kTestProvider);
+  EXPECT_EQ(generic_version->resolved_target.provider, &kTestProvider);
+  ASSERT_NE(generic_version->resolved_target.facts, nullptr);
   ASSERT_NE(generic_version->authored_target_facts, nullptr);
   EXPECT_EQ(generic_version->authored_target_facts->selector,
             LOOM_TEST_TARGET_KIND_LOW_CORE);
@@ -277,7 +278,8 @@ func.def public target(@unrequested_family) @unrequested() {
       loom_target_function_version_list_find(&result.function_versions.list,
                                              targetless);
   ASSERT_NE(targetless_version, nullptr);
-  EXPECT_EQ(targetless_version->target_provider, &kTestProvider);
+  EXPECT_EQ(targetless_version->resolved_target.provider, &kTestProvider);
+  ASSERT_NE(targetless_version->resolved_target.facts, nullptr);
   EXPECT_EQ(targetless_version->authored_target_facts, nullptr);
   ASSERT_NE(targetless_version->effective_target_facts, nullptr);
   EXPECT_EQ(targetless_version->effective_target_facts->selector,
@@ -327,11 +329,11 @@ func.def public @right() {
                                              right);
   ASSERT_NE(left_version, nullptr);
   ASSERT_NE(right_version, nullptr);
-  EXPECT_EQ(left_version->target_context_facts,
-            right_version->target_context_facts);
-  EXPECT_NE(left_version->target_context_facts,
+  EXPECT_EQ(left_version->resolved_target.facts,
+            right_version->resolved_target.facts);
+  EXPECT_NE(left_version->resolved_target.facts,
             left_version->effective_target_facts);
-  EXPECT_NE(right_version->target_context_facts,
+  EXPECT_NE(right_version->resolved_target.facts,
             right_version->effective_target_facts);
   EXPECT_NE(left_version->effective_target_facts,
             right_version->effective_target_facts);

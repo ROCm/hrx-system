@@ -450,9 +450,13 @@ TEST_F(AmdgpuProviderTest, MaterializesEveryStructuredProfile) {
     loom_builder_t builder;
     loom_builder_initialize(module.get(), &module->arena,
                             loom_module_block(module.get()), &builder);
+    const loom_resolved_target_t resolved_target = {
+        /*.provider=*/&loom_amdgpu_target_provider,
+        /*.facts=*/profile_facts,
+    };
     loom_op_t* target_op = nullptr;
     IREE_ASSERT_OK(loom_amdgpu_target_provider.materialize_definition(
-        &builder, profile_facts, target_ref, LOOM_LOCATION_UNKNOWN,
+        &builder, &resolved_target, target_ref, LOOM_LOCATION_UNKNOWN,
         &target_op));
     ASSERT_NE(target_op, nullptr);
 
@@ -497,10 +501,14 @@ TEST_F(AmdgpuProviderTest, MaterializesAuthoredRefinements) {
   loom_builder_t builder;
   loom_builder_initialize(materialized.get(), &materialized->arena,
                           loom_module_block(materialized.get()), &builder);
+  const loom_resolved_target_t resolved_target = {
+      /*.provider=*/&loom_amdgpu_target_provider,
+      /*.facts=*/source_symbol_facts->projection,
+  };
   loom_op_t* target_op = nullptr;
   IREE_ASSERT_OK(loom_amdgpu_target_provider.materialize_definition(
-      &builder, source_symbol_facts->projection, target_ref,
-      LOOM_LOCATION_UNKNOWN, &target_op));
+      &builder, &resolved_target, target_ref, LOOM_LOCATION_UNKNOWN,
+      &target_op));
   ASSERT_NE(target_op, nullptr);
 
   loom_symbol_fact_table_reset(&fact_table_);

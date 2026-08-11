@@ -34,6 +34,16 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    resolved_target
+  HDRS
+    "resolved_target.h"
+  DEPS
+
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     condition
   HDRS
     "condition.h"
@@ -138,6 +148,7 @@ loom_cc_library(
     "function_version.c"
   DEPS
     ::facts
+    ::resolved_target
     iree::base
     iree::base::internal::arena
     loom::ir
@@ -544,6 +555,7 @@ loom_cc_library(
     ::low_packet_diagnostics
     ::math_policy
     ::profile
+    ::resolved_target
     iree::base
     iree::base::internal::arena
     loom::codegen::low::lower

@@ -70,11 +70,8 @@ typedef struct loom_target_callgraph_context_t loom_target_callgraph_context_t;
 
 // One constructed target context in the transient specialization plan.
 struct loom_target_callgraph_context_t {
-  // Stable compiler-owned facts represented by this context.
-  const loom_target_facts_t* facts;
-
-  // Direct target-family interface retained with |facts|.
-  const loom_target_provider_t* target_provider;
+  // Stable compiler-owned target resolution represented by this context.
+  loom_resolved_target_t resolved_target;
 
   // Requirement applied to construct this context, or NULL for a targetless
   // root context.
@@ -303,12 +300,12 @@ static iree_status_t loom_target_callgraph_prepare_symbol(
 
 static loom_target_callgraph_context_t* loom_target_callgraph_find_root_context(
     const loom_target_callgraph_state_t* state,
-    const loom_target_provider_t* target_provider,
-    const loom_target_facts_t* facts, const loom_target_facts_t* requirement) {
+    loom_resolved_target_t resolved_target,
+    const loom_target_facts_t* requirement) {
   for (loom_target_callgraph_context_t* context = state->root_contexts;
        context != NULL; context = context->next_root) {
-    if (context->target_provider == target_provider &&
-        context->facts == facts &&
+    if (context->resolved_target.provider == resolved_target.provider &&
+        context->resolved_target.facts == resolved_target.facts &&
         context->applied_requirement == requirement) {
       return context;
     }
@@ -318,19 +315,18 @@ static loom_target_callgraph_context_t* loom_target_callgraph_find_root_context(
 
 static iree_status_t loom_target_callgraph_get_root_context(
     loom_target_callgraph_state_t* state,
-    const loom_target_provider_t* target_provider,
-    const loom_target_facts_t* facts, const loom_target_facts_t* requirement,
+    loom_resolved_target_t resolved_target,
+    const loom_target_facts_t* requirement,
     loom_target_callgraph_context_t** out_context) {
-  *out_context = loom_target_callgraph_find_root_context(state, target_provider,
-                                                         facts, requirement);
+  *out_context = loom_target_callgraph_find_root_context(state, resolved_target,
+                                                         requirement);
   if (*out_context != NULL) return iree_ok_status();
 
   loom_target_callgraph_context_t* context = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(state->pass->arena, sizeof(*context),
                                            (void**)&context));
   *context = (loom_target_callgraph_context_t){
-      .facts = facts,
-      .target_provider = target_provider,
+      .resolved_target = resolved_target,
       .applied_requirement = requirement,
       .next_root = state->root_contexts,
   };
@@ -380,9 +376,9 @@ loom_target_callgraph_find_existing_equivalent_facts(
   while (row_id != LOOM_TARGET_CALLGRAPH_ROW_ID_INVALID) {
     const loom_target_callgraph_row_t* row = &state->rows[row_id];
     if (row->existing_version != NULL &&
-        loom_target_callgraph_facts_are_equivalent(row->context->facts,
-                                                   candidate_facts)) {
-      return row->context->facts;
+        loom_target_callgraph_facts_are_equivalent(
+            row->context->resolved_target.facts, candidate_facts)) {
+      return row->context->resolved_target.facts;
     }
     row_id = row->next_symbol_row_id;
   }
@@ -418,14 +414,14 @@ static iree_status_t loom_target_callgraph_derive_context(
   if (*out_context != NULL) return iree_ok_status();
 
   if (!loom_target_facts_satisfy_specialization_requirement(
-          parent->facts, callee->authored_target_requirement)) {
-    return loom_target_callgraph_emit_target_conflict(state, call_op, callee,
-                                                      parent->facts);
+          parent->resolved_target.facts, callee->authored_target_requirement)) {
+    return loom_target_callgraph_emit_target_conflict(
+        state, call_op, callee, parent->resolved_target.facts);
   }
 
   loom_target_facts_t* candidate_facts = NULL;
   IREE_RETURN_IF_ERROR(loom_target_facts_builder_clone(
-      parent->facts, state->pass->arena, &candidate_facts));
+      parent->resolved_target.facts, state->pass->arena, &candidate_facts));
   loom_target_facts_builder_apply_requirement(
       callee->authored_target_requirement, candidate_facts);
 
@@ -443,8 +439,11 @@ static iree_status_t loom_target_callgraph_derive_context(
   IREE_RETURN_IF_ERROR(iree_arena_allocate(state->pass->arena, sizeof(*context),
                                            (void**)&context));
   *context = (loom_target_callgraph_context_t){
-      .facts = derived_facts,
-      .target_provider = parent->target_provider,
+      .resolved_target =
+          {
+              .provider = parent->resolved_target.provider,
+              .facts = derived_facts,
+          },
       .applied_requirement = callee->authored_target_requirement,
       .parent = parent,
       .next_sibling = parent->first_child,
@@ -462,7 +461,11 @@ static loom_target_callgraph_row_id_t loom_target_callgraph_find_row(
       state->symbols[source_symbol].first_row_id;
   while (row_id != LOOM_TARGET_CALLGRAPH_ROW_ID_INVALID) {
     const loom_target_callgraph_row_t* row = &state->rows[row_id];
-    if (row->context->facts == context->facts) return row_id;
+    if (row->context->resolved_target.provider ==
+            context->resolved_target.provider &&
+        row->context->resolved_target.facts == context->resolved_target.facts) {
+      return row_id;
+    }
     row_id = row->next_symbol_row_id;
   }
   return LOOM_TARGET_CALLGRAPH_ROW_ID_INVALID;
@@ -542,7 +545,7 @@ static iree_status_t loom_target_callgraph_seed_versions(
         loom_target_callgraph_prepare_symbol(state, symbol_id));
     loom_target_callgraph_context_t* context = NULL;
     IREE_RETURN_IF_ERROR(loom_target_callgraph_get_root_context(
-        state, version->target_provider, version->target_context_facts,
+        state, version->resolved_target,
         state->symbols[symbol_id].authored_target_requirement, &context));
     loom_target_callgraph_row_id_t row_id =
         LOOM_TARGET_CALLGRAPH_ROW_ID_INVALID;
@@ -735,19 +738,20 @@ static iree_status_t loom_target_callgraph_prepare_materializations(
     const iree_string_view_t target_name =
         !iree_string_view_is_empty(info->authored_target_name)
             ? info->authored_target_name
-            : loom_target_facts_identity_name(row->context->facts);
+            : loom_target_facts_identity_name(
+                  row->context->resolved_target.facts);
     bool contract_valid = false;
     const loom_target_facts_t* effective_facts = NULL;
     if (info->module_internal) {
       IREE_RETURN_IF_ERROR(loom_target_function_contract_refine_internal_facts(
-          state->module, &concrete_facts, target_name, row->context->facts,
-          state->pass->diagnostic_emitter, state->version_owner->arena,
-          &contract_valid, &effective_facts));
+          state->module, &concrete_facts, target_name,
+          row->context->resolved_target.facts, state->pass->diagnostic_emitter,
+          state->version_owner->arena, &contract_valid, &effective_facts));
     } else {
       IREE_RETURN_IF_ERROR(loom_target_function_contract_refine_facts(
-          state->module, &concrete_facts, target_name, row->context->facts,
-          state->pass->diagnostic_emitter, state->version_owner->arena,
-          &contract_valid, &effective_facts));
+          state->module, &concrete_facts, target_name,
+          row->context->resolved_target.facts, state->pass->diagnostic_emitter,
+          state->version_owner->arena, &contract_valid, &effective_facts));
     }
     if (!contract_valid) {
       state->plan_valid = false;
@@ -763,8 +767,7 @@ static iree_status_t loom_target_callgraph_prepare_materializations(
             },
         .authored_target_name = info->authored_target_name,
         .authored_target_facts = info->authored_target_requirement,
-        .target_provider = row->context->target_provider,
-        .target_context_facts = row->context->facts,
+        .resolved_target = row->context->resolved_target,
         .effective_target_facts = effective_facts,
     };
     row->pending_version = version;

@@ -37,6 +37,11 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "resolved_target",
+    hdrs = ["resolved_target.h"],
+)
+
+loom_cc_library(
     name = "condition",
     srcs = ["condition.c"],
     hdrs = ["condition.h"],
@@ -128,6 +133,7 @@ loom_cc_library(
     hdrs = ["function_version.h"],
     deps = [
         ":facts",
+        ":resolved_target",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",
@@ -490,6 +496,7 @@ loom_cc_library(
         ":low_packet_diagnostics",
         ":math_policy",
         ":profile",
+        ":resolved_target",
         "//loom/src/loom/codegen/low:verify",
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/ir",

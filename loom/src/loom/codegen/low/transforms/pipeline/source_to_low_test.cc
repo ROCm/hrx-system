@@ -413,7 +413,6 @@ TEST_F(LowLowerPassTest, ModuleInternalVersionLowersWithoutArtifactAbi) {
   function_version.base.function = loom_func_like_cast(
       module.get(),
       module->symbols.entries[function_ref.symbol_id].defining_op);
-  function_version.target_context_facts = target_facts->projection;
   function_version.effective_target_facts = effective_facts;
   loom_function_version_t* function_version_values[] = {
       &function_version.base,

@@ -16,11 +16,11 @@
 #include "loom/target/arch/amdgpu/records/target_records.h"
 
 iree_status_t loom_amdgpu_target_materialize_definition(
-    loom_builder_t* builder, const loom_target_facts_t* base_facts,
+    loom_builder_t* builder, const loom_resolved_target_t* resolved_target,
     loom_symbol_ref_t symbol, loom_location_id_t location,
     loom_op_t** out_target_op) {
   const loom_amdgpu_target_facts_t* facts =
-      loom_amdgpu_target_facts_cast(base_facts);
+      loom_amdgpu_target_facts_cast(resolved_target->facts);
   static_assert(LOOM_TARGET_FACT_FIELD_COUNT_ == 30,
                 "AMDGPU target flags reserve the first 30 bits for common "
                 "target facts");

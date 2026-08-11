@@ -347,30 +347,30 @@ func.def public @wide() -> (index) {
   ASSERT_NE(middle64_version, nullptr);
   ASSERT_NE(leaf32_version, nullptr);
   ASSERT_NE(leaf64_version, nullptr);
-  EXPECT_EQ(left_version->target_provider, &kTestProvider);
-  EXPECT_EQ(right_version->target_provider, &kTestProvider);
-  EXPECT_EQ(wide_version->target_provider, &kTestProvider);
-  EXPECT_EQ(middle32_version->target_provider, &kTestProvider);
-  EXPECT_EQ(middle64_version->target_provider, &kTestProvider);
-  EXPECT_EQ(leaf32_version->target_provider, &kTestProvider);
-  EXPECT_EQ(leaf64_version->target_provider, &kTestProvider);
-  EXPECT_EQ(left_version->target_context_facts,
-            right_version->target_context_facts);
-  EXPECT_EQ(left_version->target_context_facts,
-            middle32_version->target_context_facts);
-  EXPECT_EQ(left_version->target_context_facts,
-            leaf32_version->target_context_facts);
-  EXPECT_EQ(wide_version->target_context_facts,
-            middle64_version->target_context_facts);
-  EXPECT_EQ(wide_version->target_context_facts,
-            leaf64_version->target_context_facts);
-  EXPECT_NE(left_version->target_context_facts,
-            wide_version->target_context_facts);
+  EXPECT_EQ(left_version->resolved_target.provider, &kTestProvider);
+  EXPECT_EQ(right_version->resolved_target.provider, &kTestProvider);
+  EXPECT_EQ(wide_version->resolved_target.provider, &kTestProvider);
+  EXPECT_EQ(middle32_version->resolved_target.provider, &kTestProvider);
+  EXPECT_EQ(middle64_version->resolved_target.provider, &kTestProvider);
+  EXPECT_EQ(leaf32_version->resolved_target.provider, &kTestProvider);
+  EXPECT_EQ(leaf64_version->resolved_target.provider, &kTestProvider);
+  EXPECT_EQ(left_version->resolved_target.facts,
+            right_version->resolved_target.facts);
+  EXPECT_EQ(left_version->resolved_target.facts,
+            middle32_version->resolved_target.facts);
+  EXPECT_EQ(left_version->resolved_target.facts,
+            leaf32_version->resolved_target.facts);
+  EXPECT_EQ(wide_version->resolved_target.facts,
+            middle64_version->resolved_target.facts);
+  EXPECT_EQ(wide_version->resolved_target.facts,
+            leaf64_version->resolved_target.facts);
+  EXPECT_NE(left_version->resolved_target.facts,
+            wide_version->resolved_target.facts);
   EXPECT_EQ(
-      middle32_version->target_context_facts->storage.snapshot.subgroup_size,
+      middle32_version->resolved_target.facts->storage.snapshot.subgroup_size,
       32u);
   EXPECT_EQ(
-      middle64_version->target_context_facts->storage.snapshot.subgroup_size,
+      middle64_version->resolved_target.facts->storage.snapshot.subgroup_size,
       64u);
   EXPECT_EQ(
       middle32_version->effective_target_facts->storage.export_plan.abi_kind,
@@ -462,7 +462,7 @@ func.def public @root() {
   ASSERT_NE(helper_version, nullptr);
   ASSERT_NE(helper_version->authored_target_facts, nullptr);
   EXPECT_EQ(
-      helper_version->target_context_facts->storage.snapshot.subgroup_size,
+      helper_version->resolved_target.facts->storage.snapshot.subgroup_size,
       32u);
 
   EXPECT_FALSE(Run(module.get(), &specialization.function_versions));

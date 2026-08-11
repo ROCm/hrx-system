@@ -26,8 +26,8 @@ typedef struct loom_target_resolved_specialization_t {
   // Structured profile borrowed from the request.
   const loom_target_profile_t* target_profile;
 
-  // Provider owning |target_profile| and every fact derived from it.
-  const loom_target_provider_t* target_provider;
+  // Provider and exact target-family facts resolved for this specialization.
+  loom_resolved_target_t resolved_target;
 
   // Profile facts projected once for all requests sharing |target_profile|.
   const loom_target_facts_t* projected_profile_facts;
@@ -40,10 +40,6 @@ typedef struct loom_target_resolved_specialization_t {
 
   // Authored target facts when projected by the target witness, or NULL.
   const loom_target_symbol_facts_t* authored_target_facts;
-
-  // Profile facts refined by the authored target requirement but not by the
-  // function-local ABI/export contract.
-  const loom_target_facts_t* target_context_facts;
 
   // Compiler-owned target-refined function version.
   loom_target_function_version_t* version;
@@ -211,7 +207,7 @@ static iree_status_t loom_target_specialization_prepare_versions(
       continue;
     }
 
-    const loom_target_facts_t* target_context_facts = projected_profile_facts;
+    const loom_target_facts_t* resolved_facts = projected_profile_facts;
     if (specialization->authored_target_facts != NULL) {
       for (iree_host_size_t j = 0; j < i; ++j) {
         const loom_target_resolved_specialization_t* prior =
@@ -219,33 +215,35 @@ static iree_status_t loom_target_specialization_prepare_versions(
         if (prior->projected_profile_facts == projected_profile_facts &&
             prior->authored_target_facts ==
                 specialization->authored_target_facts &&
-            prior->target_context_facts != NULL) {
-          target_context_facts = prior->target_context_facts;
+            prior->resolved_target.facts != NULL) {
+          resolved_facts = prior->resolved_target.facts;
           break;
         }
       }
-      if (target_context_facts == projected_profile_facts) {
+      if (resolved_facts == projected_profile_facts) {
         loom_target_facts_t* refined_context_facts = NULL;
         IREE_RETURN_IF_ERROR(loom_target_facts_builder_clone(
             projected_profile_facts, arena, &refined_context_facts));
         loom_target_facts_builder_apply_requirement(
             specialization->authored_target_facts->projection,
             refined_context_facts);
-        target_context_facts = refined_context_facts;
+        resolved_facts = refined_context_facts;
       }
     }
-    specialization->target_context_facts = target_context_facts;
+    specialization->resolved_target = (loom_resolved_target_t){
+        .provider = specialization->resolved_target.provider,
+        .facts = resolved_facts,
+    };
 
     const iree_string_view_t target_name =
         !iree_string_view_is_empty(specialization->authored_target_name)
             ? specialization->authored_target_name
-            : loom_target_facts_identity_name(target_context_facts);
+            : loom_target_facts_identity_name(resolved_facts);
     bool contract_valid = false;
     const loom_target_facts_t* function_facts = NULL;
     IREE_RETURN_IF_ERROR(loom_target_function_contract_refine_facts(
-        module, specialization->function_facts, target_name,
-        target_context_facts, diagnostic_emitter, arena, &contract_valid,
-        &function_facts));
+        module, specialization->function_facts, target_name, resolved_facts,
+        diagnostic_emitter, arena, &contract_valid, &function_facts));
     if (!contract_valid) {
       if (*out_error_count != UINT32_MAX) {
         ++*out_error_count;
@@ -264,8 +262,7 @@ static iree_status_t loom_target_specialization_prepare_versions(
             specialization->authored_target_facts != NULL
                 ? specialization->authored_target_facts->projection
                 : NULL,
-        .target_provider = specialization->target_provider,
-        .target_context_facts = target_context_facts,
+        .resolved_target = specialization->resolved_target,
         .effective_target_facts = function_facts,
     };
   }
@@ -332,7 +329,7 @@ iree_status_t loom_target_specialize_functions(
         &specializations[i]));
     request_ordinals[specializations[i].function_name_id] = i;
     specializations[i].target_profile = request->target_profile;
-    specializations[i].target_provider = target_provider;
+    specializations[i].resolved_target.provider = target_provider;
   }
 
   loom_target_function_version_t* target_versions = NULL;

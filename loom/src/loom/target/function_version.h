@@ -13,12 +13,11 @@
 #include "iree/base/internal/arena.h"
 #include "loom/ir/function_version.h"
 #include "loom/target/facts.h"
+#include "loom/target/resolved_target.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-typedef struct loom_target_provider_t loom_target_provider_t;
 
 typedef struct loom_target_function_version_t {
   // Generic compiler function-version base. Must remain the first field.
@@ -31,17 +30,13 @@ typedef struct loom_target_function_version_t {
   // Facts projected from the authored target witness, or NULL when absent.
   const loom_target_facts_t* authored_target_facts;
 
-  // Non-NULL target-family provider selected with the structured profile. Its
-  // |profile_type| is non-NULL and remains paired with every derived context so
-  // artifact boundaries can materialize facts without rediscovering their
-  // family.
-  const loom_target_provider_t* target_provider;
-
   // Exact invocation context inherited by retained semantic callees.
   //
-  // This non-NULL fact set contains the profile projection and authored target
-  // requirement without function-local ABI or export overlays.
-  const loom_target_facts_t* target_context_facts;
+  // The provider remains paired with the profile projection and authored
+  // target requirement so artifact boundaries can materialize the target
+  // without rediscovering its family. Its facts exclude function-local ABI or
+  // export overlays.
+  loom_resolved_target_t resolved_target;
 
   // Non-NULL exact invocation-refined facts used to compile this function
   // version, including its function-local ABI and export contract.
