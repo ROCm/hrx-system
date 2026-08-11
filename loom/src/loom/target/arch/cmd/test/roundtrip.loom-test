@@ -1,0 +1,59 @@
+// RUN: roundtrip
+
+low.func.def target<cmd.core> abi(command_program) @one_dispatch() asm {
+  %parameters = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.buffer>
+  %output = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %executable = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %entry = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %one_u32 = cmd.constant.u32 1
+  %zero_u64 = cmd.constant.u64 0
+  %length = cmd.constant.u64 4096
+  %scale = cmd.constant.b8 127
+  %bias = cmd.constant.b16 4660
+  %flags = cmd.constant.b32 2309737967
+  %stride = cmd.constant.b64 81985529216486895
+  cmd.dispatch.direct<%executable, %entry>[%one_u32, %one_u32, %one_u32](%parameters, %zero_u64, %length, %scale, %bias, %flags, %stride, %output, %zero_u64, %length)
+  return
+}
+
+// ----
+low.func.def target<cmd.core> abi(command_program) @one_dispatch() {
+  %parameters = low.resource<command_input> {index = 0, source_type = buffer} : reg<cmd.buffer>
+  %output = low.resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %executable = low.resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %entry = low.resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %one_u32 = low.const<cmd.constant.u32> {value = 1} : reg<cmd.u32>
+  %zero_u64 = low.const<cmd.constant.u64> {value = 0} : reg<cmd.u64>
+  %length = low.const<cmd.constant.u64> {value = 4096} : reg<cmd.u64>
+  %scale = low.const<cmd.constant.b8> {value = 127} : reg<cmd.b8>
+  %bias = low.const<cmd.constant.b16> {value = 4660} : reg<cmd.b16>
+  %flags = low.const<cmd.constant.b32> {value = 2309737967} : reg<cmd.b32>
+  %stride = low.const<cmd.constant.b64> {value = 81985529216486895} : reg<cmd.b64>
+  low.op<cmd.dispatch.direct>(%executable, %entry, %one_u32, %one_u32, %one_u32, %parameters, %zero_u64, %length, %scale, %bias, %flags, %stride, %output, %zero_u64, %length) : (reg<cmd.executable>, reg<cmd.entry>, reg<cmd.u32>, reg<cmd.u32>, reg<cmd.u32>, reg<cmd.buffer>, reg<cmd.u64>, reg<cmd.u64>, reg<cmd.b8>, reg<cmd.b16>, reg<cmd.b32>, reg<cmd.b64>, reg<cmd.binding>, reg<cmd.u64>, reg<cmd.u64>)
+  low.return
+}
+
+// ====
+
+low.func.def target<cmd.core> abi(command_program) @empty_indirect() asm {
+  %launch_counts = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %executable = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %entry = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %launch_count_offset = cmd.constant.u64 0
+  %launch_count_length = cmd.constant.u64 12
+  %count_ref = cmd.buffer.ref.binding %launch_counts, %launch_count_offset, %launch_count_length
+  cmd.dispatch.indirect.static<%executable, %entry>[%count_ref]()
+  return
+}
+
+// ----
+low.func.def target<cmd.core> abi(command_program) @empty_indirect() {
+  %launch_counts = low.resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %executable = low.resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %entry = low.resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %launch_count_offset = low.const<cmd.constant.u64> {value = 0} : reg<cmd.u64>
+  %launch_count_length = low.const<cmd.constant.u64> {value = 12} : reg<cmd.u64>
+  %count_ref = low.op<cmd.buffer.ref.binding>(%launch_counts, %launch_count_offset, %launch_count_length) : (reg<cmd.binding>, reg<cmd.u64>, reg<cmd.u64>) -> reg<cmd.buffer_ref>
+  low.op<cmd.dispatch.indirect.static>(%executable, %entry, %count_ref) : (reg<cmd.executable>, reg<cmd.entry>, reg<cmd.buffer_ref>)
+  low.return
+}

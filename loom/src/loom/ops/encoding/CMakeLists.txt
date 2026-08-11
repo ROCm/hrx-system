@@ -32,6 +32,7 @@ loom_generated_cc_library(
     "builders.c"
     "tables.c"
   HDRS
+    "facts.h"
     "families.h"
     "matrix_operand.h"
     "numeric_transform.h"

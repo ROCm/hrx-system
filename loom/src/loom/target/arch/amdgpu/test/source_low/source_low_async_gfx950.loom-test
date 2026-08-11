@@ -12,7 +12,7 @@ kernel.def target(@target) @async_gather_dword() {
   %global = buffer.assume.memory_space<global> %input : buffer
   %source_base = buffer.view %global[%buffer_base] : buffer -> view<64x4xi8, #dense>
   %source = view.subview %source_base[%tid, 0] : view<64x4xi8, #dense> -> view<1x4xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest = buffer.view %scratch[%buffer_base] : buffer -> view<64x1x4xi8, #dense>
   %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x4xi8, #dense> to view<64x1x4xi8, #dense> -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
@@ -44,7 +44,7 @@ kernel.def target(@target) @async_gather_b128() {
   %global = buffer.assume.memory_space<global> %input : buffer
   %source_base = buffer.view %global[%buffer_base] : buffer -> view<64x16xi8, #dense>
   %source = view.subview %source_base[%tid, 0] : view<64x16xi8, #dense> -> view<1x16xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest = buffer.view %scratch[%buffer_base] : buffer -> view<64x1x16xi8, #dense>
   %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x16xi8, #dense> to view<64x1x16xi8, #dense> -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
@@ -76,7 +76,7 @@ kernel.def target(@target) @async_gather_two_stage() {
   %global = buffer.assume.memory_space<global> %input : buffer
   %source_base = buffer.view %global[%buffer_base] : buffer -> view<64x1x16xi8, #dense>
   %source = view.subview %source_base[%tid, 0, 0] : view<64x1x16xi8, #dense> -> view<1x1x16xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest_base = buffer.view %scratch[%buffer_base] : buffer -> view<2x64x1x16xi8, #dense>
   %dest0 = view.subview %dest_base[0, 0, 0, 0] : view<2x64x1x16xi8, #dense> -> view<1x64x1x16xi8, #dense>
   %dest1 = view.subview %dest_base[1, 0, 0, 0] : view<2x64x1x16xi8, #dense> -> view<1x64x1x16xi8, #dense>
@@ -116,7 +116,7 @@ kernel.def target(@target) @async_gather_multi_packet_newer_group() {
   %global = buffer.assume.memory_space<global> %input : buffer
   %source_base = buffer.view %global[%buffer_base] : buffer -> view<64x1x16xi8, #dense>
   %source = view.subview %source_base[%tid, 0, 0] : view<64x1x16xi8, #dense> -> view<1x1x16xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest_base = buffer.view %scratch[%buffer_base] : buffer -> view<3x64x1x16xi8, #dense>
   %dest0 = view.subview %dest_base[0, 0, 0, 0] : view<3x64x1x16xi8, #dense> -> view<1x64x1x16xi8, #dense>
   %dest1a = view.subview %dest_base[1, 0, 0, 0] : view<3x64x1x16xi8, #dense> -> view<1x64x1x16xi8, #dense>
@@ -161,8 +161,8 @@ kernel.def target(@target) @async_gather_second_lds_slot() {
   %global = buffer.assume.memory_space<global> %input : buffer
   %source_base = buffer.view %global[%buffer_base] : buffer -> view<64x16xi8, #dense>
   %source = view.subview %source_base[%tid, 0] : view<64x16xi8, #dense> -> view<1x16xi8, #dense>
-  %pad = buffer.alloca %pad_bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %pad = buffer.alloca<workgroup> align(16) %pad_bytes : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
   %dest = buffer.view %scratch[%buffer_base] : buffer -> view<64x1x16xi8, #dense>
   %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x16xi8, #dense> to view<64x1x16xi8, #dense> -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group

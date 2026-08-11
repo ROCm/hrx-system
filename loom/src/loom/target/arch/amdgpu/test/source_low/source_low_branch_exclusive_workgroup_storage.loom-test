@@ -17,7 +17,7 @@ kernel.def target(@target) @branch_exclusive_equal_slots() {
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<2xi32, #dense>
   cfg.cond_br %is_first, ^first, ^second
 ^first:
-  %first_scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %first_scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   cfg.br ^first_body
 ^first_body:
   %first_view = buffer.view %first_scratch[%buffer_base] : buffer -> view<1xi32, #dense>
@@ -26,7 +26,7 @@ kernel.def target(@target) @branch_exclusive_equal_slots() {
   view.store %first_result, %output_view[%workgroup] : i32, view<2xi32, #dense>
   cfg.br ^done
 ^second:
-  %second_scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %second_scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   cfg.br ^second_body
 ^second_body:
   %second_view = buffer.view %second_scratch[%buffer_base] : buffer -> view<1xi32, #dense>
@@ -99,7 +99,7 @@ kernel.def target(@target) @branch_exclusive_nested_max_slot() {
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<3xi32, #dense>
   cfg.cond_br %is_first, ^first, ^not_first
 ^first:
-  %first_scratch = buffer.alloca %small_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %first_scratch = buffer.alloca<workgroup> align(16) %small_bytes : buffer
   %first_view = buffer.view %first_scratch[%buffer_base] : buffer -> view<1xi32, #dense>
   view.store %value, %first_view[0] : i32, view<1xi32, #dense>
   %first_result = view.load %first_view[0] : view<1xi32, #dense> -> i32
@@ -108,14 +108,14 @@ kernel.def target(@target) @branch_exclusive_nested_max_slot() {
 ^not_first:
   cfg.cond_br %is_second, ^second, ^third
 ^second:
-  %second_scratch = buffer.alloca %large_bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %second_scratch = buffer.alloca<workgroup> align(64) %large_bytes : buffer
   %second_view = buffer.view %second_scratch[%buffer_base] : buffer -> view<1xi32, #dense>
   view.store %value, %second_view[0] : i32, view<1xi32, #dense>
   %second_result = view.load %second_view[0] : view<1xi32, #dense> -> i32
   view.store %second_result, %output_view[%workgroup] : i32, view<3xi32, #dense>
   cfg.br ^done
 ^third:
-  %third_scratch = buffer.alloca %medium_bytes {base_alignment = 32, memory_space = workgroup} : buffer
+  %third_scratch = buffer.alloca<workgroup> align(32) %medium_bytes : buffer
   %third_view = buffer.view %third_scratch[%buffer_base] : buffer -> view<1xi32, #dense>
   view.store %value, %third_view[0] : i32, view<1xi32, #dense>
   %third_result = view.load %third_view[0] : view<1xi32, #dense> -> i32
@@ -199,14 +199,14 @@ kernel.def target(@target) @lane_varying_branches_remain_distinct() {
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<2xi32, #dense>
   cfg.cond_br %is_first, ^first, ^second
 ^first:
-  %first_scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %first_scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %first_view = buffer.view %first_scratch[%buffer_base] : buffer -> view<1xi32, #dense>
   view.store %value, %first_view[0] : i32, view<1xi32, #dense>
   %first_result = view.load %first_view[0] : view<1xi32, #dense> -> i32
   view.store %first_result, %output_view[%lane] : i32, view<2xi32, #dense>
   cfg.br ^done
 ^second:
-  %second_scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %second_scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %second_view = buffer.view %second_scratch[%buffer_base] : buffer -> view<1xi32, #dense>
   view.store %value, %second_view[0] : i32, view<1xi32, #dense>
   %second_result = view.load %second_view[0] : view<1xi32, #dense> -> i32
@@ -263,8 +263,8 @@ kernel.def target(@target) @sequential_allocations_remain_distinct() {
   %second_bytes = index.constant 256 : offset
   %first_value = scalar.constant 1 : i32
   %second_value = scalar.constant 2 : i32
-  %first_scratch = buffer.alloca %first_bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %second_scratch = buffer.alloca %second_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %first_scratch = buffer.alloca<workgroup> align(16) %first_bytes : buffer
+  %second_scratch = buffer.alloca<workgroup> align(16) %second_bytes : buffer
   %first_view = buffer.view %first_scratch[%buffer_base] : buffer -> view<1xi32, #dense>
   %second_view = buffer.view %second_scratch[%buffer_base] : buffer -> view<1xi32, #dense>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<2xi32, #dense>
@@ -318,14 +318,14 @@ kernel.def target(@target) @cyclic_branch_allocations_remain_distinct() {
   %is_first = scalar.cmpi eq, %i, %loop_begin : i32
   cfg.cond_br %is_first, ^first, ^second
 ^first:
-  %first_scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %first_scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %first_view = buffer.view %first_scratch[%buffer_base] : buffer -> view<1xi32, #dense>
   view.store %value, %first_view[0] : i32, view<1xi32, #dense>
   %first_result = view.load %first_view[0] : view<1xi32, #dense> -> i32
   view.store %first_result, %output_view[0] : i32, view<2xi32, #dense>
   cfg.br ^continue
 ^second:
-  %second_scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %second_scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %second_view = buffer.view %second_scratch[%buffer_base] : buffer -> view<1xi32, #dense>
   view.store %value, %second_view[0] : i32, view<1xi32, #dense>
   %second_result = view.load %second_view[0] : view<1xi32, #dense> -> i32
@@ -391,7 +391,7 @@ kernel.def target(@target) @bounded_dynamic_workgroup_storage() {
   %capacity = index.constant 8192 : offset
   %has_storage = index.cmp eq, %workgroup, %first_workgroup : index
   %byte_length = scf.select %has_storage, %capacity, %c0 : offset
-  %scratch = buffer.alloca %byte_length {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %byte_length : buffer
   %output_view = buffer.view %output[%c0] : buffer -> view<2xi32, #dense>
   cfg.cond_br %has_storage, ^active, ^done
 ^active:

@@ -913,11 +913,9 @@ TEST_F(BuilderTest, LoopBuilder) {
   IREE_ASSERT_OK(loom_module_define_value(module_, f32, &init));
 
   loom_value_id_t iter_args[] = {init};
-  loom_type_t loop_result_types[] = {f32};
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(loom_test_loop_build(&builder_, lo, hi, step, iter_args, 1,
-                                      loop_result_types, 1, NULL, 0,
-                                      LOOM_LOCATION_UNKNOWN, &op));
+                                      NULL, 0, LOOM_LOCATION_UNKNOWN, &op));
   ASSERT_NE(op, nullptr);
   EXPECT_EQ(op->kind, LOOM_OP_TEST_LOOP);
   EXPECT_EQ(op->operand_count, 4);

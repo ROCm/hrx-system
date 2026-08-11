@@ -41,6 +41,19 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    cmd_low_descriptor_shard
+  MAIN
+    "low_descriptor_shard.py"
+  SRCS
+    "__init__.py"
+    "low_descriptor_shard.py"
+  DEPS
+    loom::py::loom::gen::target::low::low_descriptor_shard
+    loom::py::loom::target::arch::cmd::descriptors
+)
+
+iree_py_library(
+  NAME
     ireevm_low_descriptor_shard
   MAIN
     "low_descriptor_shard.py"

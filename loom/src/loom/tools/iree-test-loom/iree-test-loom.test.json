@@ -71,7 +71,7 @@
       "run": {
         "tool": "iree-test-loom",
         "stdin": {
-          "text": "global.rodata.def @bad_alignment = bytes(\"00\"), align 3\n"
+          "text": "global.rodata.def @bad_alignment = align(3) bytes(\"00\")\n"
         }
       },
       "exit": {

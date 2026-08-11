@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from loom.assembly import (
+    AlignedRefs,
     Attr,
     AttrDict,
     AttrParams,
@@ -101,6 +102,27 @@ def translate_format_elements(op: Op) -> list[tuple[str, int, str]]:
                         raise ValueError(f"Op '{op.name}': Refs('{name}') references {kind.name}, expected OPERAND")
                     elements.append(("LOOM_FORMAT_KIND_OPERAND_REFS", index, "0"))
 
+                case AlignedRefs(refs=refs_field, alignments=alignments_field):
+                    refs_kind, refs_index = resolve_field(refs_field)
+                    alignments_kind, alignments_index = resolve_field(alignments_field)
+                    if refs_kind != FieldKind.OPERAND:
+                        raise ValueError(f"Op '{op.name}': AlignedRefs refs field '{refs_field}' is not an operand field")
+                    refs_desc = layout.fields[refs_field]
+                    if not refs_desc.variadic:
+                        raise ValueError(f"Op '{op.name}': AlignedRefs refs field '{refs_field}' must be variadic")
+                    if alignments_kind != FieldKind.ATTR:
+                        raise ValueError(f"Op '{op.name}': AlignedRefs alignments field '{alignments_field}' is not an attr field")
+                    alignments_attr = op.attr(alignments_field)
+                    if alignments_attr is None or alignments_attr.attr_type != "i64_array":
+                        raise ValueError(f"Op '{op.name}': AlignedRefs alignments field '{alignments_field}' must be an i64_array attr")
+                    elements.append(
+                        (
+                            "LOOM_FORMAT_KIND_ALIGNED_REFS",
+                            refs_index,
+                            str(alignments_index),
+                        )
+                    )
+
                 case TypedRefs(field=name):
                     kind, index = resolve_field(name)
                     if kind != FieldKind.OPERAND:
@@ -149,11 +171,16 @@ def translate_format_elements(op: Op) -> list[tuple[str, int, str]]:
                         raise ValueError(f"Op '{op.name}': ResultType('{name}') references {kind.name}, expected RESULT")
                     elements.append(("LOOM_FORMAT_KIND_RESULT_TYPE_SINGLE", index, "0"))
 
-                case ResultTypeList(field=name, parens=parens):
+                case ResultTypeList(field=name, parens=parens, uniform=uniform):
                     kind, index = resolve_field(name)
                     if kind != FieldKind.RESULT:
                         raise ValueError(f"Op '{op.name}': ResultTypeList('{name}') references {kind.name}, expected RESULT")
-                    payload = "LOOM_RESULT_TYPE_LIST_PARENS" if parens else "0"
+                    flags: list[str] = []
+                    if parens:
+                        flags.append("LOOM_RESULT_TYPE_LIST_PARENS")
+                    if uniform:
+                        flags.append("LOOM_RESULT_TYPE_LIST_UNIFORM")
+                    payload = " | ".join(flags) if flags else "0"
                     elements.append(("LOOM_FORMAT_KIND_RESULT_TYPE_LIST", index, payload))
 
                 case Clause(name=name, elements=inner):
@@ -259,9 +286,18 @@ def translate_format_elements(op: Op) -> list[tuple[str, int, str]]:
                         raise ValueError(f"Op '{op.name}': BlockArgs region field '{name}' is not a region field")
                     elements.append(("LOOM_FORMAT_KIND_BLOCK_ARGS", index, "0"))
 
-                case FuncArgs(field=name):
+                case FuncArgs(
+                    field=name,
+                    start_attr=start_attr,
+                    end_attr=end_attr,
+                ):
                     field_index = c_queries.resolve_func_args_operand_index(op, name)
-                    elements.append(("LOOM_FORMAT_KIND_FUNC_ARGS", field_index, "0"))
+                    start_attr_index = c_queries.resolve_attr_index(op, start_attr, "FuncArgs")
+                    end_attr_index = c_queries.resolve_attr_index(op, end_attr, "FuncArgs")
+                    data = "0"
+                    if start_attr is not None or end_attr is not None:
+                        data = f"LOOM_FORMAT_FUNC_ARGS_DATA({start_attr_index}, {end_attr_index})"
+                    elements.append(("LOOM_FORMAT_KIND_FUNC_ARGS", field_index, data))
 
                 case PredicateList(field=name):
                     _field_kind, index = resolve_field(name)

@@ -35,11 +35,11 @@ kernel.def target(@target) export("configured_fragment_bank") @configured_fragme
   %lane = kernel.workitem.id<x> : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_view = buffer.view %output_global[%base] : buffer -> view<[%m_extent]x[%n_extent]xf32, #dense>
-  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
   %scratch_view = buffer.view %scratch[%base] : buffer -> view<[%scratch_elements]xi32, #dense>
   %marker = vector.constant 0 : vector<1xi32>
   vector.store %marker, %scratch_view[%lane] : vector<1xi32>, view<[%scratch_elements]xi32, #dense>
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %lhs_payload = vector.constant 1.0 : vector<16xbf16>
   %rhs_payload = vector.constant 1.0 : vector<16xbf16>
   %lhs = vector.fragment<lhs> %lhs_payload shape [%matrix_m, %matrix_k] : vector<16xbf16>

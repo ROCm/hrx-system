@@ -101,23 +101,23 @@ kernel.def retain @retained_kernel() {
 // ====
 
 func.def @workgroup_barrier() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   func.return
 }
 
 // ====
 
 func.def @subgroup_barrier() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
+  kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
   func.return
 }
 
 // ====
 
 func.def @global_barriers() {
-  kernel.barrier<global> {ordering = release, scope = workgroup}
-  kernel.barrier<global> {ordering = acquire, scope = workgroup}
-  kernel.barrier<global> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<global> scope(workgroup) ordering(release)
+  kernel.barrier<global> scope(workgroup) ordering(acquire)
+  kernel.barrier<global> scope(workgroup) ordering(acq_rel)
   func.return
 }
 
@@ -253,12 +253,12 @@ func.def @async_copy_global_to_workgroup(%source_buffer: buffer, %byte_offset: o
   %layout = encoding.layout.dense : encoding<layout>
   %global = buffer.assume.memory_space<global> %source_buffer : buffer
   %source = buffer.view %global[%byte_offset] : buffer -> view<16xi8, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<16xi8, %layout>
   %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, %layout> to view<16xi8, %layout> -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   func.return
 }
 
@@ -270,7 +270,7 @@ func.def @async_copy_masked(%source_buffer: buffer, %byte_offset: offset, %in_bo
   %layout = encoding.layout.dense : encoding<layout>
   %global = buffer.assume.memory_space<global> %source_buffer : buffer
   %source = buffer.view %global[%byte_offset] : buffer -> view<16xi8, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<16xi8, %layout>
   %copy = kernel.async.copy.mask %source to %dest, %in_bounds {cache_scope = cu, cache_temporal = non_temporal, direction = global_to_workgroup} : view<16xi8, %layout> to view<16xi8, %layout>, i1 -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
@@ -284,7 +284,7 @@ func.def @async_copy_workgroup_to_global(%dest_buffer: buffer, %byte_offset: off
   %base = index.constant 0 : offset
   %bytes = index.constant 1024 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %source = buffer.view %scratch[%base] : buffer -> view<16xi8, %layout>
   %global = buffer.assume.memory_space<global> %dest_buffer : buffer
   %dest = buffer.view %global[%byte_offset] : buffer -> view<16xi8, %layout>
@@ -302,7 +302,7 @@ func.def @async_copy_reinterpreted_bytes(%source_buffer: buffer, %byte_offset: o
   %layout = encoding.layout.dense : encoding<layout>
   %global = buffer.assume.memory_space<global> %source_buffer : buffer
   %source = buffer.view %global[%byte_offset] : buffer -> view<16xi8, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<4xi32, %layout>
   %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, %layout> to view<4xi32, %layout> -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
@@ -318,7 +318,7 @@ func.def @async_subgroup_gather(%source_buffer: buffer, %byte_offset: offset) {
   %layout = encoding.layout.dense : encoding<layout>
   %global = buffer.assume.memory_space<global> %source_buffer : buffer
   %source = buffer.view %global[%byte_offset] : buffer -> view<4xi8, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<64x4xi8, %layout>
   %copy = kernel.async.gather %source to %dest {cache_scope = cu, cache_temporal = regular} : view<4xi8, %layout> to view<64x4xi8, %layout> -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
@@ -334,7 +334,7 @@ func.def @async_subgroup_gather_padded_lane_slot(%source_buffer: buffer, %byte_o
   %layout = encoding.layout.dense : encoding<layout>
   %global = buffer.assume.memory_space<global> %source_buffer : buffer
   %source = buffer.view %global[%byte_offset] : buffer -> view<1xi8, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<64x4xi8, %layout>
   %copy = kernel.async.gather %source to %dest {cache_scope = cu, cache_temporal = regular} : view<1xi8, %layout> to view<64x4xi8, %layout> -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
@@ -350,7 +350,7 @@ func.def @async_subgroup_gather_gfx950_padded_lane_slot(%source_buffer: buffer, 
   %layout = encoding.layout.dense : encoding<layout>
   %global = buffer.assume.memory_space<global> %source_buffer : buffer
   %source = buffer.view %global[%byte_offset] : buffer -> view<12xi8, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<64x16xi8, %layout>
   %copy = kernel.async.gather %source to %dest {cache_scope = cu, cache_temporal = regular} : view<12xi8, %layout> to view<64x16xi8, %layout> -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
@@ -366,7 +366,7 @@ func.def @async_cluster_gather_widths(%source_buffer: buffer, %byte_offset: offs
   %layout = encoding.layout.dense : encoding<layout>
   %cluster_mask = scalar.constant 15 : i32
   %global = buffer.assume.memory_space<global> %source_buffer : buffer
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %source_b8 = buffer.view %global[%byte_offset] : buffer -> view<1xi8, %layout>
   %dest_b8 = buffer.view %scratch[%base] : buffer -> view<1xi8, %layout>
   %copy_b8 = kernel.async.cluster.gather %source_b8 to %dest_b8 using %cluster_mask {cache_scope = cu, cache_temporal = regular} : view<1xi8, %layout> to view<1xi8, %layout>, i32 -> kernel.async.token
@@ -393,7 +393,7 @@ func.def @async_cluster_gather_masked(%source_buffer: buffer, %byte_offset: offs
   %cluster_mask = scalar.constant 3 : i32
   %global = buffer.assume.memory_space<global> %source_buffer : buffer
   %source = buffer.view %global[%byte_offset] : buffer -> view<4xi8, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<4xi8, %layout>
   %copy = kernel.async.cluster.gather.mask %source to %dest using %cluster_mask, %in_bounds {cache_scope = cu, cache_temporal = regular} : view<4xi8, %layout> to view<4xi8, %layout>, i32, i1 -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
@@ -415,12 +415,12 @@ func.def @async_tensor_load_to_lds(%source_buffer: buffer, %byte_offset: offset)
   %desc = kernel.tensor.lds.descriptor dgroups(%d0, %d1, %d2, %d3) : vector<4xi32>, vector<8xi32>, vector<4xi32>, vector<4xi32> -> kernel.tensor.lds.descriptor
   %global = buffer.assume.memory_space<global> %source_buffer : buffer
   %source = buffer.view %global[%byte_offset] : buffer -> view<64x64xf32, %layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 256, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(256) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<64x64xf32, %layout>
   %copy = kernel.async.tensor.load.to.lds %source to %dest using %desc {cache_scope = cu, cache_temporal = regular} : view<64x64xf32, %layout> to view<64x64xf32, %layout>, kernel.tensor.lds.descriptor -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   func.return
 }
 
@@ -434,7 +434,7 @@ func.def @async_tensor_store_from_lds(%dest_buffer: buffer, %byte_offset: offset
   %d0 = vector.splat %descriptor_fill_value : vector<4xi32>
   %d1 = vector.splat %descriptor_fill_value : vector<8xi32>
   %desc = kernel.tensor.lds.descriptor dgroups(%d0, %d1) : vector<4xi32>, vector<8xi32> -> kernel.tensor.lds.descriptor
-  %scratch = buffer.alloca %bytes {base_alignment = 256, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(256) %bytes : buffer
   %source = buffer.view %scratch[%base] : buffer -> view<64x64xf32, %layout>
   %global = buffer.assume.memory_space<global> %dest_buffer : buffer
   %dest = buffer.view %global[%byte_offset] : buffer -> view<64x64xf32, %layout>
@@ -488,7 +488,7 @@ func.def @launch_program(%count: index, %output: tensor<4xi32>) {
 kernel.decl @empty_launch_contract() launch()
 
 func.def @empty_launch_program() {
-  kernel.launch @empty_launch_contract[]() : []()
+  kernel.launch @empty_launch_contract() : ()
   func.return
 }
 
@@ -496,6 +496,6 @@ func.def @empty_launch_program() {
 kernel.decl @empty_launch_contract() launch()
 
 func.def @empty_launch_program() {
-  kernel.launch @empty_launch_contract[]() : []()
+  kernel.launch @empty_launch_contract() : ()
   func.return
 }

@@ -40,8 +40,8 @@ class GlobalBuilder(DialectBuilder):
         self,
         *,
         symbol: str,
-        contents: Any,
         alignment: int | None = ...,
+        contents: Any,
         location_id: int | None = ...,
     ) -> None: ...
     def load(

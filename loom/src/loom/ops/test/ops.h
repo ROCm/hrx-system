@@ -282,7 +282,8 @@ enum {
   LOOM_OP_TEST_PARAMETERIZED_ATTR_ARRAY = LOOM_OP_KIND(LOOM_DIALECT_TEST, 108),
   LOOM_OP_TEST_ATTR_PARAMS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 109),
   LOOM_OP_TEST_CONDITION_REFINES_POSITIVE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 110),
-  LOOM_OP_TEST_COUNT_ = 111,
+  LOOM_OP_TEST_PARTITIONED_CALL = LOOM_OP_KIND(LOOM_DIALECT_TEST, 111),
+  LOOM_OP_TEST_COUNT_ = 112,
 };
 
 // Synthetic flags for TemplateParamFlags parser/printer coverage.
@@ -598,8 +599,6 @@ iree_status_t loom_test_loop_build(
     loom_may_consume loom_value_id_t step,
     loom_may_consume const loom_value_id_t* iter_args,
     iree_host_size_t iter_args_count,
-    const loom_type_t* result_types,
-    iree_host_size_t result_count,
     const loom_tied_result_t* tied_results,
     iree_host_size_t tied_result_count,
     loom_location_id_t location,
@@ -2219,6 +2218,25 @@ iree_status_t loom_test_condition_refines_positive_materialize(
     loom_rewriter_t* rewriter, const loom_op_t* condition_op,
     loom_value_id_t source, bool assumed_truth,
     loom_value_id_t* out_refined_value);
+
+// LOOM_OP_TEST_PARTITIONED_CALL: Test call-like op spanning trailing operand partitions after an unrelated prefix.
+// test.partitioned_call @callee[%prefix][%specialization](%binding) : [index][index](i32)
+LOOM_DEFINE_ISA(loom_test_partitioned_call_isa, LOOM_OP_TEST_PARTITIONED_CALL)
+LOOM_DEFINE_SEGMENTED_OPERANDS(loom_test_partitioned_call_prefix, 0)
+LOOM_DEFINE_SEGMENTED_OPERANDS(loom_test_partitioned_call_specializations, 1)
+LOOM_DEFINE_SEGMENTED_OPERANDS(loom_test_partitioned_call_bindings, 2)
+LOOM_DEFINE_ATTR_SYMBOL(loom_test_partitioned_call_callee, 0)
+iree_status_t loom_test_partitioned_call_build(
+    loom_builder_t* builder,
+    loom_symbol_ref_t callee,
+    const loom_value_id_t* prefix,
+    iree_host_size_t prefix_count,
+    const loom_value_id_t* specializations,
+    iree_host_size_t specializations_count,
+    const loom_value_id_t* bindings,
+    iree_host_size_t bindings_count,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 
 // Returns the vtable array for the test dialect.
 const loom_op_vtable_t* const* loom_test_dialect_vtables(

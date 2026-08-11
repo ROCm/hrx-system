@@ -44,7 +44,7 @@ check.case public @rope_pair_rotate_tile_identity_case {
   %angles = check.generate.fill value(0.0) : tensor<4xf32>
   %rotated_even = check.generate.fill value(-99.0) : tensor<4xf32>
   %rotated_odd = check.generate.fill value(-99.0) : tensor<4xf32>
-  kernel.launch @rope_pair_rotate_tile_f32[](%even, %odd, %angles, %rotated_even, %rotated_odd) : [](tensor<4xf32>, tensor<4xf32>, tensor<4xf32>, tensor<4xf32>, tensor<4xf32>)
+  kernel.launch @rope_pair_rotate_tile_f32(%even, %odd, %angles, %rotated_even, %rotated_odd) : (tensor<4xf32>, tensor<4xf32>, tensor<4xf32>, tensor<4xf32>, tensor<4xf32>)
   check.expect.close actual(%rotated_even) expected(%even) atol(0.0001) rtol(0.0001) nan(same) : tensor<4xf32>
   check.expect.close actual(%rotated_odd) expected(%odd) atol(0.0001) rtol(0.0001) nan(same) : tensor<4xf32>
   check.return
@@ -57,7 +57,7 @@ check.case public @rope_pair_rotate_tile_quarter_turn_case {
   %rotated_even = check.generate.fill value(-99.0) : tensor<4xf32>
   %rotated_odd = check.generate.fill value(-99.0) : tensor<4xf32>
   %expected_even = check.generate.iota offset(-10.0) step(-1.0) : tensor<4xf32>
-  kernel.launch @rope_pair_rotate_tile_f32[](%even, %odd, %angles, %rotated_even, %rotated_odd) : [](tensor<4xf32>, tensor<4xf32>, tensor<4xf32>, tensor<4xf32>, tensor<4xf32>)
+  kernel.launch @rope_pair_rotate_tile_f32(%even, %odd, %angles, %rotated_even, %rotated_odd) : (tensor<4xf32>, tensor<4xf32>, tensor<4xf32>, tensor<4xf32>, tensor<4xf32>)
   check.expect.close actual(%rotated_even) expected(%expected_even) atol(0.0005) rtol(0.0005) nan(same) : tensor<4xf32>
   check.expect.close actual(%rotated_odd) expected(%even) atol(0.0005) rtol(0.0005) nan(same) : tensor<4xf32>
   check.return

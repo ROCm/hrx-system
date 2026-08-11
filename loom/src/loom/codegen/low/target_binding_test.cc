@@ -285,6 +285,54 @@ low.func.def target<test.low.core> @kernel() {
   ASSERT_NE(target.descriptor_set, nullptr);
 }
 
+TEST_F(LowTargetBindingTest, TargetlessFunctionUsesPortableRepresentation) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @portable() {
+  low.return
+}
+)");
+
+  loom_low_resolved_target_t target = {};
+  IREE_ASSERT_OK(loom_low_resolve_function_target(
+      module.get(), &symbol_facts_,
+      LookupFunctionOp(module.get(), IREE_SV("portable")),
+      /*effective_target_facts=*/nullptr, &registry_,
+      iree_diagnostic_emitter_t{}, &target));
+
+  EXPECT_EQ(target.target_facts, nullptr);
+  EXPECT_TRUE(iree_string_view_is_empty(target.target_name));
+  EXPECT_EQ(target.feature_bits, 0u);
+  ASSERT_NE(target.descriptor_set, nullptr);
+  EXPECT_TRUE(iree_string_view_equal(target.descriptor_set_key,
+                                     IREE_SV("test.low.core")));
+}
+
+TEST_F(LowTargetBindingTest, MissingRepresentationStopsBeforeTargetBinding) {
+  ModulePtr module = ParseModule(R"(
+test.target<low_core> @target
+low.func.def target<test.low.core>(@target) @kernel() {
+  low.return
+}
+)");
+
+  DiagnosticCapture capture;
+  loom_low_descriptor_registry_t empty_registry = {};
+  loom_low_resolved_target_t target = {};
+  IREE_ASSERT_OK(loom_low_resolve_function_target(
+      module.get(), &symbol_facts_,
+      LookupFunctionOp(module.get(), IREE_SV("kernel")),
+      /*effective_target_facts=*/nullptr, &empty_registry,
+      {
+          /*.fn=*/CaptureDiagnostic,
+          /*.user_data=*/&capture,
+      },
+      &target));
+
+  EXPECT_EQ(capture.error, LOOM_ERR_TARGET_044);
+  EXPECT_EQ(target.target_facts, nullptr);
+  EXPECT_EQ(target.descriptor_set, nullptr);
+}
+
 TEST_F(LowTargetBindingTest,
        PortableRepresentationSupportsDeclaredTargetContract) {
   ModulePtr module = ParseModule(R"(

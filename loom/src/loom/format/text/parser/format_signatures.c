@@ -147,6 +147,7 @@ static iree_status_t loom_parse_format_lhs_result_type_list(
     loom_parsed_op_t* parsed) {
   uint32_t errors_before = parser->error_count;
   bool use_parens = (element->data & LOOM_RESULT_TYPE_LIST_PARENS) != 0;
+  bool uniform = (element->data & LOOM_RESULT_TYPE_LIST_UNIFORM) != 0;
   if (use_parens) {
     if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LPAREN)) {
       loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
@@ -155,6 +156,23 @@ static iree_status_t loom_parse_format_lhs_result_type_list(
   }
 
   loom_type_parse_mode_t type_mode = LOOM_TYPE_PARSE_BODY;
+  if (uniform) {
+    loom_type_t type = {0};
+    IREE_RETURN_IF_ERROR(loom_parse_type(parser, type_mode, &type));
+    for (uint16_t result_index = 0; result_index < parsed->result_count;
+         ++result_index) {
+      IREE_RETURN_IF_ERROR(loom_parse_format_assign_lhs_result_type(
+          parser, vtable, op_name_token, parsed, result_index, type));
+    }
+    if (use_parens) {
+      if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_RPAREN)) {
+        loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
+        return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("')'"));
+      }
+    }
+    return iree_ok_status();
+  }
+
   uint16_t result_index = 0;
   while ((!use_parens ||
           !loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_RPAREN)) &&
@@ -600,6 +618,7 @@ iree_status_t loom_parse_format_block_args(loom_parser_t* parser) {
 iree_status_t loom_parse_format_func_args(loom_parser_t* parser,
                                           const loom_op_vtable_t* vtable,
                                           const loom_format_element_t* element,
+                                          uint16_t pending_func_arg_base,
                                           loom_parsed_op_t* parsed) {
   uint16_t pending_arg_start = parser->pending_func_args.count;
   if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LPAREN)) {
@@ -664,6 +683,22 @@ iree_status_t loom_parse_format_func_args(loom_parser_t* parser,
     }
     loom_parser_pending_block_args_truncate(&parser->pending_func_args,
                                             pending_arg_start);
+  }
+  const uint8_t end_attr_index =
+      LOOM_FORMAT_FUNC_ARGS_END_ATTR_INDEX(element->data);
+  if (end_attr_index != LOOM_ATTR_INDEX_NONE) {
+    uint16_t boundary = 0;
+    if (element->field_index == LOOM_OPERAND_INDEX_NONE) {
+      boundary =
+          (uint16_t)(parser->pending_func_args.count - pending_func_arg_base);
+    } else if (loom_op_vtable_has_segmented_operands(vtable)) {
+      boundary = parsed->operand_segment_counts[element->field_index];
+    } else {
+      boundary = (uint16_t)(parsed->operand_count - element->field_index);
+    }
+    IREE_RETURN_IF_ERROR(
+        loom_parsed_op_set_attribute(parsed, &parser->parser_arena,
+                                     end_attr_index, loom_attr_i64(boundary)));
   }
   return iree_ok_status();
 }

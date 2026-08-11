@@ -73,6 +73,7 @@ def test_default_dynamic_builder_registers_all_dialects() -> None:
     assert result.name == "c0"
     assert builder.vector.name == "vector"
     assert builder.scf.name == "scf"
+    assert builder.command.name == "command"
 
 
 def test_dynamic_builder_constructs_binary_op_with_result_name() -> None:

@@ -108,7 +108,7 @@ func.def @workgroup_alloca_reference() -> (i64, i64, i64, i64, i64) {
   %bytes = index.constant 256 : offset
   %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %view = buffer.view %scratch[%base] : buffer -> view<16xf32, %layout>
   %buffer_space = test.fact_buffer_memory_space %scratch : buffer -> i64
   %buffer_align = test.fact_buffer_min_alignment %scratch : buffer -> i64
@@ -179,7 +179,7 @@ func.def @select_mixed_buffer_space_degrades_space(%condition: i1, %external: bu
   %layout = encoding.layout.dense : encoding<layout>
   %bytes = index.constant 64 : offset
   %global = buffer.assume.memory_space<global> %external : buffer
-  %workgroup = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %workgroup = buffer.alloca<workgroup> align(64) %bytes : buffer
   %selected = scf.select %condition, %global, %workgroup : buffer
   %view = buffer.view %selected[%offset] : buffer -> view<4xf32, %layout>
   %is_reference = test.fact_is_buffer_reference %selected : buffer -> i1
@@ -202,8 +202,8 @@ func.def @select_mixed_buffer_space_degrades_space(%condition: i1, %external: bu
 // A dynamic root retains only the alignment guaranteed by both candidates.
 func.def @select_buffer_meets_alignment(%condition: i1) -> (i64) {
   %bytes = index.constant 64 : offset
-  %lhs = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
-  %rhs = buffer.alloca %bytes {base_alignment = 128, memory_space = workgroup} : buffer
+  %lhs = buffer.alloca<workgroup> align(64) %bytes : buffer
+  %rhs = buffer.alloca<workgroup> align(128) %bytes : buffer
   %selected = scf.select %condition, %lhs, %rhs : buffer
   %alignment = test.fact_buffer_min_alignment %selected : buffer -> i64
   func.return %alignment : i64
@@ -279,7 +279,7 @@ func.def @subview_refine_preserves_memory_space() -> (i64, i64) {
   %bytes = index.constant 256 : offset
   %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 128, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(128) %bytes : buffer
   %source = buffer.view %scratch[%base] : buffer -> view<16xf32, %layout>
   %sub = view.subview %source[4] : view<16xf32, %layout> -> view<8xf32, %layout>
   %refined = view.refine %sub : view<8xf32, %layout> -> view<4xf32, %layout>

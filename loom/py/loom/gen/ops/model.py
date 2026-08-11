@@ -111,6 +111,12 @@ def _load_check_generation() -> DialectGeneration:
     return DialectGeneration(check_ops, list(ALL_CHECK_OPS), None)
 
 
+def _load_command_generation() -> DialectGeneration:
+    from loom.dialect.command import ALL_COMMAND_OPS, command_ops
+
+    return DialectGeneration(command_ops, list(ALL_COMMAND_OPS), None)
+
+
 def _load_buffer_generation() -> DialectGeneration:
     from loom.dialect.buffer import ALL_BUFFER_OPS, buffer_ops
 
@@ -226,6 +232,7 @@ _DIALECT_GENERATION_LOADERS: tuple[tuple[str, DialectGenerationLoader], ...] = (
     ("scf", _load_scf_generation),
     ("cfg", _load_cfg_generation),
     ("check", _load_check_generation),
+    ("command", _load_command_generation),
     ("buffer", _load_buffer_generation),
     ("view", _load_view_generation),
     ("vector", _load_vector_generation),

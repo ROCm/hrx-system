@@ -211,7 +211,10 @@ static iree_status_t loom_low_descriptor_text_asm_make_packet(
       .descriptor_key = descriptor_key,
       .mnemonic = mnemonic,
       .result_count = asm_form->result_operand_index_count,
-      .operand_count = asm_form->operand_index_count,
+      .minimum_operand_count = descriptor->minimum_packet_operand_count,
+      .operand_segment_count = asm_form->operand_segment_count,
+      .has_variadic_operands =
+          loom_low_descriptor_has_variadic_operands(descriptor),
       .asm_immediate_count = asm_form->immediate_count,
       .immediate_count = descriptor->immediate_count,
       .immediate_attribute_field_index = builds_as_const
@@ -386,7 +389,7 @@ static iree_status_t loom_low_descriptor_text_asm_find_packet_operand_index(
       loom_low_descriptor_text_asm_descriptor_set(packet->descriptor_set);
   const loom_low_asm_form_t* asm_form =
       loom_low_descriptor_text_asm_form(packet->form);
-  for (uint16_t i = 0; i < packet->operand_count; ++i) {
+  for (uint16_t i = 0; i < asm_form->operand_index_count; ++i) {
     const uint32_t asm_operand_index = asm_form->operand_index_start + i;
     if (asm_operand_index >= descriptor_set->asm_operand_index_count) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -1033,8 +1036,11 @@ static iree_status_t loom_low_descriptor_text_asm_build_packet(
     iree_host_size_t result_count, loom_location_id_t location,
     loom_op_t** out_op) {
   (void)state;
-  if (operand_count != packet->operand_count ||
-      result_count != packet->result_count) {
+  const bool operand_count_matches =
+      packet->has_variadic_operands
+          ? operand_count >= packet->minimum_operand_count
+          : operand_count == packet->minimum_operand_count;
+  if (!operand_count_matches || result_count != packet->result_count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low asm packet build shape does not match the "
                             "packet descriptor");
@@ -1060,6 +1066,52 @@ static iree_status_t loom_low_descriptor_text_asm_build_packet(
       builder, descriptor_set, descriptor, operands, operand_count, attributes,
       result_types, result_count, tied_results, tied_result_count, location,
       out_op);
+}
+
+static iree_status_t loom_low_descriptor_text_asm_operand_segment_descriptor(
+    const loom_text_low_asm_environment_state_t* state,
+    const loom_text_low_asm_packet_descriptor_t* packet, uint16_t segment_index,
+    loom_text_low_asm_operand_segment_descriptor_t* out_segment) {
+  (void)state;
+  *out_segment = (loom_text_low_asm_operand_segment_descriptor_t){0};
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_low_descriptor_text_asm_descriptor_set(packet->descriptor_set);
+  const loom_low_asm_form_t* asm_form =
+      loom_low_descriptor_text_asm_form(packet->form);
+  if (segment_index >= asm_form->operand_segment_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "low asm operand segment index is out of range");
+  }
+  const uint32_t row_index = asm_form->operand_segment_start + segment_index;
+  if (row_index >= descriptor_set->asm_operand_segment_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "low asm operand segment row is out of range");
+  }
+  const loom_low_asm_operand_segment_t* segment =
+      &descriptor_set->asm_operand_segments[row_index];
+  switch (segment->delimiter) {
+    case LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_ANGLE:
+      out_segment->delimiter =
+          LOOM_TEXT_LOW_ASM_OPERAND_SEGMENT_DELIMITER_ANGLE;
+      break;
+    case LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_SQUARE:
+      out_segment->delimiter =
+          LOOM_TEXT_LOW_ASM_OPERAND_SEGMENT_DELIMITER_SQUARE;
+      break;
+    case LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_PAREN:
+      out_segment->delimiter =
+          LOOM_TEXT_LOW_ASM_OPERAND_SEGMENT_DELIMITER_PAREN;
+      break;
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "low asm operand segment has an invalid "
+                              "delimiter");
+  }
+  out_segment->is_variadic = iree_any_bit_set(
+      segment->flags, LOOM_LOW_ASM_OPERAND_SEGMENT_FLAG_VARIADIC);
+  out_segment->fixed_operand_count =
+      segment->operand_count - (out_segment->is_variadic ? 1 : 0);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_low_descriptor_text_asm_build_return(
@@ -1335,8 +1387,11 @@ static iree_status_t loom_low_descriptor_text_asm_describe_packet(
                               packet.descriptor_key.data);
     }
   } else {
-    if (op->result_count != packet.result_count ||
-        op->operand_count != packet.operand_count) {
+    const bool operand_count_matches =
+        packet.has_variadic_operands
+            ? op->operand_count >= packet.minimum_operand_count
+            : op->operand_count == packet.minimum_operand_count;
+    if (op->result_count != packet.result_count || !operand_count_matches) {
       return iree_ok_status();
     }
     IREE_RETURN_IF_ERROR(
@@ -1492,6 +1547,8 @@ static const loom_text_low_asm_vtable_t kLowDescriptorTextAsmVtable = {
     .result_type_annotation_required =
         loom_low_descriptor_text_asm_result_type_annotation_required,
     .immediate_descriptor = loom_low_descriptor_text_asm_immediate_descriptor,
+    .operand_segment_descriptor =
+        loom_low_descriptor_text_asm_operand_segment_descriptor,
     .build_packet = loom_low_descriptor_text_asm_build_packet,
     .build_return = loom_low_descriptor_text_asm_build_return,
     .structural_attr_descriptor =
@@ -1514,6 +1571,8 @@ static const loom_text_low_asm_vtable_t kLowDescriptorTextAsmDiagnosticVtable = 
     .result_type_annotation_required =
         loom_low_descriptor_text_asm_result_type_annotation_required,
     .immediate_descriptor = loom_low_descriptor_text_asm_immediate_descriptor,
+    .operand_segment_descriptor =
+        loom_low_descriptor_text_asm_operand_segment_descriptor,
     .build_packet = loom_low_descriptor_text_asm_build_packet,
     .build_return = loom_low_descriptor_text_asm_build_return,
     .structural_attr_descriptor =

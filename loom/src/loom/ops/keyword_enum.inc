@@ -84,3 +84,5 @@
   LOOM_KW_MEMORY_ACCESS = 75,  // "memory_access"
   LOOM_KW_PERIOD = 76,  // "period"
   LOOM_KW_REQUIRES = 77,  // "requires"
+  LOOM_KW_SCOPE = 78,  // "scope"
+  LOOM_KW_ORDERING = 79,  // "ordering"

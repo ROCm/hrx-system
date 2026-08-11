@@ -24,6 +24,8 @@ from loom.target.low_descriptors import (
     LOW_DESCRIPTOR_ENCODING_ID_NONE,
     AsmForm,
     AsmImmediate,
+    AsmOperandSegment,
+    AsmOperandSegmentDelimiter,
     AsmResultValueType,
     Constraint,
     ConstraintKind,
@@ -348,6 +350,15 @@ def test_compiler_descriptor_rows_span_source_tables() -> None:
     compiled = compiler.compile_descriptor_set(TEST_LOW_CORE_DESCRIPTOR_SET)
 
     assert len(compiled.descriptor_rows) == len(compiled.descriptors)
+    rows_by_key = {
+        descriptor.key: row
+        for descriptor, row in zip(
+            compiled.descriptors,
+            compiled.descriptor_rows,
+            strict=True,
+        )
+    }
+    assert rows_by_key["test.add.i32"]["minimum_packet_operand_count"] == 2
     for descriptor, row in zip(
         compiled.descriptors,
         compiled.descriptor_rows,
@@ -1375,6 +1386,72 @@ def test_generator_rejects_asm_form_unknown_operand_field() -> None:
     with pytest.raises(
         ValueError,
         match=re.escape("descriptor 'test.add.i32' asm form 'test.add.i32' operand references unknown operand field 'missing'"),
+    ):
+        generate_descriptor_set(descriptor_set)
+
+
+def test_generator_emits_trailing_variadic_operand_segment() -> None:
+    lhs, rhs = TEST_LOW_ADD_I32_DESCRIPTOR.operands[1:]
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        operands=(
+            TEST_LOW_ADD_I32_DESCRIPTOR.operands[0],
+            lhs,
+            replace(rhs, flags=(OperandFlag.VARIADIC,)),
+        ),
+        asm_forms=(
+            AsmForm(
+                results=("dst",),
+                operand_segments=(
+                    AsmOperandSegment(
+                        AsmOperandSegmentDelimiter.PAREN,
+                        ("lhs", "rhs"),
+                    ),
+                ),
+            ),
+        ),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+    generated = generate_descriptor_set(descriptor_set)
+
+    assert compiled.asm_forms[0].operand_indices == (1, 2)
+    assert compiled.asm_forms[0].operand_segment_start == 0
+    assert compiled.asm_operand_segments[0].operand_count == 2
+    assert compiled.asm_operand_segments[0].has_variadic_operand
+    assert compiled.descriptor_rows[0]["minimum_packet_operand_count"] == 1
+    assert DescriptorFlag.VARIADIC_OPERANDS in compiled.descriptors[0].flags
+    assert "LOOM_LOW_OPERAND_FLAG_VARIADIC" in generated.source
+    assert ".minimum_packet_operand_count = 1," in generated.source
+    assert "LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS" in generated.source
+    assert "static const loom_low_asm_operand_segment_t kTestLowCoreAsmOperandSegments[]" in generated.source
+    assert ".delimiter = LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_PAREN," in generated.source
+    assert ".flags = LOOM_LOW_ASM_OPERAND_SEGMENT_FLAG_VARIADIC," in generated.source
+    assert ".asm_operand_segments = kTestLowCoreAsmOperandSegments," in generated.source
+
+
+def test_generator_rejects_non_trailing_variadic_operand() -> None:
+    lhs, rhs = TEST_LOW_ADD_I32_DESCRIPTOR.operands[1:]
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        operands=(
+            TEST_LOW_ADD_I32_DESCRIPTOR.operands[0],
+            replace(lhs, flags=(OperandFlag.VARIADIC,)),
+            rhs,
+        ),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.add.i32' variadic operand 'lhs' must be the final descriptor operand"),
     ):
         generate_descriptor_set(descriptor_set)
 

@@ -45,6 +45,16 @@ class PassInterpreterTest : public PassTestHarness {
     }
     return iree_ok_status();
   }
+
+  static bool SelectNamedFunction(void* user_data, const loom_module_t* module,
+                                  const loom_symbol_t* symbol,
+                                  loom_func_like_t function) {
+    (void)function;
+    const iree_string_view_t* selected_name =
+        static_cast<const iree_string_view_t*>(user_data);
+    return iree_string_view_equal(module->strings.entries[symbol->name_id],
+                                  *selected_name);
+  }
 };
 
 TEST_F(PassInterpreterTest, RunsModuleAndFunctionPasses) {
@@ -68,6 +78,42 @@ TEST_F(PassInterpreterTest, RunsModuleAndFunctionPasses) {
 
   EXPECT_EQ(trace.module_noop_invocation_count, 1);
   EXPECT_EQ(trace.noop_invocation_count, 2);
+}
+
+TEST_F(PassInterpreterTest, SelectsFunctionsEnteredByModuleProgram) {
+  loom_module_t* module =
+      Parse(IREE_SV("pass.pipeline<module> @pipeline pipeline {\n"
+                    "  test.module-noop\n"
+                    "  for func {\n"
+                    "    test.noop\n"
+                    "  }\n"
+                    "}\n"
+                    "test.func @first() {\n"
+                    "  test.yield\n"
+                    "}\n"
+                    "test.func @second() {\n"
+                    "  test.yield\n"
+                    "}\n"));
+  ASSERT_NE(module, nullptr);
+
+  PassProgramStorage storage;
+  IREE_ASSERT_OK(Compile(module, Pipeline(module, 0), &storage.program));
+  loom_test_pass_trace_t trace = {};
+  iree_string_view_t selected_name = IREE_SV("second");
+  loom_pass_interpreter_options_t options = InterpreterOptions(&trace);
+  options.function_selector = {
+      /*.select=*/SelectNamedFunction,
+      /*.user_data=*/&selected_name,
+  };
+  loom_pass_run_result_t result = {};
+  IREE_ASSERT_OK(loom_pass_interpreter_run_module(&storage.program, module,
+                                                  &options, &result));
+
+  EXPECT_EQ(trace.module_noop_invocation_count, 1);
+  ASSERT_EQ(trace.event_count, 2u);
+  EXPECT_TRUE(
+      iree_string_view_equal(trace.events[1].symbol_name, IREE_SV("second")));
+  EXPECT_EQ(trace.noop_invocation_count, 1);
 }
 
 TEST_F(PassInterpreterTest, RunsFunctionRootProgram) {

@@ -14,6 +14,7 @@ from typing import Any
 from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.dialect.buffer import ALL_BUFFER_OPS
 from loom.dialect.check import ALL_CHECK_OPS
+from loom.dialect.command import ALL_COMMAND_OPS
 from loom.dialect.config import ALL_CONFIG_OPS
 from loom.dialect.encoding import ALL_ENCODING_OPS
 from loom.dialect.func import ALL_FUNC_OPS
@@ -45,6 +46,7 @@ ALL_OPS = (
     *ALL_GLOBAL_OPS,
     *ALL_SCF_OPS,
     *ALL_CHECK_OPS,
+    *ALL_COMMAND_OPS,
     *ALL_CONFIG_OPS,
     *ALL_BUFFER_OPS,
     *ALL_VIEW_OPS,
@@ -82,6 +84,8 @@ def test_loom_grammar_uses_generated_op_and_type_metadata() -> None:
     assert "addi" in serialized
     assert "func" in serialized
     assert "return" in serialized
+    assert "command" in serialized
+    assert "program\\\\.launch" in serialized
     type_pattern = grammar["repository"]["types"]["patterns"][0]["match"]  # type: ignore[index]
     assert "hal\\.buffer" in type_pattern
     assert "tile" in serialized

@@ -240,9 +240,9 @@ func.def @masked_store_preserves_effecting_producer_position(%storage: buffer, %
   %output_view = buffer.view %output[%base] : buffer -> view<32xf32, #dense>
   %loaded = vector.load %storage_view[%origin] : view<32xf16, #dense> -> vector<2xf16>
   %wide = vector.extf %loaded : vector<2xf16> to vector<2xf32>
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   vector.store %replacement, %storage_view[%origin] : vector<2xf16>, view<32xf16, #dense>
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   vector.store.mask %wide, %output_view[%origin], %mask : vector<2xf32>, view<32xf32, #dense>, vector<2xi1>
   func.return
 }
@@ -253,9 +253,9 @@ func.def @masked_store_preserves_effecting_producer_position(%storage: buffer, %
   %storage_view = buffer.view %storage[%base] : buffer -> view<32xf16, #dense>
   %output_view = buffer.view %output[%base] : buffer -> view<32xf32, #dense>
   %loaded = vector.load %storage_view[%origin] : view<32xf16, #dense> -> vector<2xf16>
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   vector.store %replacement, %storage_view[%origin] : vector<2xf16>, view<32xf16, #dense>
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %10 = vector.extract %mask[0] : vector<2xi1> -> i1
   scf.if %10 {
     %11 = vector.extract %loaded[0] : vector<2xf16> -> f16

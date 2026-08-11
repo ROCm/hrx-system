@@ -105,7 +105,8 @@ typedef enum loom_low_resource_import_kind_e {
   LOOM_LOW_RESOURCE_IMPORT_KIND_VM_STATE = 2,
   LOOM_LOW_RESOURCE_IMPORT_KIND_VM_IMPORT = 3,
   LOOM_LOW_RESOURCE_IMPORT_KIND_HAL_BINDING = 4,
-  LOOM_LOW_RESOURCE_IMPORT_KIND_COUNT_ = 5,
+  LOOM_LOW_RESOURCE_IMPORT_KIND_COMMAND_INPUT = 5,
+  LOOM_LOW_RESOURCE_IMPORT_KIND_COUNT_ = 6,
 } loom_low_resource_import_kind_t;
 
 // Local low.scf.for unroll policy.

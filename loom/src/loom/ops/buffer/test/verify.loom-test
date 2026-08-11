@@ -1,0 +1,15 @@
+// RUN: verify
+
+func.def @pack_requires_one_or_more_ranges() {
+  // ERROR@+1: STRUCTURE/014 "byte_lengths" "0" "at least one physical byte range"
+  %total = buffer.pack [] : offset
+  func.return
+}
+
+// ====
+
+func.def @pack_requires_power_of_two_alignments(%byte_length: offset) {
+  // ERROR@+1: STRUCTURE/014 "minimum_alignments[0]" "24" "positive power-of-two byte alignment"
+  %total, %byte_offset = buffer.pack [align(24) %byte_length] : offset
+  func.return
+}

@@ -109,7 +109,7 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("group_count_kernel") @group_c
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %out_shared_bytes = index.constant 512 : offset
-  %out_shared_buffer = buffer.alloca %out_shared_bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %out_shared_buffer = buffer.alloca<workgroup> align(4) %out_shared_bytes : buffer
   %out_shared = buffer.view %out_shared_buffer[%c0_bytes] : buffer -> view<128xi32, %layout>
   %c128 = index.constant 128 : index
   %madd = index.madd %bx, %c128, %thread_idx : index
@@ -123,7 +123,7 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("group_count_kernel") @group_c
     %const = scalar.constant 0 : i32
     view.store %const, %out_shared[%madd_2] : i32, view<128xi32, %layout>
   }
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %c1023 = index.constant 1023 : index
   %add = index.add %num_tokens_idx, %c1023 : index
   %sub_2 = index.sub %add, %madd : index
@@ -145,7 +145,7 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("group_count_kernel") @group_c
       }
     }
   }
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %c135 = index.constant 135 : index
   %sub_3 = index.sub %c135, %thread_idx : index
   %div_3 = index.div %sub_3, %c128 : index
@@ -266,7 +266,7 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("aux_fi_kernel") @aux_fi_kerne
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %out_shared_bytes = index.constant 512 : offset
-  %out_shared_buffer = buffer.alloca %out_shared_bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %out_shared_buffer = buffer.alloca<workgroup> align(4) %out_shared_bytes : buffer
   %out_shared = buffer.view %out_shared_buffer[%c0_bytes] : buffer -> view<128xi32, %layout>
   %c128 = index.constant 128 : index
   %madd = index.madd %bx, %c128, %thread_idx : index
@@ -280,7 +280,7 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("aux_fi_kernel") @aux_fi_kerne
     %const = scalar.constant 0 : i32
     view.store %const, %out_shared[%madd_2] : i32, view<128xi32, %layout>
   }
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %c1023 = index.constant 1023 : index
   %add = index.add %num_tokens_idx, %c1023 : index
   %sub_2 = index.sub %add, %madd : index
@@ -302,7 +302,7 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("aux_fi_kernel") @aux_fi_kerne
       }
     }
   }
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %c135 = index.constant 135 : index
   %sub_3 = index.sub %c135, %thread_idx : index
   %div_3 = index.div %sub_3, %c128 : index

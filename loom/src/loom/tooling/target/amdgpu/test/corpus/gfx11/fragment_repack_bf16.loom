@@ -17,13 +17,13 @@ kernel.def target(@fragment_repack_gfx11_wave32) @fragment_repack_roundtrip_bf16
   %input_view = buffer.view %input[%base] : buffer -> view<16x16xf32, #dense>
   %rhs_view = buffer.view %rhs[%base] : buffer -> view<16x16xbf16, %rhs_layout>
   %output_view = buffer.view %output[%base] : buffer -> view<16x16xf32, #dense>
-  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
   %scratch_view = buffer.view %scratch[%base] : buffer -> view<16x16xbf16, #dense>
   %zero_accumulator = vector.constant 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero_accumulator shape [%tile_extent, %tile_extent] : vector<8xf32>
   %result = vector.fragment.load<result> %input_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xf32, #dense> -> vector<8xf32>
   vector.fragment.store<result> %result, %scratch_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<16x16xbf16, #dense>
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %lhs = vector.fragment.load<lhs> %scratch_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xbf16, #dense> -> vector<16xbf16>
   %rhs_fragment = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xbf16, %rhs_layout> -> vector<16xbf16>
   %product = vector.mma %lhs, %rhs_fragment, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
@@ -58,8 +58,8 @@ check.case public @fragment_repack_bf16_equivalence_case {
   %rhs = check.generate.iota offset(0.5) step(0.00390625) : tensor<16x16xbf16>
   %roundtrip_output = check.generate.fill value(0.0) : tensor<16x16xf32>
   %direct_output = check.generate.fill value(0.0) : tensor<16x16xf32>
-  kernel.launch @fragment_repack_roundtrip_bf16[](%input, %rhs, %roundtrip_output) : [](tensor<16x16xf32>, tensor<16x16xbf16>, tensor<16x16xf32>)
-  kernel.launch @fragment_repack_direct_bf16[](%input, %rhs, %direct_output) : [](tensor<16x16xf32>, tensor<16x16xbf16>, tensor<16x16xf32>)
+  kernel.launch @fragment_repack_roundtrip_bf16(%input, %rhs, %roundtrip_output) : (tensor<16x16xf32>, tensor<16x16xbf16>, tensor<16x16xf32>)
+  kernel.launch @fragment_repack_direct_bf16(%input, %rhs, %direct_output) : (tensor<16x16xf32>, tensor<16x16xbf16>, tensor<16x16xf32>)
   check.expect.close actual(%direct_output) expected(%roundtrip_output) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xf32>
   check.return
 }

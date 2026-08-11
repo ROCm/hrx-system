@@ -582,6 +582,7 @@ typedef enum loom_dialect_id_e {
   LOOM_DIALECT_SPIRV = 0x1B,
   LOOM_DIALECT_CONFIG = 0x1C,
   LOOM_DIALECT_SANITIZER = 0x1D,
+  LOOM_DIALECT_COMMAND = 0x1E,
   LOOM_DIALECT_RESERVED = 0xFF,
 } loom_dialect_id_t;
 #define LOOM_OP_KIND_UNKNOWN ((loom_op_kind_t)0)
@@ -593,7 +594,7 @@ typedef enum loom_dialect_id_e {
 
 // Maximum number of built-in dialects. Dialect IDs must be less than
 // this value. Matches the size of the dialect vtable registry array.
-#define LOOM_DIALECT_BUILTIN_COUNT_ 30
+#define LOOM_DIALECT_BUILTIN_COUNT_ 31
 
 // Extracts the dialect ID (high byte) from an op kind.
 static inline uint8_t loom_op_dialect_id(loom_op_kind_t kind) {
@@ -950,11 +951,13 @@ enum loom_call_like_kind_e {
   LOOM_CALL_LIKE_KIND_LOW_INTERNAL = 2,
   // Explicit semantic-to-target-low invocation of a selected low function.
   LOOM_CALL_LIKE_KIND_LOW_INVOKE = 3,
+  // Command-program materialization with specialization and binding operands.
+  LOOM_CALL_LIKE_KIND_COMMAND_PROGRAM = 4,
 };
 
-// Interface descriptor for direct symbol call-like ops. The operand and result
-// offsets identify trailing call argument/result slices, so generic analyses
-// can read call edges without knowing dialect-specific op names.
+// Interface descriptor for direct symbol call-like ops. The operand field and
+// result offset identify trailing call argument/result slices, so generic
+// analyses can read call edges without knowing dialect-specific op names.
 typedef struct loom_call_like_vtable_t {
   // Index of the symbol ref attr that names the direct callee.
   uint8_t callee_attr_index;
@@ -970,14 +973,19 @@ typedef struct loom_call_like_vtable_t {
   // absent.
   uint8_t inline_policy_attr_index;
 
-  // Operand offset where call arguments begin.
-  uint8_t operand_offset;
+  // Operand field where call arguments begin. All later operand fields are
+  // also part of the call argument slice.
+  uint8_t operand_field_index;
 
   // Result offset where call results begin.
   uint8_t result_offset;
 
   // Semantic class used by analyses to opt into the call shapes they own.
   loom_call_like_kind_t kind;
+
+  // Number of operand segments stored on segmented call ops. Zero when
+  // |operand_field_index| is a flat fixed or trailing variadic field.
+  uint8_t operand_segment_count;
 } loom_call_like_vtable_t;
 
 // Fat reference to a direct call-like op. 16 bytes, passed by value.
@@ -1064,6 +1072,11 @@ typedef struct loom_func_like_vtable_t {
   // Index of the provider proof-requirement array attr. LOOM_ATTR_INDEX_NONE
   // if absent.
   uint8_t requires_attr_index;
+
+  // Index of the optional i64 attr counting leading arguments that participate
+  // in staged specialization. LOOM_ATTR_INDEX_NONE means there is no leading
+  // staged group.
+  uint8_t specialization_count_attr_index;
 
   // Body region index. LOOM_REGION_INDEX_NONE for bodyless ops
   // (func.decl, func.ukernel) that only declare a signature.

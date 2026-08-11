@@ -1,0 +1,137 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Canonical little-endian encoding of one portable command program.
+//
+// The fixed header is followed by the tables in
+// loom_cmd_program_format_layout_t order with no inter-table padding.
+// Multi-byte fields may therefore be unaligned and must be accessed with the
+// IREE unaligned little-endian helpers. All offsets and the total artifact
+// length are 32-bit byte counts.
+
+#ifndef LOOM_TARGET_ARCH_CMD_FORMAT_H_
+#define LOOM_TARGET_ARCH_CMD_FORMAT_H_
+
+#include "iree/base/api.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Eight-byte artifact identity including the trailing NUL byte.
+#define LOOM_CMD_PROGRAM_FORMAT_MAGIC "LOOMCMD"
+
+enum {
+  LOOM_CMD_PROGRAM_FORMAT_MAGIC_LENGTH = 8,
+  LOOM_CMD_PROGRAM_FORMAT_VERSION = 0,
+
+  LOOM_CMD_PROGRAM_HEADER_MAGIC_OFFSET = 0,
+  LOOM_CMD_PROGRAM_HEADER_VERSION_OFFSET = 8,
+  LOOM_CMD_PROGRAM_HEADER_SIZE_OFFSET = 10,
+  LOOM_CMD_PROGRAM_HEADER_TOTAL_LENGTH_OFFSET = 12,
+  LOOM_CMD_PROGRAM_HEADER_FIXED_BUFFER_COUNT_OFFSET = 16,
+  LOOM_CMD_PROGRAM_HEADER_BINDING_COUNT_OFFSET = 20,
+  LOOM_CMD_PROGRAM_HEADER_EXECUTABLE_COUNT_OFFSET = 24,
+  LOOM_CMD_PROGRAM_HEADER_ENTRY_COUNT_OFFSET = 28,
+  LOOM_CMD_PROGRAM_HEADER_BUFFER_REF_COUNT_OFFSET = 32,
+  LOOM_CMD_PROGRAM_HEADER_ARGUMENT_DATA_LENGTH_OFFSET = 36,
+  LOOM_CMD_PROGRAM_HEADER_COMMAND_COUNT_OFFSET = 40,
+  LOOM_CMD_PROGRAM_HEADER_PARAMETER_ROOT_COUNT_OFFSET = 44,
+  LOOM_CMD_PROGRAM_HEADER_PARAMETER_COUNT_OFFSET = 48,
+  LOOM_CMD_PROGRAM_HEADER_PARAMETER_KEY_LENGTH_OFFSET = 52,
+  LOOM_CMD_PROGRAM_HEADER_ENTRY_SCHEMA_COUNT_OFFSET = 56,
+  LOOM_CMD_PROGRAM_HEADER_ENTRY_SCHEMA_KIND_COUNT_OFFSET = 60,
+  LOOM_CMD_PROGRAM_HEADER_BUFFER_REF_TABLE_OFFSET = 64,
+  LOOM_CMD_PROGRAM_HEADER_ENTRY_SCHEMA_TABLE_OFFSET = 68,
+  LOOM_CMD_PROGRAM_HEADER_ENTRY_SCHEMA_KIND_TABLE_OFFSET = 72,
+  LOOM_CMD_PROGRAM_HEADER_ARGUMENT_DATA_OFFSET = 76,
+  LOOM_CMD_PROGRAM_HEADER_COMMAND_TABLE_OFFSET = 80,
+  LOOM_CMD_PROGRAM_HEADER_PARAMETER_ROOT_TABLE_OFFSET = 84,
+  LOOM_CMD_PROGRAM_HEADER_PARAMETER_TABLE_OFFSET = 88,
+  LOOM_CMD_PROGRAM_HEADER_PARAMETER_KEY_TABLE_OFFSET = 92,
+  LOOM_CMD_PROGRAM_HEADER_TRANSIENT_BINDING_INDEX_OFFSET = 96,
+  LOOM_CMD_PROGRAM_HEADER_TRANSIENT_RESERVED_OFFSET = 100,
+  LOOM_CMD_PROGRAM_HEADER_TRANSIENT_BYTE_LENGTH_OFFSET = 104,
+  LOOM_CMD_PROGRAM_HEADER_TRANSIENT_MINIMUM_ALIGNMENT_OFFSET = 112,
+  LOOM_CMD_PROGRAM_HEADER_LAUNCH_COUNT_BINDING_INDEX_OFFSET = 120,
+  LOOM_CMD_PROGRAM_HEADER_LAUNCH_COUNT_RESERVED_OFFSET = 124,
+  LOOM_CMD_PROGRAM_HEADER_LAUNCH_COUNT_BYTE_LENGTH_OFFSET = 128,
+  LOOM_CMD_PROGRAM_HEADER_LAUNCH_COUNT_MINIMUM_ALIGNMENT_OFFSET = 136,
+  LOOM_CMD_PROGRAM_HEADER_SIZE = 144,
+
+  LOOM_CMD_PROGRAM_BUFFER_REF_ROLE_OFFSET = 0,
+  LOOM_CMD_PROGRAM_BUFFER_REF_ROOT_INDEX_OFFSET = 4,
+  LOOM_CMD_PROGRAM_BUFFER_REF_BYTE_OFFSET_OFFSET = 8,
+  LOOM_CMD_PROGRAM_BUFFER_REF_BYTE_LENGTH_OFFSET = 16,
+  LOOM_CMD_PROGRAM_BUFFER_REF_SIZE = 24,
+
+  LOOM_CMD_PROGRAM_ENTRY_SCHEMA_ENTRY_INDEX_OFFSET = 0,
+  LOOM_CMD_PROGRAM_ENTRY_SCHEMA_KIND_OFFSET_OFFSET = 4,
+  LOOM_CMD_PROGRAM_ENTRY_SCHEMA_ARGUMENT_COUNT_OFFSET = 8,
+  LOOM_CMD_PROGRAM_ENTRY_SCHEMA_ARGUMENT_BYTE_LENGTH_OFFSET = 12,
+  LOOM_CMD_PROGRAM_ENTRY_SCHEMA_SIZE = 16,
+
+  LOOM_CMD_PROGRAM_COMMAND_KIND_OFFSET = 0,
+  LOOM_CMD_PROGRAM_COMMAND_ARGUMENT_OFFSET_OFFSET = 4,
+  LOOM_CMD_PROGRAM_COMMAND_ARGUMENT_SCHEMA_INDEX_OFFSET = 8,
+  LOOM_CMD_PROGRAM_COMMAND_OPERAND_0_OFFSET = 12,
+  LOOM_CMD_PROGRAM_COMMAND_OPERAND_1_OFFSET = 16,
+  LOOM_CMD_PROGRAM_COMMAND_OPERAND_2_OFFSET = 20,
+  LOOM_CMD_PROGRAM_COMMAND_OPERAND_3_OFFSET = 24,
+  LOOM_CMD_PROGRAM_COMMAND_OPERAND_4_OFFSET = 28,
+  LOOM_CMD_PROGRAM_COMMAND_SIZE = 32,
+
+  LOOM_CMD_PROGRAM_PARAMETER_ROOT_FIXED_BUFFER_INDEX_OFFSET = 0,
+  LOOM_CMD_PROGRAM_PARAMETER_ROOT_RESERVED_OFFSET = 4,
+  LOOM_CMD_PROGRAM_PARAMETER_ROOT_REQUIRED_BYTE_LENGTH_OFFSET = 8,
+  LOOM_CMD_PROGRAM_PARAMETER_ROOT_MINIMUM_ALIGNMENT_OFFSET = 16,
+  LOOM_CMD_PROGRAM_PARAMETER_ROOT_SIZE = 24,
+
+  LOOM_CMD_PROGRAM_PARAMETER_KEY_OFFSET_OFFSET = 0,
+  LOOM_CMD_PROGRAM_PARAMETER_KEY_LENGTH_OFFSET = 4,
+  LOOM_CMD_PROGRAM_PARAMETER_FIXED_BUFFER_INDEX_OFFSET = 8,
+  LOOM_CMD_PROGRAM_PARAMETER_RESERVED_OFFSET = 12,
+  LOOM_CMD_PROGRAM_PARAMETER_BYTE_OFFSET_OFFSET = 16,
+  LOOM_CMD_PROGRAM_PARAMETER_BYTE_LENGTH_OFFSET = 24,
+  LOOM_CMD_PROGRAM_PARAMETER_MINIMUM_ALIGNMENT_OFFSET = 32,
+  LOOM_CMD_PROGRAM_PARAMETER_SIZE = 40,
+};
+
+// Canonical byte offsets derived from artifact table counts.
+typedef struct loom_cmd_program_format_layout_t {
+  // First byte of the operational buffer-range table.
+  uint32_t buffer_ref_offset;
+  // First byte of the executable-entry schema table.
+  uint32_t entry_schema_offset;
+  // First byte of the flattened entry-schema kind table.
+  uint32_t entry_schema_kind_offset;
+  // First byte of the tagless dispatch argument payloads.
+  uint32_t argument_data_offset;
+  // First byte of the command table.
+  uint32_t command_offset;
+  // First byte of the fixed parameter-root table.
+  uint32_t parameter_root_offset;
+  // First byte of the concrete parameter table.
+  uint32_t parameter_offset;
+  // First byte of concatenated parameter-key storage.
+  uint32_t parameter_key_offset;
+  // Total canonical artifact byte length.
+  uint32_t total_length;
+} loom_cmd_program_format_layout_t;
+
+// Calculates the canonical table layout for one program artifact.
+iree_status_t loom_cmd_program_format_calculate_layout(
+    uint32_t buffer_ref_count, uint32_t entry_schema_count,
+    uint32_t entry_schema_kind_count, uint32_t argument_data_length,
+    uint32_t command_count, uint32_t parameter_root_count,
+    uint32_t parameter_count, uint32_t parameter_key_length,
+    loom_cmd_program_format_layout_t* out_layout);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
+
+#endif  // LOOM_TARGET_ARCH_CMD_FORMAT_H_

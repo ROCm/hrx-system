@@ -606,8 +606,8 @@ static iree_status_t loom_sanitizer_try_instrument_race_sync_op(
   loom_builder_set_after(&rewriter->builder, op);
   loom_op_t* observe_op = NULL;
   IREE_RETURN_IF_ERROR(
-      loom_sanitizer_race_sync_build(&rewriter->builder, memory_space, ordering,
-                                     scope, site_location, &observe_op));
+      loom_sanitizer_race_sync_build(&rewriter->builder, memory_space, scope,
+                                     ordering, site_location, &observe_op));
   (void)observe_op;
   loom_sanitizer_insert_race_observations_statistics_t* statistics =
       loom_sanitizer_insert_race_observations_statistics(pass);

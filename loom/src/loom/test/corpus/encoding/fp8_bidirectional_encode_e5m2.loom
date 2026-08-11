@@ -106,7 +106,7 @@ kernel.def @fp8_encode_f8e5m2_f32_rows(%row_count: index) {
 check.case public @fp8_encode_f8e5m2_f32_exact_case {
   %output = check.generate.fill value(0) : tensor<16xi8>
   %expected = check.generate.fill value(0) : tensor<16xi8>
-  kernel.launch @fp8_encode_f8e5m2_f32_exact[](%output) : [](tensor<16xi8>)
+  kernel.launch @fp8_encode_f8e5m2_f32_exact(%output) : (tensor<16xi8>)
   check.expect.equal actual(%output) expected(%expected) : tensor<16xi8>
   check.return
 }
@@ -217,7 +217,7 @@ kernel.def @fp8_encode_f8e5m2_f16_rows(%row_count: index) {
 check.case public @fp8_encode_f8e5m2_f16_exact_case {
   %output = check.generate.fill value(0) : tensor<16xi8>
   %expected = check.generate.fill value(0) : tensor<16xi8>
-  kernel.launch @fp8_encode_f8e5m2_f16_exact[](%output) : [](tensor<16xi8>)
+  kernel.launch @fp8_encode_f8e5m2_f16_exact(%output) : (tensor<16xi8>)
   check.expect.equal actual(%output) expected(%expected) : tensor<16xi8>
   check.return
 }
@@ -328,7 +328,7 @@ kernel.def @fp8_encode_f8e5m2_bf16_rows(%row_count: index) {
 check.case public @fp8_encode_f8e5m2_bf16_exact_case {
   %output = check.generate.fill value(0) : tensor<16xi8>
   %expected = check.generate.fill value(0) : tensor<16xi8>
-  kernel.launch @fp8_encode_f8e5m2_bf16_exact[](%output) : [](tensor<16xi8>)
+  kernel.launch @fp8_encode_f8e5m2_bf16_exact(%output) : (tensor<16xi8>)
   check.expect.equal actual(%output) expected(%expected) : tensor<16xi8>
   check.return
 }
@@ -439,7 +439,7 @@ kernel.def @fp8_encode_f8e5m2fnuz_f32_rows(%row_count: index) {
 check.case public @fp8_encode_f8e5m2fnuz_f32_exact_case {
   %output = check.generate.fill value(0) : tensor<16xi8>
   %expected = check.generate.fill value(0) : tensor<16xi8>
-  kernel.launch @fp8_encode_f8e5m2fnuz_f32_exact[](%output) : [](tensor<16xi8>)
+  kernel.launch @fp8_encode_f8e5m2fnuz_f32_exact(%output) : (tensor<16xi8>)
   check.expect.equal actual(%output) expected(%expected) : tensor<16xi8>
   check.return
 }
@@ -550,7 +550,7 @@ kernel.def @fp8_encode_f8e5m2fnuz_f16_rows(%row_count: index) {
 check.case public @fp8_encode_f8e5m2fnuz_f16_exact_case {
   %output = check.generate.fill value(0) : tensor<16xi8>
   %expected = check.generate.fill value(0) : tensor<16xi8>
-  kernel.launch @fp8_encode_f8e5m2fnuz_f16_exact[](%output) : [](tensor<16xi8>)
+  kernel.launch @fp8_encode_f8e5m2fnuz_f16_exact(%output) : (tensor<16xi8>)
   check.expect.equal actual(%output) expected(%expected) : tensor<16xi8>
   check.return
 }
@@ -661,7 +661,7 @@ kernel.def @fp8_encode_f8e5m2fnuz_bf16_rows(%row_count: index) {
 check.case public @fp8_encode_f8e5m2fnuz_bf16_exact_case {
   %output = check.generate.fill value(0) : tensor<16xi8>
   %expected = check.generate.fill value(0) : tensor<16xi8>
-  kernel.launch @fp8_encode_f8e5m2fnuz_bf16_exact[](%output) : [](tensor<16xi8>)
+  kernel.launch @fp8_encode_f8e5m2fnuz_bf16_exact(%output) : (tensor<16xi8>)
   check.expect.equal actual(%output) expected(%expected) : tensor<16xi8>
   check.return
 }

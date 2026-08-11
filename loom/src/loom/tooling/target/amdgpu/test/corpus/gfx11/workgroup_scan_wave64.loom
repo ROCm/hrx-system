@@ -39,7 +39,7 @@ check.case public @workgroup_scan_wave64_partitions {
   %actual_forward_exclusive = check.generate.fill value(-1) : tensor<1024xi32>
   %actual_reverse_inclusive = check.generate.fill value(-1) : tensor<1024xi32>
   %actual_reverse_exclusive = check.generate.fill value(-1) : tensor<1024xi32>
-  kernel.launch @workgroup_scan_wave64[](%actual_forward_inclusive, %actual_forward_exclusive, %actual_reverse_inclusive, %actual_reverse_exclusive) : [](tensor<1024xi32>, tensor<1024xi32>, tensor<1024xi32>, tensor<1024xi32>)
+  kernel.launch @workgroup_scan_wave64(%actual_forward_inclusive, %actual_forward_exclusive, %actual_reverse_inclusive, %actual_reverse_exclusive) : (tensor<1024xi32>, tensor<1024xi32>, tensor<1024xi32>, tensor<1024xi32>)
   check.expect.equal actual(%actual_forward_inclusive) expected(%expected_forward_inclusive) : tensor<1024xi32>
   check.expect.equal actual(%actual_forward_exclusive) expected(%expected_forward_exclusive) : tensor<1024xi32>
   check.expect.equal actual(%actual_reverse_inclusive) expected(%expected_reverse_inclusive) : tensor<1024xi32>

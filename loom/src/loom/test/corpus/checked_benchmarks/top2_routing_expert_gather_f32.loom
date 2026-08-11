@@ -81,7 +81,7 @@ check.case public @top2_routing_expert_gather_ordered_case {
   %expected_route_ids = check.generate.iota offset(3) step(-1) : tensor<2xi32>
   %expected_route_scores = check.generate.iota offset(3.0) step(-1.0) : tensor<2xf32>
   %expected_payload = check.generate.iota offset(20.0) step(2.0) : tensor<4xf32>
-  kernel.launch @top2_routing_expert_gather_f32[](%scores, %expert_payloads, %route_ids, %route_scores, %combined_payload) : [](tensor<4xf32>, tensor<4x4xf32>, tensor<2xi32>, tensor<2xf32>, tensor<4xf32>)
+  kernel.launch @top2_routing_expert_gather_f32(%scores, %expert_payloads, %route_ids, %route_scores, %combined_payload) : (tensor<4xf32>, tensor<4x4xf32>, tensor<2xi32>, tensor<2xf32>, tensor<4xf32>)
   check.expect.equal actual(%route_ids) expected(%expected_route_ids) : tensor<2xi32>
   check.expect.close actual(%route_scores) expected(%expected_route_scores) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
   check.expect.close actual(%combined_payload) expected(%expected_payload) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
@@ -97,7 +97,7 @@ check.case public @top2_routing_expert_gather_tie_case {
   %expected_route_ids = check.generate.iota offset(0) step(1) : tensor<2xi32>
   %expected_route_scores = check.generate.fill value(3.0) : tensor<2xf32>
   %expected_payload = check.generate.iota offset(4.0) step(2.0) : tensor<4xf32>
-  kernel.launch @top2_routing_expert_gather_f32[](%scores, %expert_payloads, %route_ids, %route_scores, %combined_payload) : [](tensor<4xf32>, tensor<4x4xf32>, tensor<2xi32>, tensor<2xf32>, tensor<4xf32>)
+  kernel.launch @top2_routing_expert_gather_f32(%scores, %expert_payloads, %route_ids, %route_scores, %combined_payload) : (tensor<4xf32>, tensor<4x4xf32>, tensor<2xi32>, tensor<2xf32>, tensor<4xf32>)
   check.expect.equal actual(%route_ids) expected(%expected_route_ids) : tensor<2xi32>
   check.expect.close actual(%route_scores) expected(%expected_route_scores) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
   check.expect.close actual(%combined_payload) expected(%expected_payload) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>

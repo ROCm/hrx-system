@@ -11,6 +11,7 @@ from loom.dialect.buffer.defs import (
     buffer_alloca,
     buffer_assume_memory_space,
     buffer_ops,
+    buffer_pack,
     buffer_view,
 )
 from loom.dialect.memory import MemorySpace
@@ -21,5 +22,6 @@ __all__ = [
     "MemorySpace",
     "buffer_alloca",
     "buffer_assume_memory_space",
+    "buffer_pack",
     "buffer_view",
 ]

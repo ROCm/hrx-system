@@ -7,7 +7,7 @@ func.def @promoted_fragment_preserves_assume_predicates(%input: buffer, %output:
   %output_view = buffer.view %output[%base] : buffer -> view<[%n_idx]x4xf32, #dense>
   %row_in_bounds, %n_idx_assumed = index.assume %row, %n_idx [ge(%row, 0), lt(%row, %n_idx)] : index, index
   %fragment_bytes = index.constant 8 : offset
-  %fragment_buffer = buffer.alloca %fragment_bytes {base_alignment = 4, memory_space = private} : buffer
+  %fragment_buffer = buffer.alloca<private> align(4) %fragment_bytes : buffer
   %fragment = buffer.view %fragment_buffer[%base] : buffer -> view<2xi32, #dense>
   %start = index.constant 0 : index
   %end = index.constant 2 : index

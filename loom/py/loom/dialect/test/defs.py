@@ -108,7 +108,9 @@ from loom.dsl import (
     FreshResult,
     FuncLikeInterface,
     ImplicitTerminator,
+    IterArgsMatchResults,
     LiteralMatchesElementType,
+    LoopLikeInterface,
     OffsetCountMatchesRank,
     Op,
     Operand,
@@ -116,6 +118,7 @@ from loom.dsl import (
     ParameterizedAttrDef,
     Reads,
     ReadWrites,
+    RegionBranchInterface,
     RegionDef,
     Release,
     Result,
@@ -132,6 +135,7 @@ from loom.dsl import (
     Writes,
     YieldCountMatchesResults,
     YieldElementTypesMatchResults,
+    YieldTypesMatchResults,
     binary_op,
     cast_op,
     comparison_op,
@@ -1473,6 +1477,67 @@ test_low_invoke = Op(
 )
 
 # ============================================================================
+# test.partitioned_call — call-like operand partitions
+# ============================================================================
+
+test_partitioned_call = Op(
+    "test.partitioned_call",
+    group=test_ops,
+    doc="Test call-like op spanning trailing operand partitions after an unrelated prefix.",
+    operands=[
+        Operand("prefix", ANY, variadic=True),
+        Operand("specializations", ANY, variadic=True),
+        Operand("bindings", ANY, variadic=True),
+    ],
+    attrs=[
+        AttrDef(
+            "callee",
+            "symbol",
+            symbol_ref=SymbolReference("function", ["callable"]),
+        ),
+    ],
+    traits=[UNKNOWN_EFFECTS],
+    interfaces=[
+        CallLikeInterface(
+            callee="callee",
+            operands="specializations",
+            results=None,
+            kind=CallLikeKind.COMMAND_PROGRAM,
+        ),
+    ],
+    format=[
+        SymbolRef("callee"),
+        GLUE,
+        LBRACKET,
+        Refs("prefix"),
+        RBRACKET,
+        GLUE,
+        LBRACKET,
+        Refs("specializations"),
+        RBRACKET,
+        GLUE,
+        LPAREN,
+        Refs("bindings"),
+        RPAREN,
+        COLON,
+        LBRACKET,
+        TypesOf("prefix"),
+        RBRACKET,
+        GLUE,
+        LBRACKET,
+        TypesOf("specializations"),
+        RBRACKET,
+        GLUE,
+        LPAREN,
+        TypesOf("bindings"),
+        RPAREN,
+    ],
+    examples=[
+        "test.partitioned_call @callee[%prefix][%specialization](%binding) : [index][index](i32)",
+    ],
+)
+
+# ============================================================================
 # test.slice — index list with mixed static/dynamic offsets
 # ============================================================================
 
@@ -1554,7 +1619,23 @@ test_loop = Op(
             single_block=True,
             terminator="test.yield",
             implicit_args=(("iv", "index"),),
+            arg_source="iter_args",
         )
+    ],
+    interfaces=[
+        LoopLikeInterface(
+            body="body",
+            iter_args="iter_args",
+            iv="iv",
+            lower_bound="lower_bound",
+            upper_bound="upper_bound",
+            step="step",
+        ),
+    ],
+    constraints=[
+        IterArgsMatchResults("iter_args", "results"),
+        YieldCountMatchesResults("body", "results"),
+        YieldTypesMatchResults("body", "results"),
     ],
     traits=[ImplicitTerminator("test.implicit_yield")],
     format=[
@@ -1642,6 +1723,7 @@ test_branch = Op(
             terminator="test.yield",
         ),
     ],
+    interfaces=[RegionBranchInterface(selector="condition")],
     traits=[ImplicitTerminator("test.implicit_yield")],
     format=[
         Ref("condition"),
@@ -2226,6 +2308,7 @@ test_region_table = Op(
             terminator="test.yield",
         ),
     ],
+    interfaces=[RegionBranchInterface(selector="selector")],
     format=[
         Ref("selector"),
         RegionTable("case_keys", "case_regions", "default_region"),
@@ -2869,4 +2952,5 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_parameterized_attr_array,
     test_attr_params,
     test_condition_refines_positive,
+    test_partitioned_call,
 )

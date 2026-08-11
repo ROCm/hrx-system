@@ -28,9 +28,28 @@ extern "C" {
 typedef struct loom_pass_interpreter_t loom_pass_interpreter_t;
 typedef struct loom_pass_report_t loom_pass_report_t;
 
+// Selects one function for pass.for traversal.
+//
+// Module-root passes still execute once over the complete module. The selector
+// only constrains function snapshots entered through pass.for<func>; direct
+// function-root execution already names its exact function.
+typedef bool (*loom_pass_function_selector_fn_t)(void* user_data,
+                                                 const loom_module_t* module,
+                                                 const loom_symbol_t* symbol,
+                                                 loom_func_like_t function);
+
+typedef struct loom_pass_function_selector_t {
+  // Selection callback, or NULL to visit every bodyful function.
+  loom_pass_function_selector_fn_t select;
+  // Opaque caller data passed to |select|.
+  void* user_data;
+} loom_pass_function_selector_t;
+
 typedef struct loom_pass_interpreter_options_t {
   // Shared block pool used for pass instance, scratch, and snapshot arenas.
   iree_arena_block_pool_t* block_pool;
+  // Optional selection applied to pass.for<func> snapshots.
+  loom_pass_function_selector_t function_selector;
   // Optional provider for pass.where predicates outside the core built-ins.
   loom_pass_predicate_provider_t predicate_provider;
   // Optional structured diagnostic emitter copied into every pass instance.

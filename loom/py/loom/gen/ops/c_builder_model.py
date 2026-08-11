@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from loom.assembly import (
+    AlignedRefs,
     Attr,
     AttrDict,
     AttrParams,
@@ -276,7 +277,9 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
     inferred_result_source = inferred_variadic_result_type_source(op)
     params: list[dict[str, Any]] = []
     implicit_fields = {"iv", "args"}
-    covered_attrs: set[str] = set()
+    covered_attrs: set[str] = {
+        boundary_attr for element in flatten_format(op.format) if isinstance(element, FuncArgs) for boundary_attr in (element.start_attr, element.end_attr) if boundary_attr is not None
+    }
 
     def append_attr_param(name: str) -> None:
         attr_def = op.attr(name)
@@ -319,8 +322,9 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
 
     # Track the most recent BindingList for association with the next Region.
     _pending_binding: dict[str, Any] | None = None
-    # Track whether a body-backed FuncArgs was seen.
-    _pending_func_args: bool = False
+    # Track body-backed FuncArgs groups available to projected/body regions.
+    _pending_func_args: list[dict[str, Any]] = []
+    _body_func_args: list[dict[str, Any]] = []
     # Region fields whose explicit block args are not derivable from operands.
     explicit_block_args_by_region: dict[str, str] = {}
     func_args_field_names = c_queries.func_args_field_names(op)
@@ -337,7 +341,7 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
         return None
 
     def walk(elements: tuple[FormatElement, ...]) -> None:
-        nonlocal _pending_binding, _pending_func_args
+        nonlocal _pending_binding
         for element in elements:
             match element:
                 case Ref(field=name):
@@ -365,6 +369,22 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                             "may_consume": has_result_type_list,
                         }
                     )
+
+                case AlignedRefs(refs=refs_field, alignments=alignments_field):
+                    refs_desc = layout.fields.get(refs_field)
+                    if refs_desc is None or refs_desc.kind != FieldKind.OPERAND:
+                        raise ValueError(f"Op '{op.name}': AlignedRefs refs field '{refs_field}' is not an operand field")
+                    if not refs_desc.variadic:
+                        raise ValueError(f"Op '{op.name}': AlignedRefs refs field '{refs_field}' must be variadic")
+                    params.append(
+                        {
+                            "name": refs_field,
+                            "kind": "operand_variadic",
+                            "c_type": "const loom_value_id_t*",
+                            "may_consume": has_result_type_list,
+                        }
+                    )
+                    append_attr_param(alignments_field)
 
                 case BlockRef(field=name):
                     desc = layout.fields.get(name)
@@ -533,8 +553,11 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                     binding = _pending_binding
                     _pending_binding = None
                     arg_source = region_def.arg_source if region_def else None
-                    func_args = _pending_func_args or arg_source in func_args_field_names or name == func_like_body_region_name
-                    _pending_func_args = False
+                    if arg_source in func_args_field_names or name == func_like_body_region_name:
+                        func_args = tuple(_body_func_args)
+                    else:
+                        func_args = tuple(_pending_func_args)
+                    _pending_func_args.clear()
                     if arg_source in func_args_field_names:
                         arg_source = None
                     params.append(
@@ -589,19 +612,36 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                 case Clause(elements=inner):
                     walk(inner)
 
-                case FuncArgs(field=name):
+                case FuncArgs(
+                    field=name,
+                    group=group,
+                    start_attr=start_attr,
+                    end_attr=end_attr,
+                ):
                     field_desc = layout.fields.get(name)
                     operand_field = bool(field_desc is not None and field_desc.kind == FieldKind.OPERAND)
-                    param_name = "arg_types" if len(func_args_field_names) == 1 else f"{name}_types"
-                    params.append(
-                        {
-                            "name": param_name,
-                            "kind": "func_args",
-                            "field": name,
-                            "operand_field": operand_field,
-                        }
-                    )
-                    _pending_func_args = not operand_field
+                    if group is not None:
+                        param_name = f"{group}_types"
+                    elif len(func_args_field_names) == 1:
+                        param_name = "arg_types"
+                    else:
+                        param_name = f"{name}_types"
+                    param = {
+                        "name": param_name,
+                        "kind": "func_args",
+                        "field": name,
+                        "operand_field": operand_field,
+                        "start_attr_index": c_queries.resolve_attr_index(op, start_attr, "FuncArgs"),
+                        "end_attr_index": c_queries.resolve_attr_index(op, end_attr, "FuncArgs"),
+                    }
+                    params.append(param)
+                    if not operand_field:
+                        _pending_func_args.append(param)
+                        _body_func_args.append(param)
+                    if start_attr is not None:
+                        covered_attrs.add(start_attr)
+                    if end_attr is not None:
+                        covered_attrs.add(end_attr)
 
                 case PredicateList(field=name):
                     attr_def = op.attr(name)

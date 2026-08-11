@@ -14,9 +14,9 @@ class BufferBuilder(DialectBuilder):
     def alloca(
         self,
         *,
-        byte_length: ValueRef,
-        base_alignment: int,
         memory_space: str,
+        base_alignment: int,
+        byte_length: ValueRef,
         results: list[Type | TiedResultSpec],
         name: str | None = ...,
         names: Sequence[str] | None = ...,
@@ -77,3 +77,14 @@ class BufferBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> ValueRef: ...
+    def pack(
+        self,
+        *,
+        byte_lengths: list[ValueRef] = ...,
+        minimum_alignments: list[int],
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> list[ValueRef]: ...

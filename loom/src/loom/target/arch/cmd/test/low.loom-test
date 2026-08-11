@@ -1,0 +1,66 @@
+// RUN: verify
+
+// A Q/K/V preparation wave follows one scratch initialization wave. The
+// executable and entry values are symbol-free ABI inputs, and the argument
+// suffixes preserve variable kernel arity directly on the dispatch packets.
+low.func.def target<cmd.core> abi(command_program) @qkv_two_wave() {
+  %parameters = low.resource<command_input> {index = 0, source_type = buffer} : reg<cmd.buffer>
+  %input = low.resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %scratch = low.resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
+  %query_output = low.resource<command_input> {index = 2, source_type = buffer} : reg<cmd.binding>
+  %key_output = low.resource<command_input> {index = 3, source_type = buffer} : reg<cmd.binding>
+  %value_output = low.resource<command_input> {index = 4, source_type = buffer} : reg<cmd.binding>
+  %query_executable = low.resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %query_entry = low.resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %key_executable = low.resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
+  %key_entry = low.resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %value_executable = low.resource<command_input> {index = 2, source_type = index} : reg<cmd.executable>
+  %value_entry = low.resource<command_input> {index = 2, source_type = index} : reg<cmd.entry>
+  %zero_u32 = low.const<cmd.constant.u32> {value = 0} : reg<cmd.u32>
+  %one_u32 = low.const<cmd.constant.u32> {value = 1} : reg<cmd.u32>
+  %workgroup_count_x = low.const<cmd.constant.u32> {value = 32} : reg<cmd.u32>
+  %zero_u64 = low.const<cmd.constant.u64> {value = 0} : reg<cmd.u64>
+  %buffer_length = low.const<cmd.constant.u64> {value = 4096} : reg<cmd.u64>
+
+  %scratch_ref = low.op<cmd.buffer.ref.binding>(%scratch, %zero_u64, %buffer_length) : (reg<cmd.binding>, reg<cmd.u64>, reg<cmd.u64>) -> reg<cmd.buffer_ref>
+
+  low.op<cmd.fill>(%scratch_ref, %zero_u32, %one_u32) : (reg<cmd.buffer_ref>, reg<cmd.u32>, reg<cmd.u32>)
+  low.op<cmd.dispatch.direct.barrier>(%query_executable, %query_entry, %workgroup_count_x, %one_u32, %one_u32, %parameters, %zero_u64, %buffer_length, %input, %zero_u64, %buffer_length, %query_output, %zero_u64, %buffer_length) : (reg<cmd.executable>, reg<cmd.entry>, reg<cmd.u32>, reg<cmd.u32>, reg<cmd.u32>, reg<cmd.buffer>, reg<cmd.u64>, reg<cmd.u64>, reg<cmd.binding>, reg<cmd.u64>, reg<cmd.u64>, reg<cmd.binding>, reg<cmd.u64>, reg<cmd.u64>)
+
+  low.op<cmd.dispatch.direct>(%key_executable, %key_entry, %workgroup_count_x, %one_u32, %one_u32, %parameters, %zero_u64, %buffer_length, %input, %zero_u64, %buffer_length, %key_output, %zero_u64, %buffer_length) : (reg<cmd.executable>, reg<cmd.entry>, reg<cmd.u32>, reg<cmd.u32>, reg<cmd.u32>, reg<cmd.buffer>, reg<cmd.u64>, reg<cmd.u64>, reg<cmd.binding>, reg<cmd.u64>, reg<cmd.u64>, reg<cmd.binding>, reg<cmd.u64>, reg<cmd.u64>)
+
+  low.op<cmd.dispatch.direct>(%value_executable, %value_entry, %workgroup_count_x, %one_u32, %one_u32, %parameters, %zero_u64, %buffer_length, %input, %zero_u64, %buffer_length, %value_output, %zero_u64, %buffer_length) : (reg<cmd.executable>, reg<cmd.entry>, reg<cmd.u32>, reg<cmd.u32>, reg<cmd.u32>, reg<cmd.buffer>, reg<cmd.u64>, reg<cmd.u64>, reg<cmd.binding>, reg<cmd.u64>, reg<cmd.u64>, reg<cmd.binding>, reg<cmd.u64>, reg<cmd.u64>)
+
+  low.op<cmd.barrier.execution>() : ()
+  low.return
+}
+
+// ====
+
+low.func.def target<cmd.core> abi(command_program) @indirect_modes() {
+  %launch_counts = low.resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %executable = low.resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %entry = low.resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %zero = low.const<cmd.constant.u64> {value = 0} : reg<cmd.u64>
+  %count_length = low.const<cmd.constant.u64> {value = 12} : reg<cmd.u64>
+  %count_ref = low.op<cmd.buffer.ref.binding>(%launch_counts, %zero, %count_length) : (reg<cmd.binding>, reg<cmd.u64>, reg<cmd.u64>) -> reg<cmd.buffer_ref>
+  low.op<cmd.dispatch.indirect.static>(%executable, %entry, %count_ref) : (reg<cmd.executable>, reg<cmd.entry>, reg<cmd.buffer_ref>)
+  low.op<cmd.dispatch.indirect.dynamic.barrier>(%executable, %entry, %count_ref) : (reg<cmd.executable>, reg<cmd.entry>, reg<cmd.buffer_ref>)
+  low.return
+}
+
+// ====
+
+low.func.def target<cmd.core> abi(command_program) @transfer_waits() {
+  %source = low.resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %target = low.resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
+  %zero_u32 = low.const<cmd.constant.u32> {value = 0} : reg<cmd.u32>
+  %one_u32 = low.const<cmd.constant.u32> {value = 1} : reg<cmd.u32>
+  %zero_u64 = low.const<cmd.constant.u64> {value = 0} : reg<cmd.u64>
+  %length = low.const<cmd.constant.u64> {value = 4096} : reg<cmd.u64>
+  %source_ref = low.op<cmd.buffer.ref.binding>(%source, %zero_u64, %length) : (reg<cmd.binding>, reg<cmd.u64>, reg<cmd.u64>) -> reg<cmd.buffer_ref>
+  %target_ref = low.op<cmd.buffer.ref.binding>(%target, %zero_u64, %length) : (reg<cmd.binding>, reg<cmd.u64>, reg<cmd.u64>) -> reg<cmd.buffer_ref>
+  low.op<cmd.fill.barrier>(%target_ref, %zero_u32, %one_u32) : (reg<cmd.buffer_ref>, reg<cmd.u32>, reg<cmd.u32>)
+  low.op<cmd.copy.barrier>(%source_ref, %target_ref) : (reg<cmd.buffer_ref>, reg<cmd.buffer_ref>)
+  low.return
+}

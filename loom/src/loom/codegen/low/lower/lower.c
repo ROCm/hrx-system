@@ -30,6 +30,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/ops.h"
+#include "loom/rewrite/remap.h"
 #include "loom/target/low_descriptor_registry.h"
 #include "loom/target/registers.h"
 
@@ -108,6 +109,7 @@ static bool loom_low_lower_resource_import_kind_is_known(
     case LOOM_LOW_RESOURCE_IMPORT_KIND_VM_STATE:
     case LOOM_LOW_RESOURCE_IMPORT_KIND_VM_IMPORT:
     case LOOM_LOW_RESOURCE_IMPORT_KIND_HAL_BINDING:
+    case LOOM_LOW_RESOURCE_IMPORT_KIND_COMMAND_INPUT:
       return true;
     default:
       return false;
@@ -335,16 +337,6 @@ static iree_status_t loom_low_lower_check_function_signature(
         context, return_op, returned_values, i, result_ids[i]));
   }
 
-  uint16_t predicate_count = 0;
-  (void)loom_func_like_predicates(context->source_function, &predicate_count);
-  if (predicate_count != 0) {
-    const loom_diagnostic_param_t params[] = {
-        loom_param_u32(predicate_count),
-    };
-    IREE_RETURN_IF_ERROR(loom_low_lower_emit_target_context_error(
-        context, context->source_function.op, LOOM_ERR_TARGET_028, params,
-        IREE_ARRAYSIZE(params)));
-  }
   if (context->source_function.op->tied_result_count != 0) {
     const loom_diagnostic_param_t params[] = {
         loom_param_u32(context->source_function.op->tied_result_count),
@@ -1895,10 +1887,6 @@ static iree_status_t loom_low_lower_create_func_op(
     loom_symbol_ref_t low_func_ref, const loom_type_t* arg_types,
     iree_host_size_t arg_count, const loom_type_t* result_types,
     iree_host_size_t result_count) {
-  uint16_t predicate_count = 0;
-  const loom_predicate_t* predicates =
-      loom_func_like_predicates(context->source_function, &predicate_count);
-
   loom_low_func_def_build_flags_t build_flags = 0;
   uint8_t visibility = loom_func_like_visibility(context->source_function);
   uint8_t cc = loom_func_like_cc(context->source_function);
@@ -1945,11 +1933,6 @@ static iree_status_t loom_low_lower_create_func_op(
           context->source_function.vtable->export_attrs_attr_index)) {
     build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_ATTRS;
   }
-  if (loom_low_lower_function_attr_present(
-          context->source_function,
-          context->source_function.vtable->predicates_attr_index)) {
-    build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_PREDICATES;
-  }
   uint8_t retain = 0;
   if (loom_low_lower_context_source_is_retained(context)) {
     build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_RETAIN;
@@ -1968,9 +1951,9 @@ static iree_status_t loom_low_lower_create_func_op(
       context->options->target_ref, abi, abi_attrs, abi_layout, export_symbol,
       export_attrs, low_func_ref, arg_types, arg_count, result_types,
       result_count,
-      /*tied_results=*/NULL, /*tied_result_count=*/0, predicates,
-      predicate_count, context->source_function.op->location,
-      &context->low_func_op));
+      /*tied_results=*/NULL, /*tied_result_count=*/0,
+      /*predicates=*/NULL, /*predicates_count=*/0,
+      context->source_function.op->location, &context->low_func_op));
 
   loom_region_t* low_body = loom_low_lower_low_body(context);
   low_body->flags = source_body->flags;
@@ -1981,10 +1964,6 @@ static iree_status_t loom_low_lower_create_kernel_op(
     loom_low_lower_context_t* context, loom_region_t* source_body,
     loom_symbol_ref_t low_func_ref, const loom_type_t* arg_types,
     iree_host_size_t arg_count) {
-  uint16_t predicate_count = 0;
-  const loom_predicate_t* predicates =
-      loom_func_like_predicates(context->source_function, &predicate_count);
-
   loom_low_kernel_def_build_flags_t build_flags = 0;
   loom_string_id_t export_symbol =
       loom_func_like_export_symbol(context->source_function);
@@ -2000,12 +1979,6 @@ static iree_status_t loom_low_lower_create_kernel_op(
   if (loom_symbol_ref_is_valid(context->options->target_ref)) {
     build_flags |= LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_TARGET;
   }
-  if (loom_low_lower_function_attr_present(
-          context->source_function,
-          context->source_function.vtable->predicates_attr_index)) {
-    build_flags |= LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_PREDICATES;
-  }
-
   loom_target_workgroup_size_t workgroup_size = {0};
   if (iree_any_bit_set(context->result->static_launch_config_flags,
                        LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_SIZE)) {
@@ -2057,12 +2030,51 @@ static iree_status_t loom_low_lower_create_kernel_op(
       export_symbol, export_linkage, workgroup_size.x, workgroup_size.y,
       workgroup_size.z, workgroup_count.x, workgroup_count.y, workgroup_count.z,
       workgroup_cluster_size.x, workgroup_cluster_size.y,
-      workgroup_cluster_size.z, low_func_ref, arg_types, arg_count, predicates,
-      predicate_count, context->source_function.op->location,
-      &context->low_func_op));
+      workgroup_cluster_size.z, low_func_ref, arg_types, arg_count,
+      /*predicates=*/NULL, /*predicates_count=*/0,
+      context->source_function.op->location, &context->low_func_op));
 
   loom_region_t* low_body = loom_low_lower_low_body(context);
   low_body->flags = source_body->flags;
+  return iree_ok_status();
+}
+
+// Translates source function contracts through the source-to-low value map.
+static iree_status_t loom_low_lower_remap_function_predicates(
+    loom_low_lower_context_t* context) {
+  uint16_t predicate_count = 0;
+  const loom_predicate_t* source_predicates =
+      loom_func_like_predicates(context->source_function, &predicate_count);
+  if (predicate_count == 0) return iree_ok_status();
+
+  loom_func_like_t low_function =
+      loom_func_like_cast(context->module, context->low_func_op);
+  IREE_ASSERT(loom_func_like_isa(low_function));
+  IREE_ASSERT_NE(low_function.vtable->predicates_attr_index,
+                 LOOM_ATTR_INDEX_NONE);
+
+  loom_ir_remap_t remap;
+  IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
+      context->module, context->module, &context->function_arena,
+      /*options=*/NULL, &remap));
+  for (uint16_t i = 0; i < predicate_count; ++i) {
+    for (uint8_t j = 0; j < source_predicates[i].arg_count; ++j) {
+      if (source_predicates[i].arg_tags[j] != LOOM_PRED_ARG_VALUE) continue;
+      loom_value_id_t source_value =
+          (loom_value_id_t)source_predicates[i].args[j];
+      loom_value_id_t low_value = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(
+          loom_low_lower_lookup_value(context, source_value, &low_value));
+      IREE_RETURN_IF_ERROR(
+          loom_ir_remap_map_value(&remap, source_value, low_value));
+    }
+  }
+
+  loom_predicate_t* low_predicates = NULL;
+  IREE_RETURN_IF_ERROR(loom_ir_remap_predicate_list(
+      &remap, source_predicates, predicate_count, &low_predicates));
+  loom_op_attrs(low_function.op)[low_function.vtable->predicates_attr_index] =
+      loom_attr_predicate_list(low_predicates, predicate_count);
   return iree_ok_status();
 }
 
@@ -2086,7 +2098,6 @@ static iree_status_t loom_low_lower_create_function_op(
         context, source_body, low_func_ref, arg_types, arg_count, result_types,
         result_count));
   }
-
   context->result->low_func_op = context->low_func_op;
   context->result->low_func_ref = low_func_ref;
 
@@ -3631,6 +3642,9 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
     loom_low_lower_emission_scope_end(&context);
     if (iree_status_is_ok(status)) {
       status = loom_low_lower_map_blocks(&context, source_body);
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_low_lower_remap_function_predicates(&context);
     }
     if (iree_status_is_ok(status)) {
       status = loom_low_lower_prepare_branches(&context, source_body);

@@ -178,6 +178,9 @@ static iree_status_t loom_low_verify_tables_present(
       descriptor_set->asm_operand_indices,
       descriptor_set->asm_operand_index_count, "asm_operand_indices"));
   IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
+      descriptor_set->asm_operand_segments,
+      descriptor_set->asm_operand_segment_count, "asm_operand_segments"));
+  IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
       descriptor_set->asm_result_value_types,
       descriptor_set->asm_result_value_type_count, "asm_result_value_types"));
   IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
@@ -527,6 +530,13 @@ static iree_status_t loom_low_verify_native_asm_values(
                                   " does not name an explicit packet operand",
                                   descriptor_index, value->index);
         }
+        if (iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_VARIADIC)) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "low asm form for descriptor %" PRIu32
+                                  " cannot reference variadic operand %" PRIu16
+                                  " from native assembly",
+                                  descriptor_index, value->index);
+        }
         if (value->bit_width != 0) {
           return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                   "low asm form for descriptor %" PRIu32
@@ -744,6 +754,73 @@ static iree_status_t loom_low_verify_asm_form(
       asm_form->operand_index_start, asm_form->operand_index_count,
       descriptor_set->asm_operand_index_count, "asm_operand_indices"));
   IREE_RETURN_IF_ERROR(loom_low_verify_span(
+      asm_form->operand_segment_start, asm_form->operand_segment_count,
+      descriptor_set->asm_operand_segment_count, "asm_operand_segments"));
+  uint32_t segmented_operand_count = 0;
+  bool has_variadic_segment = false;
+  for (uint16_t i = 0; i < asm_form->operand_segment_count; ++i) {
+    const loom_low_asm_operand_segment_t* segment =
+        &descriptor_set
+             ->asm_operand_segments[asm_form->operand_segment_start + i];
+    if (segment->delimiter < LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_ANGLE ||
+        segment->delimiter > LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_PAREN) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "low asm form %" PRIu32
+                              " operand segment %" PRIu16
+                              " has invalid delimiter %u",
+                              asm_form_index, i, (unsigned)segment->delimiter);
+    }
+    IREE_RETURN_IF_ERROR(loom_low_verify_known_flags(
+        segment->flags, LOOM_LOW_ASM_OPERAND_SEGMENT_FLAG_VARIADIC,
+        "asm operand segment", asm_form->operand_segment_start + i));
+    if (segment->operand_count == 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "low asm form %" PRIu32
+                              " operand segment %" PRIu16 " is empty",
+                              asm_form_index, i);
+    }
+    if (iree_any_bit_set(segment->flags,
+                         LOOM_LOW_ASM_OPERAND_SEGMENT_FLAG_VARIADIC)) {
+      if (has_variadic_segment || i != asm_form->operand_segment_count - 1) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "low asm form %" PRIu32
+            " variadic operand segment must be unique and final",
+            asm_form_index);
+      }
+      has_variadic_segment = true;
+    }
+    segmented_operand_count += segment->operand_count;
+  }
+  if (asm_form->operand_segment_count != 0 &&
+      segmented_operand_count != asm_form->operand_index_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low asm form %" PRIu32 " operand segments cover %" PRIu32
+        " descriptor operands but the form contains %" PRIu16,
+        asm_form_index, segmented_operand_count, asm_form->operand_index_count);
+  }
+  if (has_variadic_segment) {
+    const uint16_t descriptor_operand_index =
+        descriptor_set->asm_operand_indices[asm_form->operand_index_start +
+                                            asm_form->operand_index_count - 1];
+    const loom_low_operand_t* operand =
+        &descriptor_set
+             ->operands[descriptor->operand_start + descriptor_operand_index];
+    if (!iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_VARIADIC)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low asm form %" PRIu32
+          " marks a variadic segment whose final descriptor operand is fixed",
+          asm_form_index);
+    }
+  } else if (loom_low_descriptor_has_variadic_operands(descriptor)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low asm form %" PRIu32
+                            " does not segment its variadic descriptor operand",
+                            asm_form_index);
+  }
+  IREE_RETURN_IF_ERROR(loom_low_verify_span(
       asm_form->immediate_start, asm_form->immediate_count,
       descriptor_set->asm_immediate_count, "asm_immediates"));
   IREE_RETURN_IF_ERROR(loom_low_verify_span(
@@ -816,6 +893,7 @@ static iree_status_t loom_low_verify_asm_forms(
   }
   if (descriptor_set->asm_form_count == 0) {
     if (descriptor_set->asm_operand_index_count != 0 ||
+        descriptor_set->asm_operand_segment_count != 0 ||
         descriptor_set->asm_result_value_type_count != 0 ||
         descriptor_set->asm_immediate_count != 0 ||
         descriptor_set->native_asm_value_count != 0) {
@@ -1694,6 +1772,8 @@ static iree_status_t loom_low_verify_descriptor_operand_roles(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint32_t descriptor_index) {
   uint16_t packet_operand_index = 0;
+  uint16_t minimum_packet_operand_count = 0;
+  bool has_variadic_operand = false;
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
     const uint32_t operand_index = descriptor->operand_start + i;
     const loom_low_operand_t* operand =
@@ -1705,6 +1785,39 @@ static iree_status_t loom_low_verify_descriptor_operand_roles(
           " uses OPERAND_RESULT, but SSA low packets require separate result "
           "and operand rows plus an explicit constraint",
           descriptor_index, i);
+    }
+    if (iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_VARIADIC)) {
+      has_variadic_operand = true;
+      if (i != descriptor->operand_count - 1 ||
+          !loom_low_operand_role_is_packet_operand(operand->role)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "low descriptor %" PRIu32
+                                " variadic operand row %" PRIu16
+                                " must be the final explicit packet operand",
+                                descriptor_index, i);
+      }
+      const loom_low_operand_flags_t unsupported_flags =
+          operand->flags & ~LOOM_LOW_OPERAND_FLAG_VARIADIC;
+      if (unsupported_flags != 0 || operand->encoding_field_id != 0 ||
+          operand->register_part_id != LOOM_LOW_REGISTER_PART_NONE ||
+          operand->address_map_kind != LOOM_LOW_OPERAND_ADDRESS_MAP_DIRECT) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "low descriptor %" PRIu32 " variadic operand row %" PRIu16
+            " has fixed-operand flags, encoding, register-part, or address "
+            "metadata",
+            descriptor_index, i);
+      }
+      if (descriptor->constraint_count != 0 ||
+          descriptor->storage_lease_count != 0 ||
+          descriptor->operand_form_count != 0) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "low descriptor %" PRIu32
+            " with variadic operands cannot declare constraints, storage "
+            "leases, or operand forms",
+            descriptor_index);
+      }
     }
     if (i < descriptor->result_count) {
       if (operand->role != LOOM_LOW_OPERAND_ROLE_RESULT) {
@@ -1754,8 +1867,28 @@ static iree_status_t loom_low_verify_descriptor_operand_roles(
             descriptor_index, i, operand->source_value_index,
             packet_operand_index);
       }
+      if (!iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_VARIADIC)) {
+        ++minimum_packet_operand_count;
+      }
       ++packet_operand_index;
     }
+  }
+  if (descriptor->minimum_packet_operand_count !=
+      minimum_packet_operand_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low descriptor %" PRIu32 " minimum packet operand count %" PRIu16
+        " should be %" PRIu16,
+        descriptor_index, descriptor->minimum_packet_operand_count,
+        minimum_packet_operand_count);
+  }
+  if (loom_low_descriptor_has_variadic_operands(descriptor) !=
+      has_variadic_operand) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low descriptor %" PRIu32
+        " variadic descriptor flag does not match its operand rows",
+        descriptor_index);
   }
   return iree_ok_status();
 }
@@ -2025,7 +2158,8 @@ static iree_status_t loom_low_verify_descriptor(
           LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR |
           LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE |
           LOOM_LOW_DESCRIPTOR_FLAG_PSEUDO | LOOM_LOW_DESCRIPTOR_FLAG_BARRIER |
-          LOOM_LOW_DESCRIPTOR_FLAG_EARLY_CLOBBER,
+          LOOM_LOW_DESCRIPTOR_FLAG_EARLY_CLOBBER |
+          LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS,
       "descriptor", descriptor_index));
   iree_string_view_t descriptor_key = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
@@ -2132,7 +2266,8 @@ static iree_status_t loom_low_verify_operand(
           LOOM_LOW_OPERAND_FLAG_STATE_READ | LOOM_LOW_OPERAND_FLAG_STATE_WRITE |
           LOOM_LOW_OPERAND_FLAG_SCHEDULE_ONLY_STATE |
           LOOM_LOW_OPERAND_FLAG_REMATERIALIZABLE |
-          LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION,
+          LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION |
+          LOOM_LOW_OPERAND_FLAG_VARIADIC,
       "operand", operand_index));
   IREE_RETURN_IF_ERROR(loom_low_verify_required_string(
       descriptor_set, operand->field_name_string_offset, "operand.field_name"));

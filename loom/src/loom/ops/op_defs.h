@@ -164,6 +164,9 @@ enum loom_format_kind_e {
   // data = binding kind (CAPTURE or ELEMENT).
   LOOM_FORMAT_KIND_BINDING_LIST = 12,
   // Function argument definitions: (%a: type, %b: type).
+  // data = optional start/end i64 attribute indices packed by
+  // LOOM_FORMAT_FUNC_ARGS_DATA. The boundaries project a contiguous slice
+  // from a body-backed function signature.
   LOOM_FORMAT_KIND_FUNC_ARGS = 13,
   // Where-clause predicates: [mul(%M, 16), ...].
   LOOM_FORMAT_KIND_PREDICATE_LIST = 14,
@@ -256,6 +259,11 @@ enum loom_format_kind_e {
   // PARAMETERIZED attribute constrained to one exact family. The family name
   // is carried by the descriptor and omitted from text.
   LOOM_FORMAT_KIND_ATTR_PARAMS = 31,
+
+  // Variadic byte-length operands paired with static alignments:
+  // [align(16) %a, align(256) %b]. field_index references the variadic
+  // operand field and data references its i64 array alignment attribute.
+  LOOM_FORMAT_KIND_ALIGNED_REFS = 32,
 };
 typedef uint8_t loom_format_kind_t;
 
@@ -274,6 +282,20 @@ enum loom_format_index_list_data_bits_e {
   ((uint16_t)((data) & LOOM_FORMAT_INDEX_LIST_ATTR_INDEX_MASK))
 #define LOOM_FORMAT_INDEX_LIST_HAS_LEADING_GLUE(data) \
   (!iree_any_bit_set((data), LOOM_FORMAT_INDEX_LIST_DATA_NO_LEADING_GLUE))
+
+// Packs optional start/end attribute indices for a FUNC_ARGS element. Each
+// byte stores index + 1 so zero remains the absent sentinel.
+#define LOOM_FORMAT_FUNC_ARGS_ATTR_BYTE(attr_index) \
+  ((uint16_t)((attr_index) == LOOM_ATTR_INDEX_NONE  \
+                  ? 0u                              \
+                  : ((uint16_t)(attr_index) + 1u)))
+#define LOOM_FORMAT_FUNC_ARGS_DATA(start_attr_index, end_attr_index)     \
+  ((uint16_t)((LOOM_FORMAT_FUNC_ARGS_ATTR_BYTE(start_attr_index) << 8) | \
+              LOOM_FORMAT_FUNC_ARGS_ATTR_BYTE(end_attr_index)))
+#define LOOM_FORMAT_FUNC_ARGS_START_ATTR_INDEX(data) \
+  ((uint8_t)(((data) >> 8) - 1u))
+#define LOOM_FORMAT_FUNC_ARGS_END_ATTR_INDEX(data) \
+  ((uint8_t)(((data) & 0xFFu) - 1u))
 
 // Surface syntax selected by a REGION format element. This affects only text
 // parsing/printing; the in-memory representation is always an ordinary
@@ -311,6 +333,7 @@ typedef enum loom_region_syntax_e {
 //   REGION_TABLE:   packed keys attr index and fixed default region index.
 //   REGION:         loom_region_syntax_t parser/printer selector.
 //   BINDING_LIST:   binding kind (CAPTURE=0, ELEMENT=1).
+//   FUNC_ARGS:      packed optional start/end i64 attribute indices.
 //   OPTIONAL_GROUP: (skip_count << 2) | anchor_category.
 typedef struct loom_format_element_t {
   loom_format_kind_t kind;
@@ -327,6 +350,8 @@ enum loom_result_type_list_flag_bits_e {
   // Wrap result types in parentheses: (type, type).
   // When clear, result types are bare: type, type.
   LOOM_RESULT_TYPE_LIST_PARENS = 1u << 0,
+  // Print and parse one type shared by every result.
+  LOOM_RESULT_TYPE_LIST_UNIFORM = 1u << 1,
 };
 
 // Data field flags for ATTR_DICT elements. Stored in the element's data field.
@@ -1104,6 +1129,14 @@ bool loom_op_regions_have_hints(const loom_module_t* module,
 bool loom_module_value_has_predicate_attribute_uses(const loom_module_t* module,
                                                     loom_value_id_t value_id);
 
+// Replaces SSA references to |old_id| in attributes on live operations nested
+// under |region| with |new_id|. Operand and type references are unchanged.
+// Rewritten operations have their effective traits and direct effects
+// refreshed.
+iree_status_t loom_region_replace_attribute_value_references(
+    loom_module_t* module, loom_region_t* region, loom_value_id_t old_id,
+    loom_value_id_t new_id);
+
 // Returns true if every result of |op| has zero operand uses, no live
 // predicate-list attribute uses, and no external value type references. Type
 // references carried by another result of |op| do not keep the whole op alive.
@@ -1155,14 +1188,14 @@ void loom_call_like_set_callee(loom_module_t* module, loom_call_like_t call,
                                loom_symbol_ref_t callee);
 
 // Returns the trailing call argument slice, or an empty slice if |call| is not
-// valid or the recorded offset is malformed for the op instance.
+// valid or the recorded field is malformed for the op instance.
 loom_value_slice_t loom_call_like_operands(loom_call_like_t call);
 
 // Returns the trailing call result slice, or an empty slice if |call| is not
 // valid or the recorded offset is malformed for the op instance.
 loom_value_slice_t loom_call_like_results(loom_call_like_t call);
 
-// Returns the operand offset where call arguments begin.
+// Resolves the flat operand offset where call arguments begin.
 uint16_t loom_call_like_operand_offset(loom_call_like_t call);
 
 // Returns the result offset where call results begin.
@@ -1307,6 +1340,11 @@ const loom_predicate_t* loom_func_like_predicates(loom_func_like_t func,
 // empty slice for non-provider function kinds and providers without
 // requirements.
 loom_parameterized_attr_array_t loom_func_like_requires(loom_func_like_t func);
+
+// Returns the number of leading function arguments consumed while
+// materializing the function-like artifact. Returns zero when the function
+// has no distinct specialization arguments or |func| is invalid.
+int64_t loom_func_like_specialization_count(loom_func_like_t func);
 
 // Returns the implements string ID for template/ukernel ops — the name of the
 // op kind this function provides an implementation for. Returns

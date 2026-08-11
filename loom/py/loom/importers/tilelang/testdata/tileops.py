@@ -275,12 +275,12 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_reduce_sum_kernel") @t
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %local_bytes = index.constant 16 : offset
-  %local_buffer = buffer.alloca %local_bytes {base_alignment = 4, memory_space = private} : buffer
+  %local_buffer = buffer.alloca<private> align(4) %local_bytes : buffer
   %local = buffer.view %local_buffer[%c0_bytes] : buffer -> view<4xf32, %layout>
   %f32_zero = scalar.constant 0.0 : f32
   %local_state = vector.splat %f32_zero : vector<4xf32>
   %out_bytes = index.constant 4 : offset
-  %out_buffer = buffer.alloca %out_bytes {base_alignment = 4, memory_space = private} : buffer
+  %out_buffer = buffer.alloca<private> align(4) %out_bytes : buffer
   %out = buffer.view %out_buffer[%c0_bytes] : buffer -> view<1xf32, %layout>
   %out_state = vector.splat %f32_zero : vector<1xf32>
   %c0 = index.constant 0 : index
@@ -350,12 +350,12 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_reduce_sum_fastmath_ke
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %local_bytes = index.constant 16 : offset
-  %local_buffer = buffer.alloca %local_bytes {base_alignment = 4, memory_space = private} : buffer
+  %local_buffer = buffer.alloca<private> align(4) %local_bytes : buffer
   %local = buffer.view %local_buffer[%c0_bytes] : buffer -> view<4xf32, %layout>
   %f32_zero = scalar.constant 0.0 : f32
   %local_state = vector.splat %f32_zero : vector<4xf32>
   %out_bytes = index.constant 4 : offset
-  %out_buffer = buffer.alloca %out_bytes {base_alignment = 4, memory_space = private} : buffer
+  %out_buffer = buffer.alloca<private> align(4) %out_bytes : buffer
   %out = buffer.view %out_buffer[%c0_bytes] : buffer -> view<1xf32, %layout>
   %out_state = vector.splat %f32_zero : vector<1xf32>
   %c0 = index.constant 0 : index
@@ -416,12 +416,12 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_reduce_abssum_kernel")
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %local_bytes = index.constant 16 : offset
-  %local_buffer = buffer.alloca %local_bytes {base_alignment = 4, memory_space = private} : buffer
+  %local_buffer = buffer.alloca<private> align(4) %local_bytes : buffer
   %local = buffer.view %local_buffer[%c0_bytes] : buffer -> view<4xf32, %layout>
   %f32_zero = scalar.constant 0.0 : f32
   %local_state = vector.splat %f32_zero : vector<4xf32>
   %out_bytes = index.constant 4 : offset
-  %out_buffer = buffer.alloca %out_bytes {base_alignment = 4, memory_space = private} : buffer
+  %out_buffer = buffer.alloca<private> align(4) %out_bytes : buffer
   %out = buffer.view %out_buffer[%c0_bytes] : buffer -> view<1xf32, %layout>
   %out_state = vector.splat %f32_zero : vector<1xf32>
   %c0 = index.constant 0 : index
@@ -483,12 +483,12 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_reduce_absmax_kernel")
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %local_bytes = index.constant 16 : offset
-  %local_buffer = buffer.alloca %local_bytes {base_alignment = 4, memory_space = private} : buffer
+  %local_buffer = buffer.alloca<private> align(4) %local_bytes : buffer
   %local = buffer.view %local_buffer[%c0_bytes] : buffer -> view<4xf32, %layout>
   %f32_zero = scalar.constant 0.0 : f32
   %local_state = vector.splat %f32_zero : vector<4xf32>
   %out_bytes = index.constant 4 : offset
-  %out_buffer = buffer.alloca %out_bytes {base_alignment = 4, memory_space = private} : buffer
+  %out_buffer = buffer.alloca<private> align(4) %out_bytes : buffer
   %out = buffer.view %out_buffer[%c0_bytes] : buffer -> view<1xf32, %layout>
   %out_state = vector.splat %f32_zero : vector<1xf32>
   %c0 = index.constant 0 : index
@@ -550,12 +550,12 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_reduce_absmax_widen_ke
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %local_bytes = index.constant 8 : offset
-  %local_buffer = buffer.alloca %local_bytes {base_alignment = 2, memory_space = private} : buffer
+  %local_buffer = buffer.alloca<private> align(2) %local_bytes : buffer
   %local = buffer.view %local_buffer[%c0_bytes] : buffer -> view<4xf16, %layout>
   %f16_zero = scalar.constant 0.0 : f16
   %local_state = vector.splat %f16_zero : vector<4xf16>
   %out_bytes = index.constant 4 : offset
-  %out_buffer = buffer.alloca %out_bytes {base_alignment = 4, memory_space = private} : buffer
+  %out_buffer = buffer.alloca<private> align(4) %out_bytes : buffer
   %out = buffer.view %out_buffer[%c0_bytes] : buffer -> view<1xf32, %layout>
   %f32_zero = scalar.constant 0.0 : f32
   %out_state = vector.splat %f32_zero : vector<1xf32>
@@ -615,10 +615,10 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_reduce_sum_2d_kernel")
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %local_bytes = index.constant 32 : offset
-  %local_buffer = buffer.alloca %local_bytes {base_alignment = 4, memory_space = private} : buffer
+  %local_buffer = buffer.alloca<private> align(4) %local_bytes : buffer
   %local = buffer.view %local_buffer[%c0_bytes] : buffer -> view<2x4xf32, %layout>
   %out_bytes = index.constant 8 : offset
-  %out_buffer = buffer.alloca %out_bytes {base_alignment = 4, memory_space = private} : buffer
+  %out_buffer = buffer.alloca<private> align(4) %out_bytes : buffer
   %out = buffer.view %out_buffer[%c0_bytes] : buffer -> view<2xf32, %layout>
   %f32_zero = scalar.constant 0.0 : f32
   %out_state = vector.splat %f32_zero : vector<2xf32>
@@ -702,7 +702,7 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_finalize_reducer_none_
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %reducer_bytes = index.constant 16 : offset
-  %reducer_buffer = buffer.alloca %reducer_bytes {base_alignment = 4, memory_space = private} : buffer
+  %reducer_buffer = buffer.alloca<private> align(4) %reducer_bytes : buffer
   %reducer = buffer.view %reducer_buffer[%c0_bytes] : buffer -> view<4xf32, %layout>
   %f32_zero = scalar.constant 0.0 : f32
   %reducer_state = vector.splat %f32_zero : vector<4xf32>
@@ -782,17 +782,17 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_cumsum_shared_1d_kerne
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %shared_bytes = index.constant 16 : offset
-  %shared_buffer = buffer.alloca %shared_bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %shared_buffer = buffer.alloca<workgroup> align(4) %shared_bytes : buffer
   %shared = buffer.view %shared_buffer[%c0_bytes] : buffer -> view<4xi32, %layout>
   %load = view.load %src[%thread_index] : view<4xi32, %layout> -> i32
   view.store %load, %shared[%thread_index] : i32, view<4xi32, %layout>
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %c0 = index.constant 0 : index
   %c4 = index.constant 4 : index
   %cumsum_value = view.load %shared[%thread_index] : view<4xi32, %layout> -> i32
   %cumsum = kernel.workgroup.scan<addi> %cumsum_value {direction = forward, mode = inclusive} : i32
   view.store %cumsum, %shared[%thread_index] : i32, view<4xi32, %layout>
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %load_2 = view.load %shared[%thread_index] : view<4xi32, %layout> -> i32
   view.store %load_2, %dst[%thread_index] : i32, view<4xi32, %layout>
   kernel.return
@@ -851,7 +851,7 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_finalize_reducer_all_k
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %reducer_bytes = index.constant 4 : offset
-  %reducer_buffer = buffer.alloca %reducer_bytes {base_alignment = 4, memory_space = private} : buffer
+  %reducer_buffer = buffer.alloca<private> align(4) %reducer_bytes : buffer
   %reducer = buffer.view %reducer_buffer[%c0_bytes] : buffer -> view<1xf32, %layout>
   %f32_zero = scalar.constant 0.0 : f32
   %reducer_state = vector.splat %f32_zero : vector<1xf32>
@@ -918,10 +918,10 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_reduce_absmax_reshape_
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %local_bytes = index.constant 32 : offset
-  %local_buffer = buffer.alloca %local_bytes {base_alignment = 4, memory_space = private} : buffer
+  %local_buffer = buffer.alloca<private> align(4) %local_bytes : buffer
   %local = buffer.view %local_buffer[%c0_bytes] : buffer -> view<2x4xf32, %layout>
   %out_bytes = index.constant 16 : offset
-  %out_buffer = buffer.alloca %out_bytes {base_alignment = 4, memory_space = private} : buffer
+  %out_buffer = buffer.alloca<private> align(4) %out_bytes : buffer
   %out = buffer.view %out_buffer[%c0_bytes] : buffer -> view<2x2xf32, %layout>
   %c0 = index.constant 0 : index
   %c2 = index.constant 2 : index
@@ -1073,13 +1073,13 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_gemm_dense_16x16x16_ke
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %a_shared_bytes = index.constant 512 : offset
-  %a_shared_buffer = buffer.alloca %a_shared_bytes {base_alignment = 2, memory_space = workgroup} : buffer
+  %a_shared_buffer = buffer.alloca<workgroup> align(2) %a_shared_bytes : buffer
   %a_shared = buffer.view %a_shared_buffer[%c0_bytes] : buffer -> view<16x16xf16, %layout>
-  %b_shared_buffer = buffer.alloca %a_shared_bytes {base_alignment = 2, memory_space = workgroup} : buffer
+  %b_shared_buffer = buffer.alloca<workgroup> align(2) %a_shared_bytes : buffer
   %b_shared_layout = encoding.layout.strided [1, 16] : encoding<layout>
   %b_shared = buffer.view %b_shared_buffer[%c0_bytes] : buffer -> view<16x16xf16, %b_shared_layout>
   %c_local_bytes = index.constant 1024 : offset
-  %c_local_buffer = buffer.alloca %c_local_bytes {base_alignment = 4, memory_space = private} : buffer
+  %c_local_buffer = buffer.alloca<private> align(4) %c_local_bytes : buffer
   %c_local = buffer.view %c_local_buffer[%c0_bytes] : buffer -> view<16x16xf32, %layout>
   %c0 = index.constant 0 : index
   %c16 = index.constant 16 : index
@@ -1126,7 +1126,7 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_gemm_dense_16x16x16_ke
   %const = scalar.constant 0.0 : f32
   %fill = vector.splat %const : vector<8xf32>
   %init = vector.fragment<init> %fill shape [%c16, %c16] : vector<8xf32>
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %lhs = vector.fragment.load<lhs> %a_shared[%c0, %c0] shape [%c16, %c16] : view<16x16xf16, %layout> -> vector<16xf16>
   %rhs = vector.fragment.load<rhs> %b_shared[%c0, %c0] shape [%c16, %c16] : view<16x16xf16, %b_shared_layout> -> vector<16xf16>
   %gemm = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf32>

@@ -65,6 +65,7 @@ class OperandFlag(CEnum):
     STATE_WRITE = "LOOM_LOW_OPERAND_FLAG_STATE_WRITE"
     SCHEDULE_ONLY_STATE = "LOOM_LOW_OPERAND_FLAG_SCHEDULE_ONLY_STATE"
     STORAGE_CONTINUATION = "LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION"
+    VARIADIC = "LOOM_LOW_OPERAND_FLAG_VARIADIC"
 
 
 class RegClassAltFlag(CEnum):
@@ -210,6 +211,7 @@ class DescriptorFlag(CEnum):
     PSEUDO = "LOOM_LOW_DESCRIPTOR_FLAG_PSEUDO"
     BARRIER = "LOOM_LOW_DESCRIPTOR_FLAG_BARRIER"
     EARLY_CLOBBER = "LOOM_LOW_DESCRIPTOR_FLAG_EARLY_CLOBBER"
+    VARIADIC_OPERANDS = "LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS"
 
 
 class DescriptorOpKind(CEnum):
@@ -285,6 +287,12 @@ class NativeAsmValueKind(CEnum):
     IMMEDIATE_TARGET_FORMAT = "LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_TARGET_FORMAT"
     REGISTER_PART = "LOOM_LOW_NATIVE_ASM_VALUE_KIND_REGISTER_PART"
     MODIFIER_LITERAL = "LOOM_LOW_NATIVE_ASM_VALUE_KIND_MODIFIER_LITERAL"
+
+
+class AsmOperandSegmentDelimiter(CEnum):
+    ANGLE = "LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_ANGLE"
+    SQUARE = "LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_SQUARE"
+    PAREN = "LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_PAREN"
 
 
 @dataclass(frozen=True, slots=True)
@@ -410,11 +418,20 @@ class AsmResultValueType:
 
 
 @dataclass(frozen=True, slots=True)
+class AsmOperandSegment:
+    """Delimited group of operands in a compact Low asm form."""
+
+    delimiter: AsmOperandSegmentDelimiter
+    operands: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class AsmForm:
     mnemonic: str | None = None
     native_assembly_mnemonic: str | None = None
     results: tuple[str, ...] = ()
     operands: tuple[str, ...] = ()
+    operand_segments: tuple[AsmOperandSegment, ...] = ()
     immediates: tuple[AsmImmediate, ...] = ()
     native_assembly_values: tuple[NativeAsmValue, ...] = ()
     result_value_types: tuple[AsmResultValueType | None, ...] = ()

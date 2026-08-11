@@ -1,0 +1,24 @@
+// RUN: emit command-program @entry
+
+// ERROR@+1: LOWERING/049 {program_name="recursive"}
+command.program.def @recursive() launch() {
+  command.program.launch @recursive() : ()
+  command.return
+}
+
+command.program.def public @entry() launch() {
+  command.program.launch @recursive() : ()
+  command.return
+}
+
+// ====
+
+// RUN: emit command-program @external_entry
+
+// ERROR@+1: LOWERING/050 {kernel_name="external_kernel"}
+kernel.decl @external_kernel(%workgroup_count_x: index) launch()
+
+command.program.def public @external_entry(%workgroup_count_x: index) launch() {
+  kernel.launch @external_kernel[%workgroup_count_x]() : [index]()
+  command.return
+}

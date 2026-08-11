@@ -33,7 +33,7 @@ check.case public @divergent_loop_carry_case {
   %values = check.generate.fill value(1) : tensor<64xi32>
   %actual = check.generate.fill value(-1) : tensor<64xi32>
   %expected = check.generate.iota offset(0) step(1) : tensor<64xi32>
-  kernel.launch @divergent_loop_carry[](%upper_bounds, %values, %actual) : [](tensor<64xi32>, tensor<64xi32>, tensor<64xi32>)
+  kernel.launch @divergent_loop_carry(%upper_bounds, %values, %actual) : (tensor<64xi32>, tensor<64xi32>, tensor<64xi32>)
   check.expect.equal actual(%actual) expected(%expected) : tensor<64xi32>
   check.return
 }

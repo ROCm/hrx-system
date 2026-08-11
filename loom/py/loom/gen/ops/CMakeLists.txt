@@ -282,6 +282,47 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    c_tables_command_generator
+  MAIN
+    "c_tables.py"
+  SRCS
+    "__init__.py"
+    "c_builder_declarations.py"
+    "c_builder_model.py"
+    "c_builder_source.py"
+    "c_builders.py"
+    "c_dialect.py"
+    "c_enum_attrs.py"
+    "c_enums.py"
+    "c_format.py"
+    "c_interfaces.py"
+    "c_location_tags.py"
+    "c_metadata_tables.py"
+    "c_names.py"
+    "c_ops_header.py"
+    "c_parameter_values.py"
+    "c_parameterized_attrs.py"
+    "c_parameterized_types.py"
+    "c_queries.py"
+    "c_registry.py"
+    "c_scalar_types.py"
+    "c_symbols.py"
+    "c_tables.py"
+    "c_traits.py"
+    "keywords.py"
+    "type_registry.py"
+  DEPS
+    loom::py::loom::gen::ops::model
+    loom::py::loom::core
+    loom::py::loom::error::error
+    loom::py::loom::gen::bootstrap
+    loom::py::loom::gen::assembly::tokens
+    loom::py::loom::gen::support::support
+    loom::py::loom::dialect::command::command
+)
+
+iree_py_library(
+  NAME
     c_tables_config_generator
   MAIN
     "c_tables.py"

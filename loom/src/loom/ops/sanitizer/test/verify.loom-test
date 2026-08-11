@@ -122,7 +122,7 @@ func.def @race_access_nonatomic_rejects_ordering(%layout: encoding<layout>, %vie
 
 func.def @race_sync_rejects_relaxed_ordering() {
   // ERROR@+1: STRUCTURE/014 "ordering" "0" "acquire, release, acq_rel, or seq_cst ordering"
-  sanitizer.race.sync<workgroup> {ordering = relaxed, scope = workgroup}
+  sanitizer.race.sync<workgroup> scope(workgroup) ordering(relaxed)
   func.return
 }
 

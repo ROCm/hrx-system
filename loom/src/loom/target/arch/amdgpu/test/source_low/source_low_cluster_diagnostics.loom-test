@@ -12,7 +12,7 @@ kernel.def target(@target) @cluster_gather_requires_target_packets() {
   %participants = scalar.constant 3 : i32
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%buffer_base] : buffer -> view<4xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest = buffer.view %scratch[%buffer_base] : buffer -> view<4xi8, #dense>
   // ERROR@+1: AMDGPU/023 {constraint_key="cluster_gather.descriptor_missing"}
   %copy = kernel.async.cluster.gather %source to %dest using %participants {cache_scope = device, cache_temporal = regular} : view<4xi8, #dense> to view<4xi8, #dense>, i32 -> kernel.async.token
@@ -37,7 +37,7 @@ kernel.def target(@target) @masked_cluster_gather_is_not_yet_lowered() {
   %predicate = scalar.constant true : i1
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%buffer_base] : buffer -> view<4xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest = buffer.view %scratch[%buffer_base] : buffer -> view<4xi8, #dense>
   // ERROR@+1: AMDGPU/023 {constraint_key="async.transfer_packet"}
   %copy = kernel.async.cluster.gather.mask %source to %dest using %participants, %predicate {cache_scope = device, cache_temporal = regular} : view<4xi8, #dense> to view<4xi8, #dense>, i32, i1 -> kernel.async.token
@@ -66,7 +66,7 @@ kernel.def target(@target) @cluster_gather_same_root_overlap() {
   %offset = index.cast %lane_base : index to offset
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%buffer_base] : buffer -> view<16xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest = buffer.view %scratch[%offset] : buffer -> view<16xi8, #dense>
   %copy0 = kernel.async.cluster.gather %source to %dest using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8, #dense> to view<16xi8, #dense>, i32 -> kernel.async.token
   // ERROR@+1: LOWERING/026

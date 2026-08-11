@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 from loom.assembly import (
+    AlignedRefs,
     Attr,
     AttrDict,
     AttrParams,
@@ -108,6 +109,7 @@ class BuilderParam:
     region_optional: bool = False
     stable_id_field: str | None = None
     static_field: str | None = None
+    end_attr_field: str | None = None
 
     @property
     def py_name(self) -> str:
@@ -264,7 +266,29 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
     """Extract public builder parameters from an op's assembly format."""
     layout = compute_layout(op)
     params: list[BuilderParam] = []
-    covered_attrs: set[str] = set()
+
+    def collect_func_args_boundaries(
+        elements: tuple[FormatElement, ...],
+    ) -> set[str]:
+        boundaries: set[str] = set()
+        for element in elements:
+            match element:
+                case FuncArgs(start_attr=start_attr, end_attr=end_attr):
+                    if start_attr is not None:
+                        boundaries.add(start_attr)
+                    if end_attr is not None:
+                        boundaries.add(end_attr)
+                case (
+                    Clause(elements=nested)
+                    | OptionalGroup(elements=nested)
+                    | Scope(elements=nested)
+                ):
+                    boundaries.update(collect_func_args_boundaries(nested))
+                case _:
+                    pass
+        return boundaries
+
+    covered_attrs = collect_func_args_boundaries(op.format)
     region_defs = {region.name: region for region in op.regions}
 
     def append_attr_param(name: str) -> None:
@@ -379,6 +403,18 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
                             doc=f"Variadic operands: {name}",
                         )
                     )
+
+                case AlignedRefs(refs=refs_field, alignments=alignments_field):
+                    params.append(
+                        BuilderParam(
+                            name=refs_field,
+                            kind=BuilderParamKind.OPERAND_VARIADIC,
+                            type_hint="list[ValueRef]",
+                            required=False,
+                            doc=f"Variadic operands: {refs_field}",
+                        )
+                    )
+                    append_attr_param(alignments_field)
 
                 case BlockRef(field=name):
                     params.append(
@@ -532,11 +568,11 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
                 case Clause(elements=inner):
                     walk(inner)
 
-                case FuncArgs(field=name):
+                case FuncArgs(field=name, group=group, end_attr=end_attr):
                     field_desc = layout.fields.get(name)
                     params.append(
                         BuilderParam(
-                            name=name,
+                            name=group or name,
                             kind=BuilderParamKind.FUNC_ARGS,
                             type_hint="list[ValueRef]",
                             required=False,
@@ -546,7 +582,8 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
                                 and field_desc.kind == FieldKind.OPERAND
                                 else None
                             ),
-                            doc=f"Function signature args: {name}",
+                            end_attr_field=end_attr,
+                            doc=f"Function signature args: {group or name}",
                         )
                     )
 

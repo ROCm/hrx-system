@@ -46,7 +46,7 @@ check.case @case_target_provider_selection {
   %input = check.generate.fill value(7) : tensor<1xi32>
   %output = check.generate.fill value(0) : tensor<1xi32>
   %expected = check.generate.fill value(14) : tensor<1xi32>
-  kernel.launch @selects_subgroup_provider[](%input, %output) : [](tensor<1xi32>, tensor<1xi32>)
+  kernel.launch @selects_subgroup_provider(%input, %output) : (tensor<1xi32>, tensor<1xi32>)
   check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
   check.return
 }

@@ -605,6 +605,7 @@ static bool loom_refine_boundaries_call_kind_participates(
       return true;
     case LOOM_CALL_LIKE_KIND_LOW_INTERNAL:
     case LOOM_CALL_LIKE_KIND_LOW_INVOKE:
+    case LOOM_CALL_LIKE_KIND_COMMAND_PROGRAM:
     case LOOM_CALL_LIKE_KIND_NONE:
     default:
       return false;

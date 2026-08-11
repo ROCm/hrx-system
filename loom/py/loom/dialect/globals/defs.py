@@ -29,6 +29,7 @@ from loom.assembly import (
     COMMA,
     EQUALS,
     Attr,
+    Clause,
     OptionalGroup,
     PredicateList,
     Ref,
@@ -197,12 +198,13 @@ global_rodata = Op(
     format=[
         SymbolRef("symbol"),
         EQUALS,
+        OptionalGroup([Clause("align", Attr("alignment"))], anchor="alignment"),
         Attr("contents"),
-        OptionalGroup([COMMA, kw("align"), Attr("alignment")], anchor="alignment"),
     ],
     verify="loom_global_rodata_def_verify",
     examples=[
-        'global.rodata.def @loom_sanitizer_sites = bytes("4c53495401000000"), align 8',
+        'global.rodata.def @loom_sanitizer_sites = align(8) bytes("4c53495401000000")',
+        'global.rodata.def @empty = bytes("")',
     ],
 )
 

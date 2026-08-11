@@ -60,7 +60,7 @@ check.case public @split_kv_online_softmax_combine_f32_case {
   %combined_acc = check.generate.fill value(-1.0) : tensor<4xf32>
   %expected_state = check.generate.iota offset(1.0) step(3.0) : tensor<2xf32>
   %expected_acc = check.generate.iota offset(20.0) step(2.0) : tensor<4xf32>
-  kernel.launch @split_kv_online_softmax_combine_f32[](%state0, %acc0, %state1, %acc1, %combined_state, %combined_acc) : [](tensor<2xf32>, tensor<4xf32>, tensor<2xf32>, tensor<4xf32>, tensor<2xf32>, tensor<4xf32>)
+  kernel.launch @split_kv_online_softmax_combine_f32(%state0, %acc0, %state1, %acc1, %combined_state, %combined_acc) : (tensor<2xf32>, tensor<4xf32>, tensor<2xf32>, tensor<4xf32>, tensor<2xf32>, tensor<4xf32>)
   check.expect.close actual(%combined_state) expected(%expected_state) atol(0.0001) rtol(0.0001) nan(same) : tensor<2xf32>
   check.expect.close actual(%combined_acc) expected(%expected_acc) atol(0.0001) rtol(0.0001) nan(same) : tensor<4xf32>
   check.return

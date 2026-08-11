@@ -509,8 +509,7 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
         "  %global = buffer.assume.memory_space<global> %input : buffer\n"
         "  %source = buffer.view %global[%zero] : buffer -> "
         "view<64x64xf32, #dense>\n"
-        "  %scratch = buffer.alloca %bytes {base_alignment = 256, "
-        "memory_space = workgroup} : buffer\n"
+        "  %scratch = buffer.alloca<workgroup> align(256) %bytes : buffer\n"
         "  %dest = buffer.view %scratch[%zero] : buffer -> "
         "view<64x64xf32, #dense>\n"
         "  %copy = kernel.async.tensor.load.to.lds %source to %dest using "
@@ -1680,7 +1679,7 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   };
   static const char kSource[] =
       "global.rodata.def @loom_sanitizer_sites = "
-      "bytes(\"00020302010100000001010601010000\"), align 16\n"
+      "align(16) bytes(\"00020302010100000001010601010000\")\n"
       "amdgpu.target<gfx1100> @gfx_target\n"
       "low.kernel.def target<amdgpu.rdna3.core>(@gfx_target) "
       "workgroup_size(64, 1, 1) "

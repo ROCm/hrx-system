@@ -75,7 +75,7 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("shared_block_alloc") @shared_
   %layout = encoding.layout.dense : encoding<layout>
   %dst_view = buffer.view %dst_noalias[%c0_bytes] : buffer -> view<4xf32, %layout>
   %scratch_bytes = index.constant 16 : offset
-  %scratch_buffer = buffer.alloca %scratch_bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %scratch_buffer = buffer.alloca<workgroup> align(4) %scratch_bytes : buffer
   %scratch = buffer.view %scratch_buffer[%c0_bytes] : buffer -> view<4xf32, %layout>
   %const = scalar.constant 1.0 : f32
   %c0 = index.constant 0 : index
@@ -139,7 +139,7 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("private_block_alloc") @privat
   %layout = encoding.layout.dense : encoding<layout>
   %dst_view = buffer.view %dst_noalias[%c0_bytes] : buffer -> view<4xi32, %layout>
   %scratch_bytes = index.constant 16 : offset
-  %scratch_buffer = buffer.alloca %scratch_bytes {base_alignment = 4, memory_space = private} : buffer
+  %scratch_buffer = buffer.alloca<private> align(4) %scratch_bytes : buffer
   %scratch = buffer.view %scratch_buffer[%c0_bytes] : buffer -> view<4xi32, %layout>
   %const = scalar.constant 7 : i32
   %c0 = index.constant 0 : index

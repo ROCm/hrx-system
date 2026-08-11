@@ -101,6 +101,18 @@
         },
         {
           "name": "meta.operation-name.loom",
+          "match": "\\b(command)\\.(program\\.launch|program\\.decl|program\\.def|concurrent|return|serial|yield)\\b",
+          "captures": {
+            "1": {
+              "name": "support.namespace.dialect.loom"
+            },
+            "2": {
+              "name": "entity.name.function.operation.loom"
+            }
+          }
+        },
+        {
+          "name": "meta.operation-name.loom",
           "match": "\\b(config)\\.(decl|def|get)\\b",
           "captures": {
             "1": {

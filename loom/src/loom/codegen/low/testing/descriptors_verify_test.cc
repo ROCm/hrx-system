@@ -82,6 +82,7 @@ struct TestTables {
   loom_low_descriptor_ref_t descriptor_refs[2];
   loom_low_asm_form_t asm_forms[2];
   uint16_t asm_operand_indices[4];
+  loom_low_asm_operand_segment_t asm_operand_segments[1];
   loom_low_asm_result_value_type_t asm_result_value_types[2];
   loom_low_asm_immediate_t asm_immediates[1];
   loom_low_operand_t operands[4];
@@ -232,6 +233,7 @@ void InitializeTestTables(TestTables* tables) {
   tables->descriptors[1].operand_start = 1;
   tables->descriptors[1].operand_count = 3;
   tables->descriptors[1].result_count = 1;
+  tables->descriptors[1].minimum_packet_operand_count = 2;
   tables->descriptors[1].schedule_class_id = 1;
   tables->descriptors[1].flags = LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE;
   tables->descriptors[1].canonical_asm_form_ordinal =
@@ -261,6 +263,7 @@ void InitializeTestTables(TestTables* tables) {
   tables->set.descriptor_ref_count = IREE_ARRAYSIZE(tables->descriptor_refs);
   tables->set.asm_forms = tables->asm_forms;
   tables->set.asm_operand_indices = tables->asm_operand_indices;
+  tables->set.asm_operand_segments = tables->asm_operand_segments;
   tables->set.asm_result_value_types = tables->asm_result_value_types;
   tables->set.asm_immediates = tables->asm_immediates;
   tables->set.operands = tables->operands;
@@ -827,6 +830,7 @@ TEST(LowDescriptorsTest, AcceptsImplicitRowsWithImplicitFlag) {
   tables.operands[2].source_value_index = LOOM_LOW_ID_NONE;
   tables.operands[2].flags = LOOM_LOW_OPERAND_FLAG_IMPLICIT;
   tables.operands[3].source_value_index = 0;
+  tables.descriptors[1].minimum_packet_operand_count = 1;
 
   IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
 }
@@ -1160,6 +1164,62 @@ TEST(LowDescriptorsTest, RejectsUnknownOperandFlagBits) {
   TestTables tables;
   InitializeTestTables(&tables);
   tables.operands[2].flags = 0x8000u;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, AcceptsTrailingVariadicOperandSegment) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAsmForms(&tables);
+  tables.operands[3].flags = LOOM_LOW_OPERAND_FLAG_VARIADIC;
+  tables.descriptors[1].minimum_packet_operand_count = 1;
+  tables.descriptors[1].flags |= LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS;
+  tables.asm_operand_segments[0].operand_count = 2;
+  tables.asm_operand_segments[0].delimiter =
+      LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_PAREN;
+  tables.asm_operand_segments[0].flags =
+      LOOM_LOW_ASM_OPERAND_SEGMENT_FLAG_VARIADIC;
+  tables.asm_forms[0].operand_segment_start = 0;
+  tables.asm_forms[0].operand_segment_count = 1;
+  tables.set.asm_operand_segment_count = 1;
+
+  IREE_EXPECT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsIncorrectMinimumPacketOperandCount) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptors[1].minimum_packet_operand_count = 1;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsVariadicDescriptorFlagWithoutOperand) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptors[1].flags |= LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsVariadicOperandWithoutDescriptorFlag) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[3].flags = LOOM_LOW_OPERAND_FLAG_VARIADIC;
+  tables.descriptors[1].minimum_packet_operand_count = 1;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsNonTrailingVariadicOperand) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[2].flags = LOOM_LOW_OPERAND_FLAG_VARIADIC;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));

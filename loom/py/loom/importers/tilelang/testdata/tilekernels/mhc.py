@@ -318,7 +318,7 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("expand_to_mhc_fwd_kernel") @e
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %local_bytes = index.constant 8192 : offset
-  %local_buffer = buffer.alloca %local_bytes {base_alignment = 2, memory_space = private} : buffer
+  %local_buffer = buffer.alloca<private> align(2) %local_bytes : buffer
   %local = buffer.view %local_buffer[%c0_bytes] : buffer -> view<32x128xbf16, %layout>
   %const = scalar.constant 0 : i32
   %cmp = scalar.cmpi sgt, %num_tokens, %const : i32
@@ -483,15 +483,15 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("mhc_pre_split_mixes_fwd_kerne
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %input_mixes_frag_bytes = index.constant 64 : offset
-  %input_mixes_frag_buffer = buffer.alloca %input_mixes_frag_bytes {base_alignment = 4, memory_space = private} : buffer
+  %input_mixes_frag_buffer = buffer.alloca<private> align(4) %input_mixes_frag_bytes : buffer
   %input_mixes_frag = buffer.view %input_mixes_frag_buffer[%c0_bytes] : buffer -> view<2x8xf32, %layout>
   %pre_layer_mix_frag_bytes = index.constant 16 : offset
-  %pre_layer_mix_frag_buffer = buffer.alloca %pre_layer_mix_frag_bytes {base_alignment = 4, memory_space = private} : buffer
+  %pre_layer_mix_frag_buffer = buffer.alloca<private> align(4) %pre_layer_mix_frag_bytes : buffer
   %pre_layer_mix_frag = buffer.view %pre_layer_mix_frag_buffer[%c0_bytes] : buffer -> view<2x2xf32, %layout>
-  %post_layer_mix_frag_buffer = buffer.alloca %pre_layer_mix_frag_bytes {base_alignment = 4, memory_space = private} : buffer
+  %post_layer_mix_frag_buffer = buffer.alloca<private> align(4) %pre_layer_mix_frag_bytes : buffer
   %post_layer_mix_frag = buffer.view %post_layer_mix_frag_buffer[%c0_bytes] : buffer -> view<2x2xf32, %layout>
   %comb_res_mix_frag_bytes = index.constant 32 : offset
-  %comb_res_mix_frag_buffer = buffer.alloca %comb_res_mix_frag_bytes {base_alignment = 4, memory_space = private} : buffer
+  %comb_res_mix_frag_buffer = buffer.alloca<private> align(4) %comb_res_mix_frag_bytes : buffer
   %comb_res_mix_frag = buffer.view %comb_res_mix_frag_buffer[%c0_bytes] : buffer -> view<2x4xf32, %layout>
   %c2 = index.constant 2 : index
   %mul = index.mul %bx, %c2 : index
@@ -618,14 +618,14 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("mhc_sinkhorn_kernel") @mhc_si
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %comb_frag_bytes = index.constant 16 : offset
-  %comb_frag_buffer = buffer.alloca %comb_frag_bytes {base_alignment = 4, memory_space = private} : buffer
+  %comb_frag_buffer = buffer.alloca<private> align(4) %comb_frag_bytes : buffer
   %comb_frag = buffer.view %comb_frag_buffer[%c0_bytes] : buffer -> view<1x2x2xf32, %layout>
   %row_sum_bytes = index.constant 8 : offset
-  %row_sum_buffer = buffer.alloca %row_sum_bytes {base_alignment = 4, memory_space = private} : buffer
+  %row_sum_buffer = buffer.alloca<private> align(4) %row_sum_bytes : buffer
   %row_sum = buffer.view %row_sum_buffer[%c0_bytes] : buffer -> view<1x2xf32, %layout>
-  %col_sum_buffer = buffer.alloca %row_sum_bytes {base_alignment = 4, memory_space = private} : buffer
+  %col_sum_buffer = buffer.alloca<private> align(4) %row_sum_bytes : buffer
   %col_sum = buffer.view %col_sum_buffer[%c0_bytes] : buffer -> view<1x2xf32, %layout>
-  %row_max_buffer = buffer.alloca %row_sum_bytes {base_alignment = 4, memory_space = private} : buffer
+  %row_max_buffer = buffer.alloca<private> align(4) %row_sum_bytes : buffer
   %row_max = buffer.view %row_max_buffer[%c0_bytes] : buffer -> view<1x2xf32, %layout>
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index

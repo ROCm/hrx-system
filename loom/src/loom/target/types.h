@@ -56,6 +56,7 @@ typedef enum loom_target_abi_kind_e {
   LOOM_TARGET_ABI_VM_MODULE_FUNCTION = 3,
   LOOM_TARGET_ABI_SHADER_ENTRY_POINT = 4,
   LOOM_TARGET_ABI_WASM_FUNCTION = 5,
+  LOOM_TARGET_ABI_COMMAND_PROGRAM = 6,
 } loom_target_abi_kind_e;
 
 typedef uint8_t loom_target_linkage_t;
@@ -124,6 +125,8 @@ static inline iree_string_view_t loom_target_abi_kind_name(
       return IREE_SV("shader_entry_point");
     case LOOM_TARGET_ABI_WASM_FUNCTION:
       return IREE_SV("wasm_function");
+    case LOOM_TARGET_ABI_COMMAND_PROGRAM:
+      return IREE_SV("command_program");
     case LOOM_TARGET_ABI_UNKNOWN:
       return IREE_SV("unknown");
   }

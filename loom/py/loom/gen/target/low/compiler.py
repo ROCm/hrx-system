@@ -16,6 +16,7 @@ from loom.gen.target.low import validation
 from loom.gen.target.low.compiled import (
     CompiledAsmForm,
     CompiledAsmImmediate,
+    CompiledAsmOperandSegment,
     CompiledDescriptorSet,
     CompiledNativeAsmValue,
     CompiledOperandForm,
@@ -207,7 +208,10 @@ def derive_instruction_classes(
     return tuple(instruction_class for instruction_class in InstructionClass if instruction_class in classes)
 
 
-def derive_descriptor_projections(descriptor: Descriptor) -> Descriptor:
+def derive_descriptor_projections(
+    descriptor: Descriptor,
+    operand_layout: validation.DescriptorOperandLayout,
+) -> Descriptor:
     """Projects validated descriptor constraints onto compact runtime flags."""
 
     has_barrier_effect = any(effect.kind is EffectKind.BARRIER for effect in descriptor.effects)
@@ -224,6 +228,12 @@ def derive_descriptor_projections(descriptor: Descriptor) -> Descriptor:
         derived_flags.append(DescriptorFlag.BARRIER)
     if has_early_clobber_constraint and not has_early_clobber_flag:
         derived_flags.append(DescriptorFlag.EARLY_CLOBBER)
+    has_variadic_operand = operand_layout.has_variadic_operands
+    has_variadic_flag = DescriptorFlag.VARIADIC_OPERANDS in descriptor.flags
+    if has_variadic_flag and not has_variadic_operand:
+        raise ValueError(f"descriptor '{descriptor.key}' has the variadic-operands flag without a variadic operand")
+    if has_variadic_operand and not has_variadic_flag:
+        derived_flags.append(DescriptorFlag.VARIADIC_OPERANDS)
 
     operand_flags: list[list[OperandFlag]] = []
     for operand in descriptor.operands:
@@ -377,8 +387,8 @@ def _compile_operand_form(
     replacement_ordinal = descriptor_ordinals[operand_form.replacement_descriptor]
     replacement = selected_descriptors[replacement_ordinal]
     _replacement_operand_indices, replacement_immediate_indices = _index_descriptor_fields(replacement)
-    source_result_count = validation.validate_descriptor_operands(descriptor)
-    replacement_result_count = validation.validate_descriptor_operands(replacement)
+    source_result_count = validation.validate_descriptor_operands(descriptor).result_count
+    replacement_result_count = validation.validate_descriptor_operands(replacement).result_count
     if replacement_result_count != source_result_count:
         raise ValueError(f"descriptor '{descriptor.key}' operand form replacement '{replacement.key}' must have the same result count")
     for i in range(source_result_count):
@@ -522,8 +532,14 @@ def _compile_asm_form(
         OperandRole.PREDICATE,
         OperandRole.RESOURCE,
     }
+    if asm_form.operands and asm_form.operand_segments:
+        raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' uses both flat operands and operand segments")
+    asm_operand_fields = asm_form.operands
+    if asm_form.operand_segments:
+        asm_operand_fields = tuple(field_name for segment in asm_form.operand_segments for field_name in segment.operands)
+
     operand_order = []
-    for field_name in asm_form.operands:
+    for field_name in asm_operand_fields:
         operand_index = operand_indices.get(field_name)
         if operand_index is None:
             raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' operand references unknown operand field '{field_name}'")
@@ -531,6 +547,33 @@ def _compile_asm_form(
         if operand.role not in packet_operand_roles:
             raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' operand field '{field_name}' does not name an explicit packet operand")
         operand_order.append(operand_index)
+
+    operand_segments = []
+    for segment_index, segment in enumerate(asm_form.operand_segments):
+        has_variadic_operand = False
+        for field_index, field_name in enumerate(segment.operands):
+            operand_index = operand_indices[field_name]
+            is_variadic = OperandFlag.VARIADIC in descriptor.operands[operand_index].flags
+            if is_variadic:
+                if segment_index != len(asm_form.operand_segments) - 1 or field_index != len(segment.operands) - 1:
+                    raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' variadic operand '{field_name}' must terminate the final operand segment")
+                has_variadic_operand = True
+        operand_segments.append(
+            CompiledAsmOperandSegment(
+                delimiter=segment.delimiter,
+                operand_count=len(segment.operands),
+                has_variadic_operand=has_variadic_operand,
+            )
+        )
+
+    variadic_operand_fields = {operand.field_name for operand in descriptor.operands if OperandFlag.VARIADIC in operand.flags}
+    if variadic_operand_fields:
+        if not asm_form.operand_segments:
+            raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' must place its variadic operand in a delimited operand segment")
+        referenced_variadic_fields = variadic_operand_fields.intersection(asm_operand_fields)
+        if referenced_variadic_fields != variadic_operand_fields:
+            missing_fields = ", ".join(sorted(variadic_operand_fields - referenced_variadic_fields))
+            raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' omits variadic operand field(s): {missing_fields}")
 
     immediate_order = []
     seen_immediate_names: set[str] = set()
@@ -583,6 +626,7 @@ def _compile_asm_form(
         native_assembly_mnemonic=native_assembly_mnemonic,
         result_indices=tuple(result_indices),
         operand_indices=tuple(operand_order),
+        operand_segments=tuple(operand_segments),
         result_value_types=asm_form.result_value_types,
         immediates=tuple(immediate_order),
         native_assembly_values=tuple(native_assembly_values),
@@ -794,6 +838,7 @@ def compile_asm_forms_for_descriptors(
 def append_asm_form_table_spans(
     asm_forms: Sequence[CompiledAsmForm],
     asm_operand_indices: list[int],
+    asm_operand_segments: list[CompiledAsmOperandSegment],
     asm_result_value_types: list[AsmResultValueType | None],
     asm_immediates: list[CompiledAsmImmediate],
     native_asm_values: list[CompiledNativeAsmValue],
@@ -806,6 +851,8 @@ def append_asm_form_table_spans(
             asm_result_value_types.extend(asm_form.result_value_types)
         asm_form.operand_index_start = len(asm_operand_indices)
         asm_operand_indices.extend(asm_form.operand_indices)
+        asm_form.operand_segment_start = len(asm_operand_segments)
+        asm_operand_segments.extend(asm_form.operand_segments)
         asm_form.immediate_start = len(asm_immediates)
         asm_immediates.extend(asm_form.immediates)
         asm_form.native_assembly_value_start = len(native_asm_values)
@@ -829,13 +876,14 @@ def compile_descriptor_set(
     enum_domain_inputs = _dedupe_by_name(spec.enum_domains, lambda item: item.name)
     _dedupe_by_name(spec.descriptors, lambda item: item.key)
 
-    result_counts_by_descriptor: dict[str, int] = {}
+    operand_layouts_by_descriptor: dict[str, validation.DescriptorOperandLayout] = {}
     rematerializable_results_by_descriptor: dict[str, tuple[int, ...]] = {}
     source_value_indices_by_descriptor: dict[str, tuple[int | None, ...]] = {}
     projected_descriptors_by_key: dict[str, Descriptor] = {}
     for descriptor in spec.descriptors:
-        result_count = validation.validate_descriptor_operands(descriptor)
-        result_counts_by_descriptor[descriptor.key] = result_count
+        operand_layout = validation.validate_descriptor_operands(descriptor)
+        operand_layouts_by_descriptor[descriptor.key] = operand_layout
+        result_count = operand_layout.result_count
         source_value_indices_by_descriptor[descriptor.key] = validation.descriptor_operand_source_value_indices(
             descriptor,
             result_count,
@@ -846,7 +894,10 @@ def compile_descriptor_set(
             descriptor,
             register_part_inputs,
         )
-        projected_descriptors_by_key[descriptor.key] = derive_descriptor_projections(descriptor)
+        projected_descriptors_by_key[descriptor.key] = derive_descriptor_projections(
+            descriptor,
+            operand_layout,
+        )
     validation.validate_physical_descriptor_set(spec)
 
     selected_descriptors = [projected_descriptors_by_key[descriptor.key] for descriptor in _select_descriptors(spec, allowlist)]
@@ -872,7 +923,7 @@ def compile_descriptor_set(
         raise ValueError(f"descriptor set '{spec.key}' requires unknown schedule classes: {', '.join(unknown_required_schedule_names)}")
     used_enum_domain_names: set[str] = set()
     for descriptor in selected_descriptors:
-        result_count = result_counts_by_descriptor[descriptor.key]
+        result_count = operand_layouts_by_descriptor[descriptor.key].result_count
         validation.validate_descriptor_encoding_fields(descriptor)
         validation.validate_descriptor_storage_leases(descriptor, result_count)
         if descriptor.encoding_id < 0 or descriptor.encoding_id > LOW_DESCRIPTOR_ENCODING_ID_NONE:
@@ -1093,12 +1144,14 @@ def compile_descriptor_set(
             canonical_asm_form_ordinals[descriptor_ordinal] = None
 
     asm_operand_indices: list[int] = []
+    asm_operand_segments: list[CompiledAsmOperandSegment] = []
     asm_result_value_types: list[AsmResultValueType | None] = []
     asm_immediates: list[CompiledAsmImmediate] = []
     native_asm_values: list[CompiledNativeAsmValue] = []
     append_asm_form_table_spans(
         asm_forms,
         asm_operand_indices,
+        asm_operand_segments,
         asm_result_value_types,
         asm_immediates,
         native_asm_values,
@@ -1238,7 +1291,8 @@ def compile_descriptor_set(
             {
                 "operand_start": operand_start,
                 "operand_count": len(descriptor.operands),
-                "result_count": result_counts_by_descriptor[descriptor.key],
+                "result_count": operand_layouts_by_descriptor[descriptor.key].result_count,
+                "minimum_packet_operand_count": operand_layouts_by_descriptor[descriptor.key].minimum_packet_operand_count,
                 "immediate_start": immediate_start,
                 "immediate_count": len(descriptor.immediates),
                 "effect_start": effect_start,
@@ -1307,6 +1361,7 @@ def compile_descriptor_set(
         canonical_asm_form_ordinals=canonical_asm_form_ordinals,
         asm_forms=asm_forms,
         asm_operand_indices=asm_operand_indices,
+        asm_operand_segments=asm_operand_segments,
         asm_result_value_types=asm_result_value_types,
         asm_immediates=asm_immediates,
         native_asm_values=native_asm_values,

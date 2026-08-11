@@ -264,7 +264,7 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("shared_storage_sync") @shared
   %src_view = buffer.view %src_noalias[%c0_bytes] : buffer -> view<4xf32, %layout>
   %dst_noalias = buffer.assume.noalias %dst : buffer
   %dst_view = buffer.view %dst_noalias[%c0_bytes] : buffer -> view<4xf32, %layout>
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %c0 = index.constant 0 : index
   %load = view.load %src_view[%c0] : view<4xf32, %layout> -> f32
   view.store %load, %dst_view[%c0] : f32, view<4xf32, %layout>
@@ -318,7 +318,7 @@ kernel.def target(@hip_mcpu_gfx11_generic) export("warp_sync_kernel") @warp_sync
   %tz = kernel.workitem.id<z> : index
   %load = view.load %src[%thread_index] : view<32xf32, %layout> -> f32
   view.store %load, %dst[%thread_index] : f32, view<32xf32, %layout>
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
+  kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
   kernel.return
 }
 """

@@ -237,6 +237,8 @@ loom_cc_library(
         "//loom/binding/c:__pkg__",
         "//loom/src/loom/codegen/low:__pkg__",
         "//loom/src/loom/target/arch/amdgpu:__pkg__",
+        "//loom/src/loom/target/arch/cmd/check:__pkg__",
+        "//loom/src/loom/target/arch/cmd/lower:__pkg__",
         "//loom/src/loom/tooling/compile:__pkg__",
         "//loom/src/loom/tools/loom-check:__pkg__",
         "//loom/src/loom/tools/loom-opt:__pkg__",

@@ -39,7 +39,7 @@ func.template<nested.kernel_inner> device @kernel_inner() {
 }
 
 func.template<nested.kernel_outer> device @kernel_outer() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   func.apply<nested.kernel_inner>() : ()
   func.return
 }

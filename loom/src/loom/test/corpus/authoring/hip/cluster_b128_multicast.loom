@@ -35,14 +35,14 @@ kernel.def target(@gfx1250) @cluster_b128_multicast() {
   %source = buffer.view %input_noalias[%lane_byte_offset] : buffer -> view<16xi8, #dense>
   %output_view = buffer.view %output_noalias[%base] : buffer -> view<2x32xi32, #dense>
 
-  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
   %destination = buffer.view %scratch[%lane_byte_offset] : buffer -> view<16xi8, #dense>
   %scratch_view = buffer.view %scratch[%base] : buffer -> view<32x4xi32, #dense>
 
   %copy = kernel.async.cluster.gather %source to %destination using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8, #dense> to view<16xi8, #dense>, i32 -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 
   %actual = vector.load %scratch_view[%lane, 0] : view<32x4xi32, #dense> -> vector<4xi32>
   %actual0 = vector.extract %actual[0] : vector<4xi32> -> i32
@@ -71,7 +71,7 @@ check.case public @case_cluster_b128_multicast {
   %input = check.generate.iota offset(1) step(1) : tensor<32x4xi32>
   %output = check.generate.fill value(0) : tensor<2x32xi32>
   %expected = check.generate.fill value(1) : tensor<2x32xi32>
-  kernel.launch @cluster_b128_multicast[](%input, %output) : [](tensor<32x4xi32>, tensor<2x32xi32>)
+  kernel.launch @cluster_b128_multicast(%input, %output) : (tensor<32x4xi32>, tensor<2x32xi32>)
   check.expect.equal actual(%output) expected(%expected) : tensor<2x32xi32>
   check.return
 }

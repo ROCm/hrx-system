@@ -52,6 +52,8 @@ enum loom_symbol_interface_bits_e {
   LOOM_SYMBOL_INTERFACE_KERNEL = 1u << 7,
   // Function-like symbol may be targeted by an ordinary call operation.
   LOOM_SYMBOL_INTERFACE_CALLABLE = 1u << 8,
+  // Function-like symbol defines or declares a reusable command program.
+  LOOM_SYMBOL_INTERFACE_COMMAND_PROGRAM = 1u << 9,
 };
 
 // Generated metadata for a symbol-reference attribute.

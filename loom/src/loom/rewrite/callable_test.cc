@@ -263,6 +263,69 @@ TEST_F(CallableInlineTest, InlinesDirectCallAndReplacesReturnOperand) {
   EXPECT_EQ(loom_region_entry_block(callee_body)->op_count, 2u);
 }
 
+TEST_F(CallableInlineTest, InlinesFuncLikeWithDeclaredTerminator) {
+  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_symbol_ref_t callee_ref = MakeSymbol(IREE_SV("test_negate"));
+  loom_symbol_ref_t caller_ref = MakeSymbol(IREE_SV("caller"));
+
+  loom_op_t* callee_op = nullptr;
+  IREE_ASSERT_OK(loom_test_func_build(&module_builder_, 0, 0, 0, callee_ref,
+                                      &i32, 1, &i32, 1, nullptr, 0, nullptr, 0,
+                                      LOOM_LOCATION_UNKNOWN, &callee_op));
+  loom_func_like_t callee = loom_func_like_cast(module_, callee_op);
+  uint16_t callee_arg_count = 0;
+  const loom_value_id_t* callee_args =
+      loom_func_like_arg_ids(callee, &callee_arg_count);
+  ASSERT_EQ(callee_arg_count, 1u);
+  loom_builder_t callee_builder = BodyBuilder(callee_op);
+  loom_op_t* neg_op = nullptr;
+  IREE_ASSERT_OK(loom_test_neg_build(&callee_builder, callee_args[0], i32,
+                                     LOOM_LOCATION_UNKNOWN, &neg_op));
+  loom_value_id_t negated = loom_test_neg_result(neg_op);
+  loom_op_t* yield_op = nullptr;
+  IREE_ASSERT_OK(loom_test_yield_build(&callee_builder, &negated, 1,
+                                       LOOM_LOCATION_UNKNOWN, &yield_op));
+
+  loom_op_t* caller_op = nullptr;
+  IREE_ASSERT_OK(loom_func_def_build(
+      &module_builder_, 0, 0, 0, 0, 0, 0, 0, loom_symbol_ref_null(), 0,
+      loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
+      loom_named_attr_slice_empty(), caller_ref, &i32, 1, &i32, 1, nullptr, 0,
+      nullptr, 0, LOOM_LOCATION_UNKNOWN, &caller_op));
+  loom_func_like_t caller = loom_func_like_cast(module_, caller_op);
+  uint16_t caller_arg_count = 0;
+  const loom_value_id_t* caller_args =
+      loom_func_like_arg_ids(caller, &caller_arg_count);
+  ASSERT_EQ(caller_arg_count, 1u);
+  loom_builder_t caller_builder = BodyBuilder(caller_op);
+  loom_op_t* invoke_op = nullptr;
+  IREE_ASSERT_OK(loom_test_invoke_build(&caller_builder, callee_ref,
+                                        caller_args, 1, &i32, 1, nullptr, 0,
+                                        LOOM_LOCATION_UNKNOWN, &invoke_op));
+  loom_value_id_t invoke_result = loom_test_invoke_results(invoke_op).values[0];
+  loom_op_t* return_op = nullptr;
+  IREE_ASSERT_OK(loom_func_return_build(&caller_builder, &invoke_result, 1,
+                                        LOOM_LOCATION_UNKNOWN, &return_op));
+
+  loom_rewriter_t rewriter = {};
+  IREE_ASSERT_OK(
+      loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_));
+  IREE_ASSERT_OK(loom_callable_inline_direct_call(&rewriter, invoke_op));
+  loom_rewriter_deinitialize(&rewriter);
+
+  EXPECT_TRUE(iree_any_bit_set(invoke_op->flags, LOOM_OP_FLAG_DEAD));
+  loom_block_t* caller_block =
+      loom_region_entry_block(loom_func_like_body(caller));
+  ASSERT_EQ(caller_block->op_count, 2u);
+  ASSERT_TRUE(loom_test_neg_isa(loom_block_op(caller_block, 0)));
+  ASSERT_TRUE(loom_func_return_isa(loom_block_op(caller_block, 1)));
+  loom_value_slice_t returned =
+      loom_func_return_operands(loom_block_op(caller_block, 1));
+  ASSERT_EQ(returned.count, 1u);
+  EXPECT_EQ(returned.values[0],
+            loom_test_neg_result(loom_block_op(caller_block, 0)));
+}
+
 TEST_F(CallableInlineTest, ConsumingInlineMovesBodyAndErasesCallee) {
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
   loom_symbol_ref_t callee_ref = MakeSymbol(IREE_SV("negate"));

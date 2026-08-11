@@ -42,6 +42,27 @@ func.def @read_boolean_config() -> (i32) {
 
 // ====
 
+// Encoding config definitions seed the same typed facts as encoding.define.
+config.def @weight_schema = #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+
+func.def @read_encoding_config() -> (i1, i1) {
+  %schema = config.get @weight_schema : encoding<schema>
+  %is_q4 = encoding.isa<#ggml_q4_0<block_elems=32, storage_bytes=18>> %schema : encoding<schema>
+  %is_q8 = encoding.isa<#ggml_q8_0<block_elems=32, storage_bytes=34>> %schema : encoding<schema>
+  func.return %is_q4, %is_q8 : i1, i1
+}
+
+// ----
+config.def @weight_schema = #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+
+func.def @read_encoding_config() -> (i1, i1) {
+  %is_q4 = scalar.constant true : i1
+  %is_q8 = scalar.constant false : i1
+  func.return %is_q4, %is_q8 : i1, i1
+}
+
+// ====
+
 // Declarations do not invent exact values. The unresolved read stays visible
 // for specialization/linking.
 config.decl @runtime_batch_size : index

@@ -597,14 +597,23 @@ def hazard_reference_count(hazard: Hazard) -> int:
     return sum(reference is not None for reference in (hazard.resource, hazard.counter_id, hazard.target_id))
 
 
-def validate_descriptor_operands(descriptor: Descriptor) -> int:
+@dataclass(frozen=True, slots=True)
+class DescriptorOperandLayout:
+    result_count: int
+    minimum_packet_operand_count: int
+    has_variadic_operands: bool
+
+
+def validate_descriptor_operands(descriptor: Descriptor) -> DescriptorOperandLayout:
     validate_u16(
         len(descriptor.operands),
         f"descriptor '{descriptor.key}' operand count",
     )
     result_count = 0
+    minimum_packet_operand_count = 0
     seen_non_result = False
-    for operand in descriptor.operands:
+    variadic_operand_index: int | None = None
+    for operand_index, operand in enumerate(descriptor.operands):
         if operand.role is OperandRole.OPERAND_RESULT:
             raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' uses OPERAND_RESULT; use separate result and operand rows plus an explicit constraint")
         is_result = operand.role is OperandRole.RESULT
@@ -616,6 +625,22 @@ def validate_descriptor_operands(descriptor: Descriptor) -> int:
             seen_non_result = True
         if operand.role is OperandRole.IMPLICIT and OperandFlag.IMPLICIT not in operand.flags:
             raise ValueError(f"descriptor '{descriptor.key}' implicit operand '{operand.field_name}' must set the implicit flag")
+        if OperandFlag.VARIADIC in operand.flags:
+            if variadic_operand_index is not None:
+                raise ValueError(f"descriptor '{descriptor.key}' has more than one variadic operand")
+            variadic_operand_index = operand_index
+            if not operand_role_is_packet_input(operand.role):
+                raise ValueError(f"descriptor '{descriptor.key}' variadic operand '{operand.field_name}' is not an explicit packet operand")
+            if operand_index != len(descriptor.operands) - 1:
+                raise ValueError(f"descriptor '{descriptor.key}' variadic operand '{operand.field_name}' must be the final descriptor operand")
+            other_flags = set(operand.flags) - {OperandFlag.VARIADIC}
+            if other_flags:
+                names = ", ".join(sorted(flag.name.lower() for flag in other_flags))
+                raise ValueError(f"descriptor '{descriptor.key}' variadic operand '{operand.field_name}' has unsupported flags: {names}")
+            if operand.encoding_field_id != 0 or operand.register_part is not None:
+                raise ValueError(f"descriptor '{descriptor.key}' variadic operand '{operand.field_name}' cannot participate in a fixed instruction encoding")
+        elif operand_role_is_packet_input(operand.role):
+            minimum_packet_operand_count += 1
         if not operand.reg_alts:
             raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' has no register-class alternatives")
         validate_u16(
@@ -662,7 +687,18 @@ def validate_descriptor_operands(descriptor: Descriptor) -> int:
                 raise ValueError(f"descriptor '{descriptor.key}' state operand '{operand.field_name}' must name exactly one register-class alternative")
             if operand.reg_alts[0].reg_class is None:
                 raise ValueError(f"descriptor '{descriptor.key}' state operand '{operand.field_name}' must name a concrete register class")
-    return result_count
+    if variadic_operand_index is not None:
+        if descriptor.constraints:
+            raise ValueError(f"descriptor '{descriptor.key}' with variadic operands cannot declare descriptor constraints")
+        if descriptor.storage_leases:
+            raise ValueError(f"descriptor '{descriptor.key}' with variadic operands cannot declare storage leases")
+        if descriptor.operand_forms:
+            raise ValueError(f"descriptor '{descriptor.key}' with variadic operands cannot declare operand forms")
+    return DescriptorOperandLayout(
+        result_count=result_count,
+        minimum_packet_operand_count=minimum_packet_operand_count,
+        has_variadic_operands=variadic_operand_index is not None,
+    )
 
 
 def validate_register_part(part: RegisterPart) -> None:
@@ -710,7 +746,7 @@ def validate_descriptor_op_kind(descriptor: Descriptor, result_count: int) -> No
         raise ValueError(f"descriptor '{descriptor.key}' uses low.const but declares effects")
     for asm_form in descriptor.asm_forms:
         mnemonic = asm_form_mnemonic(descriptor, asm_form)
-        if len(asm_form.results) != 1 or asm_form.operands:
+        if len(asm_form.results) != 1 or asm_form.operands or asm_form.operand_segments:
             raise ValueError(f"descriptor '{descriptor.key}' low.const asm form '{mnemonic}' must expose exactly one result and no operands")
 
 
@@ -1021,9 +1057,12 @@ def immediate_accepts_i64_arithmetic(immediate: Immediate) -> bool:
 
 def validate_unique_asm_fields(descriptor: Descriptor, asm_form: AsmForm, mnemonic: str) -> None:
     seen_fields: set[str] = set()
+    operand_fields = asm_form.operands
+    if asm_form.operand_segments:
+        operand_fields = tuple(field_name for segment in asm_form.operand_segments for field_name in segment.operands)
     for field_name in (
         *asm_form.results,
-        *asm_form.operands,
+        *operand_fields,
         *(immediate.field_name for immediate in asm_form.immediates),
     ):
         if field_name in seen_fields:

@@ -9,7 +9,7 @@ kernel.def target(@target) @lds_b32_diagnostics() {
   %tid = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 256 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64xi32, #dense>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32, #dense>
   %stored_value = vector.constant 1 : vector<1xi32>
@@ -47,7 +47,7 @@ kernel.def target(@target) @lds_padded_diagnostics() {
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 2048 : offset
   %layout = encoding.layout.strided [5, 1] : encoding<layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xi32, %layout>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32, #dense>
   %stored_value = vector.constant 1 : vector<4xi32>
@@ -88,7 +88,7 @@ kernel.def target(@target) @lds_read2_write2_diagnostics() {
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 2048 : offset
   %layout = encoding.layout.strided [8, 2] : encoding<layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xi32, %layout>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x2xi32, #dense>
   %stored_value = vector.constant 1 : vector<2xi32>
@@ -126,7 +126,7 @@ kernel.def target(@target) @lds_dense_b128_diagnostics() {
   %tid = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 1024 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xi32, #dense>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32, #dense>
   %stored_value = vector.constant 1 : vector<4xi32>
@@ -164,7 +164,7 @@ kernel.def target(@target) @lds_f16_subword_stride_diagnostics() {
   %lane = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 256 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<128xf16, #dense>
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<128xf16, #dense>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<128xf16, #dense>
@@ -352,7 +352,7 @@ kernel.def target(@target) @workgroup_dependent_lds_index_rejected() {
   %element_index = index.add %base, %lane : index
   %scratch_base = index.constant 0 : offset
   %bytes = index.constant 256 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32, #dense>
   %stored_value = vector.constant 1 : vector<1xi32>
   // ERROR@+1: AMDGPU/023 {constraint_key="memory_access.workgroup_dynamic_index_source"}
@@ -372,7 +372,7 @@ kernel.def target(@target) @lds_i8x8_strided_load_rejected() {
   %scratch_base = index.constant 0 : offset
   %bytes = index.constant 4096 : offset
   %layout = encoding.layout.strided [8, 2] : encoding<layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64x8xi8, %layout>
   // ERROR@+1: AMDGPU/023 {constraint_key="memory_access.vector_axis_stride"}
   %loaded = vector.load %scratch_view[%tid, 0] : view<64x8xi8, %layout> -> vector<8xi8>
@@ -390,7 +390,7 @@ kernel.def target(@target) @cache_policy_workgroup_store_rejected() {
   %tid = kernel.workitem.id<x> : index
   %scratch_base = index.constant 0 : offset
   %bytes = index.constant 1024 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64x4xi32, #dense>
   %stored_value = vector.constant 1 : vector<4xi32>
   // REMARK@+2: BACKEND/040 "rejected cache policy 'device/non_temporal'" "decision 'memory_cache_policy.workgroup'" "store in workgroup"
@@ -721,7 +721,7 @@ kernel.def target(@target) @fragment_private_memory_rejected() {
   %bytes = index.constant 512 : offset
   %m = index.constant 16 : index
   %k = index.constant 16 : index
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = private} : buffer
+  %scratch = buffer.alloca<private> align(16) %bytes : buffer
   %lhs_view = buffer.view %scratch[%base] : buffer -> view<16x16xf16, #dense>
   // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.memory_space"}
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16, #dense> -> vector<16xf16>

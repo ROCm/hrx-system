@@ -9,7 +9,9 @@
 from loom.assembly import (
     ARROW,
     COLON,
+    Attr,
     AttrDict,
+    Clause,
     IndexList,
     PredicateList,
     Ref,
@@ -495,10 +497,11 @@ sanitizer_race_sync = Op(
     verify="loom_sanitizer_race_sync_verify",
     format=[
         TemplateParam("memory_space"),
-        AttrDict(),
+        Clause("scope", Attr("scope")),
+        Clause("ordering", Attr("ordering")),
     ],
     examples=[
-        "sanitizer.race.sync<workgroup> {ordering = acq_rel, scope = workgroup}",
+        "sanitizer.race.sync<workgroup> scope(workgroup) ordering(acq_rel)",
     ],
 )
 

@@ -466,7 +466,7 @@ check.case public @fp8_finite_storage_zero_scale_mixed_pair_bf16_case {
   %scale = check.generate.fill value(0.0) : tensor<1xf32>
   %output = check.generate.fill value(1.0) : tensor<8xbf16>
   %expected = check.generate.fill value(0.0) : tensor<8xbf16>
-  kernel.launch @fp8_finite_storage_zero_scale_mixed_pair_bf16[](%input, %scale, %output) : [](tensor<8xf8E4M3>, tensor<1xf32>, tensor<8xbf16>)
+  kernel.launch @fp8_finite_storage_zero_scale_mixed_pair_bf16(%input, %scale, %output) : (tensor<8xf8E4M3>, tensor<1xf32>, tensor<8xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<8xbf16>
   check.return
 }
@@ -477,7 +477,7 @@ check.case public @bf8_finite_storage_zero_scale_mixed_pair_bf16_case {
   %scale = check.generate.fill value(0.0) : tensor<1xf32>
   %output = check.generate.fill value(1.0) : tensor<8xbf16>
   %expected = check.generate.fill value(0.0) : tensor<8xbf16>
-  kernel.launch @bf8_finite_storage_zero_scale_mixed_pair_bf16[](%input, %scale, %output) : [](tensor<8xf8E5M2>, tensor<1xf32>, tensor<8xbf16>)
+  kernel.launch @bf8_finite_storage_zero_scale_mixed_pair_bf16(%input, %scale, %output) : (tensor<8xf8E5M2>, tensor<1xf32>, tensor<8xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<8xbf16>
   check.return
 }

@@ -165,7 +165,7 @@ func.def @allows_static_disjoint_pending_async_destinations(%input: buffer) {
   %global = buffer.assume.memory_space<global> %input : buffer
   %source0 = buffer.view %global[%base] : buffer -> view<16xi8, #dense>
   %source1 = buffer.view %global[%adjacent_base] : buffer -> view<16xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest0 = buffer.view %scratch[%base] : buffer -> view<16xi8, #dense>
   %dest1 = buffer.view %scratch[%adjacent_base] : buffer -> view<16xi8, #dense>
   %copy0 = kernel.async.copy %source0 to %dest0 {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
@@ -184,7 +184,7 @@ func.def @rejects_overlapping_pending_async_destinations(%input: buffer) {
   %bytes = index.constant 64 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%base] : buffer -> view<16xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest0 = buffer.view %scratch[%base] : buffer -> view<16xi8, #dense>
   %dest1 = buffer.view %scratch[%base] : buffer -> view<16xi8, #dense>
   %copy0 = kernel.async.copy %source to %dest0 {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
@@ -204,7 +204,7 @@ func.def @rejects_unknown_same_root_pending_async_overlap(%input: buffer, %dest_
   %bytes = index.constant 64 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%base] : buffer -> view<16xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest0 = buffer.view %scratch[%base] : buffer -> view<16xi8, #dense>
   %dest1 = buffer.view %scratch[%dest_offset] : buffer -> view<16xi8, #dense>
   %copy0 = kernel.async.copy %source to %dest0 {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
@@ -224,7 +224,7 @@ func.def @rejects_destination_overwrite_before_wait(%input: buffer) {
   %bytes = index.constant 64 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%base] : buffer -> view<16xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<16xi8, #dense>
   %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
@@ -242,7 +242,7 @@ func.def @rejects_destination_read_before_wait(%input: buffer) {
   %bytes = index.constant 64 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%base] : buffer -> view<16xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<16xi8, #dense>
   %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
@@ -260,7 +260,7 @@ func.def @rejects_source_overwrite_between_issue_and_group(%input: buffer) {
   %bytes = index.constant 64 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%base] : buffer -> view<16xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<16xi8, #dense>
   %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
   %value = scalar.constant 1 : i8
@@ -278,7 +278,7 @@ func.def @rejects_source_overwrite_between_group_and_wait(%input: buffer) {
   %bytes = index.constant 64 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%base] : buffer -> view<16xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<16xi8, #dense>
   %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
@@ -298,7 +298,7 @@ func.def @rejects_potentially_aliasing_source_write(%input: buffer, %other_input
   %other_global = buffer.assume.memory_space<global> %other_input : buffer
   %source = buffer.view %global[%base] : buffer -> view<16xi8, #dense>
   %other = buffer.view %other_global[%base] : buffer -> view<16xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<16xi8, #dense>
   %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
@@ -319,7 +319,7 @@ func.def @allows_noalias_source_write(%input: buffer, %other_input: buffer) {
   %other_global = buffer.assume.memory_space<global> %other_unique : buffer
   %source = buffer.view %global[%base] : buffer -> view<16xi8, #dense>
   %other = buffer.view %other_global[%base] : buffer -> view<16xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<16xi8, #dense>
   %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
@@ -338,7 +338,7 @@ func.def @allows_disjoint_source_write_before_wait(%input: buffer) {
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%base] : buffer -> view<16xi8, #dense>
   %other = buffer.view %global[%adjacent_base] : buffer -> view<16xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<16xi8, #dense>
   %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
@@ -355,7 +355,7 @@ func.def @allows_source_write_after_wait(%input: buffer) {
   %bytes = index.constant 64 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%base] : buffer -> view<16xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<16xi8, #dense>
   %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
@@ -374,7 +374,7 @@ func.def @rejects_reordered_transfer_group(%input: buffer) {
   %global = buffer.assume.memory_space<global> %input : buffer
   %source0 = buffer.view %global[%base] : buffer -> view<16xi8, #dense>
   %source1 = buffer.view %global[%adjacent_base] : buffer -> view<16xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest0 = buffer.view %scratch[%base] : buffer -> view<16xi8, #dense>
   %dest1 = buffer.view %scratch[%adjacent_base] : buffer -> view<16xi8, #dense>
   %copy0 = kernel.async.copy %source0 to %dest0 {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
@@ -392,7 +392,7 @@ func.def @rejects_wait_between_transfer_and_group(%input: buffer) {
   %bytes = index.constant 64 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%base] : buffer -> view<16xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<16xi8, #dense>
   %older = kernel.async.group -> kernel.async.group
   // ERROR@+1: LOWERING/039 {op_name="kernel.async.copy", phase_name="kernel-async-legality"}
@@ -410,7 +410,7 @@ func.def @rejects_transfer_token_escape(%input: buffer) {
   %bytes = index.constant 64 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%base] : buffer -> view<16xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<16xi8, #dense>
   // ERROR@+1: LOWERING/040 {op_name="kernel.async.copy", phase_name="kernel-async-legality"}
   %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
@@ -430,7 +430,7 @@ kernel.def @allows_cluster_uniform_control_and_corresponding_lane_addresses() {
   %bytes = index.constant 1024 : offset
   %participants = scalar.constant 3 : i32
   %global = buffer.assume.memory_space<global> %input : buffer
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %workgroup = kernel.workgroup.id<x> : index
   %lane = kernel.workitem.id<x> : index
   %workgroup_offset = index.cast %workgroup : index to offset
@@ -458,7 +458,7 @@ kernel.def @allows_four_participant_cluster_and_cluster_uniform_addresses() {
   %bytes = index.constant 1024 : offset
   %participants = scalar.constant 15 : i32
   %global = buffer.assume.memory_space<global> %input : buffer
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %cluster_x = kernel.cluster.id<x> : index
   %cluster_y = kernel.cluster.id<y> : index
   %cluster_x_offset = index.cast %cluster_x : index to offset
@@ -485,7 +485,7 @@ kernel.def @rejects_cluster_gather_without_static_cluster() {
   %participants = scalar.constant 1 : i32
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%base] : buffer -> view<4xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<4xi8, #dense>
   // ERROR@+1: LOWERING/024 {op_name="kernel.async.cluster.gather", phase_name="kernel-async-legality", rejection_bits="256"}
   %copy = kernel.async.cluster.gather %source to %dest using %participants {cache_scope = cu, cache_temporal = regular} : view<4xi8, #dense> to view<4xi8, #dense>, i32 -> kernel.async.token
@@ -506,7 +506,7 @@ kernel.def @rejects_inexact_cluster_participant_set() {
   %bytes = index.constant 64 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%base] : buffer -> view<4xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<4xi8, #dense>
   // ERROR@+1: LOWERING/024 {op_name="kernel.async.cluster.gather", phase_name="kernel-async-legality", rejection_bits="512"}
   %copy = kernel.async.cluster.gather %source to %dest using %participants {cache_scope = cu, cache_temporal = regular} : view<4xi8, #dense> to view<4xi8, #dense>, i32 -> kernel.async.token
@@ -528,7 +528,7 @@ kernel.def @rejects_omitted_cluster_participant() {
   %participants = scalar.constant 1 : i32
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%base] : buffer -> view<4xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<4xi8, #dense>
   // ERROR@+1: LOWERING/024 {op_name="kernel.async.cluster.gather", phase_name="kernel-async-legality", rejection_bits="512"}
   %copy = kernel.async.cluster.gather %source to %dest using %participants {cache_scope = cu, cache_temporal = regular} : view<4xi8, #dense> to view<4xi8, #dense>, i32 -> kernel.async.token
@@ -550,7 +550,7 @@ kernel.def @rejects_target_control_bits_in_cluster_participants() {
   %participants_with_m0_control = scalar.constant 65539 : i32
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%base] : buffer -> view<4xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<4xi8, #dense>
   // ERROR@+1: LOWERING/024 {op_name="kernel.async.cluster.gather", phase_name="kernel-async-legality", rejection_bits="512"}
   %copy = kernel.async.cluster.gather %source to %dest using %participants_with_m0_control {cache_scope = cu, cache_temporal = regular} : view<4xi8, #dense> to view<4xi8, #dense>, i32 -> kernel.async.token
@@ -573,7 +573,7 @@ kernel.def @rejects_workgroup_varying_cluster_control() {
   %participants = scalar.constant 3 : i32
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%base] : buffer -> view<4xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<4xi8, #dense>
   %cluster_workgroup = kernel.cluster.workgroup.id<y> : index
   %is_first = index.cmp eq, %cluster_workgroup, %first_cluster_workgroup : index
@@ -599,7 +599,7 @@ kernel.def @allows_cluster_uniform_cfg_control() {
   %participants = scalar.constant 3 : i32
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%base] : buffer -> view<4xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<4xi8, #dense>
   cfg.cond_br %enabled, ^enabled_arm, ^disabled_arm
 ^enabled_arm:
@@ -627,7 +627,7 @@ kernel.def @rejects_workgroup_varying_cluster_cfg_control() {
   %participants = scalar.constant 3 : i32
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%base] : buffer -> view<4xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<4xi8, #dense>
   %cluster_workgroup = kernel.cluster.workgroup.id<y> : index
   %is_first = index.cmp eq, %cluster_workgroup, %first_cluster_workgroup : index
@@ -659,7 +659,7 @@ kernel.def @rejects_workgroup_varying_cluster_source_address() {
   %cluster_workgroup = kernel.cluster.workgroup.id<y> : index
   %cluster_offset = index.cast %cluster_workgroup : index to offset
   %source = buffer.view %global[%cluster_offset] : buffer -> view<4xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<4xi8, #dense>
   // ERROR@+1: LOWERING/024 {op_name="kernel.async.cluster.gather", phase_name="kernel-async-legality", rejection_bits="2048"}
   %copy = kernel.async.cluster.gather %source to %dest using %participants {cache_scope = cu, cache_temporal = regular} : view<4xi8, #dense> to view<4xi8, #dense>, i32 -> kernel.async.token
@@ -681,7 +681,7 @@ kernel.def @rejects_workgroup_varying_cluster_dest_address() {
   %participants = scalar.constant 3 : i32
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%base] : buffer -> view<4xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %cluster_workgroup = kernel.cluster.workgroup.id<y> : index
   %cluster_offset = index.cast %cluster_workgroup : index to offset
   %dest = buffer.view %scratch[%cluster_offset] : buffer -> view<4xi8, #dense>
@@ -705,7 +705,7 @@ kernel.def @rejects_dynamic_cluster_predicate() {
   %participants = scalar.constant 3 : i32
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%base] : buffer -> view<4xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<4xi8, #dense>
   // ERROR@+1: LOWERING/024 {op_name="kernel.async.cluster.gather.mask", phase_name="kernel-async-legality", rejection_bits="8192"}
   %copy = kernel.async.cluster.gather.mask %source to %dest using %participants, %predicate {cache_scope = cu, cache_temporal = regular} : view<4xi8, #dense> to view<4xi8, #dense>, i32, i1 -> kernel.async.token

@@ -14,7 +14,7 @@ kernel.def target(@target) @tensor_memory_requires_gfx125x() {
   %descriptor = kernel.tensor.lds.descriptor dgroups(%d0, %d1) : vector<4xi32>, vector<8xi32> -> kernel.tensor.lds.descriptor
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%buffer_base] : buffer -> view<64x64xf32, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 256, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(256) %bytes : buffer
   %dest = buffer.view %scratch[%buffer_base] : buffer -> view<64x64xf32, #dense>
   // ERROR@+1: AMDGPU/023 {constraint_key="tensor_memory.provider_required"}
   %copy = kernel.async.tensor.load.to.lds %source to %dest using %descriptor {cache_scope = cu, cache_temporal = regular} : view<64x64xf32, #dense> to view<64x64xf32, #dense>, kernel.tensor.lds.descriptor -> kernel.async.token
@@ -41,7 +41,7 @@ kernel.def target(@target) @tensor_dgroups_must_be_subgroup_uniform() {
   %descriptor = kernel.tensor.lds.descriptor dgroups(%d0, %d1) : vector<4xi32>, vector<8xi32> -> kernel.tensor.lds.descriptor
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%buffer_base] : buffer -> view<64x64xf32, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 256, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(256) %bytes : buffer
   %dest = buffer.view %scratch[%buffer_base] : buffer -> view<64x64xf32, #dense>
   // ERROR@+1: AMDGPU/023 {constraint_key="tensor_memory.dgroup_uniformity"}
   %copy = kernel.async.tensor.load.to.lds %source to %dest using %descriptor {cache_scope = cu, cache_temporal = regular} : view<64x64xf32, #dense> to view<64x64xf32, #dense>, kernel.tensor.lds.descriptor -> kernel.async.token

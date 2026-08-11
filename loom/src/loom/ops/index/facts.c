@@ -139,26 +139,9 @@ iree_status_t loom_index_assume_facts(loom_fact_context_t* context,
   loom_attribute_t pred_attr = loom_op_attrs(op)[0];
   const loom_predicate_t* predicates = pred_attr.predicate_list;
   uint16_t predicate_count = pred_attr.count;
-  for (uint16_t predicate_ordinal = 0; predicate_ordinal < predicate_count;
-       ++predicate_ordinal) {
-    const loom_predicate_t* predicate = &predicates[predicate_ordinal];
-    if (predicate->arg_tags[0] != LOOM_PRED_ARG_VALUE) continue;
-    loom_value_slice_t values = loom_index_assume_values(op);
-    loom_value_id_t target_id = (loom_value_id_t)predicate->args[0];
-    uint16_t target = 0;
-    bool found = false;
-    for (uint16_t i = 0; i < values.count; ++i) {
-      if (values.values[i] == target_id) {
-        target = i;
-        found = true;
-        break;
-      }
-    }
-    if (!found) continue;
-    if (target < fact_count) {
-      loom_value_facts_apply_predicate(&result_facts[target], predicate);
-    }
-  }
+  loom_value_slice_t values = loom_index_assume_values(op);
+  loom_value_facts_apply_alias_predicates(values.values, fact_count, predicates,
+                                          predicate_count, result_facts);
   return iree_ok_status();
 }
 

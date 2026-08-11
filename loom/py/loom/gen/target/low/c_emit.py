@@ -247,6 +247,7 @@ def _descriptor_row_lines(
             f".operand_start = {descriptor_rows[i]['operand_start']},",
             f".operand_count = {descriptor_rows[i]['operand_count']},",
             f".result_count = {descriptor_rows[i]['result_count']},",
+            f".minimum_packet_operand_count = {descriptor_rows[i]['minimum_packet_operand_count']},",
             f".immediate_start = {descriptor_rows[i]['immediate_start']},",
             f".immediate_count = {descriptor_rows[i]['immediate_count']},",
             f".effect_start = {descriptor_rows[i]['effect_start']},",
@@ -322,7 +323,9 @@ def _asm_form_row_lines(
             f".result_value_type_start = {asm_form.result_value_type_start if asm_form.result_value_type_start is not None else 'LOOM_LOW_ASM_RESULT_VALUE_TYPE_START_NONE'},",
             f".result_operand_index_count = {len(asm_form.result_indices)},",
             f".operand_index_start = {asm_form.operand_index_start},",
+            f".operand_segment_start = {asm_form.operand_segment_start},",
             f".operand_index_count = {len(asm_form.operand_indices)},",
+            f".operand_segment_count = {len(asm_form.operand_segments)},",
             f".immediate_start = {asm_form.immediate_start},",
             f".immediate_count = {len(asm_form.immediates)},",
             f".native_assembly_value_start = {asm_form.native_assembly_value_start},",
@@ -773,6 +776,20 @@ def emit_source_for_views(
         )
     _emit_array(
         lines,
+        "loom_low_asm_operand_segment_t",
+        spec.c_table_prefix,
+        "AsmOperandSegments",
+        [
+            [
+                f".delimiter = {segment.delimiter.c_name},",
+                f".operand_count = {segment.operand_count},",
+                f".flags = {'LOOM_LOW_ASM_OPERAND_SEGMENT_FLAG_VARIADIC' if segment.has_variadic_operand else '0'},",
+            ]
+            for segment in compiled.asm_operand_segments
+        ],
+    )
+    _emit_array(
+        lines,
         "loom_low_asm_result_value_type_t",
         spec.c_table_prefix,
         "AsmResultValueTypes",
@@ -844,6 +861,7 @@ def emit_source_for_views(
         "pressure_deltas": "pressure_delta_count",
         "asm_forms": "asm_form_count",
         "asm_operand_indices": "asm_operand_index_count",
+        "asm_operand_segments": "asm_operand_segment_count",
         "asm_result_value_types": "asm_result_value_type_count",
         "asm_immediates": "asm_immediate_count",
         "native_asm_values": "native_asm_value_count",
@@ -913,6 +931,7 @@ def emit_source_for_views(
             view_lines.append(f"    .asm_forms = k{asm_form_table_prefix}AsmForms,")
             view_lines.append(f"    .asm_form_count = IREE_ARRAYSIZE(k{asm_form_table_prefix}AsmForms),")
             append_optional_table("asm_operand_indices", "AsmOperandIndices", view_lines)
+            append_optional_table("asm_operand_segments", "AsmOperandSegments", view_lines)
             append_optional_table(
                 "asm_result_value_types",
                 "AsmResultValueTypes",

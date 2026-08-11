@@ -12,7 +12,7 @@ kernel.def target(@target) @cluster_gather_b32() {
   %participants = scalar.constant 3 : i32
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%buffer_base] : buffer -> view<4xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest = buffer.view %scratch[%buffer_base] : buffer -> view<4xi8, #dense>
   %copy = kernel.async.cluster.gather %source to %dest using %participants {cache_scope = device, cache_temporal = regular} : view<4xi8, #dense> to view<4xi8, #dense>, i32 -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
@@ -49,9 +49,9 @@ kernel.def target(@target) @cluster_gather_packet_widths() {
   %source8 = buffer.view %global[%buffer_base] : buffer -> view<1xi8, #dense>
   %source64 = buffer.view %global[%offset16] : buffer -> view<8xi8, #dense>
   %source128 = buffer.view %global[%offset32] : buffer -> view<16xi8, #dense>
-  %scratch8 = buffer.alloca %bytes16 {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch64 = buffer.alloca %bytes16 {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch128 = buffer.alloca %bytes16 {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch8 = buffer.alloca<workgroup> align(16) %bytes16 : buffer
+  %scratch64 = buffer.alloca<workgroup> align(16) %bytes16 : buffer
+  %scratch128 = buffer.alloca<workgroup> align(16) %bytes16 : buffer
   %dest8 = buffer.view %scratch8[%buffer_base] : buffer -> view<1xi8, #dense>
   %dest64 = buffer.view %scratch64[%buffer_base] : buffer -> view<8xi8, #dense>
   %dest128 = buffer.view %scratch128[%buffer_base] : buffer -> view<16xi8, #dense>
@@ -100,7 +100,7 @@ kernel.def target(@target) @cluster_gather_dynamic_addresses() {
   %lane_byte_offset = index.cast %lane_byte_index : index to offset
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%lane_byte_offset] : buffer -> view<4xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest = buffer.view %scratch[%lane_byte_offset] : buffer -> view<4xi8, #dense>
   %copy = kernel.async.cluster.gather %source to %dest using %participants {cache_scope = device, cache_temporal = regular} : view<4xi8, #dense> to view<4xi8, #dense>, i32 -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
@@ -134,11 +134,11 @@ kernel.def target(@target) @cluster_gather_two_stage_wait_depth() {
   %participants = scalar.constant 3 : i32
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%buffer_base] : buffer -> view<16xi8, #dense>
-  %scratch0 = buffer.alloca %bytes16 {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch1 = buffer.alloca %bytes16 {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch2 = buffer.alloca %bytes16 {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch3 = buffer.alloca %bytes16 {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch4 = buffer.alloca %bytes16 {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch0 = buffer.alloca<workgroup> align(16) %bytes16 : buffer
+  %scratch1 = buffer.alloca<workgroup> align(16) %bytes16 : buffer
+  %scratch2 = buffer.alloca<workgroup> align(16) %bytes16 : buffer
+  %scratch3 = buffer.alloca<workgroup> align(16) %bytes16 : buffer
+  %scratch4 = buffer.alloca<workgroup> align(16) %bytes16 : buffer
   %dest0 = buffer.view %scratch0[%buffer_base] : buffer -> view<16xi8, #dense>
   %dest1 = buffer.view %scratch1[%buffer_base] : buffer -> view<16xi8, #dense>
   %dest2 = buffer.view %scratch2[%buffer_base] : buffer -> view<16xi8, #dense>
@@ -211,7 +211,7 @@ kernel.def target(@target) @cluster_gather_same_root_disjoint_slots() {
   %offset3 = index.cast %slot3 : index to offset
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%buffer_base] : buffer -> view<16xi8, #dense>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest0 = buffer.view %scratch[%offset0] : buffer -> view<16xi8, #dense>
   %dest1 = buffer.view %scratch[%offset1] : buffer -> view<16xi8, #dense>
   %dest2 = buffer.view %scratch[%offset2] : buffer -> view<16xi8, #dense>
@@ -267,8 +267,8 @@ kernel.def target(@target) @cluster_gather_disjoint_workgroup_store() {
   %global_payload = buffer.assume.memory_space<global> %payload : buffer
   %source = buffer.view %global_input[%lane_byte_offset] : buffer -> view<16xi8, #dense>
   %payload_view = buffer.view %global_payload[%lane_byte_offset] : buffer -> view<4xi32, #dense>
-  %lhs_scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %rhs_scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %lhs_scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %rhs_scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest = buffer.view %lhs_scratch[%lane_byte_offset] : buffer -> view<16xi8, #dense>
   %rhs_view = buffer.view %rhs_scratch[%lane_byte_offset] : buffer -> view<4xi32, #dense>
   %copy = kernel.async.cluster.gather %source to %dest using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8, #dense> to view<16xi8, #dense>, i32 -> kernel.async.token

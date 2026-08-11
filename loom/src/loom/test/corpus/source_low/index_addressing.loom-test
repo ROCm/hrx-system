@@ -276,7 +276,7 @@ kernel.def @workitem_y_lds_uses_explicit_vaddr() {
   %scratch_base = index.constant 0 : offset
   %output_base = index.constant 0 : offset
   %bytes = index.constant 256 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32, #dense>
   %output_view = buffer.view %output[%output_base] : buffer -> view<64xi32, #dense>
   %value = vector.constant 7 : vector<1xi32>

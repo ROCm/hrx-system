@@ -383,24 +383,6 @@ ERR_TARGET_027 = ErrorDef(
     ),
 )
 
-# ERR_TARGET_028: Function predicates reached target-low lowering.
-ERR_TARGET_028 = ErrorDef(
-    domain=ErrorDomain.TARGET,
-    code=28,
-    severity=Severity.ERROR,
-    summary="Function predicates reached target-low lowering.",
-    message=(
-        "target '{target_key}' export '{export_name}' config '{config_key}' "
-        "rejected '{op_name}' in '@{function_name}': {predicate_count} "
-        "function predicate(s) require value remapping before target-low "
-        "lowering"
-    ),
-    params=(
-        *_TARGET_CONTEXT_PARAMS,
-        ErrorParam("predicate_count", ParamKind.U32),
-    ),
-)
-
 # ERR_TARGET_029: Tied function results reached target-low lowering.
 ERR_TARGET_029 = ErrorDef(
     domain=ErrorDomain.TARGET,
@@ -1307,7 +1289,6 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_025,
     ERR_TARGET_026,
     ERR_TARGET_027,
-    ERR_TARGET_028,
     ERR_TARGET_029,
     ERR_TARGET_030,
     ERR_TARGET_031,

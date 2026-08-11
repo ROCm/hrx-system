@@ -470,10 +470,12 @@ static bool loom_testbench_plan_semantic_call_invocation(
     return false;
   }
 
-  const loom_call_like_vtable_t* call_like = vtable->call_like;
+  loom_call_like_t call = loom_call_like_cast(module, (loom_op_t*)op);
+  const loom_call_like_vtable_t* call_like = call.vtable;
+  loom_value_slice_t inputs = loom_call_like_operands(call);
+  loom_value_slice_t results = loom_call_like_results(call);
   if (call_like->callee_attr_index >= op->attribute_count ||
-      call_like->operand_offset > op->operand_count ||
-      call_like->result_offset > op->result_count) {
+      inputs.count > op->operand_count || results.count > op->result_count) {
     return false;
   }
 
@@ -487,12 +489,10 @@ static bool loom_testbench_plan_semantic_call_invocation(
   out_invocation->provider = iree_string_view_empty();
   out_invocation->attrs = loom_named_attr_slice_empty();
   out_invocation->execution_epoch = LOOM_TESTBENCH_EXECUTION_EPOCH_INVALID;
-  out_invocation->input_value_ids =
-      loom_op_const_operands(op) + call_like->operand_offset;
-  out_invocation->input_count = op->operand_count - call_like->operand_offset;
-  out_invocation->result_value_ids =
-      loom_op_const_results(op) + call_like->result_offset;
-  out_invocation->result_count = op->result_count - call_like->result_offset;
+  out_invocation->input_value_ids = inputs.values;
+  out_invocation->input_count = inputs.count;
+  out_invocation->result_value_ids = results.values;
+  out_invocation->result_count = results.count;
   return loom_symbol_ref_is_valid(out_invocation->callee_ref) &&
          loom_testbench_value_ids_are_in_range(module,
                                                out_invocation->input_value_ids,

@@ -4,7 +4,7 @@ func.def @forward_after_unrolled_private_init(%output: buffer, %lhs: i64, %rhs: 
   %base = index.constant 0 : offset
   %output_view = buffer.view %output[%base] : buffer -> view<1xi64, #dense>
   %slot_bytes = index.constant 16 : offset
-  %slot_buffer = buffer.alloca %slot_bytes {base_alignment = 8, memory_space = private} : buffer
+  %slot_buffer = buffer.alloca<private> align(8) %slot_bytes : buffer
   %slots = buffer.view %slot_buffer[%base] : buffer -> view<2xi64, #dense>
   %start = index.constant 0 : index
   %end = index.constant 2 : index

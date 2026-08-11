@@ -85,7 +85,7 @@ global.variable @bad_flag : i1 = 2
 
 // Read-only artifact alignment must be either absent or a positive power of two.
 // ERROR@+1: STRUCTURE/014 "alignment" "3" "positive power-of-two byte alignment"
-global.rodata.def @bad_rodata_alignment = bytes("00"), align 3
+global.rodata.def @bad_rodata_alignment = align(3) bytes("00")
 
 // ====
 

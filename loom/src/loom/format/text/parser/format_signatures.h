@@ -31,6 +31,7 @@ iree_status_t loom_parse_format_block_args(loom_parser_t* parser);
 iree_status_t loom_parse_format_func_args(loom_parser_t* parser,
                                           const loom_op_vtable_t* vtable,
                                           const loom_format_element_t* element,
+                                          uint16_t pending_func_arg_base,
                                           loom_parsed_op_t* parsed);
 
 #ifdef __cplusplus

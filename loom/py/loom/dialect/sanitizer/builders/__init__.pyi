@@ -63,8 +63,8 @@ class SanitizerBuilder(DialectBuilder):
         self,
         *,
         memory_space: str,
-        ordering: str,
         scope: str,
+        ordering: str,
         location_id: int | None = ...,
     ) -> None: ...
     def accesses(

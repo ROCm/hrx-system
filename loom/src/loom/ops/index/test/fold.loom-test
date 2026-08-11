@@ -52,6 +52,46 @@ func.def @assume_refines_address_facts(%n: index, %base: offset) -> (i64, i64) {
 
 // ====
 
+// Value-valued assumptions combine the incoming intervals of both aliases.
+// This lets a bounded workload constrain a derived coordinate without
+// repeating the workload's literal range on the coordinate.
+func.def @assume_relational_value_bounds(%lhs0: index, %rhs0: index) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) {
+  %lhs = index.assume %lhs0 [range(%lhs0, 32, 4096)] : index
+  %rhs = index.assume %rhs0 [range(%rhs0, 1, 2048)] : index
+  %eq_lhs, %eq_rhs = index.assume %lhs, %rhs [eq(%lhs, %rhs)] : index, index
+  %lt_lhs, %lt_rhs = index.assume %lhs, %rhs [lt(%lhs, %rhs)] : index, index
+  %le_lhs, %le_rhs = index.assume %lhs, %rhs [le(%lhs, %rhs)] : index, index
+  %gt_rhs, %gt_lhs = index.assume %rhs, %lhs [gt(%rhs, %lhs)] : index, index
+  %ge_rhs, %ge_lhs = index.assume %rhs, %lhs [ge(%rhs, %lhs)] : index, index
+  %eq_lhs_lo = test.fact_range_lo %eq_lhs : index -> i64
+  %eq_lhs_hi = test.fact_range_hi %eq_lhs : index -> i64
+  %lt_lhs_hi = test.fact_range_hi %lt_lhs : index -> i64
+  %lt_rhs_lo = test.fact_range_lo %lt_rhs : index -> i64
+  %le_lhs_hi = test.fact_range_hi %le_lhs : index -> i64
+  %le_rhs_lo = test.fact_range_lo %le_rhs : index -> i64
+  %gt_rhs_lo = test.fact_range_lo %gt_rhs : index -> i64
+  %gt_lhs_hi = test.fact_range_hi %gt_lhs : index -> i64
+  %ge_rhs_lo = test.fact_range_lo %ge_rhs : index -> i64
+  %ge_lhs_hi = test.fact_range_hi %ge_lhs : index -> i64
+  func.return %eq_lhs_lo, %eq_lhs_hi, %lt_lhs_hi, %lt_rhs_lo, %le_lhs_hi, %le_rhs_lo, %gt_rhs_lo, %gt_lhs_hi, %ge_rhs_lo, %ge_lhs_hi : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64
+}
+// ----
+func.def @assume_relational_value_bounds(%lhs0: index, %rhs0: index) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) {
+  %eq_lhs_lo = scalar.constant 32 : i64
+  %eq_lhs_hi = scalar.constant 2048 : i64
+  %lt_lhs_hi = scalar.constant 2047 : i64
+  %lt_rhs_lo = scalar.constant 33 : i64
+  %le_lhs_hi = scalar.constant 2048 : i64
+  %le_rhs_lo = scalar.constant 32 : i64
+  %gt_rhs_lo = scalar.constant 33 : i64
+  %gt_lhs_hi = scalar.constant 2047 : i64
+  %ge_rhs_lo = scalar.constant 32 : i64
+  %ge_lhs_hi = scalar.constant 2048 : i64
+  func.return %eq_lhs_lo, %eq_lhs_hi, %lt_lhs_hi, %lt_rhs_lo, %le_lhs_hi, %le_rhs_lo, %gt_rhs_lo, %gt_lhs_hi, %ge_rhs_lo, %ge_lhs_hi : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64
+}
+
+// ====
+
 // SSA values referenced as dynamic shape extents are non-negative by type
 // semantics. This applies to ordinary block arguments with shaped types.
 func.def @block_arg_shape_extent_non_negative(%n: index, %tile: tile<[%n]xf32>) -> (i1) {

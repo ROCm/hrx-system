@@ -6,6 +6,8 @@
 
 // Fact implementations for the encoding dialect.
 
+#include "loom/ops/encoding/facts.h"
+
 #include <stdint.h>
 
 #include "loom/ir/module.h"
@@ -42,6 +44,31 @@ static iree_status_t loom_encoding_facts_make_summary(
 static bool loom_encoding_define_has_dynamic_params(
     const loom_encoding_define_param_view_t* params) {
   return params->dynamic_values.count != 0 || params->dynamic_names.count != 0;
+}
+
+iree_status_t loom_encoding_static_value_facts(loom_fact_context_t* context,
+                                               const loom_module_t* module,
+                                               uint16_t encoding_id,
+                                               loom_type_t result_type,
+                                               loom_value_facts_t* out_facts) {
+  const loom_encoding_t* spec = loom_module_encoding(module, encoding_id);
+  loom_encoding_role_t role = loom_type_is_encoding(result_type)
+                                  ? loom_type_encoding_role(result_type)
+                                  : LOOM_ENCODING_ROLE_UNKNOWN;
+  if (role == LOOM_ENCODING_ROLE_UNKNOWN) {
+    role = loom_encoding_static_role(module, spec);
+  }
+
+  loom_value_facts_t static_strides[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK] = {
+      0};
+  loom_encoding_family_summary_t family_summary;
+  loom_encoding_summarize_verified_static(module, encoding_id, static_strides,
+                                          IREE_ARRAYSIZE(static_strides),
+                                          &family_summary);
+  family_summary.encoding.role = role;
+  family_summary.encoding.static_spec_encoding_id = encoding_id;
+  return loom_value_facts_make_encoding_summary(
+      context, family_summary.encoding, out_facts);
 }
 
 iree_status_t loom_encoding_layout_dense_facts(
@@ -163,33 +190,10 @@ iree_status_t loom_encoding_assume_spec_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts) {
-  uint16_t spec_id = loom_encoding_assume_spec_spec(op);
-  const loom_encoding_t* spec = loom_module_encoding(module, spec_id);
-  if (!spec) {
-    result_facts[0] = loom_value_facts_unknown();
-    return iree_ok_status();
-  }
-
-  loom_type_t result_type =
-      loom_module_value_type(module, loom_encoding_assume_spec_result(op));
-  loom_encoding_role_t role = loom_type_is_encoding(result_type)
-                                  ? loom_type_encoding_role(result_type)
-                                  : LOOM_ENCODING_ROLE_UNKNOWN;
-  if (role == LOOM_ENCODING_ROLE_UNKNOWN) {
-    role = loom_encoding_static_role(module, spec);
-  }
-
-  loom_value_facts_t static_strides[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK] = {
-      0};
-  loom_encoding_family_summary_t family_summary;
-  loom_encoding_summarize_verified_static(module, spec_id, static_strides,
-                                          IREE_ARRAYSIZE(static_strides),
-                                          &family_summary);
-
-  family_summary.encoding.role = role;
-  family_summary.encoding.static_spec_encoding_id = spec_id;
-  return loom_value_facts_make_encoding_summary(
-      context, family_summary.encoding, &result_facts[0]);
+  return loom_encoding_static_value_facts(
+      context, module, loom_encoding_assume_spec_spec(op),
+      loom_module_value_type(module, loom_encoding_assume_spec_result(op)),
+      &result_facts[0]);
 }
 
 iree_status_t loom_encoding_isa_facts(loom_fact_context_t* context,

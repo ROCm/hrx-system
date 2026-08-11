@@ -26,13 +26,13 @@ kernel.def @workgroup_rank_sort_f32_i32() {
   %scores_noalias, %sorted_ids_noalias = buffer.assume.noalias %scores, %sorted_ids : buffer, buffer
   %scores_view = buffer.view %scores_noalias[%base] : buffer -> view<8xf32, #dense>
   %sorted_ids_view = buffer.view %sorted_ids_noalias[%base] : buffer -> view<8xi32, #dense>
-  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
   %scratch_view = buffer.view %scratch[%base] : buffer -> view<8xf32, #dense>
 
   %score = view.load %scores_view[%lane] : view<8xf32, #dense> -> f32
   view.store %score, %scratch_view[%lane] : f32, view<8xf32, #dense>
 
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 
   %rank = scf.for %other = [%peer_begin to %peer_end step %peer_step](%acc = %initial_rank : i32) -> (i32) {
     %other_score = view.load %scratch_view[%other] : view<8xf32, #dense> -> f32
@@ -60,7 +60,7 @@ check.case public @workgroup_rank_sort_distinct_case {
   %scores = check.generate.iota offset(0.0) step(1.0) : tensor<8xf32>
   %sorted_ids = check.generate.fill value(-1) : tensor<8xi32>
   %expected_ids = check.generate.iota offset(7) step(-1) : tensor<8xi32>
-  kernel.launch @workgroup_rank_sort_f32_i32[](%scores, %sorted_ids) : [](tensor<8xf32>, tensor<8xi32>)
+  kernel.launch @workgroup_rank_sort_f32_i32(%scores, %sorted_ids) : (tensor<8xf32>, tensor<8xi32>)
   check.expect.equal actual(%sorted_ids) expected(%expected_ids) : tensor<8xi32>
   check.return
 }
@@ -69,7 +69,7 @@ check.case public @workgroup_rank_sort_tie_case {
   %scores = check.generate.fill value(3.0) : tensor<8xf32>
   %sorted_ids = check.generate.fill value(-1) : tensor<8xi32>
   %expected_ids = check.generate.iota offset(0) step(1) : tensor<8xi32>
-  kernel.launch @workgroup_rank_sort_f32_i32[](%scores, %sorted_ids) : [](tensor<8xf32>, tensor<8xi32>)
+  kernel.launch @workgroup_rank_sort_f32_i32(%scores, %sorted_ids) : (tensor<8xf32>, tensor<8xi32>)
   check.expect.equal actual(%sorted_ids) expected(%expected_ids) : tensor<8xi32>
   check.return
 }

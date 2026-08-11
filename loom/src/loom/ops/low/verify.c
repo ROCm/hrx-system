@@ -1096,6 +1096,7 @@ static bool loom_low_resource_kind_is_known(uint8_t kind) {
     case LOOM_LOW_RESOURCE_IMPORT_KIND_VM_STATE:
     case LOOM_LOW_RESOURCE_IMPORT_KIND_VM_IMPORT:
     case LOOM_LOW_RESOURCE_IMPORT_KIND_HAL_BINDING:
+    case LOOM_LOW_RESOURCE_IMPORT_KIND_COMMAND_INPUT:
       return true;
     default:
       return false;
@@ -1112,6 +1113,8 @@ static iree_string_view_t loom_low_resource_import_kind_name(uint8_t kind) {
       return IREE_SV("vm_import");
     case LOOM_LOW_RESOURCE_IMPORT_KIND_HAL_BINDING:
       return IREE_SV("hal_binding");
+    case LOOM_LOW_RESOURCE_IMPORT_KIND_COMMAND_INPUT:
+      return IREE_SV("command_input");
     default:
       return IREE_SV("unknown");
   }
@@ -1127,6 +1130,8 @@ static bool loom_low_resource_matches_export_abi(uint8_t kind,
       return abi == LOOM_TARGET_ABI_VM_MODULE_FUNCTION;
     case LOOM_LOW_RESOURCE_IMPORT_KIND_HAL_BINDING:
       return abi == LOOM_TARGET_ABI_HAL_KERNEL;
+    case LOOM_LOW_RESOURCE_IMPORT_KIND_COMMAND_INPUT:
+      return abi == LOOM_TARGET_ABI_COMMAND_PROGRAM;
     default:
       return false;
   }
@@ -1141,6 +1146,8 @@ static loom_target_abi_kind_t loom_low_resource_expected_abi(uint8_t kind) {
       return LOOM_TARGET_ABI_VM_MODULE_FUNCTION;
     case LOOM_LOW_RESOURCE_IMPORT_KIND_HAL_BINDING:
       return LOOM_TARGET_ABI_HAL_KERNEL;
+    case LOOM_LOW_RESOURCE_IMPORT_KIND_COMMAND_INPUT:
+      return LOOM_TARGET_ABI_COMMAND_PROGRAM;
     default:
       return LOOM_TARGET_ABI_UNKNOWN;
   }

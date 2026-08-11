@@ -213,7 +213,7 @@ check.case @case_wave64_workgroup_reduce_sub_wave {
   %input = check.generate.iota offset(1.0) step(1.0) : tensor<32xf32>
   %output = check.generate.fill value(-1.0) : tensor<1xf32>
   %expected = check.generate.fill value(528.0) : tensor<1xf32>
-  kernel.launch @wave64_workgroup_reduce_sub_wave[](%input, %output) : [](tensor<32xf32>, tensor<1xf32>)
+  kernel.launch @wave64_workgroup_reduce_sub_wave(%input, %output) : (tensor<32xf32>, tensor<1xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
   check.return
 }
@@ -222,7 +222,7 @@ check.case @case_wave64_workgroup_reduce_full_wave {
   %input = check.generate.iota offset(1.0) step(1.0) : tensor<64xf32>
   %output = check.generate.fill value(-1.0) : tensor<1xf32>
   %expected = check.generate.fill value(2080.0) : tensor<1xf32>
-  kernel.launch @wave64_workgroup_reduce_full_wave[](%input, %output) : [](tensor<64xf32>, tensor<1xf32>)
+  kernel.launch @wave64_workgroup_reduce_full_wave(%input, %output) : (tensor<64xf32>, tensor<1xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
   check.return
 }
@@ -231,7 +231,7 @@ check.case @case_wave64_workgroup_reduce_cross_wave {
   %input = check.generate.iota offset(1.0) step(1.0) : tensor<128xf32>
   %output = check.generate.fill value(-1.0) : tensor<1xf32>
   %expected = check.generate.fill value(8256.0) : tensor<1xf32>
-  kernel.launch @wave64_workgroup_reduce_cross_wave[](%input, %output) : [](tensor<128xf32>, tensor<1xf32>)
+  kernel.launch @wave64_workgroup_reduce_cross_wave(%input, %output) : (tensor<128xf32>, tensor<1xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
   check.return
 }
@@ -240,7 +240,7 @@ check.case @case_wave64_workgroup_reduce_loop_accumulation {
   %input = check.generate.fill value(1.0) : tensor<3072xf32>
   %output = check.generate.fill value(-1.0) : tensor<1xf32>
   %expected = check.generate.fill value(3072.0) : tensor<1xf32>
-  kernel.launch @wave64_workgroup_reduce_loop_accumulation[](%input, %output) : [](tensor<3072xf32>, tensor<1xf32>)
+  kernel.launch @wave64_workgroup_reduce_loop_accumulation(%input, %output) : (tensor<3072xf32>, tensor<1xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
   check.return
 }
@@ -249,7 +249,7 @@ check.case @case_wave64_workgroup_reduce_sparse_loop_accumulation {
   %input = check.generate.fill value(1.0) : tensor<2xf32>
   %output = check.generate.fill value(-1.0) : tensor<1xf32>
   %expected = check.generate.fill value(128.0) : tensor<1xf32>
-  kernel.launch @wave64_workgroup_reduce_sparse_loop_accumulation[](%input, %output) : [](tensor<2xf32>, tensor<1xf32>)
+  kernel.launch @wave64_workgroup_reduce_sparse_loop_accumulation(%input, %output) : (tensor<2xf32>, tensor<1xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
   check.return
 }
@@ -258,7 +258,7 @@ check.case @case_wave64_workgroup_reduce_loop_all_workitems {
   %input = check.generate.fill value(1.0) : tensor<3072xf32>
   %output = check.generate.fill value(-1.0) : tensor<3072xf32>
   %expected = check.generate.fill value(1.0) : tensor<3072xf32>
-  kernel.launch @wave64_workgroup_reduce_loop_all_workitems[](%input, %output) : [](tensor<3072xf32>, tensor<3072xf32>)
+  kernel.launch @wave64_workgroup_reduce_loop_all_workitems(%input, %output) : (tensor<3072xf32>, tensor<3072xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<3072xf32>
   check.return
 }
@@ -271,7 +271,7 @@ check.case @case_wave64_workgroup_reduce_two_rows {
   %bias = check.generate.fill value(1.0) : tensor<2xf32>
   %output = check.generate.fill value(-1.0) : tensor<2xf32>
   %expected = check.generate.iota offset(2081.0) step(-1952.0) : tensor<2xf32>
-  kernel.launch @wave64_workgroup_reduce_two_rows[](%row_count, %fusion_flags, %input0, %input1, %bias, %output) : [](index, i32, tensor<64xf32>, tensor<64xf32>, tensor<2xf32>, tensor<2xf32>)
+  kernel.launch @wave64_workgroup_reduce_two_rows(%row_count, %fusion_flags, %input0, %input1, %bias, %output) : (index, i32, tensor<64xf32>, tensor<64xf32>, tensor<2xf32>, tensor<2xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
   check.return
 }
@@ -284,7 +284,7 @@ check.case @case_wave64_workgroup_reduce_two_rows_tail {
   %bias = check.generate.fill value(1.0) : tensor<2xf32>
   %output = check.generate.fill value(-1.0) : tensor<2xf32>
   %expected = check.generate.iota offset(2081.0) step(-2082.0) : tensor<2xf32>
-  kernel.launch @wave64_workgroup_reduce_two_rows[](%row_count, %fusion_flags, %input0, %input1, %bias, %output) : [](index, i32, tensor<64xf32>, tensor<64xf32>, tensor<2xf32>, tensor<2xf32>)
+  kernel.launch @wave64_workgroup_reduce_two_rows(%row_count, %fusion_flags, %input0, %input1, %bias, %output) : (index, i32, tensor<64xf32>, tensor<64xf32>, tensor<2xf32>, tensor<2xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
   check.return
 }

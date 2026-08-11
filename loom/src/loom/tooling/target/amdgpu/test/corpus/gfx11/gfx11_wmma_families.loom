@@ -148,8 +148,8 @@ check.case public @gfx11_wmma_families_case {
   %f16_expected = check.generate.fill value(16.0) : tensor<16x16xf16>
   %bf16_expected = check.generate.fill value(16.0) : tensor<16x16xbf16>
   %integer_expected = check.generate.fill value(-32) : tensor<16x16xi32>
-  kernel.launch @gfx11_wmma_families_wave32[](%wave32_f32_f16_output, %wave32_f32_bf16_output, %wave32_f16_output, %wave32_bf16_output, %wave32_i8_output, %wave32_i4_output) : [](tensor<16x16xf32>, tensor<16x16xf32>, tensor<16x16xf16>, tensor<16x16xbf16>, tensor<16x16xi32>, tensor<16x16xi32>)
-  kernel.launch @gfx11_wmma_families_wave64[](%wave64_f32_f16_output, %wave64_f32_bf16_output, %wave64_f16_output, %wave64_bf16_output, %wave64_i8_output, %wave64_i4_output) : [](tensor<16x16xf32>, tensor<16x16xf32>, tensor<16x16xf16>, tensor<16x16xbf16>, tensor<16x16xi32>, tensor<16x16xi32>)
+  kernel.launch @gfx11_wmma_families_wave32(%wave32_f32_f16_output, %wave32_f32_bf16_output, %wave32_f16_output, %wave32_bf16_output, %wave32_i8_output, %wave32_i4_output) : (tensor<16x16xf32>, tensor<16x16xf32>, tensor<16x16xf16>, tensor<16x16xbf16>, tensor<16x16xi32>, tensor<16x16xi32>)
+  kernel.launch @gfx11_wmma_families_wave64(%wave64_f32_f16_output, %wave64_f32_bf16_output, %wave64_f16_output, %wave64_bf16_output, %wave64_i8_output, %wave64_i4_output) : (tensor<16x16xf32>, tensor<16x16xf32>, tensor<16x16xf16>, tensor<16x16xbf16>, tensor<16x16xi32>, tensor<16x16xi32>)
   check.expect.equal actual(%wave32_f32_f16_output) expected(%f32_expected) : tensor<16x16xf32>
   check.expect.equal actual(%wave32_f32_bf16_output) expected(%f32_expected) : tensor<16x16xf32>
   check.expect.equal actual(%wave32_f16_output) expected(%f16_expected) : tensor<16x16xf16>

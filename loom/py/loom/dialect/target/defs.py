@@ -110,6 +110,11 @@ ExportAbiKind = EnumDef(
         EnumCase("vm_module_function", 3, doc="IREE VM module function ABI."),
         EnumCase("shader_entry_point", 4, doc="Graphics shader entry point ABI."),
         EnumCase("wasm_function", 5, doc="WebAssembly module function ABI."),
+        EnumCase(
+            "command_program",
+            6,
+            doc="Reusable command-program materialization ABI.",
+        ),
     ],
     doc="Callable or package ABI used by an export plan.",
     c_type="loom_target_abi_kind_t",

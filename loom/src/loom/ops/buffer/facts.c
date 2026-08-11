@@ -125,6 +125,57 @@ iree_status_t loom_buffer_alloca_facts(loom_fact_context_t* context,
                                                 &result_facts[0]);
 }
 
+static bool loom_buffer_pack_align_exact(int64_t value, int64_t alignment,
+                                         int64_t* out_aligned_value) {
+  const int64_t mask = alignment - 1;
+  int64_t biased_value = 0;
+  if (value < 0 || !iree_checked_add_i64(value, mask, &biased_value)) {
+    return false;
+  }
+  *out_aligned_value = biased_value & ~mask;
+  return true;
+}
+
+iree_status_t loom_buffer_pack_facts(loom_fact_context_t* context,
+                                     const loom_module_t* module,
+                                     const loom_op_t* op,
+                                     const loom_value_facts_t* operand_facts,
+                                     loom_value_facts_t* result_facts) {
+  loom_attribute_t minimum_alignments = loom_buffer_pack_minimum_alignments(op);
+  int64_t current_offset = 0;
+  int64_t slab_alignment = 1;
+  bool exact = true;
+  for (uint16_t i = 0; i < op->operand_count; ++i) {
+    const int64_t minimum_alignment = minimum_alignments.i64_array[i];
+    if (minimum_alignment > slab_alignment) {
+      slab_alignment = minimum_alignment;
+    }
+
+    int64_t byte_offset = 0;
+    int64_t byte_length = 0;
+    if (!exact ||
+        !loom_buffer_pack_align_exact(current_offset, minimum_alignment,
+                                      &byte_offset) ||
+        !loom_value_facts_as_exact_i64(operand_facts[i], &byte_length) ||
+        byte_length < 0 ||
+        !iree_checked_add_i64(byte_offset, byte_length, &current_offset)) {
+      exact = false;
+      result_facts[i + 1] = loom_buffer_nonnegative_unknown_facts();
+      continue;
+    }
+    result_facts[i + 1] = loom_value_facts_exact_i64(byte_offset);
+  }
+
+  int64_t total_byte_length = 0;
+  if (exact && loom_buffer_pack_align_exact(current_offset, slab_alignment,
+                                            &total_byte_length)) {
+    result_facts[0] = loom_value_facts_exact_i64(total_byte_length);
+  } else {
+    result_facts[0] = loom_buffer_nonnegative_unknown_facts();
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_buffer_assume_memory_space_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,

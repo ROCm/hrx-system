@@ -31,7 +31,7 @@ global.variable @enabled : i1 = false
 // ====
 
 // Read-only artifact payload.
-global.rodata.def @loom_sanitizer_sites = bytes("4c53495401000000"), align 8
+global.rodata.def @loom_sanitizer_sites = align(8) bytes("4c53495401000000")
 
 // ====
 
