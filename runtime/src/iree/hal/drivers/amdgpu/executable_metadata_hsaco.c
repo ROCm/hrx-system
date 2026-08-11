@@ -307,6 +307,7 @@ iree_status_t iree_hal_amdgpu_executable_metadata_calculate_hsaco_counts(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AMDGPU metadata export count overflow");
   }
+
   for (iree_host_size_t i = 0; i < hsaco_metadata->kernel_count; ++i) {
     iree_hal_amdgpu_hsaco_kernel_load_plan_t load_plan;
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_hsaco_load_plan_analyze_kernel(

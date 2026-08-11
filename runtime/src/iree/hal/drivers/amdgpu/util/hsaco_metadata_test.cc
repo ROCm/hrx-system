@@ -133,6 +133,9 @@ enum BuildKernelMetadataFlagBits : uint32_t {
   kBuildKernelMetadataClusterDimensions = 1u << 2,
   kBuildKernelMetadataUniformWorkgroups = 1u << 3,
   kBuildKernelMetadataInvalidUniformWorkgroups = 1u << 4,
+  kBuildKernelMetadataOmitMaxFlatWorkgroupSize = 1u << 5,
+  kBuildKernelMetadataOmitVgprCount = 1u << 6,
+  kBuildKernelMetadataZeroMaxFlatWorkgroupSize = 1u << 7,
 };
 
 static std::vector<uint8_t> BuildKernelMetadata(
@@ -147,6 +150,11 @@ static std::vector<uint8_t> BuildKernelMetadata(
       (flags & kBuildKernelMetadataUniformWorkgroups) != 0;
   const bool invalid_uniform_workgroups =
       (flags & kBuildKernelMetadataInvalidUniformWorkgroups) != 0;
+  const bool omit_max_flat_workgroup_size =
+      (flags & kBuildKernelMetadataOmitMaxFlatWorkgroupSize) != 0;
+  const bool omit_vgpr_count = (flags & kBuildKernelMetadataOmitVgprCount) != 0;
+  const bool zero_max_flat_workgroup_size =
+      (flags & kBuildKernelMetadataZeroMaxFlatWorkgroupSize) != 0;
   std::vector<uint8_t> output;
   AppendMsgPackMap(&output, 3);
 
@@ -163,7 +171,9 @@ static std::vector<uint8_t> BuildKernelMetadata(
   AppendMsgPackString(&output, IREE_SV("amdhsa.kernels"));
   AppendMsgPackArray(&output, 1);
   AppendMsgPackMap(
-      &output, 10 + (has_cluster_dimensions ? 1 : 0) +
+      &output, 10 - (omit_max_flat_workgroup_size ? 1 : 0) -
+                   (omit_vgpr_count ? 1 : 0) +
+                   (has_cluster_dimensions ? 1 : 0) +
                    (uniform_workgroups || invalid_uniform_workgroups ? 1 : 0));
   AppendStringField(&output, IREE_SV(".name"), IREE_SV("vector_add"));
   AppendStringField(&output, IREE_SV(".symbol"), IREE_SV("vector_add.kd"));
@@ -171,8 +181,13 @@ static std::vector<uint8_t> BuildKernelMetadata(
   AppendUintField(&output, IREE_SV(".kernarg_segment_align"), 8);
   AppendUintField(&output, IREE_SV(".group_segment_fixed_size"), 1024);
   AppendUintField(&output, IREE_SV(".private_segment_fixed_size"), 64);
-  AppendUintField(&output, IREE_SV(".max_flat_workgroup_size"), 256);
-  AppendUintField(&output, IREE_SV(".vgpr_count"), 40);
+  if (!omit_max_flat_workgroup_size) {
+    AppendUintField(&output, IREE_SV(".max_flat_workgroup_size"),
+                    zero_max_flat_workgroup_size ? 0 : 256);
+  }
+  if (!omit_vgpr_count) {
+    AppendUintField(&output, IREE_SV(".vgpr_count"), 40);
+  }
   AppendMsgPackString(&output, IREE_SV(".reqd_workgroup_size"));
   AppendMsgPackArray(&output, 3);
   AppendMsgPackUint(&output, 16);
@@ -574,6 +589,16 @@ TEST(HsacoMetadataTest, RejectsInvalidUniformWorkgroupValue) {
                             ByteSpan(elf), iree_allocator_system(), &metadata));
 }
 
+TEST(HsacoMetadataTest, RejectsZeroMaximumFlatWorkgroupSize) {
+  std::vector<uint8_t> elf = BuildElfWithMetadata(
+      BuildKernelMetadata(kBuildKernelMetadataZeroMaxFlatWorkgroupSize));
+
+  iree_hal_amdgpu_hsaco_metadata_t metadata;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        iree_hal_amdgpu_hsaco_metadata_initialize_from_elf(
+                            ByteSpan(elf), iree_allocator_system(), &metadata));
+}
+
 TEST(HsacoMetadataTest, FindsKernelBySymbol) {
   std::vector<uint8_t> elf = BuildElfWithMetadata(BuildKernelMetadata());
 
@@ -679,6 +704,22 @@ TEST(HsacoMetadataTest, RejectsMalformedMessagePackMetadata) {
                             ByteSpan(elf), iree_allocator_system(), &metadata));
 }
 
+TEST(HsacoMetadataTest, RejectsMissingResourceMetadata) {
+  const uint32_t missing_resource_flags[] = {
+      kBuildKernelMetadataOmitMaxFlatWorkgroupSize,
+      kBuildKernelMetadataOmitVgprCount,
+  };
+  for (uint32_t flags : missing_resource_flags) {
+    std::vector<uint8_t> elf = BuildElfWithMetadata(BuildKernelMetadata(flags));
+
+    iree_hal_amdgpu_hsaco_metadata_t metadata;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_hal_amdgpu_hsaco_metadata_initialize_from_elf(
+            ByteSpan(elf), iree_allocator_system(), &metadata));
+  }
+}
+
 TEST(HsacoMetadataTest, DiscoversElfSymbolsWithoutSynthesizingKernels) {
   std::vector<uint8_t> elf = AddSyntheticCandidateSymbolSection(
       BuildElfWithMetadata(BuildKernelMetadata()));
@@ -692,6 +733,7 @@ TEST(HsacoMetadataTest, DiscoversElfSymbolsWithoutSynthesizingKernels) {
   EXPECT_EQ(ToString(metadata.elf_kernel_symbols[0].name), "extra_kernel");
   EXPECT_EQ(ToString(metadata.elf_kernel_symbols[0].symbol_name),
             "extra_kernel.kd");
+
   iree_hal_amdgpu_hsaco_metadata_deinitialize(&metadata);
 }
 
