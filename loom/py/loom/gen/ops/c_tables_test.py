@@ -522,7 +522,7 @@ def test_generate_parameterized_attribute_family_metadata() -> None:
 def test_generate_symbol_reference_roles_for_all_descriptor_owners() -> None:
     dialect = Dialect("test", dialect_id=0x01)
     dependency = SymbolReference("record", ["record"])
-    availability = SymbolReference("record", ["record"], role=SymbolReferenceRole.AVAILABILITY)
+    availability = SymbolReference("symbol", [], role=SymbolReferenceRole.AVAILABILITY)
     options = ParameterizedAttrDef(
         "test.options",
         group=dialect,
@@ -548,6 +548,8 @@ def test_generate_symbol_reference_roles_for_all_descriptor_owners() -> None:
     assert tables_c.count(".role = LOOM_SYMBOL_REFERENCE_ROLE_DEPENDENCY,") == 1
     assert tables_c.count(".role = LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY,") == 2
     assert ".role = LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY," in type_tables_c
+    assert tables_c.count(".interfaces = 0,") == 2
+    assert ".interfaces = 0," in type_tables_c
 
 
 def test_generate_encoding_family_metadata() -> None:

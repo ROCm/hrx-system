@@ -1133,3 +1133,8 @@ class TestBuilder(DialectBuilder):
         bindings: list[ValueRef] = ...,
         location_id: int | None = ...,
     ) -> None: ...
+    def module_metadata(
+        self,
+        *,
+        location_id: int | None = ...,
+    ) -> None: ...

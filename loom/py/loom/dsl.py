@@ -136,6 +136,7 @@ __all__ = [
     "ELEMENTWISE",
     "DECOMPOSABLE",
     "SYMBOL_DEFINE",
+    "MODULE_SCOPE",
     "ISOLATED_FROM_ABOVE",
     "NON_DETERMINISTIC",
     "UNKNOWN_EFFECTS",
@@ -594,6 +595,8 @@ class SymbolReference:
     name: Human-readable expected symbol class used in diagnostics.
     interfaces: Generated symbol-definition interfaces accepted by the attr.
         These are structural contracts, not op names or bytecode wire kinds.
+        An empty tuple accepts any symbol without imposing an additional
+        interface constraint.
     role: Whether the reference contributes a dependency edge or only records
         where an otherwise non-live symbol may be found during compilation.
     """
@@ -611,8 +614,6 @@ class SymbolReference:
         frozen_interfaces = tuple(interfaces)
         if not name:
             raise ValueError("SymbolReference: name must be non-empty")
-        if not frozen_interfaces:
-            raise ValueError("SymbolReference: interfaces must be non-empty")
         for interface in frozen_interfaces:
             if interface not in _VALID_SYMBOL_INTERFACES:
                 raise ValueError(
@@ -1126,6 +1127,10 @@ CONSTANT_LIKE = Trait("ConstantLike")
 ELEMENTWISE = Trait("Elementwise")
 DECOMPOSABLE = Trait("Decomposable")
 SYMBOL_DEFINE = Trait("SymbolDefine")
+# Op is valid only as a direct child of the module body. Module-owned operations
+# use this independently from SymbolDefine so they do not enter the symbol table
+# or pretend to own a symbol identity.
+MODULE_SCOPE = Trait("ModuleScope")
 # Op's regions cannot reference values from the enclosing scope.
 # Values enter the region only through block arguments. Passes must
 # not substitute inner values with outer definitions.

@@ -1984,10 +1984,10 @@ class Parser:
                 self._parse_attribute_alias()
                 continue
 
-            # Top-level symbol-defining op: func.def, func.decl, test.func, etc.
+            # Top-level symbol definition or module-scope operation.
             if tok.at(TokenKind.OP_NAME):
                 op = self._parse_operation()
-                self._register_symbol(op)
+                self._register_top_level_operation(op)
                 continue
 
             raise ParseError(
@@ -2048,25 +2048,25 @@ class Parser:
         self._encoding_aliases[alias_tok.text] = instance
         self._module.add_encoding(instance)
 
-    def _register_symbol(self, op: Operation) -> None:
-        """Register a top-level symbol-defining op in the module's symbol table.
-
-        Called after _parse_operation() for any op appearing at module level.
-        """
+    def _register_top_level_operation(self, op: Operation) -> None:
+        """Attach a parsed operation to the module body and applicable index."""
         op_decl = self._op_registry.get(op.name)
-        if op_decl is None or not op_decl.has_trait("SymbolDefine"):
-            location = SourceLocation(1, 1, 0)
-            op_location = self._module.locations.get(op.location_id)
-            if isinstance(op_location, FileLocation):
-                location = SourceLocation(
-                    op_location.start_line, op_location.start_col, 0
-                )
-            raise ParseError(
-                f"top-level op '{op.name}' does not declare a generated symbol",
-                location,
-                self._tokenizer._filename,
-            )
-        self._module.add_symbol(symbol_from_operation(op, op_decl))
+        if op_decl is not None and op_decl.has_trait("SymbolDefine"):
+            self._module.add_symbol(symbol_from_operation(op, op_decl))
+            return
+        if op_decl is not None and op_decl.has_trait("ModuleScope"):
+            self._module.add_top_level_operation(op)
+            return
+
+        location = SourceLocation(1, 1, 0)
+        op_location = self._module.locations.get(op.location_id)
+        if isinstance(op_location, FileLocation):
+            location = SourceLocation(op_location.start_line, op_location.start_col, 0)
+        raise ParseError(
+            f"op '{op.name}' is not permitted at module scope",
+            location,
+            self._tokenizer._filename,
+        )
 
     def _parse_func_arg(self) -> tuple[str, Type, int]:
         """Parse one function argument: %name: type.

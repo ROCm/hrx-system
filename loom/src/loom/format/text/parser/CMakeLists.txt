@@ -45,6 +45,7 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::internal::arena
+    loom::analysis::symbol_references
     loom::error::diagnostic
     loom::error::error_defs
     loom::error::renderer

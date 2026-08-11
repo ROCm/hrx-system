@@ -548,9 +548,8 @@ iree_status_t loom_verify_module(const loom_module_t* module,
 
   // Walk the module body.
   if (module->body) {
-    // Module-level invariant: only symbol-defining ops (func.def,
-    // func.decl, etc.) are allowed at the top level. Ops without
-    // LOOM_TRAIT_SYMBOL_DEFINE belong inside function bodies.
+    // Module-level invariant: top-level operations either define a symbol or
+    // explicitly declare module-scope ownership.
     if (module->body->block_count > 0) {
       loom_block_t* entry = loom_region_entry_block(module->body);
       const loom_op_t* op = NULL;
@@ -558,7 +557,8 @@ iree_status_t loom_verify_module(const loom_module_t* module,
         const loom_op_vtable_t* vtable =
             loom_verify_lookup_vtable(&state, op->kind);
         if (vtable &&
-            !iree_any_bit_set(vtable->traits, LOOM_TRAIT_SYMBOL_DEFINE)) {
+            !iree_any_bit_set(vtable->traits, LOOM_TRAIT_SYMBOL_DEFINE |
+                                                  LOOM_TRAIT_MODULE_SCOPE)) {
           iree_string_view_t op_name = loom_op_vtable_name(vtable);
           loom_diagnostic_param_t params[] = {
               loom_param_string(op_name),

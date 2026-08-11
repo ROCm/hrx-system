@@ -132,6 +132,7 @@ TRAIT_MAP: dict[str, str] = {
     "Elementwise": "LOOM_TRAIT_ELEMENTWISE",
     "Decomposable": "LOOM_TRAIT_DECOMPOSABLE",
     "SymbolDefine": "LOOM_TRAIT_SYMBOL_DEFINE",
+    "ModuleScope": "LOOM_TRAIT_MODULE_SCOPE",
     "IsolatedFromAbove": "LOOM_TRAIT_ISOLATED_FROM_ABOVE",
     "NonDeterministic": "LOOM_TRAIT_NON_DETERMINISTIC",
     "UnknownEffects": "LOOM_TRAIT_UNKNOWN_EFFECTS",

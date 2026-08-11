@@ -88,6 +88,32 @@ def test_verifier_reports_module_body_symbol_missing_from_table() -> None:
     )
 
 
+def test_verifier_accepts_module_scope_operation() -> None:
+    module = Module()
+    module.add_top_level_operation(Operation(name="test.module_metadata"))
+
+    diagnostics = verify_module(module, ops=ALL_TEST_OPS)
+
+    assert not diagnostics.has_errors
+
+
+def test_verifier_rejects_ordinary_operation_at_module_scope() -> None:
+    module = Module()
+    module.add_top_level_operation(Operation(name="test.yield"))
+
+    diagnostics = verify_module(module, ops=ALL_TEST_OPS)
+
+    assert _diagnostic_text_contains(diagnostics, "op is not permitted at module scope")
+
+
+def test_verifier_rejects_nested_module_scope_operation() -> None:
+    module = _module_with_body_ops(Operation(name="test.module_metadata"))
+
+    diagnostics = verify_module(module, ops=ALL_TEST_OPS)
+
+    assert _diagnostic_text_contains(diagnostics, "module-scope op is nested")
+
+
 def test_verifier_reports_wrong_operand_count() -> None:
     module = Module()
     lhs = module.add_value(Value("lhs", I32))
@@ -271,18 +297,22 @@ def test_verifier_defers_template_ancestor_requirement() -> None:
         "test.requires_context",
         traits=[HasAncestor("test.context")],
     )
-    template = Op(
-        "func.template",
-        traits=[ISOLATED_FROM_ABOVE],
-        regions=[RegionDef("body")],
-    )
     module = Module()
     template_op = Operation(
         name="func.template",
+        attributes={
+            "callee": "provider",
+            "implements": "test.context",
+        },
         regions=[
             Region(
                 blocks=[
-                    Block(ops=[Operation(name="test.requires_context")]),
+                    Block(
+                        ops=[
+                            Operation(name="test.requires_context"),
+                            Operation(name="func.return"),
+                        ]
+                    ),
                 ]
             )
         ],
@@ -291,7 +321,7 @@ def test_verifier_defers_template_ancestor_requirement() -> None:
 
     diagnostics = verify_module(
         module,
-        ops=(*ALL_TEST_OPS, requires_context, template),
+        ops=(*ALL_TEST_OPS, *ALL_FUNC_OPS, requires_context),
     )
 
     assert not diagnostics.has_errors
@@ -442,7 +472,7 @@ def test_verifier_checks_each_symbol_array_dependency() -> None:
     )
 
 
-def test_verifier_checks_each_symbol_array_availability() -> None:
+def test_verifier_accepts_unresolved_symbol_array_availability() -> None:
     module = _module_with_body_ops(
         Operation(
             name="test.symbol_array_attrs",
@@ -455,15 +485,50 @@ def test_verifier_checks_each_symbol_array_availability() -> None:
 
     diagnostics = verify_module(module, ops=ALL_TEST_OPS)
 
+    assert not diagnostics.has_errors
+
+
+def test_verifier_keeps_dependency_on_available_symbol_strict() -> None:
+    module = _module_with_body_ops(
+        Operation(
+            name="test.symbol_array_attrs",
+            attributes={
+                "dependencies": SymbolNameArray([SymbolName("provider")]),
+                "available": SymbolNameArray([SymbolName("provider")]),
+            },
+        )
+    )
+
+    diagnostics = verify_module(module, ops=ALL_TEST_OPS)
+
     assert _diagnostic_text_contains(diagnostics, "unresolved symbol reference")
     assert _diagnostic_text_contains(
-        diagnostics, "attribute 'available' element 0 references @provider"
+        diagnostics, "attribute 'dependencies' element 0 references @provider"
     )
+
+
+def test_verifier_accepts_unconstrained_symbol_array_target() -> None:
+    module = Module()
+    module.add_symbol(_symbol("function", _decl("function")))
+    module = _module_with_body_ops(
+        Operation(
+            name="test.symbol_array_attrs",
+            attributes={
+                "dependencies": SymbolNameArray(),
+                "available": SymbolNameArray([SymbolName("function")]),
+            },
+        ),
+        module=module,
+    )
+
+    diagnostics = verify_module(module, ops=ALL_TEST_OPS)
+
+    assert not diagnostics.has_errors
 
 
 def test_verifier_checks_symbol_array_target_interface_when_defined() -> None:
     module = Module()
-    module.add_symbol(_symbol("function", _func()))
+    module.add_symbol(_symbol("function", _decl("function")))
     module = _module_with_body_ops(
         Operation(
             name="test.symbol_array_attrs",
@@ -600,6 +665,13 @@ def _func(body: Region | None = None) -> Operation:
         name="test.func",
         attributes={"callee": "f"},
         regions=[body if body is not None else Region(blocks=[Block()])],
+    )
+
+
+def _decl(name: str) -> Operation:
+    return Operation(
+        name="test.decl",
+        attributes={"callee": name},
     )
 
 

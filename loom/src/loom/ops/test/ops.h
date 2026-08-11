@@ -308,7 +308,8 @@ enum {
   LOOM_OP_TEST_ATTR_PARAMS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 112),
   LOOM_OP_TEST_CONDITION_REFINES_POSITIVE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 113),
   LOOM_OP_TEST_PARTITIONED_CALL = LOOM_OP_KIND(LOOM_DIALECT_TEST, 114),
-  LOOM_OP_TEST_COUNT_ = 115,
+  LOOM_OP_TEST_MODULE_METADATA = LOOM_OP_KIND(LOOM_DIALECT_TEST, 115),
+  LOOM_OP_TEST_COUNT_ = 116,
 };
 
 // Synthetic flags for TemplateParamFlags parser/printer coverage.
@@ -2325,6 +2326,14 @@ iree_status_t loom_test_partitioned_call_build(
     iree_host_size_t specializations_count,
     const loom_value_id_t* bindings,
     iree_host_size_t bindings_count,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_TEST_MODULE_METADATA: Test non-symbol metadata owned directly by a module body.
+// test.module_metadata
+LOOM_DEFINE_ISA(loom_test_module_metadata_isa, LOOM_OP_TEST_MODULE_METADATA)
+iree_status_t loom_test_module_metadata_build(
+    loom_builder_t* builder,
     loom_location_id_t location,
     loom_op_t** out_op);
 

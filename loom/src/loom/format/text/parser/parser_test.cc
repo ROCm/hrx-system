@@ -1054,6 +1054,27 @@ TEST_F(ParserTest, SymbolArraysRoundTripOrderDuplicatesAndPresentEmpty) {
   loom_module_free(module);
 }
 
+TEST_F(ParserTest, ModuleScopeMetadataRoundTrips) {
+  EXPECT_EQ(RoundTrip("test.module_metadata\n"), "test.module_metadata\n");
+}
+
+TEST_F(ParserTest, AvailabilityOnlyUnresolvedSymbolIsAccepted) {
+  loom_module_t* module = ParseOk(
+      "test.func @main() {\n"
+      "  test.symbol_array_attrs [] using [@provider]\n"
+      "  test.yield\n"
+      "}\n");
+  ASSERT_NE(module, nullptr);
+  const loom_string_id_t provider_name_id =
+      loom_module_lookup_string(module, IREE_SV("provider"));
+  ASSERT_NE(provider_name_id, LOOM_STRING_ID_INVALID);
+  const loom_symbol_id_t provider_id =
+      loom_module_find_symbol(module, provider_name_id);
+  ASSERT_NE(provider_id, LOOM_SYMBOL_ID_INVALID);
+  EXPECT_EQ(module->symbols.entries[provider_id].defining_op, nullptr);
+  loom_module_free(module);
+}
+
 TEST_F(ParserTest, ParameterizedAttrsRoundTripInDeclarationOrder) {
   std::string text = RoundTrip(
       "test.record @target\n"
@@ -1367,8 +1388,8 @@ TEST_F(ParserTest, SymbolForwardReferenceResolvesToLaterDefinition) {
 
 TEST_F(ParserTest, UnresolvedSymbolReferenceIsParseError) {
   const char* source =
-      "test.template_param_symbol<@missing>\n"
-      "test.template_param_symbol<@missing>\n";
+      "test.template_param_symbol_flags<@missing>\n"
+      "test.template_param_symbol_flags<@missing>\n";
   const auto& diagnostics = ParseExpectErrors(source);
   ASSERT_EQ(diagnostics.size(), 1u);
   ExpectError(diagnostics[0],
@@ -1378,6 +1399,20 @@ TEST_F(ParserTest, UnresolvedSymbolReferenceIsParseError) {
   EXPECT_EQ(diagnostics[0].origin_column,
             static_cast<uint32_t>(std::strchr(source, '@') - source + 1));
   EXPECT_EQ(diagnostics[0].emitter, LOOM_EMITTER_PARSER);
+}
+
+TEST_F(ParserTest, DependencyKeepsAvailabilityPlaceholderStrict) {
+  const char* source =
+      "test.func @main() {\n"
+      "  test.symbol_array_attrs [] using [@missing]\n"
+      "  test.symbol_array_attrs [@missing]\n"
+      "  test.yield\n"
+      "}\n";
+  const auto& diagnostics = ParseExpectErrors(source);
+  ASSERT_EQ(diagnostics.size(), 1u);
+  ExpectError(diagnostics[0],
+              loom_error_def_lookup(LOOM_ERROR_DOMAIN_SYMBOL, 2));
+  EXPECT_EQ(GetStringParam(diagnostics[0], 0), "missing");
 }
 
 TEST_F(ParserTest, AttrDictNestedDictRoundTripInCanonicalOrder) {

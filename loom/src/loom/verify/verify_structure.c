@@ -337,6 +337,15 @@ static void loom_verify_emit_placement_diagnostic(
 
 void loom_verify_op_placement(loom_verify_state_t* state, const loom_op_t* op,
                               const loom_op_vtable_t* vtable) {
+  if (iree_any_bit_set(vtable->traits, LOOM_TRAIT_MODULE_SCOPE) &&
+      op->parent_op) {
+    loom_diagnostic_param_t params[] = {
+        loom_param_string(loom_op_vtable_name(vtable)),
+    };
+    loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_049, params,
+                                IREE_ARRAYSIZE(params));
+  }
+
   const loom_op_placement_descriptor_t* placement = vtable->placement;
   if (!placement) return;
 
@@ -1688,6 +1697,10 @@ static void loom_verify_symbol_reference(
 
   const loom_symbol_t* symbol = &state->module->symbols.entries[ref.symbol_id];
   if (symbol->definition == NULL || symbol->defining_op == NULL) {
+    if (reference_descriptor &&
+        reference_descriptor->role == LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY) {
+      return;
+    }
     loom_diagnostic_param_t params[] = {
         loom_param_with_field_ref(
             loom_param_string(loom_verify_symbol_name(state, ref)), field_ref),
@@ -1697,7 +1710,7 @@ static void loom_verify_symbol_reference(
     return;
   }
 
-  if (!reference_descriptor ||
+  if (!reference_descriptor || reference_descriptor->interfaces == 0 ||
       loom_symbol_implements(symbol, reference_descriptor->interfaces)) {
     return;
   }

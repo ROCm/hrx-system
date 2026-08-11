@@ -95,6 +95,25 @@ def test_dynamic_builder_constructs_binary_op_with_result_name() -> None:
     assert block.ops[0].operands == [lhs.id, rhs.id]
 
 
+def test_dynamic_builder_inserts_module_scope_operation_without_block() -> None:
+    module, builder = module_builder(ops=ALL_TEST_OPS)
+
+    builder.test.module_metadata()
+
+    assert [operation.name for operation in module.body.ops] == ["test.module_metadata"]
+    assert not module.symbols
+
+
+def test_dynamic_builder_root_routes_module_scope_operation_from_block() -> None:
+    block = Block()
+    module, builder = module_builder(insertion_block=block, ops=ALL_TEST_OPS)
+
+    builder.test.module_metadata()
+
+    assert [operation.name for operation in module.body.ops] == ["test.module_metadata"]
+    assert not block.ops
+
+
 def test_dynamic_builder_resolves_enum_array_values_and_presence() -> None:
     block, builder = _builder()
 

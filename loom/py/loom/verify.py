@@ -17,6 +17,7 @@ from loom.dsl import (
     FuncLikeInterface,
     InlinePolicy,
     Op,
+    SymbolReferenceRole,
     TypeConstraint,
     type_constraint_name,
 )
@@ -154,7 +155,17 @@ class ModuleVerifier:
 
         for operation_index, operation in enumerate(self.module.body.ops):
             op_decl = self.registry.op(operation.name)
-            if op_decl is None or not op_decl.has_trait("SymbolDefine"):
+            if op_decl is None:
+                continue
+            if not (
+                op_decl.has_trait("SymbolDefine") or op_decl.has_trait("ModuleScope")
+            ):
+                self.diagnostics.error(
+                    "op is not permitted at module scope",
+                    source=f"module operation[{operation_index}] {operation.name}",
+                )
+                continue
+            if not op_decl.has_trait("SymbolDefine"):
                 continue
             if id(operation) not in indexed_operation_ids:
                 self.diagnostics.error(
@@ -627,6 +638,8 @@ class ModuleVerifier:
                     field += f" element {index}"
                 target_symbol = self._symbols_by_name.get(target_name)
                 if target_symbol is None:
+                    if symbol_ref.role is SymbolReferenceRole.AVAILABILITY:
+                        continue
                     self.diagnostics.error(
                         "unresolved symbol reference",
                         source=path,
@@ -640,6 +653,8 @@ class ModuleVerifier:
                 )
                 target_symbol_def = target_decl.symbol_def if target_decl else None
                 if target_symbol_def is None:
+                    continue
+                if not symbol_ref.interfaces:
                     continue
                 if any(
                     interface in target_symbol_def.interfaces
@@ -665,6 +680,15 @@ class ModuleVerifier:
     ) -> None:
         for trait in op_decl.traits:
             match trait.name:
+                case "ModuleScope":
+                    if parent_stack:
+                        self.diagnostics.error(
+                            "module-scope op is nested",
+                            source=path,
+                            details=(
+                                "operation must be a direct child of the module body",
+                            ),
+                        )
                 case "HasParent":
                     parent_name = parent_stack[-1].name if parent_stack else None
                     if not trait.args or parent_name == trait.args[0]:

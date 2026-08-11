@@ -162,7 +162,7 @@ class VerifyTest : public ::testing::Test {
         &builder_, 0, 0, 0, callee, arg_types, arg_count, nullptr, 0, nullptr,
         0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &func_op));
     loom_region_t* body = loom_test_func_body(func_op);
-    loom_builder_set_block(&builder_, loom_region_entry_block(body));
+    (void)loom_builder_enter_region(&builder_, func_op, body);
     for (iree_host_size_t i = 0; i < arg_count; ++i) {
       out_args[i] = loom_region_entry_arg_id(body, (uint16_t)i);
     }
@@ -2094,6 +2094,73 @@ TEST_F(VerifyTest, RejectsEveryUnresolvedSymbolArrayElement) {
     EXPECT_EQ(GetStringParam(diagnostic, 0), "missing");
     ExpectFieldRefParam(diagnostic, 0, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, 0);
   }
+}
+
+TEST_F(VerifyTest, AcceptsUnresolvedAvailabilitySymbolArrayElement) {
+  EnterTestFunc(nullptr, 0, nullptr);
+  loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_builder_intern_string(&builder_, IREE_SV("provider"), &name_id));
+  uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
+  loom_symbol_ref_t available[] = {{/*.module_id=*/0,
+                                    /*.symbol_id=*/symbol_id}};
+
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_symbol_array_attrs_build(
+      &builder_, LOOM_TEST_SYMBOL_ARRAY_ATTRS_BUILD_FLAG_HAS_AVAILABLE,
+      loom_symbol_ref_array_empty(),
+      loom_make_symbol_ref_array(available, IREE_ARRAYSIZE(available)),
+      LOOM_LOCATION_UNKNOWN, &op));
+  TerminateFunc();
+
+  auto result = Verify();
+  EXPECT_EQ(result.error_count, 0u)
+      << (collector_.errors.empty() ? "" : collector_.errors[0]);
+}
+
+TEST_F(VerifyTest, AcceptsUnconstrainedAvailabilitySymbolTarget) {
+  EnterTestFunc(nullptr, 0, nullptr);
+  loom_symbol_ref_t available[] = {{/*.module_id=*/0,
+                                    /*.symbol_id=*/0}};
+
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_symbol_array_attrs_build(
+      &builder_, LOOM_TEST_SYMBOL_ARRAY_ATTRS_BUILD_FLAG_HAS_AVAILABLE,
+      loom_symbol_ref_array_empty(),
+      loom_make_symbol_ref_array(available, IREE_ARRAYSIZE(available)),
+      LOOM_LOCATION_UNKNOWN, &op));
+  TerminateFunc();
+
+  auto result = Verify();
+  EXPECT_EQ(result.error_count, 0u)
+      << (collector_.errors.empty() ? "" : collector_.errors[0]);
+}
+
+TEST_F(VerifyTest, AcceptsModuleScopeOperationAtTopLevel) {
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(
+      loom_test_module_metadata_build(&builder_, LOOM_LOCATION_UNKNOWN, &op));
+
+  auto result = Verify();
+  EXPECT_EQ(result.error_count, 0u)
+      << (collector_.errors.empty() ? "" : collector_.errors[0]);
+}
+
+TEST_F(VerifyTest, RejectsNestedModuleScopeOperation) {
+  EnterTestFunc(nullptr, 0, nullptr);
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(
+      loom_test_module_metadata_build(&builder_, LOOM_LOCATION_UNKNOWN, &op));
+  TerminateFunc();
+
+  DiagnosticCapture capture;
+  auto result = VerifyStructured(&capture);
+  EXPECT_EQ(result.error_count, 1u);
+  const CapturedDiagnostic* entry = FindDiagnostic(
+      capture, loom_error_def_lookup(LOOM_ERROR_DOMAIN_STRUCTURE, 49));
+  ASSERT_NE(entry, nullptr);
+  EXPECT_EQ(GetStringParam(*entry, 0), "test.module_metadata");
 }
 
 TEST_F(VerifyTest, AcceptsSymbolsNestedInParameterizedValues) {

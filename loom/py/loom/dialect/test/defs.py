@@ -79,6 +79,7 @@ from loom.dsl import (
     INTEGER,
     INVOLUTION,
     ISOLATED_FROM_ABOVE,
+    MODULE_SCOPE,
     POISON_BOUNDARY,
     POOL,
     PURE,
@@ -2312,12 +2313,12 @@ test_symbol_array_attrs = Op(
             "available",
             ATTR_TYPE_SYMBOL_ARRAY,
             symbol_ref=SymbolReference(
-                "record",
-                ["record"],
+                "symbol",
+                [],
                 role=SymbolReferenceRole.AVAILABILITY,
             ),
             optional=True,
-            doc="Ordered records available from an external provider.",
+            doc="Ordered symbols available from an external provider.",
         ),
     ],
     format=[
@@ -2330,6 +2331,19 @@ test_symbol_array_attrs = Op(
     examples=[
         "test.symbol_array_attrs [@b, @a, @b] using [@a]",
     ],
+)
+
+# ============================================================================
+# test.module_metadata — module-scope operation placement
+# ============================================================================
+
+test_module_metadata = Op(
+    "test.module_metadata",
+    group=test_ops,
+    doc="Test non-symbol metadata owned directly by a module body.",
+    traits=[MODULE_SCOPE],
+    format=[],
+    examples=["test.module_metadata"],
 )
 
 # ============================================================================
@@ -3097,4 +3111,5 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_attr_params,
     test_condition_refines_positive,
     test_partitioned_call,
+    test_module_metadata,
 )

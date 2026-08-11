@@ -729,6 +729,10 @@ enum loom_trait_bits_e {
   // source-order boundary or preservation policy. HINT already carries this
   // property; this trait permits value-carrying fact identities to declare it.
   LOOM_TRAIT_COMPILE_TIME_ONLY = 1u << 25,
+  // Op is valid only as a direct child of the module body. Module-owned
+  // operations use this independently from SYMBOL_DEFINE and do not enter the
+  // module symbol table.
+  LOOM_TRAIT_MODULE_SCOPE = 1u << 26,
 };
 typedef uint32_t loom_trait_flags_t;
 

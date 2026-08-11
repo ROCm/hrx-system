@@ -3017,6 +3017,10 @@ class TestSymbolReference:
         )
         assert reference.role is SymbolReferenceRole.AVAILABILITY
 
+    def test_accepts_unconstrained_symbol_interface(self) -> None:
+        reference = SymbolReference("symbol", [], role=SymbolReferenceRole.AVAILABILITY)
+        assert reference.interfaces == ()
+
     def test_rejects_untyped_role(self) -> None:
         with _raises(ValueError, match="role must be a SymbolReferenceRole"):
             SymbolReference("record", ["record"], role="availability")  # type: ignore[arg-type]

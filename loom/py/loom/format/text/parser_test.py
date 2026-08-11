@@ -1547,6 +1547,13 @@ class TestRoundTrip:
             "}\n"
         )
 
+    def test_module_scope_metadata(self) -> None:
+        self._roundtrip_text("test.module_metadata\n")
+
+    def test_rejects_body_operation_at_module_scope(self) -> None:
+        with pytest.raises(ParseError, match="not permitted at module scope"):
+            _op_parser().parse("test.yield\n")
+
     def test_enum_arrays_preserve_order_duplicates_and_open_values(self) -> None:
         text = "test.enum_array_attrs [low, high, low] using [middle, <42>, middle]"
         op = _parse_op(text)
