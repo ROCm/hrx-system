@@ -191,7 +191,7 @@ int main(int argc, char** argv) {
       "iree-convert-parameters",
       "Converts supported parameter file formats into IREE Parameter Archives\n"
       "(.irpa) files. Provide one or more input parameter files in the same\n"
-      "form as expected by the iree-run-module tool (`--parameters=foo.gguf`)\n"
+      "flag form `--parameters=foo.gguf`\n"
       "and an output file with `--output=file.irpa`.\n"
       "\n"
       "Example converting from safetensors to IRPA:\n"

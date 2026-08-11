@@ -11,19 +11,6 @@ iree_add_all_subdirs()
 
 flatbuffer_c_library(
   NAME
-    bytecode_module_def_c_fbs
-  SRCS
-    "bytecode_module_def.fbs"
-  FLATCC_ARGS
-    "--reader"
-    "--builder"
-    "--verifier"
-    "--json"
-  PUBLIC
-)
-
-flatbuffer_c_library(
-  NAME
     cuda_executable_def_c_fbs
   SRCS
     "cuda_executable_def.fbs"

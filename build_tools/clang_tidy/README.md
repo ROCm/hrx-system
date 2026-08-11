@@ -367,9 +367,10 @@ descriptors without owning a deinitialize contract.
 caller-owned storage backing that typed view:
 
 ```c
-iree_status_t iree_vm_stack_initialize(
-    iree_byte_span_t storage, iree_vm_invocation_flags_t flags,
-    iree_vm_stack_t** out_stack);
+iree_status_t iree_tokenizer_decode_state_initialize(
+    const iree_tokenizer_t* tokenizer, iree_tokenizer_decode_flags_t flags,
+    iree_byte_span_t state_storage,
+    iree_tokenizer_decode_state_t** out_state);
 ```
 
 Without an explicit `storage` or `*_storage` parameter, a pointer-to-pointer

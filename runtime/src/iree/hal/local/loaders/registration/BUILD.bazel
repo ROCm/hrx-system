@@ -31,10 +31,5 @@ iree_runtime_cc_library(
             "//runtime/src/iree/hal/local/loaders:system_library_loader",
         ],
         "//conditions:default": [],
-    }) + iree_select({
-        "//runtime/config/hal:executable_loader_vmvx_module": [
-            "//runtime/src/iree/hal/local/loaders:vmvx_module_loader",
-        ],
-        "//conditions:default": [],
     }),
 )

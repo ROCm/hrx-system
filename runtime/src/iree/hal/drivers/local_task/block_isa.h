@@ -376,12 +376,12 @@ typedef struct iree_hal_cmd_dispatch_t {
   uint16_t binding_data_base;
 
   // Executable and export ordinal. Always set at recording time. Used by
-  // the VM fallback path (function == NULL) for vtable dispatch, and by
+  // the generic fallback path (function == NULL) for vtable dispatch, and by
   // profiling/diagnostics for per-export statistics tracking.
   iree_hal_local_executable_t* executable;
 
-  // Kernel entry point resolved at recording time. NULL for VM-based
-  // backends (VMVX) that dispatch through executable->vtable->issue_call.
+  // Kernel entry point resolved at recording time. NULL for backends that
+  // dispatch through executable->vtable->issue_call.
   // When non-NULL, the processor calls:
   //   function(&executable->environment, &dispatch_state, &workgroup_state)
   iree_hal_executable_dispatch_v0_t function;

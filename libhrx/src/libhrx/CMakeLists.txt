@@ -40,7 +40,6 @@ iree_cc_library(
     "graph_exec.c"
     "host_allocator.c"
     "mem_pool.c"
-    "module.c"
     "pool.c"
     "queue_ops.c"
     "runtime.c"
@@ -48,7 +47,6 @@ iree_cc_library(
     "status.c"
     "stream.c"
     "transfer.c"
-    "value_list.c"
     "vmm_slab_provider.c"
     "vmm_slab_provider.h"
   DEPS
@@ -71,11 +69,7 @@ iree_cc_library(
     iree::hal::utils::profile_file
     iree::hal::utils::resource_set
     iree::io::file_handle
-    iree::modules::hal
-    iree::modules::hal::types
     iree::task::api
-    iree::vm
-    iree::vm::bytecode::module
     libhrx_defs
     ${_hrx_static_platform_deps}
   DEFINES
@@ -117,7 +111,6 @@ iree_cc_library(
     "graph_exec.c"
     "host_allocator.c"
     "mem_pool.c"
-    "module.c"
     "pool.c"
     "queue_ops.c"
     "runtime.c"
@@ -125,7 +118,6 @@ iree_cc_library(
     "status.c"
     "stream.c"
     "transfer.c"
-    "value_list.c"
     "vmm_slab_provider.c"
     "vmm_slab_provider.h"
   DEPS
@@ -148,11 +140,7 @@ iree_cc_library(
     iree::hal::utils::profile_file
     iree::hal::utils::resource_set
     iree::io::file_handle
-    iree::modules::hal
-    iree::modules::hal::types
     iree::task::api
-    iree::vm
-    iree::vm::bytecode::module
     libhrx_defs
     ${_hrx_platform_deps}
   SHARED
@@ -230,7 +218,6 @@ foreach(_hrx_object_target
   )
   foreach(_hrx_generated_header_target
       iree_base_internal_flatcc_dummy_gen
-      iree_schemas_bytecode_module_def_c_fbs_gen
       op_table_gen
       encoding_table_gen)
     if(TARGET ${_hrx_generated_header_target})

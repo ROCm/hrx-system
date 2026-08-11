@@ -261,11 +261,6 @@ int main(int argc, char** argv) {
     fprintf(stderr,
             "Syntax: iree-dump-instruments instruments.bin > instruments.txt\n"
             "Example usage:\n"
-            "  $ iree-run-module \\n"
-            "        --device=local-sync \\n"
-            "        --module=instrumented.vmfb \\n"
-            "        --function=main \\n"
-            "        --instrument_file=instrument.bin\n"
             "  $ iree-dump-instruments instrument.bin\n"
             "\n");
     IREE_TRACE_APP_EXIT(EXIT_FAILURE);

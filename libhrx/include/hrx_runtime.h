@@ -155,9 +155,6 @@ typedef struct hrx_allocator_s* hrx_allocator_t;
 typedef struct hrx_semaphore_s* hrx_semaphore_t;
 typedef struct hrx_stream_s* hrx_stream_t;
 typedef struct hrx_buffer_s* hrx_buffer_t;
-typedef struct hrx_module_s* hrx_module_t;
-typedef struct hrx_function_s* hrx_function_t;
-typedef struct hrx_value_list_s* hrx_value_list_t;
 typedef struct hrx_fence_s* hrx_fence_t;
 typedef struct hrx_buffer_view_s* hrx_buffer_view_t;
 typedef struct hrx_executable_s* hrx_executable_t;
@@ -596,7 +593,7 @@ HRX_API hrx_status_t hrx_stream_get_timeline_position(
     hrx_stream_t stream, hrx_timeline_point_t* position);
 
 // Advances the stream's owned timeline to the next value and returns it.
-// Use when out-of-band work (e.g. VM invocation with a signal fence) will
+// Use when out-of-band work (e.g. an external queue submission) will
 // eventually signal the stream semaphore at the returned timepoint.
 HRX_API hrx_status_t hrx_stream_advance_timeline(hrx_stream_t stream,
                                                  uint64_t* value);
@@ -760,63 +757,6 @@ hrx_executable_export_info(hrx_executable_t executable, uint32_t export_ordinal,
 
 HRX_API hrx_status_t hrx_executable_lookup_export_by_name(
     hrx_executable_t executable, const char* name, uint32_t* export_ordinal);
-
-//===----------------------------------------------------------------------===//
-// VM modules and invocation
-//===----------------------------------------------------------------------===//
-
-// Loads a VMFB bytecode module and instantiates an invocation context with the
-// device-backed HAL module. |vmfb_data| must outlive |module|.
-HRX_API hrx_status_t hrx_module_load_vmfb(hrx_device_t device,
-                                          const void* vmfb_data,
-                                          size_t vmfb_size,
-                                          hrx_module_t* module);
-
-HRX_API void hrx_module_retain(hrx_module_t module);
-HRX_API void hrx_module_release(hrx_module_t module);
-
-// Resolves an exported function by fully-qualified name. The returned function
-// retains |module|, so it remains valid until hrx_function_release().
-HRX_API hrx_status_t hrx_module_lookup_function(hrx_module_t module,
-                                                const char* name,
-                                                hrx_function_t* function);
-
-HRX_API void hrx_function_retain(hrx_function_t function);
-HRX_API void hrx_function_release(hrx_function_t function);
-
-HRX_API hrx_status_t hrx_function_invoke(hrx_module_t module,
-                                         hrx_function_t function,
-                                         hrx_value_list_t args,
-                                         hrx_value_list_t rets);
-
-//===----------------------------------------------------------------------===//
-// VM value lists
-//===----------------------------------------------------------------------===//
-
-HRX_API hrx_status_t hrx_value_list_create(size_t capacity,
-                                           hrx_value_list_t* list);
-
-HRX_API void hrx_value_list_retain(hrx_value_list_t list);
-HRX_API void hrx_value_list_release(hrx_value_list_t list);
-
-HRX_API hrx_status_t hrx_value_list_size(hrx_value_list_t list, size_t* size);
-
-HRX_API hrx_status_t hrx_value_list_push_i64(hrx_value_list_t list,
-                                             int64_t value);
-
-HRX_API hrx_status_t hrx_value_list_get_i64(hrx_value_list_t list, size_t index,
-                                            int64_t* value);
-
-HRX_API hrx_status_t hrx_value_list_push_null_ref(hrx_value_list_t list);
-
-HRX_API hrx_status_t hrx_value_list_push_buffer(hrx_value_list_t list,
-                                                hrx_buffer_t buffer);
-
-HRX_API hrx_status_t hrx_value_list_push_buffer_view(
-    hrx_value_list_t list, hrx_buffer_view_t buffer_view);
-
-HRX_API hrx_status_t hrx_value_list_push_fence(hrx_value_list_t list,
-                                               hrx_fence_t fence);
 
 //===----------------------------------------------------------------------===//
 // Fences

@@ -99,8 +99,8 @@ class CMakeTest(unittest.TestCase):
 
     def test_build_args_translate_target_shorthand(self):
         self.assertEqual(
-            cmake_dev.build_args(["hrx", "iree-run-module", "--parallel", "8"]),
-            ["--target", "hrx", "--target", "iree-run-module", "--parallel", "8"],
+            cmake_dev.build_args(["hrx", "iree-dump-cpuinfo", "--parallel", "8"]),
+            ["--target", "hrx", "--target", "iree-dump-cpuinfo", "--parallel", "8"],
         )
 
     def test_default_fuzz_cache_dir_uses_platform_cache_roots(self):
@@ -147,8 +147,8 @@ class CMakeTest(unittest.TestCase):
             alias_path.write_text(
                 json.dumps(
                     {
-                        "iree::tools::iree-run-module": (
-                            "runtime_src_tools_iree-run-module"
+                        "iree::tools::iree-dump-cpuinfo": (
+                            "runtime_src_tools_iree-dump-cpuinfo"
                         )
                     }
                 ),
@@ -157,10 +157,10 @@ class CMakeTest(unittest.TestCase):
 
             self.assertEqual(
                 cmake_dev.build_args(
-                    ["iree::tools::iree-run-module", "--parallel", "8"],
+                    ["iree::tools::iree-dump-cpuinfo", "--parallel", "8"],
                     configured_build_dir=build_dir,
                 ),
-                ["--target", "runtime_src_tools_iree-run-module", "--parallel", "8"],
+                ["--target", "runtime_src_tools_iree-dump-cpuinfo", "--parallel", "8"],
             )
 
     def test_configure_build_and_test_plans_use_selected_build_dir(self):
@@ -321,20 +321,20 @@ class CMakeTest(unittest.TestCase):
         plan = cmake_dev.run_plan(
             tool_env,
             configured_build_dir=Path("build/cmake-debug"),
-            backend_args=["iree-run-module", "--", "--help"],
+            backend_args=["iree-dump-cpuinfo", "--", "--help"],
         )
         description = normalized_plan_description(plan)
 
-        self.assertIn("# cmake run iree-run-module", description)
+        self.assertIn("# cmake run iree-dump-cpuinfo", description)
         self.assertIn("CMake File API", description)
         self.assertIn("<built executable>", description)
         self.assertIn("--help", description)
 
     def test_run_parse_supports_print_path(self):
-        command = cmake_dev.parse_run_args(["-p", "iree-run-module"])
+        command = cmake_dev.parse_run_args(["-p", "iree-dump-cpuinfo"])
 
         self.assertTrue(command.print_path)
-        self.assertEqual(command.target, "iree-run-module")
+        self.assertEqual(command.target, "iree-dump-cpuinfo")
 
     def test_compile_commands_plan_prints_configured_database_path(self):
         tool_env = ToolEnvironment(ToolMode.SYSTEM, None)

@@ -95,39 +95,3 @@ endif()
 """,
     inline = True,
 )
-
-iree_cmake_extra_content(
-    content = """
-if(IREE_HAL_EXECUTABLE_LOADER_VMVX_MODULE)
-""",
-    inline = True,
-)
-
-iree_runtime_cc_library(
-    name = "vmvx_module_loader",
-    srcs = ["vmvx_module_loader.c"],
-    hdrs = ["vmvx_module_loader.h"],
-    defines = [
-        "IREE_HAVE_HAL_EXECUTABLE_LOADER_VMVX_MODULE=1",
-    ],
-    target_compatible_with = select({
-        "//runtime/config/hal:executable_loader_vmvx_module": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
-    deps = [
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/local:executable_loader",
-        "//runtime/src/iree/modules/vmvx",
-        "//runtime/src/iree/vm",
-        "//runtime/src/iree/vm/bytecode:archive",
-        "//runtime/src/iree/vm/bytecode:module",
-    ],
-)
-
-iree_cmake_extra_content(
-    content = """
-endif()
-""",
-    inline = True,
-)

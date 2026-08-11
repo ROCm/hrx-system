@@ -9,7 +9,6 @@
 // NOTE: we register in a specific order to allow for prioritization:
 // - system-library: used when embedded is not desired (TSAN/debugging/etc).
 // - embedded-elf: default codegen portable ELF output format.
-// - vmvx-module: reference fallback path using the IREE bytecode VM.
 
 #if defined(IREE_HAVE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY)
 #include "iree/hal/local/loaders/system_library_loader.h"
@@ -18,10 +17,6 @@
 #if defined(IREE_HAVE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF)
 #include "iree/hal/local/loaders/embedded_elf_loader.h"
 #endif  // IREE_HAVE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF
-
-#if defined(IREE_HAVE_HAL_EXECUTABLE_LOADER_VMVX_MODULE)
-#include "iree/hal/local/loaders/vmvx_module_loader.h"
-#endif  // IREE_HAVE_HAL_EXECUTABLE_LOADER_VMVX_MODULE
 
 IREE_API_EXPORT iree_status_t iree_hal_create_all_available_executable_loaders(
     iree_hal_executable_plugin_manager_t* plugin_manager,
@@ -38,9 +33,6 @@ IREE_API_EXPORT iree_status_t iree_hal_create_all_available_executable_loaders(
 #if defined(IREE_HAVE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF)
   ++required_capacity;
 #endif  // IREE_HAVE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF
-#if defined(IREE_HAVE_HAL_EXECUTABLE_LOADER_VMVX_MODULE)
-  ++required_capacity;
-#endif  // IREE_HAVE_HAL_EXECUTABLE_LOADER_VMVX_MODULE
   if (capacity < required_capacity) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE);
   }
@@ -63,14 +55,6 @@ IREE_API_EXPORT iree_status_t iree_hal_create_all_available_executable_loaders(
                                                  &loaders[count++]);
   }
 #endif  // IREE_HAVE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF
-
-#if defined(IREE_HAVE_HAL_EXECUTABLE_LOADER_VMVX_MODULE)
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_vmvx_module_loader_create_isolated(
-        /*user_module_count=*/0, /*user_modules=*/NULL, host_allocator,
-        &loaders[count++]);
-  }
-#endif  // IREE_HAVE_HAL_EXECUTABLE_LOADER_VMVX_MODULE
 
   if (iree_status_is_ok(status)) {
     *out_count = count;
@@ -100,14 +84,6 @@ IREE_API_EXPORT iree_status_t iree_hal_create_executable_loader_by_name(
                                                  out_executable_loader);
   }
 #endif  // IREE_HAVE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY
-
-#if defined(IREE_HAVE_HAL_EXECUTABLE_LOADER_VMVX_MODULE)
-  if (iree_string_view_starts_with(name, IREE_SV("vmvx-module"))) {
-    return iree_hal_vmvx_module_loader_create_isolated(
-        /*user_module_count=*/0, /*user_modules=*/NULL, host_allocator,
-        out_executable_loader);
-  }
-#endif  // IREE_HAVE_HAL_EXECUTABLE_LOADER_VMVX_MODULE
 
   return iree_make_status(
       IREE_STATUS_UNAVAILABLE,

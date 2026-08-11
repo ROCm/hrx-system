@@ -68,31 +68,9 @@ cmake -B build/ -S . \
   -DCMAKE_C_FLAGS="-DIREE_SYSFS_ROOT=\\\"/path/to/arm64_pixel6_tensor\\\"" \
   -DCMAKE_CXX_FLAGS="-DIREE_SYSFS_ROOT=\\\"/path/to/arm64_pixel6_tensor\\\""
 
-# Build and test
-cmake --build build/ --target iree-run-module
-
-# Test ARM64 big.LITTLE with default settings (all cores, scatter distribution)
-./build/tools/iree-run-module --dump_task_topologies
-
-# Test ARM64 big.LITTLE with HIGH performance cores only
-./build/tools/iree-run-module \
-  --task_topology_performance_level=high \
-  --dump_task_topologies
-
-# Test ARM64 with compact distribution (fill cache domains sequentially)
-./build/tools/iree-run-module \
-  --task_topology_distribution=compact \
-  --dump_task_topologies
-
-# Test ARM64 with latency preset (compact + high performance)
-./build/tools/iree-run-module \
-  --task_topology_favor=latency \
-  --dump_task_topologies
-
-# Test ARM64 with only LITTLE cores (low power)
-./build/tools/iree-run-module \
-  --task_topology_performance_level=low \
-  --dump_task_topologies
+# Build and run the topology tests against the captured sysfs tree.
+cmake --build build/ --target iree_task_topology_test
+ctest --test-dir build/ -R iree_task_topology_test --output-on-failure
 ```
 
 Available flags for topology configuration:

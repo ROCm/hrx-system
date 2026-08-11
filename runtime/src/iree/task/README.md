@@ -27,9 +27,9 @@ context switches, or kernel involvement.
   processed between drain() calls. The system pipeline stays full without
   explicit overlap management.
 
-- **Unified execution model.** Compute (tiled dispatch), I/O (buffer
-  transfer), host callbacks, VM invocations, and queue management all use the
-  same process interface. One scheduling policy, one worker loop, one wake
+- **Unified execution model.** Compute (tiled dispatch), I/O (buffer transfer),
+  host callbacks, resumable interpreters, and queue management all use the same
+  process interface. One scheduling policy, one worker loop, one wake
   mechanism.
 
 - **Direct wake, zero hop.** When a GPU completion, semaphore signal, or I/O
@@ -355,26 +355,26 @@ work, handles it, and sleeps again if the ready list is empty. Execution
 order is determined entirely by semaphore resolution timing, not submission
 order.
 
-### Coroutine process: VM execution
+### Coroutine process: resumable interpretation
 
-A VM invocation context that runs model execution graphs. The VM executes
-bytecode until it hits an async wait (e.g., waiting for HAL operations to
-complete), then the process sleeps. When the waited-on semaphore signals, the
-process wakes and resumes execution.
+A resumable interpreter or state machine can run as a process until it reaches
+an async wait, such as waiting for HAL operations to complete. The process then
+sleeps. When the waited-on semaphore signals, the process wakes and resumes
+from its saved program position.
 
-- **drain()**: resumes VM execution from the current bytecode position. Runs
-  until the VM yields (async wait) or completes.
-- **Sleeping**: when the VM hits an async wait, drain() returns with
-  `sleeping=true`. The process is deprioritized until the semaphore
-  signal wakes it.
+- **drain()**: resumes interpretation from the saved program position and runs
+  until the interpreter yields for an async wait or completes.
+- **Sleeping**: when interpretation reaches an async wait, drain() returns with
+  `sleeping=true`. The process is deprioritized until the semaphore signal
+  wakes it.
 - **Activation**: the semaphore timepoint callback decrements suspend count,
   promoting the process back to runnable. The latency from "semaphore signal"
-  to "VM resumes" is one scan revolution — sub-microsecond if a worker is
+  to resumed interpretation is one scan revolution — sub-microsecond if a worker is
   spinning, 1-5μs if all workers were parked.
 
 This turns the proactor's "offload work from the CQ thread" problem into a
 scheduling problem: the proactor signals a semaphore, the semaphore activates
-a VM process, a worker picks it up on its next scan. No dedicated offload
+a coroutine process, and a worker picks it up on its next scan. No dedicated offload
 thread, no thread-hop latency, no oversubscription. The CQ thread stays
 focused on completions; the worker pool handles everything else.
 
@@ -566,18 +566,18 @@ scheduling overhead is 0.01%. For a 1μs kernel, it's 1.3%.
    ~200ns (signal + timepoint + queue drain + first scan).
 ```
 
-### VM coroutine with async HAL operations
+### Interpreter coroutine with async HAL operations
 
 ```
-1. VM invocation starts as a coroutine process (on immediate list).
-2. Worker drains: VM executes bytecode, submits HAL operations.
-3. VM hits async wait (waiting for HAL results) → process sleeps.
+1. Interpreter invocation starts as a coroutine process (on immediate list).
+2. Worker drains: interpreter executes, submits HAL operations.
+3. Interpreter hits async wait (waiting for HAL results) → process sleeps.
    Worker moves on to other work.
 4. HAL operations execute (block processor processes on compute list).
 5. Last HAL operation completes → signals semaphore.
-6. Semaphore timepoint decrements VM process's suspend count.
-7. Suspend count hits 0 → VM process activated (pushed to immediate list).
-8. Next worker scan: pops VM process, calls drain().
-9. VM resumes execution from where it left off.
-   Latency from "HAL done" to "VM resumes": < 5μs.
+6. Semaphore timepoint decrements the coroutine process's suspend count.
+7. Suspend count hits 0 → process activated (pushed to immediate list).
+8. Next worker scan: pops the process and calls drain().
+9. Interpreter resumes execution from its saved program position.
+   Latency from "HAL done" to resumed interpretation: < 5μs.
 ```

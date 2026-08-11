@@ -566,19 +566,19 @@ loom_link_module(
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
             targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
-            build_dir="runtime/src/iree/vm/test",
+            build_dir="runtime/src/iree/hal/local/elf/testdata",
             repo_root=str(repo_root),
         )
 
         functions.iree_c_embed_data(
-            name="all_bytecode_modules_c",
-            srcs=[":arithmetic_ops.vmfb"],
-            c_file_output="all_bytecode_modules.c",
-            h_file_output="all_bytecode_modules.h",
+            name="generated_kernel_c",
+            srcs=[":generated_kernel.bin"],
+            c_file_output="generated_kernel.c",
+            h_file_output="generated_kernel.h",
             flatten=True,
         )
 
-        self.assertIn('"arithmetic_ops.vmfb"', converter.body)
+        self.assertIn('"generated_kernel.bin"', converter.body)
         self.assertNotIn("$<TARGET_FILE:", converter.body)
 
     def test_c_embed_data_srcs_preserve_source_file_labels(self):
@@ -759,35 +759,6 @@ loom_link_module(
                 main="config_test.py",
                 deps=[],
             )
-
-    def test_runtime_generated_files_use_discovered_python_interpreter(self):
-        repo_root = Path(__file__).resolve().parents[2]
-        runtime = bazel_to_cmake_config.include_project(
-            str(repo_root / ".bazel_to_cmake.cfg.py"),
-            "runtime/.bazel_to_cmake.cfg.py",
-        )
-        converter = SimpleNamespace(body="")
-        functions = runtime.build_file_functions(
-            converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
-            build_dir=str(repo_root / "runtime/src/iree/vm/bytecode/isa"),
-            repo_root=str(repo_root),
-        )
-
-        functions.iree_generated_files(
-            name="op_table_gen",
-            srcs=["isa.json"],
-            outs=["op_table.h"],
-            args=["--schema", "$(location isa.json)"],
-            output_args={"op_table.h": "--op-table"},
-            tool=":generate_vm_isa",
-        )
-
-        self.assertIn(
-            "${Python3_EXECUTABLE} $(rootpath generate_vm_isa.py)",
-            converter.body,
-        )
-        self.assertNotIn("python3 $(rootpath generate_vm_isa.py)", converter.body)
 
     def test_requirement_policy_loads_cross_project_requirement_defs(self):
         repo_root = Path(__file__).resolve().parents[2]

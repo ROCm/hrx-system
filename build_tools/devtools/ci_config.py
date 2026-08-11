@@ -117,7 +117,6 @@ CPU_SANITIZERS_XFAILS = (
     bazel_xfail("//runtime/src/iree/hal/replay:execute_test"),
     bazel_xfail("//runtime/src/iree/tokenizer/..."),
     bazel_xfail("//runtime/src/iree/tooling/profile:cli_test"),
-    bazel_xfail("//runtime/src/iree/vm:list_test"),
 )
 CPU_XFAIL_TARGETS = bazel_xfail_targets(CPU_XFAILS)
 CPU_CTEST_EXCLUDE_REGEX = ctest_exclude_regex(CPU_XFAILS)

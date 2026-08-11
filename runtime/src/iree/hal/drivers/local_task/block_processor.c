@@ -668,7 +668,7 @@ static void iree_hal_cmd_block_processor_profile_record_drain(
 
 // Executes a single tile of a dispatch command. Dispatches through the native
 // function pointer when available (the fast path), or falls back to the
-// executable's issue_call vtable for VM-based backends (VMVX, JIT, etc.).
+// executable's issue_call vtable for indirect backends such as JITs.
 static inline iree_status_t iree_hal_cmd_execute_dispatch_tile(
     const iree_hal_cmd_dispatch_t* dispatch,
     const iree_hal_executable_dispatch_state_v0_t* dispatch_state,

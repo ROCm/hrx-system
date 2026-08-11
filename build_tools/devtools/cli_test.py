@@ -674,7 +674,7 @@ class CliTest(unittest.TestCase):
             [
                 "bazel",
                 "clang-tidy",
-                "//runtime/src/iree/vm:all",
+                "//runtime/src/iree/tokenizer:all",
             ]
         )
 
@@ -688,7 +688,7 @@ class CliTest(unittest.TestCase):
             description,
         )
         self.assertIn("--output_groups=iree_clang_tidy_reports", description)
-        self.assertIn("//runtime/src/iree/vm:all", description)
+        self.assertIn("//runtime/src/iree/tokenizer:all", description)
         self.assertNotIn("build_tools/lefthook/presubmit.py", description)
         self.assertNotIn("--keep_going", description)
 
@@ -699,7 +699,7 @@ class CliTest(unittest.TestCase):
                 "clang-tidy",
                 "--profile",
                 "ci",
-                "//runtime/src/iree/vm:all",
+                "//runtime/src/iree/tokenizer:all",
             ]
         )
 
@@ -707,7 +707,7 @@ class CliTest(unittest.TestCase):
         description = normalized_plan_description(plan)
 
         self.assertIn("--keep_going", description)
-        self.assertIn("//runtime/src/iree/vm:all", description)
+        self.assertIn("//runtime/src/iree/tokenizer:all", description)
 
     def test_bazel_clang_tidy_git_scope_uses_presubmit_provider(self):
         args = cli.parse_arguments(["bazel", "clang-tidy", "--base", "origin/main"])
@@ -723,7 +723,7 @@ class CliTest(unittest.TestCase):
 
     def test_bazel_clang_tidy_explicit_paths_use_presubmit_provider(self):
         args = cli.parse_arguments(
-            ["bazel", "clang-tidy", "runtime/src/iree/vm/native_module.c"]
+            ["bazel", "clang-tidy", "runtime/src/iree/tokenizer/tokenizer.c"]
         )
 
         plan = args.handler(args)
@@ -731,7 +731,7 @@ class CliTest(unittest.TestCase):
 
         self.assertIn("build_tools/lefthook/presubmit.py", description)
         self.assertIn("--clang-tidy", description)
-        self.assertIn("runtime/src/iree/vm/native_module.c", description)
+        self.assertIn("runtime/src/iree/tokenizer/tokenizer.c", description)
 
     def test_bazel_clang_tidy_fix_uses_presubmit_provider(self):
         args = cli.parse_arguments(
@@ -739,7 +739,7 @@ class CliTest(unittest.TestCase):
                 "bazel",
                 "clang-tidy",
                 "--fix",
-                "runtime/src/iree/vm/native_module.c",
+                "runtime/src/iree/tokenizer/tokenizer.c",
             ]
         )
 
@@ -749,12 +749,12 @@ class CliTest(unittest.TestCase):
         self.assertIn("build_tools/lefthook/presubmit.py", description)
         self.assertIn("--fix", description)
         self.assertIn("--clang-tidy", description)
-        self.assertIn("runtime/src/iree/vm/native_module.c", description)
+        self.assertIn("runtime/src/iree/tokenizer/tokenizer.c", description)
 
     def test_bazel_clang_tidy_fix_rejects_target_patterns(self):
         with self.assertRaises(SystemExit):
             cli.parse_arguments(
-                ["bazel", "clang-tidy", "--fix", "//runtime/src/iree/vm:all"]
+                ["bazel", "clang-tidy", "--fix", "//runtime/src/iree/tokenizer:all"]
             )
 
     def test_bazel_clang_tidy_fix_rejects_all_files(self):
@@ -822,7 +822,7 @@ class CliTest(unittest.TestCase):
 
     def test_cmake_clang_tidy_explicit_paths_use_presubmit_provider(self):
         args = cli.parse_arguments(
-            ["cmake", "clang-tidy", "runtime/src/iree/vm/native_module.c"]
+            ["cmake", "clang-tidy", "runtime/src/iree/tokenizer/tokenizer.c"]
         )
 
         plan = args.handler(args)
@@ -831,7 +831,7 @@ class CliTest(unittest.TestCase):
         self.assertIn("build_tools/lefthook/presubmit.py", description)
         self.assertIn("--lane cmake", description)
         self.assertIn("--clang-tidy", description)
-        self.assertIn("runtime/src/iree/vm/native_module.c", description)
+        self.assertIn("runtime/src/iree/tokenizer/tokenizer.c", description)
 
     def test_cmake_clang_tidy_fix_uses_presubmit_provider(self):
         args = cli.parse_arguments(
@@ -839,7 +839,7 @@ class CliTest(unittest.TestCase):
                 "cmake",
                 "clang-tidy",
                 "--fix",
-                "runtime/src/iree/vm/native_module.c",
+                "runtime/src/iree/tokenizer/tokenizer.c",
             ]
         )
 
@@ -853,7 +853,9 @@ class CliTest(unittest.TestCase):
 
     def test_cmake_clang_tidy_rejects_bazel_targets(self):
         with self.assertRaises(SystemExit):
-            cli.parse_arguments(["cmake", "clang-tidy", "//runtime/src/iree/vm:all"])
+            cli.parse_arguments(
+                ["cmake", "clang-tidy", "//runtime/src/iree/tokenizer:all"]
+            )
 
     def test_bazel_fuzz_normalizes_signal_exit_codes(self):
         self.assertEqual(bazel_dev.process_exit_code(-2), 130)
@@ -1005,9 +1007,7 @@ class CliTest(unittest.TestCase):
         output = self.parse_agents_md(["bazel", "run", "--agents_md"])
 
         self.assertIn("## iree-bazel-run", output)
-        self.assertIn(
-            "iree-bazel-run //runtime/src/tools:iree-run-module -- --help", output
-        )
+        self.assertIn("iree-bazel-run //tools:iree-dump-cpuinfo -- --help", output)
         self.assertIn("execs the binary from the current directory", output)
         self.assertIn("Bazel server lock is not", output)
         self.assertNotIn("python dev.py", output)
@@ -1099,12 +1099,14 @@ class CliTest(unittest.TestCase):
         self.assertNotIn("-- -R", description)
 
     def test_cmake_run_resolves_existing_executable_target(self):
-        args = cli.parse_arguments(["cmake", "run", "iree-run-module", "--", "--help"])
+        args = cli.parse_arguments(
+            ["cmake", "run", "iree-dump-cpuinfo", "--", "--help"]
+        )
 
         plan = args.handler(args)
         description = plan.describe()
 
-        self.assertIn("# cmake run iree-run-module", description)
+        self.assertIn("# cmake run iree-dump-cpuinfo", description)
         self.assertIn("CMake File API", description)
         self.assertIn("<built executable>", description)
         self.assertIn("--help", description)
@@ -1113,7 +1115,7 @@ class CliTest(unittest.TestCase):
         output = self.parse_agents_md(["cmake", "run", "--agents_md"])
 
         self.assertIn("## iree-cmake-run", output)
-        self.assertIn("iree-cmake-build iree-run-module", output)
+        self.assertIn("iree-cmake-build iree-dump-cpuinfo", output)
         self.assertIn("does not build", output)
         self.assertNotIn("python dev.py", output)
 

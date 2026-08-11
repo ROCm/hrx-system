@@ -22,7 +22,7 @@ Common usage:
   Run on individual files or directories (most common):
       $ python build_tools/bazel_to_cmake/bazel_to_cmake.py runtime/src/iree/base/
       $ python build_tools/bazel_to_cmake/bazel_to_cmake.py runtime/src/iree/base/BUILD.bazel
-      $ python build_tools/bazel_to_cmake/bazel_to_cmake.py runtime/src/iree/base/ runtime/src/iree/vm/
+      $ python build_tools/bazel_to_cmake/bazel_to_cmake.py runtime/src/iree/base/ runtime/src/iree/hal/
 
   Run on all files under a root directory (recursively - use sparingly):
       $ python build_tools/bazel_to_cmake/bazel_to_cmake.py --recursive_dir runtime/src/iree/

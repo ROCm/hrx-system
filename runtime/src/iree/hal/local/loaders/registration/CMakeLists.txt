@@ -11,10 +11,6 @@ endif()
 if(IREE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY)
   list(APPEND IREE_HAL_EXECUTABLE_LOADER_MODULES iree::hal::local::loaders::system_library_loader)
 endif()
-if(IREE_HAL_EXECUTABLE_LOADER_VMVX_MODULE)
-  list(APPEND IREE_HAL_EXECUTABLE_LOADER_MODULES iree::hal::local::loaders::vmvx_module_loader)
-endif()
-
 iree_cc_library(
   NAME
     registration

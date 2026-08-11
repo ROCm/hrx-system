@@ -45,7 +45,7 @@ def run_dry_run_scenario(checkout: Path) -> None:
     smoke_test_lib.run_bin_wrapper(
         checkout,
         "iree-cmake-run",
-        ["-n", "iree::tools::iree-run-module", "--", "--help"],
+        ["-n", "iree::tools::iree-dump-cpuinfo", "--", "--help"],
     )
     smoke_test_lib.run_bin_wrapper(
         checkout,

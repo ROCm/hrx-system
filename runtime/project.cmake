@@ -12,9 +12,6 @@ list(APPEND CMAKE_MODULE_PATH
 option(IREE_BUILD_TESTS "Build IREE runtime unit tests and CTS targets." ON)
 option(IREE_BUILD_BENCHMARKS "Build IREE runtime benchmarks." ON)
 
-option(IREE_MODULE_VMVX
-  "Builds the VMVX runtime module boundary."
-  OFF)
 set(IREE_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
 set(IREE_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(IREE_BUILD_PYTHON_BINDINGS OFF CACHE BOOL "" FORCE)
@@ -128,21 +125,12 @@ set(IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF_DEFAULT
   ${IREE_HAL_EXECUTABLE_LOADER_DEFAULTS})
 set(IREE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY_DEFAULT
   ${IREE_HAL_EXECUTABLE_LOADER_DEFAULTS})
-set(IREE_HAL_EXECUTABLE_LOADER_VMVX_MODULE_DEFAULT OFF)
 option(IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF
   "Enables the embedded dynamic library loader for local HAL drivers."
   ${IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF_DEFAULT})
 option(IREE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY
   "Enables the system dynamic library loader for local HAL drivers."
   ${IREE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY_DEFAULT})
-option(IREE_HAL_EXECUTABLE_LOADER_VMVX_MODULE
-  "Enables the VMVX module loader for local HAL drivers."
-  ${IREE_HAL_EXECUTABLE_LOADER_VMVX_MODULE_DEFAULT})
-if(IREE_HAL_EXECUTABLE_LOADER_VMVX_MODULE)
-  set(IREE_MODULE_VMVX ON CACHE BOOL
-    "Builds the VMVX runtime module boundary." FORCE)
-endif()
-
 option(IREE_HAL_EXECUTABLE_PLUGIN_DEFAULTS
   "Sets the default value for all runtime HAL executable plugin mechanisms." ON)
 option(IREE_HAL_EXECUTABLE_PLUGIN_EMBEDDED_ELF
@@ -163,7 +151,6 @@ include(selectors)
 include(cts)
 include(iree_execution_test_suite)
 include(iree_runtime_amdgpu_toolchain)
-include(iree_vmasm_module)
 include(iree_runtime_hal_cts_test_suite)
 include(iree_wasm_library)
 

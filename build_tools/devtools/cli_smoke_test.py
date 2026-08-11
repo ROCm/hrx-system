@@ -165,7 +165,7 @@ def run_dry_run_scenario(checkout: Path) -> None:
             "build/smoke-cmake",
             "cmake",
             "run",
-            "iree::tools::iree-run-module",
+            "iree::tools::iree-dump-cpuinfo",
             "--",
             "--help",
         ],

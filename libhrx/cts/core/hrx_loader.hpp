@@ -146,27 +146,6 @@ class HrxLoader {
   decltype(&hrx_queue_dispatch) queue_dispatch;
   decltype(&hrx_queue_host_call) queue_host_call;
 
-  // VM modules/functions.
-  decltype(&hrx_module_load_vmfb) module_load_vmfb;
-  decltype(&hrx_module_retain) module_retain;
-  decltype(&hrx_module_release) module_release;
-  decltype(&hrx_module_lookup_function) module_lookup_function;
-  decltype(&hrx_function_retain) function_retain;
-  decltype(&hrx_function_release) function_release;
-  decltype(&hrx_function_invoke) function_invoke;
-
-  // VM value lists.
-  decltype(&hrx_value_list_create) value_list_create;
-  decltype(&hrx_value_list_retain) value_list_retain;
-  decltype(&hrx_value_list_release) value_list_release;
-  decltype(&hrx_value_list_size) value_list_size;
-  decltype(&hrx_value_list_push_i64) value_list_push_i64;
-  decltype(&hrx_value_list_get_i64) value_list_get_i64;
-  decltype(&hrx_value_list_push_null_ref) value_list_push_null_ref;
-  decltype(&hrx_value_list_push_buffer) value_list_push_buffer;
-  decltype(&hrx_value_list_push_buffer_view) value_list_push_buffer_view;
-  decltype(&hrx_value_list_push_fence) value_list_push_fence;
-
   // Fences.
   decltype(&hrx_fence_create) fence_create;
   decltype(&hrx_fence_create_at) fence_create_at;
