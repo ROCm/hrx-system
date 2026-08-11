@@ -9,10 +9,12 @@
 #include <string.h>
 
 #include "iree/async/operations/file.h"
+#include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/host_queue.h"
 #include "iree/hal/drivers/amdgpu/host_queue_profile.h"
 #include "iree/hal/drivers/amdgpu/host_queue_staging.h"
 #include "iree/hal/drivers/amdgpu/host_queue_submission.h"
+#include "iree/hal/utils/memory_file.h"
 
 typedef enum iree_hal_amdgpu_file_action_kind_e {
   IREE_HAL_AMDGPU_FILE_ACTION_READ,
@@ -81,6 +83,9 @@ typedef struct iree_hal_amdgpu_file_action_state_t {
   // Completion-thread retry queued when the final signal barrier is blocked by
   // temporary queue capacity pressure.
   iree_hal_amdgpu_host_queue_post_drain_action_t signal_capacity_retry;
+
+  // Completion-thread action that publishes a completed memory-file copy.
+  iree_hal_amdgpu_host_queue_post_drain_action_t memory_copy_complete;
 
   // Async read operation reused across partial completions.
   iree_async_file_read_operation_t read_op;
@@ -289,6 +294,18 @@ static void iree_hal_amdgpu_file_action_signal_capacity_post_drain(
   iree_hal_resource_release(&state->resource);
 }
 
+static void iree_hal_amdgpu_file_action_memory_copy_post_drain(
+    void* user_data) {
+  iree_hal_amdgpu_file_action_state_t* state =
+      (iree_hal_amdgpu_file_action_state_t*)user_data;
+  iree_status_t status =
+      iree_hal_amdgpu_file_action_submit_signal_barrier(state);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_semaphore_list_fail(state->signal_semaphore_list, status);
+  }
+  iree_hal_resource_release(&state->resource);
+}
+
 static void iree_hal_amdgpu_file_action_complete(
     iree_hal_amdgpu_file_action_state_t* state, iree_status_t status) {
   if (iree_status_is_ok(status) &&
@@ -445,6 +462,46 @@ static iree_status_t iree_hal_amdgpu_file_action_start_async(
   return status;
 }
 
+static iree_status_t iree_hal_amdgpu_file_action_copy_memory_file(
+    iree_hal_amdgpu_file_action_state_t* state) {
+  iree_hal_buffer_t* storage_buffer = iree_hal_file_storage_buffer(state->file);
+  if (IREE_UNLIKELY(!storage_buffer)) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "AMDGPU memory file has no device-visible storage buffer");
+  }
+
+  iree_hal_buffer_t* source_buffer = state->buffer;
+  iree_device_size_t source_offset = state->buffer_offset;
+  iree_hal_buffer_t* target_buffer = storage_buffer;
+  iree_device_size_t target_offset = (iree_device_size_t)state->file_offset;
+  if (state->kind == IREE_HAL_AMDGPU_FILE_ACTION_READ) {
+    source_buffer = storage_buffer;
+    source_offset = (iree_device_size_t)state->file_offset;
+    target_buffer = state->buffer;
+    target_offset = state->buffer_offset;
+  }
+
+  iree_hal_buffer_t* source_allocated_buffer =
+      iree_hal_buffer_allocated_buffer(source_buffer);
+  iree_hal_buffer_t* target_allocated_buffer =
+      iree_hal_buffer_allocated_buffer(target_buffer);
+  const uint8_t* source_ptr =
+      (const uint8_t*)iree_hal_amdgpu_buffer_device_pointer(
+          source_allocated_buffer);
+  uint8_t* target_ptr =
+      (uint8_t*)iree_hal_amdgpu_buffer_device_pointer(target_allocated_buffer);
+  if (IREE_UNLIKELY(!source_ptr || !target_ptr)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU memory-file transfer requires AMDGPU buffers");
+  }
+  source_ptr += iree_hal_buffer_byte_offset(source_buffer) + source_offset;
+  target_ptr += iree_hal_buffer_byte_offset(target_buffer) + target_offset;
+  return iree_hsa_memory_copy(IREE_LIBHSA(state->queue->libhsa), target_ptr,
+                              source_ptr, state->requested_length);
+}
+
 static void iree_hal_amdgpu_file_action_execute(
     iree_hal_amdgpu_reclaim_entry_t* entry, void* user_data,
     const iree_status_t status) {
@@ -453,7 +510,23 @@ static void iree_hal_amdgpu_file_action_execute(
       (iree_hal_amdgpu_file_action_state_t*)user_data;
 
   if (iree_status_is_ok(status)) {
-    iree_status_t start_status = iree_hal_amdgpu_file_action_start_async(state);
+    iree_status_t start_status = iree_ok_status();
+    if (iree_hal_memory_file_isa(state->file)) {
+      // Memory files represent host allocations. The ordinary blit path may
+      // select a device kernel, which cannot reliably access every imported
+      // host allocation. This action runs after the queue waits retire, so the
+      // native memory copy preserves queue ordering without submitting
+      // recursively from the completion thread.
+      start_status = iree_hal_amdgpu_file_action_copy_memory_file(state);
+      if (iree_status_is_ok(start_status)) {
+        iree_hal_resource_retain(&state->resource);
+        iree_hal_amdgpu_host_queue_enqueue_post_drain_action(
+            state->queue, &state->memory_copy_complete,
+            iree_hal_amdgpu_file_action_memory_copy_post_drain, state);
+      }
+    } else {
+      start_status = iree_hal_amdgpu_file_action_start_async(state);
+    }
     if (!iree_status_is_ok(start_status)) {
       iree_hal_semaphore_list_fail(state->signal_semaphore_list, start_status);
     }
@@ -557,6 +630,24 @@ iree_status_t iree_hal_amdgpu_host_queue_read_file(
   iree_device_size_t source_device_offset = 0;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_validate_file_range(
       source_file, "read", source_offset, length, &source_device_offset));
+  if (iree_hal_memory_file_isa(source_file)) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_buffer_validate_range(target_buffer, target_offset, length));
+    IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_usage(
+        iree_hal_buffer_allowed_usage(target_buffer),
+        IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET));
+    IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_access(
+        iree_hal_buffer_allowed_access(target_buffer),
+        IREE_HAL_MEMORY_ACCESS_WRITE));
+    if (IREE_UNLIKELY(length > (iree_device_size_t)IREE_HOST_SIZE_MAX)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "memory-file read exceeds host address range");
+    }
+    return iree_hal_amdgpu_host_queue_submit_direct_file_action(
+        (iree_hal_amdgpu_host_queue_t*)queue, wait_semaphore_list,
+        signal_semaphore_list, IREE_HAL_AMDGPU_FILE_ACTION_READ, source_file,
+        source_offset, target_buffer, target_offset, length);
+  }
   if (!storage_buffer) {
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_validate_direct_file_handle(
         source_file, "read"));
@@ -604,6 +695,24 @@ iree_status_t iree_hal_amdgpu_host_queue_write_file(
   iree_device_size_t target_device_offset = 0;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_validate_file_range(
       target_file, "write", target_offset, length, &target_device_offset));
+  if (iree_hal_memory_file_isa(target_file)) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_buffer_validate_range(source_buffer, source_offset, length));
+    IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_usage(
+        iree_hal_buffer_allowed_usage(source_buffer),
+        IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE));
+    IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_access(
+        iree_hal_buffer_allowed_access(source_buffer),
+        IREE_HAL_MEMORY_ACCESS_READ));
+    if (IREE_UNLIKELY(length > (iree_device_size_t)IREE_HOST_SIZE_MAX)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "memory-file write exceeds host address range");
+    }
+    return iree_hal_amdgpu_host_queue_submit_direct_file_action(
+        (iree_hal_amdgpu_host_queue_t*)queue, wait_semaphore_list,
+        signal_semaphore_list, IREE_HAL_AMDGPU_FILE_ACTION_WRITE, target_file,
+        target_offset, source_buffer, source_offset, length);
+  }
   if (!storage_buffer) {
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_validate_direct_file_handle(
         target_file, "write"));
