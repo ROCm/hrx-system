@@ -33,6 +33,21 @@ iree_py_library(
 )
 
 iree_py_binary(
+    name = "target_tables",
+    srcs = ["amdgpu_target_tables.py"],
+    main = "amdgpu_target_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        ":package_init",
+        ":target_table_family",
+        "//loom/py/loom/gen/target/arch/amdgpu/descriptors:descriptors_module",
+        "//loom/py/loom/gen/target/arch/amdgpu/encoding:encoding_tables_module",
+        "//loom/py/loom/target/arch/amdgpu:descriptors",
+        "//loom/py/loom/target/arch/amdgpu:isa_xml",
+    ],
+)
+
+iree_py_binary(
     name = "config_tables",
     srcs = ["amdgpu_config_tables.py"],
     main = "amdgpu_config_tables.py",
