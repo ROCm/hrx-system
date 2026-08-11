@@ -11,8 +11,10 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "iree/base/tooling/flags.h"
+#include "loom/codegen/low/text_asm.h"
 #include "loom/error/diagnostic.h"
 #include "loom/target/configured/provider.h"
+#include "loom/target/provider.h"
 #include "loom/tooling/cli/help.h"
 #include "loom/tooling/context/context.h"
 #include "loom/tooling/io/file.h"
@@ -85,8 +87,9 @@ static void loom_format_print_agents_markdown(FILE* stream) {
       "writes bytecode suitable for `loom-link --library=...` and\n"
       "`loom-compile` input. The complete module is verified before either\n"
       "output is written; external calls require a matching `func.decl` or\n"
-      "definition. `--check` verifies canonical text without writing "
-      "output.\n");
+      "definition. Text conversion resolves target-low syntax using the\n"
+      "configured target descriptors. `--check` verifies canonical text\n"
+      "without writing output.\n");
 }
 
 int main(int argc, char** argv) {
@@ -125,6 +128,8 @@ int main(int argc, char** argv) {
 
   loom_context_t context = {0};
   bool context_initialized = false;
+  loom_target_low_descriptor_registry_t low_descriptor_registry = {0};
+  loom_text_low_asm_environment_t low_asm_environment = {0};
   iree_io_file_contents_t* contents = NULL;
   loom_format_output_t output = {0};
 
@@ -161,6 +166,14 @@ int main(int argc, char** argv) {
             loom_configured_target_environment(), &context);
   }
   if (iree_status_is_ok(status)) {
+    status = loom_target_environment_initialize_low_descriptor_registry(
+        loom_configured_target_environment(), &low_descriptor_registry);
+  }
+  if (iree_status_is_ok(status)) {
+    loom_low_descriptor_text_asm_environment_initialize(
+        &low_descriptor_registry.registry, &low_asm_environment);
+  }
+  if (iree_status_is_ok(status)) {
     status = loom_context_finalize(&context);
   }
 
@@ -183,6 +196,7 @@ int main(int argc, char** argv) {
                 .fn = loom_format_stderr_diagnostic_sink,
                 .user_data = stderr,
             },
+        .low_asm_environment = low_asm_environment,
     };
     status =
         loom_format_convert(contents->const_buffer, filename, &context,

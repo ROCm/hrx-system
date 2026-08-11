@@ -38,7 +38,9 @@ loom_cc_binary(
     srcs = ["loom-format.c"],
     deps = [
         ":convert",
+        "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/target:provider",
         "//loom/src/loom/target/configured:provider",
         "//loom/src/loom/tooling/cli:help",
         "//loom/src/loom/tooling/context",

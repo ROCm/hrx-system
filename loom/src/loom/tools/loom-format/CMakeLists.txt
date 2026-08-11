@@ -43,8 +43,10 @@ loom_cc_binary(
     iree::base::internal::arena
     iree::base::tooling::flags
     iree::io::file_handle
+    loom::codegen::low::text_asm
     loom::error::diagnostic
     loom::target::configured::provider
+    loom::target::provider
     loom::tooling::cli::help
     loom::tooling::context
     loom::tooling::io::file
