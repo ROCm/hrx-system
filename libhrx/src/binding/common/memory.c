@@ -764,11 +764,15 @@ iree_status_t iree_hal_streaming_memory_wrap_virtual_reservation(
   IREE_ASSERT_ARGUMENT(virtual_buffer);
   IREE_ASSERT_ARGUMENT(out_buffer);
   *out_buffer = NULL;
-  return iree_hal_streaming_buffer_wrap_hrx_buffer(
+  iree_status_t status = iree_hal_streaming_buffer_wrap_hrx_buffer(
       context, virtual_buffer, HRX_MEMORY_TYPE_DEVICE_LOCAL,
       /*imported_host_ptr=*/NULL, /*allocation_pool=*/NULL,
       IREE_HAL_STREAMING_BUFFER_ACCESS_PUBLICATION_NONE,
       IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED, out_buffer);
+  if (iree_status_is_ok(status)) {
+    (*out_buffer)->is_virtual_reservation = true;
+  }
+  return status;
 }
 
 void iree_hal_streaming_memory_release_wrapped_buffer(

@@ -6141,19 +6141,30 @@ static hipError_t iree_hip_try_cross_context_h2d(
     return iree_status_to_hip_result(sync_status);
   }
 
+  iree_hal_device_t* transfer_device = owner_context->device;
+  iree_hal_buffer_t* transfer_buffer = dst_ref.buffer->buffer;
+  if (dst_ref.buffer->is_virtual_reservation) {
+    status = iree_hal_streaming_memory_import_buffer_for_context(
+        context, dst_ref.buffer, &transfer_buffer, NULL);
+    transfer_device = context->device;
+  }
+
   const uint8_t* src_ptr = (const uint8_t*)src;
   iree_device_size_t remaining = size;
   iree_device_size_t offset = 0;
-  // The pointer owner and the context issuing the synchronous copy may be on
-  // different devices. Work that produces or consumes the foreign allocation
-  // can therefore be queued outside the owner context.
-  iree_status_t transfer_status = iree_hal_streaming_context_synchronize_all();
+  // A virtual reservation may grant access to the current device without
+  // granting it to the device that created the reservation. Perform that copy
+  // through the accessor's imported buffer after all prior device work ends.
+  iree_status_t transfer_status = status;
+  if (iree_status_is_ok(transfer_status)) {
+    transfer_status = iree_hal_streaming_context_synchronize_all();
+  }
   while (remaining > 0 && iree_status_is_ok(transfer_status)) {
     const iree_device_size_t chunk_size = 4 * 1024 * 1024;
     const iree_device_size_t this_chunk =
         remaining < chunk_size ? remaining : chunk_size;
     transfer_status = iree_hal_device_transfer_h2d(
-        owner_context->device, src_ptr + offset, dst_ref.buffer->buffer,
+        transfer_device, src_ptr + offset, transfer_buffer,
         dst_ref.offset + offset, this_chunk,
         IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
     offset += this_chunk;
@@ -6230,18 +6241,30 @@ static hipError_t iree_hip_try_cross_context_d2h(
     return iree_status_to_hip_result(status);
   }
 
+  iree_hal_device_t* transfer_device = owner_context->device;
+  iree_hal_buffer_t* transfer_buffer = src_ref.buffer->buffer;
+  if (src_ref.buffer->is_virtual_reservation) {
+    status = iree_hal_streaming_memory_import_buffer_for_context(
+        context, src_ref.buffer, &transfer_buffer, NULL);
+    transfer_device = context->device;
+  }
+
   uint8_t* dst_ptr = (uint8_t*)dst;
   iree_device_size_t remaining = size;
   iree_device_size_t offset = 0;
-  // Foreign pool allocations can be used by streams on devices other than the
-  // owner. Complete that work before issuing the blocking owner-device copy.
-  iree_status_t transfer_status = iree_hal_streaming_context_synchronize_all();
+  // A virtual reservation may grant access to the current device without
+  // granting it to the device that created the reservation. Perform that copy
+  // through the accessor's imported buffer after all prior device work ends.
+  iree_status_t transfer_status = status;
+  if (iree_status_is_ok(transfer_status)) {
+    transfer_status = iree_hal_streaming_context_synchronize_all();
+  }
   while (remaining > 0 && iree_status_is_ok(transfer_status)) {
     const iree_device_size_t chunk_size = 4 * 1024 * 1024;
     const iree_device_size_t this_chunk =
         remaining < chunk_size ? remaining : chunk_size;
     transfer_status = iree_hal_device_transfer_d2h(
-        owner_context->device, src_ref.buffer->buffer, src_ref.offset + offset,
+        transfer_device, transfer_buffer, src_ref.offset + offset,
         dst_ptr + offset, this_chunk, IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
         iree_infinite_timeout());
     offset += this_chunk;

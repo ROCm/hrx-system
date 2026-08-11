@@ -853,6 +853,9 @@ typedef struct iree_hal_streaming_buffer_t {
   // True when the allocation was created by hipMallocManaged.
   bool is_managed;
 
+  // True when the buffer represents reserved virtual address space.
+  bool is_virtual_reservation;
+
   // Whether copies explicitly naming this allocation must complete before
   // returning to the caller.
   iree_atomic_int32_t synchronous_memory_operations;
