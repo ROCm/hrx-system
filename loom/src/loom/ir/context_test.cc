@@ -68,6 +68,15 @@ static const loom_encoding_vtable_t kQ8_0EncodingVtable = {
     /*.descriptor=*/&kQ8_0EncodingDescriptor,
 };
 
+static const loom_type_descriptor_t kTestTypeDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(9, "test.type"),
+    /*.ir_kind=*/LOOM_TYPE_DIALECT,
+};
+
+static const loom_type_registry_entry_t kTestTypeEntries[] = {
+    {IREE_SV("test.type"), &kTestTypeDescriptor},
+};
+
 static bool TestEncodingIsStaticValid(const loom_module_t* module,
                                       const loom_encoding_t* encoding) {
   (void)module;
@@ -467,6 +476,39 @@ TEST_F(ContextTest, ParameterizedAttributeRegistrationRejectsOptionalPrimary) {
       IREE_STATUS_INVALID_ARGUMENT,
       loom_context_register_parameterized_attrs(
           &context_, LOOM_DIALECT_TEST, kFamilies, IREE_ARRAYSIZE(kFamilies)));
+}
+
+TEST_F(ContextTest, DialectTypeDescriptorsResolveAfterFinalization) {
+  IREE_ASSERT_OK(loom_context_register_type_descriptors(
+      &context_, kTestTypeEntries, IREE_ARRAYSIZE(kTestTypeEntries)));
+  EXPECT_EQ(loom_context_lookup_type_by_name(&context_, IREE_SV("test.type")),
+            nullptr);
+
+  IREE_ASSERT_OK(loom_context_finalize(&context_));
+  EXPECT_EQ(loom_context_lookup_type_by_name(&context_, IREE_SV("test.type")),
+            &kTestTypeDescriptor);
+  EXPECT_EQ(
+      loom_context_lookup_type_by_name(&context_, IREE_SV("test.missing")),
+      nullptr);
+}
+
+TEST_F(ContextTest, DialectTypeRegistrationRejectsDuplicateNames) {
+  IREE_ASSERT_OK(loom_context_register_type_descriptors(
+      &context_, kTestTypeEntries, IREE_ARRAYSIZE(kTestTypeEntries)));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_ALREADY_EXISTS,
+      loom_context_register_type_descriptors(&context_, kTestTypeEntries,
+                                             IREE_ARRAYSIZE(kTestTypeEntries)));
+}
+
+TEST_F(ContextTest, DialectTypeRegistrationRejectsInconsistentNames) {
+  static const loom_type_registry_entry_t kInconsistentEntries[] = {
+      {IREE_SV("test.other"), &kTestTypeDescriptor},
+  };
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_context_register_type_descriptors(
+                            &context_, kInconsistentEntries,
+                            IREE_ARRAYSIZE(kInconsistentEntries)));
 }
 
 TEST_F(ContextTest, RegisterEncodingVtableAndLookupByName) {

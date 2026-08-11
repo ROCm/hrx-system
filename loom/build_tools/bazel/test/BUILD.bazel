@@ -8,11 +8,72 @@
 
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//build_tools/bazel:executable.bzl", "iree_executable_test")
+load(
+    "//loom/build_tools/bazel:defs.bzl",
+    "loom_compile_target",
+    "loom_kernel_library",
+    "loom_library",
+    "loom_test_library",
+)
 load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
 load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
 load(":loom_check_rules_test.bzl", "loom_check_rules_test_suite")
+load(
+    ":loom_library_rules_test.bzl",
+    "REFERENCE_PROFILE",
+    "SERIALIZED_REFERENCE_PROFILE",
+    "loom_library_rules_test_suite",
+)
 
 package(default_visibility = ["//visibility:public"])
+
+# Analysis-only compiler profile for exercising action construction without
+# coupling common rule tests to any production target implementation.
+loom_compile_target(
+    name = "test_compile",
+    artifact_extension = "testbin",
+    backend = "test",
+    target = "test-target",
+)
+
+loom_kernel_library(
+    name = "public_kernel_library",
+    srcs = [
+        "link_checks.loom",
+        "link_kernels.loom",
+    ],
+)
+
+loom_library(
+    name = "archive_dependency",
+    srcs = ["link_kernels.loom"],
+    tags = ["manual"],
+)
+
+loom_library(
+    name = "archive_consumer",
+    srcs = ["link_checks.loom"],
+    tags = ["manual"],
+    deps = [":archive_dependency"],
+)
+
+loom_library(
+    name = "archive_aggregate",
+    tags = ["manual"],
+    deps = [":archive_consumer"],
+)
+
+loom_test_library(
+    name = "profiled_library",
+    srcs = ["profile_cases.loom"],
+    compile_targets = [":test_compile"],
+    execution_profiles = [
+        REFERENCE_PROFILE,
+        SERIALIZED_REFERENCE_PROFILE,
+    ],
+    tags = ["manual"],
+    deps = [":archive_dependency"],
+)
 
 loom_check_test(
     name = "loom_check_wrapper_subject",
@@ -22,6 +83,8 @@ loom_check_test(
 )
 
 loom_check_rules_test_suite(name = "loom_check_rules_tests")
+
+loom_library_rules_test_suite(name = "loom_library_rules_tests")
 
 loom_link_module(
     name = "linked_module",
@@ -34,6 +97,20 @@ iree_executable_test(
     src = "//loom/src/loom/tools/loom-format",
     args = ["$(rootpath :linked_module)"],
     data = [":linked_module"],
+)
+
+iree_executable_test(
+    name = "loom_library_archive_direct_test",
+    src = "//loom/src/loom/tools/loom-format",
+    args = ["$(rootpath :archive_consumer)"],
+    data = [":archive_consumer"],
+)
+
+iree_executable_test(
+    name = "loom_library_aggregate_direct_test",
+    src = "//loom/src/loom/tools/loom-format",
+    args = ["$(rootpath :archive_aggregate)"],
+    data = [":archive_aggregate"],
 )
 
 sh_test(
@@ -52,6 +129,12 @@ test_suite(
     tests = [
         ":loom_check_rules_tests",
         ":loom_check_wrapper_direct_test",
+        ":loom_library_aggregate_direct_test",
+        ":loom_library_archive_direct_test",
+        ":loom_library_rules_tests",
         ":loom_link_module_direct_test",
+        ":profiled_library_execute_reference_test",
+        ":profiled_library_plan_test",
+        ":public_kernel_library_test",
     ],
 )

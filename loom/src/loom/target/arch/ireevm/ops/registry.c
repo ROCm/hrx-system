@@ -7,6 +7,7 @@
 #include "loom/target/arch/ireevm/ops/registry.h"
 
 #include "loom/target/arch/ireevm/ops/ops.h"
+#include "loom/target/arch/ireevm/ops/types.h"
 
 iree_status_t loom_ireevm_ops_register_dialect(loom_context_t* context) {
   iree_host_size_t vtable_count = 0;
@@ -17,6 +18,9 @@ iree_status_t loom_ireevm_ops_register_dialect(loom_context_t* context) {
       loom_ireevm_dialect_op_semantics(&semantic_count);
   IREE_RETURN_IF_ERROR(loom_context_register_dialect(
       context, LOOM_DIALECT_IREEVM, vtables, (uint16_t)vtable_count));
-  return loom_context_register_dialect_semantics(
-      context, LOOM_DIALECT_IREEVM, semantics, (uint16_t)semantic_count);
+  IREE_RETURN_IF_ERROR(loom_context_register_dialect_semantics(
+      context, LOOM_DIALECT_IREEVM, semantics, (uint16_t)semantic_count));
+  return loom_type_registry_register_types(
+      context, loom_ireevm_type_registry_entries,
+      loom_ireevm_type_registry_entry_count);
 }

@@ -207,22 +207,10 @@ def _emit_tables_header() -> str:
     return "\n".join(lines)
 
 
-def generate_type_registry(
-    all_types: list[Any],
-) -> tuple[str, str, str]:
-    """Generate type_registry.h, type_registry_tables.h, and type_registry_tables.c."""
-    header = [GENERATED_HEADER]
-    header.append("#ifndef LOOM_OPS_TYPE_REGISTRY_H_")
-    header.append("#define LOOM_OPS_TYPE_REGISTRY_H_")
-    header.append("")
-    base_includes = (
-        "iree/base/api.h",
-        "loom/ir/parameterized_type.h",
-        "loom/ir/types.h",
-        "loom/ops/op_defs.h",
-    )
-    header.extend(f'#include "{include}"' for include in base_includes)
-    enum_includes = sorted(
+def _type_enum_includes(all_types: Sequence[Any]) -> list[str]:
+    """Returns target or dialect headers required by type enum parameters."""
+
+    return sorted(
         {
             parameter.enum_def.c_include
             for type_def in all_types
@@ -230,123 +218,12 @@ def generate_type_registry(
             for parameter in type_def.params
             if parameter.enum_def is not None and parameter.enum_def.c_include is not None
         }
-        - set(base_includes)
     )
-    header.extend(f'#include "{include}"' for include in enum_includes)
-    header.append("")
-    header.append("#ifdef __cplusplus")
-    header.append('extern "C" {')
-    header.append("#endif")
-    header.append("")
-    header.append("typedef struct loom_value_fact_domain_t loom_value_fact_domain_t;")
-    header.append("typedef struct loom_module_t loom_module_t;")
-    header.append("")
-    header.append("// Format element kinds for type interiors (inside <...>).")
-    header.append("// These are separate from op format elements because type")
-    header.append("// interiors have different semantics (shape dims, element")
-    header.append("// types, encodings) than op bodies (operand refs, attr values).")
-    header.append("typedef enum loom_type_format_kind_e {")
-    header.append("  LOOM_TYPE_FMT_SHAPE = 0,      // Dimension list: 4x[%M]x...")
-    header.append("  LOOM_TYPE_FMT_SCALAR = 1,      // Element type keyword: f32, i8.")
-    header.append("  LOOM_TYPE_FMT_ENCODING = 2,    // Encoding ref: #test.schema or %enc.")
-    header.append("  LOOM_TYPE_FMT_TYPE = 3,         // Recursive type: vm.ref<T>.")
-    header.append("  LOOM_TYPE_FMT_ATTR = 4,         // Bare identifier attribute.")
-    header.append("  LOOM_TYPE_FMT_KEYWORD = 5,      // Literal punctuation/word.")
-    header.append("  LOOM_TYPE_FMT_OPTIONAL = 6,     // Conditional elements.")
-    header.append("  LOOM_TYPE_FMT_GLUE = 7,         // Suppress space.")
-    header.append("  LOOM_TYPE_FMT_PARAM = 8,        // Descriptor-backed attribute value.")
-    header.append("  LOOM_TYPE_FMT_PARAM_KEY = 9,    // Descriptor-backed parameter name.")
-    header.append("} loom_type_format_kind_t;")
-    header.append("")
-    header.append("// A 4-byte format element for type interiors. Same layout")
-    header.append("// as loom_format_element_t for consistent handling.")
-    header.append("typedef struct loom_type_format_element_t {")
-    header.append("  // Format opcode, encoded as loom_type_format_kind_t.")
-    header.append("  uint8_t kind;")
-    header.append("")
-    header.append("  // Parameter index consumed by this element.")
-    header.append("  uint8_t field_index;")
-    header.append("")
-    header.append("  // Kind-specific payload such as a keyword ID or skip count.")
-    header.append("  uint16_t data;")
-    header.append("} loom_type_format_element_t;")
-    header.append("")
-    header.append("// Descriptor for a registered type. Contains the name,")
-    header.append("// the IR type kind to construct, parameter count, and")
-    header.append("// format elements describing the type interior syntax.")
-    header.append("typedef struct loom_type_descriptor_t {")
-    header.append("  // B-string name with a trailing '<' outside its declared length.")
-    header.append("  const uint8_t* name;")
-    header.append("")
-    header.append("  // What IR type kind to construct when parsing.")
-    header.append("  loom_type_kind_t ir_kind;")
-    header.append("")
-    header.append("  // Number of declared parameters.")
-    header.append("  uint8_t param_count;")
-    header.append("")
-    header.append("  // Optional type-owned value fact domain. NULL means the type only has generic")
-    header.append("  // scalar facts or uses the domain-free extension behavior.")
-    header.append("  const loom_value_fact_domain_t* fact_domain;")
-    header.append("")
-    header.append("  // Semantic role and target-contract families for this type.")
-    header.append("  loom_type_semantics_t semantics;")
-    header.append("")
-    header.append("  // Format element array for the type interior (inside <...>).")
-    header.append("  // NULL for opaque types (no angle brackets).")
-    header.append("  const loom_type_format_element_t* format_elements;")
-    header.append("")
-    header.append("  // Number of entries in |format_elements|.")
-    header.append("  uint8_t format_element_count;")
-    header.append("")
-    header.append("  // Descriptor-backed parameter schema, or NULL when not declared.")
-    header.append("  const loom_parameterized_type_descriptor_t* parameterized;")
-    header.append("} loom_type_descriptor_t;")
-    header.append("")
-    header.extend(_generate_parameterized_type_header_lines(all_types))
-    header.append("// Entry in the sorted type registry.")
-    header.append("typedef struct loom_type_registry_entry_t {")
-    header.append("  iree_string_view_t name;")
-    header.append("  const loom_type_descriptor_t* descriptor;")
-    header.append("} loom_type_registry_entry_t;")
-    header.append("")
-    header.append("// Returns the number of entries in the global type registry.")
-    header.append("iree_host_size_t loom_type_registry_count(void);")
-    header.append("")
-    header.append("// Returns the sorted registry array (for iteration/testing).")
-    header.append("const loom_type_registry_entry_t* loom_type_registry_entries(void);")
-    header.append("")
-    header.append('// Looks up a type descriptor by name (e.g., "tile", "hal.buffer").')
-    header.append("// Returns the descriptor on success, NULL if not found.")
-    header.append("const loom_type_descriptor_t* loom_type_registry_lookup(")
-    header.append("    iree_string_view_t name);")
-    header.append("")
-    header.append("// Looks up a registered built-in descriptor by runtime type kind.")
-    header.append("// Returns NULL for dialect, generic parameterized, or invalid kinds.")
-    header.append("const loom_type_descriptor_t* loom_type_registry_lookup_builtin(")
-    header.append("    loom_type_kind_t kind);")
-    header.append("")
-    header.append("// Resolves the type-owned value fact domain for |type|, or NULL if the")
-    header.append("// registered type has no extension fact domain.")
-    header.append("const loom_value_fact_domain_t* loom_type_registry_resolve_fact_domain(")
-    header.append("    void* user_data, const loom_fact_context_t* context,")
-    header.append("    const loom_module_t* module, loom_type_t type);")
-    header.append("")
-    header.append("// Installs the generated type-registry fact-domain resolver on |context|.")
-    header.append("void loom_type_registry_configure_fact_context(")
-    header.append("    loom_fact_context_t* context);")
-    header.append("")
-    header.append("#ifdef __cplusplus")
-    header.append("}")
-    header.append("#endif")
-    header.append("")
-    header.append("#endif  // LOOM_OPS_TYPE_REGISTRY_H_")
-    header.append("")
 
-    tables_header = _emit_tables_header()
 
-    source = [GENERATED_HEADER]
-    source.append('#include "loom/ops/type_registry_tables.h"')
-    source.append('#include "loom/ir/module.h"')
+def _append_type_definition_source(source: list[str], all_types: Sequence[Any]) -> None:
+    """Appends descriptor metadata and typed constructor definitions."""
+
     nested_attr_headers = sorted(
         {
             f"loom/{c_dialect_path(parameter.parameterized_attr.group)}/ops.h"
@@ -367,7 +244,6 @@ def generate_type_registry(
         source.append(f'static const uint8_t loom_type_{ident}_name[{storage_length}] = "\\x{name_len:02x}" "{type_def.name}<";')
 
     source.append("")
-
     source.extend(_generate_parameterized_type_metadata_lines(all_types))
 
     fact_domain_symbols = sorted({fact_domain for type_def in all_types if (fact_domain := _type_fact_domain_symbol(type_def)) is not None})
@@ -385,7 +261,6 @@ def generate_type_registry(
         source.append("};")
 
     source.append("")
-
     for type_def in all_types:
         ident = _type_c_ident(type_def.name)
         ir_kind = type_ir_kind_c_name(type_def) if type_def.uses_attribute_parameters else TYPE_IR_KIND_MAP[type_def.ir_kind]
@@ -416,6 +291,78 @@ def generate_type_registry(
 
     source.extend(_generate_parameterized_type_source_lines(all_types))
 
+
+def generate_type_registry(
+    all_types: list[Any],
+) -> tuple[str, str, str]:
+    """Generate type_registry.h, type_registry_tables.h, and type_registry_tables.c."""
+    header = [GENERATED_HEADER]
+    header.append("#ifndef LOOM_OPS_TYPE_REGISTRY_H_")
+    header.append("#define LOOM_OPS_TYPE_REGISTRY_H_")
+    header.append("")
+    base_includes = (
+        "iree/base/api.h",
+        "loom/ir/type_descriptor.h",
+        "loom/ops/op_defs.h",
+    )
+    header.extend(f'#include "{include}"' for include in base_includes)
+    enum_includes = sorted(set(_type_enum_includes(all_types)) - set(base_includes))
+    header.extend(f'#include "{include}"' for include in enum_includes)
+    header.append("")
+    header.append("#ifdef __cplusplus")
+    header.append('extern "C" {')
+    header.append("#endif")
+    header.append("")
+    header.append("typedef struct loom_module_t loom_module_t;")
+    header.append("typedef struct loom_context_t loom_context_t;")
+    header.append("")
+    header.extend(_generate_parameterized_type_header_lines(all_types))
+    header.append("// Returns the number of entries in the common type registry.")
+    header.append("iree_host_size_t loom_type_registry_count(void);")
+    header.append("")
+    header.append("// Returns the sorted common registry array (for iteration/testing).")
+    header.append("const loom_type_registry_entry_t* loom_type_registry_entries(void);")
+    header.append("")
+    header.append("// Registers a generated dialect-owned type table with |context|.")
+    header.append("// Common and previously registered names cannot be replaced.")
+    header.append("iree_status_t loom_type_registry_register_types(")
+    header.append("    loom_context_t* context, const loom_type_registry_entry_t* entries,")
+    header.append("    iree_host_size_t entry_count);")
+    header.append("")
+    header.append("// Looks up a common or context-registered type by name.")
+    header.append("// Returns the descriptor on success, NULL if not found.")
+    header.append("const loom_type_descriptor_t* loom_type_registry_lookup(")
+    header.append("    const loom_context_t* context, iree_string_view_t name);")
+    header.append("")
+    header.append("// Looks up a registered built-in descriptor by runtime type kind.")
+    header.append("// Returns NULL for dialect, generic parameterized, or invalid kinds.")
+    header.append("const loom_type_descriptor_t* loom_type_registry_lookup_builtin(")
+    header.append("    loom_type_kind_t kind);")
+    header.append("")
+    header.append("// Resolves the type-owned value fact domain for |type|, or NULL if the")
+    header.append("// registered type has no extension fact domain.")
+    header.append("const loom_value_fact_domain_t* loom_type_registry_resolve_fact_domain(")
+    header.append("    void* user_data, const loom_fact_context_t* context,")
+    header.append("    const loom_module_t* module, loom_type_t type);")
+    header.append("")
+    header.append("// Installs the generated type-registry fact-domain resolver on |context|.")
+    header.append("void loom_type_registry_configure_fact_context(")
+    header.append("    loom_fact_context_t* context);")
+    header.append("")
+    header.append("#ifdef __cplusplus")
+    header.append("}")
+    header.append("#endif")
+    header.append("")
+    header.append("#endif  // LOOM_OPS_TYPE_REGISTRY_H_")
+    header.append("")
+
+    tables_header = _emit_tables_header()
+
+    source = [GENERATED_HEADER]
+    source.append('#include "loom/ops/type_registry_tables.h"')
+    source.append('#include "loom/ir/module.h"')
+    _append_type_definition_source(source, all_types)
+
     sorted_types = sorted(all_types, key=lambda type_def: type_def.name)
     source.append("const loom_type_registry_entry_t")
     source.append("    loom_type_registry_entries_storage[] = {")
@@ -437,3 +384,50 @@ def generate_type_registry(
     source.append("")
 
     return "\n".join(header), tables_header, "\n".join(source)
+
+
+def generate_dialect_type_registry(dialect: Any, all_types: Sequence[Any]) -> tuple[str, str]:
+    """Generates one dialect-owned types.h and types.c registry shard."""
+
+    path = c_dialect_path(dialect)
+    guard = f"LOOM_{path.replace('/', '_').upper()}_TYPES_H_"
+    header = [GENERATED_HEADER]
+    header.append(f"#ifndef {guard}")
+    header.append(f"#define {guard}")
+    header.append("")
+    header.append('#include "loom/ops/type_registry.h"')
+    header.extend(f'#include "{include}"' for include in _type_enum_includes(all_types) if include != "loom/ops/type_registry.h")
+    header.append("")
+    header.append("#ifdef __cplusplus")
+    header.append('extern "C" {')
+    header.append("#endif")
+    header.append("")
+    header.append("typedef struct loom_module_t loom_module_t;")
+    header.append("")
+    header.extend(_generate_parameterized_type_header_lines(all_types))
+    symbol_prefix = f"loom_{dialect.name}_type_registry"
+    header.append("// Generated type descriptors owned by this dialect.")
+    header.append(f"extern const loom_type_registry_entry_t {symbol_prefix}_entries[];")
+    header.append(f"extern const iree_host_size_t {symbol_prefix}_entry_count;")
+    header.append("")
+    header.append("#ifdef __cplusplus")
+    header.append("}")
+    header.append("#endif")
+    header.append("")
+    header.append(f"#endif  // {guard}")
+    header.append("")
+
+    source = [GENERATED_HEADER]
+    source.append(f'#include "loom/{path}/types.h"')
+    source.append('#include "loom/ir/module.h"')
+    _append_type_definition_source(source, all_types)
+    source.append(f"const loom_type_registry_entry_t {symbol_prefix}_entries[] = {{")
+    for type_def in sorted(all_types, key=lambda value: value.name):
+        ident = _type_c_ident(type_def.name)
+        source.append(f'    {{IREE_SVL("{type_def.name}"), &loom_type_{ident}_descriptor}},')
+    source.append("};")
+    source.append("")
+    source.append(f"const iree_host_size_t {symbol_prefix}_entry_count =")
+    source.append(f"    {len(all_types)};")
+    source.append("")
+    return "\n".join(header), "\n".join(source)

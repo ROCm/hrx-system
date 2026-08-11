@@ -1142,7 +1142,7 @@ static iree_status_t loom_parse_registered_type(loom_parser_t* parser,
                                                 bool* out_matched) {
   *out_matched = false;
   const loom_type_descriptor_t* descriptor =
-      loom_type_registry_lookup(token.text);
+      loom_type_registry_lookup(parser->context, token.text);
   if (!descriptor) return iree_ok_status();
   *out_matched = true;
 

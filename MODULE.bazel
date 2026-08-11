@@ -15,3 +15,15 @@ module(
 include("//build_tools/bazel:deps.MODULE.bazel")
 include("//build_tools/third_party:deps.MODULE.bazel")
 include("//loom/build_tools/bazel:deps.MODULE.bazel")
+
+# Source repositories consume Loom through independent authoring toolchain
+# roles. Root modules may register higher-priority released implementations,
+# while a local module override keeps the same labels and rebuilds these source
+# tools.
+register_toolchains(
+    "//loom/build_tools/bazel:source_tools_benchmark_toolchain",
+    "//loom/build_tools/bazel:source_tools_compile_toolchain",
+    "//loom/build_tools/bazel:source_tools_format_toolchain",
+    "//loom/build_tools/bazel:source_tools_link_toolchain",
+    "//loom/build_tools/bazel:source_tools_test_toolchain",
+)

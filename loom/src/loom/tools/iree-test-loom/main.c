@@ -26,6 +26,7 @@
 #include "loom/tooling/testbench/issue_report.h"
 #include "loom/tooling/testbench/reference.h"
 #include "loom/tooling/testbench/requirements.h"
+#include "loom/tools/iree-test-loom/library_linker.h"
 #include "loom/util/json.h"
 #include "loom/util/stream.h"
 #include "loom/verify/verify.h"
@@ -36,6 +37,10 @@ IREE_FLAG(string, case, "",
 IREE_FLAG(int32_t, sample, -1,
           "Optional concrete sample ordinal to execute for the selected case "
           "or cases. Negative executes all planned samples.");
+IREE_FLAG_LIST(
+    string, library,
+    "Loom bytecode library linked into the authored input module. Repeat as "
+    "--library=path.loombc. Libraries are linked whole in argument order.");
 IREE_FLAG_NAMED(int32_t, max_samples_per_case, "max-samples-per-case",
                 LOOM_TESTBENCH_DEFAULT_MAX_SAMPLES_PER_CASE,
                 "Maximum number of samples planned per check.case.");
@@ -523,6 +528,7 @@ static void iree_test_loom_print_agents_markdown(FILE* stream) {
       "iree-test-loom module.loom\n"
       "iree-test-loom module.loom --case=@case_q8_block_unroll_wg64\n"
       "iree-test-loom module.loom --case=@sampled_choice --sample=1\n"
+      "iree-test-loom test.loom --library=motifs.loombc\n"
       "iree-test-loom module.loom --max-samples-per-case=16\n"
       "iree-test-loom module.loom --pipeline=@hal_actual_pipeline\n"
       "iree-test-loom module.loom --config=model.hidden_size=4096\n"
@@ -723,6 +729,14 @@ int iree_test_loom_main(int argc, char** argv,
     parse_options.filename = filename;
     parse_options.source = source;
     status = loom_run_module_parse(&session, &parse_options, &run_module);
+  }
+  if (iree_status_is_ok(status)) {
+    const iree_flag_string_list_t libraries = FLAG_library_list();
+    status = iree_test_loom_link_libraries(&session, &run_module,
+                                           (iree_string_view_list_t){
+                                               .count = libraries.count,
+                                               .values = libraries.values,
+                                           });
   }
   if (iree_status_is_ok(status)) {
     status = iree_test_loom_verify_run_module(&run_module);

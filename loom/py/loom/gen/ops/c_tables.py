@@ -51,7 +51,10 @@ from loom.gen.ops.model import (
     load_dialect_generation,
     load_generation_model,
 )
-from loom.gen.ops.type_registry import generate_type_registry
+from loom.gen.ops.type_registry import (
+    generate_dialect_type_registry,
+    generate_type_registry,
+)
 from loom.gen.support.files import write_text_file as _write_file
 
 __all__ = [
@@ -62,6 +65,7 @@ __all__ = [
     "generate_tables_aggregator_c",
     "generate_tables_c",
     "generate_tables_h",
+    "generate_dialect_type_registry",
     "generate_type_registry",
     "main",
 ]
@@ -123,6 +127,8 @@ def _checked_in_output_contents(model: GenerationModel) -> dict[Path, str]:
         dialect_dir = output_root / _c_dialect_path(generation.dialect)
         contents = c_dialect.generate_dialect_contents(generation)
         outputs[dialect_dir / "ops.h"] = contents["ops.h"]
+        if "types.h" in contents:
+            outputs[dialect_dir / "types.h"] = contents["types.h"]
         if "tables.h" in contents:
             outputs[dialect_dir / "tables.h"] = contents["tables.h"]
 
@@ -224,6 +230,7 @@ def _main_build_output_mode(parser: argparse.ArgumentParser, args: argparse.Name
         _set_output(parser, outputs, "builders.c", args.builders)
         _set_output(parser, outputs, "tables.c", args.tables)
         _set_output(parser, outputs, "tables.h", args.table_header)
+        _set_output(parser, outputs, "types.c", args.types)
         for output in args.table_shard:
             _set_output(parser, outputs, f"tables/{output.name}.c", output.path)
         return _generate_selected_outputs(parser, c_dialect.generate_dialect_contents(generation), outputs)
@@ -265,6 +272,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--ops-header", type=Path, help="Generated dialect ops.h path.")
     parser.add_argument("--builders", type=Path, help="Generated dialect builders.c path.")
     parser.add_argument("--tables", type=Path, help="Generated dialect tables.c path.")
+    parser.add_argument("--types", type=Path, help="Generated dialect types.c path.")
     parser.add_argument("--table-header", type=Path, help="Generated sharded-dialect tables.h path.")
     parser.add_argument(
         "--table-shard",

@@ -561,7 +561,8 @@ loom_target_low_legality_resolve_dialect_type(const loom_module_t* module,
     return NULL;
   }
   iree_string_view_t name = module->strings.entries[name_id];
-  const loom_type_descriptor_t* descriptor = loom_type_registry_lookup(name);
+  const loom_type_descriptor_t* descriptor =
+      loom_type_registry_lookup(module->context, name);
   if (descriptor == NULL ||
       descriptor->param_count != loom_type_dialect_param_count(type)) {
     return NULL;

@@ -128,6 +128,7 @@ from loom.gen.ops.c_location_tags import generate_location_tag_table_inc
 from loom.gen.ops.c_registry import generate_op_registry
 from loom.gen.ops.c_scalar_types import generate_scalar_type_table_inc
 from loom.gen.ops.c_tables import (
+    generate_dialect_type_registry,
     generate_ops_h,
     generate_sharded_tables_c,
     generate_tables_aggregator_c,
@@ -256,9 +257,27 @@ def test_generate_type_registry_emits_type_semantics() -> None:
 
     type_registry_h, _, type_registry_tables_c = generate_type_registry([type_def])
 
-    assert "loom_type_semantics_t semantics;" in type_registry_h
+    assert '#include "loom/ir/type_descriptor.h"' in type_registry_h
     assert ".semantic = LOOM_TYPE_SEMANTIC_CONTROL_TOKEN," in type_registry_tables_c
     assert ".contract_families = LOOM_CONTRACT_KERNEL_ASYNC," in type_registry_tables_c
+
+
+def test_generate_dialect_type_registry_emits_owned_shard() -> None:
+    dialect = Dialect(
+        "target_test",
+        dialect_id=0x1E,
+        c_path="target/arch/test/ops",
+        register_by_default=False,
+    )
+    type_def = TypeDef(name="target_test.handle")
+
+    types_h, types_c = generate_dialect_type_registry(dialect, [type_def])
+
+    assert '#include "loom/ops/type_registry.h"' in types_h
+    assert "loom_target_test_type_registry_entries[]" in types_h
+    assert "loom_target_test_type_registry_entry_count" in types_h
+    assert '#include "loom/target/arch/test/ops/types.h"' in types_c
+    assert 'IREE_SVL("target_test.handle")' in types_c
 
 
 def test_generate_type_registry_emits_builtin_type_descriptor_table() -> None:

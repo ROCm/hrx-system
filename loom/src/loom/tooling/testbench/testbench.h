@@ -80,6 +80,8 @@ typedef enum loom_testbench_value_source_kind_e {
   LOOM_TESTBENCH_VALUE_SOURCE_RANDOM_UNIFORM = 4,
   // Fixture file input from check.file.read.npy.
   LOOM_TESTBENCH_VALUE_SOURCE_FILE_READ_NPY = 5,
+  // Dense typed alias from check.tensor.view.
+  LOOM_TESTBENCH_VALUE_SOURCE_TENSOR_VIEW = 6,
 } loom_testbench_value_source_kind_t;
 
 typedef enum loom_testbench_invocation_kind_e {
@@ -181,6 +183,13 @@ typedef struct loom_testbench_file_source_plan_t {
   iree_string_view_t path;
 } loom_testbench_file_source_plan_t;
 
+typedef struct loom_testbench_tensor_view_source_plan_t {
+  // SSA value providing the source tensor storage.
+  loom_value_id_t source_value_id;
+  // Static byte offset from the beginning of the source tensor.
+  iree_device_size_t byte_offset;
+} loom_testbench_tensor_view_source_plan_t;
+
 typedef struct loom_testbench_parameter_plan_t {
   // Parameter kind and payload discriminator.
   loom_testbench_parameter_kind_t kind;
@@ -226,6 +235,8 @@ typedef struct loom_testbench_value_source_plan_t {
     loom_testbench_random_uniform_source_plan_t random_uniform;
     // Payload for check.file.read.npy.
     loom_testbench_file_source_plan_t file;
+    // Payload for check.tensor.view.
+    loom_testbench_tensor_view_source_plan_t tensor_view;
   };
 } loom_testbench_value_source_plan_t;
 

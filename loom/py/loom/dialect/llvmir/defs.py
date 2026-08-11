@@ -49,6 +49,7 @@ llvmir_ops = Dialect(
     "llvmir",
     dialect_id=0x11,
     doc=("LLVM IR target punch-through operations. These ops preserve target specific intent in Loom IR while still lowering through structured LLVMIR builders instead of raw textual emission."),
+    register_by_default=False,
 )
 
 AsmFlags = EnumDef(

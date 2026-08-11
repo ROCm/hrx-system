@@ -62,6 +62,15 @@ selects.config_setting_group(
 )
 
 selects.config_setting_group(
+    name = "iree_vm_execution",
+    match_all = [
+        ":iree_vm",
+        "//loom/config/target/arch:iree_vm",
+        "//loom/config/emit:iree_vm",
+    ],
+)
+
+selects.config_setting_group(
     name = "spirv_vulkan_hal",
     match_all = [
         ":iree_hal_vulkan",

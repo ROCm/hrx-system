@@ -23,7 +23,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
-#include "loom/ops/type_registry.h"
+#include "loom/ops/test/types.h"
 #include "loom/testing/diagnostic_matchers.h"
 #include "loom/util/stream.h"
 
@@ -1629,16 +1629,14 @@ TEST_F(ParserTest, DescriptorBackedTypesRoundTripAndPreserveParameters) {
   loom_module_free(module);
 }
 
-TEST_F(ParserTest, SpirvCooperativeMatrixTypeRoundTripsCompactShape) {
+TEST_F(ParserTest, DescriptorBackedTypeRoundTripsCompactShape) {
   const char* source =
       "%matrix = test.constant 0 : "
-      "spirv.cooperative_matrix<16x32xu8, subgroup, matrix_a>\n";
+      "test.compact_matrix<16x32xbf16, subgroup>\n";
   std::string text = RoundTrip(source);
-  EXPECT_NE(text.find("spirv.cooperative_matrix<16x32xu8, subgroup, "
-                      "matrix_a>"),
+  EXPECT_NE(text.find("test.compact_matrix<16x32xbf16, subgroup>"),
             std::string::npos)
-      << "cooperative matrix payload should round-trip without shape spacing: "
-      << text;
+      << "compact shape payload should round-trip without spacing: " << text;
 
   loom_module_t* module = ParseOk(text.c_str());
   ASSERT_NE(module, nullptr);
@@ -1647,15 +1645,16 @@ TEST_F(ParserTest, SpirvCooperativeMatrixTypeRoundTripsCompactShape) {
   ASSERT_EQ(block->op_count, 1u);
   loom_type_t matrix_type = loom_module_value_type(
       module, loom_test_constant_result(loom_block_op(block, 0)));
-  ASSERT_TRUE(loom_spirv_cooperative_matrix_type_isa(matrix_type));
-  EXPECT_EQ(loom_spirv_cooperative_matrix_type_rows(matrix_type), 16);
-  EXPECT_EQ(loom_spirv_cooperative_matrix_type_columns(matrix_type), 32);
-  EXPECT_EQ(loom_spirv_cooperative_matrix_type_component_type(matrix_type),
-            LOOM_SPIRV_SCALAR_TYPE_U8);
-  EXPECT_EQ(loom_spirv_cooperative_matrix_type_scope(matrix_type),
-            LOOM_SPIRV_SCOPE_SUBGROUP);
-  EXPECT_EQ(loom_spirv_cooperative_matrix_type_use(matrix_type),
-            LOOM_SPIRV_COOPERATIVE_MATRIX_USE_MATRIX_AKHR);
+  ASSERT_TRUE(loom_test_compact_matrix_type_isa(matrix_type));
+  EXPECT_EQ(loom_test_compact_matrix_type_rows(matrix_type), 16);
+  EXPECT_EQ(loom_test_compact_matrix_type_columns(matrix_type), 32);
+  loom_type_id_t bf16_type_id = LOOM_TYPE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_type_id(
+      module, loom_type_scalar(LOOM_SCALAR_TYPE_BF16), &bf16_type_id));
+  EXPECT_EQ(loom_test_compact_matrix_type_element_type(matrix_type),
+            bf16_type_id);
+  EXPECT_EQ(loom_test_compact_matrix_type_scope(matrix_type),
+            LOOM_TEST_COMPACT_MATRIX_TYPE_SCOPE_SUBGROUP);
   loom_module_free(module);
 }
 

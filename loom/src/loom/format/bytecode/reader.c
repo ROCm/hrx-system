@@ -1633,7 +1633,7 @@ static iree_status_t loom_bytecode_reader_read_parameterized_type(
       family_offset, &family_name));
   if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
   const loom_type_descriptor_t* type_descriptor =
-      loom_type_registry_lookup(family_name);
+      loom_type_registry_lookup(reader->context, family_name);
   if (!type_descriptor || !type_descriptor->parameterized) {
     return loom_bytecode_reader_emit_invalid_field(
         reader, IREE_SV("TYPES"), IREE_SV("type"), type_index,

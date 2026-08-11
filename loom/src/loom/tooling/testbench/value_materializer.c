@@ -6,6 +6,7 @@
 
 #include "loom/tooling/testbench/value_materializer.h"
 
+#include <inttypes.h>
 #include <string.h>
 
 #include "iree/base/internal/math.h"
@@ -101,6 +102,10 @@ static iree_status_t loom_testbench_case_plan_walk_values(
     if (source->kind == LOOM_TESTBENCH_VALUE_SOURCE_RANDOM_UNIFORM) {
       IREE_RETURN_IF_ERROR(loom_testbench_case_value_callback_invoke(
           callback, source->random_uniform.seed_value_id));
+    }
+    if (source->kind == LOOM_TESTBENCH_VALUE_SOURCE_TENSOR_VIEW) {
+      IREE_RETURN_IF_ERROR(loom_testbench_case_value_callback_invoke(
+          callback, source->tensor_view.source_value_id));
     }
     IREE_RETURN_IF_ERROR(loom_testbench_case_plan_walk_type_dynamic_dimensions(
         source->type, callback));
@@ -1197,6 +1202,94 @@ static iree_status_t loom_testbench_materialize_file_read_npy(
   return status;
 }
 
+static iree_status_t loom_testbench_materialize_tensor_view(
+    const loom_testbench_value_source_plan_t* source,
+    loom_testbench_value_table_t* table) {
+  const loom_testbench_value_t* source_value = NULL;
+  IREE_RETURN_IF_ERROR(loom_testbench_value_table_lookup_borrow(
+      table, source->tensor_view.source_value_id, &source_value));
+  if (!loom_testbench_value_buffer_view(source_value)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "check.tensor.view source is not a tensor");
+  }
+
+  iree_hal_dim_t shape[LOOM_TESTBENCH_MAX_SHAPE_RANK] = {0};
+  iree_host_size_t shape_rank = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_testbench_resolve_shape(table, source->type, shape, &shape_rank));
+  iree_hal_element_type_t element_type = IREE_HAL_ELEMENT_TYPE_NONE;
+  IREE_RETURN_IF_ERROR(loom_testbench_scalar_type_to_hal_element_type(
+      loom_type_element_type(source->type), &element_type));
+
+  iree_device_size_t element_count = 1;
+  for (iree_host_size_t dimension_index = 0; dimension_index < shape_rank;
+       ++dimension_index) {
+    if (!iree_device_size_checked_mul(element_count, shape[dimension_index],
+                                      &element_count)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "check.tensor.view result element count "
+                              "overflows device size");
+    }
+  }
+  iree_device_size_t bit_count = 0;
+  if (!iree_device_size_checked_mul(element_count,
+                                    iree_hal_element_bit_count(element_type),
+                                    &bit_count) ||
+      bit_count > IREE_DEVICE_SIZE_MAX - 7) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "check.tensor.view result byte length overflows "
+                            "device size");
+  }
+  const iree_device_size_t result_byte_length = (bit_count + 7) / 8;
+  if (source->tensor_view.byte_offset > source_value->buffer.byte_length ||
+      result_byte_length >
+          source_value->buffer.byte_length - source->tensor_view.byte_offset) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "check.tensor.view byte range [%" PRIu64 ", %" PRIu64
+        ") exceeds source byte length %" PRIu64,
+        source->tensor_view.byte_offset,
+        source->tensor_view.byte_offset + result_byte_length,
+        source_value->buffer.byte_length);
+  }
+
+  iree_device_size_t source_byte_offset = 0;
+  if (!iree_device_size_checked_add(source_value->buffer.byte_offset,
+                                    source->tensor_view.byte_offset,
+                                    &source_byte_offset)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "check.tensor.view source byte offset overflows "
+                            "device size");
+  }
+  iree_hal_buffer_t* subspan_buffer = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_subspan(
+      source_value->buffer.buffer, source_byte_offset, result_byte_length,
+      table->host_allocator, &subspan_buffer));
+  iree_hal_buffer_view_t* buffer_view = NULL;
+  iree_status_t status = iree_hal_buffer_view_create(
+      subspan_buffer, shape_rank, shape, element_type,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, table->host_allocator,
+      &buffer_view);
+  iree_hal_buffer_release(subspan_buffer);
+
+  loom_testbench_value_t value = {0};
+  if (iree_status_is_ok(status)) {
+    status = loom_testbench_value_set_buffer_view_move(buffer_view, &value);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_testbench_value_table_assign_move(table, source->value_id, &value);
+  }
+  if (!iree_status_is_ok(status)) {
+    if (value.kind == LOOM_TESTBENCH_VALUE_KIND_NONE) {
+      iree_hal_buffer_view_release(buffer_view);
+    } else {
+      loom_testbench_value_deinitialize(&value);
+    }
+  }
+  return status;
+}
+
 static iree_status_t loom_testbench_materialize_value_source(
     const loom_testbench_value_materializer_options_t* options,
     const loom_testbench_value_source_plan_t* source,
@@ -1251,6 +1344,8 @@ static iree_status_t loom_testbench_materialize_value_source(
     }
     case LOOM_TESTBENCH_VALUE_SOURCE_FILE_READ_NPY:
       return loom_testbench_materialize_file_read_npy(options, source, table);
+    case LOOM_TESTBENCH_VALUE_SOURCE_TENSOR_VIEW:
+      return loom_testbench_materialize_tensor_view(source, table);
     default:
       return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "invalid value source plan kind %u",

@@ -25,6 +25,7 @@
 #include "loom/ir/ir.h"
 #include "loom/ir/parameterized_attr.h"
 #include "loom/ir/semantics.h"
+#include "loom/ir/type_descriptor.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -73,6 +74,35 @@ typedef struct loom_parameterized_attr_registry_t {
   // Dialect family registrations indexed by dialect ID.
   loom_dialect_parameterized_attrs_t dialects[LOOM_DIALECT_BUILTIN_COUNT_];
 } loom_parameterized_attr_registry_t;
+
+// Mutable descriptor list populated by dialect registration before context
+// finalization.
+typedef struct loom_registered_type_list_t {
+  // Allocated descriptor entries copied from generated static tables.
+  loom_type_registry_entry_t* entries;
+  // Number of registered entries.
+  iree_host_size_t count;
+  // Allocated entry capacity.
+  iree_host_size_t capacity;
+} loom_registered_type_list_t;
+
+// Entry in the finalized dialect-owned type name table.
+typedef struct loom_type_name_entry_t {
+  // Borrowed public type spelling from a generated descriptor table.
+  iree_string_view_t name;
+  // Borrowed generated descriptor.
+  const loom_type_descriptor_t* descriptor;
+} loom_type_name_entry_t;
+
+// Finalized type-name hash table used at text and bytecode boundaries.
+typedef struct loom_type_name_table_t {
+  // Allocated open-addressed entries.
+  loom_type_name_entry_t* entries;
+  // Power-of-two entry capacity, or zero when no dialect types are registered.
+  uint32_t capacity;
+  // Number of occupied entries.
+  uint32_t count;
+} loom_type_name_table_t;
 
 // Entry in the op name hash table. Maps a dotted op name string
 // (e.g., "test.addi") to the op kind and vtable pointer. The name
@@ -172,11 +202,17 @@ struct loom_context_t {
   // Parameterized attribute descriptors indexed by generated family kind.
   loom_parameterized_attr_registry_t parameterized_attrs;
 
+  // Dialect-owned type descriptors registered before finalization.
+  loom_registered_type_list_t registered_types;
+
   // Op name hash table for string → vtable resolution.
   loom_op_name_table_t op_name_table;
 
   // Stable family-name lookup used only at public format boundaries.
   loom_parameterized_attr_name_table_t parameterized_attr_name_table;
+
+  // Stable dialect-owned type lookup used at public format boundaries.
+  loom_type_name_table_t type_name_table;
 };
 
 // Initializes a context with the given host allocator. After initialization,
@@ -232,6 +268,16 @@ iree_status_t loom_context_register_parameterized_attrs(
     const loom_parameterized_attr_descriptor_t* descriptors,
     iree_host_size_t descriptor_count);
 
+// Registers generated dialect-owned type descriptors with the context.
+//
+// Entry and descriptor storage must remain valid for the context lifetime.
+// Entries are copied, must have matching non-empty names, and must not
+// duplicate another dialect-owned type registered in this context. Common
+// type-name collision checks are owned by the type registry facade.
+iree_status_t loom_context_register_type_descriptors(
+    loom_context_t* context, const loom_type_registry_entry_t* entries,
+    iree_host_size_t entry_count);
+
 // Registers one encoding family vtable with the context.
 //
 // `vtable->descriptor` and its family name must be non-empty and stable for the
@@ -280,6 +326,12 @@ loom_context_resolve_parameterized_attr(const loom_context_t* context,
 const loom_parameterized_attr_descriptor_t*
 loom_context_lookup_parameterized_attr_by_name(const loom_context_t* context,
                                                iree_string_view_t name);
+
+// Looks up a registered dialect-owned type descriptor by its stable public
+// name. Returns NULL when no registered dialect contributes `name`. The context
+// must be finalized.
+const loom_type_descriptor_t* loom_context_lookup_type_by_name(
+    const loom_context_t* context, iree_string_view_t name);
 
 // Resolves an encoding family or canonical alias by its bare public name.
 // Returns an invalid family identity when no matching name is registered. The

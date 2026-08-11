@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include "loom/ops/test/ops.h"
+#include "loom/ops/test/types.h"
 
 iree_status_t loom_test_dialect_register(loom_context_t* context) {
   iree_host_size_t count = 0;
@@ -41,8 +42,12 @@ iree_status_t loom_test_dialect_register(loom_context_t* context) {
   iree_host_size_t parameterized_attr_count = 0;
   const loom_parameterized_attr_descriptor_t* parameterized_attrs =
       loom_test_dialect_parameterized_attrs(&parameterized_attr_count);
-  if (parameterized_attr_count == 0) return iree_ok_status();
-  return loom_context_register_parameterized_attrs(context, LOOM_DIALECT_TEST,
-                                                   parameterized_attrs,
-                                                   parameterized_attr_count);
+  if (parameterized_attr_count > 0) {
+    IREE_RETURN_IF_ERROR(loom_context_register_parameterized_attrs(
+        context, LOOM_DIALECT_TEST, parameterized_attrs,
+        parameterized_attr_count));
+  }
+  return loom_type_registry_register_types(context,
+                                           loom_test_type_registry_entries,
+                                           loom_test_type_registry_entry_count);
 }

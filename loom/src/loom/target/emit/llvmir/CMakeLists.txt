@@ -343,6 +343,7 @@ loom_cc_test(
     loom::format::text::parser
     loom::ir
     loom::ops::func_symbol_facts
+    loom::ops::llvmir
     loom::ops::op_defs
     loom::ops::op_registry
     loom::ops::target

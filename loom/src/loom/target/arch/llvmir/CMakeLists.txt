@@ -90,6 +90,7 @@ loom_check_test_suite(
   NAME
     loom_check_file_test
   SRCS
+    "test/ops/roundtrip.loom-test"
     "test/source_low/corpus/async_empty.loom-test"
     "test/source_low/corpus/async_gather.loom-test"
     "test/source_low/corpus/index_addressing.loom-test"

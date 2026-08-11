@@ -18,6 +18,7 @@ from loom.gen.ops.c_metadata_tables import (
 from loom.gen.ops.c_names import c_dialect_include_path as _c_dialect_include_path
 from loom.gen.ops.c_ops_header import generate_ops_h
 from loom.gen.ops.model import DialectGeneration
+from loom.gen.ops.type_registry import generate_dialect_type_registry
 
 __all__ = [
     "generate_dialect_contents",
@@ -54,7 +55,7 @@ def generate_dialect_contents(generation: DialectGeneration) -> dict[str, str]:
             )
         }
     )
-    return {
+    contents = {
         "ops.h": generate_ops_h(
             dialect.name,
             dialect.dialect_id,
@@ -71,3 +72,8 @@ def generate_dialect_contents(generation: DialectGeneration) -> dict[str, str]:
         ),
         **table_files,
     }
+    if generation.types:
+        types_header, types_source = generate_dialect_type_registry(dialect, generation.types)
+        contents["types.h"] = types_header
+        contents["types.c"] = types_source
+    return contents

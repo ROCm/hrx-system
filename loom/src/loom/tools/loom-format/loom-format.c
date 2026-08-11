@@ -23,6 +23,9 @@ IREE_FLAG(string, from, "auto", "Input format: auto, text, bc, or bytecode.");
 IREE_FLAG(string, to, "text", "Output format: text, bc, or bytecode.");
 IREE_FLAG(string, output, "-",
           "Output path. Use '-' or the empty string for stdout.");
+IREE_FLAG(bool, check, false,
+          "Verifies that text input is already in canonical form without "
+          "writing output.");
 
 static iree_status_t loom_format_stderr_diagnostic_sink(
     void* user_data, const loom_diagnostic_t* diagnostic) {
@@ -40,6 +43,23 @@ static iree_status_t loom_format_write_output(
       allocator);
 }
 
+static iree_status_t loom_format_check_canonical(
+    iree_string_view_t filename, const iree_io_file_contents_t* contents,
+    const loom_format_output_t* output) {
+  const iree_string_view_t input_text =
+      loom_tooling_file_contents_string_view(contents);
+  const iree_string_view_t canonical_text =
+      iree_make_string_view((const char*)output->data, output->length);
+  if (iree_string_view_equal(input_text, canonical_text)) {
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_FAILED_PRECONDITION,
+      "'%.*s' is not canonically formatted; run loom-format --to=text "
+      "--output=<path> <input>",
+      (int)filename.size, filename.data);
+}
+
 static void loom_format_print_agents_markdown(FILE* stream) {
   fprintf(
       stream,
@@ -54,6 +74,7 @@ static void loom_format_print_agents_markdown(FILE* stream) {
       "```shell\n"
       "loom-format source.loom --from=text --to=bc --output=source.loombc\n"
       "loom-format source.loombc --from=bc --to=text --output=source.loom\n"
+      "loom-format source.loom --check\n"
       "cat source.loom | loom-format --from=text --to=bc "
       "--output=source.loombc\n"
       "loom-format source.loom --from=auto --to=text\n"
@@ -64,7 +85,8 @@ static void loom_format_print_agents_markdown(FILE* stream) {
       "writes bytecode suitable for `loom-link --library=...` and\n"
       "`loom-compile` input. The complete module is verified before either\n"
       "output is written; external calls require a matching `func.decl` or\n"
-      "definition.\n");
+      "definition. `--check` verifies canonical text without writing "
+      "output.\n");
 }
 
 int main(int argc, char** argv) {
@@ -74,7 +96,7 @@ int main(int argc, char** argv) {
       "\n"
       "Usage:\n"
       "  loom-format [--from=auto|text|bc] [--to=text|bc] [--output=file] "
-      "[file]\n"
+      "[--check] [file]\n"
       "  cat module.loom | loom-format --from=text --to=bc "
       "--output=module.loombc\n"
       "  loom-format --agents_md\n"
@@ -121,6 +143,16 @@ int main(int argc, char** argv) {
         "inputs",
         argc - 1);
   }
+  if (iree_status_is_ok(status) && FLAG_check &&
+      output_format != LOOM_MODULE_FORMAT_TEXT) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "--check requires --to=text");
+  }
+  if (iree_status_is_ok(status) && FLAG_check &&
+      !loom_tooling_file_path_is_stdio(iree_make_cstring_view(FLAG_output))) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "--check does not accept --output");
+  }
   if (iree_status_is_ok(status)) {
     loom_context_initialize(allocator, &context);
     context_initialized = true;
@@ -156,7 +188,18 @@ int main(int argc, char** argv) {
         loom_format_convert(contents->const_buffer, filename, &context,
                             &block_pool, &convert_options, &output, allocator);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && FLAG_check) {
+    const loom_module_format_t resolved_input_format =
+        input_format == LOOM_MODULE_FORMAT_AUTO
+            ? loom_module_format_detect_input(contents->const_buffer)
+            : input_format;
+    if (resolved_input_format != LOOM_MODULE_FORMAT_TEXT) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "--check requires text input");
+    } else {
+      status = loom_format_check_canonical(filename, contents, &output);
+    }
+  } else if (iree_status_is_ok(status)) {
     status = loom_format_write_output(iree_make_cstring_view(FLAG_output),
                                       &output, allocator);
   }

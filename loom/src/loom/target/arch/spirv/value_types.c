@@ -6,7 +6,7 @@
 
 #include "loom/target/arch/spirv/value_types.h"
 
-#include "loom/ops/type_registry.h"
+#include "loom/target/arch/spirv/ops/types.h"
 
 static bool loom_spirv_numeric_scalar_type_from_loom_scalar_type(
     loom_scalar_type_t type, loom_spirv_scalar_type_t* out_scalar_type) {

@@ -24,13 +24,16 @@ loom_generated_cc_library(
   GENERATED_SRC_FLAGS
     "--builders"
     "--tables"
+    "--types"
   GENERATED_SRCS
     "builders.c"
     "tables.c"
+    "types.c"
   HDRS
     "facts.h"
     "ops.h"
     "registry.h"
+    "types.h"
   ARGS
     "--dialect=test"
   DEPS
@@ -44,6 +47,7 @@ loom_generated_cc_library(
     loom::ops::op_defs
     loom::ops::storage_facts
     loom::ops::target
+    loom::ops::type_registry
     loom::rewrite::rewriter
     loom::target::test::target_record_table
     loom::target::types

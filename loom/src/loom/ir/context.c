@@ -41,6 +41,8 @@ void loom_context_initialize(iree_allocator_t allocator,
 void loom_context_deinitialize(loom_context_t* context) {
   iree_allocator_free(context->allocator, context->encodings.vtables.entries);
   iree_allocator_free(context->allocator, context->encodings.names.entries);
+  iree_allocator_free(context->allocator, context->registered_types.entries);
+  iree_allocator_free(context->allocator, context->type_name_table.entries);
   iree_allocator_free(context->allocator, context->op_name_table.entries);
   iree_allocator_free(context->allocator,
                       context->parameterized_attr_name_table.entries);
@@ -252,6 +254,52 @@ iree_status_t loom_context_register_parameterized_attrs(
   }
   dialect->count = (uint8_t)descriptor_count;
   dialect->entries = descriptors;
+  return iree_ok_status();
+}
+
+iree_status_t loom_context_register_type_descriptors(
+    loom_context_t* context, const loom_type_registry_entry_t* entries,
+    iree_host_size_t entry_count) {
+  if (entry_count == 0 || entries == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "type descriptor registration requires at least one entry");
+  }
+  for (iree_host_size_t i = 0; i < entry_count; ++i) {
+    const loom_type_registry_entry_t* entry = &entries[i];
+    if (iree_string_view_is_empty(entry->name) || entry->descriptor == NULL ||
+        entry->descriptor->name == NULL ||
+        !iree_string_view_equal(entry->name,
+                                loom_bstring_view(entry->descriptor->name))) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "type descriptor entry %" PRIhsz
+                              " has missing or inconsistent name metadata",
+                              i);
+    }
+    for (iree_host_size_t j = 0; j < context->registered_types.count; ++j) {
+      if (!iree_string_view_equal(entry->name,
+                                  context->registered_types.entries[j].name)) {
+        continue;
+      }
+      return iree_make_status(IREE_STATUS_ALREADY_EXISTS,
+                              "type '%.*s' is already registered",
+                              (int)entry->name.size, entry->name.data);
+    }
+    for (iree_host_size_t j = 0; j < i; ++j) {
+      if (!iree_string_view_equal(entry->name, entries[j].name)) continue;
+      return iree_make_status(IREE_STATUS_ALREADY_EXISTS,
+                              "type '%.*s' is repeated in one registration",
+                              (int)entry->name.size, entry->name.data);
+    }
+  }
+
+  loom_registered_type_list_t* list = &context->registered_types;
+  IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
+      context->allocator, list->count + entry_count, sizeof(*list->entries),
+      &list->capacity, (void**)&list->entries));
+  memcpy(&list->entries[list->count], entries,
+         entry_count * sizeof(*list->entries));
+  list->count += entry_count;
   return iree_ok_status();
 }
 
@@ -491,6 +539,37 @@ static iree_status_t loom_context_build_parameterized_attr_name_table(
   return iree_ok_status();
 }
 
+static iree_status_t loom_context_build_type_name_table(
+    loom_context_t* context) {
+  const iree_host_size_t type_count = context->registered_types.count;
+  if (type_count == 0) return iree_ok_status();
+
+  uint32_t capacity = iree_host_size_next_power_of_two(
+      (iree_host_size_t)(type_count * 4 + 2) / 3);
+  if (capacity < 8) capacity = 8;
+  loom_type_name_entry_t* entries = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      context->allocator, capacity, sizeof(*entries), (void**)&entries));
+  memset(entries, 0, (iree_host_size_t)capacity * sizeof(*entries));
+
+  const uint32_t mask = capacity - 1;
+  for (iree_host_size_t i = 0; i < type_count; ++i) {
+    const loom_type_registry_entry_t* registered =
+        &context->registered_types.entries[i];
+    uint32_t slot = loom_hash_string(registered->name) & mask;
+    while (entries[slot].descriptor != NULL) {
+      slot = (slot + 1) & mask;
+    }
+    entries[slot].name = registered->name;
+    entries[slot].descriptor = registered->descriptor;
+  }
+
+  context->type_name_table.entries = entries;
+  context->type_name_table.capacity = capacity;
+  context->type_name_table.count = (uint32_t)type_count;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_context_validate_condition_refinements(
     const loom_context_t* context) {
   for (uint8_t dialect_id = 0; dialect_id < LOOM_DIALECT_BUILTIN_COUNT_;
@@ -531,6 +610,7 @@ iree_status_t loom_context_finalize(loom_context_t* context) {
   IREE_RETURN_IF_ERROR(loom_context_build_encoding_family_name_table(context));
   IREE_RETURN_IF_ERROR(
       loom_context_build_parameterized_attr_name_table(context));
+  IREE_RETURN_IF_ERROR(loom_context_build_type_name_table(context));
   return loom_context_build_op_name_table(context);
 }
 
@@ -619,6 +699,21 @@ loom_context_lookup_parameterized_attr_by_name(const loom_context_t* context,
       &context->parameterized_attr_name_table;
   if (table->capacity == 0) return NULL;
   uint32_t mask = table->capacity - 1;
+  uint32_t slot = loom_hash_string(name) & mask;
+  while (table->entries[slot].descriptor != NULL) {
+    if (iree_string_view_equal(table->entries[slot].name, name)) {
+      return table->entries[slot].descriptor;
+    }
+    slot = (slot + 1) & mask;
+  }
+  return NULL;
+}
+
+const loom_type_descriptor_t* loom_context_lookup_type_by_name(
+    const loom_context_t* context, iree_string_view_t name) {
+  const loom_type_name_table_t* table = &context->type_name_table;
+  if (table->capacity == 0) return NULL;
+  const uint32_t mask = table->capacity - 1;
   uint32_t slot = loom_hash_string(name) & mask;
   while (table->entries[slot].descriptor != NULL) {
     if (iree_string_view_equal(table->entries[slot].name, name)) {

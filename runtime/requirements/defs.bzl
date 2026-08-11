@@ -14,63 +14,63 @@ load(
 
 HAL_AMDGPU = build_requirement(
     id = "runtime.hal.amdgpu",
-    label = "//runtime/requirements:hal_amdgpu",
-    enabled_by = "//runtime/config/hal:driver_amdgpu",
+    label = Label("//runtime/requirements:hal_amdgpu"),
+    enabled_by = Label("//runtime/config/hal:driver_amdgpu"),
     cmake_condition = "IREE_HAL_DRIVER_AMDGPU",
 )
 
 HAL_CUDA = build_requirement(
     id = "runtime.hal.cuda",
-    label = "//runtime/requirements:hal_cuda",
-    enabled_by = "//runtime/config/hal:driver_cuda",
+    label = Label("//runtime/requirements:hal_cuda"),
+    enabled_by = Label("//runtime/config/hal:driver_cuda"),
     cmake_condition = "IREE_HAL_DRIVER_CUDA",
 )
 
 HAL_HIP = build_requirement(
     id = "runtime.hal.hip",
-    label = "//runtime/requirements:hal_hip",
-    enabled_by = "//runtime/config/hal:driver_hip",
+    label = Label("//runtime/requirements:hal_hip"),
+    enabled_by = Label("//runtime/config/hal:driver_hip"),
     cmake_condition = "IREE_HAL_DRIVER_HIP",
 )
 
 HAL_VULKAN = build_requirement(
     id = "runtime.hal.vulkan",
-    label = "//runtime/requirements:hal_vulkan",
-    enabled_by = "//runtime/config/hal:driver_vulkan",
+    label = Label("//runtime/requirements:hal_vulkan"),
+    enabled_by = Label("//runtime/config/hal:driver_vulkan"),
     cmake_condition = "IREE_HAL_DRIVER_VULKAN",
 )
 
 HAL_WEBGPU = build_requirement(
     id = "runtime.hal.webgpu",
-    label = "//runtime/requirements:hal_webgpu",
-    enabled_by = "//runtime/config/hal:driver_webgpu",
+    label = Label("//runtime/requirements:hal_webgpu"),
+    enabled_by = Label("//runtime/config/hal:driver_webgpu"),
     cmake_condition = "IREE_HAL_DRIVER_WEBGPU",
 )
 
 AMDGPU_RESOURCE = run_requirement(
     id = "runtime.resource.amd_gpu",
-    label = "//runtime/requirements:amd_gpu",
+    label = Label("//runtime/requirements:amd_gpu"),
     cmake_label = "runtime-resource=amd-gpu",
     skip_contract = "Tests skip when no compatible AMD GPU/HSA agent is available.",
 )
 
 NVIDIA_GPU_RESOURCE = run_requirement(
     id = "runtime.resource.nvidia_gpu",
-    label = "//runtime/requirements:nvidia_gpu",
+    label = Label("//runtime/requirements:nvidia_gpu"),
     cmake_label = "runtime-resource=nvidia-gpu",
     skip_contract = "Tests skip when no compatible NVIDIA GPU/CUDA device is available.",
 )
 
 VULKAN_DEVICE_RESOURCE = run_requirement(
     id = "runtime.resource.vulkan_device",
-    label = "//runtime/requirements:vulkan_device",
+    label = Label("//runtime/requirements:vulkan_device"),
     cmake_label = "runtime-resource=vulkan-device",
     skip_contract = "Tests skip when no compatible Vulkan device is available.",
 )
 
 WEBGPU_DEVICE_RESOURCE = run_requirement(
     id = "runtime.resource.webgpu_device",
-    label = "//runtime/requirements:webgpu_device",
+    label = Label("//runtime/requirements:webgpu_device"),
     cmake_label = "runtime-resource=webgpu-device",
     skip_contract = "Tests skip when no compatible WebGPU/Dawn device is available.",
 )

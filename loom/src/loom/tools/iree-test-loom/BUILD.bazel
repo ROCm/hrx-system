@@ -35,14 +35,14 @@ _AMDGPU_TARGET_DEPS = iree_select({
 })
 
 _IREE_VM_EXECUTION_COPTS = iree_select({
-    "//loom/config/execute:iree_vm": [
+    "//loom/config/execute:iree_vm_execution": [
         "-DIREE_TEST_LOOM_HAVE_IREE_VM=1",
     ],
     "//conditions:default": [],
 })
 
 _IREE_VM_EXECUTION_DEPS = iree_select({
-    "//loom/config/execute:iree_vm": [
+    "//loom/config/execute:iree_vm_execution": [
         "//loom/src/loom/tooling/execution/ireevm:provider",
     ],
     "//conditions:default": [],
@@ -78,9 +78,16 @@ _IREE_TEST_LOOM_TARGET_DEPS = (
 
 loom_cc_library(
     name = "main",
-    srcs = ["main.c"],
-    hdrs = ["main.h"],
+    srcs = [
+        "library_linker.c",
+        "main.c",
+    ],
+    hdrs = [
+        "library_linker.h",
+        "main.h",
+    ],
     deps = [
+        "//loom/src/loom/link:linker",
         "//loom/src/loom/sanitizer:options",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/tooling/cli:help",
@@ -119,6 +126,8 @@ loom_cc_binary(
 iree_execution_test_suite(
     name = "execution_test",
     data = [
+        "testdata/library_cases.loom",
+        "testdata/linked_input_cases.loom",
         "testdata/planning_issue_cases.loom",
         "testdata/requirement_cases.loom",
         "testdata/scalar_cases.loom",
@@ -127,5 +136,6 @@ iree_execution_test_suite(
     tags = ["hostonly"],
     tools = {
         "iree-test-loom": ":iree-test-loom",
+        "loom-link": "//loom/src/loom/tools/loom-link",
     },
 )

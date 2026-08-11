@@ -50,6 +50,42 @@
       }
     },
     {
+      "name": "links explicit bytecode library into authored input",
+      "steps": [
+        {
+          "name": "archive-library",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{srcdir}/testdata/library_cases.loom",
+              "--mode=archive",
+              "--to=bc",
+              "--output={tmp}/library_cases.loombc"
+            ]
+          }
+        },
+        {
+          "name": "run-linked-input",
+          "run": {
+            "tool": "iree-test-loom",
+            "args": [
+              "{srcdir}/testdata/linked_input_cases.loom",
+              "--library={tmp}/library_cases.loombc"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "\"case_count\":2",
+              "\"sample_count\":2",
+              "\"failed_sample_count\":0",
+              "\"case\":\"input_case\",\"sample_ordinal\":0,\"passed\":true",
+              "\"case\":\"library_case\",\"sample_ordinal\":0,\"passed\":true"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "rejects unresolved text symbols before planning",
       "run": {
         "tool": "iree-test-loom",
