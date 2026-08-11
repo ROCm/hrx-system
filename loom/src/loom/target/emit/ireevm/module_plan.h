@@ -64,7 +64,7 @@ typedef struct loom_ireevm_module_plan_function_t {
   iree_string_view_t symbol_name;
   // VM calling convention string derived from the low signature.
   iree_string_view_t calling_convention;
-  // Immutable effective target facts borrowed for the plan lifetime.
+  // Immutable function target facts borrowed for the plan lifetime.
   const loom_target_facts_t* target_facts;
 } loom_ireevm_module_plan_function_t;
 
@@ -100,8 +100,8 @@ typedef struct loom_ireevm_module_plan_t {
 
 // Builds the VM module plan for all compatible low.func.def and VM
 // low.func.decl symbols in |module|. All arrays and calling-convention strings
-// are allocated from |arena|. |function_versions| and their effective facts
-// are borrowed for the plan lifetime. Returns status for infrastructure
+// are allocated from |arena|. |function_versions| and their function target
+// facts are borrowed for the plan lifetime. Returns status for infrastructure
 // failures. Invalid target contracts emit diagnostics, set |out_valid| to
 // false, and return OK.
 iree_status_t loom_ireevm_module_plan_build(

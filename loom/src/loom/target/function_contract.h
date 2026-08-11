@@ -38,7 +38,7 @@ bool loom_target_function_contract_bundles_compatible(
     const loom_target_bundle_t* effective_bundle,
     const loom_target_bundle_t* requirement_bundle);
 
-// Resolves |func_facts|'s target record and materializes the effective target
+// Resolves |func_facts|'s target record and materializes the function target
 // bundle selected by the func-like symbol.
 //
 // The target snapshot and config come from target-record facts. The export
@@ -58,7 +58,7 @@ iree_status_t loom_target_function_contract_resolve(
     const loom_target_facts_t** out_target_facts,
     loom_target_bundle_storage_t* out_bundle_storage);
 
-// Materializes the effective target bundle by overlaying |func_facts|'s
+// Materializes the function target bundle by overlaying |func_facts|'s
 // function-owned ABI/export attrs onto |base_bundle|.
 //
 // |target_name| is used only for diagnostics. Returns status only for
@@ -71,7 +71,7 @@ iree_status_t loom_target_function_contract_resolve_from_bundle(
     loom_target_bundle_storage_t* out_bundle_storage);
 
 // Resolves |func_facts|'s authored target and function-local contract into one
-// immutable effective target-facts object allocated from |arena|.
+// immutable function target facts allocated from |arena|.
 //
 // Returns status only for infrastructure failures. Invalid user IR emits a
 // structured diagnostic, sets |out_valid| to false, and returns OK.
@@ -82,7 +82,7 @@ iree_status_t loom_target_function_contract_resolve_facts(
     bool* out_valid, const loom_target_facts_t** out_facts);
 
 // Applies |func_facts|'s function-local contract to |base_facts| and returns
-// one immutable effective target-facts object allocated from |arena|.
+// immutable function target facts allocated from |arena|.
 //
 // |target_name| is used only for diagnostics. Returns status only for
 // infrastructure failures; invalid user IR emits diagnostics and sets
@@ -94,7 +94,7 @@ iree_status_t loom_target_function_contract_refine_facts(
     bool* out_valid, const loom_target_facts_t** out_facts);
 
 // Applies a module-internal callable's function-local contract to |base_facts|
-// and returns one immutable effective target-facts object allocated from
+// and returns immutable function target facts allocated from
 // |arena|.
 //
 // Module-internal callables inherit the target snapshot and configuration but
@@ -120,7 +120,7 @@ iree_status_t loom_target_function_contract_apply_hal_workgroup_size(
     loom_target_bundle_storage_t* bundle_storage, bool* out_valid);
 
 // Applies a fixed workgroup size to |base_facts| and returns one immutable
-// effective target-facts object allocated from |arena|.
+// function target facts allocated from |arena|.
 //
 // Kernel dialect code calls this after deriving launch metadata from
 // kernel-owned IR. Invalid user IR emits diagnostics and sets |out_valid|

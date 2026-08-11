@@ -8,7 +8,7 @@
 //
 // Specialization is an invocation-local compiler action. Each request names
 // one function version and supplies the structured target profile that should
-// become its exact effective target. It produces compiler-owned function
+// become its exact resolved target. It produces compiler-owned function
 // versions without creating target records or changing authored target attrs.
 
 #ifndef LOOM_TARGET_SPECIALIZATION_H_

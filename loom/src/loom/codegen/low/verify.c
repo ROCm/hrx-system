@@ -205,8 +205,7 @@ static loom_region_t* loom_low_verify_function_body(
   return NULL;
 }
 
-static const loom_target_facts_t*
-loom_low_verify_function_effective_target_facts(
+static const loom_target_facts_t* loom_low_verify_function_target_facts(
     const loom_low_verify_state_t* state, const loom_op_t* low_func_op) {
   const loom_func_like_t function =
       loom_func_like_cast(state->module, (loom_op_t*)low_func_op);
@@ -218,7 +217,7 @@ loom_low_verify_function_effective_target_facts(
       function_ref.symbol_id >= state->function_version_snapshot.symbol_count) {
     return NULL;
   }
-  return loom_target_function_version_effective_facts(
+  return loom_target_function_version_target_facts(
       loom_target_function_version_snapshot_handle_at(
           &state->function_version_snapshot, function_ref.symbol_id));
 }
@@ -2001,7 +2000,7 @@ static iree_status_t loom_low_verify_function(loom_low_verify_state_t* state,
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
       state->module, &state->symbol_facts, low_func_op,
-      loom_low_verify_function_effective_target_facts(state, low_func_op),
+      loom_low_verify_function_target_facts(state, low_func_op),
       state->registry, counting_emitter, &target));
   loom_region_t* body = loom_low_verify_function_body(low_func_op);
   if (target.descriptor_set == NULL || loom_low_verify_should_stop(state)) {

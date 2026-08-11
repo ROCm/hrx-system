@@ -56,7 +56,7 @@ typedef struct loom_target_entry_t {
   loom_symbol_ref_t func_ref;
   // Concrete target-refined function version, or NULL when unrefined.
   const loom_target_function_version_t* function_version;
-  // Immutable effective facts selected for this function.
+  // Immutable function target facts selected for this function.
   const loom_target_facts_t* target_facts;
 } loom_target_entry_t;
 

@@ -74,7 +74,7 @@ kernel.def @entry() {
       /*.required_fields=*/
       LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT |
           LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE,
-      /*.effective_target_facts=*/nullptr,
+      /*.function_target_facts=*/nullptr,
       /*.diagnostic_emitter=*/{},
   };
   loom_kernel_launch_config_t config = {};
@@ -118,7 +118,7 @@ kernel.def target(@gpu) @entry() {
       /*.required_fields=*/
       LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT |
           LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE,
-      /*.effective_target_facts=*/nullptr,
+      /*.function_target_facts=*/nullptr,
       /*.diagnostic_emitter=*/{},
   };
   loom_kernel_launch_config_t config = {};
@@ -131,7 +131,7 @@ kernel.def target(@gpu) @entry() {
   EXPECT_EQ(config.failure, LOOM_KERNEL_LAUNCH_CONFIG_FAILURE_NONE);
 }
 
-TEST_F(KernelLaunchConfigTest, DirectlyEvaluatesWithEffectiveTargetFacts) {
+TEST_F(KernelLaunchConfigTest, DirectlyEvaluatesWithFunctionTargetFacts) {
   ModulePtr module = Parse(R"(
 target.generic<reference> @authored_gpu {
   subgroup_size = 32
@@ -153,11 +153,11 @@ kernel.def target(@authored_gpu) @entry() {
       /*.name=*/IREE_SVL("test"),
       /*.storage_size=*/sizeof(loom_target_facts_t),
   };
-  loom_target_facts_t effective_target_facts = {};
-  effective_target_facts.fact_type = &fact_type;
-  effective_target_facts.storage.snapshot = effective_snapshot;
-  effective_target_facts.storage.bundle.name = IREE_SVL("effective");
-  loom_target_bundle_storage_rebind(&effective_target_facts.storage);
+  loom_target_facts_t function_target_facts = {};
+  function_target_facts.fact_type = &fact_type;
+  function_target_facts.storage.snapshot = effective_snapshot;
+  function_target_facts.storage.bundle.name = IREE_SVL("effective");
+  loom_target_bundle_storage_rebind(&function_target_facts.storage);
 
   const loom_kernel_launch_config_options_t options = {
       /*.function_symbol=*/IREE_SV("entry"),
@@ -166,7 +166,7 @@ kernel.def target(@authored_gpu) @entry() {
       /*.required_fields=*/
       LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT |
           LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_SUBGROUP_SIZE,
-      /*.effective_target_facts=*/&effective_target_facts,
+      /*.function_target_facts=*/&function_target_facts,
       /*.diagnostic_emitter=*/{},
   };
   loom_kernel_launch_config_t config = {};
@@ -188,7 +188,7 @@ kernel.def target(@authored_gpu) @entry() {
 }
 
 TEST_F(KernelLaunchConfigTest,
-       EvaluatesContextualSubgroupSizeFromEffectiveFacts) {
+       EvaluatesContextualSubgroupSizeFromFunctionTargetFacts) {
   ModulePtr module = Parse(R"(
 kernel.def @entry() {
   %one = index.constant 1 : index
@@ -205,11 +205,11 @@ kernel.def @entry() {
       /*.name=*/IREE_SVL("test"),
       /*.storage_size=*/sizeof(loom_target_facts_t),
   };
-  loom_target_facts_t effective_target_facts = {};
-  effective_target_facts.fact_type = &fact_type;
-  effective_target_facts.storage.snapshot = effective_snapshot;
-  effective_target_facts.storage.bundle.name = IREE_SVL("effective");
-  loom_target_bundle_storage_rebind(&effective_target_facts.storage);
+  loom_target_facts_t function_target_facts = {};
+  function_target_facts.fact_type = &fact_type;
+  function_target_facts.storage.snapshot = effective_snapshot;
+  function_target_facts.storage.bundle.name = IREE_SVL("effective");
+  loom_target_bundle_storage_rebind(&function_target_facts.storage);
 
   const loom_kernel_launch_config_options_t options = {
       /*.function_symbol=*/IREE_SV("entry"),
@@ -219,12 +219,12 @@ kernel.def @entry() {
       LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT |
           LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE |
           LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_SUBGROUP_SIZE,
-      /*.effective_target_facts=*/&effective_target_facts,
+      /*.function_target_facts=*/&function_target_facts,
       /*.diagnostic_emitter=*/{},
   };
 
   for (uint32_t subgroup_size : {32u, 64u}) {
-    effective_target_facts.storage.snapshot.subgroup_size = subgroup_size;
+    function_target_facts.storage.snapshot.subgroup_size = subgroup_size;
     loom_kernel_launch_config_t config = {};
     IREE_ASSERT_OK(loom_kernel_launch_config_evaluate(
         module.get(), &block_pool_, &options, &config));
@@ -254,7 +254,7 @@ kernel.def @entry() {
       /*.required_fields=*/
       LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT |
           LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE,
-      /*.effective_target_facts=*/nullptr,
+      /*.function_target_facts=*/nullptr,
       /*.diagnostic_emitter=*/{},
   };
   loom_kernel_launch_config_t config = {};
@@ -296,7 +296,7 @@ kernel.def target(@gpu) @entry(%rows: index) {
       LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT |
           LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE |
           LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_SUBGROUP_SIZE,
-      /*.effective_target_facts=*/nullptr,
+      /*.function_target_facts=*/nullptr,
       /*.diagnostic_emitter=*/{},
   };
   loom_kernel_launch_config_t config = {};

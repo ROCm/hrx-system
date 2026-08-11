@@ -744,13 +744,13 @@ TEST_F(AmdgpuHalKernelLibraryTest,
                                               exact_facts);
 
   bool contract_valid = false;
-  const loom_target_facts_t* effective_facts = nullptr;
+  const loom_target_facts_t* function_target_facts = nullptr;
   IREE_ASSERT_OK(loom_target_function_contract_refine_facts(
       module, function_facts, authored_target->name, exact_facts,
       iree_diagnostic_emitter_t{}, &version_arena, &contract_valid,
-      &effective_facts));
+      &function_target_facts));
   ASSERT_TRUE(contract_valid);
-  ASSERT_NE(effective_facts, nullptr);
+  ASSERT_NE(function_target_facts, nullptr);
   loom_target_function_version_t function_version = {};
   function_version.base.type = &loom_target_function_version_type;
   function_version.base.function = loom_func_like_cast(
@@ -758,7 +758,7 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   ASSERT_TRUE(loom_func_like_isa(function_version.base.function));
   function_version.authored_target_name = authored_target->name;
   function_version.target_requirement_facts = authored_target->projection;
-  function_version.effective_target_facts = effective_facts;
+  function_version.function_target_facts = function_target_facts;
   loom_function_version_t* version_values[] = {
       &function_version.base,
   };

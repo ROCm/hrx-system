@@ -8,8 +8,8 @@
 //
 // This layer resolves a Low function's intrinsic representation contract to
 // dense Low descriptor tables, then verifies that the representation can
-// encode the effective target selected by authored or invocation-refined
-// target facts. The descriptor table ABI itself remains IR-agnostic.
+// encode the target selected by authored or invocation-refined target facts.
+// The descriptor table ABI itself remains IR-agnostic.
 
 #ifndef LOOM_CODEGEN_LOW_TARGET_BINDING_H_
 #define LOOM_CODEGEN_LOW_TARGET_BINDING_H_
@@ -29,8 +29,8 @@ extern "C" {
 
 // Resolved low target context for one low function.
 typedef struct loom_low_resolved_target_t {
-  // Immutable effective facts selected for this Low function, or NULL for a
-  // portable representation that does not require a hardware target.
+  // Immutable function target facts selected for this Low function, or NULL
+  // for a portable representation that does not require a hardware target.
   const loom_target_facts_t* target_facts;
   // Borrowed effective target name without the leading '@', or empty when
   // |target_facts| is NULL.
@@ -38,7 +38,7 @@ typedef struct loom_low_resolved_target_t {
   // Borrowed descriptor-set key selected by the Low function representation
   // contract.
   iree_string_view_t descriptor_set_key;
-  // Feature bitset projected from the effective target facts.
+  // Feature bitset projected from the function target facts.
   uint64_t feature_bits;
   // Descriptor set found in the caller-provided registry.
   const loom_low_descriptor_set_t* descriptor_set;
@@ -153,22 +153,22 @@ static inline iree_string_view_t loom_low_descriptor_packet_diagnostic_key(
                                         packet->descriptor->key_string_offset);
 }
 
-// Resolves the effective target facts and descriptor set for |low_func_op|
+// Resolves the function target facts and descriptor set for |low_func_op|
 // using caller-owned symbol facts.
 //
 // User IR failures are emitted through |emitter| and leave
 // out_target->descriptor_set NULL. Infrastructure failures are returned as
 // status. |low_func_op| must be a target-low function definition or
-// declaration. |effective_target_facts| supplies invocation-refined facts that
+// declaration. |function_target_facts| supplies invocation-refined facts that
 // already include the function contract when non-NULL; otherwise facts are
 // resolved from the authored target witness. A targetless function resolves
 // only its explicit representation descriptor set and leaves the target facts
 // unset, independent of its ABI. The arena backing |symbol_facts| and
-// |effective_target_facts| must outlive |out_target|.
+// |function_target_facts| must outlive |out_target|.
 iree_status_t loom_low_resolve_function_target(
     const loom_module_t* module, loom_symbol_fact_table_t* symbol_facts,
     const loom_op_t* low_func_op,
-    const loom_target_facts_t* effective_target_facts,
+    const loom_target_facts_t* function_target_facts,
     const loom_low_descriptor_registry_t* registry,
     iree_diagnostic_emitter_t emitter, loom_low_resolved_target_t* out_target);
 

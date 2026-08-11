@@ -741,17 +741,19 @@ static iree_status_t loom_target_callgraph_prepare_materializations(
             : loom_target_facts_identity_name(
                   row->context->resolved_target.facts);
     bool contract_valid = false;
-    const loom_target_facts_t* effective_facts = NULL;
+    const loom_target_facts_t* function_target_facts = NULL;
     if (info->module_internal) {
       IREE_RETURN_IF_ERROR(loom_target_function_contract_refine_internal_facts(
           state->module, &concrete_facts, target_name,
           row->context->resolved_target.facts, state->pass->diagnostic_emitter,
-          state->version_owner->arena, &contract_valid, &effective_facts));
+          state->version_owner->arena, &contract_valid,
+          &function_target_facts));
     } else {
       IREE_RETURN_IF_ERROR(loom_target_function_contract_refine_facts(
           state->module, &concrete_facts, target_name,
           row->context->resolved_target.facts, state->pass->diagnostic_emitter,
-          state->version_owner->arena, &contract_valid, &effective_facts));
+          state->version_owner->arena, &contract_valid,
+          &function_target_facts));
     }
     if (!contract_valid) {
       state->plan_valid = false;
@@ -768,7 +770,7 @@ static iree_status_t loom_target_callgraph_prepare_materializations(
         .authored_target_name = info->authored_target_name,
         .target_requirement_facts = info->authored_target_requirement,
         .resolved_target = row->context->resolved_target,
-        .effective_target_facts = effective_facts,
+        .function_target_facts = function_target_facts,
     };
     row->pending_version = version;
   }

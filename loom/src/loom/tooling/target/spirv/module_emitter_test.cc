@@ -106,7 +106,7 @@ class SpirvModuleEmitterTest : public ::testing::Test {
 };
 
 TEST_F(SpirvModuleEmitterTest,
-       EffectiveFactsSelectCapabilitiesWithoutMutatingIR) {
+       FunctionTargetFactsSelectCapabilitiesWithoutMutatingIR) {
   ModulePtr module = ParseModule(IREE_SV(R"(
 spirv.target<vulkan1_3> @generic
 
@@ -171,13 +171,14 @@ low.func.def target<spirv.logical.core>(@generic) abi(shader_entry_point) @kerne
                                               profile_facts);
 
   bool contract_valid = false;
-  const loom_target_facts_t* effective_facts = nullptr;
+  const loom_target_facts_t* function_target_facts = nullptr;
   IREE_ASSERT_OK(loom_target_function_contract_refine_facts(
       module.get(), function_facts,
       loom_target_facts_identity_name(profile_facts), profile_facts,
-      iree_diagnostic_emitter_t{}, &arena_, &contract_valid, &effective_facts));
+      iree_diagnostic_emitter_t{}, &arena_, &contract_valid,
+      &function_target_facts));
   ASSERT_TRUE(contract_valid);
-  ASSERT_NE(effective_facts, nullptr);
+  ASSERT_NE(function_target_facts, nullptr);
 
   loom_spirv_module_binary_t generic_module = {};
   IREE_ASSERT_OK(loom_spirv_emit_low_module(
@@ -197,7 +198,7 @@ low.func.def target<spirv.logical.core>(@generic) abi(shader_entry_point) @kerne
   function_version.base.function = function;
   function_version.authored_target_name = target_facts->name;
   function_version.target_requirement_facts = target_facts->projection;
-  function_version.effective_target_facts = effective_facts;
+  function_version.function_target_facts = function_target_facts;
   loom_function_version_t* version_values[] = {&function_version.base};
   loom_function_version_list_t function_versions = {};
   function_versions.values = version_values;

@@ -208,15 +208,16 @@ low.kernel.def target<test.low.core>(@test_target) export("dispatch") linkage(de
   const loom_target_facts_t* base_facts =
       LookupTarget(module.get(), IREE_SV("test_target"))->projection;
 
-  const loom_target_facts_t* effective_facts = nullptr;
+  const loom_target_facts_t* function_target_facts = nullptr;
   IREE_ASSERT_OK(loom_target_function_contract_refine_facts(
       module.get(), func_facts, IREE_SV("test_target"), base_facts,
-      iree_diagnostic_emitter_t{}, &analysis_arena_, &valid, &effective_facts));
+      iree_diagnostic_emitter_t{}, &analysis_arena_, &valid,
+      &function_target_facts));
   ASSERT_TRUE(valid);
-  ASSERT_NE(effective_facts, nullptr);
-  EXPECT_NE(effective_facts, base_facts);
-  EXPECT_EQ(effective_facts->fact_type, base_facts->fact_type);
-  EXPECT_EQ(effective_facts->selector, base_facts->selector);
+  ASSERT_NE(function_target_facts, nullptr);
+  EXPECT_NE(function_target_facts, base_facts);
+  EXPECT_EQ(function_target_facts->fact_type, base_facts->fact_type);
+  EXPECT_EQ(function_target_facts->selector, base_facts->selector);
 
   EXPECT_EQ(base_facts->storage.export_plan.abi_kind,
             LOOM_TARGET_ABI_OBJECT_FUNCTION);
@@ -231,18 +232,19 @@ low.kernel.def target<test.low.core>(@test_target) export("dispatch") linkage(de
   EXPECT_FALSE(loom_target_facts_field_is_authored(
       base_facts, LOOM_TARGET_FACT_FIELD_LINKAGE));
 
-  EXPECT_EQ(effective_facts->storage.export_plan.abi_kind,
+  EXPECT_EQ(function_target_facts->storage.export_plan.abi_kind,
             LOOM_TARGET_ABI_HAL_KERNEL);
   EXPECT_TRUE(iree_string_view_equal(
-      effective_facts->storage.export_plan.export_symbol, IREE_SV("dispatch")));
-  EXPECT_EQ(effective_facts->storage.export_plan.linkage,
+      function_target_facts->storage.export_plan.export_symbol,
+      IREE_SV("dispatch")));
+  EXPECT_EQ(function_target_facts->storage.export_plan.linkage,
             LOOM_TARGET_LINKAGE_DEFAULT);
-  EXPECT_TRUE(loom_target_facts_field_is_authored(effective_facts,
+  EXPECT_TRUE(loom_target_facts_field_is_authored(function_target_facts,
                                                   LOOM_TARGET_FACT_FIELD_ABI));
   EXPECT_TRUE(loom_target_facts_field_is_authored(
-      effective_facts, LOOM_TARGET_FACT_FIELD_EXPORT_SYMBOL));
+      function_target_facts, LOOM_TARGET_FACT_FIELD_EXPORT_SYMBOL));
   EXPECT_TRUE(loom_target_facts_field_is_authored(
-      effective_facts, LOOM_TARGET_FACT_FIELD_LINKAGE));
+      function_target_facts, LOOM_TARGET_FACT_FIELD_LINKAGE));
 
   const loom_target_workgroup_size_t required_workgroup_size = {
       /*.x=*/64,
@@ -252,19 +254,19 @@ low.kernel.def target<test.low.core>(@test_target) export("dispatch") linkage(de
   const loom_target_facts_t* launch_facts = nullptr;
   IREE_ASSERT_OK(loom_target_function_contract_refine_hal_workgroup_size(
       func_facts, IREE_SV("test_target"), &required_workgroup_size,
-      effective_facts, iree_diagnostic_emitter_t{}, &analysis_arena_, &valid,
-      &launch_facts));
+      function_target_facts, iree_diagnostic_emitter_t{}, &analysis_arena_,
+      &valid, &launch_facts));
   ASSERT_TRUE(valid);
   ASSERT_NE(launch_facts, nullptr);
-  EXPECT_EQ(
-      effective_facts->storage.export_plan.hal_kernel.required_workgroup_size.x,
-      0u);
-  EXPECT_EQ(
-      effective_facts->storage.export_plan.hal_kernel.required_workgroup_size.y,
-      0u);
-  EXPECT_EQ(
-      effective_facts->storage.export_plan.hal_kernel.required_workgroup_size.z,
-      0u);
+  EXPECT_EQ(function_target_facts->storage.export_plan.hal_kernel
+                .required_workgroup_size.x,
+            0u);
+  EXPECT_EQ(function_target_facts->storage.export_plan.hal_kernel
+                .required_workgroup_size.y,
+            0u);
+  EXPECT_EQ(function_target_facts->storage.export_plan.hal_kernel
+                .required_workgroup_size.z,
+            0u);
   EXPECT_EQ(
       launch_facts->storage.export_plan.hal_kernel.required_workgroup_size.x,
       64u);
@@ -296,20 +298,21 @@ func.def @helper() {
             LOOM_TARGET_LINKAGE_DSO_LOCAL);
 
   bool valid = false;
-  const loom_target_facts_t* effective_facts = nullptr;
+  const loom_target_facts_t* function_target_facts = nullptr;
   IREE_ASSERT_OK(loom_target_function_contract_refine_internal_facts(
       module.get(), func_facts, IREE_SV("test_target"), base_facts,
-      iree_diagnostic_emitter_t{}, &analysis_arena_, &valid, &effective_facts));
+      iree_diagnostic_emitter_t{}, &analysis_arena_, &valid,
+      &function_target_facts));
   ASSERT_TRUE(valid);
-  ASSERT_NE(effective_facts, nullptr);
-  EXPECT_EQ(effective_facts->storage.export_plan.abi_kind,
+  ASSERT_NE(function_target_facts, nullptr);
+  EXPECT_EQ(function_target_facts->storage.export_plan.abi_kind,
             LOOM_TARGET_ABI_UNKNOWN);
-  EXPECT_EQ(effective_facts->storage.export_plan.linkage,
+  EXPECT_EQ(function_target_facts->storage.export_plan.linkage,
             LOOM_TARGET_LINKAGE_DEFAULT);
-  EXPECT_TRUE(iree_string_view_equal(effective_facts->storage.export_plan.name,
-                                     IREE_SV("helper")));
+  EXPECT_TRUE(iree_string_view_equal(
+      function_target_facts->storage.export_plan.name, IREE_SV("helper")));
   EXPECT_TRUE(iree_string_view_is_empty(
-      effective_facts->storage.export_plan.export_symbol));
+      function_target_facts->storage.export_plan.export_symbol));
   EXPECT_EQ(base_facts->storage.export_plan.abi_kind,
             LOOM_TARGET_ABI_OBJECT_FUNCTION);
   EXPECT_EQ(base_facts->storage.export_plan.linkage,
@@ -330,15 +333,16 @@ func.def abi(object_function) @helper() {
   const loom_target_facts_t* base_facts =
       LookupTarget(module.get(), IREE_SV("test_target"))->projection;
   bool valid = false;
-  const loom_target_facts_t* effective_facts = nullptr;
+  const loom_target_facts_t* function_target_facts = nullptr;
   IREE_ASSERT_OK(loom_target_function_contract_refine_internal_facts(
       module.get(), func_facts, IREE_SV("test_target"), base_facts,
-      iree_diagnostic_emitter_t{}, &analysis_arena_, &valid, &effective_facts));
+      iree_diagnostic_emitter_t{}, &analysis_arena_, &valid,
+      &function_target_facts));
   ASSERT_TRUE(valid);
-  ASSERT_NE(effective_facts, nullptr);
-  EXPECT_EQ(effective_facts->storage.export_plan.abi_kind,
+  ASSERT_NE(function_target_facts, nullptr);
+  EXPECT_EQ(function_target_facts->storage.export_plan.abi_kind,
             LOOM_TARGET_ABI_OBJECT_FUNCTION);
-  EXPECT_TRUE(loom_target_facts_field_is_authored(effective_facts,
+  EXPECT_TRUE(loom_target_facts_field_is_authored(function_target_facts,
                                                   LOOM_TARGET_FACT_FIELD_ABI));
 }
 

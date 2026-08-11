@@ -316,7 +316,7 @@ iree_status_t loom_ireevm_module_plan_build(
         loom_target_function_version_snapshot_at(&function_version_snapshot,
                                                  symbol_id);
     if (function_version != NULL) {
-      target_facts = function_version->effective_target_facts;
+      target_facts = function_version->function_target_facts;
       contract_valid = true;
     } else {
       status = loom_target_function_contract_resolve_facts(

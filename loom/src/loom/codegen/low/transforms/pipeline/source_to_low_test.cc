@@ -282,7 +282,7 @@ class LowLowerPassTest : public ::testing::Test {
   loom_low_lower_policy_registry_t policy_registry_ = {};
 };
 
-TEST_F(LowLowerPassTest, SourceSelectionUsesPerFunctionEffectiveTargetFacts) {
+TEST_F(LowLowerPassTest, SourceSelectionUsesPerFunctionTargetFacts) {
   ModulePtr module = Parse(IREE_SV(
       "test.target<low_core> @test_target\n"
       "func.def target(@test_target) @add(%lhs: i32, %rhs: i32) -> (i32) {\n"
@@ -305,13 +305,13 @@ TEST_F(LowLowerPassTest, SourceSelectionUsesPerFunctionEffectiveTargetFacts) {
   const loom_target_symbol_facts_t* target_requirement_symbol_facts =
       loom_target_symbol_facts_cast(base_target_facts);
   ASSERT_NE(target_requirement_symbol_facts, nullptr);
-  loom_target_facts_t* effective_target_facts = nullptr;
+  loom_target_facts_t* function_target_facts = nullptr;
   IREE_ASSERT_OK(loom_target_facts_builder_clone(
       target_requirement_symbol_facts->projection, &arena,
-      &effective_target_facts));
+      &function_target_facts));
   loom_target_facts_builder_replace_bundle(loom_test_target_bundles.values[2],
-                                           effective_target_facts);
-  effective_target_facts->selector = LOOM_TEST_TARGET_KIND_QUIRKY;
+                                           function_target_facts);
+  function_target_facts->selector = LOOM_TEST_TARGET_KIND_QUIRKY;
 
   const loom_symbol_ref_t function_ref =
       FindSymbolRef(module.get(), IREE_SV("add"));
@@ -323,7 +323,7 @@ TEST_F(LowLowerPassTest, SourceSelectionUsesPerFunctionEffectiveTargetFacts) {
   function_version.authored_target_name = target_requirement_symbol_facts->name;
   function_version.target_requirement_facts =
       target_requirement_symbol_facts->projection;
-  function_version.effective_target_facts = effective_target_facts;
+  function_version.function_target_facts = function_target_facts;
   loom_function_version_t* function_version_values[] = {
       &function_version.base,
   };
@@ -346,7 +346,7 @@ TEST_F(LowLowerPassTest, SourceSelectionUsesPerFunctionEffectiveTargetFacts) {
   EXPECT_EQ(selections.values[0].version_handle, &function_version.base);
   EXPECT_EQ(selections.values[0].target_ref.module_id, target_ref.module_id);
   EXPECT_EQ(selections.values[0].target_ref.symbol_id, target_ref.symbol_id);
-  EXPECT_EQ(selections.values[0].target_facts, effective_target_facts);
+  EXPECT_EQ(selections.values[0].target_facts, function_target_facts);
   EXPECT_EQ(selections.values[0].target_facts->selector,
             LOOM_TEST_TARGET_KIND_QUIRKY);
   EXPECT_TRUE(iree_string_view_equal(
@@ -400,14 +400,14 @@ TEST_F(LowLowerPassTest, ModuleInternalVersionLowersWithoutArtifactAbi) {
   ASSERT_NE(function_facts, nullptr);
 
   bool contract_valid = false;
-  const loom_target_facts_t* effective_facts = nullptr;
+  const loom_target_facts_t* function_target_facts = nullptr;
   IREE_ASSERT_OK(loom_target_function_contract_refine_internal_facts(
       module.get(), function_facts, target_facts->name,
       target_facts->projection, iree_diagnostic_emitter_t{}, &arena,
-      &contract_valid, &effective_facts));
+      &contract_valid, &function_target_facts));
   ASSERT_TRUE(contract_valid);
-  ASSERT_NE(effective_facts, nullptr);
-  ASSERT_EQ(effective_facts->storage.export_plan.abi_kind,
+  ASSERT_NE(function_target_facts, nullptr);
+  ASSERT_EQ(function_target_facts->storage.export_plan.abi_kind,
             LOOM_TARGET_ABI_UNKNOWN);
 
   loom_target_function_version_t function_version = {};
@@ -415,7 +415,7 @@ TEST_F(LowLowerPassTest, ModuleInternalVersionLowersWithoutArtifactAbi) {
   function_version.base.function = loom_func_like_cast(
       module.get(),
       module->symbols.entries[function_ref.symbol_id].defining_op);
-  function_version.effective_target_facts = effective_facts;
+  function_version.function_target_facts = function_target_facts;
   loom_function_version_t* function_version_values[] = {
       &function_version.base,
   };
@@ -472,7 +472,7 @@ TEST_F(LowLowerPassTest,
   function_version.base.function = loom_func_like_cast(
       module.get(),
       module->symbols.entries[function_ref.symbol_id].defining_op);
-  function_version.effective_target_facts = available_target_facts->projection;
+  function_version.function_target_facts = available_target_facts->projection;
   loom_function_version_t* function_version_values[] = {
       &function_version.base,
   };

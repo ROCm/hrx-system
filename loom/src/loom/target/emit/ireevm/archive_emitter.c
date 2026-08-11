@@ -430,7 +430,7 @@ static iree_status_t loom_ireevm_archive_emit_function(
   loom_low_emission_frame_t frame = {0};
   loom_low_planning_statistics_t planning_statistics = {0};
   const loom_low_emission_frame_options_t frame_options = {
-      .effective_target_facts = function->target_facts,
+      .function_target_facts = function->target_facts,
       .descriptor_registry = &state->low_registry.registry,
       .memory_access_table = loom_low_memory_access_table_empty(),
       .allocation_fixed_values = fixed_values,

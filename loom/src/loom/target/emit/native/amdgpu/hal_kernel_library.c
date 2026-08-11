@@ -64,7 +64,7 @@ static bool loom_amdgpu_hal_kernel_library_bundle_is_compatible(
 typedef struct loom_amdgpu_hal_kernel_library_kernel_plan_t {
   // Selected prepared low.kernel.def op for frame.
   loom_op_t* low_function_op;
-  // Resolved representation contract and effective target facts.
+  // Resolved representation contract and function target facts.
   loom_low_resolved_target_t target;
   // ABI layout derived from prepared target-low IR.
   loom_amdgpu_hal_kernel_abi_layout_t abi_layout;
@@ -680,7 +680,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
   loom_amdgpu_storage_lease_provider(&storage_lease_provider);
   const loom_low_emission_frame_options_t frame_options = {
       .descriptor_registry = &low_registry->registry,
-      .effective_target_facts = plan->target.target_facts,
+      .function_target_facts = plan->target.target_facts,
       .residency_model = residency_model,
       .schedule_pair_affinities = schedule_pair_affinities,
       .schedule_structural_state_reads = schedule_state_reads,

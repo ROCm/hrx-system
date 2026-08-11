@@ -699,7 +699,7 @@ TEST_F(IreeVmCandidateTest, EmitVmArchiveCandidate) {
   loom_run_module_deinitialize(&run_module);
 }
 
-TEST_F(IreeVmCandidateTest, EmitsFromEffectiveFunctionTargetFacts) {
+TEST_F(IreeVmCandidateTest, EmitsFromFunctionTargetFacts) {
   loom_run_module_t run_module = {};
   IREE_ASSERT_OK(Parse(IREE_SV(kPreparedVmSource), &run_module));
   loom_module_t* module = run_module.module;
@@ -757,16 +757,16 @@ TEST_F(IreeVmCandidateTest, EmitsFromEffectiveFunctionTargetFacts) {
         loom_func_symbol_facts_cast(base_function_facts);
     ASSERT_NE(function_facts, nullptr);
     bool contract_valid = false;
-    const loom_target_facts_t* effective_target_facts = nullptr;
+    const loom_target_facts_t* function_target_facts = nullptr;
     IREE_ASSERT_OK(loom_target_function_contract_refine_facts(
         module, function_facts,
         loom_target_facts_identity_name(exact_target_facts), exact_target_facts,
         iree_diagnostic_emitter_t{}, &version_arena, &contract_valid,
-        &effective_target_facts));
+        &function_target_facts));
     ASSERT_TRUE(contract_valid);
-    ASSERT_NE(effective_target_facts, nullptr);
+    ASSERT_NE(function_target_facts, nullptr);
     ASSERT_TRUE(iree_string_view_equal(
-        loom_target_facts_bundle(effective_target_facts)->name,
+        loom_target_facts_bundle(function_target_facts)->name,
         IREE_SV("iree-vm-specialized")));
 
     functions[i] = loom_func_like_cast(module, function_facts->func_op);
@@ -778,7 +778,7 @@ TEST_F(IreeVmCandidateTest, EmitsFromEffectiveFunctionTargetFacts) {
         target_requirement_symbol_facts->name;
     target_versions[i].target_requirement_facts =
         target_requirement_symbol_facts->projection;
-    target_versions[i].effective_target_facts = effective_target_facts;
+    target_versions[i].function_target_facts = function_target_facts;
     version_values[i] = &target_versions[i].base;
   }
   const iree_host_size_t authored_symbol_count = module->symbols.count;

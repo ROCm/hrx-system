@@ -724,8 +724,8 @@ func.def public @entry(%arg: i32) -> (i32) {
 
 // ====
 
-// A normalized requirement reads the containing function's effective target
-// facts and selects the matching higher-priority provider.
+// A normalized requirement reads the containing function's target facts and
+// selects the matching higher-priority provider.
 // RUN: pass select-templates,inline-callables
 
 test.target<quirky> @wave7

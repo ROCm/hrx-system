@@ -775,7 +775,7 @@ class LowKernelEmitter {
     loom_low_resolved_target_t target = {};
     IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
         module_, &symbol_facts, low_function,
-        /*effective_target_facts=*/nullptr, &target_registry_.registry,
+        /*function_target_facts=*/nullptr, &target_registry_.registry,
         iree_diagnostic_emitter_t{}, &target));
     const loom_low_descriptor_set_t* descriptor_set = target.descriptor_set;
     if (descriptor_set == nullptr) {

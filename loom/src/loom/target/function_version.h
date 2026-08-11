@@ -38,9 +38,9 @@ typedef struct loom_target_function_version_t {
   // export overlays.
   loom_resolved_target_t resolved_target;
 
-  // Non-NULL exact invocation-refined facts used to compile this function
-  // version, including its function-local ABI and export contract.
-  const loom_target_facts_t* effective_target_facts;
+  // Non-NULL function target facts used to compile this version, including
+  // its function-local ABI and export contract.
+  const loom_target_facts_t* function_target_facts;
 } loom_target_function_version_t;
 
 // Static identity for target-refined function versions.
@@ -63,14 +63,14 @@ loom_target_function_version_const_cast(
              : NULL;
 }
 
-// Returns exact target facts carried by |version|, or NULL for another type.
+// Returns function target facts carried by |version|, or NULL for another type.
 static inline const loom_target_facts_t*
-loom_target_function_version_effective_facts(
+loom_target_function_version_target_facts(
     const loom_function_version_t* version) {
   const loom_target_function_version_t* target_version =
       loom_target_function_version_const_cast(version);
   if (target_version == NULL) return NULL;
-  return target_version->effective_target_facts;
+  return target_version->function_target_facts;
 }
 
 // Finds the target-refined version currently implemented by |function|.

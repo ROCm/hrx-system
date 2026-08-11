@@ -263,7 +263,7 @@ static iree_status_t loom_target_specialization_prepare_versions(
                 ? specialization->target_requirement_symbol_facts->projection
                 : NULL,
         .resolved_target = specialization->resolved_target,
-        .effective_target_facts = function_facts,
+        .function_target_facts = function_facts,
     };
   }
   return iree_ok_status();

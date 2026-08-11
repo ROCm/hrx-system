@@ -65,7 +65,7 @@ typedef struct loom_math_legalize_state_t {
   loom_module_t* module;
   // Function-like op currently being rewritten.
   loom_func_like_t function;
-  // Effective target facts selected for |function|.
+  // Function target facts selected for |function|.
   const loom_target_facts_t* target_facts;
   // Target math policy selected for |function|, or NULL when unavailable.
   const loom_target_math_policy_t* policy;

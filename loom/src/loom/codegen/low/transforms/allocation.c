@@ -380,13 +380,13 @@ iree_status_t loom_low_materialize_allocation_create(
 // model owns the module value-ordinal scratch map.
 static iree_status_t loom_low_materialize_allocation_build_table(
     loom_module_t* module, const loom_op_t* low_func_op,
-    const loom_target_facts_t* effective_target_facts,
+    const loom_target_facts_t* function_target_facts,
     const loom_low_descriptor_registry_t* descriptor_registry,
     const loom_low_allocation_options_t* options, iree_arena_allocator_t* arena,
     loom_low_allocation_table_t* out_table) {
   loom_low_function_model_t model = {0};
   iree_status_t status = loom_low_function_model_initialize(
-      module, low_func_op, effective_target_facts, descriptor_registry,
+      module, low_func_op, function_target_facts, descriptor_registry,
       options->emitter, LOOM_LOW_FUNCTION_MODEL_FLAG_REGION_TREE, arena,
       &model);
   if (iree_status_is_ok(status)) {
@@ -409,8 +409,8 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
       loom_low_pass_capability_from_pass(pass);
   const loom_low_descriptor_registry_t* descriptor_registry =
       loom_low_pass_capability_descriptor_registry(low_capability);
-  const loom_target_facts_t* effective_target_facts =
-      loom_target_function_version_effective_facts(pass->function_version);
+  const loom_target_facts_t* function_target_facts =
+      loom_target_function_version_target_facts(pass->function_version);
   loom_low_allocation_options_t allocation_options = {
       .budgets = state ? state->budgets : NULL,
       .budget_count = state ? state->budget_count : 0,
@@ -425,7 +425,7 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
   for (;;) {
     loom_low_allocation_table_t table = {0};
     IREE_RETURN_IF_ERROR(loom_low_materialize_allocation_build_table(
-        module, function.op, effective_target_facts, descriptor_registry,
+        module, function.op, function_target_facts, descriptor_registry,
         &allocation_probe_options, pass->arena, &table));
     if (iteration_limit == 0) {
       if (table.liveness.value_count == IREE_HOST_SIZE_MAX) {
@@ -451,7 +451,7 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
         // Rematerialization is an optimization; preserve normal diagnostics
         // when pressure repair does not converge.
         IREE_RETURN_IF_ERROR(loom_low_materialize_allocation_build_table(
-            module, function.op, effective_target_facts, descriptor_registry,
+            module, function.op, function_target_facts, descriptor_registry,
             &allocation_options, pass->arena, &table));
         return iree_ok_status();
       }
@@ -473,7 +473,7 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
         continue;
       }
       IREE_RETURN_IF_ERROR(loom_low_materialize_allocation_build_table(
-          module, function.op, effective_target_facts, descriptor_registry,
+          module, function.op, function_target_facts, descriptor_registry,
           &allocation_options, pass->arena, &table));
       return iree_ok_status();
     }

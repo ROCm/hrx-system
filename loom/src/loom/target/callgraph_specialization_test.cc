@@ -373,10 +373,10 @@ func.def public @wide() -> (index) {
       middle64_version->resolved_target.facts->storage.snapshot.subgroup_size,
       64u);
   EXPECT_EQ(
-      middle32_version->effective_target_facts->storage.export_plan.abi_kind,
+      middle32_version->function_target_facts->storage.export_plan.abi_kind,
       LOOM_TARGET_ABI_UNKNOWN);
   EXPECT_EQ(
-      middle64_version->effective_target_facts->storage.export_plan.abi_kind,
+      middle64_version->function_target_facts->storage.export_plan.abi_kind,
       LOOM_TARGET_ABI_UNKNOWN);
   EXPECT_FALSE(loom_symbol_ref_is_valid(loom_func_like_target(middle32)));
   EXPECT_FALSE(loom_symbol_ref_is_valid(loom_func_like_target(middle64)));

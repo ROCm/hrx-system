@@ -91,13 +91,13 @@ test.func @second() {
   loom_target_function_version_t first_version = {};
   first_version.base.type = &loom_target_function_version_type;
   first_version.base.function = FindFunction(module.get(), IREE_SV("first"));
-  first_version.effective_target_facts = &first_facts;
+  first_version.function_target_facts = &first_facts;
 
   loom_target_facts_t second_facts = {};
   loom_target_function_version_t second_version = {};
   second_version.base.type = &loom_target_function_version_type;
   second_version.base.function = FindFunction(module.get(), IREE_SV("second"));
-  second_version.effective_target_facts = &second_facts;
+  second_version.function_target_facts = &second_facts;
 
   const loom_function_version_type_t other_type = {
       /*.name=*/IREE_SVL("other"),

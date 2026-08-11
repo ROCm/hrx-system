@@ -110,14 +110,14 @@ class TargetEntrySelectionTest : public ::testing::Test {
         loom_target_bundle_table_lookup(&loom_test_target_bundles, target_kind),
         &base_facts);
     bool valid = false;
-    const loom_target_facts_t* effective_facts = nullptr;
+    const loom_target_facts_t* function_target_facts = nullptr;
     IREE_CHECK_OK(loom_target_function_contract_refine_facts(
         module, function_facts, IREE_SV("invocation-exact"), &base_facts,
         iree_diagnostic_emitter_t{}, &analysis_arena_, &valid,
-        &effective_facts));
+        &function_target_facts));
     IREE_ASSERT(valid);
-    IREE_ASSERT(effective_facts != nullptr);
-    return effective_facts;
+    IREE_ASSERT(function_target_facts != nullptr);
+    return function_target_facts;
   }
 
   loom_target_entry_t SelectNamedEntry(
@@ -159,13 +159,13 @@ func.def public target(@generic) @entry() {
   loom_symbol_fact_table_initialize(&symbol_facts, &analysis_arena_);
   const loom_func_symbol_facts_t* function_facts =
       LookupFunctionFacts(module.get(), IREE_SV("entry"), &symbol_facts);
-  const loom_target_facts_t* effective_facts = RefineFunctionFacts(
+  const loom_target_facts_t* function_target_facts = RefineFunctionFacts(
       module.get(), function_facts, LOOM_TEST_TARGET_KIND_QUIRKY);
 
   loom_target_function_version_t function_version = {};
   function_version.base.type = &loom_target_function_version_type;
   function_version.base.function = FindFunction(module.get(), IREE_SV("entry"));
-  function_version.effective_target_facts = effective_facts;
+  function_version.function_target_facts = function_target_facts;
   loom_function_version_t* version_values[] = {
       &function_version.base,
   };
@@ -177,9 +177,9 @@ func.def public target(@generic) @entry() {
   const loom_target_entry_t entry =
       SelectNamedEntry(module.get(), IREE_SV("entry"), &function_versions);
   EXPECT_EQ(entry.function_version, &function_version);
-  EXPECT_EQ(entry.target_facts, effective_facts);
+  EXPECT_EQ(entry.target_facts, function_target_facts);
   const loom_target_bundle_t* bundle = loom_target_entry_bundle(&entry);
-  EXPECT_EQ(bundle, loom_target_facts_bundle(effective_facts));
+  EXPECT_EQ(bundle, loom_target_facts_bundle(function_target_facts));
   EXPECT_EQ(bundle->snapshot->subgroup_size, 7u);
   EXPECT_TRUE(iree_string_view_equal(bundle->name, IREE_SV("test-quirky")));
 }
@@ -195,14 +195,14 @@ func.def public @targetless() {
   loom_symbol_fact_table_initialize(&symbol_facts, &analysis_arena_);
   const loom_func_symbol_facts_t* function_facts =
       LookupFunctionFacts(module.get(), IREE_SV("targetless"), &symbol_facts);
-  const loom_target_facts_t* effective_facts = RefineFunctionFacts(
+  const loom_target_facts_t* function_target_facts = RefineFunctionFacts(
       module.get(), function_facts, LOOM_TEST_TARGET_KIND_LOW_CORE);
 
   loom_target_function_version_t function_version = {};
   function_version.base.type = &loom_target_function_version_type;
   function_version.base.function =
       FindFunction(module.get(), IREE_SV("targetless"));
-  function_version.effective_target_facts = effective_facts;
+  function_version.function_target_facts = function_target_facts;
   loom_function_version_t* version_values[] = {
       &function_version.base,
   };
@@ -214,7 +214,7 @@ func.def public @targetless() {
   const loom_target_entry_t entry =
       SelectNamedEntry(module.get(), IREE_SV("targetless"), &function_versions);
   EXPECT_EQ(entry.function_version, &function_version);
-  EXPECT_EQ(entry.target_facts, effective_facts);
+  EXPECT_EQ(entry.target_facts, function_target_facts);
   EXPECT_TRUE(iree_string_view_equal(
       loom_target_entry_bundle(&entry)->export_plan->name,
       IREE_SV("targetless")));

@@ -440,17 +440,17 @@ iree_status_t loom_target_function_contract_resolve_from_bundle(
 
 static void loom_target_function_contract_record_authorship(
     const loom_func_symbol_facts_t* func_facts,
-    loom_target_facts_t* effective_facts) {
+    loom_target_facts_t* function_target_facts) {
   if (func_facts->has_abi) {
-    loom_target_fact_field_set_insert(&effective_facts->authored_fields,
+    loom_target_fact_field_set_insert(&function_target_facts->authored_fields,
                                       LOOM_TARGET_FACT_FIELD_ABI);
   }
   if (!iree_string_view_is_empty(func_facts->export_symbol)) {
-    loom_target_fact_field_set_insert(&effective_facts->authored_fields,
+    loom_target_fact_field_set_insert(&function_target_facts->authored_fields,
                                       LOOM_TARGET_FACT_FIELD_EXPORT_SYMBOL);
   }
   if (func_facts->has_export_linkage) {
-    loom_target_fact_field_set_insert(&effective_facts->authored_fields,
+    loom_target_fact_field_set_insert(&function_target_facts->authored_fields,
                                       LOOM_TARGET_FACT_FIELD_LINKAGE);
   }
 }
@@ -472,13 +472,14 @@ static iree_status_t loom_target_function_contract_refine_scoped_facts(
     return iree_ok_status();
   }
 
-  loom_target_facts_t* effective_facts = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_target_facts_builder_clone(base_facts, arena, &effective_facts));
+  loom_target_facts_t* function_target_facts = NULL;
+  IREE_RETURN_IF_ERROR(loom_target_facts_builder_clone(base_facts, arena,
+                                                       &function_target_facts));
   loom_target_facts_builder_replace_bundle(&bundle_storage.bundle,
-                                           effective_facts);
-  loom_target_function_contract_record_authorship(func_facts, effective_facts);
-  *out_facts = effective_facts;
+                                           function_target_facts);
+  loom_target_function_contract_record_authorship(func_facts,
+                                                  function_target_facts);
+  *out_facts = function_target_facts;
   return iree_ok_status();
 }
 
@@ -532,14 +533,14 @@ iree_status_t loom_target_function_contract_refine_hal_workgroup_size(
   *out_valid = false;
   *out_facts = NULL;
 
-  loom_target_facts_t* effective_facts = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_target_facts_builder_clone(base_facts, arena, &effective_facts));
+  loom_target_facts_t* function_target_facts = NULL;
+  IREE_RETURN_IF_ERROR(loom_target_facts_builder_clone(base_facts, arena,
+                                                       &function_target_facts));
   IREE_RETURN_IF_ERROR(loom_target_function_contract_apply_hal_workgroup_size(
       func_facts, target_name, required_workgroup_size, diagnostic_emitter,
-      &effective_facts->storage, out_valid));
+      &function_target_facts->storage, out_valid));
   if (*out_valid) {
-    *out_facts = effective_facts;
+    *out_facts = function_target_facts;
   }
   return iree_ok_status();
 }

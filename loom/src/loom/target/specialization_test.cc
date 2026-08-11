@@ -270,8 +270,8 @@ func.def public target(@unrequested_family) @unrequested() {
   ASSERT_NE(generic_version->target_requirement_facts, nullptr);
   EXPECT_EQ(generic_version->target_requirement_facts->selector,
             LOOM_TEST_TARGET_KIND_LOW_CORE);
-  ASSERT_NE(generic_version->effective_target_facts, nullptr);
-  EXPECT_EQ(generic_version->effective_target_facts->selector,
+  ASSERT_NE(generic_version->function_target_facts, nullptr);
+  EXPECT_EQ(generic_version->function_target_facts->selector,
             LOOM_TEST_TARGET_KIND_LOW_CORE);
 
   const loom_target_function_version_t* targetless_version =
@@ -281,8 +281,8 @@ func.def public target(@unrequested_family) @unrequested() {
   EXPECT_EQ(targetless_version->resolved_target.provider, &kTestProvider);
   ASSERT_NE(targetless_version->resolved_target.facts, nullptr);
   EXPECT_EQ(targetless_version->target_requirement_facts, nullptr);
-  ASSERT_NE(targetless_version->effective_target_facts, nullptr);
-  EXPECT_EQ(targetless_version->effective_target_facts->selector,
+  ASSERT_NE(targetless_version->function_target_facts, nullptr);
+  EXPECT_EQ(targetless_version->function_target_facts->selector,
             LOOM_TEST_TARGET_KIND_LOW_CORE);
   EXPECT_EQ(loom_target_function_version_list_find(
                 &result.function_versions.list, unrequested),
@@ -332,11 +332,11 @@ func.def public @right() {
   EXPECT_EQ(left_version->resolved_target.facts,
             right_version->resolved_target.facts);
   EXPECT_NE(left_version->resolved_target.facts,
-            left_version->effective_target_facts);
+            left_version->function_target_facts);
   EXPECT_NE(right_version->resolved_target.facts,
-            right_version->effective_target_facts);
-  EXPECT_NE(left_version->effective_target_facts,
-            right_version->effective_target_facts);
+            right_version->function_target_facts);
+  EXPECT_NE(left_version->function_target_facts,
+            right_version->function_target_facts);
 }
 
 TEST_F(TargetSpecializationTest, PreservesMatchingAuthoredExactTarget) {
@@ -369,7 +369,7 @@ func.def public target(@exact) @entry() {
       loom_target_function_version_const_cast(
           result.function_versions.list.values[0]);
   ASSERT_NE(version, nullptr);
-  EXPECT_EQ(version->effective_target_facts->selector,
+  EXPECT_EQ(version->function_target_facts->selector,
             LOOM_TEST_TARGET_KIND_LOW_CORE);
 }
 
@@ -429,9 +429,9 @@ func.def public target(@right_requirement) export("right_function") @right() {
   ASSERT_NE(left_version, nullptr);
   ASSERT_NE(right_version, nullptr);
   const loom_target_facts_t* left_version_facts =
-      left_version->effective_target_facts;
+      left_version->function_target_facts;
   const loom_target_facts_t* right_version_facts =
-      right_version->effective_target_facts;
+      right_version->function_target_facts;
   ASSERT_NE(left_version_facts, nullptr);
   ASSERT_NE(right_version_facts, nullptr);
   EXPECT_EQ(left_version_facts->storage.export_plan.abi_kind,
@@ -563,8 +563,8 @@ func.def public target(@external) @entry() {
   EXPECT_TRUE(iree_string_view_equal(version->authored_target_name,
                                      IREE_SV("external")));
   EXPECT_EQ(version->target_requirement_facts, nullptr);
-  ASSERT_NE(version->effective_target_facts, nullptr);
-  EXPECT_EQ(version->effective_target_facts->selector,
+  ASSERT_NE(version->function_target_facts, nullptr);
+  EXPECT_EQ(version->function_target_facts->selector,
             LOOM_TEST_TARGET_KIND_LOW_CORE);
 }
 

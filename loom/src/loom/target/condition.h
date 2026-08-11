@@ -22,13 +22,13 @@ typedef struct loom_context_t loom_context_t;
 typedef uint8_t loom_target_condition_outcome_t;
 
 enum loom_target_condition_outcome_e {
-  // No effective target facts are bound at this application site.
+  // No target facts are bound at this application site.
   LOOM_TARGET_CONDITION_UNBOUND = 0,
   // The right fact family is bound but does not establish the queried value.
   LOOM_TARGET_CONDITION_UNKNOWN = 1,
-  // Effective facts disprove the condition or have an incompatible family.
+  // Bound facts disprove the condition or have an incompatible family.
   LOOM_TARGET_CONDITION_REJECT = 2,
-  // Effective facts prove the condition.
+  // Bound facts prove the condition.
   LOOM_TARGET_CONDITION_MATCH = 3,
 };
 
@@ -90,7 +90,7 @@ iree_status_t loom_target_condition_resolve(
     const loom_context_t* context, loom_attribute_t condition,
     const loom_target_condition_descriptor_t** out_descriptor);
 
-// Evaluates one resolved descriptor/value pair against effective facts.
+// Evaluates one resolved descriptor/value pair against bound facts.
 // Provider summaries preserve this pair so selection performs only this
 // static type check and one direct callback.
 static inline loom_target_condition_outcome_t loom_target_condition_evaluate(
