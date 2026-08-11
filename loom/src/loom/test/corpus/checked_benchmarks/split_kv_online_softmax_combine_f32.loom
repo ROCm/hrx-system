@@ -54,7 +54,7 @@ kernel.def @split_kv_online_softmax_combine_f32() {
 check.case public @split_kv_online_softmax_combine_f32_case {
   %state0 = check.generate.iota offset(1.0) step(1.0) : tensor<2xf32>
   %acc0 = check.generate.iota offset(10.0) step(1.0) : tensor<4xf32>
-  %state1 = check.generate.iota offset(0.3068528194400547) step(3.6931471805599454) : tensor<2xf32>
+  %state1 = check.generate.iota offset(0.30685281944005472) step(3.6931471805599454) : tensor<2xf32>
   %acc1 = check.generate.iota offset(20.0) step(2.0) : tensor<4xf32>
   %combined_state = check.generate.fill value(-1.0) : tensor<2xf32>
   %combined_acc = check.generate.fill value(-1.0) : tensor<4xf32>

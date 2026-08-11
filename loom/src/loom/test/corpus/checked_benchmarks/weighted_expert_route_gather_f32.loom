@@ -63,4 +63,5 @@ check.case public @weighted_expert_route_gather_duplicate_case {
 }
 
 check.benchmark<@weighted_expert_route_gather_distinct_case> @weighted_expert_route_gather_distinct
+
 check.benchmark<@weighted_expert_route_gather_duplicate_case> @weighted_expert_route_gather_duplicate

@@ -290,10 +290,17 @@ check.case @case_wave64_workgroup_reduce_two_rows_tail {
 }
 
 check.benchmark<@case_wave64_workgroup_reduce_sub_wave> @bench_wave64_workgroup_reduce_sub_wave
+
 check.benchmark<@case_wave64_workgroup_reduce_full_wave> @bench_wave64_workgroup_reduce_full_wave
+
 check.benchmark<@case_wave64_workgroup_reduce_cross_wave> @bench_wave64_workgroup_reduce_cross_wave
+
 check.benchmark<@case_wave64_workgroup_reduce_loop_accumulation> @bench_wave64_workgroup_reduce_loop_accumulation
+
 check.benchmark<@case_wave64_workgroup_reduce_sparse_loop_accumulation> @bench_wave64_workgroup_reduce_sparse_loop_accumulation
+
 check.benchmark<@case_wave64_workgroup_reduce_loop_all_workitems> @bench_wave64_workgroup_reduce_loop_all_workitems
+
 check.benchmark<@case_wave64_workgroup_reduce_two_rows> @bench_wave64_workgroup_reduce_two_rows
+
 check.benchmark<@case_wave64_workgroup_reduce_two_rows_tail> @bench_wave64_workgroup_reduce_two_rows_tail

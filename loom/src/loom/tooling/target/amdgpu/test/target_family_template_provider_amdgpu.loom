@@ -1,4 +1,5 @@
 amdgpu.target<gfx11-generic> @gfx11_family
+
 amdgpu.target<gfx12-5-generic> @gfx12_5_family
 
 func.template<demo.target_family> target(@gfx11_family) @gfx11_provider(%value: i32) -> (i32) {

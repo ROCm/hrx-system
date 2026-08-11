@@ -3,8 +3,8 @@
 // The floating-point rows multiply constant one matrices. The integer rows
 // multiply signed -1 by unsigned 2, making their expected -32 result depend on
 // both the packed element width and the WMMA signedness selectors.
-
 amdgpu.target<gfx11-generic> @gfx11_wmma_families_wave32_target {subgroup_size = 32}
+
 amdgpu.target<gfx11-generic> @gfx11_wmma_families_wave64_target {subgroup_size = 64}
 
 kernel.def target(@gfx11_wmma_families_wave32_target) @gfx11_wmma_families_wave32() {

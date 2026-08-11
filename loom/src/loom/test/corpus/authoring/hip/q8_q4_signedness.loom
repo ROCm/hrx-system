@@ -108,4 +108,5 @@ check.case @case_q8_mixed_dot4_signedness {
 }
 
 check.benchmark<@case_q8_q4_signedness> @bench_q8_q4_signedness
+
 check.benchmark<@case_q8_mixed_dot4_signedness> @bench_q8_mixed_dot4_signedness

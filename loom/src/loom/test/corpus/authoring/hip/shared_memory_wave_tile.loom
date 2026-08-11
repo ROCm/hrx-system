@@ -176,6 +176,9 @@ check.case @case_shared_memory_cross_wave_i32_roundtrip_two_regions {
 }
 
 check.benchmark<@case_shared_memory_wave_i32_roundtrip> @bench_shared_memory_wave_i32_roundtrip
+
 check.benchmark<@case_shared_memory_wave_i32_roundtrip_static_offset> @bench_shared_memory_wave_i32_roundtrip_static_offset
+
 check.benchmark<@case_shared_memory_wave_i32_partial_lane_roundtrip> @bench_shared_memory_wave_i32_partial_lane_roundtrip
+
 check.benchmark<@case_shared_memory_cross_wave_i32_roundtrip_two_regions> @bench_shared_memory_cross_wave_i32_roundtrip_two_regions

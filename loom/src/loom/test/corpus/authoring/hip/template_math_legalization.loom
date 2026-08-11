@@ -7,7 +7,6 @@
 // the compile or JIT invocation specializes this targetless kernel. Math
 // authored inside the selected provider then follows the same target policy
 // and lowering path as math written directly in the caller.
-
 // HIP concept:
 //   template <typename MathPolicy>
 //   __device__ float4 evaluate_exp(float scalar, float4 values);

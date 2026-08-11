@@ -108,7 +108,7 @@ check.case @dense_projection_tiled_f16_128_case {
   check.requires<hal.spirv.cooperative_matrix> {row = "khr.cooperative_matrix.f16.16x16x16.f32.subgroup"}
   %lhs = check.generate.iota offset(0.125) step(0.000244140625) : tensor<8x8x16x16xf16>
   %rhs = check.generate.iota offset(-0.25) step(0.0001220703125) : tensor<8x8x16x16xf16>
-  %init = check.generate.iota offset(0.5) step(0.00006103515625) : tensor<8x8x16x16xf32>
+  %init = check.generate.iota offset(0.5) step(6.103515625e-05) : tensor<8x8x16x16xf32>
   %output = check.generate.fill value(0.0) : tensor<8x8x16x16xf32>
   kernel.launch @dense_projection_tiled_f16_128(%lhs, %rhs, %init, %output) : (tensor<8x8x16x16xf16>, tensor<8x8x16x16xf16>, tensor<8x8x16x16xf32>, tensor<8x8x16x16xf32>)
   %expected = check.oracle.call<reference.tiled_matmul> callee(@dense_projection_tiled_f16_128) inputs(%lhs, %rhs, %init) : (tensor<8x8x16x16xf16>, tensor<8x8x16x16xf16>, tensor<8x8x16x16xf32>) -> (tensor<8x8x16x16xf32>)
@@ -248,7 +248,7 @@ check.case @narrow_score_tiled_f16_128x16_m1_case {
   check.requires<hal.spirv.cooperative_matrix> {row = "khr.cooperative_matrix.f16.16x16x16.f32.subgroup"}
   %lhs = check.generate.iota offset(-0.375) step(0.00018310546875) : tensor<8x8x16x16xf16>
   %rhs = check.generate.iota offset(0.0625) step(0.000244140625) : tensor<8x1x16x16xf16>
-  %init = check.generate.iota offset(-0.125) step(0.000030517578125) : tensor<8x1x16x16xf32>
+  %init = check.generate.iota offset(-0.125) step(3.0517578125e-05) : tensor<8x1x16x16xf32>
   %output = check.generate.fill value(0.0) : tensor<8x1x16x16xf32>
   kernel.launch @narrow_score_tiled_f16_128x16_m1(%lhs, %rhs, %init, %output) : (tensor<8x8x16x16xf16>, tensor<8x1x16x16xf16>, tensor<8x1x16x16xf32>, tensor<8x1x16x16xf32>)
   %expected = check.oracle.call<reference.tiled_matmul> callee(@narrow_score_tiled_f16_128x16_m1) inputs(%lhs, %rhs, %init) : (tensor<8x8x16x16xf16>, tensor<8x1x16x16xf16>, tensor<8x1x16x16xf32>) -> (tensor<8x1x16x16xf32>)
@@ -263,7 +263,7 @@ check.case @narrow_score_tiled_f16_128x16_m2_case {
   check.requires<hal.spirv.cooperative_matrix> {row = "khr.cooperative_matrix.f16.16x16x16.f32.subgroup"}
   %lhs = check.generate.iota offset(-0.375) step(0.00018310546875) : tensor<8x8x16x16xf16>
   %rhs = check.generate.iota offset(0.0625) step(0.000244140625) : tensor<8x1x16x16xf16>
-  %init = check.generate.iota offset(-0.125) step(0.000030517578125) : tensor<8x1x16x16xf32>
+  %init = check.generate.iota offset(-0.125) step(3.0517578125e-05) : tensor<8x1x16x16xf32>
   %output = check.generate.fill value(0.0) : tensor<8x1x16x16xf32>
   kernel.launch @narrow_score_tiled_f16_128x16_m2(%lhs, %rhs, %init, %output) : (tensor<8x8x16x16xf16>, tensor<8x1x16x16xf16>, tensor<8x1x16x16xf32>, tensor<8x1x16x16xf32>)
   %expected = check.oracle.call<reference.tiled_matmul> callee(@narrow_score_tiled_f16_128x16_m2) inputs(%lhs, %rhs, %init) : (tensor<8x8x16x16xf16>, tensor<8x1x16x16xf16>, tensor<8x1x16x16xf32>) -> (tensor<8x1x16x16xf32>)

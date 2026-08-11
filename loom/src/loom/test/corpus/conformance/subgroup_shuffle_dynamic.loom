@@ -3,11 +3,9 @@
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-
 // Bounded dynamic source lanes use the general cross-lane path while keeping
 // the cluster width static. These cases cover both lane selection and the
 // validity result of relative shuffles.
-
 kernel.def @subgroup_shuffle_dynamic_index() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index

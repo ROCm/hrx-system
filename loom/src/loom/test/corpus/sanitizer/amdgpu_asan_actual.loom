@@ -32,7 +32,7 @@ check.case @asan_global_store_valid_case {
   kernel.launch @asan_global_store_valid(%output) : (tensor<1xi32>)
   %expected = check.generate.fill value(7) : tensor<1xi32>
   check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
-  check.expect.event<device> {type = "asan_report", count = 0}
+  check.expect.event<device> {count = 0, type = "asan_report"}
   check.return
 }
 
@@ -41,6 +41,6 @@ check.case @asan_global_store_redzone_case {
   kernel.launch @asan_global_store_redzone(%output) : (tensor<1xi32>)
   %expected = check.generate.fill value(0) : tensor<1xi32>
   check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
-  check.expect.event<device> {type = "asan_report", severity = "error", count = 1, asan = {access = "write", access_length = 4}}
+  check.expect.event<device> {asan = {access = "write", access_length = 4}, count = 1, severity = "error", type = "asan_report"}
   check.return
 }

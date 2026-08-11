@@ -64,4 +64,5 @@ check.case public @rope_pair_rotate_tile_quarter_turn_case {
 }
 
 check.benchmark<@rope_pair_rotate_tile_identity_case> @rope_pair_rotate_tile_identity_smoke
+
 check.benchmark<@rope_pair_rotate_tile_quarter_turn_case> @rope_pair_rotate_tile_quarter_turn_smoke
