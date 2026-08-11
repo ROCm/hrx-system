@@ -29,25 +29,54 @@ iree_status_t loom_target_function_version_snapshot_build(
   *out_snapshot = (loom_target_function_version_snapshot_t){
       .symbol_count = module->symbols.count,
   };
-  if (module->symbols.count == 0 || function_versions == NULL ||
-      function_versions->count == 0) {
+  if (function_versions == NULL || function_versions->count == 0) {
     return iree_ok_status();
   }
 
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, module->symbols.count,
-      sizeof(*out_snapshot->version_handles_by_symbol),
-      (void**)&out_snapshot->version_handles_by_symbol));
-  memset(
-      out_snapshot->version_handles_by_symbol, 0,
-      module->symbols.count * sizeof(*out_snapshot->version_handles_by_symbol));
+  if (module->symbols.count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, module->symbols.count,
+        sizeof(*out_snapshot->version_handles_by_symbol),
+        (void**)&out_snapshot->version_handles_by_symbol));
+    memset(out_snapshot->version_handles_by_symbol, 0,
+           module->symbols.count *
+               sizeof(*out_snapshot->version_handles_by_symbol));
+  }
   for (iree_host_size_t i = 0; i < function_versions->count; ++i) {
     loom_function_version_t* version_handle = function_versions->values[i];
     const loom_target_function_version_t* function_version =
         loom_target_function_version_const_cast(version_handle);
     if (function_version == NULL) continue;
-    const loom_symbol_ref_t function_ref =
-        loom_func_like_callee(function_version->base.function);
+
+    const loom_func_like_t function = function_version->base.function;
+    loom_symbol_ref_t function_ref = loom_symbol_ref_null();
+    if (!loom_func_like_isa(function) || function.vtable == NULL ||
+        !loom_op_defining_symbol_ref(module, function.op, &function_ref)) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "target function version %zu does not name a module-local function "
+          "symbol in the observed module",
+          i);
+    }
+    const loom_symbol_t* symbol =
+        &module->symbols.entries[function_ref.symbol_id];
+    const loom_func_like_t live_function =
+        loom_func_like_cast(module, symbol->defining_op);
+    if (symbol->defining_op != function.op ||
+        live_function.vtable != function.vtable) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "target function version %zu does not name the live definition of "
+          "module symbol %u",
+          i, (unsigned)function_ref.symbol_id);
+    }
+    if (out_snapshot->version_handles_by_symbol[function_ref.symbol_id] !=
+        NULL) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "multiple target function versions name module symbol %u",
+          (unsigned)function_ref.symbol_id);
+    }
     out_snapshot->version_handles_by_symbol[function_ref.symbol_id] =
         version_handle;
   }

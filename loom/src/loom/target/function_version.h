@@ -97,7 +97,8 @@ typedef struct loom_target_function_version_snapshot_t {
 // Construction is O(symbol_count + version_count). The returned snapshot is
 // allocated from |arena| and must be discarded before the module symbol table
 // changes. Each target-refined version must name a distinct live function
-// symbol in |module|.
+// symbol in |module|; inconsistent version state returns
+// IREE_STATUS_FAILED_PRECONDITION.
 iree_status_t loom_target_function_version_snapshot_build(
     const loom_module_t* module,
     const loom_function_version_list_t* function_versions,
