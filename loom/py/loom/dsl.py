@@ -576,6 +576,14 @@ _VALID_SYMBOL_INTERFACES = frozenset(
 )
 
 
+@unique
+class SymbolReferenceRole(Enum):
+    """Compile-time graph role of a symbol reference occurrence."""
+
+    DEPENDENCY = "dependency"
+    AVAILABILITY = "availability"
+
+
 @dataclass(frozen=True, slots=True)
 class SymbolReference:
     """Declares the expected target contract of a symbol attr.
@@ -583,15 +591,19 @@ class SymbolReference:
     name: Human-readable expected symbol class used in diagnostics.
     interfaces: Generated symbol-definition interfaces accepted by the attr.
         These are structural contracts, not op names or bytecode wire kinds.
+    role: Whether the reference contributes a dependency edge or only records
+        where an otherwise non-live symbol may be found during compilation.
     """
 
     name: str
     interfaces: tuple[str, ...]
+    role: SymbolReferenceRole
 
     def __init__(
         self,
         name: str,
         interfaces: list[str] | tuple[str, ...],
+        role: SymbolReferenceRole = SymbolReferenceRole.DEPENDENCY,
     ) -> None:
         frozen_interfaces = tuple(interfaces)
         if not name:
@@ -605,8 +617,13 @@ class SymbolReference:
                     f"'{interface}', must be one of "
                     f"{sorted(_VALID_SYMBOL_INTERFACES)}"
                 )
+        if not isinstance(role, SymbolReferenceRole):
+            raise ValueError(
+                f"SymbolReference: role must be a SymbolReferenceRole, got {role!r}"
+            )
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "interfaces", frozen_interfaces)
+        object.__setattr__(self, "role", role)
 
 
 @unique

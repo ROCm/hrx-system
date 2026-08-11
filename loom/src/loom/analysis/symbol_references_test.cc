@@ -21,6 +21,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/test/ops.h"
+#include "loom/ops/test/registry.h"
 #include "loom/testing/module_ptr.h"
 
 namespace loom {
@@ -38,13 +39,9 @@ class SymbolReferencesTest : public ::testing::Test {
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_GLOBAL, loom_global_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables);
-    RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
-    iree_host_size_t parameterized_attr_count = 0;
-    const loom_parameterized_attr_descriptor_t* parameterized_attrs =
-        loom_target_dialect_parameterized_attrs(&parameterized_attr_count);
-    IREE_ASSERT_OK(loom_context_register_parameterized_attrs(
-        &context_, LOOM_DIALECT_TARGET, parameterized_attrs,
-        parameterized_attr_count));
+    IREE_ASSERT_OK(loom_test_dialect_register(&context_));
+    RegisterParameterizedAttrs(LOOM_DIALECT_TARGET,
+                               loom_target_dialect_parameterized_attrs);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     iree_arena_initialize(&block_pool_, &analysis_arena_);
   }
@@ -57,6 +54,8 @@ class SymbolReferencesTest : public ::testing::Test {
 
   using DialectVtablesFn =
       const loom_op_vtable_t* const* (*)(iree_host_size_t*);
+  using ParameterizedAttrsFn =
+      const loom_parameterized_attr_descriptor_t* (*)(iree_host_size_t*);
 
   void RegisterDialect(uint8_t dialect_id,
                        DialectVtablesFn dialect_vtables_fn) {
@@ -64,6 +63,15 @@ class SymbolReferencesTest : public ::testing::Test {
     const loom_op_vtable_t* const* vtables = dialect_vtables_fn(&count);
     IREE_ASSERT_OK(loom_context_register_dialect(&context_, dialect_id, vtables,
                                                  (uint16_t)count));
+  }
+
+  void RegisterParameterizedAttrs(uint8_t dialect_id,
+                                  ParameterizedAttrsFn parameterized_attrs_fn) {
+    iree_host_size_t count = 0;
+    const loom_parameterized_attr_descriptor_t* descriptors =
+        parameterized_attrs_fn(&count);
+    IREE_ASSERT_OK(loom_context_register_parameterized_attrs(
+        &context_, dialect_id, descriptors, count));
   }
 
   ModulePtr ParseModule(const char* source) {
@@ -358,6 +366,86 @@ test.record @b {depends = @a}
     found_cycle = true;
   }
   EXPECT_TRUE(found_cycle);
+}
+
+TEST_F(SymbolReferencesTest,
+       AvailabilityOccurrencesRemainIndexedWithoutCreatingDependencies) {
+  ModulePtr module = ParseModule(R"(
+test.record @provider {options = #test.options<mode = fast, target = @dep_one>}
+test.record @dep_one {depends = @provider}
+test.record @dep_two {depends = @provider}
+test.record @array_target
+
+func.def @typed(%arg: test.matrix<bf16, scope = subgroup, rows = 16, target = @dep_two>) {
+  test.template_param_symbol<@provider>
+  test.parameterized_attr_array [#test.options<mode = fast, target = @array_target>] using []
+  func.return
+}
+)");
+
+  loom_symbol_id_t provider = FindSymbol(module.get(), IREE_SV("provider"));
+  loom_symbol_id_t dep_one = FindSymbol(module.get(), IREE_SV("dep_one"));
+  loom_symbol_id_t dep_two = FindSymbol(module.get(), IREE_SV("dep_two"));
+  loom_symbol_id_t array_target =
+      FindSymbol(module.get(), IREE_SV("array_target"));
+  loom_symbol_id_t typed = FindSymbol(module.get(), IREE_SV("typed"));
+
+  loom_symbol_reference_table_t table = BuildTable(module.get());
+
+  const loom_symbol_reference_occurrence_t* first_dependency = FindOccurrence(
+      table, dep_one, provider, LOOM_SYMBOL_REFERENCE_OCCURRENCE_NESTED_ATTR);
+  ASSERT_NE(first_dependency, nullptr);
+  EXPECT_TRUE(loom_symbol_reference_occurrence_is_dependency(first_dependency));
+  const loom_symbol_reference_occurrence_t* second_dependency = FindOccurrence(
+      table, dep_two, provider, LOOM_SYMBOL_REFERENCE_OCCURRENCE_NESTED_ATTR);
+  ASSERT_NE(second_dependency, nullptr);
+  EXPECT_TRUE(
+      loom_symbol_reference_occurrence_is_dependency(second_dependency));
+
+  const loom_symbol_reference_occurrence_t* parameter_availability =
+      FindOccurrence(table, provider, dep_one,
+                     LOOM_SYMBOL_REFERENCE_OCCURRENCE_NESTED_ATTR);
+  ASSERT_NE(parameter_availability, nullptr);
+  EXPECT_EQ(parameter_availability->role,
+            LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY);
+  const loom_symbol_reference_occurrence_t* type_availability = FindOccurrence(
+      table, typed, dep_two, LOOM_SYMBOL_REFERENCE_OCCURRENCE_VALUE_TYPE);
+  ASSERT_NE(type_availability, nullptr);
+  EXPECT_EQ(type_availability->role, LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY);
+  const loom_symbol_reference_occurrence_t* array_availability = FindOccurrence(
+      table, typed, array_target, LOOM_SYMBOL_REFERENCE_OCCURRENCE_NESTED_ATTR);
+  ASSERT_NE(array_availability, nullptr);
+  EXPECT_EQ(array_availability->role, LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY);
+  const loom_symbol_reference_occurrence_t* nested_availability =
+      FindOccurrence(table, typed, provider,
+                     LOOM_SYMBOL_REFERENCE_OCCURRENCE_SYMBOL_ATTR);
+  ASSERT_NE(nested_availability, nullptr);
+  EXPECT_EQ(nested_availability->role, LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY);
+
+  EXPECT_EQ(table.symbols[provider].incoming_count, 3u);
+  uint32_t dependency_count = 0;
+  uint32_t availability_count = 0;
+  loom_symbol_reference_occurrence_id_t occurrence_id =
+      table.symbols[provider].first_incoming_occurrence_id;
+  while (occurrence_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
+    const loom_symbol_reference_occurrence_t* occurrence =
+        &table.occurrences[occurrence_id];
+    if (loom_symbol_reference_occurrence_is_dependency(occurrence)) {
+      ++dependency_count;
+    } else {
+      ++availability_count;
+    }
+    occurrence_id = occurrence->next_incoming_occurrence_id;
+  }
+  EXPECT_EQ(dependency_count, 2u);
+  EXPECT_EQ(availability_count, 1u);
+
+  loom_scc_list_t sccs = {};
+  loom_scc_graph_t graph = loom_symbol_reference_dependency_scc_graph(&table);
+  IREE_ASSERT_OK(loom_scc_compute(&graph, nullptr, &analysis_arena_, &sccs));
+  for (iree_host_size_t i = 0; i < sccs.count; ++i) {
+    EXPECT_FALSE(sccs.values[i].is_cycle);
+  }
 }
 
 TEST_F(SymbolReferencesTest, RebuildsAfterAttrMutationAndErase) {

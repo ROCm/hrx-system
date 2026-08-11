@@ -353,8 +353,12 @@ def _emit_attr_descriptor_table(
                     parameter.enum_def,
                 )
         if parameter.symbol_ref is not None:
-            flags = c_symbols.symbol_interface_flags(parameter.symbol_ref.interfaces)
-            lines.append(f"static const loom_symbol_reference_descriptor_t {prefix}_{parameter.name}_symbol_ref = {{{_bstring_expr(parameter.symbol_ref.name)}, {flags}}};")
+            c_symbols.append_symbol_reference_descriptor(
+                lines,
+                f"{prefix}_{parameter.name}_symbol_ref",
+                parameter.symbol_ref,
+                _bstring_expr(parameter.symbol_ref.name),
+            )
 
     table_name = f"{prefix}_parameter_desc"
     lines.append(f"static const loom_attr_descriptor_t {table_name}[] = {{")
@@ -805,9 +809,13 @@ def generate_tables_c(
         for attr_def in non_flags:
             if attr_def.symbol_ref is None:
                 continue
-            flags = c_symbols.symbol_interface_flags(attr_def.symbol_ref.interfaces)
             descriptor_name = f"{prefix}_{attr_def.name}_symbol_ref"
-            lines.append(f"static const loom_symbol_reference_descriptor_t {descriptor_name} = {{{_bstring_expr(attr_def.symbol_ref.name)}, {flags}}};")
+            c_symbols.append_symbol_reference_descriptor(
+                lines,
+                descriptor_name,
+                attr_def.symbol_ref,
+                _bstring_expr(attr_def.symbol_ref.name),
+            )
 
         # Attribute descriptors.
         if non_flags:

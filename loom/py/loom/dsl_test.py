@@ -161,6 +161,8 @@ from loom.dsl import (
     Successor,
     SymbolDefinition,
     SymbolKernelContract,
+    SymbolReference,
+    SymbolReferenceRole,
     TargetFactSpecialization,
     TargetLikeInterface,
     TotalBitCountEqual,
@@ -2983,6 +2985,23 @@ class TestScopedEnumOp:
                 attrs=[AttrDef("descriptor", "string")],
                 format=[ScopedEnumRef("descriptor")],
             )
+
+
+class TestSymbolReference:
+    def test_defaults_to_dependency_role(self) -> None:
+        reference = SymbolReference("function", ["callable"])
+        assert reference.interfaces == ("callable",)
+        assert reference.role is SymbolReferenceRole.DEPENDENCY
+
+    def test_accepts_availability_role(self) -> None:
+        reference = SymbolReference(
+            "record", ["record"], role=SymbolReferenceRole.AVAILABILITY
+        )
+        assert reference.role is SymbolReferenceRole.AVAILABILITY
+
+    def test_rejects_untyped_role(self) -> None:
+        with _raises(ValueError, match="role must be a SymbolReferenceRole"):
+            SymbolReference("record", ["record"], role="availability")  # type: ignore[arg-type]
 
 
 class TestSymbolKernelContract:

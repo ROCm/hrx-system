@@ -566,7 +566,8 @@ static iree_status_t loom_target_callgraph_plan_reachable_rows(
       const loom_symbol_reference_occurrence_t* edge =
           &state->references.occurrences[edge_id];
       edge_id = edge->next_outgoing_occurrence_id;
-      if (edge->kind != LOOM_SYMBOL_REFERENCE_OCCURRENCE_CALL ||
+      if (!loom_symbol_reference_occurrence_is_dependency(edge) ||
+          edge->kind != LOOM_SYMBOL_REFERENCE_OCCURRENCE_CALL ||
           edge->user_op == NULL) {
         continue;
       }

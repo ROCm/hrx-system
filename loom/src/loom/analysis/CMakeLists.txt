@@ -863,6 +863,7 @@ loom_cc_test(
     loom::ir
     loom::ops::func
     loom::ops::op_defs
+    loom::ops::test
     loom::testing::module_ptr
 )
 

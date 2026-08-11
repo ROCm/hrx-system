@@ -332,6 +332,38 @@ func.def @unused_private(%x: i32) -> (i32) {
   EXPECT_EQ(planned_helper->cause_ordinal, planned_entry->ordinal);
 }
 
+TEST_F(LinkPlannerTest, SelectiveRootIgnoresModuleAvailabilityReferences) {
+  loom_module_t* module = Parse(IREE_SV(R"(
+test.record @available
+test.template_param_symbol<@available>
+
+func.def public @entry() {
+  func.return
+}
+)"));
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), module, IREE_SV("input"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  iree_string_view_t roots[] = {IREE_SV("@entry")};
+  loom_link_plan_options_t options = {
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
+  };
+  PlanPtr plan = BuildPlan(index.get(), &options);
+
+  const loom_link_module_index_symbol_t* entry =
+      loom_link_module_index_lookup_global(index.get(), IREE_SV("entry"));
+  const loom_link_module_index_module_t* indexed_module =
+      loom_link_module_index_module_at(index.get(), 0);
+  ASSERT_NE(indexed_module, nullptr);
+  const loom_link_module_index_symbol_t* available =
+      loom_link_module_index_lookup_private(index.get(), indexed_module,
+                                            IREE_SV("available"));
+  EXPECT_TRUE(ContainsSymbol(plan.get(), entry));
+  EXPECT_FALSE(ContainsSymbol(plan.get(), available));
+}
+
 TEST_F(LinkPlannerTest, SelectiveBytecodePlanningMaterializesSelectedModules) {
   loom_module_t* used = Parse(IREE_SV(R"(
 func.def public @entry(%x: i32) -> (i32) {

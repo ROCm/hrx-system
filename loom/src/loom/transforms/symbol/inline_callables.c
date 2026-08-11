@@ -379,6 +379,9 @@ static void loom_inline_collect_reference_counts(loom_inline_state_t* state) {
   for (iree_host_size_t i = 0; i < state->references.occurrence_count; ++i) {
     const loom_symbol_reference_occurrence_t* edge =
         &state->references.occurrences[i];
+    if (!loom_symbol_reference_occurrence_is_dependency(edge)) {
+      continue;
+    }
     if (edge->target_symbol_id >= state->module->symbols.count) {
       continue;
     }
@@ -395,7 +398,8 @@ static iree_status_t loom_inline_build_plan(loom_inline_state_t* state) {
   for (iree_host_size_t i = 0; i < state->references.occurrence_count; ++i) {
     const loom_symbol_reference_occurrence_t* edge =
         &state->references.occurrences[i];
-    if (edge->kind != LOOM_SYMBOL_REFERENCE_OCCURRENCE_CALL) {
+    if (!loom_symbol_reference_occurrence_is_dependency(edge) ||
+        edge->kind != LOOM_SYMBOL_REFERENCE_OCCURRENCE_CALL) {
       continue;
     }
 

@@ -134,6 +134,10 @@ static iree_status_t loom_symbol_liveness_mark_module_root_edges(
   while (edge_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
     const loom_symbol_reference_occurrence_t* edge =
         &state->references->occurrences[edge_id];
+    if (!loom_symbol_reference_occurrence_is_dependency(edge)) {
+      edge_id = edge->next_outgoing_occurrence_id;
+      continue;
+    }
     ++state->concrete_edge_count;
     IREE_RETURN_IF_ERROR(loom_symbol_liveness_mark_concrete_symbol_id(
         state, edge->target_symbol_id));
@@ -176,6 +180,10 @@ static iree_status_t loom_symbol_liveness_traverse_symbol(
   while (edge_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
     const loom_symbol_reference_occurrence_t* edge =
         &state->references->occurrences[edge_id];
+    if (!loom_symbol_reference_occurrence_is_dependency(edge)) {
+      edge_id = edge->next_outgoing_occurrence_id;
+      continue;
+    }
     ++state->concrete_edge_count;
     IREE_RETURN_IF_ERROR(loom_symbol_liveness_mark_concrete_symbol_id(
         state, edge->target_symbol_id));

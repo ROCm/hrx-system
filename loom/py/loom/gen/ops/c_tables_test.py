@@ -111,6 +111,8 @@ from loom.dsl import (
     SymbolDefinition,
     SymbolDefinitionFlag,
     SymbolKernelContract,
+    SymbolReference,
+    SymbolReferenceRole,
     SymbolValueContract,
     TargetFactSpecialization,
     TargetLikeInterface,
@@ -514,6 +516,37 @@ def test_generate_parameterized_attribute_family_metadata() -> None:
     assert ".attr_kind = LOOM_ATTR_PARAMETERIZED" in tables_c
     assert ".reference.parameterized_attr_kind = LOOM_PARAMETERIZED_ATTR_TEST_TILE" in tables_c
     assert ".reference.parameterized_attr_kind = LOOM_PARAMETERIZED_ATTR_KIND_ANY" in tables_c
+
+
+def test_generate_symbol_reference_roles_for_all_descriptor_owners() -> None:
+    dialect = Dialect("test", dialect_id=0x01)
+    dependency = SymbolReference("record", ["record"])
+    availability = SymbolReference("record", ["record"], role=SymbolReferenceRole.AVAILABILITY)
+    options = ParameterizedAttrDef(
+        "test.options",
+        group=dialect,
+        parameters=[AttrDef("target", ATTR_TYPE_SYMBOL, symbol_ref=availability)],
+    )
+    holder = Op(
+        "test.holder",
+        group=dialect,
+        attrs=[
+            AttrDef("dependency", ATTR_TYPE_SYMBOL, symbol_ref=dependency),
+            AttrDef("available", ATTR_TYPE_SYMBOL, symbol_ref=availability),
+        ],
+    )
+    handle = TypeDef(
+        "test.handle",
+        params=[AttrDef("target", ATTR_TYPE_SYMBOL, symbol_ref=availability)],
+        format=[Param("target")],
+    )
+
+    tables_c = generate_tables_c("test", 0x01, [holder], [options])
+    _, _, type_tables_c = generate_type_registry([handle])
+
+    assert tables_c.count(".role = LOOM_SYMBOL_REFERENCE_ROLE_DEPENDENCY,") == 1
+    assert tables_c.count(".role = LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY,") == 2
+    assert ".role = LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY," in type_tables_c
 
 
 def test_generate_encoding_family_metadata() -> None:

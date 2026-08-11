@@ -19,6 +19,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/scc.h"
+#include "loom/ir/attribute_schema.h"
 #include "loom/ir/ir.h"
 
 #ifdef __cplusplus
@@ -69,6 +70,8 @@ typedef struct loom_symbol_reference_occurrence_t {
   loom_symbol_id_t target_symbol_id;
   // Classified source of the occurrence.
   loom_symbol_reference_occurrence_kind_t kind;
+  // Compile-time graph role declared by the owning attribute schema.
+  loom_symbol_reference_role_t role;
   // Attribute index on user_op when the occurrence came from an op attribute.
   uint16_t attr_index;
   // Operation that owns the occurrence, or NULL for module-root records.
@@ -78,6 +81,15 @@ typedef struct loom_symbol_reference_occurrence_t {
   // Next occurrence with the same target symbol.
   loom_symbol_reference_occurrence_id_t next_incoming_occurrence_id;
 } loom_symbol_reference_occurrence_t;
+
+static_assert(sizeof(loom_symbol_reference_occurrence_t) == 32,
+              "symbol reference occurrences must remain 32 bytes");
+
+// Returns true when |occurrence| contributes to reachability and link closure.
+static inline bool loom_symbol_reference_occurrence_is_dependency(
+    const loom_symbol_reference_occurrence_t* occurrence) {
+  return occurrence->role == LOOM_SYMBOL_REFERENCE_ROLE_DEPENDENCY;
+}
 
 // One abstract func.apply provider demand.
 typedef struct loom_func_contract_demand_t {
@@ -99,9 +111,9 @@ typedef struct loom_symbol_reference_symbol_occurrences_t {
   loom_symbol_reference_occurrence_id_t first_outgoing_occurrence_id;
   // First occurrence whose target_symbol_id is this symbol.
   loom_symbol_reference_occurrence_id_t first_incoming_occurrence_id;
-  // Number of outgoing occurrences.
+  // Number of outgoing occurrences across all graph roles.
   uint32_t outgoing_count;
-  // Number of incoming occurrences.
+  // Number of incoming occurrences across all graph roles.
   uint32_t incoming_count;
   // First abstract provider demand owned by this symbol.
   loom_func_contract_demand_id_t first_contract_demand_id;

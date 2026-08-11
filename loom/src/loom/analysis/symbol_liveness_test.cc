@@ -14,6 +14,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/test/ops.h"
 #include "loom/testing/module_ptr.h"
 
 namespace loom {
@@ -54,11 +55,8 @@ class SymbolLivenessTest : public ::testing::Test {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(),
                                      &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
-    iree_host_size_t vtable_count = 0;
-    const loom_op_vtable_t* const* vtables =
-        loom_func_dialect_vtables(&vtable_count);
-    IREE_ASSERT_OK(loom_context_register_dialect(
-        &context_, LOOM_DIALECT_FUNC, vtables, (uint16_t)vtable_count));
+    RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     iree_arena_initialize(&block_pool_, &analysis_arena_);
   }
@@ -67,6 +65,17 @@ class SymbolLivenessTest : public ::testing::Test {
     iree_arena_deinitialize(&analysis_arena_);
     loom_context_deinitialize(&context_);
     iree_arena_block_pool_deinitialize(&block_pool_);
+  }
+
+  using DialectVtablesFn =
+      const loom_op_vtable_t* const* (*)(iree_host_size_t*);
+
+  void RegisterDialect(uint8_t dialect_id,
+                       DialectVtablesFn dialect_vtables_fn) {
+    iree_host_size_t count = 0;
+    const loom_op_vtable_t* const* vtables = dialect_vtables_fn(&count);
+    IREE_ASSERT_OK(loom_context_register_dialect(&context_, dialect_id, vtables,
+                                                 (uint16_t)count));
   }
 
   ModulePtr ParseModule(const char* source) {
@@ -133,6 +142,29 @@ func.def @dead() {
   EXPECT_FALSE(loom_symbol_liveness_is_live(
       &liveness, FindSymbol(module.get(), IREE_SV("dead"))));
   EXPECT_EQ(liveness.contributed_edge_count, 0u);
+}
+
+TEST_F(SymbolLivenessTest, ModuleAvailabilityDoesNotRootSymbols) {
+  ModulePtr module = ParseModule(R"(
+test.record @available
+test.template_param_symbol<@available>
+
+func.def public @entry() {
+  func.return
+}
+)");
+
+  loom_symbol_liveness_options_t options = {
+      /*.flags=*/LOOM_SYMBOL_LIVENESS_INCLUDE_MODULE_EDGES,
+      /*.root_query=*/RootPublicFunc,
+  };
+  loom_symbol_liveness_t liveness = ComputeLiveness(module.get(), &options);
+
+  EXPECT_TRUE(loom_symbol_liveness_is_live(
+      &liveness, FindSymbol(module.get(), IREE_SV("entry"))));
+  EXPECT_FALSE(loom_symbol_liveness_is_live(
+      &liveness, FindSymbol(module.get(), IREE_SV("available"))));
+  EXPECT_EQ(liveness.concrete_edge_count, 0u);
 }
 
 TEST_F(SymbolLivenessTest, ContributorsScanReachableBodiesOnly) {

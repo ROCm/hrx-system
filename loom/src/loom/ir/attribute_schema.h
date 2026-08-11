@@ -56,13 +56,26 @@ enum loom_symbol_interface_bits_e {
   LOOM_SYMBOL_INTERFACE_COMMAND_PROGRAM = 1u << 9,
 };
 
+enum loom_symbol_reference_role_e {
+  // Zero/default: the reference contributes to reachability and link closure.
+  LOOM_SYMBOL_REFERENCE_ROLE_DEPENDENCY = 0,
+  // The reference records where a symbol may be found without retaining it.
+  LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY = 1,
+};
+typedef uint8_t loom_symbol_reference_role_t;
+
 // Generated metadata for a symbol-reference attribute.
 typedef struct loom_symbol_reference_descriptor_t {
   // Human-readable expected symbol class used in diagnostics.
   loom_bstring_t name;
   // Structural symbol interfaces accepted by this reference.
   loom_symbol_interface_flags_t interfaces;
+  // Compile-time graph role of each reference occurrence.
+  loom_symbol_reference_role_t role;
 } loom_symbol_reference_descriptor_t;
+
+static_assert(sizeof(loom_symbol_reference_descriptor_t) == 16,
+              "symbol reference descriptors must remain 16 bytes");
 
 static inline iree_string_view_t loom_symbol_reference_descriptor_name(
     const loom_symbol_reference_descriptor_t* descriptor) {

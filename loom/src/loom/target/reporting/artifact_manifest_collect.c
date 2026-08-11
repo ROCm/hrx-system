@@ -676,7 +676,8 @@ static iree_status_t loom_target_artifact_manifest_mark_function_closure(
       const loom_symbol_reference_occurrence_t* edge = NULL;
       IREE_RETURN_IF_ERROR(loom_target_artifact_manifest_reference_occurrence(
           reference_table, edge_id, &edge));
-      if (edge->kind == LOOM_SYMBOL_REFERENCE_OCCURRENCE_CALL) {
+      if (loom_symbol_reference_occurrence_is_dependency(edge) &&
+          edge->kind == LOOM_SYMBOL_REFERENCE_OCCURRENCE_CALL) {
         if (edge->target_symbol_id >= reference_table->symbol_count) {
           return iree_make_status(
               IREE_STATUS_FAILED_PRECONDITION,
@@ -721,7 +722,8 @@ static iree_status_t loom_target_artifact_manifest_mark_used_globals(
       const loom_symbol_reference_occurrence_t* edge = NULL;
       IREE_RETURN_IF_ERROR(loom_target_artifact_manifest_reference_occurrence(
           reference_table, edge_id, &edge));
-      if (edge->kind == LOOM_SYMBOL_REFERENCE_OCCURRENCE_GLOBAL_ACCESS) {
+      if (loom_symbol_reference_occurrence_is_dependency(edge) &&
+          edge->kind == LOOM_SYMBOL_REFERENCE_OCCURRENCE_GLOBAL_ACCESS) {
         if (edge->target_symbol_id >= reference_table->symbol_count) {
           return iree_make_status(
               IREE_STATUS_FAILED_PRECONDITION,
