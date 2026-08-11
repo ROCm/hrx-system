@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from loom.gen.support.c import c_string_arg as _c_string_arg
+from loom.gen.support.files import write_text_file
 from loom.gen.support.generated_file import line_comment_header
 from loom.target.arch.amdgpu.low_aliases import (
     AmdgpuBlockedLowAlias,
@@ -128,5 +129,4 @@ def write_low_aliases_to_path(source_path: Path) -> None:
     aliases = sorted_amdgpu_blocked_low_aliases()
     validate_amdgpu_blocked_low_aliases(aliases)
     validate_amdgpu_blocked_low_alias_descriptor_contracts(aliases)
-    source_path.parent.mkdir(parents=True, exist_ok=True)
-    source_path.write_text(_emit_source(aliases), encoding="utf-8")
+    write_text_file(source_path, _emit_source(aliases))

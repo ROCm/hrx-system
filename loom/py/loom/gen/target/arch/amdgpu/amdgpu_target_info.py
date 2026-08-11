@@ -30,6 +30,7 @@ from build_tools.amdgpu.target_map_data import (  # noqa: E402
 
 from loom.gen.support.c import c_string_arg as _c_string_arg  # noqa: E402
 from loom.gen.support.c import c_string_literal as _c_string_literal  # noqa: E402
+from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
 from loom.gen.target.arch.amdgpu.amdgpu_config_tables import (  # noqa: E402
     write_config_tables_to_paths,
@@ -1511,12 +1512,9 @@ def _write_target_info_to_paths(
     header = _emit_header(descriptor_sets)
     tables_header = _emit_tables_header()
     source = _emit_tables_source(processors, targets, descriptor_set_rows)
-    header_path.parent.mkdir(parents=True, exist_ok=True)
-    source_path.parent.mkdir(parents=True, exist_ok=True)
-    tables_header_path.parent.mkdir(parents=True, exist_ok=True)
-    header_path.write_text(header, encoding="utf-8")
-    source_path.write_text(source, encoding="utf-8")
-    tables_header_path.write_text(tables_header, encoding="utf-8")
+    write_text_file(header_path, header)
+    write_text_file(source_path, source)
+    write_text_file(tables_header_path, tables_header)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1606,14 +1604,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         processors=processors,
         targets=targets,
     )
-    args.cache_policy_encoding_rows.parent.mkdir(parents=True, exist_ok=True)
-    args.cache_policy_encoding_rows.write_text(_emit_memory_cache_policy_encoding_rows(), encoding="utf-8")
-    args.cache_policy_temporal_th.parent.mkdir(parents=True, exist_ok=True)
-    args.cache_policy_temporal_th.write_text(_emit_memory_cache_policy_temporal_th(), encoding="utf-8")
-    args.lds_bank_service_model_rows.parent.mkdir(parents=True, exist_ok=True)
-    args.lds_bank_service_model_rows.write_text(_emit_lds_bank_service_model_rows(), encoding="utf-8")
-    args.matrix_coexecution_source_layouts.parent.mkdir(parents=True, exist_ok=True)
-    args.matrix_coexecution_source_layouts.write_text(_emit_matrix_coexecution_source_layouts(), encoding="utf-8")
+    write_text_file(
+        args.cache_policy_encoding_rows,
+        _emit_memory_cache_policy_encoding_rows(),
+    )
+    write_text_file(
+        args.cache_policy_temporal_th,
+        _emit_memory_cache_policy_temporal_th(),
+    )
+    write_text_file(
+        args.lds_bank_service_model_rows,
+        _emit_lds_bank_service_model_rows(),
+    )
+    write_text_file(
+        args.matrix_coexecution_source_layouts,
+        _emit_matrix_coexecution_source_layouts(),
+    )
     write_config_tables_to_paths(
         descriptor_sets=descriptor_sets,
         processors=processors,

@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from loom.gen.support.c import CIdentifierCase, c_identifier
+from loom.gen.support.files import write_text_file
 from loom.gen.support.generated_file import line_comment_header
 from loom.target.arch.amdgpu.encoding import (
     AMDGPU_ENCODING_FIELD_IDS,
@@ -189,11 +190,6 @@ def _emit_encoding_field_ids() -> str:
     return "\n".join(lines) + "\n"
 
 
-def _write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-
-
 def write_config_tables_to_paths(
     *,
     descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
@@ -208,12 +204,12 @@ def write_config_tables_to_paths(
         processors,
         targets,
     )
-    _write(
+    write_text_file(
         low_registry_tables_path,
         _emit_low_registry_tables(selected_descriptor_sets),
     )
-    _write(
+    write_text_file(
         encoding_tables_path,
         _emit_encoding_tables(selected_descriptor_sets),
     )
-    _write(encoding_field_ids_path, _emit_encoding_field_ids())
+    write_text_file(encoding_field_ids_path, _emit_encoding_field_ids())

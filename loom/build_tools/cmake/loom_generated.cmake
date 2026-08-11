@@ -10,6 +10,11 @@
 # CMake.
 # Loom packages keep source-of-truth tables in Python and generate compact C
 # data into the build tree.
+#
+# Generated commands record input freshness in a private stamp and expose their
+# artifacts as byproducts. Generators that preserve an artifact's timestamp
+# when its contents are unchanged can then avoid invalidating C/C++ consumers
+# without leaving Make to repeat the generator on every build.
 
 function(_loom_python_command_prefix OUTPUT_PREFIX GENERATOR)
   iree_py_library_collect_package_dirs(_GENERATOR_PACKAGE_DIRS "${GENERATOR}")
@@ -68,8 +73,14 @@ function(_loom_generated_files)
   iree_py_library_collect_sources(_GENERATOR_INPUTS "${_RULE_GENERATOR}")
   _loom_python_command_prefix(_PYTHON_COMMAND_PREFIX "${_RULE_GENERATOR}")
 
+  iree_package_name(_PACKAGE_NAME)
+  set(_GEN_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}")
+  set(_GEN_STAMP
+    "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${_GEN_TARGET}.stamp")
   add_custom_command(
     OUTPUT
+      "${_GEN_STAMP}"
+    BYPRODUCTS
       ${_OUTPUTS}
     COMMAND
       ${_PYTHON_COMMAND_PREFIX}
@@ -77,6 +88,8 @@ function(_loom_generated_files)
       ${_GENERATOR_ENTRYPOINT}
       ${_RULE_ARGS}
       ${_OUTPUT_ARGS}
+    COMMAND
+      "${CMAKE_COMMAND}" -E touch "${_GEN_STAMP}"
     DEPENDS
       ${_GENERATOR_INPUTS}
       ${_RULE_INPUTS}
@@ -90,10 +103,9 @@ function(_loom_generated_files)
     PROPERTIES GENERATED TRUE
   )
 
-  iree_package_name(_PACKAGE_NAME)
-  set(_GEN_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}")
   add_custom_target("${_GEN_TARGET}"
     DEPENDS
+      "${_GEN_STAMP}"
       ${_OUTPUTS}
   )
   iree_register_generated_compile_input("${_GEN_TARGET}"
@@ -251,8 +263,14 @@ function(loom_generated_cc_library)
   iree_py_library_collect_sources(_GENERATOR_INPUTS "${_RULE_GENERATOR}")
   _loom_python_command_prefix(_PYTHON_COMMAND_PREFIX "${_RULE_GENERATOR}")
 
+  iree_package_name(_PACKAGE_NAME)
+  set(_GEN_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}_gen")
+  set(_GEN_STAMP
+    "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${_GEN_TARGET}.stamp")
   add_custom_command(
     OUTPUT
+      "${_GEN_STAMP}"
+    BYPRODUCTS
       ${_OUTPUTS}
     COMMAND
       ${_PYTHON_COMMAND_PREFIX}
@@ -260,6 +278,8 @@ function(loom_generated_cc_library)
       ${_GENERATOR_ENTRYPOINT}
       ${_RULE_ARGS}
       ${_OUTPUT_ARGS}
+    COMMAND
+      "${CMAKE_COMMAND}" -E touch "${_GEN_STAMP}"
     DEPENDS
       ${_GENERATOR_INPUTS}
       ${_RULE_INPUTS}
@@ -272,10 +292,9 @@ function(loom_generated_cc_library)
     PROPERTIES GENERATED TRUE
   )
 
-  iree_package_name(_PACKAGE_NAME)
-  set(_GEN_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}_gen")
   add_custom_target("${_GEN_TARGET}"
     DEPENDS
+      "${_GEN_STAMP}"
       ${_OUTPUTS}
   )
   iree_register_generated_compile_input("${_GEN_TARGET}"

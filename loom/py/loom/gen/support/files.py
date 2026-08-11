@@ -12,8 +12,10 @@ from pathlib import Path
 
 
 def write_text_file(path: Path, contents: str) -> None:
-    """Writes UTF-8 text, creating parent directories first."""
+    """Writes changed UTF-8 text, creating parent directories first."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_file() and path.read_text(encoding="utf-8") == contents:
+        return
     path.write_text(contents, encoding="utf-8")
 
 

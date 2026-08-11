@@ -14,6 +14,7 @@ from pathlib import Path
 
 from loom.gen.support.c import c_pascal_identifier
 from loom.gen.support.c import c_string_arg as _c_string_arg
+from loom.gen.support.files import write_text_file
 from loom.gen.support.generated_file import line_comment_header
 from loom.target.arch.amdgpu.target_info import (
     AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE,
@@ -245,5 +246,4 @@ def write_target_record_tables_to_path(
     rows = _materialize_rows(targets, processors, descriptor_sets)
     _validate_target_record_infos(rows)
     _validate_target_record_coverage(rows, processors)
-    tables_path.parent.mkdir(parents=True, exist_ok=True)
-    tables_path.write_text(_emit_tables(rows), encoding="utf-8")
+    write_text_file(tables_path, _emit_tables(rows))
