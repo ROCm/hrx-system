@@ -18,6 +18,7 @@ Usage:
     python3 loom/py/loom/gen/run.py textmate --in-place
     python3 loom/py/loom/gen/run.py textmate --check
     python3 loom/py/loom/gen/run.py x86_packed_dot_contract --in-place
+    python3 loom/py/loom/gen/run.py x86_packed_dot_contract --check
     python3 loom/py/loom/gen/run.py x86_target_profiles --check
 """
 

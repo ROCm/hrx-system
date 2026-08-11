@@ -97,13 +97,11 @@ def write_descriptor_set_to_paths(
 
 
 def main() -> None:
-    from loom.gen.target.arch.x86.x86_packed_dot_contract import write_x86_packed_dot_contract_header
     from loom.target.descriptor_sets import iter_checked_in_c_descriptor_sets
 
     descriptor_sets = tuple(iter_checked_in_c_descriptor_sets())
     for descriptor_set in descriptor_sets:
         write_descriptor_set(descriptor_set)
-    write_x86_packed_dot_contract_header()
     print(f"Generated {len(descriptor_sets)} low descriptor sets")
 
 

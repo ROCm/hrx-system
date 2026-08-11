@@ -36,6 +36,7 @@ iree_py_library(
         "//loom/py/loom/gen/ops:c_tables",
         "//loom/py/loom/gen/python",
         "//loom/py/loom/gen/support",
+        "//loom/py/loom/gen/target/arch/x86:packed_dot_contract",
         "//loom/py/loom/target/arch/amdgpu:dialect",
         "//loom/py/loom/target/arch/ireevm:dialect",
         "//loom/py/loom/target/arch/spirv:dialect",

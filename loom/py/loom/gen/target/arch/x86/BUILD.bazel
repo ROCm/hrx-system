@@ -77,3 +77,14 @@ iree_py_binary(
         "//loom/py/loom/target/arch/x86:target_info",
     ],
 )
+
+iree_py_test(
+    name = "packed_dot_contract_test",
+    srcs = [
+        "x86_packed_dot_contract_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.gen.target.arch.x86.x86_packed_dot_contract_test"],
+    main = "pytest_style_runner.py",
+    deps = [":packed_dot_contract"],
+)
