@@ -286,6 +286,7 @@ iree_runtime_cc_library(
         "virtual_queue.h",
     ],
     hdrs = [
+        "allocator.h",
         "api.h",
     ],
     deps = [
