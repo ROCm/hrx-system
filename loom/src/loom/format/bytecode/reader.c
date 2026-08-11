@@ -3711,6 +3711,21 @@ static iree_status_t loom_bytecode_body_reader_read_region(
         body_reader, loom_bytecode_reader_cursor_absolute_position(cursor),
         IREE_SV("region_nesting_exceeds_bytecode_maximum_depth"));
   }
+  uint64_t source_flags = 0;
+  uint64_t source_flags_offset =
+      loom_bytecode_reader_cursor_absolute_position(cursor);
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+      body_reader->reader, cursor, &source_flags));
+  if (source_flags > UINT16_MAX) {
+    return loom_bytecode_reader_emit_invalid_ir_body(
+        body_reader, source_flags_offset,
+        IREE_SV("region_source_flags_exceed_field_width"));
+  }
+  if ((source_flags & ~((uint64_t)LOOM_REGION_SOURCE_FLAG_MASK)) != 0) {
+    return loom_bytecode_reader_emit_invalid_ir_body(
+        body_reader, source_flags_offset,
+        IREE_SV("region_source_flags_have_unsupported_bits"));
+  }
   uint64_t block_count = 0;
   uint64_t block_count_offset =
       loom_bytecode_reader_cursor_absolute_position(cursor);
@@ -3724,6 +3739,7 @@ static iree_status_t loom_bytecode_body_reader_read_region(
   loom_region_t* region = NULL;
   IREE_RETURN_IF_ERROR(loom_module_allocate_region(
       body_reader->reader->output_module, (uint16_t)block_count, &region));
+  region->source_flags = (loom_region_source_flags_t)source_flags;
   ++body_reader->counts.region_count;
   body_reader->counts.block_count += block_count;
 

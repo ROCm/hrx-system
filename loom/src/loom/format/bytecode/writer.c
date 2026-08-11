@@ -3390,6 +3390,14 @@ static iree_status_t loom_bytecode_write_region(
                             "region nesting exceeds maximum depth %d",
                             LOOM_BYTECODE_MAX_REGION_DEPTH);
   }
+  if (region->source_flags & ~LOOM_REGION_SOURCE_FLAG_MASK) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "region source flags contain unsupported bits 0x%04X",
+        (unsigned)region->source_flags);
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_bytecode_page_writer_write_uvarint(writer, region->source_flags));
   IREE_RETURN_IF_ERROR(
       loom_bytecode_page_writer_write_uvarint(writer, region->block_count));
   for (uint16_t i = 0; i < region->block_count; ++i) {

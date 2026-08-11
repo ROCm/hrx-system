@@ -1165,6 +1165,15 @@ class TestOpPatterns:
         data = write_module(module)
         return read(data)
 
+    def test_unsupported_region_source_flags_are_rejected(self) -> None:
+        module = _make_func_module()
+        func_op = module.symbols[0].op
+        assert func_op is not None
+        func_op.regions[0].source_flags = 1 << 1
+
+        with pytest.raises(ValueError, match="unsupported source flag bits"):
+            write_module(module)
+
     def test_binary_op(self) -> None:
         module = Module(name="test")
         a = module.add_value(Value(name="a", type=I32))

@@ -62,7 +62,7 @@
 //
 //   offset  size  field
 //   0       4     magic: "LOOM" (0x4C 0x4F 0x4F 0x4D)
-//   4       1     format_version (currently 22)
+//   4       1     format_version (currently 24)
 //   5       1     location_mode (see loom_bytecode_location_mode_t)
 //   6       2     module_count
 //   8       4     file_string_pool_length (bytes)
@@ -85,7 +85,7 @@ extern "C" {
 
 #define LOOM_BYTECODE_MAGIC "LOOM"
 #define LOOM_BYTECODE_MAGIC_LENGTH 4
-#define LOOM_BYTECODE_FORMAT_VERSION 23
+#define LOOM_BYTECODE_FORMAT_VERSION 24
 
 // File-level source-location mode stored in the file header.
 enum loom_bytecode_location_mode_e {
@@ -674,6 +674,7 @@ typedef enum loom_bytecode_section_kind_e {
 //                             serialize the FuncLike body region first when one
 //                             exists, then all other materialized root regions
 //                             in slot order.
+//     [source_flags: varint]  loom_region_source_flags_t presentation bits.
 //     [block_count: varint]
 //   For each block:
 //     [has_label: byte]
@@ -784,7 +785,11 @@ typedef enum loom_bytecode_section_kind_e {
 // descriptor-backed field to distinguish them from other aggregate kinds.
 //       [region_count: varint]
 //       For each region:
-//         (recursive: block_count, blocks...)
+//         (recursive: source_flags, block_count, blocks...)
+//
+// Region source_flags directly encode loom_region_source_flags_t. They retain
+// authored presentation choices without changing program semantics. Readers
+// MUST reject bits not defined by the current bytecode version.
 
 typedef enum loom_bytecode_attr_kind_e {
   LOOM_BYTECODE_ATTR_I64 = 0,

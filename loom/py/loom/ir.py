@@ -125,6 +125,8 @@ __all__ = [
     "Operation",
     "Block",
     "Region",
+    "REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM",
+    "REGION_SOURCE_FLAG_MASK",
     # Symbols.
     "SymbolKind",
     "Symbol",
@@ -1678,11 +1680,17 @@ class Block:
     comments: tuple[str, ...] = ()
 
 
+# Region source-presentation flags. These bits are bytecode-stable.
+REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM = 1 << 0
+REGION_SOURCE_FLAG_MASK = REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM
+
+
 @dataclass(slots=True)
 class Region:
-    """An ordered list of blocks."""
+    """An ordered list of blocks and its retained source presentation."""
 
     blocks: list[Block] = field(default_factory=list)
+    source_flags: int = 0
 
 
 # ============================================================================

@@ -725,6 +725,19 @@ TEST_F(WriterTest, FunctionSymbolKindUsesDenseWireEnum) {
   loom_module_free(module);
 }
 
+TEST_F(WriterTest, UnsupportedRegionSourceFlagsFailLoudly) {
+  loom_module_t* module = CreateAttrsModule(/*reverse_attr_order=*/false);
+  loom_op_t* func_op = module->symbols.entries[0].defining_op;
+  loom_region_t* body =
+      loom_func_like_body(loom_func_like_cast(module, func_op));
+  ASSERT_NE(body, nullptr);
+  body->source_flags = 1u << 1;
+
+  ExpectWriteModuleStatus(IREE_STATUS_INVALID_ARGUMENT, module);
+
+  loom_module_free(module);
+}
+
 TEST_F(WriterTest, FunctionBodySummaryAndOpTableRefsUseNewWireShape) {
   loom_module_t* module = CreateModule("test");
 
@@ -795,6 +808,9 @@ TEST_F(WriterTest, FunctionBodySummaryAndOpTableRefsUseNewWireShape) {
   uint64_t root_region_index = 0;
   IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_region_index));
   ASSERT_EQ(root_region_index, 0u);
+  uint64_t root_source_flags = 0;
+  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_source_flags));
+  ASSERT_EQ(root_source_flags, 0u);
   uint64_t root_block_count = 0;
   IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_block_count));
   ASSERT_EQ(root_block_count, 1u);
@@ -889,6 +905,9 @@ TEST_F(WriterTest, FunctionBodySuccessorsUseRegionBlockOrdinals) {
   uint64_t root_region_index = 0;
   IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_region_index));
   ASSERT_EQ(root_region_index, 0u);
+  uint64_t root_source_flags = 0;
+  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_source_flags));
+  ASSERT_EQ(root_source_flags, 0u);
   uint64_t root_block_count = 0;
   IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_block_count));
   ASSERT_EQ(root_block_count, 2u);

@@ -50,6 +50,7 @@ from loom.ir import (
     BUFFER_TYPE,
     ENCODING_TYPE,
     NONE_TYPE,
+    REGION_SOURCE_FLAG_MASK,
     SYMBOL_FLAG_DECLARATION,
     SYMBOL_FLAG_IMPORT,
     SYMBOL_FLAG_PUBLIC,
@@ -1567,6 +1568,13 @@ class BytecodeReader:
         value_map: list[int],
         predefined_values: list[int] | None,
     ) -> tuple[Region, int]:
+        source_flags, offset = decode_varint(data, offset)
+        if source_flags > 0xFFFF:
+            raise BytecodeError("region source flags exceed UINT16_MAX")
+        if source_flags & ~REGION_SOURCE_FLAG_MASK:
+            raise BytecodeError(
+                f"region has unsupported source flag bits: {source_flags:#x}"
+            )
         block_count, offset = decode_varint(data, offset)
         blocks = [Block() for _ in range(block_count)]
         for block_index, block in enumerate(blocks):
@@ -1579,7 +1587,7 @@ class BytecodeReader:
                 block,
                 blocks,
             )
-        return Region(blocks=blocks), offset
+        return Region(blocks=blocks, source_flags=source_flags), offset
 
     def _read_block(
         self,

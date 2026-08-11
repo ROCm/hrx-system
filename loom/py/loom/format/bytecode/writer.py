@@ -32,6 +32,7 @@ from loom.format.bytecode.op_decls import (
 )
 from loom.ir import (
     ATTR_AGGREGATE_MAX_NESTING_DEPTH,
+    REGION_SOURCE_FLAG_MASK,
     Block,
     BufferType,
     DialectType,
@@ -164,7 +165,7 @@ BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
 
 # File magic and version.
 MAGIC = b"LOOM"
-FORMAT_VERSION = 23
+FORMAT_VERSION = 24
 PRODUCER = "loom-py"
 
 SYMBOL_FLAG_PUBLIC = 0x0001
@@ -1081,7 +1082,12 @@ class BytecodeWriter:
     def _write_region(
         self, buf: ByteBuffer, region: Region, value_numbers: dict[int, int]
     ) -> None:
-        """Write a region (block_count + blocks)."""
+        """Write a region (source_flags + block_count + blocks)."""
+        if region.source_flags < 0 or (region.source_flags & ~REGION_SOURCE_FLAG_MASK):
+            raise ValueError(
+                f"region has unsupported source flag bits: {region.source_flags:#x}"
+            )
+        buf.write_varint(region.source_flags)
         buf.write_varint(len(region.blocks))
         block_indices = {id(block): index for index, block in enumerate(region.blocks)}
         for block in region.blocks:

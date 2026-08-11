@@ -1732,12 +1732,16 @@ enum loom_region_instance_flag_bits_e {
 typedef uint16_t loom_region_instance_flags_t;
 
 // Source presentation recorded for a region. These flags do not affect
-// program semantics or structural analyses.
+// program semantics or structural analyses. Values are serialized directly
+// and are therefore bytecode-stable.
 enum loom_region_source_flag_bits_e {
   // The region was introduced by an explicit `asm` marker in source text.
   LOOM_REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM = 1u << 0,
 };
 typedef uint16_t loom_region_source_flags_t;
+
+#define LOOM_REGION_SOURCE_FLAG_MASK \
+  ((loom_region_source_flags_t)LOOM_REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM)
 
 // A region: an ordered list of blocks. Used for function bodies,
 // loop bodies (scf.for), conditional branches (scf.if then/else).

@@ -1570,8 +1570,7 @@ class ReaderTest : public ::testing::Test {
     return (size_t)ModuleOffset(bytes) + (size_t)entry.offset;
   }
 
-  size_t RootBlockValueListOffset(const std::vector<uint8_t>& bytes,
-                                  uint64_t* out_arg_count) {
+  size_t RootRegionSourceFlagsOffset(const std::vector<uint8_t>& bytes) {
     size_t offset = SectionPayloadOffset(bytes, LOOM_BYTECODE_SECTION_IR);
     ReadUVarint(bytes, &offset);  // value_count
     ReadUVarint(bytes, &offset);  // region_count
@@ -1581,6 +1580,14 @@ class ReaderTest : public ::testing::Test {
     EXPECT_GE(root_region_count, 1u);
     uint64_t root_region_index = ReadUVarint(bytes, &offset);
     EXPECT_EQ(root_region_index, 0u);
+    return offset;
+  }
+
+  size_t RootBlockValueListOffset(const std::vector<uint8_t>& bytes,
+                                  uint64_t* out_arg_count) {
+    size_t offset = RootRegionSourceFlagsOffset(bytes);
+    uint64_t root_source_flags = ReadUVarint(bytes, &offset);
+    EXPECT_EQ(root_source_flags, 0u);
     uint64_t root_block_count = ReadUVarint(bytes, &offset);
     EXPECT_GE(root_block_count, 1u);
     uint8_t has_label = bytes[offset++];
@@ -1770,6 +1777,7 @@ class ReaderTest : public ::testing::Test {
   size_t LastOpRegionCountOffsetInRegion(const std::vector<uint8_t>& bytes,
                                          size_t* offset) {
     size_t last_region_count_offset = 0;
+    ReadUVarint(bytes, offset);  // source_flags
     uint64_t block_count = ReadUVarint(bytes, offset);
     for (uint64_t block_index = 0; block_index < block_count; ++block_index) {
       uint8_t has_label = bytes[(*offset)++];
@@ -1914,6 +1922,33 @@ TEST_F(ReaderTest, AcceptsFunctionMetadata) {
   EXPECT_GT(result.first_module.type_count, 0u);
   EXPECT_GT(result.first_module.op_name_count, 0u);
 
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, PreservesRegionSourceFlags) {
+  loom_module_t* module = CreateFunctionModule();
+  loom_op_t* func_op = module->symbols.entries[0].defining_op;
+  loom_region_t* body =
+      loom_func_like_body(loom_func_like_cast(module, func_op));
+  ASSERT_NE(body, nullptr);
+  body->source_flags = LOOM_REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM;
+  auto bytes = WriteModule(module);
+
+  loom_module_t* read_module = nullptr;
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result =
+      ReadModule(bytes, &read_module, &error_ids);
+  EXPECT_EQ(result.error_count, 0u);
+  EXPECT_TRUE(error_ids.empty());
+  ASSERT_NE(read_module, nullptr);
+  ASSERT_EQ(read_module->symbols.count, 1u);
+  loom_op_t* read_func_op = read_module->symbols.entries[0].defining_op;
+  loom_region_t* read_body =
+      loom_func_like_body(loom_func_like_cast(read_module, read_func_op));
+  ASSERT_NE(read_body, nullptr);
+  EXPECT_EQ(read_body->source_flags, LOOM_REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM);
+
+  loom_module_free(read_module);
   loom_module_free(module);
 }
 
@@ -2959,6 +2994,18 @@ TEST_F(ReaderTest, RejectsInvalidBodyValueReference) {
   auto bytes = WriteModule(module);
   size_t operand_offset = FirstBodyOperandRefOffset(bytes);
   bytes[operand_offset] = 0x7F;
+
+  ExpectReadModuleError(bytes, "ERR_BYTECODE_016");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsUnsupportedRegionSourceFlags) {
+  loom_module_t* module = CreateFunctionModule();
+  auto bytes = WriteModule(module);
+  size_t source_flags_offset = RootRegionSourceFlagsOffset(bytes);
+  ASSERT_EQ(bytes[source_flags_offset], 0u);
+  bytes[source_flags_offset] = 1u << 1;
 
   ExpectReadModuleError(bytes, "ERR_BYTECODE_016");
 

@@ -75,9 +75,10 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::codegen::low::text_asm
     loom::format::bytecode::format
-    loom::ops::func
-    loom::ops::index
+    loom::target::test::descriptors
+    loom::testing::context
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

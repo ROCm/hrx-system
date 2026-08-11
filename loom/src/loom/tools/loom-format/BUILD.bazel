@@ -67,9 +67,10 @@ loom_cc_test(
     srcs = ["convert_test.cc"],
     deps = [
         ":convert",
+        "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/format/bytecode:format",
-        "//loom/src/loom/ops/func",
-        "//loom/src/loom/ops/index",
+        "//loom/src/loom/target/test:descriptors",
+        "//loom/src/loom/testing:context",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
