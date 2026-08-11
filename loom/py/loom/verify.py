@@ -97,15 +97,13 @@ class ModuleVerifier:
     def verify(self) -> None:
         """Verify the module and append diagnostics for every detected error."""
         self._verify_symbol_table()
-        for symbol_index, symbol in enumerate(self.module.symbols):
-            path = f"symbol[{symbol_index}] @{symbol.name}"
-            if symbol.op is None:
-                self.diagnostics.error(
-                    "symbol has no defining operation",
-                    source=path,
-                )
-                continue
-            self._verify_operation(symbol.op, path, parent_stack=())
+        self._verify_top_level_operation_ownership()
+        for operation_index, operation in enumerate(self.module.body.ops):
+            self._verify_operation(
+                operation,
+                f"module operation[{operation_index}]",
+                parent_stack=(),
+            )
 
     def _verify_symbol_table(self) -> None:
         seen: dict[str, int] = {}
@@ -124,6 +122,45 @@ class ModuleVerifier:
                 continue
             seen[symbol.name] = symbol_index
             self._symbols_by_name[symbol.name] = symbol
+
+    def _verify_top_level_operation_ownership(self) -> None:
+        body_operation_ids = {id(operation) for operation in self.module.body.ops}
+        indexed_operation_ids: dict[int, int] = {}
+        for symbol_index, symbol in enumerate(self.module.symbols):
+            path = f"symbol[{symbol_index}] @{symbol.name}"
+            if symbol.op is None:
+                self.diagnostics.error(
+                    "symbol has no defining operation",
+                    source=path,
+                )
+                continue
+            operation_id = id(symbol.op)
+            if operation_id not in body_operation_ids:
+                self.diagnostics.error(
+                    "symbol defining operation is not owned by the module body",
+                    source=path,
+                )
+            previous_symbol_index = indexed_operation_ids.get(operation_id)
+            if previous_symbol_index is not None:
+                self.diagnostics.error(
+                    "symbol defining operation has multiple symbol-table entries",
+                    source=path,
+                    details=(
+                        f"operation is also indexed by symbol[{previous_symbol_index}]",
+                    ),
+                )
+                continue
+            indexed_operation_ids[operation_id] = symbol_index
+
+        for operation_index, operation in enumerate(self.module.body.ops):
+            op_decl = self.registry.op(operation.name)
+            if op_decl is None or not op_decl.has_trait("SymbolDefine"):
+                continue
+            if id(operation) not in indexed_operation_ids:
+                self.diagnostics.error(
+                    "module body symbol definition is missing from the symbol table",
+                    source=f"module operation[{operation_index}] {operation.name}",
+                )
 
     def _verify_operation(
         self,

@@ -55,13 +55,37 @@ def test_verifier_reports_missing_operand_value() -> None:
 
 def test_verifier_reports_duplicate_symbols() -> None:
     module = Module()
-    module.symbols.append(_symbol("same", _func()))
-    module.symbols.append(_symbol("same", _func()))
+    module.add_symbol(_symbol("same", _func()))
+    module.add_symbol(_symbol("same", _func()))
 
     diagnostics = verify_module(module, ops=ALL_TEST_OPS)
 
     assert diagnostics.has_errors
     assert "duplicate symbol name" in str(diagnostics.diagnostics[0])
+
+
+def test_verifier_reports_symbol_operation_missing_from_module_body() -> None:
+    module = Module()
+    module.symbols.append(_symbol("missing", _func()))
+
+    diagnostics = verify_module(module, ops=ALL_TEST_OPS)
+
+    assert _diagnostic_text_contains(
+        diagnostics,
+        "symbol defining operation is not owned by the module body",
+    )
+
+
+def test_verifier_reports_module_body_symbol_missing_from_table() -> None:
+    module = Module()
+    module.body.ops.append(_func())
+
+    diagnostics = verify_module(module, ops=ALL_TEST_OPS)
+
+    assert _diagnostic_text_contains(
+        diagnostics,
+        "module body symbol definition is missing from the symbol table",
+    )
 
 
 def test_verifier_reports_wrong_operand_count() -> None:
@@ -263,7 +287,7 @@ def test_verifier_defers_template_ancestor_requirement() -> None:
             )
         ],
     )
-    module.symbols.append(_symbol("provider", template_op))
+    module.add_symbol(_symbol("provider", template_op))
 
     diagnostics = verify_module(
         module,
@@ -342,7 +366,7 @@ def test_verifier_does_not_defer_through_nested_isolation() -> None:
         regions=[Region(blocks=[Block(ops=[isolated_op])])],
     )
     module = Module()
-    module.symbols.append(_symbol("provider", template_op))
+    module.add_symbol(_symbol("provider", template_op))
 
     diagnostics = verify_module(
         module,
@@ -370,7 +394,7 @@ def test_verifier_reports_missing_region_terminator() -> None:
 
 def test_verifier_reports_empty_block_missing_region_terminator() -> None:
     module = Module()
-    module.symbols.append(_symbol("f", _func()))
+    module.add_symbol(_symbol("f", _func()))
 
     diagnostics = verify_module(module, ops=ALL_TEST_OPS)
 
@@ -439,7 +463,7 @@ def test_verifier_checks_each_symbol_array_availability() -> None:
 
 def test_verifier_checks_symbol_array_target_interface_when_defined() -> None:
     module = Module()
-    module.symbols.append(_symbol("function", _func()))
+    module.add_symbol(_symbol("function", _func()))
     module = _module_with_body_ops(
         Operation(
             name="test.symbol_array_attrs",
@@ -567,7 +591,7 @@ def _module_with_body_ops(
     if append_yield:
         block_ops.append(Operation(name="test.yield"))
     func = _func(Region(blocks=[Block(ops=block_ops)]))
-    module.symbols.append(_symbol("f", func))
+    module.add_symbol(_symbol("f", func))
     return module
 
 
@@ -606,7 +630,7 @@ def _verify_required_ancestor_in_func(
         traits=[HasAncestor("test.context")],
     )
     module = Module()
-    module.symbols.append(
+    module.add_symbol(
         _symbol(
             "helper",
             _func_def_with_ops("helper", inline_policy, *ops),

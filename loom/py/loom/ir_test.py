@@ -1234,6 +1234,15 @@ class TestModule:
         sym = Symbol(name="foo", kind=SymbolKind.FUNC_DEF, op=func_op)
         sid = m.add_symbol(sym)
         assert m.symbols[sid].name == "foo"
+        assert m.body.ops == [func_op]
+
+    def test_add_top_level_operation(self) -> None:
+        m = Module()
+        metadata_op = Operation(name="test.module_metadata")
+        operation_index = m.add_top_level_operation(metadata_op)
+        assert operation_index == 0
+        assert m.body.ops == [metadata_op]
+        assert not m.symbols
 
     def test_rebuild_value_metadata(self) -> None:
         m = Module()

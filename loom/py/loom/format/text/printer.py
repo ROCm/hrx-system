@@ -1261,21 +1261,19 @@ class Printer:
                     f"#{encoding.alias} = "
                     f"{_format_encoding_instance(encoding, use_alias=False)}"
                 )
-        for symbol in module.symbols:
-            if symbol.op is not None:
-                self._print_top_level_op(symbol.op, module)
-                self._lines.append("")
+        for operation in module.body.ops:
+            self._print_top_level_op(operation, module)
+            self._lines.append("")
         # Remove trailing blank line.
         while self._lines and self._lines[-1] == "":
             self._lines.pop()
         return "\n".join(self._lines) + "\n" if self._lines else ""
 
     def _print_top_level_op(self, op: Operation, module: Module) -> None:
-        """Print a top-level symbol-defining op using the format-element-driven walker.
+        """Print a module-scope op using the format-element-driven walker.
 
-        All func-like ops (func.def, func.decl, func.template, func.ukernel)
-        and future symbol-defining ops are printed through this path using the
-        same format walker as body ops.
+        Symbol definitions and module metadata use the same format walker as
+        nested operations.
         """
         self._module = module
         self._emit_comments(op.comments)

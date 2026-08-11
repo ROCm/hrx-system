@@ -2051,8 +2051,10 @@ class LocationTable:
 class Module:
     """Top-level IR container.
 
-    Owns all IR through its tables. The module is the unit of
-    serialization, linking, and compilation.
+    Owns all IR through its top-level body and uniqued tables. The symbol table
+    indexes symbol-defining operations in the body; it is not an operation
+    ownership container. The module is the unit of serialization, linking, and
+    compilation.
     """
 
     name: str = ""
@@ -2067,6 +2069,9 @@ class Module:
     values: list[Value] = field(default_factory=list)
     symbols: list[Symbol] = field(default_factory=list)
     encodings: list[EncodingInstance] = field(default_factory=list)
+
+    # Single module-scope block owning every top-level operation.
+    body: Block = field(default_factory=Block)
 
     # Source table is on the context, but for standalone modules
     # we keep a local source list.
@@ -2083,10 +2088,18 @@ class Module:
         return self.locations.add(loc)
 
     def add_symbol(self, symbol: Symbol) -> int:
-        """Add a symbol, returning its ID."""
+        """Add a symbol and its defining operation, returning its ID."""
         sym_id = len(self.symbols)
         self.symbols.append(symbol)
+        if symbol.op is not None:
+            self.body.ops.append(symbol.op)
         return sym_id
+
+    def add_top_level_operation(self, operation: Operation) -> int:
+        """Add a non-symbol module-scope operation, returning its ordinal."""
+        operation_index = len(self.body.ops)
+        self.body.ops.append(operation)
+        return operation_index
 
     def add_encoding(self, instance: EncodingInstance) -> int:
         """Add an encoding instance, returning its index. Deduplicates."""
@@ -2201,7 +2214,7 @@ def record_operation_value_metadata(
 
 
 def rebuild_value_metadata(module: Module) -> None:
-    """Rebuild all def/use metadata from module.symbols and nested regions."""
+    """Rebuild all def/use metadata from the module body and nested regions."""
     for value in module.values:
         value.flags &= ~VALUE_FLAG_BLOCK_ARG
         value.def_op_index = VALUE_DEF_OP_NONE
@@ -2209,15 +2222,20 @@ def rebuild_value_metadata(module: Module) -> None:
         value.def_result_index = 0
         value.uses.clear()
 
-    for symbol_index, symbol in enumerate(module.symbols):
-        if symbol.op is None:
-            continue
-        operand_def_count = len(symbol.op.operands) if not symbol.op.regions else 0
+    symbol_operation_ids = {
+        id(symbol.op) for symbol in module.symbols if symbol.op is not None
+    }
+    for operation_index, operation in enumerate(module.body.ops):
+        operand_def_count = (
+            len(operation.operands)
+            if id(operation) in symbol_operation_ids and not operation.regions
+            else 0
+        )
         record_operation_value_metadata(
             module,
-            symbol.op,
+            operation,
             block_index=VALUE_DEF_BLOCK_NONE,
-            op_index=symbol_index,
+            op_index=operation_index,
             operand_def_count=operand_def_count,
         )
 

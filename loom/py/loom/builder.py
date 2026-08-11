@@ -528,10 +528,8 @@ class IRBuilder:
 
     def _find_block_index(self, target_block: Block) -> int:
         """Returns target_block's index in an attached region, if any."""
-        for symbol in self._module.symbols:
-            if symbol.op is None:
-                continue
-            block_index = self._find_block_index_in_operation(symbol.op, target_block)
+        for operation in self._module.body.ops:
+            block_index = self._find_block_index_in_operation(operation, target_block)
             if block_index is not None:
                 return block_index
         return VALUE_DEF_BLOCK_NONE
