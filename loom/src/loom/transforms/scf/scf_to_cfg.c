@@ -74,11 +74,22 @@ typedef enum loom_scf_to_cfg_lowering_kind_e {
   LOOM_SCF_TO_CFG_LOWERING_SWITCH = 3,
 } loom_scf_to_cfg_lowering_kind_t;
 
+typedef struct loom_scf_to_cfg_block_insertion_t {
+  // Original CFG block containing the structured operation.
+  loom_block_t* source_block;
+  // First block-table index physically appended for this lowering.
+  uint16_t first_appended_index;
+  // Number of contiguous blocks appended for this lowering.
+  uint16_t block_count;
+} loom_scf_to_cfg_block_insertion_t;
+
 typedef struct loom_scf_to_cfg_frontier_entry_t {
   // Structured operation waiting to be lowered.
   loom_op_t* op;
   // Lowering selected when the operation entered the frontier.
   loom_scf_to_cfg_lowering_kind_t lowering_kind;
+  // Physically appended blocks awaiting semantic ordering.
+  loom_scf_to_cfg_block_insertion_t block_insertion;
 } loom_scf_to_cfg_frontier_entry_t;
 
 typedef struct loom_scf_to_cfg_frontier_t {
@@ -111,13 +122,6 @@ typedef struct loom_scf_to_cfg_state_t {
   // Outermost structured operations sharing one value-fact snapshot.
   loom_scf_to_cfg_frontier_t frontier;
 } loom_scf_to_cfg_state_t;
-
-typedef struct loom_scf_to_cfg_block_insertion_t {
-  // Region receiving blocks created for one structured op lowering.
-  loom_region_t* region;
-  // Next block-table index for a generated CFG block.
-  uint16_t next_index;
-} loom_scf_to_cfg_block_insertion_t;
 
 static iree_status_t loom_scf_to_cfg_region_stack_initialize(
     iree_arena_allocator_t* arena, loom_scf_to_cfg_region_stack_t* stack) {
@@ -267,21 +271,23 @@ static loom_builder_ip_t loom_scf_to_cfg_set_block_end(
   return saved_ip;
 }
 
-static loom_scf_to_cfg_block_insertion_t loom_scf_to_cfg_insert_blocks_after(
+static loom_scf_to_cfg_block_insertion_t loom_scf_to_cfg_begin_block_insertion(
     loom_block_t* source_block) {
+  loom_region_t* region = source_block->parent_region;
   return (loom_scf_to_cfg_block_insertion_t){
-      .region = source_block->parent_region,
-      .next_index = (uint16_t)(loom_block_region_index(source_block) + 1),
+      .source_block = source_block,
+      .first_appended_index = region->block_count,
   };
 }
 
 static iree_status_t loom_scf_to_cfg_insert_block(
     loom_scf_to_cfg_state_t* state,
     loom_scf_to_cfg_block_insertion_t* insertion, loom_block_t** out_block) {
-  IREE_RETURN_IF_ERROR(loom_region_insert_block(
-      state->module, insertion->region, insertion->next_index, out_block));
-  ++insertion->next_index;
-  insertion->region->flags |= LOOM_REGION_INSTANCE_FLAG_CFG;
+  loom_region_t* region = insertion->source_block->parent_region;
+  IREE_RETURN_IF_ERROR(
+      loom_region_append_block(state->module, region, out_block));
+  ++insertion->block_count;
+  region->flags |= LOOM_REGION_INSTANCE_FLAG_CFG;
   return iree_ok_status();
 }
 
@@ -396,8 +402,9 @@ static iree_status_t loom_scf_to_cfg_verify_op_preconditions(
 // scf.if
 //===----------------------------------------------------------------------===//
 
-static iree_status_t loom_scf_to_cfg_lower_if(loom_scf_to_cfg_state_t* state,
-                                              loom_op_t* op) {
+static iree_status_t loom_scf_to_cfg_lower_if(
+    loom_scf_to_cfg_state_t* state, loom_op_t* op,
+    loom_scf_to_cfg_block_insertion_t* out_block_insertion) {
   iree_arena_reset(state->lowering_arena);
 
   loom_block_t* then_source_block = NULL;
@@ -415,7 +422,7 @@ static iree_status_t loom_scf_to_cfg_lower_if(loom_scf_to_cfg_state_t* state,
 
   loom_block_t* source_block = op->parent_block;
   loom_scf_to_cfg_block_insertion_t insertion =
-      loom_scf_to_cfg_insert_blocks_after(source_block);
+      loom_scf_to_cfg_begin_block_insertion(source_block);
 
   loom_block_t* then_block = NULL;
   IREE_RETURN_IF_ERROR(
@@ -487,6 +494,7 @@ static iree_status_t loom_scf_to_cfg_lower_if(loom_scf_to_cfg_state_t* state,
   IREE_RETURN_IF_ERROR(loom_scf_to_cfg_replace_results(state, op, join_args));
   IREE_RETURN_IF_ERROR(loom_rewriter_erase(state->rewriter, op));
   ++state->statistics->ifs_lowered;
+  *out_block_insertion = insertion;
   iree_arena_reset(state->lowering_arena);
   return iree_ok_status();
 }
@@ -685,8 +693,9 @@ static iree_status_t loom_scf_to_cfg_build_for_iv_assume(
   return iree_ok_status();
 }
 
-static iree_status_t loom_scf_to_cfg_lower_for(loom_scf_to_cfg_state_t* state,
-                                               loom_op_t* op) {
+static iree_status_t loom_scf_to_cfg_lower_for(
+    loom_scf_to_cfg_state_t* state, loom_op_t* op,
+    loom_scf_to_cfg_block_insertion_t* out_block_insertion) {
   iree_arena_reset(state->lowering_arena);
 
   loom_value_facts_t step_facts =
@@ -720,7 +729,7 @@ static iree_status_t loom_scf_to_cfg_lower_for(loom_scf_to_cfg_state_t* state,
 
   loom_block_t* source_block = op->parent_block;
   loom_scf_to_cfg_block_insertion_t insertion =
-      loom_scf_to_cfg_insert_blocks_after(source_block);
+      loom_scf_to_cfg_begin_block_insertion(source_block);
 
   loom_block_t* header_block = NULL;
   IREE_RETURN_IF_ERROR(
@@ -838,6 +847,7 @@ static iree_status_t loom_scf_to_cfg_lower_for(loom_scf_to_cfg_state_t* state,
   IREE_RETURN_IF_ERROR(loom_scf_to_cfg_replace_results(state, op, join_args));
   IREE_RETURN_IF_ERROR(loom_rewriter_erase(state->rewriter, op));
   ++state->statistics->fors_lowered;
+  *out_block_insertion = insertion;
   iree_arena_reset(state->lowering_arena);
   return iree_ok_status();
 }
@@ -846,8 +856,9 @@ static iree_status_t loom_scf_to_cfg_lower_for(loom_scf_to_cfg_state_t* state,
 // scf.while
 //===----------------------------------------------------------------------===//
 
-static iree_status_t loom_scf_to_cfg_lower_while(loom_scf_to_cfg_state_t* state,
-                                                 loom_op_t* op) {
+static iree_status_t loom_scf_to_cfg_lower_while(
+    loom_scf_to_cfg_state_t* state, loom_op_t* op,
+    loom_scf_to_cfg_block_insertion_t* out_block_insertion) {
   iree_arena_reset(state->lowering_arena);
 
   loom_block_t* before_source_block = NULL;
@@ -865,7 +876,7 @@ static iree_status_t loom_scf_to_cfg_lower_while(loom_scf_to_cfg_state_t* state,
 
   loom_block_t* source_block = op->parent_block;
   loom_scf_to_cfg_block_insertion_t insertion =
-      loom_scf_to_cfg_insert_blocks_after(source_block);
+      loom_scf_to_cfg_begin_block_insertion(source_block);
 
   loom_block_t* before_block = NULL;
   IREE_RETURN_IF_ERROR(
@@ -955,6 +966,7 @@ static iree_status_t loom_scf_to_cfg_lower_while(loom_scf_to_cfg_state_t* state,
   IREE_RETURN_IF_ERROR(loom_scf_to_cfg_replace_results(state, op, join_args));
   IREE_RETURN_IF_ERROR(loom_rewriter_erase(state->rewriter, op));
   ++state->statistics->whiles_lowered;
+  *out_block_insertion = insertion;
   iree_arena_reset(state->lowering_arena);
   return iree_ok_status();
 }
@@ -1024,7 +1036,8 @@ static iree_status_t loom_scf_to_cfg_build_switch_dispatch(
 }
 
 static iree_status_t loom_scf_to_cfg_lower_switch(
-    loom_scf_to_cfg_state_t* state, loom_op_t* op) {
+    loom_scf_to_cfg_state_t* state, loom_op_t* op,
+    loom_scf_to_cfg_block_insertion_t* out_block_insertion) {
   iree_arena_reset(state->lowering_arena);
 
   loom_attribute_t case_keys_attr = loom_scf_switch_case_keys(op);
@@ -1033,7 +1046,7 @@ static iree_status_t loom_scf_to_cfg_lower_switch(
 
   loom_block_t* source_block = op->parent_block;
   loom_scf_to_cfg_block_insertion_t insertion =
-      loom_scf_to_cfg_insert_blocks_after(source_block);
+      loom_scf_to_cfg_begin_block_insertion(source_block);
 
   loom_block_t** dispatch_blocks = NULL;
   iree_host_size_t dispatch_block_count =
@@ -1100,6 +1113,7 @@ static iree_status_t loom_scf_to_cfg_lower_switch(
   IREE_RETURN_IF_ERROR(loom_scf_to_cfg_replace_results(state, op, join_args));
   IREE_RETURN_IF_ERROR(loom_rewriter_erase(state->rewriter, op));
   ++state->statistics->switches_lowered;
+  *out_block_insertion = insertion;
   iree_arena_reset(state->lowering_arena);
   return iree_ok_status();
 }
@@ -1174,33 +1188,108 @@ static iree_status_t loom_scf_to_cfg_collect_frontier(
   return iree_ok_status();
 }
 
+static iree_status_t loom_scf_to_cfg_order_region_blocks(
+    loom_scf_to_cfg_state_t* state,
+    const loom_scf_to_cfg_frontier_entry_t* entries,
+    iree_host_size_t entry_count) {
+  loom_region_t* region =
+      entries[0].block_insertion.source_block->parent_region;
+  iree_host_size_t appended_block_count = 0;
+  for (iree_host_size_t i = 0; i < entry_count; ++i) {
+    appended_block_count += entries[i].block_insertion.block_count;
+  }
+  uint16_t original_block_count =
+      (uint16_t)(region->block_count - appended_block_count);
+
+  iree_arena_reset(state->lowering_arena);
+  loom_block_t** ordered_blocks = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      state->lowering_arena, region->block_count, sizeof(*ordered_blocks),
+      (void**)&ordered_blocks));
+
+  iree_host_size_t entry_index = 0;
+  uint16_t ordered_block_count = 0;
+  for (uint16_t i = 0; i < original_block_count; ++i) {
+    loom_block_t* original_block = region->blocks[i];
+    ordered_blocks[ordered_block_count++] = original_block;
+    while (entry_index < entry_count &&
+           entries[entry_index].block_insertion.source_block ==
+               original_block) {
+      const loom_scf_to_cfg_block_insertion_t* insertion =
+          &entries[entry_index++].block_insertion;
+      memcpy(&ordered_blocks[ordered_block_count],
+             &region->blocks[insertion->first_appended_index],
+             insertion->block_count * sizeof(*ordered_blocks));
+      ordered_block_count += insertion->block_count;
+    }
+  }
+
+  // Frontier collection and generated block ranges establish this packed
+  // permutation. Guard the memory join where violating either producer
+  // contract would otherwise leave an uninitialized block-table entry.
+  IREE_ASSERT(entry_index == entry_count);
+  IREE_ASSERT(ordered_block_count == region->block_count);
+  memcpy(region->blocks, ordered_blocks,
+         region->block_count * sizeof(*region->blocks));
+  for (uint16_t i = 0; i < region->block_count; ++i) {
+    region->blocks[i]->region_index = i;
+  }
+  iree_arena_reset(state->lowering_arena);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_scf_to_cfg_order_frontier_blocks(
+    loom_scf_to_cfg_state_t* state) {
+  iree_host_size_t range_start = 0;
+  while (range_start < state->frontier.count) {
+    loom_region_t* region = state->frontier.entries[range_start]
+                                .block_insertion.source_block->parent_region;
+    iree_host_size_t range_end = range_start + 1;
+    while (range_end < state->frontier.count &&
+           state->frontier.entries[range_end]
+                   .block_insertion.source_block->parent_region == region) {
+      ++range_end;
+    }
+    IREE_RETURN_IF_ERROR(loom_scf_to_cfg_order_region_blocks(
+        state, &state->frontier.entries[range_start], range_end - range_start));
+    range_start = range_end;
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_scf_to_cfg_lower_frontier(
     loom_scf_to_cfg_state_t* state) {
   // Lower from the lexical tail so each block split moves only the already
   // lowered continuation instead of repeatedly moving every later operation.
   for (iree_host_size_t i = state->frontier.count; i > 0; --i) {
-    loom_scf_to_cfg_frontier_entry_t entry = state->frontier.entries[i - 1];
-    switch (entry.lowering_kind) {
+    loom_scf_to_cfg_frontier_entry_t* entry = &state->frontier.entries[i - 1];
+    switch (entry->lowering_kind) {
       case LOOM_SCF_TO_CFG_LOWERING_IF: {
-        IREE_RETURN_IF_ERROR(loom_scf_to_cfg_lower_if(state, entry.op));
+        IREE_RETURN_IF_ERROR(loom_scf_to_cfg_lower_if(state, entry->op,
+                                                      &entry->block_insertion));
         break;
       }
       case LOOM_SCF_TO_CFG_LOWERING_FOR: {
-        IREE_RETURN_IF_ERROR(loom_scf_to_cfg_lower_for(state, entry.op));
+        IREE_RETURN_IF_ERROR(loom_scf_to_cfg_lower_for(
+            state, entry->op, &entry->block_insertion));
         break;
       }
       case LOOM_SCF_TO_CFG_LOWERING_WHILE: {
-        IREE_RETURN_IF_ERROR(loom_scf_to_cfg_lower_while(state, entry.op));
+        IREE_RETURN_IF_ERROR(loom_scf_to_cfg_lower_while(
+            state, entry->op, &entry->block_insertion));
         break;
       }
       case LOOM_SCF_TO_CFG_LOWERING_SWITCH: {
-        IREE_RETURN_IF_ERROR(loom_scf_to_cfg_lower_switch(state, entry.op));
+        IREE_RETURN_IF_ERROR(loom_scf_to_cfg_lower_switch(
+            state, entry->op, &entry->block_insertion));
         break;
       }
     }
     if (loom_pass_has_error_diagnostics(state->pass)) break;
   }
-  return iree_ok_status();
+  return loom_pass_has_error_diagnostics(state->pass)
+             ? iree_ok_status()
+             : loom_scf_to_cfg_order_frontier_blocks(state);
 }
 
 iree_status_t loom_scf_to_cfg_run(loom_pass_t* pass, loom_module_t* module,

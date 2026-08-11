@@ -281,6 +281,47 @@ func.def @remaps_join_argument_dependent_type(%cond: i1, %buffer: buffer, %offse
 
 // ====
 
+func.def @lowers_frontier_across_cfg_blocks(%route: i1, %condition: i1) {
+  cfg.cond_br %route, ^left, ^right
+^left:
+  scf.if %condition {
+    test.use %route : i1
+    scf.yield
+  }
+  cfg.br ^done
+^right:
+  scf.if %condition {
+    test.use %condition : i1
+    scf.yield
+  }
+  cfg.br ^done
+^done:
+  func.return
+}
+
+// ----
+func.def @lowers_frontier_across_cfg_blocks(%route: i1, %condition: i1) {
+  cfg.cond_br %route, ^left, ^right
+^left:
+  cfg.cond_br %condition, ^_bb2, ^_bb3
+^_bb2:
+  test.use %route : i1
+  cfg.br ^_bb3
+^_bb3:
+  cfg.br ^done
+^right:
+  cfg.cond_br %condition, ^_bb5, ^_bb6
+^_bb5:
+  test.use %condition : i1
+  cfg.br ^_bb6
+^_bb6:
+  cfg.br ^done
+^done:
+  func.return
+}
+
+// ====
+
 func.def @lowers_outer_frontier_before_nested_frontier(%first_condition: i1, %second_condition: i1, %a: i32, %b: i32) -> (i32) {
   %first = scf.if %first_condition -> (i32) {
     %nested = scf.if %second_condition -> (i32) {
