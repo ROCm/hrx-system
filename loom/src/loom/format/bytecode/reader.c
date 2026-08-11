@@ -14,6 +14,7 @@
 #include "loom/format/bytecode/varint.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/module.h"
+#include "loom/ir/symbol_map.h"
 #include "loom/ir/types.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/type_registry.h"
@@ -25,7 +26,7 @@
 #define LOOM_BYTECODE_MAX_STRING_LENGTH (UINT64_C(1) << 24)
 #define LOOM_BYTECODE_MAX_TYPE_COUNT (UINT64_C(1) << 16)
 #define LOOM_BYTECODE_MAX_OP_COUNT (UINT64_C(1) << 24)
-#define LOOM_BYTECODE_MAX_SYMBOL_COUNT (UINT64_C(1) << 16)
+#define LOOM_BYTECODE_MAX_SYMBOL_COUNT LOOM_SYMBOL_ID_INVALID
 #define LOOM_BYTECODE_MAX_LOCATION_COUNT (UINT64_C(1) << 24)
 #define LOOM_BYTECODE_MAX_ENCODING_COUNT (UINT64_C(1) << 16)
 #define LOOM_BYTECODE_MAX_REGION_DEPTH 256
@@ -100,9 +101,11 @@ typedef struct loom_bytecode_reader_state_t {
   iree_host_size_t encoding_count;             // Number of encoding instances.
   iree_host_size_t location_count;             // Number of location entries.
   iree_host_size_t symbol_count;               // Number of symbol entries.
-  iree_arena_block_pool_t* block_pool;         // Arena block source.
-  iree_allocator_t host_allocator;  // Host allocator for output module.
-  loom_module_t* output_module;     // Module being materialized.
+  // Name ID to symbol ordinal index established while validating SYMBOLS.
+  loom_symbol_map_t symbol_map;
+  iree_arena_block_pool_t* block_pool;  // Arena block source.
+  iree_allocator_t host_allocator;      // Host allocator for output module.
+  loom_module_t* output_module;         // Module being materialized.
   // Stable-key codec supplied by the embedding compiler.
   loom_low_repr_environment_t low_repr_environment;
 } loom_bytecode_reader_state_t;
@@ -1588,8 +1591,8 @@ static iree_status_t loom_bytecode_reader_read_attr_value_at_depth(
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_string_ref(
           reader, name_id, IREE_SV("attribute_symbol"), name_offset, &unused));
       if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
-      uint16_t symbol_id = loom_module_find_symbol(reader->output_module,
-                                                   (loom_string_id_t)name_id);
+      uint16_t symbol_id =
+          loom_symbol_map_find(&reader->symbol_map, (loom_string_id_t)name_id);
       if (symbol_id == LOOM_SYMBOL_ID_INVALID) {
         return loom_bytecode_reader_emit_invalid_field(
             reader, cursor->range_name, IREE_SV("attribute"), 0,
@@ -1649,8 +1652,8 @@ static iree_status_t loom_bytecode_reader_read_attr_value_at_depth(
               IREE_SV("symbol_set_elements_are_not_sorted_and_unique"));
         }
         previous_name = name;
-        const uint16_t symbol_id = loom_module_find_symbol(
-            reader->output_module, (loom_string_id_t)name_id);
+        const uint16_t symbol_id = loom_symbol_map_find(
+            &reader->symbol_map, (loom_string_id_t)name_id);
         if (symbol_id == LOOM_SYMBOL_ID_INVALID) {
           return loom_bytecode_reader_emit_invalid_field(
               reader, cursor->range_name, collection_name, i, IREE_SV("symbol"),
@@ -5037,7 +5040,7 @@ static iree_status_t loom_bytecode_reader_materialize_function_symbol(
     uint8_t kind, uint16_t flags, loom_string_id_t import_module_id,
     loom_string_id_t import_symbol_id, loom_builder_t* builder) {
   uint16_t symbol_id =
-      loom_module_find_symbol(reader->output_module, (loom_string_id_t)name_id);
+      loom_symbol_map_find(&reader->symbol_map, (loom_string_id_t)name_id);
   if (symbol_id == LOOM_SYMBOL_ID_INVALID) {
     return loom_bytecode_reader_emit_invalid_field(
         reader, IREE_SV("SYMBOLS"), IREE_SV("symbol"), 0, IREE_SV("name_id"),
@@ -5452,7 +5455,7 @@ static iree_status_t loom_bytecode_reader_materialize_global_symbol(
     loom_bytecode_reader_state_t* reader, loom_bytecode_reader_cursor_t* cursor,
     uint64_t name_id, uint64_t symbol_index, loom_builder_t* builder) {
   uint16_t symbol_id =
-      loom_module_find_symbol(reader->output_module, (loom_string_id_t)name_id);
+      loom_symbol_map_find(&reader->symbol_map, (loom_string_id_t)name_id);
   if (symbol_id == LOOM_SYMBOL_ID_INVALID) {
     return loom_bytecode_reader_emit_invalid_field(
         reader, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
@@ -5628,7 +5631,7 @@ static iree_status_t loom_bytecode_reader_materialize_record_symbol(
     const loom_bytecode_reader_section_t* ir_section, uint64_t name_id,
     uint64_t symbol_index, loom_builder_t* builder) {
   uint16_t symbol_id =
-      loom_module_find_symbol(reader->output_module, (loom_string_id_t)name_id);
+      loom_symbol_map_find(&reader->symbol_map, (loom_string_id_t)name_id);
   if (symbol_id == LOOM_SYMBOL_ID_INVALID) {
     return loom_bytecode_reader_emit_invalid_field(
         reader, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
@@ -5952,6 +5955,16 @@ static iree_status_t loom_bytecode_reader_read_symbols(
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_string_ref(
         reader, name_id, IREE_SV("symbol_name"), name_offset, &unused_name));
     if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+    uint16_t indexed_symbol_id = LOOM_SYMBOL_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_symbol_map_find_or_insert(
+        &reader->symbol_map, reader->arena, (loom_string_id_t)name_id,
+        (uint16_t)symbol_index, &indexed_symbol_id));
+    if (indexed_symbol_id != symbol_index) {
+      return loom_bytecode_reader_emit_invalid_field(
+          reader, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
+          IREE_SV("name_id"), name_offset,
+          IREE_SV("symbol_name_appears_more_than_once"));
+    }
     if (symbol_metadata) {
       symbol_metadata->name = unused_name;
     }
@@ -6725,6 +6738,7 @@ static iree_status_t loom_bytecode_reader_read_module_metadata(
   reader->encoding_count = 0;
   reader->location_count = 0;
   reader->symbol_count = 0;
+  reader->symbol_map = (loom_symbol_map_t){0};
 
   loom_bytecode_reader_section_t* sections = NULL;
   iree_host_size_t section_count = 0;

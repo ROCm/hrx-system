@@ -2304,6 +2304,40 @@ TEST_F(ReaderTest, ReadsFunctionModuleIndex) {
   loom_module_free(module);
 }
 
+TEST_F(ReaderTest, RejectsDuplicateSymbolIdentity) {
+  loom_module_t* module = CreateFunctionModule();
+  AddSimpleFunction(module, "g");
+  auto bytes = WriteModule(module);
+
+  iree_arena_allocator_t metadata_arena;
+  iree_arena_initialize(&block_pool_, &metadata_arena);
+  loom_bytecode_file_metadata_t metadata = {0};
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result =
+      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+  ASSERT_EQ(result.error_count, 0u);
+  ASSERT_TRUE(error_ids.empty());
+  ASSERT_EQ(metadata.module_count, 1u);
+  ASSERT_EQ(metadata.modules[0].symbol_count, 2u);
+  const size_t first_entry_offset =
+      (size_t)metadata.modules[0].symbols[0].entry_offset;
+  const size_t second_entry_offset =
+      (size_t)metadata.modules[0].symbols[1].entry_offset;
+  iree_arena_deinitialize(&metadata_arena);
+
+  size_t first_name_offset = first_entry_offset;
+  size_t second_name_offset = second_entry_offset;
+  const uint64_t first_name_id = ReadUVarint(bytes, &first_name_offset);
+  const uint64_t second_name_id = ReadUVarint(bytes, &second_name_offset);
+  ASSERT_LT(first_name_id, 128u);
+  ASSERT_LT(second_name_id, 128u);
+  ASSERT_NE(first_name_id, second_name_id);
+  bytes[second_entry_offset] = bytes[first_entry_offset];
+
+  ExpectReadError(bytes, "ERR_BYTECODE_006");
+  loom_module_free(module);
+}
+
 TEST_F(ReaderTest, RejectsDefinitionRolesNotDeclaredByOp) {
   loom_module_t* module = CreateFunctionModule();
   for (loom_bytecode_symbol_flags_t role : {

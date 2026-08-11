@@ -88,6 +88,7 @@ loom_cc_library(
     loom::error::error_defs
     loom::format::low_repr
     loom::ir
+    loom::ir::symbol_map
     loom::ops::op_defs
     loom::ops::type_registry
     loom::verify
