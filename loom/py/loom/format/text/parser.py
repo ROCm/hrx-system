@@ -121,6 +121,7 @@ from loom.ir import (
     SignedEnumSetAttr,
     StaticDim,
     SymbolName,
+    SymbolNameArray,
     TaggedLocation,
     Type,
     TypeKind,
@@ -834,6 +835,22 @@ def _parse_descriptor_attr_value_from_tokens(
             return SignedEnumSetAttr(positive_values, negative_values)
         case "symbol":
             return tokenizer.expect(TokenKind.SYMBOL).text
+        case "symbol_array":
+            tokenizer.expect(TokenKind.LBRACKET)
+            values: list[SymbolName] = []
+            if not tokenizer.at(TokenKind.RBRACKET):
+                while True:
+                    if len(values) == 0xFFFF:
+                        raise ParseError(
+                            "symbol-array length exceeds UINT16_MAX",
+                            tokenizer.peek().location,
+                            filename,
+                        )
+                    values.append(SymbolName(tokenizer.expect(TokenKind.SYMBOL).text))
+                    if not tokenizer.try_consume(TokenKind.COMMA):
+                        break
+            tokenizer.expect(TokenKind.RBRACKET)
+            return SymbolNameArray(values)
         case "type":
             if scope is None or type_registry is None:
                 raise ValueError("type attribute parsing requires a type context")
@@ -1489,7 +1506,12 @@ def _type_optional_present(
                             TokenKind.BARE_IDENT,
                             TokenKind.LANGLE,
                         )
-                    case "enum_array" | "i64_array" | "parameterized_array":
+                    case (
+                        "enum_array"
+                        | "i64_array"
+                        | "symbol_array"
+                        | "parameterized_array"
+                    ):
                         return token.kind == TokenKind.LBRACKET
                     case "bool":
                         return token.kind == TokenKind.BARE_IDENT

@@ -448,6 +448,61 @@ func.def @typed(%arg: test.matrix<bf16, scope = subgroup, rows = 16, target = @d
   }
 }
 
+TEST_F(SymbolReferencesTest,
+       SymbolArraysIndexEveryOccurrenceWithoutAvailabilityEdges) {
+  ModulePtr module = ParseModule(R"(
+test.record @provider_a
+test.record @provider_b {depends = @consumer}
+
+func.def @consumer() {
+  test.symbol_array_attrs [@provider_a, @provider_a] using [@provider_b, @provider_a]
+  func.return
+}
+)");
+
+  loom_symbol_id_t provider_a = FindSymbol(module.get(), IREE_SV("provider_a"));
+  loom_symbol_id_t provider_b = FindSymbol(module.get(), IREE_SV("provider_b"));
+  loom_symbol_id_t consumer = FindSymbol(module.get(), IREE_SV("consumer"));
+  loom_symbol_reference_table_t table = BuildTable(module.get());
+
+  EXPECT_EQ(table.symbols[provider_a].incoming_count, 3u);
+  EXPECT_EQ(table.symbols[provider_b].incoming_count, 1u);
+  EXPECT_EQ(table.symbols[consumer].outgoing_count, 4u);
+
+  uint32_t provider_a_dependency_count = 0;
+  uint32_t provider_a_availability_count = 0;
+  loom_symbol_reference_occurrence_id_t occurrence_id =
+      table.symbols[provider_a].first_incoming_occurrence_id;
+  while (occurrence_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
+    const loom_symbol_reference_occurrence_t* occurrence =
+        &table.occurrences[occurrence_id];
+    ASSERT_EQ(occurrence->source_symbol_id, consumer);
+    ASSERT_EQ(occurrence->kind, LOOM_SYMBOL_REFERENCE_OCCURRENCE_SYMBOL_ATTR);
+    if (loom_symbol_reference_occurrence_is_dependency(occurrence)) {
+      ++provider_a_dependency_count;
+    } else {
+      ++provider_a_availability_count;
+    }
+    occurrence_id = occurrence->next_incoming_occurrence_id;
+  }
+  EXPECT_EQ(provider_a_dependency_count, 2u);
+  EXPECT_EQ(provider_a_availability_count, 1u);
+
+  const loom_symbol_reference_occurrence_t* provider_b_availability =
+      FindOccurrence(table, consumer, provider_b,
+                     LOOM_SYMBOL_REFERENCE_OCCURRENCE_SYMBOL_ATTR);
+  ASSERT_NE(provider_b_availability, nullptr);
+  EXPECT_EQ(provider_b_availability->role,
+            LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY);
+
+  loom_scc_list_t sccs = {};
+  loom_scc_graph_t graph = loom_symbol_reference_dependency_scc_graph(&table);
+  IREE_ASSERT_OK(loom_scc_compute(&graph, nullptr, &analysis_arena_, &sccs));
+  for (iree_host_size_t i = 0; i < sccs.count; ++i) {
+    EXPECT_FALSE(sccs.values[i].is_cycle);
+  }
+}
+
 TEST_F(SymbolReferencesTest, RebuildsAfterAttrMutationAndErase) {
   ModulePtr module = AllocateModule();
   loom_builder_t builder = {};

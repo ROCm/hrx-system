@@ -41,6 +41,7 @@ from loom.dsl import (
     ANY_ENCODING,
     ATTR_TYPE_PARAMETERIZED,
     ATTR_TYPE_SYMBOL,
+    ATTR_TYPE_SYMBOL_ARRAY,
     BUFFER,
     BY_REFERENCE,
     COMMUTATIVE,
@@ -384,6 +385,23 @@ class TestAttrDef:
         AttrDef("test", "enum", enum_def=_cmpi_preds)  # enum needs enum_def.
         AttrDef("test", "enum_array", enum_def=_cmpi_preds)
         AttrDef("test", "signed_enum_set", enum_def=_cmpi_preds)
+        AttrDef(
+            "test",
+            ATTR_TYPE_SYMBOL_ARRAY,
+            symbol_ref=SymbolReference("record", ["record"]),
+        )
+
+    def test_symbol_array_requires_reference_contract(self) -> None:
+        with _raises(ValueError, match="symbol_array.*requires symbol_ref"):
+            AttrDef("providers", ATTR_TYPE_SYMBOL_ARRAY)
+
+    def test_symbol_reference_contract_requires_symbol_kind(self) -> None:
+        with _raises(ValueError, match="symbol_ref requires"):
+            AttrDef(
+                "providers",
+                "i64_array",
+                symbol_ref=SymbolReference("record", ["record"]),
+            )
 
     def test_open_enum_array(self) -> None:
         attr = AttrDef("modes", "enum_array", enum_def=_cmpi_preds, open_enum=True)

@@ -331,6 +331,7 @@ ATTR_KIND_MAP: dict[str, str] = {
     "i64_array": "LOOM_ATTR_I64_ARRAY",
     "bytes": "LOOM_ATTR_BYTES",
     "symbol": "LOOM_ATTR_SYMBOL",
+    "symbol_array": "LOOM_ATTR_SYMBOL_ARRAY",
     "type": "LOOM_ATTR_TYPE",
     "encoding": "LOOM_ATTR_ENCODING",
     "predicate_list": "LOOM_ATTR_PREDICATE_LIST",

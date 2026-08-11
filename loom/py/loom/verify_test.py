@@ -36,6 +36,8 @@ from loom.ir import (
     ShapedType,
     StaticDim,
     Symbol,
+    SymbolName,
+    SymbolNameArray,
     TypeKind,
     Value,
 )
@@ -385,6 +387,77 @@ def test_verifier_reports_unresolved_symbol_ref() -> None:
     diagnostics = verify_module(module, ops=ALL_TEST_OPS)
 
     assert _diagnostic_text_contains(diagnostics, "unresolved symbol reference")
+
+
+def test_verifier_checks_each_symbol_array_dependency() -> None:
+    module = _module_with_body_ops(
+        Operation(
+            name="test.symbol_array_attrs",
+            attributes={
+                "dependencies": SymbolNameArray(
+                    [SymbolName("missing"), SymbolName("missing")]
+                )
+            },
+        )
+    )
+
+    diagnostics = verify_module(module, ops=ALL_TEST_OPS)
+
+    assert (
+        sum(
+            "unresolved symbol reference" in str(diagnostic)
+            for diagnostic in diagnostics.diagnostics
+        )
+        == 2
+    )
+    assert _diagnostic_text_contains(
+        diagnostics, "attribute 'dependencies' element 0 references @missing"
+    )
+    assert _diagnostic_text_contains(
+        diagnostics, "attribute 'dependencies' element 1 references @missing"
+    )
+
+
+def test_verifier_checks_each_symbol_array_availability() -> None:
+    module = _module_with_body_ops(
+        Operation(
+            name="test.symbol_array_attrs",
+            attributes={
+                "dependencies": SymbolNameArray(),
+                "available": SymbolNameArray([SymbolName("provider")]),
+            },
+        )
+    )
+
+    diagnostics = verify_module(module, ops=ALL_TEST_OPS)
+
+    assert _diagnostic_text_contains(diagnostics, "unresolved symbol reference")
+    assert _diagnostic_text_contains(
+        diagnostics, "attribute 'available' element 0 references @provider"
+    )
+
+
+def test_verifier_checks_symbol_array_target_interface_when_defined() -> None:
+    module = Module()
+    module.symbols.append(_symbol("function", _func()))
+    module = _module_with_body_ops(
+        Operation(
+            name="test.symbol_array_attrs",
+            attributes={
+                "dependencies": SymbolNameArray([SymbolName("function")]),
+            },
+        ),
+        module=module,
+    )
+
+    diagnostics = verify_module(module, ops=ALL_TEST_OPS)
+
+    assert _diagnostic_text_contains(
+        diagnostics, "symbol reference target has wrong interface"
+    )
+    assert _diagnostic_text_contains(
+        diagnostics, "attribute 'dependencies' element 0 references @function"
+    )
 
 
 def test_verifier_reports_missing_dynamic_dim_binding() -> None:

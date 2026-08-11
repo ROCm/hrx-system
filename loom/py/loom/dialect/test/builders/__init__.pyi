@@ -1082,6 +1082,13 @@ class TestBuilder(DialectBuilder):
         dict: Mapping[str, Any] | None = ...,
         location_id: int | None = ...,
     ) -> None: ...
+    def symbol_array_attrs(
+        self,
+        *,
+        dependencies: Sequence[str],
+        available: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> None: ...
     def parameterized_attr(
         self,
         *,

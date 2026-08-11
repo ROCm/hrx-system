@@ -37,6 +37,7 @@ from loom.ir import (
     ShapedType,
     StorageType,
     Symbol,
+    SymbolNameArray,
     Type,
     TypeKind,
 )
@@ -564,45 +565,60 @@ class ModuleVerifier:
             symbol_ref = attr_def.symbol_ref
             if symbol_ref is None or attr_def.name not in operation.attributes:
                 continue
-            target_name = operation.attributes[attr_def.name]
-            if not isinstance(target_name, str):
+            value = operation.attributes[attr_def.name]
+            if attr_def.attr_type == "symbol_array":
+                if not isinstance(value, SymbolNameArray):
+                    self.diagnostics.error(
+                        "symbol reference array attribute must be a SymbolNameArray",
+                        source=path,
+                        details=(f"attribute '{attr_def.name}' has value {value!r}",),
+                    )
+                    continue
+                target_names = tuple(value)
+            elif isinstance(value, str):
+                target_names = (value,)
+            else:
                 self.diagnostics.error(
                     "symbol reference attribute must be a string",
                     source=path,
-                    details=(f"attribute '{attr_def.name}' has value {target_name!r}",),
+                    details=(f"attribute '{attr_def.name}' has value {value!r}",),
                 )
                 continue
-            target_symbol = self._symbols_by_name.get(target_name)
-            if target_symbol is None:
+            for index, target_name in enumerate(target_names):
+                field = f"attribute '{attr_def.name}'"
+                if attr_def.attr_type == "symbol_array":
+                    field += f" element {index}"
+                target_symbol = self._symbols_by_name.get(target_name)
+                if target_symbol is None:
+                    self.diagnostics.error(
+                        "unresolved symbol reference",
+                        source=path,
+                        details=(f"{field} references @{target_name}",),
+                    )
+                    continue
+                target_decl = (
+                    self.registry.op(target_symbol.op.name)
+                    if target_symbol.op is not None
+                    else None
+                )
+                target_symbol_def = target_decl.symbol_def if target_decl else None
+                if target_symbol_def is None:
+                    continue
+                if any(
+                    interface in target_symbol_def.interfaces
+                    for interface in symbol_ref.interfaces
+                ):
+                    continue
                 self.diagnostics.error(
-                    "unresolved symbol reference",
+                    "symbol reference target has wrong interface",
                     source=path,
-                    details=(f"attribute '{attr_def.name}' references @{target_name}",),
+                    details=(
+                        f"{field} references @{target_name}",
+                        "expected one of "
+                        f"{', '.join(symbol_ref.interfaces)} for {symbol_ref.name}",
+                        f"target provides {', '.join(target_symbol_def.interfaces)}",
+                    ),
                 )
-                continue
-            target_decl = (
-                self.registry.op(target_symbol.op.name)
-                if target_symbol.op is not None
-                else None
-            )
-            target_symbol_def = target_decl.symbol_def if target_decl else None
-            if target_symbol_def is None:
-                continue
-            if any(
-                interface in target_symbol_def.interfaces
-                for interface in symbol_ref.interfaces
-            ):
-                continue
-            self.diagnostics.error(
-                "symbol reference target has wrong interface",
-                source=path,
-                details=(
-                    f"attribute '{attr_def.name}' references @{target_name}",
-                    "expected one of "
-                    f"{', '.join(symbol_ref.interfaces)} for {symbol_ref.name}",
-                    f"target provides {', '.join(target_symbol_def.interfaces)}",
-                ),
-            )
 
     def _verify_traits(
         self,

@@ -30,6 +30,7 @@ def parameter_value_c_type(parameter: AttrDef, enum_type: Callable[[AttrDef], st
         "bytes": "iree_const_byte_span_t",
         "encoding": "uint16_t",
         "symbol": "loom_symbol_ref_t",
+        "symbol_array": "loom_symbol_ref_array_t",
         "dict": "loom_named_attr_slice_t",
         "parameterized": "loom_attribute_t",
         "parameterized_array": "loom_parameterized_attr_array_t",
@@ -53,6 +54,7 @@ def parameter_value_constructor_expr(parameter: AttrDef) -> str:
         "bytes": f"loom_attr_bytes({name}.data, (uint32_t){name}.data_length)",
         "encoding": f"loom_attr_encoding({name})",
         "symbol": f"loom_attr_symbol({name})",
+        "symbol_array": f"loom_attr_symbol_array({name}.values, (uint16_t){name}.count)",
         "dict": f"loom_make_canonical_attr_dict({name}.entries, {name}.count)",
         "parameterized": name,
         "parameterized_array": f"loom_attr_parameterized_array({name}.values, {name}.count)",
@@ -75,6 +77,7 @@ def parameter_value_accessor_expr(parameter: AttrDef, slot_expr: str, c_type: st
         "bytes": f"loom_attr_as_bytes({slot_expr})",
         "encoding": f"loom_attr_as_encoding_id({slot_expr})",
         "symbol": f"loom_attr_as_symbol({slot_expr})",
+        "symbol_array": f"loom_attr_as_symbol_array({slot_expr})",
         "dict": f"loom_attr_as_dict({slot_expr})",
         "parameterized": slot_expr,
         "parameterized_array": f"loom_attr_as_parameterized_array({slot_expr})",
@@ -156,6 +159,7 @@ def append_parameter_slot_initializers(
             indent = "    "
         if parameter.attr_type in (
             "enum_array",
+            "symbol_array",
             "i64_array",
             "dict",
             "parameterized_array",

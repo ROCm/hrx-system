@@ -1764,7 +1764,6 @@ iree_status_t loom_builder_copy_signed_enum_set_attr_storage(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "builder has no arena");
   }
-
   uint64_t* storage = NULL;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(builder->arena, canonical_word_count * 2,
@@ -1774,6 +1773,34 @@ iree_status_t loom_builder_copy_signed_enum_set_attr_storage(
          canonical_word_count * sizeof(*storage));
   *out_storage = storage;
   *out_word_count = (uint16_t)canonical_word_count;
+  return iree_ok_status();
+}
+
+iree_status_t loom_builder_copy_symbol_array_attr_storage(
+    loom_builder_t* builder, loom_symbol_ref_array_t values,
+    iree_string_view_t label, const loom_symbol_ref_t** out_storage) {
+  if (!out_storage) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "symbol-array storage output is NULL");
+  }
+  *out_storage = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_builder_check_count_range(values.count, UINT16_MAX, label));
+  if (values.count == 0) return iree_ok_status();
+  if (!builder || !builder->arena) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "builder has no arena");
+  }
+  if (!values.values) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "%.*s storage is NULL for non-zero count",
+                            (int)label.size, label.data);
+  }
+  loom_symbol_ref_t* storage = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      builder->arena, values.count, sizeof(*storage), (void**)&storage));
+  memcpy(storage, values.values, values.count * sizeof(*storage));
+  *out_storage = storage;
   return iree_ok_status();
 }
 

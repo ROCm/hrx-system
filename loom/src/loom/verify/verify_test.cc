@@ -494,6 +494,27 @@ TEST_F(VerifyTest, EnumArraysRequireExplicitAttributeDescriptors) {
   ExpectU32Param(*entry, 2, LOOM_ATTR_ANY);
 }
 
+TEST_F(VerifyTest, SymbolArraysRequireExplicitAttributeDescriptors) {
+  EnterTestFunc(nullptr, 0, nullptr);
+
+  loom_symbol_ref_t refs[] = {{0, 0}};
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(
+      &builder_, loom_attr_symbol_array(refs, (uint16_t)IREE_ARRAYSIZE(refs)),
+      loom_type_scalar(LOOM_SCALAR_TYPE_I32), LOOM_LOCATION_UNKNOWN, &op));
+
+  TerminateFunc();
+  DiagnosticCapture capture;
+  auto result = VerifyStructured(&capture);
+  EXPECT_GT(result.error_count, 0u);
+  const CapturedDiagnostic* entry =
+      FindDiagnostic(capture, loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 5));
+  ASSERT_NE(entry, nullptr) << "Expected TYPE/005 attribute-kind diagnostic";
+  EXPECT_EQ(GetStringParam(*entry, 0), "value");
+  ExpectU32Param(*entry, 1, LOOM_ATTR_SYMBOL_ARRAY);
+  ExpectU32Param(*entry, 2, LOOM_ATTR_ANY);
+}
+
 TEST_F(VerifyTest, ParameterizedAttrArraysRequireExplicitAttributeDescriptors) {
   EnterTestFunc(nullptr, 0, nullptr);
 
@@ -2046,6 +2067,35 @@ TEST_F(VerifyTest, RejectsNonLocalSymbolRef) {
   ExpectFieldRefParam(*entry, 0, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, 0);
 }
 
+TEST_F(VerifyTest, RejectsEveryUnresolvedSymbolArrayElement) {
+  EnterTestFunc(nullptr, 0, nullptr);
+  loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_builder_intern_string(&builder_, IREE_SV("missing"), &name_id));
+  uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
+  loom_symbol_ref_t ref = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+  loom_symbol_ref_t dependencies[] = {ref, ref};
+
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_symbol_array_attrs_build(
+      &builder_, 0,
+      loom_make_symbol_ref_array(dependencies, IREE_ARRAYSIZE(dependencies)),
+      loom_symbol_ref_array_empty(), LOOM_LOCATION_UNKNOWN, &op));
+  TerminateFunc();
+
+  DiagnosticCapture structured;
+  auto result = VerifyStructured(&structured);
+  EXPECT_EQ(result.error_count, 2u);
+  ASSERT_EQ(structured.diagnostics.size(), 2u);
+  for (const CapturedDiagnostic& diagnostic : structured.diagnostics) {
+    ExpectError(diagnostic, loom_error_def_lookup(LOOM_ERROR_DOMAIN_SYMBOL, 2),
+                LOOM_EMITTER_VERIFIER);
+    EXPECT_EQ(GetStringParam(diagnostic, 0), "missing");
+    ExpectFieldRefParam(diagnostic, 0, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, 0);
+  }
+}
+
 TEST_F(VerifyTest, AcceptsSymbolsNestedInParameterizedValues) {
   const char* source =
       "test.record @target\n"
@@ -2090,6 +2140,32 @@ TEST_F(VerifyTest, RejectsWrongSymbolKindInParameterizedAttribute) {
   EXPECT_EQ(GetStringParam(*entry, 0), "main");
   EXPECT_EQ(GetStringParam(*entry, 2), "record");
   ExpectFieldRefParam(*entry, 0, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, 0);
+
+  loom_module_free(parsed_module);
+}
+
+TEST_F(VerifyTest, RejectsWrongSymbolKindInSymbolArray) {
+  const char* source =
+      "test.func @main() {\n"
+      "  test.symbol_array_attrs [@main, @main]\n"
+      "  test.yield\n"
+      "}\n";
+  loom_module_t* parsed_module =
+      ParseSourceModule(source, "symbol_array_kind.loom");
+  ASSERT_NE(parsed_module, nullptr);
+
+  DiagnosticCapture capture;
+  auto result = VerifyParsedSourceModuleStructured(
+      parsed_module, source, "symbol_array_kind.loom", &capture);
+  EXPECT_EQ(result.error_count, 2u);
+  ASSERT_EQ(capture.diagnostics.size(), 2u);
+  for (const CapturedDiagnostic& diagnostic : capture.diagnostics) {
+    ExpectError(diagnostic, loom_error_def_lookup(LOOM_ERROR_DOMAIN_SYMBOL, 3),
+                LOOM_EMITTER_VERIFIER);
+    EXPECT_EQ(GetStringParam(diagnostic, 0), "main");
+    EXPECT_EQ(GetStringParam(diagnostic, 2), "record");
+    ExpectFieldRefParam(diagnostic, 0, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, 0);
+  }
 
   loom_module_free(parsed_module);
 }

@@ -94,6 +94,22 @@ def _emit_builder_signed_enum_set_storage(
     lines.append(f"{indent}        &{storage}, &{word_count}));")
 
 
+def _emit_builder_symbol_array_storage(
+    lines: list[str],
+    *,
+    source: str,
+    storage: str,
+    op_name: str,
+    field_name: str,
+    indent: str = "",
+) -> None:
+    """Emits C code that copies a symbol-array attr payload into the builder."""
+    lines.append(f"{indent}const loom_symbol_ref_t* {storage} = NULL;")
+    lines.append(f"{indent}IREE_RETURN_IF_ERROR(loom_builder_copy_symbol_array_attr_storage(")
+    lines.append(f'{indent}    builder, {source}, IREE_SV("{op_name} {field_name}"),')
+    lines.append(f"{indent}    &{storage}));")
+
+
 def _emit_builder_predicate_list_storage(
     lines: list[str],
     *,
@@ -746,6 +762,7 @@ def _generate_builder_implementation(
                 "enum_array": f"loom_attr_enum_array(_{field_name}_storage, (uint16_t){name}.count)",
                 "signed_enum_set": f"loom_attr_signed_enum_set(_{field_name}_storage, _{field_name}_word_count)",
                 "symbol": f"loom_attr_symbol({name})",
+                "symbol_array": f"loom_attr_symbol_array(_{field_name}_storage, (uint16_t){name}.count)",
                 "type": f"loom_attr_type({name})",
                 "encoding": f"loom_attr_encoding({name})",
                 "bytes": f"loom_attr_bytes(_{field_name}_storage, (uint32_t){name}.data_length)",
@@ -825,6 +842,29 @@ def _generate_builder_implementation(
                         source=name,
                         storage=storage,
                         word_count=word_count,
+                        op_name=op.name,
+                        field_name=field_name,
+                    )
+                    lines.append(f"  loom_op_attrs(*out_op)[{idx}] = {constructor};")
+            elif attr_type == "symbol_array":
+                storage = f"_{field_name}_storage"
+                if optional_flag:
+                    lines.append(f"  if (iree_any_bit_set(build_flags, {optional_flag})) {{")
+                    _emit_builder_symbol_array_storage(
+                        lines,
+                        source=name,
+                        storage=storage,
+                        op_name=op.name,
+                        field_name=field_name,
+                        indent="    ",
+                    )
+                    lines.append(f"    loom_op_attrs(*out_op)[{idx}] = {constructor};")
+                    lines.append("  }")
+                else:
+                    _emit_builder_symbol_array_storage(
+                        lines,
+                        source=name,
+                        storage=storage,
                         op_name=op.name,
                         field_name=field_name,
                     )

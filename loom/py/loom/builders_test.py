@@ -41,6 +41,8 @@ from loom.ir import (
     ShapedType,
     SignedEnumSetAttr,
     StaticDim,
+    SymbolName,
+    SymbolNameArray,
     TypeKind,
 )
 
@@ -113,6 +115,34 @@ def test_dynamic_builder_resolves_enum_array_values_and_presence() -> None:
     assert second["required_values"] == EnumArrayAttr()
     assert second["optional_values"] == EnumArrayAttr()
     assert "optional_values" not in block.ops[2].attributes
+
+
+def test_dynamic_builder_normalizes_symbol_arrays_and_presence() -> None:
+    block, builder = _builder()
+
+    builder.test.symbol_array_attrs(
+        dependencies=["b", "a", "b"],
+        available=["a"],
+    )
+    builder.test.symbol_array_attrs(dependencies=[], available=[])
+    builder.test.symbol_array_attrs(dependencies=["a"])
+
+    first = block.ops[0].attributes
+    assert first["dependencies"] == SymbolNameArray(
+        [SymbolName("b"), SymbolName("a"), SymbolName("b")]
+    )
+    assert first["available"] == SymbolNameArray([SymbolName("a")])
+    second = block.ops[1].attributes
+    assert second["dependencies"] == SymbolNameArray()
+    assert second["available"] == SymbolNameArray()
+    assert "available" not in block.ops[2].attributes
+
+
+def test_dynamic_builder_rejects_symbol_sigil_in_symbol_array() -> None:
+    _block, builder = _builder()
+
+    with pytest.raises(ValueError, match="must not include '@'"):
+        builder.test.symbol_array_attrs(dependencies=["@record"])
 
 
 def test_dynamic_builder_rejects_undeclared_closed_enum_array_value() -> None:

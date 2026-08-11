@@ -115,6 +115,7 @@ from loom.ir import (
     StaticDim,
     StorageType,
     SymbolName,
+    SymbolNameArray,
     Type,
     Value,
 )
@@ -779,6 +780,12 @@ def _format_attr_value(
         if symbol_name.startswith("@"):
             raise ValueError(f"symbol attribute value must not include '@': {value!r}")
         return "@" + symbol_name
+    if attr_def is not None and attr_def.attr_type == "symbol_array":
+        if not isinstance(value, SymbolNameArray):
+            raise TypeError(
+                f"symbol-array attribute value must be SymbolNameArray: {value!r}"
+            )
+        return "[" + ", ".join("@" + str(element) for element in value) + "]"
     if attr_def is not None and attr_def.attr_type == "type":
         if not isinstance(value, _IR_TYPE_CLASSES):
             raise TypeError(f"type attribute value must be a Type: {value!r}")
@@ -994,6 +1001,11 @@ def _is_pipeline_printable_attr_value(
         return True
     if attr_def is not None and attr_def.attr_type == "symbol":
         return _is_pipeline_printable_name(str(value), allow_dot=False)
+    if attr_def is not None and attr_def.attr_type == "symbol_array":
+        return isinstance(value, SymbolNameArray) and all(
+            _is_pipeline_printable_name(str(element), allow_dot=False)
+            for element in value
+        )
     if isinstance(value, ParameterizedAttr):
         return all(
             slot is None or _is_pipeline_printable_attr_value(slot, parameter)

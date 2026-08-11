@@ -1014,6 +1014,46 @@ TEST_F(ParserTest, SignedEnumSetsRoundTripCanonicalStableValues) {
   loom_module_free(module);
 }
 
+TEST_F(ParserTest, SymbolArraysRoundTripOrderDuplicatesAndPresentEmpty) {
+  std::string text = RoundTrip(
+      "test.record @a\n"
+      "test.record @b\n"
+      "test.symbol_array_attrs [@b, @a, @b] using [@a]\n"
+      "test.symbol_array_attrs [] using []\n"
+      "test.symbol_array_attrs []\n");
+  EXPECT_NE(text.find("test.symbol_array_attrs [@b, @a, @b] using [@a]"),
+            std::string::npos);
+  EXPECT_NE(text.find("test.symbol_array_attrs [] using []"),
+            std::string::npos);
+
+  loom_module_t* module = ParseOk(
+      "test.record @a\n"
+      "test.record @b\n"
+      "test.symbol_array_attrs [@b, @a, @b] using [@a]\n"
+      "test.symbol_array_attrs [] using []\n"
+      "test.symbol_array_attrs []\n");
+  loom_block_t* body = loom_module_block(module);
+  ASSERT_EQ(body->op_count, 5u);
+  loom_op_t* mixed_op = loom_block_op(body, 2);
+  ASSERT_TRUE(loom_test_symbol_array_attrs_isa(mixed_op));
+  loom_symbol_ref_array_t dependencies =
+      loom_test_symbol_array_attrs_dependencies(mixed_op);
+  ASSERT_EQ(dependencies.count, 3u);
+  EXPECT_EQ(dependencies.values[0].symbol_id, dependencies.values[2].symbol_id);
+  EXPECT_NE(dependencies.values[0].symbol_id, dependencies.values[1].symbol_id);
+  loom_symbol_ref_array_t available =
+      loom_test_symbol_array_attrs_available(mixed_op);
+  ASSERT_EQ(available.count, 1u);
+  EXPECT_EQ(available.values[0].symbol_id, dependencies.values[1].symbol_id);
+
+  loom_op_t* present_empty_op = loom_block_op(body, 3);
+  EXPECT_FALSE(loom_attr_is_absent(loom_op_attrs(present_empty_op)[1]));
+  EXPECT_EQ(loom_test_symbol_array_attrs_available(present_empty_op).count, 0u);
+  loom_op_t* absent_op = loom_block_op(body, 4);
+  EXPECT_TRUE(loom_attr_is_absent(loom_op_attrs(absent_op)[1]));
+  loom_module_free(module);
+}
+
 TEST_F(ParserTest, ParameterizedAttrsRoundTripInDeclarationOrder) {
   std::string text = RoundTrip(
       "test.record @target\n"

@@ -276,6 +276,53 @@ static iree_status_t loom_parse_signed_enum_set_attr(
   return iree_ok_status();
 }
 
+static iree_status_t loom_parse_symbol_array_attr(loom_parser_t* parser,
+                                                  loom_attribute_t* out_attr) {
+  if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LBRACKET)) {
+    loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
+    return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'['"));
+  }
+
+  loom_symbol_ref_t inline_values[32];
+  loom_symbol_ref_t* values = inline_values;
+  iree_host_size_t capacity = IREE_ARRAYSIZE(inline_values);
+  iree_host_size_t count = 0;
+  while (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_RBRACKET) &&
+         !loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_EOF)) {
+    if (count > 0 &&
+        !loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_COMMA)) {
+      break;
+    }
+    if (count == UINT16_MAX) {
+      loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
+      return loom_parser_emit_unexpected_token(
+          parser, peek, IREE_SV("at most 65535 symbol references"));
+    }
+    if (count >= capacity) {
+      IREE_RETURN_IF_ERROR(iree_arena_grow_array(&parser->parser_arena, count,
+                                                 count + 1, sizeof(*values),
+                                                 &capacity, (void**)&values));
+    }
+    loom_attribute_t value = loom_attr_absent();
+    IREE_RETURN_IF_ERROR(loom_parse_symbol_ref_attr(parser, &value));
+    values[count++] = loom_attr_as_symbol(value);
+  }
+  if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_RBRACKET)) {
+    loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
+    return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("']'"));
+  }
+
+  loom_symbol_ref_t* arena_values = NULL;
+  if (count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(&parser->module->arena,
+                                                   count, sizeof(*arena_values),
+                                                   (void**)&arena_values));
+    memcpy(arena_values, values, count * sizeof(*arena_values));
+  }
+  *out_attr = loom_attr_symbol_array(arena_values, (uint16_t)count);
+  return iree_ok_status();
+}
+
 static int8_t loom_parse_hex_nibble(uint8_t c) {
   if (c >= '0' && c <= '9') return (int8_t)(c - '0');
   if (c >= 'a' && c <= 'f') return (int8_t)(10 + c - 'a');
@@ -632,6 +679,8 @@ static iree_status_t loom_parse_attr_value_at_depth(
     case LOOM_ATTR_SYMBOL: {
       return loom_parse_symbol_ref_attr(parser, out_attr);
     }
+    case LOOM_ATTR_SYMBOL_ARRAY:
+      return loom_parse_symbol_array_attr(parser, out_attr);
     case LOOM_ATTR_ENUM: {
       uint8_t value = 0;
       IREE_RETURN_IF_ERROR(

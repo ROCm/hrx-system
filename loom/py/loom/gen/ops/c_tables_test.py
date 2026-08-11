@@ -51,6 +51,7 @@ from loom.dsl import (
     ATTR_TYPE_PREDICATE_LIST,
     ATTR_TYPE_STRING,
     ATTR_TYPE_SYMBOL,
+    ATTR_TYPE_SYMBOL_ARRAY,
     DECOMPOSABLE,
     ELEMENTWISE,
     HINT,
@@ -2127,6 +2128,78 @@ def test_generate_descriptor_backed_signed_enum_set_surface() -> None:
     assert optional_guard < optional_copy < optional_assignment
     assert "LOOM_ATTR_SIGNED_ENUM_SET" in tables_c
     assert ".enum_case_names" in tables_c
+
+
+def test_generate_descriptor_backed_symbol_array_surface() -> None:
+    op = Op(
+        "test.symbol_arrays",
+        group=Dialect("test"),
+        attrs=[
+            AttrDef(
+                "dependencies",
+                ATTR_TYPE_SYMBOL_ARRAY,
+                symbol_ref=SymbolReference("record", ["record"]),
+            ),
+            AttrDef(
+                "available",
+                ATTR_TYPE_SYMBOL_ARRAY,
+                symbol_ref=SymbolReference(
+                    "record",
+                    ["record"],
+                    role=SymbolReferenceRole.AVAILABILITY,
+                ),
+                optional=True,
+            ),
+        ],
+        format=[
+            Attr("dependencies"),
+            OptionalGroup([Attr("available")], anchor="available"),
+        ],
+    )
+
+    ops_h = generate_ops_h("test", 0, [op])
+    builders_c = generate_builders_c("test", [op])
+    tables_c = generate_tables_c("test", 0, [op])
+
+    assert "LOOM_DEFINE_ATTR_SYMBOL_ARRAY(loom_test_symbol_arrays_dependencies, 0)" in ops_h
+    assert "loom_symbol_ref_array_t dependencies" in ops_h
+    assert "loom_optional loom_symbol_ref_array_t available" in ops_h
+    assert "LOOM_TEST_SYMBOL_ARRAYS_BUILD_FLAG_HAS_AVAILABLE" in ops_h
+    assert "loom_builder_copy_symbol_array_attr_storage" in builders_c
+    assert "loom_attr_symbol_array(_available_storage" in builders_c
+    optional_guard = builders_c.index("iree_any_bit_set(build_flags, LOOM_TEST_SYMBOL_ARRAYS_BUILD_FLAG_HAS_AVAILABLE)")
+    optional_copy = builders_c.index("loom_builder_copy_symbol_array_attr_storage(", optional_guard)
+    optional_assignment = builders_c.index("loom_attr_symbol_array(_available_storage", optional_copy)
+    assert optional_guard < optional_copy < optional_assignment
+    assert "LOOM_ATTR_SYMBOL_ARRAY" in tables_c
+    assert ".role = LOOM_SYMBOL_REFERENCE_ROLE_DEPENDENCY" in tables_c
+    assert ".role = LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY" in tables_c
+
+
+def test_generate_symbol_array_parameter_surface() -> None:
+    family = ParameterizedAttrDef(
+        "test.providers",
+        group=Dialect("test"),
+        parameters=[
+            AttrDef(
+                "values",
+                ATTR_TYPE_SYMBOL_ARRAY,
+                symbol_ref=SymbolReference("record", ["record"]),
+            )
+        ],
+    )
+
+    ops_h = generate_ops_h("test", 0, [], parameterized_attrs=[family])
+    builders_c = generate_builders_c("test", [], parameterized_attrs=[family])
+    tables_c = generate_tables_c("test", 0, [], parameterized_attrs=[family])
+
+    assert "loom_symbol_ref_array_t loom_test_providers_attr_values" in ops_h
+    assert "loom_symbol_ref_array_t values" in ops_h
+    assert "loom_attr_as_symbol_array" in ops_h
+    assert "loom_attr_symbol_array(values.values" in builders_c
+    assert "values.count > UINT16_MAX" in builders_c
+    assert "LOOM_ATTR_SYMBOL_ARRAY" in tables_c
+    assert ".role = LOOM_SYMBOL_REFERENCE_ROLE_DEPENDENCY" in tables_c
 
 
 def test_generate_builders_copy_i64_array_attrs_into_builder_arena() -> None:

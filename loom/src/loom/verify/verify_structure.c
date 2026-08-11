@@ -1297,8 +1297,14 @@ static iree_string_view_t loom_verify_encoding_attr_kind_name(
       [LOOM_ATTR_ENUM_ARRAY] = IREE_SVL("enum array"),
       [LOOM_ATTR_SIGNED_ENUM_SET] = IREE_SVL("signed enum set"),
       [LOOM_ATTR_PARAMETERIZED] = IREE_SVL("parameterized attribute"),
+      [LOOM_ATTR_PARAMETERIZED_ARRAY] =
+          IREE_SVL("parameterized attribute array"),
+      [LOOM_ATTR_SYMBOL_ARRAY] = IREE_SVL("symbol array"),
   };
-  return kind < IREE_ARRAYSIZE(kNames) ? kNames[kind] : IREE_SV("attribute");
+  if (kind >= IREE_ARRAYSIZE(kNames) || kNames[kind].size == 0) {
+    return IREE_SV("attribute");
+  }
+  return kNames[kind];
 }
 
 static bool loom_verify_static_encoding_is_malformed(
@@ -1731,6 +1737,19 @@ static void loom_verify_attr_symbol_references(
               : NULL,
           loom_attr_as_symbol(attr), field_ref);
       return;
+    case LOOM_ATTR_SYMBOL_ARRAY: {
+      loom_symbol_ref_array_t refs = loom_attr_as_symbol_array(attr);
+      if (refs.count > 0 && !refs.values) return;
+      const loom_symbol_reference_descriptor_t* reference_descriptor =
+          descriptor && descriptor->attr_kind == LOOM_ATTR_SYMBOL_ARRAY
+              ? descriptor->reference.symbol_ref
+              : NULL;
+      for (uint16_t i = 0; i < refs.count; ++i) {
+        loom_verify_symbol_reference(state, op, reference_descriptor,
+                                     refs.values[i], field_ref);
+      }
+      return;
+    }
     case LOOM_ATTR_DICT:
       // Generic dictionary entries carry no symbol-reference descriptors.
       // Their semantic interpretation belongs to the owning dialect verifier;

@@ -127,6 +127,7 @@ _C_ATTR_TYPE_MAP: dict[str, str] = {
     "enum_array": "loom_enum_array_t",
     "signed_enum_set": "loom_signed_enum_set_t",
     "symbol": "loom_symbol_ref_t",
+    "symbol_array": "loom_symbol_ref_array_t",
     "i64_array": "const int64_t*",
     "bytes": "iree_const_byte_span_t",
     "type": "uint32_t",
@@ -164,6 +165,7 @@ _BUILD_FLAG_OPTIONAL_ATTR_TYPES = frozenset(
         "enum_array",
         "signed_enum_set",
         "symbol",
+        "symbol_array",
         "i64_array",
         "bytes",
         "type",
@@ -176,6 +178,7 @@ _BUILD_FLAG_OPTIONAL_ATTR_TYPES = frozenset(
 _TRAILING_BUILD_FLAG_OPTIONAL_ATTR_TYPES = frozenset(
     {
         "i64_array",
+        "symbol_array",
         "bytes",
         "dict",
         "parameterized_array",

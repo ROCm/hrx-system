@@ -68,6 +68,7 @@ from loom.dsl import (
     ATTR_TYPE_PARAMETERIZED_ARRAY,
     ATTR_TYPE_SIGNED_ENUM_SET,
     ATTR_TYPE_SYMBOL,
+    ATTR_TYPE_SYMBOL_ARRAY,
     BY_REFERENCE,
     CONSTANT_LIKE,
     CONVERGENT,
@@ -2293,6 +2294,45 @@ test_signed_enum_set_attrs = Op(
 )
 
 # ============================================================================
+# test.symbol_array_attrs — descriptor-backed symbol-array attributes
+# ============================================================================
+
+test_symbol_array_attrs = Op(
+    "test.symbol_array_attrs",
+    group=test_ops,
+    doc="Test op with dependency and availability symbol arrays.",
+    attrs=[
+        AttrDef(
+            "dependencies",
+            ATTR_TYPE_SYMBOL_ARRAY,
+            symbol_ref=SymbolReference("record", ["record"]),
+            doc="Ordered record dependencies.",
+        ),
+        AttrDef(
+            "available",
+            ATTR_TYPE_SYMBOL_ARRAY,
+            symbol_ref=SymbolReference(
+                "record",
+                ["record"],
+                role=SymbolReferenceRole.AVAILABILITY,
+            ),
+            optional=True,
+            doc="Ordered records available from an external provider.",
+        ),
+    ],
+    format=[
+        Attr("dependencies"),
+        OptionalGroup(
+            [kw("using"), Attr("available")],
+            anchor="available",
+        ),
+    ],
+    examples=[
+        "test.symbol_array_attrs [@b, @a, @b] using [@a]",
+    ],
+)
+
+# ============================================================================
 # test.operand_dict — op with keyed SSA operand dictionary
 # ============================================================================
 
@@ -3050,6 +3090,7 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_fact_cluster_uniform,
     test_enum_array_attrs,
     test_signed_enum_set_attrs,
+    test_symbol_array_attrs,
     test_parameterized_attr,
     test_compact_parameterized_attr,
     test_parameterized_attr_array,

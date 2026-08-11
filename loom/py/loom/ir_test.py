@@ -22,6 +22,7 @@ from loom.dialect.test import (
     test_tile_attr,
     test_variant_set_type,
 )
+from loom.dsl import AttrDef, Dialect, ParameterizedAttrDef, SymbolReference
 from loom.ir import (
     BF16,
     BUFFER_TYPE,
@@ -663,6 +664,50 @@ class TestCanonicalAttrDict:
 
 
 class TestParameterizedAttr:
+    def test_canonicalizes_symbol_array_parameters(self) -> None:
+        family = ParameterizedAttrDef(
+            "test.providers",
+            group=Dialect("test"),
+            parameters=[
+                AttrDef(
+                    "values",
+                    "symbol_array",
+                    symbol_ref=SymbolReference("record", ["record"]),
+                )
+            ],
+        )
+
+        value = ParameterizedAttr(
+            family,
+            {
+                "values": [
+                    SymbolName("b"),
+                    SymbolName("a"),
+                    SymbolName("b"),
+                ]
+            },
+        )
+
+        assert value.get("values") == SymbolNameArray(
+            [SymbolName("b"), SymbolName("a"), SymbolName("b")]
+        )
+
+    def test_rejects_untyped_symbol_array_parameters(self) -> None:
+        family = ParameterizedAttrDef(
+            "test.providers",
+            group=Dialect("test"),
+            parameters=[
+                AttrDef(
+                    "values",
+                    "symbol_array",
+                    symbol_ref=SymbolReference("record", ["record"]),
+                )
+            ],
+        )
+
+        with pytest.raises(TypeError, match="symbol name array element 0"):
+            ParameterizedAttr(family, {"values": ["untyped"]})
+
     def test_compact_primary_preserves_named_declaration_order_storage(self) -> None:
         compact = test_compact_attr(label="wave", value=64)
 

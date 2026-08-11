@@ -1780,6 +1780,13 @@ loom_attribute_t loom_memory_access_atomic_scope(loom_memory_access_t access);
     return loom_attr_as_symbol(loom_op_attrs(op)[(index)]);        \
   }
 
+// Defines a function that reads a symbol-array attribute by index.
+#define LOOM_DEFINE_ATTR_SYMBOL_ARRAY(func_name, index)                  \
+  enum { func_name##_ATTR_INDEX = (index) };                             \
+  static inline loom_symbol_ref_array_t func_name(const loom_op_t* op) { \
+    return loom_attr_as_symbol_array(loom_op_attrs(op)[(index)]);        \
+  }
+
 // Defines a function that reads a string attribute by index.
 #define LOOM_DEFINE_ATTR_STRING(func_name, index)                 \
   enum { func_name##_ATTR_INDEX = (index) };                      \
@@ -2039,6 +2046,11 @@ iree_status_t loom_builder_copy_signed_enum_set_attr_storage(
     loom_builder_t* builder, loom_signed_enum_set_t set,
     iree_string_view_t label, const uint64_t** out_storage,
     uint16_t* out_word_count);
+
+// Copies a symbol-array attribute payload into the builder arena.
+iree_status_t loom_builder_copy_symbol_array_attr_storage(
+    loom_builder_t* builder, loom_symbol_ref_array_t values,
+    iree_string_view_t label, const loom_symbol_ref_t** out_storage);
 
 // Copies a predicate-list attribute payload into the builder arena.
 iree_status_t loom_builder_copy_predicate_list_attr_storage(

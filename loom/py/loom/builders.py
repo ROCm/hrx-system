@@ -27,6 +27,7 @@ from loom.dsl import (
     ATTR_TYPE_ENUM_ARRAY,
     ATTR_TYPE_PARAMETERIZED_ARRAY,
     ATTR_TYPE_SIGNED_ENUM_SET,
+    ATTR_TYPE_SYMBOL_ARRAY,
     AttrDef,
     Op,
     TypeDef,
@@ -39,6 +40,8 @@ from loom.ir import (
     ParameterizedAttrArray,
     Region,
     SignedEnumSetAttr,
+    SymbolName,
+    SymbolNameArray,
     Type,
 )
 from loom.stable_id import stable_id_from_string
@@ -226,6 +229,13 @@ class OpCallable:
                             == ATTR_TYPE_PARAMETERIZED_ARRAY
                         ):
                             value = _normalize_parameterized_attr_array(
+                                op.name, param.attr_def, value
+                            )
+                        elif (
+                            param.attr_def is not None
+                            and param.attr_def.attr_type == ATTR_TYPE_SYMBOL_ARRAY
+                        ):
+                            value = _normalize_symbol_array_attr(
                                 op.name, param.attr_def, value
                             )
                         attributes[param.name] = value
@@ -607,6 +617,32 @@ def _normalize_parameterized_attr_array(
                     f"'{expected_family.name}'"
                 )
     return array
+
+
+def _normalize_symbol_array_attr(
+    op_name: str, attr_def: AttrDef, value: Any
+) -> SymbolNameArray:
+    """Canonicalizes a symbol-array field while preserving order and repeats."""
+    values = value.values if isinstance(value, SymbolNameArray) else value
+    if isinstance(values, str | bytes | bytearray) or not isinstance(values, Iterable):
+        raise TypeError(
+            f"{op_name}: symbol array '{attr_def.name}' must be an iterable "
+            "of symbol names"
+        )
+    names: list[SymbolName] = []
+    for index, element in enumerate(values):
+        if not isinstance(element, str):
+            raise TypeError(
+                f"{op_name}: symbol array '{attr_def.name}' element {index} "
+                f"must be a symbol name, got {element!r}"
+            )
+        if element.startswith("@"):
+            raise ValueError(
+                f"{op_name}: symbol array '{attr_def.name}' element {index} "
+                "must not include '@'"
+            )
+        names.append(SymbolName(element))
+    return SymbolNameArray(names)
 
 
 def _normalize_result_names(

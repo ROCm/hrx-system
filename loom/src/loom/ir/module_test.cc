@@ -320,6 +320,20 @@ TEST_F(ModuleTest, CompactSymbolsDropsUnreferencedTombstonesAndRenumbersRefs) {
   IREE_ASSERT_OK(loom_test_record_build(
       &builder, 0, 0, (loom_symbol_ref_t){0, keep_b_symbol_id},
       loom_make_named_attr_slice(NULL, 0), LOOM_LOCATION_UNKNOWN, &keep_b_op));
+  loom_symbol_ref_t dependency_refs[] = {
+      {0, keep_b_symbol_id},
+      {0, keep_a_symbol_id},
+      {0, keep_b_symbol_id},
+  };
+  loom_symbol_ref_t availability_refs[] = {{0, keep_a_symbol_id}};
+  loom_op_t* refs_op = NULL;
+  IREE_ASSERT_OK(loom_test_symbol_array_attrs_build(
+      &builder, LOOM_TEST_SYMBOL_ARRAY_ATTRS_BUILD_FLAG_HAS_AVAILABLE,
+      loom_make_symbol_ref_array(dependency_refs,
+                                 IREE_ARRAYSIZE(dependency_refs)),
+      loom_make_symbol_ref_array(availability_refs,
+                                 IREE_ARRAYSIZE(availability_refs)),
+      LOOM_LOCATION_UNKNOWN, &refs_op));
 
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(&block_pool_, &scratch_arena);
@@ -338,6 +352,16 @@ TEST_F(ModuleTest, CompactSymbolsDropsUnreferencedTombstonesAndRenumbersRefs) {
   loom_named_attr_slice_t dict = loom_test_record_dict(keep_a_op);
   ASSERT_EQ(dict.count, 1u);
   EXPECT_EQ(loom_attr_as_symbol(dict.entries[0].value).symbol_id, 1u);
+  loom_symbol_ref_array_t dependencies =
+      loom_test_symbol_array_attrs_dependencies(refs_op);
+  ASSERT_EQ(dependencies.count, 3u);
+  EXPECT_EQ(dependencies.values[0].symbol_id, 1u);
+  EXPECT_EQ(dependencies.values[1].symbol_id, 0u);
+  EXPECT_EQ(dependencies.values[2].symbol_id, 1u);
+  loom_symbol_ref_array_t available =
+      loom_test_symbol_array_attrs_available(refs_op);
+  ASSERT_EQ(available.count, 1u);
+  EXPECT_EQ(available.values[0].symbol_id, 0u);
 
   loom_module_free(module);
 }

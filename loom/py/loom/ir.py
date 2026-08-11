@@ -1277,6 +1277,7 @@ def _canonicalize_parameterized_value(
         ATTR_TYPE_SIGNED_ENUM_SET,
         ATTR_TYPE_STRING,
         ATTR_TYPE_SYMBOL,
+        ATTR_TYPE_SYMBOL_ARRAY,
         ATTR_TYPE_TYPE,
     )
 
@@ -1368,6 +1369,13 @@ def _canonicalize_parameterized_value(
             if not isinstance(value, SymbolName):
                 raise type_error("a symbol name")
             return value
+        case kind if kind == ATTR_TYPE_SYMBOL_ARRAY:
+            values = value.values if isinstance(value, SymbolNameArray) else value
+            if isinstance(values, str | bytes | bytearray) or not isinstance(
+                values, Iterable
+            ):
+                raise type_error("an iterable of symbol names")
+            return SymbolNameArray(values)
         case kind if kind == ATTR_TYPE_DICT:
             if not isinstance(value, Mapping):
                 raise type_error("an attribute dictionary")
