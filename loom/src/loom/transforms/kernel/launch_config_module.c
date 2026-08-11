@@ -10,9 +10,12 @@
 #include "loom/ops/kernel/launch_config.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/special_values.h"
+#include "loom/ops/type_registry.h"
 #include "loom/rewrite/materialize.h"
 #include "loom/rewrite/remap.h"
 #include "loom/transforms/cleanup/dce.h"
+#include "loom/util/fact_table.h"
 
 typedef struct loom_kernel_launch_config_module_build_t {
   // Immutable verified source module containing the kernel definitions.
@@ -47,6 +50,17 @@ static iree_status_t loom_kernel_launch_config_module_build_function(
     loom_symbol_id_t source_symbol_id, loom_op_t* source_kernel_op) {
   const loom_value_slice_t source_arguments =
       loom_kernel_workload_arg_ids(build->source_module, source_kernel_op);
+  const loom_func_like_t source_kernel =
+      loom_func_like_cast(build->source_module, source_kernel_op);
+  loom_region_t* source_config = loom_kernel_def_config(source_kernel_op);
+
+  loom_value_fact_table_t source_facts = {0};
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_initialize(
+      &source_facts, build->scratch_arena, build->source_module->values.count));
+  loom_type_registry_configure_fact_context(&source_facts.context);
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_compute_region(
+      &source_facts, build->source_module, source_kernel, source_config,
+      source_kernel_op));
 
   loom_ir_remap_t remap = {0};
   IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
@@ -127,15 +141,49 @@ static iree_status_t loom_kernel_launch_config_module_build_function(
 
   loom_builder_enter_region(&builder, function_op,
                             loom_func_like_body(function));
-  const loom_region_t* source_config = loom_kernel_def_config(source_kernel_op);
   const loom_block_t* source_block =
       loom_region_const_entry_block(source_config);
-  IREE_RETURN_IF_ERROR(loom_ir_clone_block_ops(
-      &builder, source_block, &remap,
-      &(loom_ir_clone_block_options_t){.omit_terminators = true}));
-
   const loom_op_t* source_launch_config =
       loom_kernel_def_launch_config_op(source_kernel_op);
+  const loom_op_t* source_op = NULL;
+  loom_block_for_each_op(source_block, source_op) {
+    if (source_op == source_launch_config) continue;
+    bool materialize_results = source_op->result_count != 0;
+    const loom_value_id_t* source_results = loom_op_const_results(source_op);
+    for (uint16_t i = 0; i < source_op->result_count; ++i) {
+      const loom_value_id_t source_result = source_results[i];
+      materialize_results &= loom_value_facts_can_materialize_constant(
+          loom_value_fact_table_lookup(&source_facts, source_result),
+          loom_module_value_type(build->source_module, source_result));
+    }
+    if (!materialize_results) {
+      loom_op_t* cloned_op = NULL;
+      IREE_RETURN_IF_ERROR(
+          loom_ir_clone_op(&builder, source_op, &remap, &cloned_op));
+      continue;
+    }
+
+    loom_location_id_t target_location = LOOM_LOCATION_UNKNOWN;
+    IREE_RETURN_IF_ERROR(loom_ir_remap_location_id(&remap, source_op->location,
+                                                   &target_location));
+    for (uint16_t i = 0; i < source_op->result_count; ++i) {
+      const loom_value_id_t source_result = source_results[i];
+      loom_type_t target_type = {0};
+      IREE_RETURN_IF_ERROR(loom_ir_remap_type(
+          &remap, loom_module_value_type(build->source_module, source_result),
+          &target_type));
+      loom_value_id_t target_result = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_constant_build(
+          &builder, loom_value_fact_table_lookup(&source_facts, source_result),
+          target_type, target_location, &target_result));
+      IREE_RETURN_IF_ERROR(
+          loom_ir_remap_map_value(&remap, source_result, target_result));
+      IREE_RETURN_IF_ERROR(loom_kernel_launch_config_module_copy_value_name(
+          build->source_module, build->module, &remap, source_result,
+          target_result));
+    }
+  }
+
   loom_value_id_t result_values[3] = {0};
   for (uint8_t dimension = 0; dimension < IREE_ARRAYSIZE(result_values);
        ++dimension) {

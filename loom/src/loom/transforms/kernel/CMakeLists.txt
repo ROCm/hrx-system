@@ -40,9 +40,12 @@ loom_cc_library(
     loom::ops::func
     loom::ops::kernel
     loom::ops::op_defs
+    loom::ops::special_values
+    loom::ops::type_registry
     loom::rewrite::materialize
     loom::rewrite::remap
     loom::transforms::cleanup::dce
+    loom::util::fact_table
   PUBLIC
 )
 

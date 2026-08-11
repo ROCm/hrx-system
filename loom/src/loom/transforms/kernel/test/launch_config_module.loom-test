@@ -36,6 +36,14 @@ kernel.def @decode(%sequence_length: index, %batch_count: i32) {
   kernel.return
 }
 
+kernel.def @configured() {
+  %unit = index.constant 1 : index
+  %tile = config.get @model.prefill_tile : index
+  kernel.launch.config workgroups(%tile, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  kernel.return
+}
+
 // ----
 func.def public pure @prefill(%token_count: index) -> (index, index, index) {
   %unit = index.constant 1 : index
@@ -52,4 +60,10 @@ func.def public pure @decode(%sequence_length: index, %batch_count: i32) -> (ind
   %batch_count_index = index.cast %batch_count : i32 to index
   %workgroups = index.mul %sequence_length, %batch_count_index : index
   func.return %workgroups, %unit, %unit : index, index, index
+}
+
+func.def public pure @configured() -> (index, index, index) {
+  %unit = index.constant 1 : index
+  %tile = index.constant 128 : index
+  func.return %tile, %unit, %unit : index, index, index
 }

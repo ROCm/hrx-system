@@ -23,8 +23,9 @@ extern "C" {
 // Each output function is public, retains its kernel symbol name, accepts
 // exactly the kernel workload arguments, and returns the xyz workgroup count
 // as three index values. Configuration and target specialization must already
-// have selected and folded all symbolic launch dependencies, leaving workload
-// values as the only dynamic inputs. Any remaining cross-module symbol
+// have selected all symbolic launch dependencies. The normal value-fact engine
+// reifies their exact results while extracting the function, leaving workload
+// values as the only dynamic inputs. Any unresolved cross-module symbol
 // dependency fails materialization instead of being copied into the artifact.
 //
 // |source_module| is not modified. The returned module shares its Loom context
