@@ -5051,6 +5051,23 @@ static iree_status_t iree_hal_remote_server_replay_command_stream(
   return iree_ok_status();
 }
 
+// Records a serialized command stream into an unrecorded local command buffer.
+// Once recording begins, end is always paired with it so that drivers can
+// finalize or unwind any state retained before a replay failure.
+static iree_status_t iree_hal_remote_server_record_command_stream(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_hal_command_buffer_t* local_command_buffer, const uint8_t* stream_data,
+    iree_host_size_t stream_length) {
+  iree_status_t status = iree_hal_command_buffer_begin(local_command_buffer);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_server_replay_command_stream(
+        session_slot, local_command_buffer, stream_data, stream_length);
+    status = iree_status_join(
+        status, iree_hal_command_buffer_end(local_command_buffer));
+  }
+  return status;
+}
+
 //===----------------------------------------------------------------------===//
 // COMMAND_BUFFER_UPLOAD handler
 //===----------------------------------------------------------------------===//
@@ -5121,14 +5138,8 @@ static iree_status_t iree_hal_remote_server_handle_command_buffer_upload(
       IREE_HAL_QUEUE_AFFINITY_ANY, (iree_host_size_t)request->binding_capacity,
       &command_buffer);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_command_buffer_begin(command_buffer);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_server_replay_command_stream(
+    status = iree_hal_remote_server_record_command_stream(
         entry, command_buffer, stream_data, stream_length);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_command_buffer_end(command_buffer);
   }
 
   // Assign the native command buffer to the resource table.
@@ -5264,14 +5275,8 @@ static iree_status_t iree_hal_remote_server_submit_command_buffer_execute(
       IREE_HAL_COMMAND_CATEGORY_ANY, IREE_HAL_QUEUE_AFFINITY_ANY,
       op->binding_count, &local_command_buffer);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_command_buffer_begin(local_command_buffer);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_server_replay_command_stream(
+    status = iree_hal_remote_server_record_command_stream(
         session_slot, local_command_buffer, stream_data, stream_length);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_command_buffer_end(local_command_buffer);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_device_queue_execute(
