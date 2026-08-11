@@ -26,7 +26,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 34u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 35u
 
 // Sentinel for absent string-table offsets.
 #define LOOM_LOW_STRING_OFFSET_NONE LOOM_BSTRING_TABLE_OFFSET_NONE
@@ -411,6 +411,8 @@ typedef uint16_t loom_low_descriptor_flags_t;
 // Descriptor has at least one result whose storage begins in the packet Pre
 // phase before untied input reads end.
 #define LOOM_LOW_DESCRIPTOR_FLAG_EARLY_CLOBBER ((uint16_t)1u << 5)
+// Descriptor ends in a variadic packet operand row.
+#define LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS ((uint16_t)1u << 6)
 
 // Target-neutral semantic classes attached to generated low descriptors.
 // Multiple classes may be present when a packet contributes to several
@@ -834,6 +836,9 @@ typedef struct loom_low_descriptor_t {
   uint16_t operand_count;
   // Number of leading operand rows that define results.
   uint16_t result_count;
+  // Minimum packet operand count. Fixed descriptors accept exactly this count;
+  // variadic descriptors accept this count or greater.
+  uint16_t minimum_packet_operand_count;
   // First immediate row for this descriptor.
   uint32_t immediate_start;
   // Number of immediate rows for this descriptor.
@@ -866,6 +871,9 @@ typedef struct loom_low_descriptor_t {
   // LOOM_LOW_ASM_FORM_ORDINAL_NONE when no unambiguous form exists.
   uint32_t canonical_asm_form_ordinal;
 } loom_low_descriptor_t;
+
+static_assert(sizeof(loom_low_descriptor_t) == 112,
+              "loom_low_descriptor_t must be 112 bytes");
 
 typedef struct loom_low_operand_form_match_t {
   // Descriptor-local operand index whose value facts select this form.
@@ -1323,31 +1331,12 @@ bool loom_low_descriptor_operand_maps_to_packet_operand(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint16_t descriptor_operand_index);
 
-typedef struct loom_low_packet_operand_span_t {
-  // First packet operand represented by the descriptor operand row.
-  uint16_t start;
-  // Number of packet operands represented by the row.
-  uint16_t count;
-} loom_low_packet_operand_span_t;
-
 // Returns true when |descriptor| ends in a variadic packet operand row.
-bool loom_low_descriptor_has_variadic_operands(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor);
-
-// Returns the minimum number of packet operands accepted by |descriptor|.
-// Descriptors without a variadic suffix accept exactly this count.
-uint16_t loom_low_descriptor_minimum_packet_operand_count(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor);
-
-// Returns the packet operand span represented by |descriptor_operand_index|.
-// The descriptor operand must map to a packet operand and
-// |packet_operand_count| must satisfy the descriptor cardinality contract.
-loom_low_packet_operand_span_t loom_low_descriptor_operand_packet_span(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, uint16_t descriptor_operand_index,
-    uint16_t packet_operand_count);
+static inline bool loom_low_descriptor_has_variadic_operands(
+    const loom_low_descriptor_t* descriptor) {
+  return iree_any_bit_set(descriptor->flags,
+                          LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS);
+}
 
 // Returns the first low packet resource operand omitted from target assembly,
 // or NULL when |descriptor| has no implicit resource operand.

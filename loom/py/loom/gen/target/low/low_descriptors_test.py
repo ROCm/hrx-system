@@ -350,6 +350,15 @@ def test_compiler_descriptor_rows_span_source_tables() -> None:
     compiled = compiler.compile_descriptor_set(TEST_LOW_CORE_DESCRIPTOR_SET)
 
     assert len(compiled.descriptor_rows) == len(compiled.descriptors)
+    rows_by_key = {
+        descriptor.key: row
+        for descriptor, row in zip(
+            compiled.descriptors,
+            compiled.descriptor_rows,
+            strict=True,
+        )
+    }
+    assert rows_by_key["test.add.i32"]["minimum_packet_operand_count"] == 2
     for descriptor, row in zip(
         compiled.descriptors,
         compiled.descriptor_rows,
@@ -1414,7 +1423,11 @@ def test_generator_emits_trailing_variadic_operand_segment() -> None:
     assert compiled.asm_forms[0].operand_segment_start == 0
     assert compiled.asm_operand_segments[0].operand_count == 2
     assert compiled.asm_operand_segments[0].has_variadic_operand
+    assert compiled.descriptor_rows[0]["minimum_packet_operand_count"] == 1
+    assert DescriptorFlag.VARIADIC_OPERANDS in compiled.descriptors[0].flags
     assert "LOOM_LOW_OPERAND_FLAG_VARIADIC" in generated.source
+    assert ".minimum_packet_operand_count = 1," in generated.source
+    assert "LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS" in generated.source
     assert "static const loom_low_asm_operand_segment_t kTestLowCoreAsmOperandSegments[]" in generated.source
     assert ".delimiter = LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_PAREN," in generated.source
     assert ".flags = LOOM_LOW_ASM_OPERAND_SEGMENT_FLAG_VARIADIC," in generated.source

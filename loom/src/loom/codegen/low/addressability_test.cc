@@ -171,6 +171,7 @@ void InitializeAddressabilityTestState(
       /*.operand_start=*/0,
       /*.operand_count=*/IREE_ARRAYSIZE(state->operands),
       /*.result_count=*/1,
+      /*.minimum_packet_operand_count=*/1,
   };
 
   state->nodes[0].op = &state->packet_op;

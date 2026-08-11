@@ -233,6 +233,7 @@ void InitializeTestTables(TestTables* tables) {
   tables->descriptors[1].operand_start = 1;
   tables->descriptors[1].operand_count = 3;
   tables->descriptors[1].result_count = 1;
+  tables->descriptors[1].minimum_packet_operand_count = 2;
   tables->descriptors[1].schedule_class_id = 1;
   tables->descriptors[1].flags = LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE;
   tables->descriptors[1].canonical_asm_form_ordinal =
@@ -829,6 +830,7 @@ TEST(LowDescriptorsTest, AcceptsImplicitRowsWithImplicitFlag) {
   tables.operands[2].source_value_index = LOOM_LOW_ID_NONE;
   tables.operands[2].flags = LOOM_LOW_OPERAND_FLAG_IMPLICIT;
   tables.operands[3].source_value_index = 0;
+  tables.descriptors[1].minimum_packet_operand_count = 1;
 
   IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
 }
@@ -1172,6 +1174,8 @@ TEST(LowDescriptorsTest, AcceptsTrailingVariadicOperandSegment) {
   InitializeTestTables(&tables);
   AddAsmForms(&tables);
   tables.operands[3].flags = LOOM_LOW_OPERAND_FLAG_VARIADIC;
+  tables.descriptors[1].minimum_packet_operand_count = 1;
+  tables.descriptors[1].flags |= LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS;
   tables.asm_operand_segments[0].operand_count = 2;
   tables.asm_operand_segments[0].delimiter =
       LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_PAREN;
@@ -1182,6 +1186,34 @@ TEST(LowDescriptorsTest, AcceptsTrailingVariadicOperandSegment) {
   tables.set.asm_operand_segment_count = 1;
 
   IREE_EXPECT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsIncorrectMinimumPacketOperandCount) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptors[1].minimum_packet_operand_count = 1;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsVariadicDescriptorFlagWithoutOperand) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptors[1].flags |= LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsVariadicOperandWithoutDescriptorFlag) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[3].flags = LOOM_LOW_OPERAND_FLAG_VARIADIC;
+  tables.descriptors[1].minimum_packet_operand_count = 1;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
 }
 
 TEST(LowDescriptorsTest, RejectsNonTrailingVariadicOperand) {

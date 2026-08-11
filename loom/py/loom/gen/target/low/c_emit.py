@@ -247,6 +247,7 @@ def _descriptor_row_lines(
             f".operand_start = {descriptor_rows[i]['operand_start']},",
             f".operand_count = {descriptor_rows[i]['operand_count']},",
             f".result_count = {descriptor_rows[i]['result_count']},",
+            f".minimum_packet_operand_count = {descriptor_rows[i]['minimum_packet_operand_count']},",
             f".immediate_start = {descriptor_rows[i]['immediate_start']},",
             f".immediate_count = {descriptor_rows[i]['immediate_count']},",
             f".effect_start = {descriptor_rows[i]['effect_start']},",

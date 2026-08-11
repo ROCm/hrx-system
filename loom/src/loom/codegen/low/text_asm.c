@@ -211,11 +211,10 @@ static iree_status_t loom_low_descriptor_text_asm_make_packet(
       .descriptor_key = descriptor_key,
       .mnemonic = mnemonic,
       .result_count = asm_form->result_operand_index_count,
-      .minimum_operand_count = loom_low_descriptor_minimum_packet_operand_count(
-          descriptor_set, descriptor),
+      .minimum_operand_count = descriptor->minimum_packet_operand_count,
       .operand_segment_count = asm_form->operand_segment_count,
       .has_variadic_operands =
-          loom_low_descriptor_has_variadic_operands(descriptor_set, descriptor),
+          loom_low_descriptor_has_variadic_operands(descriptor),
       .asm_immediate_count = asm_form->immediate_count,
       .immediate_count = descriptor->immediate_count,
       .immediate_attribute_field_index = builds_as_const

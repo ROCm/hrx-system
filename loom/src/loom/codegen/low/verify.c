@@ -806,45 +806,6 @@ static iree_status_t loom_low_verify_descriptor_immediates(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_verify_descriptor_packet_operand_count(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, uint32_t* out_minimum_count,
-    bool* out_is_variadic) {
-  *out_minimum_count = 0;
-  *out_is_variadic = false;
-  for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
-       ++i) {
-    const uint32_t operand_row = descriptor->operand_start + i;
-    if (operand_row >= descriptor_set->operand_count) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "low descriptor operand row %" PRIu32
-                              " is out of range",
-                              operand_row);
-    }
-    const loom_low_operand_t* operand = &descriptor_set->operands[operand_row];
-    switch (operand->role) {
-      case LOOM_LOW_OPERAND_ROLE_OPERAND:
-      case LOOM_LOW_OPERAND_ROLE_PREDICATE:
-      case LOOM_LOW_OPERAND_ROLE_RESOURCE:
-        if (iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_VARIADIC)) {
-          *out_is_variadic = true;
-        } else {
-          ++*out_minimum_count;
-        }
-        break;
-      case LOOM_LOW_OPERAND_ROLE_IMPLICIT:
-        break;
-      default:
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "low descriptor operand row %" PRIu32
-            " has role %u that cannot map to a packet operand",
-            operand_row, (unsigned)operand->role);
-    }
-  }
-  return iree_ok_status();
-}
-
 static bool loom_low_verify_constraint_requires_matching_types(
     loom_low_constraint_kind_t kind) {
   return kind == LOOM_LOW_CONSTRAINT_KIND_TIED ||
@@ -1365,8 +1326,12 @@ static iree_status_t loom_low_verify_descriptor_register_field(
 static iree_status_t loom_low_verify_descriptor_registers(
     loom_low_function_verify_state_t* function_state, const loom_op_t* op,
     const loom_low_descriptor_t* descriptor) {
+  const bool has_variadic_operands =
+      loom_low_descriptor_has_variadic_operands(descriptor);
+  const uint16_t fixed_descriptor_operand_end =
+      descriptor->operand_count - (has_variadic_operands ? 1 : 0);
   uint16_t operand_field_index = 0;
-  for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
+  for (uint16_t i = 0; i < fixed_descriptor_operand_end; ++i) {
     const bool is_result = i < descriptor->result_count;
     uint16_t field_index = i;
     if (!is_result) {
@@ -1385,24 +1350,23 @@ static iree_status_t loom_low_verify_descriptor_registers(
         continue;
       }
       field_index = operand_field_index++;
-      if (iree_any_bit_set(descriptor_operand->flags,
-                           LOOM_LOW_OPERAND_FLAG_VARIADIC)) {
-        for (; field_index < op->operand_count; ++field_index) {
-          IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_register_field(
-              function_state, op, descriptor, i, /*is_result=*/false,
-              field_index));
-          if (loom_low_verify_should_stop(function_state->state)) {
-            return iree_ok_status();
-          }
-        }
-        operand_field_index = op->operand_count;
-        continue;
-      }
     }
     IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_register_field(
         function_state, op, descriptor, i, is_result, field_index));
     if (loom_low_verify_should_stop(function_state->state)) {
       return iree_ok_status();
+    }
+  }
+  if (has_variadic_operands) {
+    const uint16_t descriptor_operand_index = fixed_descriptor_operand_end;
+    for (uint16_t field_index = descriptor->minimum_packet_operand_count;
+         field_index < op->operand_count; ++field_index) {
+      IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_register_field(
+          function_state, op, descriptor, descriptor_operand_index,
+          /*is_result=*/false, field_index));
+      if (loom_low_verify_should_stop(function_state->state)) {
+        return iree_ok_status();
+      }
     }
   }
   return iree_ok_status();
@@ -1493,7 +1457,11 @@ static iree_status_t loom_low_verify_descriptor_register_parts(
     const loom_low_descriptor_t* descriptor) {
   const loom_low_descriptor_set_t* descriptor_set =
       function_state->target->descriptor_set;
-  for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
+  const bool has_variadic_operands =
+      loom_low_descriptor_has_variadic_operands(descriptor);
+  const uint16_t fixed_descriptor_operand_end =
+      descriptor->operand_count - (has_variadic_operands ? 1 : 0);
+  for (uint16_t i = descriptor->result_count; i < fixed_descriptor_operand_end;
        ++i) {
     const uint32_t operand_row = descriptor->operand_start + i;
     const loom_low_operand_t* descriptor_operand =
@@ -1502,16 +1470,43 @@ static iree_status_t loom_low_verify_descriptor_register_parts(
       continue;
     }
 
-    const loom_low_packet_operand_span_t packet_span =
-        loom_low_descriptor_operand_packet_span(descriptor_set, descriptor, i,
-                                                op->operand_count);
-    for (uint16_t j = 0; j < packet_span.count; ++j) {
-      loom_low_packet_field_t field = {
-          .field_name = loom_low_descriptor_set_string(
-              descriptor_set, descriptor_operand->field_name_string_offset),
-      };
+    loom_low_packet_field_t field = {
+        .field_name = loom_low_descriptor_set_string(
+            descriptor_set, descriptor_operand->field_name_string_offset),
+    };
+    IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_packet_operand_field(
+        function_state, op, descriptor_operand->source_value_index, &field));
+    const loom_low_register_part_mask_t required_mask =
+        loom_low_verify_descriptor_operand_part_mask(
+            function_state, descriptor_operand, field.type);
+    if (required_mask == 0) {
+      continue;
+    }
+    const loom_low_register_part_mask_t defined_mask =
+        loom_low_verify_value_defined_mask(function_state, field.value_id);
+    if ((defined_mask & required_mask) == required_mask) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(loom_low_verify_emit_undefined_register_part(
+        function_state, op, descriptor_key, field.field_ref, field.field_name,
+        required_mask, defined_mask));
+    if (loom_low_verify_should_stop(function_state->state)) {
+      return iree_ok_status();
+    }
+  }
+
+  if (has_variadic_operands) {
+    const loom_low_operand_t* descriptor_operand =
+        &descriptor_set->operands[descriptor->operand_start +
+                                  fixed_descriptor_operand_end];
+    const iree_string_view_t field_name = loom_low_descriptor_set_string(
+        descriptor_set, descriptor_operand->field_name_string_offset);
+    for (uint16_t packet_operand_index =
+             descriptor->minimum_packet_operand_count;
+         packet_operand_index < op->operand_count; ++packet_operand_index) {
+      loom_low_packet_field_t field = {.field_name = field_name};
       IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_packet_operand_field(
-          function_state, op, packet_span.start + j, &field));
+          function_state, op, packet_operand_index, &field));
       const loom_low_register_part_mask_t required_mask =
           loom_low_verify_descriptor_operand_part_mask(
               function_state, descriptor_operand, field.type);
@@ -1714,11 +1709,10 @@ static iree_status_t loom_low_verify_packet(
   }
 
   const uint32_t expected_result_count = descriptor->result_count;
-  uint32_t minimum_operand_count = 0;
-  bool has_variadic_operands = false;
-  IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_packet_operand_count(
-      descriptor_set, descriptor, &minimum_operand_count,
-      &has_variadic_operands));
+  const uint32_t minimum_operand_count =
+      descriptor->minimum_packet_operand_count;
+  const bool has_variadic_operands =
+      loom_low_descriptor_has_variadic_operands(descriptor);
   const uint32_t packet_start_error_count =
       function_state->state->result->error_count;
   if (op->result_count != expected_result_count) {

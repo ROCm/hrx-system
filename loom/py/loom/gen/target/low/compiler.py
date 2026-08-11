@@ -208,7 +208,10 @@ def derive_instruction_classes(
     return tuple(instruction_class for instruction_class in InstructionClass if instruction_class in classes)
 
 
-def derive_descriptor_projections(descriptor: Descriptor) -> Descriptor:
+def derive_descriptor_projections(
+    descriptor: Descriptor,
+    operand_layout: validation.DescriptorOperandLayout,
+) -> Descriptor:
     """Projects validated descriptor constraints onto compact runtime flags."""
 
     has_barrier_effect = any(effect.kind is EffectKind.BARRIER for effect in descriptor.effects)
@@ -225,6 +228,12 @@ def derive_descriptor_projections(descriptor: Descriptor) -> Descriptor:
         derived_flags.append(DescriptorFlag.BARRIER)
     if has_early_clobber_constraint and not has_early_clobber_flag:
         derived_flags.append(DescriptorFlag.EARLY_CLOBBER)
+    has_variadic_operand = operand_layout.has_variadic_operands
+    has_variadic_flag = DescriptorFlag.VARIADIC_OPERANDS in descriptor.flags
+    if has_variadic_flag and not has_variadic_operand:
+        raise ValueError(f"descriptor '{descriptor.key}' has the variadic-operands flag without a variadic operand")
+    if has_variadic_operand and not has_variadic_flag:
+        derived_flags.append(DescriptorFlag.VARIADIC_OPERANDS)
 
     operand_flags: list[list[OperandFlag]] = []
     for operand in descriptor.operands:
@@ -378,8 +387,8 @@ def _compile_operand_form(
     replacement_ordinal = descriptor_ordinals[operand_form.replacement_descriptor]
     replacement = selected_descriptors[replacement_ordinal]
     _replacement_operand_indices, replacement_immediate_indices = _index_descriptor_fields(replacement)
-    source_result_count = validation.validate_descriptor_operands(descriptor)
-    replacement_result_count = validation.validate_descriptor_operands(replacement)
+    source_result_count = validation.validate_descriptor_operands(descriptor).result_count
+    replacement_result_count = validation.validate_descriptor_operands(replacement).result_count
     if replacement_result_count != source_result_count:
         raise ValueError(f"descriptor '{descriptor.key}' operand form replacement '{replacement.key}' must have the same result count")
     for i in range(source_result_count):
@@ -867,13 +876,14 @@ def compile_descriptor_set(
     enum_domain_inputs = _dedupe_by_name(spec.enum_domains, lambda item: item.name)
     _dedupe_by_name(spec.descriptors, lambda item: item.key)
 
-    result_counts_by_descriptor: dict[str, int] = {}
+    operand_layouts_by_descriptor: dict[str, validation.DescriptorOperandLayout] = {}
     rematerializable_results_by_descriptor: dict[str, tuple[int, ...]] = {}
     source_value_indices_by_descriptor: dict[str, tuple[int | None, ...]] = {}
     projected_descriptors_by_key: dict[str, Descriptor] = {}
     for descriptor in spec.descriptors:
-        result_count = validation.validate_descriptor_operands(descriptor)
-        result_counts_by_descriptor[descriptor.key] = result_count
+        operand_layout = validation.validate_descriptor_operands(descriptor)
+        operand_layouts_by_descriptor[descriptor.key] = operand_layout
+        result_count = operand_layout.result_count
         source_value_indices_by_descriptor[descriptor.key] = validation.descriptor_operand_source_value_indices(
             descriptor,
             result_count,
@@ -884,7 +894,10 @@ def compile_descriptor_set(
             descriptor,
             register_part_inputs,
         )
-        projected_descriptors_by_key[descriptor.key] = derive_descriptor_projections(descriptor)
+        projected_descriptors_by_key[descriptor.key] = derive_descriptor_projections(
+            descriptor,
+            operand_layout,
+        )
     validation.validate_physical_descriptor_set(spec)
 
     selected_descriptors = [projected_descriptors_by_key[descriptor.key] for descriptor in _select_descriptors(spec, allowlist)]
@@ -910,7 +923,7 @@ def compile_descriptor_set(
         raise ValueError(f"descriptor set '{spec.key}' requires unknown schedule classes: {', '.join(unknown_required_schedule_names)}")
     used_enum_domain_names: set[str] = set()
     for descriptor in selected_descriptors:
-        result_count = result_counts_by_descriptor[descriptor.key]
+        result_count = operand_layouts_by_descriptor[descriptor.key].result_count
         validation.validate_descriptor_encoding_fields(descriptor)
         validation.validate_descriptor_storage_leases(descriptor, result_count)
         if descriptor.encoding_id < 0 or descriptor.encoding_id > LOW_DESCRIPTOR_ENCODING_ID_NONE:
@@ -1278,7 +1291,8 @@ def compile_descriptor_set(
             {
                 "operand_start": operand_start,
                 "operand_count": len(descriptor.operands),
-                "result_count": result_counts_by_descriptor[descriptor.key],
+                "result_count": operand_layouts_by_descriptor[descriptor.key].result_count,
+                "minimum_packet_operand_count": operand_layouts_by_descriptor[descriptor.key].minimum_packet_operand_count,
                 "immediate_start": immediate_start,
                 "immediate_count": len(descriptor.immediates),
                 "effect_start": effect_start,

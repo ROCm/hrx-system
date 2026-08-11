@@ -263,23 +263,32 @@ static const uint16_t* loom_low_schedule_index_descriptor_operands(
     const loom_low_descriptor_t* descriptor, uint16_t operand_count) {
   if (descriptor == NULL) return NULL;
   IREE_ASSERT_LE(operand_count, state->descriptor_operands.capacity);
+  const bool has_variadic_operands =
+      loom_low_descriptor_has_variadic_operands(descriptor);
+  const uint16_t fixed_descriptor_operand_end =
+      descriptor->operand_count - (has_variadic_operands ? 1 : 0);
   uint16_t indexed_operand_count = 0;
   for (uint16_t descriptor_operand_index = descriptor->result_count;
-       descriptor_operand_index < descriptor->operand_count;
+       descriptor_operand_index < fixed_descriptor_operand_end;
        ++descriptor_operand_index) {
     const loom_low_operand_t* operand =
         &state->target.descriptor_set
              ->operands[descriptor->operand_start + descriptor_operand_index];
     if (!loom_low_operand_role_is_packet_operand(operand->role)) continue;
-    const loom_low_packet_operand_span_t packet_span =
-        loom_low_descriptor_operand_packet_span(
-            state->target.descriptor_set, descriptor, descriptor_operand_index,
-            operand_count);
-    for (uint16_t i = 0; i < packet_span.count; ++i) {
-      state->descriptor_operands.indices[packet_span.start + i] =
-          descriptor_operand_index;
+    IREE_ASSERT_LT(operand->source_value_index, operand_count);
+    state->descriptor_operands.indices[operand->source_value_index] =
+        descriptor_operand_index;
+    ++indexed_operand_count;
+  }
+  if (has_variadic_operands) {
+    IREE_ASSERT_LE(descriptor->minimum_packet_operand_count, operand_count);
+    for (uint16_t packet_operand_index =
+             descriptor->minimum_packet_operand_count;
+         packet_operand_index < operand_count; ++packet_operand_index) {
+      state->descriptor_operands.indices[packet_operand_index] =
+          fixed_descriptor_operand_end;
+      ++indexed_operand_count;
     }
-    indexed_operand_count += packet_span.count;
   }
   IREE_ASSERT_EQ(indexed_operand_count, operand_count);
   return state->descriptor_operands.indices;

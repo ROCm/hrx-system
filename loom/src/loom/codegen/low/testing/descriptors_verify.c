@@ -814,8 +814,7 @@ static iree_status_t loom_low_verify_asm_form(
           " marks a variadic segment whose final descriptor operand is fixed",
           asm_form_index);
     }
-  } else if (loom_low_descriptor_has_variadic_operands(descriptor_set,
-                                                       descriptor)) {
+  } else if (loom_low_descriptor_has_variadic_operands(descriptor)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low asm form %" PRIu32
                             " does not segment its variadic descriptor operand",
@@ -1773,6 +1772,8 @@ static iree_status_t loom_low_verify_descriptor_operand_roles(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint32_t descriptor_index) {
   uint16_t packet_operand_index = 0;
+  uint16_t minimum_packet_operand_count = 0;
+  bool has_variadic_operand = false;
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
     const uint32_t operand_index = descriptor->operand_start + i;
     const loom_low_operand_t* operand =
@@ -1786,6 +1787,7 @@ static iree_status_t loom_low_verify_descriptor_operand_roles(
           descriptor_index, i);
     }
     if (iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_VARIADIC)) {
+      has_variadic_operand = true;
       if (i != descriptor->operand_count - 1 ||
           !loom_low_operand_role_is_packet_operand(operand->role)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1865,8 +1867,28 @@ static iree_status_t loom_low_verify_descriptor_operand_roles(
             descriptor_index, i, operand->source_value_index,
             packet_operand_index);
       }
+      if (!iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_VARIADIC)) {
+        ++minimum_packet_operand_count;
+      }
       ++packet_operand_index;
     }
+  }
+  if (descriptor->minimum_packet_operand_count !=
+      minimum_packet_operand_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low descriptor %" PRIu32 " minimum packet operand count %" PRIu16
+        " should be %" PRIu16,
+        descriptor_index, descriptor->minimum_packet_operand_count,
+        minimum_packet_operand_count);
+  }
+  if (loom_low_descriptor_has_variadic_operands(descriptor) !=
+      has_variadic_operand) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low descriptor %" PRIu32
+        " variadic descriptor flag does not match its operand rows",
+        descriptor_index);
   }
   return iree_ok_status();
 }
@@ -2136,7 +2158,8 @@ static iree_status_t loom_low_verify_descriptor(
           LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR |
           LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE |
           LOOM_LOW_DESCRIPTOR_FLAG_PSEUDO | LOOM_LOW_DESCRIPTOR_FLAG_BARRIER |
-          LOOM_LOW_DESCRIPTOR_FLAG_EARLY_CLOBBER,
+          LOOM_LOW_DESCRIPTOR_FLAG_EARLY_CLOBBER |
+          LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS,
       "descriptor", descriptor_index));
   iree_string_view_t descriptor_key = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(

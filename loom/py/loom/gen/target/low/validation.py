@@ -597,12 +597,20 @@ def hazard_reference_count(hazard: Hazard) -> int:
     return sum(reference is not None for reference in (hazard.resource, hazard.counter_id, hazard.target_id))
 
 
-def validate_descriptor_operands(descriptor: Descriptor) -> int:
+@dataclass(frozen=True, slots=True)
+class DescriptorOperandLayout:
+    result_count: int
+    minimum_packet_operand_count: int
+    has_variadic_operands: bool
+
+
+def validate_descriptor_operands(descriptor: Descriptor) -> DescriptorOperandLayout:
     validate_u16(
         len(descriptor.operands),
         f"descriptor '{descriptor.key}' operand count",
     )
     result_count = 0
+    minimum_packet_operand_count = 0
     seen_non_result = False
     variadic_operand_index: int | None = None
     for operand_index, operand in enumerate(descriptor.operands):
@@ -631,6 +639,8 @@ def validate_descriptor_operands(descriptor: Descriptor) -> int:
                 raise ValueError(f"descriptor '{descriptor.key}' variadic operand '{operand.field_name}' has unsupported flags: {names}")
             if operand.encoding_field_id != 0 or operand.register_part is not None:
                 raise ValueError(f"descriptor '{descriptor.key}' variadic operand '{operand.field_name}' cannot participate in a fixed instruction encoding")
+        elif operand_role_is_packet_input(operand.role):
+            minimum_packet_operand_count += 1
         if not operand.reg_alts:
             raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' has no register-class alternatives")
         validate_u16(
@@ -684,7 +694,11 @@ def validate_descriptor_operands(descriptor: Descriptor) -> int:
             raise ValueError(f"descriptor '{descriptor.key}' with variadic operands cannot declare storage leases")
         if descriptor.operand_forms:
             raise ValueError(f"descriptor '{descriptor.key}' with variadic operands cannot declare operand forms")
-    return result_count
+    return DescriptorOperandLayout(
+        result_count=result_count,
+        minimum_packet_operand_count=minimum_packet_operand_count,
+        has_variadic_operands=variadic_operand_index is not None,
+    )
 
 
 def validate_register_part(part: RegisterPart) -> None:

@@ -251,6 +251,7 @@ TEST(LowDescriptorTest, IndexesPacketOperandRoles) {
   descriptor.operand_start = 0;
   descriptor.result_count = 1;
   descriptor.operand_count = IREE_ARRAYSIZE(operands);
+  descriptor.minimum_packet_operand_count = 4;
   descriptor.constraint_start = 0;
   descriptor.constraint_count = IREE_ARRAYSIZE(constraints);
 

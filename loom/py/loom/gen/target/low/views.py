@@ -97,9 +97,12 @@ def _validate_view_descriptors_match_storage(
     projected_descriptors: list[Descriptor] = []
     for view_descriptor, storage_descriptor_ordinal in zip(view_spec.descriptors, descriptor_ordinals, strict=True):
         storage_descriptor = compiled.descriptors[storage_descriptor_ordinal]
-        validation.validate_descriptor_operands(view_descriptor)
+        operand_layout = validation.validate_descriptor_operands(view_descriptor)
         validation.validate_descriptor_constraints(view_descriptor)
-        projected_view_descriptor = compiler.derive_descriptor_projections(view_descriptor)
+        projected_view_descriptor = compiler.derive_descriptor_projections(
+            view_descriptor,
+            operand_layout,
+        )
         projected_descriptors.append(projected_view_descriptor)
         if (
             replace(
