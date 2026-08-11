@@ -873,6 +873,9 @@ static iree_status_t loom_print_low_asm_region_body(
         loom_print_block_needs_synthetic_label(ctx, region, block) ||
         (block->arg_count != 0 && !block_args_declared_by_parent);
     if (needs_label) {
+      if (iree_any_bit_set(block->flags, LOOM_BLOCK_FLAG_LEADING_BLANK_LINE)) {
+        IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '\n'));
+      }
       IREE_RETURN_IF_ERROR(loom_print_block_label_line_with_options(
           ctx, region, block, !block_args_declared_by_parent));
     }
@@ -883,6 +886,10 @@ static iree_status_t loom_print_low_asm_region_body(
           loom_print_should_elide_implicit_terminator(region_descriptor,
                                                       current_op)) {
         continue;
+      }
+      if (iree_any_bit_set(current_op->flags,
+                           LOOM_OP_FLAG_LEADING_BLANK_LINE)) {
+        IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '\n'));
       }
       IREE_RETURN_IF_ERROR(loom_print_op_comments(ctx, current_op));
       loom_text_low_asm_statement_t statement = {0};

@@ -113,6 +113,8 @@ struct loom_parsed_op_t {
   uint8_t operand_segment_count;
   uint8_t operand_segment_capacity;
   uint8_t instance_flags;
+  // Non-semantic source presentation copied to the finalized operation.
+  loom_op_flags_t source_flags;
   // True when |effective_traits| replaces the operation's static traits.
   bool has_effective_traits;
 

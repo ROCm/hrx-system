@@ -703,6 +703,7 @@ static iree_status_t loom_parse_low_asm_return(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low asm return builder returned no operation");
   }
+  op->flags |= parsed_spans->source_flags;
   return loom_module_attach_op_comments(parser->module, op, comments,
                                         comment_count);
 }
@@ -793,6 +794,7 @@ static iree_status_t loom_parse_low_asm_instruction(
       return iree_ok_status();
     }
   }
+  op->flags |= parsed_spans->source_flags;
   return loom_module_attach_op_comments(parser->module, op, comments,
                                         comment_count);
 }
@@ -847,11 +849,15 @@ static iree_status_t loom_parse_low_asm_packet(
   loom_token_t start_token = loom_tokenizer_peek(&parser->tokenizer);
   const iree_string_view_t* comments = NULL;
   iree_host_size_t comment_count = 0;
+  bool leading_blank_line = false;
   loom_tokenizer_take_pending_comments(&parser->tokenizer, &comments,
-                                       &comment_count);
+                                       &comment_count, &leading_blank_line);
 
   loom_parsed_op_t* parsed_spans = NULL;
   IREE_RETURN_IF_ERROR(loom_parser_acquire_parsed_op(parser, &parsed_spans));
+  if (leading_blank_line) {
+    parsed_spans->source_flags |= LOOM_OP_FLAG_LEADING_BLANK_LINE;
+  }
   iree_status_t status =
       loom_parse_low_asm_packet_impl(parser, descriptor_set, start_token,
                                      comments, comment_count, parsed_spans);

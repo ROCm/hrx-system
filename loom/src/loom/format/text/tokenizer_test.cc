@@ -476,12 +476,54 @@ TEST(Tokenizer, CollectsPendingCommentsExactly) {
   EXPECT_EQ(token.kind, LOOM_TOKEN_INTEGER);
   const iree_string_view_t* comments = NULL;
   iree_host_size_t comment_count = 0;
-  loom_tokenizer_take_pending_comments(t.get(), &comments, &comment_count);
+  bool leading_blank_line = true;
+  loom_tokenizer_take_pending_comments(t.get(), &comments, &comment_count,
+                                       &leading_blank_line);
   ASSERT_EQ(comment_count, 2u);
+  EXPECT_FALSE(leading_blank_line);
   EXPECT_TRUE(iree_string_view_equal(comments[0], IREE_SV(" first")));
   EXPECT_TRUE(iree_string_view_equal(comments[1], IREE_SV("second")));
-  loom_tokenizer_take_pending_comments(t.get(), &comments, &comment_count);
+  loom_tokenizer_take_pending_comments(t.get(), &comments, &comment_count,
+                                       &leading_blank_line);
   EXPECT_EQ(comment_count, 0u);
+  EXPECT_FALSE(leading_blank_line);
+}
+
+TEST(Tokenizer, DetectsLeadingBlankLineBeforeCommentsOrToken) {
+  ScopedTokenizer t(
+      "0\n"
+      "1\n"
+      "\n"
+      "// grouped\n"
+      "2\n"
+      "\n"
+      "\n"
+      "3");
+  const iree_string_view_t* comments = NULL;
+  iree_host_size_t comment_count = 0;
+  bool leading_blank_line = false;
+
+  EXPECT_EQ(t.next().kind, LOOM_TOKEN_INTEGER);
+  EXPECT_EQ(t.peek().line, 2u);
+  loom_tokenizer_take_pending_comments(t.get(), &comments, &comment_count,
+                                       &leading_blank_line);
+  EXPECT_EQ(comment_count, 0u);
+  EXPECT_FALSE(leading_blank_line);
+
+  EXPECT_EQ(t.next().kind, LOOM_TOKEN_INTEGER);
+  EXPECT_EQ(t.peek().line, 5u);
+  loom_tokenizer_take_pending_comments(t.get(), &comments, &comment_count,
+                                       &leading_blank_line);
+  ASSERT_EQ(comment_count, 1u);
+  EXPECT_TRUE(leading_blank_line);
+  EXPECT_TRUE(iree_string_view_equal(comments[0], IREE_SV(" grouped")));
+
+  EXPECT_EQ(t.next().kind, LOOM_TOKEN_INTEGER);
+  EXPECT_EQ(t.peek().line, 8u);
+  loom_tokenizer_take_pending_comments(t.get(), &comments, &comment_count,
+                                       &leading_blank_line);
+  EXPECT_EQ(comment_count, 0u);
+  EXPECT_TRUE(leading_blank_line);
 }
 
 TEST(Tokenizer, EmptyInput) {

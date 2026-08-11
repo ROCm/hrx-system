@@ -146,6 +146,34 @@ TEST_F(LowAsmPrinterTest, PrintsDescriptorBackedPacketRegion) {
   loom_module_free(module);
 }
 
+TEST_F(LowAsmPrinterTest, CanonicalizesVerticalSourceGrouping) {
+  const char* source =
+      "low.func.def target<test.low.core> @grouped() -> "
+      "(reg<test.i32>) asm {\n"
+      "  %c0 = test.const.i32 7\n"
+      "\n"
+      "  // arithmetic\n"
+      "  %sum = test.add.i32 %c0, %c0\n"
+      "\n"
+      "  return %sum\n"
+      "}\n";
+  loom_module_t* module = ParseOk(
+      "low.func.def target<test.low.core> @grouped() -> "
+      "(reg<test.i32>) asm {\n"
+      "  %c0 = test.const.i32 7\n"
+      "\n"
+      "\n"
+      "  // arithmetic\n"
+      "  %sum = test.add.i32 %c0, %c0\n"
+      "\n"
+      "\n"
+      "  return %sum\n"
+      "}\n");
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(PrintModule(module), source);
+  loom_module_free(module);
+}
+
 TEST_F(LowAsmPrinterTest, PreservesAuthoredAsmChoice) {
   const char* source =
       "low.func.def target<test.low.core> @assembly("

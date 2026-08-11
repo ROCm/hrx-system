@@ -685,6 +685,43 @@ TEST_F(ParserTest, OperationAndBlockCommentsRoundTrip) {
             "}\n");
 }
 
+TEST_F(ParserTest, CanonicalizesVerticalSourceGrouping) {
+  std::string text = RoundTrip(
+      "test.func @grouped() {\n"
+      "\n"
+      "\n"
+      "  // explicit entry block\n"
+      "  ^entry:\n"
+      "  %zero = test.constant 0 : i32\n"
+      "  %one = test.constant 1 : i32\n"
+      "\n"
+      "\n"
+      "  // final value\n"
+      "  %two = test.constant 2 : i32\n"
+      "\n"
+      "\n"
+      "  test.yield\n"
+      "}\n"
+      "\n"
+      "\n"
+      "test.decl @after()\n");
+  EXPECT_EQ(text,
+            "test.func @grouped() {\n"
+            "\n"
+            "// explicit entry block\n"
+            "^entry:\n"
+            "  %zero = test.constant 0 : i32\n"
+            "  %one = test.constant 1 : i32\n"
+            "\n"
+            "  // final value\n"
+            "  %two = test.constant 2 : i32\n"
+            "\n"
+            "  test.yield\n"
+            "}\n"
+            "\n"
+            "test.decl @after()\n");
+}
+
 TEST_F(ParserTest, Constant) {
   std::string text = RoundTrip("%c = test.constant 42 : i32\n");
   EXPECT_NE(text.find("test.constant 42 : i32"), std::string::npos);
