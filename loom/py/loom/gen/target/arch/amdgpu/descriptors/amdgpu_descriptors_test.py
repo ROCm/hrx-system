@@ -88,14 +88,14 @@ def test_storage_generation_reuses_parsed_isa_for_declared_views() -> None:
         descriptor_count = 2 if target == view_target else 1
         return _descriptor_set(target, descriptor_count)
 
-    def generate_descriptor_set(descriptor_set: DescriptorSet) -> SimpleNamespace:
-        return SimpleNamespace(header=f"// {descriptor_set.key}\n")
-
-    def generate_descriptor_set_shared_source(
+    def generate_descriptor_set_family(
         storage_descriptor_set: DescriptorSet,
         view_descriptor_sets: tuple[DescriptorSet, ...],
-    ) -> str:
-        return "// shared\n"
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            source="// shared\n",
+            view_headers=tuple(f"// {descriptor_set.key}\n" for descriptor_set in view_descriptor_sets),
+        )
 
     def descriptor_set_info_by_target(target: str) -> AmdgpuDescriptorSetInfo:
         if target == storage_target:
@@ -146,13 +146,8 @@ def test_storage_generation_reuses_parsed_isa_for_declared_views() -> None:
         ),
         mock.patch.object(
             amdgpu_descriptors,
-            "generate_descriptor_set",
-            generate_descriptor_set,
-        ),
-        mock.patch.object(
-            amdgpu_descriptors,
-            "generate_descriptor_set_shared_source",
-            generate_descriptor_set_shared_source,
+            "generate_descriptor_set_family",
+            generate_descriptor_set_family,
         ),
     ):
         tmp_path = Path(temporary_directory)

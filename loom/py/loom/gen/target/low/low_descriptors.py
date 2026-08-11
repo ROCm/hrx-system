@@ -17,7 +17,11 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from loom.gen.target.low import c_emit, compiler, views
-from loom.gen.target.low.compiled import DescriptorAllowlist, GeneratedDescriptorSet
+from loom.gen.target.low.compiled import (
+    DescriptorAllowlist,
+    GeneratedDescriptorSet,
+    GeneratedDescriptorSetFamily,
+)
 from loom.target.low_descriptors import DescriptorSet
 
 
@@ -32,11 +36,11 @@ def generate_descriptor_set(
     )
 
 
-def generate_descriptor_set_shared_source(
+def generate_descriptor_set_family(
     storage_spec: DescriptorSet,
     view_specs: Sequence[DescriptorSet],
-) -> str:
-    """Generates one C source containing shared storage and multiple set views.
+) -> GeneratedDescriptorSetFamily:
+    """Generates shared C storage and public headers for descriptor-set views.
 
     Each view selects descriptors from |storage_spec| by stable key. Supporting
     tables are shared as a storage superset, while descriptor, operand-form, and
@@ -54,24 +58,13 @@ def generate_descriptor_set_shared_source(
         required_schedule_class_names=required_schedule_class_names,
     )
     descriptor_set_views = tuple(views.descriptor_set_view_for_spec(compiled, view_spec) for view_spec in view_specs)
-    return c_emit.emit_source_for_views(compiled, views=descriptor_set_views)
-
-
-def generate_descriptor_set_shared_header(
-    storage_spec: DescriptorSet,
-    view_spec: DescriptorSet,
-) -> str:
-    """Generates a public view header for a shared descriptor storage source."""
-
-    required_schedule_class_names = tuple(sorted({descriptor.schedule_class for descriptor in view_spec.descriptors if descriptor.schedule_class is not None}))
-    compiled = compiler.compile_descriptor_set(
-        storage_spec,
-        allowlist=None,
-        allow_ambiguous_asm_mnemonics=True,
-        required_schedule_class_names=required_schedule_class_names,
+    return GeneratedDescriptorSetFamily(
+        source=c_emit.emit_source_for_views(
+            compiled,
+            views=descriptor_set_views,
+        ),
+        view_headers=tuple(c_emit.emit_header_for_spec(compiled, view_spec) for view_spec in view_specs),
     )
-    views.descriptor_set_view_for_spec(compiled, view_spec)
-    return c_emit.emit_header_for_spec(compiled, view_spec)
 
 
 def write_descriptor_set_to_paths(
