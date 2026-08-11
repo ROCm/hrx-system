@@ -17,7 +17,7 @@ from loom.gen.target.low import compiler, views
 from loom.gen.target.low.low_descriptors import (
     DescriptorAllowlist,
     generate_descriptor_set,
-    generate_descriptor_set_shared_source,
+    generate_descriptor_set_family,
 )
 from loom.ir import ScalarTypeKind
 from loom.target.low_descriptors import (
@@ -994,7 +994,7 @@ def test_operand_forms_preserve_assembly_implicit_packet_sources() -> None:
     assert compiled.operand_form_operand_indices == [0]
 
 
-def test_shared_source_emits_one_storage_table_with_multiple_views() -> None:
+def test_descriptor_set_family_emits_one_storage_table_and_ordered_headers() -> None:
     base_view = replace(
         TEST_LOW_CORE_DESCRIPTOR_SET,
         descriptors=TEST_LOW_CORE_DESCRIPTOR_SET.descriptors[:1],
@@ -1012,10 +1012,11 @@ def test_shared_source_emits_one_storage_table_with_multiple_views() -> None:
         descriptors=extension_view.descriptors,
     )
 
-    source = generate_descriptor_set_shared_source(
+    generated = generate_descriptor_set_family(
         storage_set,
         (base_view, extension_view),
     )
+    source = generated.source
 
     assert source.count("static const loom_low_descriptor_t kTestLowCoreDescriptors[]") == 1
     assert "kTestLowExtensionCoreDescriptors" not in source
@@ -1025,6 +1026,8 @@ def test_shared_source_emits_one_storage_table_with_multiple_views() -> None:
     assert ".descriptor_count = 1," in source
     assert ".descriptor_count = 2," in source
     assert ("const loom_low_descriptor_set_t* loom_test_low_extension_core_descriptor_set(void)") in source
+    assert "loom_test_low_core_descriptor_set(void)" in generated.view_headers[0]
+    assert "loom_test_low_extension_core_descriptor_set(void)" in generated.view_headers[1]
 
 
 def test_descriptor_set_view_selects_shared_schedule_class() -> None:
@@ -1102,7 +1105,7 @@ def test_descriptor_set_view_rejects_local_schedule_definition() -> None:
         )
 
 
-def test_shared_source_emits_prefix_view_local_asm_forms() -> None:
+def test_descriptor_set_family_emits_prefix_view_local_asm_forms() -> None:
     storage_descriptor = replace(
         TEST_LOW_ADD_I32_DESCRIPTOR,
         asm_forms=(
@@ -1138,10 +1141,10 @@ def test_shared_source_emits_prefix_view_local_asm_forms() -> None:
         descriptors=(storage_descriptor,),
     )
 
-    source = generate_descriptor_set_shared_source(
+    source = generate_descriptor_set_family(
         storage_set,
         (view, storage_set),
-    )
+    ).source
 
     assert "storage.add.i32" in source
     assert '"add.i32"' in source
@@ -1154,7 +1157,7 @@ def test_shared_source_emits_prefix_view_local_asm_forms() -> None:
     assert ".result_value_type_start = 1," in source
 
 
-def test_shared_source_compares_derived_descriptor_projections() -> None:
+def test_descriptor_set_family_compares_derived_descriptor_projections() -> None:
     descriptor = replace(
         TEST_LOW_ADD_I32_DESCRIPTOR,
         constraints=(Constraint(ConstraintKind.EARLY_CLOBBER, 0),),
@@ -1164,15 +1167,15 @@ def test_shared_source_compares_derived_descriptor_projections() -> None:
         descriptors=(descriptor,),
     )
 
-    source = generate_descriptor_set_shared_source(
+    source = generate_descriptor_set_family(
         descriptor_set,
         (descriptor_set,),
-    )
+    ).source
 
     assert ".flags = LOOM_LOW_OPERAND_FLAG_EARLY_CLOBBER," in source
 
 
-def test_shared_source_requires_view_canonical_asm_for_authorable_surface() -> None:
+def test_descriptor_set_family_requires_view_canonical_asm_for_authorable_surface() -> None:
     view_descriptor = replace(TEST_LOW_ADD_I32_DESCRIPTOR, asm_forms=())
     view = replace(
         TEST_LOW_CORE_DESCRIPTOR_SET,
@@ -1192,13 +1195,13 @@ def test_shared_source_requires_view_canonical_asm_for_authorable_surface() -> N
         ValueError,
         match=re.escape("descriptor set view 'test.low.view.core' descriptor 'test.add.i32' is authorable asm but does not declare exactly one canonical asm form; found 0"),
     ):
-        generate_descriptor_set_shared_source(
+        generate_descriptor_set_family(
             storage_set,
             (view,),
         )
 
 
-def test_shared_source_allows_view_local_non_authorable_surface() -> None:
+def test_descriptor_set_family_allows_view_local_non_authorable_surface() -> None:
     view_descriptor = replace(
         TEST_LOW_ADD_I32_DESCRIPTOR,
         asm_forms=(),
@@ -1219,16 +1222,16 @@ def test_shared_source_allows_view_local_non_authorable_surface() -> None:
         descriptors=(TEST_LOW_ADD_I32_DESCRIPTOR,),
     )
 
-    source = generate_descriptor_set_shared_source(
+    source = generate_descriptor_set_family(
         storage_set,
         (view,),
-    )
+    ).source
 
     assert "static const loom_low_descriptor_t kTestLowViewCoreDescriptors[]" in source
     assert ".canonical_asm_form_ordinal = LOOM_LOW_ASM_FORM_ORDINAL_NONE" in source
 
 
-def test_shared_source_emits_sibling_view_descriptor_surfaces() -> None:
+def test_descriptor_set_family_emits_sibling_view_descriptor_surfaces() -> None:
     first_view = replace(
         TEST_LOW_CORE_DESCRIPTOR_SET,
         descriptors=(TEST_LOW_CONST_I32_DESCRIPTOR,),
@@ -1249,10 +1252,10 @@ def test_shared_source_emits_sibling_view_descriptor_surfaces() -> None:
         ),
     )
 
-    source = generate_descriptor_set_shared_source(
+    source = generate_descriptor_set_family(
         storage_set,
         (first_view, sibling_view, storage_set),
-    )
+    ).source
 
     assert source.count("static const loom_low_operand_t kTestLowCoreOperands[]") == 1
     assert "static const loom_low_descriptor_t kTestLowSiblingCoreDescriptors[]" in source

@@ -79,6 +79,39 @@ def _loom_output_args(flags, outputs):
         output_args[_loom_output_basename(outputs[i])] = _loom_output_arg(flags[i])
     return output_args
 
+def _loom_generated_textual_headers(
+        name,
+        generator,
+        outputs,
+        output_flags,
+        args = [],
+        inputs = [],
+        tags = [],
+        visibility = None,
+        comment = None):
+    if not outputs:
+        fail("generated textual headers require at least one output")
+    if len(output_flags) != len(outputs):
+        fail("generated textual header output flags and outputs must be paired")
+
+    rule_kwargs = {}
+    if visibility != None:
+        rule_kwargs["visibility"] = visibility
+    if comment != None:
+        rule_kwargs["progress_message"] = comment
+    rule_kwargs["tags"] = tags + ["skip-bazel_to_cmake"]
+    rule_kwargs = apply_loom_target_policy(rule_kwargs)
+
+    iree_generated_files(
+        name = name,
+        srcs = inputs,
+        outs = outputs,
+        args = _loom_bazel_generator_args(args),
+        output_args = _loom_output_args(output_flags, outputs),
+        tool = generator,
+        **rule_kwargs
+    )
+
 def loom_generated_textual_header(
         name,
         generator,
@@ -103,22 +136,57 @@ def loom_generated_textual_header(
       comment: Optional progress message for the generator action.
     """
 
-    rule_kwargs = {}
-    if visibility != None:
-        rule_kwargs["visibility"] = visibility
-    if comment != None:
-        rule_kwargs["progress_message"] = comment
-    rule_kwargs["tags"] = tags + ["skip-bazel_to_cmake"]
-    rule_kwargs = apply_loom_target_policy(rule_kwargs)
-
-    iree_generated_files(
+    _loom_generated_textual_headers(
         name = name,
-        srcs = inputs,
-        outs = [output],
-        args = _loom_bazel_generator_args(args),
-        output_args = _loom_output_args([output_flag], [output]),
-        tool = generator,
-        **rule_kwargs
+        generator = generator,
+        outputs = [output],
+        output_flags = [output_flag],
+        args = args,
+        inputs = inputs,
+        tags = tags,
+        visibility = visibility,
+        comment = comment,
+    )
+
+def loom_generated_textual_header_family(
+        name,
+        generator,
+        outputs,
+        output_flags,
+        args = [],
+        inputs = [],
+        tags = [],
+        visibility = None,
+        comment = None):
+    """Generates a coherent family of textual headers in one action.
+
+    The generator must derive all outputs from the same materialized source
+    model. Outputs that can be generated independently belong in separate
+    singular actions so their invalidation and scheduling remain precise.
+
+    Args:
+      name: Generator action target name.
+      generator: Executable label that writes every textual header.
+      outputs: Generated textual header filenames.
+      output_flags: Generator flags paired positionally with outputs.
+      args: Generator arguments before the output flags.
+      inputs: Source data labels consumed by the generator.
+      tags: Additional Bazel tags for the generator action.
+      visibility: Passed through to the generator action.
+      comment: Optional progress message for the generator action.
+    """
+    if len(outputs) < 2:
+        fail("generated textual header families require at least two outputs")
+    _loom_generated_textual_headers(
+        name = name,
+        generator = generator,
+        outputs = outputs,
+        output_flags = output_flags,
+        args = args,
+        inputs = inputs,
+        tags = tags,
+        visibility = visibility,
+        comment = comment,
     )
 
 def loom_low_descriptor_data_archive(

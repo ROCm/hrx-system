@@ -26,9 +26,7 @@ def _ensure_runtime_py_on_path() -> None:
 _ensure_runtime_py_on_path()
 
 from loom.gen.target.low.low_descriptors import (  # noqa: E402
-    generate_descriptor_set,
-    generate_descriptor_set_shared_header,
-    generate_descriptor_set_shared_source,
+    generate_descriptor_set_family,
     write_descriptor_set_to_paths,
 )
 from loom.target.arch.x86.target_info import (  # noqa: E402
@@ -156,27 +154,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             descriptor_set,
             view_descriptor_sets,
         )
-        generated = generate_descriptor_set(descriptor_set)
+        generated = generate_descriptor_set_family(
+            storage_descriptor_set,
+            (*view_descriptor_sets, descriptor_set),
+        )
         args.header.parent.mkdir(parents=True, exist_ok=True)
         args.source.parent.mkdir(parents=True, exist_ok=True)
-        args.header.write_text(generated.header, encoding="utf-8")
-        args.source.write_text(
-            generate_descriptor_set_shared_source(
-                storage_descriptor_set,
-                (*view_descriptor_sets, descriptor_set),
-            ),
-            encoding="utf-8",
-        )
-        for view_info, view_descriptor_set in zip(
+        args.header.write_text(generated.view_headers[-1], encoding="utf-8")
+        args.source.write_text(generated.source, encoding="utf-8")
+        for view_info, view_header in zip(
             view_infos,
-            view_descriptor_sets,
+            generated.view_headers[:-1],
             strict=True,
         ):
             view_header_path = view_headers[view_info.generator_target]
-            view_header = generate_descriptor_set_shared_header(
-                storage_descriptor_set,
-                view_descriptor_set,
-            )
             view_header_path.parent.mkdir(parents=True, exist_ok=True)
             view_header_path.write_text(
                 view_header,

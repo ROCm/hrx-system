@@ -56,6 +56,16 @@ class GeneratedDescriptorSet:
     source: str
 
 
+@dataclass(frozen=True, slots=True)
+class GeneratedDescriptorSetFamily:
+    """C artifacts emitted from one compiled storage set and its views."""
+
+    # Shared C source implementing every descriptor-set view.
+    source: str
+    # Public C headers paired positionally with the requested view specs.
+    view_headers: tuple[str, ...]
+
+
 @dataclass(slots=True)
 class CompiledDescriptorSet:
     spec: DescriptorSet

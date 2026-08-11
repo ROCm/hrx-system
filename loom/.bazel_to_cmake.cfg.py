@@ -595,6 +595,65 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         )
         self._emit_platform_guard_end(target_compatible_with)
 
+    def loom_generated_textual_header_family(
+        self,
+        name,
+        generator,
+        outputs,
+        output_flags,
+        args=None,
+        inputs=None,
+        comment=None,
+        tags=None,
+        testonly=None,
+        target_compatible_with=None,
+        visibility=None,
+        **kwargs,
+    ):
+        if self._should_skip_target(tags=tags, **kwargs):
+            return
+        target_compatible_with = self._apply_loom_target_compatible_with(
+            target_compatible_with
+        )
+
+        name_block = self._convert_string_arg_block("NAME", name, quote=False)
+        generator_block = self._convert_single_target_block("GENERATOR", generator)
+        outputs_block = self._convert_string_list_block("OUTPUTS", outputs, sort=False)
+        output_flags_block = self._convert_string_list_block(
+            "OUTPUT_FLAGS", output_flags, sort=False
+        )
+        args_block, platform_args_block = self._convert_platform_select_strings(
+            name,
+            "ARGS",
+            self._convert_generated_args(args),
+            sort=False,
+        )
+        inputs_block, platform_inputs_block = self._convert_platform_select_strings(
+            name,
+            "INPUTS",
+            self._convert_generated_inputs(inputs),
+            sort=False,
+        )
+        comment_block = self._convert_string_arg_block("COMMENT", comment)
+
+        self._emit_platform_guard_begin(target_compatible_with)
+        if platform_args_block:
+            self._converter.body += platform_args_block
+        if platform_inputs_block:
+            self._converter.body += platform_inputs_block
+        self._converter.body += (
+            f"loom_generated_textual_header_family(\n"
+            f"{name_block}"
+            f"{generator_block}"
+            f"{outputs_block}"
+            f"{output_flags_block}"
+            f"{args_block}"
+            f"{inputs_block}"
+            f"{comment_block}"
+            f")\n\n"
+        )
+        self._emit_platform_guard_end(target_compatible_with)
+
     def loom_generated_cc_library(
         self,
         name,
