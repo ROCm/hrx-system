@@ -87,6 +87,7 @@ def _loom_generated_files(
         args = [],
         inputs = [],
         tags = [],
+        target_compatible_with = None,
         visibility = None,
         comment = None):
     if not outputs:
@@ -99,6 +100,8 @@ def _loom_generated_files(
         rule_kwargs["visibility"] = visibility
     if comment != None:
         rule_kwargs["progress_message"] = comment
+    if target_compatible_with != None:
+        rule_kwargs["target_compatible_with"] = target_compatible_with
     rule_kwargs["tags"] = tags + ["skip-bazel_to_cmake"]
     rule_kwargs = apply_loom_target_policy(rule_kwargs)
 
@@ -120,6 +123,7 @@ def loom_generated_textual_header(
         args = [],
         inputs = [],
         tags = [],
+        target_compatible_with = None,
         visibility = None,
         comment = None):
     """Generates one textual header consumed by a Loom C/C++ target.
@@ -132,6 +136,7 @@ def loom_generated_textual_header(
       args: Generator arguments before the output flag.
       inputs: Source data labels consumed by the generator.
       tags: Additional Bazel tags for the generator action.
+      target_compatible_with: Optional target compatibility constraints.
       visibility: Passed through to the generator action.
       comment: Optional progress message for the generator action.
     """
@@ -144,6 +149,7 @@ def loom_generated_textual_header(
         args = args,
         inputs = inputs,
         tags = tags,
+        target_compatible_with = target_compatible_with,
         visibility = visibility,
         comment = comment,
     )
@@ -156,6 +162,7 @@ def loom_generated_file_family(
         args = [],
         inputs = [],
         tags = [],
+        target_compatible_with = None,
         visibility = None,
         comment = None):
     """Generates a coherent family of files in one action.
@@ -172,6 +179,7 @@ def loom_generated_file_family(
       args: Generator arguments before the output flags.
       inputs: Source data labels consumed by the generator.
       tags: Additional Bazel tags for the generator action.
+      target_compatible_with: Optional target compatibility constraints.
       visibility: Passed through to the generator action.
       comment: Optional progress message for the generator action.
     """
@@ -185,6 +193,7 @@ def loom_generated_file_family(
         args = args,
         inputs = inputs,
         tags = tags,
+        target_compatible_with = target_compatible_with,
         visibility = visibility,
         comment = comment,
     )
