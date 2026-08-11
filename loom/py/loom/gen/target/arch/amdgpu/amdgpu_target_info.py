@@ -35,9 +35,9 @@ from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     amdgpu_descriptor_ref_keys,
 )
 from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
-    AmdgpuIsaFactSource,
+    AmdgpuIsaInstructionFactSource,
     AmdgpuIsaXmlError,
-    parse_amdgpu_isa_xml_path,
+    parse_amdgpu_isa_xml_instructions_path,
 )
 from loom.target.arch.amdgpu.lds_bank_service import (  # noqa: E402
     AMDGPU_LDS_BANK_SERVICE_DIRECTION_READ,
@@ -163,6 +163,15 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     validate_amdgpu_generic_contracts,
     validate_amdgpu_target_id_processor_rows,
     validate_amdgpu_target_rows,
+)
+
+_TARGET_INFO_SOPP_INSTRUCTION_NAMES = (
+    "S_BRANCH",
+    "S_CBRANCH_SCC0",
+    "S_CBRANCH_SCC1",
+    "S_DELAY_ALU",
+    "S_ENDPGM",
+    "S_NOP",
 )
 
 
@@ -873,17 +882,17 @@ def _parse_isa_xml_argument(value: str) -> tuple[str, Path]:
 
 def _parse_isa_xml_arguments(
     values: Sequence[str],
-) -> dict[str, AmdgpuIsaFactSource]:
-    specs: dict[str, AmdgpuIsaFactSource] = {}
+) -> dict[str, AmdgpuIsaInstructionFactSource]:
+    specs: dict[str, AmdgpuIsaInstructionFactSource] = {}
     for value in values:
         key, path = _parse_isa_xml_argument(value)
         if key in specs:
             raise ValueError(f"AMDGPU target-info ISA XML key '{key}' is duplicate")
-        specs[key] = parse_amdgpu_isa_xml_path(path)
+        specs[key] = parse_amdgpu_isa_xml_instructions_path(path, _TARGET_INFO_SOPP_INSTRUCTION_NAMES)
     return specs
 
 
-def _sopp_opcode(spec: AmdgpuIsaFactSource, instruction_name: str) -> int:
+def _sopp_opcode(spec: AmdgpuIsaInstructionFactSource, instruction_name: str) -> int:
     summaries = tuple(
         summary for summary in spec.instruction_encoding_summaries((instruction_name,), include_aliases=False) if summary.encoding_name == "ENC_SOPP" and summary.condition_name == "default"
     )
@@ -892,7 +901,7 @@ def _sopp_opcode(spec: AmdgpuIsaFactSource, instruction_name: str) -> int:
     return summaries[0].opcode
 
 
-def _sopp_opcode_or_zero(spec: AmdgpuIsaFactSource, instruction_name: str) -> int:
+def _sopp_opcode_or_zero(spec: AmdgpuIsaInstructionFactSource, instruction_name: str) -> int:
     try:
         summaries = tuple(
             summary for summary in spec.instruction_encoding_summaries((instruction_name,), include_aliases=False) if summary.encoding_name == "ENC_SOPP" and summary.condition_name == "default"
@@ -911,7 +920,7 @@ def _sopp_opcode_or_zero(spec: AmdgpuIsaFactSource, instruction_name: str) -> in
 
 def _materialize_descriptor_set_rows(
     descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
-    isa_specs: Mapping[str, AmdgpuIsaFactSource],
+    isa_specs: Mapping[str, AmdgpuIsaInstructionFactSource],
 ) -> tuple[_AmdgpuDescriptorSetRow, ...]:
     rows: list[_AmdgpuDescriptorSetRow] = []
     for info in descriptor_sets:

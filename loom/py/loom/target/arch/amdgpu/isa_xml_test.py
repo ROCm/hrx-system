@@ -12,6 +12,7 @@ import pytest
 
 from loom.target.arch.amdgpu.isa_xml import (
     AmdgpuIsaXmlError,
+    parse_amdgpu_isa_xml_instructions_path,
     parse_amdgpu_isa_xml_path,
     parse_amdgpu_isa_xml_text,
 )
@@ -481,6 +482,34 @@ def test_parse_amdgpu_isa_xml_path_uses_explicit_path(tmp_path: Path) -> None:
 
     assert spec.source_name == str(xml_path)
     assert spec.architecture_name == "AMD RDNA 4"
+
+
+def test_parse_amdgpu_isa_xml_instructions_path_matches_full_facts(
+    tmp_path: Path,
+) -> None:
+    xml_path = tmp_path / "amdgpu_isa.xml"
+    xml_path.write_text(SAMPLE_XML)
+    instruction_names = ("S_ADD_CO_U32", "S_WAIT_IDLE")
+
+    full_spec = parse_amdgpu_isa_xml_path(xml_path)
+    instruction_set = parse_amdgpu_isa_xml_instructions_path(
+        xml_path, instruction_names
+    )
+
+    assert instruction_set.architecture_name == full_spec.architecture_name
+    assert instruction_set.architecture_id == full_spec.architecture_id
+    assert (
+        tuple(instruction.name for instruction in instruction_set.instructions)
+        == instruction_names
+    )
+    assert instruction_set.select_instructions(["S_ADD_U32"])[0].name == (
+        "S_ADD_CO_U32"
+    )
+    assert instruction_set.instruction_encoding_summaries() == (
+        full_spec.instruction_encoding_summaries(
+            instruction_names, include_aliases=False
+        )
+    )
 
 
 def test_select_instructions_accepts_aliases_and_fails_loudly() -> None:
