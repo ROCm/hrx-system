@@ -1279,6 +1279,8 @@ class Printer:
         for block in region.blocks:
             # Block label (if named and not the entry block).
             if block.label:
+                if block.leading_blank_line:
+                    self._lines.append("")
                 saved_indent = self._indent
                 self._indent = max(self._indent - 1, 0)
                 self._emit_comments(block.comments)
@@ -1302,6 +1304,8 @@ class Printer:
                         )
                     ):
                         continue
+                    if op.leading_blank_line:
+                        self._lines.append("")
                     self._print_op(op, module)
 
     def _printable_final_op_index(self, block: Block) -> int:
@@ -1451,6 +1455,8 @@ class Printer:
                 op, implicit_terminator_name
             ):
                 continue
+            if op.leading_blank_line:
+                self._lines.append("")
             self._print_pipeline_statement(
                 op,
                 module,

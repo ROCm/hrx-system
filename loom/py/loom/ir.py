@@ -1648,6 +1648,8 @@ class Operation:
     regions: list[Region] = field(default_factory=list)
     location_id: int = LOCATION_UNKNOWN
     comments: tuple[str, ...] = ()
+    # True when one canonical empty source line precedes this operation.
+    leading_blank_line: bool = False
     name: str = ""
     is_dead: bool = False
     _attributes_frozen: bool = field(default=False, init=False, repr=False)
@@ -1678,6 +1680,8 @@ class Block:
     arg_ids: list[int] = field(default_factory=list)
     ops: list[Operation] = field(default_factory=list)
     comments: tuple[str, ...] = ()
+    # True when one canonical empty source line precedes this explicit label.
+    leading_blank_line: bool = False
 
 
 # Region source-presentation flags. These bits are bytecode-stable.
