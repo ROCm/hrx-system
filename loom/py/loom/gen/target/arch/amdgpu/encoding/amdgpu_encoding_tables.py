@@ -28,6 +28,7 @@ _ensure_runtime_py_on_path()
 
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
+    amdgpu_core_descriptor_set_instruction_names_by_isa_key,
     build_amdgpu_core_descriptor_set_from_specs,
 )
 from loom.target.arch.amdgpu.encoding import (  # noqa: E402
@@ -48,8 +49,9 @@ from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
     AmdgpuIsaFactSource,
     AmdgpuIsaInstruction,
     AmdgpuIsaOperandType,
+    AmdgpuIsaPartitionedOperandUse,
     compose_amdgpu_isa_partitioned_field,
-    parse_amdgpu_isa_xml_path,
+    parse_amdgpu_isa_xml_paths_for_instructions,
 )
 from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AmdgpuDescriptorSetInfo,
@@ -282,18 +284,18 @@ class _EncodingContract:
     v_mov_b32_opcode: int
 
 
-def _parse_isa_xml_arguments(
+def _parse_isa_xml_paths(
     values: Sequence[str],
-) -> dict[str, AmdgpuIsaFactSource]:
-    specs: dict[str, AmdgpuIsaFactSource] = {}
+) -> dict[str, Path]:
+    paths: dict[str, Path] = {}
     for value in values:
         key, separator, path = value.partition(":")
         if not separator or not key or not path:
             raise ValueError("AMDGPU encoding --isa-xml entries must be key:path pairs")
-        if key in specs:
+        if key in paths:
             raise ValueError(f"AMDGPU encoding ISA XML key '{key}' is duplicate")
-        specs[key] = parse_amdgpu_isa_xml_path(Path(path))
-    return specs
+        paths[key] = Path(path)
+    return paths
 
 
 def _parse_view_headers(values: Sequence[str]) -> dict[str, Path]:
@@ -445,43 +447,39 @@ def _add_encoding_field(
 
 def _partitioned_fields_by_encoding(
     encodings: tuple[AmdgpuIsaEncoding, ...],
-    instructions: tuple[AmdgpuIsaInstruction, ...],
+    partitioned_operand_uses: tuple[AmdgpuIsaPartitionedOperandUse, ...],
     operand_types: tuple[AmdgpuIsaOperandType, ...],
 ) -> dict[str, tuple[AmdgpuIsaEncodingField, ...]]:
     encodings_by_name = {encoding.name: encoding for encoding in encodings}
     operand_types_by_name = {operand_type.name: operand_type for operand_type in operand_types}
     fields_by_encoding: dict[str, dict[str, AmdgpuIsaEncodingField]] = {encoding.name: {} for encoding in encodings}
     ambiguous_fields_by_encoding: dict[str, set[str]] = {encoding.name: set() for encoding in encodings}
-    for instruction in instructions:
-        for instruction_encoding in instruction.encodings:
-            encoding = encodings_by_name.get(instruction_encoding.encoding_name)
-            if encoding is None:
-                raise ValueError(f"AMDGPU instruction '{instruction.name}' references missing encoding '{instruction_encoding.encoding_name}'")
-            base_fields = _encoding_fields_by_name(encoding)
-            for operand in instruction_encoding.operands:
-                if not operand.is_binary_microcode_required:
-                    continue
-                operand_type = operand_types_by_name.get(operand.operand_type)
-                if operand_type is None:
-                    raise ValueError(f"AMDGPU instruction '{instruction.name}' references missing operand type '{operand.operand_type}'")
-                if not operand_type.is_partitioned:
-                    continue
-                if operand.field_name is None:
-                    raise ValueError(f"AMDGPU instruction '{instruction.name}' encoding '{instruction_encoding.encoding_name}' has partitioned binary microcode operand without a field name")
-                base_field = base_fields.get(operand.field_name)
-                if base_field is None:
-                    raise ValueError(f"AMDGPU instruction '{instruction.name}' binary microcode operand '{operand.field_name}' is not a field in encoding '{encoding.name}'")
-                for operand_field in operand_type.fields:
-                    if operand_field.name in base_fields:
-                        continue
-                    composed_field = compose_amdgpu_isa_partitioned_field(base_field, operand_field)
-                    if composed_field is None:
-                        continue
-                    _add_encoding_field(
-                        fields_by_encoding[encoding.name],
-                        ambiguous_fields_by_encoding[encoding.name],
-                        composed_field,
-                    )
+    for use in partitioned_operand_uses:
+        encoding = encodings_by_name.get(use.encoding_name)
+        if encoding is None:
+            raise ValueError(f"AMDGPU instruction '{use.instruction_name}' references missing encoding '{use.encoding_name}'")
+        operand_type = operand_types_by_name.get(use.operand_type)
+        if operand_type is None:
+            raise ValueError(f"AMDGPU instruction '{use.instruction_name}' references missing operand type '{use.operand_type}'")
+        if not operand_type.is_partitioned:
+            raise ValueError(f"AMDGPU instruction '{use.instruction_name}' references non-partitioned operand type '{use.operand_type}' as partitioned")
+        if use.field_name is None:
+            raise ValueError(f"AMDGPU instruction '{use.instruction_name}' encoding '{use.encoding_name}' has partitioned binary microcode operand without a field name")
+        base_fields = _encoding_fields_by_name(encoding)
+        base_field = base_fields.get(use.field_name)
+        if base_field is None:
+            raise ValueError(f"AMDGPU instruction '{use.instruction_name}' binary microcode operand '{use.field_name}' is not a field in encoding '{encoding.name}'")
+        for operand_field in operand_type.fields:
+            if operand_field.name in base_fields:
+                continue
+            composed_field = compose_amdgpu_isa_partitioned_field(base_field, operand_field)
+            if composed_field is None:
+                continue
+            _add_encoding_field(
+                fields_by_encoding[encoding.name],
+                ambiguous_fields_by_encoding[encoding.name],
+                composed_field,
+            )
     return {encoding_name: tuple(sorted(fields.values(), key=lambda field: field.name)) for encoding_name, fields in fields_by_encoding.items() if fields}
 
 
@@ -616,7 +614,7 @@ def _compile_encoding_contract(
         encodings,
         _partitioned_fields_by_encoding(
             encodings,
-            spec.instructions,
+            spec.partitioned_operand_uses,
             spec.operand_types,
         ),
     )
@@ -858,6 +856,7 @@ def _emit_source(
     table_function: str,
     table_views: tuple[_EncodingTableView, ...] = (),
     encodings: tuple[AmdgpuIsaEncoding, ...],
+    partitioned_operand_uses: tuple[AmdgpuIsaPartitionedOperandUse, ...],
     instructions: tuple[AmdgpuIsaInstruction, ...],
     operand_types: tuple[AmdgpuIsaOperandType, ...],
     source_literal: int,
@@ -872,7 +871,11 @@ def _emit_source(
     encodings = _with_vop3_unused_source_defaults(encodings, vop3_unused_source_value)
     compiled_formats, compiled_fields, compiled_ranges = _compile_formats(
         encodings,
-        _partitioned_fields_by_encoding(encodings, instructions, operand_types),
+        _partitioned_fields_by_encoding(
+            encodings,
+            partitioned_operand_uses,
+            operand_types,
+        ),
     )
     maximum_format_field_count = max(
         (compiled_format.field_count for compiled_format in compiled_formats),
@@ -1078,7 +1081,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     if storage_info != descriptor_set_info:
         raise ValueError(f"AMDGPU encoding target {args.target} is a view of storage target {storage_info.generator_target}; generate the storage target with --view-header instead")
     view_infos = _view_infos_for_storage_target(descriptor_set_info, view_headers)
-    isa_specs = _parse_isa_xml_arguments(args.isa_xml)
+    instruction_names_by_isa_key = {
+        isa_key: set(instruction_names) for isa_key, instruction_names in (amdgpu_core_descriptor_set_instruction_names_by_isa_key((descriptor_set_info, *view_infos)).items())
+    }
+    for isa_info in descriptor_set_info.isa_infos:
+        instruction_names_by_isa_key[isa_info.isa_xml_key].add("V_NOP")
+    isa_specs = parse_amdgpu_isa_xml_paths_for_instructions(
+        _parse_isa_xml_paths(args.isa_xml),
+        instruction_names_by_isa_key,
+    )
     if len(descriptor_set_info.isa_infos) != 1:
         raise ValueError(f"AMDGPU encoding storage target '{args.target}' must have one ISA member")
     storage_isa_info = descriptor_set_info.isa_infos[0]
@@ -1173,6 +1184,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             table_function=table_function,
             table_views=table_views,
             encodings=spec.encodings,
+            partitioned_operand_uses=spec.partitioned_operand_uses,
             instructions=spec.instructions,
             operand_types=spec.operand_types,
             source_literal=source_literal,

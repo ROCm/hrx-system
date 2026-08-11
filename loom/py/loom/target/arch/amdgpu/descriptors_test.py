@@ -677,6 +677,7 @@ def _isa_spec(*encoding_names: str) -> AmdgpuIsaSpec:
         ),
         instructions=(),
         operand_types=(),
+        partitioned_operand_uses=(),
     )
 
 

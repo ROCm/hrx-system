@@ -89,6 +89,18 @@ class AmdgpuIsaOperandType:
 
 
 @dataclass(frozen=True, slots=True)
+class AmdgpuIsaPartitionedOperandUse:
+    # Instruction owning the operand use.
+    instruction_name: str
+    # Physical encoding containing the carrier field.
+    encoding_name: str
+    # Carrier field within the physical encoding, if declared.
+    field_name: str | None
+    # Partitioned operand type projected into the carrier field.
+    operand_type: str
+
+
+@dataclass(frozen=True, slots=True)
 class AmdgpuIsaInstructionEncoding:
     encoding_name: str
     condition_name: str
@@ -174,6 +186,11 @@ class AmdgpuIsaFactSource(AmdgpuIsaInstructionFactSource, Protocol):
 
     @property
     def operand_types(self) -> tuple[AmdgpuIsaOperandType, ...]: ...
+
+    @property
+    def partitioned_operand_uses(
+        self,
+    ) -> tuple[AmdgpuIsaPartitionedOperandUse, ...]: ...
 
     def encoding_map(self) -> dict[str, AmdgpuIsaEncoding]: ...
 
@@ -289,6 +306,7 @@ class AmdgpuIsaInstructionSet:
 class AmdgpuIsaSpec(AmdgpuIsaInstructionSet):
     encodings: tuple[AmdgpuIsaEncoding, ...]
     operand_types: tuple[AmdgpuIsaOperandType, ...]
+    partitioned_operand_uses: tuple[AmdgpuIsaPartitionedOperandUse, ...]
     _encoding_lookup_cache: dict[str, AmdgpuIsaEncoding] | None = field(
         default=None,
         init=False,
@@ -665,6 +683,18 @@ def _parse_spec_root(
         source_name,
     )
 
+    if instruction_names is None:
+        partitioned_operand_uses = _partitioned_operand_uses_from_instructions(
+            instructions,
+            operand_types,
+        )
+    else:
+        partitioned_operand_uses = _parse_partitioned_operand_uses(
+            instructions_element,
+            operand_types,
+            source_name,
+        )
+
     return AmdgpuIsaSpec(
         source_name=source_name,
         architecture_name=architecture_name,
@@ -672,7 +702,111 @@ def _parse_spec_root(
         encodings=encodings,
         instructions=instructions,
         operand_types=operand_types,
+        partitioned_operand_uses=partitioned_operand_uses,
     )
+
+
+def _normalize_partitioned_operand_uses(
+    uses: Iterable[AmdgpuIsaPartitionedOperandUse],
+) -> tuple[AmdgpuIsaPartitionedOperandUse, ...]:
+    return tuple(
+        sorted(
+            set(uses),
+            key=lambda use: (
+                use.instruction_name,
+                use.encoding_name,
+                use.field_name or "",
+                use.operand_type,
+            ),
+        )
+    )
+
+
+def _partitioned_operand_uses_from_instructions(
+    instructions: Iterable[AmdgpuIsaInstruction],
+    operand_types: Iterable[AmdgpuIsaOperandType],
+) -> tuple[AmdgpuIsaPartitionedOperandUse, ...]:
+    partitioned_operand_types = {
+        operand_type.name
+        for operand_type in operand_types
+        if operand_type.is_partitioned
+    }
+    return _normalize_partitioned_operand_uses(
+        AmdgpuIsaPartitionedOperandUse(
+            instruction_name=instruction.name,
+            encoding_name=encoding.encoding_name,
+            field_name=operand.field_name,
+            operand_type=operand.operand_type,
+        )
+        for instruction in instructions
+        for encoding in instruction.encodings
+        for operand in encoding.operands
+        if operand.is_binary_microcode_required
+        and operand.operand_type in partitioned_operand_types
+    )
+
+
+def _parse_partitioned_operand_uses(
+    instructions_element: ElementTree.Element,
+    operand_types: Iterable[AmdgpuIsaOperandType],
+    source_name: str,
+) -> tuple[AmdgpuIsaPartitionedOperandUse, ...]:
+    partitioned_operand_types = {
+        operand_type.name
+        for operand_type in operand_types
+        if operand_type.is_partitioned
+    }
+    uses: list[AmdgpuIsaPartitionedOperandUse] = []
+    for instruction_element in instructions_element.findall("Instruction"):
+        instruction_name = _required_text(
+            instruction_element, "InstructionName", source_name
+        )
+        instruction_context = _context("Instruction", instruction_name)
+        encodings_element = _required_child(
+            instruction_element,
+            "InstructionEncodings",
+            source_name,
+        )
+        for encoding_element in encodings_element.findall("InstructionEncoding"):
+            encoding_name = _required_text(
+                encoding_element, "EncodingName", source_name
+            )
+            encoding_context = (
+                f"{instruction_context}/InstructionEncoding({encoding_name})"
+            )
+            operands_element = _required_child(
+                encoding_element,
+                "Operands",
+                source_name,
+            )
+            for operand_element in operands_element.findall("Operand"):
+                operand_type = _required_text(
+                    operand_element, "OperandType", source_name
+                )
+                if operand_type not in partitioned_operand_types:
+                    continue
+                order = _required_integer_attribute(
+                    operand_element,
+                    "Order",
+                    source_name,
+                    f"{encoding_context}/Operand",
+                )
+                if not _required_boolean_attribute(
+                    operand_element,
+                    "IsBinaryMicrocodeRequired",
+                    source_name,
+                    f"{encoding_context}/Operand({order})",
+                ):
+                    continue
+                uses.append(
+                    AmdgpuIsaPartitionedOperandUse(
+                        instruction_name=instruction_name,
+                        encoding_name=encoding_name,
+                        field_name=_optional_text(operand_element, "FieldName"),
+                        operand_type=operand_type,
+                    )
+                )
+    return _normalize_partitioned_operand_uses(uses)
 
 
 def _instruction_element_matches_names(

@@ -529,6 +529,7 @@ def test_parse_amdgpu_isa_xml_path_for_instructions_preserves_shared_facts(
     assert selected_spec.architecture_id == full_spec.architecture_id
     assert selected_spec.encodings == full_spec.encodings
     assert selected_spec.operand_types == full_spec.operand_types
+    assert selected_spec.partitioned_operand_uses == full_spec.partitioned_operand_uses
     assert selected_spec.instructions == full_spec.select_instructions(
         ("S_ADD_U32", "S_WAIT_IDLE")
     )
