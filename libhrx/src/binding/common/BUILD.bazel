@@ -51,6 +51,7 @@ hrx_cc_library(
         "memory.c",
         "module.c",
         "peer.c",
+        "p2p_topology.c",
         "registry.c",
         "stream.c",
         "tls.c",
@@ -66,6 +67,7 @@ hrx_cc_library(
         "kpack.h",
         "managed_global.h",
         "memory.h",
+        "p2p_topology.h",
         "stream.h",
         "tls.h",
     ],
@@ -96,6 +98,18 @@ hrx_cc_test(
     srcs = ["function_attributes_test.cc"],
     deps = [
         ":function_attributes",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "p2p_topology_test",
+    srcs = ["p2p_topology_test.cc"],
+    deps = [
+        ":common",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
