@@ -209,6 +209,7 @@ loom_cc_test(
         ":testbench_actual",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
+        "//loom/src/loom/link:linker",
         "//loom/src/loom/ops/check",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/index",

@@ -290,12 +290,10 @@ void loom_run_hal_testbench_actual_provider_initialize(
       .context = options->context,
       .session = options->session,
       .target_environment = options->target_environment,
-      .filename = options->filename,
-      .source = options->source,
+      .run_module = options->run_module,
       .pipeline = options->pipeline,
       .sanitizer = options->sanitizer,
       .config_set = options->config_set,
-      .test_module = options->test_module,
       .kernel_launch = options->kernel_launch,
       .diagnostic_sink = options->diagnostic_sink,
       .max_errors = options->max_errors,
@@ -400,6 +398,52 @@ static iree_status_t loom_run_hal_testbench_materialize_config_set(
       loom_run_session_block_pool(provider->session), NULL));
   return loom_run_compile_report_record_materialized_config(
       provider->report, provider->compile_module.module, provider->config_set);
+}
+
+static iree_status_t loom_run_hal_testbench_clone_compile_module(
+    loom_run_hal_testbench_actual_provider_t* provider) {
+  const loom_module_t* source_module = provider->run_module->module;
+  const loom_module_t* const source_modules[] = {source_module};
+  iree_string_view_t module_name = iree_string_view_empty();
+  if (source_module->name_id < source_module->strings.count) {
+    module_name = source_module->strings.entries[source_module->name_id];
+  }
+  IREE_RETURN_IF_ERROR(loom_link_materialized_modules(
+      source_modules, IREE_ARRAYSIZE(source_modules),
+      &(loom_link_options_t){
+          .module_name = module_name,
+      },
+      loom_run_session_block_pool(provider->session),
+      provider->context->host_allocator, &provider->compile_module.module));
+  provider->compile_module_initialized = true;
+  return iree_ok_status();
+}
+
+static void loom_run_hal_testbench_bind_compile_source(
+    loom_run_hal_testbench_actual_provider_t* provider) {
+  loom_run_module_t* compile_module = &provider->compile_module;
+  const loom_run_module_t* run_module = provider->run_module;
+  compile_module->filename = run_module->filename;
+  compile_module->source = run_module->source;
+  if (!run_module->has_source_entry) {
+    return;
+  }
+
+  const iree_string_view_t source_filename = run_module->source_entry.filename;
+  for (iree_host_size_t i = 0; i < compile_module->module->sources.count; ++i) {
+    if (!iree_string_view_equal(compile_module->module->sources.entries[i],
+                                source_filename)) {
+      continue;
+    }
+    compile_module->source_entry = run_module->source_entry;
+    compile_module->source_entry.source_id = (loom_source_id_t)i;
+    compile_module->source_table_resolver = (loom_source_table_resolver_t){
+        .entries = &compile_module->source_entry,
+        .count = 1,
+    };
+    compile_module->has_source_entry = true;
+    return;
+  }
 }
 
 static iree_status_t loom_run_hal_testbench_link_selected_root(
@@ -565,22 +609,14 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
 
   iree_string_view_t entry_symbol = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_run_hal_testbench_module_symbol_name_from_ref(
-      provider->test_module, provider->kernel_launch->callee_ref,
+      provider->run_module->module, provider->kernel_launch->callee_ref,
       &entry_symbol));
 
-  loom_run_module_parse_options_t parse_options = {0};
-  loom_run_module_parse_options_initialize(&parse_options);
-  parse_options.filename = provider->filename;
-  parse_options.source = provider->source;
-  parse_options.diagnostic_sink =
-      loom_run_hal_testbench_counting_diagnostic_sink(provider);
-  parse_options.max_errors = loom_run_hal_testbench_max_errors(provider);
-  IREE_RETURN_IF_ERROR(loom_run_module_parse(provider->session, &parse_options,
-                                             &provider->compile_module));
-  provider->compile_module_initialized = true;
+  IREE_RETURN_IF_ERROR(loom_run_hal_testbench_clone_compile_module(provider));
   IREE_RETURN_IF_ERROR(loom_run_hal_testbench_materialize_config_set(provider));
   IREE_RETURN_IF_ERROR(
       loom_run_hal_testbench_select_compile_root(provider, entry_symbol));
+  loom_run_hal_testbench_bind_compile_source(provider);
 
   if (provider->kernel_launch->workload_count != 0) {
     IREE_RETURN_IF_ERROR(
@@ -936,7 +972,7 @@ iree_status_t loom_run_hal_testbench_actual_invoke(
     const loom_value_id_t input_value_id =
         provider->kernel_launch->input_value_ids[i];
     const loom_type_t input_type =
-        loom_module_value_type(provider->test_module, input_value_id);
+        loom_module_value_type(provider->run_module->module, input_value_id);
     status = loom_run_hal_testbench_input_append(
         &bindings, &inputs[i], input_type, &invocation_options);
     if (!iree_status_is_ok(status)) {
@@ -1494,12 +1530,10 @@ iree_status_t loom_run_hal_testbench_actual_sequence_initialize(
         .context = options->context,
         .session = options->session,
         .target_environment = options->target_environment,
-        .filename = options->filename,
-        .source = options->source,
+        .run_module = options->run_module,
         .pipeline = options->pipeline,
         .sanitizer = options->sanitizer,
         .config_set = options->config_set,
-        .test_module = options->test_module,
         .kernel_launch = invocation,
         .diagnostic_sink = options->diagnostic_sink,
         .max_errors = options->max_errors,

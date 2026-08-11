@@ -40,10 +40,8 @@ typedef struct iree_benchmark_loom_hal_setup_options_t {
   iree_benchmark_loom_hal_context_t* hal_context;
   // Shared Loom run session used for candidate compilation.
   loom_run_session_t* session;
-  // Source filename used in diagnostics and compiled artifacts.
-  iree_string_view_t filename;
-  // Full source text used by candidate compilation.
-  iree_string_view_t source;
+  // Canonical parsed module used for candidate compilation.
+  const loom_run_module_t* run_module;
   // Structured compile-report capture policy.
   const loom_run_compile_report_capture_options_t* compile_report_options;
   // Structured artifact-manifest sidecar policy.
