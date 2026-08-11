@@ -14,6 +14,7 @@ from unittest import mock
 from loom.gen.target.arch.amdgpu.descriptors import amdgpu_descriptors
 from loom.target.arch.amdgpu.target_info import (
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+    AMDGPU_SOPP_OPCODE_INFO_RDNA,
     AmdgpuDescriptorSetInfo,
     AmdgpuDescriptorSetIsaInfo,
 )
@@ -63,6 +64,7 @@ def _descriptor_set_info(
                 isa_xml_key="test",
                 isa_architecture_name="AMDGPU Test",
                 isa_architecture_id=1,
+                sopp_opcodes=AMDGPU_SOPP_OPCODE_INFO_RDNA,
             ),
         ),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,

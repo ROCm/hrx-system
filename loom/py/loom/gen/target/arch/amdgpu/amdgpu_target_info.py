@@ -34,11 +34,6 @@ from loom.gen.support.generated_file import line_comment_header  # noqa: E402
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     amdgpu_descriptor_ref_keys,
 )
-from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
-    AmdgpuIsaInstructionFactSource,
-    AmdgpuIsaXmlError,
-    parse_amdgpu_isa_xml_instructions_path,
-)
 from loom.target.arch.amdgpu.lds_bank_service import (  # noqa: E402
     AMDGPU_LDS_BANK_SERVICE_DIRECTION_READ,
     AMDGPU_LDS_BANK_SERVICE_DIRECTION_WRITE,
@@ -146,6 +141,7 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_WAVEFRONT_SIZE_KNOWN_FLAGS,
     AmdgpuDescriptorSetInfo,
     AmdgpuProcessorInfo,
+    AmdgpuSoppOpcodeInfo,
     AmdgpuTargetInfo,
     AmdgpuVectorMemoryCachePolicyEncodingInfo,
     amdgpu_descriptor_set_ordinal,
@@ -159,36 +155,16 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     sorted_processor_infos,
     sorted_target_infos,
     validate_amdgpu_code_object_processor_rows,
-    validate_amdgpu_descriptor_set_isa_xml,
     validate_amdgpu_generic_contracts,
     validate_amdgpu_target_id_processor_rows,
     validate_amdgpu_target_rows,
 )
 
-_TARGET_INFO_SOPP_INSTRUCTION_NAMES = (
-    "S_BRANCH",
-    "S_CBRANCH_SCC0",
-    "S_CBRANCH_SCC1",
-    "S_DELAY_ALU",
-    "S_ENDPGM",
-    "S_NOP",
-)
-
-
-@dataclass(frozen=True, slots=True)
-class _AmdgpuSoppOpcodeRow:
-    nop: int
-    delay_alu: int
-    endpgm: int
-    branch: int
-    conditional_branch_scc0: int
-    conditional_branch_scc1: int
-
 
 @dataclass(frozen=True, slots=True)
 class _AmdgpuDescriptorSetRow:
     info: AmdgpuDescriptorSetInfo
-    sopp: _AmdgpuSoppOpcodeRow
+    sopp: AmdgpuSoppOpcodeInfo
 
 
 def _u16_expr(value: int) -> str:
@@ -873,87 +849,14 @@ def _supported_wavefront_sizes(info: AmdgpuProcessorInfo) -> int:
     return flags
 
 
-def _parse_isa_xml_argument(value: str) -> tuple[str, Path]:
-    key, separator, path = value.partition(":")
-    if not separator or not key or not path:
-        raise ValueError("AMDGPU target-info --isa-xml entries must be key:path pairs")
-    return key, Path(path)
-
-
-def _parse_isa_xml_arguments(
-    values: Sequence[str],
-) -> dict[str, AmdgpuIsaInstructionFactSource]:
-    specs: dict[str, AmdgpuIsaInstructionFactSource] = {}
-    for value in values:
-        key, path = _parse_isa_xml_argument(value)
-        if key in specs:
-            raise ValueError(f"AMDGPU target-info ISA XML key '{key}' is duplicate")
-        specs[key] = parse_amdgpu_isa_xml_instructions_path(path, _TARGET_INFO_SOPP_INSTRUCTION_NAMES)
-    return specs
-
-
-def _sopp_opcode(spec: AmdgpuIsaInstructionFactSource, instruction_name: str) -> int:
-    summaries = tuple(
-        summary for summary in spec.instruction_encoding_summaries((instruction_name,), include_aliases=False) if summary.encoding_name == "ENC_SOPP" and summary.condition_name == "default"
-    )
-    if len(summaries) != 1:
-        raise ValueError(f"{spec.source_name}: expected one default ENC_SOPP encoding for {instruction_name}, found {len(summaries)}")
-    return summaries[0].opcode
-
-
-def _sopp_opcode_or_zero(spec: AmdgpuIsaInstructionFactSource, instruction_name: str) -> int:
-    try:
-        summaries = tuple(
-            summary for summary in spec.instruction_encoding_summaries((instruction_name,), include_aliases=False) if summary.encoding_name == "ENC_SOPP" and summary.condition_name == "default"
-        )
-    except AmdgpuIsaXmlError as exc:
-        message = str(exc)
-        if "unknown AMDGPU ISA instruction(s)" not in message or instruction_name not in message:
-            raise
-        return 0
-    if not summaries:
-        return 0
-    if len(summaries) != 1:
-        raise ValueError(f"{spec.source_name}: expected at most one default ENC_SOPP encoding for {instruction_name}, found {len(summaries)}")
-    return summaries[0].opcode
-
-
 def _materialize_descriptor_set_rows(
     descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
-    isa_specs: Mapping[str, AmdgpuIsaInstructionFactSource],
 ) -> tuple[_AmdgpuDescriptorSetRow, ...]:
     rows: list[_AmdgpuDescriptorSetRow] = []
     for info in descriptor_sets:
-        sopp_rows: list[_AmdgpuSoppOpcodeRow] = []
-        for isa_info in info.isa_infos:
-            spec = isa_specs.get(isa_info.isa_xml_key)
-            if spec is None:
-                raise ValueError(f"AMDGPU descriptor set {info.key} references missing ISA XML key '{isa_info.isa_xml_key}'")
-            if spec.architecture_name != isa_info.isa_architecture_name or spec.architecture_id != isa_info.isa_architecture_id:
-                validate_amdgpu_descriptor_set_isa_xml(info, spec)
-                raise ValueError(
-                    f"{spec.source_name}: AMDGPU descriptor set {info.key} ISA "
-                    f"XML key '{isa_info.isa_xml_key}' does not identify "
-                    f"{isa_info.isa_architecture_name} architecture id "
-                    f"{isa_info.isa_architecture_id}"
-                )
-            sopp_rows.append(
-                _AmdgpuSoppOpcodeRow(
-                    nop=_sopp_opcode(spec, "S_NOP"),
-                    delay_alu=_sopp_opcode_or_zero(spec, "S_DELAY_ALU"),
-                    endpgm=_sopp_opcode(spec, "S_ENDPGM"),
-                    branch=_sopp_opcode(spec, "S_BRANCH"),
-                    conditional_branch_scc0=_sopp_opcode(spec, "S_CBRANCH_SCC0"),
-                    conditional_branch_scc1=_sopp_opcode(spec, "S_CBRANCH_SCC1"),
-                )
-            )
-        sopp = sopp_rows[0]
-        for isa_info, member_sopp in zip(
-            info.isa_infos[1:],
-            sopp_rows[1:],
-            strict=True,
-        ):
-            if member_sopp != sopp:
+        sopp = info.isa_infos[0].sopp_opcodes
+        for isa_info in info.isa_infos[1:]:
+            if isa_info.sopp_opcodes != sopp:
                 raise ValueError(f"AMDGPU descriptor set {info.key} has incompatible S_OPP opcodes across ISA XML keys '{info.isa_infos[0].isa_xml_key}' and '{isa_info.isa_xml_key}'")
         rows.append(
             _AmdgpuDescriptorSetRow(
@@ -1038,6 +941,7 @@ def _validate_descriptor_set_rows(rows: Sequence[_AmdgpuDescriptorSetRow]) -> No
     for row in rows:
         opcode_rows = (
             ("s_nop", row.sopp.nop),
+            ("s_delay_alu", row.sopp.delay_alu),
             ("s_endpgm", row.sopp.endpgm),
             ("s_branch", row.sopp.branch),
             ("s_cbranch_scc0", row.sopp.conditional_branch_scc0),
@@ -1578,14 +1482,12 @@ def write_target_info_to_paths(
     header_path: Path,
     source_path: Path,
     tables_header_path: Path,
-    isa_xml_arguments: Sequence[str],
 ) -> None:
     descriptor_sets = sorted_descriptor_set_infos()
     processors = sorted_processor_infos()
     targets = sorted_target_infos()
-    isa_specs = _parse_isa_xml_arguments(isa_xml_arguments)
-    descriptor_set_rows = _materialize_descriptor_set_rows(descriptor_sets, isa_specs)
     _validate_descriptor_sets(descriptor_sets)
+    descriptor_set_rows = _materialize_descriptor_set_rows(descriptor_sets)
     _validate_descriptor_set_rows(descriptor_set_rows)
     _validate_matrix_coexecution_profiles()
     _validate_processors(processors, descriptor_sets)
@@ -1645,12 +1547,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help="Generated matrix coexecution source-layout fragment path.",
     )
-    parser.add_argument(
-        "--isa-xml",
-        action="append",
-        default=[],
-        help="ISA XML fact source as key:path.",
-    )
     args = parser.parse_args(argv)
 
     wrote_output = False
@@ -1662,7 +1558,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             header_path=args.header,
             source_path=args.source,
             tables_header_path=args.tables_header,
-            isa_xml_arguments=args.isa_xml,
         )
         wrote_output = True
     if args.cache_policy_encoding_rows is not None:

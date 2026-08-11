@@ -69,7 +69,6 @@ iree_py_binary(
         "//loom/py/loom/gen/support",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch/amdgpu:descriptors",
-        "//loom/py/loom/target/arch/amdgpu:isa_xml",
         "//loom/py/loom/target/arch/amdgpu:target_info",
     ],
 )
@@ -85,5 +84,24 @@ iree_py_test(
     deps = [
         ":target_info",
         "//loom/py/loom/target/arch/amdgpu:target_info",
+    ],
+)
+
+iree_py_test(
+    name = "target_info_isa_oracle_test",
+    srcs = ["amdgpu_target_info_isa_oracle_test.py"],
+    data = [
+        "@amdgpu_isa_xml//:amdgpu_isa_cdna3.xml",
+        "@amdgpu_isa_xml//:amdgpu_isa_cdna4.xml",
+        "@amdgpu_isa_xml//:amdgpu_isa_rdna3.xml",
+        "@amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml",
+        "@amdgpu_isa_xml//:amdgpu_isa_rdna4.xml",
+    ],
+    main = "amdgpu_target_info_isa_oracle_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    deps = [
+        "//loom/py/loom/target/arch/amdgpu:isa_xml",
+        "//loom/py/loom/target/arch/amdgpu:target_info",
+        "@rules_python//python/runfiles",
     ],
 )

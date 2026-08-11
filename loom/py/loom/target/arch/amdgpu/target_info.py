@@ -406,10 +406,40 @@ class AmdgpuVectorMemoryCachePolicyEncodingInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class AmdgpuSoppOpcodeInfo:
+    nop: int
+    delay_alu: int
+    endpgm: int
+    branch: int
+    conditional_branch_scc0: int
+    conditional_branch_scc1: int
+
+
+AMDGPU_SOPP_OPCODE_INFO_CDNA = AmdgpuSoppOpcodeInfo(
+    nop=0x000,
+    delay_alu=0x000,
+    endpgm=0x001,
+    branch=0x002,
+    conditional_branch_scc0=0x004,
+    conditional_branch_scc1=0x005,
+)
+
+AMDGPU_SOPP_OPCODE_INFO_RDNA = AmdgpuSoppOpcodeInfo(
+    nop=0x000,
+    delay_alu=0x007,
+    endpgm=0x030,
+    branch=0x020,
+    conditional_branch_scc0=0x021,
+    conditional_branch_scc1=0x022,
+)
+
+
+@dataclass(frozen=True, slots=True)
 class AmdgpuDescriptorSetIsaInfo:
     isa_xml_key: str
     isa_architecture_name: str
     isa_architecture_id: int
+    sopp_opcodes: AmdgpuSoppOpcodeInfo
     # OPR_SRC predefined value seeded into unwritten VOP3 source fields.
     vop3_unused_source_value: str | None = None
 
@@ -434,18 +464,21 @@ AMDGPU_DESCRIPTOR_SET_ISA_CDNA3 = AmdgpuDescriptorSetIsaInfo(
     isa_xml_key="cdna3",
     isa_architecture_name="AMD CDNA 3",
     isa_architecture_id=2,
+    sopp_opcodes=AMDGPU_SOPP_OPCODE_INFO_CDNA,
 )
 
 AMDGPU_DESCRIPTOR_SET_ISA_CDNA4 = AmdgpuDescriptorSetIsaInfo(
     isa_xml_key="cdna4",
     isa_architecture_name="AMD CDNA 4",
     isa_architecture_id=3,
+    sopp_opcodes=AMDGPU_SOPP_OPCODE_INFO_CDNA,
 )
 
 AMDGPU_DESCRIPTOR_SET_ISA_RDNA3 = AmdgpuDescriptorSetIsaInfo(
     isa_xml_key="rdna3",
     isa_architecture_name="AMD RDNA 3",
     isa_architecture_id=8,
+    sopp_opcodes=AMDGPU_SOPP_OPCODE_INFO_RDNA,
     vop3_unused_source_value="0",
 )
 
@@ -453,6 +486,7 @@ AMDGPU_DESCRIPTOR_SET_ISA_RDNA3_5 = AmdgpuDescriptorSetIsaInfo(
     isa_xml_key="rdna3_5",
     isa_architecture_name="AMD RDNA 3.5",
     isa_architecture_id=9,
+    sopp_opcodes=AMDGPU_SOPP_OPCODE_INFO_RDNA,
     vop3_unused_source_value="0",
 )
 
@@ -460,6 +494,7 @@ AMDGPU_DESCRIPTOR_SET_ISA_RDNA4 = AmdgpuDescriptorSetIsaInfo(
     isa_xml_key="rdna4",
     isa_architecture_name="AMD RDNA 4",
     isa_architecture_id=10,
+    sopp_opcodes=AMDGPU_SOPP_OPCODE_INFO_RDNA,
     vop3_unused_source_value="0",
 )
 
