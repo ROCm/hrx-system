@@ -258,17 +258,27 @@ def derive_descriptor_projections(
             if OperandFlag.EARLY_CLOBBER not in flags:
                 flags.append(OperandFlag.EARLY_CLOBBER)
 
+    projected_flags = tuple(derived_flags)
+    projection_changed = projected_flags != descriptor.flags
+    projected_operands: list[Operand] = []
+    for operand, flags in zip(
+        descriptor.operands,
+        operand_flags,
+        strict=True,
+    ):
+        projected_operand_flags = tuple(flags)
+        if projected_operand_flags == operand.flags:
+            projected_operands.append(operand)
+            continue
+        projected_operands.append(replace(operand, flags=projected_operand_flags))
+        projection_changed = True
+
+    if not projection_changed:
+        return descriptor
     return replace(
         descriptor,
-        flags=tuple(derived_flags),
-        operands=tuple(
-            replace(operand, flags=tuple(flags))
-            for operand, flags in zip(
-                descriptor.operands,
-                operand_flags,
-                strict=True,
-            )
-        ),
+        flags=projected_flags,
+        operands=tuple(projected_operands),
     )
 
 
