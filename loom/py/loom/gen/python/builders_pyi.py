@@ -10,11 +10,9 @@ from __future__ import annotations
 
 import argparse
 import re
-import shutil
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from loom.builder_model import (
@@ -27,9 +25,18 @@ from loom.builder_model import (
 from loom.builders import default_ops
 from loom.dsl import Op
 from loom.gen import bootstrap as _bootstrap
-from loom.gen.support.generated_file import line_comment_header
+from loom.gen.support.generated_file import (
+    GeneratedFileMaintenanceMode,
+    GeneratedFileMaintenanceResult,
+    GeneratedFileSet,
+    line_comment_header,
+    maintain_generated_file_set,
+)
 
 type CategoryGroups = Mapping[str, Sequence[tuple[Any, Sequence[Op]]]]
+
+DESCRIPTION = "Python builder stubs"
+REGENERATE_COMMAND = "python3 loom/py/loom/gen/run.py builders_pyi --in-place"
 
 
 @dataclass(frozen=True, slots=True)
@@ -349,7 +356,7 @@ def _header() -> list[str]:
     return line_comment_header(
         "#",
         generator="loom.gen.python.builders_pyi",
-        regenerate="python3 loom/py/loom/gen/run.py builders_pyi --in-place",
+        regenerate=REGENERATE_COMMAND,
     )
 
 
@@ -370,42 +377,32 @@ def _output_files() -> dict[str, str]:
     )
 
 
-def _write_files(files: Mapping[str, str]) -> None:
-    for generated_root in _generated_roots():
-        if generated_root.exists():
-            shutil.rmtree(generated_root)
-    for rel_path, content in sorted(files.items()):
-        path = _bootstrap.REPO_ROOT / rel_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-        print(f"  {rel_path}")
-
-
-def _check_files(files: Mapping[str, str]) -> int:
-    expected_paths = {_bootstrap.REPO_ROOT / rel_path for rel_path in files}
-    stale_or_changed: list[str] = []
-    for rel_path, expected in sorted(files.items()):
-        path = _bootstrap.REPO_ROOT / rel_path
-        if not path.exists() or path.read_text(encoding="utf-8") != expected:
-            stale_or_changed.append(rel_path)
-    for generated_root in _generated_roots():
-        if not generated_root.exists():
-            continue
-        stale_or_changed.extend(str(path.relative_to(_bootstrap.REPO_ROOT)) for path in generated_root.rglob("*.pyi") if path not in expected_paths)
-    if stale_or_changed:
-        print(
-            "error: generated builder stubs are stale; regenerate with python3 loom/py/loom/gen/run.py builders_pyi --in-place",
-            file=sys.stderr,
-        )
-        for rel_path in stale_or_changed:
-            print(f"  {rel_path}", file=sys.stderr)
-        return 1
-    return 0
-
-
-def _generated_roots() -> tuple[Path, ...]:
+def _obsolete_output_paths(expected_paths: set[str]) -> tuple[str, ...]:
     dialect_root = _bootstrap.REPO_ROOT / "loom" / "py" / "loom" / "dialect"
-    return tuple(path for path in dialect_root.glob("*/builders") if path.is_dir())
+    existing_paths = (path.relative_to(_bootstrap.REPO_ROOT).as_posix() for path in dialect_root.glob("*/builders/**/*.pyi") if path.is_file())
+    return tuple(sorted(path for path in existing_paths if path not in expected_paths))
+
+
+def checked_in_file_set() -> GeneratedFileSet:
+    """Returns the complete checked-in builder-stub ownership set."""
+    files = _output_files()
+    return GeneratedFileSet.from_mapping(
+        files,
+        obsolete_paths=_obsolete_output_paths(set(files)),
+    )
+
+
+def maintain_checked_in_files(
+    mode: GeneratedFileMaintenanceMode,
+) -> GeneratedFileMaintenanceResult:
+    """Checks or updates all checked-in builder stubs."""
+    return maintain_generated_file_set(
+        _bootstrap.REPO_ROOT,
+        checked_in_file_set(),
+        mode=mode,
+        description=DESCRIPTION,
+        regenerate_command=REGENERATE_COMMAND,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -415,11 +412,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     mode.add_argument("--in-place", action="store_true")
     args = parser.parse_args(argv)
 
-    files = _output_files()
-    if args.in_place:
-        _write_files(files)
-        return 0
-    return _check_files(files)
+    result = maintain_checked_in_files("update" if args.in_place else "check")
+    return 0 if result.ok else 1
 
 
 if __name__ == "__main__":
