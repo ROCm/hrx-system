@@ -15,8 +15,15 @@
 extern "C" {
 #endif
 
-// Returns true when low asm region syntax was requested by print options.
-bool loom_print_low_asm_is_requested(loom_print_context_t* ctx);
+// Returns true when |region| must use low asm syntax under the active source or
+// printer policy. Nested regions inherit an enclosing low asm region.
+bool loom_print_low_asm_is_requested(loom_print_context_t* ctx,
+                                     const loom_region_t* region);
+
+// Returns true when a requested low asm region starts with an explicit `asm`
+// marker instead of inheriting syntax from its enclosing region.
+bool loom_print_low_asm_uses_marker(loom_print_context_t* ctx,
+                                    const loom_region_t* region);
 
 // Attempts to print a region using optional low asm syntax. When canonical
 // fallback is allowed, sets |out_printed| to false if no lossless asm spelling

@@ -42,10 +42,42 @@ typedef struct loom_print_low_asm_preflight_failure_t {
   uint16_t operand_count;
 } loom_print_low_asm_preflight_failure_t;
 
-bool loom_print_low_asm_is_requested(loom_print_context_t* ctx) {
-  return ctx->low_repr.descriptor_set != NULL &&
-         iree_any_bit_set(ctx->flags, LOOM_TEXT_PRINT_PREFER_LOW_ASM |
+static bool loom_print_low_asm_preserves_source(
+    const loom_print_context_t* ctx) {
+  return iree_any_bit_set(ctx->flags, LOOM_TEXT_PRINT_PRESERVE_LOW_ASM);
+}
+
+static bool loom_print_low_asm_source_is_marked(const loom_region_t* region) {
+  return region && iree_any_bit_set(region->source_flags,
+                                    LOOM_REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM);
+}
+
+bool loom_print_low_asm_is_requested(loom_print_context_t* ctx,
+                                     const loom_region_t* region) {
+  if (ctx->low_repr.descriptor_set == NULL) return false;
+  if (ctx->low_asm_region_depth != 0) return true;
+  if (loom_print_low_asm_preserves_source(ctx)) {
+    return loom_print_low_asm_source_is_marked(region);
+  }
+  return iree_any_bit_set(ctx->flags, LOOM_TEXT_PRINT_PREFER_LOW_ASM |
                                           LOOM_TEXT_PRINT_REQUIRE_LOW_ASM);
+}
+
+bool loom_print_low_asm_uses_marker(loom_print_context_t* ctx,
+                                    const loom_region_t* region) {
+  if (loom_print_low_asm_preserves_source(ctx)) {
+    return loom_print_low_asm_source_is_marked(region);
+  }
+  return ctx->low_asm_region_depth == 0;
+}
+
+static bool loom_print_low_asm_is_required(loom_print_context_t* ctx,
+                                           const loom_region_t* region) {
+  if (loom_print_low_asm_preserves_source(ctx)) {
+    return ctx->low_asm_region_depth != 0 ||
+           loom_print_low_asm_source_is_marked(region);
+  }
+  return iree_any_bit_set(ctx->flags, LOOM_TEXT_PRINT_REQUIRE_LOW_ASM);
 }
 
 static bool loom_print_low_asm_allows_canonical_op(loom_print_context_t* ctx,
@@ -1004,7 +1036,7 @@ iree_status_t loom_print_low_asm_optional_region(
       ctx, region, region_descriptor, entry_args_declared_by_parent, &low_repr,
       &failure, &available));
   if (!available) {
-    if (iree_any_bit_set(ctx->flags, LOOM_TEXT_PRINT_REQUIRE_LOW_ASM)) {
+    if (loom_print_low_asm_is_required(ctx, region)) {
       return loom_print_low_asm_make_unavailable_status(low_repr.contract_key,
                                                         &failure);
     }
@@ -1012,8 +1044,9 @@ iree_status_t loom_print_low_asm_optional_region(
   }
   *out_printed = true;
   const loom_print_low_asm_prefix_t prefix =
-      ctx->low_asm_region_depth == 0 ? LOOM_PRINT_LOW_ASM_PREFIX_MARKER
-                                     : LOOM_PRINT_LOW_ASM_PREFIX_NONE;
+      loom_print_low_asm_uses_marker(ctx, region)
+          ? LOOM_PRINT_LOW_ASM_PREFIX_MARKER
+          : LOOM_PRINT_LOW_ASM_PREFIX_NONE;
   return loom_print_low_asm_region_with_repr(ctx, region, region_descriptor,
                                              entry_args_declared_by_parent,
                                              low_repr, prefix);

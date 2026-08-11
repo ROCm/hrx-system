@@ -179,6 +179,7 @@ static iree_status_t loom_ir_clone_region_skeleton(
   IREE_RETURN_IF_ERROR(loom_module_allocate_region(
       remap->target_module, source_region->block_count, &target_region));
   target_region->flags = source_region->flags;
+  target_region->source_flags = source_region->source_flags;
 
   for (uint16_t block_index = 0; block_index < source_region->block_count;
        ++block_index) {

@@ -322,6 +322,20 @@ TEST_F(MaterializeTest, ClonesRegionSuccessorsToClonedBlocks) {
   EXPECT_NE(loom_test_br_dest(cloned_branch), source_dest);
 }
 
+TEST_F(MaterializeTest, ClonesRegionSourcePresentation) {
+  loom_region_t* source_region = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate_region(source_, 1, &source_region));
+  source_region->source_flags |= LOOM_REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM;
+
+  loom_ir_remap_t remap = InitializeRemap();
+  loom_region_t* cloned_region = nullptr;
+  IREE_ASSERT_OK(loom_ir_clone_region(&target_builder_, source_region, &remap,
+                                      &cloned_region));
+
+  ASSERT_NE(cloned_region, nullptr);
+  EXPECT_EQ(cloned_region->source_flags, source_region->source_flags);
+}
+
 TEST_F(MaterializeTest, RejectsCrossModuleCloneWithUnmappedSuccessor) {
   loom_region_t* source_region = nullptr;
   IREE_ASSERT_OK(loom_module_allocate_region(source_, 2, &source_region));

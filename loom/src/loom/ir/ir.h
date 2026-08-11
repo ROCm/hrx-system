@@ -1731,6 +1731,14 @@ enum loom_region_instance_flag_bits_e {
 };
 typedef uint16_t loom_region_instance_flags_t;
 
+// Source presentation recorded for a region. These flags do not affect
+// program semantics or structural analyses.
+enum loom_region_source_flag_bits_e {
+  // The region was introduced by an explicit `asm` marker in source text.
+  LOOM_REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM = 1u << 0,
+};
+typedef uint16_t loom_region_source_flags_t;
+
 // A region: an ordered list of blocks. Used for function bodies,
 // loop bodies (scf.for), conditional branches (scf.if then/else).
 // Regions nest: a region's block contains ops that may have their
@@ -1748,8 +1756,8 @@ typedef struct loom_region_t {
   uint16_t block_capacity;
   // Per-region structural flags.
   loom_region_instance_flags_t flags;
-  // Reserved for future flags while keeping effect counters aligned.
-  uint16_t reserved;
+  // Non-semantic source presentation retained across exact round trips.
+  loom_region_source_flags_t source_flags;
   // Transitive count of read-like effects in all live ops nested in this
   // region. READS_MEMORY, NON_DETERMINISTIC, and UNKNOWN_EFFECTS contribute.
   uint32_t read_effect_count;

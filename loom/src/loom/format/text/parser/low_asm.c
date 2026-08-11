@@ -1022,8 +1022,12 @@ iree_status_t loom_parse_low_asm_marked_region(
         parser, marker_token,
         IREE_SV("function representation contract is not available"));
   }
-  return loom_parse_low_asm_braced_region(parser, region_descriptor,
-                                          parser->low_repr, out_region);
+  IREE_RETURN_IF_ERROR(loom_parse_low_asm_braced_region(
+      parser, region_descriptor, parser->low_repr, out_region));
+  if (*out_region) {
+    (*out_region)->source_flags |= LOOM_REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM;
+  }
+  return iree_ok_status();
 }
 
 iree_status_t loom_parse_low_asm_inherited_region(

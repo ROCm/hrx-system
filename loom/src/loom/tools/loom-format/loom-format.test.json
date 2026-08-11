@@ -63,6 +63,19 @@
       }
     },
     {
+      "name": "preserves canonical target-low asm in check mode",
+      "run": {
+        "tool": "loom-format",
+        "args": ["--check"]
+      },
+      "stdin": {
+        "text": "llvmir.target<object> @target {triple = \"amdgcn-amd-amdhsa\"}\n\nlow.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) @dispatch() asm {\n  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>\n  %value = load.i32 %input, 4\n  return\n}\n"
+      },
+      "stdout": {
+        "empty": true
+      }
+    },
+    {
       "name": "diagnoses unresolved symbol before bytecode output",
       "run": {
         "tool": "loom-format",

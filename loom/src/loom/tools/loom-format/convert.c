@@ -151,7 +151,7 @@ static iree_status_t loom_format_write_text_output(
   iree_string_builder_initialize(allocator, &builder);
 
   const loom_text_print_options_t print_options = {
-      .flags = LOOM_TEXT_PRINT_DEFAULT,
+      .flags = LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_PRESERVE_LOW_ASM,
       .low_asm_environment = low_asm_environment,
   };
   iree_status_t status = loom_text_print_module_to_builder_with_options(

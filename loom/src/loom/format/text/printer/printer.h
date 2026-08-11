@@ -48,6 +48,10 @@ enum loom_text_print_flag_bits_e {
   // Prefer low asm for self-describing function regions when a descriptor
   // environment is available, with canonical syntax as a lossless fallback.
   LOOM_TEXT_PRINT_PREFER_LOW_ASM = 1u << 6,
+  // Preserve explicit low asm markers recorded by text parsing. Marked regions
+  // must retain lossless asm syntax and unmarked root regions remain generic.
+  // This source contract takes precedence over prefer/require policy flags.
+  LOOM_TEXT_PRINT_PRESERVE_LOW_ASM = 1u << 7,
 };
 typedef uint32_t loom_text_print_flags_t;
 
