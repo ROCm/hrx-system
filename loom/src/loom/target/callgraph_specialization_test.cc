@@ -36,6 +36,9 @@ typedef struct TestTargetProfile {
 
   // Exact subgroup size projected by this profile.
   uint32_t subgroup_size;
+
+  // Whether the subgroup size was supplied explicitly.
+  bool subgroup_size_explicit;
 } TestTargetProfile;
 
 static iree_status_t ProjectTestProfileFacts(
@@ -46,6 +49,10 @@ static iree_status_t ProjectTestProfileFacts(
       reinterpret_cast<const TestTargetProfile*>(base_profile);
   out_facts->selector = LOOM_TEST_TARGET_KIND_LOW_CORE;
   out_facts->storage.snapshot.subgroup_size = profile->subgroup_size;
+  if (profile->subgroup_size_explicit) {
+    loom_target_fact_field_set_insert(&out_facts->explicit_fields,
+                                      LOOM_TARGET_FACT_FIELD_SUBGROUP_SIZE);
+  }
   return iree_ok_status();
 }
 
@@ -55,7 +62,8 @@ static const loom_target_profile_type_t kTestProfileType = {
     /*.project_facts=*/ProjectTestProfileFacts,
 };
 
-static TestTargetProfile MakeTestProfile(uint32_t subgroup_size) {
+static TestTargetProfile MakeTestProfile(uint32_t subgroup_size,
+                                         bool subgroup_size_explicit = false) {
   return TestTargetProfile{
       /*.base=*/
       {
@@ -65,6 +73,7 @@ static TestTargetProfile MakeTestProfile(uint32_t subgroup_size) {
                                           LOOM_TEST_TARGET_KIND_LOW_CORE),
       },
       /*.subgroup_size=*/subgroup_size,
+      /*.subgroup_size_explicit=*/subgroup_size_explicit,
   };
 }
 
@@ -428,6 +437,63 @@ func.def public @wave64_root() {
       OnlySemanticCallee(module.get(), Function(module.get(), recursive64_ref));
   EXPECT_EQ(recursive32_self.symbol_id, recursive32_ref.symbol_id);
   EXPECT_EQ(recursive64_self.symbol_id, recursive64_ref.symbol_id);
+}
+
+TEST_F(TargetCallgraphSpecializationTest,
+       KeepsExplicitAndDefaultedTargetContextsDistinct) {
+  ModulePtr module = Parse(R"(
+func.def @shared() -> (index) {
+  %size = target.subgroup.size : index
+  func.return %size : index
+}
+
+func.def public @default_root() -> (index) {
+  %size = func.call @shared() : () -> (index)
+  func.return %size : index
+}
+
+func.def public @explicit_root() -> (index) {
+  %size = func.call @shared() : () -> (index)
+  func.return %size : index
+}
+)");
+  const TestTargetProfile default_wave32 = MakeTestProfile(32);
+  const TestTargetProfile explicit_wave32 = MakeTestProfile(32, true);
+  const loom_target_specialization_request_t requests[] = {
+      {/*.function_name=*/IREE_SV("default_root"),
+       /*.target_profile=*/&default_wave32.base},
+      {/*.function_name=*/IREE_SV("explicit_root"),
+       /*.target_profile=*/&explicit_wave32.base},
+  };
+  loom_target_specialization_result_t specialization =
+      Specialize(module.get(), requests, IREE_ARRAYSIZE(requests));
+
+  ASSERT_TRUE(Run(module.get(), &specialization.function_versions));
+  ASSERT_EQ(specialization.function_versions.list.count, 4u);
+  const loom_symbol_ref_t default_shared_ref = OnlySemanticCallee(
+      module.get(), Function(module.get(), IREE_SV("default_root")));
+  const loom_symbol_ref_t explicit_shared_ref = OnlySemanticCallee(
+      module.get(), Function(module.get(), IREE_SV("explicit_root")));
+  EXPECT_NE(default_shared_ref.symbol_id, explicit_shared_ref.symbol_id);
+
+  const loom_target_function_version_t* default_shared_version = Version(
+      module.get(), specialization.function_versions, default_shared_ref);
+  const loom_target_function_version_t* explicit_shared_version = Version(
+      module.get(), specialization.function_versions, explicit_shared_ref);
+  ASSERT_NE(default_shared_version, nullptr);
+  ASSERT_NE(explicit_shared_version, nullptr);
+  EXPECT_EQ(default_shared_version->resolved_target.facts->storage.snapshot
+                .subgroup_size,
+            32u);
+  EXPECT_EQ(explicit_shared_version->resolved_target.facts->storage.snapshot
+                .subgroup_size,
+            32u);
+  EXPECT_FALSE(loom_target_facts_field_is_explicit(
+      default_shared_version->resolved_target.facts,
+      LOOM_TARGET_FACT_FIELD_SUBGROUP_SIZE));
+  EXPECT_TRUE(loom_target_facts_field_is_explicit(
+      explicit_shared_version->resolved_target.facts,
+      LOOM_TARGET_FACT_FIELD_SUBGROUP_SIZE));
 }
 
 TEST_F(TargetCallgraphSpecializationTest,

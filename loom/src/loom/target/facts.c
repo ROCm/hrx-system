@@ -47,6 +47,19 @@ bool loom_target_facts_satisfy_specialization_requirement(
       effective, requirement);
 }
 
+bool loom_target_facts_are_equivalent(const loom_target_facts_t* lhs,
+                                      const loom_target_facts_t* rhs) {
+  IREE_ASSERT_ARGUMENT(lhs);
+  IREE_ASSERT_ARGUMENT(rhs);
+  if (lhs == rhs) {
+    return true;
+  }
+  return lhs->fact_type == rhs->fact_type &&
+         lhs->explicit_fields == rhs->explicit_fields &&
+         loom_target_facts_satisfy_specialization_requirement(lhs, rhs) &&
+         loom_target_facts_satisfy_specialization_requirement(rhs, lhs);
+}
+
 bool loom_target_facts_structural_satisfy_specialization_requirement(
     const loom_target_facts_t* effective,
     const loom_target_facts_t* requirement) {

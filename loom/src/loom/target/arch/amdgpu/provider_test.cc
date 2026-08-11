@@ -743,6 +743,10 @@ TEST_F(AmdgpuProviderTest, SeparatesIdentityAndSpecializationRequirements) {
   EXPECT_TRUE(gfx1151_explicit_wave32_facts->subgroup_size_explicit);
   EXPECT_FALSE(gfx11_generic_facts->contract_set_key_explicit);
   EXPECT_TRUE(gfx11_explicit_contract_facts->contract_set_key_explicit);
+  EXPECT_TRUE(loom_target_facts_are_equivalent(gfx1151_a->projection,
+                                               gfx1151_b->projection));
+  EXPECT_FALSE(loom_target_facts_are_equivalent(
+      gfx1151_a->projection, gfx1151_explicit_wave32->projection));
 
   // Identity is only the generated code-object domain and target-ID
   // coordinates. Common projection explicitness cannot narrow it.
@@ -800,6 +804,10 @@ TEST_F(AmdgpuProviderTest, PreservesTargetIdFeatureRequirements) {
   EXPECT_FALSE(SatisfiesIdentity(xnack_on, xnack_off));
   EXPECT_FALSE(SatisfiesIdentity(any, xnack_on));
   EXPECT_FALSE(SatisfiesIdentity(xnack_off, xnack_on));
+  EXPECT_FALSE(
+      loom_target_facts_are_equivalent(any->projection, xnack_on->projection));
+  EXPECT_FALSE(loom_target_facts_are_equivalent(xnack_on->projection,
+                                                xnack_off->projection));
 }
 
 TEST_F(AmdgpuProviderTest, PreservesTargetOverlayRequirements) {

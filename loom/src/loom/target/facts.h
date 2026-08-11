@@ -191,6 +191,16 @@ bool loom_target_facts_satisfy_specialization_requirement(
     const loom_target_facts_t* effective,
     const loom_target_facts_t* requirement);
 
+// Returns whether |lhs| and |rhs| carry the same durable target semantics.
+//
+// Equivalent facts have the same static fact type and explicit-input
+// provenance, and each satisfies the other's family-defined specialization
+// requirements. This is stricter than having the same effective values:
+// explicitly supplying a value equal to a selector default remains observable
+// so later specialization cannot reinterpret the target differently.
+bool loom_target_facts_are_equivalent(const loom_target_facts_t* lhs,
+                                      const loom_target_facts_t* rhs);
+
 // Common structural relation for target families whose selector, snapshot,
 // and configuration fully define compatibility. Function ABI and export facts
 // do not participate.

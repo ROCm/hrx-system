@@ -360,12 +360,6 @@ loom_target_callgraph_find_derived_context(
   return NULL;
 }
 
-static bool loom_target_callgraph_facts_are_equivalent(
-    const loom_target_facts_t* lhs, const loom_target_facts_t* rhs) {
-  return loom_target_facts_satisfy_specialization_requirement(lhs, rhs) &&
-         loom_target_facts_satisfy_specialization_requirement(rhs, lhs);
-}
-
 static const loom_target_facts_t*
 loom_target_callgraph_find_existing_equivalent_facts(
     const loom_target_callgraph_state_t* state,
@@ -376,8 +370,8 @@ loom_target_callgraph_find_existing_equivalent_facts(
   while (row_id != LOOM_TARGET_CALLGRAPH_ROW_ID_INVALID) {
     const loom_target_callgraph_row_t* row = &state->rows[row_id];
     if (row->existing_version != NULL &&
-        loom_target_callgraph_facts_are_equivalent(
-            row->context->resolved_target.facts, candidate_facts)) {
+        loom_target_facts_are_equivalent(row->context->resolved_target.facts,
+                                         candidate_facts)) {
       return row->context->resolved_target.facts;
     }
     row_id = row->next_symbol_row_id;
