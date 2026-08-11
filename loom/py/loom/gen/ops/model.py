@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Python DSL model loading for Loom C op table generation."""
+"""Loads the canonical Loom declaration model for generated artifacts."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from loom.dsl import EncodingFamilyDef, Op, ParameterizedAttrDef
 
 @dataclass(frozen=True)
 class DialectGeneration:
-    """Generated C metadata inputs for one dialect."""
+    """Canonical declaration inputs owned by one dialect."""
 
     dialect: Any
     ops: list[Op]
@@ -29,7 +29,7 @@ class DialectGeneration:
 
 @dataclass(frozen=True)
 class GenerationModel:
-    """Complete op/type model consumed by C table generation."""
+    """Complete op/type model consumed by Loom generators."""
 
     dialects: list[DialectGeneration]
     types: list[Any]
@@ -256,7 +256,7 @@ _DIALECT_GENERATION_LOADERS: tuple[tuple[str, DialectGenerationLoader], ...] = (
 
 
 def dialect_names() -> tuple[str, ...]:
-    """Returns dialect names accepted by selected C table generation."""
+    """Returns dialect names available to declaration-model consumers."""
     return tuple(name for name, _ in _DIALECT_GENERATION_LOADERS)
 
 
@@ -273,7 +273,7 @@ def _load_core_types() -> list[Any]:
 
 
 def load_generation_model() -> GenerationModel:
-    """Loads all Python DSL declarations needed for C table generation."""
+    """Loads all canonical Python DSL declarations."""
     return GenerationModel(
         dialects=[loader() for _, loader in _DIALECT_GENERATION_LOADERS],
         types=_load_core_types(),

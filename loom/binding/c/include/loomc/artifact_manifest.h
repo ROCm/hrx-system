@@ -71,10 +71,18 @@ typedef struct loomc_artifact_manifest_options_t {
 /// Parses a stable artifact manifest mode spelling.
 ///
 /// Accepts `""`, `"none"`, `"summary"`, `"details"`, or `"analysis"`.
+///
+/// @param value Mode spelling to parse. The view need not be NUL-terminated.
+/// @param out_mode Receives the parsed mode on success.
+/// @return OK when `value` is recognized. Invalid argument is returned when
+/// `out_mode` is `NULL`, the view is malformed, or the spelling is unsupported.
 LOOMC_API_EXPORT loomc_status_t loomc_artifact_manifest_mode_parse(
     loomc_string_view_t value, loomc_artifact_manifest_mode_t* out_mode);
 
 /// Returns the stable JSON/CLI spelling for `mode`.
+///
+/// @param mode Mode to name. Unrecognized values use the `"none"` spelling.
+/// @return Borrowed static string view containing the stable spelling.
 LOOMC_API_EXPORT loomc_string_view_t
 loomc_artifact_manifest_mode_name(loomc_artifact_manifest_mode_t mode);
 

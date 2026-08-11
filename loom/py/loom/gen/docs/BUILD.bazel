@@ -1,0 +1,62 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_library", "iree_py_test")
+
+package(
+    default_visibility = ["//loom/py/loom/gen:__subpackages__"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+REFERENCE_MODEL_DEPS = [
+    "//loom/py/loom/dialect:package",
+    "//loom/py/loom/target/arch/amdgpu:dialect",
+    "//loom/py/loom/target/arch/ireevm:dialect",
+    "//loom/py/loom/target/arch/spirv:dialect",
+    "//loom/py/loom/target/arch/wasm:dialect",
+    "//loom/py/loom/target/arch/x86:dialect",
+]
+
+iree_py_library(
+    name = "reference",
+    srcs = [
+        "__init__.py",
+        "reference.py",
+    ],
+    tags = ["skip-bazel_to_cmake"],
+    visibility = [
+        "//loom/docs:__pkg__",
+        "//loom/py/loom/gen:__subpackages__",
+    ],
+    deps = [
+        "//loom/py/loom:core",
+        "//loom/py/loom/gen/ops:model",
+    ],
+)
+
+iree_py_binary(
+    name = "generate_reference",
+    srcs = ["generate_reference.py"],
+    main = "generate_reference.py",
+    tags = ["skip-bazel_to_cmake"],
+    deps = [
+        ":reference",
+    ] + REFERENCE_MODEL_DEPS,
+)
+
+iree_py_test(
+    name = "reference_test",
+    srcs = [
+        "reference_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.gen.docs.reference_test"],
+    main = "pytest_style_runner.py",
+    tags = ["skip-bazel_to_cmake"],
+    deps = [
+        ":reference",
+    ] + REFERENCE_MODEL_DEPS,
+)

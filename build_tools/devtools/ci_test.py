@@ -1061,6 +1061,48 @@ class CiTest(unittest.TestCase):
             block,
         )
 
+    def test_loom_docs_workflow_builds_review_artifact_without_deploy_access(self):
+        text = Path(".github/workflows/docs.yml").read_text()
+        block = self.workflow_job_block(".github/workflows/docs.yml", "build_docs")
+
+        for path in (
+            '"requirements-analysis.lock.txt"',
+            '"requirements-dev.lock.txt"',
+            '"build_tools/devtools/**"',
+            '"loom/binding/c/**"',
+            '"loom/docs/**"',
+            '"loom/py/loom/**"',
+            '"loom/src/loom/editor/textmate/**"',
+        ):
+            self.assertIn(f"- {path}", text)
+        self.assertIn("runs-on: ubuntu-24.04", block)
+        self.assertIn("python3 dev.py setup --docs", block)
+        self.assertIn("loom_docs.highlight_test", block)
+        self.assertIn(
+            "--site-dir build/loom-pages/loom",
+            block,
+        )
+        self.assertIn(
+            "test -f build/loom-pages/loom/reference/dialects/index.html",
+            block,
+        )
+        self.assertIn(
+            "test -f build/loom-pages/loom/reference/c-api/generated/index.html",
+            block,
+        )
+        self.assertIn(
+            "uses: actions/upload-pages-artifact@"
+            "fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0",
+            block,
+        )
+        self.assertIn("path: build/loom-pages", block)
+        self.assertNotIn("apt-get", text)
+        self.assertNotIn("pip install", text)
+        self.assertNotIn("sudo", text)
+        self.assertNotIn("pages: write", text)
+        self.assertNotIn("id-token: write", text)
+        self.assertNotIn("actions/deploy-pages", text)
+
     def test_xfails_project_to_ctest_regexes(self):
         self.assertIn(
             "^iree/tokenizer/",

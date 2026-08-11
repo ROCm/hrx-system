@@ -1,0 +1,31 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_test")
+
+package(
+    default_visibility = ["//visibility:private"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_py_test(
+    name = "site_test",
+    srcs = ["site_test.py"],
+    data = ["src/stylesheets/extra.css"],
+    tags = ["skip-bazel_to_cmake"],
+)
+
+iree_py_test(
+    name = "prepare_test",
+    srcs = [
+        "hooks/prepare.py",
+        "hooks/prepare_test.py",
+    ],
+    imports = ["hooks"],
+    main = "hooks/prepare_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    deps = ["//loom/py/loom/gen/docs:reference"],
+)

@@ -68,10 +68,18 @@ typedef struct loomc_compile_report_options_t {
 ///
 /// Accepts `""`, `"none"`, `"summary"`, `"details"`, `"json"`,
 /// `"json-summary"`, or `"json-details"`.
+///
+/// @param value Mode spelling to parse. The view need not be NUL-terminated.
+/// @param out_mode Receives the parsed mode on success.
+/// @return OK when `value` is recognized. Invalid argument is returned when
+/// `out_mode` is `NULL` or the spelling is unsupported.
 LOOMC_API_EXPORT loomc_status_t loomc_compile_report_mode_parse(
     loomc_string_view_t value, loomc_compile_report_mode_t* out_mode);
 
 /// Returns the stable JSON/CLI spelling for `mode`.
+///
+/// @param mode Mode to name. Unrecognized values use the `"none"` spelling.
+/// @return Borrowed static string view containing the stable spelling.
 LOOMC_API_EXPORT loomc_string_view_t
 loomc_compile_report_mode_name(loomc_compile_report_mode_t mode);
 

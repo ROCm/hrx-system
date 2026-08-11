@@ -180,6 +180,7 @@ GLOBAL_PROJECT_TRIGGERS = (
     "requirements",
 )
 ROOT_DEVTOOLS_TRIGGERS = (
+    ".github/workflows/docs.yml",
     ".github/workflows/presubmit.yml",
     "CONTRIBUTING.md",
     "README.md",
@@ -187,6 +188,7 @@ ROOT_DEVTOOLS_TRIGGERS = (
     "lefthook.yml",
     "requirements-analysis",
     "requirements-dev",
+    "loom/docs/requirements",
     "build_tools/static_analysis/",
     "build_tools/devtools/",
     "build_tools/lefthook/",

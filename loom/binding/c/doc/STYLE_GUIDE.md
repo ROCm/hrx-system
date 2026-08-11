@@ -199,6 +199,8 @@ The lint shape is:
 loom/binding/c/doc/generate.sh --check
 ```
 
-Both commands require `doxygen` on `PATH`. Generated output defaults to
+Run `python dev.py setup --docs` once to install the pinned Doxygen release in
+the repository tool environment, then invoke these commands with `.venv/bin`
+on `PATH`. Generated output defaults to
 `${TMPDIR:-/tmp}/loom-c-api-docs` for local browsing and
 `${TMPDIR:-/tmp}/loom-c-api-docs-check` for the check mode.

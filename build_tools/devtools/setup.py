@@ -22,10 +22,15 @@ from build_tools.devtools.environment import REPO_ROOT, ToolEnvironment, ToolMod
 
 
 def common_setup_plan(
-    tool_env: ToolEnvironment, *, platform_name: str | None = None
+    tool_env: ToolEnvironment,
+    *,
+    include_docs: bool = False,
+    platform_name: str | None = None,
 ) -> CommandPlan:
     plan = CommandPlan()
     if tool_env.mode == ToolMode.SYSTEM:
+        if include_docs:
+            raise ValueError("documentation setup requires a managed tool environment")
         plan.add(
             CommandStep(
                 [sys.executable, str(REPO_ROOT / "dev.py"), "doctor", "--system"],
@@ -63,6 +68,37 @@ def common_setup_plan(
     plan.add(hooks.lefthook_cli_compatibility_probe(tool_env))
     platform_name = sys.platform if platform_name is None else platform_name
     if platform_name != "win32":
+        requirements = [
+            "-r",
+            str(REPO_ROOT / "requirements-analysis.lock.txt"),
+        ]
+        if include_docs:
+            requirements.extend(
+                [
+                    "-r",
+                    str(REPO_ROOT / "loom" / "docs" / "requirements.lock.txt"),
+                ]
+            )
+        plan.add(
+            CommandStep(
+                [
+                    tool_env.python,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--require-hashes",
+                    "--only-binary=:all:",
+                    *requirements,
+                ],
+                cwd=REPO_ROOT,
+                label=(
+                    "install static-analysis and documentation Python tools"
+                    if include_docs
+                    else "install static-analysis tools"
+                ),
+            )
+        )
+    elif include_docs:
         plan.add(
             CommandStep(
                 [
@@ -73,10 +109,40 @@ def common_setup_plan(
                     "--require-hashes",
                     "--only-binary=:all:",
                     "-r",
-                    str(REPO_ROOT / "requirements-analysis.lock.txt"),
+                    str(REPO_ROOT / "loom" / "docs" / "requirements.lock.txt"),
                 ],
                 cwd=REPO_ROOT,
-                label="install static-analysis tools",
+                label="install documentation Python tools",
+            )
+        )
+    if include_docs:
+        plan.add(
+            CommandStep(
+                [
+                    tool_env.python,
+                    str(REPO_ROOT / "build_tools/devtools/install.py"),
+                    "--group",
+                    "docs",
+                    "--bin-dir",
+                    str(tool_env.bin_dir),
+                ],
+                cwd=REPO_ROOT,
+                label="install documentation standalone tools",
+            )
+        )
+        plan.add(
+            CommandStep(
+                [
+                    tool_env.python,
+                    str(REPO_ROOT / "build_tools/devtools/install.py"),
+                    "--group",
+                    "docs",
+                    "--bin-dir",
+                    str(tool_env.bin_dir),
+                    "--check",
+                ],
+                cwd=REPO_ROOT,
+                label="check documentation standalone tools",
             )
         )
     return plan

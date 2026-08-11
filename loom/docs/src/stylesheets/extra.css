@@ -1,0 +1,74 @@
+/* Copyright 2026 The IREE Authors
+ * SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+ */
+
+:root {
+  --md-primary-fg-color: #211a2d;
+  --md-primary-fg-color--light: #46375e;
+  --md-primary-fg-color--dark: #15101d;
+  --md-accent-fg-color: #c74775;
+  --md-default-bg-color: #ffffff;
+  --md-typeset-a-color: #604092;
+  --loom-gradient-start: #7048a8;
+  --loom-gradient-end: #d34871;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #17121f;
+  --md-accent-fg-color: #ff709f;
+  --md-default-bg-color: #111016;
+  --md-typeset-a-color: #d6b3ff;
+  --loom-gradient-start: #a078d5;
+  --loom-gradient-end: #ff709f;
+}
+
+.loom-hero {
+  margin: 0 0 2rem;
+  padding: clamp(1.5rem, 4vw, 3.25rem);
+  overflow: hidden;
+  color: #fff;
+  background:
+    radial-gradient(circle at 90% 10%, rgb(255 255 255 / 18%), transparent 30%),
+    linear-gradient(135deg, var(--loom-gradient-start), var(--loom-gradient-end));
+  border-radius: 0.8rem;
+  box-shadow: 0 1rem 2.5rem rgb(30 18 42 / 20%);
+}
+
+.loom-hero h2 {
+  margin-top: 0;
+  color: inherit;
+  font-size: clamp(1.8rem, 5vw, 3rem);
+  line-height: 1.08;
+}
+
+.loom-hero p {
+  max-width: 50rem;
+  font-size: 1.05rem;
+}
+
+.loom-hero .md-button {
+  margin-top: 0.5rem;
+  margin-right: 0.4rem;
+  color: #fff;
+  border-color: rgb(255 255 255 / 78%);
+}
+
+.loom-hero .md-button:is(:focus, :hover) {
+  color: #211a2d;
+  background: #fff;
+  border-color: #fff;
+}
+
+.loom-hero .md-button--primary {
+  color: #211a2d;
+  background: #fff;
+  border-color: #fff;
+}
+
+.md-typeset .grid.cards > ul > li {
+  border-top: 0.15rem solid var(--md-accent-fg-color);
+}
+
+.md-typeset code {
+  border-radius: 0.2rem;
+}

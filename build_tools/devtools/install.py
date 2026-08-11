@@ -23,9 +23,12 @@ import platform
 import shutil
 import stat
 import sys
+import tarfile
 import urllib.request
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import BinaryIO
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -34,7 +37,17 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 class ToolAsset:
     url: str
     sha256: str
-    binary_name: str
+    binary_name: str | None = None
+    archive_format: str | None = None
+    archive_files: tuple["ArchiveFile", ...] = ()
+
+
+@dataclass(frozen=True)
+class ArchiveFile:
+    member_name: str
+    install_name: str
+    sha256: str
+    executable: bool = False
 
 
 @dataclass(frozen=True)
@@ -121,6 +134,71 @@ TOOLS = {
             ),
         },
     ),
+    "doxygen": Tool(
+        version="1.17.0",
+        install_names=("doxygen",),
+        groups=("docs",),
+        default=False,
+        assets={
+            "darwin-amd64": ToolAsset(
+                url="https://www.doxygen.nl/files/doxygen-1.17.0-mac-intel.zip",
+                sha256="27a057d6084e45750f0f99c3d00d19e9fdbe6cd49598add1cb7160462796d195",
+                archive_format="zip",
+                archive_files=(
+                    ArchiveFile(
+                        member_name="doxygen-1.17.0/doxygen",
+                        install_name="doxygen",
+                        sha256="5af04fe7781294c99f2b25d10b7b6bff0c17f6a7aab7a3b362501e22cfddec99",
+                        executable=True,
+                    ),
+                ),
+            ),
+            "darwin-arm64": ToolAsset(
+                url="https://www.doxygen.nl/files/doxygen-1.17.0-mac-arm.zip",
+                sha256="e05a7f647f894d2d82ef26a1d231cda079d2d1d85cf1e1c6fd8072430d80d614",
+                archive_format="zip",
+                archive_files=(
+                    ArchiveFile(
+                        member_name="doxygen-1.17.0/doxygen",
+                        install_name="doxygen",
+                        sha256="1ccc13d7cebaeb6965e6616fe82d313646f3ab32be1273163b31623c6947cda8",
+                        executable=True,
+                    ),
+                ),
+            ),
+            "linux-amd64": ToolAsset(
+                url="https://www.doxygen.nl/files/doxygen-1.17.0.linux.bin.tar.gz",
+                sha256="75419ef4f446fc1c24ef12514b574e66e898ee6f527c6ae2ad84f91a905823c2",
+                archive_format="tar.gz",
+                archive_files=(
+                    ArchiveFile(
+                        member_name="doxygen-1.17.0/bin/doxygen",
+                        install_name="doxygen",
+                        sha256="9c46e7fb9b6a842503a299f6b9b085f112081c4fc8c73b70a6ee69afac093073",
+                        executable=True,
+                    ),
+                ),
+            ),
+            "windows-amd64": ToolAsset(
+                url="https://www.doxygen.nl/files/doxygen-1.17.0.windows.x64.bin.zip",
+                sha256="94594407c4cbca3049d76aacbb05d4a6f7d0f4e93c0de410b825d25ca5621c83",
+                archive_format="zip",
+                archive_files=(
+                    ArchiveFile(
+                        member_name="doxygen.exe",
+                        install_name="doxygen.exe",
+                        sha256="45a5e0b6d2fbca7487affe5cb1445b6fb202a3e4dba5fe39549bc846c5693f1a",
+                        executable=True,
+                    ),
+                    ArchiveFile(
+                        member_name="libclang.dll",
+                        install_name="libclang.dll",
+                        sha256="f60c38ff9600416a95357c0d19bea2fd5bf651b7072ee3e30d25f93546f1f709",
+                    ),
+                ),
+            ),
+        },
+    ),
 }
 
 
@@ -134,7 +212,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--group",
         action="append",
-        choices=("bazel", "cmake"),
+        choices=("bazel", "cmake", "docs"),
         default=[],
         help="Install tools required by a developer command lane.",
     )
@@ -248,6 +326,97 @@ def download_asset(asset: ToolAsset, destination: Path) -> None:
     os.replace(temporary_path, destination)
 
 
+def primary_file(asset: ToolAsset) -> tuple[str, str]:
+    if asset.archive_files:
+        archive_file = asset.archive_files[0]
+        return archive_file.install_name, archive_file.sha256
+    if asset.binary_name is None:
+        raise RuntimeError(f"tool asset has no installed binary: {asset.url}")
+    return asset.binary_name, asset.sha256
+
+
+def installed_files(asset: ToolAsset) -> tuple[tuple[str, str], ...]:
+    if asset.archive_files:
+        return tuple(
+            (archive_file.install_name, archive_file.sha256)
+            for archive_file in asset.archive_files
+        )
+    return (primary_file(asset),)
+
+
+def _copy_archive_file(
+    source: BinaryIO,
+    archive_file: ArchiveFile,
+    bin_dir: Path,
+) -> None:
+    if Path(archive_file.install_name).name != archive_file.install_name:
+        raise RuntimeError(
+            f"archive install name must be a file name: {archive_file.install_name}"
+        )
+    destination = bin_dir / archive_file.install_name
+    temporary_path = destination.with_suffix(destination.suffix + ".download")
+    digest = hashlib.sha256()
+    with temporary_path.open("wb") as output:
+        while True:
+            chunk = source.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            output.write(chunk)
+    actual_sha256 = digest.hexdigest()
+    if actual_sha256 != archive_file.sha256:
+        temporary_path.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"{archive_file.member_name} sha256 mismatch: expected "
+            f"{archive_file.sha256}, got {actual_sha256}"
+        )
+    if archive_file.executable:
+        mode = temporary_path.stat().st_mode
+        temporary_path.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    os.replace(temporary_path, destination)
+
+
+def extract_archive(asset: ToolAsset, archive_path: Path, bin_dir: Path) -> None:
+    if not asset.archive_files or asset.binary_name is not None:
+        raise RuntimeError(f"tool asset is not an archive: {asset.url}")
+    if asset.archive_format == "zip":
+        with zipfile.ZipFile(archive_path) as archive:
+            for archive_file in asset.archive_files:
+                try:
+                    source = archive.open(archive_file.member_name)
+                except KeyError as exc:
+                    raise RuntimeError(
+                        f"{asset.url} does not contain {archive_file.member_name}"
+                    ) from exc
+                with source:
+                    _copy_archive_file(source, archive_file, bin_dir)
+        return
+    if asset.archive_format == "tar.gz":
+        with tarfile.open(archive_path, mode="r:gz") as archive:
+            for archive_file in asset.archive_files:
+                try:
+                    member = archive.getmember(archive_file.member_name)
+                except KeyError as exc:
+                    raise RuntimeError(
+                        f"{asset.url} does not contain {archive_file.member_name}"
+                    ) from exc
+                if not member.isfile():
+                    raise RuntimeError(
+                        f"{asset.url} member is not a file: {archive_file.member_name}"
+                    )
+                source = archive.extractfile(member)
+                if source is None:
+                    raise RuntimeError(
+                        f"{asset.url} member cannot be read: {archive_file.member_name}"
+                    )
+                with source:
+                    _copy_archive_file(source, archive_file, bin_dir)
+        return
+    raise RuntimeError(
+        f"unsupported archive format {asset.archive_format!r} for {asset.url}"
+    )
+
+
 def install_alias(
     primary_path: Path,
     alias_path: Path,
@@ -281,26 +450,46 @@ def check_alias(primary_path: Path, alias_path: Path, expected_sha256: str) -> b
 
 
 def install_tool(name: str, tool: Tool, asset: ToolAsset, bin_dir: Path) -> bool:
-    primary_path = bin_dir / asset.binary_name
-    if file_sha256(primary_path) == asset.sha256:
+    primary_name, primary_sha256 = primary_file(asset)
+    primary_path = bin_dir / primary_name
+    files_ok = all(
+        file_sha256(bin_dir / install_name) == expected_sha256
+        for install_name, expected_sha256 in installed_files(asset)
+    )
+    if files_ok:
         print(f"{name} {tool.version}: already installed at {primary_path}")
     else:
         print(f"{name} {tool.version}: installing {asset.url}")
-        download_asset(asset, primary_path)
+        if asset.archive_files:
+            archive_path = bin_dir / f".{name}-{tool.version}.archive"
+            try:
+                download_asset(asset, archive_path)
+                extract_archive(asset, archive_path, bin_dir)
+            finally:
+                archive_path.unlink(missing_ok=True)
+        else:
+            download_asset(asset, primary_path)
     for alias_name in tool.install_names:
-        install_alias(primary_path, bin_dir / install_name(alias_name), asset.sha256)
+        install_alias(
+            primary_path,
+            bin_dir / install_name(alias_name),
+            primary_sha256,
+        )
     return True
 
 
 def check_tool(name: str, tool: Tool, asset: ToolAsset, bin_dir: Path) -> bool:
-    primary_path = bin_dir / asset.binary_name
+    primary_name, primary_sha256 = primary_file(asset)
+    primary_path = bin_dir / primary_name
     ok = True
-    if file_sha256(primary_path) != asset.sha256:
-        print(f"{name} {tool.version}: missing or wrong hash at {primary_path}")
-        ok = False
+    for installed_name, expected_sha256 in installed_files(asset):
+        installed_path = bin_dir / installed_name
+        if file_sha256(installed_path) != expected_sha256:
+            print(f"{name} {tool.version}: missing or wrong hash at {installed_path}")
+            ok = False
     for alias_name in tool.install_names:
         alias_path = bin_dir / install_name(alias_name)
-        if not check_alias(primary_path, alias_path, asset.sha256):
+        if not check_alias(primary_path, alias_path, primary_sha256):
             print(f"{name} {tool.version}: missing alias {alias_path}")
             ok = False
     if ok:

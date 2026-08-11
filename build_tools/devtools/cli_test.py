@@ -18,7 +18,11 @@ from unittest import mock
 
 from build_tools.devtools import aliases, cli, importers
 from build_tools.devtools import bazel as bazel_dev
-from build_tools.devtools.command_plan import CommandStep, WriteFileStep
+from build_tools.devtools.command_plan import (
+    CommandStep,
+    ExecCommandStep,
+    WriteFileStep,
+)
 
 
 def normalized_plan_description(plan) -> str:
@@ -52,6 +56,45 @@ class CliTest(unittest.TestCase):
         return mock.patch(
             "build_tools.devtools.importers.selected_manifests",
             return_value=({"site_packages": "/tmp/loom-tilelang-site"},),
+        )
+
+    def test_root_setup_can_add_optional_docs_toolchain(self):
+        args = cli.parse_arguments(["setup", "--docs"])
+
+        plan = args.handler(args)
+        description = normalized_plan_description(plan)
+
+        self.assertIn("loom/docs/requirements.lock.txt", description)
+        self.assertIn("--group docs", description)
+
+    def test_docs_build_uses_the_managed_documentation_toolchain(self):
+        args = cli.parse_arguments(
+            ["docs", "build", "--site-dir", "build/loom-docs-preview"]
+        )
+
+        plan = args.handler(args)
+        step = plan.steps[0]
+
+        self.assertIsInstance(step, ExecCommandStep)
+        self.assertEqual(Path(step.argv[0]).parents[1], cli.REPO_ROOT / ".venv")
+        self.assertEqual(
+            step.argv[1:],
+            [
+                str(cli.REPO_ROOT / "loom/docs/build.py"),
+                "build",
+                "--site-dir",
+                "build/loom-docs-preview",
+            ],
+        )
+
+    def test_docs_serve_forwards_the_preview_address(self):
+        args = cli.parse_arguments(["docs", "serve", "--address", "0.0.0.0:8080"])
+
+        plan = args.handler(args)
+
+        self.assertEqual(
+            plan.steps[0].argv[-3:],
+            ["serve", "--address", "0.0.0.0:8080"],
         )
 
     def test_importers_setup_uses_locked_requirements(self):
@@ -1300,6 +1343,16 @@ class CliTest(unittest.TestCase):
         self.assertIn("python dev.py cmake run", output)
         self.assertIn("python dev.py cmake compile-commands", output)
         self.assertIn("python dev.py cmake clang-tidy", output)
+        self.assertIn("python dev.py docs build", output)
+        self.assertIn("python dev.py docs serve", output)
+
+    def test_docs_help_explains_the_optional_toolchain_and_live_preview(self):
+        output = self.parse_help(["docs", "--help"])
+
+        self.assertIn("python dev.py setup --docs", output)
+        self.assertIn("python dev.py docs build", output)
+        self.assertIn("python dev.py docs serve", output)
+        self.assertIn("hash-locked", output)
 
     def test_bazel_build_help_explains_default_targets(self):
         output = self.parse_help(["bazel", "build", "--help"])

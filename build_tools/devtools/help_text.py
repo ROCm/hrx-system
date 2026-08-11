@@ -30,6 +30,8 @@ ROOT_COMMAND_EPILOG = """Common build-system commands:
   python dev.py bazel compile-commands
   python dev.py bazel clang-tidy
   python dev.py importers setup tilelang
+  python dev.py docs build
+  python dev.py docs serve
 
   python dev.py cmake configure
   python dev.py cmake build
@@ -89,6 +91,20 @@ They keep heavyweight frontend packages out of the base Bazel module lock while
 still giving Bazel, CMake, and CI one deterministic package surface. Select a
 ready environment for build-system commands with `--importer-env <name>`.
 Importer docs live under loom/py/loom/importers/.""",
+        )
+    if command == "docs":
+        return CommandHelp(
+            description="Build or serve the Loom programming guide.",
+            epilog="""Examples:
+  python dev.py setup --docs
+  python dev.py docs build
+  python dev.py docs build --site-dir build/loom-docs-preview
+  python dev.py docs serve
+  python dev.py docs serve --address 127.0.0.1:8080
+
+The documentation toolchain is an optional, hash-locked part of the managed
+repository environment. Install it with `python dev.py setup --docs` before
+building or serving the guide.""",
         )
     return CommandHelp(description=f"Run {command}.")
 

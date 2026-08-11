@@ -330,14 +330,16 @@ enum {
   LOOMC_ALLOCATOR_COMMAND_FREE = 3,
 };
 
-/// Allocation parameters passed to `loomc_allocator_ctl_fn_t` callbacks.
 #if !defined(IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_)
+/// Indicates that the shared allocator parameter structure has been declared.
 #define IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_
+/// Allocation parameters passed to `loomc_allocator_ctl_fn_t` callbacks.
 typedef struct iree_allocator_alloc_params_t {
   /// Minimum allocation size in bytes.
   loomc_host_size_t byte_length;
 } loomc_allocator_alloc_params_t;
 #else
+/// Allocation parameters passed to `loomc_allocator_ctl_fn_t` callbacks.
 typedef struct iree_allocator_alloc_params_t loomc_allocator_alloc_params_t;
 #endif  // !IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_
 
