@@ -15,3 +15,13 @@ global.rodata.def @empty_rodata = bytes("")
 
 // External payload declarations preserve their declaration role in bytecode.
 global.rodata.decl @external_rodata
+
+// ====
+
+// Loads preserve their rodata reference and target-neutral buffer result.
+global.rodata.def @message = align(8) bytes("6c6f6f6d")
+
+func.def @load_message() -> (buffer) {
+  %message = global.load @message : buffer
+  func.return %message : buffer
+}

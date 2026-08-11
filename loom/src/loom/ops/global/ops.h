@@ -100,7 +100,7 @@ iree_status_t loom_global_rodata_def_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_GLOBAL_LOAD: Load a value from a global. Dynamic dims and encodings in the type annotation reference co-results by name. Predicates on the global definition are propagated as value facts.
+// LOOM_OP_GLOBAL_LOAD: Load a value global or materialize a read-only data symbol. Value-global dynamic dims and encodings in the type annotation reference co-results by name, and predicates on the definition are propagated as value facts. A read-only data symbol requires one `buffer` result representing the complete payload with constant-memory provenance. Definitions provide exact byte-extent and authored alignment facts; declarations remain conservative until linking supplies their definition.
 // %tile, %m, %k = global.load @weights : tile<[%m]x[%k]xf32>
 LOOM_DEFINE_ISA(loom_global_load_isa, LOOM_OP_GLOBAL_LOAD)
 LOOM_DEFINE_VARIADIC_RESULTS(loom_global_load_result, 0)
