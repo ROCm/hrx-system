@@ -1906,6 +1906,13 @@ class SymbolNameSet:
     def __len__(self) -> int:
         return len(self.values)
 
+    @classmethod
+    def _from_canonical_values(cls, values: tuple[SymbolName, ...]) -> SymbolNameSet:
+        """Construct from an already validated strict UTF-8 ordering."""
+        result = object.__new__(cls)
+        object.__setattr__(result, "values", values)
+        return result
+
 
 @dataclass(slots=True)
 class Symbol:

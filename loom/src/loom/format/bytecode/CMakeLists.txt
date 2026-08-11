@@ -89,6 +89,7 @@ loom_cc_library(
     loom::format::low_repr
     loom::ir
     loom::ir::symbol_map
+    loom::ops::module
     loom::ops::op_defs
     loom::ops::type_registry
     loom::verify
@@ -112,6 +113,7 @@ loom_cc_test(
     loom::ir
     loom::ops::func
     loom::ops::global
+    loom::ops::module
     loom::ops::test
     loom::ops::type_registry
 )
@@ -155,6 +157,7 @@ loom_cc_library(
     iree::io::stream
     loom::format::low_repr
     loom::ir
+    loom::ops::module
     loom::ops::op_defs
   PUBLIC
 )
@@ -174,6 +177,7 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::ir
     loom::ops::global
+    loom::ops::module
     loom::ops::test
 )
 
@@ -209,6 +213,24 @@ loom_cc_fuzz(
     loom::ir
     loom::ops::test
     loom::testing::gen
+)
+
+loom_cc_benchmark(
+  NAME
+    provider_import_benchmark
+  SRCS
+    "provider_import_benchmark.cc"
+  DEPS
+    ::reader
+    ::writer
+    iree::base
+    iree::base::internal::arena
+    iree::io::stream
+    iree::testing::benchmark_main
+    loom::ir
+    loom::ops::module
+    loom::ops::test
+  TESTONLY
 )
 
 loom_cc_benchmark(

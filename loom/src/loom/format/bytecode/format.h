@@ -62,7 +62,7 @@
 //
 //   offset  size  field
 //   0       4     magic: "LOOM" (0x4C 0x4F 0x4F 0x4D)
-//   4       1     format_version (currently 24)
+//   4       1     format_version (currently 27)
 //   5       1     location_mode (see loom_bytecode_location_mode_t)
 //   6       2     module_count
 //   8       4     file_string_pool_length (bytes)
@@ -85,7 +85,7 @@ extern "C" {
 
 #define LOOM_BYTECODE_MAGIC "LOOM"
 #define LOOM_BYTECODE_MAGIC_LENGTH 4
-#define LOOM_BYTECODE_FORMAT_VERSION 25
+#define LOOM_BYTECODE_FORMAT_VERSION 27
 
 #define LOOM_BYTECODE_SOURCE_TRIVIA_LEADING_BLANK_LINE (1u << 0)
 #define LOOM_BYTECODE_SOURCE_TRIVIA_COMMENT_COUNT_SHIFT 1
@@ -160,6 +160,7 @@ typedef uint16_t loom_bytecode_module_flags_t;
 //   | LOCATIONS section     |  Location table.
 //   +-----------------------+
 //   | SOURCE_TRIVIA section |  File-level source presentation.
+//   | PROVIDER_IMPORTS      |  Compile-time symbol availability providers.
 //   +-----------------------+
 //   | RESOURCES section     |  Large blobs: weights, executables, etc.
 //   |                       |  (last — keeps dense metadata up front,
@@ -215,9 +216,11 @@ typedef enum loom_bytecode_section_kind_e {
           // Referenced by symbols and op attributes.
   LOOM_BYTECODE_SECTION_SOURCE_TRIVIA =
       9,  // Optional module-owned source presentation.
+  LOOM_BYTECODE_SECTION_PROVIDER_IMPORTS =
+      10,  // Compile-time module.import provider metadata.
 } loom_bytecode_section_kind_t;
 
-#define LOOM_BYTECODE_SECTION_COUNT 10
+#define LOOM_BYTECODE_SECTION_COUNT 11
 
 // ==========================================================================
 // SOURCE_TRIVIA section
@@ -528,7 +531,8 @@ typedef enum loom_bytecode_section_kind_e {
 //   [name_id: varint]
 //   [kind: byte]            (FUNC_DEF=0, FUNC_DECL=1,
 //                            FUNC_TEMPLATE=2, FUNC_UKERNEL=3,
-//                            GLOBAL=4, EXECUTABLE=5, RECORD=6)
+//                            GLOBAL=4, EXECUTABLE=5, RECORD=6,
+//                            ANCHOR=7)
 //   [visibility: byte]      (PUBLIC=0, PRIVATE=1)
 //   [flags: u16]            (see loom_bytecode_symbol_flag_bits_e)
 //
@@ -669,6 +673,35 @@ typedef enum loom_bytecode_section_kind_e {
 //     (if has_body:
 //       [ir_offset: u64]    (from IR section start)
 //       [ir_length: u32])
+
+// ==========================================================================
+// PROVIDER_IMPORTS section
+// ==========================================================================
+//
+// Compile-time module.import records name source providers that may define
+// module-local symbols. They are availability metadata, not runtime imports
+// and not dependency or liveness edges. Provider records are ordered by exact
+// UTF-8 provider bytes. Each anchor list is ordered by exact symbol-name bytes.
+//
+// Anchors reference SYMBOLS ordinals directly. A resolved anchor references
+// its ordinary symbol entry. An unresolved anchor references an ANCHOR symbol
+// entry, which carries only the common symbol header and exists solely to give
+// the availability record a stable ordinal. Metadata readers can therefore
+// expose provider slices without resolving names or touching IR bodies.
+//
+// Section layout:
+//
+//   [provider_count: varint]
+//   [total_anchor_count: varint]
+//   For each provider:
+//     [provider_string_id: varint]
+//     [anchor_count: varint]
+//     For each anchor:
+//       [anchor_symbol_index: varint]
+//     [source_trivia: varint]
+//     For each leading comment attached to the module.import op:
+//       [comment_length: varint]
+//       [comment_data: comment_length bytes]
 
 // ==========================================================================
 // IR section
@@ -1061,8 +1094,8 @@ typedef struct loom_bytecode_section_dir_entry_t {
 } loom_bytecode_section_dir_entry_t;
 
 // Symbol kind byte in the SYMBOLS section. These are dense wire values and
-// intentionally not equal to loom_symbol_kind_t, whose zero value is an
-// in-memory "unlinked" sentinel that is never serialized.
+// intentionally not equal to loom_symbol_kind_t. ANCHOR maps to the in-memory
+// LOOM_SYMBOL_NONE sentinel and has no defining operation or symbol payload.
 typedef enum loom_bytecode_symbol_kind_e {
   LOOM_BYTECODE_SYMBOL_FUNC_DEF = 0,
   LOOM_BYTECODE_SYMBOL_FUNC_DECL = 1,
@@ -1071,6 +1104,7 @@ typedef enum loom_bytecode_symbol_kind_e {
   LOOM_BYTECODE_SYMBOL_GLOBAL = 4,
   LOOM_BYTECODE_SYMBOL_EXECUTABLE = 5,
   LOOM_BYTECODE_SYMBOL_RECORD = 6,
+  LOOM_BYTECODE_SYMBOL_ANCHOR = 7,
   LOOM_BYTECODE_SYMBOL_COUNT_,
 } loom_bytecode_symbol_kind_t;
 

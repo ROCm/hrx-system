@@ -21,7 +21,7 @@
 // this. Non-seekable consumers (network) wrap in a vec_stream.
 //
 // Section data is NOT buffered in memory (except SYMBOLS, which needs
-// internal offset table patching and is always small). All other
+// internal offset table patching and remains compact). All other
 // sections stream directly through a 4KB page buffer to amortize
 // the iree_io_stream_write vtable dispatch cost.
 

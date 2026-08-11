@@ -56,6 +56,10 @@ typedef struct loom_bytecode_module_metadata_summary_t {
   uint64_t op_name_count;   // OPS table entry count.
   uint64_t location_count;  // LOCATIONS table entry count, or 0 when omitted.
   uint64_t symbol_count;    // SYMBOLS table entry count.
+  // PROVIDER_IMPORTS record count.
+  uint64_t provider_import_count;
+  // Total provider anchor count.
+  uint64_t provider_import_anchor_count;
 } loom_bytecode_module_metadata_summary_t;
 
 // Validated section directory entry exposed by the bytecode index.
@@ -124,6 +128,16 @@ typedef struct loom_bytecode_symbol_metadata_t {
   uint32_t body_length;
 } loom_bytecode_symbol_metadata_t;
 
+// One compile-time provider import and its slice in the module anchor array.
+typedef struct loom_bytecode_provider_import_metadata_t {
+  // Borrowed provider key view from the module STRINGS table.
+  iree_string_view_t provider;
+  // First entry in provider_import_anchor_symbol_indices.
+  uint32_t first_anchor_index;
+  // Number of symbol ordinals in this provider's contiguous slice.
+  uint32_t anchor_count;
+} loom_bytecode_provider_import_metadata_t;
+
 // Validated module directory entry and lightweight per-module index.
 typedef struct loom_bytecode_module_metadata_t {
   // Borrowed module name view from the file string pool.
@@ -152,6 +166,14 @@ typedef struct loom_bytecode_module_metadata_t {
   iree_host_size_t export_count;
   // Arena-owned symbol indices in export offset table order.
   uint32_t* export_symbol_indices;
+  // Number of compile-time provider import records.
+  iree_host_size_t provider_import_count;
+  // Arena-owned provider records in canonical provider order.
+  loom_bytecode_provider_import_metadata_t* provider_imports;
+  // Number of entries in the flat provider anchor ordinal array.
+  iree_host_size_t provider_import_anchor_count;
+  // Arena-owned SYMBOLS ordinals sliced by provider_imports.
+  uint32_t* provider_import_anchor_symbol_indices;
 } loom_bytecode_module_metadata_t;
 
 // Validated file-level bytecode index.
