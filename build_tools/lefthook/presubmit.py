@@ -187,6 +187,7 @@ ROOT_DEVTOOLS_TRIGGERS = (
     "lefthook.yml",
     "requirements-analysis",
     "requirements-dev",
+    "loom/docs/requirements",
     "build_tools/static_analysis/",
     "build_tools/devtools/",
     "build_tools/lefthook/",

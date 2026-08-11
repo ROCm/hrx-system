@@ -53,7 +53,7 @@ if [[ -z "${output_dir}" ]]; then
 fi
 
 if ! command -v doxygen >/dev/null 2>&1; then
-  echo "doxygen not found on PATH; install doxygen to generate Loom API docs." >&2
+  echo "doxygen not found on PATH; run 'python dev.py setup --docs'." >&2
   exit 127
 fi
 

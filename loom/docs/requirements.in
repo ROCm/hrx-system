@@ -1,4 +1,9 @@
 # Copyright 2026 The IREE Authors
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+# The documentation tools share the repository venv with optional analysis
+# tools. Resolve common transitive packages to the analysis lock so installing
+# either optional set cannot silently replace the other's pinned versions.
+-c ../../requirements-analysis.lock.txt
+
 mkdocs-material==9.7.7

@@ -633,6 +633,9 @@ class PresubmitTest(unittest.TestCase):
         self.assertTrue(
             presubmit.is_root_devtools_trigger("requirements-analysis.lock.txt")
         )
+        self.assertTrue(
+            presubmit.is_root_devtools_trigger("loom/docs/requirements.lock.txt")
+        )
         self.assertFalse(presubmit.is_root_devtools_trigger("runtime/requirements.txt"))
 
     def test_existing_project_scripts_include_loom(self):

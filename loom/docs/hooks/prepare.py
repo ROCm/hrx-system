@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 AUTHORED_SOURCE_ROOT = DOCS_ROOT / "src"
 PYTHON_SOURCE_ROOT = REPO_ROOT / "loom" / "py"
 DEFAULT_WORK_ROOT = REPO_ROOT / "build" / "loom-docs"
+C_API_GENERATOR = REPO_ROOT / "loom" / "binding" / "c" / "doc" / "generate.sh"
 
 if str(PYTHON_SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(PYTHON_SOURCE_ROOT))
@@ -51,12 +53,44 @@ def _staged_source_root() -> Path:
     return _work_root() / "mkdocs-source"
 
 
-def _prepare_staged_source(staged_source_root: Path) -> None:
-    if staged_source_root.exists():
-        shutil.rmtree(staged_source_root)
+def _remove_generated_directory(path: Path) -> None:
+    if path.is_symlink():
+        raise ValueError(f"generated documentation path must not be a symlink: {path}")
+    if path.exists():
+        shutil.rmtree(path)
+
+
+def _generate_c_api(work_root: Path) -> Path:
+    output_root = work_root / "c-api"
+    _remove_generated_directory(output_root)
+    environment = os.environ.copy()
+    python_bin_dir = str(Path(sys.executable).parent)
+    environment["PATH"] = python_bin_dir + os.pathsep + environment.get("PATH", "")
+    subprocess.run(
+        [
+            str(C_API_GENERATOR),
+            "--check",
+            f"--output={output_root}",
+        ],
+        cwd=REPO_ROOT,
+        env=environment,
+        check=True,
+    )
+    html_root = output_root / "html"
+    if not (html_root / "index.html").is_file():
+        raise FileNotFoundError("Doxygen did not produce the Loom C API index")
+    return html_root
+
+
+def _prepare_staged_source(staged_source_root: Path, c_api_html_root: Path) -> None:
+    _remove_generated_directory(staged_source_root)
     shutil.copytree(AUTHORED_SOURCE_ROOT, staged_source_root)
     files = generate_reference_files()
     write_reference_files(staged_source_root / "reference", files)
+    shutil.copytree(
+        c_api_html_root,
+        staged_source_root / "reference" / "c-api" / "generated",
+    )
 
 
 def on_config(config: Any) -> Any:
@@ -71,7 +105,8 @@ def on_config(config: Any) -> Any:
 def on_pre_build(config: Any) -> None:
     """Rebuilds the complete source tree before every MkDocs build."""
 
-    _prepare_staged_source(Path(config["docs_dir"]))
+    c_api_html_root = _generate_c_api(_work_root())
+    _prepare_staged_source(Path(config["docs_dir"]), c_api_html_root)
 
 
 def on_page_context(context: Any, page: Any, config: Any, nav: Any) -> Any:

@@ -20,6 +20,7 @@
 extern "C" {
 #endif
 
+/// Sanitizer assertion classes that can be enabled independently.
 enum loomc_sanitizer_check_bit_e {
   /// Enables memory access assertions.
   LOOMC_SANITIZER_CHECK_ACCESS = 1u << 0,
@@ -49,6 +50,7 @@ typedef uint64_t loomc_sanitizer_checks_t;
 #define LOOMC_SANITIZER_CHECKS_TSAN_LIKE \
   ((loomc_sanitizer_checks_t)LOOMC_SANITIZER_CHECK_RACE)
 
+/// Additional sanitizer behavior flag bits.
 enum loomc_sanitizer_flag_bit_e {
   /// No sanitizer flags are currently defined.
   LOOMC_SANITIZER_FLAG_NONE = 0u,

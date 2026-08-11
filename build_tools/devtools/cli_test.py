@@ -54,6 +54,15 @@ class CliTest(unittest.TestCase):
             return_value=({"site_packages": "/tmp/loom-tilelang-site"},),
         )
 
+    def test_root_setup_can_add_optional_docs_toolchain(self):
+        args = cli.parse_arguments(["setup", "--docs"])
+
+        plan = args.handler(args)
+        description = normalized_plan_description(plan)
+
+        self.assertIn("loom/docs/requirements.lock.txt", description)
+        self.assertIn("--group docs", description)
+
     def test_importers_setup_uses_locked_requirements(self):
         args = cli.parse_arguments(["importers", "setup", "tilelang"])
 

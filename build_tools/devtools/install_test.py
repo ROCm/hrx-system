@@ -6,9 +6,13 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
+import io
+import tarfile
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -24,8 +28,9 @@ class InstallTest(unittest.TestCase):
             platform_key = install.host_platform_key()
 
         self.assertEqual(platform_key, "windows-amd64")
-        for tool in install.TOOLS.values():
+        for tool in (tool for tool in install.TOOLS.values() if tool.default):
             asset = tool.assets[platform_key]
+            self.assertIsNotNone(asset.binary_name)
             self.assertTrue(asset.binary_name.endswith(".exe"))
             self.assertIn("-windows-amd64.exe", asset.url)
             self.assertEqual(len(asset.sha256), 64)
@@ -38,8 +43,98 @@ class InstallTest(unittest.TestCase):
             platform_key = install.host_platform_key()
 
         self.assertEqual(platform_key, "windows-arm64")
-        for tool in install.TOOLS.values():
+        for tool in (tool for tool in install.TOOLS.values() if tool.default):
             self.assertIn(platform_key, tool.assets)
+
+    def test_docs_group_selects_only_doxygen(self):
+        args = argparse.Namespace(list=False, group=["docs"], tools=[])
+
+        self.assertEqual(set(install.selected_tools(args)), {"doxygen"})
+
+    def test_extracts_zip_archive_files_with_recorded_hashes(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            archive_path = root / "tool.zip"
+            executable_contents = b"executable"
+            companion_contents = b"companion"
+            with zipfile.ZipFile(archive_path, mode="w") as archive:
+                archive.writestr("release/bin/tool", executable_contents)
+                archive.writestr("release/bin/companion", companion_contents)
+            asset = install.ToolAsset(
+                url="https://example.invalid/tool.zip",
+                sha256=install.file_sha256(archive_path) or "",
+                archive_format="zip",
+                archive_files=(
+                    install.ArchiveFile(
+                        member_name="release/bin/tool",
+                        install_name="tool",
+                        sha256=hashlib.sha256(executable_contents).hexdigest(),
+                        executable=True,
+                    ),
+                    install.ArchiveFile(
+                        member_name="release/bin/companion",
+                        install_name="companion",
+                        sha256=hashlib.sha256(companion_contents).hexdigest(),
+                    ),
+                ),
+            )
+
+            install.extract_archive(asset, archive_path, root)
+
+            self.assertEqual((root / "tool").read_bytes(), executable_contents)
+            self.assertEqual((root / "companion").read_bytes(), companion_contents)
+            self.assertTrue((root / "tool").stat().st_mode & 0o100)
+
+    def test_extracts_tar_archive_file_with_recorded_hash(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            archive_path = root / "tool.tar.gz"
+            contents = b"executable"
+            archive_info = tarfile.TarInfo("release/bin/tool")
+            archive_info.size = len(contents)
+            with tarfile.open(archive_path, mode="w:gz") as archive:
+                archive.addfile(archive_info, io.BytesIO(contents))
+            asset = install.ToolAsset(
+                url="https://example.invalid/tool.tar.gz",
+                sha256=install.file_sha256(archive_path) or "",
+                archive_format="tar.gz",
+                archive_files=(
+                    install.ArchiveFile(
+                        member_name="release/bin/tool",
+                        install_name="tool",
+                        sha256=hashlib.sha256(contents).hexdigest(),
+                        executable=True,
+                    ),
+                ),
+            )
+
+            install.extract_archive(asset, archive_path, root)
+
+            self.assertEqual((root / "tool").read_bytes(), contents)
+            self.assertTrue((root / "tool").stat().st_mode & 0o100)
+
+    def test_archive_install_names_cannot_escape_bin_directory(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            archive_path = root / "tool.zip"
+            contents = b"executable"
+            with zipfile.ZipFile(archive_path, mode="w") as archive:
+                archive.writestr("release/bin/tool", contents)
+            asset = install.ToolAsset(
+                url="https://example.invalid/tool.zip",
+                sha256=install.file_sha256(archive_path) or "",
+                archive_format="zip",
+                archive_files=(
+                    install.ArchiveFile(
+                        member_name="release/bin/tool",
+                        install_name="../tool",
+                        sha256=hashlib.sha256(contents).hexdigest(),
+                    ),
+                ),
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "must be a file name"):
+                install.extract_archive(asset, archive_path, root)
 
     def test_windows_install_names_have_executable_suffixes(self):
         self.assertEqual(

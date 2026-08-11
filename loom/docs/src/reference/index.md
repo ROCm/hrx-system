@@ -13,3 +13,9 @@ The reference is assembled from the same contracts used to build Loom:
 Generated output is rebuilt for every documentation publication. Nothing in
 the published reference is a manually maintained inventory of operations or
 headers.
+
+- [Dialect reference](dialects/index.md)
+- [Type reference](types/index.md)
+- [Attribute reference](attributes/index.md)
+- [Encoding reference](encodings/index.md)
+- [C API reference](c-api/index.md)

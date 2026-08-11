@@ -514,6 +514,12 @@ def add_root_commands(subparsers: argparse._SubParsersAction) -> None:
     add_argument(
         setup_parser, "--alias-dir", type=Path, help="Directory for generated aliases."
     )
+    add_argument(
+        setup_parser,
+        "--docs",
+        action="store_true",
+        help="Install the optional documentation toolchain.",
+    )
     setup_parser.set_defaults(handler=handle_root_setup)
 
     doctor_parser = add_subparser(
@@ -974,7 +980,7 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
 
 def handle_root_setup(args: argparse.Namespace) -> CommandPlan:
     tool_env = tool_environment_from_args(args)
-    return setup.common_setup_plan(tool_env)
+    return setup.common_setup_plan(tool_env, include_docs=args.docs)
 
 
 def handle_lane_setup(args: argparse.Namespace) -> CommandPlan:

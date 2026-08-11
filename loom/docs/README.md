@@ -4,26 +4,26 @@
 its published reference. It is documentation build infrastructure, not a
 shipped Loom command-line surface.
 
-Create an isolated documentation environment from the locked dependency set:
+Add the optional, pinned documentation toolchain to the repository environment:
 
 ```bash
-python3 -m venv build/loom-docs/venv
-build/loom-docs/venv/bin/python -m pip install \
-  --require-hashes \
-  -r loom/docs/requirements.lock.txt
+python dev.py setup --docs
 ```
+
+This installs the hash-locked Python requirements and the official pinned
+Doxygen binary into `.venv`; it does not depend on distribution packages.
 
 Build the strict static site:
 
 ```bash
-build/loom-docs/venv/bin/python loom/docs/build.py build
+.venv/bin/python loom/docs/build.py build
 ```
 
 The result is written to `build/loom-docs/site/`. Serve it with live reload
 while editing:
 
 ```bash
-build/loom-docs/venv/bin/python loom/docs/build.py serve
+.venv/bin/python loom/docs/build.py serve
 ```
 
 Hand-authored pages live under `src/`. Executable guide programs live under
