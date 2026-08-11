@@ -682,8 +682,8 @@ iree_status_t loom_vector_table_quantize_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_VECTOR_TRANSFORM: Apply an explicit numeric transform descriptor to vector register lanes. The transform operand is an encoding<transform> value that names the numeric mapping, such as scale/zero-point decode, whitening, or projection; verifier rules keep supported transform families and shape-changing parameters explicit. Hadamard-like families act along the last axis. `hadamard_sign` applies either an explicit per-lane sign table or deterministic seed-derived signs from the low bit of SplitMix64(seed + input lane) before the Hadamard. `sign_permute_hadamard` applies explicit signs to source lanes, gathers lanes through the explicit permutation vector, then applies the Hadamard.
-// %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
+// LOOM_OP_VECTOR_TRANSFORM: Apply a numeric transform to invocation-local vector register lanes. A #transform.hadamard descriptor applies a Sylvester Hadamard transform independently along the final vector axis. Distribution across subgroup lanes is explicit in the surrounding program and is not implied by this operation.
+// %r = vector.transform %v, %xf : vector<8xf32>, encoding<transform> -> vector<8xf32>
 LOOM_DEFINE_ISA(loom_vector_transform_isa, LOOM_OP_VECTOR_TRANSFORM)
 LOOM_DEFINE_OPERAND(loom_vector_transform_source, 0)
 LOOM_DEFINE_OPERAND(loom_vector_transform_transform, 1)

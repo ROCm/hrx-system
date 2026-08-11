@@ -275,7 +275,7 @@ ERR_ENCODING_017 = ErrorDef(
     summary="Vector transform descriptor is not locally decodable.",
     message=(
         "{pass_name} requires {op_name} transform to be a local "
-        "#numeric_transform encoding.define"
+        "#transform.hadamard encoding.define"
     ),
     params=(
         ErrorParam("op_name", ParamKind.STRING),
@@ -285,60 +285,6 @@ ERR_ENCODING_017 = ErrorDef(
         "Specialize the transform descriptor into the function before vector "
         "scalarization or lower the transform through a target primitive"
     ),
-)
-
-# ERR_ENCODING_018: Vector transform permutation is not statically proven.
-ERR_ENCODING_018 = ErrorDef(
-    domain=ErrorDomain.ENCODING,
-    code=18,
-    severity=Severity.ERROR,
-    summary="Vector transform permutation is not statically proven.",
-    message=("{pass_name} requires {op_name} permutation lanes to be statically exact"),
-    params=(
-        ErrorParam("op_name", ParamKind.STRING),
-        ErrorParam("pass_name", ParamKind.STRING),
-    ),
-    fix_hint=(
-        "Refine the permutation lane facts before vector scalarization or "
-        "specialize the transform through a target primitive"
-    ),
-)
-
-# ERR_ENCODING_019: Vector transform permutation repeats a source lane.
-ERR_ENCODING_019 = ErrorDef(
-    domain=ErrorDomain.ENCODING,
-    code=19,
-    severity=Severity.ERROR,
-    summary="Vector transform permutation repeats a source lane.",
-    message=(
-        "{pass_name} requires {op_name} permutation to name each source lane "
-        "once per last-axis slice"
-    ),
-    params=(
-        ErrorParam("op_name", ParamKind.STRING),
-        ErrorParam("pass_name", ParamKind.STRING),
-    ),
-    fix_hint=(
-        "Use a bijective permutation for each last-axis slice before vector "
-        "scalarization"
-    ),
-)
-
-# ERR_ENCODING_020: Vector transform permutation source lane is out of bounds.
-ERR_ENCODING_020 = ErrorDef(
-    domain=ErrorDomain.ENCODING,
-    code=20,
-    severity=Severity.ERROR,
-    summary="Vector transform permutation source lane is out of bounds.",
-    message=(
-        "{pass_name} requires {op_name} permutation lanes to reference "
-        "in-bounds source lanes"
-    ),
-    params=(
-        ErrorParam("op_name", ParamKind.STRING),
-        ErrorParam("pass_name", ParamKind.STRING),
-    ),
-    fix_hint="Clamp or specialize permutation lanes to the source last-axis extent",
 )
 
 # ERR_ENCODING_021: Encoding query specification has the wrong semantic role.
@@ -392,9 +338,6 @@ ALL_ENCODING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_ENCODING_015,
     ERR_ENCODING_016,
     ERR_ENCODING_017,
-    ERR_ENCODING_018,
-    ERR_ENCODING_019,
-    ERR_ENCODING_020,
     ERR_ENCODING_021,
     ERR_ENCODING_022,
 )

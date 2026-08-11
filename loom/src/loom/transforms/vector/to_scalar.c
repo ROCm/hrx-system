@@ -499,6 +499,20 @@ static iree_status_t loom_vector_to_scalar_lower_splat_op(
   return loom_vector_to_scalar_replace_one_result(&state, replacement);
 }
 
+static iree_status_t loom_vector_to_scalar_lower_transform_op(
+    loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
+    bool* out_handled) {
+  *out_handled = true;
+  loom_vector_to_scalar_state_t state = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_vector_to_scalar_prepare_state(pass, rewriter, op, NULL, 0, &state));
+  loom_value_id_t replacement = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_vector_to_scalar_lower_transform(&state, &replacement));
+  if (loom_pass_has_error_diagnostics(pass)) return iree_ok_status();
+  return loom_vector_to_scalar_replace_one_result(&state, replacement);
+}
+
 static iree_status_t loom_vector_to_scalar_lower_reduce_op(
     loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
     bool* out_handled) {
@@ -648,6 +662,8 @@ static const loom_vector_to_scalar_op_lowerer_t
         LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
             SPLAT, loom_vector_to_scalar_lower_splat_op),
         LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
+            TRANSFORM, loom_vector_to_scalar_lower_transform_op),
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
             REDUCE, loom_vector_to_scalar_lower_reduce_op),
         LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
             REDUCE_AXES, loom_vector_to_scalar_lower_reduce_axes_op),
@@ -692,12 +708,6 @@ static iree_status_t loom_vector_to_scalar_lower_descriptor_op(
       loom_vector_to_scalar_encoding_rejection_bits(&state) !=
           LOOM_CONTRACT_REJECTION_NONE) {
     return iree_ok_status();
-  }
-  if (descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_TRANSFORM) {
-    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_validate_transform(&state));
-    if (loom_pass_has_error_diagnostics(pass)) {
-      return iree_ok_status();
-    }
   }
   loom_value_id_t replacement = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(

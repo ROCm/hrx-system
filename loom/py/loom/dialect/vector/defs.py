@@ -1092,17 +1092,11 @@ vector_transform = Op(
     "vector.transform",
     group=vector_ops,
     doc=(
-        "Apply an explicit numeric transform descriptor to vector register "
-        "lanes. The transform operand is an encoding<transform> value that "
-        "names the numeric mapping, such as scale/zero-point decode, "
-        "whitening, or projection; verifier rules keep supported transform "
-        "families and shape-changing parameters explicit. Hadamard-like "
-        "families act along the last axis. `hadamard_sign` applies either an "
-        "explicit per-lane sign table or deterministic seed-derived signs "
-        "from the low bit of SplitMix64(seed + input lane) before the "
-        "Hadamard. `sign_permute_hadamard` applies explicit signs to source "
-        "lanes, gathers lanes through the explicit permutation vector, then "
-        "applies the Hadamard."
+        "Apply a numeric transform to invocation-local vector register lanes. "
+        "A #transform.hadamard descriptor applies a Sylvester Hadamard "
+        "transform independently along the final vector axis. Distribution "
+        "across subgroup lanes is explicit in the surrounding program and is "
+        "not implied by this operation."
     ),
     operands=[
         Operand("source", VECTOR, doc="Vector lanes to transform."),
@@ -1112,7 +1106,7 @@ vector_transform = Op(
     constraints=[
         HasFloatElement("source"),
         HasFloatElement("result"),
-        SameElementType("source", "result"),
+        SameType("source", "result"),
     ],
     verify="loom_vector_transform_verify",
     facts="loom_vector_transform_facts",
@@ -1129,8 +1123,7 @@ vector_transform = Op(
         ResultType("result"),
     ],
     examples=[
-        "%r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>",
-        "%sketch = vector.transform %v, %jl : vector<128xf32>, encoding<transform> -> vector<64xf32>",
+        "%r = vector.transform %v, %xf : vector<8xf32>, encoding<transform> -> vector<8xf32>",
     ],
 )
 

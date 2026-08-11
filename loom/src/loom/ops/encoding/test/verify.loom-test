@@ -119,11 +119,11 @@ func.def @assume_spec_rejects_bad_operand_format(%schema: encoding<schema>) {
 
 // ====
 
-// Numeric transform descriptors are verified when declared, even before a
-// vector.transform use site sees them.
-func.def @numeric_transform_unknown_family_define_only() {
-  // ERROR@+1: ENCODING/013 "numeric_transform" "family" "mystery"
-  %xf = encoding.define #numeric_transform<family="mystery", input_elems=128, output_elems=128> : encoding<transform>
+// Transform descriptors are verified when declared, before a vector.transform
+// use site sees them.
+func.def @hadamard_unknown_normalization() {
+  // ERROR@+1: PARSE/017 "normalization" "mystery"
+  %xf = encoding.define #transform.hadamard<normalization=mystery> : encoding<transform>
   func.return
 }
 
@@ -233,53 +233,23 @@ func.def @storage_static_role_mismatch() {
 
 // ====
 
-func.def @numeric_transform_hadamard_rejects_signs() {
-  %signs = vector.constant false : vector<128xi1>
-  // ERROR@+1: ENCODING/008 "numeric_transform" "signs"
-  %xf = encoding.define #numeric_transform<family="hadamard", input_elems=128, output_elems=128> {signs = %signs : vector<128xi1>} : encoding<transform>
+func.def @hadamard_default_normalization() {
+  %xf = encoding.define #transform.hadamard : encoding<transform>
   func.return
 }
 
 // ====
 
-func.def @numeric_transform_hadamard_sign_requires_signs_or_seed() {
-  // ERROR@+1: ENCODING/007 "numeric_transform" "signs or seed"
-  %xf = encoding.define #numeric_transform<family="hadamard_sign", input_elems=128, output_elems=128> : encoding<transform>
+func.def @hadamard_orthonormal() {
+  %xf = encoding.define #transform.hadamard<normalization=orthonormal> : encoding<transform>
   func.return
 }
 
 // ====
 
-func.def @numeric_transform_hadamard_sign_rejects_signs_and_seed(%seed: index) {
-  %signs = vector.constant false : vector<128xi1>
-  // ERROR@+1: ENCODING/014 "numeric_transform" "signs" "seed"
-  %xf = encoding.define #numeric_transform<family="hadamard_sign", input_elems=128, output_elems=128> {seed = %seed : index, signs = %signs : vector<128xi1>} : encoding<transform>
-  func.return
-}
-
-// ====
-
-func.def @numeric_transform_sign_permute_requires_permutation() {
-  %signs = vector.constant false : vector<128xi1>
-  // ERROR@+1: ENCODING/007 "numeric_transform" "permutation"
-  %xf = encoding.define #numeric_transform<family="sign_permute_hadamard", input_elems=128, output_elems=128> {signs = %signs : vector<128xi1>} : encoding<transform>
-  func.return
-}
-
-// ====
-
-func.def @numeric_transform_jl_dense_requires_matrix() {
-  // ERROR@+1: ENCODING/007 "numeric_transform" "matrix"
-  %xf = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> : encoding<transform>
-  func.return
-}
-
-// ====
-
-func.def @numeric_transform_jl_dense_rejects_orthonormal() {
-  %matrix = vector.constant 0.0 : vector<64x128xf32>
-  // ERROR@+1: ENCODING/013 "numeric_transform" "normalization" "orthonormal"
-  %xf = encoding.define #numeric_transform<family="jl_dense", input_elems=128, normalization="orthonormal", output_elems=64> {matrix = %matrix : vector<64x128xf32>} : encoding<transform>
+func.def @hadamard_unknown_parameter() {
+  // ERROR@+1: ENCODING/008 "transform.hadamard" "window"
+  %xf = encoding.define #transform.hadamard<window=8> : encoding<transform>
   func.return
 }
 
