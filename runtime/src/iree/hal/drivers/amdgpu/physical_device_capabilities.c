@@ -501,6 +501,14 @@ static uint8_t iree_hal_amdgpu_topology_scale_hsa_numa_distance(
   return (uint8_t)iree_min(scaled, 15u);
 }
 
+// Current ROCr versions expose one aggregate LINK_INFO record for routes that
+// may cross several physical links. The record's NUMA distance still encodes
+// the route length using these per-link distances.
+enum {
+  IREE_HAL_AMDGPU_XGMI_DIRECT_LINK_NUMA_DISTANCE = 13u,
+  IREE_HAL_AMDGPU_OTHER_DIRECT_LINK_NUMA_DISTANCE = 20u,
+};
+
 static iree_status_t iree_hal_amdgpu_validate_physical_topology_edge_access(
     hsa_amd_memory_pool_access_t access, const char* pool_kind) {
   if (IREE_LIKELY(iree_hal_amdgpu_memory_pool_access_is_valid(access))) {
@@ -592,15 +600,16 @@ iree_status_t iree_hal_amdgpu_select_physical_topology_edge(
     out_edge->link.link_type =
         iree_hal_amdgpu_link_type_to_amdgpu_link_type(first_hop->link_type);
 
-    // HSA runtimes may expose one aggregate link record for a path containing
-    // several physical hops. NUMA distance retains that path length: direct
-    // xGMI links use distance 13 and other direct links use distance 20.
+    // Recover the physical hop count from the aggregate record. This preserves
+    // the native link-query result until ROCr reports one record per hop.
     uint64_t path_distance = 0;
     for (iree_host_size_t i = 0; i < selection->link.count; ++i) {
       path_distance += selection->link.hops[i].numa_distance;
     }
     const uint32_t direct_link_distance =
-        first_hop->link_type == HSA_AMD_LINK_INFO_TYPE_XGMI ? 13u : 20u;
+        first_hop->link_type == HSA_AMD_LINK_INFO_TYPE_XGMI
+            ? IREE_HAL_AMDGPU_XGMI_DIRECT_LINK_NUMA_DISTANCE
+            : IREE_HAL_AMDGPU_OTHER_DIRECT_LINK_NUMA_DISTANCE;
     const uint64_t path_hop_count = path_distance / direct_link_distance;
     if (IREE_UNLIKELY(path_hop_count > UINT8_MAX)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
