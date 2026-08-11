@@ -15,6 +15,16 @@ extern "C" {
 
 typedef struct iree_hal_streaming_stream_t iree_hal_streaming_stream_t;
 
+// Backend operation used to enqueue a device-side buffer value wait.
+// |condition| and |flags| are opaque values interpreted by the backend.
+typedef iree_status_t(IREE_API_PTR* iree_hal_streaming_queue_wait_value_fn_t)(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    uint64_t value, uint64_t mask, iree_host_size_t value_length,
+    uint32_t condition, uint64_t flags);
+
 // Orders future work on |stream| after work already enqueued on
 // |source_stream|. The dependency is submitted to the device queue and does
 // not wait for either stream on the calling thread.
@@ -27,6 +37,15 @@ iree_status_t iree_hal_streaming_stream_wait_stream(
 iree_status_t iree_hal_streaming_queue_host_call(
     iree_hal_streaming_stream_t* stream, iree_hal_host_call_t call,
     const uint64_t args[4], iree_hal_host_call_flags_t flags);
+
+// Enqueues a device-side value wait at the current stream timeline point.
+// |condition| and |flags| are forwarded unchanged to |queue_wait_value|.
+// Synchronization: flushes pending stream commands before enqueueing.
+iree_status_t iree_hal_streaming_queue_wait_value(
+    iree_hal_streaming_stream_t* stream, iree_hal_buffer_t* target_buffer,
+    iree_device_size_t target_offset, uint64_t value, uint64_t mask,
+    iree_host_size_t value_length, uint32_t condition, uint64_t flags,
+    iree_hal_streaming_queue_wait_value_fn_t queue_wait_value);
 
 #ifdef __cplusplus
 }  // extern "C"

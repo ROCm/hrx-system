@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "common/stream.h"
+
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -759,8 +761,14 @@ static iree_status_t iree_hal_streaming_stream_synchronize_impl(
 
 iree_status_t iree_hal_streaming_stream_synchronize(
     iree_hal_streaming_stream_t* stream) {
+  // HIP launches are submitted when enqueued even though the streaming layer
+  // batches command-buffer recording. Publish work from every context before
+  // blocking so device-side dependencies cannot wait on a launch that remains
+  // recorded in another stream or physical-device context. The wait below is
+  // still scoped to |stream|.
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_context_flush_all());
   return iree_hal_streaming_stream_synchronize_impl(stream,
-                                                    /*flush_context=*/true);
+                                                    /*flush_context=*/false);
 }
 
 iree_status_t iree_hal_streaming_stream_synchronize_flushed(
@@ -1723,6 +1731,62 @@ iree_status_t iree_hal_streaming_queue_host_call(
   iree_status_t status = iree_hal_device_queue_host_call(
       stream->context->device, stream->queue_affinity, wait_semaphores,
       signal_semaphores, call, args, flags);
+  if (iree_status_is_ok(status)) {
+    stream->pending_value = signal_value;
+    stream->submitted_value = signal_value;
+  }
+  iree_slim_mutex_unlock(&stream->mutex);
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+iree_status_t iree_hal_streaming_queue_wait_value(
+    iree_hal_streaming_stream_t* stream, iree_hal_buffer_t* target_buffer,
+    iree_device_size_t target_offset, uint64_t value, uint64_t mask,
+    iree_host_size_t value_length, uint32_t condition, uint64_t flags,
+    iree_hal_streaming_queue_wait_value_fn_t queue_wait_value) {
+  IREE_ASSERT_ARGUMENT(stream);
+  IREE_ASSERT_ARGUMENT(target_buffer);
+  IREE_ASSERT_ARGUMENT(queue_wait_value);
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  // Captured waits require a graph node that preserves the target allocation
+  // and materializes the wait during each graph launch.
+  if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "queue-ordered value waits are not supported during stream capture");
+  }
+
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
+                                    iree_hal_streaming_stream_flush(stream));
+
+  iree_slim_mutex_lock(&stream->mutex);
+  uint64_t wait_value = stream->pending_value;
+  if (IREE_UNLIKELY(wait_value == UINT64_MAX)) {
+    iree_slim_mutex_unlock(&stream->mutex);
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "stream timeline value overflow");
+  }
+  uint64_t signal_value = wait_value + 1;
+  iree_hal_semaphore_list_t wait_semaphores = {
+      .count = wait_value > 0 ? 1 : 0,
+      .semaphores = &stream->timeline_semaphore,
+      .payload_values = &wait_value,
+  };
+  iree_hal_semaphore_list_t signal_semaphores = {
+      .count = 1,
+      .semaphores = &stream->timeline_semaphore,
+      .payload_values = &signal_value,
+  };
+
+  iree_status_t status = queue_wait_value(
+      stream->context->device, stream->queue_affinity, wait_semaphores,
+      signal_semaphores, target_buffer, target_offset, value, mask,
+      value_length, condition, flags);
   if (iree_status_is_ok(status)) {
     stream->pending_value = signal_value;
     stream->submitted_value = signal_value;

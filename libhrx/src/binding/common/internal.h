@@ -257,6 +257,9 @@ struct iree_hal_streaming_context_t {
   // Number of allocated entries in |streams|.
   iree_host_size_t stream_capacity;
 
+  // Number of live streams assigned to each device queue.
+  uint32_t stream_queue_counts[IREE_HAL_MAX_QUEUES];
+
   // Dedicated mutex for stream list access.
   iree_slim_mutex_t stream_list_mutex;
 

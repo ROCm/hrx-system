@@ -151,6 +151,17 @@ hrx_cc_shared_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amdgpu",
+    ],
+)
+
+hrx_cc_test(
+    name = "handle_registry_test",
+    srcs = ["handle_registry_test.cc"],
+    deps = [
+        ":handle_registry",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

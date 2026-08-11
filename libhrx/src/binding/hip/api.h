@@ -358,7 +358,65 @@ typedef enum hipStreamFlags {
   hipStreamNonBlocking = 0x01
 } hipStreamFlags_t;
 
-typedef union hipStreamBatchMemOpParams_union hipStreamBatchMemOpParams;
+typedef enum hipStreamBatchMemOpType {
+  hipStreamMemOpWaitValue32 = 0x1,
+  hipStreamMemOpWriteValue32 = 0x2,
+  hipStreamMemOpFlushRemoteWrites = 0x3,
+  hipStreamMemOpWaitValue64 = 0x4,
+  hipStreamMemOpWriteValue64 = 0x5,
+  hipStreamMemOpBarrier = 0x6,
+} hipStreamBatchMemOpType;
+
+typedef union hipStreamBatchMemOpParams_union {
+  // Operation selecting which union member is active.
+  hipStreamBatchMemOpType operation;
+  struct {
+    // Wait operation and value width.
+    hipStreamBatchMemOpType operation;
+    // Device-visible address to poll.
+    hipDeviceptr_t address;
+    union {
+      // Comparison value for a 32-bit wait.
+      uint32_t value;
+      // Comparison value for a 64-bit wait.
+      uint64_t value64;
+    };
+    // Wait condition from hipStreamWaitValue*.
+    unsigned int flags;
+    // Reserved address alias; ignored by this backend.
+    hipDeviceptr_t alias;
+  } waitValue;
+  struct {
+    // Write operation and value width.
+    hipStreamBatchMemOpType operation;
+    // Device-visible address to update.
+    hipDeviceptr_t address;
+    union {
+      // Value for a 32-bit write.
+      uint32_t value;
+      // Value for a 64-bit write.
+      uint64_t value64;
+    };
+    // Write behavior from hipStreamWriteValue*.
+    unsigned int flags;
+    // Reserved address alias; ignored by this backend.
+    hipDeviceptr_t alias;
+  } writeValue;
+  struct {
+    // Remote-write flush operation.
+    hipStreamBatchMemOpType operation;
+    // Reserved operation flags.
+    unsigned int flags;
+  } flushRemoteWrites;
+  struct {
+    // Stream memory-barrier operation.
+    hipStreamBatchMemOpType operation;
+    // Reserved operation flags.
+    unsigned int flags;
+  } memoryBarrier;
+  // Fixed ABI storage for every operation variant.
+  uint64_t pad[6];
+} hipStreamBatchMemOpParams;
 
 #define hipStreamPerThread ((hipStream_t)2)
 #define hipStreamLegacy ((hipStream_t)1)
