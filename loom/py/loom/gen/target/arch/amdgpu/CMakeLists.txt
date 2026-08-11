@@ -96,6 +96,7 @@ iree_py_library(
     loom::py::loom::gen::target::arch::amdgpu::low_aliases
     loom::py::loom::gen::target::arch::amdgpu::package_init
     loom::py::loom::gen::support::support
+    loom::py::loom::gen::target::arch::amdgpu::records::target_records
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::descriptors
     loom::py::loom::target::arch::amdgpu::target_info

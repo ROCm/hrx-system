@@ -130,6 +130,7 @@ loom_generated_cc_library(
         "--encoding-field-ids",
         "--encoding-tables",
         "--low-alias-source",
+        "--target-record-tables",
     ],
     extra_outputs = [
         "memory_cache_policy_encoding_rows.inl",
@@ -140,6 +141,7 @@ loom_generated_cc_library(
         "encoding_field_ids.inl",
         "encoding_tables.inl",
         "low_aliases.c",
+        "target_records_tables.inl",
     ],
     generated_hdr_flags = ["--header"],
     generated_hdrs = ["target_info.h"],
@@ -250,7 +252,7 @@ loom_cc_library(
     srcs = ["math_policy.c"],
     hdrs = ["math_policy.h"],
     textual_hdrs = [
-        "//loom/src/loom/target/arch/amdgpu/records:target_records_tables.inl",
+        ":target_records_tables.inl",
     ],
     deps = [
         ":target_info_defs",

@@ -239,7 +239,7 @@ loom_cc_library(
         "workgroup.h",
     ],
     textual_hdrs = [
-        "//loom/src/loom/target/arch/amdgpu/records:target_records_tables.inl",
+        "//loom/src/loom/target/arch/amdgpu:target_records_tables.inl",
         ":encoding/fp8_decode_plan_descriptor_rows.inl",
         ":encoding/fp8_encoded_operand_format_rows.inl",
         ":encoding/fp8_encoded_operand_schema_requirement_rows.inl",

@@ -4,39 +4,24 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Generator: AMDGPU compiler target-record X-macro rows."""
+"""AMDGPU compiler target-record X-macro row emission."""
 
 from __future__ import annotations
 
-import argparse
-import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-
-def _ensure_runtime_py_on_path() -> None:
-    runtime_py = Path(__file__).resolve().parents[6]
-    runtime_py_string = str(runtime_py)
-    if runtime_py_string not in sys.path:
-        sys.path.insert(0, runtime_py_string)
-
-
-_ensure_runtime_py_on_path()
-
-from loom.gen.support.c import c_pascal_identifier  # noqa: E402
-from loom.gen.support.c import c_string_arg as _c_string_arg  # noqa: E402
-from loom.gen.support.generated_file import line_comment_header  # noqa: E402
-from loom.target.arch.amdgpu.target_info import (  # noqa: E402
+from loom.gen.support.c import c_pascal_identifier
+from loom.gen.support.c import c_string_arg as _c_string_arg
+from loom.gen.support.generated_file import line_comment_header
+from loom.target.arch.amdgpu.target_info import (
     AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE,
     AmdgpuDescriptorSetInfo,
     AmdgpuProcessorInfo,
     AmdgpuTargetInfo,
     amdgpu_descriptor_set_ordinal,
     amdgpu_target_descriptor_set_key,
-    sorted_descriptor_set_infos,
-    sorted_processor_infos,
-    sorted_target_infos,
 )
 
 
@@ -250,31 +235,15 @@ def _emit_tables(rows: Sequence[_AmdgpuTargetRecordRow]) -> str:
     return "\n".join(lines)
 
 
-def write_target_record_tables_to_path(tables_path: Path) -> None:
-    rows = _materialize_rows(
-        sorted_target_infos(),
-        sorted_processor_infos(),
-        sorted_descriptor_set_infos(),
-    )
+def write_target_record_tables_to_path(
+    tables_path: Path,
+    *,
+    descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
+    processors: Sequence[AmdgpuProcessorInfo],
+    targets: Sequence[AmdgpuTargetInfo],
+) -> None:
+    rows = _materialize_rows(targets, processors, descriptor_sets)
     _validate_target_record_infos(rows)
-    _validate_target_record_coverage(rows, sorted_processor_infos())
+    _validate_target_record_coverage(rows, processors)
     tables_path.parent.mkdir(parents=True, exist_ok=True)
     tables_path.write_text(_emit_tables(rows), encoding="utf-8")
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate AMDGPU compiler target-record X-macro rows.")
-    parser.add_argument(
-        "--tables",
-        required=True,
-        type=Path,
-        help="Generated target-record X-macro table path.",
-    )
-    args = parser.parse_args(argv)
-
-    write_target_record_tables_to_path(tables_path=args.tables)
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

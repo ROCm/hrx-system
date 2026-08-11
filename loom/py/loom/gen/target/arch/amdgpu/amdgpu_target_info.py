@@ -37,6 +37,9 @@ from loom.gen.target.arch.amdgpu.amdgpu_config_tables import (  # noqa: E402
 from loom.gen.target.arch.amdgpu.amdgpu_low_aliases import (  # noqa: E402
     write_low_aliases_to_path,
 )
+from loom.gen.target.arch.amdgpu.records.amdgpu_target_records import (  # noqa: E402
+    write_target_record_tables_to_path,
+)
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     amdgpu_descriptor_ref_keys,
 )
@@ -1584,6 +1587,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         required=True,
         help="Generated blocked low-alias C source path.",
     )
+    parser.add_argument(
+        "--target-record-tables",
+        type=Path,
+        required=True,
+        help="Generated target-record X-macro table path.",
+    )
     args = parser.parse_args(argv)
 
     descriptor_sets = sorted_descriptor_set_infos()
@@ -1614,6 +1623,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         encoding_field_ids_path=args.encoding_field_ids,
     )
     write_low_aliases_to_path(args.low_alias_source)
+    write_target_record_tables_to_path(
+        args.target_record_tables,
+        descriptor_sets=descriptor_sets,
+        processors=processors,
+        targets=targets,
+    )
     return 0
 
 

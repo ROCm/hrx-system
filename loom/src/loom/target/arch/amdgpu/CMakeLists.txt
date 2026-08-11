@@ -86,6 +86,7 @@ loom_generated_cc_library(
     "--encoding-field-ids"
     "--encoding-tables"
     "--low-alias-source"
+    "--target-record-tables"
   EXTRA_OUTPUTS
     "memory_cache_policy_encoding_rows.inl"
     "memory_cache_policy_temporal_th.inl"
@@ -95,6 +96,7 @@ loom_generated_cc_library(
     "encoding_field_ids.inl"
     "encoding_tables.inl"
     "low_aliases.c"
+    "target_records_tables.inl"
   DEPS
     ::target_info_defs
     iree::base
@@ -195,7 +197,7 @@ loom_cc_library(
   HDRS
     "math_policy.h"
   TEXTUAL_HDRS
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/records/target_records_tables.inl"
+    "target_records_tables.inl"
   SRCS
     "math_policy.c"
   DEPS

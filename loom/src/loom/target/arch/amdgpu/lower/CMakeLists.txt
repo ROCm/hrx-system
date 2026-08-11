@@ -143,7 +143,7 @@ loom_cc_library(
   TEXTUAL_HDRS
     "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/memory_cache_policy_encoding_rows.inl"
     "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/memory_cache_policy_temporal_th.inl"
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/records/target_records_tables.inl"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/target_records_tables.inl"
     "encoding/fp8_decode_plan_descriptor_rows.inl"
     "encoding/fp8_encoded_operand_format_rows.inl"
     "encoding/fp8_encoded_operand_schema_requirement_rows.inl"
