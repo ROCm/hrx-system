@@ -188,6 +188,7 @@ loom_cc_library(
         "value/storage.c",
         "value/vector_construct.c",
         "value/vector_conversion.c",
+        "value/vector_transform.c",
     ],
     hdrs = [
         "abi.h",
@@ -248,6 +249,7 @@ loom_cc_library(
         "value/storage.h",
         "value/vector_construct.h",
         "value/vector_conversion.h",
+        "value/vector_transform.h",
         "workgroup.h",
     ],
     textual_hdrs = [

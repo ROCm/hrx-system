@@ -152,6 +152,7 @@ loom_cc_library(
     "value/storage.h"
     "value/vector_construct.h"
     "value/vector_conversion.h"
+    "value/vector_transform.h"
     "workgroup.h"
   TEXTUAL_HDRS
     "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/records/target_records_tables.inl"
@@ -242,6 +243,7 @@ loom_cc_library(
     "value/storage.c"
     "value/vector_construct.c"
     "value/vector_conversion.c"
+    "value/vector_transform.c"
   DEPS
     ::kinds
     ::materializers

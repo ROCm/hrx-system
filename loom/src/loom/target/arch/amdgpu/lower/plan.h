@@ -606,6 +606,19 @@ typedef struct loom_amdgpu_vector_extract_plan_t {
   bool is_dynamic;
 } loom_amdgpu_vector_extract_plan_t;
 
+typedef struct loom_amdgpu_vector_transform_plan_t {
+  // Source vector consumed by the register-local transform.
+  loom_value_id_t source;
+  // Result vector produced by the register-local transform.
+  loom_value_id_t result;
+  // Total number of 32-bit lanes in the source and result vectors.
+  uint32_t lane_count;
+  // Number of lanes in each independently transformed final-axis slice.
+  uint32_t slice_extent;
+  // Optional f32 scale bit pattern applied after the butterfly stages.
+  uint32_t normalization_scale_bits;
+} loom_amdgpu_vector_transform_plan_t;
+
 typedef struct loom_amdgpu_buffer_alloca_plan_t {
   // Exact allocation byte length proven during planning.
   int64_t byte_length;

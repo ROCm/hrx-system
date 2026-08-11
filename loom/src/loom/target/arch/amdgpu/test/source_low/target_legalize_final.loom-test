@@ -92,18 +92,7 @@ func.def target(@target) @hadamard_transform(%input: vector<4xf32>) -> (vector<4
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @hadamard_transform(%input: vector<4xf32>) -> (vector<4xf32>) {
-  %4 = vector.extract %input[0] : vector<4xf32> -> f32
-  %5 = vector.extract %input[1] : vector<4xf32> -> f32
-  %6 = vector.extract %input[2] : vector<4xf32> -> f32
-  %7 = vector.extract %input[3] : vector<4xf32> -> f32
-  %8 = scalar.addf %4, %5 : f32
-  %9 = scalar.subf %4, %5 : f32
-  %10 = scalar.addf %6, %7 : f32
-  %11 = scalar.subf %6, %7 : f32
-  %12 = scalar.addf %8, %10 : f32
-  %13 = scalar.subf %8, %10 : f32
-  %14 = scalar.addf %9, %11 : f32
-  %15 = scalar.subf %9, %11 : f32
-  %result = vector.from_elements %12, %14, %13, %15 : vector<4xf32>
+  %transform = encoding.define #transform.hadamard : encoding<transform>
+  %result = vector.transform %input, %transform : vector<4xf32>, encoding<transform> -> vector<4xf32>
   func.return %result : vector<4xf32>
 }

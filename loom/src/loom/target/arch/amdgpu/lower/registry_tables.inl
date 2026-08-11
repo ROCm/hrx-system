@@ -501,6 +501,12 @@ static const loom_amdgpu_lower_dispatch_row_t
                 loom_amdgpu_emit_vector_register_map_dispatch,
                 loom_amdgpu_low_legality_verify_vector_structural,
                 LOOM_AMDGPU_STORAGE_VECTOR_REGISTER_MAP_PLAN),
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VECTOR_TRANSFORM)] =
+            LOOM_AMDGPU_RECIPE_DATA_SOURCE_REPORT_KEY_ROW(
+                LOOM_OP_VECTOR_TRANSFORM, loom_amdgpu_vector_transform_plan_t,
+                loom_amdgpu_select_vector_transform_dispatch,
+                loom_amdgpu_emit_vector_transform_dispatch, NULL, 1,
+                LOOM_AMDGPU_REPORT_KEY_VECTOR_TRANSFORM_STRATEGY),
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VECTOR_SLICE)] =
             LOOM_AMDGPU_RECIPE_DATA_SOURCE_ROW(
                 LOOM_OP_VECTOR_SLICE, loom_amdgpu_vector_slice_plan_t,

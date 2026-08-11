@@ -69,6 +69,7 @@
 #include "loom/target/arch/amdgpu/lower/value/storage.h"
 #include "loom/target/arch/amdgpu/lower/value/vector_construct.h"
 #include "loom/target/arch/amdgpu/lower/value/vector_conversion.h"
+#include "loom/target/arch/amdgpu/lower/value/vector_transform.h"
 #include "loom/target/arch/amdgpu/lower/workgroup.h"
 
 typedef struct loom_amdgpu_lower_dispatch_row_t
@@ -163,9 +164,10 @@ enum loom_amdgpu_report_key_kind_e {
   LOOM_AMDGPU_REPORT_KEY_TENSOR_MEMORY_PACKET = 7,
   // Report the subgroup-broadcast exchange and publication strategy.
   LOOM_AMDGPU_REPORT_KEY_SUBGROUP_BROADCAST_STRATEGY = 8,
+  // Report the invocation-local vector-transform strategy.
+  LOOM_AMDGPU_REPORT_KEY_VECTOR_TRANSFORM_STRATEGY = 9,
   // Maximum report-key kind accepted by dispatch rows.
-  LOOM_AMDGPU_REPORT_KEY_MAX =
-      LOOM_AMDGPU_REPORT_KEY_SUBGROUP_BROADCAST_STRATEGY,
+  LOOM_AMDGPU_REPORT_KEY_MAX = LOOM_AMDGPU_REPORT_KEY_VECTOR_TRANSFORM_STRATEGY,
 };
 
 // Packing constants bridge the storage and preselection enum domains into the
@@ -347,6 +349,14 @@ LOOM_AMDGPU_DEFINE_DATA_SELECT(loom_amdgpu_select_vector_extract_dispatch,
 LOOM_AMDGPU_DEFINE_DATA_EMIT(loom_amdgpu_emit_vector_extract_dispatch,
                              loom_amdgpu_vector_extract_plan_t,
                              loom_amdgpu_lower_vector_extract)
+
+LOOM_AMDGPU_DEFINE_DATA_SELECT(loom_amdgpu_select_vector_transform_dispatch,
+                               loom_amdgpu_vector_transform_plan_t,
+                               loom_amdgpu_select_vector_transform_plan)
+
+LOOM_AMDGPU_DEFINE_DATA_EMIT(loom_amdgpu_emit_vector_transform_dispatch,
+                             loom_amdgpu_vector_transform_plan_t,
+                             loom_amdgpu_lower_vector_transform)
 
 LOOM_AMDGPU_DEFINE_DATA_SELECT(
     loom_amdgpu_select_vector_16bit_float_conversion_dispatch,
@@ -924,7 +934,6 @@ LOOM_AMDGPU_DEFINE_DATA_EMIT(loom_amdgpu_emit_sanitizer_race_sync_dispatch,
 #define LOOM_AMDGPU_VALUE_DATA_SOURCE_ROW LOOM_AMDGPU_INTERNAL_DATA_SOURCE_ROW
 #define LOOM_AMDGPU_VALUE_DATA_SOURCE_POLICY_ROW \
   LOOM_AMDGPU_INTERNAL_DATA_SOURCE_POLICY_ROW
-
 #define LOOM_AMDGPU_MEMORY_DATA_STORAGE_ROW \
   LOOM_AMDGPU_INTERNAL_DATA_STORAGE_ROW
 #define LOOM_AMDGPU_MEMORY_DATA_STORAGE_REPORT_KEY_ROW \
@@ -1507,6 +1516,12 @@ static iree_string_view_t loom_amdgpu_plan_key(
       }
       return loom_amdgpu_tensor_memory_plan_key(
           context, (const loom_amdgpu_tensor_load_plan_t*)plan.target_data);
+    case LOOM_AMDGPU_REPORT_KEY_VECTOR_TRANSFORM_STRATEGY:
+      if (plan.target_data == NULL) {
+        return iree_string_view_empty();
+      }
+      return loom_amdgpu_vector_transform_plan_key(
+          (const loom_amdgpu_vector_transform_plan_t*)plan.target_data);
     default:
       return iree_string_view_empty();
   }
