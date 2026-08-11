@@ -381,11 +381,9 @@ output reads like a callee-owned object factory and should use
 
 `iree-refcount-lifecycle` treats `iree_atomic_ref_count_t` as an object
 lifetime primitive, not as a generic atomic counter. A refcounted IREE C object
-is anchored by an offset-zero `iree_atomic_ref_count_t ref_count` field. The VM
-type-erased reference base uses an explicit `counter` field in
-`runtime/src/iree/vm/ref.h` because VM descriptors store the counter offset.
-Other structures are not inferred to be refcounted merely because they mention
-the primitive.
+is anchored by an offset-zero `iree_atomic_ref_count_t ref_count` field. Other
+structures are not inferred to be refcounted merely because they mention the
+primitive.
 
 Anchored refcounted objects should expose retain/release operations with the
 normal C ownership contract:
