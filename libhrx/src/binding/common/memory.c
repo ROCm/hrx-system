@@ -10,6 +10,7 @@
 
 #include "common/direct_transfer.h"
 #include "common/graph.h"
+#include "common/graph_memory.h"
 #include "common/internal.h"
 #include "common/stream.h"
 #include "iree/base/internal/atomics.h"
@@ -729,6 +730,16 @@ static void iree_hal_streaming_buffer_free(
     hrx_buffer_release(buffer->hrx_buf);
     buffer->hrx_buf = NULL;
     buffer->buffer = NULL;
+  } else if (buffer->is_virtual_memory_reservation && buffer->buffer) {
+    // Graph allocation records unmap all physical backing before releasing
+    // their virtual reservation. Reaching this path with a live mapping is an
+    // ownership invariant violation, not an ordinary buffer-release case.
+    iree_status_t status = iree_hal_allocator_virtual_memory_release(
+        buffer->context->device_allocator, buffer->buffer);
+    if (!iree_status_is_ok(status)) {
+      iree_status_abort(status);
+    }
+    buffer->buffer = NULL;
   }
   hrx_mem_pool_release(buffer->allocation_pool);
   buffer->allocation_pool = NULL;
@@ -1438,6 +1449,34 @@ iree_status_t iree_hal_streaming_memory_free_device(
           context, ptr, &owner_context, &wrapper);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
 
+  if (wrapper->graph_memory_allocation) {
+    iree_hal_streaming_graph_memory_allocation_t* allocation =
+        wrapper->graph_memory_allocation;
+    const bool has_pointer_reference =
+        iree_hal_streaming_graph_memory_allocation_claim_pointer_reference(
+            allocation);
+    if (!has_pointer_reference) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "graph allocation has no live returned-pointer reference");
+    } else {
+      status = iree_hal_streaming_context_synchronize_all();
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_streaming_graph_memory_allocation_unmap_if_mapped(
+          allocation);
+    }
+    if (iree_status_is_ok(status)) {
+      iree_hal_streaming_graph_memory_allocation_release(allocation);
+    } else if (has_pointer_reference) {
+      iree_hal_streaming_graph_memory_allocation_restore_pointer_reference(
+          allocation);
+    }
+    iree_hal_streaming_context_release(owner_context);
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
+
   // A HIP pointer may be hidden in native kernargs or device memory, so freeing
   // cannot rely on launch-time binding discovery. Flush and wait every active
   // context before releasing the allocation.
@@ -1585,6 +1624,33 @@ iree_status_t iree_hal_streaming_memory_release_completed_async_frees_from_pool(
       completed_frees, /*trim_to_release_threshold=*/false);
 }
 
+typedef struct iree_hal_streaming_deferred_graph_memory_free_t {
+  // Pointer reference retained until the stream reaches this free operation.
+  iree_hal_streaming_graph_memory_allocation_t* allocation;
+} iree_hal_streaming_deferred_graph_memory_free_t;
+
+static iree_status_t iree_hal_streaming_deferred_graph_memory_free_host_call(
+    void* user_data, const uint64_t args[4],
+    iree_hal_host_call_context_t* call_context) {
+  (void)args;
+  (void)call_context;
+  iree_hal_streaming_deferred_graph_memory_free_t* free_op =
+      (iree_hal_streaming_deferred_graph_memory_free_t*)user_data;
+  iree_status_t status =
+      iree_hal_streaming_graph_memory_allocation_unmap_if_mapped(
+          free_op->allocation);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_streaming_graph_memory_allocation_restore_pointer_reference(
+        free_op->allocation);
+    iree_allocator_free(iree_allocator_system(), free_op);
+    return iree_status_annotate_f(
+        status, "stream-ordered graph allocation unmap failed");
+  }
+  iree_hal_streaming_graph_memory_allocation_release(free_op->allocation);
+  iree_allocator_free(iree_allocator_system(), free_op);
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_streaming_memory_free_device_async(
     iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t ptr,
     iree_hal_streaming_stream_t* stream) {
@@ -1598,6 +1664,42 @@ iree_status_t iree_hal_streaming_memory_free_device_async(
       iree_hal_streaming_memory_find_device_allocation_context(
           context, ptr, &owner_context, &wrapper);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
+
+  if (wrapper->graph_memory_allocation) {
+    iree_hal_streaming_graph_memory_allocation_t* allocation =
+        wrapper->graph_memory_allocation;
+    if (!iree_hal_streaming_graph_memory_allocation_claim_pointer_reference(
+            allocation)) {
+      iree_hal_streaming_context_release(owner_context);
+      IREE_TRACE_ZONE_END(z0);
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "graph allocation has no live returned-pointer reference");
+    }
+    iree_hal_streaming_deferred_graph_memory_free_t* free_op = NULL;
+    status = iree_allocator_malloc(iree_allocator_system(), sizeof(*free_op),
+                                   (void**)&free_op);
+    if (iree_status_is_ok(status)) {
+      free_op->allocation = allocation;
+      const uint64_t args[4] = {0, 0, 0, 0};
+      status = iree_hal_streaming_queue_host_call(
+          stream,
+          iree_hal_make_host_call(
+              iree_hal_streaming_deferred_graph_memory_free_host_call, free_op),
+          args, IREE_HAL_HOST_CALL_FLAG_NONE);
+      if (!iree_status_is_ok(status)) {
+        iree_hal_streaming_graph_memory_allocation_restore_pointer_reference(
+            free_op->allocation);
+        iree_allocator_free(iree_allocator_system(), free_op);
+      }
+    } else {
+      iree_hal_streaming_graph_memory_allocation_restore_pointer_reference(
+          allocation);
+    }
+    iree_hal_streaming_context_release(owner_context);
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
 
   if (owner_context != stream->context) {
     status = wrapper->allocation_pool

@@ -329,6 +329,7 @@ iree_status_t iree_hal_streaming_stream_create(
   stream->capture_mode = IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL;
   stream->capture_graph = NULL;
   stream->capture_graph_owned = false;
+  stream->capture_graph_is_new = false;
   stream->capture_origin = false;
   stream->capture_joined_to_origin = false;
   stream->capture_id = 0;
@@ -362,6 +363,10 @@ iree_status_t iree_hal_streaming_stream_create(
 static void iree_hal_streaming_stream_destroy(
     iree_hal_streaming_stream_t* stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
+
+  if (stream->context) {
+    iree_hal_streaming_abort_capture_origin(stream);
+  }
 
   iree_hal_streaming_context_t* context = stream->context;
   if (context) {
@@ -815,6 +820,7 @@ iree_status_t iree_hal_streaming_stream_wait_event(
       if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
         stream->capture_graph = event->capture_graph;
         stream->capture_graph_owned = true;
+        stream->capture_graph_is_new = false;
         stream->capture_origin = false;
         stream->capture_joined_to_origin = false;
         if (event->recording_stream) {
@@ -845,6 +851,26 @@ iree_status_t iree_hal_streaming_stream_wait_event(
                 stream, event->capture_dependencies,
                 event->capture_dependency_count,
                 IREE_HAL_STREAMING_CAPTURE_DEPENDENCIES_ADD));
+
+    // Waiting on a participant event from the origin joins all work captured
+    // by that participant up to the event. A later operation on the participant
+    // clears this state when it advances beyond the joined frontier.
+    iree_slim_mutex_lock(&stream->mutex);
+    const bool joins_origin = stream->capture_origin;
+    const unsigned long long capture_id = stream->capture_id;
+    iree_hal_streaming_graph_t* capture_graph = stream->capture_graph;
+    iree_slim_mutex_unlock(&stream->mutex);
+    iree_hal_streaming_stream_t* recording_stream = event->recording_stream;
+    if (joins_origin && recording_stream && recording_stream != stream) {
+      iree_slim_mutex_lock(&recording_stream->mutex);
+      if (recording_stream->capture_status ==
+              IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE &&
+          recording_stream->capture_graph == capture_graph &&
+          recording_stream->capture_id == capture_id) {
+        recording_stream->capture_joined_to_origin = true;
+      }
+      iree_slim_mutex_unlock(&recording_stream->mutex);
+    }
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
