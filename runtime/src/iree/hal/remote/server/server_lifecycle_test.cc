@@ -41,6 +41,91 @@ using iree::hal::remote::server::testing::MockCarrier;
 using iree::hal::remote::server::testing::MockEndpoint;
 using iree::hal::remote::server::testing::TestBufferPool;
 
+struct FailNthAllocator {
+  // One-based allocation ordinal to fail, or zero to allow all allocations.
+  iree_host_size_t fail_allocation = 0;
+  // Number of allocation commands observed.
+  iree_host_size_t allocation_count = 0;
+  // Number of successful allocations not yet freed.
+  iree_host_size_t live_allocation_count = 0;
+
+  iree_allocator_t allocator() { return {this, Control}; }
+
+  static iree_status_t Control(void* self, iree_allocator_command_t command,
+                               const void* params, void** inout_ptr) {
+    auto* allocator = static_cast<FailNthAllocator*>(self);
+    iree_allocator_t system_allocator = iree_allocator_system();
+    switch (command) {
+      case IREE_ALLOCATOR_COMMAND_MALLOC:
+      case IREE_ALLOCATOR_COMMAND_CALLOC: {
+        ++allocator->allocation_count;
+        if (allocator->allocation_count == allocator->fail_allocation) {
+          return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+        }
+        iree_status_t status = system_allocator.ctl(system_allocator.self,
+                                                    command, params, inout_ptr);
+        if (iree_status_is_ok(status) && *inout_ptr) {
+          ++allocator->live_allocation_count;
+        }
+        return status;
+      }
+      case IREE_ALLOCATOR_COMMAND_REALLOC: {
+        ++allocator->allocation_count;
+        if (allocator->allocation_count == allocator->fail_allocation) {
+          return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+        }
+        void* old_ptr = *inout_ptr;
+        iree_status_t status = system_allocator.ctl(system_allocator.self,
+                                                    command, params, inout_ptr);
+        if (iree_status_is_ok(status)) {
+          if (!old_ptr && *inout_ptr) {
+            ++allocator->live_allocation_count;
+          } else if (old_ptr && !*inout_ptr) {
+            --allocator->live_allocation_count;
+          }
+        }
+        return status;
+      }
+      case IREE_ALLOCATOR_COMMAND_FREE:
+        if (*inout_ptr) --allocator->live_allocation_count;
+        return system_allocator.ctl(system_allocator.self, command, params,
+                                    inout_ptr);
+      default:
+        return system_allocator.ctl(system_allocator.self, command, params,
+                                    inout_ptr);
+    }
+  }
+};
+
+struct MissingDeviceSpecDevice {
+  // HAL resource base; must remain the first field.
+  iree_hal_resource_t resource;
+  // Destruction count owned by the test.
+  int* destruction_count;
+};
+
+static void DestroyMissingDeviceSpecDevice(iree_hal_device_t* base_device) {
+  auto* device = reinterpret_cast<MissingDeviceSpecDevice*>(base_device);
+  ++*device->destruction_count;
+}
+
+static const iree_hal_device_spec_t* QueryMissingDeviceSpec(
+    iree_hal_device_t* base_device) {
+  (void)base_device;
+  return nullptr;
+}
+
+static const iree_hal_device_vtable_t kMissingDeviceSpecDeviceVTable = {
+    /*.destroy=*/DestroyMissingDeviceSpecDevice,
+    /*.id=*/nullptr,
+    /*.host_allocator=*/nullptr,
+    /*.device_allocator=*/nullptr,
+    /*.replace_device_allocator=*/nullptr,
+    /*.replace_channel_provider=*/nullptr,
+    /*.trim=*/nullptr,
+    /*.device_spec=*/QueryMissingDeviceSpec,
+};
+
 class ServerLifecycleTest : public ::testing::Test {
  protected:
   static constexpr uint32_t kAxisTableCapacity = 16;
@@ -114,7 +199,9 @@ class ServerLifecycleTest : public ::testing::Test {
         factory_options, iree_allocator_system(), &factory_));
   }
 
-  void CreateAndStartServer() {
+  iree_status_t CreateServer(iree_hal_device_t* device,
+                             iree_allocator_t host_allocator,
+                             iree_hal_remote_server_t** out_server) {
     iree_async_axis_t server_axes[] = {0x0200};
     uint64_t server_epochs[] = {0};
     iree_net_session_topology_t server_topology = {};
@@ -131,11 +218,16 @@ class ServerLifecycleTest : public ::testing::Test {
     server_options.local_topology = &server_topology;
     server_options.max_connections = 1;
 
-    iree_hal_device_t* devices[] = {mock_device_};
-    IREE_ASSERT_OK(iree_hal_remote_server_create(
+    iree_hal_device_t* devices[] = {device};
+    return iree_hal_remote_server_create(
         &server_options, devices, IREE_ARRAYSIZE(devices), proactor_,
         server_tracker_, iree_hal_remote_recv_pool_buffer_pool(recv_pool_),
-        iree_allocator_system(), &server_));
+        host_allocator, out_server);
+  }
+
+  void CreateAndStartServer() {
+    IREE_ASSERT_OK(
+        CreateServer(mock_device_, iree_allocator_system(), &server_));
     IREE_ASSERT_OK(iree_hal_remote_server_start(server_));
   }
 
@@ -258,6 +350,57 @@ class ServerLifecycleTest : public ::testing::Test {
   iree_status_code_t client_connect_status_ = IREE_STATUS_OK;
   bool server_stopped_ = false;
 };
+
+TEST_F(ServerLifecycleTest, CreateUnwindsEveryAllocationFailure) {
+  CreateLoopbackFactory(IREE_HAL_REMOTE_REQUIRED_ENDPOINT_COUNT);
+
+  FailNthAllocator baseline_allocator;
+  iree_hal_remote_server_t* server = nullptr;
+  IREE_ASSERT_OK(
+      CreateServer(mock_device_, baseline_allocator.allocator(), &server));
+  ASSERT_NE(server, nullptr);
+  const iree_host_size_t allocation_count = baseline_allocator.allocation_count;
+  iree_hal_remote_server_release(server);
+  EXPECT_EQ(baseline_allocator.live_allocation_count, 0u);
+  ASSERT_GT(allocation_count, 1u);
+
+  for (iree_host_size_t fail_allocation = 1;
+       fail_allocation <= allocation_count; ++fail_allocation) {
+    FailNthAllocator allocator;
+    allocator.fail_allocation = fail_allocation;
+    server = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        CreateServer(mock_device_, allocator.allocator(), &server));
+    EXPECT_EQ(server, nullptr);
+    EXPECT_EQ(allocator.allocation_count, fail_allocation);
+    EXPECT_EQ(allocator.live_allocation_count, 0u);
+  }
+}
+
+TEST_F(ServerLifecycleTest, CreateUnwindsMissingDeviceSpec) {
+  CreateLoopbackFactory(IREE_HAL_REMOTE_REQUIRED_ENDPOINT_COUNT);
+
+  int destruction_count = 0;
+  MissingDeviceSpecDevice missing_spec_device = {
+      /*.resource=*/{},
+      /*.destruction_count=*/&destruction_count,
+  };
+  iree_hal_resource_initialize(&kMissingDeviceSpecDeviceVTable,
+                               &missing_spec_device.resource);
+
+  iree_hal_remote_server_t* server = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      CreateServer(reinterpret_cast<iree_hal_device_t*>(&missing_spec_device),
+                   iree_allocator_system(), &server));
+  EXPECT_EQ(server, nullptr);
+  EXPECT_EQ(destruction_count, 0);
+
+  iree_hal_device_release(
+      reinterpret_cast<iree_hal_device_t*>(&missing_spec_device));
+  EXPECT_EQ(destruction_count, 1);
+}
 
 TEST_F(ServerLifecycleTest, AcceptFailureClearsReservedSlot) {
   CreateLoopbackFactory(IREE_HAL_REMOTE_REQUIRED_ENDPOINT_COUNT - 1u);

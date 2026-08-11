@@ -288,6 +288,12 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_server_create(
     server->host_allocator = host_allocator;
     iree_slim_mutex_initialize(&server->session_mutex);
 
+    // Bind all trailing storage before any fallible child setup. The zeroed
+    // server is then always a complete representation accepted by destroy.
+    server->devices = (iree_hal_device_t**)((uint8_t*)server + devices_offset);
+    server->sessions =
+        (iree_hal_remote_server_session_t*)((uint8_t*)server + sessions_offset);
+
     // Copy options and bind_address to trailing storage.
     server->options = *options;
     server->options.max_connections = max_connections;
@@ -318,12 +324,22 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_server_create(
     iree_net_transport_factory_retain(server->options.transport_factory);
     iree_hal_remote_file_index_retain(server->options.file_index);
 
-    server->devices = (iree_hal_device_t**)((uint8_t*)server + devices_offset);
     server->device_count = device_count;
     for (iree_host_size_t i = 0; i < device_count; ++i) {
       server->devices[i] = devices[i];
       iree_hal_device_retain(devices[i]);
     }
+
+    // Borrow infrastructure.
+    server->proactor = proactor;
+    server->frontier_tracker = frontier_tracker;
+    server->recv_pool = recv_pool;
+
+    server->next_session_id = 1;
+    server->state = IREE_HAL_REMOTE_SERVER_STATE_STOPPED;
+  }
+
+  if (iree_status_is_ok(status)) {
     status = iree_hal_remote_server_create_device_catalog(
         server->devices, server->device_count, host_allocator,
         &server->bootstrap_device_catalog);
@@ -332,16 +348,6 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_server_create(
   if (iree_status_is_ok(status)) {
     server->local_topology.application_data =
         iree_const_cast_byte_span(server->bootstrap_device_catalog);
-
-    // Borrow infrastructure.
-    server->proactor = proactor;
-    server->frontier_tracker = frontier_tracker;
-    server->recv_pool = recv_pool;
-
-    server->sessions =
-        (iree_hal_remote_server_session_t*)((uint8_t*)server + sessions_offset);
-    server->next_session_id = 1;
-    server->state = IREE_HAL_REMOTE_SERVER_STATE_STOPPED;
   }
 
   if (iree_status_is_ok(status)) {
