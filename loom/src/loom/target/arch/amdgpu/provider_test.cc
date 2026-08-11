@@ -78,6 +78,86 @@ static loom_amdgpu_target_identity_t MakeTargetIdentity(
   return identity;
 }
 
+static void ExpectTargetFactsEqual(const loom_amdgpu_target_facts_t& expected,
+                                   const loom_amdgpu_target_facts_t& actual) {
+  EXPECT_EQ(actual.base.fact_type, expected.base.fact_type);
+  EXPECT_EQ(actual.base.selector, expected.base.selector);
+  EXPECT_EQ(actual.base.authored_fields, expected.base.authored_fields);
+
+  const loom_target_snapshot_t& expected_snapshot =
+      expected.base.storage.snapshot;
+  const loom_target_snapshot_t& actual_snapshot = actual.base.storage.snapshot;
+  EXPECT_EQ(actual_snapshot.codegen_format, expected_snapshot.codegen_format);
+  EXPECT_EQ(actual_snapshot.artifact_format, expected_snapshot.artifact_format);
+  EXPECT_EQ(actual_snapshot.default_pointer_bitwidth,
+            expected_snapshot.default_pointer_bitwidth);
+  EXPECT_EQ(actual_snapshot.index_bitwidth, expected_snapshot.index_bitwidth);
+  EXPECT_EQ(actual_snapshot.offset_bitwidth, expected_snapshot.offset_bitwidth);
+  EXPECT_EQ(actual_snapshot.max_workgroup_size.x,
+            expected_snapshot.max_workgroup_size.x);
+  EXPECT_EQ(actual_snapshot.max_workgroup_size.y,
+            expected_snapshot.max_workgroup_size.y);
+  EXPECT_EQ(actual_snapshot.max_workgroup_size.z,
+            expected_snapshot.max_workgroup_size.z);
+  EXPECT_EQ(actual_snapshot.max_flat_workgroup_size,
+            expected_snapshot.max_flat_workgroup_size);
+  EXPECT_EQ(actual_snapshot.max_workgroup_storage_bytes,
+            expected_snapshot.max_workgroup_storage_bytes);
+  EXPECT_EQ(actual_snapshot.subgroup_size, expected_snapshot.subgroup_size);
+  EXPECT_EQ(actual_snapshot.max_grid_size.x, expected_snapshot.max_grid_size.x);
+  EXPECT_EQ(actual_snapshot.max_grid_size.y, expected_snapshot.max_grid_size.y);
+  EXPECT_EQ(actual_snapshot.max_grid_size.z, expected_snapshot.max_grid_size.z);
+  EXPECT_EQ(actual_snapshot.max_flat_grid_size,
+            expected_snapshot.max_flat_grid_size);
+  EXPECT_EQ(actual_snapshot.max_workgroup_count.x,
+            expected_snapshot.max_workgroup_count.x);
+  EXPECT_EQ(actual_snapshot.max_workgroup_count.y,
+            expected_snapshot.max_workgroup_count.y);
+  EXPECT_EQ(actual_snapshot.max_workgroup_count.z,
+            expected_snapshot.max_workgroup_count.z);
+  EXPECT_EQ(actual_snapshot.memory_spaces.generic,
+            expected_snapshot.memory_spaces.generic);
+  EXPECT_EQ(actual_snapshot.memory_spaces.global,
+            expected_snapshot.memory_spaces.global);
+  EXPECT_EQ(actual_snapshot.memory_spaces.workgroup,
+            expected_snapshot.memory_spaces.workgroup);
+  EXPECT_EQ(actual_snapshot.memory_spaces.constant,
+            expected_snapshot.memory_spaces.constant);
+  EXPECT_EQ(actual_snapshot.memory_spaces.private_memory,
+            expected_snapshot.memory_spaces.private_memory);
+  EXPECT_EQ(actual_snapshot.memory_spaces.host,
+            expected_snapshot.memory_spaces.host);
+  EXPECT_EQ(actual_snapshot.memory_spaces.descriptor,
+            expected_snapshot.memory_spaces.descriptor);
+
+  const loom_target_export_plan_t& expected_export =
+      expected.base.storage.export_plan;
+  const loom_target_export_plan_t& actual_export =
+      actual.base.storage.export_plan;
+  EXPECT_EQ(actual_export.abi_kind, expected_export.abi_kind);
+  EXPECT_EQ(actual_export.linkage, expected_export.linkage);
+  EXPECT_TRUE(iree_string_view_equal(actual_export.export_symbol,
+                                     expected_export.export_symbol));
+  EXPECT_EQ(actual_export.hal_kernel.required_workgroup_size.x,
+            expected_export.hal_kernel.required_workgroup_size.x);
+  EXPECT_EQ(actual_export.hal_kernel.required_workgroup_size.y,
+            expected_export.hal_kernel.required_workgroup_size.y);
+  EXPECT_EQ(actual_export.hal_kernel.required_workgroup_size.z,
+            expected_export.hal_kernel.required_workgroup_size.z);
+  EXPECT_EQ(actual_export.hal_kernel.flat_workgroup_size_min,
+            expected_export.hal_kernel.flat_workgroup_size_min);
+  EXPECT_EQ(actual_export.hal_kernel.flat_workgroup_size_max,
+            expected_export.hal_kernel.flat_workgroup_size_max);
+
+  EXPECT_TRUE(
+      iree_string_view_equal(actual.base.storage.config.contract_set_key,
+                             expected.base.storage.config.contract_set_key));
+  EXPECT_EQ(actual.base.storage.config.contract_feature_bits,
+            expected.base.storage.config.contract_feature_bits);
+  EXPECT_TRUE(
+      loom_amdgpu_target_identity_equal(&actual.identity, &expected.identity));
+}
+
 class AmdgpuProviderTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -338,6 +418,98 @@ TEST_F(AmdgpuProviderTest, ProvidesLoweringPolicyForEveryDescriptorSet) {
         nullptr)
         << "descriptor set ordinal " << i;
   }
+}
+
+TEST_F(AmdgpuProviderTest, MaterializesEveryStructuredProfile) {
+  const iree_host_size_t target_count = loom_amdgpu_target_info_target_count();
+  ASSERT_NE(target_count, 0u);
+  for (iree_host_size_t i = 0; i < target_count; ++i) {
+    const loom_amdgpu_target_info_t* target =
+        loom_amdgpu_target_info_target_at(i);
+    ASSERT_NE(target, nullptr);
+    loom_amdgpu_target_identity_t identity = {};
+    loom_amdgpu_target_identity_initialize(target, &identity);
+    loom_amdgpu_target_profile_t profile = {};
+    IREE_ASSERT_OK(loom_amdgpu_target_profile_initialize(&identity, &profile));
+    loom_target_facts_t* profile_facts = nullptr;
+    IREE_ASSERT_OK(loom_target_profile_project_facts(
+        &profile.base, &analysis_arena_, &profile_facts));
+
+    ModulePtr module;
+    IREE_ASSERT_OK(AllocateModule(target->name, &module));
+    loom_string_id_t target_name_id = LOOM_STRING_ID_INVALID;
+    IREE_ASSERT_OK(loom_module_intern_string(module.get(), IREE_SV("target"),
+                                             &target_name_id));
+    loom_symbol_id_t target_symbol_id = LOOM_SYMBOL_ID_INVALID;
+    IREE_ASSERT_OK(loom_module_add_symbol(module.get(), target_name_id,
+                                          &target_symbol_id));
+    const loom_symbol_ref_t target_ref = {
+        /*.module_id=*/0,
+        /*.symbol_id=*/target_symbol_id,
+    };
+    loom_builder_t builder;
+    loom_builder_initialize(module.get(), &module->arena,
+                            loom_module_block(module.get()), &builder);
+    loom_op_t* target_op = nullptr;
+    IREE_ASSERT_OK(loom_amdgpu_target_provider.materialize_definition(
+        &builder, profile_facts, target_ref, LOOM_LOCATION_UNKNOWN,
+        &target_op));
+    ASSERT_NE(target_op, nullptr);
+
+    loom_symbol_fact_table_reset(&fact_table_);
+    const loom_target_symbol_facts_t* materialized_symbol_facts =
+        Target(module.get(), target_ref);
+    const loom_amdgpu_target_facts_t* materialized_facts =
+        loom_amdgpu_target_facts_cast(materialized_symbol_facts->projection);
+    ASSERT_NE(materialized_facts, nullptr);
+    const loom_amdgpu_target_facts_t* expected_facts =
+        loom_amdgpu_target_facts_cast(profile_facts);
+    ASSERT_NE(expected_facts, nullptr);
+    ExpectTargetFactsEqual(*expected_facts, *materialized_facts);
+  }
+}
+
+TEST_F(AmdgpuProviderTest, MaterializesAuthoredRefinements) {
+  ModulePtr source =
+      Parse(IREE_SV("amdgpu.target<gfx942> @source {subgroup_size = 64, "
+                    "max_workgroup_storage_bytes = 32768, "
+                    "export_symbol = \"roundtrip_export\", "
+                    "contract_set_key = \"roundtrip.contract\", "
+                    "contract_feature_bits = 5, sramecc = on, xnack = off}\n"));
+  const loom_target_symbol_facts_t* source_symbol_facts =
+      Target(source.get(), FindSymbolRef(source.get(), IREE_SV("source")));
+  const loom_amdgpu_target_facts_t* source_facts =
+      loom_amdgpu_target_facts_cast(source_symbol_facts->projection);
+  ASSERT_NE(source_facts, nullptr);
+
+  ModulePtr materialized;
+  IREE_ASSERT_OK(AllocateModule(IREE_SV("materialized"), &materialized));
+  loom_string_id_t target_name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_string(
+      materialized.get(), IREE_SV("sealed_target"), &target_name_id));
+  loom_symbol_id_t target_symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_add_symbol(materialized.get(), target_name_id,
+                                        &target_symbol_id));
+  const loom_symbol_ref_t target_ref = {
+      /*.module_id=*/0,
+      /*.symbol_id=*/target_symbol_id,
+  };
+  loom_builder_t builder;
+  loom_builder_initialize(materialized.get(), &materialized->arena,
+                          loom_module_block(materialized.get()), &builder);
+  loom_op_t* target_op = nullptr;
+  IREE_ASSERT_OK(loom_amdgpu_target_provider.materialize_definition(
+      &builder, source_symbol_facts->projection, target_ref,
+      LOOM_LOCATION_UNKNOWN, &target_op));
+  ASSERT_NE(target_op, nullptr);
+
+  loom_symbol_fact_table_reset(&fact_table_);
+  const loom_target_symbol_facts_t* materialized_symbol_facts =
+      Target(materialized.get(), target_ref);
+  const loom_amdgpu_target_facts_t* materialized_facts =
+      loom_amdgpu_target_facts_cast(materialized_symbol_facts->projection);
+  ASSERT_NE(materialized_facts, nullptr);
+  ExpectTargetFactsEqual(*source_facts, *materialized_facts);
 }
 
 TEST_F(AmdgpuProviderTest, SeparatesIdentityAndSpecializationRequirements) {

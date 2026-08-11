@@ -347,6 +347,13 @@ func.def public @wide() -> (index) {
   ASSERT_NE(middle64_version, nullptr);
   ASSERT_NE(leaf32_version, nullptr);
   ASSERT_NE(leaf64_version, nullptr);
+  EXPECT_EQ(left_version->target_provider, &kTestProvider);
+  EXPECT_EQ(right_version->target_provider, &kTestProvider);
+  EXPECT_EQ(wide_version->target_provider, &kTestProvider);
+  EXPECT_EQ(middle32_version->target_provider, &kTestProvider);
+  EXPECT_EQ(middle64_version->target_provider, &kTestProvider);
+  EXPECT_EQ(leaf32_version->target_provider, &kTestProvider);
+  EXPECT_EQ(leaf64_version->target_provider, &kTestProvider);
   EXPECT_EQ(left_version->target_context_facts,
             right_version->target_context_facts);
   EXPECT_EQ(left_version->target_context_facts,

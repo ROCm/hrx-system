@@ -16,6 +16,7 @@
 #include "loom/target/arch/amdgpu/lower/lower.h"
 #include "loom/target/arch/amdgpu/math_policy.h"
 #include "loom/target/arch/amdgpu/ops/registry.h"
+#include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/arch/amdgpu/pass_registry.h"
 #include "loom/target/arch/amdgpu/profile.h"
 
@@ -112,6 +113,7 @@ static iree_status_t loom_amdgpu_provider_contribute_pipeline(
 
 const loom_target_provider_t loom_amdgpu_target_provider = {
     .profile_type = &loom_amdgpu_target_profile_type,
+    .materialize_definition = loom_amdgpu_target_materialize_definition,
     .register_context = loom_amdgpu_ops_register_dialect,
     .initialize_low_descriptor_registry =
         loom_amdgpu_low_descriptor_registry_initialize,

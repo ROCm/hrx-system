@@ -26,6 +26,9 @@ typedef struct loom_target_resolved_specialization_t {
   // Structured profile borrowed from the request.
   const loom_target_profile_t* target_profile;
 
+  // Provider owning |target_profile| and every fact derived from it.
+  const loom_target_provider_t* target_provider;
+
   // Profile facts projected once for all requests sharing |target_profile|.
   const loom_target_facts_t* projected_profile_facts;
 
@@ -261,6 +264,7 @@ static iree_status_t loom_target_specialization_prepare_versions(
             specialization->authored_target_facts != NULL
                 ? specialization->authored_target_facts->projection
                 : NULL,
+        .target_provider = specialization->target_provider,
         .target_context_facts = target_context_facts,
         .effective_target_facts = function_facts,
     };
@@ -312,8 +316,10 @@ iree_status_t loom_target_specialize_functions(
                               " has no complete target profile",
                               i);
     }
-    if (!loom_target_environment_supports_profile_type(
-            environment, request->target_profile->type)) {
+    const loom_target_provider_t* target_provider =
+        loom_target_environment_lookup_profile_provider(
+            environment, request->target_profile->type);
+    if (target_provider == NULL) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "target specialization request %" PRIhsz
@@ -326,6 +332,7 @@ iree_status_t loom_target_specialize_functions(
         &specializations[i]));
     request_ordinals[specializations[i].function_name_id] = i;
     specializations[i].target_profile = request->target_profile;
+    specializations[i].target_provider = target_provider;
   }
 
   loom_target_function_version_t* target_versions = NULL;

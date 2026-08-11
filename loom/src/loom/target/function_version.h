@@ -18,6 +18,8 @@
 extern "C" {
 #endif
 
+typedef struct loom_target_provider_t loom_target_provider_t;
+
 typedef struct loom_target_function_version_t {
   // Generic compiler function-version base. Must remain the first field.
   loom_function_version_t base;
@@ -28,6 +30,11 @@ typedef struct loom_target_function_version_t {
 
   // Facts projected from the authored target witness, or NULL when absent.
   const loom_target_facts_t* authored_target_facts;
+
+  // Target-family provider selected with the structured profile. This direct
+  // interface remains paired with every derived context so artifact boundaries
+  // can materialize facts without rediscovering their family.
+  const loom_target_provider_t* target_provider;
 
   // Exact invocation context inherited by retained semantic callees.
   //

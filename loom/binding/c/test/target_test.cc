@@ -143,6 +143,7 @@ static const loom_target_provider_t kEmptyProvider = {};
 
 static const loom_target_provider_t kFakeElfProvider = {
     /*.profile_type=*/nullptr,
+    /*.materialize_definition=*/nullptr,
     /*.register_context=*/nullptr,
     /*.initialize_low_descriptor_registry=*/nullptr,
     /*.initialize_low_lower_policy_registry=*/nullptr,
@@ -163,6 +164,7 @@ static const loom_target_provider_t kFakeElfProvider = {
 
 static const loom_target_provider_t kFakeWasmProvider = {
     /*.profile_type=*/nullptr,
+    /*.materialize_definition=*/nullptr,
     /*.register_context=*/nullptr,
     /*.initialize_low_descriptor_registry=*/nullptr,
     /*.initialize_low_lower_policy_registry=*/nullptr,

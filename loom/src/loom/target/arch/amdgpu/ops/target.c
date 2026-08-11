@@ -15,6 +15,79 @@
 #include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/records/target_records.h"
 
+iree_status_t loom_amdgpu_target_materialize_definition(
+    loom_builder_t* builder, const loom_target_facts_t* base_facts,
+    loom_symbol_ref_t symbol, loom_location_id_t location,
+    loom_op_t** out_target_op) {
+  const loom_amdgpu_target_facts_t* facts =
+      loom_amdgpu_target_facts_cast(base_facts);
+  IREE_ASSERT(facts != NULL);
+  IREE_ASSERT(facts->identity.target != NULL);
+  IREE_ASSERT_EQ(facts->identity.target->target_kind, facts->base.selector);
+  static_assert(LOOM_TARGET_FACT_FIELD_COUNT_ == 30,
+                "AMDGPU target flags reserve the first 30 bits for common "
+                "target facts");
+  static_assert(LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_CODEGEN_FORMAT ==
+                    (1u << LOOM_TARGET_FACT_FIELD_CODEGEN_FORMAT),
+                "AMDGPU target flags must follow target fact ordinals");
+  static_assert(LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_CONTRACT_FEATURE_BITS ==
+                    (1u << LOOM_TARGET_FACT_FIELD_CONTRACT_FEATURE_BITS),
+                "AMDGPU target flags must follow target fact ordinals");
+
+  loom_amdgpu_target_build_flags_t build_flags =
+      (loom_amdgpu_target_build_flags_t)facts->base.authored_fields;
+  loom_amdgpu_target_identity_t default_identity = {0};
+  loom_amdgpu_target_identity_initialize(facts->identity.target,
+                                         &default_identity);
+  if (facts->identity.amdhsa_features.sramecc !=
+      default_identity.amdhsa_features.sramecc) {
+    build_flags |= LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_SRAMECC;
+  }
+  if (facts->identity.amdhsa_features.xnack !=
+      default_identity.amdhsa_features.xnack) {
+    build_flags |= LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_XNACK;
+  }
+
+  loom_string_id_t export_symbol = LOOM_STRING_ID_INVALID;
+  if (iree_any_bit_set(build_flags,
+                       LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_EXPORT_SYMBOL)) {
+    IREE_RETURN_IF_ERROR(loom_builder_intern_string(
+        builder, facts->base.storage.export_plan.export_symbol,
+        &export_symbol));
+  }
+  loom_string_id_t contract_set_key = LOOM_STRING_ID_INVALID;
+  if (iree_any_bit_set(build_flags,
+                       LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_CONTRACT_SET_KEY)) {
+    IREE_RETURN_IF_ERROR(loom_builder_intern_string(
+        builder, facts->base.storage.config.contract_set_key,
+        &contract_set_key));
+  }
+
+  const loom_target_snapshot_t* snapshot = &facts->base.storage.snapshot;
+  const loom_target_export_plan_t* export_plan =
+      &facts->base.storage.export_plan;
+  const loom_target_config_t* config = &facts->base.storage.config;
+  return loom_amdgpu_target_build(
+      builder, build_flags,
+      (loom_amdgpu_target_kind_t)facts->identity.target->target_kind, symbol,
+      snapshot->codegen_format, snapshot->artifact_format,
+      snapshot->default_pointer_bitwidth, snapshot->index_bitwidth,
+      snapshot->offset_bitwidth, snapshot->max_workgroup_size.x,
+      snapshot->max_workgroup_size.y, snapshot->max_workgroup_size.z,
+      snapshot->max_flat_workgroup_size, snapshot->max_workgroup_storage_bytes,
+      snapshot->subgroup_size, snapshot->max_grid_size.x,
+      snapshot->max_grid_size.y, snapshot->max_grid_size.z,
+      snapshot->max_flat_grid_size, snapshot->max_workgroup_count.x,
+      snapshot->max_workgroup_count.y, snapshot->max_workgroup_count.z,
+      snapshot->memory_spaces.generic, snapshot->memory_spaces.global,
+      snapshot->memory_spaces.workgroup, snapshot->memory_spaces.constant,
+      snapshot->memory_spaces.private_memory, snapshot->memory_spaces.host,
+      snapshot->memory_spaces.descriptor, export_plan->abi_kind, export_symbol,
+      export_plan->linkage, contract_set_key, config->contract_feature_bits,
+      facts->identity.amdhsa_features.sramecc,
+      facts->identity.amdhsa_features.xnack, location, out_target_op);
+}
+
 static iree_string_view_t loom_amdgpu_target_record_symbol_name(
     const loom_module_t* module, const loom_op_t* target_op) {
   loom_symbol_ref_t symbol_ref = loom_amdgpu_target_symbol(target_op);

@@ -58,6 +58,16 @@ typedef struct loom_builder_t loom_builder_t;
 typedef struct loom_target_environment_t loom_target_environment_t;
 typedef struct loom_target_provider_t loom_target_provider_t;
 
+// Materializes exact target-context facts as an ordinary target definition.
+//
+// The facts must have been projected by the provider's |profile_type| and may
+// include compatible authored target requirements. Builder allocation and
+// string interning are the only fallible operations for verified facts.
+typedef iree_status_t (*loom_target_materialize_definition_fn_t)(
+    loom_builder_t* builder, const loom_target_facts_t* facts,
+    loom_symbol_ref_t symbol, loom_location_id_t location,
+    loom_op_t** out_target_op);
+
 // Target emission artifact storage release callback.
 typedef void (*loom_target_emit_artifact_release_fn_t)(
     void* storage, iree_allocator_t allocator);
@@ -224,6 +234,10 @@ struct loom_target_provider_t {
   // Target-family profile representation owned by this provider, or NULL when
   // the provider contributes no profile-driven semantics.
   const loom_target_profile_type_t* profile_type;
+  // Optional inverse materializer for facts projected by |profile_type|.
+  // Providers without an ordinary target-IR representation leave this NULL
+  // and cannot seal target-bound artifacts.
+  loom_target_materialize_definition_fn_t materialize_definition;
   // Optional function that registers target-owned dialects.
   loom_target_provider_context_registration_fn_t register_context;
   // Optional function that initializes target-low descriptor-set providers.
@@ -401,11 +415,12 @@ loom_target_emitter_list_t loom_target_environment_emitter_list(
 const loom_pass_registry_t* loom_target_environment_pass_registry(
     const loom_target_environment_t* environment);
 
-// Returns whether |environment| owns |profile_type|.
+// Returns the provider owning |profile_type|, or NULL when not linked.
 //
 // This is a cold external-input boundary check used before accepting a
-// structured profile for specialization.
-bool loom_target_environment_supports_profile_type(
+// structured profile for specialization. Callers retain the returned provider
+// with projected facts instead of resolving the family again downstream.
+const loom_target_provider_t* loom_target_environment_lookup_profile_provider(
     const loom_target_environment_t* environment,
     const loom_target_profile_type_t* profile_type);
 
