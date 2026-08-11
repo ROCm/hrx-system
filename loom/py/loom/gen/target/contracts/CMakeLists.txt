@@ -64,17 +64,6 @@ iree_py_library(
 
 iree_py_library(
   NAME
-    lower_rule_shard
-  SRCS
-    "__init__.py"
-    "lower_rule_shard.py"
-  DEPS
-    loom::py::loom::gen::target::contracts::lower_rules
-    loom::py::loom::target::contract_fragments
-)
-
-iree_py_library(
-  NAME
     amdgpu_contract_fragment
   MAIN
     "contract_fragment.py"
@@ -101,170 +90,79 @@ iree_py_library(
 
 iree_py_library(
   NAME
-    amdgpu_lower_rule_shard
+    ireevm_contract_table_family
   MAIN
-    "lower_rule_shard.py"
+    "contract_table_family.py"
   SRCS
     "__init__.py"
-    "lower_rule_shard.py"
+    "contract_table_family.py"
   DEPS
-    loom::py::loom::gen::target::contracts::lower_rule_shard
-    loom::py::loom::target::arch::amdgpu::contracts::contracts
-)
-
-iree_py_library(
-  NAME
-    ireevm_contract_fragment
-  MAIN
-    "contract_fragment.py"
-  SRCS
-    "__init__.py"
-    "contract_fragment.py"
-  DEPS
-    loom::py::loom::gen::target::contracts::contract_fragment
+    loom::py::loom::gen::target::contracts::contract_table_family
     loom::py::loom::target::arch::ireevm::contracts::contracts
 )
 
 iree_py_library(
   NAME
-    ireevm_lower_rule_shard
+    llvmir_contract_table_family
   MAIN
-    "lower_rule_shard.py"
+    "contract_table_family.py"
   SRCS
     "__init__.py"
-    "lower_rule_shard.py"
+    "contract_table_family.py"
   DEPS
-    loom::py::loom::gen::target::contracts::lower_rule_shard
-    loom::py::loom::target::arch::ireevm::contracts::contracts
-)
-
-iree_py_library(
-  NAME
-    llvmir_contract_fragment
-  MAIN
-    "contract_fragment.py"
-  SRCS
-    "__init__.py"
-    "contract_fragment.py"
-  DEPS
-    loom::py::loom::gen::target::contracts::contract_fragment
+    loom::py::loom::gen::target::contracts::contract_table_family
     loom::py::loom::target::arch::llvmir::contracts
 )
 
 iree_py_library(
   NAME
-    llvmir_lower_rule_shard
+    spirv_contract_table_family
   MAIN
-    "lower_rule_shard.py"
+    "contract_table_family.py"
   SRCS
     "__init__.py"
-    "lower_rule_shard.py"
+    "contract_table_family.py"
   DEPS
-    loom::py::loom::gen::target::contracts::lower_rule_shard
-    loom::py::loom::target::arch::llvmir::contracts
-)
-
-iree_py_library(
-  NAME
-    spirv_contract_fragment
-  MAIN
-    "contract_fragment.py"
-  SRCS
-    "__init__.py"
-    "contract_fragment.py"
-  DEPS
-    loom::py::loom::gen::target::contracts::contract_fragment
+    loom::py::loom::gen::target::contracts::contract_table_family
     loom::py::loom::target::arch::spirv::contracts::contracts
 )
 
 iree_py_library(
   NAME
-    spirv_lower_rule_shard
+    test_low_contract_table_family
   MAIN
-    "lower_rule_shard.py"
+    "contract_table_family.py"
   SRCS
     "__init__.py"
-    "lower_rule_shard.py"
+    "contract_table_family.py"
   DEPS
-    loom::py::loom::gen::target::contracts::lower_rule_shard
-    loom::py::loom::target::arch::spirv::contracts::contracts
-)
-
-iree_py_library(
-  NAME
-    test_low_contract_fragment
-  MAIN
-    "contract_fragment.py"
-  SRCS
-    "__init__.py"
-    "contract_fragment.py"
-  DEPS
-    loom::py::loom::gen::target::contracts::contract_fragment
+    loom::py::loom::gen::target::contracts::contract_table_family
     loom::py::loom::target::test::contracts
 )
 
 iree_py_library(
   NAME
-    test_low_lower_rule_shard
+    wasm_contract_table_family
   MAIN
-    "lower_rule_shard.py"
+    "contract_table_family.py"
   SRCS
     "__init__.py"
-    "lower_rule_shard.py"
+    "contract_table_family.py"
   DEPS
-    loom::py::loom::gen::target::contracts::lower_rule_shard
-    loom::py::loom::target::test::contracts
-)
-
-iree_py_library(
-  NAME
-    wasm_contract_fragment
-  MAIN
-    "contract_fragment.py"
-  SRCS
-    "__init__.py"
-    "contract_fragment.py"
-  DEPS
-    loom::py::loom::gen::target::contracts::contract_fragment
+    loom::py::loom::gen::target::contracts::contract_table_family
     loom::py::loom::target::emit::wasm::contracts
 )
 
 iree_py_library(
   NAME
-    wasm_lower_rule_shard
+    x86_contract_table_family
   MAIN
-    "lower_rule_shard.py"
+    "contract_table_family.py"
   SRCS
     "__init__.py"
-    "lower_rule_shard.py"
+    "contract_table_family.py"
   DEPS
-    loom::py::loom::gen::target::contracts::lower_rule_shard
-    loom::py::loom::target::emit::wasm::contracts
-)
-
-iree_py_library(
-  NAME
-    x86_contract_fragment
-  MAIN
-    "contract_fragment.py"
-  SRCS
-    "__init__.py"
-    "contract_fragment.py"
-  DEPS
-    loom::py::loom::gen::target::contracts::contract_fragment
-    loom::py::loom::target::arch::x86::contracts::contracts
-)
-
-iree_py_library(
-  NAME
-    x86_lower_rule_shard
-  MAIN
-    "lower_rule_shard.py"
-  SRCS
-    "__init__.py"
-    "lower_rule_shard.py"
-  DEPS
-    loom::py::loom::gen::target::contracts::lower_rule_shard
+    loom::py::loom::gen::target::contracts::contract_table_family
     loom::py::loom::target::arch::x86::contracts::contracts
 )
 

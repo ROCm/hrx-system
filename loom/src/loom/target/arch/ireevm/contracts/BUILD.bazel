@@ -7,7 +7,7 @@
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
-    "loom_target_table_cc_library",
+    "loom_target_contract_table_cc_libraries",
 )
 
 package(
@@ -16,18 +16,12 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-loom_target_table_cc_library(
+loom_target_contract_table_cc_libraries(
     name = "core",
     args = ["--contract-fragment=ireevm.core"],
-    generator = "//loom/py/loom/gen/target/contracts:ireevm_contract_fragment",
-    deps = ["//loom/src/loom/target:contract"],
-)
-
-loom_target_table_cc_library(
-    name = "core_lower_rules",
-    args = ["--contract-fragment=ireevm.core"],
-    generator = "//loom/py/loom/gen/target/contracts:ireevm_lower_rule_shard",
-    deps = [
+    contract_deps = ["//loom/src/loom/target:contract"],
+    generator = "//loom/py/loom/gen/target/contracts:ireevm_contract_table_family",
+    lower_rule_deps = [
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/target/arch/ireevm/descriptors:descriptors_ids",
