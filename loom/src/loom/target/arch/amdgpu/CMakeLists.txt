@@ -385,11 +385,15 @@ loom_cc_test(
     ::provider
     iree::base
     iree::base::internal::arena
+    iree::io::stream
     iree::testing::gtest
     iree::testing::gtest_main
     loom::analysis::symbol_facts
     loom::codegen::low::pipeline::pass_environment
+    loom::format::bytecode::reader
+    loom::format::bytecode::writer
     loom::format::text::parser
+    loom::format::text::printer
     loom::ir
     loom::ops::func
     loom::ops::op_registry
