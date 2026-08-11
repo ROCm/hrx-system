@@ -40,6 +40,8 @@ typedef enum iree_hal_amdgpu_executable_export_flag_bits_e {
       1u << 0,
   // Export can only be launched with caller-provided native kernargs.
   IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_CUSTOM_DIRECT_ONLY = 1u << 1,
+  // Export rejects dispatches that would create a partial workgroup.
+  IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_REQUIRES_UNIFORM_WORKGROUPS = 1u << 2,
 } iree_hal_amdgpu_executable_export_flag_bits_t;
 typedef uint32_t iree_hal_amdgpu_executable_export_flags_t;
 
@@ -100,6 +102,10 @@ typedef struct iree_hal_amdgpu_executable_export_t {
   uint32_t fixed_group_segment_size;
   // Fixed private segment byte size reported by executable metadata.
   uint32_t fixed_private_segment_size;
+  // Maximum total work-items per workgroup accepted by this export.
+  uint32_t max_workgroup_size;
+  // Vector registers allocated per work-item by this export.
+  uint32_t vgpr_count;
   // Maximum dynamic group-memory byte count accepted for this export.
   uint32_t max_dynamic_workgroup_local_memory;
   // Native kernarg layout record for normal metadata-described dispatch.

@@ -7,6 +7,7 @@
 #include "iree/hal/drivers/amdgpu/executable.h"
 
 #include "iree/base/internal/debugging.h"
+#include "iree/hal/drivers/amdgpu/api.h"
 #include "iree/hal/drivers/amdgpu/asan_state.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/executable_global_resolver.h"
@@ -1597,6 +1598,19 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_export_infos(
       IREE_RETURN_IF_ERROR(iree_hal_amdgpu_executable_validate_workgroup_size(
           reflection->symbol_name, metadata_export->workgroup_size, limits));
     }
+    const uint32_t maximum_workgroup_invocations =
+        metadata_export->max_workgroup_size != 0
+            ? metadata_export->max_workgroup_size
+            : limits->max_workgroup_size;
+    if (IREE_UNLIKELY(maximum_workgroup_invocations >
+                      limits->max_workgroup_size)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AMDGPU kernel `%.*s` maximum workgroup size %u exceeds device "
+          "maximum %u",
+          (int)reflection->symbol_name.size, reflection->symbol_name.data,
+          maximum_workgroup_invocations, limits->max_workgroup_size);
+    }
 
     executable->custom_direct_only_exports[i] = custom_direct_only;
     executable->export_parameter_offsets[i] = reflection->parameter_offset;
@@ -2105,6 +2119,53 @@ uint64_t iree_hal_amdgpu_executable_id(iree_hal_executable_t* base_executable) {
   iree_hal_amdgpu_executable_t* executable =
       iree_hal_amdgpu_executable_cast(base_executable);
   return executable->executable_id;
+}
+
+IREE_API_EXPORT iree_status_t
+iree_hal_amdgpu_executable_query_function_attributes(
+    iree_hal_executable_t* base_executable,
+    iree_hal_executable_function_t function,
+    uint32_t* out_maximum_workgroup_invocations,
+    uint32_t* out_workgroup_local_memory_size,
+    uint32_t* out_private_memory_size, uint32_t* out_register_count,
+    uint32_t* out_maximum_dynamic_workgroup_local_memory_size,
+    bool* out_requires_uniform_workgroups) {
+  IREE_ASSERT_ARGUMENT(base_executable);
+  IREE_ASSERT_ARGUMENT(out_maximum_workgroup_invocations);
+  IREE_ASSERT_ARGUMENT(out_workgroup_local_memory_size);
+  IREE_ASSERT_ARGUMENT(out_private_memory_size);
+  IREE_ASSERT_ARGUMENT(out_register_count);
+  IREE_ASSERT_ARGUMENT(out_maximum_dynamic_workgroup_local_memory_size);
+  IREE_ASSERT_ARGUMENT(out_requires_uniform_workgroups);
+  *out_maximum_workgroup_invocations = 0;
+  *out_workgroup_local_memory_size = 0;
+  *out_private_memory_size = 0;
+  *out_register_count = 0;
+  *out_maximum_dynamic_workgroup_local_memory_size = 0;
+  *out_requires_uniform_workgroups = false;
+
+  const iree_hal_amdgpu_executable_t* executable =
+      iree_hal_amdgpu_executable_const_cast(base_executable);
+  if (IREE_UNLIKELY(!iree_hal_executable_function_is_index_in_range(
+          function, executable->kernel_count))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "function id %" PRIu64
+                            " out of range; executable has %" PRIhsz " exports",
+                            function.value, executable->kernel_count);
+  }
+  const uint32_t export_ordinal = iree_hal_executable_function_index(function);
+  const iree_hal_amdgpu_executable_export_t* metadata_export =
+      &executable->metadata->exports[export_ordinal];
+  *out_maximum_workgroup_invocations = metadata_export->max_workgroup_size;
+  *out_workgroup_local_memory_size = metadata_export->fixed_group_segment_size;
+  *out_private_memory_size = metadata_export->fixed_private_segment_size;
+  *out_register_count = metadata_export->vgpr_count;
+  *out_maximum_dynamic_workgroup_local_memory_size =
+      metadata_export->max_dynamic_workgroup_local_memory;
+  *out_requires_uniform_workgroups = iree_all_bits_set(
+      metadata_export->flags,
+      IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_REQUIRES_UNIFORM_WORKGROUPS);
+  return iree_ok_status();
 }
 
 static void iree_hal_amdgpu_executable_destroy(

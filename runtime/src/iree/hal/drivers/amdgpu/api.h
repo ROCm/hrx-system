@@ -495,6 +495,16 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_logical_device_create(
     const iree_hal_device_create_params_t* create_params,
     iree_allocator_t host_allocator, iree_hal_device_t** out_device);
 
+// Queries immutable metadata for one executable function.
+IREE_API_EXPORT iree_status_t
+iree_hal_amdgpu_executable_query_function_attributes(
+    iree_hal_executable_t* executable, iree_hal_executable_function_t function,
+    uint32_t* out_maximum_workgroup_invocations,
+    uint32_t* out_workgroup_local_memory_size,
+    uint32_t* out_private_memory_size, uint32_t* out_register_count,
+    uint32_t* out_maximum_dynamic_workgroup_local_memory_size,
+    bool* out_requires_uniform_workgroups);
+
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_driver_t
 //===----------------------------------------------------------------------===//

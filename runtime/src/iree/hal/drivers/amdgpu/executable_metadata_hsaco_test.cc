@@ -122,8 +122,11 @@ static iree_hal_amdgpu_hsaco_metadata_kernel_t MakeKernel(
       /*.kernarg_segment_alignment=*/8,
       /*.group_segment_fixed_size=*/16,
       /*.private_segment_fixed_size=*/32,
+      /*.max_flat_workgroup_size=*/256,
+      /*.vgpr_count=*/40,
       /*.required_workgroup_size=*/{},
       /*.has_required_workgroup_size=*/{},
+      /*.uniform_workgroup_size=*/{},
       /*.workgroup_cluster_size=*/{},
       /*.has_workgroup_cluster_size=*/{},
       /*.arg_count=*/args.size(),
@@ -169,6 +172,7 @@ TEST(ExecutableMetadataHsacoTest, PopulatesSparseInterleavedKernelLayout) {
                  ViewFromCodeObjectData(source_code_object_data, "test.kd"),
                  /*kernarg_segment_size=*/40, args);
   kernel.has_required_workgroup_size = true;
+  kernel.uniform_workgroup_size = true;
   kernel.required_workgroup_size[0] = 4;
   kernel.required_workgroup_size[1] = 2;
   kernel.required_workgroup_size[2] = 1;
@@ -208,7 +212,8 @@ TEST(ExecutableMetadataHsacoTest, PopulatesSparseInterleavedKernelLayout) {
             loaded_code_object_data.data_length);
 
   const iree_hal_amdgpu_executable_export_t& export_info = metadata->exports[0];
-  EXPECT_EQ(export_info.flags, IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_NONE);
+  EXPECT_EQ(export_info.flags,
+            IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_REQUIRES_UNIFORM_WORKGROUPS);
   EXPECT_EQ(export_info.workgroup_size[0], 4);
   EXPECT_EQ(export_info.workgroup_size[1], 2);
   EXPECT_EQ(export_info.workgroup_size[2], 1);
@@ -217,6 +222,8 @@ TEST(ExecutableMetadataHsacoTest, PopulatesSparseInterleavedKernelLayout) {
   EXPECT_EQ(export_info.workgroup_cluster_size[2], 1);
   EXPECT_EQ(export_info.fixed_group_segment_size, 16);
   EXPECT_EQ(export_info.fixed_private_segment_size, 32);
+  EXPECT_EQ(export_info.max_workgroup_size, 256);
+  EXPECT_EQ(export_info.vgpr_count, 40);
 
   const iree_hal_amdgpu_kernarg_layout_t* layout = nullptr;
   IREE_ASSERT_OK(iree_hal_amdgpu_executable_metadata_resolve_layout(

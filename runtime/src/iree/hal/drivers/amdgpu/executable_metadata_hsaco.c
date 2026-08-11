@@ -307,7 +307,6 @@ iree_status_t iree_hal_amdgpu_executable_metadata_calculate_hsaco_counts(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AMDGPU metadata export count overflow");
   }
-
   for (iree_host_size_t i = 0; i < hsaco_metadata->kernel_count; ++i) {
     iree_hal_amdgpu_hsaco_kernel_load_plan_t load_plan;
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_hsaco_load_plan_analyze_kernel(
@@ -531,10 +530,15 @@ iree_status_t iree_hal_amdgpu_executable_metadata_populate_from_hsaco(
     reflection->parameter_count = (uint32_t)load_plan.parameter_count;
 
     iree_hal_amdgpu_executable_export_t* export_info = &metadata->exports[i];
-    export_info->flags = IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_NONE;
+    export_info->flags =
+        kernel->uniform_workgroup_size
+            ? IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_REQUIRES_UNIFORM_WORKGROUPS
+            : IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_NONE;
     export_info->fixed_group_segment_size = kernel->group_segment_fixed_size;
     export_info->fixed_private_segment_size =
         kernel->private_segment_fixed_size;
+    export_info->max_workgroup_size = kernel->max_flat_workgroup_size;
+    export_info->vgpr_count = kernel->vgpr_count;
     export_info->max_dynamic_workgroup_local_memory =
         UINT32_MAX - kernel->group_segment_fixed_size;
     iree_hal_amdgpu_hsaco_load_plan_populate_workgroup_size(kernel,

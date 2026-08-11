@@ -630,7 +630,10 @@ typedef struct iree_hal_amdgpu_hsaco_metadata_kernel_fields_t {
   bool has_kernarg_segment_alignment;
   bool has_group_segment_fixed_size;
   bool has_private_segment_fixed_size;
+  bool has_max_flat_workgroup_size;
+  bool has_vgpr_count;
   bool has_required_workgroup_size;
+  bool has_uniform_workgroup_size;
   bool has_workgroup_cluster_size;
   bool has_args;
 } iree_hal_amdgpu_hsaco_metadata_kernel_fields_t;
@@ -1027,6 +1030,21 @@ static iree_status_t iree_hal_amdgpu_hsaco_metadata_parse_kernel(
       IREE_RETURN_IF_ERROR(iree_hal_amdgpu_msgpack_read_uint32(
           reader, &out_kernel->private_segment_fixed_size));
       fields.has_private_segment_fixed_size = true;
+    } else if (iree_string_view_equal(key,
+                                      IREE_SV(".max_flat_workgroup_size"))) {
+      if (fields.has_max_flat_workgroup_size) {
+        return iree_hal_amdgpu_hsaco_metadata_duplicate_field_status(key);
+      }
+      IREE_RETURN_IF_ERROR(iree_hal_amdgpu_msgpack_read_uint32(
+          reader, &out_kernel->max_flat_workgroup_size));
+      fields.has_max_flat_workgroup_size = true;
+    } else if (iree_string_view_equal(key, IREE_SV(".vgpr_count"))) {
+      if (fields.has_vgpr_count) {
+        return iree_hal_amdgpu_hsaco_metadata_duplicate_field_status(key);
+      }
+      IREE_RETURN_IF_ERROR(
+          iree_hal_amdgpu_msgpack_read_uint32(reader, &out_kernel->vgpr_count));
+      fields.has_vgpr_count = true;
     } else if (iree_string_view_equal(key, IREE_SV(".reqd_workgroup_size"))) {
       if (fields.has_required_workgroup_size) {
         return iree_hal_amdgpu_hsaco_metadata_duplicate_field_status(key);
@@ -1035,6 +1053,21 @@ static iree_status_t iree_hal_amdgpu_hsaco_metadata_parse_kernel(
           reader, out_kernel->required_workgroup_size));
       out_kernel->has_required_workgroup_size = true;
       fields.has_required_workgroup_size = true;
+    } else if (iree_string_view_equal(key,
+                                      IREE_SV(".uniform_work_group_size"))) {
+      if (fields.has_uniform_workgroup_size) {
+        return iree_hal_amdgpu_hsaco_metadata_duplicate_field_status(key);
+      }
+      uint32_t uniform_workgroup_size = 0;
+      IREE_RETURN_IF_ERROR(
+          iree_hal_amdgpu_msgpack_read_uint32(reader, &uniform_workgroup_size));
+      if (uniform_workgroup_size > 1) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "AMDGPU uniform workgroup metadata must be zero or one");
+      }
+      out_kernel->uniform_workgroup_size = uniform_workgroup_size != 0;
+      fields.has_uniform_workgroup_size = true;
     } else if (iree_string_view_equal(key, IREE_SV(".cluster_dims"))) {
       if (fields.has_workgroup_cluster_size) {
         return iree_hal_amdgpu_hsaco_metadata_duplicate_field_status(key);
