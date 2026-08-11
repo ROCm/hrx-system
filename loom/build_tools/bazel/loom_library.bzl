@@ -525,6 +525,8 @@ def _declare_library(
         compile_targets,
         execution_profiles,
         plan_benchmarks,
+        archive_testonly,
+        archive_visibility,
         tags,
         visibility):
     _loom_library(
@@ -532,7 +534,8 @@ def _declare_library(
         srcs = srcs,
         deps = deps,
         tags = tags,
-        visibility = visibility,
+        testonly = archive_testonly,
+        visibility = archive_visibility,
     )
 
     tests = []
@@ -605,6 +608,7 @@ def _declare_library(
             library = ":" + name,
             tags = tags,
             target = target,
+            testonly = archive_testonly,
             visibility = ["//visibility:private"],
         )
         compile_test_name = compile_name + "_test"
@@ -629,17 +633,48 @@ def loom_library(
         name,
         srcs = [],
         deps = [],
-        execution_profiles = [],
         tags = [],
         visibility = None):
-    """Declares a reusable Loom library with format and correctness coverage."""
+    """Declares a reusable Loom function or template library."""
     _declare_library(
         name = name,
         srcs = srcs,
         deps = deps,
         compile_targets = [],
-        execution_profiles = execution_profiles,
+        execution_profiles = [],
         plan_benchmarks = False,
+        archive_testonly = False,
+        archive_visibility = visibility,
+        tags = tags,
+        visibility = visibility,
+    )
+
+def loom_test_library(
+        name,
+        srcs,
+        deps = [],
+        compile_targets = [],
+        execution_profiles = [],
+        tags = [],
+        visibility = None):
+    """Declares test-only Loom wrappers and their generated test suite.
+
+    The wrapper archive is private and test-only. Its ``<name>_test`` suite
+    formats every source, plans declared benchmarks, compiles requested target
+    qualifications, and executes each authored source through every requested
+    profile with ``deps`` supplied as explicit libraries.
+    """
+    if not srcs:
+        fail("%s requires at least one authored test source" % name)
+    _declare_library(
+        name = name,
+        srcs = srcs,
+        deps = deps,
+        compile_targets = compile_targets,
+        execution_profiles = execution_profiles,
+        plan_benchmarks = True,
+        archive_testonly = True,
+        archive_visibility = ["//visibility:private"],
         tags = tags,
         visibility = visibility,
     )
@@ -660,6 +695,8 @@ def loom_kernel_library(
         compile_targets = compile_targets,
         execution_profiles = execution_profiles,
         plan_benchmarks = True,
+        archive_testonly = False,
+        archive_visibility = visibility,
         tags = tags,
         visibility = visibility,
     )
