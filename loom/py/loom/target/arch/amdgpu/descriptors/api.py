@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from functools import cache
 
 from loom.target.arch.amdgpu.encoding import (
     AMDGPU_DPP_CONTROL_ENCODING_FORMAT_IDS,
@@ -637,6 +638,7 @@ def _validate_matrix_coexecution_profile_coverage(
             )
 
 
+@cache
 def amdgpu_descriptor_ref_keys() -> tuple[str, ...]:
     """Returns descriptor keys known to the AMDGPU target family."""
 
