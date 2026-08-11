@@ -61,6 +61,7 @@ _LOOM_CONFIG_CMAKE_OPTIONS = {
     "//loom/config/execute:iree_hal_amdgpu": "LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU",
     "//loom/config/execute:iree_hal_vulkan": "LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN",
     "//loom/config/execute:iree_vm": "LOOM_EXECUTE_IREE_VM",
+    "//loom/config/execute:iree_vm_execution": "LOOM_TARGET_ARCH_IREE_VM AND LOOM_EMIT_IREE_VM AND LOOM_EXECUTE_IREE_VM",
     "//loom/config/execute:spirv_vulkan_hal": "LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN",
     "//loom/config/import:mlir": "LOOM_IMPORT_MLIR",
     "//loom/config/import:tilelang": "LOOM_IMPORT_TILELANG",

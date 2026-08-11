@@ -9,7 +9,11 @@
 load("//build_tools/bazel:cc_attrs.bzl", "cc_attrs")
 load("//build_tools/bazel:requirements.bzl", "apply_test_requirements")
 
-_LOOM_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:loom_toolchain_type")
+_LOOM_BENCHMARK_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:benchmark_toolchain_type")
+_LOOM_COMPILE_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:compile_toolchain_type")
+_LOOM_FORMAT_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:format_toolchain_type")
+_LOOM_LINK_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:link_toolchain_type")
+_LOOM_TEST_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:test_toolchain_type")
 
 LoomLibraryInfo = provider(
     doc = "A verified reusable Loom bytecode archive.",
@@ -169,10 +173,10 @@ def _loom_library_impl(ctx):
     args.add_all(ctx.files.srcs)
     args.add_all(libraries, format_each = "--library=%s")
 
-    toolchain = ctx.toolchains[_LOOM_TOOLCHAIN_TYPE]
+    tool = ctx.toolchains[_LOOM_LINK_TOOLCHAIN_TYPE].tool
     ctx.actions.run(
         arguments = [args],
-        executable = toolchain.link.files_to_run,
+        executable = tool.files_to_run,
         inputs = inputs,
         mnemonic = "LoomLibrary",
         outputs = [output],
@@ -199,7 +203,7 @@ _loom_library = rule(
         ),
     },
     doc = "Links one reusable Loom source closure into a bytecode archive.",
-    toolchains = [_LOOM_TOOLCHAIN_TYPE],
+    toolchains = [_LOOM_LINK_TOOLCHAIN_TYPE],
 )
 
 def _loom_compile_impl(ctx):
@@ -220,10 +224,10 @@ def _loom_compile_impl(ctx):
     args.add("--compile-report=summary")
     args.add("--compile-report-output=%s" % report.path)
 
-    toolchain = ctx.toolchains[_LOOM_TOOLCHAIN_TYPE]
+    tool = ctx.toolchains[_LOOM_COMPILE_TOOLCHAIN_TYPE].tool
     ctx.actions.run(
         arguments = [args],
-        executable = toolchain.compile.files_to_run,
+        executable = tool.files_to_run,
         inputs = depset([library.module]),
         mnemonic = "LoomCompile",
         outputs = [artifact, report],
@@ -264,7 +268,7 @@ _loom_compile = rule(
         ),
     },
     doc = "Compiles a Loom library and emits a target artifact and report.",
-    toolchains = [_LOOM_TOOLCHAIN_TYPE],
+    toolchains = [_LOOM_COMPILE_TOOLCHAIN_TYPE],
 )
 
 def _tool_runfiles(ctx, tool, files):
@@ -302,7 +306,7 @@ def _write_test_launcher(ctx, tool, input_file, tool_args):
     return output
 
 def _loom_execution_test_impl(ctx):
-    tool = ctx.toolchains[_LOOM_TOOLCHAIN_TYPE].test
+    tool = ctx.toolchains[_LOOM_TEST_TOOLCHAIN_TYPE].tool
     libraries = [dep[LoomLibraryInfo] for dep in ctx.attr.libraries]
     library_modules = [library.module for library in libraries]
     output = _write_test_launcher(
@@ -353,11 +357,11 @@ _loom_execution_test = rule(
     },
     doc = "Executes one authored Loom source through one execution profile.",
     test = True,
-    toolchains = [_LOOM_TOOLCHAIN_TYPE],
+    toolchains = [_LOOM_TEST_TOOLCHAIN_TYPE],
 )
 
 def _loom_format_test_impl(ctx):
-    tool = ctx.toolchains[_LOOM_TOOLCHAIN_TYPE].format
+    tool = ctx.toolchains[_LOOM_FORMAT_TOOLCHAIN_TYPE].tool
     output = _write_test_launcher(ctx, tool, ctx.file.src, ["--check"])
     return [
         DefaultInfo(
@@ -378,11 +382,11 @@ _loom_format_test = rule(
     },
     doc = "Verifies that one Loom source file is canonical and valid.",
     test = True,
-    toolchains = [_LOOM_TOOLCHAIN_TYPE],
+    toolchains = [_LOOM_FORMAT_TOOLCHAIN_TYPE],
 )
 
 def _loom_plan_test_impl(ctx):
-    tool = ctx.toolchains[_LOOM_TOOLCHAIN_TYPE].benchmark
+    tool = ctx.toolchains[_LOOM_BENCHMARK_TOOLCHAIN_TYPE].tool
     module = ctx.attr.library[LoomLibraryInfo].module
     output = _write_test_launcher(
         ctx,
@@ -413,7 +417,7 @@ _loom_plan_test = rule(
     },
     doc = "Plans every benchmark declared by a Loom kernel library.",
     test = True,
-    toolchains = [_LOOM_TOOLCHAIN_TYPE],
+    toolchains = [_LOOM_BENCHMARK_TOOLCHAIN_TYPE],
 )
 
 def _loom_compilation_test_impl(ctx):

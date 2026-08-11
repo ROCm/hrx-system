@@ -36,14 +36,14 @@ _AMDGPU_TARGET_DEPS = iree_select({
 })
 
 _IREE_VM_EXECUTION_COPTS = iree_select({
-    "//loom/config/execute:iree_vm": [
+    "//loom/config/execute:iree_vm_execution": [
         "-DIREE_BENCHMARK_LOOM_HAVE_IREE_VM=1",
     ],
     "//conditions:default": [],
 })
 
 _IREE_VM_EXECUTION_DEPS = iree_select({
-    "//loom/config/execute:iree_vm": [
+    "//loom/config/execute:iree_vm_execution": [
         "//loom/src/loom/tooling/execution/ireevm:provider",
     ],
     "//conditions:default": [],

@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 # bazel-to-cmake: skip
 
-load(":loom_toolchain.bzl", "loom_tools_toolchain")
+load(":loom_toolchain.bzl", "loom_tools_toolchains")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -15,19 +15,21 @@ exports_files([
     "loom_toolchain.bzl",
 ])
 
-toolchain_type(name = "loom_toolchain_type")
+toolchain_type(name = "benchmark_toolchain_type")
 
-loom_tools_toolchain(
+toolchain_type(name = "compile_toolchain_type")
+
+toolchain_type(name = "format_toolchain_type")
+
+toolchain_type(name = "link_toolchain_type")
+
+toolchain_type(name = "test_toolchain_type")
+
+loom_tools_toolchains(
     name = "source_tools",
     benchmark_tool = "//loom/src/loom/tools/iree-benchmark-loom",
     compile_tool = "//loom/src/loom/tools/loom-compile",
     format_tool = "//loom/src/loom/tools/loom-format",
     link_tool = "//loom/src/loom/tools/loom-link",
     test_tool = "//loom/src/loom/tools/iree-test-loom",
-)
-
-toolchain(
-    name = "source_toolchain",
-    toolchain = ":source_tools",
-    toolchain_type = ":loom_toolchain_type",
 )

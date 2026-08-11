@@ -21,7 +21,7 @@ load(
 )
 load(
     ":loom_toolchain.bzl",
-    _loom_tools_toolchain = "loom_tools_toolchain",
+    _loom_tools_toolchains = "loom_tools_toolchains",
 )
 
 LoomCompilationInfo = _LoomCompilationInfo
@@ -34,4 +34,4 @@ loom_execution_profile = _loom_execution_profile
 loom_kernel_library = _loom_kernel_library
 loom_library = _loom_library
 loom_test_library = _loom_test_library
-loom_tools_toolchain = _loom_tools_toolchain
+loom_tools_toolchains = _loom_tools_toolchains
