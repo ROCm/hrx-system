@@ -1136,7 +1136,7 @@ TEST_F(AmdgpuHalKernelLibraryTest,
       loom_amdgpu_target_info_lookup_target(IREE_SV("gfx942"), &gfx942));
   cases.push_back({
       /*.target=*/gfx942,
-      /*.target_attrs=*/"sramecc = on, xnack = off",
+      /*.target_attrs=*/"features = [sramecc, -xnack]",
       /*.features_json=*/"\"features\":[\"sramecc+\",\"xnack-\"]",
   });
 

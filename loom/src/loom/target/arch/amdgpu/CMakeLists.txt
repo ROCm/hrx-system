@@ -400,6 +400,7 @@ loom_cc_test(
     loom::pass::testing::registry_verify
     loom::pass::tooling
     loom::target::arch::amdgpu::facts
+    loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::target_info
     loom::target::provider
     loom::testing::module_ptr

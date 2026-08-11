@@ -8,12 +8,72 @@
 
 #include <stdint.h>
 
+#include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/target/ops.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/ops/ops.h"
 #include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/records/target_records.h"
+
+enum {
+  LOOM_AMDGPU_TARGET_FEATURE_WORD_COUNT_ =
+      (LOOM_AMDGPU_TARGET_FEATURES_COUNT_ + 63) / 64,
+};
+static_assert(LOOM_AMDGPU_TARGET_FEATURE_WORD_COUNT_ <=
+                  LOOM_SIGNED_ENUM_SET_MAX_WORD_COUNT,
+              "AMDGPU target features must fit the signed enum-set domain");
+static_assert(LOOM_AMDGPU_TARGET_FEATURES_COUNT_ < 32,
+              "AMDGPU target features must fit processor support flags");
+static_assert((UINT32_C(1) << LOOM_AMDGPU_TARGET_FEATURES_COUNT_) - 1 ==
+                  LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_KNOWN_FLAGS,
+              "AMDGPU target feature ordinals must cover support flags");
+static_assert((UINT32_C(1) << LOOM_AMDGPU_TARGET_FEATURES_SRAMECC) ==
+                  LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC,
+              "sramecc target feature ordinal must map to its support bit");
+static_assert((UINT32_C(1) << LOOM_AMDGPU_TARGET_FEATURES_XNACK) ==
+                  LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK,
+              "xnack target feature ordinal must map to its support bit");
+
+static loom_amdgpu_target_id_feature_support_bit_t
+loom_amdgpu_target_feature_support_bit(uint8_t stable_value) {
+  return (loom_amdgpu_target_id_feature_support_bit_t)(UINT32_C(1)
+                                                       << stable_value);
+}
+
+static loom_signed_enum_set_t loom_amdgpu_target_materialize_features(
+    const loom_amdgpu_target_identity_t* identity, uint64_t* words) {
+  bool has_assertion = false;
+  for (iree_host_size_t stable_value = 0;
+       stable_value < LOOM_AMDGPU_TARGET_FEATURES_COUNT_; ++stable_value) {
+    const loom_amdgpu_target_id_feature_support_bit_t support_bit =
+        loom_amdgpu_target_feature_support_bit((uint8_t)stable_value);
+    const loom_amdgpu_target_feature_state_t state =
+        loom_amdgpu_amdhsa_feature_state_query(&identity->amdhsa_features,
+                                               support_bit);
+    const iree_host_size_t word_index = stable_value / 64u;
+    const uint64_t bit = UINT64_C(1) << (stable_value % 64u);
+    switch (state) {
+      case LOOM_AMDGPU_TARGET_FEATURE_ANY:
+      case LOOM_AMDGPU_TARGET_FEATURE_UNSUPPORTED:
+        break;
+      case LOOM_AMDGPU_TARGET_FEATURE_OFF:
+        words[LOOM_AMDGPU_TARGET_FEATURE_WORD_COUNT_ + word_index] |= bit;
+        has_assertion = true;
+        break;
+      case LOOM_AMDGPU_TARGET_FEATURE_ON:
+        words[word_index] |= bit;
+        has_assertion = true;
+        break;
+      default:
+        IREE_CHECK_UNREACHABLE("invalid normalized AMDGPU target feature");
+        break;
+    }
+  }
+  return has_assertion ? loom_make_signed_enum_set(
+                             words, LOOM_AMDGPU_TARGET_FEATURE_WORD_COUNT_)
+                       : loom_signed_enum_set_empty();
+}
 
 iree_status_t loom_amdgpu_target_materialize_definition(
     loom_builder_t* builder, const loom_resolved_target_t* resolved_target,
@@ -33,16 +93,11 @@ iree_status_t loom_amdgpu_target_materialize_definition(
 
   loom_amdgpu_target_build_flags_t build_flags =
       (loom_amdgpu_target_build_flags_t)facts->base.explicit_fields;
-  loom_amdgpu_target_identity_t default_identity = {0};
-  loom_amdgpu_target_identity_initialize(facts->identity.target,
-                                         &default_identity);
-  if (facts->identity.amdhsa_features.sramecc !=
-      default_identity.amdhsa_features.sramecc) {
-    build_flags |= LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_SRAMECC;
-  }
-  if (facts->identity.amdhsa_features.xnack !=
-      default_identity.amdhsa_features.xnack) {
-    build_flags |= LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_XNACK;
+  uint64_t feature_words[LOOM_AMDGPU_TARGET_FEATURE_WORD_COUNT_ * 2] = {0};
+  const loom_signed_enum_set_t features =
+      loom_amdgpu_target_materialize_features(&facts->identity, feature_words);
+  if (features.word_count > 0) {
+    build_flags |= LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_FEATURES;
   }
 
   loom_string_id_t export_symbol = LOOM_STRING_ID_INVALID;
@@ -81,8 +136,7 @@ iree_status_t loom_amdgpu_target_materialize_definition(
       snapshot->memory_spaces.private_memory, snapshot->memory_spaces.host,
       snapshot->memory_spaces.descriptor, export_plan->abi_kind, export_symbol,
       export_plan->linkage, contract_set_key, config->contract_feature_bits,
-      facts->identity.amdhsa_features.sramecc,
-      facts->identity.amdhsa_features.xnack, location, out_target_op);
+      features, location, out_target_op);
 }
 
 static iree_string_view_t loom_amdgpu_target_record_symbol_name(
@@ -128,13 +182,11 @@ static iree_status_t loom_amdgpu_target_record_emit_wavefront_size_unsupported(
 static iree_status_t loom_amdgpu_target_record_emit_feature_processor_mismatch(
     const loom_module_t* module, iree_diagnostic_emitter_t emitter,
     const loom_op_t* op, iree_string_view_t feature_name,
-    loom_amdgpu_target_feature_state_t feature_state,
-    iree_string_view_t processor_name) {
+    iree_string_view_t required_state, iree_string_view_t processor_name) {
   const loom_diagnostic_param_t params[] = {
       loom_param_string(loom_amdgpu_target_record_symbol_name(module, op)),
       loom_param_string(feature_name),
-      loom_param_string(
-          loom_amdgpu_target_feature_state_attr_name(feature_state)),
+      loom_param_string(required_state),
       loom_param_string(processor_name),
   };
   return loom_amdgpu_target_record_emit(emitter, op, LOOM_ERR_AMDGPU_048,
@@ -167,21 +219,6 @@ const loom_amdgpu_processor_info_t* loom_amdgpu_target_record_processor(
       loom_amdgpu_target_record_target(target_op));
 }
 
-static void loom_amdgpu_target_record_apply_feature_attr(
-    const loom_op_t* target_op, uint8_t attr_index,
-    loom_amdgpu_target_feature_state_t* inout_feature_state) {
-  const loom_attribute_t feature_attr =
-      loom_op_const_attrs(target_op)[attr_index];
-  if (loom_attr_is_absent(feature_attr)) {
-    return;
-  }
-  const loom_amdgpu_target_feature_state_t requested_state =
-      (loom_amdgpu_target_feature_state_t)loom_attr_as_enum(feature_attr);
-  if (requested_state != LOOM_AMDGPU_TARGET_FEATURE_ANY) {
-    *inout_feature_state = requested_state;
-  }
-}
-
 void loom_amdgpu_target_record_resolve_identity(
     const loom_op_t* target_op, loom_amdgpu_target_identity_t* out_identity) {
   IREE_ASSERT_ARGUMENT(target_op);
@@ -190,12 +227,24 @@ void loom_amdgpu_target_record_resolve_identity(
       loom_amdgpu_target_record_target(target_op);
   IREE_ASSERT(target != NULL);
   loom_amdgpu_target_identity_initialize(target, out_identity);
-  loom_amdgpu_target_record_apply_feature_attr(
-      target_op, loom_amdgpu_target_sramecc_ATTR_INDEX,
-      &out_identity->amdhsa_features.sramecc);
-  loom_amdgpu_target_record_apply_feature_attr(
-      target_op, loom_amdgpu_target_xnack_ATTR_INDEX,
-      &out_identity->amdhsa_features.xnack);
+  const loom_signed_enum_set_t features =
+      loom_amdgpu_target_features(target_op);
+  for (iree_host_size_t stable_value = 0;
+       stable_value < LOOM_AMDGPU_TARGET_FEATURES_COUNT_; ++stable_value) {
+    const bool positive =
+        loom_signed_enum_set_contains_positive(features, (uint8_t)stable_value);
+    const bool negative =
+        loom_signed_enum_set_contains_negative(features, (uint8_t)stable_value);
+    if (!positive && !negative) continue;
+    IREE_ASSERT(!(positive && negative));
+    loom_amdgpu_target_feature_state_t* state =
+        loom_amdgpu_amdhsa_feature_state_select(
+            &out_identity->amdhsa_features,
+            loom_amdgpu_target_feature_support_bit((uint8_t)stable_value));
+    IREE_ASSERT(state != NULL);
+    *state = positive ? LOOM_AMDGPU_TARGET_FEATURE_ON
+                      : LOOM_AMDGPU_TARGET_FEATURE_OFF;
+  }
 }
 
 void loom_amdgpu_target_record_resolve_properties(
@@ -209,38 +258,48 @@ void loom_amdgpu_target_record_resolve_properties(
   loom_amdgpu_target_properties_resolve(&identity, common, out_properties);
 }
 
-static bool loom_amdgpu_target_record_feature_state_is_compatible(
-    const loom_amdgpu_processor_info_t* processor,
-    loom_amdgpu_target_id_feature_support_bit_t feature,
-    loom_amdgpu_target_feature_state_t state) {
-  if (state == LOOM_AMDGPU_TARGET_FEATURE_ANY) {
-    return true;
-  }
-  const bool supported =
-      loom_amdgpu_processor_supports_target_id_features(processor, feature);
-  return supported ? state == LOOM_AMDGPU_TARGET_FEATURE_OFF ||
-                         state == LOOM_AMDGPU_TARGET_FEATURE_ON
-                   : state == LOOM_AMDGPU_TARGET_FEATURE_UNSUPPORTED;
-}
-
-static iree_status_t loom_amdgpu_target_record_verify_feature_attr(
+static iree_status_t loom_amdgpu_target_record_verify_features(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter,
-    const loom_amdgpu_processor_info_t* processor, uint8_t attr_index,
-    iree_string_view_t feature_name,
-    loom_amdgpu_target_id_feature_support_bit_t feature) {
-  const loom_attribute_t attr = loom_op_const_attrs(op)[attr_index];
-  if (loom_attr_is_absent(attr)) {
-    return iree_ok_status();
+    const loom_amdgpu_processor_info_t* processor) {
+  const loom_attribute_t attr =
+      loom_op_const_attrs(op)[loom_amdgpu_target_features_ATTR_INDEX];
+  if (loom_attr_is_absent(attr)) return iree_ok_status();
+  const loom_signed_enum_set_t features = loom_attr_as_signed_enum_set(attr);
+  if (features.word_count == 0) {
+    const loom_diagnostic_param_t params[] = {
+        loom_param_string(loom_amdgpu_target_record_symbol_name(module, op)),
+    };
+    return loom_amdgpu_target_record_emit(emitter, op, LOOM_ERR_AMDGPU_050,
+                                          params, IREE_ARRAYSIZE(params));
   }
-  const loom_amdgpu_target_feature_state_t state =
-      (loom_amdgpu_target_feature_state_t)loom_attr_as_enum(attr);
-  if (loom_amdgpu_target_record_feature_state_is_compatible(processor, feature,
-                                                            state)) {
-    return iree_ok_status();
+
+  const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
+  IREE_ASSERT(vtable != NULL && vtable->attr_descriptors != NULL);
+  const loom_attr_descriptor_t* descriptor =
+      &vtable->attr_descriptors[loom_amdgpu_target_features_ATTR_INDEX];
+  for (iree_host_size_t stable_value = 0;
+       stable_value < LOOM_AMDGPU_TARGET_FEATURES_COUNT_; ++stable_value) {
+    const bool positive =
+        loom_signed_enum_set_contains_positive(features, (uint8_t)stable_value);
+    const bool negative =
+        loom_signed_enum_set_contains_negative(features, (uint8_t)stable_value);
+    if (!positive && !negative) continue;
+    IREE_ASSERT(!(positive && negative));
+    const loom_amdgpu_target_id_feature_support_bit_t support_bit =
+        loom_amdgpu_target_feature_support_bit((uint8_t)stable_value);
+    if (loom_amdgpu_processor_supports_target_id_features(processor,
+                                                          support_bit)) {
+      continue;
+    }
+    const loom_bstring_t feature_name =
+        loom_attr_descriptor_enum_case_name(descriptor, (uint8_t)stable_value);
+    IREE_ASSERT(feature_name != NULL);
+    return loom_amdgpu_target_record_emit_feature_processor_mismatch(
+        module, emitter, op, loom_bstring_view(feature_name),
+        positive ? IREE_SV("enabled") : IREE_SV("disabled"), processor->name);
   }
-  return loom_amdgpu_target_record_emit_feature_processor_mismatch(
-      module, emitter, op, feature_name, state, processor->name);
+  return iree_ok_status();
 }
 
 static uint32_t loom_amdgpu_target_record_default_wavefront_size(
@@ -282,12 +341,8 @@ iree_status_t loom_amdgpu_target_record_verify(
   const loom_amdgpu_processor_info_t* processor =
       loom_amdgpu_target_record_processor(op);
 
-  IREE_RETURN_IF_ERROR(loom_amdgpu_target_record_verify_feature_attr(
-      module, op, emitter, processor, loom_amdgpu_target_sramecc_ATTR_INDEX,
-      IREE_SV("sramecc"), LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_target_record_verify_feature_attr(
-      module, op, emitter, processor, loom_amdgpu_target_xnack_ATTR_INDEX,
-      IREE_SV("xnack"), LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_target_record_verify_features(
+      module, op, emitter, processor));
 
   uint32_t wavefront_size = 0;
   if (loom_amdgpu_target_record_effective_wavefront_size(op, processor,

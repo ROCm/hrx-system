@@ -26,6 +26,7 @@
 #include "loom/pass/testing/registry_verify.h"
 #include "loom/pass/tooling.h"
 #include "loom/target/arch/amdgpu/facts.h"
+#include "loom/target/arch/amdgpu/ops/ops.h"
 #include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/testing/module_ptr.h"
@@ -459,6 +460,8 @@ TEST_F(AmdgpuProviderTest, MaterializesEveryStructuredProfile) {
         &builder, &resolved_target, target_ref, LOOM_LOCATION_UNKNOWN,
         &target_op));
     ASSERT_NE(target_op, nullptr);
+    EXPECT_TRUE(loom_attr_is_absent(
+        loom_op_attrs(target_op)[loom_amdgpu_target_features_ATTR_INDEX]));
 
     loom_symbol_fact_table_reset(&fact_table_);
     const loom_target_symbol_facts_t* materialized_symbol_facts =
@@ -479,7 +482,8 @@ TEST_F(AmdgpuProviderTest, MaterializesAuthoredRefinements) {
                     "max_workgroup_storage_bytes = 32768, "
                     "export_symbol = \"roundtrip_export\", "
                     "contract_set_key = \"roundtrip.contract\", "
-                    "contract_feature_bits = 5, sramecc = on, xnack = off}\n"));
+                    "contract_feature_bits = 5, "
+                    "features = [sramecc, -xnack]}\n"));
   const loom_target_symbol_facts_t* source_symbol_facts =
       Target(source.get(), FindSymbolRef(source.get(), IREE_SV("source")));
   const loom_amdgpu_target_facts_t* source_facts =
@@ -510,6 +514,13 @@ TEST_F(AmdgpuProviderTest, MaterializesAuthoredRefinements) {
       &builder, &resolved_target, target_ref, LOOM_LOCATION_UNKNOWN,
       &target_op));
   ASSERT_NE(target_op, nullptr);
+  const loom_signed_enum_set_t materialized_features =
+      loom_amdgpu_target_features(target_op);
+  EXPECT_EQ(materialized_features.word_count, 1u);
+  EXPECT_TRUE(loom_signed_enum_set_contains_positive(
+      materialized_features, LOOM_AMDGPU_TARGET_FEATURES_SRAMECC));
+  EXPECT_TRUE(loom_signed_enum_set_contains_negative(
+      materialized_features, LOOM_AMDGPU_TARGET_FEATURES_XNACK));
 
   loom_symbol_fact_table_reset(&fact_table_);
   const loom_target_symbol_facts_t* materialized_symbol_facts =
@@ -619,8 +630,9 @@ TEST_F(AmdgpuProviderTest, SeparatesIdentityAndSpecializationRequirements) {
 TEST_F(AmdgpuProviderTest, PreservesTargetIdFeatureRequirements) {
   ModulePtr module =
       Parse(IREE_SV("amdgpu.target<gfx942> @any\n"
-                    "amdgpu.target<gfx942> @xnack_on {xnack = on}\n"
-                    "amdgpu.target<gfx942> @xnack_off {xnack = off}\n"));
+                    "amdgpu.target<gfx942> @xnack_on {features = [xnack]}\n"
+                    "amdgpu.target<gfx942> @xnack_off "
+                    "{features = [-xnack]}\n"));
 
   const loom_target_symbol_facts_t* any =
       Target(module.get(), FindSymbolRef(module.get(), IREE_SV("any")));

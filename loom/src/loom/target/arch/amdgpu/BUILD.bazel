@@ -405,6 +405,7 @@ loom_cc_test(
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/arch/amdgpu:facts",
         "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/target/arch/amdgpu/ops",
         "//loom/src/loom/testing:module_ptr",
         "//loom/src/loom/transforms/symbol:template_selection",
         "//runtime/src/iree/base",
