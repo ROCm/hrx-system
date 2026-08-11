@@ -3356,7 +3356,8 @@ CUDAAPI CUresult cuGraphLaunch(CUgraphExec hGraphExec, CUstream hStream) {
     stream = context->default_stream;
   }
 
-  iree_status_t status = iree_hal_streaming_graph_exec_launch(exec, stream);
+  iree_status_t status =
+      iree_hal_streaming_graph_exec_launch(exec, stream, NULL);
 
   CUresult result = iree_status_to_cu_result(status);
   IREE_TRACE_ZONE_END(z0);

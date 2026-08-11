@@ -191,6 +191,13 @@ static void iree_hal_streaming_context_destroy(
     iree_status_free(status);
   }
 
+  // Capture origins coordinate every participating stream. Abort them before
+  // streams are detached from the context so no participant keeps a borrowed
+  // graph pointer through teardown.
+  for (iree_host_size_t i = 0; i < context->stream_count; ++i) {
+    iree_hal_streaming_abort_capture_origin(context->streams[i]);
+  }
+
   // Deinitialize symbol map and unload any statically-registered modules that
   // were on-demand loaded for this context.
   iree_hal_streaming_context_symbol_map_deinitialize(&context->symbol_map);

@@ -126,6 +126,9 @@ iree_status_t iree_hal_streaming_memory_complete_synchronous_memset(
     iree_hal_streaming_context_t* context, uint64_t dst,
     iree_device_size_t length, iree_hal_streaming_stream_t* stream);
 
+// Releases private host staging after all queue users have completed.
+// Unlike a public host allocation, staging cannot escape through user-visible
+// pointers, so its owner provides the lifetime synchronization.
 #ifdef __cplusplus
 }  // extern "C"
 #endif

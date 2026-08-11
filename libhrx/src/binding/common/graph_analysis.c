@@ -35,8 +35,8 @@
 // Threshold for "small" graphs that use simplified algorithms.
 #define IREE_HAL_STREAMING_GRAPH_SMALL_GRAPH_THRESHOLD 32
 
-// Maximum dependency fan-out before considering node as synchronization point.
-#define IREE_HAL_STREAMING_GRAPH_MAX_FAN_OUT 8
+// Maximum dependency fan-in before considering a node a synchronization point.
+#define IREE_HAL_STREAMING_GRAPH_MAX_FAN_IN 8
 
 //===----------------------------------------------------------------------===//
 // DAG Scheduling Algorithm Overview
@@ -408,6 +408,84 @@ typedef struct iree_hal_streaming_graph_stream_state_t {
   uint32_t last_node_index;
 } iree_hal_streaming_graph_stream_state_t;
 
+// One incoming dependency added after node creation, indexed by its dependent
+// node. Source indices refer to the final topological order.
+typedef struct iree_hal_streaming_graph_additional_dependency_t {
+  // Source node position in the final topological order.
+  uint32_t source_index;
+  // Next incoming additional dependency, or UINT32_MAX at the end.
+  uint32_t next_index;
+} iree_hal_streaming_graph_additional_dependency_t;
+
+typedef struct iree_hal_streaming_graph_additional_dependency_index_t {
+  // First incoming additional dependency for each sorted node.
+  uint32_t* incoming_heads;
+  // Compact storage for active additional dependencies.
+  iree_hal_streaming_graph_additional_dependency_t* dependencies;
+} iree_hal_streaming_graph_additional_dependency_index_t;
+
+static iree_status_t iree_hal_streaming_graph_build_additional_dependency_index(
+    iree_hal_streaming_graph_edge_t* additional_edges,
+    const uint32_t* node_index_map, iree_host_size_t node_index_map_count,
+    uint32_t node_count, iree_arena_allocator_t* arena,
+    iree_hal_streaming_graph_additional_dependency_index_t* out_index) {
+  memset(out_index, 0, sizeof(*out_index));
+  if (!additional_edges) return iree_ok_status();
+
+  iree_host_size_t active_edge_count = 0;
+  for (iree_hal_streaming_graph_edge_t* edge = additional_edges; edge;
+       edge = edge->next) {
+    const uint32_t source_index = iree_hal_streaming_graph_node_map_lookup(
+        node_index_map, node_index_map_count, edge->from);
+    const uint32_t target_index = iree_hal_streaming_graph_node_map_lookup(
+        node_index_map, node_index_map_count, edge->to);
+    if (source_index == UINT32_MAX || target_index == UINT32_MAX) continue;
+    if (IREE_UNLIKELY(active_edge_count == UINT32_MAX)) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "graph has too many additional dependencies");
+    }
+    ++active_edge_count;
+  }
+
+  iree_host_size_t heads_size = 0;
+  if (IREE_UNLIKELY(!iree_host_size_checked_mul(
+          node_count, sizeof(*out_index->incoming_heads), &heads_size))) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "graph dependency index size overflow");
+  }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, heads_size,
+                                           (void**)&out_index->incoming_heads));
+  memset(out_index->incoming_heads, 0xFF, heads_size);
+  if (active_edge_count == 0) return iree_ok_status();
+
+  iree_host_size_t dependencies_size = 0;
+  if (IREE_UNLIKELY(!iree_host_size_checked_mul(
+          active_edge_count, sizeof(*out_index->dependencies),
+          &dependencies_size))) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "graph dependency storage size overflow");
+  }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, dependencies_size,
+                                           (void**)&out_index->dependencies));
+
+  uint32_t dependency_index = 0;
+  for (iree_hal_streaming_graph_edge_t* edge = additional_edges; edge;
+       edge = edge->next) {
+    const uint32_t source_index = iree_hal_streaming_graph_node_map_lookup(
+        node_index_map, node_index_map_count, edge->from);
+    const uint32_t target_index = iree_hal_streaming_graph_node_map_lookup(
+        node_index_map, node_index_map_count, edge->to);
+    if (source_index == UINT32_MAX || target_index == UINT32_MAX) continue;
+    out_index->dependencies[dependency_index] =
+        (iree_hal_streaming_graph_additional_dependency_t){
+            .source_index = source_index,
+            .next_index = out_index->incoming_heads[target_index],
+        };
+    out_index->incoming_heads[target_index] = dependency_index++;
+  }
+  return iree_ok_status();
+}
+
 typedef struct iree_uint32x2_t {
   uint32_t values[2];
 } iree_uint32x2_t;
@@ -435,6 +513,8 @@ typedef struct iree_uint32x2_t {
 static iree_uint32x2_t iree_hal_streaming_graph_partition_with_streams(
     iree_hal_streaming_graph_sort_node_t* nodes, uint32_t node_count,
     uint32_t* node_index_map, iree_host_size_t node_index_map_count,
+    const iree_hal_streaming_graph_additional_dependency_index_t*
+        additional_dependency_index,
     iree_hal_streaming_graph_partition_t* partitions) {
   uint32_t partition_count = 0;
   uint32_t block_count = 0;
@@ -518,6 +598,9 @@ static iree_uint32x2_t iree_hal_streaming_graph_partition_with_streams(
         // Determine which stream this node belongs to.
         uint8_t assigned_stream = 0;
         uint8_t connected_streams = 0;
+        uint32_t effective_dependency_count = nodes[i].node->dependency_count;
+        bool is_sync_point = nodes[i].node->dependency_count >
+                             IREE_HAL_STREAMING_GRAPH_MAX_FAN_IN;
 
         // Check dependencies within this partition.
         for (uint32_t j = 0; j < nodes[i].node->dependency_count; ++j) {
@@ -529,6 +612,27 @@ static iree_uint32x2_t iree_hal_streaming_graph_partition_with_streams(
             // Dependency is within this partition.
             uint8_t dep_stream = nodes[dep_index].stream_id;
             connected_streams |= (1 << dep_stream);
+          }
+        }
+
+        if (additional_dependency_index->incoming_heads) {
+          for (uint32_t dependency_index =
+                   additional_dependency_index->incoming_heads[i];
+               dependency_index != UINT32_MAX;
+               dependency_index =
+                   additional_dependency_index->dependencies[dependency_index]
+                       .next_index) {
+            const uint32_t dep_index =
+                additional_dependency_index->dependencies[dependency_index]
+                    .source_index;
+            if (!is_sync_point) {
+              is_sync_point = ++effective_dependency_count >
+                              IREE_HAL_STREAMING_GRAPH_MAX_FAN_IN;
+            }
+            if (dep_index >= recordable_start && dep_index < i) {
+              const uint8_t dep_stream = nodes[dep_index].stream_id;
+              connected_streams |= (1 << dep_stream);
+            }
           }
         }
 
@@ -567,9 +671,7 @@ static iree_uint32x2_t iree_hal_streaming_graph_partition_with_streams(
           // Either: no workstreams, multiple dependencies, or merge point.
           const uint32_t dep_count =
               iree_math_count_ones_u32(connected_streams);
-          // Check for high fan-out synchronization point.
-          const bool is_sync_point = (nodes[i].node->dependency_count >
-                                      IREE_HAL_STREAMING_GRAPH_MAX_FAN_OUT);
+          // Check for a high fan-in synchronization point.
           if (!use_workstreams || dep_count > 1 || is_sync_point) {
             // Collapse to single stream.
             assigned_stream = 0;
@@ -710,6 +812,14 @@ iree_status_t iree_hal_streaming_graph_schedule_nodes(
               node_index_map_count, additional_edges, arena,
               prepare_result.is_sorted));
 
+  iree_hal_streaming_graph_additional_dependency_index_t
+      additional_dependency_index;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_graph_build_additional_dependency_index(
+              additional_edges, node_index_map, node_index_map_count,
+              prepare_result.active_node_count, arena,
+              &additional_dependency_index));
+
   // Allocate the worst-case partition table up front. A graph where every
   // active node must be isolated needs one partition per node.
   iree_hal_streaming_graph_partition_t* partitions = NULL;
@@ -727,7 +837,7 @@ iree_status_t iree_hal_streaming_graph_schedule_nodes(
   const iree_uint32x2_t partition_block_counts =
       iree_hal_streaming_graph_partition_with_streams(
           sorted_nodes, prepare_result.active_node_count, node_index_map,
-          node_index_map_count, partitions);
+          node_index_map_count, &additional_dependency_index, partitions);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, partition_block_counts.values[0]);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, partition_block_counts.values[1]);
 
