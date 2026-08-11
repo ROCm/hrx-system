@@ -108,6 +108,17 @@ iree_status_t iree_hal_streaming_memory_memset_3d(
     const void* pattern, iree_host_size_t pattern_length,
     iree_hal_streaming_stream_t* stream);
 
+// Records a stream-ordered strided three-dimensional copy between allocations
+// owned by different contexts. Pitches and slice pitches are measured in
+// bytes; only |width| bytes in each row are copied.
+iree_status_t iree_hal_streaming_memcpy_peer_3d(
+    iree_hal_streaming_context_t* dst_context, uint64_t dst,
+    iree_device_size_t dst_row_pitch, iree_device_size_t dst_slice_pitch,
+    iree_hal_streaming_context_t* src_context, uint64_t src,
+    iree_device_size_t src_row_pitch, iree_device_size_t src_slice_pitch,
+    iree_device_size_t width, iree_host_size_t height, iree_host_size_t depth,
+    iree_hal_streaming_stream_t* stream);
+
 // Applies synchronous memset completion semantics to an already-recorded
 // destination range. Host-backed, managed, and offset destinations wait;
 // base device allocations remain asynchronous with respect to the host.

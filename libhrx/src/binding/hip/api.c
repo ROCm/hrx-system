@@ -7287,31 +7287,10 @@ static hipError_t iree_hip_memcpy3d_staged_rows(
   uint8_t* dst_base = (uint8_t*)dst;
   const uint8_t* src_base = (const uint8_t*)src;
   if (dst_context && src_context) {
-    if (stream) {
-      status = iree_hal_streaming_stream_synchronize(stream);
-    }
-    uint8_t* staging = NULL;
-    if (iree_status_is_ok(status)) {
-      staging = (uint8_t*)malloc(width);
-      if (!staging) return hipErrorOutOfMemory;
-    }
-    for (size_t z = 0; z < depth && iree_status_is_ok(status); ++z) {
-      uint8_t* dst_slice = dst_base + z * dst_slice_pitch;
-      const uint8_t* src_slice = src_base + z * src_slice_pitch;
-      for (size_t y = 0; y < height && iree_status_is_ok(status); ++y) {
-        status = iree_hal_streaming_memcpy_device_to_host(
-            src_context, staging,
-            (iree_hal_streaming_deviceptr_t)(src_slice + y * src_pitch), width,
-            NULL);
-        if (iree_status_is_ok(status)) {
-          status = iree_hal_streaming_memcpy_host_to_device(
-              dst_context,
-              (iree_hal_streaming_deviceptr_t)(dst_slice + y * dst_pitch),
-              staging, width, NULL);
-        }
-      }
-    }
-    free(staging);
+    status = iree_hal_streaming_memcpy_peer_3d(
+        dst_context, (iree_hal_streaming_deviceptr_t)dst, dst_pitch,
+        dst_slice_pitch, src_context, (iree_hal_streaming_deviceptr_t)src,
+        src_pitch, src_slice_pitch, width, height, depth, stream);
     return iree_status_to_hip_result(status);
   }
 
