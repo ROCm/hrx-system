@@ -11,6 +11,7 @@
 #include <string>
 
 #include "iree/testing/gtest.h"
+#include "iree/testing/temp_file.h"
 #include "loomc/artifact.h"
 #include "loomc/artifact_manifest.h"
 #include "loomc/compile.h"
@@ -50,41 +51,6 @@ using TargetEnvironmentPtr =
 using TargetProfilePtr =
     HandlePtr<loomc_target_profile_t, loomc_target_profile_release>;
 using WorkspacePtr = HandlePtr<loomc_workspace_t, loomc_workspace_release>;
-
-struct PublishedVersionAllocatorState {
-  // Module whose function-version publication is observed during allocation.
-  loomc_module_t* module = nullptr;
-
-  // Whether the first allocation observing published versions must fail.
-  bool fail_when_published = false;
-
-  // Whether an allocation observed published function versions.
-  bool observed_published_versions = false;
-};
-
-loomc_status_t PublishedVersionAllocatorControl(
-    void* self, loomc_allocator_command_t command, const void* params,
-    void** inout_ptr) {
-  auto* state = static_cast<PublishedVersionAllocatorState*>(self);
-  if (command != LOOMC_ALLOCATOR_COMMAND_FREE && state->module != nullptr &&
-      loomc_module_function_versions(state->module) != nullptr) {
-    state->observed_published_versions = true;
-    if (state->fail_when_published) {
-      return loomc_status_from_code(LOOMC_STATUS_RESOURCE_EXHAUSTED);
-    }
-  }
-  loomc_allocator_t system_allocator = loomc_allocator_system();
-  return system_allocator.ctl(system_allocator.self, command, params,
-                              inout_ptr);
-}
-
-loomc_allocator_t PublishedVersionAllocator(
-    PublishedVersionAllocatorState* state) {
-  return {
-      /*.self=*/state,
-      /*.ctl=*/PublishedVersionAllocatorControl,
-  };
-}
 
 void FakeArtifactRelease(void* storage, iree_allocator_t allocator) {
   iree_allocator_free(allocator, storage);
@@ -385,22 +351,6 @@ ModulePtr DeserializeModule(loomc_context_t* context,
   ResultPtr result_ptr(result);
   ExpectSucceededResult(result_ptr.get());
   return ModulePtr(module);
-}
-
-std::string SerializeModuleToText(const loomc_module_t* module) {
-  loomc_module_serialize_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("module.loom"),
-  };
-  loomc_source_t* source = nullptr;
-  loomc_status_t status = loomc_module_serialize_to_source(
-      module, &options, loomc_allocator_system(), &source);
-  LOOMC_EXPECT_OK(status);
-  SourcePtr source_ptr(source);
-  return ToString(loomc_source_contents(source_ptr.get()));
 }
 
 ModulePtr CreateIdentityModule(loomc_context_t* context,
@@ -973,7 +923,7 @@ TEST(TargetTest, RejectsSanitizerOptionsOnPlainPassProgramOptions) {
   EXPECT_EQ(pass_program, nullptr);
 }
 
-TEST(TargetTest, RetainsSpecializationVersionWithoutChangingTargetlessIr) {
+TEST(TargetTest, RejectsSerializationWithoutAnExactTargetInverse) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
   TargetProfilePtr profile = CreateSpirvProfile(target_environment.get());
   ContextPtr context = CreateSpirvContext(target_environment.get());
@@ -1019,10 +969,68 @@ TEST(TargetTest, RetainsSpecializationVersionWithoutChangingTargetlessIr) {
     ASSERT_NE(function_versions->values[0], nullptr);
     EXPECT_NE(function_versions->values[0]->type, nullptr);
     EXPECT_NE(function_versions->values[0]->function.op, nullptr);
-    const std::string text = SerializeModuleToText(module.get());
-    EXPECT_EQ(text.find("spirv.target<"), std::string::npos) << text;
-    EXPECT_EQ(text.find("func.def public target(@"), std::string::npos) << text;
-    EXPECT_NE(text.find("func.def public @entry"), std::string::npos) << text;
+    loomc_module_serialize_options_t serialize_options = {
+        /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+        /*.structure_size=*/sizeof(serialize_options),
+        /*.next=*/nullptr,
+        /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
+        /*.identifier=*/loomc_make_cstring_view("module.loom"),
+    };
+    loomc_source_t* serialized_source = nullptr;
+    LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_FAILED_PRECONDITION,
+                           loomc_module_serialize_to_source(
+                               module.get(), &serialize_options,
+                               loomc_allocator_system(), &serialized_source));
+    EXPECT_EQ(serialized_source, nullptr);
+    EXPECT_NE(loomc_module_function_versions(module.get()), nullptr);
+
+    WorkspacePtr clone_workspace = CreateWorkspace();
+    loomc_module_t* clone = nullptr;
+    LOOMC_EXPECT_STATUS_IS(
+        LOOMC_STATUS_FAILED_PRECONDITION,
+        loomc_module_clone(module.get(), clone_workspace.get(),
+                           loomc_allocator_system(), &clone));
+    EXPECT_EQ(clone, nullptr);
+    EXPECT_NE(loomc_module_function_versions(module.get()), nullptr);
+
+    FILE* file = tmpfile();
+    ASSERT_NE(file, nullptr);
+    static constexpr char kSentinel[] = "unchanged";
+    ASSERT_EQ(fwrite(kSentinel, 1, sizeof(kSentinel) - 1, file),
+              sizeof(kSentinel) - 1);
+    const long file_position = ftell(file);
+    ASSERT_GE(file_position, 0);
+    LOOMC_EXPECT_STATUS_IS(
+        LOOMC_STATUS_FAILED_PRECONDITION,
+        loomc_module_serialize_to_file(module.get(), &serialize_options, file));
+    EXPECT_EQ(ftell(file), file_position);
+    ASSERT_EQ(fseek(file, 0, SEEK_SET), 0);
+    char file_contents[sizeof(kSentinel)] = {};
+    EXPECT_EQ(fread(file_contents, 1, sizeof(kSentinel) - 1, file),
+              sizeof(kSentinel) - 1);
+    EXPECT_STREQ(file_contents, kSentinel);
+    fclose(file);
+
+    iree::testing::TempFilePath path("loomc-unsealed-target", ".loom");
+    FILE* path_file = fopen(path.path().c_str(), "wb");
+    ASSERT_NE(path_file, nullptr);
+    ASSERT_EQ(fwrite(kSentinel, 1, sizeof(kSentinel) - 1, path_file),
+              sizeof(kSentinel) - 1);
+    ASSERT_EQ(fclose(path_file), 0);
+    LOOMC_EXPECT_STATUS_IS(
+        LOOMC_STATUS_FAILED_PRECONDITION,
+        loomc_module_serialize_to_path(
+            module.get(), &serialize_options,
+            loomc_make_string_view(path.path().data(), path.path().size()),
+            loomc_allocator_system()));
+    path_file = fopen(path.path().c_str(), "rb");
+    ASSERT_NE(path_file, nullptr);
+    char path_contents[sizeof(kSentinel)] = {};
+    EXPECT_EQ(fread(path_contents, 1, sizeof(kSentinel) - 1, path_file),
+              sizeof(kSentinel) - 1);
+    EXPECT_STREQ(path_contents, kSentinel);
+    ASSERT_EQ(fclose(path_file), 0);
+    EXPECT_TRUE(path.Remove());
 
     const loomc_target_specialization_t missing_specialization = {
         /*.function_symbol=*/loomc_make_cstring_view("missing"),
@@ -1041,7 +1049,7 @@ TEST(TargetTest, RetainsSpecializationVersionWithoutChangingTargetlessIr) {
   }
 }
 
-TEST(TargetTest, PublishesSpecializationVersionsBeforeModuleArtifacts) {
+TEST(TargetTest, CompileRejectsAnUnrepresentableModuleArtifact) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
   TargetProfilePtr profile = CreateSpirvProfile(target_environment.get());
   ContextPtr context = CreateSpirvContext(target_environment.get());
@@ -1068,32 +1076,17 @@ TEST(TargetTest, PublishesSpecializationVersionsBeforeModuleArtifacts) {
       /*.config=*/{},
   };
 
-  for (bool fail_when_published : {false, true}) {
-    WorkspacePtr workspace = CreateWorkspace();
-    ModulePtr module =
-        CreateIdentityModule(context.get(), workspace.get(), "entry");
-    PublishedVersionAllocatorState allocator_state = {
-        /*.module=*/module.get(),
-        /*.fail_when_published=*/fail_when_published,
-    };
-    loomc_result_t* result = nullptr;
-    loomc_status_t status = loomc_compile_module(
-        compiler.get(), workspace.get(), pass_program.get(), module.get(),
-        &compile_options, PublishedVersionAllocator(&allocator_state), &result);
-    ResultPtr result_ptr(result);
+  WorkspacePtr workspace = CreateWorkspace();
+  ModulePtr module =
+      CreateIdentityModule(context.get(), workspace.get(), "entry");
+  loomc_result_t* result = nullptr;
+  loomc_status_t status = loomc_compile_module(
+      compiler.get(), workspace.get(), pass_program.get(), module.get(),
+      &compile_options, loomc_allocator_system(), &result);
 
-    EXPECT_TRUE(allocator_state.observed_published_versions);
-    if (fail_when_published) {
-      LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_RESOURCE_EXHAUSTED, status);
-      EXPECT_EQ(result, nullptr);
-      EXPECT_EQ(loomc_module_function_versions(module.get()), nullptr);
-    } else {
-      LOOMC_EXPECT_OK(status);
-      ExpectSucceededResult(result_ptr.get());
-      EXPECT_NE(loomc_module_function_versions(module.get()), nullptr);
-      EXPECT_EQ(loomc_result_artifact_count(result_ptr.get()), 1u);
-    }
-  }
+  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_FAILED_PRECONDITION, status);
+  EXPECT_EQ(result, nullptr);
+  EXPECT_EQ(loomc_module_function_versions(module.get()), nullptr);
 }
 
 TEST(TargetTest, RejectsSpecializationOptionsOnPassProgramCreation) {

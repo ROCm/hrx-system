@@ -227,6 +227,7 @@ loom_cc_test(
         "//loom/binding/c/target/spirv",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
     ],
 )
 

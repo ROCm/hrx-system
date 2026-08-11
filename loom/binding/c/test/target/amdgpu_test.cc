@@ -153,23 +153,27 @@ ModulePtr DeserializeModule(loomc_context_t* context,
   return ModulePtr(module);
 }
 
-std::string SerializeModuleToText(const loomc_module_t* module) {
+SourcePtr SerializeModule(const loomc_module_t* module,
+                          loomc_source_format_t format) {
   loomc_module_serialize_options_t options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
       /*.structure_size=*/sizeof(options),
       /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("compiled.loom"),
+      /*.format=*/format,
+      /*.identifier=*/format == LOOMC_SOURCE_FORMAT_BYTECODE
+          ? loomc_make_cstring_view("compiled.loombc")
+          : loomc_make_cstring_view("compiled.loom"),
   };
   loomc_source_t* source = nullptr;
   loomc_status_t status = loomc_module_serialize_to_source(
       module, &options, loomc_allocator_system(), &source);
   LOOMC_EXPECT_OK(status);
-  if (!loomc_status_is_ok(status)) {
-    return std::string();
-  }
-  SourcePtr source_ptr(source);
-  return ToString(loomc_source_contents(source_ptr.get()));
+  return SourcePtr(source);
+}
+
+std::string SerializeModuleToText(const loomc_module_t* module) {
+  SourcePtr source = SerializeModule(module, LOOMC_SOURCE_FORMAT_TEXT);
+  return source ? ToString(loomc_source_contents(source.get())) : std::string();
 }
 
 PassProgramPtr CreatePreparedLowPassProgram(loomc_context_t* context) {
@@ -728,15 +732,16 @@ kernel.def target(@gfx11_generic) @configured_store() {
   EXPECT_NE(module_text.find("amdgpu.target<gfx11-generic> @gfx11_generic"),
             std::string::npos)
       << module_text;
-  EXPECT_NE(module_text.find(
-                "low.kernel.def target<amdgpu.rdna3_5.core>(@gfx11_generic)"),
+  EXPECT_NE(module_text.find("low.kernel.def target<amdgpu.rdna3_5.core>"
+                             "(@__loom_sealed_target_0)"),
             std::string::npos)
       << module_text;
   EXPECT_EQ(
       module_text.find("low.kernel.def target<amdgpu.gfx11.generic.core>"),
       std::string::npos)
       << module_text;
-  EXPECT_EQ(module_text.find("amdgpu.target<gfx1151>"), std::string::npos)
+  EXPECT_NE(module_text.find("amdgpu.target<gfx1151> @__loom_sealed_target_0"),
+            std::string::npos)
       << module_text;
   EXPECT_NE(module_text.find("@configured_store("), std::string::npos)
       << module_text;
@@ -863,19 +868,27 @@ kernel.def @wave64_root() {
   const std::string module_text = ToString(text_artifact->contents);
 
   const size_t wave32_leaf = module_text.find(
-      "low.func.def target<amdgpu.rdna3_5.core> @read_subgroup_size()");
+      "low.func.def target<amdgpu.rdna3_5.core>"
+      "(@__loom_sealed_target_0) @read_subgroup_size()");
   const size_t wave64_leaf = module_text.find(
-      "low.func.def target<amdgpu.cdna3.core> "
+      "low.func.def target<amdgpu.cdna3.core>"
+      "(@__loom_sealed_target_1) "
       "@read_subgroup_size_spec0()");
   const size_t wave32_forward = module_text.find(
-      "low.func.def target<amdgpu.rdna3_5.core> @forward_subgroup_size()");
+      "low.func.def target<amdgpu.rdna3_5.core>"
+      "(@__loom_sealed_target_0) @forward_subgroup_size()");
   const size_t wave64_forward = module_text.find(
-      "low.func.def target<amdgpu.cdna3.core> "
+      "low.func.def target<amdgpu.cdna3.core>"
+      "(@__loom_sealed_target_1) "
       "@forward_subgroup_size_spec0()");
   const size_t wave32_root = module_text.find(
-      "low.kernel.def target<amdgpu.rdna3_5.core>", wave64_forward);
-  const size_t wave64_root =
-      module_text.find("low.kernel.def target<amdgpu.cdna3.core>", wave32_root);
+      "low.kernel.def target<amdgpu.rdna3_5.core>"
+      "(@__loom_sealed_target_0)",
+      wave64_forward);
+  const size_t wave64_root = module_text.find(
+      "low.kernel.def target<amdgpu.cdna3.core>"
+      "(@__loom_sealed_target_1)",
+      wave32_root);
   ASSERT_NE(wave32_leaf, std::string::npos) << module_text;
   ASSERT_NE(wave64_leaf, std::string::npos) << module_text;
   ASSERT_NE(wave32_forward, std::string::npos) << module_text;
@@ -907,8 +920,38 @@ kernel.def @wave64_root() {
   EXPECT_NE(wave64_forward_call, std::string::npos) << module_text;
   EXPECT_EQ(module_text.find("target.subgroup.size"), std::string::npos)
       << module_text;
-  EXPECT_EQ(module_text.find("amdgpu.target"), std::string::npos)
+  EXPECT_EQ(module_text.find("amdgpu.target<gfx1151>"), 0u) << module_text;
+  EXPECT_NE(module_text.find("amdgpu.target<gfx942>"), std::string::npos)
       << module_text;
+  EXPECT_EQ(SerializeModuleToText(module.get()), module_text);
+
+  WorkspacePtr clone_workspace = CreateWorkspace();
+  loomc_module_t* raw_clone = nullptr;
+  LOOMC_ASSERT_OK(loomc_module_clone(module.get(), clone_workspace.get(),
+                                     loomc_allocator_system(), &raw_clone));
+  ModulePtr clone(raw_clone);
+  EXPECT_EQ(SerializeModuleToText(clone.get()), module_text);
+
+  SourcePtr bytecode =
+      SerializeModule(module.get(), LOOMC_SOURCE_FORMAT_BYTECODE);
+  WorkspacePtr round_trip_workspace = CreateWorkspace();
+  ModulePtr round_trip = DeserializeModule(
+      context.get(), round_trip_workspace.get(), bytecode.get());
+  const std::string round_trip_text = SerializeModuleToText(round_trip.get());
+  EXPECT_NE(round_trip_text.find("amdgpu.target<gfx1151>"), std::string::npos)
+      << round_trip_text;
+  EXPECT_NE(round_trip_text.find("amdgpu.target<gfx942>"), std::string::npos)
+      << round_trip_text;
+  EXPECT_NE(round_trip_text.find(
+                "target<amdgpu.rdna3_5.core>(@__loom_sealed_target_0)"),
+            std::string::npos)
+      << round_trip_text;
+  EXPECT_NE(round_trip_text.find(
+                "target<amdgpu.cdna3.core>(@__loom_sealed_target_1)"),
+            std::string::npos)
+      << round_trip_text;
+  EXPECT_EQ(round_trip_text.find("target.subgroup.size"), std::string::npos)
+      << round_trip_text;
 }
 
 TEST(AmdgpuTargetTest,
