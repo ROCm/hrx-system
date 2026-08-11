@@ -460,7 +460,7 @@ func.def public @root() {
   const loom_target_function_version_t* helper_version =
       Version(module.get(), specialization.function_versions, helper_ref);
   ASSERT_NE(helper_version, nullptr);
-  ASSERT_NE(helper_version->authored_target_facts, nullptr);
+  ASSERT_NE(helper_version->target_requirement_facts, nullptr);
   EXPECT_EQ(
       helper_version->resolved_target.facts->storage.snapshot.subgroup_size,
       32u);

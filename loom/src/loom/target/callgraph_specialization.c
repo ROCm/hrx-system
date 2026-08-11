@@ -766,7 +766,7 @@ static iree_status_t loom_target_callgraph_prepare_materializations(
                 .type = &loom_target_function_version_type,
             },
         .authored_target_name = info->authored_target_name,
-        .authored_target_facts = info->authored_target_requirement,
+        .target_requirement_facts = info->authored_target_requirement,
         .resolved_target = row->context->resolved_target,
         .effective_target_facts = effective_facts,
     };

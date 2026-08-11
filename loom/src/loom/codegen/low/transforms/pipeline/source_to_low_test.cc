@@ -302,12 +302,13 @@ TEST_F(LowLowerPassTest, SourceSelectionUsesPerFunctionEffectiveTargetFacts) {
   const loom_symbol_facts_base_t* base_target_facts = nullptr;
   IREE_ASSERT_OK(loom_symbol_fact_table_lookup_ref(
       &symbol_facts, module.get(), target_ref, &base_target_facts));
-  const loom_target_symbol_facts_t* authored_target_facts =
+  const loom_target_symbol_facts_t* target_requirement_symbol_facts =
       loom_target_symbol_facts_cast(base_target_facts);
-  ASSERT_NE(authored_target_facts, nullptr);
+  ASSERT_NE(target_requirement_symbol_facts, nullptr);
   loom_target_facts_t* effective_target_facts = nullptr;
   IREE_ASSERT_OK(loom_target_facts_builder_clone(
-      authored_target_facts->projection, &arena, &effective_target_facts));
+      target_requirement_symbol_facts->projection, &arena,
+      &effective_target_facts));
   loom_target_facts_builder_replace_bundle(loom_test_target_bundles.values[2],
                                            effective_target_facts);
   effective_target_facts->selector = LOOM_TEST_TARGET_KIND_QUIRKY;
@@ -319,8 +320,9 @@ TEST_F(LowLowerPassTest, SourceSelectionUsesPerFunctionEffectiveTargetFacts) {
   function_version.base.function = loom_func_like_cast(
       module.get(),
       module->symbols.entries[function_ref.symbol_id].defining_op);
-  function_version.authored_target_name = authored_target_facts->name;
-  function_version.authored_target_facts = authored_target_facts->projection;
+  function_version.authored_target_name = target_requirement_symbol_facts->name;
+  function_version.target_requirement_facts =
+      target_requirement_symbol_facts->projection;
   function_version.effective_target_facts = effective_target_facts;
   loom_function_version_t* function_version_values[] = {
       &function_version.base,

@@ -717,13 +717,14 @@ TEST_F(IreeVmCandidateTest, EmitsFromEffectiveFunctionTargetFacts) {
   const loom_symbol_facts_base_t* base_target_facts = nullptr;
   IREE_ASSERT_OK(loom_symbol_fact_table_lookup(
       &symbol_facts, module, target_symbol_id, &base_target_facts));
-  const loom_target_symbol_facts_t* authored_target_facts =
+  const loom_target_symbol_facts_t* target_requirement_symbol_facts =
       loom_target_symbol_facts_cast(base_target_facts);
-  ASSERT_NE(authored_target_facts, nullptr);
+  ASSERT_NE(target_requirement_symbol_facts, nullptr);
 
   loom_target_facts_t* exact_target_facts = nullptr;
   IREE_ASSERT_OK(loom_target_facts_builder_clone(
-      authored_target_facts->projection, &version_arena, &exact_target_facts));
+      target_requirement_symbol_facts->projection, &version_arena,
+      &exact_target_facts));
   loom_target_bundle_storage_t exact_target_storage =
       exact_target_facts->storage;
   loom_target_bundle_storage_rebind(&exact_target_storage);
@@ -773,9 +774,10 @@ TEST_F(IreeVmCandidateTest, EmitsFromEffectiveFunctionTargetFacts) {
     authored_targets[i] = loom_func_like_target(functions[i]);
     target_versions[i].base.type = &loom_target_function_version_type;
     target_versions[i].base.function = functions[i];
-    target_versions[i].authored_target_name = authored_target_facts->name;
-    target_versions[i].authored_target_facts =
-        authored_target_facts->projection;
+    target_versions[i].authored_target_name =
+        target_requirement_symbol_facts->name;
+    target_versions[i].target_requirement_facts =
+        target_requirement_symbol_facts->projection;
     target_versions[i].effective_target_facts = effective_target_facts;
     version_values[i] = &target_versions[i].base;
   }

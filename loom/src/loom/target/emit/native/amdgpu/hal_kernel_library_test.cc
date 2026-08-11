@@ -757,7 +757,7 @@ TEST_F(AmdgpuHalKernelLibraryTest,
       module, module->symbols.entries[function_symbol_id].defining_op);
   ASSERT_TRUE(loom_func_like_isa(function_version.base.function));
   function_version.authored_target_name = authored_target->name;
-  function_version.authored_target_facts = authored_target->projection;
+  function_version.target_requirement_facts = authored_target->projection;
   function_version.effective_target_facts = effective_facts;
   loom_function_version_t* version_values[] = {
       &function_version.base,

@@ -267,8 +267,8 @@ func.def public target(@unrequested_family) @unrequested() {
   ASSERT_NE(generic_version, nullptr);
   EXPECT_EQ(generic_version->resolved_target.provider, &kTestProvider);
   ASSERT_NE(generic_version->resolved_target.facts, nullptr);
-  ASSERT_NE(generic_version->authored_target_facts, nullptr);
-  EXPECT_EQ(generic_version->authored_target_facts->selector,
+  ASSERT_NE(generic_version->target_requirement_facts, nullptr);
+  EXPECT_EQ(generic_version->target_requirement_facts->selector,
             LOOM_TEST_TARGET_KIND_LOW_CORE);
   ASSERT_NE(generic_version->effective_target_facts, nullptr);
   EXPECT_EQ(generic_version->effective_target_facts->selector,
@@ -280,7 +280,7 @@ func.def public target(@unrequested_family) @unrequested() {
   ASSERT_NE(targetless_version, nullptr);
   EXPECT_EQ(targetless_version->resolved_target.provider, &kTestProvider);
   ASSERT_NE(targetless_version->resolved_target.facts, nullptr);
-  EXPECT_EQ(targetless_version->authored_target_facts, nullptr);
+  EXPECT_EQ(targetless_version->target_requirement_facts, nullptr);
   ASSERT_NE(targetless_version->effective_target_facts, nullptr);
   EXPECT_EQ(targetless_version->effective_target_facts->selector,
             LOOM_TEST_TARGET_KIND_LOW_CORE);
@@ -562,7 +562,7 @@ func.def public target(@external) @entry() {
   ASSERT_NE(version, nullptr);
   EXPECT_TRUE(iree_string_view_equal(version->authored_target_name,
                                      IREE_SV("external")));
-  EXPECT_EQ(version->authored_target_facts, nullptr);
+  EXPECT_EQ(version->target_requirement_facts, nullptr);
   ASSERT_NE(version->effective_target_facts, nullptr);
   EXPECT_EQ(version->effective_target_facts->selector,
             LOOM_TEST_TARGET_KIND_LOW_CORE);

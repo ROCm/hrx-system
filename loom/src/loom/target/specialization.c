@@ -38,8 +38,8 @@ typedef struct loom_target_resolved_specialization_t {
   // Authored target witness name, or empty for a targetless function.
   iree_string_view_t authored_target_name;
 
-  // Authored target facts when projected by the target witness, or NULL.
-  const loom_target_symbol_facts_t* authored_target_facts;
+  // Optional target requirement symbol facts projected from the witness.
+  const loom_target_symbol_facts_t* target_requirement_symbol_facts;
 
   // Compiler-owned target-refined function version.
   loom_target_function_version_t* version;
@@ -127,11 +127,11 @@ static iree_status_t loom_target_specialization_resolve_function(
 
   const loom_symbol_ref_t authored_target_ref = function_facts->target_symbol;
   iree_string_view_t authored_target_name = iree_string_view_empty();
-  const loom_target_symbol_facts_t* authored_target_facts = NULL;
+  const loom_target_symbol_facts_t* target_requirement_symbol_facts = NULL;
   if (loom_symbol_ref_is_valid(authored_target_ref)) {
     IREE_RETURN_IF_ERROR(loom_target_specialization_lookup_target(
         module, fact_table, authored_target_ref, &authored_target_name,
-        &authored_target_facts));
+        &target_requirement_symbol_facts));
   }
 
   *out_specialization = (loom_target_resolved_specialization_t){
@@ -139,7 +139,7 @@ static iree_status_t loom_target_specialization_resolve_function(
       .function_name_id = function_name_id,
       .function_facts = function_facts,
       .authored_target_name = authored_target_name,
-      .authored_target_facts = authored_target_facts,
+      .target_requirement_symbol_facts = target_requirement_symbol_facts,
   };
   return iree_ok_status();
 }
@@ -194,10 +194,10 @@ static iree_status_t loom_target_specialization_prepare_versions(
     loom_target_resolved_specialization_t* specialization = &specializations[i];
     const loom_target_facts_t* projected_profile_facts =
         specialization->projected_profile_facts;
-    if (specialization->authored_target_facts != NULL &&
+    if (specialization->target_requirement_symbol_facts != NULL &&
         !loom_target_facts_satisfy_specialization_requirement(
             projected_profile_facts,
-            specialization->authored_target_facts->projection)) {
+            specialization->target_requirement_symbol_facts->projection)) {
       IREE_RETURN_IF_ERROR(loom_target_specialization_emit_conflict(
           diagnostic_emitter, module, specialization,
           loom_target_facts_identity_name(projected_profile_facts)));
@@ -208,13 +208,13 @@ static iree_status_t loom_target_specialization_prepare_versions(
     }
 
     const loom_target_facts_t* resolved_facts = projected_profile_facts;
-    if (specialization->authored_target_facts != NULL) {
+    if (specialization->target_requirement_symbol_facts != NULL) {
       for (iree_host_size_t j = 0; j < i; ++j) {
         const loom_target_resolved_specialization_t* prior =
             &specializations[j];
         if (prior->projected_profile_facts == projected_profile_facts &&
-            prior->authored_target_facts ==
-                specialization->authored_target_facts &&
+            prior->target_requirement_symbol_facts ==
+                specialization->target_requirement_symbol_facts &&
             prior->resolved_target.facts != NULL) {
           resolved_facts = prior->resolved_target.facts;
           break;
@@ -225,7 +225,7 @@ static iree_status_t loom_target_specialization_prepare_versions(
         IREE_RETURN_IF_ERROR(loom_target_facts_builder_clone(
             projected_profile_facts, arena, &refined_context_facts));
         loom_target_facts_builder_apply_requirement(
-            specialization->authored_target_facts->projection,
+            specialization->target_requirement_symbol_facts->projection,
             refined_context_facts);
         resolved_facts = refined_context_facts;
       }
@@ -258,9 +258,9 @@ static iree_status_t loom_target_specialization_prepare_versions(
                 .function = specialization->function,
             },
         .authored_target_name = specialization->authored_target_name,
-        .authored_target_facts =
-            specialization->authored_target_facts != NULL
-                ? specialization->authored_target_facts->projection
+        .target_requirement_facts =
+            specialization->target_requirement_symbol_facts != NULL
+                ? specialization->target_requirement_symbol_facts->projection
                 : NULL,
         .resolved_target = specialization->resolved_target,
         .effective_target_facts = function_facts,

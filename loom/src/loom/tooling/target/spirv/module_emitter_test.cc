@@ -196,7 +196,7 @@ low.func.def target<spirv.logical.core>(@generic) abi(shader_entry_point) @kerne
   function_version.base.type = &loom_target_function_version_type;
   function_version.base.function = function;
   function_version.authored_target_name = target_facts->name;
-  function_version.authored_target_facts = target_facts->projection;
+  function_version.target_requirement_facts = target_facts->projection;
   function_version.effective_target_facts = effective_facts;
   loom_function_version_t* version_values[] = {&function_version.base};
   loom_function_version_list_t function_versions = {};
