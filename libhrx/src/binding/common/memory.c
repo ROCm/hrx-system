@@ -394,11 +394,44 @@ iree_status_t iree_hal_streaming_memory_wrap_buffer(
       out_buffer);
 }
 
+iree_status_t iree_hal_streaming_memory_wrap_virtual_reservation(
+    iree_hal_streaming_context_t* context, hrx_buffer_t virtual_buffer,
+    iree_hal_streaming_buffer_t** out_buffer) {
+  IREE_ASSERT_ARGUMENT(context);
+  IREE_ASSERT_ARGUMENT(virtual_buffer);
+  IREE_ASSERT_ARGUMENT(out_buffer);
+  *out_buffer = NULL;
+  return iree_hal_streaming_buffer_wrap_hrx_buffer(
+      context, virtual_buffer, HRX_MEMORY_TYPE_DEVICE_LOCAL,
+      /*imported_host_ptr=*/NULL, /*allocation_pool=*/NULL,
+      IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED, out_buffer);
+}
+
 void iree_hal_streaming_memory_release_wrapped_buffer(
     iree_hal_streaming_buffer_t* buffer) {
   if (!buffer) return;
   hrx_buffer_table_remove(&buffer->context->buffer_table, buffer->device_ptr);
   iree_hal_streaming_buffer_free(buffer);
+}
+
+void iree_hal_streaming_memory_prepare_virtual_reservation_release(
+    iree_hal_streaming_buffer_t* buffer) {
+  IREE_ASSERT_ARGUMENT(buffer);
+  IREE_ASSERT_ARGUMENT(buffer->hrx_buf);
+  hrx_buffer_t virtual_buffer = buffer->hrx_buf;
+  buffer->hrx_buf = NULL;
+  buffer->buffer = NULL;
+  hrx_buffer_release(virtual_buffer);
+}
+
+void iree_hal_streaming_memory_restore_virtual_reservation(
+    iree_hal_streaming_buffer_t* buffer, hrx_buffer_t virtual_buffer) {
+  IREE_ASSERT_ARGUMENT(buffer);
+  IREE_ASSERT_ARGUMENT(virtual_buffer);
+  IREE_ASSERT_ARGUMENT(!buffer->hrx_buf);
+  buffer->hrx_buf = virtual_buffer;
+  hrx_buffer_retain(virtual_buffer);
+  buffer->buffer = virtual_buffer->hal_buffer;
 }
 
 static void iree_hal_streaming_temporary_host_buffer_free(

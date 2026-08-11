@@ -15,6 +15,10 @@ extern "C" {
 
 typedef struct iree_hal_streaming_context_t iree_hal_streaming_context_t;
 
+// Returns the current thread's borrowed streaming context, or NULL when no
+// context has been selected.
+iree_hal_streaming_context_t* iree_hal_streaming_context_current(void);
+
 // Orders subsequent legacy-default-stream work after all work submitted before
 // this call on blocking streams. The dependencies are encoded on the device
 // timeline; this function does not wait for them on the host.

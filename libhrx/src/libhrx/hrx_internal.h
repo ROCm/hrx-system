@@ -122,6 +122,9 @@ static_assert(HRX_MEMORY_TYPE_DEVICE_VISIBLE ==
               "memory type mismatch");
 static_assert(HRX_MEMORY_TYPE_DEVICE_LOCAL == IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
               "memory type mismatch");
+static_assert(HRX_MEMORY_TYPE_DEVICE_UNCACHED ==
+                  IREE_HAL_MEMORY_TYPE_DEVICE_UNCACHED,
+              "memory type mismatch");
 
 // Memory access bitfield.
 static_assert(HRX_MEMORY_ACCESS_NONE == IREE_HAL_MEMORY_ACCESS_NONE,

@@ -29,6 +29,7 @@
 #include "binding/hip/binding_internal.h"
 #include "binding/hip/blocking_printf_provider.h"
 #include "binding/hip/launch_params.h"
+#include "binding/hip/vmm.h"
 #include "common/context.h"
 #include "common/graph.h"
 #include "common/internal.h"
@@ -2300,6 +2301,13 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
     case hipDeviceAttributeMemoryPoolsSupported:
       *value = iree_hip_memory_pools_supported() ? 1 : 0;
       break;
+    case hipDeviceAttributeVirtualMemoryManagementSupported: {
+      bool supported = false;
+      hipError_t result = iree_hip_vmm_is_supported(device, &supported);
+      if (result != hipSuccess) HIP_RETURN_ERROR(result);
+      *value = supported ? 1 : 0;
+      break;
+    }
     case hipDeviceAttributeConcurrentManagedAccess:
       *value = 1;
       break;
@@ -6323,8 +6331,8 @@ HIPAPI hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes,
     HIP_RETURN_ERROR(range_result);
   }
 
-  if (dst == src && (kind == hipMemcpyHostToHost ||
-                     kind == hipMemcpyDeviceToDevice)) {
+  if (dst == src &&
+      (kind == hipMemcpyHostToHost || kind == hipMemcpyDeviceToDevice)) {
     IREE_TRACE_ZONE_END(z0);
     return hipSuccess;
   }
@@ -6494,8 +6502,8 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
     HIP_RETURN_ERROR(range_result);
   }
 
-  if (dst == src && (kind == hipMemcpyHostToHost ||
-                     kind == hipMemcpyDeviceToDevice)) {
+  if (dst == src &&
+      (kind == hipMemcpyHostToHost || kind == hipMemcpyDeviceToDevice)) {
     IREE_TRACE_ZONE_END(z0);
     return hipSuccess;
   }
@@ -23112,188 +23120,67 @@ HIPAPI hipError_t hipFreeAsync(void* ptr, hipStream_t stream) {
 // Virtual memory management
 //===----------------------------------------------------------------------===//
 
-static bool iree_hip_mem_allocation_handle_type_is_valid(
-    hipMemAllocationHandleType handle_type) {
-  switch (handle_type) {
-    case hipMemHandleTypeNone:
-    case hipMemHandleTypePosixFileDescriptor:
-    case hipMemHandleTypeWin32:
-    case hipMemHandleTypeWin32Kmt:
-      return true;
-    default:
-      return false;
-  }
-}
-
-static hipError_t iree_hip_validate_mem_allocation_prop(
-    const hipMemAllocationProp* prop) {
-  if (!prop) return hipErrorInvalidValue;
-  if (prop->type != hipMemAllocationTypePinned) {
-    return hipErrorInvalidValue;
-  }
-  if (!iree_hip_mem_allocation_handle_type_is_valid(
-          prop->requestedHandleType)) {
-    return hipErrorInvalidValue;
-  }
-  if (prop->location.type != hipMemLocationTypeDevice) {
-    return hipErrorInvalidValue;
-  }
-
-  int device_count = 0;
-  hipError_t count_result = hipGetDeviceCount(&device_count);
-  if (count_result != hipSuccess) return count_result;
-  if (prop->location.id < 0 || prop->location.id >= device_count) {
-    return hipErrorInvalidDevice;
-  }
-  return hipSuccess;
-}
-
-static const size_t iree_hip_vmm_allocation_granularity = 64 * 1024;
-
-static bool iree_hip_size_is_vmm_granularity_multiple(size_t size) {
-  return size != 0 && (size % iree_hip_vmm_allocation_granularity) == 0;
-}
-
-static bool iree_hip_is_power_of_two(size_t value) {
-  return value != 0 && (value & (value - 1)) == 0;
-}
-
 // Reserves virtual address space.
 HIPAPI hipError_t hipMemAddressReserve(void** ptr, size_t size,
                                        size_t alignment, void* addr,
                                        unsigned long long flags) {
-  if (!ptr || addr || flags != 0 ||
-      !iree_hip_size_is_vmm_granularity_multiple(size)) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-  if (alignment == 0) {
-    alignment = iree_hip_vmm_allocation_granularity;
-  }
-  if (!iree_hip_is_power_of_two(alignment)) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-  if (alignment < sizeof(void*)) {
-    alignment = sizeof(void*);
-  }
-
-  *ptr = NULL;
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  HIP_RETURN_ERROR(
+      iree_hip_vmm_address_reserve(ptr, size, alignment, addr, flags));
 }
 
 // Frees reserved virtual address space.
 HIPAPI hipError_t hipMemAddressFree(void* devPtr, size_t size) {
-  if (!devPtr || !iree_hip_size_is_vmm_granularity_multiple(size)) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  HIP_RETURN_ERROR(iree_hip_vmm_address_free(devPtr, size));
 }
 
 // Creates a generic allocation handle.
 HIPAPI hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle,
                                size_t size, const hipMemAllocationProp* prop,
                                unsigned long long flags) {
-  if (!handle || flags != 0 ||
-      !iree_hip_size_is_vmm_granularity_multiple(size)) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-  hipError_t prop_result = iree_hip_validate_mem_allocation_prop(prop);
-  if (prop_result != hipSuccess) {
-    HIP_RETURN_ERROR(prop_result);
-  }
-
-  *handle = NULL;
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  HIP_RETURN_ERROR(iree_hip_vmm_create(handle, size, prop, flags));
 }
 
 // Releases a generic allocation handle.
 HIPAPI hipError_t hipMemRelease(hipMemGenericAllocationHandle_t handle) {
-  if (!handle) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  HIP_RETURN_ERROR(iree_hip_vmm_release(handle));
 }
 
 // Maps virtual memory to a physical allocation.
 HIPAPI hipError_t hipMemMap(void* ptr, size_t size, size_t offset,
                             hipMemGenericAllocationHandle_t handle,
                             unsigned long long flags) {
-  if (!ptr || flags != 0 || offset != 0 || !handle ||
-      !iree_hip_size_is_vmm_granularity_multiple(size)) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  HIP_RETURN_ERROR(iree_hip_vmm_map(ptr, size, offset, handle, flags));
 }
 
 // Unmaps virtual memory.
 HIPAPI hipError_t hipMemUnmap(void* ptr, size_t size) {
-  if (!ptr || !iree_hip_size_is_vmm_granularity_multiple(size)) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  HIP_RETURN_ERROR(iree_hip_vmm_unmap(ptr, size));
 }
 
 // Sets memory access permissions.
 HIPAPI hipError_t hipMemSetAccess(void* ptr, size_t size,
                                   const hipMemAccessDesc* desc, size_t count) {
-  if (!ptr || !iree_hip_size_is_vmm_granularity_multiple(size) || !desc ||
-      count == 0) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-  for (size_t i = 0; i < count; ++i) {
-    if (desc[i].location.type != hipMemLocationTypeDevice ||
-        desc[i].location.id < 0) {
-      HIP_RETURN_ERROR(hipErrorInvalidValue);
-    }
-    switch (desc[i].flags) {
-      case hipMemAccessFlagsProtNone:
-      case hipMemAccessFlagsProtRead:
-      case hipMemAccessFlagsProtReadWrite:
-        break;
-      default:
-        HIP_RETURN_ERROR(hipErrorInvalidValue);
-    }
-  }
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  HIP_RETURN_ERROR(iree_hip_vmm_set_access(ptr, size, desc, count));
 }
 
 // Gets memory access permissions.
 HIPAPI hipError_t hipMemGetAccess(unsigned long long* flags,
                                   const hipMemLocation* location, void* ptr) {
-  if (!flags || !location || !ptr ||
-      location->type != hipMemLocationTypeDevice || location->id < 0) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  HIP_RETURN_ERROR(iree_hip_vmm_get_access(flags, location, ptr));
 }
 
 // Gets allocation granularity.
 HIPAPI hipError_t hipMemGetAllocationGranularity(
     size_t* granularity, const hipMemAllocationProp* prop,
     hipMemAllocationGranularity_flags option) {
-  if (!granularity) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-  hipError_t prop_result = iree_hip_validate_mem_allocation_prop(prop);
-  if (prop_result != hipSuccess) {
-    HIP_RETURN_ERROR(prop_result);
-  }
-  switch (option) {
-    case hipMemAllocationGranularityMinimum:
-    case hipMemAllocationGranularityRecommended:
-      *granularity = iree_hip_vmm_allocation_granularity;
-      return hipSuccess;
-    default:
-      HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
+  HIP_RETURN_ERROR(
+      iree_hip_vmm_get_allocation_granularity(granularity, prop, option));
 }
 
 // Gets properties from allocation handle.
 HIPAPI hipError_t hipMemGetAllocationPropertiesFromHandle(
     hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t handle) {
-  if (!prop || !handle) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  HIP_RETURN_ERROR(iree_hip_vmm_get_allocation_properties(prop, handle));
 }
 
 // Exports an allocation handle to a shareable handle.
@@ -23320,9 +23207,7 @@ HIPAPI hipError_t hipMemImportFromShareableHandle(
 // Retains an allocation handle from an address.
 HIPAPI hipError_t hipMemRetainAllocationHandle(
     hipMemGenericAllocationHandle_t* handle, void* addr) {
-  (void)handle;
-  (void)addr;
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  HIP_RETURN_ERROR(iree_hip_vmm_retain_allocation_handle(handle, addr));
 }
 
 //===----------------------------------------------------------------------===//

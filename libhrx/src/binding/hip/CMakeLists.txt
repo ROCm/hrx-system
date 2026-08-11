@@ -138,9 +138,11 @@ iree_cc_library(
   HDRS
     "api.h"
     "binding_internal.h"
+    "vmm.h"
   SRCS
     "abi_stubs.c"
     "api.c"
+    "vmm.c"
   DEPS
     ::blocking_printf_provider
     ::launch_params

@@ -274,16 +274,40 @@ hrx_status_t hrx_allocator_virtual_memory_unmap(hrx_allocator_t allocator,
       (iree_device_size_t)virtual_offset, (iree_device_size_t)size));
 }
 
+static iree_status_t hrx_virtual_memory_access_scope_to_hal(
+    hrx_virtual_memory_access_scope_t access_scope,
+    iree_hal_virtual_memory_access_scope_t* out_access_scope) {
+  switch (access_scope) {
+    case HRX_VIRTUAL_MEMORY_ACCESS_SCOPE_ALL:
+      *out_access_scope = IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_ALL;
+      return iree_ok_status();
+    case HRX_VIRTUAL_MEMORY_ACCESS_SCOPE_HOST:
+      *out_access_scope = IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_HOST;
+      return iree_ok_status();
+    case HRX_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE:
+      *out_access_scope = IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE;
+      return iree_ok_status();
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "invalid virtual-memory access scope");
+  }
+}
+
 hrx_status_t hrx_allocator_virtual_memory_protect(
     hrx_allocator_t allocator, hrx_buffer_t virtual_buffer,
-    size_t virtual_offset, size_t size, hrx_memory_protection_t protection) {
+    size_t virtual_offset, size_t size,
+    hrx_virtual_memory_access_scope_t access_scope,
+    hrx_memory_protection_t protection) {
   if (!allocator || !virtual_buffer) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
   }
+  iree_hal_virtual_memory_access_scope_t hal_access_scope;
+  iree_status_t status =
+      hrx_virtual_memory_access_scope_to_hal(access_scope, &hal_access_scope);
+  if (!iree_status_is_ok(status)) return hrx_status_from_iree(status);
   return hrx_status_from_iree(iree_hal_allocator_virtual_memory_protect(
       allocator->hal_allocator, virtual_buffer->hal_buffer,
       (iree_device_size_t)virtual_offset, (iree_device_size_t)size,
-      /*queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
-      IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_ALL,
+      /*queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY, hal_access_scope,
       (iree_hal_memory_protection_t)protection));
 }

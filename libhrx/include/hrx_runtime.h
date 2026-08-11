@@ -202,6 +202,7 @@ typedef uint32_t hrx_memory_type_t;
 #define HRX_MEMORY_TYPE_HOST_LOCAL 0x00000042u
 #define HRX_MEMORY_TYPE_DEVICE_VISIBLE 0x00000010u
 #define HRX_MEMORY_TYPE_DEVICE_LOCAL 0x00000030u
+#define HRX_MEMORY_TYPE_DEVICE_UNCACHED 0x00000080u
 
 // Memory access bitfield. Values match iree_hal_memory_access_t.
 typedef uint16_t hrx_memory_access_t;
@@ -922,9 +923,17 @@ typedef uint64_t hrx_memory_protection_t;
 #define HRX_MEMORY_PROTECTION_READ_WRITE \
   (HRX_MEMORY_PROTECTION_READ | HRX_MEMORY_PROTECTION_WRITE)
 
+typedef enum hrx_virtual_memory_access_scope_t {
+  HRX_VIRTUAL_MEMORY_ACCESS_SCOPE_ALL = 0,
+  HRX_VIRTUAL_MEMORY_ACCESS_SCOPE_HOST = 1,
+  HRX_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE = 2,
+} hrx_virtual_memory_access_scope_t;
+
 HRX_API hrx_status_t hrx_allocator_virtual_memory_protect(
     hrx_allocator_t allocator, hrx_buffer_t virtual_buffer,
-    size_t virtual_offset, size_t size, hrx_memory_protection_t protection);
+    size_t virtual_offset, size_t size,
+    hrx_virtual_memory_access_scope_t access_scope,
+    hrx_memory_protection_t protection);
 
 //===----------------------------------------------------------------------===//
 // Events (stream synchronization points)

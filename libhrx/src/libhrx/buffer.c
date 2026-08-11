@@ -208,16 +208,28 @@ hrx_status_t hrx_buffer_get_device_ptr(hrx_buffer_t buffer, void** device_ptr) {
                             hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                                             "buffer or device_ptr is NULL"));
   }
-  // For local-task (CPU) devices, the device pointer is available via mapping.
-  // For real GPU devices, this would use iree_hal_buffer_export.
-  // For now, map the buffer to get a usable pointer.
+  // Device allocations may not be host-visible, so ask the allocator for its
+  // native device address before falling back to a host mapping.
+  iree_hal_external_buffer_t external_buffer;
+  iree_status_t status = iree_hal_allocator_export_buffer(
+      buffer->device->allocator.hal_allocator, buffer->hal_buffer,
+      IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
+      IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE, &external_buffer);
+  if (iree_status_is_ok(status)) {
+    *device_ptr =
+        (void*)(uintptr_t)external_buffer.handle.device_allocation.ptr;
+    HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
+  }
+  iree_status_ignore(status);
+
+  // CPU allocators expose their device address through the host mapping.
   if (buffer->mapped_ptr) {
     *device_ptr = buffer->mapped_ptr;
     HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
   }
 
   // Try to get a native allocation pointer.
-  iree_status_t status = iree_hal_buffer_map_range(
+  status = iree_hal_buffer_map_range(
       buffer->hal_buffer, IREE_HAL_MAPPING_MODE_SCOPED,
       IREE_HAL_MEMORY_ACCESS_ALL, 0, buffer->size, &buffer->mapping);
   if (iree_status_is_ok(status)) {
