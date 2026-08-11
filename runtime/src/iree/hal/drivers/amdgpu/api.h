@@ -28,7 +28,26 @@ typedef uint32_t iree_hal_amdgpu_device_create_params_extension_type_t;
 enum iree_hal_amdgpu_device_create_params_extension_type_e {
   // Provides one opaque hostcall service for each physical device.
   IREE_HAL_AMDGPU_DEVICE_CREATE_PARAMS_EXTENSION_TYPE_HOSTCALL_PROVIDER = 1u,
+  // Configures eager and lazily activated host queue counts.
+  IREE_HAL_AMDGPU_DEVICE_CREATE_PARAMS_EXTENSION_TYPE_HOST_QUEUES = 2u,
 };
+
+// AMDGPU device creation extension controlling host queue provisioning.
+//
+// The device allocates |capacity| queue slots and advertises them through its
+// queue affinities. The first |initial_count| queues are initialized when the
+// device is assigned to its topology. Remaining queues are initialized on
+// first use, avoiding HSA queue and ring allocation costs until needed.
+typedef struct iree_hal_amdgpu_host_queue_extension_t {
+  // Common device creation extension prefix.
+  iree_hal_device_create_params_extension_t base;
+
+  // Maximum number of host queues per physical device.
+  iree_host_size_t capacity;
+
+  // Number of host queues initialized during device setup.
+  iree_host_size_t initial_count;
+} iree_hal_amdgpu_host_queue_extension_t;
 
 // Scalar physical-device facts available to opaque hostcall providers.
 typedef struct iree_hal_amdgpu_hostcall_provider_device_info_t {
@@ -494,6 +513,21 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_logical_device_create(
     const iree_hal_amdgpu_topology_t* topology,
     const iree_hal_device_create_params_t* create_params,
     iree_allocator_t host_allocator, iree_hal_device_t** out_device);
+
+// Replaces the execution-unit mask of one idle AMDGPU host queue.
+//
+// Each bit in |mask| controls one execution unit. |mask_bit_count| must be a
+// multiple of 32 and describe the complete mask expected by the device. A zero
+// bit count with a NULL mask restores the device default.
+//
+// This is persistent queue configuration, not a submission. The caller must
+// exclusively own the exact one-bit |queue_affinity| and ensure all prior work
+// has completed before changing or restoring the mask. The queue must remain
+// exclusive until its default mask has been restored.
+IREE_API_EXPORT iree_status_t
+iree_hal_amdgpu_device_queue_set_execution_unit_mask(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    iree_host_size_t mask_bit_count, const uint32_t* mask);
 
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_driver_t

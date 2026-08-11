@@ -146,6 +146,15 @@ typedef struct iree_hal_amdgpu_logical_device_t {
   // Mask indicating which queue affinities are valid.
   iree_hal_queue_affinity_t queue_affinity_mask;
 
+  // Queue affinities whose host queue storage has been initialized.
+  iree_atomic_uint64_t active_queue_affinity;
+
+  // Non-zero while profiling requires the active queue set to remain stable.
+  iree_atomic_int32_t queue_topology_frozen;
+
+  // Serializes cold activation of lazily provisioned host queues.
+  iree_slim_mutex_t host_queue_activation_mutex;
+
   // Selected command-buffer recording and replay implementation.
   iree_hal_amdgpu_command_buffer_mode_t command_buffer_mode;
 
