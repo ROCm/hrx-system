@@ -17,10 +17,21 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "pipe_peer_win32",
+    srcs = ["pipe_peer_win32.c"],
+    hdrs = ["pipe_peer_win32.h"],
+    deps = [
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "file_transfer",
     srcs = ["file_transfer.c"],
     hdrs = ["file_transfer.h"],
     deps = [
+        ":pipe_peer_win32",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
@@ -71,6 +82,7 @@ iree_runtime_cc_library(
     hdrs = ["handshake.h"],
     deps = [
         ":handshake_message",
+        ":pipe_peer_win32",
         ":region",
         ":shared_wake",
         ":shm",

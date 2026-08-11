@@ -56,9 +56,6 @@ typedef struct iree_net_shm_xproc_context_t {
   // Sideband channel used to transfer external file handle rights.
   iree_net_shm_file_transfer_t* file_transfer;
 
-  // Peer process ID for platforms that duplicate handles into the peer.
-  uint32_t peer_process_id;
-
   // Host allocator used for this context allocation.
   iree_allocator_t allocator;
 } iree_net_shm_xproc_context_t;

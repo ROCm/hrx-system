@@ -22,6 +22,8 @@
 #include <fcntl.h>
 #include <io.h>
 #include <windows.h>
+
+#include "iree/net/carrier/shm/pipe_peer_win32.h"
 #endif  // IREE_FILE_IO_ENABLE && IREE_PLATFORM_WINDOWS
 
 #define IREE_NET_SHM_FILE_TRANSFER_MAGIC 0x54464853u
@@ -98,10 +100,8 @@ struct iree_net_shm_file_transfer_t {
   int partial_fd;
 #endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
 #if IREE_FILE_IO_ENABLE && defined(IREE_PLATFORM_WINDOWS)
-  // Peer process ID received during SHM handshake.
-  uint32_t peer_process_id;
-  // Process handle opened with PROCESS_DUP_HANDLE for duplicating file HANDLEs.
-  HANDLE peer_process;
+  // Owned peer process HANDLE used to duplicate file HANDLEs.
+  iree_async_primitive_t peer_process;
 #endif  // IREE_FILE_IO_ENABLE && IREE_PLATFORM_WINDOWS
 };
 
@@ -554,11 +554,14 @@ static iree_status_t iree_net_shm_file_transfer_win32_handle_from_file(
 
 static iree_status_t iree_net_shm_file_transfer_win32_close_peer_handle(
     iree_net_shm_file_transfer_t* transfer, uint64_t handle_value) {
-  if (!transfer->peer_process) return iree_ok_status();
+  if (iree_async_primitive_is_none(transfer->peer_process)) {
+    return iree_ok_status();
+  }
   if (handle_value == 0) return iree_ok_status();
 
-  if (!DuplicateHandle(transfer->peer_process, (HANDLE)(uintptr_t)handle_value,
-                       NULL, NULL, 0, FALSE, DUPLICATE_CLOSE_SOURCE)) {
+  if (!DuplicateHandle((HANDLE)transfer->peer_process.value.win32_handle,
+                       (HANDLE)(uintptr_t)handle_value, NULL, NULL, 0, FALSE,
+                       DUPLICATE_CLOSE_SOURCE)) {
     return iree_make_status(
         iree_status_code_from_win32_error(GetLastError()),
         "failed to close transferred Win32 HANDLE in peer process");
@@ -580,8 +583,7 @@ static void iree_net_shm_file_transfer_release_primitive(
 #endif  // IREE_FILE_IO_ENABLE
 
 iree_status_t iree_net_shm_file_transfer_create(
-    iree_async_primitive_t channel, uint32_t peer_process_id,
-    iree_allocator_t host_allocator,
+    iree_async_primitive_t channel, iree_allocator_t host_allocator,
     iree_net_shm_file_transfer_t** out_transfer) {
   IREE_ASSERT_ARGUMENT(out_transfer);
   *out_transfer = NULL;
@@ -607,14 +609,13 @@ iree_status_t iree_net_shm_file_transfer_create(
     }
 #endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
 #if IREE_FILE_IO_ENABLE && defined(IREE_PLATFORM_WINDOWS)
-    transfer->peer_process_id = peer_process_id;
-    if (transfer->channel.type == IREE_ASYNC_PRIMITIVE_TYPE_WIN32_HANDLE &&
-        peer_process_id != 0) {
-      transfer->peer_process =
-          OpenProcess(PROCESS_DUP_HANDLE, FALSE, peer_process_id);
+    status = iree_net_shm_win32_pipe_open_peer_process(transfer->channel,
+                                                       &transfer->peer_process);
+    if (!iree_status_is_ok(status)) {
+      iree_async_primitive_close(&transfer->channel);
+      iree_allocator_free(host_allocator, transfer);
+      transfer = NULL;
     }
-#else
-    (void)peer_process_id;
 #endif  // IREE_FILE_IO_ENABLE && IREE_PLATFORM_WINDOWS
     *out_transfer = transfer;
   } else {
@@ -639,9 +640,7 @@ void iree_net_shm_file_transfer_release(
   iree_slim_mutex_deinitialize(&transfer->mutex);
 #endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
 #if IREE_FILE_IO_ENABLE && defined(IREE_PLATFORM_WINDOWS)
-  if (transfer->peer_process) {
-    CloseHandle(transfer->peer_process);
-  }
+  iree_async_primitive_close(&transfer->peer_process);
 #endif  // IREE_FILE_IO_ENABLE && IREE_PLATFORM_WINDOWS
   iree_async_primitive_close(&transfer->channel);
   iree_allocator_t host_allocator = transfer->host_allocator;
@@ -656,7 +655,7 @@ iree_net_file_handle_transfer_type_t iree_net_shm_file_transfer_type(
              ? IREE_NET_FILE_HANDLE_TRANSFER_TYPE_POSIX_FD
              : IREE_NET_FILE_HANDLE_TRANSFER_TYPE_NONE;
 #elif IREE_FILE_IO_ENABLE && defined(IREE_PLATFORM_WINDOWS)
-  return transfer->peer_process
+  return !iree_async_primitive_is_none(transfer->peer_process)
              ? IREE_NET_FILE_HANDLE_TRANSFER_TYPE_WIN32_HANDLE
              : IREE_NET_FILE_HANDLE_TRANSFER_TYPE_NONE;
 #else
@@ -747,11 +746,10 @@ iree_status_t iree_net_shm_file_transfer_export(
   }
 
 #if defined(IREE_PLATFORM_WINDOWS)
-  if (!transfer->peer_process) {
+  if (iree_async_primitive_is_none(transfer->peer_process)) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
-        "SHM carrier cannot transfer Win32 HANDLE rights to peer process %u",
-        transfer->peer_process_id);
+        "SHM carrier cannot transfer Win32 HANDLE rights to its peer");
   }
 
   HANDLE source_handle = INVALID_HANDLE_VALUE;
@@ -760,12 +758,11 @@ iree_status_t iree_net_shm_file_transfer_export(
   HANDLE peer_handle = NULL;
   if (iree_status_is_ok(status) &&
       !DuplicateHandle(GetCurrentProcess(), source_handle,
-                       transfer->peer_process, &peer_handle, 0, FALSE,
-                       DUPLICATE_SAME_ACCESS)) {
+                       (HANDLE)transfer->peer_process.value.win32_handle,
+                       &peer_handle, 0, FALSE, DUPLICATE_SAME_ACCESS)) {
     status = iree_make_status(iree_status_code_from_win32_error(GetLastError()),
-                              "failed to duplicate Win32 file HANDLE into peer "
-                              "process %u",
-                              transfer->peer_process_id);
+                              "failed to duplicate Win32 file HANDLE into "
+                              "SHM peer process");
   }
   if (iree_status_is_ok(status)) {
     iree_net_shm_file_transfer_payload_t payload = {

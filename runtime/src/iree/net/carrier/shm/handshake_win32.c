@@ -9,12 +9,12 @@
 //
 // Each handshake message consists of:
 //   1. The fixed-size header (same as POSIX) written as pipe data.
-//   2. A Windows-specific payload: sender PID + raw HANDLE values.
+//   2. A Windows-specific payload: reserved bytes + raw HANDLE values.
 //
-// The receiver uses the sender's PID to open their process via OpenProcess
-// with PROCESS_DUP_HANDLE access, then calls DuplicateHandle for each handle
-// to copy it into the receiver's address space. This works for any handle type
-// (file mappings, Events, etc.) without requiring named objects.
+// The receiver derives the sending process from the connected named pipe,
+// opens it with PROCESS_DUP_HANDLE access, then calls DuplicateHandle for each
+// handle to copy it into the receiver's address space. This works for any
+// handle type (file mappings, Events, etc.) without requiring named objects.
 //
 // Named pipes opened with FILE_FLAG_OVERLAPPED require overlapped I/O for
 // ReadFile/WriteFile. Each function creates a manual-reset event for the
@@ -28,19 +28,25 @@
 #include <string.h>
 #include <windows.h>
 
+#include "iree/net/carrier/shm/pipe_peer_win32.h"
+
 // Maximum number of handles sent in a single handshake message.
 // OFFER sends 3 (shm_region, wake_epoch_shm, signal_primitive).
 // ACCEPT sends 2 (wake_epoch_shm, signal_primitive).
 #define MAX_HANDSHAKE_HANDLES 3
 
 // Windows-specific payload appended after the standard header on the wire.
-// Contains the sender's PID so the receiver can open the sender's process for
-// DuplicateHandle, plus the raw HANDLE values in the sender's address space.
+// Raw HANDLE values are meaningful only in the process identified by the
+// connected named pipe.
 typedef struct iree_net_shm_handshake_win32_payload_t {
-  uint32_t sender_pid;
+  // Reserved and required to be zero.
+  uint32_t reserved;
+  // Number of valid entries in |handles|.
   uint32_t handle_count;
+  // Raw HANDLE values in the sending process.
   uint64_t handles[MAX_HANDSHAKE_HANDLES];
 } iree_net_shm_handshake_win32_payload_t;
+static_assert(sizeof(iree_net_shm_handshake_win32_payload_t) == 32, "");
 
 //===----------------------------------------------------------------------===//
 // Helpers
@@ -257,11 +263,10 @@ iree_status_t iree_net_shm_handshake_send(
   }
   HANDLE channel_handle = (HANDLE)channel.value.win32_handle;
 
-  // Build the Windows-specific payload with our PID and raw handle values.
-  // The receiver will use our PID to call DuplicateHandle across processes.
+  // Build the Windows-specific payload with raw handle values. The receiver
+  // derives our process identity from the connected named pipe.
   iree_net_shm_handshake_win32_payload_t payload;
   memset(&payload, 0, sizeof(payload));
-  payload.sender_pid = GetCurrentProcessId();
   payload.handle_count = 0;
 
   // Collect handles in the same order as POSIX: shm_region, epoch, signal.
@@ -338,8 +343,12 @@ iree_status_t iree_net_shm_handshake_recv(
 
   if (!iree_status_is_ok(status)) return status;
 
-  // Validate the handle count before opening the sender process or duplicating
+  // Validate the payload before opening the peer process or duplicating
   // anything. READY intentionally has no handle payload.
+  if (payload.reserved != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "handshake payload reserved field must be 0");
+  }
   if (payload.handle_count > MAX_HANDSHAKE_HANDLES) {
     return iree_make_status(IREE_STATUS_DATA_LOSS,
                             "handshake payload has invalid handle count: %u",
@@ -371,41 +380,31 @@ iree_status_t iree_net_shm_handshake_recv(
   }
   if (expected_handle_count == 0) return iree_ok_status();
 
-  out_handles->sender_process_id = payload.sender_pid;
+  iree_async_primitive_t peer_process = iree_async_primitive_none();
+  IREE_RETURN_IF_ERROR(
+      iree_net_shm_win32_pipe_open_peer_process(channel, &peer_process));
+  HANDLE peer_process_handle = (HANDLE)peer_process.value.win32_handle;
 
-  // Open the sender's process to duplicate handles into ours.
-  // PROCESS_DUP_HANDLE is sufficient — no need for broader access.
-  HANDLE sender_process =
-      OpenProcess(PROCESS_DUP_HANDLE, FALSE, payload.sender_pid);
-  if (!sender_process) {
-    return iree_make_status(
-        iree_status_code_from_win32_error(GetLastError()),
-        "OpenProcess(%lu) failed — cannot duplicate peer handles "
-        "(are both processes running as the same user?)",
-        (unsigned long)payload.sender_pid);
-  }
-
-  // Duplicate each handle from the sender's process into ours.
+  // Duplicate each handle from the pipe peer's process into ours.
   HANDLE local_handles[MAX_HANDSHAKE_HANDLES];
   memset(local_handles, 0, sizeof(local_handles));
   for (uint32_t i = 0; i < payload.handle_count; ++i) {
     HANDLE source = (HANDLE)(uintptr_t)payload.handles[i];
-    if (!DuplicateHandle(sender_process, source, GetCurrentProcess(),
+    if (!DuplicateHandle(peer_process_handle, source, GetCurrentProcess(),
                          &local_handles[i], 0, FALSE, DUPLICATE_SAME_ACCESS)) {
       // Close any handles we already duplicated.
       for (uint32_t j = 0; j < i; ++j) {
         CloseHandle(local_handles[j]);
       }
       DWORD error = GetLastError();
-      CloseHandle(sender_process);
+      iree_async_primitive_close(&peer_process);
       return iree_make_status(
           iree_status_code_from_win32_error(error),
-          "DuplicateHandle failed for handle %u (source=0x%llx from pid %lu)",
-          i, (unsigned long long)payload.handles[i],
-          (unsigned long)payload.sender_pid);
+          "DuplicateHandle failed for SHM peer handle %u (source=0x%llx)", i,
+          (unsigned long long)payload.handles[i]);
     }
   }
-  CloseHandle(sender_process);
+  iree_async_primitive_close(&peer_process);
 
   // Unpack handles based on message type. Counts were validated before any
   // handles were duplicated.

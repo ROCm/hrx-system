@@ -27,11 +27,10 @@ extern "C" {
 
 typedef struct iree_net_shm_file_transfer_t iree_net_shm_file_transfer_t;
 
-// Creates a file transfer sideband that owns |channel|. |peer_process_id| is
-// only used by platforms that duplicate handles into the peer process.
+// Creates a file transfer sideband that owns |channel|. Platforms that require
+// peer identity derive it from the connected channel.
 iree_status_t iree_net_shm_file_transfer_create(
-    iree_async_primitive_t channel, uint32_t peer_process_id,
-    iree_allocator_t host_allocator,
+    iree_async_primitive_t channel, iree_allocator_t host_allocator,
     iree_net_shm_file_transfer_t** out_transfer);
 
 // Releases the transfer sideband and closes any pending imported descriptors.

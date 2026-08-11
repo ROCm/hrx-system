@@ -150,8 +150,7 @@ iree_status_t iree_net_shm_handshake_result_attach_file_transfer(
 
   iree_net_shm_file_transfer_t* file_transfer = NULL;
   iree_status_t status = iree_net_shm_file_transfer_create(
-      *channel, result->context->peer_process_id, host_allocator,
-      &file_transfer);
+      *channel, host_allocator, &file_transfer);
   *channel = iree_async_primitive_none();
   if (iree_status_is_ok(status)) {
     result->context->file_transfer = file_transfer;
@@ -282,7 +281,6 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server_endpoint(
     context->peer_wake_epoch_mapping = peer_epoch_mapping;
     context->peer_notification = peer_notification;
     context->peer_signal_primitive = accept_handles.signal_primitive;
-    context->peer_process_id = accept_handles.sender_process_id;
 
     iree_net_shm_handshake_assemble_params(
         out_result, &region_mapping, /*is_client=*/false, ring_a, ring_b,
@@ -430,7 +428,6 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_client_endpoint(
     context->peer_wake_epoch_mapping = peer_epoch_mapping;
     context->peer_notification = peer_notification;
     context->peer_signal_primitive = offer_handles.signal_primitive;
-    context->peer_process_id = offer_handles.sender_process_id;
 
     iree_net_shm_handshake_assemble_params(
         out_result, &region_mapping, /*is_client=*/true, ring_b, ring_a,

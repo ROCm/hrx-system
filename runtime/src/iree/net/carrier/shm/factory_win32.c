@@ -210,7 +210,8 @@ static iree_status_t iree_net_shm_win32_listener_create_pipe(
 
   listener->pipe_handle =
       CreateNamedPipeW(pipe_path, PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-                       PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                       PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT |
+                           PIPE_REJECT_REMOTE_CLIENTS,
                        PIPE_UNLIMITED_INSTANCES, 4096, 4096, 0, NULL);
   if (listener->pipe_handle == INVALID_HANDLE_VALUE) {
     return iree_make_status(iree_status_code_from_win32_error(GetLastError()),

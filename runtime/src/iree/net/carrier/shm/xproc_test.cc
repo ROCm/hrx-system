@@ -488,7 +488,8 @@ static iree_status_t ServerBind(const char* address, XProcContext* context) {
 
   HANDLE pipe =
       CreateNamedPipeW(wide_path, PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-                       PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                       PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT |
+                           PIPE_REJECT_REMOTE_CLIENTS,
                        1,     // Single instance (one client per test scenario).
                        4096,  // Output buffer size.
                        4096,  // Input buffer size.

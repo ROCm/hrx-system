@@ -38,6 +38,66 @@
 
 namespace {
 
+#if defined(IREE_PLATFORM_WINDOWS)
+
+// Test representation of the private Win32 payload appended to the common
+// handshake header.
+typedef struct iree_net_shm_test_win32_payload_t {
+  uint32_t reserved;
+  uint32_t handle_count;
+  uint64_t handles[3];
+} iree_net_shm_test_win32_payload_t;
+static_assert(sizeof(iree_net_shm_test_win32_payload_t) == 32, "");
+
+static iree_status_t WriteRawWin32Handshake(
+    iree_async_primitive_t channel,
+    const iree_net_shm_handshake_header_t* header,
+    const iree_net_shm_test_win32_payload_t* payload) {
+  struct {
+    iree_net_shm_handshake_header_t header;
+    iree_net_shm_test_win32_payload_t payload;
+  } message = {*header, *payload};
+  static_assert(sizeof(message) == 64, "");
+
+  HANDLE event = CreateEventW(NULL, /*bManualReset=*/TRUE,
+                              /*bInitialState=*/FALSE, NULL);
+  if (!event) {
+    return iree_make_status(iree_status_code_from_win32_error(GetLastError()),
+                            "failed to create raw handshake write event");
+  }
+
+  OVERLAPPED overlapped = {};
+  overlapped.hEvent = event;
+  DWORD bytes_written = 0;
+  iree_status_t status = iree_ok_status();
+  HANDLE pipe = (HANDLE)channel.value.win32_handle;
+  if (!WriteFile(pipe, &message, sizeof(message), &bytes_written,
+                 &overlapped)) {
+    DWORD error = GetLastError();
+    if (error == ERROR_IO_PENDING) {
+      if (!GetOverlappedResult(pipe, &overlapped, &bytes_written,
+                               /*bWait=*/TRUE)) {
+        status =
+            iree_make_status(iree_status_code_from_win32_error(GetLastError()),
+                             "failed to complete raw handshake write");
+      }
+    } else {
+      status = iree_make_status(iree_status_code_from_win32_error(error),
+                                "failed to start raw handshake write");
+    }
+  }
+  if (iree_status_is_ok(status) && bytes_written != sizeof(message)) {
+    status =
+        iree_make_status(IREE_STATUS_DATA_LOSS,
+                         "raw handshake write transferred %lu of %zu bytes",
+                         (unsigned long)bytes_written, sizeof(message));
+  }
+  CloseHandle(event);
+  return status;
+}
+
+#endif  // IREE_PLATFORM_WINDOWS
+
 class HandshakeTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -90,7 +150,8 @@ class HandshakeTest : public ::testing::Test {
 
     HANDLE server_pipe =
         CreateNamedPipeW(pipe_name, PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-                         PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                         PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT |
+                             PIPE_REJECT_REMOTE_CLIENTS,
                          1,  // Single instance (sufficient for test).
                          4096, 4096, 0, NULL);
     ASSERT_NE(server_pipe, INVALID_HANDLE_VALUE)
@@ -361,6 +422,42 @@ TEST_F(HandshakeTest, ClientRejectsReservedOfferBytes) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, client_status);
   EXPECT_EQ(client_result.context, nullptr);
 }
+
+#if defined(IREE_PLATFORM_WINDOWS)
+
+TEST_F(HandshakeTest, ReceiveRejectsReservedWin32Payload) {
+  iree_async_primitive_t server_channel;
+  iree_async_primitive_t client_channel;
+  CreateChannelPair(&server_channel, &client_channel);
+
+  iree_net_shm_handshake_header_t header = {};
+  header.magic = IREE_NET_SHM_HANDSHAKE_MAGIC;
+  header.version = IREE_NET_SHM_HANDSHAKE_VERSION;
+  header.type = IREE_NET_SHM_HANDSHAKE_MESSAGE_READY;
+  iree_net_shm_test_win32_payload_t payload = {};
+  payload.reserved = 1;
+
+  iree_status_t write_status = iree_ok_status();
+  std::thread writer([&] {
+    write_status = WriteRawWin32Handshake(client_channel, &header, &payload);
+  });
+
+  iree_net_shm_handshake_header_t received_header = {};
+  iree_net_shm_handshake_handles_t received_handles =
+      iree_net_shm_handshake_handles_empty();
+  iree_status_t receive_status =
+      iree_net_shm_handshake_recv(server_channel, /*cancellation=*/nullptr,
+                                  &received_header, &received_handles);
+  writer.join();
+
+  IREE_EXPECT_OK(write_status);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, receive_status);
+  iree_net_shm_handshake_handles_close(&received_handles);
+  iree_async_primitive_close(&client_channel);
+  iree_async_primitive_close(&server_channel);
+}
+
+#endif  // IREE_PLATFORM_WINDOWS
 
 TEST_F(HandshakeTest, SharedWakeExportFailureLeavesEmpty) {
   iree_net_shm_shared_wake_t* local_wake = nullptr;

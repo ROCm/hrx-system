@@ -11,12 +11,26 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    pipe_peer_win32
+  HDRS
+    "pipe_peer_win32.h"
+  SRCS
+    "pipe_peer_win32.c"
+  DEPS
+    iree::async
+    iree::base
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     file_transfer
   HDRS
     "file_transfer.h"
   SRCS
     "file_transfer.c"
   DEPS
+    ::pipe_peer_win32
     iree::async
     iree::base
     iree::base::threading
@@ -77,6 +91,7 @@ iree_cc_library(
     "handshake_win32.c"
   DEPS
     ::handshake_message
+    ::pipe_peer_win32
     ::region
     ::shared_wake
     ::shm

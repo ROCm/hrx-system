@@ -68,9 +68,6 @@ static inline bool iree_net_shm_handshake_cancellation_is_requested(
 // SHM region handle plus wake handles, the ACCEPT includes only wake handles,
 // and READY includes no handles.
 typedef struct iree_net_shm_handshake_handles_t {
-  // Sending process ID for platforms where the receiver needs it to interpret
-  // handle values. Zero when the platform does not provide a process ID.
-  uint32_t sender_process_id;
   // SHM region handle (OFFER only; invalid for ACCEPT and READY).
   iree_shm_handle_t shm_region;
   // Wake epoch SHM handle (OFFER and ACCEPT; invalid for READY).
@@ -83,7 +80,6 @@ typedef struct iree_net_shm_handshake_handles_t {
 static inline iree_net_shm_handshake_handles_t
 iree_net_shm_handshake_handles_empty(void) {
   iree_net_shm_handshake_handles_t handles;
-  handles.sender_process_id = 0;
   handles.shm_region = IREE_SHM_HANDLE_INVALID;
   handles.wake_epoch_shm = IREE_SHM_HANDLE_INVALID;
   handles.signal_primitive = iree_async_primitive_none();
