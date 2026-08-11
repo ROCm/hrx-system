@@ -13,14 +13,17 @@ loom_cc_library(
   NAME
     main
   HDRS
+    "library_linker.h"
     "main.h"
   SRCS
+    "library_linker.c"
     "main.c"
   DEPS
     iree::base
     iree::base::internal::path
     iree::base::tooling::flags
     iree::io::stream
+    loom::link::linker
     loom::sanitizer::options
     loom::target::provider
     loom::tooling::cli::help
@@ -86,7 +89,10 @@ iree_execution_test_suite(
     "iree-test-loom.test.json"
   TOOLS
     "iree-test-loom=::iree-test-loom"
+    "loom-link=loom::tools::loom-link"
   DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/library_cases.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/linked_input_cases.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/planning_issue_cases.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/requirement_cases.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/scalar_cases.loom"

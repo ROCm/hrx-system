@@ -1,0 +1,6 @@
+check.case @input_case {
+  %actual = check.literal value(42) : i32
+  %expected = check.literal value(42) : i32
+  check.expect.equal actual(%actual) expected(%expected) : i32
+  check.return
+}
