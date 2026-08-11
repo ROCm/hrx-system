@@ -19,7 +19,7 @@ load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
     "loom_cc_test",
-    "loom_generated_textual_header",
+    "loom_generated_textual_header_family",
     "loom_low_descriptor_data_archive",
     "loom_target_table_cc_library",
 )
@@ -71,11 +71,18 @@ loom_low_descriptor_data_archive(
     urls = AMDGPU_ISA_XML_ARCHIVE["urls"],
 )
 
-loom_generated_textual_header(
-    name = "encoding_field_ids_gen",
+loom_generated_textual_header_family(
+    name = "encoding_config_tables_gen",
     generator = _AMDGPU_CONFIG_TABLES_GENERATOR,
-    output = "encoding_field_ids.inl",
-    output_flag = "--encoding-field-ids",
+    output_flags = [
+        "--encoding-field-ids",
+        "--encoding-tables",
+    ],
+    outputs = [
+        "encoding_field_ids.inl",
+        "encoding_tables.inl",
+    ],
+    visibility = _AMDGPU_ENCODING_VISIBILITY,
 )
 
 loom_cc_library(
@@ -302,14 +309,6 @@ loom_target_table_cc_library(
         ":encoding_defs",
         "//runtime/src/iree/base",
     ],
-)
-
-loom_generated_textual_header(
-    name = "encoding_tables_gen",
-    generator = _AMDGPU_CONFIG_TABLES_GENERATOR,
-    output = "encoding_tables.inl",
-    output_flag = "--encoding-tables",
-    visibility = _AMDGPU_ENCODING_VISIBILITY,
 )
 
 loom_cc_library(

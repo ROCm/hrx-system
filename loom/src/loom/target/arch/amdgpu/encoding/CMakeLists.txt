@@ -27,15 +27,17 @@ endif()
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
+loom_generated_textual_header_family(
   NAME
-    encoding_field_ids_gen
+    encoding_config_tables_gen
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::config_tables
-  OUTPUT
+  OUTPUTS
     "encoding_field_ids.inl"
-  OUTPUT_FLAG
+    "encoding_tables.inl"
+  OUTPUT_FLAGS
     "--encoding-field-ids"
+    "--encoding-tables"
 )
 endif()
 
@@ -305,19 +307,6 @@ loom_target_table_cc_library(
     ::encoding_defs
     iree::base
   EXCLUDE_FROM_ALL
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    encoding_tables_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::config_tables
-  OUTPUT
-    "encoding_tables.inl"
-  OUTPUT_FLAG
-    "--encoding-tables"
 )
 endif()
 
