@@ -54,6 +54,11 @@ def test_checked_in_artifact_families_register_expected_families() -> None:
             "checked_in_file_set",
             return_value=empty_file_set,
         ),
+        mock.patch.object(
+            checked_in_artifacts.numeric_conversion_matrix,
+            "checked_in_file_set",
+            return_value=empty_file_set,
+        ),
     ):
         families = checked_in_artifacts.checked_in_artifact_families()
 
@@ -64,6 +69,7 @@ def test_checked_in_artifact_families_register_expected_families() -> None:
         "AMDGPU target configuration",
         "TextMate grammars",
         "x86 packed-dot contract header",
+        "FP8 numeric conversion witnesses",
     )
     amdgpu_target_config.checked_in_file_set.assert_called_once_with()
 

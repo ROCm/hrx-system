@@ -20,6 +20,7 @@ iree_py_library(
   DEPS
     loom::py::loom::core
     loom::py::loom::dialect::encoding::encoding
+    loom::py::loom::gen::bootstrap
     loom::py::loom::gen::support::support
 )
 

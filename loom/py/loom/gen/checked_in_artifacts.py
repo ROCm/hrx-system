@@ -25,6 +25,7 @@ from loom.gen.support.generated_file import (
     maintain_generated_file_families,
 )
 from loom.gen.target.arch.x86 import x86_packed_dot_contract
+from loom.gen.test import numeric_conversion_matrix
 
 _AMDGPU_TARGET_CONFIG_MODULE_NAME = "loom_build_tools_amdgpu_target_config"
 
@@ -79,6 +80,11 @@ def checked_in_artifact_families() -> tuple[GeneratedFileFamily, ...]:
             description=x86_packed_dot_contract.DESCRIPTION,
             regenerate_command=x86_packed_dot_contract.REGENERATE_COMMAND,
             file_set=x86_packed_dot_contract.checked_in_file_set(),
+        ),
+        GeneratedFileFamily(
+            description=numeric_conversion_matrix.DESCRIPTION,
+            regenerate_command=numeric_conversion_matrix.REGENERATE_COMMAND,
+            file_set=numeric_conversion_matrix.checked_in_file_set(),
         ),
     )
 
