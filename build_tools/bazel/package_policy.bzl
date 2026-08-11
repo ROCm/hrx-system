@@ -6,7 +6,11 @@
 
 """Prefix-based package policy for build and run requirements."""
 
-_INCOMPATIBLE_TARGET = ["@platforms//:incompatible"]
+load(
+    ":requirements.bzl",
+    "apply_build_requirements",
+    "apply_test_requirements",
+)
 
 def package_policy(
         packages,
@@ -99,17 +103,6 @@ def collect_package_policy(package_name, policies):
         run_requirements = run_requirements,
     )
 
-def _requirement_tags(kind, requirements):
-    return [
-        "iree-%s-requirement=%s" % (kind, requirement.id)
-        for requirement in requirements
-    ]
-
-def _append(values, appended_values):
-    if values == None:
-        values = []
-    return values + appended_values
-
 def _canonical_label(label, package_name):
     if label.startswith(":"):
         return "//%s%s" % (package_name, label)
@@ -171,20 +164,7 @@ def apply_target_policy(kwargs, policy, name = None):
             result.get(deps_attr, []),
             policy.forbidden_deps,
         )
-    target_compatible_with = result.get("target_compatible_with")
-    if target_compatible_with == None:
-        target_compatible_with = []
-    for requirement in policy.build_requirements:
-        target_compatible_with = target_compatible_with + select({
-            requirement.enabled_by: [],
-            "//conditions:default": _INCOMPATIBLE_TARGET,
-        })
-    result["target_compatible_with"] = target_compatible_with
-    result["tags"] = _append(
-        result.get("tags"),
-        _requirement_tags("build", policy.build_requirements),
-    )
-    return result
+    return apply_build_requirements(result, policy.build_requirements)
 
 def apply_test_policy(kwargs, policy, name = None):
     """Applies build and run requirements to a test-like target.
@@ -198,11 +178,8 @@ def apply_test_policy(kwargs, policy, name = None):
       New kwargs dictionary with target compatibility, audit tags, and resource
       group applied.
     """
-    result = apply_target_policy(kwargs, policy, name = name)
-    result["tags"] = _append(
-        result.get("tags"),
-        _requirement_tags("run", policy.run_requirements),
+    return apply_test_requirements(
+        apply_target_policy(kwargs, policy, name = name),
+        run_requirements = policy.run_requirements,
+        resource_group = policy.resource_group,
     )
-    if policy.resource_group and not result.get("resource_group"):
-        result["resource_group"] = policy.resource_group
-    return result

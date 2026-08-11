@@ -805,6 +805,22 @@ loom_link_module(
         self.assertIn("IREE_HAL_DRIVER_AMDGPU", conditions)
         self.assertNotIn("LOOM_EXECUTE_AMDGPU", conditions)
 
+        requirements = {
+            requirement.id: requirement for requirement in collected.build_requirements
+        }
+        self.assertEqual(
+            requirements["loom.target.arch.amdgpu"].label,
+            "//loom/requirements:target_arch_amdgpu",
+        )
+        self.assertEqual(
+            requirements["loom.target.arch.amdgpu"].enabled_by,
+            "//loom/config/target/arch:amdgpu",
+        )
+        self.assertEqual(
+            requirements["runtime.hal.amdgpu"].label,
+            "//runtime/requirements:hal_amdgpu",
+        )
+
     def test_native_test_emits_target_compatible_guard(self):
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
