@@ -258,6 +258,35 @@ TEST_F(LowAsmParserTest, ResolvesPacketIdentityPerFunctionContract) {
   loom_module_free(module);
 }
 
+TEST_F(LowAsmParserTest, RecordsExplicitAsmSourceSyntax) {
+  loom_module_t* module = ParseOk(
+      "low.func.def target<test.low.core> @assembly("
+      "%value: reg<test.i32>) -> (reg<test.i32>) asm {\n"
+      "  return %value\n"
+      "}\n"
+      "\n"
+      "low.func.def target<test.low.core> @generic("
+      "%value: reg<test.i32>) -> (reg<test.i32>) {\n"
+      "  low.return %value : reg<test.i32>\n"
+      "}\n");
+  ASSERT_NE(module, nullptr);
+
+  loom_block_t* module_block = loom_module_block(module);
+  ASSERT_EQ(module_block->op_count, 2u);
+  loom_region_t* assembly_body =
+      loom_low_func_def_body(loom_block_op(module_block, 0));
+  loom_region_t* generic_body =
+      loom_low_func_def_body(loom_block_op(module_block, 1));
+  ASSERT_NE(assembly_body, nullptr);
+  ASSERT_NE(generic_body, nullptr);
+  EXPECT_TRUE(iree_any_bit_set(assembly_body->source_flags,
+                               LOOM_REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM));
+  EXPECT_FALSE(iree_any_bit_set(generic_body->source_flags,
+                                LOOM_REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM));
+
+  loom_module_free(module);
+}
+
 TEST_F(LowAsmParserTest, ParsesStructuralRegisterValueTypes) {
   loom_module_t* module = ParseOk(
       "low.func.decl target<test.low.core> @typed("

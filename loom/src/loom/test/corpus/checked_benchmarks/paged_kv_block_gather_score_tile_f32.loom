@@ -103,5 +103,7 @@ check.case public @paged_kv_block_gather_score_tile_tail_case {
 }
 
 check.benchmark<@paged_kv_block_gather_score_tile_page1_lane2_case> @paged_kv_block_gather_score_tile_page1_lane2
+
 check.benchmark<@paged_kv_block_gather_score_tile_page0_lane1_case> @paged_kv_block_gather_score_tile_page0_lane1
+
 check.benchmark<@paged_kv_block_gather_score_tile_tail_case> @paged_kv_block_gather_score_tile_tail

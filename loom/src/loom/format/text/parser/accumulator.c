@@ -47,6 +47,7 @@ void loom_parsed_op_reset(loom_parsed_op_t* parsed) {
   parsed->region_count = 0;
   parsed->operand_segment_count = 0;
   parsed->instance_flags = 0;
+  parsed->source_flags = 0;
   parsed->effective_traits = 0;
   parsed->has_effective_traits = false;
 }

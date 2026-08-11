@@ -621,6 +621,9 @@ static iree_status_t loom_print_pipeline_nested_region(
         loom_print_pipeline_is_elidable_terminator(region_descriptor, op)) {
       continue;
     }
+    if (iree_any_bit_set(op->flags, LOOM_OP_FLAG_LEADING_BLANK_LINE)) {
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '\n'));
+    }
     IREE_RETURN_IF_ERROR(loom_print_op_comments(ctx, op));
     IREE_RETURN_IF_ERROR(loom_print_indent(ctx));
     IREE_RETURN_IF_ERROR(loom_print_pipeline_statement(ctx, op));

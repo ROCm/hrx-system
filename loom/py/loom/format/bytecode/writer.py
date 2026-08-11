@@ -32,6 +32,7 @@ from loom.format.bytecode.op_decls import (
 )
 from loom.ir import (
     ATTR_AGGREGATE_MAX_NESTING_DEPTH,
+    REGION_SOURCE_FLAG_MASK,
     Block,
     BufferType,
     DialectType,
@@ -164,8 +165,12 @@ BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
 
 # File magic and version.
 MAGIC = b"LOOM"
-FORMAT_VERSION = 23
+FORMAT_VERSION = 24
 PRODUCER = "loom-py"
+
+SOURCE_TRIVIA_LEADING_BLANK_LINE = 1
+SOURCE_TRIVIA_COMMENT_COUNT_SHIFT = 1
+MAX_SOURCE_COMMENT_COUNT = 0xFFFF
 
 SYMBOL_FLAG_PUBLIC = 0x0001
 SYMBOL_FLAG_IMPORT = 0x0002
@@ -1081,7 +1086,12 @@ class BytecodeWriter:
     def _write_region(
         self, buf: ByteBuffer, region: Region, value_numbers: dict[int, int]
     ) -> None:
-        """Write a region (block_count + blocks)."""
+        """Write a region (source_flags + block_count + blocks)."""
+        if region.source_flags < 0 or (region.source_flags & ~REGION_SOURCE_FLAG_MASK):
+            raise ValueError(
+                f"region has unsupported source flag bits: {region.source_flags:#x}"
+            )
+        buf.write_varint(region.source_flags)
         buf.write_varint(len(region.blocks))
         block_indices = {id(block): index for index, block in enumerate(region.blocks)}
         for block in region.blocks:
@@ -1099,7 +1109,7 @@ class BytecodeWriter:
         buf.write_u8(1 if has_label else 0)
         if has_label:
             buf.write_varint(self._ctx.strings[block.label])
-        self._write_comment_list(buf, block.comments)
+        self._write_source_trivia(buf, block.leading_blank_line, block.comments)
 
         # Block args.
         buf.write_varint(len(block.arg_ids))
@@ -1144,8 +1154,21 @@ class BytecodeWriter:
         else:
             buf.write_varint(0)
 
-    def _write_comment_list(self, buf: ByteBuffer, comments: tuple[str, ...]) -> None:
-        buf.write_varint(len(comments))
+    def _write_source_trivia(
+        self,
+        buf: ByteBuffer,
+        leading_blank_line: bool,
+        comments: tuple[str, ...],
+    ) -> None:
+        if len(comments) > MAX_SOURCE_COMMENT_COUNT:
+            raise ValueError(
+                f"comment count {len(comments)} exceeds maximum "
+                f"{MAX_SOURCE_COMMENT_COUNT}"
+            )
+        source_trivia = len(comments) << SOURCE_TRIVIA_COMMENT_COUNT_SHIFT
+        if leading_blank_line:
+            source_trivia |= SOURCE_TRIVIA_LEADING_BLANK_LINE
+        buf.write_varint(source_trivia)
         for comment in comments:
             encoded = comment.encode("utf-8")
             buf.write_varint(len(encoded))
@@ -1179,7 +1202,7 @@ class BytecodeWriter:
             0 if self._location_mode == LOCATION_MODE_NO_LOCATIONS else op.location_id
         )
         buf.write_varint(location_id)
-        self._write_comment_list(buf, op.comments)
+        self._write_source_trivia(buf, op.leading_blank_line, op.comments)
 
         # Operands.
         buf.write_varint(len(op.operands))
@@ -1697,7 +1720,7 @@ class BytecodeWriter:
                 module = self._module
 
                 buf.write_varint(self._ctx.ops[op.name] + 1)
-                self._write_comment_list(buf, op.comments)
+                self._write_source_trivia(buf, op.leading_blank_line, op.comments)
 
                 _cc_to_byte: dict[str, int] = {
                     "host": 1,
@@ -1816,7 +1839,7 @@ class BytecodeWriter:
                     )
 
                 buf.write_varint(self._ctx.ops[op.name] + 1)
-                self._write_comment_list(buf, op.comments)
+                self._write_source_trivia(buf, op.leading_blank_line, op.comments)
 
                 result_ids = list(op.results)
                 local_value_ids = self._collect_global_local_values(op)
@@ -1857,7 +1880,7 @@ class BytecodeWriter:
                     )
 
                 buf.write_varint(self._ctx.ops[op.name] + 1)
-                self._write_comment_list(buf, op.comments)
+                self._write_source_trivia(buf, op.leading_blank_line, op.comments)
 
                 payload_attrs = [
                     (key, value)

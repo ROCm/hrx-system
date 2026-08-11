@@ -208,7 +208,11 @@ void loom_tokenizer_initialize(iree_string_view_t source,
   out_tokenizer->pending_comments = NULL;
   out_tokenizer->pending_comment_count = 0;
   out_tokenizer->pending_comment_capacity = 0;
+  out_tokenizer->pending_comment_start_line = 0;
+  out_tokenizer->pending_leading_blank_line = false;
   out_tokenizer->status = iree_ok_status();
+  out_tokenizer->consumed_end_line = 0;
+  out_tokenizer->consumed_end_column = 0;
   out_tokenizer->in_dim_list = false;
 }
 
@@ -282,18 +286,23 @@ iree_status_t loom_tokenizer_consume_status(loom_tokenizer_t* tokenizer) {
 
 void loom_tokenizer_take_pending_comments(
     loom_tokenizer_t* tokenizer, const iree_string_view_t** out_comments,
-    iree_host_size_t* out_comment_count) {
+    iree_host_size_t* out_comment_count, bool* out_leading_blank_line) {
   *out_comments = tokenizer->pending_comments;
   *out_comment_count = tokenizer->pending_comment_count;
+  *out_leading_blank_line = tokenizer->pending_leading_blank_line;
   if (tokenizer->pending_comment_count > 0) {
     tokenizer->pending_comments = NULL;
     tokenizer->pending_comment_capacity = 0;
   }
   tokenizer->pending_comment_count = 0;
+  tokenizer->pending_comment_start_line = 0;
+  tokenizer->pending_leading_blank_line = false;
 }
 
 void loom_tokenizer_discard_pending_comments(loom_tokenizer_t* tokenizer) {
   tokenizer->pending_comment_count = 0;
+  tokenizer->pending_comment_start_line = 0;
+  tokenizer->pending_leading_blank_line = false;
 }
 
 iree_status_t loom_tokenizer_error(const loom_tokenizer_t* tokenizer,
@@ -329,6 +338,9 @@ static iree_status_t loom_tokenizer_skip_whitespace(loom_tokenizer_t* t) {
       t->column = 1;
     } else if (c == '/' && loom_tokenizer_char_at(t, 1) == '/') {
       // Line comment: skip to end of line with UTF-8-aware column tracking.
+      if (t->pending_comment_count == 0) {
+        t->pending_comment_start_line = t->line;
+      }
       iree_host_size_t comment_start = t->position + 2;
       t->position += 2;
       t->column += 2;
@@ -956,6 +968,12 @@ static iree_status_t loom_tokenizer_scan_block_label(loom_tokenizer_t* t,
 static iree_status_t loom_tokenizer_scan(loom_tokenizer_t* t,
                                          loom_token_t* out_token) {
   IREE_RETURN_IF_ERROR(loom_tokenizer_skip_whitespace(t));
+
+  const uint32_t source_start_line =
+      t->pending_comment_count > 0 ? t->pending_comment_start_line : t->line;
+  t->pending_leading_blank_line =
+      t->consumed_end_line != 0 &&
+      (uint64_t)source_start_line > (uint64_t)t->consumed_end_line + 1;
 
   if (t->position >= t->source.size) {
     *out_token = loom_tokenizer_make_eof_token(t);

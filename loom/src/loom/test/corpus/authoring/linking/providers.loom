@@ -1,4 +1,5 @@
 amdgpu.target<gfx1100> @gfx1100
+
 amdgpu.target<gfx1200> @gfx1200
 
 // RDNA3 provider selected when its caller specializes to @gfx1100.

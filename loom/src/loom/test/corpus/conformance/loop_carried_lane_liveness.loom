@@ -138,5 +138,7 @@ check.case public @loop_edge_exact_extent_case {
 }
 
 check.benchmark<@loop_carried_lane_liveness_case>
+
 check.benchmark<@loop_carried_lane_store_after_loop_case>
+
 check.benchmark<@loop_edge_exact_extent_case>

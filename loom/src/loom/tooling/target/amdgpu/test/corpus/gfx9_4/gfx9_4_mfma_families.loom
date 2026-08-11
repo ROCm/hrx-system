@@ -3,7 +3,6 @@
 // Dense floating-point and integer rows multiply constant one matrices. Sparse
 // rows use two stored nonzero values in every group of four, so their expected
 // results distinguish the compact sparse payload from a dense interpretation.
-
 amdgpu.target<gfx9-4-generic> @gfx9_4_generic
 
 kernel.def target(@gfx9_4_generic) @gfx9_4_mfma_families() {
@@ -71,7 +70,7 @@ kernel.def target(@gfx9_4_generic) @gfx9_4_mfma_families() {
   %sparse_f16_rhs_schema = encoding.define #encoding.operand<element_format=f16, payload_elements=8, payload_registers=4> : encoding<schema>
   %sparse_f16_lhs_words = vector.constant 1006648320 : vector<2xi32>
   %sparse_f16_rhs_words = vector.constant 1006648320 : vector<4xi32>
-  %sparse_f16_lhs = vector.fragment<lhs> %sparse_f16_lhs_words shape [%m, %k32] using {sparsity = %metadata : vector<1xi32>, schema = %sparse_f16_lhs_schema : encoding<schema>} : vector<2xi32>
+  %sparse_f16_lhs = vector.fragment<lhs> %sparse_f16_lhs_words shape [%m, %k32] using {schema = %sparse_f16_lhs_schema : encoding<schema>, sparsity = %metadata : vector<1xi32>} : vector<2xi32>
   %sparse_f16_rhs = vector.fragment<rhs> %sparse_f16_rhs_words shape [%k32, %n] using {schema = %sparse_f16_rhs_schema : encoding<schema>} : vector<4xi32>
   %sparse_f16_result = vector.mma %sparse_f16_lhs, %sparse_f16_rhs, %f32_init : vector<2xi32>, vector<4xi32>, vector<4xf32>
   vector.fragment.store<result> %sparse_f16_result, %sparse_f16_output_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
@@ -80,7 +79,7 @@ kernel.def target(@gfx9_4_generic) @gfx9_4_mfma_families() {
   %sparse_bf16_rhs_schema = encoding.define #encoding.operand<element_format=bf16, payload_elements=8, payload_registers=4> : encoding<schema>
   %sparse_bf16_lhs_words = vector.constant 1065369472 : vector<2xi32>
   %sparse_bf16_rhs_words = vector.constant 1065369472 : vector<4xi32>
-  %sparse_bf16_lhs = vector.fragment<lhs> %sparse_bf16_lhs_words shape [%m, %k32] using {sparsity = %metadata : vector<1xi32>, schema = %sparse_bf16_lhs_schema : encoding<schema>} : vector<2xi32>
+  %sparse_bf16_lhs = vector.fragment<lhs> %sparse_bf16_lhs_words shape [%m, %k32] using {schema = %sparse_bf16_lhs_schema : encoding<schema>, sparsity = %metadata : vector<1xi32>} : vector<2xi32>
   %sparse_bf16_rhs = vector.fragment<rhs> %sparse_bf16_rhs_words shape [%k32, %n] using {schema = %sparse_bf16_rhs_schema : encoding<schema>} : vector<4xi32>
   %sparse_bf16_result = vector.mma %sparse_bf16_lhs, %sparse_bf16_rhs, %f32_init : vector<2xi32>, vector<4xi32>, vector<4xf32>
   vector.fragment.store<result> %sparse_bf16_result, %sparse_bf16_output_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
@@ -89,7 +88,7 @@ kernel.def target(@gfx9_4_generic) @gfx9_4_mfma_families() {
   %sparse_i8_rhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
   %sparse_i8_lhs_words = vector.constant 16843009 : vector<2xi32>
   %sparse_i8_rhs_words = vector.constant 16843009 : vector<4xi32>
-  %sparse_i8_lhs = vector.fragment<lhs> %sparse_i8_lhs_words shape [%m, %k64] using {sparsity = %metadata : vector<1xi32>, schema = %sparse_i8_lhs_schema : encoding<schema>} : vector<2xi32>
+  %sparse_i8_lhs = vector.fragment<lhs> %sparse_i8_lhs_words shape [%m, %k64] using {schema = %sparse_i8_lhs_schema : encoding<schema>, sparsity = %metadata : vector<1xi32>} : vector<2xi32>
   %sparse_i8_rhs = vector.fragment<rhs> %sparse_i8_rhs_words shape [%k64, %n] using {schema = %sparse_i8_rhs_schema : encoding<schema>} : vector<4xi32>
   %sparse_i8_result = vector.mma %sparse_i8_lhs, %sparse_i8_rhs, %i32_init : vector<2xi32>, vector<4xi32>, vector<4xi32>
   vector.fragment.store<result> %sparse_i8_result, %sparse_i8_output_view[0, 0] shape [%m, %n] : vector<4xi32>, view<16x16xi32>

@@ -1909,7 +1909,7 @@ class Parser:
         while not tok.at(TokenKind.EOF):
             # Attribute alias: #name = ...
             if tok.at(TokenKind.HASH_ATTR):
-                tok.collect_pending_comments()
+                tok.take_pending_source_trivia()
                 self._parse_attribute_alias()
                 continue
 
@@ -2313,7 +2313,8 @@ class Parser:
         """
         tok = self._tokenizer
         start_token = tok.peek()
-        comments = tuple(tok.collect_pending_comments())
+        pending_comments, leading_blank_line = tok.take_pending_source_trivia()
+        comments = tuple(pending_comments)
         start_loc = start_token.location
 
         # 1. Result list: %r = or %a, %b =
@@ -2449,6 +2450,7 @@ class Parser:
             regions=parsed.regions,
             location_id=location_id,
             comments=comments,
+            leading_blank_line=leading_blank_line,
         )
         self._validate_operation(op, start_loc)
         return op
@@ -3772,7 +3774,7 @@ class Parser:
                 )
             )
 
-        tok.collect_pending_comments()
+        tok.take_pending_source_trivia()
         tok.expect(TokenKind.RBRACE)
         self._scope = parent_scope
         return Region(blocks=blocks)
@@ -3807,7 +3809,7 @@ class Parser:
             if not has_terminator:
                 ops.append(Operation(name=implicit_terminator_decl.name))
 
-        tok.collect_pending_comments()
+        tok.take_pending_source_trivia()
         tok.expect(TokenKind.RBRACE)
         self._scope = parent_scope
         return Region(blocks=[Block(ops=ops)])
@@ -3818,7 +3820,8 @@ class Parser:
         """Parse one friendly pipeline statement into a canonical pass op."""
         tok = self._tokenizer
         start_token = tok.peek()
-        comments = tuple(tok.collect_pending_comments())
+        pending_comments, leading_blank_line = tok.take_pending_source_trivia()
+        comments = tuple(pending_comments)
         start_loc = start_token.location
 
         if tok.at(TokenKind.BARE_IDENT, "for"):
@@ -3830,6 +3833,7 @@ class Parser:
                 {"anchor": anchor},
                 [body],
                 comments,
+                leading_blank_line,
                 start_loc,
             )
 
@@ -3846,6 +3850,7 @@ class Parser:
                 where_attributes,
                 [body],
                 comments,
+                leading_blank_line,
                 start_loc,
             )
 
@@ -3881,6 +3886,7 @@ class Parser:
                 repeat_attributes,
                 [body],
                 comments,
+                leading_blank_line,
                 start_loc,
             )
 
@@ -3900,6 +3906,7 @@ class Parser:
                 {},
                 [body],
                 comments,
+                leading_blank_line,
                 start_loc,
             )
 
@@ -3911,6 +3918,7 @@ class Parser:
                 {"callee": callee},
                 [],
                 comments,
+                leading_blank_line,
                 start_loc,
             )
 
@@ -3922,6 +3930,7 @@ class Parser:
                 {"message": message},
                 [],
                 comments,
+                leading_blank_line,
                 start_loc,
             )
 
@@ -3933,6 +3942,7 @@ class Parser:
                 {"message": message},
                 [],
                 comments,
+                leading_blank_line,
                 start_loc,
             )
 
@@ -3946,6 +3956,7 @@ class Parser:
             run_attributes,
             [],
             comments,
+            leading_blank_line,
             start_loc,
         )
 
@@ -3997,6 +4008,7 @@ class Parser:
         attributes: Mapping[str, Any],
         regions: list[Region],
         comments: tuple[str, ...],
+        leading_blank_line: bool,
         start_loc: SourceLocation,
     ) -> Operation:
         end_loc = self._tokenizer.current_location()
@@ -4007,6 +4019,7 @@ class Parser:
             regions=regions,
             location_id=location_id,
             comments=comments,
+            leading_blank_line=leading_blank_line,
         )
         self._validate_operation(op, start_loc)
         return op
@@ -4020,10 +4033,12 @@ class Parser:
         label = ""
         arg_ids: list[int] = []
         comments: tuple[str, ...] = ()
+        leading_blank_line = False
 
         # Block label: ^name(args):
         if tok.peek().kind == TokenKind.BLOCK_LABEL:
-            comments = tuple(tok.collect_pending_comments())
+            pending_comments, leading_blank_line = tok.take_pending_source_trivia()
+            comments = tuple(pending_comments)
             label = tok.next().text
             if tok.at(TokenKind.LPAREN):
                 tok.expect(TokenKind.LPAREN)
@@ -4061,7 +4076,13 @@ class Parser:
             if not has_terminator:
                 ops.append(Operation(name=implicit_terminator_decl.name))
 
-        return Block(label=label, arg_ids=arg_ids, ops=ops, comments=comments)
+        return Block(
+            label=label,
+            arg_ids=arg_ids,
+            ops=ops,
+            comments=comments,
+            leading_blank_line=leading_blank_line,
+        )
 
     # --- Attr dict ---
 

@@ -43,8 +43,10 @@ loom_cc_binary(
     iree::base::internal::arena
     iree::base::tooling::flags
     iree::io::file_handle
+    loom::codegen::low::text_asm
     loom::error::diagnostic
     loom::target::configured::provider
+    loom::target::provider
     loom::tooling::cli::help
     loom::tooling::context
     loom::tooling::io::file
@@ -73,9 +75,10 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::codegen::low::text_asm
     loom::format::bytecode::format
-    loom::ops::func
-    loom::ops::index
+    loom::target::test::descriptors
+    loom::testing::context
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

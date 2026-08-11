@@ -26,9 +26,19 @@ def _ensure_runtime_py_on_path() -> Path:
 REPO_ROOT = _ensure_runtime_py_on_path()
 
 from loom.gen.support.c import c_string_literal as _c_string_literal  # noqa: E402
-from loom.gen.support.generated_file import line_comment_header  # noqa: E402
+from loom.gen.support.generated_file import (  # noqa: E402
+    GeneratedFileMaintenanceMode,
+    GeneratedFileMaintenanceResult,
+    GeneratedFileSet,
+    line_comment_header,
+    maintain_generated_file_set,
+)
 from loom.target.arch.x86.packed_dot_data import X86_PACKED_DOT_DESCRIPTORS  # noqa: E402
 from loom.target.low_descriptors import descriptor_stable_id  # noqa: E402
+
+DESCRIPTION = "x86 packed-dot contract header"
+REGENERATE_COMMAND = "python3 loom/py/loom/gen/run.py x86_packed_dot_contract --in-place"
+_CHECKED_IN_HEADER_PATH = "loom/src/loom/target/arch/x86/packed_dot_contract_data.h"
 
 
 def _join_source(lines: Sequence[str]) -> str:
@@ -52,7 +62,7 @@ def _emit_header() -> str:
             generator="loom.gen.target.arch.x86.x86_packed_dot_contract",
         ),
         "// Regenerate:",
-        "//   python3 loom/py/loom/gen/run.py x86_packed_dot_contract --in-place",
+        f"//   {REGENERATE_COMMAND}",
         "",
         "#ifndef LOOM_TARGET_ARCH_X86_PACKED_DOT_CONTRACT_DATA_H_",
         "#define LOOM_TARGET_ARCH_X86_PACKED_DOT_CONTRACT_DATA_H_",
@@ -129,11 +139,21 @@ def _emit_source() -> str:
     return _join_source(lines)
 
 
-def write_x86_packed_dot_contract_header() -> None:
-    base_path = REPO_ROOT / "loom/src/loom/target/arch/x86"
-    (base_path / "packed_dot_contract_data.h").write_text(
-        _emit_header(),
-        encoding="utf-8",
+def checked_in_file_set() -> GeneratedFileSet:
+    """Returns the checked-in packed-dot contract header ownership set."""
+    return GeneratedFileSet.from_mapping({_CHECKED_IN_HEADER_PATH: _emit_header()})
+
+
+def maintain_checked_in_files(
+    mode: GeneratedFileMaintenanceMode,
+) -> GeneratedFileMaintenanceResult:
+    """Checks or updates the checked-in packed-dot contract header."""
+    return maintain_generated_file_set(
+        REPO_ROOT,
+        checked_in_file_set(),
+        mode=mode,
+        description=DESCRIPTION,
+        regenerate_command=REGENERATE_COMMAND,
     )
 
 
@@ -154,10 +174,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Generate x86 packed-dot contract descriptor data.",
     )
-    parser.add_argument(
+    maintenance_mode = parser.add_mutually_exclusive_group()
+    maintenance_mode.add_argument(
+        "--check",
+        action="store_true",
+        help="Check the checked-in generated header.",
+    )
+    maintenance_mode.add_argument(
         "--in-place",
         action="store_true",
-        help="Regenerate checked-in generated headers.",
+        help="Regenerate the checked-in generated header.",
     )
     parser.add_argument(
         "--header",
@@ -171,13 +197,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    if args.in_place:
+    if args.check or args.in_place:
         if args.header is not None or args.source is not None:
-            parser.error("--in-place cannot be combined with explicit outputs")
-        write_x86_packed_dot_contract_header()
-        return 0
+            parser.error("checked-in maintenance modes cannot be combined with explicit outputs")
+        result = maintain_checked_in_files("update" if args.in_place else "check")
+        return 0 if result.ok else 1
     if args.header is None and args.source is None:
-        parser.error("expected --in-place, --header, or --source")
+        parser.error("expected --check, --in-place, --header, or --source")
     write_x86_packed_dot_contract_outputs(
         header_path=args.header,
         source_path=args.source,

@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 // GENERATED FILE: DO NOT EDIT.
 // Generator: loom.gen.test.numeric_conversion_matrix.
+// Regenerate: python3 loom/py/loom/gen/run.py numeric_conversion_matrix --in-place
 //
 // Exact schema-driven FP8 decode witnesses generated from the
 // target-independent numeric-format definitions. Heterogeneous

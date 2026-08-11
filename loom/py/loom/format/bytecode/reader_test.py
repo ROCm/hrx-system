@@ -51,6 +51,7 @@ from loom.ir import (
     INDEX,
     LOCATION_TAG_SANITIZER_SITE,
     OFFSET,
+    REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM,
     SYMBOL_FLAG_IMPORT,
     SYMBOL_FLAG_PUBLIC,
     VALUE_DEF_OP_NONE,
@@ -257,8 +258,8 @@ def _make_single_op_body_module(op_name: str = "test.yield") -> Module:
     return module
 
 
-def _single_op_offset(data: bytes | bytearray) -> int:
-    """Return the absolute offset of the first op in _make_single_op_body_module."""
+def _root_region_source_flags_offset(data: bytes | bytearray) -> int:
+    """Return the absolute offset of the first root region's source flags."""
     module_offset, _module_length = _module_range(data)
     _entry_offset, section_offset, _section_length = _find_section_entry(
         data, SECTION_IR
@@ -269,14 +270,34 @@ def _single_op_offset(data: bytes | bytearray) -> int:
         _count, offset = decode_varint(data, offset)
     _root_region_count, offset = decode_varint(data, offset)
     _root_region_index, offset = decode_varint(data, offset)
+    return offset
+
+
+def _single_op_offset(data: bytes | bytearray) -> int:
+    """Return the absolute offset of the first op in _make_single_op_body_module."""
+    offset = _root_region_source_flags_offset(data)
+    _source_flags, offset = decode_varint(data, offset)
     _block_count, offset = decode_varint(data, offset)
     offset += 1  # block has_label byte.
-    comment_count, offset = decode_varint(data, offset)
+    source_trivia, offset = decode_varint(data, offset)
+    comment_count = source_trivia >> 1
     for _ in range(comment_count):
         comment_length, offset = decode_varint(data, offset)
         offset += comment_length
     _arg_count, offset = decode_varint(data, offset)
     _op_count, offset = decode_varint(data, offset)
+    return offset
+
+
+def _root_block_source_trivia_offset(data: bytes | bytearray) -> int:
+    """Return the first root block's source-trivia scalar offset."""
+    offset = _root_region_source_flags_offset(data)
+    _source_flags, offset = decode_varint(data, offset)
+    _block_count, offset = decode_varint(data, offset)
+    has_label = data[offset]
+    offset += 1
+    if has_label:
+        _label_id, offset = decode_varint(data, offset)
     return offset
 
 
@@ -477,6 +498,30 @@ class TestMalformedSymbolSection:
 
 
 class TestMalformedIrSection:
+    def test_unsupported_region_source_flags_are_rejected(self) -> None:
+        data = bytearray(write_module(_make_single_op_body_module()))
+        source_flags_offset = _root_region_source_flags_offset(data)
+        assert data[source_flags_offset] == 0
+        data[source_flags_offset] = 1 << 1
+
+        with pytest.raises(BytecodeError, match="unsupported source flag bits"):
+            read_module(bytes(data))
+
+    def test_source_trivia_comment_count_beyond_field_width_is_rejected(
+        self,
+    ) -> None:
+        module = _make_single_op_body_module()
+        func_op = module.symbols[0].op
+        assert func_op is not None
+        func_op.regions[0].blocks[0].comments = ("x",)
+        data = bytearray(write_module(module))
+        source_trivia_offset = _root_block_source_trivia_offset(data)
+        assert data[source_trivia_offset : source_trivia_offset + 3] == b"\x02\x01x"
+        data[source_trivia_offset : source_trivia_offset + 3] = b"\x80\x80\x08"
+
+        with pytest.raises(BytecodeError, match="comment count exceeds UINT16_MAX"):
+            read_module(bytes(data))
+
     def test_op_table_index_plus1_zero_is_rejected(self) -> None:
         data = bytearray(write_module(_make_single_op_body_module()))
         op_offset = _single_op_offset(data)
@@ -1186,6 +1231,45 @@ class TestAttributeRoundTrips:
 
 
 class TestIRStructure:
+    def test_region_source_flags_roundtrip(self) -> None:
+        module = _make_single_op_body_module()
+        func_op = module.symbols[0].op
+        assert func_op is not None
+        func_op.regions[0].source_flags = REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM
+
+        loaded = _roundtrip(module)
+        loaded_func_op = loaded.symbols[0].op
+        assert loaded_func_op is not None
+        assert (
+            loaded_func_op.regions[0].source_flags
+            == REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM
+        )
+
+    def test_source_trivia_roundtrip(self) -> None:
+        module = _make_single_op_body_module()
+        func_op = module.symbols[0].op
+        assert func_op is not None
+        block = func_op.regions[0].blocks[0]
+        body_op = block.ops[0]
+        func_op.leading_blank_line = True
+        func_op.comments = (" symbol",)
+        block.leading_blank_line = True
+        block.comments = (" block",)
+        body_op.leading_blank_line = True
+        body_op.comments = (" operation",)
+
+        loaded = _roundtrip(module)
+        loaded_func_op = loaded.symbols[0].op
+        assert loaded_func_op is not None
+        loaded_block = loaded_func_op.regions[0].blocks[0]
+        loaded_body_op = loaded_block.ops[0]
+        assert loaded_func_op.leading_blank_line
+        assert loaded_func_op.comments == (" symbol",)
+        assert loaded_block.leading_blank_line
+        assert loaded_block.comments == (" block",)
+        assert loaded_body_op.leading_blank_line
+        assert loaded_body_op.comments == (" operation",)
+
     def test_op_with_results(self) -> None:
         module = Module(name="test")
         x = module.add_value(Value(name="x", type=F32))

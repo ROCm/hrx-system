@@ -10,11 +10,15 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(REPO_ROOT / "loom/py"))
+
+from loom.gen import checked_in_artifacts
 
 from build_tools.devtools import project_presubmit
 from build_tools.devtools.source_lock import NonEmptyTrackedFileSnapshot
@@ -37,6 +41,19 @@ RESOURCE_TEST_TAG_FILTERS = (
 )
 CTEST_RESOURCE_LABEL_EXCLUDE_REGEX = "runtime-resource="
 CI_LOOM_TARGETS = "amdgpu,iree_vm,llvmir,spirv,x86"
+LOOM_FORMAT_BAZEL_TARGET = "//loom/src/loom/tools/loom-format:loom-format"
+LOOM_FORMAT_CMAKE_TARGET = "loom::tools::loom-format"
+# Syntax-corpus modules retain their exact parser/printer fixture contract rather
+# than the verified canonical-source contract enforced by loom-format.
+LOOM_FORMAT_EXCLUDED_PREFIXES = ("loom/src/loom/test/corpus/text/",)
+# These exact modules intentionally fail semantic verification to test public
+# diagnostics. New invalid-looking filenames are not excluded automatically.
+LOOM_FORMAT_EXCLUDED_PATHS = frozenset(
+    {
+        "loom/src/loom/tooling/target/amdgpu/test/amdgpu_bad_return.loom",
+        "loom/src/loom/tools/iree-benchmark-loom/testdata/duplicate_symbol.loom",
+    }
+)
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -77,15 +94,109 @@ def should_run_presubmit(files_from: str | None) -> bool:
     )
 
 
-def run_generated_builder_check() -> bool:
+def run_generated_artifact_maintenance(fix: bool) -> bool:
+    print("loom presubmit: Checked-in generated artifacts")
+    result = checked_in_artifacts.maintain_checked_in_artifacts(
+        "update" if fix else "check"
+    )
+    if not result.ok:
+        return False
+    if not fix:
+        return True
+    return project_presubmit.stage_changed_paths(
+        PROJECT_NAME,
+        REPO_ROOT,
+        result.changed_paths,
+    )
+
+
+def is_format_source_path(path: str) -> bool:
+    # Only standalone .loom modules enter the production formatter. Directive-
+    # bearing .loom-test containers retain their authored-section lint contract.
+    source_path = PurePosixPath(path)
+    if "\\" in path or source_path.as_posix() != path or ".." in source_path.parts:
+        return False
+    if not path.startswith(PROJECT_ROOT) or not path.endswith(".loom"):
+        return False
+    if path in LOOM_FORMAT_EXCLUDED_PATHS:
+        return False
+    return not any(path.startswith(prefix) for prefix in LOOM_FORMAT_EXCLUDED_PREFIXES)
+
+
+def existing_format_source_paths(paths: list[str]) -> list[str]:
+    return sorted(
+        {
+            path
+            for path in paths
+            if is_format_source_path(path) and (REPO_ROOT / path).is_file()
+        }
+    )
+
+
+def tracked_format_source_paths() -> list[str] | None:
+    result = subprocess.run(
+        ["git", "--literal-pathspecs", "ls-files", "-z", "--", PROJECT_ROOT],
+        cwd=REPO_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+    )
+    if result.returncode != 0:
+        print(
+            "loom presubmit: failed to query tracked Loom source files",
+            file=sys.stderr,
+        )
+        if result.stderr:
+            print(result.stderr.rstrip(), file=sys.stderr)
+        return None
+    return existing_format_source_paths(result.stdout.split("\0"))
+
+
+def run_source_format_maintenance(
+    *, lane: str, files_from: str | None, fix: bool
+) -> bool:
+    tracked_paths = tracked_format_source_paths()
+    if tracked_paths is None:
+        return False
+    if files_from is None:
+        selected_paths = tracked_paths
+    else:
+        selected_paths = existing_format_source_paths(selected_files(files_from))
+    check_paths = sorted(set(tracked_paths).union(selected_paths))
+    if not check_paths:
+        return True
+
+    formatter_path = project_presubmit.build_and_resolve_executable(
+        PROJECT_NAME,
+        REPO_ROOT,
+        lane=lane,
+        bazel_target=LOOM_FORMAT_BAZEL_TARGET,
+        cmake_target=LOOM_FORMAT_CMAKE_TARGET,
+        bazel_args=(
+            "--config=locked",
+            f"--//loom/config/target:enable={CI_LOOM_TARGETS}",
+        ),
+    )
+    if formatter_path is None:
+        return False
+
+    if fix and selected_paths:
+        if not run_command(
+            [str(formatter_path), "--in-place", *selected_paths],
+            "Canonicalize selected Loom source",
+        ):
+            return False
+        if not project_presubmit.stage_changed_paths(
+            PROJECT_NAME,
+            REPO_ROOT,
+            selected_paths,
+        ):
+            return False
+
     return run_command(
-        [
-            sys.executable,
-            "loom/py/loom/gen/run.py",
-            "builders_pyi",
-            "--check",
-        ],
-        "Generated builder stubs",
+        [str(formatter_path), "--check", *check_paths],
+        "Canonical Loom source",
     )
 
 
@@ -149,7 +260,15 @@ def run_presubmit(args: argparse.Namespace) -> int:
         return 0
     ok = True
     if args.hygiene:
-        ok = run_generated_builder_check() and ok
+        ok = run_generated_artifact_maintenance(args.fix) and ok
+        ok = (
+            run_source_format_maintenance(
+                lane=args.lane,
+                files_from=args.files_from,
+                fix=args.fix,
+            )
+            and ok
+        )
         ok = run_source_lint() and ok
     if args.tests:
         if args.lane == "bazel":

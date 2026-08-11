@@ -1582,12 +1582,39 @@ class TestRoundTrip:
         printer = Printer()
         printer.register_ops(ALL_PASS_OPS)
         printer.register_types(ALL_BUILTIN_TYPES)
-        assert (
-            printer.print_module(module)
-            == """pass.pipeline<module> @compact pipeline {
-  choose(condition = #test.compact<64, label = "wave">)
-}
-"""
+        assert printer.print_module(module) == (
+            "pass.pipeline<module> @compact pipeline {\n"
+            '  choose(condition = #test.compact<64, label = "wave">)\n'
+            "}\n"
+        )
+
+    def test_pipeline_vertical_source_grouping_is_canonicalized(self) -> None:
+        parser = Parser()
+        parser.register_ops(ALL_PASS_OPS)
+        parser.register_types(ALL_BUILTIN_TYPES)
+        module = parser.parse(
+            "pass.pipeline<module> @grouped pipeline {\n"
+            "\n"
+            "\n"
+            "  prepare\n"
+            "\n"
+            "\n"
+            "  // refine results\n"
+            "  refine\n"
+            "}\n"
+        )
+
+        printer = Printer()
+        printer.register_ops(ALL_PASS_OPS)
+        printer.register_types(ALL_BUILTIN_TYPES)
+        assert printer.print_module(module) == (
+            "pass.pipeline<module> @grouped pipeline {\n"
+            "\n"
+            "  prepare\n"
+            "\n"
+            "  // refine results\n"
+            "  refine\n"
+            "}\n"
         )
 
     def test_parameterized_attr_array_roundtrips_in_pipeline_syntax(self) -> None:
@@ -1795,6 +1822,46 @@ class TestRoundTrip:
             "  // body terminator\n"
             "  test.yield\n"
             "}\n"
+        )
+
+    def test_vertical_source_grouping_is_canonicalized(self) -> None:
+        module = _op_parser().parse(
+            "\n"
+            "\n"
+            "test.func @grouped() {\n"
+            "\n"
+            "\n"
+            "// explicit entry block\n"
+            "^entry:\n"
+            "  %zero = test.constant 0 : i32\n"
+            "  %one = test.constant 1 : i32\n"
+            "\n"
+            "\n"
+            "  // final value\n"
+            "  %two = test.constant 2 : i32\n"
+            "\n"
+            "\n"
+            "  test.yield\n"
+            "}\n"
+            "\n"
+            "\n"
+            "test.decl @after()\n"
+        )
+        assert _op_printer().print_module(module) == (
+            "test.func @grouped() {\n"
+            "\n"
+            "// explicit entry block\n"
+            "^entry:\n"
+            "  %zero = test.constant 0 : i32\n"
+            "  %one = test.constant 1 : i32\n"
+            "\n"
+            "  // final value\n"
+            "  %two = test.constant 2 : i32\n"
+            "\n"
+            "  test.yield\n"
+            "}\n"
+            "\n"
+            "test.decl @after()\n"
         )
 
     def test_convert_bare_result_type(self) -> None:

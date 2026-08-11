@@ -42,10 +42,42 @@ typedef struct loom_print_low_asm_preflight_failure_t {
   uint16_t operand_count;
 } loom_print_low_asm_preflight_failure_t;
 
-bool loom_print_low_asm_is_requested(loom_print_context_t* ctx) {
-  return ctx->low_repr.descriptor_set != NULL &&
-         iree_any_bit_set(ctx->flags, LOOM_TEXT_PRINT_PREFER_LOW_ASM |
+static bool loom_print_low_asm_preserves_source(
+    const loom_print_context_t* ctx) {
+  return iree_any_bit_set(ctx->flags, LOOM_TEXT_PRINT_PRESERVE_LOW_ASM);
+}
+
+static bool loom_print_low_asm_source_is_marked(const loom_region_t* region) {
+  return region && iree_any_bit_set(region->source_flags,
+                                    LOOM_REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM);
+}
+
+bool loom_print_low_asm_is_requested(loom_print_context_t* ctx,
+                                     const loom_region_t* region) {
+  if (ctx->low_repr.descriptor_set == NULL) return false;
+  if (ctx->low_asm_region_depth != 0) return true;
+  if (loom_print_low_asm_preserves_source(ctx)) {
+    return loom_print_low_asm_source_is_marked(region);
+  }
+  return iree_any_bit_set(ctx->flags, LOOM_TEXT_PRINT_PREFER_LOW_ASM |
                                           LOOM_TEXT_PRINT_REQUIRE_LOW_ASM);
+}
+
+bool loom_print_low_asm_uses_marker(loom_print_context_t* ctx,
+                                    const loom_region_t* region) {
+  if (loom_print_low_asm_preserves_source(ctx)) {
+    return loom_print_low_asm_source_is_marked(region);
+  }
+  return ctx->low_asm_region_depth == 0;
+}
+
+static bool loom_print_low_asm_is_required(loom_print_context_t* ctx,
+                                           const loom_region_t* region) {
+  if (loom_print_low_asm_preserves_source(ctx)) {
+    return ctx->low_asm_region_depth != 0 ||
+           loom_print_low_asm_source_is_marked(region);
+  }
+  return iree_any_bit_set(ctx->flags, LOOM_TEXT_PRINT_REQUIRE_LOW_ASM);
 }
 
 static bool loom_print_low_asm_allows_canonical_op(loom_print_context_t* ctx,
@@ -841,6 +873,9 @@ static iree_status_t loom_print_low_asm_region_body(
         loom_print_block_needs_synthetic_label(ctx, region, block) ||
         (block->arg_count != 0 && !block_args_declared_by_parent);
     if (needs_label) {
+      if (iree_any_bit_set(block->flags, LOOM_BLOCK_FLAG_LEADING_BLANK_LINE)) {
+        IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '\n'));
+      }
       IREE_RETURN_IF_ERROR(loom_print_block_label_line_with_options(
           ctx, region, block, !block_args_declared_by_parent));
     }
@@ -851,6 +886,10 @@ static iree_status_t loom_print_low_asm_region_body(
           loom_print_should_elide_implicit_terminator(region_descriptor,
                                                       current_op)) {
         continue;
+      }
+      if (iree_any_bit_set(current_op->flags,
+                           LOOM_OP_FLAG_LEADING_BLANK_LINE)) {
+        IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '\n'));
       }
       IREE_RETURN_IF_ERROR(loom_print_op_comments(ctx, current_op));
       loom_text_low_asm_statement_t statement = {0};
@@ -1004,7 +1043,7 @@ iree_status_t loom_print_low_asm_optional_region(
       ctx, region, region_descriptor, entry_args_declared_by_parent, &low_repr,
       &failure, &available));
   if (!available) {
-    if (iree_any_bit_set(ctx->flags, LOOM_TEXT_PRINT_REQUIRE_LOW_ASM)) {
+    if (loom_print_low_asm_is_required(ctx, region)) {
       return loom_print_low_asm_make_unavailable_status(low_repr.contract_key,
                                                         &failure);
     }
@@ -1012,8 +1051,9 @@ iree_status_t loom_print_low_asm_optional_region(
   }
   *out_printed = true;
   const loom_print_low_asm_prefix_t prefix =
-      ctx->low_asm_region_depth == 0 ? LOOM_PRINT_LOW_ASM_PREFIX_MARKER
-                                     : LOOM_PRINT_LOW_ASM_PREFIX_NONE;
+      loom_print_low_asm_uses_marker(ctx, region)
+          ? LOOM_PRINT_LOW_ASM_PREFIX_MARKER
+          : LOOM_PRINT_LOW_ASM_PREFIX_NONE;
   return loom_print_low_asm_region_with_repr(ctx, region, region_descriptor,
                                              entry_args_declared_by_parent,
                                              low_repr, prefix);

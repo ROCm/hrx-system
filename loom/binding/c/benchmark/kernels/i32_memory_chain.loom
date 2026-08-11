@@ -1,6 +1,7 @@
 // A compact target-independent source that expands into a configurable
 // arithmetic chain during specialization and required full unrolling.
 config.decl @benchmark.workgroup_size : %value: index where [range(%value, 1, 256)]
+
 config.decl @benchmark.operation_count : %value: index where [range(%value, 1, 4096)]
 
 kernel.def export("i32_memory_chain") @i32_memory_chain() {

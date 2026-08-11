@@ -2,7 +2,6 @@
 // Loom spelling: providers state only the normalized target fact they need.
 // The kernel and providers remain targetless so this source can specialize for
 // AMDGPU, SPIR-V, or another backend that projects a subgroup-size fact.
-
 // Both specialized providers and the fallback implement the same contract:
 // double one i32 value. Selection changes the implementation, not semantics.
 func.template<hip.recipe.scale_i32> requires [#target.subgroup.size<64>] priority(20) @scale_i32_subgroup_64(%value: i32) -> (i32) {

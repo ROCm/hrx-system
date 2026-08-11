@@ -17,9 +17,9 @@ regex. The scanner handles all disambiguation:
   - '-' may continue identifiers for descriptor keys such as pass names
   - 'tile' before '<' → BARE_IDENT (type keyword), 'tile' before '.' → OP_NAME
 
-Comments (//) are collected separately and not emitted as tokens.
-The parser retrieves them via collect_pending_comments() and attaches
-them to the next operation for round-trip preservation.
+Comments (//) and an authored leading blank line are collected separately
+from tokens. The parser retrieves that source trivia and attaches it to the
+next operation or explicit block label for round-trip preservation.
 """
 
 from __future__ import annotations
@@ -201,6 +201,9 @@ class Tokenizer:
         "_column",
         "_peeked",
         "_comments",
+        "_comment_start_line",
+        "_leading_blank_line",
+        "_consumed_end_line",
         "in_dim_list",
     )
 
@@ -212,6 +215,9 @@ class Tokenizer:
         self._column = 1
         self._peeked: Token | None = None
         self._comments: list[str] = []
+        self._comment_start_line: int = 0
+        self._leading_blank_line: bool = False
+        self._consumed_end_line: int = 0
         self.in_dim_list: bool = False
 
     # --- Public interface ---
@@ -231,6 +237,9 @@ class Tokenizer:
         saved_column = self._column
         saved_peeked = self._peeked
         saved_comments = list(self._comments)
+        saved_comment_start_line = self._comment_start_line
+        saved_leading_blank_line = self._leading_blank_line
+        saved_consumed_end_line = self._consumed_end_line
         saved_in_dim_list = self.in_dim_list
         token = self.peek()
         try:
@@ -243,6 +252,9 @@ class Tokenizer:
             self._column = saved_column
             self._peeked = saved_peeked
             self._comments = saved_comments
+            self._comment_start_line = saved_comment_start_line
+            self._leading_blank_line = saved_leading_blank_line
+            self._consumed_end_line = saved_consumed_end_line
             self.in_dim_list = saved_in_dim_list
 
     def next(self) -> Token:
@@ -250,8 +262,10 @@ class Tokenizer:
         if self._peeked is not None:
             token = self._peeked
             self._peeked = None
-            return token
-        return self._scan_token()
+        else:
+            token = self._scan_token()
+        self._consumed_end_line = token.end_location.line
+        return token
 
     def expect(self, kind: TokenKind, text: str | None = None) -> Token:
         """Consume the next token, raising ParseError if it doesn't match."""
@@ -286,11 +300,14 @@ class Tokenizer:
             return self.next()
         return None
 
-    def collect_pending_comments(self) -> list[str]:
-        """Return and clear accumulated comment lines."""
+    def take_pending_source_trivia(self) -> tuple[list[str], bool]:
+        """Return and clear comments and their leading source grouping."""
         comments = self._comments
+        leading_blank_line = self._leading_blank_line
         self._comments = []
-        return comments
+        self._comment_start_line = 0
+        self._leading_blank_line = False
+        return comments, leading_blank_line
 
     def current_location(self) -> SourceLocation:
         """Current scanner position (for range tracking by the parser)."""
@@ -324,6 +341,7 @@ class Tokenizer:
                 if depth == 0:
                     interior = self._source[start : self._position]
                     self._advance()  # consume the closing '>'
+                    self._consumed_end_line = self._line
                     return interior
             if character == "\n":
                 self._line += 1
@@ -383,6 +401,8 @@ class Tokenizer:
 
             # Comment: // to end of line.
             if character == "/" and self._peek_char() == "/":
+                if not self._comments:
+                    self._comment_start_line = self._line
                 comment_start = self._position + 2
                 self._advance()  # skip first /
                 self._advance()  # skip second /
@@ -399,6 +419,12 @@ class Tokenizer:
     def _scan_token(self) -> Token:
         """Scan and return the next token."""
         self._skip_whitespace_and_comments()
+
+        source_start_line = self._comment_start_line or self._line
+        self._leading_blank_line = (
+            self._consumed_end_line != 0
+            and source_start_line > self._consumed_end_line + 1
+        )
 
         if self._position >= len(self._source):
             return self._make_token(

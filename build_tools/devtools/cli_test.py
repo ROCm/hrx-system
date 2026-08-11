@@ -1250,7 +1250,7 @@ class CliTest(unittest.TestCase):
         )
         self.assertNotIn("run: python dev.py", step.content)
         self.assertIn(
-            "bazel precommit --profile ci --commit",
+            "bazel precommit --profile ci --commit --verbose",
             step.content,
         )
 

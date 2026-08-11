@@ -125,7 +125,8 @@ This writes ignored lefthook-local.yml with the selected build system/profile
 and then runs lefthook install. Re-run this command with a different --profile
 to change the default profile used by Git commits. The installed hook uses
 commit scope: staged files plus files changed by HEAD, so amended commits
-validate the commit being replaced.""",
+validate the commit being replaced. Tool output streams while the hook runs so
+long builds and tests remain visibly active.""",
         )
     if command == "configure":
         if lane == "bazel":

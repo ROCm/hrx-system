@@ -11,25 +11,44 @@ and exact-target to code-object mapping. Loom's target-info table owns the
 compiler-supported processors and their descriptor-set assignments. This script
 joins those facts into small Bazel/CMake fragments consumed by Loom config and
 target packages.
+
+Usage:
+    python3 loom/build_tools/amdgpu/target_config.py --check
+    python3 loom/build_tools/amdgpu/target_config.py --in-place
 """
 
 from __future__ import annotations
 
 import argparse
-import difflib
 import importlib.util
 import sys
 from pathlib import Path
+
+_LOOM_PY_ROOT = Path(__file__).resolve().parents[2] / "py"
+if str(_LOOM_PY_ROOT) not in sys.path:
+    sys.path.insert(0, str(_LOOM_PY_ROOT))
+
+from loom.gen.support.generated_file import (
+    GeneratedFileMaintenanceMode,
+    GeneratedFileMaintenanceResult,
+    GeneratedFileSet,
+    maintain_generated_file_set,
+)
 
 TARGET_SOURCE_LOOM_DEFAULTS = "loom_defaults"
 TARGET_SOURCE_IREE_HAL = "iree_hal"
 _AMDGPU_NAMES = None
 
+DESCRIPTION = "AMDGPU target configuration"
+REGENERATE_COMMAND = "python3 loom/build_tools/amdgpu/target_config.py --in-place"
+
 
 def find_repo_root() -> Path:
     current = Path(__file__).resolve()
     while current != current.parent:
-        if (current / "runtime" / "src" / "iree").exists():
+        if (current / "loom" / "py" / "loom").is_dir() and (
+            current / "build_tools" / "amdgpu" / "target_map.py"
+        ).is_file():
             return current
         current = current.parent
     print("error: could not find IREE repository root", file=sys.stderr)
@@ -635,66 +654,24 @@ def render_cmake(config: TargetConfig) -> str:
     return "\n".join(lines)
 
 
-def generated_outputs(repo_root: Path, config: TargetConfig) -> dict[Path, str]:
-    output_dir = repo_root / "loom/build_tools/amdgpu"
+def generated_outputs(config: TargetConfig) -> dict[str, str]:
+    output_dir = Path("loom/build_tools/amdgpu")
     return {
-        output_dir / "target_config.bzl": render_bzl(config),
-        output_dir / "target_config.cmake": render_cmake(config),
+        (output_dir / "target_config.bzl").as_posix(): render_bzl(config),
+        (output_dir / "target_config.cmake").as_posix(): render_cmake(config),
     }
 
 
-def check_outputs(repo_root: Path, outputs: dict[Path, str]) -> int:
-    failed = False
-    for path, content in outputs.items():
-        if not path.exists():
-            print(
-                f"error: {path.relative_to(repo_root)} does not exist", file=sys.stderr
-            )
-            failed = True
-            continue
-        existing = path.read_text()
-        if existing == content:
-            continue
-        rel_path = path.relative_to(repo_root)
-        print(f"error: {rel_path} is out of date", file=sys.stderr)
-        diff = difflib.unified_diff(
-            existing.splitlines(keepends=True),
-            content.splitlines(keepends=True),
-            fromfile=str(rel_path),
-            tofile=str(rel_path) + " (generated)",
-        )
-        sys.stderr.writelines(diff)
-        failed = True
-    if failed:
-        print(
-            "Run 'python loom/build_tools/amdgpu/target_config.py' to regenerate.",
-            file=sys.stderr,
-        )
-        return 1
-    print("Loom AMDGPU target config generated files are up to date.")
-    return 0
+def checked_in_file_set(config: TargetConfig | None = None) -> GeneratedFileSet:
+    """Returns the complete checked-in target-configuration ownership set."""
+    if config is None:
+        repo_root = find_repo_root()
+        config = load_target_config(repo_root)
+    return GeneratedFileSet.from_mapping(generated_outputs(config))
 
 
-def write_outputs(outputs: dict[Path, str]) -> int:
-    for path, content in outputs.items():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content)
-        print(f"Wrote {path}")
-    return 0
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Generate Loom AMDGPU target configuration fragments."
-    )
-    parser.add_argument(
-        "--check",
-        action="store_true",
-        help="Check that generated files are up to date without modifying them.",
-    )
-    args = parser.parse_args()
-
-    repo_root = find_repo_root()
+def load_target_config(repo_root: Path) -> TargetConfig:
+    """Loads and validates the source models for target configuration."""
     configure_python_paths(repo_root)
     configure_name_helpers(repo_root)
     target_info = load_module(
@@ -706,11 +683,42 @@ def main() -> int:
         repo_root / "build_tools/amdgpu/target_map.py",
     )
     root_target_map.validate_target_map()
-    config = TargetConfig(target_info, root_target_map)
-    outputs = generated_outputs(repo_root, config)
-    if args.check:
-        return check_outputs(repo_root, outputs)
-    return write_outputs(outputs)
+    return TargetConfig(target_info, root_target_map)
+
+
+def maintain_checked_in_files(
+    mode: GeneratedFileMaintenanceMode,
+) -> GeneratedFileMaintenanceResult:
+    """Checks or updates the checked-in AMDGPU target configuration."""
+    repo_root = find_repo_root()
+    return maintain_generated_file_set(
+        repo_root,
+        checked_in_file_set(load_target_config(repo_root)),
+        mode=mode,
+        description=DESCRIPTION,
+        regenerate_command=REGENERATE_COMMAND,
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Maintain Loom AMDGPU target configuration fragments."
+    )
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument(
+        "--check",
+        action="store_true",
+        help="Check that generated files are up to date without modifying them.",
+    )
+    mode.add_argument(
+        "--in-place",
+        action="store_true",
+        help="Regenerate checked-in generated files.",
+    )
+    args = parser.parse_args(argv)
+
+    result = maintain_checked_in_files("update" if args.in_place else "check")
+    return 0 if result.ok else 1
 
 
 if __name__ == "__main__":

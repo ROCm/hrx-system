@@ -75,4 +75,5 @@ check.case public @workgroup_rank_sort_tie_case {
 }
 
 check.benchmark<@workgroup_rank_sort_distinct_case> @workgroup_rank_sort_distinct
+
 check.benchmark<@workgroup_rank_sort_tie_case> @workgroup_rank_sort_tie

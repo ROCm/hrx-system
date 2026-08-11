@@ -623,8 +623,16 @@ enum loom_op_flag_bits_e {
   // their own counted flags. Set when an op is finalized or use-def data is
   // recomputed, and cleared when the op is erased.
   LOOM_OP_FLAG_EFFECTS_COUNTED = 1u << 2,
+
+  // At least one empty source line preceded the operation. Text printers
+  // canonicalize any authored run to exactly one empty line. This is
+  // non-semantic source presentation preserved across exact cloning.
+  LOOM_OP_FLAG_LEADING_BLANK_LINE = 1u << 3,
 };
 typedef uint8_t loom_op_flags_t;
+
+#define LOOM_OP_SOURCE_PRESENTATION_FLAG_MASK \
+  ((loom_op_flags_t)LOOM_OP_FLAG_LEADING_BLANK_LINE)
 
 // Generic semantic trait bitfield. Op vtables carry construction defaults and
 // op instances carry the effective trait word consumed by pass hot paths.
@@ -1507,7 +1515,7 @@ typedef struct loom_op_t {
   uint8_t successor_count;
   // Number of attributes in trailing storage.
   uint8_t attribute_count;
-  // Per-op lifecycle/worklist flags.
+  // Per-op lifecycle, worklist, and source-presentation flags.
   loom_op_flags_t flags;
   // Per-op-instance flags: fast-math flags for float ops, overflow
   // flags for integer ops. Declared via the Flags format element in
@@ -1647,6 +1655,17 @@ static inline const uint16_t* loom_op_const_operand_segment_counts(
 // Sentinel region_index value for blocks not attached to a region.
 #define LOOM_BLOCK_REGION_INDEX_INVALID UINT16_MAX
 
+enum loom_block_flag_bits_e {
+  // At least one empty source line preceded the explicit block label. Text
+  // printers canonicalize any authored run to exactly one empty line. This is
+  // non-semantic source presentation preserved across exact cloning.
+  LOOM_BLOCK_FLAG_LEADING_BLANK_LINE = 1u << 0,
+};
+typedef uint16_t loom_block_flags_t;
+
+#define LOOM_BLOCK_SOURCE_PRESENTATION_FLAG_MASK \
+  ((loom_block_flags_t)LOOM_BLOCK_FLAG_LEADING_BLANK_LINE)
+
 // A basic block: a linear sequence of operations with optional
 // block arguments.
 //
@@ -1663,7 +1682,7 @@ typedef struct loom_block_t {
   // Number of live operations linked into this block.
   uint32_t op_count;
   // Per-block instance flags.
-  uint16_t flags;
+  loom_block_flags_t flags;
   // Position in parent_region->blocks, or LOOM_BLOCK_REGION_INDEX_INVALID.
   uint16_t region_index;
   // Block argument value IDs.
@@ -1731,6 +1750,18 @@ enum loom_region_instance_flag_bits_e {
 };
 typedef uint16_t loom_region_instance_flags_t;
 
+// Source presentation recorded for a region. These flags do not affect
+// program semantics or structural analyses. Values are serialized directly
+// and are therefore bytecode-stable.
+enum loom_region_source_flag_bits_e {
+  // The region was introduced by an explicit `asm` marker in source text.
+  LOOM_REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM = 1u << 0,
+};
+typedef uint16_t loom_region_source_flags_t;
+
+#define LOOM_REGION_SOURCE_FLAG_MASK \
+  ((loom_region_source_flags_t)LOOM_REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM)
+
 // A region: an ordered list of blocks. Used for function bodies,
 // loop bodies (scf.for), conditional branches (scf.if then/else).
 // Regions nest: a region's block contains ops that may have their
@@ -1748,8 +1779,8 @@ typedef struct loom_region_t {
   uint16_t block_capacity;
   // Per-region structural flags.
   loom_region_instance_flags_t flags;
-  // Reserved for future flags while keeping effect counters aligned.
-  uint16_t reserved;
+  // Non-semantic source presentation retained across exact round trips.
+  loom_region_source_flags_t source_flags;
   // Transitive count of read-like effects in all live ops nested in this
   // region. READS_MEMORY, NON_DETERMINISTIC, and UNKNOWN_EFFECTS contribute.
   uint32_t read_effect_count;

@@ -146,6 +146,75 @@ TEST_F(LowAsmPrinterTest, PrintsDescriptorBackedPacketRegion) {
   loom_module_free(module);
 }
 
+TEST_F(LowAsmPrinterTest, CanonicalizesVerticalSourceGrouping) {
+  const char* source =
+      "low.func.def target<test.low.core> @grouped() -> "
+      "(reg<test.i32>) asm {\n"
+      "  %c0 = test.const.i32 7\n"
+      "\n"
+      "  // arithmetic\n"
+      "  %sum = test.add.i32 %c0, %c0\n"
+      "\n"
+      "  return %sum\n"
+      "}\n";
+  loom_module_t* module = ParseOk(
+      "low.func.def target<test.low.core> @grouped() -> "
+      "(reg<test.i32>) asm {\n"
+      "  %c0 = test.const.i32 7\n"
+      "\n"
+      "\n"
+      "  // arithmetic\n"
+      "  %sum = test.add.i32 %c0, %c0\n"
+      "\n"
+      "\n"
+      "  return %sum\n"
+      "}\n");
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(PrintModule(module), source);
+  loom_module_free(module);
+}
+
+TEST_F(LowAsmPrinterTest, PreservesAuthoredAsmChoice) {
+  const char* source =
+      "low.func.def target<test.low.core> @assembly("
+      "%value: reg<test.i32>) -> (reg<test.i32>) asm {\n"
+      "  return %value\n"
+      "}\n"
+      "\n"
+      "low.func.def target<test.low.core> @generic("
+      "%value: reg<test.i32>) -> (reg<test.i32>) {\n"
+      "  low.return %value : reg<test.i32>\n"
+      "}\n";
+  loom_module_t* module = ParseOk(source);
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(PrintModule(module, LOOM_TEXT_PRINT_DEFAULT |
+                                    LOOM_TEXT_PRINT_PRESERVE_LOW_ASM |
+                                    LOOM_TEXT_PRINT_PREFER_LOW_ASM |
+                                    LOOM_TEXT_PRINT_REQUIRE_LOW_ASM),
+            source);
+  loom_module_free(module);
+}
+
+TEST_F(LowAsmPrinterTest, PreservesNestedExplicitAsmChoice) {
+  const char* source =
+      "low.func.def target<test.low.core> @select("
+      "%condition: reg<test.i32>, %then_value: reg<test.i32>, "
+      "%else_value: reg<test.i32>) -> (reg<test.i32>) {\n"
+      "  %result = low.scf.if %condition -> (reg<test.i32>) asm {\n"
+      "    low.scf.yield %then_value : reg<test.i32>\n"
+      "  } else {\n"
+      "    low.scf.yield %else_value : reg<test.i32>\n"
+      "  }\n"
+      "  low.return %result : reg<test.i32>\n"
+      "}\n";
+  loom_module_t* module = ParseOk(source);
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(PrintModule(module, LOOM_TEXT_PRINT_DEFAULT |
+                                    LOOM_TEXT_PRINT_PRESERVE_LOW_ASM),
+            source);
+  loom_module_free(module);
+}
+
 TEST_F(LowAsmPrinterTest, PrintsCanonicalHintAmongTargetPackets) {
   const char* source =
       "low.func.def target<test.low.core> @hint() -> "

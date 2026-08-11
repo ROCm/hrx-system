@@ -125,6 +125,8 @@ __all__ = [
     "Operation",
     "Block",
     "Region",
+    "REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM",
+    "REGION_SOURCE_FLAG_MASK",
     # Symbols.
     "SymbolKind",
     "Symbol",
@@ -1646,6 +1648,8 @@ class Operation:
     regions: list[Region] = field(default_factory=list)
     location_id: int = LOCATION_UNKNOWN
     comments: tuple[str, ...] = ()
+    # True when one canonical empty source line precedes this operation.
+    leading_blank_line: bool = False
     name: str = ""
     is_dead: bool = False
     _attributes_frozen: bool = field(default=False, init=False, repr=False)
@@ -1676,13 +1680,21 @@ class Block:
     arg_ids: list[int] = field(default_factory=list)
     ops: list[Operation] = field(default_factory=list)
     comments: tuple[str, ...] = ()
+    # True when one canonical empty source line precedes this explicit label.
+    leading_blank_line: bool = False
+
+
+# Region source-presentation flags. These bits are bytecode-stable.
+REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM = 1 << 0
+REGION_SOURCE_FLAG_MASK = REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM
 
 
 @dataclass(slots=True)
 class Region:
-    """An ordered list of blocks."""
+    """An ordered list of blocks and its retained source presentation."""
 
     blocks: list[Block] = field(default_factory=list)
+    source_flags: int = 0
 
 
 # ============================================================================

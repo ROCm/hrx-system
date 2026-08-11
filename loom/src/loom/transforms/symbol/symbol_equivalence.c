@@ -311,7 +311,8 @@ static iree_status_t loom_symbol_equivalence_compare_block(
   *out_equivalent = false;
   if (lhs_block->arg_count != rhs_block->arg_count ||
       lhs_block->op_count != rhs_block->op_count ||
-      lhs_block->flags != rhs_block->flags) {
+      ((lhs_block->flags ^ rhs_block->flags) &
+       (loom_block_flags_t)~LOOM_BLOCK_SOURCE_PRESENTATION_FLAG_MASK) != 0) {
     return iree_ok_status();
   }
 

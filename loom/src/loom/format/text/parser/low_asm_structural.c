@@ -264,6 +264,7 @@ static iree_status_t loom_parse_low_asm_structural_location_and_build(
   }
   IREE_RETURN_IF_ERROR(
       loom_parse_low_asm_define_single_result(parser, result_names, op));
+  op->flags |= parsed_spans->source_flags;
   return loom_module_attach_op_comments(parser->module, op, comments,
                                         comment_count);
 }

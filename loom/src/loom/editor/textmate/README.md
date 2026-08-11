@@ -1,9 +1,11 @@
 # Loom TextMate Grammars
 
-The JSON grammars in this directory are generated from the Python Loom DSL:
+The JSON grammars in this directory are generated from the Python Loom DSL.
+Check or regenerate them from the repository root:
 
 ```bash
-python3 loom/py/loom/gen/run.py textmate
+python3 loom/py/loom/gen/run.py textmate --check
+python3 loom/py/loom/gen/run.py textmate --in-place
 ```
 
 To try the grammar in VS Code while developing, run

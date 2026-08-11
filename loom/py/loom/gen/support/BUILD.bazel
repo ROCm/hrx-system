@@ -12,6 +12,7 @@ package(
 )
 
 GENERATED_FILE_VISIBILITY = [
+    "//loom/build_tools:__subpackages__",
     "//loom/py/loom/gen:__subpackages__",
     "//loom/py/loom/tools:__pkg__",
 ]

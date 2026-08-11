@@ -82,4 +82,5 @@ check.case public @signed_i8_tile_quantize_arcp_f32_case {
 }
 
 check.benchmark<@signed_i8_tile_quantize_even_ties_f32_case> @signed_i8_tile_quantize_even_ties_f32_smoke
+
 check.benchmark<@signed_i8_tile_quantize_arcp_f32_case> @signed_i8_tile_quantize_arcp_f32_smoke

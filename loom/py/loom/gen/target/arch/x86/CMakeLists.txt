@@ -70,4 +70,22 @@ iree_py_library(
     loom::py::loom::target::arch::x86::target_info
 )
 
+iree_py_test(
+  NAME
+    packed_dot_contract_test
+  MAIN
+    "../../../../tools/pytest_style_runner.py"
+  SRCS
+    "x86_packed_dot_contract_test.py"
+    "../../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.gen.target.arch.x86.x86_packed_dot_contract_test"
+  DEPS
+    loom::py::loom::gen::target::arch::x86::packed_dot_contract
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

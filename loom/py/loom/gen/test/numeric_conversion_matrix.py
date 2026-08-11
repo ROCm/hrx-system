@@ -20,10 +20,20 @@ from loom.dialect.encoding.numeric_formats import (
     Fp8Format,
     Fp8SpecialPolicy,
 )
-from loom.gen.support.generated_file import line_comment_header
+from loom.gen import bootstrap as _bootstrap
+from loom.gen.support.generated_file import (
+    GeneratedFileMaintenanceMode,
+    GeneratedFileMaintenanceResult,
+    GeneratedFileSet,
+    line_comment_header,
+    maintain_generated_file_set,
+)
 from loom.ir import ScalarTypeKind
 
 _GENERATOR = "loom.gen.test.numeric_conversion_matrix"
+DESCRIPTION = "FP8 numeric conversion witnesses"
+REGENERATE_COMMAND = "python3 loom/py/loom/gen/run.py numeric_conversion_matrix --in-place"
+_OUTPUT_ROOT = Path("loom/src/loom/test/corpus/encoding")
 
 
 @dataclass(frozen=True)
@@ -347,7 +357,11 @@ def _generated_header(direction: str) -> list[str]:
         "// Licensed under the Apache License v2.0 with LLVM Exceptions.",
         "// See https://llvm.org/LICENSE.txt for license information.",
         "// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception",
-        *line_comment_header("//", generator=_GENERATOR),
+        *line_comment_header(
+            "//",
+            generator=_GENERATOR,
+            regenerate=REGENERATE_COMMAND,
+        ),
         "//",
         f"// Exact schema-driven FP8 {direction} witnesses generated from the",
         "// target-independent numeric-format definitions. Heterogeneous",
@@ -696,6 +710,31 @@ def emit_fp8_decode_matrix(family: Literal["e4m3", "e5m2"]) -> str:
     )
 
 
+def checked_in_file_set() -> GeneratedFileSet:
+    """Returns the checked-in FP8 conversion witness ownership set."""
+    return GeneratedFileSet.from_mapping(
+        {
+            (_OUTPUT_ROOT / "fp8_bidirectional_decode_e4m3.loom").as_posix(): emit_fp8_decode_matrix("e4m3"),
+            (_OUTPUT_ROOT / "fp8_bidirectional_decode_e5m2.loom").as_posix(): emit_fp8_decode_matrix("e5m2"),
+            (_OUTPUT_ROOT / "fp8_bidirectional_encode_e4m3.loom").as_posix(): emit_fp8_encode_matrix("e4m3"),
+            (_OUTPUT_ROOT / "fp8_bidirectional_encode_e5m2.loom").as_posix(): emit_fp8_encode_matrix("e5m2"),
+        }
+    )
+
+
+def maintain_checked_in_files(
+    mode: GeneratedFileMaintenanceMode,
+) -> GeneratedFileMaintenanceResult:
+    """Checks or updates all checked-in FP8 conversion witnesses."""
+    return maintain_generated_file_set(
+        _bootstrap.REPO_ROOT,
+        checked_in_file_set(),
+        mode=mode,
+        description=DESCRIPTION,
+        regenerate_command=REGENERATE_COMMAND,
+    )
+
+
 def _write_output(path: Path, contents: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(contents, encoding="utf-8")
@@ -703,21 +742,35 @@ def _write_output(path: Path, contents: str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    maintenance_mode = parser.add_mutually_exclusive_group()
+    maintenance_mode.add_argument(
+        "--check",
+        action="store_true",
+        help="Check the checked-in generated witnesses.",
+    )
+    maintenance_mode.add_argument(
+        "--in-place",
+        action="store_true",
+        help="Regenerate the checked-in generated witnesses.",
+    )
     parser.add_argument("--encode-e4m3-output", type=Path)
     parser.add_argument("--encode-e5m2-output", type=Path)
     parser.add_argument("--decode-e4m3-output", type=Path)
     parser.add_argument("--decode-e5m2-output", type=Path)
     args = parser.parse_args(argv)
-    if all(
-        output is None
-        for output in (
-            args.encode_e4m3_output,
-            args.encode_e5m2_output,
-            args.decode_e4m3_output,
-            args.decode_e5m2_output,
-        )
-    ):
-        parser.error("at least one output path is required")
+    explicit_outputs = (
+        args.encode_e4m3_output,
+        args.encode_e5m2_output,
+        args.decode_e4m3_output,
+        args.decode_e5m2_output,
+    )
+    if args.check or args.in_place:
+        if any(output is not None for output in explicit_outputs):
+            parser.error("checked-in maintenance modes cannot be combined with explicit outputs")
+        result = maintain_checked_in_files("update" if args.in_place else "check")
+        return 0 if result.ok else 1
+    if all(output is None for output in explicit_outputs):
+        parser.error("expected --check, --in-place, or at least one explicit output")
     if args.encode_e4m3_output is not None:
         _write_output(args.encode_e4m3_output, emit_fp8_encode_matrix("e4m3"))
     if args.encode_e5m2_output is not None:

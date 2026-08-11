@@ -9,14 +9,14 @@ kernel.def target(@target) @subgroup_broadcast_i32_named_lane_wave64() {
 } launch(%input: buffer, %output: buffer) {
   %tid = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32, #encoding.layout.dense>
-  %loaded = vector.load %input_view[%tid] : view<64xi32, #encoding.layout.dense> -> vector<1xi32>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32>
+  %loaded = vector.load %input_view[%tid] : view<64xi32> -> vector<1xi32>
   %value = vector.extract %loaded[0] : vector<1xi32> -> i32
   %source_lane = scalar.constant 33 : i32
   %broadcast = kernel.subgroup.broadcast %value from %source_lane : i32, i32
   %result = vector.from_elements %broadcast : vector<1xi32>
-  vector.store %result, %output_view[%tid] : vector<1xi32>, view<64xi32, #encoding.layout.dense>
+  vector.store %result, %output_view[%tid] : vector<1xi32>, view<64xi32>
   kernel.return
 }
 
@@ -45,12 +45,12 @@ kernel.def target(@target) @subgroup_broadcast_f32x4_named_lane_wave64() {
 } launch(%input: buffer, %output: buffer) {
   %tid = kernel.workitem.id<x> : index
   %buffer_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xf32, #encoding.layout.dense>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xf32, #encoding.layout.dense>
-  %value = vector.load %input_view[%tid, 0] : view<64x4xf32, #encoding.layout.dense> -> vector<4xf32>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xf32>
+  %value = vector.load %input_view[%tid, 0] : view<64x4xf32> -> vector<4xf32>
   %source_lane = scalar.constant 47 : i32
   %broadcast = kernel.subgroup.broadcast %value from %source_lane : vector<4xf32>, i32
-  vector.store %broadcast, %output_view[%tid, 0] : vector<4xf32>, view<64x4xf32, #encoding.layout.dense>
+  vector.store %broadcast, %output_view[%tid, 0] : vector<4xf32>, view<64x4xf32>
   kernel.return
 }
 

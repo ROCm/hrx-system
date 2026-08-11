@@ -144,6 +144,10 @@ typedef struct loom_tokenizer_t {
   iree_host_size_t pending_comment_count;
   // Allocated capacity of pending_comments.
   iree_host_size_t pending_comment_capacity;
+  // Source line containing the first pending comment, or zero when none.
+  uint32_t pending_comment_start_line;
+  // True when an empty source line precedes the pending comments or token.
+  bool pending_leading_blank_line;
   iree_status_t status;
 
   // Position of the most recently consumed token's end. Updated on
@@ -175,12 +179,15 @@ void loom_tokenizer_deinitialize(loom_tokenizer_t* tokenizer);
 // tokens plus |tokenizer->error| metadata.
 iree_status_t loom_tokenizer_consume_status(loom_tokenizer_t* tokenizer);
 
-// Returns pending line comments collected while scanning leading whitespace and
-// clears the tokenizer's pending list. The returned array is tokenizer-scratch
-// storage; comment payloads are slices into the original source buffer.
+// Returns pending source trivia collected while scanning leading whitespace
+// and clears it. |out_leading_blank_line| is true when at least one empty line
+// separates the previously consumed token from the first pending comment, or
+// from the lookahead token when there are no comments. File-leading whitespace
+// does not set it. The returned comment array is tokenizer-scratch storage;
+// payloads are slices into the original source buffer.
 void loom_tokenizer_take_pending_comments(
     loom_tokenizer_t* tokenizer, const iree_string_view_t** out_comments,
-    iree_host_size_t* out_comment_count);
+    iree_host_size_t* out_comment_count, bool* out_leading_blank_line);
 
 // Clears pending line comments that were collected before a delimiter and do
 // not attach to any operation or block.

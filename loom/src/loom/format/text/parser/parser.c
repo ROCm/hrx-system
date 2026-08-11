@@ -539,6 +539,7 @@ static iree_status_t loom_finalize_op(
 
   // Set instance flags.
   op->instance_flags = parsed->instance_flags;
+  op->flags |= parsed->source_flags;
 
   // Attribute- or instance-flag-dependent traits become part of the op at the
   // parse construction boundary. Later use/def rebuilds must not recompute
@@ -572,8 +573,12 @@ static iree_status_t loom_parse_op_into(loom_parser_t* parser,
   loom_token_t start_token = loom_tokenizer_peek(&parser->tokenizer);
   const iree_string_view_t* comments = NULL;
   iree_host_size_t comment_count = 0;
+  bool leading_blank_line = false;
   loom_tokenizer_take_pending_comments(&parser->tokenizer, &comments,
-                                       &comment_count);
+                                       &comment_count, &leading_blank_line);
+  if (leading_blank_line) {
+    parsed->source_flags |= LOOM_OP_FLAG_LEADING_BLANK_LINE;
+  }
 
   // Parse LHS result names: %a, %b = op.name ...
   // Or just: op.name ... (for ops with no results).
@@ -810,8 +815,9 @@ iree_status_t loom_parser_parse_optional_block_label(loom_parser_t* parser,
 
   const iree_string_view_t* comments = NULL;
   iree_host_size_t comment_count = 0;
+  bool leading_blank_line = false;
   loom_tokenizer_take_pending_comments(&parser->tokenizer, &comments,
-                                       &comment_count);
+                                       &comment_count, &leading_blank_line);
   loom_token_t label_token = loom_tokenizer_next(&parser->tokenizer);
   loom_string_id_t label_id = 0;
   IREE_RETURN_IF_ERROR(
@@ -824,6 +830,9 @@ iree_status_t loom_parser_parse_optional_block_label(loom_parser_t* parser,
                             IREE_ARRAYSIZE(params), label_token);
   }
   block->label_id = label_id;
+  if (leading_blank_line) {
+    block->flags |= LOOM_BLOCK_FLAG_LEADING_BLANK_LINE;
+  }
   IREE_RETURN_IF_ERROR(loom_module_attach_block_comments(
       parser->module, block, comments, comment_count));
 

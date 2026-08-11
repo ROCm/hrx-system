@@ -37,19 +37,16 @@ kernel.def @tsan_workgroup_barrier_safe_write() {
   %is_first_lane = index.cmp eq, %lane, %first_lane : index
   scf.if %is_first_lane {
     view.store %before_value, %scratch_view[%first_lane] : i32, view<1xi32>
-    scf.yield
   }
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %is_second_lane = index.cmp eq, %lane, %second_lane : index
   scf.if %is_second_lane {
     view.store %after_value, %scratch_view[%first_lane] : i32, view<1xi32>
-    scf.yield
   }
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   scf.if %is_first_lane {
     %result = view.load %scratch_view[%first_lane] : view<1xi32> -> i32
     view.store %result, %output_view[%first_lane] : i32, view<1xi32>
-    scf.yield
   }
   kernel.return
 }
@@ -59,7 +56,7 @@ check.case @tsan_workgroup_write_race_case {
   kernel.launch @tsan_workgroup_write_race(%output) : (tensor<1xi32>)
   %expected = check.generate.fill value(1) : tensor<1xi32>
   check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
-  check.expect.event<device> {type = "tsan_report", severity = "error", count = 1, tsan = {check = "data_race", memory = "workgroup", current_access = "write", prior_access = "write", access_length = 4}}
+  check.expect.event<device> {count = 1, severity = "error", tsan = {access_length = 4, check = "data_race", current_access = "write", memory = "workgroup", prior_access = "write"}, type = "tsan_report"}
   check.return
 }
 
@@ -68,6 +65,6 @@ check.case @tsan_workgroup_barrier_safe_write_case {
   kernel.launch @tsan_workgroup_barrier_safe_write(%output) : (tensor<1xi32>)
   %expected = check.generate.fill value(2) : tensor<1xi32>
   check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
-  check.expect.event<device> {type = "tsan_report", count = 0}
+  check.expect.event<device> {count = 0, type = "tsan_report"}
   check.return
 }

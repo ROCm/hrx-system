@@ -307,6 +307,9 @@ iree_status_t loom_print_region_body(
         (block->arg_count != 0 && !block_args_declared_by_parent);
 
     if (needs_label) {
+      if (iree_any_bit_set(block->flags, LOOM_BLOCK_FLAG_LEADING_BLANK_LINE)) {
+        IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '\n'));
+      }
       IREE_RETURN_IF_ERROR(loom_print_block_label_line_with_options(
           ctx, region, block, !block_args_declared_by_parent));
     }
@@ -322,7 +325,9 @@ iree_status_t loom_print_region_body(
       }
       // Blank line between top-level symbol definitions (func.def, func.decl,
       // etc.) in the module body.
-      if (printed_any && ctx->indent == 0) {
+      if (printed_any && ctx->indent == 0 &&
+          !iree_any_bit_set(current_op->flags,
+                            LOOM_OP_FLAG_LEADING_BLANK_LINE)) {
         const loom_op_vtable_t* current_vtable =
             loom_op_vtable(ctx->module, current_op);
         if (current_vtable &&
@@ -330,6 +335,10 @@ iree_status_t loom_print_region_body(
           IREE_RETURN_IF_ERROR(
               loom_output_stream_write_char(ctx->stream, '\n'));
         }
+      }
+      if (iree_any_bit_set(current_op->flags,
+                           LOOM_OP_FLAG_LEADING_BLANK_LINE)) {
+        IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '\n'));
       }
       printed_any = true;
       IREE_RETURN_IF_ERROR(loom_print_op_comments(ctx, current_op));
@@ -342,25 +351,36 @@ iree_status_t loom_print_region_body(
 
 iree_status_t loom_print_module_body(loom_print_context_t* ctx,
                                      const loom_region_t* region) {
+  bool printed_any = false;
   for (uint16_t block_index = 0; block_index < region->block_count;
        ++block_index) {
     const loom_block_t* block = loom_region_const_block(region, block_index);
 
     if (loom_print_block_has_label(ctx, block) ||
         loom_print_block_needs_synthetic_label(ctx, region, block)) {
+      if (printed_any &&
+          iree_any_bit_set(block->flags, LOOM_BLOCK_FLAG_LEADING_BLANK_LINE)) {
+        IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '\n'));
+      }
       IREE_RETURN_IF_ERROR(loom_print_block_label_line(ctx, region, block));
+      printed_any = true;
     }
 
-    bool printed_any = false;
     const loom_op_t* current_op = NULL;
     loom_block_for_each_op(block, current_op) {
       if (printed_any) {
-        const loom_op_vtable_t* current_vtable =
-            loom_op_vtable(ctx->module, current_op);
-        if (current_vtable &&
-            (current_vtable->traits & LOOM_TRAIT_SYMBOL_DEFINE)) {
+        if (iree_any_bit_set(current_op->flags,
+                             LOOM_OP_FLAG_LEADING_BLANK_LINE)) {
           IREE_RETURN_IF_ERROR(
               loom_output_stream_write_char(ctx->stream, '\n'));
+        } else {
+          const loom_op_vtable_t* current_vtable =
+              loom_op_vtable(ctx->module, current_op);
+          if (current_vtable &&
+              (current_vtable->traits & LOOM_TRAIT_SYMBOL_DEFINE)) {
+            IREE_RETURN_IF_ERROR(
+                loom_output_stream_write_char(ctx->stream, '\n'));
+          }
         }
       }
       printed_any = true;

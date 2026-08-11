@@ -12,8 +12,9 @@ Reads Op declarations from the Python DSL and emits C op metadata per dialect:
   builders.c — builder implementations (macros for common, explicit for complex)
   tables.c   — .rodata: B-string names, format arrays, descriptors, vtables
 
-Public generated headers are checked into the repository for code archaeology
-and editor/search ergonomics. Bulky generated C table sources are build outputs.
+Public generated headers and compact IR lookup fragments are checked into the
+repository for code archaeology and editor/search ergonomics. Bulky generated
+C table sources and their private headers are build outputs.
 
 Usage:
     python3 loom/py/loom/gen/run.py c_tables --check
@@ -56,8 +57,15 @@ from loom.gen.ops.type_registry import (
     generate_type_registry,
 )
 from loom.gen.support.files import write_text_file as _write_file
+from loom.gen.support.generated_file import (
+    GeneratedFileMaintenanceMode,
+    GeneratedFileMaintenanceResult,
+    GeneratedFileSet,
+    maintain_generated_file_set,
+)
 
 __all__ = [
+    "checked_in_file_set",
     "generate_location_tag_table_inc",
     "generate_ops_h",
     "generate_sharded_tables_c",
@@ -68,7 +76,11 @@ __all__ = [
     "generate_dialect_type_registry",
     "generate_type_registry",
     "main",
+    "maintain_checked_in_files",
 ]
+
+DESCRIPTION = "C op table artifacts"
+REGENERATE_COMMAND = "python3 loom/py/loom/gen/run.py c_tables --in-place"
 
 
 # ============================================================================
@@ -120,79 +132,55 @@ def _generate_registry_contents(model: GenerationModel) -> dict[str, str]:
     }
 
 
-def _checked_in_output_contents(model: GenerationModel) -> dict[Path, str]:
-    output_root = _bootstrap.REPO_ROOT / "loom" / "src" / "loom"
-    outputs: dict[Path, str] = {}
+def checked_in_file_set(model: GenerationModel | None = None) -> GeneratedFileSet:
+    """Returns the complete checked-in C table artifact ownership set."""
+    if model is None:
+        model = load_generation_model()
+
+    output_root = Path("loom/src/loom")
+    checked_in_outputs: dict[str, str] = {}
+    build_output_paths: list[str] = []
     for generation in model.dialects:
         dialect_dir = output_root / _c_dialect_path(generation.dialect)
-        contents = c_dialect.generate_dialect_contents(generation)
-        outputs[dialect_dir / "ops.h"] = contents["ops.h"]
-        if "types.h" in contents:
-            outputs[dialect_dir / "types.h"] = contents["types.h"]
-        if "tables.h" in contents:
-            outputs[dialect_dir / "tables.h"] = contents["tables.h"]
+        for filename, contents in c_dialect.generate_dialect_contents(generation).items():
+            path = (dialect_dir / filename).as_posix()
+            if filename in ("ops.h", "types.h", "tables.h"):
+                checked_in_outputs[path] = contents
+            else:
+                build_output_paths.append(path)
 
-    registry_contents = _generate_registry_contents(model)
     registry_dir = output_root / "ops"
-    for filename in (
-        "op_registry.h",
-        "type_registry.h",
-        "keyword_enum.inc",
-        "keyword_table.inc",
-    ):
-        outputs[registry_dir / filename] = registry_contents[filename]
-    outputs[output_root / "ir" / "scalar_type_table.inc"] = generate_scalar_type_table_inc()
-    outputs[output_root / "ir" / "location_tag_table.inc"] = generate_location_tag_table_inc()
-    return outputs
+    for filename, contents in _generate_registry_contents(model).items():
+        path = (registry_dir / filename).as_posix()
+        if filename in (
+            "op_registry.h",
+            "type_registry.h",
+            "keyword_enum.inc",
+            "keyword_table.inc",
+        ):
+            checked_in_outputs[path] = contents
+        else:
+            build_output_paths.append(path)
 
-
-def _build_generated_output_paths(model: GenerationModel) -> list[Path]:
-    output_root = _bootstrap.REPO_ROOT / "loom" / "src" / "loom"
-    paths: list[Path] = []
-    for generation in model.dialects:
-        dialect_dir = output_root / _c_dialect_path(generation.dialect)
-        contents = c_dialect.generate_dialect_contents(generation)
-        paths.extend(dialect_dir / filename for filename in contents if filename.endswith(".c"))
-    registry_dir = output_root / "ops"
-    paths.extend(
-        [
-            registry_dir / "op_registry_tables.c",
-            registry_dir / "op_registry_tables.h",
-            registry_dir / "type_registry_tables.c",
-            registry_dir / "type_registry_tables.h",
-        ]
+    checked_in_outputs[(output_root / "ir" / "scalar_type_table.inc").as_posix()] = generate_scalar_type_table_inc()
+    checked_in_outputs[(output_root / "ir" / "location_tag_table.inc").as_posix()] = generate_location_tag_table_inc()
+    return GeneratedFileSet.from_mapping(
+        checked_in_outputs,
+        obsolete_paths=build_output_paths,
     )
-    return sorted(paths)
 
 
-def _check_checked_in_outputs(model: GenerationModel) -> int:
-    failures: list[str] = []
-    for path, expected in sorted(_checked_in_output_contents(model).items()):
-        if not path.exists():
-            failures.append(f"{path.relative_to(_bootstrap.REPO_ROOT)}: missing generated file")
-            continue
-        actual = path.read_text(encoding="utf-8")
-        if actual != expected:
-            failures.append(f"{path.relative_to(_bootstrap.REPO_ROOT)}: stale generated file")
-
-    failures.extend(f"{path.relative_to(_bootstrap.REPO_ROOT)}: generated file must be a build output" for path in _build_generated_output_paths(model) if path.exists())
-
-    if failures:
-        print("c table generation check failed:", file=sys.stderr)
-        for failure in failures:
-            print(f"  {failure}", file=sys.stderr)
-        print("regenerate with python3 loom/py/loom/gen/run.py c_tables --in-place", file=sys.stderr)
-        return 1
-
-    print(f"checked {len(_checked_in_output_contents(model))} generated C table headers")
-    return 0
-
-
-def _update_checked_in_outputs(model: GenerationModel) -> int:
-    for path, content in _checked_in_output_contents(model).items():
-        _write_file(path, content)
-    print(f"updated {len(_checked_in_output_contents(model))} generated C table headers")
-    return 0
+def maintain_checked_in_files(
+    mode: GeneratedFileMaintenanceMode,
+) -> GeneratedFileMaintenanceResult:
+    """Checks or updates all checked-in C table artifacts."""
+    return maintain_generated_file_set(
+        _bootstrap.REPO_ROOT,
+        checked_in_file_set(),
+        mode=mode,
+        description=DESCRIPTION,
+        regenerate_command=REGENERATE_COMMAND,
+    )
 
 
 def _set_output(parser: argparse.ArgumentParser, outputs: dict[str, Path], name: str, path: Path | None) -> None:
@@ -255,12 +243,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     mode.add_argument(
         "--check",
         action="store_true",
-        help="Verify checked-in generated headers are current and generated C sources are absent.",
+        help="Verify checked-in generated artifacts are current and build outputs are absent.",
     )
     mode.add_argument(
         "--in-place",
         action="store_true",
-        help="Regenerate checked-in generated headers.",
+        help="Regenerate checked-in generated artifacts.",
     )
     target = parser.add_mutually_exclusive_group()
     target.add_argument("--dialect", help="Generate selected outputs for one dialect.")
@@ -293,16 +281,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     build_output_selected = args.dialect is not None or args.registry
-    header_mode_selected = args.check or args.in_place
-    if build_output_selected and header_mode_selected:
+    maintenance_mode_selected = args.check or args.in_place
+    if build_output_selected and maintenance_mode_selected:
         parser.error("build-output generation cannot be combined with --check or --in-place")
-    if not build_output_selected and not header_mode_selected:
+    if not build_output_selected and not maintenance_mode_selected:
         parser.error("select --check, --in-place, --dialect, or --registry")
 
-    if args.check:
-        return _check_checked_in_outputs(load_generation_model())
-    if args.in_place:
-        return _update_checked_in_outputs(load_generation_model())
+    if maintenance_mode_selected:
+        result = maintain_checked_in_files("update" if args.in_place else "check")
+        return 0 if result.ok else 1
     return _main_build_output_mode(parser, args)
 
 

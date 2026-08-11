@@ -36,6 +36,7 @@ from loom.format.bytecode.writer import (
     LOCATION_MODE_NO_LOCATIONS,
     LOCATION_MODE_SOURCE_LOCATIONS,
     MAGIC,
+    MAX_SOURCE_COMMENT_COUNT,
     SECTION_ENCODINGS,
     SECTION_IR,
     SECTION_LOCATIONS,
@@ -44,12 +45,15 @@ from loom.format.bytecode.writer import (
     SECTION_STRINGS,
     SECTION_SYMBOLS,
     SECTION_TYPES,
+    SOURCE_TRIVIA_COMMENT_COUNT_SHIFT,
+    SOURCE_TRIVIA_LEADING_BLANK_LINE,
 )
 from loom.ir import (
     ATTR_AGGREGATE_MAX_NESTING_DEPTH,
     BUFFER_TYPE,
     ENCODING_TYPE,
     NONE_TYPE,
+    REGION_SOURCE_FLAG_MASK,
     SYMBOL_FLAG_DECLARATION,
     SYMBOL_FLAG_IMPORT,
     SYMBOL_FLAG_PUBLIC,
@@ -795,11 +799,15 @@ class BytecodeReader:
                         )
                     )
 
-    def _read_comment_list(
+    def _read_source_trivia(
         self, data: bytes, offset: int
-    ) -> tuple[tuple[str, ...], int]:
-        """Read a bytecode comment list encoded as raw UTF-8 strings."""
-        count, offset = decode_varint(data, offset)
+    ) -> tuple[bool, tuple[str, ...], int]:
+        """Read a leading-blank bit and raw UTF-8 comment strings."""
+        source_trivia, offset = decode_varint(data, offset)
+        leading_blank_line = (source_trivia & SOURCE_TRIVIA_LEADING_BLANK_LINE) != 0
+        count = source_trivia >> SOURCE_TRIVIA_COMMENT_COUNT_SHIFT
+        if count > MAX_SOURCE_COMMENT_COUNT:
+            raise BytecodeError("comment count exceeds UINT16_MAX")
         comments: list[str] = []
         for _ in range(count):
             length, offset = decode_varint(data, offset)
@@ -808,7 +816,7 @@ class BytecodeReader:
                 raise BytecodeError("comment extends past end of data")
             offset += length
             comments.append(comment_bytes.decode("utf-8"))
-        return tuple(comments), offset
+        return leading_blank_line, tuple(comments), offset
 
     def _map_value_ref(self, value_ref: int, value_map: list[int]) -> int:
         """Translate an available function-local value number to a module value id."""
@@ -984,7 +992,9 @@ class BytecodeReader:
                     )
                 op_name = self._ops[op_table_index]
                 self._validate_symbol_definition_flags(flags, op_name)
-                op_comments, offset = self._read_comment_list(sym_data, offset)
+                op_leading_blank_line, op_comments, offset = self._read_source_trivia(
+                    sym_data, offset
+                )
 
                 cc_byte = sym_data[offset]
                 offset += 1
@@ -1154,6 +1164,7 @@ class BytecodeReader:
                     attributes=op_attrs,
                     regions=regions,
                     comments=op_comments,
+                    leading_blank_line=op_leading_blank_line,
                 )
                 symbol = Symbol(
                     name=name,
@@ -1178,7 +1189,9 @@ class BytecodeReader:
                     )
                 op_name = self._ops[op_table_index]
                 self._validate_symbol_definition_flags(flags, op_name)
-                op_comments, offset = self._read_comment_list(sym_data, offset)
+                op_leading_blank_line, op_comments, offset = self._read_source_trivia(
+                    sym_data, offset
+                )
 
                 result_count, offset = decode_varint(sym_data, offset)
                 if result_count == 0:
@@ -1216,6 +1229,7 @@ class BytecodeReader:
                     results=result_ids,
                     attributes=op_attrs,
                     comments=op_comments,
+                    leading_blank_line=op_leading_blank_line,
                 )
                 symbol = Symbol(
                     name=name,
@@ -1263,7 +1277,9 @@ class BytecodeReader:
             )
         op_name = self._ops[op_table_index]
         self._validate_symbol_definition_flags(flags, op_name)
-        op_comments, offset = self._read_comment_list(sym_data, offset)
+        op_leading_blank_line, op_comments, offset = self._read_source_trivia(
+            sym_data, offset
+        )
 
         attr_count, offset = decode_varint(sym_data, offset)
         op_attrs, offset = self._read_op_attr_entries(
@@ -1299,6 +1315,7 @@ class BytecodeReader:
             attributes=op_attrs,
             regions=record_regions,
             comments=op_comments,
+            leading_blank_line=op_leading_blank_line,
         )
         symbol = Symbol(
             name=name,
@@ -1567,6 +1584,13 @@ class BytecodeReader:
         value_map: list[int],
         predefined_values: list[int] | None,
     ) -> tuple[Region, int]:
+        source_flags, offset = decode_varint(data, offset)
+        if source_flags > 0xFFFF:
+            raise BytecodeError("region source flags exceed UINT16_MAX")
+        if source_flags & ~REGION_SOURCE_FLAG_MASK:
+            raise BytecodeError(
+                f"region has unsupported source flag bits: {source_flags:#x}"
+            )
         block_count, offset = decode_varint(data, offset)
         blocks = [Block() for _ in range(block_count)]
         for block_index, block in enumerate(blocks):
@@ -1579,7 +1603,7 @@ class BytecodeReader:
                 block,
                 blocks,
             )
-        return Region(blocks=blocks), offset
+        return Region(blocks=blocks, source_flags=source_flags), offset
 
     def _read_block(
         self,
@@ -1597,7 +1621,7 @@ class BytecodeReader:
         if has_label:
             label_id, offset = decode_varint(data, offset)
             label = self._strings[label_id]
-        comments, offset = self._read_comment_list(data, offset)
+        leading_blank_line, comments, offset = self._read_source_trivia(data, offset)
 
         # Block args.
         arg_count, offset = decode_varint(data, offset)
@@ -1624,6 +1648,7 @@ class BytecodeReader:
         block.arg_ids = arg_ids
         block.ops = ops
         block.comments = comments
+        block.leading_blank_line = leading_blank_line
         return offset
 
     def _read_operation(
@@ -1642,7 +1667,7 @@ class BytecodeReader:
         location_id, offset = decode_varint(data, offset)
         if self._location_mode == LOCATION_MODE_NO_LOCATIONS and location_id != 0:
             raise BytecodeError("NO_LOCATIONS bytecode op location must be 0")
-        comments, offset = self._read_comment_list(data, offset)
+        leading_blank_line, comments, offset = self._read_source_trivia(data, offset)
 
         kind_id = op_table_index_plus1 - 1
         op_name = self._ops[kind_id] if kind_id < len(self._ops) else ""
@@ -1739,6 +1764,7 @@ class BytecodeReader:
             regions=regions,
             location_id=location_id,
             comments=comments,
+            leading_blank_line=leading_blank_line,
         )
         return op, offset
 

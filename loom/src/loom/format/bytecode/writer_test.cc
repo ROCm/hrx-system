@@ -272,8 +272,10 @@ class WriterTest : public ::testing::Test {
     return value;
   }
 
-  void SkipCommentList(const std::vector<uint8_t>& bytes, size_t* offset) {
-    uint64_t comment_count = ReadUVarint(bytes, offset);
+  void SkipSourceTrivia(const std::vector<uint8_t>& bytes, size_t* offset) {
+    uint64_t source_trivia = ReadUVarint(bytes, offset);
+    uint64_t comment_count =
+        source_trivia >> LOOM_BYTECODE_SOURCE_TRIVIA_COMMENT_COUNT_SHIFT;
     for (uint64_t i = 0; i < comment_count; ++i) {
       uint64_t comment_length = ReadUVarint(bytes, offset);
       *offset += (size_t)comment_length;
@@ -725,6 +727,19 @@ TEST_F(WriterTest, FunctionSymbolKindUsesDenseWireEnum) {
   loom_module_free(module);
 }
 
+TEST_F(WriterTest, UnsupportedRegionSourceFlagsFailLoudly) {
+  loom_module_t* module = CreateAttrsModule(/*reverse_attr_order=*/false);
+  loom_op_t* func_op = module->symbols.entries[0].defining_op;
+  loom_region_t* body =
+      loom_func_like_body(loom_func_like_cast(module, func_op));
+  ASSERT_NE(body, nullptr);
+  body->source_flags = 1u << 1;
+
+  ExpectWriteModuleStatus(IREE_STATUS_INVALID_ARGUMENT, module);
+
+  loom_module_free(module);
+}
+
 TEST_F(WriterTest, FunctionBodySummaryAndOpTableRefsUseNewWireShape) {
   loom_module_t* module = CreateModule("test");
 
@@ -754,14 +769,22 @@ TEST_F(WriterTest, FunctionBodySummaryAndOpTableRefsUseNewWireShape) {
       loom_func_like_arg_ids(func_like, &arg_count);
   ASSERT_EQ(arg_count, 2);
 
+  loom_block_t* entry_block =
+      loom_region_entry_block(loom_func_like_body(func_like));
   loom_builder_t body_builder;
-  loom_builder_initialize(
-      module, &module->arena,
-      loom_region_entry_block(loom_func_like_body(func_like)), &body_builder);
+  loom_builder_initialize(module, &module->arena, entry_block, &body_builder);
   loom_op_t* addi_op = nullptr;
   IREE_ASSERT_OK(loom_test_addi_build(&body_builder, arg_ids[0], arg_ids[1],
                                       i32_type, LOOM_LOCATION_UNKNOWN,
                                       &addi_op));
+  entry_block->flags |= LOOM_BLOCK_FLAG_LEADING_BLANK_LINE;
+  addi_op->flags |= LOOM_OP_FLAG_LEADING_BLANK_LINE;
+  const iree_string_view_t block_comments[] = {IREE_SV(" block")};
+  const iree_string_view_t op_comments[] = {IREE_SV(" operation")};
+  IREE_ASSERT_OK(loom_module_attach_block_comments(
+      module, entry_block, block_comments, IREE_ARRAYSIZE(block_comments)));
+  IREE_ASSERT_OK(loom_module_attach_op_comments(module, addi_op, op_comments,
+                                                IREE_ARRAYSIZE(op_comments)));
 
   auto bytes = WriteModule(module);
   size_t dir_offset = 24;
@@ -795,15 +818,24 @@ TEST_F(WriterTest, FunctionBodySummaryAndOpTableRefsUseNewWireShape) {
   uint64_t root_region_index = 0;
   IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_region_index));
   ASSERT_EQ(root_region_index, 0u);
+  uint64_t root_source_flags = 0;
+  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_source_flags));
+  ASSERT_EQ(root_source_flags, 0u);
   uint64_t root_block_count = 0;
   IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_block_count));
   ASSERT_EQ(root_block_count, 1u);
   uint8_t has_label = 0;
   IREE_ASSERT_OK(loom_bytecode_cursor_read_u8(&cursor, &has_label));
   ASSERT_EQ(has_label, 0u);
-  uint64_t block_comment_count = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &block_comment_count));
-  ASSERT_EQ(block_comment_count, 0u);
+  uint64_t block_source_trivia = 0;
+  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &block_source_trivia));
+  ASSERT_EQ(block_source_trivia, 3u);
+  uint64_t block_comment_length = 0;
+  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &block_comment_length));
+  ASSERT_EQ(block_comment_length, block_comments[0].size);
+  iree_const_byte_span_t unused_comment = iree_const_byte_span_empty();
+  IREE_ASSERT_OK(loom_bytecode_cursor_read_span(
+      &cursor, (iree_host_size_t)block_comment_length, &unused_comment));
   uint64_t block_arg_count = 0;
   IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &block_arg_count));
   ASSERT_EQ(block_arg_count, 2u);
@@ -822,6 +854,18 @@ TEST_F(WriterTest, FunctionBodySummaryAndOpTableRefsUseNewWireShape) {
   uint64_t op_table_index_plus1 = 0;
   IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &op_table_index_plus1));
   EXPECT_GT(op_table_index_plus1, 0u);
+  uint8_t instance_flags = 0;
+  IREE_ASSERT_OK(loom_bytecode_cursor_read_u8(&cursor, &instance_flags));
+  ASSERT_EQ(instance_flags, 0u);
+  uint64_t location_id = 0;
+  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &location_id));
+  ASSERT_EQ(location_id, 0u);
+  uint64_t op_source_trivia = 0;
+  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &op_source_trivia));
+  ASSERT_EQ(op_source_trivia, 3u);
+  uint64_t op_comment_length = 0;
+  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &op_comment_length));
+  ASSERT_EQ(op_comment_length, op_comments[0].size);
 
   loom_module_free(module);
 }
@@ -889,15 +933,18 @@ TEST_F(WriterTest, FunctionBodySuccessorsUseRegionBlockOrdinals) {
   uint64_t root_region_index = 0;
   IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_region_index));
   ASSERT_EQ(root_region_index, 0u);
+  uint64_t root_source_flags = 0;
+  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_source_flags));
+  ASSERT_EQ(root_source_flags, 0u);
   uint64_t root_block_count = 0;
   IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_block_count));
   ASSERT_EQ(root_block_count, 2u);
   uint8_t has_label = 0;
   IREE_ASSERT_OK(loom_bytecode_cursor_read_u8(&cursor, &has_label));
   ASSERT_EQ(has_label, 0u);
-  uint64_t block_comment_count = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &block_comment_count));
-  ASSERT_EQ(block_comment_count, 0u);
+  uint64_t block_source_trivia = 0;
+  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &block_source_trivia));
+  ASSERT_EQ(block_source_trivia, 0u);
   uint64_t block_arg_count = 0;
   IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &block_arg_count));
   ASSERT_EQ(block_arg_count, 0u);
@@ -911,9 +958,9 @@ TEST_F(WriterTest, FunctionBodySuccessorsUseRegionBlockOrdinals) {
   IREE_ASSERT_OK(loom_bytecode_cursor_read_u8(&cursor, &flags));
   EXPECT_EQ(flags, 0u);
   IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &unused));  // location_id
-  uint64_t op_comment_count = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &op_comment_count));
-  ASSERT_EQ(op_comment_count, 0u);
+  uint64_t op_source_trivia = 0;
+  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &op_source_trivia));
+  ASSERT_EQ(op_source_trivia, 0u);
   uint64_t operand_count = 0;
   IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &operand_count));
   ASSERT_EQ(operand_count, 0u);
@@ -1259,7 +1306,7 @@ TEST_F(WriterTest, GlobalSymbolWritesDefiningOpPayload) {
   offset += 1;                 // visibility
   offset += sizeof(uint16_t);  // flags
   EXPECT_NE(ReadUVarint(bytes, &offset), 0u);
-  SkipCommentList(bytes, &offset);
+  SkipSourceTrivia(bytes, &offset);
   EXPECT_EQ(ReadUVarint(bytes, &offset), 1u);
   EXPECT_EQ(ReadUVarint(bytes, &offset), 1u);
   SkipValueDef(bytes, &offset);
@@ -1323,7 +1370,7 @@ TEST_F(WriterTest, GlobalSymbolWritesDeclarationLocalValues) {
   offset += 1;                 // visibility
   offset += sizeof(uint16_t);  // flags
   EXPECT_NE(ReadUVarint(bytes, &offset), 0u);
-  SkipCommentList(bytes, &offset);
+  SkipSourceTrivia(bytes, &offset);
   EXPECT_EQ(ReadUVarint(bytes, &offset), 1u);
   EXPECT_EQ(ReadUVarint(bytes, &offset), 2u);
   SkipValueDef(bytes, &offset);  // Global value.

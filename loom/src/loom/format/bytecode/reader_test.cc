@@ -1320,8 +1320,10 @@ class ReaderTest : public ::testing::Test {
     return value_def;
   }
 
-  void SkipCommentList(const std::vector<uint8_t>& bytes, size_t* offset) {
-    uint64_t comment_count = ReadUVarint(bytes, offset);
+  void SkipSourceTrivia(const std::vector<uint8_t>& bytes, size_t* offset) {
+    uint64_t source_trivia = ReadUVarint(bytes, offset);
+    uint64_t comment_count =
+        source_trivia >> LOOM_BYTECODE_SOURCE_TRIVIA_COMMENT_COUNT_SHIFT;
     for (uint64_t i = 0; i < comment_count; ++i) {
       uint64_t comment_length = ReadUVarint(bytes, offset);
       *offset += (size_t)comment_length;
@@ -1421,7 +1423,7 @@ class ReaderTest : public ::testing::Test {
       }
       EXPECT_LE(kind, LOOM_BYTECODE_SYMBOL_FUNC_UKERNEL);
       ReadUVarint(bytes, &offset);  // def_op_table_index_plus1
-      SkipCommentList(bytes, &offset);
+      SkipSourceTrivia(bytes, &offset);
       offset += 1;  // calling_convention
       offset += 1;  // purity
       uint64_t workload_arg_count = ReadUVarint(bytes, &offset);
@@ -1570,8 +1572,7 @@ class ReaderTest : public ::testing::Test {
     return (size_t)ModuleOffset(bytes) + (size_t)entry.offset;
   }
 
-  size_t RootBlockValueListOffset(const std::vector<uint8_t>& bytes,
-                                  uint64_t* out_arg_count) {
+  size_t RootRegionSourceFlagsOffset(const std::vector<uint8_t>& bytes) {
     size_t offset = SectionPayloadOffset(bytes, LOOM_BYTECODE_SECTION_IR);
     ReadUVarint(bytes, &offset);  // value_count
     ReadUVarint(bytes, &offset);  // region_count
@@ -1581,13 +1582,32 @@ class ReaderTest : public ::testing::Test {
     EXPECT_GE(root_region_count, 1u);
     uint64_t root_region_index = ReadUVarint(bytes, &offset);
     EXPECT_EQ(root_region_index, 0u);
+    return offset;
+  }
+
+  size_t RootBlockSourceTriviaOffset(const std::vector<uint8_t>& bytes) {
+    size_t offset = RootRegionSourceFlagsOffset(bytes);
+    ReadUVarint(bytes, &offset);                 // region source_flags
+    EXPECT_GE(ReadUVarint(bytes, &offset), 1u);  // block_count
+    uint8_t has_label = bytes[offset++];
+    if (has_label) {
+      ReadUVarint(bytes, &offset);
+    }
+    return offset;
+  }
+
+  size_t RootBlockValueListOffset(const std::vector<uint8_t>& bytes,
+                                  uint64_t* out_arg_count) {
+    size_t offset = RootRegionSourceFlagsOffset(bytes);
+    uint64_t root_source_flags = ReadUVarint(bytes, &offset);
+    EXPECT_EQ(root_source_flags, 0u);
     uint64_t root_block_count = ReadUVarint(bytes, &offset);
     EXPECT_GE(root_block_count, 1u);
     uint8_t has_label = bytes[offset++];
     if (has_label) {
       ReadUVarint(bytes, &offset);
     }
-    SkipCommentList(bytes, &offset);
+    SkipSourceTrivia(bytes, &offset);
     *out_arg_count = ReadUVarint(bytes, &offset);
     return offset;
   }
@@ -1615,7 +1635,7 @@ class ReaderTest : public ::testing::Test {
     ReadUVarint(bytes, &offset);  // op_table_index_plus1
     ++offset;                     // flags
     ReadUVarint(bytes, &offset);  // location_id
-    SkipCommentList(bytes, &offset);
+    SkipSourceTrivia(bytes, &offset);
     uint64_t operand_count = ReadUVarint(bytes, &offset);
     EXPECT_GE(operand_count, 1u);
     return offset;
@@ -1633,7 +1653,7 @@ class ReaderTest : public ::testing::Test {
     ReadUVarint(bytes, &offset);  // op_table_index_plus1
     ++offset;                     // flags
     ReadUVarint(bytes, &offset);  // location_id
-    SkipCommentList(bytes, &offset);
+    SkipSourceTrivia(bytes, &offset);
     uint64_t operand_count = ReadUVarint(bytes, &offset);
     for (uint64_t i = 0; i < operand_count; ++i) {
       ReadUVarint(bytes, &offset);
@@ -1655,7 +1675,7 @@ class ReaderTest : public ::testing::Test {
     ReadUVarint(bytes, &offset);  // op_table_index_plus1
     ++offset;                     // flags
     ReadUVarint(bytes, &offset);  // location_id
-    SkipCommentList(bytes, &offset);
+    SkipSourceTrivia(bytes, &offset);
     uint64_t operand_count = ReadUVarint(bytes, &offset);
     for (uint64_t i = 0; i < operand_count; ++i) {
       ReadUVarint(bytes, &offset);
@@ -1685,7 +1705,7 @@ class ReaderTest : public ::testing::Test {
     ReadUVarint(bytes, &offset);  // op_table_index_plus1
     ++offset;                     // flags
     ReadUVarint(bytes, &offset);  // location_id
-    SkipCommentList(bytes, &offset);
+    SkipSourceTrivia(bytes, &offset);
     uint64_t operand_count = ReadUVarint(bytes, &offset);
     for (uint64_t i = 0; i < operand_count; ++i) {
       ReadUVarint(bytes, &offset);
@@ -1760,7 +1780,7 @@ class ReaderTest : public ::testing::Test {
     GlobalPayloadOffsets payload_offsets;
     payload_offsets.op_table_index_plus1 = offset;
     ReadUVarint(bytes, &offset);
-    SkipCommentList(bytes, &offset);
+    SkipSourceTrivia(bytes, &offset);
     payload_offsets.result_count = offset;
     ReadUVarint(bytes, &offset);
     payload_offsets.local_value_count = offset;
@@ -1770,13 +1790,14 @@ class ReaderTest : public ::testing::Test {
   size_t LastOpRegionCountOffsetInRegion(const std::vector<uint8_t>& bytes,
                                          size_t* offset) {
     size_t last_region_count_offset = 0;
+    ReadUVarint(bytes, offset);  // source_flags
     uint64_t block_count = ReadUVarint(bytes, offset);
     for (uint64_t block_index = 0; block_index < block_count; ++block_index) {
       uint8_t has_label = bytes[(*offset)++];
       if (has_label) {
         ReadUVarint(bytes, offset);
       }
-      SkipCommentList(bytes, offset);
+      SkipSourceTrivia(bytes, offset);
       uint64_t arg_count = ReadUVarint(bytes, offset);
       for (uint64_t arg_index = 0; arg_index < arg_count; ++arg_index) {
         ReadValueDefOffsets(bytes, offset);
@@ -1786,7 +1807,7 @@ class ReaderTest : public ::testing::Test {
         ReadUVarint(bytes, offset);  // op_table_index_plus1
         *offset += 1;                // flags
         ReadUVarint(bytes, offset);  // location_id
-        SkipCommentList(bytes, offset);
+        SkipSourceTrivia(bytes, offset);
         uint64_t operand_count = ReadUVarint(bytes, offset);
         for (uint64_t i = 0; i < operand_count; ++i) {
           ReadUVarint(bytes, offset);
@@ -1914,6 +1935,95 @@ TEST_F(ReaderTest, AcceptsFunctionMetadata) {
   EXPECT_GT(result.first_module.type_count, 0u);
   EXPECT_GT(result.first_module.op_name_count, 0u);
 
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, PreservesRegionSourceFlags) {
+  loom_module_t* module = CreateFunctionModule();
+  loom_op_t* func_op = module->symbols.entries[0].defining_op;
+  loom_region_t* body =
+      loom_func_like_body(loom_func_like_cast(module, func_op));
+  ASSERT_NE(body, nullptr);
+  body->source_flags = LOOM_REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM;
+  auto bytes = WriteModule(module);
+
+  loom_module_t* read_module = nullptr;
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result =
+      ReadModule(bytes, &read_module, &error_ids);
+  EXPECT_EQ(result.error_count, 0u);
+  EXPECT_TRUE(error_ids.empty());
+  ASSERT_NE(read_module, nullptr);
+  ASSERT_EQ(read_module->symbols.count, 1u);
+  loom_op_t* read_func_op = read_module->symbols.entries[0].defining_op;
+  loom_region_t* read_body =
+      loom_func_like_body(loom_func_like_cast(read_module, read_func_op));
+  ASSERT_NE(read_body, nullptr);
+  EXPECT_EQ(read_body->source_flags, LOOM_REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM);
+
+  loom_module_free(read_module);
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, PreservesSourceTrivia) {
+  loom_module_t* module = CreateFunctionModule();
+  loom_op_t* func_op = module->symbols.entries[0].defining_op;
+  loom_region_t* body =
+      loom_func_like_body(loom_func_like_cast(module, func_op));
+  ASSERT_NE(body, nullptr);
+  loom_block_t* entry_block = loom_region_entry_block(body);
+  ASSERT_NE(entry_block->first_op, nullptr);
+
+  func_op->flags |= LOOM_OP_FLAG_LEADING_BLANK_LINE;
+  entry_block->flags |= LOOM_BLOCK_FLAG_LEADING_BLANK_LINE;
+  entry_block->first_op->flags |= LOOM_OP_FLAG_LEADING_BLANK_LINE;
+  const iree_string_view_t symbol_comments[] = {IREE_SV(" symbol")};
+  const iree_string_view_t block_comments[] = {IREE_SV(" block")};
+  const iree_string_view_t op_comments[] = {IREE_SV(" operation")};
+  IREE_ASSERT_OK(loom_module_attach_op_comments(
+      module, func_op, symbol_comments, IREE_ARRAYSIZE(symbol_comments)));
+  IREE_ASSERT_OK(loom_module_attach_block_comments(
+      module, entry_block, block_comments, IREE_ARRAYSIZE(block_comments)));
+  IREE_ASSERT_OK(loom_module_attach_op_comments(
+      module, entry_block->first_op, op_comments, IREE_ARRAYSIZE(op_comments)));
+
+  auto bytes = WriteModule(module);
+  loom_module_t* read_module = nullptr;
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result =
+      ReadModule(bytes, &read_module, &error_ids);
+  EXPECT_EQ(result.error_count, 0u);
+  EXPECT_TRUE(error_ids.empty());
+  ASSERT_NE(read_module, nullptr);
+
+  loom_op_t* read_func_op = read_module->symbols.entries[0].defining_op;
+  loom_region_t* read_body =
+      loom_func_like_body(loom_func_like_cast(read_module, read_func_op));
+  ASSERT_NE(read_body, nullptr);
+  loom_block_t* read_entry_block = loom_region_entry_block(read_body);
+  ASSERT_NE(read_entry_block->first_op, nullptr);
+  EXPECT_TRUE(
+      iree_any_bit_set(read_func_op->flags, LOOM_OP_FLAG_LEADING_BLANK_LINE));
+  EXPECT_TRUE(iree_any_bit_set(read_entry_block->flags,
+                               LOOM_BLOCK_FLAG_LEADING_BLANK_LINE));
+  EXPECT_TRUE(iree_any_bit_set(read_entry_block->first_op->flags,
+                               LOOM_OP_FLAG_LEADING_BLANK_LINE));
+
+  iree_host_size_t comment_count = 0;
+  const iree_string_view_t* comments =
+      loom_module_op_comments(read_module, read_func_op, &comment_count);
+  ASSERT_EQ(comment_count, 1u);
+  EXPECT_TRUE(iree_string_view_equal(comments[0], symbol_comments[0]));
+  comments =
+      loom_module_block_comments(read_module, read_entry_block, &comment_count);
+  ASSERT_EQ(comment_count, 1u);
+  EXPECT_TRUE(iree_string_view_equal(comments[0], block_comments[0]));
+  comments = loom_module_op_comments(read_module, read_entry_block->first_op,
+                                     &comment_count);
+  ASSERT_EQ(comment_count, 1u);
+  EXPECT_TRUE(iree_string_view_equal(comments[0], op_comments[0]));
+
+  loom_module_free(read_module);
   loom_module_free(module);
 }
 
@@ -2961,6 +3071,41 @@ TEST_F(ReaderTest, RejectsInvalidBodyValueReference) {
   bytes[operand_offset] = 0x7F;
 
   ExpectReadModuleError(bytes, "ERR_BYTECODE_016");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsUnsupportedRegionSourceFlags) {
+  loom_module_t* module = CreateFunctionModule();
+  auto bytes = WriteModule(module);
+  size_t source_flags_offset = RootRegionSourceFlagsOffset(bytes);
+  ASSERT_EQ(bytes[source_flags_offset], 0u);
+  bytes[source_flags_offset] = 1u << 1;
+
+  ExpectReadModuleError(bytes, "ERR_BYTECODE_016");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsSourceTriviaCommentCountBeyondFieldWidth) {
+  loom_module_t* module = CreateFunctionModule();
+  loom_op_t* func_op = module->symbols.entries[0].defining_op;
+  loom_region_t* body =
+      loom_func_like_body(loom_func_like_cast(module, func_op));
+  const iree_string_view_t block_comments[] = {IREE_SV("x")};
+  IREE_ASSERT_OK(loom_module_attach_block_comments(
+      module, loom_region_entry_block(body), block_comments,
+      IREE_ARRAYSIZE(block_comments)));
+  auto bytes = WriteModule(module);
+  size_t source_trivia_offset = RootBlockSourceTriviaOffset(bytes);
+  ASSERT_EQ(bytes[source_trivia_offset], 2u);
+  ASSERT_EQ(bytes[source_trivia_offset + 1], 1u);
+  ASSERT_EQ(bytes[source_trivia_offset + 2], 'x');
+  bytes[source_trivia_offset] = 0x80;
+  bytes[source_trivia_offset + 1] = 0x80;
+  bytes[source_trivia_offset + 2] = 0x08;
+
+  ExpectReadModuleError(bytes, "ERR_BYTECODE_006");
 
   loom_module_free(module);
 }

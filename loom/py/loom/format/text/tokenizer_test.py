@@ -335,20 +335,43 @@ class TestComments:
 
     def test_comment_collected(self) -> None:
         tokenizer = Tokenizer("// hello\n%x")
-        tokenizer.next()  # consume %x
-        # Comments were already collected during scanning.
-        # Need to call collect before consuming %x.
-        # Let me re-test with proper ordering.
-        tokenizer2 = Tokenizer("// hello\n%x")
-        tokenizer2.peek()  # triggers scan, collects comment
-        comments = tokenizer2.collect_pending_comments()
+        tokenizer.peek()
+        comments, leading_blank_line = tokenizer.take_pending_source_trivia()
         assert comments == [" hello"]
+        assert not leading_blank_line
 
     def test_multiple_comments(self) -> None:
         tokenizer = Tokenizer("// first\n// second\n%x")
         tokenizer.peek()
-        comments = tokenizer.collect_pending_comments()
+        comments, leading_blank_line = tokenizer.take_pending_source_trivia()
         assert comments == [" first", " second"]
+        assert not leading_blank_line
+
+    def test_leading_blank_line_before_comments_or_token(self) -> None:
+        tokenizer = Tokenizer("\n0\n1\n\n// grouped\n2\n\n\n3")
+
+        assert tokenizer.next().text == "0"
+        comments, leading_blank_line = tokenizer.take_pending_source_trivia()
+        assert comments == []
+        assert not leading_blank_line
+
+        assert tokenizer.peek_n(0).text == "1"
+        assert tokenizer.next().text == "1"
+        comments, leading_blank_line = tokenizer.take_pending_source_trivia()
+        assert comments == []
+        assert not leading_blank_line
+
+        assert tokenizer.peek_n(0).text == "2"
+        assert tokenizer.peek().text == "2"
+        comments, leading_blank_line = tokenizer.take_pending_source_trivia()
+        assert comments == [" grouped"]
+        assert leading_blank_line
+
+        assert tokenizer.next().text == "2"
+        assert tokenizer.peek().text == "3"
+        comments, leading_blank_line = tokenizer.take_pending_source_trivia()
+        assert comments == []
+        assert leading_blank_line
 
     def test_inline_comment(self) -> None:
         tokens = _tokens("%x // comment\n%y")

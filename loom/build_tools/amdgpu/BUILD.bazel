@@ -6,7 +6,25 @@
 #
 # bazel-to-cmake: skip
 
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+
 package(
     default_visibility = ["//visibility:public"],
     licenses = ["notice"],
+)
+
+py_library(
+    name = "target_config",
+    srcs = ["target_config.py"],
+    data = ["//build_tools/amdgpu:target_map.py"],
+    deps = [
+        "//loom/py/loom/gen/support",
+        "//loom/py/loom/target/arch/amdgpu:target_info",
+    ],
+)
+
+py_test(
+    name = "target_config_test",
+    srcs = ["target_config_test.py"],
+    deps = [":target_config"],
 )

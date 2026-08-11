@@ -105,4 +105,5 @@ check.case public @top2_routing_expert_gather_tie_case {
 }
 
 check.benchmark<@top2_routing_expert_gather_ordered_case> @top2_routing_expert_gather_ordered_smoke
+
 check.benchmark<@top2_routing_expert_gather_tie_case> @top2_routing_expert_gather_tie_smoke

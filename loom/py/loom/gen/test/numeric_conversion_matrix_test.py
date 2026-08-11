@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from fractions import Fraction
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 
@@ -102,3 +104,48 @@ def test_fp8_decode_comparison_ignores_only_nan_sign(row, bit_count: int) -> Non
 )
 def test_fp8_matrix_checked_in_sources_are_current(path_name: str, generated) -> None:
     assert (_CORPUS_ROOT / path_name).read_text(encoding="utf-8") == generated()
+
+
+def test_checked_in_file_set_owns_only_corpus_witnesses() -> None:
+    generated_file_set = numeric_conversion_matrix.checked_in_file_set()
+
+    assert generated_file_set.output_paths == (
+        "loom/src/loom/test/corpus/encoding/fp8_bidirectional_decode_e4m3.loom",
+        "loom/src/loom/test/corpus/encoding/fp8_bidirectional_decode_e5m2.loom",
+        "loom/src/loom/test/corpus/encoding/fp8_bidirectional_encode_e4m3.loom",
+        "loom/src/loom/test/corpus/encoding/fp8_bidirectional_encode_e5m2.loom",
+    )
+    assert generated_file_set.obsolete_paths == ()
+
+
+def test_main_requires_an_explicit_mode_or_build_output() -> None:
+    with pytest.raises(SystemExit, match="2"):
+        numeric_conversion_matrix.main([])
+
+
+def test_main_selects_checked_in_maintenance_modes() -> None:
+    with mock.patch.object(
+        numeric_conversion_matrix,
+        "maintain_checked_in_files",
+        return_value=SimpleNamespace(ok=True),
+    ) as maintain_checked_in_files:
+        assert numeric_conversion_matrix.main(["--check"]) == 0
+        assert numeric_conversion_matrix.main(["--in-place"]) == 0
+
+    assert maintain_checked_in_files.call_args_list == [
+        mock.call("check"),
+        mock.call("update"),
+    ]
+
+
+def test_main_rejects_mixed_maintenance_and_build_outputs(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit, match="2"):
+        numeric_conversion_matrix.main(["--in-place", "--encode-e4m3-output", str(tmp_path / "encode.loom")])
+
+
+def test_main_writes_explicit_build_output(tmp_path: Path) -> None:
+    output_path = tmp_path / "generated/fp8_decode_e5m2.loom"
+
+    assert numeric_conversion_matrix.main(["--decode-e5m2-output", str(output_path)]) == 0
+
+    assert output_path.read_text(encoding="utf-8") == (numeric_conversion_matrix.emit_fp8_decode_matrix("e5m2"))
