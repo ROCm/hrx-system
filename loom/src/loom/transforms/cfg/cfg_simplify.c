@@ -1216,11 +1216,70 @@ static iree_status_t loom_cfg_simplify_fuse_single_predecessor_blocks(
 #define LOOM_CFG_SIMPLIFY_ALPHA_EQUIV_MAX_OPS 8
 #define LOOM_CFG_SIMPLIFY_ALPHA_EQUIV_MAX_VALUES 32
 
+typedef struct loom_cfg_simplify_block_hash_entry_t {
+  // Structural fingerprint used to reject non-equivalent blocks cheaply.
+  uint32_t fingerprint;
+  // Dense graph block index, or zero when the entry is empty.
+  uint16_t block_index;
+} loom_cfg_simplify_block_hash_entry_t;
+
+static_assert(sizeof(loom_cfg_simplify_block_hash_entry_t) == 8,
+              "block hash entries must remain compact");
+
+typedef struct loom_cfg_simplify_block_hash_table_t {
+  // Open-addressed entries with capacity slots.
+  loom_cfg_simplify_block_hash_entry_t* entries;
+  // Power-of-two entry capacity.
+  iree_host_size_t capacity;
+} loom_cfg_simplify_block_hash_table_t;
+
 typedef struct loom_cfg_simplify_value_map_t {
   loom_value_id_t source_values[LOOM_CFG_SIMPLIFY_ALPHA_EQUIV_MAX_VALUES];
   loom_value_id_t target_values[LOOM_CFG_SIMPLIFY_ALPHA_EQUIV_MAX_VALUES];
   iree_host_size_t count;
 } loom_cfg_simplify_value_map_t;
+
+typedef struct loom_cfg_simplify_local_values_t {
+  // Block-local values in argument/result definition order.
+  loom_value_id_t values[LOOM_CFG_SIMPLIFY_ALPHA_EQUIV_MAX_VALUES];
+  // Number of block-local values recorded in values.
+  iree_host_size_t count;
+} loom_cfg_simplify_local_values_t;
+
+// Extends an FNV-1a fingerprint with one byte span.
+static uint32_t loom_cfg_simplify_hash_bytes(const void* data,
+                                             iree_host_size_t length,
+                                             uint32_t fingerprint) {
+  const uint8_t* bytes = (const uint8_t*)data;
+  for (iree_host_size_t i = 0; i < length; ++i) {
+    fingerprint ^= bytes[i];
+    fingerprint *= 16777619u;
+  }
+  return fingerprint;
+}
+
+static uint32_t loom_cfg_simplify_hash_u32(uint32_t value,
+                                           uint32_t fingerprint) {
+  return loom_cfg_simplify_hash_bytes(&value, sizeof(value), fingerprint);
+}
+
+static iree_status_t loom_cfg_simplify_block_hash_table_initialize(
+    iree_arena_allocator_t* arena, iree_host_size_t block_count,
+    loom_cfg_simplify_block_hash_table_t* table) {
+  iree_host_size_t minimum_capacity =
+      iree_max((block_count * 4 + 2) / 3, (iree_host_size_t)2);
+  table->capacity = iree_host_size_next_power_of_two(minimum_capacity);
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, table->capacity,
+                                                 sizeof(*table->entries),
+                                                 (void**)&table->entries));
+  memset(table->entries, 0, table->capacity * sizeof(*table->entries));
+  return iree_ok_status();
+}
+
+static void loom_cfg_simplify_block_hash_table_reset(
+    loom_cfg_simplify_block_hash_table_t* table) {
+  memset(table->entries, 0, table->capacity * sizeof(*table->entries));
+}
 
 static bool loom_cfg_simplify_is_mergeable_terminal_block(
     const loom_cfg_simplify_state_t* state, const loom_cfg_graph_t* graph,
@@ -1268,9 +1327,28 @@ static bool loom_cfg_simplify_terminal_ops_equal(const loom_op_t* lhs,
   return true;
 }
 
+static uint32_t loom_cfg_simplify_terminal_op_fingerprint(const loom_op_t* op) {
+  uint32_t fingerprint = 2166136261u;
+  fingerprint = loom_cfg_simplify_hash_u32(op->kind, fingerprint);
+  fingerprint = loom_cfg_simplify_hash_u32(op->operand_count, fingerprint);
+  fingerprint = loom_cfg_simplify_hash_u32(op->attribute_count, fingerprint);
+  fingerprint = loom_cfg_simplify_hash_u32(op->instance_flags, fingerprint);
+  fingerprint = loom_cfg_simplify_hash_bytes(
+      loom_op_const_operands(op),
+      (iree_host_size_t)op->operand_count * sizeof(loom_value_id_t),
+      fingerprint);
+  const loom_attribute_t* attributes = loom_op_const_attrs(op);
+  for (uint8_t i = 0; i < op->attribute_count; ++i) {
+    uint32_t attribute_hash = loom_attribute_hash(&attributes[i]);
+    fingerprint = loom_cfg_simplify_hash_u32(attribute_hash, fingerprint);
+  }
+  return fingerprint;
+}
+
 static bool loom_cfg_simplify_find_duplicate_terminal_block(
     const loom_cfg_simplify_state_t* state, const loom_cfg_graph_t* graph,
-    uint16_t block_index, loom_block_t** out_canonical_block) {
+    loom_cfg_simplify_block_hash_table_t* table, uint16_t block_index,
+    loom_block_t** out_canonical_block) {
   *out_canonical_block = NULL;
   if (!loom_cfg_simplify_is_mergeable_terminal_block(state, graph,
                                                      block_index)) {
@@ -1278,22 +1356,25 @@ static bool loom_cfg_simplify_find_duplicate_terminal_block(
   }
   const loom_block_t* block = graph->blocks[block_index].block;
   const loom_op_t* terminator = block->first_op;
-  for (uint16_t canonical_index = 1; canonical_index < block_index;
-       ++canonical_index) {
-    if (!loom_cfg_simplify_is_mergeable_terminal_block(state, graph,
-                                                       canonical_index)) {
-      continue;
+  uint32_t fingerprint = loom_cfg_simplify_terminal_op_fingerprint(terminator);
+  iree_host_size_t slot = fingerprint & (table->capacity - 1);
+  while (table->entries[slot].block_index != 0) {
+    const loom_cfg_simplify_block_hash_entry_t* entry = &table->entries[slot];
+    if (!*out_canonical_block && entry->fingerprint == fingerprint) {
+      loom_block_t* canonical_block =
+          (loom_block_t*)graph->blocks[entry->block_index].block;
+      if (loom_cfg_simplify_terminal_ops_equal(canonical_block->first_op,
+                                               terminator)) {
+        *out_canonical_block = canonical_block;
+      }
     }
-    loom_block_t* canonical_block =
-        (loom_block_t*)graph->blocks[canonical_index].block;
-    if (!loom_cfg_simplify_terminal_ops_equal(canonical_block->first_op,
-                                              terminator)) {
-      continue;
-    }
-    *out_canonical_block = canonical_block;
-    return true;
+    slot = (slot + 1) & (table->capacity - 1);
   }
-  return false;
+  table->entries[slot] = (loom_cfg_simplify_block_hash_entry_t){
+      .fingerprint = fingerprint,
+      .block_index = block_index,
+  };
+  return *out_canonical_block != NULL;
 }
 
 static bool loom_cfg_simplify_value_map_append(
@@ -1535,30 +1616,115 @@ static bool loom_cfg_simplify_blocks_alpha_equivalent(
   return !source_op && !target_op;
 }
 
+static bool loom_cfg_simplify_local_values_append(
+    loom_cfg_simplify_local_values_t* local_values, loom_value_id_t value) {
+  if (value == LOOM_VALUE_ID_INVALID ||
+      local_values->count >= LOOM_CFG_SIMPLIFY_ALPHA_EQUIV_MAX_VALUES) {
+    return false;
+  }
+  local_values->values[local_values->count++] = value;
+  return true;
+}
+
+static uint32_t loom_cfg_simplify_hash_alpha_operand(
+    const loom_cfg_simplify_local_values_t* local_values, loom_value_id_t value,
+    uint32_t fingerprint) {
+  for (iree_host_size_t i = 0; i < local_values->count; ++i) {
+    if (local_values->values[i] != value) continue;
+    fingerprint = loom_cfg_simplify_hash_u32(0, fingerprint);
+    return loom_cfg_simplify_hash_u32((uint32_t)i, fingerprint);
+  }
+  fingerprint = loom_cfg_simplify_hash_u32(1, fingerprint);
+  return loom_cfg_simplify_hash_u32(value, fingerprint);
+}
+
+// Computes an alpha-invariant fingerprint for cheap candidate rejection.
+// Types are intentionally omitted because their dynamic fields may reference
+// block-local SSA values. Exact comparison checks every type after remapping.
+static bool loom_cfg_simplify_alpha_block_fingerprint(
+    const loom_block_t* block, uint32_t* out_fingerprint) {
+  uint32_t fingerprint = 2166136261u;
+  fingerprint = loom_cfg_simplify_hash_u32(block->arg_count, fingerprint);
+  fingerprint = loom_cfg_simplify_hash_u32(block->op_count, fingerprint);
+
+  loom_cfg_simplify_local_values_t local_values = {0};
+  for (uint16_t i = 0; i < block->arg_count; ++i) {
+    if (!loom_cfg_simplify_local_values_append(&local_values,
+                                               loom_block_arg_id(block, i))) {
+      return false;
+    }
+  }
+
+  const loom_op_t* op = NULL;
+  loom_block_for_each_op(block, op) {
+    fingerprint = loom_cfg_simplify_hash_u32(op->kind, fingerprint);
+    fingerprint = loom_cfg_simplify_hash_u32(op->operand_count, fingerprint);
+    fingerprint = loom_cfg_simplify_hash_u32(op->result_count, fingerprint);
+    fingerprint = loom_cfg_simplify_hash_u32(op->successor_count, fingerprint);
+    fingerprint = loom_cfg_simplify_hash_u32(op->attribute_count, fingerprint);
+    fingerprint = loom_cfg_simplify_hash_u32(op->instance_flags, fingerprint);
+
+    const loom_value_id_t* operands = loom_op_const_operands(op);
+    for (uint16_t i = 0; i < op->operand_count; ++i) {
+      fingerprint = loom_cfg_simplify_hash_alpha_operand(
+          &local_values, operands[i], fingerprint);
+    }
+
+    const loom_attribute_t* attributes = loom_op_const_attrs(op);
+    for (uint8_t i = 0; i < op->attribute_count; ++i) {
+      uint32_t attribute_hash = loom_attribute_hash(&attributes[i]);
+      fingerprint = loom_cfg_simplify_hash_u32(attribute_hash, fingerprint);
+    }
+
+    loom_block_t* const* successors = loom_op_const_successors(op);
+    for (uint8_t i = 0; i < op->successor_count; ++i) {
+      fingerprint =
+          loom_cfg_simplify_hash_u32(successors[i]->region_index, fingerprint);
+    }
+
+    const loom_value_id_t* results = loom_op_const_results(op);
+    for (uint16_t i = 0; i < op->result_count; ++i) {
+      if (!loom_cfg_simplify_local_values_append(&local_values, results[i])) {
+        return false;
+      }
+    }
+  }
+
+  *out_fingerprint = fingerprint;
+  return true;
+}
+
 static bool loom_cfg_simplify_find_alpha_equivalent_block(
     const loom_cfg_simplify_state_t* state, const loom_cfg_graph_t* graph,
-    uint16_t block_index, loom_block_t** out_canonical_block) {
+    loom_cfg_simplify_block_hash_table_t* table, uint16_t block_index,
+    loom_block_t** out_canonical_block) {
   *out_canonical_block = NULL;
   if (!loom_cfg_simplify_is_alpha_merge_candidate(state, graph, block_index)) {
     return false;
   }
   const loom_block_t* block = graph->blocks[block_index].block;
-  for (uint16_t canonical_index = 1; canonical_index < block_index;
-       ++canonical_index) {
-    if (!loom_cfg_simplify_is_alpha_merge_candidate(state, graph,
-                                                    canonical_index)) {
-      continue;
-    }
-    loom_block_t* canonical_block =
-        (loom_block_t*)graph->blocks[canonical_index].block;
-    if (!loom_cfg_simplify_blocks_alpha_equivalent(state, block,
-                                                   canonical_block)) {
-      continue;
-    }
-    *out_canonical_block = canonical_block;
-    return true;
+  uint32_t fingerprint = 0;
+  if (!loom_cfg_simplify_alpha_block_fingerprint(block, &fingerprint)) {
+    return false;
   }
-  return false;
+  iree_host_size_t slot = fingerprint & (table->capacity - 1);
+  while (table->entries[slot].block_index != 0) {
+    const loom_cfg_simplify_block_hash_entry_t* entry = &table->entries[slot];
+    if (!*out_canonical_block && entry->fingerprint == fingerprint) {
+      loom_block_t* canonical_block =
+          (loom_block_t*)graph->blocks[entry->block_index].block;
+      if (loom_cfg_simplify_blocks_alpha_equivalent(state, block,
+                                                    canonical_block)) {
+        *out_canonical_block = canonical_block;
+      }
+    }
+    slot = (slot + 1) & (table->capacity - 1);
+  }
+  table->entries[slot] = (loom_cfg_simplify_block_hash_entry_t){
+      .fingerprint = fingerprint,
+      .block_index = block_index,
+  };
+  return *out_canonical_block != NULL;
 }
 
 static bool loom_cfg_simplify_can_redirect_successor(
@@ -1644,13 +1810,13 @@ static iree_status_t loom_cfg_simplify_redirect_block_predecessors(
 
 static iree_status_t loom_cfg_simplify_merge_alpha_equivalent_blocks(
     loom_cfg_simplify_state_t* state, const loom_cfg_graph_t* graph,
-    bool* out_changed) {
+    loom_cfg_simplify_block_hash_table_t* table, bool* out_changed) {
   if (graph->malformed) return iree_ok_status();
   for (uint16_t block_index = 1; block_index < graph->block_count;
        ++block_index) {
     loom_block_t* canonical_block = NULL;
     if (!loom_cfg_simplify_find_alpha_equivalent_block(
-            state, graph, block_index, &canonical_block)) {
+            state, graph, table, block_index, &canonical_block)) {
       continue;
     }
     if (!loom_cfg_simplify_can_redirect_block_predecessors(
@@ -1672,13 +1838,13 @@ static iree_status_t loom_cfg_simplify_merge_alpha_equivalent_blocks(
 
 static iree_status_t loom_cfg_simplify_merge_duplicate_terminal_blocks(
     loom_cfg_simplify_state_t* state, const loom_cfg_graph_t* graph,
-    bool* out_changed) {
+    loom_cfg_simplify_block_hash_table_t* table, bool* out_changed) {
   if (graph->malformed) return iree_ok_status();
   for (uint16_t block_index = 1; block_index < graph->block_count;
        ++block_index) {
     loom_block_t* canonical_block = NULL;
     if (!loom_cfg_simplify_find_duplicate_terminal_block(
-            state, graph, block_index, &canonical_block)) {
+            state, graph, table, block_index, &canonical_block)) {
       continue;
     }
 
@@ -1971,11 +2137,16 @@ static iree_status_t loom_cfg_simplify_process_cfg_region(
   IREE_RETURN_IF_ERROR(loom_cfg_simplify_fuse_single_predecessor_blocks(
       state, &graph, out_changed));
   if (*out_changed) return iree_ok_status();
+
+  loom_cfg_simplify_block_hash_table_t block_hash_table = {0};
+  IREE_RETURN_IF_ERROR(loom_cfg_simplify_block_hash_table_initialize(
+      state->analysis_arena, graph.block_count, &block_hash_table));
   IREE_RETURN_IF_ERROR(loom_cfg_simplify_merge_duplicate_terminal_blocks(
-      state, &graph, out_changed));
+      state, &graph, &block_hash_table, out_changed));
   if (*out_changed) return iree_ok_status();
+  loom_cfg_simplify_block_hash_table_reset(&block_hash_table);
   IREE_RETURN_IF_ERROR(loom_cfg_simplify_merge_alpha_equivalent_blocks(
-      state, &graph, out_changed));
+      state, &graph, &block_hash_table, out_changed));
   if (*out_changed) return iree_ok_status();
   return loom_cfg_simplify_remove_redundant_block_args(state, &graph,
                                                        out_changed);
