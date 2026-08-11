@@ -35,10 +35,11 @@ def _parse_module(text: str) -> Module:
     return parser.parse(text)
 
 
-def _print_module(module: Module) -> str:
-    printer = Printer()
+def _print_module(module: Module, *, use_aliases: bool = True) -> str:
+    printer = Printer(use_aliases=use_aliases)
     printer.register_ops(_all_roundtrip_ops())
     printer.register_types(ALL_BUILTIN_TYPES)
+    printer.register_encoding_families(ALL_ENCODING_FAMILIES)
     return printer.print_module(module)
 
 
@@ -99,6 +100,50 @@ class TestEncodingDefineRoundTrip:
             )
         ]
 
+    def test_canonical_numeric_alias_has_structural_identity(self) -> None:
+        module = _parse_module(
+            _module_text(
+                "test.func @f() {",
+                "  %enc = encoding.define #encoding.f8e4m3fn : encoding<schema>",
+                "  test.yield",
+                "}",
+            )
+        )
+
+        assert module.encodings == [
+            EncodingInstance(
+                name="encoding.operand",
+                params=(
+                    ("element_format", "f8e4m3fn"),
+                    ("payload_elements", 1),
+                    ("payload_packing", "dense_lanes"),
+                ),
+            )
+        ]
+        assert _print_module(module) == _module_text(
+            "test.func @f() {",
+            "  %enc = encoding.define #encoding.f8e4m3fn : encoding<schema>",
+            "  test.yield",
+            "}",
+        )
+        assert _print_module(module, use_aliases=False) == _module_text(
+            "test.func @f() {",
+            "  %enc = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>",
+            "  test.yield",
+            "}",
+        )
+
+    def test_canonical_numeric_alias_rejects_fixed_parameter_override(self) -> None:
+        with pytest.raises(ParseError, match="parameter cannot be restated"):
+            _parse_module(
+                _module_text(
+                    "test.func @f() {",
+                    "  %enc = encoding.define #encoding.f8e4m3fn<element_format=f16> : encoding<schema>",
+                    "  test.yield",
+                    "}",
+                )
+            )
+
     def test_dynamic_params_print_in_canonical_order(self) -> None:
         module = _parse_module(
             "test.func @f(%group_size: index, %scales: tensor<[%group_size]xf32>) {\n"
@@ -111,7 +156,7 @@ class TestEncodingDefineRoundTrip:
         printed = _print_module(module)
         expected = (
             "test.func @f(%group_size: index, %scales: tensor<[%group_size]xf32>) {\n"
-            '  %enc = encoding.define #encoding.operand<element_format="i8", payload_elements=32, payload_packing="dense_lanes"> '
+            "  %enc = encoding.define #encoding.i8<payload_elements=32> "
             "{group_size = %group_size : index, "
             "scales = %scales : tensor<[%group_size]xf32>} : encoding<schema>\n"
             "  test.yield\n"

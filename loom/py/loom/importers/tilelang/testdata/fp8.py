@@ -59,8 +59,8 @@ kernel.def target(@hip_mcpu_gfx9_4_generic) export("fp8_fn_buffer_views") @fp8_f
   %c0_bytes = index.constant 0 : offset
   %src_noalias = buffer.assume.noalias %src : buffer
   %layout = encoding.layout.dense : encoding<layout>
-  %fp8_e4m3fn_schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
-  %src_storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %fp8_e4m3fn_schema : encoding<schema>} : encoding<storage>
+  %f8e4m3fn_schema = encoding.define #encoding.f8e4m3fn : encoding<schema>
+  %src_storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %f8e4m3fn_schema : encoding<schema>} : encoding<storage>
   %src_view = buffer.view %src_noalias[%c0_bytes] : buffer -> view<8xf8E4M3, %src_storage>
   %dst_noalias = buffer.assume.noalias %dst : buffer
   %dst_view = buffer.view %dst_noalias[%c0_bytes] : buffer -> view<8xbf16, %layout>
@@ -102,12 +102,12 @@ kernel.def target(@hip_mcpu_gfx9_4_generic) export("fp8_fnuz_buffer_views") @fp8
   %c0_bytes = index.constant 0 : offset
   %src_noalias = buffer.assume.noalias %src : buffer
   %layout = encoding.layout.dense : encoding<layout>
-  %fp8_e4m3fnuz_schema = encoding.define #encoding.operand<element_format=f8e4m3fnuz, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
-  %src_storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %fp8_e4m3fnuz_schema : encoding<schema>} : encoding<storage>
+  %f8e4m3fnuz_schema = encoding.define #encoding.f8e4m3fnuz : encoding<schema>
+  %src_storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %f8e4m3fnuz_schema : encoding<schema>} : encoding<storage>
   %src_view = buffer.view %src_noalias[%c0_bytes] : buffer -> view<8xf8E4M3, %src_storage>
   %dst_noalias = buffer.assume.noalias %dst : buffer
-  %fp8_e5m2fnuz_schema = encoding.define #encoding.operand<element_format=f8e5m2fnuz, payload_elements=1, payload_packing=dense_lanes> : encoding<schema>
-  %dst_storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %fp8_e5m2fnuz_schema : encoding<schema>} : encoding<storage>
+  %f8e5m2fnuz_schema = encoding.define #encoding.f8e5m2fnuz : encoding<schema>
+  %dst_storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %f8e5m2fnuz_schema : encoding<schema>} : encoding<storage>
   %dst_view = buffer.view %dst_noalias[%c0_bytes] : buffer -> view<8xf8E5M2, %dst_storage>
   %const = scalar.constant 0 : i32
   kernel.return

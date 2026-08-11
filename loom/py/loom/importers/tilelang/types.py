@@ -112,6 +112,15 @@ class TileLangTypeConverter:
         return _ELEMENT_BYTE_SIZES.get(str(element_type), 1)
 
 
+def storage_schema_name_hint(schema: EncodingInstance) -> str:
+    """Returns a readable SSA name hint for a materialized storage schema."""
+    if schema.name == "encoding.operand":
+        for parameter_name, parameter_value in schema.params:
+            if parameter_name == "element_format" and isinstance(parameter_value, str):
+                return f"{parameter_value}_schema"
+    return f"{schema.name}_schema"
+
+
 def _shape_dim(value: object) -> StaticDim | DynamicDim:
     if isinstance(value, int):
         return StaticDim(value)

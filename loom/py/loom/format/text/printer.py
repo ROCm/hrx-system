@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, cast
 
 from loom.assembly import (
@@ -71,7 +72,14 @@ from loom.assembly import (
 from loom.assembly import (
     Region as RegionFmt,
 )
-from loom.dsl import AttrDef, Op, ParameterizedAttrDef, TypeDef
+from loom.dsl import (
+    AttrDef,
+    EncodingAliasDef,
+    EncodingFamilyDef,
+    Op,
+    ParameterizedAttrDef,
+    TypeDef,
+)
 from loom.fields import (
     FieldLayout,
     FormatFields,
@@ -125,6 +133,21 @@ _IR_TYPE_CLASSES = (
     NoneType,
 )
 
+
+@dataclass(frozen=True, slots=True)
+class _EncodingAliasSelector:
+    """Canonical source-name lookup state for one structural family."""
+
+    # Fixed enum parameter selecting an alias row.
+    discriminator_name: str
+    # Aliases indexed by the discriminator parameter value.
+    aliases_by_discriminator: Mapping[Any, EncodingAliasDef]
+    # Static family parameter descriptors indexed by source name.
+    parameters_by_name: Mapping[str, AttrDef]
+
+
+_EncodingAliasSelectors = Mapping[str, _EncodingAliasSelector]
+
 __all__ = [
     "Printer",
     "print_type",
@@ -148,7 +171,13 @@ class TypePrintContext:
     Without context, dynamic dims print as '?' and encodings are omitted.
     """
 
-    __slots__ = ("_dim_bindings", "_encoding_binding", "_module", "_use_aliases")
+    __slots__ = (
+        "_dim_bindings",
+        "_encoding_alias_selectors",
+        "_encoding_binding",
+        "_module",
+        "_use_aliases",
+    )
 
     def __init__(
         self,
@@ -156,8 +185,10 @@ class TypePrintContext:
         module: Module,
         encoding_binding: int = -1,
         use_aliases: bool = True,
+        encoding_alias_selectors: _EncodingAliasSelectors | None = None,
     ) -> None:
         self._dim_bindings = dim_bindings
+        self._encoding_alias_selectors = encoding_alias_selectors
         self._encoding_binding = encoding_binding
         self._module = module
         self._use_aliases = use_aliases
@@ -183,20 +214,80 @@ class TypePrintContext:
         return resolve_value_name(self._module, self._encoding_binding)
 
 
+def _select_canonical_encoding_alias(
+    encoding: EncodingInstance,
+    selectors: _EncodingAliasSelectors | None,
+) -> EncodingAliasDef | None:
+    if selectors is None:
+        return None
+    selector = selectors.get(encoding.name)
+    if selector is None:
+        return None
+    parameters = dict(encoding.params)
+    alias = selector.aliases_by_discriminator.get(
+        parameters.get(selector.discriminator_name)
+    )
+    if alias is None:
+        return None
+
+    # Re-parsing the alias must reproduce the complete structural encoding.
+    # Every contributed parameter must be present and fixed values must match.
+    for parameter_name, parameter_value in alias.parameters:
+        if parameter_name not in parameters:
+            return None
+        if (parameter_name, parameter_value) in alias.fixed_parameters and parameters[
+            parameter_name
+        ] != parameter_value:
+            return None
+    return alias
+
+
 def _format_encoding_instance(
     encoding: EncodingInstance,
     *,
     use_alias: bool,
+    encoding_alias_selectors: _EncodingAliasSelectors | None = None,
 ) -> str:
     """Format a static encoding as #alias or #family<name = value, ...>."""
     if use_alias and encoding.alias:
         return f"#{encoding.alias}"
-    if not encoding.params:
-        return f"#{encoding.name}"
-    param_strs = [
-        f"{name}={_format_attr_value(value)}" for name, value in encoding.params
-    ]
-    return f"#{encoding.name}<{', '.join(param_strs)}>"
+
+    canonical_alias = (
+        _select_canonical_encoding_alias(encoding, encoding_alias_selectors)
+        if use_alias
+        else None
+    )
+    name = canonical_alias.name if canonical_alias is not None else encoding.name
+    parameters = encoding.params
+    if canonical_alias is not None:
+        alias_parameters = dict(canonical_alias.parameters)
+        fixed_parameter_names = {
+            parameter_name for parameter_name, _ in canonical_alias.fixed_parameters
+        }
+        parameters = tuple(
+            (parameter_name, parameter_value)
+            for parameter_name, parameter_value in parameters
+            if parameter_name not in fixed_parameter_names
+            and alias_parameters.get(parameter_name) != parameter_value
+        )
+    if not parameters:
+        return f"#{name}"
+    selector = (
+        encoding_alias_selectors.get(encoding.name)
+        if encoding_alias_selectors is not None
+        else None
+    )
+    parameter_descriptors = selector.parameters_by_name if selector is not None else {}
+    param_strs = []
+    for parameter_name, value in parameters:
+        formatted_value = _format_attr_value(
+            value,
+            parameter_descriptors.get(parameter_name),
+            encoding_alias_selectors=encoding_alias_selectors,
+            use_encoding_aliases=use_alias,
+        )
+        param_strs.append(f"{parameter_name}={formatted_value}")
+    return f"#{name}<{', '.join(param_strs)}>"
 
 
 def print_type(
@@ -470,7 +561,13 @@ def _print_shaped_type(
                 inner += ", ?"
         elif isinstance(enc, EncodingInstance):
             use_aliases = context._use_aliases if context else True
-            inner += ", " + _format_encoding_instance(enc, use_alias=use_aliases)
+            inner += ", " + _format_encoding_instance(
+                enc,
+                use_alias=use_aliases,
+                encoding_alias_selectors=(
+                    context._encoding_alias_selectors if context else None
+                ),
+            )
 
     return f"{type_def.name}<{inner}>"
 
@@ -620,12 +717,18 @@ def _format_attr_value(
     *,
     type_context: TypePrintContext | None = None,
     type_registry: dict[Any, Any] | None = None,
+    encoding_alias_selectors: _EncodingAliasSelectors | None = None,
+    use_encoding_aliases: bool = True,
 ) -> str:
     """Format an attribute value for text output.
 
     Enum attributes print as bare keywords (lt, not "lt").
     String attributes print quoted. Everything else prints as literals.
     """
+    if encoding_alias_selectors is None and type_context is not None:
+        encoding_alias_selectors = type_context._encoding_alias_selectors
+    if type_context is not None:
+        use_encoding_aliases = type_context._use_aliases
     if attr_def is not None and attr_def.attr_type == "enum":
         return _format_enum_attr_value(value, attr_def)
     if attr_def is not None and attr_def.attr_type == "enum_array":
@@ -693,6 +796,8 @@ def _format_attr_value(
             value.definition,
             type_context=type_context,
             type_registry=type_registry,
+            encoding_alias_selectors=encoding_alias_selectors,
+            use_encoding_aliases=use_encoding_aliases,
         )
         return f"#{value.family_name}<{parameters}>"
     if isinstance(value, ParameterizedAttrArray):
@@ -713,6 +818,8 @@ def _format_attr_value(
                     element_descriptor,
                     type_context=type_context,
                     type_registry=type_registry,
+                    encoding_alias_selectors=encoding_alias_selectors,
+                    use_encoding_aliases=use_encoding_aliases,
                 )
                 for element in value
             )
@@ -723,7 +830,11 @@ def _format_attr_value(
     if isinstance(value, list | tuple):
         parts = [
             _format_attr_value(
-                v, type_context=type_context, type_registry=type_registry
+                v,
+                type_context=type_context,
+                type_registry=type_registry,
+                encoding_alias_selectors=encoding_alias_selectors,
+                use_encoding_aliases=use_encoding_aliases,
             )
             for v in value
         ]
@@ -735,11 +846,17 @@ def _format_attr_value(
                 item,
                 type_context=type_context,
                 type_registry=type_registry,
+                encoding_alias_selectors=encoding_alias_selectors,
+                use_encoding_aliases=use_encoding_aliases,
             )
             parts.append(f"{key} = {formatted_item}")
         return "{" + ", ".join(parts) + "}"
     if isinstance(value, EncodingInstance):
-        return _format_encoding_instance(value, use_alias=True)
+        return _format_encoding_instance(
+            value,
+            use_alias=use_encoding_aliases,
+            encoding_alias_selectors=encoding_alias_selectors,
+        )
     return str(value)
 
 
@@ -749,6 +866,8 @@ def _format_parameterized_attr_parameters(
     *,
     type_context: TypePrintContext | None = None,
     type_registry: dict[Any, Any] | None = None,
+    encoding_alias_selectors: _EncodingAliasSelectors | None = None,
+    use_encoding_aliases: bool = True,
 ) -> str:
     """Formats one known-family parameterized attribute payload."""
     if not isinstance(value, ParameterizedAttr):
@@ -774,6 +893,8 @@ def _format_parameterized_attr_parameters(
                     primary_parameter,
                     type_context=type_context,
                     type_registry=type_registry,
+                    encoding_alias_selectors=encoding_alias_selectors,
+                    use_encoding_aliases=use_encoding_aliases,
                 )
             )
     for parameter_index, (parameter, slot) in enumerate(
@@ -786,6 +907,8 @@ def _format_parameterized_attr_parameters(
             parameter,
             type_context=type_context,
             type_registry=type_registry,
+            encoding_alias_selectors=encoding_alias_selectors,
+            use_encoding_aliases=use_encoding_aliases,
         )
         parameters.append(f"{parameter.name} = {formatted_slot}")
     return ", ".join(parameters)
@@ -966,6 +1089,7 @@ class Printer:
     ) -> None:
         self._registry: dict[str, Op] = {}
         self._type_registry: dict[Any, Any] = {}  # TypeDef by name and value class.
+        self._encoding_alias_selectors: dict[str, _EncodingAliasSelector] = {}
         self._layouts: dict[str, FieldLayout] = {}
         self._module: Module | None = None
         self._indent: int = 0
@@ -986,6 +1110,24 @@ class Printer:
             self._type_registry[td.name] = td
             if td.python_type is not None:
                 self._type_registry[td.python_type] = td
+
+    def register_encoding_families(self, families: Sequence[EncodingFamilyDef]) -> None:
+        """Register canonical source spellings for encoding families."""
+        for family in families:
+            if not family.aliases:
+                continue
+            discriminator_name = cast(AttrDef, family.alias_discriminator).name
+            aliases_by_discriminator = {
+                dict(alias.fixed_parameters)[discriminator_name]: alias
+                for alias in family.aliases
+            }
+            self._encoding_alias_selectors[family.name] = _EncodingAliasSelector(
+                discriminator_name=discriminator_name,
+                aliases_by_discriminator=aliases_by_discriminator,
+                parameters_by_name={
+                    parameter.name: parameter for parameter in family.parameters
+                },
+            )
 
     # --- Layout cache ---
 
@@ -1011,6 +1153,36 @@ class Printer:
             module,
             encoding_binding=value.encoding_binding,
             use_aliases=self._use_aliases,
+            encoding_alias_selectors=self._encoding_alias_selectors,
+        )
+
+    def _format_attr_value(
+        self,
+        value: Any,
+        attr_def: AttrDef | None = None,
+        *,
+        type_context: TypePrintContext | None = None,
+    ) -> str:
+        return _format_attr_value(
+            value,
+            attr_def,
+            type_context=type_context,
+            type_registry=self._type_registry,
+            encoding_alias_selectors=self._encoding_alias_selectors,
+            use_encoding_aliases=self._use_aliases,
+        )
+
+    def _format_parameterized_attr_parameters(
+        self,
+        value: Any,
+        definition: ParameterizedAttrDef,
+    ) -> str:
+        return _format_parameterized_attr_parameters(
+            value,
+            definition,
+            type_registry=self._type_registry,
+            encoding_alias_selectors=self._encoding_alias_selectors,
+            use_encoding_aliases=self._use_aliases,
         )
 
     def _print_value_type(self, value_id: int, module: Module) -> str:
@@ -1378,7 +1550,7 @@ class Printer:
         if not attrs:
             return ""
         body = ", ".join(
-            f"{key} = {_format_attr_value(value)}" for key, value in attrs.items()
+            f"{key} = {self._format_attr_value(value)}" for key, value in attrs.items()
         )
         return f"({body})"
 
@@ -1611,7 +1783,7 @@ class Printer:
                     value = fields.attr(name)
                     if value is not None:
                         attr_def = op_decl.attr(name)
-                        stream.emit(_format_attr_value(value, attr_def))
+                        stream.emit(self._format_attr_value(value, attr_def))
 
                 case SymbolRef(field=name):
                     covered_attrs.add(name)
@@ -1907,15 +2079,21 @@ class Printer:
                     covered_attrs.add(name)
                     attr_def = op_decl.attr(name)
                     value = fields.attr(name)
-                    stream.emit(f"<{_format_attr_value(value, attr_def)}>", glue=True)
+                    stream.emit(
+                        f"<{self._format_attr_value(value, attr_def)}>",
+                        glue=True,
+                    )
 
                 case AttrParams(field=name):
                     covered_attrs.add(name)
                     attr_def = cast(AttrDef, op_decl.attr(name))
                     value = fields.attr(name)
                     definition = cast(ParameterizedAttrDef, attr_def.parameterized_attr)
+                    parameters = self._format_parameterized_attr_parameters(
+                        value, definition
+                    )
                     stream.emit(
-                        f"<{_format_parameterized_attr_parameters(value, definition)}>",
+                        f"<{parameters}>",
                         glue=True,
                     )
 
@@ -1925,7 +2103,7 @@ class Printer:
                     param_attr_def = op_decl.attr(param_name)
                     param_value = fields.attr(param_name)
                     flags_value = fields.attr(flags_name)
-                    param_text = _format_attr_value(param_value, param_attr_def)
+                    param_text = self._format_attr_value(param_value, param_attr_def)
                     if flags_value:
                         stream.emit(f"<{param_text}, {flags_value}>", glue=True)
                     else:
@@ -2279,7 +2457,7 @@ class Printer:
         """Format {key = value, ...} from a named dict attribute."""
         parts: list[str] = []
         for key, value in dict_value.items():
-            parts.append(f"{key} = {_format_attr_value(value, None)}")
+            parts.append(f"{key} = {self._format_attr_value(value)}")
         return "{" + ", ".join(parts) + "}"
 
     def _format_attr_dict(
@@ -2304,7 +2482,7 @@ class Printer:
         parts: list[str] = []
         for key, value in extras.items():
             attr_def = op_decl.attr(key) if op_decl else None
-            parts.append(f"{key} = {_format_attr_value(value, attr_def)}")
+            parts.append(f"{key} = {self._format_attr_value(value, attr_def)}")
         return "{" + ", ".join(parts) + "}"
 
     def _generic_op_string(self, op: Operation, module: Module) -> str:

@@ -63,6 +63,7 @@ from loom.assembly import (
 )
 from loom.dsl import (
     AttrDef,
+    EncodingAliasDef,
     EncodingFamilyDef,
     FuncLikeInterface,
     Op,
@@ -154,6 +155,9 @@ __all__ = [
 _CURRENT_ALIASES: dict[str, EncodingInstance] | None = None
 _CURRENT_KNOWN_ENCODINGS: set[str] | None = None
 _CURRENT_IMPLICIT_SHAPED_ATTACHMENTS: set[str] | None = None
+_CURRENT_CANONICAL_ENCODING_ALIASES: dict[str, tuple[str, EncodingAliasDef]] | None = (
+    None
+)
 
 
 def _parse_special_float(text: str) -> float | None:
@@ -418,7 +422,30 @@ def _parse_static_encoding_from_tokens(
             filename,
         )
 
-    instance = EncodingInstance(name=token.text, params=params)
+    canonical_alias = (
+        _CURRENT_CANONICAL_ENCODING_ALIASES.get(token.text)
+        if _CURRENT_CANONICAL_ENCODING_ALIASES is not None
+        else None
+    )
+    if canonical_alias is not None:
+        family_name, alias = canonical_alias
+        authored_parameters = dict(params)
+        for parameter_name, _ in alias.fixed_parameters:
+            if parameter_name in authored_parameters:
+                raise ParseError(
+                    f"encoding alias '{alias.name}' fixes parameter "
+                    f"'{parameter_name}'; the parameter cannot be restated",
+                    token.location,
+                    filename,
+                )
+        expanded_parameters = dict(alias.parameters)
+        expanded_parameters.update(authored_parameters)
+        instance = EncodingInstance(
+            name=family_name,
+            params=tuple(expanded_parameters.items()),
+        )
+    else:
+        instance = EncodingInstance(name=token.text, params=params)
     module.add_encoding(instance)
     return instance
 
@@ -1785,6 +1812,7 @@ class Parser:
         self._tokenizer: Tokenizer = Tokenizer("")
         self._implicit_source_id: int | None = None
         self._encoding_aliases: dict[str, EncodingInstance] = {}
+        self._canonical_encoding_aliases: dict[str, tuple[str, EncodingAliasDef]] = {}
         self._known_encodings: set[str] = set()
         self._implicit_shaped_attachments: set[str] = set()
         self._reserved_result_names: list[str] = []
@@ -1828,10 +1856,16 @@ class Parser:
 
     def register_encoding_families(self, families: Sequence[EncodingFamilyDef]) -> None:
         """Register encoding declarations and their generated type semantics."""
-        self._known_encodings.update(family.name for family in families)
-        self._implicit_shaped_attachments.update(
-            family.name for family in families if family.implicit_shaped_attachment
-        )
+        for family in families:
+            self._known_encodings.add(family.name)
+            if family.implicit_shaped_attachment:
+                self._implicit_shaped_attachments.add(family.name)
+            for alias in family.aliases:
+                self._known_encodings.add(alias.name)
+                self._canonical_encoding_aliases[alias.name] = (
+                    family.name,
+                    alias,
+                )
 
     # --- Top-level parsing ---
 
@@ -1851,6 +1885,7 @@ class Parser:
           - Top-level dispatch
         """
         global _CURRENT_ALIASES, _CURRENT_KNOWN_ENCODINGS
+        global _CURRENT_CANONICAL_ENCODING_ALIASES
         global _CURRENT_IMPLICIT_SHAPED_ATTACHMENTS
         self._tokenizer = Tokenizer(source, filename)
         self._module = Module()
@@ -1860,6 +1895,7 @@ class Parser:
         self._scope = NameScope()
         self._encoding_aliases = {}
         _CURRENT_ALIASES = self._encoding_aliases
+        _CURRENT_CANONICAL_ENCODING_ALIASES = self._canonical_encoding_aliases
         _CURRENT_KNOWN_ENCODINGS = (
             self._known_encodings if self._known_encodings else None
         )
@@ -1891,6 +1927,7 @@ class Parser:
             )
 
         _CURRENT_ALIASES = None
+        _CURRENT_CANONICAL_ENCODING_ALIASES = None
         _CURRENT_KNOWN_ENCODINGS = None
         _CURRENT_IMPLICIT_SHAPED_ATTACHMENTS = None
         rebuild_value_metadata(self._module)

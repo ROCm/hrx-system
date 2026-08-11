@@ -16,7 +16,10 @@ from typing import Any
 from loom.builder import ValueRef
 from loom.importers.core import SourceImportSession, source_key
 from loom.importers.tilelang.nodes import dtype, node_kind, source_name
-from loom.importers.tilelang.types import TileLangTypeConverter
+from loom.importers.tilelang.types import (
+    TileLangTypeConverter,
+    storage_schema_name_hint,
+)
 from loom.ir import (
     ENCODING_LAYOUT_TYPE,
     ENCODING_SCHEMA_TYPE,
@@ -181,7 +184,7 @@ class TileLangConversionContext(SourceImportSession):
             schema_value = self.builder.encoding.define(
                 spec=schema,
                 results=[ENCODING_SCHEMA_TYPE],
-                name=self.reserve_name(f"{schema.name}_schema"),
+                name=self.reserve_name(storage_schema_name_hint(schema)),
             )
             self.storage_schema_values[schema] = schema_value
         return schema_value
