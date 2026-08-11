@@ -336,6 +336,54 @@ TEST_F(MaterializeTest, ClonesRegionSourcePresentation) {
   EXPECT_EQ(cloned_region->source_flags, source_region->source_flags);
 }
 
+TEST_F(MaterializeTest, ClonesOperationAndBlockComments) {
+  loom_region_t* source_region = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate_region(source_, 1, &source_region));
+  loom_block_t* source_block = loom_region_entry_block(source_region);
+  const iree_string_view_t block_comments[] = {
+      IREE_SV(" block heading"),
+  };
+  IREE_ASSERT_OK(loom_module_attach_block_comments(
+      source_, source_block, block_comments, IREE_ARRAYSIZE(block_comments)));
+
+  loom_builder_t source_region_builder = {};
+  loom_builder_initialize(source_, &source_->arena, source_block,
+                          &source_region_builder);
+  loom_op_t* source_op = nullptr;
+  IREE_ASSERT_OK(
+      loom_test_constant_build(&source_region_builder, loom_attr_i64(42),
+                               loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+                               LOOM_LOCATION_UNKNOWN, &source_op));
+  const iree_string_view_t op_comments[] = {
+      IREE_SV(" operation heading"),
+      IREE_SV(" operation detail"),
+  };
+  IREE_ASSERT_OK(loom_module_attach_op_comments(source_, source_op, op_comments,
+                                                IREE_ARRAYSIZE(op_comments)));
+
+  loom_ir_remap_t remap = InitializeRemap();
+  loom_region_t* cloned_region = nullptr;
+  IREE_ASSERT_OK(loom_ir_clone_region(&target_builder_, source_region, &remap,
+                                      &cloned_region));
+
+  const loom_block_t* cloned_block =
+      loom_region_const_entry_block(cloned_region);
+  iree_host_size_t cloned_block_comment_count = 0;
+  const iree_string_view_t* cloned_block_comments = loom_module_block_comments(
+      target_, cloned_block, &cloned_block_comment_count);
+  ASSERT_EQ(cloned_block_comment_count, IREE_ARRAYSIZE(block_comments));
+  EXPECT_TRUE(
+      iree_string_view_equal(cloned_block_comments[0], block_comments[0]));
+
+  const loom_op_t* cloned_op = loom_block_const_op(cloned_block, 0);
+  iree_host_size_t cloned_op_comment_count = 0;
+  const iree_string_view_t* cloned_op_comments =
+      loom_module_op_comments(target_, cloned_op, &cloned_op_comment_count);
+  ASSERT_EQ(cloned_op_comment_count, IREE_ARRAYSIZE(op_comments));
+  EXPECT_TRUE(iree_string_view_equal(cloned_op_comments[0], op_comments[0]));
+  EXPECT_TRUE(iree_string_view_equal(cloned_op_comments[1], op_comments[1]));
+}
+
 TEST_F(MaterializeTest, RejectsCrossModuleCloneWithUnmappedSuccessor) {
   loom_region_t* source_region = nullptr;
   IREE_ASSERT_OK(loom_module_allocate_region(source_, 2, &source_region));

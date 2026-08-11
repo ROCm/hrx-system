@@ -34,6 +34,26 @@ static iree_status_t loom_ir_clone_block_label(loom_ir_remap_t* remap,
                                  &target_block->label_id);
 }
 
+static iree_status_t loom_ir_clone_block_comments(
+    loom_ir_remap_t* remap, const loom_block_t* source_block,
+    loom_block_t* target_block) {
+  iree_host_size_t comment_count = 0;
+  const iree_string_view_t* comments = loom_module_block_comments(
+      remap->source_module, source_block, &comment_count);
+  return loom_module_attach_block_comments(remap->target_module, target_block,
+                                           comments, comment_count);
+}
+
+static iree_status_t loom_ir_clone_op_comments(loom_ir_remap_t* remap,
+                                               const loom_op_t* source_op,
+                                               loom_op_t* target_op) {
+  iree_host_size_t comment_count = 0;
+  const iree_string_view_t* comments =
+      loom_module_op_comments(remap->source_module, source_op, &comment_count);
+  return loom_module_attach_op_comments(remap->target_module, target_op,
+                                        comments, comment_count);
+}
+
 static iree_status_t loom_ir_clone_block_args(loom_ir_remap_t* remap,
                                               const loom_block_t* source_block,
                                               loom_block_t* target_block) {
@@ -191,6 +211,8 @@ static iree_status_t loom_ir_clone_region_skeleton(
     target_block->flags = source_block->flags;
     IREE_RETURN_IF_ERROR(
         loom_ir_clone_block_label(remap, source_block, target_block));
+    IREE_RETURN_IF_ERROR(
+        loom_ir_clone_block_comments(remap, source_block, target_block));
     IREE_RETURN_IF_ERROR(
         loom_ir_clone_block_args(remap, source_block, target_block));
   }
@@ -397,6 +419,7 @@ iree_status_t loom_ir_clone_op(loom_builder_t* builder,
     IREE_RETURN_IF_ERROR(status);
   }
   IREE_RETURN_IF_ERROR(loom_builder_finalize_op(builder, target_op));
+  IREE_RETURN_IF_ERROR(loom_ir_clone_op_comments(remap, source_op, target_op));
   *out_cloned_op = target_op;
   return iree_ok_status();
 }
