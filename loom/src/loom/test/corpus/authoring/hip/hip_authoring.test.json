@@ -542,6 +542,8 @@
           "path": "{tmp}/target_provider_gfx11_generic_trace.jsonl",
           "contains": [
             "\"pass\":\"select-templates\"",
+            "amdgpu.target<gfx11-generic> @__loom_sealed_target_0",
+            "kernel.def retain target(@__loom_sealed_target_0)",
             "%subgroup_size = index.constant 32 : index",
             "func.call inline @scale_i32_subgroup_32",
             "scalar.addi %value, %value : i32"
@@ -591,6 +593,8 @@
           "path": "{tmp}/target_provider_gfx9_4_generic_trace.jsonl",
           "contains": [
             "\"pass\":\"select-templates\"",
+            "amdgpu.target<gfx9-4-generic> @__loom_sealed_target_0",
+            "kernel.def retain target(@__loom_sealed_target_0)",
             "%subgroup_size = index.constant 64 : index",
             "func.call inline @scale_i32_subgroup_64",
             "scalar.muli %value, %scale_factor : i32"
@@ -599,6 +603,57 @@
             "func.apply",
             "%subgroup_size = target.subgroup.size",
             "scale_i32_subgroup_32",
+            "scale_i32_fallback"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "seals specialized gfx1151 target into pass traces",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/target_provider_selection.loom",
+          "--backend=amdgpu-hal",
+          "--target=gfx1151",
+          "--output={tmp}/target_provider_gfx1151.vmfb",
+          "--emit-target-artifact={tmp}/target_provider_gfx1151.hsaco",
+          "--compile-report=summary",
+          "--dump-ir-after=select-templates",
+          "--dump-ir-format=jsonl",
+          "--dump-ir-output={tmp}/target_provider_gfx1151_trace.jsonl"
+        ]
+      },
+      "stderr": {
+        "contains": [
+          "\"status\":{\"code\":0,\"name\":\"OK\"}",
+          "\"target_key\":\"gfx1151\"",
+          "\"subgroup_size\":32"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/target_provider_gfx1151.vmfb",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/target_provider_gfx1151.hsaco",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/target_provider_gfx1151_trace.jsonl",
+          "contains": [
+            "\"pass\":\"select-templates\"",
+            "amdgpu.target<gfx1151> @__loom_sealed_target_0",
+            "kernel.def retain target(@__loom_sealed_target_0)",
+            "%subgroup_size = index.constant 32 : index",
+            "func.call inline @scale_i32_subgroup_32"
+          ],
+          "not_contains": [
+            "amdgpu.target<gfx11-generic>",
+            "func.apply",
+            "%subgroup_size = target.subgroup.size",
+            "scale_i32_subgroup_64",
             "scale_i32_fallback"
           ]
         }

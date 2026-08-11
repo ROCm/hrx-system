@@ -8,6 +8,7 @@
 
 #include <inttypes.h>
 
+#include "loom/ir/module.h"
 #include "loom/util/json.h"
 
 void loom_pass_trace_options_initialize(
@@ -47,6 +48,12 @@ void loom_pass_trace_initialize(const loom_pass_trace_options_t* options,
   *out_trace = (loom_pass_trace_t){
       .options = options,
   };
+}
+
+void loom_pass_trace_bind_snapshot_projector(
+    loom_pass_trace_t* trace,
+    loom_pass_trace_snapshot_projector_t snapshot_projector) {
+  trace->snapshot_projector = snapshot_projector;
 }
 
 static iree_string_view_t loom_pass_trace_kind_name(loom_pass_kind_t kind) {
@@ -152,6 +159,18 @@ static iree_status_t loom_pass_trace_validate_artifact_sink(
         "pass trace artifact sink requires both open and close callbacks");
   }
   return iree_ok_status();
+}
+
+static iree_status_t loom_pass_trace_validate_format(
+    loom_pass_trace_format_t format) {
+  switch (format) {
+    case LOOM_PASS_TRACE_FORMAT_TEXT:
+    case LOOM_PASS_TRACE_FORMAT_JSONL:
+      return iree_ok_status();
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "unsupported pass trace format");
+  }
 }
 
 static iree_status_t loom_pass_trace_write_text_event(
@@ -324,53 +343,76 @@ iree_status_t loom_pass_trace_emit(loom_pass_trace_t* trace,
   }
   IREE_RETURN_IF_ERROR(
       loom_pass_trace_validate_artifact_sink(&trace->options->artifact_sink));
+  IREE_RETURN_IF_ERROR(loom_pass_trace_validate_format(trace->options->format));
 
-  const iree_host_size_t event_ordinal = trace->next_event_ordinal++;
-  loom_pass_trace_artifact_t artifact = {0};
-  const bool artifact_enabled =
-      loom_pass_trace_artifact_sink_is_enabled(&trace->options->artifact_sink);
-  if (artifact_enabled) {
-    IREE_RETURN_IF_ERROR(trace->options->artifact_sink.open(
-        trace->options->artifact_sink.user_data, event, event_ordinal,
-        &artifact));
-    if (!artifact.stream || iree_string_view_is_empty(artifact.path)) {
-      iree_status_t close_status = trace->options->artifact_sink.close(
-          trace->options->artifact_sink.user_data, &artifact);
-      return iree_status_join(
-          iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                           "pass trace artifact sink returned no stream/path"),
-          close_status);
+  loom_module_t* projected_module = NULL;
+  loom_pass_trace_event_t projected_event = *event;
+  iree_status_t status = iree_ok_status();
+  if (trace->snapshot_projector.project != NULL) {
+    status = trace->snapshot_projector.project(
+        trace->snapshot_projector.user_data, event->module, &projected_module);
+    if (projected_module != NULL) {
+      projected_event.module = projected_module;
     }
   }
 
-  iree_status_t status = iree_ok_status();
-  switch (trace->options->format) {
-    case LOOM_PASS_TRACE_FORMAT_TEXT:
-      status = loom_pass_trace_write_text(trace, event, event_ordinal,
-                                          artifact_enabled ? &artifact : NULL);
-      break;
-    case LOOM_PASS_TRACE_FORMAT_JSONL:
-      if (artifact_enabled) {
-        status = loom_text_print_module_with_options(
-            event->module, artifact.stream, &trace->options->print_options);
-        if (iree_status_is_ok(status)) {
-          status = loom_output_stream_write_cstring(artifact.stream, "\n");
-        }
-      }
-      if (iree_status_is_ok(status)) {
-        status = loom_pass_trace_write_jsonl(
-            trace, event, event_ordinal, artifact_enabled ? &artifact : NULL);
-      }
-      break;
-    default:
-      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "unsupported pass trace format");
-      break;
+  const iree_host_size_t event_ordinal = trace->next_event_ordinal;
+  loom_pass_trace_artifact_t artifact = {0};
+  const bool artifact_enabled =
+      loom_pass_trace_artifact_sink_is_enabled(&trace->options->artifact_sink);
+  bool artifact_opened = false;
+  if (iree_status_is_ok(status)) {
+    ++trace->next_event_ordinal;
   }
-  if (artifact_enabled) {
+  if (iree_status_is_ok(status) && artifact_enabled) {
+    status = trace->options->artifact_sink.open(
+        trace->options->artifact_sink.user_data, &projected_event,
+        event_ordinal, &artifact);
+    artifact_opened = iree_status_is_ok(status);
+  }
+  if (artifact_opened) {
+    if (!artifact.stream || iree_string_view_is_empty(artifact.path)) {
+      status =
+          iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                           "pass trace artifact sink returned no stream/path");
+    }
+  }
+
+  if (iree_status_is_ok(status)) {
+    switch (trace->options->format) {
+      case LOOM_PASS_TRACE_FORMAT_TEXT:
+        status =
+            loom_pass_trace_write_text(trace, &projected_event, event_ordinal,
+                                       artifact_opened ? &artifact : NULL);
+        break;
+      case LOOM_PASS_TRACE_FORMAT_JSONL:
+        if (artifact_opened) {
+          status = loom_text_print_module_with_options(
+              projected_event.module, artifact.stream,
+              &trace->options->print_options);
+          if (iree_status_is_ok(status)) {
+            status = loom_output_stream_write_cstring(artifact.stream, "\n");
+          }
+        }
+        if (iree_status_is_ok(status)) {
+          status = loom_pass_trace_write_jsonl(
+              trace, &projected_event, event_ordinal,
+              artifact_opened ? &artifact : NULL);
+        }
+        break;
+      default:
+        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "unsupported pass trace format");
+        break;
+    }
+  }
+  if (artifact_opened) {
     status = iree_status_join(
         status, trace->options->artifact_sink.close(
                     trace->options->artifact_sink.user_data, &artifact));
+  }
+  if (projected_module != NULL) {
+    loom_module_free(projected_module);
   }
   return status;
 }

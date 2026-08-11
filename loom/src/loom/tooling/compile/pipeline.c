@@ -12,6 +12,7 @@
 #include "loom/pass/registry.h"
 #include "loom/pass/tooling.h"
 #include "loom/target/entry_selection.h"
+#include "loom/target/module_sealing.h"
 #include "loom/target/pipeline.h"
 #include "loom/target/predicate.h"
 #include "loom/target/provider.h"
@@ -19,6 +20,27 @@
 enum {
   LOOM_COMPILE_DEFAULT_MAX_PIPELINE_ERRORS = 20,
 };
+
+typedef struct loom_compile_trace_snapshot_state_t {
+  // Live function versions whose target facts must survive the trace boundary.
+  const loom_function_version_list_t* function_versions;
+  // Block pool used to build a short-lived self-contained snapshot.
+  iree_arena_block_pool_t* block_pool;
+} loom_compile_trace_snapshot_state_t;
+
+static iree_status_t loom_compile_project_trace_snapshot(
+    void* user_data, const loom_module_t* source_module,
+    loom_module_t** out_projected_module) {
+  *out_projected_module = NULL;
+  const loom_compile_trace_snapshot_state_t* state =
+      (const loom_compile_trace_snapshot_state_t*)user_data;
+  if (state->function_versions->count == 0) {
+    return iree_ok_status();
+  }
+  return loom_target_module_seal(source_module, state->function_versions,
+                                 state->block_pool, source_module->allocator,
+                                 out_projected_module);
+}
 
 void loom_compile_pipeline_options_initialize(
     loom_compile_pipeline_options_t* out_options) {
@@ -243,10 +265,19 @@ iree_status_t loom_compile_run_pipeline(
   loom_pass_trace_options_t trace_options = {0};
   loom_pass_trace_t trace = {0};
   loom_pass_trace_t* trace_ptr = NULL;
+  loom_compile_trace_snapshot_state_t trace_snapshot_state = {
+      .function_versions = &out_result->function_versions.list,
+      .block_pool = block_pool,
+  };
   if (loom_pass_trace_options_is_enabled(options->trace_options)) {
     trace_options = *options->trace_options;
     trace_options.stage = loom_compile_pipeline_stage_name(options, pipeline);
     loom_pass_trace_initialize(&trace_options, &trace);
+    loom_pass_trace_bind_snapshot_projector(
+        &trace, (loom_pass_trace_snapshot_projector_t){
+                    .project = loom_compile_project_trace_snapshot,
+                    .user_data = &trace_snapshot_state,
+                });
     trace_ptr = &trace;
   }
   loom_pass_tool_run_options_t run_options = {

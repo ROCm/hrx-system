@@ -86,6 +86,22 @@ typedef struct loom_pass_trace_artifact_sink_t {
   void* user_data;
 } loom_pass_trace_artifact_sink_t;
 
+// Optional projection applied to one matched module snapshot before it is
+// formatted. This lets pipeline owners preserve compiler state at the trace
+// boundary without teaching generic pass infrastructure about that state.
+typedef struct loom_pass_trace_snapshot_projector_t {
+  // Projects |source_module| into an ordinary self-contained module.
+  //
+  // Returning OK with |*out_projected_module| set to NULL declines projection
+  // and prints |source_module| directly. Any non-NULL module assigned to the
+  // output is transferred to the trace layer, even when an error is returned,
+  // and is released with loom_module_free after the event finishes.
+  iree_status_t (*project)(void* user_data, const loom_module_t* source_module,
+                           loom_module_t** out_projected_module);
+  // User data passed to |project|.
+  void* user_data;
+} loom_pass_trace_snapshot_projector_t;
+
 typedef struct loom_pass_trace_options_t {
   // Destination receiving formatted trace events. Required when tracing.
   loom_output_stream_t* stream;
@@ -114,6 +130,8 @@ typedef struct loom_pass_trace_options_t {
 typedef struct loom_pass_trace_t {
   // Immutable caller-owned trace configuration.
   const loom_pass_trace_options_t* options;
+  // Execution-local projector producing self-contained matched snapshots.
+  loom_pass_trace_snapshot_projector_t snapshot_projector;
   // Number assigned to the next emitted event.
   iree_host_size_t next_event_ordinal;
 } loom_pass_trace_t;
@@ -133,6 +151,12 @@ bool loom_pass_trace_options_is_enabled(
 // Initializes state for one pass pipeline execution.
 void loom_pass_trace_initialize(const loom_pass_trace_options_t* options,
                                 loom_pass_trace_t* out_trace);
+
+// Binds execution-local module snapshot projection to |trace|. The projector
+// and its user data must remain live until the pipeline execution completes.
+void loom_pass_trace_bind_snapshot_projector(
+    loom_pass_trace_t* trace,
+    loom_pass_trace_snapshot_projector_t snapshot_projector);
 
 // Emits one trace event when it matches the configured before/after filters.
 iree_status_t loom_pass_trace_emit(loom_pass_trace_t* trace,
