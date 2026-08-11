@@ -643,7 +643,7 @@ TEST_F(CanonicalizeTest, DriverPreservesExplicitTargetFactsAcrossSideRegions) {
   loom_target_facts_t target_facts = {
       /*.fact_type=*/&target_fact_type,
       /*.selector=*/0,
-      /*.authored_fields=*/0,
+      /*.explicit_fields=*/0,
       /*.storage=*/
       {
           /*.snapshot=*/snapshot,

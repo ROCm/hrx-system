@@ -225,11 +225,11 @@ low.kernel.def target<test.low.core>(@test_target) export("dispatch") linkage(de
       iree_string_view_is_empty(base_facts->storage.export_plan.export_symbol));
   EXPECT_EQ(base_facts->storage.export_plan.linkage,
             LOOM_TARGET_LINKAGE_DSO_LOCAL);
-  EXPECT_FALSE(loom_target_facts_field_is_authored(base_facts,
+  EXPECT_FALSE(loom_target_facts_field_is_explicit(base_facts,
                                                    LOOM_TARGET_FACT_FIELD_ABI));
-  EXPECT_FALSE(loom_target_facts_field_is_authored(
+  EXPECT_FALSE(loom_target_facts_field_is_explicit(
       base_facts, LOOM_TARGET_FACT_FIELD_EXPORT_SYMBOL));
-  EXPECT_FALSE(loom_target_facts_field_is_authored(
+  EXPECT_FALSE(loom_target_facts_field_is_explicit(
       base_facts, LOOM_TARGET_FACT_FIELD_LINKAGE));
 
   EXPECT_EQ(function_target_facts->storage.export_plan.abi_kind,
@@ -239,11 +239,11 @@ low.kernel.def target<test.low.core>(@test_target) export("dispatch") linkage(de
       IREE_SV("dispatch")));
   EXPECT_EQ(function_target_facts->storage.export_plan.linkage,
             LOOM_TARGET_LINKAGE_DEFAULT);
-  EXPECT_TRUE(loom_target_facts_field_is_authored(function_target_facts,
+  EXPECT_TRUE(loom_target_facts_field_is_explicit(function_target_facts,
                                                   LOOM_TARGET_FACT_FIELD_ABI));
-  EXPECT_TRUE(loom_target_facts_field_is_authored(
+  EXPECT_TRUE(loom_target_facts_field_is_explicit(
       function_target_facts, LOOM_TARGET_FACT_FIELD_EXPORT_SYMBOL));
-  EXPECT_TRUE(loom_target_facts_field_is_authored(
+  EXPECT_TRUE(loom_target_facts_field_is_explicit(
       function_target_facts, LOOM_TARGET_FACT_FIELD_LINKAGE));
 
   const loom_target_workgroup_size_t required_workgroup_size = {
@@ -342,7 +342,7 @@ func.def abi(object_function) @helper() {
   ASSERT_NE(function_target_facts, nullptr);
   EXPECT_EQ(function_target_facts->storage.export_plan.abi_kind,
             LOOM_TARGET_ABI_OBJECT_FUNCTION);
-  EXPECT_TRUE(loom_target_facts_field_is_authored(function_target_facts,
+  EXPECT_TRUE(loom_target_facts_field_is_explicit(function_target_facts,
                                                   LOOM_TARGET_FACT_FIELD_ABI));
 }
 

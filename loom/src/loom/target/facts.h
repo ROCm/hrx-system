@@ -22,7 +22,8 @@ extern "C" {
 
 typedef struct loom_target_facts_t loom_target_facts_t;
 
-// Target-neutral fields whose explicit authorship can affect specialization.
+// Target-neutral fields whose explicit presence can affect specialization or
+// must survive projection into durable IR.
 typedef uint8_t loom_target_fact_field_t;
 enum loom_target_fact_field_e {
   LOOM_TARGET_FACT_FIELD_CODEGEN_FORMAT = 0,
@@ -58,12 +59,12 @@ enum loom_target_fact_field_e {
   LOOM_TARGET_FACT_FIELD_COUNT_,
 };
 static_assert(LOOM_TARGET_FACT_FIELD_COUNT_ <= 64,
-              "target fact authorship must fit in one word");
+              "target fact explicitness must fit in one word");
 
 // Set of target-neutral fact fields.
 typedef uint64_t loom_target_fact_field_set_t;
 
-// Records explicit authorship of |field|.
+// Records explicit presence of |field|.
 static inline void loom_target_fact_field_set_insert(
     loom_target_fact_field_set_t* set, loom_target_fact_field_t field) {
   *set |= UINT64_C(1) << field;
@@ -132,10 +133,10 @@ struct loom_target_facts_t {
   // Typed selector value that chose the generated base row.
   uint8_t selector;
 
-  // Target-neutral fields explicitly present in the authored target witness.
-  loom_target_fact_field_set_t authored_fields;
+  // Target-neutral semantic inputs explicitly supplied by IR or a profile.
+  loom_target_fact_field_set_t explicit_fields;
 
-  // Owned common target projection after authored attrs are applied.
+  // Owned common target projection after explicit inputs are applied.
   loom_target_bundle_storage_t storage;
 };
 
@@ -159,11 +160,10 @@ static inline iree_string_view_t loom_target_facts_identity_name(
              : facts->storage.bundle.name;
 }
 
-// Returns whether |field| was explicitly present in the authored target
-// witness.
-static inline bool loom_target_facts_field_is_authored(
+// Returns whether |field| was supplied as an explicit semantic input.
+static inline bool loom_target_facts_field_is_explicit(
     const loom_target_facts_t* facts, loom_target_fact_field_t field) {
-  return loom_target_fact_field_set_contains(facts->authored_fields, field);
+  return loom_target_fact_field_set_contains(facts->explicit_fields, field);
 }
 
 // Returns whether the identity of |effective| satisfies |requirement|.

@@ -438,19 +438,19 @@ iree_status_t loom_target_function_contract_resolve_from_bundle(
       out_valid, out_bundle_storage);
 }
 
-static void loom_target_function_contract_record_authorship(
+static void loom_target_function_contract_record_explicit_fields(
     const loom_func_symbol_facts_t* func_facts,
     loom_target_facts_t* function_target_facts) {
   if (func_facts->has_abi) {
-    loom_target_fact_field_set_insert(&function_target_facts->authored_fields,
+    loom_target_fact_field_set_insert(&function_target_facts->explicit_fields,
                                       LOOM_TARGET_FACT_FIELD_ABI);
   }
   if (!iree_string_view_is_empty(func_facts->export_symbol)) {
-    loom_target_fact_field_set_insert(&function_target_facts->authored_fields,
+    loom_target_fact_field_set_insert(&function_target_facts->explicit_fields,
                                       LOOM_TARGET_FACT_FIELD_EXPORT_SYMBOL);
   }
   if (func_facts->has_export_linkage) {
-    loom_target_fact_field_set_insert(&function_target_facts->authored_fields,
+    loom_target_fact_field_set_insert(&function_target_facts->explicit_fields,
                                       LOOM_TARGET_FACT_FIELD_LINKAGE);
   }
 }
@@ -477,8 +477,8 @@ static iree_status_t loom_target_function_contract_refine_scoped_facts(
                                                        &function_target_facts));
   loom_target_facts_builder_replace_bundle(&bundle_storage.bundle,
                                            function_target_facts);
-  loom_target_function_contract_record_authorship(func_facts,
-                                                  function_target_facts);
+  loom_target_function_contract_record_explicit_fields(func_facts,
+                                                       function_target_facts);
   *out_facts = function_target_facts;
   return iree_ok_status();
 }

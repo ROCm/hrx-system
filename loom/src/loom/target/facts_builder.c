@@ -185,13 +185,13 @@ void loom_target_facts_builder_apply_requirement(
       effective, requirement));
   for (loom_target_fact_field_t field = 0;
        field < LOOM_TARGET_FACT_FIELD_COUNT_; ++field) {
-    if (!loom_target_facts_field_is_authored(requirement, field)) {
+    if (!loom_target_facts_field_is_explicit(requirement, field)) {
       continue;
     }
     loom_target_facts_builder_apply_field(field, &requirement->storage,
                                           &effective->storage);
   }
-  effective->authored_fields |= requirement->authored_fields;
+  effective->explicit_fields |= requirement->explicit_fields;
   loom_target_facts_builder_rebind(effective);
 }
 

@@ -32,7 +32,7 @@ iree_status_t loom_amdgpu_target_materialize_definition(
                 "AMDGPU target flags must follow target fact ordinals");
 
   loom_amdgpu_target_build_flags_t build_flags =
-      (loom_amdgpu_target_build_flags_t)facts->base.authored_fields;
+      (loom_amdgpu_target_build_flags_t)facts->base.explicit_fields;
   loom_amdgpu_target_identity_t default_identity = {0};
   loom_amdgpu_target_identity_initialize(facts->identity.target,
                                          &default_identity);

@@ -82,7 +82,7 @@ static void ExpectTargetFactsEqual(const loom_amdgpu_target_facts_t& expected,
                                    const loom_amdgpu_target_facts_t& actual) {
   EXPECT_EQ(actual.base.fact_type, expected.base.fact_type);
   EXPECT_EQ(actual.base.selector, expected.base.selector);
-  EXPECT_EQ(actual.base.authored_fields, expected.base.authored_fields);
+  EXPECT_EQ(actual.base.explicit_fields, expected.base.explicit_fields);
 
   const loom_target_snapshot_t& expected_snapshot =
       expected.base.storage.snapshot;
@@ -580,13 +580,13 @@ TEST_F(AmdgpuProviderTest, SeparatesIdentityAndSpecializationRequirements) {
   ASSERT_NE(gfx11_explicit_contract_facts, nullptr);
   EXPECT_EQ(gfx1151_a_facts->base.storage.snapshot.subgroup_size,
             gfx1151_explicit_wave32_facts->base.storage.snapshot.subgroup_size);
-  EXPECT_FALSE(gfx1151_a_facts->subgroup_size_authored);
-  EXPECT_TRUE(gfx1151_explicit_wave32_facts->subgroup_size_authored);
-  EXPECT_FALSE(gfx11_generic_facts->contract_set_key_authored);
-  EXPECT_TRUE(gfx11_explicit_contract_facts->contract_set_key_authored);
+  EXPECT_FALSE(gfx1151_a_facts->subgroup_size_explicit);
+  EXPECT_TRUE(gfx1151_explicit_wave32_facts->subgroup_size_explicit);
+  EXPECT_FALSE(gfx11_generic_facts->contract_set_key_explicit);
+  EXPECT_TRUE(gfx11_explicit_contract_facts->contract_set_key_explicit);
 
   // Identity is only the generated code-object domain and target-ID
-  // coordinates. Common projection authorship cannot narrow it.
+  // coordinates. Common projection explicitness cannot narrow it.
   EXPECT_TRUE(SatisfiesIdentity(gfx1151_a, gfx1151_a));
   EXPECT_TRUE(SatisfiesIdentity(gfx1151_a, gfx1151_b));
   EXPECT_TRUE(SatisfiesIdentity(gfx1151_a, gfx11_generic));

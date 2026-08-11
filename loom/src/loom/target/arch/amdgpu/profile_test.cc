@@ -86,8 +86,8 @@ TEST(AmdgpuTargetProfileTest, ProjectsCompilerOwnedTypedFacts) {
   EXPECT_NE(facts->properties.common, profile.base.target_bundle);
   EXPECT_EQ(facts->base.storage.snapshot.codegen_format,
             profile.base.target_bundle->snapshot->codegen_format);
-  EXPECT_FALSE(facts->subgroup_size_authored);
-  EXPECT_FALSE(facts->contract_set_key_authored);
+  EXPECT_FALSE(facts->subgroup_size_explicit);
+  EXPECT_FALSE(facts->contract_set_key_explicit);
 
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&block_pool);

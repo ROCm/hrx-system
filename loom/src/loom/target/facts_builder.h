@@ -18,7 +18,7 @@ extern "C" {
 #endif
 
 // Initializes the target-neutral base of a family-owned fact object from one
-// complete structured target bundle.
+// complete structured target bundle with no explicit common fields.
 void loom_target_facts_builder_initialize(
     const loom_target_fact_type_t* fact_type,
     const loom_target_bundle_t* bundle, loom_target_facts_t* out_facts);
@@ -28,8 +28,8 @@ iree_status_t loom_target_facts_builder_clone(const loom_target_facts_t* source,
                                               iree_arena_allocator_t* arena,
                                               loom_target_facts_t** out_facts);
 
-// Applies every explicitly authored common field in |requirement| to
-// |effective|.
+// Applies every explicit common field in |requirement| to |effective| and
+// unions the explicit field sets.
 //
 // The caller must first prove that |effective| satisfies |requirement|.
 void loom_target_facts_builder_apply_requirement(

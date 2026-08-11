@@ -131,9 +131,9 @@ target.generic<reference> @gpu {
   ASSERT_NE(facts->projection, nullptr);
   EXPECT_TRUE(iree_string_view_equal(facts->projection->fact_type->name,
                                      IREE_SV("target")));
-  EXPECT_TRUE(loom_target_facts_field_is_authored(
+  EXPECT_TRUE(loom_target_facts_field_is_explicit(
       facts->projection, LOOM_TARGET_FACT_FIELD_SUBGROUP_SIZE));
-  EXPECT_FALSE(loom_target_facts_field_is_authored(
+  EXPECT_FALSE(loom_target_facts_field_is_explicit(
       facts->projection, LOOM_TARGET_FACT_FIELD_CODEGEN_FORMAT));
   const loom_target_bundle_storage_t& storage = facts->projection->storage;
   EXPECT_EQ(storage.snapshot.max_workgroup_size.x, 256u);
