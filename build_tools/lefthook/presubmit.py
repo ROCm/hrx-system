@@ -990,7 +990,11 @@ def clang_tidy_jobs() -> int:
             return 1
         return max(1, jobs)
     cpu_count = os.cpu_count() or 1
-    default_jobs = max(1, (cpu_count + CLANG_TIDY_DEFAULT_CORE_DIVISOR - 1) // 2)
+    default_jobs = max(
+        1,
+        (cpu_count + CLANG_TIDY_DEFAULT_CORE_DIVISOR - 1)
+        // CLANG_TIDY_DEFAULT_CORE_DIVISOR,
+    )
     return min(cpu_count, CLANG_TIDY_DEFAULT_MAX_JOBS, default_jobs)
 
 
@@ -1452,6 +1456,7 @@ def clang_tidy_bazel_command(
     ]
     if keep_going:
         command.append("--keep_going")
+    command += ["--jobs", str(clang_tidy_jobs())]
     output_groups = [
         CLANG_TIDY_LOCAL_OUTPUT_GROUP if local_outputs else CLANG_TIDY_OUTPUT_GROUP
     ]
