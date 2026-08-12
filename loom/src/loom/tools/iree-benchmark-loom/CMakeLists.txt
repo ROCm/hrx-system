@@ -24,6 +24,7 @@ loom_cc_library(
     "hal_actual.h"
     "hal_setup.h"
     "help.h"
+    "input_ring.h"
     "main.h"
     "manifest.h"
     "model.h"
@@ -51,6 +52,7 @@ loom_cc_library(
     "hal_actual.c"
     "hal_setup.c"
     "help.c"
+    "input_ring.c"
     "main.c"
     "manifest.c"
     "module_query.c"
@@ -142,6 +144,17 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file
+)
+
+loom_cc_test(
+  NAME
+    input_ring_test
+  SRCS
+    "input_ring_test.cc"
+  DEPS
+    ::main
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 loom_cc_test(

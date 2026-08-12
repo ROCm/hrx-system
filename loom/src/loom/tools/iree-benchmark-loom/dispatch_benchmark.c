@@ -14,6 +14,7 @@
 #include "loom/tooling/execution/hal/invocation.h"
 #include "loom/tooling/execution/hal/testbench_actual.h"
 #include "loom/tools/iree-benchmark-loom/case_execution.h"
+#include "loom/tools/iree-benchmark-loom/input_ring.h"
 #include "loom/tools/iree-benchmark-loom/output.h"
 
 typedef struct iree_benchmark_loom_hal_input_ring_t {
@@ -47,35 +48,6 @@ static bool iree_benchmark_loom_hal_invocation_options_equal(
     }
   }
   return true;
-}
-
-static iree_status_t iree_benchmark_loom_hal_input_ring_count_for_sample(
-    const iree_benchmark_loom_options_t* options, uint64_t binding_set_bytes,
-    iree_host_size_t dispatches_per_batch, iree_host_size_t* out_ring_count) {
-  *out_ring_count = 1;
-  if (options->input_ring_count > 0) {
-    *out_ring_count = options->input_ring_count;
-    return iree_ok_status();
-  }
-  if (options->input_ring_min_bytes == 0 || binding_set_bytes == 0) {
-    return iree_ok_status();
-  }
-  const uint64_t requested_min_bytes = (uint64_t)options->input_ring_min_bytes;
-  const uint64_t byte_sized_count =
-      requested_min_bytes / binding_set_bytes +
-      (requested_min_bytes % binding_set_bytes == 0 ? 0 : 1);
-  uint64_t ring_count = byte_sized_count;
-  if (ring_count < dispatches_per_batch) {
-    ring_count = dispatches_per_batch;
-  }
-  if (ring_count > IREE_HOST_SIZE_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "HAL benchmark input ring count %" PRIu64
-                            " exceeds host size limits",
-                            ring_count);
-  }
-  *out_ring_count = (iree_host_size_t)ring_count;
-  return iree_ok_status();
 }
 
 static iree_status_t iree_benchmark_loom_prepare_hal_invocation_plan_for_sample(
@@ -127,9 +99,9 @@ static iree_status_t iree_benchmark_loom_hal_input_ring_initialize(
 
   iree_host_size_t ring_count = 1;
   if (iree_status_is_ok(status)) {
-    status = iree_benchmark_loom_hal_input_ring_count_for_sample(
-        options, first_binding_set_bytes, policy->hal_options.timing.batch_size,
-        &ring_count);
+    ring_count = iree_benchmark_loom_input_ring_select_count(
+        options->input_ring_count, (uint64_t)options->input_ring_min_bytes,
+        first_binding_set_bytes, policy->hal_options.timing.batch_size);
   }
   if (iree_status_is_ok(status)) {
     status = iree_allocator_malloc_array(allocator, ring_count,
@@ -332,9 +304,9 @@ static iree_status_t iree_benchmark_loom_hal_sequence_input_ring_initialize(
 
   iree_host_size_t ring_count = 1;
   if (iree_status_is_ok(status)) {
-    status = iree_benchmark_loom_hal_input_ring_count_for_sample(
-        options, first_binding_set_bytes, policy->hal_options.timing.batch_size,
-        &ring_count);
+    ring_count = iree_benchmark_loom_input_ring_select_count(
+        options->input_ring_count, (uint64_t)options->input_ring_min_bytes,
+        first_binding_set_bytes, policy->hal_options.timing.batch_size);
   }
   iree_host_size_t plan_count = 0;
   if (iree_status_is_ok(status) &&
