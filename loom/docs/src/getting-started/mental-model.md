@@ -254,6 +254,8 @@ threading, and failure contracts.
   actually becomes dispatchable, and a command-program ABI where a reusable
   subgraph becomes materializable.
 
-Browse the [generated language reference](../reference/index.md) for exact
+Continue with [Source modules and canonical
+text](../guide/source-modules.md) to learn the source and composition contract,
+or browse the [generated language reference](../reference/index.md) for exact
 syntax and operation contracts. If the Loom tools are not yet on `PATH`,
 [Acquiring Loom](acquiring-loom.md) describes the current installation status.

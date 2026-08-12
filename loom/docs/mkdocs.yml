@@ -66,6 +66,9 @@ nav:
   - Get started:
       - Acquiring Loom: getting-started/acquiring-loom.md
       - Mental model: getting-started/mental-model.md
+  - Programming guide:
+      - Guide map: guide/index.md
+      - Source modules and canonical text: guide/source-modules.md
   - Reference:
       - Reference map: reference/index.md
       - Dialects: reference/dialects/index.md
