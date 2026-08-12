@@ -1092,13 +1092,79 @@ static void loom_cmd_serialize_write_program(
   loom_cmd_serialize_write_parameters(build, layout, data);
 }
 
+static void loom_cmd_serialize_bind_program(
+    const loom_cmd_serialize_build_t* build,
+    const loom_cmd_program_format_layout_t* layout, iree_byte_span_t data,
+    loom_cmd_program_t* out_program) {
+  loom_cmd_program_requirements_t requirements = build->requirements;
+  requirements.transient = (loom_cmd_program_transient_requirement_t){
+      .binding_index = build->transient_requirement
+                           ? build->transient_requirement->binding_index
+                           : UINT32_MAX,
+      .required_byte_length =
+          build->transient_requirement
+              ? build->transient_requirement->required_byte_length
+              : 0,
+      .minimum_alignment = build->transient_requirement
+                               ? build->transient_requirement->minimum_alignment
+                               : 0,
+  };
+  *out_program = (loom_cmd_program_t){
+      .storage = iree_make_const_byte_span(data.data, data.data_length),
+      .requirements = requirements,
+      .buffer_refs =
+          {
+              .data = data.data + layout->buffer_ref_offset,
+              .count = (uint32_t)build->buffer_refs.count,
+          },
+      .entry_schemas =
+          {
+              .data = data.data + layout->entry_schema_offset,
+              .count = (uint32_t)build->entry_schemas.count,
+          },
+      .entry_schema_kinds =
+          {
+              .data = data.data + layout->entry_schema_kind_offset,
+              .count = (uint32_t)build->entry_schema_kinds.count,
+          },
+      .argument_data = iree_make_const_byte_span(
+          data.data + layout->argument_data_offset, build->argument_data.count),
+      .commands =
+          {
+              .data = data.data + layout->command_offset,
+              .count = (uint32_t)build->commands.count,
+          },
+      .parameter_roots =
+          {
+              .data = data.data + layout->parameter_root_offset,
+              .count = build->parameter_requirements
+                           ? (uint32_t)build->parameter_requirements->root_count
+                           : 0,
+          },
+      .parameters =
+          {
+              .data = data.data + layout->parameter_offset,
+              .count = build->parameter_requirements
+                           ? (uint32_t)build->parameter_requirements->count
+                           : 0,
+          },
+      .parameter_keys =
+          iree_make_const_byte_span(data.data + layout->parameter_key_offset,
+                                    build->parameter_key_length),
+  };
+}
+
 iree_status_t loom_cmd_program_plan_serialize_root(
     const loom_cmd_program_plan_t* plan, iree_host_size_t root_index,
-    iree_byte_span_t* out_data, iree_allocator_t host_allocator) {
+    iree_arena_block_pool_t* block_pool, iree_byte_span_t* out_data,
+    loom_cmd_program_t* out_program, iree_allocator_t host_allocator) {
   IREE_ASSERT_ARGUMENT(plan);
   IREE_ASSERT_LT(root_index, plan->root_count);
+  IREE_ASSERT_ARGUMENT(block_pool);
   IREE_ASSERT_ARGUMENT(out_data);
+  IREE_ASSERT_ARGUMENT(out_program);
   *out_data = iree_make_byte_span(NULL, 0);
+  *out_program = (loom_cmd_program_t){0};
   loom_module_t* module = plan->root_module;
   const loom_cmd_program_root_t* root = &plan->roots[root_index];
   const loom_op_t* function_op = root->function_op;
@@ -1118,7 +1184,7 @@ iree_status_t loom_cmd_program_plan_serialize_root(
   IREE_ASSERT_EQ(function_op->result_count, 0u);
 
   iree_arena_allocator_t arena;
-  iree_arena_initialize(module->arena.block_pool, &arena);
+  iree_arena_initialize(block_pool, &arena);
   loom_local_value_domain_t value_domain = {0};
   iree_status_t status = loom_local_value_domain_acquire_for_region(
       module, body, &arena, &value_domain);
@@ -1202,6 +1268,7 @@ iree_status_t loom_cmd_program_plan_serialize_root(
   if (iree_status_is_ok(status)) {
     *out_data = iree_make_byte_span(data, layout.total_length);
     loom_cmd_serialize_write_program(&build, &layout, *out_data);
+    loom_cmd_serialize_bind_program(&build, &layout, *out_data, out_program);
   }
 
   if (loom_local_value_domain_is_acquired(&value_domain)) {

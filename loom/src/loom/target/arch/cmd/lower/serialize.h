@@ -10,7 +10,9 @@
 #define LOOM_TARGET_ARCH_CMD_LOWER_SERIALIZE_H_
 
 #include "iree/base/api.h"
+#include "iree/base/internal/arena.h"
 #include "loom/target/arch/cmd/lower/program_plan.h"
+#include "loom/target/arch/cmd/program.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,11 +34,15 @@ extern "C" {
 // parameter-requirement tables and retains no module, operation, value,
 // symbol, or string storage.
 //
+// |block_pool| supplies invocation-local scratch storage and permits concurrent
+// serialization of the same immutable plan from independent workspaces.
 // |out_data| is empty on failure. The caller owns returned bytes and must free
-// them with |host_allocator|.
+// them with |host_allocator|. |out_program| is an infallibly bound trusted view
+// borrowing those bytes; only externally loaded bytes require parsing.
 iree_status_t loom_cmd_program_plan_serialize_root(
     const loom_cmd_program_plan_t* plan, iree_host_size_t root_index,
-    iree_byte_span_t* out_data, iree_allocator_t host_allocator);
+    iree_arena_block_pool_t* block_pool, iree_byte_span_t* out_data,
+    loom_cmd_program_t* out_program, iree_allocator_t host_allocator);
 
 #ifdef __cplusplus
 }  // extern "C"

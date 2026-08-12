@@ -186,18 +186,73 @@ static iree_status_t loom_cmd_program_plan_check_print_module(
 // Textual expectations continue to describe the source and Low semantics while
 // this closure proves that the same production plan serializes into an artifact
 // accepted by the artifact's untrusted-byte parser.
+static bool loom_cmd_program_plan_check_tables_equal(
+    loom_cmd_program_table_t lhs, loom_cmd_program_table_t rhs) {
+  return lhs.data == rhs.data && lhs.count == rhs.count;
+}
+
+static bool loom_cmd_program_plan_check_views_equal(
+    const loom_cmd_program_t* lhs, const loom_cmd_program_t* rhs) {
+  return lhs->storage.data == rhs->storage.data &&
+         lhs->storage.data_length == rhs->storage.data_length &&
+         lhs->requirements.fixed_buffer_count ==
+             rhs->requirements.fixed_buffer_count &&
+         lhs->requirements.rebindable_binding_count ==
+             rhs->requirements.rebindable_binding_count &&
+         lhs->requirements.executable_count ==
+             rhs->requirements.executable_count &&
+         lhs->requirements.entry_count == rhs->requirements.entry_count &&
+         lhs->requirements.transient.binding_index ==
+             rhs->requirements.transient.binding_index &&
+         lhs->requirements.transient.required_byte_length ==
+             rhs->requirements.transient.required_byte_length &&
+         lhs->requirements.transient.minimum_alignment ==
+             rhs->requirements.transient.minimum_alignment &&
+         lhs->requirements.launch_counts.binding_index ==
+             rhs->requirements.launch_counts.binding_index &&
+         lhs->requirements.launch_counts.required_byte_length ==
+             rhs->requirements.launch_counts.required_byte_length &&
+         lhs->requirements.launch_counts.minimum_alignment ==
+             rhs->requirements.launch_counts.minimum_alignment &&
+         loom_cmd_program_plan_check_tables_equal(lhs->buffer_refs,
+                                                  rhs->buffer_refs) &&
+         loom_cmd_program_plan_check_tables_equal(lhs->entry_schemas,
+                                                  rhs->entry_schemas) &&
+         loom_cmd_program_plan_check_tables_equal(lhs->entry_schema_kinds,
+                                                  rhs->entry_schema_kinds) &&
+         lhs->argument_data.data == rhs->argument_data.data &&
+         lhs->argument_data.data_length == rhs->argument_data.data_length &&
+         loom_cmd_program_plan_check_tables_equal(lhs->commands,
+                                                  rhs->commands) &&
+         loom_cmd_program_plan_check_tables_equal(lhs->parameter_roots,
+                                                  rhs->parameter_roots) &&
+         loom_cmd_program_plan_check_tables_equal(lhs->parameters,
+                                                  rhs->parameters) &&
+         lhs->parameter_keys.data == rhs->parameter_keys.data &&
+         lhs->parameter_keys.data_length == rhs->parameter_keys.data_length;
+}
+
 static iree_status_t loom_cmd_program_plan_check_roundtrip_artifacts(
-    const loom_cmd_program_plan_t* plan, iree_allocator_t host_allocator) {
+    const loom_cmd_program_plan_t* plan, iree_arena_block_pool_t* block_pool,
+    iree_allocator_t host_allocator) {
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < plan->root_count && iree_status_is_ok(status); ++i) {
     iree_byte_span_t data = iree_byte_span_empty();
-    status =
-        loom_cmd_program_plan_serialize_root(plan, i, &data, host_allocator);
+    loom_cmd_program_t direct_program = {0};
+    status = loom_cmd_program_plan_serialize_root(
+        plan, i, block_pool, &data, &direct_program, host_allocator);
     if (iree_status_is_ok(status)) {
-      loom_cmd_program_t program = {0};
+      loom_cmd_program_t parsed_program = {0};
       status = loom_cmd_program_parse(
-          iree_make_const_byte_span(data.data, data.data_length), &program);
+          iree_make_const_byte_span(data.data, data.data_length),
+          &parsed_program);
+      if (iree_status_is_ok(status) && !loom_cmd_program_plan_check_views_equal(
+                                           &direct_program, &parsed_program)) {
+        status = iree_make_status(
+            IREE_STATUS_INTERNAL,
+            "compiler-bound command view disagrees with artifact parser");
+      }
     }
     iree_allocator_free(host_allocator, data.data);
   }
@@ -261,7 +316,7 @@ static iree_status_t loom_cmd_program_plan_check_emit_provider_execute(
   if (iree_status_is_ok(status) && pipeline_result.pass.error_count == 0 &&
       plan_valid) {
     status = loom_cmd_program_plan_check_roundtrip_artifacts(
-        &plan, request->host_allocator);
+        &plan, request->block_pool, request->host_allocator);
   }
   if (iree_status_is_ok(status) && pipeline_result.pass.error_count == 0 &&
       plan_valid) {
