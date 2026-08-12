@@ -12,9 +12,9 @@
 #include "loom/analysis/symbol_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ir/symbol_map.h"
-#include "loom/link/linker.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/target/facts.h"
+#include "loom/rewrite/module_projection.h"
 #include "loom/target/facts.h"
 #include "loom/target/function_version.h"
 #include "loom/target/provider.h"
@@ -144,32 +144,82 @@ static iree_status_t loom_target_sealing_plan_build(
 
 static iree_status_t loom_target_sealing_clone_source(
     const loom_module_t* source_module, iree_arena_block_pool_t* block_pool,
-    iree_allocator_t allocator, loom_module_t** out_module) {
-  const loom_module_t* source_modules[] = {source_module};
-  const loom_link_options_t options = {
-      .module_name = loom_target_sealing_module_name(source_module),
-  };
-  return loom_link_materialized_modules(
-      source_modules, IREE_ARRAYSIZE(source_modules), &options, block_pool,
-      allocator, out_module);
-}
-
-static iree_status_t loom_target_sealing_index_symbols(
-    const loom_module_t* module, iree_arena_allocator_t* arena,
-    loom_symbol_map_t* out_symbol_map) {
+    iree_arena_allocator_t* scratch_arena, iree_allocator_t allocator,
+    loom_ir_module_projection_t* out_projection,
+    loom_symbol_map_t* out_symbol_map, loom_module_t** out_module) {
+  *out_projection = (loom_ir_module_projection_t){0};
   *out_symbol_map = (loom_symbol_map_t){0};
-  for (loom_symbol_id_t symbol_id = 0; symbol_id < module->symbols.count;
-       ++symbol_id) {
-    const loom_string_id_t name_id = module->symbols.entries[symbol_id].name_id;
-    uint16_t indexed_symbol_id = LOOM_SYMBOL_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_symbol_map_find_or_insert(
-        out_symbol_map, arena, name_id, symbol_id, &indexed_symbol_id));
-    if (indexed_symbol_id != symbol_id) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "sealed module contains duplicate symbol names");
+  *out_module = NULL;
+
+  const loom_module_size_hints_t hints = {
+      .value_count = 0,
+      .string_count = source_module->strings.count,
+      .type_count = source_module->types.count,
+      .encoding_count = source_module->encodings.count,
+      .symbol_count = source_module->symbols.count,
+  };
+  loom_module_t* target_module = NULL;
+  IREE_RETURN_IF_ERROR(loom_module_allocate(
+      source_module->context, loom_target_sealing_module_name(source_module),
+      block_pool, &hints, allocator, &target_module));
+  target_module->flags = source_module->flags;
+
+  loom_symbol_ref_t* target_symbols = NULL;
+  iree_status_t status = iree_ok_status();
+  if (source_module->symbols.count > 0) {
+    status = iree_arena_allocate_array(
+        scratch_arena, source_module->symbols.count, sizeof(*target_symbols),
+        (void**)&target_symbols);
+  }
+  for (loom_symbol_id_t source_symbol_id = 0;
+       source_symbol_id < source_module->symbols.count &&
+       iree_status_is_ok(status);
+       ++source_symbol_id) {
+    const loom_symbol_t* source_symbol =
+        &source_module->symbols.entries[source_symbol_id];
+    loom_string_id_t target_name_id = LOOM_STRING_ID_INVALID;
+    status = loom_module_intern_string(
+        target_module, source_module->strings.entries[source_symbol->name_id],
+        &target_name_id);
+    loom_symbol_id_t target_symbol_id = LOOM_SYMBOL_ID_INVALID;
+    if (iree_status_is_ok(status)) {
+      status = loom_module_add_symbol(target_module, target_name_id,
+                                      &target_symbol_id);
+    }
+    if (iree_status_is_ok(status)) {
+      target_module->symbols.entries[target_symbol_id].flags =
+          source_symbol->flags;
+      uint16_t indexed_symbol_id = LOOM_SYMBOL_ID_INVALID;
+      status = loom_symbol_map_find_or_insert(out_symbol_map, scratch_arena,
+                                              target_name_id, target_symbol_id,
+                                              &indexed_symbol_id);
+      if (iree_status_is_ok(status) && indexed_symbol_id != target_symbol_id) {
+        status =
+            iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                             "source module contains duplicate symbol names");
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      target_symbols[source_symbol_id] = (loom_symbol_ref_t){
+          .module_id = 0,
+          .symbol_id = target_symbol_id,
+      };
     }
   }
-  return iree_ok_status();
+  if (iree_status_is_ok(status)) {
+    status = loom_ir_module_projection_initialize(
+        source_module, target_module, target_symbols,
+        source_module->symbols.count, out_projection);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_ir_module_projection_clone(out_projection, scratch_arena);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_module = target_module;
+    target_module = NULL;
+  }
+  loom_module_free(target_module);
+  return status;
 }
 
 static iree_status_t loom_target_sealing_reuse_definitions(
@@ -289,53 +339,32 @@ static iree_status_t loom_target_sealing_materialize_definitions(
   return iree_ok_status();
 }
 
-static iree_status_t loom_target_sealing_find_cloned_function(
-    const loom_module_t* source_module, loom_symbol_id_t source_symbol_id,
-    loom_module_t* sealed_module, const loom_symbol_map_t* sealed_symbol_map,
-    loom_func_like_t* out_function) {
-  *out_function = (loom_func_like_t){0};
-  const loom_symbol_t* source_symbol =
-      &source_module->symbols.entries[source_symbol_id];
-  const iree_string_view_t source_name =
-      source_module->strings.entries[source_symbol->name_id];
-  const loom_string_id_t sealed_name_id =
-      loom_module_lookup_string(sealed_module, source_name);
-  const loom_symbol_id_t sealed_symbol_id =
-      loom_symbol_map_find(sealed_symbol_map, sealed_name_id);
-  if (sealed_symbol_id == LOOM_SYMBOL_ID_INVALID) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "sealed module clone did not preserve function symbol '@%.*s'",
-        (int)source_name.size, source_name.data);
-  }
-  const loom_symbol_t* sealed_symbol =
-      &sealed_module->symbols.entries[sealed_symbol_id];
-  const loom_func_like_t function =
-      loom_func_like_cast(sealed_module, sealed_symbol->defining_op);
-  if (!loom_func_like_isa(function) ||
-      function.vtable->target_attr_index == LOOM_ATTR_INDEX_NONE) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "sealed symbol '@%.*s' is not a target-assignable function",
-        (int)source_name.size, source_name.data);
-  }
-  *out_function = function;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_target_sealing_bind_functions(
     const loom_module_t* source_module, loom_module_t* sealed_module,
-    const loom_symbol_map_t* sealed_symbol_map,
+    const loom_ir_module_projection_t* projection,
     const loom_target_sealing_plan_t* plan) {
   for (loom_symbol_id_t symbol_id = 0; symbol_id < source_module->symbols.count;
        ++symbol_id) {
     const iree_host_size_t group_index =
         plan->group_indices_by_symbol[symbol_id];
     if (group_index == IREE_HOST_SIZE_MAX) continue;
-    loom_func_like_t sealed_function = {0};
-    IREE_RETURN_IF_ERROR(loom_target_sealing_find_cloned_function(
-        source_module, symbol_id, sealed_module, sealed_symbol_map,
-        &sealed_function));
+    const loom_symbol_ref_t sealed_ref =
+        loom_ir_module_projection_target_symbol(projection, symbol_id);
+    const loom_symbol_t* sealed_symbol =
+        &sealed_module->symbols.entries[sealed_ref.symbol_id];
+    const loom_func_like_t sealed_function =
+        loom_func_like_cast(sealed_module, sealed_symbol->defining_op);
+    if (!loom_func_like_isa(sealed_function) ||
+        sealed_function.vtable->target_attr_index == LOOM_ATTR_INDEX_NONE) {
+      const loom_symbol_t* source_symbol =
+          &source_module->symbols.entries[symbol_id];
+      const iree_string_view_t source_name =
+          source_module->strings.entries[source_symbol->name_id];
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "sealed symbol '@%.*s' is not a target-assignable function",
+          (int)source_name.size, source_name.data);
+    }
     loom_func_like_set_target(sealed_module, sealed_function,
                               plan->groups[group_index].target_ref);
   }
@@ -361,6 +390,7 @@ iree_status_t loom_target_module_seal(
   iree_arena_initialize(block_pool, &scratch_arena);
   loom_target_sealing_plan_t plan = {0};
   loom_module_t* sealed_module = NULL;
+  loom_ir_module_projection_t projection = {0};
   loom_symbol_map_t sealed_symbol_map = {0};
   loom_symbol_fact_table_t target_fact_table;
   loom_symbol_fact_table_initialize(&target_fact_table, &scratch_arena);
@@ -368,12 +398,9 @@ iree_status_t loom_target_module_seal(
   iree_status_t status = loom_target_sealing_plan_build(
       source_module, function_versions, &scratch_arena, &plan);
   if (iree_status_is_ok(status)) {
-    status = loom_target_sealing_clone_source(source_module, block_pool,
-                                              allocator, &sealed_module);
-  }
-  if (iree_status_is_ok(status) && plan.group_count > 0) {
-    status = loom_target_sealing_index_symbols(sealed_module, &scratch_arena,
-                                               &sealed_symbol_map);
+    status = loom_target_sealing_clone_source(
+        source_module, block_pool, &scratch_arena, allocator, &projection,
+        &sealed_symbol_map, &sealed_module);
   }
   if (iree_status_is_ok(status) && plan.group_count > 0) {
     status = loom_target_sealing_reuse_definitions(sealed_module,
@@ -386,7 +413,7 @@ iree_status_t loom_target_module_seal(
   }
   if (iree_status_is_ok(status) && plan.group_count > 0) {
     status = loom_target_sealing_bind_functions(source_module, sealed_module,
-                                                &sealed_symbol_map, &plan);
+                                                &projection, &plan);
   }
   if (iree_status_is_ok(status)) {
     *out_sealed_module = sealed_module;

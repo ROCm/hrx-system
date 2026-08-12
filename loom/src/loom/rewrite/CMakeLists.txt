@@ -126,6 +126,40 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    module_projection
+  HDRS
+    "module_projection.h"
+  SRCS
+    "module_projection.c"
+  DEPS
+    ::materialize
+    ::remap
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::ops::op_defs
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    module_projection_test
+  SRCS
+    "module_projection_test.cc"
+  DEPS
+    ::module_projection
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::format::text::printer
+    loom::ir
+    loom::ops::func
+    loom::verify
+)
+
+loom_cc_library(
+  NAME
     callable
   HDRS
     "callable.h"

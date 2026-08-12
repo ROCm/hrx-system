@@ -172,9 +172,9 @@ loom_cc_library(
     loom::analysis::symbol_facts
     loom::ir
     loom::ir::symbol_map
-    loom::link::linker
     loom::ops::op_defs
     loom::ops::target
+    loom::rewrite::module_projection
   PUBLIC
 )
 
