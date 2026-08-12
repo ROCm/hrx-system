@@ -411,6 +411,35 @@ func.def public @targetless_entry() {
   EXPECT_EQ(loom_attr_as_i64(index_bitwidth), 64);
 }
 
+TEST_F(TargetModuleSealingTest,
+       MaterializedDefinitionsFollowAppendedSymbolOrder) {
+  ModulePtr source = Parse(R"(
+func.def public @entry() {
+  func.return
+}
+)");
+  loom_target_facts_t facts = {};
+  InitializeFacts(LOOM_TEST_TARGET_KIND_LOW_CORE, 0, &facts);
+  loom_target_function_version_t version =
+      MakeVersion(source.get(), IREE_SV("entry"), &kTestProvider, &facts);
+  loom_function_version_t* version_values[] = {&version.base};
+  const loom_function_version_list_t versions = {
+      /*.values=*/version_values,
+      /*.count=*/IREE_ARRAYSIZE(version_values),
+  };
+
+  ModulePtr sealed = Seal(source.get(), &versions);
+
+  ASSERT_EQ(sealed->symbols.count, 2u);
+  const loom_symbol_t* target_symbol = &sealed->symbols.entries[1];
+  ASSERT_TRUE(loom_test_target_isa(target_symbol->defining_op));
+  EXPECT_EQ(loom_module_block(sealed.get())->last_op,
+            target_symbol->defining_op);
+  const std::string sealed_text = Print(sealed.get());
+  ModulePtr reparsed = Parse(sealed_text.c_str());
+  EXPECT_EQ(Print(reparsed.get()), sealed_text);
+}
+
 TEST_F(TargetModuleSealingTest, ReusesOnlyAnExactlyEquivalentDefinition) {
   ModulePtr source = Parse(R"(
 test.target<low_core> @exact

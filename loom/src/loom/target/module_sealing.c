@@ -249,11 +249,8 @@ static iree_status_t loom_target_sealing_materialize_definitions(
     loom_symbol_fact_table_t* fact_table, iree_arena_allocator_t* arena,
     loom_target_sealing_plan_t* plan) {
   loom_builder_t builder;
-  loom_block_t* module_block = loom_module_block(module);
-  loom_builder_initialize(module, &module->arena, module_block, &builder);
-  if (module_block->first_op != NULL) {
-    loom_builder_set_before(&builder, module_block->first_op);
-  }
+  loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                          &builder);
 
   for (iree_host_size_t i = 0; i < plan->group_count; ++i) {
     loom_target_sealing_group_t* group = &plan->groups[i];
