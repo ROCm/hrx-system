@@ -314,8 +314,9 @@ static void iree_task_worker_eager_complete_compute_process(
 // Releases a compute slot's current process ownership. Clears the slot, resets
 // the slot generation for reuse, optionally reclaims a non-terminal process if
 // new work arrived during the sleep transition, and frees drain-accessed
-// resources only for terminal processes. Called by the worker that
-// successfully CAS'd active_drainers from gen|0 to gen|SENTINEL.
+// resources only for terminal processes. Called by a worker holding exclusive
+// release-sentinel ownership after transferring either the final active
+// drainer claim or the final warm-retainer claim.
 //
 // |tagged_sentinel| is the full 64-bit value (gen|SENTINEL) currently in
 // active_drainers. The generation bits are preserved and incremented when
@@ -469,35 +470,111 @@ static void iree_task_worker_release_compute_process(
   }
 }
 
-// Attempts to claim and release the caller's observed compute-slot lifetime.
-// The active-drainer value must still be the exact empty generation produced by
-// the caller's drain exit; a later generation belongs to a newer slot lifetime
-// and must not be cleared by this release attempt.
-static bool iree_task_worker_try_release_compute_process(
-    iree_task_worker_t* worker, iree_task_compute_slot_t* slot,
-    iree_task_process_t* process, int64_t expected_empty_drainers,
-    int32_t expected_placement_epoch, bool process_is_terminal) {
+// Attempts to transfer an empty active-drainer generation into exclusive
+// release ownership. This touches only slot storage, which outlives every
+// process placed in the slot. The caller may inspect process-owned state only
+// after this succeeds.
+static bool iree_task_worker_try_claim_compute_process_release(
+    iree_task_compute_slot_t* slot, int64_t expected_empty_drainers,
+    int32_t expected_placement_epoch, int64_t* out_tagged_sentinel) {
   int64_t current_drainers =
       iree_atomic_load(&slot->active_drainers, iree_memory_order_acquire);
   if (current_drainers != expected_empty_drainers) return false;
-
   if (iree_atomic_load(&slot->placement_epoch, iree_memory_order_acquire) !=
       expected_placement_epoch) {
     return false;
   }
 
-  if (iree_task_process_warm_retainer_count(process) != 0) return false;
-
-  int64_t expected_empty = expected_empty_drainers;
-  int64_t sentinel = expected_empty_drainers | IREE_TASK_SLOT_SENTINEL;
-  if (iree_atomic_compare_exchange_strong(
-          &slot->active_drainers, &expected_empty, sentinel,
-          iree_memory_order_acq_rel, iree_memory_order_relaxed)) {
-    iree_task_worker_release_compute_process(worker, slot, process,
-                                             process_is_terminal, sentinel);
-    return true;
+  const int64_t tagged_sentinel =
+      expected_empty_drainers | IREE_TASK_SLOT_SENTINEL;
+  if (!iree_atomic_compare_exchange_strong(
+          &slot->active_drainers, &current_drainers, tagged_sentinel,
+          iree_memory_order_acq_rel, iree_memory_order_acquire)) {
+    return false;
   }
-  return false;
+  *out_tagged_sentinel = tagged_sentinel;
+  return true;
+}
+
+// Drops the caller's active drainer claim while acquiring exclusive release
+// ownership if it was the last active drainer. A concurrent join or exit causes
+// the CAS to retry against the current count, so a successful last-drainer
+// transition moves directly from gen|1 to gen|SENTINEL without exposing a
+// zero-count process lifetime gap.
+static bool iree_task_worker_leave_and_try_claim_compute_process_release(
+    iree_task_compute_slot_t* slot, int64_t* out_empty_drainers,
+    int32_t* out_remaining_drainers, int64_t* out_tagged_sentinel) {
+  int64_t current_drainers =
+      iree_atomic_load(&slot->active_drainers, iree_memory_order_acquire);
+  while (true) {
+    const int32_t active_count = (int32_t)current_drainers;
+    IREE_ASSERT(active_count > 0, "active drainer count underflow");
+    const int64_t empty_drainers = current_drainers & ~(int64_t)UINT32_MAX;
+    const bool is_last_drainer = active_count == 1;
+    const int64_t desired_drainers =
+        is_last_drainer ? empty_drainers | IREE_TASK_SLOT_SENTINEL
+                        : current_drainers - 1;
+    if (iree_atomic_compare_exchange_weak(
+            &slot->active_drainers, &current_drainers, desired_drainers,
+            iree_memory_order_acq_rel, iree_memory_order_acquire)) {
+      *out_empty_drainers = empty_drainers;
+      *out_remaining_drainers = active_count - 1;
+      *out_tagged_sentinel = is_last_drainer ? desired_drainers : 0;
+      return is_last_drainer;
+    }
+  }
+}
+
+// Restores an exclusively claimed slot when the process must remain live.
+// Workers that raced the sentinel may temporarily perturb its low count bits
+// while bailing; wait until each has undone its claim before publishing zero.
+static void iree_task_worker_restore_compute_process_release(
+    iree_task_compute_slot_t* slot, int64_t expected_empty_drainers,
+    int64_t tagged_sentinel) {
+  int64_t expected_sentinel = tagged_sentinel;
+  while (!iree_atomic_compare_exchange_weak(
+      &slot->active_drainers, &expected_sentinel, expected_empty_drainers,
+      iree_memory_order_acq_rel, iree_memory_order_acquire)) {
+    iree_processor_yield();
+    expected_sentinel = tagged_sentinel;
+  }
+}
+
+// Transfers the final warm-retainer lifetime claim into release arbitration.
+// A concurrent active drainer may already own the sentinel and still observe
+// the warm claim before it was dropped. Wait until that arbitration either
+// advances the generation, restores the empty slot for us to claim, or leaves a
+// registered active drainer responsible for release.
+static void iree_task_worker_release_final_warm_compute_process(
+    iree_task_worker_t* worker, iree_task_compute_slot_t* slot,
+    iree_task_process_t* process, int64_t expected_empty_drainers,
+    int32_t expected_placement_epoch) {
+  const int64_t expected_generation =
+      expected_empty_drainers & ~(int64_t)UINT32_MAX;
+  while (true) {
+    int64_t tagged_sentinel = 0;
+    if (iree_task_worker_try_claim_compute_process_release(
+            slot, expected_empty_drainers, expected_placement_epoch,
+            &tagged_sentinel)) {
+      if (iree_task_process_warm_retainer_count(process) != 0) {
+        iree_task_worker_restore_compute_process_release(
+            slot, expected_empty_drainers, tagged_sentinel);
+      } else {
+        iree_task_worker_release_compute_process(worker, slot, process,
+                                                 /*process_is_terminal=*/false,
+                                                 tagged_sentinel);
+      }
+      return;
+    }
+
+    const int64_t current_drainers =
+        iree_atomic_load(&slot->active_drainers, iree_memory_order_acquire);
+    if ((current_drainers & ~(int64_t)UINT32_MAX) != expected_generation ||
+        (int32_t)current_drainers > 0) {
+      return;
+    }
+    iree_processor_yield();
+  }
 }
 
 static iree_time_t iree_task_worker_deadline_after(iree_time_t now,
@@ -691,9 +768,9 @@ static bool iree_task_worker_drain_compute_slots(iree_task_worker_t* worker) {
                                   IREE_TASK_EXECUTOR_MAX_COMPUTE_SLOTS;
     iree_task_compute_slot_t* slot = &executor->compute_slots[slot_index];
 
-    // Quick check: skip empty slots without touching active_drainers.
-    // Relaxed is sufficient — this is just a hint to avoid the expensive
-    // fetch_add on the common case of empty slots.
+    // Quick check: skip empty slots without touching active_drainers. This is
+    // just a hint to avoid the expensive fetch_add on the common case of empty
+    // slots; the process pointer is revalidated after registering below.
     intptr_t quick =
         iree_atomic_load(&slot->process, iree_memory_order_acquire);
     if (!quick || quick == IREE_TASK_COMPUTE_SLOT_RESERVED) continue;
@@ -734,9 +811,10 @@ static bool iree_task_worker_drain_compute_slots(iree_task_worker_t* worker) {
       continue;
     }
 
-    // From here, we are a registered drainer. The process pointer is valid
-    // and will remain valid until we decrement active_drainers — the
-    // release path waits for active_drainers to reach zero.
+    // From here, we are a registered drainer and the process pointer is valid.
+    // Any path that continues accessing the process after leaving active
+    // draining must first transfer this lifetime claim into warm-retainer or
+    // release-sentinel ownership.
     bool is_terminal = iree_task_process_is_terminal(process);
     bool drained_process_work = false;
     bool drained_process_keep_active = false;
@@ -825,54 +903,41 @@ static bool iree_task_worker_drain_compute_slots(iree_task_worker_t* worker) {
       did_work = did_work || entered_warm;
     }
 
-    // Unregister as active drainer. The fetch_sub(1) returns the previous
-    // 64-bit tagged value; extract the count from the low 32 bits to check
-    // if we were the last drainer.
-    //
-    // If we're the last drainer out and either the process is terminal or no
-    // one requested another drain pass, try to claim slot release by CAS-ing
-    // active_drainers from gen|0 to gen|SENTINEL. The generation bits (from our
-    // fetch_sub result) must match — if another worker completed an entire
-    // release cycle between our fetch_sub and our CAS, the generation will have
-    // incremented and our CAS fails harmlessly. This eliminates the ABA race
-    // that existed with the 32-bit counter.
-    int64_t old_drainers = iree_atomic_fetch_sub(&slot->active_drainers, 1,
-                                                 iree_memory_order_acq_rel);
-    int64_t release_generation = old_drainers & ~(int64_t)UINT32_MAX;
-    int32_t remaining = (int32_t)old_drainers - 1;
+    int64_t release_generation = 0;
+    int64_t tagged_sentinel = 0;
+    int32_t remaining = 0;
+    bool owns_release = false;
+    if (is_terminal ||
+        (!drained_process_work && !drained_process_keep_active)) {
+      // This drain may release the process. Transfer the final active claim
+      // directly into the release sentinel so process lifetime remains
+      // continuous while the last-drainer decision reads shared process state.
+      owns_release =
+          iree_task_worker_leave_and_try_claim_compute_process_release(
+              slot, &release_generation, &remaining, &tagged_sentinel);
+    } else {
+      // Useful work and local keep-active decisions require another drain pass
+      // without consulting process-owned state. Preserve the common one-RMW
+      // path and let this worker return to the executor loop immediately.
+      const int64_t old_drainers = iree_atomic_fetch_sub(
+          &slot->active_drainers, 1, iree_memory_order_acq_rel);
+      release_generation = old_drainers & ~(int64_t)UINT32_MAX;
+      remaining = (int32_t)old_drainers - 1;
+    }
 
-    if (remaining == 0) {
-      // Only the last drainer is allowed to clear needs_drain. A non-last
-      // drainer that returned did_work=false may have observed a stale empty
-      // process-local state while another drainer or a schedule_process call
-      // was concurrently publishing more work; clearing needs_drain in that
-      // non-last path could strand the work against the true last drainer's
-      // release decision.
-      //
-      // The last drainer combines four signals into its sleep decision:
-      //   1. drained_process_work — our own local did-useful-work result,
-      //      which no global flag carries across drainers but is the most
-      //      precise signal we have about "did this worker just see work".
-      //   2. drained_process_keep_active — our own local retry-soon hint for
-      //      a bounded cooperative handoff. This is intentionally not shared
-      //      through needs_drain because it is not useful work.
-      //   3. global retain_drain — the shared publication from peer drainers
-      //      that elected to stay active without useful work.
-      //   4. global needs_drain — the shared publication from peer drainers
-      //      (via the sticky store above) and from external
-      //      schedule_process callers. We consume this with an exchange so
-      //      future activations start from a clean slate.
-      //
-      // Warm retainers are not part of needs_drain: their slot lifetime claim
-      // is carried by process->warm_retainers. As long as any warm worker
-      // exists, release is skipped even when no immediate drain pass is
-      // requested.
-      //
-      // A did_work=true last drainer skips the exchange and leaves
-      // needs_drain set for the next pass to consume; worst case this is
-      // one extra no-work drain before the process actually releases. A
-      // did_work=false last drainer must consume the global flag to avoid
-      // missing a cross-drainer wake signal.
+    if (owns_release) {
+      // The sentinel now excludes new drainers and orders all prior drainer
+      // exits before these process reads. Refresh terminal state because a peer
+      // may have completed the process before dropping its claim.
+      is_terminal = is_terminal || iree_task_process_is_terminal(process);
+
+      // Only the sentinel owner clears the shared drain publications. A
+      // non-final drainer may observe no local work while a peer or external
+      // schedule call is publishing more, so its local result cannot safely
+      // consume these process-wide signals. Local useful-work and keep-active
+      // results take precedence and intentionally leave sticky publications
+      // for the next pass; a no-work sentinel owner consumes both signals to
+      // decide whether the process can sleep.
       bool needs_drain = drained_process_work || drained_process_keep_active;
       if (!is_terminal) {
         if (!needs_drain) {
@@ -884,23 +949,23 @@ static bool iree_task_worker_drain_compute_slots(iree_task_worker_t* worker) {
                                              iree_memory_order_acq_rel) != 0;
         }
         if (needs_drain) {
-          // If the final active drainer entered warm retention, any re-drain
-          // signal requires it to rejoin before sleeping. Once it drops active
-          // ownership, only warm retainers may remain, and those retainers are
-          // waiting for an active drainer to advance the retention epoch.
+          // A final active drainer that also retained warm must rejoin before
+          // waiting. Once its active ownership is restored to zero, the warm
+          // retainers are waiting for an active drainer to advance the
+          // retention epoch.
           did_work = true;
           rejoin_warm = entered_warm;
         }
       }
 
-      if (is_terminal || !needs_drain) {
-        // Release the slot if there are no warm retainers. CAS failure means a
-        // new worker incremented active_drainers between our decrement and the
-        // CAS, or another worker already released this slot. Either way,
-        // release is handled.
-        iree_task_worker_try_release_compute_process(
-            worker, slot, process, release_generation, slot_placement_epoch,
-            is_terminal);
+      const bool has_warm_retainers =
+          iree_task_process_warm_retainer_count(process) != 0;
+      if ((is_terminal || !needs_drain) && !has_warm_retainers) {
+        iree_task_worker_release_compute_process(worker, slot, process,
+                                                 is_terminal, tagged_sentinel);
+      } else {
+        iree_task_worker_restore_compute_process_release(
+            slot, release_generation, tagged_sentinel);
       }
     }
 
@@ -942,9 +1007,8 @@ static bool iree_task_worker_drain_compute_slots(iree_task_worker_t* worker) {
             &process->warm_retainers, 1, iree_memory_order_acq_rel);
         IREE_ASSERT(prior_warm_retainers > 0, "warm retainer count underflow");
         if (!rejoin_process && prior_warm_retainers == 1) {
-          iree_task_worker_try_release_compute_process(
-              worker, slot, process, release_generation, slot_placement_epoch,
-              iree_task_process_is_terminal(process));
+          iree_task_worker_release_final_warm_compute_process(
+              worker, slot, process, release_generation, slot_placement_epoch);
         }
       }
       did_work = true;

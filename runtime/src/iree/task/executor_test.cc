@@ -600,6 +600,55 @@ static void compute_completion(iree_task_process_t* process,
   context->Notify();
 }
 
+// Context for repeatedly reusing process storage as soon as release_fn
+// publishes that all scheduler access has ended.
+struct ComputeReleaseContext : public TestWaiter {
+  // Total jobs in each scheduled process lifetime.
+  int32_t job_count = 0;
+
+  // Next job ordinal available to a drainer.
+  std::atomic<int32_t> next_job_ordinal{0};
+
+  // Number of jobs completed by drainers.
+  std::atomic<int32_t> completed_job_count{0};
+
+  // Set by release_fn after the process is safe to reuse.
+  std::atomic<bool> released{false};
+};
+
+static iree_status_t compute_release_drain(
+    iree_task_process_t* process,
+    const iree_task_worker_context_t* worker_context,
+    iree_task_process_drain_result_t* result) {
+  (void)worker_context;
+  auto* context = reinterpret_cast<ComputeReleaseContext*>(process->user_data);
+  const int32_t job_ordinal =
+      context->next_job_ordinal.fetch_add(1, std::memory_order_acq_rel);
+  if (job_ordinal >= context->job_count) {
+    result->completed = context->completed_job_count.load(
+                            std::memory_order_acquire) >= context->job_count;
+    return iree_ok_status();
+  }
+
+  const int32_t completed_job_count =
+      context->completed_job_count.fetch_add(1, std::memory_order_acq_rel) + 1;
+  result->did_work = true;
+  result->completed = completed_job_count >= context->job_count;
+  return iree_ok_status();
+}
+
+static void compute_release_completion(iree_task_process_t* process,
+                                       iree_status_t status) {
+  (void)process;
+  IREE_EXPECT_OK(status);
+}
+
+static void compute_release_release(iree_task_process_t* process) {
+  auto* context = reinterpret_cast<ComputeReleaseContext*>(process->user_data);
+  context->released.store(true, std::memory_order_release);
+  context->Notify();
+}
+
 // Context for a persistent wake_budget > 1 process that repeatedly goes idle
 // and is rescheduled with one more unit of work. This mirrors the executor
 // contract local-task relies on for its long-lived compute process without
@@ -790,6 +839,36 @@ TEST(ExecutorProcessTest, ComputeSlotMultipleWorkerParticipation) {
     }
   }
   EXPECT_GE(participating_workers, 1);
+
+  iree_task_executor_release(executor);
+}
+
+TEST(ExecutorProcessTest, ComputeSlotReleasePublishesProcessQuiescence) {
+  static constexpr int kWorkerCount = 4;
+  static constexpr int kBatchCount = 1000;
+  static constexpr int kJobCount = 8;
+  iree_task_executor_t* executor = CreateExecutor(kWorkerCount);
+
+  ComputeReleaseContext context;
+  context.job_count = kJobCount;
+  iree_task_process_t process;
+  for (int batch = 0; batch < kBatchCount; ++batch) {
+    context.next_job_ordinal.store(0, std::memory_order_relaxed);
+    context.completed_job_count.store(0, std::memory_order_relaxed);
+    context.released.store(false, std::memory_order_relaxed);
+
+    iree_task_process_initialize(compute_release_drain, /*suspend_count=*/0,
+                                 /*wake_budget=*/kWorkerCount, &process);
+    process.completion_fn = compute_release_completion;
+    process.release_fn = compute_release_release;
+    process.user_data = &context;
+    iree_task_executor_schedule_process(executor, &process);
+
+    context.WaitUntil(
+        [&] { return context.released.load(std::memory_order_acquire); });
+    EXPECT_EQ(context.completed_job_count.load(std::memory_order_acquire),
+              kJobCount);
+  }
 
   iree_task_executor_release(executor);
 }
