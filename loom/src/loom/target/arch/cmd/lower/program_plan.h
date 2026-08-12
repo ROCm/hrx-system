@@ -19,6 +19,7 @@
 #include "loom/target/arch/cmd/lower/launch_graph.h"
 #include "loom/target/arch/cmd/lower/parameters.h"
 #include "loom/target/arch/cmd/lower/transients.h"
+#include "loom/target/arch/cmd/program.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -114,6 +115,13 @@ iree_status_t loom_cmd_program_plan_prepare(
     iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_block_pool_t* block_pool, bool* out_valid,
     loom_cmd_program_plan_t* out_plan, iree_allocator_t host_allocator);
+
+// Returns the complete external resource requirements fixed for |root|.
+//
+// The result is the authoritative contract shared by serialization and unit
+// loading. It contains no references to plan storage.
+loom_cmd_program_requirements_t loom_cmd_program_root_requirements(
+    const loom_cmd_program_root_t* root);
 
 // Releases all storage owned by |plan| and resets it to empty.
 void loom_cmd_program_plan_deinitialize(loom_cmd_program_plan_t* plan);

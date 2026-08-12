@@ -165,6 +165,18 @@ command.program.def public @increment_twice(%element_count: index) launch(%sourc
             mixed.launch_function_op);
   EXPECT_EQ(twice.launch_tuple_count, 1u);
   EXPECT_EQ(mixed.launch_tuple_count, 1u);
+  const loom_cmd_program_requirements_t twice_requirements =
+      loom_cmd_program_root_requirements(&twice);
+  EXPECT_EQ(twice_requirements.fixed_buffer_count, 0u);
+  EXPECT_EQ(twice_requirements.rebindable_binding_count, 4u);
+  EXPECT_EQ(twice_requirements.executable_count, 1u);
+  EXPECT_EQ(twice_requirements.entry_count, 1u);
+  EXPECT_EQ(twice_requirements.transient.binding_index, UINT32_MAX);
+  EXPECT_EQ(twice_requirements.launch_counts.binding_index, 3u);
+  EXPECT_EQ(twice_requirements.launch_counts.required_byte_length,
+            LOOM_CMD_PROGRAM_LAUNCH_COUNT_TUPLE_BYTE_LENGTH);
+  EXPECT_EQ(twice_requirements.launch_counts.minimum_alignment,
+            LOOM_CMD_PROGRAM_LAUNCH_COUNT_TUPLE_ALIGNMENT);
 
   ASSERT_EQ(plan.dependency_count, 2u);
   ASSERT_NE(plan.dependency_units, nullptr);

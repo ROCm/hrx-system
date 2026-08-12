@@ -196,6 +196,7 @@ loom_cc_library(
     loom::pass::program
     loom::pass::registry
     loom::target::arch::cmd::abi_layout
+    loom::target::arch::cmd::program
     loom::util::fact_table
   PUBLIC
 )

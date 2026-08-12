@@ -1194,18 +1194,10 @@ iree_status_t loom_cmd_program_plan_serialize_root(
       .arena = &arena,
       .value_domain = &value_domain,
       .value_count = value_domain.value_count,
-      .requirements =
-          {
-              .fixed_buffer_count = root->abi_layout.fixed_buffer_count,
-              .rebindable_binding_count =
-                  root->abi_layout.rebindable_binding_count,
-              .executable_count = root->abi_layout.executable_count,
-              .entry_count = root->abi_layout.entry_count,
-          },
+      .requirements = loom_cmd_program_root_requirements(root),
       .parameter_requirements = parameter_requirements,
       .transient_requirement = transient_requirement,
   };
-  build.requirements.launch_counts.binding_index = UINT32_MAX;
   if (iree_status_is_ok(status) && build.value_count != 0) {
     status =
         iree_arena_allocate_array(&arena, build.value_count,

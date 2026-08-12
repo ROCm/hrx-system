@@ -647,6 +647,37 @@ iree_status_t loom_cmd_program_plan_prepare(
   return status;
 }
 
+loom_cmd_program_requirements_t loom_cmd_program_root_requirements(
+    const loom_cmd_program_root_t* root) {
+  IREE_ASSERT_ARGUMENT(root);
+  loom_cmd_program_requirements_t requirements = {
+      .fixed_buffer_count = root->abi_layout.fixed_buffer_count,
+      .rebindable_binding_count = root->abi_layout.rebindable_binding_count,
+      .executable_count = root->abi_layout.executable_count,
+      .entry_count = root->abi_layout.entry_count,
+      .transient =
+          {
+              .binding_index = root->transient.binding_index,
+              .required_byte_length = root->transient.required_byte_length,
+              .minimum_alignment = root->transient.minimum_alignment,
+          },
+      .launch_counts =
+          {
+              .binding_index = UINT32_MAX,
+          },
+  };
+  if (root->launch_tuple_count != 0) {
+    IREE_ASSERT_GT(requirements.rebindable_binding_count, 0u);
+    requirements.launch_counts = (loom_cmd_program_launch_count_requirement_t){
+        .binding_index = requirements.rebindable_binding_count - 1,
+        .required_byte_length = (uint64_t)root->launch_tuple_count *
+                                LOOM_CMD_PROGRAM_LAUNCH_COUNT_TUPLE_BYTE_LENGTH,
+        .minimum_alignment = LOOM_CMD_PROGRAM_LAUNCH_COUNT_TUPLE_ALIGNMENT,
+    };
+  }
+  return requirements;
+}
+
 void loom_cmd_program_plan_deinitialize(loom_cmd_program_plan_t* plan) {
   if (!plan) return;
   for (iree_host_size_t i = 0; i < plan->root_count; ++i) {

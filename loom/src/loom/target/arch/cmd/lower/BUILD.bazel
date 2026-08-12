@@ -178,6 +178,7 @@ loom_cc_library(
         "//loom/src/loom/pass:program",
         "//loom/src/loom/pass:registry",
         "//loom/src/loom/target/arch/cmd:abi_layout",
+        "//loom/src/loom/target/arch/cmd:program",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
