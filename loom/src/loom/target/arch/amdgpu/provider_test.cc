@@ -283,10 +283,10 @@ class AmdgpuProviderTest : public ::testing::Test {
         /*.provider=*/&loom_amdgpu_target_provider,
         /*.facts=*/facts,
     };
-    loom_op_t* target_op = nullptr;
     IREE_CHECK_OK(loom_amdgpu_target_provider.materialize_definition(
-        &builder, &resolved_target, target_ref, LOOM_LOCATION_UNKNOWN,
-        &target_op));
+        &builder, &resolved_target, target_ref, LOOM_LOCATION_UNKNOWN));
+    loom_op_t* target_op =
+        module->symbols.entries[target_symbol_id].defining_op;
     IREE_ASSERT(target_op != nullptr);
     if (out_target_op != nullptr) *out_target_op = target_op;
     return module;

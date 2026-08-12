@@ -9,36 +9,36 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "loom/analysis/symbol_facts.h"
+#include "iree/base/bitmap.h"
 #include "loom/ir/module.h"
-#include "loom/ir/symbol_map.h"
 #include "loom/ops/op_defs.h"
-#include "loom/ops/target/facts.h"
 #include "loom/rewrite/module_projection.h"
-#include "loom/target/facts.h"
 #include "loom/target/function_version.h"
 #include "loom/target/provider.h"
 
-typedef struct loom_target_sealing_group_t {
-  // Exact provider-owned target facts shared by this group.
-  loom_resolved_target_t resolved_target;
+typedef struct loom_target_sealing_context_table_t {
+  // Context ordinals present in the function-version owner.
+  iree_bitmap_t present;
 
-  // Exact ordinary target definition in the sealed module.
-  loom_symbol_ref_t target_ref;
-} loom_target_sealing_group_t;
+  // Context ordinals with an exact authored target definition.
+  iree_bitmap_t exact;
+
+  // Sealed target definition indexed by context ordinal.
+  loom_symbol_ref_t* target_refs;
+} loom_target_sealing_context_table_t;
 
 typedef struct loom_target_sealing_plan_t {
   // Target versions reconciled against the source module symbol table.
   loom_target_function_version_snapshot_t version_snapshot;
 
-  // Distinct resolved targets in source function-symbol order.
-  loom_target_sealing_group_t* groups;
+  // Direct target-definition projection indexed by producer-owned identity.
+  loom_target_sealing_context_table_t contexts;
 
-  // Number of initialized entries in |groups|.
-  iree_host_size_t group_count;
+  // Number of target contexts requiring provider materialization.
+  iree_host_size_t materialization_count;
 
-  // Group index for each source symbol, or IREE_HOST_SIZE_MAX when unversioned.
-  iree_host_size_t* group_indices_by_symbol;
+  // Collision-free namespace for generated target definition names.
+  iree_host_size_t generated_name_namespace;
 } loom_target_sealing_plan_t;
 
 static iree_string_view_t loom_target_sealing_module_name(
@@ -47,42 +47,103 @@ static iree_string_view_t loom_target_sealing_module_name(
   return module->strings.entries[module->name_id];
 }
 
-static iree_status_t loom_target_sealing_validate_resolved_target(
-    const loom_resolved_target_t* resolved_target) {
-  if (resolved_target->provider == NULL || resolved_target->facts == NULL ||
-      resolved_target->facts->fact_type == NULL) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "target function version has no resolved target");
+static bool loom_target_sealing_parse_generated_name_namespace(
+    iree_string_view_t name, uint32_t* out_namespace) {
+  if (!iree_string_view_consume_prefix(&name,
+                                       IREE_SV("__loom_sealed_target_"))) {
+    return false;
   }
-  const loom_target_provider_t* provider = resolved_target->provider;
-  if (provider->profile_type == NULL ||
-      provider->profile_type->fact_type != resolved_target->facts->fact_type) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "resolved target fact type does not match its owning provider");
+  const iree_host_size_t separator = iree_string_view_find_char(name, '_', 0);
+  if (separator == IREE_STRING_VIEW_NPOS) return false;
+
+  const iree_string_view_t namespace_text =
+      iree_string_view_substr(name, 0, separator);
+  const iree_string_view_t ordinal_text =
+      iree_string_view_substr(name, separator + 1, name.size - separator - 1);
+  uint32_t ignored_ordinal = 0;
+  return iree_string_view_atoi_uint32_base(namespace_text, 10, out_namespace) &&
+         iree_string_view_atoi_uint32_base(ordinal_text, 10, &ignored_ordinal);
+}
+
+static iree_status_t loom_target_sealing_select_generated_name_namespace(
+    const loom_module_t* source_module, iree_arena_allocator_t* arena,
+    iree_host_size_t* out_namespace) {
+  *out_namespace = 0;
+  iree_host_size_t namespace_count = 0;
+  if (!iree_host_size_checked_add(source_module->symbols.count, 1,
+                                  &namespace_count)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "sealed target namespace count overflow");
   }
-  if (provider->materialize_definition == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "target provider family '%.*s' cannot materialize target definitions",
-        (int)provider->profile_type->name.size,
-        provider->profile_type->name.data);
+
+  const iree_host_size_t word_count =
+      iree_bitmap_calculate_words(namespace_count);
+  iree_host_size_t storage_size = 0;
+  if (!iree_host_size_checked_mul(word_count, sizeof(uint64_t),
+                                  &storage_size)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "sealed target namespace bitmap size overflow");
   }
+  uint64_t* words = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(arena, storage_size, (void**)&words));
+  memset(words, 0, storage_size);
+  const iree_bitmap_t used_namespaces = {
+      .bit_count = namespace_count,
+      .words = words,
+  };
+
+  for (loom_symbol_id_t symbol_id = 0; symbol_id < source_module->symbols.count;
+       ++symbol_id) {
+    const loom_symbol_t* symbol = &source_module->symbols.entries[symbol_id];
+    uint32_t namespace_ordinal = 0;
+    if (loom_target_sealing_parse_generated_name_namespace(
+            source_module->strings.entries[symbol->name_id],
+            &namespace_ordinal) &&
+        namespace_ordinal < namespace_count) {
+      iree_bitmap_set(used_namespaces, namespace_ordinal);
+    }
+  }
+
+  *out_namespace = iree_bitmap_find_first_unset(used_namespaces, 0);
+  IREE_ASSERT_LT(*out_namespace, namespace_count);
   return iree_ok_status();
 }
 
-static iree_host_size_t loom_target_sealing_find_group(
-    const loom_target_sealing_plan_t* plan,
-    const loom_resolved_target_t* resolved_target) {
-  for (iree_host_size_t i = 0; i < plan->group_count; ++i) {
-    const loom_resolved_target_t* existing = &plan->groups[i].resolved_target;
-    if (existing->provider == resolved_target->provider &&
-        loom_target_facts_are_equivalent(existing->facts,
-                                         resolved_target->facts)) {
-      return i;
-    }
+static iree_status_t loom_target_sealing_context_table_initialize(
+    iree_host_size_t context_capacity, iree_arena_allocator_t* arena,
+    loom_target_sealing_context_table_t* out_table) {
+  *out_table = (loom_target_sealing_context_table_t){
+      .present = {.bit_count = context_capacity},
+      .exact = {.bit_count = context_capacity},
+  };
+  if (context_capacity == 0) return iree_ok_status();
+
+  const iree_host_size_t bitmap_word_count =
+      iree_bitmap_calculate_words(context_capacity);
+  iree_host_size_t bitmap_storage_count = 0;
+  iree_host_size_t bitmap_storage_size = 0;
+  if (!iree_host_size_checked_mul(bitmap_word_count, 2,
+                                  &bitmap_storage_count) ||
+      !iree_host_size_checked_mul(bitmap_storage_count, sizeof(uint64_t),
+                                  &bitmap_storage_size)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "target context bitmap size overflow");
   }
-  return IREE_HOST_SIZE_MAX;
+  uint64_t* bitmap_storage = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(arena, bitmap_storage_size, (void**)&bitmap_storage));
+  memset(bitmap_storage, 0, bitmap_storage_size);
+  out_table->present.words = bitmap_storage;
+  out_table->exact.words = bitmap_storage + bitmap_word_count;
+
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, context_capacity, sizeof(*out_table->target_refs),
+      (void**)&out_table->target_refs));
+  for (iree_host_size_t i = 0; i < context_capacity; ++i) {
+    out_table->target_refs[i] = loom_symbol_ref_null();
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_target_sealing_plan_build(
@@ -103,21 +164,11 @@ static iree_status_t loom_target_sealing_plan_build(
   IREE_RETURN_IF_ERROR(loom_target_function_version_snapshot_build(
       source_module, function_versions, arena, &out_plan->version_snapshot));
 
-  if (source_module->symbols.count > 0) {
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(arena, source_module->symbols.count,
-                                  sizeof(*out_plan->group_indices_by_symbol),
-                                  (void**)&out_plan->group_indices_by_symbol));
-    for (iree_host_size_t i = 0; i < source_module->symbols.count; ++i) {
-      out_plan->group_indices_by_symbol[i] = IREE_HOST_SIZE_MAX;
-    }
-  }
-  if (function_versions == NULL || function_versions->count == 0) {
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, function_versions->count, sizeof(*out_plan->groups),
-      (void**)&out_plan->groups));
+  const iree_host_size_t context_capacity =
+      function_versions != NULL ? function_versions->count : 0;
+  IREE_RETURN_IF_ERROR(loom_target_sealing_context_table_initialize(
+      context_capacity, arena, &out_plan->contexts));
+  if (context_capacity == 0) return iree_ok_status();
 
   for (loom_symbol_id_t symbol_id = 0; symbol_id < source_module->symbols.count;
        ++symbol_id) {
@@ -125,38 +176,74 @@ static iree_status_t loom_target_sealing_plan_build(
         loom_target_function_version_snapshot_at(&out_plan->version_snapshot,
                                                  symbol_id);
     if (function_version == NULL) continue;
-    IREE_RETURN_IF_ERROR(loom_target_sealing_validate_resolved_target(
-        &function_version->resolved_target));
-
-    iree_host_size_t group_index = loom_target_sealing_find_group(
-        out_plan, &function_version->resolved_target);
-    if (group_index == IREE_HOST_SIZE_MAX) {
-      group_index = out_plan->group_count++;
-      out_plan->groups[group_index] = (loom_target_sealing_group_t){
-          .resolved_target = function_version->resolved_target,
-          .target_ref = loom_symbol_ref_null(),
-      };
+    const loom_target_context_ordinal_t context_ordinal =
+        function_version->target_context_ordinal;
+    IREE_ASSERT_LT(context_ordinal, context_capacity);
+    iree_bitmap_set(out_plan->contexts.present, context_ordinal);
+    if (function_version->authored_target_is_exact) {
+      iree_bitmap_set(out_plan->contexts.exact, context_ordinal);
     }
-    out_plan->group_indices_by_symbol[symbol_id] = group_index;
   }
-  return iree_ok_status();
+
+  const iree_host_size_t present_count =
+      iree_bitmap_count(out_plan->contexts.present);
+  const iree_host_size_t exact_count =
+      iree_bitmap_count(out_plan->contexts.exact);
+  IREE_ASSERT_LE(exact_count, present_count);
+  out_plan->materialization_count = present_count - exact_count;
+  if (out_plan->materialization_count == 0) return iree_ok_status();
+
+  for (loom_symbol_id_t symbol_id = 0; symbol_id < source_module->symbols.count;
+       ++symbol_id) {
+    const loom_target_function_version_t* function_version =
+        loom_target_function_version_snapshot_at(&out_plan->version_snapshot,
+                                                 symbol_id);
+    if (function_version == NULL) continue;
+    const loom_target_context_ordinal_t context_ordinal =
+        function_version->target_context_ordinal;
+    if (iree_bitmap_test(out_plan->contexts.exact, context_ordinal)) continue;
+    const loom_target_provider_t* provider =
+        function_version->resolved_target.provider;
+    if (provider->materialize_definition == NULL) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "target provider family '%.*s' cannot materialize target definitions",
+          (int)provider->profile_type->name.size,
+          provider->profile_type->name.data);
+    }
+  }
+
+  return loom_target_sealing_select_generated_name_namespace(
+      source_module, arena, &out_plan->generated_name_namespace);
 }
 
 static iree_status_t loom_target_sealing_clone_source(
-    const loom_module_t* source_module, iree_arena_block_pool_t* block_pool,
-    iree_arena_allocator_t* scratch_arena, iree_allocator_t allocator,
-    loom_ir_module_projection_t* out_projection,
-    loom_symbol_map_t* out_symbol_map, loom_module_t** out_module) {
+    const loom_module_t* source_module, iree_host_size_t materialization_count,
+    iree_arena_block_pool_t* block_pool, iree_arena_allocator_t* scratch_arena,
+    iree_allocator_t allocator, loom_ir_module_projection_t* out_projection,
+    loom_module_t** out_module) {
   *out_projection = (loom_ir_module_projection_t){0};
-  *out_symbol_map = (loom_symbol_map_t){0};
   *out_module = NULL;
 
+  iree_host_size_t target_string_count = 0;
+  iree_host_size_t target_symbol_count = 0;
+  if (!iree_host_size_checked_add(source_module->strings.count,
+                                  materialization_count,
+                                  &target_string_count) ||
+      !iree_host_size_checked_add(source_module->symbols.count,
+                                  materialization_count,
+                                  &target_symbol_count) ||
+      target_symbol_count > LOOM_SYMBOL_ID_INVALID) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "sealed module exceeds the target string or symbol capacity");
+  }
   const loom_module_size_hints_t hints = {
       .value_count = 0,
-      .string_count = source_module->strings.count,
+      .string_count = target_string_count,
       .type_count = source_module->types.count,
       .encoding_count = source_module->encodings.count,
-      .symbol_count = source_module->symbols.count,
+      .symbol_count = target_symbol_count,
   };
   loom_module_t* target_module = NULL;
   IREE_RETURN_IF_ERROR(loom_module_allocate(
@@ -189,17 +276,6 @@ static iree_status_t loom_target_sealing_clone_source(
     if (iree_status_is_ok(status)) {
       target_module->symbols.entries[target_symbol_id].flags =
           source_symbol->flags;
-      uint16_t indexed_symbol_id = LOOM_SYMBOL_ID_INVALID;
-      status = loom_symbol_map_find_or_insert(out_symbol_map, scratch_arena,
-                                              target_name_id, target_symbol_id,
-                                              &indexed_symbol_id);
-      if (iree_status_is_ok(status) && indexed_symbol_id != target_symbol_id) {
-        status =
-            iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                             "source module contains duplicate symbol names");
-      }
-    }
-    if (iree_status_is_ok(status)) {
       target_symbols[source_symbol_id] = (loom_symbol_ref_t){
           .module_id = 0,
           .symbol_id = target_symbol_id,
@@ -222,152 +298,113 @@ static iree_status_t loom_target_sealing_clone_source(
   return status;
 }
 
-static iree_status_t loom_target_sealing_reuse_definitions(
-    loom_module_t* module, loom_symbol_fact_table_t* fact_table,
+static void loom_target_sealing_seed_exact_contexts(
+    const loom_module_t* source_module,
+    const loom_ir_module_projection_t* projection,
     loom_target_sealing_plan_t* plan) {
-  for (loom_symbol_id_t symbol_id = 0; symbol_id < module->symbols.count;
+  for (loom_symbol_id_t symbol_id = 0; symbol_id < source_module->symbols.count;
        ++symbol_id) {
-    const loom_symbol_t* symbol = &module->symbols.entries[symbol_id];
-    if (symbol->definition == NULL ||
-        symbol->definition->fact_domain != &loom_target_symbol_fact_domain) {
+    const loom_target_function_version_t* function_version =
+        loom_target_function_version_snapshot_at(&plan->version_snapshot,
+                                                 symbol_id);
+    if (function_version == NULL ||
+        !function_version->authored_target_is_exact) {
       continue;
     }
-    const loom_symbol_facts_base_t* base_facts = NULL;
-    IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup(fact_table, module,
-                                                       symbol_id, &base_facts));
-    const loom_target_symbol_facts_t* target_facts =
-        loom_target_symbol_facts_cast(base_facts);
-    if (target_facts == NULL) continue;
 
-    for (iree_host_size_t i = 0; i < plan->group_count; ++i) {
-      loom_target_sealing_group_t* group = &plan->groups[i];
-      if (loom_symbol_ref_is_valid(group->target_ref)) continue;
-      if (loom_target_facts_are_equivalent(group->resolved_target.facts,
-                                           target_facts->projection)) {
-        group->target_ref = (loom_symbol_ref_t){
-            .module_id = 0,
-            .symbol_id = symbol_id,
-        };
-      }
+    const loom_symbol_ref_t source_target_ref =
+        loom_func_like_target(function_version->base.function);
+    IREE_ASSERT(loom_symbol_ref_is_valid(source_target_ref));
+    IREE_ASSERT_EQ(source_target_ref.module_id, 0);
+    IREE_ASSERT_LT(source_target_ref.symbol_id, source_module->symbols.count);
+    const loom_symbol_ref_t sealed_target_ref =
+        loom_ir_module_projection_target_symbol(projection,
+                                                source_target_ref.symbol_id);
+
+    const loom_target_context_ordinal_t context_ordinal =
+        function_version->target_context_ordinal;
+    loom_symbol_ref_t* context_target_ref =
+        &plan->contexts.target_refs[context_ordinal];
+    if (loom_symbol_ref_is_valid(*context_target_ref)) {
+      IREE_ASSERT_EQ(context_target_ref->module_id,
+                     sealed_target_ref.module_id);
+      IREE_ASSERT_EQ(context_target_ref->symbol_id,
+                     sealed_target_ref.symbol_id);
+    } else {
+      *context_target_ref = sealed_target_ref;
     }
   }
-  return iree_ok_status();
 }
 
 static iree_status_t loom_target_sealing_add_target_symbol(
-    loom_module_t* module, loom_symbol_map_t* symbol_map,
-    iree_arena_allocator_t* arena, iree_host_size_t group_index,
+    loom_module_t* module, iree_host_size_t generated_name_namespace,
+    iree_host_size_t materialization_ordinal,
     loom_symbol_ref_t* out_target_ref) {
   *out_target_ref = loom_symbol_ref_null();
-  for (iree_host_size_t collision_ordinal = 0;; ++collision_ordinal) {
-    char name_buffer[96];
-    const int name_length =
-        collision_ordinal == 0
-            ? snprintf(name_buffer, sizeof(name_buffer),
-                       "__loom_sealed_target_%zu", group_index)
-            : snprintf(name_buffer, sizeof(name_buffer),
-                       "__loom_sealed_target_%zu_%zu", group_index,
-                       collision_ordinal);
-    if (name_length < 0 ||
-        (iree_host_size_t)name_length >= sizeof(name_buffer)) {
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "sealed target symbol name is too long");
-    }
-    loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_module_intern_string(
-        module,
-        iree_make_string_view(name_buffer, (iree_host_size_t)name_length),
-        &name_id));
-    if (loom_symbol_map_find(symbol_map, name_id) != LOOM_SYMBOL_ID_INVALID) {
-      continue;
-    }
-
-    loom_symbol_id_t symbol_id = LOOM_SYMBOL_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_module_add_symbol(module, name_id, &symbol_id));
-    IREE_RETURN_IF_ERROR(
-        loom_symbol_map_insert(symbol_map, arena, name_id, symbol_id));
-    *out_target_ref = (loom_symbol_ref_t){
-        .module_id = 0,
-        .symbol_id = symbol_id,
-    };
-    return iree_ok_status();
+  char name_buffer[96];
+  const int name_length =
+      snprintf(name_buffer, sizeof(name_buffer), "__loom_sealed_target_%zu_%zu",
+               generated_name_namespace, materialization_ordinal);
+  if (name_length < 0 || (iree_host_size_t)name_length >= sizeof(name_buffer)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "sealed target symbol name is too long");
   }
-}
 
-static iree_status_t loom_target_sealing_materialize_definitions(
-    loom_module_t* module, loom_symbol_map_t* symbol_map,
-    loom_symbol_fact_table_t* fact_table, iree_arena_allocator_t* arena,
-    loom_target_sealing_plan_t* plan) {
-  loom_builder_t builder;
-  loom_builder_initialize(module, &module->arena, loom_module_block(module),
-                          &builder);
-
-  for (iree_host_size_t i = 0; i < plan->group_count; ++i) {
-    loom_target_sealing_group_t* group = &plan->groups[i];
-    if (loom_symbol_ref_is_valid(group->target_ref)) continue;
-
-    loom_symbol_ref_t target_ref = loom_symbol_ref_null();
-    IREE_RETURN_IF_ERROR(loom_target_sealing_add_target_symbol(
-        module, symbol_map, arena, i, &target_ref));
-    loom_op_t* target_op = NULL;
-    IREE_RETURN_IF_ERROR(
-        group->resolved_target.provider->materialize_definition(
-            &builder, &group->resolved_target, target_ref,
-            LOOM_LOCATION_UNKNOWN, &target_op));
-    if (target_op == NULL ||
-        module->symbols.entries[target_ref.symbol_id].defining_op !=
-            target_op) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "target provider did not materialize the requested definition");
-    }
-
-    const loom_symbol_facts_base_t* base_facts = NULL;
-    IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup(
-        fact_table, module, target_ref.symbol_id, &base_facts));
-    const loom_target_symbol_facts_t* target_facts =
-        loom_target_symbol_facts_cast(base_facts);
-    if (target_facts == NULL ||
-        !loom_target_facts_are_equivalent(group->resolved_target.facts,
-                                          target_facts->projection)) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "materialized target definition did not reproject to resolved facts");
-    }
-    group->target_ref = target_ref;
-  }
+  loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_module_intern_string(
+      module, iree_make_string_view(name_buffer, (iree_host_size_t)name_length),
+      &name_id));
+  loom_symbol_id_t symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_module_add_symbol(module, name_id, &symbol_id));
+  *out_target_ref = (loom_symbol_ref_t){
+      .module_id = 0,
+      .symbol_id = symbol_id,
+  };
   return iree_ok_status();
 }
 
-static iree_status_t loom_target_sealing_bind_functions(
+static iree_status_t loom_target_sealing_materialize_and_bind(
     const loom_module_t* source_module, loom_module_t* sealed_module,
     const loom_ir_module_projection_t* projection,
-    const loom_target_sealing_plan_t* plan) {
+    loom_target_sealing_plan_t* plan) {
+  loom_builder_t builder;
+  loom_builder_initialize(sealed_module, &sealed_module->arena,
+                          loom_module_block(sealed_module), &builder);
+
+  iree_host_size_t materialization_ordinal = 0;
   for (loom_symbol_id_t symbol_id = 0; symbol_id < source_module->symbols.count;
        ++symbol_id) {
-    const iree_host_size_t group_index =
-        plan->group_indices_by_symbol[symbol_id];
-    if (group_index == IREE_HOST_SIZE_MAX) continue;
-    const loom_symbol_ref_t sealed_ref =
-        loom_ir_module_projection_target_symbol(projection, symbol_id);
-    const loom_symbol_t* sealed_symbol =
-        &sealed_module->symbols.entries[sealed_ref.symbol_id];
-    const loom_func_like_t sealed_function =
-        loom_func_like_cast(sealed_module, sealed_symbol->defining_op);
-    if (!loom_func_like_isa(sealed_function) ||
-        sealed_function.vtable->target_attr_index == LOOM_ATTR_INDEX_NONE) {
-      const loom_symbol_t* source_symbol =
-          &source_module->symbols.entries[symbol_id];
-      const iree_string_view_t source_name =
-          source_module->strings.entries[source_symbol->name_id];
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "sealed symbol '@%.*s' is not a target-assignable function",
-          (int)source_name.size, source_name.data);
+    const loom_target_function_version_t* function_version =
+        loom_target_function_version_snapshot_at(&plan->version_snapshot,
+                                                 symbol_id);
+    if (function_version == NULL) continue;
+
+    const loom_target_context_ordinal_t context_ordinal =
+        function_version->target_context_ordinal;
+    loom_symbol_ref_t* target_ref =
+        &plan->contexts.target_refs[context_ordinal];
+    if (!loom_symbol_ref_is_valid(*target_ref)) {
+      loom_symbol_ref_t materialized_ref = loom_symbol_ref_null();
+      IREE_RETURN_IF_ERROR(loom_target_sealing_add_target_symbol(
+          sealed_module, plan->generated_name_namespace,
+          materialization_ordinal, &materialized_ref));
+      IREE_RETURN_IF_ERROR(
+          function_version->resolved_target.provider->materialize_definition(
+              &builder, &function_version->resolved_target, materialized_ref,
+              LOOM_LOCATION_UNKNOWN));
+      *target_ref = materialized_ref;
+      ++materialization_ordinal;
     }
-    loom_func_like_set_target(sealed_module, sealed_function,
-                              plan->groups[group_index].target_ref);
+
+    const loom_symbol_ref_t sealed_function_ref =
+        loom_ir_module_projection_target_symbol(projection, symbol_id);
+    const loom_func_like_t sealed_function = loom_func_like_cast(
+        sealed_module,
+        sealed_module->symbols.entries[sealed_function_ref.symbol_id]
+            .defining_op);
+    loom_func_like_set_target(sealed_module, sealed_function, *target_ref);
   }
+  IREE_ASSERT_EQ(materialization_ordinal, plan->materialization_count);
   return iree_ok_status();
 }
 
@@ -391,29 +428,18 @@ iree_status_t loom_target_module_seal(
   loom_target_sealing_plan_t plan = {0};
   loom_module_t* sealed_module = NULL;
   loom_ir_module_projection_t projection = {0};
-  loom_symbol_map_t sealed_symbol_map = {0};
-  loom_symbol_fact_table_t target_fact_table;
-  loom_symbol_fact_table_initialize(&target_fact_table, &scratch_arena);
 
   iree_status_t status = loom_target_sealing_plan_build(
       source_module, function_versions, &scratch_arena, &plan);
   if (iree_status_is_ok(status)) {
     status = loom_target_sealing_clone_source(
-        source_module, block_pool, &scratch_arena, allocator, &projection,
-        &sealed_symbol_map, &sealed_module);
+        source_module, plan.materialization_count, block_pool, &scratch_arena,
+        allocator, &projection, &sealed_module);
   }
-  if (iree_status_is_ok(status) && plan.group_count > 0) {
-    status = loom_target_sealing_reuse_definitions(sealed_module,
-                                                   &target_fact_table, &plan);
-  }
-  if (iree_status_is_ok(status) && plan.group_count > 0) {
-    status = loom_target_sealing_materialize_definitions(
-        sealed_module, &sealed_symbol_map, &target_fact_table, &scratch_arena,
-        &plan);
-  }
-  if (iree_status_is_ok(status) && plan.group_count > 0) {
-    status = loom_target_sealing_bind_functions(source_module, sealed_module,
-                                                &projection, &plan);
+  if (iree_status_is_ok(status) && plan.contexts.present.bit_count > 0) {
+    loom_target_sealing_seed_exact_contexts(source_module, &projection, &plan);
+    status = loom_target_sealing_materialize_and_bind(
+        source_module, sealed_module, &projection, &plan);
   }
   if (iree_status_is_ok(status)) {
     *out_sealed_module = sealed_module;

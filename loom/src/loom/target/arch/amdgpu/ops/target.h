@@ -54,8 +54,7 @@ void loom_amdgpu_target_record_resolve_properties(
 // Materializes an exact resolved AMDGPU target as an amdgpu.target definition.
 iree_status_t loom_amdgpu_target_materialize_definition(
     loom_builder_t* builder, const loom_resolved_target_t* resolved_target,
-    loom_symbol_ref_t symbol, loom_location_id_t location,
-    loom_op_t** out_target_op);
+    loom_symbol_ref_t symbol, loom_location_id_t location);
 
 iree_status_t loom_amdgpu_target_record_verify(
     const loom_module_t* module, const loom_op_t* op,

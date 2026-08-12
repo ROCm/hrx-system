@@ -164,8 +164,9 @@ static iree_status_t RegisterTestTargetContext(loom_context_t* context) {
   return loom_test_dialect_register(context);
 }
 
-// Deliberately lacks materialize_definition so generic IR boundaries can
-// prove loss prevention without relying on an incomplete production target.
+// Deliberately lacks a target-definition materializer so generic IR boundaries
+// can prove loss prevention without relying on an incomplete production
+// target.
 static const loom_target_provider_t kTestTargetProvider = {
     /*.profile_type=*/&kTestTargetProfileType,
     /*.materialize_definition=*/nullptr,
@@ -956,7 +957,7 @@ TEST(TargetTest, RejectsSanitizerOptionsOnPlainPassProgramOptions) {
   EXPECT_EQ(pass_program, nullptr);
 }
 
-TEST(TargetTest, RejectsSerializationWithoutAnExactTargetInverse) {
+TEST(TargetTest, RejectsSerializationWithoutATargetMaterializer) {
   TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
   TargetProfilePtr profile = CreateTestTargetProfile(target_environment.get());
   ContextPtr context = CreateTargetContext(target_environment.get());

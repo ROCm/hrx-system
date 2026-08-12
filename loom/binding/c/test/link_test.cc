@@ -83,8 +83,8 @@ static iree_status_t RegisterFakeTargetContext(loom_context_t* context) {
 
 static iree_status_t MaterializeFakeTargetDefinition(
     loom_builder_t* builder, const loom_resolved_target_t* resolved_target,
-    loom_symbol_ref_t symbol, loom_location_id_t location,
-    loom_op_t** out_target_op) {
+    loom_symbol_ref_t symbol, loom_location_id_t location) {
+  loom_op_t* target_op = nullptr;
   return loom_test_target_build(
       builder, /*build_flags=*/0,
       (loom_test_target_kind_t)resolved_target->facts->selector, symbol,
@@ -103,7 +103,7 @@ static iree_status_t MaterializeFakeTargetDefinition(
       /*memory_space_host=*/0, /*memory_space_descriptor=*/0, /*abi=*/0,
       /*export_symbol=*/LOOM_STRING_ID_INVALID, /*linkage=*/0,
       /*contract_set_key=*/LOOM_STRING_ID_INVALID, /*contract_feature_bits=*/0,
-      location, out_target_op);
+      location, &target_op);
 }
 
 static const loom_target_provider_t kFakeTargetProvider = {

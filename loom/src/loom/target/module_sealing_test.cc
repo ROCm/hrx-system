@@ -59,8 +59,7 @@ static const loom_target_profile_type_t kTestProfileType = {
 
 static iree_status_t MaterializeTestTargetDefinition(
     loom_builder_t* builder, const loom_resolved_target_t* resolved_target,
-    loom_symbol_ref_t symbol, loom_location_id_t location,
-    loom_op_t** out_target_op) {
+    loom_symbol_ref_t symbol, loom_location_id_t location) {
   const loom_target_facts_t* facts = resolved_target->facts;
   static_assert(LOOM_TARGET_FACT_FIELD_COUNT_ == 30,
                 "test target flags reserve the first 30 bits for common "
@@ -90,6 +89,7 @@ static iree_status_t MaterializeTestTargetDefinition(
   const loom_target_snapshot_t* snapshot = &facts->storage.snapshot;
   const loom_target_export_plan_t* export_plan = &facts->storage.export_plan;
   const loom_target_config_t* config = &facts->storage.config;
+  loom_op_t* target_op = nullptr;
   return loom_test_target_build(
       builder, build_flags,
       static_cast<loom_test_target_kind_t>(facts->selector), symbol,
@@ -107,26 +107,7 @@ static iree_status_t MaterializeTestTargetDefinition(
       snapshot->memory_spaces.private_memory, snapshot->memory_spaces.host,
       snapshot->memory_spaces.descriptor, export_plan->abi_kind, export_symbol,
       export_plan->linkage, contract_set_key, config->contract_feature_bits,
-      location, out_target_op);
-}
-
-static iree_status_t MaterializeWrongTestTargetDefinition(
-    loom_builder_t* builder, const loom_resolved_target_t* resolved_target,
-    loom_symbol_ref_t symbol, loom_location_id_t location,
-    loom_op_t** out_target_op) {
-  loom_target_facts_t wrong_facts = *resolved_target->facts;
-  wrong_facts.selector = LOOM_TEST_TARGET_KIND_QUIRKY;
-  wrong_facts.explicit_fields = 0;
-  loom_target_facts_builder_replace_bundle(
-      loom_target_bundle_table_lookup(&loom_test_target_bundles,
-                                      LOOM_TEST_TARGET_KIND_QUIRKY),
-      &wrong_facts);
-  const loom_resolved_target_t wrong_target = {
-      /*.provider=*/resolved_target->provider,
-      /*.facts=*/&wrong_facts,
-  };
-  return MaterializeTestTargetDefinition(builder, &wrong_target, symbol,
-                                         location, out_target_op);
+      location, &target_op);
 }
 
 static const loom_target_provider_t kTestProvider = {
@@ -134,13 +115,8 @@ static const loom_target_provider_t kTestProvider = {
     /*.materialize_definition=*/MaterializeTestTargetDefinition,
 };
 
-static const loom_target_provider_t kMissingInverseProvider = {
+static const loom_target_provider_t kMissingMaterializerProvider = {
     /*.profile_type=*/&kTestProfileType,
-};
-
-static const loom_target_provider_t kWrongInverseProvider = {
-    /*.profile_type=*/&kTestProfileType,
-    /*.materialize_definition=*/MaterializeWrongTestTargetDefinition,
 };
 
 static const loom_target_provider_t* const kTestProviders[] = {
@@ -150,6 +126,15 @@ static const loom_target_provider_t* const kTestProviders[] = {
 static const loom_target_provider_set_t kTestProviderSet =
     loom_target_provider_set_make(kTestProviders,
                                   IREE_ARRAYSIZE(kTestProviders));
+
+static const loom_target_provider_t* const kMissingMaterializerProviders[] = {
+    &kMissingMaterializerProvider,
+};
+
+static const loom_target_provider_set_t kMissingMaterializerProviderSet =
+    loom_target_provider_set_make(
+        kMissingMaterializerProviders,
+        IREE_ARRAYSIZE(kMissingMaterializerProviders));
 
 static TestTargetProfile MakeTestProfile(
     loom_test_target_kind_t kind,
@@ -272,8 +257,16 @@ class TargetModuleSealingTest : public ::testing::Test {
       loom_module_t* module,
       const loom_target_specialization_request_t* requests,
       iree_host_size_t request_count) {
+    return SpecializeWithEnvironment(&environment_, module, requests,
+                                     request_count);
+  }
+
+  loom_target_specialization_result_t SpecializeWithEnvironment(
+      const loom_target_environment_t* environment, loom_module_t* module,
+      const loom_target_specialization_request_t* requests,
+      iree_host_size_t request_count) {
     loom_target_specialization_result_t result = {};
-    IREE_CHECK_OK(loom_target_specialize_functions(&environment_, module,
+    IREE_CHECK_OK(loom_target_specialize_functions(environment, module,
                                                    {
                                                        /*.values=*/requests,
                                                        /*.count=*/request_count,
@@ -353,16 +346,62 @@ func.def public target(@authored) @entry() {
   EXPECT_EQ(Print(source.get()), source_text);
 }
 
-TEST_F(TargetModuleSealingTest,
-       SpecializationMaterializesOnceAndPreservesExplicitDefaults) {
+TEST_F(TargetModuleSealingTest, SharedTargetlessContextMaterializesOnce) {
   ModulePtr source = Parse(R"(
-test.target<low_core> @generic
-
-func.def public target(@generic) @generic_entry() {
+func.def public @left() {
   func.return
 }
 
-func.def public @targetless_entry() {
+func.def public @right() {
+  func.return
+}
+)");
+  const TestTargetProfile profile =
+      MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
+  const loom_target_specialization_request_t requests[] = {
+      {
+          /*.function_name=*/IREE_SV("left"),
+          /*.target_profile=*/&profile.base,
+      },
+      {
+          /*.function_name=*/IREE_SV("right"),
+          /*.target_profile=*/&profile.base,
+      },
+  };
+  const loom_target_specialization_result_t specialization =
+      Specialize(source.get(), requests, IREE_ARRAYSIZE(requests));
+  ASSERT_EQ(specialization.function_versions.list.count, 2u);
+  const auto* left_version = loom_target_function_version_const_cast(
+      specialization.function_versions.list.values[0]);
+  const auto* right_version = loom_target_function_version_const_cast(
+      specialization.function_versions.list.values[1]);
+  ASSERT_NE(left_version, nullptr);
+  ASSERT_NE(right_version, nullptr);
+  EXPECT_EQ(left_version->target_context_ordinal,
+            right_version->target_context_ordinal);
+  const iree_host_size_t source_symbol_count = source->symbols.count;
+  const std::string source_text = Print(source.get());
+
+  ModulePtr sealed = Seal(source.get(), &specialization.function_versions.list);
+
+  EXPECT_EQ(source->symbols.count, source_symbol_count);
+  EXPECT_EQ(Print(source.get()), source_text);
+  EXPECT_EQ(sealed->symbols.count, source_symbol_count + 1);
+  EXPECT_EQ(CountTestTargets(sealed.get()), 1u);
+  EXPECT_TRUE(
+      iree_string_view_equal(FunctionTargetName(sealed.get(), IREE_SV("left")),
+                             IREE_SV("__loom_sealed_target_0_0")));
+  EXPECT_TRUE(
+      iree_string_view_equal(FunctionTargetName(sealed.get(), IREE_SV("right")),
+                             IREE_SV("__loom_sealed_target_0_0")));
+}
+
+TEST_F(TargetModuleSealingTest,
+       InexactAuthoredContextMaterializesResolvedDefinition) {
+  ModulePtr source = Parse(R"(
+test.target<low_core> @requirement
+
+func.def public target(@requirement) @entry() {
   func.return
 }
 )");
@@ -371,39 +410,27 @@ func.def public @targetless_entry() {
                                     LOOM_TARGET_FACT_FIELD_INDEX_BITWIDTH);
   const TestTargetProfile profile =
       MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE, explicit_fields);
-  const loom_target_specialization_request_t requests[] = {
-      {
-          /*.function_name=*/IREE_SV("generic_entry"),
-          /*.target_profile=*/&profile.base,
-      },
-      {
-          /*.function_name=*/IREE_SV("targetless_entry"),
-          /*.target_profile=*/&profile.base,
-      },
+  const loom_target_specialization_request_t request = {
+      /*.function_name=*/IREE_SV("entry"),
+      /*.target_profile=*/&profile.base,
   };
   const loom_target_specialization_result_t specialization =
-      Specialize(source.get(), requests, IREE_ARRAYSIZE(requests));
-  ASSERT_EQ(specialization.function_versions.list.count, 2u);
+      Specialize(source.get(), &request, 1);
+  const auto* version = loom_target_function_version_const_cast(
+      specialization.function_versions.list.values[0]);
+  ASSERT_NE(version, nullptr);
+  EXPECT_FALSE(version->authored_target_is_exact);
   const iree_host_size_t source_symbol_count = source->symbols.count;
-  const std::string source_text = Print(source.get());
-  EXPECT_FALSE(loom_symbol_ref_is_valid(loom_func_like_target(
-      FindFunction(source.get(), IREE_SV("targetless_entry")))));
 
   ModulePtr sealed = Seal(source.get(), &specialization.function_versions.list);
 
-  EXPECT_EQ(source->symbols.count, source_symbol_count);
-  EXPECT_EQ(Print(source.get()), source_text);
+  const loom_op_t* sealed_target =
+      FunctionTarget(sealed.get(), IREE_SV("entry"));
   EXPECT_EQ(sealed->symbols.count, source_symbol_count + 1);
   EXPECT_EQ(CountTestTargets(sealed.get()), 2u);
-  EXPECT_TRUE(iree_string_view_equal(
-      FunctionTargetName(sealed.get(), IREE_SV("generic_entry")),
-      IREE_SV("__loom_sealed_target_0")));
-  EXPECT_TRUE(iree_string_view_equal(
-      FunctionTargetName(sealed.get(), IREE_SV("targetless_entry")),
-      IREE_SV("__loom_sealed_target_0")));
-
-  const loom_op_t* sealed_target =
-      FunctionTarget(sealed.get(), IREE_SV("generic_entry"));
+  EXPECT_TRUE(
+      iree_string_view_equal(FunctionTargetName(sealed.get(), IREE_SV("entry")),
+                             IREE_SV("__loom_sealed_target_0_0")));
   ASSERT_TRUE(loom_test_target_isa(sealed_target));
   EXPECT_EQ(loom_test_target_kind(sealed_target),
             LOOM_TEST_TARGET_KIND_LOW_CORE);
@@ -442,7 +469,7 @@ func.def public @entry() {
   EXPECT_EQ(Print(reparsed.get()), sealed_text);
 }
 
-TEST_F(TargetModuleSealingTest, ReusesOnlyAnExactlyEquivalentDefinition) {
+TEST_F(TargetModuleSealingTest, ProjectsAnExactAuthoredDefinitionDirectly) {
   ModulePtr source = Parse(R"(
 test.target<low_core> @exact
 
@@ -469,6 +496,142 @@ func.def public target(@exact) @entry() {
 }
 
 TEST_F(TargetModuleSealingTest,
+       SharedExactContextProjectsOneAuthoredDefinition) {
+  ModulePtr source = Parse(R"(
+test.target<low_core> @exact
+
+func.def public target(@exact) @first() {
+  func.return
+}
+
+func.def public target(@exact) @second() {
+  func.return
+}
+)");
+  const TestTargetProfile profile =
+      MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
+  const loom_target_specialization_request_t requests[] = {
+      {
+          /*.function_name=*/IREE_SV("first"),
+          /*.target_profile=*/&profile.base,
+      },
+      {
+          /*.function_name=*/IREE_SV("second"),
+          /*.target_profile=*/&profile.base,
+      },
+  };
+  const loom_target_specialization_result_t specialization =
+      Specialize(source.get(), requests, IREE_ARRAYSIZE(requests));
+  const auto* first_version = loom_target_function_version_const_cast(
+      specialization.function_versions.list.values[0]);
+  const auto* second_version = loom_target_function_version_const_cast(
+      specialization.function_versions.list.values[1]);
+  ASSERT_NE(first_version, nullptr);
+  ASSERT_NE(second_version, nullptr);
+  EXPECT_TRUE(first_version->authored_target_is_exact);
+  EXPECT_TRUE(second_version->authored_target_is_exact);
+  EXPECT_EQ(first_version->target_context_ordinal,
+            second_version->target_context_ordinal);
+
+  ModulePtr sealed = Seal(source.get(), &specialization.function_versions.list);
+
+  EXPECT_EQ(CountTestTargets(sealed.get()), 1u);
+  EXPECT_TRUE(iree_string_view_equal(
+      FunctionTargetName(sealed.get(), IREE_SV("first")), IREE_SV("exact")));
+  EXPECT_TRUE(iree_string_view_equal(
+      FunctionTargetName(sealed.get(), IREE_SV("second")), IREE_SV("exact")));
+}
+
+TEST_F(TargetModuleSealingTest,
+       ExactContextWitnessBindsEarlierInheritedVersion) {
+  ModulePtr source = Parse(R"(
+test.target<low_core> @exact
+
+func.def public @inherited() {
+  func.return
+}
+
+func.def public target(@exact) @witness() {
+  func.return
+}
+)");
+  loom_target_facts_t facts = {};
+  InitializeFacts(LOOM_TEST_TARGET_KIND_LOW_CORE, 0, &facts);
+  loom_target_function_version_t inherited_version =
+      MakeVersion(source.get(), IREE_SV("inherited"),
+                  &kMissingMaterializerProvider, &facts);
+  loom_target_function_version_t witness_version = MakeVersion(
+      source.get(), IREE_SV("witness"), &kMissingMaterializerProvider, &facts);
+  witness_version.authored_target_name = IREE_SV("exact");
+  witness_version.target_requirement_facts = &facts;
+  witness_version.authored_target_is_exact = true;
+  loom_function_version_t* version_values[] = {
+      &inherited_version.base,
+      &witness_version.base,
+  };
+  const loom_function_version_list_t versions = {
+      /*.values=*/version_values,
+      /*.count=*/IREE_ARRAYSIZE(version_values),
+  };
+
+  ModulePtr sealed = Seal(source.get(), &versions);
+
+  EXPECT_EQ(CountTestTargets(sealed.get()), 1u);
+  EXPECT_TRUE(iree_string_view_equal(
+      FunctionTargetName(sealed.get(), IREE_SV("inherited")),
+      IREE_SV("exact")));
+  EXPECT_TRUE(iree_string_view_equal(
+      FunctionTargetName(sealed.get(), IREE_SV("witness")), IREE_SV("exact")));
+}
+
+TEST_F(TargetModuleSealingTest,
+       EquivalentIndependentProfilesRemainDistinctContexts) {
+  ModulePtr source = Parse(R"(
+func.def public @left() {
+  func.return
+}
+
+func.def public @right() {
+  func.return
+}
+)");
+  const TestTargetProfile left_profile =
+      MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
+  const TestTargetProfile right_profile =
+      MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
+  const loom_target_specialization_request_t requests[] = {
+      {
+          /*.function_name=*/IREE_SV("left"),
+          /*.target_profile=*/&left_profile.base,
+      },
+      {
+          /*.function_name=*/IREE_SV("right"),
+          /*.target_profile=*/&right_profile.base,
+      },
+  };
+  const loom_target_specialization_result_t specialization =
+      Specialize(source.get(), requests, IREE_ARRAYSIZE(requests));
+  const auto* left_version = loom_target_function_version_const_cast(
+      specialization.function_versions.list.values[0]);
+  const auto* right_version = loom_target_function_version_const_cast(
+      specialization.function_versions.list.values[1]);
+  ASSERT_NE(left_version, nullptr);
+  ASSERT_NE(right_version, nullptr);
+  EXPECT_NE(left_version->target_context_ordinal,
+            right_version->target_context_ordinal);
+  EXPECT_TRUE(
+      loom_target_facts_are_equivalent(left_version->resolved_target.facts,
+                                       right_version->resolved_target.facts));
+
+  ModulePtr sealed = Seal(source.get(), &specialization.function_versions.list);
+
+  EXPECT_EQ(CountTestTargets(sealed.get()), 2u);
+  EXPECT_FALSE(iree_string_view_equal(
+      FunctionTargetName(sealed.get(), IREE_SV("left")),
+      FunctionTargetName(sealed.get(), IREE_SV("right"))));
+}
+
+TEST_F(TargetModuleSealingTest,
        HeterogeneousTargetsUseDeterministicSourceSymbolOrder) {
   ModulePtr source = Parse(R"(
 func.def public @low_entry() {
@@ -483,46 +646,45 @@ func.def public @quirky_entry() {
   func.return
 }
 
-func.def @__loom_sealed_target_0() {
+func.def @__loom_sealed_target_0_17() {
   func.return
 }
 )");
-  loom_target_facts_t low_facts = {};
-  InitializeFacts(LOOM_TEST_TARGET_KIND_LOW_CORE, 0, &low_facts);
-  loom_target_facts_t low_facts_copy = {};
-  InitializeFacts(LOOM_TEST_TARGET_KIND_LOW_CORE, 0, &low_facts_copy);
-  loom_target_facts_t quirky_facts = {};
-  InitializeFacts(LOOM_TEST_TARGET_KIND_QUIRKY, 0, &quirky_facts);
-  loom_target_function_version_t low_version = MakeVersion(
-      source.get(), IREE_SV("low_entry"), &kTestProvider, &low_facts);
-  loom_target_function_version_t low_copy_version = MakeVersion(
-      source.get(), IREE_SV("low_entry_copy"), &kTestProvider, &low_facts_copy);
-  loom_target_function_version_t quirky_version = MakeVersion(
-      source.get(), IREE_SV("quirky_entry"), &kTestProvider, &quirky_facts);
-  loom_function_version_t* reverse_version_order[] = {
-      &quirky_version.base,
-      &low_copy_version.base,
-      &low_version.base,
+  const TestTargetProfile low_profile =
+      MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
+  const TestTargetProfile quirky_profile =
+      MakeTestProfile(LOOM_TEST_TARGET_KIND_QUIRKY);
+  const loom_target_specialization_request_t requests[] = {
+      {
+          /*.function_name=*/IREE_SV("quirky_entry"),
+          /*.target_profile=*/&quirky_profile.base,
+      },
+      {
+          /*.function_name=*/IREE_SV("low_entry_copy"),
+          /*.target_profile=*/&low_profile.base,
+      },
+      {
+          /*.function_name=*/IREE_SV("low_entry"),
+          /*.target_profile=*/&low_profile.base,
+      },
   };
-  const loom_function_version_list_t versions = {
-      /*.values=*/reverse_version_order,
-      /*.count=*/IREE_ARRAYSIZE(reverse_version_order),
-  };
+  const loom_target_specialization_result_t specialization =
+      Specialize(source.get(), requests, IREE_ARRAYSIZE(requests));
 
-  ModulePtr first = Seal(source.get(), &versions);
-  ModulePtr second = Seal(source.get(), &versions);
+  ModulePtr first = Seal(source.get(), &specialization.function_versions.list);
+  ModulePtr second = Seal(source.get(), &specialization.function_versions.list);
 
   EXPECT_EQ(Print(first.get()), Print(second.get()));
   EXPECT_EQ(CountTestTargets(first.get()), 2u);
   EXPECT_TRUE(iree_string_view_equal(
       FunctionTargetName(first.get(), IREE_SV("low_entry")),
-      IREE_SV("__loom_sealed_target_0_1")));
+      IREE_SV("__loom_sealed_target_1_0")));
   EXPECT_TRUE(iree_string_view_equal(
       FunctionTargetName(first.get(), IREE_SV("low_entry_copy")),
-      IREE_SV("__loom_sealed_target_0_1")));
+      IREE_SV("__loom_sealed_target_1_0")));
   EXPECT_TRUE(iree_string_view_equal(
       FunctionTargetName(first.get(), IREE_SV("quirky_entry")),
-      IREE_SV("__loom_sealed_target_1")));
+      IREE_SV("__loom_sealed_target_1_1")));
   EXPECT_EQ(
       loom_test_target_kind(FunctionTarget(first.get(), IREE_SV("low_entry"))),
       LOOM_TEST_TARGET_KIND_LOW_CORE);
@@ -531,51 +693,64 @@ func.def @__loom_sealed_target_0() {
             LOOM_TEST_TARGET_KIND_QUIRKY);
 }
 
-TEST_F(TargetModuleSealingTest, RejectsProviderWithoutAnInverse) {
+TEST_F(TargetModuleSealingTest,
+       ExactAuthoredContextDoesNotRequireMaterializer) {
+  ModulePtr source = Parse(R"(
+test.target<low_core> @exact
+
+func.def public target(@exact) @entry() {
+  func.return
+}
+)");
+  loom_target_environment_t environment = {};
+  IREE_ASSERT_OK(loom_target_environment_initialize(
+      &kMissingMaterializerProviderSet, &environment));
+  const TestTargetProfile profile =
+      MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
+  const loom_target_specialization_request_t request = {
+      /*.function_name=*/IREE_SV("entry"),
+      /*.target_profile=*/&profile.base,
+  };
+  const loom_target_specialization_result_t specialization =
+      SpecializeWithEnvironment(&environment, source.get(), &request, 1);
+  loom_target_environment_deinitialize(&environment);
+  const auto* version = loom_target_function_version_const_cast(
+      specialization.function_versions.list.values[0]);
+  ASSERT_NE(version, nullptr);
+  EXPECT_TRUE(version->authored_target_is_exact);
+
+  ModulePtr sealed = Seal(source.get(), &specialization.function_versions.list);
+
+  EXPECT_EQ(CountTestTargets(sealed.get()), 1u);
+  EXPECT_TRUE(iree_string_view_equal(
+      FunctionTargetName(sealed.get(), IREE_SV("entry")), IREE_SV("exact")));
+}
+
+TEST_F(TargetModuleSealingTest, TargetlessContextRequiresProviderMaterializer) {
   ModulePtr source = Parse(R"(
 func.def public @entry() {
   func.return
 }
 )");
-  loom_target_facts_t facts = {};
-  InitializeFacts(LOOM_TEST_TARGET_KIND_LOW_CORE, 0, &facts);
-  loom_target_function_version_t version = MakeVersion(
-      source.get(), IREE_SV("entry"), &kMissingInverseProvider, &facts);
-  loom_function_version_t* version_values[] = {&version.base};
-  const loom_function_version_list_t versions = {
-      /*.values=*/version_values,
-      /*.count=*/IREE_ARRAYSIZE(version_values),
+  loom_target_environment_t environment = {};
+  IREE_ASSERT_OK(loom_target_environment_initialize(
+      &kMissingMaterializerProviderSet, &environment));
+  const TestTargetProfile profile =
+      MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
+  const loom_target_specialization_request_t request = {
+      /*.function_name=*/IREE_SV("entry"),
+      /*.target_profile=*/&profile.base,
   };
+  const loom_target_specialization_result_t specialization =
+      SpecializeWithEnvironment(&environment, source.get(), &request, 1);
+  loom_target_environment_deinitialize(&environment);
   loom_module_t* sealed_module = nullptr;
 
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
-      loom_target_module_seal(source.get(), &versions, &block_pool_,
-                              iree_allocator_system(), &sealed_module));
-  EXPECT_EQ(sealed_module, nullptr);
-}
-
-TEST_F(TargetModuleSealingTest, RejectsAnInexactProviderInverse) {
-  ModulePtr source = Parse(R"(
-func.def public @entry() {
-  func.return
-}
-)");
-  loom_target_facts_t facts = {};
-  InitializeFacts(LOOM_TEST_TARGET_KIND_LOW_CORE, 0, &facts);
-  loom_target_function_version_t version = MakeVersion(
-      source.get(), IREE_SV("entry"), &kWrongInverseProvider, &facts);
-  loom_function_version_t* version_values[] = {&version.base};
-  const loom_function_version_list_t versions = {
-      /*.values=*/version_values,
-      /*.count=*/IREE_ARRAYSIZE(version_values),
-  };
-  loom_module_t* sealed_module = nullptr;
-
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_FAILED_PRECONDITION,
-      loom_target_module_seal(source.get(), &versions, &block_pool_,
-                              iree_allocator_system(), &sealed_module));
+      loom_target_module_seal(
+          source.get(), &specialization.function_versions.list, &block_pool_,
+          iree_allocator_system(), &sealed_module));
   EXPECT_EQ(sealed_module, nullptr);
 }
 

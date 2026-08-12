@@ -5,7 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 // Benchmarks the complete target-module sealing boundary across independent
-// clone, target-grouping, materialization, and definition-reuse dimensions.
+// clone, context materialization, and exact-definition projection dimensions.
 
 #include <cstdint>
 #include <cstdio>
@@ -30,17 +30,16 @@ namespace {
 
 enum class SealingShape {
   kCloneOnly,
-  kSharedTarget,
-  kDistinctTargets,
-  kDistinctAuthoredTargets,
+  kSharedContext,
+  kDistinctContexts,
+  kExactAuthoredContexts,
 };
 
 static constexpr int64_t kBodyOpCount = 8;
 
 static iree_status_t MaterializeTestTargetDefinition(
     loom_builder_t* builder, const loom_resolved_target_t* resolved_target,
-    loom_symbol_ref_t symbol, loom_location_id_t location,
-    loom_op_t** out_target_op) {
+    loom_symbol_ref_t symbol, loom_location_id_t location) {
   const loom_target_facts_t* facts = resolved_target->facts;
   static_assert(LOOM_TARGET_FACT_FIELD_COUNT_ == 30,
                 "test target flags reserve the first 30 bits for common "
@@ -70,6 +69,7 @@ static iree_status_t MaterializeTestTargetDefinition(
   const loom_target_snapshot_t* snapshot = &facts->storage.snapshot;
   const loom_target_export_plan_t* export_plan = &facts->storage.export_plan;
   const loom_target_config_t* config = &facts->storage.config;
+  loom_op_t* target_op = nullptr;
   return loom_test_target_build(
       builder, build_flags,
       static_cast<loom_test_target_kind_t>(facts->selector), symbol,
@@ -87,7 +87,7 @@ static iree_status_t MaterializeTestTargetDefinition(
       snapshot->memory_spaces.private_memory, snapshot->memory_spaces.host,
       snapshot->memory_spaces.descriptor, export_plan->abi_kind, export_symbol,
       export_plan->linkage, contract_set_key, config->contract_feature_bits,
-      location, out_target_op);
+      location, &target_op);
 }
 
 static const loom_target_profile_type_t kTestProfileType = {
@@ -112,15 +112,20 @@ static loom_symbol_ref_t AddSymbol(loom_module_t* module,
 
 static loom_func_like_t AddFunction(loom_module_t* module,
                                     loom_builder_t* module_builder,
-                                    loom_type_t value_type, int64_t ordinal) {
+                                    loom_type_t value_type,
+                                    loom_symbol_ref_t target_ref,
+                                    int64_t ordinal) {
   char name[32];
   std::snprintf(name, sizeof(name), "function_%08d", static_cast<int>(ordinal));
   const loom_symbol_ref_t symbol = AddSymbol(module, module_builder, name);
   loom_op_t* function_op = nullptr;
+  const loom_func_def_build_flags_t build_flags =
+      loom_symbol_ref_is_valid(target_ref) ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_TARGET
+                                           : 0;
   IREE_CHECK_OK(loom_func_def_build(
-      module_builder, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0,
+      module_builder, build_flags, /*visibility=*/0, /*retain=*/0,
       /*cc=*/0, /*purity=*/0, /*temperature=*/0, /*inline_policy=*/0,
-      loom_symbol_ref_null(), /*abi=*/0, loom_named_attr_slice_empty(),
+      target_ref, /*abi=*/0, loom_named_attr_slice_empty(),
       /*export_symbol=*/LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(),
       symbol, &value_type, /*arg_types_count=*/1, &value_type,
       /*result_count=*/1, /*tied_results=*/nullptr,
@@ -165,19 +170,19 @@ class ModuleSealingFixture {
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
     IREE_CHECK_OK(loom_context_finalize(&context_));
 
-    const int64_t target_count = shape == SealingShape::kCloneOnly ? 0
-                                 : shape == SealingShape::kSharedTarget
-                                     ? 1
-                                     : function_count;
-    facts_.resize(static_cast<size_t>(target_count));
-    for (int64_t i = 0; i < target_count; ++i) {
+    const int64_t context_count = shape == SealingShape::kCloneOnly ? 0
+                                  : shape == SealingShape::kSharedContext
+                                      ? 1
+                                      : function_count;
+    facts_.resize(static_cast<size_t>(context_count));
+    for (int64_t i = 0; i < context_count; ++i) {
       loom_target_facts_builder_initialize(
           &loom_test_target_fact_type,
           loom_target_bundle_table_lookup(&loom_test_target_bundles,
                                           LOOM_TEST_TARGET_KIND_LOW_CORE),
           &facts_[i]);
       facts_[i].selector = LOOM_TEST_TARGET_KIND_LOW_CORE;
-      facts_[i].explicit_fields = static_cast<loom_target_fact_field_set_t>(i);
+      facts_[i].explicit_fields = 0;
     }
 
     loom_module_size_hints_t hints = {
@@ -186,7 +191,7 @@ class ModuleSealingFixture {
         /*.type_count=*/0,
         /*.encoding_count=*/0,
         /*.symbol_count=*/
-        static_cast<iree_host_size_t>(function_count + target_count),
+        static_cast<iree_host_size_t>(function_count + context_count),
     };
     IREE_CHECK_OK(loom_module_allocate(
         &context_, IREE_SV("module_sealing_benchmark"), &block_pool_, &hints,
@@ -198,34 +203,41 @@ class ModuleSealingFixture {
     IREE_CHECK_OK(
         loom_module_intern_type(source_module_, value_type, &value_type));
 
-    if (shape == SealingShape::kDistinctAuthoredTargets) {
-      for (int64_t i = 0; i < target_count; ++i) {
+    std::vector<loom_symbol_ref_t> authored_target_refs;
+    if (shape == SealingShape::kExactAuthoredContexts) {
+      authored_target_refs.reserve(static_cast<size_t>(context_count));
+      for (int64_t i = 0; i < context_count; ++i) {
         char name[32];
         std::snprintf(name, sizeof(name), "target_%08d", static_cast<int>(i));
         const loom_symbol_ref_t symbol =
             AddSymbol(source_module_, &builder, name);
-        loom_op_t* target_op = nullptr;
+        authored_target_refs.push_back(symbol);
         const loom_resolved_target_t resolved_target = {
             /*.provider=*/&kTestProvider,
             /*.facts=*/&facts_[i],
         };
-        IREE_CHECK_OK(
-            MaterializeTestTargetDefinition(&builder, &resolved_target, symbol,
-                                            LOOM_LOCATION_UNKNOWN, &target_op));
+        IREE_CHECK_OK(MaterializeTestTargetDefinition(
+            &builder, &resolved_target, symbol, LOOM_LOCATION_UNKNOWN));
       }
     }
 
     functions_.reserve(static_cast<size_t>(function_count));
     for (int64_t i = 0; i < function_count; ++i) {
+      const loom_symbol_ref_t target_ref =
+          shape == SealingShape::kExactAuthoredContexts
+              ? authored_target_refs[static_cast<size_t>(i)]
+              : loom_symbol_ref_null();
       functions_.push_back(
-          AddFunction(source_module_, &builder, value_type, i));
+          AddFunction(source_module_, &builder, value_type, target_ref, i));
     }
 
-    if (target_count > 0) {
+    if (context_count > 0) {
       versions_.resize(static_cast<size_t>(function_count));
       version_handles_.resize(static_cast<size_t>(function_count));
       for (int64_t i = 0; i < function_count; ++i) {
-        const int64_t target_ordinal = target_count == 1 ? 0 : i;
+        const int64_t context_ordinal = context_count == 1 ? 0 : i;
+        const bool authored_target_is_exact =
+            shape == SealingShape::kExactAuthoredContexts;
         versions_[i] = loom_target_function_version_t{
             /*.base=*/
             {
@@ -233,16 +245,17 @@ class ModuleSealingFixture {
                 /*.function=*/functions_[i],
             },
             /*.authored_target_name=*/{},
-            /*.target_requirement_facts=*/nullptr,
+            /*.target_requirement_facts=*/
+            authored_target_is_exact ? &facts_[context_ordinal] : nullptr,
             /*.resolved_target=*/
             {
                 /*.provider=*/&kTestProvider,
-                /*.facts=*/&facts_[target_ordinal],
+                /*.facts=*/&facts_[context_ordinal],
             },
             /*.target_context_ordinal=*/
-            static_cast<loom_target_context_ordinal_t>(target_ordinal),
-            /*.authored_target_is_exact=*/false,
-            /*.function_target_facts=*/&facts_[target_ordinal],
+            static_cast<loom_target_context_ordinal_t>(context_ordinal),
+            /*.authored_target_is_exact=*/authored_target_is_exact,
+            /*.function_target_facts=*/&facts_[context_ordinal],
         };
         version_handles_[i] = &versions_[i].base;
       }
@@ -255,8 +268,8 @@ class ModuleSealingFixture {
     loom_module_t* sealed_module = Seal();
     const iree_host_size_t expected_symbol_count =
         source_module_->symbols.count +
-        (shape == SealingShape::kDistinctTargets ? target_count : 0) +
-        (shape == SealingShape::kSharedTarget ? 1 : 0);
+        (shape == SealingShape::kDistinctContexts ? context_count : 0) +
+        (shape == SealingShape::kSharedContext ? 1 : 0);
     if (sealed_module->symbols.count != expected_symbol_count) std::abort();
     output_owned_bytes_ = sealed_module->arena.total_allocation_size;
     output_used_bytes_ = sealed_module->arena.used_allocation_size;
@@ -283,14 +296,13 @@ class ModuleSealingFixture {
 
   int64_t function_count() const { return function_count_; }
 
-  int64_t target_count() const {
+  int64_t target_context_count() const {
     if (shape_ == SealingShape::kCloneOnly) return 0;
-    return shape_ == SealingShape::kSharedTarget ? 1 : function_count_;
+    return shape_ == SealingShape::kSharedContext ? 1 : function_count_;
   }
 
   int64_t authored_target_count() const {
-    return shape_ == SealingShape::kDistinctAuthoredTargets ? function_count_
-                                                            : 0;
+    return shape_ == SealingShape::kExactAuthoredContexts ? function_count_ : 0;
   }
 
   iree_host_size_t source_op_count() const {
@@ -351,23 +363,24 @@ static void RunSealingBenchmark(benchmark::State& state, SealingShape shape) {
   state.counters["source_ops"] = static_cast<double>(fixture.source_op_count());
   state.counters["source_values"] =
       static_cast<double>(fixture.source_value_count());
-  state.counters["target_groups"] = static_cast<double>(fixture.target_count());
+  state.counters["target_contexts"] =
+      static_cast<double>(fixture.target_context_count());
 }
 
 static void BM_CloneOnly(benchmark::State& state) {
   RunSealingBenchmark(state, SealingShape::kCloneOnly);
 }
 
-static void BM_SharedTarget(benchmark::State& state) {
-  RunSealingBenchmark(state, SealingShape::kSharedTarget);
+static void BM_SharedContext(benchmark::State& state) {
+  RunSealingBenchmark(state, SealingShape::kSharedContext);
 }
 
-static void BM_DistinctTargets(benchmark::State& state) {
-  RunSealingBenchmark(state, SealingShape::kDistinctTargets);
+static void BM_DistinctContexts(benchmark::State& state) {
+  RunSealingBenchmark(state, SealingShape::kDistinctContexts);
 }
 
-static void BM_DistinctAuthoredTargets(benchmark::State& state) {
-  RunSealingBenchmark(state, SealingShape::kDistinctAuthoredTargets);
+static void BM_ExactAuthoredContexts(benchmark::State& state) {
+  RunSealingBenchmark(state, SealingShape::kExactAuthoredContexts);
 }
 
 static void RegisterScalingArguments(benchmark::Benchmark* value) {
@@ -378,15 +391,15 @@ BENCHMARK(BM_CloneOnly)
     ->Apply(RegisterScalingArguments)
     ->Unit(benchmark::kMicrosecond)
     ->Complexity();
-BENCHMARK(BM_SharedTarget)
+BENCHMARK(BM_SharedContext)
     ->Apply(RegisterScalingArguments)
     ->Unit(benchmark::kMicrosecond)
     ->Complexity();
-BENCHMARK(BM_DistinctTargets)
+BENCHMARK(BM_DistinctContexts)
     ->Apply(RegisterScalingArguments)
     ->Unit(benchmark::kMicrosecond)
     ->Complexity();
-BENCHMARK(BM_DistinctAuthoredTargets)
+BENCHMARK(BM_ExactAuthoredContexts)
     ->Apply(RegisterScalingArguments)
     ->Unit(benchmark::kMicrosecond)
     ->Complexity();

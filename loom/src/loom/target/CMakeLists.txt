@@ -164,16 +164,12 @@ loom_cc_library(
   SRCS
     "module_sealing.c"
   DEPS
-    ::facts
     ::function_version
     ::provider
     iree::base
     iree::base::internal::arena
-    loom::analysis::symbol_facts
     loom::ir
-    loom::ir::symbol_map
     loom::ops::op_defs
-    loom::ops::target
     loom::rewrite::module_projection
   PUBLIC
 )

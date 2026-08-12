@@ -77,8 +77,7 @@ static loom_signed_enum_set_t loom_amdgpu_target_materialize_features(
 
 iree_status_t loom_amdgpu_target_materialize_definition(
     loom_builder_t* builder, const loom_resolved_target_t* resolved_target,
-    loom_symbol_ref_t symbol, loom_location_id_t location,
-    loom_op_t** out_target_op) {
+    loom_symbol_ref_t symbol, loom_location_id_t location) {
   const loom_amdgpu_target_facts_t* facts =
       loom_amdgpu_target_facts_cast(resolved_target->facts);
   static_assert(LOOM_TARGET_FACT_FIELD_COUNT_ == 30,
@@ -119,6 +118,7 @@ iree_status_t loom_amdgpu_target_materialize_definition(
   const loom_target_export_plan_t* export_plan =
       &facts->base.storage.export_plan;
   const loom_target_config_t* config = &facts->base.storage.config;
+  loom_op_t* target_op = NULL;
   return loom_amdgpu_target_build(
       builder, build_flags,
       (loom_amdgpu_target_kind_t)facts->identity.target->target_kind, symbol,
@@ -136,7 +136,7 @@ iree_status_t loom_amdgpu_target_materialize_definition(
       snapshot->memory_spaces.private_memory, snapshot->memory_spaces.host,
       snapshot->memory_spaces.descriptor, export_plan->abi_kind, export_symbol,
       export_plan->linkage, contract_set_key, config->contract_feature_bits,
-      features, location, out_target_op);
+      features, location, &target_op);
 }
 
 static iree_string_view_t loom_amdgpu_target_record_symbol_name(

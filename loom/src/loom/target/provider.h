@@ -65,8 +65,7 @@ typedef struct loom_target_environment_t loom_target_environment_t;
 // interning are the only fallible operations for a verified resolved target.
 typedef iree_status_t (*loom_target_materialize_definition_fn_t)(
     loom_builder_t* builder, const loom_resolved_target_t* resolved_target,
-    loom_symbol_ref_t symbol, loom_location_id_t location,
-    loom_op_t** out_target_op);
+    loom_symbol_ref_t symbol, loom_location_id_t location);
 
 // Target emission artifact storage release callback.
 typedef void (*loom_target_emit_artifact_release_fn_t)(
@@ -234,9 +233,9 @@ struct loom_target_provider_t {
   // Target-family profile representation owned by this provider, or NULL when
   // the provider contributes no profile-driven semantics.
   const loom_target_profile_type_t* profile_type;
-  // Optional inverse materializer for facts projected by |profile_type|.
-  // Providers without an ordinary target-IR representation leave this NULL
-  // and cannot seal target-bound artifacts.
+  // Optional exact target-definition materializer for facts projected by
+  // |profile_type|. Providers without an ordinary target-IR representation
+  // leave this NULL; they can seal only contexts with exact authored target IR.
   loom_target_materialize_definition_fn_t materialize_definition;
   // Optional function that registers target-owned dialects.
   loom_target_provider_context_registration_fn_t register_context;
