@@ -12,6 +12,7 @@ import re
 from collections import defaultdict
 from collections.abc import Sequence
 from enum import Enum
+from functools import cache
 
 
 class CIdentifierCase(Enum):
@@ -47,6 +48,7 @@ def c_identifier_parts(value: str) -> tuple[str, ...]:
     return tuple(part for part in re.split(r"[^0-9A-Za-z]+", value) if part)
 
 
+@cache
 def c_identifier(
     value: str,
     *,
