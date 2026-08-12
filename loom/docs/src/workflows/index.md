@@ -56,6 +56,7 @@ exact selected program, workload, tool identity, and evidence boundary.
 | Oracle | Question it can answer |
 | --- | --- |
 | [RADV and Vulkan](oracles/radv.md) | Which shader and physical schedule an optimized Vulkan stack selected for one dispatch. |
+| [LLVM MC](oracles/llvm-mc.md) | Whether selected native instructions and packets encode to the expected target bytes. |
 
 ## Correctness and performance
 

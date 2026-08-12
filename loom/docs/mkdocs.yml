@@ -87,6 +87,7 @@ nav:
       - Read compile reports: workflows/compile-reports.md
       - External oracles:
           - RADV and Vulkan: workflows/oracles/radv.md
+          - LLVM MC instruction encoding: workflows/oracles/llvm-mc.md
   - Integration:
       - Integration map: integration/index.md
       - Embed kernel JIT compilation: integration/jit-kernel.md
