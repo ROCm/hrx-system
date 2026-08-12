@@ -215,8 +215,10 @@ source compilation and repeated string search.
 
 The generated [`loomc` launch-configuration API](../reference/c-api/generated/launch__config_8h.html)
 defines the exact ownership, thread-safety, argument representation, and result
-contracts. [Compile artifacts](../workflows/compile-artifacts.md) explains the
-separate executable products loaded by target runtimes.
+contracts. [Embed kernel JIT compilation](../integration/jit-kernel.md) follows
+the complete source, specialization, launch-evaluation, emission, and runtime
+handoff; [Compile artifacts](../workflows/compile-artifacts.md) covers the
+equivalent installed-tool products.
 
 ## Keep each decision at its owning boundary
 

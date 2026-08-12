@@ -85,6 +85,9 @@ nav:
       - Benchmark checked work: workflows/benchmark.md
       - Compile artifacts: workflows/compile-artifacts.md
       - Read compile reports: workflows/compile-reports.md
+  - Integration:
+      - Integration map: integration/index.md
+      - Embed kernel JIT compilation: integration/jit-kernel.md
   - Reference:
       - Reference map: reference/index.md
       - Dialects: reference/dialects/index.md

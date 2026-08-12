@@ -246,6 +246,10 @@ this guide are included only from checked programs that build against that API;
 the generated header reference remains authoritative for ownership, lifetime,
 threading, and failure contracts.
 
+[Embed kernel JIT compilation](../integration/jit-kernel.md) follows one of
+those checked programs from targetless source through launch evaluation and an
+in-memory native executable.
+
 ## Working rules
 
 - Keep reusable algorithms targetless until a real implementation requirement
