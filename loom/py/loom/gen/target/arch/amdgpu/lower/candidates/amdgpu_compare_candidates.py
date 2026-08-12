@@ -25,6 +25,7 @@ def _ensure_runtime_py_on_path() -> None:
 _ensure_runtime_py_on_path()
 
 from loom.dialect.scalar.comparison import CmpFPredicate, CmpIPredicate  # noqa: E402
+from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
 from loom.gen.target.arch.amdgpu.lower.candidates.validation import (  # noqa: E402
     c_identifier,
@@ -184,10 +185,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    args.source.parent.mkdir(parents=True, exist_ok=True)
-    args.source.write_text(
+    write_text_file(
+        args.source,
         _emit_source(public_header=args.public_header),
-        encoding="utf-8",
     )
     return 0
 

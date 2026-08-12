@@ -18,6 +18,7 @@ iree_py_library(
     "__init__.py"
     "x86_descriptors.py"
   DEPS
+    loom::py::loom::gen::support::support
     loom::py::loom::gen::target::low::low_descriptors
     loom::py::loom::target::descriptor_sets
     loom::py::loom::target::arch::x86::descriptors

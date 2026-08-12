@@ -26,6 +26,7 @@ def _ensure_runtime_py_on_path() -> None:
 
 _ensure_runtime_py_on_path()
 
+from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
 from loom.gen.target.arch.amdgpu.amdgpu_target_table_family import (  # noqa: E402
     AmdgpuTargetTableFamily,
@@ -1157,34 +1158,31 @@ def main(argv: Sequence[str] | None = None) -> int:
         amdgpu_target_table_instruction_names_by_isa_key(family),
     )
     descriptor_sets = build_amdgpu_core_descriptor_sets_from_specs(family.generator_targets, isa_specs)
-    args.header.parent.mkdir(parents=True, exist_ok=True)
-    args.source.parent.mkdir(parents=True, exist_ok=True)
-    args.header.write_text(
+    write_text_file(
+        args.header,
         _emit_header_for_target(
             target=args.target,
         ),
-        encoding="utf-8",
     )
     for view_info in family.view_infos:
         view_header_path = view_headers.get(view_info.generator_target)
         if view_header_path is None:
             continue
-        view_header_path.parent.mkdir(parents=True, exist_ok=True)
-        view_header_path.write_text(
+        write_text_file(
+            view_header_path,
             _emit_header_for_target(
                 target=view_info.generator_target,
             ),
-            encoding="utf-8",
         )
 
-    args.source.write_text(
+    write_text_file(
+        args.source,
         generate_amdgpu_encoding_table_source(
             family,
             isa_specs,
             descriptor_sets,
             public_header=args.public_header,
         ),
-        encoding="utf-8",
     )
     return 0
 

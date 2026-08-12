@@ -23,6 +23,7 @@ def _ensure_runtime_py_on_path() -> None:
 
 _ensure_runtime_py_on_path()
 
+from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.target.arch.amdgpu.amdgpu_target_table_family import (  # noqa: E402
     amdgpu_target_table_family,
     amdgpu_target_table_instruction_names_by_isa_key,
@@ -97,10 +98,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         public_header=_ENCODING_SOURCE_HEADER,
     )
 
-    args.descriptor_source.parent.mkdir(parents=True, exist_ok=True)
-    args.encoding_source.parent.mkdir(parents=True, exist_ok=True)
-    args.descriptor_source.write_text(descriptor_family.source, encoding="utf-8")
-    args.encoding_source.write_text(encoding_source, encoding="utf-8")
+    write_text_file(args.descriptor_source, descriptor_family.source)
+    write_text_file(args.encoding_source, encoding_source)
     return 0
 
 

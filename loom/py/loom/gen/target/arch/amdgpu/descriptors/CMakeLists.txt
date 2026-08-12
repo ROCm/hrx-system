@@ -36,6 +36,7 @@ iree_py_library(
     "amdgpu_descriptors.py"
   DEPS
     loom::py::loom::gen::target::arch::amdgpu::descriptors::package_init
+    loom::py::loom::gen::support::support
     loom::py::loom::gen::target::arch::amdgpu::target_table_family
     loom::py::loom::gen::target::low::low_descriptors
     loom::py::loom::target::low_descriptors

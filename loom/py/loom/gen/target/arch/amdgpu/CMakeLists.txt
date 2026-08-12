@@ -37,6 +37,7 @@ iree_py_library(
   DEPS
     loom::py::loom::gen::target::arch::amdgpu::package_init
     loom::py::loom::gen::target::arch::amdgpu::target_table_family
+    loom::py::loom::gen::support::support
     loom::py::loom::gen::target::arch::amdgpu::descriptors::descriptors_module
     loom::py::loom::gen::target::arch::amdgpu::encoding::encoding_tables_module
     loom::py::loom::target::arch::amdgpu::descriptors

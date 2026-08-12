@@ -26,6 +26,7 @@ def _ensure_runtime_py_on_path() -> Path:
 REPO_ROOT = _ensure_runtime_py_on_path()
 
 from loom.gen.support.c import c_string_literal as _c_string_literal  # noqa: E402
+from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import (  # noqa: E402
     GeneratedFileMaintenanceMode,
     GeneratedFileMaintenanceResult,
@@ -163,11 +164,9 @@ def write_x86_packed_dot_contract_outputs(
     source_path: Path | None = None,
 ) -> None:
     if header_path is not None:
-        header_path.parent.mkdir(parents=True, exist_ok=True)
-        header_path.write_text(_emit_header(), encoding="utf-8")
+        write_text_file(header_path, _emit_header())
     if source_path is not None:
-        source_path.parent.mkdir(parents=True, exist_ok=True)
-        source_path.write_text(_emit_source(), encoding="utf-8")
+        write_text_file(source_path, _emit_source())
 
 
 def main(argv: Sequence[str] | None = None) -> int:

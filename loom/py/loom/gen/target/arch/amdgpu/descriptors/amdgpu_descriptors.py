@@ -24,6 +24,7 @@ def _ensure_runtime_py_on_path() -> None:
 
 _ensure_runtime_py_on_path()
 
+from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.target.arch.amdgpu.amdgpu_target_table_family import (  # noqa: E402
     AmdgpuTargetTableFamily,
     amdgpu_target_table_family,
@@ -176,10 +177,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             descriptor_sets,
             source_public_header=descriptor_set.public_header,
         )
-        args.header.parent.mkdir(parents=True, exist_ok=True)
-        args.source.parent.mkdir(parents=True, exist_ok=True)
-        args.header.write_text(generated.view_headers[0], encoding="utf-8")
-        args.source.write_text(generated.source, encoding="utf-8")
+        write_text_file(args.header, generated.view_headers[0])
+        write_text_file(args.source, generated.source)
         for view_info, view_header in zip(
             family.view_infos,
             generated.view_headers[1:],
@@ -188,11 +187,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             view_header_path = view_headers.get(view_info.generator_target)
             if view_header_path is None:
                 continue
-            view_header_path.parent.mkdir(parents=True, exist_ok=True)
-            view_header_path.write_text(
-                view_header,
-                encoding="utf-8",
-            )
+            write_text_file(view_header_path, view_header)
         return 0
 
     write_descriptor_set_to_paths(

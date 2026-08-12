@@ -23,6 +23,7 @@ def _ensure_runtime_py_on_path() -> None:
 
 _ensure_runtime_py_on_path()
 
+from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
 from loom.gen.target.arch.amdgpu.lower.candidates.validation import (  # noqa: E402
     dense_candidate_ranges,
@@ -289,11 +290,6 @@ def _emit_candidate_ranges(
     )
 
 
-def _write_output(path: Path, contents: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(contents, encoding="utf-8")
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate AMDGPU source-to-low memory descriptor candidates.")
     parser.add_argument(
@@ -312,9 +308,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("at least one output path is required")
     candidates = _ordered_candidates(amdgpu_memory_descriptor_candidates())
     if args.candidate_rows is not None:
-        _write_output(args.candidate_rows, _emit_candidate_rows(candidates))
+        write_text_file(args.candidate_rows, _emit_candidate_rows(candidates))
     if args.candidate_ranges is not None:
-        _write_output(args.candidate_ranges, _emit_candidate_ranges(candidates))
+        write_text_file(args.candidate_ranges, _emit_candidate_ranges(candidates))
     return 0
 
 

@@ -25,6 +25,7 @@ def _ensure_runtime_py_on_path() -> None:
 _ensure_runtime_py_on_path()
 
 from loom.gen.support.c import c_string_arg as _c_string_arg  # noqa: E402
+from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
 from loom.gen.target.arch.amdgpu.descriptors.amdgpu_planning_table_inputs import (  # noqa: E402
     AmdgpuPlanningTableInputs,
@@ -1432,11 +1433,6 @@ def _emit_pair_placement_recipes(tables: _VopdComponentTables) -> str:
     )
 
 
-def _write_output(path: Path, contents: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(contents, encoding="utf-8")
-
-
 def generate_vopd_component_table_outputs(
     inputs: AmdgpuPlanningTableInputs,
     *,
@@ -1451,26 +1447,26 @@ def generate_vopd_component_table_outputs(
 
     tables = _materialize_vopd_component_tables(inputs)
     if component_rules_path is not None:
-        _write_output(component_rules_path, _emit_component_rules(tables))
+        write_text_file(component_rules_path, _emit_component_rules(tables))
     if descriptor_lookup_ranges_path is not None:
-        _write_output(
+        write_text_file(
             descriptor_lookup_ranges_path,
             _emit_descriptor_lookup_ranges(tables),
         )
     if descriptor_lookups_path is not None:
-        _write_output(
+        write_text_file(
             descriptor_lookups_path,
             _emit_descriptor_lookup_rows(tables),
         )
     if pair_affinity_ranges_path is not None:
-        _write_output(
+        write_text_file(
             pair_affinity_ranges_path,
             _emit_pair_affinity_ranges(tables),
         )
     if pair_affinities_path is not None:
-        _write_output(pair_affinities_path, _emit_pair_affinity_rows(tables))
+        write_text_file(pair_affinities_path, _emit_pair_affinity_rows(tables))
     if pair_placement_recipes_path is not None:
-        _write_output(
+        write_text_file(
             pair_placement_recipes_path,
             _emit_pair_placement_recipes(tables),
         )

@@ -28,6 +28,7 @@ from loom.dialect.encoding.numeric_formats import (  # noqa: E402
     FP8_FORMATS,
     Fp8SpecialPolicy,
 )
+from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
 from loom.gen.target.arch.amdgpu.lower.candidates.validation import (  # noqa: E402
     required_descriptor_ref_constant_name,
@@ -860,11 +861,6 @@ def _emit_fp8_scaled_descriptor_ref_rows(
     )
 
 
-def _write_output(path: Path, contents: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(contents, encoding="utf-8")
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate AMDGPU narrow-float lowering tables.")
     parser.add_argument(
@@ -920,37 +916,37 @@ def main(argv: Sequence[str] | None = None) -> int:
         else None
     )
     if args.fp8_decode_plan_descriptor_rows is not None:
-        _write_output(
+        write_text_file(
             args.fp8_decode_plan_descriptor_rows,
             _emit_fp8_decode_plan_descriptor_rows(descriptor_ref_key_set=descriptor_ref_key_set),
         )
     if args.fp8_encoded_operand_format_rows is not None:
-        _write_output(
+        write_text_file(
             args.fp8_encoded_operand_format_rows,
             _emit_fp8_encoded_operand_format_rows(),
         )
     if args.fp8_encoded_operand_schema_requirement_rows is not None:
-        _write_output(
+        write_text_file(
             args.fp8_encoded_operand_schema_requirement_rows,
             _emit_fp8_encoded_operand_schema_requirement_rows(),
         )
     if args.fp8_native_descriptor_ref_rows is not None:
-        _write_output(
+        write_text_file(
             args.fp8_native_descriptor_ref_rows,
             _emit_fp8_native_descriptor_ref_rows(descriptor_ref_key_set=descriptor_ref_key_set),
         )
     if args.fp8_scaled_descriptor_ref_rows is not None:
-        _write_output(
+        write_text_file(
             args.fp8_scaled_descriptor_ref_rows,
             _emit_fp8_scaled_descriptor_ref_rows(descriptor_ref_key_set=descriptor_ref_key_set),
         )
     if args.fp8_subnormal_table_rows is not None:
-        _write_output(
+        write_text_file(
             args.fp8_subnormal_table_rows,
             _emit_fp8_subnormal_table_rows(),
         )
     if args.fp8_packed_repair_reason_rows is not None:
-        _write_output(
+        write_text_file(
             args.fp8_packed_repair_reason_rows,
             _emit_fp8_packed_repair_reason_rows(),
         )

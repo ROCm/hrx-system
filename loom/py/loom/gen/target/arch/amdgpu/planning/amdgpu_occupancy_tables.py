@@ -24,6 +24,7 @@ def _ensure_runtime_py_on_path() -> None:
 
 _ensure_runtime_py_on_path()
 
+from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     _amdgpu_core_descriptor_set_bases,
@@ -718,8 +719,7 @@ def write_occupancy_tables_to_path(source_path: Path) -> None:
     processors = sorted_processor_infos()
     models = _materialize_models(processors)
     _validate_models(models, processors)
-    source_path.parent.mkdir(parents=True, exist_ok=True)
-    source_path.write_text(_emit_source(models), encoding="utf-8")
+    write_text_file(source_path, _emit_source(models))
 
 
 def main(argv: Sequence[str] | None = None) -> int:

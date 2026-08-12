@@ -25,6 +25,7 @@ def _ensure_runtime_py_on_path() -> None:
 
 _ensure_runtime_py_on_path()
 
+from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     amdgpu_common_reg_class_ids,
@@ -819,19 +820,14 @@ def generate_target_ref_outputs(
 ) -> None:
     """Emits target-reference tables from an existing descriptor corpus."""
 
-    header_path.parent.mkdir(parents=True, exist_ok=True)
-    source_path.parent.mkdir(parents=True, exist_ok=True)
-    header_path.write_text(
-        _emit_tables_header(),
-        encoding="utf-8",
-    )
-    source_path.write_text(
+    write_text_file(header_path, _emit_tables_header())
+    write_text_file(
+        source_path,
         _emit_source(
             public_header=public_header,
             descriptor_set_infos=descriptor_set_infos,
             descriptor_sets_by_key=descriptor_sets_by_key,
         ),
-        encoding="utf-8",
     )
 
 
