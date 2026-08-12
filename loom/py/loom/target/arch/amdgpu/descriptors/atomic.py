@@ -1089,7 +1089,7 @@ def _buffer_atomic_overlay(
         constraints = ()
 
     operands += (
-        AmdgpuOperandOverlay(resource_field_name, _sgpr_vmem_resource("resource")),
+        AmdgpuOperandOverlay(resource_field_name, _sgpr_resource("resource", units=4)),
         _mubuf_vaddr_operand(),
         AmdgpuOperandOverlay("SOFFSET", _sgpr_operand("soffset")),
     )
@@ -1188,7 +1188,9 @@ def _buffer_atomic_cmpswap_overlay(
                 _vgpr_operand("value", units=2),
                 role_exception_reason=_BUFFER_ATOMIC_VDATA_INPUT_REASON,
             ),
-            AmdgpuOperandOverlay(resource_field_name, _sgpr_vmem_resource("resource")),
+            AmdgpuOperandOverlay(
+                resource_field_name, _sgpr_resource("resource", units=4)
+            ),
             _mubuf_vaddr_operand(),
             AmdgpuOperandOverlay("SOFFSET", _sgpr_operand("soffset")),
         ),

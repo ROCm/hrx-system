@@ -28,11 +28,8 @@ typedef enum loom_low_allocation_storage_release_policy_e {
   LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN = 0,
   // Pressure-friendly storage leases may be released before the candidate.
   LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FOR_PRESSURE = 1,
-  // Ordinary leases may be released, while latency-sensitive leases remain
-  // hard conflicts.
-  LOOM_LOW_ALLOCATION_STORAGE_RELEASE_PRESERVE_LATENCY = 2,
   // Active storage leases may be released before the candidate assignment.
-  LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED = 3,
+  LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED = 2,
 } loom_low_allocation_storage_release_policy_t;
 
 typedef struct loom_low_allocation_storage_lease_unit_entry_t
@@ -100,8 +97,6 @@ typedef struct loom_low_allocation_storage_lease_state_t {
   iree_host_size_t release_action_count;
   // Number of storage-lease records marked releasable for pressure.
   iree_host_size_t pressure_release_record_count;
-  // Number of storage-lease records that should be preserved for latency.
-  iree_host_size_t latency_preservation_record_count;
 } loom_low_allocation_storage_lease_state_t;
 
 // Initializes |index| for up to |lease_unit_capacity| materialized physical

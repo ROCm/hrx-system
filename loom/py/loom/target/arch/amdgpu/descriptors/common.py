@@ -1362,16 +1362,6 @@ def _sgpr_resource(field_name: str, *, units: int = 1) -> Operand:
     return Operand(field_name, OperandRole.RESOURCE, _SGPR_ALT, unit_count=units)
 
 
-def _sgpr_vmem_resource(field_name: str) -> Operand:
-    return Operand(
-        field_name,
-        OperandRole.RESOURCE,
-        _SGPR_ALT,
-        unit_count=4,
-        latency_sensitive_resource=True,
-    )
-
-
 def _m0_implicit_resource(field_name: str = "m0") -> Operand:
     return Operand(
         field_name,
@@ -3534,7 +3524,6 @@ __all__ = (
     "_sgpr_predicate",
     "_sgpr_resource",
     "_sgpr_result",
-    "_sgpr_vmem_resource",
     "_sgpr_vgpr_operand",
     "_signed_offset_immediate",
     "_soffset_offset_operand_form",
