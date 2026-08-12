@@ -37,6 +37,20 @@ static iree_status_t CaptureDiagnostic(void* user_data,
   return iree_ok_status();
 }
 
+static iree_status_t FailDiagnostic(void* user_data,
+                                    const loom_diagnostic_t* diagnostic) {
+  (void)user_data;
+  (void)diagnostic;
+  return iree_make_status(IREE_STATUS_DATA_LOSS, "diagnostic sink failure");
+}
+
+static iree_status_t DeferDiagnostic(void* user_data,
+                                     const loom_diagnostic_t* diagnostic) {
+  (void)user_data;
+  (void)diagnostic;
+  return iree_status_from_code(IREE_STATUS_DEFERRED);
+}
+
 class ReaderTest : public ::testing::Test {
  protected:
   struct SectionEntry {
@@ -2221,6 +2235,83 @@ TEST_F(ReaderTest, AcceptsEmptyModuleMetadata) {
   EXPECT_EQ(result.first_module.symbol_count, 0u);
 
   loom_module_free(module);
+}
+
+TEST_F(ReaderTest, DiagnosticSinkFailureEscapesPublicBoundary) {
+  const uint8_t bytes[] = {0x00};
+  loom_bytecode_read_result_t result = {
+      /*.error_count=*/123,
+  };
+  loom_bytecode_index_options_t options = {
+      /*.diagnostic_sink=*/
+      {
+          /*.fn=*/FailDiagnostic,
+          /*.user_data=*/nullptr,
+      },
+  };
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DATA_LOSS,
+      loom_bytecode_read_metadata(
+          iree_make_const_byte_span(bytes, IREE_ARRAYSIZE(bytes)),
+          IREE_SV("test.loombc"), &context_, &block_pool_, &options, &result));
+
+  EXPECT_EQ(result.error_count, 123u);
+}
+
+TEST_F(ReaderTest, DiagnosticSinkCannotUsePrivateDeferredMarker) {
+  const uint8_t bytes[] = {0x00};
+  loom_bytecode_read_result_t result = {
+      /*.error_count=*/123,
+  };
+  loom_bytecode_index_options_t options = {
+      /*.diagnostic_sink=*/
+      {
+          /*.fn=*/DeferDiagnostic,
+          /*.user_data=*/nullptr,
+      },
+  };
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      loom_bytecode_read_metadata(
+          iree_make_const_byte_span(bytes, IREE_ARRAYSIZE(bytes)),
+          IREE_SV("test.loombc"), &context_, &block_pool_, &options, &result));
+
+  EXPECT_EQ(result.error_count, 123u);
+}
+
+TEST_F(ReaderTest, VerifierDeferredStatusEscapesPublicBoundary) {
+  loom_module_t* module = CreateFunctionModule();
+  loom_op_t* func_op = module->symbols.entries[0].defining_op;
+  loom_block_t* entry_block = loom_region_entry_block(
+      loom_func_like_body(loom_func_like_cast(module, func_op)));
+  IREE_ASSERT_OK(loom_op_erase(module, entry_block->last_op));
+  auto bytes = WriteModule(module);
+  loom_module_free(module);
+
+  loom_bytecode_read_result_t result = {
+      /*.error_count=*/123,
+  };
+  loom_bytecode_read_options_t options = {
+      /*.diagnostic_sink=*/
+      {
+          /*.fn=*/DeferDiagnostic,
+          /*.user_data=*/nullptr,
+      },
+      /*.verify_module=*/true,
+  };
+  loom_module_t* read_module = nullptr;
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DEFERRED,
+      loom_bytecode_read_module(
+          iree_make_const_byte_span(bytes.data(), bytes.size()),
+          IREE_SV("test.loombc"), &context_, &block_pool_, &options, &result,
+          &read_module, iree_allocator_system()));
+
+  EXPECT_EQ(result.error_count, 123u);
+  EXPECT_EQ(read_module, nullptr);
 }
 
 TEST_F(ReaderTest, AcceptsFunctionMetadata) {

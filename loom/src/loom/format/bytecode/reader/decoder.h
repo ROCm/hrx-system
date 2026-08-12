@@ -20,43 +20,27 @@ extern "C" {
 
 // Diagnostic state shared by bounded bytecode cursors in one public read.
 //
-// The decoder owns no input, arena, table, context, or IR state. Error and
-// warning counters remain owned by the caller's public result object.
+// The decoder owns no input, arena, table, context, or IR state. The error
+// counter remains owned by the caller's public result object.
 typedef struct loom_bytecode_reader_decoder_t {
   // Structured diagnostic destination and input identity.
   loom_bytecode_reader_diagnostic_context_t diagnostic_context;
-  // Caller-owned diagnostic counters updated by emitted diagnostics.
-  struct {
-    // Number of emitted error diagnostics.
-    uint32_t* error;
-    // Number of emitted warning diagnostics.
-    uint32_t* warning;
-  } counts;
+  // Caller-owned number of emitted error diagnostics.
+  uint32_t* error_count;
 } loom_bytecode_reader_decoder_t;
 
 // Initializes a bounded decoder over caller-owned diagnostic state.
 static inline void loom_bytecode_reader_decoder_initialize(
     loom_diagnostic_sink_t sink, iree_string_view_t filename,
-    uint32_t* error_count, uint32_t* warning_count,
-    loom_bytecode_reader_decoder_t* out_decoder) {
+    uint32_t* error_count, loom_bytecode_reader_decoder_t* out_decoder) {
   *out_decoder = (loom_bytecode_reader_decoder_t){
       .diagnostic_context =
           {
               .sink = sink,
               .filename = filename,
           },
-      .counts =
-          {
-              .error = error_count,
-              .warning = warning_count,
-          },
+      .error_count = error_count,
   };
-}
-
-// Returns true after the decoder has emitted an error diagnostic.
-static inline bool loom_bytecode_reader_has_errors(
-    const loom_bytecode_reader_decoder_t* decoder) {
-  return *decoder->counts.error > 0;
 }
 
 // Bounded cursor over one named bytecode range.
@@ -84,12 +68,16 @@ static inline uint64_t loom_bytecode_reader_cursor_absolute_position(
   return cursor->absolute_offset + (uint64_t)cursor->cursor.position;
 }
 
-// Emits a structured bytecode diagnostic and updates decoder counters.
-iree_status_t loom_bytecode_reader_emit(loom_bytecode_reader_decoder_t* decoder,
-                                        const loom_error_def_t* error,
-                                        const loom_diagnostic_param_t* params,
-                                        iree_host_size_t param_count,
-                                        uint64_t offset, uint64_t length);
+// Emits a structured bytecode error and increments the public error count.
+//
+// Returns code-only IREE_STATUS_DEFERRED after the diagnostic sink accepts the
+// error. Private reader functions propagate that marker through ordinary
+// status macros; only public bytecode-reader boundaries consume it. Actual
+// diagnostic sink failures propagate unchanged.
+iree_status_t loom_bytecode_reader_emit_error(
+    loom_bytecode_reader_decoder_t* decoder, const loom_error_def_t* error,
+    const loom_diagnostic_param_t* params, iree_host_size_t param_count,
+    uint64_t offset, uint64_t length);
 
 // Emits a truncated-range diagnostic at |offset|.
 iree_status_t loom_bytecode_reader_emit_unexpected_end(
@@ -182,7 +170,9 @@ static inline iree_status_t loom_bytecode_reader_read_uvarint(
     loom_bytecode_reader_cursor_t* cursor, uint64_t* out_value) {
   const uint64_t offset = loom_bytecode_reader_cursor_absolute_position(cursor);
   iree_status_t status = loom_uvarint_decode(&cursor->cursor, out_value);
-  if (IREE_LIKELY(iree_status_is_ok(status))) return iree_ok_status();
+  if (IREE_LIKELY(iree_status_is_ok(status))) {
+    return iree_ok_status();
+  }
   return loom_bytecode_reader_emit_invalid_varint(decoder, offset, status);
 }
 
@@ -193,7 +183,6 @@ static inline iree_status_t loom_bytecode_reader_read_svarint(
   uint64_t zigzag = 0;
   IREE_RETURN_IF_ERROR(
       loom_bytecode_reader_read_uvarint(decoder, cursor, &zigzag));
-  if (loom_bytecode_reader_has_errors(decoder)) return iree_ok_status();
   *out_value = (int64_t)((zigzag >> 1) ^ -(zigzag & 1));
   return iree_ok_status();
 }

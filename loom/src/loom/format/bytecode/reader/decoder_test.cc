@@ -27,18 +27,30 @@ static iree_status_t CaptureDiagnostic(void* user_data,
   return iree_ok_status();
 }
 
+static iree_status_t FailDiagnostic(void* user_data,
+                                    const loom_diagnostic_t* diagnostic) {
+  (void)user_data;
+  (void)diagnostic;
+  return iree_make_status(IREE_STATUS_DATA_LOSS, "diagnostic sink failure");
+}
+
+static iree_status_t DeferDiagnostic(void* user_data,
+                                     const loom_diagnostic_t* diagnostic) {
+  (void)user_data;
+  (void)diagnostic;
+  return iree_status_from_code(IREE_STATUS_DEFERRED);
+}
+
 class BytecodeDecoderTest : public ::testing::Test {
  protected:
   void SetUp() override {
     loom_bytecode_reader_decoder_initialize(
         loom_diagnostic_sink_t{CaptureDiagnostic, &captured_},
-        IREE_SV("decoder_test.loombc"), &error_count_, &warning_count_,
-        &decoder_);
+        IREE_SV("decoder_test.loombc"), &error_count_, &decoder_);
   }
 
   loom_bytecode_reader_decoder_t decoder_ = {};
   uint32_t error_count_ = 0;
-  uint32_t warning_count_ = 0;
   CapturedDiagnostic captured_ = {};
 };
 
@@ -91,10 +103,14 @@ TEST_F(BytecodeDecoderTest, TruncatedReadPreservesCursorAndAbsoluteOffset) {
   loom_bytecode_reader_cursor_initialize(data, sizeof(data), 4096,
                                          IREE_SV("TEST"), &cursor);
 
-  uint16_t value = 0;
-  IREE_ASSERT_OK(loom_bytecode_reader_read_u16_le(&decoder_, &cursor, &value));
+  uint16_t value = 0xCAFE;
+  iree_status_t status =
+      loom_bytecode_reader_read_u16_le(&decoder_, &cursor, &value);
+  EXPECT_EQ(status, iree_status_from_code(IREE_STATUS_DEFERRED));
+  iree_status_ignore(status);
 
   EXPECT_EQ(cursor.cursor.position, 0u);
+  EXPECT_EQ(value, 0xCAFEu);
   EXPECT_EQ(error_count_, 1u);
   ASSERT_NE(captured_.error, nullptr);
   EXPECT_EQ(captured_.error->domain, LOOM_ERROR_DOMAIN_BYTECODE);
@@ -110,7 +126,8 @@ TEST_F(BytecodeDecoderTest, InvalidVarintPreservesCursorAndReportsStart) {
                                          IREE_SV("TEST"), &cursor);
 
   uint64_t value = 0;
-  IREE_ASSERT_OK(loom_bytecode_reader_read_uvarint(&decoder_, &cursor, &value));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED, loom_bytecode_reader_read_uvarint(
+                                                  &decoder_, &cursor, &value));
 
   EXPECT_EQ(cursor.cursor.position, 0u);
   EXPECT_EQ(error_count_, 1u);
@@ -128,7 +145,8 @@ TEST_F(BytecodeDecoderTest, TrailingBytesReportCurrentAbsoluteOffset) {
   uint8_t value = 0;
   IREE_ASSERT_OK(loom_bytecode_reader_read_u8(&decoder_, &cursor, &value));
 
-  IREE_ASSERT_OK(
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DEFERRED,
       loom_bytecode_reader_expect_empty(&decoder_, &cursor, IREE_SV("table")));
 
   EXPECT_EQ(error_count_, 1u);
@@ -140,13 +158,48 @@ TEST_F(BytecodeDecoderTest, TrailingBytesReportCurrentAbsoluteOffset) {
 }
 
 TEST_F(BytecodeDecoderTest, RangeValidationRejectsOverflow) {
-  IREE_ASSERT_OK(loom_bytecode_reader_validate_range(
-      &decoder_, IREE_SV("body"), UINT64_MAX - 3, 8, UINT64_MAX));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DEFERRED,
+      loom_bytecode_reader_validate_range(&decoder_, IREE_SV("body"),
+                                          UINT64_MAX - 3, 8, UINT64_MAX));
 
   EXPECT_EQ(error_count_, 1u);
   ASSERT_NE(captured_.error, nullptr);
   EXPECT_EQ(captured_.error->domain, LOOM_ERROR_DOMAIN_BYTECODE);
   EXPECT_EQ(captured_.error->code, 7u);
+}
+
+TEST_F(BytecodeDecoderTest, DiagnosticSinkFailurePropagates) {
+  loom_bytecode_reader_decoder_initialize(
+      loom_diagnostic_sink_t{FailDiagnostic, nullptr},
+      IREE_SV("decoder_test.loombc"), &error_count_, &decoder_);
+  const uint8_t data[] = {0xAA};
+  loom_bytecode_reader_cursor_t cursor;
+  loom_bytecode_reader_cursor_initialize(data, sizeof(data), 0, IREE_SV("TEST"),
+                                         &cursor);
+
+  uint16_t value = 0;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, loom_bytecode_reader_read_u16_le(
+                                                   &decoder_, &cursor, &value));
+
+  EXPECT_EQ(error_count_, 1u);
+}
+
+TEST_F(BytecodeDecoderTest, DiagnosticSinkCannotReturnReservedDeferred) {
+  loom_bytecode_reader_decoder_initialize(
+      loom_diagnostic_sink_t{DeferDiagnostic, nullptr},
+      IREE_SV("decoder_test.loombc"), &error_count_, &decoder_);
+  const uint8_t data[] = {0xAA};
+  loom_bytecode_reader_cursor_t cursor;
+  loom_bytecode_reader_cursor_initialize(data, sizeof(data), 0, IREE_SV("TEST"),
+                                         &cursor);
+
+  uint16_t value = 0;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      loom_bytecode_reader_read_u16_le(&decoder_, &cursor, &value));
+
+  EXPECT_EQ(error_count_, 1u);
 }
 
 }  // namespace
