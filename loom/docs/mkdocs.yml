@@ -78,12 +78,17 @@ nav:
       - Command programs: guide/command-programs.md
   - Workflows:
       - Workflow map: workflows/index.md
+      - Agent-driven kernel development: workflows/agent-driven-kernel-development.md
       - Format and verify source: workflows/format-and-verify.md
       - Link and package modules: workflows/link-and-package.md
       - Test correctness: workflows/test-correctness.md
       - Benchmark checked work: workflows/benchmark.md
       - Compile artifacts: workflows/compile-artifacts.md
       - Read compile reports: workflows/compile-reports.md
+      - External oracles:
+          - RADV and Vulkan: workflows/oracles/radv.md
+          - LLVM MC instruction encoding: workflows/oracles/llvm-mc.md
+          - GGML and llama.cpp: workflows/oracles/ggml-llama-cpp.md
   - Integration:
       - Integration map: integration/index.md
       - Embed kernel JIT compilation: integration/jit-kernel.md
@@ -132,4 +137,4 @@ validation:
 extra_css:
   - stylesheets/extra.css
 
-copyright: Copyright &copy; 2026 The IREE Authors
+copyright: Copyright &copy; 2026 The HRX Authors

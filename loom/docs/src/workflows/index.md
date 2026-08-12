@@ -5,6 +5,11 @@ start with binaries on `PATH` and ordinary `.loom` or `.loombc` inputs. Source
 checkout commands, Bazel labels, compiler internals, and target-specific runtime
 setup have separate owners.
 
+Use [Agent-driven kernel development](agent-driven-kernel-development.md) when
+the task spans several tools and candidate iterations. It keeps numerical,
+compiler, and physical evidence joined to one production witness while the
+focused pages below own each command's exact contract.
+
 ## The ordinary authoring loop
 
 Most kernel and program work repeats the same evidence sequence:
@@ -33,6 +38,26 @@ at `.loombc`. A JIT embedding can perform the same operations in memory through
 | Inspect symbols and dependency closure | [Link and package modules](link-and-package.md#inspect-before-linking) |
 | Build a selective artifact input | [Link and package modules](link-and-package.md#select-one-program) |
 | Package a reusable bytecode archive | [Link and package modules](link-and-package.md#package-an-archive) |
+
+## Development loops
+
+| Task | Workflow |
+| --- | --- |
+| Drive a kernel from production witness through controlled optimization | [Agent-driven kernel development](agent-driven-kernel-development.md) |
+| Turn a score change into a compiler question | [Read compile reports](compile-reports.md#relate-reports-to-benchmark-results) |
+| Preserve a complete result and its compiler evidence | [Benchmark checked work](benchmark.md#preserve-the-experiment) |
+
+## External oracles
+
+An external compiler or runtime can answer a narrowly defined question without
+becoming Loom's source language or schedule. The oracle workflow preserves the
+exact selected program, workload, tool identity, and evidence boundary.
+
+| Oracle | Question it can answer |
+| --- | --- |
+| [RADV and Vulkan](oracles/radv.md) | Which shader and physical schedule an optimized Vulkan stack selected for one dispatch. |
+| [LLVM MC](oracles/llvm-mc.md) | Whether selected native instructions and packets encode to the expected target bytes. |
+| [GGML and llama.cpp](oracles/ggml-llama-cpp.md) | Which model, storage, graph, and optimized-runtime contracts a port must preserve. |
 
 ## Correctness and performance
 
