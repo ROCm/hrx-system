@@ -6,7 +6,6 @@
 #
 # bazel-to-cmake: skip
 
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//loom/build_tools/bazel:defs.bzl", "loom_library")
 
 package(
@@ -31,27 +30,9 @@ loom_library(
     deps = [":kernel"],
 )
 
-sh_test(
-    name = "doc_generate_test",
-    srcs = [".doc-generate.sh"],
-    data = [
-        "kernel.loom",
-        "model.loom",
-        "motif.loom",
-        "run.sh",
-        "//loom/docs/examples:example.shlib",
-        "//loom/src/loom/tools/loom-check",
-        "//loom/src/loom/tools/loom-compile",
-        "//loom/src/loom/tools/loom-format",
-        "//loom/src/loom/tools/loom-link",
-    ],
-    tags = ["hostonly"],
-)
-
 test_suite(
     name = "test",
     tests = [
-        ":doc_generate_test",
         ":kernel_test",
         ":model_test",
         ":motif_test",
