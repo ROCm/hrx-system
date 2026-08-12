@@ -72,6 +72,7 @@ nav:
       - Values, types, and shapes: guide/values-types-shapes.md
       - Functions and structured control flow: guide/functions-and-control.md
       - Buffers, views, and memory: guide/buffers-views-memory.md
+      - Vectors and structured compute: guide/vectors-and-structured-compute.md
       - Kernels and launch configuration: guide/kernels-and-launch.md
       - Facts and specialization: guide/facts-and-specialization.md
   - Workflows:

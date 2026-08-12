@@ -31,18 +31,22 @@ graph, or deployment language.
    logical access, then make memory spaces, layouts, vector transfers, and
    synchronization explicit. Continue with [Buffers, views, and
    memory](buffers-views-memory.md).
-5. **Kernels and launch configuration** add the dispatch boundary. A kernel
+5. **Vectors and structured compute** express lane-wise arithmetic, reductions,
+   encoded numeric interpretation, and matrix contractions without committing
+   reusable computation to an instruction set. Continue with [Vectors and
+   structured compute](vectors-and-structured-compute.md).
+6. **Kernels and launch configuration** add the dispatch boundary. A kernel
    owns both the mapping from workload to physical launch and the arguments
    carried into its device body. Continue with [Kernels and launch
    configuration](kernels-and-launch.md).
-6. **Facts and specialization** state what the author, composition root, and
+7. **Facts and specialization** state what the author, composition root, and
    target know. Configuration constraints, assumptions, target facts, and
    provider selection make that information useful before lowering. Continue
    with [Facts and specialization](facts-and-specialization.md).
-7. **Checks and benchmarks** make correctness workloads executable and let
+8. **Checks and benchmarks** make correctness workloads executable and let
    performance rows select those same proven workloads instead of rebuilding
    them in a harness.
-8. **Command programs** compose launchable kernels, resources, and scheduling
+9. **Command programs** compose launchable kernels, resources, and scheduling
    into reusable subgraphs while preserving the same linking and specialization
    model.
 
