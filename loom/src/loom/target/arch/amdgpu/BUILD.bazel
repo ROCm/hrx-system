@@ -284,11 +284,32 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "vector_packet_legalization",
+    srcs = ["vector_packet_legalization.c"],
+    hdrs = ["vector_packet_legalization.h"],
+    deps = [
+        ":target_info_defs",
+        "//loom/src/loom/analysis:view_regions",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:legalization",
+        "//loom/src/loom/target/arch/amdgpu/lower:kinds",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "legalization",
     srcs = ["legalization.c"],
     hdrs = ["legalization.h"],
     deps = [
         ":facts",
+        ":vector_packet_legalization",
         "//loom/src/loom/analysis:symbolic_expr",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/ir",

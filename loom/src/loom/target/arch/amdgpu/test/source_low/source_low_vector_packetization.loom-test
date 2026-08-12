@@ -1,0 +1,139 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx11-generic> @target
+kernel.def target(@target) @vector_fptrunc_f32x66_load_store() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_global = buffer.assume.memory_space<global> %input : buffer
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %input_noalias, %output_noalias = buffer.assume.noalias %input_global, %output_global : buffer, buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<66xf32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<66xf16>
+  %loaded = vector.load %input_view[0] : view<66xf32> -> vector<66xf32>
+  %converted = vector.fptrunc %loaded : vector<66xf32> to vector<66xf16>
+  vector.store %converted, %output_view[0] : vector<66xf16>, view<66xf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @vector_fptrunc_f32x66_load_store() asm {
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 264} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 132} : reg<amdgpu.sgpr x2>
+  %27 = s_mov_b32 0
+  %28 = s_mov_b32 64
+  %29 = s_mov_b32 4
+  low.br ^_bb1(%27: reg<amdgpu.sgpr>)
+^_bb1(%24: reg<amdgpu.sgpr>):
+  %30 = s_cmp_lt_i32 %24, %28
+  low.cond_br %30, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %31 = s_lshl_b32_rhs_inline %24, 2
+  %32 = s_load_dwordx4 %input_view, %31
+  %33 = slice %32[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %34 = v_cvt_f16_f32 %33
+  %35 = v_bfe_u32_offset_0_width_16_low16 %34
+  %36 = slice %32[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %37 = v_cvt_f16_f32 %36
+  %38 = v_bfe_u32_offset_0_width_16_low16 %37
+  %39 = v_lshl_add_u32_shift_imm %38, %35, 16
+  %40 = slice %32[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %41 = v_cvt_f16_f32 %40
+  %42 = v_bfe_u32_offset_0_width_16_low16 %41
+  %43 = slice %32[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %44 = v_cvt_f16_f32 %43
+  %45 = v_bfe_u32_offset_0_width_16_low16 %44
+  %46 = v_lshl_add_u32_shift_imm %45, %42, 16
+  %47 = concat(%39, %46) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %48 = v_mov_b32 0
+  %49 = s_lshl_b32_rhs_inline %24, 1
+  %50 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %51 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %53 = s_add_u32 %50, %49
+  %54 = s_addc_u32 %51, %27
+  %55 = concat(%53, %54) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b64_saddr %48, %47, %55
+  %56 = s_add_u32 %24, %29
+  low.br ^_bb1(%56: reg<amdgpu.sgpr>)
+^_bb3:
+  %58 = s_load_dwordx2 %input_view, %27 {offset = 256}
+  %59 = slice %58[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %60 = v_cvt_f16_f32 %59
+  %61 = v_bfe_u32_offset_0_width_16_low16 %60
+  %62 = slice %58[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %63 = v_cvt_f16_f32 %62
+  %64 = v_bfe_u32_offset_0_width_16_low16 %63
+  %65 = v_lshl_add_u32_shift_imm %64, %61, 16
+  %66 = v_mov_b32 0
+  global_store_b32_saddr %66, %65, %output_view {offset = 128}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+kernel.def target(@target) @vector_extf_f16x34_load_store() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_global = buffer.assume.memory_space<global> %input : buffer
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %input_noalias, %output_noalias = buffer.assume.noalias %input_global, %output_global : buffer, buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<34xf16>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<34xf32>
+  %loaded = vector.load %input_view[0] : view<34xf16> -> vector<34xf16>
+  %converted = vector.extf %loaded : vector<34xf16> to vector<34xf32>
+  vector.store %converted, %output_view[0] : vector<34xf32>, view<34xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @vector_extf_f16x34_load_store() asm {
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 68} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 136} : reg<amdgpu.sgpr x2>
+  %27 = s_mov_b32 0
+  %28 = s_mov_b32 32
+  %29 = s_mov_b32 4
+  low.br ^_bb1(%27: reg<amdgpu.sgpr>)
+^_bb1(%24: reg<amdgpu.sgpr>):
+  %30 = s_cmp_lt_i32 %24, %28
+  low.cond_br %30, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %31 = v_mov_b32 0
+  %32 = s_lshl_b32_rhs_inline %24, 1
+  %33 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %34 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %36 = s_add_u32 %33, %32
+  %37 = s_addc_u32 %34, %27
+  %38 = concat(%36, %37) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %39 = global_load_b64_saddr %31, %38
+  %40 = slice %39[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %41 = v_cvt_f32_f16 %40
+  %43 = v_lshrrev_b32_src0_inline %40, 16
+  %44 = v_cvt_f32_f16 %43
+  %45 = slice %39[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %46 = v_cvt_f32_f16 %45
+  %48 = v_lshrrev_b32_src0_inline %45, 16
+  %49 = v_cvt_f32_f16 %48
+  %50 = concat(%41, %44, %46, %49) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %52 = s_lshl_b32_rhs_inline %24, 2
+  %53 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %54 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %56 = s_add_u32 %53, %52
+  %57 = s_addc_u32 %54, %27
+  %58 = concat(%56, %57) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b128_saddr %31, %50, %58
+  %59 = s_add_u32 %24, %29
+  low.br ^_bb1(%59: reg<amdgpu.sgpr>)
+^_bb3:
+  %60 = v_mov_b32 0
+  %61 = global_load_b32_saddr %60, %input_view {offset = 64}
+  %62 = v_cvt_f32_f16 %61
+  %63 = v_lshrrev_b32_src0_inline %61, 16
+  %64 = v_cvt_f32_f16 %63
+  %65 = concat(%62, %64) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %60, %65, %output_view {offset = 128}
+  return
+}

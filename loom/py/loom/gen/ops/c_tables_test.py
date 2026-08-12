@@ -102,6 +102,7 @@ from loom.dsl import (
     Result,
     Retain,
     RetainedResult,
+    SameShape,
     SameType,
     ScalarParam,
     ShapeParam,
@@ -1089,6 +1090,21 @@ def test_generate_tables_derives_decomposable_for_same_type_elementwise_vector_o
         operands=[Operand("lhs", VECTOR), Operand("rhs", VECTOR)],
         results=[Result("result", VECTOR)],
         constraints=[SameType("lhs", "rhs", "result")],
+        traits=[ELEMENTWISE],
+    )
+
+    tables_c = generate_tables_c("test", 0x01, [op])
+
+    assert "LOOM_TRAIT_DECOMPOSABLE" in tables_c
+
+
+def test_generate_tables_derives_decomposable_for_shape_preserving_vector_ops() -> None:
+    op = Op(
+        "test.cast",
+        group=Dialect("test"),
+        operands=[Operand("input", VECTOR)],
+        results=[Result("result", VECTOR)],
+        constraints=[SameShape("input", "result")],
         traits=[ELEMENTWISE],
     )
 

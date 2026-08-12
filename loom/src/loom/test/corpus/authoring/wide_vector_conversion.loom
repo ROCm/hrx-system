@@ -1,0 +1,62 @@
+// Exercises a source vector wider than the target's native memory and register
+// widths while preserving IEEE F32-to-F16 conversion behavior across packets.
+kernel.def @wide_vector_f32_to_f16() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<128xf32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<128xf16>
+  %source = vector.load %input_view[0] : view<128xf32> -> vector<128xf32>
+  %converted = vector.fptrunc %source : vector<128xf32> to vector<128xf16>
+  vector.store %converted, %output_view[0] : vector<128xf16>, view<128xf16>
+  kernel.return
+}
+
+check.case public @wide_vector_f32_to_f16_negative_zero_case {
+  %input = check.generate.fill value(-2147483648) : tensor<128xi32>
+  %output = check.generate.fill value(0) : tensor<128xi16>
+  %expected = check.generate.fill value(-32768) : tensor<128xi16>
+  kernel.launch @wide_vector_f32_to_f16(%input, %output) : (tensor<128xi32>, tensor<128xi16>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<128xi16>
+  check.return
+}
+
+check.case public @wide_vector_f32_to_f16_infinity_case {
+  %input = check.generate.fill value(2139095040) : tensor<128xi32>
+  %output = check.generate.fill value(0) : tensor<128xi16>
+  %expected = check.generate.fill value(31744) : tensor<128xi16>
+  kernel.launch @wide_vector_f32_to_f16(%input, %output) : (tensor<128xi32>, tensor<128xi16>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<128xi16>
+  check.return
+}
+
+check.case public @wide_vector_f32_to_f16_nan_case {
+  %input = check.generate.fill value(2143289344) : tensor<128xi32>
+  %output = check.generate.fill value(0) : tensor<128xi16>
+  %expected = check.generate.fill value(32256) : tensor<128xi16>
+  kernel.launch @wide_vector_f32_to_f16(%input, %output) : (tensor<128xi32>, tensor<128xi16>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<128xi16>
+  check.return
+}
+
+check.case public @wide_vector_f32_to_f16_even_lower_tie_case {
+  // 1 + 2^-11 is halfway between F16 1.0 and its successor and rounds down.
+  %input = check.generate.fill value(1065357312) : tensor<128xi32>
+  %output = check.generate.fill value(0) : tensor<128xi16>
+  %expected = check.generate.fill value(15360) : tensor<128xi16>
+  kernel.launch @wide_vector_f32_to_f16(%input, %output) : (tensor<128xi32>, tensor<128xi16>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<128xi16>
+  check.return
+}
+
+check.case public @wide_vector_f32_to_f16_even_upper_tie_case {
+  // 1 + 3*2^-11 is the next tie and rounds up to the even F16 successor.
+  %input = check.generate.fill value(1065365504) : tensor<128xi32>
+  %output = check.generate.fill value(0) : tensor<128xi16>
+  %expected = check.generate.fill value(15362) : tensor<128xi16>
+  kernel.launch @wide_vector_f32_to_f16(%input, %output) : (tensor<128xi32>, tensor<128xi16>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<128xi16>
+  check.return
+}

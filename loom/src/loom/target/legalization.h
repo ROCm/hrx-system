@@ -31,6 +31,7 @@ extern "C" {
 #endif
 
 typedef struct loom_view_region_table_t loom_view_region_table_t;
+typedef struct loom_local_value_domain_t loom_local_value_domain_t;
 typedef struct loom_target_legalizer_entry_t loom_target_legalizer_entry_t;
 typedef struct loom_target_legalizer_provider_t
     loom_target_legalizer_provider_t;
@@ -113,6 +114,8 @@ typedef struct loom_target_legalization_context_t {
   const loom_value_fact_table_t* fact_table;
   // Optional view-region analysis visible to legalizers.
   const loom_view_region_table_t* view_regions;
+  // Dense function-local value domain valid for the current callback.
+  const loom_local_value_domain_t* value_domain;
   // Active rewriter for mutating the function body.
   loom_rewriter_t* rewriter;
   // Current legalization phase.
