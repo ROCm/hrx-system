@@ -1852,7 +1852,7 @@ class TestCrossFormatRoundTrip:
                     "target",
                     "symbol",
                     optional=True,
-                    symbol_ref=SymbolReference("record", ["record"]),
+                    symbol_ref=SymbolReference("function", ["func_like"]),
                 ),
                 AttrDef("tag", "string", optional=True),
                 AttrDef("priority", "i64", optional=True),
@@ -1869,7 +1869,7 @@ class TestCrossFormatRoundTrip:
             results=[result_id],
             attributes={
                 "callee": "entry",
-                "target": "gfx1100",
+                "target": "entry",
                 "tag": "amdgpu",
                 "priority": 3,
             },
@@ -1888,7 +1888,7 @@ class TestCrossFormatRoundTrip:
         assert symbol.op is not None
         assert symbol.op.attributes == {
             "callee": "entry",
-            "target": "gfx1100",
+            "target": "entry",
             "tag": "amdgpu",
             "priority": 3,
         }
@@ -2351,6 +2351,7 @@ class TestCrossFormatRoundTrip:
             "  %r = test.attrs %x {target = @target} : f32\n"
             "  test.yield %r : f32\n"
             "}\n"
+            "func.decl @target()\n"
         )
 
         parser = Parser()

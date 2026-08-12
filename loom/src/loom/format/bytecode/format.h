@@ -62,7 +62,7 @@
 //
 //   offset  size  field
 //   0       4     magic: "LOOM" (0x4C 0x4F 0x4F 0x4D)
-//   4       1     format_version (currently 27)
+//   4       1     format_version (currently 28)
 //   5       1     location_mode (see loom_bytecode_location_mode_t)
 //   6       2     module_count
 //   8       4     file_string_pool_length (bytes)
@@ -85,7 +85,7 @@ extern "C" {
 
 #define LOOM_BYTECODE_MAGIC "LOOM"
 #define LOOM_BYTECODE_MAGIC_LENGTH 4
-#define LOOM_BYTECODE_FORMAT_VERSION 27
+#define LOOM_BYTECODE_FORMAT_VERSION 28
 
 #define LOOM_BYTECODE_SOURCE_TRIVIA_LEADING_BLANK_LINE (1u << 0)
 #define LOOM_BYTECODE_SOURCE_TRIVIA_COMMENT_COUNT_SHIFT 1
@@ -160,7 +160,10 @@ typedef uint16_t loom_bytecode_module_flags_t;
 //   | LOCATIONS section     |  Location table.
 //   +-----------------------+
 //   | SOURCE_TRIVIA section |  File-level source presentation.
+//   +-----------------------+
 //   | PROVIDER_IMPORTS      |  Compile-time symbol availability providers.
+//   +-----------------------+
+//   | SYMBOL_REFERENCES     |  Direct dependency and provider-demand rows.
 //   +-----------------------+
 //   | RESOURCES section     |  Large blobs: weights, executables, etc.
 //   |                       |  (last — keeps dense metadata up front,
@@ -218,9 +221,11 @@ typedef enum loom_bytecode_section_kind_e {
       9,  // Optional module-owned source presentation.
   LOOM_BYTECODE_SECTION_PROVIDER_IMPORTS =
       10,  // Compile-time module.import provider metadata.
+  LOOM_BYTECODE_SECTION_SYMBOL_REFERENCES =
+      11,  // Per-symbol dependency and abstract-provider demands.
 } loom_bytecode_section_kind_t;
 
-#define LOOM_BYTECODE_SECTION_COUNT 11
+#define LOOM_BYTECODE_SECTION_COUNT 12
 
 // ==========================================================================
 // SOURCE_TRIVIA section
@@ -702,6 +707,40 @@ typedef enum loom_bytecode_section_kind_e {
 //     For each leading comment attached to the module.import op:
 //       [comment_length: varint]
 //       [comment_data: comment_length bytes]
+
+// ==========================================================================
+// SYMBOL_REFERENCES section
+// ==========================================================================
+//
+// Canonical dependency metadata used to plan a selected symbol closure without
+// reading IR bodies. Dependency targets are direct SYMBOLS ordinals. Abstract
+// provider demands are STRINGS IDs naming func.apply contract keys.
+//
+// Availability-only references, including module.import anchors, are excluded.
+// Those remain represented solely by PROVIDER_IMPORTS. Rows preserve every
+// dependency occurrence and contract demand in deterministic analysis order;
+// repeated targets and keys are valid. Closure planners use dense selection
+// bitmaps to coalesce repeated work while traversing only reached rows.
+//
+// The module dependency row contains references owned by module-level records,
+// such as static encoding metadata. The following symbol rows are in SYMBOLS
+// ordinal order, including empty rows for symbols with no outgoing edges.
+//
+// Section layout:
+//
+//   [symbol_count: varint]
+//   [total_dependency_count: varint]
+//   [total_contract_demand_count: varint]
+//   [module_dependency_count: varint]
+//   For each module dependency:
+//     [target_symbol_index: varint]
+//   For each symbol in SYMBOLS ordinal order:
+//     [dependency_count: varint]
+//     For each dependency:
+//       [target_symbol_index: varint]
+//     [contract_demand_count: varint]
+//     For each abstract provider demand:
+//       [contract_string_id: varint]
 
 // ==========================================================================
 // IR section

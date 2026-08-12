@@ -45,6 +45,7 @@ from loom.format.bytecode.writer import (
     SECTION_SOURCE_TRIVIA,
     SECTION_SOURCES,
     SECTION_STRINGS,
+    SECTION_SYMBOL_REFERENCES,
     SECTION_SYMBOLS,
     SECTION_TYPES,
     SOURCE_TRIVIA_COMMENT_COUNT_SHIFT,
@@ -238,6 +239,10 @@ class BytecodeReader:
         symbols_data = sections.get(SECTION_SYMBOLS, (0, b""))
         if isinstance(symbols_data, tuple):
             self._read_symbols_section(symbols_data, ir_data, module)
+        symbol_references_data = sections.get(SECTION_SYMBOL_REFERENCES)
+        if symbol_references_data is None:
+            raise BytecodeError("bytecode must have a SYMBOL_REFERENCES section")
+        self._read_symbol_references_section(symbol_references_data)
         provider_imports_data = sections.get(SECTION_PROVIDER_IMPORTS)
         if provider_imports_data is None:
             raise BytecodeError("bytecode must have a PROVIDER_IMPORTS section")
@@ -1362,6 +1367,66 @@ class BytecodeReader:
                 )
         if offset != len(data):
             raise BytecodeError("PROVIDER_IMPORTS section has trailing bytes")
+
+    def _read_symbol_references_section(self, section: tuple[int, bytes]) -> None:
+        """Validate metadata-only dependency and abstract-provider rows."""
+        _, data = section
+        offset = 0
+        symbol_count, offset = decode_varint(data, offset)
+        total_dependency_count, offset = decode_varint(data, offset)
+        total_contract_demand_count, offset = decode_varint(data, offset)
+        if symbol_count != len(self._wire_symbol_names):
+            raise BytecodeError("SYMBOL_REFERENCES row count does not match SYMBOLS")
+        minimum_encoded_bytes = (
+            1 + symbol_count * 2 + total_dependency_count + total_contract_demand_count
+        )
+        if minimum_encoded_bytes > len(data) - offset:
+            raise BytecodeError(
+                "SYMBOL_REFERENCES declared records exceed section length"
+            )
+
+        decoded_dependency_count = 0
+        module_dependency_count, offset = decode_varint(data, offset)
+        if module_dependency_count > total_dependency_count:
+            raise BytecodeError("module dependency count exceeds declared total")
+
+        def read_dependencies(count: int, offset: int) -> int:
+            nonlocal decoded_dependency_count
+            for _ in range(count):
+                dependency, offset = decode_varint(data, offset)
+                if dependency >= symbol_count:
+                    raise BytecodeError("dependency symbol index is out of range")
+                decoded_dependency_count += 1
+            return offset
+
+        offset = read_dependencies(module_dependency_count, offset)
+        decoded_contract_demand_count = 0
+        for _ in range(symbol_count):
+            dependency_count, offset = decode_varint(data, offset)
+            if dependency_count > total_dependency_count - decoded_dependency_count:
+                raise BytecodeError("symbol dependency count exceeds declared total")
+            offset = read_dependencies(dependency_count, offset)
+
+            contract_demand_count, offset = decode_varint(data, offset)
+            if (
+                contract_demand_count
+                > total_contract_demand_count - decoded_contract_demand_count
+            ):
+                raise BytecodeError(
+                    "symbol contract demand count exceeds declared total"
+                )
+            for _ in range(contract_demand_count):
+                contract_string_id, offset = decode_varint(data, offset)
+                if contract_string_id >= len(self._strings):
+                    raise BytecodeError("contract string id is out of range")
+                decoded_contract_demand_count += 1
+
+        if decoded_dependency_count != total_dependency_count:
+            raise BytecodeError("dependency records do not match declared total")
+        if decoded_contract_demand_count != total_contract_demand_count:
+            raise BytecodeError("contract demand records do not match declared total")
+        if offset != len(data):
+            raise BytecodeError("SYMBOL_REFERENCES section has trailing bytes")
 
     def _read_record_symbol_payload(
         self,

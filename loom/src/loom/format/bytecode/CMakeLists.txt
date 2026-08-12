@@ -155,6 +155,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     iree::io::stream
+    loom::analysis::symbol_references
     loom::format::low_repr
     loom::ir
     loom::ops::module

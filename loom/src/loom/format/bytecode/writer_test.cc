@@ -511,7 +511,7 @@ TEST_F(WriterTest, SectionDirectoryHasWrittenSections) {
   uint64_t module_offset = ReadU64LE(bytes, dir_offset + 8);
 
   auto entries = ReadSectionDirectory(bytes, module_offset);
-  ASSERT_EQ(entries.size(), 9u);
+  ASSERT_EQ(entries.size(), 10u);
 
   bool found_kinds[LOOM_BYTECODE_SECTION_COUNT] = {false};
   uint64_t previous_end = 0;
@@ -531,6 +531,7 @@ TEST_F(WriterTest, SectionDirectoryHasWrittenSections) {
   EXPECT_FALSE(found_kinds[LOOM_BYTECODE_SECTION_RESOURCES]);
   EXPECT_FALSE(found_kinds[LOOM_BYTECODE_SECTION_SOURCE_TRIVIA]);
   EXPECT_TRUE(found_kinds[LOOM_BYTECODE_SECTION_PROVIDER_IMPORTS]);
+  EXPECT_TRUE(found_kinds[LOOM_BYTECODE_SECTION_SYMBOL_REFERENCES]);
 
   loom_module_free(module);
 }

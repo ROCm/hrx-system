@@ -137,6 +137,7 @@ loom_cc_library(
     deps = [
         ":format",
         ":varint",
+        "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/format:low_repr",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",

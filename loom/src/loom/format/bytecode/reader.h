@@ -60,6 +60,10 @@ typedef struct loom_bytecode_module_metadata_summary_t {
   uint64_t provider_import_count;
   // Total provider anchor count.
   uint64_t provider_import_anchor_count;
+  // Dependency occurrence count across module and symbol rows.
+  uint64_t dependency_count;
+  // Abstract provider demand occurrence count across symbol rows.
+  uint64_t contract_demand_count;
 } loom_bytecode_module_metadata_summary_t;
 
 // Validated section directory entry exposed by the bytecode index.
@@ -138,6 +142,18 @@ typedef struct loom_bytecode_provider_import_metadata_t {
   uint32_t anchor_count;
 } loom_bytecode_provider_import_metadata_t;
 
+// Dependency and abstract-provider slices owned by one SYMBOLS ordinal.
+typedef struct loom_bytecode_symbol_reference_metadata_t {
+  // First entry in dependency_symbol_indices.
+  uint32_t first_dependency_index;
+  // Number of dependency occurrences in this symbol's slice.
+  uint32_t dependency_count;
+  // First entry in contract_demands.
+  uint32_t first_contract_demand_index;
+  // Number of abstract provider demands in this symbol's slice.
+  uint32_t contract_demand_count;
+} loom_bytecode_symbol_reference_metadata_t;
+
 // Validated module directory entry and lightweight per-module index.
 typedef struct loom_bytecode_module_metadata_t {
   // Borrowed module name view from the file string pool.
@@ -174,6 +190,22 @@ typedef struct loom_bytecode_module_metadata_t {
   iree_host_size_t provider_import_anchor_count;
   // Arena-owned SYMBOLS ordinals sliced by provider_imports.
   uint32_t* provider_import_anchor_symbol_indices;
+  // Number of module-root dependency ordinals at the start of
+  // dependency_symbol_indices.
+  uint32_t module_dependency_count;
+  // Total number of dependency occurrences across all rows.
+  iree_host_size_t dependency_count;
+  // Arena-owned dependency target ordinals in deterministic occurrence order.
+  // The module-root slice begins at zero; symbol slices are described by
+  // symbol_references. Targets may repeat within a slice.
+  uint32_t* dependency_symbol_indices;
+  // One dependency and contract-demand slice per SYMBOLS ordinal.
+  loom_bytecode_symbol_reference_metadata_t* symbol_references;
+  // Total number of abstract provider demand occurrences.
+  iree_host_size_t contract_demand_count;
+  // Arena-owned borrowed STRINGS views in deterministic demand order and
+  // sliced by symbol_references. Contract keys may repeat within a slice.
+  iree_string_view_t* contract_demands;
 } loom_bytecode_module_metadata_t;
 
 // Validated file-level bytecode index.

@@ -41,6 +41,7 @@ from loom.format.bytecode.writer import (
     SECTION_IR,
     SECTION_LOCATIONS,
     SECTION_SOURCE_TRIVIA,
+    SECTION_SYMBOL_REFERENCES,
     SECTION_SYMBOLS,
     SOURCE_TRIVIA_LEADING_BLANK_LINE,
     write_module,
@@ -501,6 +502,25 @@ class TestMalformedSectionDirectory:
         struct.pack_into("<Q", data, directory_offset + 16, module_length + 1)
 
         with pytest.raises(BytecodeError, match="trailing bytes"):
+            read_module(bytes(data))
+
+
+class TestMalformedSymbolReferences:
+    def test_declared_records_must_fit_section_payload(self) -> None:
+        module = Module(name="test")
+        _make_func(module, "f", [])
+        data = bytearray(write_module(module))
+        module_offset, _module_length = _module_range(data)
+        _entry_offset, section_offset, _section_length = _find_section_entry(
+            data, SECTION_SYMBOL_REFERENCES
+        )
+        offset = module_offset + section_offset
+        symbol_count, offset = decode_varint(data, offset)
+        assert symbol_count == 1
+        assert data[offset] == 0
+        data[offset] = 1
+
+        with pytest.raises(BytecodeError, match="declared records exceed"):
             read_module(bytes(data))
 
 

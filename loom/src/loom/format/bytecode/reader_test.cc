@@ -91,6 +91,19 @@ class ReaderTest : public ::testing::Test {
     std::vector<std::vector<size_t>> anchors;
   };
 
+  struct SymbolReferenceLayout {
+    // Byte offset of the declared total dependency occurrence count.
+    size_t total_dependency_count = 0;
+    // Byte offset of the declared total contract demand count.
+    size_t total_contract_demand_count = 0;
+    // Byte offsets of module-root dependency target ordinals.
+    std::vector<size_t> module_dependencies;
+    // Byte offsets of dependency target ordinals by source symbol.
+    std::vector<std::vector<size_t>> symbol_dependencies;
+    // Byte offsets of contract string IDs by source symbol.
+    std::vector<std::vector<size_t>> symbol_contract_demands;
+  };
+
   void SetUp() override {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(),
                                      &block_pool_);
@@ -400,6 +413,31 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_test_symbol_array_attrs_build(
         &body_builder, /*build_flags=*/0, loom_symbol_ref_array_empty(),
         loom_symbol_ref_array_empty(), LOOM_LOCATION_UNKNOWN, &absent_op));
+    loom_op_t* yield_op = nullptr;
+    IREE_CHECK_OK(loom_test_yield_build(&body_builder, /*values=*/nullptr,
+                                        /*value_count=*/0,
+                                        LOOM_LOCATION_UNKNOWN, &yield_op));
+    return module;
+  }
+
+  loom_module_t* CreateContractDemandModule() {
+    loom_module_t* module = CreateModule("reader_contract_demands");
+    loom_region_t* body = AddVoidFunction(module, "entry");
+    loom_builder_t body_builder;
+    loom_builder_initialize(module, &module->arena,
+                            loom_region_entry_block(body), &body_builder);
+    loom_string_id_t contract_id = LOOM_STRING_ID_INVALID;
+    IREE_CHECK_OK(loom_module_intern_string(module, IREE_SV("test.contract"),
+                                            &contract_id));
+    for (int i = 0; i < 2; ++i) {
+      loom_op_t* apply_op = nullptr;
+      IREE_CHECK_OK(loom_func_apply_build(
+          &body_builder, /*build_flags=*/0, contract_id,
+          /*operands=*/nullptr, /*operands_count=*/0, /*purity=*/0,
+          /*temperature=*/0, /*result_types=*/nullptr, /*result_count=*/0,
+          /*tied_results=*/nullptr, /*tied_result_count=*/0,
+          LOOM_LOCATION_UNKNOWN, &apply_op));
+    }
     loom_op_t* yield_op = nullptr;
     IREE_CHECK_OK(loom_test_yield_build(&body_builder, /*values=*/nullptr,
                                         /*value_count=*/0,
@@ -1775,6 +1813,51 @@ class ReaderTest : public ::testing::Test {
     return layout;
   }
 
+  SymbolReferenceLayout ReadSymbolReferenceLayout(
+      const std::vector<uint8_t>& bytes) {
+    SectionEntry section =
+        FindSection(bytes, LOOM_BYTECODE_SECTION_SYMBOL_REFERENCES);
+    size_t offset = (size_t)ModuleOffset(bytes) + (size_t)section.offset;
+    const size_t end_offset = offset + (size_t)section.length;
+    const uint64_t symbol_count = ReadUVarint(bytes, &offset);
+    SymbolReferenceLayout layout;
+    layout.total_dependency_count = offset;
+    ReadUVarint(bytes, &offset);
+    layout.total_contract_demand_count = offset;
+    ReadUVarint(bytes, &offset);
+
+    const uint64_t module_dependency_count = ReadUVarint(bytes, &offset);
+    layout.module_dependencies.reserve((size_t)module_dependency_count);
+    for (uint64_t i = 0; i < module_dependency_count; ++i) {
+      layout.module_dependencies.push_back(offset);
+      ReadUVarint(bytes, &offset);
+    }
+
+    layout.symbol_dependencies.reserve((size_t)symbol_count);
+    layout.symbol_contract_demands.reserve((size_t)symbol_count);
+    for (uint64_t i = 0; i < symbol_count; ++i) {
+      const uint64_t dependency_count = ReadUVarint(bytes, &offset);
+      std::vector<size_t>& dependency_offsets =
+          layout.symbol_dependencies.emplace_back();
+      dependency_offsets.reserve((size_t)dependency_count);
+      for (uint64_t j = 0; j < dependency_count; ++j) {
+        dependency_offsets.push_back(offset);
+        ReadUVarint(bytes, &offset);
+      }
+
+      const uint64_t contract_demand_count = ReadUVarint(bytes, &offset);
+      std::vector<size_t>& contract_offsets =
+          layout.symbol_contract_demands.emplace_back();
+      contract_offsets.reserve((size_t)contract_demand_count);
+      for (uint64_t j = 0; j < contract_demand_count; ++j) {
+        contract_offsets.push_back(offset);
+        ReadUVarint(bytes, &offset);
+      }
+    }
+    EXPECT_EQ(offset, end_offset);
+    return layout;
+  }
+
   size_t RootRegionSourceFlagsOffset(const std::vector<uint8_t>& bytes) {
     size_t offset = SectionPayloadOffset(bytes, LOOM_BYTECODE_SECTION_IR);
     ReadUVarint(bytes, &offset);  // value_count
@@ -2373,6 +2456,78 @@ TEST_F(ReaderTest, ReadsFunctionModuleIndex) {
   EXPECT_GT(symbol.body_length, 0u);
   EXPECT_GE(symbol.body_absolute_offset, module_metadata.offset);
   EXPECT_GT(symbol.entry_length, 0u);
+
+  iree_arena_deinitialize(&metadata_arena);
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, IndexesRawDependencyOccurrencesBySourceSymbol) {
+  loom_module_t* module = CreateSymbolArrayModule();
+  auto bytes = WriteModule(module);
+
+  iree_arena_allocator_t metadata_arena;
+  iree_arena_initialize(&block_pool_, &metadata_arena);
+  loom_bytecode_file_metadata_t metadata = {0};
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result =
+      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+
+  ASSERT_EQ(result.error_count, 0u);
+  ASSERT_TRUE(error_ids.empty());
+  ASSERT_EQ(metadata.module_count, 1u);
+  const loom_bytecode_module_metadata_t& module_metadata = metadata.modules[0];
+  ASSERT_EQ(module_metadata.symbol_count, 3u);
+  EXPECT_EQ(module_metadata.summary.dependency_count, 3u);
+  EXPECT_EQ(module_metadata.summary.contract_demand_count, 0u);
+  EXPECT_EQ(module_metadata.module_dependency_count, 0u);
+  ASSERT_EQ(module_metadata.dependency_count, 3u);
+  ASSERT_NE(module_metadata.dependency_symbol_indices, nullptr);
+  ASSERT_NE(module_metadata.symbol_references, nullptr);
+  EXPECT_EQ(module_metadata.contract_demand_count, 0u);
+  EXPECT_EQ(module_metadata.contract_demands, nullptr);
+
+  EXPECT_EQ(module_metadata.symbol_references[0].dependency_count, 0u);
+  EXPECT_EQ(module_metadata.symbol_references[1].dependency_count, 0u);
+  EXPECT_EQ(module_metadata.symbol_references[2].first_dependency_index, 0u);
+  EXPECT_EQ(module_metadata.symbol_references[2].dependency_count, 3u);
+  EXPECT_EQ(module_metadata.dependency_symbol_indices[0], 1u);
+  EXPECT_EQ(module_metadata.dependency_symbol_indices[1], 0u);
+  EXPECT_EQ(module_metadata.dependency_symbol_indices[2], 1u);
+
+  iree_arena_deinitialize(&metadata_arena);
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, IndexesEveryAbstractProviderDemand) {
+  loom_module_t* module = CreateContractDemandModule();
+  auto bytes = WriteModule(module);
+
+  iree_arena_allocator_t metadata_arena;
+  iree_arena_initialize(&block_pool_, &metadata_arena);
+  loom_bytecode_file_metadata_t metadata = {0};
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result =
+      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+
+  ASSERT_EQ(result.error_count, 0u);
+  ASSERT_TRUE(error_ids.empty());
+  ASSERT_EQ(metadata.module_count, 1u);
+  const loom_bytecode_module_metadata_t& module_metadata = metadata.modules[0];
+  ASSERT_EQ(module_metadata.symbol_count, 1u);
+  EXPECT_EQ(module_metadata.summary.dependency_count, 0u);
+  EXPECT_EQ(module_metadata.summary.contract_demand_count, 2u);
+  EXPECT_EQ(module_metadata.dependency_count, 0u);
+  EXPECT_EQ(module_metadata.dependency_symbol_indices, nullptr);
+  ASSERT_EQ(module_metadata.contract_demand_count, 2u);
+  ASSERT_NE(module_metadata.contract_demands, nullptr);
+  ASSERT_NE(module_metadata.symbol_references, nullptr);
+  EXPECT_EQ(module_metadata.symbol_references[0].first_contract_demand_index,
+            0u);
+  EXPECT_EQ(module_metadata.symbol_references[0].contract_demand_count, 2u);
+  EXPECT_TRUE(iree_string_view_equal(module_metadata.contract_demands[0],
+                                     IREE_SV("test.contract")));
+  EXPECT_TRUE(iree_string_view_equal(module_metadata.contract_demands[1],
+                                     IREE_SV("test.contract")));
 
   iree_arena_deinitialize(&metadata_arena);
   loom_module_free(module);
@@ -4194,6 +4349,49 @@ TEST_F(ReaderTest, RejectsInvalidOpNameStringReference) {
   uint64_t op_count = ReadUVarint(bytes, &offset);
   ASSERT_GT(op_count, 0u);
   bytes[offset] = 0x7F;
+
+  ExpectReadError(bytes, "ERR_BYTECODE_010");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsSymbolReferenceTargetOutsideSymbolTable) {
+  loom_module_t* module = CreateSymbolArrayModule();
+  auto bytes = WriteModule(module);
+  SymbolReferenceLayout layout = ReadSymbolReferenceLayout(bytes);
+  ASSERT_EQ(layout.symbol_dependencies.size(), 3u);
+  ASSERT_EQ(layout.symbol_dependencies[2].size(), 3u);
+  const size_t target_offset = layout.symbol_dependencies[2][0];
+  ASSERT_LT(target_offset, bytes.size());
+  bytes[target_offset] = 3;
+
+  ExpectReadError(bytes, "ERR_BYTECODE_006");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsSymbolReferenceCountBeyondSectionPayload) {
+  loom_module_t* module = CreateSymbolArrayModule();
+  auto bytes = WriteModule(module);
+  SymbolReferenceLayout layout = ReadSymbolReferenceLayout(bytes);
+  ASSERT_LT(layout.total_dependency_count, bytes.size());
+  ASSERT_EQ(bytes[layout.total_dependency_count], 3u);
+  bytes[layout.total_dependency_count] = 4;
+
+  ExpectReadError(bytes, "ERR_BYTECODE_006");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsInvalidContractDemandStringReference) {
+  loom_module_t* module = CreateContractDemandModule();
+  auto bytes = WriteModule(module);
+  SymbolReferenceLayout layout = ReadSymbolReferenceLayout(bytes);
+  ASSERT_EQ(layout.symbol_contract_demands.size(), 1u);
+  ASSERT_EQ(layout.symbol_contract_demands[0].size(), 2u);
+  const size_t contract_offset = layout.symbol_contract_demands[0][0];
+  ASSERT_LT(contract_offset, bytes.size());
+  bytes[contract_offset] = 0x7F;
 
   ExpectReadError(bytes, "ERR_BYTECODE_010");
 

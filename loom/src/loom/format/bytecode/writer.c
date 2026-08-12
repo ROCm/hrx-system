@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/analysis/symbol_references.h"
 #include "loom/format/bytecode/varint.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -4492,6 +4493,121 @@ static iree_status_t loom_bytecode_write_provider_imports_section(
   return iree_ok_status();
 }
 
+//===----------------------------------------------------------------------===//
+// Symbol reference index
+//===----------------------------------------------------------------------===//
+
+// Prepared analysis and aggregate counts written to SYMBOL_REFERENCES.
+typedef struct loom_bytecode_symbol_reference_plan_t {
+  // Canonical reference analysis whose linked rows are emitted directly.
+  loom_symbol_reference_table_t table;
+  // Number of dependency-role occurrences across all source rows.
+  iree_host_size_t dependency_count;
+  // Number of dependency-role occurrences in the module-root row.
+  uint32_t module_dependency_count;
+} loom_bytecode_symbol_reference_plan_t;
+
+static uint32_t loom_bytecode_count_dependency_occurrences(
+    const loom_symbol_reference_table_t* table,
+    loom_symbol_reference_occurrence_id_t first_occurrence_id) {
+  uint32_t dependency_count = 0;
+  loom_symbol_reference_occurrence_id_t occurrence_id = first_occurrence_id;
+  while (occurrence_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
+    const loom_symbol_reference_occurrence_t* occurrence =
+        &table->occurrences[occurrence_id];
+    if (loom_symbol_reference_occurrence_is_dependency(occurrence)) {
+      ++dependency_count;
+    }
+    occurrence_id = occurrence->next_outgoing_occurrence_id;
+  }
+  return dependency_count;
+}
+
+static iree_status_t loom_bytecode_symbol_reference_plan_initialize(
+    const loom_module_t* module, loom_bytecode_numbering_t* numbering,
+    iree_arena_allocator_t* arena,
+    loom_bytecode_symbol_reference_plan_t* out_plan) {
+  *out_plan = (loom_bytecode_symbol_reference_plan_t){0};
+  IREE_RETURN_IF_ERROR(
+      loom_symbol_reference_table_build(module, arena, &out_plan->table));
+
+  for (iree_host_size_t i = 0; i < out_plan->table.occurrence_count; ++i) {
+    if (loom_symbol_reference_occurrence_is_dependency(
+            &out_plan->table.occurrences[i])) {
+      ++out_plan->dependency_count;
+    }
+  }
+  out_plan->module_dependency_count =
+      loom_bytecode_count_dependency_occurrences(
+          &out_plan->table, out_plan->table.first_module_occurrence_id);
+
+  for (iree_host_size_t i = 0; i < out_plan->table.contract_demand_count; ++i) {
+    uint32_t unused_writer_string_id = 0;
+    IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
+        numbering, out_plan->table.contract_demands[i].contract_id,
+        &unused_writer_string_id));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_bytecode_write_dependency_row(
+    loom_bytecode_page_writer_t* page_writer,
+    const loom_symbol_reference_table_t* table,
+    loom_symbol_reference_occurrence_id_t first_occurrence_id,
+    uint32_t dependency_count) {
+  IREE_RETURN_IF_ERROR(
+      loom_bytecode_page_writer_write_uvarint(page_writer, dependency_count));
+  loom_symbol_reference_occurrence_id_t occurrence_id = first_occurrence_id;
+  while (occurrence_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
+    const loom_symbol_reference_occurrence_t* occurrence =
+        &table->occurrences[occurrence_id];
+    if (loom_symbol_reference_occurrence_is_dependency(occurrence)) {
+      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+          page_writer, occurrence->target_symbol_id));
+    }
+    occurrence_id = occurrence->next_outgoing_occurrence_id;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_bytecode_write_symbol_references_section(
+    loom_bytecode_page_writer_t* page_writer,
+    const loom_bytecode_numbering_t* numbering,
+    const loom_bytecode_symbol_reference_plan_t* plan) {
+  const loom_symbol_reference_table_t* table = &plan->table;
+  IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+      page_writer, table->symbol_count));
+  IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+      page_writer, plan->dependency_count));
+  IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+      page_writer, table->contract_demand_count));
+  IREE_RETURN_IF_ERROR(loom_bytecode_write_dependency_row(
+      page_writer, table, table->first_module_occurrence_id,
+      plan->module_dependency_count));
+  for (iree_host_size_t symbol_index = 0; symbol_index < table->symbol_count;
+       ++symbol_index) {
+    const loom_symbol_reference_symbol_occurrences_t* symbol =
+        &table->symbols[symbol_index];
+    const uint32_t dependency_count =
+        loom_bytecode_count_dependency_occurrences(
+            table, symbol->first_outgoing_occurrence_id);
+    IREE_RETURN_IF_ERROR(loom_bytecode_write_dependency_row(
+        page_writer, table, symbol->first_outgoing_occurrence_id,
+        dependency_count));
+    IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+        page_writer, symbol->contract_demand_count));
+    loom_func_contract_demand_id_t demand_id = symbol->first_contract_demand_id;
+    while (demand_id != LOOM_FUNC_CONTRACT_DEMAND_ID_INVALID) {
+      const loom_func_contract_demand_t* demand =
+          &table->contract_demands[demand_id];
+      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+          page_writer, numbering->module_string_map[demand->contract_id]));
+      demand_id = demand->next_source_demand_id;
+    }
+  }
+  return iree_ok_status();
+}
+
 // Writes the STRINGS section through the page writer.
 static iree_status_t loom_bytecode_write_strings_section(
     loom_bytecode_page_writer_t* page_writer,
@@ -5077,6 +5193,11 @@ iree_status_t loom_bytecode_write_module(
       status = loom_bytecode_number_encoding(&numbering, (uint16_t)(i + 1));
     }
   }
+  loom_bytecode_symbol_reference_plan_t symbol_reference_plan = {0};
+  if (iree_status_is_ok(status)) {
+    status = loom_bytecode_symbol_reference_plan_initialize(
+        module, &numbering, &arena, &symbol_reference_plan);
+  }
 
   // File header: magic, version, location mode, module count, producer string.
   iree_string_view_t module_name = module->strings.entries[module->name_id];
@@ -5156,6 +5277,7 @@ iree_status_t loom_bytecode_write_module(
   section_write_order[section_count++] = LOOM_BYTECODE_SECTION_IR;
   section_write_order[section_count++] = LOOM_BYTECODE_SECTION_SYMBOLS;
   section_write_order[section_count++] = LOOM_BYTECODE_SECTION_PROVIDER_IMPORTS;
+  section_write_order[section_count++] = LOOM_BYTECODE_SECTION_SYMBOL_REFERENCES;
   section_write_order[section_count++] = LOOM_BYTECODE_SECTION_STRINGS;
   section_write_order[section_count++] = LOOM_BYTECODE_SECTION_SOURCES;
   section_write_order[section_count++] = LOOM_BYTECODE_SECTION_TYPES;
@@ -5264,6 +5386,19 @@ iree_status_t loom_bytecode_write_module(
       section_lengths[LOOM_BYTECODE_SECTION_PROVIDER_IMPORTS] =
           page_writer.total_written - module_start -
           section_offsets[LOOM_BYTECODE_SECTION_PROVIDER_IMPORTS];
+    }
+  }
+
+  // Symbol references preserve the direct metadata-only dependency graph.
+  if (iree_status_is_ok(status)) {
+    section_offsets[LOOM_BYTECODE_SECTION_SYMBOL_REFERENCES] =
+        page_writer.total_written - module_start;
+    status = loom_bytecode_write_symbol_references_section(
+        &page_writer, &numbering, &symbol_reference_plan);
+    if (iree_status_is_ok(status)) {
+      section_lengths[LOOM_BYTECODE_SECTION_SYMBOL_REFERENCES] =
+          page_writer.total_written - module_start -
+          section_offsets[LOOM_BYTECODE_SECTION_SYMBOL_REFERENCES];
     }
   }
 
