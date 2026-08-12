@@ -461,13 +461,26 @@ TEST(Printf, FloatSubnormals) {
 }
 
 TEST(Printf, FloatExtremeValues) {
+  // The largest significand in the minimum normal binade expands to the
+  // maximum 767-digit exact coefficient used by exponential conversion.
+  const uint64_t widest_coefficient_bits = UINT64_C(0x001FFFFFFFFFFFFF);
+  double widest_coefficient_value = 0.0;
+  std::memcpy(&widest_coefficient_value, &widest_coefficient_bits,
+              sizeof(widest_coefficient_value));
+  ExpectMatchesLibc("%.16e", widest_coefficient_value);
+
   // Values near the limits of double range.
   ExpectMatchesLibc("%e", 1e300);
   ExpectMatchesLibc("%e", 1e308);
   ExpectMatchesLibc("%e", DBL_MAX);  // ~1.798e+308.
   ExpectMatchesLibc("%g", DBL_MAX);
+  ExpectMatchesLibc("%.16e", DBL_MAX);
+  ExpectMatchesLibc("%.17g", DBL_MAX);
   ExpectMatchesLibc("%e", DBL_MIN);  // Smallest normal: ~2.225e-308.
   ExpectMatchesLibc("%g", DBL_MIN);
+  ExpectMatchesLibc("%.17g", DBL_MIN);
+  ExpectMatchesLibc("%.17g", 5e-324);
+  ExpectMatchesLibc("%.17g", 0x1.fffffep+127);
 }
 
 TEST(Printf, FloatRoundingBoundary) {

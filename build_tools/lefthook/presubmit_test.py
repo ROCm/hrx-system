@@ -184,6 +184,14 @@ class PresubmitTest(unittest.TestCase):
         self.assertIn(f"--output_groups={presubmit.CLANG_TIDY_OUTPUT_GROUP}", command)
         self.assertEqual(command[-1], "//runtime/src/iree/base:all")
 
+    def test_clang_tidy_bazel_command_obeys_configured_jobs(self):
+        with mock.patch.dict(os.environ, {"IREE_CLANG_TIDY_JOBS": "7"}):
+            command = presubmit.clang_tidy_bazel_command(
+                ["//runtime/src/iree/base:all"]
+            )
+
+        self.assertEqual(command[2:4], ["--jobs", "7"])
+
     def test_clang_tidy_bazel_command_can_keep_going(self):
         command = presubmit.clang_tidy_bazel_command(
             ["//runtime/src/iree/base:all"],

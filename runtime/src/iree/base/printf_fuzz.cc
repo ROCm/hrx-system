@@ -122,11 +122,10 @@ static fuzz_spec_type fuzz_build_format_string(fuzz_input_t* input,
     position += snprintf(format + position, 16, "%d", width_byte % 64);
   }
 
-  // Precision. Capped to 15 to stay within our implementation's accurate
-  // range. With fmod-based rounding, we get exact remainder computation for
-  // the rounding decision, and exact quotients for up to 16 significant
-  // digits (quotient < 2^53). Precision 15 gives at most 16 significant
-  // digits for %e (precision + 1 leading digit), well within range.
+  // Precision. Capped to 15 because generated formats include the fixed-point
+  // path, whose arithmetic extraction is exact through 16 significant digits.
+  // Exponential formatting is independently exercised through all 17
+  // significant digits by the structured strategy below.
   // Strategy 4 independently tests integer precision up to 31.
   uint8_t precision_byte = fuzz_consume_u8(input);
   if (precision_byte >= 200) {
@@ -731,22 +730,23 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   //===--------------------------------------------------------------------===//
   {
     double value = fuzz_consume_double(&input);
-    uint8_t format_choice = fuzz_consume_u8(&input) % 4;
-    const char* formats[] = {"%f", "%e", "%g", "%.2f"};
+    uint8_t format_choice = fuzz_consume_u8(&input) % 5;
+    const char* formats[] = {"%f", "%e", "%g", "%.2f", "%.16e"};
 
     int iree_length = iree_snprintf(iree_buffer, sizeof(iree_buffer),
                                     formats[format_choice], value);
     int libc_length = snprintf(libc_buffer, sizeof(libc_buffer),
                                formats[format_choice], value);
 
-    // Compare if both succeeded and the value is in a range where our
-    // implementation matches libc exactly. For very large values (|v| > 1e18),
-    // the digits beyond 17 significant figures are implementation-defined
-    // artifacts of binary-to-decimal conversion, so exact comparison is not
-    // meaningful. For very small values and NaN/Inf, formatting may have
-    // acceptable platform differences.
+    // Exponential formatting extracts and rounds the exact binary64
+    // coefficient and must match libc across the entire finite range. Fixed
+    // formatting retains a narrower exact-comparison range, and %g may select
+    // that fixed path depending on the value.
+    bool compare_exactly =
+        format_choice == 1 || format_choice == 4 ||
+        (std::fabs(value) < 1e18 && std::fabs(value) > 1e-15);
     if (iree_length >= 0 && libc_length >= 0 && std::isfinite(value) &&
-        value == value && std::fabs(value) < 1e18 && std::fabs(value) > 1e-15) {
+        compare_exactly) {
       if (strcmp(iree_buffer, libc_buffer) != 0) {
         __builtin_trap();  // Mismatch — this is a bug.
       }

@@ -97,6 +97,32 @@ func.def @rounds_each_instruction() -> (f32, f64) {
 
 // ====
 
+// Hexadecimal attributes retain their exact binary64 payload in the IR while
+// constant semantics round that payload to the declared result type. Each
+// narrow input is exactly halfway between 1.0 and the next representable value
+// and therefore rounds to the even 1.0 encoding.
+func.def @hexadecimal_constants_round_to_declared_type() -> (i16, i16, i32, i64) {
+  %f16 = scalar.constant 0x1.002p0 : f16
+  %f16_bits = scalar.bitcast %f16 : f16 to i16
+  %bf16 = scalar.constant 0x1.01p0 : bf16
+  %bf16_bits = scalar.bitcast %bf16 : bf16 to i16
+  %f32 = scalar.constant 0x1.000001p0 : f32
+  %f32_bits = scalar.bitcast %f32 : f32 to i32
+  %f64 = scalar.constant 0x1.0000000000001p0 : f64
+  %f64_bits = scalar.bitcast %f64 : f64 to i64
+  func.return %f16_bits, %bf16_bits, %f32_bits, %f64_bits : i16, i16, i32, i64
+}
+// ----
+func.def @hexadecimal_constants_round_to_declared_type() -> (i16, i16, i32, i64) {
+  %f16_bits = scalar.constant 15360 : i16
+  %bf16_bits = scalar.constant 16256 : i16
+  %f32_bits = scalar.constant 1065353216 : i32
+  %f64_bits = scalar.constant 4607182418800017409 : i64
+  func.return %f16_bits, %bf16_bits, %f32_bits, %f64_bits : i16, i16, i32, i64
+}
+
+// ====
+
 // IEEE minimum and maximum choose opposite signed zeros.
 func.def @minmax_preserve_signed_zero_semantics() -> (i32, i32) {
   %positive_signed_zero = scalar.constant 0.0 : f32

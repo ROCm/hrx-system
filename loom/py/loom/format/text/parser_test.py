@@ -897,6 +897,61 @@ class TestParseConstantOp:
         op = _parse_op("%pi = test.constant 3.14 : f32")
         assert abs(op.attributes["value"] - 3.14) < 1e-10
 
+    def test_hexadecimal_float_cross_format_roundtrip(self) -> None:
+        source = """test.func @hexadecimal_float_constants() {
+  %f16 = test.constant 0x1.ffcp+15 : f16
+  %f16_min = test.constant 0x1p-14 : f16
+  %bf16 = test.constant 0x1.fep+127 : bf16
+  %f32 = test.constant 0x1.fffffep+127 : f32
+  %f64 = test.constant 0x1.fffffffffffffp+1023 : f64
+  %f64_min = test.constant 0x0.0000000000001p-1022 : f64
+  %negative_f64 = test.constant -0x1.fffffffffffffp+1023 : f64
+  %overflow = test.constant 0x1p+999999 : f64
+  %negative_overflow = test.constant -0x1p+999999 : f64
+  %underflow = test.constant 0x1p-999999 : f64
+  %negative_underflow = test.constant -0x1p-999999 : f64
+  test.yield
+}
+"""
+        module = _op_parser().parse(source)
+        function = module.symbols[0].op
+        assert function is not None
+        constants = function.regions[0].blocks[0].ops[:-1]
+        assert [op.attributes["value"] for op in constants] == [
+            65504.0,
+            6.103515625e-05,
+            3.3895313892515355e38,
+            3.4028234663852886e38,
+            1.7976931348623157e308,
+            5e-324,
+            -1.7976931348623157e308,
+            math.inf,
+            -math.inf,
+            0.0,
+            -0.0,
+        ]
+
+        canonical = _op_printer().print_module(module)
+        assert "0x" not in canonical
+        for expected in (
+            "%f16 = test.constant 65504.0 : f16",
+            "%f16_min = test.constant 6.103515625e-05 : f16",
+            "%bf16 = test.constant 3.3895313892515355e+38 : bf16",
+            "%f32 = test.constant 3.4028234663852886e+38 : f32",
+            "%f64 = test.constant 1.7976931348623157e+308 : f64",
+            "%f64_min = test.constant 4.9406564584124654e-324 : f64",
+            "%negative_f64 = test.constant -1.7976931348623157e+308 : f64",
+            "%overflow = test.constant inf : f64",
+            "%negative_overflow = test.constant -inf : f64",
+            "%underflow = test.constant 0.0 : f64",
+            "%negative_underflow = test.constant -0.0 : f64",
+        ):
+            assert expected in canonical
+        reparsed = _op_parser().parse(canonical)
+        assert _op_printer().print_module(reparsed) == canonical
+        loaded = read_module(write_module(module))
+        assert _op_printer().print_module(loaded) == canonical
+
     def test_special_float_values(self) -> None:
         nan_op = _parse_op("%nan = test.constant nan : f32")
         assert math.isnan(nan_op.attributes["value"])

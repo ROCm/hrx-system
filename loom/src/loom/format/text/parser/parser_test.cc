@@ -6,6 +6,7 @@
 
 #include "loom/format/text/parser/parser.h"
 
+#include <cmath>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -735,6 +736,65 @@ TEST_F(ParserTest, ConstantNegative) {
 TEST_F(ParserTest, ConstantZero) {
   std::string text = RoundTrip("%c = test.constant 0 : index\n");
   EXPECT_NE(text.find("test.constant 0 : index"), std::string::npos);
+}
+
+TEST_F(ParserTest, HexadecimalFloatConstantsRoundTripCanonically) {
+  const char* source =
+      "%f16 = test.constant 0x1.ffcp+15 : f16\n"
+      "%f16_min = test.constant 0x1p-14 : f16\n"
+      "%bf16 = test.constant 0x1.fep+127 : bf16\n"
+      "%f32 = test.constant 0x1.fffffep+127 : f32\n"
+      "%f64 = test.constant 0x1.fffffffffffffp+1023 : f64\n"
+      "%f64_min = test.constant 0x0.0000000000001p-1022 : f64\n"
+      "%negative_f64 = test.constant -0x1.fffffffffffffp+1023 : f64\n"
+      "%overflow = test.constant 0x1p+999999 : f64\n"
+      "%negative_overflow = test.constant -0x1p+999999 : f64\n"
+      "%underflow = test.constant 0x1p-999999 : f64\n"
+      "%negative_underflow = test.constant -0x1p-999999 : f64\n";
+  std::string text = RoundTrip(source);
+  EXPECT_EQ(text.find("0x"), std::string::npos);
+  for (const char* expected : {
+           "%f16 = test.constant 65504.0 : f16",
+           "%f16_min = test.constant 6.103515625e-05 : f16",
+           "%bf16 = test.constant 3.3895313892515355e+38 : bf16",
+           "%f32 = test.constant 3.4028234663852886e+38 : f32",
+           "%f64 = test.constant 1.7976931348623157e+308 : f64",
+           "%f64_min = test.constant 4.9406564584124654e-324 : f64",
+           "%negative_f64 = test.constant -1.7976931348623157e+308 : f64",
+           "%overflow = test.constant inf : f64",
+           "%negative_overflow = test.constant -inf : f64",
+           "%underflow = test.constant 0.0 : f64",
+           "%negative_underflow = test.constant -0.0 : f64",
+       }) {
+    EXPECT_NE(text.find(expected), std::string::npos) << expected;
+  }
+
+  loom_module_t* module = ParseOk(text.c_str());
+  if (!module) return;
+  loom_block_t* body = loom_module_block(module);
+  ASSERT_NE(body, nullptr);
+  ASSERT_EQ(body->op_count, 11u);
+  const double expected_values[] = {
+      0x1.ffcp+15,
+      0x1p-14,
+      0x1.fep+127,
+      0x1.fffffep+127,
+      0x1.fffffffffffffp+1023,
+      0x0.0000000000001p-1022,
+      -0x1.fffffffffffffp+1023,
+      INFINITY,
+      -INFINITY,
+      0.0,
+      -0.0,
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(expected_values); ++i) {
+    loom_op_t* op = loom_block_op(body, i);
+    ASSERT_NE(op, nullptr);
+    loom_attribute_t value = loom_test_constant_value(op);
+    ASSERT_EQ(value.kind, LOOM_ATTR_F64);
+    EXPECT_EQ(loom_attr_as_f64(value), expected_values[i]);
+  }
+  loom_module_free(module);
 }
 
 TEST_F(ParserTest, FunctionTypeConstantSupportsThousandArgsAndResults) {

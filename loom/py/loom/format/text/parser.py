@@ -172,6 +172,16 @@ def _parse_special_float(text: str) -> float | None:
             return None
 
 
+def _parse_float_literal(text: str) -> float:
+    unsigned_text = text[1:] if text.startswith("-") else text
+    if unsigned_text.startswith(("0x", "0X")):
+        try:
+            return float.fromhex(text)
+        except OverflowError:
+            return float("-inf" if text.startswith("-") else "inf")
+    return float(text)
+
+
 def _concrete_type_for_constraint(constraint: TypeConstraint) -> Type | None:
     """Returns the concrete type implied by a singleton type constraint."""
     match constraint:
@@ -214,7 +224,7 @@ def _parse_generic_attr_value_from_tokens(
     if tokenizer.at(TokenKind.INTEGER):
         return int(tokenizer.next().text)
     if tokenizer.at(TokenKind.FLOAT):
-        return float(tokenizer.next().text)
+        return _parse_float_literal(tokenizer.next().text)
     if tokenizer.at(TokenKind.STRING):
         return tokenizer.next().text
     if (
@@ -736,7 +746,7 @@ def _parse_descriptor_attr_value_from_tokens(
             return int(tokenizer.expect(TokenKind.INTEGER).text)
         case "f64":
             if tokenizer.at(TokenKind.FLOAT):
-                return float(tokenizer.next().text)
+                return _parse_float_literal(tokenizer.next().text)
             if tokenizer.at(TokenKind.BARE_IDENT):
                 special_float = _parse_special_float(tokenizer.peek().text)
                 if special_float is not None:

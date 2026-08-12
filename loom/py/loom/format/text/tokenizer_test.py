@@ -132,6 +132,10 @@ class TestInteger:
     def test_negative_hex(self) -> None:
         assert _texts("-0x1A") == ["-0x1A"]
 
+    def test_uppercase_hex_prefix(self) -> None:
+        assert _texts("0XdeadBEEF") == ["0XdeadBEEF"]
+        assert _kinds("0XdeadBEEF") == [TokenKind.INTEGER]
+
 
 class TestFloat:
     def test_simple(self) -> None:
@@ -151,6 +155,33 @@ class TestFloat:
 
     def test_negative_exponent(self) -> None:
         assert _texts("2.5E+10") == ["2.5E+10"]
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            "0x1p0",
+            "0x1.p0",
+            "0x.8p+1",
+            "0X1.FP-4",
+            "-0x0p+0",
+            "0x1.fffffep+127",
+        ],
+    )
+    def test_hexadecimal(self, spelling: str) -> None:
+        assert _texts(spelling) == [spelling]
+        assert _kinds(spelling) == [TokenKind.FLOAT]
+
+    @pytest.mark.parametrize(
+        "spelling",
+        ["0x.", "0x.p0", "0x1.", "0x1.2", "0x1p", "0x1p+", "1e", "1e-"],
+    )
+    def test_malformed(self, spelling: str) -> None:
+        with pytest.raises(ParseError, match="invalid float literal"):
+            _tokens(spelling)
+
+    def test_missing_hex_digits(self) -> None:
+        with pytest.raises(ParseError, match="invalid integer literal"):
+            _tokens("0x")
 
 
 class TestString:

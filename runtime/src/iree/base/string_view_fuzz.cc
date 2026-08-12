@@ -11,6 +11,9 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "iree/base/api.h"
 
@@ -25,6 +28,61 @@ static const iree_bitfield_string_mapping_t kTestBitfieldMappings[] = {
     {0x10, IREE_SVL("MAPPABLE")},  // Bit 4.
     {0x20, IREE_SVL("COHERENT")},  // Bit 5.
 };
+
+static void iree_string_view_fuzz_structured_hex_float(const uint8_t* data,
+                                                       size_t size) {
+  if (size < 4) return;
+
+  static const char kHexDigits[] = "0123456789abcdef";
+  const size_t significand_byte_count = size - 3 < 32 ? size - 3 : 32;
+  const size_t significand_nibble_count = significand_byte_count * 2;
+  const size_t point_position = data[0] % (significand_nibble_count + 1);
+
+  char text[96];
+  size_t text_length = 0;
+  if ((data[0] & 0x80) != 0) text[text_length++] = '-';
+  text[text_length++] = '0';
+  text[text_length++] = (data[0] & 0x40) != 0 ? 'X' : 'x';
+  for (size_t i = 0; i <= significand_nibble_count; ++i) {
+    if (i == point_position) text[text_length++] = '.';
+    if (i == significand_nibble_count) break;
+    const uint8_t byte = data[3 + i / 2];
+    const uint8_t nibble =
+        (i & 1) == 0 ? (uint8_t)(byte >> 4) : (uint8_t)(byte & 0x0F);
+    text[text_length++] = kHexDigits[nibble];
+  }
+  text[text_length++] = (data[0] & 0x20) != 0 ? 'P' : 'p';
+  const int16_t exponent_bits = (int16_t)((uint16_t)data[1] << 8 | data[2]);
+  const int exponent_length = snprintf(
+      text + text_length, sizeof(text) - text_length, "%d", (int)exponent_bits);
+  if (exponent_length <= 0 ||
+      (size_t)exponent_length >= sizeof(text) - text_length) {
+    return;
+  }
+  text_length += (size_t)exponent_length;
+
+  const iree_string_view_t input =
+      iree_make_string_view(text, (iree_host_size_t)text_length);
+  float actual_f32 = 0.0f;
+  double actual_f64 = 0.0;
+  if (!iree_string_view_atof(input, &actual_f32) ||
+      !iree_string_view_atod(input, &actual_f64)) {
+    abort();
+  }
+
+  char* reference_end = NULL;
+  const float reference_f32 = strtof(text, &reference_end);
+  if (reference_end == text + text_length &&
+      memcmp(&actual_f32, &reference_f32, sizeof(actual_f32)) != 0) {
+    abort();
+  }
+  reference_end = NULL;
+  const double reference_f64 = strtod(text, &reference_end);
+  if (reference_end == text + text_length &&
+      memcmp(&actual_f64, &reference_f64, sizeof(actual_f64)) != 0) {
+    abort();
+  }
+}
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   iree_string_view_t input =
@@ -69,6 +127,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   //===--------------------------------------------------------------------===//
   // Floating point parsing
   //===--------------------------------------------------------------------===//
+
+  iree_string_view_fuzz_structured_hex_float(data, size);
 
   {
     float value_f32 = 0.0f;
