@@ -8,7 +8,6 @@ load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
     "loom_cc_test",
-    "loom_generated_cc_library",
 )
 
 package(
@@ -16,8 +15,6 @@ package(
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
 )
-
-_AMDGPU_OCCUPANCY_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/planning:occupancy_tables"
 
 _AMDGPU_ROOT_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu:__pkg__"]
 
@@ -366,12 +363,13 @@ loom_cc_library(
     ],
 )
 
-loom_generated_cc_library(
+loom_cc_library(
     name = "occupancy_model",
-    srcs = ["occupancy_model.c"],
+    srcs = [
+        "occupancy_model.c",
+        "//loom/src/loom/target/arch/amdgpu:occupancy_model_tables.c",
+    ],
     hdrs = ["occupancy_model.h"],
-    generator = _AMDGPU_OCCUPANCY_TABLE_GENERATOR,
-    source = "occupancy_model_tables.c",
     visibility = _AMDGPU_ROOT_VISIBILITY,
     deps = [
         "//loom/src/loom/target:residency",

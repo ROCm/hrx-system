@@ -8,39 +8,22 @@
 
 from __future__ import annotations
 
-import argparse
-import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 
-
-def _ensure_runtime_py_on_path() -> None:
-    runtime_py = Path(__file__).resolve().parents[6]
-    runtime_py_string = str(runtime_py)
-    if runtime_py_string not in sys.path:
-        sys.path.insert(0, runtime_py_string)
-
-
-_ensure_runtime_py_on_path()
-
-from loom.gen.support.files import write_text_file  # noqa: E402
-from loom.gen.support.generated_file import line_comment_header  # noqa: E402
-from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
+from loom.gen.support.generated_file import line_comment_header
+from loom.target.arch.amdgpu.descriptors import (
     _amdgpu_core_descriptor_set_bases,
 )
-from loom.target.arch.amdgpu.target_info import (  # noqa: E402
+from loom.target.arch.amdgpu.target_info import (
     AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE,
+    AmdgpuDescriptorSetInfo,
     AmdgpuOccupancyModelInfo,
     AmdgpuProcessorInfo,
-    amdgpu_descriptor_set_ordinal,
     amdgpu_processor_occupancy_model,
-    amdgpu_processor_ordinal,
     kernel_descriptor_profile_supports_wavefront_size,
-    sorted_descriptor_set_infos,
-    sorted_processor_infos,
 )
-from loom.target.low_descriptors import RegClass, RegClassFlag  # noqa: E402
+from loom.target.low_descriptors import RegClass, RegClassFlag
 
 
 def _c_string_literal(value: str) -> str:
@@ -63,6 +46,18 @@ class _AmdgpuOccupancyModelRow:
     wave_size: int
     model: AmdgpuOccupancyModelInfo
     processors: tuple[AmdgpuProcessorInfo, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _AmdgpuOccupancyDescriptorSchema:
+    # Canonical descriptor-set ordinal used by generated runtime tables.
+    ordinal: int
+    # Register classes in their descriptor-set ordinal order.
+    reg_classes: tuple[RegClass, ...]
+    # Register-class ordinals indexed by semantic register-class name.
+    reg_class_ids: Mapping[str, int]
+    # Register-class definitions indexed by semantic register-class name.
+    reg_classes_by_name: Mapping[str, RegClass]
 
 
 def _model_symbol_suffix(row: _AmdgpuOccupancyModelRow) -> str:
@@ -89,21 +84,6 @@ def _u16_expr(value: int) -> str:
 
 def _u32_expr(value: int) -> str:
     return f"UINT32_C({value})"
-
-
-def _descriptor_reg_class_ids(descriptor_set_key: str) -> dict[str, int]:
-    for descriptor_set in _amdgpu_core_descriptor_set_bases():
-        if descriptor_set.key != descriptor_set_key:
-            continue
-        return {reg_class.name: index for index, reg_class in enumerate(descriptor_set.reg_classes)}
-    raise ValueError(f"AMDGPU occupancy model references unknown descriptor set '{descriptor_set_key}'")
-
-
-def _descriptor_reg_classes(descriptor_set_key: str) -> tuple[RegClass, ...]:
-    for descriptor_set in _amdgpu_core_descriptor_set_bases():
-        if descriptor_set.key == descriptor_set_key:
-            return descriptor_set.reg_classes
-    raise ValueError(f"AMDGPU occupancy model references unknown descriptor set '{descriptor_set_key}'")
 
 
 def _round_up(value: int, multiple: int) -> int:
@@ -188,11 +168,34 @@ def _materialize_models(
     )
 
 
+def _descriptor_schemas_by_key(
+    descriptor_set_infos: Sequence[AmdgpuDescriptorSetInfo],
+) -> dict[str, _AmdgpuOccupancyDescriptorSchema]:
+    descriptor_set_keys = {info.key for info in descriptor_set_infos}
+    descriptor_schemas_by_key: dict[str, _AmdgpuOccupancyDescriptorSchema] = {}
+    for descriptor_set in _amdgpu_core_descriptor_set_bases():
+        if descriptor_set.key not in descriptor_set_keys:
+            continue
+        ordinal = descriptor_set.descriptor_set_ordinal
+        if ordinal is None or ordinal >= AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE:
+            raise ValueError(f"AMDGPU descriptor set {descriptor_set.key} has no representable ordinal")
+        descriptor_schemas_by_key[descriptor_set.key] = _AmdgpuOccupancyDescriptorSchema(
+            ordinal=ordinal,
+            reg_classes=descriptor_set.reg_classes,
+            reg_class_ids={reg_class.name: index for index, reg_class in enumerate(descriptor_set.reg_classes)},
+            reg_classes_by_name={reg_class.name: reg_class for reg_class in descriptor_set.reg_classes},
+        )
+    missing_descriptor_sets = sorted(descriptor_set_keys - descriptor_schemas_by_key.keys())
+    if missing_descriptor_sets:
+        raise ValueError("AMDGPU occupancy models have no descriptor schema for: " + ", ".join(missing_descriptor_sets))
+    return descriptor_schemas_by_key
+
+
 def _validate_models(
     models: Sequence[_AmdgpuOccupancyModelRow],
     processors: Sequence[AmdgpuProcessorInfo],
+    descriptor_schemas_by_key: Mapping[str, _AmdgpuOccupancyDescriptorSchema],
 ) -> None:
-    descriptor_set_keys = {info.key for info in sorted_descriptor_set_infos()}
     expected_processor_waves: set[tuple[str, int]] = set()
     for processor in processors:
         for wave_size in (32, 64):
@@ -214,10 +217,9 @@ def _validate_models(
         model = model_row.model
         descriptor_set_key = model_row.descriptor_set_key
         wave_size = model_row.wave_size
-        if descriptor_set_key not in descriptor_set_keys:
+        descriptor_schema = descriptor_schemas_by_key.get(descriptor_set_key)
+        if descriptor_schema is None:
             raise ValueError(f"AMDGPU occupancy model references unknown descriptor set '{descriptor_set_key}'")
-        if amdgpu_descriptor_set_ordinal(descriptor_set_key) >= (AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE):
-            raise ValueError("AMDGPU occupancy descriptor-set ordinal overflows")
         if wave_size not in (32, 64):
             raise ValueError(f"AMDGPU occupancy wave size for {descriptor_set_key} must be 32 or 64")
         if not model_row.processors:
@@ -282,8 +284,8 @@ def _validate_models(
         if missing_base_classes:
             missing = ", ".join(missing_base_classes)
             raise ValueError(f"AMDGPU occupancy model for {descriptor_set_key} is missing base register classes: {missing}")
-        descriptor_reg_classes = _descriptor_reg_class_ids(descriptor_set_key)
-        descriptor_reg_class_rows = {row.name: row for row in _descriptor_reg_classes(descriptor_set_key)}
+        descriptor_reg_classes = descriptor_schema.reg_class_ids
+        descriptor_reg_class_rows = descriptor_schema.reg_classes_by_name
         if len(descriptor_reg_class_rows) > 0xFFFF:
             raise ValueError(f"AMDGPU descriptor set {descriptor_set_key} has too many register classes for pressure-resource indexes")
         pressure_cliff_count = 0
@@ -323,7 +325,7 @@ def _validate_models(
                 raise ValueError(f"AMDGPU occupancy model for {descriptor_set_key} has too many register-class pressure cliffs")
         modeled_register_classes = set(register_classes)
         missing_spillable_classes = sorted(
-            reg_class.name for reg_class in _descriptor_reg_classes(descriptor_set_key) if RegClassFlag.UNSPILLABLE not in reg_class.flags and reg_class.name not in modeled_register_classes
+            reg_class.name for reg_class in descriptor_schema.reg_classes if RegClassFlag.UNSPILLABLE not in reg_class.flags and reg_class.name not in modeled_register_classes
         )
         if missing_spillable_classes:
             missing = ", ".join(missing_spillable_classes)
@@ -393,7 +395,11 @@ def _validate_models(
         raise ValueError("AMDGPU occupancy models do not cover processor wave modes: " + "; ".join(details))
 
 
-def _emit_source(models: Sequence[_AmdgpuOccupancyModelRow]) -> str:
+def _emit_source(
+    models: Sequence[_AmdgpuOccupancyModelRow],
+    processors: Sequence[AmdgpuProcessorInfo],
+    descriptor_schemas_by_key: Mapping[str, _AmdgpuOccupancyDescriptorSchema],
+) -> str:
     lines = [
         "// Copyright 2026 The IREE Authors",
         "//",
@@ -410,8 +416,9 @@ def _emit_source(models: Sequence[_AmdgpuOccupancyModelRow]) -> str:
     for model_row in models:
         model = model_row.model
         suffix = _model_c_suffix(model_row)
-        descriptor_reg_classes = _descriptor_reg_class_ids(model_row.descriptor_set_key)
-        descriptor_reg_class_rows = _descriptor_reg_classes(model_row.descriptor_set_key)
+        descriptor_schema = descriptor_schemas_by_key[model_row.descriptor_set_key]
+        descriptor_reg_class_rows = descriptor_schema.reg_classes
+        descriptor_reg_classes = descriptor_schema.reg_class_ids
         register_class_indices = {row.register_class: index for index, row in enumerate(model.register_classes)}
         pressure_cliffs_by_register_class = {
             row.register_class: (
@@ -649,7 +656,7 @@ def _emit_source(models: Sequence[_AmdgpuOccupancyModelRow]) -> str:
             [
                 "",
                 f"static const loom_amdgpu_occupancy_model_t kAmdgpu{suffix}OccupancyModel = {{",
-                f"  .descriptor_set_ordinal = {_u16_expr(amdgpu_descriptor_set_ordinal(model_row.descriptor_set_key))},",
+                f"  .descriptor_set_ordinal = {_u16_expr(descriptor_schema.ordinal)},",
                 f"  .wave_size = {_u32_expr(model_row.wave_size)},",
                 f"  .max_waves_per_simd = {_u32_expr(model.max_waves_per_simd)},",
                 "  .domain = {",
@@ -696,11 +703,11 @@ def _emit_source(models: Sequence[_AmdgpuOccupancyModelRow]) -> str:
             "    kLoomAmdgpuOccupancyModelsByProcessor[][LOOM_AMDGPU_OCCUPANCY_WAVE_SLOT_COUNT] = {",
         ]
     )
-    for processor in sorted_processor_infos():
+    for processor_ordinal, processor in enumerate(processors):
         wave_rows = {wave_size: model_by_processor_wave[(processor.processor, wave_size)] for wave_size in (32, 64) if (processor.processor, wave_size) in model_by_processor_wave}
         if not wave_rows:
             continue
-        lines.append(f"  [{_u16_expr(amdgpu_processor_ordinal(processor.processor))}] = {{")
+        lines.append(f"  [{_u16_expr(processor_ordinal)}] = {{")
         for wave_size, model_row in wave_rows.items():
             wave_slot = "LOOM_AMDGPU_OCCUPANCY_WAVE_SLOT_32" if wave_size == 32 else "LOOM_AMDGPU_OCCUPANCY_WAVE_SLOT_64"
             lines.append(f"    [{wave_slot}] = &kAmdgpu{_model_c_suffix(model_row)}OccupancyModel,")
@@ -715,20 +722,13 @@ def _emit_source(models: Sequence[_AmdgpuOccupancyModelRow]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def write_occupancy_tables_to_path(source_path: Path) -> None:
-    processors = sorted_processor_infos()
+def generate_occupancy_tables(
+    descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
+    processors: Sequence[AmdgpuProcessorInfo],
+) -> str:
+    """Generates the occupancy model source for a target-info corpus."""
+
+    descriptor_schemas_by_key = _descriptor_schemas_by_key(descriptor_sets)
     models = _materialize_models(processors)
-    _validate_models(models, processors)
-    write_text_file(source_path, _emit_source(models))
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate AMDGPU occupancy model C tables.")
-    parser.add_argument("--source", required=True, type=Path)
-    args = parser.parse_args(argv)
-    write_occupancy_tables_to_path(args.source)
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    _validate_models(models, processors, descriptor_schemas_by_key)
+    return _emit_source(models, processors, descriptor_schemas_by_key)

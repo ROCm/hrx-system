@@ -38,6 +38,9 @@ from loom.gen.target.arch.amdgpu.amdgpu_config_tables import (  # noqa: E402
 from loom.gen.target.arch.amdgpu.amdgpu_low_aliases import (  # noqa: E402
     write_low_aliases_to_path,
 )
+from loom.gen.target.arch.amdgpu.planning.amdgpu_occupancy_tables import (  # noqa: E402
+    generate_occupancy_tables,
+)
 from loom.gen.target.arch.amdgpu.records.amdgpu_target_records import (  # noqa: E402
     write_target_record_tables_to_path,
 )
@@ -586,10 +589,9 @@ def _validate_memory_cache_policy_encoding_infos(
 
 
 def _ordered_memory_cache_policy_encoding_infos(
+    descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
     rows: Sequence[AmdgpuVectorMemoryCachePolicyEncodingInfo] = (AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_INFOS),
-    descriptor_sets: Sequence[AmdgpuDescriptorSetInfo] | None = None,
 ) -> tuple[AmdgpuVectorMemoryCachePolicyEncodingInfo, ...]:
-    descriptor_sets = sorted_descriptor_set_infos() if descriptor_sets is None else descriptor_sets
     _validate_memory_cache_policy_encoding_infos(rows, descriptor_sets)
     return tuple(
         sorted(
@@ -658,12 +660,14 @@ def _memory_cache_policy_temporal_th_initializer(row: tuple[str, int]) -> str:
     return f"[{_cache_temporal_c_name(keyword)}] = {th_value},"
 
 
-def _emit_memory_cache_policy_encoding_rows() -> str:
+def _emit_memory_cache_policy_encoding_rows(
+    descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
+) -> str:
     return (
         "\n".join(
             [
                 *_memory_cache_policy_fragment_header(),
-                *(_memory_cache_policy_encoding_info_initializer(row) for row in _ordered_memory_cache_policy_encoding_infos()),
+                *(_memory_cache_policy_encoding_info_initializer(row) for row in _ordered_memory_cache_policy_encoding_infos(descriptor_sets)),
             ]
         )
         + "\n"
@@ -725,14 +729,10 @@ def _lds_bank_service_model_initializer(
     return lines
 
 
-def _emit_lds_bank_service_model_rows() -> str:
-    processors = sorted_processor_infos()
-    targets = sorted_target_infos()
-    validate_amdgpu_lds_bank_service_model_infos(amdgpu_descriptor_ref_keys())
-    validate_amdgpu_target_rows(processors, targets)
+def _emit_lds_bank_service_model_rows(
+    model_sets: Sequence[Sequence[str]],
+) -> str:
     model_infos_by_key = amdgpu_lds_bank_service_model_info_by_key()
-    model_sets = amdgpu_lds_bank_service_model_sets(processors, targets)
-    validate_amdgpu_lds_bank_service_model_coverage(model_sets)
 
     lines = _lds_bank_service_fragment_header()
     for ordinal, model_keys in enumerate(model_sets):
@@ -1495,7 +1495,7 @@ def _write_target_info_to_paths(
     descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
     processors: Sequence[AmdgpuProcessorInfo],
     targets: Sequence[AmdgpuTargetInfo],
-) -> None:
+) -> tuple[tuple[str, ...], ...]:
     _validate_descriptor_sets(descriptor_sets)
     descriptor_set_rows = _materialize_descriptor_set_rows(descriptor_sets)
     _validate_descriptor_set_rows(descriptor_set_rows)
@@ -1515,6 +1515,7 @@ def _write_target_info_to_paths(
     write_text_file(header_path, header)
     write_text_file(source_path, source)
     write_text_file(tables_header_path, tables_header)
+    return model_sets
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1591,12 +1592,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         required=True,
         help="Generated target-record X-macro table path.",
     )
+    parser.add_argument(
+        "--occupancy-model-tables",
+        type=Path,
+        required=True,
+        help="Generated occupancy model C source path.",
+    )
     args = parser.parse_args(argv)
 
     descriptor_sets = sorted_descriptor_set_infos()
     processors = sorted_processor_infos()
     targets = sorted_target_infos()
-    _write_target_info_to_paths(
+    lds_bank_service_model_sets = _write_target_info_to_paths(
         header_path=args.header,
         source_path=args.source,
         tables_header_path=args.tables_header,
@@ -1606,7 +1613,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     write_text_file(
         args.cache_policy_encoding_rows,
-        _emit_memory_cache_policy_encoding_rows(),
+        _emit_memory_cache_policy_encoding_rows(descriptor_sets),
     )
     write_text_file(
         args.cache_policy_temporal_th,
@@ -1614,7 +1621,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     write_text_file(
         args.lds_bank_service_model_rows,
-        _emit_lds_bank_service_model_rows(),
+        _emit_lds_bank_service_model_rows(lds_bank_service_model_sets),
     )
     write_text_file(
         args.matrix_coexecution_source_layouts,
@@ -1634,6 +1641,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         descriptor_sets=descriptor_sets,
         processors=processors,
         targets=targets,
+    )
+    write_text_file(
+        args.occupancy_model_tables,
+        generate_occupancy_tables(descriptor_sets, processors),
     )
     return 0
 

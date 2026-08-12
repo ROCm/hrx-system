@@ -131,6 +131,7 @@ loom_generated_cc_library(
         "--encoding-tables",
         "--low-alias-source",
         "--target-record-tables",
+        "--occupancy-model-tables",
     ],
     extra_outputs = [
         "memory_cache_policy_encoding_rows.inl",
@@ -142,6 +143,7 @@ loom_generated_cc_library(
         "encoding_tables.inl",
         "low_aliases.c",
         "target_records_tables.inl",
+        "occupancy_model_tables.c",
     ],
     generated_hdr_flags = ["--header"],
     generated_hdrs = ["target_info.h"],

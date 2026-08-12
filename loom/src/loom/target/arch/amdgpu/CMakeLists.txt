@@ -87,6 +87,7 @@ loom_generated_cc_library(
     "--encoding-tables"
     "--low-alias-source"
     "--target-record-tables"
+    "--occupancy-model-tables"
   EXTRA_OUTPUTS
     "memory_cache_policy_encoding_rows.inl"
     "memory_cache_policy_temporal_th.inl"
@@ -97,6 +98,7 @@ loom_generated_cc_library(
     "encoding_tables.inl"
     "low_aliases.c"
     "target_records_tables.inl"
+    "occupancy_model_tables.c"
   DEPS
     ::target_info_defs
     iree::base

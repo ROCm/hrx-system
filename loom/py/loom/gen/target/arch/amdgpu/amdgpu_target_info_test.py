@@ -67,7 +67,9 @@ def _descriptor_set_info() -> AmdgpuDescriptorSetInfo:
 
 
 def test_memory_cache_policy_fragments_are_data_only() -> None:
-    policy_rows = amdgpu_target_info._emit_memory_cache_policy_encoding_rows()
+    policy_rows = amdgpu_target_info._emit_memory_cache_policy_encoding_rows(
+        amdgpu_target_info_data.sorted_descriptor_set_infos(),
+    )
     temporal_th = amdgpu_target_info._emit_memory_cache_policy_temporal_th()
 
     for source in (policy_rows, temporal_th):
@@ -84,7 +86,14 @@ def test_memory_cache_policy_fragments_are_data_only() -> None:
 
 
 def test_lds_bank_service_fragment_is_data_only() -> None:
-    source = amdgpu_target_info._emit_lds_bank_service_model_rows()
+    processors = amdgpu_target_info_data.sorted_processor_infos()
+    targets = amdgpu_target_info_data.sorted_target_infos()
+    source = amdgpu_target_info._emit_lds_bank_service_model_rows(
+        amdgpu_target_info_data.amdgpu_lds_bank_service_model_sets(
+            processors,
+            targets,
+        ),
+    )
 
     assert "typedef " not in source
     assert "#ifndef " not in source
@@ -191,7 +200,10 @@ def test_memory_cache_policy_rejects_missing_encoding_row() -> None:
     rows = amdgpu_target_info_data.AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_INFOS[:-1]
 
     with _raises_value_error("memory cache-policy encoding table must cover every non-none encoding"):
-        amdgpu_target_info._ordered_memory_cache_policy_encoding_infos(rows=rows)
+        amdgpu_target_info._ordered_memory_cache_policy_encoding_infos(
+            amdgpu_target_info_data.sorted_descriptor_set_infos(),
+            rows=rows,
+        )
 
 
 def test_memory_cache_policy_rejects_unknown_descriptor_encoding() -> None:
