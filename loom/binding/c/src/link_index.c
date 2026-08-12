@@ -13,7 +13,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/base/internal/atomics.h"
 #include "loom/format/bytecode/format.h"
-#include "loom/format/bytecode/reader.h"
+#include "loom/format/bytecode/index.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/ir.h"
 #include "loomc/iree.h"
@@ -347,7 +347,7 @@ static loomc_status_t loomc_link_index_add_source_to_index(
   loomc_string_view_t identifier = loomc_source_identifier(source->source);
   iree_status_t status = iree_ok_status();
   if (loomc_link_index_source_is_bytecode(source->source)) {
-    loom_bytecode_read_options_t read_options = {
+    loom_bytecode_index_options_t index_options = {
         .diagnostic_sink =
             {
                 .fn = loomc_link_index_capture_diagnostic,
@@ -357,7 +357,7 @@ static loomc_status_t loomc_link_index_add_source_to_index(
     status = loom_link_module_index_add_bytecode(
         builder->index,
         iree_make_const_byte_span(contents.data, contents.data_length),
-        iree_string_view_from_loomc(identifier), &read_options, &options,
+        iree_string_view_from_loomc(identifier), &index_options, &options,
         /*out_provider_ordinal=*/NULL);
   } else {
     loom_text_parse_options_t parse_options = {

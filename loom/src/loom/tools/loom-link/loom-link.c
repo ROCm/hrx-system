@@ -554,7 +554,7 @@ static iree_status_t loom_link_cli_build_index(
       continue;
     }
 
-    loom_bytecode_read_options_t read_options = {
+    loom_bytecode_index_options_t index_options = {
         .diagnostic_sink = {.fn = loom_diagnostic_stderr_sink},
     };
     loom_link_module_index_add_options_t options = {
@@ -564,7 +564,7 @@ static iree_status_t loom_link_cli_build_index(
     iree_host_size_t provider_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
     status = loom_link_module_index_add_bytecode(
         out_cli_index->index, input->contents->const_buffer, input->filename,
-        &read_options, &options, &provider_ordinal);
+        &index_options, &options, &provider_ordinal);
     if (iree_status_is_ok(status)) {
       status = loom_link_cli_set_provider_state(out_cli_index, provider_ordinal,
                                                 i, allocator);

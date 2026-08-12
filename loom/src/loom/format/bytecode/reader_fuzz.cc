@@ -116,10 +116,13 @@ static void fuzz_read_arbitrary_bytecode(const uint8_t* data, size_t size,
   uint32_t diagnostic_count = 0;
   loom_bytecode_read_options_t options =
       fuzz_read_options(control_byte, &diagnostic_count);
+  loom_bytecode_index_options_t index_options = {
+      .diagnostic_sink = options.diagnostic_sink,
+  };
   loom_bytecode_read_result_t metadata_result = {0};
   fuzz_ignore_status_or_trap(loom_bytecode_read_metadata(
       iree_make_const_byte_span(data, size), IREE_SV("fuzz.loombc"), &g_context,
-      block_pool, &options, &metadata_result));
+      block_pool, &index_options, &metadata_result));
 
   loom_bytecode_read_result_t module_result = {0};
   loom_module_t* module = NULL;

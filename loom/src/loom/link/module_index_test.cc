@@ -213,7 +213,7 @@ func.def public @entry(%x: i32) -> (i32) {
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index.get(),
       iree_make_const_byte_span(library_bytes.data(), library_bytes.size()),
-      IREE_SV("kernel-lib.loombc"), /*read_options=*/nullptr, &library_options,
+      IREE_SV("kernel-lib.loombc"), /*index_options=*/nullptr, &library_options,
       /*out_provider_ordinal=*/nullptr));
   loom_link_module_index_add_options_t input_options = {
       /*.provider_name=*/IREE_SV("input"),
@@ -228,7 +228,7 @@ func.def public @entry(%x: i32) -> (i32) {
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index.get(),
       iree_make_const_byte_span(library_bytes.data(), library_bytes.size()),
-      IREE_SV("kernel-lib-2.loombc"), /*read_options=*/nullptr,
+      IREE_SV("kernel-lib-2.loombc"), /*index_options=*/nullptr,
       &second_library_options, /*out_provider_ordinal=*/nullptr));
 
   const loom_link_module_index_symbol_t* selected =
@@ -322,7 +322,7 @@ target.decl @gpu
   };
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index.get(), iree_make_const_byte_span(bytes.data(), bytes.size()),
-      IREE_SV("targets.loombc"), /*read_options=*/nullptr, &options,
+      IREE_SV("targets.loombc"), /*index_options=*/nullptr, &options,
       /*out_provider_ordinal=*/nullptr));
 
   const loom_link_module_index_symbol_t* symbol =
@@ -349,7 +349,7 @@ func.def public @exported(%x: i32) -> (i32) {
   };
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index.get(), iree_make_const_byte_span(bytes.data(), bytes.size()),
-      IREE_SV("kernels.loombc"), /*read_options=*/nullptr, &options,
+      IREE_SV("kernels.loombc"), /*index_options=*/nullptr, &options,
       /*out_provider_ordinal=*/nullptr));
 
   const loom_link_module_index_provider_t* provider =
@@ -438,7 +438,7 @@ func.template<demo.contract> @provider(%x: i32) -> (i32) {
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       bytecode_index.get(),
       iree_make_const_byte_span(bytes.data(), bytes.size()),
-      IREE_SV("library.loombc"), /*read_options=*/nullptr, &options,
+      IREE_SV("library.loombc"), /*index_options=*/nullptr, &options,
       /*out_provider_ordinal=*/nullptr));
   verify_index(bytecode_index.get());
 }
@@ -473,7 +473,7 @@ check.benchmark<@kernel_case> @kernel_bench {}
   IndexPtr index = CreateIndex();
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index.get(), iree_make_const_byte_span(bytes.data(), bytes.size()),
-      IREE_SV("checks.loombc"), /*read_options=*/nullptr, &options,
+      IREE_SV("checks.loombc"), /*index_options=*/nullptr, &options,
       /*out_provider_ordinal=*/nullptr));
 
   EXPECT_EQ(loom_link_module_index_symbol_count(index.get()), 2u);

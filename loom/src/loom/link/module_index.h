@@ -16,7 +16,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
-#include "loom/format/bytecode/reader.h"
+#include "loom/format/bytecode/index.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/ir.h"
 
@@ -216,7 +216,7 @@ iree_status_t loom_link_module_index_add_materialized(
 iree_status_t loom_link_module_index_add_bytecode(
     loom_link_module_index_t* index, iree_const_byte_span_t bytecode,
     iree_string_view_t filename,
-    const loom_bytecode_read_options_t* read_options,
+    const loom_bytecode_index_options_t* index_options,
     const loom_link_module_index_add_options_t* options,
     iree_host_size_t* out_provider_ordinal);
 

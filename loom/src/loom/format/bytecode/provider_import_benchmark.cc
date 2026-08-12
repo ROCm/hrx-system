@@ -15,7 +15,7 @@
 #include "benchmark/benchmark.h"
 #include "iree/base/internal/arena.h"
 #include "iree/io/vec_stream.h"
-#include "loom/format/bytecode/reader.h"
+#include "loom/format/bytecode/index.h"
 #include "loom/format/bytecode/writer.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"

@@ -66,7 +66,7 @@ class PlannerCatalogFixture {
     };
     CheckStatus(loom_link_module_index_add_bytecode(
         index, iree_make_const_byte_span(bytes_.data(), bytes_.size()),
-        IREE_SV("planner_catalog.loombc"), /*read_options=*/nullptr, &options,
+        IREE_SV("planner_catalog.loombc"), /*index_options=*/nullptr, &options,
         /*out_provider_ordinal=*/nullptr));
     return index;
   }
@@ -83,7 +83,7 @@ class PlannerCatalogFixture {
       };
       CheckStatus(loom_link_module_index_add_bytecode(
           index, iree_make_const_byte_span(bytes_.data(), bytes_.size()),
-          IREE_SV("planner_duplicate.loombc"), /*read_options=*/nullptr,
+          IREE_SV("planner_duplicate.loombc"), /*index_options=*/nullptr,
           &options, /*out_provider_ordinal=*/nullptr));
     }
     return index;

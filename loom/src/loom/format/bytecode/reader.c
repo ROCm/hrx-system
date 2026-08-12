@@ -7682,7 +7682,7 @@ static iree_status_t loom_bytecode_reader_materialize_module(
 iree_status_t loom_bytecode_read_metadata(
     iree_const_byte_span_t bytecode, iree_string_view_t filename,
     loom_context_t* context, iree_arena_block_pool_t* block_pool,
-    const loom_bytecode_read_options_t* options,
+    const loom_bytecode_index_options_t* options,
     loom_bytecode_read_result_t* out_result) {
   iree_arena_allocator_t arena;
   iree_arena_initialize(block_pool, &arena);
@@ -7736,7 +7736,7 @@ iree_status_t loom_bytecode_read_index(
     iree_const_byte_span_t bytecode, iree_string_view_t filename,
     loom_context_t* context, iree_arena_block_pool_t* block_pool,
     iree_arena_allocator_t* metadata_arena,
-    const loom_bytecode_read_options_t* options,
+    const loom_bytecode_index_options_t* options,
     loom_bytecode_read_result_t* out_result,
     loom_bytecode_file_metadata_t* out_metadata) {
   IREE_ASSERT_ARGUMENT(block_pool);

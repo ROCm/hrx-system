@@ -74,6 +74,7 @@ loom_cc_library(
   NAME
     reader
   HDRS
+    "index.h"
     "reader.h"
   SRCS
     "reader.c"

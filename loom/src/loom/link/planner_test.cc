@@ -361,7 +361,7 @@ func.def public @unused(%x: i32) -> (i32) {
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index.get(),
       iree_make_const_byte_span(used_bytes.data(), used_bytes.size()),
-      IREE_SV("used.loombc"), /*read_options=*/nullptr, &used_options,
+      IREE_SV("used.loombc"), /*index_options=*/nullptr, &used_options,
       /*out_provider_ordinal=*/nullptr));
   loom_link_module_index_add_options_t unused_options = {
       /*.provider_name=*/IREE_SV("unused-lib"),
@@ -370,7 +370,7 @@ func.def public @unused(%x: i32) -> (i32) {
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index.get(),
       iree_make_const_byte_span(unused_bytes.data(), unused_bytes.size()),
-      IREE_SV("unused.loombc"), /*read_options=*/nullptr, &unused_options,
+      IREE_SV("unused.loombc"), /*index_options=*/nullptr, &unused_options,
       /*out_provider_ordinal=*/nullptr));
 
   const loom_link_module_index_module_t* used_module =
@@ -433,7 +433,7 @@ func.template<demo.unused> @unused_provider(%x: i32) -> (i32) {
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index.get(),
       iree_make_const_byte_span(used_bytes.data(), used_bytes.size()),
-      IREE_SV("used.loombc"), /*read_options=*/nullptr, &used_options,
+      IREE_SV("used.loombc"), /*index_options=*/nullptr, &used_options,
       /*out_provider_ordinal=*/nullptr));
   loom_link_module_index_add_options_t unused_options = {
       /*.provider_name=*/IREE_SV("unused-lib"),
@@ -442,7 +442,7 @@ func.template<demo.unused> @unused_provider(%x: i32) -> (i32) {
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index.get(),
       iree_make_const_byte_span(unused_bytes.data(), unused_bytes.size()),
-      IREE_SV("unused.loombc"), /*read_options=*/nullptr, &unused_options,
+      IREE_SV("unused.loombc"), /*index_options=*/nullptr, &unused_options,
       /*out_provider_ordinal=*/nullptr));
 
   iree_string_view_t roots[] = {IREE_SV("@entry")};
@@ -991,7 +991,8 @@ check.benchmark<@kernel_case> @kernel_bench
   };
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index.get(), iree_make_const_byte_span(bytes.data(), bytes.size()),
-      IREE_SV("kernel-lib.loombc"), /*read_options=*/nullptr, &provider_options,
+      IREE_SV("kernel-lib.loombc"), /*index_options=*/nullptr,
+      &provider_options,
       /*out_provider_ordinal=*/nullptr));
   const loom_link_module_index_module_t* indexed_module =
       loom_link_module_index_module_at(index.get(), 0);

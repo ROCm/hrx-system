@@ -10,6 +10,7 @@
 
 #include "loom/analysis/symbol_references.h"
 #include "loom/ir/context.h"
+#include "loom/ir/module.h"
 #include "loom/link/symbol_policy.h"
 #include "loom/ops/op_defs.h"
 
@@ -1037,7 +1038,7 @@ iree_status_t loom_link_module_index_add_materialized(
 iree_status_t loom_link_module_index_add_bytecode(
     loom_link_module_index_t* index, iree_const_byte_span_t bytecode,
     iree_string_view_t filename,
-    const loom_bytecode_read_options_t* read_options,
+    const loom_bytecode_index_options_t* index_options,
     const loom_link_module_index_add_options_t* options,
     iree_host_size_t* out_provider_ordinal) {
   IREE_ASSERT_ARGUMENT(index);
@@ -1046,7 +1047,7 @@ iree_status_t loom_link_module_index_add_bytecode(
   loom_bytecode_file_metadata_t metadata = {0};
   IREE_RETURN_IF_ERROR(loom_bytecode_read_index(
       bytecode, filename, index->context, index->block_pool, &index->arena,
-      read_options, &read_result, &metadata));
+      index_options, &read_result, &metadata));
   if (read_result.error_count > 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "bytecode provider '%.*s' has %u validation errors",

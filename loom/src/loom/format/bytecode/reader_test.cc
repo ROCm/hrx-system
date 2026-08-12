@@ -1297,7 +1297,7 @@ class ReaderTest : public ::testing::Test {
       const std::vector<uint8_t>& bytes, loom_context_t* context,
       std::vector<std::string>* error_ids) {
     loom_bytecode_read_result_t result = {0};
-    loom_bytecode_read_options_t options = {
+    loom_bytecode_index_options_t options = {
         /*.diagnostic_sink=*/
         {
             /*.fn=*/CaptureDiagnostic,
@@ -1320,7 +1320,7 @@ class ReaderTest : public ::testing::Test {
       loom_bytecode_file_metadata_t* out_metadata,
       std::vector<std::string>* error_ids) {
     loom_bytecode_read_result_t result = {0};
-    loom_bytecode_read_options_t options = {
+    loom_bytecode_index_options_t options = {
         /*.diagnostic_sink=*/
         {
             /*.fn=*/CaptureDiagnostic,

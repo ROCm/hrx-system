@@ -66,7 +66,10 @@ loom_cc_library(
 loom_cc_library(
     name = "reader",
     srcs = ["reader.c"],
-    hdrs = ["reader.h"],
+    hdrs = [
+        "index.h",
+        "reader.h",
+    ],
     deps = [
         ":format",
         "//loom/src/loom/error:diagnostic",

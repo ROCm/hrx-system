@@ -203,8 +203,13 @@ static void BenchmarkReadMetadata(benchmark::State& state, uint8_t preset) {
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(65536, iree_allocator_system(), &block_pool);
   uint32_t diagnostic_count = 0;
-  loom_bytecode_read_options_t options =
-      ReadOptions(/*verify_module=*/false, &diagnostic_count);
+  loom_bytecode_index_options_t options = {
+      /*.diagnostic_sink=*/
+      {
+          /*.fn=*/IgnoreDiagnostic,
+          /*.user_data=*/&diagnostic_count,
+      },
+  };
 
   for (auto _ : state) {
     loom_bytecode_read_result_t result = {0};
