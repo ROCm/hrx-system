@@ -166,6 +166,40 @@ enum iree_hal_executable_function_flag_bits_e {
 };
 typedef uint64_t iree_hal_executable_function_flags_t;
 
+// Flags indicating which executable function resource fields are available.
+typedef enum iree_hal_executable_function_resource_flag_bits_e {
+  // No function resource fields are available.
+  IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_NONE = 0u,
+  // Fixed workgroup-local memory use is available.
+  IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_WORKGROUP_LOCAL_MEMORY = 1u << 0,
+  // Fixed private memory use is available.
+  IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_PRIVATE_MEMORY = 1u << 1,
+  // Per-invocation register use is available.
+  IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_INVOCATION_REGISTERS = 1u << 2,
+  // All currently defined function resource fields.
+  IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_ALL =
+      IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_WORKGROUP_LOCAL_MEMORY |
+      IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_PRIVATE_MEMORY |
+      IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_INVOCATION_REGISTERS,
+} iree_hal_executable_function_resource_flag_bits_t;
+typedef uint32_t iree_hal_executable_function_resource_flags_t;
+
+// Immutable resource usage reported for one loaded executable function.
+//
+// Resource usage describes the exact loaded function image. Fields are valid
+// only when their corresponding bit is present in |provided_flags|. A provided
+// field may be zero; fields that are not provided are initialized to zero.
+typedef struct iree_hal_executable_function_resource_usage_t {
+  // Resource fields populated by the executable implementation.
+  iree_hal_executable_function_resource_flags_t provided_flags;
+  // Fixed workgroup-local memory required per workgroup, in bytes.
+  uint32_t fixed_workgroup_local_memory_size;
+  // Fixed private memory required per invocation, in bytes.
+  uint32_t fixed_private_memory_size;
+  // Number of 32-bit register units used per invocation.
+  uint32_t invocation_register_count;
+} iree_hal_executable_function_resource_usage_t;
+
 // Reflected information about an executable function.
 typedef struct iree_hal_executable_function_info_t {
   // Optional C-style name, if the function had one.
@@ -179,10 +213,16 @@ typedef struct iree_hal_executable_function_info_t {
   uint16_t binding_count;
   // Total number of logical parameters.
   uint16_t parameter_count;
+  // Maximum number of invocations accepted in one workgroup.
+  // Zero indicates no additional function-specific limit beyond the device
+  // launch specification.
+  uint32_t maximum_workgroup_invocations;
   // Static or minimum workgroup size of the function.
   // If IREE_HAL_EXECUTABLE_FUNCTION_FLAG_WORKGROUP_SIZE_DYNAMIC is set then
   // any dynamic workgroup size must be a multiple of this value.
   uint32_t workgroup_size[3];
+  // Immutable resource usage for the loaded function image.
+  iree_hal_executable_function_resource_usage_t resource_usage;
   // Occupancy information hinting at how this function should be scheduled.
   iree_hal_occupancy_info_t occupancy_info;
 } iree_hal_executable_function_info_t;

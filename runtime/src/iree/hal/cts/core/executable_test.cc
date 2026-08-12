@@ -76,6 +76,31 @@ TEST_P(ExecutableTest, ExportInfo) {
       IREE_HAL_EXECUTABLE_FUNCTION_FLAG_NONE);
   EXPECT_EQ(info.constant_byte_length, 2 * sizeof(uint32_t));
   EXPECT_EQ(info.binding_count, 2);
+  EXPECT_EQ(info.resource_usage.provided_flags &
+                ~IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_ALL,
+            IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_NONE);
+  if (!iree_any_bit_set(
+          info.resource_usage.provided_flags,
+          IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_WORKGROUP_LOCAL_MEMORY)) {
+    EXPECT_EQ(info.resource_usage.fixed_workgroup_local_memory_size, 0u);
+  }
+  if (!iree_any_bit_set(
+          info.resource_usage.provided_flags,
+          IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_PRIVATE_MEMORY)) {
+    EXPECT_EQ(info.resource_usage.fixed_private_memory_size, 0u);
+  }
+  if (!iree_any_bit_set(
+          info.resource_usage.provided_flags,
+          IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_INVOCATION_REGISTERS)) {
+    EXPECT_EQ(info.resource_usage.invocation_register_count, 0u);
+  }
+  const uint64_t minimum_workgroup_invocations =
+      static_cast<uint64_t>(info.workgroup_size[0]) * info.workgroup_size[1] *
+      info.workgroup_size[2];
+  if (info.maximum_workgroup_invocations != 0) {
+    EXPECT_LE(minimum_workgroup_invocations,
+              info.maximum_workgroup_invocations);
+  }
 }
 
 TEST_P(ExecutableTest, ExportParametersOutOfRange) {

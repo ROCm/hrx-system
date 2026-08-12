@@ -201,6 +201,12 @@ iree_status_t iree_hal_executable_library_export_info(
     out_info->workgroup_size[0] = attrs->workgroup_size_x;
     out_info->workgroup_size[1] = attrs->workgroup_size_y;
     out_info->workgroup_size[2] = attrs->workgroup_size_z;
+
+    out_info->resource_usage.provided_flags |=
+        IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_WORKGROUP_LOCAL_MEMORY;
+    out_info->resource_usage.fixed_workgroup_local_memory_size =
+        (uint32_t)attrs->local_memory_pages *
+        IREE_HAL_EXECUTABLE_WORKGROUP_LOCAL_MEMORY_PAGE_SIZE;
   }
 
   // Occupancy info is not yet implemented.
