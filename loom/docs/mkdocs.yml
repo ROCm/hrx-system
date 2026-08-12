@@ -73,6 +73,7 @@ nav:
       - Functions and structured control flow: guide/functions-and-control.md
       - Buffers, views, and memory: guide/buffers-views-memory.md
       - Kernels and launch configuration: guide/kernels-and-launch.md
+      - Facts and specialization: guide/facts-and-specialization.md
   - Workflows:
       - Workflow map: workflows/index.md
       - Format and verify source: workflows/format-and-verify.md

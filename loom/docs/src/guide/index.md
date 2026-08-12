@@ -37,7 +37,8 @@ graph, or deployment language.
    configuration](kernels-and-launch.md).
 6. **Facts and specialization** state what the author, composition root, and
    target know. Configuration constraints, assumptions, target facts, and
-   provider selection make that information useful before lowering.
+   provider selection make that information useful before lowering. Continue
+   with [Facts and specialization](facts-and-specialization.md).
 7. **Checks and benchmarks** make correctness workloads executable and let
    performance rows select those same proven workloads instead of rebuilding
    them in a harness.
