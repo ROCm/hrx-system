@@ -1015,6 +1015,7 @@ def _gfx11_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         _v_max_u32_overlay(),
         _v_readfirstlane_b32_overlay(),
         _v_readlane_b32_src1_inline_overlay(),
+        _v_readlane_b32_src1_sgpr_overlay(),
         *_integer_bitwise_shift_overlays(),
         *_integer_bitwise_permute_overlays(),
         _v_permlanex16_b32_src12_inline_overlay(),

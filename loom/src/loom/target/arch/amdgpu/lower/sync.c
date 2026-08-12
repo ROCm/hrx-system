@@ -11,6 +11,7 @@
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/legality.h"
 #include "loom/target/arch/amdgpu/lower/system_memory.h"
+#include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/planning/wait_packets.h"
 #include "loom/target/arch/amdgpu/planning/wait_plan.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
@@ -46,6 +47,31 @@ static bool loom_amdgpu_kernel_barrier_global_ordering_available(
   }
   return !loom_amdgpu_kernel_barrier_global_ordering_has_acquire(source_op) ||
          loom_amdgpu_system_memory_acquire_ordering_available(descriptor_set);
+}
+
+static bool loom_amdgpu_workgroup_is_single_subgroup(
+    const loom_module_t* module, loom_func_like_t function,
+    const loom_target_bundle_t* bundle,
+    const loom_value_fact_table_t* fact_table) {
+  uint32_t flat_workgroup_size = 0;
+  return loom_amdgpu_required_flat_workgroup_size_from_facts(
+             module, function, bundle, fact_table, &flat_workgroup_size) &&
+         flat_workgroup_size <= loom_amdgpu_target_wavefront_size(bundle);
+}
+
+static bool loom_amdgpu_kernel_barrier_is_memory_order_only(
+    const loom_module_t* module, loom_func_like_t function,
+    const loom_target_bundle_t* bundle,
+    const loom_value_fact_table_t* fact_table, const loom_op_t* source_op) {
+  if (loom_amdgpu_kernel_barrier_is_global_memory(source_op)) {
+    return false;
+  }
+  if (loom_kernel_barrier_scope(source_op) == LOOM_ATOMIC_SCOPE_SUBGROUP) {
+    return true;
+  }
+  return loom_kernel_barrier_scope(source_op) == LOOM_ATOMIC_SCOPE_WORKGROUP &&
+         loom_amdgpu_workgroup_is_single_subgroup(module, function, bundle,
+                                                  fact_table);
 }
 
 static iree_status_t loom_amdgpu_select_kernel_barrier_lds_wait(
@@ -137,10 +163,19 @@ iree_status_t loom_amdgpu_select_kernel_barrier_plan(
   }
 
   loom_amdgpu_kernel_barrier_plan_t local_plan = {0};
-  if (loom_kernel_barrier_scope(source_op) == LOOM_ATOMIC_SCOPE_SUBGROUP) {
+  const bool is_memory_order_only =
+      loom_amdgpu_kernel_barrier_is_memory_order_only(
+          loom_low_lower_context_module(context),
+          loom_low_lower_context_source_function(context),
+          loom_low_lower_context_bundle(context),
+          loom_low_lower_context_fact_table(context), source_op);
+  if (is_memory_order_only) {
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_select_kernel_barrier_lds_wait(context, &local_plan));
-  } else {
+  }
+  if (local_plan.kind == LOOM_AMDGPU_KERNEL_BARRIER_LOWERING_KIND_NONE &&
+      (!is_memory_order_only ||
+       loom_kernel_barrier_scope(source_op) == LOOM_ATOMIC_SCOPE_WORKGROUP)) {
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_select_workgroup_barrier_plan(context, &local_plan));
   }
@@ -243,12 +278,18 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_barrier(
     return iree_ok_status();
   }
 
-  if (loom_kernel_barrier_scope(op) == LOOM_ATOMIC_SCOPE_SUBGROUP) {
-    if (!loom_amdgpu_workgroup_memory_wait_lowering_available(descriptor_set)) {
-      return loom_amdgpu_low_legality_reject(
-          context, op, IREE_SV("descriptor.workgroup_memory_wait"));
-    }
+  const bool is_memory_order_only =
+      loom_amdgpu_kernel_barrier_is_memory_order_only(
+          loom_target_low_legality_module(context),
+          loom_target_low_legality_function(context), bundle,
+          loom_target_low_legality_fact_table(context), op);
+  if (is_memory_order_only &&
+      loom_amdgpu_workgroup_memory_wait_lowering_available(descriptor_set)) {
     return iree_ok_status();
+  }
+  if (loom_kernel_barrier_scope(op) == LOOM_ATOMIC_SCOPE_SUBGROUP) {
+    return loom_amdgpu_low_legality_reject(
+        context, op, IREE_SV("descriptor.workgroup_memory_wait"));
   }
 
   if (!loom_amdgpu_workgroup_barrier_lowering_available(descriptor_set)) {

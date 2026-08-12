@@ -36,6 +36,7 @@ iree_execution_test_suite(
         "gfx1250_configured_fragment_bank.loom",
         "long_sopp_branch.loom",
         "selected_root_amdgpu.loom",
+        "single_subgroup_barrier.loom",
         "target_family_template_provider_amdgpu.loom",
         "wave64_named_lane_broadcast.loom",
     ],

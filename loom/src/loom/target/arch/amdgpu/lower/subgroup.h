@@ -42,6 +42,13 @@ iree_status_t loom_amdgpu_emit_subgroup_readlane_register(
     loom_value_id_t source_value, uint32_t lane, loom_type_t result_type,
     loom_value_id_t* out_low_result);
 
+// Reads one subgroup-uniform lane selected by an SGPR into an SGPR.
+iree_status_t loom_amdgpu_emit_subgroup_readlane_sgpr_register(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_resolved_descriptor_t* descriptor,
+    loom_value_id_t source_value, loom_value_id_t source_lane,
+    loom_type_t result_type, loom_value_id_t* out_low_result);
+
 // Emits one direct DPP or DS swizzle cross-lane read for a 32-bit payload
 // register.
 iree_status_t loom_amdgpu_emit_direct_crosslane_register(

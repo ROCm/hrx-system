@@ -721,7 +721,7 @@
             "\"cluster_size\":{\"x\":1,\"y\":2,\"z\":1,\"flat\":2}",
             "\"local_memory_bytes\":512",
             "\"explicit_action_count\":1",
-            "\"barrier_count\":2"
+            "\"barrier_count\":0"
           ]
         }
       },

@@ -78,6 +78,6 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @nested_
 }
 
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @nested_kernel_template_expansion() asm {
-  s_barrier
+  s_waitcnt {lgkmcnt = 0}
   return
 }

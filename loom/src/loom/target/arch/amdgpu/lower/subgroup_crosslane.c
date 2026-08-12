@@ -186,6 +186,26 @@ iree_status_t loom_amdgpu_emit_subgroup_readlane_register(
   return iree_ok_status();
 }
 
+iree_status_t loom_amdgpu_emit_subgroup_readlane_sgpr_register(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_resolved_descriptor_t* descriptor,
+    loom_value_id_t source_value, loom_value_id_t source_lane,
+    loom_type_t result_type, loom_value_id_t* out_low_result) {
+  *out_low_result = LOOM_VALUE_ID_INVALID;
+  const loom_value_id_t operands[] = {
+      source_value,
+      source_lane,
+  };
+  loom_op_t* low_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
+      context, descriptor, operands, IREE_ARRAYSIZE(operands),
+      loom_make_named_attr_slice(NULL, 0), &result_type, 1,
+      /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
+      &low_op));
+  *out_low_result = loom_value_slice_get(loom_low_op_results(low_op), 0);
+  return iree_ok_status();
+}
+
 iree_status_t loom_amdgpu_emit_direct_crosslane_register(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_lower_resolved_descriptor_t* descriptor,

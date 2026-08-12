@@ -228,7 +228,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %34 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
   %carried_init = v_wmma_f32_16x16x16_bf16 %lhs, %rhs0, %34
-  s_barrier
+  s_waitcnt {lgkmcnt = 0}
   %36 = copy %carried_init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
   %output = v_wmma_f32_16x16x16_bf16 %lhs, %rhs1, %36
   %38 = v_lshlrev_b32_src0_inline %32, 2

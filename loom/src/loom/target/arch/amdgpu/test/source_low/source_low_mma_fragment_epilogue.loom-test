@@ -329,7 +329,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(32, 1, 1) workg
   %76 = v_mul_f32_src0_inline %59, 1073741824
   %78 = v_mul_f32_src0_inline %61, 1073741824
   %80 = v_mul_f32_src0_inline %63, 1073741824
-  s_barrier
+  s_waitcnt {lgkmcnt = 0}
   %82 = v_and_b32_src0_inline %19, 15
   %83 = v_and_b32_src0_inline %82, 1
   %84 = v_cmp_eq_i32_src1_inline %83 {rhs = 0}

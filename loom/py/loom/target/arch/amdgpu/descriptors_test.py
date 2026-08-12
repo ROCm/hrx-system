@@ -294,6 +294,15 @@ def test_generic_descriptor_contracts_are_member_intersections() -> None:
     )
 
 
+def test_v_readlane_b32_reserves_unused_vop3_source() -> None:
+    overlays = {overlay.descriptor_key: overlay for overlay in _gfx11_core_overlays()}
+    for descriptor_key in (
+        "amdgpu.v_readlane_b32.src1_inline",
+        "amdgpu.v_readlane_b32.src1_sgpr",
+    ):
+        assert overlays[descriptor_key].fixed_encoding_fields == (("SRC2", 0),)
+
+
 def _descriptor_set(*descriptors: Descriptor) -> DescriptorSet:
     return DescriptorSet(
         key="amdgpu.test.core",

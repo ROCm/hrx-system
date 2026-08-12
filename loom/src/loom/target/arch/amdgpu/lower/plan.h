@@ -821,7 +821,7 @@ typedef enum loom_amdgpu_subgroup_payload_kind_e {
 typedef enum loom_amdgpu_subgroup_broadcast_strategy_e {
   // Read the named lane directly through the target's native subgroup crossbar.
   LOOM_AMDGPU_SUBGROUP_BROADCAST_STRATEGY_BPERMUTE = 0,
-  // Read one statically named lane into an SGPR and publish it to every lane.
+  // Read one subgroup-uniform lane into an SGPR and publish it to every lane.
   LOOM_AMDGPU_SUBGROUP_BROADCAST_STRATEGY_SCALAR_READLANE = 1,
 } loom_amdgpu_subgroup_broadcast_strategy_t;
 
@@ -1009,7 +1009,7 @@ typedef enum loom_amdgpu_kernel_barrier_lowering_kind_e {
   LOOM_AMDGPU_KERNEL_BARRIER_LOWERING_KIND_NONE = 0,
   // Emit a full workgroup barrier packet.
   LOOM_AMDGPU_KERNEL_BARRIER_LOWERING_KIND_S_BARRIER = 1,
-  // Emit a wait packet that drains LDS effects for a single-wave workgroup.
+  // Emit a memory-ordering wait that drains LDS effects without rendezvous.
   LOOM_AMDGPU_KERNEL_BARRIER_LOWERING_KIND_LDS_WAIT = 2,
   // Emit the split signal/wait barrier packet pair used by GFX12+ targets.
   LOOM_AMDGPU_KERNEL_BARRIER_LOWERING_KIND_SPLIT_BARRIER = 3,

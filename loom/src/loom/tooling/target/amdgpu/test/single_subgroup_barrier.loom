@@ -1,0 +1,29 @@
+// A WG64/wave64 workgroup needs LDS ordering but has no second wave with
+// which to rendezvous.
+amdgpu.target<gfx11-generic> @wave64_target {subgroup_size = 64}
+
+kernel.def target(@wave64_target) @single_subgroup_exchange() {
+  %unit = index.constant 1 : index
+  %wave_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%wave_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane0 = kernel.subgroup.lane.id : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %cohort_source_offset = index.constant 1 : index
+  %cohort_width = index.constant 16 : index
+  %cohort = index.div %lane, %cohort_width : index
+  %cohort_base = index.mul %cohort, %cohort_width : index
+  %source_lane = index.add %cohort_base, %cohort_source_offset : index
+  %buffer_base = index.constant 0 : offset
+  %stage_bytes = index.constant 256 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32>
+  %stage = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
+  %stage_view = buffer.view %stage[%buffer_base] : buffer -> view<64xi32>
+  %value = view.load %input_view[%lane] : view<64xi32> -> i32
+  view.store %value, %stage_view[%lane] : i32, view<64xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %broadcast = view.load %stage_view[%source_lane] : view<64xi32> -> i32
+  view.store %broadcast, %output_view[%lane] : i32, view<64xi32>
+  kernel.return
+}
