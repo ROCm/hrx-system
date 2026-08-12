@@ -34,12 +34,19 @@ class PrepareTest(unittest.TestCase):
             }
         }
 
-        result = prepare.on_config(config)
+        with TemporaryDirectory() as temporary_directory:
+            with mock.patch.dict(
+                prepare.os.environ,
+                {"LOOM_DOCS_WORK_DIR": temporary_directory},
+            ):
+                staged_source_root = prepare._staged_source_root()
+                result = prepare.on_config(config)
+                self.assertFalse(staged_source_root.exists())
 
         self.assertIs(result, config)
         self.assertEqual(
             config["mdx_configs"]["pymdownx.snippets"]["base_path"],
-            ["loom/docs", str(prepare._staged_source_root())],
+            ["loom/docs", str(staged_source_root)],
         )
 
     def test_example_generators_are_discovered_by_package(self) -> None:
