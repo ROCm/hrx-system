@@ -57,7 +57,7 @@ endfunction()
 function(loom_target_table_cc_library)
   cmake_parse_arguments(
     _RULE
-    "EXCLUDE_FROM_ALL;HEADER_ONLY;TESTONLY"
+    "HEADER_ONLY;TESTONLY"
     "NAME;GENERATOR;SOURCE;HEADER"
     "ARGS;INPUTS;DEPS;GENERATED_HDR_FLAGS;GENERATED_HDRS;IDS_DEPS"
     ${ARGN}
@@ -198,10 +198,6 @@ function(loom_target_table_cc_library)
     ${_TESTONLY_ARG}
     PUBLIC
   )
-
-  if(_RULE_EXCLUDE_FROM_ALL)
-    iree_cc_library_exclude_from_all(${_RULE_NAME} TRUE)
-  endif()
 endfunction()
 
 function(loom_target_contract_cc_libraries)
@@ -404,7 +400,7 @@ endfunction()
 function(loom_low_descriptor_cc_library)
   cmake_parse_arguments(
     _RULE
-    "EXCLUDE_FROM_ALL;HEADER_ONLY;TESTONLY"
+    "HEADER_ONLY;TESTONLY"
     "NAME;HEADER"
     "DEPS;IDS_DEPS"
     ${ARGN}
@@ -448,35 +444,4 @@ function(loom_low_descriptor_cc_library)
     "${_PACKAGE_NAME}_${_RULE_NAME}_ids"
     "${_GEN_TARGET}"
   )
-endfunction()
-
-function(loom_low_descriptor_exclude_from_all)
-  cmake_parse_arguments(
-    _RULE
-    ""
-    ""
-    "CC_LIBRARIES;TARGETS"
-    ${ARGN}
-  )
-
-  iree_package_name(_PACKAGE_NAME)
-
-  foreach(_CC_LIBRARY IN LISTS _RULE_CC_LIBRARIES)
-    set(_NAME "${_PACKAGE_NAME}_${_CC_LIBRARY}")
-    if(NOT TARGET "${_NAME}")
-      message(FATAL_ERROR
-        "Cannot exclude missing low descriptor library ${_CC_LIBRARY} from all")
-    endif()
-    iree_cc_library_exclude_from_all(${_CC_LIBRARY} TRUE)
-  endforeach()
-
-  foreach(_TARGET IN LISTS _RULE_TARGETS)
-    set(_NAME "${_PACKAGE_NAME}_${_TARGET}")
-    if(TARGET "${_NAME}")
-      set_property(TARGET "${_NAME}" PROPERTY EXCLUDE_FROM_ALL TRUE)
-    elseif(IREE_BUILD_TESTS)
-      message(FATAL_ERROR
-        "Cannot exclude missing low descriptor target ${_TARGET} from all")
-    endif()
-  endforeach()
 endfunction()

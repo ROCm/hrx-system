@@ -7,6 +7,7 @@
 load(
     "//loom/build_tools/amdgpu:descriptor_sets.bzl",
     "loom_amdgpu_descriptor_set_compatible_with",
+    "loom_amdgpu_descriptor_table_compatible_with",
     "loom_amdgpu_low_descriptor_deps",
     "loom_amdgpu_selected_descriptor_set_defines",
     "loom_amdgpu_selected_descriptor_set_key_args",
@@ -21,7 +22,6 @@ load(
     "loom_cc_library",
     "loom_generated_file_family",
     "loom_low_descriptor_data_archive",
-    "loom_low_descriptor_exclude_from_cmake_all",
 )
 
 package(
@@ -34,8 +34,6 @@ _AMDGPU_DESCRIPTOR_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/desc
 
 _AMDGPU_TARGET_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu:target_tables"
 
-_DESCRIPTOR_SET_CDNA4 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.cdna4.core"]
-
 _DESCRIPTOR_SET_GFX9_4_GENERIC = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.gfx9_4.generic.core"]
 
 _DESCRIPTOR_SET_GFX11_GENERIC = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.gfx11.generic.core"]
@@ -43,10 +41,6 @@ _DESCRIPTOR_SET_GFX11_GENERIC = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["am
 _DESCRIPTOR_SET_GFX12_GENERIC = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.gfx12.generic.core"]
 
 _DESCRIPTOR_SET_GFX12_5_GENERIC = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.gfx12_5.generic.core"]
-
-_DESCRIPTOR_SET_RDNA3_5 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna3_5.core"]
-
-_DESCRIPTOR_SET_RDNA4M = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna4m.core"]
 
 _DESCRIPTOR_SET_RDNA4_GFX1251 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna4.gfx1251.core"]
 
@@ -208,6 +202,7 @@ loom_generated_file_family(
 loom_cc_library(
     name = "cdna3",
     srcs = [":cdna3_descriptors.c"],
+    target_compatible_with = loom_amdgpu_descriptor_table_compatible_with("cdna3"),
     deps = ["//loom/src/loom/codegen/low:descriptors"],
 )
 
@@ -259,32 +254,35 @@ loom_cc_library(
 loom_cc_library(
     name = "rdna3",
     srcs = [":rdna3_descriptors.c"],
+    target_compatible_with = loom_amdgpu_descriptor_table_compatible_with("rdna3"),
     deps = ["//loom/src/loom/codegen/low:descriptors"],
 )
 
 loom_cc_library(
     name = "rdna3_5",
     srcs = [":rdna3_5_descriptors.c"],
-    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_RDNA3_5),
+    target_compatible_with = loom_amdgpu_descriptor_table_compatible_with("rdna3_5"),
     deps = ["//loom/src/loom/codegen/low:descriptors"],
 )
 
 loom_cc_library(
     name = "rdna4m",
     srcs = [":rdna4m_descriptors.c"],
-    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_RDNA4M),
+    target_compatible_with = loom_amdgpu_descriptor_table_compatible_with("rdna4m"),
     deps = ["//loom/src/loom/codegen/low:descriptors"],
 )
 
 loom_cc_library(
     name = "rdna4",
     srcs = [":rdna4_descriptors.c"],
+    target_compatible_with = loom_amdgpu_descriptor_table_compatible_with("rdna4"),
     deps = ["//loom/src/loom/codegen/low:descriptors"],
 )
 
 loom_cc_library(
     name = "rdna4_gfx125x",
     srcs = [":rdna4_gfx125x_descriptors.c"],
+    target_compatible_with = loom_amdgpu_descriptor_table_compatible_with("rdna4_gfx125x"),
     deps = ["//loom/src/loom/codegen/low:descriptors"],
 )
 
@@ -300,7 +298,7 @@ loom_cc_library(
 loom_cc_library(
     name = "cdna4",
     srcs = [":cdna4_descriptors.c"],
-    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_CDNA4),
+    target_compatible_with = loom_amdgpu_descriptor_table_compatible_with("cdna4"),
     deps = ["//loom/src/loom/codegen/low:descriptors"],
 )
 
@@ -316,18 +314,5 @@ loom_cc_library(
         "//loom/src/loom/target:low_descriptor_registry",
         "//loom/src/loom/target:types",
         "//runtime/src/iree/base",
-    ],
-)
-
-loom_low_descriptor_exclude_from_cmake_all(
-    cc_libraries = [
-        "cdna3",
-        "cdna4",
-        "low_registry",
-        "rdna3",
-        "rdna3_5",
-        "rdna4",
-        "rdna4_gfx125x",
-        "rdna4m",
     ],
 )

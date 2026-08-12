@@ -23,7 +23,7 @@ loom_cc_library(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_AMDGPU)
+if(LOOM_TARGET_ARCH_AMDGPU AND (LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA3_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE))
 loom_cc_library(
   NAME
     cdna3_encoding_tables
@@ -96,7 +96,7 @@ loom_cc_library(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_AMDGPU)
+if(LOOM_TARGET_ARCH_AMDGPU AND (LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE))
 loom_cc_library(
   NAME
     rdna3_encoding_tables
@@ -109,7 +109,7 @@ loom_cc_library(
 )
 endif()
 
-if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_ARCH_AMDGPU)
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE)
 loom_cc_library(
   NAME
     rdna3_5_encoding_tables
@@ -122,7 +122,7 @@ loom_cc_library(
 )
 endif()
 
-if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_ARCH_AMDGPU)
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE)
 loom_cc_library(
   NAME
     rdna4m_encoding_tables
@@ -135,7 +135,7 @@ loom_cc_library(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_AMDGPU)
+if(LOOM_TARGET_ARCH_AMDGPU AND (LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE))
 loom_cc_library(
   NAME
     rdna4_encoding_tables
@@ -148,7 +148,7 @@ loom_cc_library(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_AMDGPU)
+if(LOOM_TARGET_ARCH_AMDGPU AND (LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX125X_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1251_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1250_A0_CORE))
 loom_cc_library(
   NAME
     rdna4_gfx125x_encoding_tables
@@ -173,7 +173,7 @@ loom_cc_library(
 )
 endif()
 
-if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA4_CORE AND LOOM_TARGET_ARCH_AMDGPU)
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA4_CORE)
 loom_cc_library(
   NAME
     cdna4_encoding_tables
@@ -284,19 +284,6 @@ loom_cc_library(
   DEFINES
     ${_encoding_platform_defines}
   PUBLIC
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_low_descriptor_exclude_from_all(
-  CC_LIBRARIES
-    "cdna3_encoding_tables"
-    "cdna4_encoding_tables"
-    "rdna3_5_encoding_tables"
-    "rdna3_encoding_tables"
-    "rdna4_encoding_tables"
-    "rdna4_gfx125x_encoding_tables"
-    "rdna4m_encoding_tables"
 )
 endif()
 

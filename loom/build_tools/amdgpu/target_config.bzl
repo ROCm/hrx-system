@@ -178,6 +178,31 @@ LOOM_AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS = {
 }
 
 # buildifier: disable=unsorted-dict-items
+LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES_BY_STORAGE_GENERATOR_TARGET = {
+    "cdna3": [
+        "descriptor_set_cdna3_core",
+        "descriptor_set_gfx9_4_generic_core",
+    ],
+    "cdna4": ["descriptor_set_cdna4_core"],
+    "rdna3": [
+        "descriptor_set_rdna3_core",
+        "descriptor_set_gfx11_generic_core",
+    ],
+    "rdna3_5": ["descriptor_set_rdna3_5_core"],
+    "rdna4": [
+        "descriptor_set_rdna4_core",
+        "descriptor_set_gfx12_generic_core",
+    ],
+    "rdna4_gfx125x": [
+        "descriptor_set_rdna4_gfx125x_core",
+        "descriptor_set_rdna4_gfx1251_core",
+        "descriptor_set_gfx12_5_generic_core",
+        "descriptor_set_rdna4_gfx1250_a0_core",
+    ],
+    "rdna4m": ["descriptor_set_rdna4m_core"],
+}
+
+# buildifier: disable=unsorted-dict-items
 LOOM_AMDGPU_LOW_DESCRIPTOR_HEADERS = {
     "descriptor_set_cdna3_core": "loom/target/arch/amdgpu/descriptors/cdna3_descriptors.h",
     "descriptor_set_cdna4_core": "loom/target/arch/amdgpu/descriptors/cdna4_descriptors.h",
