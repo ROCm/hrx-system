@@ -68,12 +68,11 @@ loom_cc_library(
     srcs = ["reader.c"],
     hdrs = ["reader.h"],
     deps = [
-        ":diagnostic",
         ":format",
-        ":varint",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/format:low_repr",
+        "//loom/src/loom/format/bytecode/reader:decoder",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:symbol_map",
         "//loom/src/loom/ops:op_defs",

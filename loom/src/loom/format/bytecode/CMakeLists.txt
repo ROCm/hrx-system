@@ -78,14 +78,13 @@ loom_cc_library(
   SRCS
     "reader.c"
   DEPS
-    ::diagnostic
     ::format
-    ::varint
     iree::base
     iree::base::internal::arena
     iree::base::internal::unicode
     loom::error::diagnostic
     loom::error::error_defs
+    loom::format::bytecode::reader::decoder
     loom::format::low_repr
     loom::ir
     loom::ir::symbol_map
