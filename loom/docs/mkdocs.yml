@@ -71,6 +71,8 @@ nav:
       - Source modules and canonical text: guide/source-modules.md
       - Values, types, and shapes: guide/values-types-shapes.md
       - Functions and structured control flow: guide/functions-and-control.md
+      - Buffers, views, and memory: guide/buffers-views-memory.md
+      - Kernels and launch configuration: guide/kernels-and-launch.md
   - Workflows:
       - Workflow map: workflows/index.md
       - Format and verify source: workflows/format-and-verify.md

@@ -27,12 +27,14 @@ graph, or deployment language.
    without imposing a launch ABI. Exact calls name one implementation;
    templates provide interchangeable implementations of a contract. Continue
    with [Functions and structured control flow](functions-and-control.md).
-4. **Buffers, views, and structured compute** make accessible storage, layouts,
-   memory spaces, vector operations, and synchronization explicit enough to
-   verify and specialize.
+4. **Buffers, views, and memory** separate opaque storage identity from typed
+   logical access, then make memory spaces, layouts, vector transfers, and
+   synchronization explicit. Continue with [Buffers, views, and
+   memory](buffers-views-memory.md).
 5. **Kernels and launch configuration** add the dispatch boundary. A kernel
    owns both the mapping from workload to physical launch and the arguments
-   carried into its device body.
+   carried into its device body. Continue with [Kernels and launch
+   configuration](kernels-and-launch.md).
 6. **Facts and specialization** state what the author, composition root, and
    target know. Configuration constraints, assumptions, target facts, and
    provider selection make that information useful before lowering.
