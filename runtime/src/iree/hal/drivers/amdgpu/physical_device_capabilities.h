@@ -184,6 +184,10 @@ typedef struct iree_hal_amdgpu_physical_topology_edge_t {
 
   // HSA link-hop facts collapsed into strategy-friendly topology values.
   struct {
+    // Physical interconnect technology for the first HSA-reported hop.
+    iree_hal_topology_link_type_t link_type;
+    // Physical path length recovered from the HSA link representation.
+    uint8_t path_hop_count;
     // Worst physical link class across HSA-reported link hops.
     iree_hal_topology_link_class_t link_class;
     // Conservative copy-cost class derived from |link_class|.
