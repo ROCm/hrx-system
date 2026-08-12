@@ -441,7 +441,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(32, 1, 1) workg
   %rhs_loaded = global_load_b128_saddr %60, %rhs_buffer_view
   low.op<amdgpu.ds_write_b128>(%60, %lhs_loaded) {offset = 0} memory_access([0, 3, 17, -1, 43, 16, 0, 16, 3, 0, 496, 16, 512]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>)
   low.op<amdgpu.ds_write_b128>(%60, %rhs_loaded) {offset = 512} memory_access([0, 3, 18, -1, 43, 16, 0, 16, 3, 512, 1008, 528, 1024]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>)
-  s_barrier
+  s_waitcnt {lgkmcnt = 0}
   %66 = v_and_b32_src0_inline %tid, 15
   %67 = v_lshlrev_b32_src0_inline %66, 5
   %68 = low.op<amdgpu.ds_read_b128>(%67) {offset = 0} memory_access([0, 3, 17, -1, 3, 0, 0, 0, 0, 0, 0, 0, 0]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>

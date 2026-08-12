@@ -166,8 +166,10 @@ enum loom_amdgpu_report_key_kind_e {
   LOOM_AMDGPU_REPORT_KEY_SUBGROUP_BROADCAST_STRATEGY = 8,
   // Report the invocation-local vector-transform strategy.
   LOOM_AMDGPU_REPORT_KEY_VECTOR_TRANSFORM_STRATEGY = 9,
+  // Report the synchronization strategy selected for a kernel barrier.
+  LOOM_AMDGPU_REPORT_KEY_KERNEL_BARRIER_STRATEGY = 10,
   // Maximum report-key kind accepted by dispatch rows.
-  LOOM_AMDGPU_REPORT_KEY_MAX = LOOM_AMDGPU_REPORT_KEY_VECTOR_TRANSFORM_STRATEGY,
+  LOOM_AMDGPU_REPORT_KEY_MAX = LOOM_AMDGPU_REPORT_KEY_KERNEL_BARRIER_STRATEGY,
 };
 
 // Packing constants bridge the storage and preselection enum domains into the
@@ -922,6 +924,8 @@ LOOM_AMDGPU_DEFINE_DATA_EMIT(loom_amdgpu_emit_sanitizer_race_sync_dispatch,
 
 #define LOOM_AMDGPU_STRUCTURAL_DIRECT_STORAGE_ROW \
   LOOM_AMDGPU_INTERNAL_DIRECT_STORAGE_ROW
+#define LOOM_AMDGPU_STRUCTURAL_DATA_STORAGE_REPORT_KEY_ROW \
+  LOOM_AMDGPU_INTERNAL_DATA_STORAGE_REPORT_KEY_ROW
 #define LOOM_AMDGPU_VALUE_STRUCTURAL_DIRECT_STORAGE_ROW \
   LOOM_AMDGPU_INTERNAL_DIRECT_STORAGE_ROW
 #define LOOM_AMDGPU_VALUE_STRUCTURAL_DIRECT_POLICY_ROW \
@@ -1015,6 +1019,7 @@ static const loom_amdgpu_lower_dispatch_table_t
 #undef LOOM_AMDGPU_VALUE_STRUCTURAL_DIRECT_POLICY_ROW
 #undef LOOM_AMDGPU_VALUE_STRUCTURAL_DIRECT_STORAGE_ROW
 #undef LOOM_AMDGPU_STRUCTURAL_DIRECT_STORAGE_ROW
+#undef LOOM_AMDGPU_STRUCTURAL_DATA_STORAGE_REPORT_KEY_ROW
 #undef LOOM_AMDGPU_INTERNAL_DATA_STORAGE_ROW
 #undef LOOM_AMDGPU_INTERNAL_DATA_ROW
 #undef LOOM_AMDGPU_INTERNAL_DATA_SOURCE_ROW
@@ -1357,6 +1362,29 @@ static iree_string_view_t loom_amdgpu_workgroup_reduce_plan_key(
       plan->publication_kind);
 }
 
+static iree_string_view_t loom_amdgpu_kernel_barrier_plan_key(
+    const loom_op_t* source_op, const loom_amdgpu_kernel_barrier_plan_t* plan) {
+  switch (plan->kind) {
+    case LOOM_AMDGPU_KERNEL_BARRIER_LOWERING_KIND_S_BARRIER:
+      return IREE_SV(
+          "amdgpu.kernel_barrier.strategy.s_barrier.workgroup_rendezvous");
+    case LOOM_AMDGPU_KERNEL_BARRIER_LOWERING_KIND_LDS_WAIT:
+      return loom_kernel_barrier_scope(source_op) == LOOM_ATOMIC_SCOPE_SUBGROUP
+                 ? IREE_SV(
+                       "amdgpu.kernel_barrier.strategy.lds_wait."
+                       "subgroup_scope")
+                 : IREE_SV(
+                       "amdgpu.kernel_barrier.strategy.lds_wait."
+                       "single_subgroup_workgroup");
+    case LOOM_AMDGPU_KERNEL_BARRIER_LOWERING_KIND_SPLIT_BARRIER:
+      return IREE_SV(
+          "amdgpu.kernel_barrier.strategy.split_barrier.workgroup_rendezvous");
+    case LOOM_AMDGPU_KERNEL_BARRIER_LOWERING_KIND_NONE:
+      return iree_string_view_empty();
+  }
+  return iree_string_view_empty();
+}
+
 static iree_string_view_t loom_amdgpu_subgroup_broadcast_plan_key(
     const loom_amdgpu_subgroup_broadcast_plan_t* plan) {
   switch (plan->strategy) {
@@ -1463,10 +1491,16 @@ static iree_string_view_t loom_amdgpu_plan_key(
     const loom_op_t* source_op, loom_low_lower_plan_t plan) {
   (void)user_data;
   (void)context;
-  (void)source_op;
   const loom_amdgpu_lower_dispatch_row_t* row =
       loom_amdgpu_find_lower_dispatch_row(plan.id);
   switch (loom_amdgpu_dispatch_row_report_key_kind(row)) {
+    case LOOM_AMDGPU_REPORT_KEY_KERNEL_BARRIER_STRATEGY:
+      if (plan.target_data == NULL) {
+        return iree_string_view_empty();
+      }
+      return loom_amdgpu_kernel_barrier_plan_key(
+          source_op,
+          (const loom_amdgpu_kernel_barrier_plan_t*)plan.target_data);
     case LOOM_AMDGPU_REPORT_KEY_WORKGROUP_REDUCE_PUBLICATION:
       if (plan.target_data == NULL) {
         return iree_string_view_empty();

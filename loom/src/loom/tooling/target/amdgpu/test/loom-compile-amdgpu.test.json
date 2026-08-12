@@ -2,6 +2,65 @@
   "version": 1,
   "cases": [
     {
+      "name": "lowers single-subgroup workgroup barriers to memory ordering waits",
+      "steps": [
+        {
+          "name": "compile-gfx11-generic",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/single_subgroup_barrier.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx11-generic",
+              "--output={tmp}/single_subgroup_barrier_gfx11.hal",
+              "--emit-target-artifact={tmp}/single_subgroup_barrier_gfx11.hsaco",
+              "--compile-report=details",
+              "--compile-report-output={tmp}/single_subgroup_barrier_gfx11_report.json"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/single_subgroup_barrier_gfx11.hal",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/single_subgroup_barrier_gfx11.hsaco",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/single_subgroup_barrier_gfx11_report.json",
+              "contains": [
+                "amdgpu.kernel_barrier.strategy.lds_wait.single_subgroup_workgroup"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "compile-gfx1151",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/single_subgroup_barrier.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1151",
+              "--output={tmp}/single_subgroup_barrier_gfx1151.hal",
+              "--emit-target-artifact={tmp}/single_subgroup_barrier_gfx1151.hsaco"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/single_subgroup_barrier_gfx1151.hal",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/single_subgroup_barrier_gfx1151.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "compiles exact and uniform dynamic wave64 broadcasts across native wave32 halves",
       "steps": [
         {

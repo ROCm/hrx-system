@@ -61,6 +61,9 @@ _ROW_MACRO_SIGNATURES = {
     "STRUCTURAL_DIRECT_STORAGE_ROW": _RowMacroSignature(
         argument_count=5, storage_policy_argument=4
     ),
+    "STRUCTURAL_DATA_STORAGE_REPORT_KEY_ROW": _RowMacroSignature(
+        argument_count=7, storage_policy_argument=5, report_key_argument=6
+    ),
     "VALUE_STRUCTURAL_DIRECT_STORAGE_ROW": _RowMacroSignature(
         argument_count=5, storage_policy_argument=4
     ),
@@ -148,6 +151,7 @@ _REPORT_KEY_NAMES = frozenset(
         "LOOM_AMDGPU_REPORT_KEY_FRAGMENT_REPACK_STRATEGY",
         "LOOM_AMDGPU_REPORT_KEY_FRAGMENT_MEMORY_STRATEGY",
         "LOOM_AMDGPU_REPORT_KEY_TABLE_LOOKUP_STRATEGY",
+        "LOOM_AMDGPU_REPORT_KEY_KERNEL_BARRIER_STRATEGY",
         "LOOM_AMDGPU_REPORT_KEY_SUBGROUP_REDUCE_STRATEGY",
         "LOOM_AMDGPU_REPORT_KEY_SUBGROUP_BROADCAST_STRATEGY",
         "LOOM_AMDGPU_REPORT_KEY_VECTOR_16BIT_FLOAT_CONVERSION_STRATEGY",

@@ -1009,7 +1009,7 @@ typedef enum loom_amdgpu_kernel_barrier_lowering_kind_e {
   LOOM_AMDGPU_KERNEL_BARRIER_LOWERING_KIND_NONE = 0,
   // Emit a full workgroup barrier packet.
   LOOM_AMDGPU_KERNEL_BARRIER_LOWERING_KIND_S_BARRIER = 1,
-  // Emit a wait packet that drains LDS effects for a single-wave workgroup.
+  // Emit a memory-ordering wait that drains LDS effects without rendezvous.
   LOOM_AMDGPU_KERNEL_BARRIER_LOWERING_KIND_LDS_WAIT = 2,
   // Emit the split signal/wait barrier packet pair used by GFX12+ targets.
   LOOM_AMDGPU_KERNEL_BARRIER_LOWERING_KIND_SPLIT_BARRIER = 3,
