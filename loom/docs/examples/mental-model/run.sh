@@ -40,6 +40,9 @@ loom_example_section "Check the authored modules"
 loom_example_run_tool loom-format "${loom_format}" --check \
   motif.loom kernel.loom model.loom
 
+loom_example_section "Inspect the private motif providers"
+loom_example_run_tool loom-link "${loom_link}" motif.loom --list-symbols
+
 loom_example_section "Link and specialize the command root"
 loom_example_run_tool loom-link "${loom_link}" \
   model.loom \

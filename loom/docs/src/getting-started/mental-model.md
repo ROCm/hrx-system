@@ -66,6 +66,12 @@ portable provider for the same `guide.transform` contract:
 --8<-- "examples/mental-model/motif.loom"
 ```
 
+All three definitions omit `public` and are therefore private. Supplying the
+motif as an explicit library makes those implementations available while Loom
+forms the requested program, but it does not add them to the module's public
+interface. Provider selection and normal reachability can then remove the
+implementations the selected root does not need.
+
 The wave32 provider is eligible only when the selected target establishes a
 subgroup size of 32. The fallback stays targetless, so the motif remains useful
 to targets that know nothing about AMDGPU.

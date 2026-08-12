@@ -1,5 +1,6 @@
-// Targetless helpers and interchangeable providers remain reusable across
-// kernels, shapes, and targets.
+// These targetless helpers and providers deliberately omit `public`. An
+// explicitly linked library can satisfy reachable dependencies from them
+// without adding their implementation symbols to the public module interface.
 func.def inline @double(%value: f32) -> (f32) {
   %doubled = scalar.addf %value, %value : f32
   func.return %doubled : f32

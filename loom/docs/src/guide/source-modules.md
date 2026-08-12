@@ -87,6 +87,11 @@ module itself is still target-independent:
 --8<-- "examples/mental-model/motif.loom"
 ```
 
+The exact helper and both providers are private: none carries the `public`
+modifier. Explicitly supplying this module as a library makes them visible to
+the linker for the requested composition without exporting their names from
+the resulting module interface.
+
 The specialized provider is eligible only when facts for the selected function
 establish a subgroup size of 32. The fallback carries no target requirement.
 This keeps one library useful across target families while allowing exact
