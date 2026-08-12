@@ -320,6 +320,7 @@ TEST_F(MaterializeTest, ClonesRegionSuccessorsToClonedBlocks) {
   ASSERT_TRUE(loom_test_br_isa(cloned_branch));
   EXPECT_EQ(loom_test_br_dest(cloned_branch), cloned_dest);
   EXPECT_NE(loom_test_br_dest(cloned_branch), source_dest);
+  EXPECT_EQ(remap.block_map_count, 0u);
 }
 
 TEST_F(MaterializeTest, ClonesRegionSourcePresentation) {
@@ -409,6 +410,36 @@ TEST_F(MaterializeTest, RejectsCrossModuleCloneWithUnmappedSuccessor) {
       loom_ir_clone_op(&target_builder_, branch_op, &remap, &cloned_op));
   EXPECT_EQ(cloned_op, nullptr);
   EXPECT_EQ(loom_module_block(target_)->op_count, 0u);
+}
+
+TEST_F(MaterializeTest, ClonesStandaloneSuccessorThroughExplicitBlockMap) {
+  loom_region_t* source_region = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate_region(source_, 2, &source_region));
+  loom_block_t* source_entry = loom_region_block(source_region, 0);
+  loom_block_t* source_dest = loom_region_block(source_region, 1);
+  loom_builder_t source_region_builder = {};
+  loom_builder_initialize(source_, &source_->arena, source_entry,
+                          &source_region_builder);
+  loom_op_t* branch_op = nullptr;
+  IREE_ASSERT_OK(loom_test_br_build(&source_region_builder, source_dest,
+                                    LOOM_LOCATION_UNKNOWN, &branch_op));
+
+  loom_region_t* target_region = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate_region(target_, 2, &target_region));
+  loom_block_t* target_entry = loom_region_block(target_region, 0);
+  loom_block_t* target_dest = loom_region_block(target_region, 1);
+  loom_builder_t target_region_builder = {};
+  loom_builder_initialize(target_, &target_->arena, target_entry,
+                          &target_region_builder);
+
+  loom_ir_remap_t remap = InitializeRemap();
+  IREE_ASSERT_OK(loom_ir_remap_map_block(&remap, source_dest, target_dest));
+  loom_op_t* cloned_op = nullptr;
+  IREE_ASSERT_OK(
+      loom_ir_clone_op(&target_region_builder, branch_op, &remap, &cloned_op));
+
+  ASSERT_TRUE(loom_test_br_isa(cloned_op));
+  EXPECT_EQ(loom_test_br_dest(cloned_op), target_dest);
 }
 
 TEST_F(MaterializeTest, ClonesOperandDictOps) {

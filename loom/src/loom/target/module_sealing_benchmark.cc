@@ -384,6 +384,7 @@ static void BM_ExactAuthoredContexts(benchmark::State& state) {
 }
 
 static void RegisterScalingArguments(benchmark::Benchmark* value) {
+  value->ArgName("functions");
   for (int64_t scale : {1, 16, 64, 512, 4096}) value->Arg(scale);
 }
 
