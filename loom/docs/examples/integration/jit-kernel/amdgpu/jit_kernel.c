@@ -180,7 +180,6 @@ static loomc_status_t prepare_compiler(jit_kernel_state_t* state,
       .structure_size = sizeof(pipeline_options),
       .identifier = loomc_make_cstring_view("guide-prepared-low"),
       .kind = LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
-      .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
       .source_to_low_max_errors = 20,
   };
   if (loomc_status_is_ok(status)) {

@@ -1,5 +1,7 @@
 # Command programs
 
+**Example files:** [`loom/docs/examples/guide/command-programs/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/guide/command-programs)
+
 A kernel specializes one device entry point. A command program specializes a
 reusable subgraph: its kernel launches, immutable parameters, launch counts,
 and explicit dependency structure. The result keeps the same source, linking,
@@ -69,8 +71,10 @@ about which ABI carries a value.
 
 ## Turn named parameter content into typed views
 
-The checked layer example declares the kernel contract it uses, derives a
+The layer example declares the kernel contract it uses, derives a
 typed view from one parameter root, and launches the kernel:
+
+**Source:** [`loom/docs/examples/guide/command-programs/layer.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/guide/command-programs/layer.loom)
 
 ```loom title="layer.loom"
 --8<-- "examples/guide/command-programs/layer.loom"
@@ -86,9 +90,11 @@ source buffer root.
 The model composition supplies exact layer constants. A `%layer` value of `12`
 therefore produces the key `blk.12.projection.weight`, while the forwarded
 `%element_count` may remain residual. The `view<8xf32>` result states the exact
-32-byte logical footprint needed by the kernel. Command lowering can place
-that content in a fixed resource range while `%input` and `%output` remain
-replaceable issue-time bindings.
+32-byte parameter block available to the kernel. `%element_count` independently
+selects a prefix from one through eight, so the view shape does not create one
+kernel version per active element count. Command lowering can place that content
+in a fixed resource range while `%input` and `%output` remain replaceable
+issue-time bindings.
 
 The substitutions must become exact nonnegative indices before the program is
 prepared. The result type must also have an exact byte footprint. These are
@@ -97,6 +103,8 @@ parameter identity or size remains unknown cannot describe an immutable
 command artifact.
 
 The kernel receives the typed view directly:
+
+**Source:** [`loom/docs/examples/guide/command-programs/kernels.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/guide/command-programs/kernels.loom)
 
 ```loom title="kernels.loom"
 --8<-- "examples/guide/command-programs/kernels.loom"
@@ -108,6 +116,26 @@ kernel is derived. The kernel can therefore use the same ordinary view and
 vector operations as a standalone kernel; it has no command-program-specific
 device implementation.
 
+## Expand model structure from configuration
+
+Model-level configuration can determine command topology without turning
+per-invocation shapes into global variants. This program resolves
+`@model.layer_count`, fully unrolls a source loop during command preparation,
+and uses each exact induction value to select one layer's parameter block:
+
+**Source:** [`loom/docs/examples/guide/command-programs/stack.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/guide/command-programs/stack.loom)
+
+```loom title="stack.loom"
+--8<-- "examples/guide/command-programs/stack.loom"
+```
+
+The `unroll` policy is part of the source contract. Command preparation
+requires the layer count to resolve, expands the loop into a finite sequence,
+and then sees parameter keys such as `blk.0.projection.weight` and
+`blk.1.projection.weight`. The `%element_count` specialization remains a
+separate value that controls each kernel workload; it is not promoted to
+configuration merely because every layer consumes it.
+
 ## Compose programs through exact contracts
 
 Command programs are symbols. A bodyless
@@ -116,8 +144,10 @@ records the exact specialization and binding contract required by one source
 module. [`command.program.launch`](../reference/dialects/command/ops/program-launch.md)
 provides both groups explicitly at each call site.
 
-The checked model module depends on the layer archive and composes it in two
+The model module depends on the layer archive and composes it in two
 different ways:
+
+**Source:** [`loom/docs/examples/guide/command-programs/model.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/guide/command-programs/model.loom)
 
 ```loom title="model.loom"
 --8<-- "examples/guide/command-programs/model.loom"
@@ -209,7 +239,7 @@ The prepared command plan owns three complementary artifacts:
 
 ## Keep the deployment boundary honest
 
-The checked examples in this chapter format, verify, link, and archive as Loom
+The examples in this chapter format, verify, link, and archive as Loom
 libraries. The compiler also has the target-neutral command preparation and
 lowering path described above. The installed tools do not yet expose one
 complete public command that prepares, materializes, binds, and issues a

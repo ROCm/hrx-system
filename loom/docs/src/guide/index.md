@@ -4,11 +4,12 @@ The programming guide explains Loom by the boundary that owns each decision.
 It is written for systems and ML engineers who are comfortable reading a
 kernel.
 
-Start with the [mental model](../getting-started/mental-model.md) if modules,
-templates, launch configuration, checks, and command programs are all new. Use
-the chapters here to understand why a source construct exists and when it is the
-right construct. Use the [generated reference](../reference/index.md) when you
-need the exhaustive syntax or field contract for one operation.
+Start with the [source-to-artifact walkthrough](../getting-started/mental-model.md)
+if modules, templates, launch configuration, checks, and command programs are
+all new. Use the chapters here to understand why a source construct exists and
+when it is the right construct. Use the [generated
+reference](../reference/index.md) when you need the exhaustive syntax or field
+contract for one operation.
 
 ## The language progression
 
@@ -23,8 +24,8 @@ graph, or deployment language.
    scalars, vectors, tensors, buffers, views, and physical encodings. The
    generated [type reference](../reference/types/index.md) is the exact catalog.
    Continue with [Values, types, and shapes](values-types-shapes.md).
-3. **Functions and structured control flow** express reusable computation
-   without imposing a launch ABI. Exact calls name one implementation;
+3. **Functions and structured control flow** define typed host or device
+   callables. Exact calls name one implementation;
    templates provide interchangeable implementations of a contract. Continue
    with [Functions and structured control flow](functions-and-control.md).
 4. **Buffers, views, and memory** separate opaque storage identity from typed

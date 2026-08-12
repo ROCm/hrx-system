@@ -1,5 +1,7 @@
 # Buffers, views, and memory
 
+**Example files:** [`loom/docs/examples/mental-model/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/mental-model)
+
 Loom separates storage identity from the logical shape used to access that
 storage. This keeps aliasing, memory-space, alignment, layout, and bounds facts
 available to the compiler instead of hiding them behind pointer arithmetic.
@@ -199,9 +201,9 @@ Common representation mistakes all erase information too early:
 | Shared-memory communication relies on source order | Cross-invocation visibility | State the required barrier or async completion edge. |
 | Target address spaces appear throughout a motif | Reusability | Use target-independent memory spaces and specialize at the leaf. |
 
-The checked [mental-model kernel](../getting-started/mental-model.md#a-kernel-owns-two-contracts)
+The [source-to-artifact kernel](../getting-started/mental-model.md#a-kernel-owns-two-contracts)
 shows the complete buffer-to-view path with dynamic extent, explicit no-alias
-facts, an in-bounds proof, and scalar access.
+facts, a control-flow-derived in-bounds proof, and scalar access.
 
 Continue with [Kernels and launch configuration](kernels-and-launch.md), where
 the storage operations become part of a dispatchable entry with separate

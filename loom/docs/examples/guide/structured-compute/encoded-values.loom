@@ -1,7 +1,7 @@
-// Decodes one MXFP4 block while keeping its physical carrier and numeric
+// Decodes one GGML Q4_0 block while keeping its physical carrier and numeric
 // interpretation as separate values.
-func.def @decode_mxfp4(%payload: vector<4xi32>, %scale: vector<1xi32>) -> (vector<32xbf16>) {
-  %schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=32, payload_packing=little_endian_nibbles, payload_registers=4, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
-  %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xi32>} : vector<4xi32>, encoding<schema> -> vector<32xbf16>
-  func.return %decoded : vector<32xbf16>
+func.def @decode_q4_0(%payload: vector<4xi32>, %scale: vector<1xf16>) -> (vector<32xf32>) {
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
+  %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf16>} : vector<4xi32>, encoding<schema> -> vector<32xf32>
+  func.return %decoded : vector<32xf32>
 }

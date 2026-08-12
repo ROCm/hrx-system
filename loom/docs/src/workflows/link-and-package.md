@@ -71,14 +71,12 @@ loom-link model.loom \
   --library=motif.loom \
   --mode=link \
   --root=@transform \
-  --config=guide.element_count=1009 \
-  --config=guide.workgroup_size=64 \
   --to=text \
   --output=transform.loom
 ```
 
-This is the exact composition exercised by the checked [mental-model
-example](../getting-started/mental-model.md#follow-one-composition-to-low).
+This is the exact composition exercised by the [source-to-artifact
+walkthrough](../getting-started/mental-model.md#follow-one-composition-to-low).
 `@transform` reaches its declared kernel and the template providers needed for
 `guide.transform`; unrelated private symbols can disappear.
 

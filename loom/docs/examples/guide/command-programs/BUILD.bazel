@@ -29,3 +29,9 @@ loom_library(
     srcs = ["model.loom"],
     deps = [":layer"],
 )
+
+loom_library(
+    name = "stack",
+    srcs = ["stack.loom"],
+    deps = [":kernels"],
+)

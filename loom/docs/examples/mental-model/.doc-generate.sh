@@ -97,7 +97,7 @@ grep -Fq 'amdgpu.global_load_b32_saddr' "${kernel_output}"
 grep -Fq 'amdgpu.v_add_f32' "${kernel_output}"
 grep -Fq 'amdgpu.global_store_b32_saddr' "${kernel_output}"
 grep -Fq '@transform() asm' "${command_output}"
-grep -Fq 'cmd.dispatch.direct' "${command_output}"
+grep -Fq 'cmd.dispatch.' "${command_output}"
 
 printf 'Generated documentation snippets:\n'
 printf '  %s\n' "${kernel_output}" "${command_output}"

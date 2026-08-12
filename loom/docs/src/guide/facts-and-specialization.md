@@ -1,5 +1,7 @@
 # Facts and specialization
 
+**Example files:** [`loom/docs/examples/mental-model/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/mental-model) and [`loom/docs/examples/guide/command-programs/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/guide/command-programs)
+
 Loom specializes from facts already present in the program. Constants, dynamic
 shape bindings, configuration contracts, control-flow conditions, storage
 assumptions, and target profiles all contribute knowledge to the same program
@@ -43,13 +45,13 @@ composition root must eventually supply. Its `where` clause constrains the
 value even before an exact definition is available:
 
 ```loom
-config.decl @model.hidden_size : %value: index where [range(%value, 256, 32768), mul(%value, 128)]
-
-config.decl @kernel.workgroup_size : %value: index where [range(%value, 32, 256), pow2(%value)]
+config.decl @model.layer_count : %value: index where [range(%value, 1, 256)]
+config.decl @model.prefill_batch_size : %value: index where [range(%value, 64, 512), mul(%value, 64), pow2(%value)]
+config.decl @model.weight_encoding : encoding<schema>
 ```
 
-`range(%value, lo, hi)` is inclusive. `mul(%value, 128)` means that the value
-is a multiple of 128; it does not perform multiplication. `pow2` records a
+`range(%value, lo, hi)` is inclusive. `mul(%value, 64)` means that the value
+is a multiple of 64; it does not perform multiplication. `pow2` records a
 power-of-two contract. Relational predicates such as `lt`, `le`, `eq`, and
 `ne` may relate a value to a literal or another SSA value.
 
@@ -57,15 +59,17 @@ power-of-two contract. Relational predicates such as `lt`, `le`, `eq`, and
 ordinary symbol edge and exposes its typed facts in executable IR:
 
 ```loom
-%hidden_size = config.get @model.hidden_size : index
-%workgroup_size = config.get @kernel.workgroup_size : index
+%layer_count = config.get @model.layer_count : index
+%prefill_batch_size = config.get @model.prefill_batch_size : index
+%weight_encoding = config.get @model.weight_encoding : encoding<schema>
 ```
 
 A source [`config.def`](../reference/dialects/config/ops/def.md), a `--config`
 binding, a JSON/JSONC configuration object, or an embedding's `loomc` options
 can provide the exact value. Materialization replaces the declaration with a
 definition, validates its predicates, and lets ordinary canonicalization fold
-dependent code.
+dependent code. Encoding-valued configuration can select a complete physical
+schema such as `#ggml.q4_0` without reducing that choice to an integer enum.
 
 Partial links may preserve reachable declarations. A final executable
 compilation requires every reachable `config.get` to resolve to exactly one
@@ -107,13 +111,16 @@ specialization boundary.
 ## Refine the value that carries a proven contract
 
 [`index.assume`](../reference/dialects/index/ops/assume.md) returns identity
-aliases with stronger predicates:
+aliases with stronger predicates. Use it when a fact comes from a caller or
+storage producer and is not visible in the current control flow:
 
 ```loom
-%bounded_index = index.assume %element_index [range(%element_index, 0, 1048575), lt(%element_index, %element_count)] : index
+%expert_id_i32 = view.load %routing[%token] : view<[%token_count]xi32> -> i32
+%expert_id = index.cast %expert_id_i32 : i32 to index
+%bounded_expert_id = index.assume %expert_id [range(%expert_id, 0, 127)] : index
 ```
 
-The result equals the operand, but only `%bounded_index` carries the new fact
+The result equals the operand, but only `%bounded_expert_id` carries the new fact
 edge. Memory accesses, casts, loop transforms, and provider selection that need
 the proof consume the refined value.
 
@@ -220,8 +227,10 @@ part of the implementation contract. Most reusable providers stay targetless
 and name the narrow normalized capability they need. The same requirement can
 then match AMDGPU, SPIR-V, or another target family that establishes it.
 
-The checked mental-model motif contains both the wave32 provider and its
+The composition example's motif contains both the wave32 provider and its
 portable fallback:
+
+**Source:** [`loom/docs/examples/mental-model/motif.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/mental-model/motif.loom)
 
 ```loom title="motif.loom"
 --8<-- "examples/mental-model/motif.loom"

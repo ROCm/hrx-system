@@ -1,5 +1,7 @@
 # Source modules and canonical text
 
+**Example files:** [`loom/docs/examples/mental-model/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/mental-model)
+
 A `.loom` file is a complete, independently verifiable module. It may contain
 functions, templates, kernels, checks, command programs, target descriptions,
 configuration declarations, and other symbols, but it does not inherit hidden
@@ -27,9 +29,11 @@ declaration in that module. The formatter does not search neighboring files,
 scan a library directory, or infer a dependency from a missing call. This makes
 the source boundary honest before a linker or build system is involved.
 
-The mental-model command module demonstrates the pattern. It declares the
-kernel signature it calls, then defines a command program using that exact
+The composition example's command module demonstrates the pattern. It declares
+the kernel signature it calls, then defines a command program using that exact
 symbol:
+
+**Source:** [`loom/docs/examples/mental-model/model.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/mental-model/model.loom)
 
 ```loom title="model.loom"
 --8<-- "examples/mental-model/model.loom"
@@ -80,8 +84,10 @@ Reusable modules normally contain no selected target. A compile invocation
 specializes the executable roots it is compiling for a target profile; it does
 not turn every helper or every other root in the module into that target.
 
-The checked motif below contains a wave32 provider and a portable provider. The
+The motif below contains a wave32 provider and a portable provider. The
 module itself is still target-independent:
+
+**Source:** [`loom/docs/examples/mental-model/motif.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/mental-model/motif.loom)
 
 ```loom title="motif.loom"
 --8<-- "examples/mental-model/motif.loom"
@@ -179,11 +185,11 @@ names describe the role an embedding or another module depends on. Target
 mnemonics and one model's branding belong in those names only when they are
 actually part of the contract.
 
-## Follow the checked composition
+## Follow the composition
 
-The [mental-model example](../getting-started/mental-model.md#follow-one-composition-to-low)
+The [source-to-artifact walkthrough](../getting-started/mental-model.md#follow-one-composition-to-low)
 links `motif.loom`, `kernel.loom`, and `model.loom`, selects one command root,
-binds its configuration, and compiles the reachable kernel for GFX11. Its
+and compiles the reachable kernel for GFX11. Its
 `run.sh` prints every public command before executing it, and the documentation
 build regenerates the displayed Low products from that same path.
 

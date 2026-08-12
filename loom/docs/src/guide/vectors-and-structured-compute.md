@@ -1,5 +1,7 @@
 # Vectors and structured compute
 
+**Example files:** [`loom/docs/examples/guide/structured-compute/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/guide/structured-compute)
+
 Loom vectors are typed SSA aggregates with a logical lane shape. They express
 parallel arithmetic, coordinate construction, register rearrangement,
 reductions, packed-format interpretation, and matrix contractions without
@@ -45,8 +47,10 @@ physical vector extents.
 ## Build coordinates, masks, and data as ordinary values
 
 Coordinate vectors and masks use the same SSA composition as numeric data. The
-following checked motif constructs eight logical coordinates, compares them
+following function constructs eight logical coordinates, compares them
 with a per-call limit, and selects scaled values for the active lanes:
+
+**Source:** [`loom/docs/examples/guide/structured-compute/vector-values.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/guide/structured-compute/vector-values.loom)
 
 ```loom
 --8<-- "examples/guide/structured-compute/vector-values.loom"
@@ -124,8 +128,10 @@ selected load layout without changing its source semantics.
 ## Choose the contraction that states the numeric contract
 
 A reduction combines lanes; a dot product additionally states how products and
-accumulation relate. These two checked functions deliberately make that
+accumulation relate. These two example functions deliberately make that
 difference visible:
+
+**Source:** [`loom/docs/examples/guide/structured-compute/reductions.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/guide/structured-compute/reductions.loom)
 
 ```loom
 --8<-- "examples/guide/structured-compute/reductions.loom"
@@ -153,15 +159,18 @@ result an ordinary data dependency.
 Packed model formats combine physical payload words with schemas, scales,
 codebooks, zero points, or sparse metadata. Loom preserves those pieces as
 separate SSA values instead of erasing them behind ad hoc unpacking code. This
-checked MXFP4 motif carries four `i32` payload registers while producing 32
-logical BF16 values:
+GGML Q4_0 function carries four `i32` payload registers while producing 32
+logical f32 values:
+
+**Source:** [`loom/docs/examples/guide/structured-compute/encoded-values.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/guide/structured-compute/encoded-values.loom)
 
 ```loom
 --8<-- "examples/guide/structured-compute/encoded-values.loom"
 ```
 
 [`encoding.define`](../reference/dialects/encoding/ops/define.md) materializes a
-compact schema witness. [`vector.decode`](../reference/dialects/vector/ops/decode.md)
+compact schema witness. Here `#ggml.q4_0` names the complete schema without
+repeating its physical fields at every use. [`vector.decode`](../reference/dialects/vector/ops/decode.md)
 combines the physical payload, that schema, and keyed auxiliary values at the
 numeric interpretation boundary. [`vector.encode`](../reference/dialects/vector/ops/encode.md)
 states the inverse direction.
@@ -177,6 +186,8 @@ logical element types or fuse the interpretation directly into a contraction.
 A matrix fragment is a physical vector value refined with a logical role and
 matrix dimensions. Attaching fragment facts does not copy or numerically
 convert the carrier:
+
+**Source:** [`loom/docs/examples/guide/structured-compute/matrix-fragments.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/guide/structured-compute/matrix-fragments.loom)
 
 ```loom
 --8<-- "examples/guide/structured-compute/matrix-fragments.loom"

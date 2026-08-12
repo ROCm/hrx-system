@@ -1,5 +1,7 @@
 # Kernels and launch configuration
 
+**Example files:** [`loom/docs/examples/mental-model/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/mental-model)
+
 A Loom kernel owns the computation performed on a device and the mapping from
 a logical workload to the physical launch that performs it. Keeping both
 contracts beside the kernel lets an embedding evaluate launch geometry without
@@ -105,22 +107,23 @@ workitem axes; a flat elementwise kernel can use the dispatch id.
 ## Over-dispatch safely and preserve the proof
 
 Ceiling division usually creates inactive invocations in the final workgroup.
-Guard memory access with the logical workload, then refine the coordinate so
-the in-bounds fact reaches every consumer:
+Guard memory access with the logical workload. The structured branch carries
+the comparison as a path fact to operations in its region:
 
 ```loom
 %in_bounds = index.cmp ult, %element_index, %element_count : index
 scf.if %in_bounds {
-  %bounded_index = index.assume %element_index [lt(%element_index, %element_count)] : index
-  %value = view.load %input_view[%bounded_index] : view<[%element_count]xf32> -> f32
-  view.store %value, %output_view[%bounded_index] : f32, view<[%element_count]xf32>
+  %value = view.load %input_view[%element_index] : view<[%element_count]xf32> -> f32
+  view.store %value, %output_view[%element_index] : f32, view<[%element_count]xf32>
 }
 ```
 
-The branch controls execution; [`index.assume`](../reference/dialects/index/ops/assume.md)
-publishes the fact on the SSA value used for access. A comparison whose result
-is never connected to the indexed value does not give later passes the same
-proof.
+The branch controls execution and proves `%element_index < %element_count` on
+its true path. [`index.assume`](../reference/dialects/index/ops/assume.md) is
+still useful for facts established outside visible control flow, such as the
+valid range of an expert index loaded from a routing table. [Facts and
+specialization](facts-and-specialization.md#refine-the-value-that-carries-a-proven-contract)
+separates those caller promises from compiler-derived path facts.
 
 For vector tails, a vector mask can instead define precisely which lanes access
 memory. The choice between a structured guard and a masked transfer is an
@@ -184,10 +187,6 @@ This is not redundant syntax. The bracketed values evaluate the launch
 configuration; the parenthesized values bind the device ABI. The verifier
 checks both groups against the resolved definition or declaration.
 
-Check programs may bind a tensor value to a kernel `buffer` argument. The
-check runtime materializes the tensor storage and preserves its dynamic shape
-bindings. Command programs and embeddings bind buffer resources directly.
-
 As with function calls, the declaration is mandatory. Linking searches only
 the explicitly supplied modules and libraries for that exact symbol; it never
 discovers a kernel merely because an undeclared launch happens to name it.
@@ -210,8 +209,8 @@ in four steps:
 
 Loading and invocation do not parse source, select a target, or compile device
 code. Those decisions happened when the executable and companion artifact were
-produced. Lookup returns a program-local token so repeated launches avoid
-source compilation and repeated string search.
+produced. Lookup resolves a public export name to a program-local token once;
+repeated invocations use that token without another string lookup.
 
 The generated [`loomc` launch-configuration API](../reference/c-api/generated/launch__config_8h.html)
 defines the exact ownership, thread-safety, argument representation, and result
@@ -231,9 +230,9 @@ equivalent installed-tool products.
 | Tail invocations access before checking bounds | Physical grid confused with logical extent | Guard or mask access and carry the refined index. |
 | Application code guesses LDS/shared-memory bytes | Compiler allocation result reconstructed externally | Consume `workgroup_storage_bytes` from the compiled launch contract. |
 
-The complete checked kernel in the [mental model](../getting-started/mental-model.md#a-kernel-owns-two-contracts)
-combines configuration facts, launch geometry, buffer views, a selectable
-motif, and tail handling in one targetless entry.
+The complete kernel in the [source-to-artifact walkthrough](../getting-started/mental-model.md#a-kernel-owns-two-contracts)
+combines a dynamic workload, target-derived launch geometry, buffer views, a
+selectable motif, and tail handling in one targetless entry.
 
 Continue with facts and specialization: the same value predicates used for
 bounds and launch geometry also drive linking, provider selection, and

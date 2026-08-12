@@ -1,5 +1,7 @@
 # Checks and benchmarks
 
+**Example files:** [`loom/docs/examples/guide/checks-and-benchmarks/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/guide/checks-and-benchmarks)
+
 Loom correctness cases are programs, not runner metadata. A `check.case`
 constructs values, selects deterministic samples, invokes kernels or reference
 oracles, and states expectations in the same linked symbol graph as the code it
@@ -43,14 +45,30 @@ check.case public @decode_tail_case {
 }
 ```
 
-Cases and benchmark records are test-only symbols. Production motifs and
-kernels remain in production libraries; a sibling test module owns the records
-that exercise them.
+Cases and benchmark records are test-only symbols. They may live beside the
+code they exercise during authoring or move into a separate test module when a
+library boundary benefits from that separation.
 
-## Keep the production symbol and test program separate
+## Start with one self-contained program
 
-The checked example for this chapter places a small production kernel in one
+Co-locating a private kernel, its reproducing case, and its benchmark record is
+one of Loom's fastest authoring loops. One `.loom` file can be formatted, run,
+and measured directly without creating a build graph or translating a failure
+into a second harness language. A bug report can carry the exact source,
+deterministic inputs, expected result, and workload identity as one portable
+program. Agents can change the implementation and immediately rerun the same
+evidence.
+
+That shape remains valid as long as it remains readable. Check symbols do not
+change the production kernel contract, and deployment packaging can omit them
+with `loom-link --strip-check`.
+
+## Split when the library boundary becomes clearer
+
+The example for this chapter places a small production kernel in one
 module:
+
+**Source:** [`loom/docs/examples/guide/checks-and-benchmarks/kernel.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/guide/checks-and-benchmarks/kernel.loom)
 
 ```loom title="kernel.loom"
 --8<-- "examples/guide/checks-and-benchmarks/kernel.loom"
@@ -58,6 +76,8 @@ module:
 
 Its test module declares the exact dependency, constructs a deterministic seed
 sweep, launches the kernel, and compares the mutated output tensor:
+
+**Source:** [`loom/docs/examples/guide/checks-and-benchmarks/tests.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/guide/checks-and-benchmarks/tests.loom)
 
 ```loom title="tests.loom"
 --8<-- "examples/guide/checks-and-benchmarks/tests.loom"
@@ -69,7 +89,7 @@ can satisfy that declaration; it cannot make an undeclared launch valid. The
 test archive therefore verifies and plans independently while the production
 archive remains free of check records and private wrapper entries.
 
-This is the scalable library shape: `motif/` and `kernel/` packages publish
+This is a scalable library shape: `motif/` and `kernel/` packages publish
 reusable archives, while their sibling `test/` packages own private wrappers,
 cases, and benchmark records. The public Bazel `loom_test_library` rule formats
 the authored source, plans its benchmarks, and expands target execution

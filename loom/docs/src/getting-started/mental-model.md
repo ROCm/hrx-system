@@ -1,4 +1,6 @@
-# Mental model
+# From source to artifacts
+
+**Example files:** [`loom/docs/examples/mental-model/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/mental-model)
 
 Loom keeps a program understandable while it moves from reusable source to a
 target-specific artifact. Linking, specialization, launch configuration,
@@ -62,6 +64,8 @@ the final compilation rather than a global property baked into every helper.
 This example defines an exact helper, a wave32-specific provider, and a
 portable provider for the same `guide.transform` contract:
 
+**Source:** [`loom/docs/examples/mental-model/motif.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/mental-model/motif.loom)
+
 ```loom title="motif.loom"
 --8<-- "examples/mental-model/motif.loom"
 ```
@@ -102,8 +106,11 @@ they are not. The generated [`kernel` dialect
 reference](../reference/dialects/kernel/index.md) defines the complete launch,
 execution, collective, and synchronization vocabulary.
 
-The kernel below owns its launch geometry, states its configuration domain,
-and applies the motif contract without naming either provider:
+The kernel below accepts its element count as a workload and device value,
+derives a one-subgroup workgroup size from the target profile, and applies the
+motif contract without naming either provider:
+
+**Source:** [`loom/docs/examples/mental-model/kernel.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/mental-model/kernel.loom)
 
 ```loom title="kernel.loom"
 --8<-- "examples/mental-model/kernel.loom"
@@ -123,21 +130,31 @@ binding stage.
 | Command specialization arguments | Command-program specialization | Shape a reusable command artifact and its aggregate launch requirements. |
 | Command buffer bindings | Command-program issue | Attach concrete parameter, transient, input, and output storage without recompiling the schedule. |
 
-Configuration is not a hidden global flag. A module declares the values it
-requires, another input defines them, and ordinary symbol dependency analysis
-keeps their effect visible. Likewise, target requirements are compile-time
-selection constraints rather than runtime branches. Reusable code generally
-stays targetless; a provider names a target requirement only when its algorithm
+Configuration is not a hidden global flag. A module declares artifact-level
+choices such as a model's layer count or weight encoding, another input defines
+them, and ordinary symbol dependency analysis keeps their effect visible:
+
+```loom
+config.decl @model.layer_count : %value: index where [range(%value, 1, 256)]
+config.decl @model.weight_encoding : encoding<schema>
+```
+
+Per-launch element counts stay workload values instead of becoming global
+configuration. Likewise, target requirements are compile-time selection
+constraints rather than runtime branches. Reusable code generally stays
+targetless; a provider names a target requirement only when its algorithm
 actually depends on one.
 
 Loom can preserve only information the program supplies. The ranges and
 divisibility predicates on a
 [`config.decl`](../reference/dialects/config/ops/decl.md) constrain a value even
-before a composition root binds it to one constant. An
-[`index.assume`](../reference/dialects/index/ops/assume.md) creates a refined SSA
-value carrying facts established by the surrounding program, such as the
-in-bounds index in `kernel.loom`. The `buffer.assume.*` family carries root
-alignment, memory-space, aliasing, and identity facts; the example's
+before a composition root binds it to one constant. Control flow also supplies
+path facts: inside the guarded region in `kernel.loom`, Loom knows that
+`%element_index < %element_count` without an extra assumption. An
+[`index.assume`](../reference/dialects/index/ops/assume.md) is for information
+the compiler cannot derive, such as a range guaranteed by the producer of a
+loaded routing index. The `buffer.assume.*` family carries root alignment,
+memory-space, aliasing, and identity facts; the example's
 [`buffer.assume.noalias`](../reference/dialects/buffer/ops/assume-noalias.md)
 makes the input and output independence explicit.
 
@@ -180,8 +197,12 @@ target facts while still accepting different weights, cache storage, inputs,
 and outputs. It is the same idea as a specialized kernel launch, applied to a
 larger ownership boundary rather than hidden behind a separate graph compiler.
 
-The outer module declares the exact kernel dependency and turns it into a
-one-dispatch reusable command program:
+The outer module declares the exact kernel dependency and turns one concrete
+1009-element invocation into a reusable command program. The kernel itself
+retains its dynamic workload contract and can be launched with other counts by
+other roots:
+
+**Source:** [`loom/docs/examples/mental-model/model.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/mental-model/model.loom)
 
 ```loom title="model.loom"
 --8<-- "examples/mental-model/model.loom"
@@ -200,7 +221,7 @@ constructs that exist today.
 
 ## Follow one composition to Low
 
-The three source listings above are checked `.loom` files, not prose copies.
+The three source listings above are repository `.loom` files, not prose copies.
 With the Loom tools on `PATH`, this command formats them, links and specializes
 the `@transform` root, compiles its kernel for the generic GFX11 profile, and
 prints every Loom command it runs:

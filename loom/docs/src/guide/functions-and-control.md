@@ -1,8 +1,10 @@
 # Functions and structured control flow
 
-Functions package reusable computation without imposing a kernel launch ABI.
-Structured control flow keeps conditions, iteration domains, and carried values
-visible to verification, specialization, unrolling, distribution, and lowering.
+**Example files:** [`loom/docs/examples/mental-model/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/mental-model)
+
+Functions are typed callables that can execute on the host or device. Structured
+control flow keeps conditions, iteration domains, and carried values visible to
+verification, specialization, unrolling, distribution, and lowering.
 
 In this chapter, you will learn:
 
@@ -182,8 +184,10 @@ An exact call says *which symbol*. A
 [`func.apply`](../reference/dialects/func/ops/apply.md) says *which
 implementation contract* and lets specialization select an eligible provider.
 
-The checked mental-model motif contains a concrete helper and two providers for
-one contract:
+The composition example's motif contains a concrete helper and two providers
+for one contract:
+
+**Source:** [`loom/docs/examples/mental-model/motif.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/mental-model/motif.loom)
 
 ```loom title="motif.loom"
 --8<-- "examples/mental-model/motif.loom"

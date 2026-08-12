@@ -1,0 +1,16 @@
+// Layer count is a model-level specialization: command preparation resolves it
+// before expanding the loop into a concrete schedule.
+config.decl @model.layer_count : %value: index where [range(%value, 1, 256)]
+
+kernel.decl @project_block(%element_count: index) launch(%weights: view<8xf32>, %input: buffer, %output: buffer)
+
+command.program.def public @layer_stack(%element_count: index) launch(%parameters: buffer, %state: buffer) where [range(%element_count, 1, 8)] {
+  %layer_count = config.get @model.layer_count : index
+  %first_layer = index.constant 0 : index
+  %layer_step = index.constant 1 : index
+  scf.for %layer = [%first_layer to %layer_count step %layer_step] unroll {
+    %weights = command.parameter %parameters, "blk.{}.projection.weight"[%layer] : view<8xf32>
+    kernel.launch @project_block[%element_count](%weights, %state, %state) : [index](view<8xf32>, buffer, buffer)
+  }
+  command.return
+}

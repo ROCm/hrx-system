@@ -1,5 +1,7 @@
 # Values, types, and shapes
 
+**Example files:** [`loom/docs/examples/mental-model/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/mental-model)
+
 Loom IR is statically typed SSA. Every operation names the values it consumes,
 the values it produces, and the types at that boundary. The type system keeps
 logical coordinates, physical byte addresses, register values, logical
@@ -138,19 +140,21 @@ Loom does not hide storage identity inside one polymorphic tensor type:
 | [`buffer`](../reference/types/buffer.md) | Opaque, untyped, unshaped storage identity and the root of alias facts. |
 | [`view`](../reference/types/view.md) | A typed, non-owning logical coordinate space projected over buffer storage. |
 
-Check programs use tensors to describe shaped inputs, outputs, and expected
-values. A kernel launch binds the resulting storage to `buffer` arguments.
-Inside the kernel, `buffer.view` supplies the element type, extents, base byte
+Tensors represent shaped values before a program chooses storage identity and
+access. Kernels usually accept opaque `buffer` roots through their launch ABI.
+Inside a kernel, `buffer.view` supplies the element type, extents, base byte
 offset, and optional address layout needed for access.
 
-The checked mental-model kernel shows that boundary in one place:
+The composition example shows that boundary in one place:
+
+**Source:** [`loom/docs/examples/mental-model/kernel.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/mental-model/kernel.loom)
 
 ```loom title="kernel.loom"
 --8<-- "examples/mental-model/kernel.loom"
 ```
 
 The kernel signature accepts opaque buffer identities. The body creates f32
-views using the specialized element count, and `view.load` and `view.store`
+views using the per-launch element count, and `view.load` and `view.store`
 operate in logical element coordinates. Alias independence is a fact on the
 buffers rather than an accidental consequence of different parameter names.
 
@@ -185,10 +189,12 @@ for address layout. The attachment changes how logical elements map to storage;
 it does not change the logical shape or element type.
 
 ```loom
-tensor<[%row_count]x256xi8, #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes>>
+tensor<[%row_count]x256xi8, #ggml.q4_0>
 ```
 
-Static encodings are attributes. An `encoding` SSA value can carry a dynamic
+Named encodings such as `#ggml.q4_0` are concise aliases for complete physical
+schema records. Parameterized forms remain available when a program needs to
+state a new combination explicitly. An `encoding` SSA value can carry a dynamic
 layout, schema, storage, or transform role when composition must compute the
 attachment. Vectors deliberately have no encoding attachment: physical layout
 is resolved before or while data enters the register value domain.
@@ -198,16 +204,25 @@ the available representation records and their parameters.
 
 ## Facts refine values instead of replacing them
 
-An assumption operation returns a new SSA value with a stronger fact set:
+An assumption operation returns a new SSA value with a stronger fact set. This
+is useful when the fact comes from outside the visible dataflow, such as a
+routing table whose producer guarantees valid expert IDs:
 
 ```loom
-%bounded_index = index.assume %element_index [lt(%element_index, %element_count)] : index
+%expert_id_i32 = view.load %routing[%token] : view<[%token_count]xi32> -> i32
+%expert_id = index.cast %expert_id_i32 : i32 to index
+%bounded_expert_id = index.assume %expert_id [range(%expert_id, 0, 127)] : index
 ```
 
 The original value still exists. Uses that need the proven bound consume
 `%bounded_index`, making the proof edge visible. The same pattern carries
 alignment, memory space, aliasing, storage identity, ranges, multiplicity, and
 target facts through later transformations.
+
+A dominating comparison already contributes its true or false relation as a
+path fact. [`Facts and specialization`](facts-and-specialization.md#control-flow-contributes-path-facts)
+shows that case; repeating it with an assumption loses the distinction between
+compiler-derived information and a caller promise.
 
 This is why semantic type distinctions matter. Facts can say that an `index`
 is in range, that an `offset` is aligned, that two buffers do not alias, or that

@@ -50,8 +50,6 @@ loom_example_run_tool loom-link "${loom_link}" \
   --library=motif.loom \
   --mode=link \
   --root=@transform \
-  --config=guide.element_count=1009 \
-  --config=guide.workgroup_size=64 \
   --to=text \
   --output="${output_dir}/transform.loom"
 
