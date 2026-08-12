@@ -123,10 +123,10 @@ The result records the effective ring count and bytes under
 `benchmark_result.data_cache`. Comparisons are meaningful when candidates use
 the same data-reuse policy.
 
-## Collect device timing outside the score
+## Collect instrumented device timing outside the score
 
-Final-batch profiling replays the same prepared workload after the measured
-window:
+Final-batch profiling records and executes a separate metadata-retaining replay
+of the same logical workload after the measured window:
 
 ```shell
 iree-benchmark-loom program.loom \
@@ -139,13 +139,25 @@ iree-benchmark-loom program.loom \
 ```
 
 Keeping the profiled replay outside the score prevents instrumentation from
-changing the primary host completion timing. When the target provides complete
-timestamps, `profiled_dispatch_timing.dispatch_distribution.duration_ns`
-contains per-dispatch device statistics.
+changing the primary host completion timing. It does not make the replay the
+device component of that ordinary timing. Retained metadata can add timestamp
+packets, barriers, flushes, fixups, or harvest work according to the target.
+When the target provides complete timestamps,
+`profiled_dispatch_timing.dispatch_distribution.duration_ns` contains
+per-dispatch statistics for that instrumented replay.
 
-Cross-backend kernel comparisons use device timing from both backends. Host
-queue-completion time and device timestamps occupy different time domains and
-are not interchangeable scores.
+The device timing specification and `timing_interpretation.warnings` state
+known comparability and perturbation hazards. A structured device-oriented
+score means the tool's completeness checks passed; it does not by itself prove
+equivalence with another runtime's instrumentation.
+
+A same-replay device interval must be contained by the synchronous host
+interval that encloses it. A separately profiled replay has no subtraction or
+containment relationship with the ordinary replay. Cross-backend kernel
+comparisons therefore require matched semantic boundaries, device timing on
+both sides, and a paired calibration showing that each timing mechanism has
+acceptable perturbation. Host queue-completion time and device timestamps
+remain different time domains and are not interchangeable scores.
 
 ## Compare candidates in one run
 
