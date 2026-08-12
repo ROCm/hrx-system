@@ -80,6 +80,7 @@ loom_cc_library(
     ::symbol_policy
     iree::base
     iree::base::internal::arena
+    loom::analysis::symbol_references
     loom::format::bytecode::reader
     loom::format::text::parser
     loom::ir
@@ -119,11 +120,6 @@ loom_cc_library(
   DEPS
     ::module_index
     iree::base
-    iree::base::internal::arena
-    loom::analysis::symbol_references
-    loom::ops::func
-    loom::ops::op_defs
-    loom::util::walk
   PUBLIC
 )
 
@@ -148,6 +144,24 @@ loom_cc_test(
     loom::ops::func
     loom::ops::target
     loom::ops::test
+)
+
+loom_cc_benchmark(
+  NAME
+    planner_benchmark
+  SRCS
+    "planner_benchmark.cc"
+  DEPS
+    ::module_index
+    ::planner
+    iree::base
+    iree::base::internal::arena
+    iree::io::stream
+    iree::testing::benchmark_main
+    loom::format::bytecode::writer
+    loom::ir
+    loom::ops::test
+  TESTONLY
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

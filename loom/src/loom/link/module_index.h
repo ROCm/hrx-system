@@ -7,9 +7,9 @@
 // Provider-backed module index for linker planning.
 //
 // The index is the cold planning layer above bytecode/text/materialized inputs.
-// It records lightweight symbol identity and provenance without cloning IR so
-// later planner stages can decide which modules to materialize and stream into
-// the incremental linker.
+// It records lightweight symbol identity, provenance, and direct reference
+// facts without cloning IR so the planner can compute an exact symbol closure
+// before materialization.
 
 #ifndef LOOM_LINK_MODULE_INDEX_H_
 #define LOOM_LINK_MODULE_INDEX_H_
@@ -26,6 +26,11 @@ extern "C" {
 
 // Sentinel used when no provider/module/symbol ordinal is present.
 #define LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL IREE_HOST_SIZE_MAX
+
+// Dense ordinal assigned to one implementation-contract key.
+typedef uint32_t loom_link_contract_ordinal_t;
+#define LOOM_LINK_CONTRACT_ORDINAL_INVALID \
+  ((loom_link_contract_ordinal_t)UINT32_MAX)
 
 typedef struct loom_link_module_index_t loom_link_module_index_t;
 
@@ -112,35 +117,82 @@ typedef struct loom_link_module_index_module_t {
   iree_host_size_t symbol_start_ordinal;
   // Number of symbols owned by this module.
   iree_host_size_t symbol_count;
+  // Direct dependency occurrences owned by this module.
+  struct {
+    // Number of module-root occurrences at the start of values.
+    uint32_t root_count;
+    // Total number of occurrences.
+    iree_host_size_t count;
+    // Module-local target symbol ordinals in deterministic occurrence order.
+    // Targets may repeat within a source row.
+    const uint32_t* values;
+  } dependencies;
+  // Abstract implementation-contract demand occurrences owned by this module.
+  struct {
+    // Total number of occurrences.
+    iree_host_size_t count;
+    // Dense index contract ordinals in deterministic demand order. Ordinals
+    // may repeat within a source row.
+    const loom_link_contract_ordinal_t* values;
+  } contract_demands;
 } loom_link_module_index_module_t;
 
 // Indexed module-local symbol record.
 typedef struct loom_link_module_index_symbol_t {
   // Index-wide symbol ordinal.
   iree_host_size_t ordinal;
-  // Provider that supplied this symbol.
-  iree_host_size_t provider_ordinal;
   // Module that owns this symbol.
   iree_host_size_t module_ordinal;
-  // Provider-local module ordinal.
-  iree_host_size_t provider_module_ordinal;
   // Module-local symbol ordinal.
   iree_host_size_t module_symbol_ordinal;
   // Borrowed module-local symbol name without an '@' sigil.
   iree_string_view_t name;
   // Canonical in-memory symbol kind.
   loom_symbol_kind_t kind;
-  // Source IR symbol flags when the provider was materialized.
-  loom_symbol_flags_t ir_flags;
+  // Implementation-contract group for func.template/func.ukernel providers,
+  // or LOOM_LINK_CONTRACT_ORDINAL_INVALID.
+  loom_link_contract_ordinal_t provider_contract_ordinal;
   // Link identity class.
   loom_link_symbol_identity_t identity;
   // Linker-index symbol flags.
   loom_link_symbol_flags_t flags;
-  // Implementation contract key for func.template/func.ukernel providers.
-  iree_string_view_t provider_contract;
-  // Next duplicate global symbol with the same name, or INVALID_ORDINAL.
-  iree_host_size_t next_global_duplicate_ordinal;
+  // Slice in the owning module's flat dependency occurrence array.
+  struct {
+    // First occurrence index.
+    uint32_t first;
+    // Number of occurrences.
+    uint32_t count;
+  } dependencies;
+  // Slice in the owning module's flat contract-demand array.
+  struct {
+    // First demand index.
+    uint32_t first;
+    // Number of demands.
+    uint32_t count;
+  } contract_demands;
+  // Intrusive index-owned chains.
+  struct {
+    // Next index symbol with the same name, or INVALID_ORDINAL.
+    iree_host_size_t same_name_ordinal;
+    // Next provider symbol for provider_contract_ordinal, or INVALID_ORDINAL.
+    iree_host_size_t contract_provider_ordinal;
+  } next;
 } loom_link_module_index_symbol_t;
+
+// One unique abstract implementation-contract key and its provider chain.
+typedef struct loom_link_module_index_contract_t {
+  // Dense index-wide contract ordinal.
+  loom_link_contract_ordinal_t ordinal;
+  // Borrowed implementation-contract key.
+  iree_string_view_t name;
+  // Provider-symbol chain in stable index order.
+  struct {
+    // First symbol ordinal, or INVALID_ORDINAL.
+    iree_host_size_t first_symbol_ordinal;
+    // Last symbol ordinal, or INVALID_ORDINAL.
+    iree_host_size_t last_symbol_ordinal;
+  } providers;
+} loom_link_module_index_contract_t;
 
 // Creates an empty module index over |context|.
 //
@@ -219,7 +271,19 @@ const loom_link_module_index_module_t* loom_link_module_index_symbol_module(
 const loom_link_module_index_symbol_t* loom_link_module_index_lookup_global(
     const loom_link_module_index_t* index, iree_string_view_t name);
 
-// Returns the next global duplicate for |symbol|, or NULL if none exists.
+// Returns the first indexed symbol named |name| across all identity classes.
+const loom_link_module_index_symbol_t* loom_link_module_index_lookup_name(
+    const loom_link_module_index_t* index, iree_string_view_t name);
+
+// Returns the next same-name symbol for |symbol|, or NULL if none exists.
+const loom_link_module_index_symbol_t* loom_link_module_index_next_same_name(
+    const loom_link_module_index_t* index,
+    const loom_link_module_index_symbol_t* symbol);
+
+// Returns the next global duplicate for |symbol| in selected-first order, or
+// NULL if none exists. Begin enumeration with the result of
+// loom_link_module_index_lookup_global and pass each returned duplicate back to
+// continue until NULL.
 const loom_link_module_index_symbol_t*
 loom_link_module_index_next_global_duplicate(
     const loom_link_module_index_t* index,
@@ -232,6 +296,15 @@ loom_link_module_index_next_global_duplicate(
 const loom_link_module_index_symbol_t* loom_link_module_index_lookup_private(
     const loom_link_module_index_t* index,
     const loom_link_module_index_module_t* module, iree_string_view_t name);
+
+// Returns the number of unique implementation-contract keys.
+iree_host_size_t loom_link_module_index_contract_count(
+    const loom_link_module_index_t* index);
+
+// Returns implementation contract |ordinal|, or NULL if out of range.
+const loom_link_module_index_contract_t* loom_link_module_index_contract_at(
+    const loom_link_module_index_t* index,
+    loom_link_contract_ordinal_t ordinal);
 
 // Returns a status that names the two provider locations for a duplicate
 // global symbol. This is a diagnostic helper for planner conflict reporting.

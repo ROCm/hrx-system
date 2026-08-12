@@ -443,7 +443,11 @@ LOOMC_API_EXPORT bool loomc_link_index_lookup_global(
     const loomc_link_index_t* link_index, loomc_string_view_t name,
     loomc_link_index_symbol_t* out_symbol);
 
-/// Returns the next duplicate global symbol for `symbol`.
+/// Returns the next duplicate global symbol in selected-first order.
+///
+/// Begin enumeration with a symbol returned by
+/// `loomc_link_index_lookup_global` and pass each returned duplicate back to
+/// continue until this returns false.
 ///
 /// @param link_index Index to inspect.
 /// @param symbol Symbol previously returned from this index.

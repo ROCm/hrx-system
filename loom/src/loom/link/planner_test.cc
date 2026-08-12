@@ -144,8 +144,8 @@ class LinkPlannerTest : public ::testing::Test {
   PlanPtr BuildPlan(const loom_link_module_index_t* index,
                     const loom_link_plan_options_t* options) {
     loom_link_plan_t* plan = nullptr;
-    IREE_CHECK_OK(loom_link_plan_build(index, options, &block_pool_,
-                                       iree_allocator_system(), &plan));
+    IREE_CHECK_OK(
+        loom_link_plan_build(index, options, iree_allocator_system(), &plan));
     return PlanPtr(plan);
   }
 
@@ -153,8 +153,8 @@ class LinkPlannerTest : public ::testing::Test {
                                 const loom_link_plan_options_t* options,
                                 PlanPtr* out_plan) {
     loom_link_plan_t* plan = nullptr;
-    iree_status_t status = loom_link_plan_build(index, options, &block_pool_,
-                                                iree_allocator_system(), &plan);
+    iree_status_t status =
+        loom_link_plan_build(index, options, iree_allocator_system(), &plan);
     if (iree_status_is_ok(status)) {
       *out_plan = PlanPtr(plan);
     }
@@ -197,36 +197,6 @@ class LinkPlannerTest : public ::testing::Test {
   loom_context_t context_ = {};
   std::vector<loom_module_t*> modules_;
 };
-
-typedef struct BytecodePlanMaterializer {
-  // Materialized IR matching the used bytecode provider.
-  const loom_module_t* used_module;
-  // Number of times the used provider was materialized.
-  int used_count;
-  // Number of times an unused provider was materialized.
-  int unused_count;
-} BytecodePlanMaterializer;
-
-static iree_status_t MaterializeUsedBytecodeModule(
-    void* user_data, const loom_link_module_index_t* index,
-    const loom_link_module_index_module_t* module,
-    const loom_module_t** out_module) {
-  BytecodePlanMaterializer* materializer = (BytecodePlanMaterializer*)user_data;
-  const loom_link_module_index_provider_t* provider =
-      loom_link_module_index_provider_at(index, module->provider_ordinal);
-  if (!provider) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "missing provider for test module");
-  }
-  if (iree_string_view_equal(provider->name, IREE_SV("used-lib"))) {
-    ++materializer->used_count;
-    *out_module = materializer->used_module;
-    return iree_ok_status();
-  }
-  ++materializer->unused_count;
-  return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                          "unused bytecode provider was materialized");
-}
 
 TEST_F(LinkPlannerTest, ArchiveSelectsAllSymbolsInStableIndexOrder) {
   loom_module_t* first = Parse(IREE_SV(R"(
@@ -364,7 +334,7 @@ func.def public @entry() {
   EXPECT_FALSE(ContainsSymbol(plan.get(), available));
 }
 
-TEST_F(LinkPlannerTest, SelectiveBytecodePlanningMaterializesSelectedModules) {
+TEST_F(LinkPlannerTest, SelectiveBytecodePlanningUsesSerializedDependencies) {
   loom_module_t* used = Parse(IREE_SV(R"(
 func.def public @entry(%x: i32) -> (i32) {
   %y = func.call @helper(%x) : (i32) -> (i32)
@@ -412,20 +382,10 @@ func.def public @unused(%x: i32) -> (i32) {
   EXPECT_EQ(used_module->materialized_module, nullptr);
   EXPECT_EQ(unused_module->materialized_module, nullptr);
 
-  BytecodePlanMaterializer materializer = {
-      /*.used_module=*/used,
-  };
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
       /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
-      /*.include_exported_roots=*/{},
-      /*.unresolved_policy=*/{},
-      /*.test_symbol_policy=*/{},
-      /*.strip_symbol=*/{},
-      /*.strip_symbol_user_data=*/{},
-      /*.materialize_module=*/MaterializeUsedBytecodeModule,
-      /*.materialize_module_user_data=*/&materializer,
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
 
@@ -439,8 +399,8 @@ func.def public @unused(%x: i32) -> (i32) {
   EXPECT_TRUE(ContainsSymbol(plan.get(), entry));
   EXPECT_TRUE(ContainsSymbol(plan.get(), helper));
   EXPECT_FALSE(ContainsSymbol(plan.get(), unused_symbol));
-  EXPECT_EQ(materializer.used_count, 1);
-  EXPECT_EQ(materializer.unused_count, 0);
+  EXPECT_EQ(used_module->materialized_module, nullptr);
+  EXPECT_EQ(unused_module->materialized_module, nullptr);
 }
 
 TEST_F(LinkPlannerTest, SelectiveApplyUsesBytecodeProviderContractIndex) {
@@ -485,9 +445,6 @@ func.template<demo.unused> @unused_provider(%x: i32) -> (i32) {
       IREE_SV("unused.loombc"), /*read_options=*/nullptr, &unused_options,
       /*out_provider_ordinal=*/nullptr));
 
-  BytecodePlanMaterializer materializer = {
-      /*.used_module=*/used,
-  };
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
       /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
@@ -496,13 +453,6 @@ func.template<demo.unused> @unused_provider(%x: i32) -> (i32) {
           /*.count=*/IREE_ARRAYSIZE(roots),
           /*.values=*/roots,
       },
-      /*.include_exported_roots=*/{},
-      /*.unresolved_policy=*/{},
-      /*.test_symbol_policy=*/{},
-      /*.strip_symbol=*/{},
-      /*.strip_symbol_user_data=*/{},
-      /*.materialize_module=*/MaterializeUsedBytecodeModule,
-      /*.materialize_module_user_data=*/&materializer,
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
 
@@ -524,8 +474,8 @@ func.template<demo.unused> @unused_provider(%x: i32) -> (i32) {
   EXPECT_TRUE(ContainsSymbol(plan.get(), entry));
   EXPECT_TRUE(ContainsSymbol(plan.get(), bytecode_provider));
   EXPECT_FALSE(ContainsSymbol(plan.get(), unused_provider));
-  EXPECT_EQ(materializer.used_count, 1);
-  EXPECT_EQ(materializer.unused_count, 0);
+  EXPECT_EQ(used_module->materialized_module, nullptr);
+  EXPECT_EQ(unused_module->materialized_module, nullptr);
 }
 
 TEST_F(LinkPlannerTest, SelectiveRootMayNameUniquePrivateSymbol) {
@@ -600,7 +550,7 @@ func.def public @unused(%x: i32) -> (i32) {
       loom_link_module_index_lookup_global(index.get(), IREE_SV("callee"));
   ASSERT_NE(callee_decl, nullptr);
   const loom_link_module_index_symbol_t* callee_def =
-      loom_link_module_index_next_global_duplicate(index.get(), callee_decl);
+      loom_link_module_index_next_same_name(index.get(), callee_decl);
   ASSERT_NE(callee_def, nullptr);
   const loom_link_module_index_symbol_t* unused =
       loom_link_module_index_lookup_global(index.get(), IREE_SV("unused"));
@@ -712,6 +662,49 @@ func.def @callee(%x: i32) -> (i32) {
   EXPECT_TRUE(ContainsSymbol(plan.get(), entry));
   EXPECT_TRUE(ContainsSymbol(plan.get(), callee_decl));
   EXPECT_TRUE(ContainsSymbol(plan.get(), callee_def));
+}
+
+TEST_F(LinkPlannerTest, ExportedDeclarationPullsPrivateConcreteDefinition) {
+  loom_module_t* harness = Parse(IREE_SV(R"(
+func.decl public @callee(%x: i32) -> (i32)
+)"));
+  loom_module_t* library = Parse(IREE_SV(R"(
+func.def @callee(%x: i32) -> (i32) {
+  %y = func.call @helper(%x) : (i32) -> (i32)
+  func.return %y : i32
+}
+
+func.def @helper(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"));
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), harness, IREE_SV("harness"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddMaterialized(index.get(), library, IREE_SV("library"),
+                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+  loom_link_plan_options_t options = {
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/{},
+      /*.include_exported_roots=*/true,
+  };
+  PlanPtr plan = BuildPlan(index.get(), &options);
+
+  const loom_link_module_index_module_t* library_module =
+      loom_link_module_index_module_at(index.get(), 1);
+  ASSERT_NE(library_module, nullptr);
+  const loom_link_module_index_symbol_t* callee_decl =
+      loom_link_module_index_lookup_global(index.get(), IREE_SV("callee"));
+  const loom_link_module_index_symbol_t* callee_def =
+      loom_link_module_index_lookup_private(index.get(), library_module,
+                                            IREE_SV("callee"));
+  const loom_link_module_index_symbol_t* helper =
+      loom_link_module_index_lookup_private(index.get(), library_module,
+                                            IREE_SV("helper"));
+  EXPECT_TRUE(ContainsSymbol(plan.get(), callee_decl));
+  EXPECT_TRUE(ContainsSymbol(plan.get(), callee_def));
+  EXPECT_TRUE(ContainsSymbol(plan.get(), helper));
 }
 
 TEST_F(LinkPlannerTest, SelectiveApplyPullsProviderContractImplementations) {

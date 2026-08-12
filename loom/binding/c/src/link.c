@@ -269,19 +269,6 @@ static iree_status_t loomc_link_materialize_module(
   return iree_ok_status();
 }
 
-static iree_status_t loomc_link_materialize_module_callback(
-    void* user_data, const loom_link_module_index_t* index,
-    const loom_link_module_index_module_t* module,
-    const loom_module_t** out_module) {
-  loomc_link_materialization_cache_t* cache =
-      (loomc_link_materialization_cache_t*)user_data;
-  if (index != cache->module_index) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "link plan materializer index mismatch");
-  }
-  return loomc_link_materialize_module(cache, module, out_module);
-}
-
 static loomc_status_t loomc_link_materialization_cache_initialize(
     loomc_linker_t* linker, loomc_workspace_t* workspace,
     loomc_link_index_t* link_index, loomc_result_t* result,
@@ -569,8 +556,6 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
                                   LOOMC_LINK_FLAG_STRIP_TEST_SYMBOLS)
               ? LOOM_LINK_PLAN_TEST_SYMBOL_STRIP
               : LOOM_LINK_PLAN_TEST_SYMBOL_KEEP,
-      .materialize_module = loomc_link_materialize_module_callback,
-      .materialize_module_user_data = &cache,
   };
 
   iree_status_t operation_status = iree_ok_status();
@@ -578,7 +563,6 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
   if (loomc_status_is_ok(status)) {
     operation_status = loom_link_plan_build(
         cache.module_index, &plan_options,
-        loomc_workspace_block_pool(workspace),
         loomc_link_iree_allocator(linker->allocator), &plan);
     status = loomc_link_translate_operation_status(
         result, before_diagnostics, loomc_make_cstring_view("LINK/PLAN"),

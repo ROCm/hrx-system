@@ -221,6 +221,15 @@ func.def public @entry(%x: i32) -> (i32) {
   };
   IREE_ASSERT_OK(loom_link_module_index_add_materialized(
       index.get(), input, &input_options, /*out_provider_ordinal=*/nullptr));
+  loom_link_module_index_add_options_t second_library_options = {
+      /*.provider_name=*/IREE_SV("kernel-lib-2"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+  };
+  IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
+      index.get(),
+      iree_make_const_byte_span(library_bytes.data(), library_bytes.size()),
+      IREE_SV("kernel-lib-2.loombc"), /*read_options=*/nullptr,
+      &second_library_options, /*out_provider_ordinal=*/nullptr));
 
   const loom_link_module_index_symbol_t* selected =
       loom_link_module_index_lookup_global(index.get(), IREE_SV("entry"));
@@ -236,7 +245,18 @@ func.def public @entry(%x: i32) -> (i32) {
   const loom_link_module_index_provider_t* duplicate_provider =
       loom_link_module_index_symbol_provider(index.get(), duplicate);
   ASSERT_NE(duplicate_provider, nullptr);
-  EXPECT_EQ(StringViewToString(duplicate_provider->name), "kernel-lib");
+  EXPECT_EQ(StringViewToString(duplicate_provider->name), "kernel-lib-2");
+
+  const loom_link_module_index_symbol_t* second_duplicate =
+      loom_link_module_index_next_global_duplicate(index.get(), duplicate);
+  ASSERT_NE(second_duplicate, nullptr);
+  const loom_link_module_index_provider_t* second_duplicate_provider =
+      loom_link_module_index_symbol_provider(index.get(), second_duplicate);
+  ASSERT_NE(second_duplicate_provider, nullptr);
+  EXPECT_EQ(StringViewToString(second_duplicate_provider->name), "kernel-lib");
+  EXPECT_EQ(loom_link_module_index_next_global_duplicate(index.get(),
+                                                         second_duplicate),
+            nullptr);
 
   std::string diagnostic =
       StatusToStringAndFree(loom_link_module_index_duplicate_global_status(
@@ -348,6 +368,81 @@ func.def public @exported(%x: i32) -> (i32) {
   EXPECT_TRUE(iree_all_bits_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_EXPORT));
 }
 
+TEST_F(ModuleIndexTest, ProjectsMaterializedAndBytecodeReferenceMetadata) {
+  loom_module_t* module = Parse(IREE_SV(R"(
+func.def public @entry(%x: i32) -> (i32) {
+  %y = func.call @helper(%x) : (i32) -> (i32)
+  %z = func.apply<demo.contract>(%y) : (i32) -> (i32)
+  func.return %z : i32
+}
+
+func.def @helper(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.template<demo.contract> @provider(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"));
+  std::vector<uint8_t> bytes = WriteModule(module);
+
+  auto verify_index = [&](const loom_link_module_index_t* index) {
+    const loom_link_module_index_module_t* indexed_module =
+        loom_link_module_index_module_at(index, 0);
+    ASSERT_NE(indexed_module, nullptr);
+    EXPECT_EQ(indexed_module->dependencies.root_count, 0u);
+    ASSERT_EQ(indexed_module->dependencies.count, 1u);
+    ASSERT_EQ(indexed_module->contract_demands.count, 1u);
+
+    const loom_link_module_index_symbol_t* entry =
+        loom_link_module_index_lookup_global(index, IREE_SV("entry"));
+    const loom_link_module_index_symbol_t* helper =
+        loom_link_module_index_lookup_private(index, indexed_module,
+                                              IREE_SV("helper"));
+    const loom_link_module_index_symbol_t* provider =
+        loom_link_module_index_lookup_private(index, indexed_module,
+                                              IREE_SV("provider"));
+    ASSERT_NE(entry, nullptr);
+    ASSERT_NE(helper, nullptr);
+    ASSERT_NE(provider, nullptr);
+    ASSERT_EQ(entry->dependencies.count, 1u);
+    EXPECT_EQ(indexed_module->dependencies.values[entry->dependencies.first],
+              helper->module_symbol_ordinal);
+    ASSERT_EQ(entry->contract_demands.count, 1u);
+
+    ASSERT_EQ(loom_link_module_index_contract_count(index), 1u);
+    const loom_link_contract_ordinal_t contract_ordinal =
+        indexed_module->contract_demands.values[entry->contract_demands.first];
+    const loom_link_module_index_contract_t* contract =
+        loom_link_module_index_contract_at(index, contract_ordinal);
+    ASSERT_NE(contract, nullptr);
+    EXPECT_EQ(StringViewToString(contract->name), "demo.contract");
+    EXPECT_EQ(provider->provider_contract_ordinal, contract_ordinal);
+    EXPECT_EQ(contract->providers.first_symbol_ordinal, provider->ordinal);
+    EXPECT_EQ(contract->providers.last_symbol_ordinal, provider->ordinal);
+    EXPECT_EQ(provider->next.contract_provider_ordinal,
+              LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
+  };
+
+  loom_link_module_index_add_options_t options = {
+      /*.provider_name=*/IREE_SV("library"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+  };
+  IndexPtr materialized_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+      materialized_index.get(), module, &options,
+      /*out_provider_ordinal=*/nullptr));
+  verify_index(materialized_index.get());
+
+  IndexPtr bytecode_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
+      bytecode_index.get(),
+      iree_make_const_byte_span(bytes.data(), bytes.size()),
+      IREE_SV("library.loombc"), /*read_options=*/nullptr, &options,
+      /*out_provider_ordinal=*/nullptr));
+  verify_index(bytecode_index.get());
+}
+
 TEST_F(ModuleIndexTest, IndexesTestOnlySymbolRole) {
   loom_module_t* module = Parse(IREE_SV(R"(
 check.case public @kernel_case {
@@ -429,7 +524,8 @@ func.def public @from_text(%x: i32) -> (i32) {
   const loom_link_module_index_symbol_t* symbol =
       loom_link_module_index_lookup_global(index.get(), IREE_SV("@from_text"));
   ASSERT_NE(symbol, nullptr);
-  EXPECT_EQ(symbol->provider_ordinal, provider->ordinal);
+  EXPECT_EQ(loom_link_module_index_symbol_provider(index.get(), symbol),
+            provider);
 }
 
 TEST_F(ModuleIndexTest, DuplicatePrivateNamesRemainProviderLocal) {
@@ -474,7 +570,8 @@ func.def @helper(%x: i32) -> (i32) {
                                             IREE_SV("@helper"));
   ASSERT_NE(first_helper, nullptr);
   ASSERT_NE(second_helper, nullptr);
-  EXPECT_NE(first_helper->provider_ordinal, second_helper->provider_ordinal);
+  EXPECT_NE(loom_link_module_index_symbol_provider(index.get(), first_helper),
+            loom_link_module_index_symbol_provider(index.get(), second_helper));
   EXPECT_EQ(
       loom_link_module_index_lookup_global(index.get(), IREE_SV("helper")),
       nullptr);

@@ -14,7 +14,6 @@
 #define LOOM_LINK_PLANNER_H_
 
 #include "iree/base/api.h"
-#include "iree/base/internal/arena.h"
 #include "loom/link/module_index.h"
 
 #ifdef __cplusplus
@@ -66,14 +65,6 @@ typedef bool (*loom_link_plan_strip_symbol_fn_t)(
     void* user_data, const loom_link_module_index_t* index,
     const loom_link_module_index_symbol_t* symbol);
 
-// Optional materializer for dependency scanning of indexed modules whose IR is
-// not already materialized. Implementations must keep |out_module| alive until
-// loom_link_plan_build returns.
-typedef iree_status_t (*loom_link_plan_materialize_module_fn_t)(
-    void* user_data, const loom_link_module_index_t* index,
-    const loom_link_module_index_module_t* module,
-    const loom_module_t** out_module);
-
 // Options controlling one planning operation.
 typedef struct loom_link_plan_options_t {
   // Planning mode. Zero defaults to ARCHIVE.
@@ -90,10 +81,6 @@ typedef struct loom_link_plan_options_t {
   loom_link_plan_strip_symbol_fn_t strip_symbol;
   // User data passed to strip_symbol.
   void* strip_symbol_user_data;
-  // Optional on-demand materializer for unmaterialized indexed modules.
-  loom_link_plan_materialize_module_fn_t materialize_module;
-  // User data passed to materialize_module.
-  void* materialize_module_user_data;
 } loom_link_plan_options_t;
 
 // One live symbol selection in a plan.
@@ -112,11 +99,10 @@ typedef struct loom_link_plan_symbol_t {
 
 // Builds a link plan from |index|.
 //
-// |block_pool| backs planner-owned reference tables. The caller owns the
-// returned plan and must release it with loom_link_plan_free().
+// The caller owns the returned plan and must release it with
+// loom_link_plan_free().
 iree_status_t loom_link_plan_build(const loom_link_module_index_t* index,
                                    const loom_link_plan_options_t* options,
-                                   iree_arena_block_pool_t* block_pool,
                                    iree_allocator_t allocator,
                                    loom_link_plan_t** out_plan);
 

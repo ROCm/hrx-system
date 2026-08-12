@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_benchmark", "loom_cc_library", "loom_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -71,6 +71,7 @@ loom_cc_library(
     hdrs = ["module_index.h"],
     deps = [
         ":symbol_policy",
+        "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/format/bytecode:reader",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
@@ -107,12 +108,7 @@ loom_cc_library(
     hdrs = ["planner.h"],
     deps = [
         ":module_index",
-        "//loom/src/loom/analysis:symbol_references",
-        "//loom/src/loom/ops:op_defs",
-        "//loom/src/loom/ops/func",
-        "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
     ],
 )
 
@@ -135,5 +131,21 @@ loom_cc_test(
         "//runtime/src/iree/io:stream",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "planner_benchmark",
+    srcs = ["planner_benchmark.cc"],
+    deps = [
+        ":module_index",
+        ":planner",
+        "//loom/src/loom/format/bytecode:writer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/test",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:benchmark_main",
     ],
 )

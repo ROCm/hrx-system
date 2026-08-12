@@ -443,16 +443,20 @@ static bool loomc_link_index_module_from_loom(
 }
 
 static bool loomc_link_index_symbol_from_loom(
+    const loom_link_module_index_t* index,
     const loom_link_module_index_symbol_t* source,
     loomc_link_index_symbol_t* out_symbol) {
-  if (source == NULL || out_symbol == NULL) {
+  if (index == NULL || source == NULL || out_symbol == NULL) {
     return false;
   }
+  const loom_link_module_index_module_t* module =
+      loom_link_module_index_symbol_module(index, source);
+  if (module == NULL) return false;
   *out_symbol = (loomc_link_index_symbol_t){
       .ordinal = source->ordinal,
-      .provider_ordinal = source->provider_ordinal,
+      .provider_ordinal = module->provider_ordinal,
       .module_ordinal = source->module_ordinal,
-      .provider_module_ordinal = source->provider_module_ordinal,
+      .provider_module_ordinal = module->provider_module_ordinal,
       .module_symbol_ordinal = source->module_symbol_ordinal,
       .name = loomc_string_view_from_iree(source->name),
       .kind = loomc_link_symbol_kind_from_loom(source->kind),
@@ -720,6 +724,7 @@ bool loomc_link_index_symbol_at(const loomc_link_index_t* link_index,
     return false;
   }
   return loomc_link_index_symbol_from_loom(
+      link_index->index,
       loom_link_module_index_symbol_at(link_index->index, ordinal), out_symbol);
 }
 
@@ -730,6 +735,7 @@ bool loomc_link_index_lookup_global(const loomc_link_index_t* link_index,
     return false;
   }
   return loomc_link_index_symbol_from_loom(
+      link_index->index,
       loom_link_module_index_lookup_global(link_index->index,
                                            iree_string_view_from_loomc(name)),
       out_symbol);
@@ -747,6 +753,7 @@ bool loomc_link_index_next_global_duplicate(
   const loom_link_module_index_symbol_t* internal_symbol =
       loom_link_module_index_symbol_at(link_index->index, symbol->ordinal);
   return loomc_link_index_symbol_from_loom(
+      link_index->index,
       loom_link_module_index_next_global_duplicate(link_index->index,
                                                    internal_symbol),
       out_symbol);
@@ -764,6 +771,7 @@ bool loomc_link_index_lookup_private(const loomc_link_index_t* link_index,
   const loom_link_module_index_module_t* internal_module =
       loom_link_module_index_module_at(link_index->index, module->ordinal);
   return loomc_link_index_symbol_from_loom(
+      link_index->index,
       loom_link_module_index_lookup_private(link_index->index, internal_module,
                                             iree_string_view_from_loomc(name)),
       out_symbol);
