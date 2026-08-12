@@ -43,6 +43,10 @@ CTEST_RESOURCE_LABEL_EXCLUDE_REGEX = "runtime-resource="
 CI_LOOM_TARGETS = "amdgpu,iree_vm,llvmir,spirv,x86"
 LOOM_FORMAT_BAZEL_TARGET = "//loom/src/loom/tools/loom-format:loom-format"
 LOOM_FORMAT_CMAKE_TARGET = "loom::tools::loom-format"
+LOOM_LINT_BAZEL_TARGET = "//loom/py/loom/tools:loom-lint"
+LOOM_LINT_CMAKE_TARGET = "loom::py::loom::tools::loom-lint"
+LOOM_LINT_PYTHON_SOURCE = "loom/py/loom/tools/source_lint.py"
+LOOM_LINT_SUFFIXES = frozenset({".loom", ".loom-test"})
 # Syntax-corpus modules retain their exact parser/printer fixture contract rather
 # than the verified canonical-source contract enforced by loom-format.
 LOOM_FORMAT_EXCLUDED_PREFIXES = ("loom/src/loom/test/corpus/text/",)
@@ -133,7 +137,7 @@ def existing_format_source_paths(paths: list[str]) -> list[str]:
     )
 
 
-def tracked_format_source_paths() -> list[str] | None:
+def _tracked_project_paths() -> list[str] | None:
     result = subprocess.run(
         ["git", "--literal-pathspecs", "ls-files", "-z", "--", PROJECT_ROOT],
         cwd=REPO_ROOT,
@@ -144,13 +148,44 @@ def tracked_format_source_paths() -> list[str] | None:
     )
     if result.returncode != 0:
         print(
-            "loom presubmit: failed to query tracked Loom source files",
+            "loom presubmit: failed to query tracked Loom project files",
             file=sys.stderr,
         )
         if result.stderr:
             print(result.stderr.rstrip(), file=sys.stderr)
         return None
-    return existing_format_source_paths(result.stdout.split("\0"))
+    return result.stdout.split("\0")
+
+
+def tracked_format_source_paths() -> list[str] | None:
+    paths = _tracked_project_paths()
+    return None if paths is None else existing_format_source_paths(paths)
+
+
+def is_lint_source_path(path: str) -> bool:
+    source_path = PurePosixPath(path)
+    return (
+        "\\" not in path
+        and source_path.as_posix() == path
+        and ".." not in source_path.parts
+        and path.startswith(PROJECT_ROOT)
+        and source_path.suffix in LOOM_LINT_SUFFIXES
+    )
+
+
+def existing_lint_source_paths(paths: list[str]) -> list[str]:
+    return sorted(
+        {
+            path
+            for path in paths
+            if is_lint_source_path(path) and (REPO_ROOT / path).is_file()
+        }
+    )
+
+
+def tracked_lint_source_paths() -> list[str] | None:
+    paths = _tracked_project_paths()
+    return None if paths is None else existing_lint_source_paths(paths)
 
 
 def run_source_format_maintenance(
@@ -200,14 +235,48 @@ def run_source_format_maintenance(
     )
 
 
-def run_source_lint() -> bool:
-    return run_command(
+def run_source_lint(*, lane: str, files_from: str | None) -> bool:
+    tracked_paths = tracked_lint_source_paths()
+    if tracked_paths is None:
+        return False
+    selected_paths = (
+        []
+        if files_from is None
+        else existing_lint_source_paths(selected_files(files_from))
+    )
+    check_paths = sorted(set(tracked_paths).union(selected_paths))
+
+    public_lint_ok = True
+    if check_paths:
+        if lane == "bazel":
+            linter_path = project_presubmit.build_and_resolve_executable(
+                PROJECT_NAME,
+                REPO_ROOT,
+                lane=lane,
+                bazel_target=LOOM_LINT_BAZEL_TARGET,
+                cmake_target=LOOM_LINT_CMAKE_TARGET,
+                bazel_args=("--config=locked",),
+            )
+            linter_command = [] if linter_path is None else [str(linter_path)]
+        elif lane == "cmake":
+            # CMake models Python entrypoints as source-bearing custom targets,
+            # not native executable artifacts. The public linter is deliberately
+            # standalone, so the source lane can invoke that same entrypoint.
+            linter_command = [sys.executable, LOOM_LINT_PYTHON_SOURCE]
+        else:
+            raise ValueError(f"unknown lane: {lane}")
+        public_lint_ok = bool(linter_command) and run_command(
+            [*linter_command, *check_paths], "Loom authoring policy"
+        )
+
+    repository_lint_ok = run_command(
         [
             sys.executable,
             "loom/build_tools/linters/loom_source_lint.py",
         ],
-        "Loom source invariants",
+        "Loom repository invariants",
     )
+    return public_lint_ok and repository_lint_ok
 
 
 def bazel_test_command() -> list[str]:
@@ -269,7 +338,7 @@ def run_presubmit(args: argparse.Namespace) -> int:
             )
             and ok
         )
-        ok = run_source_lint() and ok
+        ok = run_source_lint(lane=args.lane, files_from=args.files_from) and ok
     if args.tests:
         if args.lane == "bazel":
             ok = run_bazel_tests() and ok

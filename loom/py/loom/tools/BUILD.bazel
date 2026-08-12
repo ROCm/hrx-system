@@ -52,11 +52,26 @@ iree_py_library(
     ],
 )
 
+iree_py_library(
+    name = "source_lint",
+    srcs = [
+        "__init__.py",
+        "source_lint.py",
+    ],
+)
+
 iree_py_binary(
     name = "loom-compile-report",
     srcs = ["compile_report.py"],
     main = "compile_report.py",
     deps = [":compile_report"],
+)
+
+iree_py_binary(
+    name = "loom-lint",
+    srcs = ["source_lint.py"],
+    main = "source_lint.py",
+    deps = [":source_lint"],
 )
 
 iree_py_binary(
@@ -72,6 +87,7 @@ iree_py_test(
         "compile_report_test.py",
         "loom_opt_test.py",
         "pytest_style_runner.py",
+        "source_lint_test.py",
         "source_surface_test.py",
     ],
     args = [
@@ -79,12 +95,14 @@ iree_py_test(
         "loom.tools.compile_report_test",
         "loom.tools.loom_opt_test",
         "loom.tools.source_surface_test",
+        "loom.tools.source_lint_test",
     ],
     main = "pytest_style_runner.py",
     deps = [
         ":amdgpu_asm",
         ":compile_report",
         ":loom_opt",
+        ":source_lint",
         ":tools",
     ],
 )

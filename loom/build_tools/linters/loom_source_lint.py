@@ -28,11 +28,6 @@ large hand-maintained emitter. Backend source files must stay below the reviewed
 size ceiling and must not introduce broad `internal.h` umbrella headers as a
 cosmetic split.
 
-Checked Loom text is a user-facing reference surface. Across every `.loom` file
-and every authored `.loom-test` input, constant SSA names must carry a program
-role or use the numeric `%c<literal>` convention instead of spelling the
-literal in English.
-
 The authoring corpus additionally rejects stale boundary-proof boilerplate that
 agents are likely to copy into generated kernels: redundant kernel-buffer
 memory-space assumes, sentinel-sized views, late index-to-offset byte-address
@@ -47,13 +42,9 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-LOOM_PROJECT_ROOT = REPO_ROOT / "loom"
 LOOM_SOURCE_ROOT = REPO_ROOT / "loom" / "src" / "loom"
 AUTHORING_CORPUS_ROOT = LOOM_SOURCE_ROOT / "test" / "corpus" / "authoring"
 SOURCE_SUFFIXES = {".c", ".cc", ".h"}
-LOOM_TEXT_SUFFIXES = {".loom", ".loom-test"}
-LOOM_TEST_CASE_SEPARATOR_PREFIX = "// ===="
-LOOM_TEST_EXPECTED_SEPARATOR = "// ----"
 SPIRV_BACKEND_RELATIVE_ROOTS = (
     "loom/src/loom/target/arch/spirv",
     "loom/src/loom/target/emit/spirv",
@@ -140,67 +131,6 @@ AUTHORING_INDEX_TO_OFFSET_CAST_PATTERN = re.compile(
 )
 AUTHORING_BYTE_STRIDE_INDEX_PATTERN = re.compile(
     r"%nb(?:\d+|_[A-Za-z0-9_]*)?\b\s*:\s*index\b"
-)
-LOOM_CONSTANT_RESULT_PATTERN = re.compile(
-    r"%(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*"
-    r"[A-Za-z_][A-Za-z0-9_.]*\.constant\b"
-)
-# Type, domain, unit, and duplicate markers can decorate either side of a
-# spelled literal without giving it a program role. Semantic continuations
-# such as zero_point and fourth_word_ordinal remain intact.
-LOOM_NUMBER_NAME_DECORATOR_PATTERN = re.compile(
-    r"(?:"
-    r"(?:[su]?i\d+|(?:bf|fp|f)\d+)(?:x\d+|v)?"
-    r"|index|offset|scalars?|vectors?"
-    r"|bytes?|bits?|elements?|lanes?|rows?|columns?|words?|values?"
-    r"|all|[a-z]"
-    r")"
-)
-LOOM_NUMBER_WORDS = tuple(
-    sorted(
-        (
-            "zero",
-            "one",
-            "two",
-            "three",
-            "four",
-            "five",
-            "six",
-            "seven",
-            "eight",
-            "nine",
-            "ten",
-            "eleven",
-            "twelve",
-            "thirteen",
-            "fourteen",
-            "fifteen",
-            "sixteen",
-            "seventeen",
-            "eighteen",
-            "nineteen",
-            "twenty",
-            "thirty",
-            "forty",
-            "fifty",
-            "sixty",
-            "seventy",
-            "eighty",
-            "ninety",
-            "hundred",
-            "thousand",
-            "million",
-            "billion",
-            "trillion",
-        ),
-        key=len,
-        reverse=True,
-    )
-)
-LOOM_NUMBER_CONNECTOR = "and"
-LOOM_NUMBER_SIGN_PREFIXES = ("negative", "positive", "minus", "plus", "neg")
-LOOM_CONSTANT_NAME_MESSAGE = (
-    "Loom constant SSA names must describe a program role or use %c<literal>"
 )
 
 
@@ -490,123 +420,6 @@ def _iter_authoring_loom_files() -> list[Path]:
     )
 
 
-def _iter_checked_loom_files() -> list[Path]:
-    return sorted(
-        path
-        for path in LOOM_PROJECT_ROOT.rglob("*")
-        if path.is_file() and path.suffix in LOOM_TEXT_SUFFIXES
-    )
-
-
-def _is_spelled_number_sequence(text: str) -> bool:
-    """Returns whether text can be segmented entirely into number words."""
-
-    for prefix in LOOM_NUMBER_SIGN_PREFIXES:
-        if text.startswith(prefix):
-            text = text.removeprefix(prefix)
-            break
-    if not text:
-        return False
-
-    # Each state records whether the previous token was numeric. `and` is an
-    # interior connector, not a number by itself: this accepts
-    # `onehundredandone` while leaving semantic names such as `and_zero`
-    # alone.
-    reachable = {(0, False)}
-    for start in range(len(text)):
-        states = tuple(
-            previous_was_number
-            for position, previous_was_number in reachable
-            if position == start
-        )
-        for previous_was_number in states:
-            for word in LOOM_NUMBER_WORDS:
-                if text.startswith(word, start):
-                    reachable.add((start + len(word), True))
-            if previous_was_number and text.startswith(LOOM_NUMBER_CONNECTOR, start):
-                reachable.add((start + len(LOOM_NUMBER_CONNECTOR), False))
-    return (len(text), True) in reachable
-
-
-def _is_spelled_number_or_plural(text: str) -> bool:
-    """Returns whether text is a spelled number or its English plural."""
-
-    if _is_spelled_number_sequence(text):
-        return True
-
-    singular_candidates: list[str] = []
-    if text.endswith("ies"):
-        singular_candidates.append(text[:-3] + "y")
-    if text.endswith("es"):
-        singular_candidates.append(text[:-2])
-    if text.endswith("s"):
-        singular_candidates.append(text[:-1])
-    return any(
-        _is_spelled_number_sequence(candidate) for candidate in singular_candidates
-    )
-
-
-def _is_spelled_number_constant_name(name: str) -> bool:
-    """Returns whether name communicates only a spelled numeric literal."""
-
-    tokens = [token for token in name.lower().split("_") if token]
-    while len(tokens) > 1:
-        stripped_decorator = False
-        if LOOM_NUMBER_NAME_DECORATOR_PATTERN.fullmatch(tokens[0]):
-            tokens.pop(0)
-            stripped_decorator = True
-        if len(tokens) > 1 and LOOM_NUMBER_NAME_DECORATOR_PATTERN.fullmatch(tokens[-1]):
-            tokens.pop()
-            stripped_decorator = True
-        if not stripped_decorator:
-            break
-    return _is_spelled_number_or_plural("".join(tokens))
-
-
-def _iter_loom_input_lines(path: Path, text: str) -> list[tuple[int, str]]:
-    """Returns source lines, excluding runner-owned `.loom-test` expectations."""
-
-    lines: list[tuple[int, str]] = []
-    is_loom_test = path.suffix == ".loom-test"
-    in_expected_section = False
-    for line_number, line in enumerate(text.splitlines(), start=1):
-        if is_loom_test:
-            if line.startswith(LOOM_TEST_CASE_SEPARATOR_PREFIX):
-                in_expected_section = False
-                continue
-            if line.strip() == LOOM_TEST_EXPECTED_SEPARATOR:
-                in_expected_section = True
-                continue
-            if in_expected_section:
-                continue
-        lines.append((line_number, line))
-    return lines
-
-
-def _scan_loom_constant_name_text(path: Path, text: str) -> list[Finding]:
-    findings: list[Finding] = []
-    for line_number, line in _iter_loom_input_lines(path, text):
-        stripped_line = _strip_line_comments(line).strip()
-        if not stripped_line:
-            continue
-        for match in LOOM_CONSTANT_RESULT_PATTERN.finditer(stripped_line):
-            name = match.group("name")
-            if _is_spelled_number_constant_name(name):
-                findings.append(
-                    Finding(
-                        path=path,
-                        line=line_number,
-                        message=LOOM_CONSTANT_NAME_MESSAGE,
-                        context=(
-                            f"%{name} spells the literal in English; use a "
-                            "program-role name such as %batch_size, or %c512 "
-                            "when the literal itself is the only meaning"
-                        ),
-                    )
-                )
-    return findings
-
-
 def _scan_authoring_text(path: Path, text: str) -> list[Finding]:
     findings: list[Finding] = []
     for line_number, line in enumerate(text.splitlines(), start=1):
@@ -860,30 +673,6 @@ def _expect_target_execution_self_test(
     return False
 
 
-def _expect_loom_constant_name_self_test(
-    name: str,
-    relative_path: str,
-    text: str,
-    expected_lines: tuple[int, ...],
-) -> bool:
-    path = REPO_ROOT / relative_path
-    findings = _scan_loom_constant_name_text(path, text)
-    actual = tuple(
-        (_relative_path(finding.path), finding.line, finding.message)
-        for finding in findings
-    )
-    expected = tuple(
-        (relative_path, line, LOOM_CONSTANT_NAME_MESSAGE) for line in expected_lines
-    )
-    if actual == expected:
-        print(f"  PASS  {name}")
-        return True
-    print(f"  FAIL  {name}")
-    print(f"        expected: {expected!r}")
-    print(f"        actual:   {actual!r}")
-    return False
-
-
 def _expect_authoring_self_test(
     name: str, text: str, expected_messages: tuple[str, ...]
 ) -> bool:
@@ -1041,124 +830,6 @@ kernel.def @copy(%n: index) {
   kernel.return
 }
 """
-    ok &= _expect_loom_constant_name_self_test(
-        "checked Loom semantic and numeric-literal names pass",
-        "loom/src/loom/test/corpus/authoring/self_test.loom",
-        checked_loom_happy_path,
-        (),
-    )
-    ok &= _expect_loom_constant_name_self_test(
-        "standalone simple English number name fails",
-        "loom/src/loom/test/self_test.loom",
-        "%two = index.constant 2 : index\n",
-        (1,),
-    )
-    ok &= _expect_loom_constant_name_self_test(
-        "standalone concatenated English number name fails",
-        "loom/src/loom/test/self_test.loom",
-        "%fivehundredtwelve = index.constant 512 : index\n",
-        (1,),
-    )
-    ok &= _expect_loom_constant_name_self_test(
-        "standalone underscored English number name fails",
-        "loom/src/loom/test/self_test.loom",
-        "%thirty_two = index.constant 32 : index\n",
-        (1,),
-    )
-    ok &= _expect_loom_constant_name_self_test(
-        "standalone type-suffixed English number name fails",
-        "loom/src/loom/test/self_test.loom",
-        "%zero_f32x4 = vector.constant 0.0 : vector<4xf32>\n",
-        (1,),
-    )
-    ok &= _expect_loom_constant_name_self_test(
-        "standalone unit-suffixed English number name fails",
-        "loom/src/loom/test/self_test.loom",
-        "%four_bytes = index.constant 4 : offset\n",
-        (1,),
-    )
-    ok &= _expect_loom_constant_name_self_test(
-        "standalone signed English number name fails",
-        "loom/src/loom/test/self_test.loom",
-        "%negative_one = scalar.constant -1 : i32\n",
-        (1,),
-    )
-    ok &= _expect_loom_constant_name_self_test(
-        "prefix and suffix decorators do not make numeric names semantic",
-        "loom/src/loom/test/self_test.loom",
-        (
-            "%i32_zero = scalar.constant 0 : i32\n"
-            "%zero_scalar = scalar.constant 0 : i32\n"
-            "%positive_zero = scalar.constant 0.0 : f32\n"
-            "%neg_one = scalar.constant -1 : i32\n"
-            "%all_ones = scalar.constant -1 : i32\n"
-            "%zero_a = scalar.constant 0 : i32\n"
-            "%f16_ones = vector.constant 1.0 : vector<4xf16>\n"
-        ),
-        (1, 2, 3, 4, 5, 6, 7),
-    )
-    ok &= _expect_loom_constant_name_self_test(
-        "plural English number names fail",
-        "loom/src/loom/test/self_test.loom",
-        (
-            "%ones = scalar.constant 1 : i32\n"
-            "%zeroes = vector.constant 0 : vector<4xi32>\n"
-            "%sixes = vector.constant 6 : vector<4xi32>\n"
-            "%twenties = vector.constant 20 : vector<4xi32>\n"
-        ),
-        (1, 2, 3, 4),
-    )
-    ok &= _expect_loom_constant_name_self_test(
-        "English number connector and scale words fail",
-        "loom/src/loom/test/self_test.loom",
-        (
-            "%one_hundred_and_one = index.constant 101 : index\n"
-            "%thousand = index.constant 1000 : index\n"
-        ),
-        (1, 2),
-    )
-    ok &= _expect_loom_constant_name_self_test(
-        "semantic and connector-derived names pass",
-        "loom/src/loom/test/self_test.loom",
-        (
-            "%and = index.constant 15 : index\n"
-            "%and_zero = index.constant 0 : index\n"
-            "%zero_point = scalar.constant 128 : i32\n"
-            "%zero_exponent = scalar.constant 0 : i32\n"
-            "%two_pi = scalar.constant 6.283185 : f32\n"
-            "%positive_signed_zero = scalar.constant 0.0 : f32\n"
-            "%all_bits_set = scalar.constant -1 : i32\n"
-            "%f32_sign_threshold = scalar.constant 0.0 : f32\n"
-            "%nonzero = scalar.constant true : i1\n"
-            "%fourth_word_ordinal = scalar.constant 4 : i32\n"
-        ),
-        (),
-    )
-    ok &= _expect_loom_constant_name_self_test(
-        "loom-test expected output is excluded",
-        "loom/src/loom/test/self_test.loom-test",
-        (
-            "%batch_size = index.constant 512 : index\n"
-            "// ----\n"
-            "%fivehundredtwelve = index.constant 512 : index\n"
-            "%and_zero = index.constant 0 : index\n"
-        ),
-        (),
-    )
-    ok &= _expect_loom_constant_name_self_test(
-        "loom-test case boundaries restore authored input",
-        "loom/src/loom/test/self_test.loom-test",
-        (
-            "%two = index.constant 2 : index\n"
-            "// ----\n"
-            "%fivehundredtwelve = index.constant 512 : index\n"
-            "// ==== second case\n"
-            "%thirty_two = index.constant 32 : index\n"
-            "// ----\n"
-            "%sixty_four = index.constant 64 : index\n"
-        ),
-        (1, 5),
-    )
     ok &= _expect_authoring_self_test(
         "authoring happy-path source passes",
         checked_loom_happy_path,
@@ -1201,14 +872,11 @@ def main() -> int:
         findings.extend(_scan_core_tooling_flags_guardrails(path))
         findings.extend(_scan_target_execution_guardrails(path))
         findings.extend(_scan_spirv_backend_guardrails(path))
-    loom_files = _iter_checked_loom_files()
-    for path in loom_files:
-        findings.extend(_scan_loom_constant_name_text(path, path.read_text()))
     for path in _iter_authoring_loom_files():
         findings.extend(_scan_authoring_corpus(path))
 
     if not findings:
-        print(f"loom-source-lint: PASS ({len(loom_files)} Loom text files scanned)")
+        print("loom-source-lint: PASS")
         return 0
 
     print("loom-source-lint: FAIL: Loom source invariant violation.")

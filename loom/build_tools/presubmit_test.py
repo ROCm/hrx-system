@@ -429,18 +429,101 @@ class LoomPresubmitTest(unittest.TestCase):
         )
         stage_changed_paths.assert_not_called()
 
-    def test_source_lint_is_project_owned_and_read_only(self):
-        with mock.patch.object(
-            self.presubmit, "run_command", return_value=True
-        ) as run_command:
-            self.assertTrue(self.presubmit.run_source_lint())
+    def test_source_lint_classification_is_strict(self):
+        self.assertTrue(self.presubmit.is_lint_source_path("loom/a.loom"))
+        self.assertTrue(self.presubmit.is_lint_source_path("loom/a.loom-test"))
+        self.assertFalse(self.presubmit.is_lint_source_path("loom/a.txt"))
+        self.assertFalse(self.presubmit.is_lint_source_path("loom/../a.loom"))
+        self.assertFalse(self.presubmit.is_lint_source_path("other/a.loom"))
 
-        run_command.assert_called_once_with(
+    def test_source_lint_uses_public_tool_then_private_guardrails(self):
+        linter_path = Path("/tools/loom-lint")
+        with (
+            mock.patch.object(
+                self.presubmit,
+                "tracked_lint_source_paths",
+                return_value=["loom/a.loom", "loom/b.loom-test"],
+            ),
+            mock.patch.object(
+                self.presubmit.project_presubmit,
+                "build_and_resolve_executable",
+                return_value=linter_path,
+            ) as build_and_resolve_executable,
+            mock.patch.object(
+                self.presubmit, "run_command", return_value=True
+            ) as run_command,
+        ):
+            self.assertTrue(
+                self.presubmit.run_source_lint(lane="bazel", files_from=None)
+            )
+
+        build_and_resolve_executable.assert_called_once_with(
+            "loom",
+            self.presubmit.REPO_ROOT,
+            lane="bazel",
+            bazel_target="//loom/py/loom/tools:loom-lint",
+            cmake_target="loom::py::loom::tools::loom-lint",
+            bazel_args=("--config=locked",),
+        )
+        self.assertEqual(
+            run_command.call_args_list,
             [
-                sys.executable,
-                "loom/build_tools/linters/loom_source_lint.py",
+                mock.call(
+                    [
+                        str(linter_path),
+                        "loom/a.loom",
+                        "loom/b.loom-test",
+                    ],
+                    "Loom authoring policy",
+                ),
+                mock.call(
+                    [
+                        sys.executable,
+                        "loom/build_tools/linters/loom_source_lint.py",
+                    ],
+                    "Loom repository invariants",
+                ),
             ],
-            "Loom source invariants",
+        )
+
+    def test_source_lint_cmake_lane_invokes_public_python_entrypoint(self):
+        with (
+            mock.patch.object(
+                self.presubmit,
+                "tracked_lint_source_paths",
+                return_value=["loom/a.loom"],
+            ),
+            mock.patch.object(
+                self.presubmit.project_presubmit, "build_and_resolve_executable"
+            ) as build_and_resolve_executable,
+            mock.patch.object(
+                self.presubmit, "run_command", return_value=True
+            ) as run_command,
+        ):
+            self.assertTrue(
+                self.presubmit.run_source_lint(lane="cmake", files_from=None)
+            )
+
+        build_and_resolve_executable.assert_not_called()
+        self.assertEqual(
+            run_command.call_args_list,
+            [
+                mock.call(
+                    [
+                        sys.executable,
+                        "loom/py/loom/tools/source_lint.py",
+                        "loom/a.loom",
+                    ],
+                    "Loom authoring policy",
+                ),
+                mock.call(
+                    [
+                        sys.executable,
+                        "loom/build_tools/linters/loom_source_lint.py",
+                    ],
+                    "Loom repository invariants",
+                ),
+            ],
         )
 
     def test_generated_artifact_drift_fails_presubmit(self):
@@ -476,7 +559,7 @@ class LoomPresubmitTest(unittest.TestCase):
         source_format_maintenance.assert_called_once_with(
             lane="bazel", files_from=None, fix=False
         )
-        source_lint.assert_called_once_with()
+        source_lint.assert_called_once_with(lane="bazel", files_from=None)
         bazel_tests.assert_called_once_with()
 
     def test_source_lint_failure_fails_project_hygiene(self):
@@ -510,7 +593,7 @@ class LoomPresubmitTest(unittest.TestCase):
         source_format_maintenance.assert_called_once_with(
             lane="bazel", files_from=None, fix=False
         )
-        source_lint.assert_called_once_with()
+        source_lint.assert_called_once_with(lane="bazel", files_from=None)
         bazel_tests.assert_not_called()
 
     def test_test_phase_does_not_repeat_hygiene_checks(self):
