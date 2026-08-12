@@ -12,6 +12,7 @@ load("//build_tools/bazel:requirements.bzl", "apply_test_requirements")
 _LOOM_BENCHMARK_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:benchmark_toolchain_type")
 _LOOM_COMPILE_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:compile_toolchain_type")
 _LOOM_FORMAT_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:format_toolchain_type")
+_LOOM_LINT_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:lint_toolchain_type")
 _LOOM_LINK_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:link_toolchain_type")
 _LOOM_TEST_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:test_toolchain_type")
 
@@ -385,6 +386,31 @@ _loom_format_test = rule(
     toolchains = [_LOOM_FORMAT_TOOLCHAIN_TYPE],
 )
 
+def _loom_lint_test_impl(ctx):
+    tool = ctx.toolchains[_LOOM_LINT_TOOLCHAIN_TYPE].tool
+    output = _write_test_launcher(ctx, tool, ctx.file.src, [])
+    return [
+        DefaultInfo(
+            executable = output,
+            files = depset([output]),
+            runfiles = _tool_runfiles(ctx, tool, [ctx.file.src]),
+        ),
+    ]
+
+_loom_lint_test = rule(
+    implementation = _loom_lint_test_impl,
+    attrs = {
+        "src": attr.label(
+            allow_single_file = [".loom"],
+            mandatory = True,
+            doc = "Authored Loom text source to check.",
+        ),
+    },
+    doc = "Checks authoring policy in one Loom source file.",
+    test = True,
+    toolchains = [_LOOM_LINT_TOOLCHAIN_TYPE],
+)
+
 def _loom_plan_test_impl(ctx):
     tool = ctx.toolchains[_LOOM_BENCHMARK_TOOLCHAIN_TYPE].tool
     module = ctx.attr.library[LoomLibraryInfo].module
@@ -544,6 +570,15 @@ def _declare_library(
 
     tests = []
     for index, src in enumerate(srcs):
+        lint_test_name = "%s_lint_%d_test" % (name, index)
+        _loom_lint_test(
+            name = lint_test_name,
+            src = src,
+            tags = tags + ["hostonly"],
+            visibility = ["//visibility:private"],
+        )
+        tests.append(lint_test_name)
+
         test_name = "%s_format_%d_test" % (name, index)
         _loom_format_test(
             name = test_name,
