@@ -463,6 +463,15 @@ def render_bzl(config: TargetConfig) -> str:
         )
         for key in config.descriptor_set_keys
     ]
+    storage_capabilities: dict[str, list[str]] = {}
+    for key in config.descriptor_set_keys:
+        info = config.descriptor_set_info(key)
+        storage_generator_target = (
+            info.storage_generator_target or info.generator_target
+        )
+        storage_capabilities.setdefault(storage_generator_target, []).append(
+            descriptor_set_capability(key)
+        )
     low_descriptor_header_pairs = [
         (
             descriptor_set_capability(key),
@@ -544,6 +553,10 @@ def render_bzl(config: TargetConfig) -> str:
                 bzl_string_dict(
                     "LOOM_AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS",
                     generator_target_pairs,
+                ),
+                bzl_list_dict(
+                    "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES_BY_STORAGE_GENERATOR_TARGET",
+                    sorted(storage_capabilities.items()),
                 ),
                 bzl_string_dict(
                     "LOOM_AMDGPU_LOW_DESCRIPTOR_HEADERS",

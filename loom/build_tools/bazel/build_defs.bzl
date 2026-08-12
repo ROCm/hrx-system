@@ -233,7 +233,6 @@ def loom_target_table_cc_library(
         args = [],
         inputs = [],
         deps = [],
-        exclude_from_cmake_all = False,
         tags = [],
         testonly = False,
         visibility = None,
@@ -266,7 +265,6 @@ def loom_target_table_cc_library(
         paths.
       inputs: Source/vendor data labels consumed by the generator.
       deps: Runtime C library dependencies.
-      exclude_from_cmake_all: Excludes the generated C library from CMake all.
       tags: Additional Bazel tags for the internal generator action.
       testonly: Passed through to the runtime C library.
       visibility: Passed through to the generator action and runtime library.
@@ -274,7 +272,6 @@ def loom_target_table_cc_library(
     """
     if len(generated_hdr_flags) != len(generated_hdrs):
         fail("generated_hdr_flags and generated_hdrs must have the same length")
-    _ = exclude_from_cmake_all  # @unused
 
     package_name = native.package_name()
     header = header or (name + ".h")
@@ -632,7 +629,6 @@ def loom_low_descriptor_cc_library(
         deps = [],
         ids_deps = None,
         ids_visibility = None,
-        exclude_from_cmake_all = False,
         tags = [],
         testonly = False,
         visibility = None,
@@ -656,7 +652,6 @@ def loom_low_descriptor_cc_library(
         Defaults to deps.
       ids_visibility: Visibility for the generated _ids target. Defaults to
         visibility.
-      exclude_from_cmake_all: Excludes the generated C library from CMake all.
       tags: Additional Bazel tags for the internal generator action.
       testonly: Passed through to the runtime C libraries.
       visibility: Passed through to the generator action and runtime libraries.
@@ -676,7 +671,6 @@ def loom_low_descriptor_cc_library(
         args = args,
         inputs = inputs,
         deps = deps,
-        exclude_from_cmake_all = exclude_from_cmake_all,
         tags = tags,
         testonly = testonly,
         visibility = visibility,
@@ -692,19 +686,3 @@ def loom_low_descriptor_cc_library(
         testonly = testonly,
         visibility = ids_visibility if ids_visibility != None else visibility,
     )
-
-def loom_low_descriptor_exclude_from_cmake_all(
-        cc_libraries = [],
-        targets = []):
-    """Excludes descriptor-dependent CMake targets from the default all target.
-
-    Descriptor registries and backend-specific tests often depend on large
-    target tables. Keeping those targets declared but outside CMake all lets
-    explicit builds and tests work without making every default build fetch and
-    compile every backend descriptor package.
-
-    Args:
-      cc_libraries: iree_cc_library names in the current package.
-      targets: Other CMake target names in the current package, usually tests.
-    """
-    _ = (cc_libraries, targets)  # @unused

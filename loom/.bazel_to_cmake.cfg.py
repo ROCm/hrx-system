@@ -100,6 +100,11 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         self._loom_amdgpu_descriptor_set_generator_targets = _LOOM_AMDGPU_TARGET_CONFIG[
             "LOOM_AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS"
         ]
+        self._loom_amdgpu_descriptor_set_capabilities_by_storage_generator_target = (
+            _LOOM_AMDGPU_TARGET_CONFIG[
+                "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES_BY_STORAGE_GENERATOR_TARGET"
+            ]
+        )
         self._loom_requirement_policy = bazel_to_cmake_requirements.load_project_policy(
             self._repo_root,
             "loom",
@@ -272,6 +277,21 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         return self.loom_config_compatible_with(
             [self._loom_amdgpu_descriptor_set_config_label(capability)]
         )
+
+    def loom_amdgpu_descriptor_table_compatible_with(self, storage_generator_target):
+        capabilities = self._loom_amdgpu_descriptor_set_capabilities_by_storage_generator_target.get(
+            storage_generator_target
+        )
+        if not capabilities:
+            raise ValueError(
+                f"Unknown AMDGPU descriptor storage target: {storage_generator_target}"
+            )
+        compatibility = {
+            self._loom_amdgpu_descriptor_set_config_label(capability): []
+            for capability in capabilities
+        }
+        compatibility["//conditions:default"] = ["@platforms//:incompatible"]
+        return self.select(compatibility)
 
     def loom_amdgpu_selected_descriptor_set_defines(self):
         defines = []
@@ -822,7 +842,6 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         inputs=None,
         deps=None,
         ids_deps=None,
-        exclude_from_cmake_all=False,
         tags=None,
         testonly=None,
         visibility=None,
@@ -856,9 +875,6 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         )
         deps_block = self._convert_target_list_block("DEPS", deps)
         ids_deps_block = self._convert_target_list_block("IDS_DEPS", ids_deps)
-        exclude_from_all_block = self._convert_option_block(
-            "EXCLUDE_FROM_ALL", exclude_from_cmake_all
-        )
         header_only_block = self._convert_option_block("HEADER_ONLY", header_only)
         testonly_block = self._convert_option_block("TESTONLY", testonly)
 
@@ -878,7 +894,6 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             f"{inputs_block}"
             f"{deps_block}"
             f"{ids_deps_block}"
-            f"{exclude_from_all_block}"
             f"{header_only_block}"
             f"{testonly_block}"
             f")\n\n"
@@ -897,7 +912,6 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         inputs=None,
         deps=None,
         ids_deps=None,
-        exclude_from_cmake_all=False,
         tags=None,
         testonly=None,
         target_compatible_with=None,
@@ -922,7 +936,6 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             inputs=inputs,
             deps=deps,
             ids_deps=ids_deps,
-            exclude_from_cmake_all=exclude_from_cmake_all,
             testonly=testonly,
             cmake_rule_name="loom_target_table_cc_library",
         )
@@ -1098,7 +1111,6 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         inputs=None,
         deps=None,
         ids_deps=None,
-        exclude_from_cmake_all=False,
         tags=None,
         testonly=None,
         target_compatible_with=None,
@@ -1123,31 +1135,8 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             inputs=inputs,
             deps=deps,
             ids_deps=ids_deps,
-            exclude_from_cmake_all=exclude_from_cmake_all,
             testonly=testonly,
             cmake_rule_name="loom_low_descriptor_cc_library",
-        )
-        self._emit_platform_guard_end(target_compatible_with)
-
-    def loom_low_descriptor_exclude_from_cmake_all(
-        self,
-        cc_libraries=None,
-        targets=None,
-        target_compatible_with=None,
-    ):
-        target_compatible_with = self._apply_loom_target_compatible_with(
-            target_compatible_with
-        )
-        cc_libraries_block = self._convert_string_list_block(
-            "CC_LIBRARIES", cc_libraries, sort=True
-        )
-        targets_block = self._convert_string_list_block("TARGETS", targets, sort=True)
-        self._emit_platform_guard_begin(target_compatible_with)
-        self._converter.body += (
-            f"loom_low_descriptor_exclude_from_all(\n"
-            f"{cc_libraries_block}"
-            f"{targets_block}"
-            f")\n\n"
         )
         self._emit_platform_guard_end(target_compatible_with)
 
