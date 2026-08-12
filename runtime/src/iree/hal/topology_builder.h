@@ -19,7 +19,7 @@ extern "C" {
 #endif  // __cplusplus
 
 // Layout constants are defined in topology.h alongside the type definitions.
-// This header provides setters for constructing scheduling and interop words.
+// This header provides setters for constructing scheduling and cold words.
 
 //===----------------------------------------------------------------------===//
 // Scheduling word (lo) setters
@@ -190,7 +190,7 @@ iree_hal_topology_edge_set_link_class(
 }
 
 //===----------------------------------------------------------------------===//
-// Interop word (hi) setters
+// Cold word (hi) setters
 //===----------------------------------------------------------------------===//
 
 // Sets semaphore import timepoint types in an interop word.
@@ -240,6 +240,28 @@ iree_hal_topology_edge_set_buffer_export_types(
             << IREE_HAL_TOPOLOGY_EDGE_BUFFER_EXPORT_TYPES_SHIFT);
   word |= ((uint64_t)types & IREE_HAL_TOPOLOGY_EDGE_BUFFER_EXPORT_TYPES_MASK)
           << IREE_HAL_TOPOLOGY_EDGE_BUFFER_EXPORT_TYPES_SHIFT;
+  return word;
+}
+
+// Sets the physical interconnect technology in a cold word.
+static inline iree_hal_topology_edge_interop_word_t
+iree_hal_topology_edge_set_link_type(iree_hal_topology_edge_interop_word_t word,
+                                     iree_hal_topology_link_type_t link_type) {
+  word &= ~(IREE_HAL_TOPOLOGY_EDGE_LINK_TYPE_MASK
+            << IREE_HAL_TOPOLOGY_EDGE_LINK_TYPE_SHIFT);
+  word |= ((uint64_t)link_type & IREE_HAL_TOPOLOGY_EDGE_LINK_TYPE_MASK)
+          << IREE_HAL_TOPOLOGY_EDGE_LINK_TYPE_SHIFT;
+  return word;
+}
+
+// Sets the physical path length in a cold word.
+static inline iree_hal_topology_edge_interop_word_t
+iree_hal_topology_edge_set_path_hop_count(
+    iree_hal_topology_edge_interop_word_t word, uint8_t hop_count) {
+  word &= ~(IREE_HAL_TOPOLOGY_EDGE_PATH_HOP_COUNT_MASK
+            << IREE_HAL_TOPOLOGY_EDGE_PATH_HOP_COUNT_SHIFT);
+  word |= ((uint64_t)hop_count & IREE_HAL_TOPOLOGY_EDGE_PATH_HOP_COUNT_MASK)
+          << IREE_HAL_TOPOLOGY_EDGE_PATH_HOP_COUNT_SHIFT;
   return word;
 }
 

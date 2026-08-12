@@ -1,4 +1,6 @@
-# Mental model
+# From source to artifacts
+
+**Example files:** [`loom/docs/examples/elementwise-transform/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/elementwise-transform)
 
 Loom keeps a program understandable while it moves from reusable source to a
 target-specific artifact. Linking, specialization, launch configuration,
@@ -11,7 +13,11 @@ implementations, dispatchable kernels, executable checks, and command programs.
 An application chooses which roots and facts matter, then asks Loom to link and
 specialize only that reachable program.
 
-## From source to artifacts
+The canonical `elementwise-transform` example maps a selectable doubling motif
+over f32 buffers, then follows that program through linking, target
+specialization, native kernel emission, and command-program lowering.
+
+## One program, several forms
 
 `.loom` is the canonical, human-readable source form. `.loombc` preserves the
 same linkable program in bytecode. Neither form implies one target or one
@@ -60,11 +66,19 @@ This is the foundation of a scalable library: callers name semantic demands;
 libraries provide reusable implementations; target selection remains a fact of
 the final compilation rather than a global property baked into every helper.
 This example defines an exact helper, a wave32-specific provider, and a
-portable provider for the same `guide.transform` contract:
+portable provider for the same `guide.elementwise_transform` contract:
+
+**Source:** [`loom/docs/examples/elementwise-transform/motif.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/elementwise-transform/motif.loom)
 
 ```loom title="motif.loom"
---8<-- "examples/mental-model/motif.loom"
+--8<-- "examples/elementwise-transform/motif.loom"
 ```
+
+All three definitions omit `public` and are therefore private. Supplying the
+motif as an explicit library makes those implementations available while Loom
+forms the requested program, but it does not add them to the module's public
+interface. Provider selection and normal reachability can then remove the
+implementations the selected root does not need.
 
 The wave32 provider is eligible only when the selected target establishes a
 subgroup size of 32. The fallback stays targetless, so the motif remains useful
@@ -96,11 +110,14 @@ they are not. The generated [`kernel` dialect
 reference](../reference/dialects/kernel/index.md) defines the complete launch,
 execution, collective, and synchronization vocabulary.
 
-The kernel below owns its launch geometry, states its configuration domain,
-and applies the motif contract without naming either provider:
+The kernel below accepts its element count as a workload and device value,
+derives a one-subgroup workgroup size from the target profile, and applies the
+motif contract without naming either provider:
+
+**Source:** [`loom/docs/examples/elementwise-transform/kernel.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/elementwise-transform/kernel.loom)
 
 ```loom title="kernel.loom"
---8<-- "examples/mental-model/kernel.loom"
+--8<-- "examples/elementwise-transform/kernel.loom"
 ```
 
 ## Ask when a value becomes known
@@ -117,21 +134,31 @@ binding stage.
 | Command specialization arguments | Command-program specialization | Shape a reusable command artifact and its aggregate launch requirements. |
 | Command buffer bindings | Command-program issue | Attach concrete parameter, transient, input, and output storage without recompiling the schedule. |
 
-Configuration is not a hidden global flag. A module declares the values it
-requires, another input defines them, and ordinary symbol dependency analysis
-keeps their effect visible. Likewise, target requirements are compile-time
-selection constraints rather than runtime branches. Reusable code generally
-stays targetless; a provider names a target requirement only when its algorithm
+Configuration is not a hidden global flag. A module declares artifact-level
+choices such as a model's layer count or weight encoding, another input defines
+them, and ordinary symbol dependency analysis keeps their effect visible:
+
+```loom
+config.decl @model.layer_count : %value: index where [range(%value, 1, 256)]
+config.decl @model.weight_encoding : encoding<schema>
+```
+
+Per-launch element counts stay workload values instead of becoming global
+configuration. Likewise, target requirements are compile-time selection
+constraints rather than runtime branches. Reusable code generally stays
+targetless; a provider names a target requirement only when its algorithm
 actually depends on one.
 
 Loom can preserve only information the program supplies. The ranges and
 divisibility predicates on a
 [`config.decl`](../reference/dialects/config/ops/decl.md) constrain a value even
-before a composition root binds it to one constant. An
-[`index.assume`](../reference/dialects/index/ops/assume.md) creates a refined SSA
-value carrying facts established by the surrounding program, such as the
-in-bounds index in `kernel.loom`. The `buffer.assume.*` family carries root
-alignment, memory-space, aliasing, and identity facts; the example's
+before a composition root binds it to one constant. Control flow also supplies
+path facts: inside the guarded region in `kernel.loom`, Loom knows that
+`%element_index < %element_count` without an extra assumption. An
+[`index.assume`](../reference/dialects/index/ops/assume.md) is for information
+the compiler cannot derive, such as a range guaranteed by the producer of a
+loaded routing index. The `buffer.assume.*` family carries root alignment,
+memory-space, aliasing, and identity facts; the example's
 [`buffer.assume.noalias`](../reference/dialects/buffer/ops/assume-noalias.md)
 makes the input and output independence explicit.
 
@@ -174,11 +201,15 @@ target facts while still accepting different weights, cache storage, inputs,
 and outputs. It is the same idea as a specialized kernel launch, applied to a
 larger ownership boundary rather than hidden behind a separate graph compiler.
 
-The outer module declares the exact kernel dependency and turns it into a
-one-dispatch reusable command program:
+The outer module declares the exact kernel dependency and turns one concrete
+1009-element invocation into a reusable command program. The kernel itself
+retains its dynamic workload contract and can be launched with other counts by
+other roots:
+
+**Source:** [`loom/docs/examples/elementwise-transform/model.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/elementwise-transform/model.loom)
 
 ```loom title="model.loom"
---8<-- "examples/mental-model/model.loom"
+--8<-- "examples/elementwise-transform/model.loom"
 ```
 
 !!! info "Current command-program surface"
@@ -194,31 +225,32 @@ constructs that exist today.
 
 ## Follow one composition to Low
 
-The three source listings above are checked `.loom` files, not prose copies.
+The three source listings above are repository `.loom` files, not prose copies.
 With the Loom tools on `PATH`, this command formats them, links and specializes
-the `@transform` root, compiles its kernel for the generic GFX11 profile, and
+the `@elementwise_transform` root, compiles its kernel for the generic GFX11
+profile, and
 prints every Loom command it runs:
 
 ```shell
-loom/docs/examples/mental-model/run.sh \
-  gfx11-generic build/mental-model/gfx11-generic
+loom/docs/examples/elementwise-transform/run.sh \
+  gfx11-generic build/elementwise-transform/gfx11-generic
 ```
 
-The resulting directory contains the specialized `transform.loom`, a VMFB, an
-HSACO, and the captured target Low IR. The documentation build invokes that
-same script and regenerates the views below; neither output is checked-in
-source.
+The resulting directory contains the specialized `elementwise-transform.loom`,
+a VMFB, an HSACO, and the captured target Low IR. The documentation build
+invokes that same script and regenerates the views below; neither output is
+checked-in source.
 
 === "GFX11 kernel Low"
 
     ```loom
-    --8<-- "generated/examples/mental-model/kernel-gfx11.loom"
+    --8<-- "generated/examples/elementwise-transform/elementwise-transform-gfx11.loom"
     ```
 
 === "Command-program Low"
 
     ```loom
-    --8<-- "generated/examples/mental-model/command-program.loom"
+    --8<-- "generated/examples/elementwise-transform/elementwise-transform-program.loom"
     ```
 
 The GFX11 tab comes directly from the installed-tool workflow above. The
@@ -240,6 +272,10 @@ this guide are included only from checked programs that build against that API;
 the generated header reference remains authoritative for ownership, lifetime,
 threading, and failure contracts.
 
+[Embed kernel JIT compilation](../integration/jit-kernel.md) follows one of
+those checked programs from targetless source through launch evaluation and an
+in-memory native executable.
+
 ## Working rules
 
 - Keep reusable algorithms targetless until a real implementation requirement
@@ -254,6 +290,8 @@ threading, and failure contracts.
   actually becomes dispatchable, and a command-program ABI where a reusable
   subgraph becomes materializable.
 
-Browse the [generated language reference](../reference/index.md) for exact
+Continue with [Source modules and canonical
+text](../guide/source-modules.md) to learn the source and composition contract,
+or browse the [generated language reference](../reference/index.md) for exact
 syntax and operation contracts. If the Loom tools are not yet on `PATH`,
 [Acquiring Loom](acquiring-loom.md) describes the current installation status.

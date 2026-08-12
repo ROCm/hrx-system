@@ -1,9 +1,0 @@
-// The declaration makes the exact dependency explicit in this source module.
-kernel.decl @transform_buffer() launch(%input: buffer, %output: buffer)
-
-// The command program owns the reusable schedule while buffers remain
-// replaceable at issue time.
-command.program.def public @transform() launch(%input: buffer, %output: buffer) {
-  kernel.launch @transform_buffer(%input, %output) : (buffer, buffer)
-  command.return
-}

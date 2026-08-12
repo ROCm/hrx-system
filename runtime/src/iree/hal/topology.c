@@ -12,6 +12,25 @@
 // iree_hal_topology_t formatting
 //===----------------------------------------------------------------------===//
 
+static iree_string_view_t iree_hal_topology_link_type_string(
+    iree_hal_topology_link_type_t link_type) {
+  switch (link_type) {
+    case IREE_HAL_TOPOLOGY_LINK_TYPE_HYPERTRANSPORT:
+      return IREE_SV("HT");
+    case IREE_HAL_TOPOLOGY_LINK_TYPE_QPI:
+      return IREE_SV("QPI");
+    case IREE_HAL_TOPOLOGY_LINK_TYPE_PCIE:
+      return IREE_SV("PCIE");
+    case IREE_HAL_TOPOLOGY_LINK_TYPE_INFINIBAND:
+      return IREE_SV("INFINIBAND");
+    case IREE_HAL_TOPOLOGY_LINK_TYPE_XGMI:
+      return IREE_SV("XGMI");
+    case IREE_HAL_TOPOLOGY_LINK_TYPE_UNKNOWN:
+    default:
+      return IREE_SV("UNKNOWN");
+  }
+}
+
 iree_status_t iree_hal_topology_edge_format(iree_hal_topology_edge_t edge,
                                             iree_string_builder_t* builder) {
   static const iree_bitfield_string_mapping_t interop_mode_mappings[] = {
@@ -49,6 +68,15 @@ iree_status_t iree_hal_topology_edge_format(iree_hal_topology_edge_t edge,
   IREE_RETURN_IF_ERROR(iree_bitfield_format(
       iree_hal_topology_edge_link_class(edge.lo),
       IREE_ARRAYSIZE(link_class_mappings), link_class_mappings, builder));
+
+  // Format physical path details.
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, " transport="));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
+      builder, iree_hal_topology_link_type_string(
+                   iree_hal_topology_edge_link_type(edge.hi))));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder, " hops=%u", iree_hal_topology_edge_path_hop_count(edge.hi)));
 
   // Format buffer modes (non-coherent and coherent).
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, " buf_nc="));

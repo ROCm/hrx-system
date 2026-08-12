@@ -43,11 +43,11 @@ if [[ ! -x "${loom_check}" ]]; then
   exit 127
 fi
 
-output_dir="${1:-${TEST_UNDECLARED_OUTPUTS_DIR:-${repo_root}/build/loom-docs/examples/mental-model}}"
+output_dir="${1:-${TEST_UNDECLARED_OUTPUTS_DIR:-${repo_root}/build/loom-docs/examples/elementwise-transform}}"
 mkdir -p -- "${output_dir}"
 output_dir="$(cd -- "${output_dir}" && pwd -P)"
 
-temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/loom-doc-mental-model.XXXXXX")"
+temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/loom-doc-elementwise-transform.XXXXXX")"
 cleanup() {
   rm -rf -- "${temporary_root}"
 }
@@ -56,9 +56,9 @@ trap cleanup EXIT
 artifact_root="${temporary_root}/artifacts"
 "${script_dir}/run.sh" gfx11-generic "${artifact_root}"
 
-kernel_dump="${artifact_root}/transform-gfx11.loom"
-kernel_output="${output_dir}/kernel-gfx11.loom"
-kernel_unformatted="${temporary_root}/kernel-gfx11.loom"
+kernel_dump="${artifact_root}/elementwise-transform-gfx11.loom"
+kernel_output="${output_dir}/elementwise-transform-gfx11.loom"
+kernel_unformatted="${temporary_root}/elementwise-transform-gfx11.loom"
 awk '!found && /^low\.kernel\.def / { found = 1 } found { print }' \
   "${kernel_dump}" >"${kernel_unformatted}"
 "${LOOM_FORMAT}" "${kernel_unformatted}" \
@@ -67,10 +67,10 @@ awk '!found && /^low\.kernel\.def / { found = 1 } found { print }' \
 
 # Command-program materialization is not an installed-tool surface yet. Keep
 # this target-owned check provider behind the documentation build boundary.
-command_fixture="${temporary_root}/command-program.loom-test"
+command_fixture="${temporary_root}/elementwise-transform-program.loom-test"
 {
-  printf '// RUN: emit command-program @transform\n\n'
-  sed -n '1,$p' "${artifact_root}/transform.loom"
+  printf '// RUN: emit command-program @elementwise_transform\n\n'
+  sed -n '1,$p' "${artifact_root}/elementwise-transform.loom"
   printf '\n// ----\n'
 } >"${command_fixture}"
 
@@ -88,16 +88,16 @@ if ! "${loom_check}" "${command_fixture}"; then
   exit 1
 fi
 
-command_output="${output_dir}/command-program.loom"
+command_output="${output_dir}/elementwise-transform-program.loom"
 awk 'found { print } $0 == "// ----" { found = 1 }' \
   "${command_fixture}" >"${command_output}"
 
-grep -Fq '@transform_buffer' "${kernel_output}"
+grep -Fq '@elementwise_transform_f32' "${kernel_output}"
 grep -Fq 'amdgpu.global_load_b32_saddr' "${kernel_output}"
 grep -Fq 'amdgpu.v_add_f32' "${kernel_output}"
 grep -Fq 'amdgpu.global_store_b32_saddr' "${kernel_output}"
-grep -Fq '@transform() asm' "${command_output}"
-grep -Fq 'cmd.dispatch.direct' "${command_output}"
+grep -Fq '@elementwise_transform() asm' "${command_output}"
+grep -Fq 'cmd.dispatch.' "${command_output}"
 
 printf 'Generated documentation snippets:\n'
 printf '  %s\n' "${kernel_output}" "${command_output}"

@@ -1,0 +1,14 @@
+// Builds logical lane coordinates, masks inactive lanes, and scales the active
+// values without committing to a target register width.
+func.def @masked_scale(%base: i32, %limit: i32, %values: vector<8xf32>, %scale: f32) -> (vector<8xf32>) {
+  %step = scalar.constant 1 : i32
+  %lanes = vector.iota %base step %step : vector<8xi32>
+  %limits = vector.splat %limit : vector<8xi32>
+  %active = vector.cmpi slt, %lanes, %limits : vector<8xi32> -> vector<8xi1>
+
+  %scales = vector.splat %scale : vector<8xf32>
+  %scaled = vector.mulf %values, %scales : vector<8xf32>
+  %inactive_values = vector.constant 0.0 : vector<8xf32>
+  %result = vector.select %active, %scaled, %inactive_values : vector<8xf32>
+  func.return %result : vector<8xf32>
+}
