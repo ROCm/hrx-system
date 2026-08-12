@@ -928,6 +928,43 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         )
         self._emit_platform_guard_end(target_compatible_with)
 
+    def loom_target_contract_cc_libraries(
+        self,
+        name,
+        contract_deps=None,
+        lower_rule_deps=None,
+        tags=None,
+        testonly=None,
+        target_compatible_with=None,
+        visibility=None,
+        **kwargs,
+    ):
+        if self._should_skip_target(tags=tags, **kwargs):
+            return
+        target_compatible_with = self._apply_loom_target_compatible_with(
+            target_compatible_with
+        )
+
+        name_block = self._convert_string_arg_block("NAME", name, quote=False)
+        contract_deps_block = self._convert_target_list_block(
+            "CONTRACT_DEPS", contract_deps
+        )
+        lower_rule_deps_block = self._convert_target_list_block(
+            "LOWER_RULE_DEPS", lower_rule_deps
+        )
+        testonly_block = self._convert_option_block("TESTONLY", testonly)
+
+        self._emit_platform_guard_begin(target_compatible_with)
+        self._converter.body += (
+            f"loom_target_contract_cc_libraries(\n"
+            f"{name_block}"
+            f"{contract_deps_block}"
+            f"{lower_rule_deps_block}"
+            f"{testonly_block}"
+            f")\n\n"
+        )
+        self._emit_platform_guard_end(target_compatible_with)
+
     def loom_target_contract_table_cc_libraries(
         self,
         name,
@@ -984,6 +1021,66 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             f"{contract_deps_block}"
             f"{lower_rule_deps_block}"
             f"{testonly_block}"
+            f")\n\n"
+        )
+        self._emit_platform_guard_end(target_compatible_with)
+
+    def loom_target_contract_file_family(
+        self,
+        name,
+        generator,
+        fragments,
+        args=None,
+        inputs=None,
+        comment=None,
+        tags=None,
+        target_compatible_with=None,
+        visibility=None,
+        **kwargs,
+    ):
+        if self._should_skip_target(tags=tags, **kwargs):
+            return
+        target_compatible_with = self._apply_loom_target_compatible_with(
+            target_compatible_with
+        )
+
+        name_block = self._convert_string_arg_block("NAME", name, quote=False)
+        generator_block = self._convert_single_target_block("GENERATOR", generator)
+        fragments_block = self._convert_string_list_block(
+            "FRAGMENTS",
+            [
+                f"{stem}={fragment_key}"
+                for stem, fragment_key in sorted(fragments.items())
+            ],
+            sort=False,
+        )
+        args_block, platform_args_block = self._convert_platform_select_strings(
+            name,
+            "ARGS",
+            self._convert_generated_args(args),
+            sort=False,
+        )
+        inputs_block, platform_inputs_block = self._convert_platform_select_strings(
+            name,
+            "INPUTS",
+            self._convert_generated_inputs(inputs),
+            sort=False,
+        )
+        comment_block = self._convert_string_arg_block("COMMENT", comment)
+
+        self._emit_platform_guard_begin(target_compatible_with)
+        if platform_args_block:
+            self._converter.body += platform_args_block
+        if platform_inputs_block:
+            self._converter.body += platform_inputs_block
+        self._converter.body += (
+            f"loom_target_contract_file_family(\n"
+            f"{name_block}"
+            f"{generator_block}"
+            f"{fragments_block}"
+            f"{args_block}"
+            f"{inputs_block}"
+            f"{comment_block}"
             f")\n\n"
         )
         self._emit_platform_guard_end(target_compatible_with)

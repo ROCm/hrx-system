@@ -204,6 +204,53 @@ function(loom_target_table_cc_library)
   endif()
 endfunction()
 
+function(loom_target_contract_cc_libraries)
+  cmake_parse_arguments(
+    _RULE
+    "TESTONLY"
+    "NAME"
+    "CONTRACT_DEPS;LOWER_RULE_DEPS"
+    ${ARGN}
+  )
+
+  if(NOT _RULE_NAME)
+    message(FATAL_ERROR "loom_target_contract_cc_libraries requires NAME")
+  endif()
+  if(_RULE_TESTONLY AND NOT IREE_BUILD_TESTS)
+    return()
+  endif()
+  if(_RULE_TESTONLY)
+    set(_TESTONLY_ARG TESTONLY)
+  else()
+    set(_TESTONLY_ARG)
+  endif()
+
+  loom_cc_library(
+    NAME
+      "${_RULE_NAME}"
+    HDRS
+      "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_NAME}.h"
+    SRCS
+      "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_NAME}.c"
+    DEPS
+      ${_RULE_CONTRACT_DEPS}
+    ${_TESTONLY_ARG}
+    PUBLIC
+  )
+  loom_cc_library(
+    NAME
+      "${_RULE_NAME}_lower_rules"
+    HDRS
+      "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_NAME}_lower_rules.h"
+    SRCS
+      "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_NAME}_lower_rules.c"
+    DEPS
+      ${_RULE_LOWER_RULE_DEPS}
+    ${_TESTONLY_ARG}
+    PUBLIC
+  )
+endfunction()
+
 function(loom_target_contract_table_cc_libraries)
   cmake_parse_arguments(
     _RULE
@@ -285,29 +332,72 @@ function(loom_target_contract_table_cc_libraries)
       ${_OUTPUTS}
   )
 
-  loom_cc_library(
+  loom_target_contract_cc_libraries(
     NAME
       "${_RULE_NAME}"
-    HDRS
-      "${_CONTRACT_HEADER}"
-    SRCS
-      "${_CONTRACT_SOURCE}"
-    DEPS
+    CONTRACT_DEPS
       ${_RULE_CONTRACT_DEPS}
-    ${_TESTONLY_ARG}
-    PUBLIC
-  )
-  loom_cc_library(
-    NAME
-      "${_RULE_NAME}_lower_rules"
-    HDRS
-      "${_LOWER_RULE_HEADER}"
-    SRCS
-      "${_LOWER_RULE_SOURCE}"
-    DEPS
+    LOWER_RULE_DEPS
       ${_RULE_LOWER_RULE_DEPS}
     ${_TESTONLY_ARG}
-    PUBLIC
+  )
+endfunction()
+
+function(loom_target_contract_file_family)
+  cmake_parse_arguments(
+    _RULE
+    ""
+    "NAME;GENERATOR;COMMENT"
+    "FRAGMENTS;ARGS;INPUTS"
+    ${ARGN}
+  )
+
+  if(NOT _RULE_NAME)
+    message(FATAL_ERROR "loom_target_contract_file_family requires NAME")
+  endif()
+  if(NOT _RULE_GENERATOR)
+    message(FATAL_ERROR
+      "loom_target_contract_file_family requires GENERATOR")
+  endif()
+  list(LENGTH _RULE_FRAGMENTS _FRAGMENT_COUNT)
+  if(_FRAGMENT_COUNT LESS 2)
+    message(FATAL_ERROR
+      "loom_target_contract_file_family requires at least two fragments")
+  endif()
+
+  set(_OUTPUTS)
+  set(_OUTPUT_FLAGS)
+  set(_GENERATOR_ARGS ${_RULE_ARGS})
+  foreach(_FRAGMENT_SPEC IN LISTS _RULE_FRAGMENTS)
+    if(NOT _FRAGMENT_SPEC MATCHES "^([^=]+)=(.+)$")
+      message(FATAL_ERROR
+        "invalid contract fragment specification: ${_FRAGMENT_SPEC}")
+    endif()
+    set(_STEM "${CMAKE_MATCH_1}")
+    set(_FRAGMENT_KEY "${CMAKE_MATCH_2}")
+    list(APPEND _GENERATOR_ARGS "--contract-fragment=${_FRAGMENT_KEY}")
+    list(APPEND _OUTPUTS
+      "${_STEM}.c"
+      "${_STEM}.h"
+      "${_STEM}_lower_rules.c"
+      "${_STEM}_lower_rules.h"
+    )
+    list(APPEND _OUTPUT_FLAGS
+      "--contract-source"
+      "--contract-header"
+      "--lower-rule-source"
+      "--lower-rule-header"
+    )
+  endforeach()
+
+  _loom_generated_files(
+    NAME "${_RULE_NAME}"
+    GENERATOR "${_RULE_GENERATOR}"
+    OUTPUTS ${_OUTPUTS}
+    OUTPUT_FLAGS ${_OUTPUT_FLAGS}
+    ARGS ${_GENERATOR_ARGS}
+    INPUTS ${_RULE_INPUTS}
+    COMMENT "${_RULE_COMMENT}"
   )
 endfunction()
 

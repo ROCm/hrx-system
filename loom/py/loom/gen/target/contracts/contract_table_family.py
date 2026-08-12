@@ -38,59 +38,88 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate target contract and lower-rule C tables from Python data.")
     parser.add_argument(
         "--contract-fragment",
+        action="append",
         required=True,
         metavar="KEY",
-        help="Contract fragment key or alias to generate.",
+        help="Contract fragment key or alias to generate; may be repeated.",
     )
     parser.add_argument(
         "--contract-header",
+        action="append",
         required=True,
         type=Path,
-        help="Generated contract fragment header path.",
+        help="Generated contract fragment header path; may be repeated.",
     )
     parser.add_argument(
         "--contract-source",
+        action="append",
         required=True,
         type=Path,
-        help="Generated contract fragment source path.",
+        help="Generated contract fragment source path; may be repeated.",
     )
     parser.add_argument(
         "--lower-rule-header",
+        action="append",
         required=True,
         type=Path,
-        help="Generated lower-rule header path.",
+        help="Generated lower-rule header path; may be repeated.",
     )
     parser.add_argument(
         "--lower-rule-source",
+        action="append",
         required=True,
         type=Path,
-        help="Generated lower-rule source path.",
+        help="Generated lower-rule source path; may be repeated.",
     )
     args = parser.parse_args(argv)
 
-    try:
-        registration = resolve_contract_fragment(args.contract_fragment)
-    except ValueError as exc:
-        parser.error(str(exc))
-    fragment = registration.load()
-    dialect_ops = registration.load_dialect_ops()
-    lower_rules = compile_lower_rule_set(fragment, dialect_ops=dialect_ops)
-    generated_contract = generate_contract_fragment_from_lower_rules(
-        fragment,
-        dialect_ops=dialect_ops,
-        lower_rules=lower_rules,
-    )
-    generated_lower_rules = generate_lower_rule_set_from_compiled(
-        fragment,
-        compiled=lower_rules,
-    )
-    for path, contents in (
-        (args.contract_header, generated_contract.header),
-        (args.contract_source, generated_contract.source),
-        (args.lower_rule_header, generated_lower_rules.header),
-        (args.lower_rule_source, generated_lower_rules.source),
+    family_count = len(args.contract_fragment)
+    for flag_name, paths in (
+        ("--contract-header", args.contract_header),
+        ("--contract-source", args.contract_source),
+        ("--lower-rule-header", args.lower_rule_header),
+        ("--lower-rule-source", args.lower_rule_source),
     ):
-        write_text_file(path, contents)
+        if len(paths) != family_count:
+            parser.error(f"{flag_name} has {len(paths)} values for {family_count} contract fragments")
+
+    for (
+        contract_fragment,
+        contract_header,
+        contract_source,
+        lower_rule_header,
+        lower_rule_source,
+    ) in zip(
+        args.contract_fragment,
+        args.contract_header,
+        args.contract_source,
+        args.lower_rule_header,
+        args.lower_rule_source,
+        strict=True,
+    ):
+        try:
+            registration = resolve_contract_fragment(contract_fragment)
+        except ValueError as exc:
+            parser.error(str(exc))
+        fragment = registration.load()
+        dialect_ops = registration.load_dialect_ops()
+        lower_rules = compile_lower_rule_set(fragment, dialect_ops=dialect_ops)
+        generated_contract = generate_contract_fragment_from_lower_rules(
+            fragment,
+            dialect_ops=dialect_ops,
+            lower_rules=lower_rules,
+        )
+        generated_lower_rules = generate_lower_rule_set_from_compiled(
+            fragment,
+            compiled=lower_rules,
+        )
+        for path, contents in (
+            (contract_header, generated_contract.header),
+            (contract_source, generated_contract.source),
+            (lower_rule_header, generated_lower_rules.header),
+            (lower_rule_source, generated_lower_rules.source),
+        ):
+            write_text_file(path, contents)
     return 0
 
 

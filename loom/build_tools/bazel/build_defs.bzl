@@ -340,6 +340,44 @@ def loom_target_table_cc_library(
         **kwargs
     )
 
+def loom_target_contract_cc_libraries(
+        name,
+        contract_deps = [],
+        lower_rule_deps = [],
+        testonly = False,
+        visibility = None,
+        **kwargs):
+    """Wraps one generated contract and lower-rule table pair in C libraries.
+
+    Args:
+      name: Contract C library name and generated file stem. The lower-rule
+        library and files use the same stem with a _lower_rules suffix.
+      contract_deps: Runtime dependencies of the contract C library.
+      lower_rule_deps: Runtime dependencies of the lower-rule C library.
+      testonly: Passed through to both runtime C libraries.
+      visibility: Passed through to both runtime C libraries.
+      **kwargs: Additional arguments passed through to both C libraries.
+    """
+    package_name = native.package_name()
+    loom_cc_library(
+        name = name,
+        srcs = ["//%s:%s.c" % (package_name, name)],
+        hdrs = ["//%s:%s.h" % (package_name, name)],
+        deps = contract_deps,
+        testonly = testonly,
+        visibility = visibility,
+        **kwargs
+    )
+    loom_cc_library(
+        name = name + "_lower_rules",
+        srcs = ["//%s:%s_lower_rules.c" % (package_name, name)],
+        hdrs = ["//%s:%s_lower_rules.h" % (package_name, name)],
+        deps = lower_rule_deps,
+        testonly = testonly,
+        visibility = visibility,
+        **kwargs
+    )
+
 def loom_target_contract_table_cc_libraries(
         name,
         generator,
@@ -401,24 +439,75 @@ def loom_target_contract_table_cc_libraries(
         **rule_kwargs
     )
 
-    package_name = native.package_name()
-    loom_cc_library(
+    loom_target_contract_cc_libraries(
         name = name,
-        srcs = ["//%s:%s" % (package_name, contract_source)],
-        hdrs = ["//%s:%s" % (package_name, contract_header)],
-        deps = contract_deps,
+        contract_deps = contract_deps,
+        lower_rule_deps = lower_rule_deps,
         testonly = testonly,
         visibility = visibility,
         **kwargs
     )
-    loom_cc_library(
-        name = name + "_lower_rules",
-        srcs = ["//%s:%s" % (package_name, lower_rule_source)],
-        hdrs = ["//%s:%s" % (package_name, lower_rule_header)],
-        deps = lower_rule_deps,
-        testonly = testonly,
+
+def loom_target_contract_file_family(
+        name,
+        generator,
+        fragments,
+        args = [],
+        inputs = [],
+        tags = [],
+        target_compatible_with = None,
+        visibility = None,
+        comment = None):
+    """Generates several contract and lower-rule table pairs in one action.
+
+    Every fragment must belong to the same generator source and invalidation
+    domain. Runtime C libraries remain separate so consumers retain precise
+    dependency surfaces.
+
+    Args:
+      name: Generator action target name.
+      generator: Python executable that writes every contract table family.
+      fragments: Mapping from output file stem to contract fragment key.
+      args: Common generator arguments before fragment and output arguments.
+      inputs: Source data labels consumed by the generator.
+      tags: Additional Bazel tags for the generator action.
+      target_compatible_with: Optional target compatibility constraints.
+      visibility: Passed through to the generator action.
+      comment: Optional progress message for the generator action.
+    """
+    if len(fragments) < 2:
+        fail("contract file families require at least two fragments")
+
+    generator_args = list(args)
+    outputs = []
+    output_flags = []
+    for stem in sorted(fragments.keys()):
+        fragment_key = fragments[stem]
+        generator_args.append("--contract-fragment=" + fragment_key)
+        outputs.extend([
+            stem + ".c",
+            stem + ".h",
+            stem + "_lower_rules.c",
+            stem + "_lower_rules.h",
+        ])
+        output_flags.extend([
+            "--contract-source",
+            "--contract-header",
+            "--lower-rule-source",
+            "--lower-rule-header",
+        ])
+
+    _loom_generated_files(
+        name = name,
+        generator = generator,
+        outputs = outputs,
+        output_flags = output_flags,
+        args = generator_args,
+        inputs = inputs,
+        tags = tags,
+        target_compatible_with = target_compatible_with,
         visibility = visibility,
-        **kwargs
+        comment = comment,
     )
 
 def loom_generated_cc_library(
