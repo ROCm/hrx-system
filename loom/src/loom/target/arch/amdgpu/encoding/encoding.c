@@ -481,17 +481,15 @@ bool loom_amdgpu_encoding_inline_f32_source(
 const loom_amdgpu_encoding_table_t*
 loom_amdgpu_encoding_table_for_descriptor_set_ordinal(
     uint16_t descriptor_set_ordinal) {
-  const loom_amdgpu_encoding_table_t* const
-      tables[LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_COUNT] = {
+  switch (descriptor_set_ordinal) {
 #define LOOM_AMDGPU_ENCODING_TABLE(descriptor_set_ordinal, table_fn) \
-  [descriptor_set_ordinal] = table_fn(),
+  case descriptor_set_ordinal:                                       \
+    return table_fn();
 #include "loom/target/arch/amdgpu/encoding_tables.inl"
 #undef LOOM_AMDGPU_ENCODING_TABLE
-      };
-  if (descriptor_set_ordinal >= IREE_ARRAYSIZE(tables)) {
-    return NULL;
+    default:
+      return NULL;
   }
-  return tables[descriptor_set_ordinal];
 }
 
 iree_status_t loom_amdgpu_encoding_pack(
