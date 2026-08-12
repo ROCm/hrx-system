@@ -8,7 +8,7 @@ load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
     "loom_cc_test",
-    "loom_generated_cc_library",
+    "loom_generated_file_family",
 )
 
 package(
@@ -145,20 +145,34 @@ loom_cc_library(
     deps = ["//runtime/src/iree/base"],
 )
 
-loom_generated_cc_library(
-    name = "op_registry",
-    srcs = ["op_registry.c"],
-    hdrs = ["op_registry.h"],
+loom_generated_file_family(
+    name = "registry_tables_gen",
     args = ["--registry"],
-    generated_src_flags = [
+    generator = "//loom/py/loom/gen/ops:c_tables_generator",
+    output_flags = [
         "--op-registry-tables",
         "--op-registry-tables-header",
+        "--type-registry-tables",
+        "--type-registry-tables-header",
     ],
-    generated_srcs = [
+    outputs = [
         "op_registry_tables.c",
         "op_registry_tables.h",
+        "type_registry_tables.c",
+        "type_registry_tables.h",
     ],
-    generator = "//loom/py/loom/gen/ops:c_tables_generator",
+)
+
+loom_cc_library(
+    name = "op_registry",
+    srcs = [
+        "op_registry.c",
+        "op_registry_tables.c",
+    ],
+    hdrs = [
+        "op_registry.h",
+        "op_registry_tables.h",
+    ],
     deps = [
         ":op_defs",
         "//loom/src/loom/ir",
@@ -200,20 +214,16 @@ loom_cc_library(
     ],
 )
 
-loom_generated_cc_library(
+loom_cc_library(
     name = "type_registry",
-    srcs = ["type_registry.c"],
-    hdrs = ["type_registry.h"],
-    args = ["--registry"],
-    generated_src_flags = [
-        "--type-registry-tables",
-        "--type-registry-tables-header",
-    ],
-    generated_srcs = [
+    srcs = [
+        "type_registry.c",
         "type_registry_tables.c",
+    ],
+    hdrs = [
+        "type_registry.h",
         "type_registry_tables.h",
     ],
-    generator = "//loom/py/loom/gen/ops:c_tables_generator",
     deps = [
         ":op_defs",
         ":storage_facts",
