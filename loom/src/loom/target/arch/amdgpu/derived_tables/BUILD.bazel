@@ -138,36 +138,21 @@ loom_generated_file_family(
     name = "rdna4_gen",
     args = [
         "--target=rdna4",
+        "--target=rdna4_gfx125x",
         "--isa-xml=rdna4:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna4.xml)",
     ],
-    comment = "Generating rdna4 runtime target tables",
+    comment = "Generating RDNA4 runtime target table family",
     generator = _AMDGPU_TARGET_TABLE_GENERATOR,
     inputs = ["@amdgpu_isa_xml//:amdgpu_isa_rdna4.xml"],
     output_flags = [
+        "--descriptor-source",
+        "--encoding-source",
         "--descriptor-source",
         "--encoding-source",
     ],
     outputs = [
         "rdna4_descriptors.c",
         "rdna4_encoding_tables.c",
-    ],
-    visibility = _DERIVED_TABLE_VISIBILITY,
-)
-
-loom_generated_file_family(
-    name = "rdna4_gfx125x_gen",
-    args = [
-        "--target=rdna4_gfx125x",
-        "--isa-xml=rdna4:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna4.xml)",
-    ],
-    comment = "Generating rdna4_gfx125x runtime target tables",
-    generator = _AMDGPU_TARGET_TABLE_GENERATOR,
-    inputs = ["@amdgpu_isa_xml//:amdgpu_isa_rdna4.xml"],
-    output_flags = [
-        "--descriptor-source",
-        "--encoding-source",
-    ],
-    outputs = [
         "rdna4_gfx125x_descriptors.c",
         "rdna4_gfx125x_encoding_tables.c",
     ],

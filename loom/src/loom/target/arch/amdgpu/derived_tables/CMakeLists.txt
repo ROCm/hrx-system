@@ -131,40 +131,22 @@ loom_generated_file_family(
   OUTPUTS
     "rdna4_descriptors.c"
     "rdna4_encoding_tables.c"
-  OUTPUT_FLAGS
-    "--descriptor-source"
-    "--encoding-source"
-  ARGS
-    "--target=rdna4"
-    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-  INPUTS
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-    "loom_amdgpu_isa_xml"
-  COMMENT
-    "Generating rdna4 runtime target tables"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_file_family(
-  NAME
-    rdna4_gfx125x_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::target_tables
-  OUTPUTS
     "rdna4_gfx125x_descriptors.c"
     "rdna4_gfx125x_encoding_tables.c"
   OUTPUT_FLAGS
     "--descriptor-source"
     "--encoding-source"
+    "--descriptor-source"
+    "--encoding-source"
   ARGS
+    "--target=rdna4"
     "--target=rdna4_gfx125x"
     "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
   INPUTS
     "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
     "loom_amdgpu_isa_xml"
   COMMENT
-    "Generating rdna4_gfx125x runtime target tables"
+    "Generating RDNA4 runtime target table family"
 )
 endif()
 

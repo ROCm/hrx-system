@@ -62,9 +62,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=("Generate descriptor and native encoding sources from one AMDGPU target corpus."))
     parser.add_argument(
         "--target",
+        action="append",
         required=True,
         choices=AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS,
-        help="AMDGPU storage target family to generate.",
+        help="AMDGPU storage target family to generate; may be repeated.",
     )
     parser.add_argument(
         "--isa-xml",
@@ -72,34 +73,56 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=[],
         help="ISA XML fact source as <key>:<path>.",
     )
-    parser.add_argument("--descriptor-source", type=Path, required=True)
-    parser.add_argument("--encoding-source", type=Path, required=True)
+    parser.add_argument(
+        "--descriptor-source",
+        action="append",
+        type=Path,
+        required=True,
+    )
+    parser.add_argument(
+        "--encoding-source",
+        action="append",
+        type=Path,
+        required=True,
+    )
     args = parser.parse_args(argv)
 
-    family = amdgpu_target_table_family(args.target)
+    if not (len(args.target) == len(args.descriptor_source) == len(args.encoding_source)):
+        raise ValueError("AMDGPU target table generation requires one descriptor and encoding output per target")
+
+    families = tuple(amdgpu_target_table_family(target) for target in args.target)
+    instruction_names_by_isa_key: dict[str, set[str]] = {}
+    for family in families:
+        for isa_key, instruction_names in amdgpu_target_table_instruction_names_by_isa_key(family).items():
+            instruction_names_by_isa_key.setdefault(isa_key, set()).update(instruction_names)
     isa_specs = parse_amdgpu_isa_xml_paths_for_instructions(
         _parse_isa_xml_paths(args.isa_xml),
-        amdgpu_target_table_instruction_names_by_isa_key(family),
+        instruction_names_by_isa_key,
     )
     descriptor_sets = build_amdgpu_core_descriptor_sets_from_specs(
-        family.generator_targets,
+        tuple(target for family in families for target in family.generator_targets),
         isa_specs,
     )
 
-    descriptor_family = generate_amdgpu_descriptor_table_family(
-        family,
-        descriptor_sets,
-        source_public_header=_DESCRIPTOR_SOURCE_HEADER,
-    )
-    encoding_source = generate_amdgpu_encoding_table_source(
-        family,
-        isa_specs,
-        descriptor_sets,
-        public_header=_ENCODING_SOURCE_HEADER,
-    )
-
-    write_text_file(args.descriptor_source, descriptor_family.source)
-    write_text_file(args.encoding_source, encoding_source)
+    for family, descriptor_source, encoding_source in zip(
+        families,
+        args.descriptor_source,
+        args.encoding_source,
+        strict=True,
+    ):
+        descriptor_family = generate_amdgpu_descriptor_table_family(
+            family,
+            descriptor_sets,
+            source_public_header=_DESCRIPTOR_SOURCE_HEADER,
+        )
+        generated_encoding_source = generate_amdgpu_encoding_table_source(
+            family,
+            isa_specs,
+            descriptor_sets,
+            public_header=_ENCODING_SOURCE_HEADER,
+        )
+        write_text_file(descriptor_source, descriptor_family.source)
+        write_text_file(encoding_source, generated_encoding_source)
     return 0
 
 
