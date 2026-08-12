@@ -183,10 +183,14 @@ LOOMC_API_EXPORT loomc_status_t loomc_launch_config_program_load(
     loomc_launch_config_program_t** out_program);
 
 /// Retains `program` for another owner.
+///
+/// @param program Program to retain.
 LOOMC_API_EXPORT void loomc_launch_config_program_retain(
     loomc_launch_config_program_t* program);
 
 /// Releases `program` from one owner. Passing `NULL` is allowed.
+///
+/// @param program Program to release. Passing `NULL` is allowed.
 LOOMC_API_EXPORT void loomc_launch_config_program_release(
     loomc_launch_config_program_t* program);
 
