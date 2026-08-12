@@ -22,6 +22,8 @@ struct loom_low_schedule_unlock_record_t {
   uint32_t demand_units;
   // Maximum downstream activation width across unlocked consumers.
   uint32_t activation_units;
+  // Maximum latency among descriptor consumers unlocked by the producer.
+  uint16_t descriptor_latency_cycles;
   // Number of retained descriptor consumers, capped at capacity + 1.
   uint8_t descriptor_count;
   // Candidate facts published by final unscheduled consumers.
@@ -40,6 +42,9 @@ typedef struct loom_low_schedule_pressure_demand_t {
   uint32_t activation_units;
   // Pair-affinity reward made available by the candidate.
   uint16_t pair_affinity_score;
+  // Maximum latency among non-growing descriptor consumers unlocked by the
+  // candidate.
+  uint16_t non_growing_descriptor_latency_cycles;
   // Candidate properties discovered while traversing the ready frontier.
   uint8_t candidate_flags;
 } loom_low_schedule_pressure_demand_t;
@@ -1124,6 +1129,10 @@ void loom_low_schedule_pressure_publish_unlock_consumer(
       iree_max(record->activation_units,
                state->node_pressure_activation_units[consumer_node]);
   if (state->nodes[consumer_node].descriptor != NULL) {
+    record->descriptor_latency_cycles =
+        iree_max(record->descriptor_latency_cycles,
+                 loom_low_schedule_class_schedule_distance_cycles(
+                     state->nodes[consumer_node].schedule_class));
     record->candidate_flags |=
         LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_DESCRIPTOR;
     if (pressure_state->unlocks.descriptor_heads != NULL &&
@@ -1225,6 +1234,8 @@ loom_low_schedule_score_candidate_pressure_demand(
             unlock_record->descriptor_count)) {
       demand.candidate_flags |=
           LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_NON_GROWING_DESCRIPTOR;
+      demand.non_growing_descriptor_latency_cycles =
+          unlock_record->descriptor_latency_cycles;
     }
   }
   demand.pair_affinity_score =
@@ -1394,6 +1405,8 @@ void loom_low_schedule_pressure_score_candidate(
       .produced_live_value_count = produced_live_value_count,
       .dependency_latency_cycles = dependency_latency_cycles,
       .latency_cycles = latency_cycles,
+      .unlocked_non_growing_descriptor_latency_cycles =
+          pressure_demand.non_growing_descriptor_latency_cycles,
       .critical_path_cycles = state->node_critical_path_cycles != NULL
                                   ? state->node_critical_path_cycles[node_index]
                                   : latency_cycles,

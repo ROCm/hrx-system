@@ -253,13 +253,14 @@ low.func.def target<test.low.core>(@test_target) @hint_schedule_fence(
 test.target<low_core> @test_target
 
 low.func.def target<test.low.core>(@test_target) @resource_stall_extends_ready_latency_window(
-    %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>, %index: reg<test.i32>) ->
-    (reg<test.i32>, reg<test.i32 x4>) asm {
+    %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>, %index: reg<test.i32>,
+    %lhs: reg<test.i32>, %rhs: reg<test.i32>) ->
+    (reg<test.i32>, reg<test.i32 x4>, reg<test.i32>) asm {
   %load0 = test.load.v4i32 %ptr0
   low.schedule.fence
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", ready_candidate_count="17", scored_candidate_count="16", chosen_packet="test.add.i32", rejected_packet="test.extract_lane.i32", rejected_effective_stall_cycles="2"}
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", ready_candidate_count="18", scored_candidate_count="16", chosen_packet="test.add.i32", rejected_packet="test.extract_lane.i32", rejected_effective_stall_cycles="2"}
   %gap0 = test.add.i32 %index, %index
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", ready_candidate_count="17", scored_candidate_count="16", chosen_packet="test.add.i32", rejected_packet="test.extract_lane.i32", rejected_effective_stall_cycles="1"}
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", ready_candidate_count="18", scored_candidate_count="16", chosen_packet="test.add.i32", rejected_packet="test.extract_lane.i32", rejected_effective_stall_cycles="1"}
   %gap1 = test.add.i32 %gap0, %index
   // REMARK@+1: BACKEND/015
   %lane0 = test.extract_lane.i32 %load0, 0
@@ -292,8 +293,75 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_extends_ready_l
   // REMARK@+1: BACKEND/015
   %lane14 = test.extract_lane.i32 %load0, 2
   %lane15 = test.extract_lane.i32 %load0, 3
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="4", ready_candidate_count="17", scored_candidate_count="17", chosen_packet="test.load.index.v4i32", rejected_packet="test.extract_lane.i32", rejected_dependency_latency_cycles="4", rejected_effective_stall_cycles="0"}
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="4", ready_candidate_count="18", scored_candidate_count="18", chosen_packet="test.load.index.v4i32", rejected_packet="test.extract_lane.i32", rejected_dependency_latency_cycles="4", rejected_effective_stall_cycles="0"}
   %load1 = test.load.index.v4i32 %ptr1, %gap1
+  // This longer critical path is visible through the schedule view, but its
+  // one-cycle head cannot replenish the four-cycle window consumed by a lane.
+  // REMARK@+1: BACKEND/015
+  %cheap0 = test.add.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015
+  %cheap1 = test.add.i32 %cheap0, %rhs
+  // REMARK@+1: BACKEND/015
+  %cheap2 = test.add.i32 %cheap1, %rhs
+  // REMARK@+1: BACKEND/015
+  %cheap3 = test.add.i32 %cheap2, %rhs
+  // REMARK@+1: BACKEND/015
+  %cheap4 = test.add.i32 %cheap3, %rhs
+  return %lane15, %load1, %cheap4
+}
+
+// ====
+// RUN: emit low-schedule-json @resource_stall_advances_non_growing_latency_window strategy=resource-stall diagnostics=candidates output=none
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @resource_stall_advances_non_growing_latency_window(
+    %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>, %index: reg<test.i32>,
+    %address_parts: reg<test.i32 x4>) ->
+    (reg<test.i32>, reg<test.i32 x4>) asm {
+  %load0 = test.load.v4i32 %ptr0
+  low.schedule.fence
+  // REMARK@+1: BACKEND/015
+  %gap0 = test.add.i32 %index, %index
+  // REMARK@+1: BACKEND/015
+  %gap1 = test.add.i32 %gap0, %index
+  // REMARK@+1: BACKEND/015
+  %lane0 = test.extract_lane.i32 %load0, 0
+  // REMARK@+1: BACKEND/015
+  %lane1 = test.extract_lane.i32 %load0, 1
+  // REMARK@+1: BACKEND/015
+  %lane2 = test.extract_lane.i32 %load0, 2
+  // REMARK@+1: BACKEND/015
+  %lane3 = test.extract_lane.i32 %load0, 3
+  // REMARK@+1: BACKEND/015
+  %lane4 = test.extract_lane.i32 %load0, 0
+  // REMARK@+1: BACKEND/015
+  %lane5 = test.extract_lane.i32 %load0, 1
+  // REMARK@+1: BACKEND/015
+  %lane6 = test.extract_lane.i32 %load0, 2
+  // REMARK@+1: BACKEND/015
+  %lane7 = test.extract_lane.i32 %load0, 3
+  // REMARK@+1: BACKEND/015
+  %lane8 = test.extract_lane.i32 %load0, 0
+  // REMARK@+1: BACKEND/015
+  %lane9 = test.extract_lane.i32 %load0, 1
+  // REMARK@+1: BACKEND/015
+  %lane10 = test.extract_lane.i32 %load0, 2
+  // REMARK@+1: BACKEND/015
+  %lane11 = test.extract_lane.i32 %load0, 3
+  // REMARK@+1: BACKEND/015
+  %lane12 = test.extract_lane.i32 %load0, 0
+  // REMARK@+1: BACKEND/015
+  %lane13 = test.extract_lane.i32 %load0, 1
+  // REMARK@+1: BACKEND/015
+  %lane14 = test.extract_lane.i32 %load0, 2
+  %lane15 = test.extract_lane.i32 %load0, 3
+  // The short final address producer is worth issuing because it immediately
+  // exposes a four-cycle descriptor without growing the combined frontier.
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="4", ready_candidate_count="17", scored_candidate_count="17", chosen_packet="test.extract_lane.i32", chosen_dependency_latency_cycles="0", chosen_killed_live_units="4", chosen_produced_live_units="1", rejected_dependency_latency_cycles="4"}
+  %load_index = test.extract_lane.i32 %address_parts, 0
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="6", chosen_packet="test.load.index.v4i32"}
+  %load1 = test.load.index.v4i32 %ptr1, %load_index
   return %lane15, %load1
 }
 
