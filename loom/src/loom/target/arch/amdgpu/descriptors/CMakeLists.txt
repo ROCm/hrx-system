@@ -103,11 +103,104 @@ loom_generated_file_family(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_file_family(
+  NAME
+    cdna_gen
+  GENERATOR
+    loom::py::loom::gen::target::arch::amdgpu::target_tables
+  OUTPUTS
+    "cdna3_descriptors.c"
+    "cdna3_encoding_tables.c"
+    "cdna4_descriptors.c"
+    "cdna4_encoding_tables.c"
+  OUTPUT_FLAGS
+    "--descriptor-source"
+    "--encoding-source"
+    "--descriptor-source"
+    "--encoding-source"
+  ARGS
+    "--target=cdna3"
+    "--target=cdna4"
+    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
+    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
+  INPUTS
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
+    "loom_amdgpu_isa_xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
+  COMMENT
+    "Generating CDNA runtime target table family"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_file_family(
+  NAME
+    rdna3_gen
+  GENERATOR
+    loom::py::loom::gen::target::arch::amdgpu::target_tables
+  OUTPUTS
+    "rdna3_descriptors.c"
+    "rdna3_encoding_tables.c"
+    "rdna3_5_descriptors.c"
+    "rdna3_5_encoding_tables.c"
+    "rdna4m_descriptors.c"
+    "rdna4m_encoding_tables.c"
+  OUTPUT_FLAGS
+    "--descriptor-source"
+    "--encoding-source"
+    "--descriptor-source"
+    "--encoding-source"
+    "--descriptor-source"
+    "--encoding-source"
+  ARGS
+    "--target=rdna3"
+    "--target=rdna3_5"
+    "--target=rdna4m"
+    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
+    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
+  INPUTS
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
+    "loom_amdgpu_isa_xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
+  COMMENT
+    "Generating RDNA3 runtime target table family"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_file_family(
+  NAME
+    rdna4_gen
+  GENERATOR
+    loom::py::loom::gen::target::arch::amdgpu::target_tables
+  OUTPUTS
+    "rdna4_descriptors.c"
+    "rdna4_encoding_tables.c"
+    "rdna4_gfx125x_descriptors.c"
+    "rdna4_gfx125x_encoding_tables.c"
+  OUTPUT_FLAGS
+    "--descriptor-source"
+    "--encoding-source"
+    "--descriptor-source"
+    "--encoding-source"
+  ARGS
+    "--target=rdna4"
+    "--target=rdna4_gfx125x"
+    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+  INPUTS
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+    "loom_amdgpu_isa_xml"
+  COMMENT
+    "Generating RDNA4 runtime target table family"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
     cdna3
   SRCS
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/derived_tables/cdna3_descriptors.c"
+    "cdna3_descriptors.c"
   DEPS
     loom::codegen::low::descriptors
   PUBLIC
@@ -174,7 +267,7 @@ loom_cc_library(
   NAME
     rdna3
   SRCS
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/derived_tables/rdna3_descriptors.c"
+    "rdna3_descriptors.c"
   DEPS
     loom::codegen::low::descriptors
   PUBLIC
@@ -186,7 +279,7 @@ loom_cc_library(
   NAME
     rdna3_5
   SRCS
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/derived_tables/rdna3_5_descriptors.c"
+    "rdna3_5_descriptors.c"
   DEPS
     loom::codegen::low::descriptors
   PUBLIC
@@ -198,7 +291,7 @@ loom_cc_library(
   NAME
     rdna4m
   SRCS
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/derived_tables/rdna4m_descriptors.c"
+    "rdna4m_descriptors.c"
   DEPS
     loom::codegen::low::descriptors
   PUBLIC
@@ -210,7 +303,7 @@ loom_cc_library(
   NAME
     rdna4
   SRCS
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/derived_tables/rdna4_descriptors.c"
+    "rdna4_descriptors.c"
   DEPS
     loom::codegen::low::descriptors
   PUBLIC
@@ -222,7 +315,7 @@ loom_cc_library(
   NAME
     rdna4_gfx125x
   SRCS
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/derived_tables/rdna4_gfx125x_descriptors.c"
+    "rdna4_gfx125x_descriptors.c"
   DEPS
     loom::codegen::low::descriptors
   PUBLIC
@@ -245,7 +338,7 @@ loom_cc_library(
   NAME
     cdna4
   SRCS
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/derived_tables/cdna4_descriptors.c"
+    "cdna4_descriptors.c"
   DEPS
     loom::codegen::low::descriptors
   PUBLIC

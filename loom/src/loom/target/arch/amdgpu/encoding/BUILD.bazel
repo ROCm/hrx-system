@@ -67,7 +67,7 @@ loom_cc_library(
 
 loom_cc_library(
     name = "cdna3_encoding_tables",
-    srcs = ["//loom/src/loom/target/arch/amdgpu/derived_tables:cdna3_encoding_tables.c"],
+    srcs = ["//loom/src/loom/target/arch/amdgpu/descriptors:cdna3_encoding_tables.c"],
     deps = [
         ":encoding_defs",
         "//runtime/src/iree/base",
@@ -126,7 +126,7 @@ loom_cc_library(
 
 loom_cc_library(
     name = "rdna3_encoding_tables",
-    srcs = ["//loom/src/loom/target/arch/amdgpu/derived_tables:rdna3_encoding_tables.c"],
+    srcs = ["//loom/src/loom/target/arch/amdgpu/descriptors:rdna3_encoding_tables.c"],
     deps = [
         ":encoding_defs",
         "//runtime/src/iree/base",
@@ -135,7 +135,7 @@ loom_cc_library(
 
 loom_cc_library(
     name = "rdna3_5_encoding_tables",
-    srcs = ["//loom/src/loom/target/arch/amdgpu/derived_tables:rdna3_5_encoding_tables.c"],
+    srcs = ["//loom/src/loom/target/arch/amdgpu/descriptors:rdna3_5_encoding_tables.c"],
     target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_RDNA3_5),
     deps = [
         ":encoding_defs",
@@ -145,7 +145,7 @@ loom_cc_library(
 
 loom_cc_library(
     name = "rdna4m_encoding_tables",
-    srcs = ["//loom/src/loom/target/arch/amdgpu/derived_tables:rdna4m_encoding_tables.c"],
+    srcs = ["//loom/src/loom/target/arch/amdgpu/descriptors:rdna4m_encoding_tables.c"],
     target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_RDNA4M),
     deps = [
         ":encoding_defs",
@@ -155,7 +155,7 @@ loom_cc_library(
 
 loom_cc_library(
     name = "rdna4_encoding_tables",
-    srcs = ["//loom/src/loom/target/arch/amdgpu/derived_tables:rdna4_encoding_tables.c"],
+    srcs = ["//loom/src/loom/target/arch/amdgpu/descriptors:rdna4_encoding_tables.c"],
     deps = [
         ":encoding_defs",
         "//runtime/src/iree/base",
@@ -164,7 +164,7 @@ loom_cc_library(
 
 loom_cc_library(
     name = "rdna4_gfx125x_encoding_tables",
-    srcs = ["//loom/src/loom/target/arch/amdgpu/derived_tables:rdna4_gfx125x_encoding_tables.c"],
+    srcs = ["//loom/src/loom/target/arch/amdgpu/descriptors:rdna4_gfx125x_encoding_tables.c"],
     deps = [
         ":encoding_defs",
         "//runtime/src/iree/base",
@@ -183,7 +183,7 @@ loom_cc_library(
 
 loom_cc_library(
     name = "cdna4_encoding_tables",
-    srcs = ["//loom/src/loom/target/arch/amdgpu/derived_tables:cdna4_encoding_tables.c"],
+    srcs = ["//loom/src/loom/target/arch/amdgpu/descriptors:cdna4_encoding_tables.c"],
     target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_CDNA4),
     deps = [
         ":encoding_defs",

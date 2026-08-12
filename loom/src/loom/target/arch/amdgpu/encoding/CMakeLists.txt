@@ -28,7 +28,7 @@ loom_cc_library(
   NAME
     cdna3_encoding_tables
   SRCS
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/derived_tables/cdna3_encoding_tables.c"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/descriptors/cdna3_encoding_tables.c"
   DEPS
     ::encoding_defs
     iree::base
@@ -101,7 +101,7 @@ loom_cc_library(
   NAME
     rdna3_encoding_tables
   SRCS
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/derived_tables/rdna3_encoding_tables.c"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/descriptors/rdna3_encoding_tables.c"
   DEPS
     ::encoding_defs
     iree::base
@@ -114,7 +114,7 @@ loom_cc_library(
   NAME
     rdna3_5_encoding_tables
   SRCS
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/derived_tables/rdna3_5_encoding_tables.c"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/descriptors/rdna3_5_encoding_tables.c"
   DEPS
     ::encoding_defs
     iree::base
@@ -127,7 +127,7 @@ loom_cc_library(
   NAME
     rdna4m_encoding_tables
   SRCS
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/derived_tables/rdna4m_encoding_tables.c"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/descriptors/rdna4m_encoding_tables.c"
   DEPS
     ::encoding_defs
     iree::base
@@ -140,7 +140,7 @@ loom_cc_library(
   NAME
     rdna4_encoding_tables
   SRCS
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/derived_tables/rdna4_encoding_tables.c"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/descriptors/rdna4_encoding_tables.c"
   DEPS
     ::encoding_defs
     iree::base
@@ -153,7 +153,7 @@ loom_cc_library(
   NAME
     rdna4_gfx125x_encoding_tables
   SRCS
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/derived_tables/rdna4_gfx125x_encoding_tables.c"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/descriptors/rdna4_gfx125x_encoding_tables.c"
   DEPS
     ::encoding_defs
     iree::base
@@ -178,7 +178,7 @@ loom_cc_library(
   NAME
     cdna4_encoding_tables
   SRCS
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/derived_tables/cdna4_encoding_tables.c"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/descriptors/cdna4_encoding_tables.c"
   DEPS
     ::encoding_defs
     iree::base
