@@ -14,6 +14,7 @@
 #include "iree/hal/remote/protocol/common.h"
 #include "iree/hal/remote/protocol/control.h"
 #include "iree/hal/remote/protocol/queue.h"
+#include "iree/hal/remote/server/binding_storage.h"
 #include "iree/hal/remote/server/bulk.h"
 #include "iree/hal/remote/server/bulk_session.h"
 #include "iree/hal/remote/server/file_index.h"
@@ -1703,6 +1704,59 @@ static iree_status_t iree_hal_remote_server_resolve_command_buffer_ref(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_remote_server_prepare_buffer_ref_list(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_host_size_t binding_count,
+    const iree_hal_remote_binding_t* wire_bindings, const char* command_name,
+    iree_hal_remote_server_buffer_ref_list_storage_t* out_storage) {
+  iree_status_t status =
+      iree_hal_remote_server_buffer_ref_list_storage_initialize(
+          binding_count, out_storage, session_slot->server->host_allocator);
+  for (iree_host_size_t i = 0; i < binding_count && iree_status_is_ok(status);
+       ++i) {
+    status = iree_hal_remote_server_resolve_command_buffer_ref(
+        session_slot, wire_bindings[i].buffer_id, wire_bindings[i].buffer_slot,
+        wire_bindings[i].offset, wire_bindings[i].length, command_name,
+        &out_storage->values[i]);
+    if (!iree_status_is_ok(status)) {
+      status = iree_status_annotate_f(status, "binding[%" PRIhsz "]", i);
+    }
+  }
+  return status;
+}
+
+static iree_status_t iree_hal_remote_server_prepare_buffer_binding_table(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_host_size_t binding_count,
+    const iree_hal_remote_binding_t* wire_bindings, const char* command_name,
+    iree_hal_remote_server_buffer_binding_table_storage_t* out_storage) {
+  iree_status_t status =
+      iree_hal_remote_server_buffer_binding_table_storage_initialize(
+          binding_count, out_storage, session_slot->server->host_allocator);
+  for (iree_host_size_t i = 0; i < binding_count && iree_status_is_ok(status);
+       ++i) {
+    if (wire_bindings[i].buffer_id == 0) {
+      out_storage->bindings[i] = (iree_hal_buffer_binding_t){0};
+      continue;
+    }
+    iree_hal_buffer_ref_t buffer_ref;
+    status = iree_hal_remote_server_resolve_command_buffer_ref(
+        session_slot, wire_bindings[i].buffer_id, /*buffer_slot=*/0,
+        wire_bindings[i].offset, wire_bindings[i].length, command_name,
+        &buffer_ref);
+    if (iree_status_is_ok(status)) {
+      out_storage->bindings[i] = (iree_hal_buffer_binding_t){
+          .buffer = buffer_ref.buffer,
+          .offset = buffer_ref.offset,
+          .length = buffer_ref.length,
+      };
+    } else {
+      status = iree_status_annotate_f(status, "binding[%" PRIhsz "]", i);
+    }
+  }
+  return status;
+}
+
 // Resolves a wire wait_frontier to a local wait semaphore list. For each
 // (axis, epoch) entry in the wait frontier, completed epochs are skipped and
 // live epochs are resolved through the epoch mapping. All resolved semaphores
@@ -2546,54 +2600,25 @@ static iree_status_t iree_hal_remote_server_submit_dispatch(
       (const iree_hal_remote_binding_t*)(context->command_data.data +
                                          bindings_offset);
 
-  // Resolve buffer bindings to local buffers.
-  // Stack-allocate for typical dispatch sizes.
-  iree_hal_buffer_ref_t local_bindings[32];
-  if (op->binding_count > IREE_ARRAYSIZE(local_bindings)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "DISPATCH binding count %u exceeds stack limit %zu",
-                            op->binding_count, IREE_ARRAYSIZE(local_bindings));
-  }
-  memset(local_bindings, 0,
-         (iree_host_size_t)op->binding_count * sizeof(iree_hal_buffer_ref_t));
-  for (uint16_t i = 0; i < op->binding_count; ++i) {
-    if (wire_bindings[i].buffer_id != 0) {
-      iree_hal_remote_resource_id_t buffer_id =
-          iree_hal_remote_server_resolve_resource_id(
-              context->session_slot, wire_bindings[i].buffer_id);
-      iree_hal_buffer_t* buffer =
-          (iree_hal_buffer_t*)iree_hal_remote_resource_table_lookup(
-              &context->session_slot->resource_table,
-              IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER, buffer_id);
-      if (!buffer) {
-        return iree_make_status(IREE_STATUS_NOT_FOUND,
-                                "DISPATCH binding[%u] buffer 0x%016" PRIx64
-                                " not found",
-                                i, buffer_id);
-      }
-      local_bindings[i].buffer = buffer;
-    }
-    local_bindings[i].buffer_slot = wire_bindings[i].buffer_slot;
-    local_bindings[i].offset = (iree_device_size_t)wire_bindings[i].offset;
-    local_bindings[i].length = (iree_device_size_t)wire_bindings[i].length;
-  }
-
   iree_hal_dispatch_config_t local_config;
   IREE_RETURN_IF_ERROR(iree_hal_remote_server_resolve_dispatch_config(
       context->session_slot, &op->config,
       (iree_hal_dispatch_flags_t)op->dispatch_flags,
       /*allow_indirect_buffer_ref=*/false, "DISPATCH", &local_config));
 
-  iree_hal_buffer_ref_list_t binding_list = {
-      .count = op->binding_count,
-      .values = local_bindings,
-  };
-
-  return iree_hal_device_queue_dispatch(
-      local_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list, signal_list,
-      executable, iree_hal_executable_function_from_value(op->function_value),
-      local_config, constants, binding_list,
-      (iree_hal_dispatch_flags_t)op->dispatch_flags);
+  iree_hal_remote_server_buffer_ref_list_storage_t binding_storage = {0};
+  iree_status_t status = iree_hal_remote_server_prepare_buffer_ref_list(
+      context->session_slot, op->binding_count, wire_bindings, "DISPATCH",
+      &binding_storage);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_queue_dispatch(
+        local_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list, signal_list,
+        executable, iree_hal_executable_function_from_value(op->function_value),
+        local_config, constants, binding_storage.list,
+        (iree_hal_dispatch_flags_t)op->dispatch_flags);
+  }
+  iree_hal_remote_server_buffer_ref_list_storage_deinitialize(&binding_storage);
+  return status;
 }
 
 //===----------------------------------------------------------------------===//
@@ -4737,39 +4762,9 @@ static iree_status_t iree_hal_remote_server_replay_dispatch_cmd(
   iree_const_byte_span_t constants = iree_make_const_byte_span(
       constants_data, (iree_host_size_t)cmd->constant_count * sizeof(uint32_t));
 
-  // Parse and resolve bindings.
+  // Parse bindings.
   const iree_hal_remote_binding_t* wire_bindings =
       (const iree_hal_remote_binding_t*)(cmd_data + bindings_offset);
-  iree_hal_buffer_ref_t local_bindings[32];
-  if (cmd->binding_count > IREE_ARRAYSIZE(local_bindings)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "DISPATCH binding count %u exceeds limit %zu",
-                            cmd->binding_count, IREE_ARRAYSIZE(local_bindings));
-  }
-  memset(local_bindings, 0, cmd->binding_count * sizeof(iree_hal_buffer_ref_t));
-  for (uint16_t i = 0; i < cmd->binding_count; ++i) {
-    if (wire_bindings[i].buffer_id != 0) {
-      iree_hal_remote_resource_id_t buffer_id =
-          iree_hal_remote_server_resolve_resource_id(
-              session_slot, wire_bindings[i].buffer_id);
-      iree_hal_buffer_t* buffer =
-          (iree_hal_buffer_t*)iree_hal_remote_resource_table_lookup(
-              &session_slot->resource_table,
-              IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER, buffer_id);
-      if (!buffer) {
-        return iree_make_status(IREE_STATUS_NOT_FOUND,
-                                "DISPATCH (cmd stream) binding[%u] buffer "
-                                "0x%016" PRIx64 " not found",
-                                i, buffer_id);
-      }
-      local_bindings[i] = iree_hal_make_buffer_ref(
-          buffer, wire_bindings[i].offset, wire_bindings[i].length);
-    } else {
-      local_bindings[i] = iree_hal_make_indirect_buffer_ref(
-          wire_bindings[i].buffer_slot, wire_bindings[i].offset,
-          wire_bindings[i].length);
-    }
-  }
 
   iree_hal_dispatch_config_t config;
   IREE_RETURN_IF_ERROR(iree_hal_remote_server_resolve_dispatch_config(
@@ -4777,14 +4772,19 @@ static iree_status_t iree_hal_remote_server_replay_dispatch_cmd(
       (iree_hal_dispatch_flags_t)cmd->dispatch_flags,
       /*allow_indirect_buffer_ref=*/true, "DISPATCH (cmd stream)", &config));
 
-  iree_hal_buffer_ref_list_t bindings = {
-      .count = cmd->binding_count,
-      .values = local_bindings,
-  };
-  return iree_hal_command_buffer_dispatch(
-      local_command_buffer, executable,
-      iree_hal_executable_function_from_value(cmd->function_value), config,
-      constants, bindings, (iree_hal_dispatch_flags_t)cmd->dispatch_flags);
+  iree_hal_remote_server_buffer_ref_list_storage_t binding_storage = {0};
+  iree_status_t status = iree_hal_remote_server_prepare_buffer_ref_list(
+      session_slot, cmd->binding_count, wire_bindings, "DISPATCH (cmd stream)",
+      &binding_storage);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_command_buffer_dispatch(
+        local_command_buffer, executable,
+        iree_hal_executable_function_from_value(cmd->function_value), config,
+        constants, binding_storage.list,
+        (iree_hal_dispatch_flags_t)cmd->dispatch_flags);
+  }
+  iree_hal_remote_server_buffer_ref_list_storage_deinitialize(&binding_storage);
+  return status;
 }
 
 // Replays a serialized command stream into a local command buffer. Iterates
@@ -5057,88 +5057,64 @@ static iree_status_t iree_hal_remote_server_submit_command_buffer_execute(
                             "COMMAND_BUFFER_EXECUTE binding table truncated");
   }
 
-  // Resolve wire binding table to local buffer bindings.
   const iree_hal_remote_binding_t* wire_bindings =
       (const iree_hal_remote_binding_t*)(command_data + bindings_offset);
-  iree_hal_buffer_binding_t local_bindings[32];
-  if (op->binding_count > IREE_ARRAYSIZE(local_bindings)) {
-    return iree_make_status(
-        IREE_STATUS_RESOURCE_EXHAUSTED,
-        "COMMAND_BUFFER_EXECUTE binding count %u exceeds limit %zu",
-        op->binding_count, IREE_ARRAYSIZE(local_bindings));
-  }
-  memset(local_bindings, 0,
-         op->binding_count * sizeof(iree_hal_buffer_binding_t));
-  for (uint16_t i = 0; i < op->binding_count; ++i) {
-    if (wire_bindings[i].buffer_id != 0) {
-      iree_hal_remote_resource_id_t buffer_id =
-          iree_hal_remote_server_resolve_resource_id(
-              session_slot, wire_bindings[i].buffer_id);
-      iree_hal_buffer_t* buffer =
-          (iree_hal_buffer_t*)iree_hal_remote_resource_table_lookup(
-              &session_slot->resource_table,
-              IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER, buffer_id);
-      if (!buffer) {
-        return iree_make_status(
-            IREE_STATUS_NOT_FOUND,
-            "COMMAND_BUFFER_EXECUTE binding[%u] buffer 0x%016" PRIx64
-            " not found",
-            i, buffer_id);
-      }
-      local_bindings[i].buffer = buffer;
-      local_bindings[i].offset = wire_bindings[i].offset;
-      local_bindings[i].length = wire_bindings[i].length;
-    }
-  }
-  iree_hal_buffer_binding_table_t binding_table = {
-      .count = op->binding_count,
-      .bindings = local_bindings,
-  };
 
-  bool inline_stream = iree_all_bits_set(
+  const bool inline_stream = iree_all_bits_set(
       op->header.flags, IREE_HAL_REMOTE_EXECUTE_FLAG_INLINE_COMMAND_STREAM);
-
-  if (!inline_stream) {
+  iree_hal_command_buffer_t* local_command_buffer = NULL;
+  iree_hal_command_buffer_t* owned_command_buffer = NULL;
+  iree_status_t status = iree_ok_status();
+  if (inline_stream) {
+    // Inline one-shot: replay the stream into a local one-shot command buffer.
+    const uint8_t* stream_data = command_data + stream_offset;
+    iree_host_size_t stream_length = command_length - stream_offset;
+    status = iree_hal_command_buffer_create(
+        local_device, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+        IREE_HAL_COMMAND_CATEGORY_ANY, IREE_HAL_QUEUE_AFFINITY_ANY,
+        op->binding_count, &owned_command_buffer);
+    local_command_buffer = owned_command_buffer;
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_remote_server_record_command_stream(
+          session_slot, local_command_buffer, stream_data, stream_length);
+    }
+  } else {
     // Reusable: the UPLOAD handler already replayed the stream into a native
-    // local command buffer. Just look it up and submit directly — no replay.
+    // local command buffer. Just look it up and submit directly; no replay.
     iree_hal_remote_resource_id_t command_buffer_id =
         iree_hal_remote_server_resolve_resource_id(session_slot,
                                                    op->command_buffer_id);
-    iree_hal_command_buffer_t* local_command_buffer =
+    local_command_buffer =
         (iree_hal_command_buffer_t*)iree_hal_remote_resource_table_lookup(
             &session_slot->resource_table,
             IREE_HAL_REMOTE_RESOURCE_TYPE_COMMAND_BUFFER, command_buffer_id);
     if (!local_command_buffer) {
-      return iree_make_status(IREE_STATUS_NOT_FOUND,
-                              "COMMAND_BUFFER_EXECUTE command buffer "
-                              "0x%016" PRIx64 " not found",
-                              command_buffer_id);
+      status = iree_make_status(IREE_STATUS_NOT_FOUND,
+                                "COMMAND_BUFFER_EXECUTE command buffer "
+                                "0x%016" PRIx64 " not found",
+                                command_buffer_id);
     }
-    return iree_hal_device_queue_execute(
-        local_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list, signal_list,
-        local_command_buffer, binding_table, IREE_HAL_EXECUTE_FLAG_NONE);
   }
 
-  // Inline one-shot: replay the stream into a local one-shot command buffer.
-  const uint8_t* stream_data = command_data + stream_offset;
-  iree_host_size_t stream_length = command_length - stream_offset;
-
-  iree_hal_command_buffer_t* local_command_buffer = NULL;
-  iree_status_t status = iree_hal_command_buffer_create(
-      local_device, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_ANY, IREE_HAL_QUEUE_AFFINITY_ANY,
-      op->binding_count, &local_command_buffer);
+  iree_hal_remote_server_buffer_binding_table_storage_t binding_storage = {0};
   if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_server_record_command_stream(
-        session_slot, local_command_buffer, stream_data, stream_length);
+    status = iree_hal_remote_server_prepare_buffer_binding_table(
+        session_slot, op->binding_count, wire_bindings,
+        "COMMAND_BUFFER_EXECUTE", &binding_storage);
   }
   if (iree_status_is_ok(status)) {
+    // A peer-side BORROW_BINDING_TABLE_LIFETIME promise cannot authorize the
+    // local backend to borrow buffers: remote resource releases are ordered
+    // after submission capture, not device completion. Require local retention.
     status = iree_hal_device_queue_execute(
         local_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list, signal_list,
-        local_command_buffer, binding_table, IREE_HAL_EXECUTE_FLAG_NONE);
+        local_command_buffer, binding_storage.table,
+        IREE_HAL_EXECUTE_FLAG_NONE);
   }
 
-  iree_hal_command_buffer_release(local_command_buffer);
+  iree_hal_remote_server_buffer_binding_table_storage_deinitialize(
+      &binding_storage);
+  iree_hal_command_buffer_release(owned_command_buffer);
   return status;
 }
 

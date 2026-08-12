@@ -94,6 +94,25 @@ class RemoteCommandBufferTest : public ::testing::Test {
   iree_hal_device_t* device_ = nullptr;
 };
 
+TEST_F(RemoteCommandBufferTest, BindingCapacityUses16BitWireWidth) {
+  iree_hal_command_buffer_t* command_buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      device_, IREE_HAL_COMMAND_BUFFER_MODE_UNVALIDATED,
+      IREE_HAL_COMMAND_CATEGORY_ANY, IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*binding_capacity=*/UINT16_MAX, &command_buffer));
+  iree_hal_command_buffer_release(command_buffer);
+
+  command_buffer = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      iree_hal_command_buffer_create(
+          device_, IREE_HAL_COMMAND_BUFFER_MODE_UNVALIDATED,
+          IREE_HAL_COMMAND_CATEGORY_ANY, IREE_HAL_QUEUE_AFFINITY_ANY,
+          /*binding_capacity=*/(iree_host_size_t)UINT16_MAX + 1,
+          &command_buffer));
+  EXPECT_EQ(command_buffer, nullptr);
+}
+
 TEST_F(RemoteCommandBufferTest, MaximumUpdateUses32BitLength) {
   constexpr iree_host_size_t kUpdateLength =
       IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE;

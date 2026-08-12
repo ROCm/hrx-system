@@ -991,6 +991,14 @@ iree_status_t iree_hal_remote_client_command_buffer_create(
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_command_buffer = NULL;
 
+  if (binding_capacity > UINT16_MAX) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "remote command buffer binding capacity %" PRIhsz
+                            " exceeds wire limit %u",
+                            binding_capacity, (unsigned)UINT16_MAX);
+  }
+
   iree_host_size_t validation_size =
       iree_hal_command_buffer_validation_state_size(mode, binding_capacity);
   iree_host_size_t total_size = 0;
