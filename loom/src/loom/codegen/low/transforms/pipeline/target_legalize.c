@@ -288,7 +288,7 @@ typedef struct loom_low_target_legalize_function_state_t {
   const loom_low_source_selection_t* selection;
   // Source-to-low query options shared by eager and final legality checks.
   loom_low_lower_options_t lower_options;
-  // Low descriptor set selected by the function's effective target facts.
+  // Low descriptor set selected by the function target facts.
   const loom_low_descriptor_set_t* descriptor_set;
   // Active source-to-low contract query scope, rebuilt after IR mutation.
   loom_low_lower_source_query_scope_t* query_scope;

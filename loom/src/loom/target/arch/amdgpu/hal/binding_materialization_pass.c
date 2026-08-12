@@ -80,7 +80,7 @@ iree_status_t loom_amdgpu_materialize_hal_kernel_abi_run(
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
       module, &symbol_facts, function.op,
-      loom_target_function_version_effective_facts(pass->function_version),
+      loom_target_function_version_target_facts(pass->function_version),
       descriptor_registry, pass->diagnostic_emitter, &target));
   if (!loom_amdgpu_materialize_hal_kernel_abi_matches(&target)) {
     return iree_ok_status();
@@ -126,7 +126,7 @@ iree_status_t loom_amdgpu_materialize_hal_buffer_descriptors_run(
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
       module, &symbol_facts, function.op,
-      loom_target_function_version_effective_facts(pass->function_version),
+      loom_target_function_version_target_facts(pass->function_version),
       descriptor_registry, pass->diagnostic_emitter, &target));
   if (!loom_amdgpu_materialize_hal_kernel_abi_matches(&target)) {
     return iree_ok_status();

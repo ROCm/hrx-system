@@ -96,19 +96,19 @@ def generate_ops_h(
             attr_def.enum_def.c_include
             for op in ops
             for attr_def in op.attrs
-            if attr_def.attr_type in ("enum", "enum_array") and attr_def.enum_def is not None and attr_def.enum_def.c_include is not None
+            if attr_def.attr_type in ("enum", "enum_array", "signed_enum_set") and attr_def.enum_def is not None and attr_def.enum_def.c_include is not None
         }
         | {
             parameter.enum_def.c_include
             for attr_def in parameterized_attrs
             for parameter in attr_def.parameters
-            if parameter.attr_type in ("enum", "enum_array") and parameter.enum_def is not None and parameter.enum_def.c_include is not None
+            if parameter.attr_type in ("enum", "enum_array", "signed_enum_set") and parameter.enum_def is not None and parameter.enum_def.c_include is not None
         }
         | {
             parameter.enum_def.c_include
             for family in encoding_families
             for parameter in family.parameters
-            if parameter.attr_type in ("enum", "enum_array") and parameter.enum_def is not None and parameter.enum_def.c_include is not None
+            if parameter.attr_type in ("enum", "enum_array", "signed_enum_set") and parameter.enum_def is not None and parameter.enum_def.c_include is not None
         }
         | {family.auxiliary_key_enum.c_include for family in encoding_families if family.auxiliary_key_enum is not None and family.auxiliary_key_enum.c_include is not None}
     )
@@ -131,7 +131,13 @@ def generate_ops_h(
     for attr_def in parameterized_attrs:
         for parameter in attr_def.parameters:
             enum_def = parameter.enum_def
-            if parameter.attr_type not in ("enum", "enum_array") or enum_def is None or enum_def.c_type is not None or id(enum_def) in encoding_enum_types or id(enum_def) in emitted_parameter_enums:
+            if (
+                parameter.attr_type not in ("enum", "enum_array", "signed_enum_set")
+                or enum_def is None
+                or enum_def.c_type is not None
+                or id(enum_def) in encoding_enum_types
+                or id(enum_def) in emitted_parameter_enums
+            ):
                 continue
             emitted_parameter_enums.add(id(enum_def))
             c_prefix = f"{_c_parameterized_attr_prefix(attr_def)}_{parameter.name}"
@@ -258,7 +264,9 @@ def generate_ops_h(
     # multiple ops (e.g., CallingConv used by func.def, func.decl,
     # func.template, func.ukernel), emit it once with a dialect-level
     # name (loom_func_cc_t) instead of duplicating per-op.
-    open_enum_ids = {id(attr_def.enum_def) for op in ops for attr_def in op.attrs if (attr_def.attr_type in ("enum", "enum_array") and attr_def.open_enum and attr_def.enum_def is not None)}
+    open_enum_ids = {
+        id(attr_def.enum_def) for op in ops for attr_def in op.attrs if (attr_def.attr_type in ("enum", "enum_array", "signed_enum_set") and attr_def.open_enum and attr_def.enum_def is not None)
+    }
 
     # Emit shared enums first.
     for enum_id, (c_prefix, const_prefix, enum_def) in shared_enums.items():
@@ -282,7 +290,7 @@ def generate_ops_h(
     emitted_enum_defs: set[str] = set()
     for op in ops:
         for attr_def in op.attrs:
-            if attr_def.attr_type not in ("enum", "enum_array") or attr_def.enum_def is None:
+            if attr_def.attr_type not in ("enum", "enum_array", "signed_enum_set") or attr_def.enum_def is None:
                 continue
             if attr_def.enum_def.c_type is not None:
                 continue
@@ -384,6 +392,7 @@ def generate_ops_h(
                 "encoding": "LOOM_DEFINE_ATTR_ENCODING",
                 "enum": "LOOM_DEFINE_ATTR_ENUM",
                 "enum_array": "LOOM_DEFINE_ATTR_ENUM_ARRAY",
+                "signed_enum_set": "LOOM_DEFINE_ATTR_SIGNED_ENUM_SET",
                 "scoped_enum": "LOOM_DEFINE_ATTR_SCOPED_ENUM",
                 "symbol": "LOOM_DEFINE_ATTR_SYMBOL",
                 "type": "LOOM_DEFINE_ATTR_TYPE",

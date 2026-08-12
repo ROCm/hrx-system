@@ -16,9 +16,9 @@ static void loom_amdgpu_target_facts_project(const loom_module_t* module,
   loom_amdgpu_target_record_resolve_identity(target_op, &facts->identity);
   loom_amdgpu_target_properties_resolve(
       &facts->identity, &facts->base.storage.bundle, &facts->properties);
-  facts->subgroup_size_authored = loom_target_facts_field_is_authored(
+  facts->subgroup_size_explicit = loom_target_facts_field_is_explicit(
       &facts->base, LOOM_TARGET_FACT_FIELD_SUBGROUP_SIZE);
-  facts->contract_set_key_authored = loom_target_facts_field_is_authored(
+  facts->contract_set_key_explicit = loom_target_facts_field_is_explicit(
       &facts->base, LOOM_TARGET_FACT_FIELD_CONTRACT_SET_KEY);
 }
 

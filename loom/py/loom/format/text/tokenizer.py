@@ -89,9 +89,10 @@ class TokenKind(IntEnum):
     ARROW = 20  # ->
     DIM_X = 21  # 'x' dimension separator (only when in_dim_list)
     PIPE = 22  # |
+    MINUS = 23  # -
 
     # Special.
-    EOF = 23
+    EOF = 24
 
 
 @dataclass(frozen=True, slots=True)
@@ -480,11 +481,8 @@ class Tokenizer:
                 self._advance()
                 self._advance()
                 return self._make_token(TokenKind.FLOAT, "-nan", location)
-            raise ParseError(
-                "unexpected '-' (not followed by '>' or digit)",
-                location,
-                self._filename,
-            )
+            self._advance()
+            return self._make_token(TokenKind.MINUS, "-", location)
 
         # Number.
         if character.isdigit():

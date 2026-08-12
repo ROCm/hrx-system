@@ -7,7 +7,7 @@
 // Source module selection for source-to-low lowering.
 //
 // This is once-per-module JIT compilation setup. It resolves each source
-// symbol's effective target, checks that the low lowering policy supports the
+// symbol's target binding, checks that the low lowering policy supports the
 // resulting target contract, and returns the concrete inputs needed by the
 // core lowerer. Specialized functions use their compiler-owned
 // function-version facts; unrefined functions use facts projected from their
@@ -75,7 +75,7 @@ typedef struct loom_low_source_selection_t {
   // invalid ref when a targetless function was refined by the invocation.
   loom_symbol_ref_t target_ref;
 
-  // Borrowed immutable effective target facts for |func|.
+  // Borrowed immutable function target facts for |func|.
   const loom_target_facts_t* target_facts;
 
   // Borrowed module symbol name for |target_ref|, or empty when targetless.

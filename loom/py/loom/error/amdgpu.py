@@ -1025,20 +1025,21 @@ ERR_AMDGPU_047 = ErrorDef(
     fix_hint=("Apply the named target legalization before native emission"),
 )
 
-# ERR_AMDGPU_048: target feature state is incompatible with the processor.
+# ERR_AMDGPU_048: target feature requirement is unsupported by the processor.
 ERR_AMDGPU_048 = ErrorDef(
     domain=ErrorDomain.AMDGPU,
     code=48,
     severity=Severity.ERROR,
-    summary="AMDGPU target feature state is incompatible with the processor.",
+    summary="AMDGPU target feature requirement is unsupported by the processor.",
     message=(
-        "AMDGPU target '@{target_name}' selects target feature '{feature}' "
-        "state '{state}' for processor '{processor}'"
+        "AMDGPU target '@{target_name}' requires target feature '{feature}' "
+        "{required_state}, but processor '{processor}' does not support the "
+        "feature"
     ),
     params=(
         ErrorParam("target_name", ParamKind.STRING),
         ErrorParam("feature", ParamKind.STRING),
-        ErrorParam("state", ParamKind.STRING),
+        ErrorParam("required_state", ParamKind.STRING),
         ErrorParam("processor", ParamKind.STRING),
     ),
     fix_hint=(
@@ -1068,6 +1069,17 @@ ERR_AMDGPU_049 = ErrorDef(
         ErrorParam("expected_unit_count", ParamKind.U32),
     ),
     fix_hint="Materialize AMDGPU storage addresses as one VGPR",
+)
+
+# ERR_AMDGPU_050: target feature assertion set is vacuous.
+ERR_AMDGPU_050 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=50,
+    severity=Severity.ERROR,
+    summary="AMDGPU target feature assertion set is empty.",
+    message="AMDGPU target '@{target_name}' has an empty feature assertion set",
+    params=(ErrorParam("target_name", ParamKind.STRING),),
+    fix_hint="Omit the optional features field when no assertions are required",
 )
 
 ALL_AMDGPU_ERRORS = (
@@ -1115,4 +1127,5 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_047,
     ERR_AMDGPU_048,
     ERR_AMDGPU_049,
+    ERR_AMDGPU_050,
 )

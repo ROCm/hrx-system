@@ -30,7 +30,7 @@ static void InitializeTestTargetFacts(loom_target_facts_t* out_facts) {
   *out_facts = {
       /*.fact_type=*/&kTestTargetFactType,
       /*.selector=*/0,
-      /*.authored_fields=*/0,
+      /*.explicit_fields=*/0,
       /*.storage=*/
       {
           /*.snapshot=*/{/*.name=*/IREE_SVL("test")},

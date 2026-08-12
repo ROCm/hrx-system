@@ -10,11 +10,15 @@
 #include <vector>
 
 #include "iree/base/internal/arena.h"
+#include "iree/io/vec_stream.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/analysis/symbol_facts.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
+#include "loom/format/bytecode/reader.h"
+#include "loom/format/bytecode/writer.h"
 #include "loom/format/text/parser.h"
+#include "loom/format/text/printer.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
@@ -26,6 +30,7 @@
 #include "loom/pass/testing/registry_verify.h"
 #include "loom/pass/tooling.h"
 #include "loom/target/arch/amdgpu/facts.h"
+#include "loom/target/arch/amdgpu/ops/ops.h"
 #include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/testing/module_ptr.h"
@@ -35,6 +40,70 @@ namespace loom {
 namespace {
 
 using ModulePtr = ::loom::testing::ModulePtr;
+
+static ModulePtr ParseModule(iree_string_view_t source,
+                             iree_string_view_t source_name,
+                             loom_context_t* context,
+                             iree_arena_block_pool_t* block_pool) {
+  loom_text_parse_options_t parse_options = {
+      /*.diagnostic_sink=*/{},
+      /*.max_errors=*/20,
+  };
+  loom_module_t* module = nullptr;
+  IREE_CHECK_OK(loom_text_parse(source, source_name, context, block_pool,
+                                &parse_options, &module));
+  IREE_ASSERT(module != nullptr);
+  return ModulePtr(module);
+}
+
+static std::string PrintModule(const loom_module_t* module) {
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  IREE_CHECK_OK(loom_text_print_module_to_builder(module, &builder,
+                                                  LOOM_TEXT_PRINT_DEFAULT));
+  std::string text(iree_string_builder_buffer(&builder),
+                   iree_string_builder_size(&builder));
+  iree_string_builder_deinitialize(&builder);
+  return text;
+}
+
+static std::vector<uint8_t> WriteModuleBytecode(
+    const loom_module_t* module, iree_arena_block_pool_t* block_pool) {
+  iree_io_stream_t* stream = nullptr;
+  IREE_CHECK_OK(iree_io_vec_stream_create(
+      IREE_IO_STREAM_MODE_WRITABLE | IREE_IO_STREAM_MODE_SEEKABLE |
+          IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_RESIZABLE,
+      4096, iree_allocator_system(), &stream));
+  IREE_CHECK_OK(
+      loom_bytecode_write_module(module, stream, nullptr, block_pool));
+
+  const iree_io_stream_pos_t length = iree_io_stream_length(stream);
+  std::vector<uint8_t> bytes((size_t)length);
+  IREE_CHECK_OK(iree_io_stream_seek(stream, IREE_IO_STREAM_SEEK_SET, 0));
+  IREE_CHECK_OK(
+      iree_io_stream_read(stream, bytes.size(), bytes.data(), nullptr));
+  iree_io_stream_release(stream);
+  return bytes;
+}
+
+static ModulePtr ReadModuleBytecode(const std::vector<uint8_t>& bytes,
+                                    loom_context_t* context,
+                                    iree_arena_block_pool_t* block_pool) {
+  loom_bytecode_read_options_t options = {
+      /*.diagnostic_sink=*/{},
+      /*.verify_module=*/true,
+      /*.verify_max_errors=*/20,
+  };
+  loom_bytecode_read_result_t result = {};
+  loom_module_t* module = nullptr;
+  IREE_CHECK_OK(loom_bytecode_read_module(
+      iree_make_const_byte_span(bytes.data(), bytes.size()),
+      IREE_SV("amdgpu_provider_test.loombc"), context, block_pool, &options,
+      &result, &module, iree_allocator_system()));
+  IREE_ASSERT(result.error_count == 0);
+  IREE_ASSERT(module != nullptr);
+  return ModulePtr(module);
+}
 
 struct PipelineBuildData {
   const loom_target_environment_t* environment;
@@ -82,7 +151,7 @@ static void ExpectTargetFactsEqual(const loom_amdgpu_target_facts_t& expected,
                                    const loom_amdgpu_target_facts_t& actual) {
   EXPECT_EQ(actual.base.fact_type, expected.base.fact_type);
   EXPECT_EQ(actual.base.selector, expected.base.selector);
-  EXPECT_EQ(actual.base.authored_fields, expected.base.authored_fields);
+  EXPECT_EQ(actual.base.explicit_fields, expected.base.explicit_fields);
 
   const loom_target_snapshot_t& expected_snapshot =
       expected.base.storage.snapshot;
@@ -191,17 +260,41 @@ class AmdgpuProviderTest : public ::testing::Test {
     return iree_ok_status();
   }
 
-  ModulePtr Parse(iree_string_view_t source) {
-    loom_text_parse_options_t parse_options = {
-        /*.diagnostic_sink=*/{},
-        /*.max_errors=*/20,
+  ModulePtr MaterializeTargetDefinition(iree_string_view_t module_name,
+                                        iree_string_view_t target_name,
+                                        const loom_target_facts_t* facts,
+                                        loom_op_t** out_target_op = nullptr) {
+    ModulePtr module;
+    IREE_CHECK_OK(AllocateModule(module_name, &module));
+    loom_string_id_t target_name_id = LOOM_STRING_ID_INVALID;
+    IREE_CHECK_OK(
+        loom_module_intern_string(module.get(), target_name, &target_name_id));
+    loom_symbol_id_t target_symbol_id = LOOM_SYMBOL_ID_INVALID;
+    IREE_CHECK_OK(loom_module_add_symbol(module.get(), target_name_id,
+                                         &target_symbol_id));
+    const loom_symbol_ref_t target_ref = {
+        /*.module_id=*/0,
+        /*.symbol_id=*/target_symbol_id,
     };
-    loom_module_t* module = nullptr;
-    IREE_CHECK_OK(loom_text_parse(source, IREE_SV("amdgpu_provider_test.loom"),
-                                  &context_, &block_pool_, &parse_options,
-                                  &module));
-    IREE_ASSERT(module != nullptr);
-    return ModulePtr(module);
+    loom_builder_t builder;
+    loom_builder_initialize(module.get(), &module->arena,
+                            loom_module_block(module.get()), &builder);
+    const loom_resolved_target_t resolved_target = {
+        /*.provider=*/&loom_amdgpu_target_provider,
+        /*.facts=*/facts,
+    };
+    loom_op_t* target_op = nullptr;
+    IREE_CHECK_OK(loom_amdgpu_target_provider.materialize_definition(
+        &builder, &resolved_target, target_ref, LOOM_LOCATION_UNKNOWN,
+        &target_op));
+    IREE_ASSERT(target_op != nullptr);
+    if (out_target_op != nullptr) *out_target_op = target_op;
+    return module;
+  }
+
+  ModulePtr Parse(iree_string_view_t source) {
+    return ParseModule(source, IREE_SV("amdgpu_provider_test.loom"), &context_,
+                       &block_pool_);
   }
 
   loom_symbol_ref_t FindSymbolRef(const loom_module_t* module,
@@ -435,30 +528,15 @@ TEST_F(AmdgpuProviderTest, MaterializesEveryStructuredProfile) {
     IREE_ASSERT_OK(loom_target_profile_project_facts(
         &profile.base, &analysis_arena_, &profile_facts));
 
-    ModulePtr module;
-    IREE_ASSERT_OK(AllocateModule(target->name, &module));
-    loom_string_id_t target_name_id = LOOM_STRING_ID_INVALID;
-    IREE_ASSERT_OK(loom_module_intern_string(module.get(), IREE_SV("target"),
-                                             &target_name_id));
-    loom_symbol_id_t target_symbol_id = LOOM_SYMBOL_ID_INVALID;
-    IREE_ASSERT_OK(loom_module_add_symbol(module.get(), target_name_id,
-                                          &target_symbol_id));
-    const loom_symbol_ref_t target_ref = {
-        /*.module_id=*/0,
-        /*.symbol_id=*/target_symbol_id,
-    };
-    loom_builder_t builder;
-    loom_builder_initialize(module.get(), &module->arena,
-                            loom_module_block(module.get()), &builder);
     loom_op_t* target_op = nullptr;
-    IREE_ASSERT_OK(loom_amdgpu_target_provider.materialize_definition(
-        &builder, profile_facts, target_ref, LOOM_LOCATION_UNKNOWN,
-        &target_op));
-    ASSERT_NE(target_op, nullptr);
+    ModulePtr module = MaterializeTargetDefinition(
+        target->name, IREE_SV("target"), profile_facts, &target_op);
+    EXPECT_TRUE(loom_attr_is_absent(
+        loom_op_attrs(target_op)[loom_amdgpu_target_features_ATTR_INDEX]));
 
     loom_symbol_fact_table_reset(&fact_table_);
     const loom_target_symbol_facts_t* materialized_symbol_facts =
-        Target(module.get(), target_ref);
+        Target(module.get(), FindSymbolRef(module.get(), IREE_SV("target")));
     const loom_amdgpu_target_facts_t* materialized_facts =
         loom_amdgpu_target_facts_cast(materialized_symbol_facts->projection);
     ASSERT_NE(materialized_facts, nullptr);
@@ -475,41 +553,130 @@ TEST_F(AmdgpuProviderTest, MaterializesAuthoredRefinements) {
                     "max_workgroup_storage_bytes = 32768, "
                     "export_symbol = \"roundtrip_export\", "
                     "contract_set_key = \"roundtrip.contract\", "
-                    "contract_feature_bits = 5, sramecc = on, xnack = off}\n"));
+                    "contract_feature_bits = 5, "
+                    "features = [sramecc, -xnack]}\n"));
   const loom_target_symbol_facts_t* source_symbol_facts =
       Target(source.get(), FindSymbolRef(source.get(), IREE_SV("source")));
   const loom_amdgpu_target_facts_t* source_facts =
       loom_amdgpu_target_facts_cast(source_symbol_facts->projection);
   ASSERT_NE(source_facts, nullptr);
 
-  ModulePtr materialized;
-  IREE_ASSERT_OK(AllocateModule(IREE_SV("materialized"), &materialized));
-  loom_string_id_t target_name_id = LOOM_STRING_ID_INVALID;
-  IREE_ASSERT_OK(loom_module_intern_string(
-      materialized.get(), IREE_SV("sealed_target"), &target_name_id));
-  loom_symbol_id_t target_symbol_id = LOOM_SYMBOL_ID_INVALID;
-  IREE_ASSERT_OK(loom_module_add_symbol(materialized.get(), target_name_id,
-                                        &target_symbol_id));
-  const loom_symbol_ref_t target_ref = {
-      /*.module_id=*/0,
-      /*.symbol_id=*/target_symbol_id,
-  };
-  loom_builder_t builder;
-  loom_builder_initialize(materialized.get(), &materialized->arena,
-                          loom_module_block(materialized.get()), &builder);
   loom_op_t* target_op = nullptr;
-  IREE_ASSERT_OK(loom_amdgpu_target_provider.materialize_definition(
-      &builder, source_symbol_facts->projection, target_ref,
-      LOOM_LOCATION_UNKNOWN, &target_op));
-  ASSERT_NE(target_op, nullptr);
+  ModulePtr materialized = MaterializeTargetDefinition(
+      IREE_SV("materialized"), IREE_SV("sealed_target"),
+      source_symbol_facts->projection, &target_op);
+  const loom_signed_enum_set_t materialized_features =
+      loom_amdgpu_target_features(target_op);
+  EXPECT_EQ(materialized_features.word_count, 1u);
+  EXPECT_TRUE(loom_signed_enum_set_contains_positive(
+      materialized_features, LOOM_AMDGPU_TARGET_FEATURES_SRAMECC));
+  EXPECT_TRUE(loom_signed_enum_set_contains_negative(
+      materialized_features, LOOM_AMDGPU_TARGET_FEATURES_XNACK));
 
   loom_symbol_fact_table_reset(&fact_table_);
   const loom_target_symbol_facts_t* materialized_symbol_facts =
-      Target(materialized.get(), target_ref);
+      Target(materialized.get(),
+             FindSymbolRef(materialized.get(), IREE_SV("sealed_target")));
   const loom_amdgpu_target_facts_t* materialized_facts =
       loom_amdgpu_target_facts_cast(materialized_symbol_facts->projection);
   ASSERT_NE(materialized_facts, nullptr);
   ExpectTargetFactsEqual(*source_facts, *materialized_facts);
+}
+
+TEST_F(AmdgpuProviderTest, RequirementsSurviveFreshContextSerialization) {
+  static constexpr iree_string_view_t kCanonicalSource = IREE_SVL(
+      "amdgpu.target<gfx942> @source {features = [-sramecc, xnack], "
+      "subgroup_size = 64}\n");
+  ModulePtr source_a = Parse(
+      IREE_SV("amdgpu.target<gfx942> @source {features = [xnack, -sramecc], "
+              "subgroup_size = 64}\n"));
+  ModulePtr source_b = Parse(kCanonicalSource);
+  EXPECT_EQ(PrintModule(source_a.get()),
+            std::string(kCanonicalSource.data, kCanonicalSource.size));
+  EXPECT_EQ(PrintModule(source_b.get()),
+            std::string(kCanonicalSource.data, kCanonicalSource.size));
+  EXPECT_EQ(WriteModuleBytecode(source_a.get(), &block_pool_),
+            WriteModuleBytecode(source_b.get(), &block_pool_));
+
+  const loom_target_symbol_facts_t* source_symbol_facts =
+      Target(source_a.get(), FindSymbolRef(source_a.get(), IREE_SV("source")));
+  const loom_amdgpu_target_facts_t* source_facts =
+      loom_amdgpu_target_facts_cast(source_symbol_facts->projection);
+  ASSERT_NE(source_facts, nullptr);
+  EXPECT_TRUE(loom_target_facts_field_is_explicit(
+      &source_facts->base, LOOM_TARGET_FACT_FIELD_SUBGROUP_SIZE));
+  EXPECT_EQ(source_facts->identity.amdhsa_features.sramecc,
+            LOOM_AMDGPU_TARGET_FEATURE_OFF);
+  EXPECT_EQ(source_facts->identity.amdhsa_features.xnack,
+            LOOM_AMDGPU_TARGET_FEATURE_ON);
+
+  ModulePtr materialized = MaterializeTargetDefinition(
+      IREE_SV("materialized"), IREE_SV("sealed_target"),
+      source_symbol_facts->projection);
+
+  static constexpr iree_string_view_t kCanonicalMaterialized = IREE_SVL(
+      "amdgpu.target<gfx942> @sealed_target {features = [-sramecc, xnack], "
+      "subgroup_size = 64}\n");
+  EXPECT_EQ(
+      PrintModule(materialized.get()),
+      std::string(kCanonicalMaterialized.data, kCanonicalMaterialized.size));
+  const std::vector<uint8_t> materialized_bytecode =
+      WriteModuleBytecode(materialized.get(), &block_pool_);
+
+  iree_arena_block_pool_t fresh_block_pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(),
+                                   &fresh_block_pool);
+  loom_target_environment_t fresh_target_environment = {};
+  IREE_CHECK_OK(loom_target_environment_initialize(
+      &loom_amdgpu_target_provider_set, &fresh_target_environment));
+  loom_context_t fresh_context;
+  loom_context_initialize(iree_allocator_system(), &fresh_context);
+  IREE_CHECK_OK(loom_op_registry_register_all_dialects(&fresh_context));
+  IREE_CHECK_OK(loom_target_environment_register_context(
+      &fresh_target_environment, &fresh_context));
+  IREE_CHECK_OK(loom_context_finalize(&fresh_context));
+  iree_arena_allocator_t fresh_analysis_arena;
+  iree_arena_initialize(&fresh_block_pool, &fresh_analysis_arena);
+  loom_symbol_fact_table_t fresh_fact_table;
+  loom_symbol_fact_table_initialize(&fresh_fact_table, &fresh_analysis_arena);
+
+  {
+    ModulePtr text_module =
+        ParseModule(kCanonicalMaterialized, IREE_SV("fresh_text.loom"),
+                    &fresh_context, &fresh_block_pool);
+    ModulePtr bytecode_module = ReadModuleBytecode(
+        materialized_bytecode, &fresh_context, &fresh_block_pool);
+    auto expect_reprojected_facts = [&](const loom_module_t* module) {
+      loom_symbol_fact_table_reset(&fresh_fact_table);
+      const loom_symbol_ref_t fresh_target_ref =
+          FindSymbolRef(module, IREE_SV("sealed_target"));
+      const loom_symbol_facts_base_t* base_facts = nullptr;
+      IREE_CHECK_OK(loom_symbol_fact_table_lookup_ref(
+          &fresh_fact_table, module, fresh_target_ref, &base_facts));
+      const loom_target_symbol_facts_t* target_facts =
+          loom_target_symbol_facts_cast(base_facts);
+      IREE_ASSERT(target_facts != nullptr);
+      const loom_amdgpu_target_facts_t* facts =
+          loom_amdgpu_target_facts_cast(target_facts->projection);
+      IREE_ASSERT(facts != nullptr);
+      ExpectTargetFactsEqual(*source_facts, *facts);
+      EXPECT_TRUE(loom_target_facts_field_is_explicit(
+          &facts->base, LOOM_TARGET_FACT_FIELD_SUBGROUP_SIZE));
+      EXPECT_EQ(facts->identity.amdhsa_features.sramecc,
+                LOOM_AMDGPU_TARGET_FEATURE_OFF);
+      EXPECT_EQ(facts->identity.amdhsa_features.xnack,
+                LOOM_AMDGPU_TARGET_FEATURE_ON);
+    };
+    expect_reprojected_facts(text_module.get());
+    expect_reprojected_facts(bytecode_module.get());
+    EXPECT_EQ(WriteModuleBytecode(bytecode_module.get(), &fresh_block_pool),
+              materialized_bytecode);
+  }
+
+  iree_arena_deinitialize(&fresh_analysis_arena);
+  loom_target_environment_deinitialize(&fresh_target_environment);
+  loom_context_deinitialize(&fresh_context);
+  iree_arena_block_pool_deinitialize(&fresh_block_pool);
 }
 
 TEST_F(AmdgpuProviderTest, SeparatesIdentityAndSpecializationRequirements) {
@@ -572,13 +739,17 @@ TEST_F(AmdgpuProviderTest, SeparatesIdentityAndSpecializationRequirements) {
   ASSERT_NE(gfx11_explicit_contract_facts, nullptr);
   EXPECT_EQ(gfx1151_a_facts->base.storage.snapshot.subgroup_size,
             gfx1151_explicit_wave32_facts->base.storage.snapshot.subgroup_size);
-  EXPECT_FALSE(gfx1151_a_facts->subgroup_size_authored);
-  EXPECT_TRUE(gfx1151_explicit_wave32_facts->subgroup_size_authored);
-  EXPECT_FALSE(gfx11_generic_facts->contract_set_key_authored);
-  EXPECT_TRUE(gfx11_explicit_contract_facts->contract_set_key_authored);
+  EXPECT_FALSE(gfx1151_a_facts->subgroup_size_explicit);
+  EXPECT_TRUE(gfx1151_explicit_wave32_facts->subgroup_size_explicit);
+  EXPECT_FALSE(gfx11_generic_facts->contract_set_key_explicit);
+  EXPECT_TRUE(gfx11_explicit_contract_facts->contract_set_key_explicit);
+  EXPECT_TRUE(loom_target_facts_are_equivalent(gfx1151_a->projection,
+                                               gfx1151_b->projection));
+  EXPECT_FALSE(loom_target_facts_are_equivalent(
+      gfx1151_a->projection, gfx1151_explicit_wave32->projection));
 
   // Identity is only the generated code-object domain and target-ID
-  // coordinates. Common projection authorship cannot narrow it.
+  // coordinates. Common projection explicitness cannot narrow it.
   EXPECT_TRUE(SatisfiesIdentity(gfx1151_a, gfx1151_a));
   EXPECT_TRUE(SatisfiesIdentity(gfx1151_a, gfx1151_b));
   EXPECT_TRUE(SatisfiesIdentity(gfx1151_a, gfx11_generic));
@@ -611,8 +782,9 @@ TEST_F(AmdgpuProviderTest, SeparatesIdentityAndSpecializationRequirements) {
 TEST_F(AmdgpuProviderTest, PreservesTargetIdFeatureRequirements) {
   ModulePtr module =
       Parse(IREE_SV("amdgpu.target<gfx942> @any\n"
-                    "amdgpu.target<gfx942> @xnack_on {xnack = on}\n"
-                    "amdgpu.target<gfx942> @xnack_off {xnack = off}\n"));
+                    "amdgpu.target<gfx942> @xnack_on {features = [xnack]}\n"
+                    "amdgpu.target<gfx942> @xnack_off "
+                    "{features = [-xnack]}\n"));
 
   const loom_target_symbol_facts_t* any =
       Target(module.get(), FindSymbolRef(module.get(), IREE_SV("any")));
@@ -632,6 +804,10 @@ TEST_F(AmdgpuProviderTest, PreservesTargetIdFeatureRequirements) {
   EXPECT_FALSE(SatisfiesIdentity(xnack_on, xnack_off));
   EXPECT_FALSE(SatisfiesIdentity(any, xnack_on));
   EXPECT_FALSE(SatisfiesIdentity(xnack_off, xnack_on));
+  EXPECT_FALSE(
+      loom_target_facts_are_equivalent(any->projection, xnack_on->projection));
+  EXPECT_FALSE(loom_target_facts_are_equivalent(xnack_on->projection,
+                                                xnack_off->projection));
 }
 
 TEST_F(AmdgpuProviderTest, PreservesTargetOverlayRequirements) {

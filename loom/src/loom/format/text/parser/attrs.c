@@ -212,6 +212,70 @@ static iree_status_t loom_parse_enum_array_attr(
   return iree_ok_status();
 }
 
+static iree_status_t loom_parse_signed_enum_set_attr(
+    loom_parser_t* parser, const loom_attr_descriptor_t* descriptor,
+    loom_attribute_t* out_attr) {
+  if (!descriptor || descriptor->attr_kind != LOOM_ATTR_SIGNED_ENUM_SET ||
+      iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "parsing a signed enum set requires a closed descriptor-backed field");
+  }
+  if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LBRACKET)) {
+    return loom_parser_emit_unexpected_token(
+        parser, loom_tokenizer_peek(&parser->tokenizer), IREE_SV("'['"));
+  }
+
+  uint64_t words[LOOM_SIGNED_ENUM_SET_MAX_WORD_COUNT * 2] = {0};
+  bool has_value = false;
+  while (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_RBRACKET) &&
+         !loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_EOF)) {
+    if (has_value &&
+        !loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_COMMA)) {
+      break;
+    }
+    loom_token_t value_token = loom_tokenizer_peek(&parser->tokenizer);
+    bool is_negative =
+        loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_MINUS);
+    uint8_t value = 0;
+    IREE_RETURN_IF_ERROR(
+        loom_parse_enum_attr_value(parser, descriptor, &value));
+    const iree_host_size_t word_index = value / 64u;
+    const uint64_t bit = UINT64_C(1) << (value % 64u);
+    uint64_t* positive_word = &words[word_index];
+    uint64_t* negative_word =
+        &words[LOOM_SIGNED_ENUM_SET_MAX_WORD_COUNT + word_index];
+    if (iree_any_bit_set(*positive_word | *negative_word, bit)) {
+      return loom_parser_emit_unexpected_token(
+          parser, value_token, IREE_SV("each signed enum value at most once"));
+    }
+    *(is_negative ? negative_word : positive_word) |= bit;
+    has_value = true;
+  }
+  if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_RBRACKET)) {
+    return loom_parser_emit_unexpected_token(
+        parser, loom_tokenizer_peek(&parser->tokenizer), IREE_SV("']'"));
+  }
+
+  iree_host_size_t word_count = LOOM_SIGNED_ENUM_SET_MAX_WORD_COUNT;
+  while (word_count > 0 && words[word_count - 1] == 0 &&
+         words[LOOM_SIGNED_ENUM_SET_MAX_WORD_COUNT + word_count - 1] == 0) {
+    --word_count;
+  }
+  uint64_t* arena_words = NULL;
+  if (word_count > 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(&parser->module->arena, word_count * 2,
+                                  sizeof(*arena_words), (void**)&arena_words));
+    memcpy(arena_words, words, word_count * sizeof(*arena_words));
+    memcpy(arena_words + word_count,
+           words + LOOM_SIGNED_ENUM_SET_MAX_WORD_COUNT,
+           word_count * sizeof(*arena_words));
+  }
+  *out_attr = loom_attr_signed_enum_set(arena_words, (uint16_t)word_count);
+  return iree_ok_status();
+}
+
 static int8_t loom_parse_hex_nibble(uint8_t c) {
   if (c >= '0' && c <= '9') return (int8_t)(c - '0');
   if (c >= 'a' && c <= 'f') return (int8_t)(10 + c - 'a');
@@ -578,6 +642,8 @@ static iree_status_t loom_parse_attr_value_at_depth(
     case LOOM_ATTR_ENUM_ARRAY: {
       return loom_parse_enum_array_attr(parser, descriptor, out_attr);
     }
+    case LOOM_ATTR_SIGNED_ENUM_SET:
+      return loom_parse_signed_enum_set_attr(parser, descriptor, out_attr);
     case LOOM_ATTR_I64_ARRAY: {
       return loom_parse_i64_array_attr(parser, out_attr);
     }

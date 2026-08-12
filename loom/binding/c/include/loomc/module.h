@@ -375,9 +375,10 @@ LOOMC_API_EXPORT void loomc_module_release(loomc_module_t* module);
 /// @lifetime
 /// The cloned module retains `workspace` and returns its arena blocks when the
 /// module is released. The clone does not borrow from `source_module`; both
-/// modules may be mutated independently after this call returns. Cloning
-/// preserves module IR only; invocation-local compiler facts retained by a
-/// prior compilation are not copied.
+/// modules may be mutated independently after this call returns. When a prior
+/// compilation retained resolved function targets outside the source IR, the
+/// clone materializes those targets into ordinary definitions and function
+/// target references. The clone needs no invocation-local compiler facts.
 ///
 /// @thread_safety
 /// Cloning reads `source_module` and mutates `workspace`. Concurrent clones of
@@ -697,6 +698,14 @@ LOOMC_API_EXPORT loomc_status_t loomc_module_function_get_export_info(
 /// `loomc_source_release`. Serialized bytes are owned by that source and remain
 /// valid until the source is released.
 ///
+/// @par Resolved Targets
+/// When a prior compilation retained resolved function targets outside the
+/// module IR, serialization first projects them into a derived module without
+/// mutating the source. The resulting source is self-contained and can be
+/// deserialized in a fresh context without the original profiles.
+/// Serialization fails when an exact target definition cannot be materialized;
+/// it never silently emits the less-specific authored target.
+///
 /// @thread_safety
 /// Serialization is read-only with respect to `module`. Concurrent
 /// serialization of the same module is valid when the caller guarantees that no
@@ -715,6 +724,7 @@ LOOMC_API_EXPORT loomc_status_t loomc_module_serialize_to_source(
 ///
 /// @ownership
 /// The caller retains ownership of `file`; this function does not close it.
+/// Target projection completes before any bytes are written to `file`.
 LOOMC_API_EXPORT loomc_status_t loomc_module_serialize_to_file(
     const loomc_module_t* module,
     const loomc_module_serialize_options_t* options, FILE* file);
@@ -727,6 +737,9 @@ LOOMC_API_EXPORT loomc_status_t loomc_module_serialize_to_file(
 /// need to be NUL-terminated.
 /// @param allocator Host allocator used for transient file path/stream storage.
 /// @return OK when serialization succeeded.
+///
+/// Exact target projection completes before the output path is opened, so a
+/// projection failure does not create or truncate the path.
 LOOMC_API_EXPORT loomc_status_t loomc_module_serialize_to_path(
     const loomc_module_t* module,
     const loomc_module_serialize_options_t* options, loomc_string_view_t path,

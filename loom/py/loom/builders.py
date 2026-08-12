@@ -26,6 +26,7 @@ from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.dsl import (
     ATTR_TYPE_ENUM_ARRAY,
     ATTR_TYPE_PARAMETERIZED_ARRAY,
+    ATTR_TYPE_SIGNED_ENUM_SET,
     AttrDef,
     Op,
     TypeDef,
@@ -37,6 +38,7 @@ from loom.ir import (
     Module,
     ParameterizedAttrArray,
     Region,
+    SignedEnumSetAttr,
     Type,
 )
 from loom.stable_id import stable_id_from_string
@@ -209,6 +211,13 @@ class OpCallable:
                             and param.attr_def.attr_type == ATTR_TYPE_ENUM_ARRAY
                         ):
                             value = _normalize_enum_array_attr(
+                                op.name, param.attr_def, value
+                            )
+                        elif (
+                            param.attr_def is not None
+                            and param.attr_def.attr_type == ATTR_TYPE_SIGNED_ENUM_SET
+                        ):
+                            value = _normalize_signed_enum_set_attr(
                                 op.name, param.attr_def, value
                             )
                         elif (
@@ -511,6 +520,64 @@ def _normalize_enum_array_attr(
             )
         normalized_values.append(stable_value)
     return EnumArrayAttr(normalized_values)
+
+
+def _normalize_signed_enum_set_attr(
+    op_name: str, attr_def: AttrDef, value: Any
+) -> SignedEnumSetAttr:
+    """Resolves signed enum-set assertions to stable byte values."""
+    if isinstance(value, SignedEnumSetAttr):
+        assertions: Mapping[str | int, bool] = {
+            **{ordinal: True for ordinal in value.positive_values},
+            **{ordinal: False for ordinal in value.negative_values},
+        }
+    elif isinstance(value, Mapping):
+        assertions = value
+    else:
+        raise TypeError(
+            f"{op_name}: signed enum set '{attr_def.name}' must be a mapping "
+            "of enum keywords or byte values to Booleans"
+        )
+
+    assert attr_def.enum_def is not None
+    value_by_keyword = {case.keyword: case.value for case in attr_def.enum_def.cases}
+    declared_values = frozenset(value_by_keyword.values())
+    positive_values: list[int] = []
+    negative_values: list[int] = []
+    resolved_values: set[int] = set()
+    for enum_value, assertion in assertions.items():
+        if type(assertion) is not bool:
+            raise TypeError(
+                f"{op_name}: signed enum set '{attr_def.name}' assertion "
+                f"for {enum_value!r} must be a Boolean, got {assertion!r}"
+            )
+        if isinstance(enum_value, str):
+            stable_value = value_by_keyword.get(enum_value)
+            if stable_value is None:
+                raise ValueError(
+                    f"{op_name}: signed enum set '{attr_def.name}' has "
+                    f"unknown keyword {enum_value!r}"
+                )
+        elif type(enum_value) is int and 0 <= enum_value <= 0xFF:
+            stable_value = enum_value
+            if stable_value not in declared_values:
+                raise ValueError(
+                    f"{op_name}: signed enum set '{attr_def.name}' has "
+                    f"undeclared value {stable_value}"
+                )
+        else:
+            raise TypeError(
+                f"{op_name}: signed enum set '{attr_def.name}' key must be "
+                f"an enum keyword or byte value, got {enum_value!r}"
+            )
+        if stable_value in resolved_values:
+            raise ValueError(
+                f"{op_name}: signed enum set '{attr_def.name}' names stable "
+                f"value {stable_value} more than once"
+            )
+        resolved_values.add(stable_value)
+        (positive_values if assertion else negative_values).append(stable_value)
+    return SignedEnumSetAttr(positive_values, negative_values)
 
 
 def _normalize_parameterized_attr_array(

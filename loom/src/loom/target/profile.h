@@ -26,8 +26,9 @@ extern "C" {
 // Projects one complete family profile into compiler-owned typed facts.
 //
 // |out_facts| has already been zeroed and initialized from the profile's
-// target-neutral bundle. Implementations populate the family selector and
-// typed extension, allocating any nested immutable storage from |arena|.
+// target-neutral bundle. Implementations populate the family selector, mark
+// target-neutral semantic inputs in |out_facts->explicit_fields|, and populate
+// the typed extension, allocating any nested immutable storage from |arena|.
 typedef iree_status_t (*loom_target_profile_project_facts_fn_t)(
     const loom_target_profile_t* profile, iree_arena_allocator_t* arena,
     loom_target_facts_t* out_facts);

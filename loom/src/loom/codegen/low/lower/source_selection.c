@@ -169,7 +169,7 @@ static iree_status_t loom_low_source_selection_try_symbol(
                              : LOOM_TARGET_BINDING_SOURCE_AUTHORED;
   const loom_target_facts_t* target_facts = NULL;
   if (target_version != NULL) {
-    target_facts = target_version->effective_target_facts;
+    target_facts = target_version->function_target_facts;
   } else {
     if (!loom_symbol_ref_is_valid(target_ref)) {
       return iree_ok_status();

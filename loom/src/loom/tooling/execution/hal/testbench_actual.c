@@ -700,7 +700,7 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
           &provider->launch_config_pipeline_result.function_versions.list,
           launch_config_func);
   provider->launch_config_target_facts =
-      launch_config_function_version->effective_target_facts;
+      launch_config_function_version->function_target_facts;
 
   IREE_RETURN_IF_ERROR(loom_run_hal_testbench_run_compile_pipeline(
       provider, provider->compile_module.module, &pipeline_options,
@@ -908,7 +908,7 @@ static iree_status_t loom_run_hal_testbench_evaluate_launch_config(
       .workload_arguments = provider->workload_arguments,
       .workload_argument_count = workload_count,
       .required_fields = LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT,
-      .effective_target_facts = provider->launch_config_target_facts,
+      .function_target_facts = provider->launch_config_target_facts,
   };
   loom_kernel_launch_config_t config = {0};
   IREE_RETURN_IF_ERROR(loom_kernel_launch_config_evaluate(

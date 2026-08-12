@@ -191,6 +191,7 @@ loom_cc_library(
         "//loom/src/loom/pass:value_facts",
         "//loom/src/loom/sanitizer:options",
         "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target:module_sealing",
         "//loom/src/loom/target:pipeline",
         "//loom/src/loom/target:predicate",
         "//loom/src/loom/target:profile",

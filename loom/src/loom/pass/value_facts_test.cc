@@ -27,7 +27,7 @@ static void InitializeTestTargetFacts(iree_string_view_t name,
   *out_facts = {
       /*.fact_type=*/&kTestTargetFactType,
       /*.selector=*/0,
-      /*.authored_fields=*/0,
+      /*.explicit_fields=*/0,
       /*.storage=*/
       {
           /*.snapshot=*/{/*.name=*/name},

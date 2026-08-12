@@ -37,6 +37,11 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "resolved_target",
+    hdrs = ["resolved_target.h"],
+)
+
+loom_cc_library(
     name = "condition",
     srcs = ["condition.c"],
     hdrs = ["condition.h"],
@@ -128,10 +133,54 @@ loom_cc_library(
     hdrs = ["function_version.h"],
     deps = [
         ":facts",
+        ":resolved_target",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "module_sealing",
+    srcs = ["module_sealing.c"],
+    hdrs = ["module_sealing.h"],
+    deps = [
+        ":facts",
+        ":function_version",
+        ":provider",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:symbol_map",
+        "//loom/src/loom/link:linker",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/target",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "module_sealing_test",
+    srcs = ["module_sealing_test.cc"],
+    deps = [
+        ":facts_builder",
+        ":module_sealing",
+        ":provider",
+        ":specialization",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/format/text:printer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target/test:target_record_table",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -490,6 +539,7 @@ loom_cc_library(
         ":low_packet_diagnostics",
         ":math_policy",
         ":profile",
+        ":resolved_target",
         "//loom/src/loom/codegen/low:verify",
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/ir",

@@ -303,7 +303,7 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @second(%
 }
 
 TEST_F(LlvmirModuleEmitterTest,
-       EmitsTargetlessFunctionFromEffectiveFactsWithoutMutatingIR) {
+       EmitsTargetlessFunctionFromFunctionTargetFactsWithoutMutatingIR) {
   ModulePtr module = ParseModule(R"(
 llvmir.target<object> @specialized {
   triple = "loom-specialized64-unknown-none",
@@ -344,18 +344,18 @@ low.func.def target<llvmir.generic.core> abi(object_function) @entry() asm {
       loom_target_symbol_facts_cast(base_exact_target_facts);
   ASSERT_NE(exact_target_facts, nullptr);
   bool contract_valid = false;
-  const loom_target_facts_t* effective_target_facts = nullptr;
+  const loom_target_facts_t* function_target_facts = nullptr;
   IREE_ASSERT_OK(loom_target_function_contract_refine_facts(
       module.get(), function_facts, exact_target_facts->name,
       exact_target_facts->projection, iree_diagnostic_emitter_t{},
-      &version_arena, &contract_valid, &effective_target_facts));
+      &version_arena, &contract_valid, &function_target_facts));
   ASSERT_TRUE(contract_valid);
-  ASSERT_NE(effective_target_facts, nullptr);
+  ASSERT_NE(function_target_facts, nullptr);
 
   loom_target_function_version_t function_version = {};
   function_version.base.type = &loom_target_function_version_type;
   function_version.base.function = function;
-  function_version.effective_target_facts = effective_target_facts;
+  function_version.function_target_facts = function_target_facts;
   loom_function_version_t* version_values[] = {
       &function_version.base,
   };

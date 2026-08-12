@@ -1027,8 +1027,7 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
     loom_low_resolved_target_t target = {0};
     IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
         module, &symbol_facts, low_function,
-        /*effective_target_facts=*/NULL, descriptor_registry, emitter,
-        &target));
+        /*function_target_facts=*/NULL, descriptor_registry, emitter, &target));
     if (!target.descriptor_set) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
@@ -1098,7 +1097,7 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
   loom_low_schedule_table_t table = {0};
   iree_status_t status = loom_low_function_model_initialize(
       module, low_function,
-      /*effective_target_facts=*/NULL, descriptor_registry, emitter,
+      /*function_target_facts=*/NULL, descriptor_registry, emitter,
       /*flags=*/0, analysis_arena, &model);
   if (iree_status_is_ok(status)) {
     status =
@@ -1200,7 +1199,7 @@ static iree_status_t loom_check_emit_build_low_allocation_table(
   loom_low_function_model_t model = {0};
   iree_status_t status = loom_low_function_model_initialize(
       module, low_function,
-      /*effective_target_facts=*/NULL, descriptor_registry, emitter,
+      /*function_target_facts=*/NULL, descriptor_registry, emitter,
       LOOM_LOW_FUNCTION_MODEL_FLAG_REGION_TREE, analysis_arena, &model);
   if (iree_status_is_ok(status)) {
     status =

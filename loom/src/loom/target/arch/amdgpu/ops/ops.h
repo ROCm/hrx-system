@@ -13,7 +13,6 @@
 #define LOOM_OPS_AMDGPU_OPS_H_
 
 #include "loom/ops/op_defs.h"
-#include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus
@@ -54,7 +53,14 @@ typedef enum loom_amdgpu_target_kind_e {
   LOOM_AMDGPU_TARGET_KIND_COUNT_ = 25,
 } loom_amdgpu_target_kind_t;
 
-// LOOM_OP_AMDGPU_TARGET: AMDGPU target record. The selector chooses one exact, generic, or overlay target row; optional attrs preserve authored common facts and target-ID feature states.
+// Configurable AMDHSA target-ID feature.
+typedef enum loom_amdgpu_target_features_e {
+  LOOM_AMDGPU_TARGET_FEATURES_SRAMECC = 0,
+  LOOM_AMDGPU_TARGET_FEATURES_XNACK = 1,
+  LOOM_AMDGPU_TARGET_FEATURES_COUNT_ = 2,
+} loom_amdgpu_target_features_t;
+
+// LOOM_OP_AMDGPU_TARGET: AMDGPU target record. The selector chooses one exact, generic, or overlay target row; optional attrs preserve authored common facts and target-ID feature assertions.
 // amdgpu.target<gfx11-generic> @gfx11_generic
 LOOM_DEFINE_ISA(loom_amdgpu_target_isa, LOOM_OP_AMDGPU_TARGET)
 LOOM_DEFINE_ATTR_SYMBOL(loom_amdgpu_target_symbol, 0)
@@ -89,42 +95,40 @@ LOOM_DEFINE_ATTR_STRING(loom_amdgpu_target_export_symbol, 28)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_amdgpu_target_linkage, 29, loom_target_linkage_t)
 LOOM_DEFINE_ATTR_STRING(loom_amdgpu_target_contract_set_key, 30)
 LOOM_DEFINE_ATTR_I64(loom_amdgpu_target_contract_feature_bits, 31)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_amdgpu_target_sramecc, 32, loom_amdgpu_target_feature_state_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_amdgpu_target_xnack, 33, loom_amdgpu_target_feature_state_t)
-// Build flag values use macros because C enums cannot portably represent
-// values wider than int.
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_CODEGEN_FORMAT (1u << 0)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_ARTIFACT_FORMAT (1u << 1)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_DEFAULT_POINTER_BITWIDTH (1u << 2)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_INDEX_BITWIDTH (1u << 3)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_OFFSET_BITWIDTH (1u << 4)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_SIZE_X (1u << 5)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_SIZE_Y (1u << 6)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_SIZE_Z (1u << 7)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_FLAT_WORKGROUP_SIZE (1u << 8)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_STORAGE_BYTES (1u << 9)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_SUBGROUP_SIZE (1u << 10)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_GRID_SIZE_X (1u << 11)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_GRID_SIZE_Y (1u << 12)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_GRID_SIZE_Z (1u << 13)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_FLAT_GRID_SIZE (1u << 14)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_COUNT_X (1u << 15)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_COUNT_Y (1u << 16)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_COUNT_Z (1u << 17)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_GENERIC (1u << 18)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_GLOBAL (1u << 19)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_WORKGROUP (1u << 20)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_CONSTANT (1u << 21)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_PRIVATE (1u << 22)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_HOST (1u << 23)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_DESCRIPTOR (1u << 24)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_ABI (1u << 25)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_EXPORT_SYMBOL (1u << 26)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_LINKAGE (1u << 27)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_CONTRACT_SET_KEY (1u << 28)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_CONTRACT_FEATURE_BITS (1u << 29)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_SRAMECC (1u << 30)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_XNACK (1u << 31)
+LOOM_DEFINE_ATTR_SIGNED_ENUM_SET(loom_amdgpu_target_features, 32)
+enum loom_amdgpu_target_build_flag_bits_e {
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_CODEGEN_FORMAT = 1u << 0,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_ARTIFACT_FORMAT = 1u << 1,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_DEFAULT_POINTER_BITWIDTH = 1u << 2,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_INDEX_BITWIDTH = 1u << 3,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_OFFSET_BITWIDTH = 1u << 4,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_SIZE_X = 1u << 5,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_SIZE_Y = 1u << 6,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_SIZE_Z = 1u << 7,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_FLAT_WORKGROUP_SIZE = 1u << 8,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_STORAGE_BYTES = 1u << 9,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_SUBGROUP_SIZE = 1u << 10,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_GRID_SIZE_X = 1u << 11,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_GRID_SIZE_Y = 1u << 12,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_GRID_SIZE_Z = 1u << 13,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_FLAT_GRID_SIZE = 1u << 14,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_COUNT_X = 1u << 15,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_COUNT_Y = 1u << 16,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_COUNT_Z = 1u << 17,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_GENERIC = 1u << 18,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_GLOBAL = 1u << 19,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_WORKGROUP = 1u << 20,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_CONSTANT = 1u << 21,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_PRIVATE = 1u << 22,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_HOST = 1u << 23,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_DESCRIPTOR = 1u << 24,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_ABI = 1u << 25,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 26,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_LINKAGE = 1u << 27,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_CONTRACT_SET_KEY = 1u << 28,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_CONTRACT_FEATURE_BITS = 1u << 29,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_FEATURES = 1u << 30,
+};
 typedef uint32_t loom_amdgpu_target_build_flags_t;
 iree_status_t loom_amdgpu_target_build(
     loom_builder_t* builder,
@@ -161,8 +165,7 @@ iree_status_t loom_amdgpu_target_build(
     loom_optional uint8_t linkage,
     loom_optional loom_string_id_t contract_set_key,
     loom_optional int64_t contract_feature_bits,
-    loom_optional uint8_t sramecc,
-    loom_optional uint8_t xnack,
+    loom_optional loom_signed_enum_set_t features,
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_amdgpu_target_record_verify(

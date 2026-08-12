@@ -60,16 +60,16 @@ static void loom_target_symbol_fact_project_record(
     const loom_target_like_descriptor_t* descriptor,
     const loom_target_bundle_t* row_bundle, iree_string_view_t record_name,
     loom_target_bundle_storage_t* out_storage,
-    loom_target_fact_field_set_t* out_authored_fields) {
+    loom_target_fact_field_set_t* out_explicit_fields) {
   loom_target_symbol_fact_initialize_storage(row_bundle, record_name,
                                              out_storage);
-  *out_authored_fields = 0;
+  *out_explicit_fields = 0;
   for (uint8_t i = 0; i < descriptor->projection_count; ++i) {
     const loom_target_projection_t* projection = &descriptor->projections[i];
     const loom_attribute_t attr =
         loom_op_const_attrs(target.op)[projection->attr_index];
     if (!loom_attr_is_absent(attr)) {
-      loom_target_fact_field_set_insert(out_authored_fields,
+      loom_target_fact_field_set_insert(out_explicit_fields,
                                         projection->fact_field);
     }
     loom_target_symbol_fact_project_attr(module, target.op, projection,
@@ -143,7 +143,7 @@ static iree_status_t loom_target_symbol_fact_compute(
   loom_target_symbol_fact_project_record(
       module, target, descriptor, row_bundle,
       module->strings.entries[symbol->name_id], &projection->storage,
-      &projection->authored_fields);
+      &projection->explicit_fields);
   if (descriptor->fact_projector != NULL) {
     descriptor->fact_projector->project(module, target.op, projection);
   }

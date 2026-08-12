@@ -2515,6 +2515,37 @@ static iree_status_t loom_module_validate_attr_descriptor_value(
           (int)parameter_name.size, parameter_name.data, value.enum_array[i]);
     }
   }
+  if (value.kind == LOOM_ATTR_SIGNED_ENUM_SET) {
+    if (iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "signed enum-set parameter '%.*s' requires a closed enum domain",
+          (int)parameter_name.size, parameter_name.data);
+    }
+    iree_host_size_t canonical_word_count = 0;
+    IREE_RETURN_IF_ERROR(loom_signed_enum_set_canonical_word_count(
+        loom_attr_as_signed_enum_set(value), &canonical_word_count));
+    for (iree_host_size_t word_index = 0; word_index < canonical_word_count;
+         ++word_index) {
+      const uint64_t asserted_values =
+          value.signed_enum_set_words[word_index] |
+          value.signed_enum_set_words[value.count + word_index];
+      for (uint8_t bit_index = 0; bit_index < 64; ++bit_index) {
+        if (!iree_any_bit_set(asserted_values, UINT64_C(1) << bit_index)) {
+          continue;
+        }
+        const uint8_t enum_value = (uint8_t)(word_index * 64 + bit_index);
+        if (loom_attr_descriptor_has_enum_case(descriptor, enum_value)) {
+          continue;
+        }
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameter '%.*s' has undeclared signed enum-set value %u",
+            (int)parameter_name.size, parameter_name.data,
+            (unsigned)enum_value);
+      }
+    }
+  }
   if (value.kind == LOOM_ATTR_PARAMETERIZED &&
       descriptor->reference.parameterized_attr_kind !=
           LOOM_PARAMETERIZED_ATTR_KIND_ANY &&
@@ -2723,6 +2754,31 @@ static iree_status_t loom_module_canonicalize_attr_value(
       memcpy(values, value.enum_array,
              (iree_host_size_t)value.count * sizeof(*values));
       *out_value = loom_attr_enum_array(values, value.count);
+      return iree_ok_status();
+    }
+    case LOOM_ATTR_SIGNED_ENUM_SET: {
+      if (descriptor == NULL) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "signed enum-set attributes require a descriptor-backed field");
+      }
+      loom_signed_enum_set_t set = loom_attr_as_signed_enum_set(value);
+      iree_host_size_t canonical_word_count = 0;
+      IREE_RETURN_IF_ERROR(loom_signed_enum_set_canonical_word_count(
+          set, &canonical_word_count));
+      if (canonical_word_count == 0) {
+        *out_value = loom_attr_signed_enum_set(NULL, 0);
+        return iree_ok_status();
+      }
+      uint64_t* words = NULL;
+      IREE_RETURN_IF_ERROR(
+          iree_arena_allocate_array(&module->arena, canonical_word_count * 2,
+                                    sizeof(*words), (void**)&words));
+      memcpy(words, set.words, canonical_word_count * sizeof(*words));
+      memcpy(words + canonical_word_count, set.words + set.word_count,
+             canonical_word_count * sizeof(*words));
+      *out_value =
+          loom_attr_signed_enum_set(words, (uint16_t)canonical_word_count);
       return iree_ok_status();
     }
     case LOOM_ATTR_PARAMETERIZED: {
@@ -3036,6 +3092,26 @@ static iree_status_t loom_module_verify_canonical_attr_value(
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "enum array attribute pointer does not match its element count");
+      }
+      return iree_ok_status();
+    }
+    case LOOM_ATTR_SIGNED_ENUM_SET: {
+      IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_header(
+          value, IREE_SV("signed enum-set attribute")));
+      if (descriptor == NULL) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "signed enum-set attributes require a descriptor-backed field");
+      }
+      iree_host_size_t canonical_word_count = 0;
+      IREE_RETURN_IF_ERROR(loom_signed_enum_set_canonical_word_count(
+          loom_attr_as_signed_enum_set(*value), &canonical_word_count));
+      if (canonical_word_count != value->count) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "signed enum-set attribute has %u words per polarity but "
+            "canonical form requires %" PRIhsz,
+            (unsigned)value->count, canonical_word_count);
       }
       return iree_ok_status();
     }
@@ -3951,6 +4027,7 @@ static iree_status_t loom_module_replace_attribute_value_refs_impl(
     case LOOM_ATTR_SYMBOL:
     case LOOM_ATTR_I64_ARRAY:
     case LOOM_ATTR_ENUM_ARRAY:
+    case LOOM_ATTR_SIGNED_ENUM_SET:
     case LOOM_ATTR_ENCODING:
     case LOOM_ATTR_BYTES:
       return iree_ok_status();

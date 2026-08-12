@@ -344,7 +344,7 @@ def _emit_attr_descriptor_table(
     if not parameters:
         return None
     for parameter in parameters:
-        if parameter.attr_type in ("enum", "enum_array"):
+        if parameter.attr_type in ("enum", "enum_array", "signed_enum_set"):
             assert parameter.enum_def is not None
             if shared_enum_names is None or id(parameter.enum_def) not in shared_enum_names:
                 _emit_enum_case_names(
@@ -374,7 +374,7 @@ def _emit_attr_descriptor_table(
         lines.append(f"        .attr_kind = {attr_kind},")
         if flags_parts:
             lines.append(f"        .flags = {' | '.join(flags_parts)},")
-        if parameter.attr_type in ("enum", "enum_array"):
+        if parameter.attr_type in ("enum", "enum_array", "signed_enum_set"):
             enum_names = shared_enum_names[id(parameter.enum_def)] if shared_enum_names is not None and id(parameter.enum_def) in shared_enum_names else f"{prefix}_{parameter.name}_enum_names"
             lines.append(f"        .enum_max_value = (uint8_t)(IREE_ARRAYSIZE({enum_names}) - 1),")
             lines.append(f"        .enum_case_names = {enum_names},")
@@ -397,7 +397,7 @@ def _emit_encoding_enum_case_names(
     for family in encoding_families:
         for parameter in family.parameters:
             enum_def = parameter.enum_def
-            if parameter.attr_type not in ("enum", "enum_array") or enum_def is None:
+            if parameter.attr_type not in ("enum", "enum_array", "signed_enum_set") or enum_def is None:
                 continue
             enum_id = id(enum_def)
             if enum_id in shared_enum_names:
@@ -779,7 +779,7 @@ def generate_tables_c(
         # a dialect-level shared enum, or a per-op enum typedef, but all three
         # still need one parser/printer keyword table per C symbol name.
         for attr_def in op.attrs:
-            if attr_def.attr_type in ("enum", "enum_array") and attr_def.enum_def:
+            if attr_def.attr_type in ("enum", "enum_array", "signed_enum_set") and attr_def.enum_def:
                 array_name = _enum_names_array_name(op, attr_def, shared_enums)
                 if array_name in emitted_enum_case_name_arrays:
                     continue
@@ -824,7 +824,7 @@ def generate_tables_c(
                 if attr_def.open_enum:
                     flag_names.append("LOOM_ATTR_OPEN_ENUM")
                 flags = " | ".join(flag_names) if flag_names else "0"
-                if attr_def.attr_type in ("enum", "enum_array") and attr_def.enum_def:
+                if attr_def.attr_type in ("enum", "enum_array", "signed_enum_set") and attr_def.enum_def:
                     enum_names = _enum_names_array_name(op, attr_def, shared_enums)
                     enum_max_value = f"(uint8_t)(IREE_ARRAYSIZE({enum_names}) - 1)"
                 else:

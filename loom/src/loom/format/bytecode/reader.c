@@ -700,6 +700,82 @@ static uint8_t loom_bytecode_reader_find_parameter_index(
   return LOOM_ATTR_INDEX_NONE;
 }
 
+static iree_status_t loom_bytecode_reader_read_signed_enum_set(
+    loom_bytecode_reader_state_t* reader, loom_bytecode_reader_cursor_t* cursor,
+    const loom_attr_descriptor_t* descriptor, loom_attribute_t* out_attr) {
+  const uint64_t payload_offset =
+      loom_bytecode_reader_cursor_absolute_position(cursor);
+  if (!descriptor || descriptor->attr_kind != LOOM_ATTR_SIGNED_ENUM_SET ||
+      iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM)) {
+    return loom_bytecode_reader_emit_invalid_field(
+        reader, cursor->range_name, IREE_SV("attribute"), 0,
+        IREE_SV("signed_enum_set"), payload_offset,
+        IREE_SV("signed_enum_set_requires_a_closed_descriptor_backed_field"));
+  }
+
+  uint8_t word_count = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_bytecode_reader_read_u8(reader, cursor, &word_count));
+  if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+  if (word_count > LOOM_SIGNED_ENUM_SET_MAX_WORD_COUNT) {
+    return loom_bytecode_reader_emit_count_exceeds(
+        reader, IREE_SV("signed_enum_set_word_count"), word_count,
+        LOOM_SIGNED_ENUM_SET_MAX_WORD_COUNT, payload_offset);
+  }
+
+  uint64_t words[LOOM_SIGNED_ENUM_SET_MAX_WORD_COUNT * 2] = {0};
+  for (iree_host_size_t i = 0; i < (iree_host_size_t)word_count * 2; ++i) {
+    IREE_RETURN_IF_ERROR(
+        loom_bytecode_reader_read_u64_le(reader, cursor, &words[i]));
+    if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+  }
+
+  const uint64_t* negative_words = words + word_count;
+  for (iree_host_size_t i = 0; i < word_count; ++i) {
+    if ((words[i] & negative_words[i]) != 0) {
+      return loom_bytecode_reader_emit_invalid_field(
+          reader, cursor->range_name, IREE_SV("attribute"), 0,
+          IREE_SV("signed_enum_set"), payload_offset,
+          IREE_SV("signed_enum_set_contains_contradictory_assertions"));
+    }
+  }
+  if (word_count > 0 && words[word_count - 1] == 0 &&
+      negative_words[word_count - 1] == 0) {
+    return loom_bytecode_reader_emit_invalid_field(
+        reader, cursor->range_name, IREE_SV("attribute"), 0,
+        IREE_SV("signed_enum_set"), payload_offset,
+        IREE_SV("signed_enum_set_is_not_canonically_trimmed"));
+  }
+
+  const loom_signed_enum_set_t set =
+      loom_make_signed_enum_set(words, word_count);
+  for (iree_host_size_t value = 0; value < 256; ++value) {
+    if (!loom_signed_enum_set_contains_positive(set, (uint8_t)value) &&
+        !loom_signed_enum_set_contains_negative(set, (uint8_t)value)) {
+      continue;
+    }
+    if (!loom_attr_descriptor_has_enum_case(descriptor, (uint8_t)value)) {
+      return loom_bytecode_reader_emit_invalid_field(
+          reader, cursor->range_name, IREE_SV("attribute"), 0,
+          IREE_SV("signed_enum_set"), payload_offset,
+          IREE_SV("signed_enum_set_value_is_not_declared"));
+    }
+  }
+
+  if (out_attr != NULL) {
+    uint64_t* owned_words = NULL;
+    if (word_count > 0) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          &reader->output_module->arena, (iree_host_size_t)word_count * 2,
+          sizeof(*owned_words), (void**)&owned_words));
+      memcpy(owned_words, words,
+             (iree_host_size_t)word_count * 2 * sizeof(*owned_words));
+    }
+    *out_attr = loom_attr_signed_enum_set(owned_words, word_count);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_bytecode_reader_skip_attr_value_at_depth(
     loom_bytecode_reader_state_t* reader, loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, uint8_t kind,
@@ -778,6 +854,9 @@ static iree_status_t loom_bytecode_reader_skip_attr_value_at_depth(
       iree_const_byte_span_t unused = iree_const_byte_span_empty();
       return loom_bytecode_reader_read_span(reader, cursor, count, &unused);
     }
+    case LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET:
+      return loom_bytecode_reader_read_signed_enum_set(
+          reader, cursor, descriptor, /*out_attr=*/NULL);
     case LOOM_BYTECODE_ATTR_BYTES: {
       uint64_t byte_length = 0;
       IREE_RETURN_IF_ERROR(
@@ -1387,6 +1466,9 @@ static iree_status_t loom_bytecode_reader_read_attr_value_at_depth(
       *out_attr = loom_attr_enum_array(values, (uint16_t)span.data_length);
       return iree_ok_status();
     }
+    case LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET:
+      return loom_bytecode_reader_read_signed_enum_set(reader, cursor,
+                                                       descriptor, out_attr);
     case LOOM_BYTECODE_ATTR_BYTES: {
       uint64_t byte_length_offset =
           loom_bytecode_reader_cursor_absolute_position(cursor);

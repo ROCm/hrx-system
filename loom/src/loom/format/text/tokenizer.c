@@ -269,6 +269,8 @@ iree_string_view_t loom_token_kind_name(loom_token_kind_t kind) {
       return IREE_SV("'x'");
     case LOOM_TOKEN_PIPE:
       return IREE_SV("'|'");
+    case LOOM_TOKEN_MINUS:
+      return IREE_SV("'-'");
     case LOOM_TOKEN_EOF:
       return IREE_SV("end of file");
     case LOOM_TOKEN_ERROR:
@@ -1157,6 +1159,14 @@ static iree_status_t loom_tokenizer_scan(loom_tokenizer_t* t,
     t->position += length;
     t->column += (uint32_t)length;
     *out_token = loom_tokenizer_make_verbatim_token(t, LOOM_TOKEN_FLOAT, start,
+                                                    start_line, start_column);
+    return iree_ok_status();
+  }
+
+  if (c == '-') {
+    ++t->position;
+    ++t->column;
+    *out_token = loom_tokenizer_make_verbatim_token(t, LOOM_TOKEN_MINUS, start,
                                                     start_line, start_column);
     return iree_ok_status();
   }

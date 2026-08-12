@@ -176,18 +176,18 @@ TEST(TargetPassEnvironmentTest, MissingCapabilityHasEmptyAccessors) {
             nullptr);
 }
 
-TEST_F(TargetPassFactsTest, RefinedVersionSuppliesEffectiveFactsDirectly) {
+TEST_F(TargetPassFactsTest, RefinedVersionSuppliesFunctionTargetFactsDirectly) {
   ModulePtr module = ParseModule();
   const loom_func_like_t function =
       FindFunction(module.get(), IREE_SV("authored"));
-  loom_target_facts_t effective_facts = {};
+  loom_target_facts_t function_target_facts = {};
   loom_target_facts_builder_initialize(&loom_test_target_fact_type,
                                        loom_test_target_bundles.values[2],
-                                       &effective_facts);
+                                       &function_target_facts);
   loom_target_function_version_t function_version = {};
   function_version.base.type = &loom_target_function_version_type;
   function_version.base.function = function;
-  function_version.effective_target_facts = &effective_facts;
+  function_version.function_target_facts = &function_target_facts;
 
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool_, &arena);
@@ -201,7 +201,7 @@ TEST_F(TargetPassFactsTest, RefinedVersionSuppliesEffectiveFactsDirectly) {
       &pass, module.get(), function, &resolved, &resolved_facts));
 
   EXPECT_TRUE(resolved);
-  EXPECT_EQ(resolved_facts, &effective_facts);
+  EXPECT_EQ(resolved_facts, &function_target_facts);
   iree_arena_deinitialize(&arena);
 }
 
@@ -264,7 +264,7 @@ TEST_F(TargetPassFactsTest, ProjectedFactsSurviveScratchArenaReset) {
   iree_arena_deinitialize(&instance_arena);
 }
 
-TEST_F(TargetPassFactsTest, TargetlessFunctionHasNoEffectiveFacts) {
+TEST_F(TargetPassFactsTest, TargetlessFunctionHasNoTargetFacts) {
   ModulePtr module = ParseModule();
   const loom_func_like_t function =
       FindFunction(module.get(), IREE_SV("targetless"));

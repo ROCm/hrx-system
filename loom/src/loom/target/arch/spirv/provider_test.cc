@@ -190,7 +190,7 @@ TEST_F(SpirvProviderTest, ProjectedProfileSatisfiesStructuredRequirements) {
 
   EXPECT_EQ(baseline_a->projection->storage.export_plan.abi_kind,
             LOOM_TARGET_ABI_SHADER_ENTRY_POINT);
-  EXPECT_FALSE(loom_target_facts_field_is_authored(baseline_a->projection,
+  EXPECT_FALSE(loom_target_facts_field_is_explicit(baseline_a->projection,
                                                    LOOM_TARGET_FACT_FIELD_ABI));
 }
 

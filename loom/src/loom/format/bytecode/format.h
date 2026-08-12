@@ -761,7 +761,8 @@ typedef enum loom_bytecode_section_kind_e {
 // values: 0=I64, 1=F64, 2=STRING, 3=BOOL, 4=ENUM, 5=I64_ARRAY, 6=SYMBOL,
 // 7=TYPE, 8=PREDICATE_LIST, 9=DICT, 10=ENCODING, 11=BYTES,
 // 12=SCOPED_ENUM, 13=ENUM_ARRAY, 14=PARAMETERIZED,
-// 15=PARAMETERIZED_ARRAY. ABSENT is never encoded as a payload value.
+// 15=PARAMETERIZED_ARRAY, 16=SIGNED_ENUM_SET. ABSENT is never encoded as a
+// payload value.
 // ENUM value_data is the raw uint8 case ordinal;
 // bytecode readers preserve it without consulting enum case tables so open enum
 // attrs can survive tools whose op tables do not yet name the ordinal. Closed
@@ -773,6 +774,10 @@ typedef enum loom_bytecode_section_kind_e {
 // ENUM_ARRAY value_data is [element_count: varint] followed by that many raw
 // uint8 stable enum values. It is valid only for descriptor-backed fields;
 // generic dictionary entries cannot carry it.
+// SIGNED_ENUM_SET value_data is [word_count: byte] followed by |word_count|
+// little-endian positive uint64 words and then |word_count| little-endian
+// negative uint64 words. The partitions must be disjoint and canonically
+// trimmed. It is valid only for closed descriptor-backed enum fields.
 // PARAMETERIZED value_data is encoded as:
 //   [family_name_id: varint]
 //   [present_parameter_count: varint]
@@ -816,6 +821,7 @@ typedef enum loom_bytecode_attr_kind_e {
   LOOM_BYTECODE_ATTR_ENUM_ARRAY = 13,
   LOOM_BYTECODE_ATTR_PARAMETERIZED = 14,
   LOOM_BYTECODE_ATTR_PARAMETERIZED_ARRAY = 15,
+  LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET = 16,
   LOOM_BYTECODE_ATTR_COUNT,
 } loom_bytecode_attr_kind_t;
 

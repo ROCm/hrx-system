@@ -167,6 +167,32 @@ static bool loom_print_pipeline_attr_value_is_printable(
       }
       return true;
     }
+    case LOOM_ATTR_SIGNED_ENUM_SET: {
+      if (!descriptor || descriptor->attr_kind != LOOM_ATTR_SIGNED_ENUM_SET ||
+          iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM) ||
+          attr->count > LOOM_SIGNED_ENUM_SET_MAX_WORD_COUNT ||
+          ((attr->count > 0) != (attr->signed_enum_set_words != NULL))) {
+        return false;
+      }
+      if (attr->count > 0 &&
+          attr->signed_enum_set_words[attr->count - 1] == 0 &&
+          attr->signed_enum_set_words[attr->count * 2 - 1] == 0) {
+        return false;
+      }
+      loom_signed_enum_set_t set = loom_attr_as_signed_enum_set(*attr);
+      for (iree_host_size_t value = 0; value < 256; ++value) {
+        bool positive =
+            loom_signed_enum_set_contains_positive(set, (uint8_t)value);
+        bool negative =
+            loom_signed_enum_set_contains_negative(set, (uint8_t)value);
+        if (positive && negative) return false;
+        if ((positive || negative) &&
+            !loom_attr_descriptor_has_enum_case(descriptor, (uint8_t)value)) {
+          return false;
+        }
+      }
+      return true;
+    }
     case LOOM_ATTR_STRING:
       return attr->string_id < ctx->module->strings.count;
     case LOOM_ATTR_I64_ARRAY:

@@ -149,7 +149,7 @@ low.func.def target<test.low.core>(@target) @uses_workgroup_storage() {
   EXPECT_EQ(emission.u64_params[1], 64u);
 }
 
-TEST_F(LowVerifyTest, UsesEffectiveTargetFactsForTargetlessFunction) {
+TEST_F(LowVerifyTest, UsesFunctionTargetFactsForTargetlessFunction) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @exact {max_workgroup_storage_bytes = 64}
 low.func.def target<test.low.core> @uses_workgroup_storage() {
@@ -179,20 +179,20 @@ low.func.def target<test.low.core> @uses_workgroup_storage() {
   ASSERT_NE(target_facts, nullptr);
 
   bool contract_valid = false;
-  const loom_target_facts_t* effective_target_facts = nullptr;
+  const loom_target_facts_t* function_target_facts = nullptr;
   IREE_ASSERT_OK(loom_target_function_contract_refine_facts(
       module.get(), function_facts, target_facts->name,
       target_facts->projection, iree_diagnostic_emitter_t{}, &analysis_arena_,
-      &contract_valid, &effective_target_facts));
+      &contract_valid, &function_target_facts));
   ASSERT_TRUE(contract_valid);
-  ASSERT_NE(effective_target_facts, nullptr);
+  ASSERT_NE(function_target_facts, nullptr);
 
   loom_target_function_version_t function_version = {};
   function_version.base.type = &loom_target_function_version_type;
   function_version.base.function =
       loom_func_like_cast(module.get(), function_facts->func_op);
   ASSERT_TRUE(loom_func_like_isa(function_version.base.function));
-  function_version.effective_target_facts = effective_target_facts;
+  function_version.function_target_facts = function_target_facts;
   loom_function_version_t* version_values[] = {
       &function_version.base,
   };

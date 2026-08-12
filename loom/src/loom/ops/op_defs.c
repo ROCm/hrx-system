@@ -858,6 +858,23 @@ loom_symbol_ref_t loom_func_like_target(loom_func_like_t func) {
       loom_op_attrs(func.op)[func.vtable->target_attr_index]);
 }
 
+void loom_func_like_set_target(loom_module_t* module, loom_func_like_t func,
+                               loom_symbol_ref_t target) {
+  IREE_ASSERT_ARGUMENT(module);
+  IREE_ASSERT_ARGUMENT(func.op);
+  IREE_ASSERT_ARGUMENT(func.vtable);
+  IREE_ASSERT_NE(func.vtable->target_attr_index, LOOM_ATTR_INDEX_NONE);
+  IREE_ASSERT_LT(func.vtable->target_attr_index, func.op->attribute_count);
+  IREE_ASSERT(loom_symbol_ref_is_valid(target));
+  IREE_ASSERT_EQ(target.module_id, 0);
+  IREE_ASSERT_LT(target.symbol_id, module->symbols.count);
+  const loom_trait_flags_t old_traits = func.op->traits;
+  loom_op_attrs(func.op)[func.vtable->target_attr_index] =
+      loom_attr_symbol(target);
+  loom_op_refresh_effective_traits(module, func.op);
+  loom_module_update_op_direct_effects(func.op, old_traits, func.op->traits);
+}
+
 loom_string_id_t loom_func_like_repr_contract(loom_func_like_t func) {
   if (!func.vtable ||
       func.vtable->repr_contract_attr_index == LOOM_ATTR_INDEX_NONE) {
@@ -1831,6 +1848,42 @@ iree_status_t loom_builder_copy_enum_array_attr_storage(
       builder->arena, values.count, sizeof(*storage), (void**)&storage));
   memcpy(storage, values.values, values.count * sizeof(*storage));
   *out_storage = storage;
+  return iree_ok_status();
+}
+
+iree_status_t loom_builder_copy_signed_enum_set_attr_storage(
+    loom_builder_t* builder, loom_signed_enum_set_t set,
+    iree_string_view_t label, const uint64_t** out_storage,
+    uint16_t* out_word_count) {
+  if (!out_storage || !out_word_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "signed enum-set storage outputs must both be non-NULL");
+  }
+  *out_storage = NULL;
+  *out_word_count = 0;
+
+  iree_host_size_t canonical_word_count = 0;
+  iree_status_t status =
+      loom_signed_enum_set_canonical_word_count(set, &canonical_word_count);
+  if (!iree_status_is_ok(status)) {
+    return iree_status_annotate_f(status, "%.*s", (int)label.size, label.data);
+  }
+  if (canonical_word_count == 0) return iree_ok_status();
+  if (!builder || !builder->arena) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "builder has no arena");
+  }
+
+  uint64_t* storage = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(builder->arena, canonical_word_count * 2,
+                                sizeof(*storage), (void**)&storage));
+  memcpy(storage, set.words, canonical_word_count * sizeof(*storage));
+  memcpy(storage + canonical_word_count, set.words + set.word_count,
+         canonical_word_count * sizeof(*storage));
+  *out_storage = storage;
+  *out_word_count = (uint16_t)canonical_word_count;
   return iree_ok_status();
 }
 

@@ -19,6 +19,7 @@
 #include "loomc/iree.h"
 #include "result.h"
 #include "source.h"
+#include "target.h"
 
 enum {
   LOOMC_LINK_INDEX_DEFAULT_BLOCK_SIZE = 32 * 1024,
@@ -366,6 +367,9 @@ static loomc_status_t loomc_link_index_add_source_to_index(
                 .user_data = &capture,
             },
     };
+    loomc_target_pass_environment_initialize_text_asm_environment(
+        loomc_context_target_pass_environment(builder->context),
+        &parse_options.low_asm_environment);
     status = loom_link_module_index_add_text(
         builder->index,
         iree_make_string_view((const char*)contents.data, contents.data_length),

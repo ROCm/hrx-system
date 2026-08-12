@@ -29,7 +29,7 @@ def collect_encoding_enums(
     for family in encoding_families:
         for parameter in family.parameters:
             enum_def = parameter.enum_def
-            if parameter.attr_type not in ("enum", "enum_array") or enum_def is None:
+            if parameter.attr_type not in ("enum", "enum_array", "signed_enum_set") or enum_def is None:
                 continue
             previous = enums.get(id(enum_def))
             if previous is not None and previous[1] != parameter.open_enum:
@@ -83,7 +83,7 @@ def collect_shared_enums(
     usage: dict[int, list[tuple[Op, AttrDef]]] = defaultdict(list)
     for op in ops:
         for attr_def in op.attrs:
-            if attr_def.attr_type in ("enum", "enum_array") and attr_def.enum_def is not None:
+            if attr_def.attr_type in ("enum", "enum_array", "signed_enum_set") and attr_def.enum_def is not None:
                 if attr_def.enum_def.c_type is not None:
                     continue
                 usage[id(attr_def.enum_def)].append((op, attr_def))

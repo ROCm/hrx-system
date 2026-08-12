@@ -84,6 +84,7 @@ from loom.ir import (
     ScalarType,
     ScalarTypeKind,
     ShapedType,
+    SignedEnumSetAttr,
     StaticDim,
     StorageSpace,
     StorageType,
@@ -1553,6 +1554,42 @@ class TestRoundTrip:
         printed = _op_printer().print_operation(op, Module())
         assert printed == text
         assert _op_printer().print_operation(_parse_op(printed), Module()) == text
+
+    def test_signed_enum_sets_canonicalize_by_stable_value(self) -> None:
+        text = "test.signed_enum_set_attrs [high, -middle, low] using [-high]"
+        op = _parse_op(text)
+        assert op.attributes["required_features"] == SignedEnumSetAttr([1, 255], [7])
+        assert op.attributes["optional_features"] == SignedEnumSetAttr([], [255])
+        printed = _op_printer().print_operation(op, Module())
+        assert printed == (
+            "test.signed_enum_set_attrs [low, -middle, high] using [-high]"
+        )
+        assert _op_printer().print_operation(_parse_op(printed), Module()) == printed
+
+    def test_signed_enum_sets_preserve_present_empty(self) -> None:
+        op = _parse_op("test.signed_enum_set_attrs [] using []")
+
+        assert op.attributes["required_features"] == SignedEnumSetAttr()
+        assert op.attributes["optional_features"] == SignedEnumSetAttr()
+
+    def test_parameterized_signed_enum_set_uses_same_text_form(self) -> None:
+        text = "test.parameterized_attr_array [#test.feature_set<[high, -middle, low]>]"
+        op = _parse_op(text)
+        values = op.attributes["values"]
+        assert isinstance(values, ParameterizedAttrArray)
+        value = values.values[0]
+        assert isinstance(value, ParameterizedAttr)
+        assert value.family_name == "test.feature_set"
+        assert value.get("features") == SignedEnumSetAttr([1, 255], [7])
+        assert _op_printer().print_operation(op, Module()) == (
+            "test.parameterized_attr_array [#test.feature_set<[low, -middle, high]>]"
+        )
+
+    def test_signed_enum_sets_reject_duplicate_or_unknown_values(self) -> None:
+        with pytest.raises(ParseError, match="appears more than once"):
+            _parse_op("test.signed_enum_set_attrs [low, -low]")
+        with pytest.raises(ParseError, match="invalid enum value"):
+            _parse_op("test.signed_enum_set_attrs [middle, other]")
 
     def test_parameterized_attr_prints_in_declaration_order(self) -> None:
         op = _parse_op(

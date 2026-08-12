@@ -30,6 +30,7 @@ loom_cc_library(
     loom::target::entry_selection
     loom::target::low_descriptor_registry
     loom::target::math_policy
+    loom::target::module_sealing
     loom::target::pipeline
     loom::target::predicate
     loom::target::provider

@@ -385,11 +385,15 @@ loom_cc_test(
     ::provider
     iree::base
     iree::base::internal::arena
+    iree::io::stream
     iree::testing::gtest
     iree::testing::gtest_main
     loom::analysis::symbol_facts
     loom::codegen::low::pipeline::pass_environment
+    loom::format::bytecode::reader
+    loom::format::bytecode::writer
     loom::format::text::parser
+    loom::format::text::printer
     loom::ir
     loom::ops::func
     loom::ops::op_registry
@@ -400,6 +404,7 @@ loom_cc_test(
     loom::pass::testing::registry_verify
     loom::pass::tooling
     loom::target::arch::amdgpu::facts
+    loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::target_info
     loom::target::provider
     loom::testing::module_ptr

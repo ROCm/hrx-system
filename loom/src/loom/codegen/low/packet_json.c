@@ -336,6 +336,37 @@ static iree_status_t loom_low_packet_json_write_predicate_list_attr(
   return loom_json_array_end(&array);
 }
 
+static iree_status_t loom_low_packet_json_write_signed_enum_set_attr(
+    const loom_attribute_t* attr, loom_output_stream_t* stream) {
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  static const iree_string_view_t field_names[2] = {
+      IREE_SVL("positive"),
+      IREE_SVL("negative"),
+  };
+  for (iree_host_size_t polarity = 0; polarity < IREE_ARRAYSIZE(field_names);
+       ++polarity) {
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin_field(&object, field_names[polarity]));
+    loom_json_array_writer_t values;
+    IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &values));
+    const uint64_t* words =
+        attr->count > 0 ? attr->signed_enum_set_words + polarity * attr->count
+                        : NULL;
+    for (uint16_t word_index = 0; word_index < attr->count; ++word_index) {
+      for (uint8_t bit_index = 0; bit_index < 64; ++bit_index) {
+        if (!iree_any_bit_set(words[word_index], UINT64_C(1) << bit_index)) {
+          continue;
+        }
+        IREE_RETURN_IF_ERROR(loom_json_array_write_uint64_element(
+            &values, (uint64_t)word_index * 64 + bit_index));
+      }
+    }
+    IREE_RETURN_IF_ERROR(loom_json_array_end(&values));
+  }
+  return loom_json_object_end(&object);
+}
+
 static iree_status_t loom_low_packet_json_write_attr(
     const loom_module_t* module,
     const loom_text_print_options_t* type_print_options,
@@ -369,6 +400,8 @@ static iree_status_t loom_low_packet_json_write_attr(
       }
       return loom_json_array_end(&array);
     }
+    case LOOM_ATTR_SIGNED_ENUM_SET:
+      return loom_low_packet_json_write_signed_enum_set_attr(attr, stream);
     case LOOM_ATTR_I64_ARRAY: {
       loom_json_array_writer_t array;
       IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &array));

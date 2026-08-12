@@ -85,6 +85,7 @@ from loom.ir import (
     ScalarType,
     ScalarTypeKind,
     ShapedType,
+    SignedEnumSetAttr,
     StaticDim,
     StorageSpace,
     StorageType,
@@ -1985,8 +1986,71 @@ class BytecodeReader:
                     )
                     values.append(value)
                 return ParameterizedAttrArray(values), offset
+            case 16:  # SIGNED_ENUM_SET
+                return self._read_signed_enum_set_attr(data, offset, attr_def)
             case _:
                 raise BytecodeError(f"unknown attr value kind: {kind}")
+
+    def _read_signed_enum_set_attr(
+        self, data: bytes, offset: int, attr_def: Any | None
+    ) -> tuple[SignedEnumSetAttr, int]:
+        if getattr(attr_def, "attr_type", None) != "signed_enum_set" or getattr(
+            attr_def, "open_enum", False
+        ):
+            raise BytecodeError(
+                "signed enum sets require a closed descriptor-backed field"
+            )
+        enum_def = getattr(attr_def, "enum_def", None)
+        if enum_def is None:
+            raise BytecodeError("signed enum sets require an enum descriptor")
+        if offset >= len(data):
+            raise BytecodeError("signed enum-set payload is missing its word count")
+        word_count = data[offset]
+        offset += 1
+        if word_count > 4:
+            raise BytecodeError(
+                f"signed enum-set word count {word_count} exceeds maximum 4"
+            )
+        payload_end = offset + word_count * 2 * 8
+        if payload_end > len(data):
+            raise BytecodeError("signed enum-set words exceed payload size")
+
+        positive_words = [
+            struct.unpack_from("<Q", data, offset + word_index * 8)[0]
+            for word_index in range(word_count)
+        ]
+        negative_offset = offset + word_count * 8
+        negative_words = [
+            struct.unpack_from("<Q", data, negative_offset + word_index * 8)[0]
+            for word_index in range(word_count)
+        ]
+        for positive_word, negative_word in zip(
+            positive_words, negative_words, strict=True
+        ):
+            if positive_word & negative_word:
+                raise BytecodeError("signed enum set contains contradictory assertions")
+        if word_count and positive_words[-1] == 0 and negative_words[-1] == 0:
+            raise BytecodeError("signed enum set is not canonically trimmed")
+
+        positive_values: list[int] = []
+        negative_values: list[int] = []
+        for stable_value in range(word_count * 64):
+            bit = 1 << (stable_value % 64)
+            word_index = stable_value // 64
+            if positive_words[word_index] & bit:
+                positive_values.append(stable_value)
+            if negative_words[word_index] & bit:
+                negative_values.append(stable_value)
+        declared_values = {enum_case.value for enum_case in enum_def.cases}
+        undeclared_values = sorted(
+            (set(positive_values) | set(negative_values)) - declared_values
+        )
+        if undeclared_values:
+            raise BytecodeError(
+                "signed enum set contains undeclared stable value(s) "
+                f"{undeclared_values}"
+            )
+        return SignedEnumSetAttr(positive_values, negative_values), payload_end
 
     def _read_attr_dict_entries(
         self,

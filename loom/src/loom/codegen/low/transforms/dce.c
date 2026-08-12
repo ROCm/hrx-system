@@ -74,7 +74,7 @@ static iree_status_t loom_low_dce_function(
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
       module, &symbol_facts, low_func_op,
-      loom_target_function_version_effective_facts(pass->function_version),
+      loom_target_function_version_target_facts(pass->function_version),
       descriptor_registry, emitter, &target));
   if (!target.descriptor_set) {
     return iree_ok_status();

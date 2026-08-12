@@ -380,7 +380,7 @@ static iree_status_t loom_target_entry_try_entry(
   entry.function_version = function_version;
   bool contract_valid = false;
   if (function_version != NULL) {
-    entry.target_facts = function_version->effective_target_facts;
+    entry.target_facts = function_version->function_target_facts;
     contract_valid = true;
   } else {
     IREE_RETURN_IF_ERROR(loom_target_function_contract_resolve_facts(

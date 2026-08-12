@@ -23,6 +23,7 @@ from loom.dialect.test.defs import (
     test_options_attr,
     test_parameterized_attr,
     test_parameterized_attr_array,
+    test_signed_enum_set_attrs,
 )
 from loom.format.bytecode.encoding import (
     decode_varint,
@@ -75,6 +76,7 @@ from loom.ir import (
     ScalarType,
     ScalarTypeKind,
     ShapedType,
+    SignedEnumSetAttr,
     StaticDim,
     StorageSpace,
     StorageType,
@@ -1895,6 +1897,73 @@ class TestEnumArrayAttributeWireFormat:
         reader = BytecodeReader(b"")
         reader._strings = ["", "values"]
         data = bytes([9, 1, 1, 13, 0])
+
+        with pytest.raises(BytecodeError, match="descriptor-backed"):
+            reader._read_attr_value(data, 0)
+
+
+class TestSignedEnumSetAttributeWireFormat:
+    def _read_signed_enum_set(self, data: bytes) -> tuple[SignedEnumSetAttr, int]:
+        reader = BytecodeReader(b"", op_decls=[test_signed_enum_set_attrs])
+        attr_def = reader._attr_def_for_op_attr(
+            "test.signed_enum_set_attrs", "required_features"
+        )
+        value, offset = reader._read_attr_value(data, 0, attr_def=attr_def)
+        assert isinstance(value, SignedEnumSetAttr)
+        return value, offset
+
+    def test_reads_canonical_positive_and_negative_words(self) -> None:
+        positive_words = (1 << 1, 0, 0, 1 << 63)
+        negative_words = (1 << 7, 0, 0, 0)
+        data = bytes([16, 4]) + struct.pack("<8Q", *positive_words, *negative_words)
+
+        value, offset = self._read_signed_enum_set(data)
+
+        assert value == SignedEnumSetAttr([1, 255], [7])
+        assert offset == len(data)
+
+    def test_reads_present_empty_set(self) -> None:
+        value, offset = self._read_signed_enum_set(bytes([16, 0]))
+
+        assert value == SignedEnumSetAttr()
+        assert offset == 2
+
+    def test_rejects_excess_word_count(self) -> None:
+        with pytest.raises(BytecodeError, match="word count 5 exceeds"):
+            self._read_signed_enum_set(bytes([16, 5]))
+
+    def test_rejects_truncated_words(self) -> None:
+        with pytest.raises(BytecodeError, match="words exceed payload size"):
+            self._read_signed_enum_set(bytes([16, 1]) + struct.pack("<Q", 2))
+
+    def test_rejects_contradictory_assertions(self) -> None:
+        data = bytes([16, 1]) + struct.pack("<2Q", 1 << 1, 1 << 1)
+
+        with pytest.raises(BytecodeError, match="contradictory assertions"):
+            self._read_signed_enum_set(data)
+
+    def test_rejects_noncanonical_trailing_zero_pair(self) -> None:
+        data = bytes([16, 2]) + struct.pack("<4Q", 1 << 1, 0, 0, 0)
+
+        with pytest.raises(BytecodeError, match="not canonically trimmed"):
+            self._read_signed_enum_set(data)
+
+    def test_rejects_undeclared_stable_value(self) -> None:
+        data = bytes([16, 1]) + struct.pack("<2Q", 1 << 2, 0)
+
+        with pytest.raises(BytecodeError, match=r"undeclared.*\[2\]"):
+            self._read_signed_enum_set(data)
+
+    def test_rejects_set_without_field_descriptor(self) -> None:
+        reader = BytecodeReader(b"")
+
+        with pytest.raises(BytecodeError, match="descriptor-backed"):
+            reader._read_attr_value(bytes([16, 0]), 0)
+
+    def test_rejects_set_nested_in_generic_dict(self) -> None:
+        reader = BytecodeReader(b"")
+        reader._strings = ["", "features"]
+        data = bytes([9, 1, 1, 16, 0])
 
         with pytest.raises(BytecodeError, match="descriptor-backed"):
             reader._read_attr_value(data, 0)

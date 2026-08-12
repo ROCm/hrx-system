@@ -206,7 +206,7 @@ func.def target(@other_target) abi(object_function) @rejected() {
   EXPECT_FALSE(Evaluate(module.get(), where_op, IREE_SV("rejected")));
 }
 
-TEST_F(TargetPredicateTest, MatchesEffectiveFunctionVersionFacts) {
+TEST_F(TargetPredicateTest, MatchesFunctionTargetFacts) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @authored_target
 
@@ -223,14 +223,14 @@ func.def target(@authored_target) abi(object_function) @entry() {
 )");
 
   loom_func_like_t function = FindFunction(module.get(), IREE_SV("entry"));
-  loom_target_facts_t effective_facts = {};
+  loom_target_facts_t function_target_facts = {};
   loom_target_facts_builder_initialize(&loom_test_target_fact_type,
                                        loom_test_target_bundles.values[2],
-                                       &effective_facts);
+                                       &function_target_facts);
   loom_target_function_version_t function_version = {};
   function_version.base.type = &loom_target_function_version_type;
   function_version.base.function = function;
-  function_version.effective_target_facts = &effective_facts;
+  function_version.function_target_facts = &function_target_facts;
   loom_op_t* where_op =
       FirstWhere(FindPipeline(module.get(), IREE_SV("pipeline")));
 

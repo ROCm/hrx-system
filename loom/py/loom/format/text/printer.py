@@ -111,6 +111,7 @@ from loom.ir import (
     RegisterType,
     ScalarType,
     ShapedType,
+    SignedEnumSetAttr,
     StaticDim,
     StorageType,
     SymbolName,
@@ -748,6 +749,29 @@ def _format_attr_value(
             )
             + "]"
         )
+    if attr_def is not None and attr_def.attr_type == "signed_enum_set":
+        if not isinstance(value, SignedEnumSetAttr):
+            raise TypeError(
+                f"signed enum-set attribute value must be SignedEnumSetAttr: {value!r}"
+            )
+        assert attr_def.enum_def is not None
+        keyword_by_value = {
+            case.value: case.keyword for case in attr_def.enum_def.cases
+        }
+        signed_values = [
+            (stable_value, False) for stable_value in value.positive_values
+        ] + [(stable_value, True) for stable_value in value.negative_values]
+        signed_values.sort(key=lambda item: item[0])
+        formatted_values: list[str] = []
+        for stable_value, is_negative in signed_values:
+            keyword = keyword_by_value.get(stable_value)
+            if keyword is None:
+                raise ValueError(
+                    f"signed enum-set field {attr_def.name!r} has undeclared "
+                    f"value {stable_value}"
+                )
+            formatted_values.append(("-" if is_negative else "") + keyword)
+        return "[" + ", ".join(formatted_values) + "]"
     if attr_def is not None and attr_def.attr_type == "symbol":
         if not isinstance(value, str | SymbolName):
             raise TypeError(f"symbol attribute value must be a symbol: {value!r}")
@@ -775,6 +799,8 @@ def _format_attr_value(
         return f'bytes("{bytes(value).hex()}")'
     if isinstance(value, EnumArrayAttr):
         raise ValueError("enum arrays require a descriptor-backed field")
+    if isinstance(value, SignedEnumSetAttr):
+        raise ValueError("signed enum sets require a descriptor-backed field")
     if isinstance(value, ParameterizedAttr):
         if attr_def is not None:
             if attr_def.attr_type != "parameterized":

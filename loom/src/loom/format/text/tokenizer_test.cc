@@ -107,7 +107,7 @@ static loom_token_t ExpectNextErrorToken(loom_tokenizer_t* tokenizer,
 //===----------------------------------------------------------------------===//
 
 TEST(Tokenizer, SingleCharPunctuation) {
-  ScopedTokenizer t("( ) { } [ ] < > = : ,");
+  ScopedTokenizer t("( ) { } [ ] < > = : , -");
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_LPAREN);
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_RPAREN);
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_LBRACE);
@@ -119,6 +119,7 @@ TEST(Tokenizer, SingleCharPunctuation) {
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_EQUALS);
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_COLON);
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_COMMA);
+  EXPECT_EQ(t.next().kind, LOOM_TOKEN_MINUS);
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_EOF);
 }
 
@@ -245,6 +246,16 @@ TEST(Tokenizer, NegativeArrowDisambiguation) {
   ScopedTokenizer t("-> -1");
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_ARROW);
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_INTEGER);
+}
+
+TEST(Tokenizer, MinusBeforeIdentifier) {
+  ScopedTokenizer t("-feature");
+  loom_token_t minus = t.next();
+  EXPECT_EQ(minus.kind, LOOM_TOKEN_MINUS);
+  EXPECT_TRUE(iree_string_view_equal(minus.text, IREE_SV("-")));
+  loom_token_t feature = t.next();
+  EXPECT_EQ(feature.kind, LOOM_TOKEN_BARE_IDENT);
+  EXPECT_TRUE(iree_string_view_equal(feature.text, IREE_SV("feature")));
 }
 
 //===----------------------------------------------------------------------===//

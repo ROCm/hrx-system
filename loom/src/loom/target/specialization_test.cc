@@ -34,6 +34,9 @@ typedef struct TestTargetProfile {
   // Test target selector projected into facts.
   loom_test_target_kind_t kind;
 
+  // Common target fields supplied explicitly by this profile.
+  loom_target_fact_field_set_t explicit_fields;
+
   // Optional counter incremented by each fact projection.
   uint32_t* projection_count;
 } TestTargetProfile;
@@ -48,6 +51,7 @@ static iree_status_t ProjectTestProfileFacts(
     ++*profile->projection_count;
   }
   out_facts->selector = profile->kind;
+  out_facts->explicit_fields = profile->explicit_fields;
   return iree_ok_status();
 }
 
@@ -66,6 +70,7 @@ static TestTargetProfile MakeTestProfile(loom_test_target_kind_t kind) {
           loom_target_bundle_table_lookup(&loom_test_target_bundles, kind),
       },
       /*.kind=*/kind,
+      /*.explicit_fields=*/0,
       /*.projection_count=*/nullptr,
   };
 }
@@ -265,26 +270,77 @@ func.def public target(@unrequested_family) @unrequested() {
       loom_target_function_version_list_find(&result.function_versions.list,
                                              generic);
   ASSERT_NE(generic_version, nullptr);
-  EXPECT_EQ(generic_version->target_provider, &kTestProvider);
-  ASSERT_NE(generic_version->authored_target_facts, nullptr);
-  EXPECT_EQ(generic_version->authored_target_facts->selector,
+  EXPECT_EQ(generic_version->resolved_target.provider, &kTestProvider);
+  ASSERT_NE(generic_version->resolved_target.facts, nullptr);
+  ASSERT_NE(generic_version->target_requirement_facts, nullptr);
+  EXPECT_EQ(generic_version->target_requirement_facts->selector,
             LOOM_TEST_TARGET_KIND_LOW_CORE);
-  ASSERT_NE(generic_version->effective_target_facts, nullptr);
-  EXPECT_EQ(generic_version->effective_target_facts->selector,
+  ASSERT_NE(generic_version->function_target_facts, nullptr);
+  EXPECT_EQ(generic_version->function_target_facts->selector,
             LOOM_TEST_TARGET_KIND_LOW_CORE);
 
   const loom_target_function_version_t* targetless_version =
       loom_target_function_version_list_find(&result.function_versions.list,
                                              targetless);
   ASSERT_NE(targetless_version, nullptr);
-  EXPECT_EQ(targetless_version->target_provider, &kTestProvider);
-  EXPECT_EQ(targetless_version->authored_target_facts, nullptr);
-  ASSERT_NE(targetless_version->effective_target_facts, nullptr);
-  EXPECT_EQ(targetless_version->effective_target_facts->selector,
+  EXPECT_EQ(targetless_version->resolved_target.provider, &kTestProvider);
+  ASSERT_NE(targetless_version->resolved_target.facts, nullptr);
+  EXPECT_EQ(targetless_version->target_requirement_facts, nullptr);
+  ASSERT_NE(targetless_version->function_target_facts, nullptr);
+  EXPECT_EQ(targetless_version->function_target_facts->selector,
             LOOM_TEST_TARGET_KIND_LOW_CORE);
   EXPECT_EQ(loom_target_function_version_list_find(
                 &result.function_versions.list, unrequested),
             nullptr);
+}
+
+TEST_F(TargetSpecializationTest, UnionsProfileAndRequirementExplicitFields) {
+  // Every explicit value equals its selected row default. Presence must
+  // survive refinement independently of value equality, including zero.
+  ModulePtr module = Parse(R"(
+test.target<low_core> @requirement {
+  index_bitwidth = 64,
+  contract_feature_bits = 0
+}
+
+func.def public target(@requirement) @entry() {
+  func.return
+}
+)");
+  TestTargetProfile exact_profile =
+      MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
+  loom_target_fact_field_set_insert(
+      &exact_profile.explicit_fields,
+      LOOM_TARGET_FACT_FIELD_DEFAULT_POINTER_BITWIDTH);
+  const loom_target_specialization_request_t request = {
+      /*.function_name=*/IREE_SV("entry"),
+      /*.target_profile=*/&exact_profile.base,
+  };
+
+  const loom_target_specialization_result_t result =
+      Specialize(module.get(), &request, 1);
+  ASSERT_EQ(result.error_count, 0u);
+  const loom_target_function_version_t* version =
+      loom_target_function_version_list_find(
+          &result.function_versions.list,
+          Function(module.get(), IREE_SV("entry")));
+  ASSERT_NE(version, nullptr);
+  const loom_target_facts_t* resolved_facts = version->resolved_target.facts;
+  ASSERT_NE(resolved_facts, nullptr);
+
+  loom_target_fact_field_set_t expected_fields = 0;
+  loom_target_fact_field_set_insert(
+      &expected_fields, LOOM_TARGET_FACT_FIELD_DEFAULT_POINTER_BITWIDTH);
+  loom_target_fact_field_set_insert(&expected_fields,
+                                    LOOM_TARGET_FACT_FIELD_INDEX_BITWIDTH);
+  loom_target_fact_field_set_insert(
+      &expected_fields, LOOM_TARGET_FACT_FIELD_CONTRACT_FEATURE_BITS);
+  EXPECT_EQ(resolved_facts->explicit_fields, expected_fields);
+  EXPECT_EQ(resolved_facts->storage.snapshot.default_pointer_bitwidth, 64u);
+  EXPECT_EQ(resolved_facts->storage.snapshot.index_bitwidth, 64u);
+  EXPECT_EQ(resolved_facts->storage.config.contract_feature_bits, 0u);
+  EXPECT_FALSE(loom_target_facts_field_is_explicit(
+      resolved_facts, LOOM_TARGET_FACT_FIELD_SUBGROUP_SIZE));
 }
 
 TEST_F(TargetSpecializationTest, SharesProfileProjectionAndTargetlessContext) {
@@ -327,14 +383,14 @@ func.def public @right() {
                                              right);
   ASSERT_NE(left_version, nullptr);
   ASSERT_NE(right_version, nullptr);
-  EXPECT_EQ(left_version->target_context_facts,
-            right_version->target_context_facts);
-  EXPECT_NE(left_version->target_context_facts,
-            left_version->effective_target_facts);
-  EXPECT_NE(right_version->target_context_facts,
-            right_version->effective_target_facts);
-  EXPECT_NE(left_version->effective_target_facts,
-            right_version->effective_target_facts);
+  EXPECT_EQ(left_version->resolved_target.facts,
+            right_version->resolved_target.facts);
+  EXPECT_NE(left_version->resolved_target.facts,
+            left_version->function_target_facts);
+  EXPECT_NE(right_version->resolved_target.facts,
+            right_version->function_target_facts);
+  EXPECT_NE(left_version->function_target_facts,
+            right_version->function_target_facts);
 }
 
 TEST_F(TargetSpecializationTest, PreservesMatchingAuthoredExactTarget) {
@@ -367,7 +423,7 @@ func.def public target(@exact) @entry() {
       loom_target_function_version_const_cast(
           result.function_versions.list.values[0]);
   ASSERT_NE(version, nullptr);
-  EXPECT_EQ(version->effective_target_facts->selector,
+  EXPECT_EQ(version->function_target_facts->selector,
             LOOM_TEST_TARGET_KIND_LOW_CORE);
 }
 
@@ -427,9 +483,9 @@ func.def public target(@right_requirement) export("right_function") @right() {
   ASSERT_NE(left_version, nullptr);
   ASSERT_NE(right_version, nullptr);
   const loom_target_facts_t* left_version_facts =
-      left_version->effective_target_facts;
+      left_version->function_target_facts;
   const loom_target_facts_t* right_version_facts =
-      right_version->effective_target_facts;
+      right_version->function_target_facts;
   ASSERT_NE(left_version_facts, nullptr);
   ASSERT_NE(right_version_facts, nullptr);
   EXPECT_EQ(left_version_facts->storage.export_plan.abi_kind,
@@ -560,9 +616,9 @@ func.def public target(@external) @entry() {
   ASSERT_NE(version, nullptr);
   EXPECT_TRUE(iree_string_view_equal(version->authored_target_name,
                                      IREE_SV("external")));
-  EXPECT_EQ(version->authored_target_facts, nullptr);
-  ASSERT_NE(version->effective_target_facts, nullptr);
-  EXPECT_EQ(version->effective_target_facts->selector,
+  EXPECT_EQ(version->target_requirement_facts, nullptr);
+  ASSERT_NE(version->function_target_facts, nullptr);
+  EXPECT_EQ(version->function_target_facts->selector,
             LOOM_TEST_TARGET_KIND_LOW_CORE);
 }
 

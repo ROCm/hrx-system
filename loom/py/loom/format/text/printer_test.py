@@ -59,6 +59,7 @@ from loom.ir import (
     ScalarType,
     ScalarTypeKind,
     ShapedType,
+    SignedEnumSetAttr,
     StaticDim,
     StorageSpace,
     StorageType,
@@ -807,6 +808,31 @@ class TestPrintAttrDict:
             operands=[x],
             results=[r],
             attributes={"dict": {"modes": EnumArrayAttr([1, 7])}},
+        )
+
+        with pytest.raises(ValueError, match="descriptor-backed field"):
+            _printer().print_operation(op, module)
+
+    def test_signed_enum_set_prints_in_stable_ordinal_order(self) -> None:
+        op = Operation(
+            name="test.signed_enum_set_attrs",
+            attributes={
+                "required_features": SignedEnumSetAttr([255, 1], [7]),
+                "optional_features": SignedEnumSetAttr([], [255]),
+            },
+        )
+
+        assert _printer().print_operation(op, Module()) == (
+            "test.signed_enum_set_attrs [low, -middle, high] using [-high]"
+        )
+
+    def test_signed_enum_set_requires_descriptor_backed_field(self) -> None:
+        module, [x, r] = _module_with(("x", F32), ("r", F32))
+        op = Operation(
+            name="test.attrs",
+            operands=[x],
+            results=[r],
+            attributes={"dict": {"features": SignedEnumSetAttr([1])}},
         )
 
         with pytest.raises(ValueError, match="descriptor-backed field"):

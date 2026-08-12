@@ -6,10 +6,12 @@
 
 """AMDGPU target-family record dialect."""
 
+from build_tools.amdgpu.target_map_data import AMDGPU_TARGET_ID_FEATURE_ORDER
+
 from loom.assembly import AttrDict, SymbolRef, TemplateParam
 from loom.dialect.target import target_record_attrs
 from loom.dsl import (
-    ATTR_TYPE_ENUM,
+    ATTR_TYPE_SIGNED_ENUM_SET,
     SYMBOL_DEFINE,
     AttrDef,
     Dialect,
@@ -40,22 +42,17 @@ AmdgpuTargetKind = EnumDef(
     doc="AMDGPU target row selected by amdgpu.target.",
 )
 
-AmdgpuTargetFeatureState = EnumDef(
-    "AmdgpuTargetFeatureState",
+AmdgpuTargetIdFeature = EnumDef(
+    "AmdgpuTargetIdFeature",
     [
-        EnumCase("any", 0, doc="Feature state is unconstrained."),
         EnumCase(
-            "unsupported",
-            1,
-            doc="Feature is unsupported by the selected processor.",
-        ),
-        EnumCase("off", 2, doc="Feature is explicitly disabled."),
-        EnumCase("on", 3, doc="Feature is explicitly enabled."),
+            feature,
+            ordinal,
+            doc=f"AMDHSA '{feature}' target-ID feature.",
+        )
+        for ordinal, feature in enumerate(AMDGPU_TARGET_ID_FEATURE_ORDER)
     ],
-    doc="Normalized state of one AMDHSA target-ID feature.",
-    c_type="loom_amdgpu_target_feature_state_t",
-    c_const_prefix="LOOM_AMDGPU_TARGET_FEATURE",
-    c_include="loom/target/arch/amdgpu/target_info.h",
+    doc="Configurable AMDHSA target-ID feature.",
 )
 
 amdgpu_target = Op(
@@ -64,7 +61,7 @@ amdgpu_target = Op(
     doc=(
         "AMDGPU target record. The selector chooses one exact, generic, or "
         "overlay target row; optional attrs preserve authored common facts "
-        "and target-ID feature states."
+        "and target-ID feature assertions."
     ),
     traits=[SYMBOL_DEFINE],
     interfaces=[
@@ -86,18 +83,15 @@ amdgpu_target = Op(
     attrs=[
         *target_record_attrs(AmdgpuTargetKind),
         AttrDef(
-            "sramecc",
-            ATTR_TYPE_ENUM,
-            enum_def=AmdgpuTargetFeatureState,
+            "features",
+            ATTR_TYPE_SIGNED_ENUM_SET,
+            enum_def=AmdgpuTargetIdFeature,
             optional=True,
-            doc="Required AMDHSA SRAM ECC target-ID feature state.",
-        ),
-        AttrDef(
-            "xnack",
-            ATTR_TYPE_ENUM,
-            enum_def=AmdgpuTargetFeatureState,
-            optional=True,
-            doc="Required AMDHSA XNACK target-ID feature state.",
+            doc=(
+                "Explicit AMDHSA target-ID feature assertions. Bare members "
+                "require enabled features and negative members require "
+                "disabled features."
+            ),
         ),
     ],
     verify="loom_amdgpu_target_record_verify",
@@ -111,7 +105,7 @@ amdgpu_target = Op(
         "amdgpu.target<gfx942> @gfx942 {subgroup_size = 64}",
         "amdgpu.target<gfx950> @gfx950 {subgroup_size = 64}",
         "amdgpu.target<gfx1250-a0> @gfx1250_a0",
-        "amdgpu.target<gfx942> @gfx942_xnack {xnack = on}",
+        "amdgpu.target<gfx942> @gfx942_features {features = [sramecc, -xnack]}",
     ],
 )
 

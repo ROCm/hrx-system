@@ -11,6 +11,12 @@
 #include <string>
 
 #include "iree/testing/gtest.h"
+#include "iree/testing/temp_file.h"
+#include "loom/ops/test/ops.h"
+#include "loom/ops/test/registry.h"
+#include "loom/target/profile.h"
+#include "loom/target/provider.h"
+#include "loom/target/test/target_records.h"
 #include "loomc/artifact.h"
 #include "loomc/artifact_manifest.h"
 #include "loomc/compile.h"
@@ -23,8 +29,6 @@
 #include "loomc/result.h"
 #include "loomc/source.h"
 #include "loomc/status.h"
-#include "loomc/target/spirv/base.h"
-#include "loomc/target/spirv/profile.h"
 #include "loomc/workspace.h"
 #include "module.h"
 #include "target.h"
@@ -141,6 +145,46 @@ static const loom_target_emitter_t* const kFakeWasmEmitters[] = {
 
 static const loom_target_provider_t kEmptyProvider = {};
 
+static iree_status_t ProjectTestTargetProfileFacts(
+    const loom_target_profile_t* profile, iree_arena_allocator_t* arena,
+    loom_target_facts_t* out_facts) {
+  (void)profile;
+  (void)arena;
+  out_facts->selector = LOOM_TEST_TARGET_KIND_LOW_CORE;
+  return iree_ok_status();
+}
+
+static const loom_target_profile_type_t kTestTargetProfileType = {
+    /*.name=*/IREE_SVL("loomc-target-test"),
+    /*.fact_type=*/&loom_test_target_fact_type,
+    /*.project_facts=*/ProjectTestTargetProfileFacts,
+};
+
+static iree_status_t RegisterTestTargetContext(loom_context_t* context) {
+  return loom_test_dialect_register(context);
+}
+
+// Deliberately lacks materialize_definition so generic IR boundaries can
+// prove loss prevention without relying on an incomplete production target.
+static const loom_target_provider_t kTestTargetProvider = {
+    /*.profile_type=*/&kTestTargetProfileType,
+    /*.materialize_definition=*/nullptr,
+    /*.register_context=*/RegisterTestTargetContext,
+};
+
+static const loom_target_provider_t* const kTestTargetProviders[] = {
+    &kTestTargetProvider,
+};
+
+static const loom_target_provider_set_t kTestTargetProviderSet = {
+    /*.providers=*/kTestTargetProviders,
+    /*.provider_count=*/IREE_ARRAYSIZE(kTestTargetProviders),
+};
+
+static loom_target_profile_t kTestTargetProfile = {
+    /*.type=*/&kTestTargetProfileType,
+};
+
 static const loom_target_provider_t kFakeElfProvider = {
     /*.profile_type=*/nullptr,
     /*.materialize_definition=*/nullptr,
@@ -241,14 +285,6 @@ BuilderPtr CreateLinkIndexBuilder(loomc_context_t* context) {
   return BuilderPtr(builder);
 }
 
-TargetEnvironmentPtr CreateSpirvTargetEnvironment() {
-  loomc_target_environment_t* target_environment = nullptr;
-  loomc_status_t status = loomc_target_environment_create_spirv(
-      loomc_allocator_system(), &target_environment);
-  LOOMC_EXPECT_OK(status);
-  return TargetEnvironmentPtr(target_environment);
-}
-
 TargetEnvironmentPtr CreateTargetEnvironmentFromProviderSet(
     const loom_target_provider_set_t* provider_set) {
   loomc_target_environment_t* target_environment = nullptr;
@@ -258,7 +294,11 @@ TargetEnvironmentPtr CreateTargetEnvironmentFromProviderSet(
   return TargetEnvironmentPtr(target_environment);
 }
 
-ContextPtr CreateSpirvContext(loomc_target_environment_t* target_environment) {
+TargetEnvironmentPtr CreateTestTargetEnvironment() {
+  return CreateTargetEnvironmentFromProviderSet(&kTestTargetProviderSet);
+}
+
+ContextPtr CreateTargetContext(loomc_target_environment_t* target_environment) {
   loomc_context_target_options_t target_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
       /*.structure_size=*/sizeof(target_options),
@@ -277,23 +317,17 @@ ContextPtr CreateSpirvContext(loomc_target_environment_t* target_environment) {
   return ContextPtr(context);
 }
 
-TargetProfilePtr CreateSpirvProfile(
+TargetProfilePtr CreateTestTargetProfile(
     loomc_target_environment_t* target_environment) {
-  loomc_spirv_profile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_PROFILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("vulkan13"),
-      /*.preset=*/LOOMC_SPIRV_PROFILE_PRESET_VULKAN_1_3_BDA,
-  };
+  kTestTargetProfile.target_bundle = loom_target_bundle_table_lookup(
+      &loom_test_target_bundles, LOOM_TEST_TARGET_KIND_LOW_CORE);
+  IREE_ASSERT(kTestTargetProfile.target_bundle != nullptr);
   loomc_target_profile_t* profile = nullptr;
-  loomc_result_t* result = nullptr;
-  loomc_status_t status = loomc_target_profile_create_spirv(
-      target_environment, &options, loomc_allocator_system(), &profile,
-      &result);
+  loomc_status_t status = loomc_target_profile_create(
+      target_environment, loomc_make_cstring_view("test-low-core"),
+      &kTestTargetProfile, /*deinitialize=*/nullptr, loomc_allocator_system(),
+      &profile);
   LOOMC_EXPECT_OK(status);
-  ResultPtr result_ptr(result);
-  EXPECT_TRUE(loomc_result_succeeded(result_ptr.get()));
   return TargetProfilePtr(profile);
 }
 
@@ -350,22 +384,6 @@ ModulePtr DeserializeModule(loomc_context_t* context,
   ResultPtr result_ptr(result);
   ExpectSucceededResult(result_ptr.get());
   return ModulePtr(module);
-}
-
-std::string SerializeModuleToText(const loomc_module_t* module) {
-  loomc_module_serialize_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("module.loom"),
-  };
-  loomc_source_t* source = nullptr;
-  loomc_status_t status = loomc_module_serialize_to_source(
-      module, &options, loomc_allocator_system(), &source);
-  LOOMC_EXPECT_OK(status);
-  SourcePtr source_ptr(source);
-  return ToString(loomc_source_contents(source_ptr.get()));
 }
 
 ModulePtr CreateIdentityModule(loomc_context_t* context,
@@ -822,15 +840,15 @@ func.def public @entry(%x: i32) -> (i32) {
 }
 
 TEST(TargetTest, RetainReleaseProfile) {
-  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile = CreateSpirvProfile(target_environment.get());
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  TargetProfilePtr profile = CreateTestTargetProfile(target_environment.get());
   loomc_target_profile_retain(profile.get());
   loomc_target_profile_release(profile.get());
 }
 
 TEST(TargetTest, AcceptsSanitizerPipelineOptions) {
-  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  ContextPtr context = CreateSpirvContext(target_environment.get());
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  ContextPtr context = CreateTargetContext(target_environment.get());
   loomc_sanitizer_options_t sanitizer_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
       /*.structure_size=*/sizeof(sanitizer_options),
@@ -854,8 +872,8 @@ TEST(TargetTest, AcceptsSanitizerPipelineOptions) {
 }
 
 TEST(TargetTest, RejectsUnknownSanitizerCheckBits) {
-  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  ContextPtr context = CreateSpirvContext(target_environment.get());
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  ContextPtr context = CreateTargetContext(target_environment.get());
   loomc_sanitizer_options_t sanitizer_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
       /*.structure_size=*/sizeof(sanitizer_options),
@@ -884,8 +902,8 @@ TEST(TargetTest, RejectsUnknownSanitizerCheckBits) {
 }
 
 TEST(TargetTest, RejectsUnknownSanitizerReportingMode) {
-  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  ContextPtr context = CreateSpirvContext(target_environment.get());
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  ContextPtr context = CreateTargetContext(target_environment.get());
   loomc_sanitizer_options_t sanitizer_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
       /*.structure_size=*/sizeof(sanitizer_options),
@@ -938,10 +956,10 @@ TEST(TargetTest, RejectsSanitizerOptionsOnPlainPassProgramOptions) {
   EXPECT_EQ(pass_program, nullptr);
 }
 
-TEST(TargetTest, RetainsSpecializationVersionWithoutChangingTargetlessIr) {
-  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile = CreateSpirvProfile(target_environment.get());
-  ContextPtr context = CreateSpirvContext(target_environment.get());
+TEST(TargetTest, RejectsSerializationWithoutAnExactTargetInverse) {
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  TargetProfilePtr profile = CreateTestTargetProfile(target_environment.get());
+  ContextPtr context = CreateTargetContext(target_environment.get());
   CompilerPtr compiler = CreateCompiler(context.get());
   PassProgramPtr pass_program = CreateEmptyPassProgram(context.get());
 
@@ -984,10 +1002,68 @@ TEST(TargetTest, RetainsSpecializationVersionWithoutChangingTargetlessIr) {
     ASSERT_NE(function_versions->values[0], nullptr);
     EXPECT_NE(function_versions->values[0]->type, nullptr);
     EXPECT_NE(function_versions->values[0]->function.op, nullptr);
-    const std::string text = SerializeModuleToText(module.get());
-    EXPECT_EQ(text.find("spirv.target<"), std::string::npos) << text;
-    EXPECT_EQ(text.find("func.def public target(@"), std::string::npos) << text;
-    EXPECT_NE(text.find("func.def public @entry"), std::string::npos) << text;
+    loomc_module_serialize_options_t serialize_options = {
+        /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+        /*.structure_size=*/sizeof(serialize_options),
+        /*.next=*/nullptr,
+        /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
+        /*.identifier=*/loomc_make_cstring_view("module.loom"),
+    };
+    loomc_source_t* serialized_source = nullptr;
+    LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_FAILED_PRECONDITION,
+                           loomc_module_serialize_to_source(
+                               module.get(), &serialize_options,
+                               loomc_allocator_system(), &serialized_source));
+    EXPECT_EQ(serialized_source, nullptr);
+    EXPECT_NE(loomc_module_function_versions(module.get()), nullptr);
+
+    WorkspacePtr clone_workspace = CreateWorkspace();
+    loomc_module_t* clone = nullptr;
+    LOOMC_EXPECT_STATUS_IS(
+        LOOMC_STATUS_FAILED_PRECONDITION,
+        loomc_module_clone(module.get(), clone_workspace.get(),
+                           loomc_allocator_system(), &clone));
+    EXPECT_EQ(clone, nullptr);
+    EXPECT_NE(loomc_module_function_versions(module.get()), nullptr);
+
+    FILE* file = tmpfile();
+    ASSERT_NE(file, nullptr);
+    static constexpr char kSentinel[] = "unchanged";
+    ASSERT_EQ(fwrite(kSentinel, 1, sizeof(kSentinel) - 1, file),
+              sizeof(kSentinel) - 1);
+    const long file_position = ftell(file);
+    ASSERT_GE(file_position, 0);
+    LOOMC_EXPECT_STATUS_IS(
+        LOOMC_STATUS_FAILED_PRECONDITION,
+        loomc_module_serialize_to_file(module.get(), &serialize_options, file));
+    EXPECT_EQ(ftell(file), file_position);
+    ASSERT_EQ(fseek(file, 0, SEEK_SET), 0);
+    char file_contents[sizeof(kSentinel)] = {};
+    EXPECT_EQ(fread(file_contents, 1, sizeof(kSentinel) - 1, file),
+              sizeof(kSentinel) - 1);
+    EXPECT_STREQ(file_contents, kSentinel);
+    fclose(file);
+
+    iree::testing::TempFilePath path("loomc-unsealed-target", ".loom");
+    FILE* path_file = fopen(path.path().c_str(), "wb");
+    ASSERT_NE(path_file, nullptr);
+    ASSERT_EQ(fwrite(kSentinel, 1, sizeof(kSentinel) - 1, path_file),
+              sizeof(kSentinel) - 1);
+    ASSERT_EQ(fclose(path_file), 0);
+    LOOMC_EXPECT_STATUS_IS(
+        LOOMC_STATUS_FAILED_PRECONDITION,
+        loomc_module_serialize_to_path(
+            module.get(), &serialize_options,
+            loomc_make_string_view(path.path().data(), path.path().size()),
+            loomc_allocator_system()));
+    path_file = fopen(path.path().c_str(), "rb");
+    ASSERT_NE(path_file, nullptr);
+    char path_contents[sizeof(kSentinel)] = {};
+    EXPECT_EQ(fread(path_contents, 1, sizeof(kSentinel) - 1, path_file),
+              sizeof(kSentinel) - 1);
+    EXPECT_STREQ(path_contents, kSentinel);
+    ASSERT_EQ(fclose(path_file), 0);
+    EXPECT_TRUE(path.Remove());
 
     const loomc_target_specialization_t missing_specialization = {
         /*.function_symbol=*/loomc_make_cstring_view("missing"),
@@ -1006,10 +1082,50 @@ TEST(TargetTest, RetainsSpecializationVersionWithoutChangingTargetlessIr) {
   }
 }
 
+TEST(TargetTest, CompileRejectsAnUnrepresentableModuleArtifact) {
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  TargetProfilePtr profile = CreateTestTargetProfile(target_environment.get());
+  ContextPtr context = CreateTargetContext(target_environment.get());
+  CompilerPtr compiler = CreateCompiler(context.get());
+  PassProgramPtr pass_program = CreateEmptyPassProgram(context.get());
+
+  const loomc_target_specialization_t specialization = {
+      /*.function_symbol=*/loomc_make_cstring_view("entry"),
+      /*.target_profile=*/profile.get(),
+  };
+  loomc_target_specialization_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      /*.structure_size=*/sizeof(target_options),
+      /*.next=*/nullptr,
+      /*.specializations=*/&specialization,
+      /*.specialization_count=*/1,
+  };
+  loomc_compile_options_t compile_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      /*.structure_size=*/sizeof(compile_options),
+      /*.next=*/&target_options,
+      /*.module_name=*/loomc_make_cstring_view("jit_kernel"),
+      /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
+      /*.config=*/{},
+  };
+
+  WorkspacePtr workspace = CreateWorkspace();
+  ModulePtr module =
+      CreateIdentityModule(context.get(), workspace.get(), "entry");
+  loomc_result_t* result = nullptr;
+  loomc_status_t status = loomc_compile_module(
+      compiler.get(), workspace.get(), pass_program.get(), module.get(),
+      &compile_options, loomc_allocator_system(), &result);
+
+  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_FAILED_PRECONDITION, status);
+  EXPECT_EQ(result, nullptr);
+  EXPECT_EQ(loomc_module_function_versions(module.get()), nullptr);
+}
+
 TEST(TargetTest, RejectsSpecializationOptionsOnPassProgramCreation) {
-  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile = CreateSpirvProfile(target_environment.get());
-  ContextPtr context = CreateSpirvContext(target_environment.get());
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  TargetProfilePtr profile = CreateTestTargetProfile(target_environment.get());
+  ContextPtr context = CreateTargetContext(target_environment.get());
   const loomc_target_specialization_t specialization = {
       /*.function_symbol=*/loomc_make_cstring_view("entry"),
       /*.target_profile=*/profile.get(),
@@ -1036,9 +1152,9 @@ TEST(TargetTest, RejectsSpecializationOptionsOnPassProgramCreation) {
 }
 
 TEST(TargetTest, RejectsSpecializationOptionsDuringLink) {
-  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile = CreateSpirvProfile(target_environment.get());
-  ContextPtr context = CreateSpirvContext(target_environment.get());
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  TargetProfilePtr profile = CreateTestTargetProfile(target_environment.get());
+  ContextPtr context = CreateTargetContext(target_environment.get());
   LinkerPtr linker = CreateLinker(context.get());
   LinkIndexPtr link_index = CreateSingleSourceLinkIndex(context.get());
 
@@ -1075,9 +1191,9 @@ TEST(TargetTest, RejectsSpecializationOptionsDuringLink) {
 }
 
 TEST(TargetTest, RejectsSpecializationOptionsDuringEmission) {
-  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile = CreateSpirvProfile(target_environment.get());
-  ContextPtr context = CreateSpirvContext(target_environment.get());
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  TargetProfilePtr profile = CreateTestTargetProfile(target_environment.get());
+  ContextPtr context = CreateTargetContext(target_environment.get());
   WorkspacePtr workspace = CreateWorkspace();
   ModulePtr module =
       CreateIdentityModule(context.get(), workspace.get(), "entry");

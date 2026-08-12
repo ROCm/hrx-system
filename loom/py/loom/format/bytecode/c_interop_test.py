@@ -36,6 +36,7 @@ from loom.ir import (
     ParameterizedAttrArray,
     ParameterizedType,
     RegisterType,
+    SignedEnumSetAttr,
     SymbolName,
 )
 
@@ -86,7 +87,10 @@ def _typed_register_module() -> tuple[Module, RegisterType]:
         "  test.parameterized_attr #test.options<mode = fast>\n"
         "  test.parameterized_attr_array "
         "[#test.tile<width = 8>, #test.options<mode = precise>, "
-        "#test.tile<width = 8>] using [#test.tile<width = 4>]\n"
+        "#test.tile<width = 8>, "
+        "#test.feature_set<[low, -middle, high]>] "
+        "using [#test.tile<width = 4>]\n"
+        "  test.signed_enum_set_attrs [low, -middle, high] using []\n"
         "  test.yield\n"
         "}\n"
         "test.record @parameterized_record "
@@ -129,7 +133,11 @@ def main() -> None:
                 python_bytecode_path,
             ]
         )
-        loaded = read_module(c_bytecode_path.read_bytes(), type_defs=ALL_TEST_TYPES)
+        loaded = read_module(
+            c_bytecode_path.read_bytes(),
+            parameterized_attrs=ALL_TEST_PARAMETERIZED_ATTRS,
+            type_defs=ALL_TEST_TYPES,
+        )
         if not any(value.type == register_type for value in loaded.values):
             raise AssertionError(
                 "Python reader did not recover the C-written structural register type"
@@ -199,14 +207,24 @@ def main() -> None:
             "test.tile",
             "test.options",
             "test.tile",
+            "test.feature_set",
         ):
             raise AssertionError("mixed parameterized array lost element order")
         if array_values.values[0] != array_values.values[2]:
             raise AssertionError("repeated parameterized array value changed")
+        if array_values.values[3].get("features") != SignedEnumSetAttr([1, 255], [7]):
+            raise AssertionError("parameterized signed enum set changed")
         if array_op.attributes["tiles"] != ParameterizedAttrArray(
             [test_tile_attr(width=4)]
         ):
             raise AssertionError("exact-family parameterized array changed")
+        signed_set_op = entry_block.ops[5]
+        if signed_set_op.attributes["required_features"] != SignedEnumSetAttr(
+            [1, 255], [7]
+        ):
+            raise AssertionError("signed enum set did not survive C bytecode")
+        if signed_set_op.attributes["optional_features"] != SignedEnumSetAttr():
+            raise AssertionError("present empty signed enum set changed")
         record = next(
             symbol.op
             for symbol in loaded.symbols

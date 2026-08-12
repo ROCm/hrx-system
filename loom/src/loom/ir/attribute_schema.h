@@ -164,7 +164,8 @@ static inline bool loom_attr_descriptor_accepts_kind(
   }
   return kind > LOOM_ATTR_ABSENT && kind < LOOM_ATTR_COUNT_ &&
          kind != LOOM_ATTR_ANY && kind != LOOM_ATTR_SCOPED_ENUM &&
-         kind != LOOM_ATTR_ENUM_ARRAY && kind != LOOM_ATTR_PARAMETERIZED_ARRAY;
+         kind != LOOM_ATTR_ENUM_ARRAY && kind != LOOM_ATTR_SIGNED_ENUM_SET &&
+         kind != LOOM_ATTR_PARAMETERIZED_ARRAY;
 }
 
 // Returns the explicit zero/false scalar value implied by ELIDE_DEFAULT.

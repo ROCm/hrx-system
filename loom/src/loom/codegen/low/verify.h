@@ -94,7 +94,7 @@ typedef struct loom_low_verify_options_t {
   // target-owned static data; IR verification only uses it to resolve selected
   // descriptor sets and packet semantics.
   const loom_low_descriptor_registry_t* descriptor_registry;
-  // Optional compiler-owned function versions carrying effective target facts.
+  // Optional compiler-owned versions carrying function target facts.
   // The list and its entries are borrowed for the duration of verification and
   // must describe the current module symbol table. NULL resolves only authored
   // target witnesses.

@@ -542,12 +542,12 @@ typedef struct loom_template_selection_apply_target_t {
   // Authored target witness retained for diagnostics and reports.
   loom_symbol_ref_t witness;
 
-  // Effective target facts used for provider compatibility.
+  // Function target facts used for provider compatibility.
   const loom_target_facts_t* facts;
 } loom_template_selection_apply_target_t;
 
 typedef struct loom_template_selection_application_facts_t {
-  // Function-scoped SSA facts projected with the effective target facts.
+  // Function-scoped SSA facts projected with the function target facts.
   const loom_value_fact_table_t* values;
 
   // Facts established only along the lexical path to this func.apply.
@@ -598,7 +598,7 @@ static iree_status_t loom_template_selection_resolve_apply_target(
       loom_target_function_version_snapshot_at(&state->target_versions,
                                                source_ref.symbol_id);
   if (function_version != NULL) {
-    out_target->facts = function_version->effective_target_facts;
+    out_target->facts = function_version->function_target_facts;
     return iree_ok_status();
   }
   return loom_template_selection_lookup_target_facts(state, out_target->witness,

@@ -759,7 +759,7 @@ iree_status_t loom_cse_run(loom_pass_t* pass, loom_module_t* module,
       loom_symbol_fact_table_initialize(&symbol_facts, pass->arena);
       IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
           module, &symbol_facts, function.op,
-          loom_target_function_version_effective_facts(pass->function_version),
+          loom_target_function_version_target_facts(pass->function_version),
           descriptor_registry, pass->diagnostic_emitter, &low_target));
       if (low_target.descriptor_set) {
         low_target_ptr = &low_target;

@@ -9,7 +9,7 @@ from typing import Any
 
 from loom.builder import TiedResultSpec, ValueRef
 from loom.builders import DialectBuilder
-from loom.ir import Block, Predicate, Region, Type
+from loom.ir import Block, Predicate, Region, SignedEnumSetAttr, Type
 
 class TestBuilder(DialectBuilder):
     def addi(
@@ -1061,6 +1061,14 @@ class TestBuilder(DialectBuilder):
         *,
         required_values: Sequence[str | int],
         optional_values: Sequence[str | int] | None = ...,
+        dict: Mapping[str, Any] | None = ...,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def signed_enum_set_attrs(
+        self,
+        *,
+        required_features: SignedEnumSetAttr | Mapping[str | int, bool],
+        optional_features: SignedEnumSetAttr | Mapping[str | int, bool] | None = ...,
         dict: Mapping[str, Any] | None = ...,
         location_id: int | None = ...,
     ) -> None: ...

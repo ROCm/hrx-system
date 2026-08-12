@@ -91,6 +91,46 @@ uint8_t loom_predicate_kind_argument_count(uint8_t kind) {
   return UINT8_MAX;
 }
 
+iree_status_t loom_signed_enum_set_canonical_word_count(
+    loom_signed_enum_set_t set, iree_host_size_t* out_word_count) {
+  if (out_word_count == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "canonical word-count output is NULL");
+  }
+  *out_word_count = 0;
+  if (set.word_count > LOOM_SIGNED_ENUM_SET_MAX_WORD_COUNT) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "signed enum set has %" PRIhsz " words per polarity, max %u",
+        set.word_count, (unsigned)LOOM_SIGNED_ENUM_SET_MAX_WORD_COUNT);
+  }
+  if (set.word_count == 0) return iree_ok_status();
+  if (set.words == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "non-empty signed enum set has a NULL word pointer");
+  }
+
+  const uint64_t* negative_words = set.words + set.word_count;
+  for (iree_host_size_t i = 0; i < set.word_count; ++i) {
+    if ((set.words[i] & negative_words[i]) != 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "signed enum set word %" PRIhsz
+          " contains contradictory positive and negative assertions",
+          i);
+    }
+  }
+
+  iree_host_size_t canonical_word_count = set.word_count;
+  while (canonical_word_count > 0 && set.words[canonical_word_count - 1] == 0 &&
+         negative_words[canonical_word_count - 1] == 0) {
+    --canonical_word_count;
+  }
+  *out_word_count = canonical_word_count;
+  return iree_ok_status();
+}
+
 //===----------------------------------------------------------------------===//
 // Attribute equality and hashing
 //===----------------------------------------------------------------------===//
@@ -122,6 +162,16 @@ static bool loom_attribute_equal_impl(const loom_attribute_t* a,
       if (a->enum_array == NULL || b->enum_array == NULL) return false;
       if (a->enum_array == b->enum_array) return true;
       return memcmp(a->enum_array, b->enum_array, a->count) == 0;
+    case LOOM_ATTR_SIGNED_ENUM_SET:
+      if (a->count != b->count) return false;
+      if (a->count == 0) return true;
+      if (a->signed_enum_set_words == NULL ||
+          b->signed_enum_set_words == NULL) {
+        return false;
+      }
+      if (a->signed_enum_set_words == b->signed_enum_set_words) return true;
+      return memcmp(a->signed_enum_set_words, b->signed_enum_set_words,
+                    (iree_host_size_t)a->count * 2 * sizeof(uint64_t)) == 0;
     case LOOM_ATTR_PREDICATE_LIST:
       if (a->count != b->count) return false;
       if (a->predicate_list == b->predicate_list) return true;
@@ -200,6 +250,14 @@ static uint32_t loom_attribute_hash_impl(const loom_attribute_t* attr,
       hash = loom_hash_bytes(&attr->count, sizeof(attr->count), hash);
       if (attr->count != 0 && attr->enum_array != NULL) {
         hash = loom_hash_bytes(attr->enum_array, attr->count, hash);
+      }
+      break;
+    case LOOM_ATTR_SIGNED_ENUM_SET:
+      hash = loom_hash_bytes(&attr->count, sizeof(attr->count), hash);
+      if (attr->count != 0 && attr->signed_enum_set_words != NULL) {
+        hash = loom_hash_bytes(
+            attr->signed_enum_set_words,
+            (iree_host_size_t)attr->count * 2 * sizeof(uint64_t), hash);
       }
       break;
     case LOOM_ATTR_PREDICATE_LIST:

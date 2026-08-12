@@ -959,6 +959,26 @@ static iree_status_t loom_ir_remap_attribute_impl(
       return iree_ok_status();
     }
 
+    case LOOM_ATTR_SIGNED_ENUM_SET: {
+      if (source_attr.count == 0) {
+        out_target_attr->signed_enum_set_words = NULL;
+        return iree_ok_status();
+      }
+      if (!source_attr.signed_enum_set_words) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "non-empty signed enum-set attribute has a NULL payload");
+      }
+      uint64_t* target_words = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          payload_arena, (iree_host_size_t)source_attr.count * 2,
+          sizeof(*target_words), (void**)&target_words));
+      memcpy(target_words, source_attr.signed_enum_set_words,
+             (iree_host_size_t)source_attr.count * 2 * sizeof(*target_words));
+      out_target_attr->signed_enum_set_words = target_words;
+      return iree_ok_status();
+    }
+
     case LOOM_ATTR_BYTES: {
       const uint32_t byte_length = source_attr.reserved_1;
       if (byte_length == 0) {

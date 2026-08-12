@@ -522,7 +522,7 @@ class PacketPlanFixture {
     loom_low_resolved_target_t resolved_target = {};
     AbortOnError(loom_low_resolve_function_target(
         module_, &symbol_facts, low_function,
-        /*effective_target_facts=*/nullptr, &target_registry_.registry,
+        /*function_target_facts=*/nullptr, &target_registry_.registry,
         /*emitter=*/{}, &resolved_target));
     if (resolved_target.descriptor_set == nullptr) {
       std::abort();

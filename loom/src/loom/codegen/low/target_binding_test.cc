@@ -134,14 +134,14 @@ class LowTargetBindingTest : public ::testing::Test {
       const loom_module_t* module, const loom_func_symbol_facts_t* function,
       const loom_target_symbol_facts_t* target) {
     bool valid = false;
-    const loom_target_facts_t* effective_facts = nullptr;
+    const loom_target_facts_t* function_target_facts = nullptr;
     IREE_CHECK_OK(loom_target_function_contract_refine_facts(
         module, function, target->name, target->projection,
         iree_diagnostic_emitter_t{}, &analysis_arena_, &valid,
-        &effective_facts));
+        &function_target_facts));
     IREE_ASSERT(valid);
-    IREE_ASSERT(effective_facts != nullptr);
-    return effective_facts;
+    IREE_ASSERT(function_target_facts != nullptr);
+    return function_target_facts;
   }
 
   // Block pool shared by parser, module allocation, and analysis storage.
@@ -150,7 +150,7 @@ class LowTargetBindingTest : public ::testing::Test {
   // Context containing the target-aware dialects used by the fixtures.
   loom_context_t context_;
 
-  // Arena retaining symbol facts and effective target refinements.
+  // Arena retaining symbol facts and function target refinements.
   iree_arena_allocator_t analysis_arena_;
 
   // Dense symbol facts for each parsed test module.
@@ -177,7 +177,7 @@ low.func.def target<test.low.core>(@target) @kernel() {
   IREE_ASSERT_OK(loom_low_resolve_function_target(
       module.get(), &symbol_facts_,
       LookupFunctionOp(module.get(), IREE_SV("kernel")),
-      /*effective_target_facts=*/nullptr, &registry_,
+      /*function_target_facts=*/nullptr, &registry_,
       iree_diagnostic_emitter_t{}, &target));
 
   ASSERT_NE(target.target_facts, nullptr);
@@ -199,7 +199,7 @@ low.func.def target<test.low.core>(@target) @kernel() {
   EXPECT_EQ(loom_low_resolved_target_bundle(&copied_target), bundle);
 }
 
-TEST_F(LowTargetBindingTest, EffectiveFactsOverrideAuthoredTarget) {
+TEST_F(LowTargetBindingTest, FunctionTargetFactsOverrideAuthoredTarget) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @generic {
   contract_feature_bits = 1,
@@ -244,7 +244,7 @@ low.func.def target<test.low.core>(@generic) @kernel() {
   loom_low_resolved_target_t authored_target = {};
   IREE_ASSERT_OK(loom_low_resolve_function_target(
       module.get(), &symbol_facts_, function_op,
-      /*effective_target_facts=*/nullptr, &registry_,
+      /*function_target_facts=*/nullptr, &registry_,
       iree_diagnostic_emitter_t{}, &authored_target));
   EXPECT_NE(authored_target.target_facts, exact_facts);
   EXPECT_TRUE(
@@ -255,7 +255,7 @@ low.func.def target<test.low.core>(@generic) @kernel() {
             32u);
 }
 
-TEST_F(LowTargetBindingTest, EffectiveFactsBindTargetlessFunction) {
+TEST_F(LowTargetBindingTest, FunctionTargetFactsBindTargetlessFunction) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @exact {
   contract_feature_bits = 7,
@@ -296,7 +296,7 @@ low.func.def target<test.low.core> @portable() {
   IREE_ASSERT_OK(loom_low_resolve_function_target(
       module.get(), &symbol_facts_,
       LookupFunctionOp(module.get(), IREE_SV("portable")),
-      /*effective_target_facts=*/nullptr, &registry_,
+      /*function_target_facts=*/nullptr, &registry_,
       iree_diagnostic_emitter_t{}, &target));
 
   EXPECT_EQ(target.target_facts, nullptr);
@@ -321,7 +321,7 @@ low.func.def target<test.low.core>(@target) @kernel() {
   IREE_ASSERT_OK(loom_low_resolve_function_target(
       module.get(), &symbol_facts_,
       LookupFunctionOp(module.get(), IREE_SV("kernel")),
-      /*effective_target_facts=*/nullptr, &empty_registry,
+      /*function_target_facts=*/nullptr, &empty_registry,
       {
           /*.fn=*/CaptureDiagnostic,
           /*.user_data=*/&capture,
@@ -348,7 +348,7 @@ low.func.def target<test.low.core>(@exact) @kernel() {
   IREE_ASSERT_OK(loom_low_resolve_function_target(
       module.get(), &symbol_facts_,
       LookupFunctionOp(module.get(), IREE_SV("kernel")),
-      /*effective_target_facts=*/nullptr, &registry_,
+      /*function_target_facts=*/nullptr, &registry_,
       iree_diagnostic_emitter_t{}, &target));
 
   ASSERT_NE(target.descriptor_set, nullptr);
@@ -372,7 +372,7 @@ low.func.def target<test.low.alt>(@target) @kernel() {
   IREE_ASSERT_OK(loom_low_resolve_function_target(
       module.get(), &symbol_facts_,
       LookupFunctionOp(module.get(), IREE_SV("kernel")),
-      /*effective_target_facts=*/nullptr, &registry_,
+      /*function_target_facts=*/nullptr, &registry_,
       {
           /*.fn=*/CaptureDiagnostic,
           /*.user_data=*/&capture,

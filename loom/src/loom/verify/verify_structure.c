@@ -647,6 +647,85 @@ static void loom_verify_enum_array_attr(
   }
 }
 
+static void loom_verify_signed_enum_set_attr(
+    loom_verify_state_t* state, const loom_op_t* op,
+    const loom_attr_descriptor_t* descriptor, iree_string_view_t name,
+    uint8_t attr_index, loom_attribute_t attr) {
+  if (attr.kind != LOOM_ATTR_SIGNED_ENUM_SET) return;
+  loom_diagnostic_param_t attr_name_param =
+      loom_verify_param_string_for_diagnostic_field(
+          name, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, attr_index);
+  if (attr.count > LOOM_SIGNED_ENUM_SET_MAX_WORD_COUNT) {
+    loom_diagnostic_param_t params[] = {
+        attr_name_param,
+        loom_param_u32(attr.count),
+        loom_param_u32(LOOM_SIGNED_ENUM_SET_MAX_WORD_COUNT),
+    };
+    loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_046, params,
+                                IREE_ARRAYSIZE(params));
+    return;
+  }
+  bool payload_present = attr.signed_enum_set_words != NULL;
+  if ((attr.count != 0) != payload_present) {
+    loom_diagnostic_param_t params[] = {
+        attr_name_param,
+        loom_param_u32(attr.count),
+        loom_param_bool(payload_present),
+    };
+    loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_040, params,
+                                IREE_ARRAYSIZE(params));
+    return;
+  }
+  if (attr.count == 0) return;
+
+  const uint64_t* positive_words = attr.signed_enum_set_words;
+  const uint64_t* negative_words = positive_words + attr.count;
+  for (uint16_t word_index = 0; word_index < attr.count; ++word_index) {
+    const uint64_t contradictions =
+        positive_words[word_index] & negative_words[word_index];
+    const uint64_t assertions =
+        positive_words[word_index] | negative_words[word_index];
+    for (uint8_t bit_index = 0; bit_index < 64; ++bit_index) {
+      const uint64_t bit = UINT64_C(1) << bit_index;
+      const uint32_t enum_value = (uint32_t)word_index * 64 + bit_index;
+      if (iree_any_bit_set(contradictions, bit)) {
+        loom_diagnostic_param_t params[] = {
+            attr_name_param,
+            loom_param_u32(enum_value),
+        };
+        loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_047, params,
+                                    IREE_ARRAYSIZE(params));
+      }
+      if (!iree_any_bit_set(assertions, bit) ||
+          loom_attr_descriptor_has_enum_case(descriptor, (uint8_t)enum_value)) {
+        continue;
+      }
+      loom_diagnostic_param_t params[] = {
+          attr_name_param,
+          loom_param_u32(enum_value),
+      };
+      loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_010, params,
+                                  IREE_ARRAYSIZE(params));
+    }
+  }
+
+  uint16_t canonical_word_count = attr.count;
+  while (canonical_word_count > 0 &&
+         positive_words[canonical_word_count - 1] == 0 &&
+         negative_words[canonical_word_count - 1] == 0) {
+    --canonical_word_count;
+  }
+  if (canonical_word_count != attr.count) {
+    loom_diagnostic_param_t params[] = {
+        attr_name_param,
+        loom_param_u32(attr.count),
+        loom_param_u32(canonical_word_count),
+    };
+    loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_048, params,
+                                IREE_ARRAYSIZE(params));
+  }
+}
+
 static void loom_verify_parameterized_attr(
     loom_verify_state_t* state, const loom_op_t* op,
     const loom_attr_descriptor_t* field_descriptor, iree_string_view_t name,
@@ -765,6 +844,8 @@ static void loom_verify_parameterized_attr(
     }
     loom_verify_enum_array_attr(state, op, parameter_descriptor, parameter_name,
                                 attr_index, parameter);
+    loom_verify_signed_enum_set_attr(state, op, parameter_descriptor,
+                                     parameter_name, attr_index, parameter);
     loom_verify_parameterized_attr(state, op, parameter_descriptor,
                                    parameter_name, attr_index, parameter,
                                    depth + 1);
@@ -923,6 +1004,8 @@ void loom_verify_type_constraints(loom_verify_state_t* state,
       }
       loom_verify_enum_array_attr(state, op, descriptor, attr_name, i,
                                   attrs[i]);
+      loom_verify_signed_enum_set_attr(state, op, descriptor, attr_name, i,
+                                       attrs[i]);
       loom_verify_parameterized_attr(state, op, descriptor, attr_name, i,
                                      attrs[i], /*depth=*/0);
       loom_verify_predicate_list_attr(state, op, attr_name, i, attrs[i]);
@@ -1212,6 +1295,7 @@ static iree_string_view_t loom_verify_encoding_attr_kind_name(
       [LOOM_ATTR_SCOPED_ENUM] = IREE_SVL("scoped enum"),
       [LOOM_ATTR_ANY] = IREE_SVL("attribute"),
       [LOOM_ATTR_ENUM_ARRAY] = IREE_SVL("enum array"),
+      [LOOM_ATTR_SIGNED_ENUM_SET] = IREE_SVL("signed enum set"),
       [LOOM_ATTR_PARAMETERIZED] = IREE_SVL("parameterized attribute"),
   };
   return kind < IREE_ARRAYSIZE(kNames) ? kNames[kind] : IREE_SV("attribute");
@@ -1300,6 +1384,8 @@ static void loom_verify_static_encoding_ref(loom_verify_state_t* state,
           loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_010, params,
                                       IREE_ARRAYSIZE(params));
         }
+        loom_verify_signed_enum_set_attr(state, op, descriptor, parameter_name,
+                                         descriptor_index, parameter->value);
         continue;
       }
       const loom_diagnostic_param_t params[] = {

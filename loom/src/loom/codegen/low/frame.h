@@ -40,7 +40,7 @@ typedef struct loom_low_emission_frame_options_t {
   // Optional borrowed invocation-refined facts for the function. These facts
   // already include the function contract and remain immutable for the build.
   // When omitted, frame construction resolves the target from authored IR.
-  const loom_target_facts_t* effective_target_facts;
+  const loom_target_facts_t* function_target_facts;
   // Optional source-derived memory summaries for the scheduled low function.
   // When empty, frame construction rebuilds the table from durable low.op
   // memory_access attributes.

@@ -179,8 +179,8 @@ static iree_status_t loom_amdgpu_occupancy_check_resolve_residency_model(
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
       request->module, &symbol_facts, low_function,
-      /*effective_target_facts=*/NULL, &request->low_registry->registry,
-      emitter, &target));
+      /*function_target_facts=*/NULL, &request->low_registry->registry, emitter,
+      &target));
   if (target.descriptor_set == NULL) {
     return iree_ok_status();
   }

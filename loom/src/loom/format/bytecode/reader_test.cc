@@ -310,6 +310,33 @@ class ReaderTest : public ::testing::Test {
     return module;
   }
 
+  loom_module_t* CreateSignedEnumSetModule() {
+    loom_module_t* module = CreateModule("reader_signed_enum_set");
+    loom_region_t* body = AddVoidFunction(module, "f");
+    loom_builder_t body_builder;
+    loom_builder_initialize(module, &module->arena,
+                            loom_region_entry_block(body), &body_builder);
+
+    uint64_t required_words[8] = {0};
+    required_words[0] =
+        UINT64_C(1) << LOOM_TEST_SIGNED_ENUM_SET_ATTRS_REQUIRED_FEATURES_LOW;
+    required_words[3] = UINT64_C(1) << 63;
+    required_words[4] =
+        UINT64_C(1) << LOOM_TEST_SIGNED_ENUM_SET_ATTRS_REQUIRED_FEATURES_MIDDLE;
+    loom_op_t* op = nullptr;
+    IREE_CHECK_OK(loom_test_signed_enum_set_attrs_build(
+        &body_builder,
+        LOOM_TEST_SIGNED_ENUM_SET_ATTRS_BUILD_FLAG_HAS_OPTIONAL_FEATURES,
+        loom_make_signed_enum_set(required_words, 4),
+        loom_signed_enum_set_empty(), loom_named_attr_slice_empty(),
+        LOOM_LOCATION_UNKNOWN, &op));
+    loom_op_t* yield_op = nullptr;
+    IREE_CHECK_OK(loom_test_yield_build(&body_builder, /*values=*/nullptr,
+                                        /*value_count=*/0,
+                                        LOOM_LOCATION_UNKNOWN, &yield_op));
+    return module;
+  }
+
   loom_module_t* CreateParameterizedAttrModule() {
     loom_module_t* module = CreateModule("reader_parameterized_attr");
     loom_region_t* body = AddVoidFunction(module, "parameterized");
@@ -1387,6 +1414,11 @@ class ReaderTest : public ::testing::Test {
         *offset += count;
         break;
       }
+      case 16: {  // SIGNED_ENUM_SET.
+        uint8_t word_count = bytes[(*offset)++];
+        *offset += (size_t)word_count * 2 * sizeof(uint64_t);
+        break;
+      }
       default:
         ADD_FAILURE() << "unknown attribute kind in test helper: "
                       << (unsigned)kind;
@@ -1694,7 +1726,7 @@ class ReaderTest : public ::testing::Test {
     return offset;
   }
 
-  BodyOpAttrOffsets FirstBodyOpAttrOffsets(const std::vector<uint8_t>& bytes) {
+  size_t FirstBodyOpFirstAttrKindOffset(const std::vector<uint8_t>& bytes) {
     uint64_t arg_count = 0;
     size_t offset = RootBlockValueListOffset(bytes, &arg_count);
     for (uint64_t i = 0; i < arg_count; ++i) {
@@ -1724,11 +1756,15 @@ class ReaderTest : public ::testing::Test {
       ReadUVarint(bytes, &offset);
     }
 
-    BodyOpAttrOffsets attr_offsets;
     uint64_t attr_count = ReadUVarint(bytes, &offset);
-    EXPECT_EQ(attr_count, 1u);
+    EXPECT_GE(attr_count, 1u);
+    ReadUVarint(bytes, &offset);  // First attribute name ID.
+    return offset;
+  }
 
-    ReadUVarint(bytes, &offset);
+  BodyOpAttrOffsets FirstBodyOpAttrOffsets(const std::vector<uint8_t>& bytes) {
+    size_t offset = FirstBodyOpFirstAttrKindOffset(bytes);
+    BodyOpAttrOffsets attr_offsets;
     attr_offsets.attr_kind = offset;
     uint8_t attr_kind = bytes[offset++];
     EXPECT_EQ(attr_kind, 9u);
@@ -2419,6 +2455,46 @@ TEST_F(ReaderTest, EnumArraysPreserveStableValuesAndOrder) {
   EXPECT_EQ(optional.values[1], 42u);
   EXPECT_EQ(optional.values[2],
             LOOM_TEST_ENUM_ARRAY_ATTRS_OPTIONAL_VALUES_MIDDLE);
+
+  loom_module_free(read_module);
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, SignedEnumSetsPreserveAssertionsAndPresence) {
+  loom_module_t* module = CreateSignedEnumSetModule();
+  auto bytes = WriteModule(module);
+
+  loom_module_t* read_module = nullptr;
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result =
+      ReadModule(bytes, &read_module, &error_ids, /*verify_module=*/true);
+
+  EXPECT_EQ(result.error_count, 0u) << ::testing::PrintToString(error_ids);
+  EXPECT_TRUE(error_ids.empty()) << ::testing::PrintToString(error_ids);
+  ASSERT_NE(read_module, nullptr);
+  ASSERT_EQ(read_module->symbols.count, 1u);
+  loom_op_t* func_op = read_module->symbols.entries[0].defining_op;
+  ASSERT_NE(func_op, nullptr);
+  loom_block_t* entry = loom_region_entry_block(loom_test_func_body(func_op));
+  ASSERT_NE(entry, nullptr);
+  ASSERT_EQ(entry->op_count, 2u);
+  loom_op_t* op = loom_block_op(entry, 0);
+  ASSERT_TRUE(loom_test_signed_enum_set_attrs_isa(op));
+
+  loom_signed_enum_set_t required =
+      loom_test_signed_enum_set_attrs_required_features(op);
+  EXPECT_TRUE(loom_signed_enum_set_contains_positive(
+      required, LOOM_TEST_SIGNED_ENUM_SET_ATTRS_REQUIRED_FEATURES_LOW));
+  EXPECT_TRUE(loom_signed_enum_set_contains_positive(
+      required, LOOM_TEST_SIGNED_ENUM_SET_ATTRS_REQUIRED_FEATURES_HIGH));
+  EXPECT_TRUE(loom_signed_enum_set_contains_negative(
+      required, LOOM_TEST_SIGNED_ENUM_SET_ATTRS_REQUIRED_FEATURES_MIDDLE));
+  EXPECT_EQ(required.word_count, 4u);
+  EXPECT_FALSE(loom_attr_is_absent(loom_op_attrs(op)[1]));
+  loom_signed_enum_set_t optional =
+      loom_test_signed_enum_set_attrs_optional_features(op);
+  EXPECT_EQ(optional.word_count, 0u);
+  EXPECT_EQ(optional.words, nullptr);
 
   loom_module_free(read_module);
   loom_module_free(module);
@@ -3237,6 +3313,75 @@ TEST_F(ReaderTest, RejectsEnumArrayNestedInGenericDictionary) {
   BodyOpAttrOffsets attr_offsets = FirstBodyOpAttrOffsets(bytes);
   bytes[attr_offsets.nested_dict_first_value_kind] =
       LOOM_BYTECODE_ATTR_ENUM_ARRAY;
+
+  ExpectReadModuleError(bytes, "ERR_BYTECODE_006");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsSignedEnumSetForNonSignedEnumSetField) {
+  loom_module_t* module = CreateAttributeFunctionModule();
+  auto bytes = WriteModule(module);
+  BodyOpAttrOffsets attr_offsets = FirstBodyOpAttrOffsets(bytes);
+  bytes[attr_offsets.attr_kind] = LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET;
+
+  ExpectReadModuleError(bytes, "ERR_BYTECODE_006");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsSignedEnumSetWithExcessWordCount) {
+  loom_module_t* module = CreateSignedEnumSetModule();
+  auto bytes = WriteModule(module);
+  size_t attr_kind_offset = FirstBodyOpFirstAttrKindOffset(bytes);
+  ASSERT_EQ(bytes[attr_kind_offset], LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET);
+  ASSERT_EQ(bytes[attr_kind_offset + 1], 4u);
+  bytes[attr_kind_offset + 1] = 5;
+
+  ExpectReadModuleError(bytes, "ERR_BYTECODE_009");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsSignedEnumSetWithContradictoryAssertion) {
+  loom_module_t* module = CreateSignedEnumSetModule();
+  auto bytes = WriteModule(module);
+  size_t attr_kind_offset = FirstBodyOpFirstAttrKindOffset(bytes);
+  ASSERT_EQ(bytes[attr_kind_offset], LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET);
+  const size_t positive_word_offset = attr_kind_offset + 2;
+  const size_t negative_word_offset =
+      positive_word_offset + 4 * sizeof(uint64_t);
+  WriteU64LE(&bytes, negative_word_offset,
+             ReadU64LE(bytes, negative_word_offset) |
+                 ReadU64LE(bytes, positive_word_offset));
+
+  ExpectReadModuleError(bytes, "ERR_BYTECODE_006");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsSignedEnumSetWithTrailingZeroPair) {
+  loom_module_t* module = CreateSignedEnumSetModule();
+  auto bytes = WriteModule(module);
+  size_t attr_kind_offset = FirstBodyOpFirstAttrKindOffset(bytes);
+  ASSERT_EQ(bytes[attr_kind_offset], LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET);
+  const size_t positive_word_offset = attr_kind_offset + 2;
+  ASSERT_NE(ReadU64LE(bytes, positive_word_offset + 3 * sizeof(uint64_t)), 0u);
+  WriteU64LE(&bytes, positive_word_offset + 3 * sizeof(uint64_t), 0);
+
+  ExpectReadModuleError(bytes, "ERR_BYTECODE_006");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsSignedEnumSetWithUndeclaredStableValue) {
+  loom_module_t* module = CreateSignedEnumSetModule();
+  auto bytes = WriteModule(module);
+  size_t attr_kind_offset = FirstBodyOpFirstAttrKindOffset(bytes);
+  ASSERT_EQ(bytes[attr_kind_offset], LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET);
+  const size_t positive_word_offset = attr_kind_offset + 2;
+  WriteU64LE(&bytes, positive_word_offset,
+             ReadU64LE(bytes, positive_word_offset) | (UINT64_C(1) << 2));
 
   ExpectReadModuleError(bytes, "ERR_BYTECODE_006");
 

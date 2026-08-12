@@ -66,6 +66,7 @@ from loom.dsl import (
     ATTR_TYPE_I64_ARRAY,
     ATTR_TYPE_PARAMETERIZED,
     ATTR_TYPE_PARAMETERIZED_ARRAY,
+    ATTR_TYPE_SIGNED_ENUM_SET,
     ATTR_TYPE_SYMBOL,
     BY_REFERENCE,
     CONSTANT_LIKE,
@@ -205,7 +206,7 @@ _ArrayElement = EnumDef(
         EnumCase("middle", 7, doc="Sparse middle value."),
         EnumCase("high", 255, doc="Maximum stable byte value."),
     ],
-    doc="Synthetic sparse enum for enum-array lifecycle coverage.",
+    doc="Synthetic sparse enum for descriptor-backed aggregate coverage.",
 )
 
 _ParameterizedMode = EnumDef(
@@ -305,11 +306,27 @@ test_node_attr = ParameterizedAttrDef(
     doc="Recursive open-family parameterized-array witness.",
 )
 
+test_feature_set_attr = ParameterizedAttrDef(
+    "test.feature_set",
+    group=test_ops,
+    parameters=[
+        AttrDef(
+            "features",
+            ATTR_TYPE_SIGNED_ENUM_SET,
+            enum_def=_ArrayElement,
+            doc="Explicitly enabled and disabled synthetic features.",
+        ),
+    ],
+    primary_parameter="features",
+    doc="Signed enum-set parameter lifecycle witness.",
+)
+
 ALL_TEST_PARAMETERIZED_ATTRS = (
     test_tile_attr,
     test_options_attr,
     test_compact_attr,
     test_node_attr,
+    test_feature_set_attr,
 )
 
 test_scope_type = TypeDef(
@@ -2237,6 +2254,43 @@ test_enum_array_attrs = Op(
 )
 
 # ============================================================================
+# test.signed_enum_set_attrs — descriptor-backed signed enum-set attributes
+# ============================================================================
+
+test_signed_enum_set_attrs = Op(
+    "test.signed_enum_set_attrs",
+    group=test_ops,
+    doc="Test op with required and optional signed enum sets.",
+    attrs=[
+        AttrDef(
+            "required_features",
+            ATTR_TYPE_SIGNED_ENUM_SET,
+            enum_def=_ArrayElement,
+            doc="Required positive and negative feature assertions.",
+        ),
+        AttrDef(
+            "optional_features",
+            ATTR_TYPE_SIGNED_ENUM_SET,
+            enum_def=_ArrayElement,
+            optional=True,
+            doc="Optional positive and negative feature assertions.",
+        ),
+        AttrDef("dict", "dict", optional=True),
+    ],
+    format=[
+        Attr("required_features"),
+        OptionalGroup(
+            [kw("using"), Attr("optional_features")],
+            anchor="optional_features",
+        ),
+        AttrDict("dict"),
+    ],
+    examples=[
+        "test.signed_enum_set_attrs [low, -middle, high] using []",
+    ],
+)
+
+# ============================================================================
 # test.operand_dict — op with keyed SSA operand dictionary
 # ============================================================================
 
@@ -2972,6 +3026,7 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_fact_not_subnormal,
     test_fact_cluster_uniform,
     test_enum_array_attrs,
+    test_signed_enum_set_attrs,
     test_parameterized_attr,
     test_compact_parameterized_attr,
     test_parameterized_attr_array,

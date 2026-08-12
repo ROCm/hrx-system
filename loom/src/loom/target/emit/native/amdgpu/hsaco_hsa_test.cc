@@ -33,18 +33,18 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
-#include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/hal/binding_materialization.h"
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
-#include "loom/target/arch/amdgpu/ops/registry.h"
 #include "loom/target/arch/amdgpu/planning/packet_plan.h"
 #include "loom/target/arch/amdgpu/planning/storage_lease.h"
 #include "loom/target/arch/amdgpu/profile.h"
-#include "loom/target/arch/amdgpu/records/target_records.h"
+#include "loom/target/arch/amdgpu/provider.h"
 #include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/kernel_hsaco.h"
+#include "loom/target/function_version.h"
 #include "loom/target/low_descriptor_registry.h"
+#include "loom/target/specialization.h"
 
 namespace loom {
 namespace {
@@ -59,10 +59,10 @@ constexpr uint32_t kAsanConfigByteLength = 96;
 constexpr char kFeedbackConfigGlobalName[] = "iree_feedback_config";
 constexpr uint32_t kFeedbackConfigByteLength = 64;
 
-iree_status_t PrintLowVerifyDiagnostic(
+iree_status_t PrintCompilerDiagnostic(
     void* user_data, const loom_diagnostic_emission_t* emission) {
   (void)user_data;
-  fprintf(stderr, "low verifier diagnostic: %s: %s\n",
+  fprintf(stderr, "compiler diagnostic: %s: %s\n",
           emission->error ? emission->error->error_id : "<unknown>",
           emission->error ? emission->error->summary : "<unknown>");
   for (iree_host_size_t i = 0; i < emission->param_count; ++i) {
@@ -116,57 +116,13 @@ void RegisterDialect(loom_context_t* context, uint8_t dialect_id,
                                                (uint16_t)count));
 }
 
-void InitializeLowKernelContext(loom_context_t* context) {
+void InitializeLowKernelContext(const loom_target_environment_t* environment,
+                                loom_context_t* context) {
   loom_context_initialize(iree_allocator_system(), context);
-  IREE_ASSERT_OK(loom_amdgpu_ops_register_dialect(context));
+  IREE_ASSERT_OK(
+      loom_target_environment_register_context(environment, context));
   RegisterDialect(context, LOOM_DIALECT_LOW, loom_low_dialect_vtables);
   IREE_ASSERT_OK(loom_context_finalize(context));
-}
-
-iree_status_t FormatTargetRecordForProfile(
-    const loom_amdgpu_target_profile_t* profile,
-    std::string* out_target_record) {
-  IREE_ASSERT_ARGUMENT(profile);
-  IREE_ASSERT_ARGUMENT(out_target_record);
-  *out_target_record = {};
-  const loom_amdgpu_target_info_t* target = profile->identity.target;
-  const loom_amdgpu_target_record_info_t* record_info =
-      loom_amdgpu_target_record_info_for_target(target->name);
-  if (record_info == nullptr) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU HSA target '%.*s' has no target record",
-                            (int)target->name.size, target->name.data);
-  }
-  std::string target_record = "amdgpu.target<";
-  target_record.append(record_info->target_name.data,
-                       record_info->target_name.size);
-  target_record += "> @gfx_target";
-  bool has_attrs = false;
-  const auto append_attr = [&](const char* name, iree_string_view_t value) {
-    target_record += has_attrs ? ", " : " {";
-    target_record += name;
-    target_record += " = ";
-    target_record.append(value.data, value.size);
-    has_attrs = true;
-  };
-  const loom_amdgpu_target_feature_state_t sramecc =
-      profile->identity.amdhsa_features.sramecc;
-  if (sramecc == LOOM_AMDGPU_TARGET_FEATURE_OFF ||
-      sramecc == LOOM_AMDGPU_TARGET_FEATURE_ON) {
-    append_attr("sramecc", loom_amdgpu_target_feature_state_attr_name(sramecc));
-  }
-  const loom_amdgpu_target_feature_state_t xnack =
-      profile->identity.amdhsa_features.xnack;
-  if (xnack == LOOM_AMDGPU_TARGET_FEATURE_OFF ||
-      xnack == LOOM_AMDGPU_TARGET_FEATURE_ON) {
-    append_attr("xnack", loom_amdgpu_target_feature_state_attr_name(xnack));
-  }
-  if (has_attrs) {
-    target_record += "}";
-  }
-  target_record += "\n";
-  *out_target_record = std::move(target_record);
-  return iree_ok_status();
 }
 
 struct HsaApi {
@@ -739,8 +695,11 @@ class LowKernelEmitter {
   LowKernelEmitter() {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(),
                                      &block_pool_);
-    InitializeLowKernelContext(&context_);
-    loom_amdgpu_low_descriptor_registry_initialize(&target_registry_);
+    IREE_CHECK_OK(loom_target_environment_initialize(
+        &loom_amdgpu_target_provider_set, &target_environment_));
+    InitializeLowKernelContext(&target_environment_, &context_);
+    IREE_CHECK_OK(loom_target_environment_initialize_low_descriptor_registry(
+        &target_environment_, &target_registry_));
   }
 
   LowKernelEmitter(const LowKernelEmitter&) = delete;
@@ -749,6 +708,7 @@ class LowKernelEmitter {
   ~LowKernelEmitter() {
     ResetModule();
     loom_context_deinitialize(&context_);
+    loom_target_environment_deinitialize(&target_environment_);
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
 
@@ -759,10 +719,7 @@ class LowKernelEmitter {
     IREE_ASSERT_ARGUMENT(out_hsaco);
     IREE_ASSERT_ARGUMENT(arena);
     *out_hsaco = {};
-    std::string source;
-    IREE_RETURN_IF_ERROR(FormatTargetRecordForProfile(target_profile, &source));
-    source += kernel_source;
-    IREE_RETURN_IF_ERROR(ParseSource(source));
+    IREE_RETURN_IF_ERROR(ParseSource(kernel_source));
 
     loom_op_t* low_function = FindFirstLowFunction(module_);
     if (low_function == nullptr) {
@@ -770,13 +727,48 @@ class LowKernelEmitter {
                               "AMDGPU HSA low kernel has no low func");
     }
 
+    const loom_target_specialization_request_t specialization_request = {
+        /*.function_name=*/IREE_SV("loom_kernel"),
+        /*.target_profile=*/&target_profile->base,
+    };
+    loom_target_specialization_result_t specialization_result = {};
+    IREE_RETURN_IF_ERROR(loom_target_specialize_functions(
+        &target_environment_, module_,
+        {
+            /*.values=*/&specialization_request,
+            /*.count=*/1,
+        },
+        {
+            /*.fn=*/PrintCompilerDiagnostic,
+            /*.user_data=*/nullptr,
+        },
+        arena, &specialization_result));
+    if (specialization_result.error_count != 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AMDGPU HSA low kernel target specialization failed");
+    }
+    const loom_function_version_list_t* function_versions =
+        loom_function_version_owner_list(
+            &specialization_result.function_versions);
+    const loom_target_function_version_t* function_version =
+        loom_target_function_version_list_find(
+            function_versions, loom_func_like_cast(module_, low_function));
+    if (function_version == nullptr ||
+        function_version->function_target_facts == nullptr) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "AMDGPU HSA low kernel specialization produced no target facts");
+    }
+    const loom_target_facts_t* function_target_facts =
+        function_version->function_target_facts;
+
     loom_symbol_fact_table_t symbol_facts = {};
     loom_symbol_fact_table_initialize(&symbol_facts, arena);
     loom_low_resolved_target_t target = {};
     IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-        module_, &symbol_facts, low_function,
-        /*effective_target_facts=*/nullptr, &target_registry_.registry,
-        iree_diagnostic_emitter_t{}, &target));
+        module_, &symbol_facts, low_function, function_target_facts,
+        &target_registry_.registry, iree_diagnostic_emitter_t{}, &target));
     const loom_low_descriptor_set_t* descriptor_set = target.descriptor_set;
     if (descriptor_set == nullptr) {
       return iree_make_status(
@@ -791,7 +783,7 @@ class LowKernelEmitter {
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_verify_low(
         module_, low_function, descriptor_set, /*max_errors=*/20,
         iree_diagnostic_emitter_t{
-            /*.fn=*/PrintLowVerifyDiagnostic,
+            /*.fn=*/PrintCompilerDiagnostic,
             /*.user_data=*/nullptr,
         },
         &abi_verify_result, arena));
@@ -803,10 +795,13 @@ class LowKernelEmitter {
 
     loom_low_verify_options_t verify_options = {};
     verify_options.descriptor_registry = &target_registry_.registry;
+    verify_options.function_versions = function_versions;
     verify_options.emitter = {
-        /*.fn=*/PrintLowVerifyDiagnostic,
+        /*.fn=*/PrintCompilerDiagnostic,
         /*.user_data=*/nullptr,
     };
+    verify_options.provider_list =
+        loom_target_environment_low_verify_provider_list(&target_environment_);
     verify_options.max_errors = 20;
     loom_low_verify_result_t verify_result = {};
     loom_low_verify_scratch_t verify_scratch =
@@ -822,6 +817,7 @@ class LowKernelEmitter {
     loom_amdgpu_storage_lease_provider(&storage_lease_provider);
     loom_low_emission_frame_options_t frame_options = {};
     frame_options.descriptor_registry = &target_registry_.registry;
+    frame_options.function_target_facts = function_target_facts;
     frame_options.allocation_fixed_values = abi_verify_result.fixed_values;
     frame_options.allocation_fixed_value_count =
         abi_verify_result.fixed_value_count;
@@ -879,6 +875,8 @@ class LowKernelEmitter {
   iree_arena_block_pool_t block_pool_ = {0};
   // Loom context containing dialect/type registration for parsing and verify.
   loom_context_t context_ = {};
+  // AMDGPU provider environment used by specialization and Low compilation.
+  loom_target_environment_t target_environment_ = {};
   // Parsed module owned by this emitter instance.
   loom_module_t* module_ = nullptr;
   // AMDGPU-only descriptor registry used by low verification.
@@ -900,23 +898,15 @@ iree_status_t PrepareTargetProfileForLowHsaco(
         (int)target.identity.target->name.size,
         target.identity.target->name.data);
   }
-  const loom_amdgpu_target_record_info_t* record_info =
-      loom_amdgpu_target_record_info_for_target(target.identity.target->name);
-  if (record_info == nullptr) {
-    return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "AMDGPU target '%.*s' has no target-low record",
-                            (int)target.identity.target->name.size,
-                            target.identity.target->name.data);
-  }
   return loom_amdgpu_target_profile_initialize(&target.identity,
                                                out_target_profile);
 }
 
-void AppendLowKernelTargetClause(iree_string_view_t representation_contract,
-                                 std::string* source) {
+void AppendLowKernelRepresentationContract(
+    iree_string_view_t representation_contract, std::string* source) {
   source->append("target<");
   source->append(representation_contract.data, representation_contract.size);
-  source->append(">(@gfx_target)");
+  source->append(">");
 }
 
 iree_status_t EmitWorkitemStoreKernelForAmdgpu(const AmdgpuHsaTarget& target,
@@ -930,7 +920,7 @@ iree_status_t EmitWorkitemStoreKernelForAmdgpu(const AmdgpuHsaTarget& target,
   TestArena arena;
   LowKernelEmitter emitter;
   std::string source = "low.kernel.def ";
-  AppendLowKernelTargetClause(
+  AppendLowKernelRepresentationContract(
       target_profile.identity.target->descriptor_set_key, &source);
   source.append(
       " @loom_kernel() {\n"
@@ -967,7 +957,7 @@ iree_status_t EmitB128CopyKernelForAmdgpu(const AmdgpuHsaTarget& target,
   IREE_ASSERT(processor != nullptr);
 
   std::string source = "low.kernel.def ";
-  AppendLowKernelTargetClause(
+  AppendLowKernelRepresentationContract(
       target_profile.identity.target->descriptor_set_key, &source);
   source.append(
       " @loom_kernel() {\n"

@@ -104,6 +104,7 @@ from loom.ir import (
     ScalarType,
     ScalarTypeKind,
     ShapedType,
+    SignedEnumSetAttr,
     StaticDim,
     StorageSpace,
     StorageType,
@@ -271,7 +272,13 @@ def _parse_write_read(
         include_kernel=include_kernel,
         include_low=include_low,
     ).parse(text)
-    return read_module(write_module(module))
+    return read_module(
+        write_module(module),
+        parameterized_attrs=(
+            *ALL_TEST_PARAMETERIZED_ATTRS,
+            *ALL_TARGET_PARAMETERIZED_ATTRS,
+        ),
+    )
 
 
 def _roundtrip_text_through_bytecode(
@@ -1483,6 +1490,30 @@ class TestCrossFormatRoundTrip:
         assert "optional_values" not in body_ops[2].attributes
         assert _roundtrip_text_through_bytecode(text) == text
 
+    def test_signed_enum_sets_survive_bytecode_with_presence(self) -> None:
+        text = (
+            "test.func @signed_enum_sets() {\n"
+            "  test.signed_enum_set_attrs [low, -middle, high] using []\n"
+            "  test.signed_enum_set_attrs [] using [-high]\n"
+            "  test.signed_enum_set_attrs []\n"
+            "  test.yield\n"
+            "}\n"
+        )
+        loaded = _parse_write_read(text)
+        func_op = loaded.symbols[0].op
+        assert func_op is not None
+        body_ops = func_op.regions[0].blocks[0].ops
+        assert body_ops[0].attributes["required_features"] == SignedEnumSetAttr(
+            [1, 255], [7]
+        )
+        assert body_ops[0].attributes["optional_features"] == SignedEnumSetAttr()
+        assert body_ops[1].attributes["required_features"] == SignedEnumSetAttr()
+        assert body_ops[1].attributes["optional_features"] == SignedEnumSetAttr(
+            [], [255]
+        )
+        assert "optional_features" not in body_ops[2].attributes
+        assert _roundtrip_text_through_bytecode(text) == text
+
     def test_parameterized_attrs_survive_bytecode_with_named_slots(self) -> None:
         text = (
             "test.func @parameterized() {\n"
@@ -1521,7 +1552,9 @@ class TestCrossFormatRoundTrip:
             "test.func @parameterized_arrays() {\n"
             "  test.parameterized_attr_array "
             "[#test.tile<width = 8>, #test.options<mode = fast>, "
-            "#test.tile<width = 8>] using [#test.tile<width = 4>]\n"
+            "#test.tile<width = 8>, "
+            "#test.feature_set<[low, -middle, high]>] "
+            "using [#test.tile<width = 4>]\n"
             "  test.parameterized_attr_array [] using []\n"
             "  test.parameterized_attr_array []\n"
             "  test.parameterized_attr "
@@ -1545,8 +1578,10 @@ class TestCrossFormatRoundTrip:
             "test.tile",
             "test.options",
             "test.tile",
+            "test.feature_set",
         )
         assert values.values[0] == values.values[2]
+        assert values.values[3].get("features") == SignedEnumSetAttr([1, 255], [7])
         assert body_ops[0].attributes["tiles"] == ParameterizedAttrArray(
             [test_tile_attr(width=4)]
         )

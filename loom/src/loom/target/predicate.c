@@ -130,7 +130,7 @@ static iree_status_t loom_target_pass_predicate_resolve_facts(
   const loom_target_function_version_t* function_version =
       loom_target_function_version_const_cast(context->function_version);
   if (function_version != NULL) {
-    *out_facts = function_version->effective_target_facts;
+    *out_facts = function_version->function_target_facts;
     *out_valid = true;
     return iree_ok_status();
   }

@@ -58,7 +58,7 @@ typedef struct loom_low_function_model_t {
 //
 // User target-binding failures are emitted through |emitter| and recorded in
 // |out_model->error_count|. Infrastructure failures are returned as status.
-// |effective_target_facts| supplies invocation-refined facts that already
+// |function_target_facts| supplies invocation-refined facts that already
 // include the function contract when non-NULL; otherwise the model resolves
 // facts from the authored target witness. The supplied facts must outlive the
 // model.
@@ -67,7 +67,7 @@ typedef struct loom_low_function_model_t {
 // |arena| must outlive the model and every table derived from it.
 iree_status_t loom_low_function_model_initialize(
     loom_module_t* module, const loom_op_t* low_func_op,
-    const loom_target_facts_t* effective_target_facts,
+    const loom_target_facts_t* function_target_facts,
     const loom_low_descriptor_registry_t* descriptor_registry,
     iree_diagnostic_emitter_t emitter, loom_low_function_model_flags_t flags,
     iree_arena_allocator_t* arena, loom_low_function_model_t* out_model);

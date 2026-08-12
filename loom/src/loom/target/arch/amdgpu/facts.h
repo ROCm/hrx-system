@@ -66,11 +66,11 @@ typedef struct loom_amdgpu_target_facts_t {
   // Compiler-semantic properties resolved from |identity| and |base|.
   loom_amdgpu_target_properties_t properties;
 
-  // True when subgroup_size was explicitly present in the authored target.
-  bool subgroup_size_authored;
+  // True when subgroup_size was supplied as an explicit semantic input.
+  bool subgroup_size_explicit;
 
-  // True when contract_set_key was explicitly present in the authored target.
-  bool contract_set_key_authored;
+  // True when contract_set_key was supplied as an explicit semantic input.
+  bool contract_set_key_explicit;
 } loom_amdgpu_target_facts_t;
 
 // Static fact type used by AMDGPU target projection and structured profiles.

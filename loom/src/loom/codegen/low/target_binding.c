@@ -245,7 +245,7 @@ static iree_status_t loom_low_resolve_function_representation(
 
 static iree_status_t loom_low_resolve_function_target_facts(
     const loom_module_t* module, const loom_op_t* low_func_op,
-    const loom_target_facts_t* effective_target_facts,
+    const loom_target_facts_t* function_target_facts,
     const loom_low_descriptor_set_t* descriptor_set,
     iree_diagnostic_emitter_t emitter, loom_symbol_fact_table_t* fact_table,
     loom_low_resolved_target_t* out_target) {
@@ -264,9 +264,9 @@ static iree_status_t loom_low_resolve_function_target_facts(
         IREE_STATUS_INVALID_ARGUMENT,
         "low function symbol must resolve to func symbol facts");
   }
-  bool contract_valid = effective_target_facts != NULL;
-  if (iree_status_is_ok(status) && effective_target_facts != NULL) {
-    out_target->target_facts = effective_target_facts;
+  bool contract_valid = function_target_facts != NULL;
+  if (iree_status_is_ok(status) && function_target_facts != NULL) {
+    out_target->target_facts = function_target_facts;
   } else if (iree_status_is_ok(status)) {
     status = loom_target_function_contract_resolve_facts(
         module, fact_table, func_facts, emitter, fact_table->arena,
@@ -308,7 +308,7 @@ static iree_status_t loom_low_resolve_function_target_facts(
 iree_status_t loom_low_resolve_function_target(
     const loom_module_t* module, loom_symbol_fact_table_t* fact_table,
     const loom_op_t* low_func_op,
-    const loom_target_facts_t* effective_target_facts,
+    const loom_target_facts_t* function_target_facts,
     const loom_low_descriptor_registry_t* registry,
     iree_diagnostic_emitter_t emitter, loom_low_resolved_target_t* out_target) {
   *out_target = (loom_low_resolved_target_t){0};
@@ -329,16 +329,16 @@ iree_status_t loom_low_resolve_function_target(
     return iree_ok_status();
   }
 
-  if (effective_target_facts == NULL && !loom_symbol_ref_is_valid(target_ref)) {
+  if (function_target_facts == NULL && !loom_symbol_ref_is_valid(target_ref)) {
     out_target->descriptor_set = descriptor_set;
     return iree_ok_status();
   }
 
-  if (effective_target_facts != NULL) {
+  if (function_target_facts != NULL) {
     out_target->target_name =
-        loom_target_facts_identity_name(effective_target_facts);
+        loom_target_facts_identity_name(function_target_facts);
     return loom_low_resolve_function_target_facts(
-        module, low_func_op, effective_target_facts, descriptor_set, emitter,
+        module, low_func_op, function_target_facts, descriptor_set, emitter,
         fact_table, out_target);
   }
 
@@ -353,7 +353,7 @@ iree_status_t loom_low_resolve_function_target(
 
   if (loom_symbol_implements(target_symbol, LOOM_SYMBOL_INTERFACE_TARGET)) {
     return loom_low_resolve_function_target_facts(
-        module, low_func_op, /*effective_target_facts=*/NULL, descriptor_set,
+        module, low_func_op, /*function_target_facts=*/NULL, descriptor_set,
         emitter, fact_table, out_target);
   }
   return loom_low_emit_symbol_kind_mismatch(

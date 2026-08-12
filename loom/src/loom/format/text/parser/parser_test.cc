@@ -927,6 +927,36 @@ TEST_F(ParserTest, EnumArraysRoundTripStableValuesAndPresentEmpty) {
   loom_module_free(module);
 }
 
+TEST_F(ParserTest, SignedEnumSetsRoundTripCanonicalStableValues) {
+  std::string text = RoundTrip(
+      "test.signed_enum_set_attrs [high, -middle, low] using [-high]\n"
+      "test.signed_enum_set_attrs [] using []\n"
+      "test.signed_enum_set_attrs []\n");
+  EXPECT_NE(text.find("test.signed_enum_set_attrs [low, -middle, high] "
+                      "using [-high]"),
+            std::string::npos);
+  EXPECT_NE(text.find("test.signed_enum_set_attrs [] using []"),
+            std::string::npos);
+
+  loom_module_t* module = ParseOk(
+      "test.signed_enum_set_attrs [high, -middle, low] using [-high]\n");
+  ASSERT_NE(module, nullptr);
+  loom_block_t* body = loom_module_block(module);
+  ASSERT_NE(body, nullptr);
+  ASSERT_EQ(body->op_count, 1u);
+  loom_op_t* op = loom_block_op(body, 0);
+  ASSERT_TRUE(loom_test_signed_enum_set_attrs_isa(op));
+  loom_signed_enum_set_t required =
+      loom_test_signed_enum_set_attrs_required_features(op);
+  EXPECT_TRUE(loom_signed_enum_set_contains_positive(required, 1));
+  EXPECT_TRUE(loom_signed_enum_set_contains_negative(required, 7));
+  EXPECT_TRUE(loom_signed_enum_set_contains_positive(required, 255));
+  loom_signed_enum_set_t optional =
+      loom_test_signed_enum_set_attrs_optional_features(op);
+  EXPECT_TRUE(loom_signed_enum_set_contains_negative(optional, 255));
+  loom_module_free(module);
+}
+
 TEST_F(ParserTest, ParameterizedAttrsRoundTripInDeclarationOrder) {
   std::string text = RoundTrip(
       "test.record @target\n"
@@ -1191,6 +1221,13 @@ TEST_F(ParserTest, ClosedEnumArrayRejectsRawValue) {
   ASSERT_EQ(diagnostics.size(), 1u);
   ExpectError(diagnostics[0],
               loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 3));
+}
+
+TEST_F(ParserTest, SignedEnumSetRejectsRepeatedAndUnknownValues) {
+  EXPECT_FALSE(
+      ParseExpectErrors("test.signed_enum_set_attrs [low, -low]\n").empty());
+  EXPECT_FALSE(
+      ParseExpectErrors("test.signed_enum_set_attrs [other]\n").empty());
 }
 
 TEST_F(ParserTest, OpenEnumArrayRejectsValueOutsideByteDomain) {

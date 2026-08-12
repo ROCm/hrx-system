@@ -320,7 +320,7 @@ def _method_imports(
     builder_names = sorted(required_names & {"TiedResultSpec", "ValueRef"})
     if builder_names:
         loom_lines.append(f"from loom.builder import {', '.join(builder_names)}")
-    ir_names = sorted(required_names & {"Block", "Predicate", "Region", "Type"})
+    ir_names = sorted(required_names & {"Block", "Predicate", "Region", "SignedEnumSetAttr", "Type"})
     if ir_names:
         loom_lines.append(f"from loom.ir import {', '.join(ir_names)}")
     loom_lines.extend(extra_loom_imports)
@@ -344,6 +344,7 @@ def _method_import_names(signatures: Sequence[BuilderSignature]) -> set[str]:
             "Predicate",
             "Region",
             "Sequence",
+            "SignedEnumSetAttr",
             "TiedResultSpec",
             "Type",
             "ValueRef",

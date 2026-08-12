@@ -8,14 +8,18 @@
 
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "iree/testing/gtest.h"
 #include "loomc/artifact.h"
 #include "loomc/artifact_manifest.h"
 #include "loomc/compile.h"
+#include "loomc/compile_report.h"
 #include "loomc/context.h"
 #include "loomc/emit.h"
 #include "loomc/launch_config.h"
+#include "loomc/link.h"
+#include "loomc/link_index.h"
 #include "loomc/module.h"
 #include "loomc/pass.h"
 #include "loomc/result.h"
@@ -33,6 +37,10 @@ using CompilerPtr = HandlePtr<loomc_compiler_t, loomc_compiler_release>;
 using ContextPtr = HandlePtr<loomc_context_t, loomc_context_release>;
 using LaunchConfigProgramPtr = HandlePtr<loomc_launch_config_program_t,
                                          loomc_launch_config_program_release>;
+using LinkIndexBuilderPtr =
+    HandlePtr<loomc_link_index_builder_t, loomc_link_index_builder_release>;
+using LinkIndexPtr = HandlePtr<loomc_link_index_t, loomc_link_index_release>;
+using LinkerPtr = HandlePtr<loomc_linker_t, loomc_linker_release>;
 using ModulePtr = HandlePtr<loomc_module_t, loomc_module_release>;
 using PassProgramPtr =
     HandlePtr<loomc_pass_program_t, loomc_pass_program_release>;
@@ -109,14 +117,15 @@ CompilerPtr CreateCompiler(loomc_context_t* context) {
   return CompilerPtr(compiler);
 }
 
-SourcePtr CreateTextSource(const char* identifier, const char* contents) {
+SourcePtr CreateSource(loomc_source_format_t format, const char* identifier,
+                       const void* contents, size_t contents_length) {
   loomc_source_options_t options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
       /*.structure_size=*/sizeof(options),
       /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
+      /*.format=*/format,
       /*.identifier=*/loomc_make_cstring_view(identifier),
-      /*.contents=*/loomc_make_byte_span(contents, strlen(contents)),
+      /*.contents=*/loomc_make_byte_span(contents, contents_length),
       /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
   };
   loomc_source_t* source = nullptr;
@@ -124,6 +133,11 @@ SourcePtr CreateTextSource(const char* identifier, const char* contents) {
       loomc_source_create(&options, loomc_allocator_system(), &source);
   LOOMC_EXPECT_OK(status);
   return SourcePtr(source);
+}
+
+SourcePtr CreateTextSource(const char* identifier, const char* contents) {
+  return CreateSource(LOOMC_SOURCE_FORMAT_TEXT, identifier, contents,
+                      strlen(contents));
 }
 
 const loomc_artifact_t* FindArtifact(const loomc_result_t* result,
@@ -153,23 +167,78 @@ ModulePtr DeserializeModule(loomc_context_t* context,
   return ModulePtr(module);
 }
 
-std::string SerializeModuleToText(const loomc_module_t* module) {
+SourcePtr SerializeModule(const loomc_module_t* module,
+                          loomc_source_format_t format) {
   loomc_module_serialize_options_t options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
       /*.structure_size=*/sizeof(options),
       /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("compiled.loom"),
+      /*.format=*/format,
+      /*.identifier=*/format == LOOMC_SOURCE_FORMAT_BYTECODE
+          ? loomc_make_cstring_view("compiled.loombc")
+          : loomc_make_cstring_view("compiled.loom"),
   };
   loomc_source_t* source = nullptr;
   loomc_status_t status = loomc_module_serialize_to_source(
       module, &options, loomc_allocator_system(), &source);
   LOOMC_EXPECT_OK(status);
-  if (!loomc_status_is_ok(status)) {
-    return std::string();
-  }
-  SourcePtr source_ptr(source);
-  return ToString(loomc_source_contents(source_ptr.get()));
+  return SourcePtr(source);
+}
+
+std::string SerializeModuleToText(const loomc_module_t* module) {
+  SourcePtr source = SerializeModule(module, LOOMC_SOURCE_FORMAT_TEXT);
+  return source ? ToString(loomc_source_contents(source.get())) : std::string();
+}
+
+LinkIndexPtr CreateLinkIndex(loomc_context_t* context, loomc_source_t* source) {
+  loomc_link_index_builder_t* raw_builder = nullptr;
+  LOOMC_EXPECT_OK(loomc_link_index_builder_create(
+      context, nullptr, loomc_allocator_system(), &raw_builder));
+  LinkIndexBuilderPtr builder(raw_builder);
+  const loomc_link_index_source_options_t source_options = {
+      /*.provider_name=*/loomc_make_cstring_view("sealed-replay"),
+      /*.role=*/LOOMC_LINK_PROVIDER_ROLE_INPUT,
+  };
+  LOOMC_EXPECT_OK(loomc_link_index_builder_add_source(
+      builder.get(), source, &source_options, nullptr));
+
+  loomc_link_index_t* raw_index = nullptr;
+  loomc_result_t* raw_index_result = nullptr;
+  LOOMC_EXPECT_OK(loomc_link_index_builder_finish(builder.get(), &raw_index,
+                                                  &raw_index_result));
+  LinkIndexPtr index(raw_index);
+  ResultPtr index_result(raw_index_result);
+  ExpectSucceededResult(index_result.get());
+  return index;
+}
+
+LinkerPtr CreateLinker(loomc_context_t* context) {
+  loomc_linker_t* raw_linker = nullptr;
+  LOOMC_EXPECT_OK(loomc_linker_create(context, nullptr,
+                                      loomc_allocator_system(), &raw_linker));
+  return LinkerPtr(raw_linker);
+}
+
+ModulePtr LinkModule(loomc_linker_t* linker, loomc_workspace_t* workspace,
+                     loomc_link_index_t* index,
+                     const loomc_string_view_t* root_symbols = nullptr,
+                     loomc_host_size_t root_symbol_count = 0) {
+  const loomc_link_options_t link_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
+      /*.structure_size=*/sizeof(link_options),
+      /*.next=*/nullptr,
+      /*.link_index=*/index,
+      /*.module_name=*/loomc_make_cstring_view("sealed_replay"),
+      /*.root_symbols=*/root_symbols,
+      /*.root_symbol_count=*/root_symbol_count,
+  };
+  loomc_module_t* raw_module = nullptr;
+  loomc_result_t* raw_link_result = nullptr;
+  LOOMC_EXPECT_OK(loomc_link_module(linker, workspace, &link_options,
+                                    &raw_module, &raw_link_result));
+  ResultPtr link_result(raw_link_result);
+  ExpectSucceededResult(link_result.get());
+  return ModulePtr(raw_module);
 }
 
 PassProgramPtr CreatePreparedLowPassProgram(loomc_context_t* context) {
@@ -209,7 +278,8 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@gfx_target) workgroup_size(64,
 }
 
 TargetProfilePtr CreateTargetProfile(
-    loomc_target_environment_t* target_environment, const char* target) {
+    loomc_target_environment_t* target_environment, const char* target,
+    loomc_amdgpu_amdhsa_feature_states_t amdhsa_features = {}) {
   loomc_amdgpu_profile_options_t profile_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
       /*.structure_size=*/sizeof(profile_options),
@@ -218,6 +288,7 @@ TargetProfilePtr CreateTargetProfile(
       /*.identity=*/
       {
           /*.target=*/loomc_make_cstring_view(target),
+          /*.amdhsa_features=*/amdhsa_features,
       },
   };
   loomc_target_profile_t* profile = nullptr;
@@ -397,11 +468,22 @@ ResultPtr EmitModule(loomc_target_environment_t* target_environment,
                      loomc_workspace_t* workspace, loomc_module_t* module,
                      loomc_amdgpu_runtime_global_flags_t runtime_globals,
                      loomc_artifact_manifest_mode_t artifact_manifest_mode =
-                         LOOMC_ARTIFACT_MANIFEST_MODE_NONE) {
+                         LOOMC_ARTIFACT_MANIFEST_MODE_NONE,
+                     loomc_compile_report_mode_t compile_report_mode =
+                         LOOMC_COMPILE_REPORT_MODE_NONE) {
+  loomc_compile_report_options_t compile_report_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
+      /*.structure_size=*/sizeof(compile_report_options),
+      /*.next=*/nullptr,
+      /*.mode=*/compile_report_mode,
+      /*.identifier=*/loomc_string_view_empty(),
+  };
   loomc_artifact_manifest_options_t artifact_manifest_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS,
       /*.structure_size=*/sizeof(artifact_manifest_options),
-      /*.next=*/nullptr,
+      /*.next=*/compile_report_mode != LOOMC_COMPILE_REPORT_MODE_NONE
+          ? &compile_report_options
+          : nullptr,
       /*.mode=*/artifact_manifest_mode,
       /*.identifier=*/loomc_string_view_empty(),
   };
@@ -409,7 +491,9 @@ ResultPtr EmitModule(loomc_target_environment_t* target_environment,
       /*.type=*/LOOMC_STRUCTURE_TYPE_AMDGPU_EMIT_OPTIONS,
       /*.structure_size=*/sizeof(amdgpu_options),
       /*.next=*/artifact_manifest_mode != LOOMC_ARTIFACT_MANIFEST_MODE_NONE
-          ? &artifact_manifest_options
+          ? static_cast<const void*>(&artifact_manifest_options)
+      : compile_report_mode != LOOMC_COMPILE_REPORT_MODE_NONE
+          ? static_cast<const void*>(&compile_report_options)
           : nullptr,
       /*.runtime_globals=*/runtime_globals,
   };
@@ -428,6 +512,78 @@ ResultPtr EmitModule(loomc_target_environment_t* target_environment,
                         loomc_allocator_system(), &result);
   LOOMC_EXPECT_OK(status);
   return ResultPtr(result);
+}
+
+void ExpectReplayEmission(const loomc_result_t* result, const char* selector,
+                          const char* code_object_target,
+                          const char* feature_list = nullptr) {
+  ExpectSucceededResult(result);
+
+  const loomc_artifact_t* hsaco =
+      FindArtifact(result, LOOMC_ARTIFACT_KIND_EXECUTABLE,
+                   LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO);
+  ASSERT_NE(hsaco, nullptr);
+  static constexpr uint8_t kElfMagic[] = {0x7F, 'E', 'L', 'F'};
+  ASSERT_GE(hsaco->contents.data_length, sizeof(kElfMagic));
+  EXPECT_EQ(std::memcmp(hsaco->contents.data, kElfMagic, sizeof(kElfMagic)), 0);
+  EXPECT_NE(ToString(hsaco->contents).find(code_object_target),
+            std::string::npos);
+
+  const loomc_artifact_t* manifest =
+      FindArtifact(result, LOOMC_ARTIFACT_KIND_REPORT,
+                   LOOMC_ARTIFACT_FORMAT_ARTIFACT_MANIFEST_JSON);
+  ASSERT_NE(manifest, nullptr);
+  const std::string manifest_text = ToString(manifest->contents);
+  EXPECT_NE(
+      manifest_text.find(std::string("\"selector\":\"") + selector + "\""),
+      std::string::npos)
+      << manifest_text;
+  EXPECT_NE(
+      manifest_text.find(std::string("\"processor\":\"") + selector + "\""),
+      std::string::npos)
+      << manifest_text;
+  EXPECT_NE(manifest_text.find(std::string("\"code_object_target\":\"") +
+                               code_object_target + "\""),
+            std::string::npos)
+      << manifest_text;
+  if (feature_list != nullptr) {
+    EXPECT_NE(manifest_text.find(std::string("\"features\":") + feature_list),
+              std::string::npos)
+        << manifest_text;
+  }
+
+  const loomc_artifact_t* report =
+      FindArtifact(result, LOOMC_ARTIFACT_KIND_REPORT,
+                   LOOMC_ARTIFACT_FORMAT_COMPILE_REPORT_JSON);
+  ASSERT_NE(report, nullptr);
+  const std::string report_text = ToString(report->contents);
+  EXPECT_NE(
+      report_text.find(std::string("\"namespace\":\"amdgpu\",\"key\":"
+                                   "\"processor\",\"value_kind\":\"string\","
+                                   "\"value_string\":\"") +
+                       selector + "\""),
+      std::string::npos)
+      << report_text;
+}
+
+void ExpectSelectivelyLinkedTarget(const loomc_module_t* module,
+                                   const char* target_definition,
+                                   const char* representation_contract,
+                                   const char* root_symbol,
+                                   const char* specialized_constant,
+                                   const char* excluded_root_symbol) {
+  const std::string module_text = SerializeModuleToText(module);
+  EXPECT_NE(module_text.find(target_definition), std::string::npos)
+      << module_text;
+  EXPECT_NE(module_text.find(representation_contract), std::string::npos)
+      << module_text;
+  EXPECT_NE(module_text.find(root_symbol), std::string::npos) << module_text;
+  EXPECT_NE(module_text.find(specialized_constant), std::string::npos)
+      << module_text;
+  EXPECT_EQ(module_text.find(excluded_root_symbol), std::string::npos)
+      << module_text;
+  EXPECT_EQ(module_text.find("target.subgroup.size"), std::string::npos)
+      << module_text;
 }
 
 TEST(AmdgpuTargetTest,
@@ -728,15 +884,16 @@ kernel.def target(@gfx11_generic) @configured_store() {
   EXPECT_NE(module_text.find("amdgpu.target<gfx11-generic> @gfx11_generic"),
             std::string::npos)
       << module_text;
-  EXPECT_NE(module_text.find(
-                "low.kernel.def target<amdgpu.rdna3_5.core>(@gfx11_generic)"),
+  EXPECT_NE(module_text.find("low.kernel.def target<amdgpu.rdna3_5.core>"
+                             "(@__loom_sealed_target_0)"),
             std::string::npos)
       << module_text;
   EXPECT_EQ(
       module_text.find("low.kernel.def target<amdgpu.gfx11.generic.core>"),
       std::string::npos)
       << module_text;
-  EXPECT_EQ(module_text.find("amdgpu.target<gfx1151>"), std::string::npos)
+  EXPECT_NE(module_text.find("amdgpu.target<gfx1151> @__loom_sealed_target_0"),
+            std::string::npos)
       << module_text;
   EXPECT_NE(module_text.find("@configured_store("), std::string::npos)
       << module_text;
@@ -863,19 +1020,27 @@ kernel.def @wave64_root() {
   const std::string module_text = ToString(text_artifact->contents);
 
   const size_t wave32_leaf = module_text.find(
-      "low.func.def target<amdgpu.rdna3_5.core> @read_subgroup_size()");
+      "low.func.def target<amdgpu.rdna3_5.core>"
+      "(@__loom_sealed_target_0) @read_subgroup_size()");
   const size_t wave64_leaf = module_text.find(
-      "low.func.def target<amdgpu.cdna3.core> "
+      "low.func.def target<amdgpu.cdna3.core>"
+      "(@__loom_sealed_target_1) "
       "@read_subgroup_size_spec0()");
   const size_t wave32_forward = module_text.find(
-      "low.func.def target<amdgpu.rdna3_5.core> @forward_subgroup_size()");
+      "low.func.def target<amdgpu.rdna3_5.core>"
+      "(@__loom_sealed_target_0) @forward_subgroup_size()");
   const size_t wave64_forward = module_text.find(
-      "low.func.def target<amdgpu.cdna3.core> "
+      "low.func.def target<amdgpu.cdna3.core>"
+      "(@__loom_sealed_target_1) "
       "@forward_subgroup_size_spec0()");
   const size_t wave32_root = module_text.find(
-      "low.kernel.def target<amdgpu.rdna3_5.core>", wave64_forward);
-  const size_t wave64_root =
-      module_text.find("low.kernel.def target<amdgpu.cdna3.core>", wave32_root);
+      "low.kernel.def target<amdgpu.rdna3_5.core>"
+      "(@__loom_sealed_target_0)",
+      wave64_forward);
+  const size_t wave64_root = module_text.find(
+      "low.kernel.def target<amdgpu.cdna3.core>"
+      "(@__loom_sealed_target_1)",
+      wave32_root);
   ASSERT_NE(wave32_leaf, std::string::npos) << module_text;
   ASSERT_NE(wave64_leaf, std::string::npos) << module_text;
   ASSERT_NE(wave32_forward, std::string::npos) << module_text;
@@ -907,8 +1072,284 @@ kernel.def @wave64_root() {
   EXPECT_NE(wave64_forward_call, std::string::npos) << module_text;
   EXPECT_EQ(module_text.find("target.subgroup.size"), std::string::npos)
       << module_text;
-  EXPECT_EQ(module_text.find("amdgpu.target"), std::string::npos)
+  EXPECT_NE(module_text.find("amdgpu.target<gfx1151>"), std::string::npos)
       << module_text;
+  EXPECT_NE(module_text.find("amdgpu.target<gfx942>"), std::string::npos)
+      << module_text;
+  EXPECT_EQ(SerializeModuleToText(module.get()), module_text);
+
+  WorkspacePtr clone_workspace = CreateWorkspace();
+  loomc_module_t* raw_clone = nullptr;
+  LOOMC_ASSERT_OK(loomc_module_clone(module.get(), clone_workspace.get(),
+                                     loomc_allocator_system(), &raw_clone));
+  ModulePtr clone(raw_clone);
+  EXPECT_EQ(SerializeModuleToText(clone.get()), module_text);
+
+  SourcePtr bytecode =
+      SerializeModule(module.get(), LOOMC_SOURCE_FORMAT_BYTECODE);
+  WorkspacePtr round_trip_workspace = CreateWorkspace();
+  ModulePtr round_trip = DeserializeModule(
+      context.get(), round_trip_workspace.get(), bytecode.get());
+  const std::string round_trip_text = SerializeModuleToText(round_trip.get());
+  EXPECT_NE(round_trip_text.find("amdgpu.target<gfx1151>"), std::string::npos)
+      << round_trip_text;
+  EXPECT_NE(round_trip_text.find("amdgpu.target<gfx942>"), std::string::npos)
+      << round_trip_text;
+  EXPECT_NE(round_trip_text.find(
+                "target<amdgpu.rdna3_5.core>(@__loom_sealed_target_0)"),
+            std::string::npos)
+      << round_trip_text;
+  EXPECT_NE(round_trip_text.find(
+                "target<amdgpu.cdna3.core>(@__loom_sealed_target_1)"),
+            std::string::npos)
+      << round_trip_text;
+  EXPECT_EQ(round_trip_text.find("target.subgroup.size"), std::string::npos)
+      << round_trip_text;
+}
+
+TEST(AmdgpuTargetTest, CompiledTargetsSurviveFreshContextLinkingAndEmission) {
+  TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
+  ContextPtr context = CreateAmdgpuContext(target_environment.get());
+  WorkspacePtr workspace = CreateWorkspace();
+  CompilerPtr compiler = CreateCompiler(context.get());
+  PassProgramPtr pass_program = CreatePreparedLowPassProgram(context.get());
+  TargetProfilePtr wave32_profile =
+      CreateTargetProfile(target_environment.get(), "gfx1151");
+  TargetProfilePtr wave64_profile =
+      CreateTargetProfile(target_environment.get(), "gfx942",
+                          {
+                              /*.sramecc=*/LOOMC_AMDGPU_TARGET_FEATURE_ON,
+                              /*.xnack=*/LOOMC_AMDGPU_TARGET_FEATURE_OFF,
+                          });
+  SourcePtr source = CreateTextSource("sealed_replay.loom", R"(
+amdgpu.target<gfx11-generic> @wave32_requirement {subgroup_size = 32}
+
+kernel.def target(@wave32_requirement) @wave32_root() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%output: buffer) {
+  %size = target.subgroup.size : index
+  %size_i32 = index.cast %size : index to i32
+  %zero_offset = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %global = buffer.assume.memory_space<global> %output : buffer
+  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32>
+  view.store %size_i32, %view[%zero_index] : i32, view<1xi32>
+  kernel.return
+}
+
+kernel.def @wave64_root() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%output: buffer) {
+  %size = target.subgroup.size : index
+  %size_i32 = index.cast %size : index to i32
+  %zero_offset = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %global = buffer.assume.memory_space<global> %output : buffer
+  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32>
+  view.store %size_i32, %view[%zero_index] : i32, view<1xi32>
+  kernel.return
+}
+)");
+  ModulePtr module =
+      DeserializeModule(context.get(), workspace.get(), source.get());
+  const loomc_target_specialization_t specializations[] = {
+      {
+          /*.function_symbol=*/loomc_make_cstring_view("wave32_root"),
+          /*.target_profile=*/wave32_profile.get(),
+      },
+      {
+          /*.function_symbol=*/loomc_make_cstring_view("wave64_root"),
+          /*.target_profile=*/wave64_profile.get(),
+      },
+  };
+  const loomc_target_specialization_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      /*.structure_size=*/sizeof(target_options),
+      /*.next=*/nullptr,
+      /*.specializations=*/specializations,
+      /*.specialization_count=*/IREE_ARRAYSIZE(specializations),
+  };
+  const loomc_compile_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/&target_options,
+      /*.module_name=*/loomc_make_cstring_view("sealed_replay"),
+      /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
+  };
+
+  loomc_result_t* result = nullptr;
+  LOOMC_EXPECT_OK(loomc_compile_module(
+      compiler.get(), workspace.get(), pass_program.get(), module.get(),
+      &options, loomc_allocator_system(), &result));
+  ResultPtr result_ptr(result);
+  ExpectSucceededResult(result_ptr.get());
+
+  const loomc_artifact_t* text_artifact =
+      FindArtifact(result_ptr.get(), LOOMC_ARTIFACT_KIND_MODULE,
+                   LOOMC_ARTIFACT_FORMAT_LOOM_TEXT);
+  ASSERT_NE(text_artifact, nullptr);
+  const std::string module_text = ToString(text_artifact->contents);
+  EXPECT_NE(module_text.find("amdgpu.target<gfx1151> @__loom_sealed_target_0 "
+                             "{subgroup_size = 32}"),
+            std::string::npos)
+      << module_text;
+  EXPECT_NE(module_text.find("amdgpu.target<gfx942> @__loom_sealed_target_1 "
+                             "{features = [sramecc, -xnack]}"),
+            std::string::npos)
+      << module_text;
+  const size_t wave32_root = module_text.find(
+      "low.kernel.def target<amdgpu.rdna3_5.core>"
+      "(@__loom_sealed_target_0)");
+  const size_t wave64_root = module_text.find(
+      "low.kernel.def target<amdgpu.cdna3.core>"
+      "(@__loom_sealed_target_1)");
+  ASSERT_NE(wave32_root, std::string::npos) << module_text;
+  ASSERT_NE(wave64_root, std::string::npos) << module_text;
+  EXPECT_LT(module_text.find("@wave32_root", wave32_root), wave64_root)
+      << module_text;
+  EXPECT_NE(module_text.find("@wave64_root", wave64_root), std::string::npos)
+      << module_text;
+  EXPECT_LT(module_text.find("v_mov_b32 32", wave32_root), wave64_root)
+      << module_text;
+  EXPECT_NE(module_text.find("v_mov_b32 64", wave64_root), std::string::npos)
+      << module_text;
+  EXPECT_EQ(module_text.find("target.subgroup.size"), std::string::npos)
+      << module_text;
+
+  SourcePtr bytecode =
+      SerializeModule(module.get(), LOOMC_SOURCE_FORMAT_BYTECODE);
+  const loomc_byte_span_t bytecode_contents =
+      loomc_source_contents(bytecode.get());
+  ASSERT_NE(bytecode_contents.data, nullptr);
+  ASSERT_NE(bytecode_contents.data_length, 0u);
+  const std::vector<uint8_t> sealed_bytecode(
+      bytecode_contents.data,
+      bytecode_contents.data + bytecode_contents.data_length);
+
+  // Leave only ordinary serialized bytes alive before constructing the replay
+  // context. No profile or compiler-owned function version may be reachable by
+  // linking, reporting, or emission below.
+  bytecode.reset();
+  result_ptr.reset();
+  source.reset();
+  wave64_profile.reset();
+  wave32_profile.reset();
+  pass_program.reset();
+  compiler.reset();
+  module.reset();
+  workspace.reset();
+  context.reset();
+  target_environment.reset();
+
+  TargetEnvironmentPtr replay_target_environment =
+      CreateAmdgpuTargetEnvironment();
+  ContextPtr replay_context =
+      CreateAmdgpuContext(replay_target_environment.get());
+  SourcePtr replay_text_source =
+      CreateSource(LOOMC_SOURCE_FORMAT_TEXT, "sealed_replay.loom",
+                   module_text.data(), module_text.size());
+  SourcePtr replay_bytecode_source =
+      CreateSource(LOOMC_SOURCE_FORMAT_BYTECODE, "sealed_replay.loombc",
+                   sealed_bytecode.data(), sealed_bytecode.size());
+  LinkIndexPtr text_link_index =
+      CreateLinkIndex(replay_context.get(), replay_text_source.get());
+  LinkIndexPtr bytecode_link_index =
+      CreateLinkIndex(replay_context.get(), replay_bytecode_source.get());
+  LinkerPtr replay_linker = CreateLinker(replay_context.get());
+
+  WorkspacePtr text_archive_workspace = CreateWorkspace();
+  ModulePtr text_archive = LinkModule(
+      replay_linker.get(), text_archive_workspace.get(), text_link_index.get());
+  WorkspacePtr bytecode_archive_workspace = CreateWorkspace();
+  ModulePtr bytecode_archive =
+      LinkModule(replay_linker.get(), bytecode_archive_workspace.get(),
+                 bytecode_link_index.get());
+  const std::string text_archive_text =
+      SerializeModuleToText(text_archive.get());
+  const std::string bytecode_archive_text =
+      SerializeModuleToText(bytecode_archive.get());
+  EXPECT_EQ(text_archive_text, bytecode_archive_text);
+  EXPECT_NE(
+      text_archive_text.find("amdgpu.target<gfx1151> @__loom_sealed_target_0 "
+                             "{subgroup_size = 32}"),
+      std::string::npos)
+      << text_archive_text;
+  EXPECT_NE(
+      text_archive_text.find("amdgpu.target<gfx942> @__loom_sealed_target_1 "
+                             "{features = [sramecc, -xnack]}"),
+      std::string::npos)
+      << text_archive_text;
+  EXPECT_NE(text_archive_text.find(
+                "target<amdgpu.rdna3_5.core>(@__loom_sealed_target_0)"),
+            std::string::npos)
+      << text_archive_text;
+  EXPECT_NE(text_archive_text.find(
+                "target<amdgpu.cdna3.core>(@__loom_sealed_target_1)"),
+            std::string::npos)
+      << text_archive_text;
+  EXPECT_EQ(text_archive_text.find("target.subgroup.size"), std::string::npos)
+      << text_archive_text;
+
+  const loomc_string_view_t wave32_root_symbol =
+      loomc_make_cstring_view("@wave32_root");
+  WorkspacePtr text_wave32_workspace = CreateWorkspace();
+  ModulePtr text_wave32 =
+      LinkModule(replay_linker.get(), text_wave32_workspace.get(),
+                 text_link_index.get(), &wave32_root_symbol, 1);
+  WorkspacePtr bytecode_wave32_workspace = CreateWorkspace();
+  ModulePtr bytecode_wave32 =
+      LinkModule(replay_linker.get(), bytecode_wave32_workspace.get(),
+                 bytecode_link_index.get(), &wave32_root_symbol, 1);
+  static constexpr const char kWave32Target[] =
+      "amdgpu.target<gfx1151> @__loom_sealed_target_0 "
+      "{subgroup_size = 32}";
+  static constexpr const char kWave32Contract[] =
+      "target<amdgpu.rdna3_5.core>(@__loom_sealed_target_0)";
+  ExpectSelectivelyLinkedTarget(text_wave32.get(), kWave32Target,
+                                kWave32Contract, "@wave32_root", "v_mov_b32 32",
+                                "@wave64_root");
+  ExpectSelectivelyLinkedTarget(bytecode_wave32.get(), kWave32Target,
+                                kWave32Contract, "@wave32_root", "v_mov_b32 32",
+                                "@wave64_root");
+
+  const loomc_string_view_t wave64_root_symbol =
+      loomc_make_cstring_view("@wave64_root");
+  WorkspacePtr text_wave64_workspace = CreateWorkspace();
+  ModulePtr text_wave64 =
+      LinkModule(replay_linker.get(), text_wave64_workspace.get(),
+                 text_link_index.get(), &wave64_root_symbol, 1);
+  WorkspacePtr bytecode_wave64_workspace = CreateWorkspace();
+  ModulePtr bytecode_wave64 =
+      LinkModule(replay_linker.get(), bytecode_wave64_workspace.get(),
+                 bytecode_link_index.get(), &wave64_root_symbol, 1);
+  static constexpr const char kWave64Target[] =
+      "amdgpu.target<gfx942> @__loom_sealed_target_1 "
+      "{features = [sramecc, -xnack]}";
+  static constexpr const char kWave64Contract[] =
+      "target<amdgpu.cdna3.core>(@__loom_sealed_target_1)";
+  ExpectSelectivelyLinkedTarget(text_wave64.get(), kWave64Target,
+                                kWave64Contract, "@wave64_root", "v_mov_b32 64",
+                                "@wave32_root");
+  ExpectSelectivelyLinkedTarget(bytecode_wave64.get(), kWave64Target,
+                                kWave64Contract, "@wave64_root", "v_mov_b32 64",
+                                "@wave32_root");
+
+  ResultPtr wave32_emit = EmitModule(
+      replay_target_environment.get(), text_wave32_workspace.get(),
+      text_wave32.get(), LOOMC_AMDGPU_RUNTIME_GLOBAL_NONE,
+      LOOMC_ARTIFACT_MANIFEST_MODE_SUMMARY, LOOMC_COMPILE_REPORT_MODE_DETAILS);
+  ExpectReplayEmission(wave32_emit.get(), "gfx1151",
+                       "amdgcn-amd-amdhsa--gfx1151");
+
+  ResultPtr wave64_emit = EmitModule(
+      replay_target_environment.get(), bytecode_wave64_workspace.get(),
+      bytecode_wave64.get(), LOOMC_AMDGPU_RUNTIME_GLOBAL_NONE,
+      LOOMC_ARTIFACT_MANIFEST_MODE_SUMMARY, LOOMC_COMPILE_REPORT_MODE_DETAILS);
+  ExpectReplayEmission(wave64_emit.get(), "gfx942",
+                       "amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-",
+                       "[\"sramecc+\",\"xnack-\"]");
 }
 
 TEST(AmdgpuTargetTest,

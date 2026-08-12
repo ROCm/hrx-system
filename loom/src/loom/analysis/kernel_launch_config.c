@@ -228,7 +228,7 @@ iree_status_t loom_kernel_launch_config_try_evaluate_direct(
     return iree_ok_status();
   }
 
-  if (options->effective_target_facts == NULL) {
+  if (options->function_target_facts == NULL) {
     bool has_target = false;
     IREE_RETURN_IF_ERROR(loom_kernel_launch_config_symbol_has_target(
         module, symbol_id, block_pool, &has_target));
@@ -238,7 +238,7 @@ iree_status_t loom_kernel_launch_config_try_evaluate_direct(
   }
 
   loom_kernel_launch_config_fill_known_fields(module, symbol->defining_op,
-                                              options->effective_target_facts,
+                                              options->function_target_facts,
                                               /*fact_table=*/NULL, out_config);
   loom_kernel_launch_config_report_required_fields(options->required_fields,
                                                    out_config, out_config);
@@ -279,7 +279,7 @@ iree_status_t loom_kernel_launch_config_evaluate(
 
   iree_arena_allocator_t target_arena;
   iree_arena_initialize(block_pool, &target_arena);
-  const loom_target_facts_t* target_facts = options->effective_target_facts;
+  const loom_target_facts_t* target_facts = options->function_target_facts;
   bool target_valid = true;
   iree_status_t status = iree_ok_status();
   if (target_facts == NULL) {

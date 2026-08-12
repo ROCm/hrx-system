@@ -749,6 +749,59 @@ ERR_STRUCTURE_045 = ErrorDef(
     fix_hint="Flatten nested dictionary and parameterized attribute values",
 )
 
+# ERR_STRUCTURE_046: Signed enum-set word count exceeds its stable domain.
+ERR_STRUCTURE_046 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=46,
+    severity=Severity.ERROR,
+    summary="Signed enum-set word count exceeds its stable domain.",
+    message=(
+        "attribute '{attr_name}' has {word_count} words per polarity, max "
+        "{max_word_count}"
+    ),
+    params=(
+        ErrorParam("attr_name", ParamKind.STRING),
+        ErrorParam("word_count", ParamKind.U32),
+        ErrorParam("max_word_count", ParamKind.U32),
+    ),
+    fix_hint="Remove assertions outside the stable byte enum domain",
+)
+
+# ERR_STRUCTURE_047: Signed enum-set value has contradictory assertions.
+ERR_STRUCTURE_047 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=47,
+    severity=Severity.ERROR,
+    summary="Signed enum-set value has contradictory assertions.",
+    message=(
+        "attribute '{attr_name}' asserts stable enum value {enum_value} both "
+        "positively and negatively"
+    ),
+    params=(
+        ErrorParam("attr_name", ParamKind.STRING),
+        ErrorParam("enum_value", ParamKind.U32),
+    ),
+    fix_hint="Keep exactly one polarity for each explicitly asserted value",
+)
+
+# ERR_STRUCTURE_048: Signed enum-set payload is not canonically trimmed.
+ERR_STRUCTURE_048 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=48,
+    severity=Severity.ERROR,
+    summary="Signed enum-set payload is not canonically trimmed.",
+    message=(
+        "attribute '{attr_name}' has {word_count} words per polarity but "
+        "canonical form requires {canonical_word_count}"
+    ),
+    params=(
+        ErrorParam("attr_name", ParamKind.STRING),
+        ErrorParam("word_count", ParamKind.U32),
+        ErrorParam("canonical_word_count", ParamKind.U32),
+    ),
+    fix_hint="Remove trailing word pairs with no positive or negative assertions",
+)
+
 ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_001,
     ERR_STRUCTURE_002,
@@ -794,4 +847,7 @@ ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_043,
     ERR_STRUCTURE_044,
     ERR_STRUCTURE_045,
+    ERR_STRUCTURE_046,
+    ERR_STRUCTURE_047,
+    ERR_STRUCTURE_048,
 )

@@ -85,7 +85,7 @@ loom_function_version_owner_t*
 loom_target_pass_capability_function_version_owner(
     const loom_target_pass_capability_t* capability);
 
-// Resolves the immutable effective target facts for the active function pass.
+// Resolves immutable function target facts for the active function pass.
 //
 // A concrete target-refined function version supplies its facts directly from
 // the pass frame. An unrefined function projects its authored target contract
