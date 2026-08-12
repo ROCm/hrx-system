@@ -138,13 +138,14 @@ def test_vopd_descriptor_lookup_rows_use_descriptor_order() -> None:
         descriptor_set_keys=("amdgpu.rdna3.core",),
     )
 
-    lookup_rows = amdgpu_vopd_component_tables._descriptor_lookup_rows_for_set(
+    lookup = amdgpu_vopd_component_tables._descriptor_lookup_for_set(
         "amdgpu.rdna3.core",
         ("amdgpu.s_nop", component.descriptor_key),
         (rule,),
     )
 
-    assert lookup_rows == (0, 1)
+    assert lookup.rows == (0, 1)
+    assert lookup.pair_affinity_candidate_ordinals == (1,)
 
 
 def test_vopd_pair_affinities_use_descriptor_ordinals_and_priority() -> None:
@@ -162,12 +163,20 @@ def test_vopd_pair_affinities_use_descriptor_ordinals_and_priority() -> None:
         ),
     )
 
-    placement_recipes: list[amdgpu_vopd_component_tables._VopdPairPlacementRecipe] = []
+    lookup = amdgpu_vopd_component_tables._descriptor_lookup_for_set(
+        "amdgpu.rdna3.core",
+        tuple(rule.component.descriptor_key for rule in rules),
+        rules,
+    )
+    placement_recipe_catalog = amdgpu_vopd_component_tables._VopdPairPlacementRecipeCatalog(
+        recipes=[],
+        indices_by_recipe={},
+        indices_by_rule_pair={},
+    )
     rows = amdgpu_vopd_component_tables._pair_affinity_rows_for_set(
         rules,
-        (1, 2),
-        placement_recipes,
-        {},
+        lookup,
+        placement_recipe_catalog,
     )
 
     assert (
@@ -241,17 +250,25 @@ def test_vopd_polymorphic_move_is_not_a_descriptor_affinity() -> None:
         component=component,
         descriptor_set_keys=("amdgpu.rdna3.core",),
     )
-    placement_recipes: list[amdgpu_vopd_component_tables._VopdPairPlacementRecipe] = []
+    lookup = amdgpu_vopd_component_tables._descriptor_lookup_for_set(
+        "amdgpu.rdna3.core",
+        (component.descriptor_key,),
+        (rule,),
+    )
+    placement_recipe_catalog = amdgpu_vopd_component_tables._VopdPairPlacementRecipeCatalog(
+        recipes=[],
+        indices_by_recipe={},
+        indices_by_rule_pair={},
+    )
 
     rows = amdgpu_vopd_component_tables._pair_affinity_rows_for_set(
         (rule,),
-        (1,),
-        placement_recipes,
-        {},
+        lookup,
+        placement_recipe_catalog,
     )
 
     assert rows == ()
-    assert placement_recipes == []
+    assert placement_recipe_catalog.recipes == []
 
 
 def test_vopd_pair_placement_rejects_component_value_out_of_bounds() -> None:

@@ -128,6 +128,14 @@ class _VopdComponentDescriptorLookupRange:
 
 
 @dataclass(frozen=True, slots=True)
+class _VopdComponentDescriptorLookup:
+    # Rule index plus one for each descriptor ordinal; zero denotes no rule.
+    rows: tuple[int, ...]
+    # Descriptor ordinals eligible to participate in pair-affinity rows.
+    pair_affinity_candidate_ordinals: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class _VopdPairAffinityRange:
     descriptor_set_key: str
     descriptor_set_ordinal: int
@@ -164,6 +172,16 @@ class _VopdPairPlacementRelation:
 class _VopdPairPlacementRecipe:
     alternatives: tuple[tuple[_VopdPairPlacementRelation, ...], ...]
     packet_savings: int = 1
+
+
+@dataclass(slots=True)
+class _VopdPairPlacementRecipeCatalog:
+    # Recipes in first-use order for generated table emission.
+    recipes: list[_VopdPairPlacementRecipe]
+    # Emitted recipe index keyed by structural recipe value.
+    indices_by_recipe: dict[_VopdPairPlacementRecipe, int]
+    # Emitted recipe index already resolved for each ordered rule pair.
+    indices_by_rule_pair: dict[tuple[int, int], int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -630,11 +648,11 @@ def _component_flags_initializer(flags: frozenset[str]) -> str:
     return " | ".join(sorted(flags))
 
 
-def _descriptor_lookup_rows_for_set(
+def _descriptor_lookup_for_set(
     descriptor_set_key: str,
     descriptor_keys: Sequence[str],
     rules: Sequence[_VopdComponentRule],
-) -> tuple[int, ...]:
+) -> _VopdComponentDescriptorLookup:
     rule_by_descriptor_key: dict[str, int] = {}
     for rule_index, rule in enumerate(rules):
         if descriptor_set_key not in rule.descriptor_set_keys:
@@ -645,7 +663,21 @@ def _descriptor_lookup_rows_for_set(
         )
         if previous_index != rule_index + 1:
             raise ValueError(f"AMDGPU VOPD descriptor '{rule.component.descriptor_key}' has multiple component rows for descriptor set '{descriptor_set_key}'")
-    return tuple(rule_by_descriptor_key.get(descriptor_key, 0) for descriptor_key in descriptor_keys)
+
+    rows: list[int] = []
+    pair_affinity_candidate_ordinals: list[int] = []
+    for descriptor_key in descriptor_keys:
+        rule_index_plus_one = rule_by_descriptor_key.get(descriptor_key, 0)
+        rows.append(rule_index_plus_one)
+        if rule_index_plus_one == 0:
+            continue
+        rule = rules[rule_index_plus_one - 1]
+        if rule.component.descriptor_affinity_eligible:
+            pair_affinity_candidate_ordinals.append(len(rows) - 1)
+    return _VopdComponentDescriptorLookup(
+        rows=tuple(rows),
+        pair_affinity_candidate_ordinals=tuple(pair_affinity_candidate_ordinals),
+    )
 
 
 def _component_can_use_lane(
@@ -918,36 +950,35 @@ def _pair_placement_recipe(
 
 def _pair_affinity_rows_for_set(
     rules: Sequence[_VopdComponentRule],
-    descriptor_lookup_rows: Sequence[int],
-    placement_recipes: list[_VopdPairPlacementRecipe],
-    placement_recipe_indices: dict[_VopdPairPlacementRecipe, int],
+    descriptor_lookup: _VopdComponentDescriptorLookup,
+    placement_recipe_catalog: _VopdPairPlacementRecipeCatalog,
 ) -> tuple[_VopdPairAffinityRow, ...]:
     rows: list[_VopdPairAffinityRow] = []
-    for first_ordinal, first_rule_index_plus_one in enumerate(descriptor_lookup_rows):
-        if first_rule_index_plus_one == 0:
-            continue
-        first_rule = rules[first_rule_index_plus_one - 1]
-        if not first_rule.component.descriptor_affinity_eligible:
-            continue
-        for second_ordinal, second_rule_index_plus_one in enumerate(descriptor_lookup_rows):
-            if second_rule_index_plus_one == 0:
-                continue
-            second_rule = rules[second_rule_index_plus_one - 1]
-            if not second_rule.component.descriptor_affinity_eligible:
-                continue
+    for first_ordinal in descriptor_lookup.pair_affinity_candidate_ordinals:
+        first_rule_index_plus_one = descriptor_lookup.rows[first_ordinal]
+        first_rule_index = first_rule_index_plus_one - 1
+        first_rule = rules[first_rule_index]
+        for second_ordinal in descriptor_lookup.pair_affinity_candidate_ordinals:
+            second_rule_index_plus_one = descriptor_lookup.rows[second_ordinal]
+            second_rule_index = second_rule_index_plus_one - 1
+            second_rule = rules[second_rule_index]
             if not _components_can_pair(first_rule.component, second_rule.component):
                 continue
-            placement_recipe = _pair_placement_recipe(
-                first_rule.component,
-                second_rule.component,
-                first_rule.flags,
-                second_rule.flags,
-            )
-            placement_recipe_index = placement_recipe_indices.get(placement_recipe)
+            rule_pair = (first_rule_index, second_rule_index)
+            placement_recipe_index = placement_recipe_catalog.indices_by_rule_pair.get(rule_pair)
             if placement_recipe_index is None:
-                placement_recipe_index = len(placement_recipes)
-                placement_recipes.append(placement_recipe)
-                placement_recipe_indices[placement_recipe] = placement_recipe_index
+                placement_recipe = _pair_placement_recipe(
+                    first_rule.component,
+                    second_rule.component,
+                    first_rule.flags,
+                    second_rule.flags,
+                )
+                placement_recipe_index = placement_recipe_catalog.indices_by_recipe.get(placement_recipe)
+                if placement_recipe_index is None:
+                    placement_recipe_index = len(placement_recipe_catalog.recipes)
+                    placement_recipe_catalog.recipes.append(placement_recipe)
+                    placement_recipe_catalog.indices_by_recipe[placement_recipe] = placement_recipe_index
+                placement_recipe_catalog.indices_by_rule_pair[rule_pair] = placement_recipe_index
             rows.append(
                 _VopdPairAffinityRow(
                     first_descriptor_ordinal=first_ordinal,
@@ -1153,15 +1184,18 @@ def _materialize_vopd_component_tables(
     descriptor_lookup_rows: list[int] = []
     pair_affinity_ranges: list[_VopdPairAffinityRange] = []
     pair_affinity_rows: list[_VopdPairAffinityRow] = []
-    pair_placement_recipes: list[_VopdPairPlacementRecipe] = []
-    pair_placement_recipe_indices: dict[_VopdPairPlacementRecipe, int] = {}
+    pair_placement_recipe_catalog = _VopdPairPlacementRecipeCatalog(
+        recipes=[],
+        indices_by_recipe={},
+        indices_by_rule_pair={},
+    )
     for info in descriptor_sets_by_ordinal:
         if not _descriptor_set_supports_vopd(info):
             continue
         descriptor_set_ordinal = amdgpu_descriptor_set_ordinal(info.key)
         if descriptor_set_ordinal < 0:
             raise ValueError(f"AMDGPU descriptor set '{info.key}' has invalid ordinal {descriptor_set_ordinal}")
-        set_lookup_rows = _descriptor_lookup_rows_for_set(
+        set_lookup = _descriptor_lookup_for_set(
             info.key,
             descriptor_keys_by_set_key[info.key],
             rules,
@@ -1171,15 +1205,14 @@ def _materialize_vopd_component_tables(
                 descriptor_set_key=info.key,
                 descriptor_set_ordinal=descriptor_set_ordinal,
                 first_descriptor_lookup=len(descriptor_lookup_rows),
-                descriptor_lookup_count=len(set_lookup_rows),
+                descriptor_lookup_count=len(set_lookup.rows),
             )
         )
-        descriptor_lookup_rows.extend(set_lookup_rows)
+        descriptor_lookup_rows.extend(set_lookup.rows)
         set_pair_affinity_rows = _pair_affinity_rows_for_set(
             rules,
-            set_lookup_rows,
-            pair_placement_recipes,
-            pair_placement_recipe_indices,
+            set_lookup,
+            pair_placement_recipe_catalog,
         )
         pair_affinity_ranges.append(
             _VopdPairAffinityRange(
@@ -1197,7 +1230,7 @@ def _materialize_vopd_component_tables(
         descriptor_lookup_rows=tuple(descriptor_lookup_rows),
         pair_affinity_ranges=tuple(pair_affinity_ranges),
         pair_affinity_rows=tuple(pair_affinity_rows),
-        pair_placement_recipes=tuple(pair_placement_recipes),
+        pair_placement_recipes=tuple(pair_placement_recipe_catalog.recipes),
     )
     _validate_vopd_component_tables(tables)
     return tables
