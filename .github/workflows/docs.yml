@@ -34,10 +34,6 @@ on:
       - "loom/py/loom/**"
       - "loom/src/loom/editor/textmate/**"
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
 
@@ -46,6 +42,9 @@ jobs:
     name: Linux / Documentation
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    concurrency:
+      group: ${{ github.workflow }}-build-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -73,8 +72,28 @@ jobs:
           test -f build/loom-pages/loom/reference/dialects/index.html
           test -f build/loom-pages/loom/reference/c-api/generated/index.html
 
-      - name: Upload review artifact
+      - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: build/loom-pages
           retention-days: 7
+
+  deploy_docs:
+    name: GitHub Pages
+    if: github.ref == 'refs/heads/main'
+    needs: build_docs
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    steps:
+      - name: Deploy Pages artifact
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
