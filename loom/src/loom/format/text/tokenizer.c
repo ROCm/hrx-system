@@ -731,8 +731,24 @@ static iree_status_t loom_tokenizer_scan_string(loom_tokenizer_t* t,
   return iree_ok_status();
 }
 
+static iree_status_t loom_tokenizer_set_number_error(
+    loom_tokenizer_t* t, const loom_error_def_t* error, iree_host_size_t start,
+    uint32_t start_line, uint32_t start_column, loom_token_t* out_token) {
+  iree_string_view_t text =
+      iree_make_string_view(t->source.data + start, t->position - start);
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(text),
+  };
+  IREE_RETURN_IF_ERROR(
+      loom_tokenizer_set_current_error(t, error, params, IREE_ARRAYSIZE(params),
+                                       start, start_line, start_column));
+  *out_token = loom_tokenizer_make_error_token(t);
+  return iree_ok_status();
+}
+
 // Scans a number (integer or float). Position is at the first digit or '-'.
-static loom_token_t loom_tokenizer_scan_number(loom_tokenizer_t* t) {
+static iree_status_t loom_tokenizer_scan_number(loom_tokenizer_t* t,
+                                                loom_token_t* out_token) {
   uint32_t start_line = t->line;
   uint32_t start_column = t->column;
   iree_host_size_t start = t->position;
@@ -743,18 +759,69 @@ static loom_token_t loom_tokenizer_scan_number(loom_tokenizer_t* t) {
     ++t->column;
   }
 
-  // Check for hex: 0x... (but not when in_dim_list — 'x' is a
-  // dimension separator, so '0' is a static dim of size 0).
-  if (loom_tokenizer_char(t) == '0' && loom_tokenizer_char_at(t, 1) == 'x' &&
+  // Check for hexadecimal integers and C99 hexadecimal floats (but not when
+  // in_dim_list — 'x' is a dimension separator, so '0' is a static dim of
+  // size 0).
+  char radix = loom_tokenizer_char_at(t, 1);
+  if (loom_tokenizer_char(t) == '0' && (radix == 'x' || radix == 'X') &&
       !t->in_dim_list) {
     t->position += 2;
     t->column += 2;
+
+    bool has_significand_digit = false;
     while (loom_is_hex_digit(loom_tokenizer_char(t))) {
+      has_significand_digit = true;
       ++t->position;
       ++t->column;
     }
-    return loom_tokenizer_make_verbatim_token(t, LOOM_TOKEN_INTEGER, start,
-                                              start_line, start_column);
+
+    bool has_radix_point = false;
+    if (loom_tokenizer_char(t) == '.') {
+      has_radix_point = true;
+      ++t->position;
+      ++t->column;
+      while (loom_is_hex_digit(loom_tokenizer_char(t))) {
+        has_significand_digit = true;
+        ++t->position;
+        ++t->column;
+      }
+    }
+
+    bool has_binary_exponent = false;
+    bool has_exponent_digit = false;
+    char exponent = loom_tokenizer_char(t);
+    if (exponent == 'p' || exponent == 'P') {
+      has_binary_exponent = true;
+      ++t->position;
+      ++t->column;
+      char sign = loom_tokenizer_char(t);
+      if (sign == '+' || sign == '-') {
+        ++t->position;
+        ++t->column;
+      }
+      while (loom_is_digit(loom_tokenizer_char(t))) {
+        has_exponent_digit = true;
+        ++t->position;
+        ++t->column;
+      }
+    }
+
+    bool is_float = has_radix_point || has_binary_exponent;
+    if (!has_significand_digit) {
+      return loom_tokenizer_set_number_error(
+          t, is_float ? LOOM_ERR_PARSE_016 : LOOM_ERR_PARSE_015, start,
+          start_line, start_column, out_token);
+    }
+    if ((has_radix_point && !has_binary_exponent) ||
+        (has_binary_exponent && !has_exponent_digit)) {
+      return loom_tokenizer_set_number_error(
+          t, LOOM_ERR_PARSE_016, start, start_line, start_column, out_token);
+    }
+
+    *out_token = loom_tokenizer_make_verbatim_token(
+        t, has_binary_exponent ? LOOM_TOKEN_FLOAT : LOOM_TOKEN_INTEGER, start,
+        start_line, start_column);
+    return iree_ok_status();
   }
 
   // Decimal digits.
@@ -788,15 +855,20 @@ static loom_token_t loom_tokenizer_scan_number(loom_tokenizer_t* t) {
       ++t->position;
       ++t->column;
     }
+    if (!loom_is_digit(loom_tokenizer_char(t))) {
+      return loom_tokenizer_set_number_error(
+          t, LOOM_ERR_PARSE_016, start, start_line, start_column, out_token);
+    }
     while (loom_is_digit(loom_tokenizer_char(t))) {
       ++t->position;
       ++t->column;
     }
   }
 
-  return loom_tokenizer_make_verbatim_token(
+  *out_token = loom_tokenizer_make_verbatim_token(
       t, is_float ? LOOM_TOKEN_FLOAT : LOOM_TOKEN_INTEGER, start, start_line,
       start_column);
+  return iree_ok_status();
 }
 
 // Scans an identifier or op name. Position is at the first ident char.
@@ -1076,8 +1148,7 @@ static iree_status_t loom_tokenizer_scan(loom_tokenizer_t* t,
 
   // Negative number: '-' followed by digit.
   if (c == '-' && loom_is_digit(loom_tokenizer_char_at(t, 1))) {
-    *out_token = loom_tokenizer_scan_number(t);
-    return iree_ok_status();
+    return loom_tokenizer_scan_number(t, out_token);
   }
 
   if (loom_tokenizer_has_delimited_prefix(t, IREE_SV("-inf")) ||
@@ -1092,8 +1163,7 @@ static iree_status_t loom_tokenizer_scan(loom_tokenizer_t* t,
 
   // Number.
   if (loom_is_digit(c)) {
-    *out_token = loom_tokenizer_scan_number(t);
-    return iree_ok_status();
+    return loom_tokenizer_scan_number(t, out_token);
   }
 
   // String literal.

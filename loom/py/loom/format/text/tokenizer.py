@@ -726,8 +726,9 @@ class Tokenizer:
         if is_negative:
             self._advance()
 
-        # Hex integer: 0x... (but not when in_dim_list — 'x' is a
-        # dimension separator, so '0' is a static dim of size 0).
+        # Hexadecimal integer or C99 hexadecimal float (but not when
+        # in_dim_list — 'x' is a dimension separator, so '0' is a static dim
+        # of size 0).
         if (
             self._char() == "0"
             and self._peek_char() in ("x", "X")
@@ -735,14 +736,46 @@ class Tokenizer:
         ):
             self._advance()  # 0
             self._advance()  # x
-            if self._char() not in "0123456789abcdefABCDEF":
-                raise ParseError(
-                    "expected hex digits after '0x'", location, self._filename
-                )
-            while self._char() in "0123456789abcdefABCDEF":
+            hex_digits = "0123456789abcdefABCDEF"
+            has_significand_digit = False
+            while self._char() in hex_digits:
+                has_significand_digit = True
                 self._advance()
+
+            has_radix_point = self._char() == "."
+            if has_radix_point:
+                self._advance()
+                while self._char() in hex_digits:
+                    has_significand_digit = True
+                    self._advance()
+
+            has_binary_exponent = self._char() in ("p", "P")
+            has_exponent_digit = False
+            if has_binary_exponent:
+                self._advance()
+                if self._char() in ("+", "-"):
+                    self._advance()
+                while self._char().isdigit():
+                    has_exponent_digit = True
+                    self._advance()
+
             text = self._source[start : self._position]
-            return self._make_token(TokenKind.INTEGER, text, location)
+            is_float = has_radix_point or has_binary_exponent
+            if not has_significand_digit:
+                literal_kind = "float" if is_float else "integer"
+                raise ParseError(
+                    f"invalid {literal_kind} literal '{text}'",
+                    location,
+                    self._filename,
+                )
+            if (has_radix_point and not has_binary_exponent) or (
+                has_binary_exponent and not has_exponent_digit
+            ):
+                raise ParseError(
+                    f"invalid float literal '{text}'", location, self._filename
+                )
+            kind = TokenKind.FLOAT if has_binary_exponent else TokenKind.INTEGER
+            return self._make_token(kind, text, location)
 
         # Decimal digits.
         while self._char().isdigit():
@@ -762,8 +795,9 @@ class Tokenizer:
             if self._char() in ("+", "-"):
                 self._advance()
             if not self._char().isdigit():
+                text = self._source[start : self._position]
                 raise ParseError(
-                    "expected digits in exponent", location, self._filename
+                    f"invalid float literal '{text}'", location, self._filename
                 )
             while self._char().isdigit():
                 self._advance()

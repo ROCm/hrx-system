@@ -157,11 +157,17 @@ TEST(Tokenizer, NegativeInteger) {
 }
 
 TEST(Tokenizer, HexInteger) {
-  ScopedTokenizer t("0xFF");
-  loom_token_t token = t.next();
-  EXPECT_EQ(token.kind, LOOM_TOKEN_INTEGER);
-  EXPECT_TRUE(iree_string_view_equal(token.text, IREE_SV("0xFF")));
-  EXPECT_TRUE(iree_string_view_equal(token.source_text, IREE_SV("0xFF")));
+  for (const char* spelling : {"0xFF", "0XdeadBEEF", "-0x1A"}) {
+    SCOPED_TRACE(spelling);
+    ScopedTokenizer t(spelling);
+    loom_token_t token = t.next();
+    EXPECT_EQ(token.kind, LOOM_TOKEN_INTEGER);
+    EXPECT_TRUE(
+        iree_string_view_equal(token.text, iree_make_cstring_view(spelling)));
+    EXPECT_TRUE(iree_string_view_equal(token.source_text,
+                                       iree_make_cstring_view(spelling)));
+    EXPECT_EQ(t.next().kind, LOOM_TOKEN_EOF);
+  }
 }
 
 TEST(Tokenizer, Float) {
@@ -184,6 +190,45 @@ TEST(Tokenizer, NegativeFloat) {
   loom_token_t token = t.next();
   EXPECT_EQ(token.kind, LOOM_TOKEN_FLOAT);
   EXPECT_TRUE(iree_string_view_equal(token.text, IREE_SV("-0.5")));
+}
+
+TEST(Tokenizer, HexadecimalFloat) {
+  for (const char* spelling : {"0x1p0", "0x1.p0", "0x.8p+1", "0X1.FP-4",
+                               "-0x0p+0", "0x1.fffffep+127"}) {
+    SCOPED_TRACE(spelling);
+    ScopedTokenizer t(spelling);
+    loom_token_t token = t.next();
+    EXPECT_EQ(token.kind, LOOM_TOKEN_FLOAT);
+    EXPECT_TRUE(
+        iree_string_view_equal(token.text, iree_make_cstring_view(spelling)));
+    EXPECT_TRUE(iree_string_view_equal(token.source_text,
+                                       iree_make_cstring_view(spelling)));
+    EXPECT_EQ(t.next().kind, LOOM_TOKEN_EOF);
+    ExpectNoInfrastructureStatus(t.get());
+  }
+}
+
+TEST(Tokenizer, MalformedNumber) {
+  struct TestCase {
+    const char* spelling;
+    uint16_t error_code;
+  };
+  const TestCase test_cases[] = {
+      {"0x", 15},   {"0x.", 16},   {"0x.p0", 16}, {"0x1.", 16}, {"0x1.2", 16},
+      {"0x1p", 16}, {"0x1p+", 16}, {"1e", 16},    {"1e-", 16},
+  };
+  for (const TestCase& test_case : test_cases) {
+    SCOPED_TRACE(test_case.spelling);
+    ScopedTokenizer t(test_case.spelling);
+    iree_string_view_t spelling = iree_make_cstring_view(test_case.spelling);
+    ExpectNextErrorToken(
+        t.get(),
+        loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, test_case.error_code),
+        spelling, 1, 1, (uint32_t)spelling.size + 1);
+    ExpectErrorStringParam(t.get()->error, 0, spelling);
+    EXPECT_EQ(t.next().kind, LOOM_TOKEN_EOF);
+    ExpectNoInfrastructureStatus(t.get());
+  }
 }
 
 TEST(Tokenizer, NegativeSpecialFloat) {
