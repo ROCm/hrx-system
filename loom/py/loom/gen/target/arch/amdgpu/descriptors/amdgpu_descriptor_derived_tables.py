@@ -59,25 +59,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--target-ref-public-header",
         default="loom/target/arch/amdgpu/refs/target_refs.h",
     )
-    parser.add_argument("--wait-descriptor-rows", type=Path, required=True)
-    parser.add_argument("--wait-immediate-rows", type=Path, required=True)
-    parser.add_argument("--wait-descriptor-ranges", type=Path, required=True)
-    parser.add_argument("--wait-descriptor-lookups", type=Path, required=True)
-    parser.add_argument("--wait-selection-rows", type=Path, required=True)
-    parser.add_argument("--vopd-component-rules", type=Path, required=True)
-    parser.add_argument(
-        "--vopd-descriptor-lookup-ranges",
-        type=Path,
-        required=True,
-    )
-    parser.add_argument("--vopd-descriptor-lookups", type=Path, required=True)
-    parser.add_argument("--vopd-pair-affinity-ranges", type=Path, required=True)
-    parser.add_argument("--vopd-pair-affinities", type=Path, required=True)
-    parser.add_argument(
-        "--vopd-pair-placement-recipes",
-        type=Path,
-        required=True,
-    )
+    parser.add_argument("--wait-packet-source", type=Path, required=True)
+    parser.add_argument("--vopd-source", type=Path, required=True)
     args = parser.parse_args(argv)
 
     inputs = load_amdgpu_planning_table_inputs(
@@ -93,20 +76,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     generate_wait_packet_table_outputs(
         inputs,
-        descriptor_rows_path=args.wait_descriptor_rows,
-        immediate_rows_path=args.wait_immediate_rows,
-        descriptor_ranges_path=args.wait_descriptor_ranges,
-        descriptor_lookups_path=args.wait_descriptor_lookups,
-        selection_rows_path=args.wait_selection_rows,
+        source_path=args.wait_packet_source,
     )
     generate_vopd_component_table_outputs(
         inputs,
-        component_rules_path=args.vopd_component_rules,
-        descriptor_lookup_ranges_path=args.vopd_descriptor_lookup_ranges,
-        descriptor_lookups_path=args.vopd_descriptor_lookups,
-        pair_affinity_ranges_path=args.vopd_pair_affinity_ranges,
-        pair_affinities_path=args.vopd_pair_affinities,
-        pair_placement_recipes_path=args.vopd_pair_placement_recipes,
+        source_path=args.vopd_source,
     )
     return 0
 

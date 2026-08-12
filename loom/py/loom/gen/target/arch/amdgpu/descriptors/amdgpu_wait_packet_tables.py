@@ -579,10 +579,13 @@ def _generated_header() -> list[str]:
 def _descriptor_row_initializer(row: _WaitPacketDescriptorRow) -> str:
     return "\n".join(
         [
-            "LOOM_AMDGPU_WAIT_PACKET_DESCRIPTOR(",
-            f"    {row.descriptor_ref}, {_counter_mask_expr(row.counter_mask)},",
-            f"    {row.counter_count}, {row.immediate_start},",
-            f"    {row.immediate_count})",
+            "    {",
+            f"        .descriptor_ref = {row.descriptor_ref},",
+            f"        .counter_mask = {_counter_mask_expr(row.counter_mask)},",
+            f"        .counter_count = {row.counter_count},",
+            f"        .immediate_start = {row.immediate_start},",
+            f"        .immediate_count = {row.immediate_count},",
+            "    },",
         ]
     )
 
@@ -590,9 +593,12 @@ def _descriptor_row_initializer(row: _WaitPacketDescriptorRow) -> str:
 def _immediate_row_initializer(row: _WaitPacketImmediateRow) -> str:
     return "\n".join(
         [
-            "LOOM_AMDGPU_WAIT_PACKET_IMMEDIATE(",
-            f"    {row.descriptor_immediate_index}, {_c_string_arg(row.field_name)},",
-            f"    {_counter_mask_expr(row.counter_mask)}, {row.no_wait_value})",
+            "    {",
+            f"        .descriptor_immediate_index = {row.descriptor_immediate_index},",
+            f"        .name = IREE_SVL({_c_string_arg(row.field_name)}),",
+            f"        .counter_mask = {_counter_mask_expr(row.counter_mask)},",
+            f"        .no_wait_value = {row.no_wait_value},",
+            "    },",
         ]
     )
 
@@ -600,82 +606,70 @@ def _immediate_row_initializer(row: _WaitPacketImmediateRow) -> str:
 def _range_row_initializer(row: _WaitPacketDescriptorRange) -> str:
     return "\n".join(
         [
-            "LOOM_AMDGPU_WAIT_PACKET_DESCRIPTOR_RANGE(",
-            f"    {row.descriptor_set_ordinal}, {row.first_descriptor},",
-            f"    {row.descriptor_count}, {row.first_descriptor_lookup},",
-            f"    {row.descriptor_lookup_count}, {row.max_descriptor_immediate_count})",
+            f"    [{row.descriptor_set_ordinal}] = {{",
+            f"        .first_descriptor = {row.first_descriptor},",
+            f"        .descriptor_count = {row.descriptor_count},",
+            f"        .first_descriptor_lookup = {row.first_descriptor_lookup},",
+            f"        .descriptor_lookup_count = {row.descriptor_lookup_count},",
+            "        .max_descriptor_immediate_count =",
+            f"            {row.max_descriptor_immediate_count},",
+            "    },",
         ]
     )
 
 
 def _descriptor_lookup_row_initializer(descriptor_index_plus_one: int) -> str:
-    return f"LOOM_AMDGPU_WAIT_PACKET_DESCRIPTOR_LOOKUP({descriptor_index_plus_one})"
+    return f"    {descriptor_index_plus_one},"
 
 
 def _selection_row_initializer(row: _WaitPacketSelectionRow) -> str:
     return "\n".join(
         [
-            "LOOM_AMDGPU_WAIT_PACKET_SELECTION(",
-            f"    {row.descriptor_set_ordinal}, {_counter_mask_expr(row.counter_mask)},",
-            f"    {row.descriptor_index}, {_counter_mask_expr(row.covered_counter_mask)})",
+            f"    [{row.descriptor_set_ordinal}][{_counter_mask_expr(row.counter_mask)}] = {{",
+            f"        .descriptor_index = {row.descriptor_index},",
+            "        .covered_counter_mask =",
+            f"            {_counter_mask_expr(row.covered_counter_mask)},",
+            "    },",
         ]
     )
 
 
-def _emit_descriptor_rows(tables: _WaitPacketTables) -> str:
+def _emit_source(tables: _WaitPacketTables) -> str:
     return (
         "\n".join(
             [
                 *_generated_header(),
+                '#include "loom/target/arch/amdgpu/planning/wait_packet_data.h"',
+                "",
+                "const loom_amdgpu_wait_packet_descriptor_template_t",
+                "    loom_amdgpu_wait_packet_descriptors[] = {",
                 *(_descriptor_row_initializer(row) for row in tables.descriptor_rows),
-            ]
-        )
-        + "\n"
-    )
-
-
-def _emit_immediate_rows(tables: _WaitPacketTables) -> str:
-    return (
-        "\n".join(
-            [
-                *_generated_header(),
-                *(_immediate_row_initializer(row) for row in tables.immediate_rows),
-            ]
-        )
-        + "\n"
-    )
-
-
-def _emit_range_rows(tables: _WaitPacketTables) -> str:
-    return (
-        "\n".join(
-            [
-                *_generated_header(),
-                *(_range_row_initializer(row) for row in tables.range_rows),
-            ]
-        )
-        + "\n"
-    )
-
-
-def _emit_descriptor_lookup_rows(tables: _WaitPacketTables) -> str:
-    return (
-        "\n".join(
-            [
-                *_generated_header(),
+                "};",
+                "",
+                "const uint16_t loom_amdgpu_wait_packet_descriptor_lookups[] = {",
                 *(_descriptor_lookup_row_initializer(row) for row in tables.descriptor_lookup_rows),
-            ]
-        )
-        + "\n"
-    )
-
-
-def _emit_selection_rows(tables: _WaitPacketTables) -> str:
-    return (
-        "\n".join(
-            [
-                *_generated_header(),
+                "};",
+                "",
+                "const loom_amdgpu_wait_packet_descriptor_immediate_template_t",
+                "    loom_amdgpu_wait_packet_immediates[] = {",
+                *(_immediate_row_initializer(row) for row in tables.immediate_rows),
+                "};",
+                "",
+                "const loom_amdgpu_wait_packet_descriptor_range_t",
+                "    loom_amdgpu_wait_packet_descriptor_ranges",
+                "        [LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT] = {",
+                *(_range_row_initializer(row) for row in tables.range_rows),
+                "};",
+                "",
+                "const loom_amdgpu_wait_packet_selection_template_t",
+                "    loom_amdgpu_wait_packet_selections",
+                "        [LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT]",
+                "        [LOOM_AMDGPU_WAIT_COUNTER_MASK_ALL + 1] = {",
                 *(_selection_row_initializer(row) for row in tables.selection_rows),
+                "};",
+                "",
+                "static_assert(sizeof(loom_amdgpu_wait_packet_selection_template_t) == 4,",
+                '              "wait-packet selection rows must stay compact");',
             ]
         )
         + "\n"
@@ -685,74 +679,28 @@ def _emit_selection_rows(tables: _WaitPacketTables) -> str:
 def generate_wait_packet_table_outputs(
     inputs: AmdgpuPlanningTableInputs,
     *,
-    descriptor_rows_path: Path | None = None,
-    immediate_rows_path: Path | None = None,
-    descriptor_ranges_path: Path | None = None,
-    descriptor_lookups_path: Path | None = None,
-    selection_rows_path: Path | None = None,
+    source_path: Path,
 ) -> None:
-    """Generates the requested wait-packet table fragments."""
+    """Generates the descriptor-derived wait-packet data source."""
 
     tables = _materialize_wait_packet_tables(inputs)
-    if descriptor_rows_path is not None:
-        write_text_file(descriptor_rows_path, _emit_descriptor_rows(tables))
-    if immediate_rows_path is not None:
-        write_text_file(immediate_rows_path, _emit_immediate_rows(tables))
-    if descriptor_ranges_path is not None:
-        write_text_file(descriptor_ranges_path, _emit_range_rows(tables))
-    if descriptor_lookups_path is not None:
-        write_text_file(
-            descriptor_lookups_path,
-            _emit_descriptor_lookup_rows(tables),
-        )
-    if selection_rows_path is not None:
-        write_text_file(selection_rows_path, _emit_selection_rows(tables))
+    write_text_file(source_path, _emit_source(tables))
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate AMDGPU descriptor-derived wait-packet table fragments.")
+    parser = argparse.ArgumentParser(description="Generate AMDGPU descriptor-derived wait-packet data.")
     parser.add_argument(
         "--isa-xml",
         action="append",
         default=[],
         help="ISA XML fact source as <key>:<path>.",
     )
-    parser.add_argument(
-        "--descriptor-rows",
-        type=Path,
-        help="Generated wait-packet descriptor row fragment path.",
-    )
-    parser.add_argument(
-        "--immediate-rows",
-        type=Path,
-        help="Generated wait-packet immediate row fragment path.",
-    )
-    parser.add_argument(
-        "--descriptor-ranges",
-        type=Path,
-        help="Generated wait-packet descriptor-set range fragment path.",
-    )
-    parser.add_argument(
-        "--descriptor-lookups",
-        type=Path,
-        help="Generated wait-packet descriptor lookup fragment path.",
-    )
-    parser.add_argument(
-        "--selection-rows",
-        type=Path,
-        help="Generated wait-packet counter-mask selection row fragment path.",
-    )
+    parser.add_argument("--source", type=Path, required=True)
     args = parser.parse_args(argv)
-    if args.descriptor_rows is None and args.immediate_rows is None and args.descriptor_ranges is None and args.descriptor_lookups is None and args.selection_rows is None:
-        parser.error("at least one output path is required")
 
     generate_wait_packet_table_outputs(
         load_amdgpu_planning_table_inputs(args.isa_xml, {}),
-        descriptor_rows_path=args.descriptor_rows,
-        immediate_rows_path=args.immediate_rows,
-        descriptor_ranges_path=args.descriptor_ranges,
-        descriptor_lookups_path=args.descriptor_lookups,
-        selection_rows_path=args.selection_rows,
+        source_path=args.source,
     )
     return 0
 

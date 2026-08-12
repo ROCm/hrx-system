@@ -8,106 +8,7 @@
 
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
-#include "loom/target/arch/amdgpu/planning/wait_counters.h"
 #include "loom/target/arch/amdgpu/target_info_defs.h"
-
-typedef struct loom_amdgpu_wait_packet_descriptor_range_t {
-  // First descriptor template row for this descriptor-set ordinal.
-  uint16_t first_descriptor;
-  // Number of descriptor template rows for this descriptor-set ordinal.
-  uint16_t descriptor_count;
-  // First descriptor-ordinal lookup row for this descriptor-set ordinal.
-  uint16_t first_descriptor_lookup;
-  // Number of descriptor-ordinal lookup rows for this descriptor-set ordinal.
-  uint16_t descriptor_lookup_count;
-  // Maximum immediate template count owned by any descriptor row in the range.
-  uint16_t max_descriptor_immediate_count;
-} loom_amdgpu_wait_packet_descriptor_range_t;
-
-#define LOOM_AMDGPU_WAIT_PACKET_DESCRIPTOR(                        \
-    descriptor_ref_value, counter_mask_value, counter_count_value, \
-    immediate_start_value, immediate_count_value)                  \
-  {                                                                \
-      .descriptor_ref = descriptor_ref_value,                      \
-      .counter_mask = counter_mask_value,                          \
-      .counter_count = counter_count_value,                        \
-      .immediate_start = immediate_start_value,                    \
-      .immediate_count = immediate_count_value,                    \
-  },
-
-static const loom_amdgpu_wait_packet_descriptor_template_t
-    kAmdgpuWaitPacketDescriptors[] = {
-#include "loom/target/arch/amdgpu/descriptors/wait_packet_descriptors.inl"
-};
-
-#undef LOOM_AMDGPU_WAIT_PACKET_DESCRIPTOR
-
-#define LOOM_AMDGPU_WAIT_PACKET_DESCRIPTOR_LOOKUP( \
-    descriptor_index_plus_one_value)               \
-  descriptor_index_plus_one_value,
-
-static const uint16_t kAmdgpuWaitPacketDescriptorLookups[] = {
-#include "loom/target/arch/amdgpu/descriptors/wait_packet_descriptor_lookups.inl"
-};
-
-#undef LOOM_AMDGPU_WAIT_PACKET_DESCRIPTOR_LOOKUP
-
-#define LOOM_AMDGPU_WAIT_PACKET_IMMEDIATE(descriptor_immediate_index_value, \
-                                          name_value, counter_mask_value,   \
-                                          no_wait_value_value)              \
-  {                                                                         \
-      .descriptor_immediate_index = descriptor_immediate_index_value,       \
-      .name = IREE_SVL(name_value),                                         \
-      .counter_mask = counter_mask_value,                                   \
-      .no_wait_value = no_wait_value_value,                                 \
-  },
-
-static const loom_amdgpu_wait_packet_descriptor_immediate_template_t
-    kAmdgpuWaitPacketImmediates[] = {
-#include "loom/target/arch/amdgpu/descriptors/wait_packet_immediates.inl"
-};
-
-#undef LOOM_AMDGPU_WAIT_PACKET_IMMEDIATE
-
-#define LOOM_AMDGPU_WAIT_PACKET_DESCRIPTOR_RANGE(                             \
-    descriptor_set_ordinal_value, first_descriptor_value,                     \
-    descriptor_count_value, first_descriptor_lookup_value,                    \
-    descriptor_lookup_count_value, max_descriptor_immediate_count_value)      \
-  [descriptor_set_ordinal_value] = {                                          \
-      .first_descriptor = first_descriptor_value,                             \
-      .descriptor_count = descriptor_count_value,                             \
-      .first_descriptor_lookup = first_descriptor_lookup_value,               \
-      .descriptor_lookup_count = descriptor_lookup_count_value,               \
-      .max_descriptor_immediate_count = max_descriptor_immediate_count_value, \
-  },
-
-static const loom_amdgpu_wait_packet_descriptor_range_t
-    kAmdgpuWaitPacketDescriptorRanges
-        [LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT] = {
-#include "loom/target/arch/amdgpu/descriptors/wait_packet_descriptor_ranges.inl"
-};
-
-#undef LOOM_AMDGPU_WAIT_PACKET_DESCRIPTOR_RANGE
-
-#define LOOM_AMDGPU_WAIT_PACKET_SELECTION(                                    \
-    descriptor_set_ordinal_value, counter_mask_value, descriptor_index_value, \
-    covered_counter_mask_value)                                               \
-  [descriptor_set_ordinal_value][counter_mask_value] = {                      \
-      .descriptor_index = descriptor_index_value,                             \
-      .covered_counter_mask = covered_counter_mask_value,                     \
-  },
-
-static const loom_amdgpu_wait_packet_selection_template_t
-    kAmdgpuWaitPacketSelections
-        [LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT]
-        [LOOM_AMDGPU_WAIT_COUNTER_MASK_ALL + 1] = {
-#include "loom/target/arch/amdgpu/descriptors/wait_packet_selections.inl"
-};
-
-#undef LOOM_AMDGPU_WAIT_PACKET_SELECTION
-
-static_assert(sizeof(loom_amdgpu_wait_packet_selection_template_t) == 4,
-              "wait-packet selection rows must stay compact");
 
 void loom_amdgpu_wait_packet_analyze_target(
     const loom_low_descriptor_set_t* descriptor_set,
@@ -119,31 +20,17 @@ void loom_amdgpu_wait_packet_analyze_target(
   *out_target = (loom_amdgpu_wait_packet_target_t){0};
   const uint16_t descriptor_set_ordinal =
       descriptor_set->descriptor_set_ordinal;
-  IREE_ASSERT_LT(descriptor_set_ordinal,
-                 IREE_ARRAYSIZE(kAmdgpuWaitPacketDescriptorRanges));
   const loom_amdgpu_wait_packet_descriptor_range_t* range =
-      &kAmdgpuWaitPacketDescriptorRanges[descriptor_set_ordinal];
-  IREE_ASSERT_LE(range->first_descriptor,
-                 IREE_ARRAYSIZE(kAmdgpuWaitPacketDescriptors));
-  IREE_ASSERT_LE(
-      range->descriptor_count,
-      IREE_ARRAYSIZE(kAmdgpuWaitPacketDescriptors) - range->first_descriptor);
-  IREE_ASSERT_LE(range->first_descriptor_lookup,
-                 IREE_ARRAYSIZE(kAmdgpuWaitPacketDescriptorLookups));
-  IREE_ASSERT_LE(range->descriptor_lookup_count,
-                 IREE_ARRAYSIZE(kAmdgpuWaitPacketDescriptorLookups) -
-                     range->first_descriptor_lookup);
-  IREE_ASSERT_EQ(range->descriptor_lookup_count,
-                 descriptor_set->descriptor_count);
+      &loom_amdgpu_wait_packet_descriptor_ranges[descriptor_set_ordinal];
   *out_target = (loom_amdgpu_wait_packet_target_t){
-      .descriptors = &kAmdgpuWaitPacketDescriptors[range->first_descriptor],
+      .descriptors =
+          &loom_amdgpu_wait_packet_descriptors[range->first_descriptor],
       .descriptor_count = range->descriptor_count,
-      .descriptor_lookup =
-          &kAmdgpuWaitPacketDescriptorLookups[range->first_descriptor_lookup],
+      .descriptor_lookup = &loom_amdgpu_wait_packet_descriptor_lookups
+                               [range->first_descriptor_lookup],
       .descriptor_lookup_count = range->descriptor_lookup_count,
-      .selections = kAmdgpuWaitPacketSelections[descriptor_set_ordinal],
-      .selection_count =
-          IREE_ARRAYSIZE(kAmdgpuWaitPacketSelections[descriptor_set_ordinal]),
+      .selections = loom_amdgpu_wait_packet_selections[descriptor_set_ordinal],
+      .selection_count = LOOM_AMDGPU_WAIT_COUNTER_MASK_ALL + 1,
       .max_descriptor_immediate_count = range->max_descriptor_immediate_count,
   };
 }
@@ -154,8 +41,7 @@ loom_amdgpu_wait_packet_descriptor_immediate(
     uint16_t immediate_index) {
   const uint32_t immediate_row =
       packet_descriptor->immediate_start + immediate_index;
-  IREE_ASSERT(immediate_row < IREE_ARRAYSIZE(kAmdgpuWaitPacketImmediates));
-  return &kAmdgpuWaitPacketImmediates[immediate_row];
+  return &loom_amdgpu_wait_packet_immediates[immediate_row];
 }
 
 const loom_low_descriptor_t* loom_amdgpu_wait_packet_resolve_descriptor(

@@ -68,69 +68,6 @@ def test_vopd_component_source_forms_share_canonical_native_info() -> None:
     assert len({amdgpu_vopd_component_tables._component_info_key(component) for component in move_components}) == 1
 
 
-def test_vopd_component_fragment_is_data_only() -> None:
-    component = amdgpu_vopd_component_tables._component_definitions()[0]
-    rule = amdgpu_vopd_component_tables._VopdComponentRule(
-        component=component,
-        descriptor_set_keys=("amdgpu.rdna3.core",),
-    )
-    placement_recipe = amdgpu_vopd_component_tables._pair_placement_recipe(
-        component,
-        component,
-    )
-    tables = amdgpu_vopd_component_tables._VopdComponentTables(
-        rules=(rule,),
-        descriptor_lookup_ranges=(
-            amdgpu_vopd_component_tables._VopdComponentDescriptorLookupRange(
-                descriptor_set_key="amdgpu.rdna3.core",
-                descriptor_set_ordinal=0,
-                first_descriptor_lookup=0,
-                descriptor_lookup_count=2,
-            ),
-        ),
-        descriptor_lookup_rows=(0, 1),
-        pair_affinity_ranges=(
-            amdgpu_vopd_component_tables._VopdPairAffinityRange(
-                descriptor_set_key="amdgpu.rdna3.core",
-                descriptor_set_ordinal=0,
-                first_pair_affinity=0,
-                pair_affinity_count=1,
-            ),
-        ),
-        pair_affinity_rows=(
-            amdgpu_vopd_component_tables._VopdPairAffinityRow(
-                first_descriptor_ordinal=1,
-                second_descriptor_ordinal=1,
-                priority=2,
-                placement_recipe_index=0,
-            ),
-        ),
-        pair_placement_recipes=(placement_recipe,),
-    )
-    fragments = (
-        amdgpu_vopd_component_tables._emit_component_rules(tables),
-        amdgpu_vopd_component_tables._emit_descriptor_lookup_ranges(tables),
-        amdgpu_vopd_component_tables._emit_descriptor_lookup_rows(tables),
-        amdgpu_vopd_component_tables._emit_pair_affinity_ranges(tables),
-        amdgpu_vopd_component_tables._emit_pair_affinity_rows(tables),
-        amdgpu_vopd_component_tables._emit_pair_placement_recipes(tables),
-    )
-    fragment = "\n".join(fragments)
-
-    assert "LOOM_AMDGPU_VOPD_COMPONENT_INFO_RULE(" in fragment
-    assert "LOOM_AMDGPU_VOPD_COMPONENT_RULE(" in fragment
-    assert "LOOM_AMDGPU_VOPD_COMPONENT_REASON_RULE(" in fragment
-    assert "LOOM_AMDGPU_VOPD_COMPONENT_DESCRIPTOR_LOOKUP_RANGE(" in fragment
-    assert "LOOM_AMDGPU_VOPD_COMPONENT_DESCRIPTOR_LOOKUP(" in fragment
-    assert "LOOM_AMDGPU_VOPD_PAIR_AFFINITY_RANGE(" in fragment
-    assert "LOOM_AMDGPU_VOPD_PAIR_AFFINITY(" in fragment
-    assert "LOOM_AMDGPU_VOPD_PAIR_PLACEMENT_RECIPE(" in fragment
-    assert "LOOM_AMDGPU_VOPD_PAIR_PLACEMENT_RELATION(" in fragment
-    assert "typedef " not in fragment
-    assert "struct " not in fragment
-    assert "static " not in fragment
-
-
 def test_vopd_descriptor_lookup_rows_use_descriptor_order() -> None:
     component = amdgpu_vopd_component_tables._component_definitions()[0]
     rule = amdgpu_vopd_component_tables._VopdComponentRule(

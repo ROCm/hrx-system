@@ -277,14 +277,10 @@ loom_cc_library(
   NAME
     wait_packet_tables
   HDRS
+    "wait_packet_data.h"
     "wait_packet_tables.h"
-  TEXTUAL_HDRS
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/descriptors/wait_packet_descriptor_lookups.inl"
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/descriptors/wait_packet_descriptor_ranges.inl"
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/descriptors/wait_packet_descriptors.inl"
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/descriptors/wait_packet_immediates.inl"
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/descriptors/wait_packet_selections.inl"
   SRCS
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/descriptors/wait_packet_data.c"
     "wait_packet_tables.c"
   DEPS
     ::wait_counters
@@ -345,15 +341,11 @@ loom_cc_library(
   NAME
     vopd_plan
   HDRS
+    "vopd_component.h"
+    "vopd_data.h"
     "vopd_plan.h"
-  TEXTUAL_HDRS
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/descriptors/vopd_component_descriptor_lookup_ranges.inl"
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/descriptors/vopd_component_descriptor_lookups.inl"
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/descriptors/vopd_component_rules.inl"
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/descriptors/vopd_pair_affinities.inl"
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/descriptors/vopd_pair_affinity_ranges.inl"
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/descriptors/vopd_pair_placement_recipes.inl"
   SRCS
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/descriptors/vopd_data.c"
     "vopd_plan.c"
   DEPS
     ::address_state
@@ -366,12 +358,14 @@ loom_cc_library(
     loom::codegen::low::allocation
     loom::codegen::low::diagnostics
     loom::codegen::low::packet
+    loom::codegen::low::placement_pair
     loom::codegen::low::schedule
     loom::ir
     loom::ops::low
     loom::target::arch::amdgpu::encoding
     loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_info
+    loom::target::arch::amdgpu::target_info_defs
     loom::util::json
     loom::util::stream
   PUBLIC

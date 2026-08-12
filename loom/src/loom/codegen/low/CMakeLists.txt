@@ -379,12 +379,23 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    placement_pair
+  HDRS
+    "placement_pair.h"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     placement
   HDRS
     "placement.h"
   SRCS
     "placement.c"
   DEPS
+    ::placement_pair
     ::storage_relation
     iree::base
     iree::base::internal::arena
