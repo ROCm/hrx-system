@@ -193,8 +193,8 @@ TEST(TopologyEdge, SchedulingWordBitfieldOverlap) {
   EXPECT_EQ(iree_hal_topology_edge_link_class(lo), 7);
 }
 
-// Verifies that interop word bitfields don't overlap.
-TEST(TopologyEdge, InteropWordBitfieldOverlap) {
+// Verifies that cold-word bitfields don't overlap.
+TEST(TopologyEdge, ColdWordBitfieldOverlap) {
   iree_hal_topology_edge_interop_word_t hi = 0;
 
   // Set each field to its maximum value.
@@ -202,6 +202,8 @@ TEST(TopologyEdge, InteropWordBitfieldOverlap) {
   hi = iree_hal_topology_edge_set_semaphore_export_timepoint_types(hi, 0xFFFF);
   hi = iree_hal_topology_edge_set_buffer_import_types(hi, 0xFF);
   hi = iree_hal_topology_edge_set_buffer_export_types(hi, 0xFF);
+  hi = iree_hal_topology_edge_set_link_type(hi, 0xFF);
+  hi = iree_hal_topology_edge_set_path_hop_count(hi, 0xFF);
 
   // Verify all fields retained their values.
   EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(hi),
@@ -210,6 +212,8 @@ TEST(TopologyEdge, InteropWordBitfieldOverlap) {
             0xFFFF);
   EXPECT_EQ(iree_hal_topology_edge_buffer_import_types(hi), 0xFF);
   EXPECT_EQ(iree_hal_topology_edge_buffer_export_types(hi), 0xFF);
+  EXPECT_EQ(iree_hal_topology_edge_link_type(hi), 0xFF);
+  EXPECT_EQ(iree_hal_topology_edge_path_hop_count(hi), 0xFF);
 }
 
 // Verifies that setting each scheduling field independently doesn't affect
@@ -233,7 +237,7 @@ TEST(TopologyEdge, SchedulingWordBitfieldIndependence) {
 }
 
 // Verifies that setting interop fields independently doesn't affect others.
-TEST(TopologyEdge, InteropWordBitfieldIndependence) {
+TEST(TopologyEdge, ColdWordBitfieldIndependence) {
   iree_hal_topology_edge_interop_word_t hi = 0;
 
   // Set semaphore import timepoint types.
@@ -246,10 +250,26 @@ TEST(TopologyEdge, InteropWordBitfieldIndependence) {
   EXPECT_EQ(iree_hal_topology_edge_semaphore_export_timepoint_types(hi),
             IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_NONE);
   EXPECT_EQ(iree_hal_topology_edge_buffer_import_types(hi), 0);
+  EXPECT_EQ(iree_hal_topology_edge_link_type(hi),
+            IREE_HAL_TOPOLOGY_LINK_TYPE_UNKNOWN);
+  EXPECT_EQ(iree_hal_topology_edge_path_hop_count(hi), 0);
 
   // Set buffer export types and verify semaphore import unchanged.
   hi = iree_hal_topology_edge_set_buffer_export_types(
       hi, IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF);
+  EXPECT_EQ(iree_hal_topology_edge_buffer_export_types(hi),
+            IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF);
+  EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(hi),
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_CUDA_EVENT |
+                IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_HIP_EVENT);
+
+  // Physical-path details are independent from resource handle masks.
+  hi = iree_hal_topology_edge_set_link_type(hi,
+                                            IREE_HAL_TOPOLOGY_LINK_TYPE_PCIE);
+  hi = iree_hal_topology_edge_set_path_hop_count(hi, 3);
+  EXPECT_EQ(iree_hal_topology_edge_link_type(hi),
+            IREE_HAL_TOPOLOGY_LINK_TYPE_PCIE);
+  EXPECT_EQ(iree_hal_topology_edge_path_hop_count(hi), 3);
   EXPECT_EQ(iree_hal_topology_edge_buffer_export_types(hi),
             IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF);
   EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(hi),
@@ -314,6 +334,9 @@ TEST(TopologyEdge, CreateSelf) {
             IREE_HAL_TOPOLOGY_HANDLE_TYPE_NATIVE);
   EXPECT_EQ(iree_hal_topology_edge_buffer_export_types(edge.hi),
             IREE_HAL_TOPOLOGY_HANDLE_TYPE_NATIVE);
+  EXPECT_EQ(iree_hal_topology_edge_link_type(edge.hi),
+            IREE_HAL_TOPOLOGY_LINK_TYPE_UNKNOWN);
+  EXPECT_EQ(iree_hal_topology_edge_path_hop_count(edge.hi), 0);
 }
 
 // Tests creation of a conservative host-staged edge.
@@ -349,6 +372,9 @@ TEST(TopologyEdge, CreateHostStaged) {
   EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(edge.hi),
             IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_NONE);
   EXPECT_EQ(iree_hal_topology_edge_buffer_import_types(edge.hi), 0);
+  EXPECT_EQ(iree_hal_topology_edge_link_type(edge.hi),
+            IREE_HAL_TOPOLOGY_LINK_TYPE_UNKNOWN);
+  EXPECT_EQ(iree_hal_topology_edge_path_hop_count(edge.hi), 0);
 }
 
 //===----------------------------------------------------------------------===//
@@ -391,6 +417,9 @@ TEST(TopologyEdge, SameBackendSpecDoesNotImplyNativeSynchronization) {
 
 TEST(TopologyEdge, RefineSameRuntimeDomainUsesNativeSynchronizationOnly) {
   iree_hal_topology_edge_t edge = iree_hal_topology_edge_make_host_staged();
+  edge.hi = iree_hal_topology_edge_set_link_type(
+      edge.hi, IREE_HAL_TOPOLOGY_LINK_TYPE_PCIE);
+  edge.hi = iree_hal_topology_edge_set_path_hop_count(edge.hi, 2);
 
   iree_hal_topology_edge_refine_same_runtime_domain(&edge);
   EXPECT_EQ(iree_hal_topology_edge_wait_mode(edge.lo),
@@ -411,6 +440,9 @@ TEST(TopologyEdge, RefineSameRuntimeDomainUsesNativeSynchronizationOnly) {
             IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_NONE);
   EXPECT_EQ(iree_hal_topology_edge_buffer_import_types(edge.hi),
             IREE_HAL_TOPOLOGY_HANDLE_TYPE_NONE);
+  EXPECT_EQ(iree_hal_topology_edge_link_type(edge.hi),
+            IREE_HAL_TOPOLOGY_LINK_TYPE_PCIE);
+  EXPECT_EQ(iree_hal_topology_edge_path_hop_count(edge.hi), 2);
 }
 
 TEST(TopologyEdge, UnknownNumaDoesNotProjectDistanceFromNodeZero) {
@@ -523,6 +555,9 @@ TEST(TopologyEdge, PhysicalUuidMatchingIsPlacementNotAliasing) {
   EXPECT_NE(iree_hal_topology_edge_copy_cost(edge.lo), 0);
   EXPECT_EQ(iree_hal_topology_edge_capability_flags(edge.lo),
             IREE_HAL_TOPOLOGY_CAPABILITY_NONE);
+  EXPECT_EQ(iree_hal_topology_edge_link_type(edge.hi),
+            IREE_HAL_TOPOLOGY_LINK_TYPE_UNKNOWN);
+  EXPECT_EQ(iree_hal_topology_edge_path_hop_count(edge.hi), 0);
 
   iree_hal_device_spec_release(spec_b);
   iree_hal_device_spec_release(spec_a);
@@ -544,7 +579,8 @@ TEST(ResourceOrigin, Initialize) {
   EXPECT_EQ(origin.self_edge, edge.lo);
   EXPECT_EQ(origin.topology_index, 3);
 
-  // Check size is as expected (16 bytes with padding).
+  // Cold topology details must not enlarge either the edge or resource origin.
+  EXPECT_EQ(sizeof(iree_hal_topology_edge_t), 16);
   EXPECT_EQ(sizeof(iree_hal_resource_origin_t), 16);
 }
 
@@ -589,12 +625,17 @@ TEST(TopologyEdge, Formatting) {
 
   // Should contain mode information.
   EXPECT_NE(std::strstr(buffer, "NATIVE"), nullptr);
+  EXPECT_NE(std::strstr(buffer, "transport=UNKNOWN"), nullptr);
+  EXPECT_NE(std::strstr(buffer, "hops=0"), nullptr);
 
   // Test host-staged edge formatting.
   edge = iree_hal_topology_edge_make_host_staged();
   edge.lo = iree_hal_topology_edge_set_wait_mode(
       edge.lo, IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY);
   edge.lo = iree_hal_topology_edge_set_copy_cost(edge.lo, 13);
+  edge.hi = iree_hal_topology_edge_set_link_type(
+      edge.hi, IREE_HAL_TOPOLOGY_LINK_TYPE_PCIE);
+  edge.hi = iree_hal_topology_edge_set_path_hop_count(edge.hi, 2);
 
   iree_string_builder_reset(&sb);
   IREE_ASSERT_OK(iree_hal_topology_edge_format(edge, &sb));
@@ -603,6 +644,8 @@ TEST(TopologyEdge, Formatting) {
   // Should contain copy mode and cost.
   EXPECT_NE(std::strstr(buffer, "COPY"), nullptr);
   EXPECT_NE(std::strstr(buffer, "copy_cost=13"), nullptr);
+  EXPECT_NE(std::strstr(buffer, "transport=PCIE"), nullptr);
+  EXPECT_NE(std::strstr(buffer, "hops=2"), nullptr);
 
   iree_string_builder_deinitialize(&sb);
 }

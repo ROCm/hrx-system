@@ -417,22 +417,22 @@ static iree_hal_topology_link_class_t iree_hal_amdgpu_link_type_to_link_class(
   }
 }
 
-static iree_hal_amdgpu_link_type_t
-iree_hal_amdgpu_link_type_to_amdgpu_link_type(
+static iree_hal_topology_link_type_t
+iree_hal_amdgpu_link_type_to_topology_link_type(
     hsa_amd_link_info_type_t link_type) {
   switch (link_type) {
     case HSA_AMD_LINK_INFO_TYPE_HYPERTRANSPORT:
-      return IREE_HAL_AMDGPU_LINK_TYPE_HYPERTRANSPORT;
+      return IREE_HAL_TOPOLOGY_LINK_TYPE_HYPERTRANSPORT;
     case HSA_AMD_LINK_INFO_TYPE_QPI:
-      return IREE_HAL_AMDGPU_LINK_TYPE_QPI;
+      return IREE_HAL_TOPOLOGY_LINK_TYPE_QPI;
     case HSA_AMD_LINK_INFO_TYPE_PCIE:
-      return IREE_HAL_AMDGPU_LINK_TYPE_PCIE;
+      return IREE_HAL_TOPOLOGY_LINK_TYPE_PCIE;
     case HSA_AMD_LINK_INFO_TYPE_INFINBAND:
-      return IREE_HAL_AMDGPU_LINK_TYPE_INFINIBAND;
+      return IREE_HAL_TOPOLOGY_LINK_TYPE_INFINIBAND;
     case HSA_AMD_LINK_INFO_TYPE_XGMI:
-      return IREE_HAL_AMDGPU_LINK_TYPE_XGMI;
+      return IREE_HAL_TOPOLOGY_LINK_TYPE_XGMI;
     default:
-      return IREE_HAL_AMDGPU_LINK_TYPE_UNKNOWN;
+      return IREE_HAL_TOPOLOGY_LINK_TYPE_UNKNOWN;
   }
 }
 
@@ -527,7 +527,7 @@ static void iree_hal_amdgpu_physical_topology_edge_initialize(
   out_edge->coherency.all_hops_coherent = 1;
   out_edge->atomics.all_hops_32bit = 1;
   out_edge->atomics.all_hops_64bit = 1;
-  out_edge->link.link_type = IREE_HAL_AMDGPU_LINK_TYPE_UNKNOWN;
+  out_edge->link.link_type = IREE_HAL_TOPOLOGY_LINK_TYPE_UNKNOWN;
   out_edge->link.link_class = IREE_HAL_TOPOLOGY_LINK_CLASS_SAME_DIE;
   out_edge->modes.noncoherent_read = IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY;
   out_edge->modes.noncoherent_write = IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY;
@@ -598,7 +598,7 @@ iree_status_t iree_hal_amdgpu_select_physical_topology_edge(
   if (selection->link.count > 0) {
     const hsa_amd_memory_pool_link_info_t* first_hop = &selection->link.hops[0];
     out_edge->link.link_type =
-        iree_hal_amdgpu_link_type_to_amdgpu_link_type(first_hop->link_type);
+        iree_hal_amdgpu_link_type_to_topology_link_type(first_hop->link_type);
 
     // Recover the physical hop count from the aggregate record. This preserves
     // the native link-query result until ROCr reports one record per hop.
