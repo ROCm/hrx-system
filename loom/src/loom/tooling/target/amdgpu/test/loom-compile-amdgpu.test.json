@@ -2,7 +2,7 @@
   "version": 1,
   "cases": [
     {
-      "name": "compiles named-lane wave64 broadcasts across native wave32 halves",
+      "name": "compiles exact and uniform dynamic wave64 broadcasts across native wave32 halves",
       "steps": [
         {
           "name": "compile-gfx11-generic",

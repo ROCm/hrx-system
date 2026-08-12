@@ -78,3 +78,40 @@ low.kernel.def target<amdgpu.rdna3_5.core>(@target) workgroup_size(64, 1, 1) wor
   global_store_b128_saddr %40, %broadcast, %output_view
   return
 }
+
+// ====
+
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
+
+kernel.def target(@target) @subgroup_broadcast_i32_uniform_dynamic_lane_wave64(%source_lane: index) {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%source_lane: index, %input: buffer, %output: buffer) {
+  %bounded_source_lane = index.assume %source_lane [range(%source_lane, 0, 63)] : index
+  %source_lane_i32 = index.cast %bounded_source_lane : index to i32
+  %tid = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32>
+  %loaded = vector.load %input_view[%tid] : view<64xi32> -> vector<1xi32>
+  %value = vector.extract %loaded[0] : vector<1xi32> -> i32
+  %broadcast = kernel.subgroup.broadcast %value from %source_lane_i32 : i32, i32
+  %result = vector.from_elements %broadcast : vector<1xi32>
+  vector.store %result, %output_view[%tid] : vector<1xi32>, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3_5.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_broadcast_i32_uniform_dynamic_lane_wave64(%source_lane_i32: reg<amdgpu.sgpr>) asm {
+  %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %22 = v_lshlrev_b32_src0_inline %tid, 2
+  %value = global_load_b32_saddr %22, %input_view
+  %24 = v_readlane_b32_src1_sgpr %value, %source_lane_i32
+  %result = v_mov_b32_copy %24
+  %26 = v_lshlrev_b32_src0_inline %tid, 2
+  global_store_b32_saddr %26, %result, %output_view
+  return
+}

@@ -388,7 +388,7 @@ kernel.def target(@target) @subgroup_active_mask_i32_wave64_rejected() {
 // ====
 
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
-kernel.def target(@target) @subgroup_broadcast_dynamic_wave64_native_width_rejected() {
+kernel.def target(@target) @subgroup_broadcast_lane_varying_wave64_rejected() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
@@ -397,7 +397,7 @@ kernel.def target(@target) @subgroup_broadcast_dynamic_wave64_native_width_rejec
   %value = index.cast %workitem : index to i32
   %lane_id = kernel.subgroup.lane.id : index
   %lane = index.cast %lane_id : index to i32
-  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_broadcast.native_width"}
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_broadcast.uniform_lane"}
   %broadcast = kernel.subgroup.broadcast %value from %lane : i32, i32
   kernel.return
 }

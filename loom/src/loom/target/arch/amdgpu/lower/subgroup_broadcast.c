@@ -21,6 +21,8 @@
 typedef struct loom_amdgpu_subgroup_broadcast_shape_t {
   // Exact source lane when known during planning, or UINT32_MAX when dynamic.
   uint32_t exact_source_lane;
+  // Whether every active lane observes the same source lane.
+  bool source_lane_is_subgroup_uniform;
 } loom_amdgpu_subgroup_broadcast_shape_t;
 
 static bool loom_amdgpu_subgroup_broadcast_resolve_shape(
@@ -36,11 +38,14 @@ static bool loom_amdgpu_subgroup_broadcast_resolve_shape(
       return false;
     }
     out_shape->exact_source_lane = (uint32_t)exact_value;
+    out_shape->source_lane_is_subgroup_uniform = true;
     return true;
   }
 
   const loom_value_facts_t facts =
       loom_value_fact_table_lookup(fact_table, source_lane);
+  out_shape->source_lane_is_subgroup_uniform =
+      loom_value_facts_is_subgroup_uniform(facts);
   return !loom_value_facts_is_float(facts) && facts.range_lo >= 0 &&
          facts.range_hi < (int64_t)wavefront_size;
 }
@@ -90,13 +95,17 @@ iree_status_t loom_amdgpu_select_kernel_subgroup_broadcast_plan(
     }
     out_plan->strategy = LOOM_AMDGPU_SUBGROUP_BROADCAST_STRATEGY_BPERMUTE;
   } else {
-    if (shape.exact_source_lane == UINT32_MAX) {
+    if (shape.exact_source_lane == UINT32_MAX &&
+        !shape.source_lane_is_subgroup_uniform) {
       return iree_ok_status();
     }
+    const loom_amdgpu_descriptor_ref_t exchange_descriptor_ref =
+        shape.exact_source_lane == UINT32_MAX
+            ? LOOM_AMDGPU_DESCRIPTOR_REF_V_READLANE_B32_SRC1_SGPR
+            : LOOM_AMDGPU_DESCRIPTOR_REF_V_READLANE_B32_SRC1_INLINE;
     const loom_amdgpu_descriptor_resolution_t resolutions[] = {
         {
-            .descriptor_ref =
-                LOOM_AMDGPU_DESCRIPTOR_REF_V_READLANE_B32_SRC1_INLINE,
+            .descriptor_ref = exchange_descriptor_ref,
             .out_descriptor = &out_plan->exchange_descriptor,
         },
         {
@@ -195,6 +204,7 @@ iree_status_t loom_amdgpu_lower_kernel_subgroup_broadcast(
       context, source_op, plan->value, plan->payload_kind, &low_value));
 
   loom_value_id_t low_source_byte_offset = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t low_source_lane = LOOM_VALUE_ID_INVALID;
   loom_type_t scalar_type = loom_type_none();
   switch (plan->strategy) {
     case LOOM_AMDGPU_SUBGROUP_BROADCAST_STRATEGY_BPERMUTE:
@@ -203,7 +213,6 @@ iree_status_t loom_amdgpu_lower_kernel_subgroup_broadcast(
             context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
             plan->exact_source_lane * 4u, lane_type, &low_source_byte_offset));
       } else {
-        loom_value_id_t low_source_lane = LOOM_VALUE_ID_INVALID;
         IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
             context, plan->source_lane, &low_source_lane));
         IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_vgpr_b32(
@@ -213,10 +222,14 @@ iree_status_t loom_amdgpu_lower_kernel_subgroup_broadcast(
             &low_source_byte_offset));
       }
       break;
-    case LOOM_AMDGPU_SUBGROUP_BROADCAST_STRATEGY_SCALAR_READLANE:
-      IREE_ASSERT_NE(plan->exact_source_lane, UINT32_MAX);
+    case LOOM_AMDGPU_SUBGROUP_BROADCAST_STRATEGY_SCALAR_READLANE: {
       IREE_RETURN_IF_ERROR(loom_amdgpu_make_sgpr_type(context, &scalar_type));
+      if (plan->exact_source_lane == UINT32_MAX) {
+        IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
+            context, plan->source_lane, &low_source_lane));
+      }
       break;
+    }
     default:
       IREE_ASSERT_UNREACHABLE("unsupported AMDGPU subgroup broadcast strategy");
   }
@@ -237,9 +250,17 @@ iree_status_t loom_amdgpu_lower_kernel_subgroup_broadcast(
       }
       case LOOM_AMDGPU_SUBGROUP_BROADCAST_STRATEGY_SCALAR_READLANE: {
         loom_value_id_t scalar_register = LOOM_VALUE_ID_INVALID;
-        IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_readlane_register(
-            context, source_op, &plan->exchange_descriptor, low_source_register,
-            plan->exact_source_lane, scalar_type, &scalar_register));
+        if (plan->exact_source_lane != UINT32_MAX) {
+          IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_readlane_register(
+              context, source_op, &plan->exchange_descriptor,
+              low_source_register, plan->exact_source_lane, scalar_type,
+              &scalar_register));
+        } else {
+          IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_readlane_sgpr_register(
+              context, source_op, &plan->exchange_descriptor,
+              low_source_register, low_source_lane, scalar_type,
+              &scalar_register));
+        }
         IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_vgpr_unary(
             context, source_op, &plan->scalar_copy_descriptor, scalar_register,
             lane_type, &result_registers[i]));
@@ -339,15 +360,19 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_subgroup_broadcast(
         context, op, LOOM_AMDGPU_DESCRIPTOR_REF_DS_BPERMUTE_B32,
         IREE_SV("descriptor.ds_bpermute_b32"));
   }
-  if (shape.exact_source_lane == UINT32_MAX) {
+  if (shape.exact_source_lane == UINT32_MAX &&
+      !shape.source_lane_is_subgroup_uniform) {
     return loom_amdgpu_low_legality_reject(
-        context, op, IREE_SV("subgroup_broadcast.native_width"));
+        context, op, IREE_SV("subgroup_broadcast.uniform_lane"));
   }
+  const loom_amdgpu_descriptor_ref_t exchange_descriptor_ref =
+      shape.exact_source_lane == UINT32_MAX
+          ? LOOM_AMDGPU_DESCRIPTOR_REF_V_READLANE_B32_SRC1_SGPR
+          : LOOM_AMDGPU_DESCRIPTOR_REF_V_READLANE_B32_SRC1_INLINE;
   const loom_amdgpu_low_legality_descriptor_requirement_t requirements[] = {
       {
           .constraint_key = IREE_SVL("descriptor.v_readlane_b32"),
-          .descriptor_ref =
-              LOOM_AMDGPU_DESCRIPTOR_REF_V_READLANE_B32_SRC1_INLINE,
+          .descriptor_ref = exchange_descriptor_ref,
       },
       {
           .constraint_key = IREE_SVL("descriptor.v_mov_b32_copy"),

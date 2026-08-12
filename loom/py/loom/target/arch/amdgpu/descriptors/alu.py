@@ -1483,6 +1483,25 @@ def _v_readlane_b32_src1_inline_overlay() -> AmdgpuDescriptorOverlay:
         ),
         immediate_fields=("SRC1",),
         immediates=(replace(_source_inline_u32_immediate("lane"), unsigned_max=63),),
+        fixed_encoding_fields=(("SRC2", 0),),
+        effects=(_CONVERGENT_EFFECT,),
+    )
+
+
+def _v_readlane_b32_src1_sgpr_overlay() -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.v_readlane_b32.src1_sgpr",
+        instruction_name="V_READLANE_B32",
+        mnemonic="v_readlane_b32_src1_sgpr",
+        encoding_name="ENC_VOP3",
+        semantic_tag="lane.read.b32",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _sgpr_result()),
+            AmdgpuOperandOverlay("SRC0", _vgpr_operand("value")),
+            AmdgpuOperandOverlay("SRC1", _sgpr_operand("lane")),
+        ),
+        fixed_encoding_fields=(("SRC2", 0),),
         effects=(_CONVERGENT_EFFECT,),
     )
 
@@ -7035,6 +7054,7 @@ __all__ = (
     "_v_rcp_f32_overlay",
     "_v_readfirstlane_b32_overlay",
     "_v_readlane_b32_src1_inline_overlay",
+    "_v_readlane_b32_src1_sgpr_overlay",
     "_v_rndne_f32_overlay",
     "_v_rsq_f32_overlay",
     "_v_sin_f32_overlay",

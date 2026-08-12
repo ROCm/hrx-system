@@ -821,7 +821,7 @@ typedef enum loom_amdgpu_subgroup_payload_kind_e {
 typedef enum loom_amdgpu_subgroup_broadcast_strategy_e {
   // Read the named lane directly through the target's native subgroup crossbar.
   LOOM_AMDGPU_SUBGROUP_BROADCAST_STRATEGY_BPERMUTE = 0,
-  // Read one statically named lane into an SGPR and publish it to every lane.
+  // Read one subgroup-uniform lane into an SGPR and publish it to every lane.
   LOOM_AMDGPU_SUBGROUP_BROADCAST_STRATEGY_SCALAR_READLANE = 1,
 } loom_amdgpu_subgroup_broadcast_strategy_t;
 
