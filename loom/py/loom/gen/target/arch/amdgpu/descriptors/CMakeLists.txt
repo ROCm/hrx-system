@@ -104,11 +104,11 @@ iree_py_library(
 
 iree_py_library(
   NAME
-    descriptor_derived_tables
+    descriptor_tables
   MAIN
-    "amdgpu_descriptor_derived_tables.py"
+    "amdgpu_descriptor_tables.py"
   SRCS
-    "amdgpu_descriptor_derived_tables.py"
+    "amdgpu_descriptor_tables.py"
   DEPS
     loom::py::loom::gen::target::arch::amdgpu::descriptors::package_init
     loom::py::loom::gen::target::arch::amdgpu::descriptors::planning_table_inputs

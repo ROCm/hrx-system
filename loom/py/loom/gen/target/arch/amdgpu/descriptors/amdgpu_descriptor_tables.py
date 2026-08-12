@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Generator: AMDGPU ISA XML -> global descriptor-derived table family."""
+"""Generator: AMDGPU ISA XML -> global descriptor table family."""
 
 from __future__ import annotations
 

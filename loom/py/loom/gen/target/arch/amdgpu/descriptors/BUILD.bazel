@@ -100,9 +100,9 @@ iree_py_binary(
 )
 
 iree_py_binary(
-    name = "descriptor_derived_tables",
-    srcs = ["amdgpu_descriptor_derived_tables.py"],
-    main = "amdgpu_descriptor_derived_tables.py",
+    name = "descriptor_tables",
+    srcs = ["amdgpu_descriptor_tables.py"],
+    main = "amdgpu_descriptor_tables.py",
     visibility = GENERATOR_VISIBILITY,
     deps = [
         ":package_init",

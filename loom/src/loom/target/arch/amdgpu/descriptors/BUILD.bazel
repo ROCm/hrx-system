@@ -30,7 +30,7 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-_AMDGPU_DESCRIPTOR_DERIVED_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/descriptors:descriptor_derived_tables"
+_AMDGPU_DESCRIPTOR_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/descriptors:descriptor_tables"
 
 _AMDGPU_TARGET_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu:target_tables"
 
@@ -83,7 +83,7 @@ _AMDGPU_ISA_XML_INPUTS = [
     "@amdgpu_isa_xml//:amdgpu_isa_rdna4.xml",
 ]
 
-_AMDGPU_DESCRIPTOR_DERIVED_TABLE_VISIBILITY = [
+_AMDGPU_DESCRIPTOR_TABLE_VISIBILITY = [
     "//loom/src/loom/target/arch/amdgpu/planning:__pkg__",
     "//loom/src/loom/target/arch/amdgpu/refs:__pkg__",
 ]
@@ -93,14 +93,14 @@ _AMDGPU_TARGET_TABLE_VISIBILITY = [
 ]
 
 loom_generated_file_family(
-    name = "descriptor_derived_tables_gen",
+    name = "descriptor_tables_gen",
     args = (
         _AMDGPU_ISA_XML_ARGS + [
             "--target-ref-public-header=loom/target/arch/amdgpu/refs/target_refs.h",
         ] + loom_amdgpu_selected_descriptor_set_key_args()
     ),
     comment = "Generating AMDGPU global descriptor-derived table family",
-    generator = _AMDGPU_DESCRIPTOR_DERIVED_TABLE_GENERATOR,
+    generator = _AMDGPU_DESCRIPTOR_TABLE_GENERATOR,
     inputs = _AMDGPU_ISA_XML_INPUTS,
     output_flags = [
         "--wait-packet-source",
@@ -114,7 +114,7 @@ loom_generated_file_family(
         "target_refs_data.c",
         "target_refs_tables.h",
     ],
-    visibility = _AMDGPU_DESCRIPTOR_DERIVED_TABLE_VISIBILITY,
+    visibility = _AMDGPU_DESCRIPTOR_TABLE_VISIBILITY,
 )
 
 loom_generated_file_family(
