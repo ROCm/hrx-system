@@ -75,6 +75,8 @@ nav:
       - Link and package modules: workflows/link-and-package.md
       - Test correctness: workflows/test-correctness.md
       - Benchmark checked work: workflows/benchmark.md
+      - Compile artifacts: workflows/compile-artifacts.md
+      - Read compile reports: workflows/compile-reports.md
   - Reference:
       - Reference map: reference/index.md
       - Dialects: reference/dialects/index.md

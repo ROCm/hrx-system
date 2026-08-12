@@ -69,3 +69,12 @@ emitted; compile reports describe how the compiler produced it.
 that evidence. Pass reports, IR traces, native listings, and raw JSON queries
 remain available when the focused view identifies a question that needs deeper
 inspection.
+
+| Task | Workflow |
+| --- | --- |
+| Compile a loader-ready artifact | [Compile artifacts](compile-artifacts.md#compile-for-a-hal-loader) |
+| Select roots and configuration | [Compile artifacts](compile-artifacts.md#select-roots-from-a-catalog) |
+| Describe an emitted artifact | [Compile artifacts](compile-artifacts.md#emit-an-artifact-manifest) |
+| Read one bounded report view | [Read compile reports](compile-reports.md#show-one-report) |
+| Compare compiler evidence | [Read compile reports](compile-reports.md#diff-one-controlled-change) |
+| Get target-owned experiments | [Read compile reports](compile-reports.md#ask-the-target-for-experiments) |
