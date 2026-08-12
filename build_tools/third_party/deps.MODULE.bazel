@@ -63,9 +63,9 @@ rocm_repository(
     name = "hsa_runtime_headers",
     build_file = "//build_tools/third_party/rocm:hsa_runtime_headers.BUILD.bazel",
     display_name = "HSA runtime and AQL profile SDK headers",
-    sha256 = "66bd23285a3886c9b9983ac6de5efe4a828a2a293fd898d7fd75ab6c500741fb",
-    strip_prefix = "hsa-runtime-headers-cc2b5f429de4d1cb2be96ed10e6f45246e408d0e",
-    url = "https://github.com/iree-org/hsa-runtime-headers/archive/cc2b5f429de4d1cb2be96ed10e6f45246e408d0e.tar.gz",
+    sha256 = "a906b35e77b9cee074995d144cf7718a0069eba08ba7bc741ee7576950fde923",
+    strip_prefix = "hsa-runtime-headers-4285513114a70f7cf4830c89279c8cfa57b901bb",
+    url = "https://github.com/iree-org/hsa-runtime-headers/archive/4285513114a70f7cf4830c89279c8cfa57b901bb.tar.gz",
 )
 
 rocm_repository(
