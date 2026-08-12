@@ -141,7 +141,7 @@ TOOLS = {
         default=False,
         assets={
             "darwin-amd64": ToolAsset(
-                url="https://www.doxygen.nl/files/doxygen-1.17.0-mac-intel.zip",
+                url="https://github.com/doxygen/doxygen/releases/download/Release_1_17_0/doxygen-1.17.0-mac-intel.zip",
                 sha256="27a057d6084e45750f0f99c3d00d19e9fdbe6cd49598add1cb7160462796d195",
                 archive_format="zip",
                 archive_files=(
@@ -154,7 +154,7 @@ TOOLS = {
                 ),
             ),
             "darwin-arm64": ToolAsset(
-                url="https://www.doxygen.nl/files/doxygen-1.17.0-mac-arm.zip",
+                url="https://github.com/doxygen/doxygen/releases/download/Release_1_17_0/doxygen-1.17.0-mac-arm.zip",
                 sha256="e05a7f647f894d2d82ef26a1d231cda079d2d1d85cf1e1c6fd8072430d80d614",
                 archive_format="zip",
                 archive_files=(
@@ -167,7 +167,7 @@ TOOLS = {
                 ),
             ),
             "linux-amd64": ToolAsset(
-                url="https://www.doxygen.nl/files/doxygen-1.17.0.linux.bin.tar.gz",
+                url="https://github.com/doxygen/doxygen/releases/download/Release_1_17_0/doxygen-1.17.0.linux.bin.tar.gz",
                 sha256="75419ef4f446fc1c24ef12514b574e66e898ee6f527c6ae2ad84f91a905823c2",
                 archive_format="tar.gz",
                 archive_files=(
@@ -180,7 +180,7 @@ TOOLS = {
                 ),
             ),
             "windows-amd64": ToolAsset(
-                url="https://www.doxygen.nl/files/doxygen-1.17.0.windows.x64.bin.zip",
+                url="https://github.com/doxygen/doxygen/releases/download/Release_1_17_0/doxygen-1.17.0.windows.x64.bin.zip",
                 sha256="94594407c4cbca3049d76aacbb05d4a6f7d0f4e93c0de410b825d25ca5621c83",
                 archive_format="zip",
                 archive_files=(
