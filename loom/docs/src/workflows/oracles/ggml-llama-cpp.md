@@ -60,6 +60,13 @@ dispatches and their intermediate traffic.
 This is the central porting freedom: GGML describes one decomposition of the
 model, not the required Loom ABI or dispatch graph.
 
+Fusion is a primary candidate whenever it removes a transient packing,
+materialization, epilogue, or host-visible decision. Measure the complete
+semantic cut: fewer dispatches can still lose when longer live ranges, LDS, or
+barriers reduce residency. Keep a split candidate when complementary kernels
+can overlap and use different machine resources; the reference graph is neither
+a fusion ceiling nor a dispatch-count target.
+
 ## Treat GGUF and GGML formats as physical contracts
 
 GGUF is the container and metadata format. GGML tensor types describe the

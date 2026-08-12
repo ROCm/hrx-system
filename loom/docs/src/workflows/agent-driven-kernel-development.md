@@ -136,6 +136,92 @@ mathematical result. The focused [correctness](test-correctness.md) and
 [benchmark](benchmark.md) workflows describe case selection, external
 libraries, samples, and sanitizer policy.
 
+## Bound the performance regime before hill climbing
+
+Tile and provider searches become useful only after the experiment has a
+performance envelope. For throughput, the existing oracle is a proven
+achievable floor and a relevant compute or memory roofline is an upper bound.
+For latency, the inequalities reverse: the roofline supplies an idealized lower
+bound and the oracle is a concrete point to beat. State the unit and direction
+instead of saying only that a candidate is “between the bounds.”
+
+The envelope is measured for the exact semantic cut and physical request shape:
+
+| Bound or probe | Question answered |
+| --- | --- |
+| Selected oracle | What has already been achieved for this production boundary? |
+| Traffic accounting plus sustainable bandwidth | What latency floor follows from the minimum required bytes under this access pattern? |
+| Operation accounting plus relevant compute throughput | What latency floor follows from the required matrix, dot, vector, or scalar work? |
+| Load-only proxy | How much of the current schedule remains when the same addresses and publication path perform only enough observable arithmetic to keep the traffic live? |
+| Cache-resident proxy | How much remains when the same compute and schedule reuse operands from the intended cache level instead of streaming them from the production memory tier? |
+| Dispatch-only or publication proxy | How much command-processor, launch, synchronization, and output-publication cost exists without the main body? |
+
+The proxy's native artifact must prove that it retained the mechanism it claims
+to isolate. A load-only source that the compiler deletes, a cache-resident case
+whose working set spills from cache, or an empty kernel that omits the real
+publication barrier establishes no bound. Hardware counters and measured
+sustainable rates are stronger than a device data-sheet peak whose instruction
+type, request form, or residency differs from the kernel.
+
+These probes classify the regime before broad search. If a load-only proxy is
+already near the candidate, compute rewrites cannot recover much. If the
+cache-resident proxy remains slow, blaming external bandwidth is unsupported.
+If the candidate is below the known oracle and far from every relevant
+roofline, it is probably missing a structural schedule rather than a locally
+better integer tile.
+
+Optimization then has two coupled phases:
+
+1. **Create headroom.** Shorten live ranges, reduce VGPR or LDS allocation,
+   remove spills and unnecessary barriers, or reduce unavoidable traffic until
+   another residency or issue regime becomes possible.
+2. **Fill the headroom.** Add useful independent work, accumulator chains,
+   coalesced vector requests, staged prefetch, or producer-consumer overlap so
+   the newly available waves and issue slots hide latency.
+
+The first phase can make a report look cleaner while making the kernel slower.
+The second can raise pressure while improving throughput. Register count, LDS,
+and occupancy are therefore transition constraints, not standalone objectives.
+
+Many schedule changes form one causal bundle. Changing subgroup size to match
+an oracle also changes lane identity, fragment ownership, collective scope,
+workgroup topology, LDS exchange, and the amount of independent work per wave.
+A mechanical subgroup edit tests an incomplete schedule. The candidate record
+names the complete bundle required to enter the intended regime and uses
+selected partial variants or ablations to expose interactions. “One variable”
+means one causal hypothesis, not necessarily one textual edit.
+
+## Search laterally across dispatch boundaries
+
+Fusion is one of Loom's highest-leverage searches because the semantic cut is
+not tied to an oracle runtime's operator catalog. A producer can publish the
+consumer's representation while values are live, eliminating an intermediate
+round trip, a command-processor dispatch, host scheduling, and synchronization.
+Command programs make the fused and split forms comparable under one authored
+boundary.
+
+Dispatch count is not the objective. Fusion can extend live ranges, raise VGPR
+or LDS allocation, introduce workgroup barriers, duplicate computation, reduce
+residency, or serialize work that previously overlapped. Conversely, when the
+runtime and dependency graph permit concurrent execution, an LDS-heavy kernel
+that occupies only part of the machine may overlap with an LDS-free kernel and
+fill resources that a monolithic fusion leaves idle.
+
+Compare at least these quantities over the same semantic endpoints:
+
+- intermediate and parameter bytes transferred;
+- command-processor packets, host submissions, and synchronization edges;
+- registers, LDS, spills, residency, and independent work for every kernel;
+- complete dependent device span rather than the sum of isolated medians; and
+- measured overlap between split dispatches when overlap is part of the
+  hypothesis.
+
+The search includes fused, deliberately split, and pipelined forms. A trivial
+epilogue fusion may win immediately; a large contraction may be faster as
+several complementary kernels. The selected form is the smallest schedule that
+uses the machine well across the complete semantic cut, not the one with the
+fewest launch records.
+
 ## Write the candidate record first
 
 An agent's source edit begins with a compact experiment record:
@@ -156,9 +242,11 @@ eliminating full wait drains, reducing a live range enough to cross a residency
 tier, or changing the cross-lane transaction shape. “Try another tile size” is
 not a hypothesis until it names the mechanism the tile changes.
 
-One independent variable makes the result interpretable. A necessary compiler
-repair and the kernel candidate remain separate changes whenever the candidate
-can consume the repaired compiler through its normal source contract.
+One causal hypothesis makes the result interpretable. It may be a single edit
+or a coupled schedule bundle whose pieces are not independently useful.
+Necessary partial variants identify interactions, while a compiler repair and
+the kernel candidate remain separate changes whenever the candidate can consume
+the repaired compiler through its normal source contract.
 
 ## Ask the compiler before asking the GPU
 
@@ -258,6 +346,8 @@ Several recurring observations suggest experiments but cannot select a winner:
 | One lane issues wider packets. | Neighboring lanes may now touch distant addresses and destroy wave-level coalescing. |
 | The source resembles the oracle's loop. | Address forms, clauses, allocation, waits, and the runtime-selected dispatch can still differ. |
 | A profiler reports precise timestamps. | Precision does not establish replay identity or low perturbation. |
+| One member of a coupled schedule loses. | An incomplete subgroup, ownership, fragment, LDS, or overlap change may not enter the intended regime; test the declared bundle and discriminating ablations. |
+| The fused form launches fewer kernels. | Pressure, barriers, lost concurrency, and the complete device span determine whether removed dispatches were useful. |
 
 A losing candidate still has value when it falsifies one of these mechanisms.
 The experiment record states the corrected explanation and removes the more
@@ -335,16 +425,22 @@ the numerical, compiler, and physical gates around the answer.
 
 For each candidate:
 
-1. Name the production semantic cut and workload.
-2. Run in-source correctness and captured boundary checks.
-3. State the expected compiler and native change.
-4. Compile and inspect `show`, `suggest`, and strict `diff`.
-5. Follow evidence into detailed IR or ISA only when the mechanism differs.
-6. Benchmark one discriminating production shape.
-7. Sweep realistic shapes, tails, and a second target after the pilot wins.
-8. Integrate the cut and measure the complete dependent span.
-9. Keep the simplest schedule supported by all three evidence classes.
-10. Preserve rejected mechanisms and standalone compiler blockers.
+1. Name the production semantic cut, workload, oracle, and relevant rooflines.
+2. Use mechanism probes to classify the current compute, memory, or control
+   regime.
+3. Run in-source correctness and captured boundary checks.
+4. State one causal hypothesis, including every coupled change required to
+   enter the intended regime.
+5. Compile and inspect `show`, `suggest`, strict `diff`, and the expected native
+   delta.
+6. Follow evidence into detailed IR or ISA only when the mechanism differs.
+7. Benchmark one discriminating production shape.
+8. Search across dispatch boundaries and sweep realistic shapes, tails, and a
+   second target only after the pilot wins.
+9. Integrate the cut and measure the complete dependent span, including useful
+   overlap.
+10. Keep the simplest schedule supported by all three evidence classes and
+    preserve rejected mechanisms and standalone compiler blockers.
 
 The result is more than a fast artifact. It is a source family another agent
 can understand, specialize, validate, and improve without rediscovering its

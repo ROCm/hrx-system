@@ -97,6 +97,14 @@ out the same worksheet for the reference and Loom candidate:
 VGPRs” are observations, not schedules. They become hypotheses only after the
 worksheet names the work those choices organize.
 
+Changing Loom's subgroup size in isolation is therefore not a RADV-matching
+experiment. The corresponding ownership, lane cohorts, collective scopes,
+fragment layouts, LDS exchanges, workgroup shape, and independent accumulator
+chains form one schedule bundle. Reducing registers or LDS may create occupancy
+headroom, but the bundle must then fill that headroom with useful work and
+latency overlap. Selected partial variants explain the interaction; none is a
+promise that one target fact produces a fixed percentage improvement.
+
 Inspect address expressions as wave-level access patterns. Widening one lane's
 packet can make neighboring lanes touch distant rows and replace a coalesced
 transaction with many independent transactions. Likewise, higher modeled
