@@ -137,4 +137,4 @@ validation:
 extra_css:
   - stylesheets/extra.css
 
-copyright: Copyright &copy; 2026 Advanced Micro Devices, Inc.
+copyright: "&copy; 2026 Advanced Micro Devices, Inc."
