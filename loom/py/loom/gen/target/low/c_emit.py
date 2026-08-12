@@ -731,28 +731,28 @@ def emit_source_for_views(
         ),
     )
     for view in views:
-        if view.uses_storage_descriptor_tables:
-            continue
-        _emit_array(
-            lines,
-            "loom_low_descriptor_t",
-            view.spec.c_table_prefix,
-            "Descriptors",
-            _descriptor_row_lines(
-                compiled,
-                view.descriptors,
-                view.instruction_classes,
-                view.descriptor_rows,
-                view.canonical_asm_form_ordinals,
-            ),
-        )
-        _emit_array(
-            lines,
-            "loom_low_operand_form_t",
-            view.spec.c_table_prefix,
-            "OperandForms",
-            _operand_form_row_lines(view.operand_forms),
-        )
+        if not view.uses_storage_descriptor_tables:
+            _emit_array(
+                lines,
+                "loom_low_descriptor_t",
+                view.spec.c_table_prefix,
+                "Descriptors",
+                _descriptor_row_lines(
+                    compiled,
+                    view.descriptors,
+                    view.instruction_classes,
+                    view.descriptor_rows,
+                    view.canonical_asm_form_ordinals,
+                ),
+            )
+        if not view.uses_storage_operand_form_tables:
+            _emit_array(
+                lines,
+                "loom_low_operand_form_t",
+                view.spec.c_table_prefix,
+                "OperandForms",
+                _operand_form_row_lines(view.operand_forms),
+            )
     for view in views:
         _emit_array(
             lines,

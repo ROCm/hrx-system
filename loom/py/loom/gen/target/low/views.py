@@ -297,27 +297,51 @@ def descriptor_set_view_for_spec(
             uses_storage_operand_form_tables=True,
         )
 
-    storage_to_view_ordinals = {descriptor_ordinal: view_ordinal for view_ordinal, descriptor_ordinal in enumerate(descriptor_ordinal_tuple)}
-    asm_forms = _compile_view_asm_forms(compiled, view_spec)
-    _validate_view_asm_forms_unique(view_spec, asm_forms)
+    covers_storage_descriptors = descriptor_ordinal_tuple == tuple(range(len(compiled.descriptors)))
+    uses_storage_asm_form_tables = (
+        covers_storage_descriptors
+        and _view_asm_forms_match_storage(
+            compiled,
+            view_spec,
+            descriptor_ordinal_tuple,
+        )
+        and not _asm_forms_have_duplicate_mnemonics(compiled.asm_forms)
+    )
+    uses_storage_operand_form_tables = covers_storage_descriptors
+    if uses_storage_asm_form_tables:
+        asm_forms = compiled.asm_forms
+        canonical_asm_form_ordinals = compiled.canonical_asm_form_ordinals
+    else:
+        asm_forms = _compile_view_asm_forms(compiled, view_spec)
+        _validate_view_asm_forms_unique(view_spec, asm_forms)
+        canonical_asm_form_ordinals = _canonical_asm_form_ordinals(
+            len(descriptor_ordinal_tuple),
+            asm_forms,
+        )
 
-    descriptor_rows = []
-    operand_forms: list[CompiledOperandForm] = []
-    for storage_descriptor_ordinal in descriptor_ordinal_tuple:
-        storage_row = compiled.descriptor_rows[storage_descriptor_ordinal]
-        descriptor_row = dict(storage_row)
-        descriptor_row["operand_form_start"] = len(operand_forms)
-        operand_form_start = storage_row["operand_form_start"]
-        operand_form_count = storage_row["operand_form_count"]
-        for form_ordinal in range(operand_form_count):
-            operand_form = compiled.operand_forms[operand_form_start + form_ordinal]
-            operand_forms.append(
-                _clone_operand_form_for_view(
-                    operand_form,
-                    storage_to_view_ordinals[operand_form.replacement_descriptor_ordinal],
+    descriptor_rows = [dict(compiled.descriptor_rows[storage_descriptor_ordinal]) for storage_descriptor_ordinal in descriptor_ordinal_tuple]
+    if uses_storage_operand_form_tables:
+        operand_forms = compiled.operand_forms
+    else:
+        storage_to_view_ordinals = {descriptor_ordinal: view_ordinal for view_ordinal, descriptor_ordinal in enumerate(descriptor_ordinal_tuple)}
+        operand_forms = []
+        for descriptor_row, storage_descriptor_ordinal in zip(
+            descriptor_rows,
+            descriptor_ordinal_tuple,
+            strict=True,
+        ):
+            storage_row = compiled.descriptor_rows[storage_descriptor_ordinal]
+            descriptor_row["operand_form_start"] = len(operand_forms)
+            operand_form_start = storage_row["operand_form_start"]
+            operand_form_count = storage_row["operand_form_count"]
+            for form_ordinal in range(operand_form_count):
+                operand_form = compiled.operand_forms[operand_form_start + form_ordinal]
+                operand_forms.append(
+                    _clone_operand_form_for_view(
+                        operand_form,
+                        storage_to_view_ordinals[operand_form.replacement_descriptor_ordinal],
+                    )
                 )
-            )
-        descriptor_rows.append(descriptor_row)
 
     return DescriptorSetView(
         spec=view_spec,
@@ -329,13 +353,10 @@ def descriptor_set_view_for_spec(
             descriptor_ordinal_tuple,
         ),
         descriptor_rows=descriptor_rows,
-        canonical_asm_form_ordinals=_canonical_asm_form_ordinals(
-            len(descriptor_ordinal_tuple),
-            asm_forms,
-        ),
+        canonical_asm_form_ordinals=canonical_asm_form_ordinals,
         asm_forms=asm_forms,
         operand_forms=operand_forms,
         uses_storage_descriptor_tables=False,
-        uses_storage_asm_form_tables=False,
-        uses_storage_operand_form_tables=False,
+        uses_storage_asm_form_tables=uses_storage_asm_form_tables,
+        uses_storage_operand_form_tables=uses_storage_operand_form_tables,
     )
