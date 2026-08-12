@@ -9,6 +9,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/sanitizer/ops.h"
 #include "loom/ops/view/reference.h"
+#include "loom/util/predicate_facts.h"
 
 iree_status_t loom_sanitizer_assert_value_facts(
     loom_fact_context_t* context, const loom_module_t* module,
@@ -26,11 +27,9 @@ iree_status_t loom_sanitizer_assert_value_facts(
   }
 
   loom_attribute_t predicates = loom_sanitizer_assert_value_predicates(op);
-  loom_value_facts_apply_alias_predicates(
-      values.values, fact_count, predicates.predicate_list, predicates.count,
-      /*lookup_callback=*/NULL,
-      /*lookup_user_data=*/NULL, result_facts);
-  return iree_ok_status();
+  return loom_value_fact_table_apply_alias_predicates(
+      context->table, values.values, fact_count, predicates.predicate_list,
+      predicates.count, result_facts);
 }
 
 iree_status_t loom_sanitizer_assert_layout_facts(

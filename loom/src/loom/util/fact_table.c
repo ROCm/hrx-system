@@ -1316,6 +1316,8 @@ void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table) {
   table->scratch.facts.capacity = 0;
   table->scratch.value_ids.values = NULL;
   table->scratch.value_ids.capacity = 0;
+  table->scratch.alias_ordinals.values = NULL;
+  table->scratch.alias_ordinals.capacity = 0;
   table->context.table = table;
   table->context.function = (loom_func_like_t){0};
   table->context.target_facts = NULL;

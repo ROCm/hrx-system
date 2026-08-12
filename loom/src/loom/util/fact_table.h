@@ -750,6 +750,13 @@ struct loom_value_fact_table_t {
       // Allocated value ID scratch entry count.
       iree_host_size_t capacity;
     } value_ids;
+    // Direct alias-ordinal map used while applying predicate facts.
+    struct {
+      // One-based alias ordinals keyed by SSA value ID; zero means absent.
+      uint16_t* values;
+      // Allocated ordinal entry count.
+      iree_host_size_t capacity;
+    } alias_ordinals;
   } scratch;
 };
 
@@ -780,6 +787,16 @@ static inline bool loom_value_fact_table_has_entry(
     const loom_value_fact_table_t* table, loom_value_id_t value_id) {
   return value_id < table->capacity &&
          table->entries[value_id].known_divisor != 0;
+}
+
+// Looks up defined facts for a value in O(1). Returns false for undefined or
+// out-of-range value IDs without writing |out_facts|.
+static inline bool loom_value_fact_table_try_lookup(
+    const loom_value_fact_table_t* table, loom_value_id_t value_id,
+    loom_value_facts_t* out_facts) {
+  if (!loom_value_fact_table_has_entry(table, value_id)) return false;
+  *out_facts = table->entries[value_id];
+  return true;
 }
 
 // Looks up facts for a value. Returns unknown facts if the value ID is out of
