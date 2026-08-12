@@ -22,9 +22,11 @@ graph, or deployment language.
 2. **Values, types, and shapes** distinguish logical coordinates, byte offsets,
    scalars, vectors, tensors, buffers, views, and physical encodings. The
    generated [type reference](../reference/types/index.md) is the exact catalog.
+   Continue with [Values, types, and shapes](values-types-shapes.md).
 3. **Functions and structured control flow** express reusable computation
    without imposing a launch ABI. Exact calls name one implementation;
-   templates provide interchangeable implementations of a contract.
+   templates provide interchangeable implementations of a contract. Continue
+   with [Functions and structured control flow](functions-and-control.md).
 4. **Buffers, views, and structured compute** make accessible storage, layouts,
    memory spaces, vector operations, and synchronization explicit enough to
    verify and specialize.

@@ -187,8 +187,9 @@ Use [Format and verify source](../workflows/format-and-verify.md) for the comple
 modules](../workflows/link-and-package.md) for archive, selective-link, config,
 and plan commands.
 
-Continue through the programming guide to values, functions, memory, kernels,
-facts, checks, and command programs as those ownership boundaries become
-relevant. For exact source forms, use the generated [`func`](../reference/dialects/func/index.md),
+Continue with [Values, types, and shapes](values-types-shapes.md), then follow
+the guide through functions, memory, kernels, facts, checks, and command
+programs as those ownership boundaries become relevant. For exact source
+forms, use the generated [`func`](../reference/dialects/func/index.md),
 [`kernel`](../reference/dialects/kernel/index.md), and
 [`command`](../reference/dialects/command/index.md) references.

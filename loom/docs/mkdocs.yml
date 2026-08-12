@@ -69,6 +69,8 @@ nav:
   - Programming guide:
       - Guide map: guide/index.md
       - Source modules and canonical text: guide/source-modules.md
+      - Values, types, and shapes: guide/values-types-shapes.md
+      - Functions and structured control flow: guide/functions-and-control.md
   - Workflows:
       - Workflow map: workflows/index.md
       - Format and verify source: workflows/format-and-verify.md
