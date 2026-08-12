@@ -11,6 +11,7 @@ _TOOLCHAIN_TYPES = {
     "compile": Label("//loom/build_tools/bazel:compile_toolchain_type"),
     "format": Label("//loom/build_tools/bazel:format_toolchain_type"),
     "link": Label("//loom/build_tools/bazel:link_toolchain_type"),
+    "lint": Label("//loom/build_tools/bazel:lint_toolchain_type"),
     "test": Label("//loom/build_tools/bazel:test_toolchain_type"),
 }
 
@@ -47,6 +48,7 @@ def loom_tools_toolchains(
         benchmark_tool,
         compile_tool,
         format_tool,
+        lint_tool,
         link_tool,
         test_tool,
         exec_compatible_with = [],
@@ -58,14 +60,16 @@ def loom_tools_toolchains(
 
     The macro emits ``<name>_<role>`` implementations and
     ``<name>_<role>_toolchain`` registrations for the benchmark, compile,
-    format, link, and test roles. Splitting the roles prevents a rule using one
-    executable from configuring the dependency graphs of the other tools.
+    format, lint, link, and test roles. Splitting the roles prevents a rule
+    using one executable from configuring the dependency graphs of the other
+    tools.
     """
     tools = {
         "benchmark": benchmark_tool,
         "compile": compile_tool,
         "format": format_tool,
         "link": link_tool,
+        "lint": lint_tool,
         "test": test_tool,
     }
     for role, tool in tools.items():
@@ -77,8 +81,8 @@ def loom_tools_toolchains(
             visibility = ["//visibility:private"],
         )
         toolchain_kwargs = {
-            "name": implementation_name + "_toolchain",
             "exec_compatible_with": exec_compatible_with,
+            "name": implementation_name + "_toolchain",
             "tags": tags,
             "target_compatible_with": target_compatible_with,
             "target_settings": target_settings,

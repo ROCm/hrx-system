@@ -51,6 +51,14 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    source_lint
+  SRCS
+    "__init__.py"
+    "source_lint.py"
+)
+
+iree_py_library(
+  NAME
     loom-compile-report
   MAIN
     "compile_report.py"
@@ -58,6 +66,17 @@ iree_py_library(
     "compile_report.py"
   DEPS
     loom::py::loom::tools::compile_report
+)
+
+iree_py_library(
+  NAME
+    loom-lint
+  MAIN
+    "source_lint.py"
+  SRCS
+    "source_lint.py"
+  DEPS
+    loom::py::loom::tools::source_lint
 )
 
 iree_py_library(
@@ -79,16 +98,19 @@ iree_py_test(
     "compile_report_test.py"
     "loom_opt_test.py"
     "pytest_style_runner.py"
+    "source_lint_test.py"
     "source_surface_test.py"
   ARGS
     "loom.tools.amdgpu_asm_test"
     "loom.tools.compile_report_test"
     "loom.tools.loom_opt_test"
     "loom.tools.source_surface_test"
+    "loom.tools.source_lint_test"
   DEPS
     loom::py::loom::tools::amdgpu_asm
     loom::py::loom::tools::compile_report
     loom::py::loom::tools::loom_opt
+    loom::py::loom::tools::source_lint
     loom::py::loom::tools::tools
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"

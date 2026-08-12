@@ -1,5 +1,27 @@
 # Format and verify source
 
+`loom-lint` checks authoring policy that is meaningful to people and agents but
+does not change program behavior. `loom-format` independently parses, verifies,
+and prints complete Loom modules. Keeping those contracts separate lets the
+formatter canonicalize syntax without inventing semantic names.
+
+## Check authoring policy
+
+Lint one or more explicit source files:
+
+```shell
+loom-lint motif.loom kernel.loom model.loom
+```
+
+The initial rule requires constant SSA names to carry a program role, such as
+`%batch_size`, or use the compact `%c<literal>` form, such as `%c512`. A name
+such as `%fivehundredtwelve` only repeats the literal and fails with its source
+location and the `constant-name` rule identifier.
+
+`loom-lint` also accepts `.loom-test` containers and checks only authored input
+sections. Runner-owned expected output is excluded. Inputs are always explicit;
+the tool does not discover a repository, build graph, or Git change set.
+
 `loom-format` parses, verifies, and prints complete Loom modules. It is the
 source equivalent of a language formatter and the text/bytecode conversion
 boundary for linkable modules.
