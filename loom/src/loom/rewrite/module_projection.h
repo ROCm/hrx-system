@@ -56,7 +56,9 @@ iree_status_t loom_ir_module_projection_initialize(
 //
 // Temporary remap state is allocated from |scratch_arena|. Operation order,
 // nested regions, CFG edges, source metadata, presentation, and all remappable
-// payloads are preserved. No linker, reachability, or merge policy is applied.
+// payloads are preserved. Live value correspondence is indexed by source value
+// ID; erased source rows remain unmapped and do not create target value holes.
+// No linker, reachability, or merge policy is applied.
 iree_status_t loom_ir_module_projection_clone(
     loom_ir_module_projection_t* projection,
     iree_arena_allocator_t* scratch_arena);

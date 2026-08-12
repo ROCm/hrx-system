@@ -74,6 +74,7 @@ iree_status_t loom_ir_module_projection_clone(
       &(loom_ir_remap_options_t){
           .remap_symbol = loom_ir_remap_symbol_callback_make(
               loom_ir_module_projection_remap_symbol, (void*)projection),
+          .value_map_kind = LOOM_IR_REMAP_VALUE_MAP_SOURCE_INDEXED,
       },
       &projection->remap));
   loom_builder_t builder;

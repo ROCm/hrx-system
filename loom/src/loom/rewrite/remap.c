@@ -141,6 +141,28 @@ iree_status_t loom_ir_remap_initialize(const loom_module_t* source_module,
           options ? options->remap_same_module_symbols : false,
   };
 
+  const loom_ir_remap_value_map_kind_t value_map_kind =
+      options ? options->value_map_kind : LOOM_IR_REMAP_VALUE_MAP_SPARSE;
+  switch (value_map_kind) {
+    case LOOM_IR_REMAP_VALUE_MAP_SPARSE:
+      break;
+    case LOOM_IR_REMAP_VALUE_MAP_SOURCE_INDEXED:
+      if (remap.source_value_snapshot_count > 0) {
+        IREE_RETURN_IF_ERROR(
+            iree_arena_allocate_array(arena, remap.source_value_snapshot_count,
+                                      sizeof(*remap.target_values_by_source),
+                                      (void**)&remap.target_values_by_source));
+        for (iree_host_size_t i = 0; i < remap.source_value_snapshot_count;
+             ++i) {
+          remap.target_values_by_source[i] = LOOM_VALUE_ID_INVALID;
+        }
+      }
+      break;
+    default:
+      IREE_ASSERT_UNREACHABLE("unknown remap value map kind");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+
   *out_remap = remap;
   return iree_ok_status();
 }
@@ -166,6 +188,15 @@ iree_status_t loom_ir_remap_map_value(loom_ir_remap_t* remap,
         IREE_STATUS_INVALID_ARGUMENT,
         "target value %%%u out of range (target module has %" PRIhsz " values)",
         (unsigned)target_value, remap->target_module->values.count);
+  }
+  if (remap->target_values_by_source != NULL) {
+    loom_value_id_t* mapped_value =
+        &remap->target_values_by_source[source_value];
+    if (*mapped_value == LOOM_VALUE_ID_INVALID) {
+      ++remap->mapped_value_count;
+    }
+    *mapped_value = target_value;
+    return iree_ok_status();
   }
   loom_ir_remap_value_entry_t* entry = NULL;
   if (remap->value_map_entry_capacity > 0) {
@@ -214,6 +245,17 @@ bool loom_ir_remap_try_lookup_value(const loom_ir_remap_t* remap,
   }
   if (!remap || source_value >= remap->source_value_snapshot_count) {
     return false;
+  }
+  if (remap->target_values_by_source != NULL) {
+    const loom_value_id_t target_value =
+        remap->target_values_by_source[source_value];
+    if (target_value == LOOM_VALUE_ID_INVALID) {
+      return false;
+    }
+    if (out_target_value) {
+      *out_target_value = target_value;
+    }
+    return true;
   }
   const loom_ir_remap_value_entry_t* entry =
       loom_ir_remap_find_const_value_map_slot(remap, source_value);

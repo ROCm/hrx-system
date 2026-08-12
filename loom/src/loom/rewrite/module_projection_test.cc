@@ -72,6 +72,7 @@ TEST_F(ModuleProjectionTest, ClonesThroughDirectSymbolAndValueCorrespondence) {
   loom_module_t* source = Parse(R"(
 func.def public @entry(%x: i32) -> (i32) {
   // Preserve authored grouping with the cloned operation.
+  %dead = func.call @helper(%x) : (i32) -> (i32)
   %y = func.call @helper(%x) : (i32) -> (i32)
   func.return %y : i32
 }
@@ -81,6 +82,16 @@ func.def @helper(%x: i32) -> (i32) {
 }
 )");
   ASSERT_NE(source, nullptr);
+
+  loom_op_t* entry_function = source->symbols.entries[0].defining_op;
+  ASSERT_TRUE(loom_func_def_isa(entry_function));
+  loom_block_t* entry_block =
+      loom_region_entry_block(loom_func_def_body(entry_function));
+  loom_op_t* dead_call = entry_block->first_op;
+  ASSERT_TRUE(loom_func_call_isa(dead_call));
+  const loom_value_id_t dead_value =
+      loom_func_call_results(dead_call).values[0];
+  IREE_ASSERT_OK(loom_op_erase(source, dead_call));
 
   const loom_module_size_hints_t hints = {
       /*.value_count=*/0,
@@ -122,10 +133,20 @@ func.def @helper(%x: i32) -> (i32) {
   for (loom_value_id_t source_value_id = 0;
        source_value_id < source->values.count; ++source_value_id) {
     loom_value_id_t target_value_id = LOOM_VALUE_ID_INVALID;
+    if (source_value_id == dead_value) {
+      EXPECT_FALSE(loom_ir_module_projection_try_target_value(
+          &projection, source_value_id, &target_value_id));
+      EXPECT_EQ(target_value_id, LOOM_VALUE_ID_INVALID);
+      continue;
+    }
     ASSERT_TRUE(loom_ir_module_projection_try_target_value(
         &projection, source_value_id, &target_value_id));
     EXPECT_LT(target_value_id, target->values.count);
   }
+  EXPECT_EQ(target->values.count + 1, source->values.count);
+  EXPECT_NE(projection.remap.target_values_by_source, nullptr);
+  EXPECT_EQ(projection.remap.value_map_entries, nullptr);
+  EXPECT_EQ(projection.remap.value_map_entry_capacity, 0u);
   ASSERT_EQ(target->symbols.count, source->symbols.count);
   for (loom_symbol_id_t source_symbol_id = 0;
        source_symbol_id < source->symbols.count; ++source_symbol_id) {

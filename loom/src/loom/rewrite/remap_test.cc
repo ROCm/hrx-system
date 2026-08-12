@@ -202,6 +202,47 @@ TEST_F(RemapTest, MapsSparseHighSourceValuesWithoutModuleSizedTable) {
   EXPECT_EQ(resolved_value, second_target);
 }
 
+TEST_F(RemapTest, MapsSourceIndexedValuesWithoutPopulatingSparseStorage) {
+  loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_value_id_t source_values[128] = {};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(source_values); ++i) {
+    source_values[i] = DefineValue(source_, index_type);
+  }
+  loom_value_id_t first_target = DefineValue(target_, index_type);
+  loom_value_id_t second_target = DefineValue(target_, index_type);
+
+  const loom_ir_remap_options_t options = {
+      /*.allow_unmapped_values=*/{},
+      /*.remap_symbol=*/{},
+      /*.remap_same_module_symbols=*/{},
+      /*.value_map_kind=*/LOOM_IR_REMAP_VALUE_MAP_SOURCE_INDEXED,
+  };
+  loom_ir_remap_t remap = InitializeRemap(&options);
+  ASSERT_NE(remap.target_values_by_source, nullptr);
+  EXPECT_EQ(remap.value_map_entries, nullptr);
+  EXPECT_EQ(remap.value_map_entry_capacity, 0u);
+
+  const loom_value_id_t source_value =
+      source_values[IREE_ARRAYSIZE(source_values) - 1];
+  IREE_ASSERT_OK(loom_ir_remap_map_value(&remap, source_value, first_target));
+  EXPECT_EQ(remap.mapped_value_count, 1u);
+  loom_value_id_t resolved_value = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_ir_remap_resolve_value(&remap, source_value, &resolved_value));
+  EXPECT_EQ(resolved_value, first_target);
+
+  EXPECT_FALSE(loom_ir_remap_try_lookup_value(&remap, source_values[0],
+                                              &resolved_value));
+  EXPECT_EQ(resolved_value, LOOM_VALUE_ID_INVALID);
+  IREE_ASSERT_OK(loom_ir_remap_map_value(&remap, source_value, second_target));
+  EXPECT_EQ(remap.mapped_value_count, 1u);
+  IREE_ASSERT_OK(
+      loom_ir_remap_resolve_value(&remap, source_value, &resolved_value));
+  EXPECT_EQ(resolved_value, second_target);
+  EXPECT_EQ(remap.value_map_entries, nullptr);
+  EXPECT_EQ(remap.value_map_entry_capacity, 0u);
+}
+
 TEST_F(RemapTest, AllowsUnmappedValuesOnlyWithinSameModule) {
   loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   loom_value_id_t source_value = DefineValue(source_, index_type);
