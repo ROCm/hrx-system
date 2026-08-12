@@ -780,17 +780,17 @@ loom_cc_test(
     loom::format::text::parser
     loom::ir
     loom::ops::low
-    loom::target::arch::amdgpu::descriptors::low_registry
     loom::target::arch::amdgpu::hal::binding_materialization
     loom::target::arch::amdgpu::hal::kernel_abi
-    loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::planning::packet_plan
     loom::target::arch::amdgpu::planning::storage_lease
     loom::target::arch::amdgpu::profile
-    loom::target::arch::amdgpu::records::target_records
+    loom::target::arch::amdgpu::provider
     loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
+    loom::target::function_version
     loom::target::low_descriptor_registry
+    loom::target::specialization
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "nodocker"
