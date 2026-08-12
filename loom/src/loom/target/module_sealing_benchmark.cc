@@ -239,6 +239,9 @@ class ModuleSealingFixture {
                 /*.provider=*/&kTestProvider,
                 /*.facts=*/&facts_[target_ordinal],
             },
+            /*.target_context_ordinal=*/
+            static_cast<loom_target_context_ordinal_t>(target_ordinal),
+            /*.authored_target_is_exact=*/false,
             /*.function_target_facts=*/&facts_[target_ordinal],
         };
         version_handles_[i] = &versions_[i].base;

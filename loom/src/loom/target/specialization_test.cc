@@ -275,6 +275,7 @@ func.def public target(@unrequested_family) @unrequested() {
   ASSERT_NE(generic_version->target_requirement_facts, nullptr);
   EXPECT_EQ(generic_version->target_requirement_facts->selector,
             LOOM_TEST_TARGET_KIND_LOW_CORE);
+  EXPECT_TRUE(generic_version->authored_target_is_exact);
   ASSERT_NE(generic_version->function_target_facts, nullptr);
   EXPECT_EQ(generic_version->function_target_facts->selector,
             LOOM_TEST_TARGET_KIND_LOW_CORE);
@@ -286,6 +287,9 @@ func.def public target(@unrequested_family) @unrequested() {
   EXPECT_EQ(targetless_version->resolved_target.provider, &kTestProvider);
   ASSERT_NE(targetless_version->resolved_target.facts, nullptr);
   EXPECT_EQ(targetless_version->target_requirement_facts, nullptr);
+  EXPECT_FALSE(targetless_version->authored_target_is_exact);
+  EXPECT_NE(generic_version->target_context_ordinal,
+            targetless_version->target_context_ordinal);
   ASSERT_NE(targetless_version->function_target_facts, nullptr);
   EXPECT_EQ(targetless_version->function_target_facts->selector,
             LOOM_TEST_TARGET_KIND_LOW_CORE);
@@ -341,6 +345,7 @@ func.def public target(@requirement) @entry() {
   EXPECT_EQ(resolved_facts->storage.config.contract_feature_bits, 0u);
   EXPECT_FALSE(loom_target_facts_field_is_explicit(
       resolved_facts, LOOM_TARGET_FACT_FIELD_SUBGROUP_SIZE));
+  EXPECT_FALSE(version->authored_target_is_exact);
 }
 
 TEST_F(TargetSpecializationTest, SharesProfileProjectionAndTargetlessContext) {
@@ -385,6 +390,10 @@ func.def public @right() {
   ASSERT_NE(right_version, nullptr);
   EXPECT_EQ(left_version->resolved_target.facts,
             right_version->resolved_target.facts);
+  EXPECT_EQ(left_version->target_context_ordinal,
+            right_version->target_context_ordinal);
+  EXPECT_FALSE(left_version->authored_target_is_exact);
+  EXPECT_FALSE(right_version->authored_target_is_exact);
   EXPECT_NE(left_version->resolved_target.facts,
             left_version->function_target_facts);
   EXPECT_NE(right_version->resolved_target.facts,
@@ -425,6 +434,71 @@ func.def public target(@exact) @entry() {
   ASSERT_NE(version, nullptr);
   EXPECT_EQ(version->function_target_facts->selector,
             LOOM_TEST_TARGET_KIND_LOW_CORE);
+  EXPECT_TRUE(version->authored_target_is_exact);
+}
+
+TEST_F(TargetSpecializationTest,
+       RetainsDistinctContextsForEquivalentProfileObjects) {
+  ModulePtr module = Parse(R"(
+func.def public @shared_left() {
+  func.return
+}
+
+func.def public @shared_right() {
+  func.return
+}
+
+func.def public @separate() {
+  func.return
+}
+)");
+  const TestTargetProfile shared_profile =
+      MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
+  const TestTargetProfile separate_profile =
+      MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
+  const loom_target_specialization_request_t requests[] = {
+      {
+          /*.function_name=*/IREE_SV("shared_left"),
+          /*.target_profile=*/&shared_profile.base,
+      },
+      {
+          /*.function_name=*/IREE_SV("shared_right"),
+          /*.target_profile=*/&shared_profile.base,
+      },
+      {
+          /*.function_name=*/IREE_SV("separate"),
+          /*.target_profile=*/&separate_profile.base,
+      },
+  };
+
+  const loom_target_specialization_result_t result =
+      Specialize(module.get(), requests, IREE_ARRAYSIZE(requests));
+  ASSERT_EQ(result.error_count, 0u);
+  const loom_target_function_version_t* shared_left =
+      loom_target_function_version_list_find(
+          &result.function_versions.list,
+          Function(module.get(), IREE_SV("shared_left")));
+  const loom_target_function_version_t* shared_right =
+      loom_target_function_version_list_find(
+          &result.function_versions.list,
+          Function(module.get(), IREE_SV("shared_right")));
+  const loom_target_function_version_t* separate =
+      loom_target_function_version_list_find(
+          &result.function_versions.list,
+          Function(module.get(), IREE_SV("separate")));
+  ASSERT_NE(shared_left, nullptr);
+  ASSERT_NE(shared_right, nullptr);
+  ASSERT_NE(separate, nullptr);
+  EXPECT_EQ(shared_left->resolved_target.facts,
+            shared_right->resolved_target.facts);
+  EXPECT_EQ(shared_left->target_context_ordinal,
+            shared_right->target_context_ordinal);
+  EXPECT_NE(shared_left->resolved_target.facts,
+            separate->resolved_target.facts);
+  EXPECT_NE(shared_left->target_context_ordinal,
+            separate->target_context_ordinal);
+  EXPECT_TRUE(loom_target_facts_are_equivalent(
+      shared_left->resolved_target.facts, separate->resolved_target.facts));
 }
 
 TEST_F(TargetSpecializationTest,

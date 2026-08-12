@@ -321,6 +321,8 @@ class TargetModuleSealingTest : public ::testing::Test {
             /*.provider=*/provider,
             /*.facts=*/facts,
         },
+        /*.target_context_ordinal=*/0,
+        /*.authored_target_is_exact=*/false,
         /*.function_target_facts=*/facts,
     };
   }
