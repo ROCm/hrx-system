@@ -49,7 +49,7 @@ graph, or deployment language.
    benchmarks](checks-and-benchmarks.md).
 9. **Command programs** compose launchable kernels, resources, and scheduling
    into reusable subgraphs while preserving the same linking and specialization
-   model.
+   model. Continue with [Command programs](command-programs.md).
 
 The generated [dialect reference](../reference/dialects/index.md) is organized
 alphabetically because it is an inventory. The progression above is organized

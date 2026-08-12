@@ -232,6 +232,6 @@ and structured reports. [Benchmark checked work](../workflows/benchmark.md)
 covers dry-run planning, end-to-end and dispatch-completion measurement,
 interleaved comparisons, profiling, and artifact bundles.
 
-Continue with command programs: the same kernel launches and typed resources
-can become a reusable model subgraph while checks continue to exercise the
-program through its public schedule.
+Continue with [Command programs](command-programs.md): the same kernel launches
+and typed resources can become a reusable model subgraph while checks continue
+to exercise the program through its public schedule.
