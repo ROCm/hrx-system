@@ -82,6 +82,30 @@ typedef struct loom_bytecode_section_metadata_t {
   iree_const_byte_span_t bytes;
 } loom_bytecode_section_metadata_t;
 
+// Validated byte range for one variable-length shared-table entry.
+typedef struct loom_bytecode_table_entry_metadata_t {
+  // Absolute file byte offset of the entry.
+  uint64_t entry_offset;
+  // Byte length of the entry.
+  uint64_t entry_length;
+} loom_bytecode_table_entry_metadata_t;
+
+// Validated ENCODINGS instance record exposed by the bytecode index.
+typedef struct loom_bytecode_encoding_metadata_t {
+  // Absolute file byte offset of the instance entry.
+  uint64_t entry_offset;
+  // Byte length of the instance entry.
+  uint64_t entry_length;
+  // Source STRINGS ordinal naming the encoding family.
+  uint32_t name_string_index;
+} loom_bytecode_encoding_metadata_t;
+
+// Validated OPS record exposed by the bytecode index.
+typedef struct loom_bytecode_op_metadata_t {
+  // Borrowed registered operation name view from the module STRINGS table.
+  iree_string_view_t name;
+} loom_bytecode_op_metadata_t;
+
 // Validated symbol record exposed by the bytecode index.
 typedef struct loom_bytecode_symbol_metadata_t {
   // Absolute file byte offset of the symbol entry.
@@ -90,6 +114,8 @@ typedef struct loom_bytecode_symbol_metadata_t {
   uint64_t entry_length;
   // Borrowed symbol name view from the module STRINGS table.
   iree_string_view_t name;
+  // Source STRINGS ordinal naming the symbol.
+  uint32_t name_string_index;
   // Wire symbol kind.
   loom_bytecode_symbol_kind_t kind;
   // Wire symbol visibility.
@@ -140,6 +166,12 @@ typedef struct loom_bytecode_provider_import_metadata_t {
   uint32_t first_anchor_index;
   // Number of symbol ordinals in this provider's contiguous slice.
   uint32_t anchor_count;
+  // True when the import has authored leading vertical separation.
+  bool leading_blank_line;
+  // Arena-owned array of views borrowing authored comment payloads.
+  const iree_string_view_t* comments;
+  // Number of authored comments.
+  uint16_t comment_count;
 } loom_bytecode_provider_import_metadata_t;
 
 // Dependency and abstract-provider slices owned by one SYMBOLS ordinal.
@@ -170,6 +202,48 @@ typedef struct loom_bytecode_module_metadata_t {
   iree_host_size_t section_count;
   // Arena-owned section metadata array.
   loom_bytecode_section_metadata_t* sections;
+  // Validated module-local string table.
+  struct {
+    // Number of borrowed string views.
+    iree_host_size_t count;
+    // Arena-owned array of views borrowing from the input bytecode.
+    iree_string_view_t* values;
+  } strings;
+  // Validated module-local source-name table.
+  struct {
+    // Number of borrowed source-name views.
+    iree_host_size_t count;
+    // Arena-owned array of views borrowing from the input bytecode.
+    iree_string_view_t* values;
+  } sources;
+  // Seekable module-local type table.
+  struct {
+    // Number of validated type entries.
+    iree_host_size_t count;
+    // Arena-owned entry range array.
+    loom_bytecode_table_entry_metadata_t* entries;
+  } types;
+  // Seekable module-local encoding instance table.
+  struct {
+    // Number of validated encoding instances.
+    iree_host_size_t count;
+    // Arena-owned encoding metadata array.
+    loom_bytecode_encoding_metadata_t* entries;
+  } encodings;
+  // Resolved module-local operation table.
+  struct {
+    // Number of validated operation records.
+    iree_host_size_t count;
+    // Arena-owned operation metadata array.
+    loom_bytecode_op_metadata_t* entries;
+  } ops;
+  // Seekable module-local location table.
+  struct {
+    // Number of validated location entries.
+    iree_host_size_t count;
+    // Arena-owned entry range array.
+    loom_bytecode_table_entry_metadata_t* entries;
+  } locations;
   // Number of validated symbol records.
   iree_host_size_t symbol_count;
   // Arena-owned symbol metadata array.

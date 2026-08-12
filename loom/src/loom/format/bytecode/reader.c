@@ -631,8 +631,11 @@ static iree_status_t loom_bytecode_reader_read_string_table(
 
   iree_string_view_t* strings = NULL;
   if (count > 0) {
+    iree_arena_allocator_t* storage_arena = reader->current_module_metadata
+                                                ? reader->metadata_arena
+                                                : reader->arena;
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        reader->arena, (iree_host_size_t)count, sizeof(iree_string_view_t),
+        storage_arena, (iree_host_size_t)count, sizeof(iree_string_view_t),
         (void**)&strings));
   }
   for (uint64_t i = 0; i < count; ++i) {
@@ -2098,7 +2101,20 @@ static iree_status_t loom_bytecode_reader_read_encodings(
         LOOM_BYTECODE_MAX_ENCODING_COUNT, instance_count_offset);
   }
   reader->encoding_count = (iree_host_size_t)instance_count;
+  loom_bytecode_encoding_metadata_t* encoding_metadata = NULL;
+  if (reader->current_module_metadata) {
+    reader->current_module_metadata->encodings.count =
+        (iree_host_size_t)instance_count;
+    if (instance_count > 0) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          reader->metadata_arena, (iree_host_size_t)instance_count,
+          sizeof(*encoding_metadata), (void**)&encoding_metadata));
+      reader->current_module_metadata->encodings.entries = encoding_metadata;
+    }
+  }
   for (uint64_t i = 0; i < instance_count; ++i) {
+    const uint64_t entry_offset =
+        loom_bytecode_reader_cursor_absolute_position(&cursor);
     uint64_t family_offset =
         loom_bytecode_reader_cursor_absolute_position(&cursor);
     uint64_t family_index = 0;
@@ -2165,6 +2181,16 @@ static iree_status_t loom_bytecode_reader_read_encodings(
           reader, &cursor, /*descriptor=*/NULL, value_kind, true,
           reader->type_count));
       if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+    }
+    if (encoding_metadata) {
+      encoding_metadata[i] = (loom_bytecode_encoding_metadata_t){
+          .entry_offset = entry_offset,
+          .entry_length =
+              loom_bytecode_reader_cursor_absolute_position(&cursor) -
+              entry_offset,
+          .name_string_index =
+              (uint32_t)reader->encoding_family_name_ids[family_index],
+      };
     }
   }
   return loom_bytecode_reader_expect_empty(reader, &cursor,
@@ -2473,6 +2499,17 @@ static iree_status_t loom_bytecode_reader_read_types(
     IREE_RETURN_IF_ERROR(
         iree_arena_allocate_array(reader->arena, (iree_host_size_t)count,
                                   sizeof(loom_type_t), (void**)&reader->types));
+  }
+  loom_bytecode_table_entry_metadata_t* type_metadata = NULL;
+  if (read_mode == LOOM_BYTECODE_TYPE_READ_VALIDATE &&
+      reader->current_module_metadata) {
+    reader->current_module_metadata->types.count = (iree_host_size_t)count;
+    if (count > 0) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          reader->metadata_arena, (iree_host_size_t)count,
+          sizeof(*type_metadata), (void**)&type_metadata));
+      reader->current_module_metadata->types.entries = type_metadata;
+    }
   }
   reader->type_count = (iree_host_size_t)count;
   for (uint64_t type_index = 0; type_index < count; ++type_index) {
@@ -2791,6 +2828,14 @@ static iree_status_t loom_bytecode_reader_read_types(
       type = reader->output_module->types.entries[type_id];
     }
     reader->types[type_index] = type;
+    if (type_metadata) {
+      type_metadata[type_index] = (loom_bytecode_table_entry_metadata_t){
+          .entry_offset = type_offset,
+          .entry_length =
+              loom_bytecode_reader_cursor_absolute_position(&cursor) -
+              type_offset,
+      };
+    }
     if (read_mode == LOOM_BYTECODE_TYPE_READ_MATERIALIZE) {
       iree_arena_checkpoint_restore(&materialize_checkpoint);
     }
@@ -2824,6 +2869,16 @@ static iree_status_t loom_bytecode_reader_read_ops(
         reader->arena, (iree_host_size_t)count, sizeof(loom_op_kind_t),
         (void**)&reader->op_kinds));
   }
+  loom_bytecode_op_metadata_t* op_metadata = NULL;
+  if (reader->current_module_metadata) {
+    reader->current_module_metadata->ops.count = (iree_host_size_t)count;
+    if (count > 0) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          reader->metadata_arena, (iree_host_size_t)count, sizeof(*op_metadata),
+          (void**)&op_metadata));
+      reader->current_module_metadata->ops.entries = op_metadata;
+    }
+  }
   reader->op_count = (iree_host_size_t)count;
   for (uint64_t i = 0; i < count; ++i) {
     uint64_t name_offset =
@@ -2846,6 +2901,9 @@ static iree_status_t loom_bytecode_reader_read_ops(
     }
     reader->ops[i] = vtable;
     reader->op_kinds[i] = kind;
+    if (op_metadata) {
+      op_metadata[i].name = op_name;
+    }
   }
   return loom_bytecode_reader_expect_empty(reader, &cursor, IREE_SV("OPS"));
 }
@@ -2869,6 +2927,16 @@ static iree_status_t loom_bytecode_reader_read_locations(
         count_offset);
   }
   reader->location_count = (iree_host_size_t)count;
+  loom_bytecode_table_entry_metadata_t* location_metadata = NULL;
+  if (reader->current_module_metadata) {
+    reader->current_module_metadata->locations.count = (iree_host_size_t)count;
+    if (count > 0) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          reader->metadata_arena, (iree_host_size_t)count,
+          sizeof(*location_metadata), (void**)&location_metadata));
+      reader->current_module_metadata->locations.entries = location_metadata;
+    }
+  }
   for (uint64_t i = 0; i < count; ++i) {
     uint8_t kind = 0;
     uint8_t flags = 0;
@@ -2978,6 +3046,14 @@ static iree_status_t loom_bytecode_reader_read_locations(
             kind_offset);
     }
     if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+    if (location_metadata) {
+      location_metadata[i] = (loom_bytecode_table_entry_metadata_t){
+          .entry_offset = kind_offset,
+          .entry_length =
+              loom_bytecode_reader_cursor_absolute_position(&cursor) -
+              kind_offset,
+      };
+    }
   }
   return loom_bytecode_reader_expect_empty(reader, &cursor,
                                            IREE_SV("LOCATIONS"));
@@ -6060,6 +6136,7 @@ static iree_status_t loom_bytecode_reader_read_symbols(
     reader->symbol_name_ids[symbol_index] = (loom_string_id_t)name_id;
     if (symbol_metadata) {
       symbol_metadata->name = unused_name;
+      symbol_metadata->name_string_index = (uint32_t)name_id;
     }
 
     uint8_t kind = 0;
@@ -6579,11 +6656,21 @@ static iree_status_t loom_bytecode_reader_read_provider_imports(
     }
 
     iree_host_size_t comment_count = 0;
+    iree_arena_allocator_t* trivia_arena =
+        module_metadata ? reader->metadata_arena : reader->arena;
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_source_trivia(
-        reader, &cursor, reader->arena, &provider_import->leading_blank_line,
+        reader, &cursor, trivia_arena, &provider_import->leading_blank_line,
         &provider_import->comments, &comment_count));
     provider_import->comment_count = (uint16_t)comment_count;
     if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+    if (module_metadata) {
+      loom_bytecode_provider_import_metadata_t* provider_metadata =
+          &module_metadata->provider_imports[provider_index];
+      provider_metadata->leading_blank_line =
+          provider_import->leading_blank_line;
+      provider_metadata->comments = provider_import->comments;
+      provider_metadata->comment_count = provider_import->comment_count;
+    }
   }
 
   if (anchor_index != (iree_host_size_t)total_anchor_count) {
@@ -7337,10 +7424,18 @@ static iree_status_t loom_bytecode_reader_read_module_metadata(
       reader, *strings_section, IREE_SV("STRINGS"),
       LOOM_BYTECODE_MAX_STRING_COUNT, &reader->strings, &reader->string_count));
   if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+  if (reader->current_module_metadata) {
+    reader->current_module_metadata->strings.count = reader->string_count;
+    reader->current_module_metadata->strings.values = reader->strings;
+  }
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_string_table(
       reader, *sources_section, IREE_SV("SOURCES"),
       LOOM_BYTECODE_MAX_STRING_COUNT, &reader->sources, &reader->source_count));
   if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+  if (reader->current_module_metadata) {
+    reader->current_module_metadata->sources.count = reader->source_count;
+    reader->current_module_metadata->sources.values = reader->sources;
+  }
   IREE_RETURN_IF_ERROR(
       loom_bytecode_reader_read_encodings(reader, encodings_section));
   if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();

@@ -2435,6 +2435,22 @@ TEST_F(ReaderTest, ReadsFunctionModuleIndex) {
   EXPECT_GT(module_metadata.section_count, 0u);
   ASSERT_NE(module_metadata.sections, nullptr);
   EXPECT_EQ(module_metadata.summary.symbol_count, 1u);
+  EXPECT_EQ(module_metadata.strings.count,
+            module_metadata.summary.string_count);
+  ASSERT_NE(module_metadata.strings.values, nullptr);
+  EXPECT_EQ(module_metadata.sources.count,
+            module_metadata.summary.source_count);
+  EXPECT_EQ(module_metadata.types.count, module_metadata.summary.type_count);
+  ASSERT_NE(module_metadata.types.entries, nullptr);
+  EXPECT_EQ(module_metadata.encodings.count,
+            module_metadata.summary.encoding_count);
+  EXPECT_EQ(module_metadata.ops.count, module_metadata.summary.op_name_count);
+  ASSERT_NE(module_metadata.ops.entries, nullptr);
+  EXPECT_EQ(module_metadata.locations.count,
+            module_metadata.summary.location_count);
+  if (module_metadata.locations.count > 0) {
+    ASSERT_NE(module_metadata.locations.entries, nullptr);
+  }
   EXPECT_EQ(module_metadata.symbol_count, 1u);
   EXPECT_EQ(module_metadata.import_count, 0u);
   EXPECT_EQ(module_metadata.export_count, 1u);
@@ -2444,6 +2460,9 @@ TEST_F(ReaderTest, ReadsFunctionModuleIndex) {
   ASSERT_NE(module_metadata.symbols, nullptr);
   const loom_bytecode_symbol_metadata_t& symbol = module_metadata.symbols[0];
   EXPECT_TRUE(iree_string_view_equal(symbol.name, IREE_SV("f")));
+  ASSERT_LT(symbol.name_string_index, module_metadata.strings.count);
+  EXPECT_TRUE(iree_string_view_equal(
+      module_metadata.strings.values[symbol.name_string_index], symbol.name));
   EXPECT_EQ(symbol.kind, LOOM_BYTECODE_SYMBOL_FUNC_DEF);
   EXPECT_EQ(symbol.visibility, LOOM_BYTECODE_SYMBOL_VISIBILITY_PUBLIC);
   EXPECT_TRUE(
@@ -2456,6 +2475,41 @@ TEST_F(ReaderTest, ReadsFunctionModuleIndex) {
   EXPECT_GT(symbol.body_length, 0u);
   EXPECT_GE(symbol.body_absolute_offset, module_metadata.offset);
   EXPECT_GT(symbol.entry_length, 0u);
+
+  const auto* type_section =
+      std::find_if(module_metadata.sections,
+                   module_metadata.sections + module_metadata.section_count,
+                   [](const loom_bytecode_section_metadata_t& section) {
+                     return section.kind == LOOM_BYTECODE_SECTION_TYPES;
+                   });
+  ASSERT_NE(type_section,
+            module_metadata.sections + module_metadata.section_count);
+  for (iree_host_size_t i = 0; i < module_metadata.types.count; ++i) {
+    const auto& entry = module_metadata.types.entries[i];
+    EXPECT_GE(entry.entry_offset, type_section->absolute_offset);
+    EXPECT_GT(entry.entry_length, 0u);
+    EXPECT_LE(entry.entry_offset + entry.entry_length,
+              type_section->absolute_offset + type_section->length);
+  }
+  EXPECT_FALSE(iree_string_view_is_empty(module_metadata.ops.entries[0].name));
+
+  if (module_metadata.locations.count > 0) {
+    const auto* location_section =
+        std::find_if(module_metadata.sections,
+                     module_metadata.sections + module_metadata.section_count,
+                     [](const loom_bytecode_section_metadata_t& section) {
+                       return section.kind == LOOM_BYTECODE_SECTION_LOCATIONS;
+                     });
+    ASSERT_NE(location_section,
+              module_metadata.sections + module_metadata.section_count);
+    for (iree_host_size_t i = 0; i < module_metadata.locations.count; ++i) {
+      const auto& entry = module_metadata.locations.entries[i];
+      EXPECT_GE(entry.entry_offset, location_section->absolute_offset);
+      EXPECT_GT(entry.entry_length, 0u);
+      EXPECT_LE(entry.entry_offset + entry.entry_length,
+                location_section->absolute_offset + location_section->length);
+    }
+  }
 
   iree_arena_deinitialize(&metadata_arena);
   loom_module_free(module);
@@ -2560,6 +2614,12 @@ TEST_F(ReaderTest, IndexesAndMaterializesProviderImports) {
                              IREE_SV("motif/provider.loom")));
   EXPECT_EQ(module_metadata.provider_imports[0].first_anchor_index, 0u);
   EXPECT_EQ(module_metadata.provider_imports[0].anchor_count, 2u);
+  EXPECT_TRUE(module_metadata.provider_imports[0].leading_blank_line);
+  ASSERT_EQ(module_metadata.provider_imports[0].comment_count, 1u);
+  ASSERT_NE(module_metadata.provider_imports[0].comments, nullptr);
+  EXPECT_TRUE(
+      iree_string_view_equal(module_metadata.provider_imports[0].comments[0],
+                             IREE_SV(" provider comment")));
   EXPECT_EQ(module_metadata.provider_import_anchor_symbol_indices[0], 1u);
   EXPECT_EQ(module_metadata.provider_import_anchor_symbol_indices[1], 0u);
   ASSERT_NE(module_metadata.symbols, nullptr);
@@ -3362,11 +3422,30 @@ TEST_F(ReaderTest, ReadsLocationTablesWithModuleSources) {
   loom_module_t* module = CreateLocatedModule();
   auto bytes = WriteModule(module);
 
+  iree_arena_allocator_t metadata_arena;
+  iree_arena_initialize(&block_pool_, &metadata_arena);
+  loom_bytecode_file_metadata_t metadata = {0};
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t index_result =
+      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+  ASSERT_EQ(index_result.error_count, 0u);
+  ASSERT_TRUE(error_ids.empty());
+  ASSERT_EQ(metadata.module_count, 1u);
+  const loom_bytecode_module_metadata_t& module_metadata = metadata.modules[0];
+  ASSERT_EQ(module_metadata.sources.count, 1u);
+  EXPECT_TRUE(iree_string_view_equal(module_metadata.sources.values[0],
+                                     IREE_SV("model.loom")));
+  ASSERT_EQ(module_metadata.locations.count, 2u);
+  ASSERT_NE(module_metadata.locations.entries, nullptr);
+  for (iree_host_size_t i = 0; i < module_metadata.locations.count; ++i) {
+    EXPECT_GT(module_metadata.locations.entries[i].entry_length, 0u);
+  }
+
   loom_context_t read_context;
   InitializeBytecodeTestContext(&read_context);
 
   loom_module_t* read_module = nullptr;
-  std::vector<std::string> error_ids;
+  error_ids.clear();
   loom_bytecode_read_result_t result =
       ReadModule(bytes, &read_context, &read_module, &error_ids);
 
@@ -3386,6 +3465,7 @@ TEST_F(ReaderTest, ReadsLocationTablesWithModuleSources) {
 
   loom_module_free(read_module);
   loom_context_deinitialize(&read_context);
+  iree_arena_deinitialize(&metadata_arena);
   loom_module_free(module);
 }
 
