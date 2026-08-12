@@ -14,7 +14,6 @@
 #include "loom/error/error_defs.h"
 #include "loom/target/provider.h"
 #include "loom/target/reporting/format.h"
-#include "loomc/compile_report.h"
 #include "loomc/iree.h"
 #include "module.h"
 #include "result.h"
@@ -367,32 +366,6 @@ static loom_target_artifact_manifest_mode_t loomc_emit_target_manifest_mode(
   }
 }
 
-static loom_target_compile_report_format_mode_t
-loomc_emit_target_compile_report_mode(loomc_compile_report_mode_t mode) {
-  switch (mode) {
-    case LOOMC_COMPILE_REPORT_MODE_SUMMARY:
-      return LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY;
-    case LOOMC_COMPILE_REPORT_MODE_DETAILS:
-      return LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS;
-    case LOOMC_COMPILE_REPORT_MODE_NONE:
-    default:
-      return LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_NONE;
-  }
-}
-
-static loom_target_compile_report_detail_flags_t
-loomc_emit_compile_report_requested_detail_flags(
-    loomc_compile_report_mode_t mode) {
-  if (mode != LOOMC_COMPILE_REPORT_MODE_DETAILS) {
-    return LOOM_TARGET_COMPILE_REPORT_DETAIL_NONE;
-  }
-  return LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ROWS |
-         LOOM_TARGET_COMPILE_REPORT_DETAIL_SPILL_ROWS |
-         LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS |
-         LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_LEGALIZATION_ROWS |
-         LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS;
-}
-
 static loomc_status_t loomc_emit_result_fail_format_message(
     loomc_result_t* result, const char* message, loomc_string_view_t format,
     loomc_allocator_t allocator) {
@@ -552,61 +525,15 @@ static loomc_status_t loomc_emit_make_compile_report_identifier(
     const loomc_emit_resolved_options_t* options,
     const loom_target_emitter_t* emitter, loomc_allocator_t allocator,
     loomc_string_view_t* out_identifier) {
-  *out_identifier = loomc_string_view_empty();
-  if (!loomc_string_view_is_empty(options->compile_report_identifier)) {
-    return loomc_string_view_clone(options->compile_report_identifier,
-                                   allocator, out_identifier);
-  }
-  const loomc_string_view_t primary_identifier =
-      loomc_emit_identifier(options, emitter);
-  const loomc_string_view_t suffix =
-      loomc_make_cstring_view(".compile-report.json");
-  const loomc_host_size_t identifier_length =
-      primary_identifier.size + suffix.size;
-  char* identifier = NULL;
-  LOOMC_RETURN_IF_ERROR(loomc_allocator_malloc_uninitialized(
-      allocator, identifier_length, (void**)&identifier));
-  memcpy(identifier, primary_identifier.data, primary_identifier.size);
-  memcpy(identifier + primary_identifier.size, suffix.data, suffix.size);
-  *out_identifier = loomc_make_string_view(identifier, identifier_length);
-  return loomc_ok_status();
-}
-
-static loomc_status_t loomc_emit_add_compile_report_artifact(
-    loomc_result_t* result, const loomc_emit_resolved_options_t* options,
-    const loomc_string_view_t identifier,
-    const loom_target_compile_report_t* report) {
-  loomc_allocator_t allocator = loomc_result_allocator(result);
-  iree_string_builder_t builder;
-  iree_string_builder_initialize(iree_allocator_from_loomc(allocator),
-                                 &builder);
-  loom_output_stream_t stream;
-  loom_output_stream_for_builder(&builder, &stream);
-  const loom_target_compile_report_format_options_t format_options = {
-      .mode =
-          loomc_emit_target_compile_report_mode(options->compile_report_mode),
+  const loomc_compile_report_options_t report_options = {
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
+      .structure_size = sizeof(report_options),
+      .mode = options->compile_report_mode,
+      .identifier = options->compile_report_identifier,
   };
-  loomc_status_t status = loomc_status_from_iree(
-      loom_target_compile_report_format_json(report, &format_options, &stream));
-
-  char* report_storage = NULL;
-  iree_host_size_t report_length = 0;
-  if (loomc_status_is_ok(status)) {
-    report_length = iree_string_builder_size(&builder);
-    report_storage = iree_string_builder_take_storage(&builder);
-  }
-  if (loomc_status_is_ok(status)) {
-    status = loomc_result_add_artifact_take_contents(
-        result, LOOMC_ARTIFACT_KIND_REPORT,
-        loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_COMPILE_REPORT_JSON),
-        identifier, loomc_make_byte_span(report_storage, report_length));
-  }
-  if (loomc_status_is_ok(status)) {
-    report_storage = NULL;
-  }
-  loomc_allocator_free(allocator, report_storage);
-  iree_string_builder_deinitialize(&builder);
-  return status;
+  return loomc_compile_report_make_identifier(
+      &report_options, loomc_emit_identifier(options, emitter), allocator,
+      out_identifier);
 }
 
 static loomc_status_t loomc_emit_add_artifact(
@@ -765,7 +692,7 @@ loomc_status_t loomc_emit_module_append(
         compile_report.artifact_format =
             loom_target_artifact_format_name(emitter->target_artifact_format);
         compile_report.requested_detail_flags =
-            loomc_emit_compile_report_requested_detail_flags(
+            loomc_compile_report_requested_detail_flags(
                 resolved_options.compile_report_mode);
       }
       const loom_target_emit_request_t request = {
@@ -827,8 +754,9 @@ loomc_status_t loomc_emit_module_append(
     }
   }
   if (loomc_status_is_ok(status) && compile_report_initialized) {
-    status = loomc_emit_add_compile_report_artifact(
-        result, &resolved_options, compile_report_identifier, &compile_report);
+    status = loomc_compile_report_add_artifact(
+        result, resolved_options.compile_report_mode, compile_report_identifier,
+        &compile_report);
   }
 
   loomc_allocator_free(allocator, (void*)manifest_identifier.data);

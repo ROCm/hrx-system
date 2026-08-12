@@ -12,10 +12,12 @@
 /// @file
 /// Compile report emission controls.
 ///
-/// Compile reports are optional machine-readable sidecars for target emission.
-/// They describe the selected backend, target, terminal status, artifact size,
-/// and target-provided compiler analysis facts available at the selected
-/// verbosity.
+/// Compile reports are optional machine-readable sidecars for compilation and
+/// program-production operations. Target reports describe the selected backend,
+/// target, terminal status, artifact size, and compiler analysis facts
+/// available at the selected verbosity. Program-plan reports preserve selected
+/// root and unit topology, while independently compiled units report their own
+/// products.
 ///
 /// Report generation is opt-in. Omitting this descriptor, or setting `mode` to
 /// `LOOMC_COMPILE_REPORT_MODE_NONE`, keeps emission on the normal artifact
@@ -40,11 +42,12 @@ typedef enum loomc_compile_report_mode_e {
   LOOMC_COMPILE_REPORT_MODE_DETAILS = 2,
 } loomc_compile_report_mode_t;
 
-/// Compile report emission options.
+/// Compile report production options.
 ///
-/// Attach this descriptor through `loomc_emit_options_t::next`. The descriptor
-/// controls JSON report production for the emitted target artifact. It does not
-/// run compilation passes, force target analyses, or write filesystem paths.
+/// Attach this descriptor through an operation's documented `next` chain. The
+/// descriptor controls JSON report production for that operation. It does not
+/// run compilation passes, change a compiled product, force analyses that are
+/// not required by the selected detail mode, or write filesystem paths.
 typedef struct loomc_compile_report_options_t {
   /// Structure type. Must be `LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS`
   /// when nonzero.

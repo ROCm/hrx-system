@@ -30,6 +30,10 @@ typedef enum loom_target_compile_artifact_kind_e {
   LOOM_TARGET_COMPILE_ARTIFACT_KIND_HAL_KERNEL_LIBRARY = 3,
   // Target-native artifact such as ELF, SPIR-V, WASM, or object bytes.
   LOOM_TARGET_COMPILE_ARTIFACT_KIND_TARGET_ARTIFACT = 4,
+  // Portable command-program artifact.
+  LOOM_TARGET_COMPILE_ARTIFACT_KIND_COMMAND_PROGRAM = 5,
+  // Host launch-config program artifact.
+  LOOM_TARGET_COMPILE_ARTIFACT_KIND_LAUNCH_CONFIG = 6,
 } loom_target_compile_artifact_kind_t;
 
 typedef uint32_t loom_target_compile_report_detail_flags_t;

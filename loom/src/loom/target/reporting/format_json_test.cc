@@ -66,6 +66,54 @@ static void ExpectArrayLength(iree_string_view_t array,
   EXPECT_EQ(actual, expected);
 }
 
+TEST(CompileReportFormatTest, NamesCommandProgramArtifacts) {
+  loom_target_compile_report_t report = {};
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  report.artifact_kind = LOOM_TARGET_COMPILE_ARTIFACT_KIND_COMMAND_PROGRAM;
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(&builder, &stream);
+  const loom_target_compile_report_format_options_t options = {
+      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+  };
+  IREE_ASSERT_OK(
+      loom_target_compile_report_format_json(&report, &options, &stream));
+
+  const iree_string_view_t root =
+      ParseJsonDocument(iree_string_builder_view(&builder));
+  ExpectObjectValueEquals(root, IREE_SV("artifact_kind"),
+                          IREE_SV("command-program"));
+
+  iree_string_builder_deinitialize(&builder);
+  loom_target_compile_report_deinitialize(&report);
+}
+
+TEST(CompileReportFormatTest, NamesLaunchConfigArtifacts) {
+  loom_target_compile_report_t report = {};
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  report.artifact_kind = LOOM_TARGET_COMPILE_ARTIFACT_KIND_LAUNCH_CONFIG;
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(&builder, &stream);
+  const loom_target_compile_report_format_options_t options = {
+      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+  };
+  IREE_ASSERT_OK(
+      loom_target_compile_report_format_json(&report, &options, &stream));
+
+  const iree_string_view_t root =
+      ParseJsonDocument(iree_string_builder_view(&builder));
+  ExpectObjectValueEquals(root, IREE_SV("artifact_kind"),
+                          IREE_SV("launch-config"));
+
+  iree_string_builder_deinitialize(&builder);
+  loom_target_compile_report_deinitialize(&report);
+}
+
 TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
   loom_target_compile_report_pressure_row_t pressure_rows[] = {
       {

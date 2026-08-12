@@ -24,6 +24,10 @@ iree_string_view_t loom_target_compile_report_artifact_kind_name(
       return IREE_SV("hal-kernel-library");
     case LOOM_TARGET_COMPILE_ARTIFACT_KIND_TARGET_ARTIFACT:
       return IREE_SV("target-artifact");
+    case LOOM_TARGET_COMPILE_ARTIFACT_KIND_COMMAND_PROGRAM:
+      return IREE_SV("command-program");
+    case LOOM_TARGET_COMPILE_ARTIFACT_KIND_LAUNCH_CONFIG:
+      return IREE_SV("launch-config");
     default:
       return IREE_SV("unknown");
   }
