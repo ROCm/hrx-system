@@ -4,51 +4,43 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Generator: AMDGPU selected-target C config fragments."""
+"""AMDGPU selected-target C config fragment emission."""
 
 from __future__ import annotations
 
-import argparse
-import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-
-def _ensure_runtime_py_on_path() -> None:
-    runtime_py = Path(__file__).resolve().parents[5]
-    runtime_py_string = str(runtime_py)
-    if runtime_py_string not in sys.path:
-        sys.path.insert(0, runtime_py_string)
-
-
-_ensure_runtime_py_on_path()
-
-from loom.gen.support.c import CIdentifierCase, c_identifier  # noqa: E402
-from loom.gen.support.generated_file import line_comment_header  # noqa: E402
-from loom.target.arch.amdgpu.encoding import (  # noqa: E402
+from loom.gen.support.c import CIdentifierCase, c_identifier
+from loom.gen.support.files import write_text_file
+from loom.gen.support.generated_file import line_comment_header
+from loom.target.arch.amdgpu.encoding import (
     AMDGPU_ENCODING_FIELD_IDS,
     AMDGPU_ENCODING_FIELD_NAMES,
 )
-from loom.target.arch.amdgpu.names import (  # noqa: E402
+from loom.target.arch.amdgpu.names import (
     amdgpu_descriptor_set_define,
     amdgpu_descriptor_set_ordinal_constant_name,
     amdgpu_encoding_table_symbol,
     amdgpu_low_descriptor_provider_symbol,
 )
-from loom.target.arch.amdgpu.target_info import (  # noqa: E402
+from loom.target.arch.amdgpu.target_info import (
     AmdgpuDescriptorSetInfo,
+    AmdgpuProcessorInfo,
+    AmdgpuTargetInfo,
     amdgpu_target_descriptor_set_key,
-    sorted_descriptor_set_infos,
-    sorted_processor_infos,
-    sorted_target_infos,
 )
 
 
-def _selected_descriptor_set_infos() -> tuple[AmdgpuDescriptorSetInfo, ...]:
-    processors_by_name = {info.processor: info for info in sorted_processor_infos()}
-    descriptor_sets_by_key = {info.key: info for info in sorted_descriptor_set_infos()}
+def _selected_descriptor_set_infos(
+    descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
+    processors: Sequence[AmdgpuProcessorInfo],
+    targets: Sequence[AmdgpuTargetInfo],
+) -> tuple[AmdgpuDescriptorSetInfo, ...]:
+    processors_by_name = {info.processor: info for info in processors}
+    descriptor_sets_by_key = {info.key: info for info in descriptor_sets}
     descriptor_set_keys: list[str] = []
-    for target in sorted_target_infos():
+    for target in targets:
         processor = processors_by_name.get(target.processor)
         if processor is None:
             raise ValueError(f"AMDGPU target '{target.target}' has no processor row '{target.processor}'")
@@ -198,44 +190,26 @@ def _emit_encoding_field_ids() -> str:
     return "\n".join(lines) + "\n"
 
 
-def _write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate AMDGPU selected-target C config fragments.")
-    parser.add_argument(
-        "--low-registry-tables",
-        type=Path,
-        help="Generated low descriptor registry X-macro table path.",
+def write_config_tables_to_paths(
+    *,
+    descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
+    processors: Sequence[AmdgpuProcessorInfo],
+    targets: Sequence[AmdgpuTargetInfo],
+    low_registry_tables_path: Path,
+    encoding_tables_path: Path,
+    encoding_field_ids_path: Path,
+) -> None:
+    selected_descriptor_sets = _selected_descriptor_set_infos(
+        descriptor_sets,
+        processors,
+        targets,
     )
-    parser.add_argument(
-        "--encoding-tables",
-        type=Path,
-        help="Generated encoding table X-macro table path.",
+    write_text_file(
+        low_registry_tables_path,
+        _emit_low_registry_tables(selected_descriptor_sets),
     )
-    parser.add_argument(
-        "--encoding-field-ids",
-        type=Path,
-        help="Generated encoding field ID X-macro row fragment path.",
+    write_text_file(
+        encoding_tables_path,
+        _emit_encoding_tables(selected_descriptor_sets),
     )
-    args = parser.parse_args(argv)
-
-    if not (args.low_registry_tables or args.encoding_tables or args.encoding_field_ids):
-        parser.error("at least one output flag is required")
-
-    descriptor_sets: tuple[AmdgpuDescriptorSetInfo, ...] = ()
-    if args.low_registry_tables or args.encoding_tables:
-        descriptor_sets = _selected_descriptor_set_infos()
-    if args.low_registry_tables:
-        _write(args.low_registry_tables, _emit_low_registry_tables(descriptor_sets))
-    if args.encoding_tables:
-        _write(args.encoding_tables, _emit_encoding_tables(descriptor_sets))
-    if args.encoding_field_ids:
-        _write(args.encoding_field_ids, _emit_encoding_field_ids())
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    write_text_file(encoding_field_ids_path, _emit_encoding_field_ids())

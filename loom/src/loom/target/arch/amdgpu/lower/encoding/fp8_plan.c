@@ -9,58 +9,7 @@
 
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/encoding/fp8.h"
-
-typedef struct loom_amdgpu_fp8_subnormal_table_row_t {
-  // Exact FP8 numeric format owning this decode table row.
-  loom_value_fact_numeric_format_flags_t source_format;
-  // Scalar type owning this FP8/BF8 decode table row.
-  loom_scalar_type_t element_type;
-  // Encoded FP8 source format used by the decode plan.
-  loom_scalar_type_fp8_format_t format;
-  // Packed unsigned BF16 payloads for two-bit mantissas.
-  uint32_t subnormal_bf16_table_words[2];
-  // Packed BF16 payload byte tables for three-bit mantissas.
-  uint32_t subnormal_bf16_byte_table_words
-      [LOOM_AMDGPU_FP8_BF16_BYTE_COUNT]
-      [LOOM_AMDGPU_FP8_BF16_BYTE_TABLE_WORD_COUNT];
-  // Packed F16 payload byte tables.
-  uint32_t
-      subnormal_f16_byte_table_words[LOOM_AMDGPU_FP8_U16_BYTE_COUNT]
-                                    [LOOM_AMDGPU_FP8_U16_BYTE_TABLE_WORD_COUNT];
-} loom_amdgpu_fp8_subnormal_table_row_t;
-
-static const loom_amdgpu_fp8_subnormal_table_row_t
-    kLoomAmdgpuFp8SubnormalTableRows[] = {
-#define LOOM_AMDGPU_FP8_SUBNORMAL_TABLE_ROW(                                   \
-    row_source_format, row_element_type, row_exponent_bits, row_mantissa_bits, \
-    row_exponent_bias, row_special_policy, bf16_table_0, bf16_table_1,         \
-    bf16_byte_0_0, bf16_byte_0_1, bf16_byte_1_0, bf16_byte_1_1, f16_byte_0_0,  \
-    f16_byte_0_1, f16_byte_1_0, f16_byte_1_1)                                  \
-  {                                                                            \
-      .source_format = row_source_format,                                      \
-      .element_type = row_element_type,                                        \
-      .format =                                                                \
-          {                                                                    \
-              .exponent_bits = row_exponent_bits,                              \
-              .mantissa_bits = row_mantissa_bits,                              \
-              .exponent_bias = row_exponent_bias,                              \
-              .special_policy = row_special_policy,                            \
-          },                                                                   \
-      .subnormal_bf16_table_words = {bf16_table_0, bf16_table_1},              \
-      .subnormal_bf16_byte_table_words =                                       \
-          {                                                                    \
-              {bf16_byte_0_0, bf16_byte_0_1},                                  \
-              {bf16_byte_1_0, bf16_byte_1_1},                                  \
-          },                                                                   \
-      .subnormal_f16_byte_table_words =                                        \
-          {                                                                    \
-              {f16_byte_0_0, f16_byte_0_1},                                    \
-              {f16_byte_1_0, f16_byte_1_1},                                    \
-          },                                                                   \
-  }
-#include "loom/target/arch/amdgpu/lower/encoding/fp8_subnormal_table_rows.inl"
-#undef LOOM_AMDGPU_FP8_SUBNORMAL_TABLE_ROW
-};
+#include "loom/target/arch/amdgpu/lower/encoding/fp8_tables.h"
 
 static_assert(IREE_ARRAYSIZE(kLoomAmdgpuFp8SubnormalTableRows) + 1u <= 32,
               "FP8 decode plan cache stores exact rows and one compatibility "
@@ -106,29 +55,6 @@ static void loom_amdgpu_initialize_fp8_decode_format_from_row(
          row->subnormal_f16_byte_table_words,
          sizeof(plan->subnormal_f16_byte_table_words));
 }
-
-typedef struct loom_amdgpu_fp8_decode_plan_descriptor_row_t {
-  // Descriptor ref to probe in the active target descriptor set.
-  loom_amdgpu_descriptor_ref_t descriptor_ref;
-  // Byte offset of the resolved descriptor field in the decode plan.
-  size_t descriptor_offset;
-  // Plan flag raised when the descriptor ref is present.
-  loom_amdgpu_fp8_decode_plan_flags_t present_flag;
-} loom_amdgpu_fp8_decode_plan_descriptor_row_t;
-
-#define LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(ref, field, flag)       \
-  {                                                                        \
-      .descriptor_ref = ref,                                               \
-      .descriptor_offset = offsetof(loom_amdgpu_fp8_decode_plan_t, field), \
-      .present_flag = flag,                                                \
-  }
-
-static const loom_amdgpu_fp8_decode_plan_descriptor_row_t
-    kLoomAmdgpuFp8DecodePlanDescriptorRows[] = {
-#include "loom/target/arch/amdgpu/lower/encoding/fp8_decode_plan_descriptor_rows.inl"
-};
-
-#undef LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW
 
 static void loom_amdgpu_mark_fp8_native_f32_pair_decode_plan_flag(
     const loom_low_descriptor_set_t* descriptor_set,

@@ -15,12 +15,14 @@ from pathlib import Path
 from loom.dsl import Op
 from loom.gen.support.c import c_identifier as _c_identifier
 from loom.gen.support.c import c_pascal_identifier as _pascal_identifier
+from loom.gen.support.files import write_text_file
 from loom.gen.support.generated_file import line_comment_header
 from loom.target.contracts import (
     CONTRACT_ROW_NONE,
     CompiledContractFragment,
     CompiledDescriptorMatrix,
     CompiledDescriptorRule,
+    CompiledLowerRuleSet,
     ContractFragment,
     ContractSystem,
     compile_contract_fragment,
@@ -62,6 +64,21 @@ def generate_contract_fragment(
     """Generates C/H text for a compact target contract fragment."""
 
     lower_rules = compile_lower_rule_set(table, dialect_ops=dialect_ops)
+    return generate_contract_fragment_from_lower_rules(
+        table,
+        dialect_ops=dialect_ops,
+        lower_rules=lower_rules,
+    )
+
+
+def generate_contract_fragment_from_lower_rules(
+    table: ContractFragment,
+    *,
+    dialect_ops: Mapping[str, Sequence[Op]],
+    lower_rules: CompiledLowerRuleSet,
+) -> GeneratedContractFragment:
+    """Generates C/H text using the fragment's compiled lower-rule rows."""
+
     lower_rule_indices = {authored_case_index: rule_index for rule_index, authored_case_index in enumerate(lower_rules.authored_case_indices)}
     descriptor_rule_rows = {
         authored_case_index: CompiledDescriptorRule(rule_index=rule_index)
@@ -104,10 +121,8 @@ def write_contract_fragment_to_paths(
     """Writes generated C/H contents for one target contract fragment."""
 
     generated = generate_contract_fragment(table, dialect_ops=dialect_ops)
-    header_path.parent.mkdir(parents=True, exist_ok=True)
-    source_path.parent.mkdir(parents=True, exist_ok=True)
-    header_path.write_text(generated.header, encoding="utf-8")
-    source_path.write_text(generated.source, encoding="utf-8")
+    write_text_file(header_path, generated.header)
+    write_text_file(source_path, generated.source)
 
 
 def _generate_header(

@@ -10,27 +10,16 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_IREE_VM)
-loom_target_table_cc_library(
+loom_target_contract_table_cc_libraries(
   NAME
     core
   GENERATOR
-    loom::py::loom::gen::target::contracts::ireevm_contract_fragment
+    loom::py::loom::gen::target::contracts::ireevm_contract_table_family
   ARGS
     "--contract-fragment=ireevm.core"
-  DEPS
+  CONTRACT_DEPS
     loom::target::contract
-)
-endif()
-
-if(LOOM_TARGET_ARCH_IREE_VM)
-loom_target_table_cc_library(
-  NAME
-    core_lower_rules
-  GENERATOR
-    loom::py::loom::gen::target::contracts::ireevm_lower_rule_shard
-  ARGS
-    "--contract-fragment=ireevm.core"
-  DEPS
+  LOWER_RULE_DEPS
     loom::codegen::low::lower
     loom::ops::scalar
     loom::target::arch::ireevm::descriptors::descriptors_ids

@@ -271,7 +271,7 @@ static const loom_target_math_policy_registry_entry_t
                ? &kAmdgpuNativePackedBf16MathPolicy                             \
                : &kAmdgpuMathPolicy),                                           \
   },
-#include "loom/target/arch/amdgpu/records/target_records_tables.inl"
+#include "loom/target/arch/amdgpu/target_records_tables.inl"
 #undef LOOM_AMDGPU_TARGET_DESCRIPTOR_SET
 };
 

@@ -22,7 +22,7 @@ typedef struct loom_amdgpu_lds_bank_service_model_set_t {
   iree_host_size_t count;
 } loom_amdgpu_lds_bank_service_model_set_t;
 
-#include "loom/target/arch/amdgpu/analysis/lds_bank_service_model_rows.inl"
+#include "loom/target/arch/amdgpu/lds_bank_service_model_rows.inl"
 
 const loom_amdgpu_lds_bank_service_model_t*
 loom_amdgpu_lds_bank_service_model_lookup(

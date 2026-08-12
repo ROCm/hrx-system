@@ -25,16 +25,17 @@ def _ensure_runtime_py_on_path() -> None:
 _ensure_runtime_py_on_path()
 
 from loom.gen.support.c import c_string_arg as _c_string_arg  # noqa: E402
+from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
-from loom.gen.target.low.validation import operand_role_is_packet_input  # noqa: E402
-from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
-    build_amdgpu_core_descriptor_set_from_specs,
+from loom.gen.target.arch.amdgpu.descriptors.amdgpu_planning_table_inputs import (  # noqa: E402
+    AmdgpuPlanningTableInputs,
+    load_amdgpu_planning_table_inputs,
 )
+from loom.gen.target.low.validation import operand_role_is_packet_input  # noqa: E402
 from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
     AmdgpuIsaFactSource,
     AmdgpuIsaInstruction,
     AmdgpuIsaInstructionEncoding,
-    parse_amdgpu_isa_xml_path,
 )
 from loom.target.arch.amdgpu.names import amdgpu_c_identifier_fragment  # noqa: E402
 from loom.target.arch.amdgpu.target_info import (  # noqa: E402
@@ -44,7 +45,7 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     amdgpu_descriptor_set_ordinal,
     sorted_descriptor_set_infos,
 )
-from loom.target.low_descriptors import ConstraintKind, Descriptor, DescriptorSet  # noqa: E402
+from loom.target.low_descriptors import ConstraintKind, Descriptor  # noqa: E402
 
 _UINT16_MAX = 0xFFFF
 _VOPD_COMPONENT_REGISTER_UNIT_COUNT = 1
@@ -127,6 +128,14 @@ class _VopdComponentDescriptorLookupRange:
 
 
 @dataclass(frozen=True, slots=True)
+class _VopdComponentDescriptorLookup:
+    # Rule index plus one for each descriptor ordinal; zero denotes no rule.
+    rows: tuple[int, ...]
+    # Descriptor ordinals eligible to participate in pair-affinity rows.
+    pair_affinity_candidate_ordinals: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class _VopdPairAffinityRange:
     descriptor_set_key: str
     descriptor_set_ordinal: int
@@ -165,6 +174,16 @@ class _VopdPairPlacementRecipe:
     packet_savings: int = 1
 
 
+@dataclass(slots=True)
+class _VopdPairPlacementRecipeCatalog:
+    # Recipes in first-use order for generated table emission.
+    recipes: list[_VopdPairPlacementRecipe]
+    # Emitted recipe index keyed by structural recipe value.
+    indices_by_recipe: dict[_VopdPairPlacementRecipe, int]
+    # Emitted recipe index already resolved for each ordered rule pair.
+    indices_by_rule_pair: dict[tuple[int, int], int]
+
+
 @dataclass(frozen=True, slots=True)
 class _VopdComponentTables:
     rules: tuple[_VopdComponentRule, ...]
@@ -173,28 +192,6 @@ class _VopdComponentTables:
     pair_affinity_ranges: tuple[_VopdPairAffinityRange, ...]
     pair_affinity_rows: tuple[_VopdPairAffinityRow, ...]
     pair_placement_recipes: tuple[_VopdPairPlacementRecipe, ...]
-
-
-def _parse_isa_xml_argument(value: str) -> tuple[str, Path]:
-    key, separator, path = value.partition(":")
-    if not separator or not key or not path:
-        raise ValueError("AMDGPU VOPD --isa-xml entries must be key:path pairs")
-    return key, Path(path)
-
-
-def _parse_isa_xml_arguments(values: Sequence[str]) -> dict[str, AmdgpuIsaFactSource]:
-    paths: dict[str, Path] = {}
-    specs: dict[str, AmdgpuIsaFactSource] = {}
-    for value in values:
-        key, path = _parse_isa_xml_argument(value)
-        existing_path = paths.get(key)
-        if existing_path is not None:
-            if existing_path != path:
-                raise ValueError(f"AMDGPU VOPD ISA XML key '{key}' has conflicting paths '{existing_path}' and '{path}'")
-            continue
-        paths[key] = path
-        specs[key] = parse_amdgpu_isa_xml_path(path)
-    return specs
 
 
 def _descriptor_set_supports_vopd(info: AmdgpuDescriptorSetInfo) -> bool:
@@ -488,26 +485,33 @@ def _component_definitions() -> tuple[_VopdComponentDefinition, ...]:
     )
 
 
+def amdgpu_vopd_instruction_names_by_isa_key() -> dict[str, tuple[str, ...]]:
+    """Returns XML instruction facts consumed by VOPD table validation."""
+
+    descriptor_set_infos = sorted_descriptor_set_infos()
+    descriptor_set_infos_by_key = _descriptor_set_infos_by_key(descriptor_set_infos)
+    names_by_isa_key: dict[str, set[str]] = {}
+    for component in _component_definitions():
+        descriptor_set_keys = _descriptor_set_keys_for_group(
+            component.descriptor_set_group,
+            descriptor_set_infos,
+        )
+        for descriptor_set_key in descriptor_set_keys:
+            info = descriptor_set_infos_by_key[descriptor_set_key]
+            for isa_info in info.isa_infos:
+                instruction_name = _xml_instruction_name(
+                    component,
+                    isa_info.isa_xml_key,
+                )
+                if instruction_name is not None:
+                    names_by_isa_key.setdefault(isa_info.isa_xml_key, set()).add(instruction_name)
+    return {isa_key: tuple(sorted(instruction_names)) for isa_key, instruction_names in sorted(names_by_isa_key.items())}
+
+
 def _descriptor_set_infos_by_key(
     descriptor_set_infos: Sequence[AmdgpuDescriptorSetInfo],
 ) -> dict[str, AmdgpuDescriptorSetInfo]:
     return {info.key: info for info in descriptor_set_infos}
-
-
-def _descriptor_sets_by_key(
-    descriptor_set_infos: Sequence[AmdgpuDescriptorSetInfo],
-    isa_specs: Mapping[str, AmdgpuIsaFactSource],
-) -> dict[str, DescriptorSet]:
-    descriptor_sets: dict[str, DescriptorSet] = {}
-    for info in descriptor_set_infos:
-        descriptor_set = build_amdgpu_core_descriptor_set_from_specs(
-            info.generator_target,
-            isa_specs,
-        )
-        if descriptor_set.key != info.key:
-            raise ValueError(f"AMDGPU descriptor-set builder '{info.generator_target}' produced '{descriptor_set.key}', expected '{info.key}'")
-        descriptor_sets[info.key] = descriptor_set
-    return descriptor_sets
 
 
 def _validate_component_definition(
@@ -644,11 +648,11 @@ def _component_flags_initializer(flags: frozenset[str]) -> str:
     return " | ".join(sorted(flags))
 
 
-def _descriptor_lookup_rows_for_set(
+def _descriptor_lookup_for_set(
     descriptor_set_key: str,
     descriptor_keys: Sequence[str],
     rules: Sequence[_VopdComponentRule],
-) -> tuple[int, ...]:
+) -> _VopdComponentDescriptorLookup:
     rule_by_descriptor_key: dict[str, int] = {}
     for rule_index, rule in enumerate(rules):
         if descriptor_set_key not in rule.descriptor_set_keys:
@@ -659,7 +663,21 @@ def _descriptor_lookup_rows_for_set(
         )
         if previous_index != rule_index + 1:
             raise ValueError(f"AMDGPU VOPD descriptor '{rule.component.descriptor_key}' has multiple component rows for descriptor set '{descriptor_set_key}'")
-    return tuple(rule_by_descriptor_key.get(descriptor_key, 0) for descriptor_key in descriptor_keys)
+
+    rows: list[int] = []
+    pair_affinity_candidate_ordinals: list[int] = []
+    for descriptor_key in descriptor_keys:
+        rule_index_plus_one = rule_by_descriptor_key.get(descriptor_key, 0)
+        rows.append(rule_index_plus_one)
+        if rule_index_plus_one == 0:
+            continue
+        rule = rules[rule_index_plus_one - 1]
+        if rule.component.descriptor_affinity_eligible:
+            pair_affinity_candidate_ordinals.append(len(rows) - 1)
+    return _VopdComponentDescriptorLookup(
+        rows=tuple(rows),
+        pair_affinity_candidate_ordinals=tuple(pair_affinity_candidate_ordinals),
+    )
 
 
 def _component_can_use_lane(
@@ -932,36 +950,35 @@ def _pair_placement_recipe(
 
 def _pair_affinity_rows_for_set(
     rules: Sequence[_VopdComponentRule],
-    descriptor_lookup_rows: Sequence[int],
-    placement_recipes: list[_VopdPairPlacementRecipe],
-    placement_recipe_indices: dict[_VopdPairPlacementRecipe, int],
+    descriptor_lookup: _VopdComponentDescriptorLookup,
+    placement_recipe_catalog: _VopdPairPlacementRecipeCatalog,
 ) -> tuple[_VopdPairAffinityRow, ...]:
     rows: list[_VopdPairAffinityRow] = []
-    for first_ordinal, first_rule_index_plus_one in enumerate(descriptor_lookup_rows):
-        if first_rule_index_plus_one == 0:
-            continue
-        first_rule = rules[first_rule_index_plus_one - 1]
-        if not first_rule.component.descriptor_affinity_eligible:
-            continue
-        for second_ordinal, second_rule_index_plus_one in enumerate(descriptor_lookup_rows):
-            if second_rule_index_plus_one == 0:
-                continue
-            second_rule = rules[second_rule_index_plus_one - 1]
-            if not second_rule.component.descriptor_affinity_eligible:
-                continue
+    for first_ordinal in descriptor_lookup.pair_affinity_candidate_ordinals:
+        first_rule_index_plus_one = descriptor_lookup.rows[first_ordinal]
+        first_rule_index = first_rule_index_plus_one - 1
+        first_rule = rules[first_rule_index]
+        for second_ordinal in descriptor_lookup.pair_affinity_candidate_ordinals:
+            second_rule_index_plus_one = descriptor_lookup.rows[second_ordinal]
+            second_rule_index = second_rule_index_plus_one - 1
+            second_rule = rules[second_rule_index]
             if not _components_can_pair(first_rule.component, second_rule.component):
                 continue
-            placement_recipe = _pair_placement_recipe(
-                first_rule.component,
-                second_rule.component,
-                first_rule.flags,
-                second_rule.flags,
-            )
-            placement_recipe_index = placement_recipe_indices.get(placement_recipe)
+            rule_pair = (first_rule_index, second_rule_index)
+            placement_recipe_index = placement_recipe_catalog.indices_by_rule_pair.get(rule_pair)
             if placement_recipe_index is None:
-                placement_recipe_index = len(placement_recipes)
-                placement_recipes.append(placement_recipe)
-                placement_recipe_indices[placement_recipe] = placement_recipe_index
+                placement_recipe = _pair_placement_recipe(
+                    first_rule.component,
+                    second_rule.component,
+                    first_rule.flags,
+                    second_rule.flags,
+                )
+                placement_recipe_index = placement_recipe_catalog.indices_by_recipe.get(placement_recipe)
+                if placement_recipe_index is None:
+                    placement_recipe_index = len(placement_recipe_catalog.recipes)
+                    placement_recipe_catalog.recipes.append(placement_recipe)
+                    placement_recipe_catalog.indices_by_recipe[placement_recipe] = placement_recipe_index
+                placement_recipe_catalog.indices_by_rule_pair[rule_pair] = placement_recipe_index
             rows.append(
                 _VopdPairAffinityRow(
                     first_descriptor_ordinal=first_ordinal,
@@ -1127,11 +1144,12 @@ def _validate_vopd_component_tables(tables: _VopdComponentTables) -> None:
 
 
 def _materialize_vopd_component_tables(
-    descriptor_set_infos: Sequence[AmdgpuDescriptorSetInfo],
-    isa_specs: Mapping[str, AmdgpuIsaFactSource],
+    inputs: AmdgpuPlanningTableInputs,
 ) -> _VopdComponentTables:
+    descriptor_set_infos = inputs.descriptor_set_infos
+    isa_specs = inputs.isa_specs
     infos_by_key = _descriptor_set_infos_by_key(descriptor_set_infos)
-    descriptor_sets_by_key = _descriptor_sets_by_key(descriptor_set_infos, isa_specs)
+    descriptor_sets_by_key = inputs.descriptor_sets_by_key
     descriptor_keys_by_set_key = {key: tuple(descriptor.key for descriptor in descriptor_set.descriptors) for key, descriptor_set in descriptor_sets_by_key.items()}
     descriptors_by_set_key = {key: {descriptor.key: descriptor for descriptor in descriptor_set.descriptors} for key, descriptor_set in descriptor_sets_by_key.items()}
     components = _component_definitions()
@@ -1166,15 +1184,18 @@ def _materialize_vopd_component_tables(
     descriptor_lookup_rows: list[int] = []
     pair_affinity_ranges: list[_VopdPairAffinityRange] = []
     pair_affinity_rows: list[_VopdPairAffinityRow] = []
-    pair_placement_recipes: list[_VopdPairPlacementRecipe] = []
-    pair_placement_recipe_indices: dict[_VopdPairPlacementRecipe, int] = {}
+    pair_placement_recipe_catalog = _VopdPairPlacementRecipeCatalog(
+        recipes=[],
+        indices_by_recipe={},
+        indices_by_rule_pair={},
+    )
     for info in descriptor_sets_by_ordinal:
         if not _descriptor_set_supports_vopd(info):
             continue
         descriptor_set_ordinal = amdgpu_descriptor_set_ordinal(info.key)
         if descriptor_set_ordinal < 0:
             raise ValueError(f"AMDGPU descriptor set '{info.key}' has invalid ordinal {descriptor_set_ordinal}")
-        set_lookup_rows = _descriptor_lookup_rows_for_set(
+        set_lookup = _descriptor_lookup_for_set(
             info.key,
             descriptor_keys_by_set_key[info.key],
             rules,
@@ -1184,15 +1205,14 @@ def _materialize_vopd_component_tables(
                 descriptor_set_key=info.key,
                 descriptor_set_ordinal=descriptor_set_ordinal,
                 first_descriptor_lookup=len(descriptor_lookup_rows),
-                descriptor_lookup_count=len(set_lookup_rows),
+                descriptor_lookup_count=len(set_lookup.rows),
             )
         )
-        descriptor_lookup_rows.extend(set_lookup_rows)
+        descriptor_lookup_rows.extend(set_lookup.rows)
         set_pair_affinity_rows = _pair_affinity_rows_for_set(
             rules,
-            set_lookup_rows,
-            pair_placement_recipes,
-            pair_placement_recipe_indices,
+            set_lookup,
+            pair_placement_recipe_catalog,
         )
         pair_affinity_ranges.append(
             _VopdPairAffinityRange(
@@ -1210,7 +1230,7 @@ def _materialize_vopd_component_tables(
         descriptor_lookup_rows=tuple(descriptor_lookup_rows),
         pair_affinity_ranges=tuple(pair_affinity_ranges),
         pair_affinity_rows=tuple(pair_affinity_rows),
-        pair_placement_recipes=tuple(pair_placement_recipes),
+        pair_placement_recipes=tuple(pair_placement_recipe_catalog.recipes),
     )
     _validate_vopd_component_tables(tables)
     return tables
@@ -1238,13 +1258,19 @@ def _component_info_initializer(
 ) -> str:
     return "\n".join(
         [
-            "LOOM_AMDGPU_VOPD_COMPONENT_INFO_RULE(",
-            f"    {index}, {component.op}, {component.same_op_reason},",
-            f"    {_c_string_arg(component.op_name)},",
-            f"    {_c_string_arg(component.same_op_reason_name)},",
-            f"    {_c_string_arg(component.assembly_mnemonic)},",
-            f"    {_c_string_arg(component.numeric_minmax_mnemonic)},",
-            f"    {component.lane_mask}, {component.pairing_mask})",
+            f"    [{index}] = {{",
+            f"        .op = {component.op},",
+            f"        .same_op_reason = {component.same_op_reason},",
+            f"        .op_name = IREE_SVL({_c_string_arg(component.op_name)}),",
+            "        .same_op_reason_name =",
+            f"            IREE_SVL({_c_string_arg(component.same_op_reason_name)}),",
+            "        .assembly_mnemonic =",
+            f"            IREE_SVL({_c_string_arg(component.assembly_mnemonic)}),",
+            "        .numeric_minmax_mnemonic =",
+            f"            IREE_SVL({_c_string_arg(component.numeric_minmax_mnemonic)}),",
+            f"        .lane_mask = {component.lane_mask},",
+            f"        .pairing_mask = {component.pairing_mask},",
+            "    },",
         ]
     )
 
@@ -1258,27 +1284,18 @@ def _component_rule_initializer(
     accumulator_index, src0_index, vsrc1_index = component.operand_layout
     return "\n".join(
         [
-            "LOOM_AMDGPU_VOPD_COMPONENT_RULE(",
-            f"    {index}, {info_index},",
-            f"    {component.form},",
-            f"    {accumulator_index}, {src0_index}, {vsrc1_index},",
-            f"    {component.source_register_mask},",
-            f"    {_component_flags_initializer(rule.flags)})",
-        ]
-    )
-
-
-def _component_reason_initializer(
-    index: int,
-    component: _VopdComponentDefinition,
-) -> str | None:
-    if component.same_op_reason == _PAIR_REASON_UNKNOWN:
-        return None
-    return "\n".join(
-        [
-            "LOOM_AMDGPU_VOPD_COMPONENT_REASON_RULE(",
-            f"    {component.same_op_reason},",
-            f"    {index})",
+            f"    [{index}] = {{",
+            f"        .info = &loom_amdgpu_vopd_component_infos[{info_index}],",
+            f"        .form = {component.form},",
+            "        .operands =",
+            "            {",
+            f"                .accumulator_index = {accumulator_index},",
+            f"                .src0_index = {src0_index},",
+            f"                .vsrc1_index = {vsrc1_index},",
+            "            },",
+            f"        .source_register_mask = {component.source_register_mask},",
+            f"        .flags = {_component_flags_initializer(rule.flags)},",
+            "    },",
         ]
     )
 
@@ -1286,23 +1303,25 @@ def _component_reason_initializer(
 def _descriptor_lookup_range_initializer(row: _VopdComponentDescriptorLookupRange) -> str:
     return "\n".join(
         [
-            "LOOM_AMDGPU_VOPD_COMPONENT_DESCRIPTOR_LOOKUP_RANGE(",
-            f"    {row.descriptor_set_ordinal}, {row.first_descriptor_lookup},",
-            f"    {row.descriptor_lookup_count})",
+            f"    [{row.descriptor_set_ordinal}] = {{",
+            f"        .first_descriptor_lookup = {row.first_descriptor_lookup},",
+            f"        .descriptor_lookup_count = {row.descriptor_lookup_count},",
+            "    },",
         ]
     )
 
 
 def _descriptor_lookup_row_initializer(rule_index_plus_one: int) -> str:
-    return f"LOOM_AMDGPU_VOPD_COMPONENT_DESCRIPTOR_LOOKUP({rule_index_plus_one})"
+    return f"    {rule_index_plus_one},"
 
 
 def _pair_affinity_range_initializer(row: _VopdPairAffinityRange) -> str:
     return "\n".join(
         [
-            "LOOM_AMDGPU_VOPD_PAIR_AFFINITY_RANGE(",
-            f"    {row.descriptor_set_ordinal}, {row.first_pair_affinity},",
-            f"    {row.pair_affinity_count})",
+            f"    [{row.descriptor_set_ordinal}] = {{",
+            f"        .first_pair_affinity = {row.first_pair_affinity},",
+            f"        .pair_affinity_count = {row.pair_affinity_count},",
+            "    },",
         ]
     )
 
@@ -1310,10 +1329,13 @@ def _pair_affinity_range_initializer(row: _VopdPairAffinityRange) -> str:
 def _pair_affinity_row_initializer(row: _VopdPairAffinityRow) -> str:
     return "\n".join(
         [
-            "LOOM_AMDGPU_VOPD_PAIR_AFFINITY(",
-            f"    {row.first_descriptor_ordinal},",
-            f"    {row.second_descriptor_ordinal}, {row.priority},",
-            f"    {row.placement_recipe_index + 1})",
+            "    {",
+            f"        .first_descriptor_ordinal = {row.first_descriptor_ordinal},",
+            f"        .second_descriptor_ordinal = {row.second_descriptor_ordinal},",
+            f"        .priority = {row.priority},",
+            "        .placement_recipe_index_plus_one =",
+            f"            {row.placement_recipe_index + 1},",
+            "    },",
         ]
     )
 
@@ -1326,9 +1348,12 @@ def _pair_placement_recipe_initializer(
     relation_count = len(recipe.alternatives[0])
     return "\n".join(
         [
-            "LOOM_AMDGPU_VOPD_PAIR_PLACEMENT_RECIPE(",
-            f"    {recipe_index}, {first_relation}, {relation_count},",
-            f"    {len(recipe.alternatives)}, {recipe.packet_savings})",
+            f"    [{recipe_index}] = {{",
+            f"        .relations = &kVopdPairPlacementRelations[{first_relation}],",
+            f"        .relation_count = {relation_count},",
+            f"        .alternative_count = {len(recipe.alternatives)},",
+            f"        .packet_savings = {recipe.packet_savings},",
+            "    },",
         ]
     )
 
@@ -1338,89 +1363,31 @@ def _pair_placement_relation_initializer(
 ) -> str:
     return "\n".join(
         [
-            "LOOM_AMDGPU_VOPD_PAIR_PLACEMENT_RELATION(",
-            f"    {relation.result.component}, {relation.result.kind},",
-            f"    {relation.result.index}, {relation.result.unit_offset},",
-            f"    {relation.source.component}, {relation.source.kind},",
-            f"    {relation.source.index}, {relation.source.unit_offset},",
-            f"    {relation.unit_count}, {relation.kind},",
-            f"    0x{relation.location_mask:X})",
+            "    {",
+            "        .result =",
+            "            {",
+            f"                .component = {relation.result.component},",
+            f"                .kind = {relation.result.kind},",
+            f"                .index = {relation.result.index},",
+            f"                .unit_offset = {relation.result.unit_offset},",
+            "            },",
+            "        .source =",
+            "            {",
+            f"                .component = {relation.source.component},",
+            f"                .kind = {relation.source.kind},",
+            f"                .index = {relation.source.index},",
+            f"                .unit_offset = {relation.source.unit_offset},",
+            "            },",
+            f"        .unit_count = {relation.unit_count},",
+            f"        .kind = {relation.kind},",
+            f"        .location_mask = 0x{relation.location_mask:X},",
+            "    },",
         ]
     )
 
 
-def _emit_component_rules(tables: _VopdComponentTables) -> str:
+def _emit_source(tables: _VopdComponentTables) -> str:
     component_infos, info_index_by_op_value = _canonical_component_infos(tables.rules)
-    reason_initializers = [initializer for index, component in enumerate(component_infos) if (initializer := _component_reason_initializer(index, component)) is not None]
-    return (
-        "\n".join(
-            [
-                *_generated_header(),
-                *(_component_info_initializer(index, component) for index, component in enumerate(component_infos)),
-                *(
-                    _component_rule_initializer(
-                        index,
-                        info_index_by_op_value[rule.component.op_value],
-                        rule,
-                    )
-                    for index, rule in enumerate(tables.rules)
-                ),
-                *reason_initializers,
-            ]
-        )
-        + "\n"
-    )
-
-
-def _emit_descriptor_lookup_ranges(tables: _VopdComponentTables) -> str:
-    return (
-        "\n".join(
-            [
-                *_generated_header(),
-                *(_descriptor_lookup_range_initializer(row) for row in tables.descriptor_lookup_ranges),
-            ]
-        )
-        + "\n"
-    )
-
-
-def _emit_descriptor_lookup_rows(tables: _VopdComponentTables) -> str:
-    return (
-        "\n".join(
-            [
-                *_generated_header(),
-                *(_descriptor_lookup_row_initializer(row) for row in tables.descriptor_lookup_rows),
-            ]
-        )
-        + "\n"
-    )
-
-
-def _emit_pair_affinity_ranges(tables: _VopdComponentTables) -> str:
-    return (
-        "\n".join(
-            [
-                *_generated_header(),
-                *(_pair_affinity_range_initializer(row) for row in tables.pair_affinity_ranges),
-            ]
-        )
-        + "\n"
-    )
-
-
-def _emit_pair_affinity_rows(tables: _VopdComponentTables) -> str:
-    return (
-        "\n".join(
-            [
-                *_generated_header(),
-                *(_pair_affinity_row_initializer(row) for row in tables.pair_affinity_rows),
-            ]
-        )
-        + "\n"
-    )
-
-
-def _emit_pair_placement_recipes(tables: _VopdComponentTables) -> str:
     recipe_initializers: list[str] = []
     relation_initializers: list[str] = []
     first_relation = 0
@@ -1434,98 +1401,127 @@ def _emit_pair_placement_recipes(tables: _VopdComponentTables) -> str:
         )
         relation_initializers.extend(_pair_placement_relation_initializer(relation) for alternative in recipe.alternatives for relation in alternative)
         first_relation += len(recipe.alternatives[0]) * len(recipe.alternatives)
+
+    op_lookup_initializers = [f"    [{component.op}] = {index + 1}," for index, component in enumerate(component_infos)]
+    reason_lookup_initializers = [f"    [{component.same_op_reason}] = {index + 1}," for index, component in enumerate(component_infos) if component.same_op_reason != _PAIR_REASON_UNKNOWN]
     return (
         "\n".join(
             [
                 *_generated_header(),
-                *recipe_initializers,
+                '#include "loom/target/arch/amdgpu/planning/vopd_data.h"',
+                "",
+                '#include "loom/target/arch/amdgpu/target_info.h"',
+                "",
+                "const loom_amdgpu_vopd_component_info_t",
+                "    loom_amdgpu_vopd_component_infos[] = {",
+                *(_component_info_initializer(index, component) for index, component in enumerate(component_infos)),
+                "};",
+                "",
+                "static_assert(IREE_ARRAYSIZE(loom_amdgpu_vopd_component_infos) <",
+                "                  UINT8_MAX,",
+                '              "VOPD component info indexes use uint8_t + 1");',
+                "",
+                "const loom_amdgpu_vopd_component_rule_t",
+                "    loom_amdgpu_vopd_component_rules[] = {",
+                *(
+                    _component_rule_initializer(
+                        index,
+                        info_index_by_op_value[rule.component.op_value],
+                        rule,
+                    )
+                    for index, rule in enumerate(tables.rules)
+                ),
+                "};",
+                "",
+                "static_assert(IREE_ARRAYSIZE(loom_amdgpu_vopd_component_rules) <",
+                "                  UINT8_MAX,",
+                '              "VOPD component rule indexes use uint8_t + 1");',
+                "",
+                "const uint8_t loom_amdgpu_vopd_component_descriptor_lookups[] = {",
+                *(_descriptor_lookup_row_initializer(row) for row in tables.descriptor_lookup_rows),
+                "};",
+                "",
+                "const loom_amdgpu_vopd_component_descriptor_lookup_range_t",
+                "    loom_amdgpu_vopd_component_descriptor_lookup_ranges",
+                "        [LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_COUNT] = {",
+                *(_descriptor_lookup_range_initializer(row) for row in tables.descriptor_lookup_ranges),
+                "};",
+                "",
+                "const loom_amdgpu_vopd_pair_affinity_range_t",
+                "    loom_amdgpu_vopd_pair_affinity_ranges",
+                "        [LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_COUNT] = {",
+                *(_pair_affinity_range_initializer(row) for row in tables.pair_affinity_ranges),
+                "};",
+                "",
+                "static const loom_low_placement_pair_relation_t",
+                "    kVopdPairPlacementRelations[] = {",
                 *relation_initializers,
+                "};",
+                "",
+                "const loom_low_placement_pair_recipe_t",
+                "    loom_amdgpu_vopd_pair_placement_recipes[] = {",
+                *recipe_initializers,
+                "};",
+                "",
+                "static_assert(",
+                "    IREE_ARRAYSIZE(loom_amdgpu_vopd_pair_placement_recipes) <=",
+                "                  UINT16_MAX,",
+                '              "VOPD pair placement recipe indexes use uint16_t + 1");',
+                "",
+                "const loom_amdgpu_vopd_pair_affinity_row_t",
+                "    loom_amdgpu_vopd_pair_affinities[] = {",
+                *(_pair_affinity_row_initializer(row) for row in tables.pair_affinity_rows),
+                "};",
+                "",
+                "const uint8_t loom_amdgpu_vopd_component_info_indices_by_op",
+                "    [LOOM_AMDGPU_VOPD_OP_MIN_I32 + 1] = {",
+                *op_lookup_initializers,
+                "};",
+                "",
+                "const uint8_t",
+                "    loom_amdgpu_vopd_component_info_indices_by_same_op_reason",
+                "    [LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_CNDMASK_B32 + 1] = {",
+                *reason_lookup_initializers,
+                "};",
+                "",
+                "const iree_host_size_t",
+                "    loom_amdgpu_vopd_pair_placement_recipe_count =",
+                "        IREE_ARRAYSIZE(loom_amdgpu_vopd_pair_placement_recipes);",
             ]
         )
         + "\n"
     )
 
 
-def _write_output(path: Path, contents: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(contents, encoding="utf-8")
+def generate_vopd_component_table_outputs(
+    inputs: AmdgpuPlanningTableInputs,
+    *,
+    source_path: Path,
+) -> None:
+    """Generates the descriptor-derived VOPD planning data source."""
+
+    tables = _materialize_vopd_component_tables(inputs)
+    write_text_file(source_path, _emit_source(tables))
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate AMDGPU descriptor-derived VOPD table fragments.")
+    parser = argparse.ArgumentParser(description="Generate AMDGPU descriptor-derived VOPD planning data.")
     parser.add_argument(
         "--isa-xml",
         action="append",
         default=[],
         help="ISA XML fact source as <key>:<path>.",
     )
-    parser.add_argument(
-        "--component-rules",
-        type=Path,
-        help="Generated VOPD component rule row fragment path.",
-    )
-    parser.add_argument(
-        "--descriptor-lookup-ranges",
-        type=Path,
-        help="Generated VOPD descriptor-set lookup range fragment path.",
-    )
-    parser.add_argument(
-        "--descriptor-lookups",
-        type=Path,
-        help="Generated VOPD descriptor-ordinal lookup fragment path.",
-    )
-    parser.add_argument(
-        "--pair-affinity-ranges",
-        type=Path,
-        help="Generated VOPD pair-affinity range fragment path.",
-    )
-    parser.add_argument(
-        "--pair-affinities",
-        type=Path,
-        help="Generated VOPD pair-affinity row fragment path.",
-    )
-    parser.add_argument(
-        "--pair-placement-recipes",
-        type=Path,
-        help="Generated VOPD pair-placement recipe fragment path.",
-    )
+    parser.add_argument("--source", type=Path, required=True)
     args = parser.parse_args(argv)
-    requested_outputs = (
-        args.component_rules,
-        args.descriptor_lookup_ranges,
-        args.descriptor_lookups,
-        args.pair_affinity_ranges,
-        args.pair_affinities,
-        args.pair_placement_recipes,
-    )
-    if not any(path is not None for path in requested_outputs):
-        parser.error("at least one output path is required")
 
-    tables = _materialize_vopd_component_tables(
-        sorted_descriptor_set_infos(),
-        _parse_isa_xml_arguments(args.isa_xml),
+    generate_vopd_component_table_outputs(
+        load_amdgpu_planning_table_inputs(
+            args.isa_xml,
+            amdgpu_vopd_instruction_names_by_isa_key(),
+        ),
+        source_path=args.source,
     )
-    if args.component_rules is not None:
-        _write_output(args.component_rules, _emit_component_rules(tables))
-    if args.descriptor_lookup_ranges is not None:
-        _write_output(
-            args.descriptor_lookup_ranges,
-            _emit_descriptor_lookup_ranges(tables),
-        )
-    if args.descriptor_lookups is not None:
-        _write_output(args.descriptor_lookups, _emit_descriptor_lookup_rows(tables))
-    if args.pair_affinity_ranges is not None:
-        _write_output(
-            args.pair_affinity_ranges,
-            _emit_pair_affinity_ranges(tables),
-        )
-    if args.pair_affinities is not None:
-        _write_output(args.pair_affinities, _emit_pair_affinity_rows(tables))
-    if args.pair_placement_recipes is not None:
-        _write_output(
-            args.pair_placement_recipes,
-            _emit_pair_placement_recipes(tables),
-        )
     return 0
 
 

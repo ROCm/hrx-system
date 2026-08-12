@@ -8,8 +8,6 @@ load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
     "loom_cc_test",
-    "loom_generated_cc_library",
-    "loom_generated_textual_header",
 )
 
 package(
@@ -17,10 +15,6 @@ package(
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
 )
-
-_AMDGPU_OCCUPANCY_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/planning:occupancy_tables"
-
-_AMDGPU_TARGET_INFO_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu:target_info"
 
 _AMDGPU_ROOT_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu:__pkg__"]
 
@@ -104,18 +98,11 @@ loom_cc_test(
     ],
 )
 
-loom_generated_textual_header(
-    name = "matrix_coexecution_source_layouts_gen",
-    generator = _AMDGPU_TARGET_INFO_GENERATOR,
-    output = "matrix_coexecution_source_layouts.inl",
-    output_flag = "--matrix-coexecution-source-layouts",
-)
-
 loom_cc_library(
     name = "matrix_coexecution",
     srcs = ["matrix_coexecution.c"],
     hdrs = ["matrix_coexecution.h"],
-    textual_hdrs = [":matrix_coexecution_source_layouts.inl"],
+    textual_hdrs = ["//loom/src/loom/target/arch/amdgpu:matrix_coexecution_source_layouts.inl"],
     deps = [
         ":descriptor_semantics",
         ":structural_packet",
@@ -255,14 +242,13 @@ loom_cc_library(
 
 loom_cc_library(
     name = "wait_packet_tables",
-    srcs = ["wait_packet_tables.c"],
-    hdrs = ["wait_packet_tables.h"],
-    textual_hdrs = [
-        "//loom/src/loom/target/arch/amdgpu/descriptors:wait_packet_descriptor_lookups.inl",
-        "//loom/src/loom/target/arch/amdgpu/descriptors:wait_packet_descriptor_ranges.inl",
-        "//loom/src/loom/target/arch/amdgpu/descriptors:wait_packet_descriptors.inl",
-        "//loom/src/loom/target/arch/amdgpu/descriptors:wait_packet_immediates.inl",
-        "//loom/src/loom/target/arch/amdgpu/descriptors:wait_packet_selections.inl",
+    srcs = [
+        "wait_packet_tables.c",
+        "//loom/src/loom/target/arch/amdgpu/descriptors:wait_packet_data.c",
+    ],
+    hdrs = [
+        "wait_packet_data.h",
+        "wait_packet_tables.h",
     ],
     visibility = _AMDGPU_ROOT_VISIBILITY + _AMDGPU_LOWER_VISIBILITY,
     deps = [
@@ -311,15 +297,14 @@ loom_cc_test(
 
 loom_cc_library(
     name = "vopd_plan",
-    srcs = ["vopd_plan.c"],
-    hdrs = ["vopd_plan.h"],
-    textual_hdrs = [
-        "//loom/src/loom/target/arch/amdgpu/descriptors:vopd_component_descriptor_lookup_ranges.inl",
-        "//loom/src/loom/target/arch/amdgpu/descriptors:vopd_component_descriptor_lookups.inl",
-        "//loom/src/loom/target/arch/amdgpu/descriptors:vopd_component_rules.inl",
-        "//loom/src/loom/target/arch/amdgpu/descriptors:vopd_pair_affinities.inl",
-        "//loom/src/loom/target/arch/amdgpu/descriptors:vopd_pair_affinity_ranges.inl",
-        "//loom/src/loom/target/arch/amdgpu/descriptors:vopd_pair_placement_recipes.inl",
+    srcs = [
+        "vopd_plan.c",
+        "//loom/src/loom/target/arch/amdgpu/descriptors:vopd_data.c",
+    ],
+    hdrs = [
+        "vopd_component.h",
+        "vopd_data.h",
+        "vopd_plan.h",
     ],
     visibility = _AMDGPU_NATIVE_PLANNING_VISIBILITY,
     deps = [
@@ -331,10 +316,12 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:packet",
+        "//loom/src/loom/codegen/low:placement_pair",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/target/arch/amdgpu:target_info_defs",
         "//loom/src/loom/target/arch/amdgpu/encoding",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//loom/src/loom/util:json",
@@ -376,12 +363,13 @@ loom_cc_library(
     ],
 )
 
-loom_generated_cc_library(
+loom_cc_library(
     name = "occupancy_model",
-    srcs = ["occupancy_model.c"],
+    srcs = [
+        "occupancy_model.c",
+        "//loom/src/loom/target/arch/amdgpu:occupancy_model_tables.c",
+    ],
     hdrs = ["occupancy_model.h"],
-    generator = _AMDGPU_OCCUPANCY_TABLE_GENERATOR,
-    source = "occupancy_model_tables.c",
     visibility = _AMDGPU_ROOT_VISIBILITY,
     deps = [
         "//loom/src/loom/target:residency",

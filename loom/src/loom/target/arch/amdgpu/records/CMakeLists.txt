@@ -10,24 +10,11 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    target_records_tables_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::records::target_records
-  OUTPUT
-    "target_records_tables.inl"
-  OUTPUT_FLAG
-    "--tables"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
     target_records_tables
   TEXTUAL_HDRS
-    "target_records_tables.inl"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/target_records_tables.inl"
   DEPS
 
   PUBLIC

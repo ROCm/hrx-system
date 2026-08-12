@@ -1721,7 +1721,7 @@ void loom_amdgpu_low_lower_policy_registry_initialize(
       .contract_set_key = IREE_SVL(key),                                  \
       .policy = &kAmdgpuLowLowerPolicy,                                   \
   },
-#include "loom/target/arch/amdgpu/records/target_records_tables.inl"
+#include "loom/target/arch/amdgpu/target_records_tables.inl"
 #undef LOOM_AMDGPU_TARGET_DESCRIPTOR_SET
   };
   loom_low_lower_policy_registry_initialize_from_entries(

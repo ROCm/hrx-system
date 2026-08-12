@@ -26,6 +26,8 @@ from loom.target.arch.amdgpu.target_info import (
     AMDGPU_KERNEL_ENTRY_PROFILE_INITIAL_VMEM_REPLAY,
     AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE,
     AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
+    AMDGPU_SOPP_OPCODE_INFO_CDNA,
+    AMDGPU_SOPP_OPCODE_INFO_RDNA,
     AMDGPU_TARGET_ID_FEATURE_SUPPORT_KNOWN_FLAGS,
     AmdgpuDescriptorSetInfo,
     AmdgpuDescriptorSetIsaInfo,
@@ -56,6 +58,7 @@ def _descriptor_set_info() -> AmdgpuDescriptorSetInfo:
                 isa_xml_key="test",
                 isa_architecture_name="AMDGPU Test",
                 isa_architecture_id=1,
+                sopp_opcodes=AMDGPU_SOPP_OPCODE_INFO_RDNA,
             ),
         ),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
@@ -64,7 +67,9 @@ def _descriptor_set_info() -> AmdgpuDescriptorSetInfo:
 
 
 def test_memory_cache_policy_fragments_are_data_only() -> None:
-    policy_rows = amdgpu_target_info._emit_memory_cache_policy_encoding_rows()
+    policy_rows = amdgpu_target_info._emit_memory_cache_policy_encoding_rows(
+        amdgpu_target_info_data.sorted_descriptor_set_infos(),
+    )
     temporal_th = amdgpu_target_info._emit_memory_cache_policy_temporal_th()
 
     for source in (policy_rows, temporal_th):
@@ -81,7 +86,14 @@ def test_memory_cache_policy_fragments_are_data_only() -> None:
 
 
 def test_lds_bank_service_fragment_is_data_only() -> None:
-    source = amdgpu_target_info._emit_lds_bank_service_model_rows()
+    processors = amdgpu_target_info_data.sorted_processor_infos()
+    targets = amdgpu_target_info_data.sorted_target_infos()
+    source = amdgpu_target_info._emit_lds_bank_service_model_rows(
+        amdgpu_target_info_data.amdgpu_lds_bank_service_model_sets(
+            processors,
+            targets,
+        ),
+    )
 
     assert "typedef " not in source
     assert "#ifndef " not in source
@@ -107,14 +119,7 @@ def test_target_info_table_source_is_data_only() -> None:
     descriptor_set_info = amdgpu_target_info.sorted_descriptor_set_infos()[0]
     descriptor_row = amdgpu_target_info._AmdgpuDescriptorSetRow(
         info=descriptor_set_info,
-        sopp=amdgpu_target_info._AmdgpuSoppOpcodeRow(
-            nop=0,
-            delay_alu=0,
-            endpgm=1,
-            branch=2,
-            conditional_branch_scc0=4,
-            conditional_branch_scc1=5,
-        ),
+        sopp=AMDGPU_SOPP_OPCODE_INFO_CDNA,
     )
     source = amdgpu_target_info._emit_tables_source(
         processors=amdgpu_target_info.sorted_processor_infos(),
@@ -148,14 +153,7 @@ def test_overlay_and_physical_targets_generate_data_rows_only() -> None:
     descriptor_set_info = amdgpu_target_info.sorted_descriptor_set_infos()[0]
     descriptor_row = amdgpu_target_info._AmdgpuDescriptorSetRow(
         info=descriptor_set_info,
-        sopp=amdgpu_target_info._AmdgpuSoppOpcodeRow(
-            nop=0,
-            delay_alu=0,
-            endpgm=1,
-            branch=2,
-            conditional_branch_scc0=4,
-            conditional_branch_scc1=5,
-        ),
+        sopp=AMDGPU_SOPP_OPCODE_INFO_CDNA,
     )
 
     source = amdgpu_target_info._emit_tables_source(
@@ -202,7 +200,10 @@ def test_memory_cache_policy_rejects_missing_encoding_row() -> None:
     rows = amdgpu_target_info_data.AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_INFOS[:-1]
 
     with _raises_value_error("memory cache-policy encoding table must cover every non-none encoding"):
-        amdgpu_target_info._ordered_memory_cache_policy_encoding_infos(rows=rows)
+        amdgpu_target_info._ordered_memory_cache_policy_encoding_infos(
+            amdgpu_target_info_data.sorted_descriptor_set_infos(),
+            rows=rows,
+        )
 
 
 def test_memory_cache_policy_rejects_unknown_descriptor_encoding() -> None:
@@ -214,6 +215,7 @@ def test_memory_cache_policy_rejects_unknown_descriptor_encoding() -> None:
                 isa_xml_key="test",
                 isa_architecture_name="AMDGPU Test",
                 isa_architecture_id=1,
+                sopp_opcodes=AMDGPU_SOPP_OPCODE_INFO_RDNA,
             ),
         ),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,

@@ -10,6 +10,7 @@ load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load(
     ":target_config.bzl",
     "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES",
+    "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY",
     "LOOM_AMDGPU_DESCRIPTOR_SET_DEFINES",
     "LOOM_AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS",
 )
@@ -89,6 +90,13 @@ def loom_amdgpu_selected_descriptor_set_generator_args(args):
             for arg in selected_args
         ]
     return loom_amdgpu_selected_descriptor_set_values(bazel_args)
+
+def loom_amdgpu_selected_descriptor_set_key_args():
+    """Returns generator args naming every selected descriptor set."""
+    return loom_amdgpu_selected_descriptor_set_values({
+        capability: "--descriptor-set=" + descriptor_set_key
+        for descriptor_set_key, capability in LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY.items()
+    })
 
 def loom_amdgpu_selected_descriptor_set_deps(targets):
     """Selects dependency labels keyed by descriptor-set capability.

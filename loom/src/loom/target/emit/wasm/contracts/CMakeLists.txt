@@ -10,27 +10,16 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_WASM AND LOOM_EMIT_WASM)
-loom_target_table_cc_library(
+loom_target_contract_table_cc_libraries(
   NAME
     core_simd128
   GENERATOR
-    loom::py::loom::gen::target::contracts::wasm_contract_fragment
+    loom::py::loom::gen::target::contracts::wasm_contract_table_family
   ARGS
     "--contract-fragment=wasm.core.simd128"
-  DEPS
+  CONTRACT_DEPS
     loom::target::contract
-)
-endif()
-
-if(LOOM_TARGET_ARCH_WASM AND LOOM_EMIT_WASM)
-loom_target_table_cc_library(
-  NAME
-    core_simd128_lower_rules
-  GENERATOR
-    loom::py::loom::gen::target::contracts::wasm_lower_rule_shard
-  ARGS
-    "--contract-fragment=wasm.core.simd128"
-  DEPS
+  LOWER_RULE_DEPS
     loom::codegen::low::lower
     loom::ops::buffer
     loom::ops::index

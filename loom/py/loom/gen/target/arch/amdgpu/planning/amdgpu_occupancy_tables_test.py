@@ -13,6 +13,7 @@ import pytest
 from loom.gen.target.arch.amdgpu.planning import amdgpu_occupancy_tables
 from loom.target.arch.amdgpu.target_info import (
     AmdgpuOccupancyModelInfo,
+    sorted_descriptor_set_infos,
     sorted_processor_infos,
 )
 
@@ -21,6 +22,12 @@ _OCCUPANCY_HEADER = "loom/target/arch/amdgpu/planning/occupancy_model.h"
 
 def _current_models() -> tuple[amdgpu_occupancy_tables._AmdgpuOccupancyModelRow, ...]:
     return amdgpu_occupancy_tables._materialize_models(sorted_processor_infos())
+
+
+def _current_descriptor_schemas_by_key() -> dict[str, amdgpu_occupancy_tables._AmdgpuOccupancyDescriptorSchema]:
+    return amdgpu_occupancy_tables._descriptor_schemas_by_key(
+        sorted_descriptor_set_infos(),
+    )
 
 
 def _replace_row_model(
@@ -42,7 +49,12 @@ def _replace_row_model(
 
 
 def test_occupancy_generator_emits_data_source_only() -> None:
-    source = amdgpu_occupancy_tables._emit_source(_current_models())
+    descriptor_sets = sorted_descriptor_set_infos()
+    processors = sorted_processor_infos()
+    source = amdgpu_occupancy_tables.generate_occupancy_tables(
+        descriptor_sets,
+        processors,
+    )
 
     assert f'#include "{_OCCUPANCY_HEADER}"' in source
     assert "typedef " not in source
@@ -75,14 +87,22 @@ def test_occupancy_generator_emits_data_source_only() -> None:
 
 def test_occupancy_models_cover_all_processor_wave_modes() -> None:
     processors = sorted_processor_infos()
-    amdgpu_occupancy_tables._validate_models(amdgpu_occupancy_tables._materialize_models(processors), processors)
+    amdgpu_occupancy_tables._validate_models(
+        amdgpu_occupancy_tables._materialize_models(processors),
+        processors,
+        _current_descriptor_schemas_by_key(),
+    )
 
 
 def test_occupancy_models_reject_missing_processor_wave_mode() -> None:
     processors = sorted_processor_infos()
     models = _current_models()[:-1]
     with pytest.raises(ValueError, match="do not cover processor wave modes"):
-        amdgpu_occupancy_tables._validate_models(models, processors)
+        amdgpu_occupancy_tables._validate_models(
+            models,
+            processors,
+            _current_descriptor_schemas_by_key(),
+        )
 
 
 def test_occupancy_models_reject_missing_base_register_class() -> None:
@@ -97,7 +117,11 @@ def test_occupancy_models_reject_missing_base_register_class() -> None:
         ),
     )
     with pytest.raises(ValueError, match="missing base register classes"):
-        amdgpu_occupancy_tables._validate_models(models, processors)
+        amdgpu_occupancy_tables._validate_models(
+            models,
+            processors,
+            _current_descriptor_schemas_by_key(),
+        )
 
 
 def test_occupancy_models_reject_missing_spillable_register_class() -> None:
@@ -117,7 +141,11 @@ def test_occupancy_models_reject_missing_spillable_register_class() -> None:
         ValueError,
         match=r"missing spillable descriptor register classes: amdgpu\.agpr",
     ):
-        amdgpu_occupancy_tables._validate_models(models, processors)
+        amdgpu_occupancy_tables._validate_models(
+            models,
+            processors,
+            _current_descriptor_schemas_by_key(),
+        )
 
 
 def test_occupancy_models_reject_zero_residency_resource_capacity() -> None:
@@ -136,7 +164,11 @@ def test_occupancy_models_reject_zero_residency_resource_capacity() -> None:
     )
 
     with pytest.raises(ValueError, match="zero residency"):
-        amdgpu_occupancy_tables._validate_models(models, processors)
+        amdgpu_occupancy_tables._validate_models(
+            models,
+            processors,
+            _current_descriptor_schemas_by_key(),
+        )
 
 
 def test_occupancy_models_reject_zero_residency_register_capacity() -> None:
@@ -152,7 +184,11 @@ def test_occupancy_models_reject_zero_residency_register_capacity() -> None:
     )
 
     with pytest.raises(ValueError, match="zero residency"):
-        amdgpu_occupancy_tables._validate_models(models, processors)
+        amdgpu_occupancy_tables._validate_models(
+            models,
+            processors,
+            _current_descriptor_schemas_by_key(),
+        )
 
 
 def test_occupancy_models_reject_unrepresentable_terminal_cliff() -> None:
@@ -178,7 +214,11 @@ def test_occupancy_models_reject_unrepresentable_terminal_cliff() -> None:
     )
 
     with pytest.raises(ValueError, match="pressure cliff does not fit uint32"):
-        amdgpu_occupancy_tables._validate_models(models, processors)
+        amdgpu_occupancy_tables._validate_models(
+            models,
+            processors,
+            _current_descriptor_schemas_by_key(),
+        )
 
 
 def test_pressure_cliffs_jump_directly_between_reachable_tiers() -> None:

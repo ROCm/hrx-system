@@ -1197,6 +1197,7 @@ class BuildFileFunctions(object):
         srcs=None,
         deps=None,
         main=None,
+        main_module=None,
         imports=None,
         data=None,
         tags=None,
@@ -1217,6 +1218,7 @@ class BuildFileFunctions(object):
             source_list.append(main)
         name_block = self._convert_string_arg_block("NAME", name, quote=False)
         main_block = self._convert_string_arg_block("MAIN", main)
+        main_module_block = self._convert_string_arg_block("MAIN_MODULE", main_module)
         source_block = self._convert_srcs_block(source_list)
         imports_block = self._convert_string_list_block("IMPORTS", imports, sort=False)
         deps_block, deps_var_block = self._convert_python_target_list_blocks(
@@ -1229,6 +1231,7 @@ class BuildFileFunctions(object):
             "iree_py_library(\n"
             f"{name_block}"
             f"{main_block}"
+            f"{main_module_block}"
             f"{source_block}"
             f"{imports_block}"
             f"{deps_block}"

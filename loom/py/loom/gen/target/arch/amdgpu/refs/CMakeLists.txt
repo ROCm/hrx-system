@@ -11,9 +11,7 @@ iree_add_all_subdirs()
 
 iree_py_library(
   NAME
-    target_refs
-  MAIN
-    "amdgpu_target_refs.py"
+    target_refs_module
   SRCS
     "__init__.py"
     "amdgpu_target_refs.py"
@@ -23,6 +21,15 @@ iree_py_library(
     loom::py::loom::target::arch::amdgpu::descriptors
     loom::py::loom::target::arch::amdgpu::isa_xml
     loom::py::loom::target::arch::amdgpu::target_info
+)
+
+iree_py_library(
+  NAME
+    target_refs
+  MAIN_MODULE
+    "loom.gen.target.arch.amdgpu.refs.amdgpu_target_refs"
+  DEPS
+    loom::py::loom::gen::target::arch::amdgpu::refs::target_refs_module
 )
 
 iree_py_test(
@@ -36,7 +43,7 @@ iree_py_test(
   ARGS
     "loom.gen.target.arch.amdgpu.refs.amdgpu_target_refs_test"
   DEPS
-    loom::py::loom::gen::target::arch::amdgpu::refs::target_refs
+    loom::py::loom::gen::target::arch::amdgpu::refs::target_refs_module
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"

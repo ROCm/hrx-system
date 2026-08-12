@@ -49,7 +49,7 @@ typedef struct loom_amdgpu_matrix_coexecution_family_layout_t {
 
 static const loom_amdgpu_matrix_coexecution_family_layout_t
     kSourceLayouts[LOOM_AMDGPU_MATRIX_COEXECUTION_SOURCE_COUNT] = {
-#include "loom/target/arch/amdgpu/planning/matrix_coexecution_source_layouts.inl"
+#include "loom/target/arch/amdgpu/matrix_coexecution_source_layouts.inl"
 };
 
 // One retained source packet in final scheduled order.

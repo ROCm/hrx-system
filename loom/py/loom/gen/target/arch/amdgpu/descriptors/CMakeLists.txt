@@ -11,13 +11,33 @@ iree_add_all_subdirs()
 
 iree_py_library(
   NAME
-    descriptors
-  MAIN
-    "amdgpu_descriptors.py"
+    package_init
   SRCS
     "__init__.py"
+)
+
+iree_py_library(
+  NAME
+    planning_table_inputs
+  SRCS
+    "amdgpu_planning_table_inputs.py"
+  DEPS
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::package_init
+    loom::py::loom::target::low_descriptors
+    loom::py::loom::target::arch::amdgpu::descriptors
+    loom::py::loom::target::arch::amdgpu::isa_xml
+    loom::py::loom::target::arch::amdgpu::target_info
+)
+
+iree_py_library(
+  NAME
+    descriptors_module
+  SRCS
     "amdgpu_descriptors.py"
   DEPS
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::package_init
+    loom::py::loom::gen::support::support
+    loom::py::loom::gen::target::arch::amdgpu::target_table_family
     loom::py::loom::gen::target::low::low_descriptors
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::descriptors
@@ -27,14 +47,46 @@ iree_py_library(
 
 iree_py_library(
   NAME
-    wait_packet_tables
-  MAIN
-    "amdgpu_wait_packet_tables.py"
+    descriptors
+  MAIN_MODULE
+    "loom.gen.target.arch.amdgpu.descriptors.amdgpu_descriptors"
+  DEPS
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::descriptors_module
+)
+
+iree_py_library(
+  NAME
+    wait_packet_tables_module
   SRCS
-    "__init__.py"
     "amdgpu_wait_packet_tables.py"
   DEPS
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::package_init
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::planning_table_inputs
     loom::py::loom::gen::support::support
+    loom::py::loom::target::low_descriptors
+    loom::py::loom::target::arch::amdgpu::descriptors
+    loom::py::loom::target::arch::amdgpu::target_info
+)
+
+iree_py_library(
+  NAME
+    wait_packet_tables
+  MAIN_MODULE
+    "loom.gen.target.arch.amdgpu.descriptors.amdgpu_wait_packet_tables"
+  DEPS
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::wait_packet_tables_module
+)
+
+iree_py_library(
+  NAME
+    vopd_component_tables_module
+  SRCS
+    "amdgpu_vopd_component_tables.py"
+  DEPS
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::package_init
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::planning_table_inputs
+    loom::py::loom::gen::support::support
+    loom::py::loom::gen::target::low::low_descriptors
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::descriptors
     loom::py::loom::target::arch::amdgpu::isa_xml
@@ -44,13 +96,26 @@ iree_py_library(
 iree_py_library(
   NAME
     vopd_component_tables
-  MAIN
-    "amdgpu_vopd_component_tables.py"
-  SRCS
-    "__init__.py"
-    "amdgpu_vopd_component_tables.py"
+  MAIN_MODULE
+    "loom.gen.target.arch.amdgpu.descriptors.amdgpu_vopd_component_tables"
   DEPS
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::vopd_component_tables_module
+)
+
+iree_py_library(
+  NAME
+    descriptor_tables
+  MAIN
+    "amdgpu_descriptor_tables.py"
+  SRCS
+    "amdgpu_descriptor_tables.py"
+  DEPS
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::package_init
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::planning_table_inputs
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::vopd_component_tables_module
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::wait_packet_tables_module
     loom::py::loom::gen::support::support
+    loom::py::loom::gen::target::arch::amdgpu::refs::target_refs_module
     loom::py::loom::gen::target::low::low_descriptors
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::descriptors
@@ -69,7 +134,8 @@ iree_py_test(
   ARGS
     "loom.gen.target.arch.amdgpu.descriptors.amdgpu_descriptors_test"
   DEPS
-    loom::py::loom::gen::target::arch::amdgpu::descriptors::descriptors
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::descriptors_module
+    loom::py::loom::gen::target::arch::amdgpu::target_table_family
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::target_info
   PACKAGE_DIRS
@@ -89,7 +155,7 @@ iree_py_test(
   ARGS
     "loom.gen.target.arch.amdgpu.descriptors.amdgpu_vopd_component_tables_test"
   DEPS
-    loom::py::loom::gen::target::arch::amdgpu::descriptors::vopd_component_tables
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::vopd_component_tables_module
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
@@ -107,7 +173,7 @@ iree_py_test(
   ARGS
     "loom.gen.target.arch.amdgpu.descriptors.amdgpu_wait_packet_tables_test"
   DEPS
-    loom::py::loom::gen::target::arch::amdgpu::descriptors::wait_packet_tables
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::wait_packet_tables_module
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::descriptors
   PACKAGE_DIRS

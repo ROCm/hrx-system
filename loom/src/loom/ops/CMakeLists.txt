@@ -166,23 +166,34 @@ loom_cc_library(
   PUBLIC
 )
 
-loom_generated_cc_library(
+loom_generated_file_family(
   NAME
-    op_registry
+    registry_tables_gen
   GENERATOR
     loom::py::loom::gen::ops::c_tables_generator
-  SRCS
-    "op_registry.c"
-  GENERATED_SRC_FLAGS
-    "--op-registry-tables"
-    "--op-registry-tables-header"
-  GENERATED_SRCS
+  OUTPUTS
     "op_registry_tables.c"
     "op_registry_tables.h"
-  HDRS
-    "op_registry.h"
+    "type_registry_tables.c"
+    "type_registry_tables.h"
+  OUTPUT_FLAGS
+    "--op-registry-tables"
+    "--op-registry-tables-header"
+    "--type-registry-tables"
+    "--type-registry-tables-header"
   ARGS
     "--registry"
+)
+
+loom_cc_library(
+  NAME
+    op_registry
+  HDRS
+    "op_registry.h"
+    "op_registry_tables.h"
+  SRCS
+    "op_registry.c"
+    "op_registry_tables.c"
   DEPS
     ::op_defs
     iree::base
@@ -206,6 +217,7 @@ loom_generated_cc_library(
     loom::ops::target
     loom::ops::vector
     loom::ops::view
+  PUBLIC
 )
 
 loom_cc_library(
@@ -226,23 +238,15 @@ loom_cc_library(
   PUBLIC
 )
 
-loom_generated_cc_library(
+loom_cc_library(
   NAME
     type_registry
-  GENERATOR
-    loom::py::loom::gen::ops::c_tables_generator
-  SRCS
-    "type_registry.c"
-  GENERATED_SRC_FLAGS
-    "--type-registry-tables"
-    "--type-registry-tables-header"
-  GENERATED_SRCS
-    "type_registry_tables.c"
-    "type_registry_tables.h"
   HDRS
     "type_registry.h"
-  ARGS
-    "--registry"
+    "type_registry_tables.h"
+  SRCS
+    "type_registry.c"
+    "type_registry_tables.c"
   DEPS
     ::op_defs
     ::storage_facts
@@ -251,6 +255,7 @@ loom_generated_cc_library(
     loom::ops::buffer
     loom::ops::vector
     loom::util::fact_table
+  PUBLIC
 )
 
 loom_cc_test(

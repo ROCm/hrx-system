@@ -13,8 +13,10 @@ package(
 
 iree_py_library(
     name = "package",
-    srcs = ["__init__.py"],
-    deps = ["//loom/py/loom/target:package"],
+    deps = [
+        ":package_init",
+        "//loom/py/loom/target:package",
+    ],
 )
 
 iree_py_library(

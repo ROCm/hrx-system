@@ -25,12 +25,14 @@ def _ensure_runtime_py_on_path() -> None:
 
 _ensure_runtime_py_on_path()
 
+from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     amdgpu_common_reg_class_ids,
+    amdgpu_core_descriptor_set_instruction_names_by_isa_key,
     amdgpu_descriptor_ref_keys,
     amdgpu_immediate_encoding_id_items,
-    build_amdgpu_core_descriptor_set_from_specs,
+    build_amdgpu_core_descriptor_sets_from_specs,
 )
 from loom.target.arch.amdgpu.descriptors.memory import (  # noqa: E402
     _FLAT_LOAD_DESCRIPTOR_KEYS,
@@ -49,10 +51,10 @@ from loom.target.arch.amdgpu.encoding import (  # noqa: E402
     AMDGPU_ENCODING_FORMAT_VSCRATCH,
 )
 from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
-    AmdgpuIsaFactSource,
-    parse_amdgpu_isa_xml_path,
+    parse_amdgpu_isa_xml_paths_for_instructions,
 )
 from loom.target.arch.amdgpu.target_info import (  # noqa: E402
+    AmdgpuDescriptorSetInfo,
     amdgpu_descriptor_set_ordinal,
     sorted_descriptor_set_infos,
 )
@@ -230,9 +232,8 @@ def _parse_isa_xml_argument(value: str) -> tuple[str, Path]:
     return key, Path(path)
 
 
-def _parse_isa_xml_arguments(values: Sequence[str]) -> dict[str, AmdgpuIsaFactSource]:
+def _parse_isa_xml_paths(values: Sequence[str]) -> dict[str, Path]:
     paths: dict[str, Path] = {}
-    specs: dict[str, AmdgpuIsaFactSource] = {}
     for value in values:
         key, path = _parse_isa_xml_argument(value)
         if key in paths:
@@ -240,8 +241,22 @@ def _parse_isa_xml_arguments(values: Sequence[str]) -> dict[str, AmdgpuIsaFactSo
                 raise ValueError(f"AMDGPU target-ref ISA XML key '{key}' has conflicting paths '{paths[key]}' and '{path}'")
             continue
         paths[key] = path
-        specs[key] = parse_amdgpu_isa_xml_path(path)
-    return specs
+    return paths
+
+
+def select_target_ref_descriptor_set_infos(
+    descriptor_set_keys: Sequence[str],
+) -> tuple[AmdgpuDescriptorSetInfo, ...]:
+    if not descriptor_set_keys:
+        raise ValueError("AMDGPU target-ref source generation requires at least one --descriptor-set")
+    infos_by_key = {info.key: info for info in sorted_descriptor_set_infos()}
+    infos = []
+    for descriptor_set_key in descriptor_set_keys:
+        try:
+            infos.append(infos_by_key[descriptor_set_key])
+        except KeyError as exc:
+            raise ValueError(f"AMDGPU target-ref generator got unknown descriptor set '{descriptor_set_key}'") from exc
+    return tuple(infos)
 
 
 def _c_identifier(value: str) -> str:
@@ -584,27 +599,20 @@ def _reg_class_trait_names(reg_class_name: str) -> tuple[str, ...]:
 
 
 def _materialize_descriptor_ref_tables(
-    isa_specs: Mapping[str, AmdgpuIsaFactSource],
-    descriptor_set_keys: Sequence[str],
+    descriptor_set_infos: Sequence[AmdgpuDescriptorSetInfo],
+    descriptor_sets_by_key: Mapping[str, DescriptorSet],
 ) -> list[_DescriptorSetRefTable]:
-    if not descriptor_set_keys:
-        raise ValueError("AMDGPU target-ref source generation requires at least one --descriptor-set")
     _validate_descriptor_trait_keys()
     descriptor_ref_keys = amdgpu_descriptor_ref_keys()
     descriptor_ref_key_set = frozenset(descriptor_ref_keys)
-    descriptor_set_infos_by_key = {info.key: info for info in sorted_descriptor_set_infos()}
     descriptor_set_tables: list[_DescriptorSetRefTable] = []
-    for descriptor_set_key in descriptor_set_keys:
+    for descriptor_set_info in descriptor_set_infos:
         try:
-            descriptor_set_info = descriptor_set_infos_by_key[descriptor_set_key]
+            descriptor_set = descriptor_sets_by_key[descriptor_set_info.key]
         except KeyError as exc:
-            raise ValueError(f"AMDGPU target-ref generator got unknown descriptor set '{descriptor_set_key}'") from exc
-        descriptor_set = build_amdgpu_core_descriptor_set_from_specs(
-            descriptor_set_info.generator_target,
-            isa_specs,
-        )
+            raise ValueError(f"AMDGPU target-ref generation is missing materialized descriptor set '{descriptor_set_info.key}'") from exc
         if descriptor_set.key != descriptor_set_info.key:
-            raise ValueError(f"AMDGPU descriptor-set builder '{descriptor_set_info.generator_target}' produced '{descriptor_set.key}', expected '{descriptor_set_info.key}'")
+            raise ValueError(f"AMDGPU target-ref generation expected descriptor set '{descriptor_set_info.key}', got '{descriptor_set.key}'")
         _validate_lowering_descriptor_contracts(descriptor_set)
         descriptor_ordinals = {descriptor.key: ordinal for ordinal, descriptor in enumerate(descriptor_set.descriptors)}
         descriptor_refs = [_descriptor_ref_constant_name(descriptor.key) if descriptor.key in descriptor_ref_key_set else None for descriptor in descriptor_set.descriptors]
@@ -683,10 +691,13 @@ def _emit_tables_header() -> str:
 def _emit_source(
     *,
     public_header: str,
-    isa_specs: Mapping[str, AmdgpuIsaFactSource],
-    descriptor_set_keys: Sequence[str],
+    descriptor_set_infos: Sequence[AmdgpuDescriptorSetInfo],
+    descriptor_sets_by_key: Mapping[str, DescriptorSet],
 ) -> str:
-    descriptor_set_tables = _materialize_descriptor_ref_tables(isa_specs, descriptor_set_keys)
+    descriptor_set_tables = _materialize_descriptor_ref_tables(
+        descriptor_set_infos,
+        descriptor_sets_by_key,
+    )
     lines = [
         "// Copyright 2026 The IREE Authors",
         "//",
@@ -799,6 +810,27 @@ def _emit_source(
     return "\n".join(lines) + "\n"
 
 
+def generate_target_ref_outputs(
+    *,
+    public_header: str,
+    descriptor_set_infos: Sequence[AmdgpuDescriptorSetInfo],
+    descriptor_sets_by_key: Mapping[str, DescriptorSet],
+    header_path: Path,
+    source_path: Path,
+) -> None:
+    """Emits target-reference tables from an existing descriptor corpus."""
+
+    write_text_file(header_path, _emit_tables_header())
+    write_text_file(
+        source_path,
+        _emit_source(
+            public_header=public_header,
+            descriptor_set_infos=descriptor_set_infos,
+            descriptor_sets_by_key=descriptor_sets_by_key,
+        ),
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate AMDGPU dense target reference constants and maps.")
     parser.add_argument(
@@ -832,20 +864,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    isa_specs = _parse_isa_xml_arguments(args.isa_xml)
-    args.header.parent.mkdir(parents=True, exist_ok=True)
-    args.source.parent.mkdir(parents=True, exist_ok=True)
-    args.header.write_text(
-        _emit_tables_header(),
-        encoding="utf-8",
+    descriptor_set_infos = select_target_ref_descriptor_set_infos(args.descriptor_set)
+    isa_specs = parse_amdgpu_isa_xml_paths_for_instructions(
+        _parse_isa_xml_paths(args.isa_xml),
+        amdgpu_core_descriptor_set_instruction_names_by_isa_key(descriptor_set_infos),
     )
-    args.source.write_text(
-        _emit_source(
-            public_header=args.public_header,
-            isa_specs=isa_specs,
-            descriptor_set_keys=args.descriptor_set,
-        ),
-        encoding="utf-8",
+    descriptor_sets_by_target = build_amdgpu_core_descriptor_sets_from_specs(
+        tuple(info.generator_target for info in descriptor_set_infos),
+        isa_specs,
+    )
+    generate_target_ref_outputs(
+        public_header=args.public_header,
+        descriptor_set_infos=descriptor_set_infos,
+        descriptor_sets_by_key={info.key: descriptor_sets_by_target[info.generator_target] for info in descriptor_set_infos},
+        header_path=args.header,
+        source_path=args.source,
     )
     return 0
 

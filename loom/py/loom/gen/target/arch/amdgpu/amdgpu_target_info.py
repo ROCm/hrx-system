@@ -30,14 +30,22 @@ from build_tools.amdgpu.target_map_data import (  # noqa: E402
 
 from loom.gen.support.c import c_string_arg as _c_string_arg  # noqa: E402
 from loom.gen.support.c import c_string_literal as _c_string_literal  # noqa: E402
+from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
+from loom.gen.target.arch.amdgpu.amdgpu_config_tables import (  # noqa: E402
+    write_config_tables_to_paths,
+)
+from loom.gen.target.arch.amdgpu.amdgpu_low_aliases import (  # noqa: E402
+    write_low_aliases_to_path,
+)
+from loom.gen.target.arch.amdgpu.planning.amdgpu_occupancy_tables import (  # noqa: E402
+    generate_occupancy_tables,
+)
+from loom.gen.target.arch.amdgpu.records.amdgpu_target_records import (  # noqa: E402
+    write_target_record_tables_to_path,
+)
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     amdgpu_descriptor_ref_keys,
-)
-from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
-    AmdgpuIsaFactSource,
-    AmdgpuIsaXmlError,
-    parse_amdgpu_isa_xml_path,
 )
 from loom.target.arch.amdgpu.lds_bank_service import (  # noqa: E402
     AMDGPU_LDS_BANK_SERVICE_DIRECTION_READ,
@@ -146,6 +154,7 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_WAVEFRONT_SIZE_KNOWN_FLAGS,
     AmdgpuDescriptorSetInfo,
     AmdgpuProcessorInfo,
+    AmdgpuSoppOpcodeInfo,
     AmdgpuTargetInfo,
     AmdgpuVectorMemoryCachePolicyEncodingInfo,
     amdgpu_descriptor_set_ordinal,
@@ -159,7 +168,6 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     sorted_processor_infos,
     sorted_target_infos,
     validate_amdgpu_code_object_processor_rows,
-    validate_amdgpu_descriptor_set_isa_xml,
     validate_amdgpu_generic_contracts,
     validate_amdgpu_target_id_processor_rows,
     validate_amdgpu_target_rows,
@@ -167,19 +175,9 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
 
 
 @dataclass(frozen=True, slots=True)
-class _AmdgpuSoppOpcodeRow:
-    nop: int
-    delay_alu: int
-    endpgm: int
-    branch: int
-    conditional_branch_scc0: int
-    conditional_branch_scc1: int
-
-
-@dataclass(frozen=True, slots=True)
 class _AmdgpuDescriptorSetRow:
     info: AmdgpuDescriptorSetInfo
-    sopp: _AmdgpuSoppOpcodeRow
+    sopp: AmdgpuSoppOpcodeInfo
 
 
 def _u16_expr(value: int) -> str:
@@ -591,10 +589,9 @@ def _validate_memory_cache_policy_encoding_infos(
 
 
 def _ordered_memory_cache_policy_encoding_infos(
+    descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
     rows: Sequence[AmdgpuVectorMemoryCachePolicyEncodingInfo] = (AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_INFOS),
-    descriptor_sets: Sequence[AmdgpuDescriptorSetInfo] | None = None,
 ) -> tuple[AmdgpuVectorMemoryCachePolicyEncodingInfo, ...]:
-    descriptor_sets = sorted_descriptor_set_infos() if descriptor_sets is None else descriptor_sets
     _validate_memory_cache_policy_encoding_infos(rows, descriptor_sets)
     return tuple(
         sorted(
@@ -663,12 +660,14 @@ def _memory_cache_policy_temporal_th_initializer(row: tuple[str, int]) -> str:
     return f"[{_cache_temporal_c_name(keyword)}] = {th_value},"
 
 
-def _emit_memory_cache_policy_encoding_rows() -> str:
+def _emit_memory_cache_policy_encoding_rows(
+    descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
+) -> str:
     return (
         "\n".join(
             [
                 *_memory_cache_policy_fragment_header(),
-                *(_memory_cache_policy_encoding_info_initializer(row) for row in _ordered_memory_cache_policy_encoding_infos()),
+                *(_memory_cache_policy_encoding_info_initializer(row) for row in _ordered_memory_cache_policy_encoding_infos(descriptor_sets)),
             ]
         )
         + "\n"
@@ -730,14 +729,10 @@ def _lds_bank_service_model_initializer(
     return lines
 
 
-def _emit_lds_bank_service_model_rows() -> str:
-    processors = sorted_processor_infos()
-    targets = sorted_target_infos()
-    validate_amdgpu_lds_bank_service_model_infos(amdgpu_descriptor_ref_keys())
-    validate_amdgpu_target_rows(processors, targets)
+def _emit_lds_bank_service_model_rows(
+    model_sets: Sequence[Sequence[str]],
+) -> str:
     model_infos_by_key = amdgpu_lds_bank_service_model_info_by_key()
-    model_sets = amdgpu_lds_bank_service_model_sets(processors, targets)
-    validate_amdgpu_lds_bank_service_model_coverage(model_sets)
 
     lines = _lds_bank_service_fragment_header()
     for ordinal, model_keys in enumerate(model_sets):
@@ -864,87 +859,14 @@ def _supported_wavefront_sizes(info: AmdgpuProcessorInfo) -> int:
     return flags
 
 
-def _parse_isa_xml_argument(value: str) -> tuple[str, Path]:
-    key, separator, path = value.partition(":")
-    if not separator or not key or not path:
-        raise ValueError("AMDGPU target-info --isa-xml entries must be key:path pairs")
-    return key, Path(path)
-
-
-def _parse_isa_xml_arguments(
-    values: Sequence[str],
-) -> dict[str, AmdgpuIsaFactSource]:
-    specs: dict[str, AmdgpuIsaFactSource] = {}
-    for value in values:
-        key, path = _parse_isa_xml_argument(value)
-        if key in specs:
-            raise ValueError(f"AMDGPU target-info ISA XML key '{key}' is duplicate")
-        specs[key] = parse_amdgpu_isa_xml_path(path)
-    return specs
-
-
-def _sopp_opcode(spec: AmdgpuIsaFactSource, instruction_name: str) -> int:
-    summaries = tuple(
-        summary for summary in spec.instruction_encoding_summaries((instruction_name,), include_aliases=False) if summary.encoding_name == "ENC_SOPP" and summary.condition_name == "default"
-    )
-    if len(summaries) != 1:
-        raise ValueError(f"{spec.source_name}: expected one default ENC_SOPP encoding for {instruction_name}, found {len(summaries)}")
-    return summaries[0].opcode
-
-
-def _sopp_opcode_or_zero(spec: AmdgpuIsaFactSource, instruction_name: str) -> int:
-    try:
-        summaries = tuple(
-            summary for summary in spec.instruction_encoding_summaries((instruction_name,), include_aliases=False) if summary.encoding_name == "ENC_SOPP" and summary.condition_name == "default"
-        )
-    except AmdgpuIsaXmlError as exc:
-        message = str(exc)
-        if "unknown AMDGPU ISA instruction(s)" not in message or instruction_name not in message:
-            raise
-        return 0
-    if not summaries:
-        return 0
-    if len(summaries) != 1:
-        raise ValueError(f"{spec.source_name}: expected at most one default ENC_SOPP encoding for {instruction_name}, found {len(summaries)}")
-    return summaries[0].opcode
-
-
 def _materialize_descriptor_set_rows(
     descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
-    isa_specs: Mapping[str, AmdgpuIsaFactSource],
 ) -> tuple[_AmdgpuDescriptorSetRow, ...]:
     rows: list[_AmdgpuDescriptorSetRow] = []
     for info in descriptor_sets:
-        sopp_rows: list[_AmdgpuSoppOpcodeRow] = []
-        for isa_info in info.isa_infos:
-            spec = isa_specs.get(isa_info.isa_xml_key)
-            if spec is None:
-                raise ValueError(f"AMDGPU descriptor set {info.key} references missing ISA XML key '{isa_info.isa_xml_key}'")
-            if spec.architecture_name != isa_info.isa_architecture_name or spec.architecture_id != isa_info.isa_architecture_id:
-                validate_amdgpu_descriptor_set_isa_xml(info, spec)
-                raise ValueError(
-                    f"{spec.source_name}: AMDGPU descriptor set {info.key} ISA "
-                    f"XML key '{isa_info.isa_xml_key}' does not identify "
-                    f"{isa_info.isa_architecture_name} architecture id "
-                    f"{isa_info.isa_architecture_id}"
-                )
-            sopp_rows.append(
-                _AmdgpuSoppOpcodeRow(
-                    nop=_sopp_opcode(spec, "S_NOP"),
-                    delay_alu=_sopp_opcode_or_zero(spec, "S_DELAY_ALU"),
-                    endpgm=_sopp_opcode(spec, "S_ENDPGM"),
-                    branch=_sopp_opcode(spec, "S_BRANCH"),
-                    conditional_branch_scc0=_sopp_opcode(spec, "S_CBRANCH_SCC0"),
-                    conditional_branch_scc1=_sopp_opcode(spec, "S_CBRANCH_SCC1"),
-                )
-            )
-        sopp = sopp_rows[0]
-        for isa_info, member_sopp in zip(
-            info.isa_infos[1:],
-            sopp_rows[1:],
-            strict=True,
-        ):
-            if member_sopp != sopp:
+        sopp = info.isa_infos[0].sopp_opcodes
+        for isa_info in info.isa_infos[1:]:
+            if isa_info.sopp_opcodes != sopp:
                 raise ValueError(f"AMDGPU descriptor set {info.key} has incompatible S_OPP opcodes across ISA XML keys '{info.isa_infos[0].isa_xml_key}' and '{isa_info.isa_xml_key}'")
         rows.append(
             _AmdgpuDescriptorSetRow(
@@ -1029,6 +951,7 @@ def _validate_descriptor_set_rows(rows: Sequence[_AmdgpuDescriptorSetRow]) -> No
     for row in rows:
         opcode_rows = (
             ("s_nop", row.sopp.nop),
+            ("s_delay_alu", row.sopp.delay_alu),
             ("s_endpgm", row.sopp.endpgm),
             ("s_branch", row.sopp.branch),
             ("s_cbranch_scc0", row.sopp.conditional_branch_scc0),
@@ -1565,18 +1488,16 @@ def _emit_tables_source(
     return "\n".join(lines) + "\n"
 
 
-def write_target_info_to_paths(
+def _write_target_info_to_paths(
     header_path: Path,
     source_path: Path,
     tables_header_path: Path,
-    isa_xml_arguments: Sequence[str],
-) -> None:
-    descriptor_sets = sorted_descriptor_set_infos()
-    processors = sorted_processor_infos()
-    targets = sorted_target_infos()
-    isa_specs = _parse_isa_xml_arguments(isa_xml_arguments)
-    descriptor_set_rows = _materialize_descriptor_set_rows(descriptor_sets, isa_specs)
+    descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
+    processors: Sequence[AmdgpuProcessorInfo],
+    targets: Sequence[AmdgpuTargetInfo],
+) -> tuple[tuple[str, ...], ...]:
     _validate_descriptor_sets(descriptor_sets)
+    descriptor_set_rows = _materialize_descriptor_set_rows(descriptor_sets)
     _validate_descriptor_set_rows(descriptor_set_rows)
     _validate_matrix_coexecution_profiles()
     _validate_processors(processors, descriptor_sets)
@@ -1591,12 +1512,10 @@ def write_target_info_to_paths(
     header = _emit_header(descriptor_sets)
     tables_header = _emit_tables_header()
     source = _emit_tables_source(processors, targets, descriptor_set_rows)
-    header_path.parent.mkdir(parents=True, exist_ok=True)
-    source_path.parent.mkdir(parents=True, exist_ok=True)
-    tables_header_path.parent.mkdir(parents=True, exist_ok=True)
-    header_path.write_text(header, encoding="utf-8")
-    source_path.write_text(source, encoding="utf-8")
-    tables_header_path.write_text(tables_header, encoding="utf-8")
+    write_text_file(header_path, header)
+    write_text_file(source_path, source)
+    write_text_file(tables_header_path, tables_header)
+    return model_sets
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1604,76 +1523,129 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--header",
         type=Path,
+        required=True,
         help="Generated target-info header path.",
     )
     parser.add_argument(
         "--source",
         type=Path,
+        required=True,
         help="Generated target-info source path.",
     )
     parser.add_argument(
         "--tables-header",
         type=Path,
+        required=True,
         help="Generated target-info private table header path.",
     )
     parser.add_argument(
         "--cache-policy-encoding-rows",
         type=Path,
+        required=True,
         help="Generated memory cache-policy encoding row fragment path.",
     )
     parser.add_argument(
         "--cache-policy-temporal-th",
         type=Path,
+        required=True,
         help="Generated memory cache-policy temporal TH fragment path.",
     )
     parser.add_argument(
         "--lds-bank-service-model-rows",
         type=Path,
+        required=True,
         help="Generated LDS bank-service model-set fragment path.",
     )
     parser.add_argument(
         "--matrix-coexecution-source-layouts",
         type=Path,
+        required=True,
         help="Generated matrix coexecution source-layout fragment path.",
     )
     parser.add_argument(
-        "--isa-xml",
-        action="append",
-        default=[],
-        help="ISA XML fact source as key:path.",
+        "--low-registry-tables",
+        type=Path,
+        required=True,
+        help="Generated low descriptor registry X-macro table path.",
+    )
+    parser.add_argument(
+        "--encoding-tables",
+        type=Path,
+        required=True,
+        help="Generated encoding table X-macro table path.",
+    )
+    parser.add_argument(
+        "--encoding-field-ids",
+        type=Path,
+        required=True,
+        help="Generated encoding field ID X-macro row fragment path.",
+    )
+    parser.add_argument(
+        "--low-alias-source",
+        type=Path,
+        required=True,
+        help="Generated blocked low-alias C source path.",
+    )
+    parser.add_argument(
+        "--target-record-tables",
+        type=Path,
+        required=True,
+        help="Generated target-record X-macro table path.",
+    )
+    parser.add_argument(
+        "--occupancy-model-tables",
+        type=Path,
+        required=True,
+        help="Generated occupancy model C source path.",
     )
     args = parser.parse_args(argv)
 
-    wrote_output = False
-    target_info_paths = (args.header, args.source, args.tables_header)
-    if any(path is not None for path in target_info_paths):
-        if not all(path is not None for path in target_info_paths):
-            parser.error("--header, --source, and --tables-header must be provided together")
-        write_target_info_to_paths(
-            header_path=args.header,
-            source_path=args.source,
-            tables_header_path=args.tables_header,
-            isa_xml_arguments=args.isa_xml,
-        )
-        wrote_output = True
-    if args.cache_policy_encoding_rows is not None:
-        args.cache_policy_encoding_rows.parent.mkdir(parents=True, exist_ok=True)
-        args.cache_policy_encoding_rows.write_text(_emit_memory_cache_policy_encoding_rows(), encoding="utf-8")
-        wrote_output = True
-    if args.cache_policy_temporal_th is not None:
-        args.cache_policy_temporal_th.parent.mkdir(parents=True, exist_ok=True)
-        args.cache_policy_temporal_th.write_text(_emit_memory_cache_policy_temporal_th(), encoding="utf-8")
-        wrote_output = True
-    if args.lds_bank_service_model_rows is not None:
-        args.lds_bank_service_model_rows.parent.mkdir(parents=True, exist_ok=True)
-        args.lds_bank_service_model_rows.write_text(_emit_lds_bank_service_model_rows(), encoding="utf-8")
-        wrote_output = True
-    if args.matrix_coexecution_source_layouts is not None:
-        args.matrix_coexecution_source_layouts.parent.mkdir(parents=True, exist_ok=True)
-        args.matrix_coexecution_source_layouts.write_text(_emit_matrix_coexecution_source_layouts(), encoding="utf-8")
-        wrote_output = True
-    if not wrote_output:
-        parser.error("at least one output path is required")
+    descriptor_sets = sorted_descriptor_set_infos()
+    processors = sorted_processor_infos()
+    targets = sorted_target_infos()
+    lds_bank_service_model_sets = _write_target_info_to_paths(
+        header_path=args.header,
+        source_path=args.source,
+        tables_header_path=args.tables_header,
+        descriptor_sets=descriptor_sets,
+        processors=processors,
+        targets=targets,
+    )
+    write_text_file(
+        args.cache_policy_encoding_rows,
+        _emit_memory_cache_policy_encoding_rows(descriptor_sets),
+    )
+    write_text_file(
+        args.cache_policy_temporal_th,
+        _emit_memory_cache_policy_temporal_th(),
+    )
+    write_text_file(
+        args.lds_bank_service_model_rows,
+        _emit_lds_bank_service_model_rows(lds_bank_service_model_sets),
+    )
+    write_text_file(
+        args.matrix_coexecution_source_layouts,
+        _emit_matrix_coexecution_source_layouts(),
+    )
+    write_config_tables_to_paths(
+        descriptor_sets=descriptor_sets,
+        processors=processors,
+        targets=targets,
+        low_registry_tables_path=args.low_registry_tables,
+        encoding_tables_path=args.encoding_tables,
+        encoding_field_ids_path=args.encoding_field_ids,
+    )
+    write_low_aliases_to_path(args.low_alias_source)
+    write_target_record_tables_to_path(
+        args.target_record_tables,
+        descriptor_sets=descriptor_sets,
+        processors=processors,
+        targets=targets,
+    )
+    write_text_file(
+        args.occupancy_model_tables,
+        generate_occupancy_tables(descriptor_sets, processors),
+    )
     return 0
 
 

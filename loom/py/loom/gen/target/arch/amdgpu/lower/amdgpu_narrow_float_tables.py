@@ -28,6 +28,7 @@ from loom.dialect.encoding.numeric_formats import (  # noqa: E402
     FP8_FORMATS,
     Fp8SpecialPolicy,
 )
+from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
 from loom.gen.target.arch.amdgpu.lower.candidates.validation import (  # noqa: E402
     required_descriptor_ref_constant_name,
@@ -518,9 +519,12 @@ def _fp8_decode_plan_descriptor_initializer(
     )
     return "\n".join(
         [
-            "LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(",
-            f"    {descriptor_ref}, {row.plan_field},",
-            f"    {row.present_flag}),",
+            "    {",
+            f"        .descriptor_ref = {descriptor_ref},",
+            "        .descriptor_offset =",
+            f"            offsetof(loom_amdgpu_fp8_decode_plan_t, {row.plan_field}),",
+            f"        .present_flag = {row.present_flag},",
+            "    },",
         ]
     )
 
@@ -536,11 +540,13 @@ def _fp8_encoded_operand_schema_requirement_initializer(
 ) -> str:
     return "\n".join(
         [
-            "LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_REQUIREMENT_ROW(",
-            f"    {row.kind},",
-            f"    {row.scale_format}, {row.scale_topology},",
-            f"    {row.affine_policy}, {row.scale_operand_count},",
-            f"    {row.scale_group_mode}),",
+            f"    [{row.kind}] = {{",
+            f"        .scale_format = {row.scale_format},",
+            f"        .scale_topology = {row.scale_topology},",
+            f"        .affine_policy = {row.affine_policy},",
+            f"        .scale_operand_count = {row.scale_operand_count},",
+            f"        .scale_group_mode = {row.scale_group_mode},",
+            "    },",
         ]
     )
 
@@ -578,15 +584,26 @@ def _fp8_native_descriptor_ref_initializer(
         byte_select_descriptor_refs = ("LOOM_AMDGPU_DESCRIPTOR_REF_NONE",) * 4
     return "\n".join(
         [
-            "LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW(",
-            f"    {row_index},",
-            f"    {_FP8_FORMAT_INDEX_BY_NAME[row.source_format]},",
-            f"    {row.source_format},",
-            f"    {_scalar_type_constant_name(row.result_type)},",
-            f"    {lane_descriptor_ref}, {pair_descriptor_ref},",
-            f"    {', '.join(byte_select_descriptor_refs)}),",
+            f"    [{row_index}] = {{",
+            f"        .source_format = {row.source_format},",
+            f"        .result_element_type = {_scalar_type_constant_name(row.result_type)},",
+            "        .refs = {",
+            f"            .lane = {lane_descriptor_ref},",
+            f"            .pair = {pair_descriptor_ref},",
+            "            .byte_select = {",
+            f"                {', '.join(byte_select_descriptor_refs)},",
+            "            },",
+            "        },",
+            "    },",
         ]
     )
+
+
+def _fp8_native_descriptor_ref_index_initializer(
+    row_index: int,
+    row: _Fp8NativeDescriptorRefRow,
+) -> str:
+    return f"    [{_FP8_FORMAT_INDEX_BY_NAME[row.source_format]}][{_scalar_type_constant_name(row.result_type)}] = {row_index + 1},"
 
 
 def _fp8_scaled_descriptor_ref_initializer(
@@ -606,15 +623,22 @@ def _fp8_scaled_descriptor_ref_initializer(
     )
     return "\n".join(
         [
-            "LOOM_AMDGPU_FP8_SCALED_DESCRIPTOR_REF_ROW(",
-            f"    {row_index},",
-            f"    {_FP8_FORMAT_INDEX_BY_NAME[row.source_format]},",
-            f"    {row.source_format},",
-            f"    {_scalar_type_constant_name(row.result_type)},",
-            f"    {scalef32_pair_descriptor_ref},",
-            f"    {e8m0_pk8_descriptor_ref}),",
+            f"    [{row_index}] = {{",
+            f"        .source_format = {row.source_format},",
+            f"        .result_element_type = {_scalar_type_constant_name(row.result_type)},",
+            "        .scalef32_pair_descriptor_ref =",
+            f"            {scalef32_pair_descriptor_ref},",
+            f"        .e8m0_pk8_descriptor_ref = {e8m0_pk8_descriptor_ref},",
+            "    },",
         ]
     )
+
+
+def _fp8_scaled_descriptor_ref_index_initializer(
+    row_index: int,
+    row: _Fp8ScaledDescriptorRefRow,
+) -> str:
+    return f"    [{_FP8_FORMAT_INDEX_BY_NAME[row.source_format]}][{_scalar_type_constant_name(row.result_type)}] = {row_index + 1},"
 
 
 def _fp8_subnormal_bf16_payload(row: _Fp8FormatRow, mantissa: int) -> int:
@@ -674,24 +698,60 @@ def _hex_u32(value: int) -> str:
     return f"UINT32_C(0x{value:08X})"
 
 
+def _fp8_format_initializer(row: _Fp8FormatRow) -> str:
+    return "\n".join(
+        [
+            "    {",
+            f"        .source_format = {row.source_format},",
+            f"        .element_type = {_scalar_type_constant_name(row.source_type)},",
+            "        .format = {",
+            f"            .exponent_bits = {row.exponent_bits},",
+            f"            .mantissa_bits = {row.mantissa_bits},",
+            f"            .exponent_bias = {row.exponent_bias},",
+            f"            .special_policy = {row.special_policy},",
+            "        },",
+            "    },",
+        ]
+    )
+
+
 def _fp8_subnormal_table_initializer(row: _Fp8FormatRow) -> str:
     return "\n".join(
         [
-            "LOOM_AMDGPU_FP8_SUBNORMAL_TABLE_ROW(",
-            f"    {row.source_format},",
-            f"    {_scalar_type_constant_name(row.source_type)},",
-            f"    {row.exponent_bits}, {row.mantissa_bits}, {row.exponent_bias},",
-            f"    {row.special_policy},",
-            f"    {_hex_u32(_fp8_subnormal_table_word(row, 0))},",
-            f"    {_hex_u32(_fp8_subnormal_table_word(row, 2))},",
-            f"    {_hex_u32(_fp8_subnormal_bf16_byte_table_word(row, 0, 0))},",
-            f"    {_hex_u32(_fp8_subnormal_bf16_byte_table_word(row, 0, 4))},",
-            f"    {_hex_u32(_fp8_subnormal_bf16_byte_table_word(row, 1, 0))},",
-            f"    {_hex_u32(_fp8_subnormal_bf16_byte_table_word(row, 1, 4))},",
-            f"    {_hex_u32(_fp8_subnormal_f16_byte_table_word(row, 0, 0))},",
-            f"    {_hex_u32(_fp8_subnormal_f16_byte_table_word(row, 0, 4))},",
-            f"    {_hex_u32(_fp8_subnormal_f16_byte_table_word(row, 1, 0))},",
-            f"    {_hex_u32(_fp8_subnormal_f16_byte_table_word(row, 1, 4))}),",
+            "    {",
+            f"        .source_format = {row.source_format},",
+            f"        .element_type = {_scalar_type_constant_name(row.source_type)},",
+            "        .format = {",
+            f"            .exponent_bits = {row.exponent_bits},",
+            f"            .mantissa_bits = {row.mantissa_bits},",
+            f"            .exponent_bias = {row.exponent_bias},",
+            f"            .special_policy = {row.special_policy},",
+            "        },",
+            "        .subnormal_bf16_table_words = {",
+            f"            {_hex_u32(_fp8_subnormal_table_word(row, 0))},",
+            f"            {_hex_u32(_fp8_subnormal_table_word(row, 2))},",
+            "        },",
+            "        .subnormal_bf16_byte_table_words = {",
+            "            {",
+            f"                {_hex_u32(_fp8_subnormal_bf16_byte_table_word(row, 0, 0))},",
+            f"                {_hex_u32(_fp8_subnormal_bf16_byte_table_word(row, 0, 4))},",
+            "            },",
+            "            {",
+            f"                {_hex_u32(_fp8_subnormal_bf16_byte_table_word(row, 1, 0))},",
+            f"                {_hex_u32(_fp8_subnormal_bf16_byte_table_word(row, 1, 4))},",
+            "            },",
+            "        },",
+            "        .subnormal_f16_byte_table_words = {",
+            "            {",
+            f"                {_hex_u32(_fp8_subnormal_f16_byte_table_word(row, 0, 0))},",
+            f"                {_hex_u32(_fp8_subnormal_f16_byte_table_word(row, 0, 4))},",
+            "            },",
+            "            {",
+            f"                {_hex_u32(_fp8_subnormal_f16_byte_table_word(row, 1, 0))},",
+            f"                {_hex_u32(_fp8_subnormal_f16_byte_table_word(row, 1, 4))},",
+            "            },",
+            "        },",
+            "    },",
         ]
     )
 
@@ -699,9 +759,11 @@ def _fp8_subnormal_table_initializer(row: _Fp8FormatRow) -> str:
 def _fp8_encoded_operand_format_initializer(source_type: ScalarTypeKind, formats: Sequence[str]) -> str:
     return "\n".join(
         [
-            "LOOM_AMDGPU_FP8_ENCODED_OPERAND_FORMAT_ROW(",
-            f"    {_scalar_type_constant_name(source_type)},",
-            f"    {_fp8_numeric_format_flags_expr(formats)}),",
+            f"    [{_scalar_type_constant_name(source_type)}] = {{",
+            f"        .element_type = {_scalar_type_constant_name(source_type)},",
+            "        .encoded_operand_formats =",
+            f"            {_fp8_numeric_format_flags_expr(formats)},",
+            "    },",
         ]
     )
 
@@ -720,40 +782,12 @@ def _fp8_packed_repair_reason(base_name: str, repair_mask: int) -> str:
     return f"{base_name}_repair_{'_'.join(suffixes)}"
 
 
-def _fp8_packed_repair_reason_initializer(row_macro: str, base_name: str, repair_mask: int) -> str:
+def _fp8_packed_repair_reason_initializer(base_name: str, repair_mask: int) -> str:
     return "\n".join(
         [
-            f"{row_macro}(",
-            f"    {_fp8_packed_repair_expression(repair_mask)},",
-            f'    "{_fp8_packed_repair_reason(base_name, repair_mask)}")',
+            f"    [{_fp8_packed_repair_expression(repair_mask)}] =",
+            f'        IREE_SVL("{_fp8_packed_repair_reason(base_name, repair_mask)}"),',
         ]
-    )
-
-
-def _emit_fp8_packed_repair_reason_rows() -> str:
-    return (
-        "\n".join(
-            [
-                *_generated_header(),
-                *(
-                    _fp8_packed_repair_reason_initializer(
-                        "LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_REASON_ROW",
-                        "fp8_packed_bf16_decode",
-                        repair_mask,
-                    )
-                    for repair_mask in range(16)
-                ),
-                *(
-                    _fp8_packed_repair_reason_initializer(
-                        "LOOM_AMDGPU_FP8_PACKED_F16_REPAIR_REASON_ROW",
-                        "fp8_packed_f16_decode",
-                        repair_mask,
-                    )
-                    for repair_mask in range(4)
-                ),
-            ]
-        )
-        + "\n"
     )
 
 
@@ -783,28 +817,6 @@ def _emit_fp8_decode_plan_descriptor_rows(
             [
                 *_generated_header(),
                 *(_fp8_decode_plan_descriptor_initializer(row, known_refs) for row in rows),
-            ]
-        )
-        + "\n"
-    )
-
-
-def _emit_fp8_encoded_operand_format_rows(
-    rows: Sequence[_Fp8FormatRow] = _FP8_FORMAT_ROWS,
-) -> str:
-    _validate_fp8_format_rows(rows)
-    source_types = (ScalarTypeKind.F8E4M3, ScalarTypeKind.F8E5M2)
-    return (
-        "\n".join(
-            [
-                *_generated_header(),
-                *(
-                    _fp8_encoded_operand_format_initializer(
-                        source_type,
-                        tuple(row.source_format for row in rows if row.source_type == source_type),
-                    )
-                    for source_type in source_types
-                ),
             ]
         )
         + "\n"
@@ -860,100 +872,132 @@ def _emit_fp8_scaled_descriptor_ref_rows(
     )
 
 
-def _write_output(path: Path, contents: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(contents, encoding="utf-8")
+def _emit_counts_header() -> str:
+    lines = [
+        *_generated_header(),
+        "#ifndef LOOM_TARGET_ARCH_AMDGPU_LOWER_ENCODING_FP8_TABLE_COUNTS_H_",
+        "#define LOOM_TARGET_ARCH_AMDGPU_LOWER_ENCODING_FP8_TABLE_COUNTS_H_",
+        "",
+        f"#define LOOM_AMDGPU_FP8_FORMAT_ROW_COUNT {len(_FP8_FORMAT_ROWS)}u",
+        f"#define LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW_COUNT {len(_FP8_NATIVE_DESCRIPTOR_REF_ROWS)}u",
+        f"#define LOOM_AMDGPU_FP8_SCALED_DESCRIPTOR_REF_ROW_COUNT {len(_FP8_SCALED_DESCRIPTOR_REF_ROWS)}u",
+        f"#define LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW_COUNT {len(_FP8_DECODE_PLAN_DESCRIPTOR_ROWS)}u",
+        "",
+        "#endif  // LOOM_TARGET_ARCH_AMDGPU_LOWER_ENCODING_FP8_TABLE_COUNTS_H_",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _emit_source(*, public_header: str) -> str:
+    _validate_fp8_format_rows(_FP8_FORMAT_ROWS)
+    _validate_fp8_encoded_operand_schema_requirement_rows(_FP8_ENCODED_OPERAND_SCHEMA_REQUIREMENT_ROWS)
+    _validate_fp8_decode_plan_descriptor_rows(_FP8_DECODE_PLAN_DESCRIPTOR_ROWS)
+    _validate_unique_source_result_rows(
+        "AMDGPU FP8 native conversion descriptor table",
+        _FP8_NATIVE_DESCRIPTOR_REF_ROWS,
+    )
+    _validate_unique_source_result_rows(
+        "AMDGPU FP8 scaled conversion descriptor table",
+        _FP8_SCALED_DESCRIPTOR_REF_ROWS,
+    )
+    descriptor_ref_key_set = set(amdgpu_descriptor_ref_keys())
+    source_types = (ScalarTypeKind.F8E4M3, ScalarTypeKind.F8E5M2)
+    lines = [
+        *_generated_header(),
+        f'#include "{public_header}"',
+        "",
+        "const iree_string_view_t kLoomAmdgpuFp8PackedBf16RepairReasons",
+        "    [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_REASON_COUNT] = {",
+        *(_fp8_packed_repair_reason_initializer("fp8_packed_bf16_decode", repair_mask) for repair_mask in range(16)),
+        "};",
+        "",
+        "const iree_string_view_t kLoomAmdgpuFp8PackedF16RepairReasons",
+        "    [LOOM_AMDGPU_FP8_PACKED_F16_REPAIR_REASON_COUNT] = {",
+        *(_fp8_packed_repair_reason_initializer("fp8_packed_f16_decode", repair_mask) for repair_mask in range(4)),
+        "};",
+        "",
+        "const loom_amdgpu_fp8_encoded_operand_schema_requirement_t",
+        "    kLoomAmdgpuFp8EncodedOperandSchemaRequirements",
+        "        [LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_SCALE_E8M0 + 1] = {",
+        *(_fp8_encoded_operand_schema_requirement_initializer(row) for row in _FP8_ENCODED_OPERAND_SCHEMA_REQUIREMENT_ROWS),
+        "};",
+        "",
+        "const loom_amdgpu_fp8_encoded_operand_format_row_t",
+        "    kLoomAmdgpuFp8EncodedOperandFormatRows[LOOM_SCALAR_TYPE_COUNT_] = {",
+        *(
+            _fp8_encoded_operand_format_initializer(
+                source_type,
+                tuple(row.source_format for row in _FP8_FORMAT_ROWS if row.source_type == source_type),
+            )
+            for source_type in source_types
+        ),
+        "};",
+        "",
+        "const loom_amdgpu_fp8_format_row_t kLoomAmdgpuFp8FormatRows",
+        "    [LOOM_AMDGPU_FP8_FORMAT_ROW_COUNT] = {",
+        *(_fp8_format_initializer(row) for row in _FP8_FORMAT_ROWS),
+        "};",
+        "",
+        "const loom_amdgpu_fp8_subnormal_table_row_t",
+        "    kLoomAmdgpuFp8SubnormalTableRows",
+        "        [LOOM_AMDGPU_FP8_FORMAT_ROW_COUNT] = {",
+        *(_fp8_subnormal_table_initializer(row) for row in _FP8_FORMAT_ROWS),
+        "};",
+        "",
+        "const loom_amdgpu_fp8_native_descriptor_ref_row_t",
+        "    kLoomAmdgpuFp8NativeDescriptorRefRows",
+        "        [LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW_COUNT] = {",
+        *(_fp8_native_descriptor_ref_initializer(row_index, row, descriptor_ref_key_set) for row_index, row in enumerate(_FP8_NATIVE_DESCRIPTOR_REF_ROWS)),
+        "};",
+        "",
+        "const uint8_t kLoomAmdgpuFp8NativeDescriptorRefRowIndex",
+        "    [LOOM_AMDGPU_FP8_FORMAT_ROW_COUNT][LOOM_SCALAR_TYPE_COUNT_] = {",
+        *(_fp8_native_descriptor_ref_index_initializer(row_index, row) for row_index, row in enumerate(_FP8_NATIVE_DESCRIPTOR_REF_ROWS)),
+        "};",
+        "",
+        "const loom_amdgpu_fp8_scaled_descriptor_ref_row_t",
+        "    kLoomAmdgpuFp8ScaledDescriptorRefRows",
+        "        [LOOM_AMDGPU_FP8_SCALED_DESCRIPTOR_REF_ROW_COUNT] = {",
+        *(_fp8_scaled_descriptor_ref_initializer(row_index, row, descriptor_ref_key_set) for row_index, row in enumerate(_FP8_SCALED_DESCRIPTOR_REF_ROWS)),
+        "};",
+        "",
+        "const uint8_t kLoomAmdgpuFp8ScaledDescriptorRefRowIndex",
+        "    [LOOM_AMDGPU_FP8_FORMAT_ROW_COUNT][LOOM_SCALAR_TYPE_COUNT_] = {",
+        *(_fp8_scaled_descriptor_ref_index_initializer(row_index, row) for row_index, row in enumerate(_FP8_SCALED_DESCRIPTOR_REF_ROWS)),
+        "};",
+        "",
+        "const loom_amdgpu_fp8_decode_plan_descriptor_row_t",
+        "    kLoomAmdgpuFp8DecodePlanDescriptorRows",
+        "        [LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW_COUNT] = {",
+        *(_fp8_decode_plan_descriptor_initializer(row, descriptor_ref_key_set) for row in _FP8_DECODE_PLAN_DESCRIPTOR_ROWS),
+        "};",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate AMDGPU narrow-float lowering tables.")
     parser.add_argument(
-        "--fp8-decode-plan-descriptor-rows",
+        "--counts-header",
+        required=True,
         type=Path,
-        help="Generated FP8 decode-plan descriptor row fragment path.",
+        help="Generated FP8 table count header path.",
     )
     parser.add_argument(
-        "--fp8-encoded-operand-format-rows",
+        "--source",
+        required=True,
         type=Path,
-        help="Generated FP8/BF8 encoded operand format row fragment path.",
+        help="Generated FP8 table source path.",
     )
     parser.add_argument(
-        "--fp8-encoded-operand-schema-requirement-rows",
-        type=Path,
-        help="Generated FP8/BF8 encoded operand schema requirement row fragment path.",
-    )
-    parser.add_argument(
-        "--fp8-native-descriptor-ref-rows",
-        type=Path,
-        help="Generated native unscaled FP8/BF8 descriptor row fragment path.",
-    )
-    parser.add_argument(
-        "--fp8-scaled-descriptor-ref-rows",
-        type=Path,
-        help="Generated FP8/BF8 scaled conversion descriptor row fragment path.",
-    )
-    parser.add_argument(
-        "--fp8-subnormal-table-rows",
-        type=Path,
-        help="Generated FP8/BF8 subnormal decode table row fragment path.",
-    )
-    parser.add_argument(
-        "--fp8-packed-repair-reason-rows",
-        type=Path,
-        help="Generated FP8/BF8 packed repair reason row fragment path.",
+        "--public-header",
+        default="loom/target/arch/amdgpu/lower/encoding/fp8_tables.h",
+        help="Public include path for the generated source.",
     )
     args = parser.parse_args(argv)
 
-    if (
-        args.fp8_decode_plan_descriptor_rows is None
-        and args.fp8_encoded_operand_format_rows is None
-        and args.fp8_encoded_operand_schema_requirement_rows is None
-        and args.fp8_native_descriptor_ref_rows is None
-        and args.fp8_scaled_descriptor_ref_rows is None
-        and args.fp8_subnormal_table_rows is None
-        and args.fp8_packed_repair_reason_rows is None
-    ):
-        parser.error("at least one output path is required")
-    descriptor_ref_key_set = (
-        set(amdgpu_descriptor_ref_keys())
-        if args.fp8_decode_plan_descriptor_rows is not None or args.fp8_native_descriptor_ref_rows is not None or args.fp8_scaled_descriptor_ref_rows is not None
-        else None
-    )
-    if args.fp8_decode_plan_descriptor_rows is not None:
-        _write_output(
-            args.fp8_decode_plan_descriptor_rows,
-            _emit_fp8_decode_plan_descriptor_rows(descriptor_ref_key_set=descriptor_ref_key_set),
-        )
-    if args.fp8_encoded_operand_format_rows is not None:
-        _write_output(
-            args.fp8_encoded_operand_format_rows,
-            _emit_fp8_encoded_operand_format_rows(),
-        )
-    if args.fp8_encoded_operand_schema_requirement_rows is not None:
-        _write_output(
-            args.fp8_encoded_operand_schema_requirement_rows,
-            _emit_fp8_encoded_operand_schema_requirement_rows(),
-        )
-    if args.fp8_native_descriptor_ref_rows is not None:
-        _write_output(
-            args.fp8_native_descriptor_ref_rows,
-            _emit_fp8_native_descriptor_ref_rows(descriptor_ref_key_set=descriptor_ref_key_set),
-        )
-    if args.fp8_scaled_descriptor_ref_rows is not None:
-        _write_output(
-            args.fp8_scaled_descriptor_ref_rows,
-            _emit_fp8_scaled_descriptor_ref_rows(descriptor_ref_key_set=descriptor_ref_key_set),
-        )
-    if args.fp8_subnormal_table_rows is not None:
-        _write_output(
-            args.fp8_subnormal_table_rows,
-            _emit_fp8_subnormal_table_rows(),
-        )
-    if args.fp8_packed_repair_reason_rows is not None:
-        _write_output(
-            args.fp8_packed_repair_reason_rows,
-            _emit_fp8_packed_repair_reason_rows(),
-        )
+    write_text_file(args.counts_header, _emit_counts_header())
+    write_text_file(args.source, _emit_source(public_header=args.public_header))
     return 0
 
 

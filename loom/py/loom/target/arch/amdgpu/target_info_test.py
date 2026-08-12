@@ -46,6 +46,11 @@ from loom.target.arch.amdgpu.target_info import (
     AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC,
     AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK,
     AMDGPU_TARGET_INFOS,
+    AmdgpuOccupancyDomainInfo,
+    AmdgpuOccupancyModelInfo,
+    _occupancy_capacity,
+    _occupancy_capacity_change_points,
+    _validate_portable_occupancy_model,
     amdgpu_descriptor_set_info_by_generator_target,
     amdgpu_descriptor_set_storage_info_by_generator_target,
     amdgpu_descriptor_set_supported_target_contract_keys,
@@ -388,6 +393,49 @@ def test_generic_contracts_are_portable_member_intersections() -> None:
     validate_amdgpu_generic_contracts(
         AMDGPU_PROCESSOR_INFOS, AMDGPU_DESCRIPTOR_SET_INFOS
     )
+
+
+def test_occupancy_capacity_change_points_cover_every_positive_demand() -> None:
+    maximum_units = 257
+    granularities = (3, 8, 24)
+    change_points = _occupancy_capacity_change_points(maximum_units, granularities)
+
+    for units in range(1, maximum_units + 1):
+        representative = max(point for point in change_points if point <= units)
+        for granularity in granularities:
+            assert (units + granularity - 1) // granularity == (
+                representative + granularity - 1
+            ) // granularity
+            for pool_units in (17, 64, maximum_units):
+                assert _occupancy_capacity(
+                    pool_units, granularity, units
+                ) == _occupancy_capacity(pool_units, granularity, representative)
+
+
+def test_occupancy_validation_checks_member_capacity_change_points() -> None:
+    generic_model = AmdgpuOccupancyModelInfo(
+        max_waves_per_simd=16,
+        domain=AmdgpuOccupancyDomainInfo(
+            simd_count=4,
+            local_memory_bytes=64,
+            local_memory_allocation_granularity=16,
+            max_barrier_workgroup_count=16,
+        ),
+        register_classes=(),
+    )
+    member_model = replace(
+        generic_model,
+        domain=replace(
+            generic_model.domain,
+            local_memory_bytes=48,
+            local_memory_allocation_granularity=8,
+        ),
+    )
+
+    with _raises_value_error("overstates local-memory capacity at 9 bytes"):
+        _validate_portable_occupancy_model(
+            "test-generic", 32, generic_model, (member_model,)
+        )
 
 
 def test_instruction_constraints_are_attached_to_canonical_targets() -> None:

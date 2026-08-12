@@ -10,27 +10,28 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_X86)
-loom_target_table_cc_library(
+loom_target_contract_file_family(
+  NAME
+    contract_tables_gen
+  GENERATOR
+    loom::py::loom::gen::target::contracts::x86_contract_table_family
+  FRAGMENTS
+    "avx2=x86.avx2"
+    "avx512=x86.avx512"
+    "packed_dot=x86.packed_dot"
+    "scalar=x86.scalar"
+  COMMENT
+    "Generating x86 contract table families"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_target_contract_cc_libraries(
   NAME
     scalar
-  GENERATOR
-    loom::py::loom::gen::target::contracts::x86_contract_fragment
-  ARGS
-    "--contract-fragment=x86.scalar"
-  DEPS
+  CONTRACT_DEPS
     loom::target::contract
-)
-endif()
-
-if(LOOM_TARGET_ARCH_X86)
-loom_target_table_cc_library(
-  NAME
-    scalar_lower_rules
-  GENERATOR
-    loom::py::loom::gen::target::contracts::x86_lower_rule_shard
-  ARGS
-    "--contract-fragment=x86.scalar"
-  DEPS
+  LOWER_RULE_DEPS
     loom::codegen::low::lower
     loom::ops::buffer
     loom::ops::index
@@ -40,27 +41,12 @@ loom_target_table_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_X86)
-loom_target_table_cc_library(
+loom_target_contract_cc_libraries(
   NAME
     avx2
-  GENERATOR
-    loom::py::loom::gen::target::contracts::x86_contract_fragment
-  ARGS
-    "--contract-fragment=x86.avx2"
-  DEPS
+  CONTRACT_DEPS
     loom::target::contract
-)
-endif()
-
-if(LOOM_TARGET_ARCH_X86)
-loom_target_table_cc_library(
-  NAME
-    avx2_lower_rules
-  GENERATOR
-    loom::py::loom::gen::target::contracts::x86_lower_rule_shard
-  ARGS
-    "--contract-fragment=x86.avx2"
-  DEPS
+  LOWER_RULE_DEPS
     loom::codegen::low::lower
     loom::ops::buffer
     loom::ops::index
@@ -71,27 +57,12 @@ loom_target_table_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_X86)
-loom_target_table_cc_library(
+loom_target_contract_cc_libraries(
   NAME
     avx512
-  GENERATOR
-    loom::py::loom::gen::target::contracts::x86_contract_fragment
-  ARGS
-    "--contract-fragment=x86.avx512"
-  DEPS
+  CONTRACT_DEPS
     loom::target::contract
-)
-endif()
-
-if(LOOM_TARGET_ARCH_X86)
-loom_target_table_cc_library(
-  NAME
-    avx512_lower_rules
-  GENERATOR
-    loom::py::loom::gen::target::contracts::x86_lower_rule_shard
-  ARGS
-    "--contract-fragment=x86.avx512"
-  DEPS
+  LOWER_RULE_DEPS
     loom::codegen::low::lower
     loom::ops::buffer
     loom::ops::index
@@ -102,27 +73,12 @@ loom_target_table_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_X86)
-loom_target_table_cc_library(
+loom_target_contract_cc_libraries(
   NAME
     packed_dot
-  GENERATOR
-    loom::py::loom::gen::target::contracts::x86_contract_fragment
-  ARGS
-    "--contract-fragment=x86.packed_dot"
-  DEPS
+  CONTRACT_DEPS
     loom::target::contract
-)
-endif()
-
-if(LOOM_TARGET_ARCH_X86)
-loom_target_table_cc_library(
-  NAME
-    packed_dot_lower_rules
-  GENERATOR
-    loom::py::loom::gen::target::contracts::x86_lower_rule_shard
-  ARGS
-    "--contract-fragment=x86.packed_dot"
-  DEPS
+  LOWER_RULE_DEPS
     loom::codegen::low::lower
     loom::ops::vector
 )
