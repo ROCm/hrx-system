@@ -1644,10 +1644,9 @@ static iree_status_t iree_hal_amdgpu_logical_device_set_trace_profiling_enabled(
 
 // Selects one host queue from |queue_affinity| after intersecting with this
 // logical device's supported queues. The current policy is deterministic
-// first-set-bit selection, which is enough to honor explicit HIP stream
-// affinities and keeps the CTS path stable. A multi-bit affinity therefore acts
-// as "any of these queues"; queue_flush handles multi-bit masks by iterating
-// all selected queues instead.
+// first-set-bit selection, which is enough to honor explicit virtual-client
+// affinities. A multi-bit affinity therefore acts as "any of these queues";
+// queue_flush handles multi-bit masks by iterating all selected queues instead.
 static iree_status_t iree_hal_amdgpu_logical_device_select_host_queue(
     iree_hal_amdgpu_logical_device_t* logical_device,
     iree_hal_queue_affinity_t queue_affinity,
@@ -3475,8 +3474,10 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_execution_queue_acquire(
                                 mask_bit_count, expected_mask_bit_count);
     }
     bool has_enabled_unit = false;
-    for (iree_host_size_t i = 0; i < mask_bit_count / 32; ++i) {
-      has_enabled_unit |= mask[i] != 0;
+    if (iree_status_is_ok(status)) {
+      for (iree_host_size_t i = 0; i < mask_bit_count / 32; ++i) {
+        has_enabled_unit |= mask[i] != 0;
+      }
     }
     const uint32_t final_word_bit_count =
         physical_device->compute_unit_count % 32;
@@ -3526,12 +3527,17 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_execution_queue_acquire(
       if (current->physical_device_ordinal == physical_device_ordinal &&
           current->execution_unit_mask_bit_count == mask_bit_count &&
           memcmp(current->execution_unit_mask, mask, mask_size) == 0) {
-        ++current->reference_count;
-        *out_execution_queue = current;
+        if (IREE_UNLIKELY(current->reference_count == IREE_HOST_SIZE_MAX)) {
+          status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                    "execution queue reference count overflow");
+        } else {
+          ++current->reference_count;
+          *out_execution_queue = current;
+        }
         break;
       }
     }
-    if (!*out_execution_queue) {
+    if (iree_status_is_ok(status) && !*out_execution_queue) {
       for (iree_host_size_t i = physical_device->host_queue_initial_count;
            i < physical_device->host_queue_capacity; ++i) {
         const iree_host_size_t queue_ordinal =
@@ -3598,16 +3604,6 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_execution_queue_acquire(
   }
   IREE_TRACE_ZONE_END(z0);
   return status;
-}
-
-IREE_API_EXPORT void iree_hal_amdgpu_execution_queue_retain(
-    iree_hal_amdgpu_execution_queue_t* execution_queue) {
-  if (!execution_queue) return;
-  iree_hal_amdgpu_logical_device_t* logical_device =
-      execution_queue->logical_device;
-  iree_slim_mutex_lock(&logical_device->execution_queue_mutex);
-  ++execution_queue->reference_count;
-  iree_slim_mutex_unlock(&logical_device->execution_queue_mutex);
 }
 
 IREE_API_EXPORT void iree_hal_amdgpu_execution_queue_release(

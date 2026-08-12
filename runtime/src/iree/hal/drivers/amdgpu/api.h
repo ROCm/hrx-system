@@ -537,10 +537,6 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_execution_queue_acquire(
     iree_host_size_t mask_bit_count, const uint32_t* mask,
     iree_hal_amdgpu_execution_queue_t** out_execution_queue);
 
-// Retains |execution_queue| for another owner.
-IREE_API_EXPORT void iree_hal_amdgpu_execution_queue_retain(
-    iree_hal_amdgpu_execution_queue_t* execution_queue);
-
 // Releases |execution_queue| and restores its queue's default mask after the
 // final owner has stopped submitting work.
 IREE_API_EXPORT void iree_hal_amdgpu_execution_queue_release(
