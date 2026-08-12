@@ -1207,6 +1207,7 @@ static void loom_low_target_legalize_destroy_query_scope(
   if (state->query_scope == NULL) {
     return;
   }
+  state->legalization_context.value_domain = NULL;
   loom_low_lower_source_query_scope_destroy(state->query_scope);
   state->query_scope = NULL;
   state->query_scope_fact_table = NULL;
@@ -1220,6 +1221,8 @@ static iree_status_t loom_low_target_legalize_refresh_query_scope(
   IREE_RETURN_IF_ERROR(loom_low_lower_source_query_scope_create(
       state->module, state->selection->func, &state->lower_options,
       state->query_scope_arena, &state->query_scope));
+  state->legalization_context.value_domain =
+      loom_low_lower_source_query_scope_value_domain(state->query_scope);
   state->query_scope_fact_table = fact_table;
   return iree_ok_status();
 }

@@ -189,19 +189,19 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 2048} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 2048} : reg<amdgpu.sgpr x2>
-  %67 = storage {byte_alignment = 16, byte_length = 64} : low.storage<workgroup>
-  %68 = storage {byte_alignment = 16, byte_length = 2048} : low.storage<workgroup>
-  %71 = v_lshlrev_b32_src0_inline %lane, 5
-  %72 = global_load_b128_saddr %71, %input_view
-  %74 = global_load_b128_saddr %71, %input_view {offset = 16}
-  low.op<amdgpu.ds_write_b128>(%71, %72) {offset = 64} memory_access([0, 3, 9, -1, 43, 32, 0, 16, 3, 64, 2080, 80, 2096]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>)
-  low.op<amdgpu.ds_write_b128>(%71, %74) {offset = 80} memory_access([0, 3, 9, -1, 43, 32, 16, 32, 3, 80, 2096, 96, 2112]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>)
-  %78 = low.op<amdgpu.ds_read_b128>(%71) {offset = 64} memory_access([0, 3, 9, -1, 43, 32, 0, 16, 3, 64, 2080, 80, 2096]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  %80 = low.op<amdgpu.ds_read_b128>(%71) {offset = 80} memory_access([0, 3, 9, -1, 43, 32, 16, 32, 3, 80, 2096, 96, 2112]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  global_store_b128_saddr %71, %78, %output_view
-  global_store_b128_saddr %71, %80, %output_view {offset = 16}
-  %83 = v_mov_b32 0
-  %sentinel = low.op<amdgpu.ds_read_b32>(%83) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 4, 4]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  low.op<amdgpu.ds_write_b32>(%83, %sentinel) {offset = 4} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 4, 4, 8, 8]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %41 = storage {byte_alignment = 16, byte_length = 64} : low.storage<workgroup>
+  %42 = storage {byte_alignment = 16, byte_length = 2048} : low.storage<workgroup>
+  %45 = v_lshlrev_b32_src0_inline %lane, 5
+  %46 = global_load_b128_saddr %45, %input_view
+  %48 = global_load_b128_saddr %45, %input_view {offset = 16}
+  low.op<amdgpu.ds_write_b128>(%45, %46) {offset = 64} memory_access([0, 3, 9, -1, 43, 32, 0, 16, 3, 64, 2080, 80, 2096]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>)
+  low.op<amdgpu.ds_write_b128>(%45, %48) {offset = 80} memory_access([0, 3, 9, -1, 43, 32, 16, 32, 3, 80, 2096, 96, 2112]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>)
+  %55 = low.op<amdgpu.ds_read_b128>(%45) {offset = 64} memory_access([0, 3, 9, -1, 43, 32, 0, 16, 3, 64, 2080, 80, 2096]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %57 = low.op<amdgpu.ds_read_b128>(%45) {offset = 80} memory_access([0, 3, 9, -1, 43, 32, 16, 32, 3, 80, 2096, 96, 2112]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %45, %55, %output_view
+  global_store_b128_saddr %45, %57, %output_view {offset = 16}
+  %63 = v_mov_b32 0
+  %sentinel = low.op<amdgpu.ds_read_b32>(%63) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 4, 4]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.op<amdgpu.ds_write_b32>(%63, %sentinel) {offset = 4} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 4, 4, 8, 8]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   return
 }

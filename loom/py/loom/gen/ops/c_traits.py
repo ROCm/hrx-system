@@ -89,7 +89,13 @@ def _same_type_constraint_covers(op: Op, field_names: set[str]) -> bool:
     return any(trait.name == "AllTypesMatch" and field_names.issubset(trait.args) for trait in op.traits)
 
 
-def _is_same_type_elementwise_vector_decomposable(op: Op) -> bool:
+def _same_shape_constraint_covers(op: Op, field_names: set[str]) -> bool:
+    if _same_type_constraint_covers(op, field_names):
+        return True
+    return any(constraint.name == "SameShape" and field_names.issubset(constraint.args) for constraint in op.constraints)
+
+
+def _is_shape_preserving_elementwise_vector_decomposable(op: Op) -> bool:
     if not _has_trait(op, "Elementwise"):
         return False
     if len(op.results) != 1 or op.regions or op.successors:
@@ -105,7 +111,7 @@ def _is_same_type_elementwise_vector_decomposable(op: Op) -> bool:
         return False
     if any(field.type_constraint not in _VECTOR_TYPE_CONSTRAINTS for field in value_fields):
         return False
-    return _same_type_constraint_covers(op, {field.name for field in value_fields})
+    return _same_shape_constraint_covers(op, {field.name for field in value_fields})
 
 
 def trait_flags(op: Op) -> str:
@@ -118,9 +124,11 @@ def trait_flags(op: Op) -> str:
         c_name = TRAIT_MAP.get(trait.name)
         if c_name:
             bits.append(c_name)
-    is_derived_decomposable = _is_same_type_elementwise_vector_decomposable(op)
+    is_derived_decomposable = _is_shape_preserving_elementwise_vector_decomposable(op)
     if has_explicit_decomposable and not is_derived_decomposable:
-        raise ValueError(f"Op '{op.name}': Decomposable requires a single-result same-type elementwise vector op with no regions, successors, variadic fields, optional operands, or tied results")
+        raise ValueError(
+            f"Op '{op.name}': Decomposable requires a single-result shape-preserving elementwise vector op with no regions, successors, variadic fields, optional operands, or tied results"
+        )
     if "LOOM_TRAIT_DECOMPOSABLE" not in bits and is_derived_decomposable:
         bits.append("LOOM_TRAIT_DECOMPOSABLE")
 

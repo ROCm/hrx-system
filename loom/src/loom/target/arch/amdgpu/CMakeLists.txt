@@ -254,6 +254,31 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
+    vector_packet_legalization
+  HDRS
+    "vector_packet_legalization.h"
+  SRCS
+    "vector_packet_legalization.c"
+  DEPS
+    ::target_info_defs
+    iree::base
+    loom::analysis::view_regions
+    loom::codegen::low::descriptors
+    loom::ir
+    loom::ops::buffer
+    loom::ops::index
+    loom::ops::scf
+    loom::ops::vector
+    loom::rewrite::rewriter
+    loom::target::arch::amdgpu::lower::kinds
+    loom::target::legalization
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
     legalization
   HDRS
     "legalization.h"
@@ -261,6 +286,7 @@ loom_cc_library(
     "legalization.c"
   DEPS
     ::facts
+    ::vector_packet_legalization
     iree::base
     loom::analysis::symbolic_expr
     loom::codegen::low::descriptors
