@@ -1,8 +1,8 @@
 # Programming guide
 
 The programming guide explains Loom by the boundary that owns each decision.
-It is written for systems and ML engineers who are comfortable reading a kernel
-but do not need prior MLIR knowledge.
+It is written for systems and ML engineers who are comfortable reading a
+kernel.
 
 Start with the [mental model](../getting-started/mental-model.md) if modules,
 templates, launch configuration, checks, and command programs are all new. Use
