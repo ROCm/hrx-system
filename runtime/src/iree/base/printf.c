@@ -41,7 +41,7 @@
 //===----------------------------------------------------------------------===//
 // Portable math (no libm dependency)
 //===----------------------------------------------------------------------===//
-// Provides fma, fmod, floor, and modf equivalents without requiring -lm.
+// Provides FMA error tracking and a modf equivalent without requiring -lm.
 // Uses hardware FMA when the compilation target has it (single instruction,
 // no function call); falls back to the Dekker two-product algorithm otherwise.
 
@@ -87,19 +87,6 @@ static inline double iree_printf_mul_error(double a, double b, double product) {
 #endif  // FMA
 }
 
-// Portable floor: returns the largest integer <= x.
-// Only called on positive, finite values in our formatting paths.
-static inline double iree_printf_floor(double x) {
-  // Doubles >= 2^52 in magnitude are always integers (the significand cannot
-  // represent a fractional part at that scale).
-  if (x >= 4503599627370496.0) return x;
-  if (x <= -4503599627370496.0) return x;
-  double truncated = (double)(int64_t)x;
-  // C truncation rounds toward zero; floor rounds toward -infinity.
-  if (truncated > x) truncated -= 1.0;
-  return truncated;
-}
-
 // Portable modf: split value into integral and fractional parts.
 // Only called on positive, finite values in our formatting paths.
 static inline double iree_printf_modf(double value, double* integral_part) {
@@ -110,14 +97,6 @@ static inline double iree_printf_modf(double value, double* integral_part) {
   double truncated = (double)(int64_t)value;
   *integral_part = truncated;
   return value - truncated;
-}
-
-// Check if an integer-valued double is odd. Used for banker's rounding.
-// Doubles >= 2^53 in magnitude always represent even integers (the lowest
-// bit of the significand corresponds to 2 or more at that scale).
-static inline bool iree_printf_is_odd(double x) {
-  if (x >= 9007199254740992.0 || x <= -9007199254740992.0) return false;
-  return ((int64_t)x) & 1;
 }
 
 //===----------------------------------------------------------------------===//
@@ -673,10 +652,11 @@ static void iree_printf_format_pointer(iree_printf_output_t* out,
 // Precision: we do NOT need shortest-round-trip representation (Grisu/Ryu).
 // We need correctness to the displayed precision with correct rounding.
 //
-// Approach: IEEE 754 bit extraction for sign/special values, then arithmetic
-// decomposition into integral + fractional parts using int64_t digit
-// extraction. This is accurate to 17 significant digits (full double
-// precision). Precision is capped at 17; beyond that we pad with zeros.
+// Approach: IEEE 754 bit extraction for sign/special values. Exponential
+// formatting converts the exact binary coefficient to decimal integer limbs;
+// fixed formatting decomposes integral and fractional parts arithmetically.
+// Both are accurate to 17 significant digits (full double precision).
+// Precision is capped at 17; beyond that we pad with zeros.
 
 // Maximum precision we compute accurately. Beyond this, we emit zeros.
 // 17 significant digits covers the full precision of IEEE 754 double.
@@ -698,6 +678,157 @@ typedef union {
   double value;
   uint64_t bits;
 } iree_printf_double_bits_t;
+
+// Base-10 big integer used only while extracting exact floating-point digits.
+// The largest coefficient is (2^53-1)*5^1074, which has 767 decimal digits
+// and therefore fits in 86 base-1e9 limbs.
+#define IREE_PRINTF_BIGINT_BASE UINT32_C(1000000000)
+#define IREE_PRINTF_BIGINT_MAX_LIMBS 86
+typedef struct iree_printf_bigint_t {
+  uint32_t limbs[IREE_PRINTF_BIGINT_MAX_LIMBS];
+  int limb_count;
+} iree_printf_bigint_t;
+
+typedef struct iree_printf_decimal_digits_t {
+  uint64_t significand;
+  int exponent;
+} iree_printf_decimal_digits_t;
+
+static void iree_printf_bigint_initialize(uint64_t value,
+                                          iree_printf_bigint_t* out_value) {
+  memset(out_value, 0, sizeof(*out_value));
+  do {
+    out_value->limbs[out_value->limb_count++] =
+        (uint32_t)(value % IREE_PRINTF_BIGINT_BASE);
+    value /= IREE_PRINTF_BIGINT_BASE;
+  } while (value != 0);
+}
+
+static void iree_printf_bigint_multiply_small(iree_printf_bigint_t* value,
+                                              uint32_t multiplier) {
+  uint64_t carry = 0;
+  for (int i = 0; i < value->limb_count; ++i) {
+    const uint64_t product = (uint64_t)value->limbs[i] * multiplier + carry;
+    value->limbs[i] = (uint32_t)(product % IREE_PRINTF_BIGINT_BASE);
+    carry = product / IREE_PRINTF_BIGINT_BASE;
+  }
+  if (carry != 0) {
+    value->limbs[value->limb_count++] = (uint32_t)carry;
+  }
+}
+
+static uint32_t iree_printf_bigint_divide_by_10(iree_printf_bigint_t* value) {
+  uint64_t remainder = 0;
+  for (int i = value->limb_count - 1; i >= 0; --i) {
+    const uint64_t dividend =
+        remainder * IREE_PRINTF_BIGINT_BASE + value->limbs[i];
+    value->limbs[i] = (uint32_t)(dividend / 10);
+    remainder = dividend % 10;
+  }
+  while (value->limb_count > 1 && value->limbs[value->limb_count - 1] == 0) {
+    --value->limb_count;
+  }
+  return (uint32_t)remainder;
+}
+
+static int iree_printf_bigint_decimal_digit_count(
+    const iree_printf_bigint_t* value) {
+  uint32_t leading_limb = value->limbs[value->limb_count - 1];
+  int leading_digit_count = 1;
+  while (leading_limb >= 10) {
+    leading_limb /= 10;
+    ++leading_digit_count;
+  }
+  return (value->limb_count - 1) * 9 + leading_digit_count;
+}
+
+static uint64_t iree_printf_bigint_to_u64(const iree_printf_bigint_t* value) {
+  uint64_t result = 0;
+  for (int i = value->limb_count - 1; i >= 0; --i) {
+    result = result * IREE_PRINTF_BIGINT_BASE + value->limbs[i];
+  }
+  return result;
+}
+
+// Extracts |significant_digit_count| correctly-rounded decimal digits and the
+// base-10 exponent for a positive finite binary64 value. The binary value is
+// converted to an exact integer coefficient times a decimal power, then
+// rounded to nearest-even using the discarded decimal digits. This keeps
+// serialization-grade precision independent of libc and target floating-point
+// scaling behavior.
+static iree_printf_decimal_digits_t iree_printf_extract_significant_digits(
+    double value, int significant_digit_count) {
+  iree_printf_double_bits_t representation = {.value = value};
+  const int exponent_bits = (int)((representation.bits >> 52) & 0x7FF);
+  uint64_t coefficient = representation.bits & UINT64_C(0x000FFFFFFFFFFFFF);
+  int binary_exponent = -1074;
+  if (exponent_bits != 0) {
+    coefficient |= UINT64_C(1) << 52;
+    binary_exponent = exponent_bits - 1023 - 52;
+  }
+
+  // Remove powers of two from the coefficient before constructing the exact
+  // decimal form. This reduces DBL_MIN from 1074 multiplications by five to
+  // 1022 and makes exact powers of two particularly cheap.
+  while ((coefficient & 1) == 0) {
+    coefficient >>= 1;
+    ++binary_exponent;
+  }
+
+  iree_printf_bigint_t decimal_coefficient;
+  iree_printf_bigint_initialize(coefficient, &decimal_coefficient);
+  int decimal_scale = 0;
+  if (binary_exponent >= 0) {
+    for (int i = 0; i < binary_exponent; ++i) {
+      iree_printf_bigint_multiply_small(&decimal_coefficient, 2);
+    }
+  } else {
+    decimal_scale = -binary_exponent;
+    for (int i = 0; i < decimal_scale; ++i) {
+      iree_printf_bigint_multiply_small(&decimal_coefficient, 5);
+    }
+  }
+
+  iree_printf_decimal_digits_t result = {0};
+  const int decimal_digit_count =
+      iree_printf_bigint_decimal_digit_count(&decimal_coefficient);
+  result.exponent = decimal_digit_count - decimal_scale - 1;
+  const int discarded_digit_count =
+      decimal_digit_count - significant_digit_count;
+  bool sticky = false;
+  uint32_t round_digit = 0;
+  if (discarded_digit_count > 0) {
+    for (int i = 0; i < discarded_digit_count; ++i) {
+      const uint32_t discarded_digit =
+          iree_printf_bigint_divide_by_10(&decimal_coefficient);
+      if (i + 1 == discarded_digit_count) {
+        round_digit = discarded_digit;
+      } else {
+        sticky |= discarded_digit != 0;
+      }
+    }
+  }
+
+  uint64_t significand = iree_printf_bigint_to_u64(&decimal_coefficient);
+  for (int i = discarded_digit_count; i < 0; ++i) {
+    significand *= 10;
+  }
+  if (round_digit > 5 ||
+      (round_digit == 5 && (sticky || (significand & 1) != 0))) {
+    ++significand;
+  }
+
+  uint64_t significand_limit = 1;
+  for (int i = 0; i < significant_digit_count; ++i) {
+    significand_limit *= 10;
+  }
+  if (significand == significand_limit) {
+    significand /= 10;
+    ++result.exponent;
+  }
+  result.significand = significand;
+  return result;
+}
 
 static inline bool iree_printf_double_is_negative(double value) {
   iree_printf_double_bits_t u = {0};
@@ -805,49 +936,6 @@ static double iree_printf_pow10(int n) {
     }
   }
   return result;
-}
-
-// Compute value * 10^n with FMA-corrected error tracking (double-double).
-// Stores the high part in *out_result and returns the low part (error term),
-// such that *out_result + return_value = value * 10^n to extended precision.
-//
-// For n <= 22, pow10(n) is exactly representable as a double, so a single FMA
-// gives the exact error of the multiplication.
-//
-// For 22 < n <= 44, the multiplication is split into two exact steps:
-//   value * 10^n = (value * 10^22) * 10^(n-22)
-// Both 10^22 and 10^(n-22) are exactly representable (both <= 10^22). FMA
-// error terms from each step are combined for double-double precision.
-//
-// For n > 44, falls back to single-step with inexact pow10 (best-effort).
-static double iree_printf_mul_pow10_error(double value, int n,
-                                          double* out_result) {
-  if (n <= 22) {
-    double scale = iree_printf_pow10(n);
-    *out_result = value * scale;
-    return iree_printf_mul_error(value, scale, *out_result);
-  } else if (n <= 44) {
-    // Split 10^n = 10^22 * 10^(n-22) where both factors are exact doubles.
-    double scale_first = iree_printf_pow10(22);
-    double scale_second = iree_printf_pow10(n - 22);
-    // Step 1: value * 10^22 with error tracking.
-    double partial = value * scale_first;
-    double error_first = iree_printf_mul_error(value, scale_first, partial);
-    // Step 2: partial * 10^(n-22) with error tracking.
-    *out_result = partial * scale_second;
-    double error_second =
-        iree_printf_mul_error(partial, scale_second, *out_result);
-    // Combined error: the second step's error plus the first step's error
-    // propagated through the second multiplication.
-    return error_second + error_first * scale_second;
-  } else {
-    // n > 44: pow10(n) is not exactly representable, so error correction
-    // handles only the multiplication rounding, not the scale factor.
-    // Best-effort.
-    double scale = iree_printf_pow10(n);
-    *out_result = value * scale;
-    return iree_printf_mul_error(value, scale, *out_result);
-  }
 }
 
 // Format a non-negative, finite double in %f style (fixed-point notation).
@@ -1028,13 +1116,9 @@ static int iree_printf_format_fixed(char* buffer, double value, int precision,
 // buffer[mantissa_end..end] (the exponent suffix). The split point is stored
 // in |*out_exponent_offset|.
 //
-// Approach: compute all significant digits at once as a single integer via a
-// single division, rather than normalizing to [1,10) and routing through the
-// fixed-point formatter. The normalize → modf → multiply chain amplifies
-// representation error at rounding boundaries (e.g., 575537150/1e8 produces
-// 5.75537149999... instead of 5.7553715, flipping a banker's rounding
-// decision). By dividing by 10^(exponent - precision) instead, we keep the
-// full precision of the original value in a single operation.
+// The significant digits come from the exact binary64-to-decimal coefficient
+// above. Keeping digit extraction in integer arithmetic avoids normalization
+// error at rounding boundaries and remains exact at DBL_MAX and subnormals.
 static int iree_printf_format_exponential(
     char* buffer, double value, int precision, bool force_decimal_point,
     bool uppercase, int* out_trailing_zeros, int* out_exponent_offset) {
@@ -1064,281 +1148,18 @@ static int iree_printf_format_exponential(
     return position;
   }
 
-  // Compute the base-10 exponent.
-  int exponent = iree_printf_log10_approx(value);
-
   // We need (precision + 1) significant digits total: 1 before the decimal
-  // point and |precision| after. Clamp to our computational limit.
-  int sig_count = precision + 1;
-  int effective_sig_count = sig_count;
+  // point and |precision| after. Clamp to the full binary64 precision; larger
+  // requested precisions are emitted as trailing zeros.
+  int effective_sig_count = precision + 1;
   if (effective_sig_count > IREE_PRINTF_MAX_FLOAT_PRECISION) {
     effective_sig_count = IREE_PRINTF_MAX_FLOAT_PRECISION;
   }
 
-  // Scale the value so that its significant digits are an integer with
-  // exactly |effective_sig_count| digits: scaled ≈ value * 10^n where n is
-  // chosen to shift the significant digits above the decimal point.
-  //
-  // For normal doubles (exponents roughly -290 to +290), we do this in a
-  // single division/multiplication by 10^|scale_exponent|, which preserves
-  // full precision. For extreme exponents (subnormals, huge values near
-  // DBL_MAX), the scale factor itself would overflow double range, so we
-  // normalize in steps: first bring the value to [1, 10), then scale the
-  // normalized value by 10^(sig_count - 1).
-  uint64_t sig_max = (uint64_t)iree_printf_pow10(effective_sig_count);
-  uint64_t sig_min = sig_max / 10;
-  int scale_exponent = exponent - effective_sig_count + 1;
-  double scaled = 0.0;
-
-  if (scale_exponent > 290 || scale_exponent < -290) {
-    // Extreme exponent: normalize to [1, 10) in steps of at most 10^22
-    // (the largest power of 10 exactly representable as a double), then
-    // extract digits from the normalized value. This is slightly less
-    // precise than the single-step approach but doubles only have ~15.9
-    // decimal digits of precision anyway — the last 1-2 digits of a
-    // subnormal or extreme value are noise regardless.
-    double normalized = value;
-    int remaining = exponent;
-    if (remaining > 0) {
-      while (remaining > 22) {
-        normalized /= 1e22;
-        remaining -= 22;
-      }
-      normalized /= iree_printf_pow10(remaining);
-    } else if (remaining < 0) {
-      remaining = -remaining;
-      while (remaining > 22) {
-        normalized *= 1e22;
-        remaining -= 22;
-      }
-      normalized *= iree_printf_pow10(remaining);
-    }
-    // Correct for approximation errors.
-    while (normalized >= 10.0) {
-      normalized /= 10.0;
-      exponent++;
-    }
-    while (normalized < 1.0 && normalized > 0.0) {
-      normalized *= 10.0;
-      exponent--;
-    }
-    // Now normalized is in [1, 10). Scale to get sig_count digits.
-    scaled = normalized * iree_printf_pow10(effective_sig_count - 1);
-  } else {
-    // Normal case: single-step scaling preserves full precision.
-    if (scale_exponent >= 0) {
-      scaled = value / iree_printf_pow10(scale_exponent);
-    } else {
-      scaled = value * iree_printf_pow10(-scale_exponent);
-    }
-  }
-
-  // Round to nearest integer with banker's rounding (round-half-to-even).
-  //
-  // The naive approach (look at `scaled - floor(scaled)`) is unreliable
-  // because the division `value / 10^k` introduces up to 0.5 ULP error,
-  // which can turn a 0.4999... remainder into 0.5000..., flipping the
-  // rounding direction. This affects values larger than ~2^50 where the
-  // double division's rounding error is significant at the unit level.
-  //
-  // For the normal-range case (where we divided by 10^k), compute the exact
-  // remainder via double-double arithmetic: verify the truncated quotient
-  // with a double-double product, correct if the division rounded up, then
-  // use the double-double residual for the rounding decision.
-  uint64_t sig_integer = 0;
-  if (scale_exponent > 0 && scale_exponent <= 22) {
-    // Division path: scaled = value / 10^k where 10^k is exactly representable.
-    //
-    // For the truncated quotient (floor), use direct division and then verify
-    // with a double-double product. IEEE 754 correctly-rounded division can
-    // round the quotient up past an integer boundary when the true fractional
-    // part is close to 1.0 (specifically, when frac > 1.0 - 0.5*ULP at the
-    // quotient's magnitude). When this happens, (uint64_t)(value/divisor)
-    // gives Q+1 instead of Q. We detect and correct this by computing
-    // sig_integer * divisor as a double-double and checking if it exceeds
-    // value. After correction, the double-double residual gives the exact
-    // remainder for the rounding decision.
-    double divisor = iree_printf_pow10(scale_exponent);
-    double quotient = value / divisor;
-    sig_integer = (uint64_t)quotient;
-    // Verify the floor: double-double product sig_integer * divisor. If the
-    // product exceeds value, the division rounded up past the true floor.
-    double product_high = (double)sig_integer * divisor;
-    double product_low =
-        iree_printf_mul_error((double)sig_integer, divisor, product_high);
-    double residual = (value - product_high) - product_low;
-    if (residual < 0) {
-      // Division rounded up: true floor is sig_integer - 1. Adjust the
-      // remainder algebraically rather than recomputing via double-double
-      // (recomputing would require (double)sig_integer, which loses precision
-      // when sig_integer > 2^53).
-      sig_integer--;
-      residual += divisor;
-    }
-    double half = divisor * 0.5;
-    if (residual > half) {
-      sig_integer++;
-    } else if (residual == half) {
-      if (sig_integer & 1) sig_integer++;  // Banker's rounding.
-    }
-  } else if (scale_exponent < 0 && scale_exponent >= -290) {
-    // Multiplication path: scaled = value * 10^|n|. The multiplication can
-    // introduce rounding error from two sources: (1) the multiplication itself
-    // (up to 0.5 ULP), and (2) the pow10 scale factor being inexact for n > 22.
-    // Use iree_printf_mul_pow10_error to get a double-double result that
-    // corrects both sources (splitting into exact factors for 22 < n <= 44).
-    double mul_result = 0.0;
-    double mul_error =
-        iree_printf_mul_pow10_error(value, -scale_exponent, &mul_result);
-    sig_integer = (uint64_t)mul_result;
-    double sig_remainder = (mul_result - (double)sig_integer) + mul_error;
-    // The combined FMA error from the two-step multiplication can push the
-    // true remainder outside [0, 1). A negative remainder means the true
-    // product is below sig_integer; a remainder >= 1.0 means it is at least
-    // 1 above sig_integer. Normalize into [0, 1) before rounding.
-    while (sig_remainder >= 1.0) {
-      sig_integer++;
-      sig_remainder -= 1.0;
-    }
-    while (sig_remainder < 0.0) {
-      sig_integer--;
-      sig_remainder += 1.0;
-    }
-    if (sig_remainder > 0.5) {
-      sig_integer++;
-    } else if (sig_remainder == 0.5) {
-      if (sig_integer & 1) sig_integer++;
-    }
-  } else {
-    // Extreme exponents (multi-step normalization path): the value has been
-    // normalized through multiple divisions/multiplications, so FMA-based
-    // error correction isn't applicable. Direct rounding is sufficient since
-    // extreme-exponent values have inherently limited precision.
-    sig_integer = (uint64_t)scaled;
-    double sig_remainder = scaled - (double)sig_integer;
-    if (sig_remainder > 0.5) {
-      sig_integer++;
-    } else if (sig_remainder == 0.5) {
-      if (sig_integer & 1) sig_integer++;
-    }
-  }
-
-  // Handle exponent off by 1 in either direction. The log10 approximation can
-  // be off by 1, producing too many or too few digits. In either case,
-  // recompute with the corrected exponent so that rounding happens at the
-  // correct precision.
-  //
-  // This also handles carry from rounding (9999999.5 → 10000000): recomputing
-  // with exponent+1 gives the same correct result as truncation would, but
-  // without losing the rounding decision.
-  //
-  // For the recomputation we always use the single-step approach. The
-  // correction is at most ±1, so the new scale_exponent is within 1 of the
-  // old one — if the old one was in range, so is the new one. If we used the
-  // multi-step path (extreme exponent), the correction brings us back to the
-  // multi-step regime. To keep things simple, use the step-based normalization
-  // for recomputation when the new scale_exponent is extreme.
-  if (sig_integer >= sig_max || (sig_integer < sig_min && sig_integer > 0)) {
-    if (sig_integer >= sig_max) {
-      exponent++;
-    } else {
-      exponent--;
-    }
-    scale_exponent = exponent - effective_sig_count + 1;
-    if (scale_exponent > 290 || scale_exponent < -290) {
-      // Extreme: re-normalize in steps.
-      double normalized = value;
-      int remaining = exponent;
-      if (remaining > 0) {
-        while (remaining > 22) {
-          normalized /= 1e22;
-          remaining -= 22;
-        }
-        normalized /= iree_printf_pow10(remaining);
-      } else if (remaining < 0) {
-        remaining = -remaining;
-        while (remaining > 22) {
-          normalized *= 1e22;
-          remaining -= 22;
-        }
-        normalized *= iree_printf_pow10(remaining);
-      }
-      while (normalized >= 10.0) {
-        normalized /= 10.0;
-        exponent++;
-      }
-      while (normalized < 1.0 && normalized > 0.0) {
-        normalized *= 10.0;
-        exponent--;
-      }
-      scaled = normalized * iree_printf_pow10(effective_sig_count - 1);
-    } else {
-      if (scale_exponent >= 0) {
-        scaled = value / iree_printf_pow10(scale_exponent);
-      } else {
-        scaled = value * iree_printf_pow10(-scale_exponent);
-      }
-    }
-    sig_integer = (uint64_t)scaled;
-    // Use precise rounding for the recomputed value (same logic as above).
-    if (scale_exponent > 0 && scale_exponent <= 22) {
-      // Division path: direct quotient + double-double remainder rounding.
-      double divisor = iree_printf_pow10(scale_exponent);
-      double quotient = value / divisor;
-      sig_integer = (uint64_t)quotient;
-      double product_high = (double)sig_integer * divisor;
-      double product_low =
-          iree_printf_mul_error((double)sig_integer, divisor, product_high);
-      double residual = (value - product_high) - product_low;
-      if (residual < 0) {
-        // Same algebraic correction as the main division path above.
-        sig_integer--;
-        residual += divisor;
-      }
-      double half = divisor * 0.5;
-      if (residual > half) {
-        sig_integer++;
-      } else if (residual == half) {
-        if (sig_integer & 1) sig_integer++;
-      }
-    } else if (scale_exponent < 0 && scale_exponent >= -290) {
-      // Multiplication path recomputation: use two-step FMA (same as above).
-      double mul_result = 0.0;
-      double mul_error =
-          iree_printf_mul_pow10_error(value, -scale_exponent, &mul_result);
-      sig_integer = (uint64_t)mul_result;
-      double sig_remainder = (mul_result - (double)sig_integer) + mul_error;
-      while (sig_remainder >= 1.0) {
-        sig_integer++;
-        sig_remainder -= 1.0;
-      }
-      while (sig_remainder < 0.0) {
-        sig_integer--;
-        sig_remainder += 1.0;
-      }
-      if (sig_remainder > 0.5) {
-        sig_integer++;
-      } else if (sig_remainder == 0.5) {
-        if (sig_integer & 1) sig_integer++;
-      }
-    } else {
-      double sig_remainder = scaled - (double)sig_integer;
-      if (sig_remainder > 0.5) {
-        sig_integer++;
-      } else if (sig_remainder == 0.5) {
-        if (sig_integer & 1) sig_integer++;
-      }
-    }
-    // After correction, carry is still possible (value at exact power-of-10
-    // boundary). Use a loop rather than a single check: while a single carry
-    // (sig_integer == sig_max) is the expected case, a loop is defensive
-    // against hypothetical multi-digit overshoots from compounding FMA errors.
-    while (sig_integer >= sig_max) {
-      sig_integer /= 10;
-      exponent++;
-    }
-  }
-
+  const iree_printf_decimal_digits_t digits =
+      iree_printf_extract_significant_digits(value, effective_sig_count);
+  uint64_t sig_integer = digits.significand;
+  int exponent = digits.exponent;
   // Extract digits from the integer in reverse order.
   char sig_digits[IREE_PRINTF_MAX_FLOAT_PRECISION + 1];
   int digit_count = 0;
@@ -1494,58 +1315,13 @@ static void iree_printf_format_float(iree_printf_output_t* out,
 
     int exponent = 0;
     if (value != 0.0) {
-      exponent = iree_printf_log10_approx(value);
-      // Correct approximation.
-      double check = value / iree_printf_pow10(exponent);
-      if (check >= 10.0) {
-        exponent++;
-      } else if (check < 1.0) {
-        exponent--;
+      int effective_sig_precision = sig_precision;
+      if (effective_sig_precision > IREE_PRINTF_MAX_FLOAT_PRECISION) {
+        effective_sig_precision = IREE_PRINTF_MAX_FLOAT_PRECISION;
       }
-      // The C standard says the %g routing decision uses the exponent *after*
-      // rounding to sig_precision significant digits. If rounding carries over
-      // (e.g., 9.5 rounded to 1 sig digit becomes 10), the exponent increases.
-      // Use multiplication (not division) with error correction to get the
-      // exact scaled significand, then check if rounding carries.
-      int mul_exp = sig_precision - exponent - 1;
-      if (mul_exp >= 0 && mul_exp <= 22) {
-        double scale = iree_printf_pow10(mul_exp);
-        double scaled = value * scale;
-        double mul_err = iree_printf_mul_error(value, scale, scaled);
-        double int_part = iree_printf_floor(scaled);
-        double frac = (scaled - int_part) + mul_err;
-        if (frac < 0) {
-          int_part -= 1.0;
-          frac += 1.0;
-        }
-        bool rounds_up =
-            frac > 0.5 || (frac == 0.5 && iree_printf_is_odd(int_part));
-        if (rounds_up && (int_part + 1.0) >= iree_printf_pow10(sig_precision)) {
-          exponent++;
-        }
-      } else if (mul_exp < 0 && mul_exp >= -22) {
-        // Division path: value * 10^(-|mul_exp|) would lose precision, so
-        // divide instead. Division by exact pow10 (|mul_exp| <= 22) is safe.
-        // Use double-double product to get exact remainder (avoids precision
-        // loss when int_part > 2^53).
-        double divisor = iree_printf_pow10(-mul_exp);
-        double quotient = value / divisor;
-        double int_part = iree_printf_floor(quotient);
-        double product_high = int_part * divisor;
-        double product_low =
-            iree_printf_mul_error(int_part, divisor, product_high);
-        double remainder = (value - product_high) - product_low;
-        if (remainder < 0) {
-          int_part -= 1.0;
-          remainder += divisor;
-        }
-        double half = divisor * 0.5;
-        bool rounds_up = remainder > half ||
-                         (remainder == half && iree_printf_is_odd(int_part));
-        if (rounds_up && (int_part + 1.0) >= iree_printf_pow10(sig_precision)) {
-          exponent++;
-        }
-      }
+      exponent =
+          iree_printf_extract_significant_digits(value, effective_sig_precision)
+              .exponent;
     }
 
     if (exponent < -4 || exponent >= sig_precision) {
