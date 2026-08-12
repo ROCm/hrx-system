@@ -220,11 +220,14 @@ loom_cc_test(
 loom_cc_test(
     name = "target_test",
     srcs = ["target_test.cc"],
-    target_compatible_with = LOOMC_TARGET_SPIRV_COMPATIBLE_WITH,
     deps = [
         ":test_util",
         "//loom/binding/c:loomc",
-        "//loom/binding/c/target/spirv",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:profile",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/test:target_record_table",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/testing:temp_file",

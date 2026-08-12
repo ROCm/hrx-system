@@ -12,6 +12,11 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/temp_file.h"
+#include "loom/ops/test/ops.h"
+#include "loom/ops/test/registry.h"
+#include "loom/target/profile.h"
+#include "loom/target/provider.h"
+#include "loom/target/test/target_records.h"
 #include "loomc/artifact.h"
 #include "loomc/artifact_manifest.h"
 #include "loomc/compile.h"
@@ -24,8 +29,6 @@
 #include "loomc/result.h"
 #include "loomc/source.h"
 #include "loomc/status.h"
-#include "loomc/target/spirv/base.h"
-#include "loomc/target/spirv/profile.h"
 #include "loomc/workspace.h"
 #include "module.h"
 #include "target.h"
@@ -142,6 +145,46 @@ static const loom_target_emitter_t* const kFakeWasmEmitters[] = {
 
 static const loom_target_provider_t kEmptyProvider = {};
 
+static iree_status_t ProjectTestTargetProfileFacts(
+    const loom_target_profile_t* profile, iree_arena_allocator_t* arena,
+    loom_target_facts_t* out_facts) {
+  (void)profile;
+  (void)arena;
+  out_facts->selector = LOOM_TEST_TARGET_KIND_LOW_CORE;
+  return iree_ok_status();
+}
+
+static const loom_target_profile_type_t kTestTargetProfileType = {
+    /*.name=*/IREE_SVL("loomc-target-test"),
+    /*.fact_type=*/&loom_test_target_fact_type,
+    /*.project_facts=*/ProjectTestTargetProfileFacts,
+};
+
+static iree_status_t RegisterTestTargetContext(loom_context_t* context) {
+  return loom_test_dialect_register(context);
+}
+
+// Deliberately lacks materialize_definition so generic IR boundaries can
+// prove loss prevention without relying on an incomplete production target.
+static const loom_target_provider_t kTestTargetProvider = {
+    /*.profile_type=*/&kTestTargetProfileType,
+    /*.materialize_definition=*/nullptr,
+    /*.register_context=*/RegisterTestTargetContext,
+};
+
+static const loom_target_provider_t* const kTestTargetProviders[] = {
+    &kTestTargetProvider,
+};
+
+static const loom_target_provider_set_t kTestTargetProviderSet = {
+    /*.providers=*/kTestTargetProviders,
+    /*.provider_count=*/IREE_ARRAYSIZE(kTestTargetProviders),
+};
+
+static loom_target_profile_t kTestTargetProfile = {
+    /*.type=*/&kTestTargetProfileType,
+};
+
 static const loom_target_provider_t kFakeElfProvider = {
     /*.profile_type=*/nullptr,
     /*.materialize_definition=*/nullptr,
@@ -242,14 +285,6 @@ BuilderPtr CreateLinkIndexBuilder(loomc_context_t* context) {
   return BuilderPtr(builder);
 }
 
-TargetEnvironmentPtr CreateSpirvTargetEnvironment() {
-  loomc_target_environment_t* target_environment = nullptr;
-  loomc_status_t status = loomc_target_environment_create_spirv(
-      loomc_allocator_system(), &target_environment);
-  LOOMC_EXPECT_OK(status);
-  return TargetEnvironmentPtr(target_environment);
-}
-
 TargetEnvironmentPtr CreateTargetEnvironmentFromProviderSet(
     const loom_target_provider_set_t* provider_set) {
   loomc_target_environment_t* target_environment = nullptr;
@@ -259,7 +294,11 @@ TargetEnvironmentPtr CreateTargetEnvironmentFromProviderSet(
   return TargetEnvironmentPtr(target_environment);
 }
 
-ContextPtr CreateSpirvContext(loomc_target_environment_t* target_environment) {
+TargetEnvironmentPtr CreateTestTargetEnvironment() {
+  return CreateTargetEnvironmentFromProviderSet(&kTestTargetProviderSet);
+}
+
+ContextPtr CreateTargetContext(loomc_target_environment_t* target_environment) {
   loomc_context_target_options_t target_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
       /*.structure_size=*/sizeof(target_options),
@@ -278,23 +317,17 @@ ContextPtr CreateSpirvContext(loomc_target_environment_t* target_environment) {
   return ContextPtr(context);
 }
 
-TargetProfilePtr CreateSpirvProfile(
+TargetProfilePtr CreateTestTargetProfile(
     loomc_target_environment_t* target_environment) {
-  loomc_spirv_profile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_PROFILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("vulkan13"),
-      /*.preset=*/LOOMC_SPIRV_PROFILE_PRESET_VULKAN_1_3_BDA,
-  };
+  kTestTargetProfile.target_bundle = loom_target_bundle_table_lookup(
+      &loom_test_target_bundles, LOOM_TEST_TARGET_KIND_LOW_CORE);
+  IREE_ASSERT(kTestTargetProfile.target_bundle != nullptr);
   loomc_target_profile_t* profile = nullptr;
-  loomc_result_t* result = nullptr;
-  loomc_status_t status = loomc_target_profile_create_spirv(
-      target_environment, &options, loomc_allocator_system(), &profile,
-      &result);
+  loomc_status_t status = loomc_target_profile_create(
+      target_environment, loomc_make_cstring_view("test-low-core"),
+      &kTestTargetProfile, /*deinitialize=*/nullptr, loomc_allocator_system(),
+      &profile);
   LOOMC_EXPECT_OK(status);
-  ResultPtr result_ptr(result);
-  EXPECT_TRUE(loomc_result_succeeded(result_ptr.get()));
   return TargetProfilePtr(profile);
 }
 
@@ -807,15 +840,15 @@ func.def public @entry(%x: i32) -> (i32) {
 }
 
 TEST(TargetTest, RetainReleaseProfile) {
-  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile = CreateSpirvProfile(target_environment.get());
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  TargetProfilePtr profile = CreateTestTargetProfile(target_environment.get());
   loomc_target_profile_retain(profile.get());
   loomc_target_profile_release(profile.get());
 }
 
 TEST(TargetTest, AcceptsSanitizerPipelineOptions) {
-  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  ContextPtr context = CreateSpirvContext(target_environment.get());
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  ContextPtr context = CreateTargetContext(target_environment.get());
   loomc_sanitizer_options_t sanitizer_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
       /*.structure_size=*/sizeof(sanitizer_options),
@@ -839,8 +872,8 @@ TEST(TargetTest, AcceptsSanitizerPipelineOptions) {
 }
 
 TEST(TargetTest, RejectsUnknownSanitizerCheckBits) {
-  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  ContextPtr context = CreateSpirvContext(target_environment.get());
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  ContextPtr context = CreateTargetContext(target_environment.get());
   loomc_sanitizer_options_t sanitizer_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
       /*.structure_size=*/sizeof(sanitizer_options),
@@ -869,8 +902,8 @@ TEST(TargetTest, RejectsUnknownSanitizerCheckBits) {
 }
 
 TEST(TargetTest, RejectsUnknownSanitizerReportingMode) {
-  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  ContextPtr context = CreateSpirvContext(target_environment.get());
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  ContextPtr context = CreateTargetContext(target_environment.get());
   loomc_sanitizer_options_t sanitizer_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
       /*.structure_size=*/sizeof(sanitizer_options),
@@ -924,9 +957,9 @@ TEST(TargetTest, RejectsSanitizerOptionsOnPlainPassProgramOptions) {
 }
 
 TEST(TargetTest, RejectsSerializationWithoutAnExactTargetInverse) {
-  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile = CreateSpirvProfile(target_environment.get());
-  ContextPtr context = CreateSpirvContext(target_environment.get());
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  TargetProfilePtr profile = CreateTestTargetProfile(target_environment.get());
+  ContextPtr context = CreateTargetContext(target_environment.get());
   CompilerPtr compiler = CreateCompiler(context.get());
   PassProgramPtr pass_program = CreateEmptyPassProgram(context.get());
 
@@ -1050,9 +1083,9 @@ TEST(TargetTest, RejectsSerializationWithoutAnExactTargetInverse) {
 }
 
 TEST(TargetTest, CompileRejectsAnUnrepresentableModuleArtifact) {
-  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile = CreateSpirvProfile(target_environment.get());
-  ContextPtr context = CreateSpirvContext(target_environment.get());
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  TargetProfilePtr profile = CreateTestTargetProfile(target_environment.get());
+  ContextPtr context = CreateTargetContext(target_environment.get());
   CompilerPtr compiler = CreateCompiler(context.get());
   PassProgramPtr pass_program = CreateEmptyPassProgram(context.get());
 
@@ -1090,9 +1123,9 @@ TEST(TargetTest, CompileRejectsAnUnrepresentableModuleArtifact) {
 }
 
 TEST(TargetTest, RejectsSpecializationOptionsOnPassProgramCreation) {
-  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile = CreateSpirvProfile(target_environment.get());
-  ContextPtr context = CreateSpirvContext(target_environment.get());
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  TargetProfilePtr profile = CreateTestTargetProfile(target_environment.get());
+  ContextPtr context = CreateTargetContext(target_environment.get());
   const loomc_target_specialization_t specialization = {
       /*.function_symbol=*/loomc_make_cstring_view("entry"),
       /*.target_profile=*/profile.get(),
@@ -1119,9 +1152,9 @@ TEST(TargetTest, RejectsSpecializationOptionsOnPassProgramCreation) {
 }
 
 TEST(TargetTest, RejectsSpecializationOptionsDuringLink) {
-  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile = CreateSpirvProfile(target_environment.get());
-  ContextPtr context = CreateSpirvContext(target_environment.get());
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  TargetProfilePtr profile = CreateTestTargetProfile(target_environment.get());
+  ContextPtr context = CreateTargetContext(target_environment.get());
   LinkerPtr linker = CreateLinker(context.get());
   LinkIndexPtr link_index = CreateSingleSourceLinkIndex(context.get());
 
@@ -1158,9 +1191,9 @@ TEST(TargetTest, RejectsSpecializationOptionsDuringLink) {
 }
 
 TEST(TargetTest, RejectsSpecializationOptionsDuringEmission) {
-  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile = CreateSpirvProfile(target_environment.get());
-  ContextPtr context = CreateSpirvContext(target_environment.get());
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  TargetProfilePtr profile = CreateTestTargetProfile(target_environment.get());
+  ContextPtr context = CreateTargetContext(target_environment.get());
   WorkspacePtr workspace = CreateWorkspace();
   ModulePtr module =
       CreateIdentityModule(context.get(), workspace.get(), "entry");
