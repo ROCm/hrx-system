@@ -1061,9 +1061,14 @@ class CiTest(unittest.TestCase):
             block,
         )
 
-    def test_loom_docs_workflow_builds_review_artifact_without_deploy_access(self):
+    def test_loom_docs_workflow_reviews_every_change_and_deploys_only_main(self):
         text = Path(".github/workflows/docs.yml").read_text()
-        block = self.workflow_job_block(".github/workflows/docs.yml", "build_docs")
+        build_block = self.workflow_job_block(
+            ".github/workflows/docs.yml", "build_docs"
+        )
+        deploy_block = self.workflow_job_block(
+            ".github/workflows/docs.yml", "deploy_docs"
+        )
 
         for path in (
             '"requirements-analysis.lock.txt"',
@@ -1075,33 +1080,55 @@ class CiTest(unittest.TestCase):
             '"loom/src/loom/editor/textmate/**"',
         ):
             self.assertIn(f"- {path}", text)
-        self.assertIn("runs-on: ubuntu-24.04", block)
-        self.assertIn("python3 dev.py setup --docs", block)
-        self.assertIn("loom_docs.highlight_test", block)
+        self.assertIn("runs-on: ubuntu-24.04", build_block)
+        self.assertIn("python3 dev.py setup --docs", build_block)
+        self.assertIn("loom_docs.highlight_test", build_block)
         self.assertIn(
             "--site-dir build/loom-pages/loom",
-            block,
+            build_block,
         )
         self.assertIn(
             "test -f build/loom-pages/loom/reference/dialects/index.html",
-            block,
+            build_block,
         )
         self.assertIn(
             "test -f build/loom-pages/loom/reference/c-api/generated/index.html",
-            block,
+            build_block,
         )
         self.assertIn(
             "uses: actions/upload-pages-artifact@"
             "fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0",
-            block,
+            build_block,
         )
-        self.assertIn("path: build/loom-pages", block)
+        self.assertIn("path: build/loom-pages", build_block)
+        self.assertIn(
+            "group: ${{ github.workflow }}-build-${{ github.ref }}", build_block
+        )
+        self.assertIn("cancel-in-progress: true", build_block)
+        self.assertNotIn("pages: write", build_block)
+        self.assertNotIn("id-token: write", build_block)
+        self.assertNotIn("actions/deploy-pages", build_block)
+
+        self.assertIn("if: github.ref == 'refs/heads/main'", deploy_block)
+        self.assertIn("needs: build_docs", deploy_block)
+        self.assertIn("pages: write", deploy_block)
+        self.assertIn("id-token: write", deploy_block)
+        self.assertIn("name: github-pages", deploy_block)
+        self.assertIn("url: ${{ steps.deployment.outputs.page_url }}", deploy_block)
+        self.assertIn("group: github-pages", deploy_block)
+        self.assertIn("cancel-in-progress: false", deploy_block)
+        self.assertIn("id: deployment", deploy_block)
+        self.assertIn(
+            "uses: actions/deploy-pages@"
+            "cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0",
+            deploy_block,
+        )
+        self.assertEqual(text.count("pages: write"), 1)
+        self.assertEqual(text.count("id-token: write"), 1)
+        self.assertEqual(text.count("actions/deploy-pages@"), 1)
         self.assertNotIn("apt-get", text)
         self.assertNotIn("pip install", text)
         self.assertNotIn("sudo", text)
-        self.assertNotIn("pages: write", text)
-        self.assertNotIn("id-token: write", text)
-        self.assertNotIn("actions/deploy-pages", text)
 
     def test_xfails_project_to_ctest_regexes(self):
         self.assertIn(
