@@ -54,8 +54,8 @@ struct IreeHalKernelExecutionTarget {
   // Module name passed to the compile invocation.
   loomc_string_view_t module_name;
 
-  // Exported kernel function symbol compiled and dispatched by the test.
-  loomc_string_view_t kernel_function_symbol;
+  // Public kernel export compiled and dispatched by the test.
+  loomc_string_view_t kernel_export_name;
 
   // Pipeline identifier reported by pipeline creation diagnostics.
   loomc_string_view_t target_pipeline_identifier;

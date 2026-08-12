@@ -57,6 +57,14 @@ typedef enum loom_float_integer_conversion_kind_e {
 loom_value_facts_t loom_value_facts_exact_float(loom_scalar_type_t scalar_type,
                                                 double value);
 
+// Returns facts for the raw bit pattern of |scalar_type|, ignoring bits above
+// its declared width. Non-NaN values are represented exactly. NaN payloads
+// produce known-NaN facts because the compact fact representation intentionally
+// does not retain NaN payload bits.
+bool loom_value_facts_from_float_bits(loom_scalar_type_t scalar_type,
+                                      uint64_t bits,
+                                      loom_value_facts_t* out_facts);
+
 // Returns a non-materializable fact proving that a floating-point value is NaN.
 // This represents raw NaN payloads that cannot be retained in the compact fact
 // payload, such as signaling NaNs discovered through integer bitcasts.

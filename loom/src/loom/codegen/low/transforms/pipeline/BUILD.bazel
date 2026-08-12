@@ -23,6 +23,7 @@ loom_cc_library(
     visibility = _PIPELINE_VISIBILITY,
     deps = [
         "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:launch_config_program",
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/codegen/low/lower:source_selection",
         "//loom/src/loom/codegen/low/pipeline:pass_environment",

@@ -6,15 +6,16 @@
 
 #include "loomc/launch_config.h"
 
+#include <cstdint>
 #include <cstring>
-#include <memory>
-#include <string>
+#include <utility>
 
 #include "iree/testing/gtest.h"
 #include "loomc/context.h"
-#include "loomc/diagnostic.h"
+#include "loomc/module.h"
 #include "loomc/result.h"
 #include "loomc/source.h"
+#include "loomc/workspace.h"
 #include "test/util.h"
 
 namespace {
@@ -22,14 +23,17 @@ namespace {
 using loomc::testing::HandlePtr;
 
 using ContextPtr = HandlePtr<loomc_context_t, loomc_context_release>;
-
+using ModulePtr = HandlePtr<loomc_module_t, loomc_module_release>;
+using ProgramPtr = HandlePtr<loomc_launch_config_program_t,
+                             loomc_launch_config_program_release>;
+using ResultPtr = HandlePtr<loomc_result_t, loomc_result_release>;
 using SourcePtr = HandlePtr<loomc_source_t, loomc_source_release>;
-
 using WorkspacePtr = HandlePtr<loomc_workspace_t, loomc_workspace_release>;
 
-using ModulePtr = HandlePtr<loomc_module_t, loomc_module_release>;
-
-using ResultPtr = HandlePtr<loomc_result_t, loomc_result_release>;
+struct LaunchArtifact {
+  SourcePtr source;
+  loomc_artifact_t artifact;
+};
 
 ContextPtr CreateContext() {
   loomc_context_t* context = nullptr;
@@ -45,13 +49,13 @@ WorkspacePtr CreateWorkspace() {
   return WorkspacePtr(workspace);
 }
 
-SourcePtr CreateTextSource(const char* identifier, const char* contents) {
+SourcePtr CreateTextSource(const char* contents) {
   loomc_source_options_t options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
       /*.structure_size=*/sizeof(options),
       /*.next=*/nullptr,
       /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view(identifier),
+      /*.identifier=*/loomc_make_cstring_view("launch_config.loom"),
       /*.contents=*/loomc_make_byte_span(contents, strlen(contents)),
       /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
   };
@@ -61,676 +65,228 @@ SourcePtr CreateTextSource(const char* identifier, const char* contents) {
   return SourcePtr(source);
 }
 
-std::string ToString(loomc_string_view_t value) {
-  return value.data ? std::string(value.data, value.size) : std::string();
-}
-
-void ExpectSucceededResult(const loomc_result_t* result) {
-  ASSERT_NE(result, nullptr);
-  if (!loomc_result_succeeded(result) &&
-      loomc_result_diagnostic_count(result) != 0) {
-    const loomc_diagnostic_t* diagnostic =
-        loomc_result_diagnostic_at(result, 0);
-    ASSERT_NE(diagnostic, nullptr);
-    ADD_FAILURE() << ToString(diagnostic->code) << ": "
-                  << ToString(diagnostic->message);
-  }
-  EXPECT_TRUE(loomc_result_succeeded(result));
-}
-
-void ExpectFailedResultCode(const loomc_result_t* result, const char* code) {
-  ASSERT_NE(result, nullptr);
-  EXPECT_FALSE(loomc_result_succeeded(result));
-  bool found = false;
-  for (loomc_host_size_t i = 0; i < loomc_result_diagnostic_count(result);
-       ++i) {
-    const loomc_diagnostic_t* diagnostic =
-        loomc_result_diagnostic_at(result, i);
-    ASSERT_NE(diagnostic, nullptr);
-    found |= ToString(diagnostic->code) == code;
-  }
-  EXPECT_TRUE(found);
-}
-
-ModulePtr DeserializeModule(loomc_context_t* context,
-                            loomc_workspace_t* workspace, const char* text) {
-  SourcePtr source = CreateTextSource("launch_config.loom", text);
+ModulePtr ParseModule(loomc_context_t* context, loomc_workspace_t* workspace,
+                      const char* text) {
+  SourcePtr source = CreateTextSource(text);
   loomc_module_t* module = nullptr;
   loomc_result_t* result = nullptr;
   LOOMC_EXPECT_OK(loomc_module_deserialize_from_source(
       context, workspace, source.get(), nullptr, loomc_allocator_system(),
       &module, &result));
   ResultPtr result_ptr(result);
-  ExpectSucceededResult(result_ptr.get());
+  EXPECT_NE(result_ptr.get(), nullptr);
+  EXPECT_TRUE(loomc_result_succeeded(result_ptr.get()));
   return ModulePtr(module);
 }
 
-void Evaluate(loomc_module_t* module, loomc_workspace_t* workspace,
-              const loomc_launch_config_eval_options_t* options,
-              loomc_launch_config_t* out_config, ResultPtr* out_result) {
-  loomc_result_t* result = nullptr;
-  LOOMC_ASSERT_OK(loomc_module_evaluate_launch_config(
-      module, workspace, options, loomc_allocator_system(), out_config,
-      &result));
-  out_result->reset(result);
-}
-
-loomc_launch_config_eval_options_t EvalOptions(
-    const char* function_symbol,
-    loomc_launch_config_field_flags_t required_fields) {
-  loomc_launch_config_eval_options_t options = {};
-  options.type = LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG_EVAL_OPTIONS;
-  options.structure_size = sizeof(options);
-  options.function_symbol = loomc_make_cstring_view(function_symbol);
-  options.required_fields = required_fields;
-  return options;
-}
-
-loomc_launch_config_t EmptyResultConfig() {
-  loomc_launch_config_t config = {};
-  config.type = LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG;
-  config.structure_size = sizeof(config);
-  return config;
-}
-
-TEST(LaunchConfigTest, EvaluatesConstantLaunchConfig) {
+LaunchArtifact CompileLaunchArtifact(const char* text) {
   ContextPtr context = CreateContext();
   WorkspacePtr workspace = CreateWorkspace();
-  ModulePtr module = DeserializeModule(context.get(), workspace.get(), R"(
-kernel.def @entry() {
+  ModulePtr module = ParseModule(context.get(), workspace.get(), text);
+  loomc_module_serialize_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.format=*/LOOMC_SOURCE_FORMAT_BYTECODE,
+      /*.identifier=*/loomc_make_cstring_view("launch_config.loombc"),
+  };
+  loomc_source_t* source = nullptr;
+  LOOMC_EXPECT_OK(loomc_module_serialize_to_source(
+      module.get(), &options, loomc_allocator_system(), &source));
+  SourcePtr source_ptr(source);
+  const loomc_artifact_t artifact = {
+      .kind = LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
+      .format = loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE),
+      .identifier = loomc_make_cstring_view("launch_config.loombc"),
+      .contents = loomc_source_contents(source_ptr.get()),
+  };
+  return LaunchArtifact{std::move(source_ptr), artifact};
+}
+
+ProgramPtr LoadProgram(const LaunchArtifact& artifact) {
+  loomc_launch_config_program_t* program = nullptr;
+  LOOMC_EXPECT_OK(
+      loomc_launch_config_program_load(&artifact.artifact, nullptr, nullptr,
+                                       loomc_allocator_system(), &program));
+  return ProgramPtr(program);
+}
+
+loomc_launch_config_t EmptyConfig() {
+  return loomc_launch_config_t{
+      .type = LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
+      .structure_size = sizeof(loomc_launch_config_t),
+  };
+}
+
+const char kLaunchProgram[] = R"(
+func.def public pure @prefill(%token_count: index) -> (index, index, index, index, index, index, index, index, index, index, index) where [range(%token_count, 1, 512)] {
   %c1 = index.constant 1 : index
-  %c2 = index.constant 2 : index
-  %c3 = index.constant 3 : index
-  %c4 = index.constant 4 : index
-  %c5 = index.constant 5 : index
-  %c6 = index.constant 6 : index
-  kernel.launch.config workgroups(%c2, %c3, %c4) workgroup_size(%c5, %c6, %c1) : index
-} launch() {
-  kernel.return
-}
-)");
-
-  loomc_launch_config_eval_options_t options =
-      EvalOptions("@entry", LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT |
-                                LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE);
-  loomc_launch_config_t config = EmptyResultConfig();
-  ResultPtr result;
-  Evaluate(module.get(), workspace.get(), &options, &config, &result);
-
-  ExpectSucceededResult(result.get());
-  EXPECT_TRUE(config.fields & LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT);
-  EXPECT_EQ(config.workgroup_count.x, 2u);
-  EXPECT_EQ(config.workgroup_count.y, 3u);
-  EXPECT_EQ(config.workgroup_count.z, 4u);
-  EXPECT_TRUE(config.fields & LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE);
-  EXPECT_EQ(config.workgroup_size.x, 5u);
-  EXPECT_EQ(config.workgroup_size.y, 6u);
-  EXPECT_EQ(config.workgroup_size.z, 1u);
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %c1024 = index.constant 1024 : index
+  %group_count = index.add %token_count, %c1 : index
+  func.return %group_count, %c1, %c1, %c64, %c1, %c1, %c1, %c1, %c1, %c32, %c1024 : index, index, index, index, index, index, index, index, index, index, index
 }
 
-TEST(LaunchConfigTest, EvaluatesConfigBackedLaunchConfig) {
-  ContextPtr context = CreateContext();
-  WorkspacePtr workspace = CreateWorkspace();
-  ModulePtr module = DeserializeModule(context.get(), workspace.get(), R"(
-config.decl @shape.rows : index
-config.decl @shape.cols : index
-config.decl @tuning.workgroup_x : index
-
-kernel.def @entry() {
-  %one = index.constant 1 : index
-  %rows = config.get @shape.rows : index
-  %cols = config.get @shape.cols : index
-  %workgroup_x = config.get @tuning.workgroup_x : index
-  kernel.launch.config workgroups(%rows, %cols, %one) workgroup_size(%workgroup_x, %one, %one) : index
-} launch() {
-  kernel.return
+func.def public pure @decode(%row_count: i32, %scale: bf16) -> (index, index, index, index, index, index, index, index, index, index, index) where [range(%row_count, 1, 64)] {
+  %row_count_index = index.cast %row_count : i32 to index
+  %c1 = index.constant 1 : index
+  %c32 = index.constant 32 : index
+  %c256 = index.constant 256 : index
+  func.return %row_count_index, %c1, %c1, %c32, %c1, %c1, %c1, %c1, %c1, %c32, %c256 : index, index, index, index, index, index, index, index, index, index, index
 }
-)");
+)";
 
-  loomc_config_binding_t bindings[] = {
-      {
-          /*.key=*/loomc_make_cstring_view("shape.rows"),
-          /*.value=*/loomc_make_cstring_view("7"),
-      },
-      {
-          /*.key=*/loomc_make_cstring_view("shape.cols"),
-          /*.value=*/loomc_make_cstring_view("8"),
-      },
-      {
-          /*.key=*/loomc_make_cstring_view("tuning.workgroup_x"),
-          /*.value=*/loomc_make_cstring_view("10"),
-      },
-  };
-  loomc_launch_config_eval_options_t options =
-      EvalOptions("entry", LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT |
-                               LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE);
-  options.config.bindings = bindings;
-  options.config.binding_count = 3;
-  options.config.flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED;
-  loomc_launch_config_t config = EmptyResultConfig();
-  ResultPtr result;
-  Evaluate(module.get(), workspace.get(), &options, &config, &result);
+TEST(LaunchConfigProgramTest, LoadsAndLooksUpMultipleFunctions) {
+  LaunchArtifact artifact = CompileLaunchArtifact(kLaunchProgram);
+  ProgramPtr program = LoadProgram(artifact);
+  ASSERT_NE(program.get(), nullptr);
 
-  ExpectSucceededResult(result.get());
-  EXPECT_EQ(config.workgroup_count.x, 7u);
-  EXPECT_EQ(config.workgroup_count.y, 8u);
-  EXPECT_EQ(config.workgroup_count.z, 1u);
-  EXPECT_EQ(config.workgroup_size.x, 10u);
-  EXPECT_EQ(config.workgroup_size.y, 1u);
-  EXPECT_EQ(config.workgroup_size.z, 1u);
+  loomc_launch_config_function_t prefill =
+      loomc_launch_config_function_invalid();
+  LOOMC_EXPECT_OK(loomc_launch_config_program_lookup_function(
+      program.get(), loomc_make_cstring_view("prefill"), &prefill));
+  EXPECT_TRUE(loomc_launch_config_function_is_valid(prefill));
+
+  loomc_launch_config_function_t decode =
+      loomc_launch_config_function_invalid();
+  LOOMC_EXPECT_OK(loomc_launch_config_program_lookup_function(
+      program.get(), loomc_make_cstring_view("decode"), &decode));
+  EXPECT_TRUE(loomc_launch_config_function_is_valid(decode));
+  EXPECT_NE(prefill.value, decode.value);
+
+  loomc_launch_config_function_t missing =
+      loomc_launch_config_function_invalid();
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_NOT_FOUND,
+      loomc_launch_config_program_lookup_function(
+          program.get(), loomc_make_cstring_view("missing"), &missing));
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_INVALID_ARGUMENT,
+      loomc_launch_config_program_lookup_function(
+          program.get(), loomc_make_cstring_view("@prefill"), &missing));
 }
 
-TEST(LaunchConfigTest, EvaluatesJsonConfigBackedLaunchConfig) {
-  ContextPtr context = CreateContext();
-  WorkspacePtr workspace = CreateWorkspace();
-  ModulePtr module = DeserializeModule(context.get(), workspace.get(), R"(
-config.decl @shape.rows : index
-config.decl @shape.cols : index
+TEST(LaunchConfigProgramTest, InvokesCompleteLaunchContract) {
+  LaunchArtifact artifact = CompileLaunchArtifact(kLaunchProgram);
+  ProgramPtr program = LoadProgram(artifact);
+  loomc_launch_config_function_t function =
+      loomc_launch_config_function_invalid();
+  LOOMC_ASSERT_OK(loomc_launch_config_program_lookup_function(
+      program.get(), loomc_make_cstring_view("prefill"), &function));
 
-kernel.def @entry() {
-  %one = index.constant 1 : index
-  %threads = index.constant 64 : index
-  %rows = config.get @shape.rows : index
-  %cols = config.get @shape.cols : index
-  kernel.launch.config workgroups(%rows, %cols, %one) workgroup_size(%threads, %one, %one) : index
-} launch() {
-  kernel.return
-}
-)");
-
-  loomc_launch_config_eval_options_t options =
-      EvalOptions("entry", LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT |
-                               LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE);
-  options.config.json_object = loomc_make_cstring_view(R"({
-        "shape": {
-          "rows": 13,
-          "cols": 17
-        }
-      })");
-  options.config.flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED;
-  loomc_launch_config_t config = EmptyResultConfig();
-  ResultPtr result;
-  Evaluate(module.get(), workspace.get(), &options, &config, &result);
-
-  ExpectSucceededResult(result.get());
-  EXPECT_EQ(config.workgroup_count.x, 13u);
-  EXPECT_EQ(config.workgroup_count.y, 17u);
-  EXPECT_EQ(config.workgroup_count.z, 1u);
-  EXPECT_EQ(config.workgroup_size.x, 64u);
-  EXPECT_EQ(config.workgroup_size.y, 1u);
-  EXPECT_EQ(config.workgroup_size.z, 1u);
-}
-
-TEST(LaunchConfigTest, IgnoresUnusedConfigBinding) {
-  ContextPtr context = CreateContext();
-  WorkspacePtr workspace = CreateWorkspace();
-  ModulePtr module = DeserializeModule(context.get(), workspace.get(), R"(
-config.decl @shape.rows : index
-
-kernel.def @entry() {
-  %one = index.constant 1 : index
-  %rows = config.get @shape.rows : index
-  kernel.launch.config workgroups(%rows, %one, %one) workgroup_size(%one, %one, %one) : index
-} launch() {
-  kernel.return
-}
-)");
-
-  loomc_config_binding_t bindings[] = {
-      {
-          /*.key=*/loomc_make_cstring_view("shape.rows"),
-          /*.value=*/loomc_make_cstring_view("7"),
-      },
-      {
-          /*.key=*/loomc_make_cstring_view("shape.cols"),
-          /*.value=*/loomc_make_cstring_view("not parsed"),
-      },
-  };
-  loomc_launch_config_eval_options_t options =
-      EvalOptions("entry", LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT);
-  options.config.bindings = bindings;
-  options.config.binding_count = 2;
-  options.config.flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED;
-  loomc_launch_config_t config = EmptyResultConfig();
-  ResultPtr result;
-  Evaluate(module.get(), workspace.get(), &options, &config, &result);
-
-  ExpectSucceededResult(result.get());
-  EXPECT_EQ(config.workgroup_count.x, 7u);
-  EXPECT_EQ(config.workgroup_count.y, 1u);
-  EXPECT_EQ(config.workgroup_count.z, 1u);
-}
-
-TEST(LaunchConfigTest, EvaluatesWorkloadArguments) {
-  ContextPtr context = CreateContext();
-  WorkspacePtr workspace = CreateWorkspace();
-  ModulePtr module = DeserializeModule(context.get(), workspace.get(), R"(
-kernel.def @entry(%rows: index, %cols: index) {
-  %one = index.constant 1 : index
-  %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%rows, %cols, %one) workgroup_size(%threads, %one, %one) : index
-} launch() {
-  kernel.return
-}
-)");
-
-  int64_t workload_arguments[] = {11, 12};
-  loomc_launch_config_eval_options_t options =
-      EvalOptions("entry", LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT |
-                               LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE);
-  options.workload_arguments = workload_arguments;
-  options.workload_argument_count = 2;
-  loomc_launch_config_t config = EmptyResultConfig();
-  ResultPtr result;
-  Evaluate(module.get(), workspace.get(), &options, &config, &result);
-
-  ExpectSucceededResult(result.get());
-  EXPECT_EQ(config.workgroup_count.x, 11u);
-  EXPECT_EQ(config.workgroup_count.y, 12u);
-  EXPECT_EQ(config.workgroup_count.z, 1u);
-  EXPECT_EQ(config.workgroup_size.x, 64u);
-  EXPECT_EQ(config.workgroup_size.y, 1u);
-  EXPECT_EQ(config.workgroup_size.z, 1u);
-}
-
-TEST(LaunchConfigTest, EvaluatesWorkloadArgumentLaunchMath) {
-  ContextPtr context = CreateContext();
-  WorkspacePtr workspace = CreateWorkspace();
-  ModulePtr module = DeserializeModule(context.get(), workspace.get(), R"(
-kernel.def @entry(%rows: index) {
-  %one = index.constant 1 : index
-  %sixty_three = index.constant 63 : index
-  %sixty_four = index.constant 64 : index
-  %rounded_rows = index.add %rows, %sixty_three : index
-  %row_groups = index.div %rounded_rows, %sixty_four : index
-  kernel.launch.config workgroups(%row_groups, %one, %one) workgroup_size(%sixty_four, %one, %one) : index
-} launch() {
-  kernel.return
-}
-)");
-
-  int64_t workload_arguments[] = {129};
-  loomc_launch_config_eval_options_t options =
-      EvalOptions("entry", LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT |
-                               LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE);
-  options.workload_arguments = workload_arguments;
-  options.workload_argument_count = 1;
-  loomc_launch_config_t config = EmptyResultConfig();
-  ResultPtr result;
-  Evaluate(module.get(), workspace.get(), &options, &config, &result);
-
-  ExpectSucceededResult(result.get());
-  EXPECT_EQ(config.workgroup_count.x, 3u);
+  const uint64_t arguments[] = {127};
+  loomc_launch_config_t config = EmptyConfig();
+  LOOMC_ASSERT_OK(loomc_launch_config_program_invoke(program.get(), function,
+                                                     arguments, 1, &config));
+  EXPECT_EQ(config.workgroup_count.x, 128u);
   EXPECT_EQ(config.workgroup_count.y, 1u);
   EXPECT_EQ(config.workgroup_count.z, 1u);
   EXPECT_EQ(config.workgroup_size.x, 64u);
   EXPECT_EQ(config.workgroup_size.y, 1u);
   EXPECT_EQ(config.workgroup_size.z, 1u);
+  EXPECT_EQ(config.workgroup_cluster_size.x, 1u);
+  EXPECT_EQ(config.workgroup_cluster_size.y, 1u);
+  EXPECT_EQ(config.workgroup_cluster_size.z, 1u);
+  EXPECT_EQ(config.subgroup_size, 32u);
+  EXPECT_EQ(config.workgroup_storage_bytes, 1024u);
 }
 
-TEST(LaunchConfigTest, EvaluatesIntegerWorkloadArgumentsThroughIndexCast) {
-  ContextPtr context = CreateContext();
-  WorkspacePtr workspace = CreateWorkspace();
-  ModulePtr module = DeserializeModule(context.get(), workspace.get(), R"(
-kernel.def @entry(%rows_i32: i32, %cols_i64: i64) {
-  %one = index.constant 1 : index
-  %threads = index.constant 64 : index
-  %rows = index.cast %rows_i32 : i32 to index
-  %cols = index.cast %cols_i64 : i64 to index
-  kernel.launch.config workgroups(%rows, %cols, %one) workgroup_size(%threads, %one, %one) : index
-} launch() {
-  kernel.return
-}
-)");
+TEST(LaunchConfigProgramTest, SeedsDeclaredWidthScalarsAndChecksPredicates) {
+  LaunchArtifact artifact = CompileLaunchArtifact(kLaunchProgram);
+  ProgramPtr program = LoadProgram(artifact);
+  loomc_launch_config_function_t function =
+      loomc_launch_config_function_invalid();
+  LOOMC_ASSERT_OK(loomc_launch_config_program_lookup_function(
+      program.get(), loomc_make_cstring_view("decode"), &function));
 
-  int64_t workload_arguments[] = {9, 10};
-  loomc_launch_config_eval_options_t options =
-      EvalOptions("entry", LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT |
-                               LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE);
-  options.workload_arguments = workload_arguments;
-  options.workload_argument_count = 2;
-  loomc_launch_config_t config = EmptyResultConfig();
-  ResultPtr result;
-  Evaluate(module.get(), workspace.get(), &options, &config, &result);
+  const uint64_t arguments[] = {
+      UINT64_C(0xDEADBEEF00000020),
+      UINT64_C(0xDEADBEEF00003F80),
+  };
+  loomc_launch_config_t config = EmptyConfig();
+  LOOMC_ASSERT_OK(loomc_launch_config_program_invoke(program.get(), function,
+                                                     arguments, 2, &config));
+  EXPECT_EQ(config.workgroup_count.x, 32u);
+  EXPECT_EQ(config.workgroup_size.x, 32u);
+  EXPECT_EQ(config.workgroup_storage_bytes, 256u);
 
-  ExpectSucceededResult(result.get());
-  EXPECT_EQ(config.workgroup_count.x, 9u);
-  EXPECT_EQ(config.workgroup_count.y, 10u);
-  EXPECT_EQ(config.workgroup_count.z, 1u);
-  EXPECT_EQ(config.workgroup_size.x, 64u);
-  EXPECT_EQ(config.workgroup_size.y, 1u);
-  EXPECT_EQ(config.workgroup_size.z, 1u);
+  const uint64_t invalid_arguments[] = {0, UINT64_C(0x3F80)};
+  config.workgroup_count.x = 777;
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_INVALID_ARGUMENT,
+      loomc_launch_config_program_invoke(program.get(), function,
+                                         invalid_arguments, 2, &config));
+  EXPECT_EQ(config.workgroup_count.x, 777u);
 }
 
-TEST(LaunchConfigTest, AllowsPartialLaunchConfigResults) {
-  ContextPtr context = CreateContext();
-  WorkspacePtr workspace = CreateWorkspace();
-  ModulePtr module = DeserializeModule(context.get(), workspace.get(), R"(
-kernel.def @entry(%rows: index) {
-  %one = index.constant 1 : index
-  %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%rows, %one, %one) workgroup_size(%threads, %one, %one) : index
-} launch() {
-  kernel.return
-}
-)");
+TEST(LaunchConfigProgramTest, SupportsRepeatedInvocations) {
+  LaunchArtifact artifact = CompileLaunchArtifact(kLaunchProgram);
+  ProgramPtr program = LoadProgram(artifact);
+  loomc_launch_config_function_t function =
+      loomc_launch_config_function_invalid();
+  LOOMC_ASSERT_OK(loomc_launch_config_program_lookup_function(
+      program.get(), loomc_make_cstring_view("prefill"), &function));
 
-  loomc_launch_config_eval_options_t options =
-      EvalOptions("entry", LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE);
-  loomc_launch_config_t config = EmptyResultConfig();
-  ResultPtr result;
-  Evaluate(module.get(), workspace.get(), &options, &config, &result);
-
-  ExpectSucceededResult(result.get());
-  EXPECT_FALSE(config.fields & LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT);
-  EXPECT_TRUE(config.fields & LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE);
-  EXPECT_EQ(config.workgroup_size.x, 64u);
-  EXPECT_EQ(config.workgroup_size.y, 1u);
-  EXPECT_EQ(config.workgroup_size.z, 1u);
+  for (uint64_t token_count = 1; token_count <= 512; ++token_count) {
+    loomc_launch_config_t config = EmptyConfig();
+    LOOMC_ASSERT_OK(loomc_launch_config_program_invoke(
+        program.get(), function, &token_count, 1, &config));
+    EXPECT_EQ(config.workgroup_count.x, token_count + 1);
+  }
 }
 
-TEST(LaunchConfigTest, ReportsWorkloadArgumentsWithoutSignature) {
-  ContextPtr context = CreateContext();
-  WorkspacePtr workspace = CreateWorkspace();
-  ModulePtr module = DeserializeModule(context.get(), workspace.get(), R"(
-kernel.def @entry() {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
-} launch() {
-  kernel.return
-}
-)");
-
-  int64_t workload_arguments[] = {11};
-  loomc_launch_config_eval_options_t options =
-      EvalOptions("entry", LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT);
-  options.workload_arguments = workload_arguments;
-  options.workload_argument_count = 1;
-  loomc_launch_config_t config = EmptyResultConfig();
-  ResultPtr result;
-  Evaluate(module.get(), workspace.get(), &options, &config, &result);
-
-  ExpectFailedResultCode(result.get(), "LAUNCH_CONFIG/WORKLOAD_ARGUMENT_COUNT");
+void CountRelease(void* user_data, loomc_byte_span_t contents) {
+  int* release_count = static_cast<int*>(user_data);
+  EXPECT_NE(contents.data, nullptr);
+  EXPECT_NE(contents.data_length, 0u);
+  ++*release_count;
 }
 
-TEST(LaunchConfigTest, ReportsWorkloadArgumentCountMismatch) {
-  ContextPtr context = CreateContext();
-  WorkspacePtr workspace = CreateWorkspace();
-  ModulePtr module = DeserializeModule(context.get(), workspace.get(), R"(
-kernel.def @entry(%rows: index, %cols: index) {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%rows, %cols, %one) workgroup_size(%one, %one, %one) : index
-} launch() {
-  kernel.return
+TEST(LaunchConfigProgramTest, ReleasesTransferredArtifactAfterLoad) {
+  LaunchArtifact artifact = CompileLaunchArtifact(kLaunchProgram);
+  int release_count = 0;
+  loomc_launch_config_program_t* program = nullptr;
+  LOOMC_ASSERT_OK(loomc_launch_config_program_load(
+      &artifact.artifact, CountRelease, &release_count,
+      loomc_allocator_system(), &program));
+  ProgramPtr program_ptr(program);
+  EXPECT_EQ(release_count, 1);
+}
+
+TEST(LaunchConfigProgramTest, RejectsMalformedProgramContract) {
+  LaunchArtifact artifact = CompileLaunchArtifact(R"(
+func.def public pure @incomplete() -> (index, index, index) {
+  %c1 = index.constant 1 : index
+  func.return %c1, %c1, %c1 : index, index, index
 }
 )");
-
-  int64_t workload_arguments[] = {11};
-  loomc_launch_config_eval_options_t options =
-      EvalOptions("entry", LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT);
-  options.workload_arguments = workload_arguments;
-  options.workload_argument_count = 1;
-  loomc_launch_config_t config = EmptyResultConfig();
-  ResultPtr result;
-  Evaluate(module.get(), workspace.get(), &options, &config, &result);
-
-  ExpectFailedResultCode(result.get(), "LAUNCH_CONFIG/WORKLOAD_ARGUMENT_COUNT");
+  int release_count = 0;
+  loomc_launch_config_program_t* program = nullptr;
+  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT,
+                         loomc_launch_config_program_load(
+                             &artifact.artifact, CountRelease, &release_count,
+                             loomc_allocator_system(), &program));
+  EXPECT_EQ(program, nullptr);
+  EXPECT_EQ(release_count, 1);
 }
 
-TEST(LaunchConfigTest, ReportsUnsupportedWorkloadArgumentType) {
-  ContextPtr context = CreateContext();
-  WorkspacePtr workspace = CreateWorkspace();
-  ModulePtr module = DeserializeModule(context.get(), workspace.get(), R"(
-kernel.def @entry(%scale: f32) {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
-} launch() {
-  kernel.return
-}
-)");
+TEST(LaunchConfigProgramTest, ClearsOutputsOnInvalidArguments) {
+  loomc_launch_config_program_t* program =
+      reinterpret_cast<loomc_launch_config_program_t*>(UINTPTR_MAX);
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_INVALID_ARGUMENT,
+      loomc_launch_config_program_load(
+          /*artifact=*/nullptr, /*release=*/nullptr,
+          /*release_user_data=*/nullptr, loomc_allocator_system(), &program));
+  EXPECT_EQ(program, nullptr);
 
-  int64_t workload_arguments[] = {1};
-  loomc_launch_config_eval_options_t options =
-      EvalOptions("entry", LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT);
-  options.workload_arguments = workload_arguments;
-  options.workload_argument_count = 1;
-  loomc_launch_config_t config = EmptyResultConfig();
-  ResultPtr result;
-  Evaluate(module.get(), workspace.get(), &options, &config, &result);
-
-  ExpectFailedResultCode(result.get(), "LAUNCH_CONFIG/WORKLOAD_ARGUMENT_TYPE");
-}
-
-TEST(LaunchConfigTest, ReportsMissingFunctionSymbol) {
-  ContextPtr context = CreateContext();
-  WorkspacePtr workspace = CreateWorkspace();
-  ModulePtr module = DeserializeModule(context.get(), workspace.get(), R"(
-kernel.def @entry() {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
-} launch() {
-  kernel.return
-}
-)");
-
-  loomc_launch_config_eval_options_t options =
-      EvalOptions("missing", LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT);
-  loomc_launch_config_t config = EmptyResultConfig();
-  ResultPtr result;
-  Evaluate(module.get(), workspace.get(), &options, &config, &result);
-
-  ExpectFailedResultCode(result.get(), "LAUNCH_CONFIG/NOT_FOUND");
-}
-
-TEST(LaunchConfigTest, ReportsNonKernelFunctionSymbol) {
-  ContextPtr context = CreateContext();
-  WorkspacePtr workspace = CreateWorkspace();
-  ModulePtr module = DeserializeModule(context.get(), workspace.get(), R"(
-func.def @helper() {
-  func.return
-}
-
-kernel.def @entry() {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
-} launch() {
-  kernel.return
-}
-)");
-
-  loomc_launch_config_eval_options_t options =
-      EvalOptions("helper", LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT);
-  loomc_launch_config_t config = EmptyResultConfig();
-  ResultPtr result;
-  Evaluate(module.get(), workspace.get(), &options, &config, &result);
-
-  ExpectFailedResultCode(result.get(), "LAUNCH_CONFIG/NOT_KERNEL");
-}
-
-TEST(LaunchConfigTest, ReportsMissingRequiredWorkgroupCount) {
-  ContextPtr context = CreateContext();
-  WorkspacePtr workspace = CreateWorkspace();
-  ModulePtr module = DeserializeModule(context.get(), workspace.get(), R"(
-kernel.def @entry(%rows: index) {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%rows, %one, %one) workgroup_size(%one, %one, %one) : index
-} launch() {
-  kernel.return
-}
-)");
-
-  loomc_launch_config_eval_options_t options =
-      EvalOptions("entry", LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT);
-  loomc_launch_config_t config = EmptyResultConfig();
-  ResultPtr result;
-  Evaluate(module.get(), workspace.get(), &options, &config, &result);
-
-  ExpectFailedResultCode(result.get(), "LAUNCH_CONFIG/MISSING_WORKGROUP_COUNT");
-}
-
-TEST(LaunchConfigTest, ReportsMissingRequiredSubgroupSize) {
-  ContextPtr context = CreateContext();
-  WorkspacePtr workspace = CreateWorkspace();
-  ModulePtr module = DeserializeModule(context.get(), workspace.get(), R"(
-kernel.def @entry() {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
-} launch() {
-  kernel.return
-}
-)");
-
-  loomc_launch_config_eval_options_t options =
-      EvalOptions("entry", LOOMC_LAUNCH_CONFIG_FIELD_FLAG_SUBGROUP_SIZE);
-  loomc_launch_config_t config = EmptyResultConfig();
-  ResultPtr result;
-  Evaluate(module.get(), workspace.get(), &options, &config, &result);
-
-  ExpectFailedResultCode(result.get(), "LAUNCH_CONFIG/MISSING_SUBGROUP_SIZE");
-}
-
-TEST(LaunchConfigTest, ReportsMissingRequiredWorkgroupSize) {
-  ContextPtr context = CreateContext();
-  WorkspacePtr workspace = CreateWorkspace();
-  ModulePtr module = DeserializeModule(context.get(), workspace.get(), R"(
-kernel.def @entry(%threads: index) {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
-} launch() {
-  kernel.return
-}
-)");
-
-  loomc_launch_config_eval_options_t options =
-      EvalOptions("entry", LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE);
-  loomc_launch_config_t config = EmptyResultConfig();
-  ResultPtr result;
-  Evaluate(module.get(), workspace.get(), &options, &config, &result);
-
-  ExpectFailedResultCode(result.get(), "LAUNCH_CONFIG/MISSING_WORKGROUP_SIZE");
-}
-
-TEST(LaunchConfigTest, ReportsMissingRequiredWorkgroupStorageBytes) {
-  ContextPtr context = CreateContext();
-  WorkspacePtr workspace = CreateWorkspace();
-  ModulePtr module = DeserializeModule(context.get(), workspace.get(), R"(
-kernel.def @entry() {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
-} launch() {
-  kernel.return
-}
-)");
-
-  loomc_launch_config_eval_options_t options = EvalOptions(
-      "entry", LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_STORAGE_BYTES);
-  loomc_launch_config_t config = EmptyResultConfig();
-  ResultPtr result;
-  Evaluate(module.get(), workspace.get(), &options, &config, &result);
-
-  ExpectFailedResultCode(result.get(),
-                         "LAUNCH_CONFIG/MISSING_WORKGROUP_STORAGE_BYTES");
-}
-
-TEST(LaunchConfigTest, AcceptsZeroInitializedApiStructs) {
-  ContextPtr context = CreateContext();
-  WorkspacePtr workspace = CreateWorkspace();
-  ModulePtr module = DeserializeModule(context.get(), workspace.get(), R"(
-kernel.def @entry() {
-  %one = index.constant 1 : index
-  %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
-} launch() {
-  kernel.return
-}
-)");
-
-  loomc_launch_config_eval_options_t options = {};
-  options.function_symbol = loomc_make_cstring_view("entry");
-  options.required_fields = LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT |
-                            LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE;
-  loomc_launch_config_t config = {};
-  ResultPtr result;
-  Evaluate(module.get(), workspace.get(), &options, &config, &result);
-
-  ExpectSucceededResult(result.get());
-  EXPECT_EQ(config.type, LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG);
-  EXPECT_EQ(config.structure_size, sizeof(config));
-  EXPECT_EQ(config.workgroup_count.x, 1u);
-  EXPECT_EQ(config.workgroup_size.x, 64u);
-}
-
-TEST(LaunchConfigTest, RejectsUnknownRequiredFieldBits) {
-  ContextPtr context = CreateContext();
-  WorkspacePtr workspace = CreateWorkspace();
-  ModulePtr module = DeserializeModule(context.get(), workspace.get(), R"(
-kernel.def @entry() {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
-} launch() {
-  kernel.return
-}
-)");
-
-  loomc_launch_config_eval_options_t options = EvalOptions(
-      "entry", static_cast<loomc_launch_config_field_flags_t>(1u << 31));
-  loomc_launch_config_t config = EmptyResultConfig();
-  loomc_result_t* raw_result = nullptr;
-  loomc_status_t status = loomc_module_evaluate_launch_config(
-      module.get(), workspace.get(), &options, loomc_allocator_system(),
-      &config, &raw_result);
-
-  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT, status);
-  EXPECT_EQ(raw_result, nullptr);
-}
-
-TEST(LaunchConfigTest, RejectsEmptyFunctionSymbolBeforeResult) {
-  ContextPtr context = CreateContext();
-  WorkspacePtr workspace = CreateWorkspace();
-  ModulePtr module = DeserializeModule(context.get(), workspace.get(), R"(
-kernel.def @entry() {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
-} launch() {
-  kernel.return
-}
-)");
-
-  loomc_launch_config_eval_options_t options =
-      EvalOptions("", LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT);
-  loomc_launch_config_t config = EmptyResultConfig();
-  loomc_result_t* raw_result = nullptr;
-  loomc_status_t status = loomc_module_evaluate_launch_config(
-      module.get(), workspace.get(), &options, loomc_allocator_system(),
-      &config, &raw_result);
-
-  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT, status);
-  EXPECT_EQ(raw_result, nullptr);
-}
-
-TEST(LaunchConfigTest, RejectsMissingWorkloadArgumentPointerBeforeResult) {
-  ContextPtr context = CreateContext();
-  WorkspacePtr workspace = CreateWorkspace();
-  ModulePtr module = DeserializeModule(context.get(), workspace.get(), R"(
-kernel.def @entry(%rows: index) {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%rows, %one, %one) workgroup_size(%one, %one, %one) : index
-} launch() {
-  kernel.return
-}
-)");
-
-  loomc_launch_config_eval_options_t options =
-      EvalOptions("entry", LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT);
-  options.workload_argument_count = 1;
-  loomc_launch_config_t config = EmptyResultConfig();
-  loomc_result_t* raw_result = nullptr;
-  loomc_status_t status = loomc_module_evaluate_launch_config(
-      module.get(), workspace.get(), &options, loomc_allocator_system(),
-      &config, &raw_result);
-
-  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT, status);
-  EXPECT_EQ(raw_result, nullptr);
+  loomc_launch_config_function_t function = {.value = 0};
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_INVALID_ARGUMENT,
+      loomc_launch_config_program_lookup_function(
+          /*program=*/nullptr, loomc_make_cstring_view("missing"), &function));
+  EXPECT_FALSE(loomc_launch_config_function_is_valid(function));
 }
 
 }  // namespace
