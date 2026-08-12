@@ -1,0 +1,46 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+# shellcheck shell=bash
+# shellcheck disable=SC2034  # Target configuration is consumed by the caller.
+
+loom_example_configure_target() {
+  LOOM_EXAMPLE_TARGET="$1"
+  case "${LOOM_EXAMPLE_TARGET}" in
+    gfx11-generic)
+      LOOM_EXAMPLE_BACKEND="amdgpu-hal"
+      ;;
+    *)
+      printf 'unsupported example target: %s\n' "${LOOM_EXAMPLE_TARGET}" >&2
+      printf 'supported targets: gfx11-generic\n' >&2
+      return 64
+      ;;
+  esac
+}
+
+loom_example_require_tool() {
+  local tool="$1"
+  if [[ "${tool}" == */* ]]; then
+    [[ -x "${tool}" ]] && return 0
+  elif command -v "${tool}" >/dev/null 2>&1; then
+    return 0
+  fi
+  printf 'required Loom tool not found: %s\n' "${tool}" >&2
+  return 127
+}
+
+loom_example_section() {
+  printf '\n== %s ==\n' "$1"
+}
+
+loom_example_run_tool() {
+  local public_name="$1"
+  local executable="$2"
+  shift 2
+  printf '  $ %s' "${public_name}"
+  printf ' %q' "$@"
+  printf '\n'
+  "${executable}" "$@"
+}

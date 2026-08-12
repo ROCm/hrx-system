@@ -16,6 +16,7 @@ hooks:
 
 watch:
   - src
+  - examples
   - loom_docs
   - ../py/loom/builtin_types.py
   - ../binding/c/doc
@@ -64,6 +65,7 @@ nav:
   - Loom: index.md
   - Get started:
       - Acquiring Loom: getting-started/acquiring-loom.md
+      - Mental model: getting-started/mental-model.md
   - Reference:
       - Reference map: reference/index.md
       - Dialects: reference/dialects/index.md

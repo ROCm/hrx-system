@@ -1,0 +1,16 @@
+// Targetless helpers and interchangeable providers remain reusable across
+// kernels, shapes, and targets.
+func.def inline @double(%value: f32) -> (f32) {
+  %doubled = scalar.addf %value, %value : f32
+  func.return %doubled : f32
+}
+
+func.template<guide.transform> requires [#target.subgroup.size<32>] priority(20) @wave32_transform(%value: f32) -> (f32) {
+  %result = func.call @double(%value) : (f32) -> (f32)
+  func.return %result : f32
+}
+
+func.template<guide.transform> priority(1) @portable_transform(%value: f32) -> (f32) {
+  %result = func.call @double(%value) : (f32) -> (f32)
+  func.return %result : f32
+}
