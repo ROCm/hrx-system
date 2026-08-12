@@ -10,6 +10,7 @@
 #include <memory>
 #include <string>
 
+#include "emit.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/temp_file.h"
 #include "loom/ops/test/ops.h"
@@ -31,6 +32,7 @@
 #include "loomc/status.h"
 #include "loomc/workspace.h"
 #include "module.h"
+#include "result.h"
 #include "target.h"
 #include "test/util.h"
 
@@ -451,6 +453,48 @@ TEST(TargetTest, EmitSelectsOnlyLinkedEmitterWhenFormatOmitted) {
   EXPECT_EQ(ToString(artifact->identifier), "fake.bin");
   ASSERT_EQ(artifact->contents.data_length, 4u);
   EXPECT_EQ(artifact->contents.data[0], 0x7Fu);
+}
+
+TEST(TargetTest, EmitAppendsToExistingResult) {
+  const loom_target_provider_t* providers[] = {
+      &kFakeElfProvider,
+  };
+  loom_target_provider_set_t provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  TargetEnvironmentPtr target_environment =
+      CreateTargetEnvironmentFromProviderSet(&provider_set);
+  ContextPtr context = CreateContext();
+  WorkspacePtr workspace = CreateWorkspace();
+  ModulePtr module =
+      CreateIdentityModule(context.get(), workspace.get(), "entry");
+
+  loomc_result_t* result = nullptr;
+  LOOMC_ASSERT_OK(loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED,
+                                      loomc_allocator_system(), &result));
+  ResultPtr result_ptr(result);
+  static const uint8_t kExistingContents[] = {0x01};
+  const loomc_artifact_t existing_artifact = {
+      /*.kind=*/LOOMC_ARTIFACT_KIND_MODULE,
+      /*.format=*/loomc_make_cstring_view("existing"),
+      /*.identifier=*/loomc_make_cstring_view("existing.bin"),
+      /*.contents=*/
+      loomc_make_byte_span(kExistingContents, sizeof(kExistingContents)),
+  };
+  LOOMC_ASSERT_OK(
+      loomc_result_add_artifact(result_ptr.get(), &existing_artifact));
+
+  loomc_host_size_t primary_artifact_index = LOOMC_HOST_SIZE_MAX;
+  LOOMC_ASSERT_OK(loomc_emit_module_append(
+      target_environment.get(), workspace.get(), module.get(), nullptr,
+      result_ptr.get(), &primary_artifact_index));
+
+  ExpectSucceededResult(result_ptr.get());
+  EXPECT_EQ(primary_artifact_index, 1u);
+  ASSERT_EQ(loomc_result_artifact_count(result_ptr.get()), 2u);
+  EXPECT_EQ(ToString(loomc_result_artifact_at(result_ptr.get(), 0)->format),
+            "existing");
+  EXPECT_EQ(ToString(loomc_result_artifact_at(result_ptr.get(), 1)->format),
+            "fake-elf");
 }
 
 TEST(TargetTest, EmitReturnsArtifactManifestSidecar) {

@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loomc/emit.h"
+#include "emit.h"
 
 #include <string.h>
 
@@ -686,41 +686,35 @@ static loomc_status_t loomc_emit_add_artifact(
   return status;
 }
 
-loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
-                                 loomc_workspace_t* workspace,
-                                 loomc_module_t* module,
-                                 const loomc_emit_options_t* options,
-                                 loomc_allocator_t allocator,
-                                 loomc_result_t** out_result) {
-  if (out_result == NULL) {
-    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
-                             "out_result must not be NULL");
-  }
-  *out_result = NULL;
+static loomc_status_t loomc_emit_module_validate_inputs(
+    loomc_target_environment_t* target_environment,
+    loomc_workspace_t* workspace, loomc_module_t* module) {
   if (target_environment == NULL || workspace == NULL || module == NULL) {
     return loomc_make_status(
         LOOMC_STATUS_INVALID_ARGUMENT,
         "target_environment, workspace, and module must not be NULL");
   }
-  loom_module_t* internal_module = loomc_module_loom_module(module);
-  if (internal_module == NULL) {
+  if (loomc_module_loom_module(module) == NULL) {
     return loomc_make_status(LOOMC_STATUS_FAILED_PRECONDITION,
                              "module does not contain internal IR");
   }
+  return loomc_ok_status();
+}
 
-  iree_allocator_t host_allocator = {0};
-  loomc_result_t* result = NULL;
-  loomc_status_t status =
-      loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED, allocator, &result);
-  if (loomc_status_is_ok(status)) {
-    host_allocator = iree_allocator_from_loomc(allocator);
-  }
+loomc_status_t loomc_emit_module_append(
+    loomc_target_environment_t* target_environment,
+    loomc_workspace_t* workspace, loomc_module_t* module,
+    const loomc_emit_options_t* options, loomc_result_t* result,
+    loomc_host_size_t* out_primary_artifact_index) {
+  *out_primary_artifact_index = LOOMC_HOST_SIZE_MAX;
+
+  loom_module_t* internal_module = loomc_module_loom_module(module);
+  const loomc_allocator_t allocator = loomc_result_allocator(result);
+  const iree_allocator_t host_allocator = iree_allocator_from_loomc(allocator);
 
   loomc_emit_resolved_options_t resolved_options = {0};
-  if (loomc_status_is_ok(status)) {
-    status = loomc_emit_resolve_options(options, result, allocator,
-                                        &resolved_options);
-  }
+  loomc_status_t status =
+      loomc_emit_resolve_options(options, result, allocator, &resolved_options);
   const loom_target_environment_t* internal_target_environment =
       loomc_target_environment_loom_target_environment(target_environment);
   const loom_target_emitter_t* emitter = NULL;
@@ -824,8 +818,13 @@ loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
       emitter != NULL) {
+    const loomc_host_size_t primary_artifact_index =
+        loomc_result_artifact_count(result);
     status = loomc_emit_add_artifact(result, &resolved_options, emitter,
                                      &target_artifact);
+    if (loomc_status_is_ok(status)) {
+      *out_primary_artifact_index = primary_artifact_index;
+    }
   }
   if (loomc_status_is_ok(status) && compile_report_initialized) {
     status = loomc_emit_add_compile_report_artifact(
@@ -838,6 +837,31 @@ loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
   loom_target_compile_report_deinitialize(&compile_report);
   if (scratch_arena_initialized) {
     iree_arena_deinitialize(&scratch_arena);
+  }
+  return status;
+}
+
+loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
+                                 loomc_workspace_t* workspace,
+                                 loomc_module_t* module,
+                                 const loomc_emit_options_t* options,
+                                 loomc_allocator_t allocator,
+                                 loomc_result_t** out_result) {
+  if (out_result == NULL) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "out_result must not be NULL");
+  }
+  *out_result = NULL;
+  LOOMC_RETURN_IF_ERROR(
+      loomc_emit_module_validate_inputs(target_environment, workspace, module));
+
+  loomc_result_t* result = NULL;
+  loomc_status_t status =
+      loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED, allocator, &result);
+  loomc_host_size_t primary_artifact_index = LOOMC_HOST_SIZE_MAX;
+  if (loomc_status_is_ok(status)) {
+    status = loomc_emit_module_append(target_environment, workspace, module,
+                                      options, result, &primary_artifact_index);
   }
   if (loomc_status_is_ok(status)) {
     *out_result = result;
