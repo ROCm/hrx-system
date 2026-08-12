@@ -128,7 +128,6 @@ def on_config(config: Any) -> Any:
     """Points MkDocs at an isolated, generated source tree."""
 
     staged_source_root = _staged_source_root()
-    staged_source_root.mkdir(parents=True, exist_ok=True)
     config["docs_dir"] = str(staged_source_root)
     snippet_config = config.get("mdx_configs", {}).get("pymdownx.snippets")
     if snippet_config is not None:
