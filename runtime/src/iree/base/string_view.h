@@ -333,6 +333,17 @@ IREE_API_EXPORT bool iree_string_view_atoi_uint64_base(iree_string_view_t value,
                                                        uint64_t* out_value);
 IREE_API_EXPORT bool iree_string_view_atoi_uint64(iree_string_view_t value,
                                                   uint64_t* out_value);
+
+// Parses a floating-point number from the entire trimmed |value|.
+//
+// Decimal values and special values use the C floating-point spelling. C99
+// hexadecimal values require a `0x` prefix and `p` binary exponent, such as
+// `-0x1.8p+2`. Hexadecimal values are rounded directly to the destination type
+// with round-to-nearest-even semantics. Overflow and underflow are successful
+// parses that produce the corresponding infinity or signed zero.
+//
+// Returns false without modifying |out_value| if |value| is empty, malformed,
+// contains trailing characters, or exceeds the bounded decimal parser storage.
 IREE_API_EXPORT bool iree_string_view_atof(iree_string_view_t value,
                                            float* out_value);
 IREE_API_EXPORT bool iree_string_view_atod(iree_string_view_t value,
