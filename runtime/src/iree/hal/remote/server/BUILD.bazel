@@ -105,6 +105,28 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "binding_storage",
+    srcs = ["binding_storage.c"],
+    hdrs = ["binding_storage.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "binding_storage_test",
+    srcs = ["binding_storage_test.cc"],
+    deps = [
+        ":binding_storage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "server",
     srcs = [
         "bulk.c",
@@ -132,6 +154,7 @@ iree_runtime_cc_library(
         "profile_relay.h",
     ],
     deps = [
+        ":binding_storage",
         ":bulk_staging_pool",
         ":epoch_semaphore_map",
         ":resource_table",

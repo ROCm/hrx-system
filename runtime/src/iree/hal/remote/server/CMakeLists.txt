@@ -116,6 +116,32 @@ iree_cc_test(
 
 iree_cc_library(
   NAME
+    binding_storage
+  HDRS
+    "binding_storage.h"
+  SRCS
+    "binding_storage.c"
+  DEPS
+    iree::base
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    binding_storage_test
+  SRCS
+    "binding_storage_test.cc"
+  DEPS
+    ::binding_storage
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_library(
+  NAME
     server
   HDRS
     "api.h"
@@ -141,6 +167,7 @@ iree_cc_library(
     "session.c"
     "session.h"
   DEPS
+    ::binding_storage
     ::bulk_staging_pool
     ::epoch_semaphore_map
     ::resource_table
