@@ -1430,19 +1430,10 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_validate_dispatch_shape(
         "override");
   }
   if (has_workgroup_size_override) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_executable_dispatch_limits_validate_workgroup_size(
+            &descriptor->limits, config.workgroup_size));
     for (iree_host_size_t i = 0; i < 3; ++i) {
-      if (IREE_UNLIKELY(!config.workgroup_size[i])) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "dispatch workgroup size override must specify all dimensions");
-      }
-      if (IREE_UNLIKELY(config.workgroup_size[i] > UINT16_MAX)) {
-        return iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "dispatch workgroup size override dimension %" PRIhsz
-            " value %u exceeds %u",
-            i, config.workgroup_size[i], UINT16_MAX);
-      }
       if (!uses_indirect_parameters) {
         const uint64_t grid_size =
             (uint64_t)config.workgroup_count[i] * config.workgroup_size[i];
@@ -1458,7 +1449,7 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_validate_dispatch_shape(
   } else if (!uses_indirect_parameters) {
     for (iree_host_size_t i = 0; i < 3; ++i) {
       if (IREE_UNLIKELY(config.workgroup_count[i] >
-                        descriptor->max_workgroup_count[i])) {
+                        descriptor->maximum_workgroup_count[i])) {
         return iree_make_status(
             IREE_STATUS_OUT_OF_RANGE,
             "dispatch grid dimension %" PRIhsz
@@ -1468,13 +1459,16 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_validate_dispatch_shape(
       }
     }
   }
-  if (IREE_UNLIKELY(config.dynamic_workgroup_local_memory >
-                    descriptor->max_dynamic_workgroup_local_memory)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "dispatch group segment size overflows uint32_t "
-                            "(static=%u, dynamic=%u)",
-                            descriptor->kernel_args.group_segment_size,
-                            config.dynamic_workgroup_local_memory);
+  if (IREE_UNLIKELY(
+          config.dynamic_workgroup_local_memory >
+          descriptor->limits.maximum_dynamic_workgroup_local_memory_size)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "dispatch dynamic workgroup-local memory size %u exceeds maximum %u "
+        "(fixed=%u)",
+        config.dynamic_workgroup_local_memory,
+        descriptor->limits.maximum_dynamic_workgroup_local_memory_size,
+        descriptor->kernel_args.group_segment_size);
   }
   return iree_ok_status();
 }
@@ -2235,19 +2229,10 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_prepare_dispatch_plan(
           "custom-direct-only ELF exports require a dispatch workgroup size "
           "override");
     }
-    for (iree_host_size_t i = 0; i < 3; ++i) {
-      if (IREE_UNLIKELY(!inputs->config.workgroup_size[i])) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "dispatch workgroup size override must specify all dimensions");
-      }
-      if (IREE_UNLIKELY(inputs->config.workgroup_size[i] > UINT16_MAX)) {
-        return iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "dispatch workgroup size override dimension %" PRIhsz
-            " value %u exceeds %u",
-            i, inputs->config.workgroup_size[i], UINT16_MAX);
-      }
+    if (!validates) {
+      IREE_RETURN_IF_ERROR(
+          iree_hal_amdgpu_executable_dispatch_limits_validate_workgroup_size(
+              &out_plan->descriptor->limits, inputs->config.workgroup_size));
     }
   }
   if (IREE_UNLIKELY(

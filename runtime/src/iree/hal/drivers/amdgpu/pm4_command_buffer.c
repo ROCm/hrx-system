@@ -2057,45 +2057,16 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_check_dispatch_flags(
 static iree_status_t iree_hal_amdgpu_pm4_command_buffer_validate_dispatch_shape(
     const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor,
     const iree_hal_dispatch_config_t config) {
-  if (iree_hal_amdgpu_dispatch_config_has_workgroup_size_override(config)) {
-    for (iree_host_size_t i = 0; i < 3; ++i) {
-      if (IREE_UNLIKELY(!config.workgroup_size[i])) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "dispatch workgroup size override must specify all dimensions");
-      }
-      if (IREE_UNLIKELY(config.workgroup_size[i] > UINT16_MAX)) {
-        return iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "dispatch workgroup size override dimension %" PRIhsz
-            " value %u exceeds %u",
-            i, config.workgroup_size[i], UINT16_MAX);
-      }
-      const uint64_t grid_size =
-          (uint64_t)config.workgroup_count[i] * config.workgroup_size[i];
-      if (IREE_UNLIKELY(grid_size > UINT32_MAX)) {
-        return iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "dispatch grid dimension %" PRIhsz " overflows uint32_t", i);
-      }
+  for (iree_host_size_t i = 0; i < 3; ++i) {
+    if (IREE_UNLIKELY(config.workgroup_count[i] >
+                      descriptor->maximum_workgroup_count[i])) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "dispatch grid dimension %" PRIhsz
+          " overflows uint32_t (workgroup_count=%u, workgroup_size=%u)",
+          i, config.workgroup_count[i],
+          descriptor->kernel_args.workgroup_size[i]);
     }
-  } else {
-    for (iree_host_size_t i = 0; i < 3; ++i) {
-      if (IREE_UNLIKELY(config.workgroup_count[i] >
-                        descriptor->max_workgroup_count[i])) {
-        return iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "dispatch grid dimension %" PRIhsz
-            " overflows uint32_t (workgroup_count=%u, workgroup_size=%u)",
-            i, config.workgroup_count[i],
-            descriptor->kernel_args.workgroup_size[i]);
-      }
-    }
-  }
-  if (IREE_UNLIKELY(config.dynamic_workgroup_local_memory >
-                    descriptor->max_dynamic_workgroup_local_memory)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "dispatch group segment size overflows uint32_t");
   }
   return iree_ok_status();
 }

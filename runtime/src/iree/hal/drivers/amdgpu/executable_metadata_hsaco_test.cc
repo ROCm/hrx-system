@@ -211,15 +211,18 @@ TEST(ExecutableMetadataHsacoTest, PopulatesSparseInterleavedKernelLayout) {
             loaded_code_object_data.data_length);
 
   const iree_hal_amdgpu_executable_export_t& export_info = metadata->exports[0];
-  EXPECT_EQ(export_info.flags, IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_NONE);
+  EXPECT_EQ(export_info.flags,
+            IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_HAS_RESOURCE_METADATA);
   EXPECT_EQ(export_info.workgroup_size[0], 4);
   EXPECT_EQ(export_info.workgroup_size[1], 2);
   EXPECT_EQ(export_info.workgroup_size[2], 1);
   EXPECT_EQ(export_info.workgroup_cluster_size[0], 1);
   EXPECT_EQ(export_info.workgroup_cluster_size[1], 2);
   EXPECT_EQ(export_info.workgroup_cluster_size[2], 1);
-  EXPECT_EQ(export_info.fixed_group_segment_size, 16);
-  EXPECT_EQ(export_info.fixed_private_segment_size, 32);
+  EXPECT_EQ(export_info.maximum_workgroup_invocations, 256);
+  EXPECT_EQ(export_info.fixed_workgroup_local_memory_size, 16);
+  EXPECT_EQ(export_info.fixed_private_memory_size, 32);
+  EXPECT_EQ(export_info.invocation_register_count, 40);
 
   const iree_hal_amdgpu_kernarg_layout_t* layout = nullptr;
   IREE_ASSERT_OK(iree_hal_amdgpu_executable_metadata_resolve_layout(
@@ -386,6 +389,9 @@ TEST(ExecutableMetadataHsacoTest, PopulatesElfOnlyCustomDirectExport) {
       metadata->exports[0].flags,
       IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_CUSTOM_DIRECT_ONLY |
           IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_REQUIRES_DISPATCH_WORKGROUP_SIZE));
+  EXPECT_FALSE(iree_any_bit_set(
+      metadata->exports[0].flags,
+      IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_HAS_RESOURCE_METADATA));
   EXPECT_EQ(metadata->exports[0].workgroup_cluster_size[0], 0);
   EXPECT_EQ(metadata->exports[0].workgroup_cluster_size[1], 0);
   EXPECT_EQ(metadata->exports[0].workgroup_cluster_size[2], 0);
