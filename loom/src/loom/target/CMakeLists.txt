@@ -203,6 +203,28 @@ loom_cc_test(
     loom::testing::module_ptr
 )
 
+loom_cc_benchmark(
+  NAME
+    module_sealing_benchmark
+  SRCS
+    "module_sealing_benchmark.cc"
+  DEPS
+    ::facts_builder
+    ::function_version
+    ::module_sealing
+    ::provider
+    iree::base
+    iree::base::internal::arena
+    iree::testing::benchmark_main
+    loom::ir
+    loom::ops::func
+    loom::ops::op_defs
+    loom::ops::target
+    loom::ops::test
+    loom::target::test::target_record_table
+  TESTONLY
+)
+
 loom_cc_test(
   NAME
     function_version_test
