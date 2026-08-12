@@ -273,6 +273,7 @@ Typical mistakes expose the missing ownership decision:
 details, inspect row-level JSON paths, and compare selection and emitted-code
 evidence across configurations or targets.
 
-Continue with checks and benchmarks: executable cases provide runtime values,
-configuration bindings, expected results, and named performance rows without
-creating a second representation of the program.
+Continue with [Checks and benchmarks](checks-and-benchmarks.md): executable
+cases provide runtime values, configuration bindings, expected results, and
+named performance rows without creating a second representation of the
+program.

@@ -75,6 +75,7 @@ nav:
       - Vectors and structured compute: guide/vectors-and-structured-compute.md
       - Kernels and launch configuration: guide/kernels-and-launch.md
       - Facts and specialization: guide/facts-and-specialization.md
+      - Checks and benchmarks: guide/checks-and-benchmarks.md
   - Workflows:
       - Workflow map: workflows/index.md
       - Format and verify source: workflows/format-and-verify.md

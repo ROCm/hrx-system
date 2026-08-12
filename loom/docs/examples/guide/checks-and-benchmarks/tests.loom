@@ -1,0 +1,19 @@
+// The declaration makes the production dependency explicit without placing
+// test-only records in the kernel archive.
+kernel.decl @copy_i32() launch(%input: buffer, %output: buffer)
+
+check.case public @copy_i32_case {
+  %seed = check.param.seed base(1000) count(4) name("seed") : i64
+  %input = check.generate.random.uniform seed(%seed) range(-16 to 16) : tensor<8xi32>
+  %output = check.generate.fill value(0) : tensor<8xi32>
+  %expected = check.generate.random.uniform seed(%seed) range(-16 to 16) : tensor<8xi32>
+  kernel.launch @copy_i32(%input, %output) : (tensor<8xi32>, tensor<8xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<8xi32>
+  check.return
+}
+
+// One row preserves the complete deterministic seed sweep. The other names a
+// representative workload without copying its setup or expected result.
+check.benchmark<@copy_i32_case> @copy_i32_sweep
+
+check.benchmark<@copy_i32_case> @copy_i32_seed_1002 {seed = 1002}

@@ -45,7 +45,8 @@ graph, or deployment language.
    with [Facts and specialization](facts-and-specialization.md).
 8. **Checks and benchmarks** make correctness workloads executable and let
    performance rows select those same proven workloads instead of rebuilding
-   them in a harness.
+   them in a harness. Continue with [Checks and
+   benchmarks](checks-and-benchmarks.md).
 9. **Command programs** compose launchable kernels, resources, and scheduling
    into reusable subgraphs while preserving the same linking and specialization
    model.
