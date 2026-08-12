@@ -3680,6 +3680,52 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_concat_preserves_bu
 
 // ====
 
+// RUN: emit amdgpu-assembly @gfx942_concat_preserves_buffer_source_lease strategy=source
+amdgpu.target<gfx942> @gfx942_target
+low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_concat_preserves_buffer_source_lease(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x4>) asm {
+  %loaded = buffer_load_dword %resource, %vaddr, %soffset
+  %a = s_mov_b32 1
+  %b = s_mov_b32 2
+  %c = s_mov_b32 3
+  %d = s_mov_b32 4
+  %packed = concat(%a, %b, %c, %d) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  return %loaded, %packed
+}
+
+// ----
+  buffer_load_dword v0, v0, s[0:3], s4 offen offset:0
+  s_mov_b32 s8, 1
+  s_mov_b32 s9, 2
+  s_mov_b32 s10, 3
+  s_mov_b32 s11, 4
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1151_concat_preserves_buffer_source_lease strategy=source
+amdgpu.target<gfx1151> @gfx1151_target
+low.func.def target<amdgpu.rdna3_5.core>(@gfx1151_target) @gfx1151_concat_preserves_buffer_source_lease(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x4>) asm {
+  %loaded = buffer_load_dword %resource, %vaddr, %soffset
+  %a = s_mov_b32 1
+  %b = s_mov_b32 2
+  %c = s_mov_b32 3
+  %d = s_mov_b32 4
+  %packed = concat(%a, %b, %c, %d) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  return %loaded, %packed
+}
+
+// ----
+  buffer_load_dword v0, v0, s[0:3], s4 offen offset:0
+  s_mov_b32 s8, 1
+  s_mov_b32 s9, 2
+  s_mov_b32 s10, 3
+  s_mov_b32 s11, 4
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  s_endpgm
+
+// ====
+
 // RUN: emit amdgpu-assembly @gfx11_coalesced_copy waits=none
 amdgpu.target<gfx1100> @gfx11_target
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_coalesced_copy(%s0: reg<amdgpu.sgpr>, %s1: reg<amdgpu.sgpr>, %a: reg<amdgpu.vgpr x8>, %b: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>) asm {
