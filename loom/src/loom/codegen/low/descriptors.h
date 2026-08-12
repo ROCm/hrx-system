@@ -262,6 +262,9 @@ enum loom_low_storage_lease_flag_bits_e {
   LOOM_LOW_STORAGE_LEASE_FLAG_MAY_CARRY_ACROSS_BOUNDARY = 1u << 2,
   // The allocator may opportunistically release the lease to reduce pressure.
   LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_FOR_PRESSURE = 1u << 3,
+  // Preserve the lease when doing so does not lower modeled residency, keeping
+  // the target's long-latency request window open.
+  LOOM_LOW_STORAGE_LEASE_FLAG_PRESERVE_FOR_LATENCY = 1u << 4,
 };
 typedef uint16_t loom_low_storage_lease_flags_t;
 

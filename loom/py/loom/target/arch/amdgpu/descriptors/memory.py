@@ -792,9 +792,7 @@ def _buffer_load_dword_overlay(
         schedule_class=_SCHEDULE_VMEM_LOAD,
         operands=(
             AmdgpuOperandOverlay("VDATA", _vgpr_result()),
-            AmdgpuOperandOverlay(
-                resource_field_name, _sgpr_resource("resource", units=4)
-            ),
+            AmdgpuOperandOverlay(resource_field_name, _sgpr_vmem_resource("resource")),
             _mubuf_vaddr_operand(),
             AmdgpuOperandOverlay("SOFFSET", _sgpr_operand("soffset")),
         ),
@@ -839,9 +837,7 @@ def _buffer_load_off_zero_overlay(
         schedule_class=_SCHEDULE_VMEM_LOAD,
         operands=(
             AmdgpuOperandOverlay("VDATA", _vgpr_result(units=payload_units)),
-            AmdgpuOperandOverlay(
-                resource_field_name, _sgpr_resource("resource", units=4)
-            ),
+            AmdgpuOperandOverlay(resource_field_name, _sgpr_vmem_resource("resource")),
         ),
         implicit_operands=(implicit_memory,),
         immediate_fields=(offset_field_name, *_cache_field_names(cache_fields)),
@@ -894,9 +890,7 @@ def _buffer_load_vaddr_offset_overlay(
         schedule_class=_SCHEDULE_VMEM_LOAD,
         operands=(
             AmdgpuOperandOverlay("VDATA", _vgpr_result(units=payload_units)),
-            AmdgpuOperandOverlay(
-                resource_field_name, _sgpr_resource("resource", units=4)
-            ),
+            AmdgpuOperandOverlay(resource_field_name, _sgpr_vmem_resource("resource")),
             _mubuf_vaddr_operand(),
         ),
         implicit_operands=(implicit_memory,),
@@ -1004,9 +998,7 @@ def _buffer_load_b16_d16_overlay(
                 _vgpr_result(register_part=_REG_PART_VGPR_LOW16),
                 size_exception_reason=_D16_PARTIAL_REGISTER_SIZE_REASON,
             ),
-            AmdgpuOperandOverlay(
-                resource_field_name, _sgpr_resource("resource", units=4)
-            ),
+            AmdgpuOperandOverlay(resource_field_name, _sgpr_vmem_resource("resource")),
             _mubuf_vaddr_operand(),
             AmdgpuOperandOverlay("SOFFSET", _sgpr_operand("soffset")),
         ),
@@ -1067,9 +1059,7 @@ def _buffer_load_b16_d16_hi_overlay(
                 ),
                 size_exception_reason=_D16_PARTIAL_REGISTER_SIZE_REASON,
             ),
-            AmdgpuOperandOverlay(
-                resource_field_name, _sgpr_resource("resource", units=4)
-            ),
+            AmdgpuOperandOverlay(resource_field_name, _sgpr_vmem_resource("resource")),
             _mubuf_vaddr_operand(),
             AmdgpuOperandOverlay("SOFFSET", _sgpr_operand("soffset")),
         ),
@@ -1112,9 +1102,7 @@ def _buffer_load_b16_d16_vaddr_offset_overlay(
                 _vgpr_result(register_part=_REG_PART_VGPR_LOW16),
                 size_exception_reason=_D16_PARTIAL_REGISTER_SIZE_REASON,
             ),
-            AmdgpuOperandOverlay(
-                resource_field_name, _sgpr_resource("resource", units=4)
-            ),
+            AmdgpuOperandOverlay(resource_field_name, _sgpr_vmem_resource("resource")),
             _mubuf_vaddr_operand(),
         ),
         implicit_operands=(_ignore_global_read_memory(16),),
@@ -1187,9 +1175,7 @@ def _buffer_load_b16_d16_hi_vaddr_offset_overlay(
                 ),
                 size_exception_reason=_D16_PARTIAL_REGISTER_SIZE_REASON,
             ),
-            AmdgpuOperandOverlay(
-                resource_field_name, _sgpr_resource("resource", units=4)
-            ),
+            AmdgpuOperandOverlay(resource_field_name, _sgpr_vmem_resource("resource")),
             _mubuf_vaddr_operand(),
         ),
         implicit_operands=(_ignore_global_read_memory(16),),
@@ -1248,9 +1234,7 @@ def _buffer_load_sized_overlay(
         schedule_class=_SCHEDULE_VMEM_LOAD,
         operands=(
             AmdgpuOperandOverlay("VDATA", _vgpr_result(units=payload_units)),
-            AmdgpuOperandOverlay(
-                resource_field_name, _sgpr_resource("resource", units=4)
-            ),
+            AmdgpuOperandOverlay(resource_field_name, _sgpr_vmem_resource("resource")),
             _mubuf_vaddr_operand(),
             AmdgpuOperandOverlay("SOFFSET", _sgpr_operand("soffset")),
         ),
@@ -1655,9 +1639,7 @@ def _buffer_load_lds_overlay(
         semantic_tag=semantic_tag,
         schedule_class=_SCHEDULE_VMEM_LOAD_LDS,
         operands=(
-            AmdgpuOperandOverlay(
-                resource_field_name, _sgpr_resource("resource", units=4)
-            ),
+            AmdgpuOperandOverlay(resource_field_name, _sgpr_vmem_resource("resource")),
             _mubuf_vaddr_operand(),
             AmdgpuOperandOverlay("SOFFSET", _sgpr_operand("soffset")),
         ),
@@ -1721,9 +1703,7 @@ def _buffer_load_lds_vaddr_offset_overlay(
         semantic_tag=semantic_tag,
         schedule_class=_SCHEDULE_VMEM_LOAD_LDS,
         operands=(
-            AmdgpuOperandOverlay(
-                resource_field_name, _sgpr_resource("resource", units=4)
-            ),
+            AmdgpuOperandOverlay(resource_field_name, _sgpr_vmem_resource("resource")),
             _mubuf_vaddr_operand(),
         ),
         ignored_operands=(
@@ -1787,9 +1767,7 @@ def _buffer_load_lds_off_zero_overlay(
         semantic_tag=semantic_tag,
         schedule_class=_SCHEDULE_VMEM_LOAD_LDS,
         operands=(
-            AmdgpuOperandOverlay(
-                resource_field_name, _sgpr_resource("resource", units=4)
-            ),
+            AmdgpuOperandOverlay(resource_field_name, _sgpr_vmem_resource("resource")),
         ),
         ignored_operands=(
             AmdgpuIgnoredOperandOverlay(
@@ -1983,9 +1961,7 @@ def _buffer_store_dword_overlay(
         schedule_class=_SCHEDULE_VMEM_STORE,
         operands=(
             AmdgpuOperandOverlay("VDATA", _vgpr_operand("value")),
-            AmdgpuOperandOverlay(
-                resource_field_name, _sgpr_resource("resource", units=4)
-            ),
+            AmdgpuOperandOverlay(resource_field_name, _sgpr_vmem_resource("resource")),
             _mubuf_vaddr_operand(),
             AmdgpuOperandOverlay("SOFFSET", _sgpr_operand("soffset")),
         ),
@@ -2029,9 +2005,7 @@ def _buffer_store_off_zero_overlay(
         schedule_class=_SCHEDULE_VMEM_STORE,
         operands=(
             AmdgpuOperandOverlay("VDATA", _vgpr_operand("value", units=payload_units)),
-            AmdgpuOperandOverlay(
-                resource_field_name, _sgpr_resource("resource", units=4)
-            ),
+            AmdgpuOperandOverlay(resource_field_name, _sgpr_vmem_resource("resource")),
         ),
         implicit_operands=(implicit_memory,),
         immediate_fields=(offset_field_name, *_cache_field_names(cache_fields)),
@@ -2083,9 +2057,7 @@ def _buffer_store_vaddr_offset_overlay(
         schedule_class=_SCHEDULE_VMEM_STORE,
         operands=(
             AmdgpuOperandOverlay("VDATA", _vgpr_operand("value", units=payload_units)),
-            AmdgpuOperandOverlay(
-                resource_field_name, _sgpr_resource("resource", units=4)
-            ),
+            AmdgpuOperandOverlay(resource_field_name, _sgpr_vmem_resource("resource")),
             _mubuf_vaddr_operand(),
         ),
         implicit_operands=(implicit_memory,),
@@ -2190,9 +2162,7 @@ def _buffer_store_b16_overlay(
                 _vgpr_operand("value", register_part=_REG_PART_VGPR_LOW16),
                 size_exception_reason=_D16_PARTIAL_REGISTER_SIZE_REASON,
             ),
-            AmdgpuOperandOverlay(
-                resource_field_name, _sgpr_resource("resource", units=4)
-            ),
+            AmdgpuOperandOverlay(resource_field_name, _sgpr_vmem_resource("resource")),
             _mubuf_vaddr_operand(),
             AmdgpuOperandOverlay("SOFFSET", _sgpr_operand("soffset")),
         ),
@@ -2234,9 +2204,7 @@ def _buffer_store_b16_vaddr_offset_overlay(
                 _vgpr_operand("value", register_part=_REG_PART_VGPR_LOW16),
                 size_exception_reason=_D16_PARTIAL_REGISTER_SIZE_REASON,
             ),
-            AmdgpuOperandOverlay(
-                resource_field_name, _sgpr_resource("resource", units=4)
-            ),
+            AmdgpuOperandOverlay(resource_field_name, _sgpr_vmem_resource("resource")),
             _mubuf_vaddr_operand(),
         ),
         implicit_operands=(_ignore_global_write_memory(16),),
@@ -2285,9 +2253,7 @@ def _buffer_store_b8_overlay(
         schedule_class=_SCHEDULE_VMEM_STORE,
         operands=(
             AmdgpuOperandOverlay("VDATA", _vgpr_operand("value")),
-            AmdgpuOperandOverlay(
-                resource_field_name, _sgpr_resource("resource", units=4)
-            ),
+            AmdgpuOperandOverlay(resource_field_name, _sgpr_vmem_resource("resource")),
             _mubuf_vaddr_operand(),
             AmdgpuOperandOverlay("SOFFSET", _sgpr_operand("soffset")),
         ),
@@ -2358,9 +2324,7 @@ def _buffer_store_sized_overlay(
         schedule_class=_SCHEDULE_VMEM_STORE,
         operands=(
             AmdgpuOperandOverlay("VDATA", _vgpr_operand("value", units=payload_units)),
-            AmdgpuOperandOverlay(
-                resource_field_name, _sgpr_resource("resource", units=4)
-            ),
+            AmdgpuOperandOverlay(resource_field_name, _sgpr_vmem_resource("resource")),
             _mubuf_vaddr_operand(),
             AmdgpuOperandOverlay("SOFFSET", _sgpr_operand("soffset")),
         ),

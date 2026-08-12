@@ -145,6 +145,7 @@ class StorageLeaseFlag(CEnum):
     RELEASE_BEFORE_BOUNDARY = "LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_BEFORE_BOUNDARY"
     MAY_CARRY_ACROSS_BOUNDARY = "LOOM_LOW_STORAGE_LEASE_FLAG_MAY_CARRY_ACROSS_BOUNDARY"
     RELEASE_FOR_PRESSURE = "LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_FOR_PRESSURE"
+    PRESERVE_FOR_LATENCY = "LOOM_LOW_STORAGE_LEASE_FLAG_PRESERVE_FOR_LATENCY"
 
 
 class ConstraintKind(CEnum):
@@ -354,6 +355,7 @@ class Operand:
     register_part: str | None = None
     read_stage: int = 0
     ready_stage: int = 0
+    latency_sensitive_resource: bool = False
 
 
 @dataclass(frozen=True, slots=True)

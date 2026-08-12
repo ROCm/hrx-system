@@ -578,6 +578,9 @@ static bool loom_low_allocation_storage_release_policy_allows_record(
     case LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FOR_PRESSURE:
       return iree_all_bits_set(
           record->flags, LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_FOR_PRESSURE);
+    case LOOM_LOW_ALLOCATION_STORAGE_RELEASE_PRESERVE_LATENCY:
+      return !iree_any_bit_set(
+          record->flags, LOOM_LOW_STORAGE_LEASE_FLAG_PRESERVE_FOR_LATENCY);
     case LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED:
       return true;
   }
@@ -751,6 +754,10 @@ iree_status_t loom_low_allocation_storage_lease_state_initialize(
     if (iree_all_bits_set(record->flags,
                           LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_FOR_PRESSURE)) {
       ++out_state->pressure_release_record_count;
+    }
+    if (iree_all_bits_set(record->flags,
+                          LOOM_LOW_STORAGE_LEASE_FLAG_PRESERVE_FOR_LATENCY)) {
+      ++out_state->latency_preservation_record_count;
     }
     if (!iree_host_size_checked_add(lease_unit_capacity, record->unit_count,
                                     &lease_unit_capacity)) {

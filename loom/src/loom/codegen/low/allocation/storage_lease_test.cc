@@ -314,7 +314,8 @@ TEST_F(LowAllocationStorageLeaseTest, MaterializesAndReleasesConflictingLease) {
       Schedule(module, function_op, liveness, schedule_blocks,
                IREE_ARRAYSIZE(schedule_blocks), nodes, IREE_ARRAYSIZE(nodes),
                scheduled_node_indices, IREE_ARRAYSIZE(scheduled_node_indices));
-  const loom_low_storage_lease_record_t records[] = {StorageLeaseRecord()};
+  loom_low_storage_lease_record_t records[] = {StorageLeaseRecord()};
+  records[0].flags |= LOOM_LOW_STORAGE_LEASE_FLAG_PRESERVE_FOR_LATENCY;
   const loom_low_storage_lease_table_t lease_table =
       StorageLeaseTable(&schedule, records, IREE_ARRAYSIZE(records));
 
@@ -322,6 +323,7 @@ TEST_F(LowAllocationStorageLeaseTest, MaterializesAndReleasesConflictingLease) {
   IREE_ASSERT_OK(loom_low_allocation_storage_lease_state_initialize(
       &lease_table, module, function_op, &value_domain, &liveness, &arena_,
       &state));
+  EXPECT_EQ(state.latency_preservation_record_count, 1u);
 
   const loom_low_allocation_assignment_t leased_assignment = Assignment(
       /*value_id=*/value_ids[0], /*descriptor_reg_class_id=*/0,
@@ -352,6 +354,10 @@ TEST_F(LowAllocationStorageLeaseTest, MaterializesAndReleasesConflictingLease) {
       &state, &descriptor_set, &liveness, &candidate,
       /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0,
       LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED));
+  EXPECT_TRUE(loom_low_allocation_storage_lease_state_conflicts(
+      &state, &descriptor_set, &liveness, &candidate,
+      /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0,
+      LOOM_LOW_ALLOCATION_STORAGE_RELEASE_PRESERVE_LATENCY));
 
   IREE_ASSERT_OK(loom_low_allocation_storage_lease_state_record_release_actions(
       &state, &descriptor_set, &liveness, &candidate,

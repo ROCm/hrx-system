@@ -1181,7 +1181,15 @@ def _amdgpu_append_memory_source_leases(
     operand: Operand,
     packet_operand_index: int,
     counter_mask: int,
+    *,
+    preserve_for_latency: bool,
 ) -> None:
+    lease_flags = _AMDGPU_STORAGE_LEASE_FLAGS
+    if preserve_for_latency and _amdgpu_operand_accepts_sgpr(operand):
+        lease_flags = (
+            *lease_flags,
+            StorageLeaseFlag.PRESERVE_FOR_LATENCY,
+        )
     for counter_id, counter_bit in _AMDGPU_WAIT_COUNTER_MASKS.items():
         if (counter_mask & counter_bit) == 0:
             continue
@@ -1194,7 +1202,7 @@ def _amdgpu_append_memory_source_leases(
                 release_class_id=counter_id,
                 release_reason_id=_AMDGPU_WAIT_PLAN_REASON_MEMORY_SOURCE_REUSE,
                 release_reason_name=_AMDGPU_WAIT_PLAN_REASON_MEMORY_SOURCE_REUSE_NAME,
-                flags=_AMDGPU_STORAGE_LEASE_FLAGS,
+                flags=lease_flags,
             )
         )
 
@@ -1212,6 +1220,18 @@ def _amdgpu_descriptor_storage_leases(
     read_counter_mask, write_counter_mask = _amdgpu_storage_lease_counter_masks(
         schedule_classes, descriptor
     )
+    latency_sensitive_source_markers = tuple(
+        operand for operand in descriptor.operands if operand.latency_sensitive_resource
+    )
+    if any(
+        operand.role is not OperandRole.RESOURCE
+        for operand in latency_sensitive_source_markers
+    ):
+        raise ValueError(
+            f"AMDGPU descriptor '{descriptor.key}' marks a non-resource "
+            "operand as a latency-sensitive storage source"
+        )
+    preserve_memory_sources_for_latency = bool(latency_sensitive_source_markers)
     storage_leases: list[StorageLease] = []
     for result_index, result in enumerate(
         descriptor.operands[: _descriptor_result_count(descriptor)]
@@ -1271,6 +1291,7 @@ def _amdgpu_descriptor_storage_leases(
                     operand,
                     current_packet_operand_index,
                     xcnt_source_counter_mask,
+                    preserve_for_latency=preserve_memory_sources_for_latency,
                 )
             if _amdgpu_operand_accepts_vgpr(operand) and vmem_write_counter_mask != 0:
                 storage_leases.append(
@@ -1293,6 +1314,7 @@ def _amdgpu_descriptor_storage_leases(
                     operand,
                     current_packet_operand_index,
                     memory_source_read_counter_mask | memory_source_write_counter_mask,
+                    preserve_for_latency=preserve_memory_sources_for_latency,
                 )
     return tuple(storage_leases)
 

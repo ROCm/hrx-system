@@ -450,8 +450,19 @@ void loom_low_schedule_candidate_policy_select(
 
   const bool recover_pressure =
       compare_mode == LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF;
+  // Keep zero-stall selection on the bounded source-order path unless its best
+  // candidate would consume a longer-latency result while ready work remains
+  // outside that window. The existing recovery views can then preserve the
+  // latency window without scanning the complete ready set.
+  const bool recover_latency_window =
+      !recover_pressure &&
+      out_selection->chosen_score.effective_stall_cycles == 0 &&
+      out_selection->chosen_score.dependency_latency_cycles >
+          out_selection->chosen_score.latency_cycles &&
+      ready_candidate_count > nominee_count;
   if (!recover_pressure &&
-      out_selection->chosen_score.effective_stall_cycles == 0) {
+      out_selection->chosen_score.effective_stall_cycles == 0 &&
+      !recover_latency_window) {
     return;
   }
   const uint8_t source_nominee_count = nominee_count;

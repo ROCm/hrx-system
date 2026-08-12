@@ -385,7 +385,9 @@ def test_storage_lease_rows_project_memory_dependencies() -> None:
                 OperandRole.RESOURCE,
                 (RegClassAlt(_REG_SGPR),),
                 unit_count=4,
+                latency_sensitive_resource=True,
             ),
+            Operand("soffset", OperandRole.OPERAND, (RegClassAlt(_REG_SGPR),)),
             Operand(
                 "exec",
                 OperandRole.IMPLICIT,
@@ -422,6 +424,10 @@ def test_storage_lease_rows_project_memory_dependencies() -> None:
         StorageLeaseFlag.STARTS_AT_ISSUE,
         StorageLeaseFlag.MAY_CARRY_ACROSS_BOUNDARY,
     )
+    latency_source_flags = (
+        *source_flags,
+        StorageLeaseFlag.PRESERVE_FOR_LATENCY,
+    )
     assert _storage_lease_signature(descriptor) == (
         (
             StorageLeaseKind.RESULT_WRITE,
@@ -448,7 +454,7 @@ def test_storage_lease_rows_project_memory_dependencies() -> None:
             4,
             _COUNTER_VMEM_LOAD,
             "amdgpu.memory_source_reuse",
-            source_flags,
+            latency_source_flags,
         ),
         (
             StorageLeaseKind.SOURCE_READ,
@@ -457,7 +463,25 @@ def test_storage_lease_rows_project_memory_dependencies() -> None:
             4,
             _COUNTER_VMEM_STORE,
             "amdgpu.memory_source_reuse",
-            source_flags,
+            latency_source_flags,
+        ),
+        (
+            StorageLeaseKind.SOURCE_READ,
+            StorageLeaseAttachment.OPERAND,
+            2,
+            1,
+            _COUNTER_VMEM_LOAD,
+            "amdgpu.memory_source_reuse",
+            latency_source_flags,
+        ),
+        (
+            StorageLeaseKind.SOURCE_READ,
+            StorageLeaseAttachment.OPERAND,
+            2,
+            1,
+            _COUNTER_VMEM_STORE,
+            "amdgpu.memory_source_reuse",
+            latency_source_flags,
         ),
     )
 

@@ -50,7 +50,8 @@ static bool loom_low_storage_lease_flags_are_valid(
       LOOM_LOW_STORAGE_LEASE_FLAG_STARTS_AT_ISSUE |
       LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_BEFORE_BOUNDARY |
       LOOM_LOW_STORAGE_LEASE_FLAG_MAY_CARRY_ACROSS_BOUNDARY |
-      LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_FOR_PRESSURE;
+      LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_FOR_PRESSURE |
+      LOOM_LOW_STORAGE_LEASE_FLAG_PRESERVE_FOR_LATENCY;
   if ((flags & (loom_low_storage_lease_flags_t)~known_flags) != 0) {
     return false;
   }
