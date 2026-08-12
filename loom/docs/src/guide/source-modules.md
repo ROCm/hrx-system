@@ -182,6 +182,11 @@ binds its configuration, and compiles the reachable kernel for GFX11. Its
 `run.sh` prints every public command before executing it, and the documentation
 build regenerates the displayed Low products from that same path.
 
+Use [Format and verify source](../workflows/format-and-verify.md) for the complete
+`loom-format` task contract and [Link and package
+modules](../workflows/link-and-package.md) for archive, selective-link, config,
+and plan commands.
+
 Continue through the programming guide to values, functions, memory, kernels,
 facts, checks, and command programs as those ownership boundaries become
 relevant. For exact source forms, use the generated [`func`](../reference/dialects/func/index.md),

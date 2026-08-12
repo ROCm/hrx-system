@@ -69,6 +69,10 @@ nav:
   - Programming guide:
       - Guide map: guide/index.md
       - Source modules and canonical text: guide/source-modules.md
+  - Workflows:
+      - Workflow map: workflows/index.md
+      - Format and verify source: workflows/format-and-verify.md
+      - Link and package modules: workflows/link-and-package.md
   - Reference:
       - Reference map: reference/index.md
       - Dialects: reference/dialects/index.md
