@@ -82,18 +82,24 @@ hipError_t iree_hip_validate_launch_configuration(
   threads_per_block *= block_dim[2];
   const uint32_t device_max_threads = device->max_threads_per_block;
   const uint32_t symbol_max_threads =
-      symbol ? symbol->max_threads_per_block : 0;
+      symbol ? symbol->function_attributes.maximum_threads_per_block : 0;
   if ((device_max_threads != 0 && threads_per_block > device_max_threads) ||
       (symbol_max_threads != 0 && threads_per_block > symbol_max_threads)) {
     return hipErrorInvalidConfiguration;
   }
 
-  if (device->max_shared_memory_per_block != 0 &&
-      shared_memory_bytes > device->max_shared_memory_per_block) {
-    return hipErrorInvalidConfiguration;
-  }
-  if (symbol && symbol->max_dynamic_shared_size_bytes != 0 &&
-      shared_memory_bytes > symbol->max_dynamic_shared_size_bytes) {
+  if (symbol &&
+      iree_all_bits_set(
+          symbol->function_attributes.provided_flags,
+          IREE_HAL_STREAMING_FUNCTION_ATTRIBUTE_FLAG_DYNAMIC_SHARED_MEMORY)) {
+    const uint32_t configured_limit =
+        iree_hal_streaming_function_attributes_dynamic_shared_memory_size(
+            &symbol->function_attributes);
+    if (shared_memory_bytes > configured_limit) {
+      return hipErrorInvalidConfiguration;
+    }
+  } else if (device->max_shared_memory_per_block != 0 &&
+             shared_memory_bytes > device->max_shared_memory_per_block) {
     return hipErrorInvalidConfiguration;
   }
   return hipSuccess;

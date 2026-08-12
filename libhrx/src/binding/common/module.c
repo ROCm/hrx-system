@@ -221,8 +221,11 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
   }
   module->symbols = (iree_hal_streaming_symbol_t*)buffer;
   iree_hal_streaming_parameter_op_t* ops_base =
-      (iree_hal_streaming_parameter_op_t*)(buffer + symbols_size);
+      buffer ? (iree_hal_streaming_parameter_op_t*)(buffer + symbols_size)
+             : NULL;
 
+  const iree_hal_device_spec_t* device_spec =
+      iree_hal_device_spec(module->context->device);
   iree_hal_streaming_parameter_op_t* current_ops = ops_base;
   for (iree_host_size_t i = 0, parameter_base = 0;
        iree_status_is_ok(status) && i < module->symbol_count; ++i) {
@@ -234,14 +237,12 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
     symbol->executable = export_executables[i];
     symbol->export_ordinal = export_ordinals[i];
 
-    // Function attributes - TODO: Query from export metadata when available.
-    // TODO(benvanik): populate from occupancy_info when available.
+    // Cache generic loaded-function facts for compatibility API queries and
+    // launch validation.
     symbol->occupancy_info = export_infos[i].occupancy_info;
-    symbol->max_threads_per_block = 1024;       // TODO: from metadata.
-    symbol->shared_size_bytes = 0;              // TODO: from metadata.
-    symbol->local_size_bytes = 0;               // TODO: from metadata.
-    symbol->num_regs = 32;                      // TODO: from metadata.
-    symbol->max_dynamic_shared_size_bytes = 0;  // TODO: from metadata.
+    status = iree_hal_streaming_function_attributes_initialize(
+        device_spec, &export_infos[i], &symbol->function_attributes);
+    if (!iree_status_is_ok(status)) break;
 
     // Initialize parameter info.
     iree_hal_streaming_parameter_info_t* parameter_info = &symbol->parameters;

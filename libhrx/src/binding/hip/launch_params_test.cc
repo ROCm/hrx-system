@@ -24,6 +24,21 @@ void InitializeLaunchDevice(iree_hal_streaming_device_t* device) {
   device->max_shared_memory_per_block = 64 * 1024;
 }
 
+void InitializeLaunchSymbol(iree_hal_streaming_symbol_t* symbol,
+                            uint32_t maximum_threads_per_block,
+                            uint32_t dynamic_shared_memory_size) {
+  symbol->function_attributes.provided_flags =
+      IREE_HAL_STREAMING_FUNCTION_ATTRIBUTE_FLAG_MAXIMUM_THREADS_PER_BLOCK |
+      IREE_HAL_STREAMING_FUNCTION_ATTRIBUTE_FLAG_DYNAMIC_SHARED_MEMORY;
+  symbol->function_attributes.maximum_threads_per_block =
+      maximum_threads_per_block;
+  symbol->function_attributes.maximum_configurable_dynamic_shared_memory_size =
+      dynamic_shared_memory_size;
+  iree_atomic_store(
+      &symbol->function_attributes.configured_dynamic_shared_memory_size,
+      dynamic_shared_memory_size, iree_memory_order_relaxed);
+}
+
 TEST(LaunchParamsTest, ParseLaunchExtraAcceptsBufferAndSize) {
   std::array<uint8_t, 16> buffer = {};
   size_t buffer_size = buffer.size();
@@ -115,8 +130,8 @@ TEST(LaunchParamsTest, ValidateLaunchConfigurationAcceptsDeviceLimits) {
   iree_hal_streaming_device_t device = {};
   InitializeLaunchDevice(&device);
   iree_hal_streaming_symbol_t symbol = {};
-  symbol.max_threads_per_block = 512;
-  symbol.max_dynamic_shared_size_bytes = 32 * 1024;
+  InitializeLaunchSymbol(&symbol, /*maximum_threads_per_block=*/512,
+                         /*dynamic_shared_memory_size=*/32 * 1024);
 
   EXPECT_EQ(hipSuccess,
             iree_hip_validate_launch_configuration(
@@ -145,8 +160,8 @@ TEST(LaunchParamsTest, ValidateLaunchConfigurationRejectsResourceExcess) {
   iree_hal_streaming_device_t device = {};
   InitializeLaunchDevice(&device);
   iree_hal_streaming_symbol_t symbol = {};
-  symbol.max_threads_per_block = 256;
-  symbol.max_dynamic_shared_size_bytes = 4096;
+  InitializeLaunchSymbol(&symbol, /*maximum_threads_per_block=*/256,
+                         /*dynamic_shared_memory_size=*/4096);
 
   EXPECT_EQ(hipErrorInvalidConfiguration,
             iree_hip_validate_launch_configuration(
@@ -158,6 +173,39 @@ TEST(LaunchParamsTest, ValidateLaunchConfigurationRejectsResourceExcess) {
                 &device, &symbol, /*grid_dim_x=*/1, /*grid_dim_y=*/1,
                 /*grid_dim_z=*/1, /*block_dim_x=*/128, /*block_dim_y=*/1,
                 /*block_dim_z=*/1, /*shared_memory_bytes=*/8192));
+}
+
+TEST(LaunchParamsTest, ValidateLaunchConfigurationHonorsKnownZeroLimit) {
+  iree_hal_streaming_device_t device = {};
+  InitializeLaunchDevice(&device);
+  iree_hal_streaming_symbol_t symbol = {};
+  InitializeLaunchSymbol(&symbol, /*maximum_threads_per_block=*/256,
+                         /*dynamic_shared_memory_size=*/0);
+
+  EXPECT_EQ(hipSuccess,
+            iree_hip_validate_launch_configuration(
+                &device, &symbol, /*grid_dim_x=*/1, /*grid_dim_y=*/1,
+                /*grid_dim_z=*/1, /*block_dim_x=*/1, /*block_dim_y=*/1,
+                /*block_dim_z=*/1, /*shared_memory_bytes=*/0));
+  EXPECT_EQ(hipErrorInvalidConfiguration,
+            iree_hip_validate_launch_configuration(
+                &device, &symbol, /*grid_dim_x=*/1, /*grid_dim_y=*/1,
+                /*grid_dim_z=*/1, /*block_dim_x=*/1, /*block_dim_y=*/1,
+                /*block_dim_z=*/1, /*shared_memory_bytes=*/1));
+}
+
+TEST(LaunchParamsTest, ValidateLaunchConfigurationHonorsOptinFunctionLimit) {
+  iree_hal_streaming_device_t device = {};
+  InitializeLaunchDevice(&device);
+  iree_hal_streaming_symbol_t symbol = {};
+  InitializeLaunchSymbol(&symbol, /*maximum_threads_per_block=*/256,
+                         /*dynamic_shared_memory_size=*/96 * 1024);
+
+  EXPECT_EQ(hipSuccess,
+            iree_hip_validate_launch_configuration(
+                &device, &symbol, /*grid_dim_x=*/1, /*grid_dim_y=*/1,
+                /*grid_dim_z=*/1, /*block_dim_x=*/1, /*block_dim_y=*/1,
+                /*block_dim_z=*/1, /*shared_memory_bytes=*/80 * 1024));
 }
 
 TEST(LaunchParamsTest,

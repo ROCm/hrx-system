@@ -722,8 +722,11 @@ CUDAAPI CUresult cuDeviceGetAttribute(int* pi, CUdevice_attribute attrib,
     case CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR:
       *pi = device->compute_capability_minor;
       break;
-    case CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN:
+    case CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK:
       *pi = device->max_shared_memory_per_block;
+      break;
+    case CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN:
+      *pi = device->max_shared_memory_per_block_optin;
       break;
     case CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR:
       *pi = device->max_shared_memory_per_multiprocessor;
@@ -2179,25 +2182,26 @@ CUDAAPI CUresult cuFuncGetAttribute(int* pi, CUfunction_attribute attrib,
   if (symbol->type != IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION) {
     return CUDA_ERROR_INVALID_HANDLE;
   }
+  iree_hal_streaming_function_attributes_t* attributes =
+      &symbol->function_attributes;
 
   // Return attribute value based on what we have cached.
   switch (attrib) {
     case CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK:
-      *pi = symbol->max_threads_per_block;
+      *pi = attributes->maximum_threads_per_block;
       break;
     case CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES:
-      *pi = symbol->shared_size_bytes;
+      *pi = attributes->fixed_shared_memory_size;
       break;
     case CU_FUNC_ATTRIBUTE_CONST_SIZE_BYTES:
       // We don't track constant memory usage.
       *pi = 0;
       break;
     case CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES:
-      // Local memory is typically 0 for modern GPUs.
-      *pi = 0;
+      *pi = attributes->fixed_local_memory_size;
       break;
     case CU_FUNC_ATTRIBUTE_NUM_REGS:
-      *pi = symbol->num_regs;
+      *pi = attributes->register_count;
       break;
     case CU_FUNC_ATTRIBUTE_PTX_VERSION:
       // Return a default PTX version.
@@ -2212,8 +2216,8 @@ CUDAAPI CUresult cuFuncGetAttribute(int* pi, CUfunction_attribute attrib,
       *pi = 0;
       break;
     case CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES:
-      // Return the kernel's maximum dynamic shared memory size.
-      *pi = symbol->max_dynamic_shared_size_bytes;
+      *pi = iree_hal_streaming_function_attributes_dynamic_shared_memory_size(
+          attributes);
       break;
     case CU_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT:
       // Carveout percentage not tracked.
@@ -2250,15 +2254,18 @@ CUDAAPI CUresult cuFuncSetAttribute(CUfunction hfunc,
     IREE_TRACE_ZONE_END(z0);
     return CUDA_ERROR_INVALID_HANDLE;
   }
+  iree_hal_streaming_function_attributes_t* attributes =
+      &symbol->function_attributes;
 
   // Only certain attributes can be set.
   CUresult result = CUDA_SUCCESS;
   switch (attrib) {
     case CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES:
-      // Store the maximum dynamic shared memory size for this function.
-      // This is used by kernels that need more than 48KB shared memory.
-      // Note that this is not actually used for anything but queries.
-      symbol->max_dynamic_shared_size_bytes = (uint32_t)value;
+      if (value < 0 ||
+          !iree_hal_streaming_function_attributes_try_set_dynamic_shared_memory_size(
+              attributes, (uint32_t)value)) {
+        result = CUDA_ERROR_INVALID_VALUE;
+      }
       break;
     case CU_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT:
       // This controls the L1/shared memory split.
