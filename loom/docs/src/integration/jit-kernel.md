@@ -1,12 +1,14 @@
 # Embed kernel JIT compilation
 
+**Example files:** [`loom/docs/examples/integration/jit-kernel/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/integration/jit-kernel)
+
 The public `loomc` API exposes each compiler boundary as an in-memory operation.
 An application can load authored text or bytecode, link a root from reusable
 libraries, specialize it for the selected device, emit executable bytes, and
 evaluate the matching launch configuration without invoking a subprocess or
 round-tripping through temporary artifacts.
 
-This chapter follows one checked AMDGPU example. AMDGPU appears only where the
+This chapter follows one complete AMDGPU example. AMDGPU appears only where the
 embedding creates a target environment and profile and where it requests an
 HSACO. Source loading, compilation, diagnostics, launch evaluation, artifact
 ownership, and concurrency use the same core API for every target package.
@@ -22,8 +24,10 @@ In this chapter, you will learn:
 
 ## Follow one kernel through the boundary
 
-The checked source gives the host launch-config program one workload value and
+The source gives the host launch-config program one workload value and
 gives the device body no arguments:
+
+**Source:** [`loom/docs/examples/integration/jit-kernel/kernel.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/integration/jit-kernel/kernel.loom)
 
 ```loom title="kernel.loom"
 --8<-- "examples/integration/jit-kernel/kernel.loom"
@@ -52,20 +56,24 @@ executable entry to its launch-config function.
 
 A target package creates the target environment registered with the context:
 
+**Source:** [`loom/docs/examples/integration/jit-kernel/amdgpu/jit_kernel.c`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/integration/jit-kernel/amdgpu/jit_kernel.c)
+
 ```c
 --8<-- "examples/integration/jit-kernel/amdgpu/jit_kernel.c:target-context"
 ```
 
-The target environment and context are immutable after creation. The checked
+The target environment and context are immutable after creation. The
 example also creates one compiler, one target profile, and one prepared target
 pipeline. Those objects can be shared across independent workers. Each worker
 uses its own `loomc_workspace_t` and mutable `loomc_module_t`:
+
+**Source:** [`loom/docs/examples/integration/jit-kernel/amdgpu/jit_kernel.c`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/integration/jit-kernel/amdgpu/jit_kernel.c)
 
 ```c
 --8<-- "examples/integration/jit-kernel/amdgpu/jit_kernel.c:profile-pipeline"
 ```
 
-The example loads a path so the `.loom` file remains the single checked source
+The example loads a path so the `.loom` file remains the single source
 shown above. A model loader normally calls `loomc_source_create` with borrowed,
 copied, or externally owned `.loom` or `.loombc` bytes instead. The rest of the
 lifecycle is identical and remains filesystem-free.
@@ -79,6 +87,8 @@ HAL device; an offline builder may construct a generic profile such as
 
 Compilation receives the mutable module, the selected pass program, and a
 per-function target specialization:
+
+**Source:** [`loom/docs/examples/integration/jit-kernel/amdgpu/jit_kernel.c`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/integration/jit-kernel/amdgpu/jit_kernel.c)
 
 ```c
 --8<-- "examples/integration/jit-kernel/amdgpu/jit_kernel.c:compile"
@@ -103,13 +113,15 @@ The compile result owns the launch-config artifact bytes. Loading them produces
 an independently retained program, so the compile result can be released as
 soon as loading completes:
 
+**Source:** [`loom/docs/examples/integration/jit-kernel/amdgpu/jit_kernel.c`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/integration/jit-kernel/amdgpu/jit_kernel.c)
+
 ```c
 --8<-- "examples/integration/jit-kernel/amdgpu/jit_kernel.c:launch-config"
 ```
 
 Lookup by public export name happens once when a cached kernel version is
 prepared. Repeated invocations use the returned program-local token and avoid
-source compilation and repeated string lookup.
+repeated string lookup.
 
 Workload arguments are positional raw scalar bits. `index` and `offset` consume
 all 64 bits; narrower integers and floating-point values use the least
@@ -130,6 +142,8 @@ convention.
 
 Emission is a separate operation over the prepared module:
 
+**Source:** [`loom/docs/examples/integration/jit-kernel/amdgpu/jit_kernel.c`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/integration/jit-kernel/amdgpu/jit_kernel.c)
+
 ```c
 --8<-- "examples/integration/jit-kernel/amdgpu/jit_kernel.c:emit"
 ```
@@ -139,7 +153,7 @@ or copies `artifact->contents` into its runtime or cache before releasing that
 result. An offline packager can write the same artifact object to a file without
 changing the compile and emission path.
 
-The checked example prints the two facts an embedding carries into runtime
+The example prints the two facts an embedding carries into runtime
 loading:
 
 ```text
@@ -170,7 +184,7 @@ resources, and submits the returned workgroup count with the executable entry.
 It maps `workgroup_storage_bytes` according to the target adapter rather than
 assuming it is an API's additional dynamic-shared-memory field.
 
-The repository carries complete checked runtime handoffs for three integration
+The repository carries complete runtime handoffs for three integration
 shapes:
 
 - [raw HSA and AMDGPU HSACO](https://github.com/ROCm/hrx-system/blob/main/loom/binding/c/example/emit_amdgpu_hsa.c);
@@ -199,7 +213,7 @@ a normal result. An OK status can still return a compiler result containing
 structured diagnostics and a failed result state. Inspect both boundaries;
 never treat “the API call returned” as “the source program compiled.”
 
-The complete checked source for this chapter lives in the
+The complete source for this chapter lives in the
 [`jit-kernel` example](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/integration/jit-kernel).
 The generated [`loomc` C API reference](../reference/c-api/index.md) remains the
 authoritative contract for every descriptor, handle, status, and artifact used
