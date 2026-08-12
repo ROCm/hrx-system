@@ -10,8 +10,10 @@ Add the optional, pinned documentation toolchain to the repository environment:
 python dev.py setup --docs
 ```
 
-This installs the hash-locked Python requirements and the official pinned
-Doxygen binary into `.venv`; it does not depend on distribution packages.
+This installs the hash-locked Python requirements and the pinned Bazelisk and
+Doxygen binaries into `.venv`; it does not depend on distribution packages.
+The compiler-backed guide examples use Bazelisk to build the exact Loom tools
+from the current checkout before documentation is assembled.
 
 Build the strict static site:
 

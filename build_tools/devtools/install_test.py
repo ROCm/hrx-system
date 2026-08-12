@@ -46,10 +46,13 @@ class InstallTest(unittest.TestCase):
         for tool in (tool for tool in install.TOOLS.values() if tool.default):
             self.assertIn(platform_key, tool.assets)
 
-    def test_docs_group_selects_only_doxygen(self):
+    def test_docs_group_selects_documentation_build_tools(self):
         args = argparse.Namespace(list=False, group=["docs"], tools=[])
 
-        self.assertEqual(set(install.selected_tools(args)), {"doxygen"})
+        self.assertEqual(
+            set(install.selected_tools(args)),
+            {"bazelisk", "doxygen"},
+        )
 
     def test_extracts_zip_archive_files_with_recorded_hashes(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

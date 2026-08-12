@@ -18,13 +18,13 @@ same linkable program in bytecode. Neither form implies one target or one
 deployment strategy.
 
 ```text
-authored modules + libraries + configuration + target profile
-                              │
-                      link and specialize
-                              │
-              lower the selected executable roots
-                              │
-       native code + launch contracts + compiler evidence
+motif.loom + kernel.loom + model.loom + configuration + target profile
+                                  │
+                          link and specialize
+                                  │
+                  lower the selected executable roots
+                                  │
+           native code + launch contracts + compiler evidence
 ```
 
 The same source can be compiled ahead of time, linked and specialized when a
@@ -59,6 +59,17 @@ normal inlining and optimization can remove.
 This is the foundation of a scalable library: callers name semantic demands;
 libraries provide reusable implementations; target selection remains a fact of
 the final compilation rather than a global property baked into every helper.
+This example defines an exact helper, a wave32-specific provider, and a
+portable provider for the same `guide.transform` contract:
+
+```loom title="motif.loom"
+--8<-- "examples/mental-model/motif.loom"
+```
+
+The wave32 provider is eligible only when the selected target establishes a
+subgroup size of 32. The fallback stays targetless, so the motif remains useful
+to targets that know nothing about AMDGPU.
+
 The complete operation inventory lives in the generated
 [`func` dialect reference](../reference/dialects/func/index.md).
 
@@ -85,6 +96,13 @@ they are not. The generated [`kernel` dialect
 reference](../reference/dialects/kernel/index.md) defines the complete launch,
 execution, collective, and synchronization vocabulary.
 
+The kernel below owns its launch geometry, states its configuration domain,
+and applies the motif contract without naming either provider:
+
+```loom title="kernel.loom"
+--8<-- "examples/mental-model/kernel.loom"
+```
+
 ## Ask when a value becomes known
 
 Most confusion about specialization disappears once every value has a clear
@@ -105,6 +123,22 @@ keeps their effect visible. Likewise, target requirements are compile-time
 selection constraints rather than runtime branches. Reusable code generally
 stays targetless; a provider names a target requirement only when its algorithm
 actually depends on one.
+
+Loom can preserve only information the program supplies. The ranges and
+divisibility predicates on a
+[`config.decl`](../reference/dialects/config/ops/decl.md) constrain a value even
+before a composition root binds it to one constant. An
+[`index.assume`](../reference/dialects/index/ops/assume.md) creates a refined SSA
+value carrying facts established by the surrounding program, such as the
+in-bounds index in `kernel.loom`. The `buffer.assume.*` family carries root
+alignment, memory-space, aliasing, and identity facts; the example's
+[`buffer.assume.noalias`](../reference/dialects/buffer/ops/assume-noalias.md)
+makes the input and output independence explicit.
+
+These are optimization inputs, not documentation comments. Shapes, ranges,
+alignment, aliasing, and target requirements survive linking and
+specialization so that each later stage can make a stronger decision without
+rediscovering information that the author or embedding already knew.
 
 The generated [`config`](../reference/dialects/config/index.md) and
 [`target`](../reference/dialects/target/index.md) references define those two
@@ -140,6 +174,13 @@ target facts while still accepting different weights, cache storage, inputs,
 and outputs. It is the same idea as a specialized kernel launch, applied to a
 larger ownership boundary rather than hidden behind a separate graph compiler.
 
+The outer module declares the exact kernel dependency and turns it into a
+one-dispatch reusable command program:
+
+```loom title="model.loom"
+--8<-- "examples/mental-model/model.loom"
+```
+
 !!! info "Current command-program surface"
 
     Command-program source, preparation, target-neutral lowering, and immutable
@@ -150,6 +191,40 @@ larger ownership boundary rather than hidden behind a separate graph compiler.
 The generated [`command` dialect
 reference](../reference/dialects/command/index.md) documents the source
 constructs that exist today.
+
+## Follow one composition to Low
+
+The three source listings above are checked `.loom` files, not prose copies.
+With the Loom tools on `PATH`, this command formats them, links and specializes
+the `@transform` root, compiles its kernel for the generic GFX11 profile, and
+prints every Loom command it runs:
+
+```shell
+loom/docs/examples/mental-model/run.sh \
+  gfx11-generic build/mental-model/gfx11-generic
+```
+
+The resulting directory contains the specialized `transform.loom`, a VMFB, an
+HSACO, and the captured target Low IR. The documentation build invokes that
+same script and regenerates the views below; neither output is checked-in
+source.
+
+=== "GFX11 kernel Low"
+
+    ```loom
+    --8<-- "generated/examples/mental-model/kernel-gfx11.loom"
+    ```
+
+=== "Command-program Low"
+
+    ```loom
+    --8<-- "generated/examples/mental-model/command-program.loom"
+    ```
+
+The GFX11 tab comes directly from the installed-tool workflow above. The
+command-program tab shows compiler-owned materialization of the same linked
+root. Until command-program materialization has a published installed-tool
+surface, treat that tab as verified compiler output rather than a CLI recipe.
 
 ## Embedding chooses the deployment policy
 
@@ -179,6 +254,6 @@ threading, and failure contracts.
   actually becomes dispatchable, and a command-program ABI where a reusable
   subgraph becomes materializable.
 
-Continue with [Acquiring Loom](acquiring-loom.md) for the current installation
-status, or browse the [generated language reference](../reference/index.md) for
-the exact syntax and operation contracts.
+Browse the [generated language reference](../reference/index.md) for exact
+syntax and operation contracts. If the Loom tools are not yet on `PATH`,
+[Acquiring Loom](acquiring-loom.md) describes the current installation status.

@@ -18,9 +18,11 @@ from typing import Any
 DOCS_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = Path(__file__).resolve().parents[3]
 AUTHORED_SOURCE_ROOT = DOCS_ROOT / "src"
+EXAMPLE_SOURCE_ROOT = DOCS_ROOT / "examples"
 PYTHON_SOURCE_ROOT = REPO_ROOT / "loom" / "py"
 DEFAULT_WORK_ROOT = REPO_ROOT / "build" / "loom-docs"
 C_API_GENERATOR = REPO_ROOT / "loom" / "binding" / "c" / "doc" / "generate.sh"
+DOC_GENERATOR_NAME = ".doc-generate.sh"
 
 if str(PYTHON_SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(PYTHON_SOURCE_ROOT))
@@ -82,7 +84,32 @@ def _generate_c_api(work_root: Path) -> Path:
     return html_root
 
 
-def _prepare_staged_source(staged_source_root: Path, c_api_html_root: Path) -> None:
+def _generate_example_outputs(work_root: Path) -> Path:
+    output_root = work_root / "examples"
+    _remove_generated_directory(output_root)
+    output_root.mkdir(parents=True)
+
+    environment = os.environ.copy()
+    python_bin_dir = str(Path(sys.executable).parent)
+    environment["PATH"] = python_bin_dir + os.pathsep + environment.get("PATH", "")
+    for generator in sorted(EXAMPLE_SOURCE_ROOT.rglob(DOC_GENERATOR_NAME)):
+        relative_package = generator.parent.relative_to(EXAMPLE_SOURCE_ROOT)
+        package_output_root = output_root / relative_package
+        package_output_root.mkdir(parents=True)
+        subprocess.run(
+            [str(generator), str(package_output_root)],
+            cwd=REPO_ROOT,
+            env=environment,
+            check=True,
+        )
+    return output_root
+
+
+def _prepare_staged_source(
+    staged_source_root: Path,
+    c_api_html_root: Path,
+    generated_example_root: Path,
+) -> None:
     _remove_generated_directory(staged_source_root)
     shutil.copytree(AUTHORED_SOURCE_ROOT, staged_source_root)
     files = generate_reference_files()
@@ -90,6 +117,10 @@ def _prepare_staged_source(staged_source_root: Path, c_api_html_root: Path) -> N
     shutil.copytree(
         c_api_html_root,
         staged_source_root / "reference" / "c-api" / "generated",
+    )
+    shutil.copytree(
+        generated_example_root,
+        staged_source_root / "generated" / "examples",
     )
 
 
@@ -99,14 +130,23 @@ def on_config(config: Any) -> Any:
     staged_source_root = _staged_source_root()
     staged_source_root.mkdir(parents=True, exist_ok=True)
     config["docs_dir"] = str(staged_source_root)
+    snippet_config = config.get("mdx_configs", {}).get("pymdownx.snippets")
+    if snippet_config is not None:
+        base_paths = snippet_config["base_path"]
+        if str(staged_source_root) not in base_paths:
+            base_paths.append(str(staged_source_root))
     return config
 
 
 def on_pre_build(config: Any) -> None:
     """Rebuilds the complete source tree before every MkDocs build."""
 
-    c_api_html_root = _generate_c_api(_work_root())
-    _prepare_staged_source(Path(config["docs_dir"]), c_api_html_root)
+    work_root = _work_root()
+    c_api_html_root = _generate_c_api(work_root)
+    generated_example_root = _generate_example_outputs(work_root)
+    _prepare_staged_source(
+        Path(config["docs_dir"]), c_api_html_root, generated_example_root
+    )
 
 
 def on_serve(server: Any, config: Any, builder: Any) -> Any:

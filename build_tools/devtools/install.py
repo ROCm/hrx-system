@@ -63,7 +63,7 @@ TOOLS = {
     "bazelisk": Tool(
         version="1.29.0",
         install_names=("bazelisk", "bazel"),
-        groups=("bazel",),
+        groups=("bazel", "docs"),
         assets={
             "darwin-amd64": ToolAsset(
                 url="https://github.com/bazelbuild/bazelisk/releases/download/v1.29.0/bazelisk-darwin-amd64",

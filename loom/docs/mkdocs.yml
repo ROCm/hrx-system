@@ -16,6 +16,7 @@ hooks:
 
 watch:
   - src
+  - examples
   - loom_docs
   - ../py/loom/builtin_types.py
   - ../binding/c/doc
