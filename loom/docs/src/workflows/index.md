@@ -42,6 +42,17 @@ the selected case's correctness, and records measurement evidence. Keeping
 those tasks separate prevents a fast incorrect candidate from becoming a
 performance result.
 
+| Task | Workflow |
+| --- | --- |
+| Execute every checked case | [Test correctness](test-correctness.md#run-every-case) |
+| Select one case or sample | [Test correctness](test-correctness.md#select-a-case-or-sample) |
+| Test a wrapper against bytecode libraries | [Test correctness](test-correctness.md#link-test-wrappers-to-libraries) |
+| Add target-pipeline sanitizers | [Test correctness](test-correctness.md#instrument-a-test-run) |
+| Inspect a benchmark plan without execution | [Benchmark checked work](benchmark.md#inspect-the-plan-first) |
+| Measure a complete checked case | [Benchmark checked work](benchmark.md#measure-the-complete-case) |
+| Measure device dispatch completion | [Benchmark checked work](benchmark.md#measure-dispatch-completion) |
+| Compare candidates in one run | [Benchmark checked work](benchmark.md#compare-candidates-in-one-run) |
+
 The concise path belongs in the testing and benchmarking workflows. Sanitizers,
 profiles, interleaved comparisons, artifact bundles, and report archaeology are
 advanced sections reached from that ordinary path rather than flags every
