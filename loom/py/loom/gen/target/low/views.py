@@ -18,7 +18,13 @@ from loom.gen.target.low.compiled import (
     CompiledOperandForm,
     DescriptorSetView,
 )
-from loom.target.low_descriptors import Descriptor, DescriptorSet, InstructionClass
+from loom.target.low_descriptors import (
+    Descriptor,
+    DescriptorSet,
+    InstructionClass,
+    Resource,
+    ScheduleClass,
+)
 
 
 def _descriptor_refs_for_ordinals(
@@ -96,27 +102,32 @@ def _validate_view_descriptors_match_storage(
 ) -> tuple[Descriptor, ...]:
     projected_descriptors: list[Descriptor] = []
     for view_descriptor, storage_descriptor_ordinal in zip(view_spec.descriptors, descriptor_ordinals, strict=True):
+        source_descriptor = compiled.source_descriptors[storage_descriptor_ordinal]
         storage_descriptor = compiled.descriptors[storage_descriptor_ordinal]
-        operand_layout = validation.validate_descriptor_operands(view_descriptor)
-        validation.validate_descriptor_constraints(view_descriptor)
-        projected_view_descriptor = compiler.derive_descriptor_projections(
-            view_descriptor,
-            operand_layout,
-        )
-        projected_descriptors.append(projected_view_descriptor)
+        if view_descriptor == source_descriptor:
+            projected_descriptors.append(storage_descriptor)
+            continue
         if (
             replace(
-                projected_view_descriptor,
-                asm_forms=storage_descriptor.asm_forms,
-                asm_surface=storage_descriptor.asm_surface,
-                asm_surface_reason=storage_descriptor.asm_surface_reason,
-                schedule_class=storage_descriptor.schedule_class,
+                view_descriptor,
+                asm_forms=source_descriptor.asm_forms,
+                asm_surface=source_descriptor.asm_surface,
+                asm_surface_reason=source_descriptor.asm_surface_reason,
+                schedule_class=source_descriptor.schedule_class,
             )
-            == storage_descriptor
+            != source_descriptor
         ):
-            continue
-        raise ValueError(
-            f"descriptor set view '{view_spec.key}' descriptor '{view_descriptor.key}' differs from storage descriptor '{storage_descriptor.key}' outside of asm forms, asm surface policy, or schedule class"
+            raise ValueError(
+                f"descriptor set view '{view_spec.key}' descriptor '{view_descriptor.key}' differs from storage descriptor '{storage_descriptor.key}' outside of asm forms, asm surface policy, or schedule class"
+            )
+        projected_descriptors.append(
+            replace(
+                storage_descriptor,
+                asm_forms=view_descriptor.asm_forms,
+                asm_surface=view_descriptor.asm_surface,
+                asm_surface_reason=view_descriptor.asm_surface_reason,
+                schedule_class=view_descriptor.schedule_class,
+            )
         )
     return tuple(projected_descriptors)
 
@@ -127,19 +138,34 @@ def _view_instruction_classes(
     descriptors: Sequence[Descriptor],
     descriptor_ordinals: Sequence[int],
 ) -> tuple[tuple[InstructionClass, ...], ...]:
-    storage_schedule_classes = {schedule_class.name: schedule_class for schedule_class in compiled.schedule_classes}
-    view_schedule_classes = {schedule_class.name: schedule_class for schedule_class in view_spec.schedule_classes}
-    resources = {resource.name: resource for resource in compiled.resources}
+    schedule_context: (
+        tuple[
+            dict[str, ScheduleClass],
+            dict[str, ScheduleClass],
+            dict[str, Resource],
+        ]
+        | None
+    ) = None
     result: list[tuple[InstructionClass, ...]] = []
     for descriptor, storage_descriptor_ordinal in zip(descriptors, descriptor_ordinals, strict=True):
         storage_descriptor = compiled.descriptors[storage_descriptor_ordinal]
+        if descriptor.schedule_class == storage_descriptor.schedule_class:
+            result.append(compiled.instruction_classes[storage_descriptor_ordinal])
+            continue
+        if schedule_context is None:
+            schedule_context = (
+                {schedule_class.name: schedule_class for schedule_class in compiled.schedule_classes},
+                {schedule_class.name: schedule_class for schedule_class in view_spec.schedule_classes},
+                {resource.name: resource for resource in compiled.resources},
+            )
+        storage_schedule_classes, view_schedule_classes, resources = schedule_context
         view_schedule_class = view_schedule_classes.get(descriptor.schedule_class)
         if view_schedule_class is None:
             raise ValueError(f"descriptor set view '{view_spec.key}' descriptor '{descriptor.key}' references unknown schedule class '{descriptor.schedule_class}'")
         storage_schedule_class = storage_schedule_classes.get(descriptor.schedule_class)
         if storage_schedule_class is None:
             raise ValueError(f"descriptor set view '{view_spec.key}' schedule class '{descriptor.schedule_class}' is absent from storage set '{compiled.spec.key}'")
-        if descriptor.schedule_class != storage_descriptor.schedule_class and view_schedule_class != storage_schedule_class:
+        if view_schedule_class != storage_schedule_class:
             raise ValueError(f"descriptor set view '{view_spec.key}' schedule class '{descriptor.schedule_class}' differs from storage set '{compiled.spec.key}'")
         result.append(
             compiler.derive_instruction_classes(

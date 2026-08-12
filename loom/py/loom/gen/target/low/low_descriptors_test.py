@@ -1175,6 +1175,30 @@ def test_descriptor_set_family_compares_derived_descriptor_projections() -> None
     assert ".flags = LOOM_LOW_OPERAND_FLAG_EARLY_CLOBBER," in source
 
 
+def test_descriptor_set_family_rejects_view_descriptor_contract_drift() -> None:
+    view_descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        semantic_tag="test.changed.add.i32",
+    )
+    view = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        key="test.low.view.core",
+        descriptors=(view_descriptor,),
+    )
+    storage_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(TEST_LOW_ADD_I32_DESCRIPTOR,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape(
+            "descriptor set view 'test.low.view.core' descriptor 'test.add.i32' differs from storage descriptor 'test.add.i32' outside of asm forms, asm surface policy, or schedule class"
+        ),
+    ):
+        generate_descriptor_set_family(storage_set, (view,))
+
+
 def test_descriptor_set_family_requires_view_canonical_asm_for_authorable_surface() -> None:
     view_descriptor = replace(TEST_LOW_ADD_I32_DESCRIPTOR, asm_forms=())
     view = replace(

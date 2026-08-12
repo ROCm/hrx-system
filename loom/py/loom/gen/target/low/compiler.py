@@ -910,7 +910,8 @@ def compile_descriptor_set(
         )
     validation.validate_physical_descriptor_set(spec)
 
-    selected_descriptors = [projected_descriptors_by_key[descriptor.key] for descriptor in _select_descriptors(spec, allowlist)]
+    source_descriptors = _select_descriptors(spec, allowlist)
+    selected_descriptors = [projected_descriptors_by_key[descriptor.key] for descriptor in source_descriptors]
     if not selected_descriptors:
         raise ValueError(f"descriptor set '{spec.key}' selected no descriptors")
     validation.validate_descriptor_asm_surface(spec, selected_descriptors)
@@ -1331,6 +1332,7 @@ def compile_descriptor_set(
 
     return CompiledDescriptorSet(
         spec=spec,
+        source_descriptors=source_descriptors,
         descriptors=selected_descriptors,
         instruction_classes=instruction_classes,
         reg_classes=reg_classes,
