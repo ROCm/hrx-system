@@ -29,6 +29,21 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    target_table_outputs
+  SRCS
+    "amdgpu_target_table_outputs.py"
+  DEPS
+    loom::py::loom::gen::target::arch::amdgpu::package_init
+    loom::py::loom::gen::target::arch::amdgpu::target_table_family
+    loom::py::loom::gen::support::support
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::descriptors_module
+    loom::py::loom::gen::target::arch::amdgpu::encoding::encoding_tables_module
+    loom::py::loom::target::low_descriptors
+    loom::py::loom::target::arch::amdgpu::isa_xml
+)
+
+iree_py_library(
+  NAME
     target_tables
   MAIN
     "amdgpu_target_tables.py"
@@ -37,9 +52,7 @@ iree_py_library(
   DEPS
     loom::py::loom::gen::target::arch::amdgpu::package_init
     loom::py::loom::gen::target::arch::amdgpu::target_table_family
-    loom::py::loom::gen::support::support
-    loom::py::loom::gen::target::arch::amdgpu::descriptors::descriptors_module
-    loom::py::loom::gen::target::arch::amdgpu::encoding::encoding_tables_module
+    loom::py::loom::gen::target::arch::amdgpu::target_table_outputs
     loom::py::loom::target::arch::amdgpu::descriptors
     loom::py::loom::target::arch::amdgpu::isa_xml
 )

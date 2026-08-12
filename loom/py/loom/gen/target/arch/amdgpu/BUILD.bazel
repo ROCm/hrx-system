@@ -32,6 +32,20 @@ iree_py_library(
     ],
 )
 
+iree_py_library(
+    name = "target_table_outputs",
+    srcs = ["amdgpu_target_table_outputs.py"],
+    deps = [
+        ":package_init",
+        ":target_table_family",
+        "//loom/py/loom/gen/support",
+        "//loom/py/loom/gen/target/arch/amdgpu/descriptors:descriptors_module",
+        "//loom/py/loom/gen/target/arch/amdgpu/encoding:encoding_tables_module",
+        "//loom/py/loom/target:low_descriptors",
+        "//loom/py/loom/target/arch/amdgpu:isa_xml",
+    ],
+)
+
 iree_py_binary(
     name = "target_tables",
     srcs = ["amdgpu_target_tables.py"],
@@ -40,9 +54,7 @@ iree_py_binary(
     deps = [
         ":package_init",
         ":target_table_family",
-        "//loom/py/loom/gen/support",
-        "//loom/py/loom/gen/target/arch/amdgpu/descriptors:descriptors_module",
-        "//loom/py/loom/gen/target/arch/amdgpu/encoding:encoding_tables_module",
+        ":target_table_outputs",
         "//loom/py/loom/target/arch/amdgpu:descriptors",
         "//loom/py/loom/target/arch/amdgpu:isa_xml",
     ],

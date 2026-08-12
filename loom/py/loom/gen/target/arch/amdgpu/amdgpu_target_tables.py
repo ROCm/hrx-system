@@ -23,16 +23,12 @@ def _ensure_runtime_py_on_path() -> None:
 
 _ensure_runtime_py_on_path()
 
-from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.target.arch.amdgpu.amdgpu_target_table_family import (  # noqa: E402
     amdgpu_target_table_family,
     amdgpu_target_table_instruction_names_by_isa_key,
 )
-from loom.gen.target.arch.amdgpu.descriptors.amdgpu_descriptors import (  # noqa: E402
-    generate_amdgpu_descriptor_table_family,
-)
-from loom.gen.target.arch.amdgpu.encoding.amdgpu_encoding_tables import (  # noqa: E402
-    generate_amdgpu_encoding_table_source,
+from loom.gen.target.arch.amdgpu.amdgpu_target_table_outputs import (  # noqa: E402
+    generate_amdgpu_target_table_outputs,
 )
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS,
@@ -41,9 +37,6 @@ from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
 from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
     parse_amdgpu_isa_xml_paths_for_instructions,
 )
-
-_DESCRIPTOR_SOURCE_HEADER = "loom/codegen/low/descriptors.h"
-_ENCODING_SOURCE_HEADER = "loom/target/arch/amdgpu/encoding/encoding.h"
 
 
 def _parse_isa_xml_paths(values: Sequence[str]) -> dict[str, Path]:
@@ -99,7 +92,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _parse_isa_xml_paths(args.isa_xml),
         instruction_names_by_isa_key,
     )
-    descriptor_sets = build_amdgpu_core_descriptor_sets_from_specs(
+    descriptor_sets_by_generator_target = build_amdgpu_core_descriptor_sets_from_specs(
         tuple(target for family in families for target in family.generator_targets),
         isa_specs,
     )
@@ -110,19 +103,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.encoding_source,
         strict=True,
     ):
-        descriptor_family = generate_amdgpu_descriptor_table_family(
-            family,
-            descriptor_sets,
-            source_public_header=_DESCRIPTOR_SOURCE_HEADER,
-        )
-        generated_encoding_source = generate_amdgpu_encoding_table_source(
+        generate_amdgpu_target_table_outputs(
             family,
             isa_specs,
-            descriptor_sets,
-            public_header=_ENCODING_SOURCE_HEADER,
+            descriptor_sets_by_generator_target,
+            descriptor_source_path=descriptor_source,
+            encoding_source_path=encoding_source,
         )
-        write_text_file(descriptor_source, descriptor_family.source)
-        write_text_file(encoding_source, generated_encoding_source)
     return 0
 
 
