@@ -15,6 +15,7 @@ cases, benchmark workloads, and compile evidence connected from readable IR to
 native artifacts.
 
 [Get Loom](getting-started/acquiring-loom.md){ .md-button .md-button--primary }
+[Learn the model](getting-started/mental-model.md){ .md-button }
 [Explore the reference](reference/index.md){ .md-button }
 
 </div>
