@@ -12,7 +12,7 @@
 #include "loom/pass/registry.h"
 #include "loom/pass/tooling.h"
 #include "loom/target/entry_selection.h"
-#include "loom/target/module_sealing.h"
+#include "loom/target/function_version_projection.h"
 #include "loom/target/pipeline.h"
 #include "loom/target/predicate.h"
 #include "loom/target/provider.h"
@@ -37,9 +37,9 @@ static iree_status_t loom_compile_project_trace_snapshot(
   if (state->function_versions->count == 0) {
     return iree_ok_status();
   }
-  return loom_target_module_seal(source_module, state->function_versions,
-                                 state->block_pool, source_module->allocator,
-                                 out_projected_module);
+  return loom_target_function_versions_project_module(
+      source_module, state->function_versions, state->block_pool,
+      source_module->allocator, out_projected_module);
 }
 
 void loom_compile_pipeline_options_initialize(

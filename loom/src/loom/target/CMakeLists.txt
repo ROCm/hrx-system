@@ -158,11 +158,11 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
-    module_sealing
+    function_version_projection
   HDRS
-    "module_sealing.h"
+    "function_version_projection.h"
   SRCS
-    "module_sealing.c"
+    "function_version_projection.c"
   DEPS
     ::function_version
     ::provider
@@ -176,12 +176,12 @@ loom_cc_library(
 
 loom_cc_test(
   NAME
-    module_sealing_test
+    function_version_projection_test
   SRCS
-    "module_sealing_test.cc"
+    "function_version_projection_test.cc"
   DEPS
     ::facts_builder
-    ::module_sealing
+    ::function_version_projection
     ::provider
     ::specialization
     iree::base
@@ -201,13 +201,13 @@ loom_cc_test(
 
 loom_cc_benchmark(
   NAME
-    module_sealing_benchmark
+    function_version_projection_benchmark
   SRCS
-    "module_sealing_benchmark.cc"
+    "function_version_projection_benchmark.cc"
   DEPS
     ::facts_builder
     ::function_version
-    ::module_sealing
+    ::function_version_projection
     ::provider
     iree::base
     iree::base::internal::arena

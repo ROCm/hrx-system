@@ -28,9 +28,9 @@ loom_cc_library(
     loom::pass::tooling
     loom::pass::trace
     loom::target::entry_selection
+    loom::target::function_version_projection
     loom::target::low_descriptor_registry
     loom::target::math_policy
-    loom::target::module_sealing
     loom::target::pipeline
     loom::target::predicate
     loom::target::provider

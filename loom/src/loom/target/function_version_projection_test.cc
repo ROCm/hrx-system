@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/target/module_sealing.h"
+#include "loom/target/function_version_projection.h"
 
 #include <string>
 
@@ -52,7 +52,7 @@ static iree_status_t ProjectTestProfileFacts(
 }
 
 static const loom_target_profile_type_t kTestProfileType = {
-    /*.name=*/IREE_SVL("module-sealing-test"),
+    /*.name=*/IREE_SVL("function-version-projection-test"),
     /*.fact_type=*/&loom_test_target_fact_type,
     /*.project_facts=*/ProjectTestProfileFacts,
 };
@@ -151,7 +151,7 @@ static TestTargetProfile MakeTestProfile(
   };
 }
 
-class TargetModuleSealingTest : public ::testing::Test {
+class TargetFunctionVersionProjectionTest : public ::testing::Test {
  protected:
   void SetUp() override {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(),
@@ -186,9 +186,10 @@ class TargetModuleSealingTest : public ::testing::Test {
   ModulePtr Parse(const char* source) {
     loom_module_t* module = nullptr;
     loom_text_parse_options_t options = {};
-    IREE_CHECK_OK(loom_text_parse(iree_make_cstring_view(source),
-                                  IREE_SV("module_sealing_test.loom"),
-                                  &context_, &block_pool_, &options, &module));
+    IREE_CHECK_OK(
+        loom_text_parse(iree_make_cstring_view(source),
+                        IREE_SV("function_version_projection_test.loom"),
+                        &context_, &block_pool_, &options, &module));
     IREE_ASSERT(module != nullptr);
     return ModulePtr(module);
   }
@@ -277,13 +278,13 @@ class TargetModuleSealingTest : public ::testing::Test {
     return result;
   }
 
-  ModulePtr Seal(const loom_module_t* source_module,
-                 const loom_function_version_list_t* function_versions) {
-    loom_module_t* sealed_module = nullptr;
-    IREE_CHECK_OK(loom_target_module_seal(source_module, function_versions,
-                                          &block_pool_, iree_allocator_system(),
-                                          &sealed_module));
-    return ModulePtr(sealed_module);
+  ModulePtr Project(const loom_module_t* source_module,
+                    const loom_function_version_list_t* function_versions) {
+    loom_module_t* projected_module = nullptr;
+    IREE_CHECK_OK(loom_target_function_versions_project_module(
+        source_module, function_versions, &block_pool_, iree_allocator_system(),
+        &projected_module));
+    return ModulePtr(projected_module);
   }
 
   void InitializeFacts(loom_test_target_kind_t kind,
@@ -326,7 +327,8 @@ class TargetModuleSealingTest : public ::testing::Test {
   iree_arena_allocator_t version_arena_;
 };
 
-TEST_F(TargetModuleSealingTest, NoVersionsProducesAnExactIndependentClone) {
+TEST_F(TargetFunctionVersionProjectionTest,
+       NoVersionsProducesAnExactIndependentClone) {
   ModulePtr source = Parse(R"(
 test.target<low_core> @authored
 
@@ -337,16 +339,18 @@ func.def public target(@authored) @entry() {
   const std::string source_text = Print(source.get());
   loom_op_t* source_function = FindFunction(source.get(), IREE_SV("entry")).op;
 
-  ModulePtr sealed = Seal(source.get(), /*function_versions=*/nullptr);
+  ModulePtr projected = Project(source.get(), /*function_versions=*/nullptr);
 
-  ASSERT_NE(sealed, nullptr);
-  EXPECT_NE(sealed.get(), source.get());
-  EXPECT_NE(FindFunction(sealed.get(), IREE_SV("entry")).op, source_function);
-  EXPECT_EQ(Print(sealed.get()), source_text);
+  ASSERT_NE(projected, nullptr);
+  EXPECT_NE(projected.get(), source.get());
+  EXPECT_NE(FindFunction(projected.get(), IREE_SV("entry")).op,
+            source_function);
+  EXPECT_EQ(Print(projected.get()), source_text);
   EXPECT_EQ(Print(source.get()), source_text);
 }
 
-TEST_F(TargetModuleSealingTest, SharedTargetlessContextMaterializesOnce) {
+TEST_F(TargetFunctionVersionProjectionTest,
+       SharedTargetlessContextMaterializesOnce) {
   ModulePtr source = Parse(R"(
 func.def public @left() {
   func.return
@@ -382,21 +386,22 @@ func.def public @right() {
   const iree_host_size_t source_symbol_count = source->symbols.count;
   const std::string source_text = Print(source.get());
 
-  ModulePtr sealed = Seal(source.get(), &specialization.function_versions.list);
+  ModulePtr projected =
+      Project(source.get(), &specialization.function_versions.list);
 
   EXPECT_EQ(source->symbols.count, source_symbol_count);
   EXPECT_EQ(Print(source.get()), source_text);
-  EXPECT_EQ(sealed->symbols.count, source_symbol_count + 1);
-  EXPECT_EQ(CountTestTargets(sealed.get()), 1u);
-  EXPECT_TRUE(
-      iree_string_view_equal(FunctionTargetName(sealed.get(), IREE_SV("left")),
-                             IREE_SV("__loom_sealed_target_0_0")));
-  EXPECT_TRUE(
-      iree_string_view_equal(FunctionTargetName(sealed.get(), IREE_SV("right")),
-                             IREE_SV("__loom_sealed_target_0_0")));
+  EXPECT_EQ(projected->symbols.count, source_symbol_count + 1);
+  EXPECT_EQ(CountTestTargets(projected.get()), 1u);
+  EXPECT_TRUE(iree_string_view_equal(
+      FunctionTargetName(projected.get(), IREE_SV("left")),
+      IREE_SV("__loom_target_context_0_0")));
+  EXPECT_TRUE(iree_string_view_equal(
+      FunctionTargetName(projected.get(), IREE_SV("right")),
+      IREE_SV("__loom_target_context_0_0")));
 }
 
-TEST_F(TargetModuleSealingTest,
+TEST_F(TargetFunctionVersionProjectionTest,
        InexactAuthoredContextMaterializesResolvedDefinition) {
   ModulePtr source = Parse(R"(
 test.target<low_core> @requirement
@@ -422,25 +427,26 @@ func.def public target(@requirement) @entry() {
   EXPECT_FALSE(version->authored_target_is_exact);
   const iree_host_size_t source_symbol_count = source->symbols.count;
 
-  ModulePtr sealed = Seal(source.get(), &specialization.function_versions.list);
+  ModulePtr projected =
+      Project(source.get(), &specialization.function_versions.list);
 
-  const loom_op_t* sealed_target =
-      FunctionTarget(sealed.get(), IREE_SV("entry"));
-  EXPECT_EQ(sealed->symbols.count, source_symbol_count + 1);
-  EXPECT_EQ(CountTestTargets(sealed.get()), 2u);
-  EXPECT_TRUE(
-      iree_string_view_equal(FunctionTargetName(sealed.get(), IREE_SV("entry")),
-                             IREE_SV("__loom_sealed_target_0_0")));
-  ASSERT_TRUE(loom_test_target_isa(sealed_target));
-  EXPECT_EQ(loom_test_target_kind(sealed_target),
+  const loom_op_t* projected_target =
+      FunctionTarget(projected.get(), IREE_SV("entry"));
+  EXPECT_EQ(projected->symbols.count, source_symbol_count + 1);
+  EXPECT_EQ(CountTestTargets(projected.get()), 2u);
+  EXPECT_TRUE(iree_string_view_equal(
+      FunctionTargetName(projected.get(), IREE_SV("entry")),
+      IREE_SV("__loom_target_context_0_0")));
+  ASSERT_TRUE(loom_test_target_isa(projected_target));
+  EXPECT_EQ(loom_test_target_kind(projected_target),
             LOOM_TEST_TARGET_KIND_LOW_CORE);
   const loom_attribute_t index_bitwidth = loom_op_const_attrs(
-      sealed_target)[loom_test_target_index_bitwidth_ATTR_INDEX];
+      projected_target)[loom_test_target_index_bitwidth_ATTR_INDEX];
   ASSERT_FALSE(loom_attr_is_absent(index_bitwidth));
   EXPECT_EQ(loom_attr_as_i64(index_bitwidth), 64);
 }
 
-TEST_F(TargetModuleSealingTest,
+TEST_F(TargetFunctionVersionProjectionTest,
        MaterializedDefinitionsFollowAppendedSymbolOrder) {
   ModulePtr source = Parse(R"(
 func.def public @entry() {
@@ -457,19 +463,20 @@ func.def public @entry() {
       /*.count=*/IREE_ARRAYSIZE(version_values),
   };
 
-  ModulePtr sealed = Seal(source.get(), &versions);
+  ModulePtr projected = Project(source.get(), &versions);
 
-  ASSERT_EQ(sealed->symbols.count, 2u);
-  const loom_symbol_t* target_symbol = &sealed->symbols.entries[1];
+  ASSERT_EQ(projected->symbols.count, 2u);
+  const loom_symbol_t* target_symbol = &projected->symbols.entries[1];
   ASSERT_TRUE(loom_test_target_isa(target_symbol->defining_op));
-  EXPECT_EQ(loom_module_block(sealed.get())->last_op,
+  EXPECT_EQ(loom_module_block(projected.get())->last_op,
             target_symbol->defining_op);
-  const std::string sealed_text = Print(sealed.get());
-  ModulePtr reparsed = Parse(sealed_text.c_str());
-  EXPECT_EQ(Print(reparsed.get()), sealed_text);
+  const std::string projected_text = Print(projected.get());
+  ModulePtr reparsed = Parse(projected_text.c_str());
+  EXPECT_EQ(Print(reparsed.get()), projected_text);
 }
 
-TEST_F(TargetModuleSealingTest, ProjectsAnExactAuthoredDefinitionDirectly) {
+TEST_F(TargetFunctionVersionProjectionTest,
+       ProjectsAnExactAuthoredDefinitionDirectly) {
   ModulePtr source = Parse(R"(
 test.target<low_core> @exact
 
@@ -487,15 +494,16 @@ func.def public target(@exact) @entry() {
       Specialize(source.get(), &request, 1);
   const iree_host_size_t source_symbol_count = source->symbols.count;
 
-  ModulePtr sealed = Seal(source.get(), &specialization.function_versions.list);
+  ModulePtr projected =
+      Project(source.get(), &specialization.function_versions.list);
 
-  EXPECT_EQ(sealed->symbols.count, source_symbol_count);
-  EXPECT_EQ(CountTestTargets(sealed.get()), 1u);
+  EXPECT_EQ(projected->symbols.count, source_symbol_count);
+  EXPECT_EQ(CountTestTargets(projected.get()), 1u);
   EXPECT_TRUE(iree_string_view_equal(
-      FunctionTargetName(sealed.get(), IREE_SV("entry")), IREE_SV("exact")));
+      FunctionTargetName(projected.get(), IREE_SV("entry")), IREE_SV("exact")));
 }
 
-TEST_F(TargetModuleSealingTest,
+TEST_F(TargetFunctionVersionProjectionTest,
        SharedExactContextProjectsOneAuthoredDefinition) {
   ModulePtr source = Parse(R"(
 test.target<low_core> @exact
@@ -533,16 +541,18 @@ func.def public target(@exact) @second() {
   EXPECT_EQ(first_version->target_context_ordinal,
             second_version->target_context_ordinal);
 
-  ModulePtr sealed = Seal(source.get(), &specialization.function_versions.list);
+  ModulePtr projected =
+      Project(source.get(), &specialization.function_versions.list);
 
-  EXPECT_EQ(CountTestTargets(sealed.get()), 1u);
+  EXPECT_EQ(CountTestTargets(projected.get()), 1u);
   EXPECT_TRUE(iree_string_view_equal(
-      FunctionTargetName(sealed.get(), IREE_SV("first")), IREE_SV("exact")));
+      FunctionTargetName(projected.get(), IREE_SV("first")), IREE_SV("exact")));
   EXPECT_TRUE(iree_string_view_equal(
-      FunctionTargetName(sealed.get(), IREE_SV("second")), IREE_SV("exact")));
+      FunctionTargetName(projected.get(), IREE_SV("second")),
+      IREE_SV("exact")));
 }
 
-TEST_F(TargetModuleSealingTest,
+TEST_F(TargetFunctionVersionProjectionTest,
        ExactContextWitnessBindsEarlierInheritedVersion) {
   ModulePtr source = Parse(R"(
 test.target<low_core> @exact
@@ -574,17 +584,18 @@ func.def public target(@exact) @witness() {
       /*.count=*/IREE_ARRAYSIZE(version_values),
   };
 
-  ModulePtr sealed = Seal(source.get(), &versions);
+  ModulePtr projected = Project(source.get(), &versions);
 
-  EXPECT_EQ(CountTestTargets(sealed.get()), 1u);
+  EXPECT_EQ(CountTestTargets(projected.get()), 1u);
   EXPECT_TRUE(iree_string_view_equal(
-      FunctionTargetName(sealed.get(), IREE_SV("inherited")),
+      FunctionTargetName(projected.get(), IREE_SV("inherited")),
       IREE_SV("exact")));
   EXPECT_TRUE(iree_string_view_equal(
-      FunctionTargetName(sealed.get(), IREE_SV("witness")), IREE_SV("exact")));
+      FunctionTargetName(projected.get(), IREE_SV("witness")),
+      IREE_SV("exact")));
 }
 
-TEST_F(TargetModuleSealingTest,
+TEST_F(TargetFunctionVersionProjectionTest,
        EquivalentIndependentProfilesRemainDistinctContexts) {
   ModulePtr source = Parse(R"(
 func.def public @left() {
@@ -623,15 +634,16 @@ func.def public @right() {
       loom_target_facts_are_equivalent(left_version->resolved_target.facts,
                                        right_version->resolved_target.facts));
 
-  ModulePtr sealed = Seal(source.get(), &specialization.function_versions.list);
+  ModulePtr projected =
+      Project(source.get(), &specialization.function_versions.list);
 
-  EXPECT_EQ(CountTestTargets(sealed.get()), 2u);
+  EXPECT_EQ(CountTestTargets(projected.get()), 2u);
   EXPECT_FALSE(iree_string_view_equal(
-      FunctionTargetName(sealed.get(), IREE_SV("left")),
-      FunctionTargetName(sealed.get(), IREE_SV("right"))));
+      FunctionTargetName(projected.get(), IREE_SV("left")),
+      FunctionTargetName(projected.get(), IREE_SV("right"))));
 }
 
-TEST_F(TargetModuleSealingTest,
+TEST_F(TargetFunctionVersionProjectionTest,
        HeterogeneousTargetsUseDeterministicSourceSymbolOrder) {
   ModulePtr source = Parse(R"(
 func.def public @low_entry() {
@@ -646,7 +658,7 @@ func.def public @quirky_entry() {
   func.return
 }
 
-func.def @__loom_sealed_target_0_17() {
+func.def @__loom_target_context_0_17() {
   func.return
 }
 )");
@@ -671,20 +683,22 @@ func.def @__loom_sealed_target_0_17() {
   const loom_target_specialization_result_t specialization =
       Specialize(source.get(), requests, IREE_ARRAYSIZE(requests));
 
-  ModulePtr first = Seal(source.get(), &specialization.function_versions.list);
-  ModulePtr second = Seal(source.get(), &specialization.function_versions.list);
+  ModulePtr first =
+      Project(source.get(), &specialization.function_versions.list);
+  ModulePtr second =
+      Project(source.get(), &specialization.function_versions.list);
 
   EXPECT_EQ(Print(first.get()), Print(second.get()));
   EXPECT_EQ(CountTestTargets(first.get()), 2u);
   EXPECT_TRUE(iree_string_view_equal(
       FunctionTargetName(first.get(), IREE_SV("low_entry")),
-      IREE_SV("__loom_sealed_target_1_0")));
+      IREE_SV("__loom_target_context_1_0")));
   EXPECT_TRUE(iree_string_view_equal(
       FunctionTargetName(first.get(), IREE_SV("low_entry_copy")),
-      IREE_SV("__loom_sealed_target_1_0")));
+      IREE_SV("__loom_target_context_1_0")));
   EXPECT_TRUE(iree_string_view_equal(
       FunctionTargetName(first.get(), IREE_SV("quirky_entry")),
-      IREE_SV("__loom_sealed_target_1_1")));
+      IREE_SV("__loom_target_context_1_1")));
   EXPECT_EQ(
       loom_test_target_kind(FunctionTarget(first.get(), IREE_SV("low_entry"))),
       LOOM_TEST_TARGET_KIND_LOW_CORE);
@@ -693,7 +707,7 @@ func.def @__loom_sealed_target_0_17() {
             LOOM_TEST_TARGET_KIND_QUIRKY);
 }
 
-TEST_F(TargetModuleSealingTest,
+TEST_F(TargetFunctionVersionProjectionTest,
        ExactAuthoredContextDoesNotRequireMaterializer) {
   ModulePtr source = Parse(R"(
 test.target<low_core> @exact
@@ -719,14 +733,16 @@ func.def public target(@exact) @entry() {
   ASSERT_NE(version, nullptr);
   EXPECT_TRUE(version->authored_target_is_exact);
 
-  ModulePtr sealed = Seal(source.get(), &specialization.function_versions.list);
+  ModulePtr projected =
+      Project(source.get(), &specialization.function_versions.list);
 
-  EXPECT_EQ(CountTestTargets(sealed.get()), 1u);
+  EXPECT_EQ(CountTestTargets(projected.get()), 1u);
   EXPECT_TRUE(iree_string_view_equal(
-      FunctionTargetName(sealed.get(), IREE_SV("entry")), IREE_SV("exact")));
+      FunctionTargetName(projected.get(), IREE_SV("entry")), IREE_SV("exact")));
 }
 
-TEST_F(TargetModuleSealingTest, TargetlessContextRequiresProviderMaterializer) {
+TEST_F(TargetFunctionVersionProjectionTest,
+       TargetlessContextRequiresProviderMaterializer) {
   ModulePtr source = Parse(R"(
 func.def public @entry() {
   func.return
@@ -744,17 +760,18 @@ func.def public @entry() {
   const loom_target_specialization_result_t specialization =
       SpecializeWithEnvironment(&environment, source.get(), &request, 1);
   loom_target_environment_deinitialize(&environment);
-  loom_module_t* sealed_module = nullptr;
+  loom_module_t* projected_module = nullptr;
 
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
-      loom_target_module_seal(
+      loom_target_function_versions_project_module(
           source.get(), &specialization.function_versions.list, &block_pool_,
-          iree_allocator_system(), &sealed_module));
-  EXPECT_EQ(sealed_module, nullptr);
+          iree_allocator_system(), &projected_module));
+  EXPECT_EQ(projected_module, nullptr);
 }
 
-TEST_F(TargetModuleSealingTest, RejectsAFunctionVersionFromAnotherModule) {
+TEST_F(TargetFunctionVersionProjectionTest,
+       RejectsAFunctionVersionFromAnotherModule) {
   ModulePtr source = Parse(R"(
 func.def public @entry() {
   func.return
@@ -774,16 +791,17 @@ func.def public @entry() {
       /*.values=*/version_values,
       /*.count=*/IREE_ARRAYSIZE(version_values),
   };
-  loom_module_t* sealed_module = nullptr;
+  loom_module_t* projected_module = nullptr;
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_FAILED_PRECONDITION,
-      loom_target_module_seal(source.get(), &versions, &block_pool_,
-                              iree_allocator_system(), &sealed_module));
-  EXPECT_EQ(sealed_module, nullptr);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_target_function_versions_project_module(
+                            source.get(), &versions, &block_pool_,
+                            iree_allocator_system(), &projected_module));
+  EXPECT_EQ(projected_module, nullptr);
 }
 
-TEST_F(TargetModuleSealingTest, RejectsAnUnrepresentableFunctionVersion) {
+TEST_F(TargetFunctionVersionProjectionTest,
+       RejectsAnUnrepresentableFunctionVersion) {
   ModulePtr source = Parse(R"(
 func.def public @entry() {
   func.return
@@ -801,13 +819,13 @@ func.def public @entry() {
       /*.values=*/version_values,
       /*.count=*/IREE_ARRAYSIZE(version_values),
   };
-  loom_module_t* sealed_module = nullptr;
+  loom_module_t* projected_module = nullptr;
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_FAILED_PRECONDITION,
-      loom_target_module_seal(source.get(), &versions, &block_pool_,
-                              iree_allocator_system(), &sealed_module));
-  EXPECT_EQ(sealed_module, nullptr);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_target_function_versions_project_module(
+                            source.get(), &versions, &block_pool_,
+                            iree_allocator_system(), &projected_module));
+  EXPECT_EQ(projected_module, nullptr);
 }
 
 }  // namespace

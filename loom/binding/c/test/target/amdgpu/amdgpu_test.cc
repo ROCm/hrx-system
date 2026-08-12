@@ -885,7 +885,7 @@ kernel.def target(@gfx11_generic) @configured_store() {
             std::string::npos)
       << module_text;
   EXPECT_NE(module_text.find("low.kernel.def target<amdgpu.rdna3_5.core>"
-                             "(@__loom_sealed_target_0_0)"),
+                             "(@__loom_target_context_0_0)"),
             std::string::npos)
       << module_text;
   EXPECT_EQ(
@@ -893,7 +893,7 @@ kernel.def target(@gfx11_generic) @configured_store() {
       std::string::npos)
       << module_text;
   EXPECT_NE(
-      module_text.find("amdgpu.target<gfx1151> @__loom_sealed_target_0_0"),
+      module_text.find("amdgpu.target<gfx1151> @__loom_target_context_0_0"),
       std::string::npos)
       << module_text;
   EXPECT_NE(module_text.find("@configured_store("), std::string::npos)
@@ -1022,25 +1022,25 @@ kernel.def @wave64_root() {
 
   const size_t wave32_leaf = module_text.find(
       "low.func.def target<amdgpu.rdna3_5.core>"
-      "(@__loom_sealed_target_0_0) @read_subgroup_size()");
+      "(@__loom_target_context_0_0) @read_subgroup_size()");
   const size_t wave64_leaf = module_text.find(
       "low.func.def target<amdgpu.cdna3.core>"
-      "(@__loom_sealed_target_0_1) "
+      "(@__loom_target_context_0_1) "
       "@read_subgroup_size_spec0()");
   const size_t wave32_forward = module_text.find(
       "low.func.def target<amdgpu.rdna3_5.core>"
-      "(@__loom_sealed_target_0_0) @forward_subgroup_size()");
+      "(@__loom_target_context_0_0) @forward_subgroup_size()");
   const size_t wave64_forward = module_text.find(
       "low.func.def target<amdgpu.cdna3.core>"
-      "(@__loom_sealed_target_0_1) "
+      "(@__loom_target_context_0_1) "
       "@forward_subgroup_size_spec0()");
   const size_t wave32_root = module_text.find(
       "low.kernel.def target<amdgpu.rdna3_5.core>"
-      "(@__loom_sealed_target_0_0)",
+      "(@__loom_target_context_0_0)",
       wave64_forward);
   const size_t wave64_root = module_text.find(
       "low.kernel.def target<amdgpu.cdna3.core>"
-      "(@__loom_sealed_target_0_1)",
+      "(@__loom_target_context_0_1)",
       wave32_root);
   ASSERT_NE(wave32_leaf, std::string::npos) << module_text;
   ASSERT_NE(wave64_leaf, std::string::npos) << module_text;
@@ -1097,11 +1097,11 @@ kernel.def @wave64_root() {
   EXPECT_NE(round_trip_text.find("amdgpu.target<gfx942>"), std::string::npos)
       << round_trip_text;
   EXPECT_NE(round_trip_text.find(
-                "target<amdgpu.rdna3_5.core>(@__loom_sealed_target_0_0)"),
+                "target<amdgpu.rdna3_5.core>(@__loom_target_context_0_0)"),
             std::string::npos)
       << round_trip_text;
   EXPECT_NE(round_trip_text.find(
-                "target<amdgpu.cdna3.core>(@__loom_sealed_target_0_1)"),
+                "target<amdgpu.cdna3.core>(@__loom_target_context_0_1)"),
             std::string::npos)
       << round_trip_text;
   EXPECT_EQ(round_trip_text.find("target.subgroup.size"), std::string::npos)
@@ -1192,20 +1192,21 @@ kernel.def @wave64_root() {
                    LOOMC_ARTIFACT_FORMAT_LOOM_TEXT);
   ASSERT_NE(text_artifact, nullptr);
   const std::string module_text = ToString(text_artifact->contents);
-  EXPECT_NE(module_text.find("amdgpu.target<gfx1151> @__loom_sealed_target_0_0 "
-                             "{subgroup_size = 32}"),
-            std::string::npos)
+  EXPECT_NE(
+      module_text.find("amdgpu.target<gfx1151> @__loom_target_context_0_0 "
+                       "{subgroup_size = 32}"),
+      std::string::npos)
       << module_text;
-  EXPECT_NE(module_text.find("amdgpu.target<gfx942> @__loom_sealed_target_0_1 "
+  EXPECT_NE(module_text.find("amdgpu.target<gfx942> @__loom_target_context_0_1 "
                              "{features = [sramecc, -xnack]}"),
             std::string::npos)
       << module_text;
   const size_t wave32_root = module_text.find(
       "low.kernel.def target<amdgpu.rdna3_5.core>"
-      "(@__loom_sealed_target_0_0)");
+      "(@__loom_target_context_0_0)");
   const size_t wave64_root = module_text.find(
       "low.kernel.def target<amdgpu.cdna3.core>"
-      "(@__loom_sealed_target_0_1)");
+      "(@__loom_target_context_0_1)");
   ASSERT_NE(wave32_root, std::string::npos) << module_text;
   ASSERT_NE(wave64_root, std::string::npos) << module_text;
   EXPECT_LT(module_text.find("@wave32_root", wave32_root), wave64_root)
@@ -1272,22 +1273,22 @@ kernel.def @wave64_root() {
   const std::string bytecode_archive_text =
       SerializeModuleToText(bytecode_archive.get());
   EXPECT_EQ(text_archive_text, bytecode_archive_text);
-  EXPECT_NE(
-      text_archive_text.find("amdgpu.target<gfx1151> @__loom_sealed_target_0_0 "
-                             "{subgroup_size = 32}"),
-      std::string::npos)
+  EXPECT_NE(text_archive_text.find(
+                "amdgpu.target<gfx1151> @__loom_target_context_0_0 "
+                "{subgroup_size = 32}"),
+            std::string::npos)
       << text_archive_text;
   EXPECT_NE(
-      text_archive_text.find("amdgpu.target<gfx942> @__loom_sealed_target_0_1 "
+      text_archive_text.find("amdgpu.target<gfx942> @__loom_target_context_0_1 "
                              "{features = [sramecc, -xnack]}"),
       std::string::npos)
       << text_archive_text;
   EXPECT_NE(text_archive_text.find(
-                "target<amdgpu.rdna3_5.core>(@__loom_sealed_target_0_0)"),
+                "target<amdgpu.rdna3_5.core>(@__loom_target_context_0_0)"),
             std::string::npos)
       << text_archive_text;
   EXPECT_NE(text_archive_text.find(
-                "target<amdgpu.cdna3.core>(@__loom_sealed_target_0_1)"),
+                "target<amdgpu.cdna3.core>(@__loom_target_context_0_1)"),
             std::string::npos)
       << text_archive_text;
   EXPECT_EQ(text_archive_text.find("target.subgroup.size"), std::string::npos)
@@ -1304,10 +1305,10 @@ kernel.def @wave64_root() {
       LinkModule(replay_linker.get(), bytecode_wave32_workspace.get(),
                  bytecode_link_index.get(), &wave32_root_symbol, 1);
   static constexpr const char kWave32Target[] =
-      "amdgpu.target<gfx1151> @__loom_sealed_target_0_0 "
+      "amdgpu.target<gfx1151> @__loom_target_context_0_0 "
       "{subgroup_size = 32}";
   static constexpr const char kWave32Contract[] =
-      "target<amdgpu.rdna3_5.core>(@__loom_sealed_target_0_0)";
+      "target<amdgpu.rdna3_5.core>(@__loom_target_context_0_0)";
   ExpectSelectivelyLinkedTarget(text_wave32.get(), kWave32Target,
                                 kWave32Contract, "@wave32_root", "v_mov_b32 32",
                                 "@wave64_root");
@@ -1326,10 +1327,10 @@ kernel.def @wave64_root() {
       LinkModule(replay_linker.get(), bytecode_wave64_workspace.get(),
                  bytecode_link_index.get(), &wave64_root_symbol, 1);
   static constexpr const char kWave64Target[] =
-      "amdgpu.target<gfx942> @__loom_sealed_target_0_1 "
+      "amdgpu.target<gfx942> @__loom_target_context_0_1 "
       "{features = [sramecc, -xnack]}";
   static constexpr const char kWave64Contract[] =
-      "target<amdgpu.cdna3.core>(@__loom_sealed_target_0_1)";
+      "target<amdgpu.cdna3.core>(@__loom_target_context_0_1)";
   ExpectSelectivelyLinkedTarget(text_wave64.get(), kWave64Target,
                                 kWave64Contract, "@wave64_root", "v_mov_b32 64",
                                 "@wave32_root");

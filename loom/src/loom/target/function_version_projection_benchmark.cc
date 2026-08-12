@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Benchmarks the complete target-module sealing boundary across independent
+// Benchmarks the complete target-module projection boundary across independent
 // clone, context materialization, and exact-definition projection dimensions.
 
 #include <cstdint>
@@ -22,13 +22,13 @@
 #include "loom/ops/test/ops.h"
 #include "loom/target/facts_builder.h"
 #include "loom/target/function_version.h"
-#include "loom/target/module_sealing.h"
+#include "loom/target/function_version_projection.h"
 #include "loom/target/provider.h"
 #include "loom/target/test/target_records.h"
 
 namespace {
 
-enum class SealingShape {
+enum class ProjectionShape {
   kCloneOnly,
   kSharedContext,
   kDistinctContexts,
@@ -91,7 +91,7 @@ static iree_status_t MaterializeTestTargetDefinition(
 }
 
 static const loom_target_profile_type_t kTestProfileType = {
-    /*.name=*/IREE_SVL("module-sealing-benchmark"),
+    /*.name=*/IREE_SVL("function-version-projection-benchmark"),
     /*.fact_type=*/&loom_test_target_fact_type,
 };
 
@@ -158,9 +158,10 @@ static loom_func_like_t AddFunction(loom_module_t* module,
   return function;
 }
 
-class ModuleSealingFixture {
+class FunctionVersionProjectionFixture {
  public:
-  ModuleSealingFixture(SealingShape shape, int64_t function_count)
+  FunctionVersionProjectionFixture(ProjectionShape shape,
+                                   int64_t function_count)
       : shape_(shape), function_count_(function_count) {
     iree_arena_block_pool_initialize(65536, iree_allocator_system(),
                                      &block_pool_);
@@ -170,8 +171,8 @@ class ModuleSealingFixture {
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
     IREE_CHECK_OK(loom_context_finalize(&context_));
 
-    const int64_t context_count = shape == SealingShape::kCloneOnly ? 0
-                                  : shape == SealingShape::kSharedContext
+    const int64_t context_count = shape == ProjectionShape::kCloneOnly ? 0
+                                  : shape == ProjectionShape::kSharedContext
                                       ? 1
                                       : function_count;
     facts_.resize(static_cast<size_t>(context_count));
@@ -194,8 +195,8 @@ class ModuleSealingFixture {
         static_cast<iree_host_size_t>(function_count + context_count),
     };
     IREE_CHECK_OK(loom_module_allocate(
-        &context_, IREE_SV("module_sealing_benchmark"), &block_pool_, &hints,
-        iree_allocator_system(), &source_module_));
+        &context_, IREE_SV("function_version_projection_benchmark"),
+        &block_pool_, &hints, iree_allocator_system(), &source_module_));
     loom_builder_t builder;
     loom_builder_initialize(source_module_, &source_module_->arena,
                             loom_module_block(source_module_), &builder);
@@ -204,7 +205,7 @@ class ModuleSealingFixture {
         loom_module_intern_type(source_module_, value_type, &value_type));
 
     std::vector<loom_symbol_ref_t> authored_target_refs;
-    if (shape == SealingShape::kExactAuthoredContexts) {
+    if (shape == ProjectionShape::kExactAuthoredContexts) {
       authored_target_refs.reserve(static_cast<size_t>(context_count));
       for (int64_t i = 0; i < context_count; ++i) {
         char name[32];
@@ -224,7 +225,7 @@ class ModuleSealingFixture {
     functions_.reserve(static_cast<size_t>(function_count));
     for (int64_t i = 0; i < function_count; ++i) {
       const loom_symbol_ref_t target_ref =
-          shape == SealingShape::kExactAuthoredContexts
+          shape == ProjectionShape::kExactAuthoredContexts
               ? authored_target_refs[static_cast<size_t>(i)]
               : loom_symbol_ref_null();
       functions_.push_back(
@@ -237,7 +238,7 @@ class ModuleSealingFixture {
       for (int64_t i = 0; i < function_count; ++i) {
         const int64_t context_ordinal = context_count == 1 ? 0 : i;
         const bool authored_target_is_exact =
-            shape == SealingShape::kExactAuthoredContexts;
+            shape == ProjectionShape::kExactAuthoredContexts;
         versions_[i] = loom_target_function_version_t{
             /*.base=*/
             {
@@ -265,44 +266,47 @@ class ModuleSealingFixture {
       };
     }
 
-    loom_module_t* sealed_module = Seal();
+    loom_module_t* projected_module = Project();
     const iree_host_size_t expected_symbol_count =
         source_module_->symbols.count +
-        (shape == SealingShape::kDistinctContexts ? context_count : 0) +
-        (shape == SealingShape::kSharedContext ? 1 : 0);
-    if (sealed_module->symbols.count != expected_symbol_count) std::abort();
-    output_owned_bytes_ = sealed_module->arena.total_allocation_size;
-    output_used_bytes_ = sealed_module->arena.used_allocation_size;
-    loom_module_free(sealed_module);
+        (shape == ProjectionShape::kDistinctContexts ? context_count : 0) +
+        (shape == ProjectionShape::kSharedContext ? 1 : 0);
+    if (projected_module->symbols.count != expected_symbol_count) std::abort();
+    output_owned_bytes_ = projected_module->arena.total_allocation_size;
+    output_used_bytes_ = projected_module->arena.used_allocation_size;
+    loom_module_free(projected_module);
   }
 
-  ModuleSealingFixture(const ModuleSealingFixture&) = delete;
-  ModuleSealingFixture& operator=(const ModuleSealingFixture&) = delete;
+  FunctionVersionProjectionFixture(const FunctionVersionProjectionFixture&) =
+      delete;
+  FunctionVersionProjectionFixture& operator=(
+      const FunctionVersionProjectionFixture&) = delete;
 
-  ~ModuleSealingFixture() {
+  ~FunctionVersionProjectionFixture() {
     loom_module_free(source_module_);
     loom_context_deinitialize(&context_);
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
 
-  loom_module_t* Seal() {
-    loom_module_t* sealed_module = nullptr;
-    IREE_CHECK_OK(loom_target_module_seal(
+  loom_module_t* Project() {
+    loom_module_t* projected_module = nullptr;
+    IREE_CHECK_OK(loom_target_function_versions_project_module(
         source_module_, version_list_.count > 0 ? &version_list_ : nullptr,
-        &block_pool_, iree_allocator_system(), &sealed_module));
-    if (sealed_module == nullptr) std::abort();
-    return sealed_module;
+        &block_pool_, iree_allocator_system(), &projected_module));
+    if (projected_module == nullptr) std::abort();
+    return projected_module;
   }
 
   int64_t function_count() const { return function_count_; }
 
   int64_t target_context_count() const {
-    if (shape_ == SealingShape::kCloneOnly) return 0;
-    return shape_ == SealingShape::kSharedContext ? 1 : function_count_;
+    if (shape_ == ProjectionShape::kCloneOnly) return 0;
+    return shape_ == ProjectionShape::kSharedContext ? 1 : function_count_;
   }
 
   int64_t authored_target_count() const {
-    return shape_ == SealingShape::kExactAuthoredContexts ? function_count_ : 0;
+    return shape_ == ProjectionShape::kExactAuthoredContexts ? function_count_
+                                                             : 0;
   }
 
   iree_host_size_t source_op_count() const {
@@ -330,7 +334,7 @@ class ModuleSealingFixture {
                                                 static_cast<uint16_t>(count)));
   }
 
-  SealingShape shape_;
+  ProjectionShape shape_;
   int64_t function_count_;
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_;
@@ -344,12 +348,13 @@ class ModuleSealingFixture {
   iree_host_size_t output_used_bytes_ = 0;
 };
 
-static void RunSealingBenchmark(benchmark::State& state, SealingShape shape) {
-  ModuleSealingFixture fixture(shape, state.range(0));
+static void RunProjectionBenchmark(benchmark::State& state,
+                                   ProjectionShape shape) {
+  FunctionVersionProjectionFixture fixture(shape, state.range(0));
   for (auto _ : state) {
-    loom_module_t* sealed_module = fixture.Seal();
-    benchmark::DoNotOptimize(sealed_module);
-    loom_module_free(sealed_module);
+    loom_module_t* projected_module = fixture.Project();
+    benchmark::DoNotOptimize(projected_module);
+    loom_module_free(projected_module);
   }
   state.SetItemsProcessed(state.iterations() * fixture.function_count());
   state.SetComplexityN(fixture.function_count());
@@ -368,19 +373,19 @@ static void RunSealingBenchmark(benchmark::State& state, SealingShape shape) {
 }
 
 static void BM_CloneOnly(benchmark::State& state) {
-  RunSealingBenchmark(state, SealingShape::kCloneOnly);
+  RunProjectionBenchmark(state, ProjectionShape::kCloneOnly);
 }
 
 static void BM_SharedContext(benchmark::State& state) {
-  RunSealingBenchmark(state, SealingShape::kSharedContext);
+  RunProjectionBenchmark(state, ProjectionShape::kSharedContext);
 }
 
 static void BM_DistinctContexts(benchmark::State& state) {
-  RunSealingBenchmark(state, SealingShape::kDistinctContexts);
+  RunProjectionBenchmark(state, ProjectionShape::kDistinctContexts);
 }
 
 static void BM_ExactAuthoredContexts(benchmark::State& state) {
-  RunSealingBenchmark(state, SealingShape::kExactAuthoredContexts);
+  RunProjectionBenchmark(state, ProjectionShape::kExactAuthoredContexts);
 }
 
 static void RegisterScalingArguments(benchmark::Benchmark* value) {

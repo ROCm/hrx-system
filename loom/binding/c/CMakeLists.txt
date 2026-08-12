@@ -115,7 +115,7 @@ loom_cc_library(
     loom::pass::value_facts
     loom::sanitizer::options
     loom::target::function_version
-    loom::target::module_sealing
+    loom::target::function_version_projection
     loom::target::pipeline
     loom::target::predicate
     loom::target::profile

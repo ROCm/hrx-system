@@ -235,7 +235,8 @@ struct loom_target_provider_t {
   const loom_target_profile_type_t* profile_type;
   // Optional exact target-definition materializer for facts projected by
   // |profile_type|. Providers without an ordinary target-IR representation
-  // leave this NULL; they can seal only contexts with exact authored target IR.
+  // leave this NULL; only contexts with exact authored target IR can cross an
+  // artifact boundary.
   loom_target_materialize_definition_fn_t materialize_definition;
   // Optional function that registers target-owned dialects.
   loom_target_provider_context_registration_fn_t register_context;
