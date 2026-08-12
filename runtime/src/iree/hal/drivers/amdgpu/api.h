@@ -34,10 +34,10 @@ enum iree_hal_amdgpu_device_create_params_extension_type_e {
 
 // AMDGPU device creation extension controlling host queue provisioning.
 //
-// The device allocates |capacity| queue slots and advertises them through its
-// queue affinities. The first |initial_count| queues are initialized when the
-// device is assigned to its topology. Remaining queues are initialized on
-// first use, avoiding HSA queue and ring allocation costs until needed.
+// The device allocates |capacity| queue slots. The first |initial_count| queues
+// are ordinary queues advertised through the device specification and are
+// initialized when the device is assigned to its topology. Remaining slots are
+// reserved for backend-specific execution queues and initialized when acquired.
 typedef struct iree_hal_amdgpu_host_queue_extension_t {
   // Common device creation extension prefix.
   iree_hal_device_create_params_extension_t base;
@@ -48,6 +48,10 @@ typedef struct iree_hal_amdgpu_host_queue_extension_t {
   // Number of host queues initialized during device setup.
   iree_host_size_t initial_count;
 } iree_hal_amdgpu_host_queue_extension_t;
+
+// Opaque reservation of one specialized AMDGPU execution queue.
+typedef struct iree_hal_amdgpu_execution_queue_t
+    iree_hal_amdgpu_execution_queue_t;
 
 // Scalar physical-device facts available to opaque hostcall providers.
 typedef struct iree_hal_amdgpu_hostcall_provider_device_info_t {
@@ -514,20 +518,39 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_logical_device_create(
     const iree_hal_device_create_params_t* create_params,
     iree_allocator_t host_allocator, iree_hal_device_t** out_device);
 
-// Replaces the execution-unit mask of one idle AMDGPU host queue.
+// Acquires a specialized execution queue with an immutable execution-unit mask.
 //
 // Each bit in |mask| controls one execution unit. |mask_bit_count| must be a
-// multiple of 32 and describe the complete mask expected by the device. A zero
-// bit count with a NULL mask restores the device default.
+// multiple of 32 and describe the complete mask expected by the selected
+// physical device. |device_affinity| selects the physical device but does not
+// identify or reserve a queue.
 //
-// This is persistent queue configuration, not a submission. The caller must
-// exclusively own the exact one-bit |queue_affinity| and ensure all prior work
-// has completed before changing or restoring the mask. The queue must remain
-// exclusive until its default mask has been restored.
-IREE_API_EXPORT iree_status_t
-iree_hal_amdgpu_device_queue_set_execution_unit_mask(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    iree_host_size_t mask_bit_count, const uint32_t* mask);
+// Acquisitions with the same physical device and exact mask share one backend
+// queue. A distinct mask consumes another specialized queue slot and fails with
+// IREE_STATUS_RESOURCE_EXHAUSTED when all slots are in use. Callers multiplex
+// their virtual execution streams using the exact affinity returned by
+// iree_hal_amdgpu_execution_queue_affinity and must stop submitting before
+// their final release. The driver restores the default mask before reusing the
+// slot for a different configuration.
+IREE_API_EXPORT iree_status_t iree_hal_amdgpu_execution_queue_acquire(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t device_affinity,
+    iree_host_size_t mask_bit_count, const uint32_t* mask,
+    iree_hal_amdgpu_execution_queue_t** out_execution_queue);
+
+// Retains |execution_queue| for another owner.
+IREE_API_EXPORT void iree_hal_amdgpu_execution_queue_retain(
+    iree_hal_amdgpu_execution_queue_t* execution_queue);
+
+// Releases |execution_queue| and restores its queue's default mask after the
+// final owner has stopped submitting work.
+IREE_API_EXPORT void iree_hal_amdgpu_execution_queue_release(
+    iree_hal_amdgpu_execution_queue_t* execution_queue);
+
+// Returns the exact private affinity used to route work through the
+// reservation.
+IREE_API_EXPORT iree_hal_queue_affinity_t
+iree_hal_amdgpu_execution_queue_affinity(
+    const iree_hal_amdgpu_execution_queue_t* execution_queue);
 
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_driver_t

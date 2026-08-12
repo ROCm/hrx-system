@@ -143,8 +143,19 @@ typedef struct iree_hal_amdgpu_logical_device_t {
   // deregistered by each host queue before this table is freed.
   iree_hal_amdgpu_epoch_signal_table_t* host_queue_epoch_table;
 
-  // Mask indicating which queue affinities are valid.
+  // Mask indicating all ordinary and specialized queue affinities.
   iree_hal_queue_affinity_t queue_affinity_mask;
+
+  // Ordinary queue affinities used to resolve public ANY submissions.
+  iree_hal_queue_affinity_t ordinary_queue_affinity_mask;
+
+  // Specialized queue affinities currently owned by execution queue leases.
+  // Protected by |execution_queue_mutex|.
+  iree_hal_queue_affinity_t leased_execution_queue_affinity;
+
+  // Distinct immutable specialized queue configurations. Protected by
+  // |execution_queue_mutex|.
+  struct iree_hal_amdgpu_execution_queue_t* execution_queue_head;
 
   // Queue affinities whose host queue storage has been initialized.
   iree_atomic_uint64_t active_queue_affinity;
@@ -154,6 +165,9 @@ typedef struct iree_hal_amdgpu_logical_device_t {
 
   // Serializes cold activation of lazily provisioned host queues.
   iree_slim_mutex_t host_queue_activation_mutex;
+
+  // Serializes specialized execution queue acquisition and release.
+  iree_slim_mutex_t execution_queue_mutex;
 
   // Selected command-buffer recording and replay implementation.
   iree_hal_amdgpu_command_buffer_mode_t command_buffer_mode;
