@@ -20,6 +20,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/compare.h"
 #include "loom/ops/scalar/ops.h"
+#include "loom/util/fact_table.h"
 
 //===----------------------------------------------------------------------===//
 // Macros for mechanical fact inference functions
@@ -1077,6 +1078,18 @@ iree_status_t loom_scalar_bitcast_facts(loom_fact_context_t* context,
 // scalar.assume
 //===----------------------------------------------------------------------===//
 
+static bool loom_scalar_assume_lookup_facts(void* user_data,
+                                            loom_value_id_t value_id,
+                                            loom_value_facts_t* out_facts) {
+  const loom_value_fact_table_t* fact_table =
+      (const loom_value_fact_table_t*)user_data;
+  if (!fact_table || !loom_value_fact_table_has_entry(fact_table, value_id)) {
+    return false;
+  }
+  *out_facts = loom_value_fact_table_lookup(fact_table, value_id);
+  return true;
+}
+
 iree_status_t loom_scalar_assume_facts(loom_fact_context_t* context,
                                        const loom_module_t* module,
                                        const loom_op_t* op,
@@ -1093,24 +1106,10 @@ iree_status_t loom_scalar_assume_facts(loom_fact_context_t* context,
   loom_attribute_t pred_attr = loom_op_attrs(op)[0];
   const loom_predicate_t* predicates = pred_attr.predicate_list;
   uint16_t predicate_count = pred_attr.count;
-  for (uint16_t p = 0; p < predicate_count; ++p) {
-    const loom_predicate_t* pred = &predicates[p];
-    if (pred->arg_tags[0] != LOOM_PRED_ARG_VALUE) continue;
-    loom_value_slice_t values = loom_scalar_assume_values(op);
-    loom_value_id_t target_id = (loom_value_id_t)pred->args[0];
-    uint16_t target = 0;
-    bool found = false;
-    for (uint16_t i = 0; i < values.count; ++i) {
-      if (values.values[i] == target_id) {
-        target = i;
-        found = true;
-        break;
-      }
-    }
-    if (!found) continue;
-    if (target < fact_count) {
-      loom_value_facts_apply_predicate(&result_facts[target], pred);
-    }
-  }
+  loom_value_slice_t values = loom_scalar_assume_values(op);
+  loom_value_facts_apply_alias_predicates(
+      values.values, fact_count, predicates, predicate_count,
+      loom_scalar_assume_lookup_facts, context ? context->table : NULL,
+      result_facts);
   return iree_ok_status();
 }

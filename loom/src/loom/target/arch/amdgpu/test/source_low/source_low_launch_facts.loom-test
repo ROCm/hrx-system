@@ -226,3 +226,44 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
   global_store_b128_saddr %25, %loaded, %41
   return
 }
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+config.decl @launch_facts.tile_capacity : %value: index where [range(%value, 1, 65535)]
+
+// A relational configuration bound on the launch count constrains the
+// workgroup ID used for target-legal 32-bit byte-offset arithmetic.
+kernel.def target(@target) @relational_config_bound_workgroup_store(%tile_count: index) {
+  %unit = index.constant 1 : index
+  %tile_capacity = config.get @launch_facts.tile_capacity : index
+  %bounded_tile_count = index.assume %tile_count [le(%tile_count, %tile_capacity)] : index
+  kernel.launch.config workgroups(%bounded_tile_count, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%tile_count: index, %output: buffer) {
+  %c0 = index.constant 0 : index
+  %tile_bytes = index.constant 32768 : offset
+  %value = scalar.constant 42 : i32
+  %workgroup = kernel.workgroup.id<x> : index
+  %tile_offset = index.scale %workgroup, %tile_bytes : index, offset -> offset
+  %output_view = buffer.view %output[%tile_offset] : buffer -> view<1xi32>
+  view.store %value, %output_view[%c0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) @relational_config_bound_workgroup_store(%tile_count: reg<amdgpu.sgpr>) asm {
+  %workgroup = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %19 = v_mov_b32 42
+  %20 = v_mov_b32 0
+  %21 = s_lshl_b32_rhs_inline %workgroup, 15
+  %22 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %23 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %24 = s_mov_b32 0
+  %25 = s_add_u32 %22, %21
+  %26 = s_addc_u32 %23, %24
+  %27 = concat(%25, %26) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b32_saddr %20, %19, %27
+  return
+}

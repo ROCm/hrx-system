@@ -15,6 +15,7 @@
 #include "loom/ops/index/carrier.h"
 #include "loom/ops/index/compare.h"
 #include "loom/ops/index/ops.h"
+#include "loom/util/fact_table.h"
 
 #define LOOM_INDEX_BINARY_FACTS(name, transfer_fn)                       \
   iree_status_t name(loom_fact_context_t* context,                       \
@@ -123,6 +124,18 @@ iree_status_t loom_index_cast_facts(loom_fact_context_t* context,
   return iree_ok_status();
 }
 
+static bool loom_index_assume_lookup_facts(void* user_data,
+                                           loom_value_id_t value_id,
+                                           loom_value_facts_t* out_facts) {
+  const loom_value_fact_table_t* fact_table =
+      (const loom_value_fact_table_t*)user_data;
+  if (!fact_table || !loom_value_fact_table_has_entry(fact_table, value_id)) {
+    return false;
+  }
+  *out_facts = loom_value_fact_table_lookup(fact_table, value_id);
+  return true;
+}
+
 iree_status_t loom_index_assume_facts(loom_fact_context_t* context,
                                       const loom_module_t* module,
                                       const loom_op_t* op,
@@ -140,8 +153,10 @@ iree_status_t loom_index_assume_facts(loom_fact_context_t* context,
   const loom_predicate_t* predicates = pred_attr.predicate_list;
   uint16_t predicate_count = pred_attr.count;
   loom_value_slice_t values = loom_index_assume_values(op);
-  loom_value_facts_apply_alias_predicates(values.values, fact_count, predicates,
-                                          predicate_count, result_facts);
+  loom_value_facts_apply_alias_predicates(
+      values.values, fact_count, predicates, predicate_count,
+      loom_index_assume_lookup_facts, context ? context->table : NULL,
+      result_facts);
   return iree_ok_status();
 }
 

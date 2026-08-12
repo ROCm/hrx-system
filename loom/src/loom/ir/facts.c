@@ -785,11 +785,31 @@ static bool loom_value_facts_find_alias_ordinal(const loom_value_id_t* values,
   return false;
 }
 
-void loom_value_facts_apply_alias_predicates(const loom_value_id_t* values,
-                                             uint16_t value_count,
-                                             const loom_predicate_t* predicates,
-                                             uint16_t predicate_count,
-                                             loom_value_facts_t* inout_facts) {
+static bool loom_value_facts_lookup_predicate_value(
+    const loom_value_id_t* values, uint16_t value_count,
+    const loom_value_facts_t* facts,
+    loom_value_fact_lookup_callback_t lookup_callback, void* lookup_user_data,
+    loom_value_id_t value_id, bool* out_is_alias, uint16_t* out_alias_ordinal,
+    loom_value_facts_t* out_facts) {
+  if (out_is_alias) *out_is_alias = false;
+  if (out_alias_ordinal) *out_alias_ordinal = 0;
+  uint16_t alias_ordinal = 0;
+  if (loom_value_facts_find_alias_ordinal(values, value_count, value_id,
+                                          &alias_ordinal)) {
+    if (out_is_alias) *out_is_alias = true;
+    if (out_alias_ordinal) *out_alias_ordinal = alias_ordinal;
+    *out_facts = facts[alias_ordinal];
+    return true;
+  }
+  return lookup_callback &&
+         lookup_callback(lookup_user_data, value_id, out_facts);
+}
+
+void loom_value_facts_apply_alias_predicates(
+    const loom_value_id_t* values, uint16_t value_count,
+    const loom_predicate_t* predicates, uint16_t predicate_count,
+    loom_value_fact_lookup_callback_t lookup_callback, void* lookup_user_data,
+    loom_value_facts_t* inout_facts) {
   // Apply predicates whose bounds are already literals or exact aliases.
   // Predicates retaining non-exact value operands are consumed by the
   // relational interval refinement below.
@@ -814,16 +834,17 @@ void loom_value_facts_apply_alias_predicates(const loom_value_id_t* values,
           resolved_predicate.args[argument_index] < 0) {
         continue;
       }
-      uint16_t operand_ordinal = 0;
-      if (!loom_value_facts_find_alias_ordinal(
-              values, value_count,
+      loom_value_facts_t argument_facts = loom_value_facts_unknown();
+      if (!loom_value_facts_lookup_predicate_value(
+              values, value_count, inout_facts, lookup_callback,
+              lookup_user_data,
               (loom_value_id_t)resolved_predicate.args[argument_index],
-              &operand_ordinal)) {
+              /*out_is_alias=*/NULL, /*out_alias_ordinal=*/NULL,
+              &argument_facts)) {
         continue;
       }
       int64_t exact_value = 0;
-      if (!loom_value_facts_as_exact_i64(inout_facts[operand_ordinal],
-                                         &exact_value)) {
+      if (!loom_value_facts_as_exact_i64(argument_facts, &exact_value)) {
         continue;
       }
       resolved_predicate.arg_tags[argument_index] = LOOM_PRED_ARG_CONST;
@@ -846,70 +867,89 @@ void loom_value_facts_apply_alias_predicates(const loom_value_id_t* values,
       continue;
     }
 
+    bool lhs_is_alias = false;
+    bool rhs_is_alias = false;
     uint16_t lhs_ordinal = 0;
     uint16_t rhs_ordinal = 0;
-    if (!loom_value_facts_find_alias_ordinal(
-            values, value_count, (loom_value_id_t)predicate->args[0],
-            &lhs_ordinal) ||
-        !loom_value_facts_find_alias_ordinal(
-            values, value_count, (loom_value_id_t)predicate->args[1],
-            &rhs_ordinal)) {
+    loom_value_facts_t lhs_facts = loom_value_facts_unknown();
+    loom_value_facts_t rhs_facts = loom_value_facts_unknown();
+    if (!loom_value_facts_lookup_predicate_value(
+            values, value_count, inout_facts, lookup_callback, lookup_user_data,
+            (loom_value_id_t)predicate->args[0], &lhs_is_alias, &lhs_ordinal,
+            &lhs_facts) ||
+        !loom_value_facts_lookup_predicate_value(
+            values, value_count, inout_facts, lookup_callback, lookup_user_data,
+            (loom_value_id_t)predicate->args[1], &rhs_is_alias, &rhs_ordinal,
+            &rhs_facts) ||
+        (!lhs_is_alias && !rhs_is_alias)) {
       continue;
     }
 
-    const loom_value_facts_t lhs_facts = inout_facts[lhs_ordinal];
-    const loom_value_facts_t rhs_facts = inout_facts[rhs_ordinal];
-    loom_value_facts_t* lhs_result = &inout_facts[lhs_ordinal];
-    loom_value_facts_t* rhs_result = &inout_facts[rhs_ordinal];
+    loom_value_facts_t* lhs_result =
+        lhs_is_alias ? &inout_facts[lhs_ordinal] : NULL;
+    loom_value_facts_t* rhs_result =
+        rhs_is_alias ? &inout_facts[rhs_ordinal] : NULL;
     switch ((loom_predicate_kind_t)predicate->kind) {
       case LOOM_PREDICATE_EQ: {
         const int64_t range_lo =
             iree_max(lhs_facts.range_lo, rhs_facts.range_lo);
         const int64_t range_hi =
             iree_min(lhs_facts.range_hi, rhs_facts.range_hi);
-        lhs_result->range_lo = range_lo;
-        lhs_result->range_hi = range_hi;
-        rhs_result->range_lo = range_lo;
-        rhs_result->range_hi = range_hi;
+        if (lhs_result) {
+          lhs_result->range_lo = range_lo;
+          lhs_result->range_hi = range_hi;
+        }
+        if (rhs_result) {
+          rhs_result->range_lo = range_lo;
+          rhs_result->range_hi = range_hi;
+        }
         break;
       }
       case LOOM_PREDICATE_LT:
-        if (rhs_facts.range_hi > INT64_MIN) {
+        if (lhs_result && rhs_facts.range_hi > INT64_MIN) {
           lhs_result->range_hi =
               iree_min(lhs_result->range_hi, rhs_facts.range_hi - 1);
         }
-        if (lhs_facts.range_lo < INT64_MAX) {
+        if (rhs_result && lhs_facts.range_lo < INT64_MAX) {
           rhs_result->range_lo =
               iree_max(rhs_result->range_lo, lhs_facts.range_lo + 1);
         }
         break;
       case LOOM_PREDICATE_LE:
-        lhs_result->range_hi =
-            iree_min(lhs_result->range_hi, rhs_facts.range_hi);
-        rhs_result->range_lo =
-            iree_max(rhs_result->range_lo, lhs_facts.range_lo);
+        if (lhs_result) {
+          lhs_result->range_hi =
+              iree_min(lhs_result->range_hi, rhs_facts.range_hi);
+        }
+        if (rhs_result) {
+          rhs_result->range_lo =
+              iree_max(rhs_result->range_lo, lhs_facts.range_lo);
+        }
         break;
       case LOOM_PREDICATE_GT:
-        if (rhs_facts.range_lo < INT64_MAX) {
+        if (lhs_result && rhs_facts.range_lo < INT64_MAX) {
           lhs_result->range_lo =
               iree_max(lhs_result->range_lo, rhs_facts.range_lo + 1);
         }
-        if (lhs_facts.range_hi > INT64_MIN) {
+        if (rhs_result && lhs_facts.range_hi > INT64_MIN) {
           rhs_result->range_hi =
               iree_min(rhs_result->range_hi, lhs_facts.range_hi - 1);
         }
         break;
       case LOOM_PREDICATE_GE:
-        lhs_result->range_lo =
-            iree_max(lhs_result->range_lo, rhs_facts.range_lo);
-        rhs_result->range_hi =
-            iree_min(rhs_result->range_hi, lhs_facts.range_hi);
+        if (lhs_result) {
+          lhs_result->range_lo =
+              iree_max(lhs_result->range_lo, rhs_facts.range_lo);
+        }
+        if (rhs_result) {
+          rhs_result->range_hi =
+              iree_min(rhs_result->range_hi, lhs_facts.range_hi);
+        }
         break;
       default:
         continue;
     }
-    loom_value_facts_recompute_flags(lhs_result);
-    if (rhs_ordinal != lhs_ordinal) {
+    if (lhs_result) loom_value_facts_recompute_flags(lhs_result);
+    if (rhs_result && rhs_result != lhs_result) {
       loom_value_facts_recompute_flags(rhs_result);
     }
   }

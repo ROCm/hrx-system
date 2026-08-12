@@ -253,6 +253,38 @@ kernel.def @dynamic_launch_config_facts_seed_body(%count: index) {
 
 // ====
 
+// Launch analysis consumes a bounded external configuration value before
+// projecting the resulting workgroup domain into the kernel body.
+config.decl @runtime.workgroup_capacity : %value: index where [range(%value, 1, 65535)]
+
+kernel.def @relational_launch_config_facts_seed_body(%count: index) {
+  %c1 = index.constant 1 : index
+  %capacity = config.get @runtime.workgroup_capacity : index
+  %bounded_count = index.assume %count [le(%count, %capacity)] : index
+  kernel.launch.config workgroups(%bounded_count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  %bid = kernel.workgroup.id<x> : index
+  %bid_hi = test.fact_range_hi %bid : index -> i64
+  test.use %bid_hi : i64
+  kernel.return
+}
+
+// ----
+config.decl @runtime.workgroup_capacity : %value: index where [range(%value, 1, 65535)]
+
+kernel.def @relational_launch_config_facts_seed_body(%count: index) {
+  %c1 = index.constant 1 : index
+  %capacity = config.get @runtime.workgroup_capacity : index
+  %bounded_count = index.assume %count [le(%count, %capacity)] : index
+  kernel.launch.config workgroups(%bounded_count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  %bid_hi = scalar.constant 65534 : i64
+  test.use %bid_hi : i64
+  kernel.return
+}
+
+// ====
+
 kernel.def @fixed_multidim_launch_config_facts_seed_body() {
   %c1 = index.constant 1 : index
   %c4 = index.constant 4 : index

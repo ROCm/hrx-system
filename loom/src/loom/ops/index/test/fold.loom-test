@@ -92,6 +92,53 @@ func.def @assume_relational_value_bounds(%lhs0: index, %rhs0: index) -> (i64, i6
 
 // ====
 
+// Relational assumptions can consume facts from values that are referenced by
+// the predicate but do not receive checked aliases. External facts are
+// read-only regardless of which side of the relation they occupy.
+func.def @assume_relational_external_bounds(%value: index, %upper0: index, %lower0: index) -> (i64, i64, i64, i64) {
+  %upper = index.assume %upper0 [range(%upper0, 32, 4096)] : index
+  %lower = index.assume %lower0 [range(%lower0, -128, -32)] : index
+  %below = index.assume %value [lt(%value, %upper)] : index
+  %above = index.assume %value [lt(%lower, %value)] : index
+  %below_hi = test.fact_range_hi %below : index -> i64
+  %above_lo = test.fact_range_lo %above : index -> i64
+  %upper_hi = test.fact_range_hi %upper : index -> i64
+  %lower_lo = test.fact_range_lo %lower : index -> i64
+  func.return %below_hi, %above_lo, %upper_hi, %lower_lo : i64, i64, i64, i64
+}
+// ----
+func.def @assume_relational_external_bounds(%value: index, %upper0: index, %lower0: index) -> (i64, i64, i64, i64) {
+  %below_hi = scalar.constant 4095 : i64
+  %above_lo = scalar.constant -127 : i64
+  %upper_hi = scalar.constant 4096 : i64
+  %lower_lo = scalar.constant -128 : i64
+  func.return %below_hi, %above_lo, %upper_hi, %lower_lo : i64, i64, i64, i64
+}
+
+// ====
+
+// An external launch-capacity bound survives multiplication and unsigned
+// quotient transfer without repeating its literal range on the coordinate.
+func.def @assume_external_bound_through_quotient(%coordinate0: index, %capacity0: index) -> (i64, i64) {
+  %c2 = index.constant 2 : index
+  %capacity = index.assume %capacity0 [range(%capacity0, 1, 65535)] : index
+  %workgroup_capacity = index.mul %capacity, %c2 : index
+  %coordinate_nonnegative = index.assume %coordinate0 [ge(%coordinate0, 0)] : index
+  %coordinate = index.assume %coordinate_nonnegative [lt(%coordinate_nonnegative, %workgroup_capacity)] : index
+  %tile = index.div %coordinate, %c2 : index
+  %tile_lo = test.fact_range_lo %tile : index -> i64
+  %tile_hi = test.fact_range_hi %tile : index -> i64
+  func.return %tile_lo, %tile_hi : i64, i64
+}
+// ----
+func.def @assume_external_bound_through_quotient(%coordinate0: index, %capacity0: index) -> (i64, i64) {
+  %tile_lo = scalar.constant 0 : i64
+  %tile_hi = scalar.constant 65534 : i64
+  func.return %tile_lo, %tile_hi : i64, i64
+}
+
+// ====
+
 // SSA values referenced as dynamic shape extents are non-negative by type
 // semantics. This applies to ordinary block arguments with shaped types.
 func.def @block_arg_shape_extent_non_negative(%n: index, %tile: tile<[%n]xf32>) -> (i1) {

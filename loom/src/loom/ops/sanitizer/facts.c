@@ -26,9 +26,10 @@ iree_status_t loom_sanitizer_assert_value_facts(
   }
 
   loom_attribute_t predicates = loom_sanitizer_assert_value_predicates(op);
-  loom_value_facts_apply_alias_predicates(values.values, fact_count,
-                                          predicates.predicate_list,
-                                          predicates.count, result_facts);
+  loom_value_facts_apply_alias_predicates(
+      values.values, fact_count, predicates.predicate_list, predicates.count,
+      /*lookup_callback=*/NULL,
+      /*lookup_user_data=*/NULL, result_facts);
   return iree_ok_status();
 }
 
