@@ -29,14 +29,15 @@ extern "C" {
 // ensuring the completion callback fires exactly once.
 //
 // Cache-line aligned to prevent false sharing between slots. Multiple workers
-// scan different slots concurrently, each doing fetch_add/fetch_sub on
-// active_drainers — without per-slot alignment, adjacent slots on the same
-// cache line would thrash each other.
+// scan different slots concurrently, each updating active_drainers — without
+// per-slot alignment, adjacent slots on the same cache line would thrash each
+// other.
 //
-// The active_drainers counter prevents the release callback (which frees
-// the processor context) from firing while other workers are still inside
-// drain(). The completion_claimed flag ensures exactly one worker runs
-// the eager completion callback (semaphore signaling, dependent activation).
+// Active-drainer claims and their handoff to warm-retainer or release-sentinel
+// ownership prevent the release callback (which frees the processor context)
+// from firing while another worker may access it. The completion_claimed flag
+// ensures exactly one worker runs the eager completion callback (semaphore
+// signaling, dependent activation).
 typedef struct iree_alignas(iree_hardware_destructive_interference_size)
     iree_task_compute_slot_t {
   // Process pointer: 0 (empty), IREE_TASK_COMPUTE_SLOT_RESERVED while the
@@ -62,10 +63,12 @@ typedef struct iree_alignas(iree_hardware_destructive_interference_size)
   //             the generation tag. WITH the tag, the CAS fails because
   //             gen_old ≠ gen_new.
   //
-  // fetch_add(1)/fetch_sub(1) operate on the full 64-bit value but only
-  // affect the count bits (count is always small, never overflows into
-  // generation). The sentinel (INT32_MIN in the count bits) is detected
-  // via (int32_t)prev < 0.
+  // Worker entry uses fetch_add(1). Useful-work exits use fetch_sub(1), while a
+  // potential final drainer transfers gen|1 directly to gen|SENTINEL so it can
+  // inspect process-owned release state without exposing a zero-count lifetime
+  // gap. These operations affect only the count bits (the count is always
+  // small and never overflows into the generation). The sentinel (INT32_MIN in
+  // the count bits) is detected via (int32_t)prev < 0.
   iree_atomic_int64_t active_drainers;
   // Set to 1 by the first worker to claim completion (via CAS). Ensures
   // the eager completion callback (signaling, dependent activation) runs
@@ -201,14 +204,15 @@ struct iree_task_executor_t {
   // the immediate list, calling drain() on each occupied slot to
   // cooperatively execute bounded work.
   //
-  // Two-phase lifecycle:
+  // Compute-slot lifecycle:
   //   Activate:  CAS(process: 0 → ptr) by schedule_process.
-  //   Drain:     Workers increment active_drainers before entering drain(),
-  //              decrement after. Multiple workers drain concurrently.
+  //   Drain:     Workers claim active_drainers before entering drain().
+  //              Multiple workers drain concurrently.
   //   Complete:  First worker to CAS completion_claimed runs completion_fn
   //              eagerly (signals semaphores, activates dependents).
-  //   Release:   Last worker to decrement active_drainers to zero calls
-  //              release_fn (frees processor context) and clears the slot.
+  //   Release:   The final active drainer transfers directly into exclusive
+  //              sentinel ownership. Once no warm retainers remain, that owner
+  //              clears the slot and calls release_fn for terminal processes.
   //
   // This separation ensures the completion callback fires immediately
   // when work finishes (zero latency on downstream signaling) while the

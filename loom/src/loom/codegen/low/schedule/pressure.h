@@ -182,6 +182,9 @@ typedef struct loom_low_schedule_candidate_score_t {
   uint16_t dependency_latency_cycles;
   // Descriptor latency for the candidate itself.
   uint16_t latency_cycles;
+  // Maximum latency among non-growing descriptor consumers unlocked by the
+  // candidate.
+  uint16_t unlocked_non_growing_descriptor_latency_cycles;
   // Resource causing resource_stall_cycles, or LOOM_LOW_RESOURCE_NONE.
   uint16_t bottleneck_resource_id;
   // Target pair-affinity reward. Larger scores are better.

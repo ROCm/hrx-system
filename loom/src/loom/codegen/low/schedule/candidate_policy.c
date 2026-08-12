@@ -450,11 +450,26 @@ void loom_low_schedule_candidate_policy_select(
 
   const bool recover_pressure =
       compare_mode == LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF;
+  // Keep zero-stall selection on the bounded source-order path unless its best
+  // candidate would consume a longer-latency result while ready work remains
+  // outside that window. The existing recovery views can then preserve the
+  // latency window without scanning the complete ready set.
+  const bool recover_latency_window =
+      !recover_pressure &&
+      out_selection->chosen_score.effective_stall_cycles == 0 &&
+      out_selection->chosen_score.dependency_latency_cycles >
+          out_selection->chosen_score.latency_cycles &&
+      ready_candidate_count > nominee_count;
   if (!recover_pressure &&
-      out_selection->chosen_score.effective_stall_cycles == 0) {
+      out_selection->chosen_score.effective_stall_cycles == 0 &&
+      !recover_latency_window) {
     return;
   }
   const uint8_t source_nominee_count = nominee_count;
+  const uint16_t minimum_recovery_latency_cycles =
+      recover_latency_window
+          ? out_selection->chosen_score.dependency_latency_cycles
+          : 0;
   const loom_low_schedule_recovery_policy_t* recovery_policy =
       &kLoomLowScheduleRecoveryPolicies[compare_mode];
   loom_low_schedule_collect_recovery_nominees(
@@ -464,6 +479,18 @@ void loom_low_schedule_candidate_policy_select(
                                                ready_policy, indegrees,
                                                nominees[i], &nominee_scores[i]);
     ++out_selection->scored_candidate_count;
+    // Latency-window recovery must either replace the entire window that the
+    // source nominee would consume or immediately expose an equally long
+    // descriptor without growing its live frontier. Other cheap operations let
+    // critical-path ordering walk setup chains without issuing enough
+    // independent latency to amortize the resulting pressure.
+    const bool replenishes_non_growing_latency_window =
+        nominee_scores[i].unlocked_non_growing_descriptor_latency_cycles >=
+        minimum_recovery_latency_cycles;
+    if (nominee_scores[i].latency_cycles < minimum_recovery_latency_cycles &&
+        !replenishes_non_growing_latency_window) {
+      continue;
+    }
     if (iree_any_bit_set(
             recovery_policy->flags,
             LOOM_LOW_SCHEDULE_RECOVERY_POLICY_FLAG_REJECT_PRESSURE_DEBT) &&

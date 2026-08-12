@@ -352,12 +352,12 @@ TEST(BenchmarkReportTest, WritesHalTimingCountsAndWarnings) {
   result.data_cache.measurement_materialization =
       IREE_BENCHMARK_LOOM_BUFFER_MATERIALIZATION_DEVICE_LOCAL;
   result.data_cache.binding_count = 2;
-  result.data_cache.binding_ring_count = 6;
+  result.data_cache.binding_ring_count = 1;
   result.data_cache.command_buffer_ring_count = 1;
   result.data_cache.dispatches_per_batch = 6;
   result.data_cache.requested_min_ring_bytes = 4096;
-  result.data_cache.binding_set_bytes = 64;
-  result.data_cache.binding_ring_bytes = 384;
+  result.data_cache.binding_set_bytes = 8192;
+  result.data_cache.binding_ring_bytes = 8192;
   result.artifact_manifest_path =
       IREE_SV("bundle/artifact_manifests/run_candidate_artifact_manifest.json");
 
@@ -421,6 +421,11 @@ TEST(BenchmarkReportTest, WritesHalTimingCountsAndWarnings) {
   EXPECT_TRUE(iree_string_view_equal(
       LookupObject(data_cache, IREE_SV("measurement_materialization")),
       IREE_SV("device_local")));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(data_cache, IREE_SV("binding_ring_count")), IREE_SV("1")));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(data_cache, IREE_SV("ring_byte_target_met")),
+      IREE_SV("true")));
 
   iree_string_view_t timing_interpretation =
       LookupObject(measurement, IREE_SV("timing_interpretation"));

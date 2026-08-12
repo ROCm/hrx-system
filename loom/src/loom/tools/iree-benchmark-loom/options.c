@@ -110,9 +110,10 @@ IREE_FLAG_NAMED(
     int64_t, input_ring_min_bytes, "input-ring-min-bytes",
     IREE_BENCHMARK_LOOM_DEFAULT_INPUT_RING_MIN_BYTES,
     "Minimum total byte size of the device-buffer binding ring used by "
-    "dispatch_complete benchmarks. The auto ring count is max(batch-size, "
-    "ceil(min bytes / bytes per binding set)); use 0 to record one "
-    "hot-reuse binding set.");
+    "dispatch_complete benchmarks. Automatic selection materializes enough "
+    "binding sets to approach this target, capped at one set per batch "
+    "dispatch. A binding set already larger than the target is not "
+    "duplicated; use 0 to record one hot-reuse binding set.");
 IREE_FLAG_NAMED(
     int32_t, input_ring_count, "input-ring-count", 0,
     "Exact number of physical device-buffer binding sets to rotate through "

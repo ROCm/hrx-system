@@ -1911,8 +1911,11 @@ static iree_status_t iree_benchmark_loom_write_data_cache_summary_json(
       &object, IREE_SV("binding_set_bytes"), summary->binding_set_bytes));
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
       &object, IREE_SV("binding_ring_bytes"), summary->binding_ring_bytes));
+  const bool ring_byte_target_met =
+      summary->requested_min_ring_bytes == 0 ||
+      summary->binding_ring_bytes >= summary->requested_min_ring_bytes;
   IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
-      &object, IREE_SV("hot_reuse"), summary->binding_ring_count <= 1));
+      &object, IREE_SV("ring_byte_target_met"), ring_byte_target_met));
   return loom_json_object_end(&object);
 }
 
