@@ -4,14 +4,6 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load(
-    "//loom/build_tools/amdgpu:descriptor_sets.bzl",
-    "loom_amdgpu_descriptor_set_compatible_with",
-)
-load(
-    "//loom/build_tools/amdgpu:target_config.bzl",
-    "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY",
-)
 load("//loom/build_tools/amdgpu/isa_xml:archive.bzl", "AMDGPU_ISA_XML_ARCHIVE")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
@@ -26,12 +18,6 @@ package(
 
 _AMDGPU_TARGET_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu:target_tables"
 
-_DESCRIPTOR_SET_CDNA4 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.cdna4.core"]
-
-_DESCRIPTOR_SET_RDNA3_5 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna3_5.core"]
-
-_DESCRIPTOR_SET_RDNA4M = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna4m.core"]
-
 _DERIVED_TABLE_VISIBILITY = [
     "//loom/src/loom/target/arch/amdgpu/descriptors:__pkg__",
     "//loom/src/loom/target/arch/amdgpu/encoding:__pkg__",
@@ -45,13 +31,14 @@ loom_low_descriptor_data_archive(
 )
 
 loom_generated_file_family(
-    name = "cdna3_gen",
+    name = "cdna_gen",
     args = [
         "--target=cdna3",
+        "--target=cdna4",
         "--isa-xml=cdna3:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_cdna3.xml)",
         "--isa-xml=cdna4:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_cdna4.xml)",
     ],
-    comment = "Generating cdna3 runtime target tables",
+    comment = "Generating CDNA runtime target table family",
     generator = _AMDGPU_TARGET_TABLE_GENERATOR,
     inputs = [
         "@amdgpu_isa_xml//:amdgpu_isa_cdna3.xml",
@@ -60,10 +47,14 @@ loom_generated_file_family(
     output_flags = [
         "--descriptor-source",
         "--encoding-source",
+        "--descriptor-source",
+        "--encoding-source",
     ],
     outputs = [
         "cdna3_descriptors.c",
         "cdna3_encoding_tables.c",
+        "cdna4_descriptors.c",
+        "cdna4_encoding_tables.c",
     ],
     visibility = _DERIVED_TABLE_VISIBILITY,
 )
@@ -72,10 +63,12 @@ loom_generated_file_family(
     name = "rdna3_gen",
     args = [
         "--target=rdna3",
+        "--target=rdna3_5",
+        "--target=rdna4m",
         "--isa-xml=rdna3:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna3.xml)",
         "--isa-xml=rdna3_5:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml)",
     ],
-    comment = "Generating rdna3 runtime target tables",
+    comment = "Generating RDNA3 runtime target table family",
     generator = _AMDGPU_TARGET_TABLE_GENERATOR,
     inputs = [
         "@amdgpu_isa_xml//:amdgpu_isa_rdna3.xml",
@@ -84,53 +77,19 @@ loom_generated_file_family(
     output_flags = [
         "--descriptor-source",
         "--encoding-source",
+        "--descriptor-source",
+        "--encoding-source",
+        "--descriptor-source",
+        "--encoding-source",
     ],
     outputs = [
         "rdna3_descriptors.c",
         "rdna3_encoding_tables.c",
-    ],
-    visibility = _DERIVED_TABLE_VISIBILITY,
-)
-
-loom_generated_file_family(
-    name = "rdna3_5_gen",
-    args = [
-        "--target=rdna3_5",
-        "--isa-xml=rdna3_5:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml)",
-    ],
-    comment = "Generating rdna3_5 runtime target tables",
-    generator = _AMDGPU_TARGET_TABLE_GENERATOR,
-    inputs = ["@amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml"],
-    output_flags = [
-        "--descriptor-source",
-        "--encoding-source",
-    ],
-    outputs = [
         "rdna3_5_descriptors.c",
         "rdna3_5_encoding_tables.c",
-    ],
-    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_RDNA3_5),
-    visibility = _DERIVED_TABLE_VISIBILITY,
-)
-
-loom_generated_file_family(
-    name = "rdna4m_gen",
-    args = [
-        "--target=rdna4m",
-        "--isa-xml=rdna3_5:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml)",
-    ],
-    comment = "Generating rdna4m runtime target tables",
-    generator = _AMDGPU_TARGET_TABLE_GENERATOR,
-    inputs = ["@amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml"],
-    output_flags = [
-        "--descriptor-source",
-        "--encoding-source",
-    ],
-    outputs = [
         "rdna4m_descriptors.c",
         "rdna4m_encoding_tables.c",
     ],
-    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_RDNA4M),
     visibility = _DERIVED_TABLE_VISIBILITY,
 )
 
@@ -156,26 +115,5 @@ loom_generated_file_family(
         "rdna4_gfx125x_descriptors.c",
         "rdna4_gfx125x_encoding_tables.c",
     ],
-    visibility = _DERIVED_TABLE_VISIBILITY,
-)
-
-loom_generated_file_family(
-    name = "cdna4_gen",
-    args = [
-        "--target=cdna4",
-        "--isa-xml=cdna4:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_cdna4.xml)",
-    ],
-    comment = "Generating cdna4 runtime target tables",
-    generator = _AMDGPU_TARGET_TABLE_GENERATOR,
-    inputs = ["@amdgpu_isa_xml//:amdgpu_isa_cdna4.xml"],
-    output_flags = [
-        "--descriptor-source",
-        "--encoding-source",
-    ],
-    outputs = [
-        "cdna4_descriptors.c",
-        "cdna4_encoding_tables.c",
-    ],
-    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_CDNA4),
     visibility = _DERIVED_TABLE_VISIBILITY,
 )

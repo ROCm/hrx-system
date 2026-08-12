@@ -29,17 +29,22 @@ iree_add_all_subdirs()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_generated_file_family(
   NAME
-    cdna3_gen
+    cdna_gen
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::target_tables
   OUTPUTS
     "cdna3_descriptors.c"
     "cdna3_encoding_tables.c"
+    "cdna4_descriptors.c"
+    "cdna4_encoding_tables.c"
   OUTPUT_FLAGS
+    "--descriptor-source"
+    "--encoding-source"
     "--descriptor-source"
     "--encoding-source"
   ARGS
     "--target=cdna3"
+    "--target=cdna4"
     "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
     "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
   INPUTS
@@ -47,7 +52,7 @@ loom_generated_file_family(
     "loom_amdgpu_isa_xml"
     "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
   COMMENT
-    "Generating cdna3 runtime target tables"
+    "Generating CDNA runtime target table family"
 )
 endif()
 
@@ -60,11 +65,21 @@ loom_generated_file_family(
   OUTPUTS
     "rdna3_descriptors.c"
     "rdna3_encoding_tables.c"
+    "rdna3_5_descriptors.c"
+    "rdna3_5_encoding_tables.c"
+    "rdna4m_descriptors.c"
+    "rdna4m_encoding_tables.c"
   OUTPUT_FLAGS
+    "--descriptor-source"
+    "--encoding-source"
+    "--descriptor-source"
+    "--encoding-source"
     "--descriptor-source"
     "--encoding-source"
   ARGS
     "--target=rdna3"
+    "--target=rdna3_5"
+    "--target=rdna4m"
     "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
     "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
   INPUTS
@@ -72,53 +87,7 @@ loom_generated_file_family(
     "loom_amdgpu_isa_xml"
     "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
   COMMENT
-    "Generating rdna3 runtime target tables"
-)
-endif()
-
-if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_file_family(
-  NAME
-    rdna3_5_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::target_tables
-  OUTPUTS
-    "rdna3_5_descriptors.c"
-    "rdna3_5_encoding_tables.c"
-  OUTPUT_FLAGS
-    "--descriptor-source"
-    "--encoding-source"
-  ARGS
-    "--target=rdna3_5"
-    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-  INPUTS
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "loom_amdgpu_isa_xml"
-  COMMENT
-    "Generating rdna3_5 runtime target tables"
-)
-endif()
-
-if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_file_family(
-  NAME
-    rdna4m_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::target_tables
-  OUTPUTS
-    "rdna4m_descriptors.c"
-    "rdna4m_encoding_tables.c"
-  OUTPUT_FLAGS
-    "--descriptor-source"
-    "--encoding-source"
-  ARGS
-    "--target=rdna4m"
-    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-  INPUTS
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "loom_amdgpu_isa_xml"
-  COMMENT
-    "Generating rdna4m runtime target tables"
+    "Generating RDNA3 runtime target table family"
 )
 endif()
 
@@ -147,29 +116,6 @@ loom_generated_file_family(
     "loom_amdgpu_isa_xml"
   COMMENT
     "Generating RDNA4 runtime target table family"
-)
-endif()
-
-if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA4_CORE AND LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_file_family(
-  NAME
-    cdna4_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::target_tables
-  OUTPUTS
-    "cdna4_descriptors.c"
-    "cdna4_encoding_tables.c"
-  OUTPUT_FLAGS
-    "--descriptor-source"
-    "--encoding-source"
-  ARGS
-    "--target=cdna4"
-    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-  INPUTS
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "loom_amdgpu_isa_xml"
-  COMMENT
-    "Generating cdna4 runtime target tables"
 )
 endif()
 
