@@ -1,6 +1,6 @@
 # Functions and structured control flow
 
-**Example files:** [`loom/docs/examples/mental-model/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/mental-model)
+**Example files:** [`loom/docs/examples/elementwise-transform/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/elementwise-transform)
 
 Functions are typed callables that can execute on the host or device. Structured
 control flow keeps conditions, iteration domains, and carried values visible to
@@ -187,16 +187,16 @@ implementation contract* and lets specialization select an eligible provider.
 The composition example's motif contains a concrete helper and two providers
 for one contract:
 
-**Source:** [`loom/docs/examples/mental-model/motif.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/mental-model/motif.loom)
+**Source:** [`loom/docs/examples/elementwise-transform/motif.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/elementwise-transform/motif.loom)
 
 ```loom title="motif.loom"
---8<-- "examples/mental-model/motif.loom"
+--8<-- "examples/elementwise-transform/motif.loom"
 ```
 
 The kernel requests that contract without naming either provider:
 
 ```loom
-%result = func.apply<guide.transform>(%value) : (f32) -> (f32)
+%result = func.apply<guide.elementwise_transform>(%value) : (f32) -> (f32)
 ```
 
 Provider selection uses the contract key, exact signature, available facts,

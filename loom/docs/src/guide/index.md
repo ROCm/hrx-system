@@ -4,7 +4,7 @@ The programming guide explains Loom by the boundary that owns each decision.
 It is written for systems and ML engineers who are comfortable reading a
 kernel.
 
-Start with the [source-to-artifact walkthrough](../getting-started/mental-model.md)
+Start with the [source-to-artifacts walkthrough](../getting-started/source-to-artifacts.md)
 if modules, templates, launch configuration, checks, and command programs are
 all new. Use the chapters here to understand why a source construct exists and
 when it is the right construct. Use the [generated

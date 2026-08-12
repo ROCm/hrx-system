@@ -1,6 +1,6 @@
 # Source modules and canonical text
 
-**Example files:** [`loom/docs/examples/mental-model/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/mental-model)
+**Example files:** [`loom/docs/examples/elementwise-transform/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/elementwise-transform)
 
 A `.loom` file is a complete, independently verifiable module. It may contain
 functions, templates, kernels, checks, command programs, target descriptions,
@@ -33,10 +33,10 @@ The composition example's command module demonstrates the pattern. It declares
 the kernel signature it calls, then defines a command program using that exact
 symbol:
 
-**Source:** [`loom/docs/examples/mental-model/model.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/mental-model/model.loom)
+**Source:** [`loom/docs/examples/elementwise-transform/model.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/elementwise-transform/model.loom)
 
 ```loom title="model.loom"
---8<-- "examples/mental-model/model.loom"
+--8<-- "examples/elementwise-transform/model.loom"
 ```
 
 [`kernel.decl`](../reference/dialects/kernel/ops/decl.md) states the dependency
@@ -87,10 +87,10 @@ not turn every helper or every other root in the module into that target.
 The motif below contains a wave32 provider and a portable provider. The
 module itself is still target-independent:
 
-**Source:** [`loom/docs/examples/mental-model/motif.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/mental-model/motif.loom)
+**Source:** [`loom/docs/examples/elementwise-transform/motif.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/elementwise-transform/motif.loom)
 
 ```loom title="motif.loom"
---8<-- "examples/mental-model/motif.loom"
+--8<-- "examples/elementwise-transform/motif.loom"
 ```
 
 The exact helper and both providers are private: none carries the `public`
@@ -187,7 +187,7 @@ actually part of the contract.
 
 ## Follow the composition
 
-The [source-to-artifact walkthrough](../getting-started/mental-model.md#follow-one-composition-to-low)
+The [source-to-artifacts walkthrough](../getting-started/source-to-artifacts.md#follow-one-composition-to-low)
 links `motif.loom`, `kernel.loom`, and `model.loom`, selects one command root,
 and compiles the reachable kernel for GFX11. Its
 `run.sh` prints every public command before executing it, and the documentation

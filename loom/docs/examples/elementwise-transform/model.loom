@@ -1,0 +1,10 @@
+// The declaration makes the exact dependency explicit in this source module.
+kernel.decl @elementwise_transform_f32(%workload_element_count: index) launch(%device_element_count: index, %input: buffer, %output: buffer)
+
+// The command program owns the reusable schedule while buffers remain
+// replaceable at issue time.
+command.program.def public @elementwise_transform() launch(%input: buffer, %output: buffer) {
+  %element_count = index.constant 1009 : index
+  kernel.launch @elementwise_transform_f32[%element_count](%element_count, %input, %output) : [index](index, buffer, buffer)
+  command.return
+}

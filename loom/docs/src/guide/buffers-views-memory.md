@@ -1,6 +1,6 @@
 # Buffers, views, and memory
 
-**Example files:** [`loom/docs/examples/mental-model/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/mental-model)
+**Example files:** [`loom/docs/examples/elementwise-transform/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/elementwise-transform)
 
 Loom separates storage identity from the logical shape used to access that
 storage. This keeps aliasing, memory-space, alignment, layout, and bounds facts
@@ -201,7 +201,7 @@ Common representation mistakes all erase information too early:
 | Shared-memory communication relies on source order | Cross-invocation visibility | State the required barrier or async completion edge. |
 | Target address spaces appear throughout a motif | Reusability | Use target-independent memory spaces and specialize at the leaf. |
 
-The [source-to-artifact kernel](../getting-started/mental-model.md#a-kernel-owns-two-contracts)
+The [source-to-artifacts kernel](../getting-started/source-to-artifacts.md#a-kernel-owns-two-contracts)
 shows the complete buffer-to-view path with dynamic extent, explicit no-alias
 facts, a control-flow-derived in-bounds proof, and scalar access.
 

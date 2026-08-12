@@ -1,6 +1,6 @@
 # From source to artifacts
 
-**Example files:** [`loom/docs/examples/mental-model/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/mental-model)
+**Example files:** [`loom/docs/examples/elementwise-transform/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/elementwise-transform)
 
 Loom keeps a program understandable while it moves from reusable source to a
 target-specific artifact. Linking, specialization, launch configuration,
@@ -13,7 +13,11 @@ implementations, dispatchable kernels, executable checks, and command programs.
 An application chooses which roots and facts matter, then asks Loom to link and
 specialize only that reachable program.
 
-## From source to artifacts
+The canonical `elementwise-transform` example maps a selectable doubling motif
+over f32 buffers, then follows that program through linking, target
+specialization, native kernel emission, and command-program lowering.
+
+## One program, several forms
 
 `.loom` is the canonical, human-readable source form. `.loombc` preserves the
 same linkable program in bytecode. Neither form implies one target or one
@@ -62,12 +66,12 @@ This is the foundation of a scalable library: callers name semantic demands;
 libraries provide reusable implementations; target selection remains a fact of
 the final compilation rather than a global property baked into every helper.
 This example defines an exact helper, a wave32-specific provider, and a
-portable provider for the same `guide.transform` contract:
+portable provider for the same `guide.elementwise_transform` contract:
 
-**Source:** [`loom/docs/examples/mental-model/motif.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/mental-model/motif.loom)
+**Source:** [`loom/docs/examples/elementwise-transform/motif.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/elementwise-transform/motif.loom)
 
 ```loom title="motif.loom"
---8<-- "examples/mental-model/motif.loom"
+--8<-- "examples/elementwise-transform/motif.loom"
 ```
 
 All three definitions omit `public` and are therefore private. Supplying the
@@ -110,10 +114,10 @@ The kernel below accepts its element count as a workload and device value,
 derives a one-subgroup workgroup size from the target profile, and applies the
 motif contract without naming either provider:
 
-**Source:** [`loom/docs/examples/mental-model/kernel.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/mental-model/kernel.loom)
+**Source:** [`loom/docs/examples/elementwise-transform/kernel.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/elementwise-transform/kernel.loom)
 
 ```loom title="kernel.loom"
---8<-- "examples/mental-model/kernel.loom"
+--8<-- "examples/elementwise-transform/kernel.loom"
 ```
 
 ## Ask when a value becomes known
@@ -202,10 +206,10 @@ The outer module declares the exact kernel dependency and turns one concrete
 retains its dynamic workload contract and can be launched with other counts by
 other roots:
 
-**Source:** [`loom/docs/examples/mental-model/model.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/mental-model/model.loom)
+**Source:** [`loom/docs/examples/elementwise-transform/model.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/elementwise-transform/model.loom)
 
 ```loom title="model.loom"
---8<-- "examples/mental-model/model.loom"
+--8<-- "examples/elementwise-transform/model.loom"
 ```
 
 !!! info "Current command-program surface"
@@ -223,29 +227,30 @@ constructs that exist today.
 
 The three source listings above are repository `.loom` files, not prose copies.
 With the Loom tools on `PATH`, this command formats them, links and specializes
-the `@transform` root, compiles its kernel for the generic GFX11 profile, and
+the `@elementwise_transform` root, compiles its kernel for the generic GFX11
+profile, and
 prints every Loom command it runs:
 
 ```shell
-loom/docs/examples/mental-model/run.sh \
-  gfx11-generic build/mental-model/gfx11-generic
+loom/docs/examples/elementwise-transform/run.sh \
+  gfx11-generic build/elementwise-transform/gfx11-generic
 ```
 
-The resulting directory contains the specialized `transform.loom`, a VMFB, an
-HSACO, and the captured target Low IR. The documentation build invokes that
-same script and regenerates the views below; neither output is checked-in
-source.
+The resulting directory contains the specialized `elementwise-transform.loom`,
+a VMFB, an HSACO, and the captured target Low IR. The documentation build
+invokes that same script and regenerates the views below; neither output is
+checked-in source.
 
 === "GFX11 kernel Low"
 
     ```loom
-    --8<-- "generated/examples/mental-model/kernel-gfx11.loom"
+    --8<-- "generated/examples/elementwise-transform/elementwise-transform-gfx11.loom"
     ```
 
 === "Command-program Low"
 
     ```loom
-    --8<-- "generated/examples/mental-model/command-program.loom"
+    --8<-- "generated/examples/elementwise-transform/elementwise-transform-program.loom"
     ```
 
 The GFX11 tab comes directly from the installed-tool workflow above. The

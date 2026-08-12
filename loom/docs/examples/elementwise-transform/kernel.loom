@@ -1,6 +1,6 @@
 // The targetless kernel owns its physical launch and applies the transform
 // contract without naming one provider.
-kernel.def @transform_buffer(%element_count: index) {
+kernel.def @elementwise_transform_f32(%element_count: index) {
   %unit = index.constant 1 : index
   %workgroup_size = target.subgroup.size : index
   %rounding = index.sub %workgroup_size, %unit : index
@@ -19,7 +19,7 @@ kernel.def @transform_buffer(%element_count: index) {
   %in_bounds = index.cmp ult, %element_index, %element_count : index
   scf.if %in_bounds {
     %value = view.load %input_view[%element_index] : view<[%element_count]xf32> -> f32
-    %result = func.apply<guide.transform>(%value) : (f32) -> (f32)
+    %result = func.apply<guide.elementwise_transform>(%value) : (f32) -> (f32)
     view.store %result, %output_view[%element_index] : f32, view<[%element_count]xf32>
   }
   kernel.return

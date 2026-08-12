@@ -1,6 +1,6 @@
 # Values, types, and shapes
 
-**Example files:** [`loom/docs/examples/mental-model/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/mental-model)
+**Example files:** [`loom/docs/examples/elementwise-transform/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/elementwise-transform)
 
 Loom IR is statically typed SSA. Every operation names the values it consumes,
 the values it produces, and the types at that boundary. The type system keeps
@@ -147,10 +147,10 @@ offset, and optional address layout needed for access.
 
 The composition example shows that boundary in one place:
 
-**Source:** [`loom/docs/examples/mental-model/kernel.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/mental-model/kernel.loom)
+**Source:** [`loom/docs/examples/elementwise-transform/kernel.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/elementwise-transform/kernel.loom)
 
 ```loom title="kernel.loom"
---8<-- "examples/mental-model/kernel.loom"
+--8<-- "examples/elementwise-transform/kernel.loom"
 ```
 
 The kernel signature accepts opaque buffer identities. The body creates f32

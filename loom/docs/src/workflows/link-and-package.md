@@ -70,15 +70,16 @@ loom-link model.loom \
   --library=kernel.loom \
   --library=motif.loom \
   --mode=link \
-  --root=@transform \
+  --root=@elementwise_transform \
   --to=text \
-  --output=transform.loom
+  --output=elementwise-transform.loom
 ```
 
-This is the exact composition exercised by the [source-to-artifact
-walkthrough](../getting-started/mental-model.md#follow-one-composition-to-low).
-`@transform` reaches its declared kernel and the template providers needed for
-`guide.transform`; unrelated private symbols can disappear.
+This is the exact composition exercised by the [source-to-artifacts
+walkthrough](../getting-started/source-to-artifacts.md#follow-one-composition-to-low).
+`@elementwise_transform` reaches its declared kernel and the template providers
+needed for `guide.elementwise_transform`; unrelated private symbols can
+disappear.
 
 Repeated `--root=@symbol` options select several roots from one catalog. Add
 `--include-exported-roots` when the module's exported symbols should join the

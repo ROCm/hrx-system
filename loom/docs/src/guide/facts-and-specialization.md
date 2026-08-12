@@ -1,6 +1,6 @@
 # Facts and specialization
 
-**Example files:** [`loom/docs/examples/mental-model/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/mental-model) and [`loom/docs/examples/guide/command-programs/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/guide/command-programs)
+**Example files:** [`loom/docs/examples/elementwise-transform/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/elementwise-transform) and [`loom/docs/examples/guide/command-programs/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/guide/command-programs)
 
 Loom specializes from facts already present in the program. Constants, dynamic
 shape bindings, configuration contracts, control-flow conditions, storage
@@ -212,7 +212,7 @@ either cannot change the program.
 A target requirement states when a provider is valid:
 
 ```loom
-func.template<guide.transform> requires [#target.subgroup.size<32>] priority(20) @wave32_transform(%value: f32) -> (f32) {
+func.template<guide.elementwise_transform> requires [#target.subgroup.size<32>] priority(20) @wave32_elementwise_transform(%value: f32) -> (f32) {
   %result = func.call @double(%value) : (f32) -> (f32)
   func.return %result : f32
 }
@@ -230,10 +230,10 @@ then match AMDGPU, SPIR-V, or another target family that establishes it.
 The composition example's motif contains both the wave32 provider and its
 portable fallback:
 
-**Source:** [`loom/docs/examples/mental-model/motif.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/mental-model/motif.loom)
+**Source:** [`loom/docs/examples/elementwise-transform/motif.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/elementwise-transform/motif.loom)
 
 ```loom title="motif.loom"
---8<-- "examples/mental-model/motif.loom"
+--8<-- "examples/elementwise-transform/motif.loom"
 ```
 
 ## Unknown is not false

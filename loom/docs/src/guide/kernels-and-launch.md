@@ -1,6 +1,6 @@
 # Kernels and launch configuration
 
-**Example files:** [`loom/docs/examples/mental-model/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/mental-model)
+**Example files:** [`loom/docs/examples/elementwise-transform/`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/elementwise-transform)
 
 A Loom kernel owns the computation performed on a device and the mapping from
 a logical workload to the physical launch that performs it. Keeping both
@@ -154,7 +154,7 @@ belong to different stages and answer different questions.
 Templates can state the same dependency as an eligibility requirement:
 
 ```loom
-func.template<guide.transform> requires [#target.subgroup.size<32>] priority(20) @wave32_transform(%value: f32) -> (f32) {
+func.template<guide.elementwise_transform> requires [#target.subgroup.size<32>] priority(20) @wave32_elementwise_transform(%value: f32) -> (f32) {
   %two = scalar.constant 2.0 : f32
   %result = scalar.mulf %value, %two : f32
   func.return %result : f32
@@ -230,7 +230,7 @@ equivalent installed-tool products.
 | Tail invocations access before checking bounds | Physical grid confused with logical extent | Guard or mask access and carry the refined index. |
 | Application code guesses LDS/shared-memory bytes | Compiler allocation result reconstructed externally | Consume `workgroup_storage_bytes` from the compiled launch contract. |
 
-The complete kernel in the [source-to-artifact walkthrough](../getting-started/mental-model.md#a-kernel-owns-two-contracts)
+The complete kernel in the [source-to-artifacts walkthrough](../getting-started/source-to-artifacts.md#a-kernel-owns-two-contracts)
 combines a dynamic workload, target-derived launch geometry, buffer views, a
 selectable motif, and tail handling in one targetless entry.
 

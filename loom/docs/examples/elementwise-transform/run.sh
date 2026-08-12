@@ -17,7 +17,7 @@ if [[ "$#" -gt 2 ]]; then
 fi
 
 target="${1:-gfx11-generic}"
-output_dir="${2:-build/mental-model/${target}}"
+output_dir="${2:-build/elementwise-transform/${target}}"
 loom_example_configure_target "${target}"
 
 if [[ "${output_dir}" != /* ]]; then
@@ -49,24 +49,24 @@ loom_example_run_tool loom-link "${loom_link}" \
   --library=kernel.loom \
   --library=motif.loom \
   --mode=link \
-  --root=@transform \
+  --root=@elementwise_transform \
   --to=text \
-  --output="${output_dir}/transform.loom"
+  --output="${output_dir}/elementwise-transform.loom"
 
 loom_example_section "Compile the selected kernel for ${target}"
 loom_example_run_tool loom-compile "${loom_compile}" \
-  "${output_dir}/transform.loom" \
+  "${output_dir}/elementwise-transform.loom" \
   --backend="${LOOM_EXAMPLE_BACKEND}" \
   --target="${LOOM_EXAMPLE_TARGET}" \
-  --root=@transform_buffer \
-  --output="${output_dir}/transform.vmfb" \
-  --emit-target-artifact="${output_dir}/transform.hsaco" \
+  --root=@elementwise_transform_f32 \
+  --output="${output_dir}/elementwise-transform.vmfb" \
+  --emit-target-artifact="${output_dir}/elementwise-transform.hsaco" \
   --dump-ir-after=low-select-operand-forms \
-  --dump-ir-output="${output_dir}/transform-gfx11.loom"
+  --dump-ir-output="${output_dir}/elementwise-transform-gfx11.loom"
 
 loom_example_section "Artifacts"
 printf '  %s\n' \
-  "${output_dir}/transform.loom" \
-  "${output_dir}/transform-gfx11.loom" \
-  "${output_dir}/transform.vmfb" \
-  "${output_dir}/transform.hsaco"
+  "${output_dir}/elementwise-transform.loom" \
+  "${output_dir}/elementwise-transform-gfx11.loom" \
+  "${output_dir}/elementwise-transform.vmfb" \
+  "${output_dir}/elementwise-transform.hsaco"
