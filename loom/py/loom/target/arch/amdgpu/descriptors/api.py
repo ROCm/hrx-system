@@ -1504,14 +1504,14 @@ _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
     ),
     "gfx11_generic": _AmdgpuCoreDescriptorSetBuilder(
         base=_AMDGPU_GFX11_GENERIC_CORE_DESCRIPTOR_SET_BASE,
-        overlay_rows=_gfx11_generic_core_overlays,
-        overlay_descriptors=_gfx11_generic_core_overlay_descriptors,
+        overlay_rows=_gfx11_core_overlays,
+        overlay_descriptors=_gfx11_core_overlay_descriptors,
         extra_descriptors=(_s_delay_alu_descriptor(),),
     ),
     "gfx12_generic": _AmdgpuCoreDescriptorSetBuilder(
         base=_AMDGPU_GFX12_GENERIC_CORE_DESCRIPTOR_SET_BASE,
-        overlay_rows=_gfx12_generic_core_overlays,
-        overlay_descriptors=_gfx12_generic_core_overlay_descriptors,
+        overlay_rows=_gfx12_core_overlays,
+        overlay_descriptors=_gfx12_core_overlay_descriptors,
         extra_descriptors=(_s_delay_alu_descriptor(),),
     ),
     "gfx12_5_generic": _AmdgpuCoreDescriptorSetBuilder(

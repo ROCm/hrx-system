@@ -113,10 +113,8 @@ from loom.target.arch.amdgpu.descriptors import (
     _categorize_amdgpu_descriptors,
     _gfx9_4_generic_core_overlays,
     _gfx11_core_overlays,
-    _gfx11_generic_core_overlays,
     _gfx12_5_generic_core_overlays,
     _gfx12_core_overlays,
-    _gfx12_generic_core_overlays,
     _gfx115x_core_overlays,
     _gfx125x_core_overlays,
     _gfx125x_reg_classes,
@@ -250,9 +248,6 @@ def test_generic_descriptor_contracts_are_member_intersections() -> None:
         == gfx9_4_base_intersection
     )
 
-    gfx115x_overlays = {
-        overlay.descriptor_key: overlay for overlay in _gfx115x_core_overlays()
-    }
     gfx950_overlays = {
         overlay.descriptor_key: overlay for overlay in _gfx950_core_overlays()
     }
@@ -276,12 +271,6 @@ def test_generic_descriptor_contracts_are_member_intersections() -> None:
         for overlay in gfx9_4_common_overlays
         if overlay.descriptor_key not in gfx9_4_packed8_matrix_keys
     )
-    assert _gfx11_generic_core_overlays() == tuple(
-        overlay
-        for overlay in _gfx11_core_overlays()
-        if gfx115x_overlays.get(overlay.descriptor_key) == overlay
-    )
-    assert _gfx12_generic_core_overlays() == _gfx12_core_overlays()
     gfx125x_overlays = _gfx125x_core_overlays()
     assert all(
         not (overlay.semantic_tag or "").startswith("matrix.wmma.")
@@ -3240,7 +3229,6 @@ def test_scalar_float_arithmetic_descriptors_are_arch_specific() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx11_generic_core_overlays(),
     ):
         descriptor_keys = {descriptor.descriptor_key for descriptor in descriptor_set}
         assert not scalar_float_keys & descriptor_keys
@@ -3282,7 +3270,6 @@ def test_scalar_float_conversion_descriptors_are_arch_specific() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx11_generic_core_overlays(),
     ):
         descriptor_keys = {descriptor.descriptor_key for descriptor in descriptor_set}
         assert not expected_register_parts.keys() & descriptor_keys
@@ -3339,7 +3326,6 @@ def test_scalar_float_compare_descriptors_are_arch_specific() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx11_generic_core_overlays(),
     ):
         descriptor_keys = {descriptor.descriptor_key for descriptor in descriptor_set}
         assert not scalar_float_compare_keys & descriptor_keys
@@ -4167,9 +4153,7 @@ def test_vinterp_descriptors_follow_hardware_architecture_coverage() -> None:
     for overlays in (
         _gfx11_core_overlays(),
         _gfx115x_core_overlays(),
-        _gfx11_generic_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx12_generic_core_overlays(),
     ):
         assert {
             overlay.descriptor_key

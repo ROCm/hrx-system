@@ -1500,14 +1500,6 @@ def _gfx115x_core_overlay_descriptors(
     )
 
 
-@cache
-def _gfx11_generic_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
-    return _amdgpu_descriptor_overlay_intersection(
-        _gfx11_core_overlays(),
-        _gfx115x_core_overlays(),
-    )
-
-
 def _gfx12_wmma_16x16_overlays(
     *, wave_size: int, op_sel_hi_field: str
 ) -> tuple[AmdgpuDescriptorOverlay, ...]:
@@ -1777,14 +1769,6 @@ def _rdna4m_core_overlay_descriptors(
     spec = _rdna4m_spec_with_supplemental_instruction_facts(spec)
     return _with_execution_mask_state_reads(
         materialize_amdgpu_descriptor_overlays(spec, _rdna4m_core_overlays())
-    )
-
-
-def _gfx11_generic_core_overlay_descriptors(
-    spec: AmdgpuIsaFactSource,
-) -> tuple[Descriptor, ...]:
-    return _with_execution_mask_state_reads(
-        materialize_amdgpu_descriptor_overlays(spec, _gfx11_generic_core_overlays())
     )
 
 
@@ -2182,19 +2166,6 @@ def _gfx12_core_overlay_descriptors(
 ) -> tuple[Descriptor, ...]:
     return _with_execution_mask_state_reads(
         materialize_amdgpu_descriptor_overlays(spec, _gfx12_core_overlays())
-    )
-
-
-@cache
-def _gfx12_generic_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
-    return _amdgpu_descriptor_overlay_intersection(_gfx12_core_overlays())
-
-
-def _gfx12_generic_core_overlay_descriptors(
-    spec: AmdgpuIsaFactSource,
-) -> tuple[Descriptor, ...]:
-    return _with_execution_mask_state_reads(
-        materialize_amdgpu_descriptor_overlays(spec, _gfx12_generic_core_overlays())
     )
 
 
@@ -2734,8 +2705,6 @@ __all__ = (
     "_gfx125x_reg_classes",
     "_gfx11_core_overlay_descriptors",
     "_gfx11_core_overlays",
-    "_gfx11_generic_core_overlay_descriptors",
-    "_gfx11_generic_core_overlays",
     "_gfx115x_core_overlay_descriptors",
     "_gfx115x_core_overlays",
     "_gfx12_5_generic_core_overlay_descriptors",
@@ -2749,8 +2718,6 @@ __all__ = (
     "_rdna4m_core_overlay_descriptors",
     "_rdna4m_core_overlays",
     "_rdna4m_minmax_overlays",
-    "_gfx12_generic_core_overlay_descriptors",
-    "_gfx12_generic_core_overlays",
     "_gfx940_core_overlay_descriptors",
     "_gfx940_core_overlays",
     "_gfx950_core_overlay_descriptors",

@@ -21,7 +21,7 @@ from loom.target.arch.amdgpu.descriptors.rdna35 import (
     _rdna35_dpp_integer_compare_uniform_rhs_overlays,
 )
 from loom.target.arch.amdgpu.descriptors.sets import (
-    _gfx11_generic_core_overlays,
+    _gfx11_core_overlays,
     _gfx115x_core_overlays,
     _rdna4m_core_overlays,
 )
@@ -168,9 +168,7 @@ def test_rdna35_dpp_uniform_rhs_overlays_remain_exact_target_only() -> None:
         for overlay in family
     }
     gfx115x_keys = {overlay.descriptor_key for overlay in _gfx115x_core_overlays()}
-    generic_keys = {
-        overlay.descriptor_key for overlay in _gfx11_generic_core_overlays()
-    }
+    generic_keys = {overlay.descriptor_key for overlay in _gfx11_core_overlays()}
     rdna4m_overlays = {
         overlay.descriptor_key: overlay for overlay in _rdna4m_core_overlays()
     }
