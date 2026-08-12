@@ -178,6 +178,29 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "predicate_facts",
+    srcs = ["predicate_facts.c"],
+    hdrs = ["predicate_facts.h"],
+    deps = [
+        ":fact_table",
+        "//loom/src/loom/ir:facts",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "predicate_facts_test",
+    srcs = ["predicate_facts_test.cc"],
+    deps = [
+        ":predicate_facts",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "stream",
     srcs = ["stream.c"],
     hdrs = ["stream.h"],

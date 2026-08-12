@@ -43,6 +43,7 @@ loom_generated_cc_library(
     loom::rewrite::rewriter
     loom::target::facts
     loom::util::fact_table
+    loom::util::predicate_facts
 )
 
 loom_cc_test(

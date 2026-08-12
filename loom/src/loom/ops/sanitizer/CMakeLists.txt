@@ -40,6 +40,7 @@ loom_generated_cc_library(
     loom::ops::view
     loom::rewrite::rewriter
     loom::rewrite::type_propagation
+    loom::util::predicate_facts
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

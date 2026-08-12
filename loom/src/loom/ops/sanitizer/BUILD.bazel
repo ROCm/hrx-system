@@ -41,6 +41,7 @@ loom_generated_cc_library(
         "//loom/src/loom/ops/view",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/rewrite:type_propagation",
+        "//loom/src/loom/util:predicate_facts",
         "//runtime/src/iree/base",
     ],
 )

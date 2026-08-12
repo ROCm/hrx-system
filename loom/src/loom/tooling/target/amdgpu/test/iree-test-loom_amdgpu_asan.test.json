@@ -54,6 +54,33 @@
       }
     },
     {
+      "name": "preserves checked relational launch bounds under amdgpu asan",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../../test/corpus/sanitizer/amdgpu_asan_actual.loom",
+          "--case=@asan_relational_launch_bound_case",
+          "--device=amdgpu",
+          "--config=asan_launch_bound.tile_capacity=1",
+          "--sanitizer=asan",
+          "--sanitizer-reporting=report-only",
+          "--amdgpu_asan=true",
+          "--amdgpu_asan_report_policy=report-only"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            {
+              "regex": "\"case\":\"asan_relational_launch_bound_case\"[^}]*\"passed\":true"
+            },
+            "\"failed_sample_count\":0"
+          ]
+        }
+      }
+    },
+    {
       "name": "runs selected kernargs with access instrumentation",
       "run": {
         "tool": "iree-test-loom",

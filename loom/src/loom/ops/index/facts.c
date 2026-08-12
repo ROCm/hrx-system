@@ -15,6 +15,7 @@
 #include "loom/ops/index/carrier.h"
 #include "loom/ops/index/compare.h"
 #include "loom/ops/index/ops.h"
+#include "loom/util/predicate_facts.h"
 
 #define LOOM_INDEX_BINARY_FACTS(name, transfer_fn)                       \
   iree_status_t name(loom_fact_context_t* context,                       \
@@ -140,9 +141,9 @@ iree_status_t loom_index_assume_facts(loom_fact_context_t* context,
   const loom_predicate_t* predicates = pred_attr.predicate_list;
   uint16_t predicate_count = pred_attr.count;
   loom_value_slice_t values = loom_index_assume_values(op);
-  loom_value_facts_apply_alias_predicates(values.values, fact_count, predicates,
-                                          predicate_count, result_facts);
-  return iree_ok_status();
+  return loom_value_fact_table_apply_alias_predicates(
+      context->table, values.values, fact_count, predicates, predicate_count,
+      result_facts);
 }
 
 LOOM_INDEX_BINARY_FACTS(loom_index_add_facts, loom_value_facts_addi)

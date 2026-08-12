@@ -27,6 +27,26 @@ kernel.def @asan_global_store_redzone() {
   kernel.return
 }
 
+config.decl @asan_launch_bound.tile_capacity : %value: index where [range(%value, 1, 65535)]
+
+// A checked relational bound supplies the target-legal byte-offset range used
+// by the access sanitizer after value instrumentation replaces the assume.
+kernel.def @asan_relational_launch_bound(%tile_count: index) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%tile_count, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer) {
+  %c0 = index.constant 0 : index
+  %tile_bytes = index.constant 32768 : offset
+  %value = scalar.constant 42 : i32
+  %tile_capacity = config.get @asan_launch_bound.tile_capacity : index
+  %workgroup_raw = kernel.workgroup.id<x> : index
+  %workgroup = index.assume %workgroup_raw [lt(%workgroup_raw, %tile_capacity)] : index
+  %tile_offset = index.scale %workgroup, %tile_bytes : index, offset -> offset
+  %output_view = buffer.view %output[%tile_offset] : buffer -> view<1xi32>
+  view.store %value, %output_view[%c0] : i32, view<1xi32>
+  kernel.return
+}
+
 check.case @asan_global_store_valid_case {
   %output = check.generate.fill value(0) : tensor<1xi32>
   kernel.launch @asan_global_store_valid(%output) : (tensor<1xi32>)
@@ -42,5 +62,15 @@ check.case @asan_global_store_redzone_case {
   %expected = check.generate.fill value(0) : tensor<1xi32>
   check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
   check.expect.event<device> {asan = {access = "write", access_length = 4}, count = 1, severity = "error", type = "asan_report"}
+  check.return
+}
+
+check.case @asan_relational_launch_bound_case {
+  %tile_count = check.literal value(1) : index
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  kernel.launch @asan_relational_launch_bound[%tile_count](%output) : [index](tensor<1xi32>)
+  %expected = check.generate.fill value(42) : tensor<1xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
   check.return
 }

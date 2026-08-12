@@ -54,6 +54,7 @@ loom_generated_cc_library(
     loom::ops::combining
     loom::ops::op_defs
     loom::rewrite::rewriter
+    loom::util::predicate_facts
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

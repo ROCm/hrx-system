@@ -793,16 +793,6 @@ bool loom_value_facts_predicate_conflict(
 void loom_value_facts_apply_predicate(loom_value_facts_t* facts,
                                       const loom_predicate_t* predicate);
 
-// Tightens one fact per SSA value using predicates over those values.
-// Literal predicates refine their target value directly. Binary relational
-// predicates also refine both values from the known interval of their
-// counterpart. |inout_facts[i]| corresponds to |values[i]|.
-void loom_value_facts_apply_alias_predicates(const loom_value_id_t* values,
-                                             uint16_t value_count,
-                                             const loom_predicate_t* predicates,
-                                             uint16_t predicate_count,
-                                             loom_value_facts_t* inout_facts);
-
 //===----------------------------------------------------------------------===//
 // Transfer functions
 //===----------------------------------------------------------------------===//

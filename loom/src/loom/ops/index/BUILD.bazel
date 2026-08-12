@@ -46,6 +46,7 @@ loom_generated_cc_library(
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:facts",
         "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:predicate_facts",
         "//runtime/src/iree/base/internal",
     ],
 )

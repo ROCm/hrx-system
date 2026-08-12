@@ -206,6 +206,33 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    predicate_facts
+  HDRS
+    "predicate_facts.h"
+  SRCS
+    "predicate_facts.c"
+  DEPS
+    ::fact_table
+    iree::base::internal
+    iree::base::internal::arena
+    loom::ir::facts
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    predicate_facts_test
+  SRCS
+    "predicate_facts_test.cc"
+  DEPS
+    ::predicate_facts
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
     stream
   HDRS
     "stream.h"
