@@ -314,6 +314,23 @@ This makes resumption cheap without promoting an agent's prose into evidence.
 Another agent can reproduce the selected state, falsify the active hypothesis,
 and continue from the same boundary instead of trusting a narrative summary.
 
+## Use external oracles for bounded questions
+
+External compilers and runtimes can make one part of the loop independently
+observable. Each oracle keeps its own selection, provenance, and evidence
+boundary:
+
+- [RADV and Vulkan](oracles/radv.md) join an optimized Vulkan dispatch to its
+  selected SPIR-V, ACO native program, launch geometry, and score;
+- [LLVM MC](oracles/llvm-mc.md) independently qualifies selected native packet
+  encodings; and
+- [GGML and llama.cpp](oracles/ggml-llama-cpp.md) preserve model, quantized
+  storage, graph, runtime-selection, and semantic-cut contracts during a port.
+
+An oracle answers the question named by its page. It does not become Loom's
+source language, force its dispatch boundaries into a model program, or waive
+the numerical, compiler, and physical gates around the answer.
+
 ## Compact loop
 
 For each candidate:
