@@ -1,0 +1,7 @@
+// Decodes one GGML Q4_0 block while keeping its physical carrier and numeric
+// interpretation as separate values.
+func.def @decode_q4_0(%payload: vector<4xi32>, %scale: vector<1xf16>) -> (vector<32xf32>) {
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
+  %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf16>} : vector<4xi32>, encoding<schema> -> vector<32xf32>
+  func.return %decoded : vector<32xf32>
+}

@@ -1,0 +1,17 @@
+// These targetless helpers and providers deliberately omit `public`. An
+// explicitly linked library can satisfy reachable dependencies from them
+// without adding their implementation symbols to the public module interface.
+func.def inline @double(%value: f32) -> (f32) {
+  %doubled = scalar.addf %value, %value : f32
+  func.return %doubled : f32
+}
+
+func.template<guide.elementwise_transform> requires [#target.subgroup.size<32>] priority(20) @wave32_elementwise_transform(%value: f32) -> (f32) {
+  %result = func.call @double(%value) : (f32) -> (f32)
+  func.return %result : f32
+}
+
+func.template<guide.elementwise_transform> priority(1) @portable_elementwise_transform(%value: f32) -> (f32) {
+  %result = func.call @double(%value) : (f32) -> (f32)
+  func.return %result : f32
+}

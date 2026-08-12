@@ -63,9 +63,30 @@ theme:
 
 nav:
   - Loom: index.md
-  - Get started:
+  - Programming guide:
+      - Guide map: guide/index.md
       - Acquiring Loom: getting-started/acquiring-loom.md
-      - Mental model: getting-started/mental-model.md
+      - From source to artifacts: getting-started/source-to-artifacts.md
+      - Source modules and canonical text: guide/source-modules.md
+      - Values, types, and shapes: guide/values-types-shapes.md
+      - Functions and structured control flow: guide/functions-and-control.md
+      - Buffers, views, and memory: guide/buffers-views-memory.md
+      - Vectors and structured compute: guide/vectors-and-structured-compute.md
+      - Kernels and launch configuration: guide/kernels-and-launch.md
+      - Facts and specialization: guide/facts-and-specialization.md
+      - Checks and benchmarks: guide/checks-and-benchmarks.md
+      - Command programs: guide/command-programs.md
+  - Workflows:
+      - Workflow map: workflows/index.md
+      - Format and verify source: workflows/format-and-verify.md
+      - Link and package modules: workflows/link-and-package.md
+      - Test correctness: workflows/test-correctness.md
+      - Benchmark checked work: workflows/benchmark.md
+      - Compile artifacts: workflows/compile-artifacts.md
+      - Read compile reports: workflows/compile-reports.md
+  - Integration:
+      - Integration map: integration/index.md
+      - Embed kernel JIT compilation: integration/jit-kernel.md
   - Reference:
       - Reference map: reference/index.md
       - Dialects: reference/dialects/index.md
