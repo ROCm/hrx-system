@@ -14,6 +14,7 @@ from pathlib import Path
 
 from loom.dsl import Op
 from loom.gen.support.c import c_identifier as _c_identifier
+from loom.gen.support.files import write_text_file
 from loom.gen.support.generated_file import line_comment_header
 from loom.gen.target.contracts import lower_rule_rows, lower_rule_spelling
 from loom.target.contracts import (
@@ -97,10 +98,8 @@ def write_lower_rule_set_to_paths(
     """Writes generated C/H contents for one generated lower-rule set."""
 
     generated = generate_lower_rule_set(table, dialect_ops=dialect_ops)
-    header_path.parent.mkdir(parents=True, exist_ok=True)
-    source_path.parent.mkdir(parents=True, exist_ok=True)
-    header_path.write_text(generated.header, encoding="utf-8")
-    source_path.write_text(generated.source, encoding="utf-8")
+    write_text_file(header_path, generated.header)
+    write_text_file(source_path, generated.source)
 
 
 def _generate_header(*, header_guard: str, symbol_name: str) -> str:

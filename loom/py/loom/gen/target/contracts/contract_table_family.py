@@ -23,6 +23,7 @@ def _ensure_runtime_py_on_path() -> None:
 
 _ensure_runtime_py_on_path()
 
+from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.target.contracts.contract_fragments import (  # noqa: E402
     generate_contract_fragment_from_lower_rules,
 )
@@ -89,8 +90,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         (args.lower_rule_header, generated_lower_rules.header),
         (args.lower_rule_source, generated_lower_rules.source),
     ):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(contents, encoding="utf-8")
+        write_text_file(path, contents)
     return 0
 
 

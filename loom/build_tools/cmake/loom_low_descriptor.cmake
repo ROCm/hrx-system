@@ -145,11 +145,19 @@ function(loom_target_table_cc_library)
   iree_py_library_collect_sources(_GENERATOR_INPUTS "${_RULE_GENERATOR}")
   _loom_python_command_prefix(_PYTHON_COMMAND_PREFIX "${_RULE_GENERATOR}")
 
+  set(_OUTPUTS
+    "${_SOURCE}"
+    "${_HEADER}"
+    ${_GENERATED_HDRS}
+  )
+  set(_GEN_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}_gen")
+  set(_GEN_STAMP
+    "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${_GEN_TARGET}.stamp")
   add_custom_command(
     OUTPUT
-      "${_SOURCE}"
-      "${_HEADER}"
-      ${_GENERATED_HDRS}
+      "${_GEN_STAMP}"
+    BYPRODUCTS
+      ${_OUTPUTS}
     COMMAND
       ${_PYTHON_COMMAND_PREFIX}
       "${Python3_EXECUTABLE}"
@@ -158,6 +166,8 @@ function(loom_target_table_cc_library)
       "--source=${_SOURCE}"
       "--header=${_HEADER}"
       ${_GENERATED_HDR_OUTPUT_ARGS}
+    COMMAND
+      "${CMAKE_COMMAND}" -E touch "${_GEN_STAMP}"
     DEPENDS
       ${_GENERATOR_INPUTS}
       ${_RULE_INPUTS}
@@ -166,18 +176,14 @@ function(loom_target_table_cc_library)
     VERBATIM
   )
 
-  set(_GEN_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}_gen")
   add_custom_target("${_GEN_TARGET}"
     DEPENDS
-      "${_SOURCE}"
-      "${_HEADER}"
-      ${_GENERATED_HDRS}
+      "${_GEN_STAMP}"
+      ${_OUTPUTS}
   )
   iree_register_generated_compile_input("${_GEN_TARGET}"
     OUTPUTS
-      "${_SOURCE}"
-      "${_HEADER}"
-      ${_GENERATED_HDRS}
+      ${_OUTPUTS}
   )
 
   loom_cc_library(
@@ -235,12 +241,21 @@ function(loom_target_contract_table_cc_libraries)
   iree_py_library_collect_sources(_GENERATOR_INPUTS "${_RULE_GENERATOR}")
   _loom_python_command_prefix(_PYTHON_COMMAND_PREFIX "${_RULE_GENERATOR}")
 
+  set(_OUTPUTS
+    "${_CONTRACT_SOURCE}"
+    "${_CONTRACT_HEADER}"
+    "${_LOWER_RULE_SOURCE}"
+    "${_LOWER_RULE_HEADER}"
+  )
+  iree_package_name(_PACKAGE_NAME)
+  set(_GEN_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}_gen")
+  set(_GEN_STAMP
+    "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${_GEN_TARGET}.stamp")
   add_custom_command(
     OUTPUT
-      "${_CONTRACT_SOURCE}"
-      "${_CONTRACT_HEADER}"
-      "${_LOWER_RULE_SOURCE}"
-      "${_LOWER_RULE_HEADER}"
+      "${_GEN_STAMP}"
+    BYPRODUCTS
+      ${_OUTPUTS}
     COMMAND
       ${_PYTHON_COMMAND_PREFIX}
       "${Python3_EXECUTABLE}"
@@ -250,6 +265,8 @@ function(loom_target_contract_table_cc_libraries)
       "--contract-header=${_CONTRACT_HEADER}"
       "--lower-rule-source=${_LOWER_RULE_SOURCE}"
       "--lower-rule-header=${_LOWER_RULE_HEADER}"
+    COMMAND
+      "${CMAKE_COMMAND}" -E touch "${_GEN_STAMP}"
     DEPENDS
       ${_GENERATOR_INPUTS}
       ${_RULE_INPUTS}
@@ -258,21 +275,14 @@ function(loom_target_contract_table_cc_libraries)
     VERBATIM
   )
 
-  iree_package_name(_PACKAGE_NAME)
-  set(_GEN_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}_gen")
   add_custom_target("${_GEN_TARGET}"
     DEPENDS
-      "${_CONTRACT_SOURCE}"
-      "${_CONTRACT_HEADER}"
-      "${_LOWER_RULE_SOURCE}"
-      "${_LOWER_RULE_HEADER}"
+      "${_GEN_STAMP}"
+      ${_OUTPUTS}
   )
   iree_register_generated_compile_input("${_GEN_TARGET}"
     OUTPUTS
-      "${_CONTRACT_SOURCE}"
-      "${_CONTRACT_HEADER}"
-      "${_LOWER_RULE_SOURCE}"
-      "${_LOWER_RULE_HEADER}"
+      ${_OUTPUTS}
   )
 
   loom_cc_library(

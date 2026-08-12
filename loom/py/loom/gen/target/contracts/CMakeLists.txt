@@ -63,6 +63,7 @@ iree_py_library(
   DEPS
     loom::py::loom::gen::target::contracts::contract_fragments
     loom::py::loom::gen::target::contracts::lower_rules
+    loom::py::loom::gen::support::support
     loom::py::loom::target::contract_fragments
     loom::py::loom::target::contracts::contracts
 )
