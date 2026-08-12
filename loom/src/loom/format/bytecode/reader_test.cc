@@ -37,6 +37,18 @@ static iree_status_t CaptureDiagnostic(void* user_data,
   return iree_ok_status();
 }
 
+static iree_status_t CaptureInvalidFieldFailureCode(
+    void* user_data, const loom_diagnostic_t* diagnostic) {
+  auto* failure_code = static_cast<std::string*>(user_data);
+  if (strcmp(diagnostic->error->error_id, "ERR_BYTECODE_006") == 0 &&
+      diagnostic->param_count == 6 &&
+      diagnostic->params[5].kind == LOOM_PARAM_STRING) {
+    iree_string_view_t value = diagnostic->params[5].string;
+    failure_code->assign(value.data, value.size);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t FailDiagnostic(void* user_data,
                                     const loom_diagnostic_t* diagnostic) {
   (void)user_data;
@@ -2186,6 +2198,24 @@ class ReaderTest : public ::testing::Test {
     EXPECT_EQ(error_ids.front(), expected_error_id);
   }
 
+  void ExpectInvalidFieldFailureCode(const std::vector<uint8_t>& bytes,
+                                     const char* expected_failure_code) {
+    std::string failure_code;
+    loom_bytecode_index_options_t options = {
+        /*.diagnostic_sink=*/
+        {
+            /*.fn=*/CaptureInvalidFieldFailureCode,
+            /*.user_data=*/&failure_code,
+        },
+    };
+    loom_bytecode_read_result_t result = {0};
+    IREE_ASSERT_OK(loom_bytecode_read_metadata(
+        iree_make_const_byte_span(bytes.data(), bytes.size()),
+        IREE_SV("test.loombc"), &context_, &block_pool_, &options, &result));
+    EXPECT_GT(result.error_count, 0u);
+    EXPECT_EQ(failure_code, expected_failure_code);
+  }
+
   void ExpectReadModuleError(const std::vector<uint8_t>& bytes,
                              const char* expected_error_id) {
     std::vector<std::string> error_ids;
@@ -2775,6 +2805,56 @@ TEST_F(ReaderTest, RejectsOutOfRangeProviderImportAnchor) {
   bytes[layout.anchors[0][0]] = 127;
 
   ExpectReadError(bytes, "ERR_BYTECODE_006");
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsProviderImportWithUncoveredAnchor) {
+  loom_module_t* module = CreateModule("reader_uncovered_anchor");
+  loom_builder_t builder;
+  loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                          &builder);
+
+  const iree_string_view_t symbol_names[] = {
+      IREE_SV("missing_0"),
+      IREE_SV("missing_1"),
+  };
+  const iree_string_view_t provider_names[] = {
+      IREE_SV("provider_0"),
+      IREE_SV("provider_1"),
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(symbol_names); ++i) {
+    loom_string_id_t symbol_name_id = LOOM_STRING_ID_INVALID;
+    IREE_ASSERT_OK(
+        loom_module_intern_string(module, symbol_names[i], &symbol_name_id));
+    uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
+    IREE_ASSERT_OK(loom_module_add_symbol(module, symbol_name_id, &symbol_id));
+    loom_symbol_ref_t anchor = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+
+    loom_string_id_t provider_id = LOOM_STRING_ID_INVALID;
+    IREE_ASSERT_OK(
+        loom_module_intern_string(module, provider_names[i], &provider_id));
+    loom_op_t* import_op = nullptr;
+    IREE_ASSERT_OK(loom_module_import_build(
+        &builder, provider_id, loom_make_symbol_ref_array(&anchor, 1),
+        LOOM_LOCATION_NONE, &import_op));
+  }
+  auto bytes = WriteModule(module);
+  ProviderImportLayout layout = ReadProviderImportLayout(bytes);
+  ASSERT_EQ(layout.anchors.size(), 2u);
+  ASSERT_EQ(layout.anchors[0].size(), 1u);
+  ASSERT_EQ(layout.anchors[1].size(), 1u);
+
+  size_t first_end = layout.anchors[0][0];
+  const uint64_t first_anchor = ReadUVarint(bytes, &first_end);
+  ASSERT_EQ(first_end, layout.anchors[0][0] + 1);
+  size_t second_end = layout.anchors[1][0];
+  const uint64_t second_anchor = ReadUVarint(bytes, &second_end);
+  ASSERT_EQ(second_end, layout.anchors[1][0] + 1);
+  ASSERT_NE(first_anchor, second_anchor);
+  bytes[layout.anchors[1][0]] = (uint8_t)first_anchor;
+
+  ExpectInvalidFieldFailureCode(
+      bytes, "provider_anchor_symbol_is_not_used_by_any_provider");
   loom_module_free(module);
 }
 
