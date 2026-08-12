@@ -85,6 +85,8 @@ nav:
       - Benchmark checked work: workflows/benchmark.md
       - Compile artifacts: workflows/compile-artifacts.md
       - Read compile reports: workflows/compile-reports.md
+      - External oracles:
+          - RADV and Vulkan: workflows/oracles/radv.md
   - Integration:
       - Integration map: integration/index.md
       - Embed kernel JIT compilation: integration/jit-kernel.md

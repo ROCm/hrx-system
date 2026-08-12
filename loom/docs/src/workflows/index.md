@@ -47,6 +47,16 @@ at `.loombc`. A JIT embedding can perform the same operations in memory through
 | Turn a score change into a compiler question | [Read compile reports](compile-reports.md#relate-reports-to-benchmark-results) |
 | Preserve a complete result and its compiler evidence | [Benchmark checked work](benchmark.md#preserve-the-experiment) |
 
+## External oracles
+
+An external compiler or runtime can answer a narrowly defined question without
+becoming Loom's source language or schedule. The oracle workflow preserves the
+exact selected program, workload, tool identity, and evidence boundary.
+
+| Oracle | Question it can answer |
+| --- | --- |
+| [RADV and Vulkan](oracles/radv.md) | Which shader and physical schedule an optimized Vulkan stack selected for one dispatch. |
+
 ## Correctness and performance
 
 `iree-test-loom` executes `check.case` records and emits structured correctness
