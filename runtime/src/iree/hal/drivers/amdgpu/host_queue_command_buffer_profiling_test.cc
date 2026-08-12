@@ -1276,7 +1276,9 @@ TEST_F(HostQueueCommandBufferProfilingTest,
       test_device.logical_device();
   ASSERT_GT(logical_device->physical_device_count, 0u);
   for (iree_host_size_t i = 0; i < logical_device->physical_device_count; ++i) {
-    ASSERT_GT(logical_device->physical_devices[i]->host_queue_count, 0u);
+    ASSERT_GT(iree_hal_amdgpu_physical_device_host_queue_count(
+                  logical_device->physical_devices[i]),
+              0u);
   }
 
   CommandBufferProfileSink sink = {};
@@ -1318,7 +1320,9 @@ TEST_F(HostQueueCommandBufferProfilingTest,
     const iree_hal_amdgpu_physical_device_t* physical_device =
         logical_device->physical_devices[sample.physical_device_ordinal];
     const uint32_t expected_queue_ordinal =
-        (uint32_t)(physical_device->host_queue_count - 1);
+        (uint32_t)(iree_hal_amdgpu_physical_device_host_queue_count(
+                       physical_device) -
+                   1);
     EXPECT_EQ(sample.physical_device_ordinal, physical_device->device_ordinal);
     EXPECT_EQ(expected_queue_ordinal, sample.queue_ordinal);
     EXPECT_LT(sample.start_tick, sample.end_tick);

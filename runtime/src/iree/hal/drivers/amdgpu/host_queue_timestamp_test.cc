@@ -84,7 +84,10 @@ class TestLogicalDevice {
   iree_hal_amdgpu_host_queue_t* first_host_queue() const {
     iree_hal_amdgpu_physical_device_t* physical_device =
         this->first_physical_device();
-    if (!physical_device || physical_device->host_queue_count == 0) return NULL;
+    if (!physical_device || iree_hal_amdgpu_physical_device_host_queue_count(
+                                physical_device) == 0) {
+      return NULL;
+    }
     return &physical_device->host_queues[0];
   }
 
@@ -100,8 +103,10 @@ class TestLogicalDevice {
          device_index < device->physical_device_count; ++device_index) {
       iree_hal_amdgpu_physical_device_t* physical_device =
           device->physical_devices[device_index];
-      for (iree_host_size_t queue_index = 0;
-           queue_index < physical_device->host_queue_count; ++queue_index) {
+      const iree_host_size_t host_queue_count =
+          iree_hal_amdgpu_physical_device_host_queue_count(physical_device);
+      for (iree_host_size_t queue_index = 0; queue_index < host_queue_count;
+           ++queue_index) {
         iree_hal_amdgpu_host_queue_t* queue =
             &physical_device->host_queues[queue_index];
         iree_slim_mutex_lock(&queue->locks.submission_mutex);

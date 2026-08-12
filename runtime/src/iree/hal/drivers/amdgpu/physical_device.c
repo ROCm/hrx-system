@@ -208,6 +208,7 @@ void iree_hal_amdgpu_physical_device_options_initialize(
 
   out_options->host_queue_count =
       IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_QUEUE_COUNT;
+  out_options->host_queue_ordinary_count = out_options->host_queue_count;
   out_options->host_queue_initial_count = out_options->host_queue_count;
   out_options->host_queue_aql_capacity =
       IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_HOST_QUEUE_AQL_CAPACITY;
@@ -266,13 +267,23 @@ iree_status_t iree_hal_amdgpu_physical_device_options_verify(
         "(got %" PRIhsz ")",
         UINT8_MAX, options->host_queue_count);
   }
-  if (options->host_queue_initial_count == 0 ||
+  if (options->host_queue_ordinary_count == 0 ||
+      options->host_queue_ordinary_count > options->host_queue_count) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "ordinary host queue count must be in [1, host_queue_count] "
+        "(got ordinary=%" PRIhsz ", capacity=%" PRIhsz ")",
+        options->host_queue_ordinary_count, options->host_queue_count);
+  }
+  if (options->host_queue_initial_count < options->host_queue_ordinary_count ||
       options->host_queue_initial_count > options->host_queue_count) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
-        "initial host queue count must be in [1, host_queue_count] "
-        "(got initial=%" PRIhsz ", capacity=%" PRIhsz ")",
-        options->host_queue_initial_count, options->host_queue_count);
+        "initial host queue count must be in "
+        "[host_queue_ordinary_count, host_queue_count] "
+        "(got initial=%" PRIhsz ", ordinary=%" PRIhsz ", capacity=%" PRIhsz ")",
+        options->host_queue_initial_count, options->host_queue_ordinary_count,
+        options->host_queue_count);
   }
   if (!iree_host_size_is_power_of_two(options->host_queue_aql_capacity) ||
       !iree_host_size_is_power_of_two(
@@ -364,8 +375,12 @@ static iree_status_t iree_hal_amdgpu_physical_device_initialize_identity(
   out_physical_device->device_ordinal = device_ordinal;
   out_physical_device->host_memory_pools = *host_memory_pools;
   out_physical_device->host_queue_capacity = options->host_queue_count;
+  out_physical_device->host_queue_ordinary_count =
+      options->host_queue_ordinary_count;
   out_physical_device->host_queue_initial_count =
       options->host_queue_initial_count;
+  iree_atomic_store(&out_physical_device->host_queue_count, 0,
+                    iree_memory_order_relaxed);
   out_physical_device->host_queue_aql_capacity =
       options->host_queue_aql_capacity;
   out_physical_device->host_queue_notification_capacity =
@@ -1237,7 +1252,8 @@ static iree_status_t iree_hal_amdgpu_physical_device_initialize_host_queue(
       physical_device->host_queue_upload_capacity, host_allocator,
       &physical_device->host_queues[queue_ordinal]);
   if (iree_status_is_ok(status)) {
-    physical_device->host_queue_count = queue_ordinal + 1;
+    iree_atomic_store(&physical_device->host_queue_count,
+                      (int32_t)(queue_ordinal + 1), iree_memory_order_release);
   }
   return status;
 }
@@ -1259,7 +1275,8 @@ iree_status_t iree_hal_amdgpu_physical_device_ensure_host_queue(
   }
 
   iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = physical_device->host_queue_count;
+  for (iree_host_size_t i =
+           iree_hal_amdgpu_physical_device_host_queue_count(physical_device);
        i <= queue_ordinal && iree_status_is_ok(status); ++i) {
     status = iree_hal_amdgpu_physical_device_initialize_host_queue(
         logical_device, system, proactor, frontier_tracker, base_axis,
@@ -1301,10 +1318,13 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
 void iree_hal_amdgpu_physical_device_deassign_frontier(
     iree_hal_amdgpu_physical_device_t* physical_device) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  for (iree_host_size_t i = 0; i < physical_device->host_queue_count; ++i) {
+  const iree_host_size_t host_queue_count =
+      iree_hal_amdgpu_physical_device_host_queue_count(physical_device);
+  for (iree_host_size_t i = 0; i < host_queue_count; ++i) {
     iree_hal_amdgpu_host_queue_deinitialize(&physical_device->host_queues[i]);
   }
-  physical_device->host_queue_count = 0;
+  iree_atomic_store(&physical_device->host_queue_count, 0,
+                    iree_memory_order_release);
   if (physical_device->default_pool_set.entries) {
     iree_hal_pool_set_deinitialize(&physical_device->default_pool_set);
   }
@@ -1327,9 +1347,10 @@ iree_status_t iree_hal_amdgpu_physical_device_set_hsa_profiling_enabled(
 
   iree_status_t status = iree_ok_status();
   iree_host_size_t changed_count = 0;
+  const iree_host_size_t host_queue_count =
+      iree_hal_amdgpu_physical_device_host_queue_count(physical_device);
   for (iree_host_size_t i = 0;
-       i < physical_device->host_queue_count && iree_status_is_ok(status);
-       ++i) {
+       i < host_queue_count && iree_status_is_ok(status); ++i) {
     status = iree_hal_amdgpu_host_queue_set_hsa_profiling_enabled(
         &physical_device->host_queues[i], enabled);
     if (iree_status_is_ok(status)) {
@@ -1344,8 +1365,7 @@ iree_status_t iree_hal_amdgpu_physical_device_set_hsa_profiling_enabled(
                       &physical_device->host_queues[i], false));
     }
   } else if (!enabled) {
-    for (iree_host_size_t i = changed_count;
-         i < physical_device->host_queue_count; ++i) {
+    for (iree_host_size_t i = changed_count; i < host_queue_count; ++i) {
       status = iree_status_join(
           status, iree_hal_amdgpu_host_queue_set_hsa_profiling_enabled(
                       &physical_device->host_queues[i], false));
@@ -1422,7 +1442,9 @@ iree_status_t iree_hal_amdgpu_physical_device_trim(
   IREE_ASSERT_ARGUMENT(physical_device);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  for (iree_host_size_t i = 0; i < physical_device->host_queue_count; ++i) {
+  const iree_host_size_t host_queue_count =
+      iree_hal_amdgpu_physical_device_host_queue_count(physical_device);
+  for (iree_host_size_t i = 0; i < host_queue_count; ++i) {
     physical_device->host_queues[i].base.vtable->trim(
         &physical_device->host_queues[i].base);
   }

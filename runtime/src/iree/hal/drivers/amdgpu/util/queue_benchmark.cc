@@ -445,7 +445,8 @@ class QueueBenchmark : public benchmark::Fixture {
     iree_hal_amdgpu_physical_device_t* physical_device =
         logical_device->physical_devices[resolved.physical_device_ordinal];
     if (IREE_UNLIKELY(resolved.physical_queue_ordinal >=
-                      physical_device->host_queue_count)) {
+                      iree_hal_amdgpu_physical_device_host_queue_count(
+                          physical_device))) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "queue ordinal has no initialized host queue");
     }
@@ -481,7 +482,8 @@ class QueueBenchmark : public benchmark::Fixture {
     iree_hal_amdgpu_physical_device_t* physical_device =
         logical_device->physical_devices[resolved.physical_device_ordinal];
     if (IREE_UNLIKELY(resolved.physical_queue_ordinal >=
-                      physical_device->host_queue_count)) {
+                      iree_hal_amdgpu_physical_device_host_queue_count(
+                          physical_device))) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "producer axis has no initialized host queue");
     }

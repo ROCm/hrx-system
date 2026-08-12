@@ -93,7 +93,10 @@ class TestLogicalDevice {
     if (logical_device->physical_device_count == 0) return NULL;
     iree_hal_amdgpu_physical_device_t* physical_device =
         logical_device->physical_devices[0];
-    if (physical_device->host_queue_count == 0) return NULL;
+    if (iree_hal_amdgpu_physical_device_host_queue_count(physical_device) ==
+        0) {
+      return NULL;
+    }
     return &physical_device->host_queues[0];
   }
 
@@ -166,7 +169,10 @@ class TestLogicalDeviceGroup {
     if (logical_device->physical_device_count == 0) return NULL;
     iree_hal_amdgpu_physical_device_t* physical_device =
         logical_device->physical_devices[0];
-    if (physical_device->host_queue_count == 0) return NULL;
+    if (iree_hal_amdgpu_physical_device_host_queue_count(physical_device) ==
+        0) {
+      return NULL;
+    }
     return &physical_device->host_queues[0];
   }
 
@@ -232,6 +238,63 @@ TEST_F(HostQueueSubmissionTest, ExecutionQueuesShareIdenticalMasks) {
   iree_hal_amdgpu_execution_queue_release(second_queue);
   EXPECT_EQ(logical_device->execution_queue_head, nullptr);
   EXPECT_EQ(logical_device->leased_execution_queue_affinity, 0u);
+}
+
+TEST_F(HostQueueSubmissionTest, SpecializedQueueAffinityRequiresAnActiveLease) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  iree_hal_amdgpu_host_queue_extension_t queue_extension = {
+      /*.base=*/
+      {
+          /*.type=*/
+          IREE_HAL_AMDGPU_DEVICE_CREATE_PARAMS_EXTENSION_TYPE_HOST_QUEUES,
+          /*.next=*/nullptr,
+      },
+      /*.capacity=*/IREE_HAL_AMDGPU_DEFAULT_GPU_AGENT_QUEUE_COUNT + 1,
+      /*.initial_count=*/IREE_HAL_AMDGPU_DEFAULT_GPU_AGENT_QUEUE_COUNT,
+  };
+
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(test_device.Initialize(
+      &options, &libhsa_, &topology_, host_allocator_, &queue_extension.base));
+  auto* logical_device = reinterpret_cast<iree_hal_amdgpu_logical_device_t*>(
+      test_device.base_device());
+  ASSERT_GT(logical_device->physical_device_count, 0u);
+  iree_hal_amdgpu_physical_device_t* physical_device =
+      logical_device->physical_devices[0];
+  const iree_hal_queue_affinity_t specialized_affinity =
+      (iree_hal_queue_affinity_t)1ull
+      << physical_device->host_queue_ordinary_count;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        iree_hal_device_queue_flush(test_device.base_device(),
+                                                    specialized_affinity));
+
+  const iree_host_size_t compute_unit_count =
+      physical_device->compute_unit_count;
+  const iree_host_size_t mask_word_count = (compute_unit_count + 31) / 32;
+  std::vector<uint32_t> mask(mask_word_count, UINT32_MAX);
+  if (compute_unit_count % 32 != 0) {
+    mask.back() = (UINT32_C(1) << (compute_unit_count % 32)) - 1;
+  }
+  iree_hal_amdgpu_execution_queue_t* execution_queue = nullptr;
+  IREE_ASSERT_OK(iree_hal_amdgpu_execution_queue_acquire(
+      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
+      mask_word_count * 32, mask.data(), &execution_queue));
+  ASSERT_NE(execution_queue, nullptr);
+  ASSERT_EQ(iree_hal_amdgpu_execution_queue_affinity(execution_queue),
+            specialized_affinity);
+  IREE_ASSERT_OK(iree_hal_device_queue_barrier(
+      test_device.base_device(), specialized_affinity,
+      iree_hal_semaphore_list_empty(), iree_hal_semaphore_list_empty(),
+      IREE_HAL_EXECUTE_FLAG_NONE));
+
+  // Final release must wait for the submitted packet before restoring the
+  // native queue configuration and making the slot reusable.
+  iree_hal_amdgpu_execution_queue_release(execution_queue);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        iree_hal_device_queue_flush(test_device.base_device(),
+                                                    specialized_affinity));
 }
 
 TEST_F(HostQueueSubmissionTest, ExecutionQueueCapacityIsBoundedAndReusable) {

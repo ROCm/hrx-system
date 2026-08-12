@@ -391,7 +391,9 @@ TEST_F(HostcallProviderTest, EagerPhysicalLifecycleAndFailurePublication) {
               provider_context->notification_token);
     iree_hal_amdgpu_physical_device_t* physical_device =
         logical_device->physical_devices[i];
-    for (iree_host_size_t j = 0; j < physical_device->host_queue_count; ++j) {
+    const iree_host_size_t host_queue_count =
+        iree_hal_amdgpu_physical_device_host_queue_count(physical_device);
+    for (iree_host_size_t j = 0; j < host_queue_count; ++j) {
       EXPECT_EQ(physical_device->host_queues[j].hostcall_buffer,
                 reinterpret_cast<void*>(hostcall_state->device_address));
     }

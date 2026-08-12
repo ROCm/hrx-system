@@ -506,8 +506,9 @@ static void iree_hal_amdgpu_host_queue_request_completion_thread_stop(
   }
 }
 
-iree_status_t iree_hal_amdgpu_host_queue_wait_for_setup_epoch(
-    iree_hal_amdgpu_host_queue_t* queue, uint64_t epoch) {
+static iree_status_t iree_hal_amdgpu_host_queue_wait_for_epoch(
+    iree_hal_amdgpu_host_queue_t* queue, uint64_t epoch,
+    bool drain_completions) {
   IREE_ASSERT_ARGUMENT(queue);
   if (epoch == 0) return iree_ok_status();
   if (!queue->hardware_queue || !queue->notification_ring.epoch.signal.handle) {
@@ -579,8 +580,87 @@ iree_status_t iree_hal_amdgpu_host_queue_wait_for_setup_epoch(
   }
 
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_clone_error_status(queue));
-  iree_hal_amdgpu_host_queue_drain_completions_for_waiter(queue);
+  if (drain_completions) {
+    iree_hal_amdgpu_host_queue_drain_completions_for_waiter(queue);
+  }
   return iree_hal_amdgpu_host_queue_clone_error_status(queue);
+}
+
+iree_status_t iree_hal_amdgpu_host_queue_wait_for_setup_epoch(
+    iree_hal_amdgpu_host_queue_t* queue, uint64_t epoch) {
+  return iree_hal_amdgpu_host_queue_wait_for_epoch(queue, epoch,
+                                                   /*drain_completions=*/true);
+}
+
+iree_status_t iree_hal_amdgpu_host_queue_begin_execution_lease(
+    iree_hal_amdgpu_host_queue_t* queue, uint32_t mask_bit_count,
+    const uint32_t* mask, bool* out_queue_reusable) {
+  IREE_ASSERT_ARGUMENT(queue);
+  IREE_ASSERT_ARGUMENT(mask);
+  IREE_ASSERT_ARGUMENT(out_queue_reusable);
+  *out_queue_reusable = false;
+
+  iree_slim_mutex_lock(&queue->locks.submission_mutex);
+  // Keep the submission gate closed until exact native configuration succeeds.
+  queue->is_shutting_down = true;
+  iree_status_t status = iree_ok_status();
+  bool mask_update_attempted = false;
+  if (IREE_UNLIKELY(queue->pending_head != NULL)) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "cannot configure an AMDGPU execution queue with deferred work");
+  } else {
+    mask_update_attempted = true;
+    status = iree_hsa_amd_queue_cu_set_mask(IREE_LIBHSA(queue->libhsa),
+                                            queue->hardware_queue,
+                                            mask_bit_count, mask);
+  }
+  if (iree_status_is_ok(status)) {
+    queue->is_shutting_down = false;
+  } else if (mask_update_attempted) {
+    // A failed mask update may have modified the native queue. Only make the
+    // slot reusable if restoring the default mask succeeds.
+    iree_status_t reset_status = iree_hsa_amd_queue_cu_set_mask(
+        IREE_LIBHSA(queue->libhsa), queue->hardware_queue,
+        /*mask_bit_count=*/0, /*mask=*/NULL);
+    *out_queue_reusable = iree_status_is_ok(reset_status);
+    status = iree_status_join(status, reset_status);
+  }
+  iree_slim_mutex_unlock(&queue->locks.submission_mutex);
+  return status;
+}
+
+iree_status_t iree_hal_amdgpu_host_queue_end_execution_lease(
+    iree_hal_amdgpu_host_queue_t* queue) {
+  IREE_ASSERT_ARGUMENT(queue);
+
+  iree_slim_mutex_lock(&queue->locks.submission_mutex);
+  queue->is_shutting_down = true;
+  iree_status_t status = iree_ok_status();
+  uint64_t final_epoch = 0;
+  if (IREE_UNLIKELY(queue->pending_head != NULL)) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "cannot release an AMDGPU execution queue with deferred work");
+  } else {
+    final_epoch = queue->notification_ring.epoch.next_submission;
+  }
+  iree_slim_mutex_unlock(&queue->locks.submission_mutex);
+
+  if (iree_status_is_ok(status)) {
+    // The completion thread owns normal notification draining and any
+    // continuations it discovers. This waiter only establishes GPU idleness.
+    status = iree_hal_amdgpu_host_queue_wait_for_epoch(
+        queue, final_epoch, /*drain_completions=*/false);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_slim_mutex_lock(&queue->locks.submission_mutex);
+    status = iree_hsa_amd_queue_cu_set_mask(
+        IREE_LIBHSA(queue->libhsa), queue->hardware_queue,
+        /*mask_bit_count=*/0, /*mask=*/NULL);
+    iree_slim_mutex_unlock(&queue->locks.submission_mutex);
+  }
+  return status;
 }
 
 static hsa_signal_value_t iree_hal_amdgpu_host_queue_last_drained_signal_value(

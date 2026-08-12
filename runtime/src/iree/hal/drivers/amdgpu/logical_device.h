@@ -153,12 +153,14 @@ typedef struct iree_hal_amdgpu_logical_device_t {
   // Protected by |execution_queue_mutex|.
   iree_hal_queue_affinity_t leased_execution_queue_affinity;
 
+  // Specialized queue affinities configured and open for submission. Published
+  // only after native mask configuration succeeds and cleared before final
+  // retirement begins.
+  iree_atomic_uint64_t execution_queue_submission_affinity;
+
   // Distinct immutable specialized queue configurations. Protected by
   // |execution_queue_mutex|.
   struct iree_hal_amdgpu_execution_queue_t* execution_queue_head;
-
-  // Queue affinities whose host queue storage has been initialized.
-  iree_atomic_uint64_t active_queue_affinity;
 
   // Non-zero while profiling requires the active queue set to remain stable.
   iree_atomic_int32_t queue_topology_frozen;

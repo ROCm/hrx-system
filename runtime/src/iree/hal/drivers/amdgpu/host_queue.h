@@ -745,6 +745,19 @@ iree_host_size_t iree_hal_amdgpu_host_queue_drain_completions_for_waiter(
 iree_status_t iree_hal_amdgpu_host_queue_wait_for_setup_epoch(
     iree_hal_amdgpu_host_queue_t* queue, uint64_t epoch);
 
+// Applies an immutable execution-unit mask and opens the queue for a
+// specialized lease. If native configuration fails, restores the default mask
+// before reporting the queue as reusable through |out_queue_reusable|.
+iree_status_t iree_hal_amdgpu_host_queue_begin_execution_lease(
+    iree_hal_amdgpu_host_queue_t* queue, uint32_t mask_bit_count,
+    const uint32_t* mask, bool* out_queue_reusable);
+
+// Closes a specialized queue to new submissions, waits for all committed work
+// to complete, and restores the default execution-unit mask. Deferred work at
+// final release violates the lease contract and leaves the queue quarantined.
+iree_status_t iree_hal_amdgpu_host_queue_end_execution_lease(
+    iree_hal_amdgpu_host_queue_t* queue);
+
 // Enables or disables HSA dispatch timestamp population for this queue.
 //
 // This toggles the ROCR queue profiler bit. It is a cold profiling-session

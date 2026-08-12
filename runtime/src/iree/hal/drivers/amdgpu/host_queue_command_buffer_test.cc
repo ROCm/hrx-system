@@ -88,7 +88,9 @@ class ScopedHostcallBufferAddress {
     EXPECT_EQ(physical_device_->hostcall_provider_state, nullptr);
     state_.device_address = device_address;
     physical_device_->hostcall_provider_state = &state_;
-    for (iree_host_size_t i = 0; i < physical_device_->host_queue_count; ++i) {
+    const iree_host_size_t host_queue_count =
+        iree_hal_amdgpu_physical_device_host_queue_count(physical_device_);
+    for (iree_host_size_t i = 0; i < host_queue_count; ++i) {
       EXPECT_EQ(physical_device_->host_queues[i].hostcall_buffer, nullptr);
       physical_device_->host_queues[i].hostcall_buffer =
           reinterpret_cast<void*>(device_address);
@@ -96,7 +98,9 @@ class ScopedHostcallBufferAddress {
   }
 
   ~ScopedHostcallBufferAddress() {
-    for (iree_host_size_t i = 0; i < physical_device_->host_queue_count; ++i) {
+    const iree_host_size_t host_queue_count =
+        iree_hal_amdgpu_physical_device_host_queue_count(physical_device_);
+    for (iree_host_size_t i = 0; i < host_queue_count; ++i) {
       physical_device_->host_queues[i].hostcall_buffer = nullptr;
     }
     physical_device_->hostcall_provider_state = nullptr;

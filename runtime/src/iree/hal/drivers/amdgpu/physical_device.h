@@ -132,8 +132,11 @@ typedef struct iree_hal_amdgpu_physical_device_options_t {
 
   // Maximum number of host queues available for this physical device.
   iree_host_size_t host_queue_count;
+  // Number of ordinary queues exposed through the generic HAL device spec.
+  iree_host_size_t host_queue_ordinary_count;
   // Number of host queues initialized when the device frontier is assigned.
-  // Remaining queue slots are initialized on first use.
+  // This may exceed |host_queue_ordinary_count| when instrumentation requires
+  // queue-local state to be fixed before executable loading.
   iree_host_size_t host_queue_initial_count;
   // Per-host-queue HSA AQL ring capacity in packets.
   uint32_t host_queue_aql_capacity;
@@ -303,6 +306,8 @@ typedef struct iree_hal_amdgpu_physical_device_t {
 
   // Total number of host queue slots allocated in |host_queues|.
   iree_host_size_t host_queue_capacity;
+  // Number of ordinary queues exposed through the generic HAL device spec.
+  iree_host_size_t host_queue_ordinary_count;
   // Number of host queues initialized when the device frontier is assigned.
   iree_host_size_t host_queue_initial_count;
   // Per-host-queue HSA AQL ring capacity in packets.
@@ -321,11 +326,20 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   // Queue-local PM4 timestamp strategy selected from this GPU agent's ISA.
   iree_hal_amdgpu_pm4_timestamp_strategy_t pm4_timestamp_strategy;
 
-  // Number of live host queues initialized in |host_queues|.
-  iree_host_size_t host_queue_count;
+  // Number of live host queues initialized in |host_queues|. Queue activation
+  // stores with release ordering after initialization is complete; readers load
+  // with acquire ordering before accessing the corresponding queue storage.
+  iree_atomic_int32_t host_queue_count;
   // One or more host queues mapped to HSA queues on this physical device.
   iree_hal_amdgpu_host_queue_t host_queues[/*host_queue_count*/];
 } iree_hal_amdgpu_physical_device_t;
+
+// Returns the number of fully initialized host queues.
+static inline iree_host_size_t iree_hal_amdgpu_physical_device_host_queue_count(
+    const iree_hal_amdgpu_physical_device_t* physical_device) {
+  return (iree_host_size_t)iree_atomic_load(&physical_device->host_queue_count,
+                                            iree_memory_order_acquire);
+}
 
 // Returns the aligned heap size in bytes required to store the physical device
 // data structure. Requires that the options have been verified.

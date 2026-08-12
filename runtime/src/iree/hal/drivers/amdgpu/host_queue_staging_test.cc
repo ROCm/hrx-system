@@ -241,7 +241,8 @@ class HostQueueStagingTest : public ::testing::Test {
     iree_hal_amdgpu_host_queue_t* first_host_queue() const {
       iree_hal_amdgpu_physical_device_t* physical_device =
           this->first_physical_device();
-      if (!physical_device || physical_device->host_queue_count == 0) {
+      if (!physical_device || iree_hal_amdgpu_physical_device_host_queue_count(
+                                  physical_device) == 0) {
         return NULL;
       }
       return &physical_device->host_queues[0];

@@ -100,7 +100,10 @@ class TestLogicalDevice {
     if (logical_device->physical_device_count == 0) return NULL;
     iree_hal_amdgpu_physical_device_t* physical_device =
         logical_device->physical_devices[0];
-    if (physical_device->host_queue_count == 0) return NULL;
+    if (iree_hal_amdgpu_physical_device_host_queue_count(physical_device) ==
+        0) {
+      return NULL;
+    }
     return &physical_device->host_queues[0];
   }
 
