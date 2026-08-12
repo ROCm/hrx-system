@@ -3105,6 +3105,73 @@ TEST_F(RemoteBufferTest, CommandBufferUpdateOneShotAndReusable) {
   }
 }
 
+TEST_F(RemoteBufferTest, CommandBufferBindingTableSupportsWideSlots) {
+  constexpr iree_host_size_t kBindingCount = 33;
+  constexpr uint32_t kTargetSlot = 32;
+  constexpr iree_device_size_t kBufferLength = 256;
+  constexpr uint32_t kFillPattern = 0xA5B6C7D8u;
+
+  const iree_hal_command_buffer_mode_t modes[] = {
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+  };
+  for (iree_hal_command_buffer_mode_t mode : modes) {
+    SCOPED_TRACE(mode);
+    iree_hal_buffer_t* target_buffer = nullptr;
+    AllocateMappableBuffer(kBufferLength, &target_buffer);
+
+    iree_hal_command_buffer_t* command_buffer = nullptr;
+    IREE_ASSERT_OK(iree_hal_command_buffer_create(
+        client_device_, mode, IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+        IREE_HAL_QUEUE_AFFINITY_ANY, kBindingCount, &command_buffer));
+    IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+        command_buffer,
+        iree_hal_make_indirect_buffer_ref(kTargetSlot, /*offset=*/0,
+                                          kBufferLength),
+        &kFillPattern, sizeof(kFillPattern), IREE_HAL_FILL_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+
+    std::vector<iree_hal_buffer_binding_t> bindings(kBindingCount);
+    bindings[kTargetSlot] = {
+        /*.buffer=*/target_buffer,
+        /*.offset=*/0,
+        /*.length=*/kBufferLength,
+    };
+    const iree_hal_buffer_binding_table_t binding_table = {
+        /*.count=*/bindings.size(),
+        /*.bindings=*/bindings.data(),
+    };
+
+    iree_hal_semaphore_t* semaphore = nullptr;
+    IREE_ASSERT_OK(iree_hal_semaphore_create(
+        client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+        IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
+    SemaphoreListHelper signal(semaphore, 1);
+    IREE_ASSERT_OK(iree_hal_device_queue_execute(
+        client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+        iree_hal_semaphore_list_empty(), signal.list, command_buffer,
+        binding_table, IREE_HAL_EXECUTE_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(
+        semaphore, 1, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+
+    iree_hal_buffer_mapping_t mapping;
+    IREE_ASSERT_OK(
+        iree_hal_buffer_map_range(target_buffer, IREE_HAL_MAPPING_MODE_SCOPED,
+                                  IREE_HAL_MEMORY_ACCESS_READ,
+                                  /*byte_offset=*/0, kBufferLength, &mapping));
+    const uint32_t* values = (const uint32_t*)mapping.contents.data;
+    for (iree_host_size_t i = 0; i < kBufferLength / sizeof(*values); ++i) {
+      EXPECT_EQ(values[i], kFillPattern) << "element " << i;
+    }
+    IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
+
+    iree_hal_semaphore_release(semaphore);
+    iree_hal_command_buffer_release(command_buffer);
+    iree_hal_buffer_release(target_buffer);
+  }
+}
+
 TEST_F(RemoteBufferTest, CommandBufferDispatchConstantsUse32BitLength) {
   iree_const_byte_span_t binary =
       LookupTestdata("command_buffer_dispatch_test.bin");
