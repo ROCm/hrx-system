@@ -16,7 +16,10 @@ package(
 iree_c_embed_data(
     name = "testdata_vmvx",
     testonly = True,
-    srcs = ["testdata/command_buffer_dispatch_test.bin"],
+    srcs = [
+        "testdata/command_buffer_dispatch_test.bin",
+        "testdata/dispatch_wide_bindings_test.bin",
+    ],
     c_file_output = "testdata_vmvx.c",
     flatten = True,
     h_file_output = "testdata_vmvx.h",

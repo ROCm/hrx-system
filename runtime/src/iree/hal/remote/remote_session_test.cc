@@ -2949,6 +2949,131 @@ static iree_const_byte_span_t LookupTestdata(const char* filename) {
   return iree_const_byte_span_empty();
 }
 
+enum class DispatchSubmission {
+  kDirect,
+  kOneShot,
+  kReusable,
+};
+
+static const char* DispatchSubmissionName(DispatchSubmission submission) {
+  switch (submission) {
+    case DispatchSubmission::kDirect:
+      return "direct";
+    case DispatchSubmission::kOneShot:
+      return "one-shot";
+    case DispatchSubmission::kReusable:
+      return "reusable";
+  }
+  return "unknown";
+}
+
+static void SubmitAbsF32DispatchAndVerify(iree_hal_device_t* device,
+                                          iree_hal_executable_t* executable,
+                                          iree_host_size_t binding_count,
+                                          iree_host_size_t output_binding,
+                                          DispatchSubmission submission) {
+  iree_hal_buffer_params_t buffer_params = {0};
+  buffer_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
+                        IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED |
+                        IREE_HAL_BUFFER_USAGE_TRANSFER;
+  buffer_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  buffer_params.type =
+      IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+
+  iree_hal_allocator_t* allocator = iree_hal_device_allocator(device);
+  iree_hal_buffer_t* input_buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+      allocator, buffer_params, 2 * sizeof(float), &input_buffer));
+  iree_hal_buffer_t* output_buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+      allocator, buffer_params, 2 * sizeof(float), &output_buffer));
+
+  iree_hal_buffer_mapping_t mapping;
+  IREE_ASSERT_OK(iree_hal_buffer_map_range(
+      input_buffer, IREE_HAL_MAPPING_MODE_SCOPED,
+      IREE_HAL_MEMORY_ACCESS_DISCARD_WRITE, /*local_byte_offset=*/0,
+      2 * sizeof(float), &mapping));
+  const float input_data[] = {-2.5f, -4.0f};
+  memcpy(mapping.contents.data, input_data, sizeof(input_data));
+  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
+
+  std::vector<iree_hal_buffer_ref_t> binding_refs(
+      binding_count,
+      iree_hal_make_buffer_ref(input_buffer, /*offset=*/0, 2 * sizeof(float)));
+  binding_refs[output_binding] =
+      iree_hal_make_buffer_ref(output_buffer, /*offset=*/0, 2 * sizeof(float));
+  iree_hal_buffer_ref_list_t bindings = {
+      /*.count=*/binding_refs.size(),
+      /*.values=*/binding_refs.data(),
+  };
+
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
+  SemaphoreListHelper signal(semaphore, 1);
+
+  iree_hal_command_buffer_t* command_buffer = nullptr;
+  switch (submission) {
+    case DispatchSubmission::kDirect:
+      IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
+          device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
+          signal.list, executable, iree_hal_executable_function_from_index(0),
+          iree_hal_make_static_dispatch_config(1, 1, 1),
+          iree_const_byte_span_empty(), bindings, IREE_HAL_DISPATCH_FLAG_NONE));
+      break;
+    case DispatchSubmission::kOneShot:
+    case DispatchSubmission::kReusable: {
+      const iree_hal_command_buffer_mode_t command_buffer_mode =
+          submission == DispatchSubmission::kOneShot
+              ? IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT
+              : IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT;
+      IREE_ASSERT_OK(iree_hal_command_buffer_create(
+          device, command_buffer_mode, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+          IREE_HAL_QUEUE_AFFINITY_ANY, /*binding_capacity=*/0,
+          &command_buffer));
+      IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+      IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+          command_buffer, executable,
+          iree_hal_executable_function_from_index(0),
+          iree_hal_make_static_dispatch_config(1, 1, 1),
+          iree_const_byte_span_empty(), bindings, IREE_HAL_DISPATCH_FLAG_NONE));
+      IREE_ASSERT_OK(iree_hal_command_buffer_execution_barrier(
+          command_buffer,
+          IREE_HAL_EXECUTION_STAGE_DISPATCH |
+              IREE_HAL_EXECUTION_STAGE_TRANSFER |
+              IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+          IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE |
+              IREE_HAL_EXECUTION_STAGE_DISPATCH |
+              IREE_HAL_EXECUTION_STAGE_TRANSFER,
+          IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+          /*memory_barrier_count=*/0, /*memory_barriers=*/nullptr,
+          /*buffer_barrier_count=*/0, /*buffer_barriers=*/nullptr));
+      IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+      IREE_ASSERT_OK(iree_hal_device_queue_execute(
+          device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
+          signal.list, command_buffer, iree_hal_buffer_binding_table_empty(),
+          IREE_HAL_EXECUTE_FLAG_NONE));
+      break;
+    }
+  }
+
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, 1, iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_buffer_map_range(
+      output_buffer, IREE_HAL_MAPPING_MODE_SCOPED, IREE_HAL_MEMORY_ACCESS_READ,
+      /*local_byte_offset=*/0, 2 * sizeof(float), &mapping));
+  const float* output_data = (const float*)mapping.contents.data;
+  EXPECT_EQ(output_data[0], 2.5f);
+  EXPECT_EQ(output_data[1], 4.0f);
+  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
+
+  iree_hal_command_buffer_release(command_buffer);
+  iree_hal_semaphore_release(semaphore);
+  iree_hal_buffer_release(output_buffer);
+  iree_hal_buffer_release(input_buffer);
+}
+
 TEST_F(RemoteBufferTest, QueueDispatchAbsF32) {
   iree_const_byte_span_t binary =
       LookupTestdata("command_buffer_dispatch_test.bin");
@@ -2968,76 +3093,44 @@ TEST_F(RemoteBufferTest, QueueDispatchAbsF32) {
       client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, target, &load_params,
       &executable));
 
-  // Allocate input and output buffers (2 floats each).
-  iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
-  iree_hal_buffer_params_t buffer_params = {0};
-  buffer_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
-                        IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED |
-                        IREE_HAL_BUFFER_USAGE_TRANSFER;
-  buffer_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  buffer_params.type =
-      IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  SubmitAbsF32DispatchAndVerify(client_device_, executable,
+                                /*binding_count=*/2,
+                                /*output_binding=*/1,
+                                DispatchSubmission::kDirect);
+  iree_hal_executable_release(executable);
+}
 
-  iree_hal_buffer_t* input_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
-      allocator, buffer_params, 2 * sizeof(float), &input_buffer));
+TEST_F(RemoteBufferTest, WideBindingDispatchDirectAndRecorded) {
+  iree_const_byte_span_t binary =
+      LookupTestdata("dispatch_wide_bindings_test.bin");
+  ASSERT_GT(binary.data_length, 0u);
 
-  iree_hal_buffer_t* output_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
-      allocator, buffer_params, 2 * sizeof(float), &output_buffer));
+  const iree_hal_executable_target_t* target = FindExecutableTarget(
+      client_device_, IREE_SV("ireevm"), IREE_SV("bytecode"));
+  if (!target) {
+    GTEST_SKIP() << "VMVX executable loading is not enabled";
+  }
+  iree_hal_executable_load_params_t load_params;
+  iree_hal_executable_load_params_initialize(&load_params);
+  load_params.executable_data = binary;
 
-  // Write input data: [-2.5, -2.5].
-  iree_hal_buffer_mapping_t mapping;
-  IREE_ASSERT_OK(iree_hal_buffer_map_range(
-      input_buffer, IREE_HAL_MAPPING_MODE_SCOPED,
-      IREE_HAL_MEMORY_ACCESS_DISCARD_WRITE, 0, 2 * sizeof(float), &mapping));
-  float input_data[] = {-2.5f, -2.5f};
-  memcpy(mapping.contents.data, input_data, sizeof(input_data));
-  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
+  iree_hal_executable_t* executable = nullptr;
+  IREE_ASSERT_OK(iree_hal_device_load_executable(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, target, &load_params,
+      &executable));
 
-  // Dispatch abs(input) → output.
-  iree_hal_semaphore_t* semaphore = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_semaphore_create(client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0,
-                                IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
-
-  iree_hal_buffer_ref_t binding_refs[2];
-  memset(binding_refs, 0, sizeof(binding_refs));
-  binding_refs[0].buffer = input_buffer;
-  binding_refs[0].offset = 0;
-  binding_refs[0].length = 2 * sizeof(float);
-  binding_refs[1].buffer = output_buffer;
-  binding_refs[1].offset = 0;
-  binding_refs[1].length = 2 * sizeof(float);
-  iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/2,
-      /*.values=*/binding_refs,
+  const DispatchSubmission submissions[] = {
+      DispatchSubmission::kDirect,
+      DispatchSubmission::kOneShot,
+      DispatchSubmission::kReusable,
   };
+  for (DispatchSubmission submission : submissions) {
+    SCOPED_TRACE(DispatchSubmissionName(submission));
+    SubmitAbsF32DispatchAndVerify(client_device_, executable,
+                                  /*binding_count=*/33,
+                                  /*output_binding=*/32, submission);
+  }
 
-  SemaphoreListHelper signal(semaphore, 1);
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), signal.list, executable,
-      iree_hal_executable_function_from_index(0),
-      iree_hal_make_static_dispatch_config(1, 1, 1),
-      iree_const_byte_span_empty(), bindings, IREE_HAL_DISPATCH_FLAG_NONE));
-
-  // Wait for dispatch to complete.
-  IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, 1, iree_infinite_timeout(),
-                                         IREE_ASYNC_WAIT_FLAG_NONE));
-
-  // Read back output and verify abs values: [2.5, 2.5].
-  IREE_ASSERT_OK(iree_hal_buffer_map_range(
-      output_buffer, IREE_HAL_MAPPING_MODE_SCOPED, IREE_HAL_MEMORY_ACCESS_READ,
-      0, 2 * sizeof(float), &mapping));
-  const float* output_data = (const float*)mapping.contents.data;
-  EXPECT_EQ(output_data[0], 2.5f);
-  EXPECT_EQ(output_data[1], 2.5f);
-  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
-
-  iree_hal_semaphore_release(semaphore);
-  iree_hal_buffer_release(output_buffer);
-  iree_hal_buffer_release(input_buffer);
   iree_hal_executable_release(executable);
 }
 
@@ -3301,98 +3394,10 @@ TEST_F(RemoteBufferTest, OneShotCommandBufferDispatch) {
       client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, target, &load_params,
       &executable));
 
-  // Allocate input and output buffers.
-  iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
-  iree_hal_buffer_params_t buffer_params = {0};
-  buffer_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
-                        IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED |
-                        IREE_HAL_BUFFER_USAGE_TRANSFER;
-  buffer_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  buffer_params.type =
-      IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-
-  iree_hal_buffer_t* input_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
-      allocator, buffer_params, 2 * sizeof(float), &input_buffer));
-  iree_hal_buffer_t* output_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
-      allocator, buffer_params, 2 * sizeof(float), &output_buffer));
-
-  // Write input data: [-2.5, -2.5].
-  iree_hal_buffer_mapping_t mapping;
-  IREE_ASSERT_OK(iree_hal_buffer_map_range(
-      input_buffer, IREE_HAL_MAPPING_MODE_SCOPED,
-      IREE_HAL_MEMORY_ACCESS_DISCARD_WRITE, 0, 2 * sizeof(float), &mapping));
-  float input_data[] = {-2.5f, -2.5f};
-  memcpy(mapping.contents.data, input_data, sizeof(input_data));
-  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
-
-  // Record a one-shot command buffer: dispatch abs(input) → output.
-  iree_hal_command_buffer_t* command_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      client_device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-      /*binding_capacity=*/0, &command_buffer));
-
-  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
-
-  iree_hal_buffer_ref_t binding_refs[2];
-  memset(binding_refs, 0, sizeof(binding_refs));
-  binding_refs[0].buffer = input_buffer;
-  binding_refs[0].offset = 0;
-  binding_refs[0].length = 2 * sizeof(float);
-  binding_refs[1].buffer = output_buffer;
-  binding_refs[1].offset = 0;
-  binding_refs[1].length = 2 * sizeof(float);
-  iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/2,
-      /*.values=*/binding_refs,
-  };
-  IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
-      command_buffer, executable, iree_hal_executable_function_from_index(0),
-      iree_hal_make_static_dispatch_config(1, 1, 1),
-      iree_const_byte_span_empty(), bindings, IREE_HAL_DISPATCH_FLAG_NONE));
-
-  IREE_ASSERT_OK(iree_hal_command_buffer_execution_barrier(
-      command_buffer,
-      IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER |
-          IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
-      IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE |
-          IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER,
-      IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
-      /*memory_barrier_count=*/0, /*memory_barriers=*/nullptr,
-      /*buffer_barrier_count=*/0, /*buffer_barriers=*/nullptr));
-
-  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
-
-  // Submit via queue_execute.
-  iree_hal_semaphore_t* semaphore = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_semaphore_create(client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0,
-                                IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
-  SemaphoreListHelper signal(semaphore, 1);
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), signal.list, command_buffer,
-      iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE));
-
-  // Wait for completion.
-  IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, 1, iree_infinite_timeout(),
-                                         IREE_ASYNC_WAIT_FLAG_NONE));
-
-  // Read back output and verify abs values: [2.5, 2.5].
-  IREE_ASSERT_OK(iree_hal_buffer_map_range(
-      output_buffer, IREE_HAL_MAPPING_MODE_SCOPED, IREE_HAL_MEMORY_ACCESS_READ,
-      0, 2 * sizeof(float), &mapping));
-  const float* output_data = (const float*)mapping.contents.data;
-  EXPECT_EQ(output_data[0], 2.5f);
-  EXPECT_EQ(output_data[1], 2.5f);
-  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
-
-  iree_hal_semaphore_release(semaphore);
-  iree_hal_command_buffer_release(command_buffer);
-  iree_hal_buffer_release(output_buffer);
-  iree_hal_buffer_release(input_buffer);
+  SubmitAbsF32DispatchAndVerify(client_device_, executable,
+                                /*binding_count=*/2,
+                                /*output_binding=*/1,
+                                DispatchSubmission::kOneShot);
   iree_hal_executable_release(executable);
 }
 

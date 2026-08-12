@@ -13,13 +13,23 @@
 set -euo pipefail
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
-SOURCE_FILE="${ROOT_DIR}/runtime/src/iree/hal/cts/testdata/command_buffer_dispatch_test.mlir"
-OUTPUT_FILE="${ROOT_DIR}/runtime/src/iree/hal/remote/testdata/command_buffer_dispatch_test.bin"
 IREE_COMPILE="${IREE_COMPILE:-iree-compile}"
+cd "${ROOT_DIR}"
 
-"${IREE_COMPILE}" \
-  --compile-mode=hal-executable \
-  --iree-hal-target-device=local \
-  --iree-hal-local-target-device-backends=vmvx \
-  -o "${OUTPUT_FILE}" \
-  "${SOURCE_FILE}"
+compile_fixture() {
+  local source_file="$1"
+  local output_file="$2"
+  "${IREE_COMPILE}" \
+    --compile-mode=hal-executable \
+    --iree-hal-target-device=local \
+    --iree-hal-local-target-device-backends=vmvx \
+    -o "${output_file}" \
+    "${source_file}"
+}
+
+compile_fixture \
+  "runtime/src/iree/hal/cts/testdata/command_buffer_dispatch_test.mlir" \
+  "runtime/src/iree/hal/remote/testdata/command_buffer_dispatch_test.bin"
+compile_fixture \
+  "runtime/src/iree/hal/remote/testdata/dispatch_wide_bindings_test.mlir" \
+  "runtime/src/iree/hal/remote/testdata/dispatch_wide_bindings_test.bin"

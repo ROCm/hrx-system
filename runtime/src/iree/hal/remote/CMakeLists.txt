@@ -14,6 +14,7 @@ iree_c_embed_data(
     testdata_vmvx
   SRCS
     "testdata/command_buffer_dispatch_test.bin"
+    "testdata/dispatch_wide_bindings_test.bin"
   C_FILE_OUTPUT
     "testdata_vmvx.c"
   H_FILE_OUTPUT
