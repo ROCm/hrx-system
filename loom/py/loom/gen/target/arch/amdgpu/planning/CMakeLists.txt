@@ -12,8 +12,6 @@ iree_add_all_subdirs()
 iree_py_library(
   NAME
     occupancy_tables
-  MAIN
-    "amdgpu_occupancy_tables.py"
   SRCS
     "__init__.py"
     "amdgpu_occupancy_tables.py"

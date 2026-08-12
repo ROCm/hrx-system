@@ -42,7 +42,8 @@ endfunction()
 #
 # Parameters:
 # NAME: name of target
-# MAIN: optional executable Python entry point for py_binary-style targets
+# MAIN: optional executable Python source entry point for py_binary-style targets
+# MAIN_MODULE: optional executable Python module entry point for py_binary-style targets
 # SRCS: List of source files for the library
 # IMPORTS: List of package import directories relative to the current package
 # DEPS: List of other targets the test python libraries require
@@ -51,7 +52,7 @@ function(iree_py_library)
   cmake_parse_arguments(
     _RULE
     ""
-    "NAME;MAIN"
+    "NAME;MAIN;MAIN_MODULE"
     "SRCS;IMPORTS;DEPS;PYEXT_DEPS"
     ${ARGN}
   )
@@ -99,14 +100,20 @@ function(iree_py_library)
     IREE_PY_IMPORT_DIRS "${_IMPORT_DIRS}"
     IREE_PY_DEPS "${_RULE_DEPS}"
   )
-  if(_RULE_MAIN)
+  if(_RULE_MAIN AND _RULE_MAIN_MODULE)
+    message(FATAL_ERROR "iree_py_library accepts either MAIN or MAIN_MODULE, not both")
+  elseif(_RULE_MAIN)
     if(IS_ABSOLUTE "${_RULE_MAIN}")
       set(_MAIN "${_RULE_MAIN}")
     else()
       set(_MAIN "${CMAKE_CURRENT_SOURCE_DIR}/${_RULE_MAIN}")
     endif()
     set_target_properties(${_NAME} PROPERTIES
-      IREE_PY_MAIN "${_MAIN}"
+      IREE_PY_ENTRYPOINT_ARGUMENTS "${_MAIN}"
+    )
+  elseif(_RULE_MAIN_MODULE)
+    set_target_properties(${_NAME} PROPERTIES
+      IREE_PY_ENTRYPOINT_ARGUMENTS "-m;${_RULE_MAIN_MODULE}"
     )
   endif()
 
@@ -118,16 +125,21 @@ function(iree_py_library)
   endif()
 endfunction()
 
-function(iree_py_library_main OUTPUT_MAIN TARGET_NAME)
+function(iree_py_library_entrypoint OUTPUT_ARGUMENTS TARGET_NAME)
   iree_package_target_name(_TARGET_NAME "${TARGET_NAME}")
   if(NOT TARGET "${_TARGET_NAME}")
     message(FATAL_ERROR "iree_py_library target ${TARGET_NAME} was not found")
   endif()
-  get_target_property(_MAIN "${_TARGET_NAME}" IREE_PY_MAIN)
-  if(NOT _MAIN)
-    message(FATAL_ERROR "iree_py_library target ${TARGET_NAME} does not declare MAIN")
+  get_target_property(
+    _ENTRYPOINT_ARGUMENTS
+    "${_TARGET_NAME}"
+    IREE_PY_ENTRYPOINT_ARGUMENTS
+  )
+  if(NOT _ENTRYPOINT_ARGUMENTS)
+    message(FATAL_ERROR
+      "iree_py_library target ${TARGET_NAME} does not declare MAIN or MAIN_MODULE")
   endif()
-  set(${OUTPUT_MAIN} "${_MAIN}" PARENT_SCOPE)
+  set(${OUTPUT_ARGUMENTS} "${_ENTRYPOINT_ARGUMENTS}" PARENT_SCOPE)
 endfunction()
 
 function(iree_py_library_collect_sources OUTPUT_SOURCE_FILES TARGET_NAME)

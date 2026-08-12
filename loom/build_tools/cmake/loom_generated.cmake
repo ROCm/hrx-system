@@ -10,6 +10,11 @@
 # CMake.
 # Loom packages keep source-of-truth tables in Python and generate compact C
 # data into the build tree.
+#
+# Generated commands record input freshness in a private stamp and expose their
+# artifacts as byproducts. Generators that preserve an artifact's timestamp
+# when its contents are unchanged can then avoid invalidating C/C++ consumers
+# without leaving Make to repeat the generator on every build.
 
 function(_loom_python_command_prefix OUTPUT_PREFIX GENERATOR)
   iree_py_library_collect_package_dirs(_GENERATOR_PACKAGE_DIRS "${GENERATOR}")
@@ -25,7 +30,7 @@ function(_loom_python_command_prefix OUTPUT_PREFIX GENERATOR)
   )
 endfunction()
 
-function(_loom_generated_textual_headers)
+function(_loom_generated_files)
   cmake_parse_arguments(
     _RULE
     ""
@@ -35,19 +40,19 @@ function(_loom_generated_textual_headers)
   )
 
   if(NOT _RULE_NAME)
-    message(FATAL_ERROR "generated textual headers require NAME")
+    message(FATAL_ERROR "generated file actions require NAME")
   endif()
   if(NOT _RULE_GENERATOR)
-    message(FATAL_ERROR "generated textual headers require GENERATOR")
+    message(FATAL_ERROR "generated file actions require GENERATOR")
   endif()
   list(LENGTH _RULE_OUTPUTS _OUTPUT_COUNT)
   if(_OUTPUT_COUNT EQUAL 0)
-    message(FATAL_ERROR "generated textual headers require at least one output")
+    message(FATAL_ERROR "generated file actions require at least one output")
   endif()
   list(LENGTH _RULE_OUTPUT_FLAGS _OUTPUT_FLAG_COUNT)
   if(NOT _OUTPUT_FLAG_COUNT EQUAL _OUTPUT_COUNT)
     message(FATAL_ERROR
-      "generated textual header output flags and outputs must be paired")
+      "generated file output flags and outputs must be paired")
   endif()
 
   set(_OUTPUTS)
@@ -64,19 +69,27 @@ function(_loom_generated_textual_headers)
     set(_RULE_COMMENT "Generating ${_RULE_NAME}")
   endif()
 
-  iree_py_library_main(_GENERATOR "${_RULE_GENERATOR}")
+  iree_py_library_entrypoint(_GENERATOR_ENTRYPOINT "${_RULE_GENERATOR}")
   iree_py_library_collect_sources(_GENERATOR_INPUTS "${_RULE_GENERATOR}")
   _loom_python_command_prefix(_PYTHON_COMMAND_PREFIX "${_RULE_GENERATOR}")
 
+  iree_package_name(_PACKAGE_NAME)
+  set(_GEN_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}")
+  set(_GEN_STAMP
+    "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${_GEN_TARGET}.stamp")
   add_custom_command(
     OUTPUT
+      "${_GEN_STAMP}"
+    BYPRODUCTS
       ${_OUTPUTS}
     COMMAND
       ${_PYTHON_COMMAND_PREFIX}
       "${Python3_EXECUTABLE}"
-      "${_GENERATOR}"
+      ${_GENERATOR_ENTRYPOINT}
       ${_RULE_ARGS}
       ${_OUTPUT_ARGS}
+    COMMAND
+      "${CMAKE_COMMAND}" -E touch "${_GEN_STAMP}"
     DEPENDS
       ${_GENERATOR_INPUTS}
       ${_RULE_INPUTS}
@@ -90,10 +103,9 @@ function(_loom_generated_textual_headers)
     PROPERTIES GENERATED TRUE
   )
 
-  iree_package_name(_PACKAGE_NAME)
-  set(_GEN_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}")
   add_custom_target("${_GEN_TARGET}"
     DEPENDS
+      "${_GEN_STAMP}"
       ${_OUTPUTS}
   )
   iree_register_generated_compile_input("${_GEN_TARGET}"
@@ -123,7 +135,7 @@ function(loom_generated_textual_header)
     message(FATAL_ERROR "loom_generated_textual_header requires OUTPUT_FLAG")
   endif()
 
-  _loom_generated_textual_headers(
+  _loom_generated_files(
     NAME "${_RULE_NAME}"
     GENERATOR "${_RULE_GENERATOR}"
     OUTPUTS "${_RULE_OUTPUT}"
@@ -134,7 +146,7 @@ function(loom_generated_textual_header)
   )
 endfunction()
 
-function(loom_generated_textual_header_family)
+function(loom_generated_file_family)
   cmake_parse_arguments(
     _RULE
     ""
@@ -146,10 +158,10 @@ function(loom_generated_textual_header_family)
   list(LENGTH _RULE_OUTPUTS _OUTPUT_COUNT)
   if(_OUTPUT_COUNT LESS 2)
     message(FATAL_ERROR
-      "loom_generated_textual_header_family requires at least two outputs")
+      "loom_generated_file_family requires at least two outputs")
   endif()
 
-  _loom_generated_textual_headers(
+  _loom_generated_files(
     NAME "${_RULE_NAME}"
     GENERATOR "${_RULE_GENERATOR}"
     OUTPUTS ${_RULE_OUTPUTS}
@@ -247,19 +259,27 @@ function(loom_generated_cc_library)
     endforeach()
   endif()
 
-  iree_py_library_main(_GENERATOR "${_RULE_GENERATOR}")
+  iree_py_library_entrypoint(_GENERATOR_ENTRYPOINT "${_RULE_GENERATOR}")
   iree_py_library_collect_sources(_GENERATOR_INPUTS "${_RULE_GENERATOR}")
   _loom_python_command_prefix(_PYTHON_COMMAND_PREFIX "${_RULE_GENERATOR}")
 
+  iree_package_name(_PACKAGE_NAME)
+  set(_GEN_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}_gen")
+  set(_GEN_STAMP
+    "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${_GEN_TARGET}.stamp")
   add_custom_command(
     OUTPUT
+      "${_GEN_STAMP}"
+    BYPRODUCTS
       ${_OUTPUTS}
     COMMAND
       ${_PYTHON_COMMAND_PREFIX}
       "${Python3_EXECUTABLE}"
-      "${_GENERATOR}"
+      ${_GENERATOR_ENTRYPOINT}
       ${_RULE_ARGS}
       ${_OUTPUT_ARGS}
+    COMMAND
+      "${CMAKE_COMMAND}" -E touch "${_GEN_STAMP}"
     DEPENDS
       ${_GENERATOR_INPUTS}
       ${_RULE_INPUTS}
@@ -272,10 +292,9 @@ function(loom_generated_cc_library)
     PROPERTIES GENERATED TRUE
   )
 
-  iree_package_name(_PACKAGE_NAME)
-  set(_GEN_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}_gen")
   add_custom_target("${_GEN_TARGET}"
     DEPENDS
+      "${_GEN_STAMP}"
       ${_OUTPUTS}
   )
   iree_register_generated_compile_input("${_GEN_TARGET}"

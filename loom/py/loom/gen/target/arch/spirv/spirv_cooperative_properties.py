@@ -26,6 +26,7 @@ _ensure_runtime_py_on_path()
 
 from loom.gen.support.c import CIdentifierCase, c_identifier  # noqa: E402
 from loom.gen.support.c import c_string_literal as _c_string_literal  # noqa: E402
+from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
 from loom.target.arch.spirv.cooperative_matrix import (  # noqa: E402
     COOPERATIVE_MATRIX_CASES,
@@ -209,7 +210,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tables", type=Path, required=True)
     args = parser.parse_args(argv)
-    args.tables.write_text(generate_tables(), encoding="utf-8")
+    write_text_file(args.tables, generate_tables())
     return 0
 
 

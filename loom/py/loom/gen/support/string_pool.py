@@ -44,7 +44,7 @@ class CStringPool:
         label = self.canonical_label(label)
         if label in self.label_to_primary:
             primary_label = self.label_to_primary[label]
-            if self.entries_by_label[primary_label].value != value:
+            if self.value_to_label.get(value) != primary_label:
                 raise ValueError(f"string label '{label}' was reused for different values")
             return primary_label
         if value in self.value_to_label:

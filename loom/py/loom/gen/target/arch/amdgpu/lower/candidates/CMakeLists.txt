@@ -26,10 +26,9 @@ iree_py_library(
   MAIN
     "amdgpu_arithmetic_candidates.py"
   SRCS
-    "__init__.py"
     "amdgpu_arithmetic_candidates.py"
-    "validation.py"
   DEPS
+    loom::py::loom::gen::target::arch::amdgpu::lower::candidates::validation
     loom::py::loom::gen::support::support
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::descriptors
@@ -41,10 +40,9 @@ iree_py_library(
   MAIN
     "amdgpu_async_gather_candidates.py"
   SRCS
-    "__init__.py"
     "amdgpu_async_gather_candidates.py"
-    "validation.py"
   DEPS
+    loom::py::loom::gen::target::arch::amdgpu::lower::candidates::validation
     loom::py::loom::gen::support::support
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::descriptors
@@ -56,10 +54,9 @@ iree_py_library(
   MAIN
     "amdgpu_atomic_candidates.py"
   SRCS
-    "__init__.py"
     "amdgpu_atomic_candidates.py"
-    "validation.py"
   DEPS
+    loom::py::loom::gen::target::arch::amdgpu::lower::candidates::validation
     loom::py::loom::gen::support::support
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::descriptors
@@ -71,10 +68,9 @@ iree_py_library(
   MAIN
     "amdgpu_compare_candidates.py"
   SRCS
-    "__init__.py"
     "amdgpu_compare_candidates.py"
-    "validation.py"
   DEPS
+    loom::py::loom::gen::target::arch::amdgpu::lower::candidates::validation
     loom::py::loom::dialect::scalar::scalar
     loom::py::loom::dialect::vector::vector
     loom::py::loom::gen::support::support
@@ -88,10 +84,9 @@ iree_py_library(
   MAIN
     "amdgpu_memory_candidates.py"
   SRCS
-    "__init__.py"
     "amdgpu_memory_candidates.py"
-    "validation.py"
   DEPS
+    loom::py::loom::gen::target::arch::amdgpu::lower::candidates::validation
     loom::py::loom::gen::support::support
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::descriptors

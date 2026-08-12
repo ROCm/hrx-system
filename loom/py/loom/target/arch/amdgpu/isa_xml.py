@@ -15,7 +15,7 @@ overlays keyed by the normalized instruction facts produced here.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -89,6 +89,18 @@ class AmdgpuIsaOperandType:
 
 
 @dataclass(frozen=True, slots=True)
+class AmdgpuIsaPartitionedOperandUse:
+    # Instruction owning the operand use.
+    instruction_name: str
+    # Physical encoding containing the carrier field.
+    encoding_name: str
+    # Carrier field within the physical encoding, if declared.
+    field_name: str | None
+    # Partitioned operand type projected into the carrier field.
+    operand_type: str
+
+
+@dataclass(frozen=True, slots=True)
 class AmdgpuIsaInstructionEncoding:
     encoding_name: str
     condition_name: str
@@ -136,7 +148,7 @@ class AmdgpuIsaEncodingFieldSummary:
     total_padding_bit_count: int
 
 
-class AmdgpuIsaFactSource(Protocol):
+class AmdgpuIsaInstructionFactSource(Protocol):
     @property
     def source_name(self) -> str: ...
 
@@ -147,23 +159,7 @@ class AmdgpuIsaFactSource(Protocol):
     def architecture_id(self) -> int: ...
 
     @property
-    def encodings(self) -> tuple[AmdgpuIsaEncoding, ...]: ...
-
-    @property
     def instructions(self) -> tuple[AmdgpuIsaInstruction, ...]: ...
-
-    @property
-    def operand_types(self) -> tuple[AmdgpuIsaOperandType, ...]: ...
-
-    def encoding_map(self) -> dict[str, AmdgpuIsaEncoding]: ...
-
-    def select_encodings(
-        self, names: Iterable[str]
-    ) -> tuple[AmdgpuIsaEncoding, ...]: ...
-
-    def encoding_field_summaries(
-        self, names: Iterable[str] | None = None
-    ) -> tuple[AmdgpuIsaEncodingFieldSummary, ...]: ...
 
     def instruction_map(
         self, *, include_aliases: bool = False
@@ -176,12 +172,6 @@ class AmdgpuIsaFactSource(Protocol):
         include_aliases: bool = True,
     ) -> tuple[AmdgpuIsaInstruction, ...]: ...
 
-    def operand_type_map(self) -> dict[str, AmdgpuIsaOperandType]: ...
-
-    def operand_predefined_value(
-        self, operand_type_name: str, value_name: str
-    ) -> int: ...
-
     def instruction_encoding_summaries(
         self,
         names: Iterable[str] | None = None,
@@ -190,23 +180,135 @@ class AmdgpuIsaFactSource(Protocol):
     ) -> tuple[AmdgpuIsaInstructionEncodingSummary, ...]: ...
 
 
+class AmdgpuIsaFactSource(AmdgpuIsaInstructionFactSource, Protocol):
+    @property
+    def encodings(self) -> tuple[AmdgpuIsaEncoding, ...]: ...
+
+    @property
+    def operand_types(self) -> tuple[AmdgpuIsaOperandType, ...]: ...
+
+    @property
+    def partitioned_operand_uses(
+        self,
+    ) -> tuple[AmdgpuIsaPartitionedOperandUse, ...]: ...
+
+    def encoding_map(self) -> dict[str, AmdgpuIsaEncoding]: ...
+
+    def select_encodings(
+        self, names: Iterable[str]
+    ) -> tuple[AmdgpuIsaEncoding, ...]: ...
+
+    def encoding_field_summaries(
+        self, names: Iterable[str] | None = None
+    ) -> tuple[AmdgpuIsaEncodingFieldSummary, ...]: ...
+
+    def operand_type_map(self) -> dict[str, AmdgpuIsaOperandType]: ...
+
+    def operand_predefined_value(
+        self, operand_type_name: str, value_name: str
+    ) -> int: ...
+
+
 @dataclass(frozen=True, slots=True)
-class AmdgpuIsaSpec:
+class AmdgpuIsaInstructionSet:
     source_name: str
     architecture_name: str
     architecture_id: int
-    encodings: tuple[AmdgpuIsaEncoding, ...]
     instructions: tuple[AmdgpuIsaInstruction, ...]
-    operand_types: tuple[AmdgpuIsaOperandType, ...]
-    _encoding_lookup_cache: dict[str, AmdgpuIsaEncoding] | None = field(
-        default=None,
+    _instruction_lookup_cache: dict[bool, dict[str, AmdgpuIsaInstruction]] = field(
+        default_factory=dict,
         init=False,
         repr=False,
         compare=False,
         hash=False,
     )
-    _instruction_lookup_cache: dict[bool, dict[str, AmdgpuIsaInstruction]] = field(
-        default_factory=dict,
+
+    def _instruction_lookup(
+        self, *, include_aliases: bool = False
+    ) -> dict[str, AmdgpuIsaInstruction]:
+        cache = self._instruction_lookup_cache
+        lookup = cache.get(include_aliases)
+        if lookup is not None:
+            return lookup
+        instructions: dict[str, AmdgpuIsaInstruction] = {}
+        for instruction in self.instructions:
+            _insert_unique_instruction_name(
+                instructions, instruction.name, instruction, self.source_name
+            )
+            if include_aliases:
+                for alias in instruction.aliases:
+                    _insert_unique_instruction_name(
+                        instructions, alias, instruction, self.source_name
+                    )
+        cache[include_aliases] = instructions
+        return instructions
+
+    def instruction_map(
+        self, *, include_aliases: bool = False
+    ) -> dict[str, AmdgpuIsaInstruction]:
+        return dict(self._instruction_lookup(include_aliases=include_aliases))
+
+    def select_instructions(
+        self,
+        names: Iterable[str],
+        *,
+        include_aliases: bool = True,
+    ) -> tuple[AmdgpuIsaInstruction, ...]:
+        requested_names = tuple(names)
+        instructions_by_name = self._instruction_lookup(include_aliases=include_aliases)
+        selected: dict[str, AmdgpuIsaInstruction] = {}
+        missing_names: list[str] = []
+        for name in requested_names:
+            instruction = instructions_by_name.get(name)
+            if instruction is None:
+                missing_names.append(name)
+            else:
+                selected[instruction.name] = instruction
+        if missing_names:
+            missing_text = ", ".join(sorted(missing_names))
+            raise AmdgpuIsaXmlError(
+                f"{self.source_name}: unknown AMDGPU ISA instruction(s): {missing_text}"
+            )
+        return tuple(selected[name] for name in sorted(selected))
+
+    def instruction_encoding_summaries(
+        self,
+        names: Iterable[str] | None = None,
+        *,
+        include_aliases: bool = True,
+    ) -> tuple[AmdgpuIsaInstructionEncodingSummary, ...]:
+        if names is None:
+            instructions = self.instructions
+        else:
+            instructions = self.select_instructions(
+                names, include_aliases=include_aliases
+            )
+
+        summaries = [
+            _summarize_instruction_encoding(instruction, encoding)
+            for instruction in instructions
+            for encoding in instruction.encodings
+        ]
+        return tuple(
+            sorted(
+                summaries,
+                key=lambda summary: (
+                    summary.instruction_name,
+                    summary.encoding_name,
+                    summary.condition_name,
+                    summary.opcode,
+                ),
+            )
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AmdgpuIsaSpec(AmdgpuIsaInstructionSet):
+    encodings: tuple[AmdgpuIsaEncoding, ...]
+    operand_types: tuple[AmdgpuIsaOperandType, ...]
+    partitioned_operand_uses: tuple[AmdgpuIsaPartitionedOperandUse, ...]
+    _encoding_lookup_cache: dict[str, AmdgpuIsaEncoding] | None = field(
+        default=None,
         init=False,
         repr=False,
         compare=False,
@@ -275,54 +377,6 @@ class AmdgpuIsaSpec:
             )
         )
 
-    def _instruction_lookup(
-        self, *, include_aliases: bool = False
-    ) -> dict[str, AmdgpuIsaInstruction]:
-        cache = self._instruction_lookup_cache
-        lookup = cache.get(include_aliases)
-        if lookup is not None:
-            return lookup
-        instructions: dict[str, AmdgpuIsaInstruction] = {}
-        for instruction in self.instructions:
-            _insert_unique_instruction_name(
-                instructions, instruction.name, instruction, self.source_name
-            )
-            if include_aliases:
-                for alias in instruction.aliases:
-                    _insert_unique_instruction_name(
-                        instructions, alias, instruction, self.source_name
-                    )
-        cache[include_aliases] = instructions
-        return instructions
-
-    def instruction_map(
-        self, *, include_aliases: bool = False
-    ) -> dict[str, AmdgpuIsaInstruction]:
-        return dict(self._instruction_lookup(include_aliases=include_aliases))
-
-    def select_instructions(
-        self,
-        names: Iterable[str],
-        *,
-        include_aliases: bool = True,
-    ) -> tuple[AmdgpuIsaInstruction, ...]:
-        requested_names = tuple(names)
-        instructions_by_name = self._instruction_lookup(include_aliases=include_aliases)
-        selected: dict[str, AmdgpuIsaInstruction] = {}
-        missing_names: list[str] = []
-        for name in requested_names:
-            instruction = instructions_by_name.get(name)
-            if instruction is None:
-                missing_names.append(name)
-            else:
-                selected[instruction.name] = instruction
-        if missing_names:
-            missing_text = ", ".join(sorted(missing_names))
-            raise AmdgpuIsaXmlError(
-                f"{self.source_name}: unknown AMDGPU ISA instruction(s): {missing_text}"
-            )
-        return tuple(selected[name] for name in sorted(selected))
-
     def _operand_type_lookup(self) -> dict[str, AmdgpuIsaOperandType]:
         lookup = self._operand_type_lookup_cache
         if lookup is None:
@@ -354,44 +408,80 @@ class AmdgpuIsaSpec:
             )
         return value
 
-    def instruction_encoding_summaries(
-        self,
-        names: Iterable[str] | None = None,
-        *,
-        include_aliases: bool = True,
-    ) -> tuple[AmdgpuIsaInstructionEncodingSummary, ...]:
-        if names is None:
-            instructions = self.instructions
-        else:
-            instructions = self.select_instructions(
-                names, include_aliases=include_aliases
-            )
 
-        summaries = [
-            _summarize_instruction_encoding(instruction, encoding)
-            for instruction in instructions
-            for encoding in instruction.encodings
-        ]
-        return tuple(
-            sorted(
-                summaries,
-                key=lambda summary: (
-                    summary.instruction_name,
-                    summary.encoding_name,
-                    summary.condition_name,
-                    summary.opcode,
-                ),
-            )
-        )
-
-
-def parse_amdgpu_isa_xml_path(path: str | Path) -> AmdgpuIsaSpec:
+def _parse_amdgpu_isa_xml_root_path(
+    path: str | Path,
+) -> tuple[ElementTree.Element, str]:
     xml_path = Path(path)
     try:
         tree = ElementTree.parse(xml_path)
     except ElementTree.ParseError as exc:
         raise AmdgpuIsaXmlError(f"{xml_path}: malformed AMDGPU ISA XML: {exc}") from exc
-    return _parse_spec_root(tree.getroot(), str(xml_path))
+    return tree.getroot(), str(xml_path)
+
+
+def parse_amdgpu_isa_xml_path(path: str | Path) -> AmdgpuIsaSpec:
+    root, source_name = _parse_amdgpu_isa_xml_root_path(path)
+    return _parse_spec_root(root, source_name)
+
+
+def parse_amdgpu_isa_xml_path_for_instructions(
+    path: str | Path, instruction_names: Iterable[str]
+) -> AmdgpuIsaSpec:
+    """Parses complete shared facts and only the requested instructions.
+
+    Instruction aliases participate in selection so the returned fact source
+    preserves normal ``select_instructions(..., include_aliases=True)``
+    behavior for every requested name. Names absent from the XML are omitted so
+    consumers can supplement or reject them according to their own contract.
+    """
+    root, source_name = _parse_amdgpu_isa_xml_root_path(path)
+    return _parse_spec_root(
+        root,
+        source_name,
+        instruction_names=frozenset(instruction_names),
+    )
+
+
+def parse_amdgpu_isa_xml_paths_for_instructions(
+    paths_by_isa_key: Mapping[str, str | Path],
+    instruction_names_by_isa_key: Mapping[str, Iterable[str]],
+) -> dict[str, AmdgpuIsaSpec]:
+    """Parses a keyed ISA corpus using its exact instruction fact demands."""
+
+    path_keys = paths_by_isa_key.keys()
+    instruction_keys = instruction_names_by_isa_key.keys()
+    missing_keys = sorted(instruction_keys - path_keys)
+    unexpected_keys = sorted(path_keys - instruction_keys)
+    if missing_keys or unexpected_keys:
+        details = []
+        if missing_keys:
+            details.append("missing " + ", ".join(missing_keys))
+        if unexpected_keys:
+            details.append("unexpected " + ", ".join(unexpected_keys))
+        raise ValueError(
+            "AMDGPU ISA XML paths do not match instruction fact demands: "
+            + "; ".join(details)
+        )
+    return {
+        isa_key: parse_amdgpu_isa_xml_path_for_instructions(
+            paths_by_isa_key[isa_key],
+            instruction_names,
+        )
+        for isa_key, instruction_names in instruction_names_by_isa_key.items()
+    }
+
+
+def parse_amdgpu_isa_xml_instructions_path(
+    path: str | Path, instruction_names: Iterable[str]
+) -> AmdgpuIsaInstructionSet:
+    """Parses architecture identity and the named canonical instructions.
+
+    Names absent from the XML are omitted so consumers can apply their own
+    required-versus-optional instruction contract when querying the result.
+    """
+    root, source_name = _parse_amdgpu_isa_xml_root_path(path)
+    return _parse_instruction_set_root(root, source_name, instruction_names)
 
 
 def parse_amdgpu_isa_xml_text(
@@ -466,7 +556,9 @@ def _base_field_source_segments(
     return tuple(segments)
 
 
-def _parse_spec_root(root: ElementTree.Element, source_name: str) -> AmdgpuIsaSpec:
+def _parse_spec_identity(
+    root: ElementTree.Element, source_name: str
+) -> tuple[ElementTree.Element, str, int]:
     if root.tag != "Spec":
         raise AmdgpuIsaXmlError(
             f"{source_name}: expected root element <Spec>, found <{root.tag}>"
@@ -479,6 +571,52 @@ def _parse_spec_root(root: ElementTree.Element, source_name: str) -> AmdgpuIsaSp
     )
     architecture_id = _required_integer(
         architecture_element, "ArchitectureId", source_name
+    )
+    return isa_element, architecture_name, architecture_id
+
+
+def _parse_instruction_set_root(
+    root: ElementTree.Element,
+    source_name: str,
+    instruction_names: Iterable[str],
+) -> AmdgpuIsaInstructionSet:
+    isa_element, architecture_name, architecture_id = _parse_spec_identity(
+        root, source_name
+    )
+    requested_names = frozenset(instruction_names)
+    instructions_element = _required_child(isa_element, "Instructions", source_name)
+    instructions = tuple(
+        sorted(
+            (
+                _parse_instruction(instruction_element, source_name)
+                for instruction_element in instructions_element.findall("Instruction")
+                if _required_text(instruction_element, "InstructionName", source_name)
+                in requested_names
+            ),
+            key=lambda instruction: instruction.name,
+        )
+    )
+    _ensure_unique_names(
+        (instruction.name for instruction in instructions),
+        "instruction",
+        source_name,
+    )
+    return AmdgpuIsaInstructionSet(
+        source_name=source_name,
+        architecture_name=architecture_name,
+        architecture_id=architecture_id,
+        instructions=instructions,
+    )
+
+
+def _parse_spec_root(
+    root: ElementTree.Element,
+    source_name: str,
+    *,
+    instruction_names: frozenset[str] | None = None,
+) -> AmdgpuIsaSpec:
+    isa_element, architecture_name, architecture_id = _parse_spec_identity(
+        root, source_name
     )
 
     encodings_element = _required_child(isa_element, "Encodings", source_name)
@@ -505,6 +643,12 @@ def _parse_spec_root(root: ElementTree.Element, source_name: str) -> AmdgpuIsaSp
             (
                 _parse_instruction(instruction_element, source_name)
                 for instruction_element in instructions_element.findall("Instruction")
+                if instruction_names is None
+                or _instruction_element_matches_names(
+                    instruction_element,
+                    source_name,
+                    instruction_names,
+                )
             ),
             key=lambda instruction: instruction.name,
         )
@@ -539,6 +683,18 @@ def _parse_spec_root(root: ElementTree.Element, source_name: str) -> AmdgpuIsaSp
         source_name,
     )
 
+    if instruction_names is None:
+        partitioned_operand_uses = _partitioned_operand_uses_from_instructions(
+            instructions,
+            operand_types,
+        )
+    else:
+        partitioned_operand_uses = _parse_partitioned_operand_uses(
+            instructions_element,
+            operand_types,
+            source_name,
+        )
+
     return AmdgpuIsaSpec(
         source_name=source_name,
         architecture_name=architecture_name,
@@ -546,6 +702,130 @@ def _parse_spec_root(root: ElementTree.Element, source_name: str) -> AmdgpuIsaSp
         encodings=encodings,
         instructions=instructions,
         operand_types=operand_types,
+        partitioned_operand_uses=partitioned_operand_uses,
+    )
+
+
+def _normalize_partitioned_operand_uses(
+    uses: Iterable[AmdgpuIsaPartitionedOperandUse],
+) -> tuple[AmdgpuIsaPartitionedOperandUse, ...]:
+    return tuple(
+        sorted(
+            set(uses),
+            key=lambda use: (
+                use.instruction_name,
+                use.encoding_name,
+                use.field_name or "",
+                use.operand_type,
+            ),
+        )
+    )
+
+
+def _partitioned_operand_uses_from_instructions(
+    instructions: Iterable[AmdgpuIsaInstruction],
+    operand_types: Iterable[AmdgpuIsaOperandType],
+) -> tuple[AmdgpuIsaPartitionedOperandUse, ...]:
+    partitioned_operand_types = {
+        operand_type.name
+        for operand_type in operand_types
+        if operand_type.is_partitioned
+    }
+    return _normalize_partitioned_operand_uses(
+        AmdgpuIsaPartitionedOperandUse(
+            instruction_name=instruction.name,
+            encoding_name=encoding.encoding_name,
+            field_name=operand.field_name,
+            operand_type=operand.operand_type,
+        )
+        for instruction in instructions
+        for encoding in instruction.encodings
+        for operand in encoding.operands
+        if operand.is_binary_microcode_required
+        and operand.operand_type in partitioned_operand_types
+    )
+
+
+def _parse_partitioned_operand_uses(
+    instructions_element: ElementTree.Element,
+    operand_types: Iterable[AmdgpuIsaOperandType],
+    source_name: str,
+) -> tuple[AmdgpuIsaPartitionedOperandUse, ...]:
+    partitioned_operand_types = {
+        operand_type.name
+        for operand_type in operand_types
+        if operand_type.is_partitioned
+    }
+    uses: list[AmdgpuIsaPartitionedOperandUse] = []
+    for instruction_element in instructions_element.findall("Instruction"):
+        instruction_name = _required_text(
+            instruction_element, "InstructionName", source_name
+        )
+        instruction_context = _context("Instruction", instruction_name)
+        encodings_element = _required_child(
+            instruction_element,
+            "InstructionEncodings",
+            source_name,
+        )
+        for encoding_element in encodings_element.findall("InstructionEncoding"):
+            encoding_name = _required_text(
+                encoding_element, "EncodingName", source_name
+            )
+            encoding_context = (
+                f"{instruction_context}/InstructionEncoding({encoding_name})"
+            )
+            operands_element = _required_child(
+                encoding_element,
+                "Operands",
+                source_name,
+            )
+            for operand_element in operands_element.findall("Operand"):
+                operand_type = _required_text(
+                    operand_element, "OperandType", source_name
+                )
+                if operand_type not in partitioned_operand_types:
+                    continue
+                order = _required_integer_attribute(
+                    operand_element,
+                    "Order",
+                    source_name,
+                    f"{encoding_context}/Operand",
+                )
+                if not _required_boolean_attribute(
+                    operand_element,
+                    "IsBinaryMicrocodeRequired",
+                    source_name,
+                    f"{encoding_context}/Operand({order})",
+                ):
+                    continue
+                uses.append(
+                    AmdgpuIsaPartitionedOperandUse(
+                        instruction_name=instruction_name,
+                        encoding_name=encoding_name,
+                        field_name=_optional_text(operand_element, "FieldName"),
+                        operand_type=operand_type,
+                    )
+                )
+    return _normalize_partitioned_operand_uses(uses)
+
+
+def _instruction_element_matches_names(
+    instruction_element: ElementTree.Element,
+    source_name: str,
+    instruction_names: frozenset[str],
+) -> bool:
+    if (
+        _required_text(instruction_element, "InstructionName", source_name)
+        in instruction_names
+    ):
+        return True
+    aliases_element = instruction_element.find("AliasedInstructionNames")
+    if aliases_element is None:
+        return False
+    return any(
+        _required_element_text(alias_element, source_name, "Instruction/alias")
+        in instruction_names
+        for alias_element in aliases_element.findall("InstructionName")
     )
 
 

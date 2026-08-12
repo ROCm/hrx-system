@@ -406,10 +406,40 @@ class AmdgpuVectorMemoryCachePolicyEncodingInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class AmdgpuSoppOpcodeInfo:
+    nop: int
+    delay_alu: int
+    endpgm: int
+    branch: int
+    conditional_branch_scc0: int
+    conditional_branch_scc1: int
+
+
+AMDGPU_SOPP_OPCODE_INFO_CDNA = AmdgpuSoppOpcodeInfo(
+    nop=0x000,
+    delay_alu=0x000,
+    endpgm=0x001,
+    branch=0x002,
+    conditional_branch_scc0=0x004,
+    conditional_branch_scc1=0x005,
+)
+
+AMDGPU_SOPP_OPCODE_INFO_RDNA = AmdgpuSoppOpcodeInfo(
+    nop=0x000,
+    delay_alu=0x007,
+    endpgm=0x030,
+    branch=0x020,
+    conditional_branch_scc0=0x021,
+    conditional_branch_scc1=0x022,
+)
+
+
+@dataclass(frozen=True, slots=True)
 class AmdgpuDescriptorSetIsaInfo:
     isa_xml_key: str
     isa_architecture_name: str
     isa_architecture_id: int
+    sopp_opcodes: AmdgpuSoppOpcodeInfo
     # OPR_SRC predefined value seeded into unwritten VOP3 source fields.
     vop3_unused_source_value: str | None = None
 
@@ -434,18 +464,21 @@ AMDGPU_DESCRIPTOR_SET_ISA_CDNA3 = AmdgpuDescriptorSetIsaInfo(
     isa_xml_key="cdna3",
     isa_architecture_name="AMD CDNA 3",
     isa_architecture_id=2,
+    sopp_opcodes=AMDGPU_SOPP_OPCODE_INFO_CDNA,
 )
 
 AMDGPU_DESCRIPTOR_SET_ISA_CDNA4 = AmdgpuDescriptorSetIsaInfo(
     isa_xml_key="cdna4",
     isa_architecture_name="AMD CDNA 4",
     isa_architecture_id=3,
+    sopp_opcodes=AMDGPU_SOPP_OPCODE_INFO_CDNA,
 )
 
 AMDGPU_DESCRIPTOR_SET_ISA_RDNA3 = AmdgpuDescriptorSetIsaInfo(
     isa_xml_key="rdna3",
     isa_architecture_name="AMD RDNA 3",
     isa_architecture_id=8,
+    sopp_opcodes=AMDGPU_SOPP_OPCODE_INFO_RDNA,
     vop3_unused_source_value="0",
 )
 
@@ -453,6 +486,7 @@ AMDGPU_DESCRIPTOR_SET_ISA_RDNA3_5 = AmdgpuDescriptorSetIsaInfo(
     isa_xml_key="rdna3_5",
     isa_architecture_name="AMD RDNA 3.5",
     isa_architecture_id=9,
+    sopp_opcodes=AMDGPU_SOPP_OPCODE_INFO_RDNA,
     vop3_unused_source_value="0",
 )
 
@@ -460,6 +494,7 @@ AMDGPU_DESCRIPTOR_SET_ISA_RDNA4 = AmdgpuDescriptorSetIsaInfo(
     isa_xml_key="rdna4",
     isa_architecture_name="AMD RDNA 4",
     isa_architecture_id=10,
+    sopp_opcodes=AMDGPU_SOPP_OPCODE_INFO_RDNA,
     vop3_unused_source_value="0",
 )
 
@@ -2241,6 +2276,25 @@ def _occupancy_capacity(pool_units: int, granularity: int, units: int) -> int:
     return pool_units // _occupancy_rounded_units(units, granularity)
 
 
+def _occupancy_capacity_change_points(
+    maximum_units: int, granularities: Sequence[int]
+) -> tuple[int, ...]:
+    """Returns positive demands where any compared capacity may change.
+
+    For allocation granularity g, rounded demand is constant over each interval
+    ((k - 1) * g, k * g]. Capacity can therefore change only at one or at the
+    start k * g + 1 of a later interval. The union of those starts preserves
+    every capacity comparison across descriptor sets with different
+    granularities.
+    """
+    if maximum_units < 1:
+        return ()
+    change_points = {1}
+    for granularity in granularities:
+        change_points.update(range(granularity + 1, maximum_units + 1, granularity))
+    return tuple(sorted(change_points))
+
+
 def _validate_portable_occupancy_model(
     generic_processor: str,
     wave_size: int,
@@ -2278,7 +2332,13 @@ def _validate_portable_occupancy_model(
     maximum_local_memory_bytes = max(
         model.domain.local_memory_bytes for model in member_models
     )
-    for local_memory_bytes in range(1, maximum_local_memory_bytes + 1):
+    local_memory_granularities = (
+        generic_model.domain.local_memory_allocation_granularity,
+        *(model.domain.local_memory_allocation_granularity for model in member_models),
+    )
+    for local_memory_bytes in _occupancy_capacity_change_points(
+        maximum_local_memory_bytes, local_memory_granularities
+    ):
         generic_capacity = _occupancy_capacity(
             generic_model.domain.local_memory_bytes,
             generic_model.domain.local_memory_allocation_granularity,
@@ -2338,7 +2398,17 @@ def _validate_portable_occupancy_model(
             for member_row in member_rows
             if member_row is not None
         )
-        for units in range(1, maximum_units + 1):
+        register_granularities = (
+            generic_register_class.allocation_granularity,
+            *(
+                member_row.allocation_granularity
+                for member_row in member_rows
+                if member_row is not None and member_row.limits_occupancy
+            ),
+        )
+        for units in _occupancy_capacity_change_points(
+            maximum_units, register_granularities
+        ):
             generic_capacity = min(
                 generic_model.max_waves_per_simd,
                 _occupancy_capacity(

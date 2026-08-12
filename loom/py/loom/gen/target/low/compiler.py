@@ -258,17 +258,27 @@ def derive_descriptor_projections(
             if OperandFlag.EARLY_CLOBBER not in flags:
                 flags.append(OperandFlag.EARLY_CLOBBER)
 
+    projected_flags = tuple(derived_flags)
+    projection_changed = projected_flags != descriptor.flags
+    projected_operands: list[Operand] = []
+    for operand, flags in zip(
+        descriptor.operands,
+        operand_flags,
+        strict=True,
+    ):
+        projected_operand_flags = tuple(flags)
+        if projected_operand_flags == operand.flags:
+            projected_operands.append(operand)
+            continue
+        projected_operands.append(replace(operand, flags=projected_operand_flags))
+        projection_changed = True
+
+    if not projection_changed:
+        return descriptor
     return replace(
         descriptor,
-        flags=tuple(derived_flags),
-        operands=tuple(
-            replace(operand, flags=tuple(flags))
-            for operand, flags in zip(
-                descriptor.operands,
-                operand_flags,
-                strict=True,
-            )
-        ),
+        flags=projected_flags,
+        operands=tuple(projected_operands),
     )
 
 
@@ -900,7 +910,8 @@ def compile_descriptor_set(
         )
     validation.validate_physical_descriptor_set(spec)
 
-    selected_descriptors = [projected_descriptors_by_key[descriptor.key] for descriptor in _select_descriptors(spec, allowlist)]
+    source_descriptors = _select_descriptors(spec, allowlist)
+    selected_descriptors = [projected_descriptors_by_key[descriptor.key] for descriptor in source_descriptors]
     if not selected_descriptors:
         raise ValueError(f"descriptor set '{spec.key}' selected no descriptors")
     validation.validate_descriptor_asm_surface(spec, selected_descriptors)
@@ -1321,6 +1332,7 @@ def compile_descriptor_set(
 
     return CompiledDescriptorSet(
         spec=spec,
+        source_descriptors=source_descriptors,
         descriptors=selected_descriptors,
         instruction_classes=instruction_classes,
         reg_classes=reg_classes,

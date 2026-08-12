@@ -80,6 +80,7 @@ _LOOM_CONFIG_CMAKE_OPTIONS = {
 _LOOM_CONFIG_CMAKE_OPTIONS.update(_loom_amdgpu_config_cmake_options())
 
 _GENERATED_ROOTPATH_PATTERN = re.compile(r"\$\(rootpath ([^)]+)\)")
+_GENERATED_LOCATION_PATTERN = re.compile(r"\$\(location ([^)]+)\)")
 
 
 class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
@@ -304,6 +305,14 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
     def loom_amdgpu_selected_descriptor_set_generator_args(self, args):
         return self.loom_amdgpu_selected_descriptor_set_values(args)
 
+    def loom_amdgpu_selected_descriptor_set_key_args(self):
+        return self.loom_amdgpu_selected_descriptor_set_values(
+            {
+                capability: "--descriptor-set=" + descriptor_set_key
+                for descriptor_set_key, capability in self.LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY.items()
+            }
+        )
+
     def loom_amdgpu_selected_descriptor_set_deps(self, targets):
         return self.loom_amdgpu_selected_descriptor_set_values(targets)
 
@@ -490,7 +499,14 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         def replace_rootpath(match):
             return self._convert_generated_file_label(match.group(1))
 
-        return _GENERATED_ROOTPATH_PATTERN.sub(replace_rootpath, arg)
+        def replace_external_location(match):
+            label = match.group(1)
+            if label.startswith("@"):
+                return self._convert_generated_file_label(label)
+            return match.group(0)
+
+        arg = _GENERATED_ROOTPATH_PATTERN.sub(replace_rootpath, arg)
+        return _GENERATED_LOCATION_PATTERN.sub(replace_external_location, arg)
 
     def _convert_generated_args(self, args):
         def convert(args):
@@ -595,7 +611,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         )
         self._emit_platform_guard_end(target_compatible_with)
 
-    def loom_generated_textual_header_family(
+    def loom_generated_file_family(
         self,
         name,
         generator,
@@ -642,7 +658,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         if platform_inputs_block:
             self._converter.body += platform_inputs_block
         self._converter.body += (
-            f"loom_generated_textual_header_family(\n"
+            f"loom_generated_file_family(\n"
             f"{name_block}"
             f"{generator_block}"
             f"{outputs_block}"
@@ -909,6 +925,163 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             exclude_from_cmake_all=exclude_from_cmake_all,
             testonly=testonly,
             cmake_rule_name="loom_target_table_cc_library",
+        )
+        self._emit_platform_guard_end(target_compatible_with)
+
+    def loom_target_contract_cc_libraries(
+        self,
+        name,
+        contract_deps=None,
+        lower_rule_deps=None,
+        tags=None,
+        testonly=None,
+        target_compatible_with=None,
+        visibility=None,
+        **kwargs,
+    ):
+        if self._should_skip_target(tags=tags, **kwargs):
+            return
+        target_compatible_with = self._apply_loom_target_compatible_with(
+            target_compatible_with
+        )
+
+        name_block = self._convert_string_arg_block("NAME", name, quote=False)
+        contract_deps_block = self._convert_target_list_block(
+            "CONTRACT_DEPS", contract_deps
+        )
+        lower_rule_deps_block = self._convert_target_list_block(
+            "LOWER_RULE_DEPS", lower_rule_deps
+        )
+        testonly_block = self._convert_option_block("TESTONLY", testonly)
+
+        self._emit_platform_guard_begin(target_compatible_with)
+        self._converter.body += (
+            f"loom_target_contract_cc_libraries(\n"
+            f"{name_block}"
+            f"{contract_deps_block}"
+            f"{lower_rule_deps_block}"
+            f"{testonly_block}"
+            f")\n\n"
+        )
+        self._emit_platform_guard_end(target_compatible_with)
+
+    def loom_target_contract_table_cc_libraries(
+        self,
+        name,
+        generator,
+        args=None,
+        inputs=None,
+        contract_deps=None,
+        lower_rule_deps=None,
+        tags=None,
+        testonly=None,
+        target_compatible_with=None,
+        visibility=None,
+        **kwargs,
+    ):
+        if self._should_skip_target(tags=tags, **kwargs):
+            return
+        target_compatible_with = self._apply_loom_target_compatible_with(
+            target_compatible_with
+        )
+
+        name_block = self._convert_string_arg_block("NAME", name, quote=False)
+        generator_block = self._convert_single_target_block("GENERATOR", generator)
+        args_block, platform_args_block = self._convert_platform_select_strings(
+            name,
+            "ARGS",
+            self._convert_generated_args(args),
+            sort=False,
+        )
+        inputs_block, platform_inputs_block = self._convert_platform_select_strings(
+            name,
+            "INPUTS",
+            self._convert_generated_inputs(inputs),
+            sort=False,
+        )
+        contract_deps_block = self._convert_target_list_block(
+            "CONTRACT_DEPS", contract_deps
+        )
+        lower_rule_deps_block = self._convert_target_list_block(
+            "LOWER_RULE_DEPS", lower_rule_deps
+        )
+        testonly_block = self._convert_option_block("TESTONLY", testonly)
+
+        self._emit_platform_guard_begin(target_compatible_with)
+        if platform_args_block:
+            self._converter.body += platform_args_block
+        if platform_inputs_block:
+            self._converter.body += platform_inputs_block
+        self._converter.body += (
+            f"loom_target_contract_table_cc_libraries(\n"
+            f"{name_block}"
+            f"{generator_block}"
+            f"{args_block}"
+            f"{inputs_block}"
+            f"{contract_deps_block}"
+            f"{lower_rule_deps_block}"
+            f"{testonly_block}"
+            f")\n\n"
+        )
+        self._emit_platform_guard_end(target_compatible_with)
+
+    def loom_target_contract_file_family(
+        self,
+        name,
+        generator,
+        fragments,
+        args=None,
+        inputs=None,
+        comment=None,
+        tags=None,
+        target_compatible_with=None,
+        visibility=None,
+        **kwargs,
+    ):
+        if self._should_skip_target(tags=tags, **kwargs):
+            return
+        target_compatible_with = self._apply_loom_target_compatible_with(
+            target_compatible_with
+        )
+
+        name_block = self._convert_string_arg_block("NAME", name, quote=False)
+        generator_block = self._convert_single_target_block("GENERATOR", generator)
+        fragments_block = self._convert_string_list_block(
+            "FRAGMENTS",
+            [
+                f"{stem}={fragment_key}"
+                for stem, fragment_key in sorted(fragments.items())
+            ],
+            sort=False,
+        )
+        args_block, platform_args_block = self._convert_platform_select_strings(
+            name,
+            "ARGS",
+            self._convert_generated_args(args),
+            sort=False,
+        )
+        inputs_block, platform_inputs_block = self._convert_platform_select_strings(
+            name,
+            "INPUTS",
+            self._convert_generated_inputs(inputs),
+            sort=False,
+        )
+        comment_block = self._convert_string_arg_block("COMMENT", comment)
+
+        self._emit_platform_guard_begin(target_compatible_with)
+        if platform_args_block:
+            self._converter.body += platform_args_block
+        if platform_inputs_block:
+            self._converter.body += platform_inputs_block
+        self._converter.body += (
+            f"loom_target_contract_file_family(\n"
+            f"{name_block}"
+            f"{generator_block}"
+            f"{fragments_block}"
+            f"{args_block}"
+            f"{inputs_block}"
+            f"{comment_block}"
+            f")\n\n"
         )
         self._emit_platform_guard_end(target_compatible_with)
 

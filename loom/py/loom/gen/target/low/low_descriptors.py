@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
+from loom.gen.support.files import write_text_file
 from loom.gen.target.low import c_emit, compiler, views
 from loom.gen.target.low.compiled import (
     DescriptorAllowlist,
@@ -75,7 +76,5 @@ def write_descriptor_set_to_paths(
     allowlist: DescriptorAllowlist | None = None,
 ) -> None:
     generated = generate_descriptor_set(spec, allowlist)
-    header_path.parent.mkdir(parents=True, exist_ok=True)
-    source_path.parent.mkdir(parents=True, exist_ok=True)
-    header_path.write_text(generated.header, encoding="utf-8")
-    source_path.write_text(generated.source, encoding="utf-8")
+    write_text_file(header_path, generated.header)
+    write_text_file(source_path, generated.source)

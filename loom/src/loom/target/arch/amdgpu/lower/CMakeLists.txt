@@ -35,7 +35,7 @@ loom_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header_family(
+loom_generated_file_family(
   NAME
     memory_descriptor_candidate_tables_gen
   GENERATOR
@@ -50,42 +50,17 @@ loom_generated_textual_header_family(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header_family(
-  NAME
-    memory_cache_policy_tables_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::target_info
-  OUTPUTS
-    "memory_cache_policy_encoding_rows.inl"
-    "memory_cache_policy_temporal_th.inl"
-  OUTPUT_FLAGS
-    "--cache-policy-encoding-rows"
-    "--cache-policy-temporal-th"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header_family(
+loom_generated_file_family(
   NAME
     fp8_tables_gen
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
   OUTPUTS
-    "encoding/fp8_decode_plan_descriptor_rows.inl"
-    "encoding/fp8_encoded_operand_format_rows.inl"
-    "encoding/fp8_encoded_operand_schema_requirement_rows.inl"
-    "encoding/fp8_native_descriptor_ref_rows.inl"
-    "encoding/fp8_scaled_descriptor_ref_rows.inl"
-    "encoding/fp8_subnormal_table_rows.inl"
-    "encoding/fp8_packed_repair_reason_rows.inl"
+    "encoding/fp8_tables.c"
+    "encoding/fp8_table_counts.h"
   OUTPUT_FLAGS
-    "--fp8-decode-plan-descriptor-rows"
-    "--fp8-encoded-operand-format-rows"
-    "--fp8-encoded-operand-schema-requirement-rows"
-    "--fp8-native-descriptor-ref-rows"
-    "--fp8-scaled-descriptor-ref-rows"
-    "--fp8-subnormal-table-rows"
-    "--fp8-packed-repair-reason-rows"
+    "--source"
+    "--counts-header"
 )
 endif()
 
@@ -113,6 +88,8 @@ loom_cc_library(
     "encoding/fp4.h"
     "encoding/fp8.h"
     "encoding/fp8_encode.h"
+    "encoding/fp8_table_counts.h"
+    "encoding/fp8_tables.h"
     "encoding/fp8_vector_conversion.h"
     "encoding/vector_conversion.h"
     "feedback.h"
@@ -156,16 +133,9 @@ loom_cc_library(
     "value/vector_transform.h"
     "workgroup.h"
   TEXTUAL_HDRS
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/records/target_records_tables.inl"
-    "encoding/fp8_decode_plan_descriptor_rows.inl"
-    "encoding/fp8_encoded_operand_format_rows.inl"
-    "encoding/fp8_encoded_operand_schema_requirement_rows.inl"
-    "encoding/fp8_native_descriptor_ref_rows.inl"
-    "encoding/fp8_packed_repair_reason_rows.inl"
-    "encoding/fp8_scaled_descriptor_ref_rows.inl"
-    "encoding/fp8_subnormal_table_rows.inl"
-    "memory_cache_policy_encoding_rows.inl"
-    "memory_cache_policy_temporal_th.inl"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/memory_cache_policy_encoding_rows.inl"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/memory_cache_policy_temporal_th.inl"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/target_records_tables.inl"
     "memory_descriptor_candidate_ranges.inl"
     "memory_descriptor_candidates.inl"
     "registry_tables.inl"
@@ -196,6 +166,7 @@ loom_cc_library(
     "encoding/fp8_lane.c"
     "encoding/fp8_packed.c"
     "encoding/fp8_plan.c"
+    "encoding/fp8_tables.c"
     "encoding/fp8_vector_conversion.c"
     "encoding/vector_conversion.c"
     "feedback.c"

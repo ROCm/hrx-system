@@ -28,6 +28,7 @@ iree_py_binary(
     main = "x86_descriptors.py",
     visibility = GENERATOR_VISIBILITY,
     deps = [
+        "//loom/py/loom/gen/support",
         "//loom/py/loom/gen/target/low:low_descriptors",
         "//loom/py/loom/target:descriptor_sets",
         "//loom/py/loom/target/arch/x86:descriptors",

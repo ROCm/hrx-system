@@ -12,9 +12,8 @@ iree_add_all_subdirs()
 iree_py_library(
   NAME
     package
-  SRCS
-    "__init__.py"
   DEPS
+    loom::py::loom::target::package_init
     loom::py::loom::package
 )
 

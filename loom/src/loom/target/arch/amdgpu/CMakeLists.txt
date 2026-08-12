@@ -6,23 +6,6 @@
 #                                                                              #
 # To disable autogeneration for this file entirely, delete this header.        #
 ################################################################################
-if(LOOM_TARGET_ARCH_AMDGPU)
-
-set(_LOOM_AMDGPU_ISA_XML_SOURCE_DIR
-  "${PROJECT_BINARY_DIR}/_deps/amdgpu_isa_xml-src"
-)
-loom_low_descriptor_data_archive(
-  NAME
-    loom_amdgpu_isa_xml
-  SOURCE_DIR
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}"
-  URLS
-    "https://gpuopen.com/download/AMD_GPU_MR_ISA_XML_2026_03_05.zip"
-  SHA256
-    "1f17587abc9d0d355cf6f65bdba7496838b4e8313922769199689615c434965c"
-)
-
-endif()
 
 iree_add_all_subdirs()
 
@@ -94,19 +77,28 @@ loom_generated_cc_library(
     "--header"
   GENERATED_HDRS
     "target_info.h"
-  ARGS
-    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-  INPUTS
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "loom_amdgpu_isa_xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+  EXTRA_OUTPUT_FLAGS
+    "--cache-policy-encoding-rows"
+    "--cache-policy-temporal-th"
+    "--lds-bank-service-model-rows"
+    "--matrix-coexecution-source-layouts"
+    "--low-registry-tables"
+    "--encoding-field-ids"
+    "--encoding-tables"
+    "--low-alias-source"
+    "--target-record-tables"
+    "--occupancy-model-tables"
+  EXTRA_OUTPUTS
+    "memory_cache_policy_encoding_rows.inl"
+    "memory_cache_policy_temporal_th.inl"
+    "lds_bank_service_model_rows.inl"
+    "matrix_coexecution_source_layouts.inl"
+    "low_registry_tables.inl"
+    "encoding_field_ids.inl"
+    "encoding_tables.inl"
+    "low_aliases.c"
+    "target_records_tables.inl"
+    "occupancy_model_tables.c"
   DEPS
     ::target_info_defs
     iree::base
@@ -207,7 +199,7 @@ loom_cc_library(
   HDRS
     "math_policy.h"
   TEXTUAL_HDRS
-    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/records/target_records_tables.inl"
+    "target_records_tables.inl"
   SRCS
     "math_policy.c"
   DEPS
@@ -312,17 +304,16 @@ loom_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_cc_library(
+loom_cc_library(
   NAME
     low_aliases
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::low_aliases
-  SOURCE
-    "low_aliases.c"
   HDRS
     "low_aliases.h"
+  SRCS
+    "low_aliases.c"
   DEPS
     iree::base
+  PUBLIC
 )
 endif()
 

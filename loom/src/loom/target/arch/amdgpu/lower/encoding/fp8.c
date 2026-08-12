@@ -11,38 +11,10 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
+#include "loom/target/arch/amdgpu/lower/encoding/fp8_tables.h"
 #include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
-
-enum {
-  LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_REASON_COUNT = 16u,
-  LOOM_AMDGPU_FP8_PACKED_F16_REPAIR_REASON_COUNT = 4u,
-};
-
-#define LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_REASON_ROW(row_repair, row_reason) \
-  [row_repair] = IREE_SVL(row_reason),
-#define LOOM_AMDGPU_FP8_PACKED_F16_REPAIR_REASON_ROW(row_repair, row_reason)
-
-static const iree_string_view_t kLoomAmdgpuFp8PackedBf16RepairReasons
-    [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_REASON_COUNT] = {
-#include "loom/target/arch/amdgpu/lower/encoding/fp8_packed_repair_reason_rows.inl"
-};
-
-#undef LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_REASON_ROW
-#undef LOOM_AMDGPU_FP8_PACKED_F16_REPAIR_REASON_ROW
-
-#define LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_REASON_ROW(row_repair, row_reason)
-#define LOOM_AMDGPU_FP8_PACKED_F16_REPAIR_REASON_ROW(row_repair, row_reason) \
-  [row_repair] = IREE_SVL(row_reason),
-
-static const iree_string_view_t kLoomAmdgpuFp8PackedF16RepairReasons
-    [LOOM_AMDGPU_FP8_PACKED_F16_REPAIR_REASON_COUNT] = {
-#include "loom/target/arch/amdgpu/lower/encoding/fp8_packed_repair_reason_rows.inl"
-};
-
-#undef LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_REASON_ROW
-#undef LOOM_AMDGPU_FP8_PACKED_F16_REPAIR_REASON_ROW
 
 static uint32_t loom_amdgpu_fp8_decode_packed_u16(uint32_t value) {
   return value | (value << 16);
@@ -108,63 +80,9 @@ loom_value_fact_numeric_format_flags_t loom_amdgpu_fp8_descriptor_source_format(
              : LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE;
 }
 
-typedef enum loom_amdgpu_fp8_scale_group_mode_e {
-  LOOM_AMDGPU_FP8_SCALE_GROUP_MODE_NONE = 0,
-  LOOM_AMDGPU_FP8_SCALE_GROUP_MODE_ALL_LANES,
-  LOOM_AMDGPU_FP8_SCALE_GROUP_MODE_OCTETS_MAX4,
-} loom_amdgpu_fp8_scale_group_mode_t;
-
-typedef struct loom_amdgpu_fp8_encoded_operand_schema_requirement_t {
-  // Required scale format for the direct decode route.
-  loom_value_fact_numeric_format_flags_t scale_format;
-  // Required scale topology for the direct decode route.
-  loom_value_fact_scale_topology_flags_t scale_topology;
-  // Required affine policy for the direct decode route.
-  loom_value_fact_affine_policy_flags_t affine_policy;
-  // Required scale operand count for the direct decode route.
-  uint32_t scale_operand_count;
-  // Shape rule for scale_group_element_count.
-  loom_amdgpu_fp8_scale_group_mode_t scale_group_mode;
-} loom_amdgpu_fp8_encoded_operand_schema_requirement_t;
-
-static const loom_amdgpu_fp8_encoded_operand_schema_requirement_t
-    kLoomAmdgpuFp8EncodedOperandSchemaRequirements[] = {
-#define LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_REQUIREMENT_ROW(    \
-    kind, row_scale_format, row_scale_topology, row_affine_policy, \
-    row_scale_operand_count, row_scale_group_mode)                 \
-  [kind] = {                                                       \
-      .scale_format = row_scale_format,                            \
-      .scale_topology = row_scale_topology,                        \
-      .affine_policy = row_affine_policy,                          \
-      .scale_operand_count = row_scale_operand_count,              \
-      .scale_group_mode = row_scale_group_mode,                    \
-  }
-#include "loom/target/arch/amdgpu/lower/encoding/fp8_encoded_operand_schema_requirement_rows.inl"
-#undef LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_REQUIREMENT_ROW
-};
-
 static_assert(IREE_ARRAYSIZE(kLoomAmdgpuFp8EncodedOperandSchemaRequirements) ==
                   LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_SCALE_E8M0 + 1,
               "FP8 encoded operand schema requirements cover dense kinds");
-
-typedef struct loom_amdgpu_fp8_encoded_operand_format_row_t {
-  // Scalar type owning this accepted format row.
-  loom_scalar_type_t element_type;
-  // Numeric formats accepted for encoded operand facts with this scalar type.
-  loom_value_fact_numeric_format_flags_t encoded_operand_formats;
-} loom_amdgpu_fp8_encoded_operand_format_row_t;
-
-static const loom_amdgpu_fp8_encoded_operand_format_row_t
-    kLoomAmdgpuFp8EncodedOperandFormatRows[LOOM_SCALAR_TYPE_COUNT_] = {
-#define LOOM_AMDGPU_FP8_ENCODED_OPERAND_FORMAT_ROW(           \
-    row_element_type, row_encoded_operand_formats)            \
-  [row_element_type] = {                                      \
-      .element_type = row_element_type,                       \
-      .encoded_operand_formats = row_encoded_operand_formats, \
-  }
-#include "loom/target/arch/amdgpu/lower/encoding/fp8_encoded_operand_format_rows.inl"
-#undef LOOM_AMDGPU_FP8_ENCODED_OPERAND_FORMAT_ROW
-};
 
 static bool loom_amdgpu_fp8_element_format_matches(
     loom_value_fact_numeric_format_flags_t element_format,

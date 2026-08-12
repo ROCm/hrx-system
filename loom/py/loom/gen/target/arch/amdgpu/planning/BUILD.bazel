@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_test")
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
 
 package(
     default_visibility = ["//loom/py/loom/gen:__subpackages__"],
@@ -17,13 +17,12 @@ GENERATOR_VISIBILITY = [
     "//loom/src/loom/target/arch/amdgpu:__subpackages__",
 ]
 
-iree_py_binary(
+iree_py_library(
     name = "occupancy_tables",
     srcs = [
         "__init__.py",
         "amdgpu_occupancy_tables.py",
     ],
-    main = "amdgpu_occupancy_tables.py",
     visibility = GENERATOR_VISIBILITY,
     deps = [
         "//loom/py/loom/gen/support",

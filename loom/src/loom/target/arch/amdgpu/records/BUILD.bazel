@@ -7,7 +7,6 @@
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
-    "loom_generated_textual_header",
 )
 
 package(
@@ -15,8 +14,6 @@ package(
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
 )
-
-_AMDGPU_TARGET_RECORDS_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/records:target_records"
 
 _AMDGPU_TARGET_RECORDS_VISIBILITY = [
     "//loom/binding/c/target/amdgpu:__pkg__",
@@ -31,17 +28,9 @@ _AMDGPU_TARGET_RECORDS_TABLES_VISIBILITY = _AMDGPU_TARGET_RECORDS_VISIBILITY + [
     "//loom/src/loom/target/arch/amdgpu/lower:__pkg__",
 ]
 
-loom_generated_textual_header(
-    name = "target_records_tables_gen",
-    generator = _AMDGPU_TARGET_RECORDS_GENERATOR,
-    output = "target_records_tables.inl",
-    output_flag = "--tables",
-    visibility = _AMDGPU_TARGET_RECORDS_VISIBILITY,
-)
-
 loom_cc_library(
     name = "target_records_tables",
-    textual_hdrs = [":target_records_tables.inl"],
+    textual_hdrs = ["//loom/src/loom/target/arch/amdgpu:target_records_tables.inl"],
     visibility = _AMDGPU_TARGET_RECORDS_TABLES_VISIBILITY,
 )
 

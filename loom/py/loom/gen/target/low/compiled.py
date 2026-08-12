@@ -69,6 +69,9 @@ class GeneratedDescriptorSetFamily:
 @dataclass(slots=True)
 class CompiledDescriptorSet:
     spec: DescriptorSet
+    # Selected, validated descriptors before compact runtime projections.
+    source_descriptors: list[Descriptor]
+    # Runtime projections paired positionally with `source_descriptors`.
     descriptors: list[Descriptor]
     instruction_classes: list[tuple[InstructionClass, ...]]
     reg_classes: list[RegClass]

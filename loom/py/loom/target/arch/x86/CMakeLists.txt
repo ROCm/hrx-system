@@ -11,22 +11,30 @@ iree_add_all_subdirs()
 
 iree_py_library(
   NAME
-    target_info
+    package_init
   SRCS
     "__init__.py"
-    "packed_dot_data.py"
-    "target_info.py"
   DEPS
     loom::py::loom::target::arch::package_init
 )
 
 iree_py_library(
   NAME
+    target_info
+  SRCS
+    "packed_dot_data.py"
+    "target_info.py"
+  DEPS
+    loom::py::loom::target::arch::x86::package_init
+)
+
+iree_py_library(
+  NAME
     dialect
   SRCS
-    "__init__.py"
     "dialect.py"
   DEPS
+    loom::py::loom::target::arch::x86::package_init
     loom::py::loom::core
     loom::py::loom::dialect::target::target
 )
@@ -35,7 +43,6 @@ iree_py_library(
   NAME
     descriptors
   SRCS
-    "__init__.py"
     "descriptors/__init__.py"
     "descriptors/avx2.py"
     "descriptors/avx512.py"
@@ -44,7 +51,6 @@ iree_py_library(
     "descriptors/packed_dot.py"
     "descriptors/scalar.py"
     "descriptors/simd128.py"
-    "packed_dot_data.py"
   DEPS
     loom::py::loom::target::arch::x86::target_info
     loom::py::loom::target::low_descriptors

@@ -70,6 +70,8 @@ from loom.target.test.descriptors import (
     TEST_LOW_CONST_I32_DESCRIPTOR,
     TEST_LOW_CORE_DESCRIPTOR_SET,
     TEST_LOW_MUL_I32_DESCRIPTOR,
+    TEST_LOW_STATE_ADD_I32_DESCRIPTOR,
+    TEST_LOW_STATE_ADD_I32_RHS_ZERO_DESCRIPTOR,
     TEST_LOW_STATE_ADD_SCHEDULE_STATE_DESCRIPTOR,
     TEST_LOW_WRITE_HIGH16_I32_DESCRIPTOR,
     TEST_LOW_WRITE_LOW16_I32_DESCRIPTOR,
@@ -1067,6 +1069,50 @@ def test_descriptor_set_view_selects_shared_schedule_class() -> None:
     assert compiled_view.instruction_classes == ((InstructionClass.VECTOR_ALU,),)
 
 
+def test_descriptor_set_view_reuses_schedule_independent_storage_tables() -> None:
+    vector_schedule = TEST_LOW_CORE_DESCRIPTOR_SET.schedule_classes[2]
+    storage_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(
+            TEST_LOW_STATE_ADD_I32_DESCRIPTOR,
+            TEST_LOW_STATE_ADD_I32_RHS_ZERO_DESCRIPTOR,
+        ),
+    )
+    view = replace(
+        storage_set,
+        key="test.low.schedule_view.core",
+        function_name="loom_test_low_schedule_view_core_descriptor_set",
+        c_table_prefix="TestLowScheduleViewCore",
+        c_enum_prefix="TEST_LOW_SCHEDULE_VIEW_CORE",
+        descriptors=(
+            replace(
+                TEST_LOW_STATE_ADD_I32_DESCRIPTOR,
+                schedule_class=vector_schedule.name,
+            ),
+            TEST_LOW_STATE_ADD_I32_RHS_ZERO_DESCRIPTOR,
+        ),
+    )
+    compiled = compiler.compile_descriptor_set(
+        storage_set,
+        required_schedule_class_names=(vector_schedule.name,),
+    )
+
+    compiled_view = views.descriptor_set_view_for_spec(compiled, view)
+
+    assert not compiled_view.uses_storage_descriptor_tables
+    assert compiled_view.uses_storage_asm_form_tables
+    assert compiled_view.uses_storage_operand_form_tables
+    assert compiled_view.asm_forms is compiled.asm_forms
+    assert compiled_view.operand_forms is compiled.operand_forms
+
+    source = generate_descriptor_set_family(storage_set, (view,)).source
+    assert "kTestLowScheduleViewCoreDescriptors" in source
+    assert "kTestLowScheduleViewCoreAsmForms" not in source
+    assert "kTestLowScheduleViewCoreOperandForms" not in source
+    assert ".asm_forms = kTestLowCoreAsmForms," in source
+    assert ".operand_forms = kTestLowCoreOperandForms," in source
+
+
 def test_descriptor_set_view_rejects_local_schedule_definition() -> None:
     vector_schedule = TEST_LOW_CORE_DESCRIPTOR_SET.schedule_classes[2]
     vector_multiply = replace(
@@ -1173,6 +1219,30 @@ def test_descriptor_set_family_compares_derived_descriptor_projections() -> None
     ).source
 
     assert ".flags = LOOM_LOW_OPERAND_FLAG_EARLY_CLOBBER," in source
+
+
+def test_descriptor_set_family_rejects_view_descriptor_contract_drift() -> None:
+    view_descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        semantic_tag="test.changed.add.i32",
+    )
+    view = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        key="test.low.view.core",
+        descriptors=(view_descriptor,),
+    )
+    storage_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(TEST_LOW_ADD_I32_DESCRIPTOR,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape(
+            "descriptor set view 'test.low.view.core' descriptor 'test.add.i32' differs from storage descriptor 'test.add.i32' outside of asm forms, asm surface policy, or schedule class"
+        ),
+    ):
+        generate_descriptor_set_family(storage_set, (view,))
 
 
 def test_descriptor_set_family_requires_view_canonical_asm_for_authorable_surface() -> None:

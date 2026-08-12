@@ -26,9 +26,15 @@ def _ensure_runtime_py_on_path() -> None:
 
 _ensure_runtime_py_on_path()
 
+from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
+from loom.gen.target.arch.amdgpu.amdgpu_target_table_family import (  # noqa: E402
+    AmdgpuTargetTableFamily,
+    amdgpu_target_table_family,
+    amdgpu_target_table_instruction_names_by_isa_key,
+)
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
-    build_amdgpu_core_descriptor_set_from_specs,
+    build_amdgpu_core_descriptor_sets_from_specs,
 )
 from loom.target.arch.amdgpu.encoding import (  # noqa: E402
     AMDGPU_ENCODING_FIELD_IDS,
@@ -48,16 +54,14 @@ from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
     AmdgpuIsaFactSource,
     AmdgpuIsaInstruction,
     AmdgpuIsaOperandType,
+    AmdgpuIsaPartitionedOperandUse,
     compose_amdgpu_isa_partitioned_field,
-    parse_amdgpu_isa_xml_path,
+    parse_amdgpu_isa_xml_paths_for_instructions,
 )
 from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AmdgpuDescriptorSetInfo,
     AmdgpuDescriptorSetIsaInfo,
-    amdgpu_descriptor_set_info_by_generator_target,
     amdgpu_descriptor_set_ordinal,
-    amdgpu_descriptor_set_storage_info_by_generator_target,
-    amdgpu_descriptor_set_view_infos_by_storage_generator_target,
 )
 from loom.target.low_descriptors import Descriptor, DescriptorSet  # noqa: E402
 
@@ -282,18 +286,18 @@ class _EncodingContract:
     v_mov_b32_opcode: int
 
 
-def _parse_isa_xml_arguments(
+def _parse_isa_xml_paths(
     values: Sequence[str],
-) -> dict[str, AmdgpuIsaFactSource]:
-    specs: dict[str, AmdgpuIsaFactSource] = {}
+) -> dict[str, Path]:
+    paths: dict[str, Path] = {}
     for value in values:
         key, separator, path = value.partition(":")
         if not separator or not key or not path:
             raise ValueError("AMDGPU encoding --isa-xml entries must be key:path pairs")
-        if key in specs:
+        if key in paths:
             raise ValueError(f"AMDGPU encoding ISA XML key '{key}' is duplicate")
-        specs[key] = parse_amdgpu_isa_xml_path(Path(path))
-    return specs
+        paths[key] = Path(path)
+    return paths
 
 
 def _parse_view_headers(values: Sequence[str]) -> dict[str, Path]:
@@ -326,17 +330,15 @@ def _encoding_table_view_for_info(
     )
 
 
-def _view_infos_for_storage_target(
-    storage_info: AmdgpuDescriptorSetInfo,
-    view_headers: dict[str, Path],
-) -> tuple[AmdgpuDescriptorSetInfo, ...]:
-    view_infos = amdgpu_descriptor_set_view_infos_by_storage_generator_target(storage_info.generator_target)
-    expected_view_targets = {info.generator_target for info in view_infos}
+def _validate_view_headers(
+    family: AmdgpuTargetTableFamily,
+    view_headers: Mapping[str, Path],
+) -> None:
+    expected_view_targets = {info.generator_target for info in family.view_infos}
     unknown_view_headers = set(view_headers) - expected_view_targets
     if unknown_view_headers:
         unknown_targets = ", ".join(sorted(unknown_view_headers))
-        raise ValueError(f"AMDGPU encoding target {storage_info.generator_target} cannot emit view headers for: {unknown_targets}")
-    return view_infos
+        raise ValueError(f"AMDGPU encoding target {family.storage_info.generator_target} cannot emit view headers for: {unknown_targets}")
 
 
 def _c_identifier(value: str) -> str:
@@ -445,43 +447,39 @@ def _add_encoding_field(
 
 def _partitioned_fields_by_encoding(
     encodings: tuple[AmdgpuIsaEncoding, ...],
-    instructions: tuple[AmdgpuIsaInstruction, ...],
+    partitioned_operand_uses: tuple[AmdgpuIsaPartitionedOperandUse, ...],
     operand_types: tuple[AmdgpuIsaOperandType, ...],
 ) -> dict[str, tuple[AmdgpuIsaEncodingField, ...]]:
     encodings_by_name = {encoding.name: encoding for encoding in encodings}
     operand_types_by_name = {operand_type.name: operand_type for operand_type in operand_types}
     fields_by_encoding: dict[str, dict[str, AmdgpuIsaEncodingField]] = {encoding.name: {} for encoding in encodings}
     ambiguous_fields_by_encoding: dict[str, set[str]] = {encoding.name: set() for encoding in encodings}
-    for instruction in instructions:
-        for instruction_encoding in instruction.encodings:
-            encoding = encodings_by_name.get(instruction_encoding.encoding_name)
-            if encoding is None:
-                raise ValueError(f"AMDGPU instruction '{instruction.name}' references missing encoding '{instruction_encoding.encoding_name}'")
-            base_fields = _encoding_fields_by_name(encoding)
-            for operand in instruction_encoding.operands:
-                if not operand.is_binary_microcode_required:
-                    continue
-                operand_type = operand_types_by_name.get(operand.operand_type)
-                if operand_type is None:
-                    raise ValueError(f"AMDGPU instruction '{instruction.name}' references missing operand type '{operand.operand_type}'")
-                if not operand_type.is_partitioned:
-                    continue
-                if operand.field_name is None:
-                    raise ValueError(f"AMDGPU instruction '{instruction.name}' encoding '{instruction_encoding.encoding_name}' has partitioned binary microcode operand without a field name")
-                base_field = base_fields.get(operand.field_name)
-                if base_field is None:
-                    raise ValueError(f"AMDGPU instruction '{instruction.name}' binary microcode operand '{operand.field_name}' is not a field in encoding '{encoding.name}'")
-                for operand_field in operand_type.fields:
-                    if operand_field.name in base_fields:
-                        continue
-                    composed_field = compose_amdgpu_isa_partitioned_field(base_field, operand_field)
-                    if composed_field is None:
-                        continue
-                    _add_encoding_field(
-                        fields_by_encoding[encoding.name],
-                        ambiguous_fields_by_encoding[encoding.name],
-                        composed_field,
-                    )
+    for use in partitioned_operand_uses:
+        encoding = encodings_by_name.get(use.encoding_name)
+        if encoding is None:
+            raise ValueError(f"AMDGPU instruction '{use.instruction_name}' references missing encoding '{use.encoding_name}'")
+        operand_type = operand_types_by_name.get(use.operand_type)
+        if operand_type is None:
+            raise ValueError(f"AMDGPU instruction '{use.instruction_name}' references missing operand type '{use.operand_type}'")
+        if not operand_type.is_partitioned:
+            raise ValueError(f"AMDGPU instruction '{use.instruction_name}' references non-partitioned operand type '{use.operand_type}' as partitioned")
+        if use.field_name is None:
+            raise ValueError(f"AMDGPU instruction '{use.instruction_name}' encoding '{use.encoding_name}' has partitioned binary microcode operand without a field name")
+        base_fields = _encoding_fields_by_name(encoding)
+        base_field = base_fields.get(use.field_name)
+        if base_field is None:
+            raise ValueError(f"AMDGPU instruction '{use.instruction_name}' binary microcode operand '{use.field_name}' is not a field in encoding '{encoding.name}'")
+        for operand_field in operand_type.fields:
+            if operand_field.name in base_fields:
+                continue
+            composed_field = compose_amdgpu_isa_partitioned_field(base_field, operand_field)
+            if composed_field is None:
+                continue
+            _add_encoding_field(
+                fields_by_encoding[encoding.name],
+                ambiguous_fields_by_encoding[encoding.name],
+                composed_field,
+            )
     return {encoding_name: tuple(sorted(fields.values(), key=lambda field: field.name)) for encoding_name, fields in fields_by_encoding.items() if fields}
 
 
@@ -616,7 +614,7 @@ def _compile_encoding_contract(
         encodings,
         _partitioned_fields_by_encoding(
             encodings,
-            spec.instructions,
+            spec.partitioned_operand_uses,
             spec.operand_types,
         ),
     )
@@ -858,6 +856,7 @@ def _emit_source(
     table_function: str,
     table_views: tuple[_EncodingTableView, ...] = (),
     encodings: tuple[AmdgpuIsaEncoding, ...],
+    partitioned_operand_uses: tuple[AmdgpuIsaPartitionedOperandUse, ...],
     instructions: tuple[AmdgpuIsaInstruction, ...],
     operand_types: tuple[AmdgpuIsaOperandType, ...],
     source_literal: int,
@@ -872,7 +871,11 @@ def _emit_source(
     encodings = _with_vop3_unused_source_defaults(encodings, vop3_unused_source_value)
     compiled_formats, compiled_fields, compiled_ranges = _compile_formats(
         encodings,
-        _partitioned_fields_by_encoding(encodings, instructions, operand_types),
+        _partitioned_fields_by_encoding(
+            encodings,
+            partitioned_operand_uses,
+            operand_types,
+        ),
     )
     maximum_format_field_count = max(
         (compiled_format.field_count for compiled_format in compiled_formats),
@@ -925,9 +928,9 @@ def _emit_source(
                 "",
             ]
         )
+    lines.append(f"const loom_amdgpu_encoding_table_t* {table_function}(void);")
     lines.extend(f"const loom_amdgpu_encoding_table_t* {table_view.table_function}(void);" for table_view in table_views if table_view.table_function != table_function)
-    if len(table_views) > 1:
-        lines.append("")
+    lines.append("")
     lines.append(f"static const loom_amdgpu_encoding_bit_range_t k{table_prefix}BitRanges[] = {{")
     for bit_range, source_bit_offset in compiled_ranges:
         lines.extend(
@@ -1046,6 +1049,81 @@ def _emit_source(
     return "\n".join(lines) + "\n"
 
 
+def generate_amdgpu_encoding_table_source(
+    family: AmdgpuTargetTableFamily,
+    isa_specs: Mapping[str, AmdgpuIsaFactSource],
+    descriptor_sets: Mapping[str, DescriptorSet],
+    *,
+    public_header: str,
+) -> str:
+    """Generates one encoding-table family from a materialized corpus."""
+
+    storage_info = family.storage_info
+    target = storage_info.generator_target
+    if len(storage_info.isa_infos) != 1:
+        raise ValueError(f"AMDGPU encoding storage target '{target}' must have one ISA member")
+    storage_isa_info = storage_info.isa_infos[0]
+    try:
+        spec = isa_specs[storage_isa_info.isa_xml_key]
+    except KeyError as exc:
+        raise ValueError(f"AMDGPU encoding target '{target}' is missing ISA XML key '{storage_isa_info.isa_xml_key}'") from exc
+    if spec.architecture_name != storage_isa_info.isa_architecture_name or spec.architecture_id != storage_isa_info.isa_architecture_id:
+        raise ValueError(f"{spec.source_name}: AMDGPU encoding target '{target}' expects {storage_isa_info.isa_architecture_name} architecture id {storage_isa_info.isa_architecture_id}")
+
+    storage_descriptor_set = descriptor_sets[target]
+    vop3_unused_source_value = _vop3_unused_source_value(spec, storage_isa_info)
+    storage_contract = _compile_encoding_contract(
+        target,
+        spec,
+        storage_descriptor_set,
+        vop3_unused_source_value,
+    )
+    for view_info in family.view_infos:
+        _validate_view_encoding_contract(
+            target,
+            spec,
+            storage_contract,
+            view_info,
+            descriptor_sets[view_info.generator_target],
+            isa_specs,
+        )
+
+    if storage_contract.scalar_source_literal != storage_contract.source_literal:
+        raise ValueError(f"{spec.source_name}: OPR_SRC and OPR_SSRC disagree on SRC_LITERAL")
+    vector_source_vgpr0, vector_source_vgpr_count = storage_contract.vector_source_vgprs
+    if target == "rdna4_gfx125x" and vector_source_vgpr_count != AMDGPU_GFX125X_VGPR_MSB_WINDOW_SIZE:
+        raise ValueError(f"{spec.source_name}: OPR_SRC exposes {vector_source_vgpr_count} VGPRs; gfx125x S_SET_VGPR_MSB expects {AMDGPU_GFX125X_VGPR_MSB_WINDOW_SIZE}")
+
+    table_prefix = _table_prefix_for_target(target)
+    table_function = _table_function_for_target(target)
+    table_views: tuple[_EncodingTableView, ...] = ()
+    if family.view_infos:
+        table_views = (
+            _encoding_table_view_for_info(storage_info),
+            *(_encoding_table_view_for_info(view_info) for view_info in family.view_infos),
+        )
+    scalar_inline_u32_zero, scalar_inline_u32_count = storage_contract.scalar_inline_u32
+    return _emit_source(
+        target=target,
+        descriptor_set_key=storage_info.key,
+        public_header=public_header,
+        table_prefix=table_prefix,
+        table_function=table_function,
+        table_views=table_views,
+        encodings=spec.encodings,
+        partitioned_operand_uses=spec.partitioned_operand_uses,
+        instructions=spec.instructions,
+        operand_types=spec.operand_types,
+        source_literal=storage_contract.source_literal,
+        scalar_inline_u32_zero=scalar_inline_u32_zero,
+        scalar_inline_u32_count=scalar_inline_u32_count,
+        inline_f32_sources=storage_contract.inline_f32_sources,
+        vector_source_vgpr0=vector_source_vgpr0,
+        vector_source_vgpr_count=vector_source_vgpr_count,
+        vop3_unused_source_value=vop3_unused_source_value,
+    )
+
+
 def _parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target", required=True)
@@ -1071,119 +1149,40 @@ def _parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_arguments(argv)
     view_headers = _parse_view_headers(args.view_header)
-    descriptor_set_info = amdgpu_descriptor_set_info_by_generator_target(args.target)
-    if descriptor_set_info.key != args.descriptor_set_key:
-        raise ValueError(f"AMDGPU encoding target {args.target} expects descriptor set '{descriptor_set_info.key}', found '{args.descriptor_set_key}'")
-    storage_info = amdgpu_descriptor_set_storage_info_by_generator_target(args.target)
-    if storage_info != descriptor_set_info:
-        raise ValueError(f"AMDGPU encoding target {args.target} is a view of storage target {storage_info.generator_target}; generate the storage target with --view-header instead")
-    view_infos = _view_infos_for_storage_target(descriptor_set_info, view_headers)
-    isa_specs = _parse_isa_xml_arguments(args.isa_xml)
-    if len(descriptor_set_info.isa_infos) != 1:
-        raise ValueError(f"AMDGPU encoding storage target '{args.target}' must have one ISA member")
-    storage_isa_info = descriptor_set_info.isa_infos[0]
-    try:
-        spec = isa_specs[storage_isa_info.isa_xml_key]
-    except KeyError as exc:
-        raise ValueError(f"AMDGPU encoding target '{args.target}' is missing ISA XML key '{storage_isa_info.isa_xml_key}'") from exc
-    if spec.architecture_name != storage_isa_info.isa_architecture_name or spec.architecture_id != storage_isa_info.isa_architecture_id:
-        raise ValueError(f"{spec.source_name}: AMDGPU encoding target '{args.target}' expects {storage_isa_info.isa_architecture_name} architecture id {storage_isa_info.isa_architecture_id}")
-    storage_descriptor_set = build_amdgpu_core_descriptor_set_from_specs(
-        args.target,
-        isa_specs,
+    family = amdgpu_target_table_family(args.target)
+    if family.storage_info.key != args.descriptor_set_key:
+        raise ValueError(f"AMDGPU encoding target {args.target} expects descriptor set '{family.storage_info.key}', found '{args.descriptor_set_key}'")
+    _validate_view_headers(family, view_headers)
+    isa_specs = parse_amdgpu_isa_xml_paths_for_instructions(
+        _parse_isa_xml_paths(args.isa_xml),
+        amdgpu_target_table_instruction_names_by_isa_key(family),
     )
-    vop3_unused_source_value = _vop3_unused_source_value(spec, storage_isa_info)
-    storage_contract = _compile_encoding_contract(
-        args.target,
-        spec,
-        storage_descriptor_set,
-        vop3_unused_source_value,
-    )
-    for view_info in view_infos:
-        view_descriptor_set = build_amdgpu_core_descriptor_set_from_specs(
-            view_info.generator_target,
-            isa_specs,
-        )
-        _validate_view_encoding_contract(
-            args.target,
-            spec,
-            storage_contract,
-            view_info,
-            view_descriptor_set,
-            isa_specs,
-        )
-    source_literal = spec.operand_predefined_value("OPR_SRC", "SRC_LITERAL")
-    scalar_source_literal = spec.operand_predefined_value("OPR_SSRC", "SRC_LITERAL")
-    if scalar_source_literal != source_literal:
-        raise ValueError(f"{spec.source_name}: OPR_SRC and OPR_SSRC disagree on SRC_LITERAL")
-    scalar_inline_u32_zero, scalar_inline_u32_count = _derive_predefined_linear_range(
-        spec,
-        operand_type_name="OPR_SSRC",
-        base_name="0",
-        name_pattern=re.compile(r"([0-9]+)"),
-        description="OPR_SSRC inline integer",
-    )
-    inline_f32_sources = _derive_predefined_f32_sources(
-        spec,
-        operand_type_name="OPR_SRC",
-    )
-    vector_source_vgpr0, vector_source_vgpr_count = _derive_predefined_linear_range(
-        spec,
-        operand_type_name="OPR_SRC",
-        base_name="v0",
-        name_pattern=re.compile(r"v([0-9]+)"),
-        description="OPR_SRC VGPR",
-    )
-    if args.target == "rdna4_gfx125x" and vector_source_vgpr_count != AMDGPU_GFX125X_VGPR_MSB_WINDOW_SIZE:
-        raise ValueError(f"{spec.source_name}: OPR_SRC exposes {vector_source_vgpr_count} VGPRs; gfx125x S_SET_VGPR_MSB expects {AMDGPU_GFX125X_VGPR_MSB_WINDOW_SIZE}")
-    table_prefix = _table_prefix_for_target(args.target)
-    table_function = _table_function_for_target(args.target)
-    args.header.parent.mkdir(parents=True, exist_ok=True)
-    args.source.parent.mkdir(parents=True, exist_ok=True)
-    args.header.write_text(
+    descriptor_sets = build_amdgpu_core_descriptor_sets_from_specs(family.generator_targets, isa_specs)
+    write_text_file(
+        args.header,
         _emit_header_for_target(
             target=args.target,
         ),
-        encoding="utf-8",
     )
-    for view_info in view_infos:
+    for view_info in family.view_infos:
         view_header_path = view_headers.get(view_info.generator_target)
         if view_header_path is None:
             continue
-        view_header_path.parent.mkdir(parents=True, exist_ok=True)
-        view_header_path.write_text(
+        write_text_file(
+            view_header_path,
             _emit_header_for_target(
                 target=view_info.generator_target,
             ),
-            encoding="utf-8",
         )
 
-    table_views: tuple[_EncodingTableView, ...] = ()
-    if view_infos:
-        table_views = (
-            _encoding_table_view_for_info(descriptor_set_info),
-            *(_encoding_table_view_for_info(view_info) for view_info in view_infos),
-        )
-    args.source.write_text(
-        _emit_source(
-            target=args.target,
-            descriptor_set_key=args.descriptor_set_key,
+    write_text_file(
+        args.source,
+        generate_amdgpu_encoding_table_source(
+            family,
+            isa_specs,
+            descriptor_sets,
             public_header=args.public_header,
-            table_prefix=table_prefix,
-            table_function=table_function,
-            table_views=table_views,
-            encodings=spec.encodings,
-            instructions=spec.instructions,
-            operand_types=spec.operand_types,
-            source_literal=source_literal,
-            scalar_inline_u32_zero=scalar_inline_u32_zero,
-            scalar_inline_u32_count=scalar_inline_u32_count,
-            inline_f32_sources=inline_f32_sources,
-            vector_source_vgpr0=vector_source_vgpr0,
-            vector_source_vgpr_count=vector_source_vgpr_count,
-            vop3_unused_source_value=vop3_unused_source_value,
         ),
-        encoding="utf-8",
     )
     return 0
 

@@ -34,6 +34,35 @@ def test_lane_xor1_column_property_accounts_for_payload_padding() -> None:
     assert not role_has_contiguous_lane_xor1_columns(f16_layout, f16_layout.result)
 
 
+def test_lane_xor1_column_property_requires_column_lane_factor() -> None:
+    layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY["rdna3_wmmar3_f32_16x16x16_f16"]
+    row_paired_role = replace(
+        layout.result,
+        axes=(
+            None,
+            MatrixFragmentAxisLayout(1, 16, 1, 1),
+            MatrixFragmentAxisLayout(8, 2, 16, 1),
+            None,
+        ),
+    )
+    row_paired_layout = replace(layout, result=row_paired_role)
+    validate_matrix_fragment_layout(row_paired_layout)
+
+    assert role_coordinate(row_paired_layout, row_paired_role, 0, 0) == (
+        None,
+        0,
+        0,
+        None,
+    )
+    assert role_coordinate(row_paired_layout, row_paired_role, 1, 0) == (
+        None,
+        1,
+        0,
+        None,
+    )
+    assert not role_has_contiguous_lane_xor1_columns(row_paired_layout, row_paired_role)
+
+
 @pytest.mark.parametrize(
     "layout_key",
     [

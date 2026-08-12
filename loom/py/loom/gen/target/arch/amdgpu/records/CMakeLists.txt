@@ -12,8 +12,6 @@ iree_add_all_subdirs()
 iree_py_library(
   NAME
     target_records
-  MAIN
-    "amdgpu_target_records.py"
   SRCS
     "__init__.py"
     "amdgpu_target_records.py"

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -24,23 +24,23 @@ def _ensure_runtime_py_on_path() -> None:
 
 _ensure_runtime_py_on_path()
 
+from loom.gen.support.files import write_text_file  # noqa: E402
+from loom.gen.target.arch.amdgpu.amdgpu_target_table_family import (  # noqa: E402
+    AmdgpuTargetTableFamily,
+    amdgpu_target_table_family,
+)
+from loom.gen.target.low.compiled import GeneratedDescriptorSetFamily  # noqa: E402
 from loom.gen.target.low.low_descriptors import (  # noqa: E402
     generate_descriptor_set_family,
     write_descriptor_set_to_paths,
 )
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS,
-    build_amdgpu_core_descriptor_set_from_specs,
+    amdgpu_core_descriptor_set_instruction_names_by_isa_key,
+    build_amdgpu_core_descriptor_sets_from_specs,
 )
 from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
-    AmdgpuIsaFactSource,
-    parse_amdgpu_isa_xml_path,
-)
-from loom.target.arch.amdgpu.target_info import (  # noqa: E402
-    AmdgpuDescriptorSetInfo,
-    amdgpu_descriptor_set_info_by_generator_target,
-    amdgpu_descriptor_set_storage_info_by_generator_target,
-    amdgpu_descriptor_set_view_infos_by_storage_generator_target,
+    parse_amdgpu_isa_xml_paths_for_instructions,
 )
 from loom.target.low_descriptors import DescriptorSet  # noqa: E402
 
@@ -57,31 +57,29 @@ def _parse_view_headers(values: Sequence[str]) -> dict[str, Path]:
     return view_headers
 
 
-def _parse_isa_xml_arguments(
+def _parse_isa_xml_paths(
     values: Sequence[str],
-) -> dict[str, AmdgpuIsaFactSource]:
-    specs: dict[str, AmdgpuIsaFactSource] = {}
+) -> dict[str, Path]:
+    paths: dict[str, Path] = {}
     for value in values:
         key, separator, path = value.partition(":")
         if not separator or not key or not path:
             raise ValueError("AMDGPU descriptor --isa-xml entries must be key:path pairs")
-        if key in specs:
+        if key in paths:
             raise ValueError(f"AMDGPU descriptor ISA XML key '{key}' is duplicate")
-        specs[key] = parse_amdgpu_isa_xml_path(Path(path))
-    return specs
+        paths[key] = Path(path)
+    return paths
 
 
-def _view_infos_for_storage_target(
-    storage_info: AmdgpuDescriptorSetInfo,
-    view_headers: dict[str, Path],
-) -> tuple[AmdgpuDescriptorSetInfo, ...]:
-    view_infos = amdgpu_descriptor_set_view_infos_by_storage_generator_target(storage_info.generator_target)
-    expected_view_targets = {info.generator_target for info in view_infos}
+def _validate_view_headers(
+    family: AmdgpuTargetTableFamily,
+    view_headers: Mapping[str, Path],
+) -> None:
+    expected_view_targets = {info.generator_target for info in family.view_infos}
     unknown_view_headers = set(view_headers) - expected_view_targets
     if unknown_view_headers:
         unknown_targets = ", ".join(sorted(unknown_view_headers))
-        raise ValueError(f"AMDGPU descriptor target {storage_info.generator_target} cannot emit view headers for: {unknown_targets}")
-    return view_infos
+        raise ValueError(f"AMDGPU descriptor target {family.storage_info.generator_target} cannot emit view headers for: {unknown_targets}")
 
 
 def _shared_storage_descriptor_set(
@@ -101,6 +99,29 @@ def _shared_storage_descriptor_set(
         descriptors=backing_descriptor_set.descriptors,
         resources=backing_descriptor_set.resources,
         schedule_classes=backing_descriptor_set.schedule_classes,
+    )
+
+
+def generate_amdgpu_descriptor_table_family(
+    family: AmdgpuTargetTableFamily,
+    descriptor_sets: Mapping[str, DescriptorSet],
+    *,
+    source_public_header: str,
+) -> GeneratedDescriptorSetFamily:
+    """Generates descriptor storage and views from a materialized corpus."""
+
+    storage_descriptor_set = descriptor_sets[family.storage_info.generator_target]
+    view_descriptor_sets = tuple(descriptor_sets[info.generator_target] for info in family.view_infos)
+    shared_storage_descriptor_set = replace(
+        _shared_storage_descriptor_set(
+            storage_descriptor_set,
+            view_descriptor_sets,
+        ),
+        public_header=source_public_header,
+    )
+    return generate_descriptor_set_family(
+        shared_storage_descriptor_set,
+        (storage_descriptor_set, *view_descriptor_sets),
     )
 
 
@@ -139,40 +160,34 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     view_headers = _parse_view_headers(args.view_header)
-    descriptor_set_info = amdgpu_descriptor_set_info_by_generator_target(args.target)
-    storage_info = amdgpu_descriptor_set_storage_info_by_generator_target(args.target)
-    if storage_info != descriptor_set_info:
-        raise ValueError(f"AMDGPU descriptor target {args.target} is a view of storage target {storage_info.generator_target}; generate the storage target with --view-header instead")
-    view_infos = _view_infos_for_storage_target(descriptor_set_info, view_headers)
-    isa_specs = _parse_isa_xml_arguments(args.isa_xml)
-    descriptor_set = build_amdgpu_core_descriptor_set_from_specs(args.target, isa_specs)
-    if view_infos:
-        view_descriptor_sets = tuple(build_amdgpu_core_descriptor_set_from_specs(info.generator_target, isa_specs) for info in view_infos)
-        storage_descriptor_set = _shared_storage_descriptor_set(
-            descriptor_set,
-            view_descriptor_sets,
+    family = amdgpu_target_table_family(args.target)
+    _validate_view_headers(family, view_headers)
+    isa_specs = parse_amdgpu_isa_xml_paths_for_instructions(
+        _parse_isa_xml_paths(args.isa_xml),
+        amdgpu_core_descriptor_set_instruction_names_by_isa_key(family.descriptor_set_infos),
+    )
+    descriptor_sets = build_amdgpu_core_descriptor_sets_from_specs(
+        family.generator_targets,
+        isa_specs,
+    )
+    descriptor_set = descriptor_sets[family.storage_info.generator_target]
+    if family.view_infos:
+        generated = generate_amdgpu_descriptor_table_family(
+            family,
+            descriptor_sets,
+            source_public_header=descriptor_set.public_header,
         )
-        generated = generate_descriptor_set_family(
-            storage_descriptor_set,
-            (descriptor_set, *view_descriptor_sets),
-        )
-        args.header.parent.mkdir(parents=True, exist_ok=True)
-        args.source.parent.mkdir(parents=True, exist_ok=True)
-        args.header.write_text(generated.view_headers[0], encoding="utf-8")
-        args.source.write_text(generated.source, encoding="utf-8")
+        write_text_file(args.header, generated.view_headers[0])
+        write_text_file(args.source, generated.source)
         for view_info, view_header in zip(
-            view_infos,
+            family.view_infos,
             generated.view_headers[1:],
             strict=True,
         ):
             view_header_path = view_headers.get(view_info.generator_target)
             if view_header_path is None:
                 continue
-            view_header_path.parent.mkdir(parents=True, exist_ok=True)
-            view_header_path.write_text(
-                view_header,
-                encoding="utf-8",
-            )
+            write_text_file(view_header_path, view_header)
         return 0
 
     write_descriptor_set_to_paths(

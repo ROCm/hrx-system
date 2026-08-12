@@ -576,67 +576,6 @@ def test_requires_alu_wait_packet_for_depctr_processors() -> None:
         )
 
 
-def test_generated_fragments_are_data_only() -> None:
-    tables = amdgpu_wait_packet_tables._WaitPacketTables(
-        descriptor_rows=(
-            amdgpu_wait_packet_tables._WaitPacketDescriptorRow(
-                descriptor_set_key="amdgpu.test.core",
-                descriptor_set_ordinal=0,
-                descriptor_key="amdgpu.s_waitcnt",
-                descriptor_ref="LOOM_AMDGPU_DESCRIPTOR_REF_S_WAITCNT",
-                counter_mask=amdgpu_wait_packet_tables._counter_mask(_COUNTER_VMEM_LOAD),
-                counter_count=1,
-                immediate_start=0,
-                immediate_count=1,
-            ),
-        ),
-        immediate_rows=(
-            amdgpu_wait_packet_tables._WaitPacketImmediateRow(
-                descriptor_key="amdgpu.s_waitcnt",
-                descriptor_immediate_index=0,
-                field_name="vmcnt",
-                counter_mask=amdgpu_wait_packet_tables._counter_mask(_COUNTER_VMEM_LOAD),
-                no_wait_value=63,
-            ),
-        ),
-        range_rows=(
-            amdgpu_wait_packet_tables._WaitPacketDescriptorRange(
-                descriptor_set_key="amdgpu.test.core",
-                descriptor_set_ordinal=0,
-                first_descriptor=0,
-                descriptor_count=1,
-                first_descriptor_lookup=0,
-                descriptor_lookup_count=1,
-                max_descriptor_immediate_count=1,
-            ),
-        ),
-        descriptor_lookup_rows=(1,),
-        selection_rows=(
-            amdgpu_wait_packet_tables._WaitPacketSelectionRow(
-                descriptor_set_key="amdgpu.test.core",
-                descriptor_set_ordinal=0,
-                counter_mask=amdgpu_wait_packet_tables._counter_mask(_COUNTER_VMEM_LOAD),
-                descriptor_index=0,
-                covered_counter_mask=amdgpu_wait_packet_tables._counter_mask(_COUNTER_VMEM_LOAD),
-            ),
-        ),
-    )
-
-    fragments = (
-        amdgpu_wait_packet_tables._emit_descriptor_rows(tables),
-        amdgpu_wait_packet_tables._emit_immediate_rows(tables),
-        amdgpu_wait_packet_tables._emit_range_rows(tables),
-        amdgpu_wait_packet_tables._emit_descriptor_lookup_rows(tables),
-        amdgpu_wait_packet_tables._emit_selection_rows(tables),
-    )
-
-    for fragment in fragments:
-        assert "typedef" not in fragment
-        assert "#include" not in fragment
-        assert "if (" not in fragment
-        assert "return " not in fragment
-
-
 def test_rejects_descriptor_row_with_out_of_bounds_immediates() -> None:
     tables = amdgpu_wait_packet_tables._WaitPacketTables(
         descriptor_rows=(

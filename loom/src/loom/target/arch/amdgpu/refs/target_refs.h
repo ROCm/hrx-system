@@ -12,7 +12,7 @@
 #include <stdint.h>
 
 #include "loom/codegen/low/descriptors.h"
-#include "loom/target/arch/amdgpu/refs/target_refs_tables.h"
+#include "loom/target/arch/amdgpu/descriptors/target_refs_tables.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -25,6 +25,7 @@ def _ensure_runtime_py_on_path() -> None:
 
 _ensure_runtime_py_on_path()
 
+from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
 from loom.target.arch.amdgpu.descriptor_overlay import (  # noqa: E402
     AmdgpuDescriptorOverlay,
@@ -1150,15 +1151,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    args.header.parent.mkdir(parents=True, exist_ok=True)
-    args.source.parent.mkdir(parents=True, exist_ok=True)
-    args.header.write_text(
-        _emit_header(),
-        encoding="utf-8",
-    )
-    args.source.write_text(
+    write_text_file(args.header, _emit_header())
+    write_text_file(
+        args.source,
         _emit_source(public_header=args.public_header),
-        encoding="utf-8",
     )
     return 0
 

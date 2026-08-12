@@ -20,6 +20,10 @@ from loom.target.arch.amdgpu.encoding import (
     AMDGPU_ENCODING_FORMAT_SOP2_LITERAL,
     AMDGPU_ENCODING_FORMAT_VOP1_SDWA,
 )
+from loom.target.arch.amdgpu.target_info import (
+    amdgpu_descriptor_set_ordinal,
+    sorted_descriptor_set_infos,
+)
 from loom.target.low_descriptors import (
     AsmForm,
     Descriptor,
@@ -254,6 +258,23 @@ def test_target_refs_header_is_constant_fragment() -> None:
     assert "loom/codegen/low/descriptors.h" not in source
     assert "#define LOOM_AMDGPU_DESCRIPTOR_REF_COUNT" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32" in source
+
+
+def test_target_ref_tables_use_prebuilt_descriptor_sets() -> None:
+    descriptor_set_info = sorted_descriptor_set_infos()[0]
+    descriptor_set = replace(
+        _descriptor_set(*_valid_contract_descriptors()),
+        key=descriptor_set_info.key,
+    )
+
+    tables = amdgpu_target_refs._materialize_descriptor_ref_tables(
+        (descriptor_set_info,),
+        {descriptor_set_info.key: descriptor_set},
+    )
+
+    assert len(tables) == 1
+    assert tables[0].descriptor_set_key == descriptor_set_info.key
+    assert tables[0].descriptor_set_ordinal == amdgpu_descriptor_set_ordinal(descriptor_set_info.key)
 
 
 def test_descriptor_trait_names_include_resource_and_encoding_facts() -> None:

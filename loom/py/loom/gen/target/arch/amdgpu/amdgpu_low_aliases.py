@@ -4,39 +4,21 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Generator: AMDGPU blocked low-alias metadata -> C diagnostic table."""
+"""AMDGPU blocked low-alias C diagnostic table emission."""
 
 from __future__ import annotations
 
-import argparse
-import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-
-def _ensure_runtime_py_on_path() -> None:
-    runtime_py = Path(__file__).resolve().parents[5]
-    runtime_py_string = str(runtime_py)
-    if runtime_py_string not in sys.path:
-        sys.path.insert(0, runtime_py_string)
-
-
-_ensure_runtime_py_on_path()
-
-from loom.gen.support.c import c_string_arg as _c_string_arg  # noqa: E402
-from loom.gen.support.generated_file import line_comment_header  # noqa: E402
-from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
-    _gfx11_core_overlays,
-    _gfx12_core_overlays,
-    _gfx115x_core_overlays,
-    _gfx125x_core_overlays,
-    _gfx940_core_overlays,
-    _gfx950_core_overlays,
-)
-from loom.target.arch.amdgpu.low_aliases import (  # noqa: E402
+from loom.gen.support.c import c_string_arg as _c_string_arg
+from loom.gen.support.files import write_text_file
+from loom.gen.support.generated_file import line_comment_header
+from loom.target.arch.amdgpu.low_aliases import (
     AmdgpuBlockedLowAlias,
     sorted_amdgpu_blocked_low_aliases,
+    validate_amdgpu_blocked_low_alias_descriptor_contracts,
     validate_amdgpu_blocked_low_aliases,
 )
 
@@ -56,40 +38,6 @@ def _alias_lookup_rows(
 ) -> tuple[_AliasLookupRow, ...]:
     rows = tuple(_AliasLookupRow(lookup_name=lookup_name, alias=alias) for alias in aliases for lookup_name in alias.lookup_names)
     return tuple(sorted(rows, key=lambda row: row.lookup_name))
-
-
-def _amdgpu_core_overlay_sets():
-    return (
-        _gfx940_core_overlays(),
-        _gfx950_core_overlays(),
-        _gfx11_core_overlays(),
-        _gfx115x_core_overlays(),
-        _gfx12_core_overlays(),
-        _gfx125x_core_overlays(),
-    )
-
-
-def _validate_alias_descriptor_contracts(
-    aliases: Sequence[AmdgpuBlockedLowAlias],
-) -> None:
-    blocked_descriptor_keys = {alias.descriptor_key for alias in aliases}
-    for descriptor_set in _amdgpu_core_overlay_sets():
-        descriptors = {descriptor.descriptor_key: descriptor for descriptor in descriptor_set}
-        authored_aliases = blocked_descriptor_keys & descriptors.keys()
-        if authored_aliases:
-            formatted_aliases = ", ".join(sorted(authored_aliases))
-            raise ValueError(f"AMDGPU descriptor set {descriptor_set.key} authors blocked low aliases: {formatted_aliases}")
-        for alias in aliases:
-            descriptor = descriptors.get(alias.replacement_descriptor_key)
-            if descriptor is None:
-                raise ValueError(f"AMDGPU descriptor set {descriptor_set.key} lacks replacement descriptor {alias.replacement_descriptor_key}")
-            if descriptor.mnemonic != alias.replacement_mnemonic:
-                raise ValueError(
-                    f"AMDGPU descriptor set {descriptor_set.key} replacement "
-                    f"descriptor {alias.replacement_descriptor_key} has "
-                    f"mnemonic {descriptor.mnemonic!r}, expected "
-                    f"{alias.replacement_mnemonic!r}"
-                )
 
 
 def _emit_alias_rows(rows: Sequence[_AliasLookupRow]) -> list[str]:
@@ -180,23 +128,5 @@ def _emit_source(aliases: Sequence[AmdgpuBlockedLowAlias]) -> str:
 def write_low_aliases_to_path(source_path: Path) -> None:
     aliases = sorted_amdgpu_blocked_low_aliases()
     validate_amdgpu_blocked_low_aliases(aliases)
-    _validate_alias_descriptor_contracts(aliases)
-    source_path.parent.mkdir(parents=True, exist_ok=True)
-    source_path.write_text(_emit_source(aliases), encoding="utf-8")
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate AMDGPU blocked low-alias C tables.")
-    parser.add_argument(
-        "--source",
-        required=True,
-        type=Path,
-        help="Generated blocked low-alias source path.",
-    )
-    args = parser.parse_args(argv)
-    write_low_aliases_to_path(args.source)
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    validate_amdgpu_blocked_low_alias_descriptor_contracts(aliases)
+    write_text_file(source_path, _emit_source(aliases))

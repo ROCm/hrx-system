@@ -692,31 +692,32 @@ def role_has_contiguous_lane_xor1_columns(
     row_axis = _AXIS_NAMES.index("row")
     column_axis = _AXIS_NAMES.index("column")
     reduction_axis = _AXIS_NAMES.index("reduction")
+    column_layout = role.axes[column_axis]
     if (
         layout.wave_size % 2 != 0
         or role.axes[row_axis] is None
-        or role.axes[column_axis] is None
+        or column_layout is None
         or role.axes[reduction_axis] is not None
+        or role.coordinate_element_offset != 0
+        or role.coordinate_element_count != role.payload_element_count
+        or (role.payload_element_count > 1 and role.coordinate_element_stride != 1)
+        or column_layout.element_count != 1
+        or column_layout.thread_count % 2 != 0
+        or column_layout.thread_stride != 1
     ):
         return False
-    for payload_element_index in range(role.payload_element_count):
-        for lane in range(0, layout.wave_size, 2):
-            coordinate = role_coordinate(layout, role, lane, payload_element_index)
-            paired_coordinate = role_coordinate(
-                layout, role, lane ^ 1, payload_element_index
-            )
-            if coordinate is None or paired_coordinate is None:
-                return False
-            for axis_index in range(len(_AXIS_NAMES)):
-                if axis_index == column_axis:
-                    continue
-                if coordinate[axis_index] != paired_coordinate[axis_index]:
-                    return False
-            column = coordinate[column_axis]
-            paired_column = paired_coordinate[column_axis]
-            if column is None or paired_column is None or paired_column != column + 1:
-                return False
-    return True
+
+    # The validated axis factorization makes the lane-pair relationship
+    # algebraic. A stride-one column thread factor advances by one between an
+    # even lane and its xor-one pair. Every other populated axis must have an
+    # even thread stride so that the same pair remains within its lane factor.
+    return all(
+        axis_index == column_axis
+        or axis is None
+        or axis.thread_count == 1
+        or axis.thread_stride % 2 == 0
+        for axis_index, axis in enumerate(role.axes)
+    )
 
 
 AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (

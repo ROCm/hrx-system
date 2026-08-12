@@ -9,6 +9,7 @@ load(
     "loom_amdgpu_descriptor_set_compatible_with",
     "loom_amdgpu_low_descriptor_deps",
     "loom_amdgpu_selected_descriptor_set_defines",
+    "loom_amdgpu_selected_descriptor_set_key_args",
 )
 load(
     "//loom/build_tools/amdgpu:target_config.bzl",
@@ -18,9 +19,7 @@ load("//loom/build_tools/amdgpu/isa_xml:archive.bzl", "AMDGPU_ISA_XML_ARCHIVE")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
-    "loom_generated_textual_header",
-    "loom_generated_textual_header_family",
-    "loom_low_descriptor_cc_library",
+    "loom_generated_file_family",
     "loom_low_descriptor_data_archive",
     "loom_low_descriptor_exclude_from_cmake_all",
 )
@@ -31,13 +30,9 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-_AMDGPU_DESCRIPTOR_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/descriptors:descriptors"
+_AMDGPU_DESCRIPTOR_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/descriptors:descriptor_tables"
 
-_AMDGPU_WAIT_PACKET_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/descriptors:wait_packet_tables"
-
-_AMDGPU_VOPD_COMPONENT_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/descriptors:vopd_component_tables"
-
-_AMDGPU_CONFIG_TABLES_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu:config_tables"
+_AMDGPU_TARGET_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu:target_tables"
 
 _DESCRIPTOR_SET_CDNA4 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.cdna4.core"]
 
@@ -73,11 +68,11 @@ loom_low_descriptor_data_archive(
 )
 
 _AMDGPU_ISA_XML_ARGS = [
-    "--isa-xml=cdna3:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_cdna3.xml)",
-    "--isa-xml=cdna4:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_cdna4.xml)",
-    "--isa-xml=rdna3:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna3.xml)",
-    "--isa-xml=rdna3_5:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml)",
-    "--isa-xml=rdna4:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna4.xml)",
+    "--isa-xml=cdna3:$(location @amdgpu_isa_xml//:amdgpu_isa_cdna3.xml)",
+    "--isa-xml=cdna4:$(location @amdgpu_isa_xml//:amdgpu_isa_cdna4.xml)",
+    "--isa-xml=rdna3:$(location @amdgpu_isa_xml//:amdgpu_isa_rdna3.xml)",
+    "--isa-xml=rdna3_5:$(location @amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml)",
+    "--isa-xml=rdna4:$(location @amdgpu_isa_xml//:amdgpu_isa_rdna4.xml)",
 ]
 
 _AMDGPU_ISA_XML_INPUTS = [
@@ -88,82 +83,136 @@ _AMDGPU_ISA_XML_INPUTS = [
     "@amdgpu_isa_xml//:amdgpu_isa_rdna4.xml",
 ]
 
-_AMDGPU_PLANNING_FACT_VISIBILITY = [
+_AMDGPU_DESCRIPTOR_TABLE_VISIBILITY = [
     "//loom/src/loom/target/arch/amdgpu/planning:__pkg__",
+    "//loom/src/loom/target/arch/amdgpu/refs:__pkg__",
 ]
 
-loom_generated_textual_header_family(
-    name = "wait_packet_tables_gen",
-    args = _AMDGPU_ISA_XML_ARGS,
-    comment = "Generating AMDGPU wait-packet table family",
-    generator = _AMDGPU_WAIT_PACKET_TABLE_GENERATOR,
+_AMDGPU_TARGET_TABLE_VISIBILITY = [
+    "//loom/src/loom/target/arch/amdgpu/encoding:__pkg__",
+]
+
+loom_generated_file_family(
+    name = "descriptor_tables_gen",
+    args = (
+        _AMDGPU_ISA_XML_ARGS + [
+            "--target-ref-public-header=loom/target/arch/amdgpu/refs/target_refs.h",
+        ] + loom_amdgpu_selected_descriptor_set_key_args()
+    ),
+    comment = "Generating AMDGPU global descriptor-derived table family",
+    generator = _AMDGPU_DESCRIPTOR_TABLE_GENERATOR,
     inputs = _AMDGPU_ISA_XML_INPUTS,
     output_flags = [
-        "--descriptor-ranges",
-        "--descriptor-rows",
-        "--descriptor-lookups",
-        "--immediate-rows",
-        "--selection-rows",
+        "--wait-packet-source",
+        "--vopd-source",
+        "--target-ref-source",
+        "--target-ref-header",
     ],
     outputs = [
-        "wait_packet_descriptor_ranges.inl",
-        "wait_packet_descriptors.inl",
-        "wait_packet_descriptor_lookups.inl",
-        "wait_packet_immediates.inl",
-        "wait_packet_selections.inl",
+        "wait_packet_data.c",
+        "vopd_data.c",
+        "target_refs_data.c",
+        "target_refs_tables.h",
     ],
-    visibility = _AMDGPU_PLANNING_FACT_VISIBILITY,
+    visibility = _AMDGPU_DESCRIPTOR_TABLE_VISIBILITY,
 )
 
-loom_generated_textual_header_family(
-    name = "vopd_component_tables_gen",
-    args = _AMDGPU_ISA_XML_ARGS,
-    comment = "Generating AMDGPU VOPD component table family",
-    generator = _AMDGPU_VOPD_COMPONENT_TABLE_GENERATOR,
-    inputs = _AMDGPU_ISA_XML_INPUTS,
-    output_flags = [
-        "--component-rules",
-        "--descriptor-lookup-ranges",
-        "--descriptor-lookups",
-        "--pair-affinity-ranges",
-        "--pair-affinities",
-        "--pair-placement-recipes",
-    ],
-    outputs = [
-        "vopd_component_rules.inl",
-        "vopd_component_descriptor_lookup_ranges.inl",
-        "vopd_component_descriptor_lookups.inl",
-        "vopd_pair_affinity_ranges.inl",
-        "vopd_pair_affinities.inl",
-        "vopd_pair_placement_recipes.inl",
-    ],
-    visibility = _AMDGPU_PLANNING_FACT_VISIBILITY,
-)
-
-loom_low_descriptor_cc_library(
-    name = "cdna3",
+loom_generated_file_family(
+    name = "cdna_gen",
     args = [
         "--target=cdna3",
+        "--target=cdna4",
         "--isa-xml=cdna3:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_cdna3.xml)",
         "--isa-xml=cdna4:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_cdna4.xml)",
     ],
-    exclude_from_cmake_all = True,
-    generated_hdr_flags = ["--view-header=gfx9_4_generic"],
-    generated_hdrs = ["gfx9_4_generic_descriptors.h"],
-    generator = _AMDGPU_DESCRIPTOR_GENERATOR,
-    header = "cdna3_descriptors.h",
+    comment = "Generating CDNA runtime target table family",
+    generator = _AMDGPU_TARGET_TABLE_GENERATOR,
     inputs = [
         "@amdgpu_isa_xml//:amdgpu_isa_cdna3.xml",
         "@amdgpu_isa_xml//:amdgpu_isa_cdna4.xml",
     ],
-    source = "cdna3_descriptors.c",
+    output_flags = [
+        "--descriptor-source",
+        "--encoding-source",
+        "--descriptor-source",
+        "--encoding-source",
+    ],
+    outputs = [
+        "cdna3_descriptors.c",
+        "cdna3_encoding_tables.c",
+        "cdna4_descriptors.c",
+        "cdna4_encoding_tables.c",
+    ],
+    visibility = _AMDGPU_TARGET_TABLE_VISIBILITY,
+)
+
+loom_generated_file_family(
+    name = "rdna3_gen",
+    args = [
+        "--target=rdna3",
+        "--target=rdna3_5",
+        "--target=rdna4m",
+        "--isa-xml=rdna3:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna3.xml)",
+        "--isa-xml=rdna3_5:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml)",
+    ],
+    comment = "Generating RDNA3 runtime target table family",
+    generator = _AMDGPU_TARGET_TABLE_GENERATOR,
+    inputs = [
+        "@amdgpu_isa_xml//:amdgpu_isa_rdna3.xml",
+        "@amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml",
+    ],
+    output_flags = [
+        "--descriptor-source",
+        "--encoding-source",
+        "--descriptor-source",
+        "--encoding-source",
+        "--descriptor-source",
+        "--encoding-source",
+    ],
+    outputs = [
+        "rdna3_descriptors.c",
+        "rdna3_encoding_tables.c",
+        "rdna3_5_descriptors.c",
+        "rdna3_5_encoding_tables.c",
+        "rdna4m_descriptors.c",
+        "rdna4m_encoding_tables.c",
+    ],
+    visibility = _AMDGPU_TARGET_TABLE_VISIBILITY,
+)
+
+loom_generated_file_family(
+    name = "rdna4_gen",
+    args = [
+        "--target=rdna4",
+        "--target=rdna4_gfx125x",
+        "--isa-xml=rdna4:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna4.xml)",
+    ],
+    comment = "Generating RDNA4 runtime target table family",
+    generator = _AMDGPU_TARGET_TABLE_GENERATOR,
+    inputs = ["@amdgpu_isa_xml//:amdgpu_isa_rdna4.xml"],
+    output_flags = [
+        "--descriptor-source",
+        "--encoding-source",
+        "--descriptor-source",
+        "--encoding-source",
+    ],
+    outputs = [
+        "rdna4_descriptors.c",
+        "rdna4_encoding_tables.c",
+        "rdna4_gfx125x_descriptors.c",
+        "rdna4_gfx125x_encoding_tables.c",
+    ],
+    visibility = _AMDGPU_TARGET_TABLE_VISIBILITY,
+)
+
+loom_cc_library(
+    name = "cdna3",
+    srcs = [":cdna3_descriptors.c"],
     deps = ["//loom/src/loom/codegen/low:descriptors"],
 )
 
-loom_low_descriptor_cc_library(
+loom_cc_library(
     name = "gfx9_4_generic",
-    header = "gfx9_4_generic_descriptors.h",
-    header_only = True,
     target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_GFX9_4_GENERIC),
     deps = [
         ":cdna3",
@@ -171,10 +220,8 @@ loom_low_descriptor_cc_library(
     ],
 )
 
-loom_low_descriptor_cc_library(
+loom_cc_library(
     name = "gfx11_generic",
-    header = "gfx11_generic_descriptors.h",
-    header_only = True,
     target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_GFX11_GENERIC),
     deps = [
         ":rdna3",
@@ -182,10 +229,8 @@ loom_low_descriptor_cc_library(
     ],
 )
 
-loom_low_descriptor_cc_library(
+loom_cc_library(
     name = "gfx12_generic",
-    header = "gfx12_generic_descriptors.h",
-    header_only = True,
     target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_GFX12_GENERIC),
     deps = [
         ":rdna4",
@@ -193,10 +238,8 @@ loom_low_descriptor_cc_library(
     ],
 )
 
-loom_low_descriptor_cc_library(
+loom_cc_library(
     name = "gfx12_5_generic",
-    header = "gfx12_5_generic_descriptors.h",
-    header_only = True,
     target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_GFX12_5_GENERIC),
     deps = [
         ":rdna4_gfx125x",
@@ -204,10 +247,8 @@ loom_low_descriptor_cc_library(
     ],
 )
 
-loom_low_descriptor_cc_library(
+loom_cc_library(
     name = "rdna4_gfx1251",
-    header = "rdna4_gfx1251_descriptors.h",
-    header_only = True,
     target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_RDNA4_GFX1251),
     deps = [
         ":rdna4_gfx125x",
@@ -215,100 +256,40 @@ loom_low_descriptor_cc_library(
     ],
 )
 
-loom_low_descriptor_cc_library(
+loom_cc_library(
     name = "rdna3",
-    args = [
-        "--target=rdna3",
-        "--isa-xml=rdna3:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna3.xml)",
-        "--isa-xml=rdna3_5:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml)",
-    ],
-    exclude_from_cmake_all = True,
-    generated_hdr_flags = ["--view-header=gfx11_generic"],
-    generated_hdrs = ["gfx11_generic_descriptors.h"],
-    generator = _AMDGPU_DESCRIPTOR_GENERATOR,
-    header = "rdna3_descriptors.h",
-    inputs = [
-        "@amdgpu_isa_xml//:amdgpu_isa_rdna3.xml",
-        "@amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml",
-    ],
-    source = "rdna3_descriptors.c",
+    srcs = [":rdna3_descriptors.c"],
     deps = ["//loom/src/loom/codegen/low:descriptors"],
 )
 
-loom_low_descriptor_cc_library(
+loom_cc_library(
     name = "rdna3_5",
-    args = [
-        "--target=rdna3_5",
-        "--isa-xml=rdna3_5:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml)",
-    ],
-    exclude_from_cmake_all = True,
-    generator = _AMDGPU_DESCRIPTOR_GENERATOR,
-    header = "rdna3_5_descriptors.h",
-    inputs = ["@amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml"],
-    source = "rdna3_5_descriptors.c",
+    srcs = [":rdna3_5_descriptors.c"],
     target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_RDNA3_5),
     deps = ["//loom/src/loom/codegen/low:descriptors"],
 )
 
-loom_low_descriptor_cc_library(
+loom_cc_library(
     name = "rdna4m",
-    args = [
-        "--target=rdna4m",
-        "--isa-xml=rdna3_5:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml)",
-    ],
-    exclude_from_cmake_all = True,
-    generator = _AMDGPU_DESCRIPTOR_GENERATOR,
-    header = "rdna4m_descriptors.h",
-    inputs = ["@amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml"],
-    source = "rdna4m_descriptors.c",
+    srcs = [":rdna4m_descriptors.c"],
     target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_RDNA4M),
     deps = ["//loom/src/loom/codegen/low:descriptors"],
 )
 
-loom_low_descriptor_cc_library(
+loom_cc_library(
     name = "rdna4",
-    args = [
-        "--target=rdna4",
-        "--isa-xml=rdna4:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna4.xml)",
-    ],
-    exclude_from_cmake_all = True,
-    generated_hdr_flags = ["--view-header=gfx12_generic"],
-    generated_hdrs = ["gfx12_generic_descriptors.h"],
-    generator = _AMDGPU_DESCRIPTOR_GENERATOR,
-    header = "rdna4_descriptors.h",
-    inputs = ["@amdgpu_isa_xml//:amdgpu_isa_rdna4.xml"],
-    source = "rdna4_descriptors.c",
+    srcs = [":rdna4_descriptors.c"],
     deps = ["//loom/src/loom/codegen/low:descriptors"],
 )
 
-loom_low_descriptor_cc_library(
+loom_cc_library(
     name = "rdna4_gfx125x",
-    args = [
-        "--target=rdna4_gfx125x",
-        "--isa-xml=rdna4:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna4.xml)",
-    ],
-    exclude_from_cmake_all = True,
-    generated_hdr_flags = [
-        "--view-header=gfx12_5_generic",
-        "--view-header=rdna4_gfx1250_a0",
-        "--view-header=rdna4_gfx1251",
-    ],
-    generated_hdrs = [
-        "gfx12_5_generic_descriptors.h",
-        "rdna4_gfx1250_a0_descriptors.h",
-        "rdna4_gfx1251_descriptors.h",
-    ],
-    generator = _AMDGPU_DESCRIPTOR_GENERATOR,
-    header = "rdna4_gfx125x_descriptors.h",
-    inputs = ["@amdgpu_isa_xml//:amdgpu_isa_rdna4.xml"],
-    source = "rdna4_gfx125x_descriptors.c",
+    srcs = [":rdna4_gfx125x_descriptors.c"],
     deps = ["//loom/src/loom/codegen/low:descriptors"],
 )
 
-loom_low_descriptor_cc_library(
+loom_cc_library(
     name = "rdna4_gfx1250_a0",
-    header = "rdna4_gfx1250_a0_descriptors.h",
-    header_only = True,
     target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_RDNA4_GFX1250_A0),
     deps = [
         ":rdna4_gfx125x",
@@ -316,27 +297,11 @@ loom_low_descriptor_cc_library(
     ],
 )
 
-loom_low_descriptor_cc_library(
+loom_cc_library(
     name = "cdna4",
-    args = [
-        "--target=cdna4",
-        "--isa-xml=cdna4:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_cdna4.xml)",
-    ],
-    exclude_from_cmake_all = True,
-    generator = _AMDGPU_DESCRIPTOR_GENERATOR,
-    header = "cdna4_descriptors.h",
-    inputs = ["@amdgpu_isa_xml//:amdgpu_isa_cdna4.xml"],
-    source = "cdna4_descriptors.c",
+    srcs = [":cdna4_descriptors.c"],
     target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_CDNA4),
     deps = ["//loom/src/loom/codegen/low:descriptors"],
-)
-
-loom_generated_textual_header(
-    name = "low_registry_tables_gen",
-    generator = _AMDGPU_CONFIG_TABLES_GENERATOR,
-    output = "low_registry_tables.inl",
-    output_flag = "--low-registry-tables",
-    visibility = _AMDGPU_LOW_REGISTRY_VISIBILITY,
 )
 
 loom_cc_library(
@@ -344,7 +309,7 @@ loom_cc_library(
     srcs = ["low_registry.c"],
     hdrs = ["low_registry.h"],
     defines = loom_amdgpu_selected_descriptor_set_defines(),
-    textual_hdrs = [":low_registry_tables.inl"],
+    textual_hdrs = ["//loom/src/loom/target/arch/amdgpu:low_registry_tables.inl"],
     visibility = _AMDGPU_LOW_REGISTRY_VISIBILITY,
     deps = loom_amdgpu_low_descriptor_deps() + [
         "//loom/src/loom/codegen/low:descriptors",
@@ -355,5 +320,14 @@ loom_cc_library(
 )
 
 loom_low_descriptor_exclude_from_cmake_all(
-    cc_libraries = ["low_registry"],
+    cc_libraries = [
+        "cdna3",
+        "cdna4",
+        "low_registry",
+        "rdna3",
+        "rdna3_5",
+        "rdna4",
+        "rdna4_gfx125x",
+        "rdna4m",
+    ],
 )

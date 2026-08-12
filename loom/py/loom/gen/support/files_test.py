@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from loom.gen.support.files import read_optional_text_file, write_text_file
@@ -16,6 +17,16 @@ def test_write_text_file_creates_parent_directories(tmp_path: Path) -> None:
     write_text_file(output_path, "contents")
 
     assert output_path.read_text(encoding="utf-8") == "contents"
+
+
+def test_write_text_file_preserves_unchanged_file_timestamp(tmp_path: Path) -> None:
+    output_path = tmp_path / "output.txt"
+    output_path.write_text("contents", encoding="utf-8")
+    os.utime(output_path, ns=(1_000_000_000, 1_000_000_000))
+
+    write_text_file(output_path, "contents")
+
+    assert output_path.stat().st_mtime_ns == 1_000_000_000
 
 
 def test_read_optional_text_file(tmp_path: Path) -> None:

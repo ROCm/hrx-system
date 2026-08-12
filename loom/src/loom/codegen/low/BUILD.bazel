@@ -368,10 +368,17 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "placement_pair",
+    hdrs = ["placement_pair.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_library(
     name = "placement",
     srcs = ["placement.c"],
     hdrs = ["placement.h"],
     deps = [
+        ":placement_pair",
         ":storage_relation",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/ir",

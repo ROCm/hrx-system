@@ -25,6 +25,7 @@ def _ensure_runtime_py_on_path() -> None:
 _ensure_runtime_py_on_path()
 
 from loom.gen.support.c import CIdentifierCase, c_identifier  # noqa: E402
+from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
 from loom.target.arch.spirv.builtins import (  # noqa: E402
     BUILTIN_DIMENSIONS,
@@ -933,7 +934,7 @@ def main(argv: list[str]) -> int:
     if args.tables is None:
         sys.stdout.write(tables)
     else:
-        args.tables.write_text(tables)
+        write_text_file(args.tables, tables)
     return 0
 
 

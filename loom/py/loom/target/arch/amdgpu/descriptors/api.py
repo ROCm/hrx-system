@@ -11,7 +11,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from functools import cache
 
 from loom.target.arch.amdgpu.encoding import (
     AMDGPU_DPP_CONTROL_ENCODING_FORMAT_IDS,
@@ -38,6 +39,7 @@ from loom.target.arch.amdgpu.target_info import (
     AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA,
     AMDGPU_PROCESSOR_INFOS,
     AMDGPU_TARGET_INFOS,
+    AmdgpuDescriptorSetInfo,
     amdgpu_descriptor_set_info_by_generator_target,
     amdgpu_descriptor_set_supported_target_contract_keys,
     amdgpu_target_descriptor_set_key,
@@ -48,6 +50,10 @@ from .categories import *
 from .cluster import _gfx125x_cluster_descriptors
 from .common import *
 from .control import _s_delay_alu_descriptor, _s_wait_xcnt_descriptor
+from .rdna4m import (
+    _RDNA4M_IEEE_MINMAX_INSTRUCTION_ROWS,
+    _RDNA4M_NUMERIC_MINMAX_INSTRUCTION_ROWS,
+)
 from .sets import *
 from .tensor import _gfx125x_tensor_descriptors
 
@@ -637,6 +643,7 @@ def _validate_matrix_coexecution_profile_coverage(
             )
 
 
+@cache
 def amdgpu_descriptor_ref_keys() -> tuple[str, ...]:
     """Returns descriptor keys known to the AMDGPU target family."""
 
@@ -791,12 +798,19 @@ def _with_gfx125x_operand_address_state(
 
 
 def _with_gfx125x_vgpr_msb_address_state(descriptor: Descriptor) -> Descriptor:
-    operands = tuple(
-        _with_gfx125x_operand_address_state(descriptor, operand)
-        for operand in descriptor.operands
-    )
-    updated_descriptor = replace(descriptor, operands=operands)
-    if any(operand.address_state_slot != 0 for operand in operands):
+    operands: list[Operand] = []
+    operands_changed = False
+    has_address_state = False
+    for operand in descriptor.operands:
+        projected_operand = _with_gfx125x_operand_address_state(descriptor, operand)
+        operands.append(projected_operand)
+        operands_changed |= projected_operand is not operand
+        has_address_state |= projected_operand.address_state_slot != 0
+
+    updated_descriptor = descriptor
+    if operands_changed:
+        updated_descriptor = replace(descriptor, operands=tuple(operands))
+    if has_address_state:
         updated_descriptor = _with_mode_state_read(updated_descriptor)
     return updated_descriptor
 
@@ -804,13 +818,14 @@ def _with_gfx125x_vgpr_msb_address_state(descriptor: Descriptor) -> Descriptor:
 def _with_gfx125x_vgpr_msb_address_states(
     descriptor_set: DescriptorSet,
 ) -> DescriptorSet:
-    descriptor_set = replace(
-        descriptor_set,
-        descriptors=tuple(
-            _with_gfx125x_vgpr_msb_address_state(descriptor)
-            for descriptor in descriptor_set.descriptors
-        ),
-    )
+    descriptors: list[Descriptor] = []
+    descriptors_changed = False
+    for descriptor in descriptor_set.descriptors:
+        projected_descriptor = _with_gfx125x_vgpr_msb_address_state(descriptor)
+        descriptors.append(projected_descriptor)
+        descriptors_changed |= projected_descriptor is not descriptor
+    if descriptors_changed:
+        descriptor_set = replace(descriptor_set, descriptors=tuple(descriptors))
     _validate_gfx125x_vgpr_msb_address_state(descriptor_set)
     return descriptor_set
 
@@ -1335,20 +1350,22 @@ def _with_storage_lease_rows(
         schedule_class.name: schedule_class
         for schedule_class in descriptor_set.schedule_classes
     }
-    return replace(
-        descriptor_set,
-        descriptors=tuple(
-            replace(
-                descriptor,
-                storage_leases=_amdgpu_descriptor_storage_leases(
-                    schedule_classes,
-                    descriptor,
-                    enable_gfx125x_xcnt=enable_gfx125x_xcnt,
-                ),
-            )
-            for descriptor in descriptor_set.descriptors
-        ),
-    )
+    descriptors: list[Descriptor] = []
+    descriptors_changed = False
+    for descriptor in descriptor_set.descriptors:
+        storage_leases = _amdgpu_descriptor_storage_leases(
+            schedule_classes,
+            descriptor,
+            enable_gfx125x_xcnt=enable_gfx125x_xcnt,
+        )
+        if storage_leases == descriptor.storage_leases:
+            descriptors.append(descriptor)
+            continue
+        descriptors.append(replace(descriptor, storage_leases=storage_leases))
+        descriptors_changed = True
+    if not descriptors_changed:
+        return descriptor_set
+    return replace(descriptor_set, descriptors=tuple(descriptors))
 
 
 _AMDGPU_SCHEDULE_INSTRUCTION_CLASSES = {
@@ -1394,7 +1411,8 @@ _AMDGPU_KEY_INSTRUCTION_CLASSES = (
 
 
 def _with_instruction_classes(descriptor_set: DescriptorSet) -> DescriptorSet:
-    descriptors = []
+    descriptors: list[Descriptor] = []
+    descriptors_changed = False
     for descriptor in descriptor_set.descriptors:
         instruction_classes = set(descriptor.instruction_classes)
         schedule_instruction_classes = _AMDGPU_SCHEDULE_INSTRUCTION_CLASSES.get(
@@ -1416,28 +1434,63 @@ def _with_instruction_classes(descriptor_set: DescriptorSet) -> DescriptorSet:
             if descriptor.key.startswith(key_prefix):
                 instruction_classes.add(instruction_class)
                 break
+        projected_instruction_classes = tuple(
+            instruction_class
+            for instruction_class in InstructionClass
+            if instruction_class in instruction_classes
+        )
+        if projected_instruction_classes == descriptor.instruction_classes:
+            descriptors.append(descriptor)
+            continue
         descriptors.append(
             replace(
                 descriptor,
-                instruction_classes=tuple(
-                    instruction_class
-                    for instruction_class in InstructionClass
-                    if instruction_class in instruction_classes
-                ),
+                instruction_classes=projected_instruction_classes,
             )
         )
+        descriptors_changed = True
+    if not descriptors_changed:
+        return descriptor_set
     return replace(descriptor_set, descriptors=tuple(descriptors))
 
 
 _AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X = 1 << 0
 
+_AMDGPU_CORE_INSTRUCTION_FACT_NAMES = (
+    "S_GETPC_B64",
+    "S_MOV_B32",
+    "S_MOV_B64",
+    "S_XOR_B64",
+)
+
+
+def _preserve_overlay_descriptors(
+    descriptors: tuple[Descriptor, ...],
+) -> tuple[Descriptor, ...]:
+    return descriptors
+
+
+_AmdgpuOverlayMaterializer = Callable[[AmdgpuIsaFactSource], tuple[Descriptor, ...]]
+_AmdgpuOverlayProjection = Callable[[tuple[Descriptor, ...]], tuple[Descriptor, ...]]
+
 
 @dataclass(frozen=True, slots=True)
 class _AmdgpuCoreDescriptorSetBuilder:
+    # Static target-low descriptor-set skeleton.
     base: DescriptorSet
+    # Pure source overlay rows owned by the target contract.
     overlay_rows: Callable[[], tuple[AmdgpuDescriptorOverlay, ...]]
-    overlay_descriptors: Callable[[AmdgpuIsaFactSource], tuple[Descriptor, ...]]
+    # Materializer shared by targets that derive from the same ISA facts.
+    overlay_descriptors: _AmdgpuOverlayMaterializer
+    # Target-specific projection of the shared materialized descriptors.
+    project_overlay_descriptors: _AmdgpuOverlayProjection = (
+        _preserve_overlay_descriptors
+    )
+    # XML donor instructions needed to synthesize target-owned facts.
+    source_instruction_names: tuple[str, ...] = ()
+    # Target-owned descriptors that have no XML overlay.
     extra_descriptors: tuple[Descriptor, ...] = ()
+    # Builder behavior flags.
     flags: int = 0
 
 
@@ -1473,14 +1526,14 @@ _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
     ),
     "gfx11_generic": _AmdgpuCoreDescriptorSetBuilder(
         base=_AMDGPU_GFX11_GENERIC_CORE_DESCRIPTOR_SET_BASE,
-        overlay_rows=_gfx11_generic_core_overlays,
-        overlay_descriptors=_gfx11_generic_core_overlay_descriptors,
+        overlay_rows=_gfx11_core_overlays,
+        overlay_descriptors=_gfx11_core_overlay_descriptors,
         extra_descriptors=(_s_delay_alu_descriptor(),),
     ),
     "gfx12_generic": _AmdgpuCoreDescriptorSetBuilder(
         base=_AMDGPU_GFX12_GENERIC_CORE_DESCRIPTOR_SET_BASE,
-        overlay_rows=_gfx12_generic_core_overlays,
-        overlay_descriptors=_gfx12_generic_core_overlay_descriptors,
+        overlay_rows=_gfx12_core_overlays,
+        overlay_descriptors=_gfx12_core_overlay_descriptors,
         extra_descriptors=(_s_delay_alu_descriptor(),),
     ),
     "gfx12_5_generic": _AmdgpuCoreDescriptorSetBuilder(
@@ -1500,6 +1553,17 @@ _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
         base=_AMDGPU_RDNA4M_CORE_DESCRIPTOR_SET_BASE,
         overlay_rows=_rdna4m_core_overlays,
         overlay_descriptors=_rdna4m_core_overlay_descriptors,
+        source_instruction_names=tuple(
+            sorted(
+                {
+                    row[0]
+                    for row in (
+                        *_RDNA4M_NUMERIC_MINMAX_INSTRUCTION_ROWS,
+                        *_RDNA4M_IEEE_MINMAX_INSTRUCTION_ROWS,
+                    )
+                }
+            )
+        ),
         extra_descriptors=(_s_delay_alu_descriptor(),),
     ),
     "rdna4": _AmdgpuCoreDescriptorSetBuilder(
@@ -1518,14 +1582,16 @@ _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
     "rdna4_gfx1250_a0": _AmdgpuCoreDescriptorSetBuilder(
         base=_AMDGPU_RDNA4_GFX1250_A0_CORE_DESCRIPTOR_SET_BASE,
         overlay_rows=_gfx125x_core_overlays,
-        overlay_descriptors=_gfx1250_a0_core_overlay_descriptors,
+        overlay_descriptors=_gfx125x_core_overlay_descriptors,
+        project_overlay_descriptors=_gfx1250_a0_core_overlay_projection,
         extra_descriptors=_GFX125X_EXTRA_DESCRIPTORS,
         flags=_AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X,
     ),
     "rdna4_gfx1251": _AmdgpuCoreDescriptorSetBuilder(
         base=_AMDGPU_RDNA4_GFX1251_CORE_DESCRIPTOR_SET_BASE,
         overlay_rows=_gfx125x_core_overlays,
-        overlay_descriptors=_gfx1251_core_overlay_descriptors,
+        overlay_descriptors=_gfx125x_core_overlay_descriptors,
+        project_overlay_descriptors=_gfx1251_core_overlay_projection,
         extra_descriptors=_GFX125X_EXTRA_DESCRIPTORS,
         flags=_AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X,
     ),
@@ -1536,15 +1602,54 @@ AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS = tuple(
 )
 
 
+@cache
+def amdgpu_core_descriptor_set_instruction_names(target: str) -> tuple[str, ...]:
+    """Returns the imported instruction facts needed by one target contract."""
+
+    try:
+        builder = _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS[target]
+    except KeyError as exc:
+        supported = ", ".join(AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS)
+        raise ValueError(
+            f"unsupported AMDGPU descriptor target '{target}'; "
+            f"expected one of: {supported}"
+        ) from exc
+    names = set(_AMDGPU_CORE_INSTRUCTION_FACT_NAMES)
+    names.update(overlay.instruction_name for overlay in builder.overlay_rows())
+    names.update(builder.source_instruction_names)
+    return tuple(sorted(names))
+
+
+def amdgpu_core_descriptor_set_instruction_names_by_isa_key(
+    descriptor_set_infos: Iterable[AmdgpuDescriptorSetInfo],
+) -> dict[str, tuple[str, ...]]:
+    """Returns the union of imported instruction facts required per ISA XML."""
+
+    names_by_isa_key: dict[str, set[str]] = {}
+    for info in descriptor_set_infos:
+        instruction_names = amdgpu_core_descriptor_set_instruction_names(
+            info.generator_target
+        )
+        for isa_info in info.isa_infos:
+            names_by_isa_key.setdefault(isa_info.isa_xml_key, set()).update(
+                instruction_names
+            )
+    return {
+        isa_key: tuple(sorted(instruction_names))
+        for isa_key, instruction_names in sorted(names_by_isa_key.items())
+    }
+
+
 def _build_amdgpu_core_descriptor_set_from_spec(
     target: str,
     builder: _AmdgpuCoreDescriptorSetBuilder,
     spec: AmdgpuIsaFactSource,
+    materialized_overlay_descriptors: tuple[Descriptor, ...],
 ) -> DescriptorSet:
     descriptor_set = _with_overlay_descriptors(
         builder.base,
         spec,
-        builder.overlay_descriptors(spec),
+        builder.project_overlay_descriptors(materialized_overlay_descriptors),
         builder.extra_descriptors,
     )
     is_gfx125x = bool(builder.flags & _AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X)
@@ -1563,19 +1668,37 @@ def _build_amdgpu_core_descriptor_set_from_spec(
     return descriptor_set
 
 
-def build_amdgpu_core_descriptor_set_from_specs(
+def _amdgpu_core_descriptor_set_builder(
     target: str,
-    specs: Mapping[str, AmdgpuIsaFactSource],
-) -> DescriptorSet:
+) -> _AmdgpuCoreDescriptorSetBuilder:
     try:
-        builder = _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS[target]
+        return _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS[target]
     except KeyError as exc:
         supported = ", ".join(AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS)
         raise ValueError(
             f"unsupported AMDGPU descriptor target '{target}'; "
             f"expected one of: {supported}"
         ) from exc
-    info = amdgpu_descriptor_set_info_by_generator_target(target)
+
+
+def amdgpu_core_descriptor_set_overlay_rows(
+    target: str,
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
+    """Returns the XML-free descriptor overlay rows for a generator target."""
+
+    return _amdgpu_core_descriptor_set_builder(target).overlay_rows()
+
+
+def _build_amdgpu_core_descriptor_set_from_specs(
+    target: str,
+    builder: _AmdgpuCoreDescriptorSetBuilder,
+    info: AmdgpuDescriptorSetInfo,
+    specs: Mapping[str, AmdgpuIsaFactSource],
+    materialized_descriptors_by_source_and_builder: dict[
+        tuple[str, _AmdgpuOverlayMaterializer],
+        tuple[Descriptor, ...],
+    ],
+) -> DescriptorSet:
     descriptor_sets: list[DescriptorSet] = []
     for isa_info in info.isa_infos:
         try:
@@ -1597,8 +1720,25 @@ def build_amdgpu_core_descriptor_set_from_specs(
                 f"{spec.architecture_name} architecture id "
                 f"{spec.architecture_id}"
             )
+        materialization_key = (
+            isa_info.isa_xml_key,
+            builder.overlay_descriptors,
+        )
+        materialized_overlay_descriptors = (
+            materialized_descriptors_by_source_and_builder.get(materialization_key)
+        )
+        if materialized_overlay_descriptors is None:
+            materialized_overlay_descriptors = builder.overlay_descriptors(spec)
+            materialized_descriptors_by_source_and_builder[materialization_key] = (
+                materialized_overlay_descriptors
+            )
         descriptor_sets.append(
-            _build_amdgpu_core_descriptor_set_from_spec(target, builder, spec)
+            _build_amdgpu_core_descriptor_set_from_spec(
+                target,
+                builder,
+                spec,
+                materialized_overlay_descriptors,
+            )
         )
     descriptor_set = descriptor_sets[0]
     for isa_info, member_descriptor_set in zip(
@@ -1618,6 +1758,48 @@ def build_amdgpu_core_descriptor_set_from_specs(
             amdgpu_descriptor_set_supported_target_contract_keys(info)
         ),
     )
+
+
+def build_amdgpu_core_descriptor_sets_from_specs(
+    targets: Sequence[str],
+    specs: Mapping[str, AmdgpuIsaFactSource],
+) -> dict[str, DescriptorSet]:
+    """Builds related descriptor sets while sharing common ISA materialization."""
+
+    if not targets:
+        raise ValueError("AMDGPU descriptor family requires at least one target")
+    if len(set(targets)) != len(targets):
+        raise ValueError("AMDGPU descriptor family targets must be unique")
+
+    builders_and_infos = tuple(
+        (
+            target,
+            _amdgpu_core_descriptor_set_builder(target),
+            amdgpu_descriptor_set_info_by_generator_target(target),
+        )
+        for target in targets
+    )
+    materialized_descriptors_by_source_and_builder: dict[
+        tuple[str, _AmdgpuOverlayMaterializer],
+        tuple[Descriptor, ...],
+    ] = {}
+    return {
+        target: _build_amdgpu_core_descriptor_set_from_specs(
+            target,
+            builder,
+            info,
+            specs,
+            materialized_descriptors_by_source_and_builder,
+        )
+        for target, builder, info in builders_and_infos
+    }
+
+
+def build_amdgpu_core_descriptor_set_from_specs(
+    target: str,
+    specs: Mapping[str, AmdgpuIsaFactSource],
+) -> DescriptorSet:
+    return build_amdgpu_core_descriptor_sets_from_specs((target,), specs)[target]
 
 
 def build_amdgpu_core_descriptor_set_from_spec(
@@ -1659,10 +1841,14 @@ __all__ = (
     "_validate_dpp_control_fields",
     "_with_overlay_descriptors",
     "amdgpu_common_reg_class_ids",
+    "amdgpu_core_descriptor_set_instruction_names",
+    "amdgpu_core_descriptor_set_instruction_names_by_isa_key",
+    "amdgpu_core_descriptor_set_overlay_rows",
     "amdgpu_descriptor_id_keys",
     "amdgpu_descriptor_ref_keys",
     "amdgpu_immediate_encoding_id_items",
     "build_amdgpu_core_descriptor_set",
     "build_amdgpu_core_descriptor_set_from_spec",
     "build_amdgpu_core_descriptor_set_from_specs",
+    "build_amdgpu_core_descriptor_sets_from_specs",
 )
