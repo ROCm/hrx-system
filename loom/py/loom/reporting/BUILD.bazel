@@ -21,6 +21,7 @@ iree_py_library(
         "compile_report_move_causes.py",
         "compile_report_suggestions.py",
         "compile_report_view.py",
+        "compile_report_workload.py",
     ],
     imports = ["../.."],
 )

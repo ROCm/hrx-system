@@ -39,6 +39,13 @@ from loom.reporting.compile_report_move_causes import (
     build_move_cause_show,
     move_cause_diff_has_changes,
 )
+from loom.reporting.compile_report_workload import (
+    append_workload_diff_text,
+    append_workload_show_text,
+    build_workload_diff,
+    build_workload_show,
+    workload_diff_has_changes,
+)
 
 SHOW_KIND = "loom.compile_report.show"
 DIFF_KIND = "loom.compile_report.diff"
@@ -387,6 +394,11 @@ def build_compile_report_show(
     document: CompileReportDocument,
 ) -> dict[str, object]:
     """Builds a deterministic target-neutral report view."""
+    report_workload = build_workload_show(
+        document.report.get("workload"),
+        document.report.get("target_resources"),
+        document.source,
+    )
     view: dict[str, object] = {
         "kind": SHOW_KIND,
         "schema_version": COMPILE_REPORT_SCHEMA_VERSION,
@@ -398,11 +410,14 @@ def build_compile_report_show(
             "name": document.status_name,
         },
         "identity": report_identity_json(document),
+        "workload": report_workload,
         "entries": [
             _show_entry_json(
                 entry,
                 compile_report_entry_identity(entry),
+                report_workload,
                 document.report.get("workload"),
+                document.report.get("target_resources"),
                 f"{document.source}.entries.rows[{entry['index']}]",
             )
             for entry in document.entries
@@ -430,6 +445,19 @@ def build_compile_report_diff(
         comparison_mode,
         force=force,
     )
+    baseline_report_workload = build_workload_show(
+        baseline.report.get("workload"),
+        baseline.report.get("target_resources"),
+        baseline.source,
+    )
+    candidate_report_workload = build_workload_show(
+        candidate.report.get("workload"),
+        candidate.report.get("target_resources"),
+        candidate.source,
+    )
+    report_workload = build_workload_diff(
+        baseline_report_workload, candidate_report_workload
+    )
     entries = []
     unchanged_entry_count = 0
     for pair in match.pairs:
@@ -449,6 +477,28 @@ def build_compile_report_diff(
             pair.candidate,
             EvidenceClass.COMPILER_ANALYSIS,
         )
+        baseline_entry_workload = build_workload_show(
+            pair.baseline.get("workload", baseline.report.get("workload")),
+            pair.baseline.get(
+                "target_resources", baseline.report.get("target_resources")
+            ),
+            baseline_entry_source,
+        )
+        candidate_entry_workload = build_workload_show(
+            pair.candidate.get("workload", candidate.report.get("workload")),
+            pair.candidate.get(
+                "target_resources", candidate.report.get("target_resources")
+            ),
+            candidate_entry_source,
+        )
+        entry_workload = None
+        if (
+            baseline_entry_workload != baseline_report_workload
+            or candidate_entry_workload != candidate_report_workload
+        ):
+            entry_workload = build_workload_diff(
+                baseline_entry_workload, candidate_entry_workload
+            )
         move_causes = build_move_cause_diff(
             pair.baseline,
             pair.candidate,
@@ -458,6 +508,7 @@ def build_compile_report_diff(
         if (
             not _diff_group_has_changes(artifact_facts)
             and not _diff_group_has_changes(compiler_analysis)
+            and not workload_diff_has_changes(entry_workload)
             and not move_cause_diff_has_changes(move_causes)
         ):
             unchanged_entry_count += 1
@@ -466,6 +517,8 @@ def build_compile_report_diff(
             "artifact_facts": artifact_facts,
             "compiler_analysis": compiler_analysis,
         }
+        if workload_diff_has_changes(entry_workload):
+            entry_view["workload"] = entry_workload
         if move_causes is not None:
             entry_view["move_causes"] = move_causes
         if force:
@@ -503,6 +556,8 @@ def build_compile_report_diff(
         ]
     else:
         view["identity"] = report_common_identity_json(baseline, comparison_mode)
+    if workload_diff_has_changes(report_workload):
+        view["workload"] = report_workload
     if comparison_mode is CompileReportComparisonMode.TARGET and not force:
         view["targets"] = {
             "baseline": report_target_identity_json(baseline),
@@ -543,9 +598,8 @@ def format_compile_report_show_text(view: dict[str, object]) -> str:
         for binding_value in config_bindings:
             binding = _expect_dict(binding_value)
             lines.append(f"    {binding['key']} = {binding['value']}")
-    workload = identity.get("workload")
-    if isinstance(workload, dict):
-        lines.append(f"  workload: {_format_workload(workload)}")
+    lines.append("")
+    append_workload_show_text(lines, _expect_dict(view["workload"]))
 
     entries = _expect_list(view["entries"])
     if not entries:
@@ -555,6 +609,9 @@ def format_compile_report_show_text(view: dict[str, object]) -> str:
         entry_identity = _expect_dict(entry["identity"])
         lines.append("")
         lines.append(f"Entry {_entry_display_name(entry_identity)}")
+        entry_workload = entry.get("workload")
+        if isinstance(entry_workload, dict):
+            append_workload_show_text(lines, entry_workload, indent="  ")
         _append_metric_group(
             lines,
             "Artifact facts",
@@ -605,11 +662,19 @@ def format_compile_report_diff_text(view: dict[str, object]) -> str:
         )
         mismatches = _expect_list(view["identity_mismatches"])
         lines.append(f"  identity mismatches: {len(mismatches)}")
+        workload_mismatch_count = 0
         for mismatch_value in mismatches:
             mismatch = _expect_dict(mismatch_value)
+            if str(mismatch["path"]).endswith(".workload"):
+                workload_mismatch_count += 1
+                continue
             lines.append(
                 f"    {mismatch['path']}: {mismatch['baseline']!r} != "
                 f"{mismatch['candidate']!r}"
+            )
+        if workload_mismatch_count:
+            lines.append(
+                f"    workload mismatches: {workload_mismatch_count}; expanded below"
             )
     elif view.get("comparison_mode") == CompileReportComparisonMode.TARGET.value:
         targets = _expect_dict(view["targets"])
@@ -638,6 +703,10 @@ def format_compile_report_diff_text(view: dict[str, object]) -> str:
                 f"  specialization: {_format_specialization(identity)}",
             )
         )
+    report_workload = view.get("workload")
+    if isinstance(report_workload, dict):
+        lines.append("")
+        append_workload_diff_text(lines, report_workload)
     lines.append(
         f"  entries: {view['changed_entry_count']} changed, "
         f"{view['unchanged_entry_count']} unchanged"
@@ -666,6 +735,9 @@ def format_compile_report_diff_text(view: dict[str, object]) -> str:
             entry_name = _entry_display_name(entry_identity)
         lines.append("")
         lines.append(f"Entry {entry_name}")
+        entry_workload = entry.get("workload")
+        if isinstance(entry_workload, dict):
+            append_workload_diff_text(lines, entry_workload, indent="  ")
         _append_diff_group(
             lines,
             "Artifact facts",
@@ -693,16 +765,23 @@ def format_compile_report_diff_text(view: dict[str, object]) -> str:
 def _show_entry_json(
     entry: dict[str, object],
     identity: CompileReportEntryIdentity,
-    report_workload: object,
+    report_workload: dict[str, object],
+    report_workload_value: object,
+    report_target_resources_value: object,
     source: str,
 ) -> dict[str, object]:
-    view = {
+    view: dict[str, object] = {
         "identity": identity.to_json_object(),
         "artifact_facts": _show_metrics(entry, EvidenceClass.ARTIFACT_FACT),
         "compiler_analysis": _show_metrics(entry, EvidenceClass.COMPILER_ANALYSIS),
     }
-    if entry.get("workload") is not None and entry.get("workload") != report_workload:
-        view["workload"] = entry["workload"]
+    entry_workload = build_workload_show(
+        entry.get("workload", report_workload_value),
+        entry.get("target_resources", report_target_resources_value),
+        source,
+    )
+    if entry_workload != report_workload:
+        view["workload"] = entry_workload
     move_causes = build_move_cause_show(entry, source)
     if move_causes is not None:
         view["move_causes"] = move_causes
@@ -891,17 +970,6 @@ def _format_specialization(identity: dict[str, object]) -> str:
 
 def _format_context(context: dict[str, object]) -> str:
     return ", ".join(f"{key}={value}" for key, value in context.items())
-
-
-def _format_workload(workload: dict[str, object]) -> str:
-    fields = []
-    for key in ("workgroup_size", "workgroup_count", "workgroup_cluster_size"):
-        value = workload.get(key)
-        if isinstance(value, dict):
-            fields.append(f"{key}=({value.get('x')},{value.get('y')},{value.get('z')})")
-    if "dispatch_workitem_count" in workload:
-        fields.append(f"workitems={workload['dispatch_workitem_count']}")
-    return ", ".join(fields) if fields else "unavailable"
 
 
 def _entry_display_name(identity: dict[str, object]) -> str:

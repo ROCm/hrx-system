@@ -22,6 +22,7 @@ def _write_report(
     target_key: str = "gfx11-generic",
     target_record: str = "gfx11-generic",
     experimental_bank_conflict: bool = False,
+    subgroup_size: int | None = None,
 ) -> None:
     workload = {
         "workgroup_size": {"x": 64, "y": 1, "z": 1, "flat": 64},
@@ -64,6 +65,11 @@ def _write_report(
             ],
         },
     }
+    if subgroup_size is not None:
+        report["target_resources"] = {"subgroup_size": subgroup_size}
+        report["entries"]["rows"][0]["target_resources"] = {
+            "subgroup_size": subgroup_size
+        }
     if experimental_bank_conflict:
         bank_service = {
             "modeled_packet_count": 1,
@@ -125,7 +131,7 @@ def test_show_json_reads_direct_report(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     report_path = tmp_path / "report.json"
-    _write_report(report_path)
+    _write_report(report_path, subgroup_size=64)
 
     assert main(["show", str(report_path), "--format=json"]) == 0
 
@@ -135,6 +141,8 @@ def test_show_json_reads_direct_report(
     assert view["kind"] == "loom.compile_report.show"
     assert view["schema_version"] == 0
     assert view["missing_evidence"] == "omitted_metrics_are_unavailable"
+    assert view["workload"]["dispatch_workgroup_count"] == 4
+    assert view["workload"]["dispatch_subgroup_count"] == 4
     assert view["entries"][0]["identity"] == {"name": "kernel"}
 
 

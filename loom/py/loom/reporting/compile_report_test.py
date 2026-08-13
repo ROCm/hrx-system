@@ -90,6 +90,7 @@ def _compile_report() -> dict[str, object]:
                 "final": {"register_count": 96},
                 "scheduled_pressure": {"peak_live_units": 88},
             },
+            "subgroup_size": 64,
             "resident_subgroups_per_simd": 5,
             "occupancy_percent": 31,
             "limiting_resource": "amdgpu.vgpr",
@@ -163,6 +164,7 @@ def _compile_report() -> dict[str, object]:
                 {"index": 1, "key": "model.input_size", "value": "2048"},
             ],
         },
+        "target_resources": {"subgroup_size": 64},
         "workload": workload,
         "entries": {"count": 1, "rows": [entry]},
     }
@@ -587,6 +589,17 @@ def test_show_separates_facts_analysis_and_unavailable_evidence() -> None:
     compiler_analysis = entry["compiler_analysis"]
 
     assert view["missing_evidence"] == "omitted_metrics_are_unavailable"
+    assert view["workload"] == {
+        "workgroup_size": {"x": 128, "y": 1, "z": 1, "flat": 128},
+        "workitems_per_workgroup": 128,
+        "workgroup_count": {"x": 12, "y": 8, "z": 1, "flat": 96},
+        "dispatch_workgroup_count": 96,
+        "subgroup_size": 64,
+        "subgroups_per_workgroup": 2,
+        "dispatch_subgroup_count": 192,
+        "dispatch_workitem_count": 12288,
+    }
+    assert "workload" not in entry
     assert artifact_facts["code_byte_count"] == 512
     assert artifact_facts["private_memory_bytes"] == 0
     assert artifact_facts["body_instruction_count"] == 97
@@ -607,10 +620,59 @@ def test_show_separates_facts_analysis_and_unavailable_evidence() -> None:
     text = format_compile_report_show_text(view)
     assert "Artifact facts" in text
     assert "Compiler analysis" in text
+    assert "Workload (proven static launch)" in text
+    assert "dispatch subgroups: 192" in text
     assert "code bytes: 512 B" in text
     assert "WMMA instructions: 8" in text
     assert "target-planned wait actions: 10" in text
     assert "partial waits: unavailable" in text
+
+
+def test_forced_diff_expands_workload_before_artifact_metrics() -> None:
+    baseline_report = _compile_report()
+    baseline = parse_compile_report(baseline_report, source="baseline.json")
+    candidate_report = deepcopy(baseline_report)
+    for workload in (
+        candidate_report["workload"],
+        candidate_report["entries"]["rows"][0]["workload"],
+    ):
+        workload["workgroup_count"] = {
+            "x": 48,
+            "y": 8,
+            "z": 1,
+            "flat": 384,
+        }
+        workload["dispatch_workitem_count"] = 49152
+    candidate_report["entries"]["rows"][0]["body_instruction_count"] = 48
+    candidate = parse_compile_report(candidate_report, source="candidate.json")
+
+    view = build_compile_report_diff(baseline, candidate, force=True)
+
+    workload = view["workload"]
+    assert workload["changed"]["dispatch_workgroup_count"] == {
+        "baseline": 96,
+        "candidate": 384,
+        "delta": 288,
+        "change_percent": 300.0,
+    }
+    assert workload["changed"]["dispatch_subgroup_count"]["candidate"] == 768
+    assert workload["changed"]["dispatch_workitem_count"]["candidate"] == 49152
+    assert "workload" not in view["entries"][0]
+    text = format_compile_report_diff_text(view)
+    assert "workload mismatches: 2; expanded below" in text
+    assert "report.workload:" not in text
+    assert "entry.workload:" not in text
+    assert text.index("Workload (proven static launch)") < text.index("Artifact facts")
+    assert "dispatch subgroups: 192 -> 768, delta +576 (+300.00%)" in text
+
+
+def test_show_rejects_inconsistent_workload_products() -> None:
+    report = _compile_report()
+    report["workload"]["workgroup_count"]["flat"] = 95
+    document = parse_compile_report(report, source="report.json")
+
+    with pytest.raises(CompileReportError, match=r"workgroup_count.flat: expected 96"):
+        build_compile_report_show(document)
 
 
 def test_show_and_diff_preserve_move_cause_breakdown() -> None:
