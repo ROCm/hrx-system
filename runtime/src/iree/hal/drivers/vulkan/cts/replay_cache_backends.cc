@@ -61,7 +61,7 @@ static bool vulkan_replay_cache_registered_ =
          {"vulkan_replay_cache", CreateVulkanReplayCacheDeviceWithCache,
           /*executable_target_family=*/nullptr,
           /*executable_target_key=*/nullptr,
-          /*executable_data=*/nullptr, RecordingMode::kDirect,
+          /*executable_data=*/nullptr, RecordingMode::kIndirect,
           /*unsupported_tests=*/{},
           /*expected_failures=*/{}},
          {"async_queue", "file_io", "vulkan", "vulkan_replay_cache"},

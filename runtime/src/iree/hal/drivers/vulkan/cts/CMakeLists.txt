@@ -427,6 +427,29 @@ endif()
 if(IREE_HAL_DRIVER_VULKAN)
 iree_cc_test(
   NAME
+    command_buffer_atomic_tests
+  SRCS
+    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
+  DEPS
+    ::backends
+    ::replay_cache_backends
+    iree::base::tooling::flags
+    iree::hal::cts::command_buffer::atomic_test
+    iree::hal::cts::util::registry
+    iree::hal::cts::util::test_base
+    iree::testing::gtest
+  LABELS
+    "iree-build-requirement=runtime.hal.vulkan"
+    "iree-run-requirement=runtime.resource.vulkan_device"
+    "runtime-resource=vulkan-device"
+  RESOURCE_GROUP
+    iree-hal-drivers-vulkan-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_VULKAN)
+iree_cc_test(
+  NAME
     command_buffer_fill_buffer_tests
   SRCS
     "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
@@ -621,6 +644,28 @@ iree_cc_test(
     ::backends
     iree::base::tooling::flags
     iree::hal::cts::queue::queue_alloca_test
+    iree::hal::cts::util::registry
+    iree::hal::cts::util::test_base
+    iree::testing::gtest
+  LABELS
+    "iree-build-requirement=runtime.hal.vulkan"
+    "iree-run-requirement=runtime.resource.vulkan_device"
+    "runtime-resource=vulkan-device"
+  RESOURCE_GROUP
+    iree-hal-drivers-vulkan-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_VULKAN)
+iree_cc_test(
+  NAME
+    queue_atomic_tests
+  SRCS
+    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
+  DEPS
+    ::backends
+    iree::base::tooling::flags
+    iree::hal::cts::queue::queue_atomic_test
     iree::hal::cts::util::registry
     iree::hal::cts::util::test_base
     iree::testing::gtest

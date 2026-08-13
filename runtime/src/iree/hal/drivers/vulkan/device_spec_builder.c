@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#include "iree/hal/drivers/vulkan/atomic.h"
+
 IREE_API_EXPORT iree_status_t iree_hal_vulkan_device_spec_builder_add_facet(
     iree_hal_device_spec_builder_t* builder,
     const iree_hal_vulkan_device_spec_t* spec,
@@ -196,6 +198,10 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_memory(
   }
 
   if (iree_status_is_ok(status)) {
+    const iree_hal_atomic_operation_capabilities_t atomic_operations =
+        iree_hal_vulkan_atomic_capabilities(
+            params->device_plan->enabled_features)
+            .operations;
     memset(heaps, 0, heap_count * sizeof(*heaps));
     memset(memory_types, 0, heap_count * sizeof(*memory_types));
     for (iree_host_size_t i = 0; i < heap_count; ++i) {
@@ -219,6 +225,12 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_memory(
           .optimal_transfer_granularity = 1,
           .flags = IREE_HAL_MEMORY_TYPE_SPEC_FLAG_NONE,
       };
+      if (iree_all_bits_set(allocator_heap->type,
+                            IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE) &&
+          iree_all_bits_set(allocator_heap->allowed_usage,
+                            IREE_HAL_BUFFER_USAGE_STORAGE)) {
+        memory_types[i].atomic_operations = atomic_operations;
+      }
     }
 
     iree_hal_device_memory_spec_t memory = {
@@ -357,32 +369,62 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_queues(
     iree_hal_device_spec_builder_t* builder) {
   const iree_hal_vulkan_queue_assignment_t* queue_assignment =
       &params->device_plan->queue_assignment;
-  const uint32_t timestamp_valid_bits =
-      iree_hal_vulkan_device_spec_queue_timestamp_valid_bits(queue_assignment);
-  iree_hal_queue_family_role_flags_t role_flags =
-      IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
-      IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER;
-  if (timestamp_valid_bits != 0) {
-    role_flags |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_PROFILING;
-  }
-  iree_hal_queue_family_spec_t queue_family = {
-      .name = IREE_SV("default"),
-      .queue_count = (uint32_t)queue_assignment->queue_count,
-      .priority_count = 1,
-      .timestamp_valid_bits = timestamp_valid_bits,
-      .timestamp_frequency_hz =
-          iree_hal_vulkan_device_spec_timestamp_frequency_hz(
-              params->physical_device->properties2.properties.limits
-                  .timestampPeriod),
-      .physical_device_affinity = 1ull,
-      .queue_affinity = queue_assignment->compute.affinity |
-                        queue_assignment->transfer.affinity,
-      .role_flags = role_flags,
-      .flags = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_NONE,
+  const iree_hal_atomic_capabilities_t atomic_capabilities =
+      iree_hal_vulkan_atomic_capabilities(
+          params->device_plan->enabled_features);
+  const iree_hal_vulkan_queue_selection_t* queue_selections[] = {
+      &queue_assignment->compute,
+      &queue_assignment->transfer,
   };
+  const iree_string_view_t queue_names[] = {
+      IREE_SV("compute"),
+      IREE_SV("transfer"),
+  };
+  iree_hal_queue_family_spec_t queue_families[IREE_ARRAYSIZE(queue_selections)];
+  const uint64_t timestamp_frequency_hz =
+      iree_hal_vulkan_device_spec_timestamp_frequency_hz(
+          params->physical_device->properties2.properties.limits
+              .timestampPeriod);
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(queue_selections); ++i) {
+    const iree_hal_vulkan_queue_selection_t* queue = queue_selections[i];
+    iree_hal_queue_family_role_flags_t role_flags =
+        IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_HOST_CALL;
+    if (iree_all_bits_set(queue->flags, VK_QUEUE_COMPUTE_BIT)) {
+      role_flags |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH;
+    }
+    if (iree_all_bits_set(queue->flags, VK_QUEUE_TRANSFER_BIT)) {
+      role_flags |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER;
+    }
+    if (queue->timestamp_valid_bits != 0) {
+      role_flags |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_PROFILING;
+    }
+    const bool supports_atomics =
+        iree_all_bits_set(queue->flags, VK_QUEUE_COMPUTE_BIT) &&
+        (atomic_capabilities.operations.device_scope_32 != 0 ||
+         atomic_capabilities.operations.device_scope_64 != 0 ||
+         atomic_capabilities.operations.system_scope_32 != 0 ||
+         atomic_capabilities.operations.system_scope_64 != 0);
+    if (supports_atomics) {
+      role_flags |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC;
+    }
+    queue_families[i] = (iree_hal_queue_family_spec_t){
+        .name = queue_names[i],
+        .queue_count = 1,
+        .priority_count = 1,
+        .timestamp_valid_bits = queue->timestamp_valid_bits,
+        .timestamp_frequency_hz = timestamp_frequency_hz,
+        .physical_device_affinity = 1ull,
+        .queue_affinity = queue->affinity,
+        .role_flags = role_flags,
+        .flags = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_NONE,
+    };
+    if (supports_atomics) {
+      queue_families[i].atomic_capabilities = atomic_capabilities;
+    }
+  }
   iree_hal_device_queue_spec_t queues = {
-      .family_count = 1,
-      .families = &queue_family,
+      .family_count = IREE_ARRAYSIZE(queue_families),
+      .families = queue_families,
       .flags = IREE_HAL_DEVICE_QUEUE_SPEC_FLAG_NONE,
   };
   return iree_hal_device_spec_builder_set_queues(builder, &queues);
