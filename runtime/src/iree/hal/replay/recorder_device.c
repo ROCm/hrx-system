@@ -586,7 +586,7 @@ static iree_status_t iree_hal_replay_device_queue_dealloca(
       iree_make_const_byte_span(signal_payloads, signal_payloads_size),
   };
 
-  iree_hal_replay_pending_record_t pending_record;
+  iree_hal_replay_pending_record_t pending_record = {0};
   if (iree_status_is_ok(status)) {
     status = iree_hal_replay_recorder_begin_operation(
         device->recorder, device->device_id, device->device_id,
@@ -653,7 +653,7 @@ static iree_status_t iree_hal_replay_device_queue_fill(
       iree_make_const_byte_span(pattern, pattern_length),
   };
 
-  iree_hal_replay_pending_record_t pending_record;
+  iree_hal_replay_pending_record_t pending_record = {0};
   if (iree_status_is_ok(status)) {
     status = iree_hal_replay_recorder_begin_operation(
         device->recorder, device->device_id, device->device_id,
