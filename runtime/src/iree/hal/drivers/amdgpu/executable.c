@@ -728,32 +728,6 @@ static iree_status_t iree_hal_amdgpu_executable_calculate_kernarg_block_count(
       layout->total_kernarg_size, out_kernarg_block_count);
 }
 
-static iree_status_t
-iree_hal_amdgpu_executable_query_kernel_descriptor_host_ptr(
-    const iree_hal_amdgpu_libhsa_t* libhsa, uint64_t kernel_object,
-    const iree_hal_amdgpu_kernel_descriptor_t** out_descriptor) {
-  *out_descriptor = NULL;
-  if (kernel_object == 0) return iree_ok_status();
-
-  const void* host_ptr = NULL;
-  const hsa_status_t hsa_status =
-      libhsa->amd_loader.hsa_ven_amd_loader_query_host_address(
-          (void*)(uintptr_t)kernel_object, &host_ptr);
-  if (hsa_status != HSA_STATUS_SUCCESS) {
-    return iree_status_from_hsa_status(__FILE__, __LINE__, hsa_status,
-                                       "hsa_ven_amd_loader_query_host_address",
-                                       "querying kernel object host address");
-  }
-  if (IREE_UNLIKELY(!host_ptr)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU kernel object host address translation returned NULL");
-  }
-
-  *out_descriptor = (const iree_hal_amdgpu_kernel_descriptor_t*)host_ptr;
-  return iree_ok_status();
-}
-
 static iree_status_t iree_hal_amdgpu_executable_initialize_dispatch_descriptor(
     const iree_hal_amdgpu_libhsa_t* libhsa,
     iree_hal_amdgpu_gfxip_version_t gfxip_version,
@@ -863,9 +837,8 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_dispatch_descriptor(
     return iree_ok_status();
   }
   const iree_hal_amdgpu_kernel_descriptor_t* amdhsa_descriptor = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_executable_query_kernel_descriptor_host_ptr(
-          libhsa, kernel_object, &amdhsa_descriptor));
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_loaded_code_object_query_host_address(
+      libhsa, kernel_object, (const void**)&amdhsa_descriptor));
   out_descriptor->pm4_group_segment_fixed_size =
       amdhsa_descriptor->group_segment_fixed_size;
   const bool uses_workgroup_clusters =

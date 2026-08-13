@@ -17,6 +17,33 @@ typedef struct iree_hal_amdgpu_loaded_code_object_find_state_t {
   hsa_loaded_code_object_t loaded_code_object;
 } iree_hal_amdgpu_loaded_code_object_find_state_t;
 
+iree_status_t iree_hal_amdgpu_loaded_code_object_query_host_address(
+    const iree_hal_amdgpu_libhsa_t* libhsa, uint64_t device_address,
+    const void** out_host_pointer) {
+  IREE_ASSERT_ARGUMENT(libhsa);
+  IREE_ASSERT_ARGUMENT(out_host_pointer);
+  *out_host_pointer = NULL;
+  if (IREE_UNLIKELY(device_address == 0)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "loaded code-object device address is required");
+  }
+
+  hsa_status_t hsa_status =
+      libhsa->amd_loader.hsa_ven_amd_loader_query_host_address(
+          (void*)(uintptr_t)device_address, out_host_pointer);
+  if (hsa_status != HSA_STATUS_SUCCESS) {
+    return iree_status_from_hsa_status(
+        __FILE__, __LINE__, hsa_status, "hsa_ven_amd_loader_query_host_address",
+        "translating loaded code-object device address");
+  }
+  if (IREE_UNLIKELY(!*out_host_pointer)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "loaded code-object host address translation returned NULL");
+  }
+  return iree_ok_status();
+}
+
 static hsa_status_t iree_hal_amdgpu_loaded_code_object_iterate(
     hsa_executable_t executable, hsa_loaded_code_object_t loaded_code_object,
     void* user_data) {
@@ -90,13 +117,8 @@ iree_status_t iree_hal_amdgpu_loaded_code_object_query_range(
         "querying loaded executable code-object load base");
   }
 
-  hsa_status = libhsa->amd_loader.hsa_ven_amd_loader_query_host_address(
-      (void*)range.device_pointer, (const void**)&range.host_pointer);
-  if (hsa_status != HSA_STATUS_SUCCESS) {
-    return iree_status_from_hsa_status(
-        __FILE__, __LINE__, hsa_status, "hsa_ven_amd_loader_query_host_address",
-        "querying loaded executable code-object host address");
-  }
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_loaded_code_object_query_host_address(
+      libhsa, range.device_pointer, (const void**)&range.host_pointer));
 
   hsa_status =
       libhsa->amd_loader.hsa_ven_amd_loader_loaded_code_object_get_info(

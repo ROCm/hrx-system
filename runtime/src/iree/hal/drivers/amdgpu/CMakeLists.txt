@@ -339,6 +339,7 @@ iree_cc_library(
     iree::hal
     iree::hal::drivers::amdgpu::abi
     iree::hal::drivers::amdgpu::device::atomic
+    iree::hal::drivers::amdgpu::device::atomic_pm4
     iree::hal::drivers::amdgpu::device::binaries::toc
     iree::hal::drivers::amdgpu::device::blit
     iree::hal::drivers::amdgpu::device::dispatch

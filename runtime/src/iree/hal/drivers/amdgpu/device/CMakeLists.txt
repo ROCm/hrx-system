@@ -115,6 +115,24 @@ endif()
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_library(
   NAME
+    atomic_pm4
+  HDRS
+    "atomic_pm4.h"
+  SRCS
+    "atomic_pm4.c"
+  DEPS
+    ::headers
+    iree::hal
+    iree::hal::drivers::amdgpu::util::libhsa
+    iree::hal::drivers::amdgpu::util::loaded_code_object
+    iree::hal::drivers::amdgpu::util::pm4_dispatch
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
     blit
   SRCS
     "blit.c"

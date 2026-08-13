@@ -24,6 +24,15 @@ typedef struct iree_hal_amdgpu_loaded_code_object_range_t {
   uint64_t byte_length;
 } iree_hal_amdgpu_loaded_code_object_range_t;
 
+// Translates a device address in an HSA loaded code object to its stable host
+// mapping.
+//
+// The returned pointer is owned by the HSA loader and remains valid while the
+// HSA executable containing |device_address| remains alive.
+iree_status_t iree_hal_amdgpu_loaded_code_object_query_host_address(
+    const iree_hal_amdgpu_libhsa_t* libhsa, uint64_t device_address,
+    const void** out_host_pointer);
+
 // Finds the loaded code object in |executable| for |device_agent|.
 iree_status_t iree_hal_amdgpu_loaded_code_object_find(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_executable_t executable,

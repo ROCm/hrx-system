@@ -296,6 +296,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amdgpu/abi",
         "//runtime/src/iree/hal/drivers/amdgpu/device:atomic",
+        "//runtime/src/iree/hal/drivers/amdgpu/device:atomic_pm4",
         "//runtime/src/iree/hal/drivers/amdgpu/device:blit",
         "//runtime/src/iree/hal/drivers/amdgpu/device:dispatch",
         "//runtime/src/iree/hal/drivers/amdgpu/device:headers",

@@ -85,6 +85,23 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "atomic_pm4",
+    srcs = [
+        "atomic_pm4.c",
+    ],
+    hdrs = [
+        "atomic_pm4.h",
+    ],
+    deps = [
+        ":headers",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:libhsa",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:loaded_code_object",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:pm4_dispatch",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "blit",
     srcs = [
         "blit.c",

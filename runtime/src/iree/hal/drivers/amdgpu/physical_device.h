@@ -10,6 +10,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
+#include "iree/hal/drivers/amdgpu/device/atomic_pm4.h"
 #include "iree/hal/drivers/amdgpu/host_queue.h"
 #include "iree/hal/drivers/amdgpu/host_queue_staging.h"
 #include "iree/hal/drivers/amdgpu/physical_device_capabilities.h"
@@ -295,6 +296,8 @@ typedef struct iree_hal_amdgpu_physical_device_t {
 
   // Builtin kernel table for this GPU agent.
   iree_hal_amdgpu_device_kernels_t device_kernels;
+  // PM4 launch metadata derived from the builtin atomic kernels.
+  iree_hal_amdgpu_device_atomic_pm4_context_t atomic_pm4_context;
   // Host/device-neutral transfer context that points into |device_kernels|.
   iree_hal_amdgpu_device_buffer_transfer_context_t buffer_transfer_context;
 
