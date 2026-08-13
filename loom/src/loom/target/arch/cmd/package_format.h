@@ -9,11 +9,10 @@
 // The fixed header is followed without padding by the export table, flattened
 // executable-entry table, string table, and payload storage. Strings appear in
 // export order as one export name followed by its entry names. Payloads appear
-// in export order as one command program followed by its optional aggregate
-// host launch-count program. Name offsets are relative to the string table;
-// payload offsets are relative to the artifact. Multi-byte fields may be
-// unaligned and must be accessed with the IREE unaligned little-endian helpers.
-// All offsets, lengths, and counts are 32-bit values.
+// in export order as one command program per export. Name offsets are relative
+// to the string table; payload offsets are relative to the artifact. Multi-byte
+// fields may be unaligned and must be accessed with the IREE unaligned
+// little-endian helpers. All offsets, lengths, and counts are 32-bit values.
 
 #ifndef LOOM_TARGET_ARCH_CMD_PACKAGE_FORMAT_H_
 #define LOOM_TARGET_ARCH_CMD_PACKAGE_FORMAT_H_
@@ -51,9 +50,7 @@ enum {
   LOOM_CMD_PROGRAM_PACKAGE_EXPORT_ENTRY_COUNT_OFFSET = 12,
   LOOM_CMD_PROGRAM_PACKAGE_EXPORT_PROGRAM_OFFSET_OFFSET = 16,
   LOOM_CMD_PROGRAM_PACKAGE_EXPORT_PROGRAM_LENGTH_OFFSET = 20,
-  LOOM_CMD_PROGRAM_PACKAGE_EXPORT_HOST_PROGRAM_OFFSET_OFFSET = 24,
-  LOOM_CMD_PROGRAM_PACKAGE_EXPORT_HOST_PROGRAM_LENGTH_OFFSET = 28,
-  LOOM_CMD_PROGRAM_PACKAGE_EXPORT_SIZE = 32,
+  LOOM_CMD_PROGRAM_PACKAGE_EXPORT_SIZE = 24,
 
   LOOM_CMD_PROGRAM_PACKAGE_ENTRY_EXECUTABLE_INDEX_OFFSET = 0,
   LOOM_CMD_PROGRAM_PACKAGE_ENTRY_NAME_OFFSET_OFFSET = 4,
@@ -69,7 +66,7 @@ typedef struct loom_cmd_program_package_format_layout_t {
   uint32_t entry_offset;
   // First byte of concatenated export and entry names.
   uint32_t string_offset;
-  // First byte of concatenated command and host program payloads.
+  // First byte of concatenated command program payloads.
   uint32_t payload_offset;
   // Total canonical artifact byte length.
   uint32_t total_length;

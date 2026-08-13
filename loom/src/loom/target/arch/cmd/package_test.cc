@@ -156,19 +156,16 @@ static iree_const_byte_span_t AsByteSpan(const std::vector<uint8_t>& data) {
 static void BuildPackageInputs(
     const loom_cmd_program_t* direct_program,
     const loom_cmd_program_t* indirect_program,
-    const std::vector<uint8_t>& host_program,
     loom_cmd_program_package_source_entry_t (&entries)[2],
     loom_cmd_program_package_source_export_t (&exports)[2]) {
   entries[0] = {/*.executable_index=*/0, /*.name=*/IREE_SV("prefill_qkv")};
   entries[1] = {/*.executable_index=*/0, /*.name=*/IREE_SV("decode_qkv")};
   exports[0] = {/*.name=*/IREE_SV("prefill"),
                 /*.program=*/direct_program,
-                /*.host_program_data=*/iree_const_byte_span_empty(),
                 /*.entries=*/&entries[0],
                 /*.entry_count=*/1};
   exports[1] = {/*.name=*/IREE_SV("decode"),
                 /*.program=*/indirect_program,
-                /*.host_program_data=*/AsByteSpan(host_program),
                 /*.entries=*/&entries[1],
                 /*.entry_count=*/1};
 }
@@ -176,7 +173,6 @@ static void BuildPackageInputs(
 TEST(CmdProgramPackageTest, BuildsAndParsesCanonicalMultiRootPackage) {
   const std::vector<uint8_t> direct_data = BuildProgram(false);
   const std::vector<uint8_t> indirect_data = BuildProgram(true);
-  const std::vector<uint8_t> host_program = {0x4C, 0x4F, 0x4F, 0x4D};
   loom_cmd_program_t direct_program = {};
   loom_cmd_program_t indirect_program = {};
   IREE_ASSERT_OK(
@@ -186,8 +182,7 @@ TEST(CmdProgramPackageTest, BuildsAndParsesCanonicalMultiRootPackage) {
 
   loom_cmd_program_package_source_entry_t entries[2] = {};
   loom_cmd_program_package_source_export_t exports[2] = {};
-  BuildPackageInputs(&direct_program, &indirect_program, host_program, entries,
-                     exports);
+  BuildPackageInputs(&direct_program, &indirect_program, entries, exports);
 
   iree_byte_span_t package_data = iree_byte_span_empty();
   loom_cmd_program_package_t built_package = {};
@@ -204,7 +199,6 @@ TEST(CmdProgramPackageTest, BuildsAndParsesCanonicalMultiRootPackage) {
   const loom_cmd_program_package_export_t prefill =
       loom_cmd_program_package_export_at(&parsed_package, 0);
   EXPECT_TRUE(iree_string_view_equal(prefill.name, IREE_SV("prefill")));
-  EXPECT_EQ(prefill.host_program_data.data_length, 0u);
   EXPECT_EQ(prefill.entry_count, 1u);
   loom_cmd_program_t parsed_prefill = {};
   IREE_EXPECT_OK(loom_cmd_program_parse(prefill.program_data, &parsed_prefill));
@@ -212,10 +206,6 @@ TEST(CmdProgramPackageTest, BuildsAndParsesCanonicalMultiRootPackage) {
   loom_cmd_program_package_export_t decode = {};
   ASSERT_TRUE(loom_cmd_program_package_lookup_export(
       &parsed_package, IREE_SV("decode"), &decode));
-  EXPECT_EQ(decode.host_program_data.data_length, host_program.size());
-  EXPECT_EQ(memcmp(decode.host_program_data.data, host_program.data(),
-                   host_program.size()),
-            0);
   const loom_cmd_program_package_entry_t decode_entry =
       loom_cmd_program_package_export_entry_at(&parsed_package, &decode, 0);
   EXPECT_EQ(decode_entry.executable_index, 0u);
@@ -226,7 +216,6 @@ TEST(CmdProgramPackageTest, BuildsAndParsesCanonicalMultiRootPackage) {
 TEST(CmdProgramPackageTest, RejectsInconsistentBuildAssociations) {
   const std::vector<uint8_t> direct_data = BuildProgram(false);
   const std::vector<uint8_t> indirect_data = BuildProgram(true);
-  const std::vector<uint8_t> host_program = {0x4C};
   loom_cmd_program_t direct_program = {};
   loom_cmd_program_t indirect_program = {};
   IREE_ASSERT_OK(
@@ -235,18 +224,10 @@ TEST(CmdProgramPackageTest, RejectsInconsistentBuildAssociations) {
       loom_cmd_program_parse(AsByteSpan(indirect_data), &indirect_program));
   loom_cmd_program_package_source_entry_t entries[2] = {};
   loom_cmd_program_package_source_export_t exports[2] = {};
-  BuildPackageInputs(&direct_program, &indirect_program, host_program, entries,
-                     exports);
+  BuildPackageInputs(&direct_program, &indirect_program, entries, exports);
 
   iree_byte_span_t package_data = iree_byte_span_empty();
   loom_cmd_program_package_t package = {};
-  exports[1].host_program_data = iree_const_byte_span_empty();
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_cmd_program_package_build(
-                            exports, IREE_ARRAYSIZE(exports),
-                            iree_allocator_system(), &package_data, &package));
-
-  exports[1].host_program_data = AsByteSpan(host_program);
   exports[1].name = exports[0].name;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
                         loom_cmd_program_package_build(
@@ -264,7 +245,6 @@ TEST(CmdProgramPackageTest, RejectsInconsistentBuildAssociations) {
 TEST(CmdProgramPackageTest, RejectsMalformedCanonicalStorage) {
   const std::vector<uint8_t> direct_data = BuildProgram(false);
   const std::vector<uint8_t> indirect_data = BuildProgram(true);
-  const std::vector<uint8_t> host_program = {0x4C};
   loom_cmd_program_t direct_program = {};
   loom_cmd_program_t indirect_program = {};
   IREE_ASSERT_OK(
@@ -273,8 +253,7 @@ TEST(CmdProgramPackageTest, RejectsMalformedCanonicalStorage) {
       loom_cmd_program_parse(AsByteSpan(indirect_data), &indirect_program));
   loom_cmd_program_package_source_entry_t entries[2] = {};
   loom_cmd_program_package_source_export_t exports[2] = {};
-  BuildPackageInputs(&direct_program, &indirect_program, host_program, entries,
-                     exports);
+  BuildPackageInputs(&direct_program, &indirect_program, entries, exports);
   iree_byte_span_t package_data = iree_byte_span_empty();
   loom_cmd_program_package_t package = {};
   IREE_ASSERT_OK(loom_cmd_program_package_build(

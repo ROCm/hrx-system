@@ -30,8 +30,6 @@ typedef struct loom_cmd_program_package_source_export_t {
   iree_string_view_t name;
   // Validated portable command program to embed.
   const loom_cmd_program_t* program;
-  // Optional opaque aggregate host launch-count program bytes.
-  iree_const_byte_span_t host_program_data;
   // Root-local executable entry associations in command ABI order.
   const loom_cmd_program_package_source_entry_t* entries;
   // Number of entries in |entries|.
@@ -44,8 +42,6 @@ typedef struct loom_cmd_program_package_export_t {
   iree_string_view_t name;
   // Embedded portable command program bytes.
   iree_const_byte_span_t program_data;
-  // Embedded opaque aggregate host launch-count program bytes, or empty.
-  iree_const_byte_span_t host_program_data;
   // First entry in the package-global entry table.
   uint32_t first_entry;
   // Number of root-local executable entry associations.
@@ -78,7 +74,7 @@ typedef struct loom_cmd_program_package_t {
   uint32_t entry_count;
   // Concatenated export and entry names.
   iree_const_byte_span_t strings;
-  // Concatenated command and host program payloads.
+  // Concatenated command program payloads.
   iree_const_byte_span_t payloads;
 } loom_cmd_program_package_t;
 
@@ -97,8 +93,8 @@ iree_status_t loom_cmd_program_package_build(
 // Parses and validates one complete multi-root command package.
 //
 // This is the untrusted byte boundary. Successful parsing guarantees that all
-// table ranges, strings, payloads, nested command programs, executable entry
-// associations, and host-program requirements satisfy the canonical format.
+// table ranges, strings, payloads, nested command programs, and executable
+// entry associations satisfy the canonical format.
 // Parsing borrows |data| and performs no allocations.
 iree_status_t loom_cmd_program_package_parse(
     iree_const_byte_span_t data, loom_cmd_program_package_t* out_package);

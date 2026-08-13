@@ -44,24 +44,15 @@ loom_cmd_program_package_export_t loom_cmd_program_package_export_at(
       record + LOOM_CMD_PROGRAM_PACKAGE_EXPORT_PROGRAM_OFFSET_OFFSET);
   const uint32_t program_length = iree_unaligned_load_le_u32(
       record + LOOM_CMD_PROGRAM_PACKAGE_EXPORT_PROGRAM_LENGTH_OFFSET);
-  const uint32_t host_program_offset = iree_unaligned_load_le_u32(
-      record + LOOM_CMD_PROGRAM_PACKAGE_EXPORT_HOST_PROGRAM_OFFSET_OFFSET);
-  const uint32_t host_program_length = iree_unaligned_load_le_u32(
-      record + LOOM_CMD_PROGRAM_PACKAGE_EXPORT_HOST_PROGRAM_LENGTH_OFFSET);
   IREE_ASSERT_LE(name_offset, package->strings.data_length);
   IREE_ASSERT_LE(name_length, package->strings.data_length - name_offset);
   IREE_ASSERT_LE(program_offset, package->storage.data_length);
   IREE_ASSERT_LE(program_length, package->storage.data_length - program_offset);
-  IREE_ASSERT_LE(host_program_offset, package->storage.data_length);
-  IREE_ASSERT_LE(host_program_length,
-                 package->storage.data_length - host_program_offset);
   return (loom_cmd_program_package_export_t){
       .name = iree_make_string_view(
           (const char*)package->strings.data + name_offset, name_length),
       .program_data = iree_make_const_byte_span(
           package->storage.data + program_offset, program_length),
-      .host_program_data = iree_make_const_byte_span(
-          package->storage.data + host_program_offset, host_program_length),
       .first_entry = iree_unaligned_load_le_u32(
           record + LOOM_CMD_PROGRAM_PACKAGE_EXPORT_FIRST_ENTRY_OFFSET),
       .entry_count = iree_unaligned_load_le_u32(
@@ -170,32 +161,10 @@ static iree_status_t loom_cmd_program_package_analyze_sources(
           "command package export '%.*s' has no entry table",
           (int)program_export->name.size, program_export->name.data);
     }
-    if (program_export->host_program_data.data_length != 0 &&
-        program_export->host_program_data.data == NULL) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "command package export '%.*s' has invalid host program storage",
-          (int)program_export->name.size, program_export->name.data);
-    }
-    const bool requires_host_program =
-        program_export->program->requirements.launch_counts.binding_index !=
-        UINT32_MAX;
-    if (requires_host_program !=
-        (program_export->host_program_data.data_length != 0)) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "command package export '%.*s' has inconsistent host launch "
-          "program storage",
-          (int)program_export->name.size, program_export->name.data);
-    }
-
     if (!iree_host_size_checked_add(string_length, program_export->name.size,
                                     &string_length) ||
         !iree_host_size_checked_add(
             payload_length, program_export->program->storage.data_length,
-            &payload_length) ||
-        !iree_host_size_checked_add(
-            payload_length, program_export->host_program_data.data_length,
             &payload_length) ||
         !iree_host_size_checked_add(entry_count, program_export->entry_count,
                                     &entry_count)) {
@@ -329,20 +298,6 @@ iree_status_t loom_cmd_program_package_build(
     memcpy(data + next_payload, program_export->program->storage.data,
            program_export->program->storage.data_length);
     next_payload += (uint32_t)program_export->program->storage.data_length;
-    iree_unaligned_store_le_u32(
-        export_record +
-            LOOM_CMD_PROGRAM_PACKAGE_EXPORT_HOST_PROGRAM_OFFSET_OFFSET,
-        next_payload);
-    iree_unaligned_store_le_u32(
-        export_record +
-            LOOM_CMD_PROGRAM_PACKAGE_EXPORT_HOST_PROGRAM_LENGTH_OFFSET,
-        (uint32_t)program_export->host_program_data.data_length);
-    if (program_export->host_program_data.data_length != 0) {
-      memcpy(data + next_payload, program_export->host_program_data.data,
-             program_export->host_program_data.data_length);
-      next_payload += (uint32_t)program_export->host_program_data.data_length;
-    }
-
     for (iree_host_size_t j = 0; j < program_export->entry_count; ++j) {
       const loom_cmd_program_package_source_entry_t* entry =
           &program_export->entries[j];
@@ -393,10 +348,6 @@ static iree_status_t loom_cmd_program_package_validate_contents(
         record + LOOM_CMD_PROGRAM_PACKAGE_EXPORT_PROGRAM_OFFSET_OFFSET);
     const uint32_t program_length = iree_unaligned_load_le_u32(
         record + LOOM_CMD_PROGRAM_PACKAGE_EXPORT_PROGRAM_LENGTH_OFFSET);
-    const uint32_t host_program_offset = iree_unaligned_load_le_u32(
-        record + LOOM_CMD_PROGRAM_PACKAGE_EXPORT_HOST_PROGRAM_OFFSET_OFFSET);
-    const uint32_t host_program_length = iree_unaligned_load_le_u32(
-        record + LOOM_CMD_PROGRAM_PACKAGE_EXPORT_HOST_PROGRAM_LENGTH_OFFSET);
 
     if (name_length == 0 || name_offset != expected_string ||
         name_length > package->strings.data_length - expected_string) {
@@ -420,15 +371,6 @@ static iree_status_t loom_cmd_program_package_validate_contents(
                               i);
     }
     expected_payload += program_length;
-    if (host_program_offset != expected_payload ||
-        host_program_length > package->storage.data_length - expected_payload) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "command package export %" PRIu32
-                              " has a noncanonical host payload",
-                              i);
-    }
-    expected_payload += host_program_length;
-
     const loom_cmd_program_package_export_t program_export =
         loom_cmd_program_package_export_at(package, i);
     for (uint32_t j = 0; j < i; ++j) {
@@ -453,16 +395,6 @@ static iree_status_t loom_cmd_program_package_validate_contents(
                               program_export.name.data, entry_count,
                               program.requirements.entry_count);
     }
-    const bool requires_host_program =
-        program.requirements.launch_counts.binding_index != UINT32_MAX;
-    if (requires_host_program != (host_program_length != 0)) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "command package export '%.*s' has inconsistent host launch "
-          "program storage",
-          (int)program_export.name.size, program_export.name.data);
-    }
-
     for (uint32_t j = 0; j < entry_count; ++j) {
       const uint8_t* entry_record =
           package->entry_table +
