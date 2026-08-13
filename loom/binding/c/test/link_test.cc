@@ -1096,6 +1096,57 @@ func.def public @from_bytecode(%x: i32) -> (i32) {
   EXPECT_TRUE(ModuleHasSymbol(linked_module, "from_bytecode"));
 }
 
+TEST(LinkTest, ArchiveStripRemovesBytecodeTestSymbols) {
+  std::vector<uint8_t> bytecode = WriteBytecodeModule(R"(
+func.def public @kernel(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+check.case public @kernel_case {
+  %input = check.literal value(1) : i32
+  %actual = func.call @kernel(%input) : (i32) -> (i32)
+  check.expect.equal actual(%actual) expected(%input) : i32
+  check.return
+}
+
+check.benchmark<@kernel_case> @kernel_bench
+)");
+  ContextPtr context = CreateContext();
+  BuilderPtr builder = CreateBuilder(context.get());
+  SourcePtr source = CreateSource(LOOMC_SOURCE_FORMAT_BYTECODE, "module.loombc",
+                                  bytecode.data(), bytecode.size());
+  AddSource(builder.get(), source.get(), "bytecode",
+            LOOMC_LINK_PROVIDER_ROLE_INPUT);
+
+  LinkIndexPtr link_index;
+  FinishIndex(builder.get(), &link_index);
+  LinkerPtr linker = CreateLinker(context.get());
+  WorkspacePtr workspace = CreateWorkspace();
+  loomc_link_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_NONE,
+      /*.structure_size=*/0,
+      /*.next=*/nullptr,
+      /*.link_index=*/nullptr,
+      /*.module_name=*/loomc_string_view_empty(),
+      /*.root_symbols=*/nullptr,
+      /*.root_symbol_count=*/0,
+      /*.flags=*/LOOMC_LINK_FLAG_STRIP_TEST_SYMBOLS,
+  };
+  ResultPtr result;
+  ModulePtr module = LinkIndex(linker.get(), workspace.get(), link_index.get(),
+                               &options, &result);
+
+  ASSERT_TRUE(loomc_result_succeeded(result.get()));
+  ASSERT_NE(module.get(), nullptr);
+  const loom_module_t* linked_module =
+      loomc_module_const_loom_module(module.get());
+  ASSERT_NE(linked_module, nullptr);
+  VerifyModule(linked_module);
+  EXPECT_TRUE(ModuleHasSymbol(linked_module, "kernel"));
+  EXPECT_FALSE(ModuleHasSymbol(linked_module, "kernel_case"));
+  EXPECT_FALSE(ModuleHasSymbol(linked_module, "kernel_bench"));
+}
+
 TEST(LinkTest, LinkModuleMaterializesConfigFromBytecodeIndex) {
   std::vector<uint8_t> bytecode = WriteBytecodeModule(R"(
 config.decl @model36.model.hidden_size : %value: index where [range(%value, 0, 8192), mul(%value, 16)]

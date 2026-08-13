@@ -99,6 +99,7 @@ loom_cc_library(
     loom::ir::facts
     loom::link::linker
     loom::link::module_index
+    loom::link::plan_projection
     loom::link::planner
     loom::ops::func
     loom::ops::global

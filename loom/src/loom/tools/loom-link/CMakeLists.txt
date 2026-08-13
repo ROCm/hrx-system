@@ -30,6 +30,7 @@ loom_cc_binary(
     loom::ir
     loom::link::linker
     loom::link::module_index
+    loom::link::plan_projection
     loom::link::planner
     loom::target::configured::provider
     loom::target::provider
