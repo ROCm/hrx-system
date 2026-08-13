@@ -15,6 +15,7 @@
 #include "benchmark/benchmark.h"
 #include "iree/base/internal/arena.h"
 #include "iree/io/vec_stream.h"
+#include "loom/format/bytecode/reader.h"
 #include "loom/format/bytecode/selected_reader.h"
 #include "loom/format/bytecode/writer.h"
 #include "loom/ir/context.h"
@@ -349,6 +350,9 @@ class ImportedCandidateFixture {
     return bindings;
   }
 
+  loom_context_t* context() { return &context_; }
+  iree_arena_block_pool_t* block_pool() { return &block_pool_; }
+
  private:
   void BuildImporter() {
     CheckStatus(loom_module_allocate(
@@ -646,6 +650,124 @@ static void BM_Plan_ImportedCandidateResolution(benchmark::State& state) {
       candidate_count * sizeof(loom_link_provider_binding_t));
   state.counters["selected_symbols"] = 2.0;
   state.SetComplexityN(candidate_count);
+  loom_link_module_index_free(index);
+}
+
+static loom_module_t* MaterializeIndexedBytecodeModule(
+    const loom_link_module_index_t* index,
+    const loom_link_module_index_module_t* indexed_module,
+    loom_context_t* context, iree_arena_block_pool_t* block_pool) {
+  const loom_link_module_index_provider_t* provider =
+      loom_link_module_index_provider_at(index,
+                                         indexed_module->provider_ordinal);
+  if (!provider || provider->kind != LOOM_LINK_PROVIDER_BYTECODE) {
+    std::abort();
+  }
+  loom_bytecode_read_result_t read_result = {};
+  loom_module_t* module = nullptr;
+  CheckStatus(loom_bytecode_read_module_ordinal(
+      provider->bytecode.contents, provider->bytecode.filename, context,
+      block_pool, (uint16_t)indexed_module->provider_module_ordinal,
+      /*options=*/nullptr, &read_result, &module, iree_allocator_system()));
+  if (read_result.error_count != 0 || module == nullptr) {
+    std::abort();
+  }
+  return module;
+}
+
+static void BM_Link_ImportedCandidateEndToEnd(benchmark::State& state) {
+  const uint32_t candidate_count = (uint32_t)state.range(0);
+  ImportedCandidateFixture fixture(candidate_count);
+  iree_host_size_t chosen_provider_ordinal =
+      LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+  loom_link_module_index_t* index =
+      fixture.BuildIndex(&chosen_provider_ordinal);
+  std::vector<loom_link_provider_binding_t> bindings =
+      fixture.Bindings(chosen_provider_ordinal);
+  loom_link_provider_resolver_t resolver = {};
+  CheckStatus(loom_link_provider_resolver_prepare(
+      loom_link_module_index_provider_count(index), bindings.data(),
+      bindings.size(), &resolver));
+  const iree_string_view_t root = IREE_SV("@function_00000000");
+  const iree_string_view_list_t roots = {
+      /*.count=*/1,
+      /*.values=*/&root,
+  };
+  loom_link_plan_options_t plan_options = {
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/roots,
+  };
+  plan_options.provider_resolver = &resolver;
+
+  iree_arena_allocator_t projection_arena;
+  iree_arena_initialize(fixture.block_pool(), &projection_arena);
+  for (auto _ : state) {
+    loom_link_plan_t* plan = nullptr;
+    CheckStatus(loom_link_plan_build(index, &plan_options,
+                                     iree_allocator_system(), &plan));
+    loom_link_plan_module_projection_t module_projection = {};
+    CheckStatus(loom_link_plan_project_modules(plan, &projection_arena,
+                                               &module_projection));
+    loom_link_plan_linker_import_projection_t import_projection = {};
+    CheckStatus(loom_link_plan_project_linker_imports(
+        index, &module_projection, &projection_arena, &import_projection));
+    if (loom_link_plan_symbol_count(plan) != 2 ||
+        module_projection.modules.count != 2 ||
+        import_projection.provider_imports.count != 0) {
+      std::abort();
+    }
+
+    const loom_linker_options_t linker_options = {
+        /*.module_name=*/IREE_SV("linked"),
+        /*.provider_imports=*/
+        {
+            /*.count=*/import_projection.provider_imports.count,
+            /*.anchor_count=*/import_projection.provider_import_anchors.count,
+        },
+    };
+    loom_linker_t* linker = nullptr;
+    CheckStatus(loom_linker_create(fixture.context(), &linker_options,
+                                   fixture.block_pool(),
+                                   iree_allocator_system(), &linker));
+    for (iree_host_size_t i = 0; i < module_projection.modules.count; ++i) {
+      const loom_link_plan_module_selection_t& selection =
+          module_projection.modules.values[i];
+      if (selection.symbols.count != selection.source_module->symbol_count) {
+        std::abort();
+      }
+      loom_module_t* materialized_module = MaterializeIndexedBytecodeModule(
+          index, selection.source_module, fixture.context(),
+          fixture.block_pool());
+      CheckStatus(loom_linker_add_exact_module(
+          linker, materialized_module, import_projection.modules.values[i]));
+      loom_module_free(materialized_module);
+    }
+    CheckStatus(loom_linker_finalize_roots(linker, roots));
+    loom_module_t* linked_module = nullptr;
+    CheckStatus(loom_linker_finish(linker, &linked_module));
+    if (linked_module == nullptr || linked_module->symbols.count != 1) {
+      std::abort();
+    }
+    benchmark::DoNotOptimize(linked_module);
+
+    state.PauseTiming();
+    loom_module_free(linked_module);
+    loom_linker_free(linker);
+    loom_link_plan_free(plan);
+    iree_arena_reset(&projection_arena);
+    state.ResumeTiming();
+  }
+
+  state.counters["materialized_modules"] = 2.0;
+  state.counters["provider_bindings"] = static_cast<double>(candidate_count);
+  state.counters["providers"] = static_cast<double>(candidate_count + 1u);
+  state.counters["rejected_provider_bodies"] =
+      static_cast<double>(candidate_count - 1u);
+  state.counters["resolver_bytes"] = static_cast<double>(
+      candidate_count * sizeof(loom_link_provider_binding_t));
+  state.counters["selected_symbols"] = 2.0;
+  state.SetComplexityN(candidate_count);
+  iree_arena_deinitialize(&projection_arena);
   loom_link_module_index_free(index);
 }
 
@@ -1103,6 +1225,9 @@ BENCHMARK(BM_Plan_SelectiveChain_Catalog)->Apply(CatalogScales)->Complexity();
 BENCHMARK(BM_Plan_ImportedCandidateResolution)
     ->Apply(CatalogScales)
     ->Complexity();
+BENCHMARK(BM_Link_ImportedCandidateEndToEnd)
+    ->Apply(CatalogScales)
+    ->Complexity(benchmark::oNLogN);
 BENCHMARK(BM_Project_SelectiveLeaf_Catalog)->Apply(CatalogScales)->Complexity();
 BENCHMARK(BM_Project_SelectiveChain_Catalog)
     ->Apply(CatalogScales)

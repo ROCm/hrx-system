@@ -248,6 +248,7 @@ loom_cc_benchmark(
     iree::base::internal::arena
     iree::io::stream
     iree::testing::benchmark_main
+    loom::format::bytecode::reader
     loom::format::bytecode::selected_reader
     loom::format::bytecode::writer
     loom::ir
