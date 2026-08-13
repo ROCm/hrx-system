@@ -109,6 +109,12 @@ IREE_API_EXPORT const char* iree_hal_replay_operation_code_string(
       return "device.queue_execute";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_TIMESTAMP:
       return "device.queue_timestamp";
+    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_WAIT:
+      return "device.queue_atomic_wait";
+    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_STORE:
+      return "device.queue_atomic_store";
+    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_RMW:
+      return "device.queue_atomic_rmw";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_FLUSH:
       return "device.queue_flush";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_PROFILING_BEGIN:
@@ -185,6 +191,12 @@ IREE_API_EXPORT const char* iree_hal_replay_operation_code_string(
       return "command_buffer.collective";
     case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_DISPATCH:
       return "command_buffer.dispatch";
+    case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_WAIT:
+      return "command_buffer.atomic_wait";
+    case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_STORE:
+      return "command_buffer.atomic_store";
+    case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_RMW:
+      return "command_buffer.atomic_rmw";
     case IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_FUNCTION_COUNT:
       return "executable.function_count";
     case IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_FUNCTION_INFO:
@@ -255,6 +267,18 @@ IREE_API_EXPORT const char* iree_hal_replay_payload_type_string(
       return "device_queue_read";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_WRITE:
       return "device_queue_write";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_WAIT:
+      return "command_buffer_atomic_wait";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_STORE:
+      return "command_buffer_atomic_store";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_RMW:
+      return "command_buffer_atomic_rmw";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_WAIT:
+      return "device_queue_atomic_wait";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_STORE:
+      return "device_queue_atomic_store";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_RMW:
+      return "device_queue_atomic_rmw";
     default:
       return "unknown";
   }
