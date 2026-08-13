@@ -34,6 +34,7 @@ IREE_API_EXPORT iree_status_t iree_hal_executable_function_info(
     iree_hal_executable_function_info_t* out_info) {
   IREE_ASSERT_ARGUMENT(executable);
   IREE_ASSERT_ARGUMENT(out_info);
+  memset(out_info, 0, sizeof(*out_info));
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_status_t status = _VTABLE_DISPATCH(executable, function_info)(
       executable, function, out_info);

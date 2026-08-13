@@ -608,6 +608,30 @@ if(_IREE_HAL_AMDGPU_CODE_OBJECT_TARGETS)
 )
 
 iree_runtime_cc_test(
+    name = "executable_test",
+    srcs = [
+        "executable_test.cc",
+        "host_queue_command_buffer_packet.h",
+        "host_queue_command_buffer_test_util.h",
+    ],
+    deps = [
+        ":amdgpu",
+        ":headers",
+        ":queue_affinity",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:registry",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/drivers/amdgpu/cts:testdata_amdgpu",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:packet",
+        "//runtime/src/iree/hal/executable/amdgpu:executable_target",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "host_queue_command_buffer_test",
     srcs = [
         "host_queue_command_buffer_packet.h",

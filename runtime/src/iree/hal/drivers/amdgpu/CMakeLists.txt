@@ -770,6 +770,37 @@ if(_IREE_HAL_AMDGPU_CODE_OBJECT_TARGETS)
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_test(
   NAME
+    executable_test
+  SRCS
+    "executable_test.cc"
+    "host_queue_command_buffer_packet.h"
+    "host_queue_command_buffer_test_util.h"
+  DEPS
+    ::amdgpu
+    ::headers
+    ::queue_affinity
+    iree::base
+    iree::hal
+    iree::hal::cts::util::registry
+    iree::hal::cts::util::test_base
+    iree::hal::drivers::amdgpu::cts::testdata_amdgpu
+    iree::hal::drivers::amdgpu::util::packet
+    iree::hal::executable::amdgpu::executable_target
+    iree::io::file_handle
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
     host_queue_command_buffer_test
   SRCS
     "host_queue_command_buffer_packet.h"

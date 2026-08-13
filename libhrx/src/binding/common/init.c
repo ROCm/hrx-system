@@ -186,6 +186,9 @@ static iree_status_t iree_hal_streaming_query_device_info(
   device->max_shared_memory_per_block = iree_hal_streaming_u32_or_default(
       execution ? execution->maximum_workgroup_local_memory_size : 0,
       (is_gfx942 || is_gfx1100) ? 65536u : 49152u);
+  device->max_shared_memory_per_block_optin = iree_hal_streaming_u32_or_default(
+      execution ? execution->maximum_workgroup_local_memory_size_optin : 0,
+      device->max_shared_memory_per_block);
 
   return iree_ok_status();
 }

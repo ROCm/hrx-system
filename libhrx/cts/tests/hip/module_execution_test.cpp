@@ -42,6 +42,9 @@ using HipModuleUnloadFn = hipError_t (*)(hipModule_t module);
 using HipModuleGetFunctionFn = hipError_t (*)(hipFunction_t* function,
                                               hipModule_t module,
                                               const char* name);
+using HipFuncGetAttributeFn = hipError_t (*)(int* value,
+                                             hipFuncAttribute_t attribute,
+                                             hipFunction_t function);
 using HipModuleLaunchKernelFn = hipError_t (*)(
     hipFunction_t function, unsigned int grid_dim_x, unsigned int grid_dim_y,
     unsigned int grid_dim_z, unsigned int block_dim_x, unsigned int block_dim_y,
@@ -147,6 +150,8 @@ TEST(HipModuleExecutionTest, OwnsLoadAndGraphInputsAcrossReloads) {
       ResolveHipSymbol<HipModuleUnloadFn>(library, "hipModuleUnload");
   const auto module_get_function =
       ResolveHipSymbol<HipModuleGetFunctionFn>(library, "hipModuleGetFunction");
+  const auto function_get_attribute =
+      ResolveHipSymbol<HipFuncGetAttributeFn>(library, "hipFuncGetAttribute");
   const auto module_launch_kernel = ResolveHipSymbol<HipModuleLaunchKernelFn>(
       library, "hipModuleLaunchKernel");
   const auto device_synchronize =
@@ -173,6 +178,7 @@ TEST(HipModuleExecutionTest, OwnsLoadAndGraphInputsAcrossReloads) {
   ASSERT_NE(nullptr, module_load_data);
   ASSERT_NE(nullptr, module_unload);
   ASSERT_NE(nullptr, module_get_function);
+  ASSERT_NE(nullptr, function_get_attribute);
   ASSERT_NE(nullptr, module_launch_kernel);
   ASSERT_NE(nullptr, device_synchronize);
   ASSERT_NE(nullptr, hip_malloc);
@@ -222,6 +228,37 @@ TEST(HipModuleExecutionTest, OwnsLoadAndGraphInputsAcrossReloads) {
   hipFunction_t function = nullptr;
   ASSERT_EQ(hipSuccess, module_get_function(&function, module,
                                             "hrx_transform_nested_pointers"));
+
+  int maximum_threads_per_block = 0;
+  int fixed_shared_memory_size = 0;
+  int local_memory_size = 0;
+  int register_count = 0;
+  int maximum_dynamic_shared_memory_size = 0;
+  ASSERT_EQ(hipSuccess, function_get_attribute(
+                            &maximum_threads_per_block,
+                            hipFuncAttributeMaxThreadsPerBlock, function));
+  ASSERT_EQ(hipSuccess,
+            function_get_attribute(&fixed_shared_memory_size,
+                                   hipFuncAttributeSharedSizeBytes, function));
+  ASSERT_EQ(hipSuccess,
+            function_get_attribute(&local_memory_size,
+                                   hipFuncAttributeLocalSizeBytes, function));
+  ASSERT_EQ(hipSuccess,
+            function_get_attribute(&register_count, hipFuncAttributeNumRegs,
+                                   function));
+  ASSERT_EQ(hipSuccess,
+            function_get_attribute(&maximum_dynamic_shared_memory_size,
+                                   hipFuncAttributeMaxDynamicSharedSizeBytes,
+                                   function));
+  EXPECT_GT(maximum_threads_per_block, 0);
+  EXPECT_LE(maximum_threads_per_block, properties.maxThreadsPerBlock);
+  ASSERT_GE(fixed_shared_memory_size, 0);
+  EXPECT_GE(local_memory_size, 0);
+  EXPECT_GT(register_count, 0);
+  ASSERT_GE(maximum_dynamic_shared_memory_size, 0);
+  EXPECT_EQ(properties.sharedMemPerBlock,
+            static_cast<size_t>(fixed_shared_memory_size) +
+                maximum_dynamic_shared_memory_size);
 
   PointerArguments pointer_arguments = {
       static_cast<uint32_t*>(input),

@@ -45,6 +45,12 @@ using HipModuleLaunchKernelFn = hipError_t (*)(
     unsigned int grid_dim_z, unsigned int block_dim_x, unsigned int block_dim_y,
     unsigned int block_dim_z, unsigned int shared_memory_bytes,
     hipStream_t stream, void** arguments, void** extra);
+using HipFuncGetAttributeFn = hipError_t (*)(int* value,
+                                             hipFuncAttribute_t attribute,
+                                             hipFunction_t function);
+using HipFuncSetAttributeFn = hipError_t (*)(hipFunction_t function,
+                                             hipFuncAttribute_t attribute,
+                                             int value);
 using HipGraphCreateFn = hipError_t (*)(hipGraph_t* graph, unsigned int flags);
 using HipGraphDestroyFn = hipError_t (*)(hipGraph_t graph);
 using HipGraphAddKernelNodeFn = hipError_t (*)(
@@ -72,6 +78,10 @@ struct HipRuntimeApi {
   HipExtLaunchKernelFn ext_launch_kernel = nullptr;
   // Launches a module kernel with prepacked or pointer-array arguments.
   HipModuleLaunchKernelFn module_launch_kernel = nullptr;
+  // Queries a cached function compatibility attribute.
+  HipFuncGetAttributeFn function_get_attribute = nullptr;
+  // Updates a mutable function compatibility attribute.
+  HipFuncSetAttributeFn function_set_attribute = nullptr;
   // Creates a graph template.
   HipGraphCreateFn graph_create = nullptr;
   // Destroys a graph template.
@@ -110,6 +120,10 @@ class HipLaunchValidationApiTest : public testing::Test {
           api_.library, "hipExtLaunchKernel");
       api_.module_launch_kernel = ResolveHipSymbol<HipModuleLaunchKernelFn>(
           api_.library, "hipModuleLaunchKernel");
+      api_.function_get_attribute = ResolveHipSymbol<HipFuncGetAttributeFn>(
+          api_.library, "hipFuncGetAttribute");
+      api_.function_set_attribute = ResolveHipSymbol<HipFuncSetAttributeFn>(
+          api_.library, "hipFuncSetAttribute");
       api_.graph_create =
           ResolveHipSymbol<HipGraphCreateFn>(api_.library, "hipGraphCreate");
       api_.graph_destroy =
@@ -130,6 +144,8 @@ class HipLaunchValidationApiTest : public testing::Test {
     ASSERT_NE(nullptr, api_.launch_kernel);
     ASSERT_NE(nullptr, api_.ext_launch_kernel);
     ASSERT_NE(nullptr, api_.module_launch_kernel);
+    ASSERT_NE(nullptr, api_.function_get_attribute);
+    ASSERT_NE(nullptr, api_.function_set_attribute);
     ASSERT_NE(nullptr, api_.graph_create);
     ASSERT_NE(nullptr, api_.graph_destroy);
     ASSERT_NE(nullptr, api_.graph_add_kernel_node);
@@ -160,6 +176,40 @@ class HipLaunchValidationApiTest : public testing::Test {
 };
 
 HipRuntimeApi HipLaunchValidationApiTest::api_;
+
+TEST_F(HipLaunchValidationApiTest,
+       FunctionDynamicSharedMemoryAttributeHonorsGenericCeiling) {
+  iree_hal_streaming_symbol_t symbol = {};
+  symbol.type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
+  symbol.function_attributes.provided_flags =
+      IREE_HAL_STREAMING_FUNCTION_ATTRIBUTE_FLAG_DYNAMIC_SHARED_MEMORY;
+  symbol.function_attributes.maximum_configurable_dynamic_shared_memory_size =
+      4096;
+  iree_atomic_store(
+      &symbol.function_attributes.configured_dynamic_shared_memory_size, 2048,
+      iree_memory_order_relaxed);
+  hipFunction_t function =
+      reinterpret_cast<hipFunction_t>(iree_hal_streaming_symbol_tag(&symbol));
+
+  int value = 0;
+  EXPECT_EQ(hipSuccess,
+            api_.function_get_attribute(
+                &value, hipFuncAttributeMaxDynamicSharedSizeBytes, function));
+  EXPECT_EQ(2048, value);
+  EXPECT_EQ(hipErrorInvalidValue,
+            api_.function_set_attribute(
+                function, hipFuncAttributeMaxDynamicSharedSizeBytes, -1));
+  EXPECT_EQ(hipErrorInvalidValue,
+            api_.function_set_attribute(
+                function, hipFuncAttributeMaxDynamicSharedSizeBytes, 4097));
+  EXPECT_EQ(hipSuccess,
+            api_.function_set_attribute(
+                function, hipFuncAttributeMaxDynamicSharedSizeBytes, 4096));
+  EXPECT_EQ(hipSuccess,
+            api_.function_get_attribute(
+                &value, hipFuncAttributeMaxDynamicSharedSizeBytes, function));
+  EXPECT_EQ(4096, value);
+}
 
 TEST_F(HipLaunchValidationApiTest,
        LaunchEntryPointsRejectInvalidConfiguration) {

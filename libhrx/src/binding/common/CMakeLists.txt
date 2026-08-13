@@ -6,6 +6,27 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    function_attributes
+  HDRS
+    "function_attributes.h"
+  SRCS
+    "function_attributes.c"
+  DEPS
+    iree::base
+    iree::hal
+    libhrx_defs
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../libhrx>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../libhrx>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../../include>"
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     common
   HDRS
     "direct_transfer.h"
@@ -38,6 +59,7 @@ iree_cc_library(
     "stream.c"
     "tls.c"
   DEPS
+    ::function_attributes
     flatcc::parsing
     iree::async
     iree::async::util::proactor_pool
@@ -57,6 +79,20 @@ iree_cc_library(
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../include>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../../include>"
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    function_attributes_test
+  SRCS
+    "function_attributes_test.cc"
+  DEPS
+    ::function_attributes
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
 )
 
 iree_cc_test(

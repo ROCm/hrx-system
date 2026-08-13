@@ -34,6 +34,22 @@ extern "C" {
 // iree_hal_amdgpu_executable_t
 //===----------------------------------------------------------------------===//
 
+// Immutable launch limits precomputed for one export on one physical device.
+typedef struct iree_hal_amdgpu_executable_dispatch_limits_t {
+  // Maximum total workgroup size accepted by both the function and device.
+  uint32_t maximum_workgroup_invocations;
+  // Maximum XYZ workgroup sizes accepted by the physical device.
+  uint16_t maximum_workgroup_size[3];
+  // Maximum dynamic workgroup-local memory accepted by the function.
+  uint32_t maximum_dynamic_workgroup_local_memory_size;
+} iree_hal_amdgpu_executable_dispatch_limits_t;
+
+// Validates a caller-provided workgroup size against |dispatch_limits|.
+iree_status_t
+iree_hal_amdgpu_executable_dispatch_limits_validate_workgroup_size(
+    const iree_hal_amdgpu_executable_dispatch_limits_t* dispatch_limits,
+    const uint32_t workgroup_size[3]);
+
 // Host-resident dispatch metadata precomputed for one executable export on one
 // physical device.
 //
@@ -53,13 +69,13 @@ typedef struct iree_hal_amdgpu_executable_dispatch_descriptor_t {
   // Queue kernarg-ring block count for custom direct-argument dispatches.
   uint32_t custom_kernarg_block_count;
   // Maximum static workgroup count accepted for each dimension.
-  uint32_t max_workgroup_count[3];
+  uint32_t maximum_workgroup_count[3];
+  // Function and physical-device dispatch limits.
+  iree_hal_amdgpu_executable_dispatch_limits_t limits;
   // Cluster-count limits for this descriptor's physical device.
   iree_hal_amdgpu_dispatch_dimension_limits_t workgroup_cluster_count_limits;
   // Physical device ordinal owning |workgroup_cluster_count_limits|.
   iree_host_size_t physical_device_ordinal;
-  // Maximum dynamic group-memory byte count accepted for this export.
-  uint32_t max_dynamic_workgroup_local_memory;
   // PM4 launch state for the default executable workgroup size.
   iree_hal_amdgpu_pm4_dispatch_launch_state_t pm4_launch_state;
   // PM4 setup packet dwords for |pm4_launch_state|.

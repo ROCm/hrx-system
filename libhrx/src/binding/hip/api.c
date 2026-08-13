@@ -2104,7 +2104,7 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->canUseHostPointerForRegisteredMem = 1;
   prop->cooperativeLaunch = 0;
   prop->cooperativeMultiDeviceLaunch = 0;
-  prop->sharedMemPerBlockOptin = device_obj->max_shared_memory_per_block;
+  prop->sharedMemPerBlockOptin = device_obj->max_shared_memory_per_block_optin;
   prop->pageableMemoryAccessUsesHostPageTables = 0;
   prop->directManagedMemAccessFromHost = 1;
   prop->maxBlocksPerMultiProcessor = device_obj->max_blocks_per_multiprocessor;
@@ -2273,7 +2273,7 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       *value = device_obj->max_threads_per_multiprocessor;
       break;
     case hipDeviceAttributeSharedMemPerBlockOptin:
-      *value = device_obj->max_shared_memory_per_block;
+      *value = device_obj->max_shared_memory_per_block_optin;
       break;
     case hipDeviceAttributeMaxSharedMemoryPerMultiprocessor:
       *value = device_obj->max_shared_memory_per_multiprocessor;
@@ -11784,25 +11784,26 @@ HIPAPI hipError_t hipFuncGetAttribute(int* pi, hipFuncAttribute_t attrib,
   if (symbol->type != IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION) {
     HIP_RETURN_ERROR(hipErrorInvalidHandle);
   }
+  iree_hal_streaming_function_attributes_t* attributes =
+      &symbol->function_attributes;
 
   // Return attribute value based on what we have cached.
   switch (attrib) {
     case hipFuncAttributeMaxThreadsPerBlock:
-      *pi = symbol->max_threads_per_block;
+      *pi = attributes->maximum_threads_per_block;
       break;
     case hipFuncAttributeSharedSizeBytes:
-      *pi = symbol->shared_size_bytes;
+      *pi = attributes->fixed_shared_memory_size;
       break;
     case hipFuncAttributeConstSizeBytes:
       // We don't track constant memory usage.
       *pi = 0;
       break;
     case hipFuncAttributeLocalSizeBytes:
-      // Local memory is typically 0 for modern GPUs.
-      *pi = 0;
+      *pi = attributes->fixed_local_memory_size;
       break;
     case hipFuncAttributeNumRegs:
-      *pi = symbol->num_regs;
+      *pi = attributes->register_count;
       break;
     case hipFuncAttributePtxVersion:
       // Return a default PTX version equivalent for HIP.
@@ -11817,8 +11818,8 @@ HIPAPI hipError_t hipFuncGetAttribute(int* pi, hipFuncAttribute_t attrib,
       *pi = 0;
       break;
     case hipFuncAttributeMaxDynamicSharedSizeBytes:
-      // Return the kernel's maximum dynamic shared memory size.
-      *pi = symbol->max_dynamic_shared_size_bytes;
+      *pi = iree_hal_streaming_function_attributes_dynamic_shared_memory_size(
+          attributes);
       break;
     case hipFuncAttributePreferredSharedMemoryCarveout:
       // Carveout percentage not tracked.
@@ -11880,18 +11881,22 @@ HIPAPI hipError_t hipFuncGetAttributes(hipFuncAttributes* attr,
   if (symbol->type != IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION) {
     HIP_RETURN_ERROR(hipErrorInvalidHandle);
   }
+  iree_hal_streaming_function_attributes_t* attributes =
+      &symbol->function_attributes;
 
   // Fill in the attributes structure.
   memset(attr, 0, sizeof(hipFuncAttributes));
-  attr->maxThreadsPerBlock = symbol->max_threads_per_block;
-  attr->sharedSizeBytes = symbol->shared_size_bytes;
+  attr->maxThreadsPerBlock = attributes->maximum_threads_per_block;
+  attr->sharedSizeBytes = attributes->fixed_shared_memory_size;
   attr->constSizeBytes = 0;  // Not tracked.
-  attr->localSizeBytes = 0;  // Typically 0 for modern GPUs.
-  attr->numRegs = symbol->num_regs;
+  attr->localSizeBytes = attributes->fixed_local_memory_size;
+  attr->numRegs = attributes->register_count;
   attr->ptxVersion = 0;     // Not applicable to HIP/ROCm.
   attr->binaryVersion = 0;  // Not tracked.
   attr->cacheModeCA = 0;    // Not tracked.
-  attr->maxDynamicSharedSizeBytes = symbol->max_dynamic_shared_size_bytes;
+  attr->maxDynamicSharedSizeBytes =
+      iree_hal_streaming_function_attributes_dynamic_shared_memory_size(
+          attributes);
   attr->preferredShmemCarveout = 0;  // Not tracked.
 
   HIP_RETURN_ERROR(hipSuccess);
@@ -11953,15 +11958,18 @@ HIPAPI hipError_t hipFuncSetAttribute(hipFunction_t hfunc,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidHandle);
   }
+  iree_hal_streaming_function_attributes_t* attributes =
+      &symbol->function_attributes;
 
   // Only certain attributes can be set.
   hipError_t result = hipSuccess;
   switch (attrib) {
     case hipFuncAttributeMaxDynamicSharedSizeBytes:
-      // Store the maximum dynamic shared memory size for this function.
-      // This is used by kernels that need more than 48KB shared memory.
-      // Note that this is not actually used for anything but queries.
-      symbol->max_dynamic_shared_size_bytes = (uint32_t)value;
+      if (value < 0 ||
+          !iree_hal_streaming_function_attributes_try_set_dynamic_shared_memory_size(
+              attributes, (uint32_t)value)) {
+        result = hipErrorInvalidValue;
+      }
       break;
     case hipFuncAttributePreferredSharedMemoryCarveout:
       // This controls the L1/shared memory split.

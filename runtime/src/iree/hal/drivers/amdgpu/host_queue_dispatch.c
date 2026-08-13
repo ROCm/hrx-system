@@ -88,20 +88,11 @@ static iree_status_t iree_hal_amdgpu_host_queue_select_dispatch_kernel_args(
     return iree_ok_status();
   }
 
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_executable_dispatch_limits_validate_workgroup_size(
+          &descriptor->limits, config.workgroup_size));
   *override_kernel_args = descriptor->kernel_args;
   for (iree_host_size_t i = 0; i < 3; ++i) {
-    if (IREE_UNLIKELY(!config.workgroup_size[i])) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "dispatch workgroup size override must specify all dimensions");
-    }
-    if (IREE_UNLIKELY(config.workgroup_size[i] > UINT16_MAX)) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "dispatch workgroup size override dimension %" PRIhsz
-          " value %u exceeds %u",
-          i, config.workgroup_size[i], UINT16_MAX);
-    }
     override_kernel_args->workgroup_size[i] =
         (uint16_t)config.workgroup_size[i];
   }
@@ -142,7 +133,7 @@ static iree_status_t iree_hal_amdgpu_host_queue_validate_dispatch_shape(
   } else if (!uses_indirect_parameters) {
     for (iree_host_size_t i = 0; i < 3; ++i) {
       if (IREE_UNLIKELY(config.workgroup_count[i] >
-                        descriptor->max_workgroup_count[i])) {
+                        descriptor->maximum_workgroup_count[i])) {
         return iree_make_status(
             IREE_STATUS_OUT_OF_RANGE,
             "dispatch grid dimension %" PRIhsz
@@ -151,13 +142,16 @@ static iree_status_t iree_hal_amdgpu_host_queue_validate_dispatch_shape(
       }
     }
   }
-  if (IREE_UNLIKELY(config.dynamic_workgroup_local_memory >
-                    descriptor->max_dynamic_workgroup_local_memory)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "dispatch group segment size overflows uint32_t "
-                            "(static=%u, dynamic=%u)",
-                            kernel_args->group_segment_size,
-                            config.dynamic_workgroup_local_memory);
+  if (IREE_UNLIKELY(
+          config.dynamic_workgroup_local_memory >
+          descriptor->limits.maximum_dynamic_workgroup_local_memory_size)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "dispatch dynamic workgroup-local memory size %u exceeds maximum %u "
+        "(fixed=%u)",
+        config.dynamic_workgroup_local_memory,
+        descriptor->limits.maximum_dynamic_workgroup_local_memory_size,
+        kernel_args->group_segment_size);
   }
   const uint8_t* cluster_size = kernel_args->workgroup_cluster_size;
   const bool uses_workgroup_clusters =

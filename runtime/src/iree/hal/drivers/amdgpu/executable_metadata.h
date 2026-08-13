@@ -40,6 +40,8 @@ typedef enum iree_hal_amdgpu_executable_export_flag_bits_e {
       1u << 0,
   // Export can only be launched with caller-provided native kernargs.
   IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_CUSTOM_DIRECT_ONLY = 1u << 1,
+  // Export has decoded AMDGPU resource metadata.
+  IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_HAS_RESOURCE_METADATA = 1u << 2,
 } iree_hal_amdgpu_executable_export_flag_bits_t;
 typedef uint32_t iree_hal_amdgpu_executable_export_flags_t;
 
@@ -96,12 +98,14 @@ typedef struct iree_hal_amdgpu_executable_export_t {
   uint8_t workgroup_cluster_size[3];
   // Reserved to preserve natural alignment. Must be zero.
   uint8_t reserved;
-  // Fixed group segment byte size reported by executable metadata.
-  uint32_t fixed_group_segment_size;
-  // Fixed private segment byte size reported by executable metadata.
-  uint32_t fixed_private_segment_size;
-  // Maximum dynamic group-memory byte count accepted for this export.
-  uint32_t max_dynamic_workgroup_local_memory;
+  // Maximum total workgroup size accepted by the function.
+  uint32_t maximum_workgroup_invocations;
+  // Fixed workgroup-local memory size reported by executable metadata.
+  uint32_t fixed_workgroup_local_memory_size;
+  // Fixed private memory size per invocation reported by executable metadata.
+  uint32_t fixed_private_memory_size;
+  // Number of 32-bit vector register units used per invocation.
+  uint32_t invocation_register_count;
   // Native kernarg layout record for normal metadata-described dispatch.
   iree_hal_amdgpu_kernarg_layout_ref_t kernarg_layout;
 } iree_hal_amdgpu_executable_export_t;

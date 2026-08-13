@@ -8,6 +8,7 @@
 #define IREE_EXPERIMENTAL_STREAMING_INTERNAL_H_
 
 #include "common/fat_binary.h"
+#include "common/function_attributes.h"
 #include "common/hrx_bridge.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
@@ -353,7 +354,10 @@ typedef struct iree_hal_streaming_device_t {
   uint32_t max_registers_per_multiprocessor;
   uint32_t max_shared_memory_per_multiprocessor;
   uint32_t max_registers_per_block;
+  // Default shared-memory capacity available to one block.
   uint32_t max_shared_memory_per_block;
+  // Maximum shared-memory capacity available to an opted-in block.
+  uint32_t max_shared_memory_per_block_optin;
 
   // Arena block pool for transient host allocations.
   // Shared by all graphs created from this device.
@@ -652,13 +656,8 @@ typedef struct iree_hal_streaming_symbol_t {
 
   // Function attributes (only valid for FUNCTION type).
   iree_hal_occupancy_info_t occupancy_info;
-  // Maximum workgroup size reported by executable metadata, or the device
-  // limit when metadata does not specify one.
-  uint32_t max_threads_per_block;
-  uint32_t shared_size_bytes;
-  uint32_t local_size_bytes;
-  uint32_t num_regs;
-  uint32_t max_dynamic_shared_size_bytes;
+  // Cached generic facts and mutable compatibility limits.
+  iree_hal_streaming_function_attributes_t function_attributes;
 
   // Function parameter information used for argument packing and unpacking.
   iree_hal_streaming_parameter_info_t parameters;
