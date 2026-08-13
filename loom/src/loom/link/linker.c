@@ -1872,10 +1872,27 @@ static iree_status_t loom_linker_add_exact_selection(
     loom_symbol_ref_t target_ref = loom_symbol_ref_null();
     status = loom_linker_resolve_source_symbol(
         &source, source_symbol_id, &source.target_symbols[i], &target_ref);
-    if (iree_status_is_ok(status)) {
-      status = loom_linker_clone_or_merge_symbol_op(&source, source_symbol_id,
-                                                    target_ref);
+  }
+
+  const loom_block_t* source_block =
+      loom_region_const_entry_block(source_module->body);
+  for (const loom_op_t* source_op = source_block->first_op;
+       source_op && iree_status_is_ok(status); source_op = source_op->next_op) {
+    loom_symbol_ref_t source_ref = loom_symbol_ref_null();
+    if (!loom_link_op_symbol_ref(source_module, source_op, &source_ref)) {
+      continue;
     }
+    iree_host_size_t selection_ordinal = source_ref.symbol_id;
+    if (!selection.dense) {
+      selection_ordinal =
+          loom_linker_find_exact_source_symbol(&source, source_ref.symbol_id);
+      if (selection_ordinal == IREE_HOST_SIZE_MAX) {
+        continue;
+      }
+    }
+    status = loom_linker_clone_or_merge_symbol_op(
+        &source, source_ref.symbol_id,
+        source.target_symbols[selection_ordinal]);
   }
 
   iree_host_size_t max_anchor_count = 0;

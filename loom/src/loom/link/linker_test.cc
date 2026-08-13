@@ -1196,6 +1196,60 @@ func.def public @caller(%x: i32) -> (i32) {
   EXPECT_NE(text.find("func.call @helper"), std::string::npos);
 }
 
+TEST_F(LinkerTest, ExactModulePreservesSourceOperationOrder) {
+  loom_module_t* source = Parse(IREE_SV(R"(
+func.def @first() {
+  func.return
+}
+
+func.def @second() {
+  func.return
+}
+)"));
+  loom_block_t* source_block = loom_module_block(source);
+  loom_op_t* first_op = source_block->first_op;
+  ASSERT_NE(first_op, nullptr);
+  loom_op_t* second_op = first_op->next_op;
+  ASSERT_NE(second_op, nullptr);
+  loom_block_unlink_op(source, second_op);
+  IREE_ASSERT_OK(
+      loom_block_insert_before_op(source, source_block, first_op, second_op));
+  loom_module_record_op_effects(source, second_op);
+
+  loom_linker_t* dense_linker = CreateIncrementalLinker();
+  IREE_ASSERT_OK(loom_linker_add_exact_module(
+      dense_linker, source, loom_linker_source_provider_import_list_empty()));
+  loom_module_t* dense_linked = nullptr;
+  IREE_ASSERT_OK(loom_linker_finish(dense_linker, &dense_linked));
+  loom_linker_free(dense_linker);
+  modules_.push_back(dense_linked);
+  Verify(dense_linked);
+
+  const iree_host_size_t source_symbols[] = {0, 1};
+  loom_linker_t* sparse_linker = CreateIncrementalLinker();
+  IREE_ASSERT_OK(loom_linker_add_module_symbols(
+      sparse_linker, source,
+      (loom_linker_source_symbol_list_t){
+          /*.count=*/IREE_ARRAYSIZE(source_symbols),
+          /*.ordinals=*/source_symbols,
+      },
+      loom_linker_source_provider_import_list_empty()));
+  loom_module_t* sparse_linked = nullptr;
+  IREE_ASSERT_OK(loom_linker_finish(sparse_linker, &sparse_linked));
+  loom_linker_free(sparse_linker);
+  modules_.push_back(sparse_linked);
+  Verify(sparse_linked);
+
+  for (const loom_module_t* linked : {dense_linked, sparse_linked}) {
+    const std::string text = Print(linked);
+    const size_t second_position = text.find("func.def @second");
+    const size_t first_position = text.find("func.def @first");
+    ASSERT_NE(second_position, std::string::npos);
+    ASSERT_NE(first_position, std::string::npos);
+    EXPECT_LT(second_position, first_position);
+  }
+}
+
 TEST_F(LinkerTest, ExactSelectionRejectsMissingDependency) {
   loom_module_t* source = Parse(IREE_SV(R"(
 func.def @helper(%x: i32) -> (i32) {

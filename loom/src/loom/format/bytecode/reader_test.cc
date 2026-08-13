@@ -3050,6 +3050,115 @@ TEST_F(ReaderTest, IndexesAndMaterializesProviderImports) {
   loom_module_free(module);
 }
 
+TEST_F(ReaderTest, PreservesPhysicalSymbolDefinitionOrder) {
+  loom_module_t* module = CreateSymbolArrayModule();
+  ASSERT_EQ(module->symbols.count, 3u);
+  const loom_symbol_id_t a_symbol_id = loom_module_find_symbol(
+      module, loom_module_lookup_string(module, IREE_SV("a")));
+  const loom_symbol_id_t b_symbol_id = loom_module_find_symbol(
+      module, loom_module_lookup_string(module, IREE_SV("b")));
+  const loom_symbol_id_t function_symbol_id = loom_module_find_symbol(
+      module, loom_module_lookup_string(module, IREE_SV("symbol_arrays")));
+  ASSERT_NE(a_symbol_id, LOOM_SYMBOL_ID_INVALID);
+  ASSERT_NE(b_symbol_id, LOOM_SYMBOL_ID_INVALID);
+  ASSERT_NE(function_symbol_id, LOOM_SYMBOL_ID_INVALID);
+
+  // Stable symbol IDs follow construction order (a, b, function), while the
+  // physical module presentation is function, b, a.
+  loom_block_t* module_block = loom_module_block(module);
+  loom_op_t* a_op = module->symbols.entries[a_symbol_id].defining_op;
+  loom_op_t* b_op = module->symbols.entries[b_symbol_id].defining_op;
+  loom_op_t* function_op =
+      module->symbols.entries[function_symbol_id].defining_op;
+  loom_block_unlink_op(module, function_op);
+  IREE_ASSERT_OK(
+      loom_block_insert_before_op(module, module_block, a_op, function_op));
+  loom_module_record_op_effects(module, function_op);
+  loom_block_unlink_op(module, b_op);
+  IREE_ASSERT_OK(loom_block_insert_before_op(module, module_block, a_op, b_op));
+  loom_module_record_op_effects(module, b_op);
+
+  loom_builder_t builder;
+  loom_builder_initialize(module, &module->arena, module_block, &builder);
+  loom_string_id_t provider_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_string(
+      module, IREE_SV("motif/provider.loom"), &provider_id));
+  const loom_symbol_ref_t provider_anchors[] = {
+      {/*.module_id=*/0, /*.symbol_id=*/a_symbol_id},
+      {/*.module_id=*/0, /*.symbol_id=*/b_symbol_id},
+  };
+  loom_op_t* import_op = nullptr;
+  IREE_ASSERT_OK(loom_module_import_build(
+      &builder, provider_id,
+      loom_make_symbol_ref_array(provider_anchors,
+                                 IREE_ARRAYSIZE(provider_anchors)),
+      LOOM_LOCATION_NONE, &import_op));
+
+  auto bytes = WriteModule(module);
+  iree_arena_allocator_t metadata_arena;
+  iree_arena_initialize(&block_pool_, &metadata_arena);
+  loom_bytecode_file_metadata_t metadata = {0};
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result =
+      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+  ASSERT_EQ(result.error_count, 0u);
+  ASSERT_TRUE(error_ids.empty());
+  ASSERT_EQ(metadata.module_count, 1u);
+  const loom_bytecode_module_metadata_t& module_metadata = metadata.modules[0];
+  ASSERT_EQ(module_metadata.symbol_count, 3u);
+  EXPECT_TRUE(iree_string_view_equal(module_metadata.symbols[0].name,
+                                     IREE_SV("symbol_arrays")));
+  EXPECT_TRUE(
+      iree_string_view_equal(module_metadata.symbols[1].name, IREE_SV("b")));
+  EXPECT_TRUE(
+      iree_string_view_equal(module_metadata.symbols[2].name, IREE_SV("a")));
+
+  ASSERT_EQ(module_metadata.provider_import_count, 1u);
+  ASSERT_EQ(module_metadata.provider_import_anchor_count, 2u);
+  EXPECT_EQ(module_metadata.provider_import_anchor_symbol_indices[0], 2u);
+  EXPECT_EQ(module_metadata.provider_import_anchor_symbol_indices[1], 1u);
+
+  ASSERT_NE(module_metadata.symbol_references, nullptr);
+  const loom_bytecode_symbol_reference_metadata_t& function_references =
+      module_metadata.symbol_references[0];
+  ASSERT_EQ(function_references.dependency_count, 3u);
+  const uint32_t* dependency_symbol_indices =
+      module_metadata.dependency_symbol_indices +
+      function_references.first_dependency_index;
+  EXPECT_EQ(dependency_symbol_indices[0], 1u);
+  EXPECT_EQ(dependency_symbol_indices[1], 2u);
+  EXPECT_EQ(dependency_symbol_indices[2], 1u);
+  iree_arena_deinitialize(&metadata_arena);
+
+  loom_module_t* read_module = nullptr;
+  error_ids.clear();
+  result = ReadModule(bytes, &read_module, &error_ids,
+                      /*verify_module=*/true);
+  ASSERT_EQ(result.error_count, 0u);
+  ASSERT_TRUE(error_ids.empty());
+  ASSERT_NE(read_module, nullptr);
+
+  std::vector<std::string> definition_names;
+  const loom_op_t* op = nullptr;
+  loom_block_for_each_op(loom_module_block(read_module), op) {
+    for (iree_host_size_t i = 0; i < read_module->symbols.count; ++i) {
+      const loom_symbol_t* symbol = &read_module->symbols.entries[i];
+      if (symbol->defining_op == op) {
+        const iree_string_view_t name =
+            read_module->strings.entries[symbol->name_id];
+        definition_names.emplace_back(name.data, name.size);
+        break;
+      }
+    }
+  }
+  EXPECT_EQ(definition_names,
+            (std::vector<std::string>{"symbol_arrays", "b", "a"}));
+  EXPECT_EQ(bytes, WriteModule(read_module));
+
+  loom_module_free(read_module);
+  loom_module_free(module);
+}
+
 TEST_F(ReaderTest, RejectsProviderImportAnchorCountMismatch) {
   loom_module_t* module = CreateProviderImportModule();
   auto bytes = WriteModule(module);

@@ -307,6 +307,21 @@ loom_cc_benchmark(
 
 loom_cc_benchmark(
   NAME
+    writer_benchmark
+  SRCS
+    "writer_benchmark.cc"
+  DEPS
+    ::writer
+    iree::base::internal::arena
+    iree::io::stream
+    iree::testing::benchmark_main
+    loom::ir
+    loom::ops::test
+  TESTONLY
+)
+
+loom_cc_benchmark(
+  NAME
     varint_benchmark
   SRCS
     "varint_benchmark.cc"
