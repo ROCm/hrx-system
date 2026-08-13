@@ -60,6 +60,16 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "body_test",
+    srcs = ["body_test.cc"],
+    deps = [
+        ":body",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "materializer",
     srcs = ["materializer.c"],

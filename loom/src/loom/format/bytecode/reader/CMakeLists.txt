@@ -62,6 +62,17 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    body_test
+  SRCS
+    "body_test.cc"
+  DEPS
+    ::body
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 loom_cc_library(
   NAME
     materializer

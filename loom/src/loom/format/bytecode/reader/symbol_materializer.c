@@ -56,6 +56,28 @@ void loom_bytecode_symbol_materializer_initialize(
   };
 }
 
+static iree_status_t loom_bytecode_symbol_materialize_body(
+    loom_bytecode_symbol_materializer_t* materializer,
+    iree_string_view_t symbol_name,
+    const loom_bytecode_reader_section_t* ir_section, uint64_t ir_offset,
+    uint32_t ir_length, loom_builder_t* builder, loom_op_t* parent_op,
+    uint8_t first_region_index,
+    const loom_bytecode_predefined_region_values_t* predefined_regions,
+    uint8_t predefined_region_count,
+    const loom_low_repr_descriptor_set_t* low_descriptor_set) {
+  const iree_const_byte_span_t body_bytes = iree_make_const_byte_span(
+      ir_section->bytes.data + (iree_host_size_t)ir_offset, ir_length);
+  const uint64_t body_absolute_offset = ir_section->absolute_offset + ir_offset;
+  loom_bytecode_body_summary_t summary;
+  IREE_RETURN_IF_ERROR(loom_bytecode_body_summary_read(
+      &materializer->decoder, symbol_name, body_bytes, body_absolute_offset,
+      &summary));
+  return loom_bytecode_body_materialize_symbol_regions(
+      &materializer->body_materializer, symbol_name, body_bytes,
+      body_absolute_offset, &summary, builder, parent_op, first_region_index,
+      predefined_regions, predefined_region_count, low_descriptor_set);
+}
+
 static loom_symbol_kind_t loom_bytecode_reader_decode_symbol_kind(
     uint8_t kind) {
   switch (kind) {
@@ -544,9 +566,8 @@ loom_bytecode_reader_materialize_function_symbol(
               .count = (uint16_t)workload_arg_count,
           };
     }
-    IREE_RETURN_IF_ERROR(loom_bytecode_body_materialize_symbol_regions(
-        &reader->body_materializer, symbol_name, ir_section->bytes,
-        ir_section->absolute_offset, ir_offset, ir_length, builder, op,
+    IREE_RETURN_IF_ERROR(loom_bytecode_symbol_materialize_body(
+        reader, symbol_name, ir_section, ir_offset, ir_length, builder, op,
         func_like->body_region_index, predefined_regions,
         predefined_region_count, low_descriptor_set));
   }
@@ -807,9 +828,8 @@ loom_bytecode_reader_materialize_record_symbol(
   }
   if (has_body) {
     iree_string_view_t symbol_name = reader->view.strings.values[name_id];
-    IREE_RETURN_IF_ERROR(loom_bytecode_body_materialize_symbol_regions(
-        &reader->body_materializer, symbol_name, ir_section->bytes,
-        ir_section->absolute_offset, ir_offset, ir_length, builder, op,
+    IREE_RETURN_IF_ERROR(loom_bytecode_symbol_materialize_body(
+        reader, symbol_name, ir_section, ir_offset, ir_length, builder, op,
         LOOM_REGION_INDEX_NONE, /*predefined_regions=*/NULL,
         /*predefined_region_count=*/0, /*low_descriptor_set=*/NULL));
   }

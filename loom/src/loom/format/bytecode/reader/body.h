@@ -25,6 +25,25 @@ typedef struct loom_bytecode_reader_module_view_t
     loom_bytecode_reader_module_view_t;
 typedef struct loom_builder_t loom_builder_t;
 
+// Allocation summary decoded from the prefix of one bounded symbol IR body.
+// Counts describe only IR nested inside the body. The value count includes
+// entry block arguments prebound to function signature values, but excludes
+// results defined by the parent symbol operation.
+typedef struct loom_bytecode_body_summary_t {
+  // SSA values defined by block arguments and operation results.
+  uint32_t value_count;
+  // Regions in the body, including nested regions.
+  uint32_t region_count;
+  // Blocks in the body, including nested regions.
+  uint32_t block_count;
+  // Live operations in the body, including nested regions.
+  uint32_t op_count;
+  // Materialized root regions attached directly to the symbol operation.
+  uint8_t root_region_count;
+  // Byte offset of the first root-region record in the bounded body span.
+  uint8_t payload_offset;
+} loom_bytecode_body_summary_t;
+
 // State required to materialize validated symbol IR bodies.
 typedef struct loom_bytecode_body_materializer_t {
   // Shared module and attribute materialization state.
@@ -79,6 +98,14 @@ typedef struct loom_bytecode_predefined_region_values_t {
   uint16_t count;
 } loom_bytecode_predefined_region_values_t;
 
+// Decodes and validates the allocation summary prefix of one exact symbol IR
+// body. The returned payload offset lets callers retain the summary and later
+// materialize the body without decoding the prefix again.
+iree_status_t loom_bytecode_body_summary_read(
+    loom_bytecode_reader_decoder_t* decoder, iree_string_view_t symbol_name,
+    iree_const_byte_span_t body_bytes, uint64_t body_absolute_offset,
+    loom_bytecode_body_summary_t* out_summary);
+
 // Initializes a value scope whose entire map consists of fresh module values.
 iree_status_t loom_bytecode_value_scope_initialize_fresh(
     loom_bytecode_body_materializer_t* materializer,
@@ -91,11 +118,12 @@ iree_status_t loom_bytecode_value_scope_materialize_definition(
     loom_bytecode_value_scope_t* value_scope,
     loom_bytecode_reader_cursor_t* cursor, loom_value_id_t* out_value_id);
 
-// Materializes one bounded symbol IR payload into |parent_op| regions.
+// Materializes one bounded symbol IR payload into |parent_op| regions using a
+// summary previously returned by |loom_bytecode_body_summary_read|.
 iree_status_t loom_bytecode_body_materialize_symbol_regions(
     loom_bytecode_body_materializer_t* materializer,
-    iree_string_view_t symbol_name, iree_const_byte_span_t ir_section_bytes,
-    uint64_t ir_section_absolute_offset, uint64_t ir_offset, uint32_t ir_length,
+    iree_string_view_t symbol_name, iree_const_byte_span_t body_bytes,
+    uint64_t body_absolute_offset, const loom_bytecode_body_summary_t* summary,
     loom_builder_t* builder, loom_op_t* parent_op, uint8_t first_region_index,
     const loom_bytecode_predefined_region_values_t* predefined_regions,
     uint8_t predefined_region_count,
