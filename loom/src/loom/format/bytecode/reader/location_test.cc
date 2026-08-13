@@ -40,8 +40,10 @@ class BytecodeLocationTest : public ::testing::Test {
     source_names_[0] = IREE_SV("model.loom");
     module_view_.sources.values = source_names_;
     module_view_.sources.count = IREE_ARRAYSIZE(source_names_);
-    IREE_ASSERT_OK(loom_module_register_source(module_, source_names_[0],
-                                               &source_ids_[0]));
+    loom_source_id_t source_id = LOOM_SOURCE_ID_INVALID;
+    IREE_ASSERT_OK(
+        loom_module_append_source(module_, source_names_[0], &source_id));
+    IREE_ASSERT_EQ(source_id, 0u);
   }
 
   void TearDown() override {
@@ -103,8 +105,6 @@ class BytecodeLocationTest : public ::testing::Test {
   uint32_t error_count_ = 0;
   // Source table addressed by file and opaque locations.
   iree_string_view_t source_names_[1];
-  // Dense source projection used by full materialization.
-  loom_source_id_t source_ids_[1];
   // Block source shared by retained and output-module arenas.
   iree_arena_block_pool_t block_pool_;
   // Storage retaining exact entry metadata beyond validation.
@@ -184,7 +184,6 @@ TEST_F(BytecodeLocationTest, MaterializesCanonicalTable) {
   loom_bytecode_location_materializer_t materializer = {
       /*.decoder=*/&decoder_,
       /*.module_view=*/&module_view_,
-      /*.source_ids=*/source_ids_,
       /*.output_module=*/module_,
   };
 
@@ -194,7 +193,7 @@ TEST_F(BytecodeLocationTest, MaterializesCanonicalTable) {
   ASSERT_EQ(module_->locations.count, 5u);
   const loom_location_entry_t& file = module_->locations.entries[1];
   EXPECT_EQ(file.kind, LOOM_LOCATION_FILE);
-  EXPECT_EQ(file.file.source_id, source_ids_[0]);
+  EXPECT_EQ(file.file.source_id, 0u);
   EXPECT_EQ(file.file.start_line, 1u);
   EXPECT_EQ(file.file.start_col, 2u);
   EXPECT_EQ(file.file.end_line, 3u);
@@ -207,7 +206,7 @@ TEST_F(BytecodeLocationTest, MaterializesCanonicalTable) {
 
   const loom_location_entry_t& opaque = module_->locations.entries[3];
   EXPECT_EQ(opaque.kind, LOOM_LOCATION_OPAQUE);
-  EXPECT_EQ(opaque.opaque.source_id, source_ids_[0]);
+  EXPECT_EQ(opaque.opaque.source_id, 0u);
   ASSERT_EQ(opaque.opaque.data_length, 3u);
   EXPECT_EQ(std::memcmp(opaque.opaque.data, "abc", 3), 0);
 

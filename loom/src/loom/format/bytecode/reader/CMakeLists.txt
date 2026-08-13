@@ -349,6 +349,40 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    selected_projection
+  HDRS
+    "selected_projection.h"
+  SRCS
+    "selected_projection.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    selected_projection_test
+  SRCS
+    "selected_projection_test.cc"
+  DEPS
+    ::selected_projection
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_benchmark(
+  NAME
+    selected_projection_benchmark
+  SRCS
+    "selected_projection_benchmark.cc"
+  DEPS
+    ::selected_projection
+    iree::testing::benchmark_main
+  TESTONLY
+)
+
+loom_cc_library(
+  NAME
     string_table
   HDRS
     "string_table.h"

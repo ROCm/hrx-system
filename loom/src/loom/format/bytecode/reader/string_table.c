@@ -85,24 +85,18 @@ static iree_status_t loom_bytecode_string_table_read_values(
   return iree_ok_status();
 }
 
-static iree_status_t loom_bytecode_string_table_validate_canonical(
+static iree_status_t loom_bytecode_string_table_validate_unique(
     loom_bytecode_reader_decoder_t* decoder,
     const loom_bytecode_reader_section_t* section,
-    iree_arena_allocator_t* scratch_arena,
-    const loom_bytecode_reader_module_view_t* module_view) {
-  if (module_view->strings.count == 0 ||
-      !iree_string_view_is_empty(module_view->strings.values[0])) {
-    return loom_bytecode_reader_emit_invalid_field(
-        decoder, IREE_SV("STRINGS"), IREE_SV("string"), 0, IREE_SV("string"),
-        section->absolute_offset, IREE_SV("string_zero_must_be_empty"));
-  }
-  if (module_view->strings.count == 1) {
+    iree_string_view_t table_name, iree_string_view_t duplicate_reason,
+    const iree_string_view_t* values, iree_host_size_t count,
+    iree_arena_allocator_t* scratch_arena) {
+  if (count < 2) {
     return iree_ok_status();
   }
 
   iree_host_size_t minimum_capacity = 0;
-  if (!iree_host_size_checked_mul(module_view->strings.count, 2,
-                                  &minimum_capacity)) {
+  if (!iree_host_size_checked_mul(count, 2, &minimum_capacity)) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "string uniqueness table capacity overflow");
   }
@@ -121,28 +115,43 @@ static iree_status_t loom_bytecode_string_table_validate_canonical(
   if (iree_status_is_ok(status)) {
     memset(ordinals, 0xFF, capacity * sizeof(*ordinals));
   }
-  for (iree_host_size_t i = 0;
-       i < module_view->strings.count && iree_status_is_ok(status); ++i) {
-    const iree_string_view_t value = module_view->strings.values[i];
+  for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+    const iree_string_view_t value = values[i];
     const iree_host_size_t mask = capacity - 1;
     iree_host_size_t slot =
         (iree_host_size_t)loom_bytecode_string_hash(value) & mask;
     while (ordinals[slot] != UINT32_MAX &&
-           !iree_string_view_equal(module_view->strings.values[ordinals[slot]],
-                                   value)) {
+           !iree_string_view_equal(values[ordinals[slot]], value)) {
       slot = (slot + 1) & mask;
     }
     if (ordinals[slot] != UINT32_MAX) {
       status = loom_bytecode_reader_emit_invalid_field(
-          decoder, IREE_SV("STRINGS"), IREE_SV("string"), i, IREE_SV("string"),
+          decoder, table_name, IREE_SV("string"), i, IREE_SV("string"),
           loom_bytecode_string_absolute_offset(section, value),
-          IREE_SV("string_table_must_be_deduplicated"));
+          duplicate_reason);
     } else {
       ordinals[slot] = (uint32_t)i;
     }
   }
   iree_arena_checkpoint_restore(&checkpoint);
   return status;
+}
+
+static iree_status_t loom_bytecode_string_table_validate_canonical(
+    loom_bytecode_reader_decoder_t* decoder,
+    const loom_bytecode_reader_section_t* section,
+    iree_arena_allocator_t* scratch_arena,
+    const loom_bytecode_reader_module_view_t* module_view) {
+  if (module_view->strings.count == 0 ||
+      !iree_string_view_is_empty(module_view->strings.values[0])) {
+    return loom_bytecode_reader_emit_invalid_field(
+        decoder, IREE_SV("STRINGS"), IREE_SV("string"), 0, IREE_SV("string"),
+        section->absolute_offset, IREE_SV("string_zero_must_be_empty"));
+  }
+  return loom_bytecode_string_table_validate_unique(
+      decoder, section, IREE_SV("STRINGS"),
+      IREE_SV("string_table_must_be_deduplicated"), module_view->strings.values,
+      module_view->strings.count, scratch_arena);
 }
 
 iree_status_t loom_bytecode_string_table_read(
@@ -162,11 +171,17 @@ iree_status_t loom_bytecode_string_table_read(
 iree_status_t loom_bytecode_source_table_read(
     loom_bytecode_reader_decoder_t* decoder,
     const loom_bytecode_reader_section_t* section,
+    iree_arena_allocator_t* scratch_arena,
     iree_arena_allocator_t* storage_arena,
     loom_bytecode_reader_module_view_t* module_view) {
-  return loom_bytecode_string_table_read_values(
+  IREE_RETURN_IF_ERROR(loom_bytecode_string_table_read_values(
       decoder, section, IREE_SV("SOURCES"), LOOM_SOURCE_ID_INVALID,
-      storage_arena, &module_view->sources.values, &module_view->sources.count);
+      storage_arena, &module_view->sources.values,
+      &module_view->sources.count));
+  return loom_bytecode_string_table_validate_unique(
+      decoder, section, IREE_SV("SOURCES"),
+      IREE_SV("source_table_must_be_deduplicated"), module_view->sources.values,
+      module_view->sources.count, scratch_arena);
 }
 
 iree_status_t loom_bytecode_string_table_materialize(
@@ -183,21 +198,12 @@ iree_status_t loom_bytecode_string_table_materialize(
 
 iree_status_t loom_bytecode_source_table_materialize(
     const loom_bytecode_reader_module_view_t* module_view,
-    iree_arena_allocator_t* scratch_arena, loom_module_t* output_module,
-    loom_source_id_t** out_source_ids) {
-  *out_source_ids = NULL;
-  if (module_view->sources.count == 0) {
-    return iree_ok_status();
-  }
-
-  loom_source_id_t* source_ids = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(scratch_arena, module_view->sources.count,
-                                sizeof(*source_ids), (void**)&source_ids));
+    loom_module_t* output_module) {
   for (iree_host_size_t i = 0; i < module_view->sources.count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_module_register_source(
-        output_module, module_view->sources.values[i], &source_ids[i]));
+    loom_source_id_t source_id = LOOM_SOURCE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_module_append_source(
+        output_module, module_view->sources.values[i], &source_id));
+    IREE_ASSERT(source_id == i);
   }
-  *out_source_ids = source_ids;
   return iree_ok_status();
 }

@@ -30,10 +30,12 @@ iree_status_t loom_bytecode_string_table_read(
     loom_bytecode_reader_module_view_t* module_view);
 
 // Validates the SOURCES section and retains borrowed UTF-8 views in
-// |storage_arena|. The source count is bounded by the runtime source-ID space.
+// |storage_arena|. The source count is bounded by the runtime source-ID space
+// and source spellings are unique in wire order.
 iree_status_t loom_bytecode_source_table_read(
     loom_bytecode_reader_decoder_t* decoder,
     const loom_bytecode_reader_section_t* section,
+    iree_arena_allocator_t* scratch_arena,
     iree_arena_allocator_t* storage_arena,
     loom_bytecode_reader_module_view_t* module_view);
 
@@ -43,13 +45,11 @@ iree_status_t loom_bytecode_string_table_materialize(
     const loom_bytecode_reader_module_view_t* module_view,
     loom_module_t* output_module);
 
-// Registers every validated source in |output_module| and returns a dense
-// source-ordinal projection allocated from |scratch_arena|. Duplicate source
-// spellings intentionally project to the same output source ID.
+// Appends every canonical validated source to an otherwise-empty output module
+// while preserving bytecode source IDs exactly.
 iree_status_t loom_bytecode_source_table_materialize(
     const loom_bytecode_reader_module_view_t* module_view,
-    iree_arena_allocator_t* scratch_arena, loom_module_t* output_module,
-    loom_source_id_t** out_source_ids);
+    loom_module_t* output_module);
 
 #ifdef __cplusplus
 }  // extern "C"

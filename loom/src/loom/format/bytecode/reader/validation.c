@@ -983,7 +983,7 @@ static iree_status_t loom_bytecode_reader_validate_module(
       reader->arena, &reader->view));
   IREE_RETURN_IF_ERROR(loom_bytecode_source_table_read(
       &reader->decoder, reader->view.sections.sources, reader->arena,
-      &reader->view));
+      reader->arena, &reader->view));
   IREE_RETURN_IF_ERROR(loom_bytecode_encoding_table_validate(
       &reader->decoder, reader->context, &reader->view, reader->arena,
       reader->view.sections.encodings));
@@ -1145,8 +1145,8 @@ static iree_status_t loom_bytecode_reader_index_module(
   metadata->strings.values = reader->view.strings.values;
   metadata->strings.count = reader->view.strings.count;
   IREE_RETURN_IF_ERROR(loom_bytecode_source_table_read(
-      &reader->decoder, reader->view.sections.sources, retained_arena,
-      &reader->view));
+      &reader->decoder, reader->view.sections.sources, reader->arena,
+      retained_arena, &reader->view));
   metadata->sources.values = reader->view.sources.values;
   metadata->sources.count = reader->view.sources.count;
 

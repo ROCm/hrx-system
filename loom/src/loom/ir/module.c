@@ -544,6 +544,7 @@ static iree_status_t loom_module_initialize_tables(
   iree_host_size_t string_capacity = 512;
   iree_host_size_t type_capacity = 64;
   iree_host_size_t encoding_capacity = 0;
+  iree_host_size_t source_capacity = 0;
   iree_host_size_t symbol_capacity = 32;
 
   if (hints) {
@@ -553,14 +554,25 @@ static iree_status_t loom_module_initialize_tables(
         (iree_host_size_t)(hints->type_count * LOOM_MODULE_GROWTH_FACTOR);
     encoding_capacity =
         (iree_host_size_t)(hints->encoding_count * LOOM_MODULE_GROWTH_FACTOR);
+    source_capacity =
+        (iree_host_size_t)(hints->source_count * LOOM_MODULE_GROWTH_FACTOR);
     symbol_capacity =
         (iree_host_size_t)(hints->symbol_count * LOOM_MODULE_GROWTH_FACTOR);
-    if (string_capacity < 8) string_capacity = 8;
-    if (type_capacity < 8) type_capacity = 8;
+    if (string_capacity < 8) {
+      string_capacity = 8;
+    }
+    if (type_capacity < 8) {
+      type_capacity = 8;
+    }
     if (hints->encoding_count > 0 && encoding_capacity < 8) {
       encoding_capacity = 8;
     }
-    if (symbol_capacity < 4) symbol_capacity = 4;
+    if (hints->source_count > 0 && source_capacity < 4) {
+      source_capacity = 4;
+    }
+    if (symbol_capacity < 4) {
+      symbol_capacity = 4;
+    }
   }
 
   // Value segments are allocated lazily as values are defined. The matching
@@ -598,6 +610,14 @@ static iree_status_t loom_module_initialize_tables(
         arena, encoding_capacity, sizeof(loom_encoding_t),
         (void**)&module->encodings.entries));
     module->encodings.capacity = encoding_capacity;
+  }
+
+  // Sources. Modules without a source count hint retain lazy allocation.
+  if (source_capacity > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, source_capacity, sizeof(iree_string_view_t),
+        (void**)&module->sources.entries));
+    module->sources.capacity = source_capacity;
   }
 
   // Symbols.
@@ -1566,6 +1586,14 @@ iree_status_t loom_module_register_source(loom_module_t* module,
       return iree_ok_status();
     }
   }
+
+  return loom_module_append_source(module, name, out_source_id);
+}
+
+iree_status_t loom_module_append_source(loom_module_t* module,
+                                        iree_string_view_t name,
+                                        loom_source_id_t* out_source_id) {
+  *out_source_id = LOOM_SOURCE_ID_INVALID;
 
   // Source IDs are 0-based uint16_t. LOOM_SOURCE_ID_INVALID is the null
   // sentinel, so the maximum valid ID is LOOM_SOURCE_ID_INVALID - 1.

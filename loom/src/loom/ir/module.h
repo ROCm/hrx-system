@@ -39,6 +39,8 @@ typedef struct loom_module_size_hints_t {
   iree_host_size_t type_count;
   // Expected interned encoding count.
   iree_host_size_t encoding_count;
+  // Expected source identifier count.
+  iree_host_size_t source_count;
   // Expected module symbol count.
   iree_host_size_t symbol_count;
 } loom_module_size_hints_t;
@@ -253,6 +255,14 @@ static inline loom_value_ordinal_t loom_module_value_ordinal_scratch_lookup(
 iree_status_t loom_module_register_source(loom_module_t* module,
                                           iree_string_view_t name,
                                           loom_source_id_t* out_source_id);
+
+// Appends a source identifier known to be absent from |module| and returns its
+// module-local ID. The name is copied into module-owned arena storage. Callers
+// establish uniqueness at their input boundary; use
+// loom_module_register_source when the name may already be present.
+iree_status_t loom_module_append_source(loom_module_t* module,
+                                        iree_string_view_t name,
+                                        loom_source_id_t* out_source_id);
 
 // Attaches the file header to |module|. Each line omits the leading // and its
 // conventional single separating space; additional indentation remains part

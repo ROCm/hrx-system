@@ -156,6 +156,27 @@ TEST_F(ModuleTest, RegisterEmptySource) {
   loom_module_free(module);
 }
 
+TEST_F(ModuleTest, AppendSourcePreservesInsertionOrder) {
+  loom_module_size_hints_t hints = {};
+  hints.source_count = 2;
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      &hints, iree_allocator_system(),
+                                      &module));
+
+  loom_source_id_t first_id = LOOM_SOURCE_ID_INVALID;
+  loom_source_id_t second_id = LOOM_SOURCE_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_append_source(module, IREE_SV("a.loom"), &first_id));
+  IREE_ASSERT_OK(
+      loom_module_append_source(module, IREE_SV("b.loom"), &second_id));
+
+  EXPECT_EQ(first_id, 0u);
+  EXPECT_EQ(second_id, 1u);
+  EXPECT_GE(module->sources.capacity, 2u);
+  loom_module_free(module);
+}
+
 TEST_F(ModuleTest, RegisterSourceRejectsInvalidSentinelId) {
   loom_module_t* module = NULL;
   IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
@@ -3423,6 +3444,7 @@ TEST_F(ModuleTest, SizeHints) {
       /*.string_count=*/50,
       /*.type_count=*/20,
       /*.encoding_count=*/12,
+      /*.source_count=*/6,
       /*.symbol_count=*/10,
   };
   loom_module_t* module = NULL;
@@ -3436,6 +3458,7 @@ TEST_F(ModuleTest, SizeHints) {
   EXPECT_GE(module->types.capacity, 20u);
   EXPECT_GE(module->encodings.capacity, 12u);
   EXPECT_GE(module->encoding_intern.capacity, 12u);
+  EXPECT_GE(module->sources.capacity, 6u);
   EXPECT_GE(module->symbols.capacity, 10u);
   loom_module_free(module);
 }

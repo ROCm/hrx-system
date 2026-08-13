@@ -325,6 +325,9 @@ typedef enum loom_bytecode_section_kind_e {
 //   For each source:
 //     [length: varint]
 //     [utf8_data: length bytes]
+//
+// Source spellings are unique. Their canonical order is the writer's module
+// source-ID order so validated bytecode ordinals can materialize by identity.
 
 // ==========================================================================
 // TYPES section

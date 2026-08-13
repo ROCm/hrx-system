@@ -296,7 +296,7 @@ static iree_status_t loom_bytecode_location_read_source_ref(
         materializer->decoder, IREE_SV("SOURCES"), source_index,
         materializer->module_view->sources.count, offset);
   }
-  *out_source_id = materializer->source_ids[source_index];
+  *out_source_id = (loom_source_id_t)source_index;
   return iree_ok_status();
 }
 

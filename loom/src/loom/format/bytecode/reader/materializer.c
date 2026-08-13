@@ -33,8 +33,6 @@ typedef struct loom_bytecode_module_materialization_t {
   iree_allocator_t host_allocator;
   // Module under construction.
   loom_module_t* output_module;
-  // Materialized module source IDs in validated source order.
-  loom_source_id_t* source_ids;
   // Stable-key codec supplied by the embedding compiler.
   loom_low_repr_environment_t low_repr_environment;
 } loom_bytecode_module_materialization_t;
@@ -92,6 +90,7 @@ static iree_status_t loom_bytecode_module_allocate_output(
       .string_count = reader->view.strings.count,
       .type_count = reader->view.types.count,
       .encoding_count = reader->view.encodings.count,
+      .source_count = reader->view.sources.count,
       .symbol_count = reader->view.symbols.count,
   };
   // Bytecode string IDs must materialize 1:1 into module string IDs. Allocate
@@ -121,8 +120,7 @@ static iree_status_t loom_bytecode_module_materialize_tables(
         reader->view.file_header.comment_count));
   }
   IREE_RETURN_IF_ERROR(loom_bytecode_source_table_materialize(
-      &reader->view, reader->arena, reader->output_module,
-      &reader->source_ids));
+      &reader->view, reader->output_module));
   loom_bytecode_encoding_materializer_t encoding_materializer = {
       .decoder = &reader->decoder,
       .context = reader->context,
@@ -148,7 +146,6 @@ static iree_status_t loom_bytecode_module_materialize_tables(
     loom_bytecode_location_materializer_t location_materializer = {
         .decoder = &reader->decoder,
         .module_view = &reader->view,
-        .source_ids = reader->source_ids,
         .output_module = reader->output_module,
     };
     IREE_RETURN_IF_ERROR(loom_bytecode_location_table_materialize(

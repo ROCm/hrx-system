@@ -42,8 +42,6 @@ typedef struct loom_bytecode_location_materializer_t {
   loom_bytecode_reader_decoder_t* decoder;
   // Immutable validated module facts referenced by location entries.
   const loom_bytecode_reader_module_view_t* module_view;
-  // Dense source-ordinal to output-source-ID projection.
-  const loom_source_id_t* source_ids;
   // Module receiving canonical location-table entries.
   loom_module_t* output_module;
 } loom_bytecode_location_materializer_t;

@@ -248,6 +248,7 @@ static iree_status_t loom_target_function_version_projection_clone_source(
       .string_count = target_string_count,
       .type_count = source_module->types.count,
       .encoding_count = source_module->encodings.count,
+      .source_count = source_module->sources.count,
       .symbol_count = target_symbol_count,
   };
   loom_module_t* target_module = NULL;

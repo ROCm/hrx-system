@@ -183,27 +183,43 @@ TEST_F(BytecodeStringTableTest, MaterializesCanonicalStringIds) {
       iree_string_view_equal(module_->strings.entries[2], IREE_SV("beta")));
 }
 
-TEST_F(BytecodeStringTableTest, ProjectsDuplicateSources) {
+TEST_F(BytecodeStringTableTest, RejectsDuplicateSources) {
   const uint8_t data[] = {
-      0x03,       // Source count.
+      0x02,       // Source count.
       0x01, 'a',  // Source zero.
       0x01, 'a',  // Duplicate source one.
-      0x01, 'b',  // Source two.
+  };
+  const loom_bytecode_reader_section_t section =
+      MakeSection(LOOM_BYTECODE_SECTION_SOURCES, data, sizeof(data));
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DEFERRED,
+      loom_bytecode_source_table_read(&decoder_, &section, &scratch_arena_,
+                                      &storage_arena_, &module_view_));
+
+  EXPECT_EQ(error_count_, 1u);
+  EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
+}
+
+TEST_F(BytecodeStringTableTest, MaterializesCanonicalSourceIds) {
+  const uint8_t data[] = {
+      0x02,       // Source count.
+      0x01, 'a',  // Source zero.
+      0x01, 'b',  // Source one.
   };
   const loom_bytecode_reader_section_t section =
       MakeSection(LOOM_BYTECODE_SECTION_SOURCES, data, sizeof(data));
   IREE_ASSERT_OK(loom_bytecode_source_table_read(
-      &decoder_, &section, &storage_arena_, &module_view_));
+      &decoder_, &section, &scratch_arena_, &storage_arena_, &module_view_));
 
-  loom_source_id_t* source_ids = nullptr;
-  IREE_ASSERT_OK(loom_bytecode_source_table_materialize(
-      &module_view_, &scratch_arena_, module_, &source_ids));
+  IREE_ASSERT_OK(
+      loom_bytecode_source_table_materialize(&module_view_, module_));
 
   ASSERT_EQ(module_->sources.count, 2u);
-  ASSERT_NE(source_ids, nullptr);
-  EXPECT_EQ(source_ids[0], 0u);
-  EXPECT_EQ(source_ids[1], 0u);
-  EXPECT_EQ(source_ids[2], 1u);
+  EXPECT_TRUE(
+      iree_string_view_equal(module_->sources.entries[0], IREE_SV("a")));
+  EXPECT_TRUE(
+      iree_string_view_equal(module_->sources.entries[1], IREE_SV("b")));
 }
 
 TEST_F(BytecodeStringTableTest, RejectsSourceCountOutsideRuntimeIdSpace) {
@@ -213,8 +229,8 @@ TEST_F(BytecodeStringTableTest, RejectsSourceCountOutsideRuntimeIdSpace) {
 
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_DEFERRED,
-      loom_bytecode_source_table_read(&decoder_, &section, &storage_arena_,
-                                      &module_view_));
+      loom_bytecode_source_table_read(&decoder_, &section, &scratch_arena_,
+                                      &storage_arena_, &module_view_));
 
   EXPECT_EQ(error_count_, 1u);
 }
