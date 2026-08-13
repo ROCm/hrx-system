@@ -143,6 +143,10 @@ typedef uint16_t loom_bytecode_module_flags_t;
 //   +-----------------------+
 //   | Section directory     |  Section kind + offset + length for each.
 //   +-----------------------+
+//   | IR section            |  Function bodies: ops, blocks, regions.
+//   +-----------------------+
+//   | SYMBOLS section       |  Symbol table with full metadata.
+//   +-----------------------+
 //   | STRINGS section       |  Interned string table.
 //   +-----------------------+
 //   | SOURCES section       |  Source identifiers (filenames, tags).
@@ -155,9 +159,7 @@ typedef uint16_t loom_bytecode_module_flags_t;
 //   +-----------------------+
 //   | LOCATIONS section     |  Location table.
 //   +-----------------------+
-//   | SYMBOLS section       |  Symbol table with full metadata.
-//   +-----------------------+
-//   | IR section            |  Function bodies: ops, blocks, regions.
+//   | SOURCE_TRIVIA section |  File-level source presentation.
 //   +-----------------------+
 //   | RESOURCES section     |  Large blobs: weights, executables, etc.
 //   |                       |  (last — keeps dense metadata up front,
@@ -211,9 +213,21 @@ typedef enum loom_bytecode_section_kind_e {
           // embedded weights, constant tensors.
           // Aligned, seekable, mmap-friendly.
           // Referenced by symbols and op attributes.
+  LOOM_BYTECODE_SECTION_SOURCE_TRIVIA =
+      9,  // Optional module-owned source presentation.
 } loom_bytecode_section_kind_t;
 
-#define LOOM_BYTECODE_SECTION_COUNT 9
+#define LOOM_BYTECODE_SECTION_COUNT 10
+
+// ==========================================================================
+// SOURCE_TRIVIA section
+// ==========================================================================
+//
+// Optional module-owned source presentation that is not attached to an
+// operation or block. The file header uses the ordinary source-trivia encoding
+// with a required zero leading-blank-line bit:
+//
+//   [file_header: source_trivia]
 
 // ==========================================================================
 // Reader validation requirements
@@ -504,6 +518,10 @@ typedef enum loom_bytecode_section_kind_e {
 // leading-comment count in bits 1 and above and a leading-blank-line bit in
 // bit 0. The comment count is therefore source_trivia >> 1. Writers
 // canonicalize any authored run of empty lines to the single retained bit.
+// Nonempty comment_data begins with the conventional single ASCII space after
+// the // marker. In-memory comment payloads omit that separator: writers add
+// exactly one and readers remove exactly one while retaining any additional
+// indentation. Empty comments have zero-length comment_data.
 //
 // Symbol entry format:
 //

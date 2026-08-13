@@ -63,6 +63,8 @@ def _typed_register_module() -> tuple[Module, RegisterType]:
     parser.register_types(ALL_TEST_TYPES)
     parser.register_parameterized_attrs(ALL_TEST_PARAMETERIZED_ATTRS)
     module = parser.parse(
+        "// Bytecode interoperability coverage.\n"
+        "\n"
         "low.func.decl target<test.low.core> "
         "@typed_identity(%arg: reg<test.ptr : vector<4xi16>>) -> "
         "(reg<test.ptr : vector<4xi16>>)\n"
@@ -138,6 +140,8 @@ def main() -> None:
             parameterized_attrs=ALL_TEST_PARAMETERIZED_ATTRS,
             type_defs=ALL_TEST_TYPES,
         )
+        if loaded.file_header != ("Bytecode interoperability coverage.",):
+            raise AssertionError("file header did not survive C bytecode")
         if not any(value.type == register_type for value in loaded.values):
             raise AssertionError(
                 "Python reader did not recover the C-written structural register type"
@@ -148,12 +152,12 @@ def main() -> None:
         if enum_function is None:
             raise AssertionError("Python reader did not recover enum_arrays")
         if not enum_function.leading_blank_line or enum_function.comments != (
-            " Enum and parameterized attribute coverage.",
+            "Enum and parameterized attribute coverage.",
         ):
             raise AssertionError("symbol source trivia did not survive C bytecode")
         entry_block = enum_function.regions[0].blocks[0]
         if not entry_block.leading_blank_line or entry_block.comments != (
-            " Explicit entry block coverage.",
+            "Explicit entry block coverage.",
         ):
             raise AssertionError("block source trivia did not survive C bytecode")
         enum_op = entry_block.ops[0]
@@ -163,7 +167,7 @@ def main() -> None:
             raise AssertionError("open enum array did not survive C bytecode")
         options = [op.attributes["options"] for op in entry_block.ops[1:4]]
         if not entry_block.ops[1].leading_blank_line or entry_block.ops[1].comments != (
-            " Grouped operation coverage.",
+            "Grouped operation coverage.",
         ):
             raise AssertionError("commented op source trivia did not survive bytecode")
         if entry_block.ops[2].leading_blank_line:

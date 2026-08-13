@@ -1952,6 +1952,8 @@ class Parser:
             else None
         )
         tok = self._tokenizer
+        tok.peek()
+        self._module.file_header = tuple(tok.take_file_header())
 
         while not tok.at(TokenKind.EOF):
             # Attribute alias: #name = ...

@@ -1916,6 +1916,36 @@ class TestRoundTrip:
             "}\n"
         )
 
+    def test_file_header_is_owned_by_the_module(self) -> None:
+        text = (
+            "// File-level overview.\n"
+            "//  Indented header detail.\n"
+            "\n"
+            "// Declaration documentation.\n"
+            "test.decl @documented()\n"
+        )
+        module = _op_parser().parse(text)
+        assert module.file_header == (
+            "File-level overview.",
+            " Indented header detail.",
+        )
+        declaration = module.symbols[0].op
+        assert declaration is not None
+        assert declaration.comments == ("Declaration documentation.",)
+        assert not declaration.leading_blank_line
+        assert _op_printer().print_module(module) == text
+
+    def test_comment_separator_space_is_canonicalized(self) -> None:
+        module = _op_parser().parse(
+            "//documentation\n//  indented detail\ntest.decl @documented()\n"
+        )
+        assert _op_printer().print_module(module) == (
+            "// documentation\n//  indented detail\ntest.decl @documented()\n"
+        )
+
+    def test_file_header_only_roundtrip(self) -> None:
+        self._roundtrip_text("// File-level overview.\n")
+
     def test_vertical_source_grouping_is_canonicalized(self) -> None:
         module = _op_parser().parse(
             "\n"

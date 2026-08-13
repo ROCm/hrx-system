@@ -9,6 +9,7 @@
 #include "loom/format/text/printer/atoms.h"
 #include "loom/format/text/printer/context.h"
 #include "loom/format/text/printer/regions.h"
+#include "loom/ir/module.h"
 
 static loom_print_context_t loom_print_context_make(
     const loom_module_t* module, loom_output_stream_t* stream,
@@ -21,6 +22,38 @@ static loom_print_context_t loom_print_context_make(
   context.flags = options ? options->flags : LOOM_TEXT_PRINT_DEFAULT;
   if (options) context.low_asm_environment = options->low_asm_environment;
   return context;
+}
+
+static bool loom_module_has_printable_content(const loom_module_t* module) {
+  for (uint16_t i = 0; i < module->encodings.count; ++i) {
+    if (module->encodings.entries[i].alias_id != LOOM_STRING_ID_INVALID) {
+      return true;
+    }
+  }
+  if (!module->body) return false;
+  for (uint16_t i = 0; i < module->body->block_count; ++i) {
+    const loom_block_t* block = loom_region_const_block(module->body, i);
+    if (block->label_id != LOOM_STRING_ID_INVALID || block->first_op) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static iree_status_t loom_print_file_header(const loom_module_t* module,
+                                            loom_output_stream_t* stream) {
+  iree_host_size_t line_count = 0;
+  const iree_string_view_t* lines =
+      loom_module_file_header(module, &line_count);
+  for (iree_host_size_t i = 0; i < line_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "//"));
+    if (!iree_string_view_is_empty(lines[i])) {
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, ' '));
+      IREE_RETURN_IF_ERROR(loom_output_stream_write(stream, lines[i]));
+    }
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '\n'));
+  }
+  return iree_ok_status();
 }
 
 iree_status_t loom_text_print_module(const loom_module_t* module,
@@ -42,7 +75,16 @@ iree_status_t loom_text_print_module_with_options(
   IREE_RETURN_IF_ERROR(loom_print_name_plan_initialize(module, &name_plan));
   loom_print_context_t ctx =
       loom_print_context_make(module, stream, options, &name_plan);
-  iree_status_t status = loom_print_encoding_aliases(&ctx, module);
+  iree_host_size_t file_header_line_count = 0;
+  (void)loom_module_file_header(module, &file_header_line_count);
+  iree_status_t status = loom_print_file_header(module, stream);
+  if (iree_status_is_ok(status) && file_header_line_count > 0 &&
+      loom_module_has_printable_content(module)) {
+    status = loom_output_stream_write_char(stream, '\n');
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_print_encoding_aliases(&ctx, module);
+  }
   if (iree_status_is_ok(status)) {
     status = loom_print_module_body(&ctx, module->body);
   }

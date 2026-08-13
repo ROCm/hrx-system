@@ -203,6 +203,8 @@ class Tokenizer:
         "_peeked",
         "_comments",
         "_comment_start_line",
+        "_comment_end_line",
+        "_file_header_line_count",
         "_leading_blank_line",
         "_consumed_end_line",
         "in_dim_list",
@@ -217,6 +219,8 @@ class Tokenizer:
         self._peeked: Token | None = None
         self._comments: list[str] = []
         self._comment_start_line: int = 0
+        self._comment_end_line: int = 0
+        self._file_header_line_count: int = 0
         self._leading_blank_line: bool = False
         self._consumed_end_line: int = 0
         self.in_dim_list: bool = False
@@ -239,6 +243,8 @@ class Tokenizer:
         saved_peeked = self._peeked
         saved_comments = list(self._comments)
         saved_comment_start_line = self._comment_start_line
+        saved_comment_end_line = self._comment_end_line
+        saved_file_header_line_count = self._file_header_line_count
         saved_leading_blank_line = self._leading_blank_line
         saved_consumed_end_line = self._consumed_end_line
         saved_in_dim_list = self.in_dim_list
@@ -254,6 +260,8 @@ class Tokenizer:
             self._peeked = saved_peeked
             self._comments = saved_comments
             self._comment_start_line = saved_comment_start_line
+            self._comment_end_line = saved_comment_end_line
+            self._file_header_line_count = saved_file_header_line_count
             self._leading_blank_line = saved_leading_blank_line
             self._consumed_end_line = saved_consumed_end_line
             self.in_dim_list = saved_in_dim_list
@@ -301,12 +309,21 @@ class Tokenizer:
             return self.next()
         return None
 
+    def take_file_header(self) -> list[str]:
+        """Take the separated line-1 comment block, if present."""
+        file_header = self._comments[: self._file_header_line_count]
+        self._comments = self._comments[self._file_header_line_count :]
+        self._file_header_line_count = 0
+        return file_header
+
     def take_pending_source_trivia(self) -> tuple[list[str], bool]:
         """Return and clear comments and their leading source grouping."""
         comments = self._comments
         leading_blank_line = self._leading_blank_line
         self._comments = []
         self._comment_start_line = 0
+        self._comment_end_line = 0
+        self._file_header_line_count = 0
         self._leading_blank_line = False
         return comments, leading_blank_line
 
@@ -404,6 +421,13 @@ class Tokenizer:
             if character == "/" and self._peek_char() == "/":
                 if not self._comments:
                     self._comment_start_line = self._line
+                elif (
+                    self._comment_start_line == 1
+                    and self._file_header_line_count == 0
+                    and self._line > self._comment_end_line + 1
+                ):
+                    self._file_header_line_count = len(self._comments)
+                self._comment_end_line = self._line
                 comment_start = self._position + 2
                 self._advance()  # skip first /
                 self._advance()  # skip second /
@@ -412,6 +436,8 @@ class Tokenizer:
                 comment_text = self._source[comment_start : self._position]
                 if comment_text.endswith("\r"):
                     comment_text = comment_text[:-1]
+                if comment_text.startswith(" "):
+                    comment_text = comment_text[1:]
                 self._comments.append(comment_text)
                 continue
 
@@ -422,6 +448,15 @@ class Tokenizer:
         self._skip_whitespace_and_comments()
 
         source_start_line = self._comment_start_line or self._line
+        if (
+            self._comment_start_line == 1
+            and self._file_header_line_count == 0
+            and (
+                self._position == len(self._source)
+                or self._line > self._comment_end_line + 1
+            )
+        ):
+            self._file_header_line_count = len(self._comments)
         self._leading_blank_line = (
             self._consumed_end_line != 0
             and source_start_line > self._consumed_end_line + 1

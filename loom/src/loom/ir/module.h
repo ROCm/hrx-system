@@ -254,18 +254,32 @@ iree_status_t loom_module_register_source(loom_module_t* module,
                                           iree_string_view_t name,
                                           loom_source_id_t* out_source_id);
 
-// Attaches leading source comments to |op|. Comment payloads are the exact
-// source bytes after each leading // marker and are copied into |module|.
+// Attaches the file header to |module|. Each line omits the leading // and its
+// conventional single separating space; additional indentation remains part
+// of the payload. The payloads are copied into |module|. A module has at most
+// one file header attachment.
+iree_status_t loom_module_attach_file_header(loom_module_t* module,
+                                             const iree_string_view_t* lines,
+                                             iree_host_size_t line_count);
+
+// Attaches leading source comments to |op|. Lines use the same normalized
+// payload convention as loom_module_attach_file_header.
 iree_status_t loom_module_attach_op_comments(loom_module_t* module,
                                              const loom_op_t* op,
                                              const iree_string_view_t* comments,
                                              iree_host_size_t comment_count);
 
-// Attaches leading source comments to |block|. Only explicit block labels need
-// comments; unlabeled entry blocks leave comments attached to the following op.
+// Attaches leading source comments to |block| using normalized line payloads.
+// Only explicit block labels need comments; unlabeled entry blocks leave
+// comments attached to the following op.
 iree_status_t loom_module_attach_block_comments(
     loom_module_t* module, const loom_block_t* block,
     const iree_string_view_t* comments, iree_host_size_t comment_count);
+
+// Looks up the file header attached to |module|. Returns NULL when absent and
+// sets |out_line_count| to zero.
+const iree_string_view_t* loom_module_file_header(
+    const loom_module_t* module, iree_host_size_t* out_line_count);
 
 // Looks up leading source comments attached to |op|. Returns NULL when |op| has
 // no comments and sets |out_comment_count| to zero.

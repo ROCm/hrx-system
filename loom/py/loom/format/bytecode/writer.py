@@ -98,6 +98,7 @@ SECTION_LOCATIONS = 5
 SECTION_SYMBOLS = 6
 SECTION_IR = 7
 SECTION_RESOURCES = 8
+SECTION_SOURCE_TRIVIA = 9
 
 SECTION_WRITE_ORDER = (
     SECTION_IR,
@@ -108,6 +109,7 @@ SECTION_WRITE_ORDER = (
     SECTION_ENCODINGS,
     SECTION_OPS,
     SECTION_LOCATIONS,
+    SECTION_SOURCE_TRIVIA,
 )
 
 FUNCTION_SYMBOL_KINDS = frozenset(
@@ -748,6 +750,8 @@ class BytecodeWriter:
         sections[SECTION_OPS] = self._write_ops()
         if self._location_mode != LOCATION_MODE_NO_LOCATIONS:
             sections[SECTION_LOCATIONS] = self._write_locations()
+        if self._module.file_header:
+            sections[SECTION_SOURCE_TRIVIA] = self._write_source_trivia_section()
         ir_bytes, ir_offsets = self._write_ir()
         sections[SECTION_IR] = ir_bytes
         sections[SECTION_SYMBOLS] = self._write_symbols(ir_offsets)
@@ -769,6 +773,14 @@ class BytecodeWriter:
         buf.write_varint(len(sources))
         for source in sources:
             buf.write_string(source)
+        return buf.get_bytes()
+
+    def _write_source_trivia_section(self) -> bytes:
+        """Write module-owned source presentation."""
+        buf = ByteBuffer()
+        self._write_source_trivia(
+            buf, leading_blank_line=False, comments=self._module.file_header
+        )
         return buf.get_bytes()
 
     def _write_encodings(self) -> bytes:
@@ -1172,7 +1184,7 @@ class BytecodeWriter:
             source_trivia |= SOURCE_TRIVIA_LEADING_BLANK_LINE
         buf.write_varint(source_trivia)
         for comment in comments:
-            encoded = comment.encode("utf-8")
+            encoded = ((" " + comment) if comment else "").encode("utf-8")
             buf.write_varint(len(encoded))
             buf.write_bytes(encoded)
 

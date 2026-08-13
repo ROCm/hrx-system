@@ -173,6 +173,8 @@ static const char* loom_bytecode_section_name(uint16_t kind) {
       return "IR";
     case LOOM_BYTECODE_SECTION_RESOURCES:
       return "RESOURCES";
+    case LOOM_BYTECODE_SECTION_SOURCE_TRIVIA:
+      return "SOURCE_TRIVIA";
     default:
       return "UNKNOWN";
   }
@@ -428,9 +430,20 @@ static iree_status_t loom_bytecode_reader_read_source_trivia(
     iree_const_byte_span_t span = iree_const_byte_span_empty();
     IREE_RETURN_IF_ERROR(
         loom_bytecode_reader_read_span(reader, cursor, length, &span));
+    iree_string_view_t comment =
+        iree_make_string_view((const char*)span.data, span.data_length);
+    if (!iree_unicode_utf8_validate(comment)) {
+      return loom_bytecode_reader_emit_invalid_field(
+          reader, cursor->range_name, IREE_SV("comment_list"), i,
+          IREE_SV("comment"),
+          loom_bytecode_reader_cursor_absolute_position(cursor) - length,
+          IREE_SV("comment_is_not_valid_utf_8"));
+    }
+    if (iree_string_view_starts_with(comment, IREE_SV(" "))) {
+      comment = iree_string_view_remove_prefix(comment, 1);
+    }
     if (comments) {
-      comments[i] =
-          iree_make_string_view((const char*)span.data, span.data_length);
+      comments[i] = comment;
     }
   }
   if (out_leading_blank_line) {
@@ -454,6 +467,29 @@ static iree_status_t loom_bytecode_reader_expect_empty(
 
 static bool loom_bytecode_reader_string_is_valid_utf8(iree_string_view_t text) {
   return iree_unicode_utf8_validate(text);
+}
+
+static iree_status_t loom_bytecode_reader_read_file_header(
+    loom_bytecode_reader_state_t* reader,
+    const loom_bytecode_reader_section_t* section,
+    iree_arena_allocator_t* arena, const iree_string_view_t** out_lines,
+    iree_host_size_t* out_line_count) {
+  loom_bytecode_reader_cursor_t cursor;
+  loom_bytecode_reader_cursor_initialize(
+      section->bytes.data, section->bytes.data_length, section->absolute_offset,
+      IREE_SV("SOURCE_TRIVIA"), &cursor);
+  bool leading_blank_line = false;
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_source_trivia(
+      reader, &cursor, arena, &leading_blank_line, out_lines, out_line_count));
+  if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+  if (leading_blank_line) {
+    return loom_bytecode_reader_emit_invalid_field(
+        reader, IREE_SV("SOURCE_TRIVIA"), IREE_SV("file_header"), 0,
+        IREE_SV("leading_blank_line"), section->absolute_offset,
+        IREE_SV("file_header_must_not_have_a_leading_blank_line"));
+  }
+  return loom_bytecode_reader_expect_empty(reader, &cursor,
+                                           IREE_SV("file_header"));
 }
 
 static iree_status_t loom_bytecode_reader_validate_string_ref(
@@ -6617,6 +6653,9 @@ static iree_status_t loom_bytecode_reader_read_module_metadata(
   const loom_bytecode_reader_section_t* locations_section =
       loom_bytecode_reader_find_section(sections, section_count,
                                         LOOM_BYTECODE_SECTION_LOCATIONS);
+  const loom_bytecode_reader_section_t* source_trivia_section =
+      loom_bytecode_reader_find_section(sections, section_count,
+                                        LOOM_BYTECODE_SECTION_SOURCE_TRIVIA);
   if (reader->result.location_mode ==
       LOOM_BYTECODE_LOCATION_MODE_NO_LOCATIONS) {
     if (locations_section) {
@@ -6651,6 +6690,12 @@ static iree_status_t loom_bytecode_reader_read_module_metadata(
   if (locations_section) {
     IREE_RETURN_IF_ERROR(
         loom_bytecode_reader_read_locations(reader, locations_section));
+    if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+  }
+  if (source_trivia_section) {
+    IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_file_header(
+        reader, source_trivia_section, reader->arena,
+        /*out_lines=*/NULL, /*out_line_count=*/NULL));
     if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(
@@ -6720,6 +6765,9 @@ static iree_status_t loom_bytecode_reader_materialize_module(
   const loom_bytecode_reader_section_t* locations_section =
       loom_bytecode_reader_find_section(sections, section_count,
                                         LOOM_BYTECODE_SECTION_LOCATIONS);
+  const loom_bytecode_reader_section_t* source_trivia_section =
+      loom_bytecode_reader_find_section(sections, section_count,
+                                        LOOM_BYTECODE_SECTION_SOURCE_TRIVIA);
 
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_materialize_strings(reader));
   if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
@@ -6727,6 +6775,16 @@ static iree_status_t loom_bytecode_reader_materialize_module(
   IREE_RETURN_IF_ERROR(loom_module_intern_string(
       reader->output_module, module->name, &module_name_id));
   reader->output_module->name_id = module_name_id;
+  if (source_trivia_section) {
+    const iree_string_view_t* file_header = NULL;
+    iree_host_size_t file_header_line_count = 0;
+    IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_file_header(
+        reader, source_trivia_section, reader->arena, &file_header,
+        &file_header_line_count));
+    if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+    IREE_RETURN_IF_ERROR(loom_module_attach_file_header(
+        reader->output_module, file_header, file_header_line_count));
+  }
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_materialize_sources(reader));
   if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
   IREE_RETURN_IF_ERROR(

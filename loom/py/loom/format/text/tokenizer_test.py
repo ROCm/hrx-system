@@ -372,15 +372,34 @@ class TestComments:
         tokenizer = Tokenizer("// hello\n%x")
         tokenizer.peek()
         comments, leading_blank_line = tokenizer.take_pending_source_trivia()
-        assert comments == [" hello"]
+        assert comments == ["hello"]
         assert not leading_blank_line
 
     def test_multiple_comments(self) -> None:
         tokenizer = Tokenizer("// first\n// second\n%x")
         tokenizer.peek()
         comments, leading_blank_line = tokenizer.take_pending_source_trivia()
-        assert comments == [" first", " second"]
+        assert comments == ["first", "second"]
         assert not leading_blank_line
+
+    def test_file_header_is_separate_from_operation_comments(self) -> None:
+        adjacent = Tokenizer("// declaration\n%x")
+        adjacent.peek()
+        assert adjacent.take_file_header() == []
+        comments, leading_blank_line = adjacent.take_pending_source_trivia()
+        assert comments == ["declaration"]
+        assert not leading_blank_line
+
+        separated = Tokenizer("// file header\n\n// declaration\n%x")
+        separated.peek()
+        assert separated.take_file_header() == ["file header"]
+        comments, leading_blank_line = separated.take_pending_source_trivia()
+        assert comments == ["declaration"]
+        assert not leading_blank_line
+
+        header_only = Tokenizer("// file header")
+        assert header_only.peek().kind == TokenKind.EOF
+        assert header_only.take_file_header() == ["file header"]
 
     def test_leading_blank_line_before_comments_or_token(self) -> None:
         tokenizer = Tokenizer("\n0\n1\n\n// grouped\n2\n\n\n3")
@@ -399,7 +418,7 @@ class TestComments:
         assert tokenizer.peek_n(0).text == "2"
         assert tokenizer.peek().text == "2"
         comments, leading_blank_line = tokenizer.take_pending_source_trivia()
-        assert comments == [" grouped"]
+        assert comments == ["grouped"]
         assert leading_blank_line
 
         assert tokenizer.next().text == "2"

@@ -147,6 +147,10 @@ typedef struct loom_tokenizer_t {
   iree_host_size_t pending_comment_capacity;
   // Source line containing the first pending comment, or zero when none.
   uint32_t pending_comment_start_line;
+  // Source line containing the most recent pending comment, or zero when none.
+  uint32_t pending_comment_end_line;
+  // Number of initial line-1 comment lines forming a separated file header.
+  iree_host_size_t pending_file_header_line_count;
   // True when an empty source line precedes the pending comments or token.
   bool pending_leading_blank_line;
   iree_status_t status;
@@ -180,12 +184,24 @@ void loom_tokenizer_deinitialize(loom_tokenizer_t* tokenizer);
 // tokens plus |tokenizer->error| metadata.
 iree_status_t loom_tokenizer_consume_status(loom_tokenizer_t* tokenizer);
 
+// Takes a file header from pending source trivia. A file header is the
+// contiguous comment block beginning on source line 1 when an empty line
+// separates it from following source, or when no source follows it. Adjacent
+// line-1 comments remain pending for the first operation. The returned line
+// array is tokenizer-scratch storage; payloads are normalized slices into the
+// original source buffer that omit // and its conventional single separator
+// space.
+void loom_tokenizer_take_file_header(loom_tokenizer_t* tokenizer,
+                                     const iree_string_view_t** out_lines,
+                                     iree_host_size_t* out_line_count);
+
 // Returns pending source trivia collected while scanning leading whitespace
 // and clears it. |out_leading_blank_line| is true when at least one empty line
 // separates the previously consumed token from the first pending comment, or
 // from the lookahead token when there are no comments. File-leading whitespace
 // does not set it. The returned comment array is tokenizer-scratch storage;
-// payloads are slices into the original source buffer.
+// payloads are normalized slices into the original source buffer that omit //
+// and its conventional single separator space.
 void loom_tokenizer_take_pending_comments(
     loom_tokenizer_t* tokenizer, const iree_string_view_t** out_comments,
     iree_host_size_t* out_comment_count, bool* out_leading_blank_line);

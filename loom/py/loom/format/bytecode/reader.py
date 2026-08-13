@@ -41,6 +41,7 @@ from loom.format.bytecode.writer import (
     SECTION_IR,
     SECTION_LOCATIONS,
     SECTION_OPS,
+    SECTION_SOURCE_TRIVIA,
     SECTION_SOURCES,
     SECTION_STRINGS,
     SECTION_SYMBOLS,
@@ -209,6 +210,10 @@ class BytecodeReader:
         module = Module()
         module.encodings = list(self._encodings)
         module.sources = list(self._sources)
+        if SECTION_SOURCE_TRIVIA in sections:
+            module.file_header = self._read_source_trivia_section(
+                sections[SECTION_SOURCE_TRIVIA]
+            )
 
         if self._location_mode == LOCATION_MODE_NO_LOCATIONS:
             if SECTION_LOCATIONS in sections:
@@ -803,7 +808,7 @@ class BytecodeReader:
     def _read_source_trivia(
         self, data: bytes, offset: int
     ) -> tuple[bool, tuple[str, ...], int]:
-        """Read a leading-blank bit and raw UTF-8 comment strings."""
+        """Read a leading-blank bit and normalized UTF-8 comment payloads."""
         source_trivia, offset = decode_varint(data, offset)
         leading_blank_line = (source_trivia & SOURCE_TRIVIA_LEADING_BLANK_LINE) != 0
         count = source_trivia >> SOURCE_TRIVIA_COMMENT_COUNT_SHIFT
@@ -816,8 +821,26 @@ class BytecodeReader:
             if len(comment_bytes) != length:
                 raise BytecodeError("comment extends past end of data")
             offset += length
-            comments.append(comment_bytes.decode("utf-8"))
+            try:
+                comment = comment_bytes.decode("utf-8")
+            except UnicodeDecodeError as error:
+                raise BytecodeError("comment is not valid UTF-8") from error
+            if comment.startswith(" "):
+                comment = comment[1:]
+            comments.append(comment)
         return leading_blank_line, tuple(comments), offset
+
+    def _read_source_trivia_section(
+        self, section: tuple[int, bytes]
+    ) -> tuple[str, ...]:
+        """Read module-owned source presentation."""
+        _, data = section
+        leading_blank_line, file_header, offset = self._read_source_trivia(data, 0)
+        if leading_blank_line:
+            raise BytecodeError("file header must not have a leading blank line")
+        if offset != len(data):
+            raise BytecodeError("SOURCE_TRIVIA section has trailing bytes")
+        return file_header
 
     def _map_value_ref(self, value_ref: int, value_map: list[int]) -> int:
         """Translate an available function-local value number to a module value id."""

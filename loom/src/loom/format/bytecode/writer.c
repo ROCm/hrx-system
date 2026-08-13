@@ -207,12 +207,26 @@ static iree_status_t loom_bytecode_page_writer_write_source_trivia(
   IREE_RETURN_IF_ERROR(
       loom_bytecode_page_writer_write_uvarint(writer, source_trivia));
   for (iree_host_size_t i = 0; i < comment_count; ++i) {
+    bool has_payload = !iree_string_view_is_empty(comments[i]);
+    iree_host_size_t wire_size = comments[i].size + (has_payload ? 1 : 0);
     IREE_RETURN_IF_ERROR(
-        loom_bytecode_page_writer_write_uvarint(writer, comments[i].size));
+        loom_bytecode_page_writer_write_uvarint(writer, wire_size));
+    if (has_payload) {
+      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(writer, ' '));
+    }
     IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write(
         writer, comments[i].data, comments[i].size));
   }
   return iree_ok_status();
+}
+
+static iree_status_t loom_bytecode_write_source_trivia_section(
+    loom_bytecode_page_writer_t* writer, const loom_module_t* module) {
+  iree_host_size_t line_count = 0;
+  const iree_string_view_t* lines =
+      loom_module_file_header(module, &line_count);
+  return loom_bytecode_page_writer_write_source_trivia(
+      writer, /*leading_blank_line=*/false, lines, line_count);
 }
 
 //===----------------------------------------------------------------------===//
@@ -300,7 +314,13 @@ static iree_status_t loom_bytecode_emit_source_trivia(
       leading_blank_line, comment_count, &source_trivia));
   IREE_RETURN_IF_ERROR(loom_bytecode_emit_uvarint(builder, source_trivia));
   for (iree_host_size_t i = 0; i < comment_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_bytecode_emit_uvarint(builder, comments[i].size));
+    bool has_payload = !iree_string_view_is_empty(comments[i]);
+    iree_host_size_t wire_size = comments[i].size + (has_payload ? 1 : 0);
+    IREE_RETURN_IF_ERROR(loom_bytecode_emit_uvarint(builder, wire_size));
+    if (has_payload) {
+      IREE_RETURN_IF_ERROR(
+          iree_string_builder_append_string(builder, IREE_SV(" ")));
+    }
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_string(builder, comments[i]));
   }
@@ -4889,15 +4909,22 @@ iree_status_t loom_bytecode_write_module(
   // Module data starts at this offset.
   iree_host_size_t module_start = page_writer.total_written;
 
-  static const loom_bytecode_section_kind_t section_write_order[] = {
-      LOOM_BYTECODE_SECTION_IR,      LOOM_BYTECODE_SECTION_SYMBOLS,
-      LOOM_BYTECODE_SECTION_STRINGS, LOOM_BYTECODE_SECTION_SOURCES,
-      LOOM_BYTECODE_SECTION_TYPES,   LOOM_BYTECODE_SECTION_ENCODINGS,
-      LOOM_BYTECODE_SECTION_OPS,     LOOM_BYTECODE_SECTION_LOCATIONS,
-  };
-  uint32_t section_count = IREE_ARRAYSIZE(section_write_order);
-  if (location_mode == LOOM_BYTECODE_LOCATION_MODE_NO_LOCATIONS) {
-    --section_count;
+  loom_bytecode_section_kind_t section_write_order[LOOM_BYTECODE_SECTION_COUNT];
+  iree_host_size_t section_count = 0;
+  section_write_order[section_count++] = LOOM_BYTECODE_SECTION_IR;
+  section_write_order[section_count++] = LOOM_BYTECODE_SECTION_SYMBOLS;
+  section_write_order[section_count++] = LOOM_BYTECODE_SECTION_STRINGS;
+  section_write_order[section_count++] = LOOM_BYTECODE_SECTION_SOURCES;
+  section_write_order[section_count++] = LOOM_BYTECODE_SECTION_TYPES;
+  section_write_order[section_count++] = LOOM_BYTECODE_SECTION_ENCODINGS;
+  section_write_order[section_count++] = LOOM_BYTECODE_SECTION_OPS;
+  if (location_mode != LOOM_BYTECODE_LOCATION_MODE_NO_LOCATIONS) {
+    section_write_order[section_count++] = LOOM_BYTECODE_SECTION_LOCATIONS;
+  }
+  iree_host_size_t file_header_line_count = 0;
+  (void)loom_module_file_header(module, &file_header_line_count);
+  if (file_header_line_count > 0) {
+    section_write_order[section_count++] = LOOM_BYTECODE_SECTION_SOURCE_TRIVIA;
   }
   loom_bytecode_body_counts_t module_counts = {0};
   if (iree_status_is_ok(status)) {
@@ -5056,6 +5083,18 @@ iree_status_t loom_bytecode_write_module(
     }
   }
 
+  // Module-owned source presentation.
+  if (iree_status_is_ok(status) && file_header_line_count > 0) {
+    section_offsets[LOOM_BYTECODE_SECTION_SOURCE_TRIVIA] =
+        page_writer.total_written - module_start;
+    status = loom_bytecode_write_source_trivia_section(&page_writer, module);
+    if (iree_status_is_ok(status)) {
+      section_lengths[LOOM_BYTECODE_SECTION_SOURCE_TRIVIA] =
+          page_writer.total_written - module_start -
+          section_offsets[LOOM_BYTECODE_SECTION_SOURCE_TRIVIA];
+    }
+  }
+
   // Flush remaining page buffer, then seek back to patch the section
   // directory and module directory with correct offsets and lengths.
   if (iree_status_is_ok(status)) {
@@ -5069,14 +5108,9 @@ iree_status_t loom_bytecode_write_module(
                             (iree_io_stream_pos_t)section_dir_patch_position);
   }
   if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0;
-         i < IREE_ARRAYSIZE(section_write_order) && iree_status_is_ok(status);
+    for (iree_host_size_t i = 0; i < section_count && iree_status_is_ok(status);
          ++i) {
       loom_bytecode_section_kind_t kind = section_write_order[i];
-      if (kind == LOOM_BYTECODE_SECTION_LOCATIONS &&
-          location_mode == LOOM_BYTECODE_LOCATION_MODE_NO_LOCATIONS) {
-        continue;
-      }
       uint8_t entry[sizeof(loom_bytecode_section_dir_entry_t)] = {0};
       entry[0] = (uint8_t)kind;
       entry[1] = (uint8_t)((uint16_t)kind >> 8);

@@ -537,12 +537,52 @@ TEST(Tokenizer, CollectsPendingCommentsExactly) {
                                        &leading_blank_line);
   ASSERT_EQ(comment_count, 2u);
   EXPECT_FALSE(leading_blank_line);
-  EXPECT_TRUE(iree_string_view_equal(comments[0], IREE_SV(" first")));
+  EXPECT_TRUE(iree_string_view_equal(comments[0], IREE_SV("first")));
   EXPECT_TRUE(iree_string_view_equal(comments[1], IREE_SV("second")));
   loom_tokenizer_take_pending_comments(t.get(), &comments, &comment_count,
                                        &leading_blank_line);
   EXPECT_EQ(comment_count, 0u);
   EXPECT_FALSE(leading_blank_line);
+}
+
+TEST(Tokenizer, DistinguishesFileHeaderFromOperationComments) {
+  ScopedTokenizer adjacent("// declaration\n99");
+  EXPECT_EQ(adjacent.peek().kind, LOOM_TOKEN_INTEGER);
+  const iree_string_view_t* file_header = NULL;
+  iree_host_size_t file_header_line_count = 0;
+  loom_tokenizer_take_file_header(adjacent.get(), &file_header,
+                                  &file_header_line_count);
+  EXPECT_EQ(file_header_line_count, 0u);
+  const iree_string_view_t* comments = NULL;
+  iree_host_size_t comment_count = 0;
+  bool leading_blank_line = true;
+  loom_tokenizer_take_pending_comments(adjacent.get(), &comments,
+                                       &comment_count, &leading_blank_line);
+  EXPECT_EQ(comment_count, 1u);
+  EXPECT_FALSE(leading_blank_line);
+
+  ScopedTokenizer separated(
+      "// file header\n"
+      "\n"
+      "// declaration\n"
+      "99");
+  EXPECT_EQ(separated.peek().kind, LOOM_TOKEN_INTEGER);
+  loom_tokenizer_take_file_header(separated.get(), &file_header,
+                                  &file_header_line_count);
+  ASSERT_EQ(file_header_line_count, 1u);
+  EXPECT_TRUE(iree_string_view_equal(file_header[0], IREE_SV("file header")));
+  loom_tokenizer_take_pending_comments(separated.get(), &comments,
+                                       &comment_count, &leading_blank_line);
+  ASSERT_EQ(comment_count, 1u);
+  EXPECT_FALSE(leading_blank_line);
+  EXPECT_TRUE(iree_string_view_equal(comments[0], IREE_SV("declaration")));
+
+  ScopedTokenizer header_only("// file header");
+  EXPECT_EQ(header_only.peek().kind, LOOM_TOKEN_EOF);
+  loom_tokenizer_take_file_header(header_only.get(), &file_header,
+                                  &file_header_line_count);
+  ASSERT_EQ(file_header_line_count, 1u);
+  EXPECT_TRUE(iree_string_view_equal(file_header[0], IREE_SV("file header")));
 }
 
 TEST(Tokenizer, DetectsLeadingBlankLineBeforeCommentsOrToken) {
@@ -572,7 +612,7 @@ TEST(Tokenizer, DetectsLeadingBlankLineBeforeCommentsOrToken) {
                                        &leading_blank_line);
   ASSERT_EQ(comment_count, 1u);
   EXPECT_TRUE(leading_blank_line);
-  EXPECT_TRUE(iree_string_view_equal(comments[0], IREE_SV(" grouped")));
+  EXPECT_TRUE(iree_string_view_equal(comments[0], IREE_SV("grouped")));
 
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_INTEGER);
   EXPECT_EQ(t.peek().line, 8u);

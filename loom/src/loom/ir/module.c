@@ -1679,6 +1679,13 @@ static iree_status_t loom_module_attach_comments(
   return iree_ok_status();
 }
 
+iree_status_t loom_module_attach_file_header(loom_module_t* module,
+                                             const iree_string_view_t* lines,
+                                             iree_host_size_t line_count) {
+  return loom_module_attach_comments(module, LOOM_COMMENT_OWNER_MODULE, module,
+                                     lines, line_count);
+}
+
 iree_status_t loom_module_attach_op_comments(loom_module_t* module,
                                              const loom_op_t* op,
                                              const iree_string_view_t* comments,
@@ -1704,6 +1711,12 @@ static const iree_string_view_t* loom_module_comments(
   if (!attachment) return NULL;
   if (out_comment_count) *out_comment_count = attachment->comment_count;
   return attachment->comments;
+}
+
+const iree_string_view_t* loom_module_file_header(
+    const loom_module_t* module, iree_host_size_t* out_line_count) {
+  return loom_module_comments(module, LOOM_COMMENT_OWNER_MODULE, module,
+                              out_line_count);
 }
 
 const iree_string_view_t* loom_module_op_comments(
