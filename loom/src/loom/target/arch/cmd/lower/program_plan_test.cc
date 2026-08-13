@@ -160,10 +160,10 @@ command.program.def public @double_then_increment(%element_count: index) launch(
   EXPECT_TRUE(loom_low_func_def_isa(forward.function_op));
   EXPECT_TRUE(loom_low_func_def_isa(reverse.function_op));
   EXPECT_EQ(FindSymbol(plan.launch_module,
-                       IREE_SV("increment_then_double.__launch_counts")),
+                       IREE_SV("increment_then_double.__launch_config")),
             forward.launch_function_op);
   EXPECT_EQ(FindSymbol(plan.launch_module,
-                       IREE_SV("double_then_increment.__launch_counts")),
+                       IREE_SV("double_then_increment.__launch_config")),
             reverse.launch_function_op);
   EXPECT_EQ(forward.launch_tuple_count, 1u);
   EXPECT_EQ(reverse.launch_tuple_count, 1u);

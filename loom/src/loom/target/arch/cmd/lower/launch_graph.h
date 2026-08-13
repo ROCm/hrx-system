@@ -38,17 +38,18 @@ typedef struct loom_cmd_launch_count_t {
   union {
     // Exact workgroup count when |kind| is DIRECT.
     loom_target_dispatch_workgroup_count_t direct;
-    // Dense xyz tuple ordinal returned by the host function when HOST.
+    // Dense xyz tuple ordinal stored by the host function when HOST.
     uint32_t host_tuple_ordinal;
   } payload;
 } loom_cmd_launch_count_t;
 
 // Factored launch graph for one source command program.
 //
-// The owned module contains one pure host func.def whose arguments correspond
-// to the source program's specialization arguments. Its results are flattened
-// xyz values for |host_tuple_count| unique dynamic tuples. Static tuples have
-// no function results and remain in DIRECT launch rows.
+// The owned module contains one root-exported host func.def whose scalar
+// arguments correspond to the source program's specialization arguments and
+// whose final argument is a config-data buffer. It stores flattened b32 xyz
+// values for |host_tuple_count| unique dynamic tuples. Static tuples produce no
+// stores and remain in DIRECT launch rows.
 //
 // Launch rows retain source-op pointers, so the source module must outlive this
 // object. All other storage is owned by |module| and released together. Wave
@@ -57,7 +58,7 @@ typedef struct loom_cmd_launch_count_t {
 typedef struct loom_cmd_launch_graph_t {
   // Owned module containing the aggregate host function.
   loom_module_t* module;
-  // Pure aggregate host function inside |module|.
+  // Aggregate host function inside |module|.
   loom_op_t* host_function_op;
   // Source launches in schedule traversal order.
   const loom_cmd_launch_count_t* launches;
@@ -67,7 +68,7 @@ typedef struct loom_cmd_launch_graph_t {
   const loom_cmd_schedule_wave_t* waves;
   // Number of ordered waves.
   iree_host_size_t wave_count;
-  // Number of unique dynamic xyz tuples returned by |host_function_op|.
+  // Number of unique dynamic xyz tuples stored by |host_function_op|.
   uint32_t host_tuple_count;
 } loom_cmd_launch_graph_t;
 
@@ -76,8 +77,8 @@ typedef struct loom_cmd_launch_graph_t {
 // Each scheduled kernel's exact launch-config region is cloned with its
 // workload operands substituted. Pure command-program dataflow required by
 // those operands is cloned once, and ordinary canonicalization plus CSE runs
-// across the combined function. Equal residual xyz tuples share one dense host
-// result ordinal. Exact tuples are returned as direct launch metadata.
+// across the combined function. Equal residual xyz tuples share one dense
+// config-data tuple. Exact tuples remain as direct launch metadata.
 // |source_facts| is a borrowed table populated for the source program and each
 // scheduled kernel's launch-config region by the owning program plan.
 //

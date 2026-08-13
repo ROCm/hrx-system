@@ -46,10 +46,10 @@ typedef struct loom_cmd_program_root_t {
   // External resource-table shape carried through command lowering.
   loom_cmd_abi_layout_t abi_layout;
 
-  // Host launch-count function in the plan's shared launch module.
+  // Host launch-config function in the plan's shared launch module.
   loom_op_t* launch_function_op;
 
-  // Number of unique dynamic xyz tuples returned by |launch_function_op|.
+  // Number of unique dynamic xyz tuples stored by |launch_function_op|.
   uint32_t launch_tuple_count;
 
   // Plan-wide dependency unit index for each root-local executable slot.
@@ -74,7 +74,7 @@ typedef struct loom_cmd_program_root_t {
 // Immutable command roots and their union dependency graph.
 //
 // The root module contains every selected command symbol lowered to the
-// portable cmd low ISA. The launch module contains one pure host function per
+// portable cmd low ISA. The launch module contains one host config function per
 // selected root. Equivalent dependency launch sites across all roots share one
 // selectively linked and specialized kernel unit. No compilation or artifact
 // emission occurs while preparing the plan.
@@ -82,7 +82,7 @@ typedef struct loom_cmd_program_plan_t {
   // Owned module containing all lowered command roots.
   loom_module_t* root_module;
 
-  // Owned module containing all root launch-count functions.
+  // Owned module containing all root launch-config functions.
   loom_module_t* launch_module;
 
   // Selected roots in caller order.
@@ -111,7 +111,7 @@ typedef struct loom_cmd_program_plan_t {
 // dependency closure into one module, flattens command-program composition,
 // resolves root-local control flow and explicit unroll policies, interns
 // equivalent launch sites across roots into private dependency units,
-// materializes one launch-count program per root, assigns plan-wide dense
+// materializes one launch-config function per root, assigns plan-wide dense
 // dependency slots, and lowers every command root. Dependency kernel bodies
 // retain their ordinary target-compilation path. The source module is unchanged
 // and need not outlive the returned plan.

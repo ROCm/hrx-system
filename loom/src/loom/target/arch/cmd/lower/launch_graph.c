@@ -13,13 +13,16 @@
 #include "loom/ir/context.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
+#include "loom/ops/buffer/ops.h"
 #include "loom/ops/command/ops.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/launch_config.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/special_values.h"
 #include "loom/ops/type_registry.h"
+#include "loom/ops/view/ops.h"
 #include "loom/pass/value_facts.h"
 #include "loom/rewrite/materialize.h"
 #include "loom/rewrite/remap.h"
@@ -47,6 +50,8 @@ typedef struct loom_cmd_launch_graph_build_t {
   loom_module_t* module;
   // Aggregate host function under construction.
   loom_func_like_t host_function;
+  // Final buffer argument receiving the packed launch config data.
+  loom_value_id_t output_buffer;
   // Builder positioned in the aggregate host function body.
   loom_builder_t builder;
   // Source program value to aggregate host value mapping.
@@ -281,17 +286,20 @@ static iree_status_t loom_cmd_launch_graph_build_host_function(
                             result_count, (unsigned)UINT16_MAX);
   }
 
+  const iree_host_size_t argument_count =
+      (iree_host_size_t)specialization_count + 1;
   loom_type_t* argument_types = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      build->scratch_arena, argument_count, sizeof(*argument_types),
+      (void**)&argument_types));
   if (specialization_count != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        build->scratch_arena, specialization_count, sizeof(*argument_types),
-        (void**)&argument_types));
     // Populate the target value map before remapping types because a later
     // argument type may reference an earlier specialization argument.
     for (uint16_t i = 0; i < specialization_count; ++i) {
       argument_types[i] = loom_type_none();
     }
   }
+  argument_types[specialization_count] = loom_type_buffer();
   loom_type_t* result_types = NULL;
   if (result_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -306,7 +314,10 @@ static iree_status_t loom_cmd_launch_graph_build_host_function(
       loom_func_like_callee(build->source_program);
   const iree_string_view_t source_name =
       loom_cmd_launch_graph_symbol_name(build->source_module, source_callee);
-  const iree_string_view_t name_suffix = IREE_SV(".__launch_counts");
+  loom_string_id_t export_name = LOOM_STRING_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_module_intern_string(build->module, source_name, &export_name));
+  const iree_string_view_t name_suffix = IREE_SV(".__launch_config");
   if (source_name.size > IREE_HOST_SIZE_MAX - name_suffix.size) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "command program symbol name is too large");
@@ -329,7 +340,8 @@ static iree_status_t loom_cmd_launch_graph_build_host_function(
   IREE_RETURN_IF_ERROR(loom_ir_remap_location_id(
       &build->program_remap, build->source_program.op->location,
       &target_location));
-  loom_func_def_build_flags_t build_flags = LOOM_FUNC_DEF_BUILD_FLAG_HAS_PURITY;
+  loom_func_def_build_flags_t build_flags =
+      LOOM_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_SYMBOL;
   uint8_t visibility = 0;
   if (loom_func_like_visibility(build->source_program) != 0) {
     build_flags |= LOOM_FUNC_DEF_BUILD_FLAG_HAS_VISIBILITY;
@@ -341,11 +353,11 @@ static iree_status_t loom_cmd_launch_graph_build_host_function(
   loom_op_t* host_function_op = NULL;
   IREE_RETURN_IF_ERROR(loom_func_def_build(
       &build->builder, build_flags, visibility, /*retain=*/0, /*cc=*/0,
-      LOOM_FUNC_PURITY_PURE, /*temperature=*/0, /*inline_policy=*/0,
+      /*purity=*/0, /*temperature=*/0, /*inline_policy=*/0,
       loom_symbol_ref_null(), /*abi=*/0, loom_named_attr_slice_empty(),
-      LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(),
+      export_name, loom_named_attr_slice_empty(),
       (loom_symbol_ref_t){.module_id = 0, .symbol_id = target_symbol},
-      argument_types, specialization_count, result_types, result_count,
+      argument_types, argument_count, result_types, result_count,
       /*tied_results=*/NULL, /*tied_result_count=*/0,
       /*predicates=*/NULL, /*predicates_count=*/0, target_location,
       &host_function_op));
@@ -355,7 +367,7 @@ static iree_status_t loom_cmd_launch_graph_build_host_function(
   uint16_t host_argument_count = 0;
   const loom_value_id_t* host_arguments =
       loom_func_like_arg_ids(build->host_function, &host_argument_count);
-  IREE_ASSERT_EQ(host_argument_count, specialization_count);
+  IREE_ASSERT_EQ(host_argument_count, argument_count);
   IREE_RETURN_IF_ERROR(
       loom_ir_remap_map_values(&build->program_remap, source_arguments,
                                host_arguments, specialization_count));
@@ -370,6 +382,12 @@ static iree_status_t loom_cmd_launch_graph_build_host_function(
     IREE_RETURN_IF_ERROR(loom_cmd_launch_graph_copy_value_name(
         build, &build->program_remap, source_arguments[i], host_arguments[i]));
   }
+  build->output_buffer = host_arguments[specialization_count];
+  loom_string_id_t output_name = LOOM_STRING_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_module_intern_string(
+      build->module, IREE_SV("config_data"), &output_name));
+  IREE_RETURN_IF_ERROR(loom_module_set_value_name(
+      build->module, build->output_buffer, output_name));
   IREE_RETURN_IF_ERROR(loom_cmd_launch_graph_attach_program_predicates(build));
 
   loom_builder_enter_region(&build->builder, host_function_op,
@@ -551,13 +569,17 @@ static bool loom_cmd_launch_graph_exact_u32(
     uint32_t* out_value, bool* out_is_exact) {
   *out_value = 0;
   *out_is_exact = false;
+  const loom_value_facts_t value_facts =
+      loom_value_fact_table_lookup(facts, value_id);
+  if (loom_value_facts_is_float(value_facts) || value_facts.range_lo < 0 ||
+      value_facts.range_hi > UINT32_MAX) {
+    return false;
+  }
   int64_t value = 0;
-  if (!loom_value_facts_as_exact_i64(
-          loom_value_fact_table_lookup(facts, value_id), &value)) {
+  if (!loom_value_facts_as_exact_i64(value_facts, &value)) {
     return true;
   }
   *out_is_exact = true;
-  if (value < 0 || value > UINT32_MAX) return false;
   *out_value = (uint32_t)value;
   return true;
 }
@@ -683,6 +705,72 @@ static iree_status_t loom_cmd_launch_graph_compact_results(
   return iree_ok_status();
 }
 
+static iree_status_t loom_cmd_launch_graph_sink_results(
+    loom_cmd_launch_graph_build_t* build) {
+  loom_block_t* host_block =
+      loom_region_entry_block(loom_func_like_body(build->host_function));
+  loom_op_t* old_return_op = host_block->last_op;
+  IREE_ASSERT(loom_func_return_isa(old_return_op));
+  const loom_value_slice_t return_values =
+      loom_func_return_operands(old_return_op);
+  const uint16_t return_value_count = return_values.count;
+
+  loom_builder_t builder;
+  loom_builder_initialize(build->module, &build->module->arena, host_block,
+                          &builder);
+  loom_builder_set_before(&builder, old_return_op);
+  if (return_value_count != 0) {
+    loom_op_t* zero_offset_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_index_constant_build(
+        &builder, loom_attr_i64(0), loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
+        old_return_op->location, &zero_offset_op));
+    const loom_type_t config_view_type = loom_type_shaped_1d(
+        LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_I32,
+        loom_dim_pack_static(return_value_count), /*encoding_id=*/0);
+    loom_op_t* config_view_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_buffer_view_build(
+        &builder, build->output_buffer,
+        loom_index_constant_result(zero_offset_op), config_view_type,
+        old_return_op->location, &config_view_op));
+    const loom_value_id_t config_view = loom_buffer_view_result(config_view_op);
+    const loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+    const loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+    for (uint16_t i = 0; i < return_value_count; ++i) {
+      loom_op_t* cast_op = NULL;
+      IREE_RETURN_IF_ERROR(
+          loom_index_cast_build(&builder, return_values.values[i], index_type,
+                                i32_type, old_return_op->location, &cast_op));
+      const int64_t static_index = i;
+      loom_op_t* store_op = NULL;
+      IREE_RETURN_IF_ERROR(loom_view_store_build(
+          &builder, /*build_flags=*/0, loom_index_cast_result(cast_op),
+          config_view, /*indices=*/NULL, /*indices_count=*/0, &static_index,
+          /*static_indices_count=*/1, /*cache_scope=*/0,
+          /*cache_temporal=*/0, old_return_op->location, &store_op));
+    }
+  }
+
+  loom_op_t* new_return_op = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_func_return_build(&builder, /*operands=*/NULL, /*operands_count=*/0,
+                             old_return_op->location, &new_return_op));
+  IREE_RETURN_IF_ERROR(loom_op_erase(build->module, old_return_op));
+
+  if (return_value_count != 0) {
+    bool* remove_results = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        build->scratch_arena, return_value_count, sizeof(*remove_results),
+        (void**)&remove_results));
+    memset(remove_results, 1, return_value_count * sizeof(*remove_results));
+    uint16_t removed_count = 0;
+    IREE_RETURN_IF_ERROR(loom_op_remove_results(
+        build->module, build->host_function.op, remove_results,
+        build->scratch_arena, &removed_count));
+    IREE_ASSERT_EQ(removed_count, return_value_count);
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_cmd_launch_graph_materialize(
     const loom_module_t* source_module, loom_op_t* source_program_op,
     const loom_cmd_schedule_plan_t* schedule,
@@ -763,10 +851,17 @@ iree_status_t loom_cmd_launch_graph_materialize(
         loom_cmd_launch_graph_compact_results(&build, facts, &host_tuple_count);
   }
   if (iree_status_is_ok(status)) {
+    status = loom_cmd_launch_graph_sink_results(&build);
+  }
+  if (iree_status_is_ok(status)) {
     loom_canonicalizer_result_t result = {0};
     status = loom_canonicalizer_run_function(
         &canonicalizer, build.host_function, &(loom_canonicalizer_options_t){0},
         &result);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_cmd_launch_graph_run_cse(graph_module, build.host_function,
+                                           block_pool);
   }
 
   if (canonicalizer_initialized) {

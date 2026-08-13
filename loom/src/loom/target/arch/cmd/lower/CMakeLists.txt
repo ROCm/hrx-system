@@ -84,12 +84,15 @@ loom_cc_library(
     iree::base::internal::arena
     loom::ir
     loom::ir::facts
+    loom::ops::buffer
     loom::ops::command
     loom::ops::func
+    loom::ops::index
     loom::ops::kernel
     loom::ops::op_defs
     loom::ops::special_values
     loom::ops::type_registry
+    loom::ops::view
     loom::pass::value_facts
     loom::rewrite::materialize
     loom::rewrite::remap

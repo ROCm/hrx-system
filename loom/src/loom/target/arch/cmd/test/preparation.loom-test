@@ -23,10 +23,17 @@ command.program.def public @prefill(%token_count: index) launch(%storage: buffer
 }
 
 // ----
-func.def public retain pure @prefill.__launch_counts(%token_count: index) -> (index, index, index) where [range(%token_count, 1, 512)] {
+func.def public retain export("prefill") @prefill.__launch_config(%token_count: index, %config_data: buffer) where [range(%token_count, 1, 512)] {
   %bias = index.constant 1 : index
   %row_groups = index.add %token_count, %bias : index
-  func.return %row_groups, %bias, %bias : index, index, index
+  %4 = index.constant 0 : offset
+  %5 = buffer.view %config_data[%4] : buffer -> view<3xi32>
+  %6 = index.cast %row_groups : index to i32
+  view.store %6, %5[0] : i32, view<3xi32>
+  %7 = scalar.constant 1 : i32
+  view.store %7, %5[1] : i32, view<3xi32>
+  view.store %7, %5[2] : i32, view<3xi32>
+  func.return
 }
 
 // ====
