@@ -359,9 +359,49 @@ static iree_status_t iree_hal_replay_recorder_command_buffer_atomic_wait(
     iree_hal_execution_stage_t source_stage_mask,
     iree_hal_execution_stage_t target_stage_mask,
     iree_hal_buffer_ref_t target_ref, iree_hal_atomic_wait_params_t params) {
-  return iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "replay recorder command buffers do not yet record atomic waits");
+  iree_hal_replay_recorder_command_buffer_t* command_buffer =
+      iree_hal_replay_recorder_command_buffer_cast(base_command_buffer);
+  iree_hal_replay_command_buffer_atomic_wait_payload_t payload;
+  memset(&payload, 0, sizeof(payload));
+  iree_hal_replay_recorder_buffer_ref_make_payload(target_ref,
+                                                   &payload.target_ref);
+  payload.source_stage_mask = source_stage_mask;
+  payload.target_stage_mask = target_stage_mask;
+  payload.params.value = params.value;
+  payload.params.mask = params.mask;
+  payload.params.flags = params.flags;
+  payload.params.width = params.width;
+  payload.params.condition = params.condition;
+  payload.params.reserved0 = params.reserved;
+  iree_const_byte_span_t payload_iovec =
+      iree_make_const_byte_span(&payload, sizeof(payload));
+
+  iree_hal_buffer_ref_t base_target_ref = target_ref;
+  iree_hal_buffer_t* temporary_target_buffer = NULL;
+  iree_status_t status = iree_ok_status();
+  if (target_ref.buffer) {
+    status = iree_hal_replay_recorder_buffer_unwrap_for_call(
+        target_ref.buffer, command_buffer->host_allocator,
+        &base_target_ref.buffer, &temporary_target_buffer);
+  }
+  iree_hal_replay_pending_record_t pending_record = {0};
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_recorder_command_buffer_begin_operation(
+        command_buffer,
+        IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_WAIT,
+        IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_WAIT,
+        &pending_record);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_recorder_end_operation_with_payload(
+        &pending_record,
+        iree_hal_command_buffer_atomic_wait(
+            command_buffer->base_command_buffer, source_stage_mask,
+            target_stage_mask, base_target_ref, params),
+        1, &payload_iovec);
+  }
+  iree_hal_replay_recorder_buffer_release_temporary(temporary_target_buffer);
+  return status;
 }
 
 static iree_status_t iree_hal_replay_recorder_command_buffer_atomic_store(
@@ -369,9 +409,48 @@ static iree_status_t iree_hal_replay_recorder_command_buffer_atomic_store(
     iree_hal_execution_stage_t source_stage_mask,
     iree_hal_execution_stage_t target_stage_mask,
     iree_hal_buffer_ref_t target_ref, iree_hal_atomic_store_params_t params) {
-  return iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "replay recorder command buffers do not yet record atomic stores");
+  iree_hal_replay_recorder_command_buffer_t* command_buffer =
+      iree_hal_replay_recorder_command_buffer_cast(base_command_buffer);
+  iree_hal_replay_command_buffer_atomic_store_payload_t payload;
+  memset(&payload, 0, sizeof(payload));
+  iree_hal_replay_recorder_buffer_ref_make_payload(target_ref,
+                                                   &payload.target_ref);
+  payload.source_stage_mask = source_stage_mask;
+  payload.target_stage_mask = target_stage_mask;
+  payload.params.value = params.value;
+  payload.params.flags = params.flags;
+  payload.params.width = params.width;
+  memcpy(payload.params.reserved0, params.reserved,
+         sizeof(payload.params.reserved0));
+  iree_const_byte_span_t payload_iovec =
+      iree_make_const_byte_span(&payload, sizeof(payload));
+
+  iree_hal_buffer_ref_t base_target_ref = target_ref;
+  iree_hal_buffer_t* temporary_target_buffer = NULL;
+  iree_status_t status = iree_ok_status();
+  if (target_ref.buffer) {
+    status = iree_hal_replay_recorder_buffer_unwrap_for_call(
+        target_ref.buffer, command_buffer->host_allocator,
+        &base_target_ref.buffer, &temporary_target_buffer);
+  }
+  iree_hal_replay_pending_record_t pending_record = {0};
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_recorder_command_buffer_begin_operation(
+        command_buffer,
+        IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_STORE,
+        IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_STORE,
+        &pending_record);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_recorder_end_operation_with_payload(
+        &pending_record,
+        iree_hal_command_buffer_atomic_store(
+            command_buffer->base_command_buffer, source_stage_mask,
+            target_stage_mask, base_target_ref, params),
+        1, &payload_iovec);
+  }
+  iree_hal_replay_recorder_buffer_release_temporary(temporary_target_buffer);
+  return status;
 }
 
 static iree_status_t iree_hal_replay_recorder_command_buffer_atomic_rmw(
@@ -379,10 +458,48 @@ static iree_status_t iree_hal_replay_recorder_command_buffer_atomic_rmw(
     iree_hal_execution_stage_t source_stage_mask,
     iree_hal_execution_stage_t target_stage_mask,
     iree_hal_buffer_ref_t target_ref, iree_hal_atomic_rmw_params_t params) {
-  return iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "replay recorder command buffers do not yet record atomic "
-      "read-modify-write");
+  iree_hal_replay_recorder_command_buffer_t* command_buffer =
+      iree_hal_replay_recorder_command_buffer_cast(base_command_buffer);
+  iree_hal_replay_command_buffer_atomic_rmw_payload_t payload;
+  memset(&payload, 0, sizeof(payload));
+  iree_hal_replay_recorder_buffer_ref_make_payload(target_ref,
+                                                   &payload.target_ref);
+  payload.source_stage_mask = source_stage_mask;
+  payload.target_stage_mask = target_stage_mask;
+  payload.params.operand = params.operand;
+  payload.params.flags = params.flags;
+  payload.params.width = params.width;
+  payload.params.operation = params.operation;
+  payload.params.reserved0 = params.reserved;
+  iree_const_byte_span_t payload_iovec =
+      iree_make_const_byte_span(&payload, sizeof(payload));
+
+  iree_hal_buffer_ref_t base_target_ref = target_ref;
+  iree_hal_buffer_t* temporary_target_buffer = NULL;
+  iree_status_t status = iree_ok_status();
+  if (target_ref.buffer) {
+    status = iree_hal_replay_recorder_buffer_unwrap_for_call(
+        target_ref.buffer, command_buffer->host_allocator,
+        &base_target_ref.buffer, &temporary_target_buffer);
+  }
+  iree_hal_replay_pending_record_t pending_record = {0};
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_recorder_command_buffer_begin_operation(
+        command_buffer,
+        IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_RMW,
+        IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_RMW,
+        &pending_record);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_recorder_end_operation_with_payload(
+        &pending_record,
+        iree_hal_command_buffer_atomic_rmw(command_buffer->base_command_buffer,
+                                           source_stage_mask, target_stage_mask,
+                                           base_target_ref, params),
+        1, &payload_iovec);
+  }
+  iree_hal_replay_recorder_buffer_release_temporary(temporary_target_buffer);
+  return status;
 }
 
 static iree_status_t iree_hal_replay_recorder_command_buffer_signal_event(

@@ -328,6 +328,53 @@ static ReplayRecordSummary ParseReplayRecordSummary(
   return summary;
 }
 
+static std::vector<iree_hal_replay_file_record_t> ParseOperationRecords(
+    const std::vector<uint8_t>& storage) {
+  iree_hal_replay_file_header_t file_header;
+  iree_host_size_t offset = 0;
+  IREE_CHECK_OK(iree_hal_replay_file_parse_header(
+      iree_make_const_byte_span(storage.data(), storage.size()), &file_header,
+      &offset));
+  iree_const_byte_span_t file_contents = iree_make_const_byte_span(
+      storage.data(), (iree_host_size_t)file_header.file_length);
+
+  std::vector<iree_hal_replay_file_record_t> records;
+  while (offset < file_header.file_length) {
+    iree_hal_replay_file_record_t record;
+    IREE_CHECK_OK(iree_hal_replay_file_parse_record(file_contents, offset,
+                                                    &record, &offset));
+    if (record.header.record_type ==
+        IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION) {
+      records.push_back(record);
+    }
+  }
+  return records;
+}
+
+static const iree_hal_replay_file_record_t* FindOperationRecord(
+    const std::vector<iree_hal_replay_file_record_t>& records,
+    iree_hal_replay_operation_code_t operation_code) {
+  for (const auto& record : records) {
+    if (record.header.operation_code == operation_code) return &record;
+  }
+  return nullptr;
+}
+
+static void ReadQueueSemaphoreTail(
+    const iree_hal_replay_file_record_t& record,
+    iree_host_size_t fixed_payload_size,
+    iree_hal_replay_semaphore_timepoint_payload_t* out_wait_payload,
+    iree_hal_replay_semaphore_timepoint_payload_t* out_signal_payload) {
+  ASSERT_EQ(fixed_payload_size +
+                2 * sizeof(iree_hal_replay_semaphore_timepoint_payload_t),
+            record.payload.data_length);
+  memcpy(out_wait_payload, record.payload.data + fixed_payload_size,
+         sizeof(*out_wait_payload));
+  memcpy(out_signal_payload,
+         record.payload.data + fixed_payload_size + sizeof(*out_wait_payload),
+         sizeof(*out_signal_payload));
+}
+
 static iree_status_t CountHostCall(void* user_data, const uint64_t args[4],
                                    iree_hal_host_call_context_t* context) {
   (void)args;
@@ -722,6 +769,336 @@ TEST(ReplayRecorderTest, WrappedDeviceRecordsQueueExecuteSemaphores) {
   EXPECT_EQ(2u, summary.semaphore_object_payload_count);
   EXPECT_EQ(1u, summary.queue_execute_record_count);
   EXPECT_EQ(1u, summary.device_queue_execute_payload_count);
+}
+
+TEST(ReplayRecorderTest, RecordsCommandBufferAtomicOperations) {
+  std::vector<uint8_t> storage(65536, 0);
+  iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
+
+  iree_hal_device_group_t* source_group = CreateSyncDeviceGroup();
+  iree_hal_device_group_t* wrapped_group = nullptr;
+  IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
+      recorder, source_group, iree_allocator_system(), &wrapped_group));
+  iree_hal_device_t* wrapped_device =
+      iree_hal_device_group_device_at(wrapped_group, 0);
+
+  const iree_hal_buffer_params_t buffer_params = {
+      /*.usage=*/IREE_HAL_BUFFER_USAGE_STORAGE,
+      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
+      /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+  };
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+      iree_hal_device_allocator(wrapped_device), buffer_params, 64, &buffer));
+
+  iree_hal_command_buffer_t* command_buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      wrapped_device, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+      IREE_HAL_COMMAND_CATEGORY_ATOMIC, /*queue_affinity=*/1,
+      /*binding_capacity=*/1, &command_buffer));
+  const iree_hal_atomic_wait_params_t wait_params = {
+      /*.value=*/UINT64_C(0x1020304050607080),
+      /*.mask=*/UINT64_C(0xFFEEDDCCBBAA9988),
+      /*.flags=*/IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
+      /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_NOT_EQUAL,
+  };
+  const iree_hal_atomic_store_params_t store_params = {
+      /*.value=*/UINT64_C(0xAABBCCDD),
+      /*.flags=*/IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
+  };
+  const iree_hal_atomic_rmw_params_t rmw_params = {
+      /*.operand=*/UINT64_C(0x11223344),
+      /*.flags=*/IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
+      /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_XOR,
+  };
+
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+  IREE_ASSERT_OK(iree_hal_command_buffer_atomic_wait(
+      command_buffer, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      IREE_HAL_EXECUTION_STAGE_ATOMIC,
+      iree_hal_make_buffer_ref(buffer, /*offset=*/8, /*length=*/8),
+      wait_params));
+  IREE_ASSERT_OK(iree_hal_command_buffer_atomic_store(
+      command_buffer, IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0, /*offset=*/12,
+                                        /*length=*/4),
+      store_params));
+  IREE_ASSERT_OK(iree_hal_command_buffer_atomic_rmw(
+      command_buffer, IREE_HAL_EXECUTION_STAGE_HOST,
+      IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS,
+      iree_hal_make_buffer_ref(buffer, /*offset=*/32, /*length=*/4),
+      rmw_params));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+
+  iree_hal_command_buffer_release(command_buffer);
+  iree_hal_buffer_release(buffer);
+  IREE_ASSERT_OK(iree_hal_replay_recorder_close(recorder));
+  iree_hal_replay_recorder_release(recorder);
+  iree_hal_device_group_release(wrapped_group);
+  iree_hal_device_group_release(source_group);
+
+  const auto records = ParseOperationRecords(storage);
+  const auto* wait_record = FindOperationRecord(
+      records, IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_WAIT);
+  ASSERT_NE(nullptr, wait_record);
+  EXPECT_EQ(IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_WAIT,
+            wait_record->header.payload_type);
+  EXPECT_EQ(IREE_STATUS_OK, wait_record->header.status_code);
+  ASSERT_EQ(sizeof(iree_hal_replay_command_buffer_atomic_wait_payload_t),
+            wait_record->payload.data_length);
+  iree_hal_replay_command_buffer_atomic_wait_payload_t wait_payload;
+  memcpy(&wait_payload, wait_record->payload.data, sizeof(wait_payload));
+  EXPECT_NE(IREE_HAL_REPLAY_OBJECT_ID_NONE, wait_payload.target_ref.buffer_id);
+  EXPECT_EQ(8u, wait_payload.target_ref.offset);
+  EXPECT_EQ(8u, wait_payload.target_ref.length);
+  EXPECT_EQ(IREE_HAL_EXECUTION_STAGE_DISPATCH, wait_payload.source_stage_mask);
+  EXPECT_EQ(IREE_HAL_EXECUTION_STAGE_ATOMIC, wait_payload.target_stage_mask);
+  EXPECT_EQ(wait_params.value, wait_payload.params.value);
+  EXPECT_EQ(wait_params.mask, wait_payload.params.mask);
+  EXPECT_EQ(IREE_HAL_ATOMIC_FLAGS_KNOWN, wait_payload.params.flags);
+  EXPECT_EQ(wait_params.width, wait_payload.params.width);
+  EXPECT_EQ(wait_params.condition, wait_payload.params.condition);
+  EXPECT_EQ(0u, wait_payload.params.reserved0);
+
+  const auto* store_record = FindOperationRecord(
+      records, IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_STORE);
+  ASSERT_NE(nullptr, store_record);
+  EXPECT_EQ(IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_STORE,
+            store_record->header.payload_type);
+  EXPECT_EQ(IREE_STATUS_OK, store_record->header.status_code);
+  ASSERT_EQ(sizeof(iree_hal_replay_command_buffer_atomic_store_payload_t),
+            store_record->payload.data_length);
+  iree_hal_replay_command_buffer_atomic_store_payload_t store_payload;
+  memcpy(&store_payload, store_record->payload.data, sizeof(store_payload));
+  EXPECT_EQ(IREE_HAL_REPLAY_OBJECT_ID_NONE, store_payload.target_ref.buffer_id);
+  EXPECT_EQ(0u, store_payload.target_ref.buffer_slot);
+  EXPECT_EQ(12u, store_payload.target_ref.offset);
+  EXPECT_EQ(4u, store_payload.target_ref.length);
+  EXPECT_EQ(IREE_HAL_EXECUTION_STAGE_TRANSFER, store_payload.source_stage_mask);
+  EXPECT_EQ(IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+            store_payload.target_stage_mask);
+  EXPECT_EQ(store_params.value, store_payload.params.value);
+  EXPECT_EQ(IREE_HAL_ATOMIC_FLAGS_KNOWN, store_payload.params.flags);
+  EXPECT_EQ(store_params.width, store_payload.params.width);
+  EXPECT_EQ(0, memcmp(store_payload.params.reserved0, store_params.reserved,
+                      sizeof(store_params.reserved)));
+
+  const auto* rmw_record = FindOperationRecord(
+      records, IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_RMW);
+  ASSERT_NE(nullptr, rmw_record);
+  EXPECT_EQ(IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_RMW,
+            rmw_record->header.payload_type);
+  EXPECT_EQ(IREE_STATUS_OK, rmw_record->header.status_code);
+  ASSERT_EQ(sizeof(iree_hal_replay_command_buffer_atomic_rmw_payload_t),
+            rmw_record->payload.data_length);
+  iree_hal_replay_command_buffer_atomic_rmw_payload_t rmw_payload;
+  memcpy(&rmw_payload, rmw_record->payload.data, sizeof(rmw_payload));
+  EXPECT_EQ(wait_payload.target_ref.buffer_id,
+            rmw_payload.target_ref.buffer_id);
+  EXPECT_EQ(32u, rmw_payload.target_ref.offset);
+  EXPECT_EQ(4u, rmw_payload.target_ref.length);
+  EXPECT_EQ(IREE_HAL_EXECUTION_STAGE_HOST, rmw_payload.source_stage_mask);
+  EXPECT_EQ(IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS,
+            rmw_payload.target_stage_mask);
+  EXPECT_EQ(rmw_params.operand, rmw_payload.params.operand);
+  EXPECT_EQ(IREE_HAL_ATOMIC_FLAGS_KNOWN, rmw_payload.params.flags);
+  EXPECT_EQ(rmw_params.width, rmw_payload.params.width);
+  EXPECT_EQ(rmw_params.operation, rmw_payload.params.operation);
+  EXPECT_EQ(0u, rmw_payload.params.reserved0);
+}
+
+TEST(ReplayRecorderTest, RecordsDeviceQueueAtomicOperations) {
+  std::vector<uint8_t> storage(65536, 0);
+  iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
+
+  iree_hal_device_group_t* source_group = CreateSyncDeviceGroup();
+  iree_hal_device_group_t* wrapped_group = nullptr;
+  IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
+      recorder, source_group, iree_allocator_system(), &wrapped_group));
+  iree_hal_device_t* wrapped_device =
+      iree_hal_device_group_device_at(wrapped_group, 0);
+
+  const iree_hal_buffer_params_t buffer_params = {
+      /*.usage=*/IREE_HAL_BUFFER_USAGE_STORAGE,
+      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
+      /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+  };
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+      iree_hal_device_allocator(wrapped_device), buffer_params, 64, &buffer));
+
+  iree_hal_semaphore_t* wait_semaphore = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      wrapped_device, /*queue_affinity=*/1, /*initial_value=*/7,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &wait_semaphore));
+  iree_hal_semaphore_t* signal_semaphore = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      wrapped_device, /*queue_affinity=*/1, /*initial_value=*/0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore));
+  iree_hal_semaphore_t* wait_semaphores[] = {wait_semaphore};
+  uint64_t wait_values[] = {7};
+  const iree_hal_semaphore_list_t wait_list = {
+      IREE_ARRAYSIZE(wait_semaphores),
+      wait_semaphores,
+      wait_values,
+  };
+  iree_hal_semaphore_t* signal_semaphores[] = {signal_semaphore};
+  uint64_t signal_values[] = {9};
+  const iree_hal_semaphore_list_t signal_list = {
+      IREE_ARRAYSIZE(signal_semaphores),
+      signal_semaphores,
+      signal_values,
+  };
+
+  const iree_hal_atomic_wait_params_t wait_params = {
+      /*.value=*/UINT64_C(0x1020304050607080),
+      /*.mask=*/UINT64_C(0xFFEEDDCCBBAA9988),
+      /*.flags=*/IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
+      /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL,
+  };
+  const iree_hal_atomic_store_params_t store_params = {
+      /*.value=*/UINT64_C(0xAABBCCDD),
+      /*.flags=*/IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
+  };
+  const iree_hal_atomic_rmw_params_t rmw_params = {
+      /*.operand=*/UINT64_C(0x1122334455667788),
+      /*.flags=*/IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
+      /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
+  };
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNIMPLEMENTED,
+      iree_hal_device_queue_atomic_wait(wrapped_device, /*queue_affinity=*/1,
+                                        wait_list, signal_list, buffer,
+                                        /*target_offset=*/8, wait_params));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNIMPLEMENTED,
+      iree_hal_device_queue_atomic_store(wrapped_device, /*queue_affinity=*/1,
+                                         wait_list, signal_list, buffer,
+                                         /*target_offset=*/16, store_params));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNIMPLEMENTED,
+      iree_hal_device_queue_atomic_rmw(wrapped_device, /*queue_affinity=*/1,
+                                       wait_list, signal_list, buffer,
+                                       /*target_offset=*/24, rmw_params));
+
+  iree_hal_semaphore_release(signal_semaphore);
+  iree_hal_semaphore_release(wait_semaphore);
+  iree_hal_buffer_release(buffer);
+  IREE_ASSERT_OK(iree_hal_replay_recorder_close(recorder));
+  iree_hal_replay_recorder_release(recorder);
+  iree_hal_device_group_release(wrapped_group);
+  iree_hal_device_group_release(source_group);
+
+  const auto records = ParseOperationRecords(storage);
+  const auto* wait_record = FindOperationRecord(
+      records, IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_WAIT);
+  ASSERT_NE(nullptr, wait_record);
+  EXPECT_EQ(IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_WAIT,
+            wait_record->header.payload_type);
+  EXPECT_EQ((uint32_t)IREE_STATUS_UNIMPLEMENTED,
+            wait_record->header.status_code);
+  iree_hal_replay_device_queue_atomic_wait_payload_t wait_payload;
+  ASSERT_GE(wait_record->payload.data_length, sizeof(wait_payload));
+  memcpy(&wait_payload, wait_record->payload.data, sizeof(wait_payload));
+  EXPECT_NE(IREE_HAL_REPLAY_OBJECT_ID_NONE, wait_payload.target_ref.buffer_id);
+  EXPECT_EQ(wait_payload.target_ref.buffer_id,
+            wait_record->header.related_object_id);
+  EXPECT_EQ(8u, wait_payload.target_ref.offset);
+  EXPECT_EQ(8u, wait_payload.target_ref.length);
+  EXPECT_EQ(1u, wait_payload.queue_affinity);
+  EXPECT_EQ(1u, wait_payload.wait_semaphore_count);
+  EXPECT_EQ(1u, wait_payload.signal_semaphore_count);
+  EXPECT_EQ(wait_params.value, wait_payload.params.value);
+  EXPECT_EQ(wait_params.mask, wait_payload.params.mask);
+  EXPECT_EQ(IREE_HAL_ATOMIC_FLAGS_KNOWN, wait_payload.params.flags);
+  EXPECT_EQ(wait_params.width, wait_payload.params.width);
+  EXPECT_EQ(wait_params.condition, wait_payload.params.condition);
+  EXPECT_EQ(0u, wait_payload.params.reserved0);
+  iree_hal_replay_semaphore_timepoint_payload_t wait_timepoint = {};
+  iree_hal_replay_semaphore_timepoint_payload_t signal_timepoint = {};
+  ReadQueueSemaphoreTail(*wait_record, sizeof(wait_payload), &wait_timepoint,
+                         &signal_timepoint);
+  EXPECT_NE(IREE_HAL_REPLAY_OBJECT_ID_NONE, wait_timepoint.semaphore_id);
+  EXPECT_NE(IREE_HAL_REPLAY_OBJECT_ID_NONE, signal_timepoint.semaphore_id);
+  EXPECT_NE(wait_timepoint.semaphore_id, signal_timepoint.semaphore_id);
+  EXPECT_EQ(7u, wait_timepoint.value);
+  EXPECT_EQ(9u, signal_timepoint.value);
+
+  const auto* store_record = FindOperationRecord(
+      records, IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_STORE);
+  ASSERT_NE(nullptr, store_record);
+  EXPECT_EQ(IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_STORE,
+            store_record->header.payload_type);
+  EXPECT_EQ((uint32_t)IREE_STATUS_UNIMPLEMENTED,
+            store_record->header.status_code);
+  iree_hal_replay_device_queue_atomic_store_payload_t store_payload;
+  ASSERT_GE(store_record->payload.data_length, sizeof(store_payload));
+  memcpy(&store_payload, store_record->payload.data, sizeof(store_payload));
+  EXPECT_EQ(wait_payload.target_ref.buffer_id,
+            store_payload.target_ref.buffer_id);
+  EXPECT_EQ(store_payload.target_ref.buffer_id,
+            store_record->header.related_object_id);
+  EXPECT_EQ(16u, store_payload.target_ref.offset);
+  EXPECT_EQ(4u, store_payload.target_ref.length);
+  EXPECT_EQ(1u, store_payload.queue_affinity);
+  EXPECT_EQ(1u, store_payload.wait_semaphore_count);
+  EXPECT_EQ(1u, store_payload.signal_semaphore_count);
+  EXPECT_EQ(store_params.value, store_payload.params.value);
+  EXPECT_EQ(IREE_HAL_ATOMIC_FLAGS_KNOWN, store_payload.params.flags);
+  EXPECT_EQ(store_params.width, store_payload.params.width);
+  EXPECT_EQ(0, memcmp(store_payload.params.reserved0, store_params.reserved,
+                      sizeof(store_params.reserved)));
+  iree_hal_replay_semaphore_timepoint_payload_t store_wait_timepoint = {};
+  iree_hal_replay_semaphore_timepoint_payload_t store_signal_timepoint = {};
+  ReadQueueSemaphoreTail(*store_record, sizeof(store_payload),
+                         &store_wait_timepoint, &store_signal_timepoint);
+  EXPECT_EQ(wait_timepoint.semaphore_id, store_wait_timepoint.semaphore_id);
+  EXPECT_EQ(signal_timepoint.semaphore_id, store_signal_timepoint.semaphore_id);
+  EXPECT_EQ(7u, store_wait_timepoint.value);
+  EXPECT_EQ(9u, store_signal_timepoint.value);
+
+  const auto* rmw_record = FindOperationRecord(
+      records, IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_RMW);
+  ASSERT_NE(nullptr, rmw_record);
+  EXPECT_EQ(IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_RMW,
+            rmw_record->header.payload_type);
+  EXPECT_EQ((uint32_t)IREE_STATUS_UNIMPLEMENTED,
+            rmw_record->header.status_code);
+  iree_hal_replay_device_queue_atomic_rmw_payload_t rmw_payload;
+  ASSERT_GE(rmw_record->payload.data_length, sizeof(rmw_payload));
+  memcpy(&rmw_payload, rmw_record->payload.data, sizeof(rmw_payload));
+  EXPECT_EQ(wait_payload.target_ref.buffer_id,
+            rmw_payload.target_ref.buffer_id);
+  EXPECT_EQ(rmw_payload.target_ref.buffer_id,
+            rmw_record->header.related_object_id);
+  EXPECT_EQ(24u, rmw_payload.target_ref.offset);
+  EXPECT_EQ(8u, rmw_payload.target_ref.length);
+  EXPECT_EQ(1u, rmw_payload.queue_affinity);
+  EXPECT_EQ(1u, rmw_payload.wait_semaphore_count);
+  EXPECT_EQ(1u, rmw_payload.signal_semaphore_count);
+  EXPECT_EQ(rmw_params.operand, rmw_payload.params.operand);
+  EXPECT_EQ(IREE_HAL_ATOMIC_FLAGS_KNOWN, rmw_payload.params.flags);
+  EXPECT_EQ(rmw_params.width, rmw_payload.params.width);
+  EXPECT_EQ(rmw_params.operation, rmw_payload.params.operation);
+  EXPECT_EQ(0u, rmw_payload.params.reserved0);
+  iree_hal_replay_semaphore_timepoint_payload_t rmw_wait_timepoint = {};
+  iree_hal_replay_semaphore_timepoint_payload_t rmw_signal_timepoint = {};
+  ReadQueueSemaphoreTail(*rmw_record, sizeof(rmw_payload), &rmw_wait_timepoint,
+                         &rmw_signal_timepoint);
+  EXPECT_EQ(wait_timepoint.semaphore_id, rmw_wait_timepoint.semaphore_id);
+  EXPECT_EQ(signal_timepoint.semaphore_id, rmw_signal_timepoint.semaphore_id);
+  EXPECT_EQ(7u, rmw_wait_timepoint.value);
+  EXPECT_EQ(9u, rmw_signal_timepoint.value);
 }
 
 }  // namespace
