@@ -380,6 +380,38 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "selected_body",
+    srcs = ["selected_body.c"],
+    hdrs = ["selected_body.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":body",
+        ":decoder",
+        ":selected_tables",
+        ":source_trivia",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format:low_repr",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "selected_body_test",
+    srcs = ["selected_body_test.cc"],
+    deps = [
+        ":selected_body",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_test(
     name = "selected_tables_test",
     srcs = ["selected_tables_test.cc"],

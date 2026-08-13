@@ -45,6 +45,25 @@ iree_status_t loom_bytecode_selected_attribute_decode_ssa(
     const loom_bytecode_attribute_ssa_materialization_scope_t* ssa_scope,
     loom_bytecode_selected_attribute_state_t* out_state);
 
+// Materializes an attribute whose predicate VALUE arguments are STRINGS
+// ordinals. Reached table dependencies are materialized synchronously and the
+// returned value owns no scratch-arena storage.
+iree_status_t loom_bytecode_selected_attribute_materialize_named(
+    loom_bytecode_selected_table_materializer_t* materializer,
+    loom_bytecode_reader_cursor_t* cursor,
+    const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
+    loom_attribute_t* out_attr, iree_host_size_t available_type_count);
+
+// Materializes an attribute whose predicate VALUE arguments are SSA numbers.
+// Reached table dependencies are materialized synchronously and the returned
+// value owns no scratch-arena storage.
+iree_status_t loom_bytecode_selected_attribute_materialize_ssa(
+    loom_bytecode_selected_table_materializer_t* materializer,
+    loom_bytecode_reader_cursor_t* cursor,
+    const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
+    loom_attribute_t* out_attr, iree_host_size_t available_type_count,
+    const loom_bytecode_attribute_ssa_materialization_scope_t* ssa_scope);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

@@ -408,6 +408,41 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    selected_body
+  HDRS
+    "selected_body.h"
+  SRCS
+    "selected_body.c"
+  DEPS
+    ::body
+    ::decoder
+    ::selected_tables
+    ::source_trivia
+    iree::base
+    iree::base::internal::arena
+    loom::error::error_defs
+    loom::format::low_repr
+    loom::ir
+    loom::ops::op_defs
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    selected_body_test
+  SRCS
+    "selected_body_test.cc"
+  DEPS
+    ::selected_body
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::bytecode::format
+    loom::ir
+)
+
 loom_cc_test(
   NAME
     selected_tables_test

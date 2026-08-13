@@ -16,9 +16,18 @@ typedef enum loom_bytecode_selected_attribute_value_domain_e {
   LOOM_BYTECODE_SELECTED_ATTRIBUTE_VALUE_DOMAIN_SSA = 1,
 } loom_bytecode_selected_attribute_value_domain_t;
 
+typedef enum loom_bytecode_selected_attribute_reference_mode_e {
+  // Schedules missing shared-table identities for an enclosing table entry.
+  LOOM_BYTECODE_SELECTED_ATTRIBUTE_REFERENCE_MODE_SCHEDULE = 0,
+  // Materializes missing shared-table identities before returning.
+  LOOM_BYTECODE_SELECTED_ATTRIBUTE_REFERENCE_MODE_MATERIALIZE = 1,
+} loom_bytecode_selected_attribute_reference_mode_t;
+
 typedef struct loom_bytecode_selected_attribute_scope_t {
   // Concrete wire namespace used by predicate VALUE arguments.
   loom_bytecode_selected_attribute_value_domain_t value_domain;
+  // Shared-table dependency behavior for this decode.
+  loom_bytecode_selected_attribute_reference_mode_t reference_mode;
   // SSA value map when |value_domain| selects SSA numbers.
   loom_bytecode_attribute_ssa_materialization_scope_t ssa;
 } loom_bytecode_selected_attribute_scope_t;
@@ -463,6 +472,13 @@ static iree_status_t loom_bytecode_selected_attribute_decode_at_depth(
             available_type_count, type_offset);
       }
       loom_type_id_t target_type_id = LOOM_TYPE_ID_INVALID;
+      if (scope->reference_mode ==
+          LOOM_BYTECODE_SELECTED_ATTRIBUTE_REFERENCE_MODE_MATERIALIZE) {
+        IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_materialize_type(
+            materializer, (loom_type_id_t)source_type_id, &target_type_id));
+        *out_attr = loom_attr_type(target_type_id);
+        return iree_ok_status();
+      }
       loom_bytecode_selected_reference_state_t reference_state =
           LOOM_BYTECODE_SELECTED_REFERENCE_RESOLVED;
       IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_project_type(
@@ -545,6 +561,13 @@ static iree_status_t loom_bytecode_selected_attribute_decode_at_depth(
             materializer->metadata->encodings.count, encoding_offset);
       }
       uint16_t target_encoding_id = 0;
+      if (scope->reference_mode ==
+          LOOM_BYTECODE_SELECTED_ATTRIBUTE_REFERENCE_MODE_MATERIALIZE) {
+        IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_materialize_encoding(
+            materializer, (uint16_t)source_encoding_id, &target_encoding_id));
+        *out_attr = loom_attr_encoding(target_encoding_id);
+        return iree_ok_status();
+      }
       loom_bytecode_selected_reference_state_t reference_state =
           LOOM_BYTECODE_SELECTED_REFERENCE_RESOLVED;
       IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_project_encoding(
@@ -634,6 +657,8 @@ iree_status_t loom_bytecode_selected_attribute_decode_named(
   *out_state = LOOM_BYTECODE_SELECTED_ATTRIBUTE_READY;
   const loom_bytecode_selected_attribute_scope_t scope = {
       .value_domain = LOOM_BYTECODE_SELECTED_ATTRIBUTE_VALUE_DOMAIN_NAMED,
+      .reference_mode =
+          LOOM_BYTECODE_SELECTED_ATTRIBUTE_REFERENCE_MODE_SCHEDULE,
   };
   return loom_bytecode_selected_attribute_decode_at_depth(
       materializer, cursor, descriptor, kind, out_attr, available_type_count,
@@ -651,9 +676,67 @@ iree_status_t loom_bytecode_selected_attribute_decode_ssa(
   *out_state = LOOM_BYTECODE_SELECTED_ATTRIBUTE_READY;
   const loom_bytecode_selected_attribute_scope_t scope = {
       .value_domain = LOOM_BYTECODE_SELECTED_ATTRIBUTE_VALUE_DOMAIN_SSA,
+      .reference_mode =
+          LOOM_BYTECODE_SELECTED_ATTRIBUTE_REFERENCE_MODE_SCHEDULE,
       .ssa = *ssa_scope,
   };
   return loom_bytecode_selected_attribute_decode_at_depth(
       materializer, cursor, descriptor, kind, out_attr, available_type_count,
       &scope, /*aggregate_depth=*/0, out_state);
+}
+
+static iree_status_t loom_bytecode_selected_attribute_materialize(
+    loom_bytecode_selected_table_materializer_t* materializer,
+    loom_bytecode_reader_cursor_t* cursor,
+    const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
+    loom_attribute_t* out_attr, iree_host_size_t available_type_count,
+    const loom_bytecode_selected_attribute_scope_t* scope) {
+  *out_attr = loom_attr_absent();
+  const iree_arena_checkpoint_t checkpoint =
+      iree_arena_checkpoint_save(materializer->scratch_arena);
+  loom_attribute_t scratch_attr = loom_attr_absent();
+  loom_bytecode_selected_attribute_state_t state =
+      LOOM_BYTECODE_SELECTED_ATTRIBUTE_READY;
+  iree_status_t status = loom_bytecode_selected_attribute_decode_at_depth(
+      materializer, cursor, descriptor, kind, &scratch_attr,
+      available_type_count, scope, /*aggregate_depth=*/0, &state);
+  IREE_ASSERT(state == LOOM_BYTECODE_SELECTED_ATTRIBUTE_READY);
+  if (iree_status_is_ok(status)) {
+    status = loom_module_make_canonical_attribute(
+        materializer->output_module, descriptor, scratch_attr, out_attr);
+  }
+  iree_arena_checkpoint_restore(&checkpoint);
+  return status;
+}
+
+iree_status_t loom_bytecode_selected_attribute_materialize_named(
+    loom_bytecode_selected_table_materializer_t* materializer,
+    loom_bytecode_reader_cursor_t* cursor,
+    const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
+    loom_attribute_t* out_attr, iree_host_size_t available_type_count) {
+  const loom_bytecode_selected_attribute_scope_t scope = {
+      .value_domain = LOOM_BYTECODE_SELECTED_ATTRIBUTE_VALUE_DOMAIN_NAMED,
+      .reference_mode =
+          LOOM_BYTECODE_SELECTED_ATTRIBUTE_REFERENCE_MODE_MATERIALIZE,
+  };
+  return loom_bytecode_selected_attribute_materialize(
+      materializer, cursor, descriptor, kind, out_attr, available_type_count,
+      &scope);
+}
+
+iree_status_t loom_bytecode_selected_attribute_materialize_ssa(
+    loom_bytecode_selected_table_materializer_t* materializer,
+    loom_bytecode_reader_cursor_t* cursor,
+    const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
+    loom_attribute_t* out_attr, iree_host_size_t available_type_count,
+    const loom_bytecode_attribute_ssa_materialization_scope_t* ssa_scope) {
+  const loom_bytecode_selected_attribute_scope_t scope = {
+      .value_domain = LOOM_BYTECODE_SELECTED_ATTRIBUTE_VALUE_DOMAIN_SSA,
+      .reference_mode =
+          LOOM_BYTECODE_SELECTED_ATTRIBUTE_REFERENCE_MODE_MATERIALIZE,
+      .ssa = *ssa_scope,
+  };
+  return loom_bytecode_selected_attribute_materialize(
+      materializer, cursor, descriptor, kind, out_attr, available_type_count,
+      &scope);
 }
