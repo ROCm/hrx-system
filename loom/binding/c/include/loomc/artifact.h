@@ -65,6 +65,9 @@ typedef enum loomc_artifact_kind_e {
 
   /// Compiled kernel launch-configuration program.
   LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG = 4,
+
+  /// Compiled command-program launch-config program.
+  LOOMC_ARTIFACT_KIND_COMMAND_LAUNCH_CONFIG = 5,
 } loomc_artifact_kind_t;
 
 /// Borrowed artifact view owned by a result object.

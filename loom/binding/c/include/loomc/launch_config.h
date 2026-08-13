@@ -13,17 +13,18 @@
 #include "loomc/artifact.h"
 
 /// @file
-/// Compiled kernel launch configurations.
+/// Compiled launch-config programs.
 ///
-/// A launch-config program is the host companion produced by one kernel
-/// compilation invocation. It contains one function for each exported kernel
-/// and evaluates that kernel's authored workload arguments into the complete
-/// configuration required to launch the matching compiled entry.
+/// A launch-config program is a host companion produced while compiling
+/// kernels or reusable command programs. Kernel functions evaluate authored
+/// workload arguments into a fixed launch structure. Command functions
+/// evaluate issue-time scalar arguments and write the dynamic data consumed by
+/// a reusable command program.
 ///
 /// Launch-config programs are compiler products. Loading and invocation do
 /// not parse kernel source, apply configuration, select a target, or compile
-/// device code. All such decisions were made when the compiled kernel module
-/// and its companion launch-config artifact were produced.
+/// device code. All such decisions were made when the compiled program and its
+/// companion launch-config artifact were produced.
 ///
 /// @par Example
 /// Bind a compiled kernel and evaluate its launch configuration:
@@ -65,13 +66,12 @@
 extern "C" {
 #endif
 
-/// Loaded program containing compiled kernel launch configurations.
+/// Loaded program containing one homogeneous launch-config convention.
 ///
-/// A program corresponds to one kernel compilation invocation and may describe
-/// entries later emitted across multiple executable artifacts. Function names
-/// match the public export names in those artifacts; launch-config function
-/// tokens and executable function tokens remain local to their respective
-/// objects.
+/// A program contains either kernel launch functions or command launch
+/// functions. Function names match public kernel exports or command roots;
+/// launch-config function tokens and executable function tokens remain local
+/// to their respective objects.
 ///
 /// @thread_safety
 /// Programs are thread-compatible. Invocation reuses program-owned scratch and
@@ -153,12 +153,37 @@ typedef struct loomc_launch_config_t {
   uint64_t workgroup_storage_bytes;
 } loomc_launch_config_t;
 
+/// Caller-owned output storage for one command-program launch config.
+///
+/// Callers zero-initialize this structure, set `type` to
+/// `LOOMC_STRUCTURE_TYPE_CMD_LAUNCH_CONFIG`, set `structure_size` to
+/// `sizeof(loomc_cmd_launch_config_t)`, and provide the config-data span
+/// required by the matching command root.
+typedef struct loomc_cmd_launch_config_t {
+  /// Structure type. Must be `LOOMC_STRUCTURE_TYPE_CMD_LAUNCH_CONFIG` when
+  /// nonzero.
+  loomc_structure_type_t type;
+
+  /// Size of this structure in bytes.
+  loomc_host_size_t structure_size;
+
+  /// Unordered extension chain for additional launch properties.
+  void* next;
+
+  /// Writable config-data storage consumed by the reusable command program.
+  ///
+  /// The matching command root defines the required byte length and alignment.
+  /// Invocation writes the canonical little-endian representation in place and
+  /// performs no output allocation.
+  loomc_mutable_byte_span_t data;
+} loomc_cmd_launch_config_t;
+
 /// Loads and verifies a compiled launch-config program.
 ///
-/// The artifact must be the launch-config companion emitted from the same
-/// kernel compilation used to produce the matching executable artifacts. The
-/// loader validates the external bytes and constructs a program ready for
-/// invocation.
+/// The artifact kind selects either the kernel or command calling convention.
+/// It must be the launch-config companion emitted from the same compilation as
+/// the matching executable or command-program artifacts. The loader validates
+/// the external bytes and constructs a program ready for invocation.
 ///
 /// @param artifact Launch-config artifact to load. The artifact descriptor and
 /// its strings are borrowed for the duration of the call.
@@ -194,10 +219,12 @@ LOOMC_API_EXPORT void loomc_launch_config_program_retain(
 LOOMC_API_EXPORT void loomc_launch_config_program_release(
     loomc_launch_config_program_t* program);
 
-/// Resolves a compiled kernel export name to a program-local function token.
+/// Resolves a public kernel export or command root name to a program-local
+/// function token.
 ///
 /// @param program Program to search.
-/// @param export_name Exact public name of the matching executable entry.
+/// @param export_name Exact public name of the matching executable entry or
+/// command root.
 /// A leading `@` is not accepted because artifact export names are not Loom
 /// symbol references.
 /// @param out_function Receives a program-local token on success.
@@ -241,6 +268,31 @@ LOOMC_API_EXPORT loomc_status_t loomc_launch_config_program_invoke_kernel(
     const uint64_t* workload_argument_bits,
     loomc_host_size_t workload_argument_count,
     loomc_launch_config_t* out_config);
+
+/// Invokes one command launch-config function into caller-owned storage.
+///
+/// Issue-time arguments use the same positional raw-bit representation as
+/// `loomc_launch_config_program_invoke_kernel`. The final output buffer in the
+/// compiled function ABI is supplied by `out_config->data` and is not included
+/// in `argument_bits`.
+///
+/// The function token must have been returned by a program loaded from a
+/// `LOOMC_ARTIFACT_KIND_COMMAND_LAUNCH_CONFIG` artifact. Invocation validates
+/// scalar argument count and values before writing the config-data span. It
+/// performs no source compilation, string lookup, or output allocation.
+///
+/// @param program Loaded command launch-config program.
+/// @param function Program-local function to invoke.
+/// @param argument_bits Positional raw scalar argument bits, or `NULL` when
+/// `argument_count` is zero.
+/// @param argument_count Number of scalar argument slots. The compiled output
+/// buffer argument is not counted.
+/// @param out_config Caller-initialized writable config-data storage.
+/// @return OK when invocation populated every authored config-data field.
+LOOMC_API_EXPORT loomc_status_t loomc_launch_config_program_invoke_cmd(
+    loomc_launch_config_program_t* program,
+    loomc_launch_config_function_t function, const uint64_t* argument_bits,
+    loomc_host_size_t argument_count, loomc_cmd_launch_config_t* out_config);
 
 #ifdef __cplusplus
 }  // extern "C"

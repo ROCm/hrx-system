@@ -6,6 +6,7 @@
 
 #include "loomc/launch_config.h"
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <utility>
@@ -79,7 +80,9 @@ ModulePtr ParseModule(loomc_context_t* context, loomc_workspace_t* workspace,
   return ModulePtr(module);
 }
 
-LaunchArtifact CompileLaunchArtifact(const char* text) {
+LaunchArtifact CompileLaunchArtifact(
+    const char* text,
+    loomc_artifact_kind_t artifact_kind = LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG) {
   ContextPtr context = CreateContext();
   WorkspacePtr workspace = CreateWorkspace();
   ModulePtr module = ParseModule(context.get(), workspace.get(), text);
@@ -95,7 +98,7 @@ LaunchArtifact CompileLaunchArtifact(const char* text) {
       module.get(), &options, loomc_allocator_system(), &source));
   SourcePtr source_ptr(source);
   const loomc_artifact_t artifact = {
-      .kind = LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
+      .kind = artifact_kind,
       .format = loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE),
       .identifier = loomc_make_cstring_view("launch_config.loombc"),
       .contents = loomc_source_contents(source_ptr.get()),
@@ -118,6 +121,19 @@ loomc_launch_config_t EmptyConfig() {
   };
 }
 
+loomc_cmd_launch_config_t CmdConfig(void* data, loomc_host_size_t data_length) {
+  return loomc_cmd_launch_config_t{
+      .type = LOOMC_STRUCTURE_TYPE_CMD_LAUNCH_CONFIG,
+      .structure_size = sizeof(loomc_cmd_launch_config_t),
+      .data = loomc_make_mutable_byte_span(data, data_length),
+  };
+}
+
+uint32_t LoadLeU32(const uint8_t* data) {
+  return (uint32_t)data[0] | ((uint32_t)data[1] << 8) |
+         ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24);
+}
+
 const char kLaunchProgram[] = R"(
 func.def public pure @prefill(%token_count: index) -> (index, index, index, index, index, index, index, index, index, index, index) where [range(%token_count, 1, 512)] {
   %c1 = index.constant 1 : index
@@ -134,6 +150,31 @@ func.def public pure @decode(%row_count: i32, %scale: bf16) -> (index, index, in
   %c32 = index.constant 32 : index
   %c256 = index.constant 256 : index
   func.return %row_count_index, %c1, %c1, %c32, %c1, %c1, %c1, %c1, %c1, %c32, %c256 : index, index, index, index, index, index, index, index, index, index, index
+}
+)";
+
+const char kCmdLaunchProgram[] = R"(
+func.def public export("prefill") @prefill.__launch_config(%token_count: index, %config_data: buffer) where [range(%token_count, 1, 512)] {
+  %c1 = index.constant 1 : index
+  %group_count = index.add %token_count, %c1 : index
+  %zero = index.constant 0 : offset
+  %config = buffer.view %config_data[%zero] : buffer -> view<3xi32>
+  %group_count_i32 = index.cast %group_count : index to i32
+  %c1_i32 = scalar.constant 1 : i32
+  view.store %group_count_i32, %config[0] : i32, view<3xi32>
+  view.store %c1_i32, %config[1] : i32, view<3xi32>
+  view.store %c1_i32, %config[2] : i32, view<3xi32>
+  func.return
+}
+
+func.def public export("decode") @decode.__launch_config(%row_count: i32, %config_data: buffer) where [range(%row_count, 1, 64)] {
+  %zero = index.constant 0 : offset
+  %config = buffer.view %config_data[%zero] : buffer -> view<3xi32>
+  %c1 = scalar.constant 1 : i32
+  view.store %row_count, %config[0] : i32, view<3xi32>
+  view.store %c1, %config[1] : i32, view<3xi32>
+  view.store %c1, %config[2] : i32, view<3xi32>
+  func.return
 }
 )";
 
@@ -165,6 +206,82 @@ TEST(LaunchConfigProgramTest, LoadsAndLooksUpMultipleFunctions) {
       LOOMC_STATUS_INVALID_ARGUMENT,
       loomc_launch_config_program_lookup_function(
           program.get(), loomc_make_cstring_view("@prefill"), &missing));
+}
+
+TEST(LaunchConfigProgramTest, InvokesCommandFunctionsIntoCallerStorage) {
+  LaunchArtifact artifact = CompileLaunchArtifact(
+      kCmdLaunchProgram, LOOMC_ARTIFACT_KIND_COMMAND_LAUNCH_CONFIG);
+  ProgramPtr program = LoadProgram(artifact);
+  ASSERT_NE(program.get(), nullptr);
+
+  loomc_launch_config_function_t prefill =
+      loomc_launch_config_function_invalid();
+  LOOMC_ASSERT_OK(loomc_launch_config_program_lookup_function(
+      program.get(), loomc_make_cstring_view("prefill"), &prefill));
+  loomc_launch_config_function_t internal_name =
+      loomc_launch_config_function_invalid();
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_NOT_FOUND,
+      loomc_launch_config_program_lookup_function(
+          program.get(), loomc_make_cstring_view("prefill.__launch_config"),
+          &internal_name));
+
+  std::array<uint8_t, 12> data = {};
+  loomc_cmd_launch_config_t config = CmdConfig(data.data(), data.size());
+  const uint64_t token_count = 127;
+  LOOMC_ASSERT_OK(loomc_launch_config_program_invoke_cmd(
+      program.get(), prefill, &token_count, 1, &config));
+  EXPECT_EQ(LoadLeU32(&data[0]), 128u);
+  EXPECT_EQ(LoadLeU32(&data[4]), 1u);
+  EXPECT_EQ(LoadLeU32(&data[8]), 1u);
+
+  loomc_launch_config_function_t decode =
+      loomc_launch_config_function_invalid();
+  LOOMC_ASSERT_OK(loomc_launch_config_program_lookup_function(
+      program.get(), loomc_make_cstring_view("decode"), &decode));
+  const uint64_t row_count = UINT64_C(0xDEADBEEF00000020);
+  LOOMC_ASSERT_OK(loomc_launch_config_program_invoke_cmd(
+      program.get(), decode, &row_count, 1, &config));
+  EXPECT_EQ(LoadLeU32(&data[0]), 32u);
+  EXPECT_EQ(LoadLeU32(&data[4]), 1u);
+  EXPECT_EQ(LoadLeU32(&data[8]), 1u);
+}
+
+TEST(LaunchConfigProgramTest, ChecksCommandConventionAndOutputStorage) {
+  LaunchArtifact cmd_artifact = CompileLaunchArtifact(
+      kCmdLaunchProgram, LOOMC_ARTIFACT_KIND_COMMAND_LAUNCH_CONFIG);
+  ProgramPtr cmd_program = LoadProgram(cmd_artifact);
+  loomc_launch_config_function_t cmd_function =
+      loomc_launch_config_function_invalid();
+  LOOMC_ASSERT_OK(loomc_launch_config_program_lookup_function(
+      cmd_program.get(), loomc_make_cstring_view("prefill"), &cmd_function));
+
+  std::array<uint8_t, 8> short_data = {};
+  loomc_cmd_launch_config_t cmd_config =
+      CmdConfig(short_data.data(), short_data.size());
+  const uint64_t token_count = 1;
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_OUT_OF_RANGE,
+      loomc_launch_config_program_invoke_cmd(cmd_program.get(), cmd_function,
+                                             &token_count, 1, &cmd_config));
+
+  loomc_launch_config_t kernel_config = EmptyConfig();
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_INVALID_ARGUMENT,
+      loomc_launch_config_program_invoke_kernel(
+          cmd_program.get(), cmd_function, &token_count, 1, &kernel_config));
+
+  LaunchArtifact kernel_artifact = CompileLaunchArtifact(kLaunchProgram);
+  ProgramPtr kernel_program = LoadProgram(kernel_artifact);
+  loomc_launch_config_function_t kernel_function =
+      loomc_launch_config_function_invalid();
+  LOOMC_ASSERT_OK(loomc_launch_config_program_lookup_function(
+      kernel_program.get(), loomc_make_cstring_view("prefill"),
+      &kernel_function));
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_INVALID_ARGUMENT,
+      loomc_launch_config_program_invoke_cmd(
+          kernel_program.get(), kernel_function, &token_count, 1, &cmd_config));
 }
 
 TEST(LaunchConfigProgramTest, InvokesCompleteLaunchContract) {
@@ -269,6 +386,27 @@ func.def public pure @incomplete() -> (index, index, index) {
                              loomc_allocator_system(), &program));
   EXPECT_EQ(program, nullptr);
   EXPECT_EQ(release_count, 1);
+}
+
+TEST(LaunchConfigProgramTest, RejectsUnsupportedCommandStoreAddress) {
+  LaunchArtifact artifact = CompileLaunchArtifact(
+      R"(
+func.def public @dynamic_store(%index: index, %config_data: buffer) where [range(%index, 0, 7)] {
+  %zero = index.constant 0 : offset
+  %config = buffer.view %config_data[%zero] : buffer -> view<8xi32>
+  %c1 = scalar.constant 1 : i32
+  view.store %c1, %config[%index] : i32, view<8xi32>
+  func.return
+}
+)",
+      LOOMC_ARTIFACT_KIND_COMMAND_LAUNCH_CONFIG);
+  loomc_launch_config_program_t* program = nullptr;
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_UNIMPLEMENTED,
+      loomc_launch_config_program_load(&artifact.artifact, /*release=*/nullptr,
+                                       /*release_user_data=*/nullptr,
+                                       loomc_allocator_system(), &program));
+  EXPECT_EQ(program, nullptr);
 }
 
 TEST(LaunchConfigProgramTest, ClearsOutputsOnInvalidArguments) {

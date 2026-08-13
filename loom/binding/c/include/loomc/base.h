@@ -161,6 +161,45 @@ static inline loomc_byte_span_t loomc_make_byte_span(
   return value;
 }
 
+/// Non-owning view over mutable bytes.
+///
+/// @lifetime
+/// A mutable byte span never owns `data`. The API receiving the span documents
+/// how long the caller must keep the storage alive.
+typedef struct loomc_mutable_byte_span_t {
+  /// First byte of the span, or `NULL` when the span is empty.
+  uint8_t* data;
+
+  /// Number of bytes in `data`.
+  loomc_host_size_t data_length;
+} loomc_mutable_byte_span_t;
+
+/// Returns an empty mutable byte span.
+///
+/// @return A span with `data == NULL` and `data_length == 0`.
+static inline loomc_mutable_byte_span_t loomc_mutable_byte_span_empty(void) {
+  loomc_mutable_byte_span_t value = {NULL, 0};
+  return value;
+}
+
+/// Returns true when `span` contains no bytes.
+static inline bool loomc_mutable_byte_span_is_empty(
+    loomc_mutable_byte_span_t span) {
+  return span.data == NULL || span.data_length == 0;
+}
+
+/// Returns a mutable byte span over an explicit byte count.
+///
+/// @param data First byte of the span. May be `NULL` when `data_length` is
+/// zero.
+/// @param data_length Number of bytes in `data`.
+/// @return A borrowed mutable span over the provided byte range.
+static inline loomc_mutable_byte_span_t loomc_make_mutable_byte_span(
+    void* data, loomc_host_size_t data_length) {
+  loomc_mutable_byte_span_t value = {(uint8_t*)data, data_length};
+  return value;
+}
+
 /// Three-dimensional unsigned extent used by Loom C API structs.
 typedef struct loomc_dimension3_t {
   /// Extent along the x dimension.
@@ -280,6 +319,9 @@ typedef enum loomc_structure_type_e {
 
   /// `loomc_amdgpu_iree_hal_profile_options_t`.
   LOOMC_STRUCTURE_TYPE_AMDGPU_IREE_HAL_PROFILE_OPTIONS = 35,
+
+  /// `loomc_cmd_launch_config_t`.
+  LOOMC_STRUCTURE_TYPE_CMD_LAUNCH_CONFIG = 36,
 } loomc_structure_type_t;
 
 /// One loose string option entry.

@@ -70,6 +70,15 @@ LOOMC_IREE_STATIC_ASSERT(offsetof(loomc_byte_span_t, data) ==
 LOOMC_IREE_STATIC_ASSERT(offsetof(loomc_byte_span_t, data_length) ==
                              offsetof(iree_const_byte_span_t, data_length),
                          "byte span length fields must match");
+LOOMC_IREE_STATIC_ASSERT(sizeof(loomc_mutable_byte_span_t) ==
+                             sizeof(iree_byte_span_t),
+                         "mutable byte spans must match");
+LOOMC_IREE_STATIC_ASSERT(offsetof(loomc_mutable_byte_span_t, data) ==
+                             offsetof(iree_byte_span_t, data),
+                         "mutable byte span data fields must match");
+LOOMC_IREE_STATIC_ASSERT(offsetof(loomc_mutable_byte_span_t, data_length) ==
+                             offsetof(iree_byte_span_t, data_length),
+                         "mutable byte span length fields must match");
 IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_OK, IREE_STATUS_OK,
                            "status code values must match");
 IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_CANCELLED, IREE_STATUS_CANCELLED,
@@ -213,6 +222,30 @@ static inline loomc_byte_span_t loomc_byte_span_from_iree(
 static inline iree_const_byte_span_t iree_const_byte_span_from_loomc(
     loomc_byte_span_t value) {
   return iree_make_const_byte_span(value.data, value.data_length);
+}
+
+/// Converts an IREE mutable byte span to a Loom mutable byte span.
+///
+/// @param value IREE mutable byte span.
+/// @return Borrowed Loom span over the same bytes.
+///
+/// @lifetime
+/// The returned span has the same lifetime as `value`.
+static inline loomc_mutable_byte_span_t loomc_mutable_byte_span_from_iree(
+    iree_byte_span_t value) {
+  return loomc_make_mutable_byte_span(value.data, value.data_length);
+}
+
+/// Converts a Loom mutable byte span to an IREE mutable byte span.
+///
+/// @param value Loom mutable byte span.
+/// @return Borrowed IREE span over the same bytes.
+///
+/// @lifetime
+/// The returned span has the same lifetime as `value`.
+static inline iree_byte_span_t iree_byte_span_from_loomc(
+    loomc_mutable_byte_span_t value) {
+  return iree_make_byte_span(value.data, value.data_length);
 }
 
 /// Converts an IREE allocator to a Loom allocator.

@@ -76,10 +76,13 @@ loom_cc_library(
     "src/workspace.c"
   DEPS
     iree::base
+    iree::base::core_headers
     iree::base::internal
     iree::base::internal::arena
     iree::io::file_handle
     iree::io::stream
+    loom::analysis::motion
+    loom::analysis::movement
     loom::analysis::symbol_value_constraints
     loom::codegen::low::launch_config_program
     loom::codegen::low::pipeline::pass_environment
@@ -106,6 +109,7 @@ loom_cc_library(
     loom::ops::op_defs
     loom::ops::op_registry
     loom::ops::pass
+    loom::ops::view
     loom::pass::builtin_registry
     loom::pass::environment
     loom::pass::interpreter
