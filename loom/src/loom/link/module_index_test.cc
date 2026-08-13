@@ -507,6 +507,19 @@ func.decl @unavailable(%x: i32) -> (i32)
     ASSERT_NE(shared, nullptr);
     ASSERT_NE(unavailable, nullptr);
 
+    EXPECT_EQ(loom_link_module_index_provider_import_anchor_at(
+                  index, indexed_module, 0, 0),
+              alpha->module_symbol_ordinal);
+    EXPECT_EQ(loom_link_module_index_provider_import_anchor_at(
+                  index, indexed_module, 0, 1),
+              shared->module_symbol_ordinal);
+    EXPECT_EQ(loom_link_module_index_provider_import_anchor_at(
+                  index, indexed_module, 1, 0),
+              beta->module_symbol_ordinal);
+    EXPECT_EQ(loom_link_module_index_provider_import_anchor_at(
+                  index, indexed_module, 1, 1),
+              shared->module_symbol_ordinal);
+
     const loom_link_module_index_provider_import_list_t alpha_imports =
         loom_link_module_index_symbol_provider_imports(index, alpha);
     ASSERT_EQ(alpha_imports.count, 1u);

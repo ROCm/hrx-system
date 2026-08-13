@@ -183,6 +183,7 @@ loom_cc_test(
     loom::format::text::parser
     loom::ir
     loom::ops::func
+    loom::ops::module
 )
 
 loom_cc_test(

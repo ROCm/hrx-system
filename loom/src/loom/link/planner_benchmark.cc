@@ -700,6 +700,63 @@ static void BM_Project_SelectiveChain_Catalog(benchmark::State& state) {
   BenchmarkProjection(state, /*root_ordinal=*/0, symbol_count);
 }
 
+static void BM_Project_RetainedProviderImports(benchmark::State& state) {
+  const uint32_t provider_import_count = (uint32_t)state.range(0);
+  ImportedCandidateFixture fixture(provider_import_count);
+  iree_host_size_t ignored_provider_ordinal =
+      LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+  loom_link_module_index_t* index =
+      fixture.BuildIndex(&ignored_provider_ordinal);
+  const iree_string_view_t root = IREE_SV("@function_00000000");
+  const loom_link_plan_options_t options = {
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/{/*.count=*/1, /*.values=*/&root},
+      /*.include_exported_roots=*/false,
+      /*.unresolved_policy=*/LOOM_LINK_PLAN_UNRESOLVED_ALLOW,
+  };
+  loom_link_plan_t* plan = nullptr;
+  CheckStatus(
+      loom_link_plan_build(index, &options, iree_allocator_system(), &plan));
+  if (loom_link_plan_symbol_count(plan) != 1) {
+    std::abort();
+  }
+
+  iree_arena_block_pool_t projection_block_pool;
+  iree_arena_block_pool_initialize(64 * 1024, iree_allocator_system(),
+                                   &projection_block_pool);
+  iree_arena_allocator_t projection_arena;
+  iree_arena_initialize(&projection_block_pool, &projection_arena);
+  for (auto _ : state) {
+    loom_link_plan_module_projection_t projection;
+    CheckStatus(
+        loom_link_plan_project_modules(plan, &projection_arena, &projection));
+    if (projection.modules.count != 1 || projection.symbols.count != 1 ||
+        projection.provider_imports.count != provider_import_count ||
+        projection.provider_import_anchors.count != provider_import_count) {
+      std::abort();
+    }
+    benchmark::DoNotOptimize(projection.provider_imports.values);
+    benchmark::DoNotOptimize(projection.provider_import_anchors.values);
+    state.PauseTiming();
+    iree_arena_reset(&projection_arena);
+    state.ResumeTiming();
+  }
+
+  state.counters["import_anchors"] = static_cast<double>(provider_import_count);
+  state.counters["provider_imports"] =
+      static_cast<double>(provider_import_count);
+  state.counters["projection_bytes"] = static_cast<double>(
+      sizeof(loom_link_plan_module_selection_t) +
+      sizeof(loom_link_plan_module_symbol_t) +
+      provider_import_count *
+          (sizeof(loom_link_plan_module_provider_import_t) + sizeof(uint32_t)));
+  state.SetComplexityN(provider_import_count);
+  iree_arena_deinitialize(&projection_arena);
+  iree_arena_block_pool_deinitialize(&projection_block_pool);
+  loom_link_plan_free(plan);
+  loom_link_module_index_free(index);
+}
+
 static void BenchmarkExactLink(benchmark::State& state,
                                iree_host_size_t selected_symbol_count) {
   PlannerCatalogFixture fixture((uint32_t)state.range(0));
@@ -905,6 +962,9 @@ BENCHMARK(BM_Plan_ImportedCandidateResolution)
     ->Complexity();
 BENCHMARK(BM_Project_SelectiveLeaf_Catalog)->Apply(CatalogScales)->Complexity();
 BENCHMARK(BM_Project_SelectiveChain_Catalog)
+    ->Apply(CatalogScales)
+    ->Complexity();
+BENCHMARK(BM_Project_RetainedProviderImports)
     ->Apply(CatalogScales)
     ->Complexity();
 BENCHMARK(BM_LinkExact_SelectiveLeaf_Catalog)

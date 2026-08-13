@@ -330,6 +330,16 @@ iree_string_view_t loom_link_module_index_provider_import_key_at(
     const loom_link_module_index_t* index,
     const loom_link_module_index_module_t* module, iree_host_size_t ordinal);
 
+// Returns module-local symbol ordinal |anchor_ordinal| from provider import
+// |import_ordinal| in |module|.
+//
+// The index, module, import ordinal, and anchor ordinal are trusted outputs of
+// this index. The query performs no allocation or name lookup.
+uint32_t loom_link_module_index_provider_import_anchor_at(
+    const loom_link_module_index_t* index,
+    const loom_link_module_index_module_t* module,
+    iree_host_size_t import_ordinal, iree_host_size_t anchor_ordinal);
+
 // Returns provider imports that mention |symbol| as an availability anchor.
 //
 // Construction work is paid once while indexing. This query performs no

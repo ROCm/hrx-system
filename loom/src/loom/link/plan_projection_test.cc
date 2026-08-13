@@ -14,6 +14,7 @@
 #include "loom/format/text/parser.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/module/ops.h"
 
 namespace loom {
 namespace {
@@ -48,6 +49,12 @@ class LinkPlanProjectionTest : public ::testing::Test {
         loom_func_dialect_op_semantics(&semantics_count);
     IREE_ASSERT_OK(loom_context_register_dialect_semantics(
         &context_, LOOM_DIALECT_FUNC, semantics, (uint16_t)semantics_count));
+    vtables = loom_module_dialect_vtables(&vtable_count);
+    IREE_ASSERT_OK(loom_context_register_dialect(
+        &context_, LOOM_DIALECT_MODULE, vtables, (uint16_t)vtable_count));
+    semantics = loom_module_dialect_op_semantics(&semantics_count);
+    IREE_ASSERT_OK(loom_context_register_dialect_semantics(
+        &context_, LOOM_DIALECT_MODULE, semantics, (uint16_t)semantics_count));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
   }
 
@@ -189,6 +196,128 @@ TEST_F(LinkPlanProjectionTest, EmptyArchiveHasNoProjectionStorage) {
   EXPECT_EQ(projection.modules.values, nullptr);
   EXPECT_EQ(projection.symbols.count, 0u);
   EXPECT_EQ(projection.symbols.values, nullptr);
+  EXPECT_EQ(projection.provider_imports.count, 0u);
+  EXPECT_EQ(projection.provider_imports.values, nullptr);
+  EXPECT_EQ(projection.provider_import_anchors.count, 0u);
+  EXPECT_EQ(projection.provider_import_anchors.values, nullptr);
+}
+
+TEST_F(LinkPlanProjectionTest,
+       RetainsOnlyLiveUnresolvedAndConcreteImportAnchors) {
+  loom_module_t* harness = Parse(IREE_SV(R"(
+// Alpha candidates.
+module.import "alpha" [@concrete, @dead, @resolved, @unresolved]
+
+// Beta candidates.
+module.import "beta" [@dead, @resolved, @unresolved]
+
+func.def @concrete(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.decl @dead(%x: i32) -> (i32)
+func.decl @resolved(%x: i32) -> (i32)
+func.decl @unresolved(%x: i32) -> (i32)
+
+func.def public @entry(%x: i32) -> (i32) {
+  %concrete = func.call @concrete(%x) : (i32) -> (i32)
+  %resolved = func.call @resolved(%concrete) : (i32) -> (i32)
+  %unresolved = func.call @unresolved(%resolved) : (i32) -> (i32)
+  func.return %unresolved : i32
+}
+)"));
+  loom_module_t* alpha = Parse(IREE_SV(R"(
+func.def @resolved(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"));
+
+  ModuleIndexPtr index = CreateIndex();
+  AddModule(index.get(), harness, IREE_SV("harness"),
+            LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddModule(index.get(), alpha, IREE_SV("alpha-library"),
+            LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+  loom_link_provider_binding_t bindings[] = {
+      {IREE_SV("alpha"), /*.provider_ordinal=*/1},
+  };
+  loom_link_provider_resolver_t resolver = {0};
+  IREE_ASSERT_OK(loom_link_provider_resolver_prepare(
+      loom_link_module_index_provider_count(index.get()), bindings,
+      IREE_ARRAYSIZE(bindings), &resolver));
+  const iree_string_view_t roots[] = {IREE_SV("@entry")};
+  loom_link_plan_options_t options = {
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
+      /*.include_exported_roots=*/false,
+      /*.unresolved_policy=*/LOOM_LINK_PLAN_UNRESOLVED_ALLOW,
+  };
+  options.provider_resolver = &resolver;
+  LinkPlanPtr plan = BuildPlan(index.get(), &options);
+
+  loom_link_plan_module_projection_t projection;
+  IREE_ASSERT_OK(
+      loom_link_plan_project_modules(plan.get(), &arena_, &projection));
+  ASSERT_EQ(projection.modules.count, 2u);
+  ASSERT_EQ(projection.provider_imports.count, 2u);
+  ASSERT_EQ(projection.provider_import_anchors.count, 3u);
+
+  const loom_link_plan_module_selection_t* harness_selection =
+      &projection.modules.values[0];
+  ASSERT_EQ(harness_selection->source_module->ordinal, 0u);
+  ASSERT_EQ(harness_selection->provider_imports.count, 2u);
+  ASSERT_EQ(harness_selection->provider_import_anchors.count, 3u);
+
+  const auto anchor_name = [&](uint32_t source_symbol_ordinal) {
+    const loom_link_module_index_symbol_t* symbol =
+        loom_link_module_index_symbol_at(
+            index.get(),
+            harness_selection->source_module->symbol_start_ordinal +
+                source_symbol_ordinal);
+    return std::string(symbol->name.data, symbol->name.size);
+  };
+
+  const loom_link_plan_module_provider_import_t* alpha_import =
+      &harness_selection->provider_imports.values[0];
+  EXPECT_EQ(alpha_import->source_import_ordinal, 0u);
+  ASSERT_EQ(alpha_import->anchors.count, 2u);
+  EXPECT_EQ(anchor_name(harness_selection->provider_import_anchors
+                            .values[alpha_import->anchors.first]),
+            "concrete");
+  EXPECT_EQ(anchor_name(harness_selection->provider_import_anchors
+                            .values[alpha_import->anchors.first + 1]),
+            "unresolved");
+  const loom_link_module_index_provider_import_t alpha_source =
+      loom_link_module_index_provider_import_at(
+          index.get(), harness_selection->source_module,
+          alpha_import->source_import_ordinal);
+  ASSERT_EQ(alpha_source.comments.count, 1u);
+  EXPECT_EQ(std::string(alpha_source.comments.values[0].data,
+                        alpha_source.comments.values[0].size),
+            "Alpha candidates.");
+  EXPECT_FALSE(alpha_source.leading_blank_line);
+
+  const loom_link_plan_module_provider_import_t* beta_import =
+      &harness_selection->provider_imports.values[1];
+  EXPECT_EQ(beta_import->source_import_ordinal, 1u);
+  ASSERT_EQ(beta_import->anchors.count, 1u);
+  EXPECT_EQ(anchor_name(harness_selection->provider_import_anchors
+                            .values[beta_import->anchors.first]),
+            "unresolved");
+  const loom_link_module_index_provider_import_t beta_source =
+      loom_link_module_index_provider_import_at(
+          index.get(), harness_selection->source_module,
+          beta_import->source_import_ordinal);
+  ASSERT_EQ(beta_source.comments.count, 1u);
+  EXPECT_EQ(std::string(beta_source.comments.values[0].data,
+                        beta_source.comments.values[0].size),
+            "Beta candidates.");
+  EXPECT_TRUE(beta_source.leading_blank_line);
+
+  EXPECT_EQ(projection.modules.values[1].provider_imports.count, 0u);
+  EXPECT_EQ(projection.modules.values[1].provider_imports.values, nullptr);
+  EXPECT_EQ(projection.modules.values[1].provider_import_anchors.count, 0u);
+  EXPECT_EQ(projection.modules.values[1].provider_import_anchors.values,
+            nullptr);
 }
 
 }  // namespace

@@ -25,7 +25,21 @@ typedef struct loom_link_plan_module_symbol_t {
   const loom_link_module_index_symbol_t* source_symbol;
 } loom_link_plan_module_symbol_t;
 
-// Exact selected-symbol slice owned by one source module.
+// One retained provider import projected into a source module's ordinal
+// domain.
+typedef struct loom_link_plan_module_provider_import_t {
+  // Provider-import ordinal in the indexed source module.
+  uint32_t source_import_ordinal;
+  // Live unresolved anchors in canonical source order.
+  struct {
+    // First entry in the owning module selection's flat anchor slice.
+    uint32_t first;
+    // Number of retained anchors.
+    uint32_t count;
+  } anchors;
+} loom_link_plan_module_provider_import_t;
+
+// Exact selected-symbol and retained-import slices owned by one source module.
 typedef struct loom_link_plan_module_selection_t {
   // Indexed source module owning every symbol in this slice.
   const loom_link_module_index_module_t* source_module;
@@ -36,6 +50,20 @@ typedef struct loom_link_plan_module_selection_t {
     // Number of selected source symbols.
     iree_host_size_t count;
   } symbols;
+  // Provider imports containing live anchors not consumed by this plan.
+  struct {
+    // Arena-owned retained provider-import array.
+    loom_link_plan_module_provider_import_t* values;
+    // Number of retained provider imports.
+    iree_host_size_t count;
+  } provider_imports;
+  // Flat module-local source symbol ordinals sliced by provider imports.
+  struct {
+    // Arena-owned retained anchor array.
+    uint32_t* values;
+    // Number of retained anchors in this module.
+    iree_host_size_t count;
+  } provider_import_anchors;
 } loom_link_plan_module_selection_t;
 
 // Selected-only partition of one authoritative metadata link plan.
@@ -54,13 +82,30 @@ typedef struct loom_link_plan_module_projection_t {
     // Number of selected symbols in the source plan.
     iree_host_size_t count;
   } symbols;
+  // Flat storage sliced by modules[].provider_imports.
+  struct {
+    // Arena-owned retained provider-import array.
+    loom_link_plan_module_provider_import_t* values;
+    // Number of retained provider imports.
+    iree_host_size_t count;
+  } provider_imports;
+  // Flat storage sliced by provider_imports[].anchors.
+  struct {
+    // Arena-owned module-local source symbol ordinals.
+    uint32_t* values;
+    // Number of retained provider-import anchors.
+    iree_host_size_t count;
+  } provider_import_anchors;
 } loom_link_plan_module_projection_t;
 
 // Partitions |plan| into deterministic module-local source-symbol slices.
 //
-// Construction performs no name lookup or reachability analysis. Storage and
-// work scale only with selected symbols and modules. Arrays borrow the plan's
-// index and remain valid until |arena| is reset or deinitialized.
+// Construction performs no name lookup or reachability analysis. Dead anchors
+// are pruned, exact declarations resolved by this plan are consumed, and live
+// unresolved or concrete availability anchors remain. Work scales with the
+// selected symbols and provider-import metadata of selected source modules;
+// storage scales only with retained output. Arrays borrow the plan's index and
+// remain valid until |arena| is reset or deinitialized.
 iree_status_t loom_link_plan_project_modules(
     const loom_link_plan_t* plan, iree_arena_allocator_t* arena,
     loom_link_plan_module_projection_t* out_projection);

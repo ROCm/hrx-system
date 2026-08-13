@@ -1382,7 +1382,9 @@ iree_host_size_t loom_link_module_index_symbol_count(
 
 const loom_link_module_index_symbol_t* loom_link_module_index_symbol_at(
     const loom_link_module_index_t* index, iree_host_size_t ordinal) {
-  if (!index || ordinal >= index->symbols.count) return NULL;
+  if (!index || ordinal >= index->symbols.count) {
+    return NULL;
+  }
   return &index->symbols.values[ordinal];
 }
 
@@ -1391,8 +1393,9 @@ const loom_link_module_index_provider_t* loom_link_module_index_symbol_provider(
     const loom_link_module_index_symbol_t* symbol) {
   const loom_link_module_index_module_t* module =
       loom_link_module_index_symbol_module(index, symbol);
-  if (!module || module->provider_ordinal >= index->providers.count)
+  if (!module || module->provider_ordinal >= index->providers.count) {
     return NULL;
+  }
   return &index->providers.values[module->provider_ordinal];
 }
 
@@ -1460,6 +1463,26 @@ iree_string_view_t loom_link_module_index_provider_import_key_at(
   const loom_module_t* source_module = module->materialized_module;
   const loom_op_t* op = module->provider_imports.materialized_ops[ordinal];
   return source_module->strings.entries[loom_module_import_provider(op)];
+}
+
+uint32_t loom_link_module_index_provider_import_anchor_at(
+    const loom_link_module_index_t* index,
+    const loom_link_module_index_module_t* module,
+    iree_host_size_t import_ordinal, iree_host_size_t anchor_ordinal) {
+  const loom_link_module_index_provider_t* provider =
+      &index->providers.values[module->provider_ordinal];
+  if (provider->kind == LOOM_LINK_PROVIDER_BYTECODE) {
+    const loom_bytecode_module_metadata_t* bytecode_module =
+        &provider->bytecode.metadata.modules[module->provider_module_ordinal];
+    const loom_bytecode_provider_import_metadata_t* provider_import =
+        &bytecode_module->provider_imports[import_ordinal];
+    return bytecode_module->provider_import_anchor_symbol_indices
+        [provider_import->first_anchor_index + anchor_ordinal];
+  }
+
+  const loom_op_t* op =
+      module->provider_imports.materialized_ops[import_ordinal];
+  return loom_module_import_symbols(op).values[anchor_ordinal].symbol_id;
 }
 
 loom_link_module_index_provider_import_list_t
