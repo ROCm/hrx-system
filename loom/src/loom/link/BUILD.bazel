@@ -24,10 +24,23 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "provider_import_sink",
+    srcs = ["provider_import_sink.c"],
+    hdrs = ["provider_import_sink.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/module",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "linker",
     srcs = ["linker.c"],
     hdrs = ["linker.h"],
     deps = [
+        ":provider_import_sink",
         ":symbol_policy",
         "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/analysis:symbol_value_constraints",
@@ -53,6 +66,7 @@ loom_cc_test(
         "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/module",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/target/test:alt_descriptors",
@@ -198,6 +212,7 @@ loom_cc_benchmark(
         ":module_index",
         ":plan_projection",
         ":planner",
+        ":provider_import_sink",
         ":provider_resolver",
         "//loom/src/loom/format/bytecode:selected_reader",
         "//loom/src/loom/format/bytecode:writer",

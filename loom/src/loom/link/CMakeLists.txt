@@ -25,12 +25,28 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    provider_import_sink
+  HDRS
+    "provider_import_sink.h"
+  SRCS
+    "provider_import_sink.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::ops::module
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     linker
   HDRS
     "linker.h"
   SRCS
     "linker.c"
   DEPS
+    ::provider_import_sink
     ::symbol_policy
     iree::base
     iree::base::internal::arena
@@ -61,6 +77,7 @@ loom_cc_test(
     loom::format::text::parser
     loom::format::text::printer
     loom::ir
+    loom::ops::module
     loom::ops::op_registry
     loom::ops::target
     loom::ops::test
@@ -220,6 +237,7 @@ loom_cc_benchmark(
     ::module_index
     ::plan_projection
     ::planner
+    ::provider_import_sink
     ::provider_resolver
     iree::base
     iree::base::internal::arena

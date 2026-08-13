@@ -23,6 +23,7 @@
 #include "loom/link/module_index.h"
 #include "loom/link/plan_projection.h"
 #include "loom/link/planner.h"
+#include "loom/link/provider_import_sink.h"
 #include "loom/link/provider_resolver.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/module/ops.h"
@@ -783,8 +784,9 @@ static void BenchmarkExactLink(benchmark::State& state,
                                    fixture.block_pool(),
                                    iree_allocator_system(), &linker));
     state.ResumeTiming();
-    CheckStatus(loom_linker_add_module_symbols(linker, fixture.module(),
-                                               source_symbols));
+    CheckStatus(loom_linker_add_module_symbols(
+        linker, fixture.module(), source_symbols,
+        loom_linker_source_provider_import_list_empty()));
     benchmark::DoNotOptimize(linker);
     state.PauseTiming();
     loom_linker_free(linker);
@@ -814,13 +816,86 @@ static void BM_LinkExactDense_Catalog(benchmark::State& state) {
                                    fixture.block_pool(),
                                    iree_allocator_system(), &linker));
     state.ResumeTiming();
-    CheckStatus(loom_linker_add_exact_module(linker, fixture.module()));
+    CheckStatus(loom_linker_add_exact_module(
+        linker, fixture.module(),
+        loom_linker_source_provider_import_list_empty()));
     benchmark::DoNotOptimize(linker);
     state.PauseTiming();
     loom_linker_free(linker);
     state.ResumeTiming();
   }
   SetCounters(state, fixture, fixture.symbol_count());
+}
+
+static void BM_LinkProjectedProviderImports(benchmark::State& state) {
+  const uint32_t provider_import_count = (uint32_t)state.range(0);
+  PlannerCatalogFixture fixture(provider_import_count);
+  std::vector<std::string> provider_names(provider_import_count);
+  for (uint32_t i = 0; i < provider_import_count; ++i) {
+    char provider_name[32];
+    const int provider_name_length =
+        std::snprintf(provider_name, sizeof(provider_name), "provider_%08u", i);
+    if (provider_name_length <= 0 ||
+        provider_name_length >= (int)sizeof(provider_name)) {
+      std::abort();
+    }
+    provider_names[i] = std::string(provider_name, provider_name_length);
+  }
+
+  for (auto _ : state) {
+    state.PauseTiming();
+    loom_module_t* target_module = nullptr;
+    CheckStatus(loom_module_allocate(
+        fixture.module()->context, IREE_SV("linked"), fixture.block_pool(),
+        /*hints=*/nullptr, iree_allocator_system(), &target_module));
+    for (uint32_t i = 0; i < provider_import_count; ++i) {
+      const std::string symbol_name = fixture.SymbolName(i);
+      loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+      CheckStatus(loom_module_intern_string(
+          target_module,
+          iree_make_string_view(symbol_name.data(), symbol_name.size()),
+          &name_id));
+      uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
+      CheckStatus(loom_module_add_symbol(target_module, name_id, &symbol_id));
+      if (symbol_id != i) {
+        std::abort();
+      }
+    }
+    iree_arena_allocator_t sink_arena;
+    iree_arena_initialize(fixture.block_pool(), &sink_arena);
+    loom_link_provider_import_sink_t sink;
+    CheckStatus(loom_link_provider_import_sink_initialize(
+        target_module, &sink_arena, provider_import_count,
+        provider_import_count, &sink));
+    state.ResumeTiming();
+
+    for (uint32_t i = 0; i < provider_import_count; ++i) {
+      const loom_symbol_ref_t anchor = {
+          /*.module_id=*/0,
+          /*.symbol_id=*/(uint16_t)i,
+      };
+      CheckStatus(loom_link_provider_import_sink_append(
+          &sink,
+          iree_make_string_view(provider_names[i].data(),
+                                provider_names[i].size()),
+          loom_make_symbol_ref_array(&anchor, /*count=*/1),
+          /*comments=*/{}, /*leading_blank_line=*/false));
+    }
+    CheckStatus(loom_link_provider_import_sink_finish(&sink));
+    benchmark::DoNotOptimize(target_module);
+
+    state.PauseTiming();
+    loom_module_free(target_module);
+    iree_arena_deinitialize(&sink_arena);
+    state.ResumeTiming();
+  }
+  state.counters["import_anchors"] = static_cast<double>(provider_import_count);
+  state.counters["provider_imports"] =
+      static_cast<double>(provider_import_count);
+  state.counters["sink_bytes"] = static_cast<double>(
+      provider_import_count * (sizeof(loom_link_provider_import_sink_row_t) +
+                               sizeof(loom_symbol_ref_t)));
+  state.SetComplexityN(provider_import_count);
 }
 
 static void BenchmarkSelectiveMaterializeAndLink(
@@ -890,7 +965,9 @@ static void BenchmarkSelectiveMaterializeAndLink(
         selected_module->symbols.count != expected_symbol_count) {
       std::abort();
     }
-    CheckStatus(loom_linker_add_exact_module(linker, selected_module));
+    CheckStatus(loom_linker_add_exact_module(
+        linker, selected_module,
+        loom_linker_source_provider_import_list_empty()));
     loom_module_free(selected_module);
     benchmark::DoNotOptimize(linker);
     state.PauseTiming();
@@ -974,6 +1051,7 @@ BENCHMARK(BM_LinkExact_SelectiveChain_Catalog)
     ->Apply(CatalogScales)
     ->Complexity();
 BENCHMARK(BM_LinkExactDense_Catalog)->Apply(CatalogScales)->Complexity();
+BENCHMARK(BM_LinkProjectedProviderImports)->Apply(CatalogScales)->Complexity();
 BENCHMARK(BM_MaterializeAndLink_SelectiveLeaf_Catalog)
     ->Apply(CatalogScales)
     ->Complexity();

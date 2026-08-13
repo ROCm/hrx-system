@@ -299,8 +299,9 @@ static iree_status_t loomc_link_add_selected_module(
 
   const loom_link_module_index_module_t* module = selection->source_module;
   if (module->materialized_module != NULL) {
-    return loom_linker_add_module_symbols(linker, module->materialized_module,
-                                          source_symbols);
+    return loom_linker_add_module_symbols(
+        linker, module->materialized_module, source_symbols,
+        loom_linker_source_provider_import_list_empty());
   }
 
   const loom_link_module_index_provider_t* provider =
@@ -318,7 +319,9 @@ static iree_status_t loomc_link_add_selected_module(
       },
       &materialized_module);
   if (iree_status_is_ok(status)) {
-    status = loom_linker_add_exact_module(linker, materialized_module);
+    status = loom_linker_add_exact_module(
+        linker, materialized_module,
+        loom_linker_source_provider_import_list_empty());
   }
   loom_module_free(materialized_module);
   return status;
