@@ -15,6 +15,9 @@
 
 typedef enum iree_hal_command_type_e {
   IREE_HAL_CMD_EXECUTION_BARRIER = 0,
+  IREE_HAL_CMD_ATOMIC_WAIT,
+  IREE_HAL_CMD_ATOMIC_STORE,
+  IREE_HAL_CMD_ATOMIC_RMW,
   IREE_HAL_CMD_SIGNAL_EVENT,
   IREE_HAL_CMD_RESET_EVENT,
   IREE_HAL_CMD_WAIT_EVENTS,
@@ -298,6 +301,140 @@ static iree_status_t iree_hal_deferred_command_buffer_apply_execution_barrier(
 }
 
 //===----------------------------------------------------------------------===//
+// IREE_HAL_CMD_ATOMIC_*
+//===----------------------------------------------------------------------===//
+
+// Fields shared by all deferred atomic command records.
+typedef struct iree_hal_cmd_atomic_t {
+  // Common command-list header.
+  iree_hal_cmd_header_t header;
+  // Stages that must complete before the atomic operation begins.
+  iree_hal_execution_stage_t source_stage_mask;
+  // Stages that cannot begin until the atomic operation completes.
+  iree_hal_execution_stage_t target_stage_mask;
+  // Direct retained buffer or indirect binding-table target.
+  iree_hal_buffer_ref_t target_ref;
+} iree_hal_cmd_atomic_t;
+
+typedef struct iree_hal_cmd_atomic_wait_t {
+  // Fields shared by all atomic commands.
+  iree_hal_cmd_atomic_t base;
+  // Atomic wait parameters.
+  iree_hal_atomic_wait_params_t params;
+} iree_hal_cmd_atomic_wait_t;
+
+typedef struct iree_hal_cmd_atomic_store_t {
+  // Fields shared by all atomic commands.
+  iree_hal_cmd_atomic_t base;
+  // Atomic store parameters.
+  iree_hal_atomic_store_params_t params;
+} iree_hal_cmd_atomic_store_t;
+
+typedef struct iree_hal_cmd_atomic_rmw_t {
+  // Fields shared by all atomic commands.
+  iree_hal_cmd_atomic_t base;
+  // Atomic read-modify-write parameters.
+  iree_hal_atomic_rmw_params_t params;
+} iree_hal_cmd_atomic_rmw_t;
+
+static iree_status_t iree_hal_deferred_command_buffer_record_atomic(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_cmd_type_t command_type,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_host_size_t command_size,
+    void** out_command) {
+  iree_hal_deferred_command_buffer_t* command_buffer =
+      iree_hal_deferred_command_buffer_cast(base_command_buffer);
+  if (target_ref.buffer) {
+    IREE_RETURN_IF_ERROR(iree_hal_resource_set_insert(
+        command_buffer->resource_set, 1, &target_ref.buffer));
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_cmd_list_append_command(
+      &command_buffer->cmd_list, command_type, command_size, out_command));
+  iree_hal_cmd_atomic_t* command = (iree_hal_cmd_atomic_t*)*out_command;
+  command->source_stage_mask = source_stage_mask;
+  command->target_stage_mask = target_stage_mask;
+  command->target_ref = target_ref;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_deferred_command_buffer_atomic_wait(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_wait_params_t params) {
+  iree_hal_cmd_atomic_wait_t* command = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_deferred_command_buffer_record_atomic(
+      base_command_buffer, IREE_HAL_CMD_ATOMIC_WAIT, source_stage_mask,
+      target_stage_mask, target_ref, sizeof(*command), (void**)&command));
+  command->params = params;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_deferred_command_buffer_apply_atomic_wait(
+    iree_hal_command_buffer_t* target_command_buffer,
+    iree_hal_buffer_binding_table_t binding_table,
+    const iree_hal_cmd_atomic_wait_t* command) {
+  iree_hal_buffer_ref_t target_ref;
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_binding_table_resolve_ref(
+      binding_table, command->base.target_ref, &target_ref));
+  return iree_hal_command_buffer_atomic_wait(
+      target_command_buffer, command->base.source_stage_mask,
+      command->base.target_stage_mask, target_ref, command->params);
+}
+
+static iree_status_t iree_hal_deferred_command_buffer_atomic_store(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_store_params_t params) {
+  iree_hal_cmd_atomic_store_t* command = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_deferred_command_buffer_record_atomic(
+      base_command_buffer, IREE_HAL_CMD_ATOMIC_STORE, source_stage_mask,
+      target_stage_mask, target_ref, sizeof(*command), (void**)&command));
+  command->params = params;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_deferred_command_buffer_apply_atomic_store(
+    iree_hal_command_buffer_t* target_command_buffer,
+    iree_hal_buffer_binding_table_t binding_table,
+    const iree_hal_cmd_atomic_store_t* command) {
+  iree_hal_buffer_ref_t target_ref;
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_binding_table_resolve_ref(
+      binding_table, command->base.target_ref, &target_ref));
+  return iree_hal_command_buffer_atomic_store(
+      target_command_buffer, command->base.source_stage_mask,
+      command->base.target_stage_mask, target_ref, command->params);
+}
+
+static iree_status_t iree_hal_deferred_command_buffer_atomic_rmw(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_rmw_params_t params) {
+  iree_hal_cmd_atomic_rmw_t* command = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_deferred_command_buffer_record_atomic(
+      base_command_buffer, IREE_HAL_CMD_ATOMIC_RMW, source_stage_mask,
+      target_stage_mask, target_ref, sizeof(*command), (void**)&command));
+  command->params = params;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_deferred_command_buffer_apply_atomic_rmw(
+    iree_hal_command_buffer_t* target_command_buffer,
+    iree_hal_buffer_binding_table_t binding_table,
+    const iree_hal_cmd_atomic_rmw_t* command) {
+  iree_hal_buffer_ref_t target_ref;
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_binding_table_resolve_ref(
+      binding_table, command->base.target_ref, &target_ref));
+  return iree_hal_command_buffer_atomic_rmw(
+      target_command_buffer, command->base.source_stage_mask,
+      command->base.target_stage_mask, target_ref, command->params);
+}
+
+//===----------------------------------------------------------------------===//
 // IREE_HAL_CMD_SIGNAL_EVENT
 //===----------------------------------------------------------------------===//
 
@@ -306,36 +443,6 @@ typedef struct iree_hal_cmd_signal_event_t {
   iree_hal_event_t* event;
   iree_hal_execution_stage_t source_stage_mask;
 } iree_hal_cmd_signal_event_t;
-
-static iree_status_t iree_hal_deferred_command_buffer_atomic_wait(
-    iree_hal_command_buffer_t* base_command_buffer,
-    iree_hal_execution_stage_t source_stage_mask,
-    iree_hal_execution_stage_t target_stage_mask,
-    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_wait_params_t params) {
-  return iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "deferred command buffers do not yet record atomic waits");
-}
-
-static iree_status_t iree_hal_deferred_command_buffer_atomic_store(
-    iree_hal_command_buffer_t* base_command_buffer,
-    iree_hal_execution_stage_t source_stage_mask,
-    iree_hal_execution_stage_t target_stage_mask,
-    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_store_params_t params) {
-  return iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "deferred command buffers do not yet record atomic stores");
-}
-
-static iree_status_t iree_hal_deferred_command_buffer_atomic_rmw(
-    iree_hal_command_buffer_t* base_command_buffer,
-    iree_hal_execution_stage_t source_stage_mask,
-    iree_hal_execution_stage_t target_stage_mask,
-    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_rmw_params_t params) {
-  return iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "deferred command buffers do not yet record atomic read-modify-write");
-}
 
 static iree_status_t iree_hal_deferred_command_buffer_signal_event(
     iree_hal_command_buffer_t* base_command_buffer, iree_hal_event_t* event,
@@ -809,6 +916,12 @@ static iree_status_t iree_hal_deferred_command_buffer_apply_dispatch(
 static const iree_hal_cmd_apply_fn_t iree_hal_cmd_apply_table[] = {
     [IREE_HAL_CMD_EXECUTION_BARRIER] = (iree_hal_cmd_apply_fn_t)
         iree_hal_deferred_command_buffer_apply_execution_barrier,
+    [IREE_HAL_CMD_ATOMIC_WAIT] = (iree_hal_cmd_apply_fn_t)
+        iree_hal_deferred_command_buffer_apply_atomic_wait,
+    [IREE_HAL_CMD_ATOMIC_STORE] = (iree_hal_cmd_apply_fn_t)
+        iree_hal_deferred_command_buffer_apply_atomic_store,
+    [IREE_HAL_CMD_ATOMIC_RMW] = (iree_hal_cmd_apply_fn_t)
+        iree_hal_deferred_command_buffer_apply_atomic_rmw,
     [IREE_HAL_CMD_SIGNAL_EVENT] = (iree_hal_cmd_apply_fn_t)
         iree_hal_deferred_command_buffer_apply_signal_event,
     [IREE_HAL_CMD_RESET_EVENT] = (iree_hal_cmd_apply_fn_t)
