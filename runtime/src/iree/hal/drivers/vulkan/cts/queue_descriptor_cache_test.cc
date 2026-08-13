@@ -48,8 +48,8 @@ TEST_P(VulkanQueueDescriptorCacheTest, DeferredUnalignedFillsExceedOneBlock) {
   std::vector<uint8_t> bytes =
       ReadBufferBytes(target_buffer.get(), /*offset=*/0, kSubmissionCount);
   ASSERT_EQ(kSubmissionCount, bytes.size());
-  for (uint8_t byte : bytes) {
-    EXPECT_EQ(kPattern, byte);
+  for (iree_host_size_t i = 0; i < bytes.size(); ++i) {
+    EXPECT_EQ(kPattern, bytes[i]) << "byte offset " << i;
   }
 }
 
