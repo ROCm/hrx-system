@@ -28,7 +28,7 @@ command.program.def public @decode(%column_count: index) launch(%input: buffer, 
 }
 
 // ----
-kernel.def retain @project(%row_count: index, %column_count: index) {
+kernel.def retain @project.__cmd_0(%row_count: index, %column_count: index) {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%row_count, %column_count, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input: buffer, %output: buffer) {
@@ -64,12 +64,12 @@ command.program.def public @typed_view() launch(%source: buffer, %target: buffer
 }
 
 // ----
-kernel.def retain @copy_view(%element_count: index) {
+kernel.def retain @copy_view.__cmd_0(%element_count: index) {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%element_count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%1: buffer, %target: buffer) {
-  %7 = index.constant 0 : offset
-  %source = buffer.view %1[%7] : buffer -> view<1xi32>
+  %4 = index.constant 0 : offset
+  %source = buffer.view %1[%4] : buffer -> view<1xi32>
   %base = index.constant 0 : offset
   %target_view = buffer.view %target[%base] : buffer -> view<1xi32>
   %value = view.load %source[0] : view<1xi32> -> i32
@@ -100,7 +100,7 @@ command.program.def public @converged_decode() launch(%input: buffer, %output: b
 }
 
 // ----
-kernel.def retain @normalize(%token_count: index) {
+kernel.def retain @normalize.__cmd_0(%token_count: index) {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%token_count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input: buffer, %output: buffer) {
@@ -134,7 +134,7 @@ command.program.def public @converged_prefill(%token_count: index) launch(%input
 }
 
 // ----
-kernel.def retain @normalize(%token_count: index) {
+kernel.def retain @normalize.__cmd_0(%token_count: index) {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%token_count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input: buffer, %output: buffer) {

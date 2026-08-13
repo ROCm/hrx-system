@@ -53,25 +53,24 @@ command.program.def public @attention_wave() launch(%source: buffer, %target: bu
 }
 
 // ----
-low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 2, executable_count = 2, fixed_buffer_count = 0, rebindable_binding_count = 3}) @attention_wave() asm {
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 2, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 3}) @attention_wave() asm {
   %0 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
   %1 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
   %2 = resource<command_input> {index = 2, source_type = buffer} : reg<cmd.binding>
   %3 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
-  %4 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
-  %5 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
-  %6 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
-  %7 = cmd.constant.u64 0
-  %8 = cmd.constant.u64 -1
-  %9 = cmd.constant.u64 64
-  %10 = cmd.constant.u64 256
-  %11 = cmd.constant.u32 1
-  cmd.dispatch.direct<%3, %5>[%11, %11, %11](%0, %7, %8, %2, %7, %9)
-  cmd.dispatch.direct<%3, %5>[%11, %11, %11](%0, %7, %8, %2, %10, %9)
-  cmd.dispatch.direct<%3, %5>[%11, %11, %11](%0, %7, %8, %2, %9, %9)
-  cmd.dispatch.direct.barrier<%4, %6>[%11, %11, %11](%2, %7, %9, %2, %10, %9, %2, %9, %9, %1, %7, %8)
-  cmd.dispatch.direct.barrier<%3, %5>[%11, %11, %11](%0, %7, %8, %2, %7, %10)
-  cmd.dispatch.direct.barrier<%3, %5>[%11, %11, %11](%2, %7, %10, %1, %7, %8)
+  %4 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %5 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %6 = cmd.constant.u64 0
+  %7 = cmd.constant.u64 -1
+  %8 = cmd.constant.u64 64
+  %9 = cmd.constant.u64 256
+  %10 = cmd.constant.u32 1
+  cmd.dispatch.direct<%3, %4>[%10, %10, %10](%0, %6, %7, %2, %6, %8)
+  cmd.dispatch.direct<%3, %4>[%10, %10, %10](%0, %6, %7, %2, %9, %8)
+  cmd.dispatch.direct<%3, %4>[%10, %10, %10](%0, %6, %7, %2, %8, %8)
+  cmd.dispatch.direct.barrier<%3, %5>[%10, %10, %10](%2, %6, %8, %2, %9, %8, %2, %8, %8, %1, %6, %7)
+  cmd.dispatch.direct.barrier<%3, %4>[%10, %10, %10](%0, %6, %7, %2, %6, %9)
+  cmd.dispatch.direct.barrier<%3, %4>[%10, %10, %10](%2, %6, %9, %1, %6, %7)
   return
 }
 

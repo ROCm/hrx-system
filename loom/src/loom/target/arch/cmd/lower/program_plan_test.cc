@@ -125,16 +125,16 @@ command.program.def public @increment_then_double(%element_count: index) launch(
   command.return
 }
 
-command.program.def public @increment_twice(%element_count: index) launch(%source: buffer, %scratch: buffer, %target: buffer) where [range(%element_count, 1, 128)] {
-  kernel.launch @increment[%element_count](%source, %scratch) : [index](buffer, buffer)
+command.program.def public @double_then_increment(%element_count: index) launch(%source: buffer, %scratch: buffer, %target: buffer) where [range(%element_count, 1, 128)] {
+  kernel.launch @double[%element_count](%source, %scratch) : [index](buffer, buffer)
   kernel.launch @increment[%element_count](%scratch, %target) : [index](buffer, buffer)
   command.return
 }
 )");
   ASSERT_NE(source_module, nullptr);
   const loom_op_t* source_programs[] = {
-      FindSymbol(source_module.get(), IREE_SV("increment_twice")),
       FindSymbol(source_module.get(), IREE_SV("increment_then_double")),
+      FindSymbol(source_module.get(), IREE_SV("double_then_increment")),
   };
 
   loom_cmd_program_plan_t plan = {};
@@ -151,47 +151,62 @@ command.program.def public @increment_twice(%element_count: index) launch(%sourc
   ASSERT_NE(plan.roots, nullptr);
   ASSERT_NE(plan.root_module, nullptr);
   ASSERT_NE(plan.launch_module, nullptr);
-  const loom_cmd_program_root_t& twice = plan.roots[0];
-  const loom_cmd_program_root_t& mixed = plan.roots[1];
-  EXPECT_EQ(FindSymbol(plan.root_module, IREE_SV("increment_twice")),
-            twice.function_op);
+  const loom_cmd_program_root_t& forward = plan.roots[0];
+  const loom_cmd_program_root_t& reverse = plan.roots[1];
   EXPECT_EQ(FindSymbol(plan.root_module, IREE_SV("increment_then_double")),
-            mixed.function_op);
-  EXPECT_TRUE(loom_low_func_def_isa(twice.function_op));
-  EXPECT_TRUE(loom_low_func_def_isa(mixed.function_op));
-  EXPECT_EQ(FindSymbol(plan.launch_module,
-                       IREE_SV("increment_twice.__launch_counts")),
-            twice.launch_function_op);
+            forward.function_op);
+  EXPECT_EQ(FindSymbol(plan.root_module, IREE_SV("double_then_increment")),
+            reverse.function_op);
+  EXPECT_TRUE(loom_low_func_def_isa(forward.function_op));
+  EXPECT_TRUE(loom_low_func_def_isa(reverse.function_op));
   EXPECT_EQ(FindSymbol(plan.launch_module,
                        IREE_SV("increment_then_double.__launch_counts")),
-            mixed.launch_function_op);
-  EXPECT_EQ(twice.launch_tuple_count, 1u);
-  EXPECT_EQ(mixed.launch_tuple_count, 1u);
-  const loom_cmd_program_requirements_t twice_requirements =
-      loom_cmd_program_root_requirements(&twice);
-  EXPECT_EQ(twice_requirements.fixed_buffer_count, 0u);
-  EXPECT_EQ(twice_requirements.rebindable_binding_count, 4u);
-  EXPECT_EQ(twice_requirements.executable_count, 1u);
-  EXPECT_EQ(twice_requirements.entry_count, 1u);
-  EXPECT_EQ(twice_requirements.transient.binding_index, UINT32_MAX);
-  EXPECT_EQ(twice_requirements.launch_counts.binding_index, 3u);
-  EXPECT_EQ(twice_requirements.launch_counts.required_byte_length,
+            forward.launch_function_op);
+  EXPECT_EQ(FindSymbol(plan.launch_module,
+                       IREE_SV("double_then_increment.__launch_counts")),
+            reverse.launch_function_op);
+  EXPECT_EQ(forward.launch_tuple_count, 1u);
+  EXPECT_EQ(reverse.launch_tuple_count, 1u);
+  const loom_cmd_program_requirements_t forward_requirements =
+      loom_cmd_program_root_requirements(&forward);
+  EXPECT_EQ(forward_requirements.fixed_buffer_count, 0u);
+  EXPECT_EQ(forward_requirements.rebindable_binding_count, 4u);
+  EXPECT_EQ(forward_requirements.executable_count, 1u);
+  EXPECT_EQ(forward_requirements.entry_count, 2u);
+  EXPECT_EQ(forward_requirements.transient.binding_index, UINT32_MAX);
+  EXPECT_EQ(forward_requirements.launch_counts.binding_index, 3u);
+  EXPECT_EQ(forward_requirements.launch_counts.required_byte_length,
             LOOM_CMD_PROGRAM_LAUNCH_COUNT_TUPLE_BYTE_LENGTH);
-  EXPECT_EQ(twice_requirements.launch_counts.minimum_alignment,
+  EXPECT_EQ(forward_requirements.launch_counts.minimum_alignment,
             LOOM_CMD_PROGRAM_LAUNCH_COUNT_TUPLE_ALIGNMENT);
 
-  ASSERT_EQ(plan.dependency_count, 2u);
+  ASSERT_EQ(plan.dependency_count, 1u);
   ASSERT_NE(plan.dependency_units, nullptr);
   ASSERT_NE(plan.dependency_units[0].module, nullptr);
-  ASSERT_NE(plan.dependency_units[1].module, nullptr);
-  EXPECT_NE(plan.dependency_units[0].module, plan.dependency_units[1].module);
-  ASSERT_EQ(twice.dependency_count, 1u);
-  ASSERT_NE(twice.dependency_unit_indices, nullptr);
-  EXPECT_EQ(twice.dependency_unit_indices[0], 0u);
-  ASSERT_EQ(mixed.dependency_count, 2u);
-  ASSERT_NE(mixed.dependency_unit_indices, nullptr);
-  EXPECT_EQ(mixed.dependency_unit_indices[0], 0u);
-  EXPECT_EQ(mixed.dependency_unit_indices[1], 1u);
+  ASSERT_EQ(plan.dependency_units[0].export_count, 2u);
+  ASSERT_NE(plan.dependency_units[0].kernel_ops, nullptr);
+  EXPECT_NE(plan.dependency_units[0].kernel_ops[0],
+            plan.dependency_units[0].kernel_ops[1]);
+
+  ASSERT_EQ(forward.executable_count, 1u);
+  ASSERT_NE(forward.executable_unit_indices, nullptr);
+  EXPECT_EQ(forward.executable_unit_indices[0], 0u);
+  ASSERT_EQ(forward.entry_count, 2u);
+  ASSERT_NE(forward.entries, nullptr);
+  EXPECT_EQ(forward.entries[0].executable_index, 0u);
+  EXPECT_EQ(forward.entries[0].unit_export_index, 0u);
+  EXPECT_EQ(forward.entries[1].executable_index, 0u);
+  EXPECT_EQ(forward.entries[1].unit_export_index, 1u);
+
+  ASSERT_EQ(reverse.executable_count, 1u);
+  ASSERT_NE(reverse.executable_unit_indices, nullptr);
+  EXPECT_EQ(reverse.executable_unit_indices[0], 0u);
+  ASSERT_EQ(reverse.entry_count, 2u);
+  ASSERT_NE(reverse.entries, nullptr);
+  EXPECT_EQ(reverse.entries[0].executable_index, 0u);
+  EXPECT_EQ(reverse.entries[0].unit_export_index, 1u);
+  EXPECT_EQ(reverse.entries[1].executable_index, 0u);
+  EXPECT_EQ(reverse.entries[1].unit_export_index, 0u);
 
   loom_cmd_program_plan_deinitialize(&plan);
   EXPECT_EQ(plan.root_module, nullptr);

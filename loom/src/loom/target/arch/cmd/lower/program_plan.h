@@ -25,6 +25,15 @@
 extern "C" {
 #endif
 
+// One root-local executable entry requirement.
+typedef struct loom_cmd_program_entry_t {
+  // Root-local executable requirement providing this entry.
+  uint32_t executable_index;
+
+  // Unit-local named export ordinal in the executable's compilation unit.
+  uint32_t unit_export_index;
+} loom_cmd_program_entry_t;
+
 // One prepared command root within a program plan.
 //
 // The lowered command function addresses the plan-wide dependency table. Its
@@ -44,10 +53,16 @@ typedef struct loom_cmd_program_root_t {
   uint32_t launch_tuple_count;
 
   // Plan-wide dependency unit index for each root-local executable slot.
-  uint32_t* dependency_unit_indices;
+  uint32_t* executable_unit_indices;
 
-  // Number of entries in |dependency_unit_indices|.
-  uint32_t dependency_count;
+  // Number of entries in |executable_unit_indices|.
+  uint32_t executable_count;
+
+  // Root-local entry requirements in portable command entry-table order.
+  loom_cmd_program_entry_t* entries;
+
+  // Number of entries in |entries|.
+  uint32_t entry_count;
 
   // Concrete immutable parameter requirements and their fixed placement.
   loom_cmd_parameter_requirement_table_t parameters;
@@ -76,13 +91,16 @@ typedef struct loom_cmd_program_plan_t {
   // Number of entries in |roots|.
   iree_host_size_t root_count;
 
-  // Unique independently owned dependencies in executable-slot order.
+  // Unique independently owned multi-export kernel compilation units.
   loom_cmd_kernel_unit_t* dependency_units;
 
   // Number of entries in |dependency_units|.
   iree_host_size_t dependency_count;
 
-  // Host allocator used for the root and dependency-unit tables.
+  // Arena owning immutable plan metadata from the caller's shared block pool.
+  iree_arena_allocator_t arena;
+
+  // Host allocator used for owned module storage.
   iree_allocator_t host_allocator;
 } loom_cmd_program_plan_t;
 
@@ -106,7 +124,7 @@ typedef struct loom_cmd_program_plan_t {
 // status. Source contract violations emit diagnostics, set |out_valid| to
 // false, leave |out_plan| empty, and return OK. A valid plan sets |out_valid|
 // to true and transfers all referenced modules to |out_plan|, which must be
-// deinitialized by the caller.
+// deinitialized by the caller. |block_pool| must outlive the returned plan.
 iree_status_t loom_cmd_program_plan_prepare(
     const loom_module_t* source_module,
     const loom_op_t* const* source_program_ops,

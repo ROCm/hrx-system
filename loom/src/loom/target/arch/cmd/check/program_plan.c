@@ -330,17 +330,17 @@ static iree_status_t loom_cmd_program_plan_check_emit_provider_execute(
         break;
       case LOOM_CMD_PROGRAM_PLAN_CHECK_OUTPUT_KERNEL: {
         const loom_cmd_program_root_t* root = &plan.roots[0];
-        if (options.dependency_index >= root->dependency_count) {
+        if (options.dependency_index >= root->executable_count) {
           status = iree_make_status(
               IREE_STATUS_OUT_OF_RANGE,
-              "command root '@%.*s' has %u kernel dependencies; dependency "
+              "command root '@%.*s' has %u kernel executables; dependency "
               "%u is out of range",
               (int)options.root_names[0].size, options.root_names[0].data,
-              root->dependency_count, options.dependency_index);
+              root->executable_count, options.dependency_index);
           break;
         }
         const uint32_t unit_index =
-            root->dependency_unit_indices[options.dependency_index];
+            root->executable_unit_indices[options.dependency_index];
         output_module = plan.dependency_units[unit_index].module;
         break;
       }

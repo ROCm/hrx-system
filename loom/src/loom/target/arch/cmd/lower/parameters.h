@@ -102,21 +102,17 @@ typedef struct loom_cmd_parameter_layout_t {
 // Exact ordinary view results rooted in launch bindings are preserved in the
 // same lower plan, so fixed/rebindable roles and subranges propagate without
 // per-launch rediscovery. |bindings| is populated in source launch-binding
-// order. |out_requirements| owns its tables through |host_allocator|.
-// |out_layout| references only |scratch_arena| storage and remains valid until
-// that arena is reset.
+// order. |out_requirements| references |storage_arena| and remains valid until
+// that arena is reset. |out_layout| references only |scratch_arena| storage and
+// remains valid until that arena is reset.
 iree_status_t loom_cmd_parameter_layout_build(
     const loom_module_t* module, loom_func_like_t program,
     const loom_value_fact_table_t* fact_table,
-    iree_arena_allocator_t* scratch_arena, iree_allocator_t host_allocator,
-    loom_cmd_buffer_binding_t* bindings, iree_host_size_t binding_count,
+    iree_arena_allocator_t* scratch_arena,
+    iree_arena_allocator_t* storage_arena, loom_cmd_buffer_binding_t* bindings,
+    iree_host_size_t binding_count,
     loom_cmd_parameter_requirement_table_t* out_requirements,
     loom_cmd_parameter_layout_t* out_layout);
-
-// Releases all storage owned by |table| and resets it to empty.
-void loom_cmd_parameter_requirement_table_deinitialize(
-    loom_cmd_parameter_requirement_table_t* table,
-    iree_allocator_t host_allocator);
 
 #ifdef __cplusplus
 }  // extern "C"

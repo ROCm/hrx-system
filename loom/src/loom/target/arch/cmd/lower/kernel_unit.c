@@ -6,6 +6,8 @@
 
 #include "loom/target/arch/cmd/lower/kernel_unit.h"
 
+#include <inttypes.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "loom/ir/attribute.h"
@@ -51,7 +53,7 @@ static bool loom_cmd_kernel_unit_value_groups_equivalent(
   return true;
 }
 
-bool loom_cmd_kernel_unit_launches_equivalent(
+bool loom_cmd_kernel_entry_launches_equivalent(
     const loom_module_t* source_module, const loom_op_t* lhs_launch_op,
     const loom_op_t* rhs_launch_op,
     const loom_value_fact_table_t* source_facts) {
@@ -110,6 +112,46 @@ static void loom_cmd_kernel_unit_clear_explicit_export(
   if (kernel.vtable->export_attrs_attr_index != LOOM_ATTR_INDEX_NONE) {
     attrs[kernel.vtable->export_attrs_attr_index] = loom_attr_absent();
   }
+}
+
+static iree_status_t loom_cmd_kernel_entry_assign_export_name(
+    loom_module_t* module, loom_func_like_t kernel, uint32_t entry_ordinal) {
+  const loom_symbol_ref_t kernel_ref = loom_func_like_callee(kernel);
+  IREE_ASSERT(loom_symbol_ref_is_valid(kernel_ref));
+  IREE_ASSERT_EQ(kernel_ref.module_id, 0u);
+  IREE_ASSERT_LT(kernel_ref.symbol_id, module->symbols.count);
+  loom_symbol_t* kernel_symbol = &module->symbols.entries[kernel_ref.symbol_id];
+  IREE_ASSERT_LT(kernel_symbol->name_id, module->strings.count);
+  const iree_string_view_t source_name =
+      module->strings.entries[kernel_symbol->name_id];
+
+  char suffix[32] = {0};
+  const int suffix_length =
+      snprintf(suffix, sizeof(suffix), ".__cmd_%" PRIu32, entry_ordinal);
+  if (suffix_length < 0 ||
+      (iree_host_size_t)suffix_length >= IREE_ARRAYSIZE(suffix)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "command kernel export suffix is too large");
+  }
+  iree_host_size_t export_name_length = 0;
+  if (!iree_host_size_checked_add(source_name.size,
+                                  (iree_host_size_t)suffix_length,
+                                  &export_name_length)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "command kernel export name is too large");
+  }
+  char* export_name_data = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(&module->arena, export_name_length,
+                                           (void**)&export_name_data));
+  memcpy(export_name_data, source_name.data, source_name.size);
+  memcpy(export_name_data + source_name.size, suffix,
+         (iree_host_size_t)suffix_length);
+  loom_string_id_t export_name_id = LOOM_STRING_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_module_intern_string(
+      module, iree_make_string_view(export_name_data, export_name_length),
+      &export_name_id));
+  kernel_symbol->name_id = export_name_id;
+  return iree_ok_status();
 }
 
 // Returns true when every SSA value referenced by |predicate| is exact at the
@@ -438,27 +480,27 @@ static iree_status_t loom_cmd_kernel_unit_prune_argument_group(
 
 static iree_status_t loom_cmd_kernel_unit_prune_arguments(
     loom_module_t* module, loom_func_like_t kernel,
-    loom_cmd_kernel_unit_t* out_unit) {
+    loom_cmd_kernel_entry_t* out_entry) {
   loom_value_slice_t source_workloads =
       loom_kernel_workload_arg_ids(module, kernel.op);
-  out_unit->source_workload_count = source_workloads.count;
+  out_entry->source_workload_count = source_workloads.count;
   if (source_workloads.count > 0) {
     loom_block_t* workload_entry = loom_value_def_block(
         loom_module_value(module, source_workloads.values[0]));
     IREE_RETURN_IF_ERROR(loom_cmd_kernel_unit_prune_argument_group(
         module, workload_entry, source_workloads.values, source_workloads.count,
-        &out_unit->workload_count, &out_unit->source_workload_ordinals));
+        &out_entry->workload_count, &out_entry->source_workload_ordinals));
   }
 
   uint16_t source_argument_count = 0;
   const loom_value_id_t* source_argument_ids =
       loom_func_like_arg_ids(kernel, &source_argument_count);
-  out_unit->source_argument_count = source_argument_count;
+  out_entry->source_argument_count = source_argument_count;
   loom_block_t* body_entry =
       loom_region_entry_block(loom_func_like_body(kernel));
   IREE_RETURN_IF_ERROR(loom_cmd_kernel_unit_prune_argument_group(
       module, body_entry, source_argument_ids, source_argument_count,
-      &out_unit->argument_count, &out_unit->source_argument_ordinals));
+      &out_entry->argument_count, &out_entry->source_argument_ordinals));
   return iree_ok_status();
 }
 
@@ -509,21 +551,25 @@ static iree_status_t loom_cmd_kernel_unit_materialize_view_arguments(
   return iree_ok_status();
 }
 
-iree_status_t loom_cmd_kernel_unit_materialize(
+iree_status_t loom_cmd_kernel_entry_materialize(
     const loom_module_t* source_module, const loom_op_t* source_launch_op,
-    const loom_value_fact_table_t* source_facts,
+    const loom_value_fact_table_t* source_facts, uint32_t entry_ordinal,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
-    loom_cmd_kernel_unit_t* out_unit) {
+    loom_cmd_kernel_entry_t* out_entry) {
   IREE_ASSERT_ARGUMENT(source_module);
   IREE_ASSERT_ARGUMENT(source_launch_op);
   IREE_ASSERT_ARGUMENT(source_facts);
   IREE_ASSERT_ARGUMENT(block_pool);
-  IREE_ASSERT_ARGUMENT(out_unit);
-  memset(out_unit, 0, sizeof(*out_unit));
+  IREE_ASSERT_ARGUMENT(out_entry);
+  memset(out_entry, 0, sizeof(*out_entry));
   IREE_ASSERT(loom_kernel_launch_isa(source_launch_op));
 
   const loom_symbol_ref_t source_kernel_ref =
       loom_kernel_launch_callee(source_launch_op);
+  const loom_op_t* source_kernel_op =
+      source_module->symbols.entries[source_kernel_ref.symbol_id].defining_op;
+  const loom_symbol_ref_t source_target_ref = loom_func_like_target(
+      loom_func_like_cast(source_module, (loom_op_t*)source_kernel_op));
   const iree_string_view_t source_kernel_name =
       loom_cmd_kernel_unit_symbol_name(source_module, source_kernel_ref);
   const iree_string_view_t root_names[] = {source_kernel_name};
@@ -556,14 +602,18 @@ iree_status_t loom_cmd_kernel_unit_materialize(
     unit_kernel = loom_func_like_cast(unit_module, unit_kernel_op);
     IREE_ASSERT(loom_func_like_is_kernel_entry(unit_kernel));
     loom_cmd_kernel_unit_clear_explicit_export(unit_kernel);
+    status = loom_cmd_kernel_entry_assign_export_name(unit_module, unit_kernel,
+                                                      entry_ordinal);
 
-    iree_arena_initialize(block_pool, &scratch_arena);
-    scratch_arena_initialized = true;
-    loom_pass_value_fact_owner_initialize(block_pool, &fact_owner);
-    fact_owner_initialized = true;
-    status = loom_canonicalizer_initialize(unit_module, &scratch_arena,
-                                           &fact_owner, &canonicalizer);
-    canonicalizer_initialized = iree_status_is_ok(status);
+    if (iree_status_is_ok(status)) {
+      iree_arena_initialize(block_pool, &scratch_arena);
+      scratch_arena_initialized = true;
+      loom_pass_value_fact_owner_initialize(block_pool, &fact_owner);
+      fact_owner_initialized = true;
+      status = loom_canonicalizer_initialize(unit_module, &scratch_arena,
+                                             &fact_owner, &canonicalizer);
+      canonicalizer_initialized = iree_status_is_ok(status);
+    }
   }
 
   if (iree_status_is_ok(status)) {
@@ -610,10 +660,14 @@ iree_status_t loom_cmd_kernel_unit_materialize(
                                              &result);
   }
   if (iree_status_is_ok(status)) {
-    out_unit->module = unit_module;
-    out_unit->kernel_op = unit_kernel_op;
+    out_entry->module = unit_module;
+    out_entry->kernel_op = unit_kernel_op;
+    out_entry->source_target_symbol_id =
+        loom_symbol_ref_is_valid(source_target_ref)
+            ? source_target_ref.symbol_id
+            : LOOM_SYMBOL_ID_INVALID;
     status = loom_cmd_kernel_unit_prune_arguments(unit_module, unit_kernel,
-                                                  out_unit);
+                                                  out_entry);
   }
 
   if (canonicalizer_initialized) {
@@ -627,9 +681,83 @@ iree_status_t loom_cmd_kernel_unit_materialize(
   }
   if (!iree_status_is_ok(status)) {
     if (unit_module) loom_module_free(unit_module);
-    memset(out_unit, 0, sizeof(*out_unit));
+    memset(out_entry, 0, sizeof(*out_entry));
   }
   return status;
+}
+
+iree_status_t loom_cmd_kernel_unit_pack(const loom_cmd_kernel_entry_t* entries,
+                                        const uint32_t* entry_indices,
+                                        uint32_t entry_count,
+                                        iree_arena_block_pool_t* block_pool,
+                                        iree_allocator_t allocator,
+                                        loom_cmd_kernel_unit_t* out_unit) {
+  IREE_ASSERT_ARGUMENT(entries);
+  IREE_ASSERT_ARGUMENT(entry_indices);
+  IREE_ASSERT_GT(entry_count, 0u);
+  IREE_ASSERT_ARGUMENT(block_pool);
+  IREE_ASSERT_ARGUMENT(out_unit);
+  memset(out_unit, 0, sizeof(*out_unit));
+
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(block_pool, &scratch_arena);
+  const loom_module_t** source_modules = NULL;
+  iree_string_view_t* root_names = NULL;
+  iree_status_t status = iree_arena_allocate_array(&scratch_arena, entry_count,
+                                                   sizeof(*source_modules),
+                                                   (void**)&source_modules);
+  if (iree_status_is_ok(status)) {
+    status = iree_arena_allocate_array(
+        &scratch_arena, entry_count, sizeof(*root_names), (void**)&root_names);
+  }
+  for (uint32_t i = 0; i < entry_count && iree_status_is_ok(status); ++i) {
+    const loom_cmd_kernel_entry_t* entry = &entries[entry_indices[i]];
+    source_modules[i] = entry->module;
+    const loom_symbol_ref_t kernel_ref = loom_func_like_callee(
+        loom_func_like_cast(entry->module, entry->kernel_op));
+    root_names[i] = loom_cmd_kernel_unit_symbol_name(entry->module, kernel_ref);
+  }
+
+  loom_module_t* unit_module = NULL;
+  if (iree_status_is_ok(status)) {
+    status = loom_link_materialized_modules(
+        source_modules, entry_count,
+        &(loom_link_options_t){
+            .module_name = IREE_SV("command_kernel_unit"),
+            .root_symbols =
+                {
+                    .count = entry_count,
+                    .values = root_names,
+                },
+        },
+        block_pool, allocator, &unit_module);
+  }
+  loom_op_t** kernel_ops = NULL;
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_arena_allocate_array(&unit_module->arena, entry_count,
+                                  sizeof(*kernel_ops), (void**)&kernel_ops);
+  }
+  for (uint32_t i = 0; i < entry_count && iree_status_is_ok(status); ++i) {
+    kernel_ops[i] =
+        loom_cmd_kernel_unit_find_symbol(unit_module, root_names[i]);
+  }
+  iree_arena_deinitialize(&scratch_arena);
+
+  if (iree_status_is_ok(status)) {
+    out_unit->module = unit_module;
+    out_unit->kernel_ops = kernel_ops;
+    out_unit->export_count = entry_count;
+  } else if (unit_module) {
+    loom_module_free(unit_module);
+  }
+  return status;
+}
+
+void loom_cmd_kernel_entry_deinitialize(loom_cmd_kernel_entry_t* entry) {
+  if (!entry) return;
+  if (entry->module) loom_module_free(entry->module);
+  memset(entry, 0, sizeof(*entry));
 }
 
 void loom_cmd_kernel_unit_deinitialize(loom_cmd_kernel_unit_t* unit) {

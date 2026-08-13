@@ -330,50 +330,40 @@ static bool loom_cmd_parameter_align_offset(uint64_t value, uint64_t alignment,
 
 static iree_status_t loom_cmd_parameter_allocate_requirement_table(
     const loom_cmd_parameter_build_t* build, iree_host_size_t root_count,
-    iree_allocator_t host_allocator,
+    iree_arena_allocator_t* storage_arena,
     loom_cmd_parameter_requirement_table_t* table) {
-  iree_host_size_t root_table_size = 0;
-  iree_host_size_t entry_table_size = 0;
-  if (!iree_host_size_checked_mul(root_count, sizeof(*table->roots),
-                                  &root_table_size) ||
-      !iree_host_size_checked_mul(build->row_count, sizeof(*table->entries),
-                                  &entry_table_size)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "command parameter requirement table is too large");
-  }
-
   table->root_count = root_count;
   table->count = build->row_count;
-  iree_status_t status = iree_ok_status();
-  if (root_table_size != 0) {
-    status = iree_allocator_malloc(host_allocator, root_table_size,
-                                   (void**)&table->roots);
+  if (root_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(storage_arena, root_count,
+                                                   sizeof(*table->roots),
+                                                   (void**)&table->roots));
   }
-  if (iree_status_is_ok(status) && entry_table_size != 0) {
-    status = iree_allocator_malloc(host_allocator, entry_table_size,
-                                   (void**)&table->entries);
+  if (build->row_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        storage_arena, build->row_count, sizeof(*table->entries),
+        (void**)&table->entries));
   }
-  if (iree_status_is_ok(status) && build->key_storage_length != 0) {
-    status = iree_allocator_malloc(host_allocator, build->key_storage_length,
-                                   (void**)&table->key_storage);
+  if (build->key_storage_length != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate(
+        storage_arena, build->key_storage_length, (void**)&table->key_storage));
   }
-  if (!iree_status_is_ok(status)) {
-    loom_cmd_parameter_requirement_table_deinitialize(table, host_allocator);
-  }
-  return status;
+  return iree_ok_status();
 }
 
 iree_status_t loom_cmd_parameter_layout_build(
     const loom_module_t* module, loom_func_like_t program,
     const loom_value_fact_table_t* fact_table,
-    iree_arena_allocator_t* scratch_arena, iree_allocator_t host_allocator,
-    loom_cmd_buffer_binding_t* bindings, iree_host_size_t binding_count,
+    iree_arena_allocator_t* scratch_arena,
+    iree_arena_allocator_t* storage_arena, loom_cmd_buffer_binding_t* bindings,
+    iree_host_size_t binding_count,
     loom_cmd_parameter_requirement_table_t* out_requirements,
     loom_cmd_parameter_layout_t* out_layout) {
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT(loom_func_like_isa(program));
   IREE_ASSERT_ARGUMENT(fact_table);
   IREE_ASSERT_ARGUMENT(scratch_arena);
+  IREE_ASSERT_ARGUMENT(storage_arena);
   IREE_ASSERT(binding_count == 0 || bindings != NULL);
   IREE_ASSERT_ARGUMENT(out_requirements);
   IREE_ASSERT_ARGUMENT(out_layout);
@@ -411,11 +401,13 @@ iree_status_t loom_cmd_parameter_layout_build(
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(scratch_arena, binding_count,
                                                    sizeof(*fixed_bindings),
                                                    (void**)&fixed_bindings));
-    memset(fixed_bindings, 0, binding_count * sizeof(*fixed_bindings));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(scratch_arena, binding_count,
                                                    sizeof(*placement_cursors),
                                                    (void**)&placement_cursors));
-    memset(placement_cursors, 0, binding_count * sizeof(*placement_cursors));
+    for (iree_host_size_t i = 0; i < binding_count; ++i) {
+      fixed_bindings[i] = false;
+      placement_cursors[i] = 0;
+    }
   }
   for (iree_host_size_t i = 0; i < build.row_count; ++i) {
     fixed_bindings[build.rows[i].source_binding_ordinal] = true;
@@ -456,7 +448,7 @@ iree_status_t loom_cmd_parameter_layout_build(
         sizeof(*resolved_buffer_ranges), (void**)&resolved_buffer_ranges));
   }
   IREE_RETURN_IF_ERROR(loom_cmd_parameter_allocate_requirement_table(
-      &build, fixed_buffer_count, host_allocator, out_requirements));
+      &build, fixed_buffer_count, storage_arena, out_requirements));
 
   for (uint16_t i = 0; i < binding_count; ++i) {
     if (!fixed_bindings[i]) continue;
@@ -518,8 +510,6 @@ iree_status_t loom_cmd_parameter_layout_build(
   }
 
   if (!iree_status_is_ok(status)) {
-    loom_cmd_parameter_requirement_table_deinitialize(out_requirements,
-                                                      host_allocator);
     return status;
   }
   if (build.key_storage_length != 0) {
@@ -560,14 +550,4 @@ iree_status_t loom_cmd_parameter_layout_build(
       .rebindable_binding_count = rebindable_binding_count,
   };
   return iree_ok_status();
-}
-
-void loom_cmd_parameter_requirement_table_deinitialize(
-    loom_cmd_parameter_requirement_table_t* table,
-    iree_allocator_t host_allocator) {
-  if (!table) return;
-  iree_allocator_free(host_allocator, table->key_storage);
-  iree_allocator_free(host_allocator, table->entries);
-  iree_allocator_free(host_allocator, table->roots);
-  memset(table, 0, sizeof(*table));
 }
