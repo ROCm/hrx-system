@@ -1653,6 +1653,49 @@ class ReaderTest : public ::testing::Test {
     }
   }
 
+  struct PredicateOffsets {
+    // Byte offset of the first predicate's argument count.
+    size_t argument_count;
+    // Byte offset of the first predicate's first VALUE payload.
+    size_t first_value;
+  };
+
+  PredicateOffsets FirstFunctionPredicateOffsets(
+      const std::vector<uint8_t>& bytes) {
+    size_t offset = FirstSymbolFlagsOffset(bytes) + sizeof(uint16_t);
+    ReadUVarint(bytes, &offset);  // def_op_table_index_plus1
+    SkipSourceTrivia(bytes, &offset);
+    offset += 1;  // calling_convention
+    offset += 1;  // purity
+    uint64_t workload_arg_count = ReadUVarint(bytes, &offset);
+    uint64_t arg_count = ReadUVarint(bytes, &offset);
+    uint64_t result_count = ReadUVarint(bytes, &offset);
+    for (uint64_t i = 0; i < workload_arg_count; ++i) {
+      ReadValueDefOffsets(bytes, &offset);
+    }
+    for (uint64_t i = 0; i < arg_count; ++i) {
+      ReadValueDefOffsets(bytes, &offset);
+    }
+    for (uint64_t i = 0; i < result_count; ++i) {
+      uint8_t is_tied = bytes[offset++];
+      ReadValueDefOffsets(bytes, &offset);
+      if (is_tied) {
+        ReadUVarint(bytes, &offset);
+      }
+    }
+    ReadUVarint(bytes, &offset);                 // tied_result_count
+    EXPECT_GT(ReadUVarint(bytes, &offset), 0u);  // predicate_count
+    offset += 1;                                 // predicate kind
+    PredicateOffsets result = {
+        /*.argument_count=*/offset++,
+        /*.first_value=*/0,
+    };
+    EXPECT_GT(bytes[result.argument_count], 0u);
+    EXPECT_EQ(bytes[offset++], LOOM_PRED_ARG_VALUE);
+    result.first_value = offset;
+    return result;
+  }
+
   size_t FunctionBodyLengthOffset(const std::vector<uint8_t>& bytes,
                                   uint64_t symbol_index) {
     size_t offset = SectionPayloadOffset(bytes, LOOM_BYTECODE_SECTION_SYMBOLS);
@@ -2991,6 +3034,29 @@ TEST_F(ReaderTest, RejectsNonemptyPredicatesWithoutFlag) {
              flags & ~LOOM_BYTECODE_SYMBOL_FLAG_PREDICATES);
 
   ExpectReadModuleError(bytes, "ERR_BYTECODE_006");
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, MetadataRejectsPredicateArityMismatch) {
+  loom_module_t* module = CreatePredicateFunctionModule();
+  auto bytes = WriteModule(module);
+  PredicateOffsets offsets = FirstFunctionPredicateOffsets(bytes);
+  ASSERT_EQ(bytes[offsets.argument_count], 2u);
+  bytes[offsets.argument_count] = 1;
+
+  ExpectInvalidFieldFailureCode(bytes,
+                                "predicate_arity_does_not_match_its_kind");
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, MetadataRejectsPredicateSsaReferenceOutOfRange) {
+  loom_module_t* module = CreatePredicateFunctionModule();
+  auto bytes = WriteModule(module);
+  PredicateOffsets offsets = FirstFunctionPredicateOffsets(bytes);
+  ASSERT_EQ(bytes[offsets.first_value], 0u);
+  bytes[offsets.first_value] = 0x7F;
+
+  ExpectReadError(bytes, "ERR_BYTECODE_016");
   loom_module_free(module);
 }
 

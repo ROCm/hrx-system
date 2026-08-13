@@ -96,6 +96,7 @@ loom_cc_library(
     iree::base::internal::unicode
     loom::error::diagnostic
     loom::error::error_defs
+    loom::format::bytecode::reader::attribute
     loom::format::bytecode::reader::decoder
     loom::format::bytecode::reader::module_view
     loom::format::bytecode::reader::source_trivia

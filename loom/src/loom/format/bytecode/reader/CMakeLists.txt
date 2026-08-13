@@ -11,6 +11,38 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    attribute
+  HDRS
+    "attribute.h"
+  SRCS
+    "attribute.c"
+  DEPS
+    ::decoder
+    ::module_view
+    iree::base
+    iree::base::internal::arena
+    loom::error::error_defs
+    loom::format::bytecode::format
+    loom::ir
+    loom::ir::symbol_map
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    attribute_test
+  SRCS
+    "attribute_test.cc"
+  DEPS
+    ::attribute
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+)
+
+loom_cc_library(
+  NAME
     module_view
   HDRS
     "module_view.h"
