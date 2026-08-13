@@ -2442,8 +2442,8 @@ static void iree_hal_amdgpu_topology_edge_aggregate_initialize(
   out_aggregate->physical_capabilities.guaranteed =
       IREE_HAL_TOPOLOGY_CAPABILITY_P2P_COPY |
       IREE_HAL_TOPOLOGY_CAPABILITY_PEER_COHERENT |
-      IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_DEVICE |
-      IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_SYSTEM;
+      IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_32 |
+      IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_64;
   out_aggregate->physical_capabilities.required =
       IREE_HAL_TOPOLOGY_CAPABILITY_NONE;
   out_aggregate->noncoherent_read_mode = IREE_HAL_TOPOLOGY_INTEROP_MODE_NATIVE;
@@ -2530,7 +2530,9 @@ static void iree_hal_amdgpu_topology_edge_apply_aggregate(
       IREE_HAL_TOPOLOGY_CAPABILITY_P2P_COPY |
       IREE_HAL_TOPOLOGY_CAPABILITY_PEER_COHERENT |
       IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_DEVICE |
-      IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_SYSTEM;
+      IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_SYSTEM |
+      IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_32 |
+      IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_64;
   const iree_hal_topology_capability_t physical_required_capability_mask =
       IREE_HAL_TOPOLOGY_CAPABILITY_PEER_ACCESS_REQUIRES_GRANT;
   capabilities &= ~(physical_guaranteed_capability_mask |

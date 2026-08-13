@@ -549,10 +549,10 @@ iree_hal_amdgpu_physical_topology_guaranteed_capabilities(
     capabilities |= IREE_HAL_TOPOLOGY_CAPABILITY_PEER_COHERENT;
   }
   if (edge->atomics.all_hops_32bit) {
-    capabilities |= IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_DEVICE;
+    capabilities |= IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_32;
   }
   if (edge->atomics.all_hops_64bit) {
-    capabilities |= IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_SYSTEM;
+    capabilities |= IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_64;
   }
   return capabilities;
 }

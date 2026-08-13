@@ -686,12 +686,11 @@ TEST_F(PhysicalDeviceCapabilitiesTest, SelectsXgmiPhysicalTopologyEdge) {
   EXPECT_EQ(edge.link.copy_cost, 3);
   EXPECT_EQ(edge.link.latency_class, 3);
   EXPECT_EQ(edge.link.numa_distance, 3);
-  EXPECT_TRUE(
-      iree_all_bits_set(edge.capabilities.guaranteed,
-                        IREE_HAL_TOPOLOGY_CAPABILITY_P2P_COPY |
-                            IREE_HAL_TOPOLOGY_CAPABILITY_PEER_COHERENT |
-                            IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_DEVICE |
-                            IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_SYSTEM));
+  EXPECT_EQ(edge.capabilities.guaranteed,
+            IREE_HAL_TOPOLOGY_CAPABILITY_P2P_COPY |
+                IREE_HAL_TOPOLOGY_CAPABILITY_PEER_COHERENT |
+                IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_32 |
+                IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_64);
   EXPECT_EQ(edge.capabilities.required, IREE_HAL_TOPOLOGY_CAPABILITY_NONE);
   EXPECT_EQ(edge.modes.noncoherent_read, IREE_HAL_TOPOLOGY_INTEROP_MODE_NATIVE);
   EXPECT_EQ(edge.modes.coherent_read, IREE_HAL_TOPOLOGY_INTEROP_MODE_NATIVE);
@@ -726,10 +725,13 @@ TEST_F(PhysicalDeviceCapabilitiesTest,
   EXPECT_EQ(edge.link.copy_cost, 9);
   EXPECT_EQ(edge.link.latency_class, 9);
   EXPECT_EQ(edge.link.numa_distance, 9);
+  EXPECT_EQ(edge.capabilities.guaranteed,
+            IREE_HAL_TOPOLOGY_CAPABILITY_P2P_COPY |
+                IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_64);
 }
 
 TEST_F(PhysicalDeviceCapabilitiesTest,
-       SelectsPciePhysicalTopologyEdgeWithoutSystemAtomics) {
+       SelectsPciePhysicalTopologyEdgeWithout64BitAtomics) {
   std::array<hsa_amd_memory_pool_link_info_t, 1> link_hops = {
       LinkInfo(HSA_AMD_LINK_INFO_TYPE_PCIE)};
   link_hops[0].atomic_support_64bit = false;
@@ -753,14 +755,9 @@ TEST_F(PhysicalDeviceCapabilitiesTest,
   EXPECT_EQ(edge.link.link_type, IREE_HAL_TOPOLOGY_LINK_TYPE_PCIE);
   EXPECT_EQ(edge.link.copy_cost, 7);
   EXPECT_EQ(edge.link.latency_class, 7);
-  EXPECT_TRUE(iree_any_bit_set(edge.capabilities.guaranteed,
-                               IREE_HAL_TOPOLOGY_CAPABILITY_P2P_COPY));
-  EXPECT_FALSE(iree_any_bit_set(edge.capabilities.guaranteed,
-                                IREE_HAL_TOPOLOGY_CAPABILITY_PEER_COHERENT));
-  EXPECT_TRUE(iree_any_bit_set(edge.capabilities.guaranteed,
-                               IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_DEVICE));
-  EXPECT_FALSE(iree_any_bit_set(edge.capabilities.guaranteed,
-                                IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_SYSTEM));
+  EXPECT_EQ(edge.capabilities.guaranteed,
+            IREE_HAL_TOPOLOGY_CAPABILITY_P2P_COPY |
+                IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_32);
   EXPECT_EQ(edge.modes.noncoherent_read, IREE_HAL_TOPOLOGY_INTEROP_MODE_NATIVE);
   EXPECT_EQ(edge.modes.coherent_read, IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY);
 }
