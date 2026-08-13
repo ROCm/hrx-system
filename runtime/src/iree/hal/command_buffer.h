@@ -191,11 +191,19 @@ enum iree_hal_execution_stage_bits_t {
 };
 typedef uint32_t iree_hal_execution_stage_t;
 
-// Bitfield specifying flags controlling an execution dependency.
-//
-// Maps to VkDependencyFlags.
+// Bitfield specifying cache-coherence semantics for an execution dependency.
 enum iree_hal_execution_barrier_flag_bits_t {
   IREE_HAL_EXECUTION_BARRIER_FLAG_NONE = 0,
+
+  // Makes memory writes published by agents in the system coherence domain
+  // visible to accesses in the target scope. Implementations whose ordinary
+  // memory model is already system coherent may ignore this flag.
+  IREE_HAL_EXECUTION_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE = 1ull << 0,
+
+  // Makes memory writes in the source scope available to agents in the system
+  // coherence domain. Implementations whose ordinary memory model is already
+  // system coherent may ignore this flag.
+  IREE_HAL_EXECUTION_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE = 1ull << 1,
 };
 typedef uint64_t iree_hal_execution_barrier_flags_t;
 
@@ -860,6 +868,14 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_end_debug_group(
 // Defines a memory dependency between commands recorded before and after the
 // barrier. One or more memory or buffer barriers can be specified to indicate
 // between which stages or buffers the dependencies exist.
+//
+// |flags| specifies minimum cache-coherence semantics. Implementations may
+// provide stronger visibility when that is inherent in their memory model.
+// IREE_HAL_EXECUTION_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE imports writes from the
+// system coherence domain before target-scope accesses, while
+// IREE_HAL_EXECUTION_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE publishes source-scope
+// writes to that domain. HOST source and target stages imply the corresponding
+// acquire-system and release-system semantics, respectively.
 IREE_API_EXPORT iree_status_t iree_hal_command_buffer_execution_barrier(
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_execution_stage_t source_stage_mask,

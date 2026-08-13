@@ -6,6 +6,7 @@
 
 #include "iree/hal/drivers/local_task/block_command_buffer.h"
 
+#include <inttypes.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -691,11 +692,22 @@ static iree_status_t iree_hal_block_command_buffer_execution_barrier(
     const iree_hal_memory_barrier_t* memory_barriers,
     iree_host_size_t buffer_barrier_count,
     const iree_hal_buffer_barrier_t* buffer_barriers) {
+  const iree_hal_execution_barrier_flags_t supported_flags =
+      IREE_HAL_EXECUTION_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE |
+      IREE_HAL_EXECUTION_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE;
+  if (IREE_UNLIKELY(flags & ~supported_flags)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "unsupported local-task execution barrier flags: 0x%016" PRIx64,
+        flags & ~supported_flags);
+  }
+
   iree_hal_block_command_buffer_t* command_buffer =
       iree_hal_block_command_buffer_cast(base_command_buffer);
   // Block ISA barriers are global: all prior work in the region must complete
   // before the next region begins. Fine-grained memory/buffer barriers are
-  // not applicable (CPU execution is cache-coherent).
+  // not applicable. Region publication uses release/acquire synchronization in
+  // the coherent host memory domain and already provides system visibility.
   IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_profile_reserve_operations(
       command_buffer, command_buffer->profile.operations.count + 1));
   IREE_RETURN_IF_ERROR(

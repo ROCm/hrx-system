@@ -274,6 +274,16 @@ iree_status_t iree_hal_command_buffer_execution_barrier_validation(
     const iree_hal_buffer_barrier_t* buffer_barriers) {
   // NOTE: all command buffer types can perform this so no need to check.
 
+  const iree_hal_execution_barrier_flags_t supported_flags =
+      IREE_HAL_EXECUTION_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE |
+      IREE_HAL_EXECUTION_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE;
+  if (IREE_UNLIKELY(flags & ~supported_flags)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "unsupported execution barrier flags: 0x%016" PRIx64,
+        flags & ~supported_flags);
+  }
+
   // TODO(benvanik): additional synchronization validation.
 
   return iree_ok_status();

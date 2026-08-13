@@ -103,6 +103,9 @@ typedef struct iree_hal_vulkan_command_execution_barrier_t {
   // Target HAL execution stages captured during recording.
   iree_hal_execution_stage_t target_stage_mask;
 
+  // HAL barrier flags captured during recording.
+  iree_hal_execution_barrier_flags_t flags;
+
   // Number of memory barriers represented by the native barrier.
   iree_host_size_t memory_barrier_count;
 
@@ -1739,7 +1742,18 @@ static void iree_hal_vulkan_command_buffer_record_execution_barrier_native(
   // only. Memory visibility is requested by the barrier payloads.
   const bool has_memory_visibility =
       execution_barrier->memory_barrier_count != 0 ||
-      execution_barrier->buffer_barrier_count != 0;
+      execution_barrier->buffer_barrier_count != 0 ||
+      execution_barrier->flags != IREE_HAL_EXECUTION_BARRIER_FLAG_NONE;
+  const bool acquire_system_scope =
+      iree_any_bit_set(execution_barrier->flags,
+                       IREE_HAL_EXECUTION_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE) ||
+      iree_any_bit_set(execution_barrier->source_stage_mask,
+                       IREE_HAL_EXECUTION_STAGE_HOST);
+  const bool release_system_scope =
+      iree_any_bit_set(execution_barrier->flags,
+                       IREE_HAL_EXECUTION_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE) ||
+      iree_any_bit_set(execution_barrier->target_stage_mask,
+                       IREE_HAL_EXECUTION_STAGE_HOST);
   VkMemoryBarrier2 memory_barrier = {
       .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
       .srcStageMask =
@@ -1753,6 +1767,15 @@ static void iree_hal_vulkan_command_buffer_record_execution_barrier_native(
                                                    VK_ACCESS_2_MEMORY_WRITE_BIT
                                              : 0,
   };
+  if (acquire_system_scope) {
+    memory_barrier.srcStageMask |= VK_PIPELINE_STAGE_2_HOST_BIT;
+    memory_barrier.srcAccessMask |= VK_ACCESS_2_HOST_WRITE_BIT;
+  }
+  if (release_system_scope) {
+    memory_barrier.dstStageMask |= VK_PIPELINE_STAGE_2_HOST_BIT;
+    memory_barrier.dstAccessMask |=
+        VK_ACCESS_2_HOST_READ_BIT | VK_ACCESS_2_HOST_WRITE_BIT;
+  }
   VkDependencyInfo dependency_info = {
       .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
       .memoryBarrierCount = 1,
@@ -2348,11 +2371,14 @@ static iree_status_t iree_hal_vulkan_command_buffer_execution_barrier(
       iree_hal_vulkan_command_buffer_cast(base_command_buffer);
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_validate_recording_state(
       command_buffer, IREE_SV("execution_barrier")));
-  if (flags != IREE_HAL_EXECUTION_BARRIER_FLAG_NONE) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "unsupported Vulkan command buffer execution barrier flags: 0x%" PRIx64,
-        flags);
+  const iree_hal_execution_barrier_flags_t supported_flags =
+      IREE_HAL_EXECUTION_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE |
+      IREE_HAL_EXECUTION_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE;
+  if (flags & ~supported_flags) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported Vulkan command buffer execution "
+                            "barrier flags: 0x%016" PRIx64,
+                            flags & ~supported_flags);
   }
   if (source_stage_mask == 0 && target_stage_mask == 0 &&
       memory_barrier_count == 0 && buffer_barrier_count == 0) {
@@ -2372,6 +2398,7 @@ static iree_status_t iree_hal_vulkan_command_buffer_execution_barrier(
       (iree_hal_vulkan_command_execution_barrier_t*)payload;
   execution_barrier->source_stage_mask = source_stage_mask;
   execution_barrier->target_stage_mask = target_stage_mask;
+  execution_barrier->flags = flags;
   execution_barrier->memory_barrier_count = memory_barrier_count;
   execution_barrier->buffer_barrier_count = buffer_barrier_count;
   return iree_ok_status();

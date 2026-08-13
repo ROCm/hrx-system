@@ -558,6 +558,11 @@ static iree_status_t iree_hal_hip_graph_command_buffer_execution_barrier(
     const iree_hal_memory_barrier_t* memory_barriers,
     iree_host_size_t buffer_barrier_count,
     const iree_hal_buffer_barrier_t* buffer_barriers) {
+  if (flags != IREE_HAL_EXECUTION_BARRIER_FLAG_NONE) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "system-scoped HIP graph execution barriers are unsupported");
+  }
   iree_hal_hip_graph_command_buffer_t* command_buffer =
       iree_hal_hip_graph_command_buffer_cast(base_command_buffer);
   IREE_TRACE_ZONE_BEGIN(z0);

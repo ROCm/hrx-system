@@ -6,6 +6,8 @@
 
 #include "iree/hal/drivers/webgpu/webgpu_command_buffer.h"
 
+#include <inttypes.h>
+
 #include "iree/hal/drivers/webgpu/webgpu_buffer.h"
 #include "iree/hal/drivers/webgpu/webgpu_executable.h"
 #include "iree/hal/drivers/webgpu/webgpu_imports.h"
@@ -221,6 +223,19 @@ static iree_status_t iree_hal_webgpu_command_buffer_execution_barrier(
     const iree_hal_memory_barrier_t* memory_barriers,
     iree_host_size_t buffer_barrier_count,
     const iree_hal_buffer_barrier_t* buffer_barriers) {
+  const iree_hal_execution_barrier_flags_t supported_flags =
+      IREE_HAL_EXECUTION_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE |
+      IREE_HAL_EXECUTION_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE;
+  if (IREE_UNLIKELY(flags & ~supported_flags)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "unsupported WebGPU execution barrier flags: 0x%016" PRIx64,
+        flags & ~supported_flags);
+  }
+
+  // WebGPU excludes simultaneous host and device access. Host/device ownership
+  // transitions happen at queue submission and mapping boundaries, so the
+  // ordinary barrier already covers every concurrently accessible agent.
   iree_hal_webgpu_command_buffer_t* command_buffer =
       iree_hal_webgpu_command_buffer_cast(base_command_buffer);
   return iree_hal_webgpu_builder_execution_barrier(&command_buffer->builder);

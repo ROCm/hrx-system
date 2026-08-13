@@ -167,6 +167,8 @@ iree_runtime_cc_library(
         "aql_program_validation.h",
         "asan_state.c",
         "asan_state.h",
+        "barrier.c",
+        "barrier.h",
         "driver.c",
         "driver.h",
         "executable.c",
@@ -327,6 +329,7 @@ iree_runtime_cc_library(
         "aql_program_builder.h",
         "aql_program_validation.h",
         "asan_state.h",
+        "barrier.h",
         "buffer.h",
         "driver.h",
         "executable.h",
@@ -511,6 +514,18 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amdgpu/abi",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "barrier_test",
+    srcs = ["barrier_test.cc"],
+    deps = [
+        ":amdgpu",
+        ":headers",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

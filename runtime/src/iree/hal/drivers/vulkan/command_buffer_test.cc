@@ -32,6 +32,9 @@ struct NativeReplayCapture {
   // Count of fake vkCmdEndDebugUtilsLabelEXT calls.
   int end_label_count = 0;
 
+  // Count of fake vkCmdPipelineBarrier2 calls.
+  int pipeline_barrier_count = 0;
+
   // VkCommandBuffer passed to vkBeginCommandBuffer.
   VkCommandBuffer begin_command_buffer = VK_NULL_HANDLE;
 
@@ -49,6 +52,9 @@ struct NativeReplayCapture {
 
   // RGBA color copied during the fake begin-label entry-point call.
   float color[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+
+  // Memory barrier copied during the fake pipeline-barrier entry-point call.
+  VkMemoryBarrier2 memory_barrier = {};
 };
 
 static NativeReplayCapture* g_native_replay_capture = nullptr;
@@ -85,6 +91,15 @@ FakeCmdEndDebugUtilsLabelEXT(VkCommandBuffer command_buffer) {
   g_native_replay_capture->end_label_command_buffer = command_buffer;
 }
 
+static VKAPI_ATTR void VKAPI_CALL FakeCmdPipelineBarrier2(
+    VkCommandBuffer command_buffer, const VkDependencyInfo* dependency_info) {
+  (void)command_buffer;
+  ++g_native_replay_capture->pipeline_barrier_count;
+  ASSERT_EQ(dependency_info->memoryBarrierCount, 1u);
+  ASSERT_NE(dependency_info->pMemoryBarriers, nullptr);
+  g_native_replay_capture->memory_barrier = dependency_info->pMemoryBarriers[0];
+}
+
 static VKAPI_ATTR void VKAPI_CALL FakeCmdInsertDebugUtilsLabelEXT(
     VkCommandBuffer command_buffer, const VkDebugUtilsLabelEXT* label_info) {
   (void)command_buffer;
@@ -98,6 +113,7 @@ static iree_hal_vulkan_device_syms_t MakeNativeReplaySyms() {
   syms.vkCmdBeginDebugUtilsLabelEXT = FakeCmdBeginDebugUtilsLabelEXT;
   syms.vkCmdEndDebugUtilsLabelEXT = FakeCmdEndDebugUtilsLabelEXT;
   syms.vkCmdInsertDebugUtilsLabelEXT = FakeCmdInsertDebugUtilsLabelEXT;
+  syms.vkCmdPipelineBarrier2 = FakeCmdPipelineBarrier2;
   return syms;
 }
 
@@ -198,6 +214,60 @@ TEST_F(VulkanCommandBufferTest, ReplaysDebugGroupsAsDebugUtilsLabels) {
   EXPECT_FLOAT_EQ(32.0f / 255.0f, capture.color[1]);
   EXPECT_FLOAT_EQ(48.0f / 255.0f, capture.color[2]);
   EXPECT_FLOAT_EQ(64.0f / 255.0f, capture.color[3]);
+  g_native_replay_capture = nullptr;
+}
+
+TEST_F(VulkanCommandBufferTest, SystemScopeUsesHostMemoryDomain) {
+  CommandBufferPtr command_buffer = CreateCommandBuffer();
+  ASSERT_NE(command_buffer, nullptr);
+
+  const iree_hal_memory_barrier_t memory_barrier = {
+      /*.source_scope=*/IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+      /*.target_scope=*/IREE_HAL_ACCESS_SCOPE_DISPATCH_READ,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer.get()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_execution_barrier(
+      command_buffer.get(), IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      IREE_HAL_EXECUTION_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE |
+          IREE_HAL_EXECUTION_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+      /*memory_barrier_count=*/1, &memory_barrier,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer.get()));
+
+  NativeReplayCapture capture;
+  g_native_replay_capture = &capture;
+  iree_hal_vulkan_device_syms_t syms = MakeNativeReplaySyms();
+  iree_hal_vulkan_debug_utils_t debug_utils = {};
+  iree_hal_vulkan_builtins_t builtins = {};
+  iree_hal_buffer_binding_table_t binding_table =
+      iree_hal_buffer_binding_table_empty();
+  VkDevice logical_device =
+      reinterpret_cast<VkDevice>(static_cast<uintptr_t>(0x1234));
+  VkCommandBuffer native_command_buffer =
+      reinterpret_cast<VkCommandBuffer>(static_cast<uintptr_t>(0x5678));
+
+  IREE_ASSERT_OK(iree_hal_vulkan_command_buffer_record_native(
+      command_buffer.get(), &syms, logical_device, &debug_utils, &builtins,
+      native_command_buffer, /*usage_flags=*/0, VK_NULL_HANDLE, binding_table,
+      /*bda_publication=*/nullptr, /*bda_binding_cache=*/nullptr,
+      /*profile_marker=*/nullptr, iree_allocator_system()));
+
+  EXPECT_EQ(capture.pipeline_barrier_count, 1);
+  EXPECT_NE(capture.memory_barrier.srcStageMask &
+                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+            0u);
+  EXPECT_NE(capture.memory_barrier.srcStageMask & VK_PIPELINE_STAGE_2_HOST_BIT,
+            0u);
+  EXPECT_NE(capture.memory_barrier.srcAccessMask & VK_ACCESS_2_HOST_WRITE_BIT,
+            0u);
+  EXPECT_NE(capture.memory_barrier.dstStageMask &
+                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+            0u);
+  EXPECT_NE(capture.memory_barrier.dstStageMask & VK_PIPELINE_STAGE_2_HOST_BIT,
+            0u);
+  EXPECT_NE(capture.memory_barrier.dstAccessMask & VK_ACCESS_2_HOST_READ_BIT,
+            0u);
   g_native_replay_capture = nullptr;
 }
 

@@ -6,6 +6,7 @@
 
 #include "iree/hal/local/inline_command_buffer.h"
 
+#include <inttypes.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -300,7 +301,18 @@ static iree_status_t iree_hal_inline_command_buffer_execution_barrier(
     const iree_hal_memory_barrier_t* memory_barriers,
     iree_host_size_t buffer_barrier_count,
     const iree_hal_buffer_barrier_t* buffer_barriers) {
-  // No-op; we execute synchronously.
+  const iree_hal_execution_barrier_flags_t supported_flags =
+      IREE_HAL_EXECUTION_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE |
+      IREE_HAL_EXECUTION_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE;
+  if (IREE_UNLIKELY(flags & ~supported_flags)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "unsupported inline execution barrier flags: 0x%016" PRIx64,
+        flags & ~supported_flags);
+  }
+
+  // No-op; local-inline executes synchronously in the coherent host memory
+  // domain and therefore already provides system-scope visibility.
   return iree_ok_status();
 }
 

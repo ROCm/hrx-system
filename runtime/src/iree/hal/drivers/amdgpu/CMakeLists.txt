@@ -209,6 +209,8 @@ iree_cc_library(
     "aql_program_validation.h"
     "asan_state.c"
     "asan_state.h"
+    "barrier.c"
+    "barrier.h"
     "driver.c"
     "driver.h"
     "executable.c"
@@ -366,6 +368,7 @@ iree_cc_library(
     "aql_program_builder.h"
     "aql_program_validation.h"
     "asan_state.h"
+    "barrier.h"
     "buffer.h"
     "driver.h"
     "executable.h"
@@ -616,6 +619,27 @@ iree_cc_test(
     iree::base::internal::arena
     iree::hal
     iree::hal::drivers::amdgpu::abi
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    barrier_test
+  SRCS
+    "barrier_test.cc"
+  DEPS
+    ::amdgpu
+    ::headers
+    iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
