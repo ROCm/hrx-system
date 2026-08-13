@@ -219,6 +219,26 @@ def _set_target_capabilities(
     report["target_capability_rows"] = {"count": len(rows), "rows": rows}
 
 
+def _set_move_causes(
+    report: dict[str, object],
+    causes: tuple[tuple[str, int, int], ...],
+) -> None:
+    report["mode"] = "details"
+    report["entries"]["rows"][0]["move_causes"] = {
+        "kind_count": len(causes),
+        "packet_count": sum(packet_count for _, packet_count, _ in causes),
+        "unit_count": sum(unit_count for _, _, unit_count in causes),
+        "causes": [
+            {
+                "cause": cause,
+                "packet_count": packet_count,
+                "unit_count": unit_count,
+            }
+            for cause, packet_count, unit_count in causes
+        ],
+    }
+
+
 def test_parses_direct_and_benchmark_envelope_reports() -> None:
     report = _compile_report()
     direct = parse_compile_report(report, source="direct.json")
@@ -591,6 +611,106 @@ def test_show_separates_facts_analysis_and_unavailable_evidence() -> None:
     assert "WMMA instructions: 8" in text
     assert "target-planned wait actions: 10" in text
     assert "partial waits: unavailable" in text
+
+
+def test_show_and_diff_preserve_move_cause_breakdown() -> None:
+    baseline_report = _compile_report()
+    _set_move_causes(
+        baseline_report,
+        (
+            ("constant_materialization", 16, 16),
+            ("operand_bank_materialization", 10, 10),
+        ),
+    )
+    baseline = parse_compile_report(baseline_report, source="baseline.json")
+    candidate_report = _compile_report()
+    _set_move_causes(
+        candidate_report,
+        (
+            ("constant_materialization", 19, 19),
+            ("low_slice", 2, 2),
+            ("operand_bank_materialization", 10, 10),
+        ),
+    )
+    candidate = parse_compile_report(candidate_report, source="candidate.json")
+
+    show = build_compile_report_show(baseline)
+    assert show["entries"][0]["move_causes"] == {
+        "kind_count": 2,
+        "packet_count": 26,
+        "unit_count": 26,
+        "causes": [
+            {
+                "cause": "constant_materialization",
+                "packet_count": 16,
+                "unit_count": 16,
+            },
+            {
+                "cause": "operand_bank_materialization",
+                "packet_count": 10,
+                "unit_count": 10,
+            },
+        ],
+    }
+    show_text = format_compile_report_show_text(show)
+    assert "Move causes (compiler analysis)" in show_text
+    assert "operand bank materialization: 10 packets, 10 units" in show_text
+
+    diff = build_compile_report_diff(baseline, candidate)
+    assert diff["changed_entry_count"] == 1
+    assert diff["unchanged_entry_count"] == 0
+    move_diff = diff["entries"][0]["move_causes"]
+    assert move_diff["changed_cause_count"] == 2
+    assert move_diff["unchanged_cause_count"] == 1
+    assert move_diff["causes"][0]["cause"] == "constant_materialization"
+    assert move_diff["causes"][0]["packet_count"]["delta"] == 3
+    assert move_diff["causes"][1] == {
+        "cause": "low_slice",
+        "status": "added",
+        "candidate": {
+            "cause": "low_slice",
+            "packet_count": 2,
+            "unit_count": 2,
+        },
+    }
+    assert move_diff["causes"][2]["status"] == "unchanged"
+    diff_text = format_compile_report_diff_text(diff)
+    assert "low slice: added 2 packets, 2 units" in diff_text
+    assert (
+        "operand bank materialization: unchanged at 10 packets, unchanged at 10 units"
+    ) in diff_text
+
+
+def test_rejects_inconsistent_detailed_move_cause_totals() -> None:
+    report = _compile_report()
+    _set_move_causes(report, (("constant_materialization", 16, 16),))
+    report["entries"]["rows"][0]["move_causes"]["packet_count"] = 17
+    document = parse_compile_report(report, source="report.json")
+
+    with pytest.raises(CompileReportError, match="detailed causes total 16"):
+        build_compile_report_show(document)
+
+
+def test_summary_move_causes_preserve_aggregate_without_false_diff() -> None:
+    report = _compile_report()
+    report["entries"]["rows"][0]["move_causes"] = {
+        "kind_count": 2,
+        "packet_count": 26,
+        "unit_count": 26,
+    }
+    baseline = parse_compile_report(deepcopy(report), source="baseline.json")
+    candidate = parse_compile_report(report, source="candidate.json")
+
+    show = build_compile_report_show(baseline)
+    assert show["entries"][0]["move_causes"] == {
+        "kind_count": 2,
+        "packet_count": 26,
+        "unit_count": 26,
+    }
+    assert "cause breakdown: unavailable" in format_compile_report_show_text(show)
+    diff = build_compile_report_diff(baseline, candidate)
+    assert diff["entries"] == []
+    assert diff["unchanged_entry_count"] == 1
 
 
 def test_diff_preserves_missing_evidence_and_numeric_deltas() -> None:

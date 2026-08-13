@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Target-neutral views and strict diffs for Loom compile reports."""
+"""Target-neutral views and identity-aware diffs for Loom compile reports."""
 
 from __future__ import annotations
 
@@ -31,6 +31,13 @@ from loom.reporting.compile_report_bank_service import (
 from loom.reporting.compile_report_capabilities import (
     append_target_capability_diff_text,
     build_target_capability_diff,
+)
+from loom.reporting.compile_report_move_causes import (
+    append_move_cause_diff_text,
+    append_move_cause_show_text,
+    build_move_cause_diff,
+    build_move_cause_show,
+    move_cause_diff_has_changes,
 )
 
 SHOW_KIND = "loom.compile_report.show"
@@ -396,6 +403,7 @@ def build_compile_report_show(
                 entry,
                 compile_report_entry_identity(entry),
                 document.report.get("workload"),
+                f"{document.source}.entries.rows[{entry['index']}]",
             )
             for entry in document.entries
         ],
@@ -425,6 +433,12 @@ def build_compile_report_diff(
     entries = []
     unchanged_entry_count = 0
     for pair in match.pairs:
+        baseline_entry_source = (
+            f"{baseline.source}.entries.rows[{pair.baseline['index']}]"
+        )
+        candidate_entry_source = (
+            f"{candidate.source}.entries.rows[{pair.candidate['index']}]"
+        )
         artifact_facts = _diff_metrics(
             pair.baseline,
             pair.candidate,
@@ -435,8 +449,16 @@ def build_compile_report_diff(
             pair.candidate,
             EvidenceClass.COMPILER_ANALYSIS,
         )
-        if not _diff_group_has_changes(artifact_facts) and not _diff_group_has_changes(
-            compiler_analysis
+        move_causes = build_move_cause_diff(
+            pair.baseline,
+            pair.candidate,
+            baseline_entry_source,
+            candidate_entry_source,
+        )
+        if (
+            not _diff_group_has_changes(artifact_facts)
+            and not _diff_group_has_changes(compiler_analysis)
+            and not move_cause_diff_has_changes(move_causes)
         ):
             unchanged_entry_count += 1
             continue
@@ -444,6 +466,8 @@ def build_compile_report_diff(
             "artifact_facts": artifact_facts,
             "compiler_analysis": compiler_analysis,
         }
+        if move_causes is not None:
+            entry_view["move_causes"] = move_causes
         if force:
             entry_view["identities"] = {
                 "baseline": pair.baseline_identity.to_json_object(),
@@ -543,6 +567,9 @@ def format_compile_report_show_text(view: dict[str, object]) -> str:
             _expect_dict(entry["compiler_analysis"]),
             EvidenceClass.COMPILER_ANALYSIS,
         )
+        move_causes = entry.get("move_causes")
+        if isinstance(move_causes, dict):
+            append_move_cause_show_text(lines, move_causes)
     bank_service = view.get("bank_service")
     if isinstance(bank_service, dict):
         append_bank_service_show_text(lines, bank_service)
@@ -550,7 +577,7 @@ def format_compile_report_show_text(view: dict[str, object]) -> str:
 
 
 def format_compile_report_diff_text(view: dict[str, object]) -> str:
-    """Formats a strict diff for humans and agent prompts."""
+    """Formats a diff for humans and agent prompts."""
     lines = [
         "Loom compile report diff",
         f"  baseline: {view['baseline_source']}",
@@ -651,6 +678,9 @@ def format_compile_report_diff_text(view: dict[str, object]) -> str:
             _expect_dict(entry["compiler_analysis"]),
             EvidenceClass.COMPILER_ANALYSIS,
         )
+        move_causes = entry.get("move_causes")
+        if isinstance(move_causes, dict):
+            append_move_cause_diff_text(lines, move_causes)
     bank_service = view.get("bank_service")
     if isinstance(bank_service, dict):
         append_bank_service_diff_text(lines, bank_service)
@@ -664,6 +694,7 @@ def _show_entry_json(
     entry: dict[str, object],
     identity: CompileReportEntryIdentity,
     report_workload: object,
+    source: str,
 ) -> dict[str, object]:
     view = {
         "identity": identity.to_json_object(),
@@ -672,6 +703,9 @@ def _show_entry_json(
     }
     if entry.get("workload") is not None and entry.get("workload") != report_workload:
         view["workload"] = entry["workload"]
+    move_causes = build_move_cause_show(entry, source)
+    if move_causes is not None:
+        view["move_causes"] = move_causes
     return view
 
 
