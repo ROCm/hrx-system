@@ -893,6 +893,104 @@ TEST_F(ModuleTest, BlockRemoveArgRejectsPredicateAttributeUses) {
 }
 
 //===----------------------------------------------------------------------===//
+// Source comments
+//===----------------------------------------------------------------------===//
+
+TEST_F(ModuleTest, AttachedCommentsUseOneModuleOwnedStorageSpan) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_block_t* block = loom_module_block(module);
+  loom_builder_t builder;
+  loom_builder_initialize(module, &module->arena, block, &builder);
+  loom_op_t* op = NULL;
+  IREE_ASSERT_OK(loom_test_constant_build(
+      &builder, loom_attr_i64(1), loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+      LOOM_LOCATION_UNKNOWN, &op));
+
+  char op_head[] = " op";
+  char op_tail[] = " operation";
+  iree_string_view_t op_comments[] = {
+      iree_make_string_view(op_head, sizeof(op_head) - 1),
+      iree_string_view_empty(),
+      iree_make_string_view(op_tail, sizeof(op_tail) - 1),
+  };
+  IREE_ASSERT_OK(loom_module_attach_op_comments(module, op, op_comments,
+                                                IREE_ARRAYSIZE(op_comments)));
+
+  char block_head[] = " block";
+  char block_tail[] = " tail";
+  iree_string_view_t block_comments[] = {
+      iree_make_string_view(block_head, sizeof(block_head) - 1),
+      iree_string_view_empty(),
+      iree_make_string_view(block_tail, sizeof(block_tail) - 1),
+  };
+  const iree_host_size_t used_size_before = module->arena.used_allocation_size;
+  IREE_ASSERT_OK(loom_module_attach_block_comments(
+      module, block, block_comments, IREE_ARRAYSIZE(block_comments)));
+  const iree_host_size_t block_storage_size =
+      sizeof(block_comments) + sizeof(block_head) - 1 + sizeof(block_tail) - 1;
+  EXPECT_EQ(module->arena.used_allocation_size - used_size_before,
+            iree_host_align(block_storage_size, iree_max_align_t));
+
+  memset(op_head, '#', sizeof(op_head) - 1);
+  memset(op_tail, '#', sizeof(op_tail) - 1);
+  memset(op_comments, 0, sizeof(op_comments));
+  memset(block_head, '#', sizeof(block_head) - 1);
+  memset(block_tail, '#', sizeof(block_tail) - 1);
+  memset(block_comments, 0, sizeof(block_comments));
+
+  iree_host_size_t comment_count = 0;
+  const iree_string_view_t* stored_comments =
+      loom_module_op_comments(module, op, &comment_count);
+  ASSERT_EQ(comment_count, 3u);
+  ASSERT_NE(stored_comments, nullptr);
+  EXPECT_EQ(stored_comments[0].data,
+            reinterpret_cast<const char*>(stored_comments + comment_count));
+  EXPECT_TRUE(iree_string_view_equal(stored_comments[0], IREE_SV(" op")));
+  EXPECT_EQ(stored_comments[1].data, nullptr);
+  EXPECT_EQ(stored_comments[1].size, 0u);
+  EXPECT_EQ(stored_comments[2].data,
+            stored_comments[0].data + stored_comments[0].size);
+  EXPECT_TRUE(
+      iree_string_view_equal(stored_comments[2], IREE_SV(" operation")));
+
+  stored_comments = loom_module_block_comments(module, block, &comment_count);
+  ASSERT_EQ(comment_count, 3u);
+  ASSERT_NE(stored_comments, nullptr);
+  EXPECT_EQ(stored_comments[0].data,
+            reinterpret_cast<const char*>(stored_comments + comment_count));
+  EXPECT_TRUE(iree_string_view_equal(stored_comments[0], IREE_SV(" block")));
+  EXPECT_EQ(stored_comments[1].data, nullptr);
+  EXPECT_EQ(stored_comments[1].size, 0u);
+  EXPECT_EQ(stored_comments[2].data,
+            stored_comments[0].data + stored_comments[0].size);
+  EXPECT_TRUE(iree_string_view_equal(stored_comments[2], IREE_SV(" tail")));
+
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, AttachedCommentsRejectStorageSizeOverflow) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  const iree_string_view_t comments[] = {
+      iree_make_string_view("x", IREE_HOST_SIZE_MAX),
+  };
+  const iree_host_size_t used_size_before = module->arena.used_allocation_size;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_module_attach_block_comments(module, loom_module_block(module),
+                                        comments, IREE_ARRAYSIZE(comments)));
+  EXPECT_EQ(module->comments.count, 0u);
+  EXPECT_EQ(module->arena.used_allocation_size, used_size_before);
+
+  loom_module_free(module);
+}
+
+//===----------------------------------------------------------------------===//
 // Value definition
 //===----------------------------------------------------------------------===//
 

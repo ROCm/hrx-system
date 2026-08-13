@@ -1667,30 +1667,47 @@ static const loom_comment_attachment_t* loom_module_find_comment_attachment(
   return NULL;
 }
 
-static iree_status_t loom_module_copy_comments(
+// Stores one attachment's views and payload bytes in one module-arena
+// allocation.
+static iree_status_t loom_module_store_comments(
     loom_module_t* module, const iree_string_view_t* comments,
     iree_host_size_t comment_count, iree_string_view_t** out_comments) {
   *out_comments = NULL;
-  if (comment_count == 0) return iree_ok_status();
   if (!comments) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "comment_count > 0 requires non-NULL comments");
   }
 
-  iree_string_view_t* copied_comments = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(&module->arena, comment_count,
-                                                 sizeof(*copied_comments),
-                                                 (void**)&copied_comments));
+  iree_host_size_t comment_payload_size = 0;
   for (iree_host_size_t i = 0; i < comment_count; ++i) {
-    char* copied_data = NULL;
-    if (comments[i].size > 0) {
-      IREE_RETURN_IF_ERROR(iree_arena_allocate(&module->arena, comments[i].size,
-                                               (void**)&copied_data));
-      memcpy(copied_data, comments[i].data, comments[i].size);
+    if (!iree_host_size_checked_add(comment_payload_size, comments[i].size,
+                                    &comment_payload_size)) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "comment payload storage size overflow");
     }
-    copied_comments[i] = iree_make_string_view(copied_data, comments[i].size);
   }
-  *out_comments = copied_comments;
+  iree_host_size_t storage_size = 0;
+  if (!iree_host_size_checked_mul_add(comment_payload_size, comment_count,
+                                      sizeof(*comments), &storage_size)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "comment storage size overflow");
+  }
+
+  iree_string_view_t* stored_comments = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(&module->arena, storage_size,
+                                           (void**)&stored_comments));
+  char* stored_payload = (char*)(stored_comments + comment_count);
+  for (iree_host_size_t i = 0; i < comment_count; ++i) {
+    if (comments[i].size > 0) {
+      memcpy(stored_payload, comments[i].data, comments[i].size);
+      stored_comments[i] =
+          iree_make_string_view(stored_payload, comments[i].size);
+      stored_payload += comments[i].size;
+    } else {
+      stored_comments[i] = iree_string_view_empty();
+    }
+  }
+  *out_comments = stored_comments;
   return iree_ok_status();
 }
 
@@ -1698,7 +1715,9 @@ static iree_status_t loom_module_attach_comments(
     loom_module_t* module, loom_comment_owner_kind_t owner_kind,
     const void* owner, const iree_string_view_t* comments,
     iree_host_size_t comment_count) {
-  if (comment_count == 0) return iree_ok_status();
+  if (comment_count == 0) {
+    return iree_ok_status();
+  }
   if (!owner) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "comment attachment requires non-NULL owner");
@@ -1713,9 +1732,9 @@ static iree_status_t loom_module_attach_comments(
                             "comments are already attached to owner");
   }
 
-  iree_string_view_t* copied_comments = NULL;
-  IREE_RETURN_IF_ERROR(loom_module_copy_comments(
-      module, comments, comment_count, &copied_comments));
+  iree_string_view_t* stored_comments = NULL;
+  IREE_RETURN_IF_ERROR(loom_module_store_comments(
+      module, comments, comment_count, &stored_comments));
   IREE_RETURN_IF_ERROR(
       loom_comment_table_ensure_capacity(&module->arena, &module->comments));
   module->comments.entries[module->comments.count++] =
@@ -1723,7 +1742,7 @@ static iree_status_t loom_module_attach_comments(
           .owner = owner,
           .owner_kind = owner_kind,
           .comment_count = (uint16_t)comment_count,
-          .comments = copied_comments,
+          .comments = stored_comments,
       };
   return iree_ok_status();
 }
