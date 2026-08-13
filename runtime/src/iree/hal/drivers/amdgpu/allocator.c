@@ -100,6 +100,41 @@ typedef struct iree_hal_amdgpu_allocator_placement_t {
   iree_hal_memory_type_t memory_type;
 } iree_hal_amdgpu_allocator_placement_t;
 
+// Adds the complementary locality fact to visible memory on a unified-memory
+// device. Locality cannot be added to memory that the other agent cannot
+// access.
+static iree_hal_memory_type_t
+iree_hal_amdgpu_allocator_expand_unified_memory_type(
+    iree_hal_memory_type_t memory_type, bool unified_memory) {
+  if (!unified_memory) return memory_type;
+  if (iree_all_bits_set(memory_type, IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                                         IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE)) {
+    memory_type |= IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  }
+  if (iree_all_bits_set(memory_type, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
+                                         IREE_HAL_MEMORY_TYPE_HOST_VISIBLE)) {
+    memory_type |= IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
+  }
+  return memory_type;
+}
+
+// Returns true when every physical device shares its local memory with the
+// host. Affinity-free heap declarations must be valid for every queue.
+static bool iree_hal_amdgpu_allocator_has_uniform_unified_memory(
+    const iree_hal_amdgpu_allocator_t* allocator) {
+  if (allocator->logical_device->physical_device_count == 0) return false;
+  for (iree_host_size_t i = 0;
+       i < allocator->logical_device->physical_device_count; ++i) {
+    const iree_hal_amdgpu_physical_device_t* physical_device =
+        allocator->logical_device->physical_devices[i];
+    if (!physical_device ||
+        !physical_device->memory_system.device_local.unified_memory) {
+      return false;
+    }
+  }
+  return true;
+}
+
 typedef struct iree_hal_amdgpu_imported_host_release_data_t {
   // Unowned libhsa handle used to unlock the imported host allocation.
   const iree_hal_amdgpu_libhsa_t* libhsa;
@@ -447,15 +482,12 @@ static iree_status_t iree_hal_amdgpu_allocator_query_device_pointer_range(
     actual_memory_type |=
         IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_HOST_COHERENT;
   }
+  actual_memory_type = iree_hal_amdgpu_allocator_expand_unified_memory_type(
+      actual_memory_type,
+      owner_device && owner_device->memory_system.device_local.unified_memory);
 
   const iree_hal_memory_type_t required_memory_type =
       requested_memory_type & ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
-  if (IREE_UNLIKELY(iree_any_bit_set(required_memory_type,
-                                     IREE_HAL_MEMORY_TYPE_HOST_LOCAL))) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "device allocation import cannot satisfy HOST_LOCAL memory");
-  }
   if (IREE_UNLIKELY(
           !iree_all_bits_set(actual_memory_type, required_memory_type))) {
     return iree_make_status(
@@ -522,6 +554,9 @@ static bool iree_hal_amdgpu_allocator_resolve_placement(
       iree_any_bit_set(required_type, IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE);
   const iree_hal_amdgpu_physical_device_t* physical_device =
       allocator->logical_device->physical_devices[device_ordinal];
+  const bool unified_memory =
+      physical_device &&
+      physical_device->memory_system.device_local.unified_memory;
   const bool device_fine_direct_host_access =
       allocator->memory_pools.device_fine[device_ordinal].memory_pool.handle &&
       physical_device && physical_device->memory_system.svm.direct_host_access;
@@ -542,42 +577,50 @@ static bool iree_hal_amdgpu_allocator_resolve_placement(
   iree_hal_buffer_usage_t supported_usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
                                             IREE_HAL_BUFFER_USAGE_DISPATCH |
                                             sharing_usage;
+  const iree_hal_memory_type_t device_fine_memory_type =
+      IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+      IREE_HAL_MEMORY_TYPE_HOST_COHERENT;
+  const iree_hal_memory_type_t host_fine_memory_type =
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
+      IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
   if (requires_device_uncached) {
     if (!requires_device_local || requires_host_access) return false;
     memory_pool = &allocator->memory_pools.device_uncached[device_ordinal];
     memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
                   IREE_HAL_MEMORY_TYPE_DEVICE_UNCACHED;
   } else if (requires_host_local) {
-    if (requires_device_local) return false;
-    memory_pool = &allocator->memory_pools.host_fine[device_ordinal];
-    memory_type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-                  IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
-                  IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
-                  IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+    if (requires_device_local && !unified_memory) return false;
+    if (requires_device_local && prefers_device_local &&
+        (device_fine_direct_host_access || device_fine_vmm_host_access)) {
+      memory_pool = &allocator->memory_pools.device_fine[device_ordinal];
+      memory_type = device_fine_memory_type;
+    } else {
+      memory_pool = &allocator->memory_pools.host_fine[device_ordinal];
+      memory_type = host_fine_memory_type;
+    }
   } else if (requires_host_access && requires_device_local) {
-    if (!device_fine_direct_host_access && !device_fine_vmm_host_access) {
+    if (device_fine_direct_host_access || device_fine_vmm_host_access) {
+      memory_pool = &allocator->memory_pools.device_fine[device_ordinal];
+      memory_type = device_fine_memory_type;
+    } else if (unified_memory) {
+      memory_pool = &allocator->memory_pools.host_fine[device_ordinal];
+      memory_type = host_fine_memory_type;
+    } else {
       return false;
     }
-    memory_pool = &allocator->memory_pools.device_fine[device_ordinal];
-    memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
-                  IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
-                  IREE_HAL_MEMORY_TYPE_HOST_COHERENT;
   } else if (requires_host_access && prefers_device_local &&
              (device_fine_direct_host_access || device_fine_vmm_host_access)) {
     memory_pool = &allocator->memory_pools.device_fine[device_ordinal];
-    memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
-                  IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
-                  IREE_HAL_MEMORY_TYPE_HOST_COHERENT;
+    memory_type = device_fine_memory_type;
   } else if (requires_host_access) {
     memory_pool = &allocator->memory_pools.host_fine[device_ordinal];
-    memory_type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-                  IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
-                  IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
-                  IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+    memory_type = host_fine_memory_type;
   } else {
     memory_pool = &allocator->memory_pools.device_coarse[device_ordinal];
     memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   }
+  memory_type = iree_hal_amdgpu_allocator_expand_unified_memory_type(
+      memory_type, unified_memory);
   if (!memory_pool->memory_pool.handle) return false;
   if (!iree_all_bits_set(memory_type, required_type)) return false;
 
@@ -655,6 +698,16 @@ static iree_status_t iree_hal_amdgpu_allocator_resolve_virtual_memory_placement(
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "AMDGPU virtual-memory parameters cannot be placed on this device");
+  }
+  const iree_hal_amdgpu_allocator_memory_pool_t* host_fine_pool =
+      &allocator->memory_pools
+           .host_fine[memory_placement.physical_device_ordinal];
+  if (memory_placement.memory_pool == host_fine_pool) {
+    // ROCr VMM mappings require a GPU-owned pool even when host-fine memory is
+    // also device-local on a unified-memory device.
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU virtual-memory physical backing must use a GPU-owned pool");
   }
   if (!iree_all_bits_set(memory_placement.memory_type,
                          IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL)) {
@@ -896,6 +949,8 @@ static iree_status_t iree_hal_amdgpu_allocator_query_memory_heaps(
       IREE_HAL_BUFFER_USAGE_MAPPING_OPTIONAL |
       IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_RANDOM |
       IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_SEQUENTIAL_WRITE;
+  const bool unified_memory =
+      iree_hal_amdgpu_allocator_has_uniform_unified_memory(allocator);
 
   iree_hal_allocator_memory_heap_t available_heaps[4] = {0};
   iree_host_size_t heap_count = 0;
@@ -910,9 +965,11 @@ static iree_status_t iree_hal_amdgpu_allocator_query_memory_heaps(
   }
   if (device_fine_available) {
     available_heaps[heap_count++] = (iree_hal_allocator_memory_heap_t){
-        .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
+        .type = iree_hal_amdgpu_allocator_expand_unified_memory_type(
+            IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
                 IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
                 IREE_HAL_MEMORY_TYPE_HOST_COHERENT,
+            unified_memory),
         .allowed_usage = mappable_usage,
         .max_allocation_size = device_fine_max_allocation_size,
         .min_alignment = device_fine_min_alignment,
@@ -930,10 +987,11 @@ static iree_status_t iree_hal_amdgpu_allocator_query_memory_heaps(
   }
   if (host_fine_available) {
     available_heaps[heap_count++] = (iree_hal_allocator_memory_heap_t){
-        .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-                IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+        .type = iree_hal_amdgpu_allocator_expand_unified_memory_type(
+            IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
                 IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
                 IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+            unified_memory),
         .allowed_usage = mappable_usage,
         .max_allocation_size = host_fine_max_allocation_size,
         .min_alignment = host_fine_min_alignment,
@@ -988,10 +1046,9 @@ iree_hal_amdgpu_allocator_query_buffer_compatibility(
       allocation_size_valid && allocation_alignment_valid;
   const bool host_allocation_import_compatible =
       allocation_size_valid && allocation_alignment_valid &&
-      iree_all_bits_set(params->type,
+      iree_all_bits_set(placement.memory_type,
                         IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-                            IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE) &&
-      !iree_all_bits_set(params->type, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL);
+                            IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE);
   const bool device_allocation_import_compatible =
       allocation_size_valid && allocation_alignment_valid &&
       iree_all_bits_set(placement.memory_type,
@@ -1026,7 +1083,10 @@ iree_hal_amdgpu_allocator_query_buffer_compatibility(
   }
   if (iree_all_bits_set(placement.memory_type,
                         IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
-                            IREE_HAL_MEMORY_TYPE_HOST_VISIBLE)) {
+                            IREE_HAL_MEMORY_TYPE_HOST_VISIBLE) &&
+      !allocator->logical_device
+           ->physical_devices[placement.physical_device_ordinal]
+           ->memory_system.device_local.unified_memory) {
     // Fine-grained GPU-local memory exists to support explicit coherent host
     // access, but dispatches should prefer coarse-grained device-local memory.
     // Generic generation helpers use this hint to stage host-produced data
@@ -1722,25 +1782,11 @@ static iree_status_t iree_hal_amdgpu_allocator_import_buffer(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "host allocation import requires a non-zero size");
   }
-  if (IREE_UNLIKELY(
-          iree_all_bits_set(params->type, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL))) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "unable to import host allocations as device-local memory");
-  }
-
   iree_hal_buffer_params_t compat_params = *params;
-  if (iree_any_bit_set(compat_params.type, IREE_HAL_MEMORY_TYPE_OPTIMAL)) {
-    compat_params.type &= ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
-    compat_params.type |=
-        IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
-  }
-  if (!iree_all_bits_set(compat_params.type,
-                         IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "host allocation import requires device-visible memory");
-  }
+  compat_params.type &= ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
+  compat_params.type |= IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                        IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
+                        IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
 
   iree_device_size_t allocation_size = external_buffer->size;
   iree_hal_buffer_compatibility_t compatibility =

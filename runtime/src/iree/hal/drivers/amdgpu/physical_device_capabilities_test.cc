@@ -200,6 +200,7 @@ class PhysicalDeviceCapabilitiesTest : public ::testing::Test {
     selection.svm.accessible_by_default = 0;
     selection.svm.xnack_enabled = 0;
     selection.svm.direct_host_access = 0;
+    selection.device_local.agent_is_apu = 0;
     selection.device_local.fine_memory_pool = MemoryPool(30);
     selection.device_local.coarse_cpu_visible_memory = nullptr;
     return selection;
@@ -869,6 +870,7 @@ TEST_F(PhysicalDeviceCapabilitiesTest, SvmDefaultAccessDoesNotImplyPeerFlags) {
   EXPECT_TRUE(capability.svm.accessible_by_default);
   EXPECT_TRUE(capability.svm.xnack_enabled);
   EXPECT_FALSE(capability.svm.direct_host_access);
+  EXPECT_FALSE(capability.device_local.unified_memory);
   EXPECT_TRUE(capability.device_local.fine_host_visible);
   EXPECT_FALSE(capability.device_local.coarse_cpu_visible);
 
@@ -896,11 +898,24 @@ TEST_F(PhysicalDeviceCapabilitiesTest,
   EXPECT_FALSE(capability.svm.accessible_by_default);
   EXPECT_FALSE(capability.svm.xnack_enabled);
   EXPECT_TRUE(capability.svm.direct_host_access);
+  EXPECT_FALSE(capability.device_local.unified_memory);
   EXPECT_TRUE(capability.device_local.fine_host_visible);
   EXPECT_TRUE(capability.device_local.coarse_cpu_visible);
 
   EXPECT_TRUE(iree_hal_amdgpu_memory_system_requires_svm_access_attributes(
       &capability));
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest, ApuPropertySelectsUnifiedMemory) {
+  iree_hal_amdgpu_memory_system_capabilities_selection_t selection =
+      MakeMemorySystemSelection();
+  selection.device_local.agent_is_apu = 1;
+
+  iree_hal_amdgpu_memory_system_capabilities_t capability;
+  iree_hal_amdgpu_select_memory_system_capabilities(&selection, &capability);
+
+  EXPECT_TRUE(capability.device_local.unified_memory);
+  EXPECT_FALSE(capability.svm.direct_host_access);
 }
 
 TEST_F(PhysicalDeviceCapabilitiesTest, SelectsPrepublishedKernargStorage) {

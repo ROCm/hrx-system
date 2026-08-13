@@ -505,6 +505,20 @@ iree_hal_amdgpu_physical_device_query_svm_direct_host_access(
       out_direct_host_access);
 }
 
+static iree_status_t iree_hal_amdgpu_physical_device_query_agent_is_apu(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
+    bool* out_agent_is_apu) {
+  *out_agent_is_apu = false;
+  uint8_t memory_properties[8] = {0};
+  IREE_RETURN_IF_ERROR(iree_hsa_agent_get_info(
+      IREE_LIBHSA(libhsa), device_agent,
+      (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES,
+      memory_properties));
+  *out_agent_is_apu =
+      hsa_flag_isset64(memory_properties, HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU);
+  return iree_ok_status();
+}
+
 static iree_status_t
 iree_hal_amdgpu_physical_device_initialize_cpu_visible_device_coarse_memory(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
@@ -572,6 +586,10 @@ iree_hal_amdgpu_physical_device_initialize_memory_system_capabilities(
     const iree_hal_amdgpu_cpu_visible_device_coarse_memory_t*
         cpu_visible_device_coarse_memory,
     iree_hal_amdgpu_memory_system_capabilities_t* out_capabilities) {
+  bool agent_is_apu = false;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_physical_device_query_agent_is_apu(
+      libhsa, device_agent, &agent_is_apu));
+
   bool svm_direct_host_access = false;
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_physical_device_query_svm_direct_host_access(
@@ -587,6 +605,7 @@ iree_hal_amdgpu_physical_device_initialize_memory_system_capabilities(
           },
       .device_local =
           {
+              .agent_is_apu = agent_is_apu ? 1u : 0u,
               .fine_memory_pool = fine_block_memory_pool,
               .coarse_cpu_visible_memory = cpu_visible_device_coarse_memory,
           },

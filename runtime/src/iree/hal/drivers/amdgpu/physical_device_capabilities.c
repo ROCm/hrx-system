@@ -772,6 +772,8 @@ void iree_hal_amdgpu_select_memory_system_capabilities(
   out_capabilities->svm.xnack_enabled = selection->svm.xnack_enabled ? 1u : 0u;
   out_capabilities->svm.direct_host_access =
       selection->svm.direct_host_access ? 1u : 0u;
+  out_capabilities->device_local.unified_memory =
+      selection->device_local.agent_is_apu ? 1u : 0u;
   out_capabilities->device_local.fine_host_visible =
       selection->device_local.fine_memory_pool.handle ? 1u : 0u;
   out_capabilities->device_local.coarse_cpu_visible =

@@ -297,6 +297,8 @@ typedef struct iree_hal_amdgpu_memory_system_capabilities_t {
 
   // Device-local memory placement facts.
   struct {
+    // Host and device allocations share one local memory system.
+    uint32_t unified_memory : 1;
     // A host-coherent fine-grained device memory pool is available.
     uint32_t fine_host_visible : 1;
     // A CPU-visible coarse-grained device memory pool is usable by the driver.
@@ -320,6 +322,8 @@ typedef struct iree_hal_amdgpu_memory_system_capabilities_selection_t {
 
   // Device-local memory placement facts.
   struct {
+    // Whether HSA identifies the GPU agent as an integrated APU.
+    uint32_t agent_is_apu : 1;
     // Fine-grained global memory pool considered for host-visible device data.
     hsa_amd_memory_pool_t fine_memory_pool;
     // Selected CPU-visible coarse-grained device-memory capability.
