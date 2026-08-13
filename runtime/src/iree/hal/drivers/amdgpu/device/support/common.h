@@ -162,6 +162,9 @@ typedef /*_Atomic*/ uint64_t iree_amdgpu_scoped_atomic_uint64_t;
   __scoped_atomic_exchange_n((object), (desired), (memory_order),         \
                              (memory_scope))
 
+#define iree_amdgpu_scoped_atomic_thread_fence(memory_order, memory_scope) \
+  __scoped_atomic_thread_fence((memory_order), (memory_scope))
+
 #define iree_amdgpu_scoped_atomic_compare_exchange_weak(                    \
     object, expected, desired, memory_order_success, memory_order_fail,     \
     memory_scope)                                                           \
@@ -223,6 +226,9 @@ typedef iree_atomic_uint64_t iree_amdgpu_scoped_atomic_uint64_t;
 #define iree_amdgpu_scoped_atomic_exchange(object, desired, memory_order, \
                                            memory_scope)                  \
   iree_atomic_exchange((object), (desired), (memory_order))
+
+#define iree_amdgpu_scoped_atomic_thread_fence(memory_order, memory_scope) \
+  iree_atomic_thread_fence((memory_order))
 
 #define iree_amdgpu_scoped_atomic_compare_exchange_weak(                \
     object, expected, desired, memory_order_success, memory_order_fail, \

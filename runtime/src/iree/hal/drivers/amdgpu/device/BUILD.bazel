@@ -16,6 +16,7 @@ package(
 )
 
 DEVICE_HDRS = [
+    "atomic.h",
     "blit.h",
     "dispatch.h",
     "kernel_tables.h",
@@ -72,6 +73,18 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "atomic",
+    srcs = [
+        "atomic.c",
+    ],
+    deps = [
+        ":dispatch",
+        ":headers",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "blit",
     srcs = [
         "blit.c",
@@ -110,6 +123,35 @@ iree_runtime_cc_library(
     deps = [
         ":dispatch",
         ":headers",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "atomic_live_test",
+    srcs = ["atomic_live_test.cc"],
+    deps = [
+        ":atomic",
+        ":headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:device_library",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:libhsa",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:packet",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:queue_primitives",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:topology",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:vmem",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "atomic_test",
+    srcs = ["atomic_test.cc"],
+    deps = [
+        ":atomic",
+        ":headers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

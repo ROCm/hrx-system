@@ -12,6 +12,7 @@ iree_add_all_subdirs()
 add_custom_command(OUTPUT bitcode_srcs.stamp
     COMMAND ${CMAKE_COMMAND} -E touch bitcode_srcs.stamp
   DEPENDS
+    "atomic.c"
     "blit.c"
     "dispatch.c"
     "timestamp.c"
@@ -29,6 +30,7 @@ iree_register_generated_compile_input(bitcode_srcs
 add_custom_command(OUTPUT bitcode_hdrs.stamp
     COMMAND ${CMAKE_COMMAND} -E touch bitcode_hdrs.stamp
   DEPENDS
+    "atomic.h"
     "blit.h"
     "dispatch.h"
     "kernel_tables.h"
@@ -73,6 +75,7 @@ iree_cc_library(
   NAME
     headers
   HDRS
+    "atomic.h"
     "blit.h"
     "dispatch.h"
     "kernel_tables.h"
@@ -91,6 +94,20 @@ iree_cc_library(
     iree::base::internal
     iree::base::threading::thread
     iree::hal::drivers::amdgpu::abi
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
+    atomic
+  SRCS
+    "atomic.c"
+  DEPS
+    ::dispatch
+    ::headers
+    iree::hal
   PUBLIC
 )
 endif()
@@ -142,6 +159,53 @@ iree_cc_library(
     ::dispatch
     ::headers
   PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    atomic_live_test
+  SRCS
+    "atomic_live_test.cc"
+  DEPS
+    ::atomic
+    ::headers
+    iree::base
+    iree::hal::drivers::amdgpu::util::device_library
+    iree::hal::drivers::amdgpu::util::libhsa
+    iree::hal::drivers::amdgpu::util::packet
+    iree::hal::drivers::amdgpu::util::queue_primitives
+    iree::hal::drivers::amdgpu::util::topology
+    iree::hal::drivers::amdgpu::util::vmem
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    atomic_test
+  SRCS
+    "atomic_test.cc"
+  DEPS
+    ::atomic
+    ::headers
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
 )
 endif()
 
