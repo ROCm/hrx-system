@@ -113,6 +113,34 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "plan_projection",
+    srcs = ["plan_projection.c"],
+    hdrs = ["plan_projection.h"],
+    deps = [
+        ":planner",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "plan_projection_test",
+    srcs = ["plan_projection_test.cc"],
+    deps = [
+        ":module_index",
+        ":plan_projection",
+        ":planner",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_test(
     name = "planner_test",
     srcs = ["planner_test.cc"],
@@ -140,6 +168,7 @@ loom_cc_benchmark(
     srcs = ["planner_benchmark.cc"],
     deps = [
         ":module_index",
+        ":plan_projection",
         ":planner",
         "//loom/src/loom/format/bytecode:writer",
         "//loom/src/loom/ir",

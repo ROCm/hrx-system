@@ -124,6 +124,38 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    plan_projection
+  HDRS
+    "plan_projection.h"
+  SRCS
+    "plan_projection.c"
+  DEPS
+    ::planner
+    iree::base
+    iree::base::internal::arena
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    plan_projection_test
+  SRCS
+    "plan_projection_test.cc"
+  DEPS
+    ::module_index
+    ::plan_projection
+    ::planner
+    iree::base
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ir
+    loom::ops::func
+)
+
 loom_cc_test(
   NAME
     planner_test
@@ -154,6 +186,7 @@ loom_cc_benchmark(
     "planner_benchmark.cc"
   DEPS
     ::module_index
+    ::plan_projection
     ::planner
     iree::base
     iree::base::internal::arena

@@ -19,6 +19,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/link/module_index.h"
+#include "loom/link/plan_projection.h"
 #include "loom/link/planner.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
@@ -97,6 +98,7 @@ class PlannerCatalogFixture {
 
   uint32_t symbol_count() const { return symbol_count_; }
   iree_host_size_t byte_count() const { return bytes_.size(); }
+  iree_arena_block_pool_t* block_pool() { return &block_pool_; }
 
  private:
   void BuildModule(loom_module_t* module) {
@@ -260,6 +262,58 @@ static void BM_Plan_SelectiveChain_Catalog(benchmark::State& state) {
                 symbol_count);
 }
 
+static void BenchmarkProjection(benchmark::State& state, uint32_t root_ordinal,
+                                iree_host_size_t expected_symbol_count) {
+  PlannerCatalogFixture fixture((uint32_t)state.range(0));
+  loom_link_module_index_t* index = fixture.BuildIndex();
+  const std::string root_name = fixture.SymbolName(root_ordinal);
+  const iree_string_view_t root =
+      iree_make_string_view(root_name.data(), root_name.size());
+  const loom_link_plan_options_t options = {
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/{/*.count=*/1, /*.values=*/&root},
+  };
+  loom_link_plan_t* plan = nullptr;
+  CheckStatus(
+      loom_link_plan_build(index, &options, iree_allocator_system(), &plan));
+  if (loom_link_plan_symbol_count(plan) != expected_symbol_count) {
+    std::abort();
+  }
+
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(fixture.block_pool(), &arena);
+  for (auto _ : state) {
+    loom_link_plan_module_projection_t projection;
+    CheckStatus(loom_link_plan_project_modules(plan, &arena, &projection));
+    if (projection.modules.count != 1 ||
+        projection.symbols.count != expected_symbol_count) {
+      std::abort();
+    }
+    benchmark::DoNotOptimize(projection.symbols.values);
+    state.PauseTiming();
+    iree_arena_reset(&arena);
+    state.ResumeTiming();
+  }
+  state.counters["projection_bytes"] = static_cast<double>(
+      sizeof(loom_link_plan_module_selection_t) +
+      expected_symbol_count * sizeof(loom_link_plan_module_symbol_t));
+  SetCounters(state, fixture, expected_symbol_count);
+  iree_arena_deinitialize(&arena);
+  loom_link_plan_free(plan);
+  loom_link_module_index_free(index);
+}
+
+static void BM_Project_SelectiveLeaf_Catalog(benchmark::State& state) {
+  const uint32_t symbol_count = (uint32_t)state.range(0);
+  BenchmarkProjection(state, /*root_ordinal=*/symbol_count - 1,
+                      /*expected_symbol_count=*/1);
+}
+
+static void BM_Project_SelectiveChain_Catalog(benchmark::State& state) {
+  const uint32_t symbol_count = (uint32_t)state.range(0);
+  BenchmarkProjection(state, /*root_ordinal=*/0, symbol_count);
+}
+
 static void BM_GlobalDuplicateEnumeration(benchmark::State& state) {
   const uint32_t provider_count = (uint32_t)state.range(0);
   PlannerCatalogFixture fixture(/*symbol_count=*/1);
@@ -295,6 +349,10 @@ BENCHMARK(BM_ModuleIndex_Catalog)->Apply(CatalogScales)->Complexity();
 BENCHMARK(BM_Plan_Archive_Catalog)->Apply(CatalogScales)->Complexity();
 BENCHMARK(BM_Plan_SelectiveLeaf_Catalog)->Apply(CatalogScales)->Complexity();
 BENCHMARK(BM_Plan_SelectiveChain_Catalog)->Apply(CatalogScales)->Complexity();
+BENCHMARK(BM_Project_SelectiveLeaf_Catalog)->Apply(CatalogScales)->Complexity();
+BENCHMARK(BM_Project_SelectiveChain_Catalog)
+    ->Apply(CatalogScales)
+    ->Complexity();
 BENCHMARK(BM_GlobalDuplicateEnumeration)->Apply(CatalogScales)->Complexity();
 
 }  // namespace
