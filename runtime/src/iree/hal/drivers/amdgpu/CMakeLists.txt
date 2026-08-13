@@ -290,6 +290,8 @@ iree_cc_library(
     "physical_device_capabilities.h"
     "pm4_command_buffer.c"
     "pm4_command_buffer.h"
+    "pm4_command_builder.c"
+    "pm4_command_builder.h"
     "profile_aqlprofile.c"
     "profile_aqlprofile.h"
     "profile_counters.c"
