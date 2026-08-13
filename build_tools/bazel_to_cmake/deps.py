@@ -108,6 +108,7 @@ class ModuleParser:
             "module": self._ignore,
             "multiple_version_override": self._ignore,
             "override_repo": self._ignore,
+            "register_toolchains": self._ignore,
             "single_version_override": self._ignore,
             "use_extension": lambda *_args, **_kwargs: DummyModuleExtension(),
             "use_repo": self._ignore,

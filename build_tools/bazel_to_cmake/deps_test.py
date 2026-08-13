@@ -28,6 +28,8 @@ def _write_module_files(root: Path, fragment: str) -> None:
             module(name = "sample")
 
             include("//build_tools/third_party:deps.MODULE.bazel")
+
+            register_toolchains("//build_tools:sample_toolchain")
             """
         ),
         encoding="utf-8",
