@@ -96,6 +96,12 @@ iree_cc_library(
     "execute.h"
   SRCS
     "execute.c"
+    "execute_object.c"
+    "execute_object.h"
+    "execute_operation.c"
+    "execute_operation.h"
+    "execute_state.c"
+    "execute_state.h"
   DEPS
     ::digest
     ::file_reader

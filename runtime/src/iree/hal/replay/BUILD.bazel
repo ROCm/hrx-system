@@ -79,7 +79,15 @@ iree_runtime_cc_library(
 
 iree_runtime_cc_library(
     name = "execute",
-    srcs = ["execute.c"],
+    srcs = [
+        "execute.c",
+        "execute_object.c",
+        "execute_object.h",
+        "execute_operation.c",
+        "execute_operation.h",
+        "execute_state.c",
+        "execute_state.h",
+    ],
     hdrs = ["execute.h"],
     deps = [
         ":digest",
