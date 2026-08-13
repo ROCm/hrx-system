@@ -368,7 +368,13 @@ static iree_status_t iree_profile_command_print_operation_text(
             operation->workgroup_size[1], operation->workgroup_size[2]);
   } else if (operation->type == IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_FILL ||
              operation->type ==
-                 IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_UPDATE) {
+                 IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_UPDATE ||
+             operation->type ==
+                 IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_WAIT ||
+             operation->type ==
+                 IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_STORE ||
+             operation->type ==
+                 IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_RMW) {
     fprintf(file, " target=%u target_offset=%" PRIu64 " length=%" PRIu64,
             operation->target_ordinal, operation->target_offset,
             operation->length);
