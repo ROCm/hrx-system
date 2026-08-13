@@ -179,6 +179,12 @@ typedef struct iree_hal_atomic_capabilities_t {
   iree_hal_atomic_wait_condition_capabilities_t wait_conditions;
 } iree_hal_atomic_capabilities_t;
 
+// Builds memory operation capabilities for lock-free host atomic widths.
+// Naturally aligned host memory supports both device and system scope.
+IREE_API_EXPORT iree_hal_atomic_operation_capabilities_t
+iree_hal_atomic_operation_capabilities_for_host(
+    iree_hal_atomic_operation_flags_t allowed_operations);
+
 // Returns the width in bytes or zero when |width| is not valid.
 static inline iree_device_size_t iree_hal_atomic_width_byte_count(
     iree_hal_atomic_width_t width) {

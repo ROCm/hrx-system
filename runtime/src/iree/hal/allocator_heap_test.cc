@@ -26,6 +26,17 @@ TEST(HeapAllocatorTest, ProvidesCoherentUnifiedMemory) {
                                        IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
                                        IREE_HAL_MEMORY_TYPE_HOST_CACHED |
                                        IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL));
+  const iree_hal_atomic_operation_capabilities_t expected_atomic_operations =
+      iree_hal_atomic_operation_capabilities_for_host(
+          IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+  EXPECT_EQ(heap.atomic_operations.device_scope_32,
+            expected_atomic_operations.device_scope_32);
+  EXPECT_EQ(heap.atomic_operations.device_scope_64,
+            expected_atomic_operations.device_scope_64);
+  EXPECT_EQ(heap.atomic_operations.system_scope_32,
+            expected_atomic_operations.system_scope_32);
+  EXPECT_EQ(heap.atomic_operations.system_scope_64,
+            expected_atomic_operations.system_scope_64);
 
   const iree_hal_buffer_params_t params = {
       /*.usage=*/IREE_HAL_BUFFER_USAGE_STORAGE,

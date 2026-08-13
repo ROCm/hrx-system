@@ -104,6 +104,7 @@ iree_cc_test(
     "atomic_test.cc"
   DEPS
     ::hal
+    iree::base::internal
     iree::testing::gtest
     iree::testing::gtest_main
 )

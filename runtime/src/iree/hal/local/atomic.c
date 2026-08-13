@@ -20,26 +20,11 @@ bool iree_hal_local_atomic_width_is_lock_free(iree_hal_atomic_width_t width) {
   }
 }
 
-iree_hal_atomic_operation_capabilities_t
-iree_hal_local_atomic_operation_capabilities(
-    iree_hal_atomic_operation_flags_t allowed_operations) {
-  iree_hal_atomic_operation_capabilities_t capabilities = {0};
-  if (iree_atomic_int32_is_lock_free()) {
-    capabilities.device_scope_32 = allowed_operations;
-    capabilities.system_scope_32 = allowed_operations;
-  }
-  if (iree_atomic_int64_is_lock_free()) {
-    capabilities.device_scope_64 = allowed_operations;
-    capabilities.system_scope_64 = allowed_operations;
-  }
-  return capabilities;
-}
-
 iree_hal_atomic_capabilities_t iree_hal_local_atomic_capabilities(
     iree_hal_atomic_operation_flags_t allowed_operations) {
   iree_hal_atomic_capabilities_t capabilities = {
       .operations =
-          iree_hal_local_atomic_operation_capabilities(allowed_operations),
+          iree_hal_atomic_operation_capabilities_for_host(allowed_operations),
   };
   if (iree_any_bit_set(allowed_operations,
                        IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT)) {

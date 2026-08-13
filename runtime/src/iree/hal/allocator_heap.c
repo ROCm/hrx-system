@@ -127,6 +127,8 @@ static iree_status_t iree_hal_heap_allocator_query_memory_heaps(
                        IREE_HAL_BUFFER_USAGE_MAPPING_OPTIONAL |
                        IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_RANDOM |
                        IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_SEQUENTIAL_WRITE,
+      .atomic_operations = iree_hal_atomic_operation_capabilities_for_host(
+          IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL),
       .max_allocation_size = ~(iree_device_size_t)0,
       .min_alignment = IREE_HAL_HEAP_BUFFER_ALIGNMENT,
   };

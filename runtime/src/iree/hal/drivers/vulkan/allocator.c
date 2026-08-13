@@ -11,6 +11,7 @@
 
 #include "iree/async/notification.h"
 #include "iree/base/threading/mutex.h"
+#include "iree/hal/drivers/vulkan/atomic.h"
 #include "iree/hal/drivers/vulkan/buffer.h"
 #include "iree/hal/drivers/vulkan/queue.h"
 #include "iree/hal/drivers/vulkan/slab_provider.h"
@@ -388,6 +389,18 @@ static iree_hal_buffer_usage_t iree_hal_vulkan_allowed_usage_from_memory_type(
   return allowed_usage;
 }
 
+static iree_hal_atomic_operation_capabilities_t
+iree_hal_vulkan_allocator_atomic_operations(
+    const iree_hal_vulkan_allocator_t* allocator,
+    iree_hal_memory_type_t memory_type, iree_hal_buffer_usage_t allowed_usage) {
+  if (!iree_all_bits_set(memory_type, IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE) ||
+      !iree_all_bits_set(allowed_usage, IREE_HAL_BUFFER_USAGE_STORAGE)) {
+    return (iree_hal_atomic_operation_capabilities_t){0};
+  }
+  return iree_hal_vulkan_atomic_capabilities(allocator->enabled_features)
+      .operations;
+}
+
 static iree_device_size_t iree_hal_vulkan_allocator_default_pool_alignment(
     const iree_hal_vulkan_allocator_t* allocator) {
   iree_device_size_t alignment =
@@ -560,6 +573,8 @@ static iree_status_t iree_hal_vulkan_allocator_create_pool_pair(
       .memory_property_flags = memory_property_flags,
       .memory_type = memory_type,
       .supported_usage = supported_usage,
+      .atomic_operations = iree_hal_vulkan_allocator_atomic_operations(
+          allocator, memory_type, supported_usage),
       .queue_affinity_mask = allocator->queue_affinity_mask,
       .min_alignment = allocator->default_pool_alignment,
       .non_coherent_atom_size =
@@ -797,10 +812,13 @@ static iree_status_t iree_hal_vulkan_allocator_query_memory_heaps(
     const iree_hal_memory_type_t hal_memory_type =
         iree_hal_vulkan_allocator_memory_type_from_properties(
             allocator, memory_type->propertyFlags);
+    const iree_hal_buffer_usage_t allowed_usage =
+        iree_hal_vulkan_allowed_usage_from_memory_type(hal_memory_type);
     heaps[i] = (iree_hal_allocator_memory_heap_t){
         .type = hal_memory_type,
-        .allowed_usage =
-            iree_hal_vulkan_allowed_usage_from_memory_type(hal_memory_type),
+        .allowed_usage = allowed_usage,
+        .atomic_operations = iree_hal_vulkan_allocator_atomic_operations(
+            allocator, hal_memory_type, allowed_usage),
         .max_allocation_size =
             iree_hal_vulkan_allocator_max_allocation_size_for_type(
                 allocator, memory_type_index),

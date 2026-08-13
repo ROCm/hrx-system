@@ -17,11 +17,6 @@ extern "C" {
 // Returns true when |width| is backed by lock-free machine atomics.
 bool iree_hal_local_atomic_width_is_lock_free(iree_hal_atomic_width_t width);
 
-// Builds memory operation capabilities for lock-free CPU atomic widths.
-iree_hal_atomic_operation_capabilities_t
-iree_hal_local_atomic_operation_capabilities(
-    iree_hal_atomic_operation_flags_t allowed_operations);
-
 // Builds queue operation and wait-predicate capabilities for lock-free CPU
 // atomic widths.
 iree_hal_atomic_capabilities_t iree_hal_local_atomic_capabilities(

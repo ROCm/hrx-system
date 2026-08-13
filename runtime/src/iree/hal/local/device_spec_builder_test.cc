@@ -6,7 +6,7 @@
 
 #include "iree/hal/local/device_spec_builder.h"
 
-#include "iree/hal/local/atomic.h"
+#include "iree/hal/atomic.h"
 #include "iree/hal/local/cpu_device_spec.h"
 #include "iree/hal/memory/cpu_slab_provider.h"
 #include "iree/testing/gtest.h"
@@ -132,7 +132,7 @@ TEST(LocalDeviceSpecBuilderTest, CapturesCommonLocalFacts) {
   EXPECT_EQ(memory->memory_types[0].allowed_buffer_usage,
             IREE_HAL_CPU_SLAB_PROVIDER_BUFFER_USAGE);
   const iree_hal_atomic_operation_capabilities_t expected_memory_operations =
-      iree_hal_local_atomic_operation_capabilities(
+      iree_hal_atomic_operation_capabilities_for_host(
           IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
   EXPECT_EQ(memory->memory_types[0].atomic_operations.device_scope_32,
             expected_memory_operations.device_scope_32);

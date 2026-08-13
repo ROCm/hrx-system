@@ -198,10 +198,6 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_memory(
   }
 
   if (iree_status_is_ok(status)) {
-    const iree_hal_atomic_operation_capabilities_t atomic_operations =
-        iree_hal_vulkan_atomic_capabilities(
-            params->device_plan->enabled_features)
-            .operations;
     memset(heaps, 0, heap_count * sizeof(*heaps));
     memset(memory_types, 0, heap_count * sizeof(*memory_types));
     for (iree_host_size_t i = 0; i < heap_count; ++i) {
@@ -223,14 +219,9 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_memory(
               iree_hal_vulkan_device_spec_memory_access(allocator_heap),
           .minimum_alignment = allocator_heap->min_alignment,
           .optimal_transfer_granularity = 1,
+          .atomic_operations = allocator_heap->atomic_operations,
           .flags = IREE_HAL_MEMORY_TYPE_SPEC_FLAG_NONE,
       };
-      if (iree_all_bits_set(allocator_heap->type,
-                            IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE) &&
-          iree_all_bits_set(allocator_heap->allowed_usage,
-                            IREE_HAL_BUFFER_USAGE_STORAGE)) {
-        memory_types[i].atomic_operations = atomic_operations;
-      }
     }
 
     iree_hal_device_memory_spec_t memory = {

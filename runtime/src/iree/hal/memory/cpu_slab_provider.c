@@ -6,8 +6,6 @@
 
 #include "iree/hal/memory/cpu_slab_provider.h"
 
-#include "iree/hal/local/atomic.h"
-
 #if defined(IREE_PLATFORM_LINUX)
 #include <sys/mman.h>
 #endif  // IREE_PLATFORM_LINUX
@@ -170,7 +168,7 @@ static void iree_hal_cpu_slab_provider_query_properties(
   out_properties->memory_type = IREE_HAL_CPU_SLAB_PROVIDER_MEMORY_TYPE;
   out_properties->supported_usage = IREE_HAL_CPU_SLAB_PROVIDER_BUFFER_USAGE;
   out_properties->atomic_operations =
-      iree_hal_local_atomic_operation_capabilities(
+      iree_hal_atomic_operation_capabilities_for_host(
           IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
 }
 

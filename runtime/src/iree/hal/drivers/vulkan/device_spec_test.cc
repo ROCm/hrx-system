@@ -345,6 +345,9 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
   const iree_hal_device_memory_spec_t* memory =
       iree_hal_device_spec_memory(device_spec);
   ASSERT_NE(memory, nullptr);
+  const iree_hal_atomic_operation_capabilities_t expected_memory_operations =
+      iree_hal_atomic_operation_capabilities_for_host(
+          IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
   bool found_atomic_memory_type = false;
   for (iree_host_size_t i = 0; i < memory->memory_type_count; ++i) {
     const iree_hal_memory_type_spec_t* memory_type = &memory->memory_types[i];
@@ -356,13 +359,13 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
     }
     found_atomic_memory_type = true;
     EXPECT_EQ(memory_type->atomic_operations.device_scope_32,
-              IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+              expected_memory_operations.device_scope_32);
     EXPECT_EQ(memory_type->atomic_operations.device_scope_64,
-              IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+              expected_memory_operations.device_scope_64);
     EXPECT_EQ(memory_type->atomic_operations.system_scope_32,
-              IREE_HAL_ATOMIC_OPERATION_FLAG_NONE);
+              expected_memory_operations.system_scope_32);
     EXPECT_EQ(memory_type->atomic_operations.system_scope_64,
-              IREE_HAL_ATOMIC_OPERATION_FLAG_NONE);
+              expected_memory_operations.system_scope_64);
   }
   EXPECT_TRUE(found_atomic_memory_type);
 

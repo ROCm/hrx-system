@@ -6,6 +6,7 @@
 
 #include "iree/hal/atomic.h"
 
+#include "iree/base/internal/atomics.h"
 #include "iree/hal/api.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -31,6 +32,24 @@ static iree_status_t NoopCommandBufferAtomicStore(
     iree_hal_execution_stage_t target_stage_mask,
     iree_hal_buffer_ref_t target_ref, iree_hal_atomic_store_params_t params) {
   return iree_ok_status();
+}
+
+TEST(AtomicTest, HostCapabilitiesFollowLockFreeWidths) {
+  const iree_hal_atomic_operation_flags_t allowed_operations =
+      IREE_HAL_ATOMIC_OPERATION_FLAG_STORE |
+      IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD;
+  const iree_hal_atomic_operation_capabilities_t capabilities =
+      iree_hal_atomic_operation_capabilities_for_host(allowed_operations);
+
+  const iree_hal_atomic_operation_flags_t expected_32 =
+      iree_atomic_int32_is_lock_free() ? allowed_operations : 0;
+  EXPECT_EQ(capabilities.device_scope_32, expected_32);
+  EXPECT_EQ(capabilities.system_scope_32, expected_32);
+
+  const iree_hal_atomic_operation_flags_t expected_64 =
+      iree_atomic_int64_is_lock_free() ? allowed_operations : 0;
+  EXPECT_EQ(capabilities.device_scope_64, expected_64);
+  EXPECT_EQ(capabilities.system_scope_64, expected_64);
 }
 
 TEST(AtomicTest, ValidatesWaitParameters) {

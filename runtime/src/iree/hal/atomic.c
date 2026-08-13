@@ -8,6 +8,23 @@
 
 #include <inttypes.h>
 
+#include "iree/base/internal/atomics.h"
+
+IREE_API_EXPORT iree_hal_atomic_operation_capabilities_t
+iree_hal_atomic_operation_capabilities_for_host(
+    iree_hal_atomic_operation_flags_t allowed_operations) {
+  iree_hal_atomic_operation_capabilities_t capabilities = {0};
+  if (iree_atomic_int32_is_lock_free()) {
+    capabilities.device_scope_32 = allowed_operations;
+    capabilities.system_scope_32 = allowed_operations;
+  }
+  if (iree_atomic_int64_is_lock_free()) {
+    capabilities.device_scope_64 = allowed_operations;
+    capabilities.system_scope_64 = allowed_operations;
+  }
+  return capabilities;
+}
+
 static iree_status_t iree_hal_atomic_validate_width_and_value(
     iree_hal_atomic_width_t width, uint64_t value, const char* value_name) {
   switch (width) {

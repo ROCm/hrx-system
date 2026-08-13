@@ -131,6 +131,7 @@ iree_runtime_cc_test(
     srcs = ["atomic_test.cc"],
     deps = [
         ":hal",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

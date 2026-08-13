@@ -239,7 +239,7 @@ IREE_API_EXPORT iree_status_t iree_hal_local_device_spec_create(
       .allowed_memory_access = IREE_HAL_MEMORY_ACCESS_ALL,
       .minimum_alignment = IREE_HAL_HEAP_BUFFER_ALIGNMENT,
       .optimal_transfer_granularity = 1,
-      .atomic_operations = iree_hal_local_atomic_operation_capabilities(
+      .atomic_operations = iree_hal_atomic_operation_capabilities_for_host(
           IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL),
       .flags = IREE_HAL_MEMORY_TYPE_SPEC_FLAG_NONE,
   };
