@@ -758,6 +758,72 @@ static void BM_Project_RetainedProviderImports(benchmark::State& state) {
   loom_link_module_index_free(index);
 }
 
+static void BM_Project_LinkerImports(benchmark::State& state) {
+  const uint32_t provider_import_count = (uint32_t)state.range(0);
+  PlannerCatalogFixture fixture(provider_import_count,
+                                /*with_provider_imports=*/true);
+  loom_link_module_index_t* index = fixture.BuildIndex();
+  const std::string root_name = fixture.SymbolName(/*ordinal=*/0);
+  const iree_string_view_t root =
+      iree_make_string_view(root_name.data(), root_name.size());
+  const loom_link_plan_options_t options = {
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/{/*.count=*/1, /*.values=*/&root},
+      /*.include_exported_roots=*/false,
+      /*.unresolved_policy=*/LOOM_LINK_PLAN_UNRESOLVED_ALLOW,
+  };
+  loom_link_plan_t* plan = nullptr;
+  CheckStatus(
+      loom_link_plan_build(index, &options, iree_allocator_system(), &plan));
+
+  iree_arena_block_pool_t projection_block_pool;
+  iree_arena_block_pool_initialize(64 * 1024, iree_allocator_system(),
+                                   &projection_block_pool);
+  iree_arena_allocator_t module_arena;
+  iree_arena_initialize(&projection_block_pool, &module_arena);
+  loom_link_plan_module_projection_t module_projection;
+  CheckStatus(
+      loom_link_plan_project_modules(plan, &module_arena, &module_projection));
+  if (module_projection.modules.count != 1 ||
+      module_projection.symbols.count != provider_import_count ||
+      module_projection.provider_imports.count != provider_import_count) {
+    std::abort();
+  }
+
+  iree_arena_allocator_t linker_arena;
+  iree_arena_initialize(&projection_block_pool, &linker_arena);
+  for (auto _ : state) {
+    loom_link_plan_linker_import_projection_t linker_projection;
+    CheckStatus(loom_link_plan_project_linker_imports(
+        index, &module_projection, &linker_arena, &linker_projection));
+    if (linker_projection.modules.count != 1 ||
+        linker_projection.provider_imports.count != provider_import_count ||
+        linker_projection.provider_import_anchors.count !=
+            provider_import_count) {
+      std::abort();
+    }
+    benchmark::DoNotOptimize(linker_projection.provider_imports.values);
+    benchmark::DoNotOptimize(linker_projection.provider_import_anchors.values);
+    state.PauseTiming();
+    iree_arena_reset(&linker_arena);
+    state.ResumeTiming();
+  }
+
+  state.counters["import_anchors"] = static_cast<double>(provider_import_count);
+  state.counters["provider_imports"] =
+      static_cast<double>(provider_import_count);
+  state.counters["projection_bytes"] = static_cast<double>(
+      sizeof(loom_linker_source_provider_import_list_t) +
+      provider_import_count *
+          (sizeof(loom_linker_source_provider_import_t) + sizeof(uint32_t)));
+  SetCounters(state, fixture, provider_import_count);
+  iree_arena_deinitialize(&linker_arena);
+  iree_arena_deinitialize(&module_arena);
+  iree_arena_block_pool_deinitialize(&projection_block_pool);
+  loom_link_plan_free(plan);
+  loom_link_module_index_free(index);
+}
+
 static void BenchmarkExactLink(benchmark::State& state,
                                iree_host_size_t selected_symbol_count) {
   PlannerCatalogFixture fixture((uint32_t)state.range(0));
@@ -1044,6 +1110,9 @@ BENCHMARK(BM_Project_SelectiveChain_Catalog)
 BENCHMARK(BM_Project_RetainedProviderImports)
     ->Apply(CatalogScales)
     ->Complexity();
+BENCHMARK(BM_Project_LinkerImports)
+    ->Apply(CatalogScales)
+    ->Complexity(benchmark::oNLogN);
 BENCHMARK(BM_LinkExact_SelectiveLeaf_Catalog)
     ->Apply(CatalogScales)
     ->Complexity();

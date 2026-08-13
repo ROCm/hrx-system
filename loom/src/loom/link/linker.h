@@ -76,7 +76,7 @@ typedef struct loom_linker_source_provider_import_t {
     // Number of source symbol ordinals.
     iree_host_size_t count;
     // Source symbol ordinals in canonical source symbol-name order.
-    const iree_host_size_t* ordinals;
+    const uint32_t* ordinals;
   } anchors;
   // Authored source comments attached to the import operation.
   iree_string_view_list_t comments;

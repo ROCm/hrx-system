@@ -931,7 +931,7 @@ func.def @zeta(%x: i32) -> (i32) {
   IREE_ASSERT_OK(loom_linker_add_exact_module(
       linker, first, loom_linker_source_provider_import_list_empty()));
   const iree_host_size_t projected_symbols[] = {0, 1};
-  const iree_host_size_t import_anchors[] = {0, 1};
+  const uint32_t import_anchors[] = {0, 1};
   const iree_string_view_t import_comments[] = {
       IREE_SV("Projected provider."),
   };
@@ -992,7 +992,7 @@ func.def @helper() {
 }
 )"));
   const iree_host_size_t symbols[] = {0};
-  const iree_host_size_t anchors[] = {0};
+  const uint32_t anchors[] = {0};
   const loom_linker_source_provider_import_t provider_imports[] = {{
       /*.provider=*/IREE_SV("provider"),
       /*.anchors=*/

@@ -8,6 +8,8 @@
 
 #include <stdlib.h>
 
+#include "iree/base/assert.h"
+
 static int loom_link_plan_projection_compare_symbols(const void* lhs_ptr,
                                                      const void* rhs_ptr) {
   const loom_link_plan_module_symbol_t* lhs =
@@ -215,5 +217,117 @@ iree_status_t loom_link_plan_project_modules(
   out_projection->provider_imports.count = provider_import_count;
   out_projection->provider_import_anchors.values = provider_import_anchors;
   out_projection->provider_import_anchors.count = provider_import_anchor_count;
+  return iree_ok_status();
+}
+
+static uint32_t loom_link_plan_projection_find_compact_symbol_ordinal(
+    const loom_link_plan_module_selection_t* module,
+    uint32_t source_symbol_ordinal) {
+  iree_host_size_t lower_bound = 0;
+  iree_host_size_t upper_bound = module->symbols.count;
+  while (lower_bound < upper_bound) {
+    const iree_host_size_t middle =
+        lower_bound + (upper_bound - lower_bound) / 2;
+    const iree_host_size_t candidate =
+        module->symbols.values[middle].source_symbol->module_symbol_ordinal;
+    if (candidate < source_symbol_ordinal) {
+      lower_bound = middle + 1;
+    } else if (candidate > source_symbol_ordinal) {
+      upper_bound = middle;
+    } else {
+      return (uint32_t)middle;
+    }
+  }
+  IREE_ASSERT_UNREACHABLE(
+      "retained provider import anchor is absent from its module selection");
+  return 0;
+}
+
+iree_status_t loom_link_plan_project_linker_imports(
+    const loom_link_module_index_t* index,
+    const loom_link_plan_module_projection_t* module_projection,
+    iree_arena_allocator_t* arena,
+    loom_link_plan_linker_import_projection_t* out_projection) {
+  *out_projection = (loom_link_plan_linker_import_projection_t){0};
+
+  loom_linker_source_provider_import_list_t* module_imports = NULL;
+  if (module_projection->modules.count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, module_projection->modules.count, sizeof(*module_imports),
+        (void**)&module_imports));
+  }
+  loom_linker_source_provider_import_t* provider_imports = NULL;
+  if (module_projection->provider_imports.count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, module_projection->provider_imports.count,
+        sizeof(*provider_imports), (void**)&provider_imports));
+  }
+  uint32_t* provider_import_anchors = NULL;
+  if (module_projection->provider_import_anchors.count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, module_projection->provider_import_anchors.count,
+        sizeof(*provider_import_anchors), (void**)&provider_import_anchors));
+  }
+
+  iree_host_size_t import_ordinal = 0;
+  iree_host_size_t anchor_ordinal = 0;
+  for (iree_host_size_t module_ordinal = 0;
+       module_ordinal < module_projection->modules.count; ++module_ordinal) {
+    const loom_link_plan_module_selection_t* module =
+        &module_projection->modules.values[module_ordinal];
+    const iree_host_size_t module_import_start = import_ordinal;
+    for (iree_host_size_t module_import_ordinal = 0;
+         module_import_ordinal < module->provider_imports.count;
+         ++module_import_ordinal) {
+      const loom_link_plan_module_provider_import_t* projected_import =
+          &module->provider_imports.values[module_import_ordinal];
+      const loom_link_module_index_provider_import_t source_import =
+          loom_link_module_index_provider_import_at(
+              index, module->source_module,
+              projected_import->source_import_ordinal);
+      const iree_host_size_t import_anchor_start = anchor_ordinal;
+      for (iree_host_size_t i = 0; i < projected_import->anchors.count; ++i) {
+        const uint32_t source_symbol_ordinal =
+            module->provider_import_anchors
+                .values[projected_import->anchors.first + i];
+        provider_import_anchors[anchor_ordinal++] =
+            module->source_module->materialized_module
+                ? source_symbol_ordinal
+                : loom_link_plan_projection_find_compact_symbol_ordinal(
+                      module, source_symbol_ordinal);
+      }
+      provider_imports[import_ordinal++] =
+          (loom_linker_source_provider_import_t){
+              .provider = source_import.provider,
+              .anchors =
+                  {
+                      .count = projected_import->anchors.count,
+                      .ordinals = provider_import_anchors + import_anchor_start,
+                  },
+              .comments =
+                  {
+                      .count = source_import.comments.count,
+                      .values = source_import.comments.values,
+                  },
+              .leading_blank_line = source_import.leading_blank_line,
+          };
+    }
+    module_imports[module_ordinal] =
+        (loom_linker_source_provider_import_list_t){
+            .count = import_ordinal - module_import_start,
+            .values = import_ordinal == module_import_start
+                          ? NULL
+                          : provider_imports + module_import_start,
+        };
+  }
+
+  out_projection->modules.values = module_imports;
+  out_projection->modules.count = module_projection->modules.count;
+  out_projection->provider_imports.values = provider_imports;
+  out_projection->provider_imports.count =
+      module_projection->provider_imports.count;
+  out_projection->provider_import_anchors.values = provider_import_anchors;
+  out_projection->provider_import_anchors.count =
+      module_projection->provider_import_anchors.count;
   return iree_ok_status();
 }

@@ -178,6 +178,7 @@ loom_cc_library(
   SRCS
     "plan_projection.c"
   DEPS
+    ::linker
     ::planner
     iree::base
     iree::base::internal::arena
@@ -195,8 +196,10 @@ loom_cc_test(
     ::planner
     iree::base
     iree::base::internal::arena
+    iree::io::stream
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::format::bytecode::writer
     loom::format::text::parser
     loom::ir
     loom::ops::func

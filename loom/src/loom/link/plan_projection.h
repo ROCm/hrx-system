@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/link/linker.h"
 #include "loom/link/planner.h"
 
 #ifdef __cplusplus
@@ -98,6 +99,32 @@ typedef struct loom_link_plan_module_projection_t {
   } provider_import_anchors;
 } loom_link_plan_module_projection_t;
 
+// Linker-ready provider imports aligned one-to-one with projected modules.
+typedef struct loom_link_plan_linker_import_projection_t {
+  // Per-module import lists in module-projection order.
+  struct {
+    // Arena-owned lists aligned with
+    // loom_link_plan_module_projection_t.modules.
+    loom_linker_source_provider_import_list_t* values;
+    // Number of per-module lists.
+    iree_host_size_t count;
+  } modules;
+  // Flat provider-import rows sliced by modules[].
+  struct {
+    // Arena-owned provider-import rows.
+    loom_linker_source_provider_import_t* values;
+    // Number of retained provider-import rows.
+    iree_host_size_t count;
+  } provider_imports;
+  // Flat linker-domain symbol ordinals sliced by provider-import rows.
+  struct {
+    // Arena-owned symbol ordinal array.
+    uint32_t* values;
+    // Number of retained provider-import anchors.
+    iree_host_size_t count;
+  } provider_import_anchors;
+} loom_link_plan_linker_import_projection_t;
+
 // Partitions |plan| into deterministic module-local source-symbol slices.
 //
 // Construction performs no name lookup or reachability analysis. Dead anchors
@@ -109,6 +136,18 @@ typedef struct loom_link_plan_module_projection_t {
 iree_status_t loom_link_plan_project_modules(
     const loom_link_plan_t* plan, iree_arena_allocator_t* arena,
     loom_link_plan_module_projection_t* out_projection);
+
+// Projects retained provider imports into each selected module's linker domain.
+//
+// Already-materialized modules retain their original sparse symbol ordinals.
+// Bytecode modules use the dense ordinals assigned by selected materialization.
+// All views borrow canonical provider semantics from |index| and remain valid
+// until |arena| is reset or deinitialized.
+iree_status_t loom_link_plan_project_linker_imports(
+    const loom_link_module_index_t* index,
+    const loom_link_plan_module_projection_t* module_projection,
+    iree_arena_allocator_t* arena,
+    loom_link_plan_linker_import_projection_t* out_projection);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -1679,13 +1679,14 @@ static iree_status_t loom_linker_validate_source_provider_imports(
                               "provider import anchor count overflow");
     }
     for (iree_host_size_t j = 0; j < provider_import->anchors.count; ++j) {
-      if (provider_import->anchors.ordinals[j] >=
-          source_module->symbols.count) {
+      const iree_host_size_t source_symbol_ordinal =
+          provider_import->anchors.ordinals[j];
+      if (source_symbol_ordinal >= source_module->symbols.count) {
         return iree_make_status(
             IREE_STATUS_OUT_OF_RANGE,
             "provider import source symbol ordinal %" PRIhsz
             " is out of range for module with %" PRIhsz " symbols",
-            provider_import->anchors.ordinals[j], source_module->symbols.count);
+            source_symbol_ordinal, source_module->symbols.count);
       }
     }
   }
