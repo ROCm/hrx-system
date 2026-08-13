@@ -97,6 +97,15 @@ typedef struct loom_link_module_index_provider_t {
   iree_host_size_t module_start_ordinal;
   // Number of modules owned by this provider.
   iree_host_size_t module_count;
+  // Validated source backing present only for BYTECODE providers.
+  struct {
+    // Borrowed complete bytecode file contents.
+    iree_const_byte_span_t contents;
+    // Arena-owned source filename used for materialization diagnostics.
+    iree_string_view_t filename;
+    // Validated file index whose child arrays are owned by the index arena.
+    loom_bytecode_file_metadata_t metadata;
+  } bytecode;
 } loom_link_module_index_provider_t;
 
 // Indexed module record.
@@ -213,6 +222,9 @@ iree_status_t loom_link_module_index_add_materialized(
     iree_host_size_t* out_provider_ordinal);
 
 // Adds one bytecode file to |index| using metadata-only validation.
+//
+// The index borrows |bytecode| through its lifetime. |filename| and any
+// provider name supplied in |options| are copied into index-owned storage.
 iree_status_t loom_link_module_index_add_bytecode(
     loom_link_module_index_t* index, iree_const_byte_span_t bytecode,
     iree_string_view_t filename,

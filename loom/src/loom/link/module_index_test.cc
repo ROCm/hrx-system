@@ -356,6 +356,11 @@ func.def public @exported(%x: i32) -> (i32) {
       loom_link_module_index_provider_at(index.get(), 0);
   ASSERT_NE(provider, nullptr);
   EXPECT_EQ(provider->kind, LOOM_LINK_PROVIDER_BYTECODE);
+  EXPECT_EQ(provider->bytecode.contents.data, bytes.data());
+  EXPECT_EQ(provider->bytecode.contents.data_length, bytes.size());
+  EXPECT_EQ(StringViewToString(provider->bytecode.filename), "kernels.loombc");
+  ASSERT_EQ(provider->bytecode.metadata.module_count, 1u);
+  EXPECT_EQ(provider->bytecode.metadata.modules[0].symbol_count, 1u);
   const loom_link_module_index_module_t* indexed_module =
       loom_link_module_index_module_at(index.get(), 0);
   ASSERT_NE(indexed_module, nullptr);

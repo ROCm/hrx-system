@@ -1055,9 +1055,22 @@ iree_status_t loom_link_module_index_add_bytecode(
                             read_result.error_count);
   }
 
+  const bool provider_name_is_filename =
+      !options || iree_string_view_is_empty(options->provider_name) ||
+      iree_string_view_equal(options->provider_name, filename);
+  iree_string_view_t retained_filename = iree_string_view_empty();
+  if (!provider_name_is_filename) {
+    IREE_RETURN_IF_ERROR(
+        loom_link_index_copy_string(index, filename, &retained_filename));
+  }
+
   loom_link_module_index_provider_t* provider = NULL;
   IREE_RETURN_IF_ERROR(loom_link_index_append_provider(
       index, LOOM_LINK_PROVIDER_BYTECODE, filename, options, &provider));
+  provider->bytecode.contents = bytecode;
+  provider->bytecode.filename =
+      provider_name_is_filename ? provider->name : retained_filename;
+  provider->bytecode.metadata = metadata;
 
   for (iree_host_size_t i = 0; i < metadata.module_count; ++i) {
     loom_link_module_index_module_t* indexed_module = NULL;
