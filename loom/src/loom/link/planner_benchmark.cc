@@ -23,6 +23,7 @@
 #include "loom/link/module_index.h"
 #include "loom/link/plan_projection.h"
 #include "loom/link/planner.h"
+#include "loom/ops/module/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
 
@@ -34,12 +35,25 @@ static void CheckStatus(iree_status_t status) {
 
 class PlannerCatalogFixture {
  public:
-  explicit PlannerCatalogFixture(uint32_t symbol_count)
-      : symbol_count_(symbol_count) {
+  explicit PlannerCatalogFixture(uint32_t symbol_count,
+                                 bool with_provider_imports = false)
+      : symbol_count_(symbol_count),
+        with_provider_imports_(with_provider_imports) {
     iree_arena_block_pool_initialize(64 * 1024, iree_allocator_system(),
                                      &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
     CheckStatus(loom_test_dialect_register(&context_));
+    iree_host_size_t module_op_count = 0;
+    const loom_op_vtable_t* const* module_ops =
+        loom_module_dialect_vtables(&module_op_count);
+    CheckStatus(loom_context_register_dialect(
+        &context_, LOOM_DIALECT_MODULE, module_ops, (uint16_t)module_op_count));
+    iree_host_size_t module_semantic_count = 0;
+    const loom_op_semantics_t* module_semantics =
+        loom_module_dialect_op_semantics(&module_semantic_count);
+    CheckStatus(loom_context_register_dialect_semantics(
+        &context_, LOOM_DIALECT_MODULE, module_semantics,
+        (uint16_t)module_semantic_count));
     CheckStatus(loom_context_finalize(&context_));
 
     loom_module_t* module = nullptr;
@@ -121,6 +135,30 @@ class PlannerCatalogFixture {
     loom_builder_t module_builder;
     loom_builder_initialize(module, &module->arena, loom_module_block(module),
                             &module_builder);
+    if (with_provider_imports_) {
+      for (uint32_t i = 0; i < symbol_count_; ++i) {
+        char provider_name[32];
+        const int provider_name_length = std::snprintf(
+            provider_name, sizeof(provider_name), "provider_%08u", i);
+        if (provider_name_length <= 0 ||
+            provider_name_length >= (int)sizeof(provider_name)) {
+          std::abort();
+        }
+        loom_string_id_t provider_id = LOOM_STRING_ID_INVALID;
+        CheckStatus(loom_module_intern_string(
+            module, iree_make_string_view(provider_name, provider_name_length),
+            &provider_id));
+        const loom_symbol_ref_t anchor = {
+            /*.module_id=*/0,
+            /*.symbol_id=*/symbol_ids[i],
+        };
+        loom_op_t* import_op = nullptr;
+        CheckStatus(loom_module_import_build(
+            &module_builder, provider_id,
+            loom_make_symbol_ref_array(&anchor, /*count=*/1),
+            LOOM_LOCATION_NONE, &import_op));
+      }
+    }
     for (uint32_t i = 0; i < symbol_count_; ++i) {
       const loom_symbol_ref_t symbol_ref = {
           /*.module_id=*/0,
@@ -184,6 +222,7 @@ class PlannerCatalogFixture {
   }
 
   uint32_t symbol_count_;
+  bool with_provider_imports_;
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_ = {};
   loom_module_t* module_ = nullptr;
@@ -210,6 +249,58 @@ static void BM_ModuleIndex_Catalog(benchmark::State& state) {
     state.ResumeTiming();
   }
   SetCounters(state, fixture, /*selected_symbol_count=*/0);
+}
+
+static void BM_ModuleIndex_ProviderImports(benchmark::State& state) {
+  PlannerCatalogFixture fixture((uint32_t)state.range(0),
+                                /*with_provider_imports=*/true);
+  for (auto _ : state) {
+    loom_link_module_index_t* index = fixture.BuildIndex();
+    benchmark::DoNotOptimize(index);
+    state.PauseTiming();
+    loom_link_module_index_free(index);
+    state.ResumeTiming();
+  }
+  const double count = static_cast<double>(fixture.symbol_count());
+  state.counters["import_anchors"] = count;
+  state.counters["import_index_bytes"] = (2.0 * count + 1.0) * sizeof(uint32_t);
+  SetCounters(state, fixture, /*selected_symbol_count=*/0);
+}
+
+static void BM_ProviderImportOccurrenceLookup(benchmark::State& state) {
+  PlannerCatalogFixture fixture((uint32_t)state.range(0),
+                                /*with_provider_imports=*/true);
+  loom_link_module_index_t* index = fixture.BuildIndex();
+  const loom_link_module_index_module_t* module =
+      loom_link_module_index_module_at(index, 0);
+  if (!module) {
+    std::abort();
+  }
+
+  for (auto _ : state) {
+    iree_host_size_t occurrence_count = 0;
+    uint64_t import_checksum = 0;
+    for (iree_host_size_t i = 0; i < module->symbol_count; ++i) {
+      const loom_link_module_index_symbol_t* symbol =
+          loom_link_module_index_symbol_at(index,
+                                           module->symbol_start_ordinal + i);
+      const loom_link_module_index_provider_import_list_t imports =
+          loom_link_module_index_symbol_provider_imports(index, symbol);
+      occurrence_count += imports.count;
+      if (imports.count > 0) {
+        import_checksum += imports.values[0];
+      }
+    }
+    if (occurrence_count != fixture.symbol_count()) {
+      std::abort();
+    }
+    benchmark::DoNotOptimize(occurrence_count);
+    benchmark::DoNotOptimize(import_checksum);
+  }
+  state.counters["import_anchors"] =
+      static_cast<double>(fixture.symbol_count());
+  SetCounters(state, fixture, /*selected_symbol_count=*/0);
+  loom_link_module_index_free(index);
 }
 
 static void BenchmarkPlan(benchmark::State& state, loom_link_plan_mode_t mode,
@@ -512,6 +603,10 @@ static void CatalogScales(benchmark::Benchmark* benchmark) {
 }
 
 BENCHMARK(BM_ModuleIndex_Catalog)->Apply(CatalogScales)->Complexity();
+BENCHMARK(BM_ModuleIndex_ProviderImports)->Apply(CatalogScales)->Complexity();
+BENCHMARK(BM_ProviderImportOccurrenceLookup)
+    ->Apply(CatalogScales)
+    ->Complexity();
 BENCHMARK(BM_Plan_Archive_Catalog)->Apply(CatalogScales)->Complexity();
 BENCHMARK(BM_Plan_SelectiveLeaf_Catalog)->Apply(CatalogScales)->Complexity();
 BENCHMARK(BM_Plan_SelectiveChain_Catalog)->Apply(CatalogScales)->Complexity();

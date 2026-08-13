@@ -22,6 +22,7 @@
 #include "loom/ops/check/ops.h"
 #include "loom/ops/config/ops.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/module/ops.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
@@ -65,6 +66,8 @@ class ModuleIndexTest : public ::testing::Test {
                     loom_config_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables,
                     loom_func_dialect_op_semantics);
+    RegisterDialect(LOOM_DIALECT_MODULE, loom_module_dialect_vtables,
+                    loom_module_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables,
                     loom_target_dialect_op_semantics);
     IREE_ASSERT_OK(loom_test_dialect_register(&context_));
@@ -427,6 +430,97 @@ func.template<demo.contract> @provider(%x: i32) -> (i32) {
     EXPECT_EQ(contract->providers.last_symbol_ordinal, provider->ordinal);
     EXPECT_EQ(provider->next.contract_provider_ordinal,
               LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
+  };
+
+  loom_link_module_index_add_options_t options = {
+      /*.provider_name=*/IREE_SV("library"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+  };
+  IndexPtr materialized_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+      materialized_index.get(), module, &options,
+      /*out_provider_ordinal=*/nullptr));
+  verify_index(materialized_index.get());
+
+  IndexPtr bytecode_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
+      bytecode_index.get(),
+      iree_make_const_byte_span(bytes.data(), bytes.size()),
+      IREE_SV("library.loombc"), /*index_options=*/nullptr, &options,
+      /*out_provider_ordinal=*/nullptr));
+  verify_index(bytecode_index.get());
+}
+
+TEST_F(ModuleIndexTest,
+       ProjectsMaterializedAndBytecodeProviderImportOccurrences) {
+  loom_module_t* module = Parse(IREE_SV(R"(
+// Alpha provider.
+module.import "alpha.loom" [@alpha, @shared]
+
+// Beta provider.
+module.import "beta.loom" [@beta, @shared]
+
+func.decl @alpha(%x: i32) -> (i32)
+func.decl @beta(%x: i32) -> (i32)
+func.decl @shared(%x: i32) -> (i32)
+func.decl @unavailable(%x: i32) -> (i32)
+)"));
+  std::vector<uint8_t> bytes = WriteModule(module);
+
+  auto verify_index = [&](const loom_link_module_index_t* index) {
+    const loom_link_module_index_module_t* indexed_module =
+        loom_link_module_index_module_at(index, 0);
+    ASSERT_NE(indexed_module, nullptr);
+    EXPECT_EQ(indexed_module->provider_imports.count, 2u);
+    EXPECT_EQ(indexed_module->provider_imports.anchor_count, 4u);
+
+    const loom_link_module_index_provider_import_t alpha_import =
+        loom_link_module_index_provider_import_at(index, indexed_module, 0);
+    EXPECT_EQ(StringViewToString(alpha_import.provider), "alpha.loom");
+    EXPECT_EQ(alpha_import.anchor_count, 2u);
+    ASSERT_EQ(alpha_import.comments.count, 1u);
+    EXPECT_EQ(StringViewToString(alpha_import.comments.values[0]),
+              "Alpha provider.");
+
+    const loom_link_module_index_provider_import_t beta_import =
+        loom_link_module_index_provider_import_at(index, indexed_module, 1);
+    EXPECT_EQ(StringViewToString(beta_import.provider), "beta.loom");
+    EXPECT_EQ(beta_import.anchor_count, 2u);
+    ASSERT_EQ(beta_import.comments.count, 1u);
+    EXPECT_EQ(StringViewToString(beta_import.comments.values[0]),
+              "Beta provider.");
+    EXPECT_TRUE(beta_import.leading_blank_line);
+
+    const loom_link_module_index_symbol_t* alpha =
+        loom_link_module_index_lookup_global(index, IREE_SV("alpha"));
+    const loom_link_module_index_symbol_t* beta =
+        loom_link_module_index_lookup_global(index, IREE_SV("beta"));
+    const loom_link_module_index_symbol_t* shared =
+        loom_link_module_index_lookup_global(index, IREE_SV("shared"));
+    const loom_link_module_index_symbol_t* unavailable =
+        loom_link_module_index_lookup_global(index, IREE_SV("unavailable"));
+    ASSERT_NE(alpha, nullptr);
+    ASSERT_NE(beta, nullptr);
+    ASSERT_NE(shared, nullptr);
+    ASSERT_NE(unavailable, nullptr);
+
+    const loom_link_module_index_provider_import_list_t alpha_imports =
+        loom_link_module_index_symbol_provider_imports(index, alpha);
+    ASSERT_EQ(alpha_imports.count, 1u);
+    EXPECT_EQ(alpha_imports.values[0], 0u);
+    const loom_link_module_index_provider_import_list_t beta_imports =
+        loom_link_module_index_symbol_provider_imports(index, beta);
+    ASSERT_EQ(beta_imports.count, 1u);
+    EXPECT_EQ(beta_imports.values[0], 1u);
+    const loom_link_module_index_provider_import_list_t shared_imports =
+        loom_link_module_index_symbol_provider_imports(index, shared);
+    ASSERT_EQ(shared_imports.count, 2u);
+    EXPECT_EQ(shared_imports.values[0], 0u);
+    EXPECT_EQ(shared_imports.values[1], 1u);
+    const loom_link_module_index_provider_import_list_t unavailable_imports =
+        loom_link_module_index_symbol_provider_imports(index, unavailable);
+    EXPECT_EQ(unavailable_imports.count, 0u);
+    EXPECT_EQ(unavailable_imports.values, nullptr);
   };
 
   loom_link_module_index_add_options_t options = {

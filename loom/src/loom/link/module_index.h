@@ -34,6 +34,31 @@ typedef uint32_t loom_link_contract_ordinal_t;
 
 typedef struct loom_link_module_index_t loom_link_module_index_t;
 
+// Borrowed view of one compile-time provider import.
+typedef struct loom_link_module_index_provider_import_t {
+  // Opaque resolver-defined provider key.
+  iree_string_view_t provider;
+  // Number of module-local symbol anchors in the import.
+  iree_host_size_t anchor_count;
+  // Authored source comments attached to the import operation.
+  struct {
+    // Borrowed normalized comment payloads without leading `//` markers.
+    const iree_string_view_t* values;
+    // Number of comment payloads.
+    iree_host_size_t count;
+  } comments;
+  // True when the import has authored leading vertical separation.
+  bool leading_blank_line;
+} loom_link_module_index_provider_import_t;
+
+// Module-local provider-import ordinals mentioning one symbol.
+typedef struct loom_link_module_index_provider_import_list_t {
+  // Provider-import ordinals in stable module order.
+  const uint32_t* values;
+  // Number of provider-import occurrences.
+  iree_host_size_t count;
+} loom_link_module_index_provider_import_list_t;
+
 typedef enum loom_link_provider_kind_e {
   // Provider wraps one caller-owned in-memory module.
   LOOM_LINK_PROVIDER_MATERIALIZED = 0,
@@ -144,6 +169,20 @@ typedef struct loom_link_module_index_module_t {
     // may repeat within a source row.
     const loom_link_contract_ordinal_t* values;
   } contract_demands;
+  // Compile-time provider imports and their symbol-to-import projection.
+  struct {
+    // Number of source provider-import records.
+    uint32_t count;
+    // Number of source provider-import anchor occurrences.
+    uint32_t anchor_count;
+    // Borrowed materialized module.import operations in source order. NULL for
+    // bytecode modules, which borrow their existing metadata records.
+    const loom_op_t* const* materialized_ops;
+    // Arena-owned CSR offsets with symbol_count + 1 entries.
+    const uint32_t* symbol_offsets;
+    // Arena-owned module-local import ordinals grouped by source symbol.
+    const uint32_t* symbol_import_ordinals;
+  } provider_imports;
 } loom_link_module_index_module_t;
 
 // Indexed module-local symbol record.
@@ -273,6 +312,25 @@ const loom_link_module_index_provider_t* loom_link_module_index_symbol_provider(
 
 // Returns the module that owns |symbol|, or NULL if its ordinal is stale.
 const loom_link_module_index_module_t* loom_link_module_index_symbol_module(
+    const loom_link_module_index_t* index,
+    const loom_link_module_index_symbol_t* symbol);
+
+// Returns provider import |ordinal| from |module|.
+//
+// The returned view borrows canonical semantics and source trivia directly
+// from the materialized module or retained bytecode metadata. The index,
+// module, and ordinal are trusted outputs of this index.
+loom_link_module_index_provider_import_t
+loom_link_module_index_provider_import_at(
+    const loom_link_module_index_t* index,
+    const loom_link_module_index_module_t* module, iree_host_size_t ordinal);
+
+// Returns provider imports that mention |symbol| as an availability anchor.
+//
+// Construction work is paid once while indexing. This query performs no
+// allocation, hashing, search, or IR traversal.
+loom_link_module_index_provider_import_list_t
+loom_link_module_index_symbol_provider_imports(
     const loom_link_module_index_t* index,
     const loom_link_module_index_symbol_t* symbol);
 

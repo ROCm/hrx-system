@@ -85,6 +85,7 @@ loom_cc_library(
     loom::format::bytecode::index_reader
     loom::format::text::parser
     loom::ir
+    loom::ops::module
     loom::ops::op_defs
   PUBLIC
 )
@@ -107,6 +108,7 @@ loom_cc_test(
     loom::ops::check
     loom::ops::config
     loom::ops::func
+    loom::ops::module
     loom::ops::target
     loom::ops::test
 )
@@ -196,6 +198,7 @@ loom_cc_benchmark(
     loom::format::bytecode::selected_reader
     loom::format::bytecode::writer
     loom::ir
+    loom::ops::module
     loom::ops::test
   TESTONLY
 )
