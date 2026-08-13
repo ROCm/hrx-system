@@ -20,6 +20,8 @@
 #include "iree/base/internal/arena.h"
 #include "iree/io/vec_stream.h"
 #include "loom/format/bytecode/reader.h"
+#include "loom/format/bytecode/reader/selected_materializer.h"
+#include "loom/format/bytecode/selected_reader.h"
 #include "loom/format/bytecode/writer.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -449,6 +451,163 @@ static void BM_ReadModule_Catalog(benchmark::State& state) {
   iree_arena_block_pool_deinitialize(&block_pool);
 }
 
+struct SelectedMaterializationStats {
+  iree_host_size_t body_bytes;
+  iree_host_size_t body_count;
+  iree_host_size_t output_owned_bytes;
+  iree_host_size_t output_used_bytes;
+  iree_host_size_t scratch_owned_bytes;
+  iree_host_size_t scratch_used_bytes;
+  iree_host_size_t type_count;
+};
+
+static SelectedMaterializationStats InspectSelectedMaterialization(
+    CatalogBytecodeFixture& fixture,
+    const loom_bytecode_module_metadata_t& metadata,
+    const std::vector<iree_host_size_t>& ordinals,
+    iree_arena_block_pool_t* block_pool) {
+  uint32_t error_count = 0;
+  loom_bytecode_reader_decoder_t decoder;
+  loom_bytecode_reader_decoder_initialize(
+      /*sink=*/{}, IREE_SV("catalog_benchmark.loombc"), &error_count, &decoder);
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(block_pool, &scratch_arena);
+  const loom_bytecode_selected_module_materializer_t materializer = {
+      /*.decoder=*/&decoder,
+      /*.bytecode=*/
+      iree_make_const_byte_span(fixture.bytes().data(), fixture.bytes().size()),
+      /*.context=*/fixture.context(),
+      /*.scratch_arena=*/&scratch_arena,
+      /*.block_pool=*/block_pool,
+      /*.metadata=*/&metadata,
+      /*.low_repr_environment=*/{},
+      /*.host_allocator=*/iree_allocator_system(),
+  };
+  loom_module_t* output_module = nullptr;
+  IgnoreStatusOrAbort(loom_bytecode_selected_module_materialize(
+      &materializer, ordinals.data(), ordinals.size(), &output_module));
+  if (error_count != 0 || output_module == nullptr) abort();
+
+  SelectedMaterializationStats stats = {
+      /*.body_bytes=*/0,
+      /*.body_count=*/0,
+      /*.output_owned_bytes=*/output_module->arena.total_allocation_size,
+      /*.output_used_bytes=*/output_module->arena.used_allocation_size,
+      /*.scratch_owned_bytes=*/scratch_arena.total_allocation_size,
+      /*.scratch_used_bytes=*/scratch_arena.used_allocation_size,
+      /*.type_count=*/output_module->types.count,
+  };
+  for (iree_host_size_t ordinal : ordinals) {
+    const loom_bytecode_symbol_metadata_t& symbol = metadata.symbols[ordinal];
+    if (symbol.has_body) {
+      stats.body_bytes += symbol.body_length;
+      ++stats.body_count;
+    }
+  }
+  loom_module_free(output_module);
+  iree_arena_deinitialize(&scratch_arena);
+  return stats;
+}
+
+static void BenchmarkMaterializeSelectedCatalog(benchmark::State& state) {
+  const uint32_t symbol_count = (uint32_t)state.range(0);
+  const uint32_t selected_symbol_count = (uint32_t)state.range(1);
+  CatalogBytecodeFixture fixture(symbol_count, /*body_op_count=*/4);
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(65536, iree_allocator_system(), &block_pool);
+  CatalogMetadataStats catalog_stats =
+      InspectCatalogMetadata(fixture, &block_pool);
+
+  iree_arena_allocator_t metadata_arena;
+  iree_arena_initialize(&block_pool, &metadata_arena);
+  loom_bytecode_read_result_t index_result = {};
+  loom_bytecode_file_metadata_t file_metadata = {};
+  IgnoreStatusOrAbort(loom_bytecode_read_index(
+      iree_make_const_byte_span(fixture.bytes().data(), fixture.bytes().size()),
+      IREE_SV("catalog_benchmark.loombc"), fixture.context(), &block_pool,
+      &metadata_arena, /*options=*/nullptr, &index_result, &file_metadata));
+  if (index_result.error_count != 0 || file_metadata.module_count != 1 ||
+      selected_symbol_count == 0 || selected_symbol_count > symbol_count) {
+    abort();
+  }
+  std::vector<iree_host_size_t> ordinals(selected_symbol_count);
+  const iree_host_size_t first_ordinal = symbol_count - selected_symbol_count;
+  for (iree_host_size_t i = 0; i < selected_symbol_count; ++i) {
+    ordinals[i] = first_ordinal + i;
+  }
+  const SelectedMaterializationStats selected_stats =
+      InspectSelectedMaterialization(fixture, file_metadata.modules[0],
+                                     ordinals, &block_pool);
+
+  uint32_t diagnostic_count = 0;
+  loom_bytecode_read_options_t options =
+      ReadOptions(/*verify_module=*/false, &diagnostic_count);
+  for (auto _ : state) {
+    loom_bytecode_read_result_t result = {};
+    loom_module_t* module = nullptr;
+    IgnoreStatusOrAbort(loom_bytecode_materialize_module_symbols(
+        iree_make_const_byte_span(fixture.bytes().data(),
+                                  fixture.bytes().size()),
+        IREE_SV("catalog_benchmark.loombc"), fixture.context(), &block_pool,
+        &file_metadata, /*module_ordinal=*/0,
+        (loom_bytecode_symbol_ordinal_list_t){
+            /*.count=*/ordinals.size(),
+            /*.ordinals=*/ordinals.data(),
+        },
+        &options, &result, &module, iree_allocator_system()));
+    if (result.error_count != 0 || module == nullptr ||
+        module->symbols.count != selected_symbol_count) {
+      abort();
+    }
+    benchmark::DoNotOptimize(module);
+    loom_module_free(module);
+  }
+
+  SetCatalogCounters(state, fixture, catalog_stats);
+  state.counters["materialized_symbols"] =
+      static_cast<double>(selected_symbol_count);
+  state.counters["output_owned_bytes"] =
+      static_cast<double>(selected_stats.output_owned_bytes);
+  state.counters["output_used_bytes"] =
+      static_cast<double>(selected_stats.output_used_bytes);
+  state.counters["rejected_body_bytes"] =
+      static_cast<double>(catalog_stats.body_bytes - selected_stats.body_bytes);
+  state.counters["selected_bodies"] =
+      static_cast<double>(selected_stats.body_count);
+  state.counters["selected_body_bytes"] =
+      static_cast<double>(selected_stats.body_bytes);
+  state.counters["selected_types"] =
+      static_cast<double>(selected_stats.type_count);
+  state.counters["scratch_owned_bytes"] =
+      static_cast<double>(selected_stats.scratch_owned_bytes);
+  state.counters["scratch_used_bytes"] =
+      static_cast<double>(selected_stats.scratch_used_bytes);
+  state.SetItemsProcessed(state.iterations() * selected_symbol_count);
+  iree_arena_deinitialize(&metadata_arena);
+  iree_arena_block_pool_deinitialize(&block_pool);
+}
+
+static void BM_MaterializeSelectedLeaf_Catalog(benchmark::State& state) {
+  BenchmarkMaterializeSelectedCatalog(state);
+}
+
+static void BM_MaterializeSelectedAll_Catalog(benchmark::State& state) {
+  BenchmarkMaterializeSelectedCatalog(state);
+}
+
+static void SelectedLeafCatalogScales(benchmark::Benchmark* benchmark) {
+  benchmark->Args({1, 1})->Args({16, 1})->Args({64, 1})->Args({512, 1})->Args(
+      {4096, 1});
+}
+
+static void SelectedAllCatalogScales(benchmark::Benchmark* benchmark) {
+  benchmark->Args({1, 1})
+      ->Args({16, 16})
+      ->Args({64, 64})
+      ->Args({512, 512})
+      ->Args({4096, 4096});
+}
+
 static void CatalogScales(benchmark::Benchmark* benchmark) {
   benchmark->Args({1, 4})->Args({16, 4})->Args({64, 4})->Args({512, 4})->Args(
       {4096, 4});
@@ -460,6 +619,8 @@ BENCHMARK(BM_ReadIndex_Catalog)
 BENCHMARK(BM_ReadModule_Catalog)
     ->Apply(CatalogScales)
     ->Complexity(benchmark::oN);
+BENCHMARK(BM_MaterializeSelectedLeaf_Catalog)->Apply(SelectedLeafCatalogScales);
+BENCHMARK(BM_MaterializeSelectedAll_Catalog)->Apply(SelectedAllCatalogScales);
 
 static void SetTypePlanCounters(benchmark::State& state,
                                 const TypePlanBytecodeFixture& fixture,

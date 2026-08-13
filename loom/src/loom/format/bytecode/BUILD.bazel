@@ -112,12 +112,27 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "selected_reader",
+    srcs = ["selected_reader.c"],
+    hdrs = ["selected_reader.h"],
+    deps = [
+        ":reader",
+        "//loom/src/loom/format/bytecode/reader:selected_materializer",
+        "//loom/src/loom/format/bytecode/reader:validation",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
 loom_cc_test(
     name = "reader_test",
     srcs = ["reader_test.cc"],
     deps = [
         ":format",
         ":reader",
+        ":selected_reader",
         ":varint",
         ":writer",
         "//loom/src/loom/ir",
@@ -246,7 +261,9 @@ loom_cc_benchmark(
     srcs = ["reader_benchmark.cc"],
     deps = [
         ":reader",
+        ":selected_reader",
         ":writer",
+        "//loom/src/loom/format/bytecode/reader:selected_materializer",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/testing:gen",

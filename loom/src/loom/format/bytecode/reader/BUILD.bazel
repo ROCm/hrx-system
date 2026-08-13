@@ -399,6 +399,44 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "selected_symbol",
+    srcs = ["selected_symbol.c"],
+    hdrs = ["selected_symbol.h"],
+    textual_hdrs = ["symbol_materializer_impl.inl"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":selected_body",
+        ":selected_tables",
+        ":source_trivia",
+        ":symbol_schema",
+        "//loom/src/loom/format:low_repr",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/format/bytecode:index",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "selected_materializer",
+    srcs = ["selected_materializer.c"],
+    hdrs = ["selected_materializer.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":decoder",
+        ":selected_symbol",
+        ":selected_tables",
+        "//loom/src/loom/format:low_repr",
+        "//loom/src/loom/format/bytecode:index",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
 loom_cc_test(
     name = "selected_body_test",
     srcs = ["selected_body_test.cc"],

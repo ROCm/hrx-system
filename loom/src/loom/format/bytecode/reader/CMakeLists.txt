@@ -429,6 +429,49 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    selected_symbol
+  HDRS
+    "selected_symbol.h"
+  TEXTUAL_HDRS
+    "symbol_materializer_impl.inl"
+  SRCS
+    "selected_symbol.c"
+  DEPS
+    ::selected_body
+    ::selected_tables
+    ::source_trivia
+    ::symbol_schema
+    iree::base
+    iree::base::internal::arena
+    loom::format::bytecode::format
+    loom::format::bytecode::index
+    loom::format::low_repr
+    loom::ir
+    loom::ops::op_defs
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    selected_materializer
+  HDRS
+    "selected_materializer.h"
+  SRCS
+    "selected_materializer.c"
+  DEPS
+    ::decoder
+    ::selected_symbol
+    ::selected_tables
+    iree::base
+    iree::base::internal::arena
+    loom::format::bytecode::index
+    loom::format::low_repr
+    loom::ir
+  PUBLIC
+)
+
 loom_cc_test(
   NAME
     selected_body_test

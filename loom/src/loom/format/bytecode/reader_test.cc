@@ -16,6 +16,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/format/bytecode/format.h"
+#include "loom/format/bytecode/selected_reader.h"
 #include "loom/format/bytecode/varint.h"
 #include "loom/format/bytecode/writer.h"
 #include "loom/ir/context.h"
@@ -1419,6 +1420,32 @@ class ReaderTest : public ::testing::Test {
     return result;
   }
 
+  loom_bytecode_read_result_t MaterializeModuleSymbols(
+      const std::vector<uint8_t>& bytes,
+      const loom_bytecode_file_metadata_t* metadata,
+      const std::vector<iree_host_size_t>& ordinals, loom_module_t** out_module,
+      std::vector<std::string>* error_ids, bool verify_module = false) {
+    loom_bytecode_read_result_t result = {0};
+    const loom_bytecode_read_options_t options = {
+        /*.diagnostic_sink=*/
+        {
+            /*.fn=*/CaptureDiagnostic,
+            /*.user_data=*/error_ids,
+        },
+        /*.verify_module=*/verify_module,
+    };
+    IREE_CHECK_OK(loom_bytecode_materialize_module_symbols(
+        iree_make_const_byte_span(bytes.data(), bytes.size()),
+        IREE_SV("test.loombc"), &context_, &block_pool_, metadata,
+        /*module_ordinal=*/0,
+        (loom_bytecode_symbol_ordinal_list_t){
+            /*.count=*/ordinals.size(),
+            /*.ordinals=*/ordinals.data(),
+        },
+        &options, &result, out_module, iree_allocator_system()));
+    return result;
+  }
+
   uint16_t ReadU16LE(const std::vector<uint8_t>& bytes, size_t offset) {
     return (uint16_t)bytes[offset] | ((uint16_t)bytes[offset + 1] << 8);
   }
@@ -2438,6 +2465,167 @@ TEST_F(ReaderTest, AcceptsFunctionMetadata) {
   EXPECT_GT(result.first_module.type_count, 0u);
   EXPECT_GT(result.first_module.op_name_count, 0u);
 
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, MaterializesExactIndexedSymbolSelection) {
+  loom_module_t* module = CreateModule("selected_reader");
+  AddSimpleFunction(module, "rejected");
+  AddSimpleFunction(module, "selected");
+  auto bytes = WriteModule(module);
+
+  iree_arena_allocator_t metadata_arena;
+  iree_arena_initialize(&block_pool_, &metadata_arena);
+  loom_bytecode_file_metadata_t metadata = {0};
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t index_result =
+      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+  ASSERT_EQ(index_result.error_count, 0u);
+  ASSERT_TRUE(error_ids.empty());
+  ASSERT_EQ(metadata.module_count, 1u);
+  ASSERT_EQ(metadata.modules[0].symbol_count, 2u);
+
+  loom_module_t* selected_module = nullptr;
+  loom_bytecode_read_result_t selected_result = MaterializeModuleSymbols(
+      bytes, &metadata, {1}, &selected_module, &error_ids,
+      /*verify_module=*/true);
+  EXPECT_EQ(selected_result.error_count, 0u)
+      << ::testing::PrintToString(error_ids);
+  ASSERT_NE(selected_module, nullptr);
+  ASSERT_EQ(selected_module->symbols.count, 1u);
+  const loom_symbol_t* selected_symbol = &selected_module->symbols.entries[0];
+  EXPECT_TRUE(iree_string_view_equal(
+      selected_module->strings.entries[selected_symbol->name_id],
+      IREE_SV("selected")));
+  ASSERT_NE(selected_symbol->defining_op, nullptr);
+  EXPECT_EQ(loom_test_func_callee(selected_symbol->defining_op).symbol_id, 0u);
+  loom_region_t* body = loom_test_func_body(selected_symbol->defining_op);
+  ASSERT_NE(body, nullptr);
+  EXPECT_NE(loom_region_entry_block(body)->first_op, nullptr);
+
+  loom_module_free(selected_module);
+  iree_arena_deinitialize(&metadata_arena);
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, SelectedMaterializationDoesNotReadRejectedBody) {
+  loom_module_t* module = CreateModule("selected_reader_poison");
+  AddSimpleFunction(module, "rejected");
+  AddSimpleFunction(module, "selected");
+  auto bytes = WriteModule(module);
+
+  iree_arena_allocator_t metadata_arena;
+  iree_arena_initialize(&block_pool_, &metadata_arena);
+  loom_bytecode_file_metadata_t metadata = {0};
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t index_result =
+      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+  ASSERT_EQ(index_result.error_count, 0u);
+  ASSERT_TRUE(error_ids.empty());
+  const loom_bytecode_symbol_metadata_t* rejected =
+      &metadata.modules[0].symbols[0];
+  ASSERT_TRUE(rejected->has_body);
+  ASSERT_GT(rejected->body_length, 0u);
+  std::fill(
+      bytes.begin() + rejected->body_absolute_offset,
+      bytes.begin() + rejected->body_absolute_offset + rejected->body_length,
+      0x80);
+
+  loom_module_t* selected_module = nullptr;
+  loom_bytecode_read_result_t selected_result = MaterializeModuleSymbols(
+      bytes, &metadata, {1}, &selected_module, &error_ids,
+      /*verify_module=*/true);
+  EXPECT_EQ(selected_result.error_count, 0u)
+      << ::testing::PrintToString(error_ids);
+  ASSERT_NE(selected_module, nullptr);
+  ASSERT_EQ(selected_module->symbols.count, 1u);
+
+  error_ids.clear();
+  loom_module_t* full_module = nullptr;
+  loom_bytecode_read_result_t full_result =
+      ReadModule(bytes, &full_module, &error_ids);
+  EXPECT_GT(full_result.error_count, 0u);
+  EXPECT_EQ(full_module, nullptr);
+
+  loom_module_free(selected_module);
+  iree_arena_deinitialize(&metadata_arena);
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, SelectedMaterializationDoesNotReadRejectedSymbolEntry) {
+  loom_module_t* module = CreateModule("selected_reader_entry_poison");
+  AddSimpleFunction(module, "rejected");
+  AddSimpleFunction(module, "selected");
+  auto bytes = WriteModule(module);
+
+  iree_arena_allocator_t metadata_arena;
+  iree_arena_initialize(&block_pool_, &metadata_arena);
+  loom_bytecode_file_metadata_t metadata = {0};
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t index_result =
+      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+  ASSERT_EQ(index_result.error_count, 0u);
+  ASSERT_TRUE(error_ids.empty());
+  const loom_bytecode_symbol_metadata_t* rejected =
+      &metadata.modules[0].symbols[0];
+  ASSERT_GT(rejected->entry_length, 0u);
+  std::fill(bytes.begin() + rejected->entry_offset,
+            bytes.begin() + rejected->entry_offset + rejected->entry_length,
+            0x80);
+
+  loom_module_t* selected_module = nullptr;
+  loom_bytecode_read_result_t selected_result = MaterializeModuleSymbols(
+      bytes, &metadata, {1}, &selected_module, &error_ids,
+      /*verify_module=*/true);
+  EXPECT_EQ(selected_result.error_count, 0u)
+      << ::testing::PrintToString(error_ids);
+  ASSERT_NE(selected_module, nullptr);
+  ASSERT_EQ(selected_module->symbols.count, 1u);
+
+  error_ids.clear();
+  loom_module_t* full_module = nullptr;
+  loom_bytecode_read_result_t full_result =
+      ReadModule(bytes, &full_module, &error_ids);
+  EXPECT_GT(full_result.error_count, 0u);
+  EXPECT_EQ(full_module, nullptr);
+
+  loom_module_free(selected_module);
+  iree_arena_deinitialize(&metadata_arena);
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, DiagnosesMalformedSelectedBody) {
+  loom_module_t* module = CreateModule("selected_reader_malformed_body");
+  AddSimpleFunction(module, "rejected");
+  AddSimpleFunction(module, "selected");
+  auto bytes = WriteModule(module);
+
+  iree_arena_allocator_t metadata_arena;
+  iree_arena_initialize(&block_pool_, &metadata_arena);
+  loom_bytecode_file_metadata_t metadata = {0};
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t index_result =
+      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+  ASSERT_EQ(index_result.error_count, 0u);
+  ASSERT_TRUE(error_ids.empty());
+  const loom_bytecode_symbol_metadata_t* selected =
+      &metadata.modules[0].symbols[1];
+  ASSERT_TRUE(selected->has_body);
+  ASSERT_GT(selected->body_length, 0u);
+  std::fill(
+      bytes.begin() + selected->body_absolute_offset,
+      bytes.begin() + selected->body_absolute_offset + selected->body_length,
+      0x80);
+
+  loom_module_t* selected_module = nullptr;
+  loom_bytecode_read_result_t selected_result = MaterializeModuleSymbols(
+      bytes, &metadata, {1}, &selected_module, &error_ids,
+      /*verify_module=*/true);
+  EXPECT_GT(selected_result.error_count, 0u);
+  EXPECT_FALSE(error_ids.empty());
+  EXPECT_EQ(selected_module, nullptr);
+
+  iree_arena_deinitialize(&metadata_arena);
   loom_module_free(module);
 }
 

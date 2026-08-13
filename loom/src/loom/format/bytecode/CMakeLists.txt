@@ -128,6 +128,23 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    selected_reader
+  HDRS
+    "selected_reader.h"
+  SRCS
+    "selected_reader.c"
+  DEPS
+    ::reader
+    iree::base
+    iree::base::internal::arena
+    loom::format::bytecode::reader::selected_materializer
+    loom::format::bytecode::reader::validation
+    loom::verify
+  PUBLIC
+)
+
 loom_cc_test(
   NAME
     reader_test
@@ -136,6 +153,7 @@ loom_cc_test(
   DEPS
     ::format
     ::reader
+    ::selected_reader
     ::varint
     ::writer
     iree::base::internal::arena
@@ -274,11 +292,13 @@ loom_cc_benchmark(
     "reader_benchmark.cc"
   DEPS
     ::reader
+    ::selected_reader
     ::writer
     iree::base
     iree::base::internal::arena
     iree::io::stream
     iree::testing::benchmark_main
+    loom::format::bytecode::reader::selected_materializer
     loom::ir
     loom::ops::test
     loom::testing::gen
