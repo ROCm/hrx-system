@@ -10,8 +10,10 @@
 
 #include "iree/hal/drivers/amdgpu/access_policy.h"
 #include "iree/hal/drivers/amdgpu/asan_state.h"
+#include "iree/hal/drivers/amdgpu/atomic_memory.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/logical_device.h"
+#include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
 #include "iree/hal/memory/tracing.h"
 
@@ -42,6 +44,9 @@ typedef struct iree_hal_amdgpu_slab_provider_t {
 
   // Queue affinities in this provider's physical memory domain.
   iree_hal_queue_affinity_t queue_affinity_mask;
+
+  // Atomic memory cells supported by every buffer from this provider.
+  iree_hal_amdgpu_atomic_memory_cell_flags_t atomic_memory_cells;
 
   // Stable named-memory stream for HSA backing allocations from this provider.
   iree_hal_memory_trace_t trace;
@@ -427,12 +432,26 @@ iree_status_t iree_hal_amdgpu_slab_provider_create(
                             "AMDGPU slab provider queue affinity mask must "
                             "not be empty");
   }
-  if (IREE_UNLIKELY(physical_device_ordinal > UINT32_MAX)) {
+  if (IREE_UNLIKELY(physical_device_ordinal >= topology->gpu_agent_count)) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU slab provider physical device ordinal out of range: %" PRIhsz,
-        physical_device_ordinal);
+        "AMDGPU slab provider physical device ordinal %" PRIhsz
+        " exceeds topology GPU agent count %" PRIhsz,
+        physical_device_ordinal, topology->gpu_agent_count);
+  }
+  const iree_hal_amdgpu_queue_affinity_domain_t affinity_domain = {
+      .supported_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
+      .physical_device_count = topology->gpu_agent_count,
+      .queue_count_per_physical_device = topology->gpu_agent_queue_count,
+  };
+  if (IREE_UNLIKELY(!iree_hal_amdgpu_queue_affinity_is_physical_device_local(
+          affinity_domain, queue_affinity_mask, physical_device_ordinal))) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "AMDGPU slab provider queue affinity 0x%016" PRIx64
+                            " is not local to physical device %" PRIhsz,
+                            queue_affinity_mask, physical_device_ordinal);
   }
   if (IREE_UNLIKELY(!options.memory_pool.handle)) {
     IREE_TRACE_ZONE_END(z0);
@@ -507,6 +526,18 @@ iree_status_t iree_hal_amdgpu_slab_provider_create(
     status = iree_hal_amdgpu_slab_provider_query_memory_pool_properties(
         libhsa, options.memory_pool, &properties);
   }
+  iree_hal_amdgpu_atomic_memory_source_masks_t atomic_memory_source_masks;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amdgpu_atomic_memory_query_source_masks(
+        libhsa, topology, options.memory_pool,
+        HSA_AMD_MEMORY_POOL_STANDARD_FLAG, &atomic_memory_source_masks);
+  }
+  if (iree_status_is_ok(status)) {
+    provider->atomic_memory_cells =
+        iree_hal_amdgpu_atomic_memory_select_device_cells(
+            &atomic_memory_source_masks, ((iree_hal_amdgpu_gpu_agent_mask_t)1)
+                                             << physical_device_ordinal);
+  }
   if (iree_status_is_ok(status) &&
       iree_hal_amdgpu_slab_provider_uses_asan_vmm(provider)) {
     status = iree_hal_amdgpu_vmem_translate_memory_type(
@@ -529,6 +560,9 @@ iree_status_t iree_hal_amdgpu_slab_provider_create(
   if (iree_status_is_ok(status)) {
     provider->properties.memory_type = options.memory_type;
     provider->properties.supported_usage = options.supported_usage;
+    provider->properties.atomic_operations =
+        iree_hal_amdgpu_atomic_memory_expand_capabilities(
+            provider->atomic_memory_cells);
     *out_provider = &provider->base;
   } else {
     iree_hal_slab_provider_release(&provider->base);
@@ -759,9 +793,9 @@ static iree_status_t iree_hal_amdgpu_slab_provider_wrap_buffer(
   }
   return iree_hal_amdgpu_buffer_create_pooled(
       provider->libhsa, placement, resolved_type, params.access, params.usage,
-      allocation_size, allocation_size, slab->base_ptr + slab_offset,
-      release_callback, provider->buffer_pool, provider->host_allocator,
-      out_buffer);
+      provider->atomic_memory_cells, allocation_size, allocation_size,
+      slab->base_ptr + slab_offset, release_callback, provider->buffer_pool,
+      provider->host_allocator, out_buffer);
 }
 
 static iree_status_t iree_hal_amdgpu_slab_provider_validate_asan_options(

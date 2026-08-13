@@ -46,12 +46,30 @@ endif()
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_library(
   NAME
+    atomic_memory
+  HDRS
+    "atomic_memory.h"
+  SRCS
+    "atomic_memory.c"
+  DEPS
+    iree::base
+    iree::hal
+    iree::hal::drivers::amdgpu::util::libhsa
+    iree::hal::drivers::amdgpu::util::topology
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
     buffer
   HDRS
     "buffer.h"
   SRCS
     "buffer.c"
   DEPS
+    ::atomic_memory
     ::headers
     iree::base
     iree::base::internal
@@ -296,6 +314,7 @@ iree_cc_library(
     "virtual_queue.h"
   DEPS
     ::access_policy
+    ::atomic_memory
     ::buffer
     ::device_spec_builder
     ::executable_global_resolver
@@ -440,6 +459,27 @@ iree_cc_library(
     iree::hal::memory::slab_provider
     iree::hal::memory::tracing
   PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    atomic_memory_test
+  SRCS
+    "atomic_memory_test.cc"
+  DEPS
+    ::atomic_memory
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
 )
 endif()
 

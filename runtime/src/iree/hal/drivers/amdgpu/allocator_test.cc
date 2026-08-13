@@ -895,6 +895,25 @@ TEST_F(AllocatorTest, QueryMemoryHeapsReportsHsaLimits) {
     EXPECT_NE(heap.max_allocation_size, ~(iree_device_size_t)0);
     EXPECT_NE(heap.min_alignment, 0u);
     EXPECT_TRUE(iree_device_size_is_power_of_two(heap.min_alignment));
+
+    EXPECT_EQ(heap.atomic_operations.device_scope_32,
+              IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+    EXPECT_EQ(heap.atomic_operations.device_scope_64,
+              IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+    EXPECT_TRUE(heap.atomic_operations.system_scope_32 ==
+                    IREE_HAL_ATOMIC_OPERATION_FLAG_NONE ||
+                heap.atomic_operations.system_scope_32 ==
+                    IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+    EXPECT_TRUE(heap.atomic_operations.system_scope_64 ==
+                    IREE_HAL_ATOMIC_OPERATION_FLAG_NONE ||
+                heap.atomic_operations.system_scope_64 ==
+                    IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+    if (iree_all_bits_set(heap.type, IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {
+      EXPECT_EQ(heap.atomic_operations.system_scope_32,
+                IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+      EXPECT_EQ(heap.atomic_operations.system_scope_64,
+                IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+    }
   }
 }
 
@@ -1309,6 +1328,21 @@ TEST_F(AllocatorTest, AmdgpuDeviceSpecExposesRepresentativePhysicalFacts) {
   const iree_hal_device_memory_spec_t* memory =
       iree_hal_device_spec_memory(device_spec);
   ASSERT_NE(memory, nullptr);
+  ASSERT_GE(memory->memory_type_count, 2u);
+  for (iree_host_size_t i = 0; i < memory->memory_type_count; ++i) {
+    const iree_hal_memory_type_spec_t& memory_type = memory->memory_types[i];
+    EXPECT_EQ(memory_type.atomic_operations.device_scope_32,
+              IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+    EXPECT_EQ(memory_type.atomic_operations.device_scope_64,
+              IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+    if (iree_all_bits_set(memory_type.memory_type,
+                          IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {
+      EXPECT_EQ(memory_type.atomic_operations.system_scope_32,
+                IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+      EXPECT_EQ(memory_type.atomic_operations.system_scope_64,
+                IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+    }
+  }
   if (system_info_.dmabuf_supported) {
     iree_hal_external_buffer_handle_selection_t selection = {
         /*.handle_type_mask=*/IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF,

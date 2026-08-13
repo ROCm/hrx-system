@@ -248,6 +248,54 @@ iree_status_t iree_hal_amdgpu_queue_affinity_for_physical_device(
   return iree_ok_status();
 }
 
+bool iree_hal_amdgpu_queue_affinity_try_select_physical_devices(
+    iree_hal_amdgpu_queue_affinity_domain_t domain,
+    iree_hal_queue_affinity_t requested_affinity,
+    iree_hal_amdgpu_queue_affinity_physical_device_set_t*
+        out_physical_device_set) {
+  memset(out_physical_device_set, 0, sizeof(*out_physical_device_set));
+  if (domain.physical_device_count > IREE_HAL_MAX_QUEUES) return false;
+
+  iree_hal_queue_affinity_t normalized_affinity = 0;
+  if (!iree_hal_amdgpu_queue_affinity_try_normalize(domain.supported_affinity,
+                                                    requested_affinity,
+                                                    &normalized_affinity)) {
+    return false;
+  }
+
+  iree_hal_amdgpu_queue_affinity_physical_device_set_t physical_device_set = {
+      .queue_affinity = normalized_affinity,
+  };
+  for (iree_host_size_t physical_device_ordinal = 0;
+       physical_device_ordinal < domain.physical_device_count;
+       ++physical_device_ordinal) {
+    iree_hal_queue_affinity_t physical_device_affinity = 0;
+    if (!iree_hal_amdgpu_queue_affinity_try_for_physical_device(
+            domain, physical_device_ordinal, &physical_device_affinity)) {
+      return false;
+    }
+    iree_hal_queue_affinity_and_into(physical_device_affinity,
+                                     domain.supported_affinity);
+
+    iree_hal_queue_affinity_t selected_affinity = normalized_affinity;
+    iree_hal_queue_affinity_and_into(selected_affinity,
+                                     physical_device_affinity);
+    if (iree_hal_queue_affinity_is_empty(selected_affinity)) continue;
+
+    if (physical_device_set.physical_device_count == 0) {
+      physical_device_set.first_physical_device_ordinal =
+          physical_device_ordinal;
+    }
+    physical_device_set.physical_device_mask |= ((uint64_t)1)
+                                                << physical_device_ordinal;
+    ++physical_device_set.physical_device_count;
+  }
+
+  if (physical_device_set.physical_device_count == 0) return false;
+  *out_physical_device_set = physical_device_set;
+  return true;
+}
+
 iree_status_t iree_hal_amdgpu_queue_affinity_select_physical_devices(
     iree_hal_amdgpu_queue_affinity_domain_t domain,
     iree_hal_queue_affinity_t requested_affinity,

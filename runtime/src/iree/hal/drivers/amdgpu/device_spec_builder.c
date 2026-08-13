@@ -252,6 +252,7 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_memory(
               iree_hal_amdgpu_device_spec_memory_access(allocator_heap),
           .minimum_alignment = allocator_heap->min_alignment,
           .optimal_transfer_granularity = 1,
+          .atomic_operations = allocator_heap->atomic_operations,
           .flags = IREE_HAL_MEMORY_TYPE_SPEC_FLAG_NONE,
       };
     }

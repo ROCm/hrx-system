@@ -121,6 +121,17 @@ iree_status_t iree_hal_amdgpu_queue_affinity_select_physical_devices(
     iree_hal_amdgpu_queue_affinity_physical_device_set_t*
         out_physical_device_set);
 
+// Attempts to select physical devices without constructing a status.
+//
+// Placement predicates use this when malformed affinity domains and empty
+// selections are represented by false. |out_physical_device_set| is zeroed on
+// failure.
+bool iree_hal_amdgpu_queue_affinity_try_select_physical_devices(
+    iree_hal_amdgpu_queue_affinity_domain_t domain,
+    iree_hal_queue_affinity_t requested_affinity,
+    iree_hal_amdgpu_queue_affinity_physical_device_set_t*
+        out_physical_device_set);
+
 // Normalizes |requested_affinity| to queues owned by a single physical device.
 //
 // IREE_HAL_QUEUE_AFFINITY_ANY selects all supported queues for the first

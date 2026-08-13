@@ -46,10 +46,23 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "atomic_memory",
+    srcs = ["atomic_memory.c"],
+    hdrs = ["atomic_memory.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:libhsa",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:topology",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "buffer",
     srcs = ["buffer.c"],
     hdrs = ["buffer.h"],
     deps = [
+        ":atomic_memory",
         ":headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
@@ -258,6 +271,7 @@ iree_runtime_cc_library(
     ],
     deps = [
         ":access_policy",
+        ":atomic_memory",
         ":buffer",
         ":device_spec_builder",
         ":executable_global_resolver",
@@ -401,6 +415,18 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/executable/amdgpu:target_id",
         "//runtime/src/iree/hal/memory:slab_provider",
         "//runtime/src/iree/hal/memory:tracing",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "atomic_memory_test",
+    srcs = ["atomic_memory_test.cc"],
+    deps = [
+        ":atomic_memory",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

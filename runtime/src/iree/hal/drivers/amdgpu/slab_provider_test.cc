@@ -6,6 +6,7 @@
 
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/test_base.h"
+#include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/logical_device.h"
 #include "iree/hal/drivers/amdgpu/physical_device.h"
 #include "iree/testing/gtest.h"
@@ -98,6 +99,16 @@ TEST_F(SlabProviderTest,
   ASSERT_GE(device->physical_device_count, 1u);
   iree_hal_pool_t* default_pool = device->physical_devices[0]->default_pool;
   ASSERT_NE(default_pool, nullptr);
+  iree_hal_pool_capabilities_t capabilities;
+  iree_hal_pool_query_capabilities(default_pool, &capabilities);
+  EXPECT_EQ(capabilities.atomic_operations.device_scope_32,
+            IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+  EXPECT_EQ(capabilities.atomic_operations.device_scope_64,
+            IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+  EXPECT_EQ(capabilities.atomic_operations.system_scope_32,
+            IREE_HAL_ATOMIC_OPERATION_FLAG_NONE);
+  EXPECT_EQ(capabilities.atomic_operations.system_scope_64,
+            IREE_HAL_ATOMIC_OPERATION_FLAG_NONE);
 
   iree_hal_buffer_params_t params = {0};
   params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
@@ -114,6 +125,9 @@ TEST_F(SlabProviderTest,
                                 IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL));
   EXPECT_FALSE(iree_all_bits_set(iree_hal_buffer_memory_type(buffer),
                                  IREE_HAL_MEMORY_TYPE_HOST_VISIBLE));
+  EXPECT_EQ(iree_hal_amdgpu_buffer_atomic_memory_cells(buffer),
+            IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_DEVICE_SCOPE_32 |
+                IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_DEVICE_SCOPE_64);
 
   iree_hal_buffer_release(buffer);
 }

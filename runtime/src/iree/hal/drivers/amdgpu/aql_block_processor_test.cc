@@ -542,8 +542,9 @@ class AqlBlockProcessorRecordedTest : public ::testing::Test {
         /*libhsa=*/nullptr, iree_hal_buffer_placement_undefined(),
         IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE,
         IREE_HAL_MEMORY_ACCESS_ALL,
-        IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH, length,
-        length, storage, release_callback, iree_allocator_system(), &buffer));
+        IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH,
+        IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE, length, length, storage,
+        release_callback, iree_allocator_system(), &buffer));
     return BufferPtr(buffer);
   }
 
