@@ -2013,9 +2013,15 @@ TEST_F(ReaderTest, PreservesSourceTrivia) {
   func_op->flags |= LOOM_OP_FLAG_LEADING_BLANK_LINE;
   entry_block->flags |= LOOM_BLOCK_FLAG_LEADING_BLANK_LINE;
   entry_block->first_op->flags |= LOOM_OP_FLAG_LEADING_BLANK_LINE;
-  const iree_string_view_t symbol_comments[] = {IREE_SV(" symbol")};
-  const iree_string_view_t block_comments[] = {IREE_SV(" block")};
-  const iree_string_view_t op_comments[] = {IREE_SV(" operation")};
+  const iree_string_view_t symbol_comments[] = {IREE_SV("symbol")};
+  const iree_string_view_t block_comments[] = {IREE_SV("block")};
+  const iree_string_view_t op_comments[] = {IREE_SV("operation")};
+  const iree_string_view_t file_header[] = {
+      IREE_SV("File-level overview."),
+      IREE_SV("Second header line."),
+  };
+  IREE_ASSERT_OK(loom_module_attach_file_header(module, file_header,
+                                                IREE_ARRAYSIZE(file_header)));
   IREE_ASSERT_OK(loom_module_attach_op_comments(
       module, func_op, symbol_comments, IREE_ARRAYSIZE(symbol_comments)));
   IREE_ASSERT_OK(loom_module_attach_block_comments(
@@ -2047,7 +2053,11 @@ TEST_F(ReaderTest, PreservesSourceTrivia) {
 
   iree_host_size_t comment_count = 0;
   const iree_string_view_t* comments =
-      loom_module_op_comments(read_module, read_func_op, &comment_count);
+      loom_module_file_header(read_module, &comment_count);
+  ASSERT_EQ(comment_count, IREE_ARRAYSIZE(file_header));
+  EXPECT_TRUE(iree_string_view_equal(comments[0], file_header[0]));
+  EXPECT_TRUE(iree_string_view_equal(comments[1], file_header[1]));
+  comments = loom_module_op_comments(read_module, read_func_op, &comment_count);
   ASSERT_EQ(comment_count, 1u);
   EXPECT_TRUE(iree_string_view_equal(comments[0], symbol_comments[0]));
   comments =
@@ -2060,6 +2070,62 @@ TEST_F(ReaderTest, PreservesSourceTrivia) {
   EXPECT_TRUE(iree_string_view_equal(comments[0], op_comments[0]));
 
   loom_module_free(read_module);
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsFileHeaderLeadingBlankLine) {
+  loom_module_t* module = CreateModule("file_header");
+  const iree_string_view_t file_header[] = {IREE_SV("File overview.")};
+  IREE_ASSERT_OK(loom_module_attach_file_header(module, file_header,
+                                                IREE_ARRAYSIZE(file_header)));
+  auto bytes = WriteModule(module);
+  size_t offset =
+      SectionPayloadOffset(bytes, LOOM_BYTECODE_SECTION_SOURCE_TRIVIA);
+  ASSERT_EQ(bytes[offset], 2u);
+  bytes[offset] |= LOOM_BYTECODE_SOURCE_TRIVIA_LEADING_BLANK_LINE;
+
+  ExpectReadError(bytes, "ERR_BYTECODE_006");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsInvalidUtf8FileHeader) {
+  loom_module_t* module = CreateModule("file_header");
+  const iree_string_view_t file_header[] = {IREE_SV("File overview.")};
+  IREE_ASSERT_OK(loom_module_attach_file_header(module, file_header,
+                                                IREE_ARRAYSIZE(file_header)));
+  auto bytes = WriteModule(module);
+  size_t offset =
+      SectionPayloadOffset(bytes, LOOM_BYTECODE_SECTION_SOURCE_TRIVIA);
+  ASSERT_EQ(ReadUVarint(bytes, &offset), 2u);
+  ASSERT_GT(ReadUVarint(bytes, &offset), 1u);
+  ASSERT_EQ(bytes[offset], ' ');
+  bytes[offset + 1] = 0xFF;
+
+  ExpectReadError(bytes, "ERR_BYTECODE_006");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsFileHeaderTrailingBytes) {
+  loom_module_t* module = CreateModule("file_header");
+  const iree_string_view_t file_header[] = {IREE_SV("File overview.")};
+  IREE_ASSERT_OK(loom_module_attach_file_header(module, file_header,
+                                                IREE_ARRAYSIZE(file_header)));
+  auto bytes = WriteModule(module);
+  SectionEntry source_trivia =
+      FindSection(bytes, LOOM_BYTECODE_SECTION_SOURCE_TRIVIA);
+  ASSERT_NE(source_trivia.length, 0u);
+  ASSERT_EQ((uint64_t)bytes.size(),
+            ModuleOffset(bytes) + source_trivia.offset + source_trivia.length);
+  bytes.push_back(0);
+  WriteU64LE(&bytes, source_trivia.directory_entry_offset + 16,
+             source_trivia.length + 1);
+  WriteU64LE(&bytes, ModuleDirectoryOffset(bytes) + 16,
+             ModuleLength(bytes) + 1);
+
+  ExpectReadError(bytes, "ERR_BYTECODE_006");
+
   loom_module_free(module);
 }
 
@@ -3175,8 +3241,8 @@ TEST_F(ReaderTest, RejectsSourceTriviaCommentCountBeyondFieldWidth) {
   auto bytes = WriteModule(module);
   size_t source_trivia_offset = RootBlockSourceTriviaOffset(bytes);
   ASSERT_EQ(bytes[source_trivia_offset], 2u);
-  ASSERT_EQ(bytes[source_trivia_offset + 1], 1u);
-  ASSERT_EQ(bytes[source_trivia_offset + 2], 'x');
+  ASSERT_EQ(bytes[source_trivia_offset + 1], 2u);
+  ASSERT_EQ(bytes[source_trivia_offset + 2], ' ');
   bytes[source_trivia_offset] = 0x80;
   bytes[source_trivia_offset + 1] = 0x80;
   bytes[source_trivia_offset + 2] = 0x08;

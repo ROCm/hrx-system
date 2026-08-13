@@ -108,7 +108,10 @@ static iree_status_t loom_print_leading_comments(
   for (iree_host_size_t i = 0; i < comment_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_print_indent_at(ctx, indent));
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, "//"));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write(ctx->stream, comments[i]));
+    if (!iree_string_view_is_empty(comments[i])) {
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, ' '));
+      IREE_RETURN_IF_ERROR(loom_output_stream_write(ctx->stream, comments[i]));
+    }
     IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '\n'));
   }
   return iree_ok_status();

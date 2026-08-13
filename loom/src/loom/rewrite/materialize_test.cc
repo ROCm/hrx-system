@@ -342,7 +342,7 @@ TEST_F(MaterializeTest, ClonesOperationAndBlockSourcePresentation) {
   loom_block_t* source_block = loom_region_entry_block(source_region);
   source_block->flags |= LOOM_BLOCK_FLAG_LEADING_BLANK_LINE;
   const iree_string_view_t block_comments[] = {
-      IREE_SV(" block heading"),
+      IREE_SV("block heading"),
   };
   IREE_ASSERT_OK(loom_module_attach_block_comments(
       source_, source_block, block_comments, IREE_ARRAYSIZE(block_comments)));
@@ -357,8 +357,8 @@ TEST_F(MaterializeTest, ClonesOperationAndBlockSourcePresentation) {
                                LOOM_LOCATION_UNKNOWN, &source_op));
   source_op->flags |= LOOM_OP_FLAG_LEADING_BLANK_LINE;
   const iree_string_view_t op_comments[] = {
-      IREE_SV(" operation heading"),
-      IREE_SV(" operation detail"),
+      IREE_SV("operation heading"),
+      IREE_SV("operation detail"),
   };
   IREE_ASSERT_OK(loom_module_attach_op_comments(source_, source_op, op_comments,
                                                 IREE_ARRAYSIZE(op_comments)));

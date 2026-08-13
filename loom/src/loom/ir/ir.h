@@ -2201,11 +2201,12 @@ typedef struct loom_type_use_table_t {
 typedef enum loom_comment_owner_kind_e {
   LOOM_COMMENT_OWNER_OP = 0,
   LOOM_COMMENT_OWNER_BLOCK = 1,
+  LOOM_COMMENT_OWNER_MODULE = 2,
 } loom_comment_owner_kind_t;
 
-// Leading comments attached to one operation or block label.
+// Source comments attached to the file, an operation, or a block label.
 typedef struct loom_comment_attachment_t {
-  // Operation or block pointer that owns the leading comments.
+  // IR object pointer that owns the source comments.
   const void* owner;
   // Kind tag describing the pointer stored in owner.
   loom_comment_owner_kind_t owner_kind;
@@ -2213,7 +2214,7 @@ typedef struct loom_comment_attachment_t {
   uint16_t reserved;
   // Number of line comments stored in comments.
   uint16_t comment_count;
-  // Module-arena-owned post-// comment payloads in source order.
+  // Module-owned comment payloads without // or its separator space.
   iree_string_view_t* comments;
 } loom_comment_attachment_t;
 
@@ -2318,7 +2319,7 @@ typedef struct loom_module_t {
   // reference LOOM_LOCATION_UNKNOWN (0).
   loom_location_table_t locations;
 
-  // Source comments attached to operations and explicit block labels.
+  // Source comments attached to this file, operations, and block labels.
   loom_comment_table_t comments;
 
   // Module body: a region with a single entry block. All top-level symbol ops

@@ -515,10 +515,12 @@ TEST_F(WriterTest, SectionDirectoryHasWrittenSections) {
     found_kinds[kind] = true;
   }
 
-  for (int i = 0; i < LOOM_BYTECODE_SECTION_COUNT - 1; ++i) {
+  for (int i = LOOM_BYTECODE_SECTION_STRINGS; i <= LOOM_BYTECODE_SECTION_IR;
+       ++i) {
     EXPECT_TRUE(found_kinds[i]) << "missing section kind " << i;
   }
   EXPECT_FALSE(found_kinds[LOOM_BYTECODE_SECTION_RESOURCES]);
+  EXPECT_FALSE(found_kinds[LOOM_BYTECODE_SECTION_SOURCE_TRIVIA]);
 
   loom_module_free(module);
 }
@@ -779,8 +781,8 @@ TEST_F(WriterTest, FunctionBodySummaryAndOpTableRefsUseNewWireShape) {
                                       &addi_op));
   entry_block->flags |= LOOM_BLOCK_FLAG_LEADING_BLANK_LINE;
   addi_op->flags |= LOOM_OP_FLAG_LEADING_BLANK_LINE;
-  const iree_string_view_t block_comments[] = {IREE_SV(" block")};
-  const iree_string_view_t op_comments[] = {IREE_SV(" operation")};
+  const iree_string_view_t block_comments[] = {IREE_SV("block")};
+  const iree_string_view_t op_comments[] = {IREE_SV("operation")};
   IREE_ASSERT_OK(loom_module_attach_block_comments(
       module, entry_block, block_comments, IREE_ARRAYSIZE(block_comments)));
   IREE_ASSERT_OK(loom_module_attach_op_comments(module, addi_op, op_comments,
@@ -832,10 +834,14 @@ TEST_F(WriterTest, FunctionBodySummaryAndOpTableRefsUseNewWireShape) {
   ASSERT_EQ(block_source_trivia, 3u);
   uint64_t block_comment_length = 0;
   IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &block_comment_length));
-  ASSERT_EQ(block_comment_length, block_comments[0].size);
-  iree_const_byte_span_t unused_comment = iree_const_byte_span_empty();
+  ASSERT_EQ(block_comment_length, block_comments[0].size + 1);
+  iree_const_byte_span_t block_comment = iree_const_byte_span_empty();
   IREE_ASSERT_OK(loom_bytecode_cursor_read_span(
-      &cursor, (iree_host_size_t)block_comment_length, &unused_comment));
+      &cursor, (iree_host_size_t)block_comment_length, &block_comment));
+  ASSERT_EQ(block_comment.data[0], ' ');
+  EXPECT_EQ(memcmp(block_comment.data + 1, block_comments[0].data,
+                   block_comments[0].size),
+            0);
   uint64_t block_arg_count = 0;
   IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &block_arg_count));
   ASSERT_EQ(block_arg_count, 2u);
@@ -865,7 +871,13 @@ TEST_F(WriterTest, FunctionBodySummaryAndOpTableRefsUseNewWireShape) {
   ASSERT_EQ(op_source_trivia, 3u);
   uint64_t op_comment_length = 0;
   IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &op_comment_length));
-  ASSERT_EQ(op_comment_length, op_comments[0].size);
+  ASSERT_EQ(op_comment_length, op_comments[0].size + 1);
+  iree_const_byte_span_t op_comment = iree_const_byte_span_empty();
+  IREE_ASSERT_OK(loom_bytecode_cursor_read_span(
+      &cursor, (iree_host_size_t)op_comment_length, &op_comment));
+  ASSERT_EQ(op_comment.data[0], ' ');
+  EXPECT_EQ(
+      memcmp(op_comment.data + 1, op_comments[0].data, op_comments[0].size), 0);
 
   loom_module_free(module);
 }

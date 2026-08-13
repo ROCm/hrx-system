@@ -209,6 +209,8 @@ void loom_tokenizer_initialize(iree_string_view_t source,
   out_tokenizer->pending_comment_count = 0;
   out_tokenizer->pending_comment_capacity = 0;
   out_tokenizer->pending_comment_start_line = 0;
+  out_tokenizer->pending_comment_end_line = 0;
+  out_tokenizer->pending_file_header_line_count = 0;
   out_tokenizer->pending_leading_blank_line = false;
   out_tokenizer->status = iree_ok_status();
   out_tokenizer->consumed_end_line = 0;
@@ -286,6 +288,29 @@ iree_status_t loom_tokenizer_consume_status(loom_tokenizer_t* tokenizer) {
   return status;
 }
 
+void loom_tokenizer_take_file_header(loom_tokenizer_t* tokenizer,
+                                     const iree_string_view_t** out_lines,
+                                     iree_host_size_t* out_line_count) {
+  *out_lines = tokenizer->pending_comments;
+  *out_line_count = tokenizer->pending_file_header_line_count;
+  if (tokenizer->pending_file_header_line_count > 0 &&
+      tokenizer->pending_file_header_line_count ==
+          tokenizer->pending_comment_count) {
+    tokenizer->pending_comments = NULL;
+    tokenizer->pending_comment_count = 0;
+    tokenizer->pending_comment_capacity = 0;
+    tokenizer->pending_comment_start_line = 0;
+    tokenizer->pending_comment_end_line = 0;
+  } else if (tokenizer->pending_file_header_line_count > 0) {
+    tokenizer->pending_comments += tokenizer->pending_file_header_line_count;
+    tokenizer->pending_comment_count -=
+        tokenizer->pending_file_header_line_count;
+    tokenizer->pending_comment_capacity -=
+        tokenizer->pending_file_header_line_count;
+  }
+  tokenizer->pending_file_header_line_count = 0;
+}
+
 void loom_tokenizer_take_pending_comments(
     loom_tokenizer_t* tokenizer, const iree_string_view_t** out_comments,
     iree_host_size_t* out_comment_count, bool* out_leading_blank_line) {
@@ -298,12 +323,16 @@ void loom_tokenizer_take_pending_comments(
   }
   tokenizer->pending_comment_count = 0;
   tokenizer->pending_comment_start_line = 0;
+  tokenizer->pending_comment_end_line = 0;
+  tokenizer->pending_file_header_line_count = 0;
   tokenizer->pending_leading_blank_line = false;
 }
 
 void loom_tokenizer_discard_pending_comments(loom_tokenizer_t* tokenizer) {
   tokenizer->pending_comment_count = 0;
   tokenizer->pending_comment_start_line = 0;
+  tokenizer->pending_comment_end_line = 0;
+  tokenizer->pending_file_header_line_count = 0;
   tokenizer->pending_leading_blank_line = false;
 }
 
@@ -322,6 +351,9 @@ static iree_status_t loom_tokenizer_append_pending_comment(
         t->scratch_arena, t->pending_comment_count, /*minimum_capacity=*/8,
         sizeof(iree_string_view_t), &t->pending_comment_capacity,
         (void**)&t->pending_comments));
+  }
+  if (iree_string_view_starts_with(comment, IREE_SV(" "))) {
+    comment = iree_string_view_remove_prefix(comment, 1);
   }
   t->pending_comments[t->pending_comment_count++] = comment;
   return iree_ok_status();
@@ -342,7 +374,13 @@ static iree_status_t loom_tokenizer_skip_whitespace(loom_tokenizer_t* t) {
       // Line comment: skip to end of line with UTF-8-aware column tracking.
       if (t->pending_comment_count == 0) {
         t->pending_comment_start_line = t->line;
+      } else if (t->pending_comment_start_line == 1 &&
+                 t->pending_file_header_line_count == 0 &&
+                 (uint64_t)t->line >
+                     (uint64_t)t->pending_comment_end_line + 1) {
+        t->pending_file_header_line_count = t->pending_comment_count;
       }
+      t->pending_comment_end_line = t->line;
       iree_host_size_t comment_start = t->position + 2;
       t->position += 2;
       t->column += 2;
@@ -1045,6 +1083,12 @@ static iree_status_t loom_tokenizer_scan(loom_tokenizer_t* t,
 
   const uint32_t source_start_line =
       t->pending_comment_count > 0 ? t->pending_comment_start_line : t->line;
+  if (t->pending_comment_start_line == 1 &&
+      t->pending_file_header_line_count == 0 &&
+      (t->position == t->source.size ||
+       (uint64_t)t->line > (uint64_t)t->pending_comment_end_line + 1)) {
+    t->pending_file_header_line_count = t->pending_comment_count;
+  }
   t->pending_leading_blank_line =
       t->consumed_end_line != 0 &&
       (uint64_t)source_start_line > (uint64_t)t->consumed_end_line + 1;

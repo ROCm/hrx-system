@@ -1229,7 +1229,7 @@ class Printer:
     def _emit_comments(self, comments: tuple[str, ...]) -> None:
         """Emit leading line comments at the current indentation."""
         for comment in comments:
-            self._emit("//" + comment)
+            self._emit("//" + (" " + comment if comment else ""))
 
     # --- Module printing ---
 
@@ -1237,6 +1237,12 @@ class Printer:
         """Print a complete module to canonical text."""
         self._lines = []
         self._module = module
+        self._emit_comments(module.file_header)
+        if module.file_header and (
+            any(encoding.alias for encoding in module.encodings)
+            or any(symbol.op is not None for symbol in module.symbols)
+        ):
+            self._lines.append("")
         for encoding in module.encodings:
             if encoding.alias:
                 self._emit(

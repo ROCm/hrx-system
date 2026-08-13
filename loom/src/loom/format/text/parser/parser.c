@@ -1028,6 +1028,17 @@ iree_status_t loom_parse_region_with_syntax(
 //===----------------------------------------------------------------------===//
 
 static iree_status_t loom_parse_module_body(loom_parser_t* parser) {
+  // A separated line-1 comment block belongs to the source file rather than
+  // the first alias or operation. Peeking performs the initial trivia scan;
+  // taking the file header leaves any adjacent declaration comments pending.
+  (void)loom_tokenizer_peek(&parser->tokenizer);
+  const iree_string_view_t* file_header = NULL;
+  iree_host_size_t file_header_line_count = 0;
+  loom_tokenizer_take_file_header(&parser->tokenizer, &file_header,
+                                  &file_header_line_count);
+  IREE_RETURN_IF_ERROR(loom_module_attach_file_header(
+      parser->module, file_header, file_header_line_count));
+
   while (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_EOF)) {
     if (loom_parser_at_error_limit(parser)) {
       break;

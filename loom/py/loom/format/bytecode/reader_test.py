@@ -38,7 +38,9 @@ from loom.format.bytecode.writer import (
     SECTION_ENCODINGS,
     SECTION_IR,
     SECTION_LOCATIONS,
+    SECTION_SOURCE_TRIVIA,
     SECTION_SYMBOLS,
+    SOURCE_TRIVIA_LEADING_BLANK_LINE,
     write_module,
 )
 from loom.ir import (
@@ -449,6 +451,53 @@ class TestMalformedSectionDirectory:
         with pytest.raises(BytecodeError, match="unsupported flags"):
             read_module(bytes(data))
 
+    def test_file_header_leading_blank_line_is_rejected(self) -> None:
+        module = Module(name="test", file_header=("File overview.",))
+        data = bytearray(write_module(module))
+        module_offset, _module_length = _module_range(data)
+        _entry_offset, section_offset, _length = _find_section_entry(
+            data, SECTION_SOURCE_TRIVIA
+        )
+        payload_offset = module_offset + section_offset
+        assert data[payload_offset] == 2
+        data[payload_offset] |= SOURCE_TRIVIA_LEADING_BLANK_LINE
+
+        with pytest.raises(BytecodeError, match="leading blank line"):
+            read_module(bytes(data))
+
+    def test_invalid_utf8_file_header_is_rejected(self) -> None:
+        module = Module(name="test", file_header=("File overview.",))
+        data = bytearray(write_module(module))
+        module_offset, _module_length = _module_range(data)
+        _entry_offset, section_offset, _length = _find_section_entry(
+            data, SECTION_SOURCE_TRIVIA
+        )
+        payload_offset = module_offset + section_offset
+        _source_trivia, payload_offset = decode_varint(data, payload_offset)
+        _comment_length, payload_offset = decode_varint(data, payload_offset)
+        assert data[payload_offset] == ord(" ")
+        data[payload_offset + 1] = 0xFF
+
+        with pytest.raises(BytecodeError, match="not valid UTF-8"):
+            read_module(bytes(data))
+
+    def test_file_header_trailing_bytes_are_rejected(self) -> None:
+        module = Module(name="test", file_header=("File overview.",))
+        data = bytearray(write_module(module))
+        module_offset, module_length = _module_range(data)
+        entry_offset, section_offset, section_length = _find_section_entry(
+            data, SECTION_SOURCE_TRIVIA
+        )
+        assert module_offset + section_offset + section_length == len(data)
+        data.append(0)
+        struct.pack_into("<Q", data, entry_offset + 16, section_length + 1)
+        producer_end = data.index(0, 16)
+        directory_offset = (producer_end + 1 + 7) & ~7
+        struct.pack_into("<Q", data, directory_offset + 16, module_length + 1)
+
+        with pytest.raises(BytecodeError, match="trailing bytes"):
+            read_module(bytes(data))
+
 
 class TestMalformedLocationMode:
     def test_full_locations_mode_is_rejected_until_implemented(self) -> None:
@@ -518,7 +567,7 @@ class TestMalformedIrSection:
         func_op.regions[0].blocks[0].comments = ("x",)
         data = bytearray(write_module(module))
         source_trivia_offset = _root_block_source_trivia_offset(data)
-        assert data[source_trivia_offset : source_trivia_offset + 3] == b"\x02\x01x"
+        assert data[source_trivia_offset : source_trivia_offset + 3] == b"\x02\x02 "
         data[source_trivia_offset : source_trivia_offset + 3] = b"\x80\x80\x08"
 
         with pytest.raises(BytecodeError, match="comment count exceeds UINT16_MAX"):
@@ -1249,28 +1298,30 @@ class TestIRStructure:
 
     def test_source_trivia_roundtrip(self) -> None:
         module = _make_single_op_body_module()
+        module.file_header = ("File-level overview.", "Second header line.")
         func_op = module.symbols[0].op
         assert func_op is not None
         block = func_op.regions[0].blocks[0]
         body_op = block.ops[0]
         func_op.leading_blank_line = True
-        func_op.comments = (" symbol",)
+        func_op.comments = ("symbol",)
         block.leading_blank_line = True
-        block.comments = (" block",)
+        block.comments = ("block",)
         body_op.leading_blank_line = True
-        body_op.comments = (" operation",)
+        body_op.comments = ("operation",)
 
         loaded = _roundtrip(module)
+        assert loaded.file_header == module.file_header
         loaded_func_op = loaded.symbols[0].op
         assert loaded_func_op is not None
         loaded_block = loaded_func_op.regions[0].blocks[0]
         loaded_body_op = loaded_block.ops[0]
         assert loaded_func_op.leading_blank_line
-        assert loaded_func_op.comments == (" symbol",)
+        assert loaded_func_op.comments == ("symbol",)
         assert loaded_block.leading_blank_line
-        assert loaded_block.comments == (" block",)
+        assert loaded_block.comments == ("block",)
         assert loaded_body_op.leading_blank_line
-        assert loaded_body_op.comments == (" operation",)
+        assert loaded_body_op.comments == ("operation",)
 
     def test_op_with_results(self) -> None:
         module = Module(name="test")

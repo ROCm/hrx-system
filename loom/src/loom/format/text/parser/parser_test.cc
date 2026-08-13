@@ -686,6 +686,63 @@ TEST_F(ParserTest, OperationAndBlockCommentsRoundTrip) {
             "}\n");
 }
 
+TEST_F(ParserTest, FileHeaderRoundTrip) {
+  const char* source =
+      "// File-level overview.\n"
+      "//  Indented header detail.\n"
+      "\n"
+      "// Declaration documentation.\n"
+      "test.decl @documented()\n";
+  loom_module_t* module = ParseOk(source);
+  iree_host_size_t line_count = 0;
+  const iree_string_view_t* file_header =
+      loom_module_file_header(module, &line_count);
+  ASSERT_EQ(line_count, 2u);
+  EXPECT_TRUE(
+      iree_string_view_equal(file_header[0], IREE_SV("File-level overview.")));
+  EXPECT_TRUE(iree_string_view_equal(file_header[1],
+                                     IREE_SV(" Indented header detail.")));
+  loom_op_t* declaration = GetFirstFunctionOp(module);
+  ASSERT_NE(declaration, nullptr);
+  const iree_string_view_t* declaration_comments =
+      loom_module_op_comments(module, declaration, &line_count);
+  ASSERT_EQ(line_count, 1u);
+  EXPECT_TRUE(iree_string_view_equal(declaration_comments[0],
+                                     IREE_SV("Declaration documentation.")));
+  EXPECT_FALSE(
+      iree_any_bit_set(declaration->flags, LOOM_OP_FLAG_LEADING_BLANK_LINE));
+  loom_module_free(module);
+
+  EXPECT_EQ(RoundTrip(source), source);
+}
+
+TEST_F(ParserTest, FileHeaderPrecedesEncodingAliases) {
+  std::string text = RoundTrip(
+      "// File-level overview.\n"
+      "\n"
+      "#enc = #quantization<bits=8>\n"
+      "test.decl @uses_alias(%arg0: tile<4xf32, #enc>)\n");
+  EXPECT_EQ(text,
+            "// File-level overview.\n"
+            "\n"
+            "#enc = #quantization<bits=8>\n"
+            "test.decl @uses_alias(%arg0: tile<4xf32, #enc>)\n");
+}
+
+TEST_F(ParserTest, FileHeaderOnlyRoundTrip) {
+  EXPECT_EQ(RoundTrip("// File-level overview.\n"),
+            "// File-level overview.\n");
+}
+
+TEST_F(ParserTest, CanonicalizesCommentSeparatorSpace) {
+  EXPECT_EQ(RoundTrip("//documentation\n"
+                      "//  indented detail\n"
+                      "test.decl @documented()\n"),
+            "// documentation\n"
+            "//  indented detail\n"
+            "test.decl @documented()\n");
+}
+
 TEST_F(ParserTest, CanonicalizesVerticalSourceGrouping) {
   std::string text = RoundTrip(
       "test.func @grouped() {\n"

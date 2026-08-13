@@ -1733,6 +1733,7 @@ class Operation:
     attributes: Mapping[str, Any] = field(default_factory=CanonicalAttrDict)
     regions: list[Region] = field(default_factory=list)
     location_id: int = LOCATION_UNKNOWN
+    # Leading line comments without // or its conventional separator space.
     comments: tuple[str, ...] = ()
     # True when one canonical empty source line precedes this operation.
     leading_blank_line: bool = False
@@ -1765,6 +1766,7 @@ class Block:
     label: str = ""
     arg_ids: list[int] = field(default_factory=list)
     ops: list[Operation] = field(default_factory=list)
+    # Leading line comments without // or its conventional separator space.
     comments: tuple[str, ...] = ()
     # True when one canonical empty source line precedes this explicit label.
     leading_blank_line: bool = False
@@ -2015,6 +2017,8 @@ class Module:
 
     name: str = ""
     flags: int = 0
+    # File header lines without // or its conventional separator space.
+    file_header: tuple[str, ...] = ()
 
     # Tables.
     strings: StringTable = field(default_factory=StringTable)
