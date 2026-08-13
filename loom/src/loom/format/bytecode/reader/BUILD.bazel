@@ -50,6 +50,7 @@ loom_cc_library(
     name = "body",
     srcs = ["body.c"],
     hdrs = ["body.h"],
+    textual_hdrs = ["body_materializer_impl.inl"],
     visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
     deps = [
         ":attribute",

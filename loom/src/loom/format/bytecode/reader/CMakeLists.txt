@@ -46,6 +46,8 @@ loom_cc_library(
     body
   HDRS
     "body.h"
+  TEXTUAL_HDRS
+    "body_materializer_impl.inl"
   SRCS
     "body.c"
   DEPS
