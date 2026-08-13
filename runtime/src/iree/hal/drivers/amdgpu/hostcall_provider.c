@@ -32,11 +32,11 @@ static int iree_hal_amdgpu_hostcall_provider_service_thread_main(
 }
 
 iree_status_t iree_hal_amdgpu_hostcall_provider_state_create(
-    const iree_hal_amdgpu_hostcall_provider_t* provider,
+    const iree_hal_hostcall_provider_t* provider,
     iree_hal_device_t* logical_device, const iree_hal_amdgpu_libhsa_t* libhsa,
     hsa_agent_t device_agent, hsa_amd_memory_pool_t shared_memory_pool,
     iree_host_size_t host_numa_node,
-    const iree_hal_amdgpu_hostcall_provider_device_info_t* device_info,
+    const iree_hal_hostcall_provider_device_info_t* device_info,
     iree_allocator_t host_allocator,
     iree_hal_amdgpu_hostcall_provider_state_t** out_state) {
   IREE_ASSERT_ARGUMENT(provider);
@@ -46,18 +46,26 @@ iree_status_t iree_hal_amdgpu_hostcall_provider_state_create(
   IREE_ASSERT_ARGUMENT(out_state);
   *out_state = NULL;
 
-  iree_hal_amdgpu_hostcall_provider_requirements_t requirements = {0};
+  iree_hal_hostcall_provider_requirements_t requirements = {0};
   IREE_RETURN_IF_ERROR(provider->query_requirements(
       provider->user_data, device_info, &requirements));
   if (IREE_UNLIKELY(
           requirements.allocation_size == 0 ||
           requirements.allocation_alignment == 0 ||
-          !iree_host_size_is_power_of_two(requirements.allocation_alignment))) {
+          !iree_host_size_is_power_of_two(requirements.allocation_alignment) ||
+          requirements.reserved != 0)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "AMDGPU hostcall provider returned invalid allocation requirements: "
         "size=%" PRIhsz ", alignment=%" PRIhsz,
         requirements.allocation_size, requirements.allocation_alignment);
+  }
+  if (IREE_UNLIKELY(requirements.notification_type !=
+                    IREE_HAL_HOSTCALL_NOTIFICATION_TYPE_HSA_SIGNAL)) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "AMDGPU cannot provide hostcall notification type %u",
+        requirements.notification_type);
   }
 
   iree_hal_amdgpu_hostcall_provider_state_t* state = NULL;
@@ -95,15 +103,19 @@ iree_status_t iree_hal_amdgpu_hostcall_provider_state_create(
   }
   if (iree_status_is_ok(status)) {
     state->device_address = (uint64_t)(uintptr_t)state->shared_memory;
-    const iree_hal_amdgpu_error_callback_t error_callback = {
+    const iree_hal_hostcall_error_callback_t error_callback = {
         .fn = iree_hal_amdgpu_logical_device_error_handler,
         .user_data = logical_device,
+    };
+    const iree_hal_hostcall_notification_t notification = {
+        .type = IREE_HAL_HOSTCALL_NOTIFICATION_TYPE_HSA_SIGNAL,
+        .token = state->notification_signal.handle,
     };
     status = provider->initialize(
         provider->user_data, device_info,
         iree_make_byte_span(state->shared_memory, state->shared_memory_size),
-        state->device_address, state->notification_signal.handle,
-        error_callback, &state->provider_context);
+        state->device_address, notification, error_callback,
+        &state->provider_context);
   }
   if (iree_status_is_ok(status) && !state->provider_context) {
     status = iree_make_status(

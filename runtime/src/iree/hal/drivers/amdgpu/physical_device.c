@@ -916,7 +916,7 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
     iree_async_proactor_t* proactor, iree_host_size_t host_ordinal,
     const iree_hal_amdgpu_host_memory_pools_t* host_memory_pools,
     iree_host_size_t device_ordinal, iree_hal_amdgpu_asan_state_t* asan_state,
-    const iree_hal_amdgpu_hostcall_provider_t* hostcall_provider,
+    const iree_hal_hostcall_provider_t* hostcall_provider,
     iree_allocator_t host_allocator,
     iree_hal_amdgpu_physical_device_t* out_physical_device) {
   IREE_ASSERT_ARGUMENT(logical_device);
@@ -1035,12 +1035,11 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
             out_physical_device->memory_system.svm.direct_host_access);
   }
   if (iree_status_is_ok(status) && hostcall_provider) {
-    const iree_hal_amdgpu_hostcall_provider_device_info_t device_info = {
-        .physical_device_ordinal = device_ordinal,
-        .compute_unit_count = out_physical_device->compute_unit_count,
-        .maximum_waves_per_compute_unit =
+    const iree_hal_hostcall_provider_device_info_t device_info = {
+        .physical_device_ordinal = (uint32_t)device_ordinal,
+        .execution_unit_count = out_physical_device->compute_unit_count,
+        .maximum_resident_subgroup_count =
             out_physical_device->maximum_waves_per_compute_unit,
-        .wavefront_size = out_physical_device->wavefront_size,
     };
     status = iree_hal_amdgpu_hostcall_provider_state_create(
         hostcall_provider, logical_device, libhsa, device_agent,

@@ -51,22 +51,21 @@ iree_hal_amdgpu_logical_device_queue_affinity_domain(
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_resolve_hostcall_provider(
-    const void* next,
-    const iree_hal_amdgpu_hostcall_provider_t** out_provider) {
+    const void* next, const iree_hal_hostcall_provider_t** out_provider) {
   *out_provider = NULL;
   while (next) {
     const iree_hal_device_create_params_extension_t* extension =
         (const iree_hal_device_create_params_extension_t*)next;
     if (extension->type ==
-        IREE_HAL_AMDGPU_DEVICE_CREATE_PARAMS_EXTENSION_TYPE_HOSTCALL_PROVIDER) {
+        IREE_HAL_DEVICE_CREATE_PARAMS_EXTENSION_TYPE_HOSTCALL_PROVIDER) {
       if (IREE_UNLIKELY(*out_provider)) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "AMDGPU device creation contains duplicate hostcall providers");
       }
-      const iree_hal_amdgpu_hostcall_provider_extension_t* hostcall_extension =
-          (const iree_hal_amdgpu_hostcall_provider_extension_t*)extension;
-      const iree_hal_amdgpu_hostcall_provider_t* provider =
+      const iree_hal_hostcall_provider_extension_t* hostcall_extension =
+          (const iree_hal_hostcall_provider_extension_t*)extension;
+      const iree_hal_hostcall_provider_t* provider =
           &hostcall_extension->provider;
       if (IREE_UNLIKELY(!provider->query_requirements ||
                         !provider->initialize || !provider->service ||
@@ -1870,7 +1869,7 @@ static iree_status_t iree_hal_amdgpu_logical_device_initialize_physical_devices(
     iree_hal_amdgpu_logical_device_t* logical_device,
     const iree_hal_amdgpu_topology_t* topology,
     const iree_hal_amdgpu_physical_device_options_t* options,
-    const iree_hal_amdgpu_hostcall_provider_t* hostcall_provider,
+    const iree_hal_hostcall_provider_t* hostcall_provider,
     iree_allocator_t host_allocator) {
   for (iree_host_size_t device_ordinal = 0;
        device_ordinal < logical_device->physical_device_count;
@@ -2008,7 +2007,7 @@ iree_status_t iree_hal_amdgpu_logical_device_create(
       z0, iree_hal_device_create_params_verify(create_params),
       "verifying device creation parameters");
 
-  const iree_hal_amdgpu_hostcall_provider_t* hostcall_provider = NULL;
+  const iree_hal_hostcall_provider_t* hostcall_provider = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
       iree_hal_amdgpu_logical_device_resolve_hostcall_provider(

@@ -338,7 +338,7 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
     iree_async_proactor_t* proactor, iree_host_size_t host_ordinal,
     const iree_hal_amdgpu_host_memory_pools_t* host_memory_pools,
     iree_host_size_t device_ordinal, iree_hal_amdgpu_asan_state_t* asan_state,
-    const iree_hal_amdgpu_hostcall_provider_t* hostcall_provider,
+    const iree_hal_hostcall_provider_t* hostcall_provider,
     iree_allocator_t host_allocator,
     iree_hal_amdgpu_physical_device_t* out_physical_device);
 

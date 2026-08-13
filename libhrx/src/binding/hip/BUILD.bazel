@@ -70,7 +70,7 @@ hrx_cc_library(
         ":hostcall_message",
         ":printf_format",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/hal/drivers/amdgpu",
+        "//runtime/src/iree/hal",
     ],
 )
 
@@ -84,7 +84,6 @@ hrx_cc_library(
         ":blocking_printf_protocol",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/amdgpu",
     ],
 )
 

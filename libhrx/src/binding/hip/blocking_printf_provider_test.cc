@@ -87,24 +87,24 @@ TEST(BlockingPrintfProviderTest, PublishesTypedEventsAndDeviceFailures) {
   const iree_hal_device_create_params_extension_t* base_extension =
       iree_hip_blocking_printf_provider_device_extension(&provider);
   ASSERT_NE(base_extension, nullptr);
-  EXPECT_EQ(
-      base_extension->type,
-      IREE_HAL_AMDGPU_DEVICE_CREATE_PARAMS_EXTENSION_TYPE_HOSTCALL_PROVIDER);
-  const iree_hal_amdgpu_hostcall_provider_extension_t* extension =
-      (const iree_hal_amdgpu_hostcall_provider_extension_t*)base_extension;
+  EXPECT_EQ(base_extension->type,
+            IREE_HAL_DEVICE_CREATE_PARAMS_EXTENSION_TYPE_HOSTCALL_PROVIDER);
+  const iree_hal_hostcall_provider_extension_t* extension =
+      (const iree_hal_hostcall_provider_extension_t*)base_extension;
 
-  const iree_hal_amdgpu_hostcall_provider_device_info_t device_info = {
+  const iree_hal_hostcall_provider_device_info_t device_info = {
       /*.physical_device_ordinal=*/3,
-      /*.compute_unit_count=*/1,
-      /*.maximum_waves_per_compute_unit=*/1,
-      /*.wavefront_size=*/64,
+      /*.execution_unit_count=*/1,
+      /*.maximum_resident_subgroup_count=*/1,
   };
-  iree_hal_amdgpu_hostcall_provider_requirements_t requirements;
+  iree_hal_hostcall_provider_requirements_t requirements;
   IREE_ASSERT_OK(extension->provider.query_requirements(
       extension->provider.user_data, &device_info, &requirements));
   ASSERT_GT(requirements.allocation_size, 0u);
   ASSERT_TRUE(
       iree_host_size_is_power_of_two(requirements.allocation_alignment));
+  EXPECT_EQ(requirements.notification_type,
+            IREE_HAL_HOSTCALL_NOTIFICATION_TYPE_HSA_SIGNAL);
 
   std::vector<uint64_t> storage(
       (requirements.allocation_size + sizeof(uint64_t) - 1) / sizeof(uint64_t));
@@ -112,7 +112,12 @@ TEST(BlockingPrintfProviderTest, PublishesTypedEventsAndDeviceFailures) {
             0u);
   const uint64_t device_address = (uint64_t)(uintptr_t)storage.data();
   const uint64_t notification_token = UINT64_C(0x12345678);
-  const iree_hal_amdgpu_error_callback_t error_callback = {
+  const iree_hal_hostcall_notification_t notification = {
+      /*.type=*/IREE_HAL_HOSTCALL_NOTIFICATION_TYPE_HSA_SIGNAL,
+      /*.reserved=*/0,
+      /*.token=*/notification_token,
+  };
+  const iree_hal_hostcall_error_callback_t error_callback = {
       /*.fn=*/CaptureError,
       /*.user_data=*/&recorder,
   };
@@ -120,7 +125,7 @@ TEST(BlockingPrintfProviderTest, PublishesTypedEventsAndDeviceFailures) {
   IREE_ASSERT_OK(extension->provider.initialize(
       extension->provider.user_data, &device_info,
       iree_make_byte_span(storage.data(), requirements.allocation_size),
-      device_address, notification_token, error_callback, &context));
+      device_address, notification, error_callback, &context));
   ASSERT_NE(context, nullptr);
 
   iree_hip_hostcall_buffer_header_t* buffer_header =

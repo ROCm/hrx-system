@@ -8,7 +8,7 @@
 #define HRX_BINDING_HIP_BLOCKING_PRINTF_PROTOCOL_H_
 
 #include "binding/hip/hostcall_message.h"
-#include "iree/hal/drivers/amdgpu/api.h"
+#include "iree/hal/device.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -83,8 +83,8 @@ typedef struct iree_hip_blocking_printf_service_t {
   iree_string_builder_t format_scratch_builder;
   // Synchronous complete-message output sink.
   iree_hip_blocking_printf_output_sink_t output_sink;
-  // Existing logical-device error callback consuming structural failures.
-  iree_hal_amdgpu_error_callback_t error_callback;
+  // Device error callback consuming structural failures.
+  iree_hal_hostcall_error_callback_t error_callback;
   // True after a structural failure makes further interpretation unsafe.
   bool has_failed;
 } iree_hip_blocking_printf_service_t;
@@ -116,7 +116,7 @@ void iree_hip_blocking_printf_protocol_initialize(
 void iree_hip_blocking_printf_service_initialize(
     iree_hip_blocking_printf_protocol_t* protocol,
     iree_hip_blocking_printf_output_sink_t output_sink,
-    iree_hal_amdgpu_error_callback_t error_callback,
+    iree_hal_hostcall_error_callback_t error_callback,
     iree_allocator_t host_allocator,
     iree_hip_blocking_printf_service_t* out_service);
 

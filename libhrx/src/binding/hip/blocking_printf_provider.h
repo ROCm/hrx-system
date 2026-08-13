@@ -7,7 +7,7 @@
 #ifndef HRX_BINDING_HIP_BLOCKING_PRINTF_PROVIDER_H_
 #define HRX_BINDING_HIP_BLOCKING_PRINTF_PROVIDER_H_
 
-#include "iree/hal/drivers/amdgpu/api.h"
+#include "iree/hal/api.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,8 +21,8 @@ typedef struct iree_hip_blocking_printf_provider_t {
   // Custom HRX event sink, or an invalid sink for HIP's default stdio output.
   iree_hal_device_event_sink_t event_sink;
 
-  // AMDGPU device-creation extension referencing this provider.
-  iree_hal_amdgpu_hostcall_provider_extension_t device_extension;
+  // HAL device-creation extension referencing this provider.
+  iree_hal_hostcall_provider_extension_t device_extension;
 } iree_hip_blocking_printf_provider_t;
 
 // Initializes one provider configuration that remains immutable while active.

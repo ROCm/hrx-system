@@ -160,7 +160,7 @@ static void iree_hip_blocking_printf_protocol_fail_packet(
 void iree_hip_blocking_printf_service_initialize(
     iree_hip_blocking_printf_protocol_t* protocol,
     iree_hip_blocking_printf_output_sink_t output_sink,
-    iree_hal_amdgpu_error_callback_t error_callback,
+    iree_hal_hostcall_error_callback_t error_callback,
     iree_allocator_t host_allocator,
     iree_hip_blocking_printf_service_t* out_service) {
   IREE_ASSERT_ARGUMENT(protocol);

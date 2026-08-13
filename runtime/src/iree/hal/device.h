@@ -106,17 +106,149 @@ typedef struct iree_async_frontier_tracker_t iree_async_frontier_tracker_t;
 typedef struct iree_async_notification_t iree_async_notification_t;
 typedef struct iree_hal_slab_provider_t iree_hal_slab_provider_t;
 
-// Common prefix for driver-specific device creation parameter extensions.
+// Device creation parameter extension types.
+//
+// Values are globally assigned by the HAL. Drivers must silently skip extension
+// types they do not recognize to preserve forward compatibility.
+typedef uint32_t iree_hal_device_create_params_extension_type_t;
+typedef enum iree_hal_device_create_params_extension_type_e {
+  IREE_HAL_DEVICE_CREATE_PARAMS_EXTENSION_TYPE_NONE = 0u,
+  // Provides one opaque hostcall service for each physical device.
+  IREE_HAL_DEVICE_CREATE_PARAMS_EXTENSION_TYPE_HOSTCALL_PROVIDER = 1u,
+} iree_hal_device_create_params_extension_type_e;
+
+// Common prefix for device creation parameter extensions.
 //
 // Drivers walk the chain by interpreting each extension through this prefix.
-// Extension type values are scoped to the driver consuming the chain.
 typedef struct iree_hal_device_create_params_extension_t {
-  // Driver-specific extension type identifier.
-  uint32_t type;
+  // Globally assigned extension type identifier.
+  iree_hal_device_create_params_extension_type_t type;
 
-  // Next driver-specific device creation parameter extension, or NULL.
+  // Next device creation parameter extension, or NULL.
   const void* next;
 } iree_hal_device_create_params_extension_t;
+
+// Notification primitive types supported by hostcall providers.
+typedef uint32_t iree_hal_hostcall_notification_type_t;
+typedef enum iree_hal_hostcall_notification_type_e {
+  IREE_HAL_HOSTCALL_NOTIFICATION_TYPE_NONE = 0u,
+  // Token is a device-visible HSA signal handle.
+  IREE_HAL_HOSTCALL_NOTIFICATION_TYPE_HSA_SIGNAL = 1u,
+} iree_hal_hostcall_notification_type_e;
+
+// Device notification primitive supplied to a hostcall provider.
+typedef struct iree_hal_hostcall_notification_t {
+  // Concrete notification primitive type.
+  iree_hal_hostcall_notification_type_t type;
+  // Reserved for future use and must be zero.
+  uint32_t reserved;
+  // Device-visible token encoded according to |type|.
+  uint64_t token;
+} iree_hal_hostcall_notification_t;
+
+// Scalar physical-device facts available to opaque hostcall providers.
+typedef struct iree_hal_hostcall_provider_device_info_t {
+  // Ordinal of the physical device within the logical-device topology.
+  uint32_t physical_device_ordinal;
+  // Number of execution units reported for the physical device.
+  uint32_t execution_unit_count;
+  // Maximum resident subgroup count per execution unit.
+  uint32_t maximum_resident_subgroup_count;
+  // Reserved for future use and must be zero.
+  uint32_t reserved;
+} iree_hal_hostcall_provider_device_info_t;
+
+// Shared allocation and notification requirements of a hostcall provider.
+typedef struct iree_hal_hostcall_provider_requirements_t {
+  // Required allocation size in bytes.
+  iree_host_size_t allocation_size;
+  // Required power-of-two allocation alignment in bytes.
+  iree_host_size_t allocation_alignment;
+  // Notification primitive the provider requires.
+  iree_hal_hostcall_notification_type_t notification_type;
+  // Reserved for future use and must be zero.
+  uint32_t reserved;
+} iree_hal_hostcall_provider_requirements_t;
+
+// Handles an asynchronous terminal error from a hostcall provider.
+//
+// May be called from a driver thread and must not call back into the
+// originating provider or driver APIs. Ownership of |status| transfers to the
+// callback and must be propagated, retained, or freed before returning.
+typedef void(IREE_API_PTR* iree_hal_hostcall_error_fn_t)(void* user_data,
+                                                         iree_status_t status);
+
+// Callback consuming asynchronous terminal hostcall provider errors.
+typedef struct iree_hal_hostcall_error_callback_t {
+  // Function consuming ownership of a terminal status.
+  iree_hal_hostcall_error_fn_t fn;
+  // Opaque data passed to |fn|.
+  void* user_data;
+} iree_hal_hostcall_error_callback_t;
+
+// Queries shared allocation and notification requirements for one physical
+// device.
+typedef iree_status_t(
+    IREE_API_PTR* iree_hal_hostcall_provider_query_requirements_fn_t)(
+    void* user_data,
+    const iree_hal_hostcall_provider_device_info_t* device_info,
+    iree_hal_hostcall_provider_requirements_t* out_requirements);
+
+// Initializes one provider context over a HAL-owned shared allocation.
+//
+// |shared_memory| and |device_address| name the host and device views of the
+// same allocation and remain live until the matching deinitialize call.
+// |notification| remains valid for the same lifetime and may only be
+// interpreted according to its type. |error_callback| consumes terminal
+// provider failures from arbitrary service threads and remains valid until
+// deinitialize. Implementations set |out_context| to NULL before invoking the
+// callback. If the callback returns an error after publishing a non-NULL
+// context, the matching deinitialize callback is invoked exactly once while
+// the allocation and notification are still valid.
+typedef iree_status_t(IREE_API_PTR* iree_hal_hostcall_provider_initialize_fn_t)(
+    void* user_data,
+    const iree_hal_hostcall_provider_device_info_t* device_info,
+    iree_byte_span_t shared_memory, uint64_t device_address,
+    iree_hal_hostcall_notification_t notification,
+    iree_hal_hostcall_error_callback_t error_callback, void** out_context);
+
+// Services all provider work currently ready in one physical-device context.
+//
+// The provider owns protocol outcomes. Structural failures are published
+// through the error callback captured during initialization.
+typedef void(IREE_API_PTR* iree_hal_hostcall_provider_service_fn_t)(
+    void* context);
+
+// Deinitializes one provider context after its service thread has joined and
+// before its shared allocation or notification is released.
+typedef void(IREE_API_PTR* iree_hal_hostcall_provider_deinitialize_fn_t)(
+    void* context);
+
+// Immutable opaque hostcall provider copied during device creation.
+typedef struct iree_hal_hostcall_provider_t {
+  // Provider-owned data passed to requirement and initialization callbacks.
+  void* user_data;
+  // Queries shared allocation and notification requirements.
+  iree_hal_hostcall_provider_query_requirements_fn_t query_requirements;
+  // Initializes one physical-device provider context.
+  iree_hal_hostcall_provider_initialize_fn_t initialize;
+  // Services ready work on the listener thread.
+  iree_hal_hostcall_provider_service_fn_t service;
+  // Deinitializes the provider context after listener shutdown.
+  iree_hal_hostcall_provider_deinitialize_fn_t deinitialize;
+} iree_hal_hostcall_provider_t;
+
+// Device creation extension enabling an opaque hostcall provider.
+//
+// Drivers supporting the extension instantiate the provider once per physical
+// device. The provider value is copied during device creation. Provider
+// |user_data| must remain valid until the created device is destroyed.
+typedef struct iree_hal_hostcall_provider_extension_t {
+  // Common device creation extension prefix.
+  iree_hal_device_create_params_extension_t base;
+  // Provider instantiated once for each physical device.
+  iree_hal_hostcall_provider_t provider;
+} iree_hal_hostcall_provider_extension_t;
 
 // Parameters for device creation that apply across all HAL drivers.
 //
@@ -125,10 +257,9 @@ typedef struct iree_hal_device_create_params_extension_t {
 // before passing to device creation functions. All creation paths require a
 // valid pointer — callers must always provide one.
 //
-// The |next| pointer enables a Vulkan-style extension chain: drivers may define
-// their own params structs that chain off this base struct. Each extension must
-// begin with iree_hal_device_create_params_extension_t. Unrecognized extensions
-// are silently skipped for forward compatibility.
+// The |next| pointer enables a Vulkan-style extension chain. Each extension
+// must begin with iree_hal_device_create_params_extension_t. Unrecognized
+// extensions are silently skipped for forward compatibility.
 typedef struct iree_hal_device_create_params_t {
   IREE_API_UNSTABLE
 

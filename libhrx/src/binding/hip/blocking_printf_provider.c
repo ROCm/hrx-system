@@ -60,37 +60,45 @@ static void iree_hip_blocking_printf_provider_publish_output(
 
 static iree_status_t iree_hip_blocking_printf_provider_query_requirements(
     void* user_data,
-    const iree_hal_amdgpu_hostcall_provider_device_info_t* device_info,
-    iree_hal_amdgpu_hostcall_provider_requirements_t* out_requirements) {
+    const iree_hal_hostcall_provider_device_info_t* device_info,
+    iree_hal_hostcall_provider_requirements_t* out_requirements) {
   (void)user_data;
   iree_hip_blocking_printf_protocol_layout_t layout;
   IREE_RETURN_IF_ERROR(iree_hip_blocking_printf_protocol_calculate_layout(
-      device_info->compute_unit_count,
-      device_info->maximum_waves_per_compute_unit, &layout));
-  *out_requirements = (iree_hal_amdgpu_hostcall_provider_requirements_t){
+      device_info->execution_unit_count,
+      device_info->maximum_resident_subgroup_count, &layout));
+  *out_requirements = (iree_hal_hostcall_provider_requirements_t){
       .allocation_size = layout.allocation_size,
       .allocation_alignment =
           iree_max(iree_alignof(iree_hip_hostcall_buffer_header_t),
                    iree_max(iree_alignof(iree_hip_hostcall_packet_header_t),
                             iree_alignof(iree_hip_hostcall_packet_payload_t))),
+      .notification_type = IREE_HAL_HOSTCALL_NOTIFICATION_TYPE_HSA_SIGNAL,
   };
   return iree_ok_status();
 }
 
 static iree_status_t iree_hip_blocking_printf_provider_context_initialize(
     void* user_data,
-    const iree_hal_amdgpu_hostcall_provider_device_info_t* device_info,
+    const iree_hal_hostcall_provider_device_info_t* device_info,
     iree_byte_span_t shared_memory, uint64_t device_address,
-    uint64_t notification_token,
-    iree_hal_amdgpu_error_callback_t error_callback, void** out_context) {
+    iree_hal_hostcall_notification_t notification,
+    iree_hal_hostcall_error_callback_t error_callback, void** out_context) {
   iree_hip_blocking_printf_provider_t* provider =
       (iree_hip_blocking_printf_provider_t*)user_data;
   *out_context = NULL;
+  if (IREE_UNLIKELY(notification.type !=
+                        IREE_HAL_HOSTCALL_NOTIFICATION_TYPE_HSA_SIGNAL ||
+                    notification.reserved != 0 || notification.token == 0)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "HIP blocking printf requires a valid HSA signal notification");
+  }
 
   iree_hip_blocking_printf_protocol_layout_t layout;
   IREE_RETURN_IF_ERROR(iree_hip_blocking_printf_protocol_calculate_layout(
-      device_info->compute_unit_count,
-      device_info->maximum_waves_per_compute_unit, &layout));
+      device_info->execution_unit_count,
+      device_info->maximum_resident_subgroup_count, &layout));
 
   iree_hip_blocking_printf_provider_context_t* context = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
@@ -101,7 +109,7 @@ static iree_status_t iree_hip_blocking_printf_provider_context_initialize(
       (uint32_t)device_info->physical_device_ordinal;
 
   iree_hip_blocking_printf_protocol_initialize(
-      shared_memory.data, device_address, notification_token, &layout,
+      shared_memory.data, device_address, notification.token, &layout,
       &context->protocol);
   const iree_hip_blocking_printf_output_sink_t output_sink = {
       .fn = iree_hip_blocking_printf_provider_publish_output,
@@ -137,7 +145,7 @@ void iree_hip_blocking_printf_provider_initialize(
   out_provider->host_allocator = host_allocator;
   out_provider->event_sink = event_sink;
   out_provider->device_extension.base.type =
-      IREE_HAL_AMDGPU_DEVICE_CREATE_PARAMS_EXTENSION_TYPE_HOSTCALL_PROVIDER;
+      IREE_HAL_DEVICE_CREATE_PARAMS_EXTENSION_TYPE_HOSTCALL_PROVIDER;
   out_provider->device_extension.provider.user_data = out_provider;
   out_provider->device_extension.provider.query_requirements =
       iree_hip_blocking_printf_provider_query_requirements;

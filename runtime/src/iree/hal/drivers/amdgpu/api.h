@@ -11,112 +11,12 @@
 #include "iree/hal/api.h"
 
 // Exported for API interop:
-#include "iree/hal/drivers/amdgpu/util/error_callback.h"  // IWYU pragma: export
-#include "iree/hal/drivers/amdgpu/util/libhsa.h"          // IWYU pragma: export
-#include "iree/hal/drivers/amdgpu/util/topology.h"        // IWYU pragma: export
+#include "iree/hal/drivers/amdgpu/util/libhsa.h"    // IWYU pragma: export
+#include "iree/hal/drivers/amdgpu/util/topology.h"  // IWYU pragma: export
 
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
-
-//===----------------------------------------------------------------------===//
-// iree_hal_amdgpu_hostcall_provider_t
-//===----------------------------------------------------------------------===//
-
-// AMDGPU device creation parameter extension types.
-typedef uint32_t iree_hal_amdgpu_device_create_params_extension_type_t;
-enum iree_hal_amdgpu_device_create_params_extension_type_e {
-  // Provides one opaque hostcall service for each physical device.
-  IREE_HAL_AMDGPU_DEVICE_CREATE_PARAMS_EXTENSION_TYPE_HOSTCALL_PROVIDER = 1u,
-};
-
-// Scalar physical-device facts available to opaque hostcall providers.
-typedef struct iree_hal_amdgpu_hostcall_provider_device_info_t {
-  // Ordinal of the physical device within the logical-device topology.
-  iree_host_size_t physical_device_ordinal;
-
-  // Number of compute units reported for the physical device.
-  uint32_t compute_unit_count;
-
-  // Maximum resident wave count per compute unit.
-  uint32_t maximum_waves_per_compute_unit;
-
-  // Native wavefront size reported for the physical device.
-  uint32_t wavefront_size;
-} iree_hal_amdgpu_hostcall_provider_device_info_t;
-
-// Opaque shared allocation requirements returned by a hostcall provider.
-typedef struct iree_hal_amdgpu_hostcall_provider_requirements_t {
-  // Required allocation size in bytes.
-  iree_host_size_t allocation_size;
-
-  // Required power-of-two allocation alignment in bytes.
-  iree_host_size_t allocation_alignment;
-} iree_hal_amdgpu_hostcall_provider_requirements_t;
-
-// Queries shared allocation requirements for one physical device.
-typedef iree_status_t(
-    IREE_API_PTR* iree_hal_amdgpu_hostcall_provider_query_requirements_fn_t)(
-    void* user_data,
-    const iree_hal_amdgpu_hostcall_provider_device_info_t* device_info,
-    iree_hal_amdgpu_hostcall_provider_requirements_t* out_requirements);
-
-// Initializes one provider context over an HAL-owned shared allocation.
-//
-// |shared_memory| remains live until the matching deinitialize call.
-// |device_address| is the stable device-visible address of the same allocation.
-// |notification_token| is opaque to the provider except when encoding its
-// device protocol. Only the HAL may use it as a native synchronization object.
-// |error_callback| consumes terminal provider failures and remains valid until
-// deinitialize.
-typedef iree_status_t(
-    IREE_API_PTR* iree_hal_amdgpu_hostcall_provider_initialize_fn_t)(
-    void* user_data,
-    const iree_hal_amdgpu_hostcall_provider_device_info_t* device_info,
-    iree_byte_span_t shared_memory, uint64_t device_address,
-    uint64_t notification_token,
-    iree_hal_amdgpu_error_callback_t error_callback, void** out_context);
-
-// Services all provider work currently ready in one physical-device context.
-//
-// The provider owns protocol outcomes. Structural failures are published
-// through the error callback captured during initialization.
-typedef void(IREE_API_PTR* iree_hal_amdgpu_hostcall_provider_service_fn_t)(
-    void* context);
-
-// Deinitializes one provider context after its service thread has joined.
-typedef void(IREE_API_PTR* iree_hal_amdgpu_hostcall_provider_deinitialize_fn_t)(
-    void* context);
-
-// Immutable opaque hostcall provider copied during device creation.
-typedef struct iree_hal_amdgpu_hostcall_provider_t {
-  // Provider-owned data passed to requirement and initialization callbacks.
-  void* user_data;
-
-  // Queries shared allocation requirements for a physical device.
-  iree_hal_amdgpu_hostcall_provider_query_requirements_fn_t query_requirements;
-
-  // Initializes one physical-device provider context.
-  iree_hal_amdgpu_hostcall_provider_initialize_fn_t initialize;
-
-  // Services ready work on the listener thread.
-  iree_hal_amdgpu_hostcall_provider_service_fn_t service;
-
-  // Deinitializes the provider context after listener shutdown.
-  iree_hal_amdgpu_hostcall_provider_deinitialize_fn_t deinitialize;
-} iree_hal_amdgpu_hostcall_provider_t;
-
-// AMDGPU device creation extension enabling an opaque hostcall provider.
-//
-// The provider value is copied during device creation. Provider |user_data|
-// must remain valid until the created device is destroyed.
-typedef struct iree_hal_amdgpu_hostcall_provider_extension_t {
-  // Common device creation extension prefix.
-  iree_hal_device_create_params_extension_t base;
-
-  // Provider instantiated once for each physical device.
-  iree_hal_amdgpu_hostcall_provider_t provider;
-} iree_hal_amdgpu_hostcall_provider_extension_t;
 
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_logical_device_t
