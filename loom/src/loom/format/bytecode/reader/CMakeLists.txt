@@ -197,6 +197,7 @@ loom_cc_library(
     ::encoding
     ::location
     ::module_view
+    ::string_table
     ::symbol_materializer
     ::type
     iree::base
@@ -239,6 +240,7 @@ loom_cc_library(
     ::module_view
     ::operation
     ::source_trivia
+    ::string_table
     ::symbol_validator
     ::type_validator
     iree::base
@@ -343,6 +345,38 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
+    string_table
+  HDRS
+    "string_table.h"
+  SRCS
+    "string_table.c"
+  DEPS
+    ::decoder
+    ::module_view
+    iree::base
+    iree::base::internal::arena
+    iree::base::internal::unicode
+    loom::error::error_defs
+    loom::ir
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    string_table_test
+  SRCS
+    "string_table_test.cc"
+  DEPS
+    ::string_table
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::bytecode::format
+    loom::ir
 )
 
 loom_cc_library(

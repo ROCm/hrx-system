@@ -11,6 +11,7 @@
 #include "loom/error/error_catalog.h"
 #include "loom/format/bytecode/reader/encoding.h"
 #include "loom/format/bytecode/reader/location.h"
+#include "loom/format/bytecode/reader/string_table.h"
 #include "loom/format/bytecode/reader/symbol_materializer.h"
 #include "loom/format/bytecode/reader/type.h"
 #include "loom/ops/module/ops.h"
@@ -37,44 +38,6 @@ typedef struct loom_bytecode_module_materialization_t {
   // Stable-key codec supplied by the embedding compiler.
   loom_low_repr_environment_t low_repr_environment;
 } loom_bytecode_module_materialization_t;
-
-static iree_status_t loom_bytecode_module_materialize_strings(
-    loom_bytecode_module_materialization_t* reader) {
-  for (iree_host_size_t i = 0; i < reader->view.strings.count; ++i) {
-    loom_string_id_t string_id = LOOM_STRING_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_module_intern_string(
-        reader->output_module, reader->view.strings.values[i], &string_id));
-    if (string_id != i) {
-      return loom_bytecode_reader_emit_invalid_field(
-          &reader->decoder, IREE_SV("STRINGS"), IREE_SV("string"), i,
-          IREE_SV("string"), 0,
-          IREE_SV("string_table_must_be_deduplicated_and_preserve_intern_ids"));
-    }
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_bytecode_module_materialize_sources(
-    loom_bytecode_module_materialization_t* reader) {
-  if (reader->view.sources.count > LOOM_SOURCE_ID_INVALID) {
-    return loom_bytecode_reader_emit_count_exceeds(
-        &reader->decoder, IREE_SV("SOURCES"), reader->view.sources.count,
-        LOOM_SOURCE_ID_INVALID, 0);
-  }
-  if (reader->view.sources.count == 0) {
-    return iree_ok_status();
-  }
-
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      reader->arena, reader->view.sources.count, sizeof(loom_source_id_t),
-      (void**)&reader->source_ids));
-  for (iree_host_size_t i = 0; i < reader->view.sources.count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_module_register_source(
-        reader->output_module, reader->view.sources.values[i],
-        &reader->source_ids[i]));
-  }
-  return iree_ok_status();
-}
 
 static iree_status_t loom_bytecode_module_materialize_provider_imports(
     loom_bytecode_module_materialization_t* reader) {
@@ -145,7 +108,8 @@ static iree_status_t loom_bytecode_module_materialize_tables(
       &reader->decoder, reader->context, reader->arena, reader->block_pool,
       &reader->view, reader->output_module, &reader->low_repr_environment,
       &symbol_materializer);
-  IREE_RETURN_IF_ERROR(loom_bytecode_module_materialize_strings(reader));
+  IREE_RETURN_IF_ERROR(loom_bytecode_string_table_materialize(
+      &reader->view, reader->output_module));
   loom_string_id_t module_name_id = LOOM_STRING_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_module_intern_string(
       reader->output_module, reader->view.directory_entry->name,
@@ -156,7 +120,9 @@ static iree_status_t loom_bytecode_module_materialize_tables(
         reader->output_module, reader->view.file_header.comments,
         reader->view.file_header.comment_count));
   }
-  IREE_RETURN_IF_ERROR(loom_bytecode_module_materialize_sources(reader));
+  IREE_RETURN_IF_ERROR(loom_bytecode_source_table_materialize(
+      &reader->view, reader->arena, reader->output_module,
+      &reader->source_ids));
   loom_bytecode_encoding_materializer_t encoding_materializer = {
       .decoder = &reader->decoder,
       .context = reader->context,

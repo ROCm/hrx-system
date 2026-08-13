@@ -182,6 +182,7 @@ loom_cc_library(
         ":encoding",
         ":location",
         ":module_view",
+        ":string_table",
         ":symbol_materializer",
         ":type",
         "//loom/src/loom/error:error_defs",
@@ -221,6 +222,7 @@ loom_cc_library(
         ":module_view",
         ":operation",
         ":source_trivia",
+        ":string_table",
         ":symbol_validator",
         ":type_validator",
         "//loom/src/loom/error:error_defs",
@@ -312,6 +314,35 @@ loom_cc_test(
     srcs = ["source_trivia_test.cc"],
     deps = [
         ":source_trivia",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "string_table",
+    srcs = ["string_table.c"],
+    hdrs = ["string_table.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":decoder",
+        ":module_view",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:unicode",
+    ],
+)
+
+loom_cc_test(
+    name = "string_table_test",
+    srcs = ["string_table_test.cc"],
+    deps = [
+        ":string_table",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/ir",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
