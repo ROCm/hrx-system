@@ -11,6 +11,33 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    atomic
+  HDRS
+    "atomic.h"
+  SRCS
+    "atomic.c"
+  DEPS
+    iree::base
+    iree::base::internal
+    iree::base::threading
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    atomic_test
+  SRCS
+    "atomic_test.cc"
+  DEPS
+    ::atomic
+    iree::base::internal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_library(
+  NAME
     cpu_device_spec
   HDRS
     "cpu_device_spec.h"

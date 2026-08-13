@@ -123,6 +123,15 @@ typedef enum iree_hal_atomic_operation_flag_bits_e {
   IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_XOR = 1u << 6,
 } iree_hal_atomic_operation_flag_bits_e;
 
+#define IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL                                          \
+  ((iree_hal_atomic_operation_flags_t)(IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |         \
+                                       IREE_HAL_ATOMIC_OPERATION_FLAG_STORE |        \
+                                       IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD |      \
+                                       IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_SUBTRACT | \
+                                       IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_AND |      \
+                                       IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_OR |       \
+                                       IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_XOR))
+
 // Atomic wait conditions supported by one width and coherence-domain cell.
 typedef uint32_t iree_hal_atomic_wait_condition_flags_t;
 typedef enum iree_hal_atomic_wait_condition_flag_bits_e {
@@ -131,6 +140,11 @@ typedef enum iree_hal_atomic_wait_condition_flag_bits_e {
   IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_NOT_EQUAL = 1u << 1,
   IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_UNSIGNED_GREATER_EQUAL = 1u << 2,
 } iree_hal_atomic_wait_condition_flag_bits_e;
+
+#define IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL                                            \
+  ((iree_hal_atomic_wait_condition_flags_t)(IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_EQUAL |     \
+                                            IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_NOT_EQUAL | \
+                                            IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_UNSIGNED_GREATER_EQUAL))
 
 // Atomic operation capabilities partitioned by width and coherence domain.
 typedef struct iree_hal_atomic_operation_capabilities_t {

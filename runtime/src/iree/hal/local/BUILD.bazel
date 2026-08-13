@@ -18,6 +18,29 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "atomic",
+    srcs = ["atomic.c"],
+    hdrs = ["atomic.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "atomic_test",
+    srcs = ["atomic_test.cc"],
+    deps = [
+        ":atomic",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "cpu_device_spec",
     srcs = ["cpu_device_spec.c"],
     hdrs = ["cpu_device_spec.h"],
