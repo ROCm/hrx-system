@@ -160,6 +160,12 @@ def build_subgroup_access_show(
             value,
             group_source,
         )
+        if group["report_index"] != index:
+            raise CompileReportError(
+                f"{document.source}.source_low.memory.subgroup_access_groups"
+                f"[{index}].index: expected {index}, got "
+                f"{group['report_index']}"
+            )
         _validate_group_target_subgroup_size(document, group, group_source)
         shown_groups.append(group)
     shown_groups.sort(key=_group_sort_key)

@@ -488,6 +488,15 @@ def test_show_rejects_duplicate_semantic_access_variant() -> None:
         build_compile_report_show(document)
 
 
+def test_show_rejects_nonpositional_group_index() -> None:
+    report = _compile_report([_group(_exact_access())])
+    report["source_low"]["memory"]["subgroup_access_groups"][0]["index"] = 3
+    document = parse_compile_report(report, source="report.json")
+
+    with pytest.raises(CompileReportError, match="index: expected 0, got 3"):
+        build_compile_report_show(document)
+
+
 def test_show_rejects_geometry_summary_disagreement() -> None:
     report = _compile_report([_group(_exact_access())])
     group_summary = report["source_low"]["memory"]["subgroup_access_groups"][0][

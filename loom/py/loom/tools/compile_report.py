@@ -134,8 +134,8 @@ def _create_argument_parser() -> argparse.ArgumentParser:
         "--include-experimental",
         action="store_true",
         help=(
-            "Include experiments grounded in structurally exact but "
-            "hardware-unvalidated target models."
+            "Include exploratory experiments whose model or policy has not "
+            "earned default confidence."
         ),
     )
     _add_output_format_argument(suggest_parser)

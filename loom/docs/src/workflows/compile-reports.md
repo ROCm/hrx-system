@@ -148,6 +148,10 @@ does not invent one-to-one matches between ambiguous variants, and it retains
 the complete before and after geometry so widening, lane dispersion, and
 overlap can be evaluated together.
 
+For a forced single-entry comparison, the explicit entry pair also aligns wave
+memory sources whose function was renamed. Packet variants still require exact
+semantic identity; the forced pair does not authorize guessed variant matches.
+
 ## Compare target specialization
 
 Target comparison deliberately relaxes only the selected target specialization
@@ -178,11 +182,15 @@ motivated it. The output is a prioritized experiment queue, not an assertion
 that a transformation will improve performance. Recompile, retest, and measure
 each accepted experiment.
 
-When expanded AMDGPU fragment packets coincide with target-created operand-bank
-materialization, the finding leads with allocator placement and explicitly asks
-the reader to verify that the repairs belong to those loads before changing the
-memory hierarchy. The co-occurrence narrows the next experiment; it is not
-reported as a causal proof.
+The experimental AMDGPU fragment-packet finding requires exact wave geometry
+for every cited scalar packet row. It reports per-lane width together with
+cross-lane coverage, unique bytes, span, maximum gap, and maximum adjacent-lane
+delta. Packet width is not treated as a monotonic objective: wider candidates
+that worsen dispersion require a hardware timing win, rather than receiving a
+recommendation merely because they reduce static packet count. When the same
+packets coincide with target-created operand-bank materialization, the finding
+leads with allocator placement and asks the reader to verify that the repairs
+belong to those loads before changing the memory hierarchy.
 
 ```shell
 loom-compile-report suggest kernel.report.json --format=json \
@@ -190,8 +198,8 @@ loom-compile-report suggest kernel.report.json --format=json \
 ```
 
 Default findings require the target provider's high-confidence evidence tier.
-Experiments derived from structurally exact but hardware-unvalidated models are
-opted into explicitly:
+Exploratory policies and experiments derived from structurally exact but
+hardware-unvalidated models are opted into explicitly:
 
 ```shell
 loom-compile-report suggest kernel.report.json \
