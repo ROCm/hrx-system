@@ -49,8 +49,8 @@ def test_import_roundtrip_sorts_providers_and_preserves_comment_ownership() -> N
     parser.register_ops(ALL_MODULE_OPS)
     module = parser.parse(source)
     assert module.body.comments == ()
-    assert module.body.ops[0].comments == (" zeta provider",)
-    assert module.body.ops[1].comments == (" alpha provider",)
+    assert module.body.ops[0].comments == ("zeta provider",)
+    assert module.body.ops[1].comments == ("alpha provider",)
 
     printer = Printer()
     printer.register_ops(ALL_MODULE_OPS)

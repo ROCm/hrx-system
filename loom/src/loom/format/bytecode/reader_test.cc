@@ -813,7 +813,7 @@ class ReaderTest : public ::testing::Test {
         loom_make_symbol_ref_array(anchors, IREE_ARRAYSIZE(anchors)),
         LOOM_LOCATION_NONE, &import_op));
     import_op->flags |= LOOM_OP_FLAG_LEADING_BLANK_LINE;
-    const iree_string_view_t comments[] = {IREE_SV(" provider comment")};
+    const iree_string_view_t comments[] = {IREE_SV("provider comment")};
     IREE_CHECK_OK(loom_module_attach_op_comments(module, import_op, comments,
                                                  IREE_ARRAYSIZE(comments)));
     return module;
@@ -3009,7 +3009,7 @@ TEST_F(ReaderTest, IndexesAndMaterializesProviderImports) {
   ASSERT_NE(module_metadata.provider_imports[0].comments, nullptr);
   EXPECT_TRUE(
       iree_string_view_equal(module_metadata.provider_imports[0].comments[0],
-                             IREE_SV(" provider comment")));
+                             IREE_SV("provider comment")));
   EXPECT_EQ(module_metadata.provider_import_anchor_symbol_indices[0], 1u);
   EXPECT_EQ(module_metadata.provider_import_anchor_symbol_indices[1], 0u);
   ASSERT_NE(module_metadata.symbols, nullptr);
@@ -3044,8 +3044,7 @@ TEST_F(ReaderTest, IndexesAndMaterializesProviderImports) {
   const iree_string_view_t* comments =
       loom_module_op_comments(read_module, import_op, &comment_count);
   ASSERT_EQ(comment_count, 1u);
-  EXPECT_TRUE(
-      iree_string_view_equal(comments[0], IREE_SV(" provider comment")));
+  EXPECT_TRUE(iree_string_view_equal(comments[0], IREE_SV("provider comment")));
 
   loom_module_free(read_module);
   loom_module_free(module);

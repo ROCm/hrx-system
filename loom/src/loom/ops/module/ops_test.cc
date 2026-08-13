@@ -156,11 +156,11 @@ TEST_F(ModuleOpsTest, CanonicalProviderOrderPreservesCommentOwnership) {
   const loom_op_t* zeta_import = loom_block_const_op(body, 0);
   comments = loom_module_op_comments(module, zeta_import, &comment_count);
   ASSERT_EQ(comment_count, 1u);
-  EXPECT_TRUE(iree_string_view_equal(comments[0], IREE_SV(" zeta provider")));
+  EXPECT_TRUE(iree_string_view_equal(comments[0], IREE_SV("zeta provider")));
   const loom_op_t* alpha_import = loom_block_const_op(body, 1);
   comments = loom_module_op_comments(module, alpha_import, &comment_count);
   ASSERT_EQ(comment_count, 1u);
-  EXPECT_TRUE(iree_string_view_equal(comments[0], IREE_SV(" alpha provider")));
+  EXPECT_TRUE(iree_string_view_equal(comments[0], IREE_SV("alpha provider")));
 
   EXPECT_EQ(Print(module),
             std::string(kExpected, IREE_ARRAYSIZE(kExpected) - 1));

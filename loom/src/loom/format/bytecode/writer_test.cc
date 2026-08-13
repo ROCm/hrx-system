@@ -595,7 +595,7 @@ TEST_F(WriterTest, ProviderImportsUseCanonicalDirectSymbolOrdinals) {
       loom_make_symbol_ref_array(alpha_refs, IREE_ARRAYSIZE(alpha_refs)),
       LOOM_LOCATION_NONE, &alpha_import));
   alpha_import->flags |= LOOM_OP_FLAG_LEADING_BLANK_LINE;
-  const iree_string_view_t comments[] = {IREE_SV(" alpha provider")};
+  const iree_string_view_t comments[] = {IREE_SV("alpha provider")};
   IREE_ASSERT_OK(loom_module_attach_op_comments(module, alpha_import, comments,
                                                 IREE_ARRAYSIZE(comments)));
 
