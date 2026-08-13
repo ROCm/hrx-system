@@ -27,8 +27,10 @@ TEST(SlabProviderTest, CPUPropertiesDescribeAtomicStorage) {
 
   iree_hal_slab_provider_properties_t properties;
   iree_hal_slab_provider_query_properties(provider, &properties);
-  EXPECT_TRUE(iree_all_bits_set(properties.memory_type,
-                                IREE_HAL_MEMORY_TYPE_HOST_COHERENT));
+  EXPECT_EQ(properties.memory_type, IREE_HAL_CPU_SLAB_PROVIDER_MEMORY_TYPE);
+  EXPECT_TRUE(iree_all_bits_set(
+      properties.memory_type,
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL));
   EXPECT_TRUE(iree_all_bits_set(properties.supported_usage,
                                 IREE_HAL_BUFFER_USAGE_STORAGE));
 

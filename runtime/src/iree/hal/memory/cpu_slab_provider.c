@@ -167,20 +167,8 @@ static void iree_hal_cpu_slab_provider_query_stats(
 static void iree_hal_cpu_slab_provider_query_properties(
     const iree_hal_slab_provider_t* base_provider,
     iree_hal_slab_provider_properties_t* out_properties) {
-  out_properties->memory_type =
-      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
-      IREE_HAL_MEMORY_TYPE_HOST_COHERENT | IREE_HAL_MEMORY_TYPE_HOST_CACHED;
-  out_properties->supported_usage =
-      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH |
-      IREE_HAL_BUFFER_USAGE_SHARING_EXPORT |
-      IREE_HAL_BUFFER_USAGE_SHARING_REPLICATE |
-      IREE_HAL_BUFFER_USAGE_SHARING_CONCURRENT |
-      IREE_HAL_BUFFER_USAGE_SHARING_IMMUTABLE |
-      IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED |
-      IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT |
-      IREE_HAL_BUFFER_USAGE_MAPPING_OPTIONAL |
-      IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_RANDOM |
-      IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_SEQUENTIAL_WRITE;
+  out_properties->memory_type = IREE_HAL_CPU_SLAB_PROVIDER_MEMORY_TYPE;
+  out_properties->supported_usage = IREE_HAL_CPU_SLAB_PROVIDER_BUFFER_USAGE;
   out_properties->atomic_operations =
       iree_hal_local_atomic_operation_capabilities(
           IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);

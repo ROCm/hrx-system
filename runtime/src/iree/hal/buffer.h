@@ -63,6 +63,11 @@ enum iree_hal_memory_type_bits_t {
   IREE_HAL_MEMORY_TYPE_HOST_CACHED = 1u << 3,
 
   // Memory is accessible as normal host allocated memory.
+  //
+  // This may be combined with IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL when one
+  // coherent unified memory type is local to both the host and device. Because
+  // HOST_LOCAL includes HOST_COHERENT, non-coherent device-local memory that
+  // can be mapped by the host must use HOST_VISIBLE without HOST_LOCAL.
   IREE_HAL_MEMORY_TYPE_HOST_LOCAL = IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
                                     IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
                                     (1u << 6),

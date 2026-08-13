@@ -311,4 +311,27 @@ TEST(PoolSetTest, SelectsHighestPriorityCompatiblePoolBySize) {
   iree_hal_pool_release((iree_hal_pool_t*)direct_pool);
 }
 
+TEST(PoolSetTest, SelectsCoherentUnifiedMemory) {
+  iree_hal_pool_set_t pool_set;
+  IREE_ASSERT_OK(iree_hal_pool_set_initialize(
+      /*initial_capacity=*/1, iree_allocator_system(), &pool_set));
+
+  iree_hal_routing_test_pool_t* unified_pool = CreateRoutingTestPool(0);
+  unified_pool->capabilities.memory_type =
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  IREE_ASSERT_OK(iree_hal_pool_set_register(&pool_set, /*priority=*/0,
+                                            (iree_hal_pool_t*)unified_pool));
+
+  iree_hal_buffer_params_t params = {0};
+  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+  params.type =
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  EXPECT_EQ((iree_hal_pool_t*)unified_pool,
+            iree_hal_pool_set_select(&pool_set, params, 4096));
+
+  iree_hal_pool_set_deinitialize(&pool_set);
+  iree_hal_pool_release((iree_hal_pool_t*)unified_pool);
+}
+
 }  // namespace

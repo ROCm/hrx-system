@@ -230,15 +230,6 @@ static iree_status_t iree_hal_task_device_select_alloca_pool(
     return iree_ok_status();
   }
 
-  // Local-task CPU memory is semantically device-visible, but its shared slab
-  // provider reports the physical host properties used by all backing pools.
-  // Route with the physical bits while keeping the original params for the
-  // eventual buffer wrapper.
-  params.type &= ~IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  params.type &= ~IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
-  if (params.type == IREE_HAL_MEMORY_TYPE_NONE) {
-    params.type = IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
-  }
   *out_pool = iree_hal_pool_set_select(&device->default_pool_set, params,
                                        allocation_size);
   if (!*out_pool) {
@@ -731,9 +722,8 @@ static iree_status_t iree_hal_task_device_prepare_alloca_wrapper(
                             "unsupported alloca flags: 0x%" PRIx64, flags);
   }
 
-  // Local CPU slab providers report physical host properties while the local
-  // HAL device exposes those bytes as device-local. Normalize through the
-  // device allocator before creating the transient wrapper.
+  // Normalize allocation hints and usage through the device allocator before
+  // creating the transient wrapper.
   const iree_hal_buffer_compatibility_t compatibility =
       iree_hal_allocator_query_buffer_compatibility(
           iree_hal_device_allocator(base_device), *params, allocation_size,

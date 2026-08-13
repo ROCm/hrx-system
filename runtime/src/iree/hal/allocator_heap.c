@@ -112,8 +112,8 @@ static iree_status_t iree_hal_heap_allocator_query_memory_heaps(
   }
   heaps[0] = (iree_hal_allocator_memory_heap_t){
       .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
-              IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
-              IREE_HAL_MEMORY_TYPE_HOST_COHERENT,
+              IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+              IREE_HAL_MEMORY_TYPE_HOST_CACHED,
       .allowed_usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
                        IREE_HAL_BUFFER_USAGE_DISPATCH |
                        IREE_HAL_BUFFER_USAGE_SHARING_EXPORT |
