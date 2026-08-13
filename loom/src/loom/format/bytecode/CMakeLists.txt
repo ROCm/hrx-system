@@ -72,6 +72,16 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    module_summary
+  HDRS
+    "module_summary.h"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     reader
   HDRS
     "index.h"
@@ -80,12 +90,14 @@ loom_cc_library(
     "reader.c"
   DEPS
     ::format
+    ::module_summary
     iree::base
     iree::base::internal::arena
     iree::base::internal::unicode
     loom::error::diagnostic
     loom::error::error_defs
     loom::format::bytecode::reader::decoder
+    loom::format::bytecode::reader::module_view
     loom::format::low_repr
     loom::ir
     loom::ir::symbol_map

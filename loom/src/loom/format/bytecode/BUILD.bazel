@@ -64,6 +64,14 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "module_summary",
+    hdrs = ["module_summary.h"],
+    deps = [
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "reader",
     srcs = ["reader.c"],
     hdrs = [
@@ -72,10 +80,12 @@ loom_cc_library(
     ],
     deps = [
         ":format",
+        ":module_summary",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/format:low_repr",
         "//loom/src/loom/format/bytecode/reader:decoder",
+        "//loom/src/loom/format/bytecode/reader:module_view",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:symbol_map",
         "//loom/src/loom/ops:op_defs",

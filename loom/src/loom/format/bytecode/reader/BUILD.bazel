@@ -13,6 +13,21 @@ package(
 )
 
 loom_cc_library(
+    name = "module_view",
+    hdrs = ["module_view.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/format/bytecode:module_summary",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:symbol_map",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:type_registry",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "decoder",
     srcs = ["decoder.c"],
     hdrs = ["decoder.h"],

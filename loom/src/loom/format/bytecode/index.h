@@ -18,6 +18,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/error/diagnostic.h"
 #include "loom/format/bytecode/format.h"
+#include "loom/format/bytecode/module_summary.h"
 #include "loom/ir/context.h"
 
 #ifdef __cplusplus
@@ -29,40 +30,6 @@ typedef struct loom_bytecode_index_options_t {
   // Sink for structured malformed-bytecode diagnostics.
   loom_diagnostic_sink_t diagnostic_sink;
 } loom_bytecode_index_options_t;
-
-// Summary of one decoded module's lightweight metadata.
-typedef struct loom_bytecode_module_metadata_summary_t {
-  // Allocation-summary SSA value count.
-  uint64_t value_count;
-  // Allocation-summary region count.
-  uint64_t region_count;
-  // Allocation-summary block count.
-  uint64_t block_count;
-  // Allocation-summary operation count.
-  uint64_t op_count;
-  // STRINGS table entry count.
-  uint64_t string_count;
-  // SOURCES table entry count.
-  uint64_t source_count;
-  // TYPES table entry count.
-  uint64_t type_count;
-  // ENCODINGS instance table entry count.
-  uint64_t encoding_count;
-  // OPS table entry count.
-  uint64_t op_name_count;
-  // LOCATIONS table entry count, or zero when omitted.
-  uint64_t location_count;
-  // SYMBOLS table entry count.
-  uint64_t symbol_count;
-  // PROVIDER_IMPORTS record count.
-  uint64_t provider_import_count;
-  // Total provider anchor count.
-  uint64_t provider_import_anchor_count;
-  // Dependency occurrence count across module and symbol rows.
-  uint64_t dependency_count;
-  // Abstract provider demand occurrence count across symbol rows.
-  uint64_t contract_demand_count;
-} loom_bytecode_module_metadata_summary_t;
 
 // Validated section directory entry exposed by the bytecode index.
 typedef struct loom_bytecode_section_metadata_t {

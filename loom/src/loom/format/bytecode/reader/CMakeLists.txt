@@ -11,6 +11,22 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    module_view
+  HDRS
+    "module_view.h"
+  DEPS
+    iree::base
+    loom::format::bytecode::format
+    loom::format::bytecode::module_summary
+    loom::ir
+    loom::ir::symbol_map
+    loom::ops::op_defs
+    loom::ops::type_registry
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     decoder
   HDRS
     "decoder.h"
