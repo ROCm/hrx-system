@@ -191,6 +191,49 @@ iree_hal_amdgpu_atomic_memory_select_device_cells(
   return cell_flags;
 }
 
+iree_hal_amdgpu_atomic_memory_cell_flags_t
+iree_hal_amdgpu_atomic_memory_select_import_cells(
+    const iree_hal_amdgpu_atomic_memory_import_selection_t* selection) {
+  IREE_ASSERT_ARGUMENT(selection);
+
+  const uint32_t pool_class =
+      selection->global_flags & IREE_HAL_AMDGPU_ATOMIC_MEMORY_POOL_CLASS_FLAGS;
+  const bool coarse_grained =
+      pool_class == HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
+  const bool ordinary_fine_grained =
+      pool_class == HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED;
+  const bool extended_fine_grained =
+      pool_class == HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED;
+  if (!coarse_grained && !ordinary_fine_grained && !extended_fine_grained) {
+    return IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE;
+  }
+
+  if (selection->allocation_flags_available &&
+      iree_any_bit_set(selection->allocation_flags,
+                       HSA_AMD_POINTER_INFO_ALLOC_FLAG_READONLY)) {
+    return IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE;
+  }
+
+  iree_hal_amdgpu_atomic_memory_cell_flags_t cell_flags =
+      selection->candidate_cells;
+  bool supports_system_scope = extended_fine_grained;
+  if (selection->allocation_flags_available) {
+    const bool atomic_full =
+        iree_any_bit_set(selection->allocation_flags,
+                         HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_FULL);
+    const bool atomic_partial =
+        iree_any_bit_set(selection->allocation_flags,
+                         HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_PARTIAL);
+    supports_system_scope =
+        atomic_full || (extended_fine_grained && !atomic_partial);
+  }
+  if (coarse_grained || !supports_system_scope) {
+    cell_flags &= ~(IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_SYSTEM_SCOPE_32 |
+                    IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_SYSTEM_SCOPE_64);
+  }
+  return cell_flags;
+}
+
 iree_hal_atomic_operation_capabilities_t
 iree_hal_amdgpu_atomic_memory_expand_capabilities(
     iree_hal_amdgpu_atomic_memory_cell_flags_t cell_flags) {

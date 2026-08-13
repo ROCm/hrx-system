@@ -1541,6 +1541,9 @@ TEST_F(AllocatorTest, DeviceAllocationImportWrapsHsaAllocation) {
   ASSERT_NE(buffer, nullptr);
   EXPECT_TRUE(iree_all_bits_set(iree_hal_buffer_memory_type(buffer),
                                 IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL));
+  EXPECT_EQ(iree_hal_amdgpu_buffer_atomic_memory_cells(buffer),
+            IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_DEVICE_SCOPE_32 |
+                IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_DEVICE_SCOPE_64);
   EXPECT_EQ(iree_hal_buffer_allocation_size(buffer), kAllocationSize);
 
   iree_hal_external_buffer_t exported_buffer = {};

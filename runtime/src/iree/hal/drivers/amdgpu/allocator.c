@@ -35,6 +35,9 @@ typedef struct iree_hal_amdgpu_allocator_memory_pool_t {
   // HSA allocation flags required for buffers from |memory_pool|.
   uint32_t allocation_flags;
 
+  // HSA global flags classifying allocations from |memory_pool|.
+  uint32_t global_flags;
+
   // Source GPUs supporting each atomic width and coherence-domain cell.
   iree_hal_amdgpu_atomic_memory_source_masks_t atomic_memory_source_masks;
 
@@ -96,6 +99,9 @@ typedef struct iree_hal_amdgpu_allocator_t {
 typedef struct iree_hal_amdgpu_allocator_placement_t {
   // HSA memory pool selected for the allocation.
   const iree_hal_amdgpu_allocator_memory_pool_t* memory_pool;
+
+  // Physical devices selected by the complete resolved queue affinity.
+  iree_hal_amdgpu_gpu_agent_mask_t physical_device_mask;
 
   // Physical device ordinal owning |memory_pool|.
   uint32_t physical_device_ordinal;
@@ -236,6 +242,15 @@ typedef struct iree_hal_amdgpu_pointer_range_t {
   // HAL memory type implied by the HSA allocation owner and global flags.
   iree_hal_memory_type_t memory_type;
 
+  // Effective HSA memory-pool global flags reported for the allocation.
+  uint32_t global_flags;
+
+  // Versioned KFD allocation flags when |allocation_flags_available| is true.
+  uint32_t allocation_flags;
+
+  // Whether |allocation_flags| was present in the pointer-info result.
+  bool allocation_flags_available;
+
   // Physical GPU ordinal that owns the allocation.
   uint32_t physical_device_ordinal;
 } iree_hal_amdgpu_pointer_range_t;
@@ -303,6 +318,9 @@ static iree_status_t iree_hal_amdgpu_allocator_query_pool_properties(
 
   out_pool->memory_pool = memory_pool;
   out_pool->allocation_flags = allocation_flags;
+  IREE_RETURN_IF_ERROR(iree_hsa_amd_memory_pool_get_info(
+      IREE_LIBHSA(libhsa), memory_pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS,
+      &out_pool->global_flags));
   out_pool->allocation_granule = (iree_device_size_t)allocation_granule;
   out_pool->allocation_alignment = (iree_device_size_t)allocation_alignment;
   out_pool->max_allocation_size = (iree_device_size_t)max_allocation_size;
@@ -367,6 +385,49 @@ static bool iree_hal_amdgpu_hsa_pointer_info_has_field(
     const hsa_amd_pointer_info_t* info, iree_host_size_t field_offset,
     iree_host_size_t field_size) {
   return info->size >= field_offset && field_size <= info->size - field_offset;
+}
+
+static const iree_hal_amdgpu_allocator_memory_pool_t*
+iree_hal_amdgpu_allocator_match_imported_device_pool(
+    const iree_hal_amdgpu_allocator_t* allocator,
+    iree_host_size_t owner_ordinal, uint32_t global_flags) {
+  const uint32_t pool_class =
+      global_flags & IREE_HAL_AMDGPU_ATOMIC_MEMORY_POOL_CLASS_FLAGS;
+  const iree_hal_amdgpu_allocator_memory_pool_t* candidate_pools[] = {
+      &allocator->memory_pools.device_coarse[owner_ordinal],
+      &allocator->memory_pools.device_fine[owner_ordinal],
+      &allocator->memory_pools.device_uncached[owner_ordinal],
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(candidate_pools); ++i) {
+    const iree_hal_amdgpu_allocator_memory_pool_t* pool = candidate_pools[i];
+    if (pool->memory_pool.handle &&
+        (pool->global_flags & IREE_HAL_AMDGPU_ATOMIC_MEMORY_POOL_CLASS_FLAGS) ==
+            pool_class) {
+      return pool;
+    }
+  }
+  return NULL;
+}
+
+static iree_hal_amdgpu_atomic_memory_cell_flags_t
+iree_hal_amdgpu_allocator_select_imported_device_cells(
+    const iree_hal_amdgpu_allocator_t* allocator,
+    const iree_hal_amdgpu_allocator_placement_t* placement,
+    const iree_hal_amdgpu_pointer_range_t* pointer_range) {
+  const iree_hal_amdgpu_allocator_memory_pool_t* pool =
+      iree_hal_amdgpu_allocator_match_imported_device_pool(
+          allocator, pointer_range->physical_device_ordinal,
+          pointer_range->global_flags);
+  if (!pool) return IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE;
+
+  const iree_hal_amdgpu_atomic_memory_import_selection_t selection = {
+      .global_flags = pointer_range->global_flags,
+      .allocation_flags = pointer_range->allocation_flags,
+      .allocation_flags_available = pointer_range->allocation_flags_available,
+      .candidate_cells = iree_hal_amdgpu_atomic_memory_select_device_cells(
+          &pool->atomic_memory_source_masks, placement->physical_device_mask),
+  };
+  return iree_hal_amdgpu_atomic_memory_select_import_cells(&selection);
 }
 
 static iree_status_t iree_hal_amdgpu_allocator_query_device_pointer_range(
@@ -478,19 +539,13 @@ static iree_status_t iree_hal_amdgpu_allocator_query_device_pointer_range(
   const bool coarse_grained =
       iree_all_bits_set(pointer_info.global_flags,
                         HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED);
-  if (IREE_UNLIKELY(!fine_grained && !coarse_grained)) {
-    return iree_make_status(
-        IREE_STATUS_UNAVAILABLE,
-        "ROCr pointer-info result did not identify a fine- or coarse-grained "
-        "device allocation");
-  }
 
   const iree_hal_amdgpu_physical_device_t* owner_device =
       allocator->logical_device->physical_devices[owner_ordinal];
   const bool direct_host_access =
       owner_device && owner_device->memory_system.svm.direct_host_access;
   iree_hal_memory_type_t actual_memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  if (fine_grained && direct_host_access) {
+  if (fine_grained && !coarse_grained && direct_host_access) {
     actual_memory_type |=
         IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_HOST_COHERENT;
   }
@@ -529,6 +584,14 @@ static iree_status_t iree_hal_amdgpu_allocator_query_device_pointer_range(
   out_range->agent_base = pointer_info.agentBaseAddress;
   out_range->allocation_size = allocation_size;
   out_range->memory_type = actual_memory_type;
+  out_range->global_flags = pointer_info.global_flags;
+  out_range->allocation_flags_available =
+      iree_hal_amdgpu_hsa_pointer_info_has_field(
+          &pointer_info, offsetof(hsa_amd_pointer_info_t, alloc_flags),
+          sizeof(pointer_info.alloc_flags));
+  if (out_range->allocation_flags_available) {
+    out_range->allocation_flags = pointer_info.alloc_flags;
+  }
   out_range->physical_device_ordinal = (uint32_t)owner_ordinal;
   return iree_ok_status();
 }
@@ -664,6 +727,8 @@ static bool iree_hal_amdgpu_allocator_resolve_placement(
   params->type = memory_type;
   params->usage &= supported_usage;
   out_placement->memory_pool = memory_pool;
+  out_placement->physical_device_mask =
+      physical_device_set.physical_device_mask;
   out_placement->physical_device_ordinal = (uint32_t)device_ordinal;
   out_placement->memory_type = memory_type;
   out_placement->atomic_memory_cells =
@@ -1720,8 +1785,6 @@ static iree_status_t iree_hal_amdgpu_allocator_import_device_allocation(
         "parameters");
 #endif  // IREE_STATUS_MODE
   }
-  (void)memory_placement;
-
   iree_hal_amdgpu_pointer_range_t pointer_range;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_allocator_query_device_pointer_range(
       allocator, compat_params.type, external_buffer, &pointer_range));
@@ -1761,11 +1824,13 @@ static iree_status_t iree_hal_amdgpu_allocator_import_device_allocation(
                             : IREE_HAL_QUEUE_AFFINITY_ANY,
       .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
   };
+  const iree_hal_amdgpu_atomic_memory_cell_flags_t atomic_memory_cells =
+      iree_hal_amdgpu_allocator_select_imported_device_cells(
+          allocator, &memory_placement, &pointer_range);
   iree_status_t status = iree_hal_amdgpu_buffer_create(
       allocator->libhsa, placement, pointer_range.memory_type,
-      compat_params.access, compat_params.usage,
-      IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE, external_buffer->size,
-      external_buffer->size,
+      compat_params.access, compat_params.usage, atomic_memory_cells,
+      external_buffer->size, external_buffer->size,
       (void*)(uintptr_t)external_buffer->handle.device_allocation.ptr,
       imported_release_callback, allocator->host_allocator, &buffer);
 

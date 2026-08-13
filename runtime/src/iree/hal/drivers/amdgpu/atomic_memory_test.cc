@@ -121,6 +121,71 @@ TEST(AtomicMemoryTest, DeviceSelectionRequiresEverySource) {
             IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE);
 }
 
+static iree_hal_amdgpu_atomic_memory_cell_flags_t SelectImportCells(
+    uint32_t global_flags, bool allocation_flags_available,
+    uint32_t allocation_flags) {
+  const iree_hal_amdgpu_atomic_memory_import_selection_t selection = {
+      /*.global_flags=*/global_flags,
+      /*.allocation_flags=*/allocation_flags,
+      /*.allocation_flags_available=*/allocation_flags_available,
+      /*.candidate_cells=*/IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAGS_ALL,
+  };
+  return iree_hal_amdgpu_atomic_memory_select_import_cells(&selection);
+}
+
+TEST(AtomicMemoryTest, ImportedCoarseMemoryDropsSystemScope) {
+  EXPECT_EQ(SelectImportCells(HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED,
+                              /*allocation_flags_available=*/false, 0),
+            IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_DEVICE_SCOPE_32 |
+                IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_DEVICE_SCOPE_64);
+}
+
+TEST(AtomicMemoryTest, ImportedOrdinaryFineMemoryRequiresFullSystemAtomics) {
+  const auto device_cells =
+      IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_DEVICE_SCOPE_32 |
+      IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_DEVICE_SCOPE_64;
+  EXPECT_EQ(SelectImportCells(HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED,
+                              /*allocation_flags_available=*/false, 0),
+            device_cells);
+  EXPECT_EQ(SelectImportCells(HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED,
+                              /*allocation_flags_available=*/true,
+                              HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_PARTIAL),
+            device_cells);
+  EXPECT_EQ(SelectImportCells(HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED,
+                              /*allocation_flags_available=*/true,
+                              HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_FULL),
+            IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAGS_ALL);
+}
+
+TEST(AtomicMemoryTest,
+     ImportedExtendedFineMemoryRejectsPartialOnlySystemScope) {
+  EXPECT_EQ(SelectImportCells(
+                HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED,
+                /*allocation_flags_available=*/false, 0),
+            IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAGS_ALL);
+  EXPECT_EQ(SelectImportCells(
+                HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED,
+                /*allocation_flags_available=*/true,
+                HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_PARTIAL),
+            IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_DEVICE_SCOPE_32 |
+                IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_DEVICE_SCOPE_64);
+}
+
+TEST(AtomicMemoryTest, ImportedReadOnlyOrUnknownMemorySupportsNoCells) {
+  EXPECT_EQ(SelectImportCells(HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED,
+                              /*allocation_flags_available=*/true,
+                              HSA_AMD_POINTER_INFO_ALLOC_FLAG_READONLY |
+                                  HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_FULL),
+            IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE);
+  EXPECT_EQ(SelectImportCells(/*global_flags=*/0,
+                              /*allocation_flags_available=*/false, 0),
+            IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE);
+  EXPECT_EQ(SelectImportCells(HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED |
+                                  HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED,
+                              /*allocation_flags_available=*/false, 0),
+            IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE);
+}
+
 TEST(AtomicMemoryTest, ExpandsCellsToCompleteOperationFamilies) {
   const iree_hal_atomic_operation_capabilities_t capabilities =
       iree_hal_amdgpu_atomic_memory_expand_capabilities(

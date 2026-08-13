@@ -36,6 +36,13 @@ typedef enum iree_hal_amdgpu_atomic_memory_cell_flag_bits_e {
                                                 IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_SYSTEM_SCOPE_32 | \
                                                 IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_SYSTEM_SCOPE_64))
 
+// HSA global flags that distinguish coarse, ordinary fine, and extended-scope
+// fine memory pool classes.
+#define IREE_HAL_AMDGPU_ATOMIC_MEMORY_POOL_CLASS_FLAGS \
+  (HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED |    \
+   HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED |      \
+   HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED)
+
 // Source GPU masks supporting each atomic memory cell in one HSA memory pool.
 //
 // A bit at physical device ordinal N means that GPU may issue the corresponding
@@ -65,6 +72,18 @@ typedef struct iree_hal_amdgpu_atomic_memory_source_selection_t {
   const hsa_amd_memory_pool_link_info_t* link_hops;
 } iree_hal_amdgpu_atomic_memory_source_selection_t;
 
+// Immutable facts used to narrow candidate cells for an imported allocation.
+typedef struct iree_hal_amdgpu_atomic_memory_import_selection_t {
+  // Effective HSA memory-pool global flags reported for the allocation.
+  uint32_t global_flags;
+  // Versioned KFD allocation flags when |allocation_flags_available| is true.
+  uint32_t allocation_flags;
+  // Whether |allocation_flags| was present in the ROCr pointer-info result.
+  bool allocation_flags_available;
+  // Cells derived from the matched owner pool and complete queue placement.
+  iree_hal_amdgpu_atomic_memory_cell_flags_t candidate_cells;
+} iree_hal_amdgpu_atomic_memory_import_selection_t;
+
 // Selects the atomic memory cells supported by one source GPU.
 //
 // This validates HSA-reported access and pool-granularity facts at the external
@@ -87,6 +106,12 @@ iree_hal_amdgpu_atomic_memory_cell_flags_t
 iree_hal_amdgpu_atomic_memory_select_device_cells(
     const iree_hal_amdgpu_atomic_memory_source_masks_t* source_masks,
     iree_hal_amdgpu_gpu_agent_mask_t device_mask);
+
+// Narrows candidate cells using versioned foreign-allocation metadata.
+// Unknown or contradictory facts return no cells without rejecting the import.
+iree_hal_amdgpu_atomic_memory_cell_flags_t
+iree_hal_amdgpu_atomic_memory_select_import_cells(
+    const iree_hal_amdgpu_atomic_memory_import_selection_t* selection);
 
 // Expands compact memory cells into the public all-operations capability
 // matrix.
