@@ -593,6 +593,34 @@ typedef struct loom_target_compile_report_bank_service_summary_t {
   uint16_t maximum_request_multiplicity;
 } loom_target_compile_report_bank_service_summary_t;
 
+// Structural and exact-dynamic subgroup access coverage counters.
+typedef struct loom_target_compile_report_subgroup_access_summary_t {
+  // Number of packets carrying subgroup access evidence.
+  uint64_t modeled_packet_count;
+  // Number of packets with exact active-subgroup address geometry.
+  uint64_t exact_packet_count;
+  // Number of packets without exact active-subgroup address geometry.
+  uint64_t unknown_packet_count;
+  // Number of exact packets whose request intervals cover a dense span.
+  uint64_t dense_packet_count;
+  // Number of exact packets whose request intervals contain uncovered gaps.
+  uint64_t gapped_packet_count;
+  // Number of exact packets containing overlapping lane requests.
+  uint64_t overlapping_packet_count;
+  // Number of source packets with exact dynamic geometry contributions.
+  uint64_t exact_dynamic_packet_count;
+  // Number of source packets without exact dynamic geometry contributions.
+  uint64_t unknown_dynamic_packet_count;
+  // Dynamic executions represented by exact subgroup geometry contributions.
+  uint64_t dynamic_packet_count;
+  // Exact dynamic packet executions with dense request intervals.
+  uint64_t dynamic_dense_packet_count;
+  // Exact dynamic packet executions with gapped request intervals.
+  uint64_t dynamic_gapped_packet_count;
+  // Exact dynamic packet executions containing overlapping lane requests.
+  uint64_t dynamic_overlapping_packet_count;
+} loom_target_compile_report_subgroup_access_summary_t;
+
 // One emitted artifact entry summary in a compile report.
 typedef struct loom_target_compile_report_entry_t {
   // Target artifact function symbol emitted for this entry.
@@ -669,6 +697,8 @@ typedef struct loom_target_compile_report_entry_t {
   uint64_t local_memory_bytes;
   // Structural target bank-service evidence for this entry.
   loom_target_compile_report_bank_service_summary_t bank_service_summary;
+  // Structural subgroup address geometry for this entry.
+  loom_target_compile_report_subgroup_access_summary_t subgroup_access_summary;
   // Residual target move counts indexed by
   // loom_target_compile_report_move_cause_t.
   loom_target_compile_report_move_cause_counts_t
@@ -1328,6 +1358,60 @@ typedef struct loom_target_compile_report_bank_service_t {
   uint16_t maximum_request_multiplicity;
 } loom_target_compile_report_bank_service_t;
 
+// Maximum lossless subgroup lane-address terms retained in a compile report.
+#define LOOM_TARGET_COMPILE_REPORT_SUBGROUP_ACCESS_TERM_CAPACITY 4
+
+// One term in an exact subgroup lane-address function.
+typedef struct loom_target_compile_report_subgroup_access_term_t {
+  // Power-of-two divisor applied to the subgroup lane ID.
+  uint16_t divisor;
+  // Optional power-of-two modulus applied after division; zero omits it.
+  uint16_t modulus;
+  // Byte stride multiplied by the resulting lane digit.
+  uint32_t byte_stride;
+} loom_target_compile_report_subgroup_access_term_t;
+
+// Target-owned subgroup address geometry for one emitted memory packet.
+typedef struct loom_target_compile_report_subgroup_access_t {
+  // Exactness of the complete active-subgroup geometry: "exact" or "unknown".
+  iree_string_view_t proof;
+  // Proof used to derive the per-lane relative byte addresses.
+  iree_string_view_t lane_address_proof;
+  // Proof used to derive the active lane set.
+  iree_string_view_t active_lane_proof;
+  // Address-function form: "uniform", "linear", or "digit-terms".
+  iree_string_view_t lane_mapping;
+  // Exact byte-interval coverage: "dense", "gapped", or empty when unknown.
+  iree_string_view_t interval_coverage;
+  // Stable reason key when |proof| is "unknown".
+  iree_string_view_t unknown_reason;
+  // Number of lanes in the modeled subgroup.
+  uint8_t subgroup_size;
+  // Number of populated lossless lane-address terms.
+  uint8_t lane_term_count;
+  // Lossless relative address terms evaluated in array order.
+  loom_target_compile_report_subgroup_access_term_t
+      lane_terms[LOOM_TARGET_COMPILE_REPORT_SUBGROUP_ACCESS_TERM_CAPACITY];
+  // Selected target packet byte width issued by each active lane.
+  uint32_t per_lane_packet_byte_count;
+  // Constant byte stride between adjacent lanes, or zero when non-linear.
+  uint32_t linear_lane_byte_stride;
+  // Sum of per-lane packet byte widths, including overlapping requests.
+  uint64_t subgroup_requested_byte_count;
+  // Unique bytes covered by the union of all active-lane packet intervals.
+  uint64_t subgroup_unique_byte_count;
+  // Byte span from the minimum request begin to the maximum request end.
+  uint64_t subgroup_span_byte_count;
+  // Maximum absolute byte delta between adjacent subgroup lane addresses.
+  uint64_t maximum_adjacent_lane_delta_bytes;
+  // Maximum uncovered byte gap between sorted request intervals.
+  uint64_t maximum_uncovered_byte_gap_bytes;
+  // Number of distinct active-lane packet start addresses.
+  uint16_t distinct_lane_address_count;
+  // Number of disjoint byte regions covered by active-lane packets.
+  uint16_t contiguous_region_count;
+} loom_target_compile_report_subgroup_access_t;
+
 // One emitted source-memory packet row copied into a compile report.
 typedef struct loom_target_compile_report_source_low_memory_row_t {
   // Source function symbol containing the lowered source operation.
@@ -1392,6 +1476,8 @@ typedef struct loom_target_compile_report_source_low_memory_row_t {
   iree_string_view_t storage_sparsity_policy;
   // Target-owned bank-service evidence for this packet.
   loom_target_compile_report_bank_service_t bank_service;
+  // Target-owned subgroup address geometry for this packet.
+  loom_target_compile_report_subgroup_access_t subgroup_access;
   // Conservative source byte interval evidence for this memory packet.
   loom_target_compile_report_memory_interval_t source_interval;
   // Exact source execution count plus one, or zero when unknown.
@@ -1441,6 +1527,32 @@ typedef struct loom_target_compile_report_source_low_bank_service_summary_t {
   // Accumulated structural service evidence for the packet group.
   loom_target_compile_report_bank_service_summary_t summary;
 } loom_target_compile_report_source_low_bank_service_summary_t;
+
+// Subgroup access evidence grouped by one stable source and packet shape.
+typedef struct loom_target_compile_report_source_low_subgroup_access_summary_t {
+  // Source function symbol containing the modeled memory packets.
+  iree_string_view_t function_name;
+  // Source operation mnemonic that emitted the modeled memory packets.
+  iree_string_view_t source_op_name;
+  // Numeric source operation kind that emitted the modeled memory packets.
+  uint32_t source_op_kind;
+  // Named source memory root selected by value facts, if available.
+  iree_string_view_t source_root_name;
+  // Source function entry argument index for the root, or UINT16_MAX.
+  uint16_t source_root_argument_index;
+  // Target-independent memory-space key selected by the target.
+  iree_string_view_t memory_space;
+  // Source memory operation kind selected by the target.
+  iree_string_view_t operation_kind;
+  // Stable target packet key selected for the modeled packets.
+  iree_string_view_t packet_key;
+  // Stable target-owned strategy key selected for the modeled packets.
+  iree_string_view_t strategy_key;
+  // Exact or explicitly unknown subgroup address geometry shared by the group.
+  loom_target_compile_report_subgroup_access_t access;
+  // Accumulated structural and exact-dynamic coverage for the group.
+  loom_target_compile_report_subgroup_access_summary_t summary;
+} loom_target_compile_report_source_low_subgroup_access_summary_t;
 
 // Summary of emitted source-memory packet shape.
 typedef struct loom_target_compile_report_source_low_memory_summary_t {
@@ -1923,11 +2035,15 @@ typedef struct loom_target_compile_report_t {
   loom_target_compile_report_row_list_t source_low_memory_strategy_summaries;
   // Owned bank-service summaries grouped by source root and target packet.
   loom_target_compile_report_row_list_t source_low_bank_service_summaries;
+  // Owned subgroup-access summaries grouped by source root and target packet.
+  loom_target_compile_report_row_list_t source_low_subgroup_access_summaries;
   // Derived summary of emitted source-memory packet shape.
   loom_target_compile_report_source_low_memory_summary_t
       source_low_memory_summary;
   // Derived structural bank-service evidence across emitted source packets.
   loom_target_compile_report_bank_service_summary_t bank_service_summary;
+  // Derived subgroup access coverage across emitted source packets.
+  loom_target_compile_report_subgroup_access_summary_t subgroup_access_summary;
   // Owned target math-legalization decision rows.
   loom_target_compile_report_row_list_t math_legalization_rows;
   // Owned target-legalization decision rows.

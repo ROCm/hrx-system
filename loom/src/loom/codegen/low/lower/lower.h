@@ -452,6 +452,60 @@ typedef struct loom_low_lower_memory_bank_service_report_t {
   uint16_t maximum_request_multiplicity;
 } loom_low_lower_memory_bank_service_report_t;
 
+// Maximum lossless subgroup lane-address terms retained in a memory report.
+#define LOOM_LOW_LOWER_MEMORY_SUBGROUP_ACCESS_TERM_CAPACITY 4
+
+// One term in an exact subgroup lane-address function.
+typedef struct loom_low_lower_memory_subgroup_access_term_t {
+  // Power-of-two divisor applied to the subgroup lane ID.
+  uint16_t divisor;
+  // Optional power-of-two modulus applied after division; zero omits it.
+  uint16_t modulus;
+  // Byte stride multiplied by the resulting lane digit.
+  uint32_t byte_stride;
+} loom_low_lower_memory_subgroup_access_term_t;
+
+// Target-owned subgroup address geometry for one emitted memory packet.
+typedef struct loom_low_lower_memory_subgroup_access_report_t {
+  // Exactness of the complete active-subgroup geometry: "exact" or "unknown".
+  iree_string_view_t proof;
+  // Proof used to derive the per-lane relative byte addresses.
+  iree_string_view_t lane_address_proof;
+  // Proof used to derive the active lane set.
+  iree_string_view_t active_lane_proof;
+  // Address-function form: "uniform", "linear", or "digit-terms".
+  iree_string_view_t lane_mapping;
+  // Exact byte-interval coverage: "dense", "gapped", or empty when unknown.
+  iree_string_view_t interval_coverage;
+  // Stable reason key when |proof| is "unknown".
+  iree_string_view_t unknown_reason;
+  // Number of lanes in the modeled subgroup.
+  uint8_t subgroup_size;
+  // Number of populated lossless lane-address terms.
+  uint8_t lane_term_count;
+  // Lossless relative address terms evaluated in array order.
+  loom_low_lower_memory_subgroup_access_term_t
+      lane_terms[LOOM_LOW_LOWER_MEMORY_SUBGROUP_ACCESS_TERM_CAPACITY];
+  // Selected target packet byte width issued by each active lane.
+  uint32_t per_lane_packet_byte_count;
+  // Constant byte stride between adjacent lanes, or zero when non-linear.
+  uint32_t linear_lane_byte_stride;
+  // Sum of per-lane packet byte widths, including overlapping requests.
+  uint64_t subgroup_requested_byte_count;
+  // Unique bytes covered by the union of all active-lane packet intervals.
+  uint64_t subgroup_unique_byte_count;
+  // Byte span from the minimum request begin to the maximum request end.
+  uint64_t subgroup_span_byte_count;
+  // Maximum absolute byte delta between adjacent subgroup lane addresses.
+  uint64_t maximum_adjacent_lane_delta_bytes;
+  // Maximum uncovered byte gap between sorted request intervals.
+  uint64_t maximum_uncovered_byte_gap_bytes;
+  // Number of distinct active-lane packet start addresses.
+  uint16_t distinct_lane_address_count;
+  // Number of disjoint byte regions covered by active-lane packets.
+  uint16_t contiguous_region_count;
+} loom_low_lower_memory_subgroup_access_report_t;
+
 // One emitted source-memory packet row captured for production diagnostics.
 typedef struct loom_low_lower_memory_report_row_t {
   // Source function symbol containing the lowered source operation.
@@ -516,6 +570,8 @@ typedef struct loom_low_lower_memory_report_row_t {
   iree_string_view_t storage_sparsity_policy;
   // Target-owned bank-service evidence for this packet.
   loom_low_lower_memory_bank_service_report_t bank_service;
+  // Target-owned subgroup address geometry for this packet.
+  loom_low_lower_memory_subgroup_access_report_t subgroup_access;
   // Conservative source byte interval evidence for this memory packet.
   loom_low_byte_interval_t source_interval;
   // Exact source execution count plus one, or zero when unknown.

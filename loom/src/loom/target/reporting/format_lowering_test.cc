@@ -123,6 +123,28 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
   memory.bank_service.uncontended_rounds = 2;
   memory.bank_service.extra_rounds = 2;
   memory.bank_service.maximum_request_multiplicity = 2;
+  memory.subgroup_access.proof = IREE_SVL("exact");
+  memory.subgroup_access.lane_address_proof =
+      IREE_SVL("compiled-fragment-lane-register-layout");
+  memory.subgroup_access.active_lane_proof = IREE_SVL("full-wave");
+  memory.subgroup_access.lane_mapping = IREE_SVL("linear");
+  memory.subgroup_access.interval_coverage = IREE_SVL("gapped");
+  memory.subgroup_access.subgroup_size = 32;
+  memory.subgroup_access.lane_term_count = 1;
+  memory.subgroup_access.lane_terms[0] = {
+      /*.divisor=*/1,
+      /*.modulus=*/0,
+      /*.byte_stride=*/64,
+  };
+  memory.subgroup_access.per_lane_packet_byte_count = 8;
+  memory.subgroup_access.linear_lane_byte_stride = 64;
+  memory.subgroup_access.subgroup_requested_byte_count = 256;
+  memory.subgroup_access.subgroup_unique_byte_count = 256;
+  memory.subgroup_access.subgroup_span_byte_count = 1992;
+  memory.subgroup_access.maximum_adjacent_lane_delta_bytes = 64;
+  memory.subgroup_access.maximum_uncovered_byte_gap_bytes = 56;
+  memory.subgroup_access.distinct_lane_address_count = 32;
+  memory.subgroup_access.contiguous_region_count = 32;
   memory.execution_count_plus_one = 2;
   IREE_ASSERT_OK(loom_target_compile_report_record_source_low_memory_row(
       &report, &memory));
@@ -150,6 +172,12 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
                                     "source_op=vector.load"),
                             0),
       IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(
+      iree_string_view_find(
+          text, IREE_SV("subgroup_access={proof:exact,lane_address_proof:"), 0),
+      IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(text, IREE_SV("interval_coverage:gapped"), 0),
+            IREE_STRING_VIEW_NPOS);
   iree_string_builder_deinitialize(&builder);
 
   iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -197,6 +225,27 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
   const iree_string_view_t group_summary =
       LookupObject(bank_service_group, IREE_SV("summary"));
   ExpectObjectUint64Equals(group_summary, IREE_SV("exact_packet_count"), 1);
+  const iree_string_view_t subgroup_access_summary =
+      LookupObject(memory_summary, IREE_SV("subgroup_access"));
+  ExpectObjectUint64Equals(subgroup_access_summary,
+                           IREE_SV("exact_packet_count"), 1);
+  const iree_string_view_t structural_subgroup_access =
+      LookupObject(subgroup_access_summary, IREE_SV("structural"));
+  ExpectObjectUint64Equals(structural_subgroup_access,
+                           IREE_SV("gapped_packet_count"), 1);
+  ExpectObjectUint64Equals(memory_summary,
+                           IREE_SV("subgroup_access_group_count"), 1);
+  const iree_string_view_t subgroup_access_group = LookupArrayElement(
+      LookupObject(memory_summary, IREE_SV("subgroup_access_groups")),
+      /*index=*/0);
+  const iree_string_view_t group_access =
+      LookupObject(subgroup_access_group, IREE_SV("access"));
+  const iree_string_view_t group_geometry =
+      LookupObject(group_access, IREE_SV("geometry"));
+  ExpectObjectValueEquals(group_geometry, IREE_SV("interval_coverage"),
+                          IREE_SV("gapped"));
+  ExpectObjectUint64Equals(group_geometry, IREE_SV("subgroup_span_bytes"),
+                           1992);
   const iree_string_view_t selection_row = LookupArrayElement(
       LookupObject(source_low, IREE_SV("rows")), /*index=*/0);
   ExpectObjectValueEquals(selection_row, IREE_SV("plan_key"),
@@ -231,6 +280,16 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
       LookupObject(bank_service, IREE_SV("address"));
   ExpectObjectValueEquals(bank_address, IREE_SV("active_lane_proof"),
                           IREE_SV("full-wave"));
+  const iree_string_view_t subgroup_access =
+      LookupObject(memory_row, IREE_SV("subgroup_access"));
+  const iree_string_view_t subgroup_address =
+      LookupObject(subgroup_access, IREE_SV("address"));
+  ExpectObjectValueEquals(subgroup_address, IREE_SV("lane_mapping"),
+                          IREE_SV("linear"));
+  const iree_string_view_t subgroup_geometry =
+      LookupObject(subgroup_access, IREE_SV("geometry"));
+  ExpectObjectUint64Equals(subgroup_geometry,
+                           IREE_SV("maximum_uncovered_gap_bytes"), 56);
   uint64_t second_phase_rounds = 0;
   IREE_ASSERT_OK(iree_json_parse_uint64(
       LookupArrayElement(

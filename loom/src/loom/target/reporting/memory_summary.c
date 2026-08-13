@@ -373,6 +373,24 @@ void loom_target_compile_report_accumulate_bank_service_summaries(
                source->maximum_request_multiplicity);
 }
 
+void loom_target_compile_report_accumulate_subgroup_access_summaries(
+    loom_target_compile_report_subgroup_access_summary_t* target,
+    const loom_target_compile_report_subgroup_access_summary_t* source) {
+  target->modeled_packet_count += source->modeled_packet_count;
+  target->exact_packet_count += source->exact_packet_count;
+  target->unknown_packet_count += source->unknown_packet_count;
+  target->dense_packet_count += source->dense_packet_count;
+  target->gapped_packet_count += source->gapped_packet_count;
+  target->overlapping_packet_count += source->overlapping_packet_count;
+  target->exact_dynamic_packet_count += source->exact_dynamic_packet_count;
+  target->unknown_dynamic_packet_count += source->unknown_dynamic_packet_count;
+  target->dynamic_packet_count += source->dynamic_packet_count;
+  target->dynamic_dense_packet_count += source->dynamic_dense_packet_count;
+  target->dynamic_gapped_packet_count += source->dynamic_gapped_packet_count;
+  target->dynamic_overlapping_packet_count +=
+      source->dynamic_overlapping_packet_count;
+}
+
 void loom_target_compile_report_accumulate_source_low_memory_summaries(
     loom_target_compile_report_source_low_memory_summary_t* target,
     const loom_target_compile_report_source_low_memory_summary_t* source) {
@@ -1039,6 +1057,207 @@ loom_target_compile_report_record_source_low_bank_service_summary(
   return iree_ok_status();
 }
 
+static bool loom_target_compile_report_subgroup_accesses_match(
+    const loom_target_compile_report_subgroup_access_t* lhs,
+    const loom_target_compile_report_subgroup_access_t* rhs) {
+  if (!iree_string_view_equal(lhs->proof, rhs->proof) ||
+      !iree_string_view_equal(lhs->lane_address_proof,
+                              rhs->lane_address_proof) ||
+      !iree_string_view_equal(lhs->active_lane_proof, rhs->active_lane_proof) ||
+      !iree_string_view_equal(lhs->lane_mapping, rhs->lane_mapping) ||
+      !iree_string_view_equal(lhs->interval_coverage, rhs->interval_coverage) ||
+      !iree_string_view_equal(lhs->unknown_reason, rhs->unknown_reason) ||
+      lhs->subgroup_size != rhs->subgroup_size ||
+      lhs->lane_term_count != rhs->lane_term_count ||
+      lhs->per_lane_packet_byte_count != rhs->per_lane_packet_byte_count ||
+      lhs->linear_lane_byte_stride != rhs->linear_lane_byte_stride ||
+      lhs->subgroup_requested_byte_count !=
+          rhs->subgroup_requested_byte_count ||
+      lhs->subgroup_unique_byte_count != rhs->subgroup_unique_byte_count ||
+      lhs->subgroup_span_byte_count != rhs->subgroup_span_byte_count ||
+      lhs->maximum_adjacent_lane_delta_bytes !=
+          rhs->maximum_adjacent_lane_delta_bytes ||
+      lhs->maximum_uncovered_byte_gap_bytes !=
+          rhs->maximum_uncovered_byte_gap_bytes ||
+      lhs->distinct_lane_address_count != rhs->distinct_lane_address_count ||
+      lhs->contiguous_region_count != rhs->contiguous_region_count) {
+    return false;
+  }
+  for (uint8_t i = 0; i < lhs->lane_term_count; ++i) {
+    if (lhs->lane_terms[i].divisor != rhs->lane_terms[i].divisor ||
+        lhs->lane_terms[i].modulus != rhs->lane_terms[i].modulus ||
+        lhs->lane_terms[i].byte_stride != rhs->lane_terms[i].byte_stride) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool
+loom_target_compile_report_source_low_subgroup_access_summaries_match(
+    const loom_target_compile_report_source_low_subgroup_access_summary_t* lhs,
+    const loom_target_compile_report_source_low_subgroup_access_summary_t*
+        rhs) {
+  return iree_string_view_equal(lhs->function_name, rhs->function_name) &&
+         iree_string_view_equal(lhs->source_op_name, rhs->source_op_name) &&
+         lhs->source_op_kind == rhs->source_op_kind &&
+         iree_string_view_equal(lhs->source_root_name, rhs->source_root_name) &&
+         lhs->source_root_argument_index == rhs->source_root_argument_index &&
+         iree_string_view_equal(lhs->memory_space, rhs->memory_space) &&
+         iree_string_view_equal(lhs->operation_kind, rhs->operation_kind) &&
+         iree_string_view_equal(lhs->packet_key, rhs->packet_key) &&
+         iree_string_view_equal(lhs->strategy_key, rhs->strategy_key) &&
+         loom_target_compile_report_subgroup_accesses_match(&lhs->access,
+                                                            &rhs->access);
+}
+
+static loom_target_compile_report_source_low_subgroup_access_summary_t*
+loom_target_compile_report_find_source_low_subgroup_access_summary(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_source_low_subgroup_access_summary_t*
+        row) {
+  for (loom_target_compile_report_vec_t* vec =
+           report->source_low_subgroup_access_summaries.head;
+       vec != NULL; vec = vec->next) {
+    loom_target_compile_report_source_low_subgroup_access_summary_t* summaries =
+        (loom_target_compile_report_source_low_subgroup_access_summary_t*)
+            loom_target_compile_report_vec_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i) {
+      if (loom_target_compile_report_source_low_subgroup_access_summaries_match(
+              &summaries[i], row)) {
+        return &summaries[i];
+      }
+    }
+  }
+  return NULL;
+}
+
+static void loom_target_compile_report_accumulate_subgroup_access_summary(
+    loom_target_compile_report_subgroup_access_summary_t* summary,
+    const loom_target_compile_report_source_low_memory_row_t* row) {
+  const loom_target_compile_report_subgroup_access_t* access =
+      &row->subgroup_access;
+  if (iree_string_view_is_empty(access->proof)) {
+    return;
+  }
+
+  ++summary->modeled_packet_count;
+  if (!iree_string_view_equal(access->proof, IREE_SV("exact"))) {
+    ++summary->unknown_packet_count;
+    ++summary->unknown_dynamic_packet_count;
+    return;
+  }
+
+  ++summary->exact_packet_count;
+  const bool is_dense =
+      iree_string_view_equal(access->interval_coverage, IREE_SV("dense"));
+  const bool is_gapped =
+      iree_string_view_equal(access->interval_coverage, IREE_SV("gapped"));
+  const bool is_overlapping = access->subgroup_requested_byte_count >
+                              access->subgroup_unique_byte_count;
+  summary->dense_packet_count += is_dense ? 1 : 0;
+  summary->gapped_packet_count += is_gapped ? 1 : 0;
+  summary->overlapping_packet_count += is_overlapping ? 1 : 0;
+
+  if (row->execution_count_plus_one ==
+      LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_MEMORY_EXECUTION_COUNT_PLUS_ONE_UNKNOWN) {
+    ++summary->unknown_dynamic_packet_count;
+    return;
+  }
+
+  const uint64_t execution_count = row->execution_count_plus_one - 1;
+  uint64_t new_dynamic_packet_count = summary->dynamic_packet_count;
+  uint64_t new_dynamic_dense_packet_count = summary->dynamic_dense_packet_count;
+  uint64_t new_dynamic_gapped_packet_count =
+      summary->dynamic_gapped_packet_count;
+  uint64_t new_dynamic_overlapping_packet_count =
+      summary->dynamic_overlapping_packet_count;
+  const bool accumulation_ok =
+      iree_checked_add_u64(new_dynamic_packet_count, execution_count,
+                           &new_dynamic_packet_count) &&
+      (!is_dense ||
+       iree_checked_add_u64(new_dynamic_dense_packet_count, execution_count,
+                            &new_dynamic_dense_packet_count)) &&
+      (!is_gapped ||
+       iree_checked_add_u64(new_dynamic_gapped_packet_count, execution_count,
+                            &new_dynamic_gapped_packet_count)) &&
+      (!is_overlapping ||
+       iree_checked_add_u64(new_dynamic_overlapping_packet_count,
+                            execution_count,
+                            &new_dynamic_overlapping_packet_count));
+  if (!accumulation_ok) {
+    ++summary->unknown_dynamic_packet_count;
+    return;
+  }
+
+  ++summary->exact_dynamic_packet_count;
+  summary->dynamic_packet_count = new_dynamic_packet_count;
+  summary->dynamic_dense_packet_count = new_dynamic_dense_packet_count;
+  summary->dynamic_gapped_packet_count = new_dynamic_gapped_packet_count;
+  summary->dynamic_overlapping_packet_count =
+      new_dynamic_overlapping_packet_count;
+}
+
+static loom_target_compile_report_source_low_subgroup_access_summary_t
+loom_target_compile_report_source_low_subgroup_access_summary_from_row(
+    const loom_target_compile_report_source_low_memory_row_t* row) {
+  return (loom_target_compile_report_source_low_subgroup_access_summary_t){
+      .function_name = row->function_name,
+      .source_op_name = row->source_op_name,
+      .source_op_kind = row->source_op_kind,
+      .source_root_name = row->source_root_name,
+      .source_root_argument_index = row->source_root_argument_index,
+      .memory_space = row->memory_space,
+      .operation_kind = row->operation_kind,
+      .packet_key = row->packet_key,
+      .strategy_key = row->strategy_key,
+      .access = row->subgroup_access,
+  };
+}
+
+static iree_status_t
+loom_target_compile_report_record_source_low_subgroup_access_summary_row(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_source_low_subgroup_access_summary_t*
+        row) {
+  loom_target_compile_report_source_low_subgroup_access_summary_t* summary =
+      loom_target_compile_report_find_source_low_subgroup_access_summary(report,
+                                                                         row);
+  if (summary != NULL) {
+    loom_target_compile_report_accumulate_subgroup_access_summaries(
+        &summary->summary, &row->summary);
+    return iree_ok_status();
+  }
+  return loom_target_compile_report_row_list_append(
+      &report->source_low_subgroup_access_summaries, sizeof(*row),
+      report->allocator, row);
+}
+
+static iree_status_t
+loom_target_compile_report_record_source_low_subgroup_access_summary(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_source_low_memory_row_t* row) {
+  if (iree_string_view_is_empty(row->subgroup_access.proof)) {
+    return iree_ok_status();
+  }
+  loom_target_compile_report_source_low_subgroup_access_summary_t key =
+      loom_target_compile_report_source_low_subgroup_access_summary_from_row(
+          row);
+  loom_target_compile_report_source_low_subgroup_access_summary_t* summary =
+      loom_target_compile_report_find_source_low_subgroup_access_summary(report,
+                                                                         &key);
+  if (summary != NULL) {
+    loom_target_compile_report_accumulate_subgroup_access_summary(
+        &summary->summary, row);
+    return iree_ok_status();
+  }
+  loom_target_compile_report_accumulate_subgroup_access_summary(&key.summary,
+                                                                row);
+  return loom_target_compile_report_row_list_append(
+      &report->source_low_subgroup_access_summaries, sizeof(key),
+      report->allocator, &key);
+}
+
 iree_status_t loom_target_compile_report_merge_source_low_memory_details(
     loom_target_compile_report_t* target,
     const loom_target_compile_report_t* source) {
@@ -1104,6 +1323,18 @@ iree_status_t loom_target_compile_report_merge_source_low_memory_details(
     for (iree_host_size_t i = 0; i < vec->count; ++i) {
       IREE_RETURN_IF_ERROR(
           loom_target_compile_report_record_source_low_bank_service_summary_row(
+              target, &rows[i]));
+    }
+  }
+  for (const loom_target_compile_report_vec_t* vec =
+           source->source_low_subgroup_access_summaries.head;
+       vec != NULL; vec = vec->next) {
+    const loom_target_compile_report_source_low_subgroup_access_summary_t* rows =
+        (const loom_target_compile_report_source_low_subgroup_access_summary_t*)
+            loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i) {
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_record_source_low_subgroup_access_summary_row(
               target, &rows[i]));
     }
   }
@@ -1377,6 +1608,8 @@ iree_status_t loom_target_compile_report_record_source_low_memory_row(
       no_unique_delta);
   loom_target_compile_report_accumulate_bank_service_summary(
       &report->bank_service_summary, row);
+  loom_target_compile_report_accumulate_subgroup_access_summary(
+      &report->subgroup_access_summary, row);
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_record_source_low_memory_root_summary(
           report, row, unique_delta, direction_unique_delta));
@@ -1398,5 +1631,8 @@ iree_status_t loom_target_compile_report_record_source_low_memory_row(
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_record_source_low_bank_service_summary(report,
                                                                         row));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_record_source_low_subgroup_access_summary(
+          report, row));
   return iree_ok_status();
 }

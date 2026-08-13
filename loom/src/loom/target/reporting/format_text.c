@@ -603,6 +603,17 @@ static iree_status_t loom_target_compile_report_format_summary(
                 &report->bank_service_summary, builder));
         IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
       }
+      if (report->subgroup_access_summary.modeled_packet_count != 0) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder,
+            "COMPILE-REPORT: source_low_subgroup_access_summary "
+            "groups=%" PRIhsz,
+            report->source_low_subgroup_access_summaries.count));
+        IREE_RETURN_IF_ERROR(
+            loom_target_compile_report_append_subgroup_access_summary_text_fields(
+                &report->subgroup_access_summary, builder));
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
+      }
     }
   }
 
@@ -846,6 +857,16 @@ static iree_status_t loom_target_compile_report_format_entry_rows(
         IREE_RETURN_IF_ERROR(
             loom_target_compile_report_append_bank_service_summary_text_fields(
                 &row->bank_service_summary, builder));
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
+      }
+      if (row->subgroup_access_summary.modeled_packet_count != 0) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder,
+            "COMPILE-REPORT: entry_subgroup_access[%" PRIhsz "] function=%.*s",
+            row_index, (int)function_name.size, function_name.data));
+        IREE_RETURN_IF_ERROR(
+            loom_target_compile_report_append_subgroup_access_summary_text_fields(
+                &row->subgroup_access_summary, builder));
         IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
       }
       if (iree_any_bit_set(row->detail_flags,

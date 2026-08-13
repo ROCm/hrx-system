@@ -114,6 +114,45 @@ loom_target_compile_report_bank_service(
   return target;
 }
 
+static_assert(
+    LOOM_LOW_LOWER_MEMORY_SUBGROUP_ACCESS_TERM_CAPACITY ==
+        LOOM_TARGET_COMPILE_REPORT_SUBGROUP_ACCESS_TERM_CAPACITY,
+    "source-low and compile-report subgroup term capacities must match");
+
+static loom_target_compile_report_subgroup_access_t
+loom_target_compile_report_subgroup_access(
+    const loom_low_lower_memory_subgroup_access_report_t* source) {
+  loom_target_compile_report_subgroup_access_t target = {
+      .proof = source->proof,
+      .lane_address_proof = source->lane_address_proof,
+      .active_lane_proof = source->active_lane_proof,
+      .lane_mapping = source->lane_mapping,
+      .interval_coverage = source->interval_coverage,
+      .unknown_reason = source->unknown_reason,
+      .subgroup_size = source->subgroup_size,
+      .lane_term_count = source->lane_term_count,
+      .per_lane_packet_byte_count = source->per_lane_packet_byte_count,
+      .linear_lane_byte_stride = source->linear_lane_byte_stride,
+      .subgroup_requested_byte_count = source->subgroup_requested_byte_count,
+      .subgroup_unique_byte_count = source->subgroup_unique_byte_count,
+      .subgroup_span_byte_count = source->subgroup_span_byte_count,
+      .maximum_adjacent_lane_delta_bytes =
+          source->maximum_adjacent_lane_delta_bytes,
+      .maximum_uncovered_byte_gap_bytes =
+          source->maximum_uncovered_byte_gap_bytes,
+      .distinct_lane_address_count = source->distinct_lane_address_count,
+      .contiguous_region_count = source->contiguous_region_count,
+  };
+  for (uint8_t i = 0; i < source->lane_term_count; ++i) {
+    target.lane_terms[i] = (loom_target_compile_report_subgroup_access_term_t){
+        .divisor = source->lane_terms[i].divisor,
+        .modulus = source->lane_terms[i].modulus,
+        .byte_stride = source->lane_terms[i].byte_stride,
+    };
+  }
+  return target;
+}
+
 static iree_string_view_t
 loom_target_compile_report_low_frame_emitted_function_name(
     const loom_low_emission_frame_t* frame) {
@@ -497,6 +536,8 @@ iree_status_t loom_target_compile_report_record_low_lowering(
         .storage_sparsity_policy = source_row->storage_sparsity_policy,
         .bank_service =
             loom_target_compile_report_bank_service(&source_row->bank_service),
+        .subgroup_access = loom_target_compile_report_subgroup_access(
+            &source_row->subgroup_access),
         .source_interval = source_interval,
         .execution_count_plus_one = source_row->execution_count_plus_one,
     };

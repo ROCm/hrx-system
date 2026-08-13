@@ -16,6 +16,7 @@
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
 #include "loom/target/arch/amdgpu/lower/memory_bank_service.h"
+#include "loom/target/arch/amdgpu/lower/memory_subgroup_access.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 
 iree_status_t loom_amdgpu_fragment_memory_packet_type(
@@ -150,6 +151,9 @@ static iree_status_t loom_amdgpu_record_fragment_memory_packet(
   loom_amdgpu_fragment_memory_packet_report_t packet_report = {0};
   loom_amdgpu_fragment_memory_query_packet_report(descriptor_set, layout, plan,
                                                   packet, &packet_report);
+  loom_low_lower_memory_subgroup_access_report_t subgroup_access = {0};
+  IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_memory_report_subgroup_access(
+      context, source_op, layout, plan, &issued, &subgroup_access));
   loom_low_lower_memory_report_row_t row = {
       .function_name = loom_low_lower_context_function_name(context),
       .source_op_name =
@@ -176,6 +180,7 @@ static iree_status_t loom_amdgpu_record_fragment_memory_packet(
       .issued_write_unknown_width_count = issued.write_unknown_width_count,
       .dynamic_stride_bytes = plan->address_layout.linear_lane_byte_stride,
       .vector_lane_stride_bytes = plan->element_byte_count,
+      .subgroup_access = subgroup_access,
   };
   loom_amdgpu_memory_report_row_populate_storage_schema(context, &plan->source,
                                                         &row);

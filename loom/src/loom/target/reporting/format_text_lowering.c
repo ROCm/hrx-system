@@ -140,6 +140,56 @@ loom_target_compile_report_append_source_low_memory_bank_service_text(
   return iree_string_builder_append_cstring(builder, "}");
 }
 
+static iree_status_t
+loom_target_compile_report_append_source_low_memory_subgroup_access_text(
+    const loom_target_compile_report_subgroup_access_t* access,
+    iree_string_builder_t* builder) {
+  if (iree_string_view_is_empty(access->proof)) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      " subgroup_access={proof:%.*s,lane_address_proof:%.*s,"
+      "active_lane_proof:%.*s,lane_mapping:%.*s,subgroup_size:%" PRIu8
+      ",per_lane_packet_bytes:%" PRIu32 ",linear_lane_stride_bytes:%" PRIu32
+      ",lane_terms:[",
+      (int)access->proof.size, access->proof.data,
+      (int)access->lane_address_proof.size, access->lane_address_proof.data,
+      (int)access->active_lane_proof.size, access->active_lane_proof.data,
+      (int)access->lane_mapping.size, access->lane_mapping.data,
+      access->subgroup_size, access->per_lane_packet_byte_count,
+      access->linear_lane_byte_stride));
+  for (uint8_t i = 0; i < access->lane_term_count; ++i) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder,
+        "%s{divisor:%" PRIu16 ",modulus:%" PRIu16 ",byte_stride:%" PRIu32 "}",
+        i == 0 ? "" : ",", access->lane_terms[i].divisor,
+        access->lane_terms[i].modulus, access->lane_terms[i].byte_stride));
+  }
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "]"));
+  if (!iree_string_view_is_empty(access->unknown_reason)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, ",unknown_reason:%.*s", (int)access->unknown_reason.size,
+        access->unknown_reason.data));
+  }
+  if (iree_string_view_equal(access->proof, IREE_SV("exact"))) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder,
+        ",interval_coverage:%.*s,subgroup_requested_bytes:%" PRIu64
+        ",subgroup_unique_bytes:%" PRIu64 ",subgroup_span_bytes:%" PRIu64
+        ",maximum_adjacent_lane_delta_bytes:%" PRIu64
+        ",maximum_uncovered_gap_bytes:%" PRIu64
+        ",distinct_lane_addresses:%" PRIu16 ",contiguous_regions:%" PRIu16,
+        (int)access->interval_coverage.size, access->interval_coverage.data,
+        access->subgroup_requested_byte_count,
+        access->subgroup_unique_byte_count, access->subgroup_span_byte_count,
+        access->maximum_adjacent_lane_delta_bytes,
+        access->maximum_uncovered_byte_gap_bytes,
+        access->distinct_lane_address_count, access->contiguous_region_count));
+  }
+  return iree_string_builder_append_cstring(builder, "}");
+}
+
 iree_status_t
 loom_target_compile_report_append_bank_service_summary_text_fields(
     const loom_target_compile_report_bank_service_summary_t* summary,
@@ -165,6 +215,28 @@ loom_target_compile_report_append_bank_service_summary_text_fields(
       summary->dynamic_required_round_count,
       summary->dynamic_uncontended_round_count,
       summary->dynamic_extra_round_count);
+}
+
+iree_status_t
+loom_target_compile_report_append_subgroup_access_summary_text_fields(
+    const loom_target_compile_report_subgroup_access_summary_t* summary,
+    iree_string_builder_t* builder) {
+  return iree_string_builder_append_format(
+      builder,
+      " modeled_packets=%" PRIu64 " exact_packets=%" PRIu64
+      " unknown_packets=%" PRIu64 " dense_packets=%" PRIu64
+      " gapped_packets=%" PRIu64 " overlapping_packets=%" PRIu64
+      " dynamic_exact_packets=%" PRIu64 " dynamic_unknown_packets=%" PRIu64
+      " dynamic_packets=%" PRIu64 " dynamic_dense_packets=%" PRIu64
+      " dynamic_gapped_packets=%" PRIu64
+      " dynamic_overlapping_packets=%" PRIu64,
+      summary->modeled_packet_count, summary->exact_packet_count,
+      summary->unknown_packet_count, summary->dense_packet_count,
+      summary->gapped_packet_count, summary->overlapping_packet_count,
+      summary->exact_dynamic_packet_count,
+      summary->unknown_dynamic_packet_count, summary->dynamic_packet_count,
+      summary->dynamic_dense_packet_count, summary->dynamic_gapped_packet_count,
+      summary->dynamic_overlapping_packet_count);
 }
 
 static iree_status_t loom_target_compile_report_append_memory_interval_text(
@@ -648,6 +720,9 @@ static iree_status_t loom_target_compile_report_format_source_low_memory_rows(
           loom_target_compile_report_append_source_low_memory_bank_service_text(
               &row->bank_service, builder));
       IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_append_source_low_memory_subgroup_access_text(
+              &row->subgroup_access, builder));
+      IREE_RETURN_IF_ERROR(
           loom_target_compile_report_append_memory_interval_text(
               &row->source_interval, builder));
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
@@ -947,6 +1022,54 @@ loom_target_compile_report_format_source_low_bank_service_summaries(
   return iree_ok_status();
 }
 
+static iree_status_t
+loom_target_compile_report_format_source_low_subgroup_access_summaries(
+    const loom_target_compile_report_t* report,
+    iree_string_builder_t* builder) {
+  iree_host_size_t row_index = 0;
+  for (const loom_target_compile_report_vec_t* vec =
+           report->source_low_subgroup_access_summaries.head;
+       vec != NULL; vec = vec->next) {
+    const loom_target_compile_report_source_low_subgroup_access_summary_t* rows =
+        (const loom_target_compile_report_source_low_subgroup_access_summary_t*)
+            loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
+      const loom_target_compile_report_source_low_subgroup_access_summary_t*
+          row = &rows[i];
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          "COMPILE-REPORT: source_low_subgroup_access[%" PRIhsz
+          "] function=%.*s source_op=%.*s source_op_kind=%" PRIu32,
+          row_index, (int)row->function_name.size, row->function_name.data,
+          (int)row->source_op_name.size, row->source_op_name.data,
+          row->source_op_kind));
+      IREE_RETURN_IF_ERROR(loom_target_compile_report_text_append_string_field(
+          builder, IREE_SV("source_root"), row->source_root_name));
+      if (row->source_root_argument_index != UINT16_MAX) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder, " source_root_argument=%" PRIu16,
+            row->source_root_argument_index));
+      }
+      IREE_RETURN_IF_ERROR(loom_target_compile_report_text_append_string_field(
+          builder, IREE_SV("memory_space"), row->memory_space));
+      IREE_RETURN_IF_ERROR(loom_target_compile_report_text_append_string_field(
+          builder, IREE_SV("operation"), row->operation_kind));
+      IREE_RETURN_IF_ERROR(loom_target_compile_report_text_append_string_field(
+          builder, IREE_SV("packet"), row->packet_key));
+      IREE_RETURN_IF_ERROR(loom_target_compile_report_text_append_string_field(
+          builder, IREE_SV("strategy"), row->strategy_key));
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_append_source_low_memory_subgroup_access_text(
+              &row->access, builder));
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_append_subgroup_access_summary_text_fields(
+              &row->summary, builder));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_target_compile_report_format_math_rows(
     const loom_target_compile_report_t* report,
     iree_string_builder_t* builder) {
@@ -1109,6 +1232,9 @@ iree_status_t loom_target_compile_report_format_text_lowering_details(
           report, builder));
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_format_source_low_bank_service_summaries(
+          report, builder));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_source_low_subgroup_access_summaries(
           report, builder));
   return loom_target_compile_report_format_legalization_rows(report, builder);
 }

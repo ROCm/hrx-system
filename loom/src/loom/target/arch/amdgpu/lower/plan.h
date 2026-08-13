@@ -1439,6 +1439,8 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
   loom_amdgpu_matrix_fragment_layout_kind_t layout_kind;
   // Target-independent source view access plan.
   loom_low_source_memory_access_plan_t source;
+  // Whether every dynamic source-address term is subgroup-uniform.
+  bool dynamic_base_is_subgroup_uniform;
   // Source store payload or load result SSA value.
   loom_value_id_t payload;
   // Optional F32 scale applied while decoding an FP8 load payload.
