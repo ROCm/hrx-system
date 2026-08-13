@@ -73,7 +73,7 @@ loom_cc_library(
         ":symbol_policy",
         "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/format/bytecode:index",
-        "//loom/src/loom/format/bytecode:reader",
+        "//loom/src/loom/format/bytecode:index_reader",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",

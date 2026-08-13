@@ -96,6 +96,28 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "validation",
+    srcs = ["validation.c"],
+    hdrs = ["validation.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":attribute",
+        ":decoder",
+        ":module_view",
+        ":source_trivia",
+        ":symbol_validator",
+        ":type_validator",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format/bytecode:index",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:unicode",
+    ],
+)
+
+loom_cc_library(
     name = "type_plan",
     hdrs = ["type_plan.h"],
     visibility = ["//loom/src/loom/format/bytecode:__pkg__"],

@@ -102,6 +102,30 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    validation
+  HDRS
+    "validation.h"
+  SRCS
+    "validation.c"
+  DEPS
+    ::attribute
+    ::decoder
+    ::module_view
+    ::source_trivia
+    ::symbol_validator
+    ::type_validator
+    iree::base
+    iree::base::internal::arena
+    iree::base::internal::unicode
+    loom::error::error_defs
+    loom::format::bytecode::index
+    loom::ir
+    loom::ops::op_defs
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     type_plan
   HDRS
     "type_plan.h"
