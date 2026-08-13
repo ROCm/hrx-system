@@ -10,8 +10,8 @@
 
 #include "iree/base/internal/unicode.h"
 #include "loom/error/error_catalog.h"
-#include "loom/format/bytecode/reader/attribute.h"
 #include "loom/format/bytecode/reader/decoder.h"
+#include "loom/format/bytecode/reader/encoding_validator.h"
 #include "loom/format/bytecode/reader/module_view.h"
 #include "loom/format/bytecode/reader/source_trivia.h"
 #include "loom/format/bytecode/reader/symbol_validator.h"
@@ -24,7 +24,6 @@
 #define LOOM_BYTECODE_MAX_STRING_LENGTH (UINT64_C(1) << 24)
 #define LOOM_BYTECODE_MAX_OP_COUNT (UINT64_C(1) << 24)
 #define LOOM_BYTECODE_MAX_LOCATION_COUNT (UINT64_C(1) << 24)
-#define LOOM_BYTECODE_MAX_ENCODING_COUNT (UINT64_C(1) << 16)
 #define LOOM_BYTECODE_MAX_PROVIDER_IMPORT_COUNT (UINT64_C(1) << 24)
 
 // State required to validate exactly one module.
@@ -42,16 +41,6 @@ typedef struct loom_bytecode_module_reader_t {
   // Scratch-lived facts established by module validation.
   loom_bytecode_reader_module_view_t view;
 } loom_bytecode_module_reader_t;
-
-static loom_bytecode_attribute_validator_t
-loom_bytecode_reader_attribute_validator(
-    loom_bytecode_module_reader_t* reader) {
-  return (loom_bytecode_attribute_validator_t){
-      .decoder = &reader->decoder,
-      .context = reader->context,
-      .module_view = &reader->view,
-  };
-}
 
 static const char* loom_bytecode_section_name(uint16_t kind) {
   switch (kind) {
@@ -183,163 +172,6 @@ static iree_status_t loom_bytecode_reader_read_string_table(
   *out_strings = strings;
   *out_count = (iree_host_size_t)count;
   return iree_ok_status();
-}
-
-typedef struct loom_bytecode_encoding_table_t {
-  // Cursor positioned at the next encoding instance.
-  loom_bytecode_reader_cursor_t cursor;
-  // Attribute validator for instance parameters.
-  loom_bytecode_attribute_validator_t attribute_validator;
-  // Number of instance entries following the family table.
-  iree_host_size_t count;
-} loom_bytecode_encoding_table_t;
-
-static inline iree_status_t loom_bytecode_reader_begin_encodings(
-    loom_bytecode_module_reader_t* reader,
-    const loom_bytecode_reader_section_t* section,
-    loom_bytecode_encoding_table_t* out_table) {
-  loom_bytecode_encoding_table_t table = {0};
-  loom_bytecode_reader_cursor_initialize(
-      section->bytes.data, section->bytes.data_length, section->absolute_offset,
-      IREE_SV("ENCODINGS"), &table.cursor);
-
-  uint64_t family_count = 0;
-  uint64_t family_count_offset =
-      loom_bytecode_reader_cursor_absolute_position(&table.cursor);
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-      &reader->decoder, &table.cursor, &family_count));
-  if (family_count > LOOM_BYTECODE_MAX_ENCODING_COUNT ||
-      family_count > IREE_HOST_SIZE_MAX) {
-    return loom_bytecode_reader_emit_count_exceeds(
-        &reader->decoder, IREE_SV("encoding_families"), family_count,
-        LOOM_BYTECODE_MAX_ENCODING_COUNT, family_count_offset);
-  }
-  if (family_count > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        reader->arena, (iree_host_size_t)family_count, sizeof(loom_string_id_t),
-        (void**)&reader->view.encodings.family_name_ids));
-  }
-  reader->view.encodings.family_count = (iree_host_size_t)family_count;
-  for (uint64_t i = 0; i < family_count; ++i) {
-    uint64_t name_offset =
-        loom_bytecode_reader_cursor_absolute_position(&table.cursor);
-    uint64_t name_id = 0;
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-        &reader->decoder, &table.cursor, &name_id));
-    iree_string_view_t name = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_string_ref(
-        reader, name_id, IREE_SV("encoding_family_name"), name_offset, &name));
-    if (loom_context_resolve_encoding_name(reader->context, name).family_id ==
-        LOOM_ENCODING_FAMILY_ID_INVALID) {
-      return loom_bytecode_reader_emit_invalid_field(
-          &reader->decoder, IREE_SV("ENCODINGS"), IREE_SV("family"), i,
-          IREE_SV("name_id"), name_offset,
-          IREE_SV("encoding_family_is_not_registered_in_the_context"));
-    }
-    reader->view.encodings.family_name_ids[i] = (loom_string_id_t)name_id;
-  }
-
-  uint64_t instance_count = 0;
-  uint64_t instance_count_offset =
-      loom_bytecode_reader_cursor_absolute_position(&table.cursor);
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-      &reader->decoder, &table.cursor, &instance_count));
-  if (instance_count > LOOM_BYTECODE_MAX_ENCODING_COUNT) {
-    return loom_bytecode_reader_emit_count_exceeds(
-        &reader->decoder, IREE_SV("encoding_instances"), instance_count,
-        LOOM_BYTECODE_MAX_ENCODING_COUNT, instance_count_offset);
-  }
-  reader->view.encodings.count = (iree_host_size_t)instance_count;
-  table.count = (iree_host_size_t)instance_count;
-  table.attribute_validator = loom_bytecode_reader_attribute_validator(reader);
-  *out_table = table;
-  return iree_ok_status();
-}
-
-static inline iree_status_t loom_bytecode_reader_decode_encoding(
-    loom_bytecode_module_reader_t* reader,
-    loom_bytecode_encoding_table_t* table, iree_host_size_t index,
-    loom_bytecode_encoding_metadata_t* out_metadata) {
-  const uint64_t entry_offset =
-      loom_bytecode_reader_cursor_absolute_position(&table->cursor);
-  uint64_t family_offset =
-      loom_bytecode_reader_cursor_absolute_position(&table->cursor);
-  uint64_t family_index = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-      &reader->decoder, &table->cursor, &family_index));
-  if (family_index >= reader->view.encodings.family_count) {
-    return loom_bytecode_reader_emit_table_ref(
-        &reader->decoder, IREE_SV("encoding_families"), family_index,
-        reader->view.encodings.family_count, family_offset);
-  }
-  uint64_t alias_offset =
-      loom_bytecode_reader_cursor_absolute_position(&table->cursor);
-  uint64_t alias_plus_one = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-      &reader->decoder, &table->cursor, &alias_plus_one));
-  if (alias_plus_one > reader->view.strings.count) {
-    loom_diagnostic_param_t params[] = {
-        loom_param_string(IREE_SV("alias_string_id_plus1")),
-        loom_param_u64(alias_plus_one - 1),
-        loom_param_u64(reader->view.strings.count),
-    };
-    return loom_bytecode_reader_emit_error(
-        &reader->decoder, LOOM_ERR_BYTECODE_010, params, IREE_ARRAYSIZE(params),
-        alias_offset, 0);
-  }
-  uint64_t param_count = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-      &reader->decoder, &table->cursor, &param_count));
-  iree_string_view_t previous_param = iree_string_view_empty();
-  for (uint64_t param_index = 0; param_index < param_count; ++param_index) {
-    uint64_t name_offset =
-        loom_bytecode_reader_cursor_absolute_position(&table->cursor);
-    uint64_t name_id = 0;
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-        &reader->decoder, &table->cursor, &name_id));
-    iree_string_view_t param_name = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_string_ref(
-        reader, name_id, IREE_SV("encoding_param_name"), name_offset,
-        &param_name));
-    if (param_index > 0 &&
-        iree_string_view_compare(param_name, previous_param) <= 0) {
-      return loom_bytecode_reader_emit_invalid_field(
-          &reader->decoder, IREE_SV("ENCODINGS"), IREE_SV("instance"), index,
-          IREE_SV("param_name"), name_offset,
-          IREE_SV("encoding_parameters_are_not_in_canonical_order"));
-    }
-    previous_param = param_name;
-    loom_bytecode_attr_kind_t value_kind = LOOM_BYTECODE_ATTR_I64;
-    IREE_RETURN_IF_ERROR(loom_bytecode_attribute_read_kind(
-        &reader->decoder, &table->cursor, &value_kind));
-    IREE_RETURN_IF_ERROR(loom_bytecode_attribute_validate_named(
-        &table->attribute_validator, &table->cursor, /*descriptor=*/NULL,
-        value_kind, reader->view.types.count));
-  }
-  *out_metadata = (loom_bytecode_encoding_metadata_t){
-      .entry_offset = entry_offset,
-      .entry_length =
-          loom_bytecode_reader_cursor_absolute_position(&table->cursor) -
-          entry_offset,
-      .name_string_index =
-          (uint32_t)reader->view.encodings.family_name_ids[family_index],
-  };
-  return iree_ok_status();
-}
-
-static iree_status_t loom_bytecode_reader_read_encodings(
-    loom_bytecode_module_reader_t* reader,
-    const loom_bytecode_reader_section_t* section) {
-  loom_bytecode_encoding_table_t table;
-  IREE_RETURN_IF_ERROR(
-      loom_bytecode_reader_begin_encodings(reader, section, &table));
-  for (iree_host_size_t i = 0; i < table.count; ++i) {
-    loom_bytecode_encoding_metadata_t metadata;
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_reader_decode_encoding(reader, &table, i, &metadata));
-  }
-  return loom_bytecode_reader_expect_empty(&reader->decoder, &table.cursor,
-                                           IREE_SV("ENCODINGS"));
 }
 
 typedef struct loom_bytecode_op_table_t {
@@ -1459,8 +1291,9 @@ static iree_status_t loom_bytecode_reader_validate_module(
       reader, *reader->view.sections.sources, IREE_SV("SOURCES"),
       LOOM_BYTECODE_MAX_STRING_COUNT, reader->arena,
       &reader->view.sources.values, &reader->view.sources.count));
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_encodings(
-      reader, reader->view.sections.encodings));
+  IREE_RETURN_IF_ERROR(loom_bytecode_encoding_table_validate(
+      &reader->decoder, reader->context, &reader->view, reader->arena,
+      reader->view.sections.encodings));
   IREE_RETURN_IF_ERROR(loom_bytecode_type_plan_build(
       &reader->decoder, reader->context, &reader->view, reader->arena,
       reader->view.sections.types->bytes,
@@ -1500,28 +1333,6 @@ static iree_status_t loom_bytecode_reader_validate_module(
   reader->view.summary.provider_import_anchor_count =
       reader->view.provider_imports.anchor_count;
   return iree_ok_status();
-}
-
-static iree_status_t loom_bytecode_reader_index_encodings(
-    loom_bytecode_module_reader_t* reader,
-    const loom_bytecode_reader_section_t* section,
-    iree_arena_allocator_t* retained_arena,
-    loom_bytecode_module_metadata_t* metadata) {
-  loom_bytecode_encoding_table_t table;
-  IREE_RETURN_IF_ERROR(
-      loom_bytecode_reader_begin_encodings(reader, section, &table));
-  metadata->encodings.count = table.count;
-  if (table.count > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        retained_arena, table.count, sizeof(*metadata->encodings.entries),
-        (void**)&metadata->encodings.entries));
-  }
-  for (iree_host_size_t i = 0; i < table.count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_decode_encoding(
-        reader, &table, i, &metadata->encodings.entries[i]));
-  }
-  return loom_bytecode_reader_expect_empty(&reader->decoder, &table.cursor,
-                                           IREE_SV("ENCODINGS"));
 }
 
 static iree_status_t loom_bytecode_reader_index_ops(
@@ -1690,8 +1501,10 @@ static iree_status_t loom_bytecode_reader_index_module(
   metadata->sources.values = reader->view.sources.values;
   metadata->sources.count = reader->view.sources.count;
 
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_index_encodings(
-      reader, reader->view.sections.encodings, retained_arena, metadata));
+  IREE_RETURN_IF_ERROR(loom_bytecode_encoding_table_index(
+      &reader->decoder, reader->context, &reader->view, reader->arena,
+      reader->view.sections.encodings, retained_arena,
+      &metadata->encodings.entries, &metadata->encodings.count));
   IREE_RETURN_IF_ERROR(loom_bytecode_type_plan_build(
       &reader->decoder, reader->context, &reader->view, reader->arena,
       reader->view.sections.types->bytes,
