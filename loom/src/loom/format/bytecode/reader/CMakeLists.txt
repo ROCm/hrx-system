@@ -383,6 +383,59 @@ loom_cc_benchmark(
 
 loom_cc_library(
   NAME
+    selected_tables
+  HDRS
+    "selected_attribute.h"
+    "selected_tables.h"
+  SRCS
+    "selected_attribute.c"
+    "selected_tables.c"
+  DEPS
+    ::attribute
+    ::decoder
+    ::module_view
+    ::selected_projection
+    ::type_plan
+    ::type_validator
+    iree::base
+    iree::base::internal::arena
+    loom::error::error_defs
+    loom::format::bytecode::format
+    loom::format::bytecode::index
+    loom::ir
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    selected_tables_test
+  SRCS
+    "selected_tables_test.cc"
+  DEPS
+    ::selected_tables
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::bytecode::format
+    loom::ir
+)
+
+loom_cc_benchmark(
+  NAME
+    selected_tables_benchmark
+  SRCS
+    "selected_tables_benchmark.cc"
+  DEPS
+    ::selected_tables
+    iree::base::internal::arena
+    iree::testing::benchmark_main
+    loom::format::bytecode::format
+    loom::ir
+  TESTONLY
+)
+
+loom_cc_library(
+  NAME
     string_table
   HDRS
     "string_table.h"

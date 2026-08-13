@@ -29,22 +29,6 @@ typedef struct loom_bytecode_attribute_materialization_scope_t {
   loom_bytecode_attribute_ssa_materialization_scope_t ssa;
 } loom_bytecode_attribute_materialization_scope_t;
 
-typedef struct loom_bytecode_wire_predicate_t {
-  // Decoded predicate header, tags, and immediate arguments.
-  loom_predicate_t value;
-  // Raw wire ordinals for VALUE arguments.
-  uint64_t value_numbers[IREE_ARRAYSIZE(((loom_predicate_t*)0)->args)];
-  // Absolute wire offsets for argument diagnostics.
-  uint64_t argument_offsets[IREE_ARRAYSIZE(((loom_predicate_t*)0)->args)];
-} loom_bytecode_wire_predicate_t;
-
-typedef struct loom_bytecode_wire_signed_enum_set_t {
-  // Positive words followed by the equally sized negative word span.
-  uint64_t words[LOOM_SIGNED_ENUM_SET_MAX_WORD_COUNT * 2];
-  // Number of words in each signed half of |words|.
-  uint8_t word_count;
-} loom_bytecode_wire_signed_enum_set_t;
-
 static iree_status_t loom_bytecode_attribute_validate_string_ref(
     const loom_bytecode_attribute_validator_t* validator, uint64_t string_id,
     iree_string_view_t field_name, uint64_t offset,
@@ -103,7 +87,7 @@ static iree_status_t loom_bytecode_attribute_emit_invalid_ssa_value(
                                          IREE_ARRAYSIZE(params), offset, 0);
 }
 
-static uint8_t loom_bytecode_attribute_find_parameter_index(
+uint8_t loom_bytecode_attribute_find_parameter_index(
     const loom_attr_descriptor_t* parameter_descriptors,
     uint8_t parameter_count, iree_string_view_t parameter_name,
     uint8_t start_index) {
@@ -116,7 +100,7 @@ static uint8_t loom_bytecode_attribute_find_parameter_index(
                     : LOOM_ATTR_INDEX_NONE;
 }
 
-static iree_status_t loom_bytecode_attribute_read_predicate(
+iree_status_t loom_bytecode_attribute_read_predicate(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint64_t predicate_index,
     loom_bytecode_wire_predicate_t* out_predicate) {
@@ -169,7 +153,7 @@ static iree_status_t loom_bytecode_attribute_read_predicate(
   return iree_ok_status();
 }
 
-static iree_status_t loom_bytecode_attribute_read_predicate_count(
+iree_status_t loom_bytecode_attribute_read_predicate_count(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint16_t* out_predicate_count) {
   const uint64_t count_offset =
@@ -186,7 +170,7 @@ static iree_status_t loom_bytecode_attribute_read_predicate_count(
   return iree_ok_status();
 }
 
-static iree_status_t loom_bytecode_attribute_read_signed_enum_set(
+iree_status_t loom_bytecode_attribute_read_signed_enum_set(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor,

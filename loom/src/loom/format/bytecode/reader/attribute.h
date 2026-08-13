@@ -63,6 +63,24 @@ typedef struct loom_bytecode_attribute_ssa_materialization_scope_t {
   uint64_t value_count;
 } loom_bytecode_attribute_ssa_materialization_scope_t;
 
+// One decoded predicate with source-domain VALUE arguments and diagnostics.
+typedef struct loom_bytecode_wire_predicate_t {
+  // Decoded predicate header, tags, and immediate arguments.
+  loom_predicate_t value;
+  // Raw wire ordinals for VALUE arguments.
+  uint64_t value_numbers[IREE_ARRAYSIZE(((loom_predicate_t*)0)->args)];
+  // Absolute wire offsets for argument diagnostics.
+  uint64_t argument_offsets[IREE_ARRAYSIZE(((loom_predicate_t*)0)->args)];
+} loom_bytecode_wire_predicate_t;
+
+// One decoded canonical signed enum set.
+typedef struct loom_bytecode_wire_signed_enum_set_t {
+  // Positive words followed by the equally sized negative word span.
+  uint64_t words[LOOM_SIGNED_ENUM_SET_MAX_WORD_COUNT * 2];
+  // Number of words in each signed half of |words|.
+  uint8_t word_count;
+} loom_bytecode_wire_signed_enum_set_t;
+
 // Reads and validates one attribute wire-kind tag.
 IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t
 loom_bytecode_attribute_read_kind(loom_bytecode_reader_decoder_t* decoder,
@@ -80,6 +98,31 @@ loom_bytecode_attribute_read_kind(loom_bytecode_reader_decoder_t* decoder,
   *out_kind = (loom_bytecode_attr_kind_t)kind;
   return iree_ok_status();
 }
+
+// Reads one predicate payload without projecting VALUE arguments.
+iree_status_t loom_bytecode_attribute_read_predicate(
+    loom_bytecode_reader_decoder_t* decoder,
+    loom_bytecode_reader_cursor_t* cursor, uint64_t predicate_index,
+    loom_bytecode_wire_predicate_t* out_predicate);
+
+// Reads and validates a predicate-list count.
+iree_status_t loom_bytecode_attribute_read_predicate_count(
+    loom_bytecode_reader_decoder_t* decoder,
+    loom_bytecode_reader_cursor_t* cursor, uint16_t* out_predicate_count);
+
+// Reads and validates one canonical descriptor-backed signed enum set.
+iree_status_t loom_bytecode_attribute_read_signed_enum_set(
+    loom_bytecode_reader_decoder_t* decoder,
+    loom_bytecode_reader_cursor_t* cursor,
+    const loom_attr_descriptor_t* descriptor,
+    loom_bytecode_wire_signed_enum_set_t* out_set);
+
+// Finds a parameter by spelling in the descriptor suffix beginning at
+// |start_index|. Returns LOOM_ATTR_INDEX_NONE when no parameter matches.
+uint8_t loom_bytecode_attribute_find_parameter_index(
+    const loom_attr_descriptor_t* parameter_descriptors,
+    uint8_t parameter_count, iree_string_view_t parameter_name,
+    uint8_t start_index);
 
 // Validates an attribute whose predicate VALUE arguments are STRINGS ordinals.
 iree_status_t loom_bytecode_attribute_validate_named(
