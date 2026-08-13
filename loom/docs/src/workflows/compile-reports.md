@@ -56,6 +56,12 @@ and compile status. Each entry then separates two evidence classes:
   scheduled pressure, estimated dispatch traffic, operation counts, residency,
   allocation, and scheduling evidence.
 
+Register-move analysis includes compiler-classified causes. Summary reports
+preserve the aggregate packet and register-unit counts; detailed reports let
+`show` enumerate causes and let `diff` distinguish added, removed, changed, and
+unchanged causes. This separates a source-level repacking change from a
+target-created operand-bank repair instead of treating both as generic moves.
+
 Unavailable fields are omitted instead of rendered as zero. That distinction
 matters: zero instructions is a measurement; no target inspector for that
 metric is an absence of evidence.
@@ -141,6 +147,12 @@ Each finding names an action and cites the exact evidence paths and values that
 motivated it. The output is a prioritized experiment queue, not an assertion
 that a transformation will improve performance. Recompile, retest, and measure
 each accepted experiment.
+
+When expanded AMDGPU fragment packets coincide with target-created operand-bank
+materialization, the finding leads with allocator placement and explicitly asks
+the reader to verify that the repairs belong to those loads before changing the
+memory hierarchy. The co-occurrence narrows the next experiment; it is not
+reported as a causal proof.
 
 ```shell
 loom-compile-report suggest kernel.report.json --format=json \

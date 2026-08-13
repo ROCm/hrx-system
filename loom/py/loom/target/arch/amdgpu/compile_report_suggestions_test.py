@@ -252,6 +252,25 @@ def _add_fragment_packet_evidence(
     }
 
 
+def _add_operand_bank_materialization_evidence(
+    report: dict[str, object],
+    *,
+    packet_count: int,
+) -> None:
+    report["entries"]["rows"][0]["move_causes"] = {
+        "kind_count": 1,
+        "packet_count": packet_count,
+        "unit_count": packet_count,
+        "causes": [
+            {
+                "cause": "operand_bank_materialization",
+                "packet_count": packet_count,
+                "unit_count": packet_count,
+            }
+        ],
+    }
+
+
 def _add_vmem_source_reuse_evidence(
     report: dict[str, object],
     *,
@@ -556,6 +575,7 @@ def test_ignores_multi_subgroup_or_barrier_free_communication(
 def test_fragment_packet_expansion_cites_source_packets_and_pressure() -> None:
     report = _compile_report()
     _add_fragment_packet_evidence(report, expanded=True)
+    _add_operand_bank_materialization_evidence(report, packet_count=12)
     document = parse_compile_report(report)
 
     result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
@@ -565,9 +585,16 @@ def test_fragment_packet_expansion_cites_source_packets_and_pressure() -> None:
         for suggestion in result.suggestions
         if suggestion.suggestion_id == "amdgpu.fragment_packet_expansion"
     )
+    assert "Inspect allocator placement before changing fragment storage" in (
+        suggestion.action
+    )
     assert "vector.fragment.load/weights/global" in suggestion.action
     assert "128 scalar load packets" in suggestion.action
     assert "strided_d16_packed_b16_fragment_load" in suggestion.action
+    assert "12 target-created operand-bank materialization packets" in (
+        suggestion.action
+    )
+    assert "Check whether those repairs coincide" in suggestion.action
     evidence = {item.path: item.value for item in suggestion.evidence}
     assert evidence["source_low.memory.argument_packets[0].scalar_packet_count"] == 64
     assert evidence["source_low.memory.argument_packets[1].scalar_packet_count"] == 64
@@ -577,6 +604,24 @@ def test_fragment_packet_expansion_cites_source_packets_and_pressure() -> None:
     )
     assert evidence["entries.rows[0].wait_plan.full_drain_count"] == 18
     assert evidence["entries.rows[0].static_instruction_mix.register_move_count"] == 64
+    assert evidence["entries.rows[0].move_causes.causes[0].packet_count"] == 12
+    assert evidence["entries.rows[0].move_causes.causes[0].unit_count"] == 12
+
+
+def test_fragment_packet_expansion_without_move_causes_stays_layout_scoped() -> None:
+    report = _compile_report()
+    _add_fragment_packet_evidence(report, expanded=True)
+    document = parse_compile_report(report)
+
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
+
+    suggestion = next(
+        suggestion
+        for suggestion in result.suggestions
+        if suggestion.suggestion_id == "amdgpu.fragment_packet_expansion"
+    )
+    assert "Inspect operand layout and packing" in suggestion.action
+    assert "allocator placement" not in suggestion.action
 
 
 def test_contiguous_fragment_packets_do_not_suggest_expansion() -> None:

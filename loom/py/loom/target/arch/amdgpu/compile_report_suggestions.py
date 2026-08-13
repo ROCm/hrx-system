@@ -13,6 +13,10 @@ from loom.reporting.compile_report import (
     CompileReportError,
     compile_report_entry_identity,
 )
+from loom.reporting.compile_report_move_causes import (
+    CompileReportMoveCause,
+    parse_compile_report_move_causes,
+)
 from loom.reporting.compile_report_suggestions import (
     CompileReportSuggestion,
     CompileReportSuggestionConfidence,
@@ -667,6 +671,7 @@ def _suggest_fragment_packet_expansion(
                 *packet_evidence,
             ]
             entry = _entry_for_function(document, function_name)
+            operand_bank_materialization: CompileReportMoveCause | None = None
             if entry is not None:
                 entry_index = _report_integer(
                     entry.get("index"),
@@ -698,6 +703,33 @@ def _suggest_fragment_packet_expansion(
                                 value=register_move_count,
                             )
                         )
+                move_causes = parse_compile_report_move_causes(entry, entry_path)
+                if move_causes is not None and move_causes.causes is not None:
+                    operand_bank_materialization = next(
+                        (
+                            cause
+                            for cause in move_causes.causes
+                            if cause.cause == "operand_bank_materialization"
+                        ),
+                        None,
+                    )
+                    if operand_bank_materialization is not None:
+                        cause_path = (
+                            f"{entry_path}.move_causes.causes"
+                            f"[{operand_bank_materialization.position}]"
+                        )
+                        evidence.extend(
+                            (
+                                CompileReportSuggestionEvidence(
+                                    path=f"{cause_path}.packet_count",
+                                    value=operand_bank_materialization.packet_count,
+                                ),
+                                CompileReportSuggestionEvidence(
+                                    path=f"{cause_path}.unit_count",
+                                    value=operand_bank_materialization.unit_count,
+                                ),
+                            )
+                        )
 
             location = "/".join(
                 value
@@ -706,20 +738,38 @@ def _suggest_fragment_packet_expansion(
             )
             packet_summary = ", ".join(dict.fromkeys(packet_names))
             storage_summary = "/".join(dict.fromkeys(storage_formats))
+            if operand_bank_materialization is not None:
+                action = (
+                    "Inspect allocator placement before changing fragment "
+                    f"storage: the {strategy} plan for {location} "
+                    f"{storage_summary or 'storage'} emits {packet_count} "
+                    f"scalar {operation or 'memory'} packets "
+                    f"({packet_summary}) and no contiguous vector packets, "
+                    "while the entry also contains "
+                    f"{operand_bank_materialization.packet_count} "
+                    "target-created operand-bank materialization packets. "
+                    "Check whether those repairs coincide with these fragment "
+                    "loads; if so, test disjoint address/destination placement "
+                    "or a shorter overlapping live window and require both "
+                    "repairs and full drains to fall before changing the "
+                    "memory hierarchy."
+                )
+            else:
+                action = (
+                    f"Inspect operand layout and packing for {location} "
+                    f"{storage_summary or 'storage'}: the {strategy} plan "
+                    f"emits {packet_count} scalar "
+                    f"{operation or 'memory'} packets ({packet_summary}) and "
+                    "no contiguous vector packets. "
+                    "If narrow packets are layout-required, bound their live "
+                    "window and reduce full drains and register moves before "
+                    "benchmarking."
+                )
             suggestions.append(
                 CompileReportSuggestion(
                     suggestion_id="amdgpu.fragment_packet_expansion",
                     entry_name=_entry_name_for_function(document, function_name),
-                    action=(
-                        f"Inspect operand layout and packing for {location} "
-                        f"{storage_summary or 'storage'}: the {strategy} plan "
-                        f"emits {packet_count} scalar "
-                        f"{operation or 'memory'} packets ({packet_summary}) and "
-                        "no contiguous vector packets. "
-                        "If narrow packets are layout-required, bound their live "
-                        "window and reduce full drains and register moves before "
-                        "benchmarking."
-                    ),
+                    action=action,
                     evidence=tuple(evidence),
                 )
             )
