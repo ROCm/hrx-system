@@ -4,13 +4,22 @@
 // See https://llvm.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <array>
 #include <cstdint>
 #include <cstring>
+#include <future>
 
 #include "iree/hal/cts/util/atomic_test_util.h"
 #include "iree/hal/cts/util/test_base.h"
 
 namespace iree::hal::cts {
+
+using iree::testing::status::StatusIs;
+
+static void NotifyBufferReleased(void* user_data,
+                                 iree_hal_buffer_t* /*buffer*/) {
+  static_cast<std::promise<void>*>(user_data)->set_value();
+}
 
 class QueueAtomicTest : public CtsTestBase<> {
  protected:
@@ -102,6 +111,67 @@ class QueueAtomicTest : public CtsTestBase<> {
       memcpy(&value, bytes.data(), sizeof(value));
     }
     return value;
+  }
+
+  void RunResolvedMisalignmentFailureTest(iree_hal_atomic_width_t width) {
+    AtomicTestConfiguration configuration;
+    if (!SelectConfiguration(width, IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+                             IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_NONE,
+                             &configuration)) {
+      GTEST_SKIP() << "Device does not advertise the tested "
+                      "queue/memory atomic store";
+    }
+
+    alignas(uint64_t) std::array<uint8_t, kBufferSize + 1> storage = {};
+    void* misaligned_ptr = storage.data() + 1;
+    const iree_device_size_t byte_count =
+        iree_hal_atomic_width_byte_count(width);
+    ASSERT_NE(0u, reinterpret_cast<uintptr_t>(misaligned_ptr) % byte_count);
+
+    std::promise<void> released;
+    std::future<void> released_future = released.get_future();
+    iree_hal_buffer_release_callback_t release_callback = {
+        /*.fn=*/NotifyBufferReleased,
+        /*.user_data=*/&released,
+    };
+    iree_hal_external_buffer_t external_buffer = {};
+    external_buffer.type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION;
+    external_buffer.size = kBufferSize;
+    external_buffer.handle.host_allocation.ptr = misaligned_ptr;
+
+    iree_hal_buffer_params_t buffer_params = configuration.buffer_params;
+    buffer_params.access |= IREE_HAL_MEMORY_ACCESS_UNALIGNED;
+    buffer_params.min_alignment = 1;
+    Ref<iree_hal_buffer_t> buffer;
+    Status import_status(iree_hal_allocator_import_buffer(
+        device_allocator_, buffer_params, &external_buffer, release_callback,
+        buffer.out()));
+    if (!import_status.ok()) {
+      GTEST_SKIP() << "Allocator cannot import an explicitly unaligned host "
+                      "allocation: "
+                   << import_status.ToString();
+    }
+
+    SemaphoreList empty_wait;
+    SemaphoreList signal(device_, {0}, {1});
+    const iree_hal_atomic_store_params_t store_params = {
+        /*.value=*/1,
+        /*.flags=*/IREE_HAL_ATOMIC_FLAG_RELEASE,
+        /*.width=*/width,
+    };
+    Status submission_status(iree_hal_device_queue_atomic_store(
+        device_, configuration.queue_affinity, empty_wait, signal, buffer,
+        /*target_offset=*/0, store_params));
+    ASSERT_TRUE(submission_status.ok() ||
+                submission_status.code() == StatusCode::kFailedPrecondition)
+        << submission_status.ToString();
+    EXPECT_THAT(
+        Status(iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
+                                            IREE_ASYNC_WAIT_FLAG_NONE)),
+        StatusIs(StatusCode::kFailedPrecondition));
+
+    buffer.reset();
+    released_future.wait();
   }
 
   template <typename ValueType>
@@ -232,6 +302,10 @@ TEST_P(QueueAtomicTest, Wait32) {
 
 TEST_P(QueueAtomicTest, Wait64) {
   RunWaitTest<uint64_t>(IREE_HAL_ATOMIC_WIDTH_64);
+}
+
+TEST_P(QueueAtomicTest, ResolvedMisalignmentFails64) {
+  RunResolvedMisalignmentFailureTest(IREE_HAL_ATOMIC_WIDTH_64);
 }
 
 CTS_REGISTER_TEST_SUITE(QueueAtomicTest);
