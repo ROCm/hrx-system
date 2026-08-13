@@ -310,7 +310,7 @@ static iree_status_t QueueHostVisibleDispatchTransientBuffer(
       IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
-                 IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
+                 IREE_HAL_BUFFER_USAGE_STORAGE |
                  IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
   return iree_hal_device_queue_alloca(
       device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),

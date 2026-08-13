@@ -303,7 +303,7 @@ TEST(PoolSetTest, SelectsHighestPriorityCompatiblePoolBySize) {
   EXPECT_EQ((iree_hal_pool_t*)tlsf_pool,
             iree_hal_pool_set_select(&pool_set, params, 512));
 
-  params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE;
   EXPECT_EQ(nullptr, iree_hal_pool_set_select(&pool_set, params, 512));
 
   iree_hal_pool_set_deinitialize(&pool_set);

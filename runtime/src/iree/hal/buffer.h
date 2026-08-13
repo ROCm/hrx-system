@@ -224,6 +224,31 @@ enum iree_hal_buffer_usage_bits_t {
   IREE_HAL_BUFFER_USAGE_TRANSFER = IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE |
                                    IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
 
+  // ==== IREE_HAL_BUFFER_USAGE_STORAGE_* =====================================
+
+  // Buffer contents may be read through random-access device storage
+  // operations, including dispatch bindings and explicit queue operations.
+  // Read-only buffers can enable non-local prefetching and replication.
+  IREE_HAL_BUFFER_USAGE_STORAGE_READ = 1u << 10,
+
+  // Buffer contents may be written through random-access device storage
+  // operations, including dispatch bindings and explicit queue operations.
+  // Write-only buffers can reduce cache pollution and writeback latency.
+  IREE_HAL_BUFFER_USAGE_STORAGE_WRITE = 1u << 11,
+
+  // Buffer contents may be read and written through random-access device
+  // storage operations. Storage access supports flexible data formats and
+  // alignment. Atomic operations may be allowed depending on implementation.
+  //
+  // Maps to:
+  //  - D3D12_UNORDERED_ACCESS_VIEW_DESC::D3D12_BUFFER_UAV
+  //    + D3D12_RESOURCE_STATE_UNORDERED_ACCESS
+  //  - GPUBufferUsage.STORAGE
+  //  - MTLResourceUsageRead | MTLResourceUsageWrite
+  //  - VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+  IREE_HAL_BUFFER_USAGE_STORAGE =
+      IREE_HAL_BUFFER_USAGE_STORAGE_READ | IREE_HAL_BUFFER_USAGE_STORAGE_WRITE,
+
   // ==== IREE_HAL_BUFFER_USAGE_DISPATCH_* =====================================
 
   // Buffer contents are used for indirect dispatch workgroup parameters.
@@ -257,42 +282,19 @@ enum iree_hal_buffer_usage_bits_t {
   //  - VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
   IREE_HAL_BUFFER_USAGE_DISPATCH_UNIFORM_READ = 1u << 9,
 
-  // Buffer contents are read by dispatches as storage buffers.
-  // Read-only buffers can enable non-local prefetching and replication.
-  IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ = 1u << 10,
-
-  // Buffer contents are written by dispatches as storage buffers.
-  // Write-only buffers can reduce cache pollution and writeback latency.
-  IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_WRITE = 1u << 11,
-
-  // Buffer contents are read and written by dispatches as storage buffers.
-  // Storage buffers allow random read/write access to underlying data using
-  // flexible data formats and alignment. Atomic operations may be allowed
-  // depending on implementation.
-  //
-  // Maps to:
-  //  - D3D12_UNORDERED_ACCESS_VIEW_DESC::D3D12_BUFFER_UAV
-  //    + D3D12_RESOURCE_STATE_UNORDERED_ACCESS
-  //  - GPUBufferUsage.STORAGE
-  //  - MTLResourceUsageRead | MTLResourceUsageWrite
-  //  - VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
-  IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE =
-      IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ |
-      IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_WRITE,
-
   // Buffer contents are read by dispatches as images.
   // Depending on the implementation this may be ignored or treated the same as
-  // IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ.
+  // IREE_HAL_BUFFER_USAGE_STORAGE_READ.
   IREE_HAL_BUFFER_USAGE_DISPATCH_IMAGE_READ = 1u << 12,
 
   // Buffer contents are written by dispatches as images.
   // Depending on the implementation this may be ignored or treated the same as
-  // IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_WRITE.
+  // IREE_HAL_BUFFER_USAGE_STORAGE_WRITE.
   IREE_HAL_BUFFER_USAGE_DISPATCH_IMAGE_WRITE = 1u << 13,
 
   // Buffer contents are read and written by dispatches as images.
   // Depending on the implementation this may be ignored or treated the same as
-  // IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE. If supported then additional
+  // IREE_HAL_BUFFER_USAGE_STORAGE. If supported then additional
   // hardware resources may be required to perform the binding.
   //
   // Storage buffers are preferred in most cases due to the more flexible data
@@ -316,8 +318,7 @@ enum iree_hal_buffer_usage_bits_t {
   IREE_HAL_BUFFER_USAGE_DISPATCH =
       IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS |
       IREE_HAL_BUFFER_USAGE_DISPATCH_UNIFORM_READ |
-      IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
-      IREE_HAL_BUFFER_USAGE_DISPATCH_IMAGE,
+      IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_DISPATCH_IMAGE,
 
   // ==== IREE_HAL_BUFFER_USAGE_SHARING_* ======================================
 
@@ -407,11 +408,11 @@ enum iree_hal_buffer_usage_bits_t {
 
   // ==== IREE_HAL_BUFFER_USAGE_* helpers ======================================
 
-  // Default usage mode covering transfer and dispatch.
+  // Default usage mode covering transfer and random-access storage.
   // Most internal buffers will be allocated for this usage and external buffers
   // should use this unless specific usage is required (such as mapping).
   IREE_HAL_BUFFER_USAGE_DEFAULT =
-      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
+      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE,
 };
 typedef uint32_t iree_hal_buffer_usage_t;
 
@@ -609,7 +610,7 @@ static inline iree_hal_buffer_params_t iree_hal_buffer_params_with_usage(
   iree_hal_buffer_params_t result = params;
   if (!result.usage) {
     result.usage =
-        IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
   }
   result.usage |= usage;
   return result;

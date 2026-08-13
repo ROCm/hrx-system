@@ -333,8 +333,7 @@ iree_status_t AllocateStorageBuffer(iree_hal_device_t* device,
                                     iree_hal_buffer_t** out_buffer) {
   iree_hal_buffer_params_t params = {0};
   params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  params.usage =
-      IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
   return iree_hal_allocator_allocate_buffer(iree_hal_device_allocator(device),
                                             params, buffer_size, out_buffer);
 }

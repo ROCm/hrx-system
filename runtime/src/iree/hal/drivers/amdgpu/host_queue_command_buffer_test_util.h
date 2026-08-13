@@ -134,7 +134,7 @@ static iree_status_t CreateHostVisibleDispatchBuffer(
                 IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
                 IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
+  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE |
                  IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
   return iree_hal_allocator_allocate_buffer(allocator, params, buffer_size,
                                             out_buffer);

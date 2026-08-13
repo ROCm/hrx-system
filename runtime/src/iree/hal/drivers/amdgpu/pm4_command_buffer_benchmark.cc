@@ -396,7 +396,7 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
     params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
     params.access = IREE_HAL_MEMORY_ACCESS_ALL;
     params.usage =
-        IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
     params.min_alignment = kPayloadBufferAlignment;
     for (iree_host_size_t i = 0; i < kMaximumBindingTableCount; ++i) {
       IREE_RETURN_IF_ERROR(iree_hal_allocator_allocate_buffer(

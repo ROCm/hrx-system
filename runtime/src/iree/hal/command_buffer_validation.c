@@ -523,7 +523,7 @@ iree_status_t iree_hal_command_buffer_collective_validation(
   if (info_bits & IREE_HAL_COLLECTIVE_REQUIRES_SEND_BINDING) {
     const iree_hal_buffer_binding_requirements_t send_reqs = {
         .required_compatibility = IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_DISPATCH,
-        .usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ,
+        .usage = IREE_HAL_BUFFER_USAGE_STORAGE_READ,
         .access = IREE_HAL_MEMORY_ACCESS_READ,
         .type = IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
         .max_byte_offset = send_ref.offset + send_ref.length,
@@ -539,7 +539,7 @@ iree_status_t iree_hal_command_buffer_collective_validation(
   if (info_bits & IREE_HAL_COLLECTIVE_REQUIRES_RECV_BINDING) {
     const iree_hal_buffer_binding_requirements_t recv_reqs = {
         .required_compatibility = IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_DISPATCH,
-        .usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_WRITE,
+        .usage = IREE_HAL_BUFFER_USAGE_STORAGE_WRITE,
         .access = IREE_HAL_MEMORY_ACCESS_WRITE,
         .type = IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
         .max_byte_offset = recv_ref.offset + recv_ref.length,
@@ -635,7 +635,7 @@ iree_status_t iree_hal_command_buffer_dispatch_validation(
     // for buffer bindings.
     iree_hal_buffer_binding_requirements_t binding_requirements = {
         .required_compatibility = IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_DISPATCH,
-        .usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
+        .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
         .access = IREE_HAL_MEMORY_ACCESS_ANY,
         .type = IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
     };

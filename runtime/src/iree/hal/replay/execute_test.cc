@@ -1545,8 +1545,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedQueueTransfersAndDealloca) {
       IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
-                 IREE_HAL_BUFFER_USAGE_MAPPING |
-                 IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+                 IREE_HAL_BUFFER_USAGE_MAPPING | IREE_HAL_BUFFER_USAGE_STORAGE;
 
   iree_hal_buffer_t* source_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(allocator, params, 32,
@@ -1706,8 +1705,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedCommandBufferTransfers) {
       IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
-                 IREE_HAL_BUFFER_USAGE_MAPPING |
-                 IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+                 IREE_HAL_BUFFER_USAGE_MAPPING | IREE_HAL_BUFFER_USAGE_STORAGE;
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(
       iree_hal_allocator_allocate_buffer(allocator, params, 32, &buffer));
@@ -1787,8 +1785,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedIndirectCommandBufferBindings) {
       IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
-                 IREE_HAL_BUFFER_USAGE_MAPPING |
-                 IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+                 IREE_HAL_BUFFER_USAGE_MAPPING | IREE_HAL_BUFFER_USAGE_STORAGE;
   iree_hal_buffer_t* source_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(allocator, params, 16,
                                                     &source_buffer));

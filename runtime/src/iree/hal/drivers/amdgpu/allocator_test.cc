@@ -46,8 +46,7 @@ static iree_status_t QueueFillAndWait(iree_hal_device_t* device,
 
 static iree_hal_buffer_params_t DeviceLocalVirtualMemoryParams() {
   return (iree_hal_buffer_params_t){
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER |
-          IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
+      /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE,
       /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
       /*.type=*/IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
       /*.queue_affinity=*/kQueueAffinity0,

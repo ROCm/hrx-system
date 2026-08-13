@@ -946,7 +946,7 @@ TEST_F(LocalProfileRecorderTest, AppendsAndFlushesMemoryEvents) {
   event.physical_device_ordinal = QueueScope().physical_device_ordinal;
   event.queue_ordinal = QueueScope().queue_ordinal;
   event.memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  event.buffer_usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+  event.buffer_usage = IREE_HAL_BUFFER_USAGE_STORAGE;
   event.offset = 64;
   event.length = 256;
   event.alignment = 16;

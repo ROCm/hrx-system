@@ -272,8 +272,7 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_virtual_memory(
   iree_hal_buffer_params_t buffer_params = {
       .type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE |
               IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
-               IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE,
       .access = IREE_HAL_MEMORY_ACCESS_ALL,
   };
   iree_device_size_t minimum_page_size = 0;

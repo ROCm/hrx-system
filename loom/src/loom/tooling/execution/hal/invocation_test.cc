@@ -228,7 +228,7 @@ TEST_F(HalInvocationTest, PreparePlanFromListsRetainsBindings) {
   buffer_params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
   buffer_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   buffer_params.usage =
-      IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+      IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       allocator, buffer_params, /*allocation_size=*/4, &buffer));
@@ -263,7 +263,7 @@ TEST_F(HalInvocationTest, BindingListTotalByteLengthUsesLogicalBufferExtents) {
   buffer_params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
   buffer_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   buffer_params.usage =
-      IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+      IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
   iree_hal_buffer_t* allocation = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       allocator, buffer_params, /*allocation_size=*/256, &allocation));

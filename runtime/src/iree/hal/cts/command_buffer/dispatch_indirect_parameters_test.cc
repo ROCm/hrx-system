@@ -52,7 +52,7 @@ class DispatchIndirectParametersTest : public CtsTestBase<> {
     iree_hal_buffer_params_t params = {0};
     params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
     params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS |
-                   IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
+                   IREE_HAL_BUFFER_USAGE_STORAGE |
                    IREE_HAL_BUFFER_USAGE_TRANSFER;
     return iree_hal_allocator_allocate_buffer(device_allocator_, params,
                                               kParameterByteLength, out_buffer);

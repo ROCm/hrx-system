@@ -1110,7 +1110,7 @@ static iree_status_t iree_hal_vulkan_queue_bda_publication_block_create(
       .type = IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE |
               IREE_HAL_MEMORY_TYPE_HOST_VISIBLE,
       .access = IREE_HAL_MEMORY_ACCESS_DISCARD_WRITE,
-      .usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ |
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE_READ |
                IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT |
                IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_SEQUENTIAL_WRITE,
       .queue_affinity = queue->queue_affinity,
@@ -8078,7 +8078,7 @@ static iree_status_t iree_hal_vulkan_queue_validate_dispatch_storage_usage(
     iree_hal_buffer_t* buffer) {
   const iree_hal_buffer_usage_t allowed_usage =
       iree_hal_buffer_allowed_usage(buffer);
-  if (iree_any_bit_set(allowed_usage, IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE)) {
+  if (iree_any_bit_set(allowed_usage, IREE_HAL_BUFFER_USAGE_STORAGE)) {
     return iree_ok_status();
   }
 #if IREE_STATUS_MODE
@@ -8087,7 +8087,7 @@ static iree_status_t iree_hal_vulkan_queue_validate_dispatch_storage_usage(
   iree_string_view_t allowed_usage_string =
       iree_hal_buffer_usage_format(allowed_usage, &allowed_temp);
   iree_string_view_t required_usage_string = iree_hal_buffer_usage_format(
-      IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE, &required_temp);
+      IREE_HAL_BUFFER_USAGE_STORAGE, &required_temp);
   return iree_make_status(
       IREE_STATUS_PERMISSION_DENIED,
       "requested usage was not specified when the buffer was allocated; buffer "

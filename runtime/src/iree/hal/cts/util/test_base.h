@@ -535,7 +535,7 @@ class CtsTestBase : public BaseType {
     iree_hal_buffer_params_t params = {0};
     params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
     params.usage =
-        IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
     return iree_hal_allocator_allocate_buffer(device_allocator_, params,
                                               buffer_size, out_buffer);
   }
@@ -546,7 +546,7 @@ class CtsTestBase : public BaseType {
     iree_hal_buffer_params_t params = {0};
     params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
     params.usage =
-        IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
     iree_hal_buffer_t* buffer = nullptr;
     iree_status_t status = iree_hal_allocator_allocate_buffer(
         device_allocator_, params, buffer_size, &buffer);
@@ -578,7 +578,7 @@ class CtsTestBase : public BaseType {
     iree_hal_buffer_params_t params = {0};
     params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
     params.usage =
-        IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
     iree_hal_buffer_t* buffer = nullptr;
     iree_status_t status = iree_hal_allocator_allocate_buffer(
         device_allocator_, params, buffer_size, &buffer);
@@ -610,7 +610,7 @@ class CtsTestBase : public BaseType {
     iree_hal_buffer_params_t params = {0};
     params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
     params.usage =
-        IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
     iree_hal_buffer_t* buffer = nullptr;
     iree_status_t status = iree_hal_allocator_allocate_buffer(
         device_allocator_, params, buffer_size, &buffer);

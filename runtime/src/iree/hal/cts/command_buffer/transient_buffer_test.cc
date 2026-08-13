@@ -62,7 +62,7 @@ class TransientBufferTest : public CtsTestBase<> {
     params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
     params.access = access;
     params.usage =
-        IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
     return params;
   }
 

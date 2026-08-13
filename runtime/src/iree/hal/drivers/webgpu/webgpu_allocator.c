@@ -210,7 +210,7 @@ iree_hal_webgpu_allocator_compute_gpu_usage(iree_hal_memory_type_t memory_type,
   if (iree_any_bit_set(usage, IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET)) {
     gpu_usage |= IREE_HAL_WEBGPU_BUFFER_USAGE_COPY_DST;
   }
-  if (iree_any_bit_set(usage, IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE)) {
+  if (iree_any_bit_set(usage, IREE_HAL_BUFFER_USAGE_STORAGE)) {
     gpu_usage |= IREE_HAL_WEBGPU_BUFFER_USAGE_STORAGE;
   }
   if (iree_any_bit_set(usage, IREE_HAL_BUFFER_USAGE_DISPATCH_UNIFORM_READ)) {
@@ -247,19 +247,18 @@ iree_hal_webgpu_allocator_query_buffer_compatibility(
     if (iree_any_bit_set(params->usage, IREE_HAL_BUFFER_USAGE_TRANSFER)) {
       compatibility |= IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_TRANSFER;
     }
-    if (iree_any_bit_set(params->usage,
-                         IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE)) {
+    if (iree_any_bit_set(params->usage, IREE_HAL_BUFFER_USAGE_STORAGE)) {
       compatibility |= IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_DISPATCH;
     }
   }
 
   // WebGPU cannot have a buffer that is both a storage binding and
   // host-mappable. If someone requests DEVICE_LOCAL | HOST_VISIBLE with
-  // DISPATCH_STORAGE, we can allocate it as device-local (dropping
+  // STORAGE, we can allocate it as device-local (dropping
   // HOST_VISIBLE) but warn that it will require staging for host access.
   if (iree_all_bits_set(params->type, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
                                           IREE_HAL_MEMORY_TYPE_HOST_VISIBLE) &&
-      iree_any_bit_set(params->usage, IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE)) {
+      iree_any_bit_set(params->usage, IREE_HAL_BUFFER_USAGE_STORAGE)) {
     // Coerce to pure device-local — host access requires staging copies.
     compatibility |= IREE_HAL_BUFFER_COMPATIBILITY_LOW_PERFORMANCE;
     params->type &= ~IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;

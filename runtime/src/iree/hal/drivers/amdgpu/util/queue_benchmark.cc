@@ -82,8 +82,7 @@ enum class QueueAllocaTlsfGrowthMode : int64_t {
 };
 
 constexpr iree_hal_buffer_params_t kQueueAllocaBufferParams = {
-    /*usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER |
-        IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
+    /*usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE,
     /*access=*/IREE_HAL_MEMORY_ACCESS_ALL,
     /*type=*/IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE,
     /*queue_affinity=*/0,
@@ -1537,7 +1536,7 @@ class QueueBenchmark : public benchmark::Fixture {
 
     iree_hal_allocator_t* allocator = iree_hal_device_allocator(device_);
     iree_hal_buffer_params_t params = {0};
-    params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+    params.usage = IREE_HAL_BUFFER_USAGE_STORAGE;
     params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
     params.min_alignment = kPayloadBufferAlignment;
     for (iree_host_size_t i = 0; i < (iree_host_size_t)binding_count; ++i) {
@@ -2105,7 +2104,7 @@ class QueueBenchmark : public benchmark::Fixture {
     iree_hal_allocator_t* allocator = iree_hal_device_allocator(device_);
     iree_hal_buffer_params_t params = {0};
     params.usage =
-        IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
     params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
     params.min_alignment = kPayloadBufferAlignment;
 

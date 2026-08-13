@@ -267,7 +267,7 @@ static void iree_hal_test_opaque_slab_provider_query_properties(
       IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
       IREE_HAL_MEMORY_TYPE_HOST_COHERENT | IREE_HAL_MEMORY_TYPE_HOST_CACHED;
   *out_supported_usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
-                         IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
+                         IREE_HAL_BUFFER_USAGE_STORAGE |
                          IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED |
                          IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT;
 }

@@ -1166,7 +1166,7 @@ static VkBufferUsageFlags iree_hal_vulkan_buffer_usage_from_hal(
                        IREE_HAL_BUFFER_USAGE_DISPATCH_UNIFORM_READ)) {
     usage |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
   }
-  if (iree_any_bit_set(hal_usage, IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE)) {
+  if (iree_any_bit_set(hal_usage, IREE_HAL_BUFFER_USAGE_STORAGE)) {
     usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
   }
   if (iree_any_bit_set(hal_usage, IREE_HAL_BUFFER_USAGE_TRANSFER)) {

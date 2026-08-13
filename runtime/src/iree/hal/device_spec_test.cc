@@ -823,7 +823,7 @@ TEST(DeviceSpecTest, FindsVirtualMemoryAndExternalHandleRecords) {
           /*.direction_flags=*/IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
               IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT,
           /*.allowed_buffer_usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER |
-              IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ,
+              IREE_HAL_BUFFER_USAGE_STORAGE_READ,
           /*.allowed_memory_access=*/IREE_HAL_MEMORY_ACCESS_READ |
               IREE_HAL_MEMORY_ACCESS_WRITE,
           /*.compatible_memory_type_mask=*/1u << 0,
@@ -931,7 +931,7 @@ TEST(DeviceSpecTest, FindsVirtualMemoryAndExternalHandleRecords) {
 
   iree_hal_virtual_memory_class_selection_t virtual_memory_selection = {
       /*.compatible_memory_type_mask=*/1u << 0,
-      /*.buffer_usage=*/IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ,
+      /*.buffer_usage=*/IREE_HAL_BUFFER_USAGE_STORAGE_READ,
       /*.memory_access=*/IREE_HAL_MEMORY_ACCESS_READ,
       /*.operation_flags=*/IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_MAP |
           IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_UNMAP,

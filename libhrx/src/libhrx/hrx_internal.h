@@ -140,8 +140,7 @@ static_assert(HRX_BUFFER_USAGE_NONE == IREE_HAL_BUFFER_USAGE_NONE,
               "buffer usage mismatch");
 static_assert(HRX_BUFFER_USAGE_TRANSFER == IREE_HAL_BUFFER_USAGE_TRANSFER,
               "buffer usage mismatch");
-static_assert(HRX_BUFFER_USAGE_DISPATCH_STORAGE ==
-                  IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
+static_assert(HRX_BUFFER_USAGE_STORAGE == IREE_HAL_BUFFER_USAGE_STORAGE,
               "buffer usage mismatch");
 static_assert(HRX_BUFFER_USAGE_DEFAULT == IREE_HAL_BUFFER_USAGE_DEFAULT,
               "buffer usage mismatch");
