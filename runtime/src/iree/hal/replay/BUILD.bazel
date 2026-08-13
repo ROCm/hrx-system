@@ -233,6 +233,7 @@ iree_runtime_cc_test(
     name = "recorder_test",
     srcs = ["recorder_test.cc"],
     deps = [
+        ":execute",
         ":file_reader",
         ":recorder",
         "//runtime/src/iree/async",

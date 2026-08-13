@@ -14,6 +14,7 @@
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/hal/drivers/local_sync/sync_device.h"
+#include "iree/hal/replay/execute.h"
 #include "iree/hal/replay/file_reader.h"
 #include "iree/hal/testing/mock_device.h"
 #include "iree/io/file_contents.h"
@@ -116,6 +117,18 @@ static iree_hal_replay_recorder_t* CreateHostAllocationRecorder(
       file_handle, options, iree_allocator_system(), &recorder));
   iree_io_file_handle_release(file_handle);
   return recorder;
+}
+
+static iree_const_byte_span_t GetCapturedFileContents(
+    const std::vector<uint8_t>& storage) {
+  iree_hal_replay_file_header_t file_header;
+  iree_host_size_t offset = 0;
+  IREE_CHECK_OK(iree_hal_replay_file_parse_header(
+      iree_make_const_byte_span(storage.data(), storage.size()), &file_header,
+      &offset));
+  EXPECT_LE(file_header.file_length, storage.size());
+  return iree_make_const_byte_span(storage.data(),
+                                   (iree_host_size_t)file_header.file_length);
 }
 
 #if IREE_FILE_IO_ENABLE && \
@@ -771,7 +784,7 @@ TEST(ReplayRecorderTest, WrappedDeviceRecordsQueueExecuteSemaphores) {
   EXPECT_EQ(1u, summary.device_queue_execute_payload_count);
 }
 
-TEST(ReplayRecorderTest, RecordsCommandBufferAtomicOperations) {
+TEST(ReplayRecorderTest, RecordsAndReplaysCommandBufferAtomicOperations) {
   std::vector<uint8_t> storage(65536, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
@@ -910,6 +923,12 @@ TEST(ReplayRecorderTest, RecordsCommandBufferAtomicOperations) {
   EXPECT_EQ(rmw_params.width, rmw_payload.params.width);
   EXPECT_EQ(rmw_params.operation, rmw_payload.params.operation);
   EXPECT_EQ(0u, rmw_payload.params.reserved0);
+
+  iree_hal_device_group_t* replay_group = CreateSyncDeviceGroup();
+  IREE_ASSERT_OK(iree_hal_replay_execute_file(GetCapturedFileContents(storage),
+                                              replay_group, /*options=*/nullptr,
+                                              iree_allocator_system()));
+  iree_hal_device_group_release(replay_group);
 }
 
 TEST(ReplayRecorderTest, RecordsDeviceQueueAtomicOperations) {

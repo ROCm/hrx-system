@@ -232,6 +232,7 @@ iree_cc_test(
   SRCS
     "recorder_test.cc"
   DEPS
+    ::execute
     ::file_reader
     ::recorder
     iree::async
