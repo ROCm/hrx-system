@@ -953,7 +953,8 @@ static iree_hal_vulkan_queue_role_t
 iree_hal_vulkan_logical_device_preferred_queue_role_for_command_categories(
     iree_hal_command_category_t command_categories) {
   if (iree_any_bit_set(command_categories,
-                       IREE_HAL_COMMAND_CATEGORY_DISPATCH)) {
+                       IREE_HAL_COMMAND_CATEGORY_DISPATCH |
+                           IREE_HAL_COMMAND_CATEGORY_ATOMIC)) {
     return IREE_HAL_VULKAN_QUEUE_ROLE_COMPUTE;
   }
   return IREE_HAL_VULKAN_QUEUE_ROLE_TRANSFER;
@@ -964,7 +965,8 @@ iree_hal_vulkan_logical_device_required_queue_flags_for_command_categories(
     iree_hal_command_category_t command_categories) {
   VkQueueFlags queue_flags = 0;
   if (iree_any_bit_set(command_categories,
-                       IREE_HAL_COMMAND_CATEGORY_DISPATCH)) {
+                       IREE_HAL_COMMAND_CATEGORY_DISPATCH |
+                           IREE_HAL_COMMAND_CATEGORY_ATOMIC)) {
     queue_flags |= VK_QUEUE_COMPUTE_BIT;
   }
   if (iree_any_bit_set(command_categories,
@@ -1466,8 +1468,15 @@ static iree_status_t iree_hal_vulkan_logical_device_queue_atomic_wait(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_hal_atomic_wait_params_t params) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "Vulkan devices do not yet support atomic waits");
+  iree_hal_vulkan_logical_device_t* device =
+      iree_hal_vulkan_logical_device_cast(base_device);
+  iree_hal_vulkan_queue_t* queue = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_logical_device_select_queue_lane(
+      device, IREE_HAL_VULKAN_QUEUE_ROLE_COMPUTE, VK_QUEUE_COMPUTE_BIT,
+      queue_affinity, &queue));
+  return iree_hal_vulkan_queue_submit_atomic(
+      queue, wait_semaphore_list, signal_semaphore_list, target_buffer,
+      target_offset, iree_hal_vulkan_atomic_params_from_wait(params));
 }
 
 static iree_status_t iree_hal_vulkan_logical_device_queue_atomic_store(
@@ -1476,8 +1485,15 @@ static iree_status_t iree_hal_vulkan_logical_device_queue_atomic_store(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_hal_atomic_store_params_t params) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "Vulkan devices do not yet support atomic stores");
+  iree_hal_vulkan_logical_device_t* device =
+      iree_hal_vulkan_logical_device_cast(base_device);
+  iree_hal_vulkan_queue_t* queue = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_logical_device_select_queue_lane(
+      device, IREE_HAL_VULKAN_QUEUE_ROLE_COMPUTE, VK_QUEUE_COMPUTE_BIT,
+      queue_affinity, &queue));
+  return iree_hal_vulkan_queue_submit_atomic(
+      queue, wait_semaphore_list, signal_semaphore_list, target_buffer,
+      target_offset, iree_hal_vulkan_atomic_params_from_store(params));
 }
 
 static iree_status_t iree_hal_vulkan_logical_device_queue_atomic_rmw(
@@ -1486,9 +1502,15 @@ static iree_status_t iree_hal_vulkan_logical_device_queue_atomic_rmw(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_hal_atomic_rmw_params_t params) {
-  return iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "Vulkan devices do not yet support atomic read-modify-write");
+  iree_hal_vulkan_logical_device_t* device =
+      iree_hal_vulkan_logical_device_cast(base_device);
+  iree_hal_vulkan_queue_t* queue = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_logical_device_select_queue_lane(
+      device, IREE_HAL_VULKAN_QUEUE_ROLE_COMPUTE, VK_QUEUE_COMPUTE_BIT,
+      queue_affinity, &queue));
+  return iree_hal_vulkan_queue_submit_atomic(
+      queue, wait_semaphore_list, signal_semaphore_list, target_buffer,
+      target_offset, iree_hal_vulkan_atomic_params_from_rmw(params));
 }
 
 static iree_status_t iree_hal_vulkan_logical_device_queue_timestamp(
