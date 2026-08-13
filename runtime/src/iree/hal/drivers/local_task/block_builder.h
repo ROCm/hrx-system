@@ -129,9 +129,9 @@ typedef struct iree_hal_cmd_block_builder_t {
   // finalization with the actual dispatch_count. Set at begin() (entry barrier)
   // and after each barrier()/split.
   iree_hal_cmd_barrier_t* current_barrier;
-  // Number of work commands (DISPATCH, FILL, COPY, UPDATE) in the current
-  // region. This is split before reaching 256 because command indices and
-  // barrier dispatch counts are encoded as uint8_t.
+  // Number of work commands in the current region. This is split before
+  // reaching 256 because command indices and barrier dispatch counts are
+  // encoded as uint8_t.
   uint16_t region_dispatch_count;
   // Total tiles accumulated in the current region. Written to
   // region_tiles_scratch at region finalization.
@@ -220,7 +220,7 @@ iree_status_t iree_hal_cmd_block_builder_end(
 // Command recording
 //===----------------------------------------------------------------------===//
 
-// Appends a work command (DISPATCH, FILL, or COPY) to the command stream.
+// Appends a work command to the command stream.
 //
 // If the command plus its fixup entries plus reserved space does not fit
 // in the current block, the builder automatically splits: inserts BRANCH,
@@ -228,7 +228,7 @@ iree_status_t iree_hal_cmd_block_builder_end(
 // barrier for the continuation.
 //
 // Parameters:
-//   opcode: IREE_HAL_CMD_DISPATCH, IREE_HAL_CMD_FILL, or IREE_HAL_CMD_COPY.
+//   opcode: Work-command opcode to encode.
 //   flags: command flags (INDIRECT, PREDICATED, SEQUENTIAL).
 //   cmd_bytes: total command size including header and trailing data
 //              (e.g., sizeof(iree_hal_cmd_dispatch_t) + constant_count * 4).
@@ -241,6 +241,7 @@ iree_status_t iree_hal_cmd_block_builder_end(
 //               DISPATCH: product of workgroup_count dimensions.
 //               FILL/COPY: ceil(length / transfer tile length).
 //               UPDATE: 0 or 1 due to inline command payload size.
+//               ATOMIC_WAIT/STORE/RMW: 1.
 //
 // Returns a pointer to the command in the block via |out_cmd|. Header fields
 // (opcode, flags, size_qwords) are initialized. For DISPATCH commands,

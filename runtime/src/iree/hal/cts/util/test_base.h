@@ -654,9 +654,10 @@ class CtsTestBase : public BaseType {
   }
 
   // Reads a specific byte range from a buffer.
-  std::vector<uint8_t> ReadBufferBytes(iree_hal_buffer_t* buffer,
-                                       iree_device_size_t offset,
-                                       iree_device_size_t length) {
+  std::vector<uint8_t> ReadBufferBytes(
+      iree_hal_buffer_t* buffer, iree_device_size_t offset,
+      iree_device_size_t length,
+      iree_hal_queue_affinity_t queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY) {
     std::vector<uint8_t> data(length);
     if (iree_all_bits_set(iree_hal_buffer_memory_type(buffer),
                           IREE_HAL_MEMORY_TYPE_HOST_VISIBLE) &&
@@ -677,16 +678,16 @@ class CtsTestBase : public BaseType {
 
     iree_hal_file_t* file = nullptr;
     IREE_EXPECT_OK(iree_hal_file_import(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, IREE_HAL_MEMORY_ACCESS_WRITE,
-        handle, IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &file));
+        device_, queue_affinity, IREE_HAL_MEMORY_ACCESS_WRITE, handle,
+        IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &file));
     iree_io_file_handle_release(handle);
     if (!file) return data;
 
     SemaphoreList empty_wait;
     SemaphoreList write_signal(device_, {0}, {1});
     IREE_EXPECT_OK(iree_hal_device_queue_write(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, write_signal, buffer,
-        offset, file, /*target_offset=*/0, length, IREE_HAL_WRITE_FLAG_NONE));
+        device_, queue_affinity, empty_wait, write_signal, buffer, offset, file,
+        /*target_offset=*/0, length, IREE_HAL_WRITE_FLAG_NONE));
     IREE_EXPECT_OK(iree_hal_semaphore_list_wait(
         write_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
     iree_hal_file_release(file);

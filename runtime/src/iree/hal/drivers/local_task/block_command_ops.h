@@ -129,6 +129,38 @@ iree_status_t iree_hal_cmd_build_update(iree_hal_cmd_block_builder_t* builder,
                                         iree_hal_cmd_build_token_t* out_token);
 
 //===----------------------------------------------------------------------===//
+// ATOMIC
+//===----------------------------------------------------------------------===//
+
+// Builds a one-tile ATOMIC_WAIT command into the builder.
+//
+// Returns 1 fixup entry via |out_fixups|:
+//   fixups[0]: target buffer location (data_index pre-filled, caller resolves
+//              binding)
+iree_status_t iree_hal_cmd_build_atomic_wait(
+    iree_hal_cmd_block_builder_t* builder, iree_hal_atomic_wait_params_t params,
+    iree_hal_cmd_fixup_t** out_fixups, iree_hal_cmd_build_token_t* out_token);
+
+// Builds a one-tile ATOMIC_STORE command into the builder.
+//
+// Returns 1 fixup entry via |out_fixups|:
+//   fixups[0]: target buffer location (data_index pre-filled, caller resolves
+//              binding)
+iree_status_t iree_hal_cmd_build_atomic_store(
+    iree_hal_cmd_block_builder_t* builder,
+    iree_hal_atomic_store_params_t params, iree_hal_cmd_fixup_t** out_fixups,
+    iree_hal_cmd_build_token_t* out_token);
+
+// Builds a one-tile ATOMIC_RMW command into the builder.
+//
+// Returns 1 fixup entry via |out_fixups|:
+//   fixups[0]: target buffer location (data_index pre-filled, caller resolves
+//              binding)
+iree_status_t iree_hal_cmd_build_atomic_rmw(
+    iree_hal_cmd_block_builder_t* builder, iree_hal_atomic_rmw_params_t params,
+    iree_hal_cmd_fixup_t** out_fixups, iree_hal_cmd_build_token_t* out_token);
+
+//===----------------------------------------------------------------------===//
 // DISPATCH
 //===----------------------------------------------------------------------===//
 

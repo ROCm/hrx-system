@@ -11,6 +11,7 @@
 
 #include "iree/base/threading/thread.h"
 #include "iree/hal/drivers/local_task/block_builder.h"
+#include "iree/hal/drivers/local_task/block_command_ops.h"
 #include "iree/hal/drivers/local_task/block_isa.h"
 #include "iree/hal/local/local_executable.h"
 #include "iree/testing/gtest.h"
@@ -696,6 +697,116 @@ TEST_P(BlockProcessorTest, LargeCopyCommandUsesTransferTiles) {
        ++i) {
     EXPECT_EQ(target[(size_t)i], 0xCC) << "trailing byte " << i;
   }
+
+  iree_hal_cmd_block_recording_release(&recording);
+  iree_hal_cmd_block_builder_deinitialize(&builder);
+}
+
+TEST_P(BlockProcessorTest, AtomicCommandsExecuteOnce) {
+  iree_atomic_uint64_t value = IREE_ATOMIC_VAR_INIT(0);
+  iree_hal_cmd_binding_entry_t table[] = {
+      {&value, sizeof(value)},
+  };
+
+  iree_hal_cmd_block_builder_t builder;
+  iree_hal_cmd_block_builder_initialize(&block_pool_, &builder);
+  IREE_ASSERT_OK(iree_hal_cmd_block_builder_begin(&builder));
+
+  const auto configure_target_fixup = [](iree_hal_cmd_fixup_t* fixup) {
+    fixup->host_ptr = NULL;
+    fixup->offset = 0;
+    fixup->length = sizeof(uint64_t);
+    fixup->slot = 0;
+    fixup->flags = IREE_HAL_CMD_FIXUP_FLAG_NONE;
+  };
+  const iree_hal_atomic_flags_t atomic_flags =
+      IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE;
+
+  iree_hal_cmd_fixup_t* fixups = NULL;
+  iree_hal_cmd_build_token_t token;
+  const iree_hal_atomic_store_params_t store_params = {
+      /*.value=*/10,
+      /*.flags=*/atomic_flags,
+      /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
+  };
+  IREE_ASSERT_OK(
+      iree_hal_cmd_build_atomic_store(&builder, store_params, &fixups, &token));
+  configure_target_fixup(fixups);
+  IREE_ASSERT_OK(iree_hal_cmd_block_builder_barrier(&builder));
+
+  const iree_hal_atomic_wait_params_t wait_params = {
+      /*.value=*/10,
+      /*.mask=*/UINT64_MAX,
+      /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE,
+      /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
+      /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+  };
+  IREE_ASSERT_OK(
+      iree_hal_cmd_build_atomic_wait(&builder, wait_params, &fixups, &token));
+  configure_target_fixup(fixups);
+  IREE_ASSERT_OK(iree_hal_cmd_block_builder_barrier(&builder));
+
+  iree_hal_atomic_rmw_params_t rmw_params = {
+      /*.operand=*/5,
+      /*.flags=*/atomic_flags,
+      /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
+      /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
+  };
+  IREE_ASSERT_OK(
+      iree_hal_cmd_build_atomic_rmw(&builder, rmw_params, &fixups, &token));
+  configure_target_fixup(fixups);
+  IREE_ASSERT_OK(iree_hal_cmd_block_builder_barrier(&builder));
+
+  rmw_params.operand = 3;
+  rmw_params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_XOR;
+  IREE_ASSERT_OK(
+      iree_hal_cmd_build_atomic_rmw(&builder, rmw_params, &fixups, &token));
+  configure_target_fixup(fixups);
+
+  iree_hal_cmd_block_recording_t recording;
+  IREE_ASSERT_OK(iree_hal_cmd_block_builder_end(&builder, &recording));
+
+  uint64_t total_tiles_executed = 0;
+  IREE_ASSERT_OK(
+      execute(&recording, table, IREE_ARRAYSIZE(table), &total_tiles_executed));
+
+  EXPECT_EQ(iree_atomic_load(&value, iree_memory_order_relaxed), 12u);
+  EXPECT_EQ(total_tiles_executed, 4u);
+
+  iree_hal_cmd_block_recording_release(&recording);
+  iree_hal_cmd_block_builder_deinitialize(&builder);
+}
+
+TEST_P(BlockProcessorTest, AtomicCommandRejectsMisalignedTarget) {
+  alignas(uint64_t) uint8_t storage[sizeof(uint64_t) + 1] = {0};
+  iree_hal_cmd_binding_entry_t table[] = {
+      {storage + 1, sizeof(uint64_t)},
+  };
+
+  iree_hal_cmd_block_builder_t builder;
+  iree_hal_cmd_block_builder_initialize(&block_pool_, &builder);
+  IREE_ASSERT_OK(iree_hal_cmd_block_builder_begin(&builder));
+
+  const iree_hal_atomic_store_params_t store_params = {
+      /*.value=*/10,
+      /*.flags=*/IREE_HAL_ATOMIC_FLAG_RELEASE,
+      /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
+  };
+  iree_hal_cmd_fixup_t* fixups = NULL;
+  iree_hal_cmd_build_token_t token;
+  IREE_ASSERT_OK(
+      iree_hal_cmd_build_atomic_store(&builder, store_params, &fixups, &token));
+  fixups[0].host_ptr = NULL;
+  fixups[0].offset = 0;
+  fixups[0].length = sizeof(uint64_t);
+  fixups[0].slot = 0;
+  fixups[0].flags = IREE_HAL_CMD_FIXUP_FLAG_NONE;
+
+  iree_hal_cmd_block_recording_t recording;
+  IREE_ASSERT_OK(iree_hal_cmd_block_builder_end(&builder, &recording));
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        execute(&recording, table, IREE_ARRAYSIZE(table)));
 
   iree_hal_cmd_block_recording_release(&recording);
   iree_hal_cmd_block_builder_deinitialize(&builder);

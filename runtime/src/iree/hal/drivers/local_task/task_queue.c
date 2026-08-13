@@ -23,6 +23,7 @@
 #include "iree/hal/drivers/local_task/block_command_buffer.h"
 #include "iree/hal/drivers/local_task/block_command_ops.h"
 #include "iree/hal/drivers/local_task/block_processor.h"
+#include "iree/hal/local/atomic.h"
 #include "iree/hal/local/local_executable.h"
 #include "iree/hal/local/transient_buffer.h"
 #include "iree/hal/utils/resource_set.h"
@@ -232,6 +233,12 @@ static iree_hal_profile_queue_event_type_t iree_hal_task_queue_profile_type(
       return IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_COPY;
     case IREE_HAL_TASK_QUEUE_OP_UPDATE:
       return IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_UPDATE;
+    case IREE_HAL_TASK_QUEUE_OP_ATOMIC_WAIT:
+      return IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_WAIT;
+    case IREE_HAL_TASK_QUEUE_OP_ATOMIC_STORE:
+      return IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_STORE;
+    case IREE_HAL_TASK_QUEUE_OP_ATOMIC_RMW:
+      return IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_RMW;
     case IREE_HAL_TASK_QUEUE_OP_DISPATCH:
       return IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_DISPATCH;
   }
@@ -2196,6 +2203,88 @@ static iree_status_t iree_hal_task_queue_drain_update(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_task_queue_map_atomic_target(
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_width_t width, iree_hal_memory_access_t access,
+    iree_hal_buffer_mapping_t* out_mapping) {
+  const iree_device_size_t byte_count = iree_hal_atomic_width_byte_count(width);
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_map_range(
+      target_buffer, IREE_HAL_MAPPING_MODE_SCOPED, access, target_offset,
+      byte_count, out_mapping));
+  if (IREE_UNLIKELY(!iree_host_size_has_alignment(
+          (iree_host_size_t)(uintptr_t)out_mapping->contents.data,
+          (iree_host_size_t)byte_count))) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "mapped atomic target address is not naturally aligned");
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_task_queue_drain_atomic_wait(
+    iree_hal_task_queue_op_t* operation) {
+  iree_hal_buffer_mapping_t mapping = {{0}};
+  iree_status_t status = iree_hal_task_queue_map_atomic_target(
+      operation->atomic_wait.target_buffer,
+      operation->atomic_wait.target_offset, operation->atomic_wait.params.width,
+      IREE_HAL_MEMORY_ACCESS_READ, &mapping);
+  if (iree_status_is_ok(status)) {
+    iree_hal_local_atomic_wait(mapping.contents.data,
+                               operation->atomic_wait.params);
+  }
+  status = iree_status_join(status, iree_hal_buffer_unmap_range(&mapping));
+
+  if (iree_status_is_ok(status)) {
+    iree_hal_task_queue_op_complete(operation);
+  } else {
+    iree_hal_task_queue_op_destroy(operation, status);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_task_queue_drain_atomic_store(
+    iree_hal_task_queue_op_t* operation) {
+  iree_hal_buffer_mapping_t mapping = {{0}};
+  iree_status_t status = iree_hal_task_queue_map_atomic_target(
+      operation->atomic_store.target_buffer,
+      operation->atomic_store.target_offset,
+      operation->atomic_store.params.width, IREE_HAL_MEMORY_ACCESS_WRITE,
+      &mapping);
+  if (iree_status_is_ok(status)) {
+    iree_hal_local_atomic_store(mapping.contents.data,
+                                operation->atomic_store.params);
+  }
+  status = iree_status_join(status, iree_hal_buffer_unmap_range(&mapping));
+
+  if (iree_status_is_ok(status)) {
+    iree_hal_task_queue_op_complete(operation);
+  } else {
+    iree_hal_task_queue_op_destroy(operation, status);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_task_queue_drain_atomic_rmw(
+    iree_hal_task_queue_op_t* operation) {
+  iree_hal_buffer_mapping_t mapping = {{0}};
+  iree_status_t status = iree_hal_task_queue_map_atomic_target(
+      operation->atomic_rmw.target_buffer, operation->atomic_rmw.target_offset,
+      operation->atomic_rmw.params.width,
+      IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE, &mapping);
+  if (iree_status_is_ok(status)) {
+    iree_hal_local_atomic_rmw(mapping.contents.data,
+                              operation->atomic_rmw.params);
+  }
+  status = iree_status_join(status, iree_hal_buffer_unmap_range(&mapping));
+
+  if (iree_status_is_ok(status)) {
+    iree_hal_task_queue_op_complete(operation);
+  } else {
+    iree_hal_task_queue_op_destroy(operation, status);
+  }
+  return iree_ok_status();
+}
+
 // Handles a DISPATCH operation: builds a single-dispatch recording and either
 // executes it inline (ALLOW_INLINE_EXECUTION) or routes it through the compute
 // process for multi-worker tile distribution.
@@ -3096,6 +3185,30 @@ static iree_status_t iree_hal_task_queue_process_drain(
         status = iree_ok_status();
       }
       break;
+    case IREE_HAL_TASK_QUEUE_OP_ATOMIC_WAIT:
+      iree_hal_task_queue_profile_start_host_execution(operation);
+      status = iree_hal_task_queue_drain_atomic_wait(operation);
+      if (!iree_status_is_ok(status)) {
+        iree_hal_task_queue_op_destroy(operation, status);
+        status = iree_ok_status();
+      }
+      break;
+    case IREE_HAL_TASK_QUEUE_OP_ATOMIC_STORE:
+      iree_hal_task_queue_profile_start_host_execution(operation);
+      status = iree_hal_task_queue_drain_atomic_store(operation);
+      if (!iree_status_is_ok(status)) {
+        iree_hal_task_queue_op_destroy(operation, status);
+        status = iree_ok_status();
+      }
+      break;
+    case IREE_HAL_TASK_QUEUE_OP_ATOMIC_RMW:
+      iree_hal_task_queue_profile_start_host_execution(operation);
+      status = iree_hal_task_queue_drain_atomic_rmw(operation);
+      if (!iree_status_is_ok(status)) {
+        iree_hal_task_queue_op_destroy(operation, status);
+        status = iree_ok_status();
+      }
+      break;
     case IREE_HAL_TASK_QUEUE_OP_DISPATCH:
       status = iree_hal_task_queue_drain_dispatch(queue, operation,
                                                   &processor_worker_context);
@@ -3773,6 +3886,63 @@ iree_status_t iree_hal_task_queue_submit_update(
   operation->update.source_data = source_data_copy;
   iree_hal_task_queue_profile_set_payload(operation, length);
 
+  return iree_hal_task_queue_submit_op_finish(
+      operation, wait_semaphores, 1,
+      (iree_hal_resource_t* const*)&target_buffer);
+}
+
+iree_status_t iree_hal_task_queue_submit_atomic_wait(
+    iree_hal_task_queue_t* queue, iree_hal_buffer_t* target_buffer,
+    iree_device_size_t target_offset, iree_hal_atomic_wait_params_t params,
+    iree_hal_semaphore_list_t wait_semaphores,
+    iree_hal_semaphore_list_t signal_semaphores) {
+  iree_hal_task_queue_op_t* operation = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_task_queue_submit_op_begin(
+      queue, IREE_HAL_TASK_QUEUE_OP_ATOMIC_WAIT, &signal_semaphores,
+      &operation));
+  operation->atomic_wait.target_buffer = target_buffer;
+  operation->atomic_wait.target_offset = target_offset;
+  operation->atomic_wait.params = params;
+  iree_hal_task_queue_profile_set_payload(
+      operation, iree_hal_atomic_width_byte_count(params.width));
+  return iree_hal_task_queue_submit_op_finish(
+      operation, wait_semaphores, 1,
+      (iree_hal_resource_t* const*)&target_buffer);
+}
+
+iree_status_t iree_hal_task_queue_submit_atomic_store(
+    iree_hal_task_queue_t* queue, iree_hal_buffer_t* target_buffer,
+    iree_device_size_t target_offset, iree_hal_atomic_store_params_t params,
+    iree_hal_semaphore_list_t wait_semaphores,
+    iree_hal_semaphore_list_t signal_semaphores) {
+  iree_hal_task_queue_op_t* operation = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_task_queue_submit_op_begin(
+      queue, IREE_HAL_TASK_QUEUE_OP_ATOMIC_STORE, &signal_semaphores,
+      &operation));
+  operation->atomic_store.target_buffer = target_buffer;
+  operation->atomic_store.target_offset = target_offset;
+  operation->atomic_store.params = params;
+  iree_hal_task_queue_profile_set_payload(
+      operation, iree_hal_atomic_width_byte_count(params.width));
+  return iree_hal_task_queue_submit_op_finish(
+      operation, wait_semaphores, 1,
+      (iree_hal_resource_t* const*)&target_buffer);
+}
+
+iree_status_t iree_hal_task_queue_submit_atomic_rmw(
+    iree_hal_task_queue_t* queue, iree_hal_buffer_t* target_buffer,
+    iree_device_size_t target_offset, iree_hal_atomic_rmw_params_t params,
+    iree_hal_semaphore_list_t wait_semaphores,
+    iree_hal_semaphore_list_t signal_semaphores) {
+  iree_hal_task_queue_op_t* operation = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_task_queue_submit_op_begin(
+      queue, IREE_HAL_TASK_QUEUE_OP_ATOMIC_RMW, &signal_semaphores,
+      &operation));
+  operation->atomic_rmw.target_buffer = target_buffer;
+  operation->atomic_rmw.target_offset = target_offset;
+  operation->atomic_rmw.params = params;
+  iree_hal_task_queue_profile_set_payload(
+      operation, iree_hal_atomic_width_byte_count(params.width));
   return iree_hal_task_queue_submit_op_finish(
       operation, wait_semaphores, 1,
       (iree_hal_resource_t* const*)&target_buffer);

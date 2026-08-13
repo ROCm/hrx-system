@@ -64,6 +64,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/local",
+        "//runtime/src/iree/hal/local:atomic",
         "//runtime/src/iree/hal/local:executable_library",
         "//runtime/src/iree/hal/local:executable_loader",
         "//runtime/src/iree/hal/local:transient_buffer",
@@ -97,6 +98,7 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/local:executable_library",
     ],
 )
@@ -128,6 +130,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base/internal:cpu",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/base/threading:thread",
+        "//runtime/src/iree/hal/local:atomic",
         "//runtime/src/iree/hal/local:executable_loader",
         "//runtime/src/iree/hal/local:profile",
         "//runtime/src/iree/task",
@@ -141,6 +144,7 @@ iree_runtime_cc_test(
     ],
     deps = [
         ":block_builder",
+        ":block_command_ops",
         ":block_isa",
         ":block_processor",
         "//runtime/src/iree/base/internal:arena",
@@ -183,6 +187,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base/threading:thread",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/local",
+        "//runtime/src/iree/hal/local:atomic",
         "//runtime/src/iree/hal/local:device_spec_builder",
         "//runtime/src/iree/hal/local:executable_environment",
         "//runtime/src/iree/hal/local:executable_library",

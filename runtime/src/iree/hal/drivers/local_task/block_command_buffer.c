@@ -15,6 +15,7 @@
 #include "iree/hal/drivers/local_task/block_builder.h"
 #include "iree/hal/drivers/local_task/block_command_ops.h"
 #include "iree/hal/drivers/local_task/block_isa.h"
+#include "iree/hal/local/atomic.h"
 #include "iree/hal/local/executable_library.h"
 #include "iree/hal/local/local_executable.h"
 #include "iree/hal/local/transient_buffer.h"
@@ -298,26 +299,13 @@ static void iree_hal_block_command_buffer_profile_append_barrier(
   record->flags |= IREE_HAL_PROFILE_COMMAND_OPERATION_FLAG_EXECUTION_BARRIER;
 }
 
-static void iree_hal_block_command_buffer_profile_append_fill(
+static void iree_hal_block_command_buffer_profile_append_target(
     iree_hal_block_command_buffer_t* command_buffer,
+    iree_hal_profile_command_operation_type_t type,
     iree_hal_buffer_ref_t target_ref) {
   iree_hal_profile_command_operation_record_t* record =
-      iree_hal_block_command_buffer_profile_append_operation(
-          command_buffer, IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_FILL);
-  record->flags |=
-      iree_hal_block_command_buffer_profile_binding_flags(1, &target_ref);
-  record->target_offset = target_ref.offset;
-  record->length = target_ref.length;
-  record->target_ordinal =
-      iree_hal_block_command_buffer_profile_buffer_ordinal(target_ref);
-}
-
-static void iree_hal_block_command_buffer_profile_append_update(
-    iree_hal_block_command_buffer_t* command_buffer,
-    iree_hal_buffer_ref_t target_ref) {
-  iree_hal_profile_command_operation_record_t* record =
-      iree_hal_block_command_buffer_profile_append_operation(
-          command_buffer, IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_UPDATE);
+      iree_hal_block_command_buffer_profile_append_operation(command_buffer,
+                                                             type);
   record->flags |=
       iree_hal_block_command_buffer_profile_binding_flags(1, &target_ref);
   record->target_offset = target_ref.offset;
@@ -716,14 +704,63 @@ static iree_status_t iree_hal_block_command_buffer_execution_barrier(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_block_command_buffer_check_atomic_width(
+    iree_hal_atomic_width_t width) {
+  if (IREE_UNLIKELY(!iree_hal_local_atomic_width_is_lock_free(width))) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "local-task command buffers do not support lock-based %u-bit atomic "
+        "operations",
+        width);
+  }
+  return iree_ok_status();
+}
+
+// Inserts the block ISA's global region boundary only when the requested stage
+// dependency has prior work to order. This coalesces an atomic's trailing
+// boundary with the next atomic's leading boundary.
+static iree_status_t iree_hal_block_command_buffer_atomic_stage_barrier(
+    iree_hal_block_command_buffer_t* command_buffer,
+    iree_hal_execution_stage_t stage_mask) {
+  if (stage_mask == 0 || command_buffer->builder.region_dispatch_count == 0) {
+    return iree_ok_status();
+  }
+  return iree_hal_cmd_block_builder_barrier(&command_buffer->builder);
+}
+
 static iree_status_t iree_hal_block_command_buffer_atomic_wait(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_execution_stage_t source_stage_mask,
     iree_hal_execution_stage_t target_stage_mask,
     iree_hal_buffer_ref_t target_ref, iree_hal_atomic_wait_params_t params) {
-  return iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "local task command buffers do not yet support atomic waits");
+  IREE_RETURN_IF_ERROR(
+      iree_hal_block_command_buffer_check_atomic_width(params.width));
+  iree_hal_block_command_buffer_t* command_buffer =
+      iree_hal_block_command_buffer_cast(base_command_buffer);
+  IREE_RETURN_IF_ERROR(iree_hal_resource_set_insert_strided(
+      command_buffer->resource_set, 1, &target_ref,
+      offsetof(iree_hal_buffer_ref_t, buffer), sizeof(iree_hal_buffer_ref_t)));
+  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_profile_reserve_operations(
+      command_buffer, command_buffer->profile.operations.count + 1));
+  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_atomic_stage_barrier(
+      command_buffer, source_stage_mask));
+
+  iree_hal_cmd_fixup_t* fixups = NULL;
+  iree_hal_cmd_build_token_t token;
+  IREE_RETURN_IF_ERROR(iree_hal_cmd_build_atomic_wait(&command_buffer->builder,
+                                                      params, &fixups, &token));
+  iree_status_t status = iree_hal_block_command_buffer_resolve_refs(
+      command_buffer, 1, &target_ref, fixups);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_cmd_build_rollback(&command_buffer->builder, token);
+    return status;
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_atomic_stage_barrier(
+      command_buffer, target_stage_mask));
+  iree_hal_block_command_buffer_profile_append_target(
+      command_buffer, IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_WAIT,
+      target_ref);
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_block_command_buffer_atomic_store(
@@ -731,9 +768,34 @@ static iree_status_t iree_hal_block_command_buffer_atomic_store(
     iree_hal_execution_stage_t source_stage_mask,
     iree_hal_execution_stage_t target_stage_mask,
     iree_hal_buffer_ref_t target_ref, iree_hal_atomic_store_params_t params) {
-  return iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "local task command buffers do not yet support atomic stores");
+  IREE_RETURN_IF_ERROR(
+      iree_hal_block_command_buffer_check_atomic_width(params.width));
+  iree_hal_block_command_buffer_t* command_buffer =
+      iree_hal_block_command_buffer_cast(base_command_buffer);
+  IREE_RETURN_IF_ERROR(iree_hal_resource_set_insert_strided(
+      command_buffer->resource_set, 1, &target_ref,
+      offsetof(iree_hal_buffer_ref_t, buffer), sizeof(iree_hal_buffer_ref_t)));
+  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_profile_reserve_operations(
+      command_buffer, command_buffer->profile.operations.count + 1));
+  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_atomic_stage_barrier(
+      command_buffer, source_stage_mask));
+
+  iree_hal_cmd_fixup_t* fixups = NULL;
+  iree_hal_cmd_build_token_t token;
+  IREE_RETURN_IF_ERROR(iree_hal_cmd_build_atomic_store(
+      &command_buffer->builder, params, &fixups, &token));
+  iree_status_t status = iree_hal_block_command_buffer_resolve_refs(
+      command_buffer, 1, &target_ref, fixups);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_cmd_build_rollback(&command_buffer->builder, token);
+    return status;
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_atomic_stage_barrier(
+      command_buffer, target_stage_mask));
+  iree_hal_block_command_buffer_profile_append_target(
+      command_buffer, IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_STORE,
+      target_ref);
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_block_command_buffer_atomic_rmw(
@@ -741,10 +803,34 @@ static iree_status_t iree_hal_block_command_buffer_atomic_rmw(
     iree_hal_execution_stage_t source_stage_mask,
     iree_hal_execution_stage_t target_stage_mask,
     iree_hal_buffer_ref_t target_ref, iree_hal_atomic_rmw_params_t params) {
-  return iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "local task command buffers do not yet support atomic "
-      "read-modify-write");
+  IREE_RETURN_IF_ERROR(
+      iree_hal_block_command_buffer_check_atomic_width(params.width));
+  iree_hal_block_command_buffer_t* command_buffer =
+      iree_hal_block_command_buffer_cast(base_command_buffer);
+  IREE_RETURN_IF_ERROR(iree_hal_resource_set_insert_strided(
+      command_buffer->resource_set, 1, &target_ref,
+      offsetof(iree_hal_buffer_ref_t, buffer), sizeof(iree_hal_buffer_ref_t)));
+  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_profile_reserve_operations(
+      command_buffer, command_buffer->profile.operations.count + 1));
+  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_atomic_stage_barrier(
+      command_buffer, source_stage_mask));
+
+  iree_hal_cmd_fixup_t* fixups = NULL;
+  iree_hal_cmd_build_token_t token;
+  IREE_RETURN_IF_ERROR(iree_hal_cmd_build_atomic_rmw(&command_buffer->builder,
+                                                     params, &fixups, &token));
+  iree_status_t status = iree_hal_block_command_buffer_resolve_refs(
+      command_buffer, 1, &target_ref, fixups);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_cmd_build_rollback(&command_buffer->builder, token);
+    return status;
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_atomic_stage_barrier(
+      command_buffer, target_stage_mask));
+  iree_hal_block_command_buffer_profile_append_target(
+      command_buffer, IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_RMW,
+      target_ref);
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_block_command_buffer_signal_event(
@@ -818,8 +904,9 @@ static iree_status_t iree_hal_block_command_buffer_fill_buffer(
   if (!iree_status_is_ok(status)) {
     iree_hal_cmd_build_rollback(&command_buffer->builder, token);
   } else {
-    iree_hal_block_command_buffer_profile_append_fill(command_buffer,
-                                                      target_ref);
+    iree_hal_block_command_buffer_profile_append_target(
+        command_buffer, IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_FILL,
+        target_ref);
   }
   return status;
 }
@@ -852,8 +939,9 @@ static iree_status_t iree_hal_block_command_buffer_update_buffer(
   if (!iree_status_is_ok(status)) {
     iree_hal_cmd_build_rollback(&command_buffer->builder, token);
   } else {
-    iree_hal_block_command_buffer_profile_append_update(command_buffer,
-                                                        target_ref);
+    iree_hal_block_command_buffer_profile_append_target(
+        command_buffer, IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_UPDATE,
+        target_ref);
   }
   return status;
 }

@@ -25,6 +25,7 @@
 #include "iree/async/span.h"
 #include "iree/base/alignment.h"
 #include "iree/base/api.h"
+#include "iree/hal/atomic.h"
 #include "iree/hal/local/executable_library.h"
 
 typedef struct iree_hal_local_executable_t iree_hal_local_executable_t;
@@ -39,13 +40,16 @@ extern "C" {
 //===----------------------------------------------------------------------===//
 
 typedef enum iree_hal_cmd_opcode_e {
-  IREE_HAL_CMD_DISPATCH = 0,  // Execute a tiled compute grid.
-  IREE_HAL_CMD_FILL = 1,      // Fill a buffer region with a pattern.
-  IREE_HAL_CMD_COPY = 2,      // Copy between buffer regions.
-  IREE_HAL_CMD_UPDATE = 3,    // Copy inline host data to a buffer region.
-  IREE_HAL_CMD_BARRIER = 4,   // Region boundary: all prior work completes.
-  IREE_HAL_CMD_BRANCH = 5,    // Continue at target block.
-  IREE_HAL_CMD_RETURN = 6,    // Command buffer complete.
+  IREE_HAL_CMD_DISPATCH = 0,      // Execute a tiled compute grid.
+  IREE_HAL_CMD_FILL = 1,          // Fill a buffer region with a pattern.
+  IREE_HAL_CMD_COPY = 2,          // Copy between buffer regions.
+  IREE_HAL_CMD_UPDATE = 3,        // Copy inline host data to a buffer region.
+  IREE_HAL_CMD_BARRIER = 4,       // Region boundary: all prior work completes.
+  IREE_HAL_CMD_BRANCH = 5,        // Continue at target block.
+  IREE_HAL_CMD_RETURN = 6,        // Command buffer complete.
+  IREE_HAL_CMD_ATOMIC_WAIT = 7,   // Wait on an atomic buffer location.
+  IREE_HAL_CMD_ATOMIC_STORE = 8,  // Atomically store to a buffer location.
+  IREE_HAL_CMD_ATOMIC_RMW = 9,    // Atomically update a buffer location.
 } iree_hal_cmd_opcode_t;
 
 typedef uint8_t iree_hal_cmd_flags_t;
@@ -118,11 +122,11 @@ typedef struct iree_hal_cmd_header_t {
   // size is 255 * 8 = 2040 bytes. Push constants are inline; bindings are
   // NOT (they live in .data via fixup).
   uint8_t size_qwords;
-  // Work commands (DISPATCH, FILL, COPY, UPDATE): region-local index into .data
-  // tile_indices[]. The builder resets this to 0 at each barrier, so commands
-  // in different regions reuse the same .data slots. The multi-worker processor
-  // uses this to distribute tiles across workers for all work command types.
-  // Must be 0 for non-work commands (BARRIER, BRANCH, RETURN).
+  // Work commands: region-local index into .data tile_indices[]. The builder
+  // resets this to 0 at each barrier, so commands in different regions reuse
+  // the same .data slots. The multi-worker processor uses this to distribute
+  // tiles across workers for all work command types. Must be 0 for non-work
+  // commands (BARRIER, BRANCH, RETURN).
   uint8_t dispatch_index;
 } iree_hal_cmd_header_t;
 
@@ -516,6 +520,59 @@ static_assert(sizeof(iree_hal_cmd_update_t) == 24,
               "update command is 3 qwords (plus trailing inline data)");
 
 //===----------------------------------------------------------------------===//
+// ATOMIC commands
+//===----------------------------------------------------------------------===//
+
+// Waits until one resolved buffer location satisfies an inline predicate.
+typedef struct iree_hal_cmd_atomic_wait_t {
+  iree_hal_cmd_header_t header;  // opcode=ATOMIC_WAIT
+
+  // .data binding_ptrs index for the target buffer location.
+  uint16_t target_binding;
+  // Reserved for future use and must be zero.
+  uint16_t reserved;
+
+  // Width, predicate, ordering, and scope of the wait.
+  iree_hal_atomic_wait_params_t params;
+} iree_hal_cmd_atomic_wait_t;
+
+static_assert(sizeof(iree_hal_cmd_atomic_wait_t) == 32,
+              "atomic wait command is 4 qwords");
+
+// Atomically stores an inline value to one resolved buffer location.
+typedef struct iree_hal_cmd_atomic_store_t {
+  iree_hal_cmd_header_t header;  // opcode=ATOMIC_STORE
+
+  // .data binding_ptrs index for the target buffer location.
+  uint16_t target_binding;
+  // Reserved for future use and must be zero.
+  uint16_t reserved;
+
+  // Width, value, ordering, and scope of the store.
+  iree_hal_atomic_store_params_t params;
+} iree_hal_cmd_atomic_store_t;
+
+static_assert(sizeof(iree_hal_cmd_atomic_store_t) == 24,
+              "atomic store command is 3 qwords");
+
+// Atomically applies an inline no-result operation to one resolved buffer
+// location.
+typedef struct iree_hal_cmd_atomic_rmw_t {
+  iree_hal_cmd_header_t header;  // opcode=ATOMIC_RMW
+
+  // .data binding_ptrs index for the target buffer location.
+  uint16_t target_binding;
+  // Reserved for future use and must be zero.
+  uint16_t reserved;
+
+  // Width, operand, operation, ordering, and scope of the update.
+  iree_hal_atomic_rmw_params_t params;
+} iree_hal_cmd_atomic_rmw_t;
+
+static_assert(sizeof(iree_hal_cmd_atomic_rmw_t) == 24,
+              "atomic RMW command is 3 qwords");
+
+//===----------------------------------------------------------------------===//
 // BARRIER, BRANCH, RETURN commands
 //===----------------------------------------------------------------------===//
 
@@ -577,10 +634,10 @@ typedef iree_hal_cmd_header_t iree_hal_cmd_return_t;
 //
 // .data is purely scratch: scheduling atomics + resolved binding pointers.
 //
-// "Tiles" are the universal scheduling primitive: a dispatch of N tiles is
-// N work items, a copy/fill is ceil(length / transfer tile length), and an
-// UPDATE is 0 or 1 tile due to the inline source-data command-size limit. All
-// commands decompose into tiles.
+// "Tiles" are the universal scheduling primitive: a dispatch of N tiles is N
+// work items, a copy/fill is ceil(length / transfer tile length), UPDATE is 0
+// or 1 tile, and an atomic command is exactly 1 tile. All work commands
+// decompose into tiles.
 //
 // Cache-line isolation is critical throughout. The existing task system
 // loses ~57% of runtime on some models to 48-64 threads hammering the same

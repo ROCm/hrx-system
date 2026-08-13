@@ -92,9 +92,10 @@ class QueueAtomicTest : public CtsTestBase<> {
   }
 
   template <typename ValueType>
-  ValueType ReadAtomicValue(iree_hal_buffer_t* buffer) {
-    const std::vector<uint8_t> bytes =
-        ReadBufferBytes(buffer, kTargetOffset, sizeof(ValueType));
+  ValueType ReadAtomicValue(const AtomicTestConfiguration& configuration,
+                            iree_hal_buffer_t* buffer) {
+    const std::vector<uint8_t> bytes = ReadBufferBytes(
+        buffer, kTargetOffset, sizeof(ValueType), configuration.queue_affinity);
     ValueType value = 0;
     EXPECT_EQ(bytes.size(), sizeof(value));
     if (bytes.size() == sizeof(value)) {
@@ -131,7 +132,8 @@ class QueueAtomicTest : public CtsTestBase<> {
         /*.width=*/width,
     };
     IREE_ASSERT_OK(QueueStoreAndWait(configuration, buffer, store_params));
-    EXPECT_EQ(ReadAtomicValue<ValueType>(buffer), static_cast<ValueType>(10));
+    EXPECT_EQ(ReadAtomicValue<ValueType>(configuration, buffer),
+              static_cast<ValueType>(10));
 
     iree_hal_atomic_rmw_params_t rmw_params = {
         /*.operand=*/5,
@@ -140,27 +142,32 @@ class QueueAtomicTest : public CtsTestBase<> {
         /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
     };
     IREE_ASSERT_OK(QueueRmwAndWait(configuration, buffer, rmw_params));
-    EXPECT_EQ(ReadAtomicValue<ValueType>(buffer), static_cast<ValueType>(15));
+    EXPECT_EQ(ReadAtomicValue<ValueType>(configuration, buffer),
+              static_cast<ValueType>(15));
 
     rmw_params.operand = 3;
     rmw_params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_SUBTRACT;
     IREE_ASSERT_OK(QueueRmwAndWait(configuration, buffer, rmw_params));
-    EXPECT_EQ(ReadAtomicValue<ValueType>(buffer), static_cast<ValueType>(12));
+    EXPECT_EQ(ReadAtomicValue<ValueType>(configuration, buffer),
+              static_cast<ValueType>(12));
 
     rmw_params.operand = 10;
     rmw_params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_AND;
     IREE_ASSERT_OK(QueueRmwAndWait(configuration, buffer, rmw_params));
-    EXPECT_EQ(ReadAtomicValue<ValueType>(buffer), static_cast<ValueType>(8));
+    EXPECT_EQ(ReadAtomicValue<ValueType>(configuration, buffer),
+              static_cast<ValueType>(8));
 
     rmw_params.operand = 3;
     rmw_params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_OR;
     IREE_ASSERT_OK(QueueRmwAndWait(configuration, buffer, rmw_params));
-    EXPECT_EQ(ReadAtomicValue<ValueType>(buffer), static_cast<ValueType>(11));
+    EXPECT_EQ(ReadAtomicValue<ValueType>(configuration, buffer),
+              static_cast<ValueType>(11));
 
     rmw_params.operand = 15;
     rmw_params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_XOR;
     IREE_ASSERT_OK(QueueRmwAndWait(configuration, buffer, rmw_params));
-    EXPECT_EQ(ReadAtomicValue<ValueType>(buffer), static_cast<ValueType>(4));
+    EXPECT_EQ(ReadAtomicValue<ValueType>(configuration, buffer),
+              static_cast<ValueType>(4));
   }
 
   template <typename ValueType>
@@ -206,7 +213,8 @@ class QueueAtomicTest : public CtsTestBase<> {
     wait_params.condition =
         IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL;
     IREE_ASSERT_OK(QueueWaitAndWait(configuration, buffer, wait_params));
-    EXPECT_EQ(ReadAtomicValue<ValueType>(buffer), static_cast<ValueType>(0x12));
+    EXPECT_EQ(ReadAtomicValue<ValueType>(configuration, buffer),
+              static_cast<ValueType>(0x12));
   }
 };
 
