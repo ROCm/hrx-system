@@ -11,6 +11,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/device/atomic_pm4.h"
+#include "iree/hal/drivers/amdgpu/device/blit_pm4.h"
 #include "iree/hal/drivers/amdgpu/host_queue.h"
 #include "iree/hal/drivers/amdgpu/host_queue_staging.h"
 #include "iree/hal/drivers/amdgpu/physical_device_capabilities.h"
@@ -300,6 +301,8 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   iree_hal_amdgpu_device_atomic_pm4_context_t atomic_pm4_context;
   // Host/device-neutral transfer context that points into |device_kernels|.
   iree_hal_amdgpu_device_buffer_transfer_context_t buffer_transfer_context;
+  // PM4 launch metadata derived from the builtin transfer kernels.
+  iree_hal_amdgpu_device_buffer_transfer_pm4_context_t transfer_pm4_context;
 
   // Total number of host queue slots allocated in |host_queues|.
   iree_host_size_t host_queue_capacity;

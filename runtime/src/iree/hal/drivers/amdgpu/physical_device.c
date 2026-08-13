@@ -944,6 +944,20 @@ iree_hal_amdgpu_physical_device_initialize_atomic_pm4_context(
       &out_physical_device->atomic_pm4_context);
 }
 
+static iree_status_t
+iree_hal_amdgpu_physical_device_initialize_transfer_pm4_context(
+    const iree_hal_amdgpu_libhsa_t* libhsa,
+    iree_hal_amdgpu_physical_device_t* out_physical_device) {
+  if (!iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
+          out_physical_device->vendor_packet_capabilities)) {
+    return iree_ok_status();
+  }
+  return iree_hal_amdgpu_device_buffer_transfer_pm4_context_initialize(
+      libhsa, out_physical_device->agent_target->primary_isa.identity.version,
+      &out_physical_device->buffer_transfer_context,
+      &out_physical_device->transfer_pm4_context);
+}
+
 iree_status_t iree_hal_amdgpu_physical_device_initialize(
     iree_hal_device_t* logical_device, iree_hal_amdgpu_system_t* system,
     const iree_hal_amdgpu_physical_device_options_t* options,
@@ -1048,6 +1062,10 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_physical_device_initialize_atomic_pm4_context(
+        libhsa, out_physical_device);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amdgpu_physical_device_initialize_transfer_pm4_context(
         libhsa, out_physical_device);
   }
   if (iree_status_is_ok(status)) {

@@ -12,7 +12,7 @@
 
 typedef struct iree_hal_amdgpu_pm4_atomic_fallback_layout_t {
   // Immutable PM4 launch metadata for the selected fallback kernel.
-  const iree_hal_amdgpu_device_atomic_pm4_launch_t* launch;
+  const iree_hal_amdgpu_device_kernel_pm4_launch_t* launch;
   // Required kernarg template alignment in bytes.
   iree_host_size_t kernarg_alignment;
   // Required kernarg template length in bytes.
@@ -139,7 +139,7 @@ void iree_hal_amdgpu_pm4_atomic_record_initialize_rmw(
   out_record->params.rmw = params;
 }
 
-const iree_hal_amdgpu_device_atomic_pm4_launch_t*
+const iree_hal_amdgpu_device_kernel_pm4_launch_t*
 iree_hal_amdgpu_pm4_atomic_record_launch(
     const iree_hal_amdgpu_pm4_atomic_record_t* record,
     const iree_hal_amdgpu_device_atomic_pm4_context_t* atomic_context) {

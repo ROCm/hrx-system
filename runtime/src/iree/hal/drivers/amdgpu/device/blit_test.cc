@@ -100,6 +100,52 @@ TEST(BlitTest, TransferContextInitializeSaturatesLargeComputeUnitCount) {
   EXPECT_EQ(context.max_workgroup_count, UINT32_MAX);
 }
 
+TEST(BlitTest, FillPlanUsesGuaranteedTargetAlignment) {
+  const iree_hal_amdgpu_device_kernels_t kernels = MakeKernels();
+  const iree_hal_amdgpu_device_buffer_transfer_context_t context =
+      MakeContext(&kernels);
+
+  iree_hal_amdgpu_device_buffer_fill_plan_t aligned_plan = {};
+  ASSERT_TRUE(iree_hal_amdgpu_device_buffer_fill_plan(
+      &context, /*target_alignment=*/16, /*length=*/512,
+      /*pattern=*/0xABu, /*pattern_length=*/1, &aligned_plan));
+  EXPECT_EQ(aligned_plan.kernel,
+            IREE_HAL_AMDGPU_DEVICE_BUFFER_TRANSFER_KERNEL_FILL_BLOCK_X16);
+  EXPECT_EQ(aligned_plan.element_length, 32u);
+
+  iree_hal_amdgpu_device_buffer_fill_plan_t indirect_plan = {};
+  ASSERT_TRUE(iree_hal_amdgpu_device_buffer_fill_plan(
+      &context, /*target_alignment=*/1, /*length=*/512,
+      /*pattern=*/0xABu, /*pattern_length=*/1, &indirect_plan));
+  EXPECT_EQ(
+      indirect_plan.kernel,
+      IREE_HAL_AMDGPU_DEVICE_BUFFER_TRANSFER_KERNEL_FILL_BLOCK_UNALIGNED_X16);
+  EXPECT_EQ(indirect_plan.element_length, 512u);
+}
+
+TEST(BlitTest, CopyPlanUsesGuaranteedOperandAlignment) {
+  const iree_hal_amdgpu_device_kernels_t kernels = MakeKernels();
+  const iree_hal_amdgpu_device_buffer_transfer_context_t context =
+      MakeContext(&kernels);
+
+  iree_hal_amdgpu_device_buffer_copy_plan_t aligned_plan = {};
+  ASSERT_TRUE(iree_hal_amdgpu_device_buffer_copy_plan(
+      &context, /*source_alignment=*/16, /*target_alignment=*/16,
+      /*length=*/512, &aligned_plan));
+  EXPECT_EQ(aligned_plan.kernel,
+            IREE_HAL_AMDGPU_DEVICE_BUFFER_TRANSFER_KERNEL_COPY_BLOCK_X16);
+  EXPECT_EQ(aligned_plan.element_length, 32u);
+
+  iree_hal_amdgpu_device_buffer_copy_plan_t indirect_plan = {};
+  ASSERT_TRUE(iree_hal_amdgpu_device_buffer_copy_plan(
+      &context, /*source_alignment=*/16, /*target_alignment=*/1,
+      /*length=*/512, &indirect_plan));
+  EXPECT_EQ(
+      indirect_plan.kernel,
+      IREE_HAL_AMDGPU_DEVICE_BUFFER_TRANSFER_KERNEL_COPY_BLOCK_UNALIGNED_X16);
+  EXPECT_EQ(indirect_plan.element_length, 512u);
+}
+
 TEST(BlitTest, FillEmplaceSelectsBlockFillForAlignedTransfer) {
   const iree_hal_amdgpu_device_kernels_t kernels = MakeKernels();
   const iree_hal_amdgpu_device_buffer_transfer_context_t context =

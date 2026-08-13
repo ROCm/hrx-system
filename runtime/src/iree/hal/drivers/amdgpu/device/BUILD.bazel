@@ -94,10 +94,8 @@ iree_runtime_cc_library(
     ],
     deps = [
         ":headers",
+        ":kernel_pm4",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/amdgpu/util:libhsa",
-        "//runtime/src/iree/hal/drivers/amdgpu/util:loaded_code_object",
-        "//runtime/src/iree/hal/drivers/amdgpu/util:pm4_dispatch",
     ],
 )
 
@@ -112,12 +110,43 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "blit_pm4",
+    srcs = [
+        "blit_pm4.c",
+    ],
+    hdrs = [
+        "blit_pm4.h",
+    ],
+    deps = [
+        ":blit",
+        ":headers",
+        ":kernel_pm4",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "dispatch",
     srcs = [
         "dispatch.c",
     ],
     deps = [
         ":headers",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "kernel_pm4",
+    srcs = [
+        "kernel_pm4.c",
+    ],
+    hdrs = [
+        "kernel_pm4.h",
+    ],
+    deps = [
+        ":headers",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:libhsa",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:loaded_code_object",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:pm4_dispatch",
     ],
 )
 

@@ -3804,7 +3804,7 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_append_atomic_record(
     command_buffer->profile.record_fixup_entry_count +=
         measurement.profile_fixup_entry_count;
   }
-  const iree_hal_amdgpu_device_atomic_pm4_launch_t* launch =
+  const iree_hal_amdgpu_device_kernel_pm4_launch_t* launch =
       iree_hal_amdgpu_pm4_atomic_record_launch(record,
                                                command_buffer->atomic_context);
   command_buffer->previous_launch_state = launch->launch_state;

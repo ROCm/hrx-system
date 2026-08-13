@@ -76,6 +76,90 @@ typedef struct iree_hal_amdgpu_device_buffer_copy_kernargs_t {
     IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_STAGED_SOURCE_ALIGNMENT - 1) & \
    ~(IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_STAGED_SOURCE_ALIGNMENT - 1))
 
+// Builtin kernel variant selected by a transfer plan.
+typedef enum iree_hal_amdgpu_device_buffer_transfer_kernel_e {
+  IREE_HAL_AMDGPU_DEVICE_BUFFER_TRANSFER_KERNEL_FILL_X1 = 0,
+  IREE_HAL_AMDGPU_DEVICE_BUFFER_TRANSFER_KERNEL_FILL_X2,
+  IREE_HAL_AMDGPU_DEVICE_BUFFER_TRANSFER_KERNEL_FILL_X4,
+  IREE_HAL_AMDGPU_DEVICE_BUFFER_TRANSFER_KERNEL_FILL_X8,
+  IREE_HAL_AMDGPU_DEVICE_BUFFER_TRANSFER_KERNEL_FILL_BLOCK_X16,
+  IREE_HAL_AMDGPU_DEVICE_BUFFER_TRANSFER_KERNEL_FILL_BLOCK_UNALIGNED_X16,
+  IREE_HAL_AMDGPU_DEVICE_BUFFER_TRANSFER_KERNEL_COPY_X1,
+  IREE_HAL_AMDGPU_DEVICE_BUFFER_TRANSFER_KERNEL_COPY_BLOCK_X4,
+  IREE_HAL_AMDGPU_DEVICE_BUFFER_TRANSFER_KERNEL_COPY_BLOCK_X8,
+  IREE_HAL_AMDGPU_DEVICE_BUFFER_TRANSFER_KERNEL_COPY_BLOCK_X16,
+  IREE_HAL_AMDGPU_DEVICE_BUFFER_TRANSFER_KERNEL_COPY_BLOCK_UNALIGNED_X16,
+  IREE_HAL_AMDGPU_DEVICE_BUFFER_TRANSFER_KERNEL_COUNT,
+} iree_hal_amdgpu_device_buffer_transfer_kernel_t;
+
+// Immutable launch plan for one builtin fill operation.
+typedef struct iree_hal_amdgpu_device_buffer_fill_plan_t {
+  // Builtin kernel selected for this operation.
+  iree_hal_amdgpu_device_buffer_transfer_kernel_t kernel;
+  // Dispatch grid dimensions in work-items.
+  uint32_t grid_size[3];
+  // Number of elements passed to the selected kernel.
+  uint64_t element_length;
+  // Fill pattern represented as expected by the selected kernel.
+  uint64_t pattern;
+} iree_hal_amdgpu_device_buffer_fill_plan_t;
+
+// Immutable launch plan for one builtin copy operation.
+typedef struct iree_hal_amdgpu_device_buffer_copy_plan_t {
+  // Builtin kernel selected for this operation.
+  iree_hal_amdgpu_device_buffer_transfer_kernel_t kernel;
+  // Dispatch grid dimensions in work-items.
+  uint32_t grid_size[3];
+  // Number of elements passed to the selected kernel.
+  uint64_t element_length;
+} iree_hal_amdgpu_device_buffer_copy_plan_t;
+
+// Returns borrowed HSA launch metadata for a validated transfer kernel.
+const iree_hal_amdgpu_device_kernel_args_t*
+iree_hal_amdgpu_device_buffer_transfer_kernel_args(
+    const iree_hal_amdgpu_device_buffer_transfer_context_t* context,
+    iree_hal_amdgpu_device_buffer_transfer_kernel_t kernel);
+
+// Plans a builtin fill using the minimum guaranteed |target_alignment|.
+//
+// The alignment must be a non-zero power of two. Planning depends only on
+// immutable device properties and validated operation parameters, allowing the
+// result to be reused when the eventual target address is not yet available.
+// Returns false if the operation cannot be represented; |out_plan| is left
+// unmodified on failure.
+bool iree_hal_amdgpu_device_buffer_fill_plan(
+    const iree_hal_amdgpu_device_buffer_transfer_context_t* context,
+    uint64_t target_alignment, uint64_t length, uint64_t pattern,
+    uint8_t pattern_length,
+    iree_hal_amdgpu_device_buffer_fill_plan_t* out_plan);
+
+// Emplaces a planned builtin fill into already-reserved AQL storage.
+void iree_hal_amdgpu_device_buffer_fill_plan_emplace(
+    const iree_hal_amdgpu_device_buffer_transfer_context_t* IREE_AMDGPU_RESTRICT
+        context,
+    const iree_hal_amdgpu_device_buffer_fill_plan_t* IREE_AMDGPU_RESTRICT plan,
+    iree_hsa_kernel_dispatch_packet_t* IREE_AMDGPU_RESTRICT dispatch_packet,
+    void* target_ptr, void* IREE_AMDGPU_RESTRICT kernarg_ptr);
+
+// Plans a builtin copy using the minimum guaranteed source and target
+// alignments.
+//
+// Alignments must be non-zero powers of two. Returns false if the operation
+// cannot be represented; |out_plan| is left unmodified on failure.
+bool iree_hal_amdgpu_device_buffer_copy_plan(
+    const iree_hal_amdgpu_device_buffer_transfer_context_t* context,
+    uint64_t source_alignment, uint64_t target_alignment, uint64_t length,
+    iree_hal_amdgpu_device_buffer_copy_plan_t* out_plan);
+
+// Emplaces a planned builtin copy into already-reserved AQL storage.
+void iree_hal_amdgpu_device_buffer_copy_plan_emplace(
+    const iree_hal_amdgpu_device_buffer_transfer_context_t* IREE_AMDGPU_RESTRICT
+        context,
+    const iree_hal_amdgpu_device_buffer_copy_plan_t* IREE_AMDGPU_RESTRICT plan,
+    iree_hsa_kernel_dispatch_packet_t* IREE_AMDGPU_RESTRICT dispatch_packet,
+    const void* source_ptr, void* target_ptr,
+    void* IREE_AMDGPU_RESTRICT kernarg_ptr);
+
 // Populates a builtin fill dispatch packet and its kernargs in already-reserved
 // storage. The caller owns packet header commit, completion signal assignment,
 // and queue doorbell signaling.

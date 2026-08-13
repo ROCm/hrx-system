@@ -122,10 +122,8 @@ iree_cc_library(
     "atomic_pm4.c"
   DEPS
     ::headers
+    ::kernel_pm4
     iree::hal
-    iree::hal::drivers::amdgpu::util::libhsa
-    iree::hal::drivers::amdgpu::util::loaded_code_object
-    iree::hal::drivers::amdgpu::util::pm4_dispatch
   PUBLIC
 )
 endif()
@@ -145,11 +143,44 @@ endif()
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_library(
   NAME
+    blit_pm4
+  HDRS
+    "blit_pm4.h"
+  SRCS
+    "blit_pm4.c"
+  DEPS
+    ::blit
+    ::headers
+    ::kernel_pm4
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
     dispatch
   SRCS
     "dispatch.c"
   DEPS
     ::headers
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
+    kernel_pm4
+  HDRS
+    "kernel_pm4.h"
+  SRCS
+    "kernel_pm4.c"
+  DEPS
+    ::headers
+    iree::hal::drivers::amdgpu::util::libhsa
+    iree::hal::drivers::amdgpu::util::loaded_code_object
+    iree::hal::drivers::amdgpu::util::pm4_dispatch
   PUBLIC
 )
 endif()

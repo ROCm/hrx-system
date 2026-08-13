@@ -171,7 +171,7 @@ iree_status_t iree_hal_amdgpu_pm4_atomic_record_measure(
     iree_hal_amdgpu_pm4_atomic_record_measurement_t* out_measurement);
 
 // Returns the fallback launch selected by |record|.
-const iree_hal_amdgpu_device_atomic_pm4_launch_t*
+const iree_hal_amdgpu_device_kernel_pm4_launch_t*
 iree_hal_amdgpu_pm4_atomic_record_launch(
     const iree_hal_amdgpu_pm4_atomic_record_t* record,
     const iree_hal_amdgpu_device_atomic_pm4_context_t* atomic_context);
