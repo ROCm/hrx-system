@@ -164,8 +164,10 @@ static inline iree_status_t loom_bytecode_reader_read_u64_le(
   return loom_bytecode_cursor_read_u64_le(&cursor->cursor, out_value);
 }
 
-// Reads a canonical unsigned LEB128 integer from |cursor|.
-static inline iree_status_t loom_bytecode_reader_read_uvarint(
+// Reads a canonical unsigned LEB128 integer with guaranteed successful-path
+// inlining for measured parser inner loops.
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t
+loom_bytecode_reader_read_uvarint_inline(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint64_t* out_value) {
   const uint64_t offset = loom_bytecode_reader_cursor_absolute_position(cursor);
@@ -174,6 +176,14 @@ static inline iree_status_t loom_bytecode_reader_read_uvarint(
     return iree_ok_status();
   }
   return loom_bytecode_reader_emit_invalid_varint(decoder, offset, status);
+}
+
+// Reads a canonical unsigned LEB128 integer from |cursor| while allowing the
+// compiler to outline the wrapper in code-size-sensitive grammars.
+static inline iree_status_t loom_bytecode_reader_read_uvarint(
+    loom_bytecode_reader_decoder_t* decoder,
+    loom_bytecode_reader_cursor_t* cursor, uint64_t* out_value) {
+  return loom_bytecode_reader_read_uvarint_inline(decoder, cursor, out_value);
 }
 
 // Reads a canonical zigzag-encoded signed LEB128 integer from |cursor|.

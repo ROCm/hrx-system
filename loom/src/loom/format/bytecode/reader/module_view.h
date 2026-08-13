@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "loom/format/bytecode/format.h"
+#include "loom/format/bytecode/index.h"
 #include "loom/format/bytecode/module_summary.h"
 #include "loom/format/bytecode/reader/source_trivia.h"
 #include "loom/format/bytecode/reader/type_plan.h"
@@ -37,21 +38,9 @@ typedef struct loom_bytecode_reader_module_t {
   iree_string_view_t name;
 } loom_bytecode_reader_module_t;
 
-// One validated module section-directory entry.
-typedef struct loom_bytecode_reader_section_t {
-  // Wire section kind.
-  uint16_t kind;
-  // Section flags.
-  uint16_t flags;
-  // Module-relative byte offset.
-  uint64_t offset;
-  // Section byte length.
-  uint64_t length;
-  // Absolute file byte offset.
-  uint64_t absolute_offset;
-  // Section payload bytes.
-  iree_const_byte_span_t bytes;
-} loom_bytecode_reader_section_t;
+// A validated section has the same representation in a scratch module view
+// and a retained public index. Its allocation arena alone determines lifetime.
+typedef loom_bytecode_section_metadata_t loom_bytecode_reader_section_t;
 
 // One validated compile-time provider import.
 typedef struct loom_bytecode_reader_provider_import_t {
@@ -70,8 +59,6 @@ typedef struct loom_bytecode_reader_provider_import_t {
 typedef struct loom_bytecode_reader_module_view_t {
   // Validated file-directory entry for this module.
   const loom_bytecode_reader_module_t* directory_entry;
-  // Optional caller-owned retained metadata projection target.
-  struct loom_bytecode_module_metadata_t* output_metadata;
   // Validated module allocation and table-count summary.
   loom_bytecode_module_metadata_summary_t summary;
   // Validated file header retained for output module construction.

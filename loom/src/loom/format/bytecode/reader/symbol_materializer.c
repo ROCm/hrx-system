@@ -42,7 +42,6 @@ void loom_bytecode_symbol_materializer_initialize(
       .output_module = output_module,
       .low_repr_environment = *low_repr_environment,
   };
-  out_materializer->view.output_metadata = NULL;
   out_materializer->body_materializer = (loom_bytecode_body_materializer_t){
       .attributes =
           {

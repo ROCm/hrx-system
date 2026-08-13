@@ -94,6 +94,7 @@ loom_cc_library(
     ::type_plan
     iree::base
     loom::format::bytecode::format
+    loom::format::bytecode::index
     loom::format::bytecode::module_summary
     loom::ir::symbol_map
     loom::ops::op_defs

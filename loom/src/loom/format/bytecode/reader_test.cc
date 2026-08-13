@@ -2248,8 +2248,22 @@ class ReaderTest : public ::testing::Test {
     std::vector<std::string> error_ids;
     loom_bytecode_read_result_t result = ReadMetadata(bytes, &error_ids);
     EXPECT_GT(result.error_count, 0u);
-    ASSERT_FALSE(error_ids.empty());
-    EXPECT_EQ(error_ids.front(), expected_error_id);
+    EXPECT_FALSE(error_ids.empty());
+    if (!error_ids.empty()) {
+      EXPECT_EQ(error_ids.front(), expected_error_id);
+    }
+
+    iree_arena_allocator_t metadata_arena;
+    iree_arena_initialize(&block_pool_, &metadata_arena);
+    loom_bytecode_file_metadata_t metadata = {0};
+    error_ids.clear();
+    result = ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+    EXPECT_GT(result.error_count, 0u);
+    EXPECT_FALSE(error_ids.empty());
+    if (!error_ids.empty()) {
+      EXPECT_EQ(error_ids.front(), expected_error_id);
+    }
+    iree_arena_deinitialize(&metadata_arena);
   }
 
   void ExpectInvalidFieldFailureCode(const std::vector<uint8_t>& bytes,
@@ -2268,6 +2282,19 @@ class ReaderTest : public ::testing::Test {
         IREE_SV("test.loombc"), &context_, &block_pool_, &options, &result));
     EXPECT_GT(result.error_count, 0u);
     EXPECT_EQ(failure_code, expected_failure_code);
+
+    iree_arena_allocator_t metadata_arena;
+    iree_arena_initialize(&block_pool_, &metadata_arena);
+    loom_bytecode_file_metadata_t metadata = {0};
+    failure_code.clear();
+    result = {0};
+    IREE_EXPECT_OK(loom_bytecode_read_index(
+        iree_make_const_byte_span(bytes.data(), bytes.size()),
+        IREE_SV("test.loombc"), &context_, &block_pool_, &metadata_arena,
+        &options, &result, &metadata));
+    EXPECT_GT(result.error_count, 0u);
+    EXPECT_EQ(failure_code, expected_failure_code);
+    iree_arena_deinitialize(&metadata_arena);
   }
 
   void ExpectReadModuleError(const std::vector<uint8_t>& bytes,

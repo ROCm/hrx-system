@@ -528,7 +528,6 @@ iree_status_t loom_bytecode_module_materialize(
       .host_allocator = materializer->host_allocator,
       .low_repr_environment = materializer->low_repr_environment,
   };
-  state.view.output_metadata = NULL;
 
   iree_status_t status = loom_bytecode_module_allocate_output(&state);
   if (iree_status_is_ok(status)) {
