@@ -1,0 +1,29 @@
+// RUN: verify
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @address_expression_rejects_shift_32(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr x2>) {
+  // ERROR@+1: STRUCTURE/014 {attr_name="byte_shift", actual_value="32", expected_constraint="an integer in the inclusive range [0, 31]"}
+  %address = amdgpu.address.add_scaled_u32 %base, %offset {byte_shift = 32} : reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr> -> reg<amdgpu.sgpr x2>
+  low.return %address : reg<amdgpu.sgpr x2>
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @address_expression_rejects_narrow_base(%base: reg<amdgpu.sgpr>, %offset: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) {
+  // ERROR@+1: TYPE/003 {operand_name="base", actual_type="reg<amdgpu.sgpr>", expected_constraint="a two-unit AMDGPU SGPR address"}
+  %address = amdgpu.address.add_scaled_u32 %base, %offset {byte_shift = 2} : reg<amdgpu.sgpr>, reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
+  low.return %address : reg<amdgpu.sgpr>
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @address_expression_rejects_wide_offset(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) {
+  // ERROR@+1: TYPE/003 {operand_name="offset", actual_type="reg<amdgpu.sgpr x2>", expected_constraint="a one-unit AMDGPU SGPR unsigned offset"}
+  %address = amdgpu.address.add_scaled_u32 %base, %offset {byte_shift = 2} : reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr x2>
+  low.return %address : reg<amdgpu.sgpr x2>
+}

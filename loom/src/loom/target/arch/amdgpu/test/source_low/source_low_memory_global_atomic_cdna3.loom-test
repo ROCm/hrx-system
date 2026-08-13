@@ -188,13 +188,13 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workg
   %37 = concat(%35, %36) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %38 = s_mov_b32_m0_imm 0
   %contribution = global_load_dword_saddr %28, %37, %38
-  %41 = s_lshl_b32_rhs_inline %row, 8
-  %42 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %43 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %45 = s_add_u32 %42, %41
-  %46 = s_addc_u32 %43, %34
-  %47 = concat(%45, %46) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %48 = s_mov_b32_m0_imm 0
-  global_atomic_add_f32_saddr %28, %contribution, %47, %48
+  %43 = s_lshl_b32_rhs_inline %row, 8
+  %44 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %45 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %47 = s_add_u32 %44, %43
+  %48 = s_addc_u32 %45, %34
+  %49 = concat(%47, %48) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %42 = s_mov_b32_m0_imm 0
+  global_atomic_add_f32_saddr %28, %contribution, %49, %42
   return
 }

@@ -433,13 +433,20 @@ TEST_F(AmdgpuProviderTest, ProvidesSortedPassRegistry) {
 
   const loom_pass_descriptor_t* descriptor = nullptr;
   IREE_ASSERT_OK(loom_pass_registry_lookup(
-      registry, IREE_SV("amdgpu-materialize-hal-kernel-abi"), &descriptor));
+      registry, IREE_SV("amdgpu-materialize-target-low"), &descriptor));
+  ASSERT_NE(descriptor, nullptr);
+  ASSERT_NE(descriptor->info, nullptr);
+  EXPECT_EQ(descriptor->info()->kind, LOOM_PASS_FUNCTION);
+
+  IREE_ASSERT_OK(loom_pass_registry_lookup(
+      registry, IREE_SV("amdgpu-materialize-source-low-artifacts"),
+      &descriptor));
   ASSERT_NE(descriptor, nullptr);
   ASSERT_NE(descriptor->info, nullptr);
   EXPECT_EQ(descriptor->info()->kind, LOOM_PASS_FUNCTION);
 }
 
-TEST_F(AmdgpuProviderTest, ContributesHalKernelAbiMaterialization) {
+TEST_F(AmdgpuProviderTest, ContributesTargetLowMaterialization) {
   ModulePtr module;
   IREE_ASSERT_OK(AllocateModule(IREE_SV("pipeline"), &module));
 
@@ -463,7 +470,7 @@ TEST_F(AmdgpuProviderTest, ContributesHalKernelAbiMaterialization) {
       IREE_SV("target")));
 
   loom_named_attr_slice_t attrs = loom_pass_where_attrs(where_op);
-  ASSERT_EQ(attrs.count, 3u);
+  ASSERT_EQ(attrs.count, 2u);
   const loom_named_attr_t* family_attr =
       FindAttr(module.get(), attrs, IREE_SV("family"));
   ASSERT_NE(family_attr, nullptr);
@@ -475,12 +482,6 @@ TEST_F(AmdgpuProviderTest, ContributesHalKernelAbiMaterialization) {
   EXPECT_TRUE(
       iree_string_view_equal(AttrStringValue(module.get(), codegen_attr->value),
                              IREE_SV("low_native")));
-  const loom_named_attr_t* abi_attr =
-      FindAttr(module.get(), attrs, IREE_SV("abi"));
-  ASSERT_NE(abi_attr, nullptr);
-  EXPECT_TRUE(iree_string_view_equal(
-      AttrStringValue(module.get(), abi_attr->value), IREE_SV("hal_kernel")));
-
   loom_block_t* where_body =
       loom_region_entry_block(loom_pass_where_body(where_op));
   ASSERT_NE(where_body, nullptr);
@@ -489,7 +490,7 @@ TEST_F(AmdgpuProviderTest, ContributesHalKernelAbiMaterialization) {
   ASSERT_TRUE(loom_pass_run_isa(run_op));
   EXPECT_TRUE(iree_string_view_equal(
       ModuleString(module.get(), loom_pass_run_key(run_op)),
-      IREE_SV("amdgpu-materialize-hal-kernel-abi")));
+      IREE_SV("amdgpu-materialize-target-low")));
   EXPECT_TRUE(loom_pass_yield_isa(where_body->last_op));
   EXPECT_TRUE(loom_pass_yield_isa(pipeline_body->last_op));
 }

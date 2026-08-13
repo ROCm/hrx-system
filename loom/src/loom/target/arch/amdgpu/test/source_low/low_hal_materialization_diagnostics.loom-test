@@ -1,4 +1,4 @@
-// RUN: pass amdgpu-materialize-hal-kernel-abi
+// RUN: pass amdgpu-materialize-target-low
 
 amdgpu.target<gfx1100> @target
 low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @duplicate_kernarg_live_in() {

@@ -293,6 +293,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu/lower/candidates:compare_candidates",
         "//loom/src/loom/target/arch/amdgpu/matrix:contract",
         "//loom/src/loom/target/arch/amdgpu/matrix:projection",
+        "//loom/src/loom/target/arch/amdgpu/ops",
         "//loom/src/loom/target/arch/amdgpu/planning:wait_counters",
         "//loom/src/loom/target/arch/amdgpu/planning:wait_packets",
         "//loom/src/loom/target/arch/amdgpu/planning:wait_plan",

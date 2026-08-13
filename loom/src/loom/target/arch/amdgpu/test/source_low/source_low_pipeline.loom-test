@@ -283,8 +283,8 @@ pass.pipeline<module> @__loom_check_prepared_low pipeline {
   }
   for func {
     where target {
-      where target(abi = "hal_kernel", codegen = "low_native", family = "amdgpu") {
-        amdgpu-materialize-hal-kernel-abi
+      where target(codegen = "low_native", family = "amdgpu") {
+        amdgpu-materialize-target-low
       }
       canonicalize
       cse

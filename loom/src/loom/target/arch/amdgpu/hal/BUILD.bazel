@@ -69,32 +69,12 @@ loom_cc_library(
         "//loom/src/loom/ops/low",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/amdgpu:address_materialization",
         "//loom/src/loom/target/arch/amdgpu:buffer_resource",
         "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/target/arch/amdgpu/ops",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
-    ],
-)
-
-loom_cc_library(
-    name = "binding_materialization_pass",
-    srcs = ["binding_materialization_pass.c"],
-    hdrs = ["binding_materialization_pass.h"],
-    visibility = [
-        "//loom/src/loom/target/arch/amdgpu:__pkg__",
-    ],
-    deps = [
-        ":binding_materialization",
-        ":kernel_abi",
-        "//loom/src/loom/codegen/low:function",
-        "//loom/src/loom/codegen/low:target_binding",
-        "//loom/src/loom/codegen/low/pipeline:pass_environment",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/ops/low",
-        "//loom/src/loom/pass:types",
-        "//loom/src/loom/target:function_version",
-        "//loom/src/loom/target/arch/amdgpu:facts",
-        "//runtime/src/iree/base",
     ],
 )

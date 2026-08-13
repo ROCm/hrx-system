@@ -1,4 +1,4 @@
-// RUN: pass amdgpu-materialize-hal-buffer-descriptors
+// RUN: pass amdgpu-materialize-source-low-artifacts
 
 amdgpu.target<gfx942> @target
 

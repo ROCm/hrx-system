@@ -83,30 +83,26 @@ func.def target(@target) @bf16_score_gather_dot2(%query: vector<2xbf16>, %key_ca
 low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @bf16_score_gather_dot2(%query: reg<amdgpu.vgpr>, %token_offset: reg<amdgpu.sgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %key_cache_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8192} : reg<amdgpu.sgpr x2>
   %26 = v_mov_b32 0
-  %27 = s_lshl_b32_rhs_inline %token_offset, 1
-  %28 = slice %key_cache_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %29 = slice %key_cache_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %30 = s_mov_b32 0
-  %31 = s_add_u32 %28, %27
-  %32 = s_addc_u32 %29, %30
-  %33 = concat(%31, %32) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %34 = s_mov_b32_m0_imm 0
-  %35 = global_load_d16_b16_saddr %26, %33, %34
-  %37 = s_lshl_b32_rhs_inline %token_offset, 1
-  %41 = s_add_u32 %28, %37
-  %42 = s_addc_u32 %29, %30
-  %43 = concat(%41, %42) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %44 = s_mov_b32_m0_imm 0
-  %45 = global_load_d16_b16_saddr %26, %43, %44 {offset = 14}
-  %46 = v_bfe_u32_offset_0_width_16_low16 %35
-  %47 = v_lshlrev_b32_src0_16_low16 %45
-  %key_pair = v_or_b32 %46, %47
-  %49 = v_lshlrev_b32_lit %query, 16
-  %50 = v_lshlrev_b32_lit %key_pair, 16
-  %51 = v_and_b32_lit %query, 4294901760
-  %52 = v_and_b32_lit %key_pair, 4294901760
-  %53 = v_fma_f32 %49, %50, %acc
-  %score = v_fma_f32 %51, %52, %53
+  %43 = s_lshl_b32_rhs_inline %token_offset, 1
+  %44 = slice %key_cache_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %45 = slice %key_cache_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %46 = s_mov_b32 0
+  %47 = s_add_u32 %44, %43
+  %48 = s_addc_u32 %45, %46
+  %49 = concat(%47, %48) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %28 = s_mov_b32_m0_imm 0
+  %29 = global_load_d16_b16_saddr %26, %49, %28
+  %32 = s_mov_b32_m0_imm 0
+  %33 = global_load_d16_b16_saddr %26, %49, %32 {offset = 14}
+  %34 = v_bfe_u32_offset_0_width_16_low16 %29
+  %35 = v_lshlrev_b32_src0_16_low16 %33
+  %key_pair = v_or_b32 %34, %35
+  %37 = v_lshlrev_b32_lit %query, 16
+  %38 = v_lshlrev_b32_lit %key_pair, 16
+  %39 = v_and_b32_lit %query, 4294901760
+  %40 = v_and_b32_lit %key_pair, 4294901760
+  %41 = v_fma_f32 %37, %38, %acc
+  %score = v_fma_f32 %39, %40, %41
   return %score
 }
 

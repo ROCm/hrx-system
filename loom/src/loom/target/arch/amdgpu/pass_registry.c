@@ -8,10 +8,10 @@
 
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/codegen/low/pipeline/pass_requirements.h"
-#include "loom/target/arch/amdgpu/hal/binding_materialization_pass.h"
+#include "loom/target/arch/amdgpu/materialization_pass.h"
 
-static const loom_pass_requirement_def_t
-    kAmdgpuMaterializeHalKernelAbiRequirements[] = {
+static const loom_pass_requirement_def_t kAmdgpuMaterializationRequirements[] =
+    {
         {
             .capability_type = &loom_low_pass_capability_type,
             .key = IREE_SVL(
@@ -24,20 +24,18 @@ static const loom_pass_requirement_def_t
 
 static const loom_pass_descriptor_t kAmdgpuPassDescriptors[] = {
     {
-        .key = IREE_SVL("amdgpu-materialize-hal-buffer-descriptors"),
-        .info = loom_amdgpu_materialize_hal_buffer_descriptors_pass_info,
-        .function_run = loom_amdgpu_materialize_hal_buffer_descriptors_run,
-        .requirement_defs = kAmdgpuMaterializeHalKernelAbiRequirements,
-        .requirement_count =
-            IREE_ARRAYSIZE(kAmdgpuMaterializeHalKernelAbiRequirements),
+        .key = IREE_SVL("amdgpu-materialize-source-low-artifacts"),
+        .info = loom_amdgpu_materialize_source_low_artifacts_pass_info,
+        .function_run = loom_amdgpu_materialize_source_low_artifacts_run,
+        .requirement_defs = kAmdgpuMaterializationRequirements,
+        .requirement_count = IREE_ARRAYSIZE(kAmdgpuMaterializationRequirements),
     },
     {
-        .key = IREE_SVL("amdgpu-materialize-hal-kernel-abi"),
-        .info = loom_amdgpu_materialize_hal_kernel_abi_pass_info,
-        .function_run = loom_amdgpu_materialize_hal_kernel_abi_run,
-        .requirement_defs = kAmdgpuMaterializeHalKernelAbiRequirements,
-        .requirement_count =
-            IREE_ARRAYSIZE(kAmdgpuMaterializeHalKernelAbiRequirements),
+        .key = IREE_SVL("amdgpu-materialize-target-low"),
+        .info = loom_amdgpu_materialize_target_low_pass_info,
+        .function_run = loom_amdgpu_materialize_target_low_run,
+        .requirement_defs = kAmdgpuMaterializationRequirements,
+        .requirement_count = IREE_ARRAYSIZE(kAmdgpuMaterializationRequirements),
     },
 };
 

@@ -68,34 +68,12 @@ loom_cc_library(
     loom::ir
     loom::ops::low
     loom::rewrite::rewriter
+    loom::target::arch::amdgpu::address_materialization
     loom::target::arch::amdgpu::buffer_resource
+    loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_info
     loom::target::types
-  PUBLIC
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_cc_library(
-  NAME
-    binding_materialization_pass
-  HDRS
-    "binding_materialization_pass.h"
-  SRCS
-    "binding_materialization_pass.c"
-  DEPS
-    ::binding_materialization
-    ::kernel_abi
-    iree::base
-    loom::codegen::low::function
-    loom::codegen::low::pipeline::pass_environment
-    loom::codegen::low::target_binding
-    loom::ir
-    loom::ops::low
-    loom::pass::types
-    loom::target::arch::amdgpu::facts
-    loom::target::function_version
   PUBLIC
 )
 endif()

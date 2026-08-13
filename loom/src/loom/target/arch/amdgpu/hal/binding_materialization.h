@@ -38,6 +38,8 @@ typedef struct loom_amdgpu_hal_binding_materialization_result_t {
   iree_host_size_t materialized_direct_arg_count;
   // Number of amdgpu.hal.buffer_descriptor pseudos expanded into low IR.
   iree_host_size_t materialized_descriptor_count;
+  // Number of AMDGPU scalar address expressions expanded into low IR.
+  iree_host_size_t materialized_address_count;
   // True when the pass inserted the kernarg segment pointer live-in.
   bool inserted_kernarg_segment_ptr_live_in;
 } loom_amdgpu_hal_binding_materialization_result_t;
@@ -65,17 +67,19 @@ iree_status_t loom_amdgpu_hal_binding_materialize(
     loom_amdgpu_hal_binding_materialization_result_t* out_result,
     iree_arena_allocator_t* scratch_arena);
 
-// Expands only amdgpu.hal.buffer_descriptor pseudos in |function_op|.
+// Expands amdgpu.hal.buffer_descriptor pseudos and AMDGPU scalar address
+// expressions in |function_op| with one structural operation traversal.
 //
-// This is the source-low artifact boundary for descriptors that are compiler
-// internals rather than authorable low asm. Unlike
+// This is the source-low artifact boundary for HAL descriptors that are
+// compiler internals rather than authorable low asm. Unlike
 // loom_amdgpu_hal_binding_materialize, this does not materialize
 // low.resource<hal_binding> imports, direct entry arguments, or the kernarg
 // segment pointer.
-iree_status_t loom_amdgpu_hal_binding_materialize_buffer_descriptors(
+iree_status_t loom_amdgpu_hal_binding_materialize_artifact_operations(
     loom_module_t* module, loom_op_t* function_op,
     const loom_low_descriptor_set_t* descriptor_set,
-    iree_host_size_t* out_materialized_count,
+    iree_host_size_t* out_materialized_descriptor_count,
+    iree_host_size_t* out_materialized_address_count,
     iree_arena_allocator_t* scratch_arena);
 
 #ifdef __cplusplus

@@ -1,0 +1,55 @@
+// RUN: format bytecode
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @address_expression_roundtrip(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr x2>) {
+  %address = amdgpu.address.add_scaled_u32 %base, %offset {byte_shift = 2} : reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr> -> reg<amdgpu.sgpr x2>
+  low.return %address : reg<amdgpu.sgpr x2>
+}
+
+// ====
+// RUN: pass cse
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @address_expression_cse(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) {
+  %address0 = amdgpu.address.add_scaled_u32 %base, %offset {byte_shift = 2} : reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr> -> reg<amdgpu.sgpr x2>
+  %address1 = amdgpu.address.add_scaled_u32 %base, %offset {byte_shift = 2} : reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr> -> reg<amdgpu.sgpr x2>
+  low.return %address0, %address1 : reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @address_expression_cse(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) {
+  %address0 = amdgpu.address.add_scaled_u32 %base, %offset {byte_shift = 2} : reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr> -> reg<amdgpu.sgpr x2>
+  low.return %address0, %address0 : reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>
+}
+
+// ====
+// RUN: pass amdgpu-materialize-target-low
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @address_expression_materializes() -> (reg<amdgpu.sgpr x2>) {
+  %base = low.live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  %offset = low.const<amdgpu.s_mov_b32> {imm32 = 3} : reg<amdgpu.sgpr>
+  %address = amdgpu.address.add_scaled_u32 %base, %offset {byte_shift = 2} : reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr> -> reg<amdgpu.sgpr x2>
+  low.return %address : reg<amdgpu.sgpr x2>
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @address_expression_materializes() -> (reg<amdgpu.sgpr x2>) {
+  %base = low.live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  %offset = low.const<amdgpu.s_mov_b32> {imm32 = 3} : reg<amdgpu.sgpr>
+  %4 = low.op<amdgpu.s_lshl_b32.rhs_inline>(%offset) {imm32 = 2} : (reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>
+  %5 = low.slice %base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %6 = low.slice %base[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %7 = low.const<amdgpu.s_mov_b32> {imm32 = 0} : reg<amdgpu.sgpr>
+  %8 = low.op<amdgpu.s_add_u32>(%5, %4) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>
+  %9 = low.op<amdgpu.s_addc_u32>(%6, %7) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>
+  %address = low.concat(%8, %9) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  low.return %address : reg<amdgpu.sgpr x2>
+}

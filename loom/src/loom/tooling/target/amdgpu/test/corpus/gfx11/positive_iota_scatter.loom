@@ -1,0 +1,31 @@
+// Scalarized consecutive stores must share their dynamic scalar address while
+// retaining distinct immediate offsets.
+amdgpu.target<gfx11-generic> @positive_iota_scatter_gfx11
+
+kernel.def target(@positive_iota_scatter_gfx11) @positive_iota_scatter() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%base_i32: i32, %output: buffer) {
+  %base_offset = index.constant 0 : offset
+  %base0 = index.cast %base_i32 : i32 to index
+  %base = index.assume %base0 [range(%base0, 0, 4)] : index
+  %origin = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %offsets = vector.iota %base step %unit : vector<4xindex>
+  %values = vector.constant 7 : vector<4xi32>
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %output_view = buffer.view %output_global[%base_offset] : buffer -> view<8xi32>
+  vector.scatter %values, %output_view[%origin][%offsets] : vector<4xi32>, view<8xi32>, vector<4xindex>
+  kernel.return
+}
+
+check.case public @positive_iota_scatter_case {
+  %base0 = check.literal value(0) : i32
+  %base4 = check.literal value(4) : i32
+  %actual = check.generate.fill value(0) : tensor<8xi32>
+  %expected = check.generate.fill value(7) : tensor<8xi32>
+  kernel.launch @positive_iota_scatter(%base0, %actual) : (i32, tensor<8xi32>)
+  kernel.launch @positive_iota_scatter(%base4, %actual) : (i32, tensor<8xi32>)
+  check.expect.equal actual(%actual) expected(%expected) : tensor<8xi32>
+  check.return
+}

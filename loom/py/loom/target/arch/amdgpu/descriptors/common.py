@@ -1710,7 +1710,6 @@ _HAL_BUFFER_DESCRIPTOR_CACHE_SWIZZLE_STRIDE_IMMEDIATE = Immediate(
     unsigned_max=(2**14) - 1,
 )
 
-
 _MANUAL_SCALAR_DESCRIPTOR_KEYS = (
     "amdgpu.s_mov_b32",
     "amdgpu.s_mov_b32_vcc.imm",

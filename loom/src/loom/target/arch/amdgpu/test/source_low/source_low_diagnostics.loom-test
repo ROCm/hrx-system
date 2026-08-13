@@ -218,14 +218,14 @@ func.def target(@target) @dynamic_scaled_index_large_extent_flat_load(%input: bu
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dynamic_scaled_index_large_extent_flat_load(%bounded_index: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4294967296} : reg<amdgpu.sgpr x2>
   %10 = v_mov_b32 0
-  %11 = s_lshl_b32_rhs_inline %bounded_index, 2
-  %12 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %13 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %14 = s_mov_b32 0
-  %15 = s_add_u32 %12, %11
-  %16 = s_addc_u32 %13, %14
-  %17 = concat(%15, %16) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %loaded = global_load_b32_saddr %10, %17
+  %13 = s_lshl_b32_rhs_inline %bounded_index, 2
+  %14 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %15 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %16 = s_mov_b32 0
+  %17 = s_add_u32 %14, %13
+  %18 = s_addc_u32 %15, %16
+  %19 = concat(%17, %18) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %loaded = global_load_b32_saddr %10, %19
   return %loaded
 }
 

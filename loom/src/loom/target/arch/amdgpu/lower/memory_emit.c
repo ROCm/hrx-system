@@ -21,6 +21,7 @@
 #include "loom/target/arch/amdgpu/lower/memory.h"
 #include "loom/target/arch/amdgpu/lower/memory_bank_service.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
+#include "loom/target/arch/amdgpu/ops/ops.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/util/numeric_format.h"
 
@@ -366,6 +367,73 @@ static bool loom_amdgpu_memory_saddr_offset_facts(
   }
   *out_facts = offset_facts;
   return true;
+}
+
+static iree_status_t loom_amdgpu_try_emit_memory_saddr_scaled_u32_expression(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_memory_access_t* access, uint64_t static_byte_offset,
+    loom_value_id_t low_binding, loom_value_id_t* out_low_saddr,
+    bool* out_selected) {
+  *out_low_saddr = LOOM_VALUE_ID_INVALID;
+  *out_selected = false;
+  if (static_byte_offset != 0) return iree_ok_status();
+
+  const loom_low_source_memory_dynamic_term_t* selected_term = NULL;
+  for (uint8_t i = 0; i < access->source.dynamic_term_count; ++i) {
+    if (access->dynamic_term_kinds[i] !=
+        LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_SOFFSET) {
+      continue;
+    }
+    if (selected_term != NULL) return iree_ok_status();
+    selected_term = &access->source.dynamic_terms[i];
+  }
+  if (selected_term == NULL || selected_term->stride_value_count != 0 ||
+      selected_term->byte_shift ==
+          LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE ||
+      selected_term->byte_shift > 31) {
+    return iree_ok_status();
+  }
+
+  loom_value_id_t low_offset = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_lookup_value(context, selected_term->index, &low_offset));
+  const loom_type_t low_offset_type = loom_module_value_type(
+      loom_low_lower_context_module(context), low_offset);
+  if (!loom_amdgpu_low_type_is_register_class(context, low_offset_type,
+                                              LOOM_AMDGPU_REG_CLASS_ID_SGPR) ||
+      loom_low_register_type_unit_count(low_offset_type) != 1) {
+    return iree_ok_status();
+  }
+
+  const loom_type_t result_type = loom_module_value_type(
+      loom_low_lower_context_module(context), low_binding);
+  loom_op_t* address_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_address_add_scaled_u32_build(
+      loom_low_lower_context_builder(context), low_binding, low_offset,
+      selected_term->byte_shift, result_type, source_op->location,
+      &address_op));
+  *out_low_saddr = loom_amdgpu_address_add_scaled_u32_result(address_op);
+  *out_selected = true;
+  return iree_ok_status();
+}
+
+IREE_ATTRIBUTE_NOINLINE static iree_status_t
+loom_amdgpu_emit_memory_saddr_u32_offset(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_memory_access_t* access, uint32_t static_byte_offset,
+    loom_value_id_t low_binding, loom_value_id_t* out_low_saddr) {
+  bool address_expression_selected = false;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_try_emit_memory_saddr_scaled_u32_expression(
+      context, source_op, access, static_byte_offset, low_binding,
+      out_low_saddr, &address_expression_selected));
+  if (address_expression_selected) return iree_ok_status();
+
+  loom_value_id_t low_u32_offset = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr_byte_offset_terms(
+      context, source_op, &access->source, access->dynamic_term_kinds,
+      static_byte_offset, &low_u32_offset));
+  return loom_amdgpu_emit_sgpr64_add_u32_offset(context, source_op, low_binding,
+                                                low_u32_offset, out_low_saddr);
 }
 
 static uint32_t loom_amdgpu_memory_report_positive_u32(int64_t value) {
@@ -861,12 +929,9 @@ iree_status_t loom_amdgpu_emit_memory_saddr(
   }
   if (static_byte_offset <= UINT32_MAX && has_offset_facts &&
       loom_value_facts_fit_unsigned_bit_count(offset_facts, 32)) {
-    loom_value_id_t low_u32_offset = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr_byte_offset_terms(
-        context, source_op, &access->source, access->dynamic_term_kinds,
-        (uint32_t)static_byte_offset, &low_u32_offset));
-    return loom_amdgpu_emit_sgpr64_add_u32_offset(
-        context, source_op, low_binding, low_u32_offset, out_low_saddr);
+    return loom_amdgpu_emit_memory_saddr_u32_offset(
+        context, source_op, access, (uint32_t)static_byte_offset, low_binding,
+        out_low_saddr);
   }
 
   loom_amdgpu_memory_dynamic_term_sequence_t sequence = {0};

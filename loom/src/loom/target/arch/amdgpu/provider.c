@@ -67,18 +67,19 @@ static iree_status_t loom_amdgpu_provider_build_run_pass(
                                 &run_op);
 }
 
-static iree_status_t loom_amdgpu_provider_build_hal_buffer_descriptors_pass(
+static iree_status_t
+loom_amdgpu_provider_build_source_low_artifact_materialization_pass(
     loom_builder_t* builder, void* user_data) {
   (void)user_data;
   return loom_amdgpu_provider_build_run_pass(
-      builder, IREE_SV("amdgpu-materialize-hal-buffer-descriptors"));
+      builder, IREE_SV("amdgpu-materialize-source-low-artifacts"));
 }
 
-static iree_status_t loom_amdgpu_provider_build_hal_kernel_abi_pass(
+static iree_status_t loom_amdgpu_provider_build_target_low_materialization_pass(
     loom_builder_t* builder, void* user_data) {
   (void)user_data;
   return loom_amdgpu_provider_build_run_pass(
-      builder, IREE_SV("amdgpu-materialize-hal-kernel-abi"));
+      builder, IREE_SV("amdgpu-materialize-target-low"));
 }
 
 static iree_status_t loom_amdgpu_provider_contribute_pipeline(
@@ -86,29 +87,28 @@ static iree_status_t loom_amdgpu_provider_contribute_pipeline(
   loom_pass_ir_body_build_fn_t build_body = NULL;
   if (contribution->phase ==
       LOOM_TARGET_PIPELINE_PHASE_SOURCE_LOW_ARTIFACT_PREPARATION) {
-    build_body = loom_amdgpu_provider_build_hal_buffer_descriptors_pass;
+    build_body =
+        loom_amdgpu_provider_build_source_low_artifact_materialization_pass;
   } else if (contribution->phase ==
              LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_MATERIALIZATION) {
-    build_body = loom_amdgpu_provider_build_hal_kernel_abi_pass;
+    build_body = loom_amdgpu_provider_build_target_low_materialization_pass;
   } else {
     return iree_ok_status();
   }
 
-  loom_named_attr_t attrs[3] = {0};
+  loom_named_attr_t attrs[2] = {0};
+  iree_host_size_t attr_count = 0;
   IREE_RETURN_IF_ERROR(loom_amdgpu_provider_build_string_attr(
-      contribution->builder, IREE_SV("family"), IREE_SV("amdgpu"), &attrs[0]));
+      contribution->builder, IREE_SV("family"), IREE_SV("amdgpu"),
+      &attrs[attr_count++]));
   IREE_RETURN_IF_ERROR(loom_amdgpu_provider_build_string_attr(
       contribution->builder, IREE_SV("codegen"), IREE_SV("low_native"),
-      &attrs[1]));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_provider_build_string_attr(
-      contribution->builder, IREE_SV("abi"), IREE_SV("hal_kernel"), &attrs[2]));
-
+      &attrs[attr_count++]));
   loom_op_t* where_op = NULL;
   return loom_pass_ir_build_where(
       contribution->builder, LOOM_PASS_WHERE_BUILD_FLAG_HAS_ATTRS,
-      IREE_SV("target"),
-      loom_make_named_attr_slice(attrs, IREE_ARRAYSIZE(attrs)), build_body,
-      NULL, &where_op);
+      IREE_SV("target"), loom_make_named_attr_slice(attrs, attr_count),
+      build_body, NULL, &where_op);
 }
 
 const loom_target_provider_t loom_amdgpu_target_provider = {

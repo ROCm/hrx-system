@@ -268,6 +268,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::lower::candidates::compare_candidates
     loom::target::arch::amdgpu::matrix::contract
     loom::target::arch::amdgpu::matrix::projection
+    loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::planning::wait_counters
     loom::target::arch::amdgpu::planning::wait_packets
     loom::target::arch::amdgpu::planning::wait_plan

@@ -60,6 +60,54 @@ loom_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
+    address_materialization
+  HDRS
+    "address_materialization.h"
+  SRCS
+    "address_materialization.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::builder
+    loom::codegen::low::descriptors
+    loom::codegen::low::function
+    loom::ir
+    loom::ops::low
+    loom::rewrite::rewriter
+    loom::target::arch::amdgpu::ops
+    loom::target::arch::amdgpu::refs::target_refs
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
+    materialization_pass
+  HDRS
+    "materialization_pass.h"
+  SRCS
+    "materialization_pass.c"
+  DEPS
+    ::address_materialization
+    ::facts
+    iree::base
+    loom::codegen::low::function
+    loom::codegen::low::pipeline::pass_environment
+    loom::codegen::low::target_binding
+    loom::ir
+    loom::ops::low
+    loom::pass::types
+    loom::target::arch::amdgpu::hal::binding_materialization
+    loom::target::arch::amdgpu::hal::kernel_abi
+    loom::target::function_version
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
 loom_generated_cc_library(
   NAME
     target_info
@@ -470,11 +518,11 @@ loom_cc_library(
   SRCS
     "pass_registry.c"
   DEPS
+    ::materialization_pass
     iree::base
     loom::codegen::low::pipeline::pass_environment
     loom::codegen::low::pipeline::pass_requirements
     loom::pass::registry
-    loom::target::arch::amdgpu::hal::binding_materialization_pass
   PUBLIC
 )
 endif()

@@ -8,17 +8,34 @@
 
 from build_tools.amdgpu.target_map_data import AMDGPU_TARGET_ID_FEATURE_ORDER
 
-from loom.assembly import AttrDict, SymbolRef, TemplateParam
+from loom.assembly import (
+    ARROW,
+    COLON,
+    COMMA,
+    AttrDict,
+    Ref,
+    ResultType,
+    SymbolRef,
+    TemplateParam,
+    TypeOf,
+)
 from loom.dialect.target import target_record_attrs
 from loom.dsl import (
+    ATTR_TYPE_I64,
     ATTR_TYPE_SIGNED_ENUM_SET,
+    PURE,
+    REGISTER,
     SYMBOL_DEFINE,
     AttrDef,
     Dialect,
     EnumCase,
     EnumDef,
     Op,
+    Operand,
     OpPhase,
+    Result,
+    SameRegisterClass,
+    SameType,
     SymbolDefinition,
     TargetLikeInterface,
 )
@@ -109,4 +126,67 @@ amdgpu_target = Op(
     ],
 )
 
-ALL_AMDGPU_OPS: tuple[Op, ...] = (amdgpu_target,)
+amdgpu_address_add_scaled_u32 = Op(
+    "amdgpu.address.add_scaled_u32",
+    group=amdgpu_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Add a scaled unsigned 32-bit scalar offset to a 64-bit scalar "
+        "address. Scaling shifts in the 32-bit domain, the scaled offset is "
+        "zero-extended, and the address addition wraps modulo 2^64."
+    ),
+    operands=[
+        Operand(
+            "base",
+            REGISTER,
+            doc="Base address in two consecutive AMDGPU scalar registers.",
+        ),
+        Operand(
+            "offset",
+            REGISTER,
+            doc="Unsigned offset in one AMDGPU scalar register.",
+        ),
+    ],
+    attrs=[
+        AttrDef(
+            "byte_shift",
+            ATTR_TYPE_I64,
+            doc="Left shift in the inclusive range [0, 31].",
+        ),
+    ],
+    results=[
+        Result(
+            "result",
+            REGISTER,
+            doc="Scaled address in two consecutive AMDGPU scalar registers.",
+        ),
+    ],
+    traits=[PURE],
+    constraints=[
+        SameType("base", "result"),
+        SameRegisterClass("base", "offset", "result"),
+    ],
+    verify="loom_amdgpu_address_add_scaled_u32_verify",
+    format=[
+        Ref("base"),
+        COMMA,
+        Ref("offset"),
+        AttrDict(),
+        COLON,
+        TypeOf("base"),
+        COMMA,
+        TypeOf("offset"),
+        ARROW,
+        ResultType("result"),
+    ],
+    examples=[
+        "%address = amdgpu.address.add_scaled_u32 %base, %index "
+        "{byte_shift = 2} : reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr> -> "
+        "reg<amdgpu.sgpr x2>",
+    ],
+)
+
+ALL_AMDGPU_OPS: tuple[Op, ...] = (
+    amdgpu_target,
+    amdgpu_address_add_scaled_u32,
+)

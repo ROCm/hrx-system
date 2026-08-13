@@ -118,6 +118,45 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "address_materialization",
+    srcs = ["address_materialization.c"],
+    hdrs = ["address_materialization.h"],
+    visibility = _AMDGPU_HAL_VISIBILITY + _AMDGPU_NATIVE_VISIBILITY,
+    deps = [
+        "//loom/src/loom/codegen/low:builder",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target/arch/amdgpu/ops",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "materialization_pass",
+    srcs = ["materialization_pass.c"],
+    hdrs = ["materialization_pass.h"],
+    deps = [
+        ":address_materialization",
+        ":facts",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/codegen/low/pipeline:pass_environment",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target/arch/amdgpu/hal:binding_materialization",
+        "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
+        "//runtime/src/iree/base",
+    ],
+)
+
 loom_generated_cc_library(
     name = "target_info",
     srcs = ["target_info.c"],
@@ -473,10 +512,10 @@ loom_cc_library(
     srcs = ["pass_registry.c"],
     hdrs = ["pass_registry.h"],
     deps = [
+        ":materialization_pass",
         "//loom/src/loom/codegen/low/pipeline:pass_environment",
         "//loom/src/loom/codegen/low/pipeline:pass_requirements",
         "//loom/src/loom/pass:registry",
-        "//loom/src/loom/target/arch/amdgpu/hal:binding_materialization_pass",
         "//runtime/src/iree/base",
     ],
 )

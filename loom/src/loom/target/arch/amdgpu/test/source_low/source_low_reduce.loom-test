@@ -124,23 +124,23 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32x64_
   %32 = s_cmp_lt_i32 %24, %30
   low.cond_br %32, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
-  %34 = s_lshl_b32_rhs_inline %24, 2
-  %35 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %36 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %38 = s_add_u32 %35, %34
-  %39 = s_addc_u32 %36, %29
-  %40 = concat(%38, %39) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %41 = global_load_b128_saddr %init, %40
-  %42 = slice %41[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %43 = v_add_f32 %stored, %42
-  %44 = slice %41[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %45 = v_add_f32 %43, %44
-  %46 = slice %41[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %47 = v_add_f32 %45, %46
-  %48 = slice %41[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %49 = v_add_f32 %47, %48
-  %50 = s_add_u32 %24, %31
-  low.br ^_bb1(%50: reg<amdgpu.sgpr>, %49: reg<amdgpu.vgpr>)
+  %46 = s_lshl_b32_rhs_inline %24, 2
+  %47 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %48 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %50 = s_add_u32 %47, %46
+  %51 = s_addc_u32 %48, %29
+  %52 = concat(%50, %51) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %35 = global_load_b128_saddr %init, %52
+  %36 = slice %35[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %37 = v_add_f32 %stored, %36
+  %38 = slice %35[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %39 = v_add_f32 %37, %38
+  %40 = slice %35[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %41 = v_add_f32 %39, %40
+  %42 = slice %35[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %43 = v_add_f32 %41, %42
+  %44 = s_add_u32 %24, %31
+  low.br ^_bb1(%44: reg<amdgpu.sgpr>, %43: reg<amdgpu.vgpr>)
 ^_bb3:
   global_store_b32_saddr %init, %stored, %output_view
   return

@@ -21,7 +21,8 @@ extern "C" {
 
 enum {
   LOOM_OP_AMDGPU_TARGET = LOOM_OP_KIND(LOOM_DIALECT_AMDGPU, 0),
-  LOOM_OP_AMDGPU_COUNT_ = 1,
+  LOOM_OP_AMDGPU_ADDRESS_ADD_SCALED_U32 = LOOM_OP_KIND(LOOM_DIALECT_AMDGPU, 1),
+  LOOM_OP_AMDGPU_COUNT_ = 2,
 };
 
 // AMDGPU target row selected by amdgpu.target.
@@ -169,6 +170,25 @@ iree_status_t loom_amdgpu_target_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_amdgpu_target_record_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_AMDGPU_ADDRESS_ADD_SCALED_U32: Add a scaled unsigned 32-bit scalar offset to a 64-bit scalar address. Scaling shifts in the 32-bit domain, the scaled offset is zero-extended, and the address addition wraps modulo 2^64.
+// %address = amdgpu.address.add_scaled_u32 %base, %index {byte_shift = 2} : reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr> -> reg<amdgpu.sgpr x2>
+LOOM_DEFINE_ISA(loom_amdgpu_address_add_scaled_u32_isa, LOOM_OP_AMDGPU_ADDRESS_ADD_SCALED_U32)
+LOOM_DEFINE_OPERAND(loom_amdgpu_address_add_scaled_u32_base, 0)
+LOOM_DEFINE_OPERAND(loom_amdgpu_address_add_scaled_u32_offset, 1)
+LOOM_DEFINE_RESULT(loom_amdgpu_address_add_scaled_u32_result, 0)
+LOOM_DEFINE_ATTR_I64(loom_amdgpu_address_add_scaled_u32_byte_shift, 0)
+iree_status_t loom_amdgpu_address_add_scaled_u32_build(
+    loom_builder_t* builder,
+    loom_may_consume loom_value_id_t base,
+    loom_may_consume loom_value_id_t offset,
+    int64_t byte_shift,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_amdgpu_address_add_scaled_u32_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 

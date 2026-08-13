@@ -1,4 +1,4 @@
-// RUN: pass amdgpu-materialize-hal-kernel-abi
+// RUN: pass amdgpu-materialize-target-low
 
 amdgpu.target<gfx1100> @target
 

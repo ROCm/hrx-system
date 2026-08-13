@@ -1,0 +1,37 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx11-generic> @target
+func.def target(@target) @positive_iota_scatter(%output: buffer, %base_i32: i32, %values: vector<4xi32>) {
+  %base_offset = index.constant 0 : offset
+  %base0 = index.cast %base_i32 : i32 to index
+  %base = index.assume %base0 [range(%base0, 0, 4)] : index
+  %origin = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %offsets = vector.iota %base step %unit : vector<4xindex>
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %output_view = buffer.view %output_global[%base_offset] : buffer -> view<8xi32>
+  vector.scatter %values, %output_view[%origin][%offsets] : vector<4xi32>, view<8xi32>, vector<4xindex>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @positive_iota_scatter(%base: reg<amdgpu.sgpr>, %values: reg<amdgpu.vgpr x4>) asm {
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 32} : reg<amdgpu.sgpr x2>
+  %35 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %36 = v_mov_b32 0
+  %47 = s_lshl_b32_rhs_inline %base, 2
+  %48 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %49 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %50 = s_mov_b32 0
+  %51 = s_add_u32 %48, %47
+  %52 = s_addc_u32 %49, %50
+  %53 = concat(%51, %52) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b32_saddr %36, %35, %53
+  %38 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %36, %38, %53 {offset = 4}
+  %41 = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %36, %41, %53 {offset = 8}
+  %44 = slice %values[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %36, %44, %53 {offset = 12}
+  return
+}
