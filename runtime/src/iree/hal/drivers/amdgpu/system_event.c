@@ -43,8 +43,8 @@ static void iree_hal_amdgpu_system_event_initialize(void) {
   iree_mutex_initialize(&iree_hal_amdgpu_system_event_registry.mutex);
 }
 
-static bool iree_hal_amdgpu_system_event_agent(
-    const hsa_amd_event_t* event, hsa_agent_t* out_agent) {
+static bool iree_hal_amdgpu_system_event_agent(const hsa_amd_event_t* event,
+                                               hsa_agent_t* out_agent) {
   *out_agent = (hsa_agent_t){0};
   switch (event->event_type) {
     case HSA_AMD_GPU_MEMORY_FAULT_EVENT:

@@ -830,7 +830,8 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
               map->entries[idx].symbol;
           const bool is_coalesced_function =
               existing_symbol &&
-              existing_symbol->type == IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION &&
+              existing_symbol->type ==
+                  IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION &&
               symbol->type == IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION &&
               existing_symbol->module != symbol->module &&
               iree_string_view_equal(existing_symbol->name, symbol->name);

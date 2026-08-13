@@ -32,8 +32,7 @@ using HipDrvPointerGetAttributesFn = hipError_t (*)(
 TEST(HipPointerApiTest, BatchQueryRejectsInvalidPointerAndOutputSlots) {
   void* library = dlopen(CandidateLibPath(), RTLD_LAZY | RTLD_LOCAL);
   if (!library) {
-    GTEST_SKIP() << "cannot dlopen " << CandidateLibPath() << ": "
-                 << dlerror();
+    GTEST_SKIP() << "cannot dlopen " << CandidateLibPath() << ": " << dlerror();
   }
   auto get_attributes = reinterpret_cast<HipDrvPointerGetAttributesFn>(
       dlsym(library, "hipDrvPointerGetAttributes"));

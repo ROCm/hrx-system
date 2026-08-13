@@ -1716,9 +1716,9 @@ typedef struct iree_hal_streaming_prepared_launch_t {
 static int iree_hal_streaming_compare_stream_addresses(const void* lhs,
                                                        const void* rhs) {
   const uintptr_t lhs_address =
-      (uintptr_t)*(iree_hal_streaming_stream_t* const*)lhs;
+      (uintptr_t) * (iree_hal_streaming_stream_t* const*)lhs;
   const uintptr_t rhs_address =
-      (uintptr_t)*(iree_hal_streaming_stream_t* const*)rhs;
+      (uintptr_t) * (iree_hal_streaming_stream_t* const*)rhs;
   return lhs_address < rhs_address ? -1 : lhs_address > rhs_address ? 1 : 0;
 }
 

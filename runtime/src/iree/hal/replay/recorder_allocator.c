@@ -225,8 +225,8 @@ static void iree_hal_replay_recorder_allocator_deallocate_buffer(
     iree_hal_buffer_destroy(buffer);
   } else {
     IREE_HAL_REPLAY_VTABLE_DISPATCH(allocator->base_allocator,
-                                    iree_hal_allocator, deallocate_buffer)(
-        allocator->base_allocator, base_buffer);
+                                    iree_hal_allocator, deallocate_buffer)
+    (allocator->base_allocator, base_buffer);
   }
 }
 

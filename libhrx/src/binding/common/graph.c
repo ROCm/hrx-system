@@ -333,8 +333,7 @@ static void iree_hal_streaming_graph_destroy(
   while (owned_allocation) {
     // Executables retain their source graph through launch completion, so no
     // queued operation can still reference graph-private staging here.
-    iree_hal_streaming_memory_release_wrapped_buffer(
-        owned_allocation->buffer);
+    iree_hal_streaming_memory_release_wrapped_buffer(owned_allocation->buffer);
     owned_allocation->buffer = NULL;
     owned_allocation = owned_allocation->next;
   }
