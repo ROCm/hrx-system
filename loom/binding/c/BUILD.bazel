@@ -166,6 +166,7 @@ loom_cc_library(
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/error:renderer",
         "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/format/bytecode:index",
         "//loom/src/loom/format/bytecode:reader",
         "//loom/src/loom/format/bytecode:writer",
         "//loom/src/loom/format/text:parser",

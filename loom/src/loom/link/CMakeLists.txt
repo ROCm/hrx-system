@@ -81,6 +81,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::analysis::symbol_references
+    loom::format::bytecode::index
     loom::format::bytecode::reader
     loom::format::text::parser
     loom::ir

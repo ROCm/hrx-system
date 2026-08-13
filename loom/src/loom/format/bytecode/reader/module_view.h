@@ -13,11 +13,9 @@
 #include "loom/format/bytecode/format.h"
 #include "loom/format/bytecode/module_summary.h"
 #include "loom/format/bytecode/reader/source_trivia.h"
-#include "loom/ir/attribute.h"
+#include "loom/format/bytecode/reader/type_plan.h"
 #include "loom/ir/symbol_map.h"
-#include "loom/ir/types.h"
 #include "loom/ops/op_defs.h"
-#include "loom/ops/type_registry.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -67,76 +65,6 @@ typedef struct loom_bytecode_reader_provider_import_t {
   loom_bytecode_source_trivia_t source_trivia;
 } loom_bytecode_reader_provider_import_t;
 
-// One dense validated type-table entry.
-typedef struct loom_bytecode_type_plan_entry_t {
-  // Complete by-value type when the entry has no sparse fact.
-  loom_type_t direct_type;
-  // Absolute bytecode offset of the entry kind.
-  uint64_t bytecode_offset;
-} loom_bytecode_type_plan_entry_t;
-
-// Common header for one sparse fact in topological type-table order.
-typedef struct loom_bytecode_type_fact_t {
-  // Next sparse fact in increasing type ID order.
-  struct loom_bytecode_type_fact_t* next;
-  // Dense type-table entry described by this fact.
-  loom_type_id_t type_id;
-  // Non-direct loom_type_kind_t discriminator.
-  loom_type_kind_t kind;
-} loom_bytecode_type_fact_t;
-
-// Type-reference facts for one function type.
-typedef struct loom_bytecode_function_type_fact_t {
-  // Common sparse type-fact header.
-  loom_bytecode_type_fact_t base;
-  // Number of leading argument type IDs.
-  uint16_t argument_count;
-  // Number of trailing result type IDs.
-  uint16_t result_count;
-  // Argument then result type IDs in wire order.
-  loom_type_id_t type_ids[];
-} loom_bytecode_function_type_fact_t;
-
-// Type-reference facts for one dialect type.
-typedef struct loom_bytecode_dialect_type_fact_t {
-  // Common sparse type-fact header.
-  loom_bytecode_type_fact_t base;
-  // Validated STRINGS family name ID.
-  loom_string_id_t name_id;
-  // Number of parameter type IDs.
-  uint16_t parameter_count;
-  // Parameter type IDs in wire order.
-  loom_type_id_t type_ids[];
-} loom_bytecode_dialect_type_fact_t;
-
-// Materialization facts for one descriptor-backed type.
-typedef struct loom_bytecode_parameterized_type_fact_t {
-  // Common sparse type-fact header.
-  loom_bytecode_type_fact_t base;
-  // Resolved static family descriptor.
-  const loom_parameterized_type_descriptor_t* descriptor;
-  // Absolute offset of the first present parameter name.
-  uint64_t parameters_offset;
-  // Exact byte length of all present parameter names, kinds, and values.
-  iree_host_size_t parameters_length;
-  // Number of present parameters in the exact payload.
-  uint8_t present_count;
-  // Validated descriptor indices for present parameters in wire order.
-  uint8_t parameter_indices[];
-} loom_bytecode_parameterized_type_fact_t;
-
-// Materialization facts for one typed target-register payload.
-typedef struct loom_bytecode_typed_register_fact_t {
-  // Common sparse type-fact header.
-  loom_bytecode_type_fact_t base;
-  // First target-owned carrier payload word.
-  uint64_t carrier_payload0;
-  // Second target-owned carrier payload word.
-  uint64_t carrier_payload1;
-  // Prior semantic value type ID.
-  loom_type_id_t value_type_id;
-} loom_bytecode_typed_register_fact_t;
-
 // Immutable facts established while validating one module. All pointers
 // borrow either input bytecode or storage from the reader arenas.
 typedef struct loom_bytecode_reader_module_view_t {
@@ -146,6 +74,8 @@ typedef struct loom_bytecode_reader_module_view_t {
   struct loom_bytecode_module_metadata_t* output_metadata;
   // Validated module allocation and table-count summary.
   loom_bytecode_module_metadata_summary_t summary;
+  // Validated file header retained for output module construction.
+  loom_bytecode_source_trivia_t file_header;
 
   // Validated section directory and direct section identities.
   struct {
@@ -235,6 +165,8 @@ typedef struct loom_bytecode_reader_module_view_t {
     iree_host_size_t count;
     // Symbol ordinal to validated STRINGS name ID.
     loom_string_id_t* name_ids;
+    // Symbol ordinal to defining operation-table ordinal, or UINT32_MAX.
+    uint32_t* defining_op_ordinals;
     // Symbol ordinal to validated wire flags.
     loom_bytecode_symbol_flags_t* flags;
     // Symbol ordinal to validated wire kind.

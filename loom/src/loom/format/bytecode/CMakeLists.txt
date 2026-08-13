@@ -82,14 +82,29 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
-    reader
+    index
   HDRS
     "index.h"
+  DEPS
+    ::format
+    ::module_summary
+    iree::base
+    iree::base::internal::arena
+    loom::error::diagnostic
+    loom::ir
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    reader
+  HDRS
     "reader.h"
   SRCS
     "reader.c"
   DEPS
     ::format
+    ::index
     ::module_summary
     iree::base
     iree::base::internal::arena
@@ -98,14 +113,14 @@ loom_cc_library(
     loom::error::error_defs
     loom::format::bytecode::reader::attribute
     loom::format::bytecode::reader::decoder
+    loom::format::bytecode::reader::materializer
     loom::format::bytecode::reader::module_view
     loom::format::bytecode::reader::source_trivia
+    loom::format::bytecode::reader::symbol
+    loom::format::bytecode::reader::type
     loom::format::low_repr
     loom::ir
-    loom::ir::symbol_map
-    loom::ops::module
     loom::ops::op_defs
-    loom::ops::type_registry
     loom::verify
   PUBLIC
 )
@@ -236,6 +251,7 @@ loom_cc_benchmark(
   SRCS
     "provider_import_benchmark.cc"
   DEPS
+    ::index
     ::reader
     ::writer
     iree::base

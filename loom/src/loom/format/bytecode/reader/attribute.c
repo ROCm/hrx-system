@@ -253,7 +253,8 @@ static iree_status_t loom_bytecode_attribute_read_signed_enum_set(
 static iree_status_t loom_bytecode_attribute_validate_predicate_list(
     loom_bytecode_attribute_validator_t* validator,
     loom_bytecode_reader_cursor_t* cursor,
-    const loom_bytecode_attribute_validation_scope_t* scope) {
+    const loom_bytecode_attribute_validation_scope_t* scope,
+    uint16_t* out_predicate_count) {
   uint16_t predicate_count = 0;
   IREE_RETURN_IF_ERROR(loom_bytecode_attribute_read_predicate_count(
       validator->decoder, cursor, &predicate_count));
@@ -279,6 +280,7 @@ static iree_status_t loom_bytecode_attribute_validate_predicate_list(
       }
     }
   }
+  *out_predicate_count = predicate_count;
   return iree_ok_status();
 }
 
@@ -437,9 +439,11 @@ static iree_status_t loom_bytecode_attribute_validate_at_depth(
       return loom_bytecode_attribute_validate_type_ref(
           validator, type_id, available_type_count, offset);
     }
-    case LOOM_BYTECODE_ATTR_PREDICATE_LIST:
-      return loom_bytecode_attribute_validate_predicate_list(validator, cursor,
-                                                             scope);
+    case LOOM_BYTECODE_ATTR_PREDICATE_LIST: {
+      uint16_t unused_predicate_count = 0;
+      return loom_bytecode_attribute_validate_predicate_list(
+          validator, cursor, scope, &unused_predicate_count);
+    }
     case LOOM_BYTECODE_ATTR_DICT: {
       if (aggregate_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
         return loom_bytecode_reader_emit_invalid_field(
@@ -652,6 +656,19 @@ iree_status_t loom_bytecode_attribute_validate_ssa(
   return loom_bytecode_attribute_validate_at_depth(
       validator, cursor, descriptor, kind, available_type_count, &scope,
       /*aggregate_depth=*/0);
+}
+
+iree_status_t loom_bytecode_attribute_validate_predicate_list_ssa(
+    loom_bytecode_attribute_validator_t* validator,
+    loom_bytecode_reader_cursor_t* cursor,
+    const loom_bytecode_attribute_ssa_validation_scope_t* ssa_scope,
+    uint16_t* out_predicate_count) {
+  const loom_bytecode_attribute_validation_scope_t scope = {
+      .value_domain = LOOM_BYTECODE_ATTRIBUTE_VALUE_DOMAIN_SSA,
+      .ssa = *ssa_scope,
+  };
+  return loom_bytecode_attribute_validate_predicate_list(
+      validator, cursor, &scope, out_predicate_count);
 }
 
 static loom_bytecode_attribute_validator_t

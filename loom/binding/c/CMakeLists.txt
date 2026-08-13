@@ -90,6 +90,7 @@ loom_cc_library(
     loom::error::error_defs
     loom::error::renderer
     loom::format::bytecode::format
+    loom::format::bytecode::index
     loom::format::bytecode::reader
     loom::format::bytecode::writer
     loom::format::text::parser

@@ -72,27 +72,38 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "reader",
-    srcs = ["reader.c"],
-    hdrs = [
-        "index.h",
-        "reader.h",
-    ],
+    name = "index",
+    hdrs = ["index.h"],
     deps = [
         ":format",
+        ":module_summary",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "reader",
+    srcs = ["reader.c"],
+    hdrs = ["reader.h"],
+    deps = [
+        ":format",
+        ":index",
         ":module_summary",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/format:low_repr",
         "//loom/src/loom/format/bytecode/reader:attribute",
         "//loom/src/loom/format/bytecode/reader:decoder",
+        "//loom/src/loom/format/bytecode/reader:materializer",
         "//loom/src/loom/format/bytecode/reader:module_view",
         "//loom/src/loom/format/bytecode/reader:source_trivia",
+        "//loom/src/loom/format/bytecode/reader:symbol",
+        "//loom/src/loom/format/bytecode/reader:type",
         "//loom/src/loom/ir",
-        "//loom/src/loom/ir:symbol_map",
         "//loom/src/loom/ops:op_defs",
-        "//loom/src/loom/ops:type_registry",
-        "//loom/src/loom/ops/module",
         "//loom/src/loom/verify",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -216,6 +227,7 @@ loom_cc_benchmark(
     name = "provider_import_benchmark",
     srcs = ["provider_import_benchmark.cc"],
     deps = [
+        ":index",
         ":reader",
         ":writer",
         "//loom/src/loom/ir",

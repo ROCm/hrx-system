@@ -96,6 +96,14 @@ iree_status_t loom_bytecode_attribute_validate_ssa(
     iree_host_size_t available_type_count,
     const loom_bytecode_attribute_ssa_validation_scope_t* ssa_scope);
 
+// Validates a predicate list with SSA-number VALUE arguments and returns its
+// encoded predicate count.
+iree_status_t loom_bytecode_attribute_validate_predicate_list_ssa(
+    loom_bytecode_attribute_validator_t* validator,
+    loom_bytecode_reader_cursor_t* cursor,
+    const loom_bytecode_attribute_ssa_validation_scope_t* ssa_scope,
+    uint16_t* out_predicate_count);
+
 // Materializes an attribute whose predicate VALUE arguments are STRINGS
 // ordinals.
 iree_status_t loom_bytecode_attribute_materialize_named(

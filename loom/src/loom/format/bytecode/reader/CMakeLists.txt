@@ -43,19 +43,107 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    body
+  HDRS
+    "body.h"
+  SRCS
+    "body.c"
+  DEPS
+    ::attribute
+    ::decoder
+    ::module_view
+    ::source_trivia
+    iree::base
+    iree::base::internal::arena
+    loom::error::error_defs
+    loom::format::low_repr
+    loom::ir
+    loom::ops::op_defs
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    materializer
+  HDRS
+    "materializer.h"
+  SRCS
+    "materializer.c"
+  DEPS
+    ::attribute
+    ::decoder
+    ::module_view
+    ::symbol
+    ::type
+    iree::base
+    iree::base::internal::arena
+    loom::error::error_defs
+    loom::format::low_repr
+    loom::ir
+    loom::ops::module
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     module_view
   HDRS
     "module_view.h"
   DEPS
     ::source_trivia
+    ::type_plan
     iree::base
     loom::format::bytecode::format
     loom::format::bytecode::module_summary
-    loom::ir
     loom::ir::symbol_map
     loom::ops::op_defs
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    type_plan
+  HDRS
+    "type_plan.h"
+  DEPS
+    iree::base
+    loom::ir
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    type
+  HDRS
+    "type.h"
+  SRCS
+    "type.c"
+  DEPS
+    ::attribute
+    ::decoder
+    ::module_view
+    ::type_plan
+    iree::base
+    iree::base::internal::arena
+    loom::error::error_defs
+    loom::ir
     loom::ops::type_registry
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    type_test
+  SRCS
+    "type_test.cc"
+  DEPS
+    ::module_view
+    ::type
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::bytecode::format
+    loom::ir
 )
 
 loom_cc_library(
@@ -84,6 +172,34 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
+    symbol
+  HDRS
+    "symbol.h"
+    "symbol_schema.h"
+  SRCS
+    "symbol.c"
+    "symbol_materializer.c"
+    "symbol_schema.c"
+  DEPS
+    ::attribute
+    ::body
+    ::decoder
+    ::module_view
+    ::source_trivia
+    iree::base
+    iree::base::internal::arena
+    loom::error::error_defs
+    loom::format::bytecode::format
+    loom::format::bytecode::index
+    loom::format::low_repr
+    loom::ir
+    loom::ir::symbol_map
+    loom::ops::op_defs
+  PUBLIC
 )
 
 loom_cc_library(

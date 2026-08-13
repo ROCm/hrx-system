@@ -3033,7 +3033,7 @@ TEST_F(ReaderTest, RejectsNonemptyPredicatesWithoutFlag) {
   WriteU16LE(&bytes, flags_offset,
              flags & ~LOOM_BYTECODE_SYMBOL_FLAG_PREDICATES);
 
-  ExpectReadModuleError(bytes, "ERR_BYTECODE_006");
+  ExpectReadError(bytes, "ERR_BYTECODE_006");
   loom_module_free(module);
 }
 
