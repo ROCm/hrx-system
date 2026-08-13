@@ -306,9 +306,21 @@ static iree_status_t loom_cmd_launch_graph_build_host_function(
       loom_func_like_callee(build->source_program);
   const iree_string_view_t source_name =
       loom_cmd_launch_graph_symbol_name(build->source_module, source_callee);
+  const iree_string_view_t name_suffix = IREE_SV(".__launch_counts");
+  if (source_name.size > IREE_HOST_SIZE_MAX - name_suffix.size) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "command program symbol name is too large");
+  }
+  const iree_host_size_t host_name_size = source_name.size + name_suffix.size;
+  char* host_name_data = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(build->scratch_arena, host_name_size,
+                                           (void**)&host_name_data));
+  memcpy(host_name_data, source_name.data, source_name.size);
+  memcpy(host_name_data + source_name.size, name_suffix.data, name_suffix.size);
   loom_string_id_t target_name = LOOM_STRING_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_module_intern_string(build->module, source_name, &target_name));
+  IREE_RETURN_IF_ERROR(loom_module_intern_string(
+      build->module, iree_make_string_view(host_name_data, host_name_size),
+      &target_name));
   loom_symbol_id_t target_symbol = LOOM_SYMBOL_ID_INVALID;
   IREE_RETURN_IF_ERROR(
       loom_module_add_symbol(build->module, target_name, &target_symbol));

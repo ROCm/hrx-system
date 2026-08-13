@@ -48,6 +48,7 @@ static loom_op_t* loom_cmd_program_plan_find_symbol(
 
 typedef struct loom_cmd_program_root_build_t {
   iree_string_view_t name;
+  iree_string_view_t launch_name;
   loom_op_t* program_op;
   loom_func_like_t program;
   loom_cmd_schedule_plan_t schedule;
@@ -427,10 +428,16 @@ iree_status_t loom_cmd_program_plan_prepare(
   iree_arena_initialize(block_pool, &scratch_arena);
 
   iree_string_view_t* root_names = NULL;
+  iree_string_view_t* launch_names = NULL;
   loom_cmd_program_root_build_t* root_builds = NULL;
   iree_status_t status =
       iree_arena_allocate_array(&scratch_arena, source_program_count,
                                 sizeof(*root_names), (void**)&root_names);
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_arena_allocate_array(&scratch_arena, source_program_count,
+                                  sizeof(*launch_names), (void**)&launch_names);
+  }
   if (iree_status_is_ok(status)) {
     status =
         iree_arena_allocate_array(&scratch_arena, source_program_count,
@@ -543,6 +550,14 @@ iree_status_t loom_cmd_program_plan_prepare(
     status = loom_cmd_launch_graph_materialize(
         preparation_module, root->program_op, &root->schedule, &source_facts,
         block_pool, host_allocator, &root->launch_graph);
+    if (iree_status_is_ok(status)) {
+      const loom_symbol_ref_t launch_ref =
+          loom_func_like_callee(loom_func_like_cast(
+              root->launch_graph.module, root->launch_graph.host_function_op));
+      root->launch_name = loom_cmd_program_plan_symbol_name(
+          root->launch_graph.module, launch_ref);
+      launch_names[i] = root->launch_name;
+    }
   }
 
   if (valid && iree_status_is_ok(status)) {
@@ -602,7 +617,7 @@ iree_status_t loom_cmd_program_plan_prepare(
             .root_symbols =
                 {
                     .count = source_program_count,
-                    .values = root_names,
+                    .values = launch_names,
                 },
         },
         block_pool, host_allocator, &plan.launch_module);
@@ -614,8 +629,8 @@ iree_status_t loom_cmd_program_plan_prepare(
       root->function_op =
           loom_cmd_program_plan_find_symbol(plan.root_module, build->name);
       root->abi_layout = build->lower_plan.abi_layout;
-      root->launch_function_op =
-          loom_cmd_program_plan_find_symbol(plan.launch_module, build->name);
+      root->launch_function_op = loom_cmd_program_plan_find_symbol(
+          plan.launch_module, build->launch_name);
       root->launch_tuple_count = build->launch_graph.host_tuple_count;
       root->dependency_unit_indices = build->dependency_unit_indices;
       root->dependency_count = build->dependency_count;

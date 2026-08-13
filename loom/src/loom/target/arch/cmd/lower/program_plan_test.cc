@@ -159,9 +159,11 @@ command.program.def public @increment_twice(%element_count: index) launch(%sourc
             mixed.function_op);
   EXPECT_TRUE(loom_low_func_def_isa(twice.function_op));
   EXPECT_TRUE(loom_low_func_def_isa(mixed.function_op));
-  EXPECT_EQ(FindSymbol(plan.launch_module, IREE_SV("increment_twice")),
+  EXPECT_EQ(FindSymbol(plan.launch_module,
+                       IREE_SV("increment_twice.__launch_counts")),
             twice.launch_function_op);
-  EXPECT_EQ(FindSymbol(plan.launch_module, IREE_SV("increment_then_double")),
+  EXPECT_EQ(FindSymbol(plan.launch_module,
+                       IREE_SV("increment_then_double.__launch_counts")),
             mixed.launch_function_op);
   EXPECT_EQ(twice.launch_tuple_count, 1u);
   EXPECT_EQ(mixed.launch_tuple_count, 1u);
