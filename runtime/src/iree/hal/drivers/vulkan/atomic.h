@@ -102,6 +102,14 @@ iree_status_t iree_hal_vulkan_atomic_validate(
     const iree_hal_vulkan_atomic_pipelines_t* pipelines,
     iree_hal_vulkan_atomic_params_t params);
 
+// Returns Vulkan shader accesses performed by |params|.
+VkAccessFlags2 iree_hal_vulkan_atomic_access_mask(
+    iree_hal_vulkan_atomic_params_t params);
+
+// Validates that |target_address| is naturally aligned for |width|.
+iree_status_t iree_hal_vulkan_atomic_validate_target_address(
+    VkDeviceAddress target_address, iree_hal_atomic_width_t width);
+
 // Resolves one retained HAL buffer target to a final naturally aligned BDA.
 iree_status_t iree_hal_vulkan_atomic_resolve_target_address(
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
@@ -115,6 +123,17 @@ iree_status_t iree_hal_vulkan_atomic_resolve_target_address(
 void iree_hal_vulkan_atomic_record(
     const iree_hal_vulkan_atomic_pipelines_t* pipelines,
     VkCommandBuffer command_buffer, VkDeviceAddress target_address,
+    iree_hal_vulkan_atomic_record_flags_t record_flags,
+    iree_hal_vulkan_atomic_params_t params);
+
+// Records one atomic operation and its HAL execution-stage dependencies.
+void iree_hal_vulkan_atomic_record_command(
+    const iree_hal_vulkan_device_syms_t* syms,
+    const iree_hal_vulkan_atomic_pipelines_t* pipelines,
+    VkCommandBuffer command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    VkDeviceAddress target_address,
     iree_hal_vulkan_atomic_record_flags_t record_flags,
     iree_hal_vulkan_atomic_params_t params);
 

@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "iree/base/internal/debugging.h"
+#include "iree/hal/drivers/vulkan/barrier.h"
 #include "iree/hal/drivers/vulkan/buffer.h"
 #include "iree/hal/drivers/vulkan/device/library.h"
 
@@ -275,6 +276,27 @@ iree_status_t iree_hal_vulkan_atomic_validate(
                           params.width);
 }
 
+VkAccessFlags2 iree_hal_vulkan_atomic_access_mask(
+    iree_hal_vulkan_atomic_params_t params) {
+  switch (params.operation) {
+    case IREE_HAL_VULKAN_ATOMIC_OPERATION_WAIT_EQUAL:
+    case IREE_HAL_VULKAN_ATOMIC_OPERATION_WAIT_NOT_EQUAL:
+    case IREE_HAL_VULKAN_ATOMIC_OPERATION_WAIT_UNSIGNED_GREATER_EQUAL:
+      return VK_ACCESS_2_SHADER_READ_BIT;
+    case IREE_HAL_VULKAN_ATOMIC_OPERATION_STORE:
+      return VK_ACCESS_2_SHADER_WRITE_BIT;
+    case IREE_HAL_VULKAN_ATOMIC_OPERATION_RMW_ADD:
+    case IREE_HAL_VULKAN_ATOMIC_OPERATION_RMW_SUBTRACT:
+    case IREE_HAL_VULKAN_ATOMIC_OPERATION_RMW_AND:
+    case IREE_HAL_VULKAN_ATOMIC_OPERATION_RMW_OR:
+    case IREE_HAL_VULKAN_ATOMIC_OPERATION_RMW_XOR:
+      return VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
+    default:
+      IREE_ASSERT_UNREACHABLE("atomic parameters must be validated");
+      return 0;
+  }
+}
+
 iree_status_t iree_hal_vulkan_atomic_resolve_target_address(
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_hal_atomic_width_t width, VkDeviceAddress* out_target_address) {
@@ -291,14 +313,25 @@ iree_status_t iree_hal_vulkan_atomic_resolve_target_address(
                             "Vulkan atomic target device address overflows");
   }
   const VkDeviceAddress target_address = buffer_address + target_offset;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_atomic_validate_target_address(target_address, width));
+  *out_target_address = target_address;
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_vulkan_atomic_validate_target_address(
+    VkDeviceAddress target_address, iree_hal_atomic_width_t width) {
   const iree_device_size_t alignment = iree_hal_atomic_width_byte_count(width);
+  if (alignment == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid Vulkan atomic width %u", width);
+  }
   if ((target_address & (alignment - 1)) != 0) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "Vulkan atomic target device address 0x%" PRIx64
                             " does not satisfy %" PRIdsz "-byte alignment",
                             (uint64_t)target_address, alignment);
   }
-  *out_target_address = target_address;
   return iree_ok_status();
 }
 
@@ -344,4 +377,47 @@ void iree_hal_vulkan_atomic_record(
                          VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
   iree_vkCmdDispatch(IREE_VULKAN_DEVICE(&pipelines->syms), command_buffer,
                      /*groupCountX=*/1, /*groupCountY=*/1, /*groupCountZ=*/1);
+}
+
+void iree_hal_vulkan_atomic_record_command(
+    const iree_hal_vulkan_device_syms_t* syms,
+    const iree_hal_vulkan_atomic_pipelines_t* pipelines,
+    VkCommandBuffer command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    VkDeviceAddress target_address,
+    iree_hal_vulkan_atomic_record_flags_t record_flags,
+    iree_hal_vulkan_atomic_params_t params) {
+  const VkAccessFlags2 atomic_access_mask =
+      iree_hal_vulkan_atomic_access_mask(params);
+  const bool has_release =
+      iree_any_bit_set(params.flags, IREE_HAL_ATOMIC_FLAG_RELEASE) &&
+      iree_any_bit_set(atomic_access_mask, VK_ACCESS_2_SHADER_WRITE_BIT);
+  const iree_hal_vulkan_barrier_t pre_barrier = {
+      .source_stage_mask = source_stage_mask,
+      .source_access_mask =
+          has_release
+              ? iree_hal_vulkan_barrier_source_access_mask(source_stage_mask)
+              : 0,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_ATOMIC,
+      .target_access_mask = has_release ? atomic_access_mask : 0,
+  };
+  iree_hal_vulkan_barrier_record(syms, command_buffer, &pre_barrier);
+
+  iree_hal_vulkan_atomic_record(pipelines, command_buffer, target_address,
+                                record_flags, params);
+
+  const bool has_acquire =
+      iree_any_bit_set(params.flags, IREE_HAL_ATOMIC_FLAG_ACQUIRE) &&
+      iree_any_bit_set(atomic_access_mask, VK_ACCESS_2_SHADER_READ_BIT);
+  const iree_hal_vulkan_barrier_t post_barrier = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_ATOMIC,
+      .source_access_mask = has_acquire ? atomic_access_mask : 0,
+      .target_stage_mask = target_stage_mask,
+      .target_access_mask =
+          has_acquire
+              ? iree_hal_vulkan_barrier_target_access_mask(target_stage_mask)
+              : 0,
+  };
+  iree_hal_vulkan_barrier_record(syms, command_buffer, &post_barrier);
 }

@@ -1063,8 +1063,9 @@ static iree_status_t iree_hal_vulkan_logical_device_create_command_buffer(
       device, preferred_role, required_queue_flags, queue_affinity, &queue));
   return iree_hal_vulkan_command_buffer_create(
       device->device_allocator, mode, command_categories, queue->queue_affinity,
-      binding_capacity, &device->command_buffer_block_pool,
-      device->host_allocator, out_command_buffer);
+      binding_capacity, &device->builtins.atomic_pipelines,
+      &device->command_buffer_block_pool, device->host_allocator,
+      out_command_buffer);
 }
 
 static iree_status_t iree_hal_vulkan_logical_device_create_event(

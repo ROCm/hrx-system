@@ -21,10 +21,14 @@ extern "C" {
 typedef struct iree_arena_block_pool_t iree_arena_block_pool_t;
 
 // Creates a Vulkan HAL command buffer.
+//
+// |atomic_pipelines| is borrowed from the logical device and must outlive the
+// command buffer.
 iree_status_t iree_hal_vulkan_command_buffer_create(
     iree_hal_allocator_t* device_allocator, iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
     iree_hal_queue_affinity_t queue_affinity, iree_host_size_t binding_capacity,
+    const iree_hal_vulkan_atomic_pipelines_t* atomic_pipelines,
     iree_arena_block_pool_t* command_buffer_block_pool,
     iree_allocator_t host_allocator,
     iree_hal_command_buffer_t** out_command_buffer);
@@ -68,10 +72,10 @@ iree_hal_vulkan_command_buffer_native_descriptor_pool_requirements(
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_vulkan_command_buffer_descriptor_requirements_t* out_requirements);
 
-// Host-published BDA table storage used while replaying a command buffer once
-// into a native VkCommandBuffer.
+// Host-published BDA storage used while replaying a command buffer once into a
+// native VkCommandBuffer.
 typedef struct iree_hal_vulkan_command_buffer_bda_publication_t {
-  // Host-visible span reserved for all BDA dispatch tables in the replay.
+  // Host-visible span reserved for all BDA replay data.
   iree_byte_span_t host_span;
 
   // Device address corresponding to host_span.data.
@@ -87,7 +91,7 @@ typedef struct iree_hal_vulkan_command_buffer_bda_binding_slot_t {
   iree_device_size_t length;
 } iree_hal_vulkan_command_buffer_bda_binding_slot_t;
 
-// Per-submit BDA binding-table cache used while publishing replay tables.
+// Per-submit BDA binding cache used while publishing replay data.
 typedef struct iree_hal_vulkan_command_buffer_bda_binding_cache_t {
   // Mutable slot cache storage indexed by HAL binding-table slot ordinal.
   iree_hal_vulkan_command_buffer_bda_binding_slot_t* slots;
@@ -105,18 +109,18 @@ iree_status_t iree_hal_vulkan_command_buffer_resolve_bda_binding_table_slot(
     iree_hal_vulkan_command_buffer_bda_binding_cache_t* bda_binding_cache,
     iree_hal_vulkan_command_buffer_bda_binding_slot_t* out_slot);
 
-// Returns host-published BDA table bytes required to replay |command_buffer|
-// once into a native VkCommandBuffer.
+// Returns host-published BDA bytes required to replay |command_buffer| once
+// into a native VkCommandBuffer.
 iree_status_t iree_hal_vulkan_command_buffer_native_bda_publication_length(
     iree_hal_command_buffer_t* command_buffer,
     iree_device_size_t* out_publication_length);
 
-// Publishes BDA binding tables into an already-reserved publication range.
+// Publishes BDA replay data into an already-reserved publication range.
 //
-// The table layout matches iree_hal_vulkan_command_buffer_record_native, so a
+// The data layout matches iree_hal_vulkan_command_buffer_record_native, so a
 // native command buffer recorded against |bda_publication| can be resubmitted
 // after this updates the publication contents for a new binding table.
-iree_status_t iree_hal_vulkan_command_buffer_publish_bda_binding_tables(
+iree_status_t iree_hal_vulkan_command_buffer_publish_bda_replay_data(
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t binding_table,
     const iree_hal_vulkan_command_buffer_bda_publication_t* bda_publication,
@@ -209,9 +213,9 @@ typedef struct iree_hal_vulkan_command_buffer_profile_marker_t {
 // that pool alive until |native_command_buffer| is no longer executing. When
 // the command buffer has no descriptor requirements this may be VK_NULL_HANDLE.
 //
-// BDA binding tables are allocated from |bda_publication|. The caller must keep
-// that publication alive until |native_command_buffer| is no longer executing.
-// When the command buffer has no BDA dispatches this may be NULL.
+// BDA replay data is allocated from |bda_publication|. The caller must keep the
+// publication alive until |native_command_buffer| is no longer executing. When
+// the command buffer requires no BDA publication this may be NULL.
 //
 // |bda_binding_cache| may be NULL. When present, it caches binding-table slot
 // device addresses for the duration of this recording/publication pass.

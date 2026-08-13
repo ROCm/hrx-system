@@ -2329,7 +2329,7 @@ static iree_status_t iree_hal_vulkan_queue_acquire_native_replay_under_lock(
   }
   if (iree_status_is_ok(status) && !replay_publication_current) {
     replay->bda_binding_slots_valid = false;
-    status = iree_hal_vulkan_command_buffer_publish_bda_binding_tables(
+    status = iree_hal_vulkan_command_buffer_publish_bda_replay_data(
         submission->execute.command_buffer, binding_table,
         publication_length != 0 ? &publication : NULL, &bda_binding_cache);
   }

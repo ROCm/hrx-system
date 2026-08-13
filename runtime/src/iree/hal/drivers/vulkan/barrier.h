@@ -29,6 +29,14 @@ typedef struct iree_hal_vulkan_barrier_t {
   VkAccessFlags2 target_access_mask;
 } iree_hal_vulkan_barrier_t;
 
+// Returns Vulkan write accesses produced by |stage_mask|.
+VkAccessFlags2 iree_hal_vulkan_barrier_source_access_mask(
+    iree_hal_execution_stage_t stage_mask);
+
+// Returns Vulkan read/write accesses consumed by |stage_mask|.
+VkAccessFlags2 iree_hal_vulkan_barrier_target_access_mask(
+    iree_hal_execution_stage_t stage_mask);
+
 // Records |barrier| into |command_buffer|.
 void iree_hal_vulkan_barrier_record(const iree_hal_vulkan_device_syms_t* syms,
                                     VkCommandBuffer command_buffer,
