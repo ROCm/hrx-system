@@ -112,6 +112,21 @@ IREE_AMDGPU_STATIC_ASSERT(
 
 #if !defined(IREE_AMDGPU_TARGET_DEVICE)
 
+// Initializes atomic wait kernargs for a validated operation.
+void iree_hal_amdgpu_device_atomic_wait_initialize_kernargs(
+    const void* target_ptr, iree_hal_atomic_wait_params_t params,
+    iree_hal_amdgpu_device_atomic_wait_kernargs_t* out_kernargs);
+
+// Initializes atomic store kernargs for a validated operation.
+void iree_hal_amdgpu_device_atomic_store_initialize_kernargs(
+    void* target_ptr, iree_hal_atomic_store_params_t params,
+    iree_hal_amdgpu_device_atomic_store_kernargs_t* out_kernargs);
+
+// Initializes atomic RMW kernargs for a validated operation.
+void iree_hal_amdgpu_device_atomic_rmw_initialize_kernargs(
+    void* target_ptr, iree_hal_atomic_rmw_params_t params,
+    iree_hal_amdgpu_device_atomic_rmw_kernargs_t* out_kernargs);
+
 // Populates a one-workitem atomic wait dispatch and its kernargs in
 // already-reserved storage. The caller owns packet header commit,
 // completion-signal assignment, and doorbell signaling.

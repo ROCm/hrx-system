@@ -12,6 +12,8 @@
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/amdgpu/abi/command_buffer.h"
 #include "iree/hal/drivers/amdgpu/abi/timestamp.h"
+#include "iree/hal/drivers/amdgpu/atomic_memory.h"
+#include "iree/hal/drivers/amdgpu/device/atomic_pm4.h"
 #include "iree/hal/drivers/amdgpu/profile_metadata.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_capabilities.h"
@@ -83,8 +85,8 @@ typedef struct iree_hal_amdgpu_pm4_command_buffer_profile_plan_t {
   uint32_t timestamp_binding_base;
   // Total binding-table entries consumed by profile fixup.
   uint32_t binding_count;
-  // Number of profile-visible dispatch operations in |program|.
-  uint32_t dispatch_count;
+  // Number of profile-visible operations represented in |program|.
+  uint32_t operation_count;
   // Device pointer to the resident allocation base patched by fixup offsets.
   IREE_AMDGPU_DEVICE_PTR uint8_t* target_base;
   // Device-visible fallback timestamp range used for unselected dispatches.
@@ -176,6 +178,9 @@ void iree_hal_amdgpu_pm4_command_buffer_resident_pool_trim(
 // |hostcall_buffer| is an optional opaque device address copied into every
 // implicit-argument template. The allocation it references must remain valid
 // for the command buffer lifetime.
+//
+// |atomic_context| is borrowed immutable fallback launch metadata and must
+// remain valid for the command buffer lifetime.
 iree_status_t iree_hal_amdgpu_pm4_command_buffer_create(
     iree_hal_allocator_t* device_allocator, iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
@@ -183,6 +188,7 @@ iree_status_t iree_hal_amdgpu_pm4_command_buffer_create(
     iree_host_size_t device_ordinal,
     iree_hal_amdgpu_pm4_command_buffer_flags_t flags,
     iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities,
+    const iree_hal_amdgpu_device_atomic_pm4_context_t* atomic_context,
     iree_hal_amdgpu_pm4_timestamp_strategy_t pm4_timestamp_strategy,
     iree_hal_amdgpu_pm4_command_buffer_resident_pool_t* resident_pool,
     void* hostcall_buffer,
@@ -216,6 +222,12 @@ iree_hal_amdgpu_pm4_command_buffer_profile_operations(
 // Returns the number of recorded profile-visible operations.
 uint32_t iree_hal_amdgpu_pm4_command_buffer_operation_count(
     iree_hal_command_buffer_t* command_buffer);
+
+// Returns per-binding atomic memory cells required at queue submission.
+// |out_count| is zero when the command buffer has no dynamic atomic targets.
+const iree_hal_amdgpu_atomic_memory_cell_flags_t*
+iree_hal_amdgpu_pm4_command_buffer_atomic_binding_requirements(
+    iree_hal_command_buffer_t* command_buffer, uint32_t* out_count);
 
 // Returns the immutable resident kernarg template and fixup plan from end().
 const iree_hal_amdgpu_pm4_command_buffer_fixup_plan_t*

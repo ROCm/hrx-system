@@ -262,25 +262,44 @@ iree_status_t iree_hal_amdgpu_atomic_memory_validate_target(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "malformed AMDGPU atomic width %u", width);
   }
-  if (IREE_UNLIKELY(((uintptr_t)target_pointer % byte_count) != 0)) {
+  const iree_hal_amdgpu_atomic_memory_cell_flags_t required_cell =
+      iree_hal_amdgpu_atomic_memory_required_cell(width, atomic_flags);
+  return iree_hal_amdgpu_atomic_memory_validate_required_cells(
+      available_cells, target_pointer, required_cell);
+}
+
+iree_status_t iree_hal_amdgpu_atomic_memory_validate_required_cells(
+    iree_hal_amdgpu_atomic_memory_cell_flags_t available_cells,
+    const void* target_pointer,
+    iree_hal_amdgpu_atomic_memory_cell_flags_t required_cells) {
+  if (IREE_UNLIKELY(iree_any_bit_set(
+          required_cells, ~IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAGS_ALL))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "malformed AMDGPU atomic memory cell requirements 0x%08" PRIx32,
+        required_cells);
+  }
+  if (required_cells == IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE) {
+    return iree_ok_status();
+  }
+
+  const bool requires_64_bit = iree_any_bit_set(
+      required_cells,
+      IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_DEVICE_SCOPE_64 |
+          IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_SYSTEM_SCOPE_64);
+  const iree_device_size_t alignment = requires_64_bit ? 8 : 4;
+  if (IREE_UNLIKELY(((uintptr_t)target_pointer % alignment) != 0)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "AMDGPU atomic target address is not naturally aligned "
         "(address=0x%" PRIxPTR ", alignment=%" PRIdsz ")",
-        (uintptr_t)target_pointer, byte_count);
+        (uintptr_t)target_pointer, alignment);
   }
-
-  const iree_hal_amdgpu_atomic_memory_cell_flags_t required_cell =
-      iree_hal_amdgpu_atomic_memory_required_cell(width, atomic_flags);
-  if (IREE_UNLIKELY(!iree_all_bits_set(available_cells, required_cell))) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU atomic target memory does not support %u-bit %s-scope "
-        "atomics",
-        width,
-        iree_any_bit_set(atomic_flags, IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE)
-            ? "system"
-            : "device");
+  if (IREE_UNLIKELY(!iree_all_bits_set(available_cells, required_cells))) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "AMDGPU atomic target memory cells 0x%08" PRIx32
+                            " do not satisfy requirements 0x%08" PRIx32,
+                            available_cells, required_cells);
   }
   return iree_ok_status();
 }

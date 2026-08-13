@@ -14,6 +14,7 @@
 #include "iree/hal/drivers/amdgpu/atomic_memory.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/host_queue_command_buffer_test_util.h"
+#include "iree/hal/drivers/amdgpu/pm4_command_buffer.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -52,7 +53,8 @@ class ReleaseLatch {
   std::atomic<int> remaining_;
 };
 
-class HostQueueAtomicTest : public ::testing::Test {
+class HostQueueAtomicTest
+    : public ::testing::TestWithParam<iree_hal_amdgpu_command_buffer_mode_t> {
  protected:
   static void SetUpTestSuite() {
     host_allocator_ = iree_allocator_system();
@@ -106,7 +108,9 @@ class HostQueueAtomicTest : public ::testing::Test {
       iree_hal_command_buffer_t** out_command_buffer) {
     Ref<iree_hal_command_buffer_t> command_buffer;
     IREE_RETURN_IF_ERROR(iree_hal_command_buffer_create(
-        device, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+        device,
+        IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT |
+            IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA,
         IREE_HAL_COMMAND_CATEGORY_ATOMIC, queue_affinity,
         /*binding_capacity=*/1, command_buffer.out()));
     IREE_RETURN_IF_ERROR(iree_hal_command_buffer_begin(command_buffer));
@@ -208,13 +212,45 @@ iree_allocator_t HostQueueAtomicTest::host_allocator_;
 iree_hal_amdgpu_libhsa_t HostQueueAtomicTest::libhsa_;
 iree_hal_amdgpu_topology_t HostQueueAtomicTest::topology_;
 
-TEST_F(HostQueueAtomicTest, ReusableProgramRetainsAndRebindsResources) {
+TEST_F(HostQueueAtomicTest, AutoCommandBufferModeSelectsPm4) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
-  options.command_buffer_mode = IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_AQL;
+  options.command_buffer_mode = IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_AUTO;
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(
       test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+  if (!iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
+          test_device.logical_device()
+              ->physical_devices[0]
+              ->vendor_packet_capabilities)) {
+    GTEST_SKIP() << "PM4 command buffers are not supported on this device";
+  }
+
+  iree_hal_queue_affinity_t queue_affinity = 0;
+  IREE_ASSERT_OK(QueueAffinityForPhysicalDevice(
+      test_device, /*physical_device_ordinal=*/0, &queue_affinity));
+  Ref<iree_hal_command_buffer_t> command_buffer;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      test_device.base_device(), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+      IREE_HAL_COMMAND_CATEGORY_ATOMIC, queue_affinity,
+      /*binding_capacity=*/0, command_buffer.out()));
+  EXPECT_TRUE(iree_hal_amdgpu_pm4_command_buffer_isa(command_buffer));
+}
+
+TEST_P(HostQueueAtomicTest, ReusableProgramRetainsAndRebindsResources) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.command_buffer_mode = GetParam();
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(
+      test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+  if (GetParam() == IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_PM4 &&
+      !iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
+          test_device.logical_device()
+              ->physical_devices[0]
+              ->vendor_packet_capabilities)) {
+    GTEST_SKIP() << "PM4 command buffers are not supported on this device";
+  }
 
   iree_hal_queue_affinity_t queue_affinity = 0;
   IREE_ASSERT_OK(QueueAffinityForPhysicalDevice(
@@ -253,6 +289,34 @@ TEST_F(HostQueueAtomicTest, ReusableProgramRetainsAndRebindsResources) {
   IREE_ASSERT_OK(CreateReusableAtomicProgram(test_device.base_device(),
                                              queue_affinity, static_buffer,
                                              command_buffer.out()));
+  if (GetParam() == IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_PM4) {
+    uint32_t operation_count = 0;
+    const iree_hal_profile_command_operation_record_t* operations =
+        iree_hal_amdgpu_pm4_command_buffer_profile_operations(command_buffer,
+                                                              &operation_count);
+    ASSERT_NE(operations, nullptr);
+    ASSERT_EQ(operation_count, 5u);
+    EXPECT_EQ(operations[0].type,
+              IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_STORE);
+    EXPECT_EQ(operations[0].target_offset, sizeof(uint32_t));
+    EXPECT_EQ(operations[0].length, sizeof(uint32_t));
+    EXPECT_TRUE(iree_any_bit_set(
+        operations[0].flags,
+        IREE_HAL_PROFILE_COMMAND_OPERATION_FLAG_STATIC_BINDINGS));
+    EXPECT_EQ(operations[1].type,
+              IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_RMW);
+    EXPECT_EQ(operations[2].type,
+              IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_WAIT);
+    EXPECT_EQ(operations[2].target_offset, 0u);
+    EXPECT_EQ(operations[2].target_ordinal, 0u);
+    EXPECT_TRUE(iree_any_bit_set(
+        operations[2].flags,
+        IREE_HAL_PROFILE_COMMAND_OPERATION_FLAG_DYNAMIC_BINDINGS));
+    EXPECT_EQ(operations[3].type,
+              IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_STORE);
+    EXPECT_EQ(operations[4].type,
+              IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_RMW);
+  }
   Ref<iree_hal_semaphore_t> gate;
   IREE_ASSERT_OK(CreateSemaphore(test_device.base_device(), gate.out()));
   Ref<iree_hal_semaphore_t> completion;
@@ -327,13 +391,20 @@ TEST_F(HostQueueAtomicTest, ReusableProgramRetainsAndRebindsResources) {
   EXPECT_EQ(second_storage[1], 23u);
 }
 
-TEST_F(HostQueueAtomicTest, DeferredResolvedMisalignmentFailsAndQueueRecovers) {
+TEST_P(HostQueueAtomicTest, DeferredResolvedMisalignmentFailsAndQueueRecovers) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
-  options.command_buffer_mode = IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_AQL;
+  options.command_buffer_mode = GetParam();
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(
       test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+  if (GetParam() == IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_PM4 &&
+      !iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
+          test_device.logical_device()
+              ->physical_devices[0]
+              ->vendor_packet_capabilities)) {
+    GTEST_SKIP() << "PM4 command buffers are not supported on this device";
+  }
 
   iree_hal_queue_affinity_t queue_affinity = 0;
   IREE_ASSERT_OK(QueueAffinityForPhysicalDevice(
@@ -436,6 +507,166 @@ TEST_F(HostQueueAtomicTest, DeferredResolvedMisalignmentFailsAndQueueRecovers) {
   valid_buffer.reset();
   valid_release_latch.Wait();
 }
+
+TEST_P(HostQueueAtomicTest, SupportsWidthsConditionsAndRmwOperations) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.command_buffer_mode = GetParam();
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(
+      test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+  if (GetParam() == IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_PM4 &&
+      !iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
+          test_device.logical_device()
+              ->physical_devices[0]
+              ->vendor_packet_capabilities)) {
+    GTEST_SKIP() << "PM4 command buffers are not supported on this device";
+  }
+
+  iree_hal_queue_affinity_t queue_affinity = 0;
+  IREE_ASSERT_OK(QueueAffinityForPhysicalDevice(
+      test_device, /*physical_device_ordinal=*/0, &queue_affinity));
+  alignas(64) std::array<uint64_t, 8> storage = {};
+  ReleaseLatch release_latch(/*release_count=*/1);
+  Ref<iree_hal_buffer_t> buffer;
+  IREE_ASSERT_OK(ImportHostAtomicBuffer(
+      &test_device, queue_affinity, storage.data(), sizeof(storage),
+      IREE_HAL_MEMORY_ACCESS_NONE, /*minimum_alignment=*/64,
+      release_latch.callback(), buffer.out()));
+
+  Ref<iree_hal_command_buffer_t> command_buffer;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      test_device.base_device(), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+      IREE_HAL_COMMAND_CATEGORY_ATOMIC, queue_affinity,
+      /*binding_capacity=*/0, command_buffer.out()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+  const iree_hal_atomic_flags_t atomic_flags =
+      IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE |
+      IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE;
+  auto append_sequence = [&](iree_hal_buffer_ref_t target,
+                             iree_hal_atomic_width_t width) -> iree_status_t {
+    const uint64_t wait_mask =
+        width == IREE_HAL_ATOMIC_WIDTH_32 ? UINT32_MAX : UINT64_MAX;
+    IREE_RETURN_IF_ERROR(iree_hal_command_buffer_atomic_store(
+        command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+        IREE_HAL_EXECUTION_STAGE_ATOMIC, target,
+        (iree_hal_atomic_store_params_t){
+            /*.value=*/10,
+            /*.flags=*/atomic_flags,
+            /*.width=*/width,
+        }));
+    IREE_RETURN_IF_ERROR(iree_hal_command_buffer_atomic_rmw(
+        command_buffer, IREE_HAL_EXECUTION_STAGE_ATOMIC,
+        IREE_HAL_EXECUTION_STAGE_ATOMIC, target,
+        (iree_hal_atomic_rmw_params_t){
+            /*.operand=*/5,
+            /*.flags=*/atomic_flags,
+            /*.width=*/width,
+            /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
+        }));
+    IREE_RETURN_IF_ERROR(iree_hal_command_buffer_atomic_wait(
+        command_buffer, IREE_HAL_EXECUTION_STAGE_ATOMIC,
+        IREE_HAL_EXECUTION_STAGE_ATOMIC, target,
+        (iree_hal_atomic_wait_params_t){
+            /*.value=*/15,
+            /*.mask=*/wait_mask,
+            /*.flags=*/atomic_flags,
+            /*.width=*/width,
+            /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+        }));
+    IREE_RETURN_IF_ERROR(iree_hal_command_buffer_atomic_wait(
+        command_buffer, IREE_HAL_EXECUTION_STAGE_ATOMIC,
+        IREE_HAL_EXECUTION_STAGE_ATOMIC, target,
+        (iree_hal_atomic_wait_params_t){
+            /*.value=*/14,
+            /*.mask=*/wait_mask,
+            /*.flags=*/atomic_flags,
+            /*.width=*/width,
+            /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_NOT_EQUAL,
+        }));
+    IREE_RETURN_IF_ERROR(iree_hal_command_buffer_atomic_wait(
+        command_buffer, IREE_HAL_EXECUTION_STAGE_ATOMIC,
+        IREE_HAL_EXECUTION_STAGE_ATOMIC, target,
+        (iree_hal_atomic_wait_params_t){
+            /*.value=*/15,
+            /*.mask=*/wait_mask,
+            /*.flags=*/atomic_flags,
+            /*.width=*/width,
+            /*.condition=*/
+            IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL,
+        }));
+    const iree_hal_atomic_rmw_operation_t operations[] = {
+        IREE_HAL_ATOMIC_RMW_OPERATION_SUBTRACT,
+        IREE_HAL_ATOMIC_RMW_OPERATION_AND,
+        IREE_HAL_ATOMIC_RMW_OPERATION_OR,
+        IREE_HAL_ATOMIC_RMW_OPERATION_XOR,
+    };
+    const uint64_t operands[] = {2, 0xFu, 0x10u, 0x1u};
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(operations); ++i) {
+      IREE_RETURN_IF_ERROR(iree_hal_command_buffer_atomic_rmw(
+          command_buffer, IREE_HAL_EXECUTION_STAGE_ATOMIC,
+          i + 1 == IREE_ARRAYSIZE(operations) ? IREE_HAL_EXECUTION_STAGE_HOST
+                                              : IREE_HAL_EXECUTION_STAGE_ATOMIC,
+          target,
+          (iree_hal_atomic_rmw_params_t){
+              /*.operand=*/operands[i],
+              /*.flags=*/atomic_flags,
+              /*.width=*/width,
+              /*.operation=*/operations[i],
+          }));
+    }
+    return iree_ok_status();
+  };
+  IREE_ASSERT_OK(append_sequence(
+      iree_hal_make_buffer_ref(buffer, /*offset=*/0, sizeof(uint32_t)),
+      IREE_HAL_ATOMIC_WIDTH_32));
+  IREE_ASSERT_OK(append_sequence(
+      iree_hal_make_buffer_ref(buffer, /*offset=*/sizeof(uint64_t),
+                               sizeof(uint64_t)),
+      IREE_HAL_ATOMIC_WIDTH_64));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+
+  Ref<iree_hal_semaphore_t> completion;
+  IREE_ASSERT_OK(CreateSemaphore(test_device.base_device(), completion.out()));
+  iree_hal_semaphore_t* completion_semaphore = completion.get();
+  uint64_t completion_value = 1;
+  const iree_hal_semaphore_list_t signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&completion_semaphore,
+      /*.payload_values=*/&completion_value,
+  };
+  IREE_ASSERT_OK(iree_hal_device_queue_execute(
+      test_device.base_device(), queue_affinity,
+      iree_hal_semaphore_list_empty(), signal_list, command_buffer,
+      iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE));
+  command_buffer.reset();
+  buffer.reset();
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(completion, completion_value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+  release_latch.Wait();
+  EXPECT_EQ(static_cast<uint32_t>(storage[0]), 28u);
+  EXPECT_EQ(storage[1], 28u);
+}
+
+static const char* CommandBufferModeName(
+    const ::testing::TestParamInfo<iree_hal_amdgpu_command_buffer_mode_t>&
+        info) {
+  switch (info.param) {
+    case IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_AQL:
+      return "Aql";
+    case IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_PM4:
+      return "Pm4";
+    default:
+      return "Unknown";
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    CommandBufferModes, HostQueueAtomicTest,
+    ::testing::Values(IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_AQL,
+                      IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_PM4),
+    CommandBufferModeName);
 
 }  // namespace
 }  // namespace iree::hal::amdgpu

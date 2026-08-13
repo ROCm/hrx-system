@@ -2738,10 +2738,10 @@ static bool iree_hal_amdgpu_logical_device_can_auto_select_pm4_command_buffer(
   if (iree_any_bit_set(mode, unsupported_modes)) {
     return false;
   }
-  if (!iree_all_bits_set(command_categories,
-                         IREE_HAL_COMMAND_CATEGORY_DISPATCH) ||
-      iree_any_bit_set(command_categories,
-                       ~IREE_HAL_COMMAND_CATEGORY_DISPATCH)) {
+  const iree_hal_command_category_t supported_categories =
+      IREE_HAL_COMMAND_CATEGORY_DISPATCH | IREE_HAL_COMMAND_CATEGORY_ATOMIC;
+  if (command_categories == 0 ||
+      iree_any_bit_set(command_categories, ~supported_categories)) {
     return false;
   }
   if (!iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
@@ -2754,8 +2754,8 @@ static bool iree_hal_amdgpu_logical_device_can_auto_select_pm4_command_buffer(
           physical_device->pm4_timestamp_strategy)) {
     return false;
   }
-  // Auto mode must be able to replay either static or dynamic reusable dispatch
-  // command buffers without changing implementation after recording begins.
+  // Auto mode must be able to replay either static or dynamic reusable command
+  // buffers without changing implementation after recording begins.
   if (physical_device->host_queue_upload_capacity == 0) return false;
   return true;
 }
@@ -2804,6 +2804,7 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_pm4_command_buffer(
       logical_device->device_allocator, mode, command_categories,
       effective_queue_affinity, binding_capacity, device_ordinal, flags,
       physical_device->vendor_packet_capabilities,
+      &physical_device->atomic_pm4_context,
       physical_device->pm4_timestamp_strategy,
       physical_device->pm4_command_buffer_resident_pool,
       iree_hal_amdgpu_physical_device_hostcall_buffer(physical_device),

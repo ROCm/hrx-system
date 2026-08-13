@@ -10,6 +10,8 @@
 
 #include "iree/hal/drivers/amdgpu/aql_command_buffer.h"
 #include "iree/hal/drivers/amdgpu/aql_program_validation.h"
+#include "iree/hal/drivers/amdgpu/atomic_memory.h"
+#include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/host_queue_command_buffer_block.h"
 #include "iree/hal/drivers/amdgpu/host_queue_command_buffer_replay.h"
 #include "iree/hal/drivers/amdgpu/host_queue_profile.h"
@@ -282,6 +284,46 @@ static void iree_hal_amdgpu_host_queue_initialize_pm4_dispatch_event(
 }
 
 static iree_status_t
+iree_hal_amdgpu_host_queue_validate_pm4_atomic_binding_requirements(
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_buffer_binding_table_t binding_table,
+    const uint64_t* binding_ptrs) {
+  uint32_t requirement_count = 0;
+  const iree_hal_amdgpu_atomic_memory_cell_flags_t* requirements =
+      iree_hal_amdgpu_pm4_command_buffer_atomic_binding_requirements(
+          command_buffer, &requirement_count);
+  if (requirement_count == 0) return iree_ok_status();
+  if (IREE_UNLIKELY(requirement_count > binding_table.count)) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "PM4 atomic binding requirements exceed the resolved binding table");
+  }
+
+  iree_status_t status = iree_ok_status();
+  for (uint32_t i = 0; i < requirement_count && iree_status_is_ok(status);
+       ++i) {
+    if (requirements[i] == IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE) {
+      continue;
+    }
+    if (IREE_UNLIKELY(!binding_table.bindings[i].buffer)) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "PM4 atomic target binding table slot %u is NULL", i);
+      continue;
+    }
+    iree_hal_buffer_t* allocated_buffer =
+        iree_hal_buffer_allocated_buffer(binding_table.bindings[i].buffer);
+    status = iree_hal_amdgpu_atomic_memory_validate_required_cells(
+        iree_hal_amdgpu_buffer_atomic_memory_cells(allocated_buffer),
+        (const void*)(uintptr_t)binding_ptrs[i], requirements[i]);
+    if (!iree_status_is_ok(status)) {
+      status = iree_status_annotate_f(status, "binding_table[%u]", i);
+    }
+  }
+  return status;
+}
+
+static iree_status_t
 iree_hal_amdgpu_host_queue_submit_profiled_pm4_command_buffer(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_amdgpu_wait_resolution_t* resolution,
@@ -305,12 +347,12 @@ iree_hal_amdgpu_host_queue_submit_profiled_pm4_command_buffer(
         "profiling materialized");
   }
   if (IREE_UNLIKELY(selection->operation_count !=
-                    profile_plan->dispatch_count)) {
+                    profile_plan->operation_count)) {
     return iree_make_status(
         IREE_STATUS_INTERNAL,
-        "PM4 profile operation count %u does not match profile dispatch "
+        "PM4 profile operation count %u does not match materialized operation "
         "count %u",
-        selection->operation_count, profile_plan->dispatch_count);
+        selection->operation_count, profile_plan->operation_count);
   }
   if (IREE_UNLIKELY(profile_plan->binding_count <
                         command_buffer->binding_count ||
@@ -346,6 +388,11 @@ iree_hal_amdgpu_host_queue_submit_profiled_pm4_command_buffer(
     if (command_buffer->binding_count != 0) {
       status = iree_hal_amdgpu_host_queue_resolve_command_buffer_binding_ptrs(
           command_buffer, binding_table, binding_ptrs);
+      if (iree_status_is_ok(status)) {
+        status =
+            iree_hal_amdgpu_host_queue_validate_pm4_atomic_binding_requirements(
+                command_buffer, binding_table, binding_ptrs);
+      }
     }
   }
   if (iree_status_is_ok(status)) {
@@ -353,10 +400,11 @@ iree_hal_amdgpu_host_queue_submit_profiled_pm4_command_buffer(
         (uint64_t)(uintptr_t)&profile_plan->dummy_ticks->start_tick;
     const uint64_t dummy_end_tick =
         (uint64_t)(uintptr_t)&profile_plan->dummy_ticks->end_tick;
-    for (uint32_t dispatch_ordinal = 0;
-         dispatch_ordinal < profile_plan->dispatch_count; ++dispatch_ordinal) {
+    for (uint32_t operation_ordinal = 0;
+         operation_ordinal < profile_plan->operation_count;
+         ++operation_ordinal) {
       const uint32_t timestamp_binding =
-          profile_plan->timestamp_binding_base + 2u * dispatch_ordinal;
+          profile_plan->timestamp_binding_base + 2u * operation_ordinal;
       binding_ptrs[timestamp_binding + 0] = dummy_start_tick;
       binding_ptrs[timestamp_binding + 1] = dummy_end_tick;
     }
@@ -562,6 +610,11 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_pm4_command_buffer(
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_host_queue_resolve_command_buffer_binding_ptrs(
         command_buffer, binding_table, binding_ptrs);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_amdgpu_host_queue_validate_pm4_atomic_binding_requirements(
+            command_buffer, binding_table, binding_ptrs);
   }
   if (iree_status_is_ok(status)) {
     const hsa_signal_t publication_signal =

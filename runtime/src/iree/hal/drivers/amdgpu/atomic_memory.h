@@ -126,6 +126,13 @@ iree_status_t iree_hal_amdgpu_atomic_memory_validate_target(
     const void* target_pointer, iree_hal_atomic_width_t width,
     iree_hal_atomic_flags_t atomic_flags);
 
+// Validates one resolved target against an accumulated set of required cells.
+// The target must satisfy the strictest natural alignment in |required_cells|.
+iree_status_t iree_hal_amdgpu_atomic_memory_validate_required_cells(
+    iree_hal_amdgpu_atomic_memory_cell_flags_t available_cells,
+    const void* target_pointer,
+    iree_hal_amdgpu_atomic_memory_cell_flags_t required_cells);
+
 // Expands compact memory cells into the public all-operations capability
 // matrix.
 iree_hal_atomic_operation_capabilities_t

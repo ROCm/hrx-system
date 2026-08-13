@@ -229,6 +229,43 @@ TEST(AtomicMemoryTest, ValidatesTargetAlignmentAndMemoryCell) {
           IREE_HAL_ATOMIC_WIDTH_64, IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE));
 }
 
+TEST(AtomicMemoryTest, EmptyRequiredCellsAcceptAnyTarget) {
+  IREE_EXPECT_OK(iree_hal_amdgpu_atomic_memory_validate_required_cells(
+      IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE, nullptr,
+      IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE));
+}
+
+TEST(AtomicMemoryTest, RequiredCellsUseStrictestNaturalAlignment) {
+  const auto required_cells =
+      IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_DEVICE_SCOPE_32 |
+      IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_SYSTEM_SCOPE_64;
+  IREE_EXPECT_OK(iree_hal_amdgpu_atomic_memory_validate_required_cells(
+      required_cells, reinterpret_cast<const void*>(uintptr_t{0x1000}),
+      required_cells));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      iree_hal_amdgpu_atomic_memory_validate_required_cells(
+          required_cells, reinterpret_cast<const void*>(uintptr_t{0x1004}),
+          required_cells));
+}
+
+TEST(AtomicMemoryTest, RequiredCellsRejectMissingCapabilities) {
+  const auto required_cells =
+      IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_DEVICE_SCOPE_32 |
+      IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_SYSTEM_SCOPE_64;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      iree_hal_amdgpu_atomic_memory_validate_required_cells(
+          IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_DEVICE_SCOPE_32,
+          reinterpret_cast<const void*>(uintptr_t{0x1000}), required_cells));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_amdgpu_atomic_memory_validate_required_cells(
+          IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAGS_ALL,
+          reinterpret_cast<const void*>(uintptr_t{0x1000}),
+          IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAGS_ALL | (1u << 31)));
+}
+
 TEST(AtomicMemoryTest, ExpandsCellsToCompleteOperationFamilies) {
   const iree_hal_atomic_operation_capabilities_t capabilities =
       iree_hal_amdgpu_atomic_memory_expand_capabilities(
