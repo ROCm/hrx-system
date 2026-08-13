@@ -45,11 +45,8 @@ typedef struct iree_hal_vulkan_slab_provider_t {
   // Vulkan memory property flags for |memory_type_index|.
   VkMemoryPropertyFlags memory_property_flags;
 
-  // HAL memory type exposed by slabs from this provider.
-  iree_hal_memory_type_t memory_type;
-
-  // HAL buffer usage bits supported by slabs from this provider.
-  iree_hal_buffer_usage_t supported_usage;
+  // Immutable HAL memory properties exposed by this provider.
+  iree_hal_slab_provider_properties_t properties;
 
   // Queue affinity mask valid for buffers materialized from this provider.
   iree_hal_queue_affinity_t queue_affinity_mask;
@@ -131,8 +128,8 @@ iree_status_t iree_hal_vulkan_slab_provider_create(
   provider->logical_device = options.logical_device;
   provider->memory_type_index = options.memory_type_index;
   provider->memory_property_flags = options.memory_property_flags;
-  provider->memory_type = options.memory_type;
-  provider->supported_usage = options.supported_usage;
+  provider->properties.memory_type = options.memory_type;
+  provider->properties.supported_usage = options.supported_usage;
   provider->queue_affinity_mask = options.queue_affinity_mask;
   provider->min_alignment = options.min_alignment;
   provider->non_coherent_atom_size =
@@ -219,9 +216,9 @@ static iree_status_t iree_hal_vulkan_slab_provider_acquire_slab(
   }
 
   const iree_hal_buffer_params_t params = {
-      .type = provider->memory_type,
+      .type = provider->properties.memory_type,
       .access = IREE_HAL_MEMORY_ACCESS_ALL,
-      .usage = provider->supported_usage,
+      .usage = provider->properties.supported_usage,
       .queue_affinity = provider->queue_affinity_mask,
       .min_alignment = min_alignment,
   };
@@ -284,14 +281,15 @@ static iree_status_t iree_hal_vulkan_slab_provider_wrap_buffer(
   iree_hal_memory_type_t resolved_type = params.type;
   if (iree_any_bit_set(resolved_type, IREE_HAL_MEMORY_TYPE_OPTIMAL)) {
     resolved_type &= ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
-    resolved_type |= provider->memory_type;
+    resolved_type |= provider->properties.memory_type;
   }
-  if (IREE_UNLIKELY(!iree_all_bits_set(provider->memory_type, resolved_type))) {
+  if (IREE_UNLIKELY(!iree_all_bits_set(provider->properties.memory_type,
+                                       resolved_type))) {
 #if IREE_STATUS_MODE
     iree_bitfield_string_temp_t actual_temp;
     iree_bitfield_string_temp_t requested_temp;
-    iree_string_view_t actual_string =
-        iree_hal_memory_type_format(provider->memory_type, &actual_temp);
+    iree_string_view_t actual_string = iree_hal_memory_type_format(
+        provider->properties.memory_type, &actual_temp);
     iree_string_view_t requested_string =
         iree_hal_memory_type_format(resolved_type, &requested_temp);
     return iree_make_status(
@@ -304,13 +302,13 @@ static iree_status_t iree_hal_vulkan_slab_provider_wrap_buffer(
     return iree_status_from_code(IREE_STATUS_INVALID_ARGUMENT);
 #endif  // IREE_STATUS_MODE
   }
-  if (IREE_UNLIKELY(
-          !iree_all_bits_set(provider->supported_usage, params.usage))) {
+  if (IREE_UNLIKELY(!iree_all_bits_set(provider->properties.supported_usage,
+                                       params.usage))) {
 #if IREE_STATUS_MODE
     iree_bitfield_string_temp_t actual_temp;
     iree_bitfield_string_temp_t requested_temp;
-    iree_string_view_t actual_string =
-        iree_hal_buffer_usage_format(provider->supported_usage, &actual_temp);
+    iree_string_view_t actual_string = iree_hal_buffer_usage_format(
+        provider->properties.supported_usage, &actual_temp);
     iree_string_view_t requested_string =
         iree_hal_buffer_usage_format(params.usage, &requested_temp);
     return iree_make_status(
@@ -415,12 +413,10 @@ static void iree_hal_vulkan_slab_provider_query_stats(
 
 static void iree_hal_vulkan_slab_provider_query_properties(
     const iree_hal_slab_provider_t* base_provider,
-    iree_hal_memory_type_t* out_memory_type,
-    iree_hal_buffer_usage_t* out_supported_usage) {
+    iree_hal_slab_provider_properties_t* out_properties) {
   const iree_hal_vulkan_slab_provider_t* provider =
       iree_hal_vulkan_slab_provider_const_cast(base_provider);
-  *out_memory_type = provider->memory_type;
-  *out_supported_usage = provider->supported_usage;
+  *out_properties = provider->properties;
 }
 
 static const iree_hal_slab_provider_vtable_t

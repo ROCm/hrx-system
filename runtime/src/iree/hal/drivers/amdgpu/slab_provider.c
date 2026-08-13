@@ -64,11 +64,8 @@ typedef struct iree_hal_amdgpu_slab_provider_t {
   // Borrowed ASAN state used when ASAN shadow support is enabled.
   iree_hal_amdgpu_asan_state_t* asan_state;
 
-  // HAL memory type bits derived from the HSA pool flags.
-  iree_hal_memory_type_t memory_type;
-
-  // HAL buffer usage bits supported by slabs from the HSA pool.
-  iree_hal_buffer_usage_t supported_usage;
+  // Immutable HAL memory properties exposed by this provider.
+  iree_hal_slab_provider_properties_t properties;
 
   // Cumulative slab acquisitions reported through query_stats().
   iree_atomic_int64_t total_acquired;
@@ -166,8 +163,8 @@ static bool iree_hal_amdgpu_slab_provider_record_memory_event(
   event.pool_id = (uint64_t)(uintptr_t)provider;
   event.backing_id = (uint64_t)(uintptr_t)backing_ptr;
   event.physical_device_ordinal = provider->physical_device_ordinal;
-  event.memory_type = provider->memory_type;
-  event.buffer_usage = provider->supported_usage;
+  event.memory_type = provider->properties.memory_type;
+  event.buffer_usage = provider->properties.supported_usage;
   event.length = slab_handle->allocation_size;
   event.alignment = provider->allocation_alignment;
   const bool recorded =
@@ -530,8 +527,8 @@ iree_status_t iree_hal_amdgpu_slab_provider_create(
     }
   }
   if (iree_status_is_ok(status)) {
-    provider->memory_type = options.memory_type;
-    provider->supported_usage = options.supported_usage;
+    provider->properties.memory_type = options.memory_type;
+    provider->properties.supported_usage = options.supported_usage;
     *out_provider = &provider->base;
   } else {
     iree_hal_slab_provider_release(&provider->base);
@@ -699,14 +696,15 @@ static iree_status_t iree_hal_amdgpu_slab_provider_wrap_buffer(
   iree_hal_memory_type_t resolved_type = params.type;
   if (iree_any_bit_set(resolved_type, IREE_HAL_MEMORY_TYPE_OPTIMAL)) {
     resolved_type &= ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
-    resolved_type |= provider->memory_type;
+    resolved_type |= provider->properties.memory_type;
   }
-  if (IREE_UNLIKELY(!iree_all_bits_set(provider->memory_type, resolved_type))) {
+  if (IREE_UNLIKELY(!iree_all_bits_set(provider->properties.memory_type,
+                                       resolved_type))) {
 #if IREE_STATUS_MODE
     iree_bitfield_string_temp_t actual_temp;
     iree_bitfield_string_temp_t requested_temp;
-    iree_string_view_t actual_string =
-        iree_hal_memory_type_format(provider->memory_type, &actual_temp);
+    iree_string_view_t actual_string = iree_hal_memory_type_format(
+        provider->properties.memory_type, &actual_temp);
     iree_string_view_t requested_string =
         iree_hal_memory_type_format(resolved_type, &requested_temp);
     return iree_make_status(
@@ -719,13 +717,13 @@ static iree_status_t iree_hal_amdgpu_slab_provider_wrap_buffer(
     return iree_status_from_code(IREE_STATUS_INVALID_ARGUMENT);
 #endif  // IREE_STATUS_MODE
   }
-  if (IREE_UNLIKELY(
-          !iree_all_bits_set(provider->supported_usage, params.usage))) {
+  if (IREE_UNLIKELY(!iree_all_bits_set(provider->properties.supported_usage,
+                                       params.usage))) {
 #if IREE_STATUS_MODE
     iree_bitfield_string_temp_t actual_temp;
     iree_bitfield_string_temp_t requested_temp;
-    iree_string_view_t actual_string =
-        iree_hal_buffer_usage_format(provider->supported_usage, &actual_temp);
+    iree_string_view_t actual_string = iree_hal_buffer_usage_format(
+        provider->properties.supported_usage, &actual_temp);
     iree_string_view_t requested_string =
         iree_hal_buffer_usage_format(params.usage, &requested_temp);
     return iree_make_status(
@@ -857,12 +855,10 @@ static void iree_hal_amdgpu_slab_provider_query_stats(
 
 static void iree_hal_amdgpu_slab_provider_query_properties(
     const iree_hal_slab_provider_t* base_provider,
-    iree_hal_memory_type_t* out_memory_type,
-    iree_hal_buffer_usage_t* out_supported_usage) {
+    iree_hal_slab_provider_properties_t* out_properties) {
   const iree_hal_amdgpu_slab_provider_t* provider =
       iree_hal_amdgpu_slab_provider_const_cast(base_provider);
-  *out_memory_type = provider->memory_type;
-  *out_supported_usage = provider->supported_usage;
+  *out_properties = provider->properties;
 }
 
 static const iree_hal_slab_provider_vtable_t

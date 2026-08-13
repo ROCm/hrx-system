@@ -368,12 +368,11 @@ static void hrx_vmm_slab_provider_query_stats(
 
 static void hrx_vmm_slab_provider_query_properties(
     const iree_hal_slab_provider_t* base_provider,
-    iree_hal_memory_type_t* out_memory_type,
-    iree_hal_buffer_usage_t* out_supported_usage) {
+    iree_hal_slab_provider_properties_t* out_properties) {
   const hrx_vmm_slab_provider_t* provider =
       hrx_vmm_slab_provider_const_cast(base_provider);
-  *out_memory_type = provider->buffer_params.type;
-  *out_supported_usage = provider->buffer_params.usage;
+  out_properties->memory_type = provider->buffer_params.type;
+  out_properties->supported_usage = provider->buffer_params.usage;
 }
 
 iree_status_t hrx_vmm_slab_provider_create(
