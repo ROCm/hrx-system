@@ -2064,7 +2064,7 @@ static iree_status_t iree_hal_vulkan_logical_device_initialize_from_plan(
   if (iree_status_is_ok(status)) {
     status = iree_hal_vulkan_builtins_initialize(
         &device->syms, device->logical_device, &device->physical_device,
-        &device->builtins);
+        device->enabled_features, &device->builtins);
   }
   if (iree_status_is_ok(status)) {
     iree_hal_vulkan_logical_device_resolve_queue_assignment(

@@ -9,6 +9,7 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
+#include "iree/hal/drivers/vulkan/atomic.h"
 #include "iree/hal/drivers/vulkan/util/libvulkan.h"
 
 #ifdef __cplusplus
@@ -40,12 +41,16 @@ typedef struct iree_hal_vulkan_builtins_t {
 
   // Compute pipeline patching partial dwords for unaligned updates.
   VkPipeline update_pipeline;
+
+  // BDA pipelines implementing atomic wait, store, and RMW operations.
+  iree_hal_vulkan_atomic_pipelines_t atomic_pipelines;
 } iree_hal_vulkan_builtins_t;
 
 // Initializes built-in Vulkan pipelines for |logical_device|.
 iree_status_t iree_hal_vulkan_builtins_initialize(
     const iree_hal_vulkan_device_syms_t* syms, VkDevice logical_device,
     const iree_hal_vulkan_physical_device_snapshot_t* physical_device,
+    iree_hal_vulkan_features_t enabled_features,
     iree_hal_vulkan_builtins_t* out_builtins);
 
 // Deinitializes built-in Vulkan pipelines and releases device handles.

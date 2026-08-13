@@ -63,6 +63,7 @@ iree_cc_library(
     headers
   HDRS
     "api.h"
+    "atomic.h"
     "command_buffer.h"
     "debug_utils.h"
     "device_options.h"
@@ -249,6 +250,8 @@ iree_cc_library(
     "allocator.c"
     "allocator.h"
     "api.c"
+    "atomic.c"
+    "atomic.h"
     "buffer.c"
     "buffer.h"
     "builtins.c"
@@ -295,6 +298,7 @@ iree_cc_library(
     iree::base::threading
     iree::base::threading::thread
     iree::hal
+    iree::hal::drivers::vulkan::device::library
     iree::hal::drivers::vulkan::util::libvulkan
     iree::hal::local::profile
     iree::hal::local::transient_buffer

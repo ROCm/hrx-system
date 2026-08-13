@@ -1,0 +1,97 @@
+; Copyright 2026 The IREE Authors
+;
+; Licensed under the Apache License v2.0 with LLVM Exceptions.
+; See https://llvm.org/LICENSE.txt for license information.
+; SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+;
+; SPIR-V
+; Version: 1.0
+; Generator: Google Shaderc over Glslang; 11
+; Bound: 115
+; Schema: 0
+               OpCapability Shader
+          %1 = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint GLCompute %4 "main"
+               OpExecutionMode %4 LocalSize 1 1 1
+               OpDecorate %_struct_13 Block
+               OpMemberDecorate %_struct_13 0 Offset 0
+               OpMemberDecorate %_struct_13 1 Offset 4
+               OpMemberDecorate %_struct_13 2 Offset 8
+               OpMemberDecorate %_struct_13 3 Offset 12
+               OpMemberDecorate %_struct_13 4 Offset 16
+               OpMemberDecorate %_struct_13 5 Offset 20
+               OpDecorate %_runtimearr_uint ArrayStride 4
+               OpDecorate %_struct_40 BufferBlock
+               OpMemberDecorate %_struct_40 0 Offset 0
+               OpDecorate %42 Binding 0
+               OpDecorate %42 DescriptorSet 0
+               OpDecorate %gl_WorkGroupSize BuiltIn WorkgroupSize
+       %void = OpTypeVoid
+          %3 = OpTypeFunction %void
+       %uint = OpTypeInt 32 0
+ %_struct_13 = OpTypeStruct %uint %uint %uint %uint %uint %uint
+%_ptr_PushConstant__struct_13 = OpTypePointer PushConstant %_struct_13
+         %15 = OpVariable %_ptr_PushConstant__struct_13 PushConstant
+        %int = OpTypeInt 32 1
+      %int_4 = OpConstant %int 4
+%_ptr_PushConstant_uint = OpTypePointer PushConstant %uint
+      %int_1 = OpConstant %int 1
+      %int_0 = OpConstant %int 0
+     %uint_8 = OpConstant %uint 8
+   %uint_255 = OpConstant %uint 255
+%_runtimearr_uint = OpTypeRuntimeArray %uint
+ %_struct_40 = OpTypeStruct %_runtimearr_uint
+%_ptr_Uniform__struct_40 = OpTypePointer Uniform %_struct_40
+         %42 = OpVariable %_ptr_Uniform__struct_40 Uniform
+      %int_2 = OpConstant %int 2
+%_ptr_Uniform_uint = OpTypePointer Uniform %uint
+     %uint_0 = OpConstant %uint 0
+      %int_5 = OpConstant %int 5
+       %bool = OpTypeBool
+      %int_3 = OpConstant %int 3
+     %v3uint = OpTypeVector %uint 3
+     %uint_1 = OpConstant %uint 1
+%gl_WorkGroupSize = OpConstantComposite %v3uint %uint_1 %uint_1 %uint_1
+          %4 = OpFunction %void None %3
+          %5 = OpLabel
+         %44 = OpAccessChain %_ptr_PushConstant_uint %15 %int_2
+         %45 = OpLoad %uint %44
+         %47 = OpAccessChain %_ptr_Uniform_uint %42 %int_0 %45
+         %48 = OpLoad %uint %47
+               OpBranch %53
+         %53 = OpLabel
+        %114 = OpPhi %uint %48 %5 %87 %54
+        %113 = OpPhi %uint %uint_0 %5 %89 %54
+         %60 = OpAccessChain %_ptr_PushConstant_uint %15 %int_5
+         %61 = OpLoad %uint %60
+         %63 = OpULessThan %bool %113 %61
+               OpLoopMerge %55 %54 None
+               OpBranchConditional %63 %54 %55
+         %54 = OpLabel
+         %66 = OpAccessChain %_ptr_PushConstant_uint %15 %int_3
+         %67 = OpLoad %uint %66
+         %69 = OpIAdd %uint %67 %113
+         %72 = OpIMul %uint %uint_8 %69
+         %75 = OpShiftLeftLogical %uint %uint_255 %72
+        %100 = OpAccessChain %_ptr_PushConstant_uint %15 %int_4
+        %101 = OpLoad %uint %100
+        %103 = OpIAdd %uint %101 %113
+        %104 = OpAccessChain %_ptr_PushConstant_uint %15 %int_1
+        %105 = OpLoad %uint %104
+        %106 = OpUMod %uint %103 %105
+        %107 = OpAccessChain %_ptr_PushConstant_uint %15 %int_0
+        %108 = OpLoad %uint %107
+        %110 = OpIMul %uint %uint_8 %106
+        %111 = OpShiftRightLogical %uint %108 %110
+        %112 = OpBitwiseAnd %uint %111 %uint_255
+         %81 = OpShiftLeftLogical %uint %112 %72
+         %84 = OpNot %uint %75
+         %85 = OpBitwiseAnd %uint %114 %84
+         %87 = OpBitwiseOr %uint %85 %81
+         %89 = OpIAdd %uint %113 %int_1
+               OpBranch %53
+         %55 = OpLabel
+               OpStore %47 %114
+               OpReturn
+               OpFunctionEnd
