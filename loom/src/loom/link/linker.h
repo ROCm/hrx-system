@@ -52,6 +52,14 @@ typedef struct loom_linker_add_options_t {
   iree_string_view_list_t root_symbols;
 } loom_linker_add_options_t;
 
+// Exact module-local source symbol ordinals selected by a link plan.
+typedef struct loom_linker_source_symbol_list_t {
+  // Number of ordinals in the selection.
+  iree_host_size_t count;
+  // Strictly increasing module-local source symbol ordinals.
+  const iree_host_size_t* ordinals;
+} loom_linker_source_symbol_list_t;
+
 // Creates an incremental linker over |context|.
 //
 // The linker owns a fresh target module allocated from |block_pool|. The
@@ -83,6 +91,16 @@ void loom_linker_free(loom_linker_t* linker);
 iree_status_t loom_linker_add_module(loom_linker_t* linker,
                                      const loom_module_t* source_module,
                                      const loom_linker_add_options_t* options);
+
+// Adds an exact precomputed source symbol selection to |linker|.
+//
+// |source_symbols| must be strictly increasing. The caller owns dependency
+// closure: references from selected IR to omitted source symbols fail rather
+// than triggering reachability discovery. The linker retains no pointers into
+// |source_module| or |source_symbols| after this call returns.
+iree_status_t loom_linker_add_module_symbols(
+    loom_linker_t* linker, const loom_module_t* source_module,
+    loom_linker_source_symbol_list_t source_symbols);
 
 // Finalizes explicit output |root_symbols| after all modules have been added.
 //

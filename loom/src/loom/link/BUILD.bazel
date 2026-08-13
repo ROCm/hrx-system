@@ -167,6 +167,7 @@ loom_cc_benchmark(
     name = "planner_benchmark",
     srcs = ["planner_benchmark.cc"],
     deps = [
+        ":linker",
         ":module_index",
         ":plan_projection",
         ":planner",

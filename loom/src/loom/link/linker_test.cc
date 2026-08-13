@@ -121,6 +121,16 @@ class LinkerTest : public ::testing::Test {
     return linked_module;
   }
 
+  loom_linker_t* CreateIncrementalLinker() {
+    loom_linker_t* linker = nullptr;
+    const loom_linker_options_t options = {
+        /*.module_name=*/IREE_SV("linked"),
+    };
+    IREE_CHECK_OK(loom_linker_create(&context_, &options, &block_pool_,
+                                     iree_allocator_system(), &linker));
+    return linker;
+  }
+
   iree_status_t LinkStatus(std::initializer_list<loom_module_t*> source_modules,
                            loom_module_t** out_module) {
     return LinkStatus(source_modules, {}, out_module);
@@ -934,6 +944,134 @@ func.def @identity(%x: i32) -> (i32) {
   EXPECT_NE(text.find("func.def @identity"), std::string::npos);
   EXPECT_NE(text.find("func.def retain @caller"), std::string::npos);
   EXPECT_NE(text.find("func.call @identity"), std::string::npos);
+}
+
+TEST_F(LinkerTest, ExactSelectionsLinkPrecomputedCrossModuleClosure) {
+  loom_module_t* harness = Parse(IREE_SV(R"(
+func.decl @identity(%x: i32) -> (i32)
+
+func.def public @caller(%x: i32) -> (i32) {
+  %y = func.call @identity(%x) : (i32) -> (i32)
+  func.return %y : i32
+}
+
+func.def @unused(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"));
+  loom_module_t* corpus = Parse(IREE_SV(R"(
+func.def @identity(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.def @unused_corpus(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"));
+
+  loom_linker_t* linker = CreateIncrementalLinker();
+  const iree_host_size_t harness_symbols[] = {0, 1};
+  IREE_ASSERT_OK(loom_linker_add_module_symbols(
+      linker, harness,
+      (loom_linker_source_symbol_list_t){
+          /*.count=*/IREE_ARRAYSIZE(harness_symbols),
+          /*.ordinals=*/harness_symbols,
+      }));
+  const iree_host_size_t corpus_symbols[] = {0};
+  IREE_ASSERT_OK(loom_linker_add_module_symbols(
+      linker, corpus,
+      (loom_linker_source_symbol_list_t){
+          /*.count=*/IREE_ARRAYSIZE(corpus_symbols),
+          /*.ordinals=*/corpus_symbols,
+      }));
+  const iree_string_view_t roots[] = {IREE_SV("@caller")};
+  IREE_ASSERT_OK(
+      loom_linker_finalize_roots(linker, (iree_string_view_list_t){
+                                             /*.count=*/IREE_ARRAYSIZE(roots),
+                                             /*.values=*/roots,
+                                         }));
+  loom_module_t* linked = nullptr;
+  IREE_ASSERT_OK(loom_linker_finish(linker, &linked));
+  loom_linker_free(linker);
+  modules_.push_back(linked);
+  Verify(linked);
+
+  std::string text = Print(linked);
+  EXPECT_EQ(text.find("func.decl @identity"), std::string::npos);
+  EXPECT_NE(text.find("func.def @identity"), std::string::npos);
+  EXPECT_NE(text.find("func.def public retain @caller"), std::string::npos);
+  EXPECT_NE(text.find("func.call @identity"), std::string::npos);
+  EXPECT_EQ(text.find("@unused"), std::string::npos);
+}
+
+TEST_F(LinkerTest, ExactSelectionRejectsMissingDependency) {
+  loom_module_t* source = Parse(IREE_SV(R"(
+func.def @helper(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.def public @caller(%x: i32) -> (i32) {
+  %y = func.call @helper(%x) : (i32) -> (i32)
+  func.return %y : i32
+}
+)"));
+
+  loom_linker_t* linker = CreateIncrementalLinker();
+  const iree_host_size_t source_symbols[] = {1};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_linker_add_module_symbols(
+                            linker, source,
+                            (loom_linker_source_symbol_list_t){
+                                /*.count=*/IREE_ARRAYSIZE(source_symbols),
+                                /*.ordinals=*/source_symbols,
+                            }));
+  loom_linker_free(linker);
+}
+
+TEST_F(LinkerTest, ExactSelectionRejectsMalformedOrdinals) {
+  loom_module_t* source = Parse(IREE_SV(R"(
+func.def @first() {
+  func.return
+}
+
+func.def @second() {
+  func.return
+}
+)"));
+
+  loom_linker_t* linker = CreateIncrementalLinker();
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_linker_add_module_symbols(linker, source,
+                                     (loom_linker_source_symbol_list_t){
+                                         /*.count=*/1,
+                                         /*.ordinals=*/nullptr,
+                                     }));
+  const iree_host_size_t duplicate_symbols[] = {0, 0};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_linker_add_module_symbols(
+                            linker, source,
+                            (loom_linker_source_symbol_list_t){
+                                /*.count=*/IREE_ARRAYSIZE(duplicate_symbols),
+                                /*.ordinals=*/duplicate_symbols,
+                            }));
+  const iree_host_size_t descending_symbols[] = {1, 0};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_linker_add_module_symbols(
+                            linker, source,
+                            (loom_linker_source_symbol_list_t){
+                                /*.count=*/IREE_ARRAYSIZE(descending_symbols),
+                                /*.ordinals=*/descending_symbols,
+                            }));
+  const iree_host_size_t out_of_range_symbols[] = {2};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        loom_linker_add_module_symbols(
+                            linker, source,
+                            (loom_linker_source_symbol_list_t){
+                                /*.count=*/IREE_ARRAYSIZE(out_of_range_symbols),
+                                /*.ordinals=*/out_of_range_symbols,
+                            }));
+  loom_linker_free(linker);
 }
 
 TEST_F(LinkerTest, RejectsDuplicatePublicConcreteDefinitions) {

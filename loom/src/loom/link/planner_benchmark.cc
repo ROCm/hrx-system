@@ -18,6 +18,7 @@
 #include "loom/format/bytecode/writer.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/link/linker.h"
 #include "loom/link/module_index.h"
 #include "loom/link/plan_projection.h"
 #include "loom/link/planner.h"
@@ -46,13 +47,14 @@ class PlannerCatalogFixture {
                                      iree_allocator_system(), &module));
     BuildModule(module);
     SerializeModule(module);
-    loom_module_free(module);
+    module_ = module;
   }
 
   PlannerCatalogFixture(const PlannerCatalogFixture&) = delete;
   PlannerCatalogFixture& operator=(const PlannerCatalogFixture&) = delete;
 
   ~PlannerCatalogFixture() {
+    loom_module_free(module_);
     loom_context_deinitialize(&context_);
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
@@ -99,6 +101,7 @@ class PlannerCatalogFixture {
   uint32_t symbol_count() const { return symbol_count_; }
   iree_host_size_t byte_count() const { return bytes_.size(); }
   iree_arena_block_pool_t* block_pool() { return &block_pool_; }
+  const loom_module_t* module() const { return module_; }
 
  private:
   void BuildModule(loom_module_t* module) {
@@ -182,6 +185,7 @@ class PlannerCatalogFixture {
   uint32_t symbol_count_;
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_ = {};
+  loom_module_t* module_ = nullptr;
   std::vector<uint8_t> bytes_;
 };
 
@@ -314,6 +318,50 @@ static void BM_Project_SelectiveChain_Catalog(benchmark::State& state) {
   BenchmarkProjection(state, /*root_ordinal=*/0, symbol_count);
 }
 
+static void BenchmarkExactLink(benchmark::State& state,
+                               iree_host_size_t selected_symbol_count) {
+  PlannerCatalogFixture fixture((uint32_t)state.range(0));
+  std::vector<iree_host_size_t> source_symbol_ordinals(selected_symbol_count);
+  if (selected_symbol_count == 1) {
+    source_symbol_ordinals[0] = fixture.symbol_count() - 1;
+  } else {
+    for (iree_host_size_t i = 0; i < selected_symbol_count; ++i) {
+      source_symbol_ordinals[i] = i;
+    }
+  }
+  const loom_linker_source_symbol_list_t source_symbols = {
+      /*.count=*/source_symbol_ordinals.size(),
+      /*.ordinals=*/source_symbol_ordinals.data(),
+  };
+  const loom_linker_options_t linker_options = {
+      /*.module_name=*/IREE_SV("linked"),
+  };
+
+  for (auto _ : state) {
+    state.PauseTiming();
+    loom_linker_t* linker = nullptr;
+    CheckStatus(loom_linker_create(fixture.module()->context, &linker_options,
+                                   fixture.block_pool(),
+                                   iree_allocator_system(), &linker));
+    state.ResumeTiming();
+    CheckStatus(loom_linker_add_module_symbols(linker, fixture.module(),
+                                               source_symbols));
+    benchmark::DoNotOptimize(linker);
+    state.PauseTiming();
+    loom_linker_free(linker);
+    state.ResumeTiming();
+  }
+  SetCounters(state, fixture, selected_symbol_count);
+}
+
+static void BM_LinkExact_SelectiveLeaf_Catalog(benchmark::State& state) {
+  BenchmarkExactLink(state, /*selected_symbol_count=*/1);
+}
+
+static void BM_LinkExact_SelectiveChain_Catalog(benchmark::State& state) {
+  BenchmarkExactLink(state, /*selected_symbol_count=*/state.range(0));
+}
+
 static void BM_GlobalDuplicateEnumeration(benchmark::State& state) {
   const uint32_t provider_count = (uint32_t)state.range(0);
   PlannerCatalogFixture fixture(/*symbol_count=*/1);
@@ -351,6 +399,12 @@ BENCHMARK(BM_Plan_SelectiveLeaf_Catalog)->Apply(CatalogScales)->Complexity();
 BENCHMARK(BM_Plan_SelectiveChain_Catalog)->Apply(CatalogScales)->Complexity();
 BENCHMARK(BM_Project_SelectiveLeaf_Catalog)->Apply(CatalogScales)->Complexity();
 BENCHMARK(BM_Project_SelectiveChain_Catalog)
+    ->Apply(CatalogScales)
+    ->Complexity();
+BENCHMARK(BM_LinkExact_SelectiveLeaf_Catalog)
+    ->Apply(CatalogScales)
+    ->Complexity();
+BENCHMARK(BM_LinkExact_SelectiveChain_Catalog)
     ->Apply(CatalogScales)
     ->Complexity();
 BENCHMARK(BM_GlobalDuplicateEnumeration)->Apply(CatalogScales)->Complexity();

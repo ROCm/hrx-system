@@ -92,10 +92,10 @@ typedef struct loom_linker_source_t {
   const loom_module_t* module;
   // Per-input temporary arena.
   iree_arena_allocator_t* arena;
-  // Source symbol index to target symbol reference table.
+  // Dense source-symbol map, or entries parallel to exact.ordinals.
   loom_symbol_ref_t* target_symbols;
-  // Number of entries in target_symbols.
-  iree_host_size_t target_symbol_count;
+  // Number of symbols in the source module.
+  iree_host_size_t source_symbol_count;
   // Source symbols selected by this add operation.
   uint8_t* live_symbols;
   // Source symbols whose outgoing dependency edges have been scanned.
@@ -104,6 +104,15 @@ typedef struct loom_linker_source_t {
   loom_symbol_reference_table_t reference_table;
   // Lazily initialized source-to-target remap table.
   loom_ir_remap_t remap;
+  // Symbol remap policy used by source IR cloning and contract merging.
+  loom_ir_remap_symbol_callback_t symbol_remap;
+  // Exact source-symbol selection state.
+  struct {
+    // Strictly increasing module-local source symbol ordinals.
+    const iree_host_size_t* ordinals;
+    // Number of entries in ordinals and target_symbols.
+    iree_host_size_t count;
+  } exact;
   // True when root filtering is active for this add operation.
   bool selective;
 } loom_linker_source_t;
@@ -324,17 +333,10 @@ static iree_status_t loom_linker_rename_private_target_symbol(
   return loom_linker_recanonicalize_symbol_uses(linker, target_symbol_id);
 }
 
-static iree_status_t loom_linker_map_source_symbol(
+static iree_status_t loom_linker_resolve_source_symbol(
     loom_linker_source_t* source, uint16_t source_symbol_id,
-    loom_symbol_ref_t* out_target_ref) {
-  *out_target_ref = loom_symbol_ref_null();
-  if (source_symbol_id >= source->target_symbol_count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "source symbol ref {module=0, symbol=%u} is out of range",
-        (unsigned)source_symbol_id);
-  }
-  loom_symbol_ref_t cached_ref = source->target_symbols[source_symbol_id];
+    loom_symbol_ref_t* target_ref_slot, loom_symbol_ref_t* out_target_ref) {
+  loom_symbol_ref_t cached_ref = *target_ref_slot;
   if (loom_symbol_ref_is_valid(cached_ref)) {
     *out_target_ref = cached_ref;
     return iree_ok_status();
@@ -386,16 +388,66 @@ static iree_status_t loom_linker_map_source_symbol(
       .module_id = 0,
       .symbol_id = target_symbol_id,
   };
-  source->target_symbols[source_symbol_id] = target_ref;
+  *target_ref_slot = target_ref;
   *out_target_ref = target_ref;
   return iree_ok_status();
 }
 
-static iree_status_t loom_linker_remap_symbol(
-    void* user_data, const loom_module_t* source_module,
-    loom_module_t* target_module, loom_symbol_ref_t source_ref,
+static iree_status_t loom_linker_map_source_symbol(
+    loom_linker_source_t* source, uint16_t source_symbol_id,
     loom_symbol_ref_t* out_target_ref) {
-  loom_linker_source_t* source = (loom_linker_source_t*)user_data;
+  *out_target_ref = loom_symbol_ref_null();
+  if (source_symbol_id >= source->source_symbol_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "source symbol ref {module=0, symbol=%u} is out of range",
+        (unsigned)source_symbol_id);
+  }
+  return loom_linker_resolve_source_symbol(
+      source, source_symbol_id, &source->target_symbols[source_symbol_id],
+      out_target_ref);
+}
+
+static iree_host_size_t loom_linker_find_exact_source_symbol(
+    const loom_linker_source_t* source, uint16_t source_symbol_id) {
+  iree_host_size_t low = 0;
+  iree_host_size_t high = source->exact.count;
+  while (low < high) {
+    const iree_host_size_t middle = low + (high - low) / 2;
+    const iree_host_size_t ordinal = source->exact.ordinals[middle];
+    if (ordinal < source_symbol_id) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  return low < source->exact.count &&
+                 source->exact.ordinals[low] == source_symbol_id
+             ? low
+             : IREE_HOST_SIZE_MAX;
+}
+
+static iree_status_t loom_linker_map_exact_source_symbol(
+    loom_linker_source_t* source, uint16_t source_symbol_id,
+    loom_symbol_ref_t* out_target_ref) {
+  *out_target_ref = loom_symbol_ref_null();
+  const iree_host_size_t selection_ordinal =
+      loom_linker_find_exact_source_symbol(source, source_symbol_id);
+  if (selection_ordinal == IREE_HOST_SIZE_MAX) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "exact link selection missed reachable source symbol ref "
+        "{module=0, symbol=%u}",
+        (unsigned)source_symbol_id);
+  }
+  return loom_linker_resolve_source_symbol(
+      source, source_symbol_id, &source->target_symbols[selection_ordinal],
+      out_target_ref);
+}
+
+static iree_status_t loom_linker_validate_symbol_remap(
+    const loom_linker_source_t* source, const loom_module_t* source_module,
+    loom_module_t* target_module, loom_symbol_ref_t source_ref) {
   if (source_module != source->module) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "link symbol remap source module mismatch");
@@ -411,12 +463,22 @@ static iree_status_t loom_linker_remap_symbol(
                             (unsigned)source_ref.module_id,
                             (unsigned)source_ref.symbol_id);
   }
-  if (source_ref.symbol_id >= source->target_symbol_count) {
+  if (source_ref.symbol_id >= source->source_symbol_count) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "source symbol ref {module=0, symbol=%u} is out of range",
         (unsigned)source_ref.symbol_id);
   }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_linker_remap_symbol(
+    void* user_data, const loom_module_t* source_module,
+    loom_module_t* target_module, loom_symbol_ref_t source_ref,
+    loom_symbol_ref_t* out_target_ref) {
+  loom_linker_source_t* source = (loom_linker_source_t*)user_data;
+  IREE_RETURN_IF_ERROR(loom_linker_validate_symbol_remap(
+      source, source_module, target_module, source_ref));
   if (source->selective && !source->live_symbols[source_ref.symbol_id]) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -428,14 +490,24 @@ static iree_status_t loom_linker_remap_symbol(
                                        out_target_ref);
 }
 
+static iree_status_t loom_linker_remap_exact_symbol(
+    void* user_data, const loom_module_t* source_module,
+    loom_module_t* target_module, loom_symbol_ref_t source_ref,
+    loom_symbol_ref_t* out_target_ref) {
+  loom_linker_source_t* source = (loom_linker_source_t*)user_data;
+  IREE_RETURN_IF_ERROR(loom_linker_validate_symbol_remap(
+      source, source_module, target_module, source_ref));
+  return loom_linker_map_exact_source_symbol(source, source_ref.symbol_id,
+                                             out_target_ref);
+}
+
 static iree_status_t loom_linker_get_source_remap(loom_linker_source_t* source,
                                                   loom_ir_remap_t** out_remap) {
   if (!source->remap.source_module) {
     IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
         source->module, source->linker->target_module, source->arena,
         &(loom_ir_remap_options_t){
-            .remap_symbol = loom_ir_remap_symbol_callback_make(
-                loom_linker_remap_symbol, source),
+            .remap_symbol = source->symbol_remap,
         },
         &source->remap));
   }
@@ -797,8 +869,7 @@ static iree_status_t loom_link_merge_func_contract(
                               "cross-module contract merge requires source "
                               "remap state");
     }
-    symbol_callback = loom_ir_remap_symbol_callback_make(
-        loom_linker_remap_symbol, link_source);
+    symbol_callback = link_source->symbol_remap;
   }
 
   loom_ir_remap_t contract_remap = {0};
@@ -1028,8 +1099,7 @@ static iree_status_t loom_link_merge_value_contract(
                               "cross-module contract merge requires source "
                               "remap state");
     }
-    symbol_callback = loom_ir_remap_symbol_callback_make(
-        loom_linker_remap_symbol, link_source);
+    symbol_callback = link_source->symbol_remap;
   }
 
   loom_ir_remap_t contract_remap = {0};
@@ -1224,7 +1294,7 @@ static iree_status_t loom_linker_clone_or_merge_symbol_op(
 
 static iree_status_t loom_linker_mark_source_symbol_live(
     loom_linker_source_t* source, uint16_t source_symbol_id) {
-  if (source_symbol_id >= source->target_symbol_count) {
+  if (source_symbol_id >= source->source_symbol_count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "source symbol %u is out of range",
                             (unsigned)source_symbol_id);
@@ -1248,7 +1318,7 @@ static bool loom_linker_source_symbol_is_func_provider(
 static iree_status_t loom_linker_mark_contract_providers_live(
     loom_linker_source_t* source, iree_string_view_t contract) {
   if (iree_string_view_is_empty(contract)) return iree_ok_status();
-  for (uint16_t symbol_id = 0; symbol_id < source->target_symbol_count;
+  for (uint16_t symbol_id = 0; symbol_id < source->source_symbol_count;
        ++symbol_id) {
     const loom_symbol_t* symbol = &source->module->symbols.entries[symbol_id];
     if (!loom_linker_source_symbol_is_func_provider(symbol)) continue;
@@ -1346,7 +1416,7 @@ static iree_status_t loom_linker_mark_root_symbols_live(
                               "root symbol name must not be empty");
     }
     for (iree_host_size_t symbol_index = 0;
-         symbol_index < source->target_symbol_count; ++symbol_index) {
+         symbol_index < source->source_symbol_count; ++symbol_index) {
       iree_string_view_t source_name = iree_string_view_empty();
       IREE_RETURN_IF_ERROR(loom_link_source_symbol_name(
           source->module, (uint16_t)symbol_index, &source_name));
@@ -1364,7 +1434,7 @@ static iree_status_t loom_linker_mark_existing_target_anchors_live(
     loom_linker_source_t* source) {
   loom_linker_t* linker = source->linker;
   for (iree_host_size_t symbol_index = 0;
-       symbol_index < source->target_symbol_count; ++symbol_index) {
+       symbol_index < source->source_symbol_count; ++symbol_index) {
     iree_string_view_t source_name = iree_string_view_empty();
     IREE_RETURN_IF_ERROR(loom_link_source_symbol_name(
         source->module, (uint16_t)symbol_index, &source_name));
@@ -1417,7 +1487,7 @@ static iree_status_t loom_linker_resolve_live_symbols(
   bool changed = true;
   while (changed) {
     changed = false;
-    for (uint16_t symbol_id = 0; symbol_id < source->target_symbol_count;
+    for (uint16_t symbol_id = 0; symbol_id < source->source_symbol_count;
          ++symbol_id) {
       if (!source->live_symbols[symbol_id] ||
           source->scanned_symbols[symbol_id]) {
@@ -1498,9 +1568,47 @@ static iree_status_t loom_link_validate_add_options(
   return iree_ok_status();
 }
 
-static iree_host_size_t loom_link_add_root_symbol_count(
-    const loom_linker_add_options_t* options) {
-  return options ? options->root_symbols.count : 0;
+static iree_status_t loom_linker_validate_source_module(
+    const loom_linker_t* linker, const loom_module_t* source_module) {
+  if (!linker || !source_module) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "linker and source module must not be NULL");
+  }
+  if (linker->finished || !linker->target_module) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "cannot add a module after linker finish");
+  }
+  if (source_module->context != linker->context) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "source module context does not match linker");
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_linker_validate_source_symbols(
+    const loom_module_t* source_module,
+    loom_linker_source_symbol_list_t source_symbols) {
+  if (source_symbols.count != 0 && !source_symbols.ordinals) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "source symbol count is non-zero but ordinals is NULL");
+  }
+  for (iree_host_size_t i = 0; i < source_symbols.count; ++i) {
+    const iree_host_size_t ordinal = source_symbols.ordinals[i];
+    if (ordinal >= source_module->symbols.count) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "source symbol ordinal %" PRIhsz
+                              " is out of range for module with %" PRIhsz
+                              " symbols",
+                              ordinal, source_module->symbols.count);
+    }
+    if (i != 0 && ordinal <= source_symbols.ordinals[i - 1]) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "source symbol ordinals must be strictly increasing");
+    }
+  }
+  return iree_ok_status();
 }
 
 iree_status_t loom_linker_create(loom_context_t* context,
@@ -1572,18 +1680,8 @@ static void loom_linker_retain_function_root(loom_linker_t* linker,
 iree_status_t loom_linker_add_module(loom_linker_t* linker,
                                      const loom_module_t* source_module,
                                      const loom_linker_add_options_t* options) {
-  if (!linker || !source_module) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "linker and source module must not be NULL");
-  }
-  if (linker->finished || !linker->target_module) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "cannot add a module after linker finish");
-  }
-  if (source_module->context != linker->context) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "source module context does not match linker");
-  }
+  IREE_RETURN_IF_ERROR(
+      loom_linker_validate_source_module(linker, source_module));
   IREE_RETURN_IF_ERROR(loom_link_validate_add_options(options));
 
   iree_arena_allocator_t source_arena;
@@ -1593,36 +1691,38 @@ iree_status_t loom_linker_add_module(loom_linker_t* linker,
       .linker = linker,
       .module = source_module,
       .arena = &source_arena,
-      .target_symbol_count = source_module->symbols.count,
-      .selective = loom_link_add_root_symbol_count(options) > 0,
+      .source_symbol_count = source_module->symbols.count,
+      .selective = options && options->root_symbols.count != 0,
   };
+  source.symbol_remap =
+      loom_ir_remap_symbol_callback_make(loom_linker_remap_symbol, &source);
 
   iree_status_t status = iree_ok_status();
-  if (source.target_symbol_count > 0) {
+  if (source.source_symbol_count > 0) {
     status = iree_arena_allocate_array(
-        &source_arena, source.target_symbol_count,
+        &source_arena, source.source_symbol_count,
         sizeof(*source.target_symbols), (void**)&source.target_symbols);
   }
-  if (iree_status_is_ok(status) && source.target_symbol_count > 0) {
-    for (iree_host_size_t i = 0; i < source.target_symbol_count; ++i) {
+  if (iree_status_is_ok(status) && source.source_symbol_count > 0) {
+    for (iree_host_size_t i = 0; i < source.source_symbol_count; ++i) {
       source.target_symbols[i] = loom_symbol_ref_null();
     }
   }
   if (iree_status_is_ok(status) && source.selective) {
     status = iree_arena_allocate_array(
-        &source_arena, source.target_symbol_count, sizeof(*source.live_symbols),
+        &source_arena, source.source_symbol_count, sizeof(*source.live_symbols),
         (void**)&source.live_symbols);
   }
   if (iree_status_is_ok(status) && source.selective) {
     status = iree_arena_allocate_array(
-        &source_arena, source.target_symbol_count,
+        &source_arena, source.source_symbol_count,
         sizeof(*source.scanned_symbols), (void**)&source.scanned_symbols);
   }
   if (iree_status_is_ok(status) && source.selective) {
     memset(source.live_symbols, 0,
-           source.target_symbol_count * sizeof(*source.live_symbols));
+           source.source_symbol_count * sizeof(*source.live_symbols));
     memset(source.scanned_symbols, 0,
-           source.target_symbol_count * sizeof(*source.scanned_symbols));
+           source.source_symbol_count * sizeof(*source.scanned_symbols));
     status = loom_linker_mark_root_symbols_live(&source, options);
   }
   if (iree_status_is_ok(status) && source.selective) {
@@ -1636,6 +1736,56 @@ iree_status_t loom_linker_add_module(loom_linker_t* linker,
   }
   if (iree_status_is_ok(status)) {
     status = loom_linker_clone_module_body(&source);
+  }
+  iree_arena_deinitialize(&source_arena);
+  return status;
+}
+
+iree_status_t loom_linker_add_module_symbols(
+    loom_linker_t* linker, const loom_module_t* source_module,
+    loom_linker_source_symbol_list_t source_symbols) {
+  IREE_RETURN_IF_ERROR(
+      loom_linker_validate_source_module(linker, source_module));
+  IREE_RETURN_IF_ERROR(
+      loom_linker_validate_source_symbols(source_module, source_symbols));
+  if (source_symbols.count == 0) {
+    return iree_ok_status();
+  }
+
+  iree_arena_allocator_t source_arena;
+  iree_arena_initialize(linker->block_pool, &source_arena);
+  loom_linker_source_t source = {
+      .linker = linker,
+      .module = source_module,
+      .arena = &source_arena,
+      .source_symbol_count = source_module->symbols.count,
+      .exact =
+          {
+              .ordinals = source_symbols.ordinals,
+              .count = source_symbols.count,
+          },
+  };
+  source.symbol_remap = loom_ir_remap_symbol_callback_make(
+      loom_linker_remap_exact_symbol, &source);
+
+  iree_status_t status = iree_arena_allocate_array(
+      &source_arena, source.exact.count, sizeof(*source.target_symbols),
+      (void**)&source.target_symbols);
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < source.exact.count; ++i) {
+      source.target_symbols[i] = loom_symbol_ref_null();
+    }
+  }
+  for (iree_host_size_t i = 0;
+       i < source.exact.count && iree_status_is_ok(status); ++i) {
+    const uint16_t source_symbol_id = (uint16_t)source.exact.ordinals[i];
+    loom_symbol_ref_t target_ref = loom_symbol_ref_null();
+    status = loom_linker_resolve_source_symbol(
+        &source, source_symbol_id, &source.target_symbols[i], &target_ref);
+    if (iree_status_is_ok(status)) {
+      status = loom_linker_clone_or_merge_symbol_op(&source, source_symbol_id,
+                                                    target_ref);
+    }
   }
   iree_arena_deinitialize(&source_arena);
   return status;

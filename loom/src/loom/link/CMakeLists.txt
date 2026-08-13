@@ -185,6 +185,7 @@ loom_cc_benchmark(
   SRCS
     "planner_benchmark.cc"
   DEPS
+    ::linker
     ::module_index
     ::plan_projection
     ::planner
