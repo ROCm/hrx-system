@@ -43,7 +43,6 @@
 #include "common/tls.h"
 #include "hrx_runtime.h"
 #include "iree/base/threading/call_once.h"
-#include "iree/hal/drivers/amdgpu/api.h"
 
 //===----------------------------------------------------------------------===//
 // Debug logging
@@ -2787,7 +2786,7 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       *value = 1;  // Assume large BAR support
       break;
     case hipDeviceAttributeCanUseStreamWaitValue:
-      *value = 1;
+      *value = 0;
       break;
     case hipDeviceAttributeImageSupport:
       *value = 1;
@@ -9982,10 +9981,12 @@ HIPAPI hipError_t hipMemcpyPeerAsync(void* dst, int dstDeviceId,
     HIP_RETURN_ERROR(hipErrorContextIsDestroyed);
   }
   if (sizeBytes == 0) {
+    iree_hal_streaming_stream_release(stream_obj);
     IREE_TRACE_ZONE_END(z0);
     return hipSuccess;
   }
   if (!dst || !src) {
+    iree_hal_streaming_stream_release(stream_obj);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
@@ -10011,8 +10012,9 @@ HIPAPI hipError_t hipMemcpyPeerAsync(void* dst, int dstDeviceId,
     HIP_RETURN_ERROR(result);
   }
 
-  result = iree_hip_memcpy_peer_staged(dst_context, dst, src_context, src,
-                                       sizeBytes, stream_obj);
+  result = iree_status_to_hip_result(iree_hal_streaming_memcpy_peer(
+      dst_context, (iree_hal_streaming_deviceptr_t)(uintptr_t)dst, src_context,
+      (iree_hal_streaming_deviceptr_t)(uintptr_t)src, sizeBytes, stream_obj));
   iree_hal_streaming_stream_release(stream_obj);
   IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(result);
@@ -12114,35 +12116,11 @@ static hipError_t iree_hip_enqueue_stream_value_write(
   return iree_status_to_hip_result(status);
 }
 
-static iree_hal_amdgpu_wait_value_condition_t
-iree_hip_stream_wait_value_condition(unsigned int flags) {
-  switch (flags) {
-    case IREE_HIP_STREAM_WAIT_VALUE_EQ:
-      return IREE_HAL_AMDGPU_WAIT_VALUE_CONDITION_EQUAL;
-    case IREE_HIP_STREAM_WAIT_VALUE_AND:
-      return IREE_HAL_AMDGPU_WAIT_VALUE_CONDITION_BITWISE_AND;
-    case IREE_HIP_STREAM_WAIT_VALUE_NOR:
-      return IREE_HAL_AMDGPU_WAIT_VALUE_CONDITION_BITWISE_NOR;
-    case IREE_HIP_STREAM_WAIT_VALUE_GTE:
-    default:
-      return IREE_HAL_AMDGPU_WAIT_VALUE_CONDITION_GREATER_THAN_OR_EQUAL;
-  }
-}
-
-static iree_status_t iree_hip_enqueue_stream_value_wait_resolved(
-    iree_hal_streaming_stream_t* stream,
-    const iree_hip_stream_value_target_t* target, uint64_t value,
-    unsigned int flags, uint64_t mask, iree_host_size_t byte_length) {
-  return iree_hal_streaming_queue_wait_value(
-      stream, target->buffer_ref.buffer->buffer, target->buffer_ref.offset,
-      value, mask, byte_length, iree_hip_stream_wait_value_condition(flags),
-      IREE_HAL_AMDGPU_WAIT_VALUE_FLAG_NONE,
-      iree_hal_amdgpu_device_queue_wait_value);
-}
-
 static hipError_t iree_hip_enqueue_stream_value_wait(
     hipStream_t stream, const void* ptr, uint64_t value, unsigned int flags,
     uint64_t mask, iree_host_size_t byte_length) {
+  (void)value;
+  (void)mask;
   if (!ptr || !iree_hip_stream_wait_value_flags_are_valid(flags)) {
     return hipErrorInvalidValue;
   }
@@ -12161,11 +12139,9 @@ static hipError_t iree_hip_enqueue_stream_value_wait(
     return result;
   }
 
-  iree_status_t status = iree_hip_enqueue_stream_value_wait_resolved(
-      stream_object, &target, value, flags, mask, byte_length);
   iree_hip_stream_value_target_deinitialize(&target);
   iree_hal_streaming_stream_release(stream_object);
-  return iree_status_to_hip_result(status);
+  return hipErrorNotSupported;
 }
 
 // Writes a 32-bit value to memory as part of stream execution.
@@ -12207,16 +12183,11 @@ static hipError_t iree_hip_stream_value_operation_initialize(
   const void* address = NULL;
   switch (params->operation) {
     case hipStreamMemOpWaitValue32:
-      out_operation->kind = IREE_HIP_STREAM_VALUE_OPERATION_WAIT;
-      out_operation->value = params->waitValue.value;
-      out_operation->mask = UINT32_MAX;
-      out_operation->flags = params->waitValue.flags;
-      out_operation->byte_length = sizeof(uint32_t);
-      address = params->waitValue.address;
-      if (!iree_hip_stream_wait_value_flags_are_valid(out_operation->flags)) {
+      if (!iree_hip_stream_wait_value_flags_are_valid(
+              params->waitValue.flags)) {
         return hipErrorInvalidValue;
       }
-      break;
+      return hipErrorNotSupported;
     case hipStreamMemOpWriteValue32:
       out_operation->kind = IREE_HIP_STREAM_VALUE_OPERATION_WRITE;
       out_operation->value = params->writeValue.value;
@@ -12229,16 +12200,11 @@ static hipError_t iree_hip_stream_value_operation_initialize(
       }
       break;
     case hipStreamMemOpWaitValue64:
-      out_operation->kind = IREE_HIP_STREAM_VALUE_OPERATION_WAIT;
-      out_operation->value = params->waitValue.value64;
-      out_operation->mask = UINT64_MAX;
-      out_operation->flags = params->waitValue.flags;
-      out_operation->byte_length = sizeof(uint64_t);
-      address = params->waitValue.address;
-      if (!iree_hip_stream_wait_value_flags_are_valid(out_operation->flags)) {
+      if (!iree_hip_stream_wait_value_flags_are_valid(
+              params->waitValue.flags)) {
         return hipErrorInvalidValue;
       }
-      break;
+      return hipErrorNotSupported;
     case hipStreamMemOpWriteValue64:
       out_operation->kind = IREE_HIP_STREAM_VALUE_OPERATION_WRITE;
       out_operation->value = params->writeValue.value64;
@@ -12308,15 +12274,9 @@ HIPAPI hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count,
   for (iree_host_size_t i = 0; i < initialized_count && result == hipSuccess;
        ++i) {
     const iree_hip_stream_value_operation_t* operation = &operations[i];
-    if (operation->kind == IREE_HIP_STREAM_VALUE_OPERATION_WAIT) {
-      status = iree_hip_enqueue_stream_value_wait_resolved(
-          stream_object, &operation->target, operation->value, operation->flags,
-          operation->mask, operation->byte_length);
-    } else {
-      status = iree_hip_enqueue_stream_value_write_resolved(
-          stream_object, &operation->target, operation->value, operation->flags,
-          operation->byte_length);
-    }
+    status = iree_hip_enqueue_stream_value_write_resolved(
+        stream_object, &operation->target, operation->value, operation->flags,
+        operation->byte_length);
     if (!iree_status_is_ok(status)) {
       result = iree_status_to_hip_result(status);
     }

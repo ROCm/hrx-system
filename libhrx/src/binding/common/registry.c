@@ -826,11 +826,24 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
       bool inserted = false;
       for (iree_host_size_t j = 0; j < map->capacity; ++j) {
         if (map->entries[idx].key == symbol_host_ptr) {
-          status = iree_make_status(
-              IREE_STATUS_ALREADY_EXISTS,
-              "host symbol pointer for `%.*s` is already registered",
-              (int)registered_name.size, registered_name.data);
-          break;
+          iree_hal_streaming_symbol_t* existing_symbol =
+              map->entries[idx].symbol;
+          const bool is_coalesced_function =
+              existing_symbol &&
+              existing_symbol->type == IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION &&
+              symbol->type == IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION &&
+              existing_symbol->module != symbol->module &&
+              iree_string_view_equal(existing_symbol->name, symbol->name);
+          if (!is_coalesced_function) {
+            status = iree_make_status(
+                IREE_STATUS_ALREADY_EXISTS,
+                "host symbol pointer for `%.*s` is already registered",
+                (int)registered_name.size, registered_name.data);
+            break;
+          }
+          // Weak host stubs may be coalesced while each device image retains
+          // its own definition. Keep every compatible definition in the probe
+          // chain so unloading one image leaves another resolvable.
         }
         if (map->entries[idx].key == IREE_HAL_STREAMING_SYMBOL_MAP_EMPTY_KEY ||
             map->entries[idx].key ==
