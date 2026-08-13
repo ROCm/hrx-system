@@ -775,8 +775,9 @@ iree_hal_amdgpu_physical_device_initialize_default_pool_resources(
       .memory_pool = out_physical_device->host_memory_pools.fine_pool,
       .vmem_memory_type = IREE_HAL_AMDGPU_VMEM_MEMORY_TYPE_DEFAULT,
       .asan_state = asan_state,
-      .memory_type =
-          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      .memory_type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                     IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
+                     IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
       .supported_usage =
           iree_hal_amdgpu_physical_device_mappable_pool_supported_usage(),
   };

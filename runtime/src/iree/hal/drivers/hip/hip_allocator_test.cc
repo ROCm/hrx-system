@@ -229,16 +229,16 @@ TEST_F(HipAllocatorTest, DeviceLocalMappingPromotesToHostVisible) {
   iree_hal_buffer_compatibility_t compat =
       iree_hal_allocator_query_buffer_compatibility(
           allocator, params, kSize, &compat_params, &compat_size);
-  ASSERT_TRUE(
-      iree_all_bits_set(compat, IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE));
+  if (!iree_all_bits_set(compat, IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE)) {
+    GTEST_SKIP() << "Device-local mapped memory is unsupported";
+  }
 
   // The allocator must have promoted to a type that supports mapping.
-  // On HIP this is either DEVICE_LOCAL+HOST_VISIBLE (managed) or
-  // HOST_LOCAL+DEVICE_VISIBLE (page-locked fallback).
-  EXPECT_TRUE(
-      iree_all_bits_set(compat_params.type,
-                        IREE_HAL_MEMORY_TYPE_HOST_VISIBLE) ||
-      iree_all_bits_set(compat_params.type, IREE_HAL_MEMORY_TYPE_HOST_LOCAL));
+  EXPECT_TRUE(iree_all_bits_set(
+      compat_params.type,
+      IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE));
+  EXPECT_TRUE(iree_all_bits_set(compat_params.type,
+                                IREE_HAL_MEMORY_TYPE_HOST_COHERENT));
 
   // Allocation must succeed (no "mappable buffers require host pointers").
   iree_hal_buffer_t* buffer = nullptr;

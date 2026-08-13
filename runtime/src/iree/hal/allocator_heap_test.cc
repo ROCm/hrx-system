@@ -21,9 +21,11 @@ TEST(HeapAllocatorTest, ProvidesCoherentUnifiedMemory) {
   IREE_ASSERT_OK(
       iree_hal_allocator_query_memory_heaps(allocator, 1, &heap, &heap_count));
   ASSERT_EQ(heap_count, 1);
-  EXPECT_TRUE(iree_all_bits_set(
-      heap.type,
-      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL));
+  EXPECT_TRUE(
+      iree_all_bits_set(heap.type, IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                                       IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
+                                       IREE_HAL_MEMORY_TYPE_HOST_CACHED |
+                                       IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL));
 
   const iree_hal_buffer_params_t params = {
       /*.usage=*/IREE_HAL_BUFFER_USAGE_STORAGE,
@@ -34,9 +36,11 @@ TEST(HeapAllocatorTest, ProvidesCoherentUnifiedMemory) {
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(
       iree_hal_allocator_allocate_buffer(allocator, params, 16, &buffer));
-  EXPECT_TRUE(iree_all_bits_set(
-      iree_hal_buffer_memory_type(buffer),
-      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL));
+  EXPECT_TRUE(iree_all_bits_set(iree_hal_buffer_memory_type(buffer),
+                                IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                                    IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
+                                    IREE_HAL_MEMORY_TYPE_HOST_CACHED |
+                                    IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL));
 
   iree_hal_buffer_release(buffer);
   iree_hal_allocator_release(allocator);

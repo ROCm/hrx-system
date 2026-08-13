@@ -121,6 +121,17 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    buffer_test
+  SRCS
+    "buffer_test.cc"
+  DEPS
+    ::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
     device_test
   SRCS
     "device_test.cc"

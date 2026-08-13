@@ -17,7 +17,7 @@ extern "C" {
 // Memory type reported by the CPU slab provider.
 #define IREE_HAL_CPU_SLAB_PROVIDER_MEMORY_TYPE                           \
   (IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_LOCAL | \
-   IREE_HAL_MEMORY_TYPE_HOST_CACHED)
+   IREE_HAL_MEMORY_TYPE_HOST_COHERENT | IREE_HAL_MEMORY_TYPE_HOST_CACHED)
 
 // Buffer usage flags supported by CPU slab allocations.
 #define IREE_HAL_CPU_SLAB_PROVIDER_BUFFER_USAGE                      \

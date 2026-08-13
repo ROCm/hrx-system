@@ -12,6 +12,10 @@
 #include "iree/hal/buffer_heap_impl.h"
 #include "iree/hal/resource.h"
 
+static const iree_hal_memory_type_t iree_hal_heap_allocator_memory_type =
+    IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+    IREE_HAL_MEMORY_TYPE_HOST_COHERENT | IREE_HAL_MEMORY_TYPE_HOST_CACHED;
+
 typedef struct iree_hal_heap_allocator_t {
   iree_hal_resource_t resource;
   iree_allocator_t host_allocator;
@@ -111,9 +115,7 @@ static iree_status_t iree_hal_heap_allocator_query_memory_heaps(
     return iree_status_from_code(IREE_STATUS_OUT_OF_RANGE);
   }
   heaps[0] = (iree_hal_allocator_memory_heap_t){
-      .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
-              IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-              IREE_HAL_MEMORY_TYPE_HOST_CACHED,
+      .type = iree_hal_heap_allocator_memory_type,
       .allowed_usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
                        IREE_HAL_BUFFER_USAGE_DISPATCH |
                        IREE_HAL_BUFFER_USAGE_SHARING_EXPORT |
@@ -139,6 +141,11 @@ iree_hal_heap_allocator_query_buffer_compatibility(
   if (iree_any_bit_set(params->type, IREE_HAL_MEMORY_TYPE_DEVICE_UNCACHED)) {
     return IREE_HAL_BUFFER_COMPATIBILITY_NONE;
   }
+  const iree_hal_memory_type_t required_type =
+      params->type & ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
+  if (!iree_all_bits_set(iree_hal_heap_allocator_memory_type, required_type)) {
+    return IREE_HAL_BUFFER_COMPATIBILITY_NONE;
+  }
 
   // All buffers can be allocated on the heap and all heap-accessible buffers
   // can be imported/exported.
@@ -161,11 +168,8 @@ iree_hal_heap_allocator_query_buffer_compatibility(
     }
   }
 
-  // Always ensure we are host-visible.
-  params->type |= IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
-
-  // We are now optimal.
-  params->type &= ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
+  // Heap memory is coherent cached UMA for CPU devices.
+  params->type = iree_hal_heap_allocator_memory_type;
 
   // Host currently uses mapping to copy buffers, which is done a lot.
   // We could probably remove this mutation by preventing copies in those cases.

@@ -52,6 +52,9 @@ enum iree_hal_memory_type_bits_t {
   // iree_hal_buffer_mapping_invalidate_range are not needed to flush host
   // writes to the device or make device writes visible to the host,
   // respectively.
+  //
+  // Coherence is independent of placement: host-local and device-local memory
+  // may either be coherent or require explicit host cache management.
   IREE_HAL_MEMORY_TYPE_HOST_COHERENT = 1u << 2,
 
   // Memory allocated with this type is cached on the host. Host memory
@@ -62,15 +65,18 @@ enum iree_hal_memory_type_bits_t {
   // made on the device.
   IREE_HAL_MEMORY_TYPE_HOST_CACHED = 1u << 3,
 
-  // Memory is accessible as normal host allocated memory.
+  // Memory allocated with this type is local to the host and accessible as
+  // normal host memory. This includes IREE_HAL_MEMORY_TYPE_HOST_VISIBLE.
   //
   // This may be combined with IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL when one
-  // coherent unified memory type is local to both the host and device. Because
-  // HOST_LOCAL includes HOST_COHERENT, non-coherent device-local memory that
-  // can be mapped by the host must use HOST_VISIBLE without HOST_LOCAL.
-  IREE_HAL_MEMORY_TYPE_HOST_LOCAL = IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
-                                    IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
-                                    (1u << 6),
+  // unified memory type is local to both the host and device. Locality does not
+  // imply coherence; IREE_HAL_MEMORY_TYPE_HOST_COHERENT is reported separately
+  // when explicit host cache management is unnecessary.
+  //
+  // Host-visible memory without HOST_LOCAL may be remotely accessible or
+  // otherwise significantly slower for ordinary host access.
+  IREE_HAL_MEMORY_TYPE_HOST_LOCAL =
+      IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | (1u << 6),
 
   // The allocator will choose the optimal memory type based on buffer usage,
   // preferring to place the allocation in host-local memory.
@@ -114,7 +120,7 @@ enum iree_hal_memory_type_bits_t {
   // It should be expected that host access will be slow.
   //
   // This bit is only used during allocation.
-  // Allocations will fail if there is no host-local memory type that can
+  // Allocations will fail if there is no device-local memory type that can
   // satisfy all requested usage.
   IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE =
       IREE_HAL_MEMORY_TYPE_OPTIMAL | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
