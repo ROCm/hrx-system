@@ -18,6 +18,7 @@
 #include "iree/hal/drivers/amdgpu/abi/kernel_descriptor.h"
 #include "iree/hal/drivers/amdgpu/util/aql_ring.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
+#include "iree/hal/drivers/amdgpu/util/pm4_atomic.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_barrier.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_dispatch.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_dispatch_test_kernels.h"
@@ -327,6 +328,86 @@ static iree_status_t AppendPm4WriteData32(uint32_t* dwords, uint32_t capacity,
   return iree_ok_status();
 }
 
+static iree_status_t AppendPm4AtomicWait(
+    iree_hal_atomic_width_t width, iree_hal_atomic_wait_condition_t condition,
+    void* target, uint64_t value, uint64_t mask, uint32_t* dwords,
+    uint32_t capacity, uint32_t* inout_dword_count) {
+  if (*inout_dword_count > capacity) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "PM4 atomic wait cursor exceeds capacity");
+  }
+  uint32_t emitted_dword_count = 0;
+  if (!iree_hal_amdgpu_pm4_atomic_wait_emit(
+          width, condition, reinterpret_cast<uintptr_t>(target), value, mask,
+          capacity - *inout_dword_count, &dwords[*inout_dword_count],
+          &emitted_dword_count)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "PM4 atomic wait cannot be encoded");
+  }
+  *inout_dword_count += emitted_dword_count;
+  return iree_ok_status();
+}
+
+static iree_status_t AppendPm4AtomicStore(iree_hal_atomic_width_t width,
+                                          void* target, uint64_t value,
+                                          uint32_t* dwords, uint32_t capacity,
+                                          uint32_t* inout_dword_count) {
+  if (*inout_dword_count > capacity) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "PM4 atomic store cursor exceeds capacity");
+  }
+  uint32_t emitted_dword_count = 0;
+  if (!iree_hal_amdgpu_pm4_atomic_store_emit(
+          width, reinterpret_cast<uintptr_t>(target), value,
+          capacity - *inout_dword_count, &dwords[*inout_dword_count],
+          &emitted_dword_count)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "PM4 atomic store cannot be encoded");
+  }
+  *inout_dword_count += emitted_dword_count;
+  return iree_ok_status();
+}
+
+static iree_status_t AppendPm4AtomicRmw(
+    iree_hal_atomic_width_t width, iree_hal_atomic_rmw_operation_t operation,
+    void* target, uint64_t operand, uint32_t* dwords, uint32_t capacity,
+    uint32_t* inout_dword_count) {
+  if (*inout_dword_count > capacity) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "PM4 atomic RMW cursor exceeds capacity");
+  }
+  uint32_t emitted_dword_count = 0;
+  if (!iree_hal_amdgpu_pm4_atomic_rmw_emit(
+          width, operation, reinterpret_cast<uintptr_t>(target), operand,
+          capacity - *inout_dword_count, &dwords[*inout_dword_count],
+          &emitted_dword_count)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "PM4 atomic RMW cannot be encoded");
+  }
+  *inout_dword_count += emitted_dword_count;
+  return iree_ok_status();
+}
+
+static iree_status_t AppendPm4CopyData64(uint32_t* dwords, uint32_t capacity,
+                                         uint32_t* inout_dword_count,
+                                         const void* source, void* target) {
+  if (*inout_dword_count > capacity) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "PM4 copy-data cursor exceeds capacity");
+  }
+  iree_hal_amdgpu_pm4_ib_slot_t slot;
+  const uint32_t emitted_dword_count =
+      iree_hal_amdgpu_pm4_emit_copy_data64(&slot, source, target);
+  if (capacity - *inout_dword_count < emitted_dword_count) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "PM4 copy-data exceeds capacity");
+  }
+  memcpy(&dwords[*inout_dword_count], slot.dwords,
+         emitted_dword_count * sizeof(*dwords));
+  *inout_dword_count += emitted_dword_count;
+  return iree_ok_status();
+}
+
 static iree_status_t AppendPm4CompletionWrite(
     iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities,
     uint32_t* dwords, uint32_t capacity, uint32_t* inout_dword_count,
@@ -376,6 +457,12 @@ static iree_status_t AppendPm4DispatchDirect(
 static void WaitForCompletionWord(volatile uint32_t* completion,
                                   uint32_t value) {
   while (*completion != value) {
+    iree_processor_yield();
+  }
+}
+
+static void WaitForMarker(iree_atomic_int32_t* marker, int32_t value) {
+  while (iree_atomic_load(marker, iree_memory_order_acquire) != value) {
     iree_processor_yield();
   }
 }
@@ -816,6 +903,346 @@ TEST_F(PM4DispatchLiveTest, AqlAndAqlPm4IbLaunchMixedKernels) {
   IREE_ASSERT_OK(iree_hsa_queue_destroy(IREE_LIBHSA(&libhsa), queue));
   IREE_ASSERT_OK(iree_hsa_amd_memory_pool_free(IREE_LIBHSA(&libhsa), memory));
   IREE_ASSERT_OK(iree_hsa_executable_destroy(IREE_LIBHSA(&libhsa), executable));
+}
+
+struct alignas(64) AtomicPacketMemory {
+  uint32_t wait32[3];
+  uint64_t wait64[3];
+  iree_atomic_int32_t staged_wait32[3];
+  iree_atomic_int64_t staged_wait64[3];
+  uint64_t payload[6];
+  uint64_t observed_payload[6];
+  uint32_t store32;
+  uint64_t store64;
+  iree_atomic_int32_t marker;
+  uint32_t completion;
+};
+
+struct alignas(64) AtomicPacketDeviceMemory {
+  uint32_t rmw32[5];
+  uint64_t rmw64[5];
+  uint32_t store32;
+  uint64_t store64;
+};
+
+template <typename T>
+static T ApplyAtomicRmw(T value, iree_hal_atomic_rmw_operation_t operation,
+                        T operand) {
+  switch (operation) {
+    case IREE_HAL_ATOMIC_RMW_OPERATION_ADD:
+      return value + operand;
+    case IREE_HAL_ATOMIC_RMW_OPERATION_SUBTRACT:
+      return value - operand;
+    case IREE_HAL_ATOMIC_RMW_OPERATION_AND:
+      return value & operand;
+    case IREE_HAL_ATOMIC_RMW_OPERATION_OR:
+      return value | operand;
+    case IREE_HAL_ATOMIC_RMW_OPERATION_XOR:
+      return value ^ operand;
+    default:
+      IREE_ASSERT_UNREACHABLE("atomic RMW operation must be validated");
+      return value;
+  }
+}
+
+TEST_F(PM4DispatchLiveTest, NativeMemoryPacketMatrix) {
+  hsa_agent_t cpu_agent = topology.cpu_agents[0];
+  hsa_agent_t gpu_agent = topology.gpu_agents[0];
+  uint32_t xcc_count = 0;
+  IREE_ASSERT_OK(iree_hsa_agent_get_info(
+      IREE_LIBHSA(&libhsa), gpu_agent,
+      (hsa_agent_info_t)HSA_AMD_AGENT_INFO_NUM_XCC, &xcc_count));
+  ASSERT_GT(xcc_count, 0u);
+  hsa_amd_memory_pool_t host_memory_pool = {0};
+  IREE_ASSERT_OK(iree_hal_amdgpu_find_fine_global_memory_pool(
+      &libhsa, cpu_agent, &host_memory_pool));
+  AtomicPacketMemory* memory = nullptr;
+  IREE_ASSERT_OK(iree_hsa_amd_memory_pool_allocate(
+      IREE_LIBHSA(&libhsa), host_memory_pool, sizeof(*memory),
+      HSA_AMD_MEMORY_POOL_STANDARD_FLAG, reinterpret_cast<void**>(&memory)));
+  IREE_ASSERT_OK(iree_hsa_amd_agents_allow_access(IREE_LIBHSA(&libhsa),
+                                                  /*num_agents=*/1, &gpu_agent,
+                                                  /*flags=*/nullptr, memory));
+
+  hsa_amd_memory_pool_t device_memory_pool = {0};
+  IREE_ASSERT_OK(iree_hal_amdgpu_find_coarse_global_memory_pool(
+      &libhsa, gpu_agent, &device_memory_pool));
+  AtomicPacketDeviceMemory* device_memory = nullptr;
+  IREE_ASSERT_OK(iree_hsa_amd_memory_pool_allocate(
+      IREE_LIBHSA(&libhsa), device_memory_pool, sizeof(*device_memory),
+      HSA_AMD_MEMORY_POOL_STANDARD_FLAG,
+      reinterpret_cast<void**>(&device_memory)));
+  IREE_ASSERT_OK(iree_hsa_amd_agents_allow_access(
+      IREE_LIBHSA(&libhsa), /*num_agents=*/1, &cpu_agent, /*flags=*/nullptr,
+      device_memory));
+
+  hsa_amd_memory_pool_t pm4_memory_pool = {0};
+  IREE_ASSERT_OK(iree_hal_amdgpu_find_coarse_global_memory_pool(
+      &libhsa, cpu_agent, &pm4_memory_pool));
+  QueueError queue_error;
+  hsa_queue_t* queue = nullptr;
+  IREE_ASSERT_OK(iree_hsa_queue_create(
+      IREE_LIBHSA(&libhsa), gpu_agent, /*size=*/64, HSA_QUEUE_TYPE_MULTI,
+      HsaQueueErrorCallback, &queue_error, UINT32_MAX, UINT32_MAX, &queue));
+  iree_hal_amdgpu_aql_ring_t aql_ring;
+  iree_hal_amdgpu_aql_ring_initialize(
+      &libhsa, reinterpret_cast<iree_amd_queue_t*>(queue), &aql_ring);
+  hsa_signal_t completion_signal = iree_hsa_signal_null();
+  IREE_ASSERT_OK(iree_hsa_amd_signal_create(
+      IREE_LIBHSA(&libhsa), /*initial_value=*/1, /*num_consumers=*/0,
+      /*consumers=*/nullptr, /*attributes=*/0, &completion_signal));
+
+  memset(memory, 0, sizeof(*memory));
+  memset(device_memory, 0, sizeof(*device_memory));
+  memory->wait32[0] = 0xAA55;
+  memory->wait32[1] = 0xAA55;
+  memory->wait32[2] = 0x80000000u;
+  memory->wait64[0] = 0x123456789ABCDEF0ull;
+  memory->wait64[1] = 0x123456789ABCDEF0ull;
+  memory->wait64[2] = 0x8000000000000000ull;
+  const uint32_t initial_rmw32[] = {10, 10, 0xFF00, 0xF0, 0xAA};
+  const uint64_t initial_rmw64[] = {
+      0x100000000ull,        0x100000010ull,        0xFFFF0000FFFF0000ull,
+      0xF000000000000000ull, 0xAAAAAAAAAAAAAAAAull,
+  };
+  memcpy(device_memory->rmw32, initial_rmw32, sizeof(initial_rmw32));
+  memcpy(device_memory->rmw64, initial_rmw64, sizeof(initial_rmw64));
+
+  uint32_t pm4_dwords[256] = {0};
+  uint32_t pm4_dword_count = 0;
+  IREE_ASSERT_OK(AppendPm4HostAcquire(agent_pm4_barrier_capabilities,
+                                      pm4_dwords, IREE_ARRAYSIZE(pm4_dwords),
+                                      &pm4_dword_count));
+  IREE_ASSERT_OK(AppendPm4AtomicWait(
+      IREE_HAL_ATOMIC_WIDTH_32, IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+      &memory->wait32[0], 0x55, 0xFF, pm4_dwords, IREE_ARRAYSIZE(pm4_dwords),
+      &pm4_dword_count));
+  IREE_ASSERT_OK(AppendPm4AtomicWait(
+      IREE_HAL_ATOMIC_WIDTH_32, IREE_HAL_ATOMIC_WAIT_CONDITION_NOT_EQUAL,
+      &memory->wait32[1], 0x54, 0xFF, pm4_dwords, IREE_ARRAYSIZE(pm4_dwords),
+      &pm4_dword_count));
+  IREE_ASSERT_OK(AppendPm4AtomicWait(
+      IREE_HAL_ATOMIC_WIDTH_32,
+      IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL, &memory->wait32[2],
+      0x7FFFFFFFu, UINT32_MAX, pm4_dwords, IREE_ARRAYSIZE(pm4_dwords),
+      &pm4_dword_count));
+  IREE_ASSERT_OK(AppendPm4AtomicWait(
+      IREE_HAL_ATOMIC_WIDTH_64, IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+      &memory->wait64[0], 0x1234000000000000ull, 0xFFFF000000000000ull,
+      pm4_dwords, IREE_ARRAYSIZE(pm4_dwords), &pm4_dword_count));
+  IREE_ASSERT_OK(AppendPm4AtomicWait(
+      IREE_HAL_ATOMIC_WIDTH_64, IREE_HAL_ATOMIC_WAIT_CONDITION_NOT_EQUAL,
+      &memory->wait64[1], 0x1235000000000000ull, 0xFFFF000000000000ull,
+      pm4_dwords, IREE_ARRAYSIZE(pm4_dwords), &pm4_dword_count));
+  IREE_ASSERT_OK(AppendPm4AtomicWait(
+      IREE_HAL_ATOMIC_WIDTH_64,
+      IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL, &memory->wait64[2],
+      0x7FFFFFFFFFFFFFFFull, UINT64_MAX, pm4_dwords, IREE_ARRAYSIZE(pm4_dwords),
+      &pm4_dword_count));
+
+  const iree_hal_atomic_rmw_operation_t operations[] = {
+      IREE_HAL_ATOMIC_RMW_OPERATION_ADD, IREE_HAL_ATOMIC_RMW_OPERATION_SUBTRACT,
+      IREE_HAL_ATOMIC_RMW_OPERATION_AND, IREE_HAL_ATOMIC_RMW_OPERATION_OR,
+      IREE_HAL_ATOMIC_RMW_OPERATION_XOR,
+  };
+  const uint64_t operands32[] = {5, 3, 0x0FF0, 0x0F, 0xFF};
+  const uint64_t operands64[] = {
+      0x200000000ull,        0x10,       0x0FFF0FFF0FFF0FFFull,
+      0x0F0000000000000Full, UINT64_MAX,
+  };
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(operations); ++i) {
+    IREE_ASSERT_OK(AppendPm4AtomicRmw(IREE_HAL_ATOMIC_WIDTH_32, operations[i],
+                                      &device_memory->rmw32[i], operands32[i],
+                                      pm4_dwords, IREE_ARRAYSIZE(pm4_dwords),
+                                      &pm4_dword_count));
+    IREE_ASSERT_OK(AppendPm4AtomicRmw(IREE_HAL_ATOMIC_WIDTH_64, operations[i],
+                                      &device_memory->rmw64[i], operands64[i],
+                                      pm4_dwords, IREE_ARRAYSIZE(pm4_dwords),
+                                      &pm4_dword_count));
+  }
+  IREE_ASSERT_OK(AppendPm4AtomicStore(
+      IREE_HAL_ATOMIC_WIDTH_32, &device_memory->store32, 0x76543210u,
+      pm4_dwords, IREE_ARRAYSIZE(pm4_dwords), &pm4_dword_count));
+  IREE_ASSERT_OK(AppendPm4AtomicStore(
+      IREE_HAL_ATOMIC_WIDTH_64, &device_memory->store64, 0xFEDCBA9876543210ull,
+      pm4_dwords, IREE_ARRAYSIZE(pm4_dwords), &pm4_dword_count));
+  IREE_ASSERT_OK(AppendPm4AtomicStore(
+      IREE_HAL_ATOMIC_WIDTH_32, &memory->store32, 0x89ABCDEFu, pm4_dwords,
+      IREE_ARRAYSIZE(pm4_dwords), &pm4_dword_count));
+  IREE_ASSERT_OK(AppendPm4AtomicStore(
+      IREE_HAL_ATOMIC_WIDTH_64, &memory->store64, 0x0123456789ABCDEFull,
+      pm4_dwords, IREE_ARRAYSIZE(pm4_dwords), &pm4_dword_count));
+  IREE_ASSERT_OK(AppendPm4CompletionWrite(
+      agent_pm4_barrier_capabilities, pm4_dwords, IREE_ARRAYSIZE(pm4_dwords),
+      &pm4_dword_count, &memory->completion, /*value=*/1));
+
+  iree_hal_amdgpu_pm4_program_t pm4_program = {};
+  IREE_ASSERT_OK(iree_hal_amdgpu_pm4_program_initialize(
+      &libhsa, gpu_agent, pm4_memory_pool, pm4_dwords, pm4_dword_count,
+      &pm4_program));
+  const uint64_t packet_id =
+      iree_hal_amdgpu_aql_ring_reserve(&aql_ring, /*count=*/1);
+  iree_hal_amdgpu_aql_packet_t* packet =
+      iree_hal_amdgpu_aql_ring_packet(&aql_ring, packet_id);
+  memset(packet, 0, sizeof(*packet));
+  uint16_t setup = 0;
+  const uint16_t header = iree_hal_amdgpu_aql_emit_pm4_ib_dwords(
+      &packet->pm4_ib, pm4_program.dwords, pm4_program.dword_count,
+      iree_hal_amdgpu_aql_packet_control_barrier_system(), completion_signal,
+      &setup);
+  iree_hal_amdgpu_aql_ring_commit(packet, header, setup);
+  iree_hal_amdgpu_aql_ring_doorbell(&aql_ring, packet_id);
+  EXPECT_EQ(
+      iree_hsa_signal_wait_scacquire(
+          IREE_LIBHSA(&libhsa), completion_signal, HSA_SIGNAL_CONDITION_EQ,
+          /*compare_value=*/0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED),
+      0);
+  WaitForCompletionWord(&memory->completion, /*value=*/1);
+
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(operations); ++i) {
+    uint32_t expected32 = initial_rmw32[i];
+    uint64_t expected64 = initial_rmw64[i];
+    for (uint32_t xcc = 0; xcc < xcc_count; ++xcc) {
+      expected32 = ApplyAtomicRmw(expected32, operations[i],
+                                  static_cast<uint32_t>(operands32[i]));
+      expected64 = ApplyAtomicRmw(expected64, operations[i], operands64[i]);
+    }
+    EXPECT_EQ(device_memory->rmw32[i], expected32);
+    EXPECT_EQ(device_memory->rmw64[i], expected64);
+  }
+  EXPECT_EQ(device_memory->store32, 0x76543210u);
+  EXPECT_EQ(device_memory->store64, 0xFEDCBA9876543210ull);
+  EXPECT_EQ(memory->store32, 0x89ABCDEFu);
+  EXPECT_EQ(memory->store64, 0x0123456789ABCDEFull);
+  EXPECT_EQ(queue_error.callback_count.load(std::memory_order_relaxed), 0u);
+
+  iree_hal_amdgpu_pm4_program_deinitialize(&pm4_program);
+
+  iree_atomic_store(&memory->marker, 0, iree_memory_order_relaxed);
+  iree_atomic_store(&memory->staged_wait32[0], 0, iree_memory_order_relaxed);
+  iree_atomic_store(&memory->staged_wait32[1], 0x54, iree_memory_order_relaxed);
+  iree_atomic_store(&memory->staged_wait32[2], 0x7FFFFFFE,
+                    iree_memory_order_relaxed);
+  iree_atomic_store(&memory->staged_wait64[0], 0, iree_memory_order_relaxed);
+  iree_atomic_store(&memory->staged_wait64[1],
+                    static_cast<int64_t>(0x1234000000000000ull),
+                    iree_memory_order_relaxed);
+  iree_atomic_store(&memory->staged_wait64[2],
+                    static_cast<int64_t>(0x7FFFFFFFFFFFFFFEull),
+                    iree_memory_order_relaxed);
+  memset(memory->payload, 0, sizeof(memory->payload));
+  memset(memory->observed_payload, 0, sizeof(memory->observed_payload));
+  memory->completion = 0;
+
+  pm4_dword_count = 0;
+  const uint64_t staged_wait_values[6] = {
+      0x55,
+      0x54,
+      0x7FFFFFFFu,
+      0x1234000000000000ull,
+      0x1234000000000000ull,
+      0x7FFFFFFFFFFFFFFFull,
+  };
+  const uint64_t staged_wait_masks[6] = {
+      0xFF,
+      0xFF,
+      UINT32_MAX,
+      0xFFFF000000000000ull,
+      0xFFFF000000000000ull,
+      UINT64_MAX,
+  };
+  const iree_hal_atomic_wait_condition_t staged_wait_conditions[6] = {
+      IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+      IREE_HAL_ATOMIC_WAIT_CONDITION_NOT_EQUAL,
+      IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL,
+      IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+      IREE_HAL_ATOMIC_WAIT_CONDITION_NOT_EQUAL,
+      IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL,
+  };
+  for (uint32_t i = 0; i < 6; ++i) {
+    IREE_ASSERT_OK(AppendPm4CompletionWrite(
+        agent_pm4_barrier_capabilities, pm4_dwords, IREE_ARRAYSIZE(pm4_dwords),
+        &pm4_dword_count, &memory->marker,
+        /*value=*/i + 1));
+    void* target = i < 3 ? static_cast<void*>(&memory->staged_wait32[i])
+                         : static_cast<void*>(&memory->staged_wait64[i - 3]);
+    const iree_hal_atomic_width_t width =
+        i < 3 ? IREE_HAL_ATOMIC_WIDTH_32 : IREE_HAL_ATOMIC_WIDTH_64;
+    IREE_ASSERT_OK(AppendPm4AtomicWait(
+        width, staged_wait_conditions[i], target, staged_wait_values[i],
+        staged_wait_masks[i], pm4_dwords, IREE_ARRAYSIZE(pm4_dwords),
+        &pm4_dword_count));
+    IREE_ASSERT_OK(AppendPm4HostAcquire(agent_pm4_barrier_capabilities,
+                                        pm4_dwords, IREE_ARRAYSIZE(pm4_dwords),
+                                        &pm4_dword_count));
+    IREE_ASSERT_OK(AppendPm4CopyData64(pm4_dwords, IREE_ARRAYSIZE(pm4_dwords),
+                                       &pm4_dword_count, &memory->payload[i],
+                                       &memory->observed_payload[i]));
+  }
+  IREE_ASSERT_OK(AppendPm4CompletionWrite(
+      agent_pm4_barrier_capabilities, pm4_dwords, IREE_ARRAYSIZE(pm4_dwords),
+      &pm4_dword_count, &memory->completion, /*value=*/2));
+  IREE_ASSERT_OK(iree_hal_amdgpu_pm4_program_initialize(
+      &libhsa, gpu_agent, pm4_memory_pool, pm4_dwords, pm4_dword_count,
+      &pm4_program));
+
+  iree_hsa_signal_store_screlease(IREE_LIBHSA(&libhsa), completion_signal, 1);
+  const uint64_t staged_packet_id =
+      iree_hal_amdgpu_aql_ring_reserve(&aql_ring, /*count=*/1);
+  packet = iree_hal_amdgpu_aql_ring_packet(&aql_ring, staged_packet_id);
+  memset(packet, 0, sizeof(*packet));
+  setup = 0;
+  const uint16_t staged_header = iree_hal_amdgpu_aql_emit_pm4_ib_dwords(
+      &packet->pm4_ib, pm4_program.dwords, pm4_program.dword_count,
+      iree_hal_amdgpu_aql_packet_control_barrier_system(), completion_signal,
+      &setup);
+  iree_hal_amdgpu_aql_ring_commit(packet, staged_header, setup);
+  iree_hal_amdgpu_aql_ring_doorbell(&aql_ring, staged_packet_id);
+
+  const uint64_t payload_values[6] = {
+      0xA000000000000001ull, 0xA000000000000002ull, 0xA000000000000003ull,
+      0xA000000000000004ull, 0xA000000000000005ull, 0xA000000000000006ull,
+  };
+  const int32_t published_wait32[3] = {
+      0x55,
+      0x55,
+      static_cast<int32_t>(0x80000000u),
+  };
+  const int64_t published_wait64[3] = {
+      static_cast<int64_t>(0x123456789ABCDEF0ull),
+      static_cast<int64_t>(0x1235000000000000ull),
+      static_cast<int64_t>(0x8000000000000000ull),
+  };
+  for (uint32_t i = 0; i < 6; ++i) {
+    WaitForMarker(&memory->marker, static_cast<int32_t>(i + 1));
+    memory->payload[i] = payload_values[i];
+    if (i < 3) {
+      iree_atomic_store(&memory->staged_wait32[i], published_wait32[i],
+                        iree_memory_order_release);
+    } else {
+      iree_atomic_store(&memory->staged_wait64[i - 3], published_wait64[i - 3],
+                        iree_memory_order_release);
+    }
+  }
+
+  EXPECT_EQ(
+      iree_hsa_signal_wait_scacquire(
+          IREE_LIBHSA(&libhsa), completion_signal, HSA_SIGNAL_CONDITION_EQ,
+          /*compare_value=*/0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED),
+      0);
+  WaitForCompletionWord(&memory->completion, /*value=*/2);
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(payload_values); ++i) {
+    EXPECT_EQ(memory->observed_payload[i], payload_values[i]);
+  }
+  EXPECT_EQ(queue_error.callback_count.load(std::memory_order_relaxed), 0u);
+  iree_hal_amdgpu_pm4_program_deinitialize(&pm4_program);
+
+  IREE_ASSERT_OK(
+      iree_hsa_signal_destroy(IREE_LIBHSA(&libhsa), completion_signal));
+  IREE_ASSERT_OK(iree_hsa_queue_destroy(IREE_LIBHSA(&libhsa), queue));
+  IREE_ASSERT_OK(
+      iree_hsa_amd_memory_pool_free(IREE_LIBHSA(&libhsa), device_memory));
+  IREE_ASSERT_OK(iree_hsa_amd_memory_pool_free(IREE_LIBHSA(&libhsa), memory));
 }
 
 }  // namespace

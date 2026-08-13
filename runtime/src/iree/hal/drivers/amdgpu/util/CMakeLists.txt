@@ -326,6 +326,20 @@ endif()
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_library(
   NAME
+    pm4_atomic
+  HDRS
+    "pm4_atomic.h"
+  DEPS
+    ::packet
+    iree::base
+    iree::hal
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
     info
   HDRS
     "info.h"
@@ -915,6 +929,25 @@ endif()
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_test(
   NAME
+    pm4_atomic_test
+  SRCS
+    "pm4_atomic_test.cc"
+  DEPS
+    ::pm4_atomic
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
     pm4_dispatch_test
   SRCS
     "pm4_dispatch_test.cc"
@@ -966,6 +999,7 @@ iree_cc_test(
   DEPS
     ::libhsa
     ::packet
+    ::pm4_atomic
     ::pm4_dispatch
     ::pm4_dispatch_test_kernels
     ::pm4_program
