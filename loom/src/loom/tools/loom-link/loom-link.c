@@ -19,6 +19,7 @@
 #include "loom/codegen/low/text_asm.h"
 #include "loom/error/diagnostic.h"
 #include "loom/format/bytecode/reader.h"
+#include "loom/format/bytecode/selected_reader.h"
 #include "loom/format/bytecode/writer.h"
 #include "loom/format/text/parser.h"
 #include "loom/format/text/printer.h"
@@ -102,26 +103,19 @@ typedef struct loom_link_cli_input_t {
   bool has_source_entry;
 } loom_link_cli_input_t;
 
-typedef struct loom_link_cli_provider_state_t {
-  // Input ordinal that produced this provider.
-  iree_host_size_t input_ordinal;
-} loom_link_cli_provider_state_t;
-
-typedef struct loom_link_cli_index_t {
-  // Provider-backed symbol index.
-  loom_link_module_index_t* index;
-  // Provider states parallel to index provider ordinals.
-  loom_link_cli_provider_state_t* provider_states;
-  // Allocated provider state capacity.
-  iree_host_size_t provider_state_capacity;
-} loom_link_cli_index_t;
-
 typedef struct loom_link_cli_materialized_module_t {
   // Source module borrowed for the duration of one linker add.
   const loom_module_t* module;
   // Owned bytecode materialization released after the linker add.
   loom_module_t* owned_module;
 } loom_link_cli_materialized_module_t;
+
+typedef struct loom_link_cli_bytecode_read_state_t {
+  // Low descriptor registry backing the read options.
+  loom_target_low_descriptor_registry_t low_registry;
+  // Bytecode reader options referencing low_registry.
+  loom_bytecode_read_options_t options;
+} loom_link_cli_bytecode_read_state_t;
 
 static const char* loom_link_cli_mode_name(loom_link_plan_mode_t mode) {
   switch (mode) {
@@ -347,35 +341,87 @@ static iree_status_t loom_link_cli_read_input(
   return iree_ok_status();
 }
 
+static iree_status_t loom_link_cli_bytecode_read_state_initialize(
+    loom_link_cli_bytecode_read_state_t* out_state) {
+  *out_state = (loom_link_cli_bytecode_read_state_t){
+      .options =
+          {
+              .diagnostic_sink = {.fn = loom_diagnostic_stderr_sink},
+              .verify_module = false,
+              .verify_max_errors = 0,
+          },
+  };
+  IREE_RETURN_IF_ERROR(
+      loom_target_environment_initialize_low_descriptor_registry(
+          loom_configured_target_environment(), &out_state->low_registry));
+  loom_low_repr_environment_initialize(
+      &out_state->low_registry.registry,
+      &out_state->options.low_repr_environment);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_link_cli_materialize_bytecode_module(
-    const loom_link_cli_input_t* input, iree_host_size_t module_ordinal,
-    loom_context_t* context, iree_arena_block_pool_t* block_pool,
+    const loom_link_module_index_provider_t* provider,
+    iree_host_size_t module_ordinal, loom_context_t* context,
+    iree_arena_block_pool_t* block_pool,
     const loom_tooling_config_set_t* config_set, iree_allocator_t allocator,
     loom_module_t** out_module) {
   *out_module = NULL;
-  loom_bytecode_read_options_t read_options = {
-      .diagnostic_sink = {.fn = loom_diagnostic_stderr_sink},
-      .verify_module = false,
-      .verify_max_errors = 0,
-  };
-  loom_target_low_descriptor_registry_t low_registry = {0};
+  IREE_ASSERT(provider->kind == LOOM_LINK_PROVIDER_BYTECODE);
+  loom_link_cli_bytecode_read_state_t read_state;
   IREE_RETURN_IF_ERROR(
-      loom_target_environment_initialize_low_descriptor_registry(
-          loom_configured_target_environment(), &low_registry));
-  loom_low_repr_environment_initialize(&low_registry.registry,
-                                       &read_options.low_repr_environment);
+      loom_link_cli_bytecode_read_state_initialize(&read_state));
   loom_bytecode_read_result_t read_result = {0};
   loom_module_t* module = NULL;
   IREE_RETURN_IF_ERROR(loom_bytecode_read_module_ordinal(
-      input->contents->const_buffer, input->filename, context, block_pool,
-      (uint16_t)module_ordinal, &read_options, &read_result, &module,
-      allocator));
+      provider->bytecode.contents, provider->bytecode.filename, context,
+      block_pool, (uint16_t)module_ordinal, &read_state.options, &read_result,
+      &module, allocator));
   if (read_result.error_count > 0 || !module) {
     loom_module_free(module);
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "failed to read bytecode module %" PRIhsz " from '%.*s'",
-        module_ordinal, (int)input->filename.size, input->filename.data);
+        module_ordinal, (int)provider->bytecode.filename.size,
+        provider->bytecode.filename.data);
+  }
+
+  iree_status_t status =
+      loom_link_cli_materialize_config(module, config_set, block_pool);
+  if (!iree_status_is_ok(status)) {
+    loom_module_free(module);
+    return status;
+  }
+  *out_module = module;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_link_cli_materialize_selected_bytecode_module(
+    const loom_link_module_index_provider_t* provider,
+    iree_host_size_t module_ordinal,
+    loom_bytecode_symbol_ordinal_list_t selection, loom_context_t* context,
+    iree_arena_block_pool_t* block_pool,
+    const loom_tooling_config_set_t* config_set, iree_allocator_t allocator,
+    loom_module_t** out_module) {
+  *out_module = NULL;
+  IREE_ASSERT(provider->kind == LOOM_LINK_PROVIDER_BYTECODE);
+  loom_link_cli_bytecode_read_state_t read_state;
+  IREE_RETURN_IF_ERROR(
+      loom_link_cli_bytecode_read_state_initialize(&read_state));
+  loom_bytecode_read_result_t read_result = {0};
+  loom_module_t* module = NULL;
+  IREE_RETURN_IF_ERROR(loom_bytecode_materialize_module_symbols(
+      provider->bytecode.contents, provider->bytecode.filename, context,
+      block_pool, &provider->bytecode.metadata, (uint16_t)module_ordinal,
+      selection, &read_state.options, &read_result, &module, allocator));
+  if (read_result.error_count > 0 || !module) {
+    loom_module_free(module);
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "failed to read selected bytecode symbols from module %" PRIhsz
+        " in '%.*s'",
+        module_ordinal, (int)provider->bytecode.filename.size,
+        provider->bytecode.filename.data);
   }
 
   iree_status_t status =
@@ -451,39 +497,6 @@ static iree_status_t loom_link_cli_read_inputs(
   return iree_ok_status();
 }
 
-static void loom_link_cli_index_deinitialize(loom_link_cli_index_t* cli_index,
-                                             iree_allocator_t allocator) {
-  if (!cli_index) {
-    return;
-  }
-  loom_link_module_index_free(cli_index->index);
-  iree_allocator_free(allocator, cli_index->provider_states);
-  *cli_index = (loom_link_cli_index_t){0};
-}
-
-static iree_status_t loom_link_cli_reserve_provider_states(
-    loom_link_cli_index_t* cli_index, iree_host_size_t count,
-    iree_allocator_t allocator) {
-  if (count <= cli_index->provider_state_capacity) {
-    return iree_ok_status();
-  }
-  return iree_allocator_grow_array(
-      allocator, count, sizeof(*cli_index->provider_states),
-      &cli_index->provider_state_capacity, (void**)&cli_index->provider_states);
-}
-
-static iree_status_t loom_link_cli_set_provider_state(
-    loom_link_cli_index_t* cli_index, iree_host_size_t provider_ordinal,
-    iree_host_size_t input_ordinal, iree_allocator_t allocator) {
-  IREE_RETURN_IF_ERROR(loom_link_cli_reserve_provider_states(
-      cli_index, provider_ordinal + 1, allocator));
-  cli_index->provider_states[provider_ordinal] =
-      (loom_link_cli_provider_state_t){
-          .input_ordinal = input_ordinal,
-      };
-  return iree_ok_status();
-}
-
 static iree_status_t loom_link_cli_materialized_provider_name(
     const loom_link_cli_input_t* input, iree_host_size_t module_ordinal,
     iree_string_builder_t* scratch_builder, iree_string_view_t* out_name) {
@@ -502,10 +515,11 @@ static iree_status_t loom_link_cli_materialized_provider_name(
 static iree_status_t loom_link_cli_build_index(
     loom_link_cli_input_t* inputs, iree_host_size_t input_count,
     loom_context_t* context, iree_arena_block_pool_t* block_pool,
-    iree_allocator_t allocator, loom_link_cli_index_t* out_cli_index) {
-  *out_cli_index = (loom_link_cli_index_t){0};
-  IREE_RETURN_IF_ERROR(loom_link_module_index_create(
-      context, block_pool, allocator, &out_cli_index->index));
+    iree_allocator_t allocator, loom_link_module_index_t** out_index) {
+  *out_index = NULL;
+  loom_link_module_index_t* index = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_link_module_index_create(context, block_pool, allocator, &index));
 
   iree_string_builder_t provider_name_builder;
   iree_string_builder_initialize(allocator, &provider_name_builder);
@@ -521,20 +535,14 @@ static iree_status_t loom_link_cli_build_index(
         iree_string_view_t provider_name = iree_string_view_empty();
         status = loom_link_cli_materialized_provider_name(
             input, j, &provider_name_builder, &provider_name);
-        iree_host_size_t provider_ordinal =
-            LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
         if (iree_status_is_ok(status)) {
           loom_link_module_index_add_options_t options = {
               .provider_name = provider_name,
               .role = input->role,
           };
           status = loom_link_module_index_add_materialized(
-              out_cli_index->index, input->materialized_modules[j], &options,
-              &provider_ordinal);
-        }
-        if (iree_status_is_ok(status)) {
-          status = loom_link_cli_set_provider_state(
-              out_cli_index, provider_ordinal, i, allocator);
+              index, input->materialized_modules[j], &options,
+              /*out_provider_ordinal=*/NULL);
         }
       }
       continue;
@@ -547,19 +555,16 @@ static iree_status_t loom_link_cli_build_index(
         .provider_name = input->filename,
         .role = input->role,
     };
-    iree_host_size_t provider_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
     status = loom_link_module_index_add_bytecode(
-        out_cli_index->index, input->contents->const_buffer, input->filename,
-        &index_options, &options, &provider_ordinal);
-    if (iree_status_is_ok(status)) {
-      status = loom_link_cli_set_provider_state(out_cli_index, provider_ordinal,
-                                                i, allocator);
-    }
+        index, input->contents->const_buffer, input->filename, &index_options,
+        &options, /*out_provider_ordinal=*/NULL);
   }
 
   iree_string_builder_deinitialize(&provider_name_builder);
   if (!iree_status_is_ok(status)) {
-    loom_link_cli_index_deinitialize(out_cli_index, allocator);
+    loom_link_module_index_free(index);
+  } else {
+    *out_index = index;
   }
   return status;
 }
@@ -715,34 +720,75 @@ static iree_status_t loom_link_cli_print_plan(const loom_link_plan_t* plan,
 }
 
 static iree_status_t loom_link_cli_materialize_index_module(
-    const loom_link_cli_index_t* cli_index, loom_link_cli_input_t* inputs,
+    const loom_link_module_index_t* index,
     const loom_tooling_config_set_t* config_set, loom_context_t* context,
     iree_arena_block_pool_t* block_pool,
     const loom_link_module_index_module_t* indexed_module,
     iree_allocator_t allocator,
     loom_link_cli_materialized_module_t* out_materialized) {
   *out_materialized = (loom_link_cli_materialized_module_t){0};
-  const loom_link_cli_provider_state_t* provider_state =
-      &cli_index->provider_states[indexed_module->provider_ordinal];
-  loom_link_cli_input_t* input = &inputs[provider_state->input_ordinal];
 
   if (indexed_module->materialized_module != NULL) {
     out_materialized->module = indexed_module->materialized_module;
     return iree_ok_status();
   }
 
+  const loom_link_module_index_provider_t* provider =
+      loom_link_module_index_provider_at(index,
+                                         indexed_module->provider_ordinal);
+  IREE_ASSERT(provider->kind == LOOM_LINK_PROVIDER_BYTECODE);
   loom_module_t* materialized_module = NULL;
   IREE_RETURN_IF_ERROR(loom_link_cli_materialize_bytecode_module(
-      input, indexed_module->provider_module_ordinal, context, block_pool,
+      provider, indexed_module->provider_module_ordinal, context, block_pool,
       config_set, allocator, &materialized_module));
   out_materialized->module = materialized_module;
   out_materialized->owned_module = materialized_module;
   return iree_ok_status();
 }
 
+static iree_status_t loom_link_cli_add_selected_index_module(
+    const loom_link_module_index_t* index,
+    const loom_link_plan_module_selection_t* selection,
+    const loom_tooling_config_set_t* config_set, loom_context_t* context,
+    iree_arena_block_pool_t* block_pool,
+    iree_host_size_t* source_symbol_ordinals, iree_allocator_t allocator,
+    loom_linker_t* linker) {
+  for (iree_host_size_t i = 0; i < selection->symbols.count; ++i) {
+    source_symbol_ordinals[i] =
+        selection->symbols.values[i].source_symbol->module_symbol_ordinal;
+  }
+  const loom_linker_source_symbol_list_t source_symbols = {
+      .count = selection->symbols.count,
+      .ordinals = source_symbol_ordinals,
+  };
+
+  const loom_link_module_index_module_t* module = selection->source_module;
+  if (module->materialized_module != NULL) {
+    return loom_linker_add_module_symbols(linker, module->materialized_module,
+                                          source_symbols);
+  }
+
+  const loom_link_module_index_provider_t* provider =
+      loom_link_module_index_provider_at(index, module->provider_ordinal);
+  IREE_ASSERT(provider->kind == LOOM_LINK_PROVIDER_BYTECODE);
+  loom_module_t* materialized_module = NULL;
+  iree_status_t status = loom_link_cli_materialize_selected_bytecode_module(
+      provider, module->provider_module_ordinal,
+      (loom_bytecode_symbol_ordinal_list_t){
+          .count = selection->symbols.count,
+          .ordinals = source_symbol_ordinals,
+      },
+      context, block_pool, config_set, allocator, &materialized_module);
+  if (iree_status_is_ok(status)) {
+    status = loom_linker_add_exact_module(linker, materialized_module);
+  }
+  loom_module_free(materialized_module);
+  return status;
+}
+
 static iree_status_t loom_link_cli_link_plan(
-    const loom_link_cli_index_t* cli_index, const loom_link_plan_t* plan,
-    loom_link_plan_mode_t mode, bool strip_check, loom_link_cli_input_t* inputs,
+    const loom_link_module_index_t* index, const loom_link_plan_t* plan,
+    loom_link_plan_mode_t mode, bool strip_check,
     const loom_tooling_config_set_t* config_set, loom_context_t* context,
     iree_arena_block_pool_t* block_pool, iree_string_view_list_t output_roots,
     iree_allocator_t allocator, loom_module_t** out_module) {
@@ -760,15 +806,15 @@ static iree_status_t loom_link_cli_link_plan(
       mode == LOOM_LINK_PLAN_ARCHIVE && !strip_check;
   if (archive_full_modules) {
     const iree_host_size_t module_count =
-        loom_link_module_index_module_count(cli_index->index);
+        loom_link_module_index_module_count(index);
     for (iree_host_size_t i = 0; i < module_count && iree_status_is_ok(status);
          ++i) {
       const loom_link_module_index_module_t* indexed_module =
-          loom_link_module_index_module_at(cli_index->index, i);
+          loom_link_module_index_module_at(index, i);
       loom_link_cli_materialized_module_t materialized = {0};
       status = loom_link_cli_materialize_index_module(
-          cli_index, inputs, config_set, context, block_pool, indexed_module,
-          allocator, &materialized);
+          index, config_set, context, block_pool, indexed_module, allocator,
+          &materialized);
       if (iree_status_is_ok(status)) {
         status = loom_linker_add_module(linker, materialized.module,
                                         /*options=*/NULL);
@@ -778,39 +824,25 @@ static iree_status_t loom_link_cli_link_plan(
   } else {
     loom_link_plan_module_projection_t projection = {0};
     status = loom_link_plan_project_modules(plan, &arena, &projection);
+    iree_host_size_t max_module_symbol_count = 0;
+    for (iree_host_size_t i = 0;
+         i < projection.modules.count && iree_status_is_ok(status); ++i) {
+      max_module_symbol_count = iree_max(
+          max_module_symbol_count, projection.modules.values[i].symbols.count);
+    }
     iree_host_size_t* source_symbol_ordinals = NULL;
-    if (iree_status_is_ok(status) && projection.symbols.count != 0) {
-      status = iree_arena_allocate_array(&arena, projection.symbols.count,
+    if (iree_status_is_ok(status) && max_module_symbol_count != 0) {
+      status = iree_arena_allocate_array(&arena, max_module_symbol_count,
                                          sizeof(*source_symbol_ordinals),
                                          (void**)&source_symbol_ordinals);
     }
     for (iree_host_size_t i = 0;
-         i < projection.symbols.count && iree_status_is_ok(status); ++i) {
-      source_symbol_ordinals[i] =
-          projection.symbols.values[i].source_symbol->module_symbol_ordinal;
-    }
-
-    iree_host_size_t symbol_offset = 0;
-    for (iree_host_size_t i = 0;
          i < projection.modules.count && iree_status_is_ok(status); ++i) {
       const loom_link_plan_module_selection_t* selection =
           &projection.modules.values[i];
-      const loom_linker_source_symbol_list_t source_symbols = {
-          .count = selection->symbols.count,
-          .ordinals = source_symbol_ordinals + symbol_offset,
-      };
-      loom_link_cli_materialized_module_t materialized = {0};
-      status = loom_link_cli_materialize_index_module(
-          cli_index, inputs, config_set, context, block_pool,
-          selection->source_module, allocator, &materialized);
-      if (iree_status_is_ok(status)) {
-        status = loom_linker_add_module_symbols(linker, materialized.module,
-                                                source_symbols);
-      }
-      loom_module_free(materialized.owned_module);
-      if (iree_status_is_ok(status)) {
-        symbol_offset += selection->symbols.count;
-      }
+      status = loom_link_cli_add_selected_index_module(
+          index, selection, config_set, context, block_pool,
+          source_symbol_ordinals, allocator, linker);
     }
   }
 
@@ -1101,7 +1133,7 @@ int main(int argc, char** argv) {
   loom_tooling_config_set_initialize(allocator, &config_set);
   loom_link_cli_input_t* inputs = NULL;
   iree_host_size_t input_count = 0;
-  loom_link_cli_index_t cli_index = {0};
+  loom_link_module_index_t* module_index = NULL;
   loom_link_plan_t* plan = NULL;
   loom_module_t* linked_module = NULL;
   loom_source_entry_t* source_entries = NULL;
@@ -1162,11 +1194,11 @@ int main(int argc, char** argv) {
   }
   if (iree_status_is_ok(status)) {
     status = loom_link_cli_build_index(inputs, input_count, &context,
-                                       &block_pool, allocator, &cli_index);
+                                       &block_pool, allocator, &module_index);
   }
   if (iree_status_is_ok(status) && FLAG_list_symbols) {
     status = loom_link_cli_print_symbol_list(
-        cli_index.index, iree_make_cstring_view(FLAG_output), allocator);
+        module_index, iree_make_cstring_view(FLAG_output), allocator);
   }
 
   loom_link_plan_options_t plan_options = {
@@ -1178,7 +1210,7 @@ int main(int argc, char** argv) {
   };
   if (iree_status_is_ok(status) && !FLAG_list_symbols) {
     status =
-        loom_link_plan_build(cli_index.index, &plan_options, allocator, &plan);
+        loom_link_plan_build(module_index, &plan_options, allocator, &plan);
   }
   if (iree_status_is_ok(status) && FLAG_print_plan) {
     status = loom_link_cli_print_plan(
@@ -1186,8 +1218,8 @@ int main(int argc, char** argv) {
   }
   if (iree_status_is_ok(status) && !FLAG_list_symbols && !FLAG_print_plan) {
     status =
-        loom_link_cli_link_plan(&cli_index, plan, plan_mode, FLAG_strip_check,
-                                inputs, &config_set, &context, &block_pool,
+        loom_link_cli_link_plan(module_index, plan, plan_mode, FLAG_strip_check,
+                                &config_set, &context, &block_pool,
                                 (iree_string_view_list_t){
                                     .count = roots.count,
                                     .values = roots.values,
@@ -1227,7 +1259,7 @@ int main(int argc, char** argv) {
   iree_allocator_free(allocator, source_entries);
   loom_module_free(linked_module);
   loom_link_plan_free(plan);
-  loom_link_cli_index_deinitialize(&cli_index, allocator);
+  loom_link_module_index_free(module_index);
   loom_link_cli_inputs_deinitialize(inputs, input_count, allocator);
   loom_tooling_config_set_deinitialize(&config_set);
   if (context_initialized) {

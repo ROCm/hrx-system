@@ -171,6 +171,7 @@ loom_cc_benchmark(
         ":module_index",
         ":plan_projection",
         ":planner",
+        "//loom/src/loom/format/bytecode:selected_reader",
         "//loom/src/loom/format/bytecode:writer",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/test",

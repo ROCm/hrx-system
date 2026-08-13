@@ -92,6 +92,7 @@ loom_cc_library(
     loom::format::bytecode::format
     loom::format::bytecode::index
     loom::format::bytecode::reader
+    loom::format::bytecode::selected_reader
     loom::format::bytecode::writer
     loom::format::text::parser
     loom::format::text::printer

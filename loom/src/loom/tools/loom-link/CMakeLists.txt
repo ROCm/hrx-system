@@ -24,6 +24,7 @@ loom_cc_binary(
     loom::codegen::low::text_asm
     loom::error::diagnostic
     loom::format::bytecode::reader
+    loom::format::bytecode::selected_reader
     loom::format::bytecode::writer
     loom::format::text::parser
     loom::format::text::printer

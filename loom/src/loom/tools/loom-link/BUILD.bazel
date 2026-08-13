@@ -21,6 +21,7 @@ loom_cc_binary(
         "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/format/bytecode:reader",
+        "//loom/src/loom/format/bytecode:selected_reader",
         "//loom/src/loom/format/bytecode:writer",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/format/text:printer",

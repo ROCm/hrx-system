@@ -102,6 +102,16 @@ iree_status_t loom_linker_add_module_symbols(
     loom_linker_t* linker, const loom_module_t* source_module,
     loom_linker_source_symbol_list_t source_symbols);
 
+// Adds every symbol from an exact dependency-closed source module.
+//
+// This is the dense counterpart to loom_linker_add_module_symbols for compact
+// modules produced by selective materialization. Every source symbol is cloned
+// without reachability discovery, and source symbol IDs map directly into the
+// exact target-symbol projection. The linker retains no pointers into
+// |source_module| after this call returns.
+iree_status_t loom_linker_add_exact_module(loom_linker_t* linker,
+                                           const loom_module_t* source_module);
+
 // Finalizes explicit output |root_symbols| after all modules have been added.
 //
 // Every named root must have a materialized definition or declaration.

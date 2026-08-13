@@ -85,6 +85,15 @@ struct loom_linker_t {
   bool finished;
 };
 
+typedef struct loom_linker_exact_selection_t {
+  // Strictly increasing module-local source ordinals, or NULL when dense.
+  const iree_host_size_t* ordinals;
+  // Number of selected source symbols.
+  iree_host_size_t count;
+  // True when the selection is the complete dense source-symbol domain.
+  bool dense;
+} loom_linker_exact_selection_t;
+
 typedef struct loom_linker_source_t {
   // Owning linker.
   loom_linker_t* linker;
@@ -107,12 +116,7 @@ typedef struct loom_linker_source_t {
   // Symbol remap policy used by source IR cloning and contract merging.
   loom_ir_remap_symbol_callback_t symbol_remap;
   // Exact source-symbol selection state.
-  struct {
-    // Strictly increasing module-local source symbol ordinals.
-    const iree_host_size_t* ordinals;
-    // Number of entries in ordinals and target_symbols.
-    iree_host_size_t count;
-  } exact;
+  loom_linker_exact_selection_t exact;
   // True when root filtering is active for this add operation.
   bool selective;
 } loom_linker_source_t;
@@ -427,6 +431,15 @@ static iree_host_size_t loom_linker_find_exact_source_symbol(
              : IREE_HOST_SIZE_MAX;
 }
 
+static iree_status_t loom_linker_map_dense_source_symbol(
+    loom_linker_source_t* source, uint16_t source_symbol_id,
+    loom_symbol_ref_t* out_target_ref) {
+  *out_target_ref = loom_symbol_ref_null();
+  return loom_linker_resolve_source_symbol(
+      source, source_symbol_id, &source->target_symbols[source_symbol_id],
+      out_target_ref);
+}
+
 static iree_status_t loom_linker_map_exact_source_symbol(
     loom_linker_source_t* source, uint16_t source_symbol_id,
     loom_symbol_ref_t* out_target_ref) {
@@ -498,6 +511,17 @@ static iree_status_t loom_linker_remap_exact_symbol(
   IREE_RETURN_IF_ERROR(loom_linker_validate_symbol_remap(
       source, source_module, target_module, source_ref));
   return loom_linker_map_exact_source_symbol(source, source_ref.symbol_id,
+                                             out_target_ref);
+}
+
+static iree_status_t loom_linker_remap_dense_symbol(
+    void* user_data, const loom_module_t* source_module,
+    loom_module_t* target_module, loom_symbol_ref_t source_ref,
+    loom_symbol_ref_t* out_target_ref) {
+  loom_linker_source_t* source = (loom_linker_source_t*)user_data;
+  IREE_RETURN_IF_ERROR(loom_linker_validate_symbol_remap(
+      source, source_module, target_module, source_ref));
+  return loom_linker_map_dense_source_symbol(source, source_ref.symbol_id,
                                              out_target_ref);
 }
 
@@ -1741,17 +1765,9 @@ iree_status_t loom_linker_add_module(loom_linker_t* linker,
   return status;
 }
 
-iree_status_t loom_linker_add_module_symbols(
+static iree_status_t loom_linker_add_exact_selection(
     loom_linker_t* linker, const loom_module_t* source_module,
-    loom_linker_source_symbol_list_t source_symbols) {
-  IREE_RETURN_IF_ERROR(
-      loom_linker_validate_source_module(linker, source_module));
-  IREE_RETURN_IF_ERROR(
-      loom_linker_validate_source_symbols(source_module, source_symbols));
-  if (source_symbols.count == 0) {
-    return iree_ok_status();
-  }
-
+    loom_linker_exact_selection_t selection) {
   iree_arena_allocator_t source_arena;
   iree_arena_initialize(linker->block_pool, &source_arena);
   loom_linker_source_t source = {
@@ -1759,14 +1775,12 @@ iree_status_t loom_linker_add_module_symbols(
       .module = source_module,
       .arena = &source_arena,
       .source_symbol_count = source_module->symbols.count,
-      .exact =
-          {
-              .ordinals = source_symbols.ordinals,
-              .count = source_symbols.count,
-          },
+      .exact = selection,
   };
   source.symbol_remap = loom_ir_remap_symbol_callback_make(
-      loom_linker_remap_exact_symbol, &source);
+      selection.dense ? loom_linker_remap_dense_symbol
+                      : loom_linker_remap_exact_symbol,
+      &source);
 
   iree_status_t status = iree_arena_allocate_array(
       &source_arena, source.exact.count, sizeof(*source.target_symbols),
@@ -1778,7 +1792,8 @@ iree_status_t loom_linker_add_module_symbols(
   }
   for (iree_host_size_t i = 0;
        i < source.exact.count && iree_status_is_ok(status); ++i) {
-    const uint16_t source_symbol_id = (uint16_t)source.exact.ordinals[i];
+    const uint16_t source_symbol_id =
+        (uint16_t)(selection.dense ? i : selection.ordinals[i]);
     loom_symbol_ref_t target_ref = loom_symbol_ref_null();
     status = loom_linker_resolve_source_symbol(
         &source, source_symbol_id, &source.target_symbols[i], &target_ref);
@@ -1789,6 +1804,39 @@ iree_status_t loom_linker_add_module_symbols(
   }
   iree_arena_deinitialize(&source_arena);
   return status;
+}
+
+iree_status_t loom_linker_add_module_symbols(
+    loom_linker_t* linker, const loom_module_t* source_module,
+    loom_linker_source_symbol_list_t source_symbols) {
+  IREE_RETURN_IF_ERROR(
+      loom_linker_validate_source_module(linker, source_module));
+  IREE_RETURN_IF_ERROR(
+      loom_linker_validate_source_symbols(source_module, source_symbols));
+  if (source_symbols.count == 0) {
+    return iree_ok_status();
+  }
+  return loom_linker_add_exact_selection(
+      linker, source_module,
+      (loom_linker_exact_selection_t){
+          .ordinals = source_symbols.ordinals,
+          .count = source_symbols.count,
+      });
+}
+
+iree_status_t loom_linker_add_exact_module(loom_linker_t* linker,
+                                           const loom_module_t* source_module) {
+  IREE_RETURN_IF_ERROR(
+      loom_linker_validate_source_module(linker, source_module));
+  if (source_module->symbols.count == 0) {
+    return iree_ok_status();
+  }
+  return loom_linker_add_exact_selection(
+      linker, source_module,
+      (loom_linker_exact_selection_t){
+          .count = source_module->symbols.count,
+          .dense = true,
+      });
 }
 
 iree_status_t loom_linker_finalize_roots(loom_linker_t* linker,

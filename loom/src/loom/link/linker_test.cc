@@ -1004,6 +1004,38 @@ func.def @unused_corpus(%x: i32) -> (i32) {
   EXPECT_EQ(text.find("@unused"), std::string::npos);
 }
 
+TEST_F(LinkerTest, ExactModuleLinksCompleteDenseProjection) {
+  loom_module_t* source = Parse(IREE_SV(R"(
+func.def @helper(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.def public @caller(%x: i32) -> (i32) {
+  %y = func.call @helper(%x) : (i32) -> (i32)
+  func.return %y : i32
+}
+)"));
+
+  loom_linker_t* linker = CreateIncrementalLinker();
+  IREE_ASSERT_OK(loom_linker_add_exact_module(linker, source));
+  const iree_string_view_t roots[] = {IREE_SV("@caller")};
+  IREE_ASSERT_OK(
+      loom_linker_finalize_roots(linker, (iree_string_view_list_t){
+                                             /*.count=*/IREE_ARRAYSIZE(roots),
+                                             /*.values=*/roots,
+                                         }));
+  loom_module_t* linked = nullptr;
+  IREE_ASSERT_OK(loom_linker_finish(linker, &linked));
+  loom_linker_free(linker);
+  modules_.push_back(linked);
+  Verify(linked);
+
+  std::string text = Print(linked);
+  EXPECT_NE(text.find("func.def @helper"), std::string::npos);
+  EXPECT_NE(text.find("func.def public retain @caller"), std::string::npos);
+  EXPECT_NE(text.find("func.call @helper"), std::string::npos);
+}
+
 TEST_F(LinkerTest, ExactSelectionRejectsMissingDependency) {
   loom_module_t* source = Parse(IREE_SV(R"(
 func.def @helper(%x: i32) -> (i32) {

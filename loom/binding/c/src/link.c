@@ -15,6 +15,7 @@
 #include "iree/base/internal/atomics.h"
 #include "link_index.h"
 #include "loom/format/bytecode/reader.h"
+#include "loom/format/bytecode/selected_reader.h"
 #include "loom/link/linker.h"
 #include "loom/link/module_index.h"
 #include "loom/link/plan_projection.h"
@@ -71,6 +72,13 @@ typedef struct loomc_link_diagnostic_capture_t {
   // Source associated with emitted diagnostics.
   const loomc_source_t* source;
 } loomc_link_diagnostic_capture_t;
+
+typedef struct loomc_link_bytecode_read_state_t {
+  // Diagnostic bridge retaining the public source identity.
+  loomc_link_diagnostic_capture_t capture;
+  // Bytecode reader options referencing capture.
+  loom_bytecode_read_options_t options;
+} loomc_link_bytecode_read_state_t;
 
 static iree_allocator_t loomc_link_iree_allocator(loomc_allocator_t allocator) {
   return iree_allocator_from_loomc(allocator);
@@ -175,41 +183,76 @@ static iree_status_t loomc_link_capture_diagnostic(
       capture->result, capture->source, diagnostic));
 }
 
+static void loomc_link_bytecode_read_state_initialize(
+    loomc_link_materialization_context_t* context, const loomc_source_t* source,
+    loomc_link_bytecode_read_state_t* out_state) {
+  *out_state = (loomc_link_bytecode_read_state_t){
+      .capture =
+          {
+              .result = context->result,
+              .source = source,
+          },
+  };
+  out_state->options.diagnostic_sink = (loom_diagnostic_sink_t){
+      .fn = loomc_link_capture_diagnostic,
+      .user_data = &out_state->capture,
+  };
+  loomc_target_pass_environment_initialize_low_repr_environment(
+      loomc_context_target_pass_environment(context->linker->context),
+      &out_state->options.low_repr_environment);
+}
+
 static iree_status_t loomc_link_read_bytecode_module(
     loomc_link_materialization_context_t* context,
     const loom_link_module_index_provider_t* provider,
     const loom_link_module_index_module_t* module, const loomc_source_t* source,
     loom_module_t** out_module) {
   *out_module = NULL;
-  loomc_byte_span_t contents = loomc_source_contents(source);
-  loomc_string_view_t identifier = loomc_source_identifier(source);
-  loomc_link_diagnostic_capture_t capture = {
-      .result = context->result,
-      .source = source,
-  };
-  loom_bytecode_read_options_t read_options = {
-      .diagnostic_sink =
-          {
-              .fn = loomc_link_capture_diagnostic,
-              .user_data = &capture,
-          },
-  };
-  loomc_target_pass_environment_initialize_low_repr_environment(
-      loomc_context_target_pass_environment(context->linker->context),
-      &read_options.low_repr_environment);
+  IREE_ASSERT(provider->kind == LOOM_LINK_PROVIDER_BYTECODE);
+  loomc_link_bytecode_read_state_t read_state;
+  loomc_link_bytecode_read_state_initialize(context, source, &read_state);
   loom_bytecode_read_result_t read_result = {0};
   loom_module_t* materialized_module = NULL;
   IREE_RETURN_IF_ERROR(loom_bytecode_read_module_ordinal(
-      iree_make_const_byte_span(contents.data, contents.data_length),
-      iree_string_view_from_loomc(identifier),
+      provider->bytecode.contents, provider->bytecode.filename,
       loomc_context_loom_context(context->linker->context), context->block_pool,
-      (uint16_t)module->provider_module_ordinal, &read_options, &read_result,
-      &materialized_module, loomc_link_iree_allocator(context->allocator)));
+      (uint16_t)module->provider_module_ordinal, &read_state.options,
+      &read_result, &materialized_module,
+      loomc_link_iree_allocator(context->allocator)));
   if (read_result.error_count != 0 || materialized_module == NULL) {
     loom_module_free(materialized_module);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "bytecode provider '%.*s' module %" PRIhsz
                             " did not materialize",
+                            (int)provider->name.size, provider->name.data,
+                            module->provider_module_ordinal);
+  }
+  *out_module = materialized_module;
+  return iree_ok_status();
+}
+
+static iree_status_t loomc_link_read_selected_bytecode_module(
+    loomc_link_materialization_context_t* context,
+    const loom_link_module_index_provider_t* provider,
+    const loom_link_module_index_module_t* module, const loomc_source_t* source,
+    loom_bytecode_symbol_ordinal_list_t selection, loom_module_t** out_module) {
+  *out_module = NULL;
+  IREE_ASSERT(provider->kind == LOOM_LINK_PROVIDER_BYTECODE);
+  loomc_link_bytecode_read_state_t read_state;
+  loomc_link_bytecode_read_state_initialize(context, source, &read_state);
+  loom_bytecode_read_result_t read_result = {0};
+  loom_module_t* materialized_module = NULL;
+  IREE_RETURN_IF_ERROR(loom_bytecode_materialize_module_symbols(
+      provider->bytecode.contents, provider->bytecode.filename,
+      loomc_context_loom_context(context->linker->context), context->block_pool,
+      &provider->bytecode.metadata, (uint16_t)module->provider_module_ordinal,
+      selection, &read_state.options, &read_result, &materialized_module,
+      loomc_link_iree_allocator(context->allocator)));
+  if (read_result.error_count != 0 || materialized_module == NULL) {
+    loom_module_free(materialized_module);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "bytecode provider '%.*s' module %" PRIhsz
+                            " did not materialize selected symbols",
                             (int)provider->name.size, provider->name.data,
                             module->provider_module_ordinal);
   }
@@ -239,6 +282,46 @@ static iree_status_t loomc_link_materialize_module(
   out_materialized->module = materialized_module;
   out_materialized->owned_module = materialized_module;
   return iree_ok_status();
+}
+
+static iree_status_t loomc_link_add_selected_module(
+    loomc_link_materialization_context_t* context,
+    const loom_link_plan_module_selection_t* selection,
+    iree_host_size_t* source_symbol_ordinals, loom_linker_t* linker) {
+  for (iree_host_size_t i = 0; i < selection->symbols.count; ++i) {
+    source_symbol_ordinals[i] =
+        selection->symbols.values[i].source_symbol->module_symbol_ordinal;
+  }
+  const loom_linker_source_symbol_list_t source_symbols = {
+      .count = selection->symbols.count,
+      .ordinals = source_symbol_ordinals,
+  };
+
+  const loom_link_module_index_module_t* module = selection->source_module;
+  if (module->materialized_module != NULL) {
+    return loom_linker_add_module_symbols(linker, module->materialized_module,
+                                          source_symbols);
+  }
+
+  const loom_link_module_index_provider_t* provider =
+      loom_link_module_index_provider_at(context->module_index,
+                                         module->provider_ordinal);
+  IREE_ASSERT(provider->kind == LOOM_LINK_PROVIDER_BYTECODE);
+  const loomc_source_t* source = loomc_link_index_source_for_provider(
+      context->link_index, module->provider_ordinal);
+  loom_module_t* materialized_module = NULL;
+  iree_status_t status = loomc_link_read_selected_bytecode_module(
+      context, provider, module, source,
+      (loom_bytecode_symbol_ordinal_list_t){
+          .count = selection->symbols.count,
+          .ordinals = source_symbol_ordinals,
+      },
+      &materialized_module);
+  if (iree_status_is_ok(status)) {
+    status = loom_linker_add_exact_module(linker, materialized_module);
+  }
+  loom_module_free(materialized_module);
+  return status;
 }
 
 static void loomc_link_materialization_context_initialize(
@@ -288,36 +371,25 @@ static iree_status_t loomc_link_add_selected_modules(
   loom_link_plan_module_projection_t projection = {0};
   IREE_RETURN_IF_ERROR(
       loom_link_plan_project_modules(plan, arena, &projection));
+  iree_host_size_t max_module_symbol_count = 0;
+  for (iree_host_size_t i = 0; i < projection.modules.count; ++i) {
+    max_module_symbol_count = iree_max(
+        max_module_symbol_count, projection.modules.values[i].symbols.count);
+  }
   iree_host_size_t* source_symbol_ordinals = NULL;
-  if (projection.symbols.count != 0) {
+  if (max_module_symbol_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, projection.symbols.count, sizeof(*source_symbol_ordinals),
+        arena, max_module_symbol_count, sizeof(*source_symbol_ordinals),
         (void**)&source_symbol_ordinals));
-    for (iree_host_size_t i = 0; i < projection.symbols.count; ++i) {
-      source_symbol_ordinals[i] =
-          projection.symbols.values[i].source_symbol->module_symbol_ordinal;
-    }
   }
 
   iree_status_t status = iree_ok_status();
-  iree_host_size_t symbol_offset = 0;
   for (iree_host_size_t i = 0;
        i < projection.modules.count && iree_status_is_ok(status); ++i) {
     const loom_link_plan_module_selection_t* selection =
         &projection.modules.values[i];
-    loomc_link_materialized_module_t materialized = {0};
-    status = loomc_link_materialize_module(context, selection->source_module,
-                                           &materialized);
-    if (iree_status_is_ok(status)) {
-      status = loom_linker_add_module_symbols(
-          linker, materialized.module,
-          (loom_linker_source_symbol_list_t){
-              .count = selection->symbols.count,
-              .ordinals = source_symbol_ordinals + symbol_offset,
-          });
-    }
-    loom_module_free(materialized.owned_module);
-    symbol_offset += selection->symbols.count;
+    status = loomc_link_add_selected_module(context, selection,
+                                            source_symbol_ordinals, linker);
   }
   return status;
 }

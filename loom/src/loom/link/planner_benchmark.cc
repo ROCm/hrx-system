@@ -15,6 +15,7 @@
 #include "benchmark/benchmark.h"
 #include "iree/base/internal/arena.h"
 #include "iree/io/vec_stream.h"
+#include "loom/format/bytecode/selected_reader.h"
 #include "loom/format/bytecode/writer.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -362,6 +363,123 @@ static void BM_LinkExact_SelectiveChain_Catalog(benchmark::State& state) {
   BenchmarkExactLink(state, /*selected_symbol_count=*/state.range(0));
 }
 
+static void BM_LinkExactDense_Catalog(benchmark::State& state) {
+  PlannerCatalogFixture fixture((uint32_t)state.range(0));
+  const loom_linker_options_t linker_options = {
+      /*.module_name=*/IREE_SV("linked"),
+  };
+
+  for (auto _ : state) {
+    state.PauseTiming();
+    loom_linker_t* linker = nullptr;
+    CheckStatus(loom_linker_create(fixture.module()->context, &linker_options,
+                                   fixture.block_pool(),
+                                   iree_allocator_system(), &linker));
+    state.ResumeTiming();
+    CheckStatus(loom_linker_add_exact_module(linker, fixture.module()));
+    benchmark::DoNotOptimize(linker);
+    state.PauseTiming();
+    loom_linker_free(linker);
+    state.ResumeTiming();
+  }
+  SetCounters(state, fixture, fixture.symbol_count());
+}
+
+static void BenchmarkSelectiveMaterializeAndLink(
+    benchmark::State& state, uint32_t root_ordinal,
+    iree_host_size_t expected_symbol_count) {
+  PlannerCatalogFixture fixture((uint32_t)state.range(0));
+  loom_link_module_index_t* index = fixture.BuildIndex();
+  const std::string root_name = fixture.SymbolName(root_ordinal);
+  const iree_string_view_t root =
+      iree_make_string_view(root_name.data(), root_name.size());
+  const loom_link_plan_options_t plan_options = {
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/{/*.count=*/1, /*.values=*/&root},
+  };
+  loom_link_plan_t* plan = nullptr;
+  CheckStatus(loom_link_plan_build(index, &plan_options,
+                                   iree_allocator_system(), &plan));
+  iree_arena_allocator_t projection_arena;
+  iree_arena_initialize(fixture.block_pool(), &projection_arena);
+  loom_link_plan_module_projection_t projection = {};
+  CheckStatus(
+      loom_link_plan_project_modules(plan, &projection_arena, &projection));
+  if (projection.modules.count != 1 ||
+      projection.symbols.count != expected_symbol_count) {
+    std::abort();
+  }
+
+  const loom_link_plan_module_selection_t& selection =
+      projection.modules.values[0];
+  std::vector<iree_host_size_t> source_symbol_ordinals(selection.symbols.count);
+  for (iree_host_size_t i = 0; i < selection.symbols.count; ++i) {
+    source_symbol_ordinals[i] =
+        selection.symbols.values[i].source_symbol->module_symbol_ordinal;
+  }
+  const loom_link_module_index_provider_t* provider =
+      loom_link_module_index_provider_at(
+          index, selection.source_module->provider_ordinal);
+  if (!provider || provider->kind != LOOM_LINK_PROVIDER_BYTECODE) {
+    std::abort();
+  }
+  const loom_bytecode_read_options_t read_options = {};
+  const loom_linker_options_t linker_options = {
+      /*.module_name=*/IREE_SV("linked"),
+  };
+
+  for (auto _ : state) {
+    state.PauseTiming();
+    loom_linker_t* linker = nullptr;
+    CheckStatus(loom_linker_create(fixture.module()->context, &linker_options,
+                                   fixture.block_pool(),
+                                   iree_allocator_system(), &linker));
+    state.ResumeTiming();
+    loom_bytecode_read_result_t read_result = {};
+    loom_module_t* selected_module = nullptr;
+    CheckStatus(loom_bytecode_materialize_module_symbols(
+        provider->bytecode.contents, provider->bytecode.filename,
+        fixture.module()->context, fixture.block_pool(),
+        &provider->bytecode.metadata,
+        (uint16_t)selection.source_module->provider_module_ordinal,
+        (loom_bytecode_symbol_ordinal_list_t){
+            /*.count=*/source_symbol_ordinals.size(),
+            /*.ordinals=*/source_symbol_ordinals.data(),
+        },
+        &read_options, &read_result, &selected_module,
+        iree_allocator_system()));
+    if (read_result.error_count != 0 || selected_module == nullptr ||
+        selected_module->symbols.count != expected_symbol_count) {
+      std::abort();
+    }
+    CheckStatus(loom_linker_add_exact_module(linker, selected_module));
+    loom_module_free(selected_module);
+    benchmark::DoNotOptimize(linker);
+    state.PauseTiming();
+    loom_linker_free(linker);
+    state.ResumeTiming();
+  }
+
+  SetCounters(state, fixture, expected_symbol_count);
+  iree_arena_deinitialize(&projection_arena);
+  loom_link_plan_free(plan);
+  loom_link_module_index_free(index);
+}
+
+static void BM_MaterializeAndLink_SelectiveLeaf_Catalog(
+    benchmark::State& state) {
+  const uint32_t symbol_count = (uint32_t)state.range(0);
+  BenchmarkSelectiveMaterializeAndLink(state, /*root_ordinal=*/symbol_count - 1,
+                                       /*expected_symbol_count=*/1);
+}
+
+static void BM_MaterializeAndLink_SelectiveChain_Catalog(
+    benchmark::State& state) {
+  const uint32_t symbol_count = (uint32_t)state.range(0);
+  BenchmarkSelectiveMaterializeAndLink(state, /*root_ordinal=*/0,
+                                       /*expected_symbol_count=*/symbol_count);
+}
+
 static void BM_GlobalDuplicateEnumeration(benchmark::State& state) {
   const uint32_t provider_count = (uint32_t)state.range(0);
   PlannerCatalogFixture fixture(/*symbol_count=*/1);
@@ -405,6 +523,13 @@ BENCHMARK(BM_LinkExact_SelectiveLeaf_Catalog)
     ->Apply(CatalogScales)
     ->Complexity();
 BENCHMARK(BM_LinkExact_SelectiveChain_Catalog)
+    ->Apply(CatalogScales)
+    ->Complexity();
+BENCHMARK(BM_LinkExactDense_Catalog)->Apply(CatalogScales)->Complexity();
+BENCHMARK(BM_MaterializeAndLink_SelectiveLeaf_Catalog)
+    ->Apply(CatalogScales)
+    ->Complexity();
+BENCHMARK(BM_MaterializeAndLink_SelectiveChain_Catalog)
     ->Apply(CatalogScales)
     ->Complexity();
 BENCHMARK(BM_GlobalDuplicateEnumeration)->Apply(CatalogScales)->Complexity();
