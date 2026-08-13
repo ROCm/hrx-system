@@ -6249,26 +6249,6 @@ static iree_status_t loom_bytecode_reader_read_provider_imports(
         (void**)&reader->view.provider_imports.anchors));
   }
 
-  loom_bytecode_module_metadata_t* module_metadata =
-      reader->view.output_metadata;
-  if (module_metadata) {
-    module_metadata->provider_import_count = (iree_host_size_t)provider_count;
-    module_metadata->provider_import_anchor_count =
-        (iree_host_size_t)total_anchor_count;
-    if (provider_count > 0) {
-      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          reader->metadata_arena, (iree_host_size_t)provider_count,
-          sizeof(*module_metadata->provider_imports),
-          (void**)&module_metadata->provider_imports));
-    }
-    if (total_anchor_count > 0) {
-      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          reader->metadata_arena, (iree_host_size_t)total_anchor_count,
-          sizeof(*module_metadata->provider_import_anchor_symbol_indices),
-          (void**)&module_metadata->provider_import_anchor_symbol_indices));
-    }
-  }
-
   iree_host_size_t anchor_index = 0;
   iree_string_view_t previous_provider = iree_string_view_empty();
   const iree_host_size_t anchor_usage_word_count =
@@ -6321,14 +6301,6 @@ static iree_status_t loom_bytecode_reader_read_provider_imports(
     provider_import->provider_id = (loom_string_id_t)provider_id;
     provider_import->first_anchor_index = (uint32_t)anchor_index;
     provider_import->anchor_count = (uint32_t)anchor_count;
-    if (module_metadata) {
-      module_metadata->provider_imports[provider_index] =
-          (loom_bytecode_provider_import_metadata_t){
-              .provider = provider,
-              .first_anchor_index = (uint32_t)anchor_index,
-              .anchor_count = (uint32_t)anchor_count,
-          };
-    }
 
     iree_string_view_t previous_anchor = iree_string_view_empty();
     for (iree_host_size_t local_anchor_index = 0;
@@ -6358,10 +6330,6 @@ static iree_status_t loom_bytecode_reader_read_provider_imports(
       previous_anchor = anchor_name;
       reader->view.provider_imports.anchors[anchor_index] = (loom_symbol_ref_t){
           .module_id = 0, .symbol_id = (uint16_t)symbol_index};
-      if (module_metadata) {
-        module_metadata->provider_import_anchor_symbol_indices[anchor_index] =
-            (uint32_t)symbol_index;
-      }
       if (reader->view.symbols.kinds[symbol_index] ==
           LOOM_BYTECODE_SYMBOL_ANCHOR) {
         anchor_usage_bits[symbol_index / 64] |= UINT64_C(1)
@@ -6370,20 +6338,10 @@ static iree_status_t loom_bytecode_reader_read_provider_imports(
     }
 
     iree_host_size_t comment_count = 0;
-    iree_arena_allocator_t* trivia_arena =
-        module_metadata ? reader->metadata_arena : reader->arena;
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_source_trivia(
-        reader, &cursor, trivia_arena, &provider_import->leading_blank_line,
+        reader, &cursor, reader->arena, &provider_import->leading_blank_line,
         &provider_import->comments, &comment_count));
     provider_import->comment_count = (uint16_t)comment_count;
-    if (module_metadata) {
-      loom_bytecode_provider_import_metadata_t* provider_metadata =
-          &module_metadata->provider_imports[provider_index];
-      provider_metadata->leading_blank_line =
-          provider_import->leading_blank_line;
-      provider_metadata->comments = provider_import->comments;
-      provider_metadata->comment_count = provider_import->comment_count;
-    }
   }
 
   if (anchor_index != (iree_host_size_t)total_anchor_count) {
@@ -6410,6 +6368,59 @@ static iree_status_t loom_bytecode_reader_read_provider_imports(
 
   return loom_bytecode_reader_expect_empty(&reader->decoder, &cursor,
                                            IREE_SV("PROVIDER_IMPORTS"));
+}
+
+// Keep index-only retained allocation out of shared module validation so full
+// reads do not pay its instruction-cache cost.
+IREE_ATTRIBUTE_NOINLINE static iree_status_t
+loom_bytecode_reader_project_provider_imports(
+    const loom_bytecode_reader_module_view_t* view,
+    loom_bytecode_module_metadata_t* output_metadata,
+    iree_arena_allocator_t* retained_arena) {
+  output_metadata->provider_import_count = view->provider_imports.count;
+  if (view->provider_imports.count > 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(retained_arena, view->provider_imports.count,
+                                  sizeof(*output_metadata->provider_imports),
+                                  (void**)&output_metadata->provider_imports));
+  }
+  output_metadata->provider_import_anchor_count =
+      view->provider_imports.anchor_count;
+  if (view->provider_imports.anchor_count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        retained_arena, view->provider_imports.anchor_count,
+        sizeof(*output_metadata->provider_import_anchor_symbol_indices),
+        (void**)&output_metadata->provider_import_anchor_symbol_indices));
+  }
+
+  for (iree_host_size_t provider_index = 0;
+       provider_index < view->provider_imports.count; ++provider_index) {
+    const loom_bytecode_reader_provider_import_t* provider_import =
+        &view->provider_imports.values[provider_index];
+    iree_string_view_t* retained_comments = NULL;
+    if (provider_import->comment_count > 0) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          retained_arena, provider_import->comment_count,
+          sizeof(*retained_comments), (void**)&retained_comments));
+      memcpy(retained_comments, provider_import->comments,
+             provider_import->comment_count * sizeof(*retained_comments));
+    }
+    output_metadata->provider_imports[provider_index] =
+        (loom_bytecode_provider_import_metadata_t){
+            .provider = view->strings.values[provider_import->provider_id],
+            .first_anchor_index = provider_import->first_anchor_index,
+            .anchor_count = provider_import->anchor_count,
+            .leading_blank_line = provider_import->leading_blank_line,
+            .comments = retained_comments,
+            .comment_count = provider_import->comment_count,
+        };
+  }
+  for (iree_host_size_t anchor_index = 0;
+       anchor_index < view->provider_imports.anchor_count; ++anchor_index) {
+    output_metadata->provider_import_anchor_symbol_indices[anchor_index] =
+        view->provider_imports.anchors[anchor_index].symbol_id;
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_bytecode_reader_read_symbol_references(
@@ -7326,6 +7337,10 @@ iree_status_t loom_bytecode_read_index(
       loom_bytecode_reader_initialize_module(&reader, &module_reader);
       status = loom_bytecode_reader_validate_module(
           &module_reader, &reader.modules[i], &out_metadata->modules[i]);
+      if (iree_status_is_ok(status)) {
+        status = loom_bytecode_reader_project_provider_imports(
+            &module_reader.view, &out_metadata->modules[i], metadata_arena);
+      }
       if (i == 0) {
         reader.result.first_module = module_reader.view.summary;
       }
