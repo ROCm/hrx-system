@@ -105,8 +105,11 @@ static iree_status_t iree_benchmark_loom_write_profile_artifact_identity_json(
   IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
       object, IREE_SV("batch_size"),
       benchmark_result->hal_benchmark.timing.batch_size));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      object, IREE_SV("measurement_relationship"),
+      IREE_SV("distinct_execution")));
   const loom_run_hal_profile_summary_t* profile =
-      &benchmark_result->hal_benchmark.profile;
+      &benchmark_result->hal_benchmark.profile_replay;
   if (profile->has_artifact_path) {
     IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
         object, IREE_SV("artifact_path"),
@@ -453,7 +456,7 @@ static iree_status_t iree_benchmark_loom_append_profile_summary_rows(
     const iree_benchmark_loom_benchmark_result_t* benchmark_result,
     iree_allocator_t allocator, iree_string_builder_t* profile_output) {
   const loom_run_hal_profile_summary_t* profile =
-      &benchmark_result->hal_benchmark.profile;
+      &benchmark_result->hal_benchmark.profile_replay;
   if (!benchmark_result->has_hal_benchmark || !profile->requested) {
     return iree_ok_status();
   }
@@ -651,7 +654,7 @@ static iree_status_t iree_benchmark_loom_append_profile_counter_rows(
     const iree_benchmark_loom_benchmark_result_t* benchmark_result,
     iree_allocator_t allocator, iree_string_builder_t* profile_output) {
   const loom_run_hal_profile_summary_t* profile =
-      &benchmark_result->hal_benchmark.profile;
+      &benchmark_result->hal_benchmark.profile_replay;
   if (!benchmark_result->has_hal_benchmark || !profile->requested ||
       !iree_benchmark_loom_profile_data_has_counter_data(
           profile->data_families)) {
@@ -760,7 +763,7 @@ static iree_status_t iree_benchmark_loom_append_profile_counter_rows(
   return status;
 }
 
-iree_status_t iree_benchmark_loom_append_profile_row(
+iree_status_t iree_benchmark_loom_append_profile_replay_row(
     const iree_benchmark_loom_run_identity_t* run,
     const iree_benchmark_loom_candidate_identity_t* candidate,
     iree_host_size_t work_item_index, const loom_module_t* module,
@@ -770,7 +773,7 @@ iree_status_t iree_benchmark_loom_append_profile_row(
     const iree_benchmark_loom_benchmark_result_t* benchmark_result,
     iree_allocator_t allocator, iree_string_builder_t* profile_output) {
   if (!benchmark_result->has_hal_benchmark ||
-      !benchmark_result->hal_benchmark.profile.requested) {
+      !benchmark_result->hal_benchmark.profile_replay.requested) {
     return iree_ok_status();
   }
   loom_output_stream_t stream;
@@ -778,7 +781,7 @@ iree_status_t iree_benchmark_loom_append_profile_row(
   loom_json_object_writer_t object;
   IREE_RETURN_IF_ERROR(loom_json_object_begin(&stream, &object));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
-      &object, IREE_SV("row"), IREE_SV("profile")));
+      &object, IREE_SV("row"), IREE_SV("profile_replay")));
   IREE_RETURN_IF_ERROR(
       iree_benchmark_loom_write_run_id_field_json(run, &object));
   IREE_RETURN_IF_ERROR(
@@ -799,9 +802,9 @@ iree_status_t iree_benchmark_loom_append_profile_row(
       &object, IREE_SV("batch_size"),
       benchmark_result->hal_benchmark.timing.batch_size));
   IREE_RETURN_IF_ERROR(
-      loom_json_object_begin_field(&object, IREE_SV("profile")));
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_hal_profile_summary_json(
-      &benchmark_result->hal_benchmark.profile, &stream));
+      loom_json_object_begin_field(&object, IREE_SV("profile_replay")));
+  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_hal_profile_replay_json(
+      policy, benchmark_result, &stream));
   IREE_RETURN_IF_ERROR(loom_json_object_end(&object));
   IREE_RETURN_IF_ERROR(loom_output_stream_write_char(&stream, '\n'));
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_append_profile_summary_rows(

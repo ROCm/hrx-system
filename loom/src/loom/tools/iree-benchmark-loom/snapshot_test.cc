@@ -187,7 +187,7 @@ TEST(BenchmarkSnapshotSinkTest, AggregatesDeduplicatedWorkItems) {
   EXPECT_TRUE(iree_string_view_is_empty(
       TryLookupObject(measurement, IREE_SV("operation_timing_ns"))));
   EXPECT_TRUE(iree_string_view_is_empty(
-      TryLookupObject(first_work_item, IREE_SV("profile"))));
+      TryLookupObject(first_work_item, IREE_SV("profile_replay"))));
   EXPECT_TRUE(iree_string_view_is_empty(
       TryLookupObject(first_work_item, IREE_SV("compile_report"))));
   EXPECT_TRUE(
@@ -237,7 +237,7 @@ TEST(BenchmarkSnapshotSinkTest, IncludesRequestedProfileSummary) {
   result.hal_benchmark.timing.operation_timing.mean_ns = 30.0;
   result.hal_benchmark.timing.operation_timing.p50_ns = 30;
   result.hal_benchmark.timing.operation_timing.p90_ns = 40;
-  result.hal_benchmark.profile.requested = true;
+  result.hal_benchmark.profile_replay.requested = true;
 
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_run(
       &event_sink, &run, /*dry_run=*/false, &kNoSanitizer));
@@ -260,8 +260,12 @@ TEST(BenchmarkSnapshotSinkTest, IncludesRequestedProfileSummary) {
   iree_string_view_t root = ParseJsonDocument(SnapshotJson(&snapshot, &output));
   iree_string_view_t work_items = LookupObject(root, IREE_SV("work_items"));
   iree_string_view_t first_work_item = FirstArrayElement(work_items);
-  iree_string_view_t profile =
-      LookupObject(first_work_item, IREE_SV("profile"));
+  iree_string_view_t profile_replay =
+      LookupObject(first_work_item, IREE_SV("profile_replay"));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(profile_replay, IREE_SV("measurement_relationship")),
+      IREE_SV("distinct_execution")));
+  iree_string_view_t profile = LookupObject(profile_replay, IREE_SV("summary"));
   EXPECT_TRUE(iree_string_view_equal(
       LookupObject(profile, IREE_SV("requested")), IREE_SV("true")));
   EXPECT_TRUE(iree_string_view_equal(LookupObject(profile, IREE_SV("executed")),

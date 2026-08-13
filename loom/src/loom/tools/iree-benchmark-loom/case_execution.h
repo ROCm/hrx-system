@@ -26,7 +26,8 @@ iree_host_size_t iree_benchmark_loom_case_sample_from_benchmark_sample(
     const loom_testbench_case_plan_t* case_plan,
     iree_host_size_t benchmark_sample_ordinal);
 
-// Emits result/profile events for every logical benchmark alias of |work_item|.
+// Emits result/profile-replay events for every logical benchmark alias of
+// |work_item|.
 iree_status_t iree_benchmark_loom_emit_work_item_result_aliases(
     const iree_benchmark_loom_run_identity_t* run,
     const loom_testbench_module_plan_t* module_plan,

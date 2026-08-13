@@ -156,13 +156,13 @@ check.benchmark<@sampled> @all_b
             IREE_BENCHMARK_LOOM_EVENT_BENCHMARK_RESULT);
   EXPECT_EQ(collector.events[4].benchmark_result.work_item_index, 0u);
   EXPECT_EQ(collector.events[4].benchmark_result.correctness_sample_count, 2u);
-  EXPECT_EQ(collector.events[5].kind, IREE_BENCHMARK_LOOM_EVENT_PROFILE);
+  EXPECT_EQ(collector.events[5].kind, IREE_BENCHMARK_LOOM_EVENT_PROFILE_REPLAY);
   EXPECT_EQ(collector.events[6].kind,
             IREE_BENCHMARK_LOOM_EVENT_BENCHMARK_RESULT);
   EXPECT_TRUE(iree_string_view_equal(
       collector.events[6].benchmark_result.candidate->candidate_id,
       IREE_SV("c1")));
-  EXPECT_EQ(collector.events[7].kind, IREE_BENCHMARK_LOOM_EVENT_PROFILE);
+  EXPECT_EQ(collector.events[7].kind, IREE_BENCHMARK_LOOM_EVENT_PROFILE_REPLAY);
 
   iree_benchmark_loom_work_plan_deinitialize(&work_plan);
 }

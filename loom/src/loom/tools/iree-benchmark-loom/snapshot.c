@@ -637,7 +637,7 @@ static iree_status_t iree_benchmark_loom_snapshot_emit_event(
     case IREE_BENCHMARK_LOOM_EVENT_BENCHMARK_RESULT:
       return iree_benchmark_loom_snapshot_append_benchmark(
           state, &event->benchmark_result);
-    case IREE_BENCHMARK_LOOM_EVENT_PROFILE:
+    case IREE_BENCHMARK_LOOM_EVENT_PROFILE_REPLAY:
       return iree_ok_status();
     case IREE_BENCHMARK_LOOM_EVENT_FAILURE:
       return iree_benchmark_loom_snapshot_append_failure(state,

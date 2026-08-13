@@ -143,13 +143,15 @@ changing the primary host completion timing. It does not make the replay the
 device component of that ordinary timing. Retained metadata can add timestamp
 packets, barriers, flushes, fixups, or harvest work according to the target.
 When the target provides complete timestamps,
-`profiled_dispatch_timing.dispatch_distribution.duration_ns` contains
+`profile_replay.measurement_relationship` records that the replay is a distinct
+execution, and
+`profile_replay.dispatch_timing.dispatch_distribution.duration_ns` contains
 per-dispatch statistics for that instrumented replay.
 
-The device timing specification and `timing_interpretation.warnings` state
-known comparability and perturbation hazards. A structured device-oriented
-score means the tool's completeness checks passed; it does not by itself prove
-equivalence with another runtime's instrumentation.
+`profile_replay.warnings` states known comparability and perturbation hazards.
+When present, `profile_replay.comparison` means the tool's completeness checks
+passed; it does not by itself prove equivalence with another runtime's
+instrumentation.
 
 A same-replay device interval must be contained by the synchronous host
 interval that encloses it. A separately profiled replay has no subtraction or
