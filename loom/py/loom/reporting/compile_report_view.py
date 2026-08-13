@@ -539,7 +539,21 @@ def build_compile_report_diff(
     bank_service = build_bank_service_diff(baseline, candidate)
     if bank_service is not None:
         view["bank_service"] = bank_service
-    subgroup_access = build_subgroup_access_diff(baseline, candidate)
+    subgroup_access = build_subgroup_access_diff(
+        baseline,
+        candidate,
+        entry_function_pairs=(
+            tuple(
+                (
+                    pair.baseline_identity.function,
+                    pair.candidate_identity.function,
+                )
+                for pair in match.pairs
+            )
+            if force
+            else ()
+        ),
+    )
     if subgroup_access is not None:
         view["subgroup_access"] = subgroup_access
     if comparison_mode is CompileReportComparisonMode.TARGET and not force:

@@ -180,8 +180,10 @@ def build_subgroup_access_show(
 def build_subgroup_access_diff(
     baseline: CompileReportDocument,
     candidate: CompileReportDocument,
+    *,
+    entry_function_pairs: tuple[tuple[str | None, str | None], ...] = (),
 ) -> dict[str, object] | None:
-    """Builds a source-aware diff without pairing ambiguous packet variants."""
+    """Builds a source-aware diff under explicit entry function pairings."""
     baseline_show = build_subgroup_access_show(baseline)
     candidate_show = build_subgroup_access_show(candidate)
     if baseline_show is None and candidate_show is None:
@@ -203,8 +205,32 @@ def build_subgroup_access_diff(
         _expect_dict(baseline_show["summary"]),
         _expect_dict(candidate_show["summary"]),
     )
-    baseline_sources = _sources_by_key(_expect_list(baseline_show["groups"]))
-    candidate_sources = _sources_by_key(_expect_list(candidate_show["groups"]))
+    candidate_function_aliases: dict[str, str] = {}
+    for baseline_function, candidate_function in entry_function_pairs:
+        if (
+            baseline_function is None
+            or candidate_function is None
+            or baseline_function == candidate_function
+        ):
+            continue
+        previous = candidate_function_aliases.setdefault(
+            candidate_function, baseline_function
+        )
+        if previous != baseline_function:
+            raise CompileReportError(
+                "explicit entry pairing maps candidate function "
+                f"{candidate_function!r} to both {previous!r} and "
+                f"{baseline_function!r}"
+            )
+    baseline_sources = _sources_by_key(
+        _expect_list(baseline_show["groups"]),
+        source=baseline.source,
+    )
+    candidate_sources = _sources_by_key(
+        _expect_list(candidate_show["groups"]),
+        source=candidate.source,
+        function_aliases=candidate_function_aliases,
+    )
     changed_sources = []
     unchanged_source_count = 0
     for key in sorted(set(baseline_sources) | set(candidate_sources)):
@@ -709,11 +735,24 @@ def _sum_group_summaries(groups: list[dict[str, object]]) -> dict[str, object]:
 
 def _sources_by_key(
     values: list[object],
+    *,
+    source: str,
+    function_aliases: dict[str, str] | None = None,
 ) -> dict[tuple[tuple[int, object], ...], dict[str, object]]:
     source_groups: dict[tuple[tuple[int, object], ...], list[dict[str, object]]] = {}
+    original_keys: dict[
+        tuple[tuple[int, object], ...], tuple[tuple[int, object], ...]
+    ] = {}
     for value in values:
         group = _expect_dict(value)
-        key = _source_key(group)
+        original_key = _source_key(group)
+        key = _source_key(group, function_aliases=function_aliases)
+        previous_original_key = original_keys.setdefault(key, original_key)
+        if previous_original_key != original_key:
+            raise CompileReportError(
+                f"{source}: explicit entry pairing ambiguously collapses "
+                "multiple subgroup access sources"
+            )
         source_groups.setdefault(key, []).append(group)
     sources = {}
     for key, groups in source_groups.items():
@@ -732,11 +771,11 @@ def _diff_source(
     baseline: dict[str, object], candidate: dict[str, object]
 ) -> dict[str, object] | None:
     baseline_variants = {
-        _variant_key(_expect_dict(value)): _expect_dict(value)
+        _variant_within_source_key(_expect_dict(value)): _expect_dict(value)
         for value in _expect_list(baseline["variants"])
     }
     candidate_variants = {
-        _variant_key(_expect_dict(value)): _expect_dict(value)
+        _variant_within_source_key(_expect_dict(value)): _expect_dict(value)
         for value in _expect_list(candidate["variants"])
     }
     added = []
@@ -979,17 +1018,28 @@ def _group_sort_key(group: dict[str, object]) -> tuple[object, ...]:
     return (_source_key(group), _variant_key(group))
 
 
-def _source_key(group: dict[str, object]) -> tuple[tuple[int, object], ...]:
+def _source_key(
+    group: dict[str, object],
+    *,
+    function_aliases: dict[str, str] | None = None,
+) -> tuple[tuple[int, object], ...]:
     identity = _expect_dict(group["identity"])
-    return tuple(
-        _sortable_component(identity[field]) for field in _SOURCE_IDENTITY_FIELDS
-    )
+    values = []
+    for field in _SOURCE_IDENTITY_FIELDS:
+        value = identity[field]
+        if field == "function" and function_aliases and isinstance(value, str):
+            value = function_aliases.get(value, value)
+        values.append(_sortable_component(value))
+    return tuple(values)
 
 
 def _variant_key(group: dict[str, object]) -> tuple[object, ...]:
+    return (_source_key(group), _variant_within_source_key(group))
+
+
+def _variant_within_source_key(group: dict[str, object]) -> tuple[object, ...]:
     identity = _expect_dict(group["identity"])
     return (
-        _source_key(group),
         _sortable_component(identity["packet"]),
         _sortable_component(identity["strategy"]),
         _freeze(group["access"]),

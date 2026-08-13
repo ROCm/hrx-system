@@ -449,6 +449,36 @@ def test_diff_reports_execution_count_change_on_same_variant() -> None:
     )
 
 
+def test_forced_diff_aligns_sources_from_paired_renamed_entry() -> None:
+    access = _exact_access(packet_bytes=2, lane_stride_bytes=2, coverage="dense")
+    baseline = parse_compile_report(
+        _compile_report([_group(access, modeled_packets=1, dynamic_packets=1)]),
+        source="baseline.json",
+    )
+    candidate_group = _group(access, modeled_packets=2, dynamic_packets=5)
+    candidate_group["function"] = "candidate_attention"
+    candidate_report = _compile_report([candidate_group])
+    candidate_entry = candidate_report["entries"]["rows"][0]
+    candidate_entry["function"] = "candidate_attention"
+    candidate_entry["source_function"] = "candidate_attention"
+    candidate_entry["target_export"] = "candidate_attention"
+    candidate = parse_compile_report(candidate_report, source="candidate.json")
+
+    subgroup_access = build_compile_report_diff(
+        baseline,
+        candidate,
+        force=True,
+    )["subgroup_access"]
+
+    assert subgroup_access["changed_source_count"] == 1
+    assert subgroup_access["unchanged_source_count"] == 0
+    assert len(subgroup_access["sources"]) == 1
+    source = subgroup_access["sources"][0]
+    assert source["status"] == "changed"
+    assert source["identity"]["function"] == "dflash_attention"
+    assert len(source["changed_variants"]) == 1
+
+
 def test_show_rejects_duplicate_semantic_access_variant() -> None:
     group = _group(_exact_access())
     report = _compile_report([group, deepcopy(group)])
