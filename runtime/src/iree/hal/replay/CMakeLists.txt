@@ -111,6 +111,7 @@ iree_cc_library(
     recorder
   HDRS
     "recorder.h"
+    "recorder_device.h"
   SRCS
     "recorder.c"
     "recorder_allocator.c"
@@ -119,6 +120,7 @@ iree_cc_library(
     "recorder_buffer.h"
     "recorder_command_buffer.c"
     "recorder_command_buffer.h"
+    "recorder_device.c"
     "recorder_event.c"
     "recorder_event.h"
     "recorder_executable.c"

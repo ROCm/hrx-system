@@ -101,6 +101,7 @@ iree_runtime_cc_library(
         "recorder_buffer.h",
         "recorder_command_buffer.c",
         "recorder_command_buffer.h",
+        "recorder_device.c",
         "recorder_event.c",
         "recorder_event.h",
         "recorder_executable.c",
@@ -109,7 +110,10 @@ iree_runtime_cc_library(
         "recorder_file.h",
         "recorder_record.h",
     ],
-    hdrs = ["recorder.h"],
+    hdrs = [
+        "recorder.h",
+        "recorder_device.h",
+    ],
     deps = [
         ":digest",
         ":file_writer",
