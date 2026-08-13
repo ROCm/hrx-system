@@ -253,6 +253,38 @@ iree_hal_amdgpu_atomic_memory_required_cell(
   }
 }
 
+iree_status_t iree_hal_amdgpu_atomic_memory_validate_target(
+    iree_hal_amdgpu_atomic_memory_cell_flags_t available_cells,
+    const void* target_pointer, iree_hal_atomic_width_t width,
+    iree_hal_atomic_flags_t atomic_flags) {
+  const iree_device_size_t byte_count = iree_hal_atomic_width_byte_count(width);
+  if (IREE_UNLIKELY(byte_count == 0)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "malformed AMDGPU atomic width %u", width);
+  }
+  if (IREE_UNLIKELY(((uintptr_t)target_pointer % byte_count) != 0)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AMDGPU atomic target address is not naturally aligned "
+        "(address=0x%" PRIxPTR ", alignment=%" PRIdsz ")",
+        (uintptr_t)target_pointer, byte_count);
+  }
+
+  const iree_hal_amdgpu_atomic_memory_cell_flags_t required_cell =
+      iree_hal_amdgpu_atomic_memory_required_cell(width, atomic_flags);
+  if (IREE_UNLIKELY(!iree_all_bits_set(available_cells, required_cell))) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AMDGPU atomic target memory does not support %u-bit %s-scope "
+        "atomics",
+        width,
+        iree_any_bit_set(atomic_flags, IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE)
+            ? "system"
+            : "device");
+  }
+  return iree_ok_status();
+}
+
 iree_hal_atomic_operation_capabilities_t
 iree_hal_amdgpu_atomic_memory_expand_capabilities(
     iree_hal_amdgpu_atomic_memory_cell_flags_t cell_flags) {

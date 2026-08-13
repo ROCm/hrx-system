@@ -8,6 +8,7 @@
 
 #include "iree/hal/drivers/amdgpu/aql_buffer_ref.h"
 #include "iree/hal/drivers/amdgpu/atomic_memory.h"
+#include "iree/hal/drivers/amdgpu/barrier.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/util/kernarg_ring.h"
 
@@ -15,26 +16,14 @@
 // Recording
 //===----------------------------------------------------------------------===//
 
-static iree_hsa_fence_scope_t iree_hal_amdgpu_aql_atomic_handoff_scope(
-    iree_hal_execution_stage_t stage_mask, iree_hal_atomic_flags_t atomic_flags,
-    iree_hal_atomic_flags_t ordering_flag) {
-  if (!iree_any_bit_set(atomic_flags, ordering_flag)) {
-    return IREE_HSA_FENCE_SCOPE_NONE;
-  }
-  return iree_any_bit_set(atomic_flags, IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE) ||
-                 iree_any_bit_set(stage_mask, IREE_HAL_EXECUTION_STAGE_HOST)
-             ? IREE_HSA_FENCE_SCOPE_SYSTEM
-             : IREE_HSA_FENCE_SCOPE_AGENT;
-}
-
 static void iree_hal_amdgpu_aql_atomic_record_dependency(
     iree_hal_amdgpu_aql_program_builder_t* builder,
     iree_hal_execution_stage_t stage_mask, iree_hal_atomic_flags_t atomic_flags,
     iree_hal_atomic_flags_t ordering_flag) {
   if (stage_mask == 0) return;
   const iree_hsa_fence_scope_t handoff_scope =
-      iree_hal_amdgpu_aql_atomic_handoff_scope(stage_mask, atomic_flags,
-                                               ordering_flag);
+      iree_hal_amdgpu_barrier_resolve_atomic_handoff_scope(
+          stage_mask, atomic_flags, ordering_flag);
   iree_hal_amdgpu_aql_program_builder_add_execution_dependency(
       builder, (uint8_t)handoff_scope, (uint8_t)handoff_scope);
 }
@@ -154,10 +143,6 @@ static iree_status_t iree_hal_amdgpu_aql_atomic_resolve_target(
   *out_target_pointer = NULL;
   const iree_device_size_t byte_count =
       iree_hal_atomic_width_byte_count(params.width);
-  if (IREE_UNLIKELY(byte_count == 0)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "malformed AQL atomic width %u", params.width);
-  }
 
   iree_hal_buffer_ref_t resolved_ref;
   uint8_t* target_pointer = NULL;
@@ -166,28 +151,11 @@ static iree_status_t iree_hal_amdgpu_aql_atomic_resolve_target(
       params.target->ordinal, params.target->offset, byte_count,
       params.required_usage, params.required_access, &resolved_ref,
       &target_pointer));
-  if (IREE_UNLIKELY(((uintptr_t)target_pointer % byte_count) != 0)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AQL atomic target address is not naturally aligned "
-        "(address=0x%" PRIxPTR ", alignment=%" PRIdsz ")",
-        (uintptr_t)target_pointer, byte_count);
-  }
-
-  const iree_hal_amdgpu_atomic_memory_cell_flags_t required_cell =
-      iree_hal_amdgpu_atomic_memory_required_cell(params.width, params.flags);
   const iree_hal_amdgpu_atomic_memory_cell_flags_t available_cells =
       iree_hal_amdgpu_buffer_atomic_memory_cells(
           iree_hal_buffer_allocated_buffer(resolved_ref.buffer));
-  if (IREE_UNLIKELY(!iree_all_bits_set(available_cells, required_cell))) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AQL atomic target memory does not support %u-bit %s-scope atomics",
-        params.width,
-        iree_any_bit_set(params.flags, IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE)
-            ? "system"
-            : "device");
-  }
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_atomic_memory_validate_target(
+      available_cells, target_pointer, params.width, params.flags));
 
   *out_target_pointer = target_pointer;
   return iree_ok_status();

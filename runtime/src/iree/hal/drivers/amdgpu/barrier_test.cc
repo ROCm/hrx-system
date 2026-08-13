@@ -80,5 +80,27 @@ TEST(BarrierTest, HostStagesImplySystemScopes) {
   EXPECT_EQ(scopes.release, IREE_HSA_FENCE_SCOPE_SYSTEM);
 }
 
+TEST(BarrierTest, AtomicOrderingSelectsHandoffScope) {
+  EXPECT_EQ(
+      iree_hal_amdgpu_barrier_resolve_atomic_handoff_scope(
+          IREE_HAL_EXECUTION_STAGE_DISPATCH, IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+          IREE_HAL_ATOMIC_FLAG_ACQUIRE),
+      IREE_HSA_FENCE_SCOPE_NONE);
+  EXPECT_EQ(iree_hal_amdgpu_barrier_resolve_atomic_handoff_scope(
+                IREE_HAL_EXECUTION_STAGE_DISPATCH, IREE_HAL_ATOMIC_FLAG_ACQUIRE,
+                IREE_HAL_ATOMIC_FLAG_ACQUIRE),
+            IREE_HSA_FENCE_SCOPE_AGENT);
+  EXPECT_EQ(
+      iree_hal_amdgpu_barrier_resolve_atomic_handoff_scope(
+          IREE_HAL_EXECUTION_STAGE_DISPATCH,
+          IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+          IREE_HAL_ATOMIC_FLAG_ACQUIRE),
+      IREE_HSA_FENCE_SCOPE_SYSTEM);
+  EXPECT_EQ(iree_hal_amdgpu_barrier_resolve_atomic_handoff_scope(
+                IREE_HAL_EXECUTION_STAGE_HOST, IREE_HAL_ATOMIC_FLAG_RELEASE,
+                IREE_HAL_ATOMIC_FLAG_RELEASE),
+            IREE_HSA_FENCE_SCOPE_SYSTEM);
+}
+
 }  // namespace
 }  // namespace iree::hal::amdgpu

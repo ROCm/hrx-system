@@ -61,3 +61,15 @@ iree_hal_amdgpu_barrier_scopes_t iree_hal_amdgpu_barrier_resolve_scopes(
 
   return scopes;
 }
+
+iree_hsa_fence_scope_t iree_hal_amdgpu_barrier_resolve_atomic_handoff_scope(
+    iree_hal_execution_stage_t stage_mask, iree_hal_atomic_flags_t atomic_flags,
+    iree_hal_atomic_flags_t ordering_flag) {
+  if (!iree_any_bit_set(atomic_flags, ordering_flag)) {
+    return IREE_HSA_FENCE_SCOPE_NONE;
+  }
+  return iree_any_bit_set(atomic_flags, IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE) ||
+                 iree_any_bit_set(stage_mask, IREE_HAL_EXECUTION_STAGE_HOST)
+             ? IREE_HSA_FENCE_SCOPE_SYSTEM
+             : IREE_HSA_FENCE_SCOPE_AGENT;
+}

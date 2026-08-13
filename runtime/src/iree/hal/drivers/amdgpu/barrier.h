@@ -7,6 +7,7 @@
 #ifndef IREE_HAL_DRIVERS_AMDGPU_BARRIER_H_
 #define IREE_HAL_DRIVERS_AMDGPU_BARRIER_H_
 
+#include "iree/hal/atomic.h"
 #include "iree/hal/command_buffer.h"
 #include "iree/hal/drivers/amdgpu/abi/queue.h"
 
@@ -32,6 +33,12 @@ iree_hal_amdgpu_barrier_scopes_t iree_hal_amdgpu_barrier_resolve_scopes(
     const iree_hal_memory_barrier_t* memory_barriers,
     iree_host_size_t buffer_barrier_count,
     const iree_hal_buffer_barrier_t* buffer_barriers);
+
+// Resolves one atomic ordering handoff into its minimum HSA fence scope.
+// Returns no fence when |atomic_flags| does not contain |ordering_flag|.
+iree_hsa_fence_scope_t iree_hal_amdgpu_barrier_resolve_atomic_handoff_scope(
+    iree_hal_execution_stage_t stage_mask, iree_hal_atomic_flags_t atomic_flags,
+    iree_hal_atomic_flags_t ordering_flag);
 
 #ifdef __cplusplus
 }  // extern "C"
