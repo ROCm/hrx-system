@@ -68,6 +68,7 @@ iree_runtime_cc_library(
     srcs = ["device_spec_builder.c"],
     hdrs = ["device_spec_builder.h"],
     deps = [
+        ":atomic",
         ":cpu_device_spec",
         ":executable_loader",
         "//runtime/src/iree/base",
@@ -82,6 +83,7 @@ iree_runtime_cc_test(
     name = "device_spec_builder_test",
     srcs = ["device_spec_builder_test.cc"],
     deps = [
+        ":atomic",
         ":cpu_device_spec",
         ":device_spec_builder",
         "//runtime/src/iree/hal",
@@ -276,6 +278,7 @@ iree_runtime_cc_library(
         "local_executable.h",
     ],
     deps = [
+        ":atomic",
         ":executable_environment",
         ":executable_library",
         ":profile",

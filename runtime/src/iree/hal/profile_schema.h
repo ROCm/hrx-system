@@ -743,6 +743,15 @@ enum iree_hal_profile_queue_event_type_e {
 
   // User-visible host callback submitted through a queue operation.
   IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_HOST_CALL = 11u,
+
+  // Atomic predicate wait submitted through a queue operation.
+  IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_WAIT = 12u,
+
+  // Atomic store submitted through a queue operation.
+  IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_STORE = 13u,
+
+  // Atomic read-modify-write submitted through a queue operation.
+  IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_RMW = 14u,
 };
 
 // Bitfield specifying properties of one queue event record.

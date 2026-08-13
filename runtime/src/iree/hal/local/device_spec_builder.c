@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "iree/base/internal/cpu.h"
+#include "iree/hal/local/atomic.h"
 #include "iree/hal/local/cpu_device_spec.h"
 #include "iree/hal/memory/cpu_slab_provider.h"
 #include "iree/hal/utils/device_spec_builder.h"
@@ -238,6 +239,8 @@ IREE_API_EXPORT iree_status_t iree_hal_local_device_spec_create(
       .allowed_memory_access = IREE_HAL_MEMORY_ACCESS_ALL,
       .minimum_alignment = IREE_HAL_HEAP_BUFFER_ALIGNMENT,
       .optimal_transfer_granularity = 1,
+      .atomic_operations = iree_hal_local_atomic_operation_capabilities(
+          IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL),
       .flags = IREE_HAL_MEMORY_TYPE_SPEC_FLAG_NONE,
   };
   iree_hal_device_memory_spec_t memory = {
@@ -251,6 +254,19 @@ IREE_API_EXPORT iree_status_t iree_hal_local_device_spec_create(
     status = iree_hal_device_spec_builder_set_memory(&builder, &memory);
   }
 
+  iree_hal_queue_family_role_flags_t queue_role_flags =
+      IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
+      IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
+      IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_HOST_CALL |
+      IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_PROFILING;
+  const iree_hal_atomic_operation_capabilities_t* atomic_operations =
+      &params->atomic_capabilities.operations;
+  if (atomic_operations->device_scope_32 ||
+      atomic_operations->device_scope_64 ||
+      atomic_operations->system_scope_32 ||
+      atomic_operations->system_scope_64) {
+    queue_role_flags |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC;
+  }
   iree_hal_queue_family_spec_t queue_family = {
       .name = IREE_SV("default"),
       .queue_count = (uint32_t)params->queue_count,
@@ -260,10 +276,10 @@ IREE_API_EXPORT iree_status_t iree_hal_local_device_spec_create(
           params->queue_count == IREE_HAL_MAX_QUEUES
               ? IREE_HAL_QUEUE_AFFINITY_ANY
               : (((iree_hal_queue_affinity_t)1 << params->queue_count) - 1),
-      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
-                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
-                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_HOST_CALL |
-                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_PROFILING,
+      .role_flags = queue_role_flags,
+      .atomic_capabilities = params->atomic_capabilities,
+      .zero_compute_atomic_capabilities =
+          params->zero_compute_atomic_capabilities,
       .flags = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_NONE,
   };
   iree_hal_device_queue_spec_t queues = {

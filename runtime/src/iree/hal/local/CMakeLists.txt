@@ -71,6 +71,7 @@ iree_cc_library(
   SRCS
     "device_spec_builder.c"
   DEPS
+    ::atomic
     ::cpu_device_spec
     ::executable_loader
     iree::base
@@ -87,6 +88,7 @@ iree_cc_test(
   SRCS
     "device_spec_builder_test.cc"
   DEPS
+    ::atomic
     ::cpu_device_spec
     ::device_spec_builder
     iree::hal
@@ -311,6 +313,7 @@ iree_cc_library(
   SRCS
     "inline_command_buffer.c"
   DEPS
+    ::atomic
     ::executable_environment
     ::executable_library
     ::profile

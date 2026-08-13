@@ -29,6 +29,10 @@ typedef struct iree_hal_local_device_spec_params_t {
   iree_host_size_t queue_count;
   // Worker count used by the default dispatch queue.
   iree_host_size_t default_queue_worker_count;
+  // Atomic operations implemented by the local queue family.
+  iree_hal_atomic_capabilities_t atomic_capabilities;
+  // Atomic operations implemented without occupying dispatch resources.
+  iree_hal_atomic_capabilities_t zero_compute_atomic_capabilities;
   // Number of executable loaders in |loaders|.
   iree_host_size_t loader_count;
   // Borrowed executable loaders used to advertise supported target families.
