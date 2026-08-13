@@ -122,8 +122,35 @@ loom_cc_library(
     "planner.c"
   DEPS
     ::module_index
+    ::provider_resolver
     iree::base
   PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    provider_resolver
+  HDRS
+    "provider_resolver.h"
+  SRCS
+    "provider_resolver.c"
+  DEPS
+    ::module_index
+    iree::base
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    provider_resolver_test
+  SRCS
+    "provider_resolver_test.cc"
+  DEPS
+    ::module_index
+    ::provider_resolver
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 loom_cc_library(
@@ -177,6 +204,7 @@ loom_cc_test(
     loom::ops::check
     loom::ops::config
     loom::ops::func
+    loom::ops::module
     loom::ops::target
     loom::ops::test
 )
@@ -191,6 +219,7 @@ loom_cc_benchmark(
     ::module_index
     ::plan_projection
     ::planner
+    ::provider_resolver
     iree::base
     iree::base::internal::arena
     iree::io::stream
@@ -198,6 +227,7 @@ loom_cc_benchmark(
     loom::format::bytecode::selected_reader
     loom::format::bytecode::writer
     loom::ir
+    loom::ops::func
     loom::ops::module
     loom::ops::test
   TESTONLY

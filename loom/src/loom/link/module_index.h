@@ -325,6 +325,11 @@ loom_link_module_index_provider_import_at(
     const loom_link_module_index_t* index,
     const loom_link_module_index_module_t* module, iree_host_size_t ordinal);
 
+// Returns the opaque resolver key for provider import |ordinal| from |module|.
+iree_string_view_t loom_link_module_index_provider_import_key_at(
+    const loom_link_module_index_t* index,
+    const loom_link_module_index_module_t* module, iree_host_size_t ordinal);
+
 // Returns provider imports that mention |symbol| as an availability anchor.
 //
 // Construction work is paid once while indexing. This query performs no

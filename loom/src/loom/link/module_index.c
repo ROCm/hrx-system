@@ -1447,6 +1447,21 @@ loom_link_module_index_provider_import_at(
   };
 }
 
+iree_string_view_t loom_link_module_index_provider_import_key_at(
+    const loom_link_module_index_t* index,
+    const loom_link_module_index_module_t* module, iree_host_size_t ordinal) {
+  const loom_link_module_index_provider_t* provider =
+      &index->providers.values[module->provider_ordinal];
+  if (provider->kind == LOOM_LINK_PROVIDER_BYTECODE) {
+    const loom_bytecode_module_metadata_t* bytecode_module =
+        &provider->bytecode.metadata.modules[module->provider_module_ordinal];
+    return bytecode_module->provider_imports[ordinal].provider;
+  }
+  const loom_module_t* source_module = module->materialized_module;
+  const loom_op_t* op = module->provider_imports.materialized_ops[ordinal];
+  return source_module->strings.entries[loom_module_import_provider(op)];
+}
+
 loom_link_module_index_provider_import_list_t
 loom_link_module_index_symbol_provider_imports(
     const loom_link_module_index_t* index,

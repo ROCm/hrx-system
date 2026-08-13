@@ -476,6 +476,9 @@ func.decl @unavailable(%x: i32) -> (i32)
 
     const loom_link_module_index_provider_import_t alpha_import =
         loom_link_module_index_provider_import_at(index, indexed_module, 0);
+    EXPECT_EQ(StringViewToString(loom_link_module_index_provider_import_key_at(
+                  index, indexed_module, 0)),
+              "alpha.loom");
     EXPECT_EQ(StringViewToString(alpha_import.provider), "alpha.loom");
     EXPECT_EQ(alpha_import.anchor_count, 2u);
     ASSERT_EQ(alpha_import.comments.count, 1u);
