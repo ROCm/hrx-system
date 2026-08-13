@@ -212,6 +212,21 @@ TEST_F(HipAllocatorTest, ImportHostAllocationWithCallbackUnregistersOnDestroy) {
   iree_allocator_free_aligned(iree_allocator_system(), host_ptr);
 }
 
+TEST_F(HipAllocatorTest, DualLocalityRequiresTopologyEvidence) {
+  iree_hal_buffer_params_t params = {0};
+  params.type =
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+
+  iree_hal_buffer_params_t resolved_params = {0};
+  iree_device_size_t resolved_allocation_size = 0;
+  EXPECT_EQ(IREE_HAL_BUFFER_COMPATIBILITY_NONE,
+            iree_hal_allocator_query_buffer_compatibility(
+                iree_hal_device_allocator(device_), params,
+                /*allocation_size=*/4096, &resolved_params,
+                &resolved_allocation_size));
+}
+
 // Verify that requesting MAPPING on DEVICE_LOCAL memory (without HOST_VISIBLE)
 // promotes to HOST_VISIBLE so the buffer is actually mappable. This is the
 // combination the Python bindings produce via asdevicearray().

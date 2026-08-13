@@ -178,6 +178,8 @@ struct ReplayRecordSummary {
   uint64_t import_buffer_captured_data_length = 0;
   iree_host_size_t device_queue_execute_payload_count = 0;
   iree_host_size_t semaphore_object_payload_count = 0;
+  // Memory type from the last parsed buffer object payload.
+  iree_hal_memory_type_t last_buffer_memory_type = 0;
 };
 
 static ReplayRecordSummary ParseReplayRecordSummary(
@@ -212,6 +214,15 @@ static ReplayRecordSummary ParseReplayRecordSummary(
         } else if (record.header.object_type ==
                    IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER) {
           ++summary.buffer_object_record_count;
+          EXPECT_EQ(IREE_HAL_REPLAY_PAYLOAD_TYPE_BUFFER_OBJECT,
+                    record.header.payload_type);
+          iree_hal_replay_buffer_object_payload_t buffer_payload;
+          if (record.payload.data_length != sizeof(buffer_payload)) {
+            ADD_FAILURE() << "buffer object payload size mismatch";
+            return summary;
+          }
+          memcpy(&buffer_payload, record.payload.data, sizeof(buffer_payload));
+          summary.last_buffer_memory_type = buffer_payload.memory_type;
         } else if (record.header.object_type ==
                    IREE_HAL_REPLAY_OBJECT_TYPE_COMMAND_BUFFER) {
           ++summary.command_buffer_object_record_count;
@@ -799,7 +810,7 @@ TEST(ReplayRecorderTest, RecordsAndReplaysCommandBufferAtomicOperations) {
       /*.usage=*/IREE_HAL_BUFFER_USAGE_STORAGE,
       /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
       /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+          IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
   };
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
@@ -854,6 +865,12 @@ TEST(ReplayRecorderTest, RecordsAndReplaysCommandBufferAtomicOperations) {
   iree_hal_replay_recorder_release(recorder);
   iree_hal_device_group_release(wrapped_group);
   iree_hal_device_group_release(source_group);
+
+  const ReplayRecordSummary summary = ParseReplayRecordSummary(storage);
+  EXPECT_EQ(
+      summary.last_buffer_memory_type,
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
+          IREE_HAL_MEMORY_TYPE_HOST_CACHED | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL);
 
   const auto records = ParseOperationRecords(storage);
   const auto* wait_record = FindOperationRecord(

@@ -119,7 +119,8 @@ static iree_hal_device_spec_params_t MakeTestSpecParams(
   };
   out_memory_types[0] = {
       /*.heap_index=*/0,
-      /*.memory_type=*/IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+      /*.memory_type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+          IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
       /*.allowed_buffer_usage=*/IREE_HAL_BUFFER_USAGE_DEFAULT,
       /*.allowed_memory_access=*/IREE_HAL_MEMORY_ACCESS_ALL,
       /*.minimum_alignment=*/256,
@@ -408,6 +409,9 @@ TEST(DeviceSpecTest, CreateSerializeParseAndSelect) {
   const iree_hal_device_memory_spec_t* parsed_memory =
       iree_hal_device_spec_memory(parsed_spec);
   ASSERT_EQ(parsed_memory->memory_type_count, 1u);
+  EXPECT_EQ(
+      parsed_memory->memory_types[0].memory_type,
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL);
   EXPECT_EQ(parsed_memory->memory_types[0].atomic_operations.device_scope_32,
             IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
                 IREE_HAL_ATOMIC_OPERATION_FLAG_STORE);
