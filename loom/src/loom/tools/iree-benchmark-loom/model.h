@@ -25,6 +25,8 @@ extern "C" {
 #endif
 
 typedef struct loom_tooling_config_set_t loom_tooling_config_set_t;
+typedef struct iree_benchmark_loom_launch_evidence_t
+    iree_benchmark_loom_launch_evidence_t;
 
 // Invalid stable ordinal for optional benchmark model indexes.
 #define IREE_BENCHMARK_LOOM_INDEX_INVALID IREE_HOST_SIZE_MAX
@@ -183,6 +185,9 @@ typedef struct iree_benchmark_loom_benchmark_result_t {
   iree_host_size_t sample_ordinal;
   // Number of case samples run per benchmark iteration.
   iree_host_size_t samples_per_iteration;
+  // Borrowed concrete workload and resolved launch records for the timed work
+  // item. Empty for benchmarks that do not submit HAL kernel launches.
+  const iree_benchmark_loom_launch_evidence_t* launch_evidence;
   // Failed sample executions observed during warmup and measured iterations.
   iree_host_size_t failed_sample_count;
   // Timing summary for measured iterations.

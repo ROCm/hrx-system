@@ -264,6 +264,8 @@
             "## iree-benchmark-loom",
             "default output is a compact JSON snapshot",
             "work_items",
+            "ordered, typed `workload`",
+            "`launch_config`",
             "failure.entry",
             "select(.failure)",
             "--output-format=jsonl",

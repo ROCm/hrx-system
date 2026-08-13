@@ -101,7 +101,17 @@ iree-benchmark-loom program.loom \
 ```
 
 Concrete parameter values appear in the structured result, so reports can be
-joined by values rather than filename conventions.
+joined by values rather than filename conventions. Executed HAL results also
+record every launch in case-sample and source order. `workload` is the ordered,
+typed value vector supplied to the kernel's launch function; `launch_config` is
+the separate resolved workgroup count, workgroup size, subgroup size, and any
+other launch fields used for that invocation. This makes a measured duration
+traceable to its exact runtime launch without pretending those values were
+compile-time constants.
+
+```shell
+jq '.work_items[] | {benchmark, case, launches}' results.json
+```
 
 ## Control data reuse
 

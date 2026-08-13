@@ -20,6 +20,17 @@
 extern "C" {
 #endif
 
+// Invoked immediately after one concrete case sample executes successfully.
+typedef void(IREE_API_PTR* iree_benchmark_loom_case_sample_observer_fn_t)(
+    void* user_data, iree_host_size_t case_sample_ordinal);
+
+typedef struct iree_benchmark_loom_case_sample_observer_t {
+  // Optional observer callback, or NULL when no sample evidence is required.
+  iree_benchmark_loom_case_sample_observer_fn_t fn;
+  // Caller-owned context passed to |fn|.
+  void* user_data;
+} iree_benchmark_loom_case_sample_observer_t;
+
 // Maps a benchmark-local sample ordinal to its underlying case sample ordinal.
 iree_host_size_t iree_benchmark_loom_case_sample_from_benchmark_sample(
     const loom_testbench_benchmark_plan_t* benchmark_plan,
@@ -62,6 +73,7 @@ iree_status_t iree_benchmark_loom_run_work_item_correctness_range(
     const iree_benchmark_loom_work_item_t* work_item,
     const loom_testbench_case_execution_options_t* execution_options,
     iree_arena_allocator_t* arena,
+    iree_benchmark_loom_case_sample_observer_t sample_observer,
     const iree_benchmark_loom_event_sink_t* event_sink,
     iree_host_size_t* out_sample_count,
     iree_host_size_t* out_failed_sample_count);

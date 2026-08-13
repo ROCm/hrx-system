@@ -14,6 +14,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
+#include "loom/tools/iree-benchmark-loom/launch_evidence.h"
 #include "loom/tools/iree-benchmark-loom/manifest.h"
 
 namespace loom {
@@ -453,6 +454,100 @@ TEST(BenchmarkReportTest, WritesHalTimingCountsAndWarnings) {
       warnings, IREE_SV("sub_microsecond_logical_operation")));
   EXPECT_TRUE(
       JsonArrayContainsString(warnings, IREE_SV("unstable_p90_to_p50")));
+
+  iree_string_builder_deinitialize(&builder);
+}
+
+TEST(BenchmarkReportTest, WritesExactWorkloadAndResolvedLaunchConfig) {
+  loom_testbench_benchmark_plan_t benchmark_plan = {};
+  benchmark_plan.name = IREE_SV("dynamic_latency");
+  loom_testbench_case_plan_t case_plan = {};
+  case_plan.name = IREE_SV("dynamic_case");
+  iree_benchmark_loom_benchmark_policy_t policy = {};
+  policy.measure = IREE_SV("dispatch_complete");
+
+  iree_benchmark_loom_workload_value_t workload_values[] = {
+      {
+          /*.type=*/LOOM_SCALAR_TYPE_INDEX,
+          /*.value=*/4096,
+      },
+      {
+          /*.type=*/LOOM_SCALAR_TYPE_I32,
+          /*.value=*/513,
+      },
+  };
+  iree_benchmark_loom_launch_record_t launch_record = {
+      /*.case_sample_ordinal=*/3,
+      /*.sequence_step_ordinal=*/0,
+      /*.entry=*/IREE_SV("dynamic_kernel"),
+      /*.workload_values=*/workload_values,
+      /*.workload_value_count=*/IREE_ARRAYSIZE(workload_values),
+      /*.launch_config=*/
+      {
+          /*.fields=*/
+          LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT |
+              LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE |
+              LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_SUBGROUP_SIZE,
+          /*.workgroup_count=*/{65, 2, 1},
+          /*.workgroup_size=*/{64, 1, 1},
+          /*.subgroup_size=*/32,
+      },
+  };
+  iree_benchmark_loom_launch_evidence_t launch_evidence = {
+      /*.host_allocator=*/{},
+      /*.records=*/&launch_record,
+      /*.record_count=*/1,
+      /*.workload_values=*/workload_values,
+      /*.workload_value_count=*/IREE_ARRAYSIZE(workload_values),
+  };
+  iree_benchmark_loom_benchmark_result_t result = {};
+  result.executed = true;
+  result.passed = true;
+  result.samples_per_iteration = 1;
+  result.launch_evidence = &launch_evidence;
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(&builder, &stream);
+  IREE_ASSERT_OK(iree_benchmark_loom_write_benchmark_result_json(
+      &benchmark_plan, &case_plan, &policy, &result,
+      /*correctness_sample_count=*/1,
+      /*correctness_failed_sample_count=*/0, &stream));
+
+  const iree_string_view_t root =
+      ParseJsonDocument(iree_string_builder_view(&builder));
+  const iree_string_view_t launches = LookupObject(root, IREE_SV("launches"));
+  iree_host_size_t launch_count = 0;
+  IREE_ASSERT_OK(iree_json_array_length(launches, &launch_count));
+  ASSERT_EQ(launch_count, 1u);
+  iree_string_view_t launch = iree_string_view_empty();
+  IREE_ASSERT_OK(iree_json_array_get(launches, 0, &launch));
+  ExpectObjectValueEquals(launch, IREE_SV("case_sample_index"), IREE_SV("3"));
+  ExpectObjectValueEquals(launch, IREE_SV("entry"), IREE_SV("dynamic_kernel"));
+  EXPECT_TRUE(iree_string_view_is_empty(
+      TryLookupObject(launch, IREE_SV("workload_count"))));
+
+  const iree_string_view_t workload = LookupObject(launch, IREE_SV("workload"));
+  iree_host_size_t workload_count = 0;
+  IREE_ASSERT_OK(iree_json_array_length(workload, &workload_count));
+  ASSERT_EQ(workload_count, 2u);
+  iree_string_view_t second_workload = iree_string_view_empty();
+  IREE_ASSERT_OK(iree_json_array_get(workload, 1, &second_workload));
+  ExpectObjectValueEquals(second_workload, IREE_SV("type"), IREE_SV("i32"));
+  ExpectObjectValueEquals(second_workload, IREE_SV("value"), IREE_SV("513"));
+
+  const iree_string_view_t launch_config =
+      LookupObject(launch, IREE_SV("launch_config"));
+  const iree_string_view_t workgroup_count =
+      LookupObject(launch_config, IREE_SV("workgroup_count"));
+  ExpectObjectValueEquals(workgroup_count, IREE_SV("x"), IREE_SV("65"));
+  ExpectObjectValueEquals(workgroup_count, IREE_SV("y"), IREE_SV("2"));
+  const iree_string_view_t workgroup_size =
+      LookupObject(launch_config, IREE_SV("workgroup_size"));
+  ExpectObjectValueEquals(workgroup_size, IREE_SV("x"), IREE_SV("64"));
+  ExpectObjectValueEquals(launch_config, IREE_SV("subgroup_size"),
+                          IREE_SV("32"));
 
   iree_string_builder_deinitialize(&builder);
 }

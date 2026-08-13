@@ -19,6 +19,7 @@
 #include "loom/tooling/testbench/issue_report.h"
 #include "loom/tools/iree-benchmark-loom/device_spec_report.h"
 #include "loom/tools/iree-benchmark-loom/diagnostics.h"
+#include "loom/tools/iree-benchmark-loom/launch_evidence.h"
 #include "loom/tools/iree-benchmark-loom/module_query.h"
 #include "loom/tools/iree-benchmark-loom/options.h"
 #include "loom/tools/iree-benchmark-loom/profile_report.h"
@@ -430,9 +431,6 @@ static iree_status_t iree_benchmark_loom_write_kernel_launch_plan_json(
       module, case_plan->first_kernel_launch->callee_ref, &kernel_entry));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       object, IREE_SV("kernel_entry"), kernel_entry));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
-      object, IREE_SV("kernel_workload_count"),
-      case_plan->first_kernel_launch->workload_count));
   IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
       object, IREE_SV("kernel_argument_count"),
       case_plan->first_kernel_launch->input_count));
@@ -2096,6 +2094,13 @@ iree_status_t iree_benchmark_loom_write_benchmark_evidence_fields_json(
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_benchmark_correctness_json(
       correctness_sample_count, correctness_failed_sample_count,
       object->stream));
+  if (benchmark_result->launch_evidence != NULL &&
+      benchmark_result->launch_evidence->record_count != 0) {
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin_field(object, IREE_SV("launches")));
+    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_launch_evidence_json(
+        benchmark_result->launch_evidence, object->stream));
+  }
   if (iree_benchmark_loom_benchmark_result_has_measurement(benchmark_result)) {
     IREE_RETURN_IF_ERROR(
         loom_json_object_begin_field(object, IREE_SV("measurement")));

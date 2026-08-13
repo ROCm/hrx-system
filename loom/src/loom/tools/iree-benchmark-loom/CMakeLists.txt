@@ -25,6 +25,7 @@ loom_cc_library(
     "hal_setup.h"
     "help.h"
     "input_ring.h"
+    "launch_evidence.h"
     "main.h"
     "manifest.h"
     "model.h"
@@ -53,6 +54,7 @@ loom_cc_library(
     "hal_setup.c"
     "help.c"
     "input_ring.c"
+    "launch_evidence.c"
     "main.c"
     "manifest.c"
     "module_query.c"
@@ -79,6 +81,7 @@ loom_cc_library(
     iree::tooling::device_util
     iree::tooling::profile::counter
     iree::tooling::profile::summary
+    loom::analysis::kernel_launch_config
     loom::error::diagnostic
     loom::error::json_sink
     loom::error::renderer
@@ -108,6 +111,7 @@ loom_cc_library(
     loom::tooling::testbench::issue_report
     loom::tooling::testbench::reference
     loom::tooling::testbench::requirements
+    loom::tooling::testbench::value_materializer
     loom::util::json
     loom::util::stream
     loom::verify

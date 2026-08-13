@@ -921,6 +921,7 @@ static iree_status_t loom_run_hal_testbench_evaluate_launch_config(
         (int)options.function_symbol.size, options.function_symbol.data,
         (unsigned)config.failure);
   }
+  provider->resolved_launch_config = config;
   out_options->workgroup_count[0] = config.workgroup_count.x;
   out_options->workgroup_count[1] = config.workgroup_count.y;
   out_options->workgroup_count[2] = config.workgroup_count.z;
