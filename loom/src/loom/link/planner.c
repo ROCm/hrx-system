@@ -20,6 +20,8 @@ struct loom_link_plan_t {
   const loom_link_module_index_t* index;
   // Host allocator for plan storage.
   iree_allocator_t allocator;
+  // Planning mode determining module-level archive ownership.
+  loom_link_plan_mode_t mode;
   // Live symbol selections in stable worklist order.
   struct {
     // Growable selection storage.
@@ -756,15 +758,14 @@ iree_status_t loom_link_plan_build(const loom_link_module_index_t* index,
   memset(plan, 0, sizeof(*plan));
   plan->index = index;
   plan->allocator = allocator;
+  plan->mode = options ? options->mode : LOOM_LINK_PLAN_ARCHIVE;
 
   iree_status_t status = loom_link_plan_initialize_reachability(plan, options);
   if (iree_status_is_ok(status)) {
     status = loom_link_plan_initialize_candidate_providers(plan, options);
   }
-  const loom_link_plan_mode_t mode =
-      options ? options->mode : LOOM_LINK_PLAN_ARCHIVE;
   if (iree_status_is_ok(status)) {
-    switch (mode) {
+    switch (plan->mode) {
       case LOOM_LINK_PLAN_ARCHIVE:
         status = loom_link_plan_select_archive(plan, options);
         break;
@@ -772,8 +773,9 @@ iree_status_t loom_link_plan_build(const loom_link_module_index_t* index,
         status = loom_link_plan_select_selective(plan, options);
         break;
       default:
-        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "unknown link plan mode %u", (unsigned)mode);
+        status =
+            iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "unknown link plan mode %u", (unsigned)plan->mode);
         break;
     }
   }
@@ -802,6 +804,10 @@ void loom_link_plan_free(loom_link_plan_t* plan) {
 const loom_link_module_index_t* loom_link_plan_index(
     const loom_link_plan_t* plan) {
   return plan ? plan->index : NULL;
+}
+
+loom_link_plan_mode_t loom_link_plan_mode(const loom_link_plan_t* plan) {
+  return plan ? plan->mode : LOOM_LINK_PLAN_ARCHIVE;
 }
 
 iree_host_size_t loom_link_plan_symbol_count(const loom_link_plan_t* plan) {

@@ -1165,6 +1165,9 @@ func.def @unused_corpus(%x: i32) -> (i32) {
 
 TEST_F(LinkerTest, ExactModuleLinksCompleteDenseProjection) {
   loom_module_t* source = Parse(IREE_SV(R"(
+test.module_metadata
+module.import "consumed" [@helper]
+
 func.def @helper(%x: i32) -> (i32) {
   func.return %x : i32
 }
@@ -1191,9 +1194,26 @@ func.def public @caller(%x: i32) -> (i32) {
   Verify(linked);
 
   std::string text = Print(linked);
+  EXPECT_NE(text.find("test.module_metadata"), std::string::npos);
+  EXPECT_EQ(text.find("module.import"), std::string::npos);
   EXPECT_NE(text.find("func.def @helper"), std::string::npos);
   EXPECT_NE(text.find("func.def public retain @caller"), std::string::npos);
   EXPECT_NE(text.find("func.call @helper"), std::string::npos);
+}
+
+TEST_F(LinkerTest, ExactModuleLinksMetadataWithoutSymbols) {
+  loom_module_t* source = Parse(IREE_SV("test.module_metadata\n"));
+
+  loom_linker_t* linker = CreateIncrementalLinker();
+  IREE_ASSERT_OK(loom_linker_add_exact_module(
+      linker, source, loom_linker_source_provider_import_list_empty()));
+  loom_module_t* linked = nullptr;
+  IREE_ASSERT_OK(loom_linker_finish(linker, &linked));
+  loom_linker_free(linker);
+  modules_.push_back(linked);
+  Verify(linked);
+
+  EXPECT_NE(Print(linked).find("test.module_metadata"), std::string::npos);
 }
 
 TEST_F(LinkerTest, ExactModulePreservesSourceOperationOrder) {

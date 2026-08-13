@@ -17,6 +17,7 @@
 #include "loom/link/provider_import_sink.h"
 #include "loom/link/symbol_policy.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/module/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/rewrite/materialize.h"
 #include "loom/rewrite/remap.h"
@@ -1857,9 +1858,12 @@ static iree_status_t loom_linker_add_exact_selection(
                       : loom_linker_remap_exact_symbol,
       &source);
 
-  iree_status_t status = iree_arena_allocate_array(
-      &source_arena, source.exact.count, sizeof(*source.target_symbols),
-      (void**)&source.target_symbols);
+  iree_status_t status = iree_ok_status();
+  if (source.exact.count > 0) {
+    status = iree_arena_allocate_array(&source_arena, source.exact.count,
+                                       sizeof(*source.target_symbols),
+                                       (void**)&source.target_symbols);
+  }
   if (iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < source.exact.count; ++i) {
       source.target_symbols[i] = loom_symbol_ref_null();
@@ -1880,6 +1884,11 @@ static iree_status_t loom_linker_add_exact_selection(
        source_op && iree_status_is_ok(status); source_op = source_op->next_op) {
     loom_symbol_ref_t source_ref = loom_symbol_ref_null();
     if (!loom_link_op_symbol_ref(source_module, source_op, &source_ref)) {
+      if (selection.dense && !loom_module_import_isa(source_op)) {
+        loom_op_t* cloned_op = NULL;
+        status = loom_linker_clone_source_op(&source, source_op,
+                                             /*before_op=*/NULL, &cloned_op);
+      }
       continue;
     }
     iree_host_size_t selection_ordinal = source_ref.symbol_id;
@@ -1961,9 +1970,6 @@ iree_status_t loom_linker_add_exact_module(
       loom_linker_validate_source_module(linker, source_module));
   IREE_RETURN_IF_ERROR(loom_linker_validate_source_provider_imports(
       linker, source_module, provider_imports));
-  if (source_module->symbols.count == 0) {
-    return iree_ok_status();
-  }
   return loom_linker_add_exact_selection(
       linker, source_module,
       (loom_linker_exact_selection_t){

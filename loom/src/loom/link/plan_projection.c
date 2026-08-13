@@ -48,14 +48,15 @@ iree_status_t loom_link_plan_project_modules(
     loom_link_plan_module_projection_t* out_projection) {
   *out_projection = (loom_link_plan_module_projection_t){0};
   const iree_host_size_t symbol_count = loom_link_plan_symbol_count(plan);
-  if (symbol_count == 0) {
-    return iree_ok_status();
-  }
+  const loom_link_module_index_t* index = loom_link_plan_index(plan);
+  const bool projects_archive_modules =
+      loom_link_plan_mode(plan) == LOOM_LINK_PLAN_ARCHIVE;
 
   loom_link_plan_module_symbol_t* symbols = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, symbol_count, sizeof(*symbols), (void**)&symbols));
-  const loom_link_module_index_t* index = loom_link_plan_index(plan);
+  if (symbol_count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, symbol_count, sizeof(*symbols), (void**)&symbols));
+  }
   for (iree_host_size_t i = 0; i < symbol_count; ++i) {
     const loom_link_plan_symbol_t* planned_symbol =
         loom_link_plan_symbol_at(plan, i);
@@ -66,40 +67,79 @@ iree_status_t loom_link_plan_project_modules(
         .source_symbol = source_symbol,
     };
   }
-  qsort(symbols, symbol_count, sizeof(*symbols),
-        loom_link_plan_projection_compare_symbols);
+  if (symbol_count > 1) {
+    qsort(symbols, symbol_count, sizeof(*symbols),
+          loom_link_plan_projection_compare_symbols);
+  }
 
-  iree_host_size_t module_count = 1;
-  for (iree_host_size_t i = 1; i < symbol_count; ++i) {
-    if (symbols[i - 1].source_symbol->module_ordinal !=
-        symbols[i].source_symbol->module_ordinal) {
-      ++module_count;
+  iree_host_size_t module_count = 0;
+  if (projects_archive_modules) {
+    module_count = loom_link_module_index_module_count(index);
+  } else if (symbol_count > 0) {
+    module_count = 1;
+    for (iree_host_size_t i = 1; i < symbol_count; ++i) {
+      if (symbols[i - 1].source_symbol->module_ordinal !=
+          symbols[i].source_symbol->module_ordinal) {
+        ++module_count;
+      }
     }
+  }
+  if (module_count == 0) {
+    return iree_ok_status();
   }
 
   loom_link_plan_module_selection_t* modules = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, module_count, sizeof(*modules), (void**)&modules));
 
-  iree_host_size_t module_ordinal = 0;
-  iree_host_size_t first_symbol_index = 0;
-  for (iree_host_size_t i = 0; i < symbol_count; ++i) {
-    const bool ends_module = i + 1 == symbol_count ||
-                             symbols[i].source_symbol->module_ordinal !=
-                                 symbols[i + 1].source_symbol->module_ordinal;
-    if (ends_module) {
-      modules[module_ordinal++] = (loom_link_plan_module_selection_t){
-          .source_module = loom_link_module_index_module_at(
-              index, symbols[i].source_symbol->module_ordinal),
+  if (projects_archive_modules) {
+    iree_host_size_t symbol_ordinal = 0;
+    for (iree_host_size_t module_ordinal = 0; module_ordinal < module_count;
+         ++module_ordinal) {
+      const iree_host_size_t first_symbol_ordinal = symbol_ordinal;
+      while (symbol_ordinal < symbol_count &&
+             symbols[symbol_ordinal].source_symbol->module_ordinal ==
+                 module_ordinal) {
+        ++symbol_ordinal;
+      }
+      const iree_host_size_t module_symbol_count =
+          symbol_ordinal - first_symbol_ordinal;
+      modules[module_ordinal] = (loom_link_plan_module_selection_t){
+          .source_module =
+              loom_link_module_index_module_at(index, module_ordinal),
           .symbols =
               {
-                  .values = symbols + first_symbol_index,
-                  .count = i + 1 - first_symbol_index,
+                  .values = module_symbol_count > 0
+                                ? symbols + first_symbol_ordinal
+                                : NULL,
+                  .count = module_symbol_count,
               },
           .provider_imports = {0},
           .provider_import_anchors = {0},
       };
-      first_symbol_index = i + 1;
+    }
+    IREE_ASSERT_EQ(symbol_ordinal, symbol_count);
+  } else {
+    iree_host_size_t module_ordinal = 0;
+    iree_host_size_t first_symbol_index = 0;
+    for (iree_host_size_t i = 0; i < symbol_count; ++i) {
+      const bool ends_module = i + 1 == symbol_count ||
+                               symbols[i].source_symbol->module_ordinal !=
+                                   symbols[i + 1].source_symbol->module_ordinal;
+      if (ends_module) {
+        modules[module_ordinal++] = (loom_link_plan_module_selection_t){
+            .source_module = loom_link_module_index_module_at(
+                index, symbols[i].source_symbol->module_ordinal),
+            .symbols =
+                {
+                    .values = symbols + first_symbol_index,
+                    .count = i + 1 - first_symbol_index,
+                },
+            .provider_imports = {0},
+            .provider_import_anchors = {0},
+        };
+        first_symbol_index = i + 1;
+      }
     }
   }
 

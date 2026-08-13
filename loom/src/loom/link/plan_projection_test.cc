@@ -17,6 +17,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/module/ops.h"
+#include "loom/ops/test/registry.h"
 
 namespace loom {
 namespace {
@@ -57,6 +58,7 @@ class LinkPlanProjectionTest : public ::testing::Test {
     semantics = loom_module_dialect_op_semantics(&semantics_count);
     IREE_ASSERT_OK(loom_context_register_dialect_semantics(
         &context_, LOOM_DIALECT_MODULE, semantics, (uint16_t)semantics_count));
+    IREE_ASSERT_OK(loom_test_dialect_register(&context_));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
   }
 
@@ -234,6 +236,25 @@ TEST_F(LinkPlanProjectionTest, EmptyArchiveHasNoProjectionStorage) {
   EXPECT_EQ(projection.provider_imports.values, nullptr);
   EXPECT_EQ(projection.provider_import_anchors.count, 0u);
   EXPECT_EQ(projection.provider_import_anchors.values, nullptr);
+}
+
+TEST_F(LinkPlanProjectionTest, ArchiveProjectsSymbolEmptyModules) {
+  loom_module_t* metadata = Parse(IREE_SV("test.module_metadata\n"));
+  ModuleIndexPtr index = CreateIndex();
+  AddModule(index.get(), metadata, IREE_SV("metadata"),
+            LOOM_LINK_PROVIDER_ROLE_INPUT);
+  LinkPlanPtr plan = BuildPlan(index.get(), /*options=*/nullptr);
+
+  loom_link_plan_module_projection_t projection;
+  IREE_ASSERT_OK(
+      loom_link_plan_project_modules(plan.get(), &arena_, &projection));
+  ASSERT_EQ(projection.modules.count, 1u);
+  EXPECT_EQ(projection.modules.values[0].source_module,
+            loom_link_module_index_module_at(index.get(), 0));
+  EXPECT_EQ(projection.modules.values[0].symbols.count, 0u);
+  EXPECT_EQ(projection.modules.values[0].symbols.values, nullptr);
+  EXPECT_EQ(projection.symbols.count, 0u);
+  EXPECT_EQ(projection.symbols.values, nullptr);
 }
 
 TEST_F(LinkPlanProjectionTest,

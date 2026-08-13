@@ -116,6 +116,9 @@ void loom_link_plan_free(loom_link_plan_t* plan);
 const loom_link_module_index_t* loom_link_plan_index(
     const loom_link_plan_t* plan);
 
+// Returns the mode that selected |plan|.
+loom_link_plan_mode_t loom_link_plan_mode(const loom_link_plan_t* plan);
+
 // Returns the number of live symbol selections.
 iree_host_size_t loom_link_plan_symbol_count(const loom_link_plan_t* plan);
 

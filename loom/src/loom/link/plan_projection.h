@@ -67,13 +67,14 @@ typedef struct loom_link_plan_module_selection_t {
   } provider_import_anchors;
 } loom_link_plan_module_selection_t;
 
-// Selected-only partition of one authoritative metadata link plan.
+// Module-local partition of one authoritative metadata link plan.
 typedef struct loom_link_plan_module_projection_t {
-  // Source modules in increasing index ordinal order.
+  // Source modules in increasing index ordinal order. Archive projections
+  // include symbol-empty modules so their module-level metadata is retained.
   struct {
     // Arena-owned module selection array.
     loom_link_plan_module_selection_t* values;
-    // Number of source modules containing selected symbols.
+    // Number of projected source modules.
     iree_host_size_t count;
   } modules;
   // Flat storage sliced by modules[].symbols.
@@ -129,8 +130,10 @@ typedef struct loom_link_plan_linker_import_projection_t {
 //
 // Construction performs no name lookup or reachability analysis. Dead anchors
 // are pruned, exact declarations resolved by this plan are consumed, and live
-// unresolved or concrete availability anchors remain. Work scales with the
-// selected symbols and provider-import metadata of selected source modules;
+// unresolved or concrete availability anchors remain. Archive projections own
+// every indexed module, including modules without symbols; selective
+// projections contain only modules with selected symbols. Work scales with the
+// selected symbols and provider-import metadata of projected source modules;
 // storage scales only with retained output. Arrays borrow the plan's index and
 // remain valid until |arena| is reset or deinitialized.
 iree_status_t loom_link_plan_project_modules(

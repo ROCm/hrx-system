@@ -55,6 +55,7 @@ loom_cc_library(
     loom::ir
     loom::ir::symbol_map
     loom::ops::func
+    loom::ops::module
     loom::ops::op_defs
     loom::rewrite::materialize
     loom::rewrite::remap
@@ -204,6 +205,7 @@ loom_cc_test(
     loom::ir
     loom::ops::func
     loom::ops::module
+    loom::ops::test
 )
 
 loom_cc_test(

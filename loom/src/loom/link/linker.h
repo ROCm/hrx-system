@@ -146,8 +146,10 @@ iree_status_t loom_linker_add_module_symbols(
 // This is the dense counterpart to loom_linker_add_module_symbols for compact
 // modules produced by selective materialization. Every source symbol is cloned
 // without reachability discovery, and source symbol IDs map directly into the
-// exact target-symbol projection. |provider_imports| must use the compact
-// module's dense symbol ordinal domain. The linker retains no pointers into
+// exact target-symbol projection. Non-symbol module metadata is also cloned,
+// except that authored module.import operations are replaced by the exact
+// |provider_imports| projection. |provider_imports| must use the compact
+// module's dense symbol ordinal domain. The linker retains no pointers into any
 // source storage after this call returns.
 iree_status_t loom_linker_add_exact_module(
     loom_linker_t* linker, const loom_module_t* source_module,
