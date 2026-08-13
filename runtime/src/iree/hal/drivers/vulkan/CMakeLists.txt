@@ -252,6 +252,8 @@ iree_cc_library(
     "api.c"
     "atomic.c"
     "atomic.h"
+    "barrier.c"
+    "barrier.h"
     "buffer.c"
     "buffer.h"
     "builtins.c"
