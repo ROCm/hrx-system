@@ -412,12 +412,19 @@ def build_compile_report_diff(
     baseline: CompileReportDocument,
     candidate: CompileReportDocument,
     comparison_mode: CompileReportComparisonMode = CompileReportComparisonMode.EXACT,
+    *,
+    force: bool = False,
 ) -> dict[str, object]:
     """Builds a deterministic diff under the selected identity contract."""
-    pairs = match_compile_report_entries(baseline, candidate, comparison_mode)
+    match = match_compile_report_entries(
+        baseline,
+        candidate,
+        comparison_mode,
+        force=force,
+    )
     entries = []
     unchanged_entry_count = 0
-    for pair in pairs:
+    for pair in match.pairs:
         artifact_facts = _diff_metrics(
             pair.baseline,
             pair.candidate,
@@ -433,13 +440,18 @@ def build_compile_report_diff(
         ):
             unchanged_entry_count += 1
             continue
-        entries.append(
-            {
-                "identity": pair.identity.to_json_object(),
-                "artifact_facts": artifact_facts,
-                "compiler_analysis": compiler_analysis,
+        entry_view: dict[str, object] = {
+            "artifact_facts": artifact_facts,
+            "compiler_analysis": compiler_analysis,
+        }
+        if force:
+            entry_view["identities"] = {
+                "baseline": pair.baseline_identity.to_json_object(),
+                "candidate": pair.candidate_identity.to_json_object(),
             }
-        )
+        else:
+            entry_view["identity"] = pair.baseline_identity.to_json_object()
+        entries.append(entry_view)
     view: dict[str, object] = {
         "kind": DIFF_KIND,
         "schema_version": COMPILE_REPORT_SCHEMA_VERSION,
@@ -447,12 +459,27 @@ def build_compile_report_diff(
         "baseline_source": baseline.source,
         "candidate_source": candidate.source,
         "comparison_mode": comparison_mode.value,
-        "identity": report_common_identity_json(baseline, comparison_mode),
         "changed_entry_count": len(entries),
         "unchanged_entry_count": unchanged_entry_count,
         "entries": entries,
     }
-    if comparison_mode is CompileReportComparisonMode.TARGET:
+    if force:
+        pair = match.pairs[0]
+        view["forced"] = True
+        view["identities"] = {
+            "baseline": report_identity_json(baseline),
+            "candidate": report_identity_json(candidate),
+        }
+        view["entry_identities"] = {
+            "baseline": pair.baseline_identity.to_json_object(),
+            "candidate": pair.candidate_identity.to_json_object(),
+        }
+        view["identity_mismatches"] = [
+            mismatch.to_json_object() for mismatch in match.identity_mismatches
+        ]
+    else:
+        view["identity"] = report_common_identity_json(baseline, comparison_mode)
+    if comparison_mode is CompileReportComparisonMode.TARGET and not force:
         view["targets"] = {
             "baseline": report_target_identity_json(baseline),
             "candidate": report_target_identity_json(candidate),
@@ -460,7 +487,7 @@ def build_compile_report_diff(
     bank_service = build_bank_service_diff(baseline, candidate)
     if bank_service is not None:
         view["bank_service"] = bank_service
-    if comparison_mode is CompileReportComparisonMode.TARGET:
+    if comparison_mode is CompileReportComparisonMode.TARGET and not force:
         target_capabilities = build_target_capability_diff(baseline, candidate)
         if target_capabilities is not None:
             view["target_capabilities"] = target_capabilities
@@ -524,13 +551,40 @@ def format_compile_report_show_text(view: dict[str, object]) -> str:
 
 def format_compile_report_diff_text(view: dict[str, object]) -> str:
     """Formats a strict diff for humans and agent prompts."""
-    identity = _expect_dict(view["identity"])
     lines = [
         "Loom compile report diff",
         f"  baseline: {view['baseline_source']}",
         f"  candidate: {view['candidate_source']}",
     ]
-    if view.get("comparison_mode") == CompileReportComparisonMode.TARGET.value:
+    if view.get("forced") is True:
+        identities = _expect_dict(view["identities"])
+        baseline_identity = _expect_dict(identities["baseline"])
+        candidate_identity = _expect_dict(identities["candidate"])
+        lines.extend(
+            (
+                "  comparison: forced single-entry observation",
+                "  warning: identity contract bypassed; deltas are not causal",
+                f"  baseline target: {_format_target(baseline_identity)}",
+                (
+                    "  baseline specialization: "
+                    f"{_format_specialization(baseline_identity)}"
+                ),
+                f"  candidate target: {_format_target(candidate_identity)}",
+                (
+                    "  candidate specialization: "
+                    f"{_format_specialization(candidate_identity)}"
+                ),
+            )
+        )
+        mismatches = _expect_list(view["identity_mismatches"])
+        lines.append(f"  identity mismatches: {len(mismatches)}")
+        for mismatch_value in mismatches:
+            mismatch = _expect_dict(mismatch_value)
+            lines.append(
+                f"    {mismatch['path']}: {mismatch['baseline']!r} != "
+                f"{mismatch['candidate']!r}"
+            )
+    elif view.get("comparison_mode") == CompileReportComparisonMode.TARGET.value:
         targets = _expect_dict(view["targets"])
         baseline_target = _expect_dict(targets["baseline"])
         candidate_target = _expect_dict(targets["candidate"])
@@ -550,6 +604,7 @@ def format_compile_report_diff_text(view: dict[str, object]) -> str:
             )
         )
     else:
+        identity = _expect_dict(view["identity"])
         lines.extend(
             (
                 f"  target: {_format_target(identity)}",
@@ -568,9 +623,22 @@ def format_compile_report_diff_text(view: dict[str, object]) -> str:
         lines.append("  reported entry evidence: unchanged")
     for entry_value in _expect_list(view["entries"]):
         entry = _expect_dict(entry_value)
-        entry_identity = _expect_dict(entry["identity"])
+        if view.get("forced") is True:
+            entry_identities = _expect_dict(entry["identities"])
+            baseline_entry_identity = _expect_dict(entry_identities["baseline"])
+            candidate_entry_identity = _expect_dict(entry_identities["candidate"])
+            baseline_name = _entry_display_name(baseline_entry_identity)
+            candidate_name = _entry_display_name(candidate_entry_identity)
+            entry_name = (
+                baseline_name
+                if baseline_name == candidate_name
+                else f"{baseline_name} -> {candidate_name}"
+            )
+        else:
+            entry_identity = _expect_dict(entry["identity"])
+            entry_name = _entry_display_name(entry_identity)
         lines.append("")
-        lines.append(f"Entry {_entry_display_name(entry_identity)}")
+        lines.append(f"Entry {entry_name}")
         _append_diff_group(
             lines,
             "Artifact facts",

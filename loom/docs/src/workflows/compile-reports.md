@@ -94,9 +94,23 @@ loom-compile-report diff \
   >candidate.diff.json
 ```
 
-There is no force switch for incomparable reports. Fix the experiment so that
-one independent variable changes, or describe the result as two observations
-instead of a causal comparison.
+When historical or externally produced artifacts cannot be regenerated with a
+common identity, `--force` can compare reports containing exactly one compiled
+entry each:
+
+```shell
+loom-compile-report diff \
+  historical-baseline.report.json \
+  historical-candidate.report.json \
+  --force
+```
+
+The forced view preserves both report and entry identities, lists every field
+that violates the exact comparison contract, and labels the deltas as
+observational rather than causal. Reports with more than one entry remain an
+error because entry order is not a semantic pairing contract. Use the strict
+default for controlled experiments; `--force` makes otherwise inaccessible
+evidence inspectable, but does not repair the experiment.
 
 ## Compare target specialization
 

@@ -161,11 +161,44 @@ class CompileReportDocument:
 
 @dataclass(frozen=True)
 class CompileReportEntryPair:
-    """Matched entries from two comparable reports."""
+    """Paired entries from two reports."""
 
-    identity: CompileReportEntryIdentity
+    baseline_identity: CompileReportEntryIdentity
+    candidate_identity: CompileReportEntryIdentity
     baseline: dict[str, object]
     candidate: dict[str, object]
+
+
+@dataclass(frozen=True)
+class CompileReportIdentityMismatch:
+    """One identity field that differs across a forced comparison."""
+
+    path: str
+    baseline: object
+    candidate: object
+
+    def to_json_object(self) -> dict[str, object]:
+        """Returns the mismatch as a deterministic diagnostic row."""
+        return {
+            "path": self.path,
+            "baseline": self.baseline,
+            "candidate": self.candidate,
+        }
+
+    def format(self) -> str:
+        """Formats the mismatch for errors and text views."""
+        return (
+            f"{self.path}: {_display_identity_value(self.baseline)} != "
+            f"{_display_identity_value(self.candidate)}"
+        )
+
+
+@dataclass(frozen=True)
+class CompileReportEntryMatch:
+    """Entry pairs and retained identity mismatches for one comparison."""
+
+    pairs: tuple[CompileReportEntryPair, ...]
+    identity_mismatches: tuple[CompileReportIdentityMismatch, ...]
 
 
 def load_compile_report(path: Path) -> CompileReportDocument:
@@ -308,17 +341,70 @@ def match_compile_report_entries(
     baseline: CompileReportDocument,
     candidate: CompileReportDocument,
     comparison_mode: CompileReportComparisonMode = CompileReportComparisonMode.EXACT,
-) -> tuple[CompileReportEntryPair, ...]:
+    *,
+    force: bool = False,
+) -> CompileReportEntryMatch:
     """Checks the selected comparability contract and returns entry pairs."""
-    differences: list[str] = []
+    status_differences: list[str] = []
     if baseline.status_code != 0:
-        differences.append(
+        status_differences.append(
             f"baseline status is {baseline.status_name} ({baseline.status_code})"
         )
     if candidate.status_code != 0:
-        differences.append(
+        status_differences.append(
             f"candidate status is {candidate.status_name} ({candidate.status_code})"
         )
+    if force and status_differences:
+        formatted = "\n  ".join(status_differences)
+        raise IncomparableCompileReportsError(
+            "compile reports do not contain two successful compilations:\n  "
+            + formatted
+        )
+
+    if force:
+        if comparison_mode is not CompileReportComparisonMode.EXACT:
+            raise IncomparableCompileReportsError(
+                "forced comparison cannot be combined with another identity contract"
+            )
+        if len(baseline.entries) != 1 or len(candidate.entries) != 1:
+            raise IncomparableCompileReportsError(
+                "forced comparison requires exactly one entry in each report; "
+                f"baseline has {len(baseline.entries)} and candidate has "
+                f"{len(candidate.entries)}"
+            )
+        baseline_entry = baseline.entries[0]
+        candidate_entry = candidate.entries[0]
+        baseline_identity = compile_report_entry_identity(baseline_entry)
+        candidate_identity = compile_report_entry_identity(candidate_entry)
+        identity_mismatches = _report_identity_mismatches(
+            baseline,
+            candidate,
+            comparison_mode,
+        )
+        for field in _ENTRY_IDENTITY_FIELDS + _ENTRY_CONTEXT_FIELDS:
+            baseline_value = baseline_entry.get(field)
+            candidate_value = candidate_entry.get(field)
+            if _canonical_value(baseline_value) != _canonical_value(candidate_value):
+                identity_mismatches.append(
+                    CompileReportIdentityMismatch(
+                        path=f"entry.{field}",
+                        baseline=baseline_value,
+                        candidate=candidate_value,
+                    )
+                )
+        return CompileReportEntryMatch(
+            pairs=(
+                CompileReportEntryPair(
+                    baseline_identity=baseline_identity,
+                    candidate_identity=candidate_identity,
+                    baseline=baseline_entry,
+                    candidate=candidate_entry,
+                ),
+            ),
+            identity_mismatches=tuple(identity_mismatches),
+        )
+
+    differences = list(status_differences)
 
     if comparison_mode is CompileReportComparisonMode.TARGET:
         for document_role, document in (
@@ -330,25 +416,14 @@ def match_compile_report_entries(
             if not document.report.get("target_key"):
                 differences.append(f"{document_role} target_key is unavailable")
 
-    for field in _REPORT_IDENTITY_FIELDS:
-        if (
-            comparison_mode is CompileReportComparisonMode.TARGET
-            and field in _TARGET_VARIANT_REPORT_FIELDS
-        ):
-            continue
-        baseline_value = _canonical_value(baseline.report.get(field))
-        candidate_value = _canonical_value(candidate.report.get(field))
-        if baseline_value != candidate_value:
-            differences.append(
-                f"{field}: {_display_identity_value(baseline.report.get(field))} "
-                f"!= {_display_identity_value(candidate.report.get(field))}"
-            )
-    if baseline.config_bindings != candidate.config_bindings:
-        differences.append(
-            "config_bindings: "
-            f"{dict(baseline.config_bindings)!r} != "
-            f"{dict(candidate.config_bindings)!r}"
+    differences.extend(
+        mismatch.format()
+        for mismatch in _report_identity_mismatches(
+            baseline,
+            candidate,
+            comparison_mode,
         )
+    )
 
     baseline_entries = _entries_by_identity(baseline)
     candidate_entries = _entries_by_identity(candidate)
@@ -391,7 +466,8 @@ def match_compile_report_entries(
                 )
         pairs.append(
             CompileReportEntryPair(
-                identity=identity,
+                baseline_identity=identity,
+                candidate_identity=identity,
                 baseline=baseline_entry,
                 candidate=candidate_entry,
             )
@@ -402,7 +478,44 @@ def match_compile_report_entries(
         raise IncomparableCompileReportsError(
             "compile reports are not comparable:\n  " + formatted
         )
-    return tuple(pairs)
+    return CompileReportEntryMatch(
+        pairs=tuple(pairs),
+        identity_mismatches=(),
+    )
+
+
+def _report_identity_mismatches(
+    baseline: CompileReportDocument,
+    candidate: CompileReportDocument,
+    comparison_mode: CompileReportComparisonMode,
+) -> list[CompileReportIdentityMismatch]:
+    """Returns report-level mismatches under the selected identity contract."""
+    mismatches: list[CompileReportIdentityMismatch] = []
+    for field in _REPORT_IDENTITY_FIELDS:
+        if (
+            comparison_mode is CompileReportComparisonMode.TARGET
+            and field in _TARGET_VARIANT_REPORT_FIELDS
+        ):
+            continue
+        baseline_value = baseline.report.get(field)
+        candidate_value = candidate.report.get(field)
+        if _canonical_value(baseline_value) != _canonical_value(candidate_value):
+            mismatches.append(
+                CompileReportIdentityMismatch(
+                    path=f"report.{field}",
+                    baseline=baseline_value,
+                    candidate=candidate_value,
+                )
+            )
+    if baseline.config_bindings != candidate.config_bindings:
+        mismatches.append(
+            CompileReportIdentityMismatch(
+                path="config_bindings",
+                baseline=dict(baseline.config_bindings),
+                candidate=dict(candidate.config_bindings),
+            )
+        )
+    return mismatches
 
 
 def report_identity_json(document: CompileReportDocument) -> dict[str, object]:

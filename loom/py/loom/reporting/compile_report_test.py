@@ -285,10 +285,12 @@ def test_matches_only_exact_report_and_entry_context() -> None:
     candidate_report["entries"]["rows"][0]["code_byte_count"] = 480
     candidate = parse_compile_report(candidate_report, source="candidate.json")
 
-    pairs = match_compile_report_entries(baseline, candidate)
+    match = match_compile_report_entries(baseline, candidate)
 
-    assert len(pairs) == 1
-    assert pairs[0].identity.display_name() == "routed_linear"
+    assert len(match.pairs) == 1
+    assert match.pairs[0].baseline_identity.display_name() == "routed_linear"
+    assert match.pairs[0].candidate_identity.display_name() == "routed_linear"
+    assert match.identity_mismatches == ()
 
 
 @pytest.mark.parametrize(
@@ -328,6 +330,89 @@ def test_rejects_incomparable_reports(mutate, message: str) -> None:
         match_compile_report_entries(baseline, candidate)
 
 
+def test_forced_comparison_pairs_single_entries_and_retains_identity() -> None:
+    baseline_report = _compile_report()
+    baseline_report["function"] = "baseline_kernel"
+    baseline_report["target_export"] = "baseline_kernel"
+    baseline_entry = baseline_report["entries"]["rows"][0]
+    baseline_entry["function"] = "baseline_kernel"
+    baseline_entry["source_function"] = "baseline_kernel"
+    baseline_entry["target_export"] = "baseline_kernel"
+    baseline = parse_compile_report(baseline_report, source="baseline.json")
+
+    candidate_report = deepcopy(baseline_report)
+    candidate_report["function"] = "candidate_kernel"
+    candidate_report["target_export"] = "candidate_kernel"
+    candidate_entry = candidate_report["entries"]["rows"][0]
+    candidate_entry["function"] = "candidate_kernel"
+    candidate_entry["source_function"] = "candidate_kernel"
+    candidate_entry["target_export"] = "candidate_kernel"
+    candidate_entry["code_byte_count"] = 480
+    candidate = parse_compile_report(candidate_report, source="candidate.json")
+
+    with pytest.raises(IncomparableCompileReportsError, match="missing entry"):
+        match_compile_report_entries(baseline, candidate)
+
+    match = match_compile_report_entries(baseline, candidate, force=True)
+    assert len(match.pairs) == 1
+    assert match.pairs[0].baseline_identity.display_name() == "baseline_kernel"
+    assert match.pairs[0].candidate_identity.display_name() == "candidate_kernel"
+    assert [mismatch.path for mismatch in match.identity_mismatches] == [
+        "report.function",
+        "report.target_export",
+        "entry.function",
+        "entry.source_function",
+        "entry.target_export",
+    ]
+
+    view = build_compile_report_diff(baseline, candidate, force=True)
+    assert view["forced"] is True
+    assert "identity" not in view
+    assert view["identities"]["baseline"]["function"] == "baseline_kernel"
+    assert view["identities"]["candidate"]["function"] == "candidate_kernel"
+    assert view["entry_identities"] == {
+        "baseline": {"name": "baseline_kernel"},
+        "candidate": {"name": "candidate_kernel"},
+    }
+    assert view["entries"][0]["identities"] == {
+        "baseline": {"name": "baseline_kernel"},
+        "candidate": {"name": "candidate_kernel"},
+    }
+    assert view["entries"][0]["artifact_facts"]["changed"]["code_byte_count"] == {
+        "baseline": 512,
+        "candidate": 480,
+        "delta": -32,
+        "change_percent": -6.25,
+    }
+    text = format_compile_report_diff_text(view)
+    assert "comparison: forced single-entry observation" in text
+    assert "identity contract bypassed; deltas are not causal" in text
+    assert "identity mismatches: 5" in text
+    assert "report.function: 'baseline_kernel' != 'candidate_kernel'" in text
+    assert "Entry baseline_kernel -> candidate_kernel" in text
+
+
+def test_forced_comparison_rejects_ambiguous_entry_pairing() -> None:
+    baseline_report = _compile_report()
+    second_entry = deepcopy(baseline_report["entries"]["rows"][0])
+    second_entry["index"] = 1
+    second_entry["function"] = "second_kernel"
+    second_entry["source_function"] = "second_kernel"
+    second_entry["target_export"] = "second_kernel"
+    baseline_report["entries"] = {
+        "count": 2,
+        "rows": [baseline_report["entries"]["rows"][0], second_entry],
+    }
+    baseline = parse_compile_report(baseline_report)
+    candidate = parse_compile_report(_compile_report())
+
+    with pytest.raises(
+        IncomparableCompileReportsError,
+        match=r"forced comparison requires exactly one entry.*baseline has 2",
+    ):
+        match_compile_report_entries(baseline, candidate, force=True)
+
+
 def test_target_comparison_permits_only_target_specialization_identity() -> None:
     baseline = parse_compile_report(_compile_report(), source="baseline.json")
     candidate_report = _compile_report()
@@ -341,7 +426,7 @@ def test_target_comparison_permits_only_target_specialization_identity() -> None
     candidate_entry["target_config"] = "gfx11_5_wave64"
     candidate = parse_compile_report(candidate_report, source="candidate.json")
 
-    pairs = match_compile_report_entries(
+    match = match_compile_report_entries(
         baseline,
         candidate,
         CompileReportComparisonMode.TARGET,
@@ -352,7 +437,7 @@ def test_target_comparison_permits_only_target_specialization_identity() -> None
         CompileReportComparisonMode.TARGET,
     )
 
-    assert len(pairs) == 1
+    assert len(match.pairs) == 1
     assert view["comparison_mode"] == "target"
     assert view["identity"]["target_family"] == "AMDGPU"
     assert "target_key" not in view["identity"]

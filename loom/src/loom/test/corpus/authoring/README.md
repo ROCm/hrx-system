@@ -131,10 +131,12 @@ loom-compile-report \
 
 The JSON views are sparse so they can feed an autoresearch loop without
 replaying the full report. Omitted metrics are unavailable, not zero. `diff`
-requires exact schema, target, config, workload, and entry identity; it has no
-force mode for unlike compilations. To compare two target specializations of
-the same source, config, workload, artifact family, and target family, select
-the bounded target comparison explicitly:
+requires exact schema, target, config, workload, and entry identity by default.
+`--force` permits an explicitly observational comparison only when each report
+contains one entry; it preserves every identity mismatch instead of pretending
+the inputs describe one controlled experiment. To compare two target
+specializations of the same source, config, workload, artifact family, and
+target family, select the bounded target comparison explicitly:
 
 ```bash
 loom-compile-report \
