@@ -2849,6 +2849,74 @@ TEST_F(ModuleTest, InternTypeIdReturnsCanonicalId) {
   loom_module_free(module);
 }
 
+TEST_F(ModuleTest, InternTopologicalTypeHandlesDeepCanonicalChain) {
+  constexpr iree_host_size_t kDepth = 4096;
+  loom_module_t* module = NULL;
+  const loom_module_size_hints_t hints = {
+      /*.type_count=*/kDepth + 1,
+  };
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      &hints, iree_allocator_system(),
+                                      &module));
+
+  loom_type_id_t dependency_id = LOOM_TYPE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_topological_type_id(
+      module, loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+      /*structural_dependency_ids=*/NULL,
+      /*structural_dependency_count=*/0, &dependency_id));
+  ASSERT_EQ(dependency_id, 0u);
+
+  struct FunctionTypeStorage {
+    // Number of argument types.
+    uint16_t arg_count;
+    // Number of result types.
+    uint16_t result_count;
+    // Alignment padding matching loom_func_type_data_t.
+    uint32_t reserved;
+    // Single immediate dependency payload.
+    loom_type_t types[1];
+  } source = {};
+  static_assert(sizeof(FunctionTypeStorage) ==
+                sizeof(loom_func_type_data_t) + sizeof(loom_type_t));
+  source.arg_count = 1;
+  for (iree_host_size_t i = 0; i < kDepth; ++i) {
+    source.types[0] = module->types.entries[dependency_id];
+    const loom_type_t type =
+        loom_type_function(reinterpret_cast<loom_func_type_data_t*>(&source));
+    loom_type_id_t type_id = LOOM_TYPE_ID_INVALID;
+    IREE_ASSERT_OK(loom_module_intern_topological_type_id(
+        module, type, &dependency_id, /*structural_dependency_count=*/1,
+        &type_id));
+    ASSERT_EQ(type_id, i + 1);
+    dependency_id = type_id;
+  }
+
+  source.types[0] = module->types.entries[dependency_id - 1];
+  const loom_type_t duplicate =
+      loom_type_function(reinterpret_cast<loom_func_type_data_t*>(&source));
+  const loom_type_id_t duplicate_dependency_id = dependency_id - 1;
+  loom_type_id_t duplicate_id = LOOM_TYPE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_topological_type_id(
+      module, duplicate, &duplicate_dependency_id,
+      /*structural_dependency_count=*/1, &duplicate_id));
+  EXPECT_EQ(duplicate_id, dependency_id);
+  EXPECT_EQ(module->types.count, kDepth + 1);
+
+  const loom_func_type_data_t* deepest_data =
+      loom_type_func_data(module->types.entries[dependency_id]);
+  ASSERT_NE(deepest_data, nullptr);
+  const loom_type_t expected_dependency =
+      module->types.entries[dependency_id - 1];
+  EXPECT_EQ(deepest_data->types[0].header, expected_dependency.header);
+  EXPECT_EQ(deepest_data->types[0].encoding_id,
+            expected_dependency.encoding_id);
+  EXPECT_EQ(deepest_data->types[0].encoding_flags,
+            expected_dependency.encoding_flags);
+  EXPECT_EQ(deepest_data->types[0].dims[0], expected_dependency.dims[0]);
+  EXPECT_EQ(deepest_data->types[0].dims[1], expected_dependency.dims[1]);
+  loom_module_free(module);
+}
+
 TEST_F(ModuleTest, InternDifferentTypes) {
   loom_module_t* module = NULL;
   IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
@@ -3060,6 +3128,16 @@ TEST_F(ModuleTest, InternFunctionTypeDirectAndPackedFormsDedup) {
   EXPECT_TRUE(loom_type_equal(direct_interned, packed_interned));
   EXPECT_EQ(loom_type_func_data(direct_interned),
             loom_type_func_data(packed_interned));
+  EXPECT_EQ(module->arena.total_allocation_size, allocation_size);
+
+  const loom_type_id_t dependency_ids[] = {0, 1, 2};
+  loom_type_id_t topological_type_id = LOOM_TYPE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_topological_type_id(
+      module, packed_source, dependency_ids, IREE_ARRAYSIZE(dependency_ids),
+      &topological_type_id));
+  EXPECT_EQ(topological_type_id, 3u);
+  EXPECT_EQ(module->types.hashes[topological_type_id],
+            loom_type_hash(module->types.entries[topological_type_id]));
   EXPECT_EQ(module->arena.total_allocation_size, allocation_size);
 
   iree_allocator_free(iree_allocator_system(),

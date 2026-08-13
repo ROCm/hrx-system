@@ -2188,6 +2188,8 @@ typedef struct loom_type_table_t {
   iree_host_size_t count;
   iree_host_size_t capacity;
   loom_type_t* entries;
+  // Structural hashes parallel to entries.
+  uint32_t* hashes;
 } loom_type_table_t;
 
 // A reference from one SSA value's type to another SSA value.

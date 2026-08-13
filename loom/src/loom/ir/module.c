@@ -41,6 +41,11 @@ static uint32_t loom_hash_u32_extend(uint32_t hash, uint32_t value) {
   return loom_hash_bytes_extend(hash, &value, sizeof(value));
 }
 
+// Extends an FNV-1a hash with one uint64_t.
+static uint32_t loom_hash_u64_extend(uint32_t hash, uint64_t value) {
+  return loom_hash_bytes_extend(hash, &value, sizeof(value));
+}
+
 static uint32_t loom_hash_string_view(iree_string_view_t string) {
   return loom_hash_bytes(string.data, string.size);
 }
@@ -271,17 +276,29 @@ static iree_status_t loom_string_table_ensure_capacity(
 
 static iree_status_t loom_type_table_ensure_capacity(
     iree_arena_allocator_t* arena, loom_type_table_t* table) {
-  if (table->count < table->capacity) return iree_ok_status();
-  iree_host_size_t new_capacity =
-      table->capacity > 0 ? table->capacity * 2 : 64;
+  if (table->count < table->capacity) {
+    return iree_ok_status();
+  }
+  iree_host_size_t new_capacity = 64;
+  if (table->capacity > 0 &&
+      !iree_host_size_checked_mul(table->capacity, 2, &new_capacity)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "type table capacity overflow");
+  }
   loom_type_t* new_entries = NULL;
+  uint32_t* new_hashes = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, new_capacity, sizeof(loom_type_t), (void**)&new_entries));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, new_capacity, sizeof(uint32_t), (void**)&new_hashes));
   memset(new_entries, 0, new_capacity * sizeof(loom_type_t));
+  memset(new_hashes, 0, new_capacity * sizeof(uint32_t));
   if (table->count > 0) {
     memcpy(new_entries, table->entries, table->count * sizeof(loom_type_t));
+    memcpy(new_hashes, table->hashes, table->count * sizeof(uint32_t));
   }
   table->entries = new_entries;
+  table->hashes = new_hashes;
   table->capacity = new_capacity;
   return iree_ok_status();
 }
@@ -569,8 +586,11 @@ static iree_status_t loom_module_initialize_tables(
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(arena, type_capacity, sizeof(loom_type_t),
                                 (void**)&module->types.entries));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, type_capacity, sizeof(uint32_t), (void**)&module->types.hashes));
   module->types.capacity = type_capacity;
   memset(module->types.entries, 0, type_capacity * sizeof(loom_type_t));
+  memset(module->types.hashes, 0, type_capacity * sizeof(uint32_t));
 
   // Encodings. Modules without an encoding count hint retain lazy allocation.
   if (encoding_capacity > 0) {
@@ -3584,6 +3604,19 @@ typedef struct loom_function_type_equal_context_t {
   uint16_t result_count;
 } loom_function_type_equal_context_t;
 
+// One type assembled over canonical immediate dependencies already interned in
+// the module. Dependency IDs follow the type's representation order.
+typedef struct loom_topological_type_context_t {
+  // Module owning every dependency ID.
+  const loom_module_t* module;
+  // Temporary top-level type representation.
+  loom_type_t type;
+  // Canonical immediate dependency IDs in representation order.
+  const loom_type_id_t* dependency_ids;
+  // Number of entries in dependency_ids.
+  iree_host_size_t dependency_count;
+} loom_topological_type_context_t;
+
 typedef iree_status_t (*loom_module_type_clone_fn_t)(loom_module_t* module,
                                                      const void* clone_context,
                                                      loom_type_t* out_type);
@@ -3642,6 +3675,85 @@ static bool loom_type_equal_fn(const void* context, uint32_t index) {
   return loom_type_equal(ctx->module->types.entries[index], ctx->type);
 }
 
+// Compares only the immediate structure of a topologically assembled type.
+// Nested type identities are canonical module entries and therefore compare by
+// their exact by-value storage instead of recursively walking their payloads.
+static bool loom_topological_type_equal_fn(const void* context,
+                                           uint32_t index) {
+  const loom_topological_type_context_t* ctx =
+      (const loom_topological_type_context_t*)context;
+  const loom_type_t existing = ctx->module->types.entries[index];
+  const loom_type_t candidate = ctx->type;
+  if (existing.header != candidate.header ||
+      existing.encoding_id != candidate.encoding_id ||
+      existing.encoding_flags != candidate.encoding_flags) {
+    return false;
+  }
+
+  switch (loom_type_kind(candidate)) {
+    case LOOM_TYPE_FUNCTION: {
+      const loom_func_type_data_t* existing_data =
+          loom_type_func_data(existing);
+      const loom_func_type_data_t* candidate_data =
+          loom_type_func_data(candidate);
+      if (existing_data == NULL || candidate_data == NULL ||
+          existing_data->arg_count != candidate_data->arg_count ||
+          existing_data->result_count != candidate_data->result_count) {
+        return false;
+      }
+      for (iree_host_size_t i = 0; i < ctx->dependency_count; ++i) {
+        if (!loom_type_has_same_storage(
+                existing_data->types[i],
+                ctx->module->types.entries[ctx->dependency_ids[i]])) {
+          return loom_type_equal(existing, candidate);
+        }
+      }
+      return true;
+    }
+    case LOOM_TYPE_DIALECT: {
+      if (loom_type_dialect_name_id(existing) !=
+          loom_type_dialect_name_id(candidate)) {
+        return false;
+      }
+      const loom_type_t* existing_parameters =
+          loom_type_dialect_params(existing);
+      if (ctx->dependency_count > 0 && existing_parameters == NULL) {
+        return false;
+      }
+      for (iree_host_size_t i = 0; i < ctx->dependency_count; ++i) {
+        if (!loom_type_has_same_storage(
+                existing_parameters[i],
+                ctx->module->types.entries[ctx->dependency_ids[i]])) {
+          return loom_type_equal(existing, candidate);
+        }
+      }
+      return true;
+    }
+    case LOOM_TYPE_REGISTER: {
+      if (ctx->dependency_count == 0) {
+        return loom_type_equal(existing, candidate);
+      }
+      const loom_register_type_data_t* existing_data =
+          loom_type_register_data(existing);
+      const loom_register_type_data_t* candidate_data =
+          loom_type_register_data(candidate);
+      if (existing_data == NULL || candidate_data == NULL ||
+          existing_data->carrier_payload0 != candidate_data->carrier_payload0 ||
+          existing_data->carrier_payload1 != candidate_data->carrier_payload1) {
+        return false;
+      }
+      if (loom_type_has_same_storage(
+              existing_data->value_type,
+              ctx->module->types.entries[ctx->dependency_ids[0]])) {
+        return true;
+      }
+      return loom_type_equal(existing, candidate);
+    }
+    default:
+      return loom_type_equal(existing, candidate);
+  }
+}
+
 // Compares one interned module type against temporary arg/result arrays for a
 // first-class function signature that has not been packed into a FAM payload.
 static bool loom_function_type_equal_fn(const void* context, uint32_t index) {
@@ -3692,6 +3804,52 @@ static uint32_t loom_function_type_hash(const loom_type_t* arg_types,
   return hash;
 }
 
+// Computes loom_type_hash() without recursively hashing canonical immediate
+// dependencies. Their structural hashes were recorded when the dependencies
+// were interned earlier in the topological sequence.
+static uint32_t loom_topological_type_hash(
+    const loom_topological_type_context_t* context) {
+  const loom_type_t type = context->type;
+  uint32_t hash = 2166136261u;
+  hash = loom_hash_u32_extend(hash, type.header);
+  hash = loom_hash_u16_extend(hash, type.encoding_id);
+  hash = loom_hash_u16_extend(hash, type.encoding_flags);
+
+  switch (loom_type_kind(type)) {
+    case LOOM_TYPE_FUNCTION: {
+      const loom_func_type_data_t* data = loom_type_func_data(type);
+      hash = loom_hash_u16_extend(hash, data->arg_count);
+      hash = loom_hash_u16_extend(hash, data->result_count);
+      hash = loom_hash_u16_extend(hash, (uint16_t)context->dependency_count);
+      for (iree_host_size_t i = 0; i < context->dependency_count; ++i) {
+        hash = loom_hash_u32_extend(
+            hash, context->module->types.hashes[context->dependency_ids[i]]);
+      }
+      return hash;
+    }
+    case LOOM_TYPE_DIALECT:
+      hash = loom_hash_u32_extend(hash, loom_type_dialect_name_id(type));
+      hash = loom_hash_u16_extend(hash, (uint16_t)context->dependency_count);
+      for (iree_host_size_t i = 0; i < context->dependency_count; ++i) {
+        hash = loom_hash_u32_extend(
+            hash, context->module->types.hashes[context->dependency_ids[i]]);
+      }
+      return hash;
+    case LOOM_TYPE_REGISTER: {
+      if (context->dependency_count == 0) {
+        return loom_type_hash(type);
+      }
+      const loom_register_type_data_t* data = loom_type_register_data(type);
+      hash = loom_hash_u64_extend(hash, data->carrier_payload0);
+      hash = loom_hash_u64_extend(hash, data->carrier_payload1);
+      return loom_hash_u32_extend(
+          hash, context->module->types.hashes[context->dependency_ids[0]]);
+    }
+    default:
+      return loom_type_hash(type);
+  }
+}
+
 static iree_status_t loom_module_clone_type_payload(loom_module_t* module,
                                                     loom_type_t type,
                                                     loom_type_t* out_type);
@@ -3731,6 +3889,69 @@ static iree_status_t loom_module_clone_type_from_context(
     loom_module_t* module, const void* clone_context, loom_type_t* out_type) {
   loom_type_t type = *(const loom_type_t*)clone_context;
   return loom_module_clone_type_payload(module, type, out_type);
+}
+
+// Retains only the top-level payload of a type whose nested types are already
+// canonical module entries.
+static iree_status_t loom_module_clone_topological_type_from_context(
+    loom_module_t* module, const void* clone_context, loom_type_t* out_type) {
+  const loom_topological_type_context_t* ctx =
+      (const loom_topological_type_context_t*)clone_context;
+  const loom_type_t type = ctx->type;
+  switch (loom_type_kind(type)) {
+    case LOOM_TYPE_FUNCTION: {
+      const loom_func_type_data_t* source_data = loom_type_func_data(type);
+      iree_host_size_t allocation_size = 0;
+      IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+          sizeof(loom_func_type_data_t), &allocation_size,
+          IREE_STRUCT_FIELD_FAM(ctx->dependency_count, loom_type_t)));
+      loom_func_type_data_t* target_data = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(&module->arena, allocation_size,
+                                               (void**)&target_data));
+      target_data->arg_count = source_data->arg_count;
+      target_data->result_count = source_data->result_count;
+      target_data->reserved = 0;
+      for (iree_host_size_t i = 0; i < ctx->dependency_count; ++i) {
+        target_data->types[i] = module->types.entries[ctx->dependency_ids[i]];
+      }
+      *out_type = loom_type_function(target_data);
+      return iree_ok_status();
+    }
+    case LOOM_TYPE_DIALECT: {
+      loom_type_t* target_parameters = NULL;
+      if (ctx->dependency_count > 0) {
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            &module->arena, ctx->dependency_count, sizeof(*target_parameters),
+            (void**)&target_parameters));
+      }
+      for (iree_host_size_t i = 0; i < ctx->dependency_count; ++i) {
+        target_parameters[i] = module->types.entries[ctx->dependency_ids[i]];
+      }
+      *out_type =
+          loom_type_dialect(loom_type_dialect_name_id(type),
+                            (uint16_t)ctx->dependency_count, target_parameters);
+      return iree_ok_status();
+    }
+    case LOOM_TYPE_REGISTER: {
+      if (ctx->dependency_count == 0) {
+        return loom_module_clone_type_payload(module, type, out_type);
+      }
+      const loom_register_type_data_t* source_data =
+          loom_type_register_data(type);
+      loom_register_type_data_t* target_data = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(
+          &module->arena, sizeof(*target_data), (void**)&target_data));
+      *target_data = (loom_register_type_data_t){
+          .carrier_payload0 = source_data->carrier_payload0,
+          .carrier_payload1 = source_data->carrier_payload1,
+          .value_type = module->types.entries[ctx->dependency_ids[0]],
+      };
+      *out_type = loom_type_register_payload_with_value_type(target_data);
+      return iree_ok_status();
+    }
+    default:
+      return loom_module_clone_type_payload(module, type, out_type);
+  }
 }
 
 // Clones one temporary first-class function signature described by
@@ -3933,6 +4154,7 @@ static iree_status_t loom_module_intern_type_impl(
   }
 
   module->types.entries[new_index] = type;
+  module->types.hashes[new_index] = hash;
   module->types.count++;
   *out_interned_type = type;
   if (out_type_id) *out_type_id = (loom_type_id_t)new_index;
@@ -3961,6 +4183,62 @@ static loom_type_t loom_module_canonicalize_shaped_type_attachment(
   type.encoding_id = 0;
   type.encoding_flags = 0;
   return type;
+}
+
+iree_status_t loom_module_intern_topological_type_id(
+    loom_module_t* module, loom_type_t type,
+    const loom_type_id_t* structural_dependency_ids,
+    iree_host_size_t structural_dependency_count, loom_type_id_t* out_type_id) {
+  if (out_type_id == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "type id output is NULL");
+  }
+  *out_type_id = LOOM_TYPE_ID_INVALID;
+
+  type = loom_module_canonicalize_shaped_type_attachment(module, type);
+  iree_host_size_t expected_dependency_count = 0;
+  switch (loom_type_kind(type)) {
+    case LOOM_TYPE_FUNCTION: {
+      const loom_func_type_data_t* data = loom_type_func_data(type);
+      IREE_ASSERT(data != NULL);
+      expected_dependency_count =
+          (iree_host_size_t)data->arg_count + data->result_count;
+      break;
+    }
+    case LOOM_TYPE_DIALECT:
+      expected_dependency_count = loom_type_dialect_param_count(type);
+      break;
+    case LOOM_TYPE_REGISTER:
+      expected_dependency_count =
+          loom_type_register_has_value_type(type) ? 1 : 0;
+      break;
+    default:
+      break;
+  }
+  IREE_ASSERT(expected_dependency_count == structural_dependency_count);
+  IREE_ASSERT(structural_dependency_count == 0 ||
+              structural_dependency_ids != NULL);
+  for (iree_host_size_t i = 0; i < structural_dependency_count; ++i) {
+    IREE_ASSERT(structural_dependency_ids[i] < module->types.count);
+  }
+
+  const loom_topological_type_context_t context = {
+      .module = module,
+      .type = type,
+      .dependency_ids = structural_dependency_ids,
+      .dependency_count = structural_dependency_count,
+  };
+  const uint32_t hash = loom_topological_type_hash(&context);
+  loom_type_t interned_type = {0};
+  iree_status_t status = loom_module_intern_type_impl(
+      module, hash, loom_topological_type_equal_fn, &context,
+      loom_module_clone_topological_type_from_context, &context, &interned_type,
+      out_type_id, /*out_miss=*/NULL);
+  if (iree_status_is_ok(status) && loom_type_is_register(interned_type) &&
+      loom_type_register_has_value_type(interned_type)) {
+    loom_module_note_recent_register_type(module, *out_type_id);
+  }
+  return status;
 }
 
 static iree_status_t loom_module_intern_type_with_dependencies(

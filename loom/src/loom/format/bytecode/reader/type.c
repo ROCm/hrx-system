@@ -137,6 +137,43 @@ static iree_status_t loom_bytecode_type_materialize_fact(
   }
 }
 
+static void loom_bytecode_type_fact_structural_dependencies(
+    const loom_bytecode_type_fact_t* fact,
+    const loom_type_id_t** out_dependency_ids,
+    iree_host_size_t* out_dependency_count) {
+  *out_dependency_ids = NULL;
+  *out_dependency_count = 0;
+  if (fact == NULL) {
+    return;
+  }
+  switch (fact->kind) {
+    case LOOM_TYPE_FUNCTION: {
+      const loom_bytecode_function_type_fact_t* function_fact =
+          (const loom_bytecode_function_type_fact_t*)fact;
+      *out_dependency_ids = function_fact->type_ids;
+      *out_dependency_count = (iree_host_size_t)function_fact->argument_count +
+                              function_fact->result_count;
+      return;
+    }
+    case LOOM_TYPE_DIALECT: {
+      const loom_bytecode_dialect_type_fact_t* dialect_fact =
+          (const loom_bytecode_dialect_type_fact_t*)fact;
+      *out_dependency_ids = dialect_fact->type_ids;
+      *out_dependency_count = dialect_fact->parameter_count;
+      return;
+    }
+    case LOOM_TYPE_REGISTER: {
+      const loom_bytecode_typed_register_fact_t* register_fact =
+          (const loom_bytecode_typed_register_fact_t*)fact;
+      *out_dependency_ids = &register_fact->value_type_id;
+      *out_dependency_count = 1;
+      return;
+    }
+    default:
+      return;
+  }
+}
+
 iree_status_t loom_bytecode_type_materialize(
     loom_bytecode_type_materializer_t* materializer) {
   const loom_bytecode_type_fact_t* fact =
@@ -148,16 +185,24 @@ iree_status_t loom_bytecode_type_materialize(
         iree_arena_checkpoint_save(materializer->scratch_arena);
     loom_type_t type = {0};
     iree_status_t status = iree_ok_status();
-    if (fact && fact->type_id == type_index) {
-      status = loom_bytecode_type_materialize_fact(materializer, fact, &type);
+    const loom_bytecode_type_fact_t* current_fact =
+        fact && fact->type_id == type_index ? fact : NULL;
+    if (current_fact != NULL) {
+      status = loom_bytecode_type_materialize_fact(materializer, current_fact,
+                                                   &type);
       fact = fact->next;
     } else {
       type = materializer->module_view->types.entries[type_index].direct_type;
     }
     loom_type_id_t type_id = LOOM_TYPE_ID_INVALID;
     if (iree_status_is_ok(status)) {
-      status = loom_module_intern_type_id(materializer->output_module, type,
-                                          &type_id);
+      const loom_type_id_t* dependency_ids = NULL;
+      iree_host_size_t dependency_count = 0;
+      loom_bytecode_type_fact_structural_dependencies(
+          current_fact, &dependency_ids, &dependency_count);
+      status = loom_module_intern_topological_type_id(
+          materializer->output_module, type, dependency_ids, dependency_count,
+          &type_id);
     }
     if (iree_status_is_ok(status) && type_id != type_index) {
       status = loom_bytecode_reader_emit_invalid_field(

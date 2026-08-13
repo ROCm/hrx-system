@@ -493,6 +493,24 @@ iree_status_t loom_module_intern_type_id(loom_module_t* module,
                                          loom_type_t type,
                                          loom_type_id_t* out_type_id);
 
+// Interns one type whose immediate structural dependencies are already
+// interned in |module|.
+//
+// |structural_dependency_ids| lists function arguments/results, dialect type
+// parameters, or a typed register's value type in representation order. It is
+// empty for all other type kinds. The corresponding by-value types in |type|
+// must be exact copies of those module entries. Pointer-backed storage owned by
+// |type| may be temporary; only its top-level payload is copied because nested
+// payloads are retained by the canonical dependency entries.
+//
+// This is the topological construction path for validated serialized type
+// tables. General callers with arbitrary recursive type values use
+// loom_module_intern_type_id instead.
+iree_status_t loom_module_intern_topological_type_id(
+    loom_module_t* module, loom_type_t type,
+    const loom_type_id_t* structural_dependency_ids,
+    iree_host_size_t structural_dependency_count, loom_type_id_t* out_type_id);
+
 // Interns a function type directly from argument and result type arrays. If a
 // structurally identical function type already exists, returns the canonical
 // module-owned entry without cloning. Otherwise, recursively interns signature
