@@ -5,7 +5,6 @@
 
 #include <stdio.h>
 
-#include "allocator.h"
 #include "hrx_internal.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/buffer.h"
@@ -180,10 +179,10 @@ static void hrx_vmm_slab_provider_remove_active_locked(
 static iree_status_t hrx_vmm_slab_provider_protect_slab(
     hrx_allocator_t accessor_allocator, hrx_vmm_slab_t* slab,
     iree_hal_memory_protection_t protection) {
-  return hrx_allocator_virtual_memory_protect_hal(
-      accessor_allocator, slab->virtual_buffer, /*virtual_offset=*/0,
-      slab->allocation_size, HRX_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE,
-      protection);
+  return iree_hal_allocator_virtual_memory_protect(
+      accessor_allocator->hal_allocator, slab->virtual_buffer,
+      /*virtual_offset=*/0, slab->allocation_size, IREE_HAL_QUEUE_AFFINITY_ANY,
+      IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE, protection);
 }
 
 static iree_status_t hrx_vmm_slab_provider_retry_failed_releases(

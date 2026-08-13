@@ -219,7 +219,9 @@ static iree_status_t iree_hal_streaming_graph_memory_allocation_map(
     status = iree_hal_allocator_virtual_memory_protect(
         context->device_allocator, allocation->virtual_buffer->buffer,
         /*virtual_offset=*/0, allocation->reservation_size,
-        IREE_HAL_QUEUE_AFFINITY_ANY, IREE_HAL_MEMORY_PROTECTION_READ_WRITE);
+        IREE_HAL_QUEUE_AFFINITY_ANY,
+        IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE,
+        IREE_HAL_MEMORY_PROTECTION_READ_WRITE);
   }
   if (iree_status_is_ok(status)) {
     allocation->physical_memory = physical_memory;
