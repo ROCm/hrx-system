@@ -22,7 +22,7 @@
 // emitted in source order. The format contains no native structs, alignment
 // gaps, or padding bytes.
 #define IREE_HAL_DEVICE_SPEC_MAGIC UINT32_C(0x43505344)  // DSPC
-#define IREE_HAL_DEVICE_SPEC_VERSION UINT32_C(6)
+#define IREE_HAL_DEVICE_SPEC_VERSION UINT32_C(7)
 #define IREE_HAL_DEVICE_SPEC_FNV1A64_OFFSET_BASIS UINT64_C(0xcbf29ce484222325)
 #define IREE_HAL_DEVICE_SPEC_FNV1A64_PRIME UINT64_C(0x100000001b3)
 
@@ -182,6 +182,39 @@ static iree_status_t iree_hal_device_spec_encode_memory_heap(
   return iree_hal_device_spec_writer_write_u32(writer, value->flags);
 }
 
+static iree_status_t iree_hal_device_spec_encode_atomic_operations(
+    const iree_hal_atomic_operation_capabilities_t* value,
+    iree_hal_device_spec_writer_t* writer) {
+  IREE_RETURN_IF_ERROR(
+      iree_hal_device_spec_writer_write_u32(writer, value->device_scope_32));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_device_spec_writer_write_u32(writer, value->device_scope_64));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_device_spec_writer_write_u32(writer, value->system_scope_32));
+  return iree_hal_device_spec_writer_write_u32(writer, value->system_scope_64);
+}
+
+static iree_status_t iree_hal_device_spec_encode_atomic_wait_conditions(
+    const iree_hal_atomic_wait_condition_capabilities_t* value,
+    iree_hal_device_spec_writer_t* writer) {
+  IREE_RETURN_IF_ERROR(
+      iree_hal_device_spec_writer_write_u32(writer, value->device_scope_32));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_device_spec_writer_write_u32(writer, value->device_scope_64));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_device_spec_writer_write_u32(writer, value->system_scope_32));
+  return iree_hal_device_spec_writer_write_u32(writer, value->system_scope_64);
+}
+
+static iree_status_t iree_hal_device_spec_encode_atomic_capabilities(
+    const iree_hal_atomic_capabilities_t* value,
+    iree_hal_device_spec_writer_t* writer) {
+  IREE_RETURN_IF_ERROR(iree_hal_device_spec_encode_atomic_operations(
+      &value->operations, writer));
+  return iree_hal_device_spec_encode_atomic_wait_conditions(
+      &value->wait_conditions, writer);
+}
+
 static iree_status_t iree_hal_device_spec_encode_memory_type(
     const iree_hal_memory_type_spec_t* value,
     iree_hal_device_spec_writer_t* writer) {
@@ -197,6 +230,8 @@ static iree_status_t iree_hal_device_spec_encode_memory_type(
       iree_hal_device_spec_writer_write_u64(writer, value->minimum_alignment));
   IREE_RETURN_IF_ERROR(iree_hal_device_spec_writer_write_u64(
       writer, value->optimal_transfer_granularity));
+  IREE_RETURN_IF_ERROR(iree_hal_device_spec_encode_atomic_operations(
+      &value->atomic_operations, writer));
   return iree_hal_device_spec_writer_write_u32(writer, value->flags);
 }
 
@@ -258,7 +293,13 @@ static iree_status_t iree_hal_device_spec_encode_queue_family(
   IREE_RETURN_IF_ERROR(iree_hal_device_spec_writer_write_u64(
       writer, value->physical_device_affinity));
   IREE_RETURN_IF_ERROR(
+      iree_hal_device_spec_writer_write_u64(writer, value->queue_affinity));
+  IREE_RETURN_IF_ERROR(
       iree_hal_device_spec_writer_write_u32(writer, value->role_flags));
+  IREE_RETURN_IF_ERROR(iree_hal_device_spec_encode_atomic_capabilities(
+      &value->atomic_capabilities, writer));
+  IREE_RETURN_IF_ERROR(iree_hal_device_spec_encode_atomic_capabilities(
+      &value->zero_compute_atomic_capabilities, writer));
   return iree_hal_device_spec_writer_write_u32(writer, value->flags);
 }
 
@@ -807,6 +848,41 @@ static iree_status_t iree_hal_device_spec_decode_memory_heap(
   return iree_hal_device_spec_reader_read_u32(reader, &out_value->flags);
 }
 
+static iree_status_t iree_hal_device_spec_decode_atomic_operations(
+    iree_hal_device_spec_reader_t* reader,
+    iree_hal_atomic_operation_capabilities_t* out_value) {
+  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_u32(
+      reader, &out_value->device_scope_32));
+  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_u32(
+      reader, &out_value->device_scope_64));
+  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_u32(
+      reader, &out_value->system_scope_32));
+  return iree_hal_device_spec_reader_read_u32(reader,
+                                              &out_value->system_scope_64);
+}
+
+static iree_status_t iree_hal_device_spec_decode_atomic_wait_conditions(
+    iree_hal_device_spec_reader_t* reader,
+    iree_hal_atomic_wait_condition_capabilities_t* out_value) {
+  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_u32(
+      reader, &out_value->device_scope_32));
+  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_u32(
+      reader, &out_value->device_scope_64));
+  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_u32(
+      reader, &out_value->system_scope_32));
+  return iree_hal_device_spec_reader_read_u32(reader,
+                                              &out_value->system_scope_64);
+}
+
+static iree_status_t iree_hal_device_spec_decode_atomic_capabilities(
+    iree_hal_device_spec_reader_t* reader,
+    iree_hal_atomic_capabilities_t* out_value) {
+  IREE_RETURN_IF_ERROR(iree_hal_device_spec_decode_atomic_operations(
+      reader, &out_value->operations));
+  return iree_hal_device_spec_decode_atomic_wait_conditions(
+      reader, &out_value->wait_conditions);
+}
+
 static iree_status_t iree_hal_device_spec_decode_memory_type(
     iree_hal_device_spec_reader_t* reader,
     iree_hal_memory_type_spec_t* out_value) {
@@ -823,6 +899,8 @@ static iree_status_t iree_hal_device_spec_decode_memory_type(
       reader, &out_value->minimum_alignment));
   IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_u64(
       reader, &out_value->optimal_transfer_granularity));
+  IREE_RETURN_IF_ERROR(iree_hal_device_spec_decode_atomic_operations(
+      reader, &out_value->atomic_operations));
   return iree_hal_device_spec_reader_read_u32(reader, &out_value->flags);
 }
 
@@ -887,7 +965,13 @@ static iree_status_t iree_hal_device_spec_decode_queue_family(
   IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_u64(
       reader, &out_value->physical_device_affinity));
   IREE_RETURN_IF_ERROR(
+      iree_hal_device_spec_reader_read_u64(reader, &out_value->queue_affinity));
+  IREE_RETURN_IF_ERROR(
       iree_hal_device_spec_reader_read_u32(reader, &out_value->role_flags));
+  IREE_RETURN_IF_ERROR(iree_hal_device_spec_decode_atomic_capabilities(
+      reader, &out_value->atomic_capabilities));
+  IREE_RETURN_IF_ERROR(iree_hal_device_spec_decode_atomic_capabilities(
+      reader, &out_value->zero_compute_atomic_capabilities));
   return iree_hal_device_spec_reader_read_u32(reader, &out_value->flags);
 }
 

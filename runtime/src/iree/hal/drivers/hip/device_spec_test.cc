@@ -93,6 +93,7 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
   ASSERT_NE(queues, nullptr);
   ASSERT_EQ(queues->family_count, 1);
   EXPECT_EQ(queues->families[0].queue_count, 1);
+  EXPECT_EQ(queues->families[0].queue_affinity, 1u);
   EXPECT_EQ(queues->families[0].timestamp_frequency_hz, 1000000000ull);
   ASSERT_EQ(queues->external_timepoint_handle_count, 1);
   const iree_hal_external_timepoint_handle_spec_t* hip_event_timepoint =

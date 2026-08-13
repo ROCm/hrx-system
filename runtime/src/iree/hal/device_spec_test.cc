@@ -124,8 +124,14 @@ static iree_hal_device_spec_params_t MakeTestSpecParams(
       /*.allowed_memory_access=*/IREE_HAL_MEMORY_ACCESS_ALL,
       /*.minimum_alignment=*/256,
       /*.optimal_transfer_granularity=*/4096,
+      /*.atomic_operations=*/{},
       /*.flags=*/IREE_HAL_MEMORY_TYPE_SPEC_FLAG_NONE,
   };
+  out_memory_types[0].atomic_operations.device_scope_32 =
+      IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
+      IREE_HAL_ATOMIC_OPERATION_FLAG_STORE;
+  out_memory_types[0].atomic_operations.system_scope_64 =
+      IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD;
   *out_memory = {
       /*.heap_count=*/1,
       /*.heaps=*/out_memory_heaps,
@@ -143,10 +149,22 @@ static iree_hal_device_spec_params_t MakeTestSpecParams(
       /*.timestamp_valid_bits=*/64,
       /*.timestamp_frequency_hz=*/1000000000ull,
       /*.physical_device_affinity=*/1,
+      /*.queue_affinity=*/1,
       /*.role_flags=*/IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
           IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
+      /*.atomic_capabilities=*/{},
+      /*.zero_compute_atomic_capabilities=*/{},
       /*.flags=*/IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_NONE,
   };
+  out_queue_families[0].atomic_capabilities.operations.device_scope_32 =
+      IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
+      IREE_HAL_ATOMIC_OPERATION_FLAG_STORE;
+  out_queue_families[0].atomic_capabilities.wait_conditions.device_scope_32 =
+      IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_EQUAL |
+      IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_NOT_EQUAL;
+  out_queue_families[0]
+      .zero_compute_atomic_capabilities.operations.device_scope_32 =
+      IREE_HAL_ATOMIC_OPERATION_FLAG_STORE;
   *out_queues = {
       /*.family_count=*/1,
       /*.families=*/out_queue_families,
@@ -365,7 +383,7 @@ TEST(DeviceSpecTest, CreateSerializeParseAndSelect) {
   IREE_ASSERT_OK(iree_hal_device_spec_serialize(spec, iree_allocator_system(),
                                                 &serialized_bytes));
   static const uint8_t kExpectedHeaderPrefix[] = {
-      'D', 'S', 'P', 'C', 6, 0, 0, 0,
+      'D', 'S', 'P', 'C', 7, 0, 0, 0,
   };
   ASSERT_GE(serialized_bytes.data_length, sizeof(kExpectedHeaderPrefix));
   EXPECT_EQ(memcmp(serialized_bytes.data, kExpectedHeaderPrefix,
@@ -387,6 +405,25 @@ TEST(DeviceSpecTest, CreateSerializeParseAndSelect) {
             iree_hal_device_spec_fingerprint(parsed_spec));
   ExpectStringViewEq(iree_hal_device_spec_identity(parsed_spec)->display_name,
                      "Test Device");
+  const iree_hal_device_memory_spec_t* parsed_memory =
+      iree_hal_device_spec_memory(parsed_spec);
+  ASSERT_EQ(parsed_memory->memory_type_count, 1u);
+  EXPECT_EQ(parsed_memory->memory_types[0].atomic_operations.device_scope_32,
+            IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
+                IREE_HAL_ATOMIC_OPERATION_FLAG_STORE);
+  EXPECT_EQ(parsed_memory->memory_types[0].atomic_operations.system_scope_64,
+            IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD);
+  const iree_hal_device_queue_spec_t* parsed_queues =
+      iree_hal_device_spec_queues(parsed_spec);
+  ASSERT_EQ(parsed_queues->family_count, 1u);
+  EXPECT_EQ(parsed_queues->families[0].queue_affinity, 1u);
+  EXPECT_EQ(parsed_queues->families[0]
+                .atomic_capabilities.wait_conditions.device_scope_32,
+            IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_EQUAL |
+                IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_NOT_EQUAL);
+  EXPECT_EQ(parsed_queues->families[0]
+                .zero_compute_atomic_capabilities.operations.device_scope_32,
+            IREE_HAL_ATOMIC_OPERATION_FLAG_STORE);
   EXPECT_EQ(iree_hal_device_spec_sanitizer(parsed_spec)
                 ->asan.pool_options.redzone_size,
             64u);
@@ -420,7 +457,7 @@ TEST(DeviceSpecSerializationTest, RejectsMalformedImages) {
   {
     SCOPED_TRACE("unsupported version");
     std::vector<uint8_t> bytes = canonical_bytes;
-    StoreU32Le(&bytes, 4, 7);
+    StoreU32Le(&bytes, 4, 8);
     ExpectParseFails(bytes);
   }
   {
@@ -458,7 +495,7 @@ TEST(DeviceSpecSerializationTest, RejectsMalformedImages) {
   {
     SCOPED_TRACE("invalid ASAN mode");
     std::vector<uint8_t> bytes = canonical_bytes;
-    // The empty v6 body places the sanitizer flags at byte 316 and its mode at
+    // The empty v7 body places the sanitizer flags at byte 316 and its mode at
     // byte 320.
     StoreU32Le(&bytes, 320, UINT32_MAX);
     ExpectParseFails(bytes);
@@ -804,6 +841,7 @@ TEST(DeviceSpecTest, FindsVirtualMemoryAndExternalHandleRecords) {
           /*.allowed_memory_access=*/IREE_HAL_MEMORY_ACCESS_ALL,
           /*.minimum_alignment=*/256,
           /*.optimal_transfer_granularity=*/4096,
+          /*.atomic_operations=*/{},
           /*.flags=*/IREE_HAL_MEMORY_TYPE_SPEC_FLAG_NONE,
       },
       {
@@ -813,6 +851,7 @@ TEST(DeviceSpecTest, FindsVirtualMemoryAndExternalHandleRecords) {
           /*.allowed_memory_access=*/IREE_HAL_MEMORY_ACCESS_READ,
           /*.minimum_alignment=*/64,
           /*.optimal_transfer_granularity=*/4096,
+          /*.atomic_operations=*/{},
           /*.flags=*/IREE_HAL_MEMORY_TYPE_SPEC_FLAG_NONE,
       },
   };

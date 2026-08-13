@@ -120,6 +120,7 @@ TEST(LocalDeviceSpecBuilderTest, CapturesCommonLocalFacts) {
   ASSERT_NE(queues, nullptr);
   ASSERT_EQ(queues->family_count, 1);
   EXPECT_EQ(queues->families[0].queue_count, 2);
+  EXPECT_EQ(queues->families[0].queue_affinity, 3u);
 
   const iree_hal_device_dispatch_spec_t* dispatch =
       iree_hal_device_spec_dispatch(spec);

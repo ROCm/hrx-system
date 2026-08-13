@@ -687,6 +687,31 @@ static iree_status_t iree_hal_metal_device_queue_execute(
   return status;
 }
 
+static iree_status_t iree_hal_metal_device_queue_atomic_wait(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list, iree_hal_buffer_t* target_buffer,
+    iree_device_size_t target_offset, iree_hal_atomic_wait_params_t params) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, "Metal devices do not support atomic waits");
+}
+
+static iree_status_t iree_hal_metal_device_queue_atomic_store(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list, iree_hal_buffer_t* target_buffer,
+    iree_device_size_t target_offset, iree_hal_atomic_store_params_t params) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, "Metal devices do not support atomic stores");
+}
+
+static iree_status_t iree_hal_metal_device_queue_atomic_rmw(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list, iree_hal_buffer_t* target_buffer,
+    iree_device_size_t target_offset, iree_hal_atomic_rmw_params_t params) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "Metal devices do not support atomic read-modify-write");
+}
+
 static iree_status_t iree_hal_metal_device_queue_timestamp(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -831,6 +856,9 @@ static const iree_hal_device_vtable_t iree_hal_metal_device_vtable = {
     .queue_host_call = iree_hal_device_queue_emulated_host_call,
     .queue_dispatch = iree_hal_device_queue_emulated_dispatch,
     .queue_execute = iree_hal_metal_device_queue_execute,
+    .queue_atomic_wait = iree_hal_metal_device_queue_atomic_wait,
+    .queue_atomic_store = iree_hal_metal_device_queue_atomic_store,
+    .queue_atomic_rmw = iree_hal_metal_device_queue_atomic_rmw,
     .queue_timestamp = iree_hal_metal_device_queue_timestamp,
     .queue_flush = iree_hal_metal_device_queue_flush,
     .profiling_begin = iree_hal_metal_device_profiling_begin,

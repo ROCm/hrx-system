@@ -41,6 +41,7 @@ iree_runtime_cc_library(
     srcs = [
         "allocator.c",
         "allocator_heap.c",
+        "atomic.c",
         "buffer.c",
         "buffer_heap.c",
         "buffer_heap_impl.h",
@@ -78,6 +79,7 @@ iree_runtime_cc_library(
     hdrs = [
         "allocator.h",
         "api.h",
+        "atomic.h",
         "buffer.h",
         "buffer_transfer.h",
         "buffer_view.h",
@@ -121,6 +123,16 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/memory:asan",
         "//runtime/src/iree/hal/utils:platform_topology",
         "//runtime/src/iree/io:file_handle",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "atomic_test",
+    srcs = ["atomic_test.cc"],
+    deps = [
+        ":hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

@@ -144,6 +144,7 @@ TEST(DeviceSpecBuilderTest, AdvertisesThePhysicalDeviceTickRate) {
       iree_hal_device_spec_queues(device_spec);
   ASSERT_NE(queues, nullptr);
   ASSERT_EQ(queues->family_count, 1);
+  EXPECT_EQ(queues->families[0].queue_affinity, 3u);
   EXPECT_EQ(queues->families[0].timestamp_frequency_hz,
             kAgentTimestampFrequencyHz);
   EXPECT_EQ(queues->families[0].timestamp_valid_bits, 64u);
@@ -169,6 +170,8 @@ TEST(DeviceSpecBuilderTest, QueueFamiliesReportPerPhysicalDeviceFrequency) {
       iree_hal_device_spec_queues(device_spec);
   ASSERT_NE(queues, nullptr);
   ASSERT_EQ(queues->family_count, 2);
+  EXPECT_EQ(queues->families[0].queue_affinity, 3u);
+  EXPECT_EQ(queues->families[1].queue_affinity, 12u);
   EXPECT_EQ(queues->families[0].timestamp_frequency_hz,
             kAgentTimestampFrequencyHz);
   EXPECT_EQ(queues->families[0].timestamp_valid_bits, 64u);

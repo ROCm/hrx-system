@@ -375,6 +375,8 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_queues(
               params->physical_device->properties2.properties.limits
                   .timestampPeriod),
       .physical_device_affinity = 1ull,
+      .queue_affinity = queue_assignment->compute.affinity |
+                        queue_assignment->transfer.affinity,
       .role_flags = role_flags,
       .flags = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_NONE,
   };

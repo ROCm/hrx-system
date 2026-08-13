@@ -226,6 +226,8 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
   device_plan.enabled_extensions =
       IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_CALIBRATED_TIMESTAMPS;
   device_plan.queue_assignment.queue_count = 2;
+  device_plan.queue_assignment.compute.affinity = 1ull << 0;
+  device_plan.queue_assignment.transfer.affinity = 1ull << 1;
   device_plan.queue_assignment.compute.timestamp_valid_bits = 64;
   device_plan.queue_assignment.transfer.timestamp_valid_bits = 64;
 
@@ -256,6 +258,7 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
   ASSERT_NE(queues, nullptr);
   ASSERT_EQ(queues->family_count, 1);
   EXPECT_EQ(queues->families[0].queue_count, 2);
+  EXPECT_EQ(queues->families[0].queue_affinity, 3u);
   EXPECT_EQ(queues->families[0].timestamp_frequency_hz, 1000000000ull);
 
   const iree_hal_device_dispatch_spec_t* dispatch =

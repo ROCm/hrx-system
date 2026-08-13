@@ -989,6 +989,68 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_execute(
     iree_hal_buffer_binding_table_t binding_table,
     iree_hal_execute_flags_t flags);
 
+// Enqueues an asynchronous atomic wait on a device queue.
+//
+// The operation becomes eligible after |wait_semaphore_list| is satisfied and
+// publishes |signal_semaphore_list| after the memory predicate is satisfied.
+// The call returns after the operation is accepted and never waits for the
+// predicate on the host. Queue submissions are not implicitly FIFO; callers
+// use semaphore dependencies to order this operation with other submissions.
+// The target buffer is retained until the operation completes.
+//
+// Implementations may actively poll, occupy execution resources, or stall the
+// selected queue until the predicate is satisfied. If the producer is ordered
+// behind the wait or requires resources exhausted by waits, the operation may
+// deadlock. Issued waits are not guaranteed to be cancellable and may prevent
+// device teardown from completing. Callers are responsible for constructing a
+// producer placement and dependency graph that can make progress.
+//
+// |queue_affinity| must contain exactly one bit so the caller can ensure that
+// an independent producer does not depend on work queued behind the wait.
+// |target_offset| must be naturally aligned to |params.width| and the buffer
+// must permit storage reads and device reads.
+IREE_API_EXPORT iree_status_t iree_hal_device_queue_atomic_wait(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_wait_params_t params);
+
+// Enqueues an asynchronous atomic store on a device queue.
+//
+// The operation becomes eligible after |wait_semaphore_list| is satisfied and
+// publishes |signal_semaphore_list| after the store completes. Queue
+// submissions are not implicitly FIFO; callers use semaphore dependencies to
+// order this operation with other submissions. The target buffer is retained
+// until the operation completes.
+//
+// |target_offset| must be naturally aligned to |params.width| and the buffer
+// must permit storage writes and device writes.
+IREE_API_EXPORT iree_status_t iree_hal_device_queue_atomic_store(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_store_params_t params);
+
+// Enqueues an asynchronous no-result atomic read-modify-write on a device
+// queue.
+//
+// The operation becomes eligible after |wait_semaphore_list| is satisfied and
+// publishes |signal_semaphore_list| after the update completes. Queue
+// submissions are not implicitly FIFO; callers use semaphore dependencies to
+// order this operation with other submissions. The target buffer is retained
+// until the operation completes.
+//
+// |target_offset| must be naturally aligned to |params.width| and the buffer
+// must permit storage reads and writes and device reads and writes.
+IREE_API_EXPORT iree_status_t iree_hal_device_queue_atomic_rmw(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_rmw_params_t params);
+
 // Flags controlling iree_hal_device_queue_timestamp behavior.
 typedef uint64_t iree_hal_timestamp_flags_t;
 enum iree_hal_timestamp_flag_bits_t {
@@ -1326,6 +1388,27 @@ typedef struct iree_hal_device_vtable_t {
       iree_hal_command_buffer_t* command_buffer,
       iree_hal_buffer_binding_table_t binding_table,
       iree_hal_execute_flags_t flags);
+
+  iree_status_t(IREE_API_PTR* queue_atomic_wait)(
+      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+      const iree_hal_semaphore_list_t wait_semaphore_list,
+      const iree_hal_semaphore_list_t signal_semaphore_list,
+      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+      iree_hal_atomic_wait_params_t params);
+
+  iree_status_t(IREE_API_PTR* queue_atomic_store)(
+      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+      const iree_hal_semaphore_list_t wait_semaphore_list,
+      const iree_hal_semaphore_list_t signal_semaphore_list,
+      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+      iree_hal_atomic_store_params_t params);
+
+  iree_status_t(IREE_API_PTR* queue_atomic_rmw)(
+      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+      const iree_hal_semaphore_list_t wait_semaphore_list,
+      const iree_hal_semaphore_list_t signal_semaphore_list,
+      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+      iree_hal_atomic_rmw_params_t params);
 
   iree_status_t(IREE_API_PTR* queue_timestamp)(
       iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,

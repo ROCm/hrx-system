@@ -12,6 +12,7 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/allocator.h"
+#include "iree/hal/atomic.h"
 #include "iree/hal/buffer.h"
 #include "iree/hal/channel.h"
 #include "iree/hal/event.h"
@@ -96,12 +97,15 @@ enum iree_hal_command_category_bits_t {
   IREE_HAL_COMMAND_CATEGORY_TRANSFER = 1u << 0,
   // Command is considered a dispatch operation (dispatch/execute).
   IREE_HAL_COMMAND_CATEGORY_DISPATCH = 1u << 1,
+  // Command is considered an atomic memory operation.
+  IREE_HAL_COMMAND_CATEGORY_ATOMIC = 1u << 2,
   // Commands may be of any type.
   // Using this value may prevent optimizations and if possible callers should
   // always specify the strictest set possible (for example, only transfer
   // commands to ensure they get placed on a DMA queue).
-  IREE_HAL_COMMAND_CATEGORY_ANY =
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER | IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+  IREE_HAL_COMMAND_CATEGORY_ANY = IREE_HAL_COMMAND_CATEGORY_TRANSFER |
+                                  IREE_HAL_COMMAND_CATEGORY_DISPATCH |
+                                  IREE_HAL_COMMAND_CATEGORY_ATOMIC,
 };
 typedef uint32_t iree_hal_command_category_t;
 
@@ -188,6 +192,8 @@ enum iree_hal_execution_stage_bits_t {
   IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE = 1u << 4,
   // Pseudo-stage for read/writes by the host. Not executed on device.
   IREE_HAL_EXECUTION_STAGE_HOST = 1u << 5,
+  // Stage where atomic memory operations execute.
+  IREE_HAL_EXECUTION_STAGE_ATOMIC = 1u << 6,
 };
 typedef uint32_t iree_hal_execution_stage_t;
 
@@ -231,6 +237,10 @@ enum iree_hal_access_scope_bits_t {
   IREE_HAL_ACCESS_SCOPE_MEMORY_READ = 1u << 8,
   // External/non-specific write.
   IREE_HAL_ACCESS_SCOPE_MEMORY_WRITE = 1u << 9,
+  // Read performed by an atomic memory operation.
+  IREE_HAL_ACCESS_SCOPE_ATOMIC_READ = 1u << 10,
+  // Write performed by an atomic memory operation.
+  IREE_HAL_ACCESS_SCOPE_ATOMIC_WRITE = 1u << 11,
 };
 typedef uint32_t iree_hal_access_scope_t;
 
@@ -886,6 +896,60 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_execution_barrier(
     iree_host_size_t buffer_barrier_count,
     const iree_hal_buffer_barrier_t* buffer_barriers);
 
+// Waits until the atomic value at |target_ref| satisfies |params.condition|.
+//
+// |source_stage_mask| names earlier stages that must complete before the wait
+// begins. |target_stage_mask| names later stages that cannot begin until the
+// wait completes. Stages outside those masks may overlap the wait.
+//
+// Implementations may actively poll and occupy queue or execution resources
+// until the predicate is satisfied. If the producer is ordered behind the wait
+// or requires resources exhausted by waits, execution may deadlock. Issued
+// waits are not guaranteed to be cancellable and may prevent device teardown
+// from completing. Callers are responsible for constructing a producer
+// placement and dependency graph that can make progress.
+//
+// |target_ref.length| must equal the selected atomic width in bytes and the
+// resolved address must be naturally aligned. The buffer requires
+// IREE_HAL_BUFFER_USAGE_STORAGE_READ and IREE_HAL_MEMORY_ACCESS_READ.
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_atomic_wait(
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_wait_params_t params);
+
+// Atomically stores |params.value| to |target_ref|.
+//
+// |source_stage_mask| names earlier stages that must complete before the store
+// begins. |target_stage_mask| names later stages that cannot begin until the
+// store completes. Stages outside those masks may overlap the store.
+//
+// |target_ref.length| must equal the selected atomic width in bytes and the
+// resolved address must be naturally aligned. The buffer requires
+// IREE_HAL_BUFFER_USAGE_STORAGE_WRITE and IREE_HAL_MEMORY_ACCESS_WRITE.
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_atomic_store(
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_store_params_t params);
+
+// Atomically applies |params.operation| to |target_ref| and discards the prior
+// value.
+//
+// |source_stage_mask| names earlier stages that must complete before the RMW
+// begins. |target_stage_mask| names later stages that cannot begin until the
+// RMW completes. Stages outside those masks may overlap the RMW.
+//
+// |target_ref.length| must equal the selected atomic width in bytes and the
+// resolved address must be naturally aligned. The buffer requires
+// IREE_HAL_BUFFER_USAGE_STORAGE and both IREE_HAL_MEMORY_ACCESS_READ and
+// IREE_HAL_MEMORY_ACCESS_WRITE.
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_atomic_rmw(
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_rmw_params_t params);
+
 // Sets an event to the signaled state.
 // |source_stage_mask| specifies when the event is signaled.
 //
@@ -1114,6 +1178,24 @@ typedef struct iree_hal_command_buffer_vtable_t {
       const iree_hal_memory_barrier_t* memory_barriers,
       iree_host_size_t buffer_barrier_count,
       const iree_hal_buffer_barrier_t* buffer_barriers);
+
+  iree_status_t(IREE_API_PTR* atomic_wait)(
+      iree_hal_command_buffer_t* command_buffer,
+      iree_hal_execution_stage_t source_stage_mask,
+      iree_hal_execution_stage_t target_stage_mask,
+      iree_hal_buffer_ref_t target_ref, iree_hal_atomic_wait_params_t params);
+
+  iree_status_t(IREE_API_PTR* atomic_store)(
+      iree_hal_command_buffer_t* command_buffer,
+      iree_hal_execution_stage_t source_stage_mask,
+      iree_hal_execution_stage_t target_stage_mask,
+      iree_hal_buffer_ref_t target_ref, iree_hal_atomic_store_params_t params);
+
+  iree_status_t(IREE_API_PTR* atomic_rmw)(
+      iree_hal_command_buffer_t* command_buffer,
+      iree_hal_execution_stage_t source_stage_mask,
+      iree_hal_execution_stage_t target_stage_mask,
+      iree_hal_buffer_ref_t target_ref, iree_hal_atomic_rmw_params_t params);
 
   iree_status_t(IREE_API_PTR* signal_event)(
       iree_hal_command_buffer_t* command_buffer, iree_hal_event_t* event,

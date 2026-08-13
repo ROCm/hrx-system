@@ -1915,12 +1915,13 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_device_spec(
     const iree_hal_amdgpu_physical_device_t* physical_device =
         logical_device->physical_devices[i];
     if (IREE_UNLIKELY(physical_device->device_ordinal > UINT32_MAX ||
-                      physical_device->host_queue_count > UINT32_MAX)) {
-      status = iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "AMDGPU device spec physical row out of range: "
-          "device_ordinal=%" PRIhsz ", queue_count=%" PRIhsz,
-          physical_device->device_ordinal, physical_device->host_queue_count);
+                      physical_device->host_queue_capacity > UINT32_MAX)) {
+      status =
+          iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                           "AMDGPU device spec physical row out of range: "
+                           "device_ordinal=%" PRIhsz ", queue_count=%" PRIhsz,
+                           physical_device->device_ordinal,
+                           physical_device->host_queue_capacity);
       break;
     }
 
@@ -1947,7 +1948,8 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_device_spec(
     physical_params->numa.node_id = physical_device->host_numa_node;
     physical_params->physical_ordinal =
         (uint32_t)physical_device->device_ordinal;
-    physical_params->queue_count = (uint32_t)physical_device->host_queue_count;
+    physical_params->queue_count =
+        (uint32_t)physical_device->host_queue_capacity;
     physical_params->compute_unit_count = physical_device->compute_unit_count;
     physical_params->wavefront_size = physical_device->wavefront_size;
     physical_params->maximum_waves_per_compute_unit =
@@ -3165,6 +3167,37 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_execute(
                                 binding_table, flags);
 }
 
+static iree_status_t iree_hal_amdgpu_logical_device_queue_atomic_wait(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_wait_params_t params) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "AMDGPU devices do not yet support atomic waits");
+}
+
+static iree_status_t iree_hal_amdgpu_logical_device_queue_atomic_store(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_store_params_t params) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "AMDGPU devices do not yet support atomic stores");
+}
+
+static iree_status_t iree_hal_amdgpu_logical_device_queue_atomic_rmw(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_rmw_params_t params) {
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "AMDGPU devices do not yet support atomic read-modify-write");
+}
+
 static iree_status_t iree_hal_amdgpu_logical_device_queue_timestamp(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -3588,6 +3621,9 @@ static const iree_hal_device_vtable_t iree_hal_amdgpu_logical_device_vtable = {
     .queue_host_call = iree_hal_amdgpu_logical_device_queue_host_call,
     .queue_dispatch = iree_hal_amdgpu_logical_device_queue_dispatch,
     .queue_execute = iree_hal_amdgpu_logical_device_queue_execute,
+    .queue_atomic_wait = iree_hal_amdgpu_logical_device_queue_atomic_wait,
+    .queue_atomic_store = iree_hal_amdgpu_logical_device_queue_atomic_store,
+    .queue_atomic_rmw = iree_hal_amdgpu_logical_device_queue_atomic_rmw,
     .queue_timestamp = iree_hal_amdgpu_logical_device_queue_timestamp,
     .queue_flush = iree_hal_amdgpu_logical_device_queue_flush,
     .profiling_begin = iree_hal_amdgpu_logical_device_profiling_begin,

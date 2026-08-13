@@ -575,6 +575,36 @@ static iree_status_t iree_hal_hip_graph_command_buffer_execution_barrier(
   return status;
 }
 
+static iree_status_t iree_hal_hip_graph_command_buffer_atomic_wait(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_wait_params_t params) {
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "HIP graph command buffers do not support atomic waits");
+}
+
+static iree_status_t iree_hal_hip_graph_command_buffer_atomic_store(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_store_params_t params) {
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "HIP graph command buffers do not support atomic stores");
+}
+
+static iree_status_t iree_hal_hip_graph_command_buffer_atomic_rmw(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_rmw_params_t params) {
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "HIP graph command buffers do not support atomic read-modify-write");
+}
+
 static iree_status_t iree_hal_hip_graph_command_buffer_signal_event(
     iree_hal_command_buffer_t* base_command_buffer, iree_hal_event_t* event,
     iree_hal_execution_stage_t source_stage_mask) {
@@ -1020,6 +1050,9 @@ static const iree_hal_command_buffer_vtable_t
         .end_debug_group = iree_hal_hip_graph_command_buffer_end_debug_group,
         .execution_barrier =
             iree_hal_hip_graph_command_buffer_execution_barrier,
+        .atomic_wait = iree_hal_hip_graph_command_buffer_atomic_wait,
+        .atomic_store = iree_hal_hip_graph_command_buffer_atomic_store,
+        .atomic_rmw = iree_hal_hip_graph_command_buffer_atomic_rmw,
         .signal_event = iree_hal_hip_graph_command_buffer_signal_event,
         .reset_event = iree_hal_hip_graph_command_buffer_reset_event,
         .wait_events = iree_hal_hip_graph_command_buffer_wait_events,

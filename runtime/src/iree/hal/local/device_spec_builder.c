@@ -16,10 +16,12 @@
 static iree_status_t iree_hal_local_device_spec_verify_params(
     const iree_hal_local_device_spec_params_t* params) {
   IREE_ASSERT_ARGUMENT(params);
-  if (IREE_UNLIKELY(params->queue_count > UINT32_MAX)) {
+  if (IREE_UNLIKELY(params->queue_count == 0 ||
+                    params->queue_count > IREE_HAL_MAX_QUEUES)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "local device queue count %" PRIhsz
-                            " exceeds uint32_t range",
+                            "local device queue count must be in [1, %" PRIhsz
+                            "] (got %" PRIhsz ")",
+                            (iree_host_size_t)IREE_HAL_MAX_QUEUES,
                             params->queue_count);
   }
   if (IREE_UNLIKELY(params->default_queue_worker_count > UINT32_MAX)) {
@@ -254,6 +256,10 @@ IREE_API_EXPORT iree_status_t iree_hal_local_device_spec_create(
       .queue_count = (uint32_t)params->queue_count,
       .priority_count = 1,
       .physical_device_affinity = 1ull,
+      .queue_affinity =
+          params->queue_count == IREE_HAL_MAX_QUEUES
+              ? IREE_HAL_QUEUE_AFFINITY_ANY
+              : (((iree_hal_queue_affinity_t)1 << params->queue_count) - 1),
       .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
                     IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
                     IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_HOST_CALL |
