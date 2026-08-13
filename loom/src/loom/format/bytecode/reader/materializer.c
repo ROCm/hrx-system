@@ -9,7 +9,7 @@
 #include <string.h>
 
 #include "loom/error/error_catalog.h"
-#include "loom/format/bytecode/reader/attribute.h"
+#include "loom/format/bytecode/reader/encoding.h"
 #include "loom/format/bytecode/reader/symbol_materializer.h"
 #include "loom/format/bytecode/reader/type.h"
 #include "loom/ops/module/ops.h"
@@ -36,18 +36,6 @@ typedef struct loom_bytecode_module_materialization_t {
   // Stable-key codec supplied by the embedding compiler.
   loom_low_repr_environment_t low_repr_environment;
 } loom_bytecode_module_materialization_t;
-
-static loom_bytecode_attribute_materializer_t
-loom_bytecode_module_attribute_materializer(
-    loom_bytecode_module_materialization_t* reader) {
-  return (loom_bytecode_attribute_materializer_t){
-      .decoder = &reader->decoder,
-      .context = reader->context,
-      .module_view = &reader->view,
-      .scratch_arena = reader->arena,
-      .output_module = reader->output_module,
-  };
-}
 
 static iree_status_t loom_bytecode_module_materialize_strings(
     loom_bytecode_module_materialization_t* reader) {
@@ -85,105 +73,6 @@ static iree_status_t loom_bytecode_module_materialize_sources(
         &reader->source_ids[i]));
   }
   return iree_ok_status();
-}
-
-static iree_status_t loom_bytecode_module_materialize_encodings(
-    loom_bytecode_module_materialization_t* reader,
-    const loom_bytecode_reader_section_t* section) {
-  loom_bytecode_reader_cursor_t cursor;
-  loom_bytecode_reader_cursor_initialize(
-      section->bytes.data, section->bytes.data_length, section->absolute_offset,
-      IREE_SV("ENCODINGS"), &cursor);
-
-  uint64_t family_count = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-      &reader->decoder, &cursor, &family_count));
-  for (uint64_t i = 0; i < family_count; ++i) {
-    uint64_t unused_name_id = 0;
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-        &reader->decoder, &cursor, &unused_name_id));
-  }
-
-  uint64_t instance_count = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-      &reader->decoder, &cursor, &instance_count));
-  loom_bytecode_attribute_materializer_t attribute_materializer =
-      loom_bytecode_module_attribute_materializer(reader);
-  for (uint64_t instance_index = 0; instance_index < instance_count;
-       ++instance_index) {
-    uint64_t family_offset =
-        loom_bytecode_reader_cursor_absolute_position(&cursor);
-    uint64_t family_index = 0;
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-        &reader->decoder, &cursor, &family_index));
-    if (family_index >= reader->view.encodings.family_count) {
-      return loom_bytecode_reader_emit_table_ref(
-          &reader->decoder, IREE_SV("encoding_families"), family_index,
-          reader->view.encodings.family_count, family_offset);
-    }
-
-    uint64_t alias_offset =
-        loom_bytecode_reader_cursor_absolute_position(&cursor);
-    uint64_t alias_plus_one = 0;
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-        &reader->decoder, &cursor, &alias_plus_one));
-    if (alias_plus_one > reader->view.strings.count) {
-      return loom_bytecode_reader_emit_table_ref(
-          &reader->decoder, IREE_SV("STRINGS"), alias_plus_one - 1,
-          reader->view.strings.count, alias_offset);
-    }
-
-    uint64_t param_count = 0;
-    uint64_t param_count_offset =
-        loom_bytecode_reader_cursor_absolute_position(&cursor);
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-        &reader->decoder, &cursor, &param_count));
-    if (param_count > UINT8_MAX || param_count > IREE_HOST_SIZE_MAX) {
-      return loom_bytecode_reader_emit_count_exceeds(
-          &reader->decoder, IREE_SV("encoding_params"), param_count, UINT8_MAX,
-          param_count_offset);
-    }
-
-    loom_named_attr_t* params = NULL;
-    if (param_count > 0) {
-      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          reader->arena, (iree_host_size_t)param_count,
-          sizeof(loom_named_attr_t), (void**)&params));
-    }
-    for (uint64_t param_index = 0; param_index < param_count; ++param_index) {
-      uint64_t name_id = 0;
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-          &reader->decoder, &cursor, &name_id));
-      loom_bytecode_attr_kind_t value_kind = LOOM_BYTECODE_ATTR_I64;
-      IREE_RETURN_IF_ERROR(loom_bytecode_attribute_read_kind(
-          &reader->decoder, &cursor, &value_kind));
-      params[param_index].name_id = (loom_string_id_t)name_id;
-      params[param_index].reserved = 0;
-      IREE_RETURN_IF_ERROR(loom_bytecode_attribute_materialize_named(
-          &attribute_materializer, &cursor, /*descriptor=*/NULL, value_kind,
-          &params[param_index].value, reader->view.types.count));
-    }
-
-    loom_encoding_t encoding = {
-        .name_id = reader->view.encodings.family_name_ids[family_index],
-        .alias_id = alias_plus_one == 0
-                        ? LOOM_STRING_ID_INVALID
-                        : (loom_string_id_t)(alias_plus_one - 1),
-        .attribute_count = (uint8_t)param_count,
-        .attributes = params,
-    };
-    uint16_t encoding_id = 0;
-    IREE_RETURN_IF_ERROR(loom_module_add_encoding(reader->output_module,
-                                                  &encoding, &encoding_id));
-    if (encoding_id != instance_index + 1) {
-      return loom_bytecode_reader_emit_invalid_field(
-          &reader->decoder, IREE_SV("ENCODINGS"), IREE_SV("instance"),
-          instance_index, IREE_SV("encoding"), family_offset,
-          IREE_SV("encoding_table_must_be_deduplicated_in_canonical_order"));
-    }
-  }
-  return loom_bytecode_reader_expect_empty(&reader->decoder, &cursor,
-                                           IREE_SV("ENCODINGS"));
 }
 
 static iree_status_t loom_bytecode_module_read_location_coordinate(
@@ -491,8 +380,15 @@ static iree_status_t loom_bytecode_module_materialize_tables(
         reader->view.file_header.comment_count));
   }
   IREE_RETURN_IF_ERROR(loom_bytecode_module_materialize_sources(reader));
-  IREE_RETURN_IF_ERROR(loom_bytecode_module_materialize_encodings(
-      reader, reader->view.sections.encodings));
+  loom_bytecode_encoding_materializer_t encoding_materializer = {
+      .decoder = &reader->decoder,
+      .context = reader->context,
+      .module_view = &reader->view,
+      .scratch_arena = reader->arena,
+      .output_module = reader->output_module,
+  };
+  IREE_RETURN_IF_ERROR(loom_bytecode_encoding_table_materialize(
+      &encoding_materializer, reader->view.sections.encodings));
   IREE_RETURN_IF_ERROR(loom_bytecode_symbols_predeclare(&symbol_materializer));
   IREE_RETURN_IF_ERROR(
       loom_bytecode_module_materialize_provider_imports(reader));

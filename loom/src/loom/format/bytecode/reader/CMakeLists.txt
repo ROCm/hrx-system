@@ -75,11 +75,11 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
-    encoding_validator
+    encoding
   HDRS
-    "encoding_validator.h"
+    "encoding.h"
   SRCS
-    "encoding_validator.c"
+    "encoding.c"
   DEPS
     ::attribute
     ::decoder
@@ -94,11 +94,25 @@ loom_cc_library(
 
 loom_cc_test(
   NAME
+    encoding_test
+  SRCS
+    "encoding_test.cc"
+  DEPS
+    ::encoding
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::bytecode::format
+    loom::ir
+)
+
+loom_cc_test(
+  NAME
     encoding_validator_test
   SRCS
     "encoding_validator_test.cc"
   DEPS
-    ::encoding_validator
+    ::encoding
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
@@ -114,8 +128,8 @@ loom_cc_library(
   SRCS
     "materializer.c"
   DEPS
-    ::attribute
     ::decoder
+    ::encoding
     ::module_view
     ::symbol_materializer
     ::type
@@ -154,7 +168,7 @@ loom_cc_library(
     "validation.c"
   DEPS
     ::decoder
-    ::encoding_validator
+    ::encoding
     ::module_view
     ::source_trivia
     ::symbol_validator

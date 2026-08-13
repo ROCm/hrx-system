@@ -71,9 +71,9 @@ loom_cc_test(
 )
 
 loom_cc_library(
-    name = "encoding_validator",
-    srcs = ["encoding_validator.c"],
-    hdrs = ["encoding_validator.h"],
+    name = "encoding",
+    srcs = ["encoding.c"],
+    hdrs = ["encoding.h"],
     visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
     deps = [
         ":attribute",
@@ -88,10 +88,23 @@ loom_cc_library(
 )
 
 loom_cc_test(
+    name = "encoding_test",
+    srcs = ["encoding_test.cc"],
+    deps = [
+        ":encoding",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "encoding_validator_test",
     srcs = ["encoding_validator_test.cc"],
     deps = [
-        ":encoding_validator",
+        ":encoding",
         "//loom/src/loom/format/bytecode:format",
         "//loom/src/loom/ir",
         "//runtime/src/iree/base/internal:arena",
@@ -106,8 +119,8 @@ loom_cc_library(
     hdrs = ["materializer.h"],
     visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
     deps = [
-        ":attribute",
         ":decoder",
+        ":encoding",
         ":module_view",
         ":symbol_materializer",
         ":type",
@@ -143,7 +156,7 @@ loom_cc_library(
     visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
     deps = [
         ":decoder",
-        ":encoding_validator",
+        ":encoding",
         ":module_view",
         ":source_trivia",
         ":symbol_validator",

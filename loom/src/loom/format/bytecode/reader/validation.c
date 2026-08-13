@@ -11,7 +11,7 @@
 #include "iree/base/internal/unicode.h"
 #include "loom/error/error_catalog.h"
 #include "loom/format/bytecode/reader/decoder.h"
-#include "loom/format/bytecode/reader/encoding_validator.h"
+#include "loom/format/bytecode/reader/encoding.h"
 #include "loom/format/bytecode/reader/module_view.h"
 #include "loom/format/bytecode/reader/source_trivia.h"
 #include "loom/format/bytecode/reader/symbol_validator.h"
