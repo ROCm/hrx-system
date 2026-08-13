@@ -269,9 +269,9 @@ static loomc_status_t prepare_and_evaluate_launch(
 
   const uint64_t workload_argument_bits[] = {kElementCount};
   if (loomc_status_is_ok(status)) {
-    status = loomc_launch_config_program_invoke(state->launch_program, function,
-                                                workload_argument_bits, 1,
-                                                out_launch_config);
+    status = loomc_launch_config_program_invoke_kernel(
+        state->launch_program, function, workload_argument_bits, 1,
+        out_launch_config);
   }
   return status;
 }

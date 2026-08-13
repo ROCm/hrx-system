@@ -49,7 +49,7 @@
 ///     .type = LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
 ///     .structure_size = sizeof(launch_config),
 /// };
-/// status = loomc_launch_config_program_invoke(
+/// status = loomc_launch_config_program_invoke_kernel(
 ///     launch_program, launch_function, workload_argument_bits,
 ///     /*workload_argument_count=*/1, &launch_config);
 /// if (loomc_status_is_ok(status)) {
@@ -114,7 +114,7 @@ static inline bool loomc_launch_config_function_is_valid(
 /// Callers zero-initialize this structure, set `type` to
 /// `LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG`, set `structure_size` to
 /// `sizeof(loomc_launch_config_t)`, and pass it to
-/// `loomc_launch_config_program_invoke`.
+/// `loomc_launch_config_program_invoke_kernel`.
 typedef struct loomc_launch_config_t {
   /// Structure type. Must be `LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG` when
   /// nonzero.
@@ -235,12 +235,12 @@ LOOMC_API_EXPORT loomc_status_t loomc_launch_config_program_lookup_function(
 /// @param workload_argument_count Number of argument slots.
 /// @param out_config Caller-initialized complete result storage.
 /// @return OK when invocation produced a complete launch configuration.
-LOOMC_API_EXPORT loomc_status_t
-loomc_launch_config_program_invoke(loomc_launch_config_program_t* program,
-                                   loomc_launch_config_function_t function,
-                                   const uint64_t* workload_argument_bits,
-                                   loomc_host_size_t workload_argument_count,
-                                   loomc_launch_config_t* out_config);
+LOOMC_API_EXPORT loomc_status_t loomc_launch_config_program_invoke_kernel(
+    loomc_launch_config_program_t* program,
+    loomc_launch_config_function_t function,
+    const uint64_t* workload_argument_bits,
+    loomc_host_size_t workload_argument_count,
+    loomc_launch_config_t* out_config);
 
 #ifdef __cplusplus
 }  // extern "C"

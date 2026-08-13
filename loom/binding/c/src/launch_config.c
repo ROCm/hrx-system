@@ -641,7 +641,7 @@ static iree_status_t loomc_launch_config_evaluate(
   return iree_ok_status();
 }
 
-loomc_status_t loomc_launch_config_program_invoke(
+loomc_status_t loomc_launch_config_program_invoke_kernel(
     loomc_launch_config_program_t* program,
     loomc_launch_config_function_t function,
     const uint64_t* workload_argument_bits,

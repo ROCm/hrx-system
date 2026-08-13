@@ -202,7 +202,7 @@ in four steps:
 2. Resolve the kernel's public export name with
    `loomc_launch_config_program_lookup_function`.
 3. Pass the workload scalar bit patterns to
-   `loomc_launch_config_program_invoke`.
+   `loomc_launch_config_program_invoke_kernel`.
 4. Issue the matching executable entry with the returned workgroup count,
    workgroup size, optional cluster size, subgroup size, and workgroup-storage
    requirement.

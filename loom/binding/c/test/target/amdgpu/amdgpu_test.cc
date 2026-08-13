@@ -689,7 +689,7 @@ kernel.def target(@gfx11_wave64) @target_specialized_launch(%expert_count: index
         /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
         /*.structure_size=*/sizeof(launch_config),
     };
-    LOOMC_EXPECT_OK(loomc_launch_config_program_invoke(
+    LOOMC_EXPECT_OK(loomc_launch_config_program_invoke_kernel(
         launch_program_ptr.get(), launch_function, workload_argument_bits,
         IREE_ARRAYSIZE(workload_argument_bits), &launch_config));
     EXPECT_EQ(launch_config.workgroup_count.x,
@@ -775,7 +775,7 @@ kernel.def target(@gfx1151) @decode(%row_count: i32, %scale: bf16) {
       /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
       /*.structure_size=*/sizeof(prefill_config),
   };
-  LOOMC_EXPECT_OK(loomc_launch_config_program_invoke(
+  LOOMC_EXPECT_OK(loomc_launch_config_program_invoke_kernel(
       launch_program_ptr.get(), prefill_function, prefill_arguments,
       IREE_ARRAYSIZE(prefill_arguments), &prefill_config));
   EXPECT_EQ(prefill_config.workgroup_count.x, 129u);
@@ -793,7 +793,7 @@ kernel.def target(@gfx1151) @decode(%row_count: i32, %scale: bf16) {
       /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
       /*.structure_size=*/sizeof(decode_config),
   };
-  LOOMC_EXPECT_OK(loomc_launch_config_program_invoke(
+  LOOMC_EXPECT_OK(loomc_launch_config_program_invoke_kernel(
       launch_program_ptr.get(), decode_function, decode_arguments,
       IREE_ARRAYSIZE(decode_arguments), &decode_config));
   EXPECT_EQ(decode_config.workgroup_count.x, 64u);

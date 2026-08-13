@@ -544,7 +544,7 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
       /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
       /*.structure_size=*/sizeof(launch_config),
   };
-  LOOMC_ASSERT_OK(loomc_launch_config_program_invoke(
+  LOOMC_ASSERT_OK(loomc_launch_config_program_invoke_kernel(
       launch_program_ptr.get(), launch_function,
       /*workload_argument_bits=*/nullptr,
       /*workload_argument_count=*/0, &launch_config));

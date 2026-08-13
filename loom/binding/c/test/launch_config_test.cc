@@ -177,8 +177,8 @@ TEST(LaunchConfigProgramTest, InvokesCompleteLaunchContract) {
 
   const uint64_t arguments[] = {127};
   loomc_launch_config_t config = EmptyConfig();
-  LOOMC_ASSERT_OK(loomc_launch_config_program_invoke(program.get(), function,
-                                                     arguments, 1, &config));
+  LOOMC_ASSERT_OK(loomc_launch_config_program_invoke_kernel(
+      program.get(), function, arguments, 1, &config));
   EXPECT_EQ(config.workgroup_count.x, 128u);
   EXPECT_EQ(config.workgroup_count.y, 1u);
   EXPECT_EQ(config.workgroup_count.z, 1u);
@@ -205,8 +205,8 @@ TEST(LaunchConfigProgramTest, SeedsDeclaredWidthScalarsAndChecksPredicates) {
       UINT64_C(0xDEADBEEF00003F80),
   };
   loomc_launch_config_t config = EmptyConfig();
-  LOOMC_ASSERT_OK(loomc_launch_config_program_invoke(program.get(), function,
-                                                     arguments, 2, &config));
+  LOOMC_ASSERT_OK(loomc_launch_config_program_invoke_kernel(
+      program.get(), function, arguments, 2, &config));
   EXPECT_EQ(config.workgroup_count.x, 32u);
   EXPECT_EQ(config.workgroup_size.x, 32u);
   EXPECT_EQ(config.workgroup_storage_bytes, 256u);
@@ -215,8 +215,8 @@ TEST(LaunchConfigProgramTest, SeedsDeclaredWidthScalarsAndChecksPredicates) {
   config.workgroup_count.x = 777;
   LOOMC_EXPECT_STATUS_IS(
       LOOMC_STATUS_INVALID_ARGUMENT,
-      loomc_launch_config_program_invoke(program.get(), function,
-                                         invalid_arguments, 2, &config));
+      loomc_launch_config_program_invoke_kernel(program.get(), function,
+                                                invalid_arguments, 2, &config));
   EXPECT_EQ(config.workgroup_count.x, 777u);
 }
 
@@ -230,7 +230,7 @@ TEST(LaunchConfigProgramTest, SupportsRepeatedInvocations) {
 
   for (uint64_t token_count = 1; token_count <= 512; ++token_count) {
     loomc_launch_config_t config = EmptyConfig();
-    LOOMC_ASSERT_OK(loomc_launch_config_program_invoke(
+    LOOMC_ASSERT_OK(loomc_launch_config_program_invoke_kernel(
         program.get(), function, &token_count, 1, &config));
     EXPECT_EQ(config.workgroup_count.x, token_count + 1);
   }
