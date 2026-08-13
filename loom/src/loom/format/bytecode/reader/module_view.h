@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "loom/format/bytecode/format.h"
 #include "loom/format/bytecode/module_summary.h"
+#include "loom/format/bytecode/reader/source_trivia.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/symbol_map.h"
 #include "loom/ir/types.h"
@@ -62,12 +63,8 @@ typedef struct loom_bytecode_reader_provider_import_t {
   uint32_t first_anchor_index;
   // Number of anchors in the contiguous slice.
   uint32_t anchor_count;
-  // Authored leading vertical separation.
-  bool leading_blank_line;
-  // Borrowed comment payload views.
-  const iree_string_view_t* comments;
-  // Number of attached comments.
-  uint16_t comment_count;
+  // Validated source comments and authored vertical separation.
+  loom_bytecode_source_trivia_t source_trivia;
 } loom_bytecode_reader_provider_import_t;
 
 // One dense validated type-table entry.

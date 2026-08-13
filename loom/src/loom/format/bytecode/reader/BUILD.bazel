@@ -17,6 +17,7 @@ loom_cc_library(
     hdrs = ["module_view.h"],
     visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
     deps = [
+        ":source_trivia",
         "//loom/src/loom/format/bytecode:format",
         "//loom/src/loom/format/bytecode:module_summary",
         "//loom/src/loom/ir",
@@ -24,6 +25,31 @@ loom_cc_library(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:type_registry",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "source_trivia",
+    srcs = ["source_trivia.c"],
+    hdrs = ["source_trivia.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":decoder",
+        "//loom/src/loom/format/bytecode:format",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:unicode",
+    ],
+)
+
+loom_cc_test(
+    name = "source_trivia_test",
+    srcs = ["source_trivia_test.cc"],
+    deps = [
+        ":source_trivia",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

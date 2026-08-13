@@ -15,6 +15,7 @@ loom_cc_library(
   HDRS
     "module_view.h"
   DEPS
+    ::source_trivia
     iree::base
     loom::format::bytecode::format
     loom::format::bytecode::module_summary
@@ -23,6 +24,34 @@ loom_cc_library(
     loom::ops::op_defs
     loom::ops::type_registry
   PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    source_trivia
+  HDRS
+    "source_trivia.h"
+  SRCS
+    "source_trivia.c"
+  DEPS
+    ::decoder
+    iree::base
+    iree::base::internal::arena
+    iree::base::internal::unicode
+    loom::format::bytecode::format
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    source_trivia_test
+  SRCS
+    "source_trivia_test.cc"
+  DEPS
+    ::source_trivia
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 loom_cc_library(

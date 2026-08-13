@@ -98,6 +98,7 @@ loom_cc_library(
     loom::error::error_defs
     loom::format::bytecode::reader::decoder
     loom::format::bytecode::reader::module_view
+    loom::format::bytecode::reader::source_trivia
     loom::format::low_repr
     loom::ir
     loom::ir::symbol_map

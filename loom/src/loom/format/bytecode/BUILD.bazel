@@ -86,6 +86,7 @@ loom_cc_library(
         "//loom/src/loom/format:low_repr",
         "//loom/src/loom/format/bytecode/reader:decoder",
         "//loom/src/loom/format/bytecode/reader:module_view",
+        "//loom/src/loom/format/bytecode/reader:source_trivia",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:symbol_map",
         "//loom/src/loom/ops:op_defs",
