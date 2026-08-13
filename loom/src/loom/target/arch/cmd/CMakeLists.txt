@@ -52,6 +52,36 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    package
+  HDRS
+    "package.h"
+    "package_format.h"
+  SRCS
+    "package.c"
+    "package_format.c"
+  DEPS
+    ::program
+    iree::base
+    iree::base::core_headers
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    package_test
+  SRCS
+    "package_test.cc"
+  DEPS
+    ::package
+    ::program
+    iree::base
+    iree::base::core_headers
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
     provider
   HDRS
     "provider.h"

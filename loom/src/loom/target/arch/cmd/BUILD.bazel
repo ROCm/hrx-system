@@ -61,6 +61,37 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "package",
+    srcs = [
+        "package.c",
+        "package_format.c",
+    ],
+    hdrs = [
+        "package.h",
+        "package_format.h",
+    ],
+    visibility = ["//loom:__subpackages__"],
+    deps = [
+        ":program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+    ],
+)
+
+loom_cc_test(
+    name = "package_test",
+    srcs = ["package_test.cc"],
+    deps = [
+        ":package",
+        ":program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "provider",
     srcs = ["provider.c"],
     hdrs = ["provider.h"],
