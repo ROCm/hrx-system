@@ -506,6 +506,7 @@ loom_cc_library(
     name = "symbol_materializer",
     srcs = ["symbol_materializer.c"],
     hdrs = ["symbol_materializer.h"],
+    textual_hdrs = ["symbol_materializer_impl.inl"],
     visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
     deps = [
         ":attribute",

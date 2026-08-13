@@ -548,6 +548,8 @@ loom_cc_library(
     symbol_materializer
   HDRS
     "symbol_materializer.h"
+  TEXTUAL_HDRS
+    "symbol_materializer_impl.inl"
   SRCS
     "symbol_materializer.c"
   DEPS
