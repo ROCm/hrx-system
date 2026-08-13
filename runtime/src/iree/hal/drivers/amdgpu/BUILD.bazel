@@ -487,6 +487,7 @@ iree_runtime_cc_test(
     deps = [
         ":amdgpu",
         ":headers",
+        ":queue_affinity",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:test_base",

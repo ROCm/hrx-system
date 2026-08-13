@@ -816,6 +816,9 @@ static iree_status_t iree_hal_amdgpu_allocator_resolve_virtual_memory_placement(
       .queue_affinity = params->queue_affinity,
       .memory_type = memory_placement.memory_type,
       .buffer_usage = params->usage,
+      .atomic_memory_cells = memory_placement.atomic_memory_cells,
+      .atomic_memory_source_masks =
+          &memory_placement.memory_pool->atomic_memory_source_masks,
       .minimum_granule = granularity.minimum,
       .recommended_granule = granularity.recommended,
       .max_allocation_size = memory_placement.memory_pool->max_allocation_size,

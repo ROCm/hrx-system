@@ -46,6 +46,10 @@ struct iree_hal_physical_memory_t {
 
   // HAL memory type used for allocator statistics.
   iree_hal_memory_type_t memory_type;
+
+  // Unowned immutable source masks for this backing's allocator-owned pool.
+  const iree_hal_amdgpu_atomic_memory_source_masks_t*
+      atomic_memory_source_masks;
 };
 
 struct iree_hal_amdgpu_virtual_memory_state_t {
@@ -287,7 +291,7 @@ iree_status_t iree_hal_amdgpu_virtual_memory_reserve(
     status = iree_hal_amdgpu_buffer_create(
         state->libhsa, buffer_placement, placement.memory_type,
         IREE_HAL_MEMORY_ACCESS_ALL, placement.buffer_usage,
-        IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE, size, size, base_ptr,
+        placement.atomic_memory_cells, size, size, base_ptr,
         iree_hal_amdgpu_virtual_memory_reservation_release_callback(state),
         state->host_allocator, &virtual_buffer);
   }
@@ -362,6 +366,7 @@ iree_status_t iree_hal_amdgpu_physical_memory_allocate(
       .allocation_size = size,
       .minimum_granule = placement.minimum_granule,
       .memory_type = placement.memory_type,
+      .atomic_memory_source_masks = placement.atomic_memory_source_masks,
   };
 
   iree_status_t status = iree_hsa_amd_vmem_handle_create(
@@ -440,6 +445,30 @@ iree_status_t iree_hal_amdgpu_virtual_memory_map(
         IREE_STATUS_INVALID_ARGUMENT,
         "AMDGPU virtual-memory map range is not a valid minimum-granule "
         "physical mapping");
+  }
+
+  const iree_hal_amdgpu_queue_affinity_domain_t domain = {
+      .supported_affinity = range.queue_affinity,
+      .physical_device_count = state->topology->gpu_agent_count,
+      .queue_count_per_physical_device = state->topology->gpu_agent_queue_count,
+  };
+  iree_hal_amdgpu_queue_affinity_physical_device_set_t physical_device_set;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_queue_affinity_select_physical_devices(
+      domain, range.queue_affinity, &physical_device_set));
+  const iree_hal_amdgpu_atomic_memory_cell_flags_t reservation_cells =
+      iree_hal_amdgpu_buffer_atomic_memory_cells(virtual_buffer);
+  const iree_hal_amdgpu_atomic_memory_cell_flags_t physical_cells =
+      iree_hal_amdgpu_atomic_memory_select_device_cells(
+          physical_memory->atomic_memory_source_masks,
+          physical_device_set.physical_device_mask);
+  if (IREE_UNLIKELY(!iree_all_bits_set(physical_cells, reservation_cells))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU physical backing atomic cells 0x%08" PRIx32
+        " do not satisfy virtual reservation cells 0x%08" PRIx32
+        " for physical device mask 0x%016" PRIx64,
+        physical_cells, reservation_cells,
+        physical_device_set.physical_device_mask);
   }
 
   void* map_ptr = (uint8_t*)range.base_ptr + virtual_offset;
