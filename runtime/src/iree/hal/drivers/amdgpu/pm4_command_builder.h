@@ -9,6 +9,8 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/drivers/amdgpu/abi/command_buffer.h"
+#include "iree/hal/drivers/amdgpu/util/pm4_barrier.h"
+#include "iree/hal/drivers/amdgpu/util/pm4_dispatch.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -76,6 +78,37 @@ iree_status_t iree_hal_amdgpu_pm4_dword_builder_reserve(
 iree_status_t iree_hal_amdgpu_pm4_dword_builder_append(
     iree_hal_amdgpu_pm4_dword_builder_t* builder, uint32_t dword_count,
     uint32_t** out_dwords);
+
+// Emits one execution or fixup barrier into |builder|.
+iree_status_t iree_hal_amdgpu_pm4_dword_builder_emit_barrier(
+    iree_hal_amdgpu_pm4_dword_builder_t* builder,
+    iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities,
+    iree_hal_amdgpu_pm4_barrier_flags_t barrier_flags,
+    iree_hsa_fence_scope_t acquire_scope, iree_hsa_fence_scope_t release_scope);
+
+// Appends a previously derived static dispatch setup stream.
+iree_status_t iree_hal_amdgpu_pm4_dword_builder_emit_dispatch_setup(
+    iree_hal_amdgpu_pm4_dword_builder_t* builder,
+    const uint32_t
+        source_dwords[IREE_HAL_AMDGPU_PM4_DISPATCH_SETUP_DWORD_COUNT],
+    uint32_t setup_dword_count);
+
+// Emits dispatch user data for |launch_state|.
+iree_status_t iree_hal_amdgpu_pm4_dword_builder_emit_user_data(
+    iree_hal_amdgpu_pm4_dword_builder_t* builder,
+    const iree_hal_amdgpu_pm4_dispatch_launch_state_t* launch_state,
+    uint64_t kernarg_address, const void* kernarg_preload_data);
+
+// Emits one direct dispatch with the given thread counts.
+iree_status_t iree_hal_amdgpu_pm4_dword_builder_emit_dispatch_direct(
+    iree_hal_amdgpu_pm4_dword_builder_t* builder,
+    const uint32_t dispatch_thread_count[3], uint32_t dispatch_initiator);
+
+// Resolves whether a kernarg range is copied into preloaded user-data SGPRs.
+iree_status_t iree_hal_amdgpu_pm4_dispatch_kernarg_range_preload_offset(
+    const iree_hal_amdgpu_pm4_dispatch_launch_state_t* launch_state,
+    uint32_t kernarg_byte_offset, uint32_t kernarg_byte_length,
+    bool* out_is_preloaded, uint32_t* out_preload_dword_offset);
 
 void iree_hal_amdgpu_pm4_byte_builder_initialize(
     iree_allocator_t host_allocator,
