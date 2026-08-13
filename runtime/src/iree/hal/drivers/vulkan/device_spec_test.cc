@@ -9,6 +9,7 @@
 #include <cstring>
 #include <vector>
 
+#include "iree/hal/drivers/vulkan/atomic.h"
 #include "iree/hal/drivers/vulkan/device_spec_builder.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -153,6 +154,49 @@ TEST(DeviceSpecTest, AddsAndFindsCoreFacet) {
 
   iree_hal_device_spec_release(device_spec);
   iree_hal_device_spec_builder_deinitialize(&builder);
+}
+
+TEST(DeviceSpecTest, AtomicCapabilitiesRequireExactFeatures) {
+  const iree_hal_vulkan_features_t required_features =
+      IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES |
+      IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL |
+      IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL_DEVICE_SCOPE;
+  const iree_hal_vulkan_features_t required_feature_bits[] = {
+      IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES,
+      IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL,
+      IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL_DEVICE_SCOPE,
+  };
+  for (iree_hal_vulkan_features_t removed_feature : required_feature_bits) {
+    SCOPED_TRACE(removed_feature);
+    const iree_hal_atomic_capabilities_t capabilities =
+        iree_hal_vulkan_atomic_capabilities(required_features &
+                                            ~removed_feature);
+    EXPECT_EQ(capabilities.operations.device_scope_32,
+              IREE_HAL_ATOMIC_OPERATION_FLAG_NONE);
+    EXPECT_EQ(capabilities.wait_conditions.device_scope_32,
+              IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_NONE);
+  }
+
+  iree_hal_atomic_capabilities_t capabilities =
+      iree_hal_vulkan_atomic_capabilities(required_features);
+  EXPECT_EQ(capabilities.operations.device_scope_32,
+            IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+  EXPECT_EQ(capabilities.wait_conditions.device_scope_32,
+            IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL);
+  EXPECT_EQ(capabilities.operations.device_scope_64,
+            IREE_HAL_ATOMIC_OPERATION_FLAG_NONE);
+
+  capabilities = iree_hal_vulkan_atomic_capabilities(
+      required_features |
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_INT64_ATOMICS);
+  EXPECT_EQ(capabilities.operations.device_scope_64,
+            IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+  EXPECT_EQ(capabilities.wait_conditions.device_scope_64,
+            IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL);
+  EXPECT_EQ(capabilities.operations.system_scope_32,
+            IREE_HAL_ATOMIC_OPERATION_FLAG_NONE);
+  EXPECT_EQ(capabilities.operations.system_scope_64,
+            IREE_HAL_ATOMIC_OPERATION_FLAG_NONE);
 }
 
 TEST(DeviceSpecTest, CreatesSpecFromParams) {

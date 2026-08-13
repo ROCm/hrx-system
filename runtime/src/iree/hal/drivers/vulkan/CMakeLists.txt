@@ -92,6 +92,7 @@ iree_cc_test(
   DEPS
     ::device_spec
     ::device_spec_builder
+    ::headers
     iree::base
     iree::hal
     iree::hal::utils::device_spec_builder

@@ -81,6 +81,7 @@ iree_runtime_cc_test(
     deps = [
         ":device_spec",
         ":device_spec_builder",
+        ":headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/utils:device_spec_builder",

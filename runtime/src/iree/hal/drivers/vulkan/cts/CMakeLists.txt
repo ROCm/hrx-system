@@ -662,10 +662,12 @@ iree_cc_test(
     queue_atomic_tests
   SRCS
     "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
+    "atomic_submission_test.cc"
   DEPS
     ::backends
     iree::base::tooling::flags
     iree::hal::cts::queue::queue_atomic_test
+    iree::hal::cts::util::atomic_test_util
     iree::hal::cts::util::registry
     iree::hal::cts::util::test_base
     iree::testing::gtest
