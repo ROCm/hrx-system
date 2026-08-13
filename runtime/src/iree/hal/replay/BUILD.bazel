@@ -183,6 +183,26 @@ iree_runtime_cc_test(
     ],
 )
 
+iree_runtime_cc_test(
+    name = "execute_atomic_test",
+    srcs = [
+        "execute_atomic_test.cc",
+        "execute_operation.h",
+        "execute_state.h",
+    ],
+    deps = [
+        ":execute",
+        ":file_reader",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/local_sync:sync_driver",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_cmake_extra_content(
     content = """
 endif()

@@ -190,6 +190,25 @@ iree_cc_test(
     iree::testing::temp_file
 )
 
+iree_cc_test(
+  NAME
+    execute_atomic_test
+  SRCS
+    "execute_atomic_test.cc"
+    "execute_operation.h"
+    "execute_state.h"
+  DEPS
+    ::execute
+    ::file_reader
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::hal
+    iree::hal::drivers::local_sync::sync_driver
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 endif()
 
 iree_cc_test(

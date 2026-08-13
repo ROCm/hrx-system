@@ -12,6 +12,93 @@
 
 #include "iree/hal/replay/execute_object.h"
 
+static iree_status_t iree_hal_replay_executor_require_fixed_payload(
+    const iree_hal_replay_file_record_t* record,
+    iree_hal_replay_payload_type_t payload_type,
+    iree_host_size_t payload_length) {
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(
+      record, payload_type, payload_length));
+  if (IREE_UNLIKELY(record->payload.data_length != payload_length)) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "replay fixed payload length mismatch");
+  }
+  return iree_ok_status();
+}
+
+static iree_hal_atomic_wait_params_t
+iree_hal_replay_executor_atomic_wait_params(
+    iree_hal_replay_atomic_wait_params_payload_t payload) {
+  return (iree_hal_atomic_wait_params_t){
+      .value = payload.value,
+      .mask = payload.mask,
+      .flags = payload.flags,
+      .width = payload.width,
+      .condition = payload.condition,
+      .reserved = payload.reserved0,
+  };
+}
+
+static iree_hal_atomic_store_params_t
+iree_hal_replay_executor_atomic_store_params(
+    iree_hal_replay_atomic_store_params_payload_t payload) {
+  iree_hal_atomic_store_params_t params = {
+      .value = payload.value,
+      .flags = payload.flags,
+      .width = payload.width,
+  };
+  memcpy(params.reserved, payload.reserved0, sizeof(params.reserved));
+  return params;
+}
+
+static iree_hal_atomic_rmw_params_t iree_hal_replay_executor_atomic_rmw_params(
+    iree_hal_replay_atomic_rmw_params_payload_t payload) {
+  return (iree_hal_atomic_rmw_params_t){
+      .operand = payload.operand,
+      .flags = payload.flags,
+      .width = payload.width,
+      .operation = payload.operation,
+      .reserved = payload.reserved0,
+  };
+}
+
+static iree_status_t iree_hal_replay_executor_make_atomic_buffer_ref(
+    iree_hal_replay_executor_t* executor,
+    const iree_hal_replay_buffer_ref_payload_t* payload,
+    iree_hal_atomic_width_t width, iree_hal_buffer_ref_t* out_ref) {
+  if (IREE_UNLIKELY(payload->reserved0 != 0)) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "replay atomic buffer reference reserved fields must be zero");
+  }
+  if (IREE_UNLIKELY(payload->buffer_id != IREE_HAL_REPLAY_OBJECT_ID_NONE &&
+                    payload->buffer_slot != 0)) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "replay direct atomic buffer reference has an indirect slot");
+  }
+  if (IREE_UNLIKELY(payload->length !=
+                    iree_hal_atomic_width_byte_count(width))) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "replay atomic target length does not match the selected width");
+  }
+  return iree_hal_replay_executor_make_buffer_ref(executor, payload, out_ref);
+}
+
+static iree_status_t iree_hal_replay_executor_make_direct_atomic_buffer_ref(
+    iree_hal_replay_executor_t* executor,
+    const iree_hal_replay_buffer_ref_payload_t* payload,
+    iree_hal_atomic_width_t width, iree_hal_buffer_ref_t* out_ref) {
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_make_atomic_buffer_ref(
+      executor, payload, width, out_ref));
+  if (IREE_UNLIKELY(!out_ref->buffer)) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "replay queue atomic operation requires a direct target reference");
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_replay_executor_scope_event(
     iree_hal_replay_executor_t* executor,
     const iree_hal_replay_file_record_t* record,
@@ -440,6 +527,135 @@ static iree_status_t iree_hal_replay_executor_queue_write(
   return status;
 }
 
+static iree_status_t iree_hal_replay_executor_queue_atomic_wait(
+    iree_hal_replay_executor_t* executor,
+    const iree_hal_replay_file_record_t* record) {
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(
+      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_WAIT,
+      sizeof(iree_hal_replay_device_queue_atomic_wait_payload_t)));
+  iree_hal_replay_device_queue_atomic_wait_payload_t payload;
+  memcpy(&payload, record->payload.data, sizeof(payload));
+
+  iree_hal_replay_object_entry_t* device_entry = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
+      executor, record->header.object_id, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
+      &device_entry));
+  iree_hal_replay_semaphore_list_storage_t wait_storage;
+  iree_hal_replay_semaphore_list_storage_t signal_storage;
+  iree_const_byte_span_t trailing_payload;
+  iree_status_t status = iree_hal_replay_executor_make_queue_semaphore_lists(
+      executor, record, sizeof(payload), payload.wait_semaphore_count,
+      payload.signal_semaphore_count, /*trailing_payload_length=*/0,
+      &wait_storage, &signal_storage, &trailing_payload);
+  iree_hal_buffer_ref_t target_ref;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_executor_make_direct_atomic_buffer_ref(
+        executor, &payload.target_ref, payload.params.width, &target_ref);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_queue_atomic_wait(
+        device_entry->value.device, payload.queue_affinity, wait_storage.list,
+        signal_storage.list, target_ref.buffer, target_ref.offset,
+        iree_hal_replay_executor_atomic_wait_params(payload.params));
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_executor_flush_and_wait(device_entry->value.device,
+                                                     payload.queue_affinity,
+                                                     signal_storage.list);
+  }
+  iree_hal_replay_semaphore_list_storage_deinitialize(&signal_storage,
+                                                      executor->host_allocator);
+  iree_hal_replay_semaphore_list_storage_deinitialize(&wait_storage,
+                                                      executor->host_allocator);
+  return status;
+}
+
+static iree_status_t iree_hal_replay_executor_queue_atomic_store(
+    iree_hal_replay_executor_t* executor,
+    const iree_hal_replay_file_record_t* record) {
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(
+      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_STORE,
+      sizeof(iree_hal_replay_device_queue_atomic_store_payload_t)));
+  iree_hal_replay_device_queue_atomic_store_payload_t payload;
+  memcpy(&payload, record->payload.data, sizeof(payload));
+
+  iree_hal_replay_object_entry_t* device_entry = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
+      executor, record->header.object_id, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
+      &device_entry));
+  iree_hal_replay_semaphore_list_storage_t wait_storage;
+  iree_hal_replay_semaphore_list_storage_t signal_storage;
+  iree_const_byte_span_t trailing_payload;
+  iree_status_t status = iree_hal_replay_executor_make_queue_semaphore_lists(
+      executor, record, sizeof(payload), payload.wait_semaphore_count,
+      payload.signal_semaphore_count, /*trailing_payload_length=*/0,
+      &wait_storage, &signal_storage, &trailing_payload);
+  iree_hal_buffer_ref_t target_ref;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_executor_make_direct_atomic_buffer_ref(
+        executor, &payload.target_ref, payload.params.width, &target_ref);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_queue_atomic_store(
+        device_entry->value.device, payload.queue_affinity, wait_storage.list,
+        signal_storage.list, target_ref.buffer, target_ref.offset,
+        iree_hal_replay_executor_atomic_store_params(payload.params));
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_executor_flush_and_wait(device_entry->value.device,
+                                                     payload.queue_affinity,
+                                                     signal_storage.list);
+  }
+  iree_hal_replay_semaphore_list_storage_deinitialize(&signal_storage,
+                                                      executor->host_allocator);
+  iree_hal_replay_semaphore_list_storage_deinitialize(&wait_storage,
+                                                      executor->host_allocator);
+  return status;
+}
+
+static iree_status_t iree_hal_replay_executor_queue_atomic_rmw(
+    iree_hal_replay_executor_t* executor,
+    const iree_hal_replay_file_record_t* record) {
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(
+      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_RMW,
+      sizeof(iree_hal_replay_device_queue_atomic_rmw_payload_t)));
+  iree_hal_replay_device_queue_atomic_rmw_payload_t payload;
+  memcpy(&payload, record->payload.data, sizeof(payload));
+
+  iree_hal_replay_object_entry_t* device_entry = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
+      executor, record->header.object_id, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
+      &device_entry));
+  iree_hal_replay_semaphore_list_storage_t wait_storage;
+  iree_hal_replay_semaphore_list_storage_t signal_storage;
+  iree_const_byte_span_t trailing_payload;
+  iree_status_t status = iree_hal_replay_executor_make_queue_semaphore_lists(
+      executor, record, sizeof(payload), payload.wait_semaphore_count,
+      payload.signal_semaphore_count, /*trailing_payload_length=*/0,
+      &wait_storage, &signal_storage, &trailing_payload);
+  iree_hal_buffer_ref_t target_ref;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_executor_make_direct_atomic_buffer_ref(
+        executor, &payload.target_ref, payload.params.width, &target_ref);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_queue_atomic_rmw(
+        device_entry->value.device, payload.queue_affinity, wait_storage.list,
+        signal_storage.list, target_ref.buffer, target_ref.offset,
+        iree_hal_replay_executor_atomic_rmw_params(payload.params));
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_executor_flush_and_wait(device_entry->value.device,
+                                                     payload.queue_affinity,
+                                                     signal_storage.list);
+  }
+  iree_hal_replay_semaphore_list_storage_deinitialize(&signal_storage,
+                                                      executor->host_allocator);
+  iree_hal_replay_semaphore_list_storage_deinitialize(&wait_storage,
+                                                      executor->host_allocator);
+  return status;
+}
+
 static iree_status_t iree_hal_replay_executor_command_buffer_execution_barrier(
     iree_hal_replay_executor_t* executor,
     const iree_hal_replay_file_record_t* record) {
@@ -557,6 +773,72 @@ static iree_status_t iree_hal_replay_executor_command_buffer_execution_barrier(
     iree_allocator_free(executor->host_allocator, memory_barriers);
   }
   return status;
+}
+
+static iree_status_t iree_hal_replay_executor_command_buffer_atomic_wait(
+    iree_hal_replay_executor_t* executor,
+    const iree_hal_replay_file_record_t* record) {
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_fixed_payload(
+      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_WAIT,
+      sizeof(iree_hal_replay_command_buffer_atomic_wait_payload_t)));
+  iree_hal_replay_command_buffer_atomic_wait_payload_t payload;
+  memcpy(&payload, record->payload.data, sizeof(payload));
+
+  iree_hal_replay_object_entry_t* command_buffer_entry = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
+      executor, record->header.object_id,
+      IREE_HAL_REPLAY_OBJECT_TYPE_COMMAND_BUFFER, &command_buffer_entry));
+  iree_hal_buffer_ref_t target_ref;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_make_atomic_buffer_ref(
+      executor, &payload.target_ref, payload.params.width, &target_ref));
+  return iree_hal_command_buffer_atomic_wait(
+      command_buffer_entry->value.command_buffer, payload.source_stage_mask,
+      payload.target_stage_mask, target_ref,
+      iree_hal_replay_executor_atomic_wait_params(payload.params));
+}
+
+static iree_status_t iree_hal_replay_executor_command_buffer_atomic_store(
+    iree_hal_replay_executor_t* executor,
+    const iree_hal_replay_file_record_t* record) {
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_fixed_payload(
+      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_STORE,
+      sizeof(iree_hal_replay_command_buffer_atomic_store_payload_t)));
+  iree_hal_replay_command_buffer_atomic_store_payload_t payload;
+  memcpy(&payload, record->payload.data, sizeof(payload));
+
+  iree_hal_replay_object_entry_t* command_buffer_entry = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
+      executor, record->header.object_id,
+      IREE_HAL_REPLAY_OBJECT_TYPE_COMMAND_BUFFER, &command_buffer_entry));
+  iree_hal_buffer_ref_t target_ref;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_make_atomic_buffer_ref(
+      executor, &payload.target_ref, payload.params.width, &target_ref));
+  return iree_hal_command_buffer_atomic_store(
+      command_buffer_entry->value.command_buffer, payload.source_stage_mask,
+      payload.target_stage_mask, target_ref,
+      iree_hal_replay_executor_atomic_store_params(payload.params));
+}
+
+static iree_status_t iree_hal_replay_executor_command_buffer_atomic_rmw(
+    iree_hal_replay_executor_t* executor,
+    const iree_hal_replay_file_record_t* record) {
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_fixed_payload(
+      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_RMW,
+      sizeof(iree_hal_replay_command_buffer_atomic_rmw_payload_t)));
+  iree_hal_replay_command_buffer_atomic_rmw_payload_t payload;
+  memcpy(&payload, record->payload.data, sizeof(payload));
+
+  iree_hal_replay_object_entry_t* command_buffer_entry = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
+      executor, record->header.object_id,
+      IREE_HAL_REPLAY_OBJECT_TYPE_COMMAND_BUFFER, &command_buffer_entry));
+  iree_hal_buffer_ref_t target_ref;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_make_atomic_buffer_ref(
+      executor, &payload.target_ref, payload.params.width, &target_ref));
+  return iree_hal_command_buffer_atomic_rmw(
+      command_buffer_entry->value.command_buffer, payload.source_stage_mask,
+      payload.target_stage_mask, target_ref,
+      iree_hal_replay_executor_atomic_rmw_params(payload.params));
 }
 
 static iree_status_t iree_hal_replay_executor_command_buffer_event(
@@ -1184,6 +1466,12 @@ iree_status_t iree_hal_replay_executor_replay_operation(
       return iree_hal_replay_executor_queue_read(executor, record);
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_WRITE:
       return iree_hal_replay_executor_queue_write(executor, record);
+    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_WAIT:
+      return iree_hal_replay_executor_queue_atomic_wait(executor, record);
+    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_STORE:
+      return iree_hal_replay_executor_queue_atomic_store(executor, record);
+    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_RMW:
+      return iree_hal_replay_executor_queue_atomic_rmw(executor, record);
     case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_BEGIN: {
       iree_hal_replay_object_entry_t* entry = NULL;
       IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
@@ -1201,6 +1489,15 @@ iree_status_t iree_hal_replay_executor_replay_operation(
     case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_EXECUTION_BARRIER:
       return iree_hal_replay_executor_command_buffer_execution_barrier(executor,
                                                                        record);
+    case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_WAIT:
+      return iree_hal_replay_executor_command_buffer_atomic_wait(executor,
+                                                                 record);
+    case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_STORE:
+      return iree_hal_replay_executor_command_buffer_atomic_store(executor,
+                                                                  record);
+    case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_RMW:
+      return iree_hal_replay_executor_command_buffer_atomic_rmw(executor,
+                                                                record);
     case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_SIGNAL_EVENT:
     case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_RESET_EVENT:
       return iree_hal_replay_executor_command_buffer_event(executor, record);
