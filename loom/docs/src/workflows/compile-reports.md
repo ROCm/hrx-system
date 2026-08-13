@@ -46,15 +46,27 @@ Start with the target-neutral human view:
 loom-compile-report show kernel.report.json
 ```
 
-The header states artifact, target, specialization, workload, configuration,
-and compile status. Each entry then separates two evidence classes:
+The header states artifact, target, specialization, compiled launch geometry,
+configuration, and compile status. Launch fields appear only when the compiled
+artifact fixes them; a missing workgroup count is the normal result for a
+workload-dependent launch function, not missing benchmark evidence. Each entry
+then separates two evidence classes:
 
 - **Artifact facts** come from the emitted code or target-owned artifact
   inspection: code bytes, instruction counts, instruction families, and
   physical memory usage.
 - **Compiler analysis** comes from the prepared program and target model:
-  scheduled pressure, estimated dispatch traffic, operation counts, residency,
-  allocation, and scheduling evidence.
+  scheduled pressure, compiled execution economics, residency, allocation, and
+  scheduling evidence.
+
+Compiled execution economics never require a static dispatch size. Exact
+fixed-trip multiplicities are reported per workitem and, when the artifact
+fixes local workgroup size, for one workgroup. They count target-Low operation
+effects and descriptor-effect widths, not native instruction issues, memory
+transactions, or executed branch paths. Control flow is a statically reachable
+block envelope: data-dependent alternatives may both contribute. Whole-
+dispatch geometry belongs to a concrete benchmark launch unless the compiled
+artifact genuinely specializes it.
 
 Register-move analysis includes compiler-classified causes. Summary reports
 preserve the aggregate packet and register-unit counts; detailed reports let

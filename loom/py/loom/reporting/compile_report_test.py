@@ -81,6 +81,37 @@ def _compile_report() -> dict[str, object]:
             "barrier_count": 1,
             "branch_count": 4,
         },
+        "dynamic_instruction_mix": {
+            "descriptor_count": 100,
+            "scalar_alu_count": 10,
+            "vector_alu_count": 40,
+            "matrix_count": 8,
+            "mfma_count": 0,
+            "smfmac_count": 0,
+            "wmma_count": 8,
+            "swmmac_count": 0,
+            "dot_count": 0,
+            "atomic_count": 0,
+            "branch_count": 4,
+            "barrier_count": 1,
+            "control_count": 4,
+            "conversion_count": 3,
+            "cache_count": 0,
+            "register_move_count": 5,
+            "global_load_count": 4,
+            "global_store_count": 2,
+            "buffer_load_count": 6,
+            "buffer_store_count": 0,
+            "flat_memory_count": 0,
+            "local_memory_count": 12,
+            "scalar_memory_count": 0,
+            "private_memory_count": 0,
+            "generic_memory_count": 0,
+            "memory_read_byte_count": 32,
+            "memory_write_byte_count": 16,
+            "memory_read_unknown_width_count": 0,
+            "memory_write_unknown_width_count": 0,
+        },
         "target_resources": {
             "scalar": {
                 "final": {"register_count": 32},
@@ -112,18 +143,30 @@ def _compile_report() -> dict[str, object]:
         },
         "economics": {
             "operations": {
+                "per_workitem": {
+                    "scalar_alu_count": 10,
+                    "vector_alu_count": 40,
+                    "matrix_count": 8,
+                    "wmma_count": 8,
+                },
                 "dispatch": {
-                    "vector_alu_count": 40960,
-                    "matrix_count": 8192,
-                    "wmma_count": 8192,
-                }
+                    "scalar_alu_count": 122880,
+                    "vector_alu_count": 491520,
+                    "matrix_count": 98304,
+                    "wmma_count": 98304,
+                },
             },
             "memory": {
+                "per_workitem_issued": {
+                    "read_bytes": 32,
+                    "write_bytes": 16,
+                    "total_bytes": 48,
+                },
                 "dispatch_issued": {
-                    "read_bytes": 3072,
-                    "write_bytes": 1024,
-                    "total_bytes": 4096,
-                }
+                    "read_bytes": 393216,
+                    "write_bytes": 196608,
+                    "total_bytes": 589824,
+                },
             },
         },
         "wait_plan": {
@@ -587,6 +630,7 @@ def test_show_separates_facts_analysis_and_unavailable_evidence() -> None:
     entry = view["entries"][0]
     artifact_facts = entry["artifact_facts"]
     compiler_analysis = entry["compiler_analysis"]
+    execution_economics = entry["execution_economics"]
 
     assert view["missing_evidence"] == "omitted_metrics_are_unavailable"
     assert view["workload"] == {
@@ -610,8 +654,12 @@ def test_show_separates_facts_analysis_and_unavailable_evidence() -> None:
     assert artifact_facts["unclassified_instruction_count"] == 0
     assert compiler_analysis["occupancy_percent"] == 31
     assert compiler_analysis["residency_next_better_tier"] == 6
-    assert compiler_analysis["dispatch_total_bytes"] == 4096
-    assert compiler_analysis["dispatch_wmma_count"] == 8192
+    assert execution_economics["fixed_trip_multiplicity_coverage"] == "exact"
+    assert execution_economics["issued_byte_coverage"] == "exact"
+    assert execution_economics["primary_scope"] == "workgroup"
+    workgroup_metrics = execution_economics["scopes"]["workgroup"]["metrics"]
+    assert workgroup_metrics["issued_total_bytes"] == 6144
+    assert workgroup_metrics["wmma_count"] == 1024
     assert compiler_analysis["planned_wait_action_count"] == 10
     assert compiler_analysis["target_insertion_static_packet_count"] == 4
     assert compiler_analysis["target_insertion_unknown_dynamic_packet_count"] == 1
@@ -620,12 +668,57 @@ def test_show_separates_facts_analysis_and_unavailable_evidence() -> None:
     text = format_compile_report_show_text(view)
     assert "Artifact facts" in text
     assert "Compiler analysis" in text
-    assert "Workload (proven static launch)" in text
+    assert "Compiled execution economics (compiler analysis)" in text
+    assert "fixed-trip multiplicity coverage: exact" in text
+    assert "all statically reachable blocks (path envelope)" in text
+    assert "scope: one workgroup (128 workitems)" in text
+    assert "Launch geometry (compiled artifact)" in text
     assert "dispatch subgroups: 192" in text
     assert "code bytes: 512 B" in text
     assert "WMMA instructions: 8" in text
     assert "target-planned wait actions: 10" in text
     assert "partial waits: unavailable" in text
+
+
+def test_show_execution_economics_without_static_dispatch_geometry() -> None:
+    report = _compile_report()
+    workload = report["workload"]
+    del workload["workgroup_count"]
+    del workload["dispatch_workitem_count"]
+    entry = report["entries"]["rows"][0]
+    del entry["economics"]["operations"]["dispatch"]
+    del entry["economics"]["memory"]["dispatch_issued"]
+    document = parse_compile_report(report, source="dynamic.json")
+
+    view = build_compile_report_show(document)
+
+    economics = view["entries"][0]["execution_economics"]
+    assert economics["primary_scope"] == "workgroup"
+    assert set(economics["scopes"]) == {"workitem", "workgroup"}
+    assert economics["scopes"]["workitem"]["metrics"]["wmma_count"] == 8
+    assert economics["scopes"]["workgroup"]["metrics"]["wmma_count"] == 1024
+    text = format_compile_report_show_text(view)
+    assert "scope: one workgroup (128 workitems)" in text
+    assert "dispatch workitems: unavailable" in text
+
+
+def test_show_execution_economics_without_any_static_launch_geometry() -> None:
+    report = _compile_report()
+    report["workload"].clear()
+    entry = report["entries"]["rows"][0]
+    del entry["economics"]["operations"]["dispatch"]
+    del entry["economics"]["memory"]["dispatch_issued"]
+    document = parse_compile_report(report, source="dynamic.json")
+
+    view = build_compile_report_show(document)
+
+    economics = view["entries"][0]["execution_economics"]
+    assert economics["primary_scope"] == "workitem"
+    assert set(economics["scopes"]) == {"workitem"}
+    assert economics["scopes"]["workitem"]["metrics"]["issued_total_bytes"] == 48
+    text = format_compile_report_show_text(view)
+    assert "scope: one workitem" in text
+    assert "workgroup size: unavailable" in text
 
 
 def test_forced_diff_expands_workload_before_artifact_metrics() -> None:
@@ -643,6 +736,7 @@ def test_forced_diff_expands_workload_before_artifact_metrics() -> None:
             "flat": 384,
         }
         workload["dispatch_workitem_count"] = 49152
+    del candidate_report["entries"]["rows"][0]["economics"]
     candidate_report["entries"]["rows"][0]["body_instruction_count"] = 48
     candidate = parse_compile_report(candidate_report, source="candidate.json")
 
@@ -662,7 +756,9 @@ def test_forced_diff_expands_workload_before_artifact_metrics() -> None:
     assert "workload mismatches: 2; expanded below" in text
     assert "report.workload:" not in text
     assert "entry.workload:" not in text
-    assert text.index("Workload (proven static launch)") < text.index("Artifact facts")
+    assert text.index("Launch geometry (compiled artifact)") < text.index(
+        "Artifact facts"
+    )
     assert "dispatch subgroups: 192 -> 768, delta +576 (+300.00%)" in text
 
 
@@ -673,6 +769,82 @@ def test_show_rejects_inconsistent_workload_products() -> None:
 
     with pytest.raises(CompileReportError, match=r"workgroup_count.flat: expected 96"):
         build_compile_report_show(document)
+
+
+def test_show_explains_unavailable_fixed_trip_economics() -> None:
+    report = _compile_report()
+    entry = report["entries"]["rows"][0]
+    del entry["dynamic_instruction_mix"]
+    del entry["economics"]
+    document = parse_compile_report(report, source="report.json")
+
+    view = build_compile_report_show(document)
+
+    economics = view["entries"][0]["execution_economics"]
+    assert economics == {
+        "fixed_trip_multiplicity_coverage": "unavailable",
+        "issued_byte_coverage": "unavailable",
+        "reason": "exact_fixed_trip_multiplicities_unavailable",
+    }
+    text = format_compile_report_show_text(view)
+    assert "fixed-trip multiplicity coverage: unavailable" in text
+    assert "exact fixed-trip multiplicities were not proven" in text
+    assert "estimated dispatch" not in text
+
+
+def test_show_qualifies_unknown_issued_widths() -> None:
+    report = _compile_report()
+    entry = report["entries"]["rows"][0]
+    entry["dynamic_instruction_mix"]["memory_read_unknown_width_count"] = 2
+    document = parse_compile_report(report, source="report.json")
+
+    view = build_compile_report_show(document)
+
+    economics = view["entries"][0]["execution_economics"]
+    assert economics["issued_byte_coverage"] == "partial"
+    assert (
+        economics["scopes"]["workgroup"]["metrics"]["issued_read_unknown_width_count"]
+        == 256
+    )
+    text = format_compile_report_show_text(view)
+    assert "issued byte coverage: partial" in text
+    assert "reads with unknown issued width: 256" in text
+
+
+def test_show_rejects_inconsistent_retained_static_dispatch_economics() -> None:
+    report = _compile_report()
+    report["entries"]["rows"][0]["economics"]["operations"]["dispatch"][
+        "wmma_count"
+    ] = 1
+    document = parse_compile_report(report, source="report.json")
+
+    with pytest.raises(CompileReportError, match=r"wmma_count: expected 98304"):
+        build_compile_report_show(document)
+
+
+def test_diff_preserves_fixed_trip_economics_coverage_loss() -> None:
+    baseline = parse_compile_report(_compile_report(), source="baseline.json")
+    candidate_report = _compile_report()
+    candidate_entry = candidate_report["entries"]["rows"][0]
+    del candidate_entry["dynamic_instruction_mix"]
+    del candidate_entry["economics"]
+    candidate = parse_compile_report(candidate_report, source="candidate.json")
+
+    view = build_compile_report_diff(baseline, candidate)
+
+    assert view["changed_entry_count"] == 1
+    economics = view["entries"][0]["execution_economics"]
+    assert economics["fixed_trip_multiplicity_coverage"] == {
+        "baseline": "exact",
+        "candidate": "unavailable",
+    }
+    assert economics["incomplete"]["scalar_alu_count"] == {
+        "baseline": 10,
+        "candidate": None,
+    }
+    text = format_compile_report_diff_text(view)
+    assert "fixed-trip multiplicity coverage: exact -> unavailable" in text
+    assert "exact fixed-trip multiplicities were not proven" in text
 
 
 def test_show_and_diff_preserve_move_cause_breakdown() -> None:
@@ -782,7 +954,12 @@ def test_diff_preserves_missing_evidence_and_numeric_deltas() -> None:
     candidate_entry["code_byte_count"] = 480
     candidate_entry["body_instruction_count"] = 89
     candidate_entry["static_instruction_mix"]["wmma_count"] = 6
-    candidate_entry["economics"]["operations"]["dispatch"]["wmma_count"] = 6144
+    candidate_entry["dynamic_instruction_mix"]["matrix_count"] = 6
+    candidate_entry["dynamic_instruction_mix"]["wmma_count"] = 6
+    candidate_entry["economics"]["operations"]["per_workitem"]["matrix_count"] = 6
+    candidate_entry["economics"]["operations"]["per_workitem"]["wmma_count"] = 6
+    candidate_entry["economics"]["operations"]["dispatch"]["matrix_count"] = 73728
+    candidate_entry["economics"]["operations"]["dispatch"]["wmma_count"] = 73728
     candidate_entry["wait_plan"]["planned_action_count"] = 8
     candidate_entry["target_insertions"]["dynamic_packet_count"] = 256
     del candidate_entry["wait_plan"]["partial_wait_count"]
@@ -794,7 +971,7 @@ def test_diff_preserves_missing_evidence_and_numeric_deltas() -> None:
     body_instructions = entry["artifact_facts"]["changed"]["body_instruction_count"]
     wmma = entry["artifact_facts"]["changed"]["wmma_count"]
     partial_waits = entry["compiler_analysis"]["incomplete"]["partial_wait_count"]
-    dynamic_wmma = entry["compiler_analysis"]["changed"]["dispatch_wmma_count"]
+    dynamic_wmma = entry["execution_economics"]["changed"]["wmma_count"]
     planned_waits = entry["compiler_analysis"]["changed"]["planned_wait_action_count"]
     target_insertions = entry["compiler_analysis"]["changed"][
         "target_insertion_dynamic_packet_count"
@@ -804,7 +981,7 @@ def test_diff_preserves_missing_evidence_and_numeric_deltas() -> None:
     assert code_bytes["change_percent"] == -6.25
     assert body_instructions["delta"] == -8
     assert wmma["delta"] == -2
-    assert dynamic_wmma["delta"] == -2048
+    assert dynamic_wmma["delta"] == -256
     assert planned_waits["delta"] == -2
     assert target_insertions["delta"] == -128
     assert partial_waits["candidate"] is None
@@ -813,6 +990,7 @@ def test_diff_preserves_missing_evidence_and_numeric_deltas() -> None:
     text = format_compile_report_diff_text(view)
     assert "512 B -> 480 B, delta -32 B (-6.25%)" in text
     assert "partial waits: 9 -> unavailable" in text
+    assert "WMMA operation effects: 1,024 -> 768, delta -256 (-25.00%)" in text
 
 
 def test_diff_treats_explicit_null_as_unavailable_evidence() -> None:

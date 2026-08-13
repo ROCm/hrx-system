@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Exact static workload views for Loom compile reports."""
+"""Compiled launch geometry views for Loom compile reports."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def build_workload_show(
     target_resources_value: object,
     source: str,
 ) -> dict[str, object]:
-    """Builds exact static workload facts retained by one report record."""
+    """Builds compiled launch facts retained by one report record."""
     if workload_value is None:
         return {}
     workload = _require_object(workload_value, f"{source}.workload")
@@ -151,10 +151,10 @@ def append_workload_show_text(
     *,
     indent: str = "",
 ) -> None:
-    """Appends exact static workload facts to a human-readable view."""
-    lines.append(f"{indent}Workload (proven static launch)")
+    """Appends compiled launch facts to a human-readable view."""
+    lines.append(f"{indent}Launch geometry (compiled artifact)")
     if not workload:
-        lines.append(f"{indent}  static launch facts: unavailable")
+        lines.append(f"{indent}  static launch geometry: unavailable")
         return
     for spec in _WORKLOAD_FIELD_SPECS:
         value = workload.get(spec.key, _MISSING)
@@ -167,10 +167,10 @@ def append_workload_diff_text(
     *,
     indent: str = "",
 ) -> None:
-    """Appends changed static workload facts to a human-readable diff."""
+    """Appends changed compiled launch facts to a human-readable diff."""
     changed = _require_object(workload_diff.get("changed"), "workload.changed")
     incomplete = _require_object(workload_diff.get("incomplete"), "workload.incomplete")
-    lines.append(f"{indent}Workload (proven static launch)")
+    lines.append(f"{indent}Launch geometry (compiled artifact)")
     if not changed and not incomplete:
         lines.append(f"{indent}  no launch geometry changes")
     for spec in _WORKLOAD_FIELD_SPECS:

@@ -32,6 +32,13 @@ from loom.reporting.compile_report_capabilities import (
     append_target_capability_diff_text,
     build_target_capability_diff,
 )
+from loom.reporting.compile_report_execution_economics import (
+    append_execution_economics_diff_text,
+    append_execution_economics_show_text,
+    build_execution_economics_diff,
+    build_execution_economics_show,
+    execution_economics_diff_has_changes,
+)
 from loom.reporting.compile_report_move_causes import (
     append_move_cause_diff_text,
     append_move_cause_show_text,
@@ -248,59 +255,6 @@ _METRIC_SPECS = (
         "target_resources.residency.unique_limiting_resource."
         "next_worse.additional_units",
     ),
-    _analysis(
-        "dispatch_read_bytes",
-        "estimated dispatch reads",
-        "economics.memory.dispatch_issued.read_bytes",
-        "bytes",
-    ),
-    _analysis(
-        "dispatch_write_bytes",
-        "estimated dispatch writes",
-        "economics.memory.dispatch_issued.write_bytes",
-        "bytes",
-    ),
-    _analysis(
-        "dispatch_total_bytes",
-        "estimated dispatch traffic",
-        "economics.memory.dispatch_issued.total_bytes",
-        "bytes",
-    ),
-    _analysis(
-        "dispatch_vector_alu_count",
-        "estimated dispatch vector ALU",
-        "economics.operations.dispatch.vector_alu_count",
-    ),
-    _analysis(
-        "dispatch_matrix_count",
-        "estimated dispatch matrix operations",
-        "economics.operations.dispatch.matrix_count",
-    ),
-    _analysis(
-        "dispatch_mfma_count",
-        "estimated dispatch MFMA",
-        "economics.operations.dispatch.mfma_count",
-    ),
-    _analysis(
-        "dispatch_smfmac_count",
-        "estimated dispatch SMFMAC",
-        "economics.operations.dispatch.smfmac_count",
-    ),
-    _analysis(
-        "dispatch_wmma_count",
-        "estimated dispatch WMMA",
-        "economics.operations.dispatch.wmma_count",
-    ),
-    _analysis(
-        "dispatch_swmmac_count",
-        "estimated dispatch SWMMAC",
-        "economics.operations.dispatch.swmmac_count",
-    ),
-    _analysis(
-        "dispatch_dot_count",
-        "estimated dispatch dot operations",
-        "economics.operations.dispatch.dot_count",
-    ),
     _analysis("schedule_node_count", "schedule nodes", "schedule_node_count"),
     _analysis(
         "schedule_dependency_count",
@@ -499,6 +453,14 @@ def build_compile_report_diff(
             entry_workload = build_workload_diff(
                 baseline_entry_workload, candidate_entry_workload
             )
+        execution_economics = build_execution_economics_diff(
+            build_execution_economics_show(
+                pair.baseline, baseline_entry_workload, baseline_entry_source
+            ),
+            build_execution_economics_show(
+                pair.candidate, candidate_entry_workload, candidate_entry_source
+            ),
+        )
         move_causes = build_move_cause_diff(
             pair.baseline,
             pair.candidate,
@@ -509,12 +471,14 @@ def build_compile_report_diff(
             not _diff_group_has_changes(artifact_facts)
             and not _diff_group_has_changes(compiler_analysis)
             and not workload_diff_has_changes(entry_workload)
+            and not execution_economics_diff_has_changes(execution_economics)
             and not move_cause_diff_has_changes(move_causes)
         ):
             unchanged_entry_count += 1
             continue
         entry_view: dict[str, object] = {
             "artifact_facts": artifact_facts,
+            "execution_economics": execution_economics,
             "compiler_analysis": compiler_analysis,
         }
         if workload_diff_has_changes(entry_workload):
@@ -617,6 +581,9 @@ def format_compile_report_show_text(view: dict[str, object]) -> str:
             "Artifact facts",
             _expect_dict(entry["artifact_facts"]),
             EvidenceClass.ARTIFACT_FACT,
+        )
+        append_execution_economics_show_text(
+            lines, _expect_dict(entry["execution_economics"])
         )
         _append_metric_group(
             lines,
@@ -744,6 +711,9 @@ def format_compile_report_diff_text(view: dict[str, object]) -> str:
             _expect_dict(entry["artifact_facts"]),
             EvidenceClass.ARTIFACT_FACT,
         )
+        append_execution_economics_diff_text(
+            lines, _expect_dict(entry["execution_economics"])
+        )
         _append_diff_group(
             lines,
             "Compiler analysis",
@@ -770,16 +740,19 @@ def _show_entry_json(
     report_target_resources_value: object,
     source: str,
 ) -> dict[str, object]:
-    view: dict[str, object] = {
-        "identity": identity.to_json_object(),
-        "artifact_facts": _show_metrics(entry, EvidenceClass.ARTIFACT_FACT),
-        "compiler_analysis": _show_metrics(entry, EvidenceClass.COMPILER_ANALYSIS),
-    }
     entry_workload = build_workload_show(
         entry.get("workload", report_workload_value),
         entry.get("target_resources", report_target_resources_value),
         source,
     )
+    view: dict[str, object] = {
+        "identity": identity.to_json_object(),
+        "artifact_facts": _show_metrics(entry, EvidenceClass.ARTIFACT_FACT),
+        "execution_economics": build_execution_economics_show(
+            entry, entry_workload, source
+        ),
+        "compiler_analysis": _show_metrics(entry, EvidenceClass.COMPILER_ANALYSIS),
+    }
     if entry_workload != report_workload:
         view["workload"] = entry_workload
     move_causes = build_move_cause_show(entry, source)
