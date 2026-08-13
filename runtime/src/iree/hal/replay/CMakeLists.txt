@@ -81,6 +81,13 @@ iree_cc_library(
     "dump.h"
   SRCS
     "dump.c"
+    "dump_json.c"
+    "dump_json.h"
+    "dump_layout.c"
+    "dump_layout.h"
+    "dump_state.h"
+    "dump_text.c"
+    "dump_text.h"
   DEPS
     ::digest
     ::file_reader

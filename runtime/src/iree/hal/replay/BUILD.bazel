@@ -67,7 +67,16 @@ iree_runtime_cc_library(
 
 iree_runtime_cc_library(
     name = "dump",
-    srcs = ["dump.c"],
+    srcs = [
+        "dump.c",
+        "dump_json.c",
+        "dump_json.h",
+        "dump_layout.c",
+        "dump_layout.h",
+        "dump_state.h",
+        "dump_text.c",
+        "dump_text.h",
+    ],
     hdrs = ["dump.h"],
     deps = [
         ":digest",
