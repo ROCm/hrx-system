@@ -765,6 +765,21 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "host_queue_file_test",
+    srcs = ["host_queue_file_test.cc"],
+    deps = [
+        ":amdgpu",
+        ":headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "host_queue_staging_test",
     srcs = ["host_queue_staging_test.cc"],
     deps = [
