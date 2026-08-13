@@ -24,6 +24,8 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/test/ops.h"
+#include "loom/ops/test/registry.h"
+#include "loom/ops/test/types.h"
 #include "loom/testing/gen.h"
 
 namespace {
@@ -49,10 +51,7 @@ class SerializedBytecodeFixture {
     iree_arena_block_pool_initialize(65536, iree_allocator_system(),
                                      &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
-    iree_host_size_t count = 0;
-    const loom_op_vtable_t* const* vtables = loom_test_dialect_vtables(&count);
-    IgnoreStatusOrAbort(loom_context_register_dialect(
-        &context_, LOOM_DIALECT_TEST, vtables, (uint16_t)count));
+    IgnoreStatusOrAbort(loom_test_dialect_register(&context_));
     IgnoreStatusOrAbort(loom_context_finalize(&context_));
   }
 
@@ -183,6 +182,83 @@ class CatalogBytecodeFixture final : public SerializedBytecodeFixture {
           &body_builder, &current_value, 1, LOOM_LOCATION_NONE, &yield_op));
     }
   }
+};
+
+class TypePlanBytecodeFixture final : public SerializedBytecodeFixture {
+ public:
+  explicit TypePlanBytecodeFixture(uint32_t instance_count) {
+    loom_module_t* module = nullptr;
+    IgnoreStatusOrAbort(loom_module_allocate(
+        context(), IREE_SV("reader_type_plan_benchmark"), block_pool(), nullptr,
+        iree_allocator_system(), &module));
+    BuildModule(module, instance_count);
+    type_count_ = module->types.count;
+    SerializeModule(module);
+    loom_module_free(module);
+  }
+
+  iree_host_size_t type_count() const { return type_count_; }
+
+ private:
+  static void BuildModule(loom_module_t* module, uint32_t instance_count) {
+    loom_type_id_t bf16_type_id = LOOM_TYPE_ID_INVALID;
+    IgnoreStatusOrAbort(loom_module_intern_type_id(
+        module, loom_type_scalar(LOOM_SCALAR_TYPE_BF16), &bf16_type_id));
+    loom_string_id_t dialect_name_id = LOOM_STRING_ID_INVALID;
+    IgnoreStatusOrAbort(loom_module_intern_string(
+        module, IREE_SV("benchmark.type_pair"), &dialect_name_id));
+    std::vector<loom_type_t> root_types;
+    root_types.reserve(instance_count);
+
+    for (uint32_t i = 0; i < instance_count; ++i) {
+      loom_type_t parameterized_type = {};
+      IgnoreStatusOrAbort(loom_test_array_type_make(
+          module, LOOM_TEST_ARRAY_TYPE_BUILD_FLAG_HAS_ALIGNMENT, bf16_type_id,
+          /*alignment=*/(uint64_t)i + 1, loom_named_attr_slice_empty(),
+          &parameterized_type));
+
+      loom_type_t register_type = {};
+      IgnoreStatusOrAbort(loom_module_intern_register_type(
+          module, /*carrier_payload0=*/(uint64_t)i + 1,
+          /*carrier_payload1=*/(uint64_t)4 << 16, parameterized_type,
+          &register_type));
+
+      loom_type_t dialect_parameters[] = {parameterized_type, register_type};
+      loom_type_t dialect_type = {};
+      IgnoreStatusOrAbort(loom_module_intern_type(
+          module,
+          loom_type_dialect(dialect_name_id, IREE_ARRAYSIZE(dialect_parameters),
+                            dialect_parameters),
+          &dialect_type));
+
+      loom_type_t function_arguments[] = {parameterized_type, dialect_type};
+      loom_type_t function_results[] = {register_type};
+      loom_type_t function_type = {};
+      IgnoreStatusOrAbort(loom_module_intern_function_type(
+          module, function_arguments, IREE_ARRAYSIZE(function_arguments),
+          function_results, IREE_ARRAYSIZE(function_results), &function_type));
+      root_types.push_back(function_type);
+    }
+
+    loom_builder_t builder;
+    loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                            &builder);
+    loom_string_id_t symbol_name_id = LOOM_STRING_ID_INVALID;
+    IgnoreStatusOrAbort(loom_module_intern_string(
+        module, IREE_SV("type_plan_root"), &symbol_name_id));
+    loom_symbol_id_t symbol_id = LOOM_SYMBOL_ID_INVALID;
+    IgnoreStatusOrAbort(
+        loom_module_add_symbol(module, symbol_name_id, &symbol_id));
+    loom_op_t* declaration_op = nullptr;
+    IgnoreStatusOrAbort(loom_test_decl_build(
+        &builder, /*build_flags=*/0, /*visibility=*/0, /*cc=*/0,
+        (loom_symbol_ref_t){/*.module_id=*/0, /*.symbol_id=*/symbol_id},
+        root_types.data(), root_types.size(), /*result_types=*/nullptr,
+        /*result_count=*/0, /*tied_results=*/nullptr,
+        /*tied_result_count=*/0, LOOM_LOCATION_UNKNOWN, &declaration_op));
+  }
+
+  iree_host_size_t type_count_ = 0;
 };
 
 static loom_bytecode_read_options_t ReadOptions(bool verify_module,
@@ -383,6 +459,82 @@ BENCHMARK(BM_ReadIndex_Catalog)
     ->Complexity(benchmark::oN);
 BENCHMARK(BM_ReadModule_Catalog)
     ->Apply(CatalogScales)
+    ->Complexity(benchmark::oN);
+
+static void SetTypePlanCounters(benchmark::State& state,
+                                const TypePlanBytecodeFixture& fixture,
+                                uint32_t instance_count) {
+  state.counters["bytecode_bytes"] =
+      static_cast<double>(fixture.bytes().size());
+  state.counters["instances"] = static_cast<double>(instance_count);
+  state.counters["types"] = static_cast<double>(fixture.type_count());
+  state.SetBytesProcessed(state.iterations() * fixture.bytes().size());
+  state.SetItemsProcessed(state.iterations() * fixture.type_count());
+  state.SetComplexityN(instance_count);
+}
+
+static void BM_ReadMetadata_TypePlan(benchmark::State& state) {
+  const uint32_t instance_count = (uint32_t)state.range(0);
+  TypePlanBytecodeFixture fixture(instance_count);
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(65536, iree_allocator_system(), &block_pool);
+
+  for (auto _ : state) {
+    loom_bytecode_read_result_t result = {};
+    IgnoreStatusOrAbort(loom_bytecode_read_metadata(
+        iree_make_const_byte_span(fixture.bytes().data(),
+                                  fixture.bytes().size()),
+        IREE_SV("type_plan_benchmark.loombc"), fixture.context(), &block_pool,
+        /*options=*/nullptr, &result));
+    if (result.error_count != 0 ||
+        result.first_module.type_count != fixture.type_count()) {
+      abort();
+    }
+    benchmark::DoNotOptimize(result.first_module.type_count);
+  }
+
+  SetTypePlanCounters(state, fixture, instance_count);
+  iree_arena_block_pool_deinitialize(&block_pool);
+}
+
+static void BM_ReadModule_TypePlan(benchmark::State& state) {
+  const uint32_t instance_count = (uint32_t)state.range(0);
+  TypePlanBytecodeFixture fixture(instance_count);
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(65536, iree_allocator_system(), &block_pool);
+  uint32_t diagnostic_count = 0;
+  loom_bytecode_read_options_t options =
+      ReadOptions(/*verify_module=*/false, &diagnostic_count);
+
+  for (auto _ : state) {
+    loom_bytecode_read_result_t result = {};
+    loom_module_t* module = nullptr;
+    IgnoreStatusOrAbort(loom_bytecode_read_module(
+        iree_make_const_byte_span(fixture.bytes().data(),
+                                  fixture.bytes().size()),
+        IREE_SV("type_plan_benchmark.loombc"), fixture.context(), &block_pool,
+        &options, &result, &module, iree_allocator_system()));
+    if (result.error_count != 0 || module == nullptr ||
+        module->types.count != fixture.type_count()) {
+      abort();
+    }
+    benchmark::DoNotOptimize(module);
+    loom_module_free(module);
+  }
+
+  SetTypePlanCounters(state, fixture, instance_count);
+  iree_arena_block_pool_deinitialize(&block_pool);
+}
+
+static void TypePlanScales(benchmark::Benchmark* benchmark) {
+  benchmark->Arg(1)->Arg(16)->Arg(64)->Arg(512)->Arg(4096);
+}
+
+BENCHMARK(BM_ReadMetadata_TypePlan)
+    ->Apply(TypePlanScales)
+    ->Complexity(benchmark::oN);
+BENCHMARK(BM_ReadModule_TypePlan)
+    ->Apply(TypePlanScales)
     ->Complexity(benchmark::oN);
 
 static void BM_ReadMetadata_Representative(benchmark::State& state) {

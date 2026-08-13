@@ -674,7 +674,7 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_module_intern_type_id(
         module, loom_type_scalar(LOOM_SCALAR_TYPE_BF16), &bf16_type_id));
 
-    loom_type_t argument_types[6] = {};
+    loom_type_t argument_types[8] = {};
     IREE_CHECK_OK(loom_test_scope_type_make(
         module, LOOM_TEST_SCOPE_TYPE_SCOPE_SUBGROUP, &argument_types[0]));
     IREE_CHECK_OK(
@@ -687,6 +687,9 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_test_array_type_make(
         module, LOOM_TEST_ARRAY_TYPE_BUILD_FLAG_HAS_ALIGNMENT, bf16_type_id,
         /*alignment=*/32, loom_named_attr_slice_empty(), &argument_types[3]));
+    IREE_CHECK_OK(loom_test_array_type_make(
+        module, LOOM_TEST_ARRAY_TYPE_BUILD_FLAG_HAS_METADATA, bf16_type_id,
+        /*alignment=*/0, loom_named_attr_slice_empty(), &argument_types[7]));
     loom_attribute_t tile = loom_attr_absent();
     IREE_CHECK_OK(loom_test_tile_attr_make(module, 8, &tile));
     loom_attribute_t options = loom_attr_absent();
@@ -703,6 +706,14 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_test_variant_set_type_make(
         module, /*build_flags=*/0, loom_parameterized_attr_array_empty(),
         loom_parameterized_attr_array_empty(), &argument_types[5]));
+    loom_string_id_t pair_name_id = LOOM_STRING_ID_INVALID;
+    IREE_CHECK_OK(loom_module_intern_string(
+        module, IREE_SV("test.parameterized_pair"), &pair_name_id));
+    loom_type_t pair_types[] = {argument_types[2], argument_types[3]};
+    IREE_CHECK_OK(loom_module_intern_type(
+        module,
+        loom_type_dialect(pair_name_id, IREE_ARRAYSIZE(pair_types), pair_types),
+        &argument_types[6]));
 
     loom_builder_t builder;
     loom_builder_initialize(module, &module->arena, loom_module_block(module),
@@ -3974,7 +3985,7 @@ TEST_F(ReaderTest, ReadsDescriptorBackedParameterizedTypes) {
   const loom_op_t* decl_op = read_module->symbols.entries[0].defining_op;
   ASSERT_NE(decl_op, nullptr);
   loom_value_slice_t arguments = loom_test_decl_args(decl_op);
-  ASSERT_EQ(arguments.count, 6u);
+  ASSERT_EQ(arguments.count, 8u);
 
   loom_type_t scope_type =
       loom_module_value_type(read_module, arguments.values[0]);
@@ -4022,6 +4033,22 @@ TEST_F(ReaderTest, ReadsDescriptorBackedParameterizedTypes) {
   ASSERT_TRUE(loom_test_variant_set_type_isa(variants_absent_type));
   EXPECT_FALSE(
       loom_test_variant_set_type_has_alternatives(variants_absent_type));
+
+  loom_type_t pair_type =
+      loom_module_value_type(read_module, arguments.values[6]);
+  ASSERT_TRUE(loom_type_is_dialect(pair_type));
+  ASSERT_EQ(loom_type_dialect_param_count(pair_type), 2u);
+  const loom_type_t* pair_types = loom_type_dialect_params(pair_type);
+  EXPECT_TRUE(loom_type_equal(pair_types[0], packed_type));
+  EXPECT_TRUE(loom_type_equal(pair_types[1], aligned_type));
+  EXPECT_FALSE(loom_type_equal(pair_types[0], pair_types[1]));
+
+  loom_type_t metadata_type =
+      loom_module_value_type(read_module, arguments.values[7]);
+  ASSERT_TRUE(loom_test_array_type_isa(metadata_type));
+  EXPECT_FALSE(loom_test_array_type_has_alignment(metadata_type));
+  EXPECT_TRUE(loom_test_array_type_has_metadata(metadata_type));
+  EXPECT_EQ(loom_test_array_type_metadata(metadata_type).count, 0u);
 
   loom_module_free(read_module);
   loom_module_free(source_module);
