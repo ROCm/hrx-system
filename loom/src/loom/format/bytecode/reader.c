@@ -163,6 +163,8 @@ typedef struct loom_bytecode_reader_module_view_t {
     iree_host_size_t count;
     // Symbol ordinal to validated STRINGS name ID.
     loom_string_id_t* name_ids;
+    // Symbol ordinal to validated wire flags.
+    loom_bytecode_symbol_flags_t* flags;
     // Symbol ordinal to validated wire kind.
     uint8_t* kinds;
     // Number of unresolved wire-only provider anchors.
@@ -4728,98 +4730,6 @@ static iree_status_t loom_bytecode_reader_skip_record_payload(
   return iree_ok_status();
 }
 
-static iree_status_t loom_bytecode_reader_skip_symbol_payload(
-    loom_bytecode_module_reader_t* reader,
-    loom_bytecode_reader_cursor_t* cursor, uint8_t kind, uint16_t symbol_flags,
-    uint64_t symbol_index) {
-  if (kind <= LOOM_BYTECODE_SYMBOL_FUNC_UKERNEL) {
-    uint64_t op_ref_offset =
-        loom_bytecode_reader_cursor_absolute_position(cursor);
-    uint64_t op_table_index_plus1 = 0;
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-        &reader->decoder, cursor, &op_table_index_plus1));
-    const loom_op_vtable_t* vtable = NULL;
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_op_ref(
-        reader, op_table_index_plus1, op_ref_offset, &vtable));
-    if (!vtable->func_like) {
-      return loom_bytecode_reader_emit_invalid_field(
-          &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
-          IREE_SV("def_op_table_index_plus1"), op_ref_offset,
-          IREE_SV("function_symbol_defining_op_must_implement_funclike"));
-    }
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_symbol_definition_flags(
-        reader, symbol_index, symbol_flags, vtable, op_ref_offset));
-
-    uint64_t value = 0;
-    uint8_t byte_value = 0;
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_source_trivia(
-        reader, cursor, reader->arena, NULL, NULL, NULL));
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_reader_read_u8(&reader->decoder, cursor, &byte_value));
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_reader_read_u8(&reader->decoder, cursor, &byte_value));
-    uint64_t workload_arg_count = 0;
-    uint64_t arg_count = 0;
-    uint64_t result_count = 0;
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-        &reader->decoder, cursor, &workload_arg_count));
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(&reader->decoder,
-                                                           cursor, &arg_count));
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-        &reader->decoder, cursor, &result_count));
-    for (uint64_t i = 0; i < workload_arg_count; ++i) {
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_skip_value_def(
-          reader, cursor, IREE_SV("kernel_workload_arg_type")));
-    }
-    for (uint64_t i = 0; i < arg_count; ++i) {
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_skip_value_def(
-          reader, cursor, IREE_SV("arg_type")));
-    }
-    for (uint64_t i = 0; i < result_count; ++i) {
-      IREE_RETURN_IF_ERROR(
-          loom_bytecode_reader_read_u8(&reader->decoder, cursor, &byte_value));
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_skip_value_def(
-          reader, cursor, IREE_SV("result_type")));
-      if (byte_value) {
-        IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(&reader->decoder,
-                                                               cursor, &value));
-      }
-    }
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_reader_read_uvarint(&reader->decoder, cursor, &value));
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_reader_skip_predicate_list(reader, cursor, false));
-    if (kind == LOOM_BYTECODE_SYMBOL_FUNC_TEMPLATE ||
-        kind == LOOM_BYTECODE_SYMBOL_FUNC_UKERNEL) {
-      IREE_RETURN_IF_ERROR(
-          loom_bytecode_reader_read_uvarint(&reader->decoder, cursor, &value));
-      IREE_RETURN_IF_ERROR(
-          loom_bytecode_reader_read_uvarint(&reader->decoder, cursor, &value));
-    }
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_skip_func_payload_attrs(
-        reader, cursor, symbol_index, vtable, vtable->func_like));
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_reader_read_u8(&reader->decoder, cursor, &byte_value));
-    if (byte_value) {
-      uint64_t offset = 0;
-      uint32_t length = 0;
-      IREE_RETURN_IF_ERROR(
-          loom_bytecode_reader_read_u64_le(&reader->decoder, cursor, &offset));
-      IREE_RETURN_IF_ERROR(
-          loom_bytecode_reader_read_u32_le(&reader->decoder, cursor, &length));
-    }
-  } else if (kind == LOOM_BYTECODE_SYMBOL_GLOBAL) {
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_skip_global_payload(
-        reader, cursor, symbol_index, symbol_flags,
-        /*symbol_metadata=*/NULL));
-  } else if (kind == LOOM_BYTECODE_SYMBOL_RECORD) {
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_skip_record_payload(
-        reader, cursor, /*ir_section=*/NULL, symbol_index, symbol_flags,
-        /*symbol_metadata=*/NULL));
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_bytecode_reader_symbol_cursor_to_entries(
     loom_bytecode_module_reader_t* reader,
     const loom_bytecode_reader_section_t* symbols_section,
@@ -4845,47 +4755,22 @@ static iree_status_t loom_bytecode_reader_symbol_cursor_to_entries(
 }
 
 static iree_status_t loom_bytecode_reader_predeclare_symbols(
-    loom_bytecode_module_reader_t* reader,
-    const loom_bytecode_reader_section_t* symbols_section) {
-  loom_bytecode_reader_cursor_t cursor;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_symbol_cursor_to_entries(
-      reader, symbols_section, &cursor));
-
+    loom_bytecode_module_reader_t* reader) {
   for (iree_host_size_t i = 0; i < reader->view.symbols.count; ++i) {
-    uint64_t name_id = 0;
-    uint8_t kind = 0;
-    uint8_t visibility = 0;
-    uint16_t flags = 0;
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_reader_read_uvarint(&reader->decoder, &cursor, &name_id));
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_reader_read_u8(&reader->decoder, &cursor, &kind));
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_reader_read_u8(&reader->decoder, &cursor, &visibility));
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_reader_read_u16_le(&reader->decoder, &cursor, &flags));
-    (void)visibility;
-    if (flags & LOOM_BYTECODE_SYMBOL_FLAG_IMPORT) {
-      uint64_t unused = 0;
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(&reader->decoder,
-                                                             &cursor, &unused));
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(&reader->decoder,
-                                                             &cursor, &unused));
-    }
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_module_add_symbol(
-        reader->output_module, (loom_string_id_t)name_id, &symbol_id));
+        reader->output_module, reader->view.symbols.name_ids[i], &symbol_id));
     loom_symbol_t* symbol = &reader->output_module->symbols.entries[symbol_id];
-    symbol->kind = loom_bytecode_reader_decode_symbol_kind(kind);
+    symbol->kind =
+        loom_bytecode_reader_decode_symbol_kind(reader->view.symbols.kinds[i]);
     symbol->flags = 0;
-    if (flags & LOOM_BYTECODE_SYMBOL_FLAG_PUBLIC) {
+    const loom_bytecode_symbol_flags_t flags = reader->view.symbols.flags[i];
+    if (iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_PUBLIC)) {
       symbol->flags |= LOOM_SYMBOL_FLAG_PUBLIC;
     }
-    if (flags & LOOM_BYTECODE_SYMBOL_FLAG_RETAIN) {
+    if (iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_RETAIN)) {
       symbol->flags |= LOOM_SYMBOL_FLAG_RETAIN;
     }
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_skip_symbol_payload(
-        reader, &cursor, kind, flags, i));
   }
   return iree_ok_status();
 }
@@ -5749,14 +5634,19 @@ static iree_status_t loom_bytecode_reader_read_symbols(
   }
   reader->view.symbols.count = (iree_host_size_t)count;
   if (count > 0) {
+    const iree_host_size_t symbol_fact_size =
+        sizeof(*reader->view.symbols.name_ids) +
+        sizeof(*reader->view.symbols.flags) +
+        sizeof(*reader->view.symbols.kinds);
+    uint8_t* symbol_facts = NULL;
     IREE_RETURN_IF_ERROR(
         iree_arena_allocate_array(reader->arena, (iree_host_size_t)count,
-                                  sizeof(*reader->view.symbols.name_ids),
-                                  (void**)&reader->view.symbols.name_ids));
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(reader->arena, (iree_host_size_t)count,
-                                  sizeof(*reader->view.symbols.kinds),
-                                  (void**)&reader->view.symbols.kinds));
+                                  symbol_fact_size, (void**)&symbol_facts));
+    reader->view.symbols.name_ids = (loom_string_id_t*)symbol_facts;
+    symbol_facts += count * sizeof(*reader->view.symbols.name_ids);
+    reader->view.symbols.flags = (loom_bytecode_symbol_flags_t*)symbol_facts;
+    symbol_facts += count * sizeof(*reader->view.symbols.flags);
+    reader->view.symbols.kinds = symbol_facts;
   }
 
   uint64_t import_count = 0;
@@ -5911,6 +5801,7 @@ static iree_status_t loom_bytecode_reader_read_symbols(
           IREE_SV("anchor_header"), kind_offset,
           IREE_SV("provider_anchor_must_be_private_and_unflagged"));
     }
+    reader->view.symbols.flags[symbol_index] = flags;
     reader->view.symbols.kinds[symbol_index] = kind;
     if (kind == LOOM_BYTECODE_SYMBOL_ANCHOR) {
       ++reader->view.symbols.unresolved_anchor_count;
@@ -7191,8 +7082,7 @@ static iree_status_t loom_bytecode_reader_materialize_module(
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_materialize_sources(reader));
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_materialize_encodings(
       reader, reader->view.sections.encodings));
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_predeclare_symbols(
-      reader, reader->view.sections.symbols));
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_predeclare_symbols(reader));
   IREE_RETURN_IF_ERROR(
       loom_bytecode_reader_materialize_provider_imports(reader));
   IREE_RETURN_IF_ERROR(
