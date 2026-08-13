@@ -165,6 +165,18 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "physical_device_test",
+    srcs = ["physical_device_test.cc"],
+    deps = [
+        ":headers",
+        ":vulkan",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "spirv_test",
     srcs = ["spirv_test.cc"],
     deps = [

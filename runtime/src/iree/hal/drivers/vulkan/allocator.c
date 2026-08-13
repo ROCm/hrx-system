@@ -363,27 +363,12 @@ iree_hal_vulkan_allocator_max_allocation_size_for_type(
                      allocator, memory_type_index));
 }
 
-static iree_hal_memory_type_t iree_hal_vulkan_memory_type_from_vk(
-    VkMemoryPropertyFlags flags) {
-  iree_hal_memory_type_t memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
-  if (iree_all_bits_set(flags, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
-    memory_type |= IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  }
-  if (iree_all_bits_set(flags, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) {
-    memory_type |= IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
-  }
-  if (iree_all_bits_set(flags, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
-    memory_type |= IREE_HAL_MEMORY_TYPE_HOST_COHERENT;
-  }
-  if (iree_all_bits_set(flags, VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) {
-    memory_type |= IREE_HAL_MEMORY_TYPE_HOST_CACHED;
-  }
-  if (iree_all_bits_set(memory_type, IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
-                                         IREE_HAL_MEMORY_TYPE_HOST_COHERENT) &&
-      !iree_all_bits_set(memory_type, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL)) {
-    memory_type |= IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
-  }
-  return memory_type;
+static iree_hal_memory_type_t
+iree_hal_vulkan_allocator_memory_type_from_properties(
+    const iree_hal_vulkan_allocator_t* allocator,
+    VkMemoryPropertyFlags memory_property_flags) {
+  return iree_hal_vulkan_memory_type_from_properties(
+      allocator->properties2.properties.deviceType, memory_property_flags);
 }
 
 static iree_hal_buffer_usage_t iree_hal_vulkan_allowed_usage_from_memory_type(
@@ -474,9 +459,11 @@ static bool iree_hal_vulkan_allocator_memory_type_precedes(
   const VkMemoryType* right_memory_type =
       &memory_properties->memoryTypes[right_memory_type_index];
   const iree_hal_memory_type_t left_hal_memory_type =
-      iree_hal_vulkan_memory_type_from_vk(left_memory_type->propertyFlags);
+      iree_hal_vulkan_allocator_memory_type_from_properties(
+          allocator, left_memory_type->propertyFlags);
   const iree_hal_memory_type_t right_hal_memory_type =
-      iree_hal_vulkan_memory_type_from_vk(right_memory_type->propertyFlags);
+      iree_hal_vulkan_allocator_memory_type_from_properties(
+          allocator, right_memory_type->propertyFlags);
   const int32_t left_priority =
       iree_hal_vulkan_allocator_query_memory_heap_priority(
           left_hal_memory_type);
@@ -686,8 +673,8 @@ static iree_status_t iree_hal_vulkan_allocator_initialize_default_pools(
   int32_t best_host_cached_priority = INT32_MIN;
   for (uint32_t i = 0; i < memory_properties->memoryTypeCount; ++i) {
     const iree_hal_memory_type_t memory_type =
-        iree_hal_vulkan_memory_type_from_vk(
-            memory_properties->memoryTypes[i].propertyFlags);
+        iree_hal_vulkan_allocator_memory_type_from_properties(
+            allocator, memory_properties->memoryTypes[i].propertyFlags);
     if (iree_all_bits_set(memory_type, IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE)) {
       const int32_t priority =
           iree_hal_vulkan_allocator_memory_type_priority(memory_type);
@@ -733,7 +720,8 @@ static iree_status_t iree_hal_vulkan_allocator_initialize_default_pools(
     const uint32_t i = selected_indices[selected_ordinal];
     const VkMemoryType* vk_memory_type = &memory_properties->memoryTypes[i];
     const iree_hal_memory_type_t memory_type =
-        iree_hal_vulkan_memory_type_from_vk(vk_memory_type->propertyFlags);
+        iree_hal_vulkan_allocator_memory_type_from_properties(
+            allocator, vk_memory_type->propertyFlags);
     const iree_hal_buffer_usage_t supported_usage =
         iree_hal_vulkan_allowed_usage_from_memory_type(memory_type);
     iree_hal_vulkan_allocator_pool_pair_t pool_pair;
@@ -807,7 +795,8 @@ static iree_status_t iree_hal_vulkan_allocator_query_memory_heaps(
     const VkMemoryType* memory_type =
         &memory_properties->memoryTypes[memory_type_index];
     const iree_hal_memory_type_t hal_memory_type =
-        iree_hal_vulkan_memory_type_from_vk(memory_type->propertyFlags);
+        iree_hal_vulkan_allocator_memory_type_from_properties(
+            allocator, memory_type->propertyFlags);
     heaps[i] = (iree_hal_allocator_memory_heap_t){
         .type = hal_memory_type,
         .allowed_usage =
@@ -914,7 +903,8 @@ static bool iree_hal_vulkan_allocator_resolve_memory_placement(
     if (!iree_all_bits_set(allowed_memory_type_bits, 1u << i)) continue;
     const VkMemoryType* vk_memory_type = &memory_properties->memoryTypes[i];
     const iree_hal_memory_type_t memory_type =
-        iree_hal_vulkan_memory_type_from_vk(vk_memory_type->propertyFlags);
+        iree_hal_vulkan_allocator_memory_type_from_properties(
+            allocator, vk_memory_type->propertyFlags);
     if (!iree_all_bits_set(memory_type, required_type)) continue;
 
     iree_hal_buffer_params_t candidate_params = *params;
@@ -992,13 +982,8 @@ static bool iree_hal_vulkan_allocator_supports_host_allocation_import(
   // Arbitrary host pointers only become usable Vulkan buffers when the device
   // and host share memory. Discrete devices may expose the extension while
   // still rejecting normal heap pointers for device-visible storage.
-  switch (allocator->properties2.properties.deviceType) {
-    case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
-    case VK_PHYSICAL_DEVICE_TYPE_CPU:
-      return true;
-    default:
-      return false;
-  }
+  return iree_hal_vulkan_physical_device_type_uses_unified_memory(
+      allocator->properties2.properties.deviceType);
 }
 
 static iree_status_t iree_hal_vulkan_allocator_prepare_sparse_buffer_params(
