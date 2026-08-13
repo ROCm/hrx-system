@@ -19,6 +19,7 @@ iree_py_library(
     "compile_report_capabilities.py"
     "compile_report_execution_economics.py"
     "compile_report_move_causes.py"
+    "compile_report_subgroup_access.py"
     "compile_report_suggestions.py"
     "compile_report_view.py"
     "compile_report_workload.py"
@@ -33,12 +34,14 @@ iree_py_test(
     "../tools/pytest_style_runner.py"
   SRCS
     "compile_report_bank_service_test.py"
+    "compile_report_subgroup_access_test.py"
     "compile_report_suggestions_test.py"
     "compile_report_test.py"
     "../tools/pytest_style_runner.py"
   ARGS
     "loom.reporting.compile_report_bank_service_test"
     "loom.reporting.compile_report_suggestions_test"
+    "loom.reporting.compile_report_subgroup_access_test"
     "loom.reporting.compile_report_test"
   DEPS
     loom::py::loom::reporting::reporting

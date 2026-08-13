@@ -46,6 +46,12 @@ from loom.reporting.compile_report_move_causes import (
     build_move_cause_show,
     move_cause_diff_has_changes,
 )
+from loom.reporting.compile_report_subgroup_access import (
+    append_subgroup_access_diff_text,
+    append_subgroup_access_show_text,
+    build_subgroup_access_diff,
+    build_subgroup_access_show,
+)
 from loom.reporting.compile_report_workload import (
     append_workload_diff_text,
     append_workload_show_text,
@@ -380,6 +386,9 @@ def build_compile_report_show(
     bank_service = build_bank_service_show(document)
     if bank_service is not None:
         view["bank_service"] = bank_service
+    subgroup_access = build_subgroup_access_show(document)
+    if subgroup_access is not None:
+        view["subgroup_access"] = subgroup_access
     if document.envelope_context:
         view["envelope_context"] = dict(document.envelope_context)
     return view
@@ -530,6 +539,9 @@ def build_compile_report_diff(
     bank_service = build_bank_service_diff(baseline, candidate)
     if bank_service is not None:
         view["bank_service"] = bank_service
+    subgroup_access = build_subgroup_access_diff(baseline, candidate)
+    if subgroup_access is not None:
+        view["subgroup_access"] = subgroup_access
     if comparison_mode is CompileReportComparisonMode.TARGET and not force:
         target_capabilities = build_target_capability_diff(baseline, candidate)
         if target_capabilities is not None:
@@ -594,6 +606,9 @@ def format_compile_report_show_text(view: dict[str, object]) -> str:
         move_causes = entry.get("move_causes")
         if isinstance(move_causes, dict):
             append_move_cause_show_text(lines, move_causes)
+    subgroup_access = view.get("subgroup_access")
+    if isinstance(subgroup_access, dict):
+        append_subgroup_access_show_text(lines, subgroup_access)
     bank_service = view.get("bank_service")
     if isinstance(bank_service, dict):
         append_bank_service_show_text(lines, bank_service)
@@ -723,6 +738,9 @@ def format_compile_report_diff_text(view: dict[str, object]) -> str:
         move_causes = entry.get("move_causes")
         if isinstance(move_causes, dict):
             append_move_cause_diff_text(lines, move_causes)
+    subgroup_access = view.get("subgroup_access")
+    if isinstance(subgroup_access, dict):
+        append_subgroup_access_diff_text(lines, subgroup_access)
     bank_service = view.get("bank_service")
     if isinstance(bank_service, dict):
         append_bank_service_diff_text(lines, bank_service)

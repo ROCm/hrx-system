@@ -74,6 +74,17 @@ preserve the aggregate packet and register-unit counts; detailed reports let
 unchanged causes. This separates a source-level repacking change from a
 target-created operand-bank repair instead of treating both as generic moves.
 
+Fragment memory reports also preserve the producer-proven address relationship
+across a complete subgroup. `show` prints each authored memory source and its
+packet variants with the per-lane packet width, exact lane-offset formula, and
+the byte-interval union for the subgroup. Requested bytes count every lane's
+request, unique bytes count their union, and span bytes cover the lowest through
+highest requested address. Dense, gapped, and overlapping are exact geometry
+facts; they are deliberately not presented as cache-line transaction or cycle
+predictions. When the compiler cannot prove a complete subgroup, uniform
+dynamic base, uniform control, or packet width, the missing proof and its reason
+remain visible instead of manufacturing geometry.
+
 Unavailable fields are omitted instead of rendered as zero. That distinction
 matters: zero instructions is a measurement; no target inspector for that
 metric is an absence of evidence.
@@ -129,6 +140,13 @@ observational rather than causal. Reports with more than one entry remain an
 error because entry order is not a semantic pairing contract. Use the strict
 default for controlled experiments; `--force` makes otherwise inaccessible
 evidence inspectable, but does not repair the experiment.
+
+Wave memory diffs group packet and strategy variants under the stable authored
+source identity. A scalar-to-wide lowering therefore appears as removed and
+added variants of one source even when the number of packets changes. The tool
+does not invent one-to-one matches between ambiguous variants, and it retains
+the complete before and after geometry so widening, lane dispersion, and
+overlap can be evaluated together.
 
 ## Compare target specialization
 
