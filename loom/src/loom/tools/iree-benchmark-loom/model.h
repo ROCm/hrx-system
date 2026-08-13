@@ -145,6 +145,8 @@ typedef struct iree_benchmark_loom_benchmark_result_t {
   iree_string_view_t state;
   // True when failure fields below describe why the benchmark did not run.
   bool has_failure;
+  // Kernel entry whose candidate failed, when the failure is entry-specific.
+  iree_string_view_t failure_entry;
   // Product stage that failed: compile, prepare, benchmark, etc.
   iree_string_view_t failure_stage;
   // Failure kind within |failure_stage|.

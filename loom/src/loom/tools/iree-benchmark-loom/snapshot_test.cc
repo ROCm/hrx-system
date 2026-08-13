@@ -9,6 +9,7 @@
 #include "iree/base/internal/json.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/tools/iree-benchmark-loom/hal_actual.h"
 
 namespace loom {
 namespace {
@@ -543,12 +544,18 @@ TEST(BenchmarkSnapshotSinkTest, IncludesFailurePayloadsOnFailure) {
   case_plan.name = IREE_SV("kernel_case");
   iree_benchmark_loom_benchmark_policy_t policy = {};
   policy.measure = IREE_SV("dispatch_complete");
+  iree_benchmark_loom_hal_actual_provider_t provider = {};
+  provider.execution.invocation_options.function_name =
+      IREE_SV("rejected_kernel");
+  provider.execution.compile_failure_stage = IREE_SV("compile");
+  provider.execution.compile_failure_kind = IREE_SV("diagnostics");
+  provider.execution.compile_failure_message =
+      IREE_SV("candidate did not lower");
+  provider.execution.compile_rejected = true;
+  provider.diagnostics.error_count = 1;
   iree_benchmark_loom_benchmark_result_t result = {};
-  result.has_failure = true;
-  result.failure_stage = IREE_SV("compile");
-  result.failure_kind = IREE_SV("diagnostics");
-  result.failure_message = IREE_SV("candidate did not lower");
-  result.diagnostic_error_count = 1;
+  iree_benchmark_loom_benchmark_result_set_compile_rejection(&provider,
+                                                             &result);
   result.diagnostic_json = IREE_SV("{\"message\":\"bad op\"}");
 
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_run(
@@ -581,6 +588,9 @@ TEST(BenchmarkSnapshotSinkTest, IncludesFailurePayloadsOnFailure) {
   iree_string_view_t first_work_item = FirstArrayElement(work_items);
   iree_string_view_t failure =
       LookupObject(first_work_item, IREE_SV("failure"));
+  iree_string_view_t failure_entry = LookupObject(failure, IREE_SV("entry"));
+  EXPECT_TRUE(
+      iree_string_view_equal(failure_entry, IREE_SV("rejected_kernel")));
   iree_string_view_t failure_stage = LookupObject(failure, IREE_SV("stage"));
   EXPECT_TRUE(iree_string_view_equal(failure_stage, IREE_SV("compile")));
   EXPECT_TRUE(iree_string_view_equal(

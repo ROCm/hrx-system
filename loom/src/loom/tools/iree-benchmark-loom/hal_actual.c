@@ -208,6 +208,8 @@ void iree_benchmark_loom_benchmark_result_set_compile_rejection(
   memset(out_result, 0, sizeof(*out_result));
   out_result->state = IREE_SV("compile_failed");
   out_result->has_failure = true;
+  out_result->failure_entry =
+      provider->execution.invocation_options.function_name;
   out_result->failure_stage = provider->execution.compile_failure_stage;
   out_result->failure_kind = provider->execution.compile_failure_kind;
   out_result->failure_message = provider->execution.compile_failure_message;

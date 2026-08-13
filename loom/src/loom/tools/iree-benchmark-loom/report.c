@@ -937,6 +937,8 @@ iree_status_t iree_benchmark_loom_write_benchmark_failure_json(
     loom_output_stream_t* stream) {
   loom_json_object_writer_t object;
   IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field_if_nonempty(
+      &object, IREE_SV("entry"), benchmark_result->failure_entry));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       &object, IREE_SV("stage"), benchmark_result->failure_stage));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
