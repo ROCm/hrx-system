@@ -54,10 +54,12 @@ iree_status_t iree_hal_amdgpu_access_allow_agent_list(
     const iree_hal_amdgpu_libhsa_t* libhsa,
     const iree_hal_amdgpu_access_agent_list_t* agent_list, const void* ptr);
 
-// Pins |host_ptr| for the HSA agents in |agent_list|.
-iree_status_t iree_hal_amdgpu_access_lock_host_allocation(
+// Pins |host_ptr| for the HSA agents in |agent_list| using the access
+// properties of the CPU-owned |memory_pool|.
+iree_status_t iree_hal_amdgpu_access_lock_host_allocation_to_pool(
     const iree_hal_amdgpu_libhsa_t* libhsa,
-    const iree_hal_amdgpu_access_agent_list_t* agent_list, void* host_ptr,
+    const iree_hal_amdgpu_access_agent_list_t* agent_list,
+    hsa_amd_memory_pool_t memory_pool, void* host_ptr,
     iree_device_size_t length, void** out_agent_ptr);
 
 #ifdef __cplusplus

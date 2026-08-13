@@ -1305,6 +1305,61 @@ TEST_F(AllocatorTest, UnsupportedExternalBufferImportsFailLoud) {
   }
 }
 
+TEST_F(AllocatorTest, HostAllocationImportUsesFinePoolAtomicContract) {
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(test_device.Initialize(&libhsa_, &topology_, host_allocator_));
+
+  constexpr iree_device_size_t kAllocationSize = 4096;
+  void* host_ptr = nullptr;
+  IREE_ASSERT_OK(iree_allocator_malloc_aligned(host_allocator_, kAllocationSize,
+                                               /*min_alignment=*/64,
+                                               /*offset=*/0, &host_ptr));
+
+  iree_hal_external_buffer_t external_buffer = {};
+  external_buffer.type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION;
+  external_buffer.size = kAllocationSize;
+  external_buffer.handle.host_allocation.ptr = host_ptr;
+
+  iree_hal_buffer_params_t params = {};
+  params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
+  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE;
+  params.queue_affinity = kQueueAffinity0;
+
+  int release_count = 0;
+  iree_hal_buffer_release_callback_t callback = {};
+  callback.fn = CountingReleaseCallback;
+  callback.user_data = &release_count;
+
+  iree_hal_buffer_t* buffer = nullptr;
+  iree_status_t status = iree_hal_allocator_import_buffer(
+      test_device.allocator(), params, &external_buffer, callback, &buffer);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free_aligned(host_allocator_, host_ptr);
+  }
+  IREE_ASSERT_OK(status);
+  ASSERT_NE(buffer, nullptr);
+  EXPECT_TRUE(iree_all_bits_set(iree_hal_buffer_memory_type(buffer),
+                                IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                                    IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
+                                    IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE));
+  EXPECT_EQ(iree_hal_amdgpu_buffer_atomic_memory_cells(buffer),
+            IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAGS_ALL);
+
+  constexpr uint32_t kPattern = 0xC001CAFEu;
+  IREE_EXPECT_OK(QueueFillAndWait(test_device.device(), kQueueAffinity0, buffer,
+                                  kAllocationSize, &kPattern,
+                                  sizeof(kPattern)));
+  const uint32_t* values = static_cast<const uint32_t*>(host_ptr);
+  for (iree_host_size_t i = 0; i < kAllocationSize / sizeof(*values); ++i) {
+    EXPECT_EQ(values[i], kPattern);
+  }
+
+  iree_hal_buffer_release(buffer);
+  EXPECT_EQ(release_count, 1);
+  iree_allocator_free_aligned(host_allocator_, host_ptr);
+}
+
 TEST_F(AllocatorTest, AmdgpuDeviceSpecExposesRepresentativePhysicalFacts) {
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(test_device.Initialize(&libhsa_, &topology_, host_allocator_));
