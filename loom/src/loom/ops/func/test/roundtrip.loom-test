@@ -33,6 +33,16 @@ func.decl @extern_matmul(%a: f32, %b: f32) -> (f32)
 
 // ====
 
+// Compile-time provider declarations anchor source availability without
+// becoming exact callable symbols.
+module.import "target/amdgpu/qwen.loom" [@effect_provider]
+
+func.provider.decl<test.effect> @effect_provider(%value: i32) -> (i32)
+
+func.provider.decl<test.constrained> @constrained_provider(%M: index, %value: tensor<[%M]xf32>) -> (tensor<[%M]xf32>) where [mul(%M, 16)]
+
+// ====
+
 // Declaration contract carrying author inline policy for provider-backed import.
 func.decl hot inline @extern_small_helper(%x: f32) -> (f32)
 

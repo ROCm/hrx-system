@@ -1351,14 +1351,13 @@ loom_parameterized_attr_array_t loom_func_like_requires(loom_func_like_t func);
 // has no distinct specialization arguments or |func| is invalid.
 int64_t loom_func_like_specialization_count(loom_func_like_t func);
 
-// Returns the implements string ID for template/ukernel ops — the name of the
-// op kind this function provides an implementation for. Returns
-// LOOM_STRING_ID_INVALID for def/decl ops, ops with no implements attr, or
-// if |func| is not valid.
+// Returns the implementation-contract string ID for concrete providers and
+// compile-time provider declarations. Returns LOOM_STRING_ID_INVALID for ops
+// with no implements attr or if |func| is not valid.
 loom_string_id_t loom_func_like_implements(loom_func_like_t func);
 
-// Returns the dispatch priority for template/ukernel ops. Returns 0 for
-// def/decl ops, ops with no priority attr, or if |func| is not valid.
+// Returns the dispatch priority for concrete providers. Returns 0 for ops with
+// no priority attr or if |func| is not valid.
 int64_t loom_func_like_priority(loom_func_like_t func);
 
 //===----------------------------------------------------------------------===//

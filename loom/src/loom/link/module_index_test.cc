@@ -388,6 +388,8 @@ func.def @helper(%x: i32) -> (i32) {
   func.return %x : i32
 }
 
+func.provider.decl<demo.contract> @provider_anchor(%x: i32) -> (i32)
+
 func.template<demo.contract> @provider(%x: i32) -> (i32) {
   func.return %x : i32
 }
@@ -410,9 +412,12 @@ func.template<demo.contract> @provider(%x: i32) -> (i32) {
     const loom_link_module_index_symbol_t* provider =
         loom_link_module_index_lookup_private(index, indexed_module,
                                               IREE_SV("provider"));
+    const loom_link_module_index_symbol_t* provider_declaration =
+        loom_link_module_index_lookup_global(index, IREE_SV("provider_anchor"));
     ASSERT_NE(entry, nullptr);
     ASSERT_NE(helper, nullptr);
     ASSERT_NE(provider, nullptr);
+    ASSERT_NE(provider_declaration, nullptr);
     ASSERT_EQ(entry->dependencies.count, 1u);
     EXPECT_EQ(indexed_module->dependencies.values[entry->dependencies.first],
               helper->module_symbol_ordinal);
@@ -425,7 +430,13 @@ func.template<demo.contract> @provider(%x: i32) -> (i32) {
         loom_link_module_index_contract_at(index, contract_ordinal);
     ASSERT_NE(contract, nullptr);
     EXPECT_EQ(StringViewToString(contract->name), "demo.contract");
-    EXPECT_EQ(provider->provider_contract_ordinal, contract_ordinal);
+    EXPECT_EQ(provider->implementation_contract_ordinal, contract_ordinal);
+    EXPECT_EQ(provider_declaration->implementation_contract_ordinal,
+              contract_ordinal);
+    EXPECT_TRUE(iree_all_bits_set(provider_declaration->flags,
+                                  LOOM_LINK_SYMBOL_FLAG_DECLARATION));
+    EXPECT_FALSE(iree_any_bit_set(provider_declaration->flags,
+                                  LOOM_LINK_SYMBOL_FLAG_HAS_BODY));
     EXPECT_EQ(contract->providers.first_symbol_ordinal, provider->ordinal);
     EXPECT_EQ(contract->providers.last_symbol_ordinal, provider->ordinal);
     EXPECT_EQ(provider->next.contract_provider_ordinal,

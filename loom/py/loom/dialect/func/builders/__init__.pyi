@@ -139,3 +139,16 @@ class FuncBuilder(DialectBuilder):
         operands: list[ValueRef] = ...,
         location_id: int | None = ...,
     ) -> None: ...
+    def provider_decl(
+        self,
+        *,
+        implements: str,
+        callee: str,
+        args: list[ValueRef] = ...,
+        results: list[Type | TiedResultSpec],
+        predicates: list[Predicate] = ...,
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> list[ValueRef]: ...

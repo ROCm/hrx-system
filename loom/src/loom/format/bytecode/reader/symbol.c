@@ -819,8 +819,7 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
           loom_bytecode_reader_cursor_absolute_position(&table->cursor),
           IREE_SV("predicate_flag_requires_funclike_predicates_attr"));
     }
-    if (kind == LOOM_BYTECODE_SYMBOL_FUNC_TEMPLATE ||
-        kind == LOOM_BYTECODE_SYMBOL_FUNC_UKERNEL) {
+    if (func_like->implements_attr_index != LOOM_ATTR_INDEX_NONE) {
       uint64_t implements_offset =
           loom_bytecode_reader_cursor_absolute_position(&table->cursor);
       uint64_t implements_string_id = 0;
@@ -832,8 +831,9 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
       iree_string_view_t implements_name = iree_string_view_empty();
       IREE_RETURN_IF_ERROR(loom_bytecode_symbol_validate_string_ref(
           &reader->decoder, &reader->view, implements_string_id,
-          IREE_SV("implements_op_name"), implements_offset, &implements_name));
-      symbol_metadata->implements_op_name = implements_name;
+          IREE_SV("implementation_contract"), implements_offset,
+          &implements_name));
+      symbol_metadata->implementation_contract = implements_name;
       symbol_metadata->priority = priority;
     }
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_skip_func_payload_attrs(

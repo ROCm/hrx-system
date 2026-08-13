@@ -572,7 +572,7 @@ static iree_status_t loom_link_index_append_symbol(
     loom_link_module_index_t* index, loom_link_module_index_module_t* module,
     iree_string_view_t name, loom_symbol_kind_t kind,
     loom_link_symbol_identity_t identity, loom_link_symbol_flags_t flags,
-    iree_string_view_t provider_contract) {
+    iree_string_view_t implementation_contract) {
   const iree_host_size_t symbol_ordinal = index->symbols.count;
   iree_host_size_t symbol_count = 0;
   if (!iree_host_size_checked_add(symbol_ordinal, 1, &symbol_count)) {
@@ -580,10 +580,10 @@ static iree_status_t loom_link_index_append_symbol(
                             "link symbol count overflow");
   }
   IREE_RETURN_IF_ERROR(loom_link_index_reserve_symbols(index, symbol_count));
-  loom_link_contract_ordinal_t provider_contract_ordinal =
+  loom_link_contract_ordinal_t implementation_contract_ordinal =
       LOOM_LINK_CONTRACT_ORDINAL_INVALID;
   IREE_RETURN_IF_ERROR(loom_link_index_intern_contract(
-      index, provider_contract, &provider_contract_ordinal));
+      index, implementation_contract, &implementation_contract_ordinal));
 
   loom_link_module_index_symbol_t* symbol =
       &index->symbols.values[symbol_ordinal];
@@ -593,7 +593,7 @@ static iree_status_t loom_link_index_append_symbol(
       .module_symbol_ordinal = module->symbol_count,
       .name = name,
       .kind = kind,
-      .provider_contract_ordinal = provider_contract_ordinal,
+      .implementation_contract_ordinal = implementation_contract_ordinal,
       .identity = identity,
       .flags = flags,
       .next =
@@ -608,17 +608,15 @@ static iree_status_t loom_link_index_append_symbol(
   index->symbols.count = symbol_count;
   IREE_RETURN_IF_ERROR(
       loom_link_index_insert_symbol_name(index, symbol_ordinal));
-  loom_link_index_append_contract_provider(index, provider_contract_ordinal,
-                                           symbol_ordinal);
+  if (kind == LOOM_SYMBOL_FUNC_TEMPLATE || kind == LOOM_SYMBOL_FUNC_UKERNEL) {
+    loom_link_index_append_contract_provider(
+        index, implementation_contract_ordinal, symbol_ordinal);
+  }
   return iree_ok_status();
 }
 
-static iree_string_view_t loom_link_materialized_symbol_provider_contract(
+static iree_string_view_t loom_link_materialized_symbol_contract(
     const loom_module_t* module, const loom_symbol_t* symbol) {
-  if (symbol->kind != LOOM_SYMBOL_FUNC_TEMPLATE &&
-      symbol->kind != LOOM_SYMBOL_FUNC_UKERNEL) {
-    return iree_string_view_empty();
-  }
   loom_func_like_t func = loom_func_like_cast(module, symbol->defining_op);
   if (!loom_func_like_isa(func)) {
     return iree_string_view_empty();
@@ -782,12 +780,12 @@ static iree_status_t loom_link_index_module_materialized_symbols(
         loom_link_symbol_has_global_identity(source_module, symbol)
             ? LOOM_LINK_SYMBOL_IDENTITY_GLOBAL
             : LOOM_LINK_SYMBOL_IDENTITY_PRIVATE;
-    iree_string_view_t provider_contract =
-        loom_link_materialized_symbol_provider_contract(source_module, symbol);
+    iree_string_view_t implementation_contract =
+        loom_link_materialized_symbol_contract(source_module, symbol);
     IREE_RETURN_IF_ERROR(loom_link_index_append_symbol(
         index, module, name, symbol->kind, identity,
         loom_link_materialized_symbol_flags(source_module, symbol),
-        provider_contract));
+        implementation_contract));
   }
   return iree_ok_status();
 }
@@ -920,7 +918,7 @@ static iree_status_t loom_link_index_module_bytecode_symbols(
         index, module, symbol->name,
         loom_link_bytecode_symbol_kind(symbol->kind),
         loom_link_bytecode_symbol_identity(symbol, flags), flags,
-        symbol->implements_op_name));
+        symbol->implementation_contract));
   }
   return iree_ok_status();
 }

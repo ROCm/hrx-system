@@ -115,9 +115,9 @@ loom_bytecode_reader_materialize_function_symbol(
     loom_bytecode_symbol_policy_materializer_t* reader,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_bytecode_symbol_policy_body_source_t* body_source,
-    iree_host_size_t symbol_ordinal, uint64_t name_id, uint8_t kind,
-    uint16_t flags, loom_string_id_t import_module_id,
-    loom_string_id_t import_symbol_id, loom_builder_t* builder) {
+    iree_host_size_t symbol_ordinal, uint64_t name_id, uint16_t flags,
+    loom_string_id_t import_module_id, loom_string_id_t import_symbol_id,
+    loom_builder_t* builder) {
   uint16_t symbol_id =
       loom_bytecode_symbol_policy_lookup_symbol(reader, (uint32_t)name_id);
   loom_symbol_ref_t callee_ref = {0, symbol_id};
@@ -223,8 +223,7 @@ loom_bytecode_reader_materialize_function_symbol(
 
   loom_string_id_t implements_id = LOOM_STRING_ID_INVALID;
   int64_t priority = 0;
-  if (kind == LOOM_BYTECODE_SYMBOL_FUNC_TEMPLATE ||
-      kind == LOOM_BYTECODE_SYMBOL_FUNC_UKERNEL) {
+  if (func_like->implements_attr_index != LOOM_ATTR_INDEX_NONE) {
     const uint64_t implements_offset =
         loom_bytecode_reader_cursor_absolute_position(cursor);
     uint64_t implements_string_id = 0;
@@ -748,7 +747,7 @@ static iree_status_t loom_bytecode_symbol_materialize_entry(
   }
   if (kind <= LOOM_BYTECODE_SYMBOL_FUNC_UKERNEL) {
     return loom_bytecode_reader_materialize_function_symbol(
-        reader, cursor, body_source, symbol_ordinal, name_id, kind, flags,
+        reader, cursor, body_source, symbol_ordinal, name_id, flags,
         import_module_id, import_symbol_id, builder);
   } else if (kind == LOOM_BYTECODE_SYMBOL_GLOBAL) {
     return loom_bytecode_reader_materialize_global_symbol(

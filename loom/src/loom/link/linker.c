@@ -1000,6 +1000,11 @@ static iree_status_t loom_link_merge_func_contract(
           .field_name = IREE_SV("predicates"),
       },
       {
+          .source_attr_index = source_func.vtable->implements_attr_index,
+          .target_attr_index = target_func.vtable->implements_attr_index,
+          .field_name = IREE_SV("implements"),
+      },
+      {
           .source_attr_index =
               source_func.vtable->specialization_count_attr_index,
           .target_attr_index =

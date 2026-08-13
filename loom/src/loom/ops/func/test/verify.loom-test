@@ -17,6 +17,16 @@ func.def @ordinary_calls_require_callable_symbols() {
 
 // ====
 
+func.provider.decl<test.effect> @provider_only(%value: i32) -> (i32)
+
+func.def @provider_declarations_are_not_callable(%value: i32) -> (i32) {
+  // ERROR@+1: SYMBOL/003 {symbol_name="provider_only", actual_kind="function provider", expected_kind="function"}
+  %result = func.call @provider_only(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
 // ABI contracts can remain target-independent until invocation selection.
 func.def abi(object_function) @targetless_abi() {
   func.return

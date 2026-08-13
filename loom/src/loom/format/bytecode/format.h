@@ -605,10 +605,12 @@ typedef enum loom_bytecode_section_kind_e {
 //         (VALUE:   [value_ref: varint] signature-local value number)
 //         (CONST:   [value: signed_varint])
 //
-//     // Template/ukernel metadata (FUNC_TEMPLATE or FUNC_UKERNEL):
-//     (if template or ukernel:
-//       [implements_op_name: varint]  (string index of op name)
-//       [priority: varint])
+//     // Implementation-provider metadata. Present when the defining FuncLike
+//     // operation declares an implements field. This includes concrete
+//     // templates/ukernels and compile-time provider declarations.
+//     (if defining op declares implements:
+//       [implementation_contract: varint]  (string table index)
+//       [priority: varint])            0 when the op has no priority field
 //
 //     [attr_count: varint]      Present attributes except the identity symbol
 //                               attr and shared function metadata attrs:

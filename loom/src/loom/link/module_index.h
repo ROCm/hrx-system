@@ -197,9 +197,9 @@ typedef struct loom_link_module_index_symbol_t {
   iree_string_view_t name;
   // Canonical in-memory symbol kind.
   loom_symbol_kind_t kind;
-  // Implementation-contract group for func.template/func.ukernel providers,
-  // or LOOM_LINK_CONTRACT_ORDINAL_INVALID.
-  loom_link_contract_ordinal_t provider_contract_ordinal;
+  // Implementation-contract group for provider declarations and concrete
+  // func.template/func.ukernel providers, or INVALID when absent.
+  loom_link_contract_ordinal_t implementation_contract_ordinal;
   // Link identity class.
   loom_link_symbol_identity_t identity;
   // Linker-index symbol flags.
@@ -222,7 +222,7 @@ typedef struct loom_link_module_index_symbol_t {
   struct {
     // Next index symbol with the same name, or INVALID_ORDINAL.
     iree_host_size_t same_name_ordinal;
-    // Next provider symbol for provider_contract_ordinal, or INVALID_ORDINAL.
+    // Next concrete provider for implementation_contract_ordinal, or invalid.
     iree_host_size_t contract_provider_ordinal;
   } next;
 } loom_link_module_index_symbol_t;

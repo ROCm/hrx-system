@@ -22,7 +22,7 @@ import struct
 from collections.abc import Iterable, Mapping
 from typing import Any, ClassVar, cast
 
-from loom.dsl import SymbolReferenceRole
+from loom.dsl import FuncLikeInterface, SymbolReferenceRole
 from loom.fields import compute_layout, resolve_fields
 from loom.format.bytecode.encoding import ByteBuffer
 from loom.format.bytecode.op_decls import (
@@ -714,14 +714,10 @@ class BytecodeWriter:
                 attr_name = getattr(func_like, field_name, None)
                 if attr_name is not None:
                     keys.add(attr_name)
-            if symbol_def.bytecode_kind in (
-                "LOOM_SYMBOL_FUNC_TEMPLATE",
-                "LOOM_SYMBOL_FUNC_UKERNEL",
-            ):
-                for field_name in ("implements", "priority"):
-                    attr_name = getattr(func_like, field_name, None)
-                    if attr_name is not None:
-                        keys.add(attr_name)
+            for field_name in ("implements", "priority"):
+                attr_name = getattr(func_like, field_name, None)
+                if attr_name is not None:
+                    keys.add(attr_name)
         return frozenset(keys)
 
     def _symbol_definition_flags(self, op: Operation) -> int:
@@ -2002,6 +1998,34 @@ class BytecodeWriter:
             case _:
                 raise ValueError(f"unknown predicate arg tag: {arg.tag!r}")
 
+    def _write_function_implementation_metadata(
+        self,
+        buf: ByteBuffer,
+        op: Operation,
+        symbol_name: str,
+        func_like: FuncLikeInterface,
+    ) -> None:
+        """Write the fixed implementation metadata declared by a FuncLike op."""
+        if func_like.implements is None:
+            return
+        implements = op.attributes.get(func_like.implements)
+        if not isinstance(implements, str):
+            raise ValueError(
+                f"{op.name} symbol {symbol_name!r} must have a string implements attr"
+            )
+        priority = (
+            op.attributes.get(func_like.priority, 0)
+            if func_like.priority is not None
+            else 0
+        )
+        if not isinstance(priority, int) or priority < 0:
+            raise ValueError(
+                f"{op.name} symbol {symbol_name!r} priority "
+                "must be a non-negative integer"
+            )
+        buf.write_varint(self._ctx.strings[implements])
+        buf.write_varint(priority)
+
     def _write_symbols(self, ir_offsets: dict[int, tuple[int, int]]) -> bytes:
         """Write the SYMBOLS section.
 
@@ -2083,6 +2107,9 @@ class BytecodeWriter:
             if symbol.kind in FUNCTION_SYMBOL_KINDS and symbol.op is not None:
                 op = symbol.op
                 module = self._module
+                func_like = func_like_interface_for_op(self._op_decls_by_name, op.name)
+                if func_like is None:
+                    raise ValueError(f"function symbol {op.name!r} is not FuncLike")
 
                 buf.write_varint(self._ctx.ops[op.name] + 1)
                 self._write_source_trivia(buf, op.leading_blank_line, op.comments)
@@ -2148,24 +2175,9 @@ class BytecodeWriter:
                     self._value_numbers_by_name(signature_value_numbers),
                 )
 
-                if symbol.kind in (
-                    SymbolKind.FUNC_TEMPLATE,
-                    SymbolKind.FUNC_UKERNEL,
-                ):
-                    implements = op.attributes.get("implements")
-                    if not isinstance(implements, str):
-                        raise ValueError(
-                            f"{op.name} symbol {symbol.name!r} must have "
-                            "a string implements attr"
-                        )
-                    priority = op.attributes.get("priority", 0)
-                    if not isinstance(priority, int) or priority < 0:
-                        raise ValueError(
-                            f"{op.name} symbol {symbol.name!r} priority "
-                            "must be a non-negative integer"
-                        )
-                    buf.write_varint(self._ctx.strings[implements])
-                    buf.write_varint(priority)
+                self._write_function_implementation_metadata(
+                    buf, op, symbol.name, func_like
+                )
 
                 shared_attr_keys = self._shared_func_metadata_attr_keys(op)
                 payload_attrs = [

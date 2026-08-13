@@ -6,11 +6,12 @@
 
 """Func dialect op definitions.
 
-Seven ops for program structure:
+Eight ops for program structure:
 
 Top-level (module-level symbols):
   func.def       — Function definition (has body, callable by name).
   func.decl      — External function declaration (no body, callable by name).
+  func.provider.decl — Compile-time implementation-provider declaration.
 
 Body ops (inside function/template bodies):
   func.call      — Runtime function call.
@@ -427,6 +428,53 @@ func_decl = Op(
 )
 
 # ============================================================================
+# func.provider.decl<T> — compile-time implementation-provider declaration
+# ============================================================================
+
+func_provider_decl = Op(
+    "func.provider.decl",
+    group=func_ops,
+    doc=(
+        "Compile-time declaration of an imported implementation-provider "
+        "family. The symbol is an availability anchor for module.import and "
+        "is selected only through func.apply; it is not directly callable."
+    ),
+    traits=[SYMBOL_DEFINE],
+    operands=[Operand("args", ANY, variadic=True)],
+    attrs=[
+        AttrDef("implements", "string"),
+        AttrDef("callee", "symbol"),
+        AttrDef("predicates", "predicate_list", optional=True),
+    ],
+    symbol_def=SymbolDefinition(
+        field="callee",
+        name="function provider",
+        interfaces=["func_like"],
+        bytecode_kind="LOOM_SYMBOL_FUNC_DECL",
+        fact_domain="loom_func_symbol_fact_domain",
+        flags=[SymbolDefinitionFlag.DECLARATION],
+    ),
+    results=[Result("results", ANY, variadic=True)],
+    interfaces=[
+        FuncLikeInterface(
+            callee="callee",
+            predicates="predicates",
+            implements="implements",
+            args="args",
+        )
+    ],
+    verify="loom_func_provider_decl_verify",
+    format=[
+        KeyRef("implements"),
+        *_SIGNATURE_FORMAT,
+    ],
+    examples=[
+        "func.provider.decl<qwen.routed_down> @routed_down(%x: tensor<16xf32>) -> (tensor<16xf32>)",
+        "func.provider.decl<qwen.quantize> @quantize(%K: index, %x: tensor<[%K]xf32>) -> (tensor<[%K]xi8>) where [mul(%K, 32)]",
+    ],
+)
+
+# ============================================================================
 # func.template<T> — constraint-matched visible implementation
 # ============================================================================
 
@@ -680,4 +728,6 @@ ALL_FUNC_OPS: tuple[Op, ...] = (
     func_call,
     func_apply,
     func_return,
+    # Appended to preserve the stable numeric IDs of the original func ops.
+    func_provider_decl,
 )

@@ -3846,10 +3846,8 @@ static bool loom_bytecode_func_metadata_attr_is_shared(
       attr_index == func_like->predicates_attr_index) {
     return true;
   }
-  if ((vtable->symbol_kind == LOOM_SYMBOL_FUNC_TEMPLATE ||
-       vtable->symbol_kind == LOOM_SYMBOL_FUNC_UKERNEL) &&
-      (attr_index == func_like->implements_attr_index ||
-       attr_index == func_like->priority_attr_index)) {
+  if (attr_index == func_like->implements_attr_index ||
+      attr_index == func_like->priority_attr_index) {
     return true;
   }
   return false;
@@ -4015,17 +4013,15 @@ static iree_status_t loom_bytecode_write_func_metadata(
     }
   }
 
-  // Template/ukernel dispatch metadata: the name of the op kind this function
-  // provides an implementation for, and its matching priority. Written only
-  // for templates and ukernels; absent for def/decl.
-  const loom_op_vtable_t* vtable = loom_op_vtable(module, func_like.op);
+  // Implementation dispatch metadata. Concrete providers and compile-time
+  // provider declarations both carry the contract; declarations encode zero
+  // priority because ranking belongs to concrete providers.
   loom_string_id_t implements_id = loom_func_like_implements(func_like);
-  if (vtable->symbol_kind == LOOM_SYMBOL_FUNC_TEMPLATE ||
-      vtable->symbol_kind == LOOM_SYMBOL_FUNC_UKERNEL) {
+  if (func_like.vtable->implements_attr_index != LOOM_ATTR_INDEX_NONE) {
     if (implements_id == LOOM_STRING_ID_INVALID) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "template/ukernel function symbol must have implements metadata");
+          "function provider symbol must have implements metadata");
     }
     uint32_t implements_string_id = 0;
     IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(

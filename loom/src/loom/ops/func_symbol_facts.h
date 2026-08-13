@@ -58,13 +58,13 @@ typedef struct loom_func_symbol_facts_t {
   // True when the func op owns an implementation body.
   bool has_body;
 
-  // Implementation contract string ID for provider funcs, or invalid.
+  // Implementation contract string ID for providers/declarations, or invalid.
   loom_string_id_t implements_id;
 
-  // Borrowed implementation contract key, or empty for non-providers.
+  // Borrowed implementation contract key, or empty when absent.
   iree_string_view_t implements;
 
-  // Provider priority for funcs with an implementation contract.
+  // Concrete provider priority, or zero when not applicable.
   int64_t priority;
 
   // Borrowed argument value IDs in signature order.

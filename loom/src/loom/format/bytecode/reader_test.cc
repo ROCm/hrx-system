@@ -1764,7 +1764,7 @@ class ReaderTest : public ::testing::Test {
       SkipPredicateList(bytes, &offset);
       if (kind == LOOM_BYTECODE_SYMBOL_FUNC_TEMPLATE ||
           kind == LOOM_BYTECODE_SYMBOL_FUNC_UKERNEL) {
-        ReadUVarint(bytes, &offset);  // implements_op_name
+        ReadUVarint(bytes, &offset);  // implementation_contract
         ReadUVarint(bytes, &offset);  // priority
       }
       SkipAttributeEntries(bytes, &offset);

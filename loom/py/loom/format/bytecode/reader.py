@@ -19,6 +19,7 @@ import struct
 from collections.abc import Iterable
 from typing import Any, ClassVar, Literal, cast
 
+from loom.dsl import FuncLikeInterface
 from loom.fields import compute_layout
 from loom.format.bytecode.encoding import decode_signed_varint, decode_varint
 from loom.format.bytecode.op_decls import (
@@ -977,6 +978,25 @@ class BytecodeReader:
             value_ids.append(value_id)
         return value_ids, offset
 
+    def _read_function_implementation_metadata(
+        self,
+        data: bytes,
+        offset: int,
+        func_like: FuncLikeInterface,
+    ) -> tuple[str | None, int, int]:
+        """Read the fixed implementation metadata declared by a FuncLike op."""
+        if func_like.implements is None:
+            return None, 0, offset
+        implements_id, offset = decode_varint(data, offset)
+        if implements_id >= len(self._strings):
+            raise BytecodeError(
+                "function implements string_id "
+                f"{implements_id} out of range "
+                f"(string table has {len(self._strings)} entries)"
+            )
+        priority, offset = decode_varint(data, offset)
+        return self._strings[implements_id], priority, offset
+
     def _read_symbols_section(
         self,
         symbols_section: tuple[int, bytes],
@@ -1033,6 +1053,11 @@ class BytecodeReader:
                     )
                 op_name = self._ops[op_table_index]
                 self._validate_symbol_definition_flags(flags, op_name)
+                func_like = func_like_interface_for_op(self._op_decls_by_name, op_name)
+                if func_like is None:
+                    raise BytecodeError(
+                        f"function symbol defining op {op_name!r} is not FuncLike"
+                    )
                 op_leading_blank_line, op_comments, offset = self._read_source_trivia(
                     sym_data, offset
                 )
@@ -1097,21 +1122,11 @@ class BytecodeReader:
                     op_name, flags, predicates
                 )
 
-                implements: str | None = None
-                priority = 0
-                if kind in (
-                    SymbolKind.FUNC_TEMPLATE.value,
-                    SymbolKind.FUNC_UKERNEL.value,
-                ):
-                    implements_id, offset = decode_varint(sym_data, offset)
-                    if implements_id >= len(self._strings):
-                        raise BytecodeError(
-                            "function implements string_id "
-                            f"{implements_id} out of range "
-                            f"(string table has {len(self._strings)} entries)"
-                        )
-                    priority, offset = decode_varint(sym_data, offset)
-                    implements = self._strings[implements_id]
+                implements, priority, offset = (
+                    self._read_function_implementation_metadata(
+                        sym_data, offset, func_like
+                    )
+                )
 
                 payload_attr_count, offset = decode_varint(sym_data, offset)
                 payload_attrs, offset = self._read_op_attr_entries(
@@ -1564,14 +1579,10 @@ class BytecodeReader:
                 attr_name = getattr(func_like, field_name, None)
                 if attr_name is not None:
                     keys.add(attr_name)
-            if symbol_def.bytecode_kind in (
-                "LOOM_SYMBOL_FUNC_TEMPLATE",
-                "LOOM_SYMBOL_FUNC_UKERNEL",
-            ):
-                for field_name in ("implements", "priority"):
-                    attr_name = getattr(func_like, field_name, None)
-                    if attr_name is not None:
-                        keys.add(attr_name)
+            for field_name in ("implements", "priority"):
+                attr_name = getattr(func_like, field_name, None)
+                if attr_name is not None:
+                    keys.add(attr_name)
         return frozenset(keys)
 
     def _func_body_region_index(self, op_name: str) -> int | None:

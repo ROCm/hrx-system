@@ -28,7 +28,8 @@ enum {
   LOOM_OP_FUNC_CALL = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 4),
   LOOM_OP_FUNC_APPLY = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 5),
   LOOM_OP_FUNC_RETURN = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 6),
-  LOOM_OP_FUNC_COUNT_ = 7,
+  LOOM_OP_FUNC_PROVIDER_DECL = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 7),
+  LOOM_OP_FUNC_COUNT_ = 8,
 };
 
 // Function visibility. Absent (0) means private (module-internal).
@@ -388,6 +389,37 @@ iree_status_t loom_func_return_build(
     iree_host_size_t operands_count,
     loom_location_id_t location,
     loom_op_t** out_op);
+
+// LOOM_OP_FUNC_PROVIDER_DECL: Compile-time declaration of an imported implementation-provider family. The symbol is an availability anchor for module.import and is selected only through func.apply; it is not directly callable.
+// func.provider.decl<qwen.routed_down> @routed_down(%x: tensor<16xf32>) -> (tensor<16xf32>)
+LOOM_DEFINE_ISA(loom_func_provider_decl_isa, LOOM_OP_FUNC_PROVIDER_DECL)
+LOOM_DEFINE_VARIADIC_OPERANDS(loom_func_provider_decl_args, 0)
+LOOM_DEFINE_VARIADIC_RESULTS(loom_func_provider_decl_results, 0)
+LOOM_DEFINE_ATTR_STRING(loom_func_provider_decl_implements, 0)
+LOOM_DEFINE_ATTR_SYMBOL(loom_func_provider_decl_callee, 1)
+LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_func_provider_decl_predicates, 2)
+enum loom_func_provider_decl_build_flag_bits_e {
+  LOOM_FUNC_PROVIDER_DECL_BUILD_FLAG_HAS_PREDICATES = 1u << 0,
+};
+typedef uint32_t loom_func_provider_decl_build_flags_t;
+iree_status_t loom_func_provider_decl_build(
+    loom_builder_t* builder,
+    loom_func_provider_decl_build_flags_t build_flags,
+    loom_string_id_t implements,
+    loom_symbol_ref_t callee,
+    const loom_type_t* arg_types,
+    iree_host_size_t arg_types_count,
+    const loom_type_t* result_types,
+    iree_host_size_t result_count,
+    const loom_tied_result_t* tied_results,
+    iree_host_size_t tied_result_count,
+    loom_optional const loom_predicate_t* predicates,
+    iree_host_size_t predicates_count,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_func_provider_decl_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
 
 // Returns the vtable array for the func dialect.
 const loom_op_vtable_t* const* loom_func_dialect_vtables(

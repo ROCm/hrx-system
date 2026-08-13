@@ -1369,5 +1369,54 @@ func.def public @identity(%x: i32) -> (i32) {
   EXPECT_EQ(linked, nullptr);
 }
 
+TEST_F(LinkerTest, ProviderDefinitionSatisfiesProviderDeclaration) {
+  loom_module_t* harness = Parse(IREE_SV(R"(
+func.provider.decl<demo.effect> @provider(%x: i32) -> (i32)
+)"));
+  loom_module_t* library = Parse(IREE_SV(R"(
+func.template<demo.effect> @provider(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"));
+
+  const loom_module_t* inputs[] = {harness, library};
+  loom_module_t* linked = nullptr;
+  loom_link_options_t options = {
+      /*.module_name=*/IREE_SV("linked"),
+  };
+  IREE_ASSERT_OK(loom_link_materialized_modules(
+      inputs, IREE_ARRAYSIZE(inputs), &options, &block_pool_,
+      iree_allocator_system(), &linked));
+  modules_.push_back(linked);
+  Verify(linked);
+
+  const std::string text = Print(linked);
+  EXPECT_EQ(text.find("func.provider.decl"), std::string::npos);
+  EXPECT_NE(text.find("func.template<demo.effect> @provider"),
+            std::string::npos);
+}
+
+TEST_F(LinkerTest, RejectsMismatchedProviderDeclarationContract) {
+  loom_module_t* harness = Parse(IREE_SV(R"(
+func.provider.decl<demo.expected> @provider(%x: i32) -> (i32)
+)"));
+  loom_module_t* library = Parse(IREE_SV(R"(
+func.template<demo.other> @provider(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"));
+
+  const loom_module_t* inputs[] = {harness, library};
+  loom_module_t* linked = nullptr;
+  loom_link_options_t options = {
+      /*.module_name=*/IREE_SV("linked"),
+  };
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_link_materialized_modules(
+                            inputs, IREE_ARRAYSIZE(inputs), &options,
+                            &block_pool_, iree_allocator_system(), &linked));
+  EXPECT_EQ(linked, nullptr);
+}
+
 }  // namespace
 }  // namespace loom

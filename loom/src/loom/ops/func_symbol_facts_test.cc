@@ -190,6 +190,23 @@ func.decl import("env", "do.work") @do_work(%arg0: i32) -> (i32)
   EXPECT_EQ(facts->result_count, 1);
 }
 
+TEST_F(FuncSymbolFactsTest, ProviderDeclarationFactsCarryContract) {
+  ModulePtr module = ParseModule(R"(
+func.provider.decl<qwen.routed_down> @provider(%arg0: i32) -> (i32)
+)");
+
+  const loom_func_symbol_facts_t* facts =
+      LookupFunc(module.get(), IREE_SV("provider"));
+  EXPECT_EQ(facts->base.symbol_kind, LOOM_SYMBOL_FUNC_DECL);
+  EXPECT_FALSE(facts->has_body);
+  EXPECT_FALSE(facts->imports);
+  EXPECT_TRUE(
+      iree_string_view_equal(facts->implements, IREE_SV("qwen.routed_down")));
+  EXPECT_EQ(facts->priority, 0);
+  EXPECT_EQ(facts->argument_count, 1);
+  EXPECT_EQ(facts->result_count, 1);
+}
+
 TEST_F(FuncSymbolFactsTest, ImportSymbolDefaultsToDeclarationName) {
   ModulePtr module = ParseModule(R"(
 func.decl import("env") @do_work(%arg0: i32) -> (i32)

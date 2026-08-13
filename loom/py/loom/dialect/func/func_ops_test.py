@@ -120,6 +120,21 @@ class TestFuncDeclRoundTrip:
             parser.parse("func.decl @bad(%a: f32) -> (f32) {\n  func.return %a : f32\n}\n")
 
 
+class TestFuncProviderDeclRoundTrip:
+    def test_simple(self) -> None:
+        _roundtrip("func.provider.decl<qwen.routed_down> @routed_down(%a: f32) -> (f32)\n")
+
+    def test_with_predicates(self) -> None:
+        _roundtrip("func.provider.decl<qwen.quantize> @quantize(%K: index, %a: tensor<[%K]xf32>) -> (tensor<[%K]xi8>) where [mul(%K, 32)]\n")
+
+    def test_contract_stored(self) -> None:
+        module = _parse_module(_module_text("func.provider.decl<qwen.routed_down> @routed_down(%a: f32) -> (f32)"))
+        symbol = module.symbols[0]
+        assert symbol.op is not None
+        assert symbol.op.name == "func.provider.decl"
+        assert symbol.op.attributes.get("implements") == "qwen.routed_down"
+
+
 class TestFuncImportParsing:
     def test_basic_import(self) -> None:
         module = _parse_module(_module_text('func.decl import("linalg_lib") @matmul(%a: f32, %b: f32) -> (f32)'))
@@ -243,6 +258,11 @@ class TestFuncImportCrossFormatRoundTrip:
                 "  func.return %x : f32",
                 "}",
             ),
+        )
+
+    def test_provider_declaration_survives_bytecode(self) -> None:
+        self._cross_roundtrip(
+            _module_text("func.provider.decl<qwen.routed_down> @routed_down(%a: f32) -> (f32)"),
         )
 
 

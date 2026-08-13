@@ -109,9 +109,9 @@ typedef struct loom_bytecode_symbol_metadata_t {
   uint16_t tied_result_count;
   // Global declaration-local value count, or zero for non-global symbols.
   uint64_t local_value_count;
-  // Borrowed implemented op name for template/ukernel symbols.
-  iree_string_view_t implements_op_name;
-  // Template/ukernel priority value, or zero for other symbols.
+  // Borrowed implementation-contract key for provider symbols/declarations.
+  iree_string_view_t implementation_contract;
+  // Concrete provider priority value, or zero when not applicable.
   uint64_t priority;
   // True when the symbol carries an IR body reference.
   bool has_body;
