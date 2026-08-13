@@ -52,6 +52,16 @@ class BytecodeTypeTest : public ::testing::Test {
         /*section_absolute_offset=*/0);
   }
 
+  iree_status_t DecodeEntry(loom_type_id_t type_index, const uint8_t* data,
+                            iree_host_size_t length, uint64_t absolute_offset,
+                            loom_bytecode_type_plan_entry_t* out_entry,
+                            loom_bytecode_type_fact_t** out_fact) {
+    return loom_bytecode_type_plan_decode_indexed_entry(
+        &decoder_, &context_, &module_view_, &scratch_arena_, type_index,
+        iree_make_const_byte_span(data, length), absolute_offset, out_entry,
+        out_fact);
+  }
+
   loom_bytecode_type_materializer_t MakeMaterializer(const uint8_t* data,
                                                      iree_host_size_t length) {
     return loom_bytecode_type_materializer_t{
@@ -118,6 +128,28 @@ TEST_F(BytecodeTypeTest, RejectsNonTopologicalTypeReference) {
   };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED, BuildPlan(data, sizeof(data)));
   EXPECT_EQ(error_count_, 1u);
+}
+
+TEST_F(BytecodeTypeTest, DecodesOneIndexedEntry) {
+  const uint8_t data[] = {
+      LOOM_BYTECODE_TYPE_FUNCTION, 0x01, 0x01, 0x01, 0x00,
+  };
+  loom_bytecode_type_plan_entry_t entry = {};
+  loom_bytecode_type_fact_t* fact = nullptr;
+  IREE_ASSERT_OK(DecodeEntry(/*type_index=*/2, data, sizeof(data),
+                             /*absolute_offset=*/41, &entry, &fact));
+
+  EXPECT_EQ(entry.bytecode_offset, 41u);
+  ASSERT_NE(fact, nullptr);
+  EXPECT_EQ(fact->type_id, 2u);
+  EXPECT_EQ(fact->kind, LOOM_TYPE_FUNCTION);
+  const auto* function_fact =
+      reinterpret_cast<const loom_bytecode_function_type_fact_t*>(fact);
+  EXPECT_EQ(function_fact->argument_count, 1u);
+  EXPECT_EQ(function_fact->result_count, 1u);
+  EXPECT_EQ(function_fact->type_ids[0], 1u);
+  EXPECT_EQ(function_fact->type_ids[1], 0u);
+  EXPECT_EQ(error_count_, 0u);
 }
 
 }  // namespace
